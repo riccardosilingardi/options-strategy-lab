@@ -2,7 +2,8 @@
 // Plain Node, no test framework: `npm test` runs this file directly.
 
 import assert from "node:assert/strict";
-import { fuseSignals, weatherComponent, newsComponent, ageDecay } from "./signals.js";
+import { fuseSignals, weatherComponent, newsComponent, ageDecay, regionSignals,
+  sentimentDirection, signalAdjustment, rankScore, compareCandidates, withSignalRank, againstSignal } from "./signals.js";
 
 /* ---------------- tiny harness ---------------- */
 let passed = 0;
@@ -222,6 +223,95 @@ test("missing bars, weather and news degrade to neutral instead of throwing", ()
   assert.equal(r.components.seasonal.dir, 1);
   assert.equal(r.agreement, "MIXED");
   narrativeIsUsable(r);
+});
+
+/* ---------------- 13. ranking: CONFLICT last, signal weighed ---------------- */
+const bullish = fuseSignals({ ticker: "CORN", month: JULY, now: NOW, weatherData: HOT_DRY_JULY, newsItems: BULLISH_NEWS, bars: bars("up"), seasonalMean: 2.5 });
+const conflicted = fuseSignals({ ticker: "CORN", month: JULY, now: NOW, weatherData: HOT_DRY_JULY, bars: bars("down"), seasonalMean: -2.5 });
+
+test("the fixtures used for ranking really are CONFLUENT and CONFLICT", () => {
+  assert.equal(bullish.agreement, "CONFLUENT");
+  assert.equal(conflicted.agreement, "CONFLICT");
+});
+
+test("sentimentDirection maps every preset family to +1 / -1 / 0", () => {
+  assert.equal(sentimentDirection("verybull"), 1);
+  assert.equal(sentimentDirection("bull"), 1);
+  assert.equal(sentimentDirection("bear"), -1);
+  assert.equal(sentimentDirection("verybear"), -1);
+  assert.equal(sentimentDirection("neutral"), 0);
+  assert.equal(sentimentDirection(undefined), 0);
+});
+
+test("the signal helps a candidate that agrees with it and hurts one that does not", () => {
+  const withIt = signalAdjustment(bullish, 1);
+  const againstIt = signalAdjustment(bullish, -1);
+  assert.ok(withIt > 0, `a bullish read must help a bullish candidate (got ${withIt})`);
+  assert.ok(againstIt < 0, `a bullish read must hurt a bearish candidate (got ${againstIt})`);
+  assert.equal(Math.round(withIt + againstIt), 0, "the two adjustments must be mirror images");
+  assert.equal(signalAdjustment(null, 1), 0, "no read means no adjustment");
+});
+
+test("a range structure is helped by a quiet tape and hurt by a loud one", () => {
+  const quiet = fuseSignals({ ticker: "UNG", month: 5, now: NOW });
+  assert.ok(signalAdjustment(quiet, 0) > signalAdjustment(bullish, 0),
+    "a score near zero must rank a neutral structure above a loud one");
+});
+
+test("rankScore moves EV by the signal, and a missing EV does not throw", () => {
+  assert.equal(rankScore(20, null, 1), 20);
+  assert.ok(rankScore(20, bullish, 1) > 20);
+  assert.ok(rankScore(20, bullish, -1) < 20);
+  assert.ok(Number.isFinite(rankScore(undefined, bullish, 1)));
+});
+
+test("a CONFLICT candidate ranks last however good its expected value", () => {
+  const candidates = [
+    withSignalRank({ name: "conflicted but rich", ev100: 500 }, conflicted, 1),
+    withSignalRank({ name: "poor but clean", ev100: -5 }, bullish, 1),
+    withSignalRank({ name: "decent and clean", ev100: 10 }, bullish, 1),
+  ].sort(compareCandidates);
+  assert.equal(candidates[candidates.length - 1].name, "conflicted but rich",
+    `CONFLICT must sort last, got ${candidates.map((c) => c.name).join(" > ")}`);
+  assert.equal(candidates[0].name, "decent and clean");
+  assert.equal(candidates[0].conflict, false);
+});
+
+/* ---------------- 14. going against the signal ---------------- */
+test("a trade fighting the signal reports how many factors it fights", () => {
+  const a = againstSignal(bullish, -1);
+  assert.ok(a, "a bearish trade against a bullish read must be flagged");
+  assert.ok(a.n >= 1 && a.n <= 4, `expected 1..4 opposing factors, got ${a.n}`);
+  assert.equal(a.total, 4);
+  assert.equal(a.question, `You are going against ${a.n} of 4 factors. Why?`);
+  assert.match(a.detail, /\d/, "the prompt must carry the numbers, not just an adjective");
+  assert.equal(a.opposing.length, a.n);
+});
+
+test("a trade that agrees with the signal, or has no direction, is not flagged", () => {
+  assert.equal(againstSignal(bullish, 1), null);
+  assert.equal(againstSignal(bullish, 0), null);
+  assert.equal(againstSignal(null, -1), null);
+});
+
+test("a score inside the noise floor is nothing to go against", () => {
+  const quiet = fuseSignals({ ticker: "UNG", month: 5, now: NOW });
+  assert.ok(Math.abs(quiet.score) < 10, `fixture must be quiet, scored ${quiet.score}`);
+  assert.equal(againstSignal(quiet, 1), null);
+  assert.equal(againstSignal(quiet, -1), null);
+});
+
+/* ---------------- 15. the UI adapter reads the same numbers ---------------- */
+test("regionSignals returns one row per region with data, same direction as the engine", () => {
+  const rows = regionSignals(HOT_DRY_JULY, JULY);
+  assert.equal(rows.length, 3, "three regions have a forecast in this fixture");
+  for (const r of rows) {
+    assert.ok(["\u2191", "\u2193", "\u2248"].includes(r.dir), `unexpected arrow ${r.dir}`);
+    assert.ok(["strong", "medium", "weak"].includes(r.strength));
+    assert.ok(r.why.length > 20, "the row must carry the engine's own sentence");
+  }
+  assert.ok(rows.every((r) => r.numDir === 1), "hot and dry in July reads bullish everywhere here");
+  assert.deepEqual(regionSignals(null, JULY), [], "no forecast means no rows, not a throw");
 });
 
 /* ---------------- summary ---------------- */

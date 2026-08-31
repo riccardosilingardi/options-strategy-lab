@@ -8,15 +8,12 @@
 // four component readings, an agreement verdict and an English narrative that
 // always contains the numbers behind the verdict.
 //
-// NOTE ON DUPLICATION — read before editing.
+// SINGLE SOURCE OF TRUTH — read before editing.
 // The region table, the climate norms, the news cause->effect rules and the
-// SMA/RSI read below are ports of the ones currently living in `pro.jsx`
-// (`REGIONS`, `NORMALS`, `TAG_RULES`, `taSignals`). They are ports rather than
-// imports because `pro.jsx` imports React and cannot be loaded outside the
-// browser bundle. The thresholds and the reasoning are deliberately identical.
-// When the UI is wired to this engine (next session, PRD §10 Day 2), `pro.jsx`
-// must import these four blocks from here and delete its own copies, so the
-// numbers cannot drift apart.
+// SMA/RSI read below used to be duplicated in `pro.jsx`. They are not any more:
+// `pro.jsx` imports them from here and keeps only the rendering. Never copy a
+// threshold out of this file into a component — two copies drift apart, and
+// then two screens disagree about the same trade.
 
 import { SEASONAL } from "./engine.js";
 
@@ -31,16 +28,18 @@ const avg = (a) => (a.length ? sum(a) / a.length : 0);
 const signed = (x, digits = 1) => `${x >= 0 ? "+" : ""}${x.toFixed(digits)}`;
 
 /* ================================================================
-   Region table and climate norms (port of pro.jsx REGIONS / NORMALS)
+   Region table and climate norms
 ================================================================ */
 
+// `lat`/`lon` are the Open-Meteo request coordinates, `phase` the crop or demand
+// phase shown next to each region in the Weather tab.
 export const REGIONS = [
-  { id: "cornbelt", name: "Corn Belt (Iowa)", affects: ["CORN", "SOYB"], kind: "agri" },
-  { id: "brazil", name: "Mato Grosso (Brazil)", affects: ["SOYB", "CORN"], kind: "agri" },
-  { id: "plains", name: "Plains (Kansas)", affects: ["WEAT"], kind: "agri" },
-  { id: "blacksea", name: "Odessa (Ukraine)", affects: ["WEAT", "CORN"], kind: "agri" },
-  { id: "gas-south", name: "Dallas (cooling demand)", affects: ["UNG", "BOIL"], kind: "energy" },
-  { id: "gas-ne", name: "New York (cooling demand)", affects: ["UNG", "BOIL"], kind: "energy" },
+  { id: "cornbelt", name: "Corn Belt (Iowa)", lat: 41.6, lon: -93.6, affects: ["CORN", "SOYB"], kind: "agri", phase: "Jul-Aug: corn pollination / soybean flowering" },
+  { id: "brazil", name: "Mato Grosso (Brazil)", lat: -15.6, lon: -56.1, affects: ["SOYB", "CORN"], kind: "agri", phase: "Oct-Feb: soybean planting and growth (off-season now)" },
+  { id: "plains", name: "Plains (Kansas)", lat: 37.7, lon: -97.3, affects: ["WEAT"], kind: "agri", phase: "Jun-Jul: winter wheat harvest" },
+  { id: "blacksea", name: "Odessa (Ukraine)", lat: 46.5, lon: 30.7, affects: ["WEAT", "CORN"], kind: "agri", phase: "Jul: Black Sea wheat harvest" },
+  { id: "gas-south", name: "Dallas (cooling demand)", lat: 32.8, lon: -96.8, affects: ["UNG", "BOIL"], kind: "energy", phase: "Summer: cooling degree days drive power burn" },
+  { id: "gas-ne", name: "New York (cooling demand)", lat: 40.7, lon: -74.0, affects: ["UNG", "BOIL"], kind: "energy", phase: "Summer: cooling degree days drive power burn" },
 ];
 
 // Monthly climate normals: t = average daily Tmax in Celsius, p = rainfall in mm/month.
@@ -145,7 +144,7 @@ export function weatherComponent(ticker, weatherData, month) {
 }
 
 /* ================================================================
-   News: cause -> effect tagging (port of pro.jsx TAG_RULES / tagImpacts)
+   News: cause -> effect tagging
 ================================================================ */
 
 const TAG_RULES = [
@@ -244,7 +243,7 @@ export function newsComponent(ticker, newsItems, now = Date.now()) {
 }
 
 /* ================================================================
-   Technical (port of the SMA/RSI read in pro.jsx taSignals)
+   Technical: SMA / RSI read
 ================================================================ */
 
 /** SMA20 / SMA50 / RSI14 read of a daily bar series. Null under 60 bars. */
@@ -425,4 +424,115 @@ function buildNarrative({ ticker, month, components, agreement, score, confidenc
   }
 
   return s.join(". ") + ".";
+}
+
+/* ================================================================
+   Adapters for the UI
+
+   These exist so no component ever re-implements a threshold. They reshape
+   what the engine already computed; they never decide anything new.
+================================================================ */
+
+/** Weight -> the word the Weather tab shows next to a region. */
+export const WEIGHT_LABEL = (w) => (w >= 1 ? "strong" : w >= 0.65 ? "medium" : "weak");
+
+/**
+ * One row per watched region, shaped for the Weather tab: arrow direction, a
+ * strength word and the same `why` sentence the engine reasons with.
+ */
+export function regionSignals(weatherData, month = new Date().getMonth()) {
+  const out = [];
+  for (const rg of REGIONS) {
+    const read = readRegion(rg, weatherData?.[rg.id], month);
+    if (!read) continue;
+    out.push({ region: rg.name, tks: rg.affects, dir: ARROW[read.dir], numDir: read.dir, strength: WEIGHT_LABEL(read.weight), why: read.why });
+  }
+  return out;
+}
+
+/* ================================================================
+   Ranking — PRD §7 wiring
+
+   A candidate is ranked on its expected value AND on whether the four factors
+   agree with the direction that candidate needs. A CONFLICT always ranks last:
+   when the factors contradict each other we do not know enough to trade, and no
+   expected value is allowed to argue us out of that.
+================================================================ */
+
+/** The direction a sentiment preset needs in order to pay: +1, -1 or 0. */
+export function sentimentDirection(sent) {
+  if (sent === "bull" || sent === "verybull") return 1;
+  if (sent === "bear" || sent === "verybear") return -1;
+  return 0;
+}
+
+/**
+ * How many EV points the signal read is worth to a candidate that needs
+ * direction `dir`. Scaled by confidence, so a 20/100 read barely moves a rank.
+ * A range structure (dir 0) is helped by a quiet tape and hurt by a loud one.
+ */
+export function signalAdjustment(fused, dir) {
+  if (!fused) return 0;
+  const align = dir === 0 ? (40 - Math.abs(fused.score)) / 2 : (dir * fused.score) / 2;
+  return align * (fused.confidence / 100);
+}
+
+/** EV per $100 at risk, adjusted by the signal read. */
+export function rankScore(ev100, fused, dir) {
+  return (Number.isFinite(ev100) ? ev100 : -999) + signalAdjustment(fused, dir);
+}
+
+/**
+ * Comparator for candidates carrying `{ conflict, rank }`. CONFLICT last, then
+ * best adjusted rank first.
+ */
+export function compareCandidates(a, b) {
+  if (!!a.conflict !== !!b.conflict) return a.conflict ? 1 : -1;
+  return b.rank - a.rank;
+}
+
+/** Attach `conflict` and `rank` to a candidate, ready for compareCandidates. */
+export function withSignalRank(candidate, fused, dir) {
+  return {
+    ...candidate,
+    fused,
+    conflict: fused?.agreement === "CONFLICT",
+    rank: rankScore(candidate.ev100, fused, dir),
+  };
+}
+
+/* ================================================================
+   Going against the signal — PRD §7 / §2 override pattern
+================================================================ */
+
+// Below this the score is noise and there is nothing to go against.
+const AGAINST_MIN_SCORE = 10;
+
+/**
+ * Is a trade needing direction `dir` fighting the engine? Returns null when it
+ * is not, otherwise the numbers the prompt must state. Never blocks: the caller
+ * asks for a written reason and stores it with the position.
+ */
+export function againstSignal(fused, dir) {
+  if (!fused || !dir) return null;
+  if (Math.abs(fused.score) < AGAINST_MIN_SCORE) return null;
+  if (Math.sign(fused.score) === dir) return null;
+
+  const keys = Object.keys(WEIGHTS);
+  const opposing = keys.filter((k) => fused.components[k].dir === -dir && fused.components[k].dir !== 0);
+  const supporting = keys.filter((k) => fused.components[k].dir === dir);
+  return {
+    dir,
+    n: opposing.length,
+    total: keys.length,
+    opposing: opposing.map((k) => ({ key: k, label: LABEL[k], strength: fused.components[k].strength, why: fused.components[k].why })),
+    supporting: supporting.map((k) => LABEL[k]),
+    score: fused.score,
+    confidence: fused.confidence,
+    agreement: fused.agreement,
+    question: `You are going against ${opposing.length} of ${keys.length} factors. Why?`,
+    detail: `${fused.ticker} scores ${scoreTxt(fused.score)} out of 100 at ${fused.confidence}/100 confidence, which points ${dirWord(Math.sign(fused.score))}, and this structure needs ${dirWord(dir)}`
+      + (opposing.length ? `. Against you: ${opposing.map((k) => `${LABEL[k]} (${fused.components[k].strength}/100)`).join(", ")}` : "")
+      + (supporting.length ? `. With you: ${supporting.map((k) => LABEL[k]).join(", ")}` : ". Nothing reads your way"),
+  };
 }

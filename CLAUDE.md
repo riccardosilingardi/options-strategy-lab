@@ -53,6 +53,11 @@ while the position is open.
 - `src/engine.js` — shared math (Black-Scholes, payoff, probabilities,
   seasonal tables). Plain JS, no React imports. **Both the client and the
   Netlify functions import from here.** Never duplicate this math.
+- `src/signals.js` — the 4-factor confluence engine (`fuseSignals`) and the
+  single source of the region table, the climate norms, the news cause→effect
+  rules, the SMA/RSI read and the candidate ranking. Plain JS, no React imports.
+  `pro.jsx` imports all of it and keeps only the rendering. Never copy a
+  threshold out of here into a component.
 - `netlify/functions/*.mjs` — serverless endpoints, routed in `netlify.toml`
 - `netlify/edge-functions/gate.js` — password gate, with demo-token bypass
 
@@ -68,6 +73,8 @@ one sentence, change the chart, not the copy. Mobile has no hover: tap to open.
 ## Known traps
 
 - `logEvent` must never be called inside JSX render — use `useEffect`
+- News impact directions are numbers (`1 / 0 / -1`), never arrow strings. Render
+  them with `ARROW[dir]` from `signals.js`
 - Use the safe `getU(ticker)` accessor, never `UNDERLYINGS[ticker]` directly
 - Single-leg orders go to Alpaca as simple orders, not mleg (422 otherwise)
 - Cancel conflicting open orders before sending an mleg close (wash-trade check)

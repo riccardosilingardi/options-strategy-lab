@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    name: test and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # npm ci needs a lockfile in sync with package.json; fall back to a plain
+      # install so a dependency bump never turns into a red build for no reason.
+      - name: Install dependencies
+        run: npm ci || npm install
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
