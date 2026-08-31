@@ -8,30 +8,16 @@ import {
   FlaskConical, Briefcase, Plus, Newspaper, Plug, Send, ExternalLink, CloudSun, MessageSquare, FileText, Compass, Bell, Home,
 } from "lucide-react";
 import { fetchAllNews, ImpactTags, MeteoTab, CopilotTab, ReportTab, OrderTicket, AlpacaDesk, scaleStrategy, probProfit, buildContext, GuardianPanel, PriceChart, ChainMatrix, PayoffThumb, OptionPanel, UnifiedView, taSignals, confluence } from "./pro.jsx";
+import { N as nCDF, bs as bsPrice, smile as smileIV, payoff as payoffExp, SEASONAL, SIGMA } from "./engine.js";
 import { T } from "./theme.js";
 
 /* ============================== THEME ============================== */
 const mono = { fontFamily: "ui-monospace, Menlo, monospace" };
 
-/* ============================== MATH: Black-Scholes ============================== */
-function erf(x) {
-  const s = x < 0 ? -1 : 1; x = Math.abs(x);
-  const t = 1 / (1 + 0.3275911 * x);
-  const y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x);
-  return s * y;
-}
-const nCDF = (x) => 0.5 * (1 + erf(x / Math.SQRT2));
+/* ============================== MATH: Black-Scholes (Greeks only — shared engine covers price/payoff) ============================== */
 const nPDF = (x) => Math.exp(-0.5 * x * x) / Math.sqrt(2 * Math.PI);
 const R = 0.045;
 
-function bsPrice(S, K, Tyr, iv, type) {
-  if (Tyr <= 0 || iv <= 0) return type === "call" ? Math.max(S - K, 0) : Math.max(K - S, 0);
-  const d1 = (Math.log(S / K) + (R + 0.5 * iv * iv) * Tyr) / (iv * Math.sqrt(Tyr));
-  const d2 = d1 - iv * Math.sqrt(Tyr);
-  return type === "call"
-    ? S * nCDF(d1) - K * Math.exp(-R * Tyr) * nCDF(d2)
-    : K * Math.exp(-R * Tyr) * nCDF(-d2) - S * nCDF(-d1);
-}
 function bsGreeks(S, K, Tyr, iv, type) {
   if (Tyr <= 0 || iv <= 0) return { delta: 0, gamma: 0, theta: 0, vega: 0 };
   const sq = Math.sqrt(Tyr);
@@ -43,27 +29,26 @@ function bsGreeks(S, K, Tyr, iv, type) {
   const vega = S * nPDF(d1) * sq / 100;
   return { delta, gamma, theta, vega };
 }
-const smileIV = (baseIV, S, K) => baseIV * (1 + 0.6 * Math.abs(Math.log(K / S)));
 
 /* ============================== UNDERLYINGS (fallback stats) ============================== */
 const UNDERLYINGS = {
-  SOYB: { name: "Soybeans", iv: 0.20, sigma: 0.19, step: 0.5,
-    monthlyMean: [-0.5, -0.3, 0.2, 0.4, 0.5, 1.2, 1.8, 1.1, -0.6, -0.8, -0.4, -0.2],
+  SOYB: { name: "Soybeans", iv: 0.20, sigma: SIGMA.SOYB, step: 0.5,
+    monthlyMean: SEASONAL.SOYB,
     newsQ: "soybean futures prices" },
-  CORN: { name: "Corn", iv: 0.24, sigma: 0.22, step: 0.5,
-    monthlyMean: [-0.6, -0.4, 0.1, 0.3, 0.9, 1.5, 1.3, -0.9, -1.1, -0.5, -0.3, -0.2],
+  CORN: { name: "Corn", iv: 0.24, sigma: SIGMA.CORN, step: 0.5,
+    monthlyMean: SEASONAL.CORN,
     newsQ: "corn futures USDA crop" },
-  UNG: { name: "US Natural Gas", iv: 0.45, sigma: 0.48, step: 0.5,
-    monthlyMean: [2.1, 1.4, -1.8, -2.5, -1.2, -0.4, 0.3, 0.5, 0.8, 1.6, 2.4, 2.2],
+  UNG: { name: "US Natural Gas", iv: 0.45, sigma: SIGMA.UNG, step: 0.5,
+    monthlyMean: SEASONAL.UNG,
     newsQ: "natural gas prices storage EIA" },
-  BOIL: { name: "2x Natural Gas", iv: 0.85, sigma: 0.95, step: 1,
-    monthlyMean: [4.0, 2.6, -3.8, -5.2, -2.6, -1.0, 0.4, 0.8, 1.4, 3.0, 4.6, 4.2],
+  BOIL: { name: "2x Natural Gas", iv: 0.85, sigma: SIGMA.BOIL, step: 1,
+    monthlyMean: SEASONAL.BOIL,
     newsQ: "natural gas prices forecast" },
-  WEAT: { name: "Wheat", iv: 0.26, sigma: 0.25, step: 0.25,
-    monthlyMean: [-0.3, 0.1, 0.8, 1.1, 0.9, -0.4, -0.8, -0.6, -0.4, -0.2, 0.0, -0.1],
+  WEAT: { name: "Wheat", iv: 0.26, sigma: SIGMA.WEAT, step: 0.25,
+    monthlyMean: SEASONAL.WEAT,
     newsQ: "wheat futures prices" },
-  SPY: { name: "S&P 500 ETF", iv: 0.13, sigma: 0.16, step: 5,
-    monthlyMean: [0.9, 0.2, 0.8, 1.2, 0.6, 0.5, 1.3, 0.1, -0.7, 0.8, 1.6, 1.1],
+  SPY: { name: "S&P 500 ETF", iv: 0.13, sigma: SIGMA.SPY, step: 5,
+    monthlyMean: SEASONAL.SPY,
     newsQ: "S&P 500 stock market outlook" },
 };
 const MONTHS_IT = ["Gen", "Feb", "Mar", "Apr", "Mag", "Giu", "Lug", "Ago", "Set", "Ott", "Nov", "Dic"];
@@ -300,12 +285,6 @@ function scenarioValue(legs, S, dte, baseIV, ivMap) {
   return legs.reduce((a, l, i) => {
     const iv = ivMap ? ivMap[i] : smileIV(baseIV, S, l.strike);
     return a + Math.sign(l.side) * l.qty * bsPrice(S, l.strike, dte / 365, iv, l.type);
-  }, 0);
-}
-function payoffExp(legs, S) {
-  return legs.reduce((a, l) => {
-    const intr = l.type === "call" ? Math.max(S - l.strike, 0) : Math.max(l.strike - S, 0);
-    return a + Math.sign(l.side) * l.qty * intr;
   }, 0);
 }
 function netGreeks(legs, S, dte, baseIV, ivMap) {
