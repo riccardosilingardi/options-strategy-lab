@@ -7,7 +7,8 @@ import {
   RefreshCw, ShieldCheck, Save, Trash2, Play, Layers, Radar, Box,
   FlaskConical, Briefcase, Plus, Newspaper, Plug, Send, ExternalLink, CloudSun, MessageSquare, FileText, Compass, Bell, Home,
 } from "lucide-react";
-import { fetchAllNews, ImpactTags, MeteoTab, CopilotTab, ReportTab, OrderTicket, AlpacaDesk, scaleStrategy, probProfit, buildContext, GuardianPanel, PriceChart, ChainMatrix, PayoffThumb, OptionPanel, UnifiedView, taSignals, confluence } from "./pro.jsx";
+import { fetchAllNews, fetchWeather, ImpactTags, MeteoTab, CopilotTab, ReportTab, OrderTicket, AlpacaDesk, scaleStrategy, probProfit, buildContext, GuardianPanel, PriceChart, ChainMatrix, PayoffThumb, OptionPanel, UnifiedView, taSignals, confluence, WhyThisTrade } from "./pro.jsx";
+import { fuseSignals, sentimentDirection, withSignalRank, compareCandidates, againstSignal } from "./signals.js";
 import { N as nCDF, bs as bsPrice, smile as smileIV, payoff as payoffExp, SEASONAL, SIGMA } from "./engine.js";
 import { T } from "./theme.js";
 
@@ -482,6 +483,9 @@ export default function OptionsStrategyLab() {
   const [multi, setMulti] = useState({ sel: ["SOYB", "CORN", "UNG"], busy: false, res: null, err: null, dteT: 45, senMode: "auto" });
   const [wiz, setWiz] = useState({ risk: 250, horizon: 45, conviction: "moderate", busy: false, result: null, err: null });
   const [optRef, setOptRef] = useState(null); // snapshot prezzi Optimizer per riconciliazione col Builder
+  const [weather, setWeather] = useState(null);  // regionId -> forecast 14g (fuseSignals)
+  const [barsCache, setBarsCache] = useState({}); // ticker -> daily bars (fattore tecnico)
+  const [against, setAgainst] = useState({ reason: "" }); // motivazione per un trade contro il segnale
 
   const U = getU(ticker);
   const chain = chains[ticker];
@@ -609,7 +613,7 @@ export default function OptionsStrategyLab() {
     return () => clearInterval(id);
   }, [autoMon, store.positions, refreshChain]);
 
-  const switchTicker = (tk) => { setTicker(tk); setExpKey(null); setLegs([]); setMc(null); setBt(null); if (!chains[tk]) refreshChain(tk); };
+  const switchTicker = (tk) => { setTicker(tk); setExpKey(null); setLegs([]); setMc(null); setBt(null); setAgainst({ reason: "" }); if (!chains[tk]) refreshChain(tk); };
 
   /* ---- seasonal da Alpha Vantage ---- */
   const loadSeasonal = async () => {
@@ -625,14 +629,67 @@ export default function OptionsStrategyLab() {
     setBusy(null);
   };
 
-  /* ---- news ---- */
-  const loadNews = async (tk) => {
-    setBusy("news");
-    try { setNews((n) => ({ ...n, [tk]: { items: [], loading: true } })); const items = await fetchAllNews(tk, getU(tk).newsQ); setNews((n) => ({ ...n, [tk]: { items, at: Date.now() } })); }
-    catch { setMsg("Feed RSS non raggiungibili al momento."); }
-    setBusy(null);
-  };
-  useEffect(() => { if (tab === "news" && !news[ticker]) loadNews(ticker); }, [tab, ticker]); // eslint-disable-line
+  /* ---- news ----
+     PRD §7: le news devono caricarsi all'AVVIO per il ticker corrente, non
+     quando si apre il tab. Altrimenti il motore ragiona senza di loro. Con
+     `silent` il caricamento in background non tocca busy/messaggi. */
+  const loadNews = useCallback(async (tk, silent) => {
+    if (!silent) setBusy("news");
+    try {
+      setNews((n) => ({ ...n, [tk]: { items: n[tk]?.items || [], loading: true } }));
+      const items = await fetchAllNews(tk, getU(tk).newsQ);
+      setNews((n) => ({ ...n, [tk]: { items, at: Date.now() } }));
+    } catch {
+      setNews((n) => ({ ...n, [tk]: { items: n[tk]?.items || [], loading: false, err: true } }));
+      if (!silent) setMsg("Feed RSS non raggiungibili al momento.");
+    }
+    if (!silent) setBusy(null);
+  }, []);
+  // all'avvio e a ogni cambio ticker: le news del ticker corrente sono già lì
+  useEffect(() => { if (!news[ticker]) loadNews(ticker, true); }, [ticker, news, loadNews]);
+
+  /* ---- meteo: una volta all'avvio, serve al fattore weather di fuseSignals ---- */
+  useEffect(() => { (async () => { try { setWeather(await fetchWeather()); } catch { /* meteo opzionale */ } })(); }, []);
+
+  /* ---- barre giornaliere: servono al fattore tecnico (SMA/RSI, 60+ barre) ---- */
+  // Restituisce le barre (dalla cache o dalla rete) così chi chiama può usarle
+  // subito, senza aspettare il giro di render dello state.
+  const barsAsked = useRef({});
+  const loadBars = useCallback(async (tk) => {
+    if (barsAsked.current[tk]) return barsAsked.current[tk];
+    const job = (async () => {
+      try {
+        const r = await fetch(`/api/bars?sym=${encodeURIComponent(tk)}&days=400`);
+        const j = await r.json();
+        if (r.ok && j.bars?.length) { setBarsCache((b) => ({ ...b, [tk]: j.bars })); return j.bars; }
+      } catch { /* il fattore tecnico degrada a neutro da solo */ }
+      return null;
+    })();
+    barsAsked.current[tk] = job;
+    return job;
+  }, []);
+  useEffect(() => { loadBars(ticker); }, [ticker, loadBars]);
+
+  /* ---- fusione 4 fattori per ticker (PRD §7) ----
+     Le news taggate valgono per tutti i sottostanti (un titolo sul Mar Nero
+     tocca WEAT anche se il feed è stato scaricato per SOYB), quindi il pool è
+     l'unione di tutti i feed caricati, deduplicata per titolo. */
+  const newsPool = useMemo(() => {
+    const seen = new Set();
+    return Object.values(news).flatMap((n) => n?.items || []).filter((i) => i?.title && !seen.has(i.title) && seen.add(i.title));
+  }, [news]);
+
+  const fuseFor = useCallback((tk, barsOverride) => fuseSignals({
+    ticker: tk, month: NOW_MONTH,
+    weatherData: weather, newsItems: newsPool,
+    bars: barsOverride !== undefined ? barsOverride : barsCache[tk],
+    seasonalMean: ((seasonal[tk]?.monthlyMean) || getU(tk).monthlyMean)[NOW_MONTH],
+  }), [weather, newsPool, barsCache, seasonal]);
+
+  const fused = useMemo(
+    () => Object.fromEntries(Object.keys(UNDERLYINGS).map((tk) => [tk, fuseFor(tk)])),
+    [fuseFor]
+  );
 
   /* ---- analisi ---- */
   const A = useMemo(() => (spot && legs.length ? analyze(legs, spot, dte, iv, q) : null), [legs, spot, dte, iv, q]);
@@ -665,6 +722,12 @@ export default function OptionsStrategyLab() {
     setStore(st); await saveState(st); setMsg("Strategia salvata ✓ (persistente tra sessioni).");
   };
   const openPaper = async (alpacaOrder) => {
+    // Non blocchiamo il trade: chiediamo la motivazione scritta e la salviamo
+    // con la posizione (PRD §2, pattern override).
+    if (clash && against.reason.trim().length < REASON_MIN) {
+      setMsg(`Write why you are going against ${clash.n} of ${clash.total} factors (at least ${REASON_MIN} characters). The reason is stored with the position.`);
+      return;
+    }
     const expiry = expKey ? new Date(expKey).toISOString() : new Date(Date.now() + dte * 86400000).toISOString();
     const ivAvg0 = A.legPx.reduce((x, y) => x + y.iv, 0) / Math.max(1, A.legPx.length);
     const pop0 = probProfit(A.curve, spot, ivAvg0, dte);
@@ -673,11 +736,16 @@ export default function OptionsStrategyLab() {
       openedAt: new Date().toISOString(), expiry, maxProfit: A.maxProfit, maxLoss: A.maxLoss,
       realEntry: A.realCount === legs.length,
       alpacaId: alpacaOrder?.id || null,
-      thesis: { pop: pop0, iv: ivAvg0, seasonal: seas.monthlyMean[NOW_MONTH], regime: seas.monthlyMean[NOW_MONTH] > 0.8 ? "forte+" : seas.monthlyMean[NOW_MONTH] < -0.8 ? "forte-" : "debole", spot, breakevens: A.breakevens, delta: A.greeks.delta, vega: A.greeks.vega },
-      timeline: [{ t: Date.now(), type: "open", text: `${alpacaOrder ? "Ordine Alpaca " + alpacaOrder.id.slice(0, 8) + "… inviato · " : ""}Aperta: PoP ${pop0 != null ? (pop0 * 100).toFixed(0) + "%" : "n/d"} · IV ${(ivAvg0 * 100).toFixed(0)}% · stagionale ${seas.monthlyMean[NOW_MONTH].toFixed(1)}%/m` }],
+      thesis: { pop: pop0, iv: ivAvg0, seasonal: seas.monthlyMean[NOW_MONTH], regime: seas.monthlyMean[NOW_MONTH] > 0.8 ? "forte+" : seas.monthlyMean[NOW_MONTH] < -0.8 ? "forte-" : "debole", spot, breakevens: A.breakevens, delta: A.greeks.delta, vega: A.greeks.vega,
+        signal: fused[ticker] ? { score: fused[ticker].score, confidence: fused[ticker].confidence, agreement: fused[ticker].agreement, narrative: fused[ticker].narrative } : null,
+        againstSignal: clash ? { ...clash, reason: against.reason.trim(), at: Date.now() } : null },
+      timeline: [
+        { t: Date.now(), type: "open", text: `${alpacaOrder ? "Ordine Alpaca " + alpacaOrder.id.slice(0, 8) + "… inviato · " : ""}Aperta: PoP ${pop0 != null ? (pop0 * 100).toFixed(0) + "%" : "n/d"} · IV ${(ivAvg0 * 100).toFixed(0)}% · stagionale ${seas.monthlyMean[NOW_MONTH].toFixed(1)}%/m${fused[ticker] ? ` · segnale ${fused[ticker].score > 0 ? "+" : ""}${fused[ticker].score}/100 ${fused[ticker].agreement}` : ""}` },
+        ...(clash ? [{ t: Date.now(), type: "against", text: `Against ${clash.n} of ${clash.total} factors. Reason: "${against.reason.trim()}"` }] : []),
+      ],
     };
     const st = { ...store, positions: [...store.positions, pos] };
-    setStore(st); await saveState(st); setMsg("Posizione paper aperta ✓"); setTab("paper");
+    setStore(st); await saveState(st); setAgainst({ reason: "" }); setMsg("Posizione paper aperta ✓"); setTab("paper");
   };
   const delSaved = async (id) => { const st = { ...store, saved: store.saved.filter((s) => s.id !== id) }; setStore(st); await saveState(st); };
   const logEvent = useCallback((id, type, text) => {
@@ -714,6 +782,9 @@ export default function OptionsStrategyLab() {
     setMulti((m) => ({ ...m, busy: true, err: null, res: null }));
     try {
       const out = [];
+      // le barre servono al fattore tecnico: caricale prima di fondere i segnali
+      const barsMap = Object.fromEntries(await Promise.all(multi.sel.map(async (tk) => [tk, await loadBars(tk)])));
+      const fz = Object.fromEntries(multi.sel.map((tk) => [tk, fuseFor(tk, barsMap[tk] ?? barsCache[tk])]));
       for (const tk of multi.sel) {
         let c = chains[tk] || (await refreshChain(tk, true));
         if (!c?.spot) continue;
@@ -739,9 +810,13 @@ export default function OptionsStrategyLab() {
           out.push({ tk, sent, name: pr.name, legs: pr.legs, expKey: ek, dte: d2, a, pop, n, ev: pop * a.maxProfit * n });
         }
       }
-      out.forEach((o) => { const pr = evProfile(o.pop, o.a.maxProfit, o.a.maxLoss); o.ev100 = pr ? pr.ev100 : -999; o.tag = pr?.tag; });
-      out.sort((x, y) => y.ev100 - x.ev100);
-      setMulti((m) => ({ ...m, busy: false, res: out.slice(0, 8) }));
+      // Ranking: valore atteso CORRETTO dal segnale a 4 fattori, e i CONFLICT in
+      // fondo comunque (PRD §7). Le funzioni pure stanno in src/signals.js.
+      const ranked = out.map((o) => {
+        const pr = evProfile(o.pop, o.a.maxProfit, o.a.maxLoss);
+        return withSignalRank({ ...o, ev100: pr ? pr.ev100 : -999, tag: pr?.tag }, fz[o.tk], sentimentDirection(o.sent));
+      }).sort(compareCandidates);
+      setMulti((m) => ({ ...m, busy: false, res: ranked.slice(0, 8) }));
     } catch (e) { setMulti((m) => ({ ...m, busy: false, err: String(e.message || e) })); }
   };
 
@@ -1001,16 +1076,37 @@ export default function OptionsStrategyLab() {
     return { cap, tradeRisk, openRisk, overTrade, overTotal, maxTradeRisk: 0.05 * cap, maxTotal: 0.25 * cap };
   }, [A, store.positions, store.settings.capital]);
 
-  /* ---- scanner ---- */
+  /* ---- direzione del trade e scontro col segnale (PRD §7) ----
+     La direzione la dà il delta netto della struttura: positivo = il trade
+     guadagna se il prezzo sale. Sotto 0.05 in valore assoluto la struttura è
+     di fatto neutra e non c'è nessuna direzione contro cui andare. */
+  const tradeDir = useMemo(() => {
+    if (!A) return 0;
+    const d = A.greeks.delta;
+    return Math.abs(d) < 0.05 ? 0 : Math.sign(d);
+  }, [A]);
+  const clash = useMemo(() => againstSignal(fused[ticker], tradeDir), [fused, ticker, tradeDir]);
+  const REASON_MIN = 15;
+  const reasonOk = !clash || against.reason.trim().length >= REASON_MIN;
+
+  /* ---- scanner ----
+     Il punteggio non è più la sola stagionalità: pesa fuseSignals(), che
+     contiene già stagionalità, trend, meteo e news con i loro pesi (PRD §7).
+     Un ticker in CONFLICT finisce ULTIMO comunque: quando i fattori si
+     contraddicono non sappiamo abbastanza, e nessun rendimento atteso può
+     farci cambiare idea. */
   const scan = useMemo(() => Object.entries(UNDERLYINGS).map(([tk, u]) => {
     const s = seasonal[tk] || { monthlyMean: u.monthlyMean };
     const seasonalScore = s.monthlyMean[NOW_MONTH];
     const c = chains[tk];
-    const trend = 0; // trend live richiederebbe serie giornaliera: usa stagionale + news come guida
-    const score = seasonalScore * 1.5 + trend;
+    const f = fused[tk];
+    // fuseSignals vive in -100..+100, la stagionalità in %/mese: /25 le riporta
+    // sulla stessa scala prima di sommarle.
+    const score = seasonalScore * 1.5 + (f ? (f.score / 25) * (f.confidence / 100) : 0);
     const sugg = score > 1.5 ? "verybull" : score > 0.5 ? "bull" : score < -1.5 ? "verybear" : score < -0.5 ? "bear" : "neutral";
-    return { tk, name: u.name, spot: c?.spot ?? null, seasonalScore, score, sugg, real: !!seasonal[tk], hasChain: !!c };
-  }).sort((a, b) => b.score - a.score), [chains, seasonal]);
+    return { tk, name: u.name, spot: c?.spot ?? null, seasonalScore, score, sugg, real: !!seasonal[tk], hasChain: !!c,
+      fused: f, conflict: f?.agreement === "CONFLICT", agreement: f?.agreement, signalScore: f?.score ?? 0, confidence: f?.confidence ?? 0 };
+  }).sort((a, b) => (a.conflict !== b.conflict ? (a.conflict ? 1 : -1) : b.score - a.score)), [chains, seasonal, fused]);
 
   /* ============================== RENDER ============================== */
   // "Oggi" rimossa su feedback: troppe info, valore basso al livello attuale.
@@ -1306,7 +1402,7 @@ export default function OptionsStrategyLab() {
         {tab === "scan" && (
           <Panel style={{ marginTop: 12 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-              <Lbl>BEST OPPORTUNITIES · STAGIONALITÀ {MONTHS_IT[NOW_MONTH].toUpperCase()}</Lbl>
+              <Lbl>BEST OPPORTUNITIES · SEGNALE A 4 FATTORI · {MONTHS_IT[NOW_MONTH].toUpperCase()}</Lbl>
               <Btn small ghost onClick={async () => { setBusy("all"); for (const tk of Object.keys(UNDERLYINGS)) await refreshChain(tk, true); setBusy(null); setMsg("Tutte le chain aggiornate ✓"); }}>
                 <RefreshCw size={11} /> Aggiorna tutte
               </Btn>
@@ -1323,6 +1419,14 @@ export default function OptionsStrategyLab() {
                         stag. {r.seasonalScore > 0 ? "+" : ""}{r.seasonalScore.toFixed(1)}%/m {r.real ? "(reale 10y)" : "(stima)"} · {r.spot ? `$${r.spot.toFixed(2)}` : "chain da caricare"}{ta[r.tk] ? ` · trend ${ta[r.tk].trend > 0 ? "↑" : ta[r.tk].trend < 0 ? "↓" : "→"} RSI ${ta[r.tk].rsi.toFixed(0)}` : ""}
                       </div>
                     </div>
+                    {r.fused && (() => {
+                      const c = r.conflict ? T.red : r.agreement === "CONFLUENT" ? T.green : T.blue;
+                      return (
+                        <span title={r.fused.narrative} style={{ ...mono, fontSize: 9.5, color: c, border: `1px solid ${c}66`, padding: "3px 8px", borderRadius: 5, cursor: "help" }}>
+                          {r.agreement} · {r.signalScore > 0 ? "+" : ""}{r.signalScore}/100 · conf {r.confidence}
+                        </span>
+                      );
+                    })()}
                     <span style={{ ...mono, fontSize: 10, color: sObj.color, border: `1px solid ${sObj.color}66`, padding: "3px 8px", borderRadius: 5 }}>{sObj.icon} {sObj.label.toUpperCase()}</span>
                     <Btn small ghost onClick={() => { switchTicker(r.tk); setSentiment(r.sugg); setTab("optimize"); }}>→ Ottimizza</Btn>
                   </div>
@@ -1330,7 +1434,7 @@ export default function OptionsStrategyLab() {
               })}
             </div>
             <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 10 }}>
-              Carica la Alpha Vantage key (tab Paper → Integrazioni) e premi "Stagionalità reale" nel Backtest per sostituire le stime con 10 anni di dati veri per ticker.
+The order weighs the 4-factor signal (seasonality, price trend, weather, news): CONFLICT tickers stay last regardless. Tap or hover the badge for the full narrative. Carica la Alpha Vantage key (tab Paper → Integrazioni) e premi "Stagionalità reale" nel Backtest per sostituire le stime con 10 anni di dati veri per ticker.
             </div>
           </Panel>
         )}
@@ -1384,6 +1488,14 @@ export default function OptionsStrategyLab() {
                 )}
               </div>
             </Panel>
+
+            <WhyThisTrade
+              fused={fused[ticker]}
+              title={`WHY THIS TRADE · ${ticker}`}
+              note={fused[ticker]?.agreement === "CONFLICT"
+                ? "Candidates on a CONFLICT ticker rank last in the multi-market scan below, whatever their expected value."
+                : "The scan below ranks candidates on expected value adjusted by this read."}
+            />
 
             <Panel style={{ marginTop: 10 }}>
               <Lbl>2 · STRATEGIE {SENT.label.toUpperCase()} — {ticker} · PREMI DA CHAIN REALE</Lbl>
@@ -1462,6 +1574,11 @@ export default function OptionsStrategyLab() {
                 {multi.res && (
                   <div style={{ display: "grid", gap: 6, marginTop: 10 }}>
                     {multi.res.length === 0 && <div style={{ ...mono, fontSize: 11.5, color: T.mut }}>Nessuna strategia entra nel budget sui mercati selezionati.</div>}
+                    {multi.res.some((r) => r.conflict) && (
+                      <div style={{ ...mono, fontSize: 10, color: T.red }}>
+                        Candidates marked CONFLICT sit at the bottom by construction: the four factors contradict each other on that underlying, and no expected value is worth a signal we cannot read.
+                      </div>
+                    )}
                     {multi.res.map((r, i) => (
                       <div key={i} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "8px 10px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7 }}>
                         <span style={{ ...mono, fontSize: 10, color: T.dim, width: 16 }}>#{i + 1}</span>
@@ -1471,8 +1588,15 @@ export default function OptionsStrategyLab() {
                           <div style={{ ...mono, fontSize: 10, color: T.dim }}>{r.expKey} · {r.dte} DTE · ×{r.n}</div>
                         </div>
                         {r.tag && <span title={r.tag.d} style={{ ...mono, fontSize: 8.5, color: r.tag.c, border: `1px solid ${r.tag.c}55`, borderRadius: 4, padding: "1px 6px", cursor: "help" }}>{r.tag.t}</span>}
+                        {r.fused && (
+                          <span title={r.fused.narrative}
+                            style={{ ...mono, fontSize: 8.5, color: r.conflict ? T.red : r.fused.agreement === "CONFLUENT" ? T.green : T.blue, border: `1px solid ${(r.conflict ? T.red : r.fused.agreement === "CONFLUENT" ? T.green : T.blue)}55`, borderRadius: 4, padding: "1px 6px", cursor: "help" }}>
+                            {r.fused.agreement} {r.fused.score > 0 ? "+" : ""}{r.fused.score}
+                          </span>
+                        )}
                         <Stat k="CHANCE" v={`${(r.pop * 100).toFixed(0)}%`} c={r.pop >= 0.5 ? T.green : T.violet} />
                         <Stat k="EV/$100" v={`${r.ev100 >= 0 ? "+" : ""}$${r.ev100.toFixed(0)}`} c={r.ev100 >= 0 ? T.green : T.red} />
+                        <Stat k="RANK" v={`${r.rank >= 0 ? "+" : ""}${r.rank.toFixed(0)}`} c={r.conflict ? T.red : T.amber} />
                         <Stat k="MAX TOT" v={fmt$(r.n * r.a.maxProfit)} c={T.green} />
                         <Btn small ghost onClick={() => { setTicker(r.tk); setExpKey(r.expKey); setLegs(r.legs.map((l) => ({ ...l }))); setStratName(`${r.name} (multi)`); setMc(null); setBt(null); setTab("build"); }}>Builder →</Btn>
                       </div>
@@ -1494,7 +1618,7 @@ export default function OptionsStrategyLab() {
                   style={{ ...mono, background: "transparent", border: "none", borderBottom: `1px dashed ${T.line}`, color: T.ink, fontSize: 15, fontWeight: 700, outline: "none", minWidth: 200 }} />
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                   <Btn small ghost color={T.blue} onClick={saveStrategy}><Save size={12} /> Salva</Btn>
-                  <Btn small color={T.green} onClick={openPaper}><Briefcase size={12} /> Paper interno</Btn>
+                  <Btn small color={T.green} onClick={openPaper} disabled={!reasonOk}><Briefcase size={12} /> Paper interno</Btn>
                   
                 </div>
               </div>
@@ -1511,6 +1635,43 @@ export default function OptionsStrategyLab() {
                   <span style={{ ...mono, fontSize: 10, color: A.realCount === legs.length ? T.green : T.amber }}>
                     {A.realCount === legs.length ? "● tutti i premi da quote CBOE reali (mid bid/ask)" : `◐ ${A.realCount}/${legs.length} legs con quote reali — gli altri sono BS`}
                   </span>
+                </div>
+              )}
+
+              <WhyThisTrade
+                fused={fused[ticker]}
+                title={`WHY THIS TRADE · ${ticker}`}
+                note={tradeDir === 0
+                  ? "This structure is direction-neutral: it wants a quiet tape more than a call on direction."
+                  : `This structure needs ${ticker} to go ${tradeDir > 0 ? "up" : "down"}.`}
+              />
+
+              {/* ---- Andare contro il segnale (PRD §7) ----
+                  Non si chiude e non blocca il trade: chiede la motivazione
+                  scritta, che viene salvata nella tesi della posizione. */}
+              {clash && (
+                <div style={{ marginTop: 10, padding: "11px 13px", background: `${T.amber}12`, border: `1.5px solid ${T.amber}`, borderRadius: 8 }}>
+                  <div style={{ ...mono, fontSize: 12.5, fontWeight: 800, color: T.amber }}>{clash.question}</div>
+                  <div style={{ fontSize: 12.5, color: T.body, marginTop: 5, lineHeight: 1.5 }}>{clash.detail}.</div>
+                  <div style={{ display: "grid", gap: 4, marginTop: 8 }}>
+                    {clash.opposing.map((o) => (
+                      <div key={o.key} style={{ ...mono, fontSize: 10.5, color: T.mut }}>
+                        <span style={{ color: T.red, fontWeight: 700 }}>✗ {o.label}</span> ({o.strength}/100) — {o.why}
+                      </div>
+                    ))}
+                  </div>
+                  <textarea
+                    value={against.reason}
+                    onChange={(e) => setAgainst({ reason: e.target.value })}
+                    placeholder="Why are you taking this trade anyway? Write the reason — it is stored with the position and you will read it again when you close."
+                    rows={3}
+                    style={{ ...mono, width: "100%", boxSizing: "border-box", marginTop: 9, background: T.bg, color: T.ink, border: `1px solid ${reasonOk ? T.green : T.amber}`, borderRadius: 6, padding: "8px 9px", fontSize: 12, resize: "vertical" }}
+                  />
+                  <div style={{ ...mono, fontSize: 10, color: reasonOk ? T.green : T.dim, marginTop: 4 }}>
+                    {reasonOk
+                      ? "✓ Reason recorded: it will be saved with the position and shown again when you close it."
+                      : `${Math.max(0, REASON_MIN - against.reason.trim().length)} more characters. Nothing here stops you taking this trade — you are only asked to write down why.`}
+                  </div>
                 </div>
               )}
 
@@ -1647,7 +1808,12 @@ export default function OptionsStrategyLab() {
               </div>
               </div>
 
-              {alpaca && (
+              {alpaca && !reasonOk && (
+                <div style={{ ...mono, fontSize: 11, color: T.amber, marginTop: 10, padding: "9px 11px", border: `1px solid ${T.amber}66`, borderRadius: 7 }}>
+                  The order ticket unlocks as soon as you write why you are going against {clash.n} of {clash.total} factors. The trade is not forbidden — the written reason is required.
+                </div>
+              )}
+              {alpaca && reasonOk && (
                 <OrderTicket
                   onSent={(o) => openPaper(o)}
                   legs={legs} expKey={expKey} ticker={ticker}
@@ -2012,7 +2178,7 @@ export default function OptionsStrategyLab() {
           </div>
         )}
 
-        {tab === "meteo" && <MeteoTab news={news[ticker]?.items || []} />}
+        {tab === "meteo" && <MeteoTab news={news[ticker]?.items || []} data={weather} />}
 
         {tab === "copilot" && (
           <CopilotTab

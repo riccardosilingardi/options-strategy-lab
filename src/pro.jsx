@@ -3,6 +3,7 @@ import { RefreshCw, Send, Trash2, Download, Sparkles, CloudSun, FileText, XCircl
 import { T } from "./theme.js";
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, LineStyle } from "lightweight-charts";
 import { erf, netBS } from "./engine.js";
+import { ARROW, REGIONS, regionSignals, tagImpacts, taRead } from "./signals.js";
 
 /* ============ theme (condiviso) ============ */
 const mono = { fontFamily: "ui-monospace, Menlo, monospace" };
@@ -29,33 +30,14 @@ async function proxied(url) {
 }
 
 /* ================================================================
-   1) NEWS: tagging causa→effetto + fonti geopolitiche/governative
+   1) NEWS: cause -> effect tagging + geopolitical/government sources
+
+   The cause->effect rules themselves live in src/signals.js: the same tags feed
+   the news factor of fuseSignals(), so a headline can never mean one thing to
+   the feed and another to the engine.
 ================================================================ */
-const TAG_RULES = [
-  { re: /(heat ?wave|drought|dry (spell|weather)|scorching|soil moisture)/i, imp: [["CORN", "↑", "stress idrico/caldo su colture → rischio rese → prezzi su"], ["SOYB", "↑", "stress colture → offerta attesa giù → prezzi su"], ["WEAT", "↑", "siccità aree grano → prezzi su"]] },
-  { re: /(beneficial rain|rains improve|good weather|favou?rable weather|bumper (crop|harvest)|record (crop|harvest))/i, imp: [["CORN", "↓", "meteo favorevole/raccolto abbondante → offerta su → prezzi giù"], ["SOYB", "↓", "rese attese in aumento → pressione sui prezzi"]] },
-  { re: /(usda|wasde|crop report|grain stocks|acreage|prospective plantings)/i, imp: [["CORN", "≈", "dato governativo USDA: sotto attese ↑, sopra attese ↓"], ["SOYB", "≈", "come sopra: confrontare con consensus"], ["WEAT", "≈", "come sopra"]] },
-  { re: /(china).{0,40}(soy|grain|corn|purchas|import|buy)/i, imp: [["SOYB", "↑", "domanda export Cina → sostegno ai prezzi"], ["CORN", "↑", "acquisti cinesi → domanda su"]] },
-  { re: /(export sales|export ban|export restriction|tariff|trade (war|deal)|dazi)/i, imp: [["SOYB", "≈", "flussi commerciali: ban/dazi su origine USA ↓, su concorrenti ↑"], ["CORN", "≈", "come sopra"], ["WEAT", "≈", "come sopra"], ["SPY", "↓", "escalation commerciale → risk-off azionario"]] },
-  { re: /(black sea|ukrain|grain corridor|odesa|russia.{0,30}(wheat|grain))/i, imp: [["WEAT", "↑", "rischio offerta Mar Nero → premio al rischio sul grano"], ["CORN", "↑", "Ucraina export mais → rischio corridoio → prezzi su"]] },
-  { re: /(natural gas storage|eia.{0,30}(storage|inventory|injection)|working gas)/i, imp: [["UNG", "≈", "dato scorte EIA: build sopra attese ↓, sotto attese ↑"], ["BOIL", "≈", "stesso segno, amplificato 2x"]] },
-  { re: /(lng (export|terminal|plant)|freeport|cheniere|sabine)/i, imp: [["UNG", "↑", "più export LNG → domanda gas USA su → prezzi su"], ["BOIL", "↑", "leva 2x sul gas"]] },
-  { re: /(hurricane|tropical storm|gulf (of mexico|coast).{0,30}(gas|oil|energy))/i, imp: [["UNG", "↑", "rischio produzione/infrastrutture Gulf → gas su"], ["BOIL", "↑", "leva 2x"]] },
-  { re: /(opec|crude .{0,10}(cut|sanction)|oil sanction|energy sanction|pipeline (halt|attack|outage)|nord stream)/i, imp: [["UNG", "↑", "shock offerta energia → contagio rialzista sul gas"], ["SPY", "↓", "shock energetico → pressione su azionario"]] },
-  { re: /(fed|fomc|interest rate|inflation|cpi|payrolls|recession)/i, imp: [["SPY", "≈", "macro USA: dato hawkish ↓, dovish ↑"]] },
-  { re: /(la ni[nñ]a|el ni[nñ]o|monsoon|frost|freeze|polar vortex)/i, imp: [["CORN", "≈", "pattern climatico: valutare fase colturale della regione colpita"], ["SOYB", "≈", "come sopra"], ["UNG", "↑", "freddo estremo → domanda riscaldamento su"]] },
-  { re: /(ethanol|biofuel|renewable (fuel|diesel))/i, imp: [["CORN", "↑", "domanda etanolo → domanda mais su"], ["SOYB", "↑", "biodiesel → domanda olio di soia su"]] },
-];
-export function tagImpacts(title) {
-  const out = [];
-  const seen = new Set();
-  for (const r of TAG_RULES) {
-    if (r.re.test(title)) for (const [tk, dir, why] of r.imp) {
-      if (!seen.has(tk)) { seen.add(tk); out.push({ tk, dir, why }); }
-    }
-  }
-  return out;
-}
+export { tagImpacts };
+
 const ANALYSIS_QUERIES = [
   '"Saxo Bank" commodities weekly',
   'EIA natural gas weekly storage report analysis',
@@ -109,10 +91,10 @@ export const ImpactTags = ({ item }) => (
     {item.analysis && <span style={{ ...mono, fontSize: 9, color: T.blue, border: `1px solid ${T.blue}55`, padding: "2px 6px", borderRadius: 4 }}>ANALISI</span>}
     {(item.impacts || []).length === 0 && <span style={{ ...mono, fontSize: 9, color: T.dim, border: `1px solid ${T.line}`, padding: "2px 6px", borderRadius: 4 }}>macro generale</span>}
     {(item.impacts || []).map((im) => {
-      const c = im.dir === "↑" ? T.green : im.dir === "↓" ? T.red : T.mut;
+      const c = im.dir > 0 ? T.green : im.dir < 0 ? T.red : T.mut;
       return (
         <span key={im.tk} title={im.why} style={{ ...mono, fontSize: 9, color: c, border: `1px solid ${c}55`, padding: "2px 6px", borderRadius: 4, cursor: "help" }}>
-          {im.tk} {im.dir} · {im.why}
+          {im.tk} {ARROW[im.dir]} · {im.why}
         </span>
       );
     })}
@@ -120,25 +102,14 @@ export const ImpactTags = ({ item }) => (
 );
 
 /* ================================================================
-   2) METEO: Open-Meteo (open source) su regioni chiave commodity
+   2) WEATHER: Open-Meteo forecasts over the key commodity regions
+
+   The region table, the climate normals and the anomaly read all live in
+   src/signals.js. This block only fetches and reshapes for display, so the
+   Weather tab and fuseSignals() can never disagree about the same forecast.
 ================================================================ */
-export const REGIONS = [
-  { id: "cornbelt", name: "Corn Belt (Iowa, USA)", lat: 41.6, lon: -93.6, affects: ["CORN", "SOYB"], phase: "lug-ago: pollination mais / fioritura soia" },
-  { id: "brazil", name: "Mato Grosso (Brasile)", lat: -15.6, lon: -56.1, affects: ["SOYB", "CORN"], phase: "ott-feb: semina/sviluppo soia (ora off-season)" },
-  { id: "plains", name: "Plains (Kansas, USA)", lat: 37.7, lon: -97.3, affects: ["WEAT"], phase: "giu-lug: raccolto winter wheat" },
-  { id: "blacksea", name: "Odessa (Ucraina)", lat: 46.5, lon: 30.7, affects: ["WEAT", "CORN"], phase: "lug: raccolto grano Mar Nero" },
-  { id: "gas-south", name: "Dallas (domanda cooling)", lat: 32.8, lon: -96.8, affects: ["UNG", "BOIL"], phase: "estate: CDD → domanda elettrica per AC" },
-  { id: "gas-ne", name: "New York (domanda cooling)", lat: 40.7, lon: -74.0, affects: ["UNG", "BOIL"], phase: "estate: CDD → domanda elettrica per AC" },
-];
-// Normali climatiche mensili approssimate (Tmax °C e pioggia mm/mese) per il calcolo delle ANOMALIE
-const NORMALS = {
-  cornbelt: { t: [0, 3, 10, 17, 23, 28, 30, 29, 25, 18, 9, 2], p: [26, 29, 55, 92, 118, 128, 114, 108, 79, 66, 48, 34] },
-  brazil:   { t: [31, 31, 31, 31, 30, 30, 31, 33, 34, 33, 31, 31], p: [211, 198, 185, 102, 34, 8, 6, 12, 44, 111, 166, 200] },
-  plains:   { t: [6, 9, 15, 21, 25, 31, 34, 33, 28, 21, 13, 7], p: [22, 26, 55, 71, 105, 111, 84, 76, 66, 55, 34, 27] },
-  blacksea: { t: [3, 5, 9, 16, 21, 26, 29, 29, 23, 17, 10, 5], p: [38, 33, 31, 30, 34, 42, 32, 32, 34, 30, 39, 42] },
-  "gas-south": { t: [14, 17, 21, 25, 29, 33, 36, 36, 32, 26, 20, 15], p: [58, 63, 82, 84, 118, 95, 55, 51, 66, 90, 65, 62] },
-  "gas-ne": { t: [4, 6, 11, 17, 22, 27, 30, 29, 25, 18, 12, 7], p: [82, 74, 96, 96, 96, 92, 97, 95, 90, 88, 84, 92] },
-};
+export { REGIONS };
+
 export async function fetchWeather() {
   const out = {};
   await Promise.all(REGIONS.map(async (rg) => {
@@ -150,77 +121,26 @@ export async function fetchWeather() {
   }));
   return out;
 }
+
+/** One display row per region: anomaly versus that region's own monthly norm. */
 export function weatherSignals(data) {
-  // Segnali ad ANOMALIA vs norma climatica del mese (non soglie fisse) + trend prima/seconda settimana
-  const sig = [];
-  const avg = (a) => a.reduce((x, y) => x + y, 0) / a.length;
-  const m0 = new Date().getMonth();
-  for (const rg of REGIONS) {
-    const d = data[rg.id]; const nz = NORMALS[rg.id];
-    if (!d || !nz) continue;
-    const tAvg = avg(d.tmax);
-    const dT = tAvg - nz.t[m0];
-    const rain = d.prec.reduce((a, b) => a + b, 0);
-    const dP = rain - nz.p[m0] / 2; // 14 giorni ≈ mezzo mese
-    const trend = avg(d.tmax.slice(7)) - avg(d.tmax.slice(0, 7));
-    const trendTxt = trend > 1.5 ? "in intensificazione" : trend < -1.5 ? "in attenuazione" : "stabile";
-    const isAgri = ["cornbelt", "brazil", "plains", "blacksea"].includes(rg.id);
-    if (isAgri) {
-      if (dT >= 3 && dP < 0) sig.push({ region: rg.name, tks: rg.affects, dir: "↑", strength: dT >= 5 ? "forte" : "media", why: `Anomalia +${dT.toFixed(1)}°C sopra la norma di ${["Gen","Feb","Mar","Apr","Mag","Giu","Lug","Ago","Set","Ott","Nov","Dic"][m0]} con pioggia sotto norma (${dP.toFixed(0)}mm): stress colturale ${trendTxt} → rialzista` });
-      else if (dT >= 3) sig.push({ region: rg.name, tks: rg.affects, dir: "↑", strength: "debole", why: `Caldo anomalo (+${dT.toFixed(1)}°C) ma piogge nella norma: pressione moderata, caldo ${trendTxt}` });
-      else if (dP > nz.p[m0] * 0.4 && dT <= 1) sig.push({ region: rg.name, tks: rg.affects, dir: "↓", strength: "media", why: `Piogge abbondanti (+${dP.toFixed(0)}mm vs norma) e temperature regolari: meteo ideale → ribassista` });
-      else if (dT <= -3) sig.push({ region: rg.name, tks: rg.affects, dir: "≈", strength: "debole", why: `Fresco anomalo (${dT.toFixed(1)}°C): rallenta lo sviluppo ma non danneggia — neutrale, monitorare` });
-      else sig.push({ region: rg.name, tks: rg.affects, dir: "≈", strength: "debole", why: `Nella norma stagionale (ΔT ${dT >= 0 ? "+" : ""}${dT.toFixed(1)}°C, Δpioggia ${dP >= 0 ? "+" : ""}${dP.toFixed(0)}mm): il meteo non è un fattore questa settimana` });
-    } else {
-      if (dT >= 2.5) sig.push({ region: rg.name, tks: rg.affects, dir: "↑", strength: dT >= 4 ? "forte" : "media", why: `+${dT.toFixed(1)}°C sopra norma → domanda di raffrescamento (CDD) anomala, ${trendTxt} → rialzista gas` });
-      else if (dT <= -2.5) sig.push({ region: rg.name, tks: rg.affects, dir: "↓", strength: "media", why: `${dT.toFixed(1)}°C sotto norma → cooling demand debole → ribassista gas` });
-      else sig.push({ region: rg.name, tks: rg.affects, dir: "≈", strength: "debole", why: `Temperature in linea con la norma (Δ${dT >= 0 ? "+" : ""}${dT.toFixed(1)}°C): domanda gas regolare` });
-    }
-  }
-  return sig;
+  return regionSignals(data);
 }
-function weatherSignalsOld(data) {
-  const sig = [];
-  const avg = (a) => a.reduce((x, y) => x + y, 0) / a.length;
-  const g = (id) => data[id];
-  if (g("cornbelt")) {
-    const d = g("cornbelt");
-    const hot = d.tmax.filter((t) => t >= 34).length;
-    const rain = d.prec.reduce((a, b) => a + b, 0);
-    if (hot >= 3) sig.push({ region: "Corn Belt", tks: ["CORN", "SOYB"], dir: "↑", why: `${hot} giorni ≥34°C nei prossimi 14g durante pollination → rischio rese → rialzista` });
-    if (rain < 12) sig.push({ region: "Corn Belt", tks: ["CORN", "SOYB"], dir: "↑", why: `solo ${rain.toFixed(0)}mm di pioggia in 14g → stress idrico → rialzista` });
-    if (rain > 60 && hot === 0) sig.push({ region: "Corn Belt", tks: ["CORN", "SOYB"], dir: "↓", why: `${rain.toFixed(0)}mm e temperature miti → meteo ideale → ribassista` });
-  }
-  if (g("plains")) {
-    const d = g("plains");
-    const rain = d.prec.reduce((a, b) => a + b, 0);
-    if (rain > 50) sig.push({ region: "Plains", tks: ["WEAT"], dir: "↑", why: `${rain.toFixed(0)}mm durante il raccolto → ritardi/qualità a rischio → rialzista` });
-    if (rain < 8) sig.push({ region: "Plains", tks: ["WEAT"], dir: "≈", why: "raccolto asciutto e regolare → neutrale/offerta puntuale" });
-  }
-  if (g("blacksea")) {
-    const d = g("blacksea");
-    if (d.tmax.filter((t) => t >= 35).length >= 4) sig.push({ region: "Mar Nero", tks: ["WEAT"], dir: "↑", why: "ondata di caldo su area export → rese in calo → rialzista" });
-  }
-  if (g("gas-south") && g("gas-ne")) {
-    const cdd = (avg(g("gas-south").tmax) + avg(g("gas-ne").tmax)) / 2;
-    if (cdd >= 33) sig.push({ region: "USA (Sud+NE)", tks: ["UNG", "BOIL"], dir: "↑", why: `Tmax media 14g ${cdd.toFixed(0)}°C → CDD elevati → domanda power burn su → rialzista gas` });
-    else if (cdd <= 28) sig.push({ region: "USA (Sud+NE)", tks: ["UNG", "BOIL"], dir: "↓", why: `Tmax media 14g ${cdd.toFixed(0)}°C → cooling demand debole → ribassista gas` });
-    else sig.push({ region: "USA (Sud+NE)", tks: ["UNG", "BOIL"], dir: "≈", why: `Tmax media ${cdd.toFixed(0)}°C → domanda nella norma → neutrale` });
-  }
-  if (g("brazil")) sig.push({ region: "Brasile", tks: ["SOYB"], dir: "≈", why: "off-season colturale: il meteo brasiliano pesa da ottobre (semina)" });
-  return sig;
-}
-export function MeteoTab({ news = [] }) {
-  const [data, setData] = useState(null);
+
+export function MeteoTab({ news = [], data: given = null }) {
+  // Le previsioni le carica già l'app all'avvio (servono a fuseSignals): se
+  // arrivano da lì non le riscarichiamo, il tab le riusa.
+  const [fetched, setFetched] = useState(null);
   const [err, setErr] = useState(null);
-  const load = async () => { try { setErr(null); setData(await fetchWeather()); } catch (e) { setErr(String(e.message || e)); } };
-  useEffect(() => { load(); }, []);
+  const data = given || fetched;
+  const load = async () => { try { setErr(null); setFetched(await fetchWeather()); } catch (e) { setErr(String(e.message || e)); } };
+  useEffect(() => { if (!given) load(); }, [given]);
   const sig = data ? weatherSignals(data) : [];
   // correlazione meteo ↔ news: per ticker, direzione prevalente delle news taggate
   const newsDir = {};
   for (const n of news) for (const im of n.impacts || []) {
     if (!newsDir[im.tk]) newsDir[im.tk] = { up: 0, dn: 0 };
-    if (im.dir === "↑") newsDir[im.tk].up++; else if (im.dir === "↓") newsDir[im.tk].dn++;
+    if (im.dir > 0) newsDir[im.tk].up++; else if (im.dir < 0) newsDir[im.tk].dn++;
   }
   const combined = sig.filter((s2) => s2.dir !== "≈").map((s2) => {
     const agree = s2.tks.some((tk) => {
@@ -305,6 +225,126 @@ export function MeteoTab({ news = [] }) {
             <span style={{ ...mono, fontSize: 10, color: T.dim }}>· più la tacca è piena/opaca, più pioggia · fonte open-meteo.com</span>
           </div>
         </Panel>
+      )}
+    </div>
+  );
+}
+
+/* ================================================================
+   2b) WHY THIS TRADE — the 4-factor read, in plain English
+
+   Progressive disclosure (PRD §6): the verdict and the narrative are always
+   visible; the four components sit behind a tap. Mobile has no hover, so every
+   explanation opens on tap, closes on a tap outside, and on a narrow screen it
+   renders below the bars instead of floating over them.
+================================================================ */
+
+const AGREEMENT_STYLE = {
+  CONFLUENT: { c: T.green, label: "CONFLUENT", meaning: "three or more factors point the same way" },
+  MIXED: { c: T.blue, label: "MIXED", meaning: "some factors push, the rest stay quiet" },
+  CONFLICT: { c: T.red, label: "CONFLICT", meaning: "the factors contradict each other" },
+};
+const FACTOR_LABEL = { seasonal: "Seasonality", technical: "Price trend", weather: "Weather", news: "News flow" };
+const FACTOR_ORDER = ["seasonal", "technical", "weather", "news"];
+
+/** True while the viewport is too narrow to float an explanation over content. */
+export function useNarrow(px = 720) {
+  const [narrow, setNarrow] = useState(() => (typeof window !== "undefined" ? window.innerWidth <= px : false));
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const mq = window.matchMedia(`(max-width: ${px}px)`);
+    const on = () => setNarrow(mq.matches);
+    on();
+    mq.addEventListener ? mq.addEventListener("change", on) : mq.addListener(on);
+    return () => (mq.removeEventListener ? mq.removeEventListener("change", on) : mq.removeListener(on));
+  }, [px]);
+  return narrow;
+}
+
+export function WhyThisTrade({ fused, title = "WHY THIS TRADE", note }) {
+  const [detail, setDetail] = useState(false);
+  const [open, setOpen] = useState(null); // key of the factor whose explanation is open
+  const narrow = useNarrow();
+  const ref = React.useRef(null);
+
+  // Tap outside closes the open explanation. Mobile has no hover, so this is
+  // the only way back out of it.
+  useEffect(() => {
+    if (!open) return;
+    const away = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(null); };
+    const esc = (e) => { if (e.key === "Escape") setOpen(null); };
+    document.addEventListener("pointerdown", away);
+    document.addEventListener("keydown", esc);
+    return () => { document.removeEventListener("pointerdown", away); document.removeEventListener("keydown", esc); };
+  }, [open]);
+
+  if (!fused) return null;
+  const st = AGREEMENT_STYLE[fused.agreement] || AGREEMENT_STYLE.MIXED;
+  const scoreCol = fused.score > 0 ? T.green : fused.score < 0 ? T.red : T.mut;
+
+  return (
+    <div ref={ref} style={{ marginTop: 10, padding: "11px 13px", background: `${st.c}0d`, border: `1px solid ${st.c}55`, borderRadius: 8 }}>
+      {/* ---- always visible: verdict, the two numbers, the narrative ---- */}
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <Lbl>{title}</Lbl>
+        <span style={{ ...mono, fontSize: 10, fontWeight: 800, color: "#14181d", background: st.c, borderRadius: 4, padding: "2px 7px", letterSpacing: "0.08em" }}>
+          {st.label}
+        </span>
+        <span style={{ ...mono, fontSize: 11, color: T.mut }}>{st.meaning}</span>
+        <span style={{ marginLeft: "auto", display: "flex", gap: 12 }}>
+          <Stat k="SIGNAL SCORE" v={`${fused.score > 0 ? "+" : ""}${fused.score} / 100`} c={scoreCol} />
+          <Stat k="CONFIDENCE" v={`${fused.confidence} / 100`} c={fused.confidence >= 70 ? T.green : fused.confidence < 40 ? T.red : T.amber} />
+        </span>
+      </div>
+
+      <div style={{ fontSize: 12.5, color: T.body, marginTop: 7, lineHeight: 1.5 }}>{fused.narrative}</div>
+      {note && <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 5 }}>{note}</div>}
+
+      {/* ---- behind a tap: the four components as direction + strength ---- */}
+      <button onClick={() => { setDetail((d) => !d); setOpen(null); }}
+        style={{ ...mono, fontSize: 10.5, marginTop: 8, background: "transparent", color: T.blue, border: `1px solid ${T.blue}55`, borderRadius: 5, padding: "4px 9px", cursor: "pointer" }}>
+        {detail ? "hide detail ▲" : "show detail ▼"}
+      </button>
+
+      {detail && (
+        <div style={{ marginTop: 9, display: "grid", gap: 6 }}>
+          {FACTOR_ORDER.map((k) => {
+            const cp = fused.components[k];
+            const col = cp.dir > 0 ? T.green : cp.dir < 0 ? T.red : T.mut;
+            const isOpen = open === k;
+            const explanation = (
+              <div style={{
+                ...(narrow
+                  ? { position: "static", marginTop: 6 }
+                  : { position: "absolute", top: "100%", left: 0, right: 0, marginTop: 4, zIndex: 20, boxShadow: "0 6px 18px rgba(0,0,0,0.45)" }),
+                background: T.panel, border: `1px solid ${col}66`, borderRadius: 6, padding: "8px 10px",
+              }}>
+                <div style={{ fontSize: 12, color: T.body, lineHeight: 1.5 }}>{cp.why}</div>
+                <div style={{ ...mono, fontSize: 9.5, color: T.dim, marginTop: 4 }}>tap anywhere outside to close</div>
+              </div>
+            );
+            return (
+              <div key={k} style={{ position: "relative" }}>
+                <button onClick={() => setOpen(isOpen ? null : k)}
+                  style={{ width: "100%", textAlign: "left", background: isOpen ? `${col}14` : T.bg, border: `1px solid ${isOpen ? col : T.line}`, borderRadius: 6, padding: "7px 9px", cursor: "pointer" }}>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    <span style={{ ...mono, fontSize: 13, fontWeight: 800, color: col, width: 14 }}>{ARROW[cp.dir]}</span>
+                    <span style={{ ...mono, fontSize: 11, color: T.ink, minWidth: 96 }}>{FACTOR_LABEL[k]}</span>
+                    <span style={{ flex: 1, minWidth: 90, height: 7, background: T.line, borderRadius: 4, overflow: "hidden" }}>
+                      <span style={{ display: "block", width: `${cp.strength}%`, height: "100%", background: col, borderRadius: 4 }} />
+                    </span>
+                    <span style={{ ...mono, fontSize: 10.5, color: T.dim, width: 52, textAlign: "right" }}>{cp.strength}/100</span>
+                    <span style={{ ...mono, fontSize: 10, color: T.blue }}>{isOpen ? "▲" : "why?"}</span>
+                  </div>
+                </button>
+                {isOpen && explanation}
+              </div>
+            );
+          })}
+          <div style={{ ...mono, fontSize: 9.5, color: T.dim }}>
+            Direction is the arrow, strength is the bar (0-100). The score above is these four weighted together: seasonality 30%, price trend 25%, weather 25%, news 20%.
+          </div>
+        </div>
       )}
     </div>
   );
@@ -508,8 +548,10 @@ export function buildContext(ctx) {
     spot,
     strategia_corrente: A ? { legs, expKey, entry: +(A.entry * 100).toFixed(0), maxProfit: +A.maxProfit.toFixed(0), maxLoss: +A.maxLoss.toFixed(0), breakevens: A.breakevens, greeks: { delta: +A.greeks.delta.toFixed(2), theta: +A.greeks.theta.toFixed(0), vega: +A.greeks.vega.toFixed(0) } } : null,
     posizioni_paper: store.positions.map((p) => ({ ticker: p.ticker, nome: p.name, legs: p.legs, exp: p.expKey, entry: +(p.entryNet * 100).toFixed(0), maxProfit: +p.maxProfit.toFixed(0), maxLoss: +p.maxLoss.toFixed(0), aperta: p.openedAt.slice(0, 10), thesis: p.thesis || null, timeline: (p.timeline || []).slice(-5).map((e) => e.text) })),
-    scanner: (scan || []).map((s) => ({ tk: s.tk, stagionale_mese_pct: +s.seasonalScore.toFixed(1), sentiment: s.sugg, fonte: s.real ? "storico reale" : "stima" })),
-    news_taggate: (news || []).slice(0, 10).map((n) => ({ titolo: n.title, impatti: n.impacts, geo: !!n.geo })),
+    scanner: (scan || []).map((s) => ({ tk: s.tk, stagionale_mese_pct: +s.seasonalScore.toFixed(1), sentiment: s.sugg, fonte: s.real ? "storico reale" : "stima",
+      segnale_4_fattori: s.fused ? { score: s.fused.score, confidence: s.fused.confidence, agreement: s.fused.agreement, narrativa: s.fused.narrative } : null })),
+    news_taggate: (news || []).slice(0, 10).map((n) => ({ titolo: n.title, geo: !!n.geo,
+      impatti: (n.impacts || []).map((im) => ({ tk: im.tk, dir: ARROW[im.dir], why: im.why })) })),
     fonte_stagionalita: seasonalSrc,
   });
 }
@@ -581,7 +623,7 @@ export function buildReportMd(ctx, weatherSig, aiText) {
   }
   L.push(`\n## 3 · News rilevanti (tag causa→effetto, incl. geopolitica/governi)`);
   (news || []).filter((n) => (n.impacts || []).length).slice(0, 8).forEach((n) => {
-    L.push(`- ${n.title} ${n.geo ? "🏛" : ""}\n  ${(n.impacts || []).map((im) => `**${im.tk} ${im.dir}** (${im.why})`).join(" · ")}`);
+    L.push(`- ${n.title} ${n.geo ? "🏛" : ""}\n  ${(n.impacts || []).map((im) => `**${im.tk} ${ARROW[im.dir]}** (${im.why})`).join(" · ")}`);
   });
   L.push(`\n## 4 · Clima → commodity (14 giorni)`);
   (weatherSig || []).forEach((s) => L.push(`- **${s.tks.join("+")} ${s.dir}** — ${s.region}: ${s.why}`));
@@ -1113,20 +1155,13 @@ export function OptionPanel({ occ, label, quote, onClose }) {
    11) VISTA UNIFICATA — Prezzo storico × Cono probabilità × Zone strategia
    Un solo asse prezzi: candele, proiezione MC, zone P&L, strike, breakeven.
 ================================================================ */
-// ---- Motore analisi tecnica minimale (SMA, RSI, struttura) ----
+// ---- Trend read: the SMA/RSI math is taRead() in src/signals.js, the technical
+// factor of fuseSignals(). Here we only add the sentence the Builder prints. ----
 export function taSignals(bars) {
-  if (!bars || bars.length < 60) return null;
-  const cl = bars.map((b) => b.close);
-  const sma = (n, i = cl.length - 1) => cl.slice(i - n + 1, i + 1).reduce((a, b) => a + b, 0) / n;
-  const s20 = sma(20), s50 = sma(50), s20p = sma(20, cl.length - 6), s50p = sma(50, cl.length - 6);
-  const px = cl[cl.length - 1];
-  let g = 0, l = 0;
-  for (let i = cl.length - 14; i < cl.length; i++) { const d = cl[i] - cl[i - 1]; if (d > 0) g += d; else l -= d; }
-  const rsi = l === 0 ? 100 : 100 - 100 / (1 + g / l);
-  const trend = s20 > s50 && s20 > s20p ? 1 : s20 < s50 && s20 < s20p ? -1 : 0;
-  const cross = s20 > s50 && s20p <= s50p ? "golden" : s20 < s50 && s20p >= s50p ? "death" : null;
-  return { trend, rsi, s20, s50, cross, px,
-    trendTxt: trend > 0 ? "rialzista (SMA20>SMA50, in salita)" : trend < 0 ? "ribassista (SMA20<SMA50, in discesa)" : "laterale (medie piatte/incrociate)" };
+  const ta = taRead(bars);
+  if (!ta) return null;
+  return { ...ta,
+    trendTxt: ta.trend > 0 ? "rialzista (SMA20>SMA50, in salita)" : ta.trend < 0 ? "ribassista (SMA20<SMA50, in discesa)" : "laterale (medie piatte/incrociate)" };
 }
 export function confluence(seasonalM, ta) {
   if (!ta) return null;
