@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { RefreshCw, Send, Trash2, Download, Sparkles, CloudSun, FileText, XCircle } from "lucide-react";
 import { T } from "./theme.js";
+import { RULES, ruleBadge, takeProfitLabel, scaleOutLabel, stopLossLabel, exitDTELabel, perTradeCapLabel, copilotRulesBlock, money, pctText } from "./rules.js";
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, LineStyle } from "lightweight-charts";
 import { erf, netBS } from "./engine.js";
 import { ARROW, REGIONS, regionSignals, tagImpacts, taRead } from "./signals.js";
@@ -353,6 +354,16 @@ export function WhyThisTrade({ fused, title = "WHY THIS TRADE", note }) {
 /* ================================================================
    3) ALPACA PRO: ordini completi + posizioni/ordini live
 ================================================================ */
+// Nessun componente invia ordini senza cancello: se la prop `gate` manca, la
+// risposta e' un blocco, non un permesso (PRD §8, regola 4 di CLAUDE.md).
+export function runGate(gate, proposal) {
+  if (typeof gate !== "function") {
+    return { pass: false, warnings: [], violations: [{ code: "GATE_MISSING",
+      message: "The risk gate is not wired into this screen, so no order can leave it. This is a bug, and it fails closed on purpose." }] };
+  }
+  return gate(proposal);
+}
+
 export async function alpacaReq(path, method = "GET", body = null) {
   const r = await fetch(`/api/alpaca?path=${encodeURIComponent(path)}`, {
     method,
@@ -363,15 +374,20 @@ export async function alpacaReq(path, method = "GET", body = null) {
   if (!r.ok) throw new Error(`Alpaca ${r.status}: ${text.slice(0, 200)}`);
   return text ? JSON.parse(text) : {};
 }
-export function OrderTicket({ creds, legs, expKey, ticker, buildOcc, quoteFn, estNet, setMsg, onSent }) {
+export function OrderTicket({ creds, legs, expKey, ticker, buildOcc, quoteFn, estNet, setMsg, onSent, gate, dte, maxLoss, maxProfit }) {
   const [cfg, setCfg] = useState({ qty: 1, type: "limit", tif: "day", limit: "" });
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
   useEffect(() => { if (estNet != null && cfg.limit === "") setCfg((c) => ({ ...c, limit: Math.abs(estNet).toFixed(2) })); }, [estNet]); // eslint-disable-line
+  // Il cancello gira PRIMA di costruire l'ordine: quello che si vede nel
+  // pannello e' esattamente quello che decide se l'ordine parte.
+  const preview = runGate(gate, { ticker, intent: "open", legs, dte, contracts: cfg.qty, maxLoss, maxProfit });
   const send = async () => {
     if (!confirm) { setConfirm(true); return; }
     setConfirm(false); setBusy(true);
     try {
+      const g = runGate(gate, { ticker, intent: "open", legs, dte, contracts: cfg.qty, maxLoss, maxProfit });
+      if (!g.pass) { setMsg(`Risk gate: order not sent. ${g.violations.map((v) => v.message).join(" ")}`); setBusy(false); return; }
       const mlegs = legs.map((l) => {
         const q = quoteFn ? quoteFn(l) : null;
         const occ = q?.occ || (expKey ? buildOcc(ticker, expKey, l.type, l.strike) : null);
@@ -407,16 +423,26 @@ export function OrderTicket({ creds, legs, expKey, ticker, buildOcc, quoteFn, es
         )}
         <div><div style={{ ...mono, fontSize: 9.5, color: T.dim }}>TIF</div>
           <Sel value={cfg.tif} onChange={(e) => setCfg({ ...cfg, tif: e.target.value })}><option value="day">Day</option><option value="gtc">GTC</option></Sel></div>
-        <Btn color={confirm ? T.red : T.violet} onClick={send} disabled={busy}>
-          <Send size={12} /> {busy ? "Invio…" : confirm ? "CONFERMA INVIO?" : "Invia ordine"}
+        <Btn color={confirm ? T.red : T.violet} onClick={send} disabled={busy || !preview.pass}>
+          <Send size={12} /> {busy ? "Invio…" : !preview.pass ? "BLOCCATO DAL RISK GATE" : confirm ? "CONFERMA INVIO?" : "Invia ordine"}
         </Btn>
         {confirm && <Btn small ghost onClick={() => setConfirm(false)}>Annulla</Btn>}
       </div>
-      <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6 }}>Solo paper. Limit sul prezzo NETTO della combinazione (debit positivo). Doppia conferma obbligatoria.</div>
+      {!preview.pass && (
+        <div style={{ display: "grid", gap: 3, marginTop: 7 }}>
+          {preview.violations.map((v) => (
+            <div key={v.code} style={{ ...mono, fontSize: 10.5, color: T.red }}>✗ {v.message}</div>
+          ))}
+        </div>
+      )}
+      {preview.warnings.map((w) => (
+        <div key={w.code} style={{ ...mono, fontSize: 10.5, color: T.amber, marginTop: 5 }}>⚠ {w.message}</div>
+      ))}
+      <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6 }}>Solo paper. Limit sul prezzo NETTO della combinazione (debit positivo). Doppia conferma obbligatoria, e ogni ordine passa da src/riskGate.js.</div>
     </div>
   );
 }
-export function AlpacaDesk({ creds, setMsg }) {
+export function AlpacaDesk({ creds, setMsg, gate }) {
   const [pos, setPos] = useState(null);
   const [ords, setOrds] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -437,6 +463,14 @@ export function AlpacaDesk({ creds, setMsg }) {
   // 2) invia UN ordine complesso di chiusura (mleg) — mai gambe separate
   const closeGroup = async (grp) => {
     try {
+      // Anche una chiusura e' un ordine: passa dal cancello (intent "close",
+      // quindi le regole d'ingresso non si applicano, quella paper si).
+      const g = runGate(gate, {
+        intent: "close", ticker: String(grp.key || "").split(" ")[0],
+        legs: grp.items.map((x) => ({ side: +x.qty > 0 ? 1 : -1, qty: Math.abs(+x.qty), type: /C\d{8}$/.test(x.symbol) ? "call" : "put" })),
+        maxLoss: grp.items.reduce((a, x) => a + Math.abs(+x.cost_basis || 0), 0), contracts: 1,
+      });
+      if (!g.pass) { setMsg(`Risk gate: chiusura non inviata. ${g.violations.map((v) => v.message).join(" ")}`); return; }
       const syms = new Set(grp.items.map((x) => x.symbol));
       for (const o of ords || []) {
         const oSyms = o.order_class === "mleg" ? (o.legs || []).map((l) => l.symbol) : [o.symbol];
@@ -508,22 +542,26 @@ export function AlpacaDesk({ creds, setMsg }) {
 /* ================================================================
    4) AI COPILOT: chat con skill trader precaricate
 ================================================================ */
-const SYSTEM_PROMPT = `Sei il copilot di un trader di opzioni su ETF commodity (SOYB, CORN, UNG, BOIL, WEAT, SPY) in PAPER TRADING.
-Regole del trader, da applicare SEMPRE nelle analisi: solo strategie a rischio definito; take profit al 50% del max profit; stop loss al 50% della max loss; uscita a 7 giorni dalla scadenza; max 5% del capitale per trade; esposizione opzioni totale ≤25%; la stagionalità è un segnale primario; posizioni contrarie alla stagionalità richiedono scrutinio extra.
-Stile: conciso, numeri espliciti (Greeks, P&L, probabilità), raccomandazioni con freccia →, evidenzia sempre rischi e cosa invaliderebbe la tesi. Non garantire risultati: è analisi educativa su conto paper, non consulenza finanziaria.
+// Un solo posto per le regole, anche nei prompt: il testo qui sotto e' generato
+// da src/rules.js, quindi il modello non puo' citare un numero che il codice
+// non applica piu' (era il caso di "regola del 5%" e "exit 7 DTE").
+const SYSTEM_PROMPT = `You are the copilot of an options trader working on commodity ETFs (SOYB, CORN, UNG, BOIL, WEAT, SPY) in PAPER TRADING.
+${copilotRulesBlock()}
+These rules are enforced in code by src/riskGate.js before any order is sent. Never propose a trade that breaks them, and never present a rule number that differs from the ones above.
+Style: concise, explicit numbers (Greeks, P&L, probabilities), recommendations marked with an arrow →, always state the risk and what would invalidate the thesis. Never guarantee an outcome: this is educational analysis on a paper account, not financial advice.
 
-METODO DI LAVORO (workflow del trader, seguili in ordine): 1 Discovery (scanner stagionale + trend) → 2 Costruzione (chain reale, strike, Greeks, R/R, breakeven) → 3 Esecuzione (solo dopo conferma esplicita, verifica buying power) → 4 Monitoraggio (P&L vs regole, % del max profit) → 5 Reporting.
+METHOD (follow in order): 1 Discovery (seasonal scanner + trend) → 2 Construction (real chain, strikes, Greeks, R/R, breakevens) → 3 Execution (only after explicit human confirmation, check buying power) → 4 Monitoring (P&L against the rules, % of max profit) → 5 Reporting.
 
-ALBERI DECISIONALI: (A) segnale stagionale forte rialzista + trend su → bull call spread (capitale basso) o long call (capitale alto), moderata convinzione → call calendar; (B) mercato neutrale/range e bassa volatilità → iron condor (mai strangle nudi: solo rischio definito); (C) evento in arrivo con IV bassa → long straddle/strangle ATM; IV già alta → vendi premio con rischio definito o aspetta; bias direzionale → vertical spread.
+DECISION TREES: (A) strong bullish seasonal signal + uptrend → bull call spread (small capital) or long call (larger capital), moderate conviction → call calendar; (B) neutral/range market with low volatility → iron condor (never naked strangles: defined risk only); (C) event ahead with low IV → long ATM straddle/strangle; IV already high → sell premium with defined risk, or wait; directional bias → vertical spread.
 
-GESTIONE: scaling in/out → parti con 1 contratto, aggiungi se profittevole, chiudi metà al 50% del max profit e tutto al 75%; rolling vicino a scadenza con calendar; se il sottostante va contro → rivaluta la tesi: se invalidata chiudi, non mediare.
+MANAGEMENT: scale in and out → start with 1 contract, add if it works, close half at ${pctText(RULES.takeProfitPct)} of max profit and the rest at ${pctText(RULES.scaleOutPct)}; roll near expiration with a calendar; if the underlying moves against you → re-examine the thesis: if it is invalidated, close, do not average down.
 
-FORMATO OUTPUT: sezioni chiare (LEGS / P&L PROFILE / GREEKS / NEXT STEPS), sempre risk/reward, sempre next steps, prima di ogni esecuzione chiedi conferma.`;
+OUTPUT FORMAT: clear sections (LEGS / P&L PROFILE / GREEKS / NEXT STEPS), always risk/reward, always next steps, and ask for confirmation before any execution.`;
 export const SKILLS = [
-  { id: "pretrade", label: "✓ Analisi pre-trade", prompt: "Esegui l'analisi pre-trade della strategia corrente: valuta struttura, Greeks, R/R, breakeven vs supporti/resistenze, allineamento stagionale e news. Concludi con checklist GO/NO-GO e dimensione posizione secondo la regola del 5%." },
-  { id: "positions", label: "♻ Review posizioni", prompt: "Fai la review delle posizioni aperte rispetto alle regole (TP 50%, SL 50%, exit 7 DTE): per ciascuna dai → HOLD / CHIUDI / ROLLA con motivazione e livelli da monitorare." },
-  { id: "news", label: "📰 Impatto news", prompt: "Analizza le news taggate nel contesto: quali impattano le mie posizioni e i sottostanti in radar? Distingui rumore da segnale, con causa→effetto e orizzonte temporale." },
-  { id: "radar", label: "📡 Radar opportunità", prompt: "Dallo scanner stagionale e dai segnali meteo, proponi le 2 migliori opportunità operative di questa settimana con struttura suggerita (strike relativi, DTE ~45), tesi, rischio e trigger d'ingresso." },
+  { id: "pretrade", label: "✓ Pre-trade analysis", prompt: `Run the pre-trade analysis of the current strategy: structure, Greeks, risk/reward, breakevens against support and resistance, seasonal alignment and news. Finish with a GO/NO-GO checklist and a position size within the per-trade limit (${perTradeCapLabel()}).` },
+  { id: "positions", label: "♻ Position review", prompt: `Review the open positions against the rules (${ruleBadge()}): for each one give → HOLD / CLOSE / ROLL with the reasoning and the levels to watch. Remember the ${stopLossLabel()} rule is a warning, never an automatic close.` },
+  { id: "news", label: "📰 News impact", prompt: "Analyse the tagged news in context: which items affect my positions and the underlyings on the radar? Separate noise from signal, with cause→effect and a time horizon." },
+  { id: "radar", label: "📡 Opportunity radar", prompt: `From the seasonal scanner and the weather signals, propose the 2 best opportunities of this week with a suggested structure (relative strikes, ~${RULES.targetEntryDTE} DTE), the thesis, the risk and the entry trigger. Nothing below ${RULES.minEntryDTE} DTE at entry: the risk gate refuses it.` },
 ];
 export async function askAI(_key, messages, contextStr) {
   const r = await fetch("/api/ai", {
@@ -610,11 +648,11 @@ export function buildReportMd(ctx, weatherSig, aiText) {
   L.push(`# Report Operativo Commodity Options — ${d}\n`);
   L.push(`## 1 · Opportunità (scanner stagionale)`);
   (scan || []).slice(0, 3).forEach((s, i) => L.push(`${i + 1}. **${s.tk}** — stagionale ${s.seasonalScore > 0 ? "+" : ""}${s.seasonalScore.toFixed(1)}%/m (${s.real ? "storico reale" : "stima"}) → bias **${s.sugg.toUpperCase()}**`));
-  L.push(`\n## 2 · Posizioni & segnali regole (TP50/SL50/7DTE)`);
+  L.push(`\n## 2 · Posizioni & segnali regole (${ruleBadge()})`);
   if (!store.positions.length) L.push("Nessuna posizione paper aperta.");
   store.positions.forEach((p) => {
     const dte = Math.max(0, Math.round((new Date(p.expiry) - Date.now()) / 86400000));
-    L.push(`- **${p.ticker} · ${p.name}** — exp ${p.expKey || "n/d"} (${dte} DTE)${dte <= 7 ? " ⚠ **≤7 DTE: valuta chiusura/roll**" : ""} · entry ${fmt$(Math.abs(p.entryNet) * 100)} · maxP ${fmt$(p.maxProfit)} / maxL ${fmt$(p.maxLoss)}`);
+    L.push(`- **${p.ticker} · ${p.name}** — exp ${p.expKey || "n/d"} (${dte} DTE)${dte <= RULES.exitDTE ? ` ⚠ **≤${RULES.exitDTE} DTE: valuta chiusura/roll**` : ""} · entry ${fmt$(Math.abs(p.entryNet) * 100)} · maxP ${fmt$(p.maxProfit)} / maxL ${fmt$(p.maxLoss)}`);
   });
   if (store.positions.length) {
     const totRisk = store.positions.reduce((a, p) => a + Math.abs(p.maxLoss), 0);
@@ -804,17 +842,17 @@ export function computeTIS(pos, cur) {
   }
   comp.push({ k: "Volatilità implicita", pts: ivPts, max: 20, note: `IV ${th.iv != null ? (th.iv * 100).toFixed(0) : "?"}% → ${cur.ivNow != null ? (cur.ivNow * 100).toFixed(0) : "?"}% (vega ${cur.vegaSign > 0 ? "+" : "−"})` });
   // 4) Tempo (20)
-  const dtePts = cur.dteLeft > 14 ? 20 : cur.dteLeft > 7 ? 10 : 0;
-  comp.push({ k: "Margine temporale", pts: dtePts, max: 20, note: `${cur.dteLeft} DTE (regola exit ≤7)` });
+  const dtePts = cur.dteLeft > RULES.exitDTE * 2 ? 20 : cur.dteLeft > RULES.exitDTE ? 10 : 0;
+  comp.push({ k: "Margine temporale", pts: dtePts, max: 20, note: `${cur.dteLeft} DTE (regola exit ≤${RULES.exitDTE})` });
   const tis = comp.reduce((a, c) => a + c.pts, 0);
   return { tis, comp };
 }
 
-// Exit Path Simulator: MC giornaliero DA OGGI, regole TP50/SL50/7DTE
+// Exit Path Simulator: MC giornaliero DA OGGI, regole da src/rules.js
 export function exitPathSim(pos, S, dteLeft, iv, sigma, nSim = 2000) {
   const { legs, entryNet, maxProfit, maxLoss } = pos;
-  const tp = 0.5 * maxProfit, sl = 0.5 * maxLoss;
-  const days = Math.max(1, dteLeft - 7);
+  const tp = RULES.takeProfitPct * maxProfit, sl = RULES.stopLossPct * maxLoss;
+  const days = Math.max(1, dteLeft - RULES.exitDTE);
   const dt = 1 / 365, sq = sigma * Math.sqrt(dt);
   let nTP = 0, nSL = 0, nTimePos = 0, nTimeNeg = 0, sumExit = 0;
   const tpDays = [];
@@ -846,7 +884,7 @@ export function exitPathSim(pos, S, dteLeft, iv, sigma, nSim = 2000) {
 // Exit Ladder: prezzo netto combo per target P&L
 export const ladderNet = (entryNet, targetPnl) => entryNet + targetPnl / 100;
 
-export function GuardianPanel({ pos, spot, dteLeft, ivNow, sigma, seasonalNow, pnlNow, popNow, vegaSign, alpaca, quoteFn, buildOcc, setMsg, logEvent }) {
+export function GuardianPanel({ pos, spot, dteLeft, ivNow, sigma, seasonalNow, pnlNow, popNow, vegaSign, alpaca, quoteFn, buildOcc, setMsg, logEvent, gate }) {
   const [sim, setSim] = useState(null);
   const [busy, setBusy] = useState(false);
   const [ladderBusy, setLadderBusy] = useState(null);
@@ -862,6 +900,11 @@ export function GuardianPanel({ pos, spot, dteLeft, ivNow, sigma, seasonalNow, p
   const placeExit = async (label, targetPnl) => {
     setLadderBusy(label);
     try {
+      // Ogni gradino della scala e' un ordine su Alpaca: passa dal cancello.
+      const g = runGate(gate, { intent: "close", ticker: pos.ticker, legs: pos.legs,
+        dte: dteLeft, contracts: 1, maxLoss: pos.maxLoss, maxProfit: pos.maxProfit, pnl: pnlNow });
+      if (!g.pass) { setMsg(`Risk gate: ${label} non inviato. ${g.violations.map((v) => v.message).join(" ")}`); setLadderBusy(null); return; }
+      for (const w of g.warnings) logEvent(pos.id, "gate-warning", w.message);
       const net = ladderNet(pos.entryNet, targetPnl);
       const mlegs = pos.legs.map((l) => {
         const q = quoteFn ? quoteFn(l) : null;
@@ -904,10 +947,10 @@ export function GuardianPanel({ pos, spot, dteLeft, ivNow, sigma, seasonalNow, p
       </div>
       {pct != null && (
         <div style={{ marginTop: 8 }}>
-          <div style={{ ...mono, fontSize: 9, color: T.dim }}>PROGRESSO VS MAX PROFIT · TP a 50% · scala-out 75%</div>
+          <div style={{ ...mono, fontSize: 9, color: T.dim }}>PROGRESSO VS MAX PROFIT · {takeProfitLabel()} · scala-out {scaleOutLabel()}</div>
           <div style={{ position: "relative", height: 10, background: T.line, borderRadius: 5, marginTop: 3 }}>
-            <div style={{ position: "absolute", left: "43.5%", width: 1, top: -2, bottom: -2, background: T.amber }} title="TP 50%" />
-            <div style={{ position: "absolute", left: "65.2%", width: 1, top: -2, bottom: -2, background: T.green }} title="75%" />
+            <div style={{ position: "absolute", left: `${(RULES.takeProfitPct * 100 + 100) / 230 * 100}%`, width: 1, top: -2, bottom: -2, background: T.amber }} title={takeProfitLabel()} />
+            <div style={{ position: "absolute", left: `${(RULES.scaleOutPct * 100 + 100) / 230 * 100}%`, width: 1, top: -2, bottom: -2, background: T.green }} title={scaleOutLabel()} />
             <div style={{ width: `${Math.max(0, (pct + 100) / 230 * 100)}%`, height: 10, borderRadius: 5, background: pnlNow >= 0 ? `${T.green}bb` : `${T.red}bb` }} />
           </div>
           <div style={{ ...mono, fontSize: 10, color: pnlNow >= 0 ? T.green : T.red, marginTop: 2 }}>{pct.toFixed(0)}% del max profit ({fmt$(pnlNow)})</div>
@@ -916,17 +959,17 @@ export function GuardianPanel({ pos, spot, dteLeft, ivNow, sigma, seasonalNow, p
       <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap", alignItems: "center" }}>
         <Btn small ghost color={T.blue} onClick={runSim} disabled={busy}>{busy ? "Simulo…" : "▶ Exit Path Simulator"}</Btn>
         {alpaca && (<>
-          <Btn small ghost color={T.green} onClick={() => placeExit("TP50", 0.5 * pos.maxProfit)} disabled={!!ladderBusy}>GTC TP50 @ ${Math.abs(ladderNet(pos.entryNet, 0.5 * pos.maxProfit)).toFixed(2)}</Btn>
-          <Btn small ghost color={T.green} onClick={() => placeExit("TP75", 0.75 * pos.maxProfit)} disabled={!!ladderBusy}>GTC TP75 @ ${Math.abs(ladderNet(pos.entryNet, 0.75 * pos.maxProfit)).toFixed(2)}</Btn>
-          <Btn small ghost color={T.red} onClick={() => placeExit("STOP", 0.5 * pos.maxLoss)} disabled={!!ladderBusy}>Stop @ ${Math.abs(ladderNet(pos.entryNet, 0.5 * pos.maxLoss)).toFixed(2)}</Btn>
+          <Btn small ghost color={T.green} onClick={() => placeExit(takeProfitLabel(), RULES.takeProfitPct * pos.maxProfit)} disabled={!!ladderBusy}>GTC {takeProfitLabel()} @ ${Math.abs(ladderNet(pos.entryNet, RULES.takeProfitPct * pos.maxProfit)).toFixed(2)}</Btn>
+          <Btn small ghost color={T.green} onClick={() => placeExit(`TP ${scaleOutLabel()}`, RULES.scaleOutPct * pos.maxProfit)} disabled={!!ladderBusy}>GTC TP {scaleOutLabel()} @ ${Math.abs(ladderNet(pos.entryNet, RULES.scaleOutPct * pos.maxProfit)).toFixed(2)}</Btn>
+          <Btn small ghost color={T.red} onClick={() => placeExit(stopLossLabel(), RULES.stopLossPct * pos.maxLoss)} disabled={!!ladderBusy}>{stopLossLabel()} @ ${Math.abs(ladderNet(pos.entryNet, RULES.stopLossPct * pos.maxLoss)).toFixed(2)}</Btn>
         </>)}
       </div>
       {sim && (
         <div style={{ display: "flex", gap: 14, marginTop: 10, flexWrap: "wrap", padding: "8px 10px", background: `${T.blue}0d`, borderRadius: 6 }}>
-          <Stat k="P(TP50 PRIMA)" v={`${(sim.pTP * 100).toFixed(0)}%`} c={T.green} />
-          <Stat k="P(STOP PRIMA)" v={`${(sim.pSL * 100).toFixed(0)}%`} c={T.red} />
-          <Stat k="P(EXIT 7DTE +)" v={`${(sim.pTimePos * 100).toFixed(0)}%`} c={T.green} />
-          <Stat k="P(EXIT 7DTE −)" v={`${(sim.pTimeNeg * 100).toFixed(0)}%`} c={T.red} />
+          <Stat k={`P(${takeProfitLabel()} PRIMA)`} v={`${(sim.pTP * 100).toFixed(0)}%`} c={T.green} />
+          <Stat k={`P(${stopLossLabel()} PRIMA)`} v={`${(sim.pSL * 100).toFixed(0)}%`} c={T.red} />
+          <Stat k={`P(EXIT ${exitDTELabel()} +)`} v={`${(sim.pTimePos * 100).toFixed(0)}%`} c={T.green} />
+          <Stat k={`P(EXIT ${exitDTELabel()} −)`} v={`${(sim.pTimeNeg * 100).toFixed(0)}%`} c={T.red} />
           <Stat k="GIORNI MEDIANI A TP" v={sim.medTPdays ?? "—"} c={T.blue} />
           <Stat k="P&L ATTESO SEGUENDO LE REGOLE" v={fmt$(sim.evExit)} c={sim.evExit >= 0 ? T.green : T.red} />
           <Stat k="CHIUDI ORA vs ATTENDI" v={pnlNow != null ? (pnlNow >= sim.evExit ? "→ CHIUDI ORA" : "→ ATTENDI") : "—"} c={T.amber} />
@@ -1167,7 +1210,7 @@ export function confluence(seasonalM, ta) {
   if (!ta) return null;
   const seaDir = seasonalM > 0.8 ? 1 : seasonalM < -0.8 ? -1 : 0;
   let verdict, c, advice;
-  if (seaDir !== 0 && ta.trend === seaDir) { verdict = "GO DIREZIONALE"; c = T.green; advice = `2 conferme: stagionalità ${seaDir > 0 ? "↑" : "↓"} + trend tecnico concorde → vertical spread ${seaDir > 0 ? "rialzista" : "ribassista"}, size piena consentita (entro il 5%).`; }
+  if (seaDir !== 0 && ta.trend === seaDir) { verdict = "GO DIREZIONALE"; c = T.green; advice = `2 conferme: stagionalità ${seaDir > 0 ? "↑" : "↓"} + trend tecnico concorde → vertical spread ${seaDir > 0 ? "rialzista" : "ribassista"}, size piena consentita (entro il limite per trade).`; }
   else if (seaDir !== 0 && ta.trend === -seaDir) { verdict = "DIVERGENZA"; c = T.amber; advice = `Stagionalità ${seaDir > 0 ? "↑" : "↓"} ma trend tecnico opposto: riduci la size o attendi che il trend giri. In alternativa struttura a intervallo.`; }
   else if (seaDir === 0 && ta.trend === 0) { verdict = "REGIME DA INTERVALLO"; c = T.blue; advice = "Né stagione né trend spingono: iron condor / butterfly sui muri OI, il tempo lavora per te."; }
   else { verdict = "SEGNALE SINGOLO"; c = T.mut; advice = seaDir !== 0 ? "Solo la stagionalità spinge (trend neutro): direzionale a size ridotta o attendi conferma tecnica." : "Solo il trend spinge (stagione neutra): segui il tecnico con size ridotta."; }
