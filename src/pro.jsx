@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { RefreshCw, Send, Trash2, Download, Sparkles, CloudSun, FileText, XCircle } from "lucide-react";
 import { T } from "./theme.js";
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, LineStyle } from "lightweight-charts";
+import { erf, netBS } from "./engine.js";
 
 /* ============ theme (condiviso) ============ */
 const mono = { fontFamily: "ui-monospace, Menlo, monospace" };
@@ -723,7 +724,6 @@ export function probProfit(curve, S, sigma, dte) {
   const Tyr = dte / 365, r = 0.045;
   const sq = sigma * Math.sqrt(Tyr);
   const mu = Math.log(S) + (r - 0.5 * sigma * sigma) * Tyr;
-  const erf = (x) => { const s = x < 0 ? -1 : 1; x = Math.abs(x); const t = 1 / (1 + 0.3275911 * x); return s * (1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x)); };
   const cdf = (x) => 0.5 * (1 + erf((Math.log(x) - mu) / (sq * Math.SQRT2)));
   let p = 0;
   for (let i = 0; i < curve.length - 1; i++) {
@@ -737,17 +737,6 @@ export function probProfit(curve, S, sigma, dte) {
 /* ================================================================
    7) POSITION GUARDIAN — TIS, Exit Path Simulator, Exit Ladder, Timeline
 ================================================================ */
-// BS compatto (self-contained)
-const _erf = (x) => { const s = x < 0 ? -1 : 1; x = Math.abs(x); const t = 1 / (1 + 0.3275911 * x); return s * (1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x)); };
-const _N = (x) => 0.5 * (1 + _erf(x / Math.SQRT2));
-function _bs(S, K, Tyr, iv, type) {
-  if (Tyr <= 0 || iv <= 0) return type === "call" ? Math.max(S - K, 0) : Math.max(K - S, 0);
-  const d1 = (Math.log(S / K) + (0.045 + 0.5 * iv * iv) * Tyr) / (iv * Math.sqrt(Tyr));
-  const d2 = d1 - iv * Math.sqrt(Tyr);
-  return type === "call" ? S * _N(d1) - K * Math.exp(-0.045 * Tyr) * _N(d2) : K * Math.exp(-0.045 * Tyr) * _N(-d2) - S * _N(-d1);
-}
-const _netBS = (legs, S, dte, iv) => legs.reduce((a, l) => a + Math.sign(l.side) * l.qty * _bs(S, l.strike, dte / 365, iv * (1 + 0.6 * Math.abs(Math.log(l.strike / S))), l.type), 0);
-
 // Thesis Integrity Score 0-100, scomposto
 export function computeTIS(pos, cur) {
   // cur: { pop, ivNow, seasonalNow, dteLeft, vegaSign }
@@ -794,12 +783,12 @@ export function exitPathSim(pos, S, dteLeft, iv, sigma, nSim = 2000) {
       while (u === 0) u = Math.random(); while (v === 0) v = Math.random();
       const z = Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
       s = s * Math.exp(-0.5 * sigma * sigma * dt + sq * z);
-      const pnl = (_netBS(legs, s, dteLeft - d, iv) - entryNet) * 100;
+      const pnl = (netBS(legs, s, dteLeft - d, iv) - entryNet) * 100;
       if (pnl >= tp) { nTP++; tpDays.push(d); sumExit += pnl; done = true; break; }
       if (pnl <= sl) { nSL++; sumExit += pnl; done = true; break; }
     }
     if (!done) {
-      const pnl = (_netBS(legs, s, 7, iv) - entryNet) * 100;
+      const pnl = (netBS(legs, s, 7, iv) - entryNet) * 100;
       if (pnl > 0) nTimePos++; else nTimeNeg++;
       sumExit += pnl;
     }
