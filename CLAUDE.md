@@ -72,6 +72,11 @@ one sentence, change the chart, not the copy. Mobile has no hover: tap to open.
 - Single-leg orders go to Alpaca as simple orders, not mleg (422 otherwise)
 - Cancel conflicting open orders before sending an mleg close (wash-trade check)
 - State hydration sanitises corrupt positions using the `v: 2` version flag
+- `pro.jsx` keeps its own `probProfit(curve, S, sigma, dte)` and `exitPathSim(...)`
+  with signatures different from the ones in `engine.js`. This is intentional and
+  must not be merged: the UI depends on the extra fields these versions return
+  (`pTimeNeg`, `pWin`, `horizon`), and `probProfit` there works on an already
+  built payoff `curve` rather than on `legs`
 
 ## Working style
 
