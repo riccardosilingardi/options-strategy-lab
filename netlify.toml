@@ -1,0 +1,49 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[[redirects]]
+  from = "/api/chain"
+  to = "/.netlify/functions/chain"
+  status = 200
+
+[[redirects]]
+  from = "/api/av"
+  to = "/.netlify/functions/av"
+  status = 200
+
+[[redirects]]
+  from = "/api/bars"
+  to = "/.netlify/functions/bars"
+  status = 200
+
+[[redirects]]
+  from = "/api/state"
+  to = "/.netlify/functions/state"
+  status = 200
+
+[[redirects]]
+  from = "/api/approve"
+  to = "/.netlify/functions/approve"
+  status = 200
+
+[[redirects]]
+  from = "/api/proxy"
+  to = "/.netlify/functions/proxy"
+  status = 200
+
+[[redirects]]
+  from = "/api/alpaca"
+  to = "/.netlify/functions/alpaca"
+  status = 200
+
+[[redirects]]
+  from = "/api/ai"
+  to = "/.netlify/functions/ai"
+  status = 200
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
