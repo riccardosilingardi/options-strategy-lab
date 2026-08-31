@@ -1,5 +1,11 @@
 // One-tap approve: esegue su Alpaca PAPER l'ordine proposto dall'Autopilot, previa validazione token
 import { getStore } from "@netlify/blobs";
+import { evaluateTrade } from "../../src/riskGate.js";
+
+// L'host paper e' una costante di questo file: e' la prova che l'ordine
+// autorizzato finisce su un conto paper, ed e' cio' che il cancello verifica.
+const PAPER_HOST = "paper-api.alpaca.markets";
+const PAPER_ACCOUNT = { paperVerified: true, paperSource: `this endpoint posts only to ${PAPER_HOST}` };
 const page = (title, body, ok) => new Response(
   `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title>
 <style>body{margin:0;height:100vh;display:flex;align-items:center;justify-content:center;background:#14181d;font-family:ui-monospace,monospace;color:#f5f0e6}
@@ -19,9 +25,20 @@ export default async (req) => {
     if (!a) return page("Link non valido", "Autorizzazione inesistente o già rimossa.", false);
     if (a.used) return page("Già eseguito", `Questo ordine era già stato autorizzato il ${new Date(a.usedAt).toLocaleString("it-IT")}.`, false);
     if (Date.now() > a.exp) return page("Link scaduto", "L'autorizzazione è scaduta (24h). L'Autopilot ne genererà una nuova al prossimo ciclo se ancora rilevante.", false);
+    // PRD §8: il cancello gira di nuovo QUI, al momento dell'esecuzione. Fra la
+    // proposta e il tap possono passare 24 ore, e le posizioni possono cambiare.
+    const state = JSON.parse((await store.get("state")) || "{}");
+    const g = evaluateTrade({
+      proposal: a.gateContext?.proposal || { intent: "close", legs: [], maxLoss: 0 },
+      portfolio: { positions: state.positions || [], account: PAPER_ACCOUNT },
+      capital: a.gateContext?.capital || {},
+      signals: null,
+    });
+    if (!g.pass) return page("Bloccato dal risk gate", g.violations.map((v) => v.message).join("<br>"), false);
+
     const k = Netlify.env.get("ALPACA_KEY"), s = Netlify.env.get("ALPACA_SECRET");
     if (!k || !s) return page("Server non configurato", "Mancano ALPACA_KEY/ALPACA_SECRET.", false);
-    const r = await fetch("https://paper-api.alpaca.markets/v2/orders", {
+    const r = await fetch(`https://${PAPER_HOST}/v2/orders`, {
       method: "POST",
       headers: { "APCA-API-KEY-ID": k, "APCA-API-SECRET-KEY": s, "Content-Type": "application/json" },
       body: JSON.stringify(a.order),

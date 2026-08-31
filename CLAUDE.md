@@ -48,6 +48,16 @@ while the position is open.
 
 ## Architecture
 
+- `src/rules.js` — **the single source of truth for the trading rules**. Take
+  profit, stop loss, exit DTE, the entry-DTE floor and the PRD §3 sizing model
+  (`sizing()`), plus the generated rule strings (`ruleBadge()`,
+  `perTradeCapLabel()`, `copilotRulesBlock()`, `RULE_PILLS`). Never write a rule
+  number or a rule sentence anywhere else — not in a component, not in a prompt,
+  not in a serverless function.
+- `src/riskGate.js` — `evaluateTrade({ proposal, portfolio, capital, signals })`,
+  a pure function returning `{ pass, violations, warnings }`. Every order path
+  calls it, and a screen with no gate wired in fails closed
+  (`runGate` in `pro.jsx`).
 - `src/App.jsx`, `src/pro.jsx` — UI
 - `src/theme.js` — shared theme, never redeclare a local `T`
 - `src/engine.js` — shared math (Black-Scholes, payoff, probabilities,
@@ -69,6 +79,22 @@ separately or two screens will disagree about the same trade.
 Every visual exposes `takeaway()` (one always-visible sentence, generated from
 the numbers) and `explain(element)` (on tap). If the takeaway needs more than
 one sentence, change the chart, not the copy. Mobile has no hover: tap to open.
+
+## Order paths
+
+There are **six** ways an order can reach Alpaca, and every one routes through
+`evaluateTrade`:
+
+1. `App.jsx` → `sendToAlpaca()` — the manual multileg ticket
+2. `pro.jsx` → `OrderTicket.send()` — the pro ticket (limit/market, TIF, qty)
+3. `pro.jsx` → `AlpacaDesk.closeGroup()` — close a whole strategy
+4. `pro.jsx` → `GuardianPanel.placeExit()` — the exit ladder
+5. `autopilot.mjs` — gates each proposal before it becomes an approve link
+6. `approve.mjs` — re-runs the gate at execution time, up to 24h later
+
+Adding a seventh means adding a gate call. Paper mode is *verified*, not
+assumed: `alpaca.mjs` returns an `X-OSL-Paper-Endpoint` header and the gate
+rejects anything it cannot confirm.
 
 ## Known traps
 

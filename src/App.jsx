@@ -11,6 +11,8 @@ import { fetchAllNews, fetchWeather, ImpactTags, MeteoTab, CopilotTab, ReportTab
 import { fuseSignals, sentimentDirection, withSignalRank, compareCandidates, againstSignal } from "./signals.js";
 import { N as nCDF, bs as bsPrice, smile as smileIV, payoff as payoffExp, SEASONAL, SIGMA } from "./engine.js";
 import { T } from "./theme.js";
+import { RULES, sizing, ruleBadge, takeProfitLabel, stopLossLabel, perTradeCapLabel, RULE_PILLS, money, pctText } from "./rules.js";
+import { evaluateTrade, gateSummary } from "./riskGate.js";
 
 /* ============================== THEME ============================== */
 const mono = { fontFamily: "ui-monospace, Menlo, monospace" };
@@ -200,6 +202,17 @@ async function alpacaGet(path) {
   const r = await fetch(`/api/alpaca?path=${encodeURIComponent(path)}`);
   if (!r.ok) throw new Error(`Alpaca ${r.status}: ${await r.text()}`);
   return r.json();
+}
+// Il proxy serverless punta SOLO a paper-api.alpaca.markets e lo dichiara in un
+// header. Leggerlo qui e' l'unico modo di VERIFICARE (non presumere) che il
+// conto sia paper: senza questa prova src/riskGate.js rifiuta l'ordine.
+const PAPER_HOST = "paper-api.alpaca.markets";
+async function alpacaAccount() {
+  const r = await fetch(`/api/alpaca?path=${encodeURIComponent("/v2/account")}`);
+  if (!r.ok) throw new Error(`Alpaca ${r.status}: ${await r.text()}`);
+  const acc = await r.json();
+  const host = r.headers.get("X-OSL-Paper-Endpoint");
+  return { ...acc, paperVerified: host === PAPER_HOST, paperSource: host ? `the proxy routed this to ${host}` : null };
 }
 async function alpacaOrderMleg(legs) {
   const body = {
@@ -404,11 +417,11 @@ async function loadState() {
   try { const v = localStorage.getItem(SKEY); return v ? JSON.parse(v) : null; }
   catch { return null; }
 }
-const EMPTY = { saved: [], positions: [], settings: { webhook: "", reportFreq: "weekly", reportLast: 0, reportLastMd: "", capital: 5000, mode: "pro" }, seasonal: {}, journal: [], ivHist: {} };
+const EMPTY = { saved: [], positions: [], settings: { webhook: "", reportFreq: "weekly", reportLast: 0, reportLastMd: "", capital: RULES.defaultTradingCapital, concurrentTarget: RULES.defaultConcurrentTarget, savings: null, sizeOverride: null, mode: "pro" }, seasonal: {}, journal: [], ivHist: {} };
 async function saveState(st) {
   try { localStorage.setItem(SKEY, JSON.stringify(st)); } catch (e) { console.error(e); }
   // sync server (abilita Autopilot ad app chiusa); fire-and-forget
-  try { fetch("/api/state", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ positions: st.positions, settings: { webhook: st.settings?.webhook } }) }); } catch { /* offline ok */ }
+  try { fetch("/api/state", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ positions: st.positions, settings: { webhook: st.settings?.webhook, capital: st.settings?.capital, concurrentTarget: st.settings?.concurrentTarget, savings: st.settings?.savings, sizeOverride: st.settings?.sizeOverride } }) }); } catch { /* offline ok */ }
 }
 
 /* ============================== UI ATOMS ============================== */
@@ -728,6 +741,10 @@ export default function OptionsStrategyLab() {
       setMsg(`Write why you are going against ${clash.n} of ${clash.total} factors (at least ${REASON_MIN} characters). The reason is stored with the position.`);
       return;
     }
+    // Anche la posizione interna passa dal cancello: non tocca il broker, ma
+    // entra nell'esposizione totale che il cancello misura al prossimo ordine.
+    const gLocal = gate({ ticker, intent: "open", legs, dte, contracts: 1, maxLoss: A?.maxLoss, maxProfit: A?.maxProfit }, LOCAL_BOOK);
+    if (!gLocal.pass) { setMsg(`Risk gate: position not opened. ${gLocal.violations.map((v) => v.message).join(" ")}`); return; }
     const expiry = expKey ? new Date(expKey).toISOString() : new Date(Date.now() + dte * 86400000).toISOString();
     const ivAvg0 = A.legPx.reduce((x, y) => x + y.iv, 0) / Math.max(1, A.legPx.length);
     const pop0 = probProfit(A.curve, spot, ivAvg0, dte);
@@ -740,6 +757,7 @@ export default function OptionsStrategyLab() {
         signal: fused[ticker] ? { score: fused[ticker].score, confidence: fused[ticker].confidence, agreement: fused[ticker].agreement, narrative: fused[ticker].narrative } : null,
         againstSignal: clash ? { ...clash, reason: against.reason.trim(), at: Date.now() } : null },
       timeline: [
+        { t: Date.now(), type: "gate", text: `Risk gate — ${gateSummary(gLocal)}` },
         { t: Date.now(), type: "open", text: `${alpacaOrder ? "Ordine Alpaca " + alpacaOrder.id.slice(0, 8) + "… inviato · " : ""}Aperta: PoP ${pop0 != null ? (pop0 * 100).toFixed(0) + "%" : "n/d"} · IV ${(ivAvg0 * 100).toFixed(0)}% · stagionale ${seas.monthlyMean[NOW_MONTH].toFixed(1)}%/m${fused[ticker] ? ` · segnale ${fused[ticker].score > 0 ? "+" : ""}${fused[ticker].score}/100 ${fused[ticker].agreement}` : ""}` },
         ...(clash ? [{ t: Date.now(), type: "against", text: `Against ${clash.n} of ${clash.total} factors. Reason: "${against.reason.trim()}"` }] : []),
       ],
@@ -772,7 +790,7 @@ export default function OptionsStrategyLab() {
       const pnl = al?.pnl ?? null;
       const ruleExit = !!(al && (al.level === "action"));
       entry = { id, t: Date.now(), ticker: p.ticker, name: p.name, openedAt: p.openedAt, pnl, ruleExit,
-        riskOk: Math.abs(p.maxLoss) <= 0.05 * (store.settings.capital || 5000) };
+        riskOk: Math.abs(p.maxLoss) <= limits.perTradeLimit };
     }
     const st = { ...store, positions: store.positions.filter((x) => x.id !== id), journal: entry ? [...(store.journal || []), entry] : (store.journal || []) };
     setStore(st); await saveState(st);
@@ -832,8 +850,8 @@ export default function OptionsStrategyLab() {
       const rem = Math.max(1, dte - i * 30);
       const pnl = ((i === span ? payoffExp(legs, Sx) : scenarioValue(legs, Sx, rem, iv)) - A.entry) * 100;
       let note = `prezzo ${r >= 0 ? "+" : ""}${r.toFixed(1)}%`;
-      if (!closed && pnl >= 0.5 * A.maxProfit) { closed = { i, pnl: 0.5 * A.maxProfit, why: "TP 50%" }; note += " → 🎯 TP 50% colpito: incassi a regola"; }
-      else if (!closed && pnl <= 0.5 * A.maxLoss) { closed = { i, pnl: 0.5 * A.maxLoss, why: "STOP 50%" }; note += " → 🛑 STOP 50%: chiudi a regola"; }
+      if (!closed && pnl >= RULES.takeProfitPct * A.maxProfit) { closed = { i, pnl: RULES.takeProfitPct * A.maxProfit, why: takeProfitLabel() }; note += ` → 🎯 ${takeProfitLabel()} colpito: incassi a regola`; }
+      else if (!closed && pnl <= RULES.stopLossPct * A.maxLoss) { closed = { i, pnl: RULES.stopLossPct * A.maxLoss, why: stopLossLabel() }; note += ` → 🛑 ${stopLossLabel()}: warning, valuta la chiusura`; }
       steps.push({ m: i, label: MONTHS_IT[(NOW_MONTH + i) % 12], S: Sx, pnl, note });
       if (closed) break;
     }
@@ -848,7 +866,7 @@ export default function OptionsStrategyLab() {
   const testAlpaca = async () => {
     setBusy("alpaca"); setMsg(null);
     try {
-      const acc = await alpacaGet("/v2/account");
+      const acc = await alpacaAccount();
       setAlpaca(acc);
       setMsg(`Alpaca PAPER connesso ✓ · equity $${(+acc.equity).toLocaleString()} · buying power $${(+acc.buying_power).toLocaleString()}`);
     } catch (e) {
@@ -861,6 +879,12 @@ export default function OptionsStrategyLab() {
     if (!confirmSend) { setConfirmSend(true); return; }
     setConfirmSend(false); setBusy("order");
     try {
+      // PRD §8: nessun ordine raggiunge Alpaca senza passare da qui.
+      const g = gate({ ticker, intent: "open", legs, dte, contracts: 1, maxLoss: A?.maxLoss, maxProfit: A?.maxProfit });
+      if (!g.pass) {
+        setMsg(`Risk gate: order not sent. ${g.violations.map((v) => v.message).join(" ")}`);
+        setBusy(null); return;
+      }
       const withOcc = legs.map((l) => {
         const quote = q(l);
         const occ = quote?.occ || (expKey ? buildOcc(ticker, expKey, l.type, l.strike) : null);
@@ -899,13 +923,13 @@ export default function OptionsStrategyLab() {
       if (match.length) { pnl = match.reduce((a, x) => a + (+x.unrealized_pl), 0); live = true; }
     }
     if (pnl == null) pnl = sp != null ? (netValue(p.legs, sp, Math.max(1, dteLeft), getU(p.ticker).iv, qp) - p.entryNet) * 100 : null;
-    const tpHit = pnl != null && p.maxProfit > 0 && pnl >= 0.5 * p.maxProfit;
-    const slHit = pnl != null && p.maxLoss < 0 && pnl <= 0.5 * p.maxLoss;
-    const dteExit = dteLeft <= 7;
+    const tpHit = pnl != null && p.maxProfit > 0 && pnl >= RULES.takeProfitPct * p.maxProfit;
+    const slHit = pnl != null && p.maxLoss < 0 && pnl <= RULES.stopLossPct * p.maxLoss;
+    const dteExit = dteLeft <= RULES.exitDTE;
     // verdetto autopilot recente non-HOLD in attesa
     const ap = (p.timeline || []).filter((e) => e.type === "autopilot" && Date.now() - e.t < 48 * 36e5 && !e.text.includes("HOLD")).slice(-1)[0];
     const level = tpHit || slHit || dteExit || ap ? "action" : pnl != null && pnl < 0.35 * p.maxLoss ? "watch" : "ok";
-    const label = tpHit ? "TP 50% raggiunto → incassa" : slHit ? "STOP 50% toccato → chiudi" : dteExit ? `${dteLeft} DTE → chiudi/rolla` : ap ? "Autopilot: azione in attesa di OK" : pnl == null ? "in attesa dati…" : level === "watch" ? "in perdita: monitora la tesi" : "in linea col piano";
+    const label = tpHit ? `${takeProfitLabel()} raggiunto → incassa` : slHit ? `${stopLossLabel()} toccato → warning` : dteExit ? `${dteLeft} DTE → chiudi/rolla` : ap ? "Autopilot: azione in attesa di OK" : pnl == null ? "in attesa dati…" : level === "watch" ? "in perdita: monitora la tesi" : "in linea col piano";
     return { p, pnl, dteLeft, level, label, ap, live, spotNow: sp, tpHit, slHit, dteExit };
   }), [store.positions, chains, alSync]);
 
@@ -913,9 +937,9 @@ export default function OptionsStrategyLab() {
   // DENTRO il JSX del tab Paper (setState durante il render) => instabilità del tab.
   useEffect(() => {
     for (const a of posAlerts) {
-      if (a.tpHit) logEvent(a.p.id, "tp", `Raggiunto TP 50% (${fmt$(a.pnl)})`);
-      if (a.slHit) logEvent(a.p.id, "sl", `Toccato SL 50% (${fmt$(a.pnl)})`);
-      if (a.dteExit) logEvent(a.p.id, "dte", "Entrata in finestra ≤7 DTE");
+      if (a.tpHit) logEvent(a.p.id, "tp", `Raggiunto ${takeProfitLabel()} (${fmt$(a.pnl)})`);
+      if (a.slHit) logEvent(a.p.id, "sl", `Toccato ${stopLossLabel()} (${fmt$(a.pnl)}) — warning, non chiusura automatica`);
+      if (a.dteExit) logEvent(a.p.id, "dte", `Entrata in finestra ≤${RULES.exitDTE} DTE`);
     }
   }, [posAlerts, logEvent]);
   const nAttention = posAlerts.filter((a) => a.level === "action").length;
@@ -1065,16 +1089,30 @@ export default function OptionsStrategyLab() {
     return { level, next, score, disciplina, coerenza, pazienza, closed, opened, ruled };
   }, [store.journal, store.positions, store.settings.capital]);
 
-  /* ---- guardrail ---- */
+  /* ---- risk gate (PRD §8) ----
+     Un solo cancello per ogni ordine. La UI non ricalcola mai i limiti: chiede
+     a src/riskGate.js e mostra quello che risponde. */
+  const capitalAnswers = useMemo(() => ({
+    tradingCapital: store.settings.capital,
+    concurrentTarget: store.settings.concurrentTarget,
+    savings: store.settings.savings,
+    override: store.settings.sizeOverride,
+  }), [store.settings]);
+  const limits = useMemo(() => sizing(capitalAnswers), [capitalAnswers]);
+  // Conto locale: la posizione "Paper interno" non lascia il browser, quindi la
+  // verifica paper e' soddisfatta per costruzione. Non usarlo mai per un ordine.
+  const LOCAL_BOOK = { paperVerified: true, paperSource: "local simulation, no broker involved" };
+  const gate = useCallback((proposal, account) => evaluateTrade({
+    proposal,
+    portfolio: { positions: store.positions, account: account === undefined ? alpaca : account },
+    capital: capitalAnswers,
+    signals: fused[proposal?.ticker || ticker] || null,
+  }), [store.positions, alpaca, capitalAnswers, fused, ticker]);
+
   const guard = useMemo(() => {
     if (!A) return null;
-    const cap = store.settings.capital || 5000;
-    const tradeRisk = Math.abs(A.maxLoss);
-    const openRisk = store.positions.reduce((a, p) => a + Math.abs(p.maxLoss), 0);
-    const overTrade = tradeRisk > 0.05 * cap;
-    const overTotal = openRisk + tradeRisk > 0.25 * cap;
-    return { cap, tradeRisk, openRisk, overTrade, overTotal, maxTradeRisk: 0.05 * cap, maxTotal: 0.25 * cap };
-  }, [A, store.positions, store.settings.capital]);
+    return gate({ ticker, intent: "open", legs, dte, contracts: 1, maxLoss: A.maxLoss, maxProfit: A.maxProfit }, LOCAL_BOOK);
+  }, [A, gate, legs, dte, ticker]); // eslint-disable-line
 
   /* ---- direzione del trade e scontro col segnale (PRD §7) ----
      La direzione la dà il delta netto della struttura: positivo = il trade
@@ -1139,7 +1177,7 @@ export default function OptionsStrategyLab() {
             <h1 style={{ fontSize: 24, fontWeight: 800, color: T.ink, margin: "4px 0 6px" }}>Commodity Options Desk</h1>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
               <span style={{ ...mono, fontSize: 10, color: T.green, border: `1px solid ${T.green}55`, background: `${T.green}12`, padding: "3px 8px", borderRadius: 5, display: "inline-flex", gap: 5, alignItems: "center" }}>
-                <ShieldCheck size={12} /> PAPER · TP 50% · SL 50% · 7 DTE
+                <ShieldCheck size={12} /> PAPER · {ruleBadge()}
               </span>
               <span style={{ ...mono, fontSize: 10, color: chain ? T.blue : T.dim, border: `1px solid ${chain ? T.blue : T.dim}44`, padding: "3px 8px", borderRadius: 5 }}>
                 {chain ? `${chain.source} · agg. ${ago(chain.updated)}` : "chain non caricata"}
@@ -1263,15 +1301,15 @@ export default function OptionsStrategyLab() {
                             <Stat k="P&L ORA" v={pnl != null ? fmt$(pnl) : "…"} c={pnl >= 0 ? T.green : T.red} />
                             <Stat k="PREZZO ORA" v={spotNow != null ? `$${spotNow.toFixed(2)}` : "…"} />
                             <Stat k="ENTRY" v={p.entrySpot != null ? `$${(+p.entrySpot).toFixed(2)}` : "—"} c={T.amber} />
-                            <Stat k="DTE" v={dteLeft} c={dteLeft <= 7 ? T.red : T.mut} />
+                            <Stat k="DTE" v={dteLeft} c={dteLeft <= RULES.exitDTE ? T.red : T.mut} />
                           </div>
                           {pct != null && (
                             <div style={{ marginTop: 6 }}>
                               <div style={{ position: "relative", height: 7, background: T.line, borderRadius: 4 }}>
-                                <div style={{ position: "absolute", left: "50%", width: 1, top: -2, bottom: -2, background: T.amber }} title="TP 50%" />
+                                <div style={{ position: "absolute", left: `${RULES.takeProfitPct * 100}%`, width: 1, top: -2, bottom: -2, background: T.amber }} title={takeProfitLabel()} />
                                 <div style={{ width: `${pct}%`, height: 7, borderRadius: 4, background: pnl >= 0 ? `${T.green}bb` : `${T.red}bb` }} />
                               </div>
-                              <div style={{ ...mono, fontSize: 9.5, color: T.dim, marginTop: 2 }}>{pct.toFixed(0)}% del max profit · linea ambra = TP 50%</div>
+                              <div style={{ ...mono, fontSize: 9.5, color: T.dim, marginTop: 2 }}>{pct.toFixed(0)}% del max profit · linea ambra = {takeProfitLabel()}</div>
                             </div>
                           )}
                         </div>
@@ -1307,7 +1345,7 @@ export default function OptionsStrategyLab() {
                 ))}
               </div>
               <div style={{ fontSize: 12.5, color: T.body, marginTop: 8 }}>→ {journey.next}</div>
-              <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6 }}>Questa piattaforma ti accompagna al profitto con regole, non con promesse: TP 50% · SL 50% · exit 7 DTE · max 5% per trade.</div>
+              <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6 }}>Questa piattaforma ti accompagna al profitto con regole, non con promesse: {ruleBadge()} · {perTradeCapLabel()}.</div>
             </Panel>
           </div>
         )}
@@ -1319,10 +1357,13 @@ export default function OptionsStrategyLab() {
               <Lbl>TROVA IL MIO TRADE · 3 DOMANDE, ZERO GERGO · SOLO PAPER (DENARO FINTO)</Lbl>
               <div style={{ marginTop: 12 }}>
                 <div style={{ fontSize: 13.5, color: T.ink, fontWeight: 700 }}>1 · Quanto sei disposto a rischiare al massimo su questa operazione?</div>
-                <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 2 }}>È il massimo che puoi perdere, mai un centesimo di più. Regola d'oro: max 5% del tuo capitale.</div>
+                <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 2 }}>È il massimo che puoi perdere, mai un centesimo di più. Il tuo limite per trade: {money(limits.perTradeLimit)}.</div>
+                {limits.pills.map((pl) => (
+                  <div key={pl.id} style={{ ...mono, fontSize: 10.5, color: T.amber, marginTop: 6, padding: "7px 9px", border: `1px solid ${T.amber}44`, borderRadius: 6 }}>{pl.text}</div>
+                ))}
                 <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
-                  {[Math.round(0.01 * (store.settings.capital || 5000)), Math.round(0.025 * (store.settings.capital || 5000)), Math.round(0.05 * (store.settings.capital || 5000))].map((v) => (
-                    <Btn key={v} small ghost={wiz.risk !== v} onClick={() => setWiz({ ...wiz, risk: v })}>${v}{v === Math.round(0.05 * (store.settings.capital || 5000)) ? " (max 5%)" : ""}</Btn>
+                  {[Math.round(limits.perTradeLimit / 5), Math.round(limits.perTradeLimit / 2), Math.round(limits.perTradeLimit)].map((v) => (
+                    <Btn key={v} small ghost={wiz.risk !== v} onClick={() => setWiz({ ...wiz, risk: v })}>${v}{v === Math.round(limits.perTradeLimit) ? ` (${perTradeCapLabel()})` : ""}</Btn>
                   ))}
                   <Inp type="number" min={50} step={50} value={wiz.risk} onChange={(e) => setWiz({ ...wiz, risk: Math.max(50, +e.target.value) })} style={{ width: 90 }} />
                 </div>
@@ -1355,7 +1396,7 @@ export default function OptionsStrategyLab() {
               {journey.score != null && (
                 <div style={{ display: "flex", gap: 14, marginTop: 8, flexWrap: "wrap" }}>
                   <Stat k="DISCIPLINA (uscite a regola)" v={journey.disciplina != null ? `${(journey.disciplina * 100).toFixed(0)}%` : "—"} c={journey.disciplina >= 0.8 ? T.green : T.amber} />
-                  <Stat k="COERENZA (rischio ≤5%)" v={journey.coerenza != null ? `${(journey.coerenza * 100).toFixed(0)}%` : "—"} />
+                  <Stat k={`COERENZA (rischio ≤${pctText(RULES.bestPracticePerTradePct)})`} v={journey.coerenza != null ? `${(journey.coerenza * 100).toFixed(0)}%` : "—"} />
                   <Stat k="PAZIENZA (no overtrading)" v={journey.pazienza != null ? `${(journey.pazienza * 100).toFixed(0)}%` : "—"} />
                   <Stat k="TRADE CHIUSI" v={journey.closed} />
                 </div>
@@ -1392,7 +1433,7 @@ export default function OptionsStrategyLab() {
                     );
                   })}
                 </div>
-                <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 10 }}>Nel Builder: grafico completo, guardrail 5%, livelli d'uscita automatici e apertura paper (denaro finto). La scelta resta tua: la piattaforma consiglia, non decide.</div>
+                <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 10 }}>Nel Builder: grafico completo, il risk gate ({perTradeCapLabel()}), livelli d'uscita automatici e apertura paper (denaro finto). La scelta resta tua: la piattaforma consiglia, non decide.</div>
               </Panel>
             )}
           </div>
@@ -1604,7 +1645,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   </div>
                 )}
               </div>
-              <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 8 }}>Budget = premio massimo da pagare (in USD, dai mid reali della chain CBOE); per i credit spread, dove il premio si incassa, il vincolo diventa il capitale a rischio. Chance = probabilità di profitto a scadenza (lognormale con IV reale della chain). Ricorda la regola 5% del capitale per trade.</div>
+              <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 8 }}>Budget = premio massimo da pagare (in USD, dai mid reali della chain CBOE); per i credit spread, dove il premio si incassa, il vincolo diventa il capitale a rischio. Chance = probabilità di profitto a scadenza (lognormale con IV reale della chain). Ricorda il limite per trade: {money(limits.perTradeLimit)} ({perTradeCapLabel()}).</div>
             </Panel>
           </div>
         )}
@@ -1675,18 +1716,29 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                 </div>
               )}
 
-              {guard && (guard.overTrade || guard.overTotal) && (
+              {/* Il verdetto del risk gate, non un calcolo parallelo: la stessa
+                  funzione che decide se l'ordine parte scrive anche queste righe. */}
+              {guard && !guard.pass && (
                 <div style={{ marginTop: 10, padding: "9px 11px", background: `${T.red}12`, border: `1px solid ${T.red}66`, borderRadius: 7 }}>
-                  <div style={{ ...mono, fontSize: 11, color: T.red, fontWeight: 700 }}>⚠ GUARDRAIL: questo trade viola le tue regole</div>
-                  <div style={{ fontSize: 12, color: T.body, marginTop: 3 }}>
-                    {guard.overTrade && <>Rischio {fmt$(guard.tradeRisk)} &gt; 5% del capitale ({fmt$(guard.maxTradeRisk)}). </>}
-                    {guard.overTotal && <>Esposizione totale {fmt$(guard.openRisk + guard.tradeRisk)} &gt; 25% ({fmt$(guard.maxTotal)}). </>}
-                    Riduci quantità o strike, oppure procedi consapevolmente (verrà segnato nel tuo percorso).
+                  <div style={{ ...mono, fontSize: 11, color: T.red, fontWeight: 700 }}>⚠ RISK GATE: l'ordine non partirebbe</div>
+                  <div style={{ display: "grid", gap: 4, marginTop: 4 }}>
+                    {guard.violations.map((v) => (
+                      <div key={v.code} style={{ fontSize: 12, color: T.body }}>{v.message}</div>
+                    ))}
                   </div>
                 </div>
               )}
-              {guard && !guard.overTrade && !guard.overTotal && (
-                <div style={{ ...mono, fontSize: 10, color: T.green, marginTop: 8 }}>✓ Dentro le regole: rischio {fmt$(guard.tradeRisk)} / max {fmt$(guard.maxTradeRisk)} (5% di {fmt$(guard.cap)}) · esposizione {fmt$(guard.openRisk + guard.tradeRisk)} / {fmt$(guard.maxTotal)}</div>
+              {guard && guard.pass && (
+                <div style={{ ...mono, fontSize: 10, color: T.green, marginTop: 8 }}>
+                  ✓ Dentro le regole: rischio {money(guard.limits.tradeRisk)} / max {money(guard.limits.perTrade)} · esposizione {money(guard.limits.totalAfter)} / {money(guard.limits.total)}
+                </div>
+              )}
+              {guard && guard.warnings.length > 0 && (
+                <div style={{ display: "grid", gap: 4, marginTop: 6 }}>
+                  {guard.warnings.map((w) => (
+                    <div key={w.code} style={{ ...mono, fontSize: 10.5, color: T.amber }}>⚠ {w.message}</div>
+                  ))}
+                </div>
               )}
 
               <ChainMatrix chain={chain} expKey={expKey} spot={spot} legs={legs} onCell={onChainCell} />
@@ -1745,8 +1797,8 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                 <Stat k="MAX PROFIT" v={fmt$(A.maxProfit)} c={T.green} tip="Il massimo che puoi guadagnare a scadenza, nello scenario migliore." />
                 <Stat k="MAX LOSS" v={fmt$(A.maxLoss)} c={T.red} tip="Il massimo che puoi perdere: è definito in partenza, mai un dollaro di più." />
                 <Stat k="BREAKEVEN" v={A.breakevens.map((b) => b.toFixed(2)).join(" · ") || "—"} c={T.blue} />
-                <Stat k="TP 50%" v={fmt$(A.maxProfit * 0.5)} c={T.green} tip="La tua regola: incassa quando il profitto raggiunge metà del massimo. Statisticamente batte l'attesa fino a scadenza." />
-                <Stat k="SL 50%" v={fmt$(A.maxLoss * 0.5)} c={T.red} tip="La tua regola: ferma la perdita a metà del massimo. Protegge il capitale dagli scenari peggiori." />
+                <Stat k={takeProfitLabel()} v={fmt$(A.maxProfit * RULES.takeProfitPct)} c={T.green} tip={RULE_PILLS.takeProfit()} />
+                <Stat k={stopLossLabel()} v={fmt$(A.maxLoss * RULES.stopLossPct)} c={T.red} tip={RULE_PILLS.stopLoss()} />
               </div>
               <div style={{ display: "flex", gap: 16, marginTop: 10, flexWrap: "wrap" }}>
                 <Stat k="Δ DELTA" v={A.greeks.delta.toFixed(2)} />
@@ -1819,6 +1871,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   legs={legs} expKey={expKey} ticker={ticker}
                   buildOcc={buildOcc} quoteFn={q} estNet={A.entry * 100 / 100}
                   setMsg={setMsg}
+                  gate={gate} dte={dte} maxLoss={A.maxLoss} maxProfit={A.maxProfit}
                 />
               )}
               {!alpaca && <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 8 }}>Connetti Alpaca (Paper → Integrazioni) per sbloccare l'order ticket pro: limit/market, TIF, quantità, cancellazioni.</div>}
@@ -1906,7 +1959,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
               <div style={{ fontSize: 12.5, color: T.body, marginTop: 8, lineHeight: 1.6 }}>
                 <b style={{ color: T.blue }}>CHANCE</b> (Optimize/Builder): fotografia istantanea — probabilità di finire in profitto <i>a scadenza</i>, calcolata dalla volatilità che il mercato prezza ora. Usala per <b>confrontare strategie prima di entrare</b>.<br/>
                 <b style={{ color: T.amber }}>MONTE CARLO</b> (qui sotto): stessa domanda ma con la storia — 8.000 scenari con la stagionalità e la volatilità reali degli ultimi 10 anni. Usala per <b>validare che la stagione sia davvero dalla tua</b>. Se Chance e MC divergono molto, il mercato prezza qualcosa che la storia non conosce (evento in arrivo).<br/>
-                <b style={{ color: T.violet }}>EXIT PATH</b> (Guardian, per posizioni aperte): la più realistica — simula giorno per giorno <i>da oggi</i> e applica le TUE regole (TP50/SL50/7DTE). È l'unica che risponde a "da qui, come finisce seguendo il piano?". Usala per <b>decidere se tenere o incassare</b>.
+                <b style={{ color: T.violet }}>EXIT PATH</b> (Guardian, per posizioni aperte): la più realistica — simula giorno per giorno <i>da oggi</i> e applica le TUE regole ({ruleBadge()}). È l'unica che risponde a "da qui, come finisce seguendo il piano?". Usala per <b>decidere se tenere o incassare</b>.
               </div>
             </Panel>
 
@@ -1927,7 +1980,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   </div>
                   <div style={{ marginTop: 10, padding: "9px 11px", background: `${T.blue}0d`, border: `1px solid ${T.blue}33`, borderRadius: 7, fontSize: 12.5, color: T.body }}>
                     <b style={{ color: T.ink }}>In parole semplici:</b> su 8.000 scenari simulati, {Math.round(mc.pop * 100)} su 100 chiudono in profitto.
-                    Nel 5% dei casi peggiori perdi circa {fmt$(Math.abs(mc.p5))}{guard ? (Math.abs(mc.p5) <= guard.maxTradeRisk ? " — dentro la tua regola del 5% del capitale ✓" : ` — ATTENZIONE: oltre la tua regola del 5% (${fmt$(guard.maxTradeRisk)})`) : ""}.
+                    Nel 5% dei casi peggiori perdi circa {fmt$(Math.abs(mc.p5))}{guard ? (Math.abs(mc.p5) <= guard.limits.perTrade ? ` — dentro il tuo limite per trade di ${money(guard.limits.perTrade)} ✓` : ` — ATTENZIONE: oltre il tuo limite per trade (${money(guard.limits.perTrade)})`) : ""}.
                     Il risultato tipico (mediana) è {fmt$(mc.p50)}.
                   </div>
                   <div style={{ height: 180, marginTop: 12 }}>
@@ -2063,10 +2116,10 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   const qp = makeQuote(c, p.expKey);
                   const nowNet = s ? netValue(p.legs, s, dteLeft, getU(p.ticker).iv, qp) : null;
                   const pnl = nowNet != null ? (nowNet - p.entryNet) * 100 : null;
-                  const tpHit = pnl != null && p.maxProfit > 0 && pnl >= 0.5 * p.maxProfit;
-                  const slHit = pnl != null && p.maxLoss < 0 && pnl <= 0.5 * p.maxLoss;
-                  const dteExit = dteLeft <= 7;
-                  const rec = tpHit ? { t: "→ CHIUDI: TP 50%", c: T.green } : slHit ? { t: "→ CHIUDI: SL 50%", c: T.red } : dteExit ? { t: "→ CHIUDI/ROLLA: ≤7 DTE", c: T.amber } : { t: "→ HOLD", c: T.mut };
+                  const tpHit = pnl != null && p.maxProfit > 0 && pnl >= RULES.takeProfitPct * p.maxProfit;
+                  const slHit = pnl != null && p.maxLoss < 0 && pnl <= RULES.stopLossPct * p.maxLoss;
+                  const dteExit = dteLeft <= RULES.exitDTE;
+                  const rec = tpHit ? { t: `→ CHIUDI: ${takeProfitLabel()}`, c: T.green } : slHit ? { t: `→ WARNING: ${stopLossLabel()}`, c: T.red } : dteExit ? { t: `→ CHIUDI/ROLLA: ≤${RULES.exitDTE} DTE`, c: T.amber } : { t: "→ HOLD", c: T.mut };
                   return (
                     <div key={p.id} style={{ padding: "10px 12px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7 }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
@@ -2104,7 +2157,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                             seasonalNow={seasNow} pnlNow={pnl} popNow={popNow}
                             vegaSign={Math.sign(p.thesis?.vega ?? 1) || 1}
                             alpaca={!!alpaca} quoteFn={qp} buildOcc={buildOcc}
-                            setMsg={setMsg} logEvent={logEvent}
+                            setMsg={setMsg} logEvent={logEvent} gate={gate}
                           />
                         );
                       })()}
@@ -2114,7 +2167,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
               </div>
             </Panel>
 
-            {alpaca && <AlpacaDesk setMsg={setMsg} />}
+            {alpaca && <AlpacaDesk setMsg={setMsg} gate={gate} />}
 
             <Panel style={{ marginTop: 10 }}>
               <Lbl>STRATEGIE SALVATE ({store.saved.length})</Lbl>
@@ -2161,10 +2214,13 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                 <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 6 }}>Chiave letta dalla env del server (ANTHROPIC_KEY). Copilot e report AI attivi senza inserire nulla nel sito.</div>
               </div>
               <div style={{ marginTop: 14 }}>
-                <div style={{ ...mono, fontSize: 11, color: T.ink, fontWeight: 700 }}>Capitale di riferimento (per le regole 5% / 25%)</div>
+                <div style={{ ...mono, fontSize: 11, color: T.ink, fontWeight: 700 }}>Capitale di riferimento (da qui si deriva ogni limite — PRD §3)</div>
                 <div style={{ display: "flex", gap: 6, marginTop: 6, alignItems: "center" }}>
                   <Inp type="number" min={500} step={500} value={store.settings.capital || 5000} onChange={(e) => setSetting("capital", Math.max(500, +e.target.value))} style={{ width: 120 }} />
-                  <span style={{ ...mono, fontSize: 10.5, color: T.dim }}>USD · max per trade: {fmt$(0.05 * (store.settings.capital || 5000))} · esposizione max: {fmt$(0.25 * (store.settings.capital || 5000))}</span>
+                  <span style={{ ...mono, fontSize: 10.5, color: T.dim }}>USD</span>
+                  <span style={{ ...mono, fontSize: 10.5, color: T.dim }}>posizioni in parallelo</span>
+                  <Inp type="number" min={1} max={20} value={store.settings.concurrentTarget || RULES.defaultConcurrentTarget} onChange={(e) => setSetting("concurrentTarget", Math.max(1, +e.target.value))} style={{ width: 70 }} />
+                  <span style={{ ...mono, fontSize: 10.5, color: T.dim }}>→ max per trade: {money(limits.perTradeLimit)} · esposizione max: {money(limits.totalLimit)}</span>
                 </div>
               </div>
               <div style={{ marginTop: 14 }}>
@@ -2204,7 +2260,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
         </TabBoundary>
 
         <div style={{ ...mono, fontSize: 10, color: "#4b5563", textAlign: "center", marginTop: 22 }}>
-          Paper trading only · Quote CBOE ritardate ~15 min · Max 5% capitale/trade · Esposizione ≤25% · Non è consulenza finanziaria
+          Paper trading only · Quote CBOE ritardate ~15 min · {perTradeCapLabel()} · Esposizione ≤{pctText(RULES.totalExposurePct)} · Non è consulenza finanziaria
         </div>
       </div>
     </div>
