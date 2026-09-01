@@ -36,6 +36,12 @@ export const RULES = {
   savingsShareWarnPct: 0.10,   // trading capital above 10% of savings → pill
   lowConfidence: 40,           // signal confidence under this → warning
   minOverrideReasonChars: 15,  // an override needs a typed reason, not a shrug
+
+  // --- "nothing today", PRD §5. The app must be able to refuse, so the two
+  // thresholds that make it refuse live here with every other rule number.
+  expensiveIVRank: 70,         // IV rank at or above this → options priced rich
+                               // versus their own history: we are the buyer of
+                               // an expensive option, so we stand down
 };
 
 /* ============================== formatting ============================== */
@@ -91,6 +97,29 @@ export const RULE_PILLS = {
     `you can read before you send the order.`,
   paperOnly: () =>
     `Paper trading only. If the account cannot be verified as paper, the order is rejected.`,
+};
+
+/* ===================== "nothing today", PRD §5 =====================
+   The refusal screen gets the same care as every other. Its sentences are
+   generated from the same numbers that cause the refusal, so the screen can
+   never explain a threshold the code does not apply. */
+
+export const NOTHING_TODAY = {
+  signalsNotAligned: (best) =>
+    `The four factors do not agree on any market today` +
+    (best ? ` — the closest is ${best.tk}, and even there confidence is ${best.confidence} out of 100, ` +
+      `under the ${RULES.lowConfidence} we need.` : `.`) +
+    ` When the signals contradict each other we do not know enough, and a trade taken anyway is a guess with your money on it.`,
+  optionsExpensive: (ticker, rank) =>
+    `Options on ${ticker} are expensive right now: their implied volatility sits at ${rank} out of 100 versus ` +
+    `its own past year, above the ${RULES.expensiveIVRank} mark. Buying here means paying a rich price for the ` +
+    `same outcome, and the premium usually deflates faster than the idea pays off.`,
+  budgetTooSmall: (risk) =>
+    `Nothing fits inside ${money(risk)} of risk today. Every structure that matched your answers costs more than ` +
+    `that to put on, and stretching the budget past your per-trade limit is exactly the habit these rules exist to stop.`,
+  noData: (what) =>
+    `Market data for ${what} did not load, so there is nothing to judge. This is a missing-data problem, not a ` +
+    `verdict on the market: try again in a minute.`,
 };
 
 /** The rules block injected into every model prompt. English, generated. */

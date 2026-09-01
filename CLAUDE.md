@@ -51,15 +51,28 @@ while the position is open.
 - `src/rules.js` — **the single source of truth for the trading rules**. Take
   profit, stop loss, exit DTE, the entry-DTE floor and the PRD §3 sizing model
   (`sizing()`), plus the generated rule strings (`ruleBadge()`,
-  `perTradeCapLabel()`, `copilotRulesBlock()`, `RULE_PILLS`). Never write a rule
-  number or a rule sentence anywhere else — not in a component, not in a prompt,
-  not in a serverless function.
+  `perTradeCapLabel()`, `copilotRulesBlock()`, `RULE_PILLS`, `NOTHING_TODAY`).
+  Never write a rule number or a rule sentence anywhere else — not in a
+  component, not in a prompt, not in a serverless function. The two thresholds
+  that make the app refuse (`lowConfidence`, `expensiveIVRank`) live here too,
+  so the "nothing today" screen can only ever explain a rule the code applies.
 - `src/riskGate.js` — `evaluateTrade({ proposal, portfolio, capital, signals })`,
   a pure function returning `{ pass, violations, warnings }`. Every order path
   calls it, and a screen with no gate wired in fails closed
   (`runGate` in `pro.jsx`).
-- `src/App.jsx`, `src/pro.jsx` — UI
-- `src/theme.js` — shared theme, never redeclare a local `T`
+- `src/wizard.jsx` — **the app shell (PRD §5)**. The wizard is the entry point,
+  not a tab: capital onboarding on a first run, then screen 1 (greeting, one line
+  of status, three choices — and "what needs attention today" once positions
+  exist), screen 2 (budget, horizon, what matters most) and screen 5 ("nothing
+  today"). Screens 3 and 4 are not built yet: the search hands its pick to the
+  Builder. `App.jsx` owns the `view` (`wizard` | `desk`) above the tabs.
+- `src/App.jsx`, `src/pro.jsx` — UI. The tabs are still all reachable, behind
+  "Open the full desk", but they are no longer the front door.
+- `src/theme.js` — shared theme, never redeclare a local `T`. **Light is the
+  default**; dark lives behind Settings. `T.onAccent` is the text colour on a
+  filled accent — never write `#14181d` into a component. Every light accent
+  clears 4.5:1 on white and on the page, and `src/theme.test.js` fails the build
+  if a tweak breaks that.
 - `src/engine.js` — shared math (Black-Scholes, payoff, probabilities,
   seasonal tables). Plain JS, no React imports. **Both the client and the
   Netlify functions import from here.** Never duplicate this math.
@@ -110,6 +123,14 @@ rejects anything it cannot confirm.
   must not be merged: the UI depends on the extra fields these versions return
   (`pTimeNeg`, `pWin`, `horizon`), and `probProfit` there works on an already
   built payoff `curve` rather than on `legs`
+
+## Saying "nothing today"
+
+The refusal is a screen, not a toast. `runWizard` in `App.jsx` decides, in order:
+data missing → signals not aligned → options expensive versus their own history →
+nothing fits the budget. A missing-data answer must never be dressed up as a
+market verdict — they are different sentences on screen, and `wizard.test.jsx`
+holds that line.
 
 ## Working style
 

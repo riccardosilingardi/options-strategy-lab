@@ -1,11 +1,21 @@
 <!doctype html>
-<html lang="it">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="robots" content="noindex, nofollow" />
     <title>Options Strategy Lab</title>
-    <style>body{margin:0;background:#14181d}</style>
+    <style>body{margin:0;background:#f5f6f7}</style>
+    <!-- The first paint happens before React runs. Light is the default, so
+         only a stored dark choice needs applying here to avoid a white flash. -->
+    <script>
+      try {
+        if (localStorage.getItem("osl-theme") === "dark") {
+          document.documentElement.style.background = "#14181d";
+          document.addEventListener("DOMContentLoaded", function () { document.body.style.background = "#14181d"; });
+        }
+      } catch (e) { /* private mode */ }
+    </script>
   </head>
   <body>
     <div id="root"></div>

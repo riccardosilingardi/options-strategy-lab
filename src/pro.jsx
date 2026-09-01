@@ -11,7 +11,7 @@ const mono = { fontFamily: "ui-monospace, Menlo, monospace" };
 const fmt$ = (x) => (x == null || Number.isNaN(x) || !Number.isFinite(x)) ? "—" : `${x < 0 ? "-" : ""}$${Math.abs(x).toFixed(0)}`;
 const Btn = ({ children, onClick, color = T.amber, ghost, disabled, small }) => (
   <button onClick={onClick} disabled={disabled}
-    style={{ ...mono, fontSize: small ? 11 : 12, padding: small ? "4px 8px" : "8px 12px", borderRadius: 6, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.5 : 1, background: ghost ? "transparent" : color, color: ghost ? color : "#14181d", border: ghost ? `1px solid ${color}66` : "none", display: "inline-flex", alignItems: "center", gap: 6 }}>{children}</button>
+    style={{ ...mono, fontSize: small ? 11 : 12, padding: small ? "4px 8px" : "8px 12px", borderRadius: 6, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.5 : 1, background: ghost ? "transparent" : color, color: ghost ? color : T.onAccent, border: ghost ? `1px solid ${color}66` : "none", display: "inline-flex", alignItems: "center", gap: 6 }}>{children}</button>
 );
 const Panel = ({ children, style }) => <div style={{ background: T.panel, border: `1px solid ${T.line}`, borderRadius: 8, padding: 14, ...style }}>{children}</div>;
 const Lbl = ({ children }) => <div style={{ ...mono, fontSize: 10, letterSpacing: "0.15em", color: T.amber }}>{children}</div>;
@@ -59,7 +59,7 @@ async function fetchRss(url) {
   const xml = await r.text();
   const doc = new DOMParser().parseFromString(xml, "text/xml");
   const items = Array.from(doc.querySelectorAll("item"));
-  if (!items.length) throw new Error("feed vuoto");
+  if (!items.length) throw new Error("empty feed");
   return items.slice(0, 10).map((it) => ({
     title: it.querySelector("title")?.textContent || "",
     link: it.querySelector("link")?.textContent || "",
@@ -78,7 +78,7 @@ export async function fetchAllNews(ticker, newsQ) {
   const nGeoStart = 2, nAnStart = 2 + GEO_QUERIES.length;
   const results = await Promise.allSettled(feeds.map(fetchRss));
   const items = results.flatMap((r, i) => (r.status === "fulfilled" ? r.value.map((x) => ({ ...x, geo: i >= nGeoStart && i < nAnStart, analysis: i >= nAnStart })) : []));
-  if (!items.length) throw new Error("feed non raggiungibili");
+  if (!items.length) throw new Error("news feeds are not reachable");
   const seen = new Set();
   return items
     .filter((i) => i.title && !seen.has(i.title) && seen.add(i.title))
@@ -89,8 +89,8 @@ export async function fetchAllNews(ticker, newsQ) {
 export const ImpactTags = ({ item }) => (
   <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 5 }}>
     {item.geo && <span style={{ ...mono, fontSize: 9, color: T.violet, border: `1px solid ${T.violet}55`, padding: "2px 6px", borderRadius: 4 }}>GEO/GOV</span>}
-    {item.analysis && <span style={{ ...mono, fontSize: 9, color: T.blue, border: `1px solid ${T.blue}55`, padding: "2px 6px", borderRadius: 4 }}>ANALISI</span>}
-    {(item.impacts || []).length === 0 && <span style={{ ...mono, fontSize: 9, color: T.dim, border: `1px solid ${T.line}`, padding: "2px 6px", borderRadius: 4 }}>macro generale</span>}
+    {item.analysis && <span style={{ ...mono, fontSize: 9, color: T.blue, border: `1px solid ${T.blue}55`, padding: "2px 6px", borderRadius: 4 }}>ANALYSIS</span>}
+    {(item.impacts || []).length === 0 && <span style={{ ...mono, fontSize: 9, color: T.dim, border: `1px solid ${T.line}`, padding: "2px 6px", borderRadius: 4 }}>general market</span>}
     {(item.impacts || []).map((im) => {
       const c = im.dir > 0 ? T.green : im.dir < 0 ? T.red : T.mut;
       return (
@@ -154,24 +154,24 @@ export function MeteoTab({ news = [], data: given = null }) {
     <div style={{ marginTop: 12 }}>
       {combined.length > 0 && (
         <Panel style={{ marginBottom: 10, border: `1px solid ${T.amber}44` }}>
-          <Lbl>⚡ SEGNALI ATTIVI · METEO {combined.some((s2) => s2.agree) ? "+ NEWS CONCORDI" : ""}</Lbl>
+          <Lbl>⚡ LIVE SIGNALS · WEATHER {combined.some((s2) => s2.agree) ? "+ NEWS AGREEING" : ""}</Lbl>
           <div style={{ display: "grid", gap: 5, marginTop: 8 }}>
             {combined.map((s2, i) => (
               <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                 <span style={{ ...mono, fontSize: 12, fontWeight: 800, color: s2.dir === "↑" ? T.green : T.red }}>{s2.tks.join("+")} {s2.dir}</span>
                 <span style={{ ...mono, fontSize: 9, color: s2.agree ? T.amber : T.dim, border: `1px solid ${s2.agree ? T.amber : T.line}66`, borderRadius: 4, padding: "1px 6px" }}>
-                  {s2.agree ? "★ RAFFORZATO: meteo + news nella stessa direzione" : `forza ${s2.strength} (solo meteo)`}
+                  {s2.agree ? "★ REINFORCED: weather and news point the same way" : `strength ${s2.strength} (weather only)`}
                 </span>
               </div>
             ))}
           </div>
-          <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6 }}>★ = più fonti indipendenti concordano: il segnale pesa di più. Apri prima il tab News per includere la correlazione.</div>
+          <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6 }}>★ means two independent sources agree, so the signal counts for more. Open the News tab first to include them.</div>
         </Panel>
       )}
       <Panel>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-          <Lbl><CloudSun size={11} style={{ verticalAlign: "-1px" }} /> ANOMALIE CLIMATICHE vs NORMA (14 GIORNI) · CAUSA → EFFETTO</Lbl>
-          <Btn small ghost onClick={load}><RefreshCw size={11} /> Aggiorna</Btn>
+          <Lbl><CloudSun size={11} style={{ verticalAlign: "-1px" }} /> WEATHER VERSUS NORMAL (NEXT 14 DAYS) · CAUSE → EFFECT</Lbl>
+          <Btn small ghost onClick={load}><RefreshCw size={11} /> Refresh</Btn>
         </div>
         {err && <div style={{ ...mono, fontSize: 11, color: T.red, marginTop: 8 }}>{err}</div>}
         <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
@@ -187,12 +187,12 @@ export function MeteoTab({ news = [], data: given = null }) {
               </div>
             );
           })}
-          {!data && !err && <div style={{ ...mono, fontSize: 12, color: T.mut }}>Carico previsioni…</div>}
+          {!data && !err && <div style={{ ...mono, fontSize: 12, color: T.mut }}>Loading the forecast…</div>}
         </div>
       </Panel>
       {data && (
         <Panel style={{ marginTop: 10 }}>
-          <Lbl>REGIONI MONITORATE</Lbl>
+          <Lbl>REGIONS BEING WATCHED</Lbl>
           <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
             {REGIONS.map((rg) => {
               const d = data[rg.id];
@@ -204,7 +204,7 @@ export function MeteoTab({ news = [], data: given = null }) {
                 <div key={rg.id} style={{ padding: "9px 11px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 6 }}>
                     <div style={{ fontWeight: 700, color: T.ink, fontSize: 13 }}>{rg.name} <span style={{ ...mono, fontSize: 10, color: T.blue }}>{rg.affects.join(" · ")}</span></div>
-                    <div style={{ ...mono, fontSize: 11, color: T.mut }}>Tmax med {tmaxAvg.toFixed(0)}°C · {hot}g ≥34°C · pioggia {rain.toFixed(0)}mm/14g</div>
+                    <div style={{ ...mono, fontSize: 11, color: T.mut }}>avg high {tmaxAvg.toFixed(0)}°C · {hot} days ≥34°C · {rain.toFixed(0)}mm rain in 14 days</div>
                   </div>
                   <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 3 }}>{rg.phase}</div>
                   <div style={{ display: "flex", gap: 2, marginTop: 6 }}>
@@ -217,13 +217,13 @@ export function MeteoTab({ news = [], data: given = null }) {
             })}
           </div>
           <div style={{ display: "flex", gap: 12, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
-            <span style={{ ...mono, fontSize: 10, color: T.dim }}>LEGENDA (ogni tacca = 1 giorno, 14 giorni):</span>
-            {[["#3a4a5a", "mite <28°C"], ["#8a7434", "caldo 28-33°C"], ["#e8b545", "molto caldo 33-36°C"], ["#d66a5a", "estremo ≥36°C"]].map(([c, l]) => (
+            <span style={{ ...mono, fontSize: 10, color: T.dim }}>KEY (one mark per day, 14 days):</span>
+            {[["#3a4a5a", "mild, under 28°C"], ["#8a7434", "warm, 28-33°C"], ["#b8860b", "hot, 33-36°C"], ["#c0392b", "extreme, 36°C and up"]].map(([c, l]) => (
               <span key={l} style={{ ...mono, fontSize: 10, color: T.mut, display: "inline-flex", gap: 4, alignItems: "center" }}>
                 <span style={{ width: 10, height: 10, borderRadius: 2, background: c, display: "inline-block" }} /> {l}
               </span>
             ))}
-            <span style={{ ...mono, fontSize: 10, color: T.dim }}>· più la tacca è piena/opaca, più pioggia · fonte open-meteo.com</span>
+            <span style={{ ...mono, fontSize: 10, color: T.dim }}>· the more solid the mark, the more rain · source open-meteo.com</span>
           </div>
         </Panel>
       )}
@@ -288,7 +288,7 @@ export function WhyThisTrade({ fused, title = "WHY THIS TRADE", note }) {
       {/* ---- always visible: verdict, the two numbers, the narrative ---- */}
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         <Lbl>{title}</Lbl>
-        <span style={{ ...mono, fontSize: 10, fontWeight: 800, color: "#14181d", background: st.c, borderRadius: 4, padding: "2px 7px", letterSpacing: "0.08em" }}>
+        <span style={{ ...mono, fontSize: 10, fontWeight: 800, color: T.onAccent, background: st.c, borderRadius: 4, padding: "2px 7px", letterSpacing: "0.08em" }}>
           {st.label}
         </span>
         <span style={{ ...mono, fontSize: 11, color: T.mut }}>{st.meaning}</span>
@@ -317,7 +317,7 @@ export function WhyThisTrade({ fused, title = "WHY THIS TRADE", note }) {
               <div style={{
                 ...(narrow
                   ? { position: "static", marginTop: 6 }
-                  : { position: "absolute", top: "100%", left: 0, right: 0, marginTop: 4, zIndex: 20, boxShadow: "0 6px 18px rgba(0,0,0,0.45)" }),
+                  : { position: "absolute", top: "100%", left: 0, right: 0, marginTop: 4, zIndex: 20, boxShadow: `0 6px 18px rgba(0,0,0,${T.dark ? 0.45 : 0.14})` }),
                 background: T.panel, border: `1px solid ${col}66`, borderRadius: 6, padding: "8px 10px",
               }}>
                 <div style={{ fontSize: 12, color: T.body, lineHeight: 1.5 }}>{cp.why}</div>
@@ -391,10 +391,10 @@ export function OrderTicket({ creds, legs, expKey, ticker, buildOcc, quoteFn, es
       const mlegs = legs.map((l) => {
         const q = quoteFn ? quoteFn(l) : null;
         const occ = q?.occ || (expKey ? buildOcc(ticker, expKey, l.type, l.strike) : null);
-        if (!occ) throw new Error("seleziona una scadenza reale della chain");
+        if (!occ) throw new Error("pick a real expiry from the chain first");
         return { symbol: occ, ratio_qty: String(l.qty), side: l.side > 0 ? "buy" : "sell", position_intent: l.side > 0 ? "buy_to_open" : "sell_to_open" };
       });
-      if (mlegs.length > 4) throw new Error("Alpaca accetta max 4 gambe per ordine: dividi la strategia");
+      if (mlegs.length > 4) throw new Error("Alpaca takes at most 4 legs per order: split the strategy in two");
       let body;
       if (mlegs.length === 1) {
         // singola gamba: ordine semplice (mleg richiede 2-4 gambe)
@@ -406,27 +406,27 @@ export function OrderTicket({ creds, legs, expKey, ticker, buildOcc, quoteFn, es
       }
       const o = await alpacaReq("/v2/orders", "POST", body);
       if (onSent) onSent(o, cfg);
-      setMsg(`Ordine ${cfg.type.toUpperCase()} x${cfg.qty} inviato ad Alpaca PAPER ✓ · id ${o.id?.slice(0, 8)}… · stato ${o.status}`);
-    } catch (e) { setMsg(`Invio ordine fallito: ${e.message}`); }
+      setMsg(`${cfg.type === "limit" ? "Limit" : "Market"} order ×${cfg.qty} sent to your Alpaca paper account · id ${o.id?.slice(0, 8)}… · ${o.status}`);
+    } catch (e) { setMsg(`The order was not sent: ${e.message}`); }
     setBusy(false);
   };
   return (
     <div style={{ marginTop: 12, padding: "10px 12px", background: T.bg, border: `1px solid ${T.violet}44`, borderRadius: 7 }}>
-      <Lbl>ORDER TICKET · ALPACA PAPER (multileg)</Lbl>
+      <Lbl>SEND THE ORDER · ALPACA PAPER ACCOUNT</Lbl>
       <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
         <div><div style={{ ...mono, fontSize: 9.5, color: T.dim }}>QTY</div><Inp type="number" min={1} max={20} value={cfg.qty} onChange={(e) => setCfg({ ...cfg, qty: Math.max(1, +e.target.value) })} style={{ width: 56 }} /></div>
-        <div><div style={{ ...mono, fontSize: 9.5, color: T.dim }}>TIPO</div>
-          <Sel value={cfg.type} onChange={(e) => setCfg({ ...cfg, type: e.target.value })}><option value="limit">Limit (netto)</option><option value="market">Market</option></Sel></div>
+        <div><div style={{ ...mono, fontSize: 9.5, color: T.dim }}>ORDER TYPE</div>
+          <Sel value={cfg.type} onChange={(e) => setCfg({ ...cfg, type: e.target.value })}><option value="limit">Limit — set my price</option><option value="market">Market — take what is there</option></Sel></div>
         {cfg.type === "limit" && (
-          <div><div style={{ ...mono, fontSize: 9.5, color: T.dim }}>LIMIT NETTO $ (mid: {estNet != null ? Math.abs(estNet).toFixed(2) : "—"})</div>
+          <div><div style={{ ...mono, fontSize: 9.5, color: T.dim }}>MY PRICE $ (market is {estNet != null ? Math.abs(estNet).toFixed(2) : "—"})</div>
             <Inp type="number" step="0.01" value={cfg.limit} onChange={(e) => setCfg({ ...cfg, limit: e.target.value })} style={{ width: 90 }} /></div>
         )}
-        <div><div style={{ ...mono, fontSize: 9.5, color: T.dim }}>TIF</div>
-          <Sel value={cfg.tif} onChange={(e) => setCfg({ ...cfg, tif: e.target.value })}><option value="day">Day</option><option value="gtc">GTC</option></Sel></div>
+        <div><div style={{ ...mono, fontSize: 9.5, color: T.dim }}>HOW LONG IT STANDS</div>
+          <Sel value={cfg.tif} onChange={(e) => setCfg({ ...cfg, tif: e.target.value })}><option value="day">Today only</option><option value="gtc">Until I cancel</option></Sel></div>
         <Btn color={confirm ? T.red : T.violet} onClick={send} disabled={busy || !preview.pass}>
-          <Send size={12} /> {busy ? "Invio…" : !preview.pass ? "BLOCCATO DAL RISK GATE" : confirm ? "CONFERMA INVIO?" : "Invia ordine"}
+          <Send size={12} /> {busy ? "Sending…" : !preview.pass ? "BLOCKED BY THE RISK GATE" : confirm ? "TAP AGAIN TO CONFIRM" : "Send the order"}
         </Btn>
-        {confirm && <Btn small ghost onClick={() => setConfirm(false)}>Annulla</Btn>}
+        {confirm && <Btn small ghost onClick={() => setConfirm(false)}>Cancel</Btn>}
       </div>
       {!preview.pass && (
         <div style={{ display: "grid", gap: 3, marginTop: 7 }}>
@@ -438,7 +438,7 @@ export function OrderTicket({ creds, legs, expKey, ticker, buildOcc, quoteFn, es
       {preview.warnings.map((w) => (
         <div key={w.code} style={{ ...mono, fontSize: 10.5, color: T.amber, marginTop: 5 }}>⚠ {w.message}</div>
       ))}
-      <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6 }}>Solo paper. Limit sul prezzo NETTO della combinazione (debit positivo). Doppia conferma obbligatoria, e ogni ordine passa da src/riskGate.js.</div>
+      <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6 }}>Paper account only. The price is for the whole combination, not one leg. Every order asks you twice, and every order goes through the risk gate first.</div>
     </div>
   );
 }
@@ -454,11 +454,11 @@ export function AlpacaDesk({ creds, setMsg, gate }) {
         alpacaReq("/v2/orders?status=open&limit=30&nested=true"),
       ]);
       setPos(p); setOrds(o);
-    } catch (e) { setMsg(`Sync Alpaca fallita: ${e.message}`); }
+    } catch (e) { setMsg(`Could not sync with Alpaca: ${e.message}`); }
     setBusy(false);
   };
   useEffect(() => { sync(); }, []); // eslint-disable-line
-  const cancel = async (id) => { try { await alpacaReq(`/v2/orders/${id}`, "DELETE"); setMsg("Ordine cancellato ✓"); sync(); } catch (e) { setMsg(e.message); } };
+  const cancel = async (id) => { try { await alpacaReq(`/v2/orders/${id}`, "DELETE"); setMsg("Order cancelled."); sync(); } catch (e) { setMsg(e.message); } };
   // Chiusura strategia intera: 1) cancella ordini aperti sugli stessi contratti (evita "wash trade detected")
   // 2) invia UN ordine complesso di chiusura (mleg) — mai gambe separate
   const closeGroup = async (grp) => {
@@ -470,7 +470,7 @@ export function AlpacaDesk({ creds, setMsg, gate }) {
         legs: grp.items.map((x) => ({ side: +x.qty > 0 ? 1 : -1, qty: Math.abs(+x.qty), type: /C\d{8}$/.test(x.symbol) ? "call" : "put" })),
         maxLoss: grp.items.reduce((a, x) => a + Math.abs(+x.cost_basis || 0), 0), contracts: 1,
       });
-      if (!g.pass) { setMsg(`Risk gate: chiusura non inviata. ${g.violations.map((v) => v.message).join(" ")}`); return; }
+      if (!g.pass) { setMsg(`Risk gate: the close was not sent. ${g.violations.map((v) => v.message).join(" ")}`); return; }
       const syms = new Set(grp.items.map((x) => x.symbol));
       for (const o of ords || []) {
         const oSyms = o.order_class === "mleg" ? (o.legs || []).map((l) => l.symbol) : [o.symbol];
@@ -485,17 +485,17 @@ export function AlpacaDesk({ creds, setMsg, gate }) {
         ? { symbol: mlegs[0].symbol, qty: mlegs[0].ratio_qty, side: mlegs[0].side, type: "market", time_in_force: "day" }
         : { order_class: "mleg", qty: "1", type: "market", time_in_force: "day", legs: mlegs.slice(0, 4) };
       await alpacaReq("/v2/orders", "POST", body);
-      setMsg(`Chiusura strategia ${grp.key} inviata come ordine unico ✓`);
+      setMsg(`Closing ${grp.key} — sent as a single order.`);
       setTimeout(sync, 1500);
-    } catch (e) { setMsg(`Chiusura fallita: ${e.message}`); }
+    } catch (e) { setMsg(`The close was not sent: ${e.message}`); }
   };
   return (
     <Panel style={{ marginTop: 10 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-        <Lbl>ALPACA LIVE · POSIZIONI E ORDINI REALI (PAPER)</Lbl>
+        <Lbl>ON YOUR ALPACA PAPER ACCOUNT</Lbl>
         <Btn small ghost onClick={sync} disabled={busy}><RefreshCw size={11} /> Sync</Btn>
       </div>
-      <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6 }}>POSIZIONI APERTE ({pos ? pos.length : "…"})</div>
+      <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6 }}>OPEN POSITIONS ({pos ? pos.length : "…"})</div>
       <div style={{ display: "grid", gap: 6, marginTop: 6 }}>
         {(() => {
           const groups = {};
@@ -509,20 +509,20 @@ export function AlpacaDesk({ creds, setMsg, gate }) {
             <div key={g.key} style={{ padding: "8px 10px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7 }}>
               <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
                 <div style={{ flex: 1, minWidth: 160 }}>
-                  <div style={{ ...mono, fontWeight: 700, color: T.ink, fontSize: 12.5 }}>{g.key} · {g.items.length} gamb{g.items.length === 1 ? "a" : "e"}</div>
+                  <div style={{ ...mono, fontWeight: 700, color: T.ink, fontSize: 12.5 }}>{g.key} · {g.items.length} leg{g.items.length === 1 ? "" : "s"}</div>
                   {g.items.map((x) => (
                     <div key={x.symbol} style={{ ...mono, fontSize: 10, color: T.dim }}>{+x.qty > 0 ? "+" : ""}{x.qty} {x.symbol.slice(-9)} · avg ${(+x.avg_entry_price).toFixed(2)} → ${(+x.current_price).toFixed(2)}</div>
                   ))}
                 </div>
-                <Stat k="P&L STRATEGIA" v={fmt$(g.pl)} c={g.pl >= 0 ? T.green : T.red} />
-                <Btn small ghost color={T.red} onClick={() => closeGroup(g)}><XCircle size={11} /> Chiudi strategia (ordine unico)</Btn>
+                <Stat k="PROFIT NOW" v={fmt$(g.pl)} c={g.pl >= 0 ? T.green : T.red} />
+                <Btn small ghost color={T.red} onClick={() => closeGroup(g)}><XCircle size={11} /> Close the whole trade</Btn>
               </div>
             </div>
           ));
         })()}
-        {pos && pos.length === 0 && <div style={{ ...mono, fontSize: 11, color: T.mut }}>Nessuna posizione su Alpaca.</div>}
+        {pos && pos.length === 0 && <div style={{ ...mono, fontSize: 11, color: T.mut }}>Nothing open on Alpaca.</div>}
       </div>
-      <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 10 }}>ORDINI APERTI ({ords ? ords.length : "…"})</div>
+      <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 10 }}>ORDERS WAITING ({ords ? ords.length : "…"})</div>
       <div style={{ display: "grid", gap: 6, marginTop: 6 }}>
         {(ords || []).map((o) => (
           <div key={o.id} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "8px 10px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7 }}>
@@ -530,10 +530,10 @@ export function AlpacaDesk({ creds, setMsg, gate }) {
               <div style={{ ...mono, fontWeight: 700, color: T.ink, fontSize: 12 }}>{o.order_class === "mleg" ? `MULTILEG x${o.qty} (${(o.legs || []).length} legs)` : `${o.symbol} ${o.side} ${o.qty}`}</div>
               <div style={{ ...mono, fontSize: 10, color: T.dim }}>{o.type}{o.limit_price ? ` @ ${o.limit_price}` : ""} · {o.time_in_force} · {o.status}</div>
             </div>
-            <Btn small ghost color={T.red} onClick={() => cancel(o.id)}><Trash2 size={11} /> Cancella</Btn>
+            <Btn small ghost color={T.red} onClick={() => cancel(o.id)}><Trash2 size={11} /> Cancel</Btn>
           </div>
         ))}
-        {ords && ords.length === 0 && <div style={{ ...mono, fontSize: 11, color: T.mut }}>Nessun ordine aperto.</div>}
+        {ords && ords.length === 0 && <div style={{ ...mono, fontSize: 11, color: T.mut }}>No orders waiting.</div>}
       </div>
     </Panel>
   );
@@ -570,7 +570,7 @@ export async function askAI(_key, messages, contextStr) {
     body: JSON.stringify({
       model: "claude-sonnet-4-6",
       max_tokens: 1200,
-      system: SYSTEM_PROMPT + "\n\nCONTESTO LIVE (JSON):\n" + contextStr,
+      system: SYSTEM_PROMPT + "\n\nLIVE CONTEXT (JSON):\n" + contextStr,
       messages,
     }),
   });
@@ -581,16 +581,16 @@ export async function askAI(_key, messages, contextStr) {
 export function buildContext(ctx) {
   const { store, scan, news, ticker, legs, expKey, A, spot, seasonalSrc } = ctx;
   return JSON.stringify({
-    data: new Date().toISOString().slice(0, 10),
-    ticker_corrente: ticker,
+    date: new Date().toISOString().slice(0, 10),
+    currentTicker: ticker,
     spot,
-    strategia_corrente: A ? { legs, expKey, entry: +(A.entry * 100).toFixed(0), maxProfit: +A.maxProfit.toFixed(0), maxLoss: +A.maxLoss.toFixed(0), breakevens: A.breakevens, greeks: { delta: +A.greeks.delta.toFixed(2), theta: +A.greeks.theta.toFixed(0), vega: +A.greeks.vega.toFixed(0) } } : null,
-    posizioni_paper: store.positions.map((p) => ({ ticker: p.ticker, nome: p.name, legs: p.legs, exp: p.expKey, entry: +(p.entryNet * 100).toFixed(0), maxProfit: +p.maxProfit.toFixed(0), maxLoss: +p.maxLoss.toFixed(0), aperta: p.openedAt.slice(0, 10), thesis: p.thesis || null, timeline: (p.timeline || []).slice(-5).map((e) => e.text) })),
-    scanner: (scan || []).map((s) => ({ tk: s.tk, stagionale_mese_pct: +s.seasonalScore.toFixed(1), sentiment: s.sugg, fonte: s.real ? "storico reale" : "stima",
-      segnale_4_fattori: s.fused ? { score: s.fused.score, confidence: s.fused.confidence, agreement: s.fused.agreement, narrativa: s.fused.narrative } : null })),
-    news_taggate: (news || []).slice(0, 10).map((n) => ({ titolo: n.title, geo: !!n.geo,
-      impatti: (n.impacts || []).map((im) => ({ tk: im.tk, dir: ARROW[im.dir], why: im.why })) })),
-    fonte_stagionalita: seasonalSrc,
+    currentStrategy: A ? { legs, expKey, entry: +(A.entry * 100).toFixed(0), maxProfit: +A.maxProfit.toFixed(0), maxLoss: +A.maxLoss.toFixed(0), breakevens: A.breakevens, greeks: { delta: +A.greeks.delta.toFixed(2), theta: +A.greeks.theta.toFixed(0), vega: +A.greeks.vega.toFixed(0) } } : null,
+    paperPositions: store.positions.map((p) => ({ ticker: p.ticker, name: p.name, legs: p.legs, exp: p.expKey, entry: +(p.entryNet * 100).toFixed(0), maxProfit: +p.maxProfit.toFixed(0), maxLoss: +p.maxLoss.toFixed(0), openedAt: p.openedAt.slice(0, 10), thesis: p.thesis || null, timeline: (p.timeline || []).slice(-5).map((e) => e.text) })),
+    scanner: (scan || []).map((s) => ({ tk: s.tk, seasonalMonthPct: +s.seasonalScore.toFixed(1), sentiment: s.sugg, source: s.real ? "real history" : "estimate",
+      fourFactorSignal: s.fused ? { score: s.fused.score, confidence: s.fused.confidence, agreement: s.fused.agreement, narrative: s.fused.narrative } : null })),
+    taggedNews: (news || []).slice(0, 10).map((n) => ({ title: n.title, geo: !!n.geo,
+      impacts: (n.impacts || []).map((im) => ({ tk: im.tk, dir: ARROW[im.dir], why: im.why })) })),
+    seasonalitySource: seasonalSrc,
   });
 }
 export function CopilotTab({ ctx, apiKey }) {
@@ -600,7 +600,7 @@ export function CopilotTab({ ctx, apiKey }) {
   const [err, setErr] = useState(null);
   const send = async (text) => {
     if (!text.trim() || busy) return;
-    if (!apiKey) { setErr("Inserisci la tua Anthropic API key in Paper → Integrazioni."); return; }
+    if (!apiKey) { setErr("Add your Anthropic API key in Positions → Integrations."); return; }
     setErr(null);
     const next = [...msgs, { role: "user", content: text }];
     setMsgs(next); setInput(""); setBusy(true);
@@ -613,26 +613,26 @@ export function CopilotTab({ ctx, apiKey }) {
   return (
     <div style={{ marginTop: 12 }}>
       <Panel>
-        <Lbl><Sparkles size={11} style={{ verticalAlign: "-1px" }} /> COPILOT AI · SKILL TRADER PRECARICATE · CONTESTO LIVE INIETTATO</Lbl>
+        <Lbl><Sparkles size={11} style={{ verticalAlign: "-1px" }} /> AI COPILOT · IT ALREADY KNOWS YOUR POSITIONS</Lbl>
         <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
           {SKILLS.map((s) => <Btn key={s.id} small ghost color={T.blue} onClick={() => send(s.prompt)} disabled={busy}>{s.label}</Btn>)}
         </div>
         <div style={{ marginTop: 12, display: "grid", gap: 8, maxHeight: 420, overflowY: "auto" }}>
-          {msgs.length === 0 && <div style={{ ...mono, fontSize: 11.5, color: T.mut }}>Usa una skill sopra o scrivi una domanda. Il copilot conosce già: posizioni paper, strategia nel Builder, scanner stagionale, news taggate e le tue regole di rischio.</div>}
+          {msgs.length === 0 && <div style={{ ...mono, fontSize: 11.5, color: T.mut }}>Pick one above or just ask. The copilot already knows your open positions, the trade in the Builder, the seasonal scanner, the tagged news and your own risk rules.</div>}
           {msgs.map((m, i) => (
             <div key={i} style={{ padding: "9px 11px", borderRadius: 7, background: m.role === "user" ? `${T.blue}14` : T.bg, border: `1px solid ${m.role === "user" ? T.blue + "44" : T.line}` }}>
-              <div style={{ ...mono, fontSize: 9, color: m.role === "user" ? T.blue : T.amber, marginBottom: 3 }}>{m.role === "user" ? "TU" : "COPILOT"}</div>
+              <div style={{ ...mono, fontSize: 9, color: m.role === "user" ? T.blue : T.amber, marginBottom: 3 }}>{m.role === "user" ? "YOU" : "COPILOT"}</div>
               <div style={{ fontSize: 13, color: T.body, whiteSpace: "pre-wrap" }}>{m.content}</div>
             </div>
           ))}
-          {busy && <div style={{ ...mono, fontSize: 11, color: T.amber }}>Il copilot sta analizzando…</div>}
+          {busy && <div style={{ ...mono, fontSize: 11, color: T.amber }}>Thinking…</div>}
         </div>
         {err && <div style={{ ...mono, fontSize: 11, color: T.red, marginTop: 8 }}>{err}</div>}
         <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
-          <Inp value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send(input)} placeholder="Chiedi al copilot… (Invio per inviare)" style={{ flex: 1 }} />
+          <Inp value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send(input)} placeholder="Ask a question… (Enter to send)" style={{ flex: 1 }} />
           <Btn onClick={() => send(input)} disabled={busy}><Send size={13} /></Btn>
         </div>
-        <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6 }}>La tua API key resta nel browser e transita solo verso api.anthropic.com via proxy. Analisi educativa su paper, non consulenza finanziaria.</div>
+        <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6 }}>Educational analysis on a paper account, not financial advice.</div>
       </Panel>
     </div>
   );
@@ -643,30 +643,30 @@ export function CopilotTab({ ctx, apiKey }) {
 ================================================================ */
 export function buildReportMd(ctx, weatherSig, aiText) {
   const { store, scan, news, seasonalSrc } = ctx;
-  const d = new Date().toLocaleString("it-IT");
+  const d = new Date().toLocaleString("en-GB");
   const L = [];
-  L.push(`# Report Operativo Commodity Options — ${d}\n`);
-  L.push(`## 1 · Opportunità (scanner stagionale)`);
-  (scan || []).slice(0, 3).forEach((s, i) => L.push(`${i + 1}. **${s.tk}** — stagionale ${s.seasonalScore > 0 ? "+" : ""}${s.seasonalScore.toFixed(1)}%/m (${s.real ? "storico reale" : "stima"}) → bias **${s.sugg.toUpperCase()}**`));
-  L.push(`\n## 2 · Posizioni & segnali regole (${ruleBadge()})`);
-  if (!store.positions.length) L.push("Nessuna posizione paper aperta.");
+  L.push(`# Commodity Options Report — ${d}\n`);
+  L.push(`## 1 · Opportunities (seasonal scanner)`);
+  (scan || []).slice(0, 3).forEach((s, i) => L.push(`${i + 1}. **${s.tk}** — seasonal ${s.seasonalScore > 0 ? "+" : ""}${s.seasonalScore.toFixed(1)}%/mo (${s.real ? "real history" : "estimate"}) → leaning **${s.sugg.toUpperCase()}**`));
+  L.push(`\n## 2 · Positions against the rules (${ruleBadge()})`);
+  if (!store.positions.length) L.push("No open positions.");
   store.positions.forEach((p) => {
     const dte = Math.max(0, Math.round((new Date(p.expiry) - Date.now()) / 86400000));
-    L.push(`- **${p.ticker} · ${p.name}** — exp ${p.expKey || "n/d"} (${dte} DTE)${dte <= RULES.exitDTE ? ` ⚠ **≤${RULES.exitDTE} DTE: valuta chiusura/roll**` : ""} · entry ${fmt$(Math.abs(p.entryNet) * 100)} · maxP ${fmt$(p.maxProfit)} / maxL ${fmt$(p.maxLoss)}`);
+    L.push(`- **${p.ticker} · ${p.name}** — expires ${p.expKey || "n/a"} (${dte} days)${dte <= RULES.exitDTE ? ` ⚠ **${RULES.exitDTE} days or fewer: close or roll**` : ""} · opened at ${fmt$(Math.abs(p.entryNet) * 100)} · can make ${fmt$(p.maxProfit)} / can lose ${fmt$(p.maxLoss)}`);
   });
   if (store.positions.length) {
     const totRisk = store.positions.reduce((a, p) => a + Math.abs(p.maxLoss), 0);
     const totMaxP = store.positions.reduce((a, p) => a + Math.max(0, p.maxProfit), 0);
-    L.push(`\n**Portafoglio:** capitale a rischio ${fmt$(totRisk)} · max profit potenziale ${fmt$(totMaxP)}`);
+    L.push(`\n**Across everything:** ${fmt$(totRisk)} at risk · up to ${fmt$(totMaxP)} to be made`);
   }
-  L.push(`\n## 3 · News rilevanti (tag causa→effetto, incl. geopolitica/governi)`);
+  L.push(`\n## 3 · Headlines that matter (cause → effect, politics included)`);
   (news || []).filter((n) => (n.impacts || []).length).slice(0, 8).forEach((n) => {
     L.push(`- ${n.title} ${n.geo ? "🏛" : ""}\n  ${(n.impacts || []).map((im) => `**${im.tk} ${ARROW[im.dir]}** (${im.why})`).join(" · ")}`);
   });
-  L.push(`\n## 4 · Clima → commodity (14 giorni)`);
+  L.push(`\n## 4 · Weather → commodities (next 14 days)`);
   (weatherSig || []).forEach((s) => L.push(`- **${s.tks.join("+")} ${s.dir}** — ${s.region}: ${s.why}`));
-  if (aiText) { L.push(`\n## 5 · Analisi del copilot AI`); L.push(aiText); }
-  L.push(`\n---\n_Fonte stagionalità: ${seasonalSrc}. Paper trading only. Non è consulenza finanziaria._`);
+  if (aiText) { L.push(`\n## 5 · The copilot\u2019s read`); L.push(aiText); }
+  L.push(`\n---\n_Seasonality source: ${seasonalSrc}. Paper trading only. Educational software, not financial advice._`);
   return L.join("\n");
 }
 function svgPayoff(legs, entryNet, S0) {
@@ -688,7 +688,7 @@ export function exportPdf(ctx, md) {
     <div class="pos"><h3>${p2.ticker} · ${p2.name}</h3>
       ${svgPayoff(p2.legs, p2.entryNet, p2.entrySpot)}
       <p class="m">${p2.legs.map((l) => `${l.side > 0 ? "+" : "−"}${l.qty} ${l.strike}${l.type === "call" ? "C" : "P"}`).join(" / ")} · exp ${p2.expKey || "n/d"} · max profit $${p2.maxProfit?.toFixed(0)} · max loss $${Math.abs(p2.maxLoss)?.toFixed(0)}</p>
-      ${(p2.timeline || []).slice(-4).map((e) => `<p class="tl">${new Date(e.t).toLocaleDateString("it-IT")} · ${e.text.replace(/\[approva:.*?\]/, "")}</p>`).join("")}
+      ${(p2.timeline || []).slice(-4).map((e) => `<p class="tl">${new Date(e.t).toLocaleDateString("en-GB")} · ${e.text.replace(/\[approva:.*?\]/, "")}</p>`).join("")}
     </div>`).join("");
   const body = md
     .replace(/^# (.*)$/gm, "<h1>$1</h1>").replace(/^## (.*)$/gm, "<h2>$1</h2>")
@@ -701,8 +701,8 @@ export function exportPdf(ctx, md) {
     h3{font-size:13px;margin:14px 0 4px} li{font-size:12.5px} .m{font-family:monospace;font-size:11px;color:#555;margin:4px 0}
     .tl{font-family:monospace;font-size:10.5px;color:#777;margin:2px 0} .pos{page-break-inside:avoid;border:1px solid #ddd;border-radius:6px;padding:10px 14px;margin:10px 0}
     @media print {.noprint{display:none}}</style></head><body>
-    <button class="noprint" onclick="window.print()" style="padding:8px 14px;margin-bottom:14px;cursor:pointer">🖨 Stampa / Salva come PDF</button>
-    ${body}<h2>Dettaglio posizioni (payoff)</h2>${posHtml || "<p>Nessuna posizione aperta.</p>"}
+    <button class="noprint" onclick="window.print()" style="padding:8px 14px;margin-bottom:14px;cursor:pointer">🖨 Print or save as PDF</button>
+    ${body}<h2>Positions in detail</h2>${posHtml || "<p>No open positions.</p>"}
     </body></html>`);
   w.document.close();
 }
@@ -720,8 +720,8 @@ export function ReportTab({ ctx, apiKey, setSetting }) {
     try { wsig = weatherSignals(await fetchWeather()); } catch { /* meteo opzionale */ }
     let ai = null;
     if (useAI && apiKey) {
-      try { ai = await askAI(apiKey, [{ role: "user", content: "Genera la sezione narrativa del report periodico: sintesi operativa della settimana, priorità sulle posizioni, 2 opportunità dal radar, rischi geopolitici/meteo da monitorare. Max 250 parole, elenco puntato." }], buildContext(ctx)); }
-      catch (e) { ai = `(analisi AI non disponibile: ${e.message})`; }
+      try { ai = await askAI(apiKey, [{ role: "user", content: "Write the narrative section of the periodic report: what happened this week, what to prioritise on the open positions, two opportunities from the radar, and the political or weather risks to watch. Bullet points, 250 words maximum." }], buildContext(ctx)); }
+      catch (e) { ai = `(the copilot could not be reached: ${e.message})`; }
     }
     const out = buildReportMd(ctx, wsig, ai);
     setMd(out);
@@ -739,40 +739,40 @@ export function ReportTab({ ctx, apiKey, setSetting }) {
   };
   const toWebhook = async () => {
     try {
-      await fetch(store.settings.webhook, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ subject: "Report Commodity Options", markdown: md, generatedAt: new Date().toISOString() }) });
-      ctx.setMsg("Report inviato al webhook ✓ (Zapier/Make lo può girare via email)");
-    } catch (e) { ctx.setMsg(`Webhook fallito: ${e.message}`); }
+      await fetch(store.settings.webhook, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ subject: "Commodity Options Report", markdown: md, generatedAt: new Date().toISOString() }) });
+      ctx.setMsg("Report sent to your webhook.");
+    } catch (e) { ctx.setMsg(`The webhook failed: ${e.message}`); }
   };
   return (
     <div style={{ marginTop: 12 }}>
       <Panel>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-          <Lbl><FileText size={11} style={{ verticalAlign: "-1px" }} /> REPORT CENTER · ROUTINE {cfg.freq === "daily" ? "GIORNALIERA" : "SETTIMANALE"} {isDue ? "· ⚠ IN SCADENZA" : "· ✓ AGGIORNATO"}</Lbl>
+          <Lbl><FileText size={11} style={{ verticalAlign: "-1px" }} /> REPORTS · {cfg.freq === "daily" ? "DAILY" : "WEEKLY"} {isDue ? "· ⚠ DUE NOW" : "· ✓ UP TO DATE"}</Lbl>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             <Sel value={cfg.freq} onChange={(e) => setSetting("reportFreq", e.target.value)}>
-              <option value="daily">Ogni giorno</option><option value="weekly">Ogni settimana</option>
+              <option value="daily">Every day</option><option value="weekly">Every week</option>
             </Sel>
-            <Btn small onClick={gen} disabled={busy}><RefreshCw size={11} /> {busy ? "Genero…" : "Genera ora"}</Btn>
+            <Btn small onClick={gen} disabled={busy}><RefreshCw size={11} /> {busy ? "Writing…" : "Write it now"}</Btn>
           </div>
         </div>
         <div style={{ display: "flex", gap: 12, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
           <label style={{ ...mono, fontSize: 11, color: T.mut, display: "flex", gap: 6, alignItems: "center" }}>
-            <input type="checkbox" checked={useAI} onChange={(e) => setUseAI(e.target.checked)} /> includi analisi copilot AI
+            <input type="checkbox" checked={useAI} onChange={(e) => setUseAI(e.target.checked)} /> include the copilot's read
           </label>
-          <span style={{ ...mono, fontSize: 10, color: T.dim }}>ultimo: {cfg.last ? new Date(cfg.last).toLocaleString("it-IT") : "mai"}</span>
+          <span style={{ ...mono, fontSize: 10, color: T.dim }}>last one: {cfg.last ? new Date(cfg.last).toLocaleString("en-GB") : "never"}</span>
         </div>
         <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6 }}>
-          Sezioni: opportunità scanner · segnali regole sulle posizioni · news taggate (geo/governi incluse) · clima→commodity · narrativa AI opzionale. Alla riapertura dell'app, se la routine è scaduta, il report si rigenera da solo.
+          Each report covers: scanner opportunities, your positions against the rules, tagged headlines, weather effects, and optionally the copilot's read. It rewrites itself when you reopen the app and one is due.
         </div>
       </Panel>
       {md && (
         <Panel style={{ marginTop: 10 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-            <Lbl>ANTEPRIMA</Lbl>
+            <Lbl>PREVIEW</Lbl>
             <div style={{ display: "flex", gap: 6 }}>
               <Btn small ghost onClick={download}><Download size={11} /> .md</Btn>
-              <Btn small color={T.amber} onClick={() => exportPdf(ctx, md)}><FileText size={11} /> Esporta PDF</Btn>
-              {store.settings.webhook && <Btn small ghost color={T.violet} onClick={toWebhook}><Send size={11} /> Invia a webhook</Btn>}
+              <Btn small color={T.amber} onClick={() => exportPdf(ctx, md)}><FileText size={11} /> Export PDF</Btn>
+              {store.settings.webhook && <Btn small ghost color={T.violet} onClick={toWebhook}><Send size={11} /> Send to webhook</Btn>}
             </div>
           </div>
           <pre style={{ ...mono, fontSize: 11.5, color: T.body, whiteSpace: "pre-wrap", marginTop: 10, maxHeight: 460, overflowY: "auto" }}>{md}</pre>
@@ -825,14 +825,14 @@ export function computeTIS(pos, cur) {
   // 1) PoP vs entry (40)
   let popPts = 20;
   if (th.pop != null && cur.pop != null && th.pop > 0) popPts = Math.round(Math.max(0, Math.min(1.2, cur.pop / th.pop)) / 1.2 * 40);
-  comp.push({ k: "Probabilità di profitto", pts: popPts, max: 40, note: cur.pop != null ? `${(cur.pop * 100).toFixed(0)}% ora vs ${th.pop != null ? (th.pop * 100).toFixed(0) : "?"}% all'ingresso` : "n/d" });
+  comp.push({ k: "Chance of profit", pts: popPts, max: 40, note: cur.pop != null ? `${(cur.pop * 100).toFixed(0)}% now versus ${th.pop != null ? (th.pop * 100).toFixed(0) : "?"}% when you opened it` : "n/a" });
   // 2) Stagionalità (20)
   let seaPts = 10;
   if (th.seasonal != null && cur.seasonalNow != null) {
     const same = Math.sign(th.seasonal) === Math.sign(cur.seasonalNow) || th.seasonal === 0;
     seaPts = same ? (Math.abs(cur.seasonalNow) >= Math.abs(th.seasonal) * 0.5 ? 20 : 12) : 4;
   }
-  comp.push({ k: "Regime stagionale", pts: seaPts, max: 20, note: `entry ${th.seasonal?.toFixed?.(1) ?? "?"}%/m → ora ${cur.seasonalNow?.toFixed?.(1) ?? "?"}%/m` });
+  comp.push({ k: "Season", pts: seaPts, max: 20, note: `${th.seasonal?.toFixed?.(1) ?? "?"}%/mo when you opened it → ${cur.seasonalNow?.toFixed?.(1) ?? "?"}%/mo now` });
   // 3) IV a favore (20): vega+ vuole IV su, vega- IV giù
   let ivPts = 10;
   if (th.iv != null && cur.ivNow != null && cur.vegaSign) {
@@ -840,10 +840,10 @@ export function computeTIS(pos, cur) {
     const fav = cur.vegaSign * dIV;
     ivPts = fav > 0.01 ? 20 : fav < -0.02 ? 2 : 10;
   }
-  comp.push({ k: "Volatilità implicita", pts: ivPts, max: 20, note: `IV ${th.iv != null ? (th.iv * 100).toFixed(0) : "?"}% → ${cur.ivNow != null ? (cur.ivNow * 100).toFixed(0) : "?"}% (vega ${cur.vegaSign > 0 ? "+" : "−"})` });
+  comp.push({ k: "Market nerves", pts: ivPts, max: 20, note: `${th.iv != null ? (th.iv * 100).toFixed(0) : "?"}% → ${cur.ivNow != null ? (cur.ivNow * 100).toFixed(0) : "?"}%, and this trade ${cur.vegaSign > 0 ? "wants that to rise" : "wants that to fall"}` });
   // 4) Tempo (20)
   const dtePts = cur.dteLeft > RULES.exitDTE * 2 ? 20 : cur.dteLeft > RULES.exitDTE ? 10 : 0;
-  comp.push({ k: "Margine temporale", pts: dtePts, max: 20, note: `${cur.dteLeft} DTE (regola exit ≤${RULES.exitDTE})` });
+  comp.push({ k: "Time left", pts: dtePts, max: 20, note: `${cur.dteLeft} days (the rule closes it at ${RULES.exitDTE})` });
   const tis = comp.reduce((a, c) => a + c.pts, 0);
   return { tis, comp };
 }
@@ -891,7 +891,7 @@ export function GuardianPanel({ pos, spot, dteLeft, ivNow, sigma, seasonalNow, p
   const { tis, comp } = computeTIS(pos, { pop: popNow, ivNow, seasonalNow, dteLeft, vegaSign });
   const tisColor = tis >= 70 ? T.green : tis >= 40 ? T.amber : T.red;
   useEffect(() => {
-    if (tis < 40) logEvent(pos.id, "tis-low", `TIS ${tis}/100: tesi indebolita — valuta riduzione/chiusura`);
+    if (tis < 40) logEvent(pos.id, "tis-low", `The reason you opened this has weakened to ${tis}/100 — consider trimming or closing`);
   }, [tis]); // eslint-disable-line
   const runSim = () => {
     setBusy(true);
@@ -903,26 +903,26 @@ export function GuardianPanel({ pos, spot, dteLeft, ivNow, sigma, seasonalNow, p
       // Ogni gradino della scala e' un ordine su Alpaca: passa dal cancello.
       const g = runGate(gate, { intent: "close", ticker: pos.ticker, legs: pos.legs,
         dte: dteLeft, contracts: 1, maxLoss: pos.maxLoss, maxProfit: pos.maxProfit, pnl: pnlNow });
-      if (!g.pass) { setMsg(`Risk gate: ${label} non inviato. ${g.violations.map((v) => v.message).join(" ")}`); setLadderBusy(null); return; }
+      if (!g.pass) { setMsg(`Risk gate: the ${label} order was not sent. ${g.violations.map((v) => v.message).join(" ")}`); setLadderBusy(null); return; }
       for (const w of g.warnings) logEvent(pos.id, "gate-warning", w.message);
       const net = ladderNet(pos.entryNet, targetPnl);
       const mlegs = pos.legs.map((l) => {
         const q = quoteFn ? quoteFn(l) : null;
         const occ = q?.occ || (pos.expKey ? buildOcc(pos.ticker, pos.expKey, l.type, l.strike) : null);
-        if (!occ) throw new Error("serve chain reale per i simboli OCC");
+        if (!occ) throw new Error("live prices are needed to name the contracts");
         return { symbol: occ, ratio_qty: String(l.qty), side: l.side > 0 ? "sell" : "buy", position_intent: l.side > 0 ? "sell_to_close" : "buy_to_close" };
       });
       let body;
       if (mlegs.length === 1) {
         body = { symbol: mlegs[0].symbol, qty: mlegs[0].ratio_qty, side: mlegs[0].side, type: "limit", time_in_force: "gtc", limit_price: (Math.abs(net) / (+mlegs[0].ratio_qty || 1)).toFixed(2) };
-      } else if (mlegs.length > 4) { throw new Error("max 4 gambe per ordine Alpaca"); }
+      } else if (mlegs.length > 4) { throw new Error("Alpaca takes at most 4 legs per order"); }
       else {
         body = { order_class: "mleg", qty: "1", type: "limit", time_in_force: "gtc", limit_price: Math.abs(net).toFixed(2), legs: mlegs };
       }
       const o = await alpacaReq("/v2/orders", "POST", body);
-      setMsg(`Exit ladder ${label} piazzato GTC @ netto $${Math.abs(net).toFixed(2)} ✓ (${o.id?.slice(0, 8)}…)`);
-      logEvent(pos.id, "ladder", `Ordine ${label} GTC @ $${Math.abs(net).toFixed(2)}`);
-    } catch (e) { setMsg(`Ladder ${label} fallito: ${e.message}`); }
+      setMsg(`${label} exit order placed at $${Math.abs(net).toFixed(2)}, standing until you cancel it (${o.id?.slice(0, 8)}…)`);
+      logEvent(pos.id, "ladder", `${label} exit order placed at $${Math.abs(net).toFixed(2)}`);
+    } catch (e) { setMsg(`The ${label} exit order failed: ${e.message}`); }
     setLadderBusy(null);
   };
   const pct = pos.maxProfit > 0 && pnlNow != null ? Math.max(-100, Math.min(130, (pnlNow / pos.maxProfit) * 100)) : null;
@@ -930,7 +930,7 @@ export function GuardianPanel({ pos, spot, dteLeft, ivNow, sigma, seasonalNow, p
     <div style={{ marginTop: 8, padding: "10px 12px", background: `${T.bg}`, border: `1px solid ${tisColor}44`, borderRadius: 7 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
         <div>
-          <div style={{ ...mono, fontSize: 9, color: T.dim }}>THESIS INTEGRITY</div>
+          <div style={{ ...mono, fontSize: 9, color: T.dim }}>IS THE REASON STILL GOOD?</div>
           <div style={{ ...mono, fontSize: 22, fontWeight: 800, color: tisColor }}>{tis}<span style={{ fontSize: 11, color: T.dim }}>/100</span></div>
         </div>
         <div style={{ flex: 1, minWidth: 200 }}>
@@ -947,17 +947,17 @@ export function GuardianPanel({ pos, spot, dteLeft, ivNow, sigma, seasonalNow, p
       </div>
       {pct != null && (
         <div style={{ marginTop: 8 }}>
-          <div style={{ ...mono, fontSize: 9, color: T.dim }}>PROGRESSO VS MAX PROFIT · {takeProfitLabel()} · scala-out {scaleOutLabel()}</div>
+          <div style={{ ...mono, fontSize: 9, color: T.dim }}>PROGRESS TOWARDS THE MAXIMUM · {takeProfitLabel()} · rest out at {scaleOutLabel()}</div>
           <div style={{ position: "relative", height: 10, background: T.line, borderRadius: 5, marginTop: 3 }}>
             <div style={{ position: "absolute", left: `${(RULES.takeProfitPct * 100 + 100) / 230 * 100}%`, width: 1, top: -2, bottom: -2, background: T.amber }} title={takeProfitLabel()} />
             <div style={{ position: "absolute", left: `${(RULES.scaleOutPct * 100 + 100) / 230 * 100}%`, width: 1, top: -2, bottom: -2, background: T.green }} title={scaleOutLabel()} />
             <div style={{ width: `${Math.max(0, (pct + 100) / 230 * 100)}%`, height: 10, borderRadius: 5, background: pnlNow >= 0 ? `${T.green}bb` : `${T.red}bb` }} />
           </div>
-          <div style={{ ...mono, fontSize: 10, color: pnlNow >= 0 ? T.green : T.red, marginTop: 2 }}>{pct.toFixed(0)}% del max profit ({fmt$(pnlNow)})</div>
+          <div style={{ ...mono, fontSize: 10, color: pnlNow >= 0 ? T.green : T.red, marginTop: 2 }}>{pct.toFixed(0)}% of the maximum ({fmt$(pnlNow)})</div>
         </div>
       )}
       <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap", alignItems: "center" }}>
-        <Btn small ghost color={T.blue} onClick={runSim} disabled={busy}>{busy ? "Simulo…" : "▶ Exit Path Simulator"}</Btn>
+        <Btn small ghost color={T.blue} onClick={runSim} disabled={busy}>{busy ? "Simulating…" : "▶ How does this end?"}</Btn>
         {alpaca && (<>
           <Btn small ghost color={T.green} onClick={() => placeExit(takeProfitLabel(), RULES.takeProfitPct * pos.maxProfit)} disabled={!!ladderBusy}>GTC {takeProfitLabel()} @ ${Math.abs(ladderNet(pos.entryNet, RULES.takeProfitPct * pos.maxProfit)).toFixed(2)}</Btn>
           <Btn small ghost color={T.green} onClick={() => placeExit(`TP ${scaleOutLabel()}`, RULES.scaleOutPct * pos.maxProfit)} disabled={!!ladderBusy}>GTC TP {scaleOutLabel()} @ ${Math.abs(ladderNet(pos.entryNet, RULES.scaleOutPct * pos.maxProfit)).toFixed(2)}</Btn>
@@ -966,13 +966,13 @@ export function GuardianPanel({ pos, spot, dteLeft, ivNow, sigma, seasonalNow, p
       </div>
       {sim && (
         <div style={{ display: "flex", gap: 14, marginTop: 10, flexWrap: "wrap", padding: "8px 10px", background: `${T.blue}0d`, borderRadius: 6 }}>
-          <Stat k={`P(${takeProfitLabel()} PRIMA)`} v={`${(sim.pTP * 100).toFixed(0)}%`} c={T.green} />
-          <Stat k={`P(${stopLossLabel()} PRIMA)`} v={`${(sim.pSL * 100).toFixed(0)}%`} c={T.red} />
-          <Stat k={`P(EXIT ${exitDTELabel()} +)`} v={`${(sim.pTimePos * 100).toFixed(0)}%`} c={T.green} />
-          <Stat k={`P(EXIT ${exitDTELabel()} −)`} v={`${(sim.pTimeNeg * 100).toFixed(0)}%`} c={T.red} />
-          <Stat k="GIORNI MEDIANI A TP" v={sim.medTPdays ?? "—"} c={T.blue} />
-          <Stat k="P&L ATTESO SEGUENDO LE REGOLE" v={fmt$(sim.evExit)} c={sim.evExit >= 0 ? T.green : T.red} />
-          <Stat k="CHIUDI ORA vs ATTENDI" v={pnlNow != null ? (pnlNow >= sim.evExit ? "→ CHIUDI ORA" : "→ ATTENDI") : "—"} c={T.amber} />
+          <Stat k={`HITS ${takeProfitLabel()} FIRST`} v={`${(sim.pTP * 100).toFixed(0)}%`} c={T.green} />
+          <Stat k={`HITS ${stopLossLabel()} FIRST`} v={`${(sim.pSL * 100).toFixed(0)}%`} c={T.red} />
+          <Stat k={`RUNS TO ${exitDTELabel()} IN PROFIT`} v={`${(sim.pTimePos * 100).toFixed(0)}%`} c={T.green} />
+          <Stat k={`RUNS TO ${exitDTELabel()} AT A LOSS`} v={`${(sim.pTimeNeg * 100).toFixed(0)}%`} c={T.red} />
+          <Stat k="TYPICAL DAYS TO TARGET" v={sim.medTPdays ?? "—"} c={T.blue} />
+          <Stat k="AVERAGE RESULT FOLLOWING THE RULES" v={fmt$(sim.evExit)} c={sim.evExit >= 0 ? T.green : T.red} />
+          <Stat k="TAKE IT NOW OR WAIT?" v={pnlNow != null ? (pnlNow >= sim.evExit ? "→ TAKE IT NOW" : "→ WAIT") : "—"} c={T.amber} />
         </div>
       )}
       {(pos.timeline || []).length > 0 && (
@@ -980,7 +980,7 @@ export function GuardianPanel({ pos, spot, dteLeft, ivNow, sigma, seasonalNow, p
           <div style={{ ...mono, fontSize: 9, color: T.dim }}>TIMELINE</div>
           {(pos.timeline || []).slice(-6).map((e, i) => (
             <div key={i} style={{ ...mono, fontSize: 10, color: T.mut, marginTop: 2 }}>
-              <span style={{ color: T.dim }}>{new Date(e.t).toLocaleDateString("it-IT")}</span> · {e.text}
+              <span style={{ color: T.dim }}>{new Date(e.t).toLocaleDateString("en-GB")}</span> · {e.text}
             </div>
           ))}
         </div>
@@ -1010,29 +1010,29 @@ export function PriceChart({ ticker, levels, breakevens, entrySpot, legLines, he
         ref.current.innerHTML = "";
         chart = createChart(ref.current, {
           height,
-          layout: { background: { color: "#14181d" }, textColor: "#8b95a1", fontFamily: "ui-monospace, Menlo, monospace", fontSize: 10 },
-          grid: { vertLines: { color: "#1f242b" }, horzLines: { color: "#1f242b" } },
-          rightPriceScale: { borderColor: "#2a2f36" },
-          timeScale: { borderColor: "#2a2f36" },
+          layout: { background: { color: T.bg }, textColor: T.mut, fontFamily: "ui-monospace, Menlo, monospace", fontSize: 10 },
+          grid: { vertLines: { color: T.line }, horzLines: { color: T.line } },
+          rightPriceScale: { borderColor: T.line },
+          timeScale: { borderColor: T.line },
           crosshair: { mode: 0 },
         });
         const bars = j.bars.slice(-range);
         const candles = chart.addSeries(CandlestickSeries, {
-          upColor: "#7fb85c", downColor: "#d66a5a", borderUpColor: "#7fb85c", borderDownColor: "#d66a5a",
-          wickUpColor: "#7fb85c", wickDownColor: "#d66a5a",
+          upColor: T.green, downColor: T.red, borderUpColor: T.green, borderDownColor: T.red,
+          wickUpColor: T.green, wickDownColor: T.red,
         });
         candles.setData(bars);
-        const vol = chart.addSeries(HistogramSeries, { priceScaleId: "vol", color: "#3a4a5a", priceFormat: { type: "volume" } });
+        const vol = chart.addSeries(HistogramSeries, { priceScaleId: "vol", color: T.dim, priceFormat: { type: "volume" } });
         chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
-        vol.setData(bars.map((b) => ({ time: b.time, value: b.volume, color: b.close >= b.open ? "#7fb85c44" : "#d66a5a44" })));
+        vol.setData(bars.map((b) => ({ time: b.time, value: b.volume, color: `${b.close >= b.open ? T.green : T.red}44` })));
         const line = (price, color, title) => candles.createPriceLine({ price, color, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title });
         (legLines || []).forEach((lg) => {
-          candles.createPriceLine({ price: lg.price, color: lg.side > 0 ? "#7fb85c" : "#d66a5a", lineWidth: 2, lineStyle: LineStyle.Solid, axisLabelVisible: true, title: lg.label });
+          candles.createPriceLine({ price: lg.price, color: lg.side > 0 ? T.green : T.red, lineWidth: 2, lineStyle: LineStyle.Solid, axisLabelVisible: true, title: lg.label });
         });
-        (levels?.supports || []).forEach((p) => line(p, "#7fb85c", "OI put"));
-        (levels?.resistances || []).forEach((p) => line(p, "#d66a5a", "OI call"));
-        (breakevens || []).forEach((p) => line(p, "#5aa7d6", "BE"));
-        if (entrySpot) line(entrySpot, "#e8b545", "entry");
+        (levels?.supports || []).forEach((p) => line(p, T.green, "support"));
+        (levels?.resistances || []).forEach((p) => line(p, T.red, "resistance"));
+        (breakevens || []).forEach((p) => line(p, T.blue, "break even"));
+        if (entrySpot) line(entrySpot, T.amber, "your entry");
         chart.timeScale().fitContent();
         setMeta({ n: bars.length, source: j.source, last: bars[bars.length - 1] });
         const ro = new ResizeObserver(() => chart.applyOptions({ width: ref.current?.clientWidth || 600 }));
@@ -1044,16 +1044,16 @@ export function PriceChart({ ticker, levels, breakevens, entrySpot, legLines, he
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
-        <Lbl>GRAFICO {ticker} · CANDELE GIORNALIERE {meta ? `· ${meta.source} (delayed)` : ""}</Lbl>
+        <Lbl>{ticker} · DAILY PRICES {meta ? `· ${meta.source} (delayed)` : ""}</Lbl>
         <div style={{ display: "flex", gap: 4 }}>
           {[90, 180, 365].map((d) => (
-            <Btn key={d} small ghost={range !== d} onClick={() => setRange(d)}>{d === 90 ? "3M" : d === 180 ? "6M" : "1A"}</Btn>
+            <Btn key={d} small ghost={range !== d} onClick={() => setRange(d)}>{d === 90 ? "3M" : d === 180 ? "6M" : "1Y"}</Btn>
           ))}
         </div>
       </div>
       {err && <div style={{ ...mono, fontSize: 11, color: T.red, marginTop: 6 }}>{err}</div>}
       <div ref={ref} style={{ marginTop: 8, borderRadius: 6, overflow: "hidden" }} />
-      {meta?.last && <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 4 }}>Ultimo: {meta.last.time} · O {meta.last.open} H {meta.last.high} L {meta.last.low} C {meta.last.close} · linee: muri OI reali (verde/rosso), breakeven strategia (blu), entry (ambra)</div>}
+      {meta?.last && <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 4 }}>Latest: {meta.last.time} · open {meta.last.open} high {meta.last.high} low {meta.last.low} close {meta.last.close} · the lines are where the market is positioned (green and red), your break-even (blue) and your entry (amber)</div>}
     </div>
   );
 }
@@ -1090,7 +1090,7 @@ export function ChainMatrix({ chain, expKey, spot, legs, onCell }) {
   return (
     <div style={{ marginTop: 12 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
-        <Lbl>CHAIN {expKey} · CLICCA UNA CELLA: 1° click COMPRA · 2° VENDI · 3° RIMUOVI</Lbl>
+        <Lbl>{expKey} · TAP A PRICE: ONCE TO BUY · TWICE TO SELL · A THIRD TIME TO REMOVE</Lbl>
         <div style={{ display: "flex", gap: 4 }}>
           {[[0.06, "±6%"], [0.12, "±12%"], [0.25, "±25%"]].map(([v, l]) => (
             <Btn key={l} small ghost={width !== v} onClick={() => setWidth(v)}>{l}</Btn>
@@ -1117,7 +1117,7 @@ export function ChainMatrix({ chain, expKey, spot, legs, onCell }) {
           </tbody>
         </table>
       </div>
-      <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 4 }}>Riga evidenziata = strike più vicino allo spot (${spot.toFixed(2)}). Sfondo azzurrato = in-the-money. Dati reali CBOE (delayed ~15m).</div>
+      <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 4 }}>The highlighted row is the strike nearest today\u2019s price (${spot.toFixed(2)}). A blue tint means the option already has value. Live CBOE prices, ~15 min delayed.</div>
     </div>
   );
 }
@@ -1177,18 +1177,18 @@ export function OptionPanel({ occ, label, quote, onClose }) {
   return (
     <div style={{ marginTop: 10, padding: "10px 12px", background: T.bg, border: `1px solid ${T.violet}44`, borderRadius: 7 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
-        <Lbl>STORICO CONTRATTO · {label} {src ? `· ${src}` : ""}</Lbl>
-        <Btn small ghost onClick={onClose}>✕ chiudi</Btn>
+        <Lbl>THIS CONTRACT OVER TIME · {label} {src ? `· ${src}` : ""}</Lbl>
+        <Btn small ghost onClick={onClose}>✕ close</Btn>
       </div>
       {quote && (
         <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 4 }}>
-          ora: mid {quote.mid?.toFixed(2) ?? "—"} · IV {quote.iv ? (quote.iv * 100).toFixed(0) + "%" : "—"} · OI {quote.oi ?? "—"} · vol {quote.vol ?? "—"}
+          now: {quote.mid?.toFixed(2) ?? "—"} · volatility {quote.iv ? (quote.iv * 100).toFixed(0) + "%" : "—"} · {quote.oi ?? "—"} contracts open · {quote.vol ?? "—"} traded today
         </div>
       )}
       {err && <div style={{ ...mono, fontSize: 11, color: T.red, marginTop: 6 }}>{err}</div>}
       <div ref={ref} style={{ marginTop: 8 }} />
       <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 4 }}>
-        Ti dice se stai comprando il contratto su massimi di premio o dopo uno sgonfiamento: informazione che il payoff non mostra.
+        This tells you whether you are buying near the top of its price range or after it has deflated — something the payoff chart cannot show you.
       </div>
     </div>
   );
@@ -1204,17 +1204,17 @@ export function taSignals(bars) {
   const ta = taRead(bars);
   if (!ta) return null;
   return { ...ta,
-    trendTxt: ta.trend > 0 ? "rialzista (SMA20>SMA50, in salita)" : ta.trend < 0 ? "ribassista (SMA20<SMA50, in discesa)" : "laterale (medie piatte/incrociate)" };
+    trendTxt: ta.trend > 0 ? "rising" : ta.trend < 0 ? "falling" : "going sideways" };
 }
 export function confluence(seasonalM, ta) {
   if (!ta) return null;
   const seaDir = seasonalM > 0.8 ? 1 : seasonalM < -0.8 ? -1 : 0;
   let verdict, c, advice;
-  if (seaDir !== 0 && ta.trend === seaDir) { verdict = "GO DIREZIONALE"; c = T.green; advice = `2 conferme: stagionalità ${seaDir > 0 ? "↑" : "↓"} + trend tecnico concorde → vertical spread ${seaDir > 0 ? "rialzista" : "ribassista"}, size piena consentita (entro il limite per trade).`; }
-  else if (seaDir !== 0 && ta.trend === -seaDir) { verdict = "DIVERGENZA"; c = T.amber; advice = `Stagionalità ${seaDir > 0 ? "↑" : "↓"} ma trend tecnico opposto: riduci la size o attendi che il trend giri. In alternativa struttura a intervallo.`; }
-  else if (seaDir === 0 && ta.trend === 0) { verdict = "REGIME DA INTERVALLO"; c = T.blue; advice = "Né stagione né trend spingono: iron condor / butterfly sui muri OI, il tempo lavora per te."; }
-  else { verdict = "SEGNALE SINGOLO"; c = T.mut; advice = seaDir !== 0 ? "Solo la stagionalità spinge (trend neutro): direzionale a size ridotta o attendi conferma tecnica." : "Solo il trend spinge (stagione neutra): segui il tecnico con size ridotta."; }
-  const warn = ta.rsi >= 70 ? "⚠ RSI " + ta.rsi.toFixed(0) + " ipercomprato: timing d'ingresso rialzista sfavorevole, attendi un pullback." : ta.rsi <= 30 ? "⚠ RSI " + ta.rsi.toFixed(0) + " ipervenduto: timing ribassista sfavorevole, possibile rimbalzo." : null;
+  if (seaDir !== 0 && ta.trend === seaDir) { verdict = "BOTH AGREE"; c = T.green; advice = `The season points ${seaDir > 0 ? "up" : "down"} and the price is already moving that way. A ${seaDir > 0 ? "bullish" : "bearish"} spread makes sense, at your full per-trade limit.`; }
+  else if (seaDir !== 0 && ta.trend === -seaDir) { verdict = "THEY DISAGREE"; c = T.amber; advice = `The season points ${seaDir > 0 ? "up" : "down"} but the price is moving the other way. Trade smaller, wait for the price to turn, or pick a trade that does not need a direction.`; }
+  else if (seaDir === 0 && ta.trend === 0) { verdict = "QUIET MARKET"; c = T.blue; advice = "Neither the season nor the price is pushing. A trade that profits from things staying still suits this best — time works for you."; }
+  else { verdict = "ONE SIGNAL ONLY"; c = T.mut; advice = seaDir !== 0 ? "Only the season is pushing and the price is flat. Trade smaller, or wait for the price to confirm it." : "Only the price is pushing and the season is flat. Follow the price, but trade smaller."; }
+  const warn = ta.rsi >= 70 ? "⚠ The price has run hot recently (RSI " + ta.rsi.toFixed(0) + "). Buying here often means buying the top — waiting for a dip usually gets a better entry." : ta.rsi <= 30 ? "⚠ The price has been beaten down recently (RSI " + ta.rsi.toFixed(0) + "). Selling here often means selling the bottom — a bounce is common." : null;
   return { verdict, c, advice, warn };
 }
 
@@ -1248,8 +1248,8 @@ export function UnifiedView({ ticker, dte, sigma, driftM, curve, legs, breakeven
     const n = range <= 180 ? 90 : range <= 400 ? 250 : allBars.length;
     setBars(allBars.slice(-n));
   }, [allBars, range]);
-  if (err) return <div style={{ ...mono, fontSize: 11, color: T.red }}>Grafico non disponibile: {err}</div>;
-  if (!bars || !spot || !curve?.length) return <div style={{ ...mono, fontSize: 11, color: T.mut }}>Carico vista unificata…</div>;
+  if (err) return <div style={{ ...mono, fontSize: 11, color: T.red }}>Chart unavailable: {err}</div>;
+  if (!bars || !spot || !curve?.length) return <div style={{ ...mono, fontSize: 11, color: T.mut }}>Loading the chart…</div>;
 
   const H = 440, padL = 6, padR = 60, padT = 10, padB = 26;
   const shareH = range > 400 ? 0.72 : 0.58;
@@ -1298,7 +1298,7 @@ export function UnifiedView({ ticker, dte, sigma, driftM, curve, legs, breakeven
   return (
     <div ref={wrapRef}>
       <div style={{ display: "flex", gap: 4, marginBottom: 6, justifyContent: "flex-end" }}>
-        {[[180, "6M"], [365, "1A"], [1825, "5A"]].map(([v, l]) => (
+        {[[180, "6M"], [365, "1Y"], [1825, "5Y"]].map(([v, l]) => (
           <Btn key={l} small ghost={range !== v} onClick={() => setRange(v)}>{l}</Btn>
         ))}
       </div>
@@ -1330,8 +1330,8 @@ export function UnifiedView({ ticker, dte, sigma, driftM, curve, legs, breakeven
         })}
         {/* separatore OGGI */}
         <line x1={xToday} x2={xToday} y1={padT} y2={H - padB} stroke={T.amber} strokeWidth={1} strokeDasharray="3 3" />
-        <text x={xToday + 4} y={padT + 10} fill={T.amber} fontSize={9.5} fontFamily="monospace">OGGI ${spot.toFixed(2)}</text>
-        <text x={xEnd - 4} y={padT + 10} fill={T.dim} fontSize={9.5} fontFamily="monospace" textAnchor="end">SCADENZA · {dte} DTE</text>
+        <text x={xToday + 4} y={padT + 10} fill={T.amber} fontSize={9.5} fontFamily="monospace">TODAY ${spot.toFixed(2)}</text>
+        <text x={xEnd - 4} y={padT + 10} fill={T.dim} fontSize={9.5} fontFamily="monospace" textAnchor="end">EXPIRY · {dte} DAYS</text>
         {/* strike delle gambe + breakeven */}
         {legs.map((l, i) => (<g key={"lg" + i}>
           <line x1={xToday} x2={xEnd} y1={Y(l.strike)} y2={Y(l.strike)} stroke={l.side > 0 ? T.green : T.red} strokeWidth={1.4} />
@@ -1346,12 +1346,12 @@ export function UnifiedView({ ticker, dte, sigma, driftM, curve, legs, breakeven
         <text x={xToday} y={H - 8} fill={T.dim} fontSize={9} fontFamily="monospace" textAnchor="middle">{bars[bars.length - 1]?.time}</text>
       </svg>
       <div style={{ display: "flex", gap: 14, marginTop: 6, flexWrap: "wrap", alignItems: "center" }}>
-        {[["■", T.green + "44", "zona di PROFITTO a scadenza"], ["■", T.violet + "55", "cono probabilità (chiaro 5–95% · scuro 25–75%)"], ["┅", T.violet, "mediana attesa"], ["—", T.blue, "breakeven"], ["—", T.green, "gamba comprata"], ["—", T.red, "gamba venduta"]].map(([g, c, l]) => (
+        {[["■", T.green + "44", "where you make money at expiry"], ["■", T.violet + "55", "where the price could go (pale 5–95%, solid 25–75%)"], ["┅", T.violet, "the middle path"], ["—", T.blue, "break even"], ["—", T.green, "option you bought"], ["—", T.red, "option you sold"]].map(([g, c, l]) => (
           <span key={l} style={{ ...mono, fontSize: 9.5, color: T.mut }}><span style={{ color: c, fontWeight: 800 }}>{g}</span> {l}</span>
         ))}
       </div>
       <div style={{ marginTop: 8, padding: "8px 11px", background: `${T.blue}0d`, border: `1px solid ${T.blue}33`, borderRadius: 7, fontSize: 12.5, color: T.body }}>
-        <b style={{ color: T.ink }}>Lettura:</b> il cono viola mostra dove il prezzo può realisticamente arrivare entro la scadenza (volatilità reale + stagionalità); le fasce verdi sono dove la tua strategia guadagna. Sovrapposizione cono↔verde ≈ <b style={{ color: pIn >= 0.5 ? T.green : T.violet }}>{(pIn * 100).toFixed(0)}%</b> — {"coerente con la CHANCE della strategia (stesso modello, stessa scala)"}.
+        <b style={{ color: T.ink }}>How to read it:</b> the purple cone is where the price can realistically get to by expiry; the green bands are where this trade makes money. They overlap about <b style={{ color: pIn >= 0.5 ? T.green : T.violet }}>{(pIn * 100).toFixed(0)}%</b> of the time — which is the same number as the CHANCE shown above, worked out the same way.
       </div>
     </div>
   );
