@@ -53,7 +53,7 @@ export const amount$ = (x) => (Number.isFinite(Number(x)) ? `$${Math.abs(Math.ro
  *   entryNet  — what the structure cost per share (negative for a credit)
  *   lo, hi    — the price range to sample; defaults to ±30% around `spot`
  *   spot      — today's price, used for the default range and for `at`
- *   n         — samples; 240 matches the Bench's own curve resolution
+ *   n         — samples; 240 matches the Build screen's own curve resolution
  * @returns { samples, bands, breakevens, maxProfit, maxLoss, at, lo, hi, spot }
  *   bands: [{ lo, hi, sign }] in price order, sign +1 profit / -1 loss.
  */

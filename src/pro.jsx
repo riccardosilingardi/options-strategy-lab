@@ -401,7 +401,7 @@ export function CopilotTab({ ctx, apiKey }) {
           {SKILLS.map((s) => <Btn key={s.id} small ghost color={T.blue} onClick={() => send(s.prompt)} disabled={busy}>{s.label}</Btn>)}
         </div>
         <div style={{ marginTop: 12, display: "grid", gap: 8, maxHeight: 420, overflowY: "auto" }}>
-          {msgs.length === 0 && <div style={{ ...mono, fontSize: 11.5, color: T.mut }}>Pick one above or just ask. The copilot already knows your open positions, the trade on the Bench, the Radar, the tagged news and your own risk rules.</div>}
+          {msgs.length === 0 && <div style={{ ...mono, fontSize: 11.5, color: T.mut }}>Pick one above or just ask. The copilot already knows your open positions, the trade on the Build screen, the Radar, the tagged news and your own risk rules.</div>}
           {msgs.map((m, i) => (
             <div key={i} style={{ padding: "9px 11px", borderRadius: 7, background: m.role === "user" ? `${T.blue}14` : T.bg, border: `1px solid ${m.role === "user" ? T.blue + "44" : T.line}` }}>
               <div style={{ ...mono, fontSize: 9, color: m.role === "user" ? T.blue : T.amber, marginBottom: 3 }}>{m.role === "user" ? "YOU" : "COPILOT"}</div>
@@ -962,7 +962,7 @@ export function OptionPanel({ occ, label, quote, onClose }) {
    Un solo asse prezzi: candele, proiezione MC, zone P&L, strike, breakeven.
 ================================================================ */
 // ---- Trend read: the SMA/RSI math is taRead() in src/signals.js, the technical
-// factor of fuseSignals(). Here we only add the sentence the Bench prints. ----
+// factor of fuseSignals(). Here we only add the sentence the Build screen prints. ----
 export function taSignals(bars) {
   const ta = taRead(bars);
   if (!ta) return null;
