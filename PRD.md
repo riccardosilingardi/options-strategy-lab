@@ -87,14 +87,32 @@ All of these live in one config object, not scattered as literals. The backtest 
 The wizard is not a feature inside the app. It is the entry point and the spine. Existing tabs remain reachable but are no longer the front door.
 
 **Screen 1 — Open**
-Greeting, one line of status, three choices: *My positions* / *Find opportunities* / *Decide for me*.
+Greeting, one line of status, **two** doors: *My positions* / *Find opportunities*.
 Once the user has positions, the front page becomes "what needs attention today" and the wizard sits one tap away.
 
-**Screen 2 — Three questions**
-Budget, time horizon, and what matters most (*win often* / *balanced* / *win big*). No delta, no implied volatility, no Greeks. Sizing pill appears here.
+*Three doors was the wrong structure.* "Decide for me" was a door that skipped the questions, and the only way to skip them is to invent the answers. It is now the last button of *Find opportunities*, once the app knows what it is deciding with.
 
-**Screen 3 — Two roads, never one**
-Always at least two candidates with an explicit trade-off. One answer is advice; two answers with their price is teaching.
+**Screen 2 — Find opportunities**
+One screen, three steps, and the last button is the decision.
+
+1. **Basket** — which markets to consider. All five commodity ETFs by default. The ranking later runs across whatever is left in it.
+2. **Budget and time** — how much you are willing to lose, and how long to give the idea. No delta, no implied volatility, no Greeks. Sizing pill appears here.
+3. **Drivers** — three sliders that always sum to 100: *how often it works*, *how much it pays*, *how little it ties up*. The three presets (*win often* / *balanced* / *win big*) **set** the sliders rather than replacing them, so the user sees what the choice means numerically. That is a literacy pill in itself: the three words are one dial, not three boxes.
+
+Then **Decide for me**, which applies the weights and produces the verdict.
+
+**NOTHING IS PRE-ANSWERED.** The flow cannot proceed past the questions until they are actually answered, and the button names which answer is missing. An earlier build shipped with $250 and 45 days already filled in, and then told the user "the $250 you said you were willing to lose" when they had said nothing at all. An app that invents your answer and quotes it back to you has stopped being trustworthy about anything else it says.
+
+**Screen 3 — The verdict: two roads, never one**
+Always at least two candidates with an explicit trade-off. One answer is advice; two answers with their price is teaching. Three things belong on this screen and nowhere else:
+
+- **The copilot narrative, first.** What was actually examined, in English, with the real numbers: how many news items and which of them were geopolitical, which weather regions are outside their own monthly norm and by how much, what seasonality says for this month, and how the user's weights tipped the choice. Generated from the data (`verdictNarrative()` in `signals.js`), never templated prose.
+- **The answers, read back**, with a *change* link.
+- **The evidence, on each road**: the "Why this trade" panel — agreement badge, the four factors as direction/strength bars, and the tap-through to the weather regions and the news headlines behind them — plus the gauge next to the band thumbnail. The four-factor engine exists and is wired; the screen where the decision happens must not be the one screen that shows none of it.
+
+**The two roads may come from different underlyings.** When the basket holds more than one commodity, every readable market in it contributes candidates, they are ranked together on one scale, and road 2 is free to come from a different market than road 1. Two structures on one underlying share a fate, and comparing them teaches less than comparing two markets.
+
+**Copy rule for a road:** lead with what it gives and what it costs, and put the frequency alongside the payout so the trade-off is one sentence. Opening with "3 times in 10" is a verdict before the reader knows what is being judged, and every beginner reads it as "this is a bad trade".
 
 **Screen 4 — Confirm**
 What is being sent, the risk checks in plain language, and the exit plan already decided. The risk gate runs **after** the tap, before the order leaves.
@@ -119,7 +137,9 @@ Every visual is generated from the same `payoff(legs, S)` function. Never comput
 | Position detail | gauge (large) | payoff (small), histogram on demand only |
 | Backtest | straight histogram + model curve | seasonal filter, year-by-year bars |
 
-**Band thumbnail** — price line plus green/red bands from the sign of the payoff. Survives at 80px. No numbers, no labels. Works for any structure: an iron condor produces three bands with no special-case code.
+**Band thumbnail** — the underlying's own price line over green/red bands from the sign of the payoff. Survives at 80px. No numbers, no labels. Works for any structure: an iron condor produces three bands with no special-case code.
+
+Price is the **vertical** axis, exactly as it is in the unified component, so the two never disagree about which way is up: the bands are horizontal stripes and the underlying's recent path runs left to right across them, ending at today's price on the right-hand edge. Without that line the thumbnail is a row of coloured bars — it says where the trade pays, but not where the market is in relation to it, which is the whole question. With no history loaded the line degrades to a flat one at today's price; it is never absent.
 
 **Gauge** — the payoff curve projected into polar coordinates. Colours self-calibrate from the sign of the payoff, so left is not necessarily red. Needle = spot.
 
@@ -149,6 +169,22 @@ Currently weather and news are decoration: they render tabs and never reach any 
 Narratives must contain numbers. "Signals are positive" is a failure.
 
 News must load at startup for the current ticker, not lazily when a tab opens.
+
+---
+
+## 7b. Public demo
+
+`?demo=<DEMO_TOKEN>` bypasses the password gate in `netlify/edge-functions/gate.js`. The token is checked on the edge against the `DEMO_TOKEN` environment variable and never reaches the client bundle; a cookie keeps the session in demo mode across navigation, and it carries no secret — it says "this session came in through the demo door", nothing more.
+
+A demo that cannot be walked through teaches nothing, so **everything stays visible and navigable**. Exactly three things change:
+
+- A banner: *"Public demo — paper trading, read only"*.
+- Every button that would reach the **broker** is disabled with the tooltip *"Demo mode: read only"* — all six order paths, checked next to the send and not only on the button.
+- State is never POSTed to `/api/state`. That blob is a single shared document: a visitor writing to it would overwrite the owner's positions and feed the autopilot a book that is not theirs. It is not read from either.
+
+Three didactic positions are preloaded — one in profit near its take-profit, one in loss near its stop, and one whose thesis has broken while the price still looks fine. They are **not fixtures with numbers typed into them**: they are real structures priced with the same Black-Scholes as everything else and struck relative to today's live price, so each one actually reads the way it claims to when the app values it. A ticker with no live price is skipped rather than invented.
+
+The third one is the hard case and the point of the exercise: the P&L is fine, nothing is firing on the front page, and the reason for opening it has gone. That break has to be **true on the same tables the Thesis Integrity Score reads**, or the demo is caught lying by its own screen — so the copy states only the breaks that actually happened on the day it is being viewed.
 
 ---
 
@@ -187,7 +223,7 @@ The brief has three sections: OPEN POSITIONS, NEW PROPOSALS, **REJECTED BY GATE*
 | Day 2 | Signals wired into scan ranking and UI; news load at startup | CONFLICT candidates rank last |
 | Day 2 | `src/riskGate.js` + tests; every order path routed through it | A trade at 10% of capital is refused with the exact figure |
 | Day 3 | Wizard screens 1–5; capital model and pills | A new user reaches a confirmable proposal without seeing a Greek |
-| Day 3 | Demo access for judges (read-only token, three example positions) | Site usable without a password |
+| Day 3 | Demo access for judges (read-only token, three example positions) | `?demo=<DEMO_TOKEN>` opens the site, every broker button is disabled, three didactic positions are preloaded |
 | Day 4 | Backtest: 7 vs 14 vs 21 DTE on two underlyings | `report.md` with assumptions and limitations |
 | Day 4 | Video and deck | Recorded |
 | Day 5 | Submit, morning | Submitted |

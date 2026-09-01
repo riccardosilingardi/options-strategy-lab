@@ -10,12 +10,13 @@ import {
 } from "lucide-react";
 import { fetchAllNews, fetchWeather, ImpactTags, CopilotTab, ReportTab, OrderTicket, AlpacaDesk, scaleStrategy, probProfit, buildContext, GuardianPanel, PriceChart, ChainMatrix, OptionPanel, UnifiedView, taSignals, confluence, WhyThisTrade } from "./pro.jsx";
 import { BandThumbnail, payoffBands, bandTakeaway, GaugeFigure, exitPlanSentence } from "./visuals.jsx";
-import { fuseSignals, sentimentDirection, withSignalRank, compareCandidates, againstSignal } from "./signals.js";
+import { fuseSignals, sentimentDirection, withSignalRank, compareCandidates, againstSignal, DRIVER_PRESETS, rankByDrivers, verdictNarrative } from "./signals.js";
 import { N as nCDF, bs as bsPrice, smile as smileIV, payoff as payoffExp, SEASONAL, SIGMA } from "./engine.js";
 import { T, themeName, setTheme } from "./theme.js";
 import { RULES, sizing, ruleBadge, takeProfitLabel, stopLossLabel, perTradeCapLabel, RULE_PILLS, NOTHING_TODAY, money, pctText } from "./rules.js";
 import { evaluateTrade, gateSummary } from "./riskGate.js";
-import { CapitalOnboarding, WizardOpen, WizardQuestions, WizardCandidates, WizardConfirm, NothingToday, Card, Pill } from "./wizard.jsx";
+import { DEMO, DEMO_BANNER, DEMO_TOOLTIP, DEMO_SEED_TICKERS, demoPositions } from "./demo.js";
+import { CapitalOnboarding, WizardOpen, FindOpportunities, WizardCandidates, WizardConfirm, NothingToday, Card, Pill } from "./wizard.jsx";
 
 /* ============================== THEME ============================== */
 const mono = { fontFamily: "ui-monospace, Menlo, monospace" };
@@ -39,25 +40,29 @@ function bsGreeks(S, K, Tyr, iv, type) {
 
 /* ============================== UNDERLYINGS (fallback stats) ============================== */
 const UNDERLYINGS = {
-  SOYB: { name: "Soybeans", iv: 0.20, sigma: SIGMA.SOYB, step: 0.5,
+  SOYB: { commodity: true, name: "Soybeans", iv: 0.20, sigma: SIGMA.SOYB, step: 0.5,
     monthlyMean: SEASONAL.SOYB,
     newsQ: "soybean futures prices" },
-  CORN: { name: "Corn", iv: 0.24, sigma: SIGMA.CORN, step: 0.5,
+  CORN: { commodity: true, name: "Corn", iv: 0.24, sigma: SIGMA.CORN, step: 0.5,
     monthlyMean: SEASONAL.CORN,
     newsQ: "corn futures USDA crop" },
-  UNG: { name: "US Natural Gas", iv: 0.45, sigma: SIGMA.UNG, step: 0.5,
+  UNG: { commodity: true, name: "US Natural Gas", iv: 0.45, sigma: SIGMA.UNG, step: 0.5,
     monthlyMean: SEASONAL.UNG,
     newsQ: "natural gas prices storage EIA" },
-  BOIL: { name: "2x Natural Gas", iv: 0.85, sigma: SIGMA.BOIL, step: 1,
+  BOIL: { commodity: true, name: "2x Natural Gas", iv: 0.85, sigma: SIGMA.BOIL, step: 1,
     monthlyMean: SEASONAL.BOIL,
     newsQ: "natural gas prices forecast" },
-  WEAT: { name: "Wheat", iv: 0.26, sigma: SIGMA.WEAT, step: 0.25,
+  WEAT: { commodity: true, name: "Wheat", iv: 0.26, sigma: SIGMA.WEAT, step: 0.25,
     monthlyMean: SEASONAL.WEAT,
     newsQ: "wheat futures prices" },
   SPY: { name: "S&P 500 ETF", iv: 0.13, sigma: SIGMA.SPY, step: 5,
     monthlyMean: SEASONAL.SPY,
     newsQ: "S&P 500 stock market outlook" },
 };
+// The BASKET is the five commodity ETFs this app is about, derived from the
+// table above rather than typed out a second time: SPY is here so the desk can
+// price a hedge, it is not something the guided flow goes looking for.
+const BASKET = Object.keys(UNDERLYINGS).filter((k) => UNDERLYINGS[k].commodity);
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const NOW_MONTH = new Date().getMonth();
 // Accesso SICURO alle statistiche del sottostante: qualunque ticker (anche importato
@@ -388,6 +393,10 @@ async function loadState() {
 const EMPTY = { saved: [], positions: [], settings: { webhook: "", reportFreq: "weekly", reportLast: 0, reportLastMd: "", capital: RULES.defaultTradingCapital, concurrentTarget: RULES.defaultConcurrentTarget, savings: null, sizeOverride: null, mode: "pro", onboarded: false, notifyWhenReady: false }, seasonal: {}, journal: [], ivHist: {} };
 async function saveState(st) {
   try { localStorage.setItem(SKEY, JSON.stringify(st)); } catch (e) { console.error(e); }
+  // The server blob is ONE shared document, so a demo visitor writing to it
+  // would overwrite the owner's positions and feed the autopilot a book that
+  // is not theirs. Demo state stays in the visitor's own browser.
+  if (DEMO) return;
   // sync server (abilita Autopilot ad app chiusa); fire-and-forget
   try { fetch("/api/state", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ positions: st.positions, settings: { webhook: st.settings?.webhook, capital: st.settings?.capital, concurrentTarget: st.settings?.concurrentTarget, savings: st.settings?.savings, sizeOverride: st.settings?.sizeOverride, notifyWhenReady: !!st.settings?.notifyWhenReady } }) }); } catch { /* offline ok */ }
 }
@@ -405,6 +414,13 @@ const Btn = ({ children, onClick, color = T.amber, ghost, disabled, small }) => 
 const Panel = ({ children, style }) => (
   <div style={{ background: T.panel, border: `1px solid ${T.line}`, borderRadius: 8, padding: 14, ...style }}>{children}</div>
 );
+/** The demo banner. One line, on every screen, saying exactly what this is. */
+const DemoBanner = () => (DEMO ? (
+  <div style={{ ...mono, fontSize: 11.5, color: T.blue, background: `${T.blue}12`, borderBottom: `1px solid ${T.blue}44`,
+    padding: "9px 14px", display: "flex", gap: 8, alignItems: "center", justifyContent: "center", flexWrap: "wrap", textAlign: "center" }}>
+    <ShieldCheck size={13} style={{ flexShrink: 0 }} /> {DEMO_BANNER}
+  </div>
+) : null);
 const Lbl = ({ children }) => <div style={{ ...mono, fontSize: 10, letterSpacing: "0.15em", color: T.amber }}>{children}</div>;
 const Stat = ({ k, v, c, tip }) => (
   <div>
@@ -445,6 +461,7 @@ export default function OptionsStrategyLab() {
   const [wizStep, setWizStep] = useState("open"); // open | questions | candidates | confirm | nothing
   const [nothing, setNothing] = useState(null);   // [{ id, text }] — why not today
   const [candidates, setCandidates] = useState([]); // screen 3: always two roads
+  const [verdict, setVerdict] = useState([]);       // screen 3: what was examined, in English
   const [picked, setPicked] = useState(null);       // screen 4: the road taken
   const [confirmResult, setConfirmResult] = useState(null); // the gate's answer AFTER the tap
   const [hydrated, setHydrated] = useState(false);
@@ -476,7 +493,16 @@ export default function OptionsStrategyLab() {
   const [replay, setReplay] = useState(null);
   const [nf, setNf] = useState({ tk: "ALL", kind: "all", q: "", days: 7 });
   const [multi, setMulti] = useState({ sel: ["SOYB", "CORN", "UNG"], busy: false, res: null, err: null, dteT: 45, senMode: "auto" });
-  const [wiz, setWiz] = useState({ risk: 250, horizon: RULES.targetEntryDTE, priority: "balanced", busy: false, err: null });
+  // FAULT A: risk and horizon start NULL and stay null until the user answers.
+  // The old defaults ($250, 45 days) were quoted back on the verdict screen as
+  // "the $250 you said you were willing to lose" to a user who had said nothing,
+  // which is the app putting words in their mouth. The basket and the weights
+  // DO have a starting position, because "all five markets, evenly weighted" is
+  // a visible state the user can see and change, not an invented answer.
+  const [wiz, setWiz] = useState({
+    basket: BASKET, risk: null, horizon: null,
+    weights: { ...DRIVER_PRESETS.balanced }, priority: "balanced", busy: false, err: null,
+  });
   const [optRef, setOptRef] = useState(null); // price snapshot from the Shortlist, to reconcile against the Bench
   const [weather, setWeather] = useState(null);  // regionId -> forecast 14g (fuseSignals)
   const [barsCache, setBarsCache] = useState({}); // ticker -> daily bars (fattore tecnico)
@@ -529,9 +555,11 @@ export default function OptionsStrategyLab() {
     (async () => {
       try {
       const st = (await loadState()) || EMPTY;
-      // merge timeline Autopilot dal server (brief generati ad app chiusa)
+      // merge timeline Autopilot dal server (brief generati ad app chiusa).
+      // Not in demo: that blob holds the owner's real paper book, and a public
+      // visitor has no business reading it.
       try {
-        const r = await fetch("/api/state");
+        const r = DEMO ? { ok: false } : await fetch("/api/state");
         if (r.ok) {
           const srv = await r.json();
           for (const sp of srv.positions || []) {
@@ -558,12 +586,27 @@ export default function OptionsStrategyLab() {
       if (st.settings?.onboarded == null) {
         settings.onboarded = (st.positions || []).length > 0 || (st.saved || []).length > 0;
       }
+      // The demo has no setup step: a visitor with three minutes should land on
+      // the front page, not on a capital questionnaire.
+      if (DEMO) settings.onboarded = true;
       setStore({ ...EMPTY, ...st, v: 2, settings });
       setHydrated(true);
       if (st.seasonal) setSeasonal(st.seasonal);
-      const tickers = [...new Set([(st.positions || []).map((p) => p.ticker), "SOYB"].flat())];
+      const seedTickers = DEMO ? DEMO_SEED_TICKERS : [];
+      const tickers = [...new Set([(st.positions || []).map((p) => p.ticker), "SOYB", ...seedTickers].flat())];
       setBusy("auto"); setMsg("Loading live option chains…");
-      for (const tk of tickers) await refreshChain(tk, true);
+      const loaded = {};
+      for (const tk of tickers) { const c = await refreshChain(tk, true); if (c?.spot) loaded[tk] = c.spot; }
+      // The three didactic positions are built HERE, from the prices that just
+      // came back, so each one really is near its take-profit, near its stop or
+      // sitting on a thesis that has expired. A fixture with numbers typed into
+      // it would drift away from the live chain the first time it moved.
+      if (DEMO && !(st.positions || []).length) {
+        const seeded = demoPositions({ spots: loaded, underlying: getU });
+        if (seeded.length) {
+          setStore((s) => { const ns = { ...s, positions: seeded }; saveState(ns); return ns; });
+        }
+      }
       setMsg(null);
       setBusy(null);
       } finally { setHydrated(true); }
@@ -672,6 +715,12 @@ export default function OptionsStrategyLab() {
     return job;
   }, []);
   useEffect(() => { loadBars(ticker); }, [ticker, loadBars]);
+  // Every held position's history too: the band thumbnail draws the underlying's
+  // price line over its zones (PRD §6), and without the bars the list falls back
+  // to a flat dashed line that says nothing about how the price got there.
+  useEffect(() => {
+    for (const tk of new Set(store.positions.map((p) => p.ticker))) loadBars(tk);
+  }, [store.positions, loadBars]);
 
   /* ---- fusione 4 fattori per ticker (PRD §7) ----
      Le news taggate valgono per tutti i sottostanti (un titolo sul Mar Nero
@@ -771,16 +820,28 @@ export default function OptionsStrategyLab() {
     setAgainst({ reason: "" }); setMsg("Position opened."); setTab("positions");
   };
   const delSaved = async (id) => { const st = { ...store, saved: store.saved.filter((s) => s.id !== id) }; setStore(st); await saveState(st); };
+  // A day's event is logged ONCE. When it has already been logged, this has to
+  // return the state it was given — the SAME object, not a copy of it.
+  //
+  // Returning `{ ...st, positions }` on a no-op looks harmless and is not: the
+  // new array changes `store.positions`, which recomputes the `posAlerts` memo,
+  // which re-runs the effect that called logEvent, which builds another new
+  // array. That is an infinite render loop, and it fires the moment any
+  // position is sitting on its take-profit or its stop — which, with the demo's
+  // example positions, is on the very first screen. It also wrote the whole
+  // state to disk on every pass round the loop.
   const logEvent = useCallback((id, type, text) => {
     setStore((st) => {
+      let changed = false;
       const positions = st.positions.map((p) => {
         if (p.id !== id) return p;
         const day = new Date().toDateString();
         const dup = (p.timeline || []).some((e) => e.type === type && new Date(e.t).toDateString() === day);
         if (dup) return p;
-        const next = { ...p, timeline: [...(p.timeline || []), { t: Date.now(), type, text }] };
-        return next;
+        changed = true;
+        return { ...p, timeline: [...(p.timeline || []), { t: Date.now(), type, text }] };
       });
+      if (!changed) return st;
       const ns = { ...st, positions };
       saveState(ns);
       return ns;
@@ -881,6 +942,10 @@ export default function OptionsStrategyLab() {
     setBusy(null);
   };
   const sendToAlpaca = async () => {
+    // Order path 1 of the six (CLAUDE.md). The demo is read-only at the broker:
+    // the check lives next to the send, not only on the button, so a path that
+    // ever gets called some other way still cannot reach Alpaca.
+    if (DEMO) { setMsg(DEMO_TOOLTIP); return; }
     if (!confirmSend) { setConfirmSend(true); return; }
     setConfirmSend(false); setBusy("order");
     try {
@@ -953,81 +1018,132 @@ export default function OptionsStrategyLab() {
      Two things can come out of here: two roads on screen 3, or the
      "nothing today" screen. The refusal is a first-class outcome, so it is
      computed here from the same numbers the rest of the app uses, and its
-     sentences come from src/rules.js — never typed into a component. */
+     sentences come from src/rules.js — never typed into a component.
+
+     THE WHOLE BASKET, ON ONE SCALE. The old version picked the single
+     best-scoring ticker and then built both roads out of it, which meant the
+     two roads were always the same market wearing two structures — and a user
+     who ticked five commodities got one. Now every ticker in the basket that we
+     can actually read contributes candidates, they are ranked together on the
+     user's three weights, and road 2 is free to come from a different market
+     than road 1. That is the point of asking for a basket at all. */
   const runWizard = async (overrides) => {
     const ans = { ...wiz, ...(overrides || {}) };
     setWiz((w) => ({ ...w, ...(overrides || {}), busy: true, err: null }));
     setNothing(null);
     const stop = (reasons) => { setNothing(reasons); setWizStep("nothing"); setWiz((w) => ({ ...w, busy: false })); };
     try {
+      // 0) Nothing is assumed. If the questions were not answered we do not
+      // guess at them — we go back and ask (FindOpportunities blocks the button,
+      // this is the belt to that pair of braces).
+      const basket = (ans.basket || []).filter((tk) => UNDERLYINGS[tk]);
+      if (!basket.length || !(ans.risk > 0) || !(ans.horizon > 0)) {
+        setWiz((w) => ({ ...w, busy: false, err: "Answer all three before this can run: markets, what you are willing to lose, and how long to give it." }));
+        setWizStep("questions");
+        return;
+      }
+
       // 1) Do we know anything at all? No weather, no news and no price history
       // means the four factors are quiet by default, which is a data problem
       // and not a verdict on the market. Say which it is.
       const dataIn = !!weather || newsPool.length > 0 || Object.keys(barsCache).length > 0;
       if (!dataIn) return stop([{ id: "no-data", text: NOTHING_TODAY.noData("weather, news and prices") }]);
 
-      // 2) Do the four factors agree anywhere? A CONFLICT ticker, or one under
-      // the confidence floor, is not a trade — it is a market we cannot read.
-      const usable = scan.filter((r) => !r.conflict && r.confidence >= RULES.lowConfidence);
+      // 2) Do the four factors agree anywhere IN THE BASKET? A CONFLICT ticker,
+      // or one under the confidence floor, is not a trade — it is a market we
+      // cannot read, and it drops out of the basket rather than out of the app.
+      // Why a market left the basket travels with it: the verdict narrative has
+      // to say "we looked and it did not qualify" or "we could not see it", and
+      // those are different sentences (CLAUDE.md, saying "nothing today").
+      const excluded = [];
+      const inBasket = scan.filter((r) => basket.includes(r.tk));
+      const usable = inBasket.filter((r) => {
+        const keep = !r.conflict && r.confidence >= RULES.lowConfidence;
+        if (!keep) excluded.push({ tk: r.tk, reason: "signals" });
+        return keep;
+      });
       if (!usable.length) {
-        const closest = scan.slice().sort((a, b) => b.confidence - a.confidence)[0];
+        const closest = inBasket.slice().sort((a, b) => b.confidence - a.confidence)[0];
         return stop([{ id: "signals", text: NOTHING_TODAY.signalsNotAligned(closest || null) }]);
       }
-      const best = usable[0];
 
-      // 3) Are the options themselves expensive versus their own history? If we
-      // would be paying a rich premium for the same idea, we stand down.
-      const h = (store.ivHist || {})[best.tk] || [];
-      if (h.length >= 20) {
+      // 3) Are the options themselves expensive versus their own history? A
+      // ticker priced rich drops out; if that empties the basket, we stand down
+      // and say which one came closest to being worth it.
+      const ivRankOf = (tk) => {
+        const h = (store.ivHist || {})[tk] || [];
+        if (h.length < 20) return null;
         const cur = h[h.length - 1].iv;
-        const rank = Math.round((h.filter((x) => x.iv <= cur).length / h.length) * 100);
-        if (rank >= RULES.expensiveIVRank) {
-          return stop([{ id: "expensive", text: NOTHING_TODAY.optionsExpensive(best.tk, rank) }]);
-        }
+        return Math.round((h.filter((x) => x.iv <= cur).length / h.length) * 100);
+      };
+      const priced = [];
+      const tooRich = [];
+      for (const r of usable) {
+        const rank = ivRankOf(r.tk);
+        if (rank != null && rank >= RULES.expensiveIVRank) {
+          tooRich.push({ tk: r.tk, rank });
+          excluded.push({ tk: r.tk, reason: "expensive" });
+        } else priced.push(r);
+      }
+      if (!priced.length) {
+        const cheapest = tooRich.slice().sort((a, b) => a.rank - b.rank)[0];
+        return stop([{ id: "expensive", text: NOTHING_TODAY.optionsExpensive(cheapest.tk, cheapest.rank) }]);
       }
 
-      let c = chains[best.tk] || (await refreshChain(best.tk, true));
-      if (!c?.spot) return stop([{ id: "no-chain", text: NOTHING_TODAY.noData(best.tk) }]);
-      const sp = c.spot;
-      const exps = c.expirations.filter((e) => c.byExp[e].dte >= RULES.minEntryDTE && c.byExp[e].dte <= 130);
-      const ek = exps.length ? exps.reduce((b2, e) => Math.abs(c.byExp[e].dte - ans.horizon) < Math.abs(c.byExp[b2].dte - ans.horizon) ? e : b2, exps[0]) : null;
-      if (!ek) return stop([{ id: "no-exp", text: NOTHING_TODAY.noData(`${best.tk} expiries at least ${RULES.minEntryDTE} days out`) }]);
-      const d2 = c.byExp[ek].dte;
-      const sSet = new Set([...Object.keys(c.byExp[ek].calls), ...Object.keys(c.byExp[ek].puts)].map(Number));
-      const strikes = Array.from(sSet).sort((a, b) => a - b);
-      const qq = makeQuote(c, ek);
-      // candidati da ENTRAMBE le famiglie: direzionale (sentiment scanner) + intervallo (neutral)
-      const fams = best.sugg === "neutral" ? ["neutral"] : [best.sugg, "neutral"];
-      const cands = fams.flatMap((sent) => buildPresets(sent, sp, getU(best.tk).step, strikes).map((pr) => {
-        // A single long option is not a first trade: it pays for time it usually
-        // does not get, and a beginner reads the loss as bad luck rather than as
-        // decay. They stay on the full desk; the guided flow never proposes one.
-        if (pr.legs.length < 2) return null;
-        const a = analyze(pr.legs, sp, d2, getU(best.tk).iv, qq);
-        if (!Number.isFinite(a.maxProfit) || a.maxProfit <= 0 || !Number.isFinite(a.maxLoss) || a.maxLoss >= 0) return null;
-        const ivA = a.legPx.reduce((x, y) => x + y.iv, 0) / Math.max(1, a.legPx.length);
-        const pop = probProfit(a.curve, sp, ivA, d2) || 0;
-        const unit = Math.abs(a.maxLoss);
-        const n = Math.floor(ans.risk / unit);
-        if (n < 1) return null;
-        const pr2 = evProfile(pop, a.maxProfit, a.maxLoss);
-        return { sent, pr, a, pop, n, unit, ev100: pr2 ? pr2.ev100 : -999,
-          rr: a.maxProfit / unit, totRisk: n * unit, totProfit: n * a.maxProfit };
-      })).filter(Boolean);
-      // 4) Nothing fits the budget: also a real answer, not an error toast.
-      if (!cands.length) return stop([{ id: "budget", text: NOTHING_TODAY.budgetTooSmall(ans.risk) }]);
+      // 4) Build candidates for EVERY readable ticker in the basket, and keep
+      // the four-factor read attached to each one: the decision screen shows the
+      // evidence next to the road, so the evidence has to travel with it.
+      const examined = [];
+      const pool = [];
+      for (const r of priced) {
+        const tk = r.tk;
+        const c = chains[tk] || (await refreshChain(tk, true));
+        if (!c?.spot) { excluded.push({ tk, reason: "nodata" }); continue; }
+        const sp = c.spot;
+        const exps = c.expirations.filter((e) => c.byExp[e].dte >= RULES.minEntryDTE && c.byExp[e].dte <= 130);
+        if (!exps.length) { excluded.push({ tk, reason: "nodata" }); continue; }
+        const ek = exps.reduce((b2, e) => Math.abs(c.byExp[e].dte - ans.horizon) < Math.abs(c.byExp[b2].dte - ans.horizon) ? e : b2, exps[0]);
+        const d2 = c.byExp[ek].dte;
+        const sSet = new Set([...Object.keys(c.byExp[ek].calls), ...Object.keys(c.byExp[ek].puts)].map(Number));
+        const strikes = Array.from(sSet).sort((a, b) => a - b);
+        const qq = makeQuote(c, ek);
+        examined.push({ tk, fused: r.fused, spot: sp, dte: d2 });
+        loadBars(tk);
+        // candidati da ENTRAMBE le famiglie: direzionale (sentiment scanner) + intervallo (neutral)
+        const fams = r.sugg === "neutral" ? ["neutral"] : [r.sugg, "neutral"];
+        for (const sent of fams) {
+          for (const pr of buildPresets(sent, sp, getU(tk).step, strikes)) {
+            // A single long option is not a first trade: it pays for time it
+            // usually does not get, and a beginner reads the loss as bad luck
+            // rather than as decay. They stay on the full desk; the guided flow
+            // never proposes one.
+            if (pr.legs.length < 2) continue;
+            const a = analyze(pr.legs, sp, d2, getU(tk).iv, qq);
+            if (!Number.isFinite(a.maxProfit) || a.maxProfit <= 0 || !Number.isFinite(a.maxLoss) || a.maxLoss >= 0) continue;
+            const ivA = a.legPx.reduce((x, y) => x + y.iv, 0) / Math.max(1, a.legPx.length);
+            const pop = probProfit(a.curve, sp, ivA, d2) || 0;
+            const unit = Math.abs(a.maxLoss);
+            if (unit > ans.risk) continue;   // it does not fit the budget: not a road
+            const pr2 = evProfile(pop, a.maxProfit, a.maxLoss);
+            pool.push({
+              tk, sent, pr, a, pop, unit, ek, spot: sp, dte: d2,
+              ev100: pr2 ? pr2.ev100 : -999, rr: a.maxProfit / unit,
+              risk: unit, fused: r.fused,
+            });
+          }
+        }
+      }
+      if (!examined.length) return stop([{ id: "no-chain", text: NOTHING_TODAY.noData(basket.join(", ")) }]);
 
-      // The third question picks the FIRST road: win often = highest chance,
-      // win big = best payoff per dollar risked, balanced = best expected value.
-      // Whichever they asked for, prefer the ones that are not expected to lose
-      // money: "win big" should hand over the best-priced long shot, not simply
-      // the longest one.
-      const rank = ans.priority === "often" ? (a, b) => b.pop - a.pop
-        : ans.priority === "big" ? (a, b) => b.rr - a.rr
-        : (a, b) => b.ev100 - a.ev100;
-      const worthIt = cands.filter((x) => x.ev100 >= 0);
-      const pool = (worthIt.length >= 2 ? worthIt : cands).slice().sort(rank);
-      const first = pool[0];
+      // 5) Nothing fits the budget: also a real answer, not an error toast.
+      if (!pool.length) return stop([{ id: "budget", text: NOTHING_TODAY.budgetTooSmall(ans.risk) }]);
+
+      // 6) The user's three weights decide the order, across the whole basket at
+      // once. Prefer the ones that are not expected to lose money: "win big"
+      // should hand over the best-priced long shot, not simply the longest one.
+      const worthIt = pool.filter((x) => x.ev100 >= 0);
+      const ranked = rankByDrivers(worthIt.length >= 2 ? worthIt : pool, ans.weights);
+      const first = ranked[0];
 
       // The SECOND road is not the runner-up: it is the one that trades the
       // hardest against the first (PRD §5). Picking the second-best would show
@@ -1035,39 +1151,49 @@ export default function OptionsStrategyLab() {
       //
       // It must also be a real alternative. A candidate that is worse on how
       // often it works AND on what it pays AND on what it costs is not a road,
-      // it is a mistake with a chart next to it — "two roads" only teaches when
-      // the second one buys something the first does not.
-      const rival = pool.slice(1).filter((x) =>
-        x.pop > first.pop + 1e-9 || x.rr > first.rr + 1e-9 || x.unit < first.unit - 1e-9);
-      const spread = (f) => { const xs = pool.map(f); const r = Math.max(...xs) - Math.min(...xs); return r > 0 ? r : 1; };
+      // it is a mistake with a chart next to it.
+      const rival = ranked.slice(1).filter((x) =>
+        x.pop > first.pop + 1e-9 || x.rr > first.rr + 1e-9 || x.risk < first.risk - 1e-9);
+      const spread = (f) => { const xs = ranked.map(f); const r = Math.max(...xs) - Math.min(...xs); return r > 0 ? r : 1; };
       const dPop = spread((x) => x.pop), dRR = spread((x) => x.rr);
-      const contrast = (x) => Math.abs(x.pop - first.pop) / dPop + Math.abs(x.rr - first.rr) / dRR;
+      // A road from a DIFFERENT market is worth something on its own: two
+      // structures on one underlying share a fate, and comparing them teaches
+      // less than comparing two markets. It is a thumb on the scale, not a rule.
+      const contrast = (x) => Math.abs(x.pop - first.pop) / dPop + Math.abs(x.rr - first.rr) / dRR
+        + (x.tk !== first.tk ? 0.35 : 0);
       const second = rival.slice().sort((a, b) => contrast(b) - contrast(a))[0];
 
-      // 5) One road is advice, not teaching. If everything else on the board is
+      // 7) One road is advice, not teaching. If everything else on the board is
       // beaten by the first on every axis, the app says so rather than dressing
       // a dominated structure up as a choice.
       if (!second) return stop([{ id: "one-road", text: NOTHING_TODAY.onlyOneRoad(ans.risk) }]);
 
       const toCandidate = (x, n) => ({
-        id: `${best.tk}-${x.pr.name}-${n}`,
-        ticker: best.tk, name: x.pr.name, legs: x.pr.legs.map((l) => ({ ...l })),
-        entryNet: x.a.entry, spot: sp, expKey: ek, dte: d2,
-        maxProfit: x.a.maxProfit, maxLoss: x.a.maxLoss, risk: x.unit, pop: x.pop,
-        rr: x.rr, contracts: 1, a: x.a, sigma: (seasonal[best.tk]?.sigma) || getU(best.tk).sigma,
+        id: `${x.tk}-${x.pr.name}-${n}`,
+        ticker: x.tk, name: x.pr.name, legs: x.pr.legs.map((l) => ({ ...l })),
+        entryNet: x.a.entry, spot: x.spot, expKey: x.ek, dte: x.dte,
+        maxProfit: x.a.maxProfit, maxLoss: x.a.maxLoss, risk: x.risk, pop: x.pop,
+        rr: x.rr, contracts: 1, a: x.a, fused: x.fused,
+        driver: x.driver, drivers: x.drivers,
+        sigma: (seasonal[x.tk]?.sigma) || getU(x.tk).sigma,
       });
+      const roads = [toCandidate(first, 1), toCandidate(second, 2)];
 
-      setTicker(best.tk); setExpKey(ek);
-      loadBars(best.tk);
+      // 8) The copilot narrative: what was actually examined, in English, with
+      // the real counts. Generated in src/signals.js from the same data the
+      // score came from — never a template with the numbers dropped in.
+      setVerdict(verdictNarrative({
+        basket, examined, excluded, newsItems: newsPool, weatherData: weather,
+        month: NOW_MONTH, weights: ans.weights, chosen: roads,
+      }));
+
+      setTicker(first.tk); setExpKey(first.ek);
       setWiz((w) => ({ ...w, busy: false }));
-      setCandidates([toCandidate(first, 1), toCandidate(second, 2)]);
+      setCandidates(roads);
       setPicked(null); setConfirmResult(null);
       setWizStep("candidates");
     } catch (e) { setWiz((w) => ({ ...w, busy: false, err: String(e.message || e) })); }
   };
-
-  /** "Decide for me": same search, no questions — your saved answers and limit. */
-  const decideForMe = () => runWizard({ risk: Math.round(limits.perTradeLimit), horizon: RULES.targetEntryDTE });
 
   /* ---- screen 3 → screen 4. Taking a road loads it on the bench too, so
      "open it on the bench and change it" is one tap away from the refusal. */
@@ -1096,7 +1222,7 @@ export default function OptionsStrategyLab() {
       if (r.ok) {
         setMsg(`${picked.ticker} · ${picked.name} is open on paper. ${exitPlanSentence()}`);
         setView("desk"); setTab("positions");
-        setWizStep("open"); setPicked(null); setCandidates([]);
+        setWizStep("open"); setPicked(null); setCandidates([]); setVerdict([]);
       }
     } catch (e) {
       setWiz((w) => ({ ...w, err: String(e.message || e) }));
@@ -1310,6 +1436,7 @@ export default function OptionsStrategyLab() {
   if (!store.settings.onboarded) {
     return (
       <div style={{ minHeight: "100vh", background: T.bg, color: T.body }}>
+        <DemoBanner />
         <CapitalOnboarding
           initial={{ capital: store.settings.capital, concurrentTarget: store.settings.concurrentTarget, savings: store.settings.savings }}
           onDone={async (a) => {
@@ -1327,29 +1454,32 @@ export default function OptionsStrategyLab() {
   if (view === "wizard") {
     return (
       <div style={{ minHeight: "100vh", background: T.bg, color: T.body }}>
+        <DemoBanner />
         {msg && (
           <div style={{ ...mono, fontSize: 12, color: T.amber, background: `${T.amber}12`, borderBottom: `1px solid ${T.amber}44`, padding: "10px 14px" }}>{msg}</div>
         )}
         {wizStep === "open" && (
           <WizardOpen
             positions={store.positions} posAlerts={posAlerts} attention={nAttention}
-            marketReady={marketReady} perTradeLimit={limits.perTradeLimit}
+            marketReady={marketReady} barsFor={(tk) => barsCache[tk] || []}
             onPositions={() => { setView("desk"); setTab("positions"); }}
             onFind={() => { setNothing(null); setWizStep("questions"); }}
-            onDecide={decideForMe}
             onDesk={() => { setView("desk"); setTab("bench"); setEv("radar"); }}
             onSettings={() => { setView("desk"); setShowSettings(true); }}
           />
         )}
         {wizStep === "questions" && (
-          <WizardQuestions
+          <FindOpportunities
             answers={wiz} setAnswers={setWiz} limits={limits} busy={wiz.busy} err={wiz.err}
-            onBack={goHome} onSearch={() => runWizard()}
+            universe={BASKET.map((tk) => ({ tk, name: getU(tk).name }))}
+            onBack={goHome} onDecide={() => runWizard()}
           />
         )}
         {wizStep === "candidates" && (
           <WizardCandidates
-            candidates={candidates} answers={wiz}
+            candidates={candidates} answers={wiz} narrative={verdict}
+            barsFor={(tk) => barsCache[tk] || []}
+            weatherData={weather} newsItems={newsPool} month={NOW_MONTH}
             onPick={pickRoad}
             onBack={() => setWizStep("questions")}
           />
@@ -1382,6 +1512,7 @@ export default function OptionsStrategyLab() {
 
   return (
     <div style={{ minHeight: "100vh", background: T.bg, color: T.body, fontFamily: "ui-sans-serif, system-ui" }}>
+      <DemoBanner />
       <div style={{ maxWidth: 1720, margin: "0 auto", padding: "18px 14px 40px" }}>
 
         {/* Header */}
@@ -1624,7 +1755,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                       <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 4 }}>
                         {p.legs.map((l) => `${l.side > 0 ? "+" : "−"}${l.qty} ${l.strike}${l.type === "call" ? "C" : "P"}`).join(" / ")}
                       </div>
-                      <div style={{ marginTop: 6 }}><BandThumbnail bands={payoffBands({ legs: p.legs, entryNet: a.entry, spot })} width={220} height={40} title={bandTakeaway(payoffBands({ legs: p.legs, entryNet: a.entry, spot }), { ticker })} /></div>
+                      <div style={{ marginTop: 6 }}><BandThumbnail bands={payoffBands({ legs: p.legs, entryNet: a.entry, spot })} bars={barsCache[ticker] || []} width={220} height={40} title={bandTakeaway(payoffBands({ legs: p.legs, entryNet: a.entry, spot }), { ticker })} /></div>
                       <div style={{ display: "flex", gap: 14, marginTop: 8, flexWrap: "wrap" }}>
                         <Stat k={a.entry >= 0 ? "YOU PAY" : "YOU RECEIVE"} v={fmt$(Math.abs(a.entry) * 100)} />
                         <Stat k="MAX PROFIT" v={fmt$(a.maxProfit)} c={T.green} />
@@ -1687,7 +1818,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                     {multi.res.map((r, i) => (
                       <div key={i} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "8px 10px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7 }}>
                         <span style={{ ...mono, fontSize: 10, color: T.dim, width: 16 }}>#{i + 1}</span>
-                        <BandThumbnail bands={payoffBands({ legs: r.legs, entryNet: r.a.entry, spot: r.spot })} width={130} height={34} title={bandTakeaway(payoffBands({ legs: r.legs, entryNet: r.a.entry, spot: r.spot }), { ticker: r.tk })} />
+                        <BandThumbnail bands={payoffBands({ legs: r.legs, entryNet: r.a.entry, spot: r.spot })} bars={barsCache[r.tk] || []} width={130} height={34} title={bandTakeaway(payoffBands({ legs: r.legs, entryNet: r.a.entry, spot: r.spot }), { ticker: r.tk })} />
                         <div style={{ flex: 1, minWidth: 140 }}>
                           <div style={{ fontWeight: 700, color: T.ink, fontSize: 12.5 }}>{r.tk} · {r.name}</div>
                           <div style={{ ...mono, fontSize: 10, color: T.dim }}>{r.expKey} · {r.dte} DTE · ×{r.n}</div>

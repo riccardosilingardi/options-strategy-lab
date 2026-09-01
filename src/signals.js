@@ -16,6 +16,7 @@
 // then two screens disagree about the same trade.
 
 import { SEASONAL } from "./engine.js";
+import { RULES } from "./rules.js";
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
@@ -303,6 +304,9 @@ export function seasonalComponent(ticker, month, seasonalMean) {
 ================================================================ */
 
 const WEIGHTS = { seasonal: 0.30, technical: 0.25, weather: 0.25, news: 0.20 };
+// The gate's warning floor, imported rather than written down again: a
+// narrative must only ever quote a threshold the code actually applies.
+const LOW_CONFIDENCE = RULES.lowConfidence;
 const LABEL = { seasonal: "seasonality", technical: "the price trend", weather: "weather", news: "news flow" };
 const REINFORCE = 1.25; // weather and geopolitical news agreeing on the same ticker
 const CONFLICT_DAMPING = 0.6;
@@ -416,11 +420,18 @@ function buildNarrative({ ticker, month, components, agreement, score, confidenc
   if (agreement === "CONFLUENT" && confidence >= 70) {
     s.push(`At ${confidence}/100 this clears the 70-confidence bar the autopilot needs to propose a defined-risk spread in the ${dirWord(up.length ? 1 : -1)} direction`);
   } else if (agreement === "CONFLICT") {
-    s.push(`Confidence ${confidence}/100 is under the 40 the risk gate treats as a warning, so nothing here justifies an order today`);
+    s.push(`Confidence ${confidence}/100 is under the ${LOW_CONFIDENCE} the risk gate treats as a warning, so nothing here justifies an order today`);
   } else if (nActive === 0) {
     s.push(`With no factor above the noise floor the honest answer is nothing today, not a trade at ${confidence}/100 confidence`);
   } else {
-    s.push(`At ${confidence}/100 this sits below the 70-confidence bar for opening a position, so it is a watch-list name rather than a trade`);
+    // Two different bars, and saying "not a trade" conflates them. 70 is what
+    // the AUTOPILOT needs before it proposes something unprompted (PRD §9); the
+    // guided flow's floor is the risk gate's 40. A market at 55 is one you may
+    // trade deliberately but not one the app will bring to you on its own — and
+    // on a screen that is offering it as a road, "this is not a trade" reads as
+    // the app arguing with itself in front of the user.
+    s.push(`At ${confidence}/100 this clears the ${LOW_CONFIDENCE} the risk gate needs but not the 70 the autopilot ` +
+      `waits for before proposing anything unprompted, so it is worth taking deliberately rather than on autopilot`);
   }
 
   return s.join(". ") + ".";
@@ -535,4 +546,284 @@ export function againstSignal(fused, dir) {
       + (opposing.length ? `. Against you: ${opposing.map((k) => `${LABEL[k]} (${fused.components[k].strength}/100)`).join(", ")}` : "")
       + (supporting.length ? `. With you: ${supporting.map((k) => LABEL[k]).join(", ")}` : ". Nothing reads your way"),
   };
+}
+
+/* ================================================================
+   DRIVERS — what the user says matters, as three numbers
+
+   The old screen asked "what matters most?" and offered three words. A word
+   hides its own arithmetic: "win often" and "win big" are the SAME question
+   asked with different weights, and a beginner who never sees the weights never
+   learns that the two are on one dial rather than in two boxes.
+
+   So the three presets set the sliders instead of replacing them. Pick "win
+   often" and you watch the chance slider go to 60 and the payout slider drop to
+   20 — the choice explains itself, which is what a literacy pill is (PRD §2).
+
+   The three always sum to 100, because a preference only means anything against
+   the other preferences.
+================================================================ */
+
+export const DRIVERS = [
+  { id: "chance", label: "How often it works", sub: "the share of outcomes that finish in profit" },
+  { id: "profit", label: "How much it pays", sub: "what the win is worth per dollar you put at risk" },
+  { id: "budget", label: "How little it ties up", sub: "the cash the ticket costs to put on" },
+];
+
+/** The three words, as the numbers they always were. */
+export const DRIVER_PRESETS = {
+  often: { chance: 60, profit: 15, budget: 25 },
+  balanced: { chance: 34, profit: 33, budget: 33 },
+  big: { chance: 15, profit: 65, budget: 20 },
+};
+
+/** The preset a set of weights IS, or null when the user has moved off one. */
+export function presetOf(weights) {
+  const w = normaliseWeights(weights);
+  for (const [id, p] of Object.entries(DRIVER_PRESETS)) {
+    if (DRIVERS.every((d) => Math.abs(p[d.id] - w[d.id]) <= 1)) return id;
+  }
+  return null;
+}
+
+/**
+ * Force three weights to sum to 100 while keeping their proportions. Moving one
+ * slider has to take from the others or the numbers stop meaning anything, and
+ * doing that silently in a component would put the arithmetic in two places.
+ *
+ * @param weights the three raw values
+ * @param moved   the slider the user just dragged; it keeps its value exactly
+ *                and the other two absorb the difference in proportion.
+ */
+export function normaliseWeights(weights = {}, moved = null) {
+  const ids = DRIVERS.map((d) => d.id);
+  const raw = {};
+  for (const id of ids) raw[id] = Math.max(0, Math.min(100, Math.round(Number(weights[id]) || 0)));
+
+  if (moved && ids.includes(moved)) {
+    const keep = raw[moved];
+    const others = ids.filter((id) => id !== moved);
+    const rest = 100 - keep;
+    const had = others.reduce((a, id) => a + raw[id], 0);
+    const out = { [moved]: keep };
+    if (had <= 0) {
+      out[others[0]] = Math.round(rest / 2);
+      out[others[1]] = rest - out[others[0]];
+    } else {
+      out[others[0]] = Math.round((raw[others[0]] / had) * rest);
+      out[others[1]] = rest - out[others[0]];
+    }
+    return out;
+  }
+
+  const total = ids.reduce((a, id) => a + raw[id], 0);
+  if (total === 100) return raw;
+  if (total <= 0) return { ...DRIVER_PRESETS.balanced };
+  const out = {};
+  let used = 0;
+  for (let i = 0; i < ids.length - 1; i++) {
+    out[ids[i]] = Math.round((raw[ids[i]] / total) * 100);
+    used += out[ids[i]];
+  }
+  out[ids[ids.length - 1]] = 100 - used;
+  return out;
+}
+
+/**
+ * Score every candidate on the user's three weights, on ONE scale across the
+ * WHOLE basket — that is what lets road 1 be corn and road 2 be natural gas
+ * (PRD §5: two roads, and nothing says they have to be the same market).
+ *
+ * ALL THREE drivers are normalised the same way — best in the pool scores 1,
+ * worst scores 0 — because "pays well" and "works often" only mean anything
+ * against the other things on offer today. Mixing an absolute measure with two
+ * relative ones was a bug: a chance of profit read absolutely never uses more
+ * than about half its scale in practice (real structures land between 0.3 and
+ * 0.8), so a weight of 60 on it quietly lost to a weight of 25 on a dimension
+ * that did use its whole scale. A slider set to 60 has to beat a slider set
+ * to 25, or the numbers on screen are decoration.
+ *
+ * The signal read then scales the result: a candidate on a market where the
+ * four factors barely agree is worth less than the same structure on one where
+ * they do, and that is the engine reaching the decision rather than decorating it.
+ *
+ * @param cands   [{ pop, rr, risk, fused, dir }]
+ * @param weights the three sliders
+ * @returns the same objects with `driver` (0-100) and `drivers` (the three
+ *          normalised parts), sorted best first.
+ */
+export function rankByDrivers(cands = [], weights = DRIVER_PRESETS.balanced) {
+  const w = normaliseWeights(weights);
+  if (!cands.length) return [];
+  // Best in the pool scores 1, worst 0. With nothing to choose between — one
+  // candidate, or every candidate identical on that axis — the driver scores
+  // everything 1 rather than pretending the only ticket on offer is also the
+  // worst one.
+  const scale = (values, higherIsBetter) => {
+    const lo = Math.min(...values), hi = Math.max(...values);
+    if (!(hi > lo)) return () => 1;
+    return (v) => {
+      const t = (v - lo) / (hi - lo);
+      return higherIsBetter ? t : 1 - t;
+    };
+  };
+  const num = (x) => (Number.isFinite(Number(x)) ? Number(x) : 0);
+  const sChance = scale(cands.map((c) => num(c.pop)), true);
+  const sProfit = scale(cands.map((c) => num(c.rr)), true);
+  const sBudget = scale(cands.map((c) => num(c.risk)), false);
+
+  const scored = cands.map((c) => {
+    const chance = sChance(num(c.pop));
+    const profit = sProfit(num(c.rr));
+    const budget = sBudget(num(c.risk));
+    const base = (w.chance * chance + w.profit * profit + w.budget * budget) / 100;
+    // 0.6 at no confidence, 1.0 at full confidence: the signal moves the order,
+    // it does not decide it on its own.
+    const conf = c.fused ? 0.6 + 0.4 * (c.fused.confidence / 100) : 0.8;
+    return { ...c, drivers: { chance, profit, budget }, driver: Math.round(base * conf * 100) };
+  });
+  return scored.sort((a, b) => b.driver - a.driver);
+}
+
+/* ================================================================
+   THE VERDICT NARRATIVE
+
+   What the app actually looked at, in English, with the real counts. Not a
+   template with holes: every clause is only written when there is a number to
+   put in it, so "we read 14 headlines, 3 of them geopolitical" appears and
+   "we read 0 headlines" says something different rather than the same sentence
+   with a zero in it.
+
+   PRD §7: "Narratives must contain numbers. 'Signals are positive' is a failure."
+================================================================ */
+
+const list = (xs) => (xs.length <= 1 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`);
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
+/**
+ * @param {object} arg
+ *   basket     — the tickers the user asked us to consider
+ *   examined   — [{ tk, fused }] the ones that reached the shortlist
+ *   excluded   — [{ tk, reason }] and why each of the others did not:
+ *                "signals" (read, but the factors did not agree),
+ *                "expensive" (read, but priced rich versus its own history) or
+ *                "nodata" (we could not see it at all)
+ *   newsItems  — the headline pool, already tagged
+ *   weatherData— the raw forecast payload
+ *   month      — 0-11
+ *   weights    — the three sliders
+ *   chosen     — [{ ticker, name, drivers, driver }] the roads, best first
+ *   now        — clock
+ * @returns an array of paragraphs.
+ */
+export function verdictNarrative({ basket = [], examined = [], excluded = [], newsItems = [], weatherData = null,
+  month = new Date().getMonth(), weights = DRIVER_PRESETS.balanced, chosen = [], now = Date.now() } = {}) {
+  const w = normaliseWeights(weights);
+  const m = MONTHS[month];
+  const out = [];
+
+  /* 1) What was on the table, and why anything left it.
+
+     "We could not see it" and "we looked and it did not qualify" are DIFFERENT
+     answers and must never be written as the same sentence — the same rule the
+     "nothing today" screen lives by, pointing the other way. Each excluded
+     market says which of the two happened to it. */
+  const read = examined.map((e) => e.tk);
+  const why = new Map((excluded || []).map((x) => [x.tk, x]));
+  const dropped = basket.filter((tk) => !read.includes(tk));
+  const grouped = { signals: [], expensive: [], nodata: [] };
+  for (const tk of dropped) grouped[why.get(tk)?.reason || "nodata"].push(tk);
+  const clauses = [];
+  if (grouped.signals.length) {
+    // Deliberately NOT "we could not read it": that wording belongs to the
+    // missing-data case below, and the two must not sound alike.
+    clauses.push(`on ${list(grouped.signals)} the four factors contradicted each other or were too quiet ` +
+      `to act on, and when they disagree we do not know enough`);
+  }
+  if (grouped.expensive.length) {
+    clauses.push(`${list(grouped.expensive)} ${grouped.expensive.length === 1 ? "is" : "are"} priced richly ` +
+      `against ${grouped.expensive.length === 1 ? "its" : "their"} own past year, so we would be paying up for the same idea`);
+  }
+  if (grouped.nodata.length) {
+    clauses.push(`${list(grouped.nodata)} had no prices we could read, so ${grouped.nodata.length === 1 ? "it was" : "they were"} ` +
+      `left out rather than guessed at`);
+  }
+  out.push(
+    `You asked about ${plural(basket.length, "market", "markets")} — ${list(basket)}. ` +
+    (clauses.length
+      ? `${read.length === 0 ? "None" : plural(read.length, "of them", "of them")} came through to the shortlist` +
+        `${read.length ? ` (${list(read)})` : ""}. ${clauses.map((c) => c[0].toUpperCase() + c.slice(1)).join("; ")}.`
+      : `All ${basket.length} came through to the shortlist.`)
+  );
+
+  /* 2) News — counted, not characterised. */
+  const tagged = newsItems.filter((n) => (n.impacts || tagImpacts(n.title || "")).some((im) => basket.includes(im.tk)));
+  const geo = tagged.filter((n) => n.geo === true || GEO_RE.test(n.title || ""));
+  const freshDays = tagged
+    .map((n) => (n.date ? (now - new Date(n.date).getTime()) / 86400000 : null))
+    .filter((d) => Number.isFinite(d));
+  const freshest = freshDays.length ? Math.min(...freshDays) : null;
+  if (!newsItems.length) {
+    out.push(`No headlines had loaded when this ran, so the news factor contributed nothing either way — that is a gap in what we could see, not a quiet news day.`);
+  } else if (!tagged.length) {
+    out.push(`We read ${plural(newsItems.length, "headline", "headlines")} and none of them tagged anything in your basket. News scored zero here because nothing said anything about these markets, not because the news was neutral.`);
+  } else {
+    out.push(
+      `We read ${plural(newsItems.length, "headline", "headlines")}; ${tagged.length} of them tag a market you asked about, ` +
+      (geo.length
+        ? `and ${plural(geo.length, "is", "are")} geopolitical or government — export bans, sanctions, USDA and EIA figures and the like — which weigh more than market chatter because they move supply rather than the session. `
+        : `and none of them is geopolitical or government, so they all count as market chatter, which weighs less. `) +
+      (freshest == null ? `` : `The freshest is ${freshest < 1 ? "under a day" : plural(Math.round(freshest), "day", "days")} old, and a headline five days old counts half.`)
+    );
+  }
+
+  /* 3) Weather — which regions are off their own norm, and by how much. */
+  const regions = regionSignals(weatherData, month).filter((r) => r.tks.some((tk) => basket.includes(tk)));
+  const anomalous = regions.filter((r) => r.numDir !== 0);
+  if (!weatherData) {
+    out.push(`The forecast had not loaded, so weather contributed nothing to any of these scores.`);
+  } else if (!anomalous.length) {
+    out.push(`${plural(regions.length, "growing region", "growing regions")} behind your basket ${regions.length === 1 ? "has" : "have"} a usable forecast, and every one of them sits inside its own seasonal norm. Each region is read against ITS OWN ${m} average, never a fixed temperature: 30°C is ordinary in Dallas in July and extreme in Odesa in April.`);
+  } else {
+    out.push(
+      `Of ${plural(regions.length, "growing region", "growing regions")} with a usable forecast, ${anomalous.length} ` +
+      `${anomalous.length === 1 ? "is" : "are"} outside ${anomalous.length === 1 ? "its" : "their"} own ${m} norm: ` +
+      `${list(anomalous.slice(0, 3).map((r) => `${r.region} (${r.why.replace(/^.*?runs /, "").split(",")[0]}, ${r.strength})`))}. ` +
+      `Every region is measured against its own ${m} average, never a fixed temperature.`
+    );
+  }
+
+  /* 4) Seasonality for THIS month, per market. */
+  const seasons = examined
+    .map((e) => ({ tk: e.tk, mean: e.fused?.components?.seasonal?.mean }))
+    .filter((x) => Number.isFinite(x.mean))
+    .sort((a, b) => Math.abs(b.mean) - Math.abs(a.mean));
+  if (seasons.length) {
+    out.push(
+      `Seasonally, ${m} has averaged ` +
+      `${list(seasons.slice(0, 4).map((x) => `${signed(x.mean)}%/month for ${x.tk}`))} historically. ` +
+      `Anything inside plus or minus 0.8% counts as no seasonal edge at all, and seasonality is the heaviest ` +
+      `of the four factors at 30%.`
+    );
+  }
+
+  /* 5) How the sliders tipped it. */
+  if (chosen.length) {
+    const lead = chosen[0];
+    const ordered = DRIVERS.map((d) => ({ ...d, v: w[d.id] })).sort((a, b) => b.v - a.v);
+    const top = ordered[0], bottom = ordered[ordered.length - 1];
+    const tickers = [...new Set(chosen.map((c) => c.ticker))];
+    out.push(
+      `You set ${list(ordered.map((d) => `${d.label.toLowerCase()} at ${d.v}`))} out of 100. ` +
+      `That weighting is what put ${lead.ticker} · ${lead.name} first: ` +
+      `${top.label.toLowerCase()} is what you asked for most, and against everything else on offer today it ` +
+      `scores ${Math.round((lead.drivers?.[top.id] ?? 0) * 100)} out of 100 on that, against ` +
+      `${Math.round((lead.drivers?.[bottom.id] ?? 0) * 100)} on ${bottom.label.toLowerCase()}, which you asked for least. ` +
+      (tickers.length > 1
+        ? `The two roads come from different markets — ${list(tickers)} — because the whole basket was ranked on one scale, not each market on its own.`
+        : `Both roads come from ${tickers[0]}: nothing in the rest of the basket scored high enough on your weights to earn the second slot.`)
+    );
+  }
+
+  return out;
 }
