@@ -3,9 +3,9 @@
 //
 // The wizard is not a tab inside the app. It is the front door: the first thing
 // you see, and the thing you come back to. The desk behind "Full desk" is
-// three places — Bench, Positions, Journal — and everything else there
+// three places — Build, Positions, Journal — and everything else there
 // (Radar, Shortlist, market levels, history) is evidence for the trade on the
-// bench rather than a destination of its own.
+// Build screen rather than a destination of its own.
 //
 // Screens in this file:
 //   · CapitalOnboarding — first run, PRD §3. Capital, positions at once, savings.
@@ -24,7 +24,7 @@
 // ============================================================================
 import React, { useState } from "react";
 import { Compass, Briefcase, Bell, ArrowLeft, SlidersHorizontal, ShieldCheck, ShieldAlert, AlertTriangle, Sparkles } from "lucide-react";
-import { T } from "./theme.js";
+import { T, BADGE_SAFE, BADGE_BTN_GAP } from "./theme.js";
 import { RULES, sizing, money, pctText, perTradeCapLabel, ruleBadge } from "./rules.js";
 import { BandThumbnail, Gauge, payoffBands, bandTakeaway, gaugeTakeaway, explainElement, UnifiedFigure, exitPlanSentence, exitPlanDetail, inTenPhrase, price } from "./visuals.jsx";
 import { DRIVERS, DRIVER_PRESETS, presetOf, normaliseWeights } from "./signals.js";
@@ -131,7 +131,7 @@ export function CapitalOnboarding({ initial = {}, onDone }) {
   const reasonShort = wantOverride && ovAmount && ovReason.trim().length < RULES.minOverrideReasonChars;
 
   return (
-    <div style={{ ...sans, maxWidth: 620, margin: "0 auto", padding: "24px 16px 48px" }}>
+    <div style={{ ...sans, maxWidth: 620, margin: "0 auto", padding: `24px 16px ${BADGE_SAFE}px` }}>
       <Eyebrow>Setting up · paper trading only</Eyebrow>
       <h1 style={{ ...sans, fontSize: 27, fontWeight: 800, color: T.ink, margin: "8px 0 6px", lineHeight: 1.2 }}>
         First, how much are we working with?
@@ -218,7 +218,7 @@ export function CapitalOnboarding({ initial = {}, onDone }) {
         )}
 
         <button onClick={() => onDone(answers)} disabled={!ready}
-          style={{ ...sans, width: "100%", minHeight: 56, marginTop: 20, fontSize: 16, fontWeight: 700, borderRadius: 10,
+          style={{ ...sans, width: "100%", minHeight: 56, marginTop: 20, marginBottom: BADGE_BTN_GAP, fontSize: 16, fontWeight: 700, borderRadius: 10,
             cursor: ready ? "pointer" : "not-allowed", opacity: ready ? 1 : 0.5,
             background: T.amber, color: T.onAccent, border: "none" }}>
           Start
@@ -264,7 +264,7 @@ export function WizardOpen({ positions = [], posAlerts = [], attention = 0, mark
   onPositions, onFind, onDesk, onSettings, barsFor }) {
   const hasPositions = positions.length > 0;
   return (
-    <div style={{ ...sans, maxWidth: 620, margin: "0 auto", padding: "22px 16px 40px" }}>
+    <div style={{ ...sans, maxWidth: 620, margin: "0 auto", padding: `22px 16px ${BADGE_SAFE}px` }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
         <div>
           <h1 style={{ ...sans, fontSize: 27, fontWeight: 800, color: T.ink, margin: 0, lineHeight: 1.2 }}>{greeting()}</h1>
@@ -427,7 +427,7 @@ export function FindOpportunities({ answers, setAnswers, limits, universe = [], 
   const ready = missing.length === 0;
 
   return (
-    <div style={{ ...sans, maxWidth: 620, margin: "0 auto", padding: "16px 16px 44px" }}>
+    <div style={{ ...sans, maxWidth: 620, margin: "0 auto", padding: `16px 16px ${BADGE_SAFE}px` }}>
       <BackLink onClick={onBack} />
       <h1 style={{ ...sans, fontSize: 25, fontWeight: 800, color: T.ink, margin: "4px 0 6px", lineHeight: 1.25 }}>
         Find opportunities.
@@ -526,7 +526,7 @@ export function FindOpportunities({ answers, setAnswers, limits, universe = [], 
         )}
 
         <button onClick={onDecide} disabled={busy || !ready}
-          style={{ ...sans, width: "100%", minHeight: 58, marginTop: 22, fontSize: 16.5, fontWeight: 700, borderRadius: 10,
+          style={{ ...sans, width: "100%", minHeight: 58, marginTop: 22, marginBottom: BADGE_BTN_GAP, fontSize: 16.5, fontWeight: 700, borderRadius: 10,
             cursor: busy ? "wait" : ready ? "pointer" : "not-allowed", opacity: busy ? 0.6 : ready ? 1 : 0.45,
             background: T.amber, color: T.onAccent, border: "none", display: "inline-flex", alignItems: "center",
             justifyContent: "center", gap: 8 }}>
@@ -715,7 +715,7 @@ export function WizardCandidates({ candidates = [], answers = {}, narrative = []
   weatherData, newsItems, month, onPick, onBack }) {
   const tickers = [...new Set(candidates.map((c) => c.ticker))];
   return (
-    <div style={{ ...sans, maxWidth: 760, margin: "0 auto", padding: "16px 16px 44px" }}>
+    <div style={{ ...sans, maxWidth: 760, margin: "0 auto", padding: `16px 16px ${BADGE_SAFE}px` }}>
       <BackLink onClick={onBack} label="Change my answers" />
       <Eyebrow>The verdict</Eyebrow>
       <h1 style={{ ...sans, fontSize: 25, fontWeight: 800, color: T.ink, margin: "6px 0 6px", lineHeight: 1.25 }}>
@@ -832,7 +832,7 @@ export function WizardConfirm({
   const refused = !!(result && !result.pass);
 
   return (
-    <div style={{ ...sans, maxWidth: 720, margin: "0 auto", padding: "16px 16px 44px" }}>
+    <div style={{ ...sans, maxWidth: 720, margin: "0 auto", padding: `16px 16px ${BADGE_SAFE}px` }}>
       <BackLink onClick={onBack} label="Back to the two roads" />
       <Eyebrow>Confirm</Eyebrow>
       <h1 style={{ ...sans, fontSize: 25, fontWeight: 800, color: T.ink, margin: "6px 0 4px", lineHeight: 1.25 }}>
@@ -894,7 +894,7 @@ export function WizardConfirm({
       </Card>
 
       <button onClick={onConfirm} disabled={busy || refused}
-        style={{ ...sans, width: "100%", minHeight: 58, marginTop: 18, fontSize: 16.5, fontWeight: 700, borderRadius: 10,
+        style={{ ...sans, width: "100%", minHeight: 58, marginTop: 18, marginBottom: BADGE_BTN_GAP, fontSize: 16.5, fontWeight: 700, borderRadius: 10,
           cursor: busy ? "wait" : refused ? "not-allowed" : "pointer", opacity: busy ? 0.6 : refused ? 0.45 : 1,
           background: T.amber, color: T.onAccent, border: "none" }}>
         {busy ? "Checking…" : refused ? "Blocked by the risk gate" : `Open this on paper · ${money(c.risk)} at risk`}
@@ -903,7 +903,7 @@ export function WizardConfirm({
       {refused && onDesk && (
         <button onClick={onDesk}
           style={{ ...sans, fontSize: 14, minHeight: TAP, marginTop: 8, padding: "8px 4px", background: "transparent", border: "none", color: T.blue, cursor: "pointer", textAlign: "left", width: "100%" }}>
-          Open it on the bench and change it →
+          Open it on the Build screen and change it →
         </button>
       )}
 
@@ -929,7 +929,7 @@ export function NothingToday({ reasons = [], notified, onNotify, onBack, onPosit
   const dataProblem = reasons.length > 0 && reasons.every((r) => String(r.id || "").startsWith("no-"));
   const oneRoad = !dataProblem && reasons.length > 0 && reasons.every((r) => r.id === "one-road");
   return (
-    <div style={{ ...sans, maxWidth: 620, margin: "0 auto", padding: "16px 16px 44px" }}>
+    <div style={{ ...sans, maxWidth: 620, margin: "0 auto", padding: `16px 16px ${BADGE_SAFE}px` }}>
       <BackLink onClick={onBack} label="Change my answers" />
       <div style={{ marginTop: 6 }}>
         <Eyebrow>Today’s answer</Eyebrow>
@@ -973,7 +973,7 @@ export function NothingToday({ reasons = [], notified, onNotify, onBack, onPosit
         </div>
         {!notified && (
           <button onClick={onNotify}
-            style={{ ...sans, width: "100%", minHeight: 52, marginTop: 14, fontSize: 15.5, fontWeight: 700, borderRadius: 10,
+            style={{ ...sans, width: "100%", minHeight: 52, marginTop: 14, marginBottom: BADGE_BTN_GAP, fontSize: 15.5, fontWeight: 700, borderRadius: 10,
               cursor: "pointer", background: T.amber, color: T.onAccent, border: "none" }}>
             Notify me
           </button>

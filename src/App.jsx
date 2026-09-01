@@ -12,11 +12,12 @@ import { fetchAllNews, fetchWeather, ImpactTags, CopilotTab, ReportTab, OrderTic
 import { BandThumbnail, payoffBands, bandTakeaway, GaugeFigure, exitPlanSentence } from "./visuals.jsx";
 import { fuseSignals, sentimentDirection, withSignalRank, compareCandidates, againstSignal, DRIVER_PRESETS, rankByDrivers, verdictNarrative } from "./signals.js";
 import { N as nCDF, bs as bsPrice, smile as smileIV, payoff as payoffExp, SEASONAL, SIGMA } from "./engine.js";
-import { T, themeName, setTheme } from "./theme.js";
+import { T, themeName, setTheme, BADGE_SAFE } from "./theme.js";
 import { RULES, sizing, ruleBadge, takeProfitLabel, stopLossLabel, perTradeCapLabel, RULE_PILLS, NOTHING_TODAY, money, pctText } from "./rules.js";
 import { evaluateTrade, gateSummary } from "./riskGate.js";
 import { DEMO, DEMO_BANNER, DEMO_TOOLTIP, DEMO_SEED_TICKERS, demoPositions } from "./demo.js";
 import { CapitalOnboarding, WizardOpen, FindOpportunities, WizardCandidates, WizardConfirm, NothingToday, Card, Pill } from "./wizard.jsx";
+import { buildHandOff, buildScreenState, BUILD_TAB } from "./handoff.js";
 
 /* ============================== THEME ============================== */
 const mono = { fontFamily: "ui-monospace, Menlo, monospace" };
@@ -455,9 +456,9 @@ export default function OptionsStrategyLab() {
   // PRD §5: the wizard IS the app. `view` is the shell — the tabs are one of
   // its destinations, not the front door. `wizStep` is which wizard screen.
   const [view, setView] = useState("wizard");   // "wizard" | "desk"
-  // The desk is three places, not eleven: the bench where a trade is built, the
-  // positions you hold and the journal of what happened. Everything that used
-  // to be a tab of its own is evidence for one of those three (see `ev`).
+  // The desk is three places, not eleven: the Build screen where a trade is put
+  // together, the positions you hold and the journal of what happened. Everything
+  // that used to be a tab of its own is evidence for one of those three (see `ev`).
   const [wizStep, setWizStep] = useState("open"); // open | questions | candidates | confirm | nothing
   const [nothing, setNothing] = useState(null);   // [{ id, text }] — why not today
   const [candidates, setCandidates] = useState([]); // screen 3: always two roads
@@ -465,8 +466,8 @@ export default function OptionsStrategyLab() {
   const [picked, setPicked] = useState(null);       // screen 4: the road taken
   const [confirmResult, setConfirmResult] = useState(null); // the gate's answer AFTER the tap
   const [hydrated, setHydrated] = useState(false);
-  const [tab, setTab] = useState("bench");       // "bench" | "positions" | "journal"
-  const [ev, setEv] = useState(null);           // which evidence section is open on the bench
+  const [tab, setTab] = useState("build");       // "build" | "positions" | "journal"
+  const [ev, setEv] = useState(null);           // which evidence section is open on the Build screen
   const [showSettings, setShowSettings] = useState(false);
   const [ticker, setTicker] = useState("SOYB");
   const [chains, setChains] = useState({});      // ticker -> chain CBOE
@@ -503,10 +504,15 @@ export default function OptionsStrategyLab() {
     basket: BASKET, risk: null, horizon: null,
     weights: { ...DRIVER_PRESETS.balanced }, priority: "balanced", busy: false, err: null,
   });
-  const [optRef, setOptRef] = useState(null); // price snapshot from the Shortlist, to reconcile against the Bench
+  const [optRef, setOptRef] = useState(null); // price snapshot from the Shortlist, to reconcile against the Build screen
   const [weather, setWeather] = useState(null);  // regionId -> forecast 14g (fuseSignals)
   const [barsCache, setBarsCache] = useState({}); // ticker -> daily bars (fattore tecnico)
   const [against, setAgainst] = useState({ reason: "" }); // motivazione per un trade contro il segnale
+  // A hand-off has to end where the trade is. `buildAnchor` marks the top of
+  // the Build section and `scrollBuild` is bumped by every hand-off, so the
+  // scroll happens after React has applied the new state, not before it.
+  const buildAnchor = useRef(null);
+  const [scrollBuild, setScrollBuild] = useState(0);
 
   const U = getU(ticker);
   const chain = chains[ticker];
@@ -520,6 +526,12 @@ export default function OptionsStrategyLab() {
     return Array.from(s).sort((a, b) => a - b);
   }, [chain, expKey]);
   const q = useMemo(() => makeQuote(chain, expKey), [chain, expKey]);
+
+  /* ---- a hand-off ends where the trade is ---- */
+  useEffect(() => {
+    if (!scrollBuild) return;
+    buildAnchor.current?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+  }, [scrollBuild]);
 
   /* ---- chain fetch ---- */
   const refreshChain = useCallback(async (tk, silent) => {
@@ -746,15 +758,37 @@ export default function OptionsStrategyLab() {
   /* ---- analisi ---- */
   const A = useMemo(() => (spot && legs.length ? analyze(legs, spot, dte, iv, q) : null), [legs, spot, dte, iv, q]);
   const oiGrid = useMemo(() => oiGridFromChain(chain, spot), [chain, spot]);
+  // A chain that is still being fetched is not a chain that failed. `busy` is
+  // the ticker of the request in flight ("all" during a refresh-all), so the
+  // Build screen can say "loading" instead of blaming the user for a request
+  // that has not come back yet.
+  const chainLoading = busy === ticker || busy === "all";
+  const buildScreen = buildScreenState({ spot, hasTrade: !!A, chainLoading });
   const lv = useMemo(() => levelsFromGrid(oiGrid, spot), [oiGrid, spot]);
 
 
   /* ---- azioni strategia ---- */
-  const applyPreset = (p, a) => {
-    setLegs(p.legs.map((l) => ({ ...l }))); setStratName(p.name); setMc(null); setBt(null);
-    setOptRef(a ? { name: p.name, entry: a.entry, maxProfit: a.maxProfit, maxLoss: a.maxLoss, expKey, t: Date.now() } : null);
-    setTab("bench");
+  /* ---- ONE way to put a trade on the Build screen ----
+     Every button that hands a specific trade to Build lands here: the
+     Shortlist's presets, the multi-market scan, "Monitor" on a position,
+     "Load" on a saved strategy and the wizard taking a road. `buildHandOff`
+     (src/handoff.js) decides what changes; this applies it. Written inline at
+     each button instead, a hand-off forgets one of the four things it has to
+     do and the tap looks like it did nothing — see the comment there. */
+  const openOnBuild = ({ ticker: tk, expKey: ek = null, legs: lg, name, ref = null }) => {
+    const h = buildHandOff({ ticker: tk, expKey: ek, legs: lg, name, chains });
+    setTicker(h.ticker); setExpKey(h.expKey); setLegs(h.legs); setStratName(h.name);
+    setMc(null); setBt(null);
+    setOptRef(ref);
+    setEv(h.ev);          // close the evidence panel: the trade goes underneath it
+    setTab(h.tab);
+    if (h.loadChain) refreshChain(h.ticker);   // no chain, no price, no trade to show
+    setScrollBuild((n) => n + 1);
   };
+  const applyPreset = (p, a) => openOnBuild({
+    ticker, expKey, legs: p.legs, name: p.name,
+    ref: a ? { name: p.name, entry: a.entry, maxProfit: a.maxProfit, maxLoss: a.maxLoss, expKey, t: Date.now() } : null,
+  });
   const updLeg = (i, f, v) => setLegs((L) => L.map((l, j) => (j === i ? { ...l, [f]: v } : l)));
   const onChainCell = (k, t) => {
     setLegs((L) => {
@@ -774,9 +808,9 @@ export default function OptionsStrategyLab() {
     setStore(st); await saveState(st); setMsg("Strategy saved. It will still be here next time.");
   };
   /* ---- ONE way to open a paper position ----
-     The Bench and the wizard's confirm screen both land here, so a position
-     opened from screen 4 carries exactly the same gate record, thesis and
-     timeline as one opened from the bench. Two paths would mean two truths. */
+     The Build screen and the wizard's confirm screen both land here, so a
+     position opened from screen 4 carries exactly the same gate record, thesis
+     and timeline as one built by hand. Two paths would mean two truths. */
   const commitPosition = async ({ ticker: tk, expKey: ek, legs: lg, dte: d, analysis, spot: sp, name, alpacaOrder, clashInfo, reason }) => {
     // Anche la posizione interna passa dal cancello: non tocca il broker, ma
     // entra nell'esposizione totale che il cancello misura al prossimo ordine.
@@ -1195,13 +1229,11 @@ export default function OptionsStrategyLab() {
     } catch (e) { setWiz((w) => ({ ...w, busy: false, err: String(e.message || e) })); }
   };
 
-  /* ---- screen 3 → screen 4. Taking a road loads it on the bench too, so
-     "open it on the bench and change it" is one tap away from the refusal. */
+  /* ---- screen 3 → screen 4. Taking a road loads it on Build too, so
+     "open it on the Build screen and change it" is one tap away from the refusal. */
   const pickRoad = (c) => {
     setPicked(c); setConfirmResult(null);
-    setTicker(c.ticker); setExpKey(c.expKey);
-    setLegs(c.legs.map((l) => ({ ...l }))); setStratName(c.name);
-    setMc(null); setBt(null);
+    openOnBuild({ ticker: c.ticker, expKey: c.expKey, legs: c.legs, name: c.name });
     setWizStep("confirm");
   };
 
@@ -1399,13 +1431,13 @@ export default function OptionsStrategyLab() {
   // The old "Today" tab is gone: what needs attention today is the wizard's
   // front page now (PRD §5), so keeping a second copy behind a flag would just
   // be two screens that can disagree about the same positions.
-  // THREE places, and only three. A place is somewhere you go and stay: the
-  // Bench where a trade is built, the Positions you hold, the Journal of what
+  // THREE places, and only three. A place is somewhere you go and stay: Build,
+  // where a trade is put together, the Positions you hold, the Journal of what
   // happened. Everything that used to be a tab of its own — Radar, Shortlist,
   // market levels, history, the copilot — is EVIDENCE for the trade on the
-  // bench, so it opens underneath it instead of taking you somewhere else.
+  // Build screen, so it opens underneath it instead of taking you somewhere else.
   const PLACES = [
-    { id: "bench", label: "Bench", I: Play },
+    { id: "build", label: "Build", I: Play },
     { id: "positions", label: "Positions", I: Briefcase },
     { id: "journal", label: "Journal", I: FileText },
   ];
@@ -1423,6 +1455,16 @@ export default function OptionsStrategyLab() {
      shows: setup on a first run, the wizard by default, the tabs on request. */
 
   const goHome = () => { setView("wizard"); setWizStep("open"); setNothing(null); };
+  /* Leaving the wizard for the desk. `ev` is set explicitly every time: a
+     panel left open from a previous visit hides whatever is on Build. */
+  const goDesk = (evId = null) => {
+    setView("desk"); setTab(BUILD_TAB); setEv(evId);
+    // Land where the button promised. Coming off a scrolled wizard screen the
+    // browser keeps the old scroll position, which drops you into the middle
+    // of the desk: "Open it on the Build screen" has to end on the trade.
+    if (evId) window.scrollTo?.({ top: 0 });
+    else setScrollBuild((n) => n + 1);
+  };
   const marketReady = !!spot || Object.keys(chains).length > 0;
 
   if (!hydrated) {
@@ -1464,7 +1506,7 @@ export default function OptionsStrategyLab() {
             marketReady={marketReady} barsFor={(tk) => barsCache[tk] || []}
             onPositions={() => { setView("desk"); setTab("positions"); }}
             onFind={() => { setNothing(null); setWizStep("questions"); }}
-            onDesk={() => { setView("desk"); setTab("bench"); setEv("radar"); }}
+            onDesk={() => goDesk("radar")}
             onSettings={() => { setView("desk"); setShowSettings(true); }}
           />
         )}
@@ -1493,7 +1535,7 @@ export default function OptionsStrategyLab() {
             busy={wiz.busy}
             onConfirm={confirmRoad}
             onBack={() => { setConfirmResult(null); setWizStep("candidates"); }}
-            onDesk={() => { setView("desk"); setTab("bench"); }}
+            onDesk={() => goDesk()}
           />
         )}
         {wizStep === "nothing" && (
@@ -1503,7 +1545,7 @@ export default function OptionsStrategyLab() {
             onNotify={() => setNotify(true)}
             onBack={() => setWizStep("questions")}
             onPositions={() => { setView("desk"); setTab("positions"); }}
-            onDesk={() => { setView("desk"); setTab("bench"); setEv("radar"); }}
+            onDesk={() => goDesk("radar")}
           />
         )}
       </div>
@@ -1513,7 +1555,10 @@ export default function OptionsStrategyLab() {
   return (
     <div style={{ minHeight: "100vh", background: T.bg, color: T.body, fontFamily: "ui-sans-serif, system-ui" }}>
       <DemoBanner />
-      <div style={{ maxWidth: 1720, margin: "0 auto", padding: "18px 14px 40px" }}>
+      {/* The bottom padding is the strip reserved for the injected Netlify
+             badge (see BADGE_SAFE in theme.js): it is fixed to the viewport and
+             was covering whatever happened to be at the bottom right. */}
+        <div style={{ maxWidth: 1720, margin: "0 auto", padding: `18px 14px ${BADGE_SAFE}px` }}>
 
         {/* Header */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
@@ -1608,9 +1653,9 @@ export default function OptionsStrategyLab() {
           })}
         </div>
 
-        {/* The evidence, under the bench where the trade is. Tabs are not
+        {/* The evidence, under the Build screen where the trade is. Tabs are not
             destinations: each of these answers a question about THIS trade. */}
-        {tab === "bench" && !showSettings && (
+        {tab === "build" && !showSettings && (
           <div style={{ marginTop: 10 }}>
             <div style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center" }}>
               <span style={{ ...mono, fontSize: 10, letterSpacing: "0.15em", color: T.dim, marginRight: 4 }}>EVIDENCE</span>
@@ -1627,14 +1672,14 @@ export default function OptionsStrategyLab() {
             </div>
             {ev && (
               <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 6 }}>
-                {EVIDENCE.find((e) => e.id === ev)?.sub} — evidence for the trade on the bench, not a place of its own.
+                {EVIDENCE.find((e) => e.id === ev)?.sub} — evidence for the trade on the Build screen, not a place of its own.
               </div>
             )}
           </div>
         )}
 
         {/* ============ SCANNER ============ */}
-        {tab === "bench" && !showSettings && ev === "radar" && (
+        {tab === "build" && !showSettings && ev === "radar" && (
           <Panel style={{ marginTop: 12 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
               <Lbl>BEST OPPORTUNITIES · 4-FACTOR SIGNAL · {MONTHS[NOW_MONTH].toUpperCase()}</Lbl>
@@ -1663,7 +1708,7 @@ export default function OptionsStrategyLab() {
                       );
                     })()}
                     <span style={{ ...mono, fontSize: 10, color: sObj.color, border: `1px solid ${sObj.color}66`, padding: "3px 8px", borderRadius: 5 }}>{sObj.icon} {sObj.label.toUpperCase()}</span>
-                    <Btn small ghost onClick={() => { switchTicker(r.tk); setSentiment(r.sugg); setTab("bench"); setEv("shortlist"); }}>→ Shortlist</Btn>
+                    <Btn small ghost onClick={() => { switchTicker(r.tk); setSentiment(r.sugg); setTab("build"); setEv("shortlist"); }}>→ Shortlist</Btn>
                   </div>
                 );
               })}
@@ -1675,7 +1720,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
         )}
 
         {/* ============ OPTIMIZE ============ */}
-        {tab === "bench" && !showSettings && ev === "shortlist" && spot && (
+        {tab === "build" && !showSettings && ev === "shortlist" && spot && (
           <div style={{ marginTop: 12 }}>
             <Panel>
               <Lbl>1 · WHICH WAY DO YOU THINK IT GOES?</Lbl>
@@ -1750,7 +1795,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                             {a.realCount === p.legs.length ? "● live prices" : `◐ ${a.realCount}/${p.legs.length} live`}
                           </span>
                         </div>
-                        <Btn small onClick={() => applyPreset(p, a)}>Open on the Bench →</Btn>
+                        <Btn small onClick={() => applyPreset(p, a)}>Open on Build →</Btn>
                       </div>
                       <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 4 }}>
                         {p.legs.map((l) => `${l.side > 0 ? "+" : "−"}${l.qty} ${l.strike}${l.type === "call" ? "C" : "P"}`).join(" / ")}
@@ -1776,7 +1821,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                             <Stat k="MOST YOU CAN MAKE" v={fmt$(sc.totProfit)} c={T.green} />
                             {pop != null && <Stat k="PROFIT × CHANCE" v={fmt$(sc.totProfit * pop)} c={T.blue} />}
                             <Stat k={optMode === "target" ? "HITS THE TARGET" : "BUDGET USED"} v={optMode === "target" ? (sc.totProfit >= optAmt ? "✓ yes" : "✗ no") : `${((sc.n * sc.unit / Math.max(1, optAmt)) * 100).toFixed(0)}%`} c={T.blue} />
-                            <div style={{ ...mono, fontSize: 9, color: T.dim, width: "100%" }}>Totals for ×{sc.n} · the Bench always shows one, so divide by {sc.n} to compare.</div>
+                            <div style={{ ...mono, fontSize: 9, color: T.dim, width: "100%" }}>Totals for ×{sc.n} · Build always shows one, so divide by {sc.n} to compare.</div>
                           </div>
                         );
                       })()}
@@ -1834,7 +1879,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                         <Stat k="EV/$100" v={`${r.ev100 >= 0 ? "+" : ""}$${r.ev100.toFixed(0)}`} c={r.ev100 >= 0 ? T.green : T.red} />
                         <Stat k="RANK" v={`${r.rank >= 0 ? "+" : ""}${r.rank.toFixed(0)}`} c={r.conflict ? T.red : T.amber} />
                         <Stat k="MAX TOT" v={fmt$(r.n * r.a.maxProfit)} c={T.green} />
-                        <Btn small ghost onClick={() => { setTicker(r.tk); setExpKey(r.expKey); setLegs(r.legs.map((l) => ({ ...l }))); setStratName(`${r.name} (multi)`); setMc(null); setBt(null); setTab("bench"); }}>Bench →</Btn>
+                        <Btn small ghost onClick={() => openOnBuild({ ticker: r.tk, expKey: r.expKey, legs: r.legs, name: `${r.name} (multi)` })}>Build →</Btn>
                       </div>
                     ))}
                   </div>
@@ -1846,7 +1891,10 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
         )}
 
         {/* ============ BUILDER ============ */}
-        {tab === "bench" && !showSettings && spot && A && (
+        {/* Where a hand-off lands. The anchor is rendered for every state of
+            the Build screen, so scrolling works while the chain is loading. */}
+        {tab === "build" && !showSettings && <div ref={buildAnchor} style={{ scrollMarginTop: 12 }} />}
+        {tab === "build" && !showSettings && buildScreen === "builder" && (
           <div style={{ marginTop: 12 }}>
             <Panel>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
@@ -2076,7 +2124,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
         )}
 
         {/* ============ 3D ============ */}
-        {tab === "bench" && !showSettings && ev === "levels" && (
+        {tab === "build" && !showSettings && ev === "levels" && (
           <Panel style={{ marginTop: 12 }}>
             <Lbl>WHERE THE MARKET IS POSITIONED (CBOE OPEN INTEREST)</Lbl>
             {!oiGrid && <div style={{ ...mono, fontSize: 12, color: T.mut, padding: 30, textAlign: "center" }}>Press Refresh at the top to load the prices first.</div>}
@@ -2115,7 +2163,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
         )}
 
         {/* ============ BACKTEST ============ */}
-        {tab === "bench" && !showSettings && ev === "history" && spot && (
+        {tab === "build" && !showSettings && ev === "history" && spot && (
           <div style={{ marginTop: 12 }}>
             <Panel>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
@@ -2153,7 +2201,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
             <Panel style={{ marginTop: 10 }}>
               <Lbl>THREE PROBABILITIES · WHICH ONE TO READ, AND WHEN</Lbl>
               <div style={{ fontSize: 12.5, color: T.body, marginTop: 8, lineHeight: 1.6 }}>
-                <b style={{ color: T.blue }}>CHANCE</b> (Shortlist and Bench): a snapshot — the odds of finishing in profit <i>at expiry</i>, worked out from what the market is pricing right now. Use it to <b>compare trades before you open one</b>.<br/>
+                <b style={{ color: T.blue }}>CHANCE</b> (Shortlist and Build): a snapshot — the odds of finishing in profit <i>at expiry</i>, worked out from what the market is pricing right now. Use it to <b>compare trades before you open one</b>.<br/>
                 <b style={{ color: T.amber }}>SIMULATION</b> (below): the same question asked of history — 8,000 runs using the last ten years of seasonality and volatility. Use it to <b>check the season really is on your side</b>. If the two disagree sharply, the market is pricing something history has not seen: an event is coming.<br/>
                 <b style={{ color: T.violet }}>EXIT PATH</b> (on open positions): the most realistic — it walks day by day <i>from today</i> and applies your own rules ({ruleBadge()}). It is the only one that answers "from here, how does this end if I stick to the plan?". Use it to <b>decide whether to hold or take the money</b>.
               </div>
@@ -2276,7 +2324,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
                         <div style={{ fontWeight: 700, color: T.ink, fontSize: 13.5 }}>{p.ticker} · {p.name}</div>
                         <div style={{ display: "flex", gap: 6 }}>
-                          <Btn small ghost color={T.blue} onClick={() => { setTicker(p.ticker); if (!chains[p.ticker]) refreshChain(p.ticker); setExpKey(p.expKey || null); setLegs(p.legs.map((l) => ({ ...l }))); setStratName(p.name + " (monitor)"); setTab("bench"); }}>Monitor ↗</Btn>
+                          <Btn small ghost color={T.blue} onClick={() => openOnBuild({ ticker: p.ticker, expKey: p.expKey || null, legs: p.legs, name: p.name + " (monitor)" })}>Monitor ↗</Btn>
                           <Btn small ghost color={T.red} onClick={() => closePos(p.id)}><Trash2 size={11} /> Close</Btn>
                         </div>
                       </div>
@@ -2333,7 +2381,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                       <div style={{ color: T.ink, fontWeight: 600, fontSize: 12.5 }}>{sv.ticker} · {sv.name}</div>
                       <div style={{ ...mono, fontSize: 10, color: T.dim }}>{sv.legs.map((l) => `${l.side > 0 ? "+" : "−"}${l.qty} ${l.strike}${l.type === "call" ? "C" : "P"}`).join(" / ")} · {sv.expKey || `${sv.dte} DTE`}</div>
                     </div>
-                    <Btn small ghost onClick={() => { setTicker(sv.ticker); if (!chains[sv.ticker]) refreshChain(sv.ticker); setExpKey(sv.expKey || null); setLegs(sv.legs.map((l) => ({ ...l }))); setStratName(sv.name); setMc(null); setBt(null); setTab("bench"); }}>Load</Btn>
+                    <Btn small ghost onClick={() => openOnBuild({ ticker: sv.ticker, expKey: sv.expKey || null, legs: sv.legs, name: sv.name })}>Load</Btn>
                     <button onClick={() => delSaved(sv.id)} style={{ background: "none", border: "none", color: T.dim, cursor: "pointer" }}><Trash2 size={13} /></button>
                   </div>
                 ))}
@@ -2486,7 +2534,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
           </div>
         )}
 
-        {tab === "bench" && !showSettings && ev === "copilot" && (
+        {tab === "build" && !showSettings && ev === "copilot" && (
           <CopilotTab
             apiKey={"server"}
             ctx={{ store, scan, news: news[ticker]?.items || [], ticker, legs, expKey, A, spot, seasonalSrc: seas.src, setMsg }}
@@ -2546,17 +2594,25 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
           </div>
         )}
 
-        {tab === "bench" && !showSettings && !spot && (
+        {/* The chain is on its way. Saying "no market data" here would blame
+            the user for a request that has not come back yet. */}
+        {tab === "build" && !showSettings && buildScreen === "loading" && (
+          <Panel style={{ marginTop: 12 }}>
+            <div style={{ ...mono, fontSize: 12, color: T.blue }}>Loading {ticker} option prices — the trade appears here as soon as they arrive.</div>
+          </Panel>
+        )}
+
+        {tab === "build" && !showSettings && buildScreen === "no-market-data" && (
           <Panel style={{ marginTop: 12 }}>
             <div style={{ ...mono, fontSize: 12, color: T.amber }}>Option prices for {ticker} have not loaded yet — press Refresh at the top.</div>
           </Panel>
         )}
 
-        {/* An empty bench is a normal state, not a blank screen: say what it is
-            for and where the trades come from. */}
-        {tab === "bench" && !showSettings && spot && !A && (
+        {/* An empty Build screen is a normal state, not a blank screen: say what
+            it is for and where the trades come from. */}
+        {tab === "build" && !showSettings && buildScreen === "empty" && (
           <Panel style={{ marginTop: 12 }}>
-            <Lbl>THE BENCH IS EMPTY</Lbl>
+            <Lbl>NOTHING TO BUILD YET</Lbl>
             <div style={{ fontSize: 13.5, color: T.body, marginTop: 8, lineHeight: 1.55 }}>
               This is where one trade sits while you take it apart: its payoff, its odds, its risk checks and
               the four factors behind it. Nothing is on it yet.

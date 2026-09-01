@@ -136,15 +136,25 @@ while the position is open.
 
 ## Navigation — tabs are not destinations, they are evidence
 
-The desk has **three places only**: **Bench** (one trade, taken apart),
+The desk has **three places only**: **Build** (one trade, taken apart),
 **Positions**, **Journal**. Settings sits behind the gear, not in the row.
 
-What used to be tabs is now evidence for the trade on the Bench, opening
+What used to be tabs is now evidence for the trade on **Build**, opening
 underneath it: **Radar** (was Scan), **Shortlist** (was Optimize), Market
-levels, History, Copilot. **Bench** was the Builder. Weather and News are not
-tabs at all any more: they are the drill-down behind the "Why this trade"
-panel — tapping the weather bar reveals the regions and their anomalies,
-tapping the news bar reveals the headlines with their tags.
+levels, History, Copilot. **Build** was the Builder, then the Bench — the tab
+id is `"build"`, and "Bench" survives nowhere in the code or the copy, because
+a beginner cannot guess what a bench is for. **Shortlist keeps its name**: it
+is the list of candidate structures, which is what the word means. Weather and
+News are not tabs at all any more: they are the drill-down behind the
+"Why this trade" panel — tapping the weather bar reveals the regions and their
+anomalies, tapping the news bar reveals the headlines with their tags.
+
+A trade reaches Build through **one function**, `openOnBuild()` in `App.jsx`,
+built on `buildHandOff()` in `src/handoff.js`. It closes the open evidence
+panel, loads the target ticker's chain if it is missing and scrolls Build into
+view. A hand-off written inline at the button instead silently does nothing
+when the user is already on the Build tab: the evidence panel stays expanded
+above and the trade lands below the fold.
 
 ## Visual contract
 
@@ -195,7 +205,7 @@ Alpaca. `saveState()` also stops writing to `/api/state`: that blob is a single
 shared document and a visitor must not overwrite the owner's book.
 
 Positions are opened through one function, `commitPosition()` in `App.jsx`:
-both the Bench's "open on paper" and the wizard's screen 4 land there, so a
+both Build's "open on paper" and the wizard's screen 4 land there, so a
 position carries the same gate record, thesis and timeline whichever way it was
 opened.
 

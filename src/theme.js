@@ -38,3 +38,22 @@ export const setTheme = (name) => {
 export const PALETTES = { light: LIGHTT, dark: DARKT };
 
 export const T = themeName() === "dark" ? DARKT : LIGHTT;
+
+/* ---------------------------------------------------------------------------
+   THE INJECTED BADGE.
+
+   Netlify injects a "Powered by Netlify" badge that is fixed to the bottom
+   right of the VIEWPORT — not to the page — and it is not ours to remove. It
+   covers roughly the bottom-right 300x80px, which on a 390px phone is most of
+   the width of a full-width button. It was sitting on top of "Decide for me",
+   on the "One contract of each, on a paper account" line, and on body text.
+
+   So we reserve the space instead. `BADGE_SAFE` is the bottom padding every
+   scrolling page gets, so any content can be scrolled clear of the badge;
+   `BADGE_BTN_GAP` is the gap under a full-width primary button, so the badge
+   never lands on the tap target itself. Both are here rather than typed into
+   a component, for the same reason every other shared measurement is.
+--------------------------------------------------------------------------- */
+export const BADGE_H = 80;            // the badge's own height, roughly
+export const BADGE_SAFE = 112;        // bottom padding on a scrolling page
+export const BADGE_BTN_GAP = 28;      // bottom margin under a primary button

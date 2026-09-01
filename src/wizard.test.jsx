@@ -395,7 +395,7 @@ check("screen 4 offers the order until the gate has spoken, then reports the ref
   has(after, "The gate refused this");
   has(after, "Blocked by the risk gate");
   has(after, "your limit: 5%");   // the gate's own sentence, with its numbers
-  has(after, "Open it on the bench and change it");
+  has(after, "Open it on the Build screen and change it");
 });
 
 check("the checklist is read off the gate, never recomputed", () => {
