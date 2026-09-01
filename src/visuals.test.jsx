@@ -196,9 +196,38 @@ check("the thumbnail carries no numbers and no labels", () => {
   const b = payoffBands({ legs: ironCondor, entryNet: -2, spot: SPOT });
   const html = renderToStaticMarkup(<BandThumbnail bands={b} width={80} height={30} />);
   if (/<text/.test(html)) throw new Error("the thumbnail renders text");
-  // three bands, one price line, breakeven ticks and the spot marker
+  // three bands, breakeven ticks, the price line and the spot marker
   eq((html.match(/<rect/g) || []).length, 3, "band rects");
   if (!/<circle/.test(html)) throw new Error("no spot marker");
+});
+
+check("the thumbnail draws the underlying's PRICE LINE over the bands (PRD §6)", () => {
+  const b = payoffBands({ legs: ironCondor, entryNet: -2, spot: SPOT });
+  const bars = [92, 95, 99, 104, 101, 100].map((c) => ({ open: c, high: c + 1, low: c - 1, close: c }));
+  const html = renderToStaticMarkup(<BandThumbnail bands={b} width={160} height={44} bars={bars} spot={SPOT} />);
+  const path = (html.match(/<path d="(M[^"]+)"/) || [])[1];
+  if (!path) throw new Error("bare coloured bars: no price line at all");
+  eq((path.match(/L/g) || []).length, bars.length - 1, "price line vertices");
+  // price is the VERTICAL axis, as it is in the unified component: the bands
+  // span the full width and stack, so the line can run across them.
+  const widths = [...html.matchAll(/<rect[^>]*width="([\d.]+)"/g)].map((m) => +m[1]);
+  if (!widths.every((w) => Math.abs(w - 160) < 0.01)) throw new Error(`bands are not full-width stripes: ${widths}`);
+});
+
+check("a thumbnail with no history still draws a line, never bare bars", () => {
+  const b = payoffBands({ legs: bullCall, entryNet: 2, spot: SPOT });
+  const html = renderToStaticMarkup(<BandThumbnail bands={b} width={80} height={30} spot={SPOT} />);
+  if (!/stroke-dasharray="2 3"/.test(html)) throw new Error("no fallback price line");
+});
+
+check("the price axis stretches to hold history outside the payoff range", () => {
+  const b = payoffBands({ legs: bullCall, entryNet: 2, spot: SPOT });
+  // a close far above the sampled range must still land inside the picture
+  const bars = [{ close: SPOT * 2 }, { close: SPOT }];
+  const html = renderToStaticMarkup(<BandThumbnail bands={b} width={100} height={40} bars={bars} spot={SPOT} />);
+  const path = (html.match(/<path d="(M[^"]+)"/) || [])[1];
+  const ys = [...path.matchAll(/[ML][\d.-]+,([\d.-]+)/g)].map((m) => +m[1]);
+  if (ys.some((y) => y < -0.01 || y > 40.01)) throw new Error(`the price line runs off the chart: ${ys}`);
 });
 
 check("the visuals render at all, and describe themselves for a screen reader", () => {

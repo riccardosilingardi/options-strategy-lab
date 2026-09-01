@@ -214,8 +214,9 @@ export function explainElement(el, b, ctx = {}) {
         : `The needle is today's price, ${price(b.spot)}. Expiring exactly here would ${b.at(b.spot) > 0 ? "pay" : "lose"} ` +
           `${amount$(b.at(b.spot))} — it is where the trade stands if nothing at all happens.`;
     case "history":
-      return `The candles are where ${ticker} has actually traded. They share the vertical price axis with ` +
-        `everything to their right, so a level in the past lines up with the same level in the payoff.`;
+      return `That is where ${ticker} has actually traded. It shares the vertical price axis with everything to ` +
+        `its right, so a level in the past lines up with the same level in the payoff: you can read straight ` +
+        `across from where the price has been to what the trade would be worth there.`;
     case "cone":
       return sigma > 0 && dte > 0
         ? `The cone is where the price can realistically get to by expiry, at ${pctText(sigma)} annual volatility ` +
@@ -311,36 +312,72 @@ export function Figure({ takeaway, explanation, onClose, children, style }) {
 
 /* ====================================================================
    1) BAND THUMBNAIL
-   A price line and the green/red bands, nothing else. No numbers, no labels,
-   no legend: at 80px there is no room for any of them and no need either.
+   The underlying's price line over the green/red bands, and nothing else. No
+   numbers, no labels, no legend: at 80px there is no room for any of them and
+   no need either.
+
+   PRICE IS THE VERTICAL AXIS, exactly as it is in the unified component, so the
+   two never disagree about which way is up. That makes the bands horizontal
+   stripes and lets the underlying's own recent path run left to right across
+   them, ending at today's price on the right-hand edge. Without that line the
+   thumbnail is a row of coloured bars: it says where the trade pays, but not
+   where the market actually is in relation to it, which is the whole question.
+
+   With no history loaded the line degrades to a flat one at today's price —
+   still an answer ("here, and we do not know how it got here"), never a blank.
 ==================================================================== */
 
-export function BandThumbnail({ bands, width = 160, height = 44, spot = null, onExplain, title }) {
+/** The closes of a bar series, whatever shape the feed used. */
+const closes = (bars) => (Array.isArray(bars) ? bars : [])
+  .map((x) => Number(x?.close ?? x?.c ?? x?.value ?? x))
+  .filter((x) => Number.isFinite(x) && x > 0);
+
+export function BandThumbnail({ bands, width = 160, height = 44, spot = null, bars = [], onExplain, title }) {
   const b = bands;
   if (!b || !b.bands.length) return null;
-  const X = (s) => ((s - b.lo) / (b.hi - b.lo)) * width;
   const s0 = spot ?? b.spot;
-  const mid = height / 2;
+  const hist = closes(bars);
+
+  // The price axis has to hold the bands AND the history, or the line walks off
+  // the top of the picture the moment the market moves outside the payoff range.
+  const lo = Math.min(b.lo, ...(hist.length ? [Math.min(...hist)] : []));
+  const hi = Math.max(b.hi, ...(hist.length ? [Math.max(...hist)] : []));
+  const Y = (s) => height - ((s - lo) / (hi - lo || 1)) * height;
+
+  // The history occupies the left three quarters; today sits at the right edge,
+  // so the eye lands on "where we are" without hunting for it.
+  const xToday = width * 0.78;
+  const XH = (i) => (hist.length > 1 ? (i / (hist.length - 1)) * xToday : xToday);
+  const path = hist.length > 1
+    ? hist.map((c, i) => `${i ? "L" : "M"}${XH(i).toFixed(2)},${Y(c).toFixed(2)}`).join(" ")
+    : null;
+
   const tap = (el) => (onExplain ? () => onExplain(el) : undefined);
   return (
     <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} role="img"
-      aria-label={title || "where this trade makes and loses money"}
+      aria-label={title || "where this trade makes and loses money, and where the price is now"}
       style={{ display: "block", borderRadius: 4, background: T.bg, cursor: onExplain ? "pointer" : "default", maxWidth: "100%" }}>
       {b.bands.map((z, i) => (
-        <rect key={i} x={X(z.lo)} y={0} width={Math.max(0.5, X(z.hi) - X(z.lo))} height={height}
+        <rect key={i} x={0} y={Y(z.hi)} width={width} height={Math.max(0.5, Y(z.lo) - Y(z.hi))}
           fill={z.sign > 0 ? T.green : T.red} opacity={z.sign > 0 ? 0.3 : 0.15}
           onClick={tap(z.sign > 0 ? "green" : "red")} />
       ))}
-      {/* the price line: the axis the bands are laid along */}
-      <line x1={0} x2={width} y1={mid} y2={mid} stroke={T.ink} strokeWidth={1} opacity={0.45} />
       {b.breakevens.map((s, i) => (
-        <line key={i} x1={X(s)} x2={X(s)} y1={mid - height * 0.28} y2={mid + height * 0.28}
-          stroke={T.ink} strokeWidth={1} opacity={0.35} onClick={tap("breakeven")} />
+        <line key={i} x1={0} x2={width} y1={Y(s)} y2={Y(s)}
+          stroke={T.ink} strokeWidth={1} opacity={0.35} strokeDasharray="3 3" onClick={tap("breakeven")} />
       ))}
-      {s0 != null && s0 >= b.lo && s0 <= b.hi && (
+      {/* the price line — the underlying's own path across the zones */}
+      {path
+        ? <path d={path} fill="none" stroke={T.ink} strokeWidth={1.4} strokeLinejoin="round"
+            strokeLinecap="round" opacity={0.85} onClick={tap("history")} />
+        : s0 != null && (
+          <line x1={0} x2={xToday} y1={Y(s0)} y2={Y(s0)} stroke={T.ink} strokeWidth={1.2}
+            opacity={0.4} strokeDasharray="2 3" onClick={tap("history")} />
+        )}
+      {s0 != null && (
         <g onClick={tap("needle")}>
-          <line x1={X(s0)} x2={X(s0)} y1={0} y2={height} stroke={T.ink} strokeWidth={1.6} />
-          <circle cx={X(s0)} cy={mid} r={Math.max(2.5, height * 0.09)} fill={T.ink} />
+          <line x1={xToday} x2={width} y1={Y(s0)} y2={Y(s0)} stroke={T.ink} strokeWidth={1.6} />
+          <circle cx={xToday} cy={Y(s0)} r={Math.max(2.5, height * 0.09)} fill={T.ink} />
         </g>
       )}
     </svg>
@@ -348,13 +385,14 @@ export function BandThumbnail({ bands, width = 160, height = 44, spot = null, on
 }
 
 /** The thumbnail with its takeaway and tap-to-explain, for a list row. */
-export function BandThumbFigure({ legs, entryNet, spot, ticker, width, height, style }) {
+export function BandThumbFigure({ legs, entryNet, spot, bars, ticker, width, height, style }) {
   const [open, setOpen] = useState(null);
   const b = payoffBands({ legs, entryNet, spot });
   return (
     <Figure style={style} takeaway={bandTakeaway(b, { ticker })}
       explanation={open ? explainElement(open, b, { ticker }) : null} onClose={() => setOpen(null)}>
-      <BandThumbnail bands={b} width={width} height={height} onExplain={setOpen} title={bandTakeaway(b, { ticker })} />
+      <BandThumbnail bands={b} width={width} height={height} bars={bars} onExplain={setOpen}
+        title={bandTakeaway(b, { ticker })} />
     </Figure>
   );
 }

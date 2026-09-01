@@ -27,7 +27,8 @@ An agent that cannot execute a trade it cannot justify.
    poor first trade. They stay reachable on the full desk.
 3. No API key ever reaches the client. Keys live only in Netlify environment
    variables: ALPACA_KEY, ALPACA_SECRET, ANTHROPIC_KEY, ALPHAVANTAGE_KEY,
-   SITE_PASSWORD, DEMO_TOKEN, optional WEBHOOK_URL and optional
+   SITE_PASSWORD, DEMO_TOKEN (checked on the edge, never bundled), optional
+   WEBHOOK_URL and optional
    ANTHROPIC_WORKSPACE_ID (needed only for an identity-linked Anthropic key;
    `ai.mjs` sends the `anthropic-workspace-id` header only when it is set).
 4. No order reaches Alpaca without passing `src/riskGate.js`.
@@ -66,13 +67,41 @@ while the position is open.
   (`runGate` in `pro.jsx`).
 - `src/wizard.jsx` — **the app shell (PRD §5)**. The wizard is the entry point,
   not a tab: capital onboarding on a first run, then screen 1 (greeting, one line
-  of status, three choices — and "what needs attention today" once positions
-  exist), screen 2 (budget, horizon, what matters most), screen 3 (**two roads,
-  never one** — at least two candidates, each with a band thumbnail and one
-  generated sentence naming what it gives up), screen 4 (confirm: the unified
-  component, the gate's checks in plain English, the exit plan stated as already
-  decided) and screen 5 ("nothing today"). On screen 4 the gate runs **after**
-  the tap. `App.jsx` owns the `view` (`wizard` | `desk`).
+  of status, **two** doors — and "what needs attention today" once positions
+  exist), screen 2 (`FindOpportunities`: basket, budget and time, three driver
+  sliders, then **"Decide for me"** as the last button), screen 3 (the verdict:
+  the copilot narrative, the answers read back with a *change* link, then **two
+  roads, never one** — each with a band thumbnail, a gauge, the "Why this trade"
+  evidence panel and one generated sentence naming what it gives up), screen 4
+  (confirm: the unified component, the gate's checks in plain English, the exit
+  plan stated as already decided) and screen 5 ("nothing today"). On screen 4 the
+  gate runs **after** the tap. `App.jsx` owns the `view` (`wizard` | `desk`).
+
+  **Never pre-answer a question.** `wiz.risk` and `wiz.horizon` start `null` and
+  stay null until the user answers; the button is disabled and names what is
+  missing. A default that gets quoted back as "the $250 you said you were willing
+  to lose" is the app putting words in the user's mouth. The basket and the
+  weights DO have a starting position, because "all five, evenly weighted" is a
+  visible state on screen that the user can see and change — that is not the same
+  as an invented answer.
+
+  **Lead a road with what it gives and costs**, with the frequency alongside the
+  payout in the same sentence (`roadHeadline()`). Opening with "3 times in 10"
+  reads as a bad trade to a beginner before they know what is being judged.
+
+- `src/why.jsx` — **the "Why this trade" panel**, and the only copy of it. The
+  agreement badge, the four factors as direction/strength bars, and the
+  drill-down behind them: weather opens the regions and their anomalies, news
+  opens the headlines with their tags. It lives here rather than in `pro.jsx`
+  because the wizard's decision screen needs it too — a road with no evidence
+  under it is a recommendation, and this app does not make recommendations.
+  `pro.jsx` re-exports it so older imports keep working.
+
+- `src/demo.js` — **the public demo (PRD §7b)**. `DEMO` is a module constant read
+  once at import, exactly like `T` in `theme.js`: a flag that changed halfway
+  through a render would mean two screens disagreeing about whether an order can
+  leave. It also builds the three didactic positions from today's live prices —
+  never from typed-in numbers, and never for a ticker whose price did not load.
 - `src/visuals.jsx` — **the visual language (PRD §6)**. `payoffBands()` is the
   only place zones are derived, and it reads `payoff()` from `engine.js`; the
   band thumbnail, the gauge and the unified position component all consume its
@@ -94,6 +123,14 @@ while the position is open.
   rules, the SMA/RSI read and the candidate ranking. Plain JS, no React imports.
   `pro.jsx` imports all of it and keeps only the rendering. Never copy a
   threshold out of here into a component.
+
+  The guided flow's three **drivers** live here too: `DRIVERS`, `DRIVER_PRESETS`,
+  `normaliseWeights()` (the three always sum to 100), `presetOf()` and
+  `rankByDrivers()`. All three drivers are normalised the same way — best in the
+  pool scores 1, worst 0 — so a slider set to 60 actually beats one set to 25.
+  Mixing an absolute measure with relative ones makes the numbers on screen
+  decoration. `verdictNarrative()` is here as well: what the app actually looked
+  at, in English, with the real counts.
 - `netlify/functions/*.mjs` — serverless endpoints, routed in `netlify.toml`
 - `netlify/edge-functions/gate.js` — password gate, with demo-token bypass
 
@@ -116,9 +153,14 @@ Every visual is generated from `payoff(legs, S)`, through `payoffBands()` in
 about the same trade.
 
 The three components:
-- **Band thumbnail** — price line plus green/red bands from the sign of the
-  payoff. No numbers, no labels, readable at 80px. An iron condor produces
-  three bands with no special-casing. Used in every list.
+- **Band thumbnail** — the **underlying's own price line** over green/red bands
+  from the sign of the payoff. No numbers, no labels, readable at 80px. An iron
+  condor produces three bands with no special-casing. Used in every list.
+  Price is the **vertical** axis, as it is in the unified component, so the bands
+  are horizontal stripes and the price line runs across them, ending at today's
+  price on the right-hand edge. Pass `bars`; with none it falls back to a flat
+  dashed line at spot. Without that line it is a row of coloured bars that never
+  says where the market is in relation to the trade.
 - **Gauge** — the payoff projected into polar coordinates as a semicircular
   arc, needle at spot. Colours come from the sign of the payoff, so left is NOT
   always red: a bear spread is green on the left. Primary visual on position
@@ -147,6 +189,11 @@ There are **six** ways an order can reach Alpaca, and every one routes through
 5. `autopilot.mjs` — gates each proposal before it becomes an approve link
 6. `approve.mjs` — re-runs the gate at execution time, up to 24h later
 
+In **demo mode** every one of the six is disabled, and the check sits next to the
+send as well as on the button, so a path called some other way still cannot reach
+Alpaca. `saveState()` also stops writing to `/api/state`: that blob is a single
+shared document and a visitor must not overwrite the owner's book.
+
 Positions are opened through one function, `commitPosition()` in `App.jsx`:
 both the Bench's "open on paper" and the wizard's screen 4 land there, so a
 position carries the same gate record, thesis and timeline whichever way it was
@@ -173,6 +220,18 @@ rejects anything it cannot confirm.
   must not be merged: the UI depends on the extra fields these versions return
   (`pTimeNeg`, `pWin`, `horizon`), and `probProfit` there works on an already
   built payoff `curve` rather than on `legs`
+
+## The basket
+
+`BASKET` in `App.jsx` is derived from the `commodity: true` flag on `UNDERLYINGS`,
+never typed out a second time — SPY is in the table so the desk can price a hedge,
+it is not something the guided flow goes looking for.
+
+`runWizard` ranks the **whole basket on one scale**: every readable market
+contributes candidates and road 2 is free to come from a different market than
+road 1. Building both roads out of the single best-scoring ticker gives a user
+who picked five commodities two structures on one of them, which teaches less
+than comparing two markets — they share a fate.
 
 ## Saying "nothing today"
 

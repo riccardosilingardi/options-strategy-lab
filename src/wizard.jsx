@@ -9,9 +9,12 @@
 //
 // Screens in this file:
 //   · CapitalOnboarding — first run, PRD §3. Capital, positions at once, savings.
-//   · WizardOpen        — screen 1. Greeting, one line of status, three choices.
-//   · WizardQuestions   — screen 2. Budget, horizon, what matters most.
-//   · WizardCandidates  — screen 3. Two roads, never one.
+//   · WizardOpen        — screen 1. Greeting, one line of status, TWO doors.
+//   · FindOpportunities — screen 2. Basket, budget and time, three drivers,
+//                         and "Decide for me" as the last button rather than a
+//                         door of its own.
+//   · WizardCandidates  — screen 3. The verdict: what was examined, the answers
+//                         read back, then two roads with their evidence.
 //   · WizardConfirm     — screen 4. What is being sent, the checks, the exit plan.
 //   · NothingToday      — screen 5. A designed answer, not an error state.
 //
@@ -20,10 +23,12 @@
 // stacks in one column and widens on a desk.
 // ============================================================================
 import React, { useState } from "react";
-import { Compass, Briefcase, Sparkles, Bell, ArrowLeft, SlidersHorizontal, ShieldCheck, ShieldAlert, AlertTriangle } from "lucide-react";
+import { Compass, Briefcase, Bell, ArrowLeft, SlidersHorizontal, ShieldCheck, ShieldAlert, AlertTriangle, Sparkles } from "lucide-react";
 import { T } from "./theme.js";
 import { RULES, sizing, money, pctText, perTradeCapLabel, ruleBadge } from "./rules.js";
-import { BandThumbnail, payoffBands, bandTakeaway, explainElement, UnifiedFigure, exitPlanSentence, exitPlanDetail, inTenPhrase, price } from "./visuals.jsx";
+import { BandThumbnail, Gauge, payoffBands, bandTakeaway, gaugeTakeaway, explainElement, UnifiedFigure, exitPlanSentence, exitPlanDetail, inTenPhrase, price } from "./visuals.jsx";
+import { DRIVERS, DRIVER_PRESETS, presetOf, normaliseWeights } from "./signals.js";
+import { WhyThisTrade } from "./why.jsx";
 
 const mono = { fontFamily: "ui-monospace, Menlo, monospace" };
 const sans = { fontFamily: "ui-sans-serif, system-ui" };
@@ -67,10 +72,10 @@ const Chip = ({ children, on, onClick, color = T.amber }) => (
     }}>{children}</button>
 );
 
-const NumberField = ({ value, onChange, prefix, min = 0, step = 1, width = 150 }) => (
+const NumberField = ({ value, onChange, prefix, min = 0, step = 1, width = 150, placeholder }) => (
   <label style={{ display: "inline-flex", alignItems: "center", gap: 6, background: T.bg, border: `1px solid ${T.line}`, borderRadius: 10, padding: "0 12px", minHeight: TAP, width }}>
     {prefix && <span style={{ ...mono, fontSize: 15, color: T.mut }}>{prefix}</span>}
-    <input type="number" inputMode="numeric" min={min} step={step} value={value}
+    <input type="number" inputMode="numeric" min={min} step={step} value={value} placeholder={placeholder}
       onChange={(e) => onChange(e.target.value)}
       style={{ ...mono, fontSize: 16, background: "transparent", color: T.ink, border: "none", outline: "none", width: "100%", minWidth: 0 }} />
   </label>
@@ -256,7 +261,7 @@ export function statusLine({ positions = [], attention = 0, marketReady = true }
 }
 
 export function WizardOpen({ positions = [], posAlerts = [], attention = 0, marketReady = true,
-  onPositions, onFind, onDecide, onDesk, onSettings, perTradeLimit }) {
+  onPositions, onFind, onDesk, onSettings, barsFor }) {
   const hasPositions = positions.length > 0;
   return (
     <div style={{ ...sans, maxWidth: 620, margin: "0 auto", padding: "22px 16px 40px" }}>
@@ -288,7 +293,7 @@ export function WizardOpen({ positions = [], posAlerts = [], attention = 0, mark
                   {/* The band thumbnail is the list visual everywhere (PRD §6). */}
                   {p.legs && (
                     <BandThumbnail bands={payoffBands({ legs: p.legs, entryNet: p.entryNet, spot: spotNow ?? p.entrySpot })}
-                      width={80} height={34} />
+                      bars={barsFor ? barsFor(p.ticker) : []} width={80} height={34} />
                   )}
                   <span style={{ flex: 1, minWidth: 0 }}>
                     <span style={{ display: "block", fontSize: 15, fontWeight: 700, color: T.ink }}>{p.ticker} · {p.name}</span>
@@ -304,16 +309,17 @@ export function WizardOpen({ positions = [], posAlerts = [], attention = 0, mark
         </Card>
       )}
 
+      {/* TWO doors, not three. "Decide for me" was never a third place to go:
+          it is the last button of the second one, once the app knows what it is
+          deciding with. A door that skips the questions can only skip them by
+          inventing the answers, and this app does not invent answers. */}
       <div style={{ display: "grid", gap: 10, marginTop: 18 }}>
         <BigChoice icon={Briefcase} color={T.blue} onClick={onPositions}
           title="My positions"
           sub={hasPositions ? `${positions.length} open · profit target, stop and exit day for each` : "Nothing open yet"} />
         <BigChoice icon={Compass} color={T.amber} primary onClick={onFind}
           title="Find opportunities"
-          sub="Answer three questions, see what fits" />
-        <BigChoice icon={Sparkles} color={T.violet} onClick={onDecide}
-          title="Decide for me"
-          sub={`Uses your usual answers and the ${money(perTradeLimit)} limit`} />
+          sub="Choose the markets, say what matters, let it decide" />
       </div>
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginTop: 20, flexWrap: "wrap" }}>
@@ -328,10 +334,28 @@ export function WizardOpen({ positions = [], posAlerts = [], attention = 0, mark
 }
 
 /* ====================================================================
-   SCREEN 2 — THREE QUESTIONS
-   Budget, time horizon, what matters most. No delta, no implied
-   volatility, no Greeks: a beginner answers all three from their own
-   life, not from an options textbook.
+   SCREEN 2 — FIND OPPORTUNITIES
+
+   One screen, three blocks, and the last button is the decision.
+
+   1. BASKET   — which markets to consider. All five by default, because a
+                 beginner has no reason to exclude one yet, and the ranking
+                 later runs across whatever is left in it.
+   2. BUDGET   — what you are willing to lose, and how long to give the idea.
+                 NOTHING IS PRE-ANSWERED. The old screen shipped with $250 and
+                 45 days already filled in, and the verdict then told the user
+                 "the $250 you said you were willing to lose" when they had said
+                 nothing at all. An app that invents your answer and then quotes
+                 it back to you has stopped being trustworthy about anything.
+   3. DRIVERS  — three sliders that always sum to 100. The old third question
+                 offered three words; the words are still here, but now they SET
+                 the sliders instead of replacing them, so the user watches "win
+                 often" mean chance 60 / payout 15 / cost 25. That is the pill
+                 (PRD §2): the choice explaining its own arithmetic, before it
+                 is made rather than after.
+
+   Then "Decide for me" — which is not a separate entrance any more. It is what
+   this screen is for.
 ==================================================================== */
 
 export const HORIZONS = [
@@ -339,30 +363,102 @@ export const HORIZONS = [
   { days: RULES.targetEntryDTE, label: "1–2 months", sub: "usual" },
   { days: RULES.targetEntryDTE + 30, label: "2–3 months", sub: "patient" },
 ];
+/** The three words, kept — but they now move the sliders (see DRIVER_PRESETS). */
 export const PRIORITIES = [
   { id: "often", label: "Win often", sub: "More trades work out, each one pays less." },
   { id: "balanced", label: "Balanced", sub: "The middle of the two." },
   { id: "big", label: "Win big", sub: "Fewer work out, the ones that do pay more." },
 ];
 
-export function WizardQuestions({ answers, setAnswers, limits, busy, err, onBack, onSearch }) {
-  const { risk, horizon, priority } = answers;
+/** A block heading. Numbered, so the screen reads as a sequence on a phone. */
+const Block = ({ n, of, title, children }) => (
+  <div style={{ marginTop: 22 }}>
+    <div style={{ ...mono, fontSize: 10.5, color: T.dim, letterSpacing: "0.1em" }}>STEP {n} OF {of}</div>
+    <div style={{ ...sans, fontSize: 17, fontWeight: 700, color: T.ink, marginTop: 4, lineHeight: 1.35 }}>{title}</div>
+    {children}
+  </div>
+);
+
+/** One slider. The number next to it is the point: a weight you can read. */
+const DriverSlider = ({ d, value, onChange }) => (
+  <div style={{ marginTop: 14 }}>
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10 }}>
+      <span style={{ ...sans, fontSize: 14.5, fontWeight: 600, color: T.ink }}>{d.label}</span>
+      <span style={{ ...mono, fontSize: 15, fontWeight: 800, color: T.amber }}>{value}</span>
+    </div>
+    <div style={{ ...sans, fontSize: 12.5, color: T.mut, marginTop: 2, lineHeight: 1.45 }}>{d.sub}</div>
+    <input type="range" min={0} max={100} step={5} value={value}
+      aria-label={d.label}
+      onChange={(e) => onChange(Number(e.target.value))}
+      style={{ width: "100%", marginTop: 8, height: 28, accentColor: T.amber, cursor: "pointer" }} />
+  </div>
+);
+
+/**
+ * @param answers  { basket, risk, horizon, weights } — risk and horizon are
+ *                 NULL until answered, and stay null. Never defaulted.
+ * @param universe [{ tk, name }] the markets on offer.
+ */
+export function FindOpportunities({ answers, setAnswers, limits, universe = [], busy, err, onBack, onDecide }) {
+  const { risk, horizon } = answers;
+  // An UNSET basket means "all five, not narrowed yet". An EMPTY one means the
+  // user has just deselected the last market, and it has to stay empty — the
+  // old test for `.length` silently re-selected everything, so the "nothing is
+  // selected" pill could never appear and the last chip would not turn off.
+  const basket = Array.isArray(answers.basket) ? answers.basket : universe.map((u) => u.tk);
+  const weights = normaliseWeights(answers.weights || DRIVER_PRESETS.balanced);
+  const preset = presetOf(weights);
   const cap = Math.round(limits.perTradeLimit);
   const presets = [...new Set([Math.round(cap / 5), Math.round(cap / 2), cap])].filter((x) => x >= 25);
-  const overLimit = risk > limits.perTradeLimit;
+  const overLimit = risk != null && risk > limits.perTradeLimit;
+
+  const toggle = (tk) => {
+    const next = basket.includes(tk) ? basket.filter((x) => x !== tk) : [...basket, tk];
+    setAnswers({ ...answers, basket: next });
+  };
+  const setWeight = (id, v) => setAnswers({ ...answers, weights: normaliseWeights({ ...weights, [id]: v }, id) });
+
+  // Nothing proceeds on an answer nobody gave. The button says which one is
+  // missing, because "disabled" on its own is a locked door with no sign on it.
+  const missing = [];
+  if (!basket.length) missing.push("at least one market");
+  if (!(risk > 0)) missing.push("how much you are willing to lose");
+  if (!(horizon > 0)) missing.push("how long to give it");
+  const ready = missing.length === 0;
 
   return (
     <div style={{ ...sans, maxWidth: 620, margin: "0 auto", padding: "16px 16px 44px" }}>
       <BackLink onClick={onBack} />
       <h1 style={{ ...sans, fontSize: 25, fontWeight: 800, color: T.ink, margin: "4px 0 6px", lineHeight: 1.25 }}>
-        Three questions.
+        Find opportunities.
       </h1>
       <p style={{ ...sans, fontSize: 15, color: T.mut, lineHeight: 1.5, margin: 0 }}>
-        Then the app goes looking. If nothing is worth doing today, it will say so.
+        Three things, then it decides. If nothing is worth doing today, it will say so.
       </p>
 
       <Card style={{ marginTop: 18 }}>
-        <Question n={1} of={3} title="How much are you willing to lose on this one trade?">
+        <Block n={1} of={3} title="Which markets should it look at?">
+          <Pill>
+            All five to start with. Narrowing the basket does not make the app more careful — it
+            just gives it less to compare, and the two roads it ends up showing you have to come
+            from somewhere.
+          </Pill>
+          <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+            {universe.map((u) => (
+              <Chip key={u.tk} color={T.blue} on={basket.includes(u.tk)} onClick={() => toggle(u.tk)}>
+                {u.tk}
+                <span style={{ display: "block", fontSize: 11, fontWeight: 500, opacity: 0.8 }}>{u.name}</span>
+              </Chip>
+            ))}
+          </div>
+          {!basket.length && (
+            <Pill tone={T.red}>
+              Nothing is selected, so there is nothing to look at. Pick at least one market.
+            </Pill>
+          )}
+        </Block>
+
+        <Block n={2} of={3} title="How much, and for how long?">
           {/* The pill lands before the choice, not after it (PRD §2). */}
           <Pill>
             This is the most you can lose, whatever happens — the app will not build anything that risks
@@ -376,7 +472,9 @@ export function WizardQuestions({ answers, setAnswers, limits, busy, err, onBack
             ))}
           </div>
           <div style={{ marginTop: 10 }}>
-            <NumberField value={risk} onChange={(v) => setAnswers({ ...answers, risk: Math.max(25, +v || 0) })} prefix="$" min={25} step={25} />
+            <NumberField value={risk == null ? "" : risk} placeholder="or type an amount"
+              onChange={(v) => setAnswers({ ...answers, risk: v === "" ? null : Math.max(25, +v || 0) })}
+              prefix="$" min={25} step={25} />
           </div>
           {overLimit && (
             <Pill tone={T.red}>
@@ -384,10 +482,7 @@ export function WizardQuestions({ answers, setAnswers, limits, busy, err, onBack
               refuse the order — change the amount here, or raise the limit in Settings and write down why.
             </Pill>
           )}
-        </Question>
-
-        <Question n={2} of={3} title="How long do you want to give the idea?">
-          <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: 8, marginTop: 16, flexWrap: "wrap" }}>
             {HORIZONS.map((h) => (
               <Chip key={h.days} color={T.blue} on={horizon === h.days} onClick={() => setAnswers({ ...answers, horizon: h.days })}>
                 {h.label}
@@ -398,45 +493,84 @@ export function WizardQuestions({ answers, setAnswers, limits, busy, err, onBack
             The trade closes at {RULES.exitDTE} days to expiry whatever happens, so a longer horizon means more room
             before that day arrives.
           </div>
-        </Question>
+        </Block>
 
-        <Question n={3} of={3} title="What matters most to you?">
-          <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
+        <Block n={3} of={3} title="What should it weigh most?">
+          <Pill>
+            These three are one dial, not three boxes: they always add up to 100, so asking for more of
+            one asks for less of the others. The three buttons below are just positions on that dial —
+            tap one and watch where it puts the numbers.
+          </Pill>
+          <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
             {PRIORITIES.map((p) => (
-              <button key={p.id} onClick={() => setAnswers({ ...answers, priority: p.id })}
-                style={{ ...sans, display: "block", width: "100%", textAlign: "left", minHeight: 64, padding: "12px 14px",
-                  borderRadius: 10, cursor: "pointer",
-                  background: priority === p.id ? `${T.violet}12` : "transparent",
-                  border: `1.5px solid ${priority === p.id ? T.violet : T.line}` }}>
-                <span style={{ display: "block", fontSize: 15.5, fontWeight: 700, color: priority === p.id ? T.violet : T.ink }}>{p.label}</span>
-                <span style={{ display: "block", fontSize: 13, color: T.mut, marginTop: 3 }}>{p.sub}</span>
-              </button>
+              <Chip key={p.id} color={T.violet} on={preset === p.id}
+                onClick={() => setAnswers({ ...answers, weights: { ...DRIVER_PRESETS[p.id] }, priority: p.id })}>
+                {p.label}
+              </Chip>
             ))}
           </div>
-        </Question>
+          {DRIVERS.map((d) => (
+            <DriverSlider key={d.id} d={d} value={weights[d.id]} onChange={(v) => setWeight(d.id, v)} />
+          ))}
+          <div style={{ ...mono, fontSize: 11.5, color: T.dim, marginTop: 12, textAlign: "right" }}>
+            {DRIVERS.map((d) => `${d.id} ${weights[d.id]}`).join("  ·  ")}  =  100
+          </div>
+        </Block>
 
         {err && <Pill tone={T.red}>{err}</Pill>}
+        {!ready && (
+          <Pill tone={T.blue}>
+            Still missing: {missing.join(", ")}. Nothing here is filled in for you — an answer you did
+            not give is not an answer, and the app is not going to quote one back at you later.
+          </Pill>
+        )}
 
-        <button onClick={onSearch} disabled={busy}
-          style={{ ...sans, width: "100%", minHeight: 56, marginTop: 22, fontSize: 16, fontWeight: 700, borderRadius: 10,
-            cursor: busy ? "wait" : "pointer", opacity: busy ? 0.6 : 1,
-            background: T.amber, color: T.onAccent, border: "none" }}>
-          {busy ? "Looking…" : "Show me what fits"}
+        <button onClick={onDecide} disabled={busy || !ready}
+          style={{ ...sans, width: "100%", minHeight: 58, marginTop: 22, fontSize: 16.5, fontWeight: 700, borderRadius: 10,
+            cursor: busy ? "wait" : ready ? "pointer" : "not-allowed", opacity: busy ? 0.6 : ready ? 1 : 0.45,
+            background: T.amber, color: T.onAccent, border: "none", display: "inline-flex", alignItems: "center",
+            justifyContent: "center", gap: 8 }}>
+          <Sparkles size={18} /> {busy ? "Looking…" : "Decide for me"}
         </button>
+        <div style={{ ...sans, fontSize: 12.5, color: T.dim, marginTop: 10, textAlign: "center", lineHeight: 1.5 }}>
+          It applies your weights across {basket.length === 1 ? "the market" : `all ${basket.length} markets`} and
+          comes back with two roads and its reasoning — or with nothing, and why.
+        </div>
       </Card>
     </div>
   );
 }
 
 /* ====================================================================
-   SCREEN 3 — TWO ROADS, NEVER ONE (PRD §5)
+   SCREEN 3 — THE VERDICT: TWO ROADS, NEVER ONE (PRD §5)
 
    One answer is advice; two answers with their price is teaching. The screen
    refuses to show a single "best": if only one structure survives the search
    there is nothing to compare, and the honest answer is screen 5.
 
-   Each road gets a band thumbnail (the same bands every other screen draws,
-   from payoff()) and ONE sentence naming what it gives up against the other.
+   Three things the old version was missing:
+
+   · WHAT WAS ACTUALLY EXAMINED, up top and in English, with the real counts —
+     how many headlines and how many of them were geopolitical, which regions sit
+     outside their own monthly norm and by how much, what this month has averaged
+     historically, and how the three sliders tipped the choice. Generated in
+     src/signals.js from the same data the score came from, never templated.
+
+   · THE ANSWERS, READ BACK, with a link to change them. The screen quotes the
+     budget in its own copy, so the budget had better be something the user
+     actually said.
+
+   · THE EVIDENCE, ON EACH ROAD. The four-factor engine exists and is wired, and
+     the screen where the decision happens used to show none of it. Each road now
+     carries the same "Why this trade" panel the desk has — the agreement badge,
+     the four factors as direction and strength, and the tap-through to the
+     weather regions and the news headlines behind them — plus the gauge next to
+     the band thumbnail.
+
+   And the lead line no longer opens with "3 times in 10". To a beginner that
+   reads as a bad trade before they have seen what the trade IS. What a road
+   gives and what it costs comes first; the frequency sits alongside the payout,
+   in the same sentence, so the trade-off is one thought rather than two.
 ==================================================================== */
 
 /** What this candidate gives up against the other one, from the numbers. */
@@ -461,22 +595,48 @@ export function tradeOffSentence(me, other) {
   return `Gives up ${gives[0]}${gives.length > 1 ? `, and ${gives[1]}` : ""}.`;
 }
 
-/** One road. The thumbnail is tappable and explains itself, like every visual. */
-function RoadCard({ c, other, onPick, i }) {
+/**
+ * The headline for one road: what it pays, what it costs, and how often — in
+ * that order and in one sentence.
+ *
+ * Leading with the frequency was the bug. "About 3 times in 10" at the top of a
+ * card is a verdict before the reader knows what is being judged, and every
+ * beginner reads it as "this is a bad trade" rather than as one half of a
+ * trade-off. Payout first, price second, frequency attached to the payout it
+ * belongs to.
+ */
+export function roadHeadline(c) {
+  if (!c) return "";
+  const often = inTenPhrase(c.pop);
+  return `Pays up to ${money(c.maxProfit)} for ${money(c.risk)} at risk — and that happens ${often}.`;
+}
+
+/** One road. Every visual on it is tappable and explains itself. */
+function RoadCard({ c, other, onPick, i, bars = [], weatherData, newsItems, month }) {
   const [open, setOpen] = useState(null);
   const bands = payoffBands({ legs: c.legs, entryNet: c.entryNet, spot: c.spot });
   const inTen = Math.max(0, Math.min(10, Math.round((c.pop || 0) * 10)));
-  const oftenText = inTenPhrase(c.pop);
   return (
     <Card style={{ marginTop: 12 }}>
       <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
         <span style={{ ...mono, fontSize: 10.5, color: T.dim, letterSpacing: "0.1em" }}>ROAD {i + 1}</span>
         <span style={{ ...sans, fontSize: 17, fontWeight: 700, color: T.ink }}>{c.ticker} · {c.name}</span>
+        {c.driver != null && (
+          <span style={{ ...mono, fontSize: 10, color: T.violet, border: `1px solid ${T.violet}55`, borderRadius: 4, padding: "2px 7px" }}>
+            {c.driver}/100 ON YOUR WEIGHTS
+          </span>
+        )}
       </div>
 
-      <div style={{ marginTop: 10 }}>
-        <BandThumbnail bands={bands} width={320} height={54} onExplain={setOpen}
+      {/* What it gives and what it costs, first. */}
+      <div style={{ ...sans, fontSize: 16, fontWeight: 700, color: T.ink, marginTop: 8, lineHeight: 1.4 }}>
+        {roadHeadline(c)}
+      </div>
+
+      <div style={{ display: "flex", gap: 14, marginTop: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
+        <BandThumbnail bands={bands} width={300} height={92} bars={bars} spot={c.spot} onExplain={setOpen}
           title={bandTakeaway(bands, { ticker: c.ticker })} />
+        <Gauge bands={bands} size={190} onExplain={setOpen} ticker={c.ticker} />
       </div>
       <div style={{ ...sans, fontSize: 13.5, color: T.body, lineHeight: 1.5, marginTop: 8 }}>
         {bandTakeaway(bands, { ticker: c.ticker })}
@@ -489,9 +649,9 @@ function RoadCard({ c, other, onPick, i }) {
       )}
 
       <div style={{ display: "flex", gap: 18, marginTop: 12, flexWrap: "wrap" }}>
-        {[["WORKS OUT", oftenText, inTen >= 6 ? T.green : inTen >= 4 ? T.blue : T.violet],
-          ["YOU RISK", money(c.risk), T.ink],
+        {[["YOU RISK", money(c.risk), T.ink],
           ["YOU CAN MAKE", money(c.maxProfit), T.green],
+          ["WORKS OUT", inTenPhrase(c.pop), inTen >= 6 ? T.green : inTen >= 4 ? T.blue : T.violet],
           ["DAYS", `${Math.round(c.dte)}`, T.ink]].map(([k, v, col]) => (
             <span key={k}>
               <span style={{ ...mono, fontSize: 9.5, color: T.dim, display: "block" }}>{k}</span>
@@ -499,6 +659,13 @@ function RoadCard({ c, other, onPick, i }) {
             </span>
           ))}
       </div>
+
+      {/* THE EVIDENCE. The same panel the desk shows, on the screen where the
+          decision is actually made. The four bars are open by default here:
+          behind a tap they were, in practice, not on the screen at all. */}
+      <WhyThisTrade fused={c.fused} ticker={c.ticker} weatherData={weatherData} newsItems={newsItems}
+        month={month} defaultDetail title="WHY THIS MARKET"
+        note={`Tap Weather for the regions behind that bar, or News for the headlines behind that one.`} />
 
       {/* The one sentence that makes this two roads rather than a ranking. */}
       <Pill tone={T.violet}>{tradeOffSentence(c, other)}</Pill>
@@ -512,25 +679,78 @@ function RoadCard({ c, other, onPick, i }) {
   );
 }
 
-export function WizardCandidates({ candidates = [], answers = {}, onPick, onBack }) {
+/** The answers, read back. Never a number the user did not type or tap. */
+function AnswersBack({ answers, onChange }) {
+  const w = normaliseWeights(answers.weights || DRIVER_PRESETS.balanced);
+  const basket = answers.basket || [];
+  const horizon = HORIZONS.find((h) => h.days === answers.horizon);
+  const rows = [
+    ["Markets", basket.length ? basket.join(" · ") : "—"],
+    ["Willing to lose", answers.risk > 0 ? money(answers.risk) : "—"],
+    ["Time given", horizon ? horizon.label : answers.horizon > 0 ? `${answers.horizon} days` : "—"],
+    ["Weights", DRIVERS.map((d) => `${d.label.toLowerCase()} ${w[d.id]}`).join(" · ")],
+  ];
   return (
-    <div style={{ ...sans, maxWidth: 720, margin: "0 auto", padding: "16px 16px 44px" }}>
+    <Card style={{ marginTop: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+        <Eyebrow>What you told it</Eyebrow>
+        <button onClick={onChange}
+          style={{ ...sans, fontSize: 13.5, background: "transparent", border: "none", color: T.blue, cursor: "pointer", padding: "4px 0", minHeight: 32 }}>
+          change
+        </button>
+      </div>
+      <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
+        {rows.map(([k, v]) => (
+          <div key={k} style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+            <span style={{ ...mono, fontSize: 10.5, color: T.dim, minWidth: 120, letterSpacing: "0.08em", textTransform: "uppercase" }}>{k}</span>
+            <span style={{ ...sans, fontSize: 14, color: T.ink, flex: 1, minWidth: 0 }}>{v}</span>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+export function WizardCandidates({ candidates = [], answers = {}, narrative = [], barsFor,
+  weatherData, newsItems, month, onPick, onBack }) {
+  const tickers = [...new Set(candidates.map((c) => c.ticker))];
+  return (
+    <div style={{ ...sans, maxWidth: 760, margin: "0 auto", padding: "16px 16px 44px" }}>
       <BackLink onClick={onBack} label="Change my answers" />
-      <Eyebrow>Two roads</Eyebrow>
+      <Eyebrow>The verdict</Eyebrow>
       <h1 style={{ ...sans, fontSize: 25, fontWeight: 800, color: T.ink, margin: "6px 0 6px", lineHeight: 1.25 }}>
         {candidates.length === 2 ? "Two ways to do this." : `${candidates.length} ways to do this.`}
+        {tickers.length > 1 ? ` In ${tickers.length} different markets.` : ""}
       </h1>
       <p style={{ ...sans, fontSize: 15, color: T.mut, lineHeight: 1.55, margin: 0 }}>
         Neither one is the right answer. Each buys something and pays for it somewhere else, and the
-        sentence under each chart says where. Both fit the {money(answers.risk || 0)} you said you were willing to lose.
+        sentence under each chart says where.
       </p>
+
+      {/* What was actually examined, before anything is recommended. */}
+      {narrative.length > 0 && (
+        <Card style={{ marginTop: 14 }}>
+          <Eyebrow>What I looked at</Eyebrow>
+          <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
+            {narrative.map((para, i) => (
+              <p key={i} style={{ ...sans, fontSize: 14, color: T.body, lineHeight: 1.6, margin: 0 }}>{para}</p>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      <AnswersBack answers={answers} onChange={onBack} />
+
       {candidates.map((c, i) => (
         <RoadCard key={c.id || i} c={c} i={i} onPick={onPick}
+          bars={barsFor ? barsFor(c.ticker) : []}
+          weatherData={weatherData} newsItems={newsItems} month={month}
           other={candidates.find((x) => x !== c) || null} />
       ))}
       <div style={{ ...sans, fontSize: 12.5, color: T.dim, marginTop: 16, lineHeight: 1.5, textAlign: "center" }}>
-        Green is where the trade makes money at expiry, red is where it does not. Both charts are drawn from the
-        same payoff calculation, so they can be compared directly.
+        Green is where the trade makes money at expiry, red is where it does not, and the line across them is
+        where the price has actually been. Every chart here is drawn from the same payoff calculation, so they
+        can be compared directly.
       </div>
     </div>
   );
