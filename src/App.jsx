@@ -5,14 +5,16 @@ import {
 } from "recharts";
 import {
   RefreshCw, ShieldCheck, Save, Trash2, Play, Layers, Radar, Box,
-  FlaskConical, Briefcase, Plus, Newspaper, Plug, Send, ExternalLink, CloudSun, MessageSquare, FileText, Compass, Bell, Home,
+  FlaskConical, Briefcase, Plus, Newspaper, Plug, Send, ExternalLink, CloudSun, MessageSquare, FileText, Bell,
+  SlidersHorizontal, ArrowLeft, Sun, Moon,
 } from "lucide-react";
 import { fetchAllNews, fetchWeather, ImpactTags, MeteoTab, CopilotTab, ReportTab, OrderTicket, AlpacaDesk, scaleStrategy, probProfit, buildContext, GuardianPanel, PriceChart, ChainMatrix, PayoffThumb, OptionPanel, UnifiedView, taSignals, confluence, WhyThisTrade } from "./pro.jsx";
 import { fuseSignals, sentimentDirection, withSignalRank, compareCandidates, againstSignal } from "./signals.js";
 import { N as nCDF, bs as bsPrice, smile as smileIV, payoff as payoffExp, SEASONAL, SIGMA } from "./engine.js";
-import { T } from "./theme.js";
-import { RULES, sizing, ruleBadge, takeProfitLabel, stopLossLabel, perTradeCapLabel, RULE_PILLS, money, pctText } from "./rules.js";
+import { T, themeName, setTheme } from "./theme.js";
+import { RULES, sizing, ruleBadge, takeProfitLabel, stopLossLabel, perTradeCapLabel, RULE_PILLS, NOTHING_TODAY, money, pctText } from "./rules.js";
 import { evaluateTrade, gateSummary } from "./riskGate.js";
+import { CapitalOnboarding, WizardOpen, WizardQuestions, NothingToday, Card, Pill } from "./wizard.jsx";
 
 /* ============================== THEME ============================== */
 const mono = { fontFamily: "ui-monospace, Menlo, monospace" };
@@ -54,7 +56,7 @@ const UNDERLYINGS = {
     monthlyMean: SEASONAL.SPY,
     newsQ: "S&P 500 stock market outlook" },
 };
-const MONTHS_IT = ["Gen", "Feb", "Mar", "Apr", "Mag", "Giu", "Lug", "Ago", "Set", "Ott", "Nov", "Dic"];
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const NOW_MONTH = new Date().getMonth();
 // Accesso SICURO alle statistiche del sottostante: qualunque ticker (anche importato
 // da Alpaca o salvato da versioni precedenti) ha sempre un fallback valido.
@@ -108,12 +110,6 @@ function parseCboeJson(sym, j) {
   return { spot, byExp, expirations, updated: new Date().toISOString(), source: "CBOE diretta" };
 }
 
-// Fallback: proxy serverless della web app (nessun problema CORS/CSP)
-async function proxied(url) {
-  const r = await fetch(`/api/proxy?url=${encodeURIComponent(url)}`);
-  if (!r.ok) throw new Error("proxy " + r.status);
-  return r;
-}
 async function fetchCboeChain(sym) {
   // 1) endpoint server dedicato (gestisce varianti simbolo + header browser)
   try {
@@ -167,36 +163,6 @@ async function fetchHistory(sym) {
   return { ...st, matrix: h.matrix, from: h.from, src: `${h.src} · ${st.years}y` };
 }
 
-/* ============================== NEWS RSS (via proxy serverless) ============================== */
-async function fetchRss(url) {
-  let r;
-  try { r = await fetch(url); if (!r.ok) throw new Error("rss " + r.status); }
-  catch { r = await proxied(url); }
-  const xml = await r.text();
-  const doc = new DOMParser().parseFromString(xml, "text/xml");
-  const items = Array.from(doc.querySelectorAll("item"));
-  if (!items.length) throw new Error("feed vuoto");
-  return items.slice(0, 12).map((it) => ({
-    title: it.querySelector("title")?.textContent || "",
-    link: it.querySelector("link")?.textContent || "",
-    date: it.querySelector("pubDate")?.textContent || "",
-    src: it.querySelector("source")?.textContent || new URL(url).hostname,
-  }));
-}
-async function fetchNews(ticker) {
-  const q = getU(ticker).newsQ;
-  const feeds = [
-    `https://news.google.com/rss/search?q=${encodeURIComponent(q)}&hl=en-US&gl=US&ceid=US:en`,
-    `https://feeds.finance.yahoo.com/rss/2.0/headline?s=${ticker}&region=US&lang=en-US`,
-  ];
-  const results = await Promise.allSettled(feeds.map(fetchRss));
-  const items = results.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
-  if (!items.length) throw new Error("feed non raggiungibili");
-  const seen = new Set();
-  return items.filter((i) => i.title && !seen.has(i.title) && seen.add(i.title))
-    .sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 18);
-}
-
 /* ============================== ALPACA PAPER (via proxy serverless /api/alpaca) ============================== */
 async function alpacaGet(path) {
   const r = await fetch(`/api/alpaca?path=${encodeURIComponent(path)}`);
@@ -235,11 +201,11 @@ async function alpacaOrderMleg(legs) {
 
 /* ============================== STRATEGY PRESETS ============================== */
 const SENTIMENTS = [
-  { id: "verybear", label: "Very Bear", color: "#c0392b", icon: "⭣⭣", tgt: -0.08 },
+  { id: "verybear", label: "Very Bear", color: T.redDeep, icon: "⭣⭣", tgt: -0.08 },
   { id: "bear", label: "Bear", color: T.red, icon: "⭣", tgt: -0.04 },
   { id: "neutral", label: "Neutral", color: T.mut, icon: "→", tgt: 0 },
   { id: "bull", label: "Bull", color: T.green, icon: "⭡", tgt: 0.04 },
-  { id: "verybull", label: "Very Bull", color: "#4a9e3f", icon: "⭡⭡", tgt: 0.08 },
+  { id: "verybull", label: "Very Bull", color: T.greenDeep, icon: "⭡⭡", tgt: 0.08 },
 ];
 // se c'è la chain reale, gli strike vengono agganciati ai più vicini disponibili
 function snapStrike(x, strikes, step) {
@@ -251,8 +217,8 @@ function buildPresets(sent, S, step, strikes) {
   const P = {
     verybear: [
       { name: "Long Put ATM", raw: [[1, "put", 0]] },
-      { name: "Bear Put Spread largo", raw: [[1, "put", 0], [-1, "put", -0.1]] },
-      { name: "Put Butterfly ribassista", raw: [[1, "put", 0], [-2, "put", -0.06], [1, "put", -0.12]] },
+      { name: "Wide Bear Put Spread", raw: [[1, "put", 0], [-1, "put", -0.1]] },
+      { name: "Bearish Put Butterfly", raw: [[1, "put", 0], [-2, "put", -0.06], [1, "put", -0.12]] },
     ],
     bear: [
       { name: "Bear Call Spread", raw: [[-1, "call", 0.03], [1, "call", 0.08]] },
@@ -265,12 +231,12 @@ function buildPresets(sent, S, step, strikes) {
     ],
     bull: [
       { name: "Bull Call Spread", raw: [[1, "call", 0], [-1, "call", 0.05]] },
-      { name: "Bull Put Spread (credito)", raw: [[-1, "put", -0.03], [1, "put", -0.08]] },
+      { name: "Bull Put Spread (credit)", raw: [[-1, "put", -0.03], [1, "put", -0.08]] },
     ],
     verybull: [
       { name: "Long Call ATM", raw: [[1, "call", 0]] },
-      { name: "Bull Call Spread largo", raw: [[1, "call", 0], [-1, "call", 0.1]] },
-      { name: "Call Butterfly rialzista", raw: [[1, "call", 0], [-2, "call", 0.06], [1, "call", 0.12]] },
+      { name: "Wide Bull Call Spread", raw: [[1, "call", 0], [-1, "call", 0.1]] },
+      { name: "Bullish Call Butterfly", raw: [[1, "call", 0], [-2, "call", 0.06], [1, "call", 0.12]] },
     ],
   };
   return P[sent].map((p) => ({
@@ -417,7 +383,7 @@ async function loadState() {
   try { const v = localStorage.getItem(SKEY); return v ? JSON.parse(v) : null; }
   catch { return null; }
 }
-const EMPTY = { saved: [], positions: [], settings: { webhook: "", reportFreq: "weekly", reportLast: 0, reportLastMd: "", capital: RULES.defaultTradingCapital, concurrentTarget: RULES.defaultConcurrentTarget, savings: null, sizeOverride: null, mode: "pro" }, seasonal: {}, journal: [], ivHist: {} };
+const EMPTY = { saved: [], positions: [], settings: { webhook: "", reportFreq: "weekly", reportLast: 0, reportLastMd: "", capital: RULES.defaultTradingCapital, concurrentTarget: RULES.defaultConcurrentTarget, savings: null, sizeOverride: null, mode: "pro", onboarded: false, notifyWhenReady: false }, seasonal: {}, journal: [], ivHist: {} };
 async function saveState(st) {
   try { localStorage.setItem(SKEY, JSON.stringify(st)); } catch (e) { console.error(e); }
   // sync server (abilita Autopilot ad app chiusa); fire-and-forget
@@ -430,7 +396,7 @@ const Btn = ({ children, onClick, color = T.amber, ghost, disabled, small }) => 
     style={{
       ...mono, fontSize: small ? 11 : 12, padding: small ? "4px 8px" : "8px 12px", borderRadius: 6,
       cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.5 : 1,
-      background: ghost ? "transparent" : color, color: ghost ? color : "#14181d",
+      background: ghost ? "transparent" : color, color: ghost ? color : T.onAccent,
       border: ghost ? `1px solid ${color}66` : "none", display: "inline-flex", alignItems: "center", gap: 6,
     }}>{children}</button>
 );
@@ -448,7 +414,7 @@ const Inp = (props) => (
   <input {...props} style={{ ...mono, background: T.bg, color: T.ink, border: `1px solid ${T.line}`, borderRadius: 5, padding: "6px 8px", fontSize: 12, ...(props.style || {}) }} />
 );
 const fmt$ = (x) => (x === Infinity || x === -Infinity || x == null || Number.isNaN(x)) ? "—" : `${x < 0 ? "-" : ""}$${Math.abs(x).toFixed(0)}`;
-const ago = (d) => { const m = Math.round((Date.now() - new Date(d)) / 60000); return m < 60 ? `${m}m fa` : m < 1440 ? `${Math.round(m / 60)}h fa` : `${Math.round(m / 1440)}g fa`; };
+const ago = (d) => { const m = Math.round((Date.now() - new Date(d)) / 60000); return m < 60 ? `${m}m ago` : m < 1440 ? `${Math.round(m / 60)}h ago` : `${Math.round(m / 1440)}d ago`; };
 
 /* ============================== MAIN ============================== */
 class TabBoundary extends React.Component {
@@ -458,9 +424,9 @@ class TabBoundary extends React.Component {
   render() {
     if (this.state.err) return (
       <div style={{ marginTop: 12, padding: 16, background: T.panel, border: `1px solid ${T.red}66`, borderRadius: 8 }}>
-        <div style={{ ...mono, fontSize: 11, color: T.red, fontWeight: 700 }}>⚠ ERRORE IN QUESTA SEZIONE (il resto dell'app funziona)</div>
+        <div style={{ ...mono, fontSize: 11, color: T.red, fontWeight: 700 }}>⚠ THIS SECTION HIT AN ERROR (the rest of the app still works)</div>
         <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 6, whiteSpace: "pre-wrap" }}>{String(this.state.err?.message || this.state.err).slice(0, 300)}</div>
-        <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6 }}>Copia questo messaggio e incollalo in chat per il fix. Cambia tab per continuare a usare l'app.</div>
+        <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6 }}>Copy this message if you want it fixed. Switch tabs to carry on using the app.</div>
       </div>
     );
     return this.props.children;
@@ -468,7 +434,13 @@ class TabBoundary extends React.Component {
 }
 
 export default function OptionsStrategyLab() {
-  const [tab, setTab] = useState("wizard");
+  // PRD §5: the wizard IS the app. `view` is the shell — the tabs are one of
+  // its destinations, not the front door. `wizStep` is which wizard screen.
+  const [view, setView] = useState("wizard");   // "wizard" | "desk"
+  const [wizStep, setWizStep] = useState("open"); // "open" | "questions" | "nothing"
+  const [nothing, setNothing] = useState(null);   // [{ id, text }] — why not today
+  const [hydrated, setHydrated] = useState(false);
+  const [tab, setTab] = useState("paper");
   const [ticker, setTicker] = useState("SOYB");
   const [chains, setChains] = useState({});      // ticker -> chain CBOE
   const [seasonal, setSeasonal] = useState({});  // ticker -> {monthlyMean, sigma, rets, years} da Alpha Vantage
@@ -494,7 +466,7 @@ export default function OptionsStrategyLab() {
   const [replay, setReplay] = useState(null);
   const [nf, setNf] = useState({ tk: "ALL", kind: "all", q: "", days: 7 });
   const [multi, setMulti] = useState({ sel: ["SOYB", "CORN", "UNG"], busy: false, res: null, err: null, dteT: 45, senMode: "auto" });
-  const [wiz, setWiz] = useState({ risk: 250, horizon: 45, conviction: "moderate", busy: false, result: null, err: null });
+  const [wiz, setWiz] = useState({ risk: 250, horizon: RULES.targetEntryDTE, priority: "balanced", busy: false, err: null });
   const [optRef, setOptRef] = useState(null); // snapshot prezzi Optimizer per riconciliazione col Builder
   const [weather, setWeather] = useState(null);  // regionId -> forecast 14g (fuseSignals)
   const [barsCache, setBarsCache] = useState({}); // ticker -> daily bars (fattore tecnico)
@@ -503,7 +475,7 @@ export default function OptionsStrategyLab() {
   const U = getU(ticker);
   const chain = chains[ticker];
   const spot = chain?.spot ?? null;
-  const seas = seasonal[ticker] || { monthlyMean: U.monthlyMean, sigma: U.sigma, matrix: null, years: null, src: "stima" };
+  const seas = seasonal[ticker] || { monthlyMean: U.monthlyMean, sigma: U.sigma, matrix: null, years: null, src: "estimate" };
   const iv = U.iv;
   const dte = expKey && chain?.byExp[expKey] ? chain.byExp[expKey].dte : dteManual;
   const expStrikes = useMemo(() => {
@@ -515,7 +487,7 @@ export default function OptionsStrategyLab() {
 
   /* ---- chain fetch ---- */
   const refreshChain = useCallback(async (tk, silent) => {
-    if (!silent) { setBusy(tk); setMsg(`Scarico chain ${tk}… (se la fetch diretta è bloccata uso il proxy Claude: 20-40s)`); }
+    if (!silent) { setBusy(tk); setMsg(`Loading ${tk} option prices…`); }
     try {
       const c = await fetchCboeChain(tk);
       setChains((m) => ({ ...m, [tk]: c }));
@@ -534,10 +506,10 @@ export default function OptionsStrategyLab() {
           });
         }
       } catch { /* opzionale */ }
-      if (!silent) setMsg(`${tk}: chain reale caricata [${c.source}] — spot $${c.spot?.toFixed(2)}, ${c.expirations.length} scadenze.`);
+      if (!silent) setMsg(`${tk} loaded from ${c.source} — price $${c.spot?.toFixed(2)}, ${c.expirations.length} expiries.`);
       return c;
     } catch (e) {
-      if (!silent) setMsg(`${tk}: chain non disponibile — ${e.message}`);
+      if (!silent) setMsg(`Could not load ${tk} option prices — ${e.message}`);
       return null;
     } finally { if (!silent) setBusy(null); }
   }, []);
@@ -545,6 +517,7 @@ export default function OptionsStrategyLab() {
   /* ---- avvio: storage + refresh automatico ---- */
   useEffect(() => {
     (async () => {
+      try {
       const st = (await loadState()) || EMPTY;
       // merge timeline Autopilot dal server (brief generati ad app chiusa)
       try {
@@ -568,15 +541,22 @@ export default function OptionsStrategyLab() {
       const droppedPos = (st.positions || []).filter((p) => !okPos(p)).length;
       st.positions = (st.positions || []).filter(okPos);
       st.saved = (st.saved || []).filter((sv) => sv && Array.isArray(sv.legs) && typeof sv.ticker === "string");
-      if (droppedPos > 0) setMsg(`⚠ ${droppedPos} posizione/i corrotte da una versione precedente sono state rimosse (i dati validi sono intatti).`);
-      setStore({ ...EMPTY, ...st, v: 2, settings: { ...EMPTY.settings, ...(st.settings || {}) } });
-      if ((st.positions || []).length > 0) setTab("paper");
+      if (droppedPos > 0) setMsg(`${droppedPos} position${droppedPos === 1 ? "" : "s"} saved by an older version were damaged and have been removed. Everything else is intact.`);
+      // Anyone who already has positions or saved strategies has been through
+      // setup on an older build: do not send them back to onboarding.
+      const settings = { ...EMPTY.settings, ...(st.settings || {}) };
+      if (st.settings?.onboarded == null) {
+        settings.onboarded = (st.positions || []).length > 0 || (st.saved || []).length > 0;
+      }
+      setStore({ ...EMPTY, ...st, v: 2, settings });
+      setHydrated(true);
       if (st.seasonal) setSeasonal(st.seasonal);
       const tickers = [...new Set([(st.positions || []).map((p) => p.ticker), "SOYB"].flat())];
-      setBusy("auto"); setMsg("Aggiornamento automatico chain reali (CBOE)…");
+      setBusy("auto"); setMsg("Loading live option chains…");
       for (const tk of tickers) await refreshChain(tk, true);
-      setMsg("Dati aggiornati all'apertura ✓");
+      setMsg(null);
       setBusy(null);
+      } finally { setHydrated(true); }
     })();
   }, [refreshChain]);
 
@@ -637,8 +617,8 @@ export default function OptionsStrategyLab() {
       setSeasonal(s2);
       const st = { ...store, seasonal: Object.fromEntries(Object.entries(s2).map(([k, v]) => [k, { monthlyMean: v.monthlyMean, sigma: v.sigma, matrix: v.matrix, years: v.years, from: v.from, src: v.src }])) };
       setStore(st); await saveState(st);
-      setMsg(`${ticker}: stagionalità reale calcolata su ${h.years} anni di dati.`);
-    } catch (e) { setMsg(`Alpha Vantage: ${e.message}`); }
+      setMsg(`${ticker}: seasonality worked out from ${h.years} years of real prices.`);
+    } catch (e) { setMsg(`Could not load the price history: ${e.message}`); }
     setBusy(null);
   };
 
@@ -654,7 +634,7 @@ export default function OptionsStrategyLab() {
       setNews((n) => ({ ...n, [tk]: { items, at: Date.now() } }));
     } catch {
       setNews((n) => ({ ...n, [tk]: { items: n[tk]?.items || [], loading: false, err: true } }));
-      if (!silent) setMsg("Feed RSS non raggiungibili al momento.");
+      if (!silent) setMsg("News feeds are not reachable right now.");
     }
     if (!silent) setBusy(null);
   }, []);
@@ -732,7 +712,7 @@ export default function OptionsStrategyLab() {
   const saveStrategy = async () => {
     const item = { id: Date.now(), name: stratName, ticker, expKey, dte, legs, savedAt: new Date().toISOString() };
     const st = { ...store, saved: [...store.saved, item] };
-    setStore(st); await saveState(st); setMsg("Strategia salvata ✓ (persistente tra sessioni).");
+    setStore(st); await saveState(st); setMsg("Strategy saved. It will still be here next time.");
   };
   const openPaper = async (alpacaOrder) => {
     // Non blocchiamo il trade: chiediamo la motivazione scritta e la salviamo
@@ -753,17 +733,17 @@ export default function OptionsStrategyLab() {
       openedAt: new Date().toISOString(), expiry, maxProfit: A.maxProfit, maxLoss: A.maxLoss,
       realEntry: A.realCount === legs.length,
       alpacaId: alpacaOrder?.id || null,
-      thesis: { pop: pop0, iv: ivAvg0, seasonal: seas.monthlyMean[NOW_MONTH], regime: seas.monthlyMean[NOW_MONTH] > 0.8 ? "forte+" : seas.monthlyMean[NOW_MONTH] < -0.8 ? "forte-" : "debole", spot, breakevens: A.breakevens, delta: A.greeks.delta, vega: A.greeks.vega,
+      thesis: { pop: pop0, iv: ivAvg0, seasonal: seas.monthlyMean[NOW_MONTH], regime: seas.monthlyMean[NOW_MONTH] > 0.8 ? "strong up" : seas.monthlyMean[NOW_MONTH] < -0.8 ? "strong down" : "weak", spot, breakevens: A.breakevens, delta: A.greeks.delta, vega: A.greeks.vega,
         signal: fused[ticker] ? { score: fused[ticker].score, confidence: fused[ticker].confidence, agreement: fused[ticker].agreement, narrative: fused[ticker].narrative } : null,
         againstSignal: clash ? { ...clash, reason: against.reason.trim(), at: Date.now() } : null },
       timeline: [
         { t: Date.now(), type: "gate", text: `Risk gate — ${gateSummary(gLocal)}` },
-        { t: Date.now(), type: "open", text: `${alpacaOrder ? "Ordine Alpaca " + alpacaOrder.id.slice(0, 8) + "… inviato · " : ""}Aperta: PoP ${pop0 != null ? (pop0 * 100).toFixed(0) + "%" : "n/d"} · IV ${(ivAvg0 * 100).toFixed(0)}% · stagionale ${seas.monthlyMean[NOW_MONTH].toFixed(1)}%/m${fused[ticker] ? ` · segnale ${fused[ticker].score > 0 ? "+" : ""}${fused[ticker].score}/100 ${fused[ticker].agreement}` : ""}` },
+        { t: Date.now(), type: "open", text: `${alpacaOrder ? "Alpaca order " + alpacaOrder.id.slice(0, 8) + "… sent · " : ""}Opened with a ${pop0 != null ? (pop0 * 100).toFixed(0) + "%" : "n/a"} chance · volatility ${(ivAvg0 * 100).toFixed(0)}% · season ${seas.monthlyMean[NOW_MONTH].toFixed(1)}%/mo${fused[ticker] ? ` · signal ${fused[ticker].score > 0 ? "+" : ""}${fused[ticker].score}/100 ${fused[ticker].agreement}` : ""}` },
         ...(clash ? [{ t: Date.now(), type: "against", text: `Against ${clash.n} of ${clash.total} factors. Reason: "${against.reason.trim()}"` }] : []),
       ],
     };
     const st = { ...store, positions: [...store.positions, pos] };
-    setStore(st); await saveState(st); setAgainst({ reason: "" }); setMsg("Posizione paper aperta ✓"); setTab("paper");
+    setStore(st); await saveState(st); setAgainst({ reason: "" }); setMsg("Position opened."); setTab("paper");
   };
   const delSaved = async (id) => { const st = { ...store, saved: store.saved.filter((s) => s.id !== id) }; setStore(st); await saveState(st); };
   const logEvent = useCallback((id, type, text) => {
@@ -841,7 +821,7 @@ export default function OptionsStrategyLab() {
   const runReplay = (row) => {
     // row = [anno, r1..r12 in %]; rigioca la finestra stagionale mese per mese con le regole
     const span = Math.max(1, Math.round(dte / 30));
-    const steps = [{ m: 0, label: "ingresso", S: spot, pnl: 0, note: "apri la posizione" }];
+    const steps = [{ m: 0, label: "open", S: spot, pnl: 0, note: "you open the trade" }];
     let Sx = spot, closed = null;
     for (let i = 1; i <= span; i++) {
       const r = row[((NOW_MONTH + i - 1) % 12) + 1];
@@ -849,10 +829,10 @@ export default function OptionsStrategyLab() {
       Sx = Sx * (1 + r / 100);
       const rem = Math.max(1, dte - i * 30);
       const pnl = ((i === span ? payoffExp(legs, Sx) : scenarioValue(legs, Sx, rem, iv)) - A.entry) * 100;
-      let note = `prezzo ${r >= 0 ? "+" : ""}${r.toFixed(1)}%`;
-      if (!closed && pnl >= RULES.takeProfitPct * A.maxProfit) { closed = { i, pnl: RULES.takeProfitPct * A.maxProfit, why: takeProfitLabel() }; note += ` → 🎯 ${takeProfitLabel()} colpito: incassi a regola`; }
-      else if (!closed && pnl <= RULES.stopLossPct * A.maxLoss) { closed = { i, pnl: RULES.stopLossPct * A.maxLoss, why: stopLossLabel() }; note += ` → 🛑 ${stopLossLabel()}: warning, valuta la chiusura`; }
-      steps.push({ m: i, label: MONTHS_IT[(NOW_MONTH + i) % 12], S: Sx, pnl, note });
+      let note = `price ${r >= 0 ? "+" : ""}${r.toFixed(1)}%`;
+      if (!closed && pnl >= RULES.takeProfitPct * A.maxProfit) { closed = { i, pnl: RULES.takeProfitPct * A.maxProfit, why: takeProfitLabel() }; note += ` → 🎯 ${takeProfitLabel()} hit: you take the profit`; }
+      else if (!closed && pnl <= RULES.stopLossPct * A.maxLoss) { closed = { i, pnl: RULES.stopLossPct * A.maxLoss, why: stopLossLabel() }; note += ` → 🛑 ${stopLossLabel()}: a warning, think about closing`; }
+      steps.push({ m: i, label: MONTHS[(NOW_MONTH + i) % 12], S: Sx, pnl, note });
       if (closed) break;
     }
     const finale = closed ? closed.pnl : steps[steps.length - 1].pnl;
@@ -868,10 +848,10 @@ export default function OptionsStrategyLab() {
     try {
       const acc = await alpacaAccount();
       setAlpaca(acc);
-      setMsg(`Alpaca PAPER connesso ✓ · equity $${(+acc.equity).toLocaleString()} · buying power $${(+acc.buying_power).toLocaleString()}`);
+      setMsg(`Alpaca paper account connected · balance $${(+acc.equity).toLocaleString()} · buying power $${(+acc.buying_power).toLocaleString()}`);
     } catch (e) {
       setAlpaca(null);
-      setMsg(`Alpaca non raggiungibile: ${e.message}. Nota: se vedi un errore CORS/network, il browser blocca le chiamate dirette — in tal caso usa il server MCP Alpaca da configurare tra i connettori Claude.`);
+      setMsg(`Could not reach Alpaca: ${e.message}`);
     }
     setBusy(null);
   };
@@ -888,12 +868,12 @@ export default function OptionsStrategyLab() {
       const withOcc = legs.map((l) => {
         const quote = q(l);
         const occ = quote?.occ || (expKey ? buildOcc(ticker, expKey, l.type, l.strike) : null);
-        if (!occ) throw new Error("seleziona una scadenza reale dalla chain per generare i simboli OCC");
+        if (!occ) throw new Error("pick a real expiry from the chain first, so the contracts can be named");
         return { ...l, occ };
       });
       const o = await alpacaOrderMleg(withOcc);
-      setMsg(`Ordine multileg inviato ad Alpaca PAPER ✓ · id ${o.id?.slice(0, 8)}…`);
-    } catch (e) { setMsg(`Invio ordine fallito: ${e.message}`); }
+      setMsg(`Order sent to your Alpaca paper account · id ${o.id?.slice(0, 8)}…`);
+    } catch (e) { setMsg(`The order was not sent: ${e.message}`); }
     setBusy(null);
   };
 
@@ -929,7 +909,7 @@ export default function OptionsStrategyLab() {
     // verdetto autopilot recente non-HOLD in attesa
     const ap = (p.timeline || []).filter((e) => e.type === "autopilot" && Date.now() - e.t < 48 * 36e5 && !e.text.includes("HOLD")).slice(-1)[0];
     const level = tpHit || slHit || dteExit || ap ? "action" : pnl != null && pnl < 0.35 * p.maxLoss ? "watch" : "ok";
-    const label = tpHit ? `${takeProfitLabel()} raggiunto → incassa` : slHit ? `${stopLossLabel()} toccato → warning` : dteExit ? `${dteLeft} DTE → chiudi/rolla` : ap ? "Autopilot: azione in attesa di OK" : pnl == null ? "in attesa dati…" : level === "watch" ? "in perdita: monitora la tesi" : "in linea col piano";
+    const label = tpHit ? `${takeProfitLabel()} reached — take the profit` : slHit ? `${stopLossLabel()} reached — a warning, not an order` : dteExit ? `${dteLeft} days left — close or roll` : ap ? "The autopilot has something waiting for your OK" : pnl == null ? "waiting for prices…" : level === "watch" ? "Losing: check the reason you opened it" : "On plan";
     return { p, pnl, dteLeft, level, label, ap, live, spotNow: sp, tpHit, slHit, dteExit };
   }), [store.positions, chains, alSync]);
 
@@ -937,24 +917,56 @@ export default function OptionsStrategyLab() {
   // DENTRO il JSX del tab Paper (setState durante il render) => instabilità del tab.
   useEffect(() => {
     for (const a of posAlerts) {
-      if (a.tpHit) logEvent(a.p.id, "tp", `Raggiunto ${takeProfitLabel()} (${fmt$(a.pnl)})`);
-      if (a.slHit) logEvent(a.p.id, "sl", `Toccato ${stopLossLabel()} (${fmt$(a.pnl)}) — warning, non chiusura automatica`);
-      if (a.dteExit) logEvent(a.p.id, "dte", `Entrata in finestra ≤${RULES.exitDTE} DTE`);
+      if (a.tpHit) logEvent(a.p.id, "tp", `Reached ${takeProfitLabel()} (${fmt$(a.pnl)})`);
+      if (a.slHit) logEvent(a.p.id, "sl", `Reached ${stopLossLabel()} (${fmt$(a.pnl)}) — a warning, nothing closes automatically`);
+      if (a.dteExit) logEvent(a.p.id, "dte", `Inside the ${RULES.exitDTE}-day exit window`);
     }
   }, [posAlerts, logEvent]);
   const nAttention = posAlerts.filter((a) => a.level === "action").length;
 
-  /* ---- wizard: trova il mio trade ---- */
-  const runWizard = async () => {
-    setWiz((w) => ({ ...w, busy: true, err: null, result: null }));
+  /* ---- the wizard search (PRD §5, screens 2 → 3) ----
+     Two things can come out of here: a candidate loaded in the Builder, or the
+     "nothing today" screen. The refusal is a first-class outcome, so it is
+     computed here from the same numbers the rest of the app uses, and its
+     sentences come from src/rules.js — never typed into a component. */
+  const runWizard = async (overrides) => {
+    const ans = { ...wiz, ...(overrides || {}) };
+    setWiz((w) => ({ ...w, ...(overrides || {}), busy: true, err: null }));
+    setNothing(null);
+    const stop = (reasons) => { setNothing(reasons); setWizStep("nothing"); setWiz((w) => ({ ...w, busy: false })); };
     try {
-      const best = scan.find((r) => r.sugg !== "neutral") || scan[0];
+      // 1) Do we know anything at all? No weather, no news and no price history
+      // means the four factors are quiet by default, which is a data problem
+      // and not a verdict on the market. Say which it is.
+      const dataIn = !!weather || newsPool.length > 0 || Object.keys(barsCache).length > 0;
+      if (!dataIn) return stop([{ id: "no-data", text: NOTHING_TODAY.noData("weather, news and prices") }]);
+
+      // 2) Do the four factors agree anywhere? A CONFLICT ticker, or one under
+      // the confidence floor, is not a trade — it is a market we cannot read.
+      const usable = scan.filter((r) => !r.conflict && r.confidence >= RULES.lowConfidence);
+      if (!usable.length) {
+        const closest = scan.slice().sort((a, b) => b.confidence - a.confidence)[0];
+        return stop([{ id: "signals", text: NOTHING_TODAY.signalsNotAligned(closest || null) }]);
+      }
+      const best = usable[0];
+
+      // 3) Are the options themselves expensive versus their own history? If we
+      // would be paying a rich premium for the same idea, we stand down.
+      const h = (store.ivHist || {})[best.tk] || [];
+      if (h.length >= 20) {
+        const cur = h[h.length - 1].iv;
+        const rank = Math.round((h.filter((x) => x.iv <= cur).length / h.length) * 100);
+        if (rank >= RULES.expensiveIVRank) {
+          return stop([{ id: "expensive", text: NOTHING_TODAY.optionsExpensive(best.tk, rank) }]);
+        }
+      }
+
       let c = chains[best.tk] || (await refreshChain(best.tk, true));
-      if (!c?.spot) throw new Error(`dati ${best.tk} non disponibili ora: riprova tra poco`);
+      if (!c?.spot) return stop([{ id: "no-chain", text: NOTHING_TODAY.noData(best.tk) }]);
       const sp = c.spot;
-      const exps = c.expirations.filter((e) => c.byExp[e].dte >= 15 && c.byExp[e].dte <= 130);
-      const ek = exps.reduce((b2, e) => Math.abs(c.byExp[e].dte - wiz.horizon) < Math.abs(c.byExp[b2].dte - wiz.horizon) ? e : b2, exps[0]);
-      if (!ek) throw new Error("nessuna scadenza adatta");
+      const exps = c.expirations.filter((e) => c.byExp[e].dte >= RULES.minEntryDTE && c.byExp[e].dte <= 130);
+      const ek = exps.length ? exps.reduce((b2, e) => Math.abs(c.byExp[e].dte - ans.horizon) < Math.abs(c.byExp[b2].dte - ans.horizon) ? e : b2, exps[0]) : null;
+      if (!ek) return stop([{ id: "no-exp", text: NOTHING_TODAY.noData(`${best.tk} expiries at least ${RULES.minEntryDTE} days out`) }]);
       const d2 = c.byExp[ek].dte;
       const sSet = new Set([...Object.keys(c.byExp[ek].calls), ...Object.keys(c.byExp[ek].puts)].map(Number));
       const strikes = Array.from(sSet).sort((a, b) => a - b);
@@ -967,33 +979,49 @@ export default function OptionsStrategyLab() {
         const ivA = a.legPx.reduce((x, y) => x + y.iv, 0) / Math.max(1, a.legPx.length);
         const pop = probProfit(a.curve, sp, ivA, d2) || 0;
         const unit = Math.abs(a.maxLoss);
-        const n = Math.floor(wiz.risk / unit);
+        const n = Math.floor(ans.risk / unit);
         if (n < 1) return null;
         const pr2 = evProfile(pop, a.maxProfit, a.maxLoss);
-        return { sent, pr, a, pop, n, unit, ev100: pr2 ? pr2.ev100 : -999 };
+        return { sent, pr, a, pop, n, unit, ev100: pr2 ? pr2.ev100 : -999,
+          rr: a.maxProfit / unit, totRisk: n * unit, totProfit: n * a.maxProfit };
       })).filter(Boolean);
-      if (!cands.length) throw new Error(`con $${wiz.risk} di rischio nessuna strategia entra: alza il budget o allunga l'orizzonte`);
-      const safe = cands.filter((x) => x.pop >= 0.55).sort((a, b) => b.ev100 - a.ev100)[0]
-        || cands.slice().sort((a, b) => b.pop - a.pop)[0];
-      const bold = cands.filter((x) => x.pop < 0.55 && x !== safe).sort((a, b) => b.ev100 - a.ev100)[0]
-        || cands.filter((x) => x !== safe).sort((a, b) => b.n * b.a.maxProfit - a.n * a.a.maxProfit)[0];
-      const t3 = ta[best.tk];
-      const seaDir3 = best.seasonalScore > 0 ? 1 : -1;
-      const strong = Math.abs(best.seasonalScore) >= 1 && (!t3 || t3.trend === 0 || t3.trend === seaDir3);
-      const mk = (x, kind) => x && ({
-        kind, tk: best.tk, name: x.pr.name, legs: x.pr.legs, expKey: ek, dte: d2, n: x.n,
-        totRisk: x.n * x.unit, totProfit: x.n * x.a.maxProfit, pop: x.pop, ev100: x.ev100,
-        winTxt: `vinci ~${Math.round(x.pop * 10)} volte su 10`,
-      });
-      setWiz((w) => ({ ...w, busy: false, result: {
-        tk: best.tk, expKey: ek, seas: best.seasonalScore,
-        props: [mk(safe, "safe"), mk(bold, "bold")].filter(Boolean),
-        reco: strong ? "bold" : "safe",
-        recoTxt: strong
-          ? `Pattern stagionale FORTE (${best.seasonalScore > 0 ? "+" : ""}${best.seasonalScore.toFixed(1)}%/m)${t3 && t3.trend === seaDir3 ? " e trend tecnico concorde" : ""}: ha senso valutare l'Ambiziosa.`
-          : `Il pattern stagionale è debole/moderato: la piattaforma consiglia la Prudente (più probabilità, meno dipendenza dalla direzione).`,
-      }}));
+      // 4) Nothing fits the budget: also a real answer, not an error toast.
+      if (!cands.length) return stop([{ id: "budget", text: NOTHING_TODAY.budgetTooSmall(ans.risk) }]);
+
+      // The third question picks the winner: win often = highest chance,
+      // win big = best payoff per dollar risked, balanced = best expected value.
+      // Whichever they asked for, prefer the ones that are not expected to lose
+      // money: "win big" should hand over the best-priced long shot, not simply
+      // the longest one.
+      const rank = ans.priority === "often" ? (a, b) => b.pop - a.pop
+        : ans.priority === "big" ? (a, b) => b.rr - a.rr
+        : (a, b) => b.ev100 - a.ev100;
+      const worthIt = cands.filter((x) => x.ev100 >= 0);
+      const pick = (worthIt.length ? worthIt : cands).slice().sort(rank)[0];
+
+      // Screens 3 and 4 (two roads, confirm) are the next session's work. Until
+      // they exist the pick is handed to the Builder, which already has the
+      // chart, the risk gate and the paper open button.
+      setTicker(best.tk); setExpKey(ek);
+      setLegs(pick.pr.legs.map((l) => ({ ...l })));
+      setStratName(pick.pr.name);
+      setMc(null); setBt(null);
+      setWiz((w) => ({ ...w, busy: false }));
+      setView("desk"); setTab("build");
+      const inTen = Math.round(pick.pop * 10);
+      const odds = inTen <= 0 ? "it rarely works out, but when it does it pays a lot"
+        : inTen === 1 ? "it works out about 1 time in 10"
+        : `it works out about ${inTen} times in 10`;
+      setMsg(`${best.tk} · ${pick.pr.name} — ${odds}. Risking ${money(pick.unit)} to make up to ${money(pick.a.maxProfit)}. Check it below, then open it on paper.`);
     } catch (e) { setWiz((w) => ({ ...w, busy: false, err: String(e.message || e) })); }
+  };
+
+  /** "Decide for me": same search, no questions — your saved answers and limit. */
+  const decideForMe = () => runWizard({ risk: Math.round(limits.perTradeLimit), horizon: RULES.targetEntryDTE });
+
+  const setNotify = async (on) => {
+    const st = { ...store, settings: { ...store.settings, notifyWhenReady: on } };
+    setStore(st); await saveState(st);
   };
 
   /* ---- profilo strategia: EV per $100 a rischio + etichetta onesta ---- */
@@ -1003,9 +1031,9 @@ export default function OptionsStrategyLab() {
     const ev = pop * maxProfit - (1 - pop) * risk;
     const ev100 = (ev / risk) * 100;
     const rr = maxProfit / risk;
-    const tag = pop >= 0.6 ? { t: "ALTA PROBABILIT\u00c0", c: T.green, d: `vinci ~${Math.round(pop * 10)} volte su 10, guadagno contenuto` }
-      : pop < 0.45 && rr >= 2 ? { t: "ALTO POTENZIALE", c: T.violet, d: `vinci ~${Math.round(pop * 10)} su 10, ma R/R ${rr.toFixed(1)}:1` }
-      : { t: "BILANCIATA", c: T.blue, d: "compromesso probabilit\u00e0/guadagno" };
+    const tag = pop >= 0.6 ? { t: "WINS OFTEN", c: T.green, d: `works out about ${Math.round(pop * 10)} times in 10, for a smaller gain` }
+      : pop < 0.45 && rr >= 2 ? { t: "WINS BIG", c: T.violet, d: `works out about ${Math.round(pop * 10)} times in 10, but pays ${rr.toFixed(1)}× what you risk` }
+      : { t: "BALANCED", c: T.blue, d: "a middle path between how often and how much" };
     return { ev, ev100, rr, tag };
   };
 
@@ -1014,7 +1042,7 @@ export default function OptionsStrategyLab() {
     try {
       const raw = await alpacaGet("/v2/positions");
       const opts = raw.filter((x) => x.asset_class === "us_option" && parseOcc(x.symbol));
-      if (!opts.length) { if (!silent) setMsg("Nessuna posizione in opzioni sul conto Alpaca."); return; }
+      if (!opts.length) { if (!silent) setMsg("No option positions on the Alpaca account."); return; }
       const groups = {};
       for (const x of opts) {
         const o = parseOcc(x.symbol);
@@ -1042,13 +1070,13 @@ export default function OptionsStrategyLab() {
           }
           const dte0 = Math.round((new Date(g.exp) - Date.now()) / 864e5);
           next.push({
-            id: Date.now() + added, name: "Importata da Alpaca", ticker: g.und, expKey: g.exp,
+            id: Date.now() + added, name: "Imported from Alpaca", ticker: g.und, expKey: g.exp,
             legs: g.legs, entryNet: g.net, entrySpot: chains[g.und]?.spot ?? null,
             openedAt: new Date().toISOString(), expiry: g.exp,
             maxProfit: Number.isFinite(mp) ? mp : 0, maxLoss: Number.isFinite(ml) ? ml : 0,
             realEntry: true, alpacaId: "sync", alpacaLive: true,
             thesis: { imported: true, iv: getU(g.und).iv, seasonal: (seasonal[g.und]?.monthlyMean || getU(g.und).monthlyMean)[NOW_MONTH], pop: null, spot: chains[g.und]?.spot ?? null, vega: 1 },
-            timeline: [{ t: Date.now(), type: "open", text: `Importata dal conto paper Alpaca (${g.legs.length} gambe, ${dte0} DTE): il Guardian ora la segue` }],
+            timeline: [{ t: Date.now(), type: "open", text: `Imported from your Alpaca paper account (${g.legs.length} legs, ${dte0} days to expiry). It is now being watched.` }],
           });
           added++;
         }
@@ -1057,8 +1085,8 @@ export default function OptionsStrategyLab() {
         saveState(ns);
         return ns;
       });
-      if (!silent) setMsg(added ? `Importate ${added} posizioni dal conto Alpaca \u2713` : "Posizioni Alpaca gi\u00e0 tutte collegate \u2713");
-    } catch (e) { if (!silent) setMsg(`Import Alpaca: ${e.message}`); }
+      if (!silent) setMsg(added ? `Imported ${added} position${added === 1 ? "" : "s"} from Alpaca.` : "Every Alpaca position is already linked.");
+    } catch (e) { if (!silent) setMsg(`Could not import from Alpaca: ${e.message}`); }
   }, [chains, seasonal]);
 
   useEffect(() => {
@@ -1081,11 +1109,11 @@ export default function OptionsStrategyLab() {
     const parts = [disciplina, coerenza, pazienza].filter((x) => x != null);
     const score = parts.length ? Math.round(parts.reduce((a, b) => a + b, 0) / parts.length * 100) : null;
     const opened = closed + store.positions.length;
-    let level = 1, next = "Usa il Wizard e apri il tuo primo paper trade";
-    if (opened >= 1) { level = 2; next = `Apri ${Math.max(0, 3 - opened)} paper trade per il Liv.3 (spread a 2 gambe + Exit Ladder)`; }
-    if (opened >= 3) { level = 3; next = `Chiudi ${Math.max(0, 5 - ruled)} trade seguendo le regole per il Liv.4 (condor, vendita premio)`; }
-    if (ruled >= 5 && (disciplina ?? 0) >= 0.6) { level = 4; next = `Arriva a 10 chiusure con disciplina \u226580% per il Liv.5 (Autopilot pieno)`; }
-    if (closed >= 10 && (disciplina ?? 0) >= 0.8) { level = 5; next = "Percorso completo: valuta la Live Readiness col Copilot"; }
+    let level = 1, next = "Open your first paper trade";
+    if (opened >= 1) { level = 2; next = `Open ${Math.max(0, 3 - opened)} more to reach level 3`; }
+    if (opened >= 3) { level = 3; next = `Close ${Math.max(0, 5 - ruled)} trades by the rules to reach level 4`; }
+    if (ruled >= 5 && (disciplina ?? 0) >= 0.6) { level = 4; next = "Reach 10 closed trades with 80% discipline for level 5"; }
+    if (closed >= 10 && (disciplina ?? 0) >= 0.8) { level = 5; next = "You have the full set of habits. Ask the copilot whether you are ready for real money."; }
     return { level, next, score, disciplina, coerenza, pazienza, closed, opened, ruled };
   }, [store.journal, store.positions, store.settings.capital]);
 
@@ -1147,24 +1175,92 @@ export default function OptionsStrategyLab() {
   }).sort((a, b) => (a.conflict !== b.conflict ? (a.conflict ? 1 : -1) : b.score - a.score)), [chains, seasonal, fused]);
 
   /* ============================== RENDER ============================== */
-  // "Oggi" rimossa su feedback: troppe info, valore basso al livello attuale.
-  // Il codice resta dietro flag per reintegrarla in futuro dentro il Guardian.
-  const SHOW_OGGI = false;
+  // The old "Today" tab is gone: what needs attention today is the wizard's
+  // front page now (PRD §5), so keeping a second copy behind a flag would just
+  // be two screens that can disagree about the same positions.
   const TABS = [
-    ...(SHOW_OGGI ? [{ id: "oggi", label: "Oggi", I: Home }] : []),
-    { id: "wizard", label: "Wizard", I: Compass },
     { id: "scan", label: "Scanner", I: Radar },
     { id: "optimize", label: "Optimize", I: Layers },
     { id: "build", label: "Builder", I: Play },
-    { id: "3d", label: "Livelli OI", I: Box },
-    { id: "backtest", label: "Backtest MC", I: FlaskConical },
+    { id: "3d", label: "Market levels", I: Box },
+    { id: "backtest", label: "History", I: FlaskConical },
     { id: "news", label: "News", I: Newspaper },
-    { id: "meteo", label: "Meteo", I: CloudSun },
+    { id: "meteo", label: "Weather", I: CloudSun },
     { id: "copilot", label: "Copilot", I: MessageSquare },
     { id: "report", label: "Report", I: FileText },
-    { id: "paper", label: "Paper", I: Briefcase },
+    { id: "paper", label: "Positions", I: Briefcase },
+    { id: "settings", label: "Settings", I: SlidersHorizontal },
   ];
   const SENT = SENTIMENTS.find((s) => s.id === sentiment);
+
+  /* ---------- the shell (PRD §5) ----------
+     Everything above is the app's brain. What follows decides which face it
+     shows: setup on a first run, the wizard by default, the tabs on request. */
+
+  const goHome = () => { setView("wizard"); setWizStep("open"); setNothing(null); };
+  const marketReady = !!spot || Object.keys(chains).length > 0;
+
+  if (!hydrated) {
+    return (
+      <div style={{ minHeight: "100vh", background: T.bg, color: T.mut, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "ui-sans-serif, system-ui", fontSize: 15 }}>
+        Loading your desk…
+      </div>
+    );
+  }
+
+  if (!store.settings.onboarded) {
+    return (
+      <div style={{ minHeight: "100vh", background: T.bg, color: T.body }}>
+        <CapitalOnboarding
+          initial={{ capital: store.settings.capital, concurrentTarget: store.settings.concurrentTarget, savings: store.settings.savings }}
+          onDone={async (a) => {
+            const st = { ...store, settings: { ...store.settings,
+              capital: a.tradingCapital, concurrentTarget: a.concurrentTarget, savings: a.savings,
+              sizeOverride: a.override && a.override.reason && a.override.reason.trim().length >= RULES.minOverrideReasonChars ? a.override : null,
+              onboarded: true } };
+            setStore(st); await saveState(st); goHome();
+          }}
+        />
+      </div>
+    );
+  }
+
+  if (view === "wizard") {
+    return (
+      <div style={{ minHeight: "100vh", background: T.bg, color: T.body }}>
+        {msg && (
+          <div style={{ ...mono, fontSize: 12, color: T.amber, background: `${T.amber}12`, borderBottom: `1px solid ${T.amber}44`, padding: "10px 14px" }}>{msg}</div>
+        )}
+        {wizStep === "open" && (
+          <WizardOpen
+            positions={store.positions} posAlerts={posAlerts} attention={nAttention}
+            marketReady={marketReady} perTradeLimit={limits.perTradeLimit}
+            onPositions={() => { setView("desk"); setTab("paper"); }}
+            onFind={() => { setNothing(null); setWizStep("questions"); }}
+            onDecide={decideForMe}
+            onDesk={() => { setView("desk"); setTab("scan"); }}
+            onSettings={() => { setView("desk"); setTab("settings"); }}
+          />
+        )}
+        {wizStep === "questions" && (
+          <WizardQuestions
+            answers={wiz} setAnswers={setWiz} limits={limits} busy={wiz.busy} err={wiz.err}
+            onBack={goHome} onSearch={() => runWizard()}
+          />
+        )}
+        {wizStep === "nothing" && (
+          <NothingToday
+            reasons={nothing || []} notified={!!store.settings.notifyWhenReady}
+            hasPositions={store.positions.length > 0}
+            onNotify={() => setNotify(true)}
+            onBack={() => setWizStep("questions")}
+            onPositions={() => { setView("desk"); setTab("paper"); }}
+            onDesk={() => { setView("desk"); setTab("scan"); }}
+          />
+        )}
+      </div>
+    );
+  }
 
   return (
     <div style={{ minHeight: "100vh", background: T.bg, color: T.body, fontFamily: "ui-sans-serif, system-ui" }}>
@@ -1173,14 +1269,18 @@ export default function OptionsStrategyLab() {
         {/* Header */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
           <div>
-            <Lbl>OPTIONS STRATEGY LAB v2 · DATI REALI</Lbl>
+            <button onClick={goHome}
+              style={{ ...mono, fontSize: 12, minHeight: 44, padding: "6px 0", background: "transparent", border: "none", color: T.blue, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <ArrowLeft size={14} /> Home
+            </button>
+            <Lbl>OPTIONS STRATEGY LAB v2 · LIVE DATA</Lbl>
             <h1 style={{ fontSize: 24, fontWeight: 800, color: T.ink, margin: "4px 0 6px" }}>Commodity Options Desk</h1>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
               <span style={{ ...mono, fontSize: 10, color: T.green, border: `1px solid ${T.green}55`, background: `${T.green}12`, padding: "3px 8px", borderRadius: 5, display: "inline-flex", gap: 5, alignItems: "center" }}>
                 <ShieldCheck size={12} /> PAPER · {ruleBadge()}
               </span>
               <span style={{ ...mono, fontSize: 10, color: chain ? T.blue : T.dim, border: `1px solid ${chain ? T.blue : T.dim}44`, padding: "3px 8px", borderRadius: 5 }}>
-                {chain ? `${chain.source} · agg. ${ago(chain.updated)}` : "chain non caricata"}
+                {chain ? `${chain.source} · updated ${ago(chain.updated)}` : "prices not loaded"}
               </span>
             </div>
           </div>
@@ -1192,18 +1292,20 @@ export default function OptionsStrategyLab() {
             <Btn onClick={() => refreshChain(ticker)} disabled={busy !== null}>
               <RefreshCw size={13} /> {busy === ticker ? "…" : "Refresh"}
             </Btn>
-            <Btn small ghost onClick={() => { localStorage.setItem("osl-theme", localStorage.getItem("osl-theme") === "light" ? "dark" : "light"); location.reload(); }}>◐</Btn>
+            <Btn small ghost onClick={() => setTheme(T.dark ? "light" : "dark")}>
+              {T.dark ? <Sun size={13} /> : <Moon size={13} />} {T.dark ? "Light" : "Dark"}
+            </Btn>
           </div>
         </div>
 
         <div style={{ display: "flex", gap: 14, marginTop: 10, flexWrap: "wrap" }}>
-          <Stat k="SPOT (CBOE)" v={spot ? `$${spot.toFixed(2)}` : "—"} />
-          <Stat k="SCADENZA" v={expKey ? `${expKey} · ${dte} DTE` : `${dte} DTE (modello)`} c={T.blue} />
-          <Stat k={`STAGIONALITÀ ${MONTHS_IT[NOW_MONTH].toUpperCase()}`} v={`${seas.monthlyMean[NOW_MONTH] > 0 ? "+" : ""}${seas.monthlyMean[NOW_MONTH].toFixed(1)}%`} c={seas.monthlyMean[NOW_MONTH] > 0 ? T.green : T.red} />
-          <Stat k="FONTE STAG." v={seas.src || "stima"} c={seasonal[ticker] ? T.green : T.dim} />
-          <Stat k="IV RANK" v={ivRank ? (ivRank.rank != null ? `${ivRank.rank}` : `raccolta ${ivRank.collecting}g`) : "—"}
+          <Stat k="PRICE NOW (CBOE)" v={spot ? `$${spot.toFixed(2)}` : "—"} />
+          <Stat k="EXPIRY" v={expKey ? `${expKey} · ${dte} DTE` : `${dte} DTE (model)`} c={T.blue} />
+          <Stat k={`SEASONALITY ${MONTHS[NOW_MONTH].toUpperCase()}`} v={`${seas.monthlyMean[NOW_MONTH] > 0 ? "+" : ""}${seas.monthlyMean[NOW_MONTH].toFixed(1)}%`} c={seas.monthlyMean[NOW_MONTH] > 0 ? T.green : T.red} />
+          <Stat k="SEASONAL SOURCE" v={seas.src || "estimate"} c={seasonal[ticker] ? T.green : T.dim} />
+          <Stat k="IV RANK" v={ivRank ? (ivRank.rank != null ? `${ivRank.rank}` : `${ivRank.collecting}d collected`) : "—"}
             c={ivRank?.rank != null ? (ivRank.rank >= 60 ? T.red : ivRank.rank <= 40 ? T.green : T.mut) : T.dim}
-            tip="Dove si trova la volatilità implicita di oggi rispetto al suo storico (0=minimi, 100=massimi). Alto (>60) → conviene VENDERE premio (condor, credit spread). Basso (<40) → conviene COMPRARE opzioni. Lo storico si costruisce con un refresh al giorno." />
+            tip="Where today's option prices sit against their own past year (0 = cheapest ever, 100 = dearest). High means selling premium pays better; low means buying options is good value. The history builds up with one refresh a day." />
         </div>
 
         {msg && <div style={{ ...mono, fontSize: 11.5, color: T.amber, border: `1px solid ${T.amber}44`, background: `${T.amber}10`, borderRadius: 6, padding: "7px 10px", marginTop: 10 }}>{msg}</div>}
@@ -1213,7 +1315,7 @@ export default function OptionsStrategyLab() {
         {posAlerts.length > 0 && (
           <div style={{ marginTop: 12, padding: "10px 12px", background: T.panel, border: `1px solid ${nAttention ? T.red : T.line}55`, borderRadius: 8 }}>
             <div style={{ ...mono, fontSize: 10, letterSpacing: "0.15em", color: nAttention ? T.red : T.amber, display: "flex", alignItems: "center", gap: 6 }}>
-              <Bell size={11} /> MORNING CHECK · {nAttention ? `${nAttention} POSIZION${nAttention === 1 ? "E" : "I"} RICHIEDE ATTENZIONE` : "TUTTO IN LINEA COL PIANO"}
+              <Bell size={11} /> TODAY · {nAttention ? `${nAttention} POSITION${nAttention === 1 ? "" : "S"} NEED A DECISION` : "EVERYTHING IS ON PLAN"}
             </div>
             <div style={{ display: "grid", gap: 5, marginTop: 8 }}>
               {posAlerts.map(({ p, pnl, dteLeft, level, label }) => {
@@ -1238,214 +1340,23 @@ export default function OptionsStrategyLab() {
             <button key={id} onClick={() => setTab(id)}
               style={{
                 ...mono, fontSize: 11, padding: "8px 10px", borderRadius: 6, whiteSpace: "nowrap", cursor: "pointer",
-                background: tab === id ? T.amber : "transparent", color: tab === id ? "#14181d" : T.mut,
+                background: tab === id ? T.amber : "transparent", color: tab === id ? T.onAccent : T.mut,
                 border: `1px solid ${tab === id ? T.amber : T.line}`, display: "inline-flex", gap: 5, alignItems: "center",
               }}>
               <I size={12} /> {label}{id === "paper" && nAttention > 0 && (
-                <span style={{ ...mono, fontSize: 9, background: T.red, color: "#14181d", borderRadius: 8, padding: "0 5px", fontWeight: 800 }}>{nAttention}</span>
+                <span style={{ ...mono, fontSize: 9, background: T.red, color: T.onAccent, borderRadius: 8, padding: "0 5px", fontWeight: 800 }}>{nAttention}</span>
               )}
             </button>
           ))}
         </div>
 
-        {/* ============ OGGI (HOME) — dietro flag SHOW_OGGI ============ */}
-        {SHOW_OGGI && tab === "oggi" && (
-          <div style={{ marginTop: 12 }}>
-            <Panel>
-              <Lbl>OGGI · {new Date().toLocaleDateString("it-IT", { weekday: "long", day: "numeric", month: "long" }).toUpperCase()}</Lbl>
-              <div style={{ fontSize: 14, color: T.ink, fontWeight: 700, marginTop: 8 }}>
-                {store.positions.length === 0
-                  ? "Nessuna posizione aperta: oggi si osserva o si cerca un'opportunità."
-                  : nAttention > 0
-                    ? `${nAttention} posizion${nAttention === 1 ? "e richiede" : "i richiedono"} la tua attenzione — partiamo da lì.`
-                    : "Le tue posizioni sono in linea col piano. Nessuna azione urgente."}
-              </div>
-              {alSync.orders.length > 0 && (
-                <div style={{ marginTop: 10, padding: "9px 11px", background: `${T.amber}0d`, border: `1px solid ${T.amber}55`, borderRadius: 7 }}>
-                  <div style={{ ...mono, fontSize: 10, color: T.amber, fontWeight: 700 }}>⏳ ORDINI IN ATTESA DI ESECUZIONE SUL CONTO ({alSync.orders.length})</div>
-                  {alSync.orders.map((o) => {
-                    const ageH = ((Date.now() - new Date(o.submitted_at)) / 36e5).toFixed(1);
-                    return (
-                      <div key={o.id} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 6 }}>
-                        <span style={{ ...mono, fontSize: 11.5, color: T.ink, fontWeight: 700 }}>{o.order_class === "mleg" ? `MULTILEG ×${o.qty} (${(o.legs || []).length} gambe)` : `${o.symbol} ${o.side} ${o.qty}`}</span>
-                        <span style={{ ...mono, fontSize: 10.5, color: T.mut }}>{o.type}{o.limit_price ? ` @ $${o.limit_price}` : ""} · {o.time_in_force} · in attesa da {ageH}h</span>
-                        <Btn small ghost color={T.red} onClick={async () => { try { await alpacaGet(`/v2/orders/${o.id}`).catch(() => null); await fetch(`/api/alpaca?path=${encodeURIComponent("/v2/orders/" + o.id)}`, { method: "DELETE" }); setMsg("Ordine cancellato ✓"); setAlSync((z) => ({ ...z, orders: z.orders.filter((x) => x.id !== o.id) })); } catch (e) { setMsg(String(e.message)); } }}>Cancella</Btn>
-                      </div>
-                    );
-                  })}
-                  <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 5 }}>Appena l'ordine viene eseguito, la posizione entra da sola sotto il Guardian (controllo ogni 60s).</div>
-                </div>
-              )}
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(430px, 1fr))", gap: 8, marginTop: 10 }}>
-                {posAlerts.map(({ p, pnl, dteLeft, level, label, live, spotNow }) => {
-                  const c2 = level === "action" ? T.red : level === "watch" ? T.amber : T.green;
-                  const pct = p.maxProfit > 0 && pnl != null ? Math.max(0, Math.min(100, (pnl / p.maxProfit) * 100)) : null;
-                  const curve = (() => {
-                    const ks = p.legs.map((l) => l.strike);
-                    const lo3 = Math.min(...ks, spotNow || 1e9) * 0.85, hi3 = Math.max(...ks, spotNow || 0) * 1.15;
-                    const pts = [];
-                    for (let i = 0; i <= 60; i++) { const sx = lo3 + (i / 60) * (hi3 - lo3); pts.push({ s: sx, exp: (payoffExp(p.legs, sx) - p.entryNet) * 100 }); }
-                    return pts;
-                  })();
-                  return (
-                    <div key={p.id} style={{ padding: "10px 12px", background: T.bg, border: `1px solid ${c2}44`, borderRadius: 8 }}>
-                      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                        <span style={{ width: 8, height: 8, borderRadius: 4, background: c2 }} />
-                        <span style={{ ...mono, fontSize: 12.5, color: T.ink, fontWeight: 700 }}>{p.ticker} {p.name}</span>
-                        {live && <span style={{ ...mono, fontSize: 8.5, color: T.violet, border: `1px solid ${T.violet}55`, borderRadius: 4, padding: "1px 5px" }}>P&L DAL CONTO</span>}
-                      </div>
-                      <div style={{ display: "flex", gap: 14, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
-                        <PayoffThumb curve={curve} height={54} />
-                        <div style={{ flex: 1, minWidth: 150 }}>
-                          <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
-                            <Stat k="P&L ORA" v={pnl != null ? fmt$(pnl) : "…"} c={pnl >= 0 ? T.green : T.red} />
-                            <Stat k="PREZZO ORA" v={spotNow != null ? `$${spotNow.toFixed(2)}` : "…"} />
-                            <Stat k="ENTRY" v={p.entrySpot != null ? `$${(+p.entrySpot).toFixed(2)}` : "—"} c={T.amber} />
-                            <Stat k="DTE" v={dteLeft} c={dteLeft <= RULES.exitDTE ? T.red : T.mut} />
-                          </div>
-                          {pct != null && (
-                            <div style={{ marginTop: 6 }}>
-                              <div style={{ position: "relative", height: 7, background: T.line, borderRadius: 4 }}>
-                                <div style={{ position: "absolute", left: `${RULES.takeProfitPct * 100}%`, width: 1, top: -2, bottom: -2, background: T.amber }} title={takeProfitLabel()} />
-                                <div style={{ width: `${pct}%`, height: 7, borderRadius: 4, background: pnl >= 0 ? `${T.green}bb` : `${T.red}bb` }} />
-                              </div>
-                              <div style={{ ...mono, fontSize: 9.5, color: T.dim, marginTop: 2 }}>{pct.toFixed(0)}% del max profit · linea ambra = {takeProfitLabel()}</div>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                      <div style={{ fontSize: 11.5, color: T.body, marginTop: 6 }}>{label}</div>
-                      <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
-                        <Btn small color={c2} onClick={() => setTab("paper")}>Guardian completo →</Btn>
-                        <Btn small ghost color={T.blue} onClick={() => { setTicker(p.ticker); if (!chains[p.ticker]) refreshChain(p.ticker); setExpKey(p.expKey || null); setLegs(p.legs.map((l) => ({ ...l }))); setStratName(p.name + " (monitor)"); setTab("build"); }}>Monitor grafico →</Btn>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-              <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
-                {store.positions.length === 0 && <Btn onClick={() => setTab("wizard")}><Compass size={13} /> Trova il mio trade</Btn>}
-                {scan[0] && (
-                  <Btn ghost color={T.blue} onClick={() => { setSentiment(scan[0].sugg); switchTicker(scan[0].tk); setTab("optimize"); }}>
-                    Stagionalità più forte: {scan[0].tk} ({scan[0].seasonalScore > 0 ? "+" : ""}{scan[0].seasonalScore.toFixed(1)}%/m) →
-                  </Btn>
-                )}
-                <Btn ghost onClick={() => setTab("news")}>News taggate →</Btn>
-              </div>
-            </Panel>
-
-            <Panel style={{ marginTop: 10 }}>
-              <Lbl>IL TUO PERCORSO · LIVELLO {journey.level}/5 {journey.score != null ? `· AWARENESS ${journey.score}/100` : ""}</Lbl>
-              <div style={{ display: "flex", gap: 3, marginTop: 8 }}>
-                {["Osservatore", "Primo trade", "Gestore", "Stratega", "Autopilota"].map((n, i) => (
-                  <div key={n} style={{ flex: 1, textAlign: "center" }}>
-                    <div style={{ height: 6, borderRadius: 3, background: i < journey.level ? T.amber : T.line }} />
-                    <div style={{ ...mono, fontSize: 8.5, color: i < journey.level ? T.amber : T.dim, marginTop: 3 }}>{n}</div>
-                  </div>
-                ))}
-              </div>
-              <div style={{ fontSize: 12.5, color: T.body, marginTop: 8 }}>→ {journey.next}</div>
-              <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6 }}>Questa piattaforma ti accompagna al profitto con regole, non con promesse: {ruleBadge()} · {perTradeCapLabel()}.</div>
-            </Panel>
-          </div>
-        )}
-
-        {/* ============ WIZARD ============ */}
-        {tab === "wizard" && (
-          <div style={{ marginTop: 12 }}>
-            <Panel>
-              <Lbl>TROVA IL MIO TRADE · 3 DOMANDE, ZERO GERGO · SOLO PAPER (DENARO FINTO)</Lbl>
-              <div style={{ marginTop: 12 }}>
-                <div style={{ fontSize: 13.5, color: T.ink, fontWeight: 700 }}>1 · Quanto sei disposto a rischiare al massimo su questa operazione?</div>
-                <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 2 }}>È il massimo che puoi perdere, mai un centesimo di più. Il tuo limite per trade: {money(limits.perTradeLimit)}.</div>
-                {limits.pills.map((pl) => (
-                  <div key={pl.id} style={{ ...mono, fontSize: 10.5, color: T.amber, marginTop: 6, padding: "7px 9px", border: `1px solid ${T.amber}44`, borderRadius: 6 }}>{pl.text}</div>
-                ))}
-                <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
-                  {[Math.round(limits.perTradeLimit / 5), Math.round(limits.perTradeLimit / 2), Math.round(limits.perTradeLimit)].map((v) => (
-                    <Btn key={v} small ghost={wiz.risk !== v} onClick={() => setWiz({ ...wiz, risk: v })}>${v}{v === Math.round(limits.perTradeLimit) ? ` (${perTradeCapLabel()})` : ""}</Btn>
-                  ))}
-                  <Inp type="number" min={50} step={50} value={wiz.risk} onChange={(e) => setWiz({ ...wiz, risk: Math.max(50, +e.target.value) })} style={{ width: 90 }} />
-                </div>
-              </div>
-              <div style={{ marginTop: 14 }}>
-                <div style={{ fontSize: 13.5, color: T.ink, fontWeight: 700 }}>2 · Quanto tempo vuoi dare all'idea?</div>
-                <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
-                  {[[21, "2-4 settimane"], [45, "1-2 mesi (consigliato)"], [75, "2-3 mesi"]].map(([v, l]) => (
-                    <Btn key={v} small ghost={wiz.horizon !== v} onClick={() => setWiz({ ...wiz, horizon: v })}>{l}</Btn>
-                  ))}
-                </div>
-              </div>
-              <div style={{ marginTop: 16 }}>
-                <Btn onClick={runWizard} disabled={wiz.busy}><Compass size={13} /> {wiz.busy ? "Cerco la migliore opportunità…" : "Trova il mio trade"}</Btn>
-              </div>
-              {wiz.err && <div style={{ ...mono, fontSize: 11.5, color: T.red, marginTop: 10 }}>{wiz.err}</div>}
-            </Panel>
-
-            <Panel style={{ marginTop: 10 }}>
-              <Lbl>IL TUO PERCORSO · LIVELLO {journey.level}/5 {journey.score != null ? `· AWARENESS ${journey.score}/100` : ""}</Lbl>
-              <div style={{ display: "flex", gap: 3, marginTop: 8 }}>
-                {["Osservatore", "Primo trade", "Gestore", "Stratega", "Autopilota"].map((n, i) => (
-                  <div key={n} style={{ flex: 1, textAlign: "center" }}>
-                    <div style={{ height: 6, borderRadius: 3, background: i < journey.level ? T.amber : T.line }} />
-                    <div style={{ ...mono, fontSize: 8.5, color: i < journey.level ? T.amber : T.dim, marginTop: 3 }}>{n}</div>
-                  </div>
-                ))}
-              </div>
-              <div style={{ fontSize: 12.5, color: T.body, marginTop: 8 }}>→ {journey.next}</div>
-              {journey.score != null && (
-                <div style={{ display: "flex", gap: 14, marginTop: 8, flexWrap: "wrap" }}>
-                  <Stat k="DISCIPLINA (uscite a regola)" v={journey.disciplina != null ? `${(journey.disciplina * 100).toFixed(0)}%` : "—"} c={journey.disciplina >= 0.8 ? T.green : T.amber} />
-                  <Stat k={`COERENZA (rischio ≤${pctText(RULES.bestPracticePerTradePct)})`} v={journey.coerenza != null ? `${(journey.coerenza * 100).toFixed(0)}%` : "—"} />
-                  <Stat k="PAZIENZA (no overtrading)" v={journey.pazienza != null ? `${(journey.pazienza * 100).toFixed(0)}%` : "—"} />
-                  <Stat k="TRADE CHIUSI" v={journey.closed} />
-                </div>
-              )}
-              <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6 }}>Si sale di livello con i comportamenti, non col tempo: disciplina nelle uscite, rispetto del rischio, niente overtrading.</div>
-            </Panel>
-
-            {wiz.result && (
-              <Panel style={{ marginTop: 10, border: `1px solid ${T.green}55` }}>
-                <Lbl>DUE STRADE, NUMERI VERI · {wiz.result.tk} · SCADENZA {wiz.result.expKey}</Lbl>
-                <div style={{ fontSize: 12.5, color: T.body, marginTop: 8 }}>{wiz.result.recoTxt}</div>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 10, marginTop: 10 }}>
-                  {wiz.result.props.map((pp) => {
-                    const isReco = wiz.result.reco === pp.kind;
-                    const col = pp.kind === "safe" ? T.green : T.violet;
-                    return (
-                      <div key={pp.kind} style={{ padding: "12px 14px", background: T.bg, border: `1px solid ${col}${isReco ? "" : "44"}`, borderRadius: 8 }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
-                          <div style={{ fontWeight: 800, color: col, fontSize: 13 }}>{pp.kind === "safe" ? "🛡 PRUDENTE" : "🚀 AMBIZIOSA"}{isReco && <span style={{ ...mono, fontSize: 9, color: T.amber, marginLeft: 8 }}>★ consigliata ora</span>}</div>
-                        </div>
-                        <div style={{ fontSize: 12.5, color: T.ink, fontWeight: 700, marginTop: 6 }}>{pp.name} ×{pp.n}</div>
-                        <div style={{ fontSize: 12.5, color: T.body, marginTop: 4 }}>
-                          {pp.winTxt}; rischi al massimo <b style={{ color: T.red }}>{fmt$(pp.totRisk)}</b>, guadagni fino a <b style={{ color: T.green }}>{fmt$(pp.totProfit)}</b>.
-                        </div>
-                        <div style={{ display: "flex", gap: 12, marginTop: 8, flexWrap: "wrap" }}>
-                          <Stat k="CHANCE" v={`${(pp.pop * 100).toFixed(0)}%`} c={col} />
-                          <Stat k="EV/$100" v={`${pp.ev100 >= 0 ? "+" : ""}$${pp.ev100.toFixed(0)}`} c={pp.ev100 >= 0 ? T.green : T.red} />
-                          <Stat k="RISCHIO" v={fmt$(pp.totRisk)} c={T.red} />
-                        </div>
-                        <div style={{ marginTop: 10 }}>
-                          <Btn color={col} onClick={() => { setTicker(pp.tk); setExpKey(pp.expKey); setLegs(pp.legs.map((l) => ({ ...l }))); setStratName(`${pp.name} (wizard)`); setMc(null); setBt(null); setTab("build"); }}>Vedi e conferma nel Builder →</Btn>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-                <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 10 }}>Nel Builder: grafico completo, il risk gate ({perTradeCapLabel()}), livelli d'uscita automatici e apertura paper (denaro finto). La scelta resta tua: la piattaforma consiglia, non decide.</div>
-              </Panel>
-            )}
-          </div>
-        )}
-
-        {/* ============ SCANNER ============ */}        {/* ============ SCANNER ============ */}
+        {/* ============ SCANNER ============ */}
         {tab === "scan" && (
           <Panel style={{ marginTop: 12 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-              <Lbl>BEST OPPORTUNITIES · SEGNALE A 4 FATTORI · {MONTHS_IT[NOW_MONTH].toUpperCase()}</Lbl>
-              <Btn small ghost onClick={async () => { setBusy("all"); for (const tk of Object.keys(UNDERLYINGS)) await refreshChain(tk, true); setBusy(null); setMsg("Tutte le chain aggiornate ✓"); }}>
-                <RefreshCw size={11} /> Aggiorna tutte
+              <Lbl>BEST OPPORTUNITIES · 4-FACTOR SIGNAL · {MONTHS[NOW_MONTH].toUpperCase()}</Lbl>
+              <Btn small ghost onClick={async () => { setBusy("all"); for (const tk of Object.keys(UNDERLYINGS)) await refreshChain(tk, true); setBusy(null); setMsg("All markets refreshed."); }}>
+                <RefreshCw size={11} /> Refresh all
               </Btn>
             </div>
             <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
@@ -1457,7 +1368,7 @@ export default function OptionsStrategyLab() {
                     <div style={{ flex: 1, minWidth: 140 }}>
                       <div style={{ fontWeight: 700, color: T.ink, fontSize: 14 }}>{r.tk} <span style={{ color: T.dim, fontWeight: 400, fontSize: 11 }}>{r.name}</span></div>
                       <div style={{ ...mono, fontSize: 10.5, color: T.mut }}>
-                        stag. {r.seasonalScore > 0 ? "+" : ""}{r.seasonalScore.toFixed(1)}%/m {r.real ? "(reale 10y)" : "(stima)"} · {r.spot ? `$${r.spot.toFixed(2)}` : "chain da caricare"}{ta[r.tk] ? ` · trend ${ta[r.tk].trend > 0 ? "↑" : ta[r.tk].trend < 0 ? "↓" : "→"} RSI ${ta[r.tk].rsi.toFixed(0)}` : ""}
+                        seasonal {r.seasonalScore > 0 ? "+" : ""}{r.seasonalScore.toFixed(1)}%/mo {r.real ? "(10y history)" : "(estimate)"} · {r.spot ? `$${r.spot.toFixed(2)}` : "prices not loaded"}{ta[r.tk] ? ` · trend ${ta[r.tk].trend > 0 ? "↑" : ta[r.tk].trend < 0 ? "↓" : "→"} RSI ${ta[r.tk].rsi.toFixed(0)}` : ""}
                       </div>
                     </div>
                     {r.fused && (() => {
@@ -1469,13 +1380,13 @@ export default function OptionsStrategyLab() {
                       );
                     })()}
                     <span style={{ ...mono, fontSize: 10, color: sObj.color, border: `1px solid ${sObj.color}66`, padding: "3px 8px", borderRadius: 5 }}>{sObj.icon} {sObj.label.toUpperCase()}</span>
-                    <Btn small ghost onClick={() => { switchTicker(r.tk); setSentiment(r.sugg); setTab("optimize"); }}>→ Ottimizza</Btn>
+                    <Btn small ghost onClick={() => { switchTicker(r.tk); setSentiment(r.sugg); setTab("optimize"); }}>→ Build options</Btn>
                   </div>
                 );
               })}
             </div>
             <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 10 }}>
-The order weighs the 4-factor signal (seasonality, price trend, weather, news): CONFLICT tickers stay last regardless. Tap or hover the badge for the full narrative. Carica la Alpha Vantage key (tab Paper → Integrazioni) e premi "Stagionalità reale" nel Backtest per sostituire le stime con 10 anni di dati veri per ticker.
+The order weighs the 4-factor signal (seasonality, price trend, weather, news): CONFLICT tickers stay last regardless. Tap the badge for the full narrative. In the Backtest tab, "Real 10y seasonality" replaces the estimates with ten years of actual data for that market.
             </div>
           </Panel>
         )}
@@ -1484,14 +1395,14 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
         {tab === "optimize" && spot && (
           <div style={{ marginTop: 12 }}>
             <Panel>
-              <Lbl>1 · SENTIMENT MACRO</Lbl>
+              <Lbl>1 · WHICH WAY DO YOU THINK IT GOES?</Lbl>
               <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
                 {SENTIMENTS.map((s) => (
                   <button key={s.id} onClick={() => setSentiment(s.id)}
                     style={{
                       ...mono, fontSize: 11, padding: "10px 12px", borderRadius: 24, cursor: "pointer", flex: "1 1 auto",
                       background: sentiment === s.id ? s.color : "transparent",
-                      color: sentiment === s.id ? "#14181d" : s.color,
+                      color: sentiment === s.id ? T.onAccent : s.color,
                       border: `1.5px solid ${s.color}`, fontWeight: 700,
                     }}>
                     {s.icon} {s.label}
@@ -1499,21 +1410,21 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                 ))}
               </div>
               <div style={{ display: "flex", gap: 16, marginTop: 12, alignItems: "center", flexWrap: "wrap" }}>
-                <Stat k="TARGET IMPLICITO" v={`$${(spot * (1 + SENT.tgt)).toFixed(2)} (${SENT.tgt >= 0 ? "+" : ""}${(SENT.tgt * 100).toFixed(0)}%)`} c={T.blue} />
+                <Stat k="IMPLIED TARGET" v={`$${(spot * (1 + SENT.tgt)).toFixed(2)} (${SENT.tgt >= 0 ? "+" : ""}${(SENT.tgt * 100).toFixed(0)}%)`} c={T.blue} />
                 <div>
-                  <div style={{ ...mono, fontSize: 9.5, color: T.dim }}>MODALITÀ OPTIMIZER</div>
+                  <div style={{ ...mono, fontSize: 9.5, color: T.dim }}>SIZE BY</div>
                   <div style={{ display: "flex", gap: 4 }}>
-                    <Btn small ghost={optMode !== "budget"} onClick={() => setOptMode("budget")}>Budget premio</Btn>
-                    <Btn small ghost={optMode !== "target"} onClick={() => setOptMode("target")}>Obiettivo ricavo</Btn>
+                    <Btn small ghost={optMode !== "budget"} onClick={() => setOptMode("budget")}>What I can spend</Btn>
+                    <Btn small ghost={optMode !== "target"} onClick={() => setOptMode("target")}>What I want to make</Btn>
                   </div>
                 </div>
                 <div>
-                  <div style={{ ...mono, fontSize: 9.5, color: T.dim }}>{optMode === "budget" ? "BUDGET MAX A RISCHIO ($)" : "RICAVO OBIETTIVO ($)"}</div>
+                  <div style={{ ...mono, fontSize: 9.5, color: T.dim }}>{optMode === "budget" ? "MOST I WILL RISK ($)" : "PROFIT I AM AIMING FOR ($)"}</div>
                   <Inp type="number" min={50} step={50} value={optAmt} onChange={(e) => setOptAmt(Math.max(0, +e.target.value))} style={{ width: 100 }} />
                 </div>
                 {chain && (
                   <div>
-                    <div style={{ ...mono, fontSize: 9.5, color: T.dim }}>SCADENZA REALE</div>
+                    <div style={{ ...mono, fontSize: 9.5, color: T.dim }}>EXPIRY</div>
                     <select value={expKey || ""} onChange={(e) => setExpKey(e.target.value)}
                       style={{ ...mono, background: T.bg, color: T.ink, border: `1px solid ${T.line}`, borderRadius: 5, padding: "5px 8px", fontSize: 12 }}>
                       {chain.expirations.map((e) => (
@@ -1522,7 +1433,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                     </select>
                     {chain.expirations.length <= 4 && (
                       <div style={{ ...mono, fontSize: 9, color: T.dim, marginTop: 3, maxWidth: 220 }}>
-                        Queste sono TUTTE le scadenze quotate da CBOE per {ticker} (ETF con sole mensili): non è un limite dell'app.
+                        These are every expiry CBOE lists for {ticker} — this ETF only has monthly ones, it is not a limit of the app.
                       </div>
                     )}
                   </div>
@@ -1539,7 +1450,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
             />
 
             <Panel style={{ marginTop: 10 }}>
-              <Lbl>2 · STRATEGIE {SENT.label.toUpperCase()} — {ticker} · PREMI DA CHAIN REALE</Lbl>
+              <Lbl>2 · {SENT.label.toUpperCase()} STRATEGIES — {ticker} · PRICED FROM THE LIVE CHAIN</Lbl>
               <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
                 {buildPresets(sentiment, spot, U.step, expStrikes).map((p) => {
                   const a = analyze(p.legs, spot, dte, iv, q);
@@ -1552,17 +1463,17 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                         <div style={{ fontWeight: 700, color: T.ink, fontSize: 13.5 }}>
                           {p.name}{" "}
                           <span style={{ ...mono, fontSize: 9, color: a.realCount === p.legs.length ? T.green : T.amber }}>
-                            {a.realCount === p.legs.length ? "● quote reali" : `◐ ${a.realCount}/${p.legs.length} reali`}
+                            {a.realCount === p.legs.length ? "● live prices" : `◐ ${a.realCount}/${p.legs.length} live`}
                           </span>
                         </div>
-                        <Btn small onClick={() => applyPreset(p, a)}>Apri in Builder →</Btn>
+                        <Btn small onClick={() => applyPreset(p, a)}>Open in Builder →</Btn>
                       </div>
                       <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 4 }}>
                         {p.legs.map((l) => `${l.side > 0 ? "+" : "−"}${l.qty} ${l.strike}${l.type === "call" ? "C" : "P"}`).join(" / ")}
                       </div>
                       <div style={{ marginTop: 6 }}><PayoffThumb curve={a.curve} /></div>
                       <div style={{ display: "flex", gap: 14, marginTop: 8, flexWrap: "wrap" }}>
-                        <Stat k={a.entry >= 0 ? "DEBITO" : "CREDITO"} v={fmt$(Math.abs(a.entry) * 100)} />
+                        <Stat k={a.entry >= 0 ? "YOU PAY" : "YOU RECEIVE"} v={fmt$(Math.abs(a.entry) * 100)} />
                         <Stat k="MAX PROFIT" v={fmt$(a.maxProfit)} c={T.green} />
                         <Stat k="MAX LOSS" v={fmt$(a.maxLoss)} c={T.red} />
                         <Stat k="R/R" v={rr ? rr.toFixed(2) : "—"} c={T.amber} />
@@ -1571,17 +1482,17 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                       </div>
                       {(() => {
                         const sc = scaleStrategy(a, optMode, optAmt);
-                        if (!sc) return <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6 }}>Scaling non applicabile (profitto illimitato o rischio nullo): valuta a 1 contratto.</div>;
-                        if (!sc.ok) return <div style={{ ...mono, fontSize: 10.5, color: T.red, marginTop: 6 }}>✗ Budget insufficiente: 1 combo {sc.isCredit ? `richiede ${fmt$(sc.unit)} di capitale a rischio` : `costa ${fmt$(sc.unit)} di premio (chain reale)`}.</div>;
+                        if (!sc) return <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6 }}>Cannot scale this one (unlimited profit or no defined risk): judge it at a single contract.</div>;
+                        if (!sc.ok) return <div style={{ ...mono, fontSize: 10.5, color: T.red, marginTop: 6 }}>✗ Not enough budget: one of these {sc.isCredit ? `ties up ${fmt$(sc.unit)} of risk` : `costs ${fmt$(sc.unit)} to buy`}.</div>;
                         return (
                           <div style={{ display: "flex", gap: 14, marginTop: 8, flexWrap: "wrap", padding: "6px 8px", background: `${T.amber}0d`, borderRadius: 5 }}>
-                            <Stat k="COMBO" v={`×${sc.n}`} c={T.amber} />
-                            <Stat k={sc.isCredit ? "CREDITO INCASSATO" : "PREMIO DA PAGARE"} v={fmt$(sc.totPrem)} c={sc.isCredit ? T.green : T.ink} />
-                            <Stat k="CAPITALE A RISCHIO" v={fmt$(sc.totRisk)} c={T.red} />
-                            <Stat k="MAX RICAVO TOT" v={fmt$(sc.totProfit)} c={T.green} />
-                            {pop != null && <Stat k="RICAVO ATTESO × CHANCE" v={fmt$(sc.totProfit * pop)} c={T.blue} />}
-                            <Stat k={optMode === "target" ? "COPRE OBIETTIVO" : "USO BUDGET"} v={optMode === "target" ? (sc.totProfit >= optAmt ? "✓ sì" : "✗ no") : `${((sc.n * sc.unit / Math.max(1, optAmt)) * 100).toFixed(0)}%`} c={T.blue} />
-                            <div style={{ ...mono, fontSize: 9, color: T.dim, width: "100%" }}>Totali per ×{sc.n} combo · il Builder mostra sempre 1 combo: per confrontare, dividi per {sc.n}.</div>
+                            <Stat k="HOW MANY" v={`×${sc.n}`} c={T.amber} />
+                            <Stat k={sc.isCredit ? "YOU RECEIVE" : "YOU PAY"} v={fmt$(sc.totPrem)} c={sc.isCredit ? T.green : T.ink} />
+                            <Stat k="MOST YOU CAN LOSE" v={fmt$(sc.totRisk)} c={T.red} />
+                            <Stat k="MOST YOU CAN MAKE" v={fmt$(sc.totProfit)} c={T.green} />
+                            {pop != null && <Stat k="PROFIT × CHANCE" v={fmt$(sc.totProfit * pop)} c={T.blue} />}
+                            <Stat k={optMode === "target" ? "HITS THE TARGET" : "BUDGET USED"} v={optMode === "target" ? (sc.totProfit >= optAmt ? "✓ yes" : "✗ no") : `${((sc.n * sc.unit / Math.max(1, optAmt)) * 100).toFixed(0)}%`} c={T.blue} />
+                            <div style={{ ...mono, fontSize: 9, color: T.dim, width: "100%" }}>Totals for ×{sc.n} · the Builder always shows one, so divide by {sc.n} to compare.</div>
                           </div>
                         );
                       })()}
@@ -1591,17 +1502,17 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
               </div>
               <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px dashed ${T.line}` }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-                  <Lbl>3 · CONFRONTO MULTI-COMMODITY · USA IL PANNELLO SENTIMENT QUI SOPRA</Lbl>
-                  <Btn small onClick={runMultiScan} disabled={multi.busy}><Radar size={11} /> {multi.busy ? "Scansiono…" : "Scansiona selezionati"}</Btn>
+                  <Lbl>3 · COMPARE MARKETS · USES THE DIRECTION YOU PICKED ABOVE</Lbl>
+                  <Btn small onClick={runMultiScan} disabled={multi.busy}><Radar size={11} /> {multi.busy ? "Searching…" : "Search the selected markets"}</Btn>
                 </div>
                 <div style={{ display: "flex", gap: 12, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
                   <div style={{ display: "flex", gap: 4 }}>
-                    <Btn small ghost={multi.senMode !== "auto"} onClick={() => setMulti((m) => ({ ...m, senMode: "auto", res: null }))}>Stagionalità per mercato</Btn>
-                    <Btn small ghost={multi.senMode !== "fixed"} onClick={() => setMulti((m) => ({ ...m, senMode: "fixed", res: null }))}>Sentiment scelto ({SENT.label}) su tutti</Btn>
+                    <Btn small ghost={multi.senMode !== "auto"} onClick={() => setMulti((m) => ({ ...m, senMode: "auto", res: null }))}>Season decides each market</Btn>
+                    <Btn small ghost={multi.senMode !== "fixed"} onClick={() => setMulti((m) => ({ ...m, senMode: "fixed", res: null }))}>My pick ({SENT.label}) everywhere</Btn>
                   </div>
-                  <span style={{ ...mono, fontSize: 10, color: T.dim }}>ORIZZONTE: ~{multi.dteT} DTE</span>
+                  <span style={{ ...mono, fontSize: 10, color: T.dim }}>HORIZON: ~{multi.dteT} DTE</span>
                   <input type="range" min={21} max={90} step={1} value={multi.dteT} onChange={(e) => setMulti((m) => ({ ...m, dteT: +e.target.value, res: null }))} style={{ width: 160, accentColor: T.amber }} />
-                  <span style={{ ...mono, fontSize: 9.5, color: T.dim }}>cambia orizzonte → rilancia la scansione</span>
+                  <span style={{ ...mono, fontSize: 9.5, color: T.dim }}>change the horizon, then search again</span>
                 </div>
                 <div style={{ display: "flex", gap: 5, marginTop: 8, flexWrap: "wrap" }}>
                   {Object.keys(UNDERLYINGS).map((tk) => (
@@ -1614,7 +1525,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                 {multi.err && <div style={{ ...mono, fontSize: 11, color: T.red, marginTop: 8 }}>{multi.err}</div>}
                 {multi.res && (
                   <div style={{ display: "grid", gap: 6, marginTop: 10 }}>
-                    {multi.res.length === 0 && <div style={{ ...mono, fontSize: 11.5, color: T.mut }}>Nessuna strategia entra nel budget sui mercati selezionati.</div>}
+                    {multi.res.length === 0 && <div style={{ ...mono, fontSize: 11.5, color: T.mut }}>Nothing fits your budget on the markets you picked.</div>}
                     {multi.res.some((r) => r.conflict) && (
                       <div style={{ ...mono, fontSize: 10, color: T.red }}>
                         Candidates marked CONFLICT sit at the bottom by construction: the four factors contradict each other on that underlying, and no expected value is worth a signal we cannot read.
@@ -1645,7 +1556,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   </div>
                 )}
               </div>
-              <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 8 }}>Budget = premio massimo da pagare (in USD, dai mid reali della chain CBOE); per i credit spread, dove il premio si incassa, il vincolo diventa il capitale a rischio. Chance = probabilità di profitto a scadenza (lognormale con IV reale della chain). Ricorda il limite per trade: {money(limits.perTradeLimit)} ({perTradeCapLabel()}).</div>
+              <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 8 }}>Budget is the most you will pay, taken from live CBOE prices. For trades where you receive money up front, the limit becomes the capital tied up instead. Chance is the probability of ending in profit at expiry. Your per-trade limit: {money(limits.perTradeLimit)} ({perTradeCapLabel()}).</div>
             </Panel>
           </div>
         )}
@@ -1658,15 +1569,15 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                 <input value={stratName} onChange={(e) => setStratName(e.target.value)}
                   style={{ ...mono, background: "transparent", border: "none", borderBottom: `1px dashed ${T.line}`, color: T.ink, fontSize: 15, fontWeight: 700, outline: "none", minWidth: 200 }} />
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  <Btn small ghost color={T.blue} onClick={saveStrategy}><Save size={12} /> Salva</Btn>
-                  <Btn small color={T.green} onClick={openPaper} disabled={!reasonOk}><Briefcase size={12} /> Paper interno</Btn>
+                  <Btn small ghost color={T.blue} onClick={saveStrategy}><Save size={12} /> Save</Btn>
+                  <Btn small color={T.green} onClick={openPaper} disabled={!reasonOk}><Briefcase size={12} /> Open on paper</Btn>
                   
                 </div>
               </div>
 
               {chain && (
                 <div style={{ marginTop: 10, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                  <span style={{ ...mono, fontSize: 10, color: T.dim }}>SCADENZA</span>
+                  <span style={{ ...mono, fontSize: 10, color: T.dim }}>EXPIRY</span>
                   <select value={expKey || ""} onChange={(e) => { setExpKey(e.target.value); setMc(null); setBt(null); }}
                     style={{ ...mono, background: T.bg, color: T.ink, border: `1px solid ${T.line}`, borderRadius: 5, padding: "5px 8px", fontSize: 12 }}>
                     {chain.expirations.map((e) => (
@@ -1674,7 +1585,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                     ))}
                   </select>
                   <span style={{ ...mono, fontSize: 10, color: A.realCount === legs.length ? T.green : T.amber }}>
-                    {A.realCount === legs.length ? "● tutti i premi da quote CBOE reali (mid bid/ask)" : `◐ ${A.realCount}/${legs.length} legs con quote reali — gli altri sono BS`}
+                    {A.realCount === legs.length ? "● every price is a live CBOE quote" : `◐ ${A.realCount}/${legs.length} legs priced live — the rest are modelled`}
                   </span>
                 </div>
               )}
@@ -1720,7 +1631,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   funzione che decide se l'ordine parte scrive anche queste righe. */}
               {guard && !guard.pass && (
                 <div style={{ marginTop: 10, padding: "9px 11px", background: `${T.red}12`, border: `1px solid ${T.red}66`, borderRadius: 7 }}>
-                  <div style={{ ...mono, fontSize: 11, color: T.red, fontWeight: 700 }}>⚠ RISK GATE: l'ordine non partirebbe</div>
+                  <div style={{ ...mono, fontSize: 11, color: T.red, fontWeight: 700 }}>⚠ RISK GATE: this order would not be sent</div>
                   <div style={{ display: "grid", gap: 4, marginTop: 4 }}>
                     {guard.violations.map((v) => (
                       <div key={v.code} style={{ fontSize: 12, color: T.body }}>{v.message}</div>
@@ -1730,7 +1641,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
               )}
               {guard && guard.pass && (
                 <div style={{ ...mono, fontSize: 10, color: T.green, marginTop: 8 }}>
-                  ✓ Dentro le regole: rischio {money(guard.limits.tradeRisk)} / max {money(guard.limits.perTrade)} · esposizione {money(guard.limits.totalAfter)} / {money(guard.limits.total)}
+                  ✓ Inside your rules: risking {money(guard.limits.tradeRisk)} of {money(guard.limits.perTrade)} allowed · total {money(guard.limits.totalAfter)} of {money(guard.limits.total)}
                 </div>
               )}
               {guard && guard.warnings.length > 0 && (
@@ -1768,14 +1679,14 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                         ${lp.px.toFixed(2)} {lp.real ? "●" : "◌"} <span style={{ color: T.dim }}>IV {(lp.iv * 100).toFixed(0)}%{lp.oi != null ? ` · OI ${lp.oi}` : ""}</span>
                       </span>
                       {(() => { const qq = q(l); const occ = qq?.occ || (expKey ? buildOcc(ticker, expKey, l.type, l.strike) : null); return occ ? (
-                        <button title="storico del contratto" onClick={() => setOptLeg({ occ, label: `${ticker} ${l.strike}${l.type === "call" ? "C" : "P"} ${expKey}`, quote: qq })}
+                        <button title="price history for this contract" onClick={() => setOptLeg({ occ, label: `${ticker} ${l.strike}${l.type === "call" ? "C" : "P"} ${expKey}`, quote: qq })}
                           style={{ background: "none", border: "none", color: T.violet, cursor: "pointer", ...mono, fontSize: 13 }}>📈</button>
                       ) : null; })()}
                       <button onClick={() => rmLeg(i)} style={{ background: "none", border: "none", color: T.dim, cursor: "pointer" }}><Trash2 size={14} /></button>
                     </div>
                   );
                 })}
-                <Btn small ghost onClick={addLeg}><Plus size={12} /> Aggiungi leg</Btn>
+                <Btn small ghost onClick={addLeg}><Plus size={12} /> Add a leg</Btn>
               </div>
               {optLeg && <OptionPanel occ={optLeg.occ} label={optLeg.label} quote={optLeg.quote} onClose={() => setOptLeg(null)} />}
 
@@ -1783,19 +1694,19 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
               {optRef && optRef.name === stratName && optRef.expKey === expKey && (() => {
                 const d = (A.entry - optRef.entry) * 100;
                 if (Math.abs(d) < 1) return (
-                  <div style={{ ...mono, fontSize: 10, color: T.green, marginTop: 10 }}>✓ Numeri identici all'Optimizer (stesse quote CBOE, 1 combo).</div>
+                  <div style={{ ...mono, fontSize: 10, color: T.green, marginTop: 10 }}>✓ Same numbers as the Optimize tab (same live quotes, one contract).</div>
                 );
                 return (
                   <div style={{ ...mono, fontSize: 10, color: T.amber, marginTop: 10 }}>
-                    ⚠ Dall'Optimizer il net è cambiato di {fmt$(Math.abs(d))} ({d > 0 ? "più caro" : "più conveniente"}): le quote CBOE si sono aggiornate tra i due tab (delayed ~15m). Il prezzo vero è questo del Builder.
+                    ⚠ The price moved {fmt$(Math.abs(d))} {d > 0 ? "against you" : "in your favour"} since the Optimize tab: the quotes refreshed in between. This one is the current price.
                   </div>
                 );
               })()}
               {/* Stats */}
               <div style={{ display: "flex", gap: 16, marginTop: 14, flexWrap: "wrap" }}>
-                <Stat k={A.entry >= 0 ? "NET DEBIT" : "NET CREDIT"} v={fmt$(Math.abs(A.entry) * 100)} tip="Quanto paghi (debit) o incassi (credit) per aprire la combinazione. Con quote reali è il mid tra bid e ask." />
-                <Stat k="MAX PROFIT" v={fmt$(A.maxProfit)} c={T.green} tip="Il massimo che puoi guadagnare a scadenza, nello scenario migliore." />
-                <Stat k="MAX LOSS" v={fmt$(A.maxLoss)} c={T.red} tip="Il massimo che puoi perdere: è definito in partenza, mai un dollaro di più." />
+                <Stat k={A.entry >= 0 ? "YOU PAY" : "YOU RECEIVE"} v={fmt$(Math.abs(A.entry) * 100)} tip="What it costs to open this trade, or what you are paid to open it. With live quotes this is the midpoint between the buy and sell price." />
+                <Stat k="MOST YOU CAN MAKE" v={fmt$(A.maxProfit)} c={T.green} tip="The best this trade can do at expiry. It cannot make more than this." />
+                <Stat k="MOST YOU CAN LOSE" v={fmt$(A.maxLoss)} c={T.red} tip="The worst this trade can do. It is fixed the moment you open it — never a dollar more." />
                 <Stat k="BREAKEVEN" v={A.breakevens.map((b) => b.toFixed(2)).join(" · ") || "—"} c={T.blue} />
                 <Stat k={takeProfitLabel()} v={fmt$(A.maxProfit * RULES.takeProfitPct)} c={T.green} tip={RULE_PILLS.takeProfit()} />
                 <Stat k={stopLossLabel()} v={fmt$(A.maxLoss * RULES.stopLossPct)} c={T.red} tip={RULE_PILLS.stopLoss()} />
@@ -1803,12 +1714,12 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
               <div style={{ display: "flex", gap: 16, marginTop: 10, flexWrap: "wrap" }}>
                 <Stat k="Δ DELTA" v={A.greeks.delta.toFixed(2)} />
                 <Stat k="Γ GAMMA" v={A.greeks.gamma.toFixed(3)} />
-                <Stat k="Θ THETA/g" v={fmt$(A.greeks.theta)} c={A.greeks.theta >= 0 ? T.green : T.red} tip="Quanto guadagni (+) o perdi (−) ogni giorno che passa, a parità di prezzo. Il tempo lavora per te se è positivo." />
-                <Stat k="V VEGA/1%" v={fmt$(A.greeks.vega)} c={T.violet} tip="Quanto cambia il valore se la volatilità implicita sale dell'1%. Positivo = ti aiuta l'agitazione del mercato." />
+                <Stat k="Θ PER DAY" v={fmt$(A.greeks.theta)} c={A.greeks.theta >= 0 ? T.green : T.red} tip="What you gain (+) or lose (−) for each day that passes, if the price stays put. Positive means time is on your side." />
+                <Stat k="V PER 1% VOL" v={fmt$(A.greeks.vega)} c={T.violet} tip="How much the value moves if the market gets 1% more jumpy. Positive means a nervous market helps you." />
               </div>
 
               <div style={{ marginTop: 14 }}>
-                <Lbl>VISTA UNIFICATA · PREZZO STORICO × CONO DI PROBABILITÀ × ZONE DELLA TUA STRATEGIA</Lbl>
+                <Lbl>PRICE HISTORY × WHERE IT COULD GO × WHERE YOU MAKE MONEY</Lbl>
                 <div style={{ marginTop: 8 }}>
                   <UnifiedView
                     ticker={ticker} dte={dte} spot={spot}
@@ -1827,19 +1738,19 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                 return (
                   <div style={{ marginTop: 10, padding: "10px 12px", background: `${cf.c}0d`, border: `1px solid ${cf.c}55`, borderRadius: 8 }}>
                     <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                      <span style={{ ...mono, fontSize: 12, fontWeight: 800, color: cf.c }}>CONFLUENZA: {cf.verdict}</span>
-                      <span style={{ ...mono, fontSize: 10.5, color: T.mut }}>stagionalità {seas.monthlyMean[NOW_MONTH] >= 0 ? "+" : ""}{seas.monthlyMean[NOW_MONTH].toFixed(1)}%/m · trend {t2.trendTxt} · RSI14 {t2.rsi.toFixed(0)}{t2.cross ? ` · ${t2.cross === "golden" ? "✚ golden cross recente" : "✖ death cross recente"}` : ""}</span>
+                      <span style={{ ...mono, fontSize: 12, fontWeight: 800, color: cf.c }}>AGREEMENT: {cf.verdict}</span>
+                      <span style={{ ...mono, fontSize: 10.5, color: T.mut }}>seasonality {seas.monthlyMean[NOW_MONTH] >= 0 ? "+" : ""}{seas.monthlyMean[NOW_MONTH].toFixed(1)}%/mo · trend {t2.trendTxt} · RSI14 {t2.rsi.toFixed(0)}{t2.cross ? ` · ${t2.cross === "golden" ? "✚ recent golden cross" : "✖ recent death cross"}` : ""}</span>
                     </div>
                     <div style={{ fontSize: 12.5, color: T.body, marginTop: 5 }}>{cf.advice}</div>
                     {cf.warn && <div style={{ fontSize: 12, color: T.amber, marginTop: 4 }}>{cf.warn}</div>}
-                    <div style={{ ...mono, fontSize: 9.5, color: T.dim, marginTop: 5 }}>Metodo: la tecnica è un filtro di conferma/timing sulla stagionalità (albero decisionale della tua skill), non un segnale autonomo.</div>
+                    <div style={{ ...mono, fontSize: 9.5, color: T.dim, marginTop: 5 }}>The price trend is used to confirm or time the seasonal read, never as a signal on its own.</div>
                   </div>
                 );
               })()}
 
               {/* Payoff classico: vista secondaria */}
               <div style={{ marginTop: 14 }}>
-              <Lbl>PAYOFF CLASSICO (P&L PER PREZZO A SCADENZA / OGGI / METÀ VITA)</Lbl>
+              <Lbl>PROFIT AND LOSS BY PRICE · AT EXPIRY, TODAY, AND HALFWAY</Lbl>
               <div style={{ height: 240, marginTop: 8 }}>
                 <ResponsiveContainer>
 
@@ -1852,9 +1763,9 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                     <ReferenceLine x={+spot.toFixed(2)} stroke={T.amber} strokeDasharray="4 3" label={{ value: "spot", fill: T.amber, fontSize: 10 }} />
                     {lv && lv.supports.map((s) => <ReferenceLine key={"s" + s} x={s} stroke={T.green} strokeDasharray="2 4" />)}
                     {lv && lv.resistances.map((s) => <ReferenceLine key={"r" + s} x={s} stroke={T.red} strokeDasharray="2 4" />)}
-                    <Line dataKey="now" name="oggi (T+0)" stroke={T.violet} dot={false} strokeWidth={1.5} strokeDasharray="2 3" />
-                    <Line dataKey="mid" name={`a T-${Math.round(dte / 2)}g`} stroke={T.blue} dot={false} strokeWidth={1.5} strokeDasharray="5 4" />
-                    <Line dataKey="exp" name="a scadenza" stroke={T.amber} dot={false} strokeWidth={2.2} />
+                    <Line dataKey="now" name="today" stroke={T.violet} dot={false} strokeWidth={1.5} strokeDasharray="2 3" />
+                    <Line dataKey="mid" name={`in ${Math.round(dte / 2)} days`} stroke={T.blue} dot={false} strokeWidth={1.5} strokeDasharray="5 4" />
+                    <Line dataKey="exp" name="at expiry" stroke={T.amber} dot={false} strokeWidth={2.2} />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
@@ -1874,7 +1785,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   gate={gate} dte={dte} maxLoss={A.maxLoss} maxProfit={A.maxProfit}
                 />
               )}
-              {!alpaca && <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 8 }}>Connetti Alpaca (Paper → Integrazioni) per sbloccare l'order ticket pro: limit/market, TIF, quantità, cancellazioni.</div>}
+              {!alpaca && <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 8 }}>Connect Alpaca in Positions → Integrations to unlock the full order ticket: limit or market, time in force, quantity and cancellations.</div>}
             </Panel>
           </div>
         )}
@@ -1882,15 +1793,15 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
         {/* ============ 3D ============ */}
         {tab === "3d" && (
           <Panel style={{ marginTop: 12 }}>
-            <Lbl>LIVELLI OPEN INTEREST REALI (CBOE) · DOVE SI ADDENSANO LE POSIZIONI DEL MERCATO</Lbl>
-            {!oiGrid && <div style={{ ...mono, fontSize: 12, color: T.mut, padding: 30, textAlign: "center" }}>Carica prima la chain con Refresh.</div>}
+            <Lbl>WHERE THE MARKET IS POSITIONED (CBOE OPEN INTEREST)</Lbl>
+            {!oiGrid && <div style={{ ...mono, fontSize: 12, color: T.mut, padding: 30, textAlign: "center" }}>Press Refresh at the top to load the prices first.</div>}
             {oiGrid && (
               <div style={{ height: 190, marginTop: 10 }}>
                 <ResponsiveContainer>
                   <BarChart data={oiGrid.strikes.map((k, j) => ({ k, put: -oiGrid.oiPutTot[j], call: oiGrid.oiCallTot[j] }))} margin={{ top: 4, right: 4, bottom: 0, left: 0 }} stackOffset="sign">
                     <XAxis dataKey="k" stroke={T.dim} tick={{ fontSize: 9, fontFamily: "monospace" }} />
                     <YAxis stroke={T.dim} tick={{ fontSize: 9, fontFamily: "monospace" }} width={44} tickFormatter={(v) => Math.abs(v)} />
-                    <Tooltip contentStyle={{ background: T.panel, border: `1px solid ${T.line}`, fontFamily: "monospace", fontSize: 11 }} formatter={(v, n2) => [Math.abs(v), n2 === "put" ? "OI put" : "OI call"]} />
+                    <Tooltip contentStyle={{ background: T.panel, border: `1px solid ${T.line}`, fontFamily: "monospace", fontSize: 11 }} formatter={(v, n2) => [Math.abs(v), n2 === "put" ? "put contracts" : "call contracts"]} />
                     <ReferenceLine y={0} stroke={T.mut} />
                     {spot && <ReferenceLine x={oiGrid.strikes.reduce((b2, k) => Math.abs(k - spot) < Math.abs(b2 - spot) ? k : b2, oiGrid.strikes[0])} stroke={T.amber} strokeDasharray="4 3" />}
                     <Bar dataKey="put" fill={`${T.green}bb`} stackId="a" />
@@ -1899,21 +1810,21 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                 </ResponsiveContainer>
               </div>
             )}
-            {oiGrid && <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 2 }}>Profilo OI 2D (sempre disponibile): barre verdi sotto lo zero = muri PUT (supporti), rosse sopra = muri CALL (resistenze), linea ambra = spot.</div>}
+            {oiGrid && <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 2 }}>Green bars below zero are where put buyers cluster — prices tend to hold there. Red bars above are where call buyers cluster — prices tend to stall there. The amber line is today's price.</div>}
             {lv && (
               <div style={{ display: "flex", gap: 20, marginTop: 10, flexWrap: "wrap" }}>
                 <div>
-                  <div style={{ ...mono, fontSize: 10, color: T.green }}>SUPPORTI (muri PUT reali)</div>
+                  <div style={{ ...mono, fontSize: 10, color: T.green }}>PRICES THAT TEND TO HOLD</div>
                   <div style={{ ...mono, fontSize: 14, fontWeight: 700, color: T.ink }}>{lv.supports.map((x) => `$${x}`).join(" · ") || "—"}</div>
                 </div>
                 <div>
-                  <div style={{ ...mono, fontSize: 10, color: T.red }}>RESISTENZE (muri CALL reali)</div>
+                  <div style={{ ...mono, fontSize: 10, color: T.red }}>PRICES THAT TEND TO STALL</div>
                   <div style={{ ...mono, fontSize: 14, fontWeight: 700, color: T.ink }}>{lv.resistances.map((x) => `$${x}`).join(" · ") || "—"}</div>
                 </div>
               </div>
             )}
             <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 8 }}>
-              OI aggregato sulle prime 6 scadenze ≤120 DTE (CBOE, ~15 min di ritardo). Muri grandi = livelli dove il mercato ha interesse a difendere il prezzo: usali come riferimento per strike e uscite.
+              Added up across the first six expiries within 120 days (CBOE, ~15 min delayed). A big wall is a price the market has an interest in defending — useful when picking strikes and exits.
             </div>
           </Panel>
         )}
@@ -1923,9 +1834,9 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
           <div style={{ marginTop: 12 }}>
             <Panel>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-                <Lbl>STAGIONALITÀ {seasonal[ticker] ? `REALE · ${seas.src}` : "(STIMA — carica dati reali)"}</Lbl>
+                <Lbl>SEASONALITY {seasonal[ticker] ? `· ${seas.src}` : "(ESTIMATE — load the real history)"}</Lbl>
                 <Btn small ghost color={T.blue} onClick={loadSeasonal} disabled={busy === "av"}>
-                  <RefreshCw size={11} /> Stagionalità reale 10y
+                  <RefreshCw size={11} /> Real 10y seasonality
                 </Btn>
               </div>
               {(() => {
@@ -1935,13 +1846,13 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                 const rank = [...mm].sort((a, b) => b - a).indexOf(cur) + 1;
                 return (
                   <div style={{ fontSize: 12.5, color: T.body, marginTop: 8, padding: "8px 10px", background: `${T.amber}0a`, borderRadius: 6 }}>
-                    <b style={{ color: T.ink }}>In parole semplici:</b> per {ticker} il mese storicamente migliore è <b style={{ color: T.green }}>{MONTHS_IT[bi]}</b> ({mm[bi] > 0 ? "+" : ""}{mm[bi].toFixed(1)}%/mese in media), il peggiore <b style={{ color: T.red }}>{MONTHS_IT[wi]}</b> ({mm[wi].toFixed(1)}%). {MONTHS_IT[NOW_MONTH]} (barra gialla) è il {rank}° mese su 12: {cur > 0.8 ? "vento a favore — le strategie direzionali hanno senso." : cur < -0.8 ? "vento contrario — meglio ribassiste o non-direzionali." : "mese senza spinta chiara — preferisci strategie a intervallo (condor/butterfly)."}
+                    <b style={{ color: T.ink }}>In plain words:</b> {ticker}'s best month historically is <b style={{ color: T.green }}>{MONTHS[bi]}</b> ({mm[bi] > 0 ? "+" : ""}{mm[bi].toFixed(1)}% a month on average), its worst is <b style={{ color: T.red }}>{MONTHS[wi]}</b> ({mm[wi].toFixed(1)}%). {MONTHS[NOW_MONTH]} (the amber bar) ranks {rank} of 12: {cur > 0.8 ? "the season is behind you — a directional trade makes sense." : cur < -0.8 ? "the season is against you — favour downside or non-directional trades." : "no clear push this month — a range trade suits it better."}
                   </div>
                 );
               })()}
               <div style={{ height: 170, marginTop: 10 }}>
                 <ResponsiveContainer>
-                  <BarChart data={seas.monthlyMean.map((v, i) => ({ m: MONTHS_IT[i], v: +v.toFixed(2) }))} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
+                  <BarChart data={seas.monthlyMean.map((v, i) => ({ m: MONTHS[i], v: +v.toFixed(2) }))} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
                     <XAxis dataKey="m" stroke={T.dim} tick={{ fontSize: 9.5, fontFamily: "monospace" }} />
                     <YAxis stroke={T.dim} tick={{ fontSize: 9.5, fontFamily: "monospace" }} width={34} unit="%" />
                     <Tooltip contentStyle={{ background: T.panel, border: `1px solid ${T.line}`, fontFamily: "monospace", fontSize: 11 }} />
@@ -1955,33 +1866,33 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
             </Panel>
 
             <Panel style={{ marginTop: 10 }}>
-              <Lbl>LE 3 PROBABILITÀ DELLA PIATTAFORMA · QUALE GUARDARE E QUANDO</Lbl>
+              <Lbl>THREE PROBABILITIES · WHICH ONE TO READ, AND WHEN</Lbl>
               <div style={{ fontSize: 12.5, color: T.body, marginTop: 8, lineHeight: 1.6 }}>
-                <b style={{ color: T.blue }}>CHANCE</b> (Optimize/Builder): fotografia istantanea — probabilità di finire in profitto <i>a scadenza</i>, calcolata dalla volatilità che il mercato prezza ora. Usala per <b>confrontare strategie prima di entrare</b>.<br/>
-                <b style={{ color: T.amber }}>MONTE CARLO</b> (qui sotto): stessa domanda ma con la storia — 8.000 scenari con la stagionalità e la volatilità reali degli ultimi 10 anni. Usala per <b>validare che la stagione sia davvero dalla tua</b>. Se Chance e MC divergono molto, il mercato prezza qualcosa che la storia non conosce (evento in arrivo).<br/>
-                <b style={{ color: T.violet }}>EXIT PATH</b> (Guardian, per posizioni aperte): la più realistica — simula giorno per giorno <i>da oggi</i> e applica le TUE regole ({ruleBadge()}). È l'unica che risponde a "da qui, come finisce seguendo il piano?". Usala per <b>decidere se tenere o incassare</b>.
+                <b style={{ color: T.blue }}>CHANCE</b> (Optimize and Builder): a snapshot — the odds of finishing in profit <i>at expiry</i>, worked out from what the market is pricing right now. Use it to <b>compare trades before you open one</b>.<br/>
+                <b style={{ color: T.amber }}>SIMULATION</b> (below): the same question asked of history — 8,000 runs using the last ten years of seasonality and volatility. Use it to <b>check the season really is on your side</b>. If the two disagree sharply, the market is pricing something history has not seen: an event is coming.<br/>
+                <b style={{ color: T.violet }}>EXIT PATH</b> (on open positions): the most realistic — it walks day by day <i>from today</i> and applies your own rules ({ruleBadge()}). It is the only one that answers "from here, how does this end if I stick to the plan?". Use it to <b>decide whether to hold or take the money</b>.
               </div>
             </Panel>
 
             <Panel style={{ marginTop: 10 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-                <Lbl>MONTE CARLO 8.000 SIM + BACKTEST STORICO — "{stratName}"</Lbl>
-                <Btn small onClick={runMC} disabled={!A}><FlaskConical size={12} /> Esegui</Btn>
+                <Lbl>8,000 SIMULATIONS + REAL HISTORY — "{stratName}"</Lbl>
+                <Btn small onClick={runMC} disabled={!A}><FlaskConical size={12} /> Run it</Btn>
               </div>
               {mc ? (
                 <>
                   <div style={{ display: "flex", gap: 16, marginTop: 12, flexWrap: "wrap" }}>
-                    <Stat k="PROB. PROFITTO" v={`${(mc.pop * 100).toFixed(1)}%`} c={mc.pop >= 0.5 ? T.green : T.red} tip="Quota di scenari simulati che finiscono in profitto a scadenza." />
-                    <Stat k="P&L ATTESO" v={fmt$(mc.ev)} c={mc.ev >= 0 ? T.green : T.red} />
-                    <Stat k="P5" v={fmt$(mc.p5)} c={T.red} tip="Scenario pessimo (5% peggiore): solo 1 volta su 20 andrà peggio di così." />
-                    <Stat k="MEDIANA" v={fmt$(mc.p50)} />
-                    <Stat k="P95" v={fmt$(mc.p95)} c={T.green} tip="Scenario ottimo (5% migliore): solo 1 volta su 20 andrà meglio di così." />
-                    <Stat k="DRIFT ANN." v={`${(mc.muAnn * 100).toFixed(1)}%`} c={T.blue} />
+                    <Stat k="CHANCE OF PROFIT" v={`${(mc.pop * 100).toFixed(1)}%`} c={mc.pop >= 0.5 ? T.green : T.red} tip="The share of simulated runs that finish in profit at expiry." />
+                    <Stat k="AVERAGE RESULT" v={fmt$(mc.ev)} c={mc.ev >= 0 ? T.green : T.red} />
+                    <Stat k="BAD CASE" v={fmt$(mc.p5)} c={T.red} tip="Only 1 run in 20 turns out worse than this." />
+                    <Stat k="TYPICAL" v={fmt$(mc.p50)} />
+                    <Stat k="GOOD CASE" v={fmt$(mc.p95)} c={T.green} tip="Only 1 run in 20 turns out better than this." />
+                    <Stat k="YEARLY DRIFT" v={`${(mc.muAnn * 100).toFixed(1)}%`} c={T.blue} />
                   </div>
                   <div style={{ marginTop: 10, padding: "9px 11px", background: `${T.blue}0d`, border: `1px solid ${T.blue}33`, borderRadius: 7, fontSize: 12.5, color: T.body }}>
-                    <b style={{ color: T.ink }}>In parole semplici:</b> su 8.000 scenari simulati, {Math.round(mc.pop * 100)} su 100 chiudono in profitto.
-                    Nel 5% dei casi peggiori perdi circa {fmt$(Math.abs(mc.p5))}{guard ? (Math.abs(mc.p5) <= guard.limits.perTrade ? ` — dentro il tuo limite per trade di ${money(guard.limits.perTrade)} ✓` : ` — ATTENZIONE: oltre il tuo limite per trade (${money(guard.limits.perTrade)})`) : ""}.
-                    Il risultato tipico (mediana) è {fmt$(mc.p50)}.
+                    <b style={{ color: T.ink }}>In plain words:</b> out of 8,000 simulated runs, {Math.round(mc.pop * 100)} in 100 finish in profit.
+                    In the worst 5% you lose about {fmt$(Math.abs(mc.p5))}{guard ? (Math.abs(mc.p5) <= guard.limits.perTrade ? ` — inside your per-trade limit of ${money(guard.limits.perTrade)} ✓` : ` — CAREFUL: past your per-trade limit of ${money(guard.limits.perTrade)}`) : ""}.
+                    The typical result is {fmt$(mc.p50)}.
                   </div>
                   <div style={{ height: 180, marginTop: 12 }}>
                     <ResponsiveContainer>
@@ -1997,11 +1908,11 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   </div>
                   {bt ? (
                     <div style={{ marginTop: 12 }}>
-                      <Lbl>BACKTEST STORICO REALE · FINESTRA {MONTHS_IT[NOW_MONTH]}→ +{Math.max(1, Math.round(dte / 30))}m PER OGNI ANNO</Lbl>
+                      <Lbl>WHAT ACTUALLY HAPPENED · {MONTHS[NOW_MONTH]} → +{Math.max(1, Math.round(dte / 30))} MONTHS, EVERY YEAR</Lbl>
                       <div style={{ display: "flex", gap: 16, marginTop: 8, flexWrap: "wrap" }}>
-                        <Stat k="WIN RATE STORICO" v={`${(bt.winRate * 100).toFixed(0)}%`} c={bt.winRate >= 0.5 ? T.green : T.red} />
-                        <Stat k="P&L MEDIO" v={fmt$(bt.avg)} c={bt.avg >= 0 ? T.green : T.red} />
-                        <Stat k="ANNI" v={bt.rows.length} />
+                        <Stat k="YEARS IT WORKED" v={`${(bt.winRate * 100).toFixed(0)}%`} c={bt.winRate >= 0.5 ? T.green : T.red} />
+                        <Stat k="AVERAGE RESULT" v={fmt$(bt.avg)} c={bt.avg >= 0 ? T.green : T.red} />
+                        <Stat k="YEARS TESTED" v={bt.rows.length} />
                       </div>
                       <div style={{ display: "flex", gap: 4, marginTop: 8, flexWrap: "wrap" }}>
                         {bt.rows.map((r) => (
@@ -2014,12 +1925,12 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                     </div>
                   ) : (
                     <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 10 }}>
-                      Backtest storico anno-per-anno disponibile dopo il caricamento della stagionalità reale (Alpha Vantage).
+                      The year-by-year history unlocks once you load the real seasonality above.
                     </div>
                   )}
                   {replay && (
                     <div style={{ marginTop: 12, padding: "10px 12px", background: `${T.amber}0a`, border: `1px solid ${T.amber}44`, borderRadius: 7 }}>
-                      <Lbl>⏪ COSA SAREBBE SUCCESSO NEL {replay.year} · "{stratName}" APERTA A {MONTHS_IT[NOW_MONTH].toUpperCase()}</Lbl>
+                      <Lbl>⏪ WHAT WOULD HAVE HAPPENED IN {replay.year} · "{stratName}" OPENED IN {MONTHS[NOW_MONTH].toUpperCase()}</Lbl>
                       <div style={{ display: "grid", gap: 4, marginTop: 8 }}>
                         {replay.steps.map((st2) => (
                           <div key={st2.m} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -2031,17 +1942,17 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                         ))}
                       </div>
                       <div style={{ fontSize: 12.5, color: T.ink, fontWeight: 700, marginTop: 8 }}>
-                        Esito seguendo le tue regole: {fmt$(replay.finale)} {replay.closed ? `(${replay.closed.why} al mese ${replay.closed.i})` : "(portata a scadenza)"}
+                        Following your rules: {fmt$(replay.finale)} {replay.closed ? `(${replay.closed.why} in month ${replay.closed.i})` : "(held to expiry)"}
                       </div>
-                      <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 4 }}>Simulazione didattica su rendimenti mensili reali: ti allena a fidarti delle regole prima di rischiare.</div>
+                      <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 4 }}>Replayed on real monthly returns. The point is to watch the rules work before you rely on them.</div>
                     </div>
                   )}
                   <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 8 }}>
-                    MC: GBM con drift stagionale {seasonal[ticker] ? "reale" : "stimato"} e σ {(seas.sigma * 100).toFixed(0)}%. Modello semplificato: niente salti né term structure IV.
+                    Simulated with {seasonal[ticker] ? "real" : "estimated"} seasonal drift and {(seas.sigma * 100).toFixed(0)}% volatility. A simplified model: no price jumps, no volatility term structure.
                   </div>
                 </>
               ) : (
-                <div style={{ ...mono, fontSize: 12, color: T.mut, marginTop: 10 }}>Premi "Esegui" per PoP, distribuzione P&L e backtest sugli ultimi ~10 anni.</div>
+                <div style={{ ...mono, fontSize: 12, color: T.mut, marginTop: 10 }}>Press "Run it" for the odds, the spread of outcomes, and what happened in each of the last ten years.</div>
               )}
             </Panel>
           </div>
@@ -2052,24 +1963,24 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
           <Panel style={{ marginTop: 12 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
               <Lbl>NEWS FEED RSS · {ticker} ({U.newsQ})</Lbl>
-              <Btn small ghost onClick={() => loadNews(ticker)} disabled={busy === "news"}><RefreshCw size={11} /> Aggiorna</Btn>
+              <Btn small ghost onClick={() => loadNews(ticker)} disabled={busy === "news"}><RefreshCw size={11} /> Refresh</Btn>
             </div>
             <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap", alignItems: "center" }}>
               {["ALL", ...Object.keys(UNDERLYINGS)].map((tk) => (
-                <Btn key={tk} small ghost={nf.tk !== tk} onClick={() => setNf({ ...nf, tk })}>{tk === "ALL" ? "Tutti" : tk}</Btn>
+                <Btn key={tk} small ghost={nf.tk !== tk} onClick={() => setNf({ ...nf, tk })}>{tk === "ALL" ? "All" : tk}</Btn>
               ))}
               <span style={{ width: 8 }} />
-              {[["all", "Tutte"], ["geo", "Geo/Gov"], ["analysis", "Analisi"], ["tagged", "Con impatto"]].map(([v, l]) => (
+              {[["all", "Everything"], ["geo", "Politics"], ["analysis", "Analysis"], ["tagged", "Market-moving"]].map(([v, l]) => (
                 <Btn key={v} small ghost={nf.kind !== v} color={T.violet} onClick={() => setNf({ ...nf, kind: v })}>{l}</Btn>
               ))}
               <select value={nf.days} onChange={(e) => setNf({ ...nf, days: +e.target.value })}
                 style={{ ...mono, background: T.bg, color: T.ink, border: `1px solid ${T.line}`, borderRadius: 5, padding: "4px 6px", fontSize: 11 }}>
-                <option value={1}>24 ore</option><option value={3}>3 giorni</option><option value={7}>7 giorni</option><option value={0}>Tutte le date</option>
+                <option value={1}>Last 24 hours</option><option value={3}>Last 3 days</option><option value={7}>Last week</option><option value={0}>Any date</option>
               </select>
-              <Inp placeholder="cerca…" value={nf.q} onChange={(e) => setNf({ ...nf, q: e.target.value })} style={{ width: 130 }} />
+              <Inp placeholder="search…" value={nf.q} onChange={(e) => setNf({ ...nf, q: e.target.value })} style={{ width: 130 }} />
             </div>
             <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
-              {news[ticker]?.loading && <div style={{ ...mono, fontSize: 12, color: T.mut }}>Carico feed…</div>}
+              {news[ticker]?.loading && <div style={{ ...mono, fontSize: 12, color: T.mut }}>Loading headlines…</div>}
               {(news[ticker]?.items || []).filter((n) => {
                 if (nf.tk !== "ALL" && !(n.impacts || []).some((im) => im.tk === nf.tk)) return false;
                 if (nf.kind === "geo" && !n.geo) return false;
@@ -2088,11 +1999,11 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                 </a>
               ))}
               {news[ticker] && !news[ticker].loading && !(news[ticker].items || []).length && (
-                <div style={{ ...mono, fontSize: 12, color: T.mut }}>Nessuna news trovata: riprova ad aggiornare.</div>
+                <div style={{ ...mono, fontSize: 12, color: T.mut }}>No headlines right now. Try refreshing.</div>
               )}
             </div>
             <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 10 }}>
-              Fonti: Google News (target + query geopolitiche: OPEC, sanzioni, Mar Nero, USDA, Cina) + Yahoo Finance per ticker + EIA (governo USA). Ogni notizia è taggata per sottostante con direzione e causa→effetto; passa il mouse sui tag per il dettaglio.
+              Sources: Google News (including OPEC, sanctions, Black Sea, USDA and China searches), Yahoo Finance per market, and the US Energy Information Administration. Every headline is tagged with which market it moves, which way, and why — tap a tag to read it.
             </div>
           </Panel>
         )}
@@ -2102,12 +2013,12 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
           <div style={{ marginTop: 12 }}>
             <Panel>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-                <Lbl>POSIZIONI PAPER ({store.positions.length}) · MARK-TO-MARKET LIVE</Lbl>
+                <Lbl>YOUR POSITIONS ({store.positions.length}) · VALUED LIVE</Lbl>
                 <label style={{ ...mono, fontSize: 10.5, color: autoMon ? T.green : T.dim, display: "flex", gap: 5, alignItems: "center", cursor: "pointer" }}>
-                  <input type="checkbox" checked={autoMon} onChange={(e) => setAutoMon(e.target.checked)} /> auto-refresh 60s
+                  <input type="checkbox" checked={autoMon} onChange={(e) => setAutoMon(e.target.checked)} /> refresh every 60s
                 </label>
               </div>
-              {store.positions.length === 0 && <div style={{ ...mono, fontSize: 12, color: T.mut, marginTop: 8 }}>Nessuna posizione. Builder → "Paper interno".</div>}
+              {store.positions.length === 0 && <div style={{ ...mono, fontSize: 12, color: T.mut, marginTop: 8 }}>Nothing open yet. Build a trade, then press "Open on paper".</div>}
               <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
                 {store.positions.map((p) => {
                   const c = chains[p.ticker];
@@ -2119,23 +2030,23 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   const tpHit = pnl != null && p.maxProfit > 0 && pnl >= RULES.takeProfitPct * p.maxProfit;
                   const slHit = pnl != null && p.maxLoss < 0 && pnl <= RULES.stopLossPct * p.maxLoss;
                   const dteExit = dteLeft <= RULES.exitDTE;
-                  const rec = tpHit ? { t: `→ CHIUDI: ${takeProfitLabel()}`, c: T.green } : slHit ? { t: `→ WARNING: ${stopLossLabel()}`, c: T.red } : dteExit ? { t: `→ CHIUDI/ROLLA: ≤${RULES.exitDTE} DTE`, c: T.amber } : { t: "→ HOLD", c: T.mut };
+                  const rec = tpHit ? { t: `→ TAKE THE PROFIT: ${takeProfitLabel()}`, c: T.green } : slHit ? { t: `→ WARNING: ${stopLossLabel()}`, c: T.red } : dteExit ? { t: `→ CLOSE OR ROLL: ${RULES.exitDTE} days left`, c: T.amber } : { t: "→ HOLD", c: T.mut };
                   return (
                     <div key={p.id} style={{ padding: "10px 12px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7 }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
                         <div style={{ fontWeight: 700, color: T.ink, fontSize: 13.5 }}>{p.ticker} · {p.name}</div>
                         <div style={{ display: "flex", gap: 6 }}>
                           <Btn small ghost color={T.blue} onClick={() => { setTicker(p.ticker); if (!chains[p.ticker]) refreshChain(p.ticker); setExpKey(p.expKey || null); setLegs(p.legs.map((l) => ({ ...l }))); setStratName(p.name + " (monitor)"); setTab("build"); }}>Monitor ↗</Btn>
-                          <Btn small ghost color={T.red} onClick={() => closePos(p.id)}><Trash2 size={11} /> Chiudi</Btn>
+                          <Btn small ghost color={T.red} onClick={() => closePos(p.id)}><Trash2 size={11} /> Close</Btn>
                         </div>
                       </div>
                       <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 3 }}>
-                        {p.legs.map((l) => `${l.side > 0 ? "+" : "−"}${l.qty} ${l.strike}${l.type === "call" ? "C" : "P"}`).join(" / ")} · exp {p.expKey || new Date(p.expiry).toLocaleDateString("it-IT")} · aperta {new Date(p.openedAt).toLocaleDateString("it-IT")}
+                        {p.legs.map((l) => `${l.side > 0 ? "+" : "−"}${l.qty} ${l.strike}${l.type === "call" ? "C" : "P"}`).join(" / ")} · expires {p.expKey || new Date(p.expiry).toLocaleDateString("en-GB")} · opened {new Date(p.openedAt).toLocaleDateString("en-GB")}
                       </div>
                       <div style={{ display: "flex", gap: 14, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
                         <Stat k="ENTRY" v={fmt$(Math.abs(p.entryNet) * 100)} />
-                        <Stat k="P&L (mark)" v={pnl != null ? fmt$(pnl) : "refresh…"} c={pnl >= 0 ? T.green : T.red} />
-                        <Stat k="% MAX PROFIT" v={pnl != null && p.maxProfit > 0 ? `${((pnl / p.maxProfit) * 100).toFixed(0)}%` : "—"} />
+                        <Stat k="PROFIT NOW" v={pnl != null ? fmt$(pnl) : "loading…"} c={pnl >= 0 ? T.green : T.red} />
+                        <Stat k="OF THE MAXIMUM" v={pnl != null && p.maxProfit > 0 ? `${((pnl / p.maxProfit) * 100).toFixed(0)}%` : "—"} />
                         <Stat k="DTE" v={dteLeft} c={dteExit ? T.amber : T.ink} />
                         <span style={{ ...mono, fontSize: 11.5, fontWeight: 700, color: rec.c }}>{rec.t}</span>
                       </div>
@@ -2170,7 +2081,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
             {alpaca && <AlpacaDesk setMsg={setMsg} gate={gate} />}
 
             <Panel style={{ marginTop: 10 }}>
-              <Lbl>STRATEGIE SALVATE ({store.saved.length})</Lbl>
+              <Lbl>SAVED STRATEGIES ({store.saved.length})</Lbl>
               <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
                 {store.saved.map((sv) => (
                   <div key={sv.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7, flexWrap: "wrap" }}>
@@ -2178,59 +2089,156 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                       <div style={{ color: T.ink, fontWeight: 600, fontSize: 12.5 }}>{sv.ticker} · {sv.name}</div>
                       <div style={{ ...mono, fontSize: 10, color: T.dim }}>{sv.legs.map((l) => `${l.side > 0 ? "+" : "−"}${l.qty} ${l.strike}${l.type === "call" ? "C" : "P"}`).join(" / ")} · {sv.expKey || `${sv.dte} DTE`}</div>
                     </div>
-                    <Btn small ghost onClick={() => { setTicker(sv.ticker); if (!chains[sv.ticker]) refreshChain(sv.ticker); setExpKey(sv.expKey || null); setLegs(sv.legs.map((l) => ({ ...l }))); setStratName(sv.name); setMc(null); setBt(null); setTab("build"); }}>Carica</Btn>
+                    <Btn small ghost onClick={() => { setTicker(sv.ticker); if (!chains[sv.ticker]) refreshChain(sv.ticker); setExpKey(sv.expKey || null); setLegs(sv.legs.map((l) => ({ ...l }))); setStratName(sv.name); setMc(null); setBt(null); setTab("build"); }}>Load</Btn>
                     <button onClick={() => delSaved(sv.id)} style={{ background: "none", border: "none", color: T.dim, cursor: "pointer" }}><Trash2 size={13} /></button>
                   </div>
                 ))}
-                {store.saved.length === 0 && <div style={{ ...mono, fontSize: 11.5, color: T.mut }}>Nessuna strategia salvata.</div>}
+                {store.saved.length === 0 && <div style={{ ...mono, fontSize: 11.5, color: T.mut }}>Nothing saved yet.</div>}
               </div>
             </Panel>
 
             <Panel style={{ marginTop: 10 }}>
-              <Lbl><Plug size={11} style={{ verticalAlign: "-1px" }} /> INTEGRAZIONI</Lbl>
+              <Lbl><Plug size={11} style={{ verticalAlign: "-1px" }} /> INTEGRATIONS</Lbl>
               <div style={{ marginTop: 10 }}>
-                <div style={{ ...mono, fontSize: 11, color: T.ink, fontWeight: 700 }}>Alpha Vantage (storico 10y+ gratuito)</div>
-                <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 6 }}>Chiave letta dalla env del server (ALPHAVANTAGE_KEY). Usata dal tab Backtest per stagionalità e backtest reali.</div>
+                <div style={{ ...mono, fontSize: 11, color: T.ink, fontWeight: 700 }}>Alpha Vantage — free 10-year price history</div>
+                <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 6 }}>The key lives in the server environment (ALPHAVANTAGE_KEY). It powers the real seasonality and the year-by-year history in the Backtest tab.</div>
               </div>
               <div style={{ marginTop: 14 }}>
-                <div style={{ ...mono, fontSize: 11, color: T.ink, fontWeight: 700 }}>Alpaca PAPER trading</div>
+                <div style={{ ...mono, fontSize: 11, color: T.ink, fontWeight: 700 }}>Alpaca paper trading</div>
                 <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap", alignItems: "center" }}>
-                  <Btn small onClick={testAlpaca} disabled={busy === "alpaca"}>Verifica connessione</Btn>
-                  <span style={{ ...mono, fontSize: 10.5, color: T.dim }}>chiavi lette dalle env del server (ALPACA_KEY / ALPACA_SECRET)</span>
+                  <Btn small onClick={testAlpaca} disabled={busy === "alpaca"}>Check the connection</Btn>
+                  <span style={{ ...mono, fontSize: 10.5, color: T.dim }}>keys live in the server environment (ALPACA_KEY / ALPACA_SECRET)</span>
                 </div>
                 {alpaca && (
                   <div style={{ display: "flex", gap: 14, marginTop: 8, flexWrap: "wrap" }}>
                     <Stat k="EQUITY" v={`$${(+alpaca.equity).toLocaleString()}`} c={T.green} />
                     <Stat k="BUYING POWER" v={`$${(+alpaca.buying_power).toLocaleString()}`} />
-                    <Stat k="STATO" v={alpaca.status} c={T.blue} />
+                    <Stat k="STATUS" v={alpaca.status} c={T.blue} />
                   </div>
                 )}
                 <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6 }}>
-                  Endpoint paper-api.alpaca.markets (SOLO paper): order ticket limit/market con TIF, sync posizioni/ordini, cancellazioni e chiusure. Ogni invio ordine richiede doppia conferma.
+                  Only paper-api.alpaca.markets is ever contacted, and the app checks that it was: no real money can be reached from here. Every order asks you twice before it is sent.
                 </div>
               </div>
               <div style={{ marginTop: 14 }}>
-                <div style={{ ...mono, fontSize: 11, color: T.ink, fontWeight: 700 }}>Anthropic API (Copilot AI + Report)</div>
-                <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 6 }}>Chiave letta dalla env del server (ANTHROPIC_KEY). Copilot e report AI attivi senza inserire nulla nel sito.</div>
+                <div style={{ ...mono, fontSize: 11, color: T.ink, fontWeight: 700 }}>Anthropic API — copilot and reports</div>
+                <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 6 }}>The key lives in the server environment (ANTHROPIC_KEY), so nothing needs typing into the site.</div>
               </div>
               <div style={{ marginTop: 14 }}>
-                <div style={{ ...mono, fontSize: 11, color: T.ink, fontWeight: 700 }}>Capitale di riferimento (da qui si deriva ogni limite — PRD §3)</div>
-                <div style={{ display: "flex", gap: 6, marginTop: 6, alignItems: "center" }}>
-                  <Inp type="number" min={500} step={500} value={store.settings.capital || 5000} onChange={(e) => setSetting("capital", Math.max(500, +e.target.value))} style={{ width: 120 }} />
-                  <span style={{ ...mono, fontSize: 10.5, color: T.dim }}>USD</span>
-                  <span style={{ ...mono, fontSize: 10.5, color: T.dim }}>posizioni in parallelo</span>
-                  <Inp type="number" min={1} max={20} value={store.settings.concurrentTarget || RULES.defaultConcurrentTarget} onChange={(e) => setSetting("concurrentTarget", Math.max(1, +e.target.value))} style={{ width: 70 }} />
-                  <span style={{ ...mono, fontSize: 10.5, color: T.dim }}>→ max per trade: {money(limits.perTradeLimit)} · esposizione max: {money(limits.totalLimit)}</span>
-                </div>
+                <div style={{ ...mono, fontSize: 11, color: T.ink, fontWeight: 700 }}>Your capital and limits</div>
+                <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 6 }}>Now in the Settings tab, next to the theme.</div>
               </div>
               <div style={{ marginTop: 14 }}>
-                <div style={{ ...mono, fontSize: 11, color: T.ink, fontWeight: 700 }}>Webhook report (opzionale)</div>
+                <div style={{ ...mono, fontSize: 11, color: T.ink, fontWeight: 700 }}>Report webhook (optional)</div>
                 <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
                   <Inp placeholder="https://hooks.zapier.com/…" value={store.settings.webhook} onChange={(e) => setSetting("webhook", e.target.value)} style={{ flex: 1, minWidth: 200 }} />
                 </div>
-                <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 4 }}>Il tab Report può inviare il report in JSON/markdown a Zapier o Make, che lo gira via email/Telegram su tua regola.</div>
+                <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 4 }}>The Report tab can post each report to Zapier or Make, which can forward it by email or messaging.</div>
               </div>
             </Panel>
+          </div>
+        )}
+
+        {/* ============ SETTINGS ============ */}
+        {tab === "settings" && (
+          <div style={{ marginTop: 12, maxWidth: 620 }}>
+            <Card>
+              <Lbl>APPEARANCE</Lbl>
+              <div style={{ fontSize: 13, color: T.mut, marginTop: 8, lineHeight: 1.5 }}>
+                Light is the default. Dark is here whenever you want it — the app reloads to apply the change.
+              </div>
+              <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                {[["light", "Light", Sun], ["dark", "Dark", Moon]].map(([id, label, I]) => {
+                  const on = themeName() === id;
+                  return (
+                    <button key={id} onClick={() => !on && setTheme(id)}
+                      style={{ flex: 1, minHeight: 52, borderRadius: 10, cursor: on ? "default" : "pointer",
+                        fontSize: 15, fontWeight: on ? 700 : 500, fontFamily: "ui-sans-serif, system-ui",
+                        background: on ? T.amber : "transparent", color: on ? T.onAccent : T.ink,
+                        border: `1.5px solid ${on ? T.amber : T.line}`, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                      <I size={16} /> {label}
+                    </button>
+                  );
+                })}
+              </div>
+            </Card>
+
+            <Card style={{ marginTop: 12 }}>
+              <Lbl>YOUR CAPITAL · EVERY LIMIT COMES FROM HERE</Lbl>
+              <div style={{ fontSize: 13, color: T.mut, marginTop: 8, lineHeight: 1.5 }}>
+                Change these and the per-trade limit changes with them. Nothing here is a number we handed you.
+              </div>
+              <div style={{ display: "flex", gap: 16, marginTop: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
+                <div>
+                  <div style={{ ...mono, fontSize: 10, color: T.dim }}>TRADING CAPITAL ($)</div>
+                  <Inp type="number" min={100} step={500} value={store.settings.capital || RULES.defaultTradingCapital}
+                    onChange={(e) => setSetting("capital", Math.max(100, +e.target.value))} style={{ width: 130, fontSize: 16, padding: "10px 10px" }} />
+                </div>
+                <div>
+                  <div style={{ ...mono, fontSize: 10, color: T.dim }}>POSITIONS AT ONCE</div>
+                  <Inp type="number" min={1} max={20} value={store.settings.concurrentTarget || RULES.defaultConcurrentTarget}
+                    onChange={(e) => setSetting("concurrentTarget", Math.max(1, +e.target.value))} style={{ width: 90, fontSize: 16, padding: "10px 10px" }} />
+                </div>
+                <div>
+                  <div style={{ ...mono, fontSize: 10, color: T.dim }}>TOTAL SAVINGS ($, OPTIONAL)</div>
+                  <Inp type="number" min={0} step={1000} value={store.settings.savings ?? ""}
+                    onChange={(e) => setSetting("savings", e.target.value === "" ? null : Math.max(0, +e.target.value))} style={{ width: 150, fontSize: 16, padding: "10px 10px" }} />
+                </div>
+              </div>
+              {/* The pills explain the limit while you are still changing it. */}
+              {limits.pills.map((pl) => <Pill key={pl.id}>{pl.text}</Pill>)}
+              <div style={{ marginTop: 14, padding: "12px 14px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 10 }}>
+                <div style={{ fontSize: 15, fontWeight: 700, color: T.ink }}>{money(limits.perTradeLimit)} at risk per trade</div>
+                <div style={{ fontSize: 13, color: T.mut, marginTop: 4, lineHeight: 1.5 }}>
+                  and {money(limits.totalLimit)} across everything at once ({pctText(RULES.totalExposurePct)} of your capital).
+                  {limits.overrideAccepted ? ` This is your own limit, not the suggested one — your reason: “${limits.overrideReason}”.` : ""}
+                </div>
+              </div>
+              {/* An override is allowed, and it costs a written reason (PRD §3). */}
+              <div style={{ marginTop: 14 }}>
+                <div style={{ ...mono, fontSize: 10, color: T.dim }}>OVERRIDE THE PER-TRADE LIMIT (NEEDS A WRITTEN REASON)</div>
+                <div style={{ display: "flex", gap: 8, marginTop: 6, flexWrap: "wrap", alignItems: "center" }}>
+                  <Inp type="number" min={0} step={50} placeholder="amount"
+                    value={store.settings.sizeOverride?.perTrade ?? ""}
+                    onChange={(e) => setSetting("sizeOverride", e.target.value === ""
+                      ? null
+                      : { ...(store.settings.sizeOverride || {}), perTrade: Math.max(0, +e.target.value) })}
+                    style={{ width: 120, fontSize: 16, padding: "10px 10px" }} />
+                  {store.settings.sizeOverride && (
+                    <Btn small ghost color={T.red} onClick={() => setSetting("sizeOverride", null)}>Remove override</Btn>
+                  )}
+                </div>
+                {store.settings.sizeOverride && (
+                  <textarea rows={3} placeholder="Why this limit and not the suggested one?"
+                    value={store.settings.sizeOverride?.reason ?? ""}
+                    onChange={(e) => setSetting("sizeOverride", { ...(store.settings.sizeOverride || {}), reason: e.target.value })}
+                    style={{ width: "100%", boxSizing: "border-box", marginTop: 8, fontSize: 16, lineHeight: 1.45,
+                      fontFamily: "ui-sans-serif, system-ui", background: T.bg, color: T.ink,
+                      border: `1px solid ${limits.overrideAccepted ? T.green : T.amber}`, borderRadius: 8, padding: "10px 12px", resize: "vertical" }} />
+                )}
+              </div>
+            </Card>
+
+            <Card style={{ marginTop: 12 }}>
+              <Lbl>WHEN THERE IS NOTHING TO DO</Lbl>
+              <label style={{ display: "flex", gap: 10, alignItems: "flex-start", marginTop: 10, cursor: "pointer" }}>
+                <input type="checkbox" checked={!!store.settings.notifyWhenReady}
+                  onChange={(e) => setNotify(e.target.checked)} style={{ marginTop: 3, width: 18, height: 18 }} />
+                <span style={{ fontSize: 13.5, color: T.body, lineHeight: 1.5 }}>
+                  Flag it in the daily brief when the signals line up again and options stop being expensive.
+                </span>
+              </label>
+            </Card>
+
+            <Card style={{ marginTop: 12 }}>
+              <Lbl>START OVER</Lbl>
+              <div style={{ fontSize: 13, color: T.mut, marginTop: 8, lineHeight: 1.5 }}>
+                Run the capital questions again. Your positions and saved strategies are not touched.
+              </div>
+              <div style={{ marginTop: 12 }}>
+                <Btn ghost color={T.blue} onClick={() => setSetting("onboarded", false)}>Redo setup</Btn>
+              </div>
+            </Card>
           </div>
         )}
 
@@ -2253,14 +2261,14 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
 
         {(tab === "optimize" || tab === "build" || tab === "backtest") && !spot && (
           <Panel style={{ marginTop: 12 }}>
-            <div style={{ ...mono, fontSize: 12, color: T.amber }}>Chain {ticker} non ancora caricata: premi Refresh in alto (fonte CBOE, gratuita).</div>
+            <div style={{ ...mono, fontSize: 12, color: T.amber }}>Option prices for {ticker} have not loaded yet — press Refresh at the top.</div>
           </Panel>
         )}
 
         </TabBoundary>
 
-        <div style={{ ...mono, fontSize: 10, color: "#4b5563", textAlign: "center", marginTop: 22 }}>
-          Paper trading only · Quote CBOE ritardate ~15 min · {perTradeCapLabel()} · Esposizione ≤{pctText(RULES.totalExposurePct)} · Non è consulenza finanziaria
+        <div style={{ ...mono, fontSize: 10, color: T.dim, textAlign: "center", marginTop: 22 }}>
+          Paper trading only · CBOE prices delayed ~15 min · {perTradeCapLabel()} · Total exposure ≤{pctText(RULES.totalExposurePct)} · Educational software, not financial advice
         </div>
       </div>
     </div>
