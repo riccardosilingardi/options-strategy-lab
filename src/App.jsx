@@ -5,19 +5,21 @@ import {
 } from "recharts";
 import {
   RefreshCw, ShieldCheck, Save, Trash2, Play, Layers, Radar, Box,
-  FlaskConical, Briefcase, Plus, Newspaper, Plug, Send, ExternalLink, CloudSun, MessageSquare, FileText, Bell,
+  FlaskConical, Briefcase, Plus, Plug, Send, ExternalLink, MessageSquare, FileText, Bell,
   SlidersHorizontal, ArrowLeft, Sun, Moon,
 } from "lucide-react";
-import { fetchAllNews, fetchWeather, ImpactTags, MeteoTab, CopilotTab, ReportTab, OrderTicket, AlpacaDesk, scaleStrategy, probProfit, buildContext, GuardianPanel, PriceChart, ChainMatrix, PayoffThumb, OptionPanel, UnifiedView, taSignals, confluence, WhyThisTrade } from "./pro.jsx";
+import { fetchAllNews, fetchWeather, ImpactTags, CopilotTab, ReportTab, OrderTicket, AlpacaDesk, scaleStrategy, probProfit, buildContext, GuardianPanel, PriceChart, ChainMatrix, OptionPanel, UnifiedView, taSignals, confluence, WhyThisTrade } from "./pro.jsx";
+import { BandThumbnail, payoffBands, bandTakeaway, GaugeFigure, exitPlanSentence } from "./visuals.jsx";
 import { fuseSignals, sentimentDirection, withSignalRank, compareCandidates, againstSignal } from "./signals.js";
 import { N as nCDF, bs as bsPrice, smile as smileIV, payoff as payoffExp, SEASONAL, SIGMA } from "./engine.js";
 import { T, themeName, setTheme } from "./theme.js";
 import { RULES, sizing, ruleBadge, takeProfitLabel, stopLossLabel, perTradeCapLabel, RULE_PILLS, NOTHING_TODAY, money, pctText } from "./rules.js";
 import { evaluateTrade, gateSummary } from "./riskGate.js";
-import { CapitalOnboarding, WizardOpen, WizardQuestions, NothingToday, Card, Pill } from "./wizard.jsx";
+import { CapitalOnboarding, WizardOpen, WizardQuestions, WizardCandidates, WizardConfirm, NothingToday, Card, Pill } from "./wizard.jsx";
 
 /* ============================== THEME ============================== */
 const mono = { fontFamily: "ui-monospace, Menlo, monospace" };
+const sansUI = { fontFamily: "ui-sans-serif, system-ui" };
 
 /* ============================== MATH: Black-Scholes (Greeks only — shared engine covers price/payoff) ============================== */
 const nPDF = (x) => Math.exp(-0.5 * x * x) / Math.sqrt(2 * Math.PI);
@@ -387,7 +389,7 @@ const EMPTY = { saved: [], positions: [], settings: { webhook: "", reportFreq: "
 async function saveState(st) {
   try { localStorage.setItem(SKEY, JSON.stringify(st)); } catch (e) { console.error(e); }
   // sync server (abilita Autopilot ad app chiusa); fire-and-forget
-  try { fetch("/api/state", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ positions: st.positions, settings: { webhook: st.settings?.webhook, capital: st.settings?.capital, concurrentTarget: st.settings?.concurrentTarget, savings: st.settings?.savings, sizeOverride: st.settings?.sizeOverride } }) }); } catch { /* offline ok */ }
+  try { fetch("/api/state", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ positions: st.positions, settings: { webhook: st.settings?.webhook, capital: st.settings?.capital, concurrentTarget: st.settings?.concurrentTarget, savings: st.settings?.savings, sizeOverride: st.settings?.sizeOverride, notifyWhenReady: !!st.settings?.notifyWhenReady } }) }); } catch { /* offline ok */ }
 }
 
 /* ============================== UI ATOMS ============================== */
@@ -437,10 +439,18 @@ export default function OptionsStrategyLab() {
   // PRD §5: the wizard IS the app. `view` is the shell — the tabs are one of
   // its destinations, not the front door. `wizStep` is which wizard screen.
   const [view, setView] = useState("wizard");   // "wizard" | "desk"
-  const [wizStep, setWizStep] = useState("open"); // "open" | "questions" | "nothing"
+  // The desk is three places, not eleven: the bench where a trade is built, the
+  // positions you hold and the journal of what happened. Everything that used
+  // to be a tab of its own is evidence for one of those three (see `ev`).
+  const [wizStep, setWizStep] = useState("open"); // open | questions | candidates | confirm | nothing
   const [nothing, setNothing] = useState(null);   // [{ id, text }] — why not today
+  const [candidates, setCandidates] = useState([]); // screen 3: always two roads
+  const [picked, setPicked] = useState(null);       // screen 4: the road taken
+  const [confirmResult, setConfirmResult] = useState(null); // the gate's answer AFTER the tap
   const [hydrated, setHydrated] = useState(false);
-  const [tab, setTab] = useState("paper");
+  const [tab, setTab] = useState("bench");       // "bench" | "positions" | "journal"
+  const [ev, setEv] = useState(null);           // which evidence section is open on the bench
+  const [showSettings, setShowSettings] = useState(false);
   const [ticker, setTicker] = useState("SOYB");
   const [chains, setChains] = useState({});      // ticker -> chain CBOE
   const [seasonal, setSeasonal] = useState({});  // ticker -> {monthlyMean, sigma, rets, years} da Alpha Vantage
@@ -467,7 +477,7 @@ export default function OptionsStrategyLab() {
   const [nf, setNf] = useState({ tk: "ALL", kind: "all", q: "", days: 7 });
   const [multi, setMulti] = useState({ sel: ["SOYB", "CORN", "UNG"], busy: false, res: null, err: null, dteT: 45, senMode: "auto" });
   const [wiz, setWiz] = useState({ risk: 250, horizon: RULES.targetEntryDTE, priority: "balanced", busy: false, err: null });
-  const [optRef, setOptRef] = useState(null); // snapshot prezzi Optimizer per riconciliazione col Builder
+  const [optRef, setOptRef] = useState(null); // price snapshot from the Shortlist, to reconcile against the Bench
   const [weather, setWeather] = useState(null);  // regionId -> forecast 14g (fuseSignals)
   const [barsCache, setBarsCache] = useState({}); // ticker -> daily bars (fattore tecnico)
   const [against, setAgainst] = useState({ reason: "" }); // motivazione per un trade contro il segnale
@@ -694,7 +704,7 @@ export default function OptionsStrategyLab() {
   const applyPreset = (p, a) => {
     setLegs(p.legs.map((l) => ({ ...l }))); setStratName(p.name); setMc(null); setBt(null);
     setOptRef(a ? { name: p.name, entry: a.entry, maxProfit: a.maxProfit, maxLoss: a.maxLoss, expKey, t: Date.now() } : null);
-    setTab("build");
+    setTab("bench");
   };
   const updLeg = (i, f, v) => setLegs((L) => L.map((l, j) => (j === i ? { ...l, [f]: v } : l)));
   const onChainCell = (k, t) => {
@@ -714,6 +724,40 @@ export default function OptionsStrategyLab() {
     const st = { ...store, saved: [...store.saved, item] };
     setStore(st); await saveState(st); setMsg("Strategy saved. It will still be here next time.");
   };
+  /* ---- ONE way to open a paper position ----
+     The Bench and the wizard's confirm screen both land here, so a position
+     opened from screen 4 carries exactly the same gate record, thesis and
+     timeline as one opened from the bench. Two paths would mean two truths. */
+  const commitPosition = async ({ ticker: tk, expKey: ek, legs: lg, dte: d, analysis, spot: sp, name, alpacaOrder, clashInfo, reason }) => {
+    // Anche la posizione interna passa dal cancello: non tocca il broker, ma
+    // entra nell'esposizione totale che il cancello misura al prossimo ordine.
+    const gLocal = gate({ ticker: tk, intent: "open", legs: lg, dte: d, contracts: 1, maxLoss: analysis?.maxLoss, maxProfit: analysis?.maxProfit }, LOCAL_BOOK);
+    if (!gLocal.pass) return { ok: false, gate: gLocal };
+    const seasM = ((seasonal[tk]?.monthlyMean) || getU(tk).monthlyMean)[NOW_MONTH];
+    const expiry = ek ? new Date(ek).toISOString() : new Date(Date.now() + d * 86400000).toISOString();
+    const ivAvg0 = analysis.legPx.reduce((x, y) => x + y.iv, 0) / Math.max(1, analysis.legPx.length);
+    const pop0 = probProfit(analysis.curve, sp, ivAvg0, d);
+    const f = fused[tk];
+    const pos = {
+      id: Date.now(), name, ticker: tk, expKey: ek, legs: lg, entryNet: analysis.entry, entrySpot: sp,
+      openedAt: new Date().toISOString(), expiry, maxProfit: analysis.maxProfit, maxLoss: analysis.maxLoss,
+      realEntry: analysis.realCount === lg.length,
+      alpacaId: alpacaOrder?.id || null,
+      thesis: { pop: pop0, iv: ivAvg0, seasonal: seasM, regime: seasM > 0.8 ? "strong up" : seasM < -0.8 ? "strong down" : "weak", spot: sp, breakevens: analysis.breakevens, delta: analysis.greeks.delta, vega: analysis.greeks.vega,
+        signal: f ? { score: f.score, confidence: f.confidence, agreement: f.agreement, narrative: f.narrative } : null,
+        againstSignal: clashInfo ? { ...clashInfo, reason: (reason || "").trim(), at: Date.now() } : null },
+      timeline: [
+        { t: Date.now(), type: "gate", text: `Risk gate — ${gateSummary(gLocal)}` },
+        { t: Date.now(), type: "open", text: `${alpacaOrder ? "Alpaca order " + alpacaOrder.id.slice(0, 8) + "… sent · " : ""}Opened with a ${pop0 != null ? (pop0 * 100).toFixed(0) + "%" : "n/a"} chance · volatility ${(ivAvg0 * 100).toFixed(0)}% · season ${seasM.toFixed(1)}%/mo${f ? ` · signal ${f.score > 0 ? "+" : ""}${f.score}/100 ${f.agreement}` : ""}` },
+        { t: Date.now(), type: "plan", text: `Exit plan frozen at entry — ${exitPlanSentence()}` },
+        ...(clashInfo ? [{ t: Date.now(), type: "against", text: `Against ${clashInfo.n} of ${clashInfo.total} factors. Reason: "${(reason || "").trim()}"` }] : []),
+      ],
+    };
+    const st = { ...store, positions: [...store.positions, pos] };
+    setStore(st); await saveState(st);
+    return { ok: true, gate: gLocal, pos };
+  };
+
   const openPaper = async (alpacaOrder) => {
     // Non blocchiamo il trade: chiediamo la motivazione scritta e la salviamo
     // con la posizione (PRD §2, pattern override).
@@ -721,29 +765,10 @@ export default function OptionsStrategyLab() {
       setMsg(`Write why you are going against ${clash.n} of ${clash.total} factors (at least ${REASON_MIN} characters). The reason is stored with the position.`);
       return;
     }
-    // Anche la posizione interna passa dal cancello: non tocca il broker, ma
-    // entra nell'esposizione totale che il cancello misura al prossimo ordine.
-    const gLocal = gate({ ticker, intent: "open", legs, dte, contracts: 1, maxLoss: A?.maxLoss, maxProfit: A?.maxProfit }, LOCAL_BOOK);
-    if (!gLocal.pass) { setMsg(`Risk gate: position not opened. ${gLocal.violations.map((v) => v.message).join(" ")}`); return; }
-    const expiry = expKey ? new Date(expKey).toISOString() : new Date(Date.now() + dte * 86400000).toISOString();
-    const ivAvg0 = A.legPx.reduce((x, y) => x + y.iv, 0) / Math.max(1, A.legPx.length);
-    const pop0 = probProfit(A.curve, spot, ivAvg0, dte);
-    const pos = {
-      id: Date.now(), name: stratName, ticker, expKey, legs, entryNet: A.entry, entrySpot: spot,
-      openedAt: new Date().toISOString(), expiry, maxProfit: A.maxProfit, maxLoss: A.maxLoss,
-      realEntry: A.realCount === legs.length,
-      alpacaId: alpacaOrder?.id || null,
-      thesis: { pop: pop0, iv: ivAvg0, seasonal: seas.monthlyMean[NOW_MONTH], regime: seas.monthlyMean[NOW_MONTH] > 0.8 ? "strong up" : seas.monthlyMean[NOW_MONTH] < -0.8 ? "strong down" : "weak", spot, breakevens: A.breakevens, delta: A.greeks.delta, vega: A.greeks.vega,
-        signal: fused[ticker] ? { score: fused[ticker].score, confidence: fused[ticker].confidence, agreement: fused[ticker].agreement, narrative: fused[ticker].narrative } : null,
-        againstSignal: clash ? { ...clash, reason: against.reason.trim(), at: Date.now() } : null },
-      timeline: [
-        { t: Date.now(), type: "gate", text: `Risk gate — ${gateSummary(gLocal)}` },
-        { t: Date.now(), type: "open", text: `${alpacaOrder ? "Alpaca order " + alpacaOrder.id.slice(0, 8) + "… sent · " : ""}Opened with a ${pop0 != null ? (pop0 * 100).toFixed(0) + "%" : "n/a"} chance · volatility ${(ivAvg0 * 100).toFixed(0)}% · season ${seas.monthlyMean[NOW_MONTH].toFixed(1)}%/mo${fused[ticker] ? ` · signal ${fused[ticker].score > 0 ? "+" : ""}${fused[ticker].score}/100 ${fused[ticker].agreement}` : ""}` },
-        ...(clash ? [{ t: Date.now(), type: "against", text: `Against ${clash.n} of ${clash.total} factors. Reason: "${against.reason.trim()}"` }] : []),
-      ],
-    };
-    const st = { ...store, positions: [...store.positions, pos] };
-    setStore(st); await saveState(st); setAgainst({ reason: "" }); setMsg("Position opened."); setTab("paper");
+    const r = await commitPosition({ ticker, expKey, legs, dte, analysis: A, spot, name: stratName,
+      alpacaOrder, clashInfo: clash, reason: against.reason });
+    if (!r.ok) { setMsg(`Risk gate: position not opened. ${r.gate.violations.map((v) => v.message).join(" ")}`); return; }
+    setAgainst({ reason: "" }); setMsg("Position opened."); setTab("positions");
   };
   const delSaved = async (id) => { const st = { ...store, saved: store.saved.filter((s) => s.id !== id) }; setStore(st); await saveState(st); };
   const logEvent = useCallback((id, type, text) => {
@@ -805,7 +830,7 @@ export default function OptionsStrategyLab() {
           const unit = Math.abs(a.maxLoss);
           const n = Math.floor(optAmt / Math.max(1, a.entry >= 0 ? Math.abs(a.entry) * 100 : unit));
           if (n < 1) continue;
-          out.push({ tk, sent, name: pr.name, legs: pr.legs, expKey: ek, dte: d2, a, pop, n, ev: pop * a.maxProfit * n });
+          out.push({ tk, sent, name: pr.name, legs: pr.legs, expKey: ek, dte: d2, a, pop, n, spot: sp, ev: pop * a.maxProfit * n });
         }
       }
       // Ranking: valore atteso CORRETTO dal segnale a 4 fattori, e i CONFLICT in
@@ -925,7 +950,7 @@ export default function OptionsStrategyLab() {
   const nAttention = posAlerts.filter((a) => a.level === "action").length;
 
   /* ---- the wizard search (PRD §5, screens 2 → 3) ----
-     Two things can come out of here: a candidate loaded in the Builder, or the
+     Two things can come out of here: two roads on screen 3, or the
      "nothing today" screen. The refusal is a first-class outcome, so it is
      computed here from the same numbers the rest of the app uses, and its
      sentences come from src/rules.js — never typed into a component. */
@@ -974,6 +999,10 @@ export default function OptionsStrategyLab() {
       // candidati da ENTRAMBE le famiglie: direzionale (sentiment scanner) + intervallo (neutral)
       const fams = best.sugg === "neutral" ? ["neutral"] : [best.sugg, "neutral"];
       const cands = fams.flatMap((sent) => buildPresets(sent, sp, getU(best.tk).step, strikes).map((pr) => {
+        // A single long option is not a first trade: it pays for time it usually
+        // does not get, and a beginner reads the loss as bad luck rather than as
+        // decay. They stay on the full desk; the guided flow never proposes one.
+        if (pr.legs.length < 2) return null;
         const a = analyze(pr.legs, sp, d2, getU(best.tk).iv, qq);
         if (!Number.isFinite(a.maxProfit) || a.maxProfit <= 0 || !Number.isFinite(a.maxLoss) || a.maxLoss >= 0) return null;
         const ivA = a.legPx.reduce((x, y) => x + y.iv, 0) / Math.max(1, a.legPx.length);
@@ -988,7 +1017,7 @@ export default function OptionsStrategyLab() {
       // 4) Nothing fits the budget: also a real answer, not an error toast.
       if (!cands.length) return stop([{ id: "budget", text: NOTHING_TODAY.budgetTooSmall(ans.risk) }]);
 
-      // The third question picks the winner: win often = highest chance,
+      // The third question picks the FIRST road: win often = highest chance,
       // win big = best payoff per dollar risked, balanced = best expected value.
       // Whichever they asked for, prefer the ones that are not expected to lose
       // money: "win big" should hand over the best-priced long shot, not simply
@@ -997,27 +1026,85 @@ export default function OptionsStrategyLab() {
         : ans.priority === "big" ? (a, b) => b.rr - a.rr
         : (a, b) => b.ev100 - a.ev100;
       const worthIt = cands.filter((x) => x.ev100 >= 0);
-      const pick = (worthIt.length ? worthIt : cands).slice().sort(rank)[0];
+      const pool = (worthIt.length >= 2 ? worthIt : cands).slice().sort(rank);
+      const first = pool[0];
 
-      // Screens 3 and 4 (two roads, confirm) are the next session's work. Until
-      // they exist the pick is handed to the Builder, which already has the
-      // chart, the risk gate and the paper open button.
+      // The SECOND road is not the runner-up: it is the one that trades the
+      // hardest against the first (PRD §5). Picking the second-best would show
+      // the same idea twice and teach nothing about the price of the choice.
+      //
+      // It must also be a real alternative. A candidate that is worse on how
+      // often it works AND on what it pays AND on what it costs is not a road,
+      // it is a mistake with a chart next to it — "two roads" only teaches when
+      // the second one buys something the first does not.
+      const rival = pool.slice(1).filter((x) =>
+        x.pop > first.pop + 1e-9 || x.rr > first.rr + 1e-9 || x.unit < first.unit - 1e-9);
+      const spread = (f) => { const xs = pool.map(f); const r = Math.max(...xs) - Math.min(...xs); return r > 0 ? r : 1; };
+      const dPop = spread((x) => x.pop), dRR = spread((x) => x.rr);
+      const contrast = (x) => Math.abs(x.pop - first.pop) / dPop + Math.abs(x.rr - first.rr) / dRR;
+      const second = rival.slice().sort((a, b) => contrast(b) - contrast(a))[0];
+
+      // 5) One road is advice, not teaching. If everything else on the board is
+      // beaten by the first on every axis, the app says so rather than dressing
+      // a dominated structure up as a choice.
+      if (!second) return stop([{ id: "one-road", text: NOTHING_TODAY.onlyOneRoad(ans.risk) }]);
+
+      const toCandidate = (x, n) => ({
+        id: `${best.tk}-${x.pr.name}-${n}`,
+        ticker: best.tk, name: x.pr.name, legs: x.pr.legs.map((l) => ({ ...l })),
+        entryNet: x.a.entry, spot: sp, expKey: ek, dte: d2,
+        maxProfit: x.a.maxProfit, maxLoss: x.a.maxLoss, risk: x.unit, pop: x.pop,
+        rr: x.rr, contracts: 1, a: x.a, sigma: (seasonal[best.tk]?.sigma) || getU(best.tk).sigma,
+      });
+
       setTicker(best.tk); setExpKey(ek);
-      setLegs(pick.pr.legs.map((l) => ({ ...l })));
-      setStratName(pick.pr.name);
-      setMc(null); setBt(null);
+      loadBars(best.tk);
       setWiz((w) => ({ ...w, busy: false }));
-      setView("desk"); setTab("build");
-      const inTen = Math.round(pick.pop * 10);
-      const odds = inTen <= 0 ? "it rarely works out, but when it does it pays a lot"
-        : inTen === 1 ? "it works out about 1 time in 10"
-        : `it works out about ${inTen} times in 10`;
-      setMsg(`${best.tk} · ${pick.pr.name} — ${odds}. Risking ${money(pick.unit)} to make up to ${money(pick.a.maxProfit)}. Check it below, then open it on paper.`);
+      setCandidates([toCandidate(first, 1), toCandidate(second, 2)]);
+      setPicked(null); setConfirmResult(null);
+      setWizStep("candidates");
     } catch (e) { setWiz((w) => ({ ...w, busy: false, err: String(e.message || e) })); }
   };
 
   /** "Decide for me": same search, no questions — your saved answers and limit. */
   const decideForMe = () => runWizard({ risk: Math.round(limits.perTradeLimit), horizon: RULES.targetEntryDTE });
+
+  /* ---- screen 3 → screen 4. Taking a road loads it on the bench too, so
+     "open it on the bench and change it" is one tap away from the refusal. */
+  const pickRoad = (c) => {
+    setPicked(c); setConfirmResult(null);
+    setTicker(c.ticker); setExpKey(c.expKey);
+    setLegs(c.legs.map((l) => ({ ...l }))); setStratName(c.name);
+    setMc(null); setBt(null);
+    setWizStep("confirm");
+  };
+
+  /* ---- screen 4. The gate runs AFTER the tap (PRD §5): the screen shows what
+     it measures, the tap makes it decide, and a refusal stays on this screen
+     with its reasons rather than becoming a toast somewhere else. */
+  const confirmRoad = async () => {
+    if (!picked) return;
+    setWiz((w) => ({ ...w, busy: true }));
+    try {
+      const r = await commitPosition({
+        ticker: picked.ticker, expKey: picked.expKey, legs: picked.legs, dte: picked.dte,
+        analysis: picked.a, spot: picked.spot, name: picked.name,
+        clashInfo: againstSignal(fused[picked.ticker], Math.abs(picked.a.greeks.delta) < 0.05 ? 0 : Math.sign(picked.a.greeks.delta)),
+        reason: "",
+      });
+      setConfirmResult(r.gate);
+      if (r.ok) {
+        setMsg(`${picked.ticker} · ${picked.name} is open on paper. ${exitPlanSentence()}`);
+        setView("desk"); setTab("positions");
+        setWizStep("open"); setPicked(null); setCandidates([]);
+      }
+    } catch (e) {
+      setWiz((w) => ({ ...w, err: String(e.message || e) }));
+    } finally {
+      setWiz((w) => ({ ...w, busy: false }));
+    }
+  };
+
 
   const setNotify = async (on) => {
     const st = { ...store, settings: { ...store.settings, notifyWhenReady: on } };
@@ -1142,6 +1229,14 @@ export default function OptionsStrategyLab() {
     return gate({ ticker, intent: "open", legs, dte, contracts: 1, maxLoss: A.maxLoss, maxProfit: A.maxProfit }, LOCAL_BOOK);
   }, [A, gate, legs, dte, ticker]); // eslint-disable-line
 
+  /** Wizard screen 4: the gate's reading BEFORE the tap — the same numbers, no
+      decision yet. Declared here, below `gate`: a useMemo runs during render,
+      so reading `gate` from above its own declaration is a crash, not a hoist. */
+  const confirmPreview = useMemo(() => (picked
+    ? gate({ ticker: picked.ticker, intent: "open", legs: picked.legs, dte: picked.dte, contracts: 1,
+      maxLoss: picked.maxLoss, maxProfit: picked.maxProfit }, LOCAL_BOOK)
+    : null), [picked, gate]); // eslint-disable-line
+
   /* ---- direzione del trade e scontro col segnale (PRD §7) ----
      La direzione la dà il delta netto della struttura: positivo = il trade
      guadagna se il prezzo sale. Sotto 0.05 in valore assoluto la struttura è
@@ -1178,18 +1273,22 @@ export default function OptionsStrategyLab() {
   // The old "Today" tab is gone: what needs attention today is the wizard's
   // front page now (PRD §5), so keeping a second copy behind a flag would just
   // be two screens that can disagree about the same positions.
-  const TABS = [
-    { id: "scan", label: "Scanner", I: Radar },
-    { id: "optimize", label: "Optimize", I: Layers },
-    { id: "build", label: "Builder", I: Play },
-    { id: "3d", label: "Market levels", I: Box },
-    { id: "backtest", label: "History", I: FlaskConical },
-    { id: "news", label: "News", I: Newspaper },
-    { id: "meteo", label: "Weather", I: CloudSun },
-    { id: "copilot", label: "Copilot", I: MessageSquare },
-    { id: "report", label: "Report", I: FileText },
-    { id: "paper", label: "Positions", I: Briefcase },
-    { id: "settings", label: "Settings", I: SlidersHorizontal },
+  // THREE places, and only three. A place is somewhere you go and stay: the
+  // Bench where a trade is built, the Positions you hold, the Journal of what
+  // happened. Everything that used to be a tab of its own — Radar, Shortlist,
+  // market levels, history, the copilot — is EVIDENCE for the trade on the
+  // bench, so it opens underneath it instead of taking you somewhere else.
+  const PLACES = [
+    { id: "bench", label: "Bench", I: Play },
+    { id: "positions", label: "Positions", I: Briefcase },
+    { id: "journal", label: "Journal", I: FileText },
+  ];
+  const EVIDENCE = [
+    { id: "radar", label: "Radar", I: Radar, sub: "which market, and why" },
+    { id: "shortlist", label: "Shortlist", I: Layers, sub: "which structures fit" },
+    { id: "levels", label: "Market levels", I: Box, sub: "where the open interest sits" },
+    { id: "history", label: "History", I: FlaskConical, sub: "what happened in past years" },
+    { id: "copilot", label: "Copilot", I: MessageSquare, sub: "ask about this trade" },
   ];
   const SENT = SENTIMENTS.find((s) => s.id === sentiment);
 
@@ -1235,11 +1334,11 @@ export default function OptionsStrategyLab() {
           <WizardOpen
             positions={store.positions} posAlerts={posAlerts} attention={nAttention}
             marketReady={marketReady} perTradeLimit={limits.perTradeLimit}
-            onPositions={() => { setView("desk"); setTab("paper"); }}
+            onPositions={() => { setView("desk"); setTab("positions"); }}
             onFind={() => { setNothing(null); setWizStep("questions"); }}
             onDecide={decideForMe}
-            onDesk={() => { setView("desk"); setTab("scan"); }}
-            onSettings={() => { setView("desk"); setTab("settings"); }}
+            onDesk={() => { setView("desk"); setTab("bench"); setEv("radar"); }}
+            onSettings={() => { setView("desk"); setShowSettings(true); }}
           />
         )}
         {wizStep === "questions" && (
@@ -1248,14 +1347,33 @@ export default function OptionsStrategyLab() {
             onBack={goHome} onSearch={() => runWizard()}
           />
         )}
+        {wizStep === "candidates" && (
+          <WizardCandidates
+            candidates={candidates} answers={wiz}
+            onPick={pickRoad}
+            onBack={() => setWizStep("questions")}
+          />
+        )}
+        {wizStep === "confirm" && (
+          <WizardConfirm
+            candidate={picked} preview={confirmPreview} result={confirmResult}
+            bars={barsCache[picked?.ticker] || []}
+            sigma={(seasonal[picked?.ticker]?.sigma) || getU(picked?.ticker).sigma}
+            driftAnnual={Math.log(1 + (((seasonal[picked?.ticker]?.monthlyMean) || getU(picked?.ticker).monthlyMean)[NOW_MONTH] || 0) / 100) * 12}
+            busy={wiz.busy}
+            onConfirm={confirmRoad}
+            onBack={() => { setConfirmResult(null); setWizStep("candidates"); }}
+            onDesk={() => { setView("desk"); setTab("bench"); }}
+          />
+        )}
         {wizStep === "nothing" && (
           <NothingToday
             reasons={nothing || []} notified={!!store.settings.notifyWhenReady}
             hasPositions={store.positions.length > 0}
             onNotify={() => setNotify(true)}
             onBack={() => setWizStep("questions")}
-            onPositions={() => { setView("desk"); setTab("paper"); }}
-            onDesk={() => { setView("desk"); setTab("scan"); }}
+            onPositions={() => { setView("desk"); setTab("positions"); }}
+            onDesk={() => { setView("desk"); setTab("bench"); setEv("radar"); }}
           />
         )}
       </div>
@@ -1295,6 +1413,11 @@ export default function OptionsStrategyLab() {
             <Btn small ghost onClick={() => setTheme(T.dark ? "light" : "dark")}>
               {T.dark ? <Sun size={13} /> : <Moon size={13} />} {T.dark ? "Light" : "Dark"}
             </Btn>
+            {/* Settings is not a place you trade from, so it is not one of the
+                three: it sits behind this gear, exactly as it does on screen 1. */}
+            <Btn small ghost={!showSettings} color={T.blue} onClick={() => setShowSettings((v) => !v)}>
+              <SlidersHorizontal size={13} /> Settings
+            </Btn>
           </div>
         </div>
 
@@ -1310,7 +1433,7 @@ export default function OptionsStrategyLab() {
 
         {msg && <div style={{ ...mono, fontSize: 11.5, color: T.amber, border: `1px solid ${T.amber}44`, background: `${T.amber}10`, borderRadius: 6, padding: "7px 10px", marginTop: 10 }}>{msg}</div>}
 
-        <TabBoundary k={tab}>
+        <TabBoundary k={`${tab}/${ev}`}>
         {/* Alert Center: morning check */}
         {posAlerts.length > 0 && (
           <div style={{ marginTop: 12, padding: "10px 12px", background: T.panel, border: `1px solid ${nAttention ? T.red : T.line}55`, borderRadius: 8 }}>
@@ -1321,7 +1444,7 @@ export default function OptionsStrategyLab() {
               {posAlerts.map(({ p, pnl, dteLeft, level, label }) => {
                 const c2 = level === "action" ? T.red : level === "watch" ? T.amber : T.green;
                 return (
-                  <button key={p.id} onClick={() => setTab("paper")}
+                  <button key={p.id} onClick={() => setTab("positions")}
                     style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", background: "transparent", border: "none", cursor: "pointer", padding: 0, textAlign: "left" }}>
                     <span style={{ width: 7, height: 7, borderRadius: 4, background: c2, flexShrink: 0 }} />
                     <span style={{ ...mono, fontSize: 11.5, color: T.ink, fontWeight: 700 }}>{p.ticker} {p.name}</span>
@@ -1334,24 +1457,53 @@ export default function OptionsStrategyLab() {
           </div>
         )}
 
-        {/* Tabs */}
-        <div style={{ display: "flex", gap: 4, marginTop: 14, overflowX: "auto", paddingBottom: 2 }}>
-          {TABS.map(({ id, label, I }) => (
-            <button key={id} onClick={() => setTab(id)}
-              style={{
-                ...mono, fontSize: 11, padding: "8px 10px", borderRadius: 6, whiteSpace: "nowrap", cursor: "pointer",
-                background: tab === id ? T.amber : "transparent", color: tab === id ? T.onAccent : T.mut,
-                border: `1px solid ${tab === id ? T.amber : T.line}`, display: "inline-flex", gap: 5, alignItems: "center",
-              }}>
-              <I size={12} /> {label}{id === "paper" && nAttention > 0 && (
-                <span style={{ ...mono, fontSize: 9, background: T.red, color: T.onAccent, borderRadius: 8, padding: "0 5px", fontWeight: 800 }}>{nAttention}</span>
-              )}
-            </button>
-          ))}
+        {/* The three places */}
+        <div style={{ display: "flex", gap: 6, marginTop: 14, flexWrap: "wrap" }}>
+          {PLACES.map(({ id, label, I }) => {
+            const on = tab === id && !showSettings;
+            return (
+              <button key={id} onClick={() => { setTab(id); setShowSettings(false); }}
+                style={{
+                  ...sansUI, fontSize: 14, fontWeight: on ? 700 : 500, minHeight: 46,
+                  padding: "8px 16px", borderRadius: 8, whiteSpace: "nowrap", cursor: "pointer",
+                  background: on ? T.amber : "transparent", color: on ? T.onAccent : T.ink,
+                  border: `1.5px solid ${on ? T.amber : T.line}`, display: "inline-flex", gap: 6, alignItems: "center",
+                }}>
+                <I size={14} /> {label}{id === "positions" && nAttention > 0 && (
+                  <span style={{ ...mono, fontSize: 9, background: T.red, color: T.onAccent, borderRadius: 8, padding: "0 5px", fontWeight: 800 }}>{nAttention}</span>
+                )}
+              </button>
+            );
+          })}
         </div>
 
+        {/* The evidence, under the bench where the trade is. Tabs are not
+            destinations: each of these answers a question about THIS trade. */}
+        {tab === "bench" && !showSettings && (
+          <div style={{ marginTop: 10 }}>
+            <div style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center" }}>
+              <span style={{ ...mono, fontSize: 10, letterSpacing: "0.15em", color: T.dim, marginRight: 4 }}>EVIDENCE</span>
+              {EVIDENCE.map(({ id, label, I, sub }) => (
+                <button key={id} onClick={() => setEv(ev === id ? null : id)} title={sub}
+                  style={{
+                    ...mono, fontSize: 11, padding: "7px 10px", borderRadius: 6, whiteSpace: "nowrap", cursor: "pointer",
+                    background: ev === id ? `${T.blue}18` : "transparent", color: ev === id ? T.blue : T.mut,
+                    border: `1px solid ${ev === id ? T.blue : T.line}`, display: "inline-flex", gap: 5, alignItems: "center",
+                  }}>
+                  <I size={12} /> {label} {ev === id ? "▲" : "▼"}
+                </button>
+              ))}
+            </div>
+            {ev && (
+              <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 6 }}>
+                {EVIDENCE.find((e) => e.id === ev)?.sub} — evidence for the trade on the bench, not a place of its own.
+              </div>
+            )}
+          </div>
+        )}
+
         {/* ============ SCANNER ============ */}
-        {tab === "scan" && (
+        {tab === "bench" && !showSettings && ev === "radar" && (
           <Panel style={{ marginTop: 12 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
               <Lbl>BEST OPPORTUNITIES · 4-FACTOR SIGNAL · {MONTHS[NOW_MONTH].toUpperCase()}</Lbl>
@@ -1380,19 +1532,19 @@ export default function OptionsStrategyLab() {
                       );
                     })()}
                     <span style={{ ...mono, fontSize: 10, color: sObj.color, border: `1px solid ${sObj.color}66`, padding: "3px 8px", borderRadius: 5 }}>{sObj.icon} {sObj.label.toUpperCase()}</span>
-                    <Btn small ghost onClick={() => { switchTicker(r.tk); setSentiment(r.sugg); setTab("optimize"); }}>→ Build options</Btn>
+                    <Btn small ghost onClick={() => { switchTicker(r.tk); setSentiment(r.sugg); setTab("bench"); setEv("shortlist"); }}>→ Shortlist</Btn>
                   </div>
                 );
               })}
             </div>
             <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 10 }}>
-The order weighs the 4-factor signal (seasonality, price trend, weather, news): CONFLICT tickers stay last regardless. Tap the badge for the full narrative. In the Backtest tab, "Real 10y seasonality" replaces the estimates with ten years of actual data for that market.
+The order weighs the 4-factor signal (seasonality, price trend, weather, news): CONFLICT tickers stay last regardless. Tap the badge for the full narrative. Under History, "Real 10y seasonality" replaces the estimates with ten years of actual data for that market.
             </div>
           </Panel>
         )}
 
         {/* ============ OPTIMIZE ============ */}
-        {tab === "optimize" && spot && (
+        {tab === "bench" && !showSettings && ev === "shortlist" && spot && (
           <div style={{ marginTop: 12 }}>
             <Panel>
               <Lbl>1 · WHICH WAY DO YOU THINK IT GOES?</Lbl>
@@ -1443,6 +1595,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
 
             <WhyThisTrade
               fused={fused[ticker]}
+              ticker={ticker} weatherData={weather} newsItems={newsPool} month={NOW_MONTH}
               title={`WHY THIS TRADE · ${ticker}`}
               note={fused[ticker]?.agreement === "CONFLICT"
                 ? "Candidates on a CONFLICT ticker rank last in the multi-market scan below, whatever their expected value."
@@ -1466,12 +1619,12 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                             {a.realCount === p.legs.length ? "● live prices" : `◐ ${a.realCount}/${p.legs.length} live`}
                           </span>
                         </div>
-                        <Btn small onClick={() => applyPreset(p, a)}>Open in Builder →</Btn>
+                        <Btn small onClick={() => applyPreset(p, a)}>Open on the Bench →</Btn>
                       </div>
                       <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 4 }}>
                         {p.legs.map((l) => `${l.side > 0 ? "+" : "−"}${l.qty} ${l.strike}${l.type === "call" ? "C" : "P"}`).join(" / ")}
                       </div>
-                      <div style={{ marginTop: 6 }}><PayoffThumb curve={a.curve} /></div>
+                      <div style={{ marginTop: 6 }}><BandThumbnail bands={payoffBands({ legs: p.legs, entryNet: a.entry, spot })} width={220} height={40} title={bandTakeaway(payoffBands({ legs: p.legs, entryNet: a.entry, spot }), { ticker })} /></div>
                       <div style={{ display: "flex", gap: 14, marginTop: 8, flexWrap: "wrap" }}>
                         <Stat k={a.entry >= 0 ? "YOU PAY" : "YOU RECEIVE"} v={fmt$(Math.abs(a.entry) * 100)} />
                         <Stat k="MAX PROFIT" v={fmt$(a.maxProfit)} c={T.green} />
@@ -1492,7 +1645,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                             <Stat k="MOST YOU CAN MAKE" v={fmt$(sc.totProfit)} c={T.green} />
                             {pop != null && <Stat k="PROFIT × CHANCE" v={fmt$(sc.totProfit * pop)} c={T.blue} />}
                             <Stat k={optMode === "target" ? "HITS THE TARGET" : "BUDGET USED"} v={optMode === "target" ? (sc.totProfit >= optAmt ? "✓ yes" : "✗ no") : `${((sc.n * sc.unit / Math.max(1, optAmt)) * 100).toFixed(0)}%`} c={T.blue} />
-                            <div style={{ ...mono, fontSize: 9, color: T.dim, width: "100%" }}>Totals for ×{sc.n} · the Builder always shows one, so divide by {sc.n} to compare.</div>
+                            <div style={{ ...mono, fontSize: 9, color: T.dim, width: "100%" }}>Totals for ×{sc.n} · the Bench always shows one, so divide by {sc.n} to compare.</div>
                           </div>
                         );
                       })()}
@@ -1534,7 +1687,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                     {multi.res.map((r, i) => (
                       <div key={i} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "8px 10px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7 }}>
                         <span style={{ ...mono, fontSize: 10, color: T.dim, width: 16 }}>#{i + 1}</span>
-                        <PayoffThumb curve={r.a.curve} height={36} />
+                        <BandThumbnail bands={payoffBands({ legs: r.legs, entryNet: r.a.entry, spot: r.spot })} width={130} height={34} title={bandTakeaway(payoffBands({ legs: r.legs, entryNet: r.a.entry, spot: r.spot }), { ticker: r.tk })} />
                         <div style={{ flex: 1, minWidth: 140 }}>
                           <div style={{ fontWeight: 700, color: T.ink, fontSize: 12.5 }}>{r.tk} · {r.name}</div>
                           <div style={{ ...mono, fontSize: 10, color: T.dim }}>{r.expKey} · {r.dte} DTE · ×{r.n}</div>
@@ -1550,7 +1703,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                         <Stat k="EV/$100" v={`${r.ev100 >= 0 ? "+" : ""}$${r.ev100.toFixed(0)}`} c={r.ev100 >= 0 ? T.green : T.red} />
                         <Stat k="RANK" v={`${r.rank >= 0 ? "+" : ""}${r.rank.toFixed(0)}`} c={r.conflict ? T.red : T.amber} />
                         <Stat k="MAX TOT" v={fmt$(r.n * r.a.maxProfit)} c={T.green} />
-                        <Btn small ghost onClick={() => { setTicker(r.tk); setExpKey(r.expKey); setLegs(r.legs.map((l) => ({ ...l }))); setStratName(`${r.name} (multi)`); setMc(null); setBt(null); setTab("build"); }}>Builder →</Btn>
+                        <Btn small ghost onClick={() => { setTicker(r.tk); setExpKey(r.expKey); setLegs(r.legs.map((l) => ({ ...l }))); setStratName(`${r.name} (multi)`); setMc(null); setBt(null); setTab("bench"); }}>Bench →</Btn>
                       </div>
                     ))}
                   </div>
@@ -1562,7 +1715,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
         )}
 
         {/* ============ BUILDER ============ */}
-        {tab === "build" && spot && A && (
+        {tab === "bench" && !showSettings && spot && A && (
           <div style={{ marginTop: 12 }}>
             <Panel>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
@@ -1592,6 +1745,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
 
               <WhyThisTrade
                 fused={fused[ticker]}
+                ticker={ticker} weatherData={weather} newsItems={newsPool} month={NOW_MONTH}
                 title={`WHY THIS TRADE · ${ticker}`}
                 note={tradeDir === 0
                   ? "This structure is direction-neutral: it wants a quiet tape more than a call on direction."
@@ -1690,15 +1844,15 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
               </div>
               {optLeg && <OptionPanel occ={optLeg.occ} label={optLeg.label} quote={optLeg.quote} onClose={() => setOptLeg(null)} />}
 
-              {/* Riconciliazione con l'Optimizer: stesso trade, numeri sempre spiegati */}
+              {/* Reconciliation with the Shortlist: same trade, numbers always explained */}
               {optRef && optRef.name === stratName && optRef.expKey === expKey && (() => {
                 const d = (A.entry - optRef.entry) * 100;
                 if (Math.abs(d) < 1) return (
-                  <div style={{ ...mono, fontSize: 10, color: T.green, marginTop: 10 }}>✓ Same numbers as the Optimize tab (same live quotes, one contract).</div>
+                  <div style={{ ...mono, fontSize: 10, color: T.green, marginTop: 10 }}>✓ Same numbers as the Shortlist (same live quotes, one contract).</div>
                 );
                 return (
                   <div style={{ ...mono, fontSize: 10, color: T.amber, marginTop: 10 }}>
-                    ⚠ The price moved {fmt$(Math.abs(d))} {d > 0 ? "against you" : "in your favour"} since the Optimize tab: the quotes refreshed in between. This one is the current price.
+                    ⚠ The price moved {fmt$(Math.abs(d))} {d > 0 ? "against you" : "in your favour"} since the Shortlist was drawn: the quotes refreshed in between. This one is the current price.
                   </div>
                 );
               })()}
@@ -1791,7 +1945,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
         )}
 
         {/* ============ 3D ============ */}
-        {tab === "3d" && (
+        {tab === "bench" && !showSettings && ev === "levels" && (
           <Panel style={{ marginTop: 12 }}>
             <Lbl>WHERE THE MARKET IS POSITIONED (CBOE OPEN INTEREST)</Lbl>
             {!oiGrid && <div style={{ ...mono, fontSize: 12, color: T.mut, padding: 30, textAlign: "center" }}>Press Refresh at the top to load the prices first.</div>}
@@ -1830,7 +1984,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
         )}
 
         {/* ============ BACKTEST ============ */}
-        {tab === "backtest" && spot && (
+        {tab === "bench" && !showSettings && ev === "history" && spot && (
           <div style={{ marginTop: 12 }}>
             <Panel>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
@@ -1868,7 +2022,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
             <Panel style={{ marginTop: 10 }}>
               <Lbl>THREE PROBABILITIES · WHICH ONE TO READ, AND WHEN</Lbl>
               <div style={{ fontSize: 12.5, color: T.body, marginTop: 8, lineHeight: 1.6 }}>
-                <b style={{ color: T.blue }}>CHANCE</b> (Optimize and Builder): a snapshot — the odds of finishing in profit <i>at expiry</i>, worked out from what the market is pricing right now. Use it to <b>compare trades before you open one</b>.<br/>
+                <b style={{ color: T.blue }}>CHANCE</b> (Shortlist and Bench): a snapshot — the odds of finishing in profit <i>at expiry</i>, worked out from what the market is pricing right now. Use it to <b>compare trades before you open one</b>.<br/>
                 <b style={{ color: T.amber }}>SIMULATION</b> (below): the same question asked of history — 8,000 runs using the last ten years of seasonality and volatility. Use it to <b>check the season really is on your side</b>. If the two disagree sharply, the market is pricing something history has not seen: an event is coming.<br/>
                 <b style={{ color: T.violet }}>EXIT PATH</b> (on open positions): the most realistic — it walks day by day <i>from today</i> and applies your own rules ({ruleBadge()}). It is the only one that answers "from here, how does this end if I stick to the plan?". Use it to <b>decide whether to hold or take the money</b>.
               </div>
@@ -1958,58 +2112,13 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
           </div>
         )}
 
-        {/* ============ NEWS ============ */}
-        {tab === "news" && (
-          <Panel style={{ marginTop: 12 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-              <Lbl>NEWS FEED RSS · {ticker} ({U.newsQ})</Lbl>
-              <Btn small ghost onClick={() => loadNews(ticker)} disabled={busy === "news"}><RefreshCw size={11} /> Refresh</Btn>
-            </div>
-            <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap", alignItems: "center" }}>
-              {["ALL", ...Object.keys(UNDERLYINGS)].map((tk) => (
-                <Btn key={tk} small ghost={nf.tk !== tk} onClick={() => setNf({ ...nf, tk })}>{tk === "ALL" ? "All" : tk}</Btn>
-              ))}
-              <span style={{ width: 8 }} />
-              {[["all", "Everything"], ["geo", "Politics"], ["analysis", "Analysis"], ["tagged", "Market-moving"]].map(([v, l]) => (
-                <Btn key={v} small ghost={nf.kind !== v} color={T.violet} onClick={() => setNf({ ...nf, kind: v })}>{l}</Btn>
-              ))}
-              <select value={nf.days} onChange={(e) => setNf({ ...nf, days: +e.target.value })}
-                style={{ ...mono, background: T.bg, color: T.ink, border: `1px solid ${T.line}`, borderRadius: 5, padding: "4px 6px", fontSize: 11 }}>
-                <option value={1}>Last 24 hours</option><option value={3}>Last 3 days</option><option value={7}>Last week</option><option value={0}>Any date</option>
-              </select>
-              <Inp placeholder="search…" value={nf.q} onChange={(e) => setNf({ ...nf, q: e.target.value })} style={{ width: 130 }} />
-            </div>
-            <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
-              {news[ticker]?.loading && <div style={{ ...mono, fontSize: 12, color: T.mut }}>Loading headlines…</div>}
-              {(news[ticker]?.items || []).filter((n) => {
-                if (nf.tk !== "ALL" && !(n.impacts || []).some((im) => im.tk === nf.tk)) return false;
-                if (nf.kind === "geo" && !n.geo) return false;
-                if (nf.kind === "analysis" && !n.analysis) return false;
-                if (nf.kind === "tagged" && !(n.impacts || []).length) return false;
-                if (nf.days && n.date && Date.now() - new Date(n.date) > nf.days * 864e5) return false;
-                if (nf.q && !n.title.toLowerCase().includes(nf.q.toLowerCase())) return false;
-                return true;
-              }).map((n, i) => (
-                <a key={i} href={n.link} target="_blank" rel="noreferrer" style={{ textDecoration: "none", padding: "9px 11px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7, display: "block" }}>
-                  <div style={{ color: T.ink, fontSize: 13, fontWeight: 600, display: "flex", gap: 6, alignItems: "flex-start" }}>
-                    <ExternalLink size={12} style={{ marginTop: 3, color: T.blue, flexShrink: 0 }} /> {n.title}
-                  </div>
-                  <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 3 }}>{n.src}{n.date ? ` · ${ago(n.date)}` : ""}</div>
-                  <ImpactTags item={n} />
-                </a>
-              ))}
-              {news[ticker] && !news[ticker].loading && !(news[ticker].items || []).length && (
-                <div style={{ ...mono, fontSize: 12, color: T.mut }}>No headlines right now. Try refreshing.</div>
-              )}
-            </div>
-            <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 10 }}>
-              Sources: Google News (including OPEC, sanctions, Black Sea, USDA and China searches), Yahoo Finance per market, and the US Energy Information Administration. Every headline is tagged with which market it moves, which way, and why — tap a tag to read it.
-            </div>
-          </Panel>
-        )}
+        {/* News and Weather are no longer tabs. They are the evidence behind the
+            "Why this trade" panel: tapping the weather bar opens the regions and
+            their anomalies, tapping the news bar opens the headlines with their
+            tags. Evidence belongs next to the claim it supports. */}
 
         {/* ============ PAPER + INTEGRAZIONI ============ */}
-        {tab === "paper" && (
+        {tab === "positions" && !showSettings && (
           <div style={{ marginTop: 12 }}>
             <Panel>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
@@ -2036,13 +2145,17 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
                         <div style={{ fontWeight: 700, color: T.ink, fontSize: 13.5 }}>{p.ticker} · {p.name}</div>
                         <div style={{ display: "flex", gap: 6 }}>
-                          <Btn small ghost color={T.blue} onClick={() => { setTicker(p.ticker); if (!chains[p.ticker]) refreshChain(p.ticker); setExpKey(p.expKey || null); setLegs(p.legs.map((l) => ({ ...l }))); setStratName(p.name + " (monitor)"); setTab("build"); }}>Monitor ↗</Btn>
+                          <Btn small ghost color={T.blue} onClick={() => { setTicker(p.ticker); if (!chains[p.ticker]) refreshChain(p.ticker); setExpKey(p.expKey || null); setLegs(p.legs.map((l) => ({ ...l }))); setStratName(p.name + " (monitor)"); setTab("bench"); }}>Monitor ↗</Btn>
                           <Btn small ghost color={T.red} onClick={() => closePos(p.id)}><Trash2 size={11} /> Close</Btn>
                         </div>
                       </div>
                       <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 3 }}>
                         {p.legs.map((l) => `${l.side > 0 ? "+" : "−"}${l.qty} ${l.strike}${l.type === "call" ? "C" : "P"}`).join(" / ")} · expires {p.expKey || new Date(p.expiry).toLocaleDateString("en-GB")} · opened {new Date(p.openedAt).toLocaleDateString("en-GB")}
                       </div>
+                      {/* PRD §6: the gauge is the primary visual on position detail.
+                          It is drawn from payoff() like every other zone in the app. */}
+                      <GaugeFigure legs={p.legs} entryNet={p.entryNet} spot={s ?? p.entrySpot}
+                        ticker={p.ticker} size={230} style={{ marginTop: 10 }} />
                       <div style={{ display: "flex", gap: 14, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
                         <Stat k="ENTRY" v={fmt$(Math.abs(p.entryNet) * 100)} />
                         <Stat k="PROFIT NOW" v={pnl != null ? fmt$(pnl) : "loading…"} c={pnl >= 0 ? T.green : T.red} />
@@ -2089,7 +2202,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                       <div style={{ color: T.ink, fontWeight: 600, fontSize: 12.5 }}>{sv.ticker} · {sv.name}</div>
                       <div style={{ ...mono, fontSize: 10, color: T.dim }}>{sv.legs.map((l) => `${l.side > 0 ? "+" : "−"}${l.qty} ${l.strike}${l.type === "call" ? "C" : "P"}`).join(" / ")} · {sv.expKey || `${sv.dte} DTE`}</div>
                     </div>
-                    <Btn small ghost onClick={() => { setTicker(sv.ticker); if (!chains[sv.ticker]) refreshChain(sv.ticker); setExpKey(sv.expKey || null); setLegs(sv.legs.map((l) => ({ ...l }))); setStratName(sv.name); setMc(null); setBt(null); setTab("build"); }}>Load</Btn>
+                    <Btn small ghost onClick={() => { setTicker(sv.ticker); if (!chains[sv.ticker]) refreshChain(sv.ticker); setExpKey(sv.expKey || null); setLegs(sv.legs.map((l) => ({ ...l }))); setStratName(sv.name); setMc(null); setBt(null); setTab("bench"); }}>Load</Btn>
                     <button onClick={() => delSaved(sv.id)} style={{ background: "none", border: "none", color: T.dim, cursor: "pointer" }}><Trash2 size={13} /></button>
                   </div>
                 ))}
@@ -2101,7 +2214,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
               <Lbl><Plug size={11} style={{ verticalAlign: "-1px" }} /> INTEGRATIONS</Lbl>
               <div style={{ marginTop: 10 }}>
                 <div style={{ ...mono, fontSize: 11, color: T.ink, fontWeight: 700 }}>Alpha Vantage — free 10-year price history</div>
-                <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 6 }}>The key lives in the server environment (ALPHAVANTAGE_KEY). It powers the real seasonality and the year-by-year history in the Backtest tab.</div>
+                <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 6 }}>The key lives in the server environment (ALPHAVANTAGE_KEY). It powers the real seasonality and the year-by-year history under History.</div>
               </div>
               <div style={{ marginTop: 14 }}>
                 <div style={{ ...mono, fontSize: 11, color: T.ink, fontWeight: 700 }}>Alpaca paper trading</div>
@@ -2126,21 +2239,21 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
               </div>
               <div style={{ marginTop: 14 }}>
                 <div style={{ ...mono, fontSize: 11, color: T.ink, fontWeight: 700 }}>Your capital and limits</div>
-                <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 6 }}>Now in the Settings tab, next to the theme.</div>
+                <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 6 }}>Behind the Settings button at the top of this page, next to the theme.</div>
               </div>
               <div style={{ marginTop: 14 }}>
                 <div style={{ ...mono, fontSize: 11, color: T.ink, fontWeight: 700 }}>Report webhook (optional)</div>
                 <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
                   <Inp placeholder="https://hooks.zapier.com/…" value={store.settings.webhook} onChange={(e) => setSetting("webhook", e.target.value)} style={{ flex: 1, minWidth: 200 }} />
                 </div>
-                <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 4 }}>The Report tab can post each report to Zapier or Make, which can forward it by email or messaging.</div>
+                <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 4 }}>The report in the Journal can post itself to Zapier or Make, which can forward it by email or messaging.</div>
               </div>
             </Panel>
           </div>
         )}
 
         {/* ============ SETTINGS ============ */}
-        {tab === "settings" && (
+        {showSettings && (
           <div style={{ marginTop: 12, maxWidth: 620 }}>
             <Card>
               <Lbl>APPEARANCE</Lbl>
@@ -2242,26 +2355,91 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
           </div>
         )}
 
-        {tab === "meteo" && <MeteoTab news={news[ticker]?.items || []} data={weather} />}
-
-        {tab === "copilot" && (
+        {tab === "bench" && !showSettings && ev === "copilot" && (
           <CopilotTab
             apiKey={"server"}
             ctx={{ store, scan, news: news[ticker]?.items || [], ticker, legs, expKey, A, spot, seasonalSrc: seas.src, setMsg }}
           />
         )}
 
-        {tab === "report" && (
-          <ReportTab
-            apiKey={"server"}
-            setSetting={setSetting}
-            ctx={{ store, scan, news: news[ticker]?.items || [], ticker, legs, expKey, A, spot, seasonalSrc: seas.src, setMsg }}
-          />
+        {/* ============ JOURNAL — the third place ============
+            What actually happened, and what it says about the habits. The
+            report lives here too: it is a written record, not a workspace. */}
+        {tab === "journal" && !showSettings && (
+          <div style={{ marginTop: 12 }}>
+            <Panel>
+              <Lbl>THE RECORD · {(store.journal || []).length} CLOSED · {store.positions.length} OPEN</Lbl>
+              <div style={{ display: "flex", gap: 18, marginTop: 10, flexWrap: "wrap" }}>
+                <Stat k="LEVEL" v={journey.level} c={T.amber} />
+                <Stat k="AWARENESS" v={journey.score == null ? "—" : `${journey.score}/100`} c={journey.score >= 70 ? T.green : journey.score >= 40 ? T.amber : T.dim} />
+                <Stat k="CLOSED BY THE RULES" v={journey.closed ? `${journey.ruled}/${journey.closed}` : "—"} c={T.blue} />
+                <Stat k="INSIDE THE LIMIT" v={journey.coerenza == null ? "—" : pctText(journey.coerenza)} c={T.blue} />
+              </div>
+              <div style={{ fontSize: 13, color: T.mut, marginTop: 10, lineHeight: 1.5 }}>
+                Next: {journey.next}. Discipline is the share of trades you closed because a rule said so rather than
+                because you felt like it — it is the only number here that predicts the others.
+              </div>
+            </Panel>
+
+            <Panel style={{ marginTop: 10 }}>
+              <Lbl>CLOSED TRADES</Lbl>
+              {!(store.journal || []).length && (
+                <div style={{ ...mono, fontSize: 12, color: T.mut, marginTop: 8 }}>Nothing closed yet. Every trade you close lands here with the reason it ended.</div>
+              )}
+              <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
+                {(store.journal || []).slice().reverse().map((e) => (
+                  <div key={e.id} style={{ padding: "9px 11px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7 }}>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                      <span style={{ fontWeight: 700, color: T.ink, fontSize: 13 }}>{e.ticker} · {e.name}</span>
+                      <span style={{ ...mono, fontSize: 13, fontWeight: 700, color: e.pnl == null ? T.dim : e.pnl >= 0 ? T.green : T.red }}>{e.pnl == null ? "—" : fmt$(e.pnl)}</span>
+                      <span style={{ ...mono, fontSize: 10, color: e.ruleExit ? T.green : T.amber, border: `1px solid ${(e.ruleExit ? T.green : T.amber)}55`, borderRadius: 4, padding: "1px 6px" }}>
+                        {e.ruleExit ? "closed by the rules" : "closed by hand"}
+                      </span>
+                      <span style={{ ...mono, fontSize: 10, color: e.riskOk ? T.dim : T.red }}>
+                        {e.riskOk ? "inside the per-trade limit" : "over the per-trade limit at the time"}
+                      </span>
+                    </div>
+                    <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 3 }}>
+                      opened {new Date(e.openedAt).toLocaleDateString("en-GB")} · closed {new Date(e.t).toLocaleDateString("en-GB")}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Panel>
+
+            <ReportTab
+              apiKey={"server"}
+              setSetting={setSetting}
+              ctx={{ store, scan, news: news[ticker]?.items || [], ticker, legs, expKey, A, spot, seasonalSrc: seas.src, setMsg }}
+            />
+          </div>
         )}
 
-        {(tab === "optimize" || tab === "build" || tab === "backtest") && !spot && (
+        {tab === "bench" && !showSettings && !spot && (
           <Panel style={{ marginTop: 12 }}>
             <div style={{ ...mono, fontSize: 12, color: T.amber }}>Option prices for {ticker} have not loaded yet — press Refresh at the top.</div>
+          </Panel>
+        )}
+
+        {/* An empty bench is a normal state, not a blank screen: say what it is
+            for and where the trades come from. */}
+        {tab === "bench" && !showSettings && spot && !A && (
+          <Panel style={{ marginTop: 12 }}>
+            <Lbl>THE BENCH IS EMPTY</Lbl>
+            <div style={{ fontSize: 13.5, color: T.body, marginTop: 8, lineHeight: 1.55 }}>
+              This is where one trade sits while you take it apart: its payoff, its odds, its risk checks and
+              the four factors behind it. Nothing is on it yet.
+            </div>
+            <div style={{ fontSize: 13.5, color: T.mut, marginTop: 8, lineHeight: 1.55 }}>
+              Open <b style={{ color: T.blue }}>Radar</b> to see which market is worth looking at, or
+              <b style={{ color: T.blue }}> Shortlist</b> to see which structures fit — both are evidence buttons
+              just above. Or go back Home and answer three questions instead.
+            </div>
+            <div style={{ display: "flex", gap: 6, marginTop: 12, flexWrap: "wrap" }}>
+              <Btn small onClick={() => setEv("radar")}><Radar size={11} /> Radar</Btn>
+              <Btn small ghost onClick={() => setEv("shortlist")}><Layers size={11} /> Shortlist</Btn>
+              <Btn small ghost color={T.blue} onClick={goHome}>← Home</Btn>
+            </div>
           </Panel>
         )}
 

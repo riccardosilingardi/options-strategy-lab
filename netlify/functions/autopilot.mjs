@@ -62,7 +62,13 @@ export default async () => {
   const approvals = JSON.parse((await store.get("approvals")) || "{}");
   const briefsPrev = JSON.parse((await store.get("briefs")) || "{}");
   const positions = state.positions || [];
-  if (!positions.length) return new Response("no positions");
+  // "Notify me" on the nothing-today screen writes settings.notifyWhenReady.
+  // The autopilot is the only thing that runs while the app is closed, so if it
+  // ignored the flag the button would be a promise nobody keeps. With the flag
+  // on we still produce a brief when there is nothing open, because "still
+  // nothing, here is why" is exactly what was asked for.
+  const notifyWhenReady = state.settings?.notifyWhenReady === true;
+  if (!positions.length && !notifyWhenReady) return new Response("no positions");
   const webhook = Netlify.env.get("WEBHOOK_URL") || state.settings?.webhook || null;
   const anthKey = Netlify.env.get("ANTHROPIC_KEY");
   const siteUrl = Netlify.env.get("URL") || "https://options-strategy-lab.netlify.app";
@@ -94,14 +100,14 @@ export default async () => {
     const prev = briefsPrev[pos.id];
     const material = !prev || Math.abs((prev.tis ?? 50) - tis) >= 10 || pctMax >= RULES.takeProfitPct * 100 || pnl <= RULES.stopLossPct * pos.maxLoss || dteLeft <= RULES.exitDTE || (prev.dteLeft ?? 99) > RULES.exitDTE;
 
-    let verdict = "HOLD", rationale = "Nessun cambiamento materiale: HOLD confermato.", evidence = [], invalidation = "";
+    let verdict = "HOLD", rationale = "Nothing material has changed: HOLD confirmed.", evidence = [], invalidation = "";
     if (material && anthKey) {
       try {
         const facts = {
-          posizione: { ticker: pos.ticker, nome: pos.name, legs: pos.legs, exp: pos.expKey, dteLeft },
+          position: { ticker: pos.ticker, name: pos.name, legs: pos.legs, exp: pos.expKey, dteLeft },
           targets: { takeProfit: +(RULES.takeProfitPct * pos.maxProfit).toFixed(0), stopWarning: +(RULES.stopLossPct * pos.maxLoss).toFixed(0), exitDTE: RULES.exitDTE },
-          tesi_ingresso: pos.thesis,
-          oggi: { fonte_chain: data ? "CBOE delayed" : "modello BS", spot: +spot.toFixed(2), pnl: +pnl.toFixed(0), pct_max_profit: +pctMax.toFixed(0), pop_ora: +(pop * 100).toFixed(0), iv_ora: +(iv * 100).toFixed(0), tis, stagionale_mese: seasonalNow },
+          entryThesis: pos.thesis,
+          today: { chainSource: data ? "CBOE delayed" : "Black-Scholes model", spot: +spot.toFixed(2), pnl: +pnl.toFixed(0), pct_max_profit: +pctMax.toFixed(0), popNow: +(pop * 100).toFixed(0), ivNow: +(iv * 100).toFixed(0), tis, seasonalThisMonth: seasonalNow },
           simulator_from_today: { p_take_profit_first: +(sim.pTP * 100).toFixed(0), p_stop_first: +(sim.pSL * 100).toFixed(0), p_exit_at_exit_dte_positive: +(sim.pTimePos * 100).toFixed(0), expected_pnl_following_rules: +sim.ev.toFixed(0), median_days_to_take_profit: sim.medDays },
         };
         const r = await fetch("https://api.anthropic.com/v1/messages", {
@@ -118,7 +124,7 @@ export default async () => {
         const parsed = JSON.parse(txt.slice(txt.indexOf("{"), txt.lastIndexOf("}") + 1));
         verdict = ({ CHIUDI_TUTTO: "CLOSE_ALL", CLOSE: "CLOSE_ALL" }[parsed.verdict] || parsed.verdict || verdict); rationale = parsed.rationale || rationale;
         evidence = parsed.evidence || []; invalidation = parsed.invalidation || "";
-      } catch (e) { rationale = `AI non disponibile (${String(e.message).slice(0, 60)}): applico regole meccaniche.`; }
+      } catch (e) { rationale = `The model could not be reached (${String(e.message).slice(0, 80)}): the mechanical rules decide instead.`; }
     }
     // fallback regole meccaniche
     if (pctMax >= RULES.takeProfitPct * 100 && verdict === "HOLD") { verdict = "CLOSE_ALL"; rationale = `Rule: reached ${pctText(RULES.takeProfitPct)} of max profit.`; }
@@ -141,7 +147,7 @@ export default async () => {
     if (verdict !== "HOLD" && gateResult && !gateResult.pass) {
       rejected.push({ pos: `${pos.ticker} ${pos.name}`, verdict, reasons: gateResult.violations.map((v) => v.message) });
       pos.timeline = [...(pos.timeline || []), { t: Date.now(), type: "gate",
-        text: `RISK GATE: ${verdict} non proposto — ${gateResult.violations.map((v) => v.message).join(" ")}` }];
+        text: `RISK GATE: ${verdict} not proposed — ${gateResult.violations.map((v) => v.message).join(" ")}` }];
     }
     if (verdict !== "HOLD" && gateResult && gateResult.pass) {
       const exp = (pos.expKey || "").replaceAll("-", "").slice(2);
@@ -168,7 +174,7 @@ export default async () => {
 
     const brief = { t: Date.now(), verdict, rationale, evidence, invalidation, pnl: +pnl.toFixed(0), pctMax: +pctMax.toFixed(0), tis, pop: +(pop * 100).toFixed(0), dteLeft, sim, approveUrl, gateWarnings: (gateResult?.warnings || []).map((w) => w.message), gateBlocked: !!(gateResult && !gateResult.pass) };
     briefsPrev[pos.id] = { tis, dteLeft, t: brief.t };
-    pos.timeline = [...(pos.timeline || []), { t: brief.t, type: "autopilot", text: `AUTOPILOT ${verdict} (${brief.pctMax}% maxP, TIS ${tis}) — ${rationale}${approveUrl ? " · [approva: " + approveUrl + "]" : ""}` }];
+    pos.timeline = [...(pos.timeline || []), { t: brief.t, type: "autopilot", text: `AUTOPILOT ${verdict} (${brief.pctMax}% maxP, TIS ${tis}) — ${rationale}${approveUrl ? " · [approve: " + approveUrl + "]" : ""}` }];
     out.push({ pos: `${pos.ticker} ${pos.name}`, brief });
   }
 
@@ -180,13 +186,19 @@ export default async () => {
     // PRD §9: il brief ha tre sezioni, e la terza esiste anche quando e' vuota.
     const openMd = out.map((o) => {
       const b = o.brief;
-      return `## ${o.pos} → **${b.verdict}** (TIS ${b.tis}/100)\n${b.rationale}\n${(b.evidence || []).map((e) => `- ${e}`).join("\n")}\n${b.invalidation ? `_Invalida se: ${b.invalidation}_\n` : ""}P&L ${b.pnl}$ (${b.pctMax}% maxP) · PoP ${b.pop}% · ${b.dteLeft} DTE · Sim: take profit ${(b.sim.pTP * 100).toFixed(0)}% / stop ${(b.sim.pSL * 100).toFixed(0)}%${(b.gateWarnings || []).map((w) => `\n⚠ ${w}`).join("")}${b.approveUrl ? `\n\n**→ AUTORIZZA (24h): ${b.approveUrl}**` : ""}`;
+      return `## ${o.pos} → **${b.verdict}** (TIS ${b.tis}/100)\n${b.rationale}\n${(b.evidence || []).map((e) => `- ${e}`).join("\n")}\n${b.invalidation ? `_Invalidated if: ${b.invalidation}_\n` : ""}P&L ${b.pnl}$ (${b.pctMax}% maxP) · PoP ${b.pop}% · ${b.dteLeft} DTE · Sim: take profit ${(b.sim.pTP * 100).toFixed(0)}% / stop ${(b.sim.pSL * 100).toFixed(0)}%${(b.gateWarnings || []).map((w) => `\n⚠ ${w}`).join("")}${b.approveUrl ? `\n\n**→ APPROVE (valid 24h): ${b.approveUrl}**` : ""}`;
     }).join("\n\n---\n\n");
     const rejectedMd = rejected.length
-      ? rejected.map((r) => `## ${r.pos} → ${r.verdict} **RESPINTO**\n${r.reasons.map((x) => `- ${x}`).join("\n")}`).join("\n\n")
-      : "_Nessuna proposta respinta in questo ciclo._";
-    const md = `# OPEN POSITIONS\n\n${openMd || "_Nessuna posizione aperta._"}\n\n---\n\n# NEW PROPOSALS\n\n_Fase OPEN non ancora attiva (PRD §9)._\n\n---\n\n# REJECTED BY GATE\n\n${rejectedMd}\n\n---\n\nRegole in vigore: ${ruleBadge()}.`;
-    try { await fetch(webhook, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ subject: `Autopilot ${new Date().toLocaleDateString("it-IT")}: ${out.map((o) => o.brief.verdict).join(", ")}${rejected.length ? ` · ${rejected.length} respinte dal gate` : ""}`, markdown: md }) }); } catch { /* log only */ }
+      ? rejected.map((r) => `## ${r.pos} → ${r.verdict} **REJECTED**\n${r.reasons.map((x) => `- ${x}`).join("\n")}`).join("\n\n")
+      : "_No proposal was rejected in this cycle._";
+    // The flag is stated in the brief, not just obeyed silently: the user who
+    // tapped "Notify me" needs to see that the watch is running.
+    const notifyMd = notifyWhenReady
+      ? `_You asked to be told when there is something worth doing. The watch is on: this brief reaches you every weekday whether or not anything has changed._`
+      : `_Watching is off. Turn on "Notify me" on the nothing-today screen to get this brief when the picture changes._`;
+    const md = `# OPEN POSITIONS\n\n${openMd || "_Nothing open._"}\n\n---\n\n# NEW PROPOSALS\n\n${notifyMd}\n\n_The OPEN phase is not live yet (PRD §9)._\n\n---\n\n# REJECTED BY GATE\n\n${rejectedMd}\n\n---\n\nRules in force: ${ruleBadge()}.`;
+    const subject = `Autopilot ${new Date().toISOString().slice(0, 10)}: ${out.length ? out.map((o) => o.brief.verdict).join(", ") : notifyWhenReady ? "watching, nothing open" : "nothing to report"}${rejected.length ? ` · ${rejected.length} rejected by the gate` : ""}`;
+    try { await fetch(webhook, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ subject, markdown: md }) }); } catch { /* log only */ }
   }
-  return Response.json({ ran: out.length, rejected: rejected.length });
+  return Response.json({ ran: out.length, rejected: rejected.length, notifyWhenReady });
 };

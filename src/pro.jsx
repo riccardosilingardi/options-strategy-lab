@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from "react";
-import { RefreshCw, Send, Trash2, Download, Sparkles, CloudSun, FileText, XCircle } from "lucide-react";
+import { RefreshCw, Send, Trash2, Download, Sparkles, FileText, XCircle } from "lucide-react";
 import { T } from "./theme.js";
 import { RULES, ruleBadge, takeProfitLabel, scaleOutLabel, stopLossLabel, exitDTELabel, perTradeCapLabel, copilotRulesBlock, money, pctText } from "./rules.js";
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, LineStyle } from "lightweight-charts";
 import { erf, netBS } from "./engine.js";
 import { ARROW, REGIONS, regionSignals, tagImpacts, taRead } from "./signals.js";
+import { useNarrow, BandThumbnail, payoffBands, bandTakeaway } from "./visuals.jsx";
 
 /* ============ theme (condiviso) ============ */
 const mono = { fontFamily: "ui-monospace, Menlo, monospace" };
@@ -107,7 +108,7 @@ export const ImpactTags = ({ item }) => (
 
    The region table, the climate normals and the anomaly read all live in
    src/signals.js. This block only fetches and reshapes for display, so the
-   Weather tab and fuseSignals() can never disagree about the same forecast.
+   weather drill-down and fuseSignals() can never disagree about the same forecast.
 ================================================================ */
 export { REGIONS };
 
@@ -128,108 +129,8 @@ export function weatherSignals(data) {
   return regionSignals(data);
 }
 
-export function MeteoTab({ news = [], data: given = null }) {
-  // Le previsioni le carica già l'app all'avvio (servono a fuseSignals): se
-  // arrivano da lì non le riscarichiamo, il tab le riusa.
-  const [fetched, setFetched] = useState(null);
-  const [err, setErr] = useState(null);
-  const data = given || fetched;
-  const load = async () => { try { setErr(null); setFetched(await fetchWeather()); } catch (e) { setErr(String(e.message || e)); } };
-  useEffect(() => { if (!given) load(); }, [given]);
-  const sig = data ? weatherSignals(data) : [];
-  // correlazione meteo ↔ news: per ticker, direzione prevalente delle news taggate
-  const newsDir = {};
-  for (const n of news) for (const im of n.impacts || []) {
-    if (!newsDir[im.tk]) newsDir[im.tk] = { up: 0, dn: 0 };
-    if (im.dir > 0) newsDir[im.tk].up++; else if (im.dir < 0) newsDir[im.tk].dn++;
-  }
-  const combined = sig.filter((s2) => s2.dir !== "≈").map((s2) => {
-    const agree = s2.tks.some((tk) => {
-      const nd = newsDir[tk]; if (!nd) return false;
-      return (s2.dir === "↑" && nd.up > nd.dn) || (s2.dir === "↓" && nd.dn > nd.up);
-    });
-    return { ...s2, agree };
-  });
-  return (
-    <div style={{ marginTop: 12 }}>
-      {combined.length > 0 && (
-        <Panel style={{ marginBottom: 10, border: `1px solid ${T.amber}44` }}>
-          <Lbl>⚡ LIVE SIGNALS · WEATHER {combined.some((s2) => s2.agree) ? "+ NEWS AGREEING" : ""}</Lbl>
-          <div style={{ display: "grid", gap: 5, marginTop: 8 }}>
-            {combined.map((s2, i) => (
-              <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                <span style={{ ...mono, fontSize: 12, fontWeight: 800, color: s2.dir === "↑" ? T.green : T.red }}>{s2.tks.join("+")} {s2.dir}</span>
-                <span style={{ ...mono, fontSize: 9, color: s2.agree ? T.amber : T.dim, border: `1px solid ${s2.agree ? T.amber : T.line}66`, borderRadius: 4, padding: "1px 6px" }}>
-                  {s2.agree ? "★ REINFORCED: weather and news point the same way" : `strength ${s2.strength} (weather only)`}
-                </span>
-              </div>
-            ))}
-          </div>
-          <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6 }}>★ means two independent sources agree, so the signal counts for more. Open the News tab first to include them.</div>
-        </Panel>
-      )}
-      <Panel>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-          <Lbl><CloudSun size={11} style={{ verticalAlign: "-1px" }} /> WEATHER VERSUS NORMAL (NEXT 14 DAYS) · CAUSE → EFFECT</Lbl>
-          <Btn small ghost onClick={load}><RefreshCw size={11} /> Refresh</Btn>
-        </div>
-        {err && <div style={{ ...mono, fontSize: 11, color: T.red, marginTop: 8 }}>{err}</div>}
-        <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
-          {sig.map((s, i) => {
-            const c = s.dir === "↑" ? T.green : s.dir === "↓" ? T.red : T.mut;
-            return (
-              <div key={i} style={{ padding: "9px 11px", background: T.bg, border: `1px solid ${c}44`, borderRadius: 7 }}>
-                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                  <span style={{ ...mono, fontSize: 12, fontWeight: 800, color: c }}>{s.tks.join("+")} {s.dir}</span>
-                  <span style={{ ...mono, fontSize: 10.5, color: T.dim }}>{s.region}</span>
-                </div>
-                <div style={{ fontSize: 12.5, color: T.body, marginTop: 3 }}>{s.why}</div>
-              </div>
-            );
-          })}
-          {!data && !err && <div style={{ ...mono, fontSize: 12, color: T.mut }}>Loading the forecast…</div>}
-        </div>
-      </Panel>
-      {data && (
-        <Panel style={{ marginTop: 10 }}>
-          <Lbl>REGIONS BEING WATCHED</Lbl>
-          <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
-            {REGIONS.map((rg) => {
-              const d = data[rg.id];
-              if (!d) return null;
-              const rain = d.prec.reduce((a, b) => a + b, 0);
-              const tmaxAvg = d.tmax.reduce((a, b) => a + b, 0) / d.tmax.length;
-              const hot = d.tmax.filter((t) => t >= 34).length;
-              return (
-                <div key={rg.id} style={{ padding: "9px 11px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 6 }}>
-                    <div style={{ fontWeight: 700, color: T.ink, fontSize: 13 }}>{rg.name} <span style={{ ...mono, fontSize: 10, color: T.blue }}>{rg.affects.join(" · ")}</span></div>
-                    <div style={{ ...mono, fontSize: 11, color: T.mut }}>avg high {tmaxAvg.toFixed(0)}°C · {hot} days ≥34°C · {rain.toFixed(0)}mm rain in 14 days</div>
-                  </div>
-                  <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 3 }}>{rg.phase}</div>
-                  <div style={{ display: "flex", gap: 2, marginTop: 6 }}>
-                    {d.tmax.map((t, i) => (
-                      <div key={i} title={`${d.dates[i]}: ${t}°C, ${d.prec[i]}mm`} style={{ flex: 1, height: 18, borderRadius: 2, background: t >= 36 ? T.red : t >= 33 ? T.amber : t >= 28 ? "#8a7434" : "#3a4a5a", opacity: 0.5 + Math.min(0.5, d.prec[i] / 20) }} />
-                    ))}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-          <div style={{ display: "flex", gap: 12, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
-            <span style={{ ...mono, fontSize: 10, color: T.dim }}>KEY (one mark per day, 14 days):</span>
-            {[["#3a4a5a", "mild, under 28°C"], ["#8a7434", "warm, 28-33°C"], ["#b8860b", "hot, 33-36°C"], ["#c0392b", "extreme, 36°C and up"]].map(([c, l]) => (
-              <span key={l} style={{ ...mono, fontSize: 10, color: T.mut, display: "inline-flex", gap: 4, alignItems: "center" }}>
-                <span style={{ width: 10, height: 10, borderRadius: 2, background: c, display: "inline-block" }} /> {l}
-              </span>
-            ))}
-            <span style={{ ...mono, fontSize: 10, color: T.dim }}>· the more solid the mark, the more rain · source open-meteo.com</span>
-          </div>
-        </Panel>
-      )}
-    </div>
-  );
-}
+// The Weather tab is gone (see WhyThisTrade below): weather is evidence for a
+// trade, not a place to visit. `weatherSignals` stays — the report still uses it.
 
 /* ================================================================
    2b) WHY THIS TRADE — the 4-factor read, in plain English
@@ -248,21 +149,64 @@ const AGREEMENT_STYLE = {
 const FACTOR_LABEL = { seasonal: "Seasonality", technical: "Price trend", weather: "Weather", news: "News flow" };
 const FACTOR_ORDER = ["seasonal", "technical", "weather", "news"];
 
-/** True while the viewport is too narrow to float an explanation over content. */
-export function useNarrow(px = 720) {
-  const [narrow, setNarrow] = useState(() => (typeof window !== "undefined" ? window.innerWidth <= px : false));
-  useEffect(() => {
-    if (typeof window === "undefined" || !window.matchMedia) return;
-    const mq = window.matchMedia(`(max-width: ${px}px)`);
-    const on = () => setNarrow(mq.matches);
-    on();
-    mq.addEventListener ? mq.addEventListener("change", on) : mq.addListener(on);
-    return () => (mq.removeEventListener ? mq.removeEventListener("change", on) : mq.removeListener(on));
-  }, [px]);
-  return narrow;
+// `useNarrow` lives in src/visuals.jsx with the rest of the tap-to-explain
+// plumbing — one definition, re-exported here so old imports keep working.
+export { useNarrow };
+
+/* ---- the drill-down behind the weather and news bars ----
+   Weather and News used to be tabs of their own, which meant the evidence for a
+   trade lived two taps away from the trade. They are not destinations: they are
+   what this panel is claiming. Tapping the weather bar opens the regions and
+   their anomalies; tapping the news bar opens the headlines with their tags. */
+
+function WeatherDrill({ ticker, weatherData, month }) {
+  const rows = regionSignals(weatherData, month).filter((r) => !ticker || r.tks.includes(ticker));
+  if (!weatherData) return <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 6 }}>The forecast has not loaded yet.</div>;
+  if (!rows.length) return <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 6 }}>No region watched for {ticker} has a usable forecast right now.</div>;
+  return (
+    <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
+      {rows.map((r, i) => {
+        const c = r.numDir > 0 ? T.green : r.numDir < 0 ? T.red : T.mut;
+        return (
+          <div key={i} style={{ padding: "7px 9px", background: T.bg, border: `1px solid ${c}44`, borderRadius: 6 }}>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <span style={{ ...mono, fontSize: 12, fontWeight: 800, color: c }}>{r.dir}</span>
+              <span style={{ ...mono, fontSize: 11, color: T.ink }}>{r.region}</span>
+              <span style={{ ...mono, fontSize: 9.5, color: T.dim }}>{r.tks.join(" · ")} · {r.strength}</span>
+            </div>
+            <div style={{ fontSize: 12, color: T.body, marginTop: 3, lineHeight: 1.45 }}>{r.why}</div>
+          </div>
+        );
+      })}
+      <div style={{ ...mono, fontSize: 9.5, color: T.dim }}>
+        Each region is read against its OWN monthly norm, never a fixed temperature: +30°C is ordinary in Dallas in July and extreme in Odessa in April.
+      </div>
+    </div>
+  );
 }
 
-export function WhyThisTrade({ fused, title = "WHY THIS TRADE", note }) {
+function NewsDrill({ ticker, newsItems = [] }) {
+  const rows = newsItems.filter((n) => (n.impacts || []).some((im) => !ticker || im.tk === ticker)).slice(0, 8);
+  if (!newsItems.length) return <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 6 }}>No headlines have loaded yet.</div>;
+  if (!rows.length) return <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 6 }}>None of the {newsItems.length} headlines loaded is tagged as moving {ticker}.</div>;
+  return (
+    <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
+      {rows.map((n, i) => (
+        <a key={i} href={n.link} target="_blank" rel="noreferrer"
+          style={{ textDecoration: "none", display: "block", padding: "7px 9px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 6 }}>
+          <div style={{ color: T.ink, fontSize: 12.5, fontWeight: 600, lineHeight: 1.4 }}>{n.title}</div>
+          <div style={{ ...mono, fontSize: 9.5, color: T.dim, marginTop: 2 }}>{n.src}{n.geo ? " · government or geopolitics, so it weighs more" : ""}</div>
+          <ImpactTags item={n} />
+        </a>
+      ))}
+      <div style={{ ...mono, fontSize: 9.5, color: T.dim }}>
+        A headline five days old counts half. Government and geopolitical items weigh more than market chatter because they move supply, not the session.
+      </div>
+    </div>
+  );
+}
+
+export function WhyThisTrade({ fused, title = "WHY THIS TRADE", note, ticker, weatherData, newsItems, month }) {
   const [detail, setDetail] = useState(false);
   const [open, setOpen] = useState(null); // key of the factor whose explanation is open
   const narrow = useNarrow();
@@ -313,14 +257,20 @@ export function WhyThisTrade({ fused, title = "WHY THIS TRADE", note }) {
             const cp = fused.components[k];
             const col = cp.dir > 0 ? T.green : cp.dir < 0 ? T.red : T.mut;
             const isOpen = open === k;
+            // Weather and News carry their own evidence with them: the same tap
+            // that explains the bar shows what the bar is made of.
+            const drill = k === "weather" ? <WeatherDrill ticker={ticker} weatherData={weatherData} month={month} />
+              : k === "news" ? <NewsDrill ticker={ticker} newsItems={newsItems} />
+                : null;
             const explanation = (
               <div style={{
-                ...(narrow
+                ...(narrow || drill
                   ? { position: "static", marginTop: 6 }
                   : { position: "absolute", top: "100%", left: 0, right: 0, marginTop: 4, zIndex: 20, boxShadow: `0 6px 18px rgba(0,0,0,${T.dark ? 0.45 : 0.14})` }),
                 background: T.panel, border: `1px solid ${col}66`, borderRadius: 6, padding: "8px 10px",
               }}>
                 <div style={{ fontSize: 12, color: T.body, lineHeight: 1.5 }}>{cp.why}</div>
+                {drill}
                 <div style={{ ...mono, fontSize: 9.5, color: T.dim, marginTop: 4 }}>tap anywhere outside to close</div>
               </div>
             );
@@ -335,7 +285,7 @@ export function WhyThisTrade({ fused, title = "WHY THIS TRADE", note }) {
                       <span style={{ display: "block", width: `${cp.strength}%`, height: "100%", background: col, borderRadius: 4 }} />
                     </span>
                     <span style={{ ...mono, fontSize: 10.5, color: T.dim, width: 52, textAlign: "right" }}>{cp.strength}/100</span>
-                    <span style={{ ...mono, fontSize: 10, color: T.blue }}>{isOpen ? "▲" : "why?"}</span>
+                    <span style={{ ...mono, fontSize: 10, color: T.blue }}>{isOpen ? "▲" : k === "weather" ? "regions?" : k === "news" ? "headlines?" : "why?"}</span>
                   </div>
                 </button>
                 {isOpen && explanation}
@@ -574,8 +524,15 @@ export async function askAI(_key, messages, contextStr) {
       messages,
     }),
   });
-  const j = await r.json();
-  if (j.error) throw new Error(j.error.message || JSON.stringify(j.error).slice(0, 200));
+  // The real API message is the only useful thing when this fails — a missing
+  // workspace id, an expired key, a rate limit all say exactly what to fix.
+  // Never replace it with a generic sentence.
+  const raw = await r.text();
+  let j = null;
+  try { j = JSON.parse(raw); } catch { /* the proxy returned something that is not JSON */ }
+  if (!j) throw new Error(raw.trim().slice(0, 300) || `The copilot endpoint answered HTTP ${r.status} with an empty body.`);
+  if (j.error) throw new Error(j.error.message || JSON.stringify(j.error).slice(0, 300));
+  if (!r.ok) throw new Error(`HTTP ${r.status}: ${raw.trim().slice(0, 300)}`);
   return (j.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
 }
 export function buildContext(ctx) {
@@ -618,7 +575,7 @@ export function CopilotTab({ ctx, apiKey }) {
           {SKILLS.map((s) => <Btn key={s.id} small ghost color={T.blue} onClick={() => send(s.prompt)} disabled={busy}>{s.label}</Btn>)}
         </div>
         <div style={{ marginTop: 12, display: "grid", gap: 8, maxHeight: 420, overflowY: "auto" }}>
-          {msgs.length === 0 && <div style={{ ...mono, fontSize: 11.5, color: T.mut }}>Pick one above or just ask. The copilot already knows your open positions, the trade in the Builder, the seasonal scanner, the tagged news and your own risk rules.</div>}
+          {msgs.length === 0 && <div style={{ ...mono, fontSize: 11.5, color: T.mut }}>Pick one above or just ask. The copilot already knows your open positions, the trade on the Bench, the Radar, the tagged news and your own risk rules.</div>}
           {msgs.map((m, i) => (
             <div key={i} style={{ padding: "9px 11px", borderRadius: 7, background: m.role === "user" ? `${T.blue}14` : T.bg, border: `1px solid ${m.role === "user" ? T.blue + "44" : T.line}` }}>
               <div style={{ ...mono, fontSize: 9, color: m.role === "user" ? T.blue : T.amber, marginBottom: 3 }}>{m.role === "user" ? "YOU" : "COPILOT"}</div>
@@ -1122,27 +1079,6 @@ export function ChainMatrix({ chain, expKey, spot, legs, onCell }) {
   );
 }
 
-/* Mini-thumbnail payoff per le card dell'Optimize */
-export function PayoffThumb({ curve, height = 48 }) {
-  if (!curve?.length) return null;
-  const pts = curve.filter((_, i) => i % 6 === 0);
-  const xs = pts.map((p) => p.s), ys = pts.map((p) => p.exp);
-  const xmin = Math.min(...xs), xmax = Math.max(...xs);
-  const ymin = Math.min(...ys), ymax = Math.max(...ys), yr = Math.max(1, ymax - ymin);
-  const W = 160, H = height;
-  const X = (x) => ((x - xmin) / (xmax - xmin)) * W;
-  const Y = (y) => H - ((y - ymin) / yr) * H;
-  const d = pts.map((p, i) => `${i ? "L" : "M"}${X(p.s).toFixed(1)},${Y(p.exp).toFixed(1)}`).join("");
-  const zeroY = Y(0);
-  return (
-    <svg width={W} height={H} style={{ display: "block" }}>
-      <line x1={0} x2={W} y1={zeroY} y2={zeroY} stroke={T.line} strokeWidth={1} />
-      <path d={`${d}L${W},${H}L0,${H}Z`} fill={`${T.green}18`} />
-      <path d={d} fill="none" stroke={T.amber} strokeWidth={1.8} />
-    </svg>
-  );
-}
-
 /* ================================================================
    10) OPTION PANEL — storico prezzo del singolo contratto (stile Fiuto)
 ================================================================ */
@@ -1199,7 +1135,7 @@ export function OptionPanel({ occ, label, quote, onClose }) {
    Un solo asse prezzi: candele, proiezione MC, zone P&L, strike, breakeven.
 ================================================================ */
 // ---- Trend read: the SMA/RSI math is taRead() in src/signals.js, the technical
-// factor of fuseSignals(). Here we only add the sentence the Builder prints. ----
+// factor of fuseSignals(). Here we only add the sentence the Bench prints. ----
 export function taSignals(bars) {
   const ta = taRead(bars);
   if (!ta) return null;

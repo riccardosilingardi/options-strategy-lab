@@ -93,8 +93,8 @@ export const RULE_PILLS = {
     `Close or roll at ${RULES.exitDTE} days to expiration. The last ${RULES.exitDTE} days pay ` +
     `little extra premium for sharply higher gamma risk.`,
   definedRisk: () =>
-    `Spreads only: every short leg is covered by a long one, so the worst case is a number ` +
-    `you can read before you send the order.`,
+    `No uncovered short legs, and the maximum loss is always known: every option sold is covered by ` +
+    `one bought, so the worst case is a number you can read before you send the order.`,
   paperOnly: () =>
     `Paper trading only. If the account cannot be verified as paper, the order is rejected.`,
 };
@@ -117,6 +117,10 @@ export const NOTHING_TODAY = {
   budgetTooSmall: (risk) =>
     `Nothing fits inside ${money(risk)} of risk today. Every structure that matched your answers costs more than ` +
     `that to put on, and stretching the budget past your per-trade limit is exactly the habit these rules exist to stop.`,
+  onlyOneRoad: (risk) =>
+    `Only one structure fits inside ${money(risk)} of risk today, and one answer is advice rather than teaching. ` +
+    `This app shows two roads with the trade-off between them or it shows none: with nothing to compare against, ` +
+    `you would be taking our word for it. Widen the budget or come back tomorrow.`,
   noData: (what) =>
     `Market data for ${what} did not load, so there is nothing to judge. This is a missing-data problem, not a ` +
     `verdict on the market: try again in a minute.`,
@@ -124,8 +128,8 @@ export const NOTHING_TODAY = {
 
 /** The rules block injected into every model prompt. English, generated. */
 export const copilotRulesBlock = () =>
-  `Trading rules, to be applied in EVERY analysis: defined-risk structures only (spreads, ` +
-  `never naked legs); take profit at ${pctText(RULES.takeProfitPct)} of max profit; ` +
+  `Trading rules, to be applied in EVERY analysis: defined risk only — no uncovered short legs, ` +
+  `and the maximum loss must always be a known number; take profit at ${pctText(RULES.takeProfitPct)} of max profit; ` +
   `a loss of ${pctText(RULES.stopLossPct)} of max loss is a WARNING, never an automatic close; ` +
   `exit at ${RULES.exitDTE} days to expiration; no single trade above ` +
   `${pctText(RULES.bestPracticePerTradePct)} of trading capital; total options exposure at or ` +
