@@ -2,26 +2,28 @@
 // src/wizard.jsx — THE APP SHELL (PRD §5).
 //
 // The wizard is not a tab inside the app. It is the front door: the first thing
-// you see, and the thing you come back to. The tabs (Scanner, Optimize,
-// Builder, Backtest…) are still there for anyone who wants them, one tap away
-// behind "Full desk", but nobody has to start there any more.
+// you see, and the thing you come back to. The desk behind "Full desk" is
+// three places — Bench, Positions, Journal — and everything else there
+// (Radar, Shortlist, market levels, history) is evidence for the trade on the
+// bench rather than a destination of its own.
 //
 // Screens in this file:
 //   · CapitalOnboarding — first run, PRD §3. Capital, positions at once, savings.
 //   · WizardOpen        — screen 1. Greeting, one line of status, three choices.
 //   · WizardQuestions   — screen 2. Budget, horizon, what matters most.
+//   · WizardCandidates  — screen 3. Two roads, never one.
+//   · WizardConfirm     — screen 4. What is being sent, the checks, the exit plan.
 //   · NothingToday      — screen 5. A designed answer, not an error state.
-// Screens 3 (two roads) and 4 (confirm) are the next session's work: for now
-// the search hands its best candidate to the existing Builder.
 //
 // Written for a phone. No hover anywhere: every affordance is a tap target of
 // at least 52px, inputs are 16px so iOS does not zoom on focus, and everything
 // stacks in one column and widens on a desk.
 // ============================================================================
 import React, { useState } from "react";
-import { Compass, Briefcase, Sparkles, Bell, ArrowLeft, SlidersHorizontal } from "lucide-react";
+import { Compass, Briefcase, Sparkles, Bell, ArrowLeft, SlidersHorizontal, ShieldCheck, ShieldAlert, AlertTriangle } from "lucide-react";
 import { T } from "./theme.js";
 import { RULES, sizing, money, pctText, perTradeCapLabel, ruleBadge } from "./rules.js";
+import { BandThumbnail, payoffBands, bandTakeaway, explainElement, UnifiedFigure, exitPlanSentence, exitPlanDetail, inTenPhrase, price } from "./visuals.jsx";
 
 const mono = { fontFamily: "ui-monospace, Menlo, monospace" };
 const sans = { fontFamily: "ui-sans-serif, system-ui" };
@@ -276,13 +278,18 @@ export function WizardOpen({ positions = [], posAlerts = [], attention = 0, mark
         <Card style={{ marginTop: 18, borderColor: attention ? `${T.red}66` : T.line }}>
           <Eyebrow>{attention ? "Needs attention today" : "Your positions"}</Eyebrow>
           <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
-            {posAlerts.map(({ p, pnl, dteLeft, level, label }) => {
+            {posAlerts.map(({ p, pnl, dteLeft, level, label, spotNow }) => {
               const c = level === "action" ? T.red : level === "watch" ? T.amber : T.green;
               return (
                 <button key={p.id} onClick={onPositions}
                   style={{ ...sans, display: "flex", gap: 12, alignItems: "center", width: "100%", textAlign: "left",
                     minHeight: 64, padding: "12px 13px", background: T.bg, border: `1px solid ${c}44`, borderRadius: 10, cursor: "pointer" }}>
                   <span style={{ width: 10, height: 10, borderRadius: 5, background: c, flexShrink: 0 }} />
+                  {/* The band thumbnail is the list visual everywhere (PRD §6). */}
+                  {p.legs && (
+                    <BandThumbnail bands={payoffBands({ legs: p.legs, entryNet: p.entryNet, spot: spotNow ?? p.entrySpot })}
+                      width={80} height={34} />
+                  )}
                   <span style={{ flex: 1, minWidth: 0 }}>
                     <span style={{ display: "block", fontSize: 15, fontWeight: 700, color: T.ink }}>{p.ticker} · {p.name}</span>
                     <span style={{ display: "block", fontSize: 13, color: T.mut, marginTop: 2 }}>{label} · {dteLeft} days left</span>
@@ -422,6 +429,272 @@ export function WizardQuestions({ answers, setAnswers, limits, busy, err, onBack
 }
 
 /* ====================================================================
+   SCREEN 3 — TWO ROADS, NEVER ONE (PRD §5)
+
+   One answer is advice; two answers with their price is teaching. The screen
+   refuses to show a single "best": if only one structure survives the search
+   there is nothing to compare, and the honest answer is screen 5.
+
+   Each road gets a band thumbnail (the same bands every other screen draws,
+   from payoff()) and ONE sentence naming what it gives up against the other.
+==================================================================== */
+
+/** What this candidate gives up against the other one, from the numbers. */
+export function tradeOffSentence(me, other) {
+  if (!me) return "";
+  if (!other) return "The only structure that fits your answers today.";
+  const inTen = (p) => Math.max(0, Math.min(10, Math.round((p || 0) * 10)));
+  const gives = [];
+  if (inTen(me.pop) < inTen(other.pop)) {
+    gives.push(`how often it works — about ${inTenPhrase(me.pop)} against ${inTen(other.pop)}`);
+  }
+  if (me.maxProfit < other.maxProfit * 0.98) {
+    gives.push(`the size of the win — up to ${money(me.maxProfit)} against ${money(other.maxProfit)}`);
+  }
+  if (me.risk > other.risk * 1.02) {
+    gives.push(`the cheaper ticket — ${money(me.risk)} at risk against ${money(other.risk)}`);
+  }
+  if (!gives.length) {
+    return `Gives up nothing measurable against the other: it works out about as often, ` +
+      `pays about as much and risks about as much. The difference is the shape, not the odds.`;
+  }
+  return `Gives up ${gives[0]}${gives.length > 1 ? `, and ${gives[1]}` : ""}.`;
+}
+
+/** One road. The thumbnail is tappable and explains itself, like every visual. */
+function RoadCard({ c, other, onPick, i }) {
+  const [open, setOpen] = useState(null);
+  const bands = payoffBands({ legs: c.legs, entryNet: c.entryNet, spot: c.spot });
+  const inTen = Math.max(0, Math.min(10, Math.round((c.pop || 0) * 10)));
+  const oftenText = inTenPhrase(c.pop);
+  return (
+    <Card style={{ marginTop: 12 }}>
+      <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
+        <span style={{ ...mono, fontSize: 10.5, color: T.dim, letterSpacing: "0.1em" }}>ROAD {i + 1}</span>
+        <span style={{ ...sans, fontSize: 17, fontWeight: 700, color: T.ink }}>{c.ticker} · {c.name}</span>
+      </div>
+
+      <div style={{ marginTop: 10 }}>
+        <BandThumbnail bands={bands} width={320} height={54} onExplain={setOpen}
+          title={bandTakeaway(bands, { ticker: c.ticker })} />
+      </div>
+      <div style={{ ...sans, fontSize: 13.5, color: T.body, lineHeight: 1.5, marginTop: 8 }}>
+        {bandTakeaway(bands, { ticker: c.ticker })}
+      </div>
+      {open && (
+        <div style={{ marginTop: 8, padding: "10px 12px", background: T.bg, border: `1px solid ${T.blue}55`, borderLeft: `3px solid ${T.blue}`, borderRadius: 8 }}>
+          <div style={{ ...sans, fontSize: 12.5, color: T.body, lineHeight: 1.5 }}>{explainElement(open, bands, { ticker: c.ticker })}</div>
+          <button onClick={() => setOpen(null)} style={{ ...mono, fontSize: 10, marginTop: 6, background: "transparent", border: "none", color: T.blue, cursor: "pointer", padding: 0 }}>close</button>
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 18, marginTop: 12, flexWrap: "wrap" }}>
+        {[["WORKS OUT", oftenText, inTen >= 6 ? T.green : inTen >= 4 ? T.blue : T.violet],
+          ["YOU RISK", money(c.risk), T.ink],
+          ["YOU CAN MAKE", money(c.maxProfit), T.green],
+          ["DAYS", `${Math.round(c.dte)}`, T.ink]].map(([k, v, col]) => (
+            <span key={k}>
+              <span style={{ ...mono, fontSize: 9.5, color: T.dim, display: "block" }}>{k}</span>
+              <span style={{ ...mono, fontSize: 15, fontWeight: 700, color: col }}>{v}</span>
+            </span>
+          ))}
+      </div>
+
+      {/* The one sentence that makes this two roads rather than a ranking. */}
+      <Pill tone={T.violet}>{tradeOffSentence(c, other)}</Pill>
+
+      <button onClick={() => onPick(c)}
+        style={{ ...sans, width: "100%", minHeight: 56, marginTop: 14, fontSize: 16, fontWeight: 700, borderRadius: 10,
+          cursor: "pointer", background: T.amber, color: T.onAccent, border: "none" }}>
+        Take this road
+      </button>
+    </Card>
+  );
+}
+
+export function WizardCandidates({ candidates = [], answers = {}, onPick, onBack }) {
+  return (
+    <div style={{ ...sans, maxWidth: 720, margin: "0 auto", padding: "16px 16px 44px" }}>
+      <BackLink onClick={onBack} label="Change my answers" />
+      <Eyebrow>Two roads</Eyebrow>
+      <h1 style={{ ...sans, fontSize: 25, fontWeight: 800, color: T.ink, margin: "6px 0 6px", lineHeight: 1.25 }}>
+        {candidates.length === 2 ? "Two ways to do this." : `${candidates.length} ways to do this.`}
+      </h1>
+      <p style={{ ...sans, fontSize: 15, color: T.mut, lineHeight: 1.55, margin: 0 }}>
+        Neither one is the right answer. Each buys something and pays for it somewhere else, and the
+        sentence under each chart says where. Both fit the {money(answers.risk || 0)} you said you were willing to lose.
+      </p>
+      {candidates.map((c, i) => (
+        <RoadCard key={c.id || i} c={c} i={i} onPick={onPick}
+          other={candidates.find((x) => x !== c) || null} />
+      ))}
+      <div style={{ ...sans, fontSize: 12.5, color: T.dim, marginTop: 16, lineHeight: 1.5, textAlign: "center" }}>
+        Green is where the trade makes money at expiry, red is where it does not. Both charts are drawn from the
+        same payoff calculation, so they can be compared directly.
+      </div>
+    </div>
+  );
+}
+
+/* ====================================================================
+   SCREEN 4 — CONFIRM (PRD §5)
+
+   What is being sent, the risk checks in plain English with real numbers, and
+   the exit plan stated as already decided — not offered. The gate runs AFTER
+   the tap: this screen shows what it measures, the tap makes it decide.
+==================================================================== */
+
+/**
+ * The checks, in the order the gate applies them, read off the gate's OWN
+ * output — `evaluateTrade` stays the only implementation of the rules, this
+ * only puts English around the numbers it returns.
+ */
+export function gateChecklist(result, proposal = {}) {
+  if (!result) return [];
+  const L = result.limits || {};
+  const blocked = (code) => (result.violations || []).some((v) => v.code === code);
+  const cap = L.tradingCapital || 0;
+  const rows = [
+    {
+      id: "defined",
+      ok: !blocked("UNDEFINED_RISK") && !blocked("NO_STRUCTURE"),
+      text: `The worst case is a number you can read: ${money(L.tradeRisk)}. Every option sold is covered by ` +
+        `one bought, so the loss cannot run past it.`,
+    },
+    {
+      id: "per-trade",
+      ok: !blocked("PER_TRADE_LIMIT"),
+      text: `${money(L.tradeRisk)} at risk against your ${money(L.perTrade)} per-trade limit` +
+        (cap ? ` — ${pctText(L.tradeRisk / cap)} of your ${money(cap)} of trading capital.` : "."),
+    },
+    {
+      id: "total",
+      ok: !blocked("TOTAL_EXPOSURE"),
+      text: `${money(L.openRisk)} is already at risk in open positions. With this one that becomes ` +
+        `${money(L.totalAfter)}, against a ceiling of ${money(L.total)}.`,
+    },
+    {
+      id: "entry-dte",
+      ok: !blocked("ENTRY_DTE"),
+      text: `${Math.round(Number(proposal.dte) || 0)} days to expiration at entry, against a floor of ` +
+        `${RULES.minEntryDTE}. The exit rule fires at ${RULES.exitDTE} days, so this has ` +
+        `${Math.max(0, Math.round((Number(proposal.dte) || 0) - RULES.exitDTE))} days to work.`,
+    },
+    {
+      id: "paper",
+      ok: !blocked("PAPER_MODE"),
+      text: L.paper?.verified
+        ? `Paper account confirmed: ${L.paper.why}. No real money can be reached from here.`
+        : `Paper mode is NOT confirmed: ${L.paper?.why || "the account could not be checked"}. An order that ` +
+          `cannot be proven to be paper does not leave.`,
+    },
+  ];
+  return rows;
+}
+
+const CheckRow = ({ ok, text }) => (
+  <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+    {ok
+      ? <ShieldCheck size={17} style={{ color: T.green, flexShrink: 0, marginTop: 1 }} />
+      : <ShieldAlert size={17} style={{ color: T.red, flexShrink: 0, marginTop: 1 }} />}
+    <span style={{ ...sans, fontSize: 13.5, color: ok ? T.body : T.ink, lineHeight: 1.5 }}>{text}</span>
+  </div>
+);
+
+export function WizardConfirm({
+  candidate, preview, result, bars = [], sigma = 0.3, driftAnnual = 0,
+  busy, onConfirm, onBack, onDesk,
+}) {
+  if (!candidate) return null;
+  const c = candidate;
+  const shown = result || preview;
+  const rows = gateChecklist(shown, { dte: c.dte });
+  const refused = !!(result && !result.pass);
+
+  return (
+    <div style={{ ...sans, maxWidth: 720, margin: "0 auto", padding: "16px 16px 44px" }}>
+      <BackLink onClick={onBack} label="Back to the two roads" />
+      <Eyebrow>Confirm</Eyebrow>
+      <h1 style={{ ...sans, fontSize: 25, fontWeight: 800, color: T.ink, margin: "6px 0 4px", lineHeight: 1.25 }}>
+        {c.ticker} · {c.name}
+      </h1>
+      <p style={{ ...sans, fontSize: 15, color: T.mut, lineHeight: 1.55, margin: 0 }}>
+        {c.legs.length} legs, expiring {c.expKey || `in ${Math.round(c.dte)} days`}. Risking {money(c.risk)} to make
+        up to {money(c.maxProfit)}.
+      </p>
+
+      <Card style={{ marginTop: 14 }}>
+        <Eyebrow>What this looks like</Eyebrow>
+        <div style={{ marginTop: 10 }}>
+          <UnifiedFigure legs={c.legs} entryNet={c.entryNet} spot={c.spot} bars={bars}
+            dte={c.dte} sigma={sigma} driftAnnual={driftAnnual} ticker={c.ticker} height={340} />
+        </div>
+      </Card>
+
+      <Card style={{ marginTop: 12 }}>
+        <Eyebrow>What is being sent</Eyebrow>
+        <div style={{ ...mono, fontSize: 13, color: T.ink, marginTop: 8, lineHeight: 1.7 }}>
+          {c.legs.map((l, i) => (
+            <div key={i}>
+              {l.side > 0 ? "BUY" : "SELL"} {l.qty} × {c.ticker} {price(l.strike)} {l.type === "call" ? "call" : "put"}
+            </div>
+          ))}
+        </div>
+        <div style={{ ...sans, fontSize: 13, color: T.mut, marginTop: 8, lineHeight: 1.5 }}>
+          One contract of each, on a paper account. Nothing is sent until you tap below.
+        </div>
+      </Card>
+
+      <Card style={{ marginTop: 12 }}>
+        <Eyebrow>{refused ? "The gate refused this" : "The checks that run when you tap"}</Eyebrow>
+        <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
+          {rows.map((r) => <CheckRow key={r.id} ok={r.ok} text={r.text} />)}
+        </div>
+        {(shown?.warnings || []).map((w, i) => (
+          <div key={i} style={{ display: "flex", gap: 10, alignItems: "flex-start", marginTop: 12 }}>
+            <AlertTriangle size={17} style={{ color: T.amber, flexShrink: 0, marginTop: 1 }} />
+            <span style={{ ...sans, fontSize: 13.5, color: T.body, lineHeight: 1.5 }}>{w.message}</span>
+          </div>
+        ))}
+        {refused && (
+          <Pill tone={T.red}>
+            The order was not sent. {shown.violations.map((v) => v.message).join(" ")}
+          </Pill>
+        )}
+      </Card>
+
+      <Card style={{ marginTop: 12 }}>
+        <Eyebrow>The exit plan — decided now, not later</Eyebrow>
+        <div style={{ ...sans, fontSize: 16, fontWeight: 700, color: T.ink, marginTop: 8, lineHeight: 1.4 }}>
+          {exitPlanSentence()}
+        </div>
+        <div style={{ ...sans, fontSize: 13.5, color: T.mut, marginTop: 6, lineHeight: 1.5 }}>
+          {exitPlanDetail(c.maxProfit)}
+        </div>
+      </Card>
+
+      <button onClick={onConfirm} disabled={busy || refused}
+        style={{ ...sans, width: "100%", minHeight: 58, marginTop: 18, fontSize: 16.5, fontWeight: 700, borderRadius: 10,
+          cursor: busy ? "wait" : refused ? "not-allowed" : "pointer", opacity: busy ? 0.6 : refused ? 0.45 : 1,
+          background: T.amber, color: T.onAccent, border: "none" }}>
+        {busy ? "Checking…" : refused ? "Blocked by the risk gate" : `Open this on paper · ${money(c.risk)} at risk`}
+      </button>
+
+      {refused && onDesk && (
+        <button onClick={onDesk}
+          style={{ ...sans, fontSize: 14, minHeight: TAP, marginTop: 8, padding: "8px 4px", background: "transparent", border: "none", color: T.blue, cursor: "pointer", textAlign: "left", width: "100%" }}>
+          Open it on the bench and change it →
+        </button>
+      )}
+
+      <div style={{ ...sans, fontSize: 12, color: T.dim, marginTop: 14, textAlign: "center", lineHeight: 1.5 }}>
+        Paper trading only. Educational software, not financial advice.
+      </div>
+    </div>
+  );
+}
+
+/* ====================================================================
    SCREEN 5 — NOTHING TODAY
    Not an error. The app saying "nothing today" is the product working:
    an agent that cannot execute a trade it cannot justify. It states why
@@ -430,8 +703,11 @@ export function WizardQuestions({ answers, setAnswers, limits, busy, err, onBack
 
 export function NothingToday({ reasons = [], notified, onNotify, onBack, onPositions, onDesk, hasPositions }) {
   // "We looked and decided against it" and "we could not look" are different
-  // answers, and the second one must not be dressed up as the first.
+  // answers, and the second one must not be dressed up as the first. "We found
+  // exactly one thing" is a third answer again: the board is not empty, it is
+  // just not teaching anything.
   const dataProblem = reasons.length > 0 && reasons.every((r) => String(r.id || "").startsWith("no-"));
+  const oneRoad = !dataProblem && reasons.length > 0 && reasons.every((r) => r.id === "one-road");
   return (
     <div style={{ ...sans, maxWidth: 620, margin: "0 auto", padding: "16px 16px 44px" }}>
       <BackLink onClick={onBack} label="Change my answers" />
@@ -443,7 +719,9 @@ export function NothingToday({ reasons = [], notified, onNotify, onBack, onPosit
         <p style={{ ...sans, fontSize: 15.5, color: T.mut, lineHeight: 1.55, margin: "10px 0 0" }}>
           {dataProblem
             ? "Not because the markets look bad — because we could not see them. Nothing gets proposed on data we do not have."
-            : "Not a glitch, and not a missing feature. Nothing on the board is worth your money right now, so the honest answer is to sit this one out."}
+            : oneRoad
+              ? "One structure fits, and one is not enough. This app shows you a choice with its price attached, or it shows you nothing."
+              : "Not a glitch, and not a missing feature. Nothing on the board is worth your money right now, so the honest answer is to sit this one out."}
         </p>
       </div>
 

@@ -22,10 +22,14 @@ An agent that cannot execute a trade it cannot justify.
 ## Non-negotiable rules
 
 1. Paper trading only. If paper mode cannot be verified, reject the order.
-2. Defined-risk structures only (spreads). Never naked legs.
+2. No uncovered short legs, max loss always known. The GUIDED wizard flow goes
+   further and excludes single-leg long options too — time decay makes them a
+   poor first trade. They stay reachable on the full desk.
 3. No API key ever reaches the client. Keys live only in Netlify environment
    variables: ALPACA_KEY, ALPACA_SECRET, ANTHROPIC_KEY, ALPHAVANTAGE_KEY,
-   SITE_PASSWORD, DEMO_TOKEN, optional WEBHOOK_URL.
+   SITE_PASSWORD, DEMO_TOKEN, optional WEBHOOK_URL and optional
+   ANTHROPIC_WORKSPACE_ID (needed only for an identity-linked Anthropic key;
+   `ai.mjs` sends the `anthropic-workspace-id` header only when it is set).
 4. No order reaches Alpaca without passing `src/riskGate.js`.
 5. Nothing executes without an explicit human confirmation.
 
@@ -63,11 +67,20 @@ while the position is open.
 - `src/wizard.jsx` — **the app shell (PRD §5)**. The wizard is the entry point,
   not a tab: capital onboarding on a first run, then screen 1 (greeting, one line
   of status, three choices — and "what needs attention today" once positions
-  exist), screen 2 (budget, horizon, what matters most) and screen 5 ("nothing
-  today"). Screens 3 and 4 are not built yet: the search hands its pick to the
-  Builder. `App.jsx` owns the `view` (`wizard` | `desk`) above the tabs.
-- `src/App.jsx`, `src/pro.jsx` — UI. The tabs are still all reachable, behind
-  "Open the full desk", but they are no longer the front door.
+  exist), screen 2 (budget, horizon, what matters most), screen 3 (**two roads,
+  never one** — at least two candidates, each with a band thumbnail and one
+  generated sentence naming what it gives up), screen 4 (confirm: the unified
+  component, the gate's checks in plain English, the exit plan stated as already
+  decided) and screen 5 ("nothing today"). On screen 4 the gate runs **after**
+  the tap. `App.jsx` owns the `view` (`wizard` | `desk`).
+- `src/visuals.jsx` — **the visual language (PRD §6)**. `payoffBands()` is the
+  only place zones are derived, and it reads `payoff()` from `engine.js`; the
+  band thumbnail, the gauge and the unified position component all consume its
+  output. Every visual exposes `takeaway()` (one always-visible generated
+  sentence) and `explainElement(el)` (on tap). Never compute a zone anywhere
+  else. `useNarrow` and the `Figure` tap-to-explain frame live here too.
+- `src/App.jsx`, `src/pro.jsx` — UI. Everything is still reachable behind
+  "Open the full desk", but it is no longer the front door.
 - `src/theme.js` — shared theme, never redeclare a local `T`. **Light is the
   default**; dark lives behind Settings. `T.onAccent` is the text colour on a
   filled accent — never write `#14181d` into a component. Every light accent
@@ -84,14 +97,43 @@ while the position is open.
 - `netlify/functions/*.mjs` — serverless endpoints, routed in `netlify.toml`
 - `netlify/edge-functions/gate.js` — password gate, with demo-token bypass
 
+## Navigation — tabs are not destinations, they are evidence
+
+The desk has **three places only**: **Bench** (one trade, taken apart),
+**Positions**, **Journal**. Settings sits behind the gear, not in the row.
+
+What used to be tabs is now evidence for the trade on the Bench, opening
+underneath it: **Radar** (was Scan), **Shortlist** (was Optimize), Market
+levels, History, Copilot. **Bench** was the Builder. Weather and News are not
+tabs at all any more: they are the drill-down behind the "Why this trade"
+panel — tapping the weather bar reveals the regions and their anomalies,
+tapping the news bar reveals the headlines with their tags.
+
 ## Visual contract
 
-Every visual is generated from `payoff(legs, S)` — never compute zones
-separately or two screens will disagree about the same trade.
+Every visual is generated from `payoff(legs, S)`, through `payoffBands()` in
+`src/visuals.jsx` — never compute zones separately or two screens will disagree
+about the same trade.
+
+The three components:
+- **Band thumbnail** — price line plus green/red bands from the sign of the
+  payoff. No numbers, no labels, readable at 80px. An iron condor produces
+  three bands with no special-casing. Used in every list.
+- **Gauge** — the payoff projected into polar coordinates as a semicircular
+  arc, needle at spot. Colours come from the sign of the payoff, so left is NOT
+  always red: a bear spread is green on the left. Primary visual on position
+  detail.
+- **Unified position component** — price history, dispersion cone, terminal
+  distribution as a rotated histogram and the payoff rotated 90°, all on ONE
+  shared vertical price axis, with a horizontal dashed line from today's spot
+  across to the payoff value. Cone and distribution switch on above
+  `UNIFIED_DETAIL_WIDTH` and off below it. Coloured bands stop where the cone
+  ends.
 
 Every visual exposes `takeaway()` (one always-visible sentence, generated from
-the numbers) and `explain(element)` (on tap). If the takeaway needs more than
-one sentence, change the chart, not the copy. Mobile has no hover: tap to open.
+the numbers) and `explainElement(element)` (on tap). If the takeaway needs more
+than one sentence, change the chart, not the copy. Mobile has no hover: tap to
+open, tap outside to close, explanation below the chart on narrow screens.
 
 ## Order paths
 
@@ -104,6 +146,11 @@ There are **six** ways an order can reach Alpaca, and every one routes through
 4. `pro.jsx` → `GuardianPanel.placeExit()` — the exit ladder
 5. `autopilot.mjs` — gates each proposal before it becomes an approve link
 6. `approve.mjs` — re-runs the gate at execution time, up to 24h later
+
+Positions are opened through one function, `commitPosition()` in `App.jsx`:
+both the Bench's "open on paper" and the wizard's screen 4 land there, so a
+position carries the same gate record, thesis and timeline whichever way it was
+opened.
 
 Adding a seventh means adding a gate call. Paper mode is *verified*, not
 assumed: `alpaca.mjs` returns an `X-OSL-Paper-Endpoint` header and the gate
@@ -118,6 +165,9 @@ rejects anything it cannot confirm.
 - Single-leg orders go to Alpaca as simple orders, not mleg (422 otherwise)
 - Cancel conflicting open orders before sending an mleg close (wash-trade check)
 - State hydration sanitises corrupt positions using the `v: 2` version flag
+- `settings.notifyWhenReady` must be included in the `/api/state` sync payload:
+  the autopilot is the only thing running while the app is closed, so a flag
+  that never reaches the server makes "Notify me" a promise nobody keeps
 - `pro.jsx` keeps its own `probProfit(curve, S, sigma, dte)` and `exitPathSim(...)`
   with signatures different from the ones in `engine.js`. This is intentional and
   must not be merged: the UI depends on the extra fields these versions return
@@ -128,9 +178,10 @@ rejects anything it cannot confirm.
 
 The refusal is a screen, not a toast. `runWizard` in `App.jsx` decides, in order:
 data missing → signals not aligned → options expensive versus their own history →
-nothing fits the budget. A missing-data answer must never be dressed up as a
-market verdict — they are different sentences on screen, and `wizard.test.jsx`
-holds that line.
+nothing fits the budget → only one road survives. A missing-data answer must
+never be dressed up as a market verdict — they are different sentences on
+screen, and `wizard.test.jsx` holds that line. "Only one candidate" is also a
+refusal: one answer is advice, two answers with their price is teaching.
 
 ## Working style
 

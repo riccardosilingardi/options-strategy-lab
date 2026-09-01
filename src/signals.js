@@ -32,7 +32,7 @@ const signed = (x, digits = 1) => `${x >= 0 ? "+" : ""}${x.toFixed(digits)}`;
 ================================================================ */
 
 // `lat`/`lon` are the Open-Meteo request coordinates, `phase` the crop or demand
-// phase shown next to each region in the Weather tab.
+// phase shown next to each region in the weather drill-down.
 export const REGIONS = [
   { id: "cornbelt", name: "Corn Belt (Iowa)", lat: 41.6, lon: -93.6, affects: ["CORN", "SOYB"], kind: "agri", phase: "Jul-Aug: corn pollination / soybean flowering" },
   { id: "brazil", name: "Mato Grosso (Brazil)", lat: -15.6, lon: -56.1, affects: ["SOYB", "CORN"], kind: "agri", phase: "Oct-Feb: soybean planting and growth (off-season now)" },
@@ -433,11 +433,11 @@ function buildNarrative({ ticker, month, components, agreement, score, confidenc
    what the engine already computed; they never decide anything new.
 ================================================================ */
 
-/** Weight -> the word the Weather tab shows next to a region. */
+/** Weight -> the word the weather drill-down shows next to a region. */
 export const WEIGHT_LABEL = (w) => (w >= 1 ? "strong" : w >= 0.65 ? "medium" : "weak");
 
 /**
- * One row per watched region, shaped for the Weather tab: arrow direction, a
+ * One row per watched region, shaped for the weather drill-down: arrow direction, a
  * strength word and the same `why` sentence the engine reasons with.
  */
 export function regionSignals(weatherData, month = new Date().getMonth()) {
