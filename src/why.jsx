@@ -65,6 +65,9 @@ const AGREEMENT_STYLE = {
 };
 const FACTOR_LABEL = { seasonal: "Seasonality", technical: "Price trend", weather: "Weather", news: "News flow" };
 const FACTOR_ORDER = ["seasonal", "technical", "weather", "news"];
+/** `Seasonality, Price trend, Weather and News flow` — generated, never typed. */
+const FACTOR_LIST = FACTOR_ORDER.map((k) => FACTOR_LABEL[k])
+  .reduce((acc, x, i, all) => (i === 0 ? x : i === all.length - 1 ? `${acc} and ${x}` : `${acc}, ${x}`), "");
 
 // `useNarrow` lives in src/visuals.jsx with the rest of the tap-to-explain
 // plumbing — one definition, re-exported here so old imports keep working.
@@ -170,9 +173,13 @@ export function WhyThisTrade({ fused, title = "WHY THIS TRADE", note, ticker, we
       {note && <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 5 }}>{note}</div>}
 
       {/* ---- behind a tap: the four components as direction + strength ---- */}
+      {/* THE TOGGLE NAMES WHAT IT OPENS. "show detail" is a door with no sign
+          on it: nobody found the four readings behind it, which are the whole
+          reason this panel exists. The label is built from FACTOR_ORDER and
+          FACTOR_LABEL, so it cannot drift from the bars it reveals. */}
       <button onClick={() => { setDetail((d) => !d); setOpen(null); }}
-        style={{ ...mono, fontSize: 10.5, marginTop: 8, background: "transparent", color: T.blue, border: `1px solid ${T.blue}55`, borderRadius: 5, padding: "4px 9px", cursor: "pointer" }}>
-        {detail ? "hide detail ▲" : "show detail ▼"}
+        style={{ ...mono, fontSize: 10.5, marginTop: 8, background: "transparent", color: T.blue, border: `1px solid ${T.blue}55`, borderRadius: 5, padding: "4px 9px", cursor: "pointer", textAlign: "left", lineHeight: 1.5 }}>
+        {detail ? "Hide the four readings ▲" : `Show the four readings: ${FACTOR_LIST} ▼`}
       </button>
 
       {detail && (

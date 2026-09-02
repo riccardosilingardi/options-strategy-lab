@@ -42,7 +42,20 @@ export default async (req) => {
       const hint = !workspace && /workspace/i.test(message)
         ? " — set ANTHROPIC_WORKSPACE_ID in the Netlify environment variables: this key belongs to a workspace, and Anthropic will not accept the call without it."
         : "";
-      return Response.json({ error: { type, message: message + hint, status: r.status } }, { status: r.status });
+      // WHAT WE SENT, so the failure names its own cause. When this panel fails
+      // the three candidates are: the variable is not set, the key is wrong, or
+      // the request itself is malformed — and from the screen alone they look
+      // identical. These three facts separate them without exposing anything:
+      // whether the workspace header went out (not its value), which headers
+      // were attached (names only, never the key), and which model was asked
+      // for. Nothing secret is echoed: `x-api-key` appears as a name only.
+      const sent = {
+        workspaceHeader: workspace ? "sent" : "not sent (ANTHROPIC_WORKSPACE_ID is empty or unset)",
+        headers: Object.keys(headers).sort(),
+        endpoint: "https://api.anthropic.com/v1/messages",
+        model: (() => { try { return JSON.parse(body)?.model || null; } catch { return null; } })(),
+      };
+      return Response.json({ error: { type, message: message + hint, status: r.status, sent } }, { status: r.status });
     }
     return new Response(out, { status: r.status, headers: { "Content-Type": "application/json" } });
   } catch (e) {

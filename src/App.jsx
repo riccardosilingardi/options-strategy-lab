@@ -14,7 +14,7 @@ import { fuseSignals, sentimentDirection, withSignalRank, compareCandidates, aga
 import { N as nCDF, bs as bsPrice, smile as smileIV, payoff as payoffExp, SEASONAL, SIGMA } from "./engine.js";
 import { parseOcc, buildOcc, fetchChain, hasOpenInterest, enrichOpenInterest, feedName, sourceNote, openInterestNote } from "./chain.js";
 import { T, themeName, setTheme, BADGE_SAFE } from "./theme.js";
-import { RULES, sizing, ruleBadge, takeProfitLabel, stopLossLabel, perTradeCapLabel, RULE_PILLS, NOTHING_TODAY, money, pctText } from "./rules.js";
+import { RULES, sizing, ruleBadge, takeProfitLabel, stopLossLabel, perTradeCapLabel, RULE_PILLS, NOTHING_TODAY, money, pctText, capitalSourceNote, perTradeLimitPhrase, qualityFloor, qualityFloorSentence, liquiditySkippedNote } from "./rules.js";
 import { evaluateTrade, gateSummary } from "./riskGate.js";
 import { DEMO, DEMO_BANNER, DEMO_TOOLTIP, DEMO_SEED_TICKERS, demoPositions } from "./demo.js";
 import { CapitalOnboarding, WizardOpen, FindOpportunities, WizardCandidates, WizardConfirm, NothingToday, Card, Pill } from "./wizard.jsx";
@@ -258,6 +258,28 @@ function analyze(legs, S, dte, baseIV, q) {
   return { entry, curve, maxProfit: maxP, maxLoss: maxL, breakevens: bes, greeks: netGreeks(legs, S, dte, baseIV, ivMap), realCount, legPx };
 }
 
+/**
+ * The preset list for one direction, split by the quality floors (src/rules.js).
+ *
+ * Pure, and module-level, so the Shortlist cannot apply a different floor from
+ * the one the wizard applies: both call `qualityFloor()` with the open interest
+ * that came back on the legs. What is filtered out travels WITH the result —
+ * `cut` carries the name and the reason — because a list that silently
+ * shortens itself is indistinguishable from a broken one.
+ */
+function shortlistWithFloors(sent, S, step, strikes, dte, baseIV, q) {
+  const rows = [], cut = [];
+  let oiSkipped = false;
+  for (const p of buildPresets(sent, S, step, strikes)) {
+    const a = analyze(p.legs, S, dte, baseIV, q);
+    const qf = qualityFloor({ openInterest: a.legPx.map((l) => l.oi), maxProfit: a.maxProfit, maxLoss: a.maxLoss });
+    if (!qf.liquidity.checked) oiSkipped = true;
+    if (qf.pass) rows.push({ p, a });
+    else cut.push({ name: p.name, reasons: qf.reasons });
+  }
+  return { rows, cut, oiSkipped };
+}
+
 /* ============================== MONTE CARLO + BACKTEST STORICO ============================== */
 function montecarlo(legs, S, dte, entry, sigma, monthlyMean, nSim = 8000) {
   const Tyr = dte / 365;
@@ -348,7 +370,12 @@ async function loadState() {
   try { const v = localStorage.getItem(SKEY); return v ? JSON.parse(v) : null; }
   catch { return null; }
 }
-const EMPTY = { saved: [], positions: [], settings: { webhook: "", reportFreq: "weekly", reportLast: 0, reportLastMd: "", capital: RULES.defaultTradingCapital, concurrentTarget: RULES.defaultConcurrentTarget, savings: null, sizeOverride: null, mode: "pro", onboarded: false, notifyWhenReady: false }, seasonal: {}, journal: [], ivHist: {} };
+// `capital` and `concurrentTarget` start NULL, not at the suggested figures.
+// A stored 5000 nobody typed is indistinguishable from a 5000 the user chose,
+// and every screen downstream would print "$250 per trade" as his limit. Null
+// means unanswered, `sizing()` reports `answered: false`, and the screens say
+// "suggested" until he answers (PRD §3).
+const EMPTY = { saved: [], positions: [], settings: { webhook: "", reportFreq: "weekly", reportLast: 0, reportLastMd: "", capital: null, concurrentTarget: null, savings: null, sizeOverride: null, mode: "pro", onboarded: false, notifyWhenReady: false }, seasonal: {}, journal: [], ivHist: {} };
 async function saveState(st) {
   try { localStorage.setItem(SKEY, JSON.stringify(st)); } catch (e) { console.error(e); }
   // The server blob is ONE shared document, so a demo visitor writing to it
@@ -436,6 +463,19 @@ export default function OptionsStrategyLab() {
   const [legs, setLegs] = useState([]);
   const [stratName, setStratName] = useState("Bull Call Spread");
   const [store, setStore] = useState(EMPTY);
+  /* ---- THE CAPITAL MODEL, PRD §3. ONE HOME, READ EVERYWHERE. ----
+     Declared here, above everything that reads it, because everything does:
+     the risk gate, the wizard's budget question, the Build screen's risk field,
+     the Settings panel and every sentence that prints a dollar limit. The app
+     used to carry two numbers for the same thing — a derived $250 and a
+     hardcoded 500 in the Build field — and neither of them was the user's. */
+  const capitalAnswers = useMemo(() => ({
+    tradingCapital: store.settings.capital,
+    concurrentTarget: store.settings.concurrentTarget,
+    savings: store.settings.savings,
+    override: store.settings.sizeOverride,
+  }), [store.settings]);
+  const limits = useMemo(() => sizing(capitalAnswers), [capitalAnswers]);
   const [busy, setBusy] = useState(null);
   const [msg, setMsg] = useState(null);
   const [mc, setMc] = useState(null);
@@ -443,7 +483,12 @@ export default function OptionsStrategyLab() {
   const [alpaca, setAlpaca] = useState(null);    // account info
   const [confirmSend, setConfirmSend] = useState(false);
   const [optMode, setOptMode] = useState("budget");
-  const [optAmt, setOptAmt] = useState(500);
+  // NOT a hardcoded 500. The field starts at the per-trade limit the capital
+  // model derives and only holds a number of its own once the user types one,
+  // so the Build screen and the wizard are incapable of disagreeing about how
+  // much this user may risk.
+  const [optAmtTyped, setOptAmt] = useState(null);
+  const optAmt = optAmtTyped == null ? Math.round(limits.perTradeLimit) : optAmtTyped;
   const [autoMon, setAutoMon] = useState(true);
   const [optLeg, setOptLeg] = useState(null); // {occ, label, quote}
   const [alSync, setAlSync] = useState({ orders: [], positions: [], t: 0 });
@@ -725,6 +770,11 @@ export default function OptionsStrategyLab() {
 
   /* ---- analisi ---- */
   const A = useMemo(() => (spot && legs.length ? analyze(legs, spot, dte, iv, q) : null), [legs, spot, dte, iv, q]);
+  // The Shortlist, already past the quality floors. Computed here rather than
+  // inside the render so the filtered-out list and the rows come from one call.
+  const shortlist = useMemo(
+    () => (spot ? shortlistWithFloors(sentiment, spot, U.step, expStrikes, dte, iv, q) : { rows: [], cut: [], oiSkipped: false }),
+    [sentiment, spot, U.step, expStrikes, dte, iv, q]);
   const oiGrid = useMemo(() => oiGridFromChain(chain, spot), [chain, spot]);
   // A chain that is still being fetched is not a chain that failed. `busy` is
   // the ticker of the request in flight ("all" during a refresh-all), so the
@@ -868,6 +918,8 @@ export default function OptionsStrategyLab() {
     setMulti((m) => ({ ...m, busy: true, err: null, res: null }));
     try {
       const out = [];
+      // What the quality floors removed, so an empty or short result can say why.
+      const cutFloors = { n: 0, markets: new Set(), oiSkipped: new Set() };
       // le barre servono al fattore tecnico: caricale prima di fondere i segnali
       const barsMap = Object.fromEntries(await Promise.all(multi.sel.map(async (tk) => [tk, await loadBars(tk)])));
       const fz = Object.fromEntries(multi.sel.map((tk) => [tk, fuseFor(tk, barsMap[tk] ?? barsCache[tk])]));
@@ -888,6 +940,10 @@ export default function OptionsStrategyLab() {
         for (const pr of buildPresets(sent, sp, getU(tk).step, strikes)) {
           const a = analyze(pr.legs, sp, d2, getU(tk).iv, qq);
           if (!Number.isFinite(a.maxProfit) || a.maxProfit <= 0 || !Number.isFinite(a.maxLoss)) continue;
+          // Same floors as the Shortlist and the wizard, from the same function.
+          const qf = qualityFloor({ openInterest: a.legPx.map((l) => l.oi), maxProfit: a.maxProfit, maxLoss: a.maxLoss });
+          if (!qf.liquidity.checked) cutFloors.oiSkipped.add(tk);
+          if (!qf.pass) { cutFloors.n++; cutFloors.markets.add(tk); continue; }
           const ivA = a.legPx.reduce((x, y) => x + y.iv, 0) / Math.max(1, a.legPx.length);
           const pop = probProfit(a.curve, sp, ivA, d2) || 0;
           const unit = Math.abs(a.maxLoss);
@@ -902,7 +958,8 @@ export default function OptionsStrategyLab() {
         const pr = evProfile(o.pop, o.a.maxProfit, o.a.maxLoss);
         return withSignalRank({ ...o, ev100: pr ? pr.ev100 : -999, tag: pr?.tag }, fz[o.tk], sentimentDirection(o.sent));
       }).sort(compareCandidates);
-      setMulti((m) => ({ ...m, busy: false, res: ranked.slice(0, 8) }));
+      setMulti((m) => ({ ...m, busy: false, res: ranked.slice(0, 8),
+        floors: { n: cutFloors.n, markets: [...cutFloors.markets], oiSkipped: [...cutFloors.oiSkipped] } }));
     } catch (e) { setMulti((m) => ({ ...m, busy: false, err: String(e.message || e) })); }
   };
 
@@ -1097,6 +1154,10 @@ export default function OptionsStrategyLab() {
       // evidence next to the road, so the evidence has to travel with it.
       const examined = [];
       const pool = [];
+      // What the quality floors threw out, and where. Counted per reason so the
+      // refusal can name the floor: "nothing on CORN clears the liquidity floor
+      // today" is a useful answer, an empty screen is not.
+      const floors = { liquidity: 0, reward: 0, markets: new Set(), oiUnavailable: new Set() };
       for (const r of priced) {
         const tk = r.tk;
         const c = chains[tk] || (await refreshChain(tk, true));
@@ -1126,6 +1187,19 @@ export default function OptionsStrategyLab() {
             const pop = probProfit(a.curve, sp, ivA, d2) || 0;
             const unit = Math.abs(a.maxLoss);
             if (unit > ans.risk) continue;   // it does not fit the budget: not a road
+            // THE QUALITY FLOORS (src/rules.js). A structure that clears every
+            // other rule can still be a price on a contract nobody trades, or a
+            // ticket that pays $15 for $86 at risk. Neither becomes a road, and
+            // the tally below is what lets the refusal screen say WHICH floor
+            // emptied the board rather than shrugging at an empty page.
+            const qf = qualityFloor({ openInterest: a.legPx.map((l) => l.oi), maxProfit: a.maxProfit, maxLoss: a.maxLoss });
+            if (!qf.liquidity.checked) floors.oiUnavailable.add(tk);
+            if (!qf.pass) {
+              if (!qf.liquidity.pass) floors.liquidity++;
+              else floors.reward++;
+              floors.markets.add(tk);
+              continue;
+            }
             const pr2 = evProfile(pop, a.maxProfit, a.maxLoss);
             pool.push({
               tk, sent, pr, a, pop, unit, ek, spot: sp, dte: d2,
@@ -1137,8 +1211,21 @@ export default function OptionsStrategyLab() {
       }
       if (!examined.length) return stop([{ id: "no-chain", text: NOTHING_TODAY.noData(basket.join(", ")) }]);
 
-      // 5) Nothing fits the budget: also a real answer, not an error toast.
-      if (!pool.length) return stop([{ id: "budget", text: NOTHING_TODAY.budgetTooSmall(ans.risk) }]);
+      // 5) Nothing fits: a real answer, and WHICH real answer matters. A board
+      // emptied by the quality floors is a different sentence from a board
+      // emptied by the budget, and the user is owed the one that is true.
+      if (!pool.length) {
+        const cut = floors.liquidity + floors.reward;
+        if (cut > 0) {
+          return stop([{
+            id: "quality-floor",
+            text: NOTHING_TODAY.belowQualityFloor({
+              liquidity: floors.liquidity, reward: floors.reward, markets: [...floors.markets],
+            }),
+          }]);
+        }
+        return stop([{ id: "budget", text: NOTHING_TODAY.budgetTooSmall(ans.risk) }]);
+      }
 
       // 6) The user's three weights decide the order, across the whole basket at
       // once. Prefer the ones that are not expected to lose money: "win big"
@@ -1187,6 +1274,8 @@ export default function OptionsStrategyLab() {
       setVerdict(verdictNarrative({
         basket, examined, excluded, newsItems: newsPool, weatherData: weather,
         month: NOW_MONTH, weights: ans.weights, chosen: roads,
+        floors: { liquidity: floors.liquidity, reward: floors.reward,
+          markets: [...floors.markets], oiUnavailable: [...floors.oiUnavailable] },
       }));
 
       setTicker(first.tk); setExpKey(first.ek);
@@ -1333,13 +1422,6 @@ export default function OptionsStrategyLab() {
   /* ---- risk gate (PRD §8) ----
      Un solo cancello per ogni ordine. La UI non ricalcola mai i limiti: chiede
      a src/riskGate.js e mostra quello che risponde. */
-  const capitalAnswers = useMemo(() => ({
-    tradingCapital: store.settings.capital,
-    concurrentTarget: store.settings.concurrentTarget,
-    savings: store.settings.savings,
-    override: store.settings.sizeOverride,
-  }), [store.settings]);
-  const limits = useMemo(() => sizing(capitalAnswers), [capitalAnswers]);
   // Conto locale: la posizione "Paper interno" non lascia il browser, quindi la
   // verifica paper e' soddisfatta per costruzione. Non usarlo mai per un ordine.
   const LOCAL_BOOK = { paperVerified: true, paperSource: "local simulation, no broker involved" };
@@ -1752,9 +1834,32 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
 
             <Panel style={{ marginTop: 10 }}>
               <Lbl>2 · {SENT.label.toUpperCase()} STRATEGIES — {ticker} · PRICED FROM THE LIVE CHAIN</Lbl>
+              {/* THE QUALITY FLOORS, before anything is drawn. A structure that
+                  fails one is never rendered as an option — but the count of
+                  what went and why is, because a list that silently shortens
+                  itself teaches nothing and looks broken. */}
+              {shortlist.cut.length > 0 && (
+                <div style={{ ...mono, fontSize: 10.5, color: T.amber, marginTop: 8, lineHeight: 1.6, padding: "8px 10px", background: `${T.amber}0f`, border: `1px solid ${T.amber}44`, borderRadius: 6 }}>
+                  {shortlist.cut.length} of {shortlist.cut.length + shortlist.rows.length} structures for this
+                  direction did not clear the quality floors and are not shown:
+                  <div style={{ marginTop: 4 }}>
+                    {shortlist.cut.map((c) => <div key={c.name}>· {c.name} — {c.reasons[0]}</div>)}
+                  </div>
+                </div>
+              )}
+              {shortlist.rows.length === 0 && (
+                <div style={{ ...mono, fontSize: 11, color: T.red, marginTop: 8, lineHeight: 1.6 }}>
+                  Nothing on {ticker} clears the quality floors at this expiry today. That is an answer, not an
+                  empty screen: {qualityFloorSentence()}
+                </div>
+              )}
+              {shortlist.oiSkipped && (
+                <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 8, lineHeight: 1.6 }}>
+                  {liquiditySkippedNote(feedName(chain))}
+                </div>
+              )}
               <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
-                {buildPresets(sentiment, spot, U.step, expStrikes).map((p) => {
-                  const a = analyze(p.legs, spot, dte, iv, q);
+                {shortlist.rows.map(({ p, a }) => {
                   const rr = a.maxProfit > 0 && a.maxLoss < 0 ? (a.maxProfit / Math.abs(a.maxLoss)) : null;
                   const ivAvg = a.legPx.reduce((x, y) => x + y.iv, 0) / Math.max(1, a.legPx.length);
                   const pop = probProfit(a.curve, spot, ivAvg, dte);
@@ -1826,7 +1931,27 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                 {multi.err && <div style={{ ...mono, fontSize: 11, color: T.red, marginTop: 8 }}>{multi.err}</div>}
                 {multi.res && (
                   <div style={{ display: "grid", gap: 6, marginTop: 10 }}>
-                    {multi.res.length === 0 && <div style={{ ...mono, fontSize: 11.5, color: T.mut }}>Nothing fits your budget on the markets you picked.</div>}
+                    {/* An empty scan always says WHY. "Nothing fits your budget"
+                        and "nothing here clears the quality floors" are
+                        different answers, and the second one is the useful one. */}
+                    {multi.res.length === 0 && (
+                      <div style={{ ...mono, fontSize: 11.5, color: T.mut, lineHeight: 1.6 }}>
+                        {multi.floors?.n
+                          ? `Nothing on ${multi.floors.markets.join(", ")} clears the quality floors today — ${multi.floors.n} structure${multi.floors.n === 1 ? " was" : "s were"} built and filtered out. ${qualityFloorSentence()}`
+                          : "Nothing fits your budget on the markets you picked."}
+                      </div>
+                    )}
+                    {multi.res.length > 0 && multi.floors?.n > 0 && (
+                      <div style={{ ...mono, fontSize: 10, color: T.amber, lineHeight: 1.6 }}>
+                        {multi.floors.n} structure{multi.floors.n === 1 ? "" : "s"} on {multi.floors.markets.join(", ")} did
+                        not clear the quality floors and {multi.floors.n === 1 ? "is" : "are"} not listed. {qualityFloorSentence()}
+                      </div>
+                    )}
+                    {multi.floors?.oiSkipped?.length > 0 && (
+                      <div style={{ ...mono, fontSize: 10, color: T.dim, lineHeight: 1.6 }}>
+                        {liquiditySkippedNote(`the feed for ${multi.floors.oiSkipped.join(", ")}`)}
+                      </div>
+                    )}
                     {multi.res.some((r) => r.conflict) && (
                       <div style={{ ...mono, fontSize: 10, color: T.red }}>
                         Candidates marked CONFLICT sit at the bottom by construction: the four factors contradict each other on that underlying, and no expected value is worth a signal we cannot read.
@@ -1857,7 +1982,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   </div>
                 )}
               </div>
-              <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 8 }}>Budget is the most you will pay, taken from live {feedName(chain) || "market"} prices. For trades where you receive money up front, the limit becomes the capital tied up instead. Chance is the probability of ending in profit at expiry. Your per-trade limit: {money(limits.perTradeLimit)} ({perTradeCapLabel()}).</div>
+              <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 8 }}>Budget is the most you will pay, taken from live {feedName(chain) || "market"} prices. For trades where you receive money up front, the limit becomes the capital tied up instead. Chance is the probability of ending in profit at expiry. {limits.answered ? "Your" : "The suggested"} per-trade limit: {money(limits.perTradeLimit)} ({perTradeCapLabel()}). {qualityFloorSentence()}</div>
             </Panel>
           </div>
         )}
@@ -2461,20 +2586,29 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
             </Card>
 
             <Card style={{ marginTop: 12 }}>
-              <Lbl>YOUR CAPITAL · EVERY LIMIT COMES FROM HERE</Lbl>
+              <Lbl>{limits.answered ? "YOUR CAPITAL · EVERY LIMIT COMES FROM HERE" : "YOUR CAPITAL · NOT SET YET"}</Lbl>
               <div style={{ fontSize: 13, color: T.mut, marginTop: 8, lineHeight: 1.5 }}>
                 Change these and the per-trade limit changes with them. Nothing here is a number we handed you.
               </div>
+              {/* Empty means UNANSWERED, and the field says what a suggestion
+                  would look like rather than filling itself in as if you had
+                  chosen it. Every figure below then reads "suggested" until
+                  both boxes have something in them. */}
+              {!limits.answered && (
+                <Pill tone={T.blue}>{capitalSourceNote(limits)}</Pill>
+              )}
               <div style={{ display: "flex", gap: 16, marginTop: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
                 <div>
                   <div style={{ ...mono, fontSize: 10, color: T.dim }}>TRADING CAPITAL ($)</div>
-                  <Inp type="number" min={100} step={500} value={store.settings.capital || RULES.defaultTradingCapital}
-                    onChange={(e) => setSetting("capital", Math.max(100, +e.target.value))} style={{ width: 130, fontSize: 16, padding: "10px 10px" }} />
+                  <Inp type="number" min={100} step={500} value={store.settings.capital ?? ""}
+                    placeholder={`e.g. ${RULES.suggestedTradingCapital}`}
+                    onChange={(e) => setSetting("capital", e.target.value === "" ? null : Math.max(100, +e.target.value))} style={{ width: 130, fontSize: 16, padding: "10px 10px" }} />
                 </div>
                 <div>
                   <div style={{ ...mono, fontSize: 10, color: T.dim }}>POSITIONS AT ONCE</div>
-                  <Inp type="number" min={1} max={20} value={store.settings.concurrentTarget || RULES.defaultConcurrentTarget}
-                    onChange={(e) => setSetting("concurrentTarget", Math.max(1, +e.target.value))} style={{ width: 90, fontSize: 16, padding: "10px 10px" }} />
+                  <Inp type="number" min={1} max={20} value={store.settings.concurrentTarget ?? ""}
+                    placeholder={`e.g. ${RULES.suggestedConcurrentTarget}`}
+                    onChange={(e) => setSetting("concurrentTarget", e.target.value === "" ? null : Math.max(1, +e.target.value))} style={{ width: 90, fontSize: 16, padding: "10px 10px" }} />
                 </div>
                 <div>
                   <div style={{ ...mono, fontSize: 10, color: T.dim }}>TOTAL SAVINGS ($, OPTIONAL)</div>
@@ -2484,12 +2618,18 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
               </div>
               {/* The pills explain the limit while you are still changing it. */}
               {limits.pills.map((pl) => <Pill key={pl.id}>{pl.text}</Pill>)}
-              <div style={{ marginTop: 14, padding: "12px 14px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 10 }}>
-                <div style={{ fontSize: 15, fontWeight: 700, color: T.ink }}>{money(limits.perTradeLimit)} at risk per trade</div>
+              <div style={{ marginTop: 14, padding: "12px 14px", background: T.bg, border: `1px solid ${limits.answered ? T.line : T.blue}`, borderRadius: 10 }}>
+                <div style={{ ...mono, fontSize: 10, color: limits.answered ? T.dim : T.blue, letterSpacing: "0.1em" }}>
+                  {limits.answered ? "YOUR LIMITS" : "SUGGESTED — NOT YOUR LIMITS YET"}
+                </div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: T.ink, marginTop: 4 }}>{money(limits.perTradeLimit)} at risk per trade</div>
                 <div style={{ fontSize: 13, color: T.mut, marginTop: 4, lineHeight: 1.5 }}>
                   and {money(limits.totalLimit)} across everything at once ({pctText(RULES.totalExposurePct)} of your capital).
                   {limits.overrideAccepted ? ` This is your own limit, not the suggested one — your reason: “${limits.overrideReason}”.` : ""}
                 </div>
+                {/* Only when answered: unanswered, the pill above the fields
+                    already says it, and saying it twice reads as noise. */}
+                {limits.answered && <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6, lineHeight: 1.5 }}>{capitalSourceNote(limits)}</div>}
               </div>
               {/* An override is allowed, and it costs a written reason (PRD §3). */}
               <div style={{ marginTop: 14 }}>

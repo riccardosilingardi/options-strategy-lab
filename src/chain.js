@@ -126,7 +126,7 @@ export function parseCboeJson(sym, j, now = Date.now()) {
     };
   }
   const expirations = Object.keys(byExp).sort();
-  if (!expirations.length) throw new Error("chain vuota");
+  if (!expirations.length) throw new Error("the chain came back with no usable expirations");
   return { spot, byExp, expirations, updated: new Date().toISOString(), source: SOURCE.cboeDirect };
 }
 

@@ -28,9 +28,14 @@ export const RULES = {
   bestPracticePerTradePct: 0.05, // no single trade above 5% of trading capital
   totalExposurePct: 0.25,        // no more than 25% of capital at risk at once
 
-  // --- defaults used only when onboarding has not answered yet
-  defaultTradingCapital: 5000,
-  defaultConcurrentTarget: 4,
+  // --- THE STARTING POINT SHOWN WHILE THE USER HAS NOT ANSWERED YET.
+  // These are a SUGGESTION on screen, never "your limit": `sizing()` reports
+  // `answered: false` when it had to fall back to them, and every screen that
+  // prints a figure derived from them has to say where it came from. An app
+  // that quotes a number the user never chose back at them as their own limit
+  // has stopped being trustworthy about anything else it says (PRD §5).
+  suggestedTradingCapital: 5000,
+  suggestedConcurrentTarget: 4,
 
   // --- pill thresholds
   savingsShareWarnPct: 0.10,   // trading capital above 10% of savings → pill
@@ -42,6 +47,34 @@ export const RULES = {
   expensiveIVRank: 70,         // IV rank at or above this → options priced rich
                                // versus their own history: we are the buyer of
                                // an expensive option, so we stand down
+
+  // --- QUALITY FLOORS. A structure can pass every rule above and still be
+  // indefensible. These two are the floors under a PROPOSAL: a candidate that
+  // fails either one is never offered, and the screen says which floor it hit.
+  //
+  // minOpenInterestPerLeg — how many contracts must already be open on a leg
+  // before this app will build with it. Open interest is the count of contracts
+  // in existence at the previous session's close: it is the closest thing to a
+  // headcount of the people on the other side of your trade. On a contract with
+  // 2 open and 0 open, the bid and the ask are a market maker's placeholder,
+  // not a price anybody has agreed to — you can be quoted 1.16 and 0.30 on two
+  // adjacent strikes whose implied volatility disagrees by ten points, because
+  // no trade has ever tested either number. 25 is the floor: it is far above
+  // the single digits that mark a strike nobody has touched, and far below what
+  // a genuinely traded near-the-money strike on these ETFs carries.
+  minOpenInterestPerLeg: 25,
+
+  // minRewardRisk — the least a structure may pay per dollar it puts at risk.
+  // Read it as a break-even hit rate: at a ratio r a win pays r and a loss costs
+  // 1, so you break even at p = 1 / (1 + r) — 0.25 means being right
+  // 80% of the time to break even, and anything below it needs a hit rate no
+  // structure on these five chains actually prices. It is also the practitioner
+  // floor for a credit spread — collect at least a quarter of the width or the
+  // wins are too small to pay for the losses. High-probability credit spreads
+  // sit comfortably above it (a two-thirds-chance spread collecting a third of
+  // its width is 0.5), so the floor removes the lottery tickets without
+  // removing the boring trades that are the point of this app.
+  minRewardRisk: 0.25,
 };
 
 /* ============================== formatting ============================== */
@@ -124,7 +157,136 @@ export const NOTHING_TODAY = {
   noData: (what) =>
     `Market data for ${what} did not load, so there is nothing to judge. This is a missing-data problem, not a ` +
     `verdict on the market: try again in a minute.`,
+  // The quality floors emptied the board. This is a real answer — "nothing on
+  // CORN clears the liquidity floor today" is worth more than a screen of
+  // structures nobody trades — so it gets a sentence with the counts in it.
+  belowQualityFloor: (tally) => {
+    const t = tally || {};
+    const markets = (t.markets || []).join(", ");
+    const parts = [];
+    if (t.liquidity > 0) parts.push(`${t.liquidity} because ${qualityFloorLabels().liquidity}`);
+    if (t.reward > 0) parts.push(`${t.reward} because ${qualityFloorLabels().reward}`);
+    return `Every structure that fit your answers on ${markets || "the markets you picked"} was ` +
+      `filtered out by the quality floors: ${parts.join(", and ")}. ` +
+      `Those floors are the difference between a price and a market. Nothing here today is the honest answer, ` +
+      `and it is a better one than a trade nobody else is willing to take the other side of.`;
+  },
 };
+
+/**
+ * Where the limits on screen came from, in one sentence. Any screen that prints
+ * a per-trade or exposure figure prints this next to it, so a suggested number
+ * can never be read as the user's own decision (PRD §3, §5).
+ */
+export const capitalSourceNote = (limits) => {
+  const L = limits || {};
+  if (L.answered) {
+    return `Worked out from the ${money(L.tradingCapital)} you set aside for trading and the ` +
+      `${L.concurrentTarget} position${L.concurrentTarget === 1 ? "" : "s"} you want open at once.`;
+  }
+  return `SUGGESTED STARTING POINT — you have not told the app how much you are trading with yet. ` +
+    `These figures come from an example ${money(RULES.suggestedTradingCapital)} split across ` +
+    `${RULES.suggestedConcurrentTarget} positions, not from anything you chose. Set your own in Settings.`;
+};
+
+/** `your own per-trade limit` / `the suggested per-trade limit` — never the wrong one. */
+export const perTradeLimitPhrase = (limits) =>
+  (limits && limits.answered) ? "your own per-trade limit" : "the suggested per-trade limit";
+
+/** The possessive in front of a limit figure: `your` only when it really is. */
+export const limitOwner = (limits) => ((limits && limits.answered) ? "your" : "the suggested");
+
+/* ====================== QUALITY FLOORS, applied ======================
+   The two floors in RULES, as one pure function every candidate goes through.
+   It lives here with the numbers rather than in a component, so a structure
+   cannot be rejected on one screen and offered on another.
+
+   TWO THINGS THIS FUNCTION WILL NOT DO.
+
+   It will not treat MISSING open interest as low open interest. Alpaca's
+   snapshots carry no open-interest figure at all (src/chain.js fills it in
+   afterwards from the broker's contract list, and sometimes that call does not
+   land). A floor that reads `null` as zero would reject every candidate on the
+   whole feed and call it illiquidity, which is a lie about what we know. When
+   any leg's count is unknown the liquidity check is SKIPPED and says so, and
+   the screen repeats that rather than staying quiet.
+
+   And it will not invent a reason. Every rejection comes back with the number
+   that caused it, so the sentence on screen is the arithmetic, not a verdict. */
+
+/** The floors as phrases, generated so no screen can quote a different number. */
+export const qualityFloorLabels = () => ({
+  liquidity: `fewer than ${RULES.minOpenInterestPerLeg} contracts are open on one of its legs`,
+  reward: `it pays under ${money(RULES.minRewardRisk * 100)} for every ${money(100)} at risk`,
+});
+
+/** `at least 25 open contracts per leg and $0.25 of reward per $1 at risk` */
+export const qualityFloorSentence = () =>
+  `Every structure offered here has at least ${RULES.minOpenInterestPerLeg} contracts of open interest on ` +
+  `every leg and pays at least ${pctText(RULES.minRewardRisk)} of what it risks. Open interest is how many ` +
+  `contracts are actually open: a price on a contract nobody trades is a quote, not a market.`;
+
+/** The one sentence shown when the liquidity floor could not be applied. */
+export const liquiditySkippedNote = (feed) =>
+  `The liquidity floor was SKIPPED${feed ? ` — ${feed} does not report open interest for these contracts` : ""}. ` +
+  `Missing data is not evidence that nobody trades them, so nothing was rejected for it.`;
+
+/**
+ * Run one candidate past both floors.
+ *
+ * @param {object} cand
+ *   openInterest — one entry per leg. A number is a known count (0 included:
+ *                  CBOE really does report zero). `null`/`undefined` means the
+ *                  feed did not tell us, and skips the check.
+ *   maxProfit    — dollars, the best case
+ *   maxLoss      — dollars, the worst case (negative, or positive magnitude)
+ * @returns {{ pass, liquidity, reward, reasons }} — `reasons` are finished
+ *   English sentences with the numbers already in them.
+ */
+export function qualityFloor({ openInterest = [], maxProfit, maxLoss } = {}) {
+  const risk = Math.abs(Number(maxLoss));
+  const reward = Number(maxProfit);
+  const rr = risk > 0 && Number.isFinite(reward) ? reward / risk : null;
+
+  const counts = Array.isArray(openInterest) ? openInterest : [];
+  // `Number(null)` is 0 and `Number(undefined)` is NaN, so the unknowns have to
+  // be thrown out BEFORE the coercion or a leg the feed said nothing about
+  // arrives here as a leg with zero open contracts — exactly the lie this
+  // function exists to refuse to tell.
+  const isKnown = (x) => x != null && x !== "" && Number.isFinite(Number(x));
+  const known = counts.filter(isKnown).map(Number);
+  const checked = counts.length > 0 && known.length === counts.length;
+  const worst = checked ? Math.min(...known) : null;
+  const liquidity = {
+    checked,
+    pass: checked ? worst >= RULES.minOpenInterestPerLeg : true,
+    worst,
+    floor: RULES.minOpenInterestPerLeg,
+  };
+
+  const rewardCheck = {
+    checked: rr != null,
+    pass: rr != null && rr >= RULES.minRewardRisk,
+    rr,
+    floor: RULES.minRewardRisk,
+  };
+
+  const reasons = [];
+  if (!liquidity.pass) {
+    reasons.push(
+      `Open interest is ${worst} on its thinnest leg, under the ${RULES.minOpenInterestPerLeg} this app needs. ` +
+      `A price on a contract nobody trades is a quote, not a market: you would be paying whatever the ` +
+      `market maker felt like typing.`);
+  }
+  if (!rewardCheck.pass) {
+    reasons.push(rr == null
+      ? `The best case cannot be measured against the worst, so there is no reward-to-risk to judge.`
+      : `It pays ${money(rr * 100)} for every ${money(100)} at risk, under the ${money(RULES.minRewardRisk * 100)} ` +
+        `floor: you would have to be right ${pctText(1 / (1 + rr), 0)} of the time just to break even.`);
+  }
+
+  return { pass: liquidity.pass && rewardCheck.pass, liquidity, reward: rewardCheck, reasons };
+}
 
 /** The rules block injected into every model prompt. English, generated. */
 export const copilotRulesBlock = () =>
@@ -143,6 +305,8 @@ export const copilotRulesBlock = () =>
    suggestion on top of it. */
 
 const positive = (x, fallback) => (Number.isFinite(Number(x)) && Number(x) > 0 ? Number(x) : fallback);
+/** Did the user actually give us this, or are we about to invent it? */
+const given = (x) => x != null && x !== "" && Number.isFinite(Number(x)) && Number(x) > 0;
 
 /**
  * @param {object} answers
@@ -154,8 +318,15 @@ const positive = (x, fallback) => (Number.isFinite(Number(x)) && Number(x) > 0 ?
  *          override was accepted.
  */
 export function sizing(answers = {}) {
-  const tradingCapital = positive(answers.tradingCapital, RULES.defaultTradingCapital);
-  const concurrentTarget = Math.max(1, Math.round(positive(answers.concurrentTarget, RULES.defaultConcurrentTarget)));
+  // ANSWERED, or ASSUMED. Both questions have to have been answered before any
+  // number derived from them may be shown as the user's own limit; with either
+  // missing the whole set is a suggestion, and `answered: false` is how every
+  // screen knows to say so. The figures are still produced — the risk gate has
+  // to enforce SOMETHING while the questions are open, and the suggested
+  // starting point is the conservative thing to enforce.
+  const answered = given(answers.tradingCapital) && given(answers.concurrentTarget);
+  const tradingCapital = positive(answers.tradingCapital, RULES.suggestedTradingCapital);
+  const concurrentTarget = Math.max(1, Math.round(positive(answers.concurrentTarget, RULES.suggestedConcurrentTarget)));
   const savings = Number.isFinite(Number(answers.savings)) && Number(answers.savings) > 0 ? Number(answers.savings) : null;
 
   const suggestedPerTrade = tradingCapital / concurrentTarget;
@@ -170,8 +341,14 @@ export function sizing(answers = {}) {
   const overrideAccepted = wantsOverride && reason.length >= RULES.minOverrideReasonChars;
   const perTradeLimit = overrideAccepted ? Number(ov.perTrade) : cappedPerTrade;
 
+  // A PILL EXPLAINS AN ANSWER. With the questions still open there is no answer
+  // to explain, and a pill built on the suggested figures reads as a statement
+  // about the user — "one position at a time means all your risk sits on one
+  // outcome" to somebody who never said one — which is the same fault as
+  // quoting an invented budget back at him. The override pill is the exception:
+  // it is about something he really did type.
   const pills = [];
-  if (suggestedPerTrade > bestPracticeCap) {
+  if (answered && suggestedPerTrade > bestPracticeCap) {
     pills.push({
       id: "per-trade-over-best-practice",
       text: `With ${concurrentTarget} position${concurrentTarget === 1 ? "" : "s"} at a time, each one ` +
@@ -180,14 +357,14 @@ export function sizing(answers = {}) {
         `${pctText(RULES.bestPracticePerTradePct)} — ${money(bestPracticeCap)} — so one loss can't end the run.`,
     });
   }
-  if (savings && tradingCapital > RULES.savingsShareWarnPct * savings) {
+  if (answered && savings && tradingCapital > RULES.savingsShareWarnPct * savings) {
     pills.push({
       id: "capital-share-of-savings",
       text: `Trading capital is usually money you could lose without changing your life. Yours is ` +
         `${pctText(tradingCapital / savings)} of your savings (${money(tradingCapital)} of ${money(savings)}).`,
     });
   }
-  if (concurrentTarget === 1) {
+  if (answered && concurrentTarget === 1) {
     pills.push({
       id: "single-position",
       text: `One position at a time means all your risk sits on one outcome. That is not wrong, but ` +
@@ -203,6 +380,7 @@ export function sizing(answers = {}) {
   }
 
   return {
+    answered,
     tradingCapital, concurrentTarget, savings,
     suggestedPerTrade, bestPracticeCap, cappedPerTrade, suggestedTotal,
     perTradeLimit, totalLimit: suggestedTotal,

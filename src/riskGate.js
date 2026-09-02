@@ -16,7 +16,7 @@
 // import this file.
 // ============================================================================
 
-import { RULES, sizing, money, pctText } from "./rules.js";
+import { RULES, sizing, money, pctText, capitalSourceNote } from "./rules.js";
 
 /* ============================== helpers ============================== */
 
@@ -177,6 +177,13 @@ export function evaluateTrade({ proposal, portfolio, capital, signals } = {}) {
   }
 
   /* ---- warnings: shown, never blocking ---- */
+  // The gate always enforces SOMETHING — a proposal cannot wait for a
+  // questionnaire — but it must never let a suggested figure pass itself off as
+  // the user's own limit. When the capital questions are unanswered the numbers
+  // above come from the suggested starting point, and the gate says so out loud.
+  if (isOpen && !limits.answered) {
+    warnings.push(V("CAPITAL_NOT_SET", capitalSourceNote(limits)));
+  }
   if (signals && signals.agreement === "CONFLICT") {
     warnings.push(V("SIGNAL_CONFLICT",
       `The four factors disagree (agreement: CONFLICT, score ${isNum(signals.score) ? signals.score : "n/a"}/100, ` +
@@ -204,6 +211,7 @@ export function evaluateTrade({ proposal, portfolio, capital, signals } = {}) {
     warnings,
     intent,
     limits: {
+      answered: limits.answered,
       tradingCapital: cap,
       perTrade: limits.perTradeLimit,
       total: limits.totalLimit,

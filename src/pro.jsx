@@ -358,7 +358,16 @@ export async function askAI(_key, messages, contextStr) {
   let j = null;
   try { j = JSON.parse(raw); } catch { /* the proxy returned something that is not JSON */ }
   if (!j) throw new Error(raw.trim().slice(0, 300) || `The copilot endpoint answered HTTP ${r.status} with an empty body.`);
-  if (j.error) throw new Error(j.error.message || JSON.stringify(j.error).slice(0, 300));
+  if (j.error) {
+    // The API's own sentence, plus what the proxy actually sent. Without the
+    // second half "workspace id required" and "wrong key" read the same on
+    // screen, and the person who has to fix it cannot tell which it is.
+    const d = j.error.sent;
+    const detail = d
+      ? ` [ai.mjs sent: model ${d.model || "none"}, headers ${(d.headers || []).join(" ")}, anthropic-workspace-id ${d.workspaceHeader}]`
+      : "";
+    throw new Error((j.error.message || JSON.stringify(j.error).slice(0, 300)) + detail);
+  }
   if (!r.ok) throw new Error(`HTTP ${r.status}: ${raw.trim().slice(0, 300)}`);
   return (j.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
 }

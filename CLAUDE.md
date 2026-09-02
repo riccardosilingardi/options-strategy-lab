@@ -45,10 +45,49 @@ An agent that cannot execute a trade it cannot justify.
 
 ## Position sizing
 
-Derived, not hardcoded. See PRD §3. The user supplies trading capital and how
-many positions they hold at once; the app derives the per-trade limit and shows
-the best-practice cap as an explained suggestion. Overrides require a typed
-reason and are stored with the position.
+Derived, not hardcoded, and **asked rather than assumed**. See PRD §3. The user
+supplies trading capital and how many positions they hold at once; `sizing()` in
+`src/rules.js` derives the per-trade and total limits and shows the best-practice
+cap as an explained suggestion. Overrides require a typed reason and are stored
+with the position.
+
+**One home, read everywhere.** Never derive, default or hardcode a capital,
+per-trade or exposure figure anywhere else. The Build screen's risk field once
+defaulted to a hardcoded 500 while the wizard quoted a derived 250 — two numbers
+for the same thing, neither of them the user's. Everything now reads
+`limits` (the `sizing()` result) from `App.jsx`.
+
+**Until both questions are answered, nothing is his limit.** `capital` and
+`concurrentTarget` are stored `null`, `sizing()` returns `answered: false`, and
+every screen printing a figure derived from the fallback labels it a suggestion
+(`capitalSourceNote()`, `limitOwner()`, `perTradeLimitPhrase()`). No literacy
+pill is generated while the questions are open — a pill explains an answer, and
+there is no answer to explain. The gate still enforces the suggested figures,
+because a proposal cannot wait for a questionnaire, and warns that it is doing so.
+
+## Quality floors — the app will not propose an indefensible trade
+
+Two named constants in `src/rules.js`, with the reasoning beside them, applied by
+one pure function `qualityFloor()` at **every** point candidates are generated:
+the guided flow's pool in `runWizard`, the Shortlist (`shortlistWithFloors`) and
+the multi-market scan. See PRD §4b for the numbers and the evidence behind them.
+
+- `minOpenInterestPerLeg` — a leg nobody trades is a quote, not a price.
+- `minRewardRisk` — below it you must be right more often than anything on these
+  chains actually prices.
+
+Two rules hold them, and both are the point:
+
+1. **Missing open interest is not low open interest.** Alpaca snapshots carry
+   `oi: null`; reading that as `0` would reject a whole feed and call it
+   illiquidity. Unknown → the check is SKIPPED and the screen says so
+   (`liquiditySkippedNote()`). A real `0` from CBOE still fails.
+2. **Never an empty screen without an explanation.** If the floors empty a
+   market, say which floor and how many: `NOTHING_TODAY.belowQualityFloor()` on
+   the refusal screen, a line on the Shortlist naming what it removed, and the
+   counts in `verdictNarrative()`.
+
+Adding a third generation site means calling `qualityFloor()` there too.
 
 ## Exit rules
 
@@ -64,12 +103,15 @@ while the position is open.
 
 - `src/rules.js` — **the single source of truth for the trading rules**. Take
   profit, stop loss, exit DTE, the entry-DTE floor and the PRD §3 sizing model
-  (`sizing()`), plus the generated rule strings (`ruleBadge()`,
-  `perTradeCapLabel()`, `copilotRulesBlock()`, `RULE_PILLS`, `NOTHING_TODAY`).
+  (`sizing()`), the two quality floors and `qualityFloor()` that applies them,
+  plus the generated rule strings (`ruleBadge()`, `perTradeCapLabel()`,
+  `copilotRulesBlock()`, `capitalSourceNote()`, `qualityFloorSentence()`,
+  `RULE_PILLS`, `NOTHING_TODAY`).
   Never write a rule number or a rule sentence anywhere else — not in a
-  component, not in a prompt, not in a serverless function. The two thresholds
-  that make the app refuse (`lowConfidence`, `expensiveIVRank`) live here too,
-  so the "nothing today" screen can only ever explain a rule the code applies.
+  component, not in a prompt, not in a serverless function. The thresholds
+  that make the app refuse (`lowConfidence`, `expensiveIVRank`,
+  `minOpenInterestPerLeg`, `minRewardRisk`) live here too, so the "nothing
+  today" screen can only ever explain a rule the code applies.
 - `src/riskGate.js` — `evaluateTrade({ proposal, portfolio, capital, signals })`,
   a pure function returning `{ pass, violations, warnings }`. Every order path
   calls it, and a screen with no gate wired in fails closed
@@ -99,8 +141,11 @@ while the position is open.
   reads as a bad trade to a beginner before they know what is being judged.
 
 - `src/why.jsx` — **the "Why this trade" panel**, and the only copy of it. The
-  agreement badge, the four factors as direction/strength bars, and the
-  drill-down behind them: weather opens the regions and their anomalies, news
+  agreement badge, the four factors as direction/strength bars behind a toggle
+  that **names them** ("Show the four readings: Seasonality, Price trend,
+  Weather and News flow", built from `FACTOR_ORDER`/`FACTOR_LABEL` so it cannot
+  drift from the bars it opens — "show detail" was a door with no sign on it and
+  nobody opened it), and the drill-down behind them: weather opens the regions and their anomalies, news
   opens the headlines with their tags. It lives here rather than in `pro.jsx`
   because the wizard's decision screen needs it too — a road with no evidence
   under it is a recommendation, and this app does not make recommendations.
@@ -263,6 +308,10 @@ both Build's "open on paper" and the wizard's screen 4 land there, so a
 position carries the same gate record, thesis and timeline whichever way it was
 opened.
 
+The gate answers "may this order leave"; the quality floors answer "should this
+have been offered at all", and they live where candidates are generated, not in
+the gate — a trade the user builds by hand is his to make.
+
 Adding a seventh means adding a gate call. Paper mode is *verified*, not
 assumed: `alpaca.mjs` returns an `X-OSL-Paper-Endpoint` header and the gate
 rejects anything it cannot confirm.
@@ -308,7 +357,8 @@ than comparing two markets — they share a fate.
 
 The refusal is a screen, not a toast. `runWizard` in `App.jsx` decides, in order:
 data missing → signals not aligned → options expensive versus their own history →
-nothing fits the budget → only one road survives. A missing-data answer must
+every candidate below the quality floors → nothing fits the budget → only one road
+survives. A missing-data answer must
 never be dressed up as a market verdict — they are different sentences on
 screen, and `wizard.test.jsx` holds that line. "Only one candidate" is also a
 refusal: one answer is advice, two answers with their price is teaching.

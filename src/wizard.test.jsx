@@ -2,6 +2,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { CapitalOnboarding, WizardOpen, FindOpportunities, WizardCandidates, WizardConfirm, NothingToday, statusLine, tradeOffSentence, roadHeadline, gateChecklist } from "./wizard.jsx";
 import { evaluateTrade } from "./riskGate.js";
+import { WhyThisTrade } from "./why.jsx";
 import { sizing, NOTHING_TODAY, RULES } from "./rules.js";
 import { DRIVER_PRESETS, normaliseWeights, presetOf, rankByDrivers, verdictNarrative } from "./signals.js";
 
@@ -30,6 +31,64 @@ check("onboarding shows the 1-position pill before the choice", () => {
   has(h, "all your risk sits on one outcome");
   // the pill must appear BEFORE the Start button in the markup
   if (h.indexOf("all your risk sits on one outcome") > h.indexOf(">Start<")) throw new Error("pill rendered after the confirm button");
+});
+
+/* ---- THE EVIDENCE TOGGLE NAMES WHAT IT OPENS ---- */
+
+check("the 'why this trade' toggle names the four readings behind it", () => {
+  const fused = {
+    ticker: "CORN", score: 30, confidence: 60, agreement: "MIXED", narrative: "CORN scores +30.",
+    components: {
+      seasonal: { dir: 1, strength: 50, why: "s" }, technical: { dir: 1, strength: 40, why: "t" },
+      weather: { dir: 0, strength: 10, why: "w" }, news: { dir: 1, strength: 20, why: "n" },
+    },
+  };
+  const h = renderToStaticMarkup(<WhyThisTrade fused={fused} />);
+  // "show detail" was a door with no sign on it and nobody opened it.
+  if (/show detail/i.test(h)) throw new Error("the toggle still hides what it opens behind the word 'detail'");
+  has(h, "Show the four readings:");
+  for (const label of ["Seasonality", "Price trend", "Weather", "News flow"]) has(h, label);
+});
+
+/* ---- THE CAPITAL MODEL: asked, never assumed (PRD §3) ---- */
+
+check("onboarding does not pre-answer either question", () => {
+  const h = renderToStaticMarkup(<CapitalOnboarding onDone={() => {}} />);
+  // Empty fields, and a button that names what is still missing rather than
+  // being a locked door with no sign on it.
+  has(h, "Still needed: how much you are trading with");
+  if (/value="5000"/.test(h)) throw new Error("the capital field pre-filled itself with the suggestion");
+  // The suggestion is on screen, visibly a suggestion the user can accept.
+  has(h, "No idea? Start from $5,000");
+});
+
+check("an unanswered capital question is labelled a suggestion, never a limit", () => {
+  const open = sizing({});
+  if (open.answered) throw new Error("nothing was answered, so nothing is answered");
+  const h = renderToStaticMarkup(<CapitalOnboarding onDone={() => {}} />);
+  has(h, "WHAT THE ANSWERS WOULD GIVE YOU");
+  if (h.includes(">YOUR LIMITS<")) throw new Error("a figure nobody chose was labelled YOUR LIMITS");
+});
+
+check("both answers given makes the same figures his", () => {
+  const h = renderToStaticMarkup(<CapitalOnboarding initial={{ capital: 5000, concurrentTarget: 4 }} onDone={() => {}} />);
+  has(h, "YOUR LIMITS");
+  has(h, "Start");
+  if (h.includes("Still needed")) throw new Error("both questions are answered; nothing is missing");
+});
+
+check("the wizard's budget step reads the capital model, and says whose it is", () => {
+  const open = sizing({});
+  const h = renderToStaticMarkup(
+    <FindOpportunities answers={{ ...ANSWERED, risk: null, horizon: null }} setAnswers={() => {}}
+      limits={open} universe={UNIVERSE} />);
+  has(h, "The suggested limit works out at");
+  has(h, "not from anything you chose");
+  const mine = sizing({ tradingCapital: 5000, concurrentTarget: 4 });
+  const h2 = renderToStaticMarkup(
+    <FindOpportunities answers={ANSWERED} setAnswers={() => {}} limits={mine} universe={UNIVERSE} />);
+  has(h2, "Your limit works out at");
+  if (h2.includes("not from anything you chose")) throw new Error("he answered; stop calling it a suggestion");
 });
 
 check("screen 1 offers TWO doors, and 'decide for me' is not one of them", () => {
