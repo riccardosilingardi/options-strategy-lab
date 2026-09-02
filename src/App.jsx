@@ -12,6 +12,7 @@ import { fetchAllNews, fetchWeather, ImpactTags, CopilotTab, ReportTab, OrderTic
 import { BandThumbnail, payoffBands, bandTakeaway, GaugeFigure, exitPlanSentence } from "./visuals.jsx";
 import { fuseSignals, sentimentDirection, withSignalRank, compareCandidates, againstSignal, DRIVER_PRESETS, rankByDrivers, verdictNarrative } from "./signals.js";
 import { N as nCDF, bs as bsPrice, smile as smileIV, payoff as payoffExp, SEASONAL, SIGMA } from "./engine.js";
+import { parseOcc, buildOcc, fetchChain, hasOpenInterest } from "./chain.js";
 import { T, themeName, setTheme, BADGE_SAFE } from "./theme.js";
 import { RULES, sizing, ruleBadge, takeProfitLabel, stopLossLabel, perTradeCapLabel, RULE_PILLS, NOTHING_TODAY, money, pctText } from "./rules.js";
 import { evaluateTrade, gateSummary } from "./riskGate.js";
@@ -72,65 +73,13 @@ const NOW_MONTH = new Date().getMonth();
 const FALLBACK_U = (tk) => ({ name: tk, iv: 0.30, sigma: 0.30, step: 0.5, monthlyMean: Array(12).fill(0), newsQ: `${tk} price outlook`, fallback: true });
 const getU = (tk) => UNDERLYINGS[tk] || FALLBACK_U(tk || "?");
 
-/* ============================== CBOE REAL OPTION CHAIN ============================== */
-// Endpoint pubblico CBOE (dati ritardati ~15min): bid/ask, IV, OI, volume, greche REALI per strike
-function parseOcc(occ) {
-  const m = occ.match(/^([A-Z]{1,6})(\d{2})(\d{2})(\d{2})([CP])(\d{8})$/);
-  if (!m) return null;
-  return {
-    und: m[1],
-    exp: `20${m[2]}-${m[3]}-${m[4]}`,
-    type: m[5] === "C" ? "call" : "put",
-    strike: parseInt(m[6], 10) / 1000,
-    occ,
-  };
-}
-function buildOcc(sym, expISO, type, strike) {
-  const d = expISO.replaceAll("-", "").slice(2); // YYMMDD
-  const k = String(Math.round(strike * 1000)).padStart(8, "0");
-  return `${sym.toUpperCase()}${d}${type === "call" ? "C" : "P"}${k}`;
-}
-const CBOE_URL = (sym) => `https://cdn.cboe.com/api/global/delayed_quotes/options/${sym.toUpperCase()}.json`;
-
-async function fetchCboeDirect(sym) {
-  const r = await fetch(CBOE_URL(sym));
-  if (!r.ok) throw new Error("CBOE " + r.status);
-  return parseCboeJson(sym, await r.json());
-}
-function parseCboeJson(sym, j) {
-  const d = j.data || {};
-  const spot = d.current_price ?? d.close ?? d.last ?? null;
-  const byExp = {};
-  for (const o of d.options || []) {
-    const p = parseOcc(o.option || "");
-    if (!p) continue;
-    const dte = Math.round((new Date(p.exp) - Date.now()) / 86400000);
-    if (dte < 0 || dte > 400) continue; // fino a ~13 mesi: tutte le scadenze CBOE disponibili
-    if (!byExp[p.exp]) byExp[p.exp] = { dte, calls: {}, puts: {} };
-    const mid = o.bid > 0 && o.ask > 0 ? (o.bid + o.ask) / 2 : (o.last_trade_price || null);
-    byExp[p.exp][p.type === "call" ? "calls" : "puts"][p.strike] = {
-      bid: o.bid, ask: o.ask, mid, iv: o.iv || null, oi: o.open_interest || 0,
-      vol: o.volume || 0, delta: o.delta, theta: o.theta, occ: p.occ,
-    };
-  }
-  const expirations = Object.keys(byExp).sort();
-  if (!expirations.length) throw new Error("chain vuota");
-  return { spot, byExp, expirations, updated: new Date().toISOString(), source: "CBOE diretta" };
-}
-
-async function fetchCboeChain(sym) {
-  // 1) endpoint server dedicato (gestisce varianti simbolo + header browser)
-  try {
-    const r = await fetch(`/api/chain?sym=${encodeURIComponent(sym)}`);
-    if (r.ok) { const c = parseCboeJson(sym, await r.json()); return { ...c, source: "CBOE (server)" }; }
-    const err = await r.json().catch(() => ({}));
-    throw new Error((err.tried || [err.error]).join(" | "));
-  } catch (eServer) {
-    // 2) fetch diretta (funziona in locale/dev)
-    try { return await fetchCboeDirect(sym); }
-    catch (eDirect) { throw new Error(`server: ${eServer.message} · diretta: ${eDirect.message}`); }
-  }
-}
+/* ============================== OPTION CHAIN: ALPACA FIRST, CBOE AS THE NET ==============================
+   The chain lives in src/chain.js — one internal shape, two sources, and the
+   mid price computed in one place so the two can never disagree about the price
+   of the same contract for a reason that is only a formula. Alpaca is primary
+   (the same broker the orders go to); CBOE catches every failure, so a slow or
+   silent broker costs a few seconds, never a blank screen.
+   ======================================================================== */
 
 /* ============================== ALPHA VANTAGE: storico 10y+ ============================== */
 function statsFromMatrix(matrix) {
@@ -354,7 +303,11 @@ function histBacktest(legs, S, dte, entry, matrix) {
 
 /* ============================== 3D DATA da chain reale ============================== */
 function oiGridFromChain(chain, S) {
-  if (!chain) return null;
+  // Open interest is not in every source: an Alpaca snapshot carries the quote,
+  // the greeks and the IV, but not how many contracts are open. A grid of zeros
+  // would draw an empty chart under a sentence explaining where buyers cluster,
+  // which is the app describing something it cannot see. No OI, no panel.
+  if (!chain || !hasOpenInterest(chain)) return null;
   const exps = chain.expirations.filter((e) => chain.byExp[e].dte >= 7 && chain.byExp[e].dte <= 120).slice(0, 6);
   if (!exps.length) return null;
   const strikeSet = new Set();
@@ -537,7 +490,7 @@ export default function OptionsStrategyLab() {
   const refreshChain = useCallback(async (tk, silent) => {
     if (!silent) { setBusy(tk); setMsg(`Loading ${tk} option prices…`); }
     try {
-      const c = await fetchCboeChain(tk);
+      const c = await fetchChain(tk);
       setChains((m) => ({ ...m, [tk]: c }));
       // snapshot IV ATM giornaliero → costruisce lo storico per l'IV Rank
       try {
@@ -2126,8 +2079,12 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
         {/* ============ 3D ============ */}
         {tab === "build" && !showSettings && ev === "levels" && (
           <Panel style={{ marginTop: 12 }}>
-            <Lbl>WHERE THE MARKET IS POSITIONED (CBOE OPEN INTEREST)</Lbl>
-            {!oiGrid && <div style={{ ...mono, fontSize: 12, color: T.mut, padding: 30, textAlign: "center" }}>Press Refresh at the top to load the prices first.</div>}
+            <Lbl>WHERE THE MARKET IS POSITIONED (OPEN INTEREST)</Lbl>
+            {!oiGrid && <div style={{ ...mono, fontSize: 12, color: T.mut, padding: 30, textAlign: "center" }}>
+              {!chain ? "Press Refresh at the top to load the prices first."
+                : !hasOpenInterest(chain) ? `Open interest is not part of the ${chain.source} feed, so this panel has nothing to draw. It fills in when the chain comes from CBOE.`
+                : "Not enough strikes near today's price to draw this."}
+            </div>}
             {oiGrid && (
               <div style={{ height: 190, marginTop: 10 }}>
                 <ResponsiveContainer>

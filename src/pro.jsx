@@ -864,7 +864,7 @@ export function ChainMatrix({ chain, expKey, spot, legs, onCell }) {
         {q ? (
           <span style={{ ...mono, fontSize: 10.5 }}>
             <b style={{ color: lg ? (lg.side > 0 ? T.green : T.red) : T.ink }}>{q.mid != null ? q.mid.toFixed(2) : "—"}</b>
-            <span style={{ color: T.dim }}> · {q.iv ? (q.iv * 100).toFixed(0) + "%" : "—"} · OI {q.oi}</span>
+            <span style={{ color: T.dim }}> · {q.iv ? (q.iv * 100).toFixed(0) + "%" : "—"} · OI {q.oi ?? "—"}</span>
             {lg && <b style={{ color: lg.side > 0 ? T.green : T.red }}> {lg.side > 0 ? "＋BUY" : "−SELL"}{lg.qty > 1 ? "×" + lg.qty : ""}</b>}
           </span>
         ) : <span style={{ ...mono, fontSize: 10, color: T.dim }}>—</span>}

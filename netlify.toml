@@ -8,6 +8,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/chainAlpaca"
+  to = "/.netlify/functions/chainAlpaca"
+  status = 200
+
+[[redirects]]
   from = "/api/av"
   to = "/.netlify/functions/av"
   status = 200
