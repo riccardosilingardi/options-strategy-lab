@@ -39,6 +39,36 @@ export const SOURCE = {
   cboeDirect: "CBOE diretta",
 };
 
+/* ---------- WHAT THE SCREEN CALLS THE FEED ----------
+ * ONE PLACE DECIDES, and every label reads from it. A screen that hardcodes a
+ * feed name is a screen that can contradict the badge three centimetres above
+ * it — which is exactly what "PRICE NOW (CBOE)" did while the badge said
+ * "Alpaca (indicative)". A label the code does not derive is a label that goes
+ * stale the first time the source changes.
+ */
+
+/** The short name: what to put in a heading. "Alpaca", "CBOE", or null. */
+export function feedName(chain) {
+  const s = chain?.source;
+  if (!s) return null;
+  if (s === SOURCE.alpacaIndicative || s === SOURCE.alpacaOpra) return "Alpaca";
+  if (s === SOURCE.cboeServer || s === SOURCE.cboeDirect) return "CBOE";
+  return s;
+}
+
+/**
+ * One sentence saying how fresh these prices really are.
+ * The delay is a property of the feed, so it is stated wherever the feed is —
+ * never "~15 min delayed" under numbers that came from somewhere else.
+ */
+export function sourceNote(chain) {
+  const s = chain?.source;
+  if (!s) return "prices not loaded";
+  if (s === SOURCE.alpacaIndicative) return "Alpaca indicative prices — a calculated feed, not the consolidated tape";
+  if (s === SOURCE.alpacaOpra) return "Alpaca OPRA prices — the consolidated tape";
+  return "CBOE prices, about 15 minutes delayed";
+}
+
 /** OCC symbol → its parts. `UNG260116C00013000` → UNG, 2026-01-16, call, 13. */
 export function parseOcc(occ) {
   const m = occ.match(/^([A-Z]{1,6})(\d{2})(\d{2})(\d{2})([CP])(\d{8})$/);
@@ -178,9 +208,11 @@ export function normaliseAlpacaChain(sym, payload, { spot, feed = "indicative", 
 
 /**
  * Does this chain know how many contracts are open?
- * Alpaca's snapshots do not carry open interest, so the panel built on it has
- * nothing to draw — and must say which feed cannot fill it rather than drawing
- * a row of zeros under a sentence about where buyers cluster.
+ * Alpaca's snapshots do not carry open interest; `enrichOpenInterest` below
+ * fills it in afterwards from the broker's contract list, and until it lands
+ * (or when it never does) the panel built on it has nothing to draw. It must
+ * then say so rather than draw a row of zeros under a sentence about where
+ * buyers cluster — and every OI column on screen hides itself the same way.
  */
 export function hasOpenInterest(chain) {
   if (!chain?.expirations) return false;
@@ -190,6 +222,160 @@ export function hasOpenInterest(chain) {
     }
   }
   return false;
+}
+
+/* ============================== OPEN INTEREST ==============================
+ *
+ * Alpaca's MARKET DATA snapshot carries the quote, the trade and the greeks and
+ * no open interest. Its TRADING API does carry it:
+ *
+ *   GET /v2/options/contracts
+ *       ?underlying_symbols&status&expiration_date_gte&expiration_date_lte
+ *       &strike_price_gte&strike_price_lte&limit&page_token
+ *   → { option_contracts: [ { symbol, strike_price, expiration_date, type,
+ *                             open_interest, open_interest_date,
+ *                             close_price, close_price_date, ... } ],
+ *       next_page_token }
+ *
+ * Verified against Alpaca's own SDK (alpaca-py 0.44.0, GetOptionContractsRequest
+ * and OptionContract). Two things that bite: `limit` maxes out at 10000, and
+ * `open_interest` arrives as a STRING, not a number.
+ *
+ * THAT LIVES ON paper-api.alpaca.markets, which `netlify/functions/alpaca.mjs`
+ * already proxies — so this needs no new host, no new function and no new key,
+ * and alpaca.mjs still speaks to exactly one host. Its X-OSL-Paper-Endpoint
+ * header, the thing src/riskGate.js checks to VERIFY paper mode, means exactly
+ * what it meant before: nothing here touches it.
+ *
+ * TWO RULES, AND THEY ARE NOT NEGOTIABLE.
+ *
+ *   NON-BLOCKING. The quotes are the product; open interest is a nice-to-have.
+ *   This call gets its own short timeout, swallows its own failure, and never
+ *   sits between the user and a chain. The app fires it AFTER the chain is on
+ *   screen and patches the numbers in when they land (`refreshChain`).
+ *
+ *   HONEST. The figure is the previous session's close, not a live count. It is
+ *   labelled as such wherever it appears, and `oiAsOf` carries the date the
+ *   broker stamped on it. When the call does not land, `oi` stays null and the
+ *   column disappears — a dash is not a number, and a zero we invented would be
+ *   worse than both.
+ */
+const OI_TIMEOUT_MS = 3500;
+const OI_PAGE = 10000;   // Alpaca's own maximum for this endpoint
+const OI_MAX_PAGES = 3;
+
+/** The proxied path. One host (paper-api), one method (GET), no key on the client. */
+export function openInterestPath(sym, { expFrom, expTo, strikeLo, strikeHi, pageToken } = {}) {
+  // Deliberately no URLSearchParams: alpaca.mjs validates the path against a
+  // character whitelist, and an encoded comma or colon would be rejected there.
+  const q = [
+    `underlying_symbols=${encodeURIComponent(sym)}`,
+    "status=active",
+    `limit=${OI_PAGE}`,
+  ];
+  if (expFrom) q.push(`expiration_date_gte=${expFrom}`);
+  if (expTo) q.push(`expiration_date_lte=${expTo}`);
+  if (strikeLo > 0) q.push(`strike_price_gte=${strikeLo.toFixed(2)}`);
+  if (strikeHi > 0) q.push(`strike_price_lte=${strikeHi.toFixed(2)}`);
+  if (pageToken) q.push(`page_token=${encodeURIComponent(pageToken)}`);
+  return `/v2/options/contracts?${q.join("&")}`;
+}
+
+/** The strikes and expiries this chain actually holds — nothing else is worth asking for. */
+function chainBounds(chain) {
+  const exps = chain?.expirations || [];
+  if (!exps.length) return null;
+  let lo = Infinity, hi = 0;
+  for (const e of exps) {
+    for (const side of ["calls", "puts"]) {
+      for (const k of Object.keys(chain.byExp[e]?.[side] || {})) {
+        const kk = +k;
+        if (kk < lo) lo = kk;
+        if (kk > hi) hi = kk;
+      }
+    }
+  }
+  if (!(hi > 0)) return null;
+  return { expFrom: exps[0], expTo: exps[exps.length - 1], strikeLo: lo, strikeHi: hi };
+}
+
+/**
+ * Ask the broker how many contracts are open, keyed by OCC symbol.
+ * Returns `{ byOcc, asOf }`; throws on anything that goes wrong, because the
+ * only caller wraps it in a catch that shrugs.
+ */
+export async function fetchOpenInterest(sym, chain, { fetchImpl = fetch, timeoutMs = OI_TIMEOUT_MS } = {}) {
+  const bounds = chainBounds(chain);
+  if (!bounds) throw new Error("nothing to enrich");
+
+  const ctl = typeof AbortController === "function" ? new AbortController() : null;
+  const timer = setTimeout(() => ctl?.abort(), timeoutMs);
+  try {
+    const byOcc = new Map();
+    let asOf = null, token = null, pages = 0;
+    do {
+      const path = openInterestPath(sym, { ...bounds, pageToken: token });
+      const r = await fetchImpl(`/api/alpaca?path=${encodeURIComponent(path)}`, { signal: ctl?.signal });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const j = await r.json();
+      for (const c of j?.option_contracts || []) {
+        const oi = Number(c?.open_interest);       // the broker sends it as a string
+        if (!c?.symbol || !Number.isFinite(oi)) continue;
+        byOcc.set(c.symbol, oi);
+        if (c.open_interest_date && (!asOf || c.open_interest_date > asOf)) asOf = c.open_interest_date;
+      }
+      token = j?.next_page_token || null;
+      pages++;
+    } while (token && pages < OI_MAX_PAGES);
+
+    if (!byOcc.size) throw new Error("no contracts came back");
+    return { byOcc, asOf };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * A copy of the chain with `oi` filled in where the OCC symbol matched.
+ * Returns null when nothing matched: swapping a chain for an identical one
+ * would re-render every screen to show the same numbers.
+ */
+export function applyOpenInterest(chain, byOcc, asOf = null) {
+  if (!chain?.expirations || !byOcc?.size) return null;
+  let filled = 0;
+  const byExp = {};
+  for (const e of chain.expirations) {
+    const src = chain.byExp[e];
+    const out = { ...src, calls: {}, puts: {} };
+    for (const side of ["calls", "puts"]) {
+      for (const [k, c] of Object.entries(src[side] || {})) {
+        const oi = byOcc.get(c.occ);
+        if (oi == null) { out[side][k] = c; continue; }
+        out[side][k] = { ...c, oi };
+        filled++;
+      }
+    }
+    byExp[e] = out;
+  }
+  if (!filled) return null;
+  return { ...chain, byExp, oiAsOf: asOf, oiSource: "Alpaca contracts" };
+}
+
+/** Both halves, for the one caller that wants the enriched chain or nothing. */
+export async function enrichOpenInterest(sym, chain, opts = {}) {
+  const { byOcc, asOf } = await fetchOpenInterest(sym, chain, opts);
+  return applyOpenInterest(chain, byOcc, asOf);
+}
+
+/**
+ * How to describe the open-interest number on screen, with the date the broker
+ * stamped on it. Never sounds fresher than it is: this is the previous
+ * session's close, and saying so is the same rule that makes the feed label
+ * read "indicative".
+ */
+export function openInterestNote(chain) {
+  if (!chain?.oiSource) return "Open interest as reported by the feed.";
+  return `Open interest is the previous session's close${chain.oiAsOf ? `, as of ${chain.oiAsOf}` : ""}, from the broker's contract list — not a live count.`;
 }
 
 /** Shape-check what came back over the wire before the app trusts it. */

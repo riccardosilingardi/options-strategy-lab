@@ -12,7 +12,7 @@ import { fetchAllNews, fetchWeather, ImpactTags, CopilotTab, ReportTab, OrderTic
 import { BandThumbnail, payoffBands, bandTakeaway, GaugeFigure, exitPlanSentence } from "./visuals.jsx";
 import { fuseSignals, sentimentDirection, withSignalRank, compareCandidates, againstSignal, DRIVER_PRESETS, rankByDrivers, verdictNarrative } from "./signals.js";
 import { N as nCDF, bs as bsPrice, smile as smileIV, payoff as payoffExp, SEASONAL, SIGMA } from "./engine.js";
-import { parseOcc, buildOcc, fetchChain, hasOpenInterest } from "./chain.js";
+import { parseOcc, buildOcc, fetchChain, hasOpenInterest, enrichOpenInterest, feedName, sourceNote, openInterestNote } from "./chain.js";
 import { T, themeName, setTheme, BADGE_SAFE } from "./theme.js";
 import { RULES, sizing, ruleBadge, takeProfitLabel, stopLossLabel, perTradeCapLabel, RULE_PILLS, NOTHING_TODAY, money, pctText } from "./rules.js";
 import { evaluateTrade, gateSummary } from "./riskGate.js";
@@ -158,11 +158,15 @@ async function alpacaOrderMleg(legs) {
 
 /* ============================== STRATEGY PRESETS ============================== */
 const SENTIMENTS = [
-  { id: "verybear", label: "Very Bear", color: T.redDeep, icon: "⭣⭣", tgt: -0.08 },
-  { id: "bear", label: "Bear", color: T.red, icon: "⭣", tgt: -0.04 },
+  // GLYPHS THAT EXIST EVERYWHERE. These were ⭡ / ⭣ (U+2B61, U+2B63), a
+  // Unicode block Android has no font for: the buttons rendered as empty boxes
+  // on a phone, which is where this app gets demoed. U+2191 / U+2193 are the
+  // same arrows ARROW in signals.js already uses, and they are in every font.
+  { id: "verybear", label: "Very Bear", color: T.redDeep, icon: "↓↓", tgt: -0.08 },
+  { id: "bear", label: "Bear", color: T.red, icon: "↓", tgt: -0.04 },
   { id: "neutral", label: "Neutral", color: T.mut, icon: "→", tgt: 0 },
-  { id: "bull", label: "Bull", color: T.green, icon: "⭡", tgt: 0.04 },
-  { id: "verybull", label: "Very Bull", color: T.greenDeep, icon: "⭡⭡", tgt: 0.08 },
+  { id: "bull", label: "Bull", color: T.green, icon: "↑", tgt: 0.04 },
+  { id: "verybull", label: "Very Bull", color: T.greenDeep, icon: "↑↑", tgt: 0.08 },
 ];
 // se c'è la chain reale, gli strike vengono agganciati ai più vicini disponibili
 function snapStrike(x, strikes, step) {
@@ -423,7 +427,7 @@ export default function OptionsStrategyLab() {
   const [ev, setEv] = useState(null);           // which evidence section is open on the Build screen
   const [showSettings, setShowSettings] = useState(false);
   const [ticker, setTicker] = useState("SOYB");
-  const [chains, setChains] = useState({});      // ticker -> chain CBOE
+  const [chains, setChains] = useState({});      // ticker -> normalised chain (Alpaca, or CBOE as the net)
   const [seasonal, setSeasonal] = useState({});  // ticker -> {monthlyMean, sigma, rets, years} da Alpha Vantage
   const [news, setNews] = useState({});          // ticker -> items
   const [sentiment, setSentiment] = useState("bull");
@@ -492,6 +496,17 @@ export default function OptionsStrategyLab() {
     try {
       const c = await fetchChain(tk);
       setChains((m) => ({ ...m, [tk]: c }));
+      // Open interest is not in an Alpaca snapshot. It IS in the broker's own
+      // contract list, on the host /api/alpaca already proxies — but the quotes
+      // are the product and this is a nice-to-have, so it is fired here, AFTER
+      // the chain is on screen, and patched in when it lands. It has its own
+      // short timeout, it swallows its own failure, and nothing waits for it.
+      // The guard keeps a late answer from overwriting a fresher chain.
+      if (!hasOpenInterest(c)) {
+        enrichOpenInterest(tk, c)
+          .then((withOI) => { if (withOI) setChains((m) => (m[tk] === c ? { ...m, [tk]: withOI } : m)); })
+          .catch(() => { /* no open interest is a missing column, never a failed load */ });
+      }
       // snapshot IV ATM giornaliero → costruisce lo storico per l'IV Rank
       try {
         const ek2 = c.expirations.find((e) => c.byExp[e].dte >= 25 && c.byExp[e].dte <= 70) || c.expirations[0];
@@ -903,8 +918,8 @@ export default function OptionsStrategyLab() {
       const rem = Math.max(1, dte - i * 30);
       const pnl = ((i === span ? payoffExp(legs, Sx) : scenarioValue(legs, Sx, rem, iv)) - A.entry) * 100;
       let note = `price ${r >= 0 ? "+" : ""}${r.toFixed(1)}%`;
-      if (!closed && pnl >= RULES.takeProfitPct * A.maxProfit) { closed = { i, pnl: RULES.takeProfitPct * A.maxProfit, why: takeProfitLabel() }; note += ` → 🎯 ${takeProfitLabel()} hit: you take the profit`; }
-      else if (!closed && pnl <= RULES.stopLossPct * A.maxLoss) { closed = { i, pnl: RULES.stopLossPct * A.maxLoss, why: stopLossLabel() }; note += ` → 🛑 ${stopLossLabel()}: a warning, think about closing`; }
+      if (!closed && pnl >= RULES.takeProfitPct * A.maxProfit) { closed = { i, pnl: RULES.takeProfitPct * A.maxProfit, why: takeProfitLabel() }; note += ` → TAKE PROFIT: ${takeProfitLabel()} hit: you take the profit`; }
+      else if (!closed && pnl <= RULES.stopLossPct * A.maxLoss) { closed = { i, pnl: RULES.stopLossPct * A.maxLoss, why: stopLossLabel() }; note += ` → STOP: ${stopLossLabel()}: a warning, think about closing`; }
       steps.push({ m: i, label: MONTHS[(NOW_MONTH + i) % 12], S: Sx, pnl, note });
       if (closed) break;
     }
@@ -1551,7 +1566,11 @@ export default function OptionsStrategyLab() {
         </div>
 
         <div style={{ display: "flex", gap: 14, marginTop: 10, flexWrap: "wrap" }}>
-          <Stat k="PRICE NOW (CBOE)" v={spot ? `$${spot.toFixed(2)}` : "—"} />
+          {/* The feed is named in ONE place (feedName in chain.js) and every label
+              reads from it. This one used to say "(CBOE)" three centimetres under a
+              badge that said "Alpaca (indicative)": a screen contradicting itself
+              about where its own numbers came from. */}
+          <Stat k={`PRICE NOW${feedName(chain) ? ` (${feedName(chain).toUpperCase()})` : ""}`} v={spot ? `$${spot.toFixed(2)}` : "—"} />
           <Stat k="EXPIRY" v={expKey ? `${expKey} · ${dte} DTE` : `${dte} DTE (model)`} c={T.blue} />
           <Stat k={`SEASONALITY ${MONTHS[NOW_MONTH].toUpperCase()}`} v={`${seas.monthlyMean[NOW_MONTH] > 0 ? "+" : ""}${seas.monthlyMean[NOW_MONTH].toFixed(1)}%`} c={seas.monthlyMean[NOW_MONTH] > 0 ? T.green : T.red} />
           <Stat k="SEASONAL SOURCE" v={seas.src || "estimate"} c={seasonal[ticker] ? T.green : T.dim} />
@@ -1714,7 +1733,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                     </select>
                     {chain.expirations.length <= 4 && (
                       <div style={{ ...mono, fontSize: 9, color: T.dim, marginTop: 3, maxWidth: 220 }}>
-                        These are every expiry CBOE lists for {ticker} — this ETF only has monthly ones, it is not a limit of the app.
+                        These are every expiry {feedName(chain) || "the feed"} lists for {ticker} — this ETF only has monthly ones, it is not a limit of the app.
                       </div>
                     )}
                   </div>
@@ -1838,7 +1857,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   </div>
                 )}
               </div>
-              <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 8 }}>Budget is the most you will pay, taken from live CBOE prices. For trades where you receive money up front, the limit becomes the capital tied up instead. Chance is the probability of ending in profit at expiry. Your per-trade limit: {money(limits.perTradeLimit)} ({perTradeCapLabel()}).</div>
+              <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 8 }}>Budget is the most you will pay, taken from live {feedName(chain) || "market"} prices. For trades where you receive money up front, the limit becomes the capital tied up instead. Chance is the probability of ending in profit at expiry. Your per-trade limit: {money(limits.perTradeLimit)} ({perTradeCapLabel()}).</div>
             </Panel>
           </div>
         )}
@@ -1846,6 +1865,206 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
         {/* ============ BUILDER ============ */}
         {/* Where a hand-off lands. The anchor is rendered for every state of
             the Build screen, so scrolling works while the chain is loading. */}
+        {/* THE EVIDENCE PANELS OPEN HERE, ALL FIVE OF THEM.
+           Market levels, History and Copilot used to be written after the
+           whole builder block, so opening one rendered it ~2000px down a page
+           that does not scroll: on a phone the tap looked like it did nothing,
+           which is how "History and Copilot are broken" was reported. Radar and
+           Shortlist worked only because they happened to sit next to the strip.
+           All five now open directly under the button that opened them. */}
+
+        {/* An evidence panel that needs prices and has none must SAY so. Rendering
+            nothing at all is the same failure as rendering below the fold: the
+            user taps, the screen does not change, and the app has no answer. */}
+        {tab === "build" && !showSettings && (ev === "history" || ev === "shortlist") && !spot && (
+          <Panel style={{ marginTop: 12 }}>
+            <div style={{ ...mono, fontSize: 12, color: T.mut }}>
+              {ev === "history"
+                ? `The seasonality chart, the 8,000-run simulation and the year-by-year replay are all drawn from ${ticker}'s own prices, and they have not loaded yet.`
+                : `The shortlist is built out of real ${ticker} contracts, and they have not loaded yet.`}
+              {" "}Press Refresh at the top of the screen.
+            </div>
+          </Panel>
+        )}
+
+        {tab === "build" && !showSettings && ev === "levels" && (
+          <Panel style={{ marginTop: 12 }}>
+            <Lbl>WHERE THE MARKET IS POSITIONED (OPEN INTEREST)</Lbl>
+            {!oiGrid && <div style={{ ...mono, fontSize: 12, color: T.mut, padding: 30, textAlign: "center" }}>
+              {!chain ? "Press Refresh at the top to load the prices first."
+                : !hasOpenInterest(chain) ? `Open interest is not part of the ${chain.source} feed. It is fetched separately from the broker\u2019s contract list, and that has not come back \u2014 so this panel has nothing to draw yet.`
+                : "Not enough strikes near today's price to draw this."}
+            </div>}
+            {oiGrid && (
+              <div style={{ height: 190, marginTop: 10 }}>
+                <ResponsiveContainer>
+                  <BarChart data={oiGrid.strikes.map((k, j) => ({ k, put: -oiGrid.oiPutTot[j], call: oiGrid.oiCallTot[j] }))} margin={{ top: 4, right: 4, bottom: 0, left: 0 }} stackOffset="sign">
+                    <XAxis dataKey="k" stroke={T.dim} tick={{ fontSize: 9, fontFamily: "monospace" }} />
+                    <YAxis stroke={T.dim} tick={{ fontSize: 9, fontFamily: "monospace" }} width={44} tickFormatter={(v) => Math.abs(v)} />
+                    <Tooltip contentStyle={{ background: T.panel, border: `1px solid ${T.line}`, fontFamily: "monospace", fontSize: 11 }} formatter={(v, n2) => [Math.abs(v), n2 === "put" ? "put contracts" : "call contracts"]} />
+                    <ReferenceLine y={0} stroke={T.mut} />
+                    {spot && <ReferenceLine x={oiGrid.strikes.reduce((b2, k) => Math.abs(k - spot) < Math.abs(b2 - spot) ? k : b2, oiGrid.strikes[0])} stroke={T.amber} strokeDasharray="4 3" />}
+                    <Bar dataKey="put" fill={`${T.green}bb`} stackId="a" />
+                    <Bar dataKey="call" fill={`${T.red}bb`} stackId="a" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+            {oiGrid && <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 2 }}>Green bars below zero are where put buyers cluster — prices tend to hold there. Red bars above are where call buyers cluster — prices tend to stall there. The amber line is today's price.</div>}
+            {lv && (
+              <div style={{ display: "flex", gap: 20, marginTop: 10, flexWrap: "wrap" }}>
+                <div>
+                  <div style={{ ...mono, fontSize: 10, color: T.green }}>PRICES THAT TEND TO HOLD</div>
+                  <div style={{ ...mono, fontSize: 14, fontWeight: 700, color: T.ink }}>{lv.supports.map((x) => `$${x}`).join(" · ") || "—"}</div>
+                </div>
+                <div>
+                  <div style={{ ...mono, fontSize: 10, color: T.red }}>PRICES THAT TEND TO STALL</div>
+                  <div style={{ ...mono, fontSize: 14, fontWeight: 700, color: T.ink }}>{lv.resistances.map((x) => `$${x}`).join(" · ") || "—"}</div>
+                </div>
+              </div>
+            )}
+            <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 8 }}>
+              {openInterestNote(chain)} Added up across the first six expiries within 120 days. A big wall is a price the market has an interest in defending — useful when picking strikes and exits.
+            </div>
+          </Panel>
+        )}
+
+        {/* ============ BACKTEST ============ */}
+        {tab === "build" && !showSettings && ev === "history" && spot && (
+          <div style={{ marginTop: 12 }}>
+            <Panel>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+                <Lbl>SEASONALITY {seasonal[ticker] ? `· ${seas.src}` : "(ESTIMATE — load the real history)"}</Lbl>
+                <Btn small ghost color={T.blue} onClick={loadSeasonal} disabled={busy === "av"}>
+                  <RefreshCw size={11} /> Real 10y seasonality
+                </Btn>
+              </div>
+              {(() => {
+                const mm = seas.monthlyMean;
+                const bi = mm.indexOf(Math.max(...mm)), wi = mm.indexOf(Math.min(...mm));
+                const cur = mm[NOW_MONTH];
+                const rank = [...mm].sort((a, b) => b - a).indexOf(cur) + 1;
+                return (
+                  <div style={{ fontSize: 12.5, color: T.body, marginTop: 8, padding: "8px 10px", background: `${T.amber}0a`, borderRadius: 6 }}>
+                    <b style={{ color: T.ink }}>In plain words:</b> {ticker}'s best month historically is <b style={{ color: T.green }}>{MONTHS[bi]}</b> ({mm[bi] > 0 ? "+" : ""}{mm[bi].toFixed(1)}% a month on average), its worst is <b style={{ color: T.red }}>{MONTHS[wi]}</b> ({mm[wi].toFixed(1)}%). {MONTHS[NOW_MONTH]} (the amber bar) ranks {rank} of 12: {cur > 0.8 ? "the season is behind you — a directional trade makes sense." : cur < -0.8 ? "the season is against you — favour downside or non-directional trades." : "no clear push this month — a range trade suits it better."}
+                  </div>
+                );
+              })()}
+              <div style={{ height: 170, marginTop: 10 }}>
+                <ResponsiveContainer>
+                  <BarChart data={seas.monthlyMean.map((v, i) => ({ m: MONTHS[i], v: +v.toFixed(2) }))} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
+                    <XAxis dataKey="m" stroke={T.dim} tick={{ fontSize: 9.5, fontFamily: "monospace" }} />
+                    <YAxis stroke={T.dim} tick={{ fontSize: 9.5, fontFamily: "monospace" }} width={34} unit="%" />
+                    <Tooltip contentStyle={{ background: T.panel, border: `1px solid ${T.line}`, fontFamily: "monospace", fontSize: 11 }} />
+                    <ReferenceLine y={0} stroke={T.mut} />
+                    <Bar dataKey="v">
+                      {seas.monthlyMean.map((v, i) => <Cell key={i} fill={i === NOW_MONTH ? T.amber : v >= 0 ? `${T.green}bb` : `${T.red}bb`} />)}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </Panel>
+
+            <Panel style={{ marginTop: 10 }}>
+              <Lbl>THREE PROBABILITIES · WHICH ONE TO READ, AND WHEN</Lbl>
+              <div style={{ fontSize: 12.5, color: T.body, marginTop: 8, lineHeight: 1.6 }}>
+                <b style={{ color: T.blue }}>CHANCE</b> (Shortlist and Build): a snapshot — the odds of finishing in profit <i>at expiry</i>, worked out from what the market is pricing right now. Use it to <b>compare trades before you open one</b>.<br/>
+                <b style={{ color: T.amber }}>SIMULATION</b> (below): the same question asked of history — 8,000 runs using the last ten years of seasonality and volatility. Use it to <b>check the season really is on your side</b>. If the two disagree sharply, the market is pricing something history has not seen: an event is coming.<br/>
+                <b style={{ color: T.violet }}>EXIT PATH</b> (on open positions): the most realistic — it walks day by day <i>from today</i> and applies your own rules ({ruleBadge()}). It is the only one that answers "from here, how does this end if I stick to the plan?". Use it to <b>decide whether to hold or take the money</b>.
+              </div>
+            </Panel>
+
+            <Panel style={{ marginTop: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+                <Lbl>8,000 SIMULATIONS + REAL HISTORY — "{stratName}"</Lbl>
+                <Btn small onClick={runMC} disabled={!A}><FlaskConical size={12} /> Run it</Btn>
+              </div>
+              {mc ? (
+                <>
+                  <div style={{ display: "flex", gap: 16, marginTop: 12, flexWrap: "wrap" }}>
+                    <Stat k="CHANCE OF PROFIT" v={`${(mc.pop * 100).toFixed(1)}%`} c={mc.pop >= 0.5 ? T.green : T.red} tip="The share of simulated runs that finish in profit at expiry." />
+                    <Stat k="AVERAGE RESULT" v={fmt$(mc.ev)} c={mc.ev >= 0 ? T.green : T.red} />
+                    <Stat k="BAD CASE" v={fmt$(mc.p5)} c={T.red} tip="Only 1 run in 20 turns out worse than this." />
+                    <Stat k="TYPICAL" v={fmt$(mc.p50)} />
+                    <Stat k="GOOD CASE" v={fmt$(mc.p95)} c={T.green} tip="Only 1 run in 20 turns out better than this." />
+                    <Stat k="YEARLY DRIFT" v={`${(mc.muAnn * 100).toFixed(1)}%`} c={T.blue} />
+                  </div>
+                  <div style={{ marginTop: 10, padding: "9px 11px", background: `${T.blue}0d`, border: `1px solid ${T.blue}33`, borderRadius: 7, fontSize: 12.5, color: T.body }}>
+                    <b style={{ color: T.ink }}>In plain words:</b> out of 8,000 simulated runs, {Math.round(mc.pop * 100)} in 100 finish in profit.
+                    In the worst 5% you lose about {fmt$(Math.abs(mc.p5))}{guard ? (Math.abs(mc.p5) <= guard.limits.perTrade ? ` — inside your per-trade limit of ${money(guard.limits.perTrade)} ✓` : ` — CAREFUL: past your per-trade limit of ${money(guard.limits.perTrade)}`) : ""}.
+                    The typical result is {fmt$(mc.p50)}.
+                  </div>
+                  <div style={{ height: 180, marginTop: 12 }}>
+                    <ResponsiveContainer>
+                      <BarChart data={mc.bins} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
+                        <XAxis dataKey="x" stroke={T.dim} tick={{ fontSize: 9, fontFamily: "monospace" }} />
+                        <YAxis stroke={T.dim} tick={{ fontSize: 9, fontFamily: "monospace" }} width={40} />
+                        <Tooltip contentStyle={{ background: T.panel, border: `1px solid ${T.line}`, fontFamily: "monospace", fontSize: 11 }} />
+                        <Bar dataKey="n">
+                          {mc.bins.map((b, i) => <Cell key={i} fill={b.x >= 0 ? `${T.green}cc` : `${T.red}cc`} />)}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                  {bt ? (
+                    <div style={{ marginTop: 12 }}>
+                      <Lbl>WHAT ACTUALLY HAPPENED · {MONTHS[NOW_MONTH]} → +{Math.max(1, Math.round(dte / 30))} MONTHS, EVERY YEAR</Lbl>
+                      <div style={{ display: "flex", gap: 16, marginTop: 8, flexWrap: "wrap" }}>
+                        <Stat k="YEARS IT WORKED" v={`${(bt.winRate * 100).toFixed(0)}%`} c={bt.winRate >= 0.5 ? T.green : T.red} />
+                        <Stat k="AVERAGE RESULT" v={fmt$(bt.avg)} c={bt.avg >= 0 ? T.green : T.red} />
+                        <Stat k="YEARS TESTED" v={bt.rows.length} />
+                      </div>
+                      <div style={{ display: "flex", gap: 4, marginTop: 8, flexWrap: "wrap" }}>
+                        {bt.rows.map((r) => (
+                          <button key={r.year} onClick={() => { const row = (seas.matrix || []).find((x) => String(x[0]) === r.year); if (row) runReplay(row); }}
+                            style={{ ...mono, fontSize: 10, padding: "3px 7px", borderRadius: 4, cursor: "pointer", background: replay?.year === +r.year ? `${T.amber}22` : "transparent", color: r.pnl >= 0 ? T.green : T.red, border: `1px solid ${r.pnl >= 0 ? T.green : T.red}44` }}>
+                            ▶ {r.year}: {fmt$(r.pnl)}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 10 }}>
+                      The year-by-year history unlocks once you load the real seasonality above.
+                    </div>
+                  )}
+                  {replay && (
+                    <div style={{ marginTop: 12, padding: "10px 12px", background: `${T.amber}0a`, border: `1px solid ${T.amber}44`, borderRadius: 7 }}>
+                      <Lbl>WHAT WOULD HAVE HAPPENED IN {replay.year} · "{stratName}" OPENED IN {MONTHS[NOW_MONTH].toUpperCase()}</Lbl>
+                      <div style={{ display: "grid", gap: 4, marginTop: 8 }}>
+                        {replay.steps.map((st2) => (
+                          <div key={st2.m} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                            <span style={{ ...mono, fontSize: 10, color: T.dim, width: 58 }}>{st2.label}</span>
+                            <span style={{ ...mono, fontSize: 11, color: T.ink }}>${st2.S.toFixed(2)}</span>
+                            <span style={{ ...mono, fontSize: 11, fontWeight: 700, color: st2.pnl >= 0 ? T.green : T.red, width: 60 }}>{fmt$(st2.pnl)}</span>
+                            <span style={{ fontSize: 11.5, color: T.body }}>{st2.note}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{ fontSize: 12.5, color: T.ink, fontWeight: 700, marginTop: 8 }}>
+                        Following your rules: {fmt$(replay.finale)} {replay.closed ? `(${replay.closed.why} in month ${replay.closed.i})` : "(held to expiry)"}
+                      </div>
+                      <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 4 }}>Replayed on real monthly returns. The point is to watch the rules work before you rely on them.</div>
+                    </div>
+                  )}
+                  <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 8 }}>
+                    Simulated with {seasonal[ticker] ? "real" : "estimated"} seasonal drift and {(seas.sigma * 100).toFixed(0)}% volatility. A simplified model: no price jumps, no volatility term structure.
+                  </div>
+                </>
+              ) : (
+                <div style={{ ...mono, fontSize: 12, color: T.mut, marginTop: 10 }}>Press "Run it" for the odds, the spread of outcomes, and what happened in each of the last ten years.</div>
+              )}
+            </Panel>
+          </div>
+        )}
+
+        {tab === "build" && !showSettings && ev === "copilot" && (
+          <CopilotTab
+            apiKey={"server"}
+            ctx={{ store, scan, news: news[ticker]?.items || [], ticker, legs, expKey, A, spot, seasonalSrc: seas.src, setMsg }}
+          />
+        )}
+
         {tab === "build" && !showSettings && <div ref={buildAnchor} style={{ scrollMarginTop: 12 }} />}
         {tab === "build" && !showSettings && buildScreen === "builder" && (
           <div style={{ marginTop: 12 }}>
@@ -1870,7 +2089,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                     ))}
                   </select>
                   <span style={{ ...mono, fontSize: 10, color: A.realCount === legs.length ? T.green : T.amber }}>
-                    {A.realCount === legs.length ? "● every price is a live CBOE quote" : `◐ ${A.realCount}/${legs.length} legs priced live — the rest are modelled`}
+                    {A.realCount === legs.length ? `● every price is a live ${feedName(chain) || "market"} quote` : `◐ ${A.realCount}/${legs.length} legs priced live — the rest are modelled`}
                   </span>
                 </div>
               )}
@@ -1966,7 +2185,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                       </span>
                       {(() => { const qq = q(l); const occ = qq?.occ || (expKey ? buildOcc(ticker, expKey, l.type, l.strike) : null); return occ ? (
                         <button title="price history for this contract" onClick={() => setOptLeg({ occ, label: `${ticker} ${l.strike}${l.type === "call" ? "C" : "P"} ${expKey}`, quote: qq })}
-                          style={{ background: "none", border: "none", color: T.violet, cursor: "pointer", ...mono, fontSize: 13 }}>📈</button>
+                          style={{ background: "none", border: "none", color: T.violet, cursor: "pointer", ...mono, fontSize: 11 }}>chart</button>
                       ) : null; })()}
                       <button onClick={() => rmLeg(i)} style={{ background: "none", border: "none", color: T.dim, cursor: "pointer" }}><Trash2 size={14} /></button>
                     </div>
@@ -2077,177 +2296,6 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
         )}
 
         {/* ============ 3D ============ */}
-        {tab === "build" && !showSettings && ev === "levels" && (
-          <Panel style={{ marginTop: 12 }}>
-            <Lbl>WHERE THE MARKET IS POSITIONED (OPEN INTEREST)</Lbl>
-            {!oiGrid && <div style={{ ...mono, fontSize: 12, color: T.mut, padding: 30, textAlign: "center" }}>
-              {!chain ? "Press Refresh at the top to load the prices first."
-                : !hasOpenInterest(chain) ? `Open interest is not part of the ${chain.source} feed, so this panel has nothing to draw. It fills in when the chain comes from CBOE.`
-                : "Not enough strikes near today's price to draw this."}
-            </div>}
-            {oiGrid && (
-              <div style={{ height: 190, marginTop: 10 }}>
-                <ResponsiveContainer>
-                  <BarChart data={oiGrid.strikes.map((k, j) => ({ k, put: -oiGrid.oiPutTot[j], call: oiGrid.oiCallTot[j] }))} margin={{ top: 4, right: 4, bottom: 0, left: 0 }} stackOffset="sign">
-                    <XAxis dataKey="k" stroke={T.dim} tick={{ fontSize: 9, fontFamily: "monospace" }} />
-                    <YAxis stroke={T.dim} tick={{ fontSize: 9, fontFamily: "monospace" }} width={44} tickFormatter={(v) => Math.abs(v)} />
-                    <Tooltip contentStyle={{ background: T.panel, border: `1px solid ${T.line}`, fontFamily: "monospace", fontSize: 11 }} formatter={(v, n2) => [Math.abs(v), n2 === "put" ? "put contracts" : "call contracts"]} />
-                    <ReferenceLine y={0} stroke={T.mut} />
-                    {spot && <ReferenceLine x={oiGrid.strikes.reduce((b2, k) => Math.abs(k - spot) < Math.abs(b2 - spot) ? k : b2, oiGrid.strikes[0])} stroke={T.amber} strokeDasharray="4 3" />}
-                    <Bar dataKey="put" fill={`${T.green}bb`} stackId="a" />
-                    <Bar dataKey="call" fill={`${T.red}bb`} stackId="a" />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            )}
-            {oiGrid && <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 2 }}>Green bars below zero are where put buyers cluster — prices tend to hold there. Red bars above are where call buyers cluster — prices tend to stall there. The amber line is today's price.</div>}
-            {lv && (
-              <div style={{ display: "flex", gap: 20, marginTop: 10, flexWrap: "wrap" }}>
-                <div>
-                  <div style={{ ...mono, fontSize: 10, color: T.green }}>PRICES THAT TEND TO HOLD</div>
-                  <div style={{ ...mono, fontSize: 14, fontWeight: 700, color: T.ink }}>{lv.supports.map((x) => `$${x}`).join(" · ") || "—"}</div>
-                </div>
-                <div>
-                  <div style={{ ...mono, fontSize: 10, color: T.red }}>PRICES THAT TEND TO STALL</div>
-                  <div style={{ ...mono, fontSize: 14, fontWeight: 700, color: T.ink }}>{lv.resistances.map((x) => `$${x}`).join(" · ") || "—"}</div>
-                </div>
-              </div>
-            )}
-            <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 8 }}>
-              Added up across the first six expiries within 120 days (CBOE, ~15 min delayed). A big wall is a price the market has an interest in defending — useful when picking strikes and exits.
-            </div>
-          </Panel>
-        )}
-
-        {/* ============ BACKTEST ============ */}
-        {tab === "build" && !showSettings && ev === "history" && spot && (
-          <div style={{ marginTop: 12 }}>
-            <Panel>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-                <Lbl>SEASONALITY {seasonal[ticker] ? `· ${seas.src}` : "(ESTIMATE — load the real history)"}</Lbl>
-                <Btn small ghost color={T.blue} onClick={loadSeasonal} disabled={busy === "av"}>
-                  <RefreshCw size={11} /> Real 10y seasonality
-                </Btn>
-              </div>
-              {(() => {
-                const mm = seas.monthlyMean;
-                const bi = mm.indexOf(Math.max(...mm)), wi = mm.indexOf(Math.min(...mm));
-                const cur = mm[NOW_MONTH];
-                const rank = [...mm].sort((a, b) => b - a).indexOf(cur) + 1;
-                return (
-                  <div style={{ fontSize: 12.5, color: T.body, marginTop: 8, padding: "8px 10px", background: `${T.amber}0a`, borderRadius: 6 }}>
-                    <b style={{ color: T.ink }}>In plain words:</b> {ticker}'s best month historically is <b style={{ color: T.green }}>{MONTHS[bi]}</b> ({mm[bi] > 0 ? "+" : ""}{mm[bi].toFixed(1)}% a month on average), its worst is <b style={{ color: T.red }}>{MONTHS[wi]}</b> ({mm[wi].toFixed(1)}%). {MONTHS[NOW_MONTH]} (the amber bar) ranks {rank} of 12: {cur > 0.8 ? "the season is behind you — a directional trade makes sense." : cur < -0.8 ? "the season is against you — favour downside or non-directional trades." : "no clear push this month — a range trade suits it better."}
-                  </div>
-                );
-              })()}
-              <div style={{ height: 170, marginTop: 10 }}>
-                <ResponsiveContainer>
-                  <BarChart data={seas.monthlyMean.map((v, i) => ({ m: MONTHS[i], v: +v.toFixed(2) }))} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
-                    <XAxis dataKey="m" stroke={T.dim} tick={{ fontSize: 9.5, fontFamily: "monospace" }} />
-                    <YAxis stroke={T.dim} tick={{ fontSize: 9.5, fontFamily: "monospace" }} width={34} unit="%" />
-                    <Tooltip contentStyle={{ background: T.panel, border: `1px solid ${T.line}`, fontFamily: "monospace", fontSize: 11 }} />
-                    <ReferenceLine y={0} stroke={T.mut} />
-                    <Bar dataKey="v">
-                      {seas.monthlyMean.map((v, i) => <Cell key={i} fill={i === NOW_MONTH ? T.amber : v >= 0 ? `${T.green}bb` : `${T.red}bb`} />)}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </Panel>
-
-            <Panel style={{ marginTop: 10 }}>
-              <Lbl>THREE PROBABILITIES · WHICH ONE TO READ, AND WHEN</Lbl>
-              <div style={{ fontSize: 12.5, color: T.body, marginTop: 8, lineHeight: 1.6 }}>
-                <b style={{ color: T.blue }}>CHANCE</b> (Shortlist and Build): a snapshot — the odds of finishing in profit <i>at expiry</i>, worked out from what the market is pricing right now. Use it to <b>compare trades before you open one</b>.<br/>
-                <b style={{ color: T.amber }}>SIMULATION</b> (below): the same question asked of history — 8,000 runs using the last ten years of seasonality and volatility. Use it to <b>check the season really is on your side</b>. If the two disagree sharply, the market is pricing something history has not seen: an event is coming.<br/>
-                <b style={{ color: T.violet }}>EXIT PATH</b> (on open positions): the most realistic — it walks day by day <i>from today</i> and applies your own rules ({ruleBadge()}). It is the only one that answers "from here, how does this end if I stick to the plan?". Use it to <b>decide whether to hold or take the money</b>.
-              </div>
-            </Panel>
-
-            <Panel style={{ marginTop: 10 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-                <Lbl>8,000 SIMULATIONS + REAL HISTORY — "{stratName}"</Lbl>
-                <Btn small onClick={runMC} disabled={!A}><FlaskConical size={12} /> Run it</Btn>
-              </div>
-              {mc ? (
-                <>
-                  <div style={{ display: "flex", gap: 16, marginTop: 12, flexWrap: "wrap" }}>
-                    <Stat k="CHANCE OF PROFIT" v={`${(mc.pop * 100).toFixed(1)}%`} c={mc.pop >= 0.5 ? T.green : T.red} tip="The share of simulated runs that finish in profit at expiry." />
-                    <Stat k="AVERAGE RESULT" v={fmt$(mc.ev)} c={mc.ev >= 0 ? T.green : T.red} />
-                    <Stat k="BAD CASE" v={fmt$(mc.p5)} c={T.red} tip="Only 1 run in 20 turns out worse than this." />
-                    <Stat k="TYPICAL" v={fmt$(mc.p50)} />
-                    <Stat k="GOOD CASE" v={fmt$(mc.p95)} c={T.green} tip="Only 1 run in 20 turns out better than this." />
-                    <Stat k="YEARLY DRIFT" v={`${(mc.muAnn * 100).toFixed(1)}%`} c={T.blue} />
-                  </div>
-                  <div style={{ marginTop: 10, padding: "9px 11px", background: `${T.blue}0d`, border: `1px solid ${T.blue}33`, borderRadius: 7, fontSize: 12.5, color: T.body }}>
-                    <b style={{ color: T.ink }}>In plain words:</b> out of 8,000 simulated runs, {Math.round(mc.pop * 100)} in 100 finish in profit.
-                    In the worst 5% you lose about {fmt$(Math.abs(mc.p5))}{guard ? (Math.abs(mc.p5) <= guard.limits.perTrade ? ` — inside your per-trade limit of ${money(guard.limits.perTrade)} ✓` : ` — CAREFUL: past your per-trade limit of ${money(guard.limits.perTrade)}`) : ""}.
-                    The typical result is {fmt$(mc.p50)}.
-                  </div>
-                  <div style={{ height: 180, marginTop: 12 }}>
-                    <ResponsiveContainer>
-                      <BarChart data={mc.bins} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
-                        <XAxis dataKey="x" stroke={T.dim} tick={{ fontSize: 9, fontFamily: "monospace" }} />
-                        <YAxis stroke={T.dim} tick={{ fontSize: 9, fontFamily: "monospace" }} width={40} />
-                        <Tooltip contentStyle={{ background: T.panel, border: `1px solid ${T.line}`, fontFamily: "monospace", fontSize: 11 }} />
-                        <Bar dataKey="n">
-                          {mc.bins.map((b, i) => <Cell key={i} fill={b.x >= 0 ? `${T.green}cc` : `${T.red}cc`} />)}
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                  {bt ? (
-                    <div style={{ marginTop: 12 }}>
-                      <Lbl>WHAT ACTUALLY HAPPENED · {MONTHS[NOW_MONTH]} → +{Math.max(1, Math.round(dte / 30))} MONTHS, EVERY YEAR</Lbl>
-                      <div style={{ display: "flex", gap: 16, marginTop: 8, flexWrap: "wrap" }}>
-                        <Stat k="YEARS IT WORKED" v={`${(bt.winRate * 100).toFixed(0)}%`} c={bt.winRate >= 0.5 ? T.green : T.red} />
-                        <Stat k="AVERAGE RESULT" v={fmt$(bt.avg)} c={bt.avg >= 0 ? T.green : T.red} />
-                        <Stat k="YEARS TESTED" v={bt.rows.length} />
-                      </div>
-                      <div style={{ display: "flex", gap: 4, marginTop: 8, flexWrap: "wrap" }}>
-                        {bt.rows.map((r) => (
-                          <button key={r.year} onClick={() => { const row = (seas.matrix || []).find((x) => String(x[0]) === r.year); if (row) runReplay(row); }}
-                            style={{ ...mono, fontSize: 10, padding: "3px 7px", borderRadius: 4, cursor: "pointer", background: replay?.year === +r.year ? `${T.amber}22` : "transparent", color: r.pnl >= 0 ? T.green : T.red, border: `1px solid ${r.pnl >= 0 ? T.green : T.red}44` }}>
-                            ▶ {r.year}: {fmt$(r.pnl)}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  ) : (
-                    <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 10 }}>
-                      The year-by-year history unlocks once you load the real seasonality above.
-                    </div>
-                  )}
-                  {replay && (
-                    <div style={{ marginTop: 12, padding: "10px 12px", background: `${T.amber}0a`, border: `1px solid ${T.amber}44`, borderRadius: 7 }}>
-                      <Lbl>⏪ WHAT WOULD HAVE HAPPENED IN {replay.year} · "{stratName}" OPENED IN {MONTHS[NOW_MONTH].toUpperCase()}</Lbl>
-                      <div style={{ display: "grid", gap: 4, marginTop: 8 }}>
-                        {replay.steps.map((st2) => (
-                          <div key={st2.m} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                            <span style={{ ...mono, fontSize: 10, color: T.dim, width: 58 }}>{st2.label}</span>
-                            <span style={{ ...mono, fontSize: 11, color: T.ink }}>${st2.S.toFixed(2)}</span>
-                            <span style={{ ...mono, fontSize: 11, fontWeight: 700, color: st2.pnl >= 0 ? T.green : T.red, width: 60 }}>{fmt$(st2.pnl)}</span>
-                            <span style={{ fontSize: 11.5, color: T.body }}>{st2.note}</span>
-                          </div>
-                        ))}
-                      </div>
-                      <div style={{ fontSize: 12.5, color: T.ink, fontWeight: 700, marginTop: 8 }}>
-                        Following your rules: {fmt$(replay.finale)} {replay.closed ? `(${replay.closed.why} in month ${replay.closed.i})` : "(held to expiry)"}
-                      </div>
-                      <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 4 }}>Replayed on real monthly returns. The point is to watch the rules work before you rely on them.</div>
-                    </div>
-                  )}
-                  <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 8 }}>
-                    Simulated with {seasonal[ticker] ? "real" : "estimated"} seasonal drift and {(seas.sigma * 100).toFixed(0)}% volatility. A simplified model: no price jumps, no volatility term structure.
-                  </div>
-                </>
-              ) : (
-                <div style={{ ...mono, fontSize: 12, color: T.mut, marginTop: 10 }}>Press "Run it" for the odds, the spread of outcomes, and what happened in each of the last ten years.</div>
-              )}
-            </Panel>
-          </div>
-        )}
-
         {/* News and Weather are no longer tabs. They are the evidence behind the
             "Why this trade" panel: tapping the weather bar opens the regions and
             their anomalies, tapping the news bar opens the headlines with their
@@ -2491,13 +2539,6 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
           </div>
         )}
 
-        {tab === "build" && !showSettings && ev === "copilot" && (
-          <CopilotTab
-            apiKey={"server"}
-            ctx={{ store, scan, news: news[ticker]?.items || [], ticker, legs, expKey, A, spot, seasonalSrc: seas.src, setMsg }}
-          />
-        )}
-
         {/* ============ JOURNAL — the third place ============
             What actually happened, and what it says about the habits. The
             report lives here too: it is a written record, not a workspace. */}
@@ -2590,7 +2631,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
         </TabBoundary>
 
         <div style={{ ...mono, fontSize: 10, color: T.dim, textAlign: "center", marginTop: 22 }}>
-          Paper trading only · CBOE prices delayed ~15 min · {perTradeCapLabel()} · Total exposure ≤{pctText(RULES.totalExposurePct)} · Educational software, not financial advice
+          Paper trading only · {sourceNote(chain)} · {perTradeCapLabel()} · Total exposure ≤{pctText(RULES.totalExposurePct)} · Educational software, not financial advice
         </div>
       </div>
     </div>
