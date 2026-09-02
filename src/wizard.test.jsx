@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { CapitalOnboarding, WizardOpen, FindOpportunities, WizardCandidates, ConfirmSteps, NothingToday, statusLine, tradeOffSentence, roadHeadline, gateChecklist } from "./wizard.jsx";
 import { evaluateTrade } from "./riskGate.js";
 import { WhyThisTrade } from "./why.jsx";
-import { Markdown } from "./pro.jsx";
+import { Markdown, sseDeltas, gatewayPageMessage } from "./pro.jsx";
 import { sizing, NOTHING_TODAY, RULES } from "./rules.js";
 import { DRIVER_PRESETS, normaliseWeights, presetOf, rankByDrivers, verdictNarrative } from "./signals.js";
 
@@ -61,6 +61,55 @@ check("the copilot's markdown is rendered, never shown as source", () => {
 check("an empty or absent answer renders nothing rather than crashing", () => {
   if (renderToStaticMarkup(<Markdown text="" />) !== "") throw new Error("empty text should render nothing");
   if (renderToStaticMarkup(<Markdown text={null} />) !== "") throw new Error("null text should render nothing");
+});
+
+/* ---- THE COPILOT STREAMS, SO A GATEWAY CANNOT TIME IT OUT ---- */
+
+const delta = (t) => `event: content_block_delta\ndata: ${JSON.stringify({ type: "content_block_delta", delta: { type: "text_delta", text: t } })}\n\n`;
+
+check("the stream parser pulls the text out of Anthropic's frames", () => {
+  const buf = `event: message_start\ndata: {"type":"message_start"}\n\n` + delta("Hello ") + delta("world.");
+  const { text, rest } = sseDeltas(buf);
+  if (text !== "Hello world.") throw new Error(`assembled ${JSON.stringify(text)}`);
+  if (rest !== "") throw new Error("a complete buffer should leave no tail");
+});
+
+check("a delta split across two network reads is not dropped", () => {
+  // The whole reason the parser keeps a tail: TCP does not respect frame
+  // boundaries, and half a delta thrown away is text silently missing.
+  const whole = delta("Hello ") + delta("world.");
+  const cut = 30;
+  const first = sseDeltas(whole.slice(0, cut));
+  const second = sseDeltas(first.rest + whole.slice(cut));
+  if (first.text + second.text !== "Hello world.") {
+    throw new Error(`split read lost text: ${JSON.stringify(first.text + second.text)}`);
+  }
+});
+
+check("an error frame stops the stream instead of being ignored", () => {
+  const buf = `event: error\ndata: ${JSON.stringify({ type: "error", error: { message: "overloaded" } })}\n\n`;
+  let threw = null;
+  try { sseDeltas(buf); } catch (e) { threw = e; }
+  if (!threw) throw new Error("an error frame passed silently");
+  has(threw.message, "overloaded");
+});
+
+check("a gateway page is reported as a timeout, never dumped as markup", () => {
+  // Exactly what came back from the live site when an analysis ran long.
+  const page = '<HTML> <HEAD> <TITLE>Inactivity Timeout</TITLE> </HEAD> <BODY BGCOLOR="white">'
+    + '<H1>Inactivity Timeout</H1><B>Description: Too much time has passed without sending any data for document.</B></BODY></HTML>';
+  const m = gatewayPageMessage(page);
+  if (!m) throw new Error("an HTML gateway page was not recognised");
+  if (/<HTML|<BODY|BGCOLOR|<H1/i.test(m)) throw new Error("the markup reached the message");
+  has(m, "Inactivity Timeout");          // the title names the cause, so it is kept
+  has(m, "gateway answered with a web page");
+  has(m, "timeout on a long analysis");
+});
+
+check("a real JSON error is left alone for the API's own sentence", () => {
+  if (gatewayPageMessage('{"error":{"message":"invalid x-api-key"}}') !== null) {
+    throw new Error("a JSON error body was mistaken for a gateway page");
+  }
 });
 
 /* ---- THE EVIDENCE TOGGLE NAMES WHAT IT OPENS ---- */

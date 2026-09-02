@@ -489,7 +489,7 @@ export default function OptionsStrategyLab() {
   // an evidence panel: every other chip in the strip unmounts it, so state kept
   // inside it was destroyed on the next tap and an answer that landed while it
   // was shut never reached the screen at all.
-  const [copilot, setCopilot] = useState({ msgs: [], busy: false, err: null });
+  const [copilot, setCopilot] = useState({ msgs: [], busy: false, err: null, partial: "" });
   const [optMode, setOptMode] = useState("budget");
   // NOT a hardcoded 500. The field starts at the per-trade limit the capital
   // model derives and only holds a number of its own once the user types one,

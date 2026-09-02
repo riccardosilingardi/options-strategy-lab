@@ -461,24 +461,108 @@ export const SKILLS = [
   { id: "news", label: "News impact", prompt: "Analyse the tagged news in context: which items affect my positions and the underlyings on the radar? Separate noise from signal, with cause→effect and a time horizon." },
   { id: "radar", label: "Opportunity radar", prompt: `From the seasonal scanner and the weather signals, propose the 2 best opportunities of this week with a suggested structure (relative strikes, ~${RULES.targetEntryDTE} DTE), the thesis, the risk and the entry trigger. Nothing below ${RULES.minEntryDTE} DTE at entry: the risk gate refuses it.` },
 ];
-export async function askAI(_key, messages, contextStr) {
+/**
+ * Pull the text deltas out of one or more SSE frames.
+ *
+ * Pure, and separate from the fetch, so the parsing can be tested without a
+ * network: the frame shape is Anthropic's contract and a mistake here is
+ * silent — text simply goes missing.
+ *
+ * @param chunk raw bytes decoded to text; may end mid-frame
+ * @returns { text, rest } — the deltas found, and the unparsed tail to keep
+ */
+export function sseDeltas(chunk) {
+  const frames = String(chunk).split("\n\n");
+  const rest = frames.pop() || "";     // a partial frame: keep it for next time
+  let text = "";
+  for (const frame of frames) {
+    for (const line of frame.split("\n")) {
+      if (!line.startsWith("data:")) continue;
+      const payload = line.slice(5).trim();
+      if (!payload || payload === "[DONE]") continue;
+      let ev = null;
+      try { ev = JSON.parse(payload); } catch { continue; }
+      if (ev.type === "content_block_delta" && ev.delta?.type === "text_delta") text += ev.delta.text;
+      else if (ev.type === "error") throw new Error(ev.error?.message || "The copilot stream failed part-way through.");
+    }
+  }
+  return { text, rest };
+}
+
+/**
+ * Is this response body a GATEWAY talking rather than the API? Returns the
+ * sentence to show, or null when the body is something else.
+ *
+ * A proxy timeout, a block page or a login wall all arrive as HTML. Dumping the
+ * markup on screen — which is what happened — tells the reader nothing, and the
+ * page title is usually the only part that names the cause.
+ */
+export function gatewayPageMessage(raw) {
+  if (!/^\s*<(?:!doctype|html)/i.test(String(raw))) return null;
+  const title = (String(raw).match(/<title[^>]*>([^<]*)<\/title>/i) || [])[1];
+  return `The request never reached the copilot: a gateway answered with a web page` +
+    `${title ? ` titled \u201c${title.trim()}\u201d` : ""} instead of an answer. ` +
+    `That is almost always a timeout on a long analysis rather than a problem with the key.`;
+}
+
+/**
+ * Ask the copilot. STREAMS, always.
+ *
+ * A full analysis takes tens of seconds to write. Waiting for the whole thing
+ * before the first byte moves leaves the connection silent, and a gateway in
+ * the middle kills a silent connection: the reader gets an HTML page saying
+ * "Too much time has passed without sending any data for document" where the
+ * analysis should have been. Streaming keeps bytes flowing from the first
+ * token, so there is no silence to time out — and the answer can be shown as it
+ * is written instead of all at once at the end.
+ *
+ * @param onDelta called with the text SO FAR each time more of it arrives
+ * @returns the finished text
+ */
+export async function askAI(_key, messages, contextStr, onDelta) {
   const r = await fetch("/api/ai", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       model: "claude-sonnet-4-6",
       max_tokens: 1200,
+      stream: true,
       system: SYSTEM_PROMPT + "\n\nLIVE CONTEXT (JSON):\n" + contextStr,
       messages,
     }),
   });
+
+  // The happy path: server-sent events, one text delta at a time.
+  if (r.ok && r.body && /text\/event-stream/i.test(r.headers.get("content-type") || "")) {
+    const reader = r.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "", text = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const { text: more, rest } = sseDeltas(buf);
+      buf = rest;
+      if (more) { text += more; if (onDelta) onDelta(text); }
+    }
+    if (!text.trim()) throw new Error("The copilot returned an empty answer.");
+    return text;
+  }
   // The real API message is the only useful thing when this fails — a missing
   // workspace id, an expired key, a rate limit all say exactly what to fix.
   // Never replace it with a generic sentence.
   const raw = await r.text();
   let j = null;
   try { j = JSON.parse(raw); } catch { /* the proxy returned something that is not JSON */ }
-  if (!j) throw new Error(raw.trim().slice(0, 300) || `The copilot endpoint answered HTTP ${r.status} with an empty body.`);
+  if (!j) {
+    // An HTML page here is a GATEWAY talking, not the API: a timeout, a proxy
+    // block or a login wall. Dumping its markup on screen tells the reader
+    // nothing — keep the title, which usually names what happened, and say what
+    // kind of failure it is.
+    const gateway = gatewayPageMessage(raw);
+    if (gateway) throw new Error(gateway);
+    throw new Error(raw.trim().slice(0, 300) || `The copilot endpoint answered HTTP ${r.status} with an empty body.`);
+  }
   if (j.error) {
     // The API's own sentence, plus what the proxy actually sent. Without the
     // second half "workspace id required" and "wrong key" read the same on
@@ -527,17 +611,25 @@ export function buildContext(ctx) {
  * @param setConvo the caller's setter
  */
 export function CopilotTab({ ctx, apiKey, convo, setConvo, onAnalysis }) {
-  const { msgs = [], busy = false, err = null } = convo || {};
+  const { msgs = [], busy = false, err = null, partial = "" } = convo || {};
   const [input, setInput] = useState("");
   const send = async (text, label) => {
     if (!text.trim() || busy) return;
     if (!apiKey) { setConvo((c) => ({ ...c, err: "The copilot is not configured on the server." })); return; }
     const next = [...msgs, { role: "user", content: text }];
-    setConvo({ msgs: next, busy: true, err: null });
+    setConvo({ msgs: next, busy: true, err: null, partial: "" });
     setInput("");
     try {
-      const reply = await askAI(apiKey, next.map((m) => ({ role: m.role, content: m.content })), buildContext(ctx));
-      setConvo({ msgs: [...next, { role: "assistant", content: reply }], busy: false, err: null });
+      // The answer is shown AS IT ARRIVES. A pre-trade analysis takes tens of
+      // seconds to write, and a motionless "Thinking…" for that long is
+      // indistinguishable from a hang — which is how the gateway timeout got
+      // reported as "it does nothing" in the first place.
+      const reply = await askAI(
+        apiKey,
+        next.map((m) => ({ role: m.role, content: m.content })),
+        buildContext(ctx),
+        (sofar) => setConvo((c) => ({ ...c, partial: sofar })));
+      setConvo({ msgs: [...next, { role: "assistant", content: reply }], busy: false, err: null, partial: "" });
       // THE JOURNAL IS THE RECORD OF WHAT THE APP DID. An analysis run here is
       // part of that record — the Journal's report was already quoting "the
       // copilot's read" while these runs left no trace at all, so the two told
@@ -547,7 +639,7 @@ export function CopilotTab({ ctx, apiKey, convo, setConvo, onAnalysis }) {
       // KEEP the question. Rolling `msgs` back to what it was before also
       // deleted what the user had just asked, so a failure looked like the tap
       // had never happened.
-      setConvo({ msgs: next, busy: false, err: String(e.message || e) });
+      setConvo({ msgs: next, busy: false, err: String(e.message || e), partial: "" });
     }
   };
   /** Print what is on screen. The browser's own dialog also saves to PDF. */
@@ -605,9 +697,18 @@ export function CopilotTab({ ctx, apiKey, convo, setConvo, onAnalysis }) {
             </div>
           ))}
           {busy && (
-            <div style={{ ...mono, fontSize: 11, color: T.amber }}>
-              Thinking… you can close this panel: the answer waits here, it is not lost.
-            </div>
+            partial
+              ? (
+                <div style={{ padding: "11px 13px", borderRadius: 7, background: T.bg, border: `1px solid ${T.line}` }}>
+                  <div style={{ ...mono, fontSize: 9, letterSpacing: "0.1em", color: T.amber, marginBottom: 7 }}>COPILOT · WRITING</div>
+                  <Markdown text={partial} />
+                </div>
+              )
+              : (
+                <div style={{ ...mono, fontSize: 11, color: T.amber }}>
+                  Thinking… you can close this panel: the answer waits here, it is not lost.
+                </div>
+              )
           )}
         </div>
         {err && <div style={{ ...mono, fontSize: 11, color: T.red, marginTop: 8 }}>{err}</div>}

@@ -22,7 +22,37 @@ export default async (req) => {
     if (workspace) headers["anthropic-workspace-id"] = workspace;
 
     const body = await req.text();
+    // STREAM WHEN ASKED TO, AND THAT IS THE DEFAULT FOR THE COPILOT.
+    //
+    // This function used to await the WHOLE answer before sending a single byte
+    // back. A pre-trade analysis takes tens of seconds to write, and a gateway
+    // that sees a connection sit silent that long kills it — the browser then
+    // gets an HTML error page ("Too much time has passed without sending any
+    // data for document") instead of JSON, which is exactly what happened.
+    //
+    // Passing the SSE stream straight through means bytes move from the first
+    // token onward, so nothing is ever idle long enough to be timed out, and the
+    // reader watches the answer arrive instead of watching a spinner.
+    let wantsStream = false;
+    try { wantsStream = JSON.parse(body)?.stream === true; } catch { /* body is checked below */ }
+
     const r = await fetch("https://api.anthropic.com/v1/messages", { method: "POST", headers, body });
+
+    // An error is JSON even on a streaming request: read it and fall through to
+    // the reporting below rather than streaming an error page.
+    if (wantsStream && r.ok && r.body) {
+      return new Response(r.body, {
+        status: 200,
+        headers: {
+          "Content-Type": "text/event-stream; charset=utf-8",
+          "Cache-Control": "no-cache, no-transform",
+          "Connection": "keep-alive",
+          // Some proxies buffer a response until it completes, which would put
+          // the silence back. This is the conventional ask not to.
+          "X-Accel-Buffering": "no",
+        },
+      });
+    }
     const out = await r.text();
 
     // Pass the real API error through unchanged where it already is one, and

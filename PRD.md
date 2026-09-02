@@ -337,6 +337,15 @@ The build order was a plan for a future builder. It is now a record.
 
 ## 10b. The copilot, and what the Journal is a record of
 
+**The call streams.** `ai.mjs` passes Anthropic's server-sent events straight through and
+`askAI` always asks for them. Buffering the whole answer first left the connection silent for
+the tens of seconds an analysis takes to write, and a gateway kills a silent connection — the
+browser got an HTML page reading *"Too much time has passed without sending any data for
+document"* where the analysis should have been. Streaming also means the answer is shown as it
+is written rather than after a motionless wait, which is the difference between "thinking" and
+"hung". An HTML body is now reported as the timeout it is (`gatewayPageMessage()`), never
+dumped as markup.
+
 The copilot answers in **markdown**, and the panel renders it (`Markdown` in `pro.jsx`).
 Printing it raw put `## 1. STRUCTURE`, `**Ticker:**` and a wall of `|---|` pipes on screen —
 the content was fine, it was being shown as source. The system prompt now writes for someone

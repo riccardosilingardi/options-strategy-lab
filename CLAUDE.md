@@ -336,6 +336,18 @@ went straight to a confirm page skipped the trade itself. Both are gone.
   bands — so the strip and the bands are the same fact read two ways. It appears
   above `PAY_MIN_W` and folds away below it, where the full-width payoff chart
   underneath carries it instead.
+- **THE COPILOT CALL MUST STREAM.** `ai.mjs` passes Anthropic's SSE straight
+  through when the body carries `stream: true`, and `askAI` always asks for it.
+  Buffering the whole answer first left the connection silent for the tens of
+  seconds an analysis takes to write, and a gateway kills a silent connection:
+  the browser got an HTML page — "Too much time has passed without sending any
+  data for document" — where the analysis should have been. Bytes must move from
+  the first token. `sseDeltas()` keeps the partial tail between reads, because
+  TCP does not respect frame boundaries and half a delta dropped is text
+  silently missing. `gatewayPageMessage()` turns an HTML body into a sentence
+  naming the timeout instead of dumping markup on screen. Both are pure and
+  tested; the autopilot calls Anthropic directly and has a background budget, so
+  it does not need this.
 - **The copilot answers in MARKDOWN.** Render it with `Markdown` in `pro.jsx` —
   never `white-space: pre-wrap`, which put `## 1. STRUCTURE`, `**Ticker:**` and
   a wall of `|---|` pipes on screen. The prompt asks for prose for a non-expert
