@@ -325,7 +325,7 @@ export function AlpacaDesk({ creds, setMsg, gate }) {
 const SYSTEM_PROMPT = `You are the copilot of an options trader working on commodity ETFs (SOYB, CORN, UNG, BOIL, WEAT, SPY) in PAPER TRADING.
 ${copilotRulesBlock()}
 These rules are enforced in code by src/riskGate.js before any order is sent. Never propose a trade that breaks them, and never present a rule number that differs from the ones above.
-Style: concise, explicit numbers (Greeks, P&L, probabilities), recommendations marked with an arrow →, always state the risk and what would invalidate the thesis. Never guarantee an outcome: this is educational analysis on a paper account, not financial advice.
+WHO YOU ARE WRITING FOR: someone who is learning, not a professional trader. Plain English sentences. Define any term the first time you use it, in the same sentence — "open interest (how many contracts are actually open)". Never guarantee an outcome: this is educational analysis on a paper account, not financial advice. Always state the risk and what would make the idea wrong.
 
 METHOD (follow in order): 1 Discovery (seasonal scanner + trend) → 2 Construction (real chain, strikes, Greeks, R/R, breakevens) → 3 Execution (only after explicit human confirmation, check buying power) → 4 Monitoring (P&L against the rules, % of max profit) → 5 Reporting.
 
@@ -333,7 +333,128 @@ DECISION TREES: (A) strong bullish seasonal signal + uptrend → bull call sprea
 
 MANAGEMENT: scale in and out → start with 1 contract, add if it works, close half at ${pctText(RULES.takeProfitPct)} of max profit and the rest at ${pctText(RULES.scaleOutPct)}; roll near expiration with a calendar; if the underlying moves against you → re-examine the thesis: if it is invalidated, close, do not average down.
 
-OUTPUT FORMAT: clear sections (LEGS / P&L PROFILE / GREEKS / NEXT STEPS), always risk/reward, always next steps, and ask for confirmation before any execution.`;
+OUTPUT FORMAT — READ THIS TWICE, IT IS THE MOST IGNORED PART.
+The screen ALREADY shows the legs, the strikes, the greeks, the max profit, the max loss and the breakevens, right next to your answer. Do NOT repeat them as a specification. Refer to them ("the $22/$23 call spread above") and spend your words on what the numbers MEAN.
+- Write prose. Short paragraphs. NO tables, NO pipe characters, NO code fences, NO leg-by-leg listings.
+- At most four short sections. Head each one with "## " and a plain-English title — "What this trade is betting on", not "STRUCTURE".
+- Bullets with "- " only where a list is genuinely a list. **Bold** for the one number that matters in a paragraph, sparingly.
+- Open with one sentence that answers the question asked. Close with what you would watch, and what would tell you the idea is wrong.
+- Ask for confirmation before any execution.`;
+/* ================================================================
+   MARKDOWN, RENDERED — not printed
+
+   The model answers in markdown. The panel used to drop it on screen with
+   `white-space: pre-wrap`, so the reader got `## 1. STRUCTURE`, `**Ticker:**`
+   and a wall of `|---|---|` pipes. The content was fine; it was being shown as
+   source code. This is a deliberately small renderer — headings, bullets,
+   numbered lists, bold, inline code, rules and tables — because the prompt now
+   asks for prose and anything more elaborate is a sign the prompt drifted.
+================================================================ */
+
+/** `**bold**` and `` `code` `` inside a line. Returns React nodes. */
+function inlineMd(text, keyBase = "i") {
+  const out = [];
+  const re = /(\*\*[^*]+\*\*|`[^`]+`)/g;
+  let last = 0, m, n = 0;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) out.push(text.slice(last, m.index));
+    const tok = m[0];
+    if (tok.startsWith("**")) {
+      out.push(<b key={`${keyBase}-b${n++}`} style={{ color: T.ink }}>{tok.slice(2, -2)}</b>);
+    } else {
+      out.push(<code key={`${keyBase}-c${n++}`} style={{ ...mono, fontSize: "0.92em", background: T.bg, padding: "1px 4px", borderRadius: 3 }}>{tok.slice(1, -1)}</code>);
+    }
+    last = m.index + tok.length;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return out;
+}
+
+const mdTableRow = (line) => line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
+
+export function Markdown({ text, style }) {
+  if (!text) return null;
+  // Code fences carry no meaning in an analysis; the prompt forbids them and a
+  // stray one must not swallow the rest of the answer.
+  const lines = String(text).replace(/```[a-z]*\n?/gi, "").split("\n");
+  const blocks = [];
+  let para = [], list = null;
+
+  const flushPara = () => {
+    if (!para.length) return;
+    blocks.push(<p key={`p${blocks.length}`} style={{ margin: "0 0 9px", lineHeight: 1.6 }}>{inlineMd(para.join(" "), `p${blocks.length}`)}</p>);
+    para = [];
+  };
+  const flushList = () => {
+    if (!list) return;
+    const Tag = list.ordered ? "ol" : "ul";
+    blocks.push(<Tag key={`l${blocks.length}`} style={{ margin: "0 0 10px", paddingLeft: 20, lineHeight: 1.6 }}>
+      {list.items.map((it, i) => <li key={i} style={{ marginBottom: 3 }}>{inlineMd(it, `l${blocks.length}-${i}`)}</li>)}
+    </Tag>);
+    list = null;
+  };
+  const flush = () => { flushPara(); flushList(); };
+
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i];
+    const line = raw.trimEnd();
+    const t = line.trim();
+
+    if (!t) { flush(); continue; }
+    if (/^(-{3,}|\*{3,}|_{3,})$/.test(t)) { flush(); blocks.push(<hr key={`h${blocks.length}`} style={{ border: "none", borderTop: `1px solid ${T.line}`, margin: "12px 0" }} />); continue; }
+
+    const head = t.match(/^(#{1,4})\s+(.*)$/);
+    if (head) {
+      flush();
+      const lvl = head[1].length;
+      blocks.push(<div key={`hd${blocks.length}`} style={{
+        ...(lvl <= 2 ? { ...mono, fontSize: 10.5, letterSpacing: "0.12em", color: T.amber, textTransform: "uppercase" } : { fontSize: 13.5, fontWeight: 700, color: T.ink }),
+        margin: blocks.length ? "14px 0 6px" : "0 0 6px",
+      }}>{inlineMd(head[2].replace(/^\d+[.)]\s*/, ""), `hd${blocks.length}`)}</div>);
+      continue;
+    }
+
+    // a table: a header row, a separator row, then body rows
+    if (t.startsWith("|") && /^\|[\s:|-]+\|?$/.test((lines[i + 1] || "").trim())) {
+      flush();
+      const header = mdTableRow(t);
+      const rows = [];
+      i += 2;
+      while (i < lines.length && lines[i].trim().startsWith("|")) { rows.push(mdTableRow(lines[i])); i++; }
+      i--;
+      blocks.push(
+        <div key={`t${blocks.length}`} style={{ overflowX: "auto", margin: "0 0 10px" }}>
+          <table style={{ borderCollapse: "collapse", fontSize: 12.5, minWidth: "100%" }}>
+            <thead><tr>{header.map((h, j) => (
+              <th key={j} style={{ ...mono, fontSize: 10, letterSpacing: "0.08em", color: T.dim, textAlign: "left", padding: "5px 9px", borderBottom: `1px solid ${T.line}`, whiteSpace: "nowrap" }}>{h}</th>
+            ))}</tr></thead>
+            <tbody>{rows.map((r, j) => (
+              <tr key={j}>{r.map((c, k) => (
+                <td key={k} style={{ padding: "5px 9px", borderBottom: `1px solid ${T.line}`, color: T.body, verticalAlign: "top" }}>{inlineMd(c, `t${j}-${k}`)}</td>
+              ))}</tr>
+            ))}</tbody>
+          </table>
+        </div>);
+      continue;
+    }
+
+    const bullet = t.match(/^[-*•]\s+(.*)$/);
+    const numbered = t.match(/^\d+[.)]\s+(.*)$/);
+    if (bullet || numbered) {
+      flushPara();
+      const ordered = !!numbered;
+      if (!list || list.ordered !== ordered) { flushList(); list = { ordered, items: [] }; }
+      list.items.push((bullet || numbered)[1]);
+      continue;
+    }
+
+    flushList();
+    para.push(t);
+  }
+  flush();
+  return <div style={{ fontSize: 13, color: T.body, ...style }}>{blocks}</div>;
+}
+
 export const SKILLS = [
   { id: "pretrade", label: "Pre-trade analysis", prompt: `Run the pre-trade analysis of the current strategy: structure, Greeks, risk/reward, breakevens against support and resistance, seasonal alignment and news. Finish with a GO/NO-GO checklist and a position size within the per-trade limit (${perTradeCapLabel()}).` },
   { id: "positions", label: "Position review", prompt: `Review the open positions against the rules (${ruleBadge()}): for each one give → HOLD / CLOSE / ROLL with the reasoning and the levels to watch. Remember the ${stopLossLabel()} rule is a warning, never an automatic close.` },
@@ -405,10 +526,10 @@ export function buildContext(ctx) {
  * @param convo    { msgs, busy, err } — owned by the caller
  * @param setConvo the caller's setter
  */
-export function CopilotTab({ ctx, apiKey, convo, setConvo }) {
+export function CopilotTab({ ctx, apiKey, convo, setConvo, onAnalysis }) {
   const { msgs = [], busy = false, err = null } = convo || {};
   const [input, setInput] = useState("");
-  const send = async (text) => {
+  const send = async (text, label) => {
     if (!text.trim() || busy) return;
     if (!apiKey) { setConvo((c) => ({ ...c, err: "The copilot is not configured on the server." })); return; }
     const next = [...msgs, { role: "user", content: text }];
@@ -417,6 +538,11 @@ export function CopilotTab({ ctx, apiKey, convo, setConvo }) {
     try {
       const reply = await askAI(apiKey, next.map((m) => ({ role: m.role, content: m.content })), buildContext(ctx));
       setConvo({ msgs: [...next, { role: "assistant", content: reply }], busy: false, err: null });
+      // THE JOURNAL IS THE RECORD OF WHAT THE APP DID. An analysis run here is
+      // part of that record — the Journal's report was already quoting "the
+      // copilot's read" while these runs left no trace at all, so the two told
+      // different stories about the same day.
+      if (onAnalysis) onAnalysis({ label: label || "Question", prompt: text, answer: reply, ticker: ctx?.ticker || null });
     } catch (e) {
       // KEEP the question. Rolling `msgs` back to what it was before also
       // deleted what the user had just asked, so a failure looked like the tap
@@ -424,19 +550,58 @@ export function CopilotTab({ ctx, apiKey, convo, setConvo }) {
       setConvo({ msgs: next, busy: false, err: String(e.message || e) });
     }
   };
+  /** Print what is on screen. The browser's own dialog also saves to PDF. */
+  const printConvo = () => {
+    const w = window.open("", "_blank");
+    if (!w) return;
+    const esc = (x) => String(x).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+    const body = msgs.map((m) => m.role === "user"
+      ? `<h2>${esc(m.content)}</h2>`
+      : `<div class="a">${esc(m.content)
+        .replace(/^#{1,4}\s+(.*)$/gm, "<h3>$1</h3>")
+        .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
+        .replace(/^[-*]\s+(.*)$/gm, "<li>$1</li>")
+        .replace(/\n{2,}/g, "<br/><br/>")}</div>`).join("");
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Copilot analysis</title><style>
+      body{font-family:Georgia,serif;color:#1c2128;max-width:760px;margin:24px auto;padding:0 16px;line-height:1.6}
+      h1{font-size:20px;border-bottom:2px solid #b07d18;padding-bottom:6px}
+      h2{font-size:13px;color:#555;font-family:ui-monospace,monospace;margin:22px 0 6px}
+      h3{font-size:12px;color:#b07d18;letter-spacing:.06em;text-transform:uppercase;margin:14px 0 4px}
+      .a{font-size:13.5px} li{font-size:13px}
+      @media print{.noprint{display:none}}</style></head><body>
+      <button class="noprint" onclick="window.print()" style="padding:8px 14px;margin-bottom:14px;cursor:pointer">Print or save as PDF</button>
+      <h1>Copilot analysis — ${esc(ctx?.ticker || "")} · ${esc(new Date().toLocaleString("en-GB"))}</h1>
+      ${body}
+      <p style="font-size:11px;color:#777;margin-top:24px">Paper trading only. Educational analysis, not financial advice.</p>
+      </body></html>`);
+    w.document.close();
+  };
   return (
     <div style={{ marginTop: 12 }}>
       <Panel>
-        <Lbl><Sparkles size={11} style={{ verticalAlign: "-1px" }} /> AI COPILOT · IT ALREADY KNOWS YOUR POSITIONS</Lbl>
-        <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
-          {SKILLS.map((s) => <Btn key={s.id} small ghost color={T.blue} onClick={() => send(s.prompt)} disabled={busy}>{s.label}</Btn>)}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+          <Lbl><Sparkles size={11} style={{ verticalAlign: "-1px" }} /> AI COPILOT · IT ALREADY KNOWS YOUR POSITIONS</Lbl>
+          {msgs.length > 0 && (
+            <div style={{ display: "flex", gap: 6 }}>
+              <Btn small ghost color={T.blue} onClick={printConvo}><FileText size={11} /> Print</Btn>
+              <Btn small ghost onClick={() => setConvo({ msgs: [], busy: false, err: null })}><Trash2 size={11} /> Clear</Btn>
+            </div>
+          )}
         </div>
-        <div style={{ marginTop: 12, display: "grid", gap: 8, maxHeight: 420, overflowY: "auto" }}>
+        <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
+          {SKILLS.map((sk) => <Btn key={sk.id} small ghost color={T.blue} onClick={() => send(sk.prompt, sk.label)} disabled={busy}>{sk.label}</Btn>)}
+        </div>
+        {/* No fixed-height window. An analysis is meant to be READ, and a 420px
+            box on a desktop turned every answer into a peephole. It grows with
+            the answer; the page scrolls, as pages do. */}
+        <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
           {msgs.length === 0 && !busy && <div style={{ ...mono, fontSize: 11.5, color: T.mut }}>Pick one above or just ask. The copilot already knows your open positions, the trade on the Build screen, the Radar, the tagged news and your own risk rules.</div>}
           {msgs.map((m, i) => (
-            <div key={i} style={{ padding: "9px 11px", borderRadius: 7, background: m.role === "user" ? `${T.blue}14` : T.bg, border: `1px solid ${m.role === "user" ? T.blue + "44" : T.line}` }}>
-              <div style={{ ...mono, fontSize: 9, color: m.role === "user" ? T.blue : T.amber, marginBottom: 3 }}>{m.role === "user" ? "YOU" : "COPILOT"}</div>
-              <div style={{ fontSize: 13, color: T.body, whiteSpace: "pre-wrap" }}>{m.content}</div>
+            <div key={i} style={{ padding: m.role === "user" ? "9px 11px" : "11px 13px", borderRadius: 7, background: m.role === "user" ? `${T.blue}14` : T.bg, border: `1px solid ${m.role === "user" ? T.blue + "44" : T.line}` }}>
+              <div style={{ ...mono, fontSize: 9, letterSpacing: "0.1em", color: m.role === "user" ? T.blue : T.amber, marginBottom: m.role === "user" ? 3 : 7 }}>{m.role === "user" ? "YOU ASKED" : "COPILOT"}</div>
+              {m.role === "user"
+                ? <div style={{ fontSize: 12.5, color: T.body, lineHeight: 1.5 }}>{m.content}</div>
+                : <Markdown text={m.content} />}
             </div>
           ))}
           {busy && (
@@ -451,8 +616,8 @@ export function CopilotTab({ ctx, apiKey, convo, setConvo }) {
           <Btn onClick={() => send(input)} disabled={busy}><Send size={13} /></Btn>
         </div>
         <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6, lineHeight: 1.6 }}>
-          This conversation stays here and is not written to the Journal — the report in the Journal is a separate
-          document with its own button. Educational analysis on a paper account, not financial advice.
+          Every analysis you run here is filed in the Journal with its question, so the Journal and this panel tell the
+          same story about the same day. Educational analysis on a paper account, not financial advice.
         </div>
       </Panel>
     </div>
@@ -487,6 +652,18 @@ export function buildReportMd(ctx, weatherSig, aiText) {
   L.push(`\n## 4 · Weather → commodities (next 14 days)`);
   (weatherSig || []).forEach((s) => L.push(`- **${s.tks.join("+")} ${s.dir}** — ${s.region}: ${s.why}`));
   if (aiText) { L.push(`\n## 5 · The copilot\u2019s read`); L.push(aiText); }
+  // The analyses run from the Copilot panel are part of the same record. The
+  // report used to carry only its OWN model call, so a day with three pre-trade
+  // analyses on it produced a report that mentioned none of them.
+  const runs = (store.copilotLog || []).slice(0, 5);
+  if (runs.length) {
+    L.push(`\n## 6 \u00b7 Analyses you ran in the copilot`);
+    runs.forEach((c) => {
+      L.push(`\n### ${c.label || "Question"}${c.ticker ? ` \u2014 ${c.ticker}` : ""} \u00b7 ${new Date(c.t).toLocaleString("en-GB")}`);
+      L.push(`_Asked:_ ${String(c.prompt).slice(0, 300)}`);
+      L.push(String(c.answer || ""));
+    });
+  }
   L.push(`\n---\n_Seasonality source: ${seasonalSrc}. Paper trading only. Educational software, not financial advice._`);
   return L.join("\n");
 }
@@ -1053,8 +1230,19 @@ export function UnifiedView({ ticker, dte, sigma, driftM, curve, legs, breakeven
   const MIN_W = 560;
   const [W, setW] = useState(MIN_W);
   useEffect(() => {
-    const ro = new ResizeObserver(() => setW(Math.max(MIN_W, wrapRef.current?.clientWidth || MIN_W)));
-    if (wrapRef.current) ro.observe(wrapRef.current);
+    // The observer must attach to a node that EXISTS ON MOUNT. The loading and
+    // error states used to return before the wrapper was rendered, so `wrapRef`
+    // was null when this ran, nothing was ever observed, and W kept its initial
+    // value for the life of the component. That was invisible while the initial
+    // value happened to be 1100 — about right on a desktop — and became a chart
+    // frozen at 560px in a 1382px column the moment the initial value changed.
+    // The wrapper is now always rendered and the states live inside it.
+    const el = wrapRef.current;
+    if (!el) return;
+    const measure = () => setW(Math.max(MIN_W, el.clientWidth || MIN_W));
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    measure();
     return () => ro.disconnect();
   }, []);
   useEffect(() => {
@@ -1075,14 +1263,33 @@ export function UnifiedView({ ticker, dte, sigma, driftM, curve, legs, breakeven
     const n = range <= 180 ? 90 : range <= 400 ? 250 : allBars.length;
     setBars(allBars.slice(-n));
   }, [allBars, range]);
-  if (err) return <div style={{ ...mono, fontSize: 11, color: T.red }}>Chart unavailable: {err}</div>;
-  if (!bars || !spot || !curve?.length) return <div style={{ ...mono, fontSize: 11, color: T.mut }}>Loading the chart…</div>;
+  // Rendered through the SAME wrapper as the chart, so the width is measured
+  // from the moment the component mounts rather than whenever data arrives.
+  const shell = (inner) => <div ref={wrapRef} style={{ maxWidth: "100%" }}>{inner}</div>;
+  if (err) return shell(<div style={{ ...mono, fontSize: 11, color: T.red }}>Chart unavailable: {err}</div>);
+  if (!bars || !spot || !curve?.length) return shell(<div style={{ ...mono, fontSize: 11, color: T.mut }}>Loading the chart…</div>);
 
   const H = 440, padL = 6, padR = 60, padT = 10, padB = 26;
+  // THE PAYOFF, BESIDE THE PRICE CHART, ON THE SAME PRICE AXIS (PRD §6).
+  // Price is the vertical axis here, so the multi-leg payoff belongs rotated
+  // 90° in a strip on the right: at any height you read the price on the axis
+  // and, straight across, what the trade is worth there. It was a separate
+  // chart further down the page with its own axis, which meant comparing "where
+  // the price could go" with "where this makes money" was a memory exercise.
+  // ADAPTIVE: the strip needs real room to be worth anything, so it appears
+  // only when there is some, and on a phone the full-width payoff chart below
+  // carries it instead.
+  const PAY_MIN_W = 820;
+  const showPay = W >= PAY_MIN_W;
+  const payGap = showPay ? 10 : 0;
+  const payW = showPay ? Math.max(120, Math.min(210, (W - padL - padR) * 0.19)) : 0;
+  const plotW = W - padL - padR - payW - payGap;
   const shareH = range > 400 ? 0.72 : 0.58;
-  const histW = (W - padL - padR) * shareH;
-  const projW = (W - padL - padR) * (1 - shareH);
+  const histW = plotW * shareH;
+  const projW = plotW * (1 - shareH);
   const x0 = padL, xToday = padL + histW, xEnd = padL + histW + projW;
+  const payX0 = xEnd + payGap;
+  const xRight = showPay ? payX0 + payW : xEnd;
 
   // cono lognormale: drift stagionale + IV reale
   const mu = Math.log(1 + (driftM || 0) / 100) * 12;
@@ -1119,6 +1326,21 @@ export function UnifiedView({ ticker, dte, sigma, driftM, curve, legs, breakeven
   const cdf = (x) => 0.5 * (1 + erf2((Math.log(x) - muT) / (sq * Math.SQRT2)));
   const pIn = zones.reduce((a, [lo, hi]) => a + Math.max(0, cdf(Math.min(hi, yMax * 2)) - cdf(Math.max(lo, 0.01))), 0);
 
+  /* ---- the payoff, rotated onto the shared price axis ----
+     Same `curve` the zones above are cut from, so the strip and the green bands
+     can never disagree: one is the other read sideways. Only the visible price
+     range is drawn — a payoff that runs off the top of the axis would invite a
+     comparison with a price the chart is not showing. */
+  const payPts = showPay
+    ? curve.filter((c) => c.s >= yMin && c.s <= yMax).map((c) => ({ y: Y(c.s), v: c.exp }))
+    : [];
+  const payMax = payPts.length ? Math.max(...payPts.map((p2) => Math.abs(p2.v)), 1) : 1;
+  // Zero sits a third in from the left, so a credit spread's small win still has
+  // somewhere to be drawn and the loss side is not squeezed to nothing.
+  const payZero = payX0 + payW * 0.34;
+  const PX = (v) => payZero + (v / payMax) * (v >= 0 ? payX0 + payW - 9 - payZero : payZero - payX0 - 9);
+  const payPath = payPts.map((p2, i) => `${(i ? "L" : "M")}${PX(p2.v).toFixed(1)},${p2.y.toFixed(1)}`).join("");
+
   const poly = (ks) => cone.map((c) => `${c.x.toFixed(1)},${Y(c[ks[0]]).toFixed(1)}`).join(" ") + " " + [...cone].reverse().map((c) => `${c.x.toFixed(1)},${Y(c[ks[1]]).toFixed(1)}`).join(" ");
   const gTicks = 5;
 
@@ -1137,8 +1359,8 @@ export function UnifiedView({ ticker, dte, sigma, driftM, curve, legs, breakeven
         {Array.from({ length: gTicks + 1 }, (_, i) => {
           const v = yMin + (i / gTicks) * (yMax - yMin);
           return (<g key={i}>
-            <line x1={x0} x2={xEnd} y1={Y(v)} y2={Y(v)} stroke={T.line} strokeWidth={0.6} />
-            <text x={xEnd + 6} y={Y(v) + 3} fill={T.dim} fontSize={9.5} fontFamily="monospace">{v.toFixed(2)}</text>
+            <line x1={x0} x2={xRight} y1={Y(v)} y2={Y(v)} stroke={T.line} strokeWidth={0.6} />
+            <text x={xRight + 6} y={Y(v) + 3} fill={T.dim} fontSize={9.5} fontFamily="monospace">{v.toFixed(2)}</text>
           </g>);
         })}
         {/* zone strategia (proiezione): verde = profitto a scadenza */}
@@ -1168,12 +1390,30 @@ export function UnifiedView({ ticker, dte, sigma, driftM, curve, legs, breakeven
           <text x={xToday + 4} y={Y(l.strike) - 3} fill={l.side > 0 ? T.green : T.red} fontSize={9.5} fontFamily="monospace" fontWeight="700">{l.side > 0 ? "+" : "−"}{l.qty} {l.strike}{l.type === "call" ? "C" : "P"}</text>
         </g>))}
         {(breakevens || []).map((b, i) => (<g key={"be" + i}>
-          <line x1={x0} x2={xEnd} y1={Y(b)} y2={Y(b)} stroke={T.blue} strokeWidth={1.1} strokeDasharray="6 4" />
+          <line x1={x0} x2={xRight} y1={Y(b)} y2={Y(b)} stroke={T.blue} strokeWidth={1.1} strokeDasharray="6 4" />
           <text x={x0 + 4} y={Y(b) - 3} fill={T.blue} fontSize={9.5} fontFamily="monospace">BE {b.toFixed(2)}</text>
         </g>))}
         {/* etichette date */}
         <text x={x0} y={H - 8} fill={T.dim} fontSize={9} fontFamily="monospace">{bars[0]?.time}</text>
         <text x={xToday} y={H - 8} fill={T.dim} fontSize={9} fontFamily="monospace" textAnchor="middle">{bars[bars.length - 1]?.time}</text>
+        {/* ---- THE PAYOFF, BESIDE THE PRICE, ON THE SAME AXIS ---- */}
+        {showPay && (
+          <g>
+            <rect x={payX0} y={padT} width={payW} height={H - padT - padB} fill={T.panel} opacity={0.5} />
+            {/* the profit side and the loss side, tinted like the bands opposite */}
+            <rect x={payZero} y={padT} width={Math.max(0, payX0 + payW - payZero)} height={H - padT - padB} fill={T.green} opacity={0.05} />
+            <rect x={payX0} y={padT} width={Math.max(0, payZero - payX0)} height={H - padT - padB} fill={T.red} opacity={0.05} />
+            <line x1={payZero} x2={payZero} y1={padT} y2={H - padB} stroke={T.mut} strokeWidth={0.9} />
+            <path d={payPath} fill="none" stroke={T.amber} strokeWidth={2} />
+            <text x={payX0 + payW / 2} y={padT + 10} fill={T.dim} fontSize={9} fontFamily="monospace" textAnchor="middle">
+              AT EXPIRY
+            </text>
+            <text x={payZero - 3} y={H - padB - 4} fill={T.red} fontSize={8.5} fontFamily="monospace" textAnchor="end">lose</text>
+            <text x={payZero + 3} y={H - padB - 4} fill={T.green} fontSize={8.5} fontFamily="monospace">make</text>
+            {/* today's price, read straight across into the payoff */}
+            <line x1={x0} x2={xRight} y1={Y(spot)} y2={Y(spot)} stroke={T.amber} strokeWidth={0.9} strokeDasharray="2 3" opacity={0.75} />
+          </g>
+        )}
       </svg>
       </div>
       <div style={{ display: "flex", gap: 14, marginTop: 6, flexWrap: "wrap", alignItems: "center" }}>

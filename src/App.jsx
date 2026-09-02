@@ -8,7 +8,7 @@ import {
   FlaskConical, Briefcase, Plus, Plug, Send, ExternalLink, MessageSquare, FileText, Bell,
   SlidersHorizontal, ArrowLeft, Sun, Moon,
 } from "lucide-react";
-import { fetchAllNews, fetchWeather, ImpactTags, CopilotTab, ReportTab, OrderTicket, AlpacaDesk, scaleStrategy, probProfit, buildContext, GuardianPanel, PriceChart, ChainMatrix, OptionPanel, UnifiedView, taSignals, confluence, WhyThisTrade } from "./pro.jsx";
+import { fetchAllNews, fetchWeather, ImpactTags, CopilotTab, ReportTab, OrderTicket, AlpacaDesk, scaleStrategy, probProfit, buildContext, GuardianPanel, PriceChart, ChainMatrix, OptionPanel, UnifiedView, taSignals, confluence, WhyThisTrade, Markdown } from "./pro.jsx";
 import { BandThumbnail, payoffBands, bandTakeaway, GaugeFigure, exitPlanSentence } from "./visuals.jsx";
 import { fuseSignals, sentimentDirection, withSignalRank, compareCandidates, againstSignal, DRIVER_PRESETS, rankByDrivers, verdictNarrative } from "./signals.js";
 import { N as nCDF, bs as bsPrice, smile as smileIV, payoff as payoffExp, SEASONAL, SIGMA } from "./engine.js";
@@ -375,7 +375,7 @@ async function loadState() {
 // and every screen downstream would print "$250 per trade" as his limit. Null
 // means unanswered, `sizing()` reports `answered: false`, and the screens say
 // "suggested" until he answers (PRD §3).
-const EMPTY = { saved: [], positions: [], settings: { webhook: "", reportFreq: "weekly", reportLast: 0, reportLastMd: "", capital: null, concurrentTarget: null, savings: null, sizeOverride: null, mode: "pro", onboarded: false, notifyWhenReady: false }, seasonal: {}, journal: [], ivHist: {} };
+const EMPTY = { saved: [], positions: [], settings: { webhook: "", reportFreq: "weekly", reportLast: 0, reportLastMd: "", capital: null, concurrentTarget: null, savings: null, sizeOverride: null, mode: "pro", onboarded: false, notifyWhenReady: false }, seasonal: {}, journal: [], ivHist: {}, copilotLog: [] };
 async function saveState(st) {
   try { localStorage.setItem(SKEY, JSON.stringify(st)); } catch (e) { console.error(e); }
   // The server blob is ONE shared document, so a demo visitor writing to it
@@ -881,6 +881,22 @@ export default function OptionsStrategyLab() {
     setAgainst({ reason: "" }); setPicked(null); setOpenResult(null);
     setMsg(`Position opened. ${exitPlanSentence()}`); setTab("positions");
   };
+  /* ---- an analysis run in the Copilot panel is filed in the Journal ----
+     The Journal's report already quoted "the copilot's read" while the runs
+     from the panel left no trace at all, so the two documents described the
+     same day differently. Kept LOCAL and capped: it is analysis text, it has no
+     business in the shared /api/state blob, and an uncapped log would fill
+     localStorage with essays. */
+  const COPILOT_LOG_MAX = 20;
+  const logAnalysis = useCallback(({ label, prompt, answer, ticker: tk }) => {
+    setStore((st) => {
+      const entry = { t: Date.now(), label, prompt, answer, ticker: tk || null };
+      const ns = { ...st, copilotLog: [entry, ...(st.copilotLog || [])].slice(0, COPILOT_LOG_MAX) };
+      saveState(ns);
+      return ns;
+    });
+  }, []);
+
   const delSaved = async (id) => { const st = { ...store, saved: store.saved.filter((s) => s.id !== id) }; setStore(st); await saveState(st); };
   // A day's event is logged ONCE. When it has already been logged, this has to
   // return the state it was given — the SAME object, not a copy of it.
@@ -2172,7 +2188,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
         {tab === "build" && !showSettings && ev === "copilot" && (
           <CopilotTab
             apiKey={"server"}
-            convo={copilot} setConvo={setCopilot}
+            convo={copilot} setConvo={setCopilot} onAnalysis={logAnalysis}
             ctx={{ store, scan, news: news[ticker]?.items || [], ticker, legs, expKey, A, spot, seasonalSrc: seas.src, setMsg }}
           />
         )}
@@ -2748,6 +2764,40 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                 ))}
               </div>
             </Panel>
+
+            {/* THE ANALYSES RUN IN THE COPILOT PANEL, HERE, IN THE JOURNAL.
+                The Journal is the record of what the app did; a pre-trade
+                analysis or an opportunity radar is part of that record, and
+                leaving it only in a panel that is one tap from being closed
+                made the Journal and the Copilot disagree about the same day. */}
+            {(store.copilotLog || []).length > 0 && (
+              <Panel style={{ marginTop: 12 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+                  <Lbl>COPILOT ANALYSES · {store.copilotLog.length} FILED</Lbl>
+                  <Btn small ghost onClick={() => { setEv("copilot"); setTab("build"); }}>Run another →</Btn>
+                </div>
+                <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6, lineHeight: 1.6 }}>
+                  Every analysis you run from the Copilot panel on Build is filed here with the question that produced
+                  it, newest first, and the last {store.copilotLog.length === 1 ? "one is" : `${store.copilotLog.length} are`} included in the report below.
+                </div>
+                <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
+                  {store.copilotLog.map((c, i) => (
+                    <details key={c.t + "-" + i} style={{ background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7, padding: "9px 11px" }}>
+                      <summary style={{ cursor: "pointer", listStyle: "none" }}>
+                        <span style={{ ...mono, fontSize: 10, color: T.amber, letterSpacing: "0.08em" }}>{(c.label || "QUESTION").toUpperCase()}</span>
+                        <span style={{ ...mono, fontSize: 10, color: T.dim, marginLeft: 8 }}>
+                          {c.ticker ? `${c.ticker} · ` : ""}{new Date(c.t).toLocaleString("en-GB")}
+                        </span>
+                      </summary>
+                      <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 7, lineHeight: 1.5 }}>{c.prompt}</div>
+                      <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${T.line}` }}>
+                        <Markdown text={c.answer} />
+                      </div>
+                    </details>
+                  ))}
+                </div>
+              </Panel>
+            )}
 
             <ReportTab
               apiKey={"server"}

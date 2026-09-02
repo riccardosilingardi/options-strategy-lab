@@ -335,6 +335,24 @@ The build order was a plan for a future builder. It is now a record.
 
 ---
 
+## 10b. The copilot, and what the Journal is a record of
+
+The copilot answers in **markdown**, and the panel renders it (`Markdown` in `pro.jsx`).
+Printing it raw put `## 1. STRUCTURE`, `**Ticker:**` and a wall of `|---|` pipes on screen —
+the content was fine, it was being shown as source. The system prompt now writes for someone
+learning rather than a professional: prose, at most four plain-English sections, terms defined
+on first use, and an explicit ban on restating the legs, the greeks and the max loss that the
+Build screen already shows a centimetre away. Tables coming back is a sign the prompt drifted.
+
+**The Journal is the record of what the app did, and the copilot is part of that.** An analysis
+run from the panel is filed in `store.copilotLog` — local only, capped, never in the shared
+`/api/state` blob — listed in the Journal under the question that produced it, and quoted in
+the report. Before, the report cited "the copilot's read" from its own separate model call
+while the panel's runs left no trace anywhere, so the two documents described the same day
+differently. The panel can also print what is on screen.
+
+---
+
 ## 11. Data sources — what each number on screen actually is
 
 | What | Where it comes from | What it is *not* |
@@ -404,7 +422,9 @@ After that:
   and no unreadable candles at 80px. **This is the next thing to build** — the candle line is
   the least readable thing on the roads screen at the size it is drawn.
 - Gauge plus thumbnail on Radar and Shortlist.
-- On Build, an option to place the payoff beside the rotated price chart on the shared price axis.
+- ~~On Build, place the payoff beside the price chart on the shared price axis.~~ **DONE** —
+  it is the right-hand strip of `UnifiedView`, cut from the same `curve` as the green bands,
+  shown above `PAY_MIN_W` and folded away on a phone.
 
 ### AFTER THE SUBMISSION
 

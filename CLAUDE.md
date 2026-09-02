@@ -325,9 +325,31 @@ went straight to a confirm page skipped the trade itself. Both are gone.
   a 560px floor below which the candles, the cone and the payoff are unreadable.
   On a 390px phone that floor made the whole page scroll sideways. The svg sits
   in an `overflowX: auto` wrapper; the page must never move.
+- **A ResizeObserver must observe a node that exists ON MOUNT.** `UnifiedView`
+  returned its loading and error states BEFORE the wrapper carrying the ref, so
+  the ref was null when the effect ran, nothing was ever observed, and the width
+  kept its initial value for the life of the component — invisible while that
+  value happened to suit a desktop, a chart frozen at 560px in a 1382px column
+  the moment it changed. Every state renders through the same wrapper now.
+- **The payoff sits BESIDE the price chart, on the shared price axis**, in the
+  right-hand strip of `UnifiedView`, cut from the same `curve` as the green
+  bands — so the strip and the bands are the same fact read two ways. It appears
+  above `PAY_MIN_W` and folds away below it, where the full-width payoff chart
+  underneath carries it instead.
+- **The copilot answers in MARKDOWN.** Render it with `Markdown` in `pro.jsx` —
+  never `white-space: pre-wrap`, which put `## 1. STRUCTURE`, `**Ticker:**` and
+  a wall of `|---|` pipes on screen. The prompt asks for prose for a non-expert
+  and forbids restating the legs, greeks and max loss the screen already shows;
+  if tables start coming back, the prompt drifted, not the renderer.
 - **Anything the app does by itself has to say that it did.** The Journal's
   report writes itself when one is due and the tab is opened. Finding a document
   where there was nothing, with no explanation, is indistinguishable from a bug.
+- **The Journal is the record of what the app did, and that includes the
+  copilot.** An analysis run from the Copilot panel is filed in `store.copilotLog`
+  (local only, capped, never in the `/api/state` blob), listed in the Journal
+  with the question that produced it, and quoted in the report. The report used
+  to cite "the copilot's read" from its own model call while the panel's runs
+  left no trace, so the two documents described the same day differently.
 
 The gate answers "may this order leave"; the quality floors answer "should this
 have been offered at all", and they live where candidates are generated, not in

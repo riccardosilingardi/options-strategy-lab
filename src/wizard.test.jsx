@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { CapitalOnboarding, WizardOpen, FindOpportunities, WizardCandidates, ConfirmSteps, NothingToday, statusLine, tradeOffSentence, roadHeadline, gateChecklist } from "./wizard.jsx";
 import { evaluateTrade } from "./riskGate.js";
 import { WhyThisTrade } from "./why.jsx";
+import { Markdown } from "./pro.jsx";
 import { sizing, NOTHING_TODAY, RULES } from "./rules.js";
 import { DRIVER_PRESETS, normaliseWeights, presetOf, rankByDrivers, verdictNarrative } from "./signals.js";
 
@@ -31,6 +32,35 @@ check("onboarding shows the 1-position pill before the choice", () => {
   has(h, "all your risk sits on one outcome");
   // the pill must appear BEFORE the Start button in the markup
   if (h.indexOf("all your risk sits on one outcome") > h.indexOf(">Start<")) throw new Error("pill rendered after the confirm button");
+});
+
+/* ---- THE COPILOT'S ANSWER IS RENDERED, NOT PRINTED ---- */
+
+check("the copilot's markdown is rendered, never shown as source", () => {
+  // This is the shape the model actually returns, taken from a live run that
+  // reached the screen as `## 1. STRUCTURE`, `**Ticker:**` and a wall of pipes.
+  const real = [
+    "---", "", "## 1. STRUCTURE", "",
+    "**Ticker:** UNG | Spot: **$10.58**", "",
+    "| Leg | Side | Strike |", "|-----|------|--------|", "| Long put | +1 | $10.00 |", "",
+    "- The $10.00/$10.50 put spread is a **short bull put spread**",
+    "- The $10.50/$11.50 call spread is a long call spread", "",
+    "```", "Max Profit: $58", "```", "",
+    "1. First step", "2. Second step",
+  ].join("\n");
+  const h = renderToStaticMarkup(<Markdown text={real} />);
+  for (const raw of ["##", "**", "|---", "```"]) {
+    if (h.includes(raw)) throw new Error(`markdown source ${JSON.stringify(raw)} reached the screen`);
+  }
+  for (const tag of ["<table", "<ul", "<ol", "<b ", "<hr"]) has(h, tag);
+  has(h, "STRUCTURE");
+  // the heading keeps its words and loses its numbering
+  if (h.includes(">1. STRUCTURE<")) throw new Error("the heading kept its numbering");
+});
+
+check("an empty or absent answer renders nothing rather than crashing", () => {
+  if (renderToStaticMarkup(<Markdown text="" />) !== "") throw new Error("empty text should render nothing");
+  if (renderToStaticMarkup(<Markdown text={null} />) !== "") throw new Error("null text should render nothing");
 });
 
 /* ---- THE EVIDENCE TOGGLE NAMES WHAT IT OPENS ---- */
