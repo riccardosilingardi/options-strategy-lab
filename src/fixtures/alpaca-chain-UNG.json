@@ -1,0 +1,1290 @@
+{
+ "_capture": {
+  "NOT_LIVE": true,
+  "why": "The sandbox that generated this branch has no outbound access to data.alpaca.markets and no ALPACA_KEY, so this payload was HAND-BUILT to the exact shape of Alpaca's own SDK models (alpaca-py 0.44.0: OptionsSnapshot / OptionsGreeks / Quote / Trade, SNAPSHOT_MAPPING) rather than captured from the live API.",
+  "replace_with_the_real_thing": "node scripts/capture-alpaca-chain.mjs UNG   (with ALPACA_KEY and ALPACA_SECRET in the environment). It overwrites this file with a real response and drops this block.",
+  "endpoint": "GET https://data.alpaca.markets/v1beta1/options/snapshots/UNG?feed=indicative",
+  "underlying_last_trade": 13.24
+ },
+ "snapshots": {
+  "UNG260918C00011000": {
+   "greeks": {
+    "delta": 0.9717,
+    "gamma": 0.0491,
+    "rho": 0.0048,
+    "theta": -0.00268,
+    "vega": 0.0018
+   },
+   "impliedVolatility": 0.4769,
+   "latestQuote": {
+    "ap": 2.28,
+    "as": 12,
+    "ax": "W",
+    "bp": 2.22,
+    "bs": 9,
+    "bx": "W",
+    "c": "A",
+    "t": "2026-09-01T19:59:58.12Z"
+   },
+   "latestTrade": {
+    "c": "I",
+    "p": 2.25,
+    "s": 1,
+    "t": "2026-09-01T18:41:03.55Z",
+    "x": "W"
+   }
+  },
+  "UNG260918P00011000": {
+   "latestQuote": {
+    "ap": 0.04,
+    "as": 12,
+    "ax": "W",
+    "bp": 0.0,
+    "bs": 9,
+    "bx": "W",
+    "c": "A",
+    "t": "2026-09-01T19:59:58.12Z"
+   },
+   "latestTrade": {
+    "c": "I",
+    "p": 0.01,
+    "s": 1,
+    "t": "2026-09-01T18:41:03.55Z",
+    "x": "W"
+   }
+  },
+  "UNG260918C00012000": {
+   "greeks": {
+    "delta": 0.8531,
+    "gamma": 0.1767,
+    "rho": 0.0053,
+    "theta": -0.00935,
+    "vega": 0.0064
+   },
+   "impliedVolatility": 0.4694,
+   "latestQuote": {
+    "ap": 1.37,
+    "as": 12,
+    "ax": "W",
+    "bp": 1.31,
+    "bs": 9,
+    "bx": "W",
+    "c": "A",
+    "t": "2026-09-01T19:59:58.12Z"
+   },
+   "latestTrade": {
+    "c": "I",
+    "p": 1.34,
+    "s": 1,
+    "t": "2026-09-01T18:41:03.55Z",
+    "x": "W"
+   }
+  },
+  "UNG260918P00012000": {
+   "greeks": {
+    "delta": -0.1469,
+    "gamma": 0.1767,
+    "rho": 0.0053,
+    "theta": -0.00935,
+    "vega": 0.0064
+   },
+   "impliedVolatility": 0.4694,
+   "latestQuote": {
+    "ap": 0.13,
+    "as": 12,
+    "ax": "W",
+    "bp": 0.07,
+    "bs": 9,
+    "bx": "W",
+    "c": "A",
+    "t": "2026-09-01T19:59:58.12Z"
+   },
+   "latestTrade": {
+    "c": "I",
+    "p": 0.1,
+    "s": 1,
+    "t": "2026-09-01T18:41:03.55Z",
+    "x": "W"
+   }
+  },
+  "UNG260918C00013000": {
+   "greeks": {
+    "delta": 0.5939,
+    "gamma": 0.303,
+    "rho": 0.0057,
+    "theta": -0.01552,
+    "vega": 0.0108
+   },
+   "impliedVolatility": 0.4618,
+   "latestQuote": {
+    "ap": 0.66,
+    "as": 12,
+    "ax": "W",
+    "bp": 0.6,
+    "bs": 9,
+    "bx": "W",
+    "c": "A",
+    "t": "2026-09-01T19:59:58.12Z"
+   },
+   "latestTrade": {
+    "c": "I",
+    "p": 0.63,
+    "s": 1,
+    "t": "2026-09-01T18:41:03.55Z",
+    "x": "W"
+   }
+  },
+  "UNG260918P00013000": {
+   "greeks": {
+    "delta": -0.4061,
+    "gamma": 0.303,
+    "rho": 0.0057,
+    "theta": -0.01552,
+    "vega": 0.0108
+   },
+   "impliedVolatility": 0.4618,
+   "latestQuote": {
+    "ap": 0.42,
+    "as": 12,
+    "ax": "W",
+    "bp": 0.36,
+    "bs": 9,
+    "bx": "W",
+    "c": "A",
+    "t": "2026-09-01T19:59:58.12Z"
+   },
+   "latestTrade": {
+    "c": "I",
+    "p": 0.39,
+    "s": 1,
+    "t": "2026-09-01T18:41:03.55Z",
+    "x": "W"
+   }
+  },
+  "UNG260918C00014000": {
+   "greeks": {
+    "delta": 0.3003,
+    "gamma": 0.2694,
+    "rho": 0.0061,
+    "theta": -0.01403,
+    "vega": 0.0096
+   },
+   "impliedVolatility": 0.4657,
+   "latestQuote": {
+    "ap": 0.26,
+    "as": 12,
+    "ax": "W",
+    "bp": 0.2,
+    "bs": 9,
+    "bx": "W",
+    "c": "A",
+    "t": "2026-09-01T19:59:58.12Z"
+   },
+   "latestTrade": {
+    "c": "I",
+    "p": 0.23,
+    "s": 1,
+    "t": "2026-09-01T18:41:03.55Z",
+    "x": "W"
+   }
+  },
+  "UNG260918P00014000": {
+   "greeks": {
+    "delta": -0.6997,
+    "gamma": 0.2694,
+    "rho": 0.0061,
+    "theta": -0.01403,
+    "vega": 0.0096
+   },
+   "impliedVolatility": 0.4657,
+   "latestQuote": {
+    "ap": 1.02,
+    "as": 12,
+    "ax": "W",
+    "bp": 0.96,
+    "bs": 9,
+    "bx": "W",
+    "c": "A",
+    "t": "2026-09-01T19:59:58.12Z"
+   },
+   "latestTrade": {
+    "c": "I",
+    "p": 0.99,
+    "s": 1,
+    "t": "2026-09-01T18:41:03.55Z",
+    "x": "W"
+   }
+  },
+  "UNG260918C00015000": {
+   "greeks": {
+    "delta": 0.1131,
+    "gamma": 0.1462,
+    "rho": 0.0066,
+    "theta": -0.00787,
+    "vega": 0.0053
+   },
+   "impliedVolatility": 0.4733,
+   "latestQuote": {
+    "ap": 0.1,
+    "as": 12,
+    "ax": "W",
+    "bp": 0.04,
+    "bs": 9,
+    "bx": "W",
+    "c": "A",
+    "t": "2026-09-01T19:59:58.12Z"
+   },
+   "latestTrade": {
+    "c": "I",
+    "p": 0.07,
+    "s": 1,
+    "t": "2026-09-01T18:41:03.55Z",
+    "x": "W"
+   }
+  },
+  "UNG260918P00015000": {
+   "greeks": {
+    "delta": -0.8869,
+    "gamma": 0.1462,
+    "rho": 0.0066,
+    "theta": -0.00787,
+    "vega": 0.0053
+   },
+   "impliedVolatility": 0.4733,
+   "latestQuote": {
+    "ap": 1.86,
+    "as": 12,
+    "ax": "W",
+    "bp": 1.8,
+    "bs": 9,
+    "bx": "W",
+    "c": "A",
+    "t": "2026-09-01T19:59:58.12Z"
+   },
+   "latestTrade": {
+    "c": "I",
+    "p": 1.83,
+    "s": 1,
+    "t": "2026-09-01T18:41:03.55Z",
+    "x": "W"
+   }
+  },
+  "UNG260918C00016000": {
+   "greeks": {
+    "delta": 0.0336,
+    "gamma": 0.056,
+    "rho": 0.007,
+    "theta": -0.00311,
+    "vega": 0.0021
+   },
+   "impliedVolatility": 0.4808,
+   "latestQuote": {
+    "ap": 0.05,
+    "as": 12,
+    "ax": "W",
+    "bp": 0.0,
+    "bs": 9,
+    "bx": "W",
+    "c": "A",
+    "t": "2026-09-01T19:59:58.12Z"
+   },
+   "latestTrade": {
+    "c": "I",
+    "p": 0.02,
+    "s": 1,
+    "t": "2026-09-01T18:41:03.55Z",
+    "x": "W"
+   }
+  },
+  "UNG260918P00016000": {
+   "greeks": {
+    "delta": -0.9664,
+    "gamma": 0.056,
+    "rho": 0.007,
+    "theta": -0.00311,
+    "vega": 0.0021
+   },
+   "impliedVolatility": 0.4808,
+   "latestQuote": {
+    "ap": 2.81,
+    "as": 12,
+    "ax": "W",
+    "bp": 2.75,
+    "bs": 9,
+    "bx": "W",
+    "c": "A",
+    "t": "2026-09-01T19:59:58.12Z"
+   },
+   "latestTrade": {
+    "c": "I",
+    "p": 2.78,
+    "s": 1,
+    "t": "2026-09-01T18:41:03.55Z",
+    "x": "W"
+   }
+  },
+  "UNG261016C00011000": {
+   "greeks": {
+    "delta": 0.8853,
+    "gamma": 0.0883,
+    "rho": 0.0133,
+    "theta": -0.00483,
+    "vega": 0.0089
+   },
+   "impliedVolatility": 0.4769,
+   "latestQuote": {
+    "ap": 2.4,
+    "as": 12,
+    "ax": "W",
+    "bp": 2.34,
+    "bs": 9,
+    "bx": "W",
+    "c": "A",
+    "t": "2026-09-01T19:59:58.12Z"
+   },
+   "latestTrade": {
+    "c": "I",
+    "p": 2.37,
+    "s": 1,
+    "t": "2026-09-01T18:41:03.55Z",
+    "x": "W"
+   }
+  },
+  "UNG261016P00011000": {
+   "greeks": {
+    "delta": -0.1147,
+    "gamma": 0.0883,
+    "rho": 0.0133,
+    "theta": -0.00483,
+    "vega": 0.0089
+   },
+   "impliedVolatility": 0.4769,
+   "latestQuote": {
+    "ap": 0.16,
+    "as": 12,
+    "ax": "W",
+    "bp": 0.1,
+    "bs": 9,
+    "bx": "W",
+    "c": "A",
+    "t": "2026-09-01T19:59:58.12Z"
+   },
+   "latestTrade": {
+    "c": "I",
+    "p": 0.13,
+    "s": 1,
+    "t": "2026-09-01T18:41:03.55Z",
+    "x": "W"
+   }
+  },
+  "UNG261016C00012000": {
+   "greeks": {
+    "delta": 0.7533,
+    "gamma": 0.1462,
+    "rho": 0.0145,
+    "theta": -0.00774,
+    "vega": 0.0145
+   },
+   "impliedVolatility": 0.4694,
+   "latestQuote": {
+    "ap": 1.61,
+    "as": 12,
+    "ax": "W",
+    "bp": 1.55,
+    "bs": 9,
+    "bx": "W",
+    "c": "A",
+    "t": "2026-09-01T19:59:58.12Z"
+   },
+   "latestTrade": {
+    "c": "I",
+    "p": 1.58,
+    "s": 1,
+    "t": "2026-09-01T18:41:03.55Z",
+    "x": "W"
+   }
+  },
+  "UNG261016P00012000": {
+   "greeks": {
+    "delta": -0.2467,
+    "gamma": 0.1462,
+    "rho": 0.0145,
+    "theta": -0.00774,
+    "vega": 0.0145
+   },
+   "impliedVolatility": 0.4694,
+   "latestQuote": {
+    "ap": 0.37,
+    "as": 12,
+    "ax": "W",
+    "bp": 0.31,
+    "bs": 9,
+    "bx": "W",
+    "c": "A",
+    "t": "2026-09-01T19:59:58.12Z"
+   },
+   "latestTrade": {
+    "c": "I",
+    "p": 0.34,
+    "s": 1,
+    "t": "2026-09-01T18:41:03.55Z",
+    "x": "W"
+   }
+  },
+  "UNG261016C00013000": {
+   "greeks": {
+    "delta": 0.577,
+    "gamma": 0.1844,
+    "rho": 0.0157,
+    "theta": -0.00944,
+    "vega": 0.018
+   },
+   "impliedVolatility": 0.4618,
+   "latestQuote": {
+    "ap": 0.99,
+    "as": 12,
+    "ax": "W",
+    "bp": 0.93,
+    "bs": 9,
+    "bx": "W",
+    "c": "A",
+    "t": "2026-09-01T19:59:58.12Z"
+   },
+   "latestTrade": {
+    "c": "I",
+    "p": 0.96,
+    "s": 1,
+    "t": "2026-09-01T18:41:03.55Z",
+    "x": "W"
+   }
+  },
+  "UNG261016P00013000": {
+   "greeks": {
+    "delta": -0.423,
+    "gamma": 0.1844,
+    "rho": 0.0157,
+    "theta": -0.00944,
+    "vega": 0.018
+   },
+   "impliedVolatility": 0.4618,
+   "latestQuote": {
+    "ap": 0.75,
+    "as": 12,
+    "ax": "W",
+    "bp": 0.69,
+    "bs": 9,
+    "bx": "W",
+    "c": "A",
+    "t": "2026-09-01T19:59:58.12Z"
+   },
+   "latestTrade": {
+    "c": "I",
+    "p": 0.72,
+    "s": 1,
+    "t": "2026-09-01T18:41:03.55Z",
+    "x": "W"
+   }
+  },
+  "UNG261016C00014000": {
+   "greeks": {
+    "delta": 0.3958,
+    "gamma": 0.1799,
+    "rho": 0.0169,
+    "theta": -0.00937,
+    "vega": 0.0177
+   },
+   "impliedVolatility": 0.4657,
+   "latestQuote": {
+    "ap": 0.58,
+    "as": 12,
+    "ax": "W",
+    "bp": 0.52,
+    "bs": 9,
+    "bx": "W",
+    "c": "A",
+    "t": "2026-09-01T19:59:58.12Z"
+   },
+   "latestTrade": {
+    "c": "I",
+    "p": 0.55,
+    "s": 1,
+    "t": "2026-09-01T18:41:03.55Z",
+    "x": "W"
+   }
+  },
+  "UNG261016P00014000": {
+   "greeks": {
+    "delta": -0.6042,
+    "gamma": 0.1799,
+    "rho": 0.0169,
+    "theta": -0.00937,
+    "vega": 0.0177
+   },
+   "impliedVolatility": 0.4657,
+   "latestQuote": {
+    "ap": 1.34,
+    "as": 12,
+    "ax": "W",
+    "bp": 1.28,
+    "bs": 9,
+    "bx": "W",
+    "c": "A",
+    "t": "2026-09-01T19:59:58.12Z"
+   },
+   "latestTrade": {
+    "c": "I",
+    "p": 1.31,
+    "s": 1,
+    "t": "2026-09-01T18:41:03.55Z",
+    "x": "W"
+   }
+  },
+  "UNG261016C00015000": {
+   "greeks": {
+    "delta": 0.2491,
+    "gamma": 0.1458,
+    "rho": 0.0181,
+    "theta": -0.00784,
+    "vega": 0.0146
+   },
+   "impliedVolatility": 0.4733,
+   "latestQuote": {
+    "ap": 0.33,
+    "as": 12,
+    "ax": "W",
+    "bp": 0.27,
+    "bs": 9,
+    "bx": "W",
+    "c": "A",
+    "t": "2026-09-01T19:59:58.12Z"
+   },
+   "latestTrade": {
+    "c": "I",
+    "p": 0.3,
+    "s": 1,
+    "t": "2026-09-01T18:41:03.55Z",
+    "x": "W"
+   }
+  },
+  "UNG261016P00015000": {
+   "greeks": {
+    "delta": -0.7509,
+    "gamma": 0.1458,
+    "rho": 0.0181,
+    "theta": -0.00784,
+    "vega": 0.0146
+   },
+   "impliedVolatility": 0.4733,
+   "latestQuote": {
+    "ap": 2.09,
+    "as": 12,
+    "ax": "W",
+    "bp": 2.03,
+    "bs": 9,
+    "bx": "W",
+    "c": "A",
+    "t": "2026-09-01T19:59:58.12Z"
+   },
+   "latestTrade": {
+    "c": "I",
+    "p": 2.06,
+    "s": 1,
+    "t": "2026-09-01T18:41:03.55Z",
+    "x": "W"
+   }
+  },
+  "UNG261016C00016000": {
+   "greeks": {
+    "delta": 0.1467,
+    "gamma": 0.1039,
+    "rho": 0.0193,
+    "theta": -0.00577,
+    "vega": 0.0106
+   },
+   "impliedVolatility": 0.4808,
+   "latestQuote": {
+    "ap": 0.19,
+    "as": 12,
+    "ax": "W",
+    "bp": 0.13,
+    "bs": 9,
+    "bx": "W",
+    "c": "A",
+    "t": "2026-09-01T19:59:58.12Z"
+   },
+   "latestTrade": {
+    "c": "I",
+    "p": 0.16,
+    "s": 1,
+    "t": "2026-09-01T18:41:03.55Z",
+    "x": "W"
+   }
+  },
+  "UNG261016P00016000": {
+   "greeks": {
+    "delta": -0.8533,
+    "gamma": 0.1039,
+    "rho": 0.0193,
+    "theta": -0.00577,
+    "vega": 0.0106
+   },
+   "impliedVolatility": 0.4808,
+   "latestQuote": {
+    "ap": 2.95,
+    "as": 12,
+    "ax": "W",
+    "bp": 2.89,
+    "bs": 9,
+    "bx": "W",
+    "c": "A",
+    "t": "2026-09-01T19:59:58.12Z"
+   },
+   "latestTrade": {
+    "c": "I",
+    "p": 2.92,
+    "s": 1,
+    "t": "2026-09-01T18:41:03.55Z",
+    "x": "W"
+   }
+  },
+  "UNG261218C00011000": {
+   "greeks": {
+    "delta": 0.8015,
+    "gamma": 0.0815,
+    "rho": 0.0322,
+    "theta": -0.00445,
+    "vega": 0.02
+   },
+   "impliedVolatility": 0.4769,
+   "latestQuote": {
+    "ap": 2.7,
+    "as": 12,
+    "ax": "W",
+    "bp": 2.64,
+    "bs": 9,
+    "bx": "W",
+    "c": "A",
+    "t": "2026-09-01T19:59:58.12Z"
+   },
+   "latestTrade": {
+    "c": "I",
+    "p": 2.67,
+    "s": 1,
+    "t": "2026-09-01T18:41:03.55Z",
+    "x": "W"
+   }
+  },
+  "UNG261218P00011000": {
+   "greeks": {
+    "delta": -0.1985,
+    "gamma": 0.0815,
+    "rho": 0.0322,
+    "theta": -0.00445,
+    "vega": 0.02
+   },
+   "impliedVolatility": 0.4769,
+   "latestQuote": {
+    "ap": 0.46,
+    "as": 12,
+    "ax": "W",
+    "bp": 0.4,
+    "bs": 9,
+    "bx": "W",
+    "c": "A",
+    "t": "2026-09-01T19:59:58.12Z"
+   },
+   "latestTrade": {
+    "c": "I",
+    "p": 0.43,
+    "s": 1,
+    "t": "2026-09-01T18:41:03.55Z",
+    "x": "W"
+   }
+  },
+  "UNG261218C00012000": {
+   "greeks": {
+    "delta": 0.6964,
+    "gamma": 0.1039,
+    "rho": 0.0352,
+    "theta": -0.0055,
+    "vega": 0.0251
+   },
+   "impliedVolatility": 0.4694,
+   "latestQuote": {
+    "ap": 2.02,
+    "as": 12,
+    "ax": "W",
+    "bp": 1.96,
+    "bs": 9,
+    "bx": "W",
+    "c": "A",
+    "t": "2026-09-01T19:59:58.12Z"
+   },
+   "latestTrade": {
+    "c": "I",
+    "p": 1.99,
+    "s": 1,
+    "t": "2026-09-01T18:41:03.55Z",
+    "x": "W"
+   }
+  },
+  "UNG261218P00012000": {
+   "greeks": {
+    "delta": -0.3036,
+    "gamma": 0.1039,
+    "rho": 0.0352,
+    "theta": -0.0055,
+    "vega": 0.0251
+   },
+   "impliedVolatility": 0.4694,
+   "latestQuote": {
+    "ap": 0.78,
+    "as": 12,
+    "ax": "W",
+    "bp": 0.72,
+    "bs": 9,
+    "bx": "W",
+    "c": "A",
+    "t": "2026-09-01T19:59:58.12Z"
+   },
+   "latestTrade": {
+    "c": "I",
+    "p": 0.75,
+    "s": 1,
+    "t": "2026-09-01T18:41:03.55Z",
+    "x": "W"
+   }
+  },
+  "UNG261218C00013000": {
+   "greeks": {
+    "delta": 0.5785,
+    "gamma": 0.1182,
+    "rho": 0.0381,
+    "theta": -0.00605,
+    "vega": 0.028
+   },
+   "impliedVolatility": 0.4618,
+   "latestQuote": {
+    "ap": 1.46,
+    "as": 12,
+    "ax": "W",
+    "bp": 1.4,
+    "bs": 9,
+    "bx": "W",
+    "c": "A",
+    "t": "2026-09-01T19:59:58.12Z"
+   },
+   "latestTrade": {
+    "c": "I",
+    "p": 1.43,
+    "s": 1,
+    "t": "2026-09-01T18:41:03.55Z",
+    "x": "W"
+   }
+  },
+  "UNG261218P00013000": {
+   "greeks": {
+    "delta": -0.4215,
+    "gamma": 0.1182,
+    "rho": 0.0381,
+    "theta": -0.00605,
+    "vega": 0.028
+   },
+   "impliedVolatility": 0.4618,
+   "latestQuote": {
+    "ap": 1.22,
+    "as": 12,
+    "ax": "W",
+    "bp": 1.16,
+    "bs": 9,
+    "bx": "W",
+    "c": "A",
+    "t": "2026-09-01T19:59:58.12Z"
+   },
+   "latestTrade": {
+    "c": "I",
+    "p": 1.19,
+    "s": 1,
+    "t": "2026-09-01T18:41:03.55Z",
+    "x": "W"
+   }
+  },
+  "UNG261218C00014000": {
+   "greeks": {
+    "delta": 0.4621,
+    "gamma": 0.1189,
+    "rho": 0.041,
+    "theta": -0.0062,
+    "vega": 0.0285
+   },
+   "impliedVolatility": 0.4657,
+   "latestQuote": {
+    "ap": 1.05,
+    "as": 12,
+    "ax": "W",
+    "bp": 0.99,
+    "bs": 9,
+    "bx": "W",
+    "c": "A",
+    "t": "2026-09-01T19:59:58.12Z"
+   },
+   "latestTrade": {
+    "c": "I",
+    "p": 1.02,
+    "s": 1,
+    "t": "2026-09-01T18:41:03.55Z",
+    "x": "W"
+   }
+  },
+  "UNG261218P00014000": {
+   "greeks": {
+    "delta": -0.5379,
+    "gamma": 0.1189,
+    "rho": 0.041,
+    "theta": -0.0062,
+    "vega": 0.0285
+   },
+   "impliedVolatility": 0.4657,
+   "latestQuote": {
+    "ap": 1.81,
+    "as": 12,
+    "ax": "W",
+    "bp": 1.75,
+    "bs": 9,
+    "bx": "W",
+    "c": "A",
+    "t": "2026-09-01T19:59:58.12Z"
+   },
+   "latestTrade": {
+    "c": "I",
+    "p": 1.78,
+    "s": 1,
+    "t": "2026-09-01T18:41:03.55Z",
+    "x": "W"
+   }
+  },
+  "UNG261218C00015000": {
+   "greeks": {
+    "delta": 0.3598,
+    "gamma": 0.1102,
+    "rho": 0.044,
+    "theta": -0.00593,
+    "vega": 0.0268
+   },
+   "impliedVolatility": 0.4733,
+   "latestQuote": {
+    "ap": 0.76,
+    "as": 12,
+    "ax": "W",
+    "bp": 0.7,
+    "bs": 9,
+    "bx": "W",
+    "c": "A",
+    "t": "2026-09-01T19:59:58.12Z"
+   },
+   "latestTrade": {
+    "c": "I",
+    "p": 0.73,
+    "s": 1,
+    "t": "2026-09-01T18:41:03.55Z",
+    "x": "W"
+   }
+  },
+  "UNG261218P00015000": {
+   "greeks": {
+    "delta": -0.6402,
+    "gamma": 0.1102,
+    "rho": 0.044,
+    "theta": -0.00593,
+    "vega": 0.0268
+   },
+   "impliedVolatility": 0.4733,
+   "latestQuote": {
+    "ap": 2.52,
+    "as": 12,
+    "ax": "W",
+    "bp": 2.46,
+    "bs": 9,
+    "bx": "W",
+    "c": "A",
+    "t": "2026-09-01T19:59:58.12Z"
+   },
+   "latestTrade": {
+    "c": "I",
+    "p": 2.49,
+    "s": 1,
+    "t": "2026-09-01T18:41:03.55Z",
+    "x": "W"
+   }
+  },
+  "UNG261218C00016000": {
+   "greeks": {
+    "delta": 0.2752,
+    "gamma": 0.0968,
+    "rho": 0.0469,
+    "theta": -0.00538,
+    "vega": 0.0239
+   },
+   "impliedVolatility": 0.4808,
+   "latestTrade": {
+    "c": "I",
+    "p": 0.51,
+    "s": 1,
+    "t": "2026-09-01T18:41:03.55Z",
+    "x": "W"
+   }
+  },
+  "UNG261218P00016000": {
+   "greeks": {
+    "delta": -0.7248,
+    "gamma": 0.0968,
+    "rho": 0.0469,
+    "theta": -0.00538,
+    "vega": 0.0239
+   },
+   "impliedVolatility": 0.4808,
+   "latestQuote": {
+    "ap": 3.3,
+    "as": 12,
+    "ax": "W",
+    "bp": 3.24,
+    "bs": 9,
+    "bx": "W",
+    "c": "A",
+    "t": "2026-09-01T19:59:58.12Z"
+   },
+   "latestTrade": {
+    "c": "I",
+    "p": 3.27,
+    "s": 1,
+    "t": "2026-09-01T18:41:03.55Z",
+    "x": "W"
+   }
+  },
+  "UNG271217C00011000": {
+   "greeks": {
+    "delta": 0.7301,
+    "gamma": 0.0461,
+    "rho": 0.1419,
+    "theta": -0.00252,
+    "vega": 0.0497
+   },
+   "impliedVolatility": 0.4769,
+   "latestQuote": {
+    "ap": 3.88,
+    "as": 12,
+    "ax": "W",
+    "bp": 3.82,
+    "bs": 9,
+    "bx": "W",
+    "c": "A",
+    "t": "2026-09-01T19:59:58.12Z"
+   },
+   "latestTrade": {
+    "c": "I",
+    "p": 3.85,
+    "s": 1,
+    "t": "2026-09-01T18:41:03.55Z",
+    "x": "W"
+   }
+  },
+  "UNG271217P00011000": {
+   "greeks": {
+    "delta": -0.2699,
+    "gamma": 0.0461,
+    "rho": 0.1419,
+    "theta": -0.00252,
+    "vega": 0.0497
+   },
+   "impliedVolatility": 0.4769,
+   "latestQuote": {
+    "ap": 1.64,
+    "as": 12,
+    "ax": "W",
+    "bp": 1.58,
+    "bs": 9,
+    "bx": "W",
+    "c": "A",
+    "t": "2026-09-01T19:59:58.12Z"
+   },
+   "latestTrade": {
+    "c": "I",
+    "p": 1.61,
+    "s": 1,
+    "t": "2026-09-01T18:41:03.55Z",
+    "x": "W"
+   }
+  },
+  "UNG271217C00012000": {
+   "greeks": {
+    "delta": 0.674,
+    "gamma": 0.051,
+    "rho": 0.1548,
+    "theta": -0.0027,
+    "vega": 0.0542
+   },
+   "impliedVolatility": 0.4694,
+   "latestQuote": {
+    "ap": 3.35,
+    "as": 12,
+    "ax": "W",
+    "bp": 3.29,
+    "bs": 9,
+    "bx": "W",
+    "c": "A",
+    "t": "2026-09-01T19:59:58.12Z"
+   },
+   "latestTrade": {
+    "c": "I",
+    "p": 3.32,
+    "s": 1,
+    "t": "2026-09-01T18:41:03.55Z",
+    "x": "W"
+   }
+  },
+  "UNG271217P00012000": {
+   "greeks": {
+    "delta": -0.326,
+    "gamma": 0.051,
+    "rho": 0.1548,
+    "theta": -0.0027,
+    "vega": 0.0542
+   },
+   "impliedVolatility": 0.4694,
+   "latestQuote": {
+    "ap": 2.11,
+    "as": 12,
+    "ax": "W",
+    "bp": 2.05,
+    "bs": 9,
+    "bx": "W",
+    "c": "A",
+    "t": "2026-09-01T19:59:58.12Z"
+   },
+   "latestTrade": {
+    "c": "I",
+    "p": 2.08,
+    "s": 1,
+    "t": "2026-09-01T18:41:03.55Z",
+    "x": "W"
+   }
+  },
+  "UNG271217C00013000": {
+   "greeks": {
+    "delta": 0.6168,
+    "gamma": 0.055,
+    "rho": 0.1678,
+    "theta": -0.00281,
+    "vega": 0.0574
+   },
+   "impliedVolatility": 0.4618,
+   "latestQuote": {
+    "ap": 2.87,
+    "as": 12,
+    "ax": "W",
+    "bp": 2.81,
+    "bs": 9,
+    "bx": "W",
+    "c": "A",
+    "t": "2026-09-01T19:59:58.12Z"
+   },
+   "latestTrade": {
+    "c": "I",
+    "p": 2.84,
+    "s": 1,
+    "t": "2026-09-01T18:41:03.55Z",
+    "x": "W"
+   }
+  },
+  "UNG271217P00013000": {
+   "greeks": {
+    "delta": -0.3832,
+    "gamma": 0.055,
+    "rho": 0.1678,
+    "theta": -0.00281,
+    "vega": 0.0574
+   },
+   "impliedVolatility": 0.4618,
+   "latestQuote": {
+    "ap": 2.63,
+    "as": 12,
+    "ax": "W",
+    "bp": 2.57,
+    "bs": 9,
+    "bx": "W",
+    "c": "A",
+    "t": "2026-09-01T19:59:58.12Z"
+   },
+   "latestTrade": {
+    "c": "I",
+    "p": 2.6,
+    "s": 1,
+    "t": "2026-09-01T18:41:03.55Z",
+    "x": "W"
+   }
+  },
+  "UNG271217C00014000": {
+   "greeks": {
+    "delta": 0.5632,
+    "gamma": 0.0562,
+    "rho": 0.1807,
+    "theta": -0.00293,
+    "vega": 0.0592
+   },
+   "impliedVolatility": 0.4657,
+   "latestQuote": {
+    "ap": 2.51,
+    "as": 12,
+    "ax": "W",
+    "bp": 2.45,
+    "bs": 9,
+    "bx": "W",
+    "c": "A",
+    "t": "2026-09-01T19:59:58.12Z"
+   },
+   "latestTrade": {
+    "c": "I",
+    "p": 2.48,
+    "s": 1,
+    "t": "2026-09-01T18:41:03.55Z",
+    "x": "W"
+   }
+  },
+  "UNG271217P00014000": {
+   "greeks": {
+    "delta": -0.4368,
+    "gamma": 0.0562,
+    "rho": 0.1807,
+    "theta": -0.00293,
+    "vega": 0.0592
+   },
+   "impliedVolatility": 0.4657,
+   "latestQuote": {
+    "ap": 3.27,
+    "as": 12,
+    "ax": "W",
+    "bp": 3.21,
+    "bs": 9,
+    "bx": "W",
+    "c": "A",
+    "t": "2026-09-01T19:59:58.12Z"
+   },
+   "latestTrade": {
+    "c": "I",
+    "p": 3.24,
+    "s": 1,
+    "t": "2026-09-01T18:41:03.55Z",
+    "x": "W"
+   }
+  },
+  "UNG271217C00015000": {
+   "greeks": {
+    "delta": 0.5146,
+    "gamma": 0.056,
+    "rho": 0.1936,
+    "theta": -0.00301,
+    "vega": 0.06
+   },
+   "impliedVolatility": 0.4733,
+   "latestQuote": {
+    "ap": 2.22,
+    "as": 12,
+    "ax": "W",
+    "bp": 2.16,
+    "bs": 9,
+    "bx": "W",
+    "c": "A",
+    "t": "2026-09-01T19:59:58.12Z"
+   },
+   "latestTrade": {
+    "c": "I",
+    "p": 2.19,
+    "s": 1,
+    "t": "2026-09-01T18:41:03.55Z",
+    "x": "W"
+   }
+  },
+  "UNG271217P00015000": {
+   "greeks": {
+    "delta": -0.4854,
+    "gamma": 0.056,
+    "rho": 0.1936,
+    "theta": -0.00301,
+    "vega": 0.06
+   },
+   "impliedVolatility": 0.4733,
+   "latestQuote": {
+    "ap": 3.98,
+    "as": 12,
+    "ax": "W",
+    "bp": 3.92,
+    "bs": 9,
+    "bx": "W",
+    "c": "A",
+    "t": "2026-09-01T19:59:58.12Z"
+   },
+   "latestTrade": {
+    "c": "I",
+    "p": 3.95,
+    "s": 1,
+    "t": "2026-09-01T18:41:03.55Z",
+    "x": "W"
+   }
+  },
+  "UNG271217C00016000": {
+   "greeks": {
+    "delta": 0.4707,
+    "gamma": 0.055,
+    "rho": 0.2065,
+    "theta": -0.00305,
+    "vega": 0.0598
+   },
+   "impliedVolatility": 0.4808,
+   "latestQuote": {
+    "ap": 1.98,
+    "as": 12,
+    "ax": "W",
+    "bp": 1.92,
+    "bs": 9,
+    "bx": "W",
+    "c": "A",
+    "t": "2026-09-01T19:59:58.12Z"
+   },
+   "latestTrade": {
+    "c": "I",
+    "p": 1.95,
+    "s": 1,
+    "t": "2026-09-01T18:41:03.55Z",
+    "x": "W"
+   }
+  },
+  "UNG271217P00016000": {
+   "greeks": {
+    "delta": -0.5293,
+    "gamma": 0.055,
+    "rho": 0.2065,
+    "theta": -0.00305,
+    "vega": 0.0598
+   },
+   "impliedVolatility": 0.4808,
+   "latestQuote": {
+    "ap": 4.74,
+    "as": 12,
+    "ax": "W",
+    "bp": 4.68,
+    "bs": 9,
+    "bx": "W",
+    "c": "A",
+    "t": "2026-09-01T19:59:58.12Z"
+   },
+   "latestTrade": {
+    "c": "I",
+    "p": 4.71,
+    "s": 1,
+    "t": "2026-09-01T18:41:03.55Z",
+    "x": "W"
+   }
+  }
+ },
+ "next_page_token": null
+}

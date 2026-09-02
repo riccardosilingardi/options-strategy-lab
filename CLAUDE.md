@@ -118,6 +118,17 @@ while the position is open.
 - `src/engine.js` — shared math (Black-Scholes, payoff, probabilities,
   seasonal tables). Plain JS, no React imports. **Both the client and the
   Netlify functions import from here.** Never duplicate this math.
+- `src/chain.js` — **where the option chain comes from**. One internal shape
+  (`{ spot, byExp, expirations, updated, source }`, each contract
+  `{ bid, ask, mid, iv, oi, vol, delta, theta, occ }`) and two sources:
+  **Alpaca first, CBOE as the net**. `fetchChain()` gives the broker a 4-second
+  timeout and falls back — a slow broker costs seconds, never a blank screen —
+  and after two failures in a row it stops asking for the rest of the session.
+  `midOf()` is the only place a mid price is computed, so the two sources cannot
+  disagree about the price of the same contract for a reason that is only a
+  formula. Alpaca snapshots carry no open interest and no volume, so those come
+  back `null` (never `0`, which on screen reads as "nobody trades this") and the
+  open-interest panel says which feed cannot fill it.
 - `src/signals.js` — the 4-factor confluence engine (`fuseSignals`) and the
   single source of the region table, the climate norms, the news cause→effect
   rules, the SMA/RSI read and the candidate ranking. Plain JS, no React imports.
@@ -131,7 +142,13 @@ while the position is open.
   Mixing an absolute measure with relative ones makes the numbers on screen
   decoration. `verdictNarrative()` is here as well: what the app actually looked
   at, in English, with the real counts.
-- `netlify/functions/*.mjs` — serverless endpoints, routed in `netlify.toml`
+- `netlify/functions/*.mjs` — serverless endpoints, routed in `netlify.toml`.
+  `chainAlpaca.mjs` reads option snapshots from **data.alpaca.markets** and is a
+  SEPARATE function from `alpaca.mjs` on purpose: `alpaca.mjs` talks to exactly
+  one host, paper-api.alpaca.markets, and that is what makes its
+  `X-OSL-Paper-Endpoint` header a verification rather than a claim. Market data
+  never goes through it. The feed is indicative, not OPRA, and the source string
+  says so on screen
 - `netlify/edge-functions/gate.js` — password gate, with demo-token bypass
 
 ## Navigation — tabs are not destinations, they are evidence
