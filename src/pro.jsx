@@ -386,22 +386,43 @@ export function buildContext(ctx) {
     seasonalitySource: seasonalSrc,
   });
 }
-export function CopilotTab({ ctx, apiKey }) {
-  const [msgs, setMsgs] = useState([]);
+/**
+ * THE CONVERSATION DOES NOT LIVE HERE.
+ *
+ * This panel is one of the five evidence panels on the Build screen, and it is
+ * rendered only while it is the open one. Every other chip in that strip
+ * UNMOUNTS it — so when `msgs`, `busy` and `err` were local state, tapping
+ * another chip destroyed the answer, and an answer that arrived while the panel
+ * was closed was thrown away by React before it could be shown. The reported
+ * symptom was exactly that: "the analysis starts, nothing appears in the
+ * Copilot tab, and if I change tab the run seems already finished or gone."
+ *
+ * So the conversation is owned by App.jsx and passed in. The panel is a view of
+ * it, nothing more: a request that finishes while the panel is shut lands in the
+ * app's state and is waiting when it is opened again, and the chip that opens it
+ * can say so.
+ *
+ * @param convo    { msgs, busy, err } — owned by the caller
+ * @param setConvo the caller's setter
+ */
+export function CopilotTab({ ctx, apiKey, convo, setConvo }) {
+  const { msgs = [], busy = false, err = null } = convo || {};
   const [input, setInput] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState(null);
   const send = async (text) => {
     if (!text.trim() || busy) return;
-    if (!apiKey) { setErr("Add your Anthropic API key in Positions → Integrations."); return; }
-    setErr(null);
+    if (!apiKey) { setConvo((c) => ({ ...c, err: "The copilot is not configured on the server." })); return; }
     const next = [...msgs, { role: "user", content: text }];
-    setMsgs(next); setInput(""); setBusy(true);
+    setConvo({ msgs: next, busy: true, err: null });
+    setInput("");
     try {
       const reply = await askAI(apiKey, next.map((m) => ({ role: m.role, content: m.content })), buildContext(ctx));
-      setMsgs([...next, { role: "assistant", content: reply }]);
-    } catch (e) { setErr(String(e.message || e)); setMsgs(msgs); }
-    setBusy(false);
+      setConvo({ msgs: [...next, { role: "assistant", content: reply }], busy: false, err: null });
+    } catch (e) {
+      // KEEP the question. Rolling `msgs` back to what it was before also
+      // deleted what the user had just asked, so a failure looked like the tap
+      // had never happened.
+      setConvo({ msgs: next, busy: false, err: String(e.message || e) });
+    }
   };
   return (
     <div style={{ marginTop: 12 }}>
@@ -411,21 +432,28 @@ export function CopilotTab({ ctx, apiKey }) {
           {SKILLS.map((s) => <Btn key={s.id} small ghost color={T.blue} onClick={() => send(s.prompt)} disabled={busy}>{s.label}</Btn>)}
         </div>
         <div style={{ marginTop: 12, display: "grid", gap: 8, maxHeight: 420, overflowY: "auto" }}>
-          {msgs.length === 0 && <div style={{ ...mono, fontSize: 11.5, color: T.mut }}>Pick one above or just ask. The copilot already knows your open positions, the trade on the Build screen, the Radar, the tagged news and your own risk rules.</div>}
+          {msgs.length === 0 && !busy && <div style={{ ...mono, fontSize: 11.5, color: T.mut }}>Pick one above or just ask. The copilot already knows your open positions, the trade on the Build screen, the Radar, the tagged news and your own risk rules.</div>}
           {msgs.map((m, i) => (
             <div key={i} style={{ padding: "9px 11px", borderRadius: 7, background: m.role === "user" ? `${T.blue}14` : T.bg, border: `1px solid ${m.role === "user" ? T.blue + "44" : T.line}` }}>
               <div style={{ ...mono, fontSize: 9, color: m.role === "user" ? T.blue : T.amber, marginBottom: 3 }}>{m.role === "user" ? "YOU" : "COPILOT"}</div>
               <div style={{ fontSize: 13, color: T.body, whiteSpace: "pre-wrap" }}>{m.content}</div>
             </div>
           ))}
-          {busy && <div style={{ ...mono, fontSize: 11, color: T.amber }}>Thinking…</div>}
+          {busy && (
+            <div style={{ ...mono, fontSize: 11, color: T.amber }}>
+              Thinking… you can close this panel: the answer waits here, it is not lost.
+            </div>
+          )}
         </div>
         {err && <div style={{ ...mono, fontSize: 11, color: T.red, marginTop: 8 }}>{err}</div>}
         <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
           <Inp value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send(input)} placeholder="Ask a question… (Enter to send)" style={{ flex: 1 }} />
           <Btn onClick={() => send(input)} disabled={busy}><Send size={13} /></Btn>
         </div>
-        <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6 }}>Educational analysis on a paper account, not financial advice.</div>
+        <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6, lineHeight: 1.6 }}>
+          This conversation stays here and is not written to the Journal — the report in the Journal is a separate
+          document with its own button. Educational analysis on a paper account, not financial advice.
+        </div>
       </Panel>
     </div>
   );
@@ -505,6 +533,11 @@ export function ReportTab({ ctx, apiKey, setSetting }) {
   const [md, setMd] = useState(store.settings.reportLastMd || "");
   const [busy, setBusy] = useState(false);
   const [useAI, setUseAI] = useState(!!apiKey);
+  // A report that writes ITSELF has to say that it did. This one runs on the
+  // effect below whenever one is due, so a user who opened the Journal and
+  // found a document where there had been nothing had no way to know whether he
+  // had caused it, whether the copilot had put it there, or what it was.
+  const [autoRan, setAutoRan] = useState(false);
   const dueMs = cfg.freq === "daily" ? 864e5 : 6048e5;
   const isDue = Date.now() - cfg.last > dueMs;
   const gen = async () => {
@@ -522,7 +555,7 @@ export function ReportTab({ ctx, apiKey, setSetting }) {
     setSetting("reportLastMd", out);
     setBusy(false);
   };
-  useEffect(() => { if (isDue && (ctx.scan || []).length) gen(); }, []); // eslint-disable-line — auto all'apertura se scaduto
+  useEffect(() => { if (isDue && (ctx.scan || []).length) { setAutoRan(true); gen(); } }, []); // eslint-disable-line — auto all'apertura se scaduto
   const download = () => {
     const blob = new Blob([md], { type: "text/markdown" });
     const a = document.createElement("a");
@@ -554,6 +587,12 @@ export function ReportTab({ ctx, apiKey, setSetting }) {
           </label>
           <span style={{ ...mono, fontSize: 10, color: T.dim }}>last one: {cfg.last ? new Date(cfg.last).toLocaleString("en-GB") : "never"}</span>
         </div>
+        {autoRan && (
+          <div style={{ ...mono, fontSize: 10.5, color: T.blue, marginTop: 8, padding: "7px 9px", background: `${T.blue}0f`, border: `1px solid ${T.blue}44`, borderRadius: 6, lineHeight: 1.6 }}>
+            This report wrote ITSELF just now, because the {cfg.freq === "daily" ? "daily" : "weekly"} one was due and
+            you opened the Journal. Nothing was sent anywhere{useAI ? ", and section 5 is the copilot's read — the same model as the Copilot panel, asked a different question" : ""}. Press "Write it now" to redo it.
+          </div>
+        )}
         <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6 }}>
           Each report covers: scanner opportunities, your positions against the rules, tagged headlines, weather effects, and optionally the copilot's read. It rewrites itself when you reopen the app and one is due.
         </div>
@@ -1005,9 +1044,16 @@ export function UnifiedView({ ticker, dte, sigma, driftM, curve, legs, breakeven
   const [range, setRange] = useState(180);
   const [err, setErr] = useState(null);
   const wrapRef = React.useRef(null);
-  const [W, setW] = useState(1100);
+  // This chart has a floor of 560px: below it the candles, the cone and the
+  // rotated payoff stop being readable at all. On a 390px phone that floor used
+  // to make the WHOLE PAGE scroll sideways — every other screen shifted with it
+  // and nothing lined up. The width stays; what changes is that the overflow is
+  // the CHART's, inside its own scroller, so the page never moves (CLAUDE.md:
+  // this app is demoed on a phone).
+  const MIN_W = 560;
+  const [W, setW] = useState(MIN_W);
   useEffect(() => {
-    const ro = new ResizeObserver(() => setW(Math.max(560, wrapRef.current?.clientWidth || 900)));
+    const ro = new ResizeObserver(() => setW(Math.max(MIN_W, wrapRef.current?.clientWidth || MIN_W)));
     if (wrapRef.current) ro.observe(wrapRef.current);
     return () => ro.disconnect();
   }, []);
@@ -1076,13 +1122,16 @@ export function UnifiedView({ ticker, dte, sigma, driftM, curve, legs, breakeven
   const poly = (ks) => cone.map((c) => `${c.x.toFixed(1)},${Y(c[ks[0]]).toFixed(1)}`).join(" ") + " " + [...cone].reverse().map((c) => `${c.x.toFixed(1)},${Y(c[ks[1]]).toFixed(1)}`).join(" ");
   const gTicks = 5;
 
+  // The observer measures the OUTER box; the scroller is the inner one, so the
+  // measured width is the space actually available rather than the chart's own.
   return (
-    <div ref={wrapRef}>
+    <div ref={wrapRef} style={{ maxWidth: "100%" }}>
       <div style={{ display: "flex", gap: 4, marginBottom: 6, justifyContent: "flex-end" }}>
         {[[180, "6M"], [365, "1Y"], [1825, "5Y"]].map(([v, l]) => (
           <Btn key={l} small ghost={range !== v} onClick={() => setRange(v)}>{l}</Btn>
         ))}
       </div>
+      <div style={{ overflowX: "auto", overflowY: "hidden", maxWidth: "100%", WebkitOverflowScrolling: "touch" }}>
       <svg width={W} height={H} style={{ display: "block", background: T.bg, borderRadius: 8, border: `1px solid ${T.line}` }}>
         {/* griglia + asse prezzi */}
         {Array.from({ length: gTicks + 1 }, (_, i) => {
@@ -1126,6 +1175,7 @@ export function UnifiedView({ ticker, dte, sigma, driftM, curve, legs, breakeven
         <text x={x0} y={H - 8} fill={T.dim} fontSize={9} fontFamily="monospace">{bars[0]?.time}</text>
         <text x={xToday} y={H - 8} fill={T.dim} fontSize={9} fontFamily="monospace" textAnchor="middle">{bars[bars.length - 1]?.time}</text>
       </svg>
+      </div>
       <div style={{ display: "flex", gap: 14, marginTop: 6, flexWrap: "wrap", alignItems: "center" }}>
         {[["■", T.green + "44", "where you make money at expiry"], ["■", T.violet + "55", "where the price could go (pale 5–95%, solid 25–75%)"], ["┅", T.violet, "the middle path"], ["—", T.blue, "break even"], ["—", T.green, "option you bought"], ["—", T.red, "option you sold"]].map(([g, c, l]) => (
           <span key={l} style={{ ...mono, fontSize: 9.5, color: T.mut }}><span style={{ color: c, fontWeight: 800 }}>{g}</span> {l}</span>

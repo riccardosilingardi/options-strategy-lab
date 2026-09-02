@@ -848,9 +848,29 @@ const CheckRow = ({ ok, text }) => (
   </div>
 );
 
-export function WizardConfirm({
+/**
+ * THE CONFIRM STEP — the checks in plain English, the exit plan stated as
+ * already decided, and the one button that opens the position.
+ *
+ * It is a BLOCK, not a screen, because it now lives at the bottom of the Build
+ * screen. "Take this road" used to jump from the two roads straight to a
+ * confirm page with a send button on it, which meant the guided flow could
+ * reach an order without ever passing the desk where the trade can actually be
+ * looked at — the chain, the legs, the greeks. The road now hands off to Build
+ * and this block is the end of that screen, so there is ONE route to an order
+ * and it runs through the place where the trade is visible.
+ *
+ * Nothing here decides anything: `gateChecklist()` puts English around what
+ * `evaluateTrade()` already returned.
+ *
+ * @param candidate  { ticker, name, legs, expKey, dte, risk, maxProfit, entryNet, spot }
+ * @param preview    the gate's reading BEFORE the tap
+ * @param result     the gate's answer AFTER the tap, when there is one
+ * @param heading    false on Build, where the trade's name is already above
+ */
+export function ConfirmSteps({
   candidate, preview, result, bars = [], sigma = 0.3, driftAnnual = 0,
-  busy, onConfirm, onBack, onDesk,
+  busy, onConfirm, onDesk, heading = true, showFigure = true,
 }) {
   if (!candidate) return null;
   const c = candidate;
@@ -859,24 +879,27 @@ export function WizardConfirm({
   const refused = !!(result && !result.pass);
 
   return (
-    <div style={{ ...sans, maxWidth: 720, margin: "0 auto", padding: `16px 16px ${BADGE_SAFE}px` }}>
-      <BackLink onClick={onBack} label="Back to the two roads" />
-      <Eyebrow>Confirm</Eyebrow>
-      <h1 style={{ ...sans, fontSize: 25, fontWeight: 800, color: T.ink, margin: "6px 0 4px", lineHeight: 1.25 }}>
-        {c.ticker} · {c.name}
-      </h1>
-      <p style={{ ...sans, fontSize: 15, color: T.mut, lineHeight: 1.55, margin: 0 }}>
-        {c.legs.length} legs, expiring {c.expKey || `in ${Math.round(c.dte)} days`}. Risking {money(c.risk)} to make
-        up to {money(c.maxProfit)}.
-      </p>
+    <div>
+      {heading && (
+        <>
+          <Eyebrow>Confirm</Eyebrow>
+          <h1 style={{ ...sans, fontSize: 25, fontWeight: 800, color: T.ink, margin: "6px 0 4px", lineHeight: 1.25 }}>
+            {c.ticker} · {c.name}
+          </h1>
+          <p style={{ ...sans, fontSize: 15, color: T.mut, lineHeight: 1.55, margin: 0 }}>
+            {c.legs.length} legs, expiring {c.expKey || `in ${Math.round(c.dte)} days`}. Risking {money(c.risk)} to make
+            up to {money(c.maxProfit)}.
+          </p>
+        </>
+      )}
 
-      <Card style={{ marginTop: 14 }}>
+      {showFigure && <Card style={{ marginTop: 14 }}>
         <Eyebrow>What this looks like</Eyebrow>
         <div style={{ marginTop: 10 }}>
           <UnifiedFigure legs={c.legs} entryNet={c.entryNet} spot={c.spot} bars={bars}
             dte={c.dte} sigma={sigma} driftAnnual={driftAnnual} ticker={c.ticker} height={340} />
         </div>
-      </Card>
+      </Card>}
 
       <Card style={{ marginTop: 12 }}>
         <Eyebrow>What is being sent</Eyebrow>
@@ -930,7 +953,7 @@ export function WizardConfirm({
       {refused && onDesk && (
         <button onClick={onDesk}
           style={{ ...sans, fontSize: 14, minHeight: TAP, marginTop: 8, padding: "8px 4px", background: "transparent", border: "none", color: T.blue, cursor: "pointer", textAlign: "left", width: "100%" }}>
-          Open it on the Build screen and change it →
+          Change the trade above and try again →
         </button>
       )}
 

@@ -1,6 +1,6 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { CapitalOnboarding, WizardOpen, FindOpportunities, WizardCandidates, WizardConfirm, NothingToday, statusLine, tradeOffSentence, roadHeadline, gateChecklist } from "./wizard.jsx";
+import { CapitalOnboarding, WizardOpen, FindOpportunities, WizardCandidates, ConfirmSteps, NothingToday, statusLine, tradeOffSentence, roadHeadline, gateChecklist } from "./wizard.jsx";
 import { evaluateTrade } from "./riskGate.js";
 import { WhyThisTrade } from "./why.jsx";
 import { sizing, NOTHING_TODAY, RULES } from "./rules.js";
@@ -419,9 +419,9 @@ const blockedResult = evaluateTrade({
   portfolio: { positions: [], account: PAPER }, capital: CAPITAL,
 });
 
-check("screen 4 states the checks in plain English with real numbers", () => {
+check("the confirm step states the checks in plain English with real numbers", () => {
   const h = renderToStaticMarkup(
-    <WizardConfirm candidate={ROADS[1]} preview={passResult} result={null} onConfirm={() => {}} onBack={() => {}} />);
+    <ConfirmSteps candidate={ROADS[1]} preview={passResult} result={null} onConfirm={() => {}} onBack={() => {}} />);
   has(h, "The checks that run when you tap");
   has(h, "$200");                       // the real max loss
   has(h, "$250 per-trade limit");       // the real derived limit
@@ -431,30 +431,30 @@ check("screen 4 states the checks in plain English with real numbers", () => {
   has(h, "Every option sold is covered by one bought");
 });
 
-check("screen 4 states the exit plan as already decided", () => {
+check("the confirm step states the exit plan as already decided", () => {
   const h = renderToStaticMarkup(
-    <WizardConfirm candidate={ROADS[1]} preview={passResult} onConfirm={() => {}} onBack={() => {}} />);
+    <ConfirmSteps candidate={ROADS[1]} preview={passResult} onConfirm={() => {}} onBack={() => {}} />);
   has(h, "Close at 50% of max gain, or at 21 days to expiration.");
   has(h, "decided now, not later");
   has(h, "not renegotiated while the position is open");
   for (const offered of ["Choose your exit", "Set a target", "Pick a stop"]) {
-    if (h.includes(offered)) throw new Error(`screen 4 is offering the exit rather than stating it: ${offered}`);
+    if (h.includes(offered)) throw new Error(`the confirm step is offering the exit rather than stating it: ${offered}`);
   }
 });
 
-check("screen 4 offers the order until the gate has spoken, then reports the refusal", () => {
+check("the confirm step offers the order until the gate has spoken, then reports the refusal", () => {
   const before = renderToStaticMarkup(
-    <WizardConfirm candidate={ROADS[1]} preview={passResult} result={null} onConfirm={() => {}} onBack={() => {}} />);
+    <ConfirmSteps candidate={ROADS[1]} preview={passResult} result={null} onConfirm={() => {}} onBack={() => {}} />);
   has(before, "Open this on paper");
   if (before.includes("Blocked by the risk gate")) throw new Error("refusing before the tap");
 
   const after = renderToStaticMarkup(
-    <WizardConfirm candidate={{ ...ROADS[1], maxLoss: -900, risk: 900 }} preview={passResult}
+    <ConfirmSteps candidate={{ ...ROADS[1], maxLoss: -900, risk: 900 }} preview={passResult}
       result={blockedResult} onConfirm={() => {}} onBack={() => {}} onDesk={() => {}} />);
   has(after, "The gate refused this");
   has(after, "Blocked by the risk gate");
   has(after, "your limit: 5%");   // the gate's own sentence, with its numbers
-  has(after, "Open it on the Build screen and change it");
+  has(after, "Change the trade above and try again");
 });
 
 check("the checklist is read off the gate, never recomputed", () => {
@@ -468,13 +468,26 @@ check("the checklist is read off the gate, never recomputed", () => {
   has(perTrade.text, "$250");
 });
 
-check("the unified component is the visual on screen 4", () => {
+check("the confirm step can carry the unified component as its visual", () => {
   const h = renderToStaticMarkup(
-    <WizardConfirm candidate={ROADS[1]} preview={passResult} onConfirm={() => {}} onBack={() => {}}
+    <ConfirmSteps candidate={ROADS[1]} preview={passResult} onConfirm={() => {}} onBack={() => {}}
       bars={[{ open: 98, high: 101, low: 97, close: 100 }]} sigma={0.25} />);
   has(h, "What this looks like");
   has(h, "<svg");
   has(h, "CORN is at $100.00");   // the generated takeaway under the chart
+});
+
+check("on Build the confirm step drops the chart and the heading it would duplicate", () => {
+  // The Build screen already shows the trade's name and its charts above. The
+  // block there is the CHECKS, the exit plan and the button — nothing repeated.
+  const h = renderToStaticMarkup(
+    <ConfirmSteps candidate={ROADS[1]} preview={passResult} heading={false} showFigure={false}
+      onConfirm={() => {}} />);
+  if (h.includes("What this looks like")) throw new Error("the chart is drawn twice on Build");
+  if (h.includes(">Confirm<")) throw new Error("the heading is drawn twice on Build");
+  has(h, "The checks that run when you tap");
+  has(h, "decided now, not later");
+  has(h, "Open this on paper");
 });
 
 check("screen 5 is a designed screen that states why and offers to notify", () => {

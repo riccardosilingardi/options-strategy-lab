@@ -123,10 +123,16 @@ while the position is open.
   sliders, then **"Decide for me"** as the last button), screen 3 (the verdict:
   the copilot narrative, the answers read back with a *change* link, then **two
   roads, never one** — each with a band thumbnail, a gauge, the "Why this trade"
-  evidence panel and one generated sentence naming what it gives up), screen 4
-  (confirm: the unified component, the gate's checks in plain English, the exit
-  plan stated as already decided) and screen 5 ("nothing today"). On screen 4 the
-  gate runs **after** the tap. `App.jsx` owns the `view` (`wizard` | `desk`).
+  evidence panel and one generated sentence naming what it gives up) and
+  screen 5 ("nothing today").
+  **There is no confirm SCREEN.** "Take this road" lands on Build with the trade
+  loaded, and the confirm step — what is being sent, the gate's checks in plain
+  English, the exit plan stated as already decided — is `ConfirmSteps` at the
+  BOTTOM of the Build screen, reading the live Build state, so a strike changed
+  above changes the checks below. The gate runs **after** the tap and a refusal
+  stays there with its reasons. A road must not be able to reach an order
+  without passing the screen that shows the trade.
+  `App.jsx` owns the `view` (`wizard` | `desk`).
 
   **Never pre-answer a question.** `wiz.risk` and `wiz.horizon` start `null` and
   stay null until the user answers; the button is disabled and names what is
@@ -303,10 +309,25 @@ send as well as on the button, so a path called some other way still cannot reac
 Alpaca. `saveState()` also stops writing to `/api/state`: that blob is a single
 shared document and a visitor must not overwrite the owner's book.
 
-Positions are opened through one function, `commitPosition()` in `App.jsx`:
-both Build's "open on paper" and the wizard's screen 4 land there, so a
-position carries the same gate record, thesis and timeline whichever way it was
-opened.
+Positions are opened through one function, `commitPosition()` in `App.jsx`, and
+there is now ONE control that calls it: the confirm step at the bottom of Build.
+The small "Open on paper" button that used to sit in the builder's header opened
+a position without the checks or the exit plan ever being read, and a road that
+went straight to a confirm page skipped the trade itself. Both are gone.
+
+- **An evidence panel owns no state.** All five are mounted only while open, so
+  every other chip unmounts them. The Copilot's conversation lived inside its
+  panel and was destroyed on the next tap — an answer that landed while it was
+  shut never reached the screen. It belongs to `App.jsx` now and is passed in;
+  the chip shows when the copilot is thinking or holding an answer. Anything
+  long-running inside a panel has to live above it.
+- **A wide chart scrolls inside ITS OWN box, never the page.** `UnifiedView` has
+  a 560px floor below which the candles, the cone and the payoff are unreadable.
+  On a 390px phone that floor made the whole page scroll sideways. The svg sits
+  in an `overflowX: auto` wrapper; the page must never move.
+- **Anything the app does by itself has to say that it did.** The Journal's
+  report writes itself when one is due and the tab is opened. Finding a document
+  where there was nothing, with no explanation, is indistinguishable from a bug.
 
 The gate answers "may this order leave"; the quality floors answer "should this
 have been offered at all", and they live where candidates are generated, not in

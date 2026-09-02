@@ -171,8 +171,16 @@ Always at least two candidates with an explicit trade-off. One answer is advice;
 
 **Copy rule for a road:** lead with what it gives and what it costs, and put the frequency alongside the payout so the trade-off is one sentence. Opening with "3 times in 10" is a verdict before the reader knows what is being judged, and every beginner reads it as "this is a bad trade".
 
-**Screen 4 — Confirm**
-What is being sent, the risk checks in plain language, and the exit plan already decided. The risk gate runs **after** the tap, before the order leaves.
+**Screen 4 is gone as a screen — taking a road LANDS ON BUILD.**
+"Take this road" used to jump straight to a confirm page carrying a send button, so the
+guided flow could reach an order without ever passing the screen where the trade can
+actually be looked at. It now loads the road onto Build, names it there ("the road you
+took"), and the confirm step — what is being sent, the risk checks in plain language, and
+the exit plan already decided — is the **bottom of the Build screen** (`ConfirmSteps` in
+`wizard.jsx`). It reads the LIVE Build state, so a strike changed above changes the checks
+below: what is confirmed is what is on screen. The risk gate still runs **after** the tap,
+and a refusal stays on that screen with its reasons. There is one route to an order from
+Build, not two.
 
 **Screen 5 — Nothing today**
 A real screen, not an error state. `runWizard` decides in order: data missing → signals not
@@ -364,6 +372,15 @@ underneath the strip that reveals it: **Radar** (was Scan), **Shortlist** (was O
   down a page that does not scroll: on a phone the tap looked like it did nothing, and both were
   reported as broken features. A panel that needs prices and has none must **say so**; rendering
   nothing is the same failure with a different cause.
+- **An evidence panel owns no state.** It is mounted only while it is the open one, so every
+  other chip in the strip unmounts it. The Copilot's conversation lived inside it and was
+  destroyed on the next tap — an answer that arrived while the panel was shut never reached the
+  screen at all. The conversation belongs to `App.jsx`; the panel is a view of it, and the chip
+  says when it is thinking or holding an answer.
+- **Anything the app does by itself has to say that it did.** The Journal's report writes itself
+  when one is due and you open the tab, copilot section included. Silently finding a document
+  where there was nothing is indistinguishable from a bug, so the report says it wrote itself
+  and why.
 - A trade reaches Build through **one function**, `openOnBuild()` in `App.jsx`, built on
   `buildHandOff()` in `src/handoff.js`.
 
@@ -384,7 +401,8 @@ two roads. Evidence — weather, news, seasonal, technical — stays as sub-pane
 After that:
 
 - One simplified multi-leg thumbnail used everywhere: shape, bands, meaningful vertical bars,
-  and no unreadable candles at 80px.
+  and no unreadable candles at 80px. **This is the next thing to build** — the candle line is
+  the least readable thing on the roads screen at the size it is drawn.
 - Gauge plus thumbnail on Radar and Shortlist.
 - On Build, an option to place the payoff beside the rotated price chart on the shared price axis.
 

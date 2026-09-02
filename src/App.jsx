@@ -17,7 +17,7 @@ import { T, themeName, setTheme, BADGE_SAFE } from "./theme.js";
 import { RULES, sizing, ruleBadge, takeProfitLabel, stopLossLabel, perTradeCapLabel, RULE_PILLS, NOTHING_TODAY, money, pctText, capitalSourceNote, perTradeLimitPhrase, qualityFloor, qualityFloorSentence, liquiditySkippedNote } from "./rules.js";
 import { evaluateTrade, gateSummary } from "./riskGate.js";
 import { DEMO, DEMO_BANNER, DEMO_TOOLTIP, DEMO_SEED_TICKERS, demoPositions } from "./demo.js";
-import { CapitalOnboarding, WizardOpen, FindOpportunities, WizardCandidates, WizardConfirm, NothingToday, Card, Pill } from "./wizard.jsx";
+import { CapitalOnboarding, WizardOpen, FindOpportunities, WizardCandidates, ConfirmSteps, NothingToday, Card, Pill } from "./wizard.jsx";
 import { buildHandOff, buildScreenState, BUILD_TAB } from "./handoff.js";
 
 /* ============================== THEME ============================== */
@@ -443,12 +443,15 @@ export default function OptionsStrategyLab() {
   // The desk is three places, not eleven: the Build screen where a trade is put
   // together, the positions you hold and the journal of what happened. Everything
   // that used to be a tab of its own is evidence for one of those three (see `ev`).
-  const [wizStep, setWizStep] = useState("open"); // open | questions | candidates | confirm | nothing
+  const [wizStep, setWizStep] = useState("open"); // open | questions | candidates | nothing
   const [nothing, setNothing] = useState(null);   // [{ id, text }] — why not today
   const [candidates, setCandidates] = useState([]); // screen 3: always two roads
   const [verdict, setVerdict] = useState([]);       // screen 3: what was examined, in English
   const [picked, setPicked] = useState(null);       // screen 4: the road taken
-  const [confirmResult, setConfirmResult] = useState(null); // the gate's answer AFTER the tap
+  // The gate's answer AFTER the tap on the Build screen's confirm step. A
+  // refusal has to stay ON that screen with its reasons — a toast that scrolls
+  // away is not an explanation.
+  const [openResult, setOpenResult] = useState(null);
   const [hydrated, setHydrated] = useState(false);
   const [tab, setTab] = useState("build");       // "build" | "positions" | "journal"
   const [ev, setEv] = useState(null);           // which evidence section is open on the Build screen
@@ -482,6 +485,11 @@ export default function OptionsStrategyLab() {
   const [bt, setBt] = useState(null);
   const [alpaca, setAlpaca] = useState(null);    // account info
   const [confirmSend, setConfirmSend] = useState(false);
+  // THE COPILOT'S CONVERSATION LIVES HERE, not inside the panel. The panel is
+  // an evidence panel: every other chip in the strip unmounts it, so state kept
+  // inside it was destroyed on the next tap and an answer that landed while it
+  // was shut never reached the screen at all.
+  const [copilot, setCopilot] = useState({ msgs: [], busy: false, err: null });
   const [optMode, setOptMode] = useState("budget");
   // NOT a hardcoded 500. The field starts at the per-trade limit the capital
   // model derives and only holds a number of its own once the user types one,
@@ -868,8 +876,10 @@ export default function OptionsStrategyLab() {
     }
     const r = await commitPosition({ ticker, expKey, legs, dte, analysis: A, spot, name: stratName,
       alpacaOrder, clashInfo: clash, reason: against.reason });
+    setOpenResult(r.gate);
     if (!r.ok) { setMsg(`Risk gate: position not opened. ${r.gate.violations.map((v) => v.message).join(" ")}`); return; }
-    setAgainst({ reason: "" }); setMsg("Position opened."); setTab("positions");
+    setAgainst({ reason: "" }); setPicked(null); setOpenResult(null);
+    setMsg(`Position opened. ${exitPlanSentence()}`); setTab("positions");
   };
   const delSaved = async (id) => { const st = { ...store, saved: store.saved.filter((s) => s.id !== id) }; setStore(st); await saveState(st); };
   // A day's event is logged ONCE. When it has already been logged, this has to
@@ -1281,44 +1291,26 @@ export default function OptionsStrategyLab() {
       setTicker(first.tk); setExpKey(first.ek);
       setWiz((w) => ({ ...w, busy: false }));
       setCandidates(roads);
-      setPicked(null); setConfirmResult(null);
+      setPicked(null); setOpenResult(null);
       setWizStep("candidates");
     } catch (e) { setWiz((w) => ({ ...w, busy: false, err: String(e.message || e) })); }
   };
 
   /* ---- screen 3 → screen 4. Taking a road loads it on Build too, so
      "open it on the Build screen and change it" is one tap away from the refusal. */
+  /* ---- taking a road LANDS ON BUILD (PRD §5).
+     It used to jump straight to a confirm page carrying a send button, so the
+     guided flow could reach an order without ever passing the screen where the
+     trade can be looked at. The road now loads onto Build and the confirm step
+     is the bottom of that screen: one route to an order, and it runs through
+     the place that shows the chain, the legs and the greeks. */
   const pickRoad = (c) => {
-    setPicked(c); setConfirmResult(null);
+    setPicked(c); setOpenResult(null);
     openOnBuild({ ticker: c.ticker, expKey: c.expKey, legs: c.legs, name: c.name });
-    setWizStep("confirm");
+    setStratName(c.name);
+    goDesk();
   };
 
-  /* ---- screen 4. The gate runs AFTER the tap (PRD §5): the screen shows what
-     it measures, the tap makes it decide, and a refusal stays on this screen
-     with its reasons rather than becoming a toast somewhere else. */
-  const confirmRoad = async () => {
-    if (!picked) return;
-    setWiz((w) => ({ ...w, busy: true }));
-    try {
-      const r = await commitPosition({
-        ticker: picked.ticker, expKey: picked.expKey, legs: picked.legs, dte: picked.dte,
-        analysis: picked.a, spot: picked.spot, name: picked.name,
-        clashInfo: againstSignal(fused[picked.ticker], Math.abs(picked.a.greeks.delta) < 0.05 ? 0 : Math.sign(picked.a.greeks.delta)),
-        reason: "",
-      });
-      setConfirmResult(r.gate);
-      if (r.ok) {
-        setMsg(`${picked.ticker} · ${picked.name} is open on paper. ${exitPlanSentence()}`);
-        setView("desk"); setTab("positions");
-        setWizStep("open"); setPicked(null); setCandidates([]); setVerdict([]);
-      }
-    } catch (e) {
-      setWiz((w) => ({ ...w, err: String(e.message || e) }));
-    } finally {
-      setWiz((w) => ({ ...w, busy: false }));
-    }
-  };
 
 
   const setNotify = async (on) => {
@@ -1437,13 +1429,6 @@ export default function OptionsStrategyLab() {
     return gate({ ticker, intent: "open", legs, dte, contracts: 1, maxLoss: A.maxLoss, maxProfit: A.maxProfit }, LOCAL_BOOK);
   }, [A, gate, legs, dte, ticker]); // eslint-disable-line
 
-  /** Wizard screen 4: the gate's reading BEFORE the tap — the same numbers, no
-      decision yet. Declared here, below `gate`: a useMemo runs during render,
-      so reading `gate` from above its own declaration is a crash, not a hoist. */
-  const confirmPreview = useMemo(() => (picked
-    ? gate({ ticker: picked.ticker, intent: "open", legs: picked.legs, dte: picked.dte, contracts: 1,
-      maxLoss: picked.maxLoss, maxProfit: picked.maxProfit }, LOCAL_BOOK)
-    : null), [picked, gate]); // eslint-disable-line
 
   /* ---- direzione del trade e scontro col segnale (PRD §7) ----
      La direzione la dà il delta netto della struttura: positivo = il trade
@@ -1576,18 +1561,6 @@ export default function OptionsStrategyLab() {
             onBack={() => setWizStep("questions")}
           />
         )}
-        {wizStep === "confirm" && (
-          <WizardConfirm
-            candidate={picked} preview={confirmPreview} result={confirmResult}
-            bars={barsCache[picked?.ticker] || []}
-            sigma={(seasonal[picked?.ticker]?.sigma) || getU(picked?.ticker).sigma}
-            driftAnnual={Math.log(1 + (((seasonal[picked?.ticker]?.monthlyMean) || getU(picked?.ticker).monthlyMean)[NOW_MONTH] || 0) / 100) * 12}
-            busy={wiz.busy}
-            onConfirm={confirmRoad}
-            onBack={() => { setConfirmResult(null); setWizStep("candidates"); }}
-            onDesk={() => goDesk()}
-          />
-        )}
         {wizStep === "nothing" && (
           <NothingToday
             reasons={nothing || []} notified={!!store.settings.notifyWhenReady}
@@ -1713,16 +1686,29 @@ export default function OptionsStrategyLab() {
           <div style={{ marginTop: 10 }}>
             <div style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center" }}>
               <span style={{ ...mono, fontSize: 10, letterSpacing: "0.15em", color: T.dim, marginRight: 4 }}>EVIDENCE</span>
-              {EVIDENCE.map(({ id, label, I, sub }) => (
-                <button key={id} onClick={() => setEv(ev === id ? null : id)} title={sub}
-                  style={{
-                    ...mono, fontSize: 11, padding: "7px 10px", borderRadius: 6, whiteSpace: "nowrap", cursor: "pointer",
-                    background: ev === id ? `${T.blue}18` : "transparent", color: ev === id ? T.blue : T.mut,
-                    border: `1px solid ${ev === id ? T.blue : T.line}`, display: "inline-flex", gap: 5, alignItems: "center",
-                  }}>
-                  <I size={12} /> {label} {ev === id ? "▲" : "▼"}
-                </button>
-              ))}
+              {EVIDENCE.map(({ id, label, I, sub }) => {
+                // A panel that is doing something, or holding something you have
+                // not read, has to say so ON THE CHIP. The copilot answering into
+                // a closed panel was indistinguishable from the copilot doing
+                // nothing at all.
+                const working = id === "copilot" && copilot.busy;
+                const waiting = id === "copilot" && ev !== "copilot" && !copilot.busy
+                  && copilot.msgs.length > 0 && copilot.msgs[copilot.msgs.length - 1].role === "assistant";
+                const marked = working || waiting;
+                const col = marked ? T.amber : ev === id ? T.blue : T.mut;
+                return (
+                  <button key={id} onClick={() => setEv(ev === id ? null : id)}
+                    title={working ? "The copilot is answering" : waiting ? "An answer is waiting here" : sub}
+                    style={{
+                      ...mono, fontSize: 11, padding: "7px 10px", borderRadius: 6, whiteSpace: "nowrap", cursor: "pointer",
+                      background: marked ? `${T.amber}18` : ev === id ? `${T.blue}18` : "transparent", color: col,
+                      border: `1px solid ${marked ? T.amber : ev === id ? T.blue : T.line}`, display: "inline-flex", gap: 5, alignItems: "center",
+                    }}>
+                    <I size={12} /> {label}
+                    {working ? " · thinking" : waiting ? " · answer ready" : ""} {ev === id ? "▲" : "▼"}
+                  </button>
+                );
+              })}
             </div>
             {ev && (
               <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 6 }}>
@@ -2186,11 +2172,28 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
         {tab === "build" && !showSettings && ev === "copilot" && (
           <CopilotTab
             apiKey={"server"}
+            convo={copilot} setConvo={setCopilot}
             ctx={{ store, scan, news: news[ticker]?.items || [], ticker, legs, expKey, A, spot, seasonalSrc: seas.src, setMsg }}
           />
         )}
 
         {tab === "build" && !showSettings && <div ref={buildAnchor} style={{ scrollMarginTop: 12 }} />}
+        {/* Where the guided flow lands. Without this the trade simply appears on
+            Build and the user has no way to tell that the road they picked is
+            the thing in front of them. */}
+        {tab === "build" && !showSettings && picked && (
+          <div style={{ marginTop: 12, padding: "10px 12px", background: `${T.blue}0f`, border: `1px solid ${T.blue}55`, borderLeft: `3px solid ${T.blue}`, borderRadius: 8 }}>
+            <div style={{ ...mono, fontSize: 10, color: T.blue, letterSpacing: "0.1em" }}>THE ROAD YOU TOOK</div>
+            <div style={{ fontSize: 13.5, color: T.body, marginTop: 4, lineHeight: 1.55 }}>
+              {picked.ticker} · {picked.name}. It is loaded below — check the strikes, the expiry and the prices,
+              change anything you want, then open it at the bottom of this screen. Nothing is sent until you do.
+            </div>
+            <button onClick={() => { setPicked(null); setOpenResult(null); }}
+              style={{ ...mono, fontSize: 10.5, marginTop: 6, background: "transparent", border: "none", color: T.blue, cursor: "pointer", padding: "4px 0" }}>
+              dismiss
+            </button>
+          </div>
+        )}
         {tab === "build" && !showSettings && buildScreen === "builder" && (
           <div style={{ marginTop: 12 }}>
             <Panel>
@@ -2199,7 +2202,10 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   style={{ ...mono, background: "transparent", border: "none", borderBottom: `1px dashed ${T.line}`, color: T.ink, fontSize: 15, fontWeight: 700, outline: "none", minWidth: 200 }} />
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                   <Btn small ghost color={T.blue} onClick={saveStrategy}><Save size={12} /> Save</Btn>
-                  <Btn small color={T.green} onClick={openPaper} disabled={!reasonOk}><Briefcase size={12} /> Open on paper</Btn>
+                  {/* One route to an order from this screen: the confirm step at
+                      the bottom, which states the checks and the exit plan
+                      first. A second button up here opened a position without
+                      any of that ever being read. */}
                   
                 </div>
               </div>
@@ -2417,6 +2423,25 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
               )}
               {!alpaca && <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 8 }}>Connect Alpaca in Positions → Integrations to unlock the full order ticket: limit or market, time in force, quantity and cancellations.</div>}
             </Panel>
+
+            {/* THE CONFIRM STEP, AT THE END OF THE SCREEN THAT SHOWS THE TRADE.
+                It used to be a wizard screen of its own that "Take this road"
+                jumped to, which let the guided flow reach an order without ever
+                passing the chain, the legs or the greeks. It reads the LIVE
+                Build state, so a strike changed above changes the checks below:
+                what is confirmed is what is on screen. */}
+            <div style={{ marginTop: 12 }}>
+              <ConfirmSteps
+                candidate={{
+                  ticker, name: stratName, legs, expKey, dte,
+                  risk: Math.abs(A.maxLoss), maxProfit: A.maxProfit, entryNet: A.entry, spot,
+                }}
+                preview={guard} result={openResult}
+                heading={false} showFigure={false}
+                busy={busy === "order"}
+                onConfirm={() => openPaper()}
+              />
+            </div>
           </div>
         )}
 
