@@ -34,7 +34,15 @@ export default async (req) => {
       try { parsed = JSON.parse(out); } catch { /* not JSON */ }
       const message = parsed?.error?.message || (out || "").trim().slice(0, 400) || `Anthropic returned HTTP ${r.status}.`;
       const type = parsed?.error?.type || "api_error";
-      return Response.json({ error: { type, message, status: r.status } }, { status: r.status });
+      // The API names the fix; this names WHERE to apply it. Whether a key is
+      // identity-linked cannot be read off the key, so the app cannot know in
+      // advance — but the moment Anthropic says the header is missing, the one
+      // useful sentence is which Netlify variable to set. Only added when the
+      // variable really is unset, so it can never point at the wrong cause.
+      const hint = !workspace && /workspace/i.test(message)
+        ? " — set ANTHROPIC_WORKSPACE_ID in the Netlify environment variables: this key belongs to a workspace, and Anthropic will not accept the call without it."
+        : "";
+      return Response.json({ error: { type, message: message + hint, status: r.status } }, { status: r.status });
     }
     return new Response(out, { status: r.status, headers: { "Content-Type": "application/json" } });
   } catch (e) {

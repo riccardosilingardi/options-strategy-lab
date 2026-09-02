@@ -7,6 +7,7 @@ import { erf, netBS } from "./engine.js";
 import { ARROW, REGIONS, regionSignals, tagImpacts, taRead } from "./signals.js";
 import { useNarrow, BandThumbnail, payoffBands, bandTakeaway } from "./visuals.jsx";
 import { DEMO, DEMO_TOOLTIP } from "./demo.js";
+import { hasOpenInterest, sourceNote, openInterestNote } from "./chain.js";
 // "Why this trade" and the headline tags moved to src/why.jsx: the wizard's
 // decision screen needs them too, and a road with no evidence under it is a
 // recommendation. Re-exported here so nothing else has to change its import.
@@ -334,10 +335,10 @@ MANAGEMENT: scale in and out → start with 1 contract, add if it works, close h
 
 OUTPUT FORMAT: clear sections (LEGS / P&L PROFILE / GREEKS / NEXT STEPS), always risk/reward, always next steps, and ask for confirmation before any execution.`;
 export const SKILLS = [
-  { id: "pretrade", label: "✓ Pre-trade analysis", prompt: `Run the pre-trade analysis of the current strategy: structure, Greeks, risk/reward, breakevens against support and resistance, seasonal alignment and news. Finish with a GO/NO-GO checklist and a position size within the per-trade limit (${perTradeCapLabel()}).` },
-  { id: "positions", label: "♻ Position review", prompt: `Review the open positions against the rules (${ruleBadge()}): for each one give → HOLD / CLOSE / ROLL with the reasoning and the levels to watch. Remember the ${stopLossLabel()} rule is a warning, never an automatic close.` },
-  { id: "news", label: "📰 News impact", prompt: "Analyse the tagged news in context: which items affect my positions and the underlyings on the radar? Separate noise from signal, with cause→effect and a time horizon." },
-  { id: "radar", label: "📡 Opportunity radar", prompt: `From the seasonal scanner and the weather signals, propose the 2 best opportunities of this week with a suggested structure (relative strikes, ~${RULES.targetEntryDTE} DTE), the thesis, the risk and the entry trigger. Nothing below ${RULES.minEntryDTE} DTE at entry: the risk gate refuses it.` },
+  { id: "pretrade", label: "Pre-trade analysis", prompt: `Run the pre-trade analysis of the current strategy: structure, Greeks, risk/reward, breakevens against support and resistance, seasonal alignment and news. Finish with a GO/NO-GO checklist and a position size within the per-trade limit (${perTradeCapLabel()}).` },
+  { id: "positions", label: "Position review", prompt: `Review the open positions against the rules (${ruleBadge()}): for each one give → HOLD / CLOSE / ROLL with the reasoning and the levels to watch. Remember the ${stopLossLabel()} rule is a warning, never an automatic close.` },
+  { id: "news", label: "News impact", prompt: "Analyse the tagged news in context: which items affect my positions and the underlyings on the radar? Separate noise from signal, with cause→effect and a time horizon." },
+  { id: "radar", label: "Opportunity radar", prompt: `From the seasonal scanner and the weather signals, propose the 2 best opportunities of this week with a suggested structure (relative strikes, ~${RULES.targetEntryDTE} DTE), the thesis, the risk and the entry trigger. Nothing below ${RULES.minEntryDTE} DTE at entry: the risk gate refuses it.` },
 ];
 export async function askAI(_key, messages, contextStr) {
   const r = await fetch("/api/ai", {
@@ -444,7 +445,7 @@ export function buildReportMd(ctx, weatherSig, aiText) {
   }
   L.push(`\n## 3 · Headlines that matter (cause → effect, politics included)`);
   (news || []).filter((n) => (n.impacts || []).length).slice(0, 8).forEach((n) => {
-    L.push(`- ${n.title} ${n.geo ? "🏛" : ""}\n  ${(n.impacts || []).map((im) => `**${im.tk} ${ARROW[im.dir]}** (${im.why})`).join(" · ")}`);
+    L.push(`- ${n.title} ${n.geo ? "(policy)" : ""}\n  ${(n.impacts || []).map((im) => `**${im.tk} ${ARROW[im.dir]}** (${im.why})`).join(" · ")}`);
   });
   L.push(`\n## 4 · Weather → commodities (next 14 days)`);
   (weatherSig || []).forEach((s) => L.push(`- **${s.tks.join("+")} ${s.dir}** — ${s.region}: ${s.why}`));
@@ -484,7 +485,7 @@ export function exportPdf(ctx, md) {
     h3{font-size:13px;margin:14px 0 4px} li{font-size:12.5px} .m{font-family:monospace;font-size:11px;color:#555;margin:4px 0}
     .tl{font-family:monospace;font-size:10.5px;color:#777;margin:2px 0} .pos{page-break-inside:avoid;border:1px solid #ddd;border-radius:6px;padding:10px 14px;margin:10px 0}
     @media print {.noprint{display:none}}</style></head><body>
-    <button class="noprint" onclick="window.print()" style="padding:8px 14px;margin-bottom:14px;cursor:pointer">🖨 Print or save as PDF</button>
+    <button class="noprint" onclick="window.print()" style="padding:8px 14px;margin-bottom:14px;cursor:pointer">Print or save as PDF</button>
     ${body}<h2>Positions in detail</h2>${posHtml || "<p>No open positions.</p>"}
     </body></html>`);
   w.document.close();
@@ -849,6 +850,9 @@ export function ChainMatrix({ chain, expKey, spot, legs, onCell }) {
   const [width, setWidth] = useState(0.12);
   if (!chain || !expKey || !chain.byExp[expKey] || !spot) return null;
   const e = chain.byExp[expKey];
+  // No open interest, no OI column. A column of dashes is a promise the feed
+  // cannot keep, and it costs width the strikes need on a phone.
+  const oi = hasOpenInterest(chain);
   const ks = Array.from(new Set([...Object.keys(e.calls), ...Object.keys(e.puts)].map(Number)))
     .sort((a, b) => a - b)
     .filter((k) => k >= spot * (1 - width) && k <= spot * (1 + width));
@@ -864,7 +868,7 @@ export function ChainMatrix({ chain, expKey, spot, legs, onCell }) {
         {q ? (
           <span style={{ ...mono, fontSize: 10.5 }}>
             <b style={{ color: lg ? (lg.side > 0 ? T.green : T.red) : T.ink }}>{q.mid != null ? q.mid.toFixed(2) : "—"}</b>
-            <span style={{ color: T.dim }}> · {q.iv ? (q.iv * 100).toFixed(0) + "%" : "—"} · OI {q.oi ?? "—"}</span>
+            <span style={{ color: T.dim }}> · {q.iv ? (q.iv * 100).toFixed(0) + "%" : "—"}{oi ? ` · OI ${q.oi ?? "—"}` : ""}</span>
             {lg && <b style={{ color: lg.side > 0 ? T.green : T.red }}> {lg.side > 0 ? "＋BUY" : "−SELL"}{lg.qty > 1 ? "×" + lg.qty : ""}</b>}
           </span>
         ) : <span style={{ ...mono, fontSize: 10, color: T.dim }}>—</span>}
@@ -885,9 +889,9 @@ export function ChainMatrix({ chain, expKey, spot, legs, onCell }) {
         <table style={{ width: "100%", borderCollapse: "collapse", background: T.bg }}>
           <thead>
             <tr style={{ ...mono, fontSize: 9, color: T.dim }}>
-              <th style={{ padding: "5px 6px", textAlign: "right" }}>CALL · mid · IV · OI</th>
+              <th style={{ padding: "5px 6px", textAlign: "right" }}>CALL · mid · IV{oi ? " · OI" : ""}</th>
               <th style={{ padding: "5px 6px", textAlign: "center" }}>STRIKE</th>
-              <th style={{ padding: "5px 6px", textAlign: "left" }}>PUT · mid · IV · OI</th>
+              <th style={{ padding: "5px 6px", textAlign: "left" }}>PUT · mid · IV{oi ? " · OI" : ""}</th>
             </tr>
           </thead>
           <tbody>
@@ -901,7 +905,12 @@ export function ChainMatrix({ chain, expKey, spot, legs, onCell }) {
           </tbody>
         </table>
       </div>
-      <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 4 }}>The highlighted row is the strike nearest today\u2019s price (${spot.toFixed(2)}). A blue tint means the option already has value. Live CBOE prices, ~15 min delayed.</div>
+      {/* This was written as JSX text containing `\u2019` and `${spot.toFixed(2)}`,
+          neither of which JSX interpolates: the escape and the expression were
+          both printed on screen, literally. It is one expression now. */}
+      <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 4 }}>
+        {`The highlighted row is the strike nearest today\u2019s price ($${spot.toFixed(2)}). A blue tint means the option already has value. ${sourceNote(chain)}.${oi ? ` ${openInterestNote(chain)}` : ""}`}
+      </div>
     </div>
   );
 }
@@ -945,7 +954,7 @@ export function OptionPanel({ occ, label, quote, onClose }) {
       </div>
       {quote && (
         <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 4 }}>
-          now: {quote.mid?.toFixed(2) ?? "—"} · volatility {quote.iv ? (quote.iv * 100).toFixed(0) + "%" : "—"} · {quote.oi ?? "—"} contracts open · {quote.vol ?? "—"} traded today
+          now: {quote.mid?.toFixed(2) ?? "—"} · volatility {quote.iv ? (quote.iv * 100).toFixed(0) + "%" : "—"}{quote.oi != null ? ` · ${quote.oi} contracts open at the last close` : ""}{quote.vol != null ? ` · ${quote.vol} traded today` : ""}
         </div>
       )}
       {err && <div style={{ ...mono, fontSize: 11, color: T.red, marginTop: 6 }}>{err}</div>}

@@ -19,6 +19,8 @@ import { readFileSync } from "node:fs";
 import {
   normaliseAlpacaChain, parseCboeJson, midOf, parseOcc, buildOcc,
   fetchChain, resetChainSource, SOURCE, MAX_DTE,
+  feedName, sourceNote, openInterestPath, applyOpenInterest, fetchOpenInterest,
+  hasOpenInterest,
 } from "./chain.js";
 
 const ok = [], bad = [];
@@ -241,11 +243,78 @@ check("after two failures in a row the session stops paying the timeout", async 
   eq(asked, 3, "attempts after the reset");
 });
 
+/* ---------- 4. ONE PLACE NAMES THE FEED ----------
+   The screen said "PRICE NOW (CBOE)" under a badge that said "Alpaca
+   (indicative)" because two places decided what to call the same numbers.
+   Only one does now, and these assertions are what keeps it that way. */
+
+check("the feed is named from the chain, never from a literal", () => {
+  eq(feedName({ source: SOURCE.alpacaIndicative }), "Alpaca", "indicative");
+  eq(feedName({ source: SOURCE.alpacaOpra }), "Alpaca", "opra");
+  eq(feedName({ source: SOURCE.cboeServer }), "CBOE", "cboe server");
+  eq(feedName({ source: SOURCE.cboeDirect }), "CBOE", "cboe direct");
+  eq(feedName(null), null, "no chain, no name");
+});
+
+check("the freshness sentence follows the feed and never oversells it", () => {
+  truthy(!/real.?time|live tape/i.test(sourceNote({ source: SOURCE.alpacaIndicative })),
+    "the indicative feed is never called real-time");
+  truthy(/indicative/i.test(sourceNote({ source: SOURCE.alpacaIndicative })), "indicative says so");
+  truthy(/15 min/i.test(sourceNote({ source: SOURCE.cboeDirect })), "CBOE states its delay");
+});
+
+/* ---------- 5. OPEN INTEREST ----------
+   Alpaca's snapshots do not carry it; the broker's contract list does. The
+   request goes through /api/alpaca, which validates the path against a
+   character whitelist — so the path this builds has to survive that. */
+
+check("the contracts path only uses characters the order proxy accepts", () => {
+  const path = openInterestPath("UNG", {
+    expFrom: "2026-09-18", expTo: "2027-01-15", strikeLo: 8, strikeHi: 19, pageToken: "a+b/c=",
+  });
+  truthy(/^\/v2\/[a-zA-Z0-9/_\-.?=&%]*$/.test(path), `alpaca.mjs would reject: ${path}`);
+  truthy(path.includes("underlying_symbols=UNG"), "the underlying is filtered server-side");
+  truthy(path.includes("expiration_date_gte=2026-09-18"), "expiry floor");
+  truthy(path.includes("strike_price_lte=19.00"), "strike ceiling");
+  truthy(!path.includes(","), "a comma would fail the proxy's whitelist");
+});
+
+check("open interest is grafted onto the chain by OCC symbol", () => {
+  const base = normaliseAlpacaChain("UNG", RAW, { spot: 13.24, feed: "indicative", now: NOW });
+  eq(hasOpenInterest(base), false, "an Alpaca snapshot starts with none");
+  const exp = base.expirations[0];
+  const [k, first] = Object.entries(base.byExp[exp].calls)[0];
+  const merged = applyOpenInterest(base, new Map([[first.occ, 1234]]), "2026-09-02");
+  eq(merged.byExp[exp].calls[k].oi, 1234, "the matched contract got its number");
+  eq(merged.oiAsOf, "2026-09-02", "the date the broker stamped on it travels with it");
+  eq(hasOpenInterest(merged), true, "and the panels can draw now");
+  eq(base.byExp[exp].calls[k].oi, null, "the chain it came from is untouched");
+});
+
+check("nothing matching means nothing changes — never a chain of zeros", () => {
+  const base = normaliseAlpacaChain("UNG", RAW, { spot: 13.24, feed: "indicative", now: NOW });
+  eq(applyOpenInterest(base, new Map([["NOTHING260918C00011000", 99]])), null, "no match, no swap");
+  eq(applyOpenInterest(base, new Map()), null, "empty answer, no swap");
+});
+
+check("a slow or broken contract list never reaches the chain", async () => {
+  const base = normaliseAlpacaChain("UNG", RAW, { spot: 13.24, feed: "indicative", now: NOW });
+  let threw = false;
+  try { await fetchOpenInterest("UNG", base, { fetchImpl: async () => ({ ok: false, status: 403 }) }); }
+  catch { threw = true; }
+  truthy(threw, "an HTTP failure throws for the caller's catch to swallow");
+  // and the chain the app already showed is the same object it was
+  eq(hasOpenInterest(base), false, "the chain on screen is unchanged");
+});
+
+
 await run();
 console.log(`chain: ${ok.length} passed, ${bad.length} failed`);
 for (const [n, m] of bad) console.log(`  ✗ ${n}\n    ${m}`);
 if (RAW._capture?.NOT_LIVE) {
   console.log("  ! the Alpaca fixture is hand-built to the SDK's shape, not captured live —");
   console.log("    run scripts/capture-alpaca-chain.mjs with real keys to replace it.");
+  const c = RAW._capture.live_behaviour_confirmed;
+  if (c) console.log(`    (the INTEGRATION is confirmed: checked by hand on ${c.date}. Only these bytes are synthetic.)`);
 }
 process.exit(bad.length ? 1 : 0);

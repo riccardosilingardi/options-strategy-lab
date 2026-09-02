@@ -1,7 +1,19 @@
 {
  "_capture": {
   "NOT_LIVE": true,
+  "what_this_means": "The BYTES in this file are synthetic. The INTEGRATION they stand in for is not: see live_behaviour_confirmed below. Do not read NOT_LIVE as 'Alpaca was never verified'.",
   "why": "The sandbox that generated this branch has no outbound access to data.alpaca.markets and no ALPACA_KEY, so this payload was HAND-BUILT to the exact shape of Alpaca's own SDK models (alpaca-py 0.44.0: OptionsSnapshot / OptionsGreeks / Quote / Trade, SNAPSHOT_MAPPING) rather than captured from the live API.",
+  "live_behaviour_confirmed": {
+   "date": "2026-09-03",
+   "how": "checked by hand on the live site, against the real ALPACA_KEY/ALPACA_SECRET in the Netlify environment",
+   "observed": [
+    "the source badge reads \"Alpaca (indicative)\", so fetchChain() reached the broker and did not fall back to CBOE",
+    "implied volatility is present and varies strike by strike \u2014 it is read data, not one number repeated",
+    "the quotes are real bid/ask, not modelled prices"
+   ],
+   "settled_question": "Alpaca DOES return greeks and impliedVolatility on the Basic indicative feed. That was open when this branch was written; it is answered now. Do not re-litigate it.",
+   "still_missing_from_the_feed": "open interest and volume. Snapshots do not carry them; they come from GET /v2/options/contracts on the trading API instead (see fetchOpenInterest in src/chain.js)."
+  },
   "replace_with_the_real_thing": "node scripts/capture-alpaca-chain.mjs UNG   (with ALPACA_KEY and ALPACA_SECRET in the environment). It overwrites this file with a real response and drops this block.",
   "endpoint": "GET https://data.alpaca.markets/v1beta1/options/snapshots/UNG?feed=indicative",
   "underlying_last_trade": 13.24

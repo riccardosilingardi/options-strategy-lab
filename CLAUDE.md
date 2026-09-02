@@ -2,6 +2,15 @@
 
 Read `PRD.md` before any substantial change. This file is the short version.
 
+## Standing rule — start with the last session's debts
+
+**Every session begins by fixing what the previous session flagged as broken,
+unverified or left hanging, before starting its own task.** Then it hands its own
+list forward: the last thing every session writes is what it could NOT verify.
+Carry this rule into whatever you hand to the next session — it is the only
+reason a note like "the fixture is not a live capture" ever gets resolved
+instead of being re-discovered.
+
 ## What this is
 
 A paper-trading platform for multi-leg options strategies on commodity ETFs
@@ -118,7 +127,8 @@ while the position is open.
 - `src/engine.js` — shared math (Black-Scholes, payoff, probabilities,
   seasonal tables). Plain JS, no React imports. **Both the client and the
   Netlify functions import from here.** Never duplicate this math.
-- `src/chain.js` — **where the option chain comes from**. One internal shape
+- `src/chain.js` — **where the option chain comes from**, and **the only place
+  that decides what to call the feed**. One internal shape
   (`{ spot, byExp, expirations, updated, source }`, each contract
   `{ bid, ask, mid, iv, oi, vol, delta, theta, occ }`) and two sources:
   **Alpaca first, CBOE as the net**. `fetchChain()` gives the broker a 4-second
@@ -129,6 +139,25 @@ while the position is open.
   formula. Alpaca snapshots carry no open interest and no volume, so those come
   back `null` (never `0`, which on screen reads as "nobody trades this") and the
   open-interest panel says which feed cannot fill it.
+
+  **`feedName(chain)` and `sourceNote(chain)` name the feed, and every label on
+  screen reads from them.** Never write "CBOE" or "Alpaca" into a component. The
+  header once said "PRICE NOW (CBOE)" directly under a badge reading
+  "Alpaca (indicative)": two places deciding what to call the same numbers is a
+  screen that contradicts itself about where its own data came from.
+
+  **Open interest comes from the TRADING API, not the market-data feed.**
+  `fetchOpenInterest()` / `enrichOpenInterest()` read
+  `GET /v2/options/contracts` (fields `open_interest`, `open_interest_date` —
+  the count arrives as a *string*) through the existing `/api/alpaca` proxy, so
+  no new host, no new function, no new key, and `alpaca.mjs` still speaks to
+  exactly one host: its `X-OSL-Paper-Endpoint` header means exactly what it
+  meant before. Two rules hold it: it is **non-blocking** (`refreshChain` fires
+  it after the chain is on screen and patches the numbers in when they land —
+  nothing ever waits for it), and it is **honest** (the figure is the previous
+  session's close, `openInterestNote()` says so with the date, and when the call
+  does not land the OI column disappears rather than printing dashes). Never
+  invent or estimate an open-interest number.
 - `src/signals.js` — the 4-factor confluence engine (`fuseSignals`) and the
   single source of the region table, the climate norms, the news cause→effect
   rules, the SMA/RSI read and the candidate ranking. Plain JS, no React imports.
@@ -165,6 +194,14 @@ is the list of candidate structures, which is what the word means. Weather and
 News are not tabs at all any more: they are the drill-down behind the
 "Why this trade" panel — tapping the weather bar reveals the regions and their
 anomalies, tapping the news bar reveals the headlines with their tags.
+
+**An evidence panel must be written next to the strip that opens it.** Market
+levels, History and Copilot were once written after the whole builder block, so
+opening one rendered it ~2,000px down a page that does not scroll: on a phone
+the tap looked like it did nothing, and both were reported as broken features.
+All five panels now open directly under the button that opened them. A panel
+that needs prices and has none must SAY so — rendering nothing at all is the
+same failure with a different cause.
 
 A trade reaches Build through **one function**, `openOnBuild()` in `App.jsx`,
 built on `buildHandOff()` in `src/handoff.js`. It closes the open evidence
@@ -233,6 +270,13 @@ rejects anything it cannot confirm.
 ## Known traps
 
 - `logEvent` must never be called inside JSX render — use `useEffect`
+- **No emoji and no rare glyphs in user-facing strings.** The direction buttons
+  used U+2B61/U+2B63 (`⭡ ⭣`), a block Android's system fonts do not cover: they
+  rendered as empty boxes on the phone this app gets demoed on. Stay inside what
+  every font has — `↑ ↓ → ✓ ✗ ⚠ ▲ ▼ ●` — and write words where a pictogram was
+  doing the talking. This app is demoed on a phone.
+- JSX **text** does not interpolate: `${x}` and `\u2019` written as element
+  children are printed on screen, literally. Wrap the line in `{`…`}`.
 - News impact directions are numbers (`1 / 0 / -1`), never arrow strings. Render
   them with `ARROW[dir]` from `signals.js`
 - Use the safe `getU(ticker)` accessor, never `UNDERLYINGS[ticker]` directly
