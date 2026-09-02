@@ -89,6 +89,13 @@ Two rules hold them, and both are the point:
 
 Adding a third generation site means calling `qualityFloor()` there too.
 
+**The floor is held up against the chains it is applied to.** `oiProfile()` in `chain.js`
+and `OpenInterestReadout` at the bottom of the Shortlist print what open interest the
+loaded chains actually carry — near the money and whole chain — beside the floor. It
+reports and never estimates: unknown stays unknown, and a feed with no open interest is
+named rather than drawn as zeros. It exists so `minOpenInterestPerLeg` can be settled from
+a live screen instead of re-argued from one walkthrough.
+
 ## Exit rules
 
 Chosen once per position at construction time, then frozen. Never renegotiated

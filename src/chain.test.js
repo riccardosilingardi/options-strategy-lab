@@ -20,7 +20,7 @@ import {
   normaliseAlpacaChain, parseCboeJson, midOf, parseOcc, buildOcc,
   fetchChain, resetChainSource, SOURCE, MAX_DTE,
   feedName, sourceNote, openInterestPath, applyOpenInterest, fetchOpenInterest,
-  hasOpenInterest,
+  hasOpenInterest, oiProfile,
 } from "./chain.js";
 
 const ok = [], bad = [];
@@ -307,6 +307,38 @@ check("a slow or broken contract list never reaches the chain", async () => {
   eq(hasOpenInterest(base), false, "the chain on screen is unchanged");
 });
 
+
+/* -------- the readout that lets the floor be argued with -------- */
+const CH = (contracts) => ({
+  spot: 20, expirations: ["2026-10-16"],
+  byExp: { "2026-10-16": { dte: 44, calls: contracts, puts: {} } },
+});
+
+check("oiProfile counts what is known and never coerces what is not", () => {
+  const p = oiProfile(CH({ 19: { oi: 40 }, 20: { oi: 0 }, 21: { oi: null }, 22: { oi: undefined } }), { floor: 25 });
+  eq(p.total, 4, "every contract is counted");
+  eq(p.known, 2, "only the two reported counts are known");
+  eq(p.unknown, 2, "null and undefined are unknown, never zero");
+  eq(p.all.clearing, 1, "one leg clears 25");
+  eq(p.all.share, 0.5, "the share is of the KNOWN counts, not of the chain");
+});
+
+check("oiProfile separates the strikes a trade is built from", () => {
+  // spot 20: 19 and 21 are near the money, 30 is not.
+  const p = oiProfile(CH({ 19: { oi: 100 }, 21: { oi: 80 }, 30: { oi: 0 } }), { floor: 25, nearPct: 0.1 });
+  eq(p.near.count, 2, "only the two near-the-money strikes");
+  eq(p.near.share, 1, "both clear the floor near the money");
+  eq(p.all.count, 3, "the whole chain includes the dead far strike");
+  truthy(p.all.share < 1, "which drags the whole-chain share down — the two are different questions");
+});
+
+check("a feed with no open interest is reported as such, not as zeros", () => {
+  const p = oiProfile(CH({ 19: { oi: null }, 20: { oi: null } }), { floor: 25 });
+  eq(p.reports, false, "nothing to report");
+  eq(p.known, 0, "no known counts");
+  eq(p.all.median, null, "and no median invented from nothing");
+  eq(oiProfile(null), null, "no chain, no profile");
+});
 
 await run();
 console.log(`chain: ${ok.length} passed, ${bad.length} failed`);

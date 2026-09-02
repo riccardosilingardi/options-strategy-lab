@@ -137,6 +137,18 @@ The floor values were chosen from the live examples above and from the structure
 five option markets. They have **not** been re-measured against a full live chain across
 all five tickers — see the note at the end of this file.
 
+**So the app reports what the developer cannot fetch.** At the bottom of the Shortlist,
+`OpenInterestReadout` reads every chain the session has loaded and prints, per market, the
+median, 90th percentile and maximum open interest, and the share of contracts that clear the
+floor — twice: once for the strikes within 10% of spot, where these structures are actually
+built, and once for the whole chain, which is dominated by strikes nobody trades. The pure
+function behind it is `oiProfile()` in `src/chain.js`. It **reports and never estimates**: a
+contract whose count is unknown is counted as unknown, and a feed that carries no open
+interest at all is named as such rather than drawn as a row of zeros — the same rule
+`qualityFloor()` applies when it skips. Read the near-the-money share: high means the floor is
+removing untraded strikes and nothing else; falling towards zero on a market worth trading
+means 25 is too high for that market, and it is one line in `src/rules.js`.
+
 ---
 
 ## 5. The wizard IS the app
@@ -427,6 +439,12 @@ two roads. Evidence — weather, news, seasonal, technical — stays as sub-pane
 
 After that:
 
+- **Settle the liquidity floor with the readout, and write the number down.** The Shortlist now
+  prints the open-interest distribution of every loaded chain against the floor (§4b). The next
+  session with live access should load all five markets on a quiet day, read the near-the-money
+  "clear 25" share for each, and either confirm 25 or move it — then record the measured
+  distribution in §4b so the constant stops being an inference from one walkthrough. This is the
+  oldest carried-forward debt in the file and the readout exists specifically to close it.
 - One simplified multi-leg thumbnail used everywhere: shape, bands, meaningful vertical bars,
   and no unreadable candles at 80px. **This is the next thing to build** — the candle line is
   the least readable thing on the roads screen at the size it is drawn.
@@ -461,8 +479,10 @@ ends by writing down what it could not verify. Currently open:
   answers 403), so 25 and 0.25 come from the reported live SOYB and WEAT examples and from the
   structure of these markets, not from a survey of all five chains. **The next session with live
   access should print the open-interest distribution per expiry for UNG, CORN, SOYB, BOIL and
-  WEAT and confirm that 25 does not empty a quiet market.** If it does, the floors are named
-  constants in one file and the screens read them.
+  WEAT and confirm that 25 does not empty a quiet market.** The app now does the printing
+  itself — the readout at the bottom of the Shortlist (§4b) — so this needs a session with live
+  chains and a screenshot, not new code. If 25 is wrong, the floors are named constants in one
+  file and the screens read them.
 - **The live Anthropic call.** No `ANTHROPIC_KEY` in the sandbox. `ai.mjs` now returns what it
   sent — the model, the header names, and whether `anthropic-workspace-id` went out — alongside
   the API's own error, so the screen distinguishes an unset variable from a bad key from a bad

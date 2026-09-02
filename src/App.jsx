@@ -12,7 +12,7 @@ import { fetchAllNews, fetchWeather, ImpactTags, CopilotTab, ReportTab, OrderTic
 import { BandThumbnail, payoffBands, bandTakeaway, GaugeFigure, exitPlanSentence } from "./visuals.jsx";
 import { fuseSignals, sentimentDirection, withSignalRank, compareCandidates, againstSignal, DRIVER_PRESETS, rankByDrivers, verdictNarrative } from "./signals.js";
 import { N as nCDF, bs as bsPrice, smile as smileIV, payoff as payoffExp, SEASONAL, SIGMA } from "./engine.js";
-import { parseOcc, buildOcc, fetchChain, hasOpenInterest, enrichOpenInterest, feedName, sourceNote, openInterestNote } from "./chain.js";
+import { parseOcc, buildOcc, fetchChain, hasOpenInterest, enrichOpenInterest, feedName, sourceNote, openInterestNote, oiProfile } from "./chain.js";
 import { T, themeName, setTheme, BADGE_SAFE } from "./theme.js";
 import { RULES, sizing, ruleBadge, takeProfitLabel, stopLossLabel, perTradeCapLabel, RULE_PILLS, NOTHING_TODAY, money, pctText, capitalSourceNote, perTradeLimitPhrase, qualityFloor, qualityFloorSentence, liquiditySkippedNote } from "./rules.js";
 import { evaluateTrade, gateSummary } from "./riskGate.js";
@@ -407,6 +407,89 @@ const DemoBanner = () => (DEMO ? (
   </div>
 ) : null);
 const Lbl = ({ children }) => <div style={{ ...mono, fontSize: 10, letterSpacing: "0.15em", color: T.amber }}>{children}</div>;
+/* ============================== IS THE LIQUIDITY FLOOR RIGHT? ==============================
+ *
+ * `RULES.minOpenInterestPerLeg` was chosen from a handful of legs seen once in
+ * a live walkthrough. That is evidence, not a measurement, and it cannot be
+ * settled from inside the code: it needs chains nobody here can fetch. So the
+ * app reports what it sees. This panel reads every chain the session has
+ * loaded and prints the open interest those contracts actually carry, beside
+ * the floor being applied to them.
+ *
+ * Two rows per market, because "every strike in the chain" and "the strikes a
+ * trade is built from" are different populations, and only the second decides
+ * whether the floor is sensible. It reports and never estimates: a feed with no
+ * open interest is named as such rather than drawn as a row of zeros — the same
+ * rule `qualityFloor()` applies when it skips.
+ */
+function OpenInterestReadout({ chains, floor }) {
+  const rows = Object.entries(chains || {})
+    .map(([tk, c]) => ({ tk, feed: feedName(c) || "the feed", p: oiProfile(c, { floor }) }))
+    .filter((r) => r.p);
+  if (!rows.length) return null;
+  const num = (x) => (x == null ? "\u2014" : String(Math.round(x)));
+  const pct = (x) => (x == null ? "\u2014" : `${Math.round(x * 100)}%`);
+  const reporting = rows.filter((r) => r.p.reports);
+  const th = { padding: "4px 8px" };
+  return (
+    <Panel style={{ marginTop: 10 }}>
+      <Lbl>4 · WHAT THESE CHAINS ACTUALLY CARRY — IS {floor} THE RIGHT FLOOR?</Lbl>
+      <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 8, lineHeight: 1.6 }}>
+        {`The liquidity floor rejects any leg with fewer than ${floor} contracts open. Whether ${floor} is the right number is a question about real chains, not about the code, so here is what the ${rows.length === 1 ? "one chain" : "chains"} loaded in this session ${rows.length === 1 ? "contains" : "contain"}. The row that matters is `}
+        <b>near the money</b>{" (within 10% of spot): that is where these structures get built."}
+      </div>
+      <div style={{ overflowX: "auto", marginTop: 10 }}>
+        <table style={{ ...mono, fontSize: 10.5, borderCollapse: "collapse", minWidth: 420, width: "100%" }}>
+          <thead>
+            <tr style={{ color: T.dim, textAlign: "right" }}>
+              <th style={{ ...th, textAlign: "left", paddingLeft: 0 }}>MARKET</th>
+              <th style={{ ...th, textAlign: "left" }}>CONTRACTS</th>
+              <th style={th}>MEDIAN OI</th>
+              <th style={th}>90th</th>
+              <th style={th}>MAX</th>
+              <th style={{ ...th, paddingRight: 0 }}>CLEAR {floor}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(({ tk, feed, p }) => (p.reports ? (
+              <React.Fragment key={tk}>
+                <tr style={{ borderTop: `1px solid ${T.line}`, textAlign: "right" }}>
+                  <td style={{ padding: "5px 8px 5px 0", textAlign: "left", color: T.ink, fontWeight: 700 }}>{tk}</td>
+                  <td style={{ padding: "5px 8px", textAlign: "left", color: T.amber }}>near the money ({p.near.count})</td>
+                  <td style={{ padding: "5px 8px", color: T.ink }}>{num(p.near.median)}</td>
+                  <td style={{ padding: "5px 8px", color: T.mut }}>{num(p.near.p90)}</td>
+                  <td style={{ padding: "5px 8px", color: T.mut }}>{num(p.near.max)}</td>
+                  <td style={{ padding: "5px 0 5px 8px", color: p.near.share >= 0.5 ? T.green : T.red }}>{pct(p.near.share)}</td>
+                </tr>
+                <tr style={{ textAlign: "right", color: T.dim }}>
+                  <td style={{ padding: "0 8px 6px 0" }} />
+                  <td style={{ padding: "0 8px 6px", textAlign: "left" }}>whole chain ({p.known})</td>
+                  <td style={{ padding: "0 8px 6px" }}>{num(p.all.median)}</td>
+                  <td style={{ padding: "0 8px 6px" }}>{num(p.all.p90)}</td>
+                  <td style={{ padding: "0 8px 6px" }}>{num(p.all.max)}</td>
+                  <td style={{ padding: "0 0 6px 8px" }}>{pct(p.all.share)}</td>
+                </tr>
+              </React.Fragment>
+            ) : (
+              <tr key={tk} style={{ borderTop: `1px solid ${T.line}` }}>
+                <td style={{ padding: "5px 8px 5px 0", color: T.ink, fontWeight: 700 }}>{tk}</td>
+                <td colSpan={5} style={{ padding: "5px 8px", color: T.dim }}>
+                  {`${feed} does not report open interest for these ${p.total} contracts — the floor is skipped, not failed.`}
+                </td>
+              </tr>
+            )))}
+          </tbody>
+        </table>
+      </div>
+      <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 8, lineHeight: 1.6 }}>
+        {reporting.length === 0
+          ? "No loaded feed reports open interest yet, so there is nothing here to judge the floor against. Open interest arrives after the chain, and only from the broker's contract list."
+          : `Read it this way: if "clear ${floor}" stays high near the money, the floor is removing untraded strikes and nothing else. If it falls towards zero on a market you want to trade, ${floor} is too high for that market — and it is one line in src/rules.js. Every number here is a reported count, never an estimate.`}
+      </div>
+    </Panel>
+  );
+}
+
 const Stat = ({ k, v, c, tip }) => (
   <div>
     <div style={{ ...mono, fontSize: 9.5, color: T.dim }}>{k}{tip && <span title={tip} style={{ cursor: "help", color: T.blue, marginLeft: 3 }}>ⓘ</span>}</div>
@@ -1986,6 +2069,11 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
               </div>
               <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 8 }}>Budget is the most you will pay, taken from live {feedName(chain) || "market"} prices. For trades where you receive money up front, the limit becomes the capital tied up instead. Chance is the probability of ending in profit at expiry. {limits.answered ? "Your" : "The suggested"} per-trade limit: {money(limits.perTradeLimit)} ({perTradeCapLabel()}). {qualityFloorSentence()}</div>
             </Panel>
+
+            {/* The floor, held up against the chains it is applied to. The
+                developer cannot fetch a live chain; the app can, so it reports.
+                See OpenInterestReadout above. */}
+            <OpenInterestReadout chains={chains} floor={RULES.minOpenInterestPerLeg} />
           </div>
         )}
 
