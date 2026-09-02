@@ -469,12 +469,16 @@ export const SKILLS = [
  * silent — text simply goes missing.
  *
  * @param chunk raw bytes decoded to text; may end mid-frame
- * @returns { text, rest } — the deltas found, and the unparsed tail to keep
+ * @returns { text, rest, stopped } — the deltas found, the unparsed tail to
+ *   keep, and whether Anthropic said the message was FINISHED. That last one
+ *   matters: a stream that just stops is indistinguishable from one that
+ *   finished unless the end is announced, and half an analysis presented as a
+ *   whole one is the app lying about its own work.
  */
 export function sseDeltas(chunk) {
   const frames = String(chunk).split("\n\n");
   const rest = frames.pop() || "";     // a partial frame: keep it for next time
-  let text = "";
+  let text = "", stopped = false;
   for (const frame of frames) {
     for (const line of frame.split("\n")) {
       if (!line.startsWith("data:")) continue;
@@ -483,10 +487,11 @@ export function sseDeltas(chunk) {
       let ev = null;
       try { ev = JSON.parse(payload); } catch { continue; }
       if (ev.type === "content_block_delta" && ev.delta?.type === "text_delta") text += ev.delta.text;
+      else if (ev.type === "message_stop") stopped = true;
       else if (ev.type === "error") throw new Error(ev.error?.message || "The copilot stream failed part-way through.");
     }
   }
-  return { text, rest };
+  return { text, rest, stopped };
 }
 
 /**
@@ -536,16 +541,29 @@ export async function askAI(_key, messages, contextStr, onDelta) {
   if (r.ok && r.body && /text\/event-stream/i.test(r.headers.get("content-type") || "")) {
     const reader = r.body.getReader();
     const dec = new TextDecoder();
-    let buf = "", text = "";
+    let buf = "", text = "", finished = false;
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
       buf += dec.decode(value, { stream: true });
-      const { text: more, rest } = sseDeltas(buf);
+      const { text: more, rest, stopped } = sseDeltas(buf);
       buf = rest;
+      if (stopped) finished = true;
       if (more) { text += more; if (onDelta) onDelta(text); }
     }
     if (!text.trim()) throw new Error("The copilot returned an empty answer.");
+    if (!finished) {
+      // The stream stopped without Anthropic saying the message was done: the
+      // connection was cut mid-sentence. Returning what arrived would file half
+      // an analysis in the Journal as a finished one. The words are kept — they
+      // are still worth reading — but they travel WITH the fact that they stop
+      // early, and the caller decides what to do about it.
+      const err = new Error(
+        "The copilot was cut off before it finished this answer. What arrived is kept below, but it stops " +
+        "mid-thought — ask again to get the whole thing.");
+      err.partial = text;
+      throw err;
+    }
     return text;
   }
   // The real API message is the only useful thing when this fails — a missing
@@ -638,8 +656,14 @@ export function CopilotTab({ ctx, apiKey, convo, setConvo, onAnalysis }) {
     } catch (e) {
       // KEEP the question. Rolling `msgs` back to what it was before also
       // deleted what the user had just asked, so a failure looked like the tap
-      // had never happened.
-      setConvo({ msgs: next, busy: false, err: String(e.message || e), partial: "" });
+      // had never happened. And keep a CUT-OFF answer, marked as cut off: the
+      // words that did arrive are worth reading, they are just not the whole
+      // thing, and the difference has to be visible rather than assumed.
+      const cut = e && e.partial;
+      setConvo({
+        msgs: cut ? [...next, { role: "assistant", content: cut, truncated: true }] : next,
+        busy: false, err: String(e.message || e), partial: "",
+      });
     }
   };
   /** Print what is on screen. The browser's own dialog also saves to PDF. */
@@ -690,10 +714,17 @@ export function CopilotTab({ ctx, apiKey, convo, setConvo, onAnalysis }) {
           {msgs.length === 0 && !busy && <div style={{ ...mono, fontSize: 11.5, color: T.mut }}>Pick one above or just ask. The copilot already knows your open positions, the trade on the Build screen, the Radar, the tagged news and your own risk rules.</div>}
           {msgs.map((m, i) => (
             <div key={i} style={{ padding: m.role === "user" ? "9px 11px" : "11px 13px", borderRadius: 7, background: m.role === "user" ? `${T.blue}14` : T.bg, border: `1px solid ${m.role === "user" ? T.blue + "44" : T.line}` }}>
-              <div style={{ ...mono, fontSize: 9, letterSpacing: "0.1em", color: m.role === "user" ? T.blue : T.amber, marginBottom: m.role === "user" ? 3 : 7 }}>{m.role === "user" ? "YOU ASKED" : "COPILOT"}</div>
+              <div style={{ ...mono, fontSize: 9, letterSpacing: "0.1em", color: m.role === "user" ? T.blue : T.amber, marginBottom: m.role === "user" ? 3 : 7 }}>{m.role === "user" ? "YOU ASKED" : m.truncated ? "COPILOT · CUT OFF" : "COPILOT"}</div>
               {m.role === "user"
                 ? <div style={{ fontSize: 12.5, color: T.body, lineHeight: 1.5 }}>{m.content}</div>
-                : <Markdown text={m.content} />}
+                : <>
+                  <Markdown text={m.content} />
+                  {m.truncated && (
+                    <div style={{ ...mono, fontSize: 10.5, color: T.amber, marginTop: 8, paddingTop: 8, borderTop: `1px solid ${T.amber}44`, lineHeight: 1.6 }}>
+                      This answer stops here because the connection was cut, not because the copilot had finished.
+                    </div>
+                  )}
+                </>}
             </div>
           ))}
           {busy && (

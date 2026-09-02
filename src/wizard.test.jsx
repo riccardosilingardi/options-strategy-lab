@@ -86,6 +86,16 @@ check("a delta split across two network reads is not dropped", () => {
   }
 });
 
+check("a finished message is told apart from a stream that just stops", () => {
+  // Without this the app cannot know the difference, and half an analysis gets
+  // filed in the Journal as a whole one.
+  const cut = sseDeltas(delta("Half a thought"));
+  if (cut.stopped) throw new Error("a stream with no message_stop was read as finished");
+  const whole = sseDeltas(delta("A whole thought.") + `event: message_stop\ndata: {"type":"message_stop"}\n\n`);
+  if (!whole.stopped) throw new Error("message_stop was not noticed");
+  if (whole.text !== "A whole thought.") throw new Error("the text was mangled by the stop frame");
+});
+
 check("an error frame stops the stream instead of being ignored", () => {
   const buf = `event: error\ndata: ${JSON.stringify({ type: "error", error: { message: "overloaded" } })}\n\n`;
   let threw = null;

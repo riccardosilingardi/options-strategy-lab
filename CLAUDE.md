@@ -348,6 +348,14 @@ went straight to a confirm page skipped the trade itself. Both are gone.
   naming the timeout instead of dumping markup on screen. Both are pure and
   tested; the autopilot calls Anthropic directly and has a background budget, so
   it does not need this.
+- **A CUT-OFF ANSWER IS NEVER PRESENTED AS A FINISHED ONE.** A stream that just
+  stops is indistinguishable from one that finished unless the end is announced,
+  so `sseDeltas()` reports `stopped` (Anthropic's `message_stop`) and `askAI`
+  throws when the stream ends without it, carrying the partial text on
+  `err.partial`. The panel keeps those words — they are worth reading — under a
+  "COPILOT · CUT OFF" label that says the connection was cut rather than the
+  copilot finishing, and the analysis is NOT filed in the Journal. Half an
+  analysis recorded as a whole one is the app lying about its own work.
 - **The copilot answers in MARKDOWN.** Render it with `Markdown` in `pro.jsx` —
   never `white-space: pre-wrap`, which put `## 1. STRUCTURE`, `**Ticker:**` and
   a wall of `|---|` pipes on screen. The prompt asks for prose for a non-expert
