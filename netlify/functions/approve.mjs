@@ -22,9 +22,9 @@ export default async (req) => {
     const raw = await store.get("approvals");
     const approvals = raw ? JSON.parse(raw) : {};
     const a = approvals[id];
-    if (!a) return page("Link non valido", "Autorizzazione inesistente o già rimossa.", false);
-    if (a.used) return page("Già eseguito", `Questo ordine era già stato autorizzato il ${new Date(a.usedAt).toLocaleString("it-IT")}.`, false);
-    if (Date.now() > a.exp) return page("Link scaduto", "L'autorizzazione è scaduta (24h). L'Autopilot ne genererà una nuova al prossimo ciclo se ancora rilevante.", false);
+    if (!a) return page("Link not valid", "This authorisation does not exist, or it has already been removed.", false);
+    if (a.used) return page("Already executed", `This order was authorised on ${new Date(a.usedAt).toLocaleString("en-GB", { timeZone: "UTC" })} UTC and cannot be sent twice.`, false);
+    if (Date.now() > a.exp) return page("Link expired", "This authorisation was valid for 24 hours and that window has passed. The autopilot will issue a new one on its next run if the proposal still stands.", false);
     // PRD §8: il cancello gira di nuovo QUI, al momento dell'esecuzione. Fra la
     // proposta e il tap possono passare 24 ore, e le posizioni possono cambiare.
     const state = JSON.parse((await store.get("state")) || "{}");
@@ -34,22 +34,22 @@ export default async (req) => {
       capital: a.gateContext?.capital || {},
       signals: null,
     });
-    if (!g.pass) return page("Bloccato dal risk gate", g.violations.map((v) => v.message).join("<br>"), false);
+    if (!g.pass) return page("Blocked by the risk gate", g.violations.map((v) => v.message).join("<br>"), false);
 
     const k = Netlify.env.get("ALPACA_KEY"), s = Netlify.env.get("ALPACA_SECRET");
-    if (!k || !s) return page("Server non configurato", "Mancano ALPACA_KEY/ALPACA_SECRET.", false);
+    if (!k || !s) return page("Server not configured", "ALPACA_KEY and ALPACA_SECRET are not set in the Netlify environment.", false);
     const r = await fetch(`https://${PAPER_HOST}/v2/orders`, {
       method: "POST",
       headers: { "APCA-API-KEY-ID": k, "APCA-API-SECRET-KEY": s, "Content-Type": "application/json" },
       body: JSON.stringify(a.order),
     });
     const out = await r.json();
-    if (!r.ok) return page("Ordine rifiutato da Alpaca", JSON.stringify(out).slice(0, 300), false);
+    if (!r.ok) return page("Alpaca refused the order", JSON.stringify(out).slice(0, 300), false);
     a.used = true; a.usedAt = Date.now(); a.orderId = out.id;
     approvals[id] = a;
     await store.set("approvals", JSON.stringify(approvals));
-    return page("Ordine eseguito ✓", `${a.label} · ${a.posName}<br>Ordine Alpaca PAPER ${out.id?.slice(0, 8)}… inviato (${out.status}).`, true);
+    return page("Order sent ✓", `${a.label} · ${a.posName}<br>Alpaca PAPER order ${out.id?.slice(0, 8)}… sent (${out.status}).`, true);
   } catch (e) {
-    return page("Errore", String(e.message || e), false);
+    return page("Something went wrong", String(e.message || e), false);
   }
 };

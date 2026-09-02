@@ -62,6 +62,24 @@ suggestedTotal    = 0.25 * tradingCapital
 
 The user can override any suggestion. Overrides require a typed reason and are stored.
 
+**BUILT, and this is the one home for it.** `sizing()` in `src/rules.js` is the only
+thing that turns the two answers into limits, and everything reads it: the risk gate,
+the wizard's budget question and its preset chips, the Build screen's risk field, the
+Settings panel and every sentence that prints a dollar figure. The Build field used to
+default to a hardcoded 500 while the wizard quoted a derived 250; it now starts at
+`limits.perTradeLimit` and holds a number of its own only once the user types one, so
+the two screens are incapable of disagreeing.
+
+**ASKED, NEVER ASSUMED.** `tradingCapital` and `concurrentTarget` are stored as `null`
+until answered, and `sizing()` returns `answered: false` when it had to fall back to
+`RULES.suggestedTradingCapital` / `suggestedConcurrentTarget`. While that flag is false:
+every figure on screen is labelled a suggestion rather than a limit ("SUGGESTED — NOT
+YOUR LIMITS YET", `capitalSourceNote()`), the onboarding fields start EMPTY with the
+suggestion offered as a tappable link beside them, no literacy pill is generated (a pill
+explains an answer, and there is no answer to explain), and the risk gate still enforces
+the suggested figures — a proposal cannot wait for a questionnaire — but attaches a
+`CAPITAL_NOT_SET` warning saying where the numbers came from.
+
 ---
 
 ## 4. Exit rules — evidence status
@@ -78,7 +96,58 @@ Rules are **parameters chosen once per position and then frozen**. The copilot p
 
 DTE = days to expiration.
 
-All of these live in one config object, not scattered as literals. The backtest (§9) tests 7 vs 14 vs 21 on the user's own underlyings and the winner becomes the default.
+All of these live in one config object, not scattered as literals.
+
+**NOT BUILT:** the 7-vs-14-vs-21 backtest that would replace this default with a measured
+one. The app has a year-by-year historical replay of a *given structure* (`histBacktest`
+in `App.jsx`, one row per year with a click-through month-by-month replay), but nothing
+that compares the three exit rules against each other, and no `report.md`. 21 DTE remains
+a number taken from published research, not from this app's own evidence.
+
+---
+
+## 4b. Quality floors — the app will not propose an indefensible trade
+
+A structure can satisfy every rule in §4 and still be one nobody should take. Two floors,
+both named constants in `src/rules.js` with the reasoning beside them, applied by one pure
+function `qualityFloor()` at every point candidates are generated — the guided flow's pool,
+the Shortlist, and the multi-market scan — so a structure cannot be rejected on one screen
+and offered on another.
+
+| Floor | Value | Why that number |
+|---|---|---|
+| `minOpenInterestPerLeg` | **25 contracts** | Open interest is the count of contracts in existence at the previous session's close — the closest thing to a headcount of the people on the other side. The live case that prompted this: a SOYB call spread quoted at 1.16 and 0.30 on adjacent strikes whose implied volatility disagreed by ten points, on legs with **2** and **0** open. Those were placeholders, not prices. 25 sits far above the single digits that mark a strike nobody has touched and far below what a genuinely traded near-the-money strike on these ETFs carries. |
+| `minRewardRisk` | **0.25** | The least a structure may pay per dollar risked. At a ratio *r* you break even at a hit rate of 1/(1+*r*), so 0.25 means being right 80% of the time just to come out level. The SOYB spread paid $15 for $86 at risk — 0.17, an 85% break-even. It is also the practitioner floor for a credit spread: collect at least a quarter of the width. A two-thirds-chance credit spread collecting a third of its width scores 0.5 and clears it comfortably. |
+
+Two rules hold them:
+
+- **Missing open interest is not low open interest.** Alpaca's snapshots carry no
+  open-interest figure at all — `null`, not `0` — and the enrichment call from the trading
+  API sometimes does not land. Reading `null` as zero would reject an entire feed and call
+  it illiquidity. When any leg's count is unknown the liquidity check is **skipped**, and
+  the screen says it was skipped and why. A real `0`, which CBOE does report, still fails.
+- **Never an empty screen without an explanation.** When the floors empty a market, the
+  screen says so with the counts: "nothing on CORN clears the liquidity floor today" is a
+  useful answer and a consistent one — this app is built to be able to say there is nothing
+  worth doing. The refusal has its own sentence (`NOTHING_TODAY.belowQualityFloor`), the
+  Shortlist lists what it removed and why, and the verdict narrative reports how many
+  candidates were built and thrown away before the user saw them.
+
+The floor values were chosen from the live examples above and from the structure of these
+five option markets. They have **not** been re-measured against a full live chain across
+all five tickers — see the note at the end of this file.
+
+**So the app reports what the developer cannot fetch.** At the bottom of the Shortlist,
+`OpenInterestReadout` reads every chain the session has loaded and prints, per market, the
+median, 90th percentile and maximum open interest, and the share of contracts that clear the
+floor — twice: once for the strikes within 10% of spot, where these structures are actually
+built, and once for the whole chain, which is dominated by strikes nobody trades. The pure
+function behind it is `oiProfile()` in `src/chain.js`. It **reports and never estimates**: a
+contract whose count is unknown is counted as unknown, and a feed that carries no open
+interest at all is named as such rather than drawn as a row of zeros — the same rule
+`qualityFloor()` applies when it skips. Read the near-the-money share: high means the floor is
+removing untraded strikes and nothing else; falling towards zero on a market worth trading
+means 25 is too high for that market, and it is one line in `src/rules.js`.
 
 ---
 
@@ -114,11 +183,24 @@ Always at least two candidates with an explicit trade-off. One answer is advice;
 
 **Copy rule for a road:** lead with what it gives and what it costs, and put the frequency alongside the payout so the trade-off is one sentence. Opening with "3 times in 10" is a verdict before the reader knows what is being judged, and every beginner reads it as "this is a bad trade".
 
-**Screen 4 — Confirm**
-What is being sent, the risk checks in plain language, and the exit plan already decided. The risk gate runs **after** the tap, before the order leaves.
+**Screen 4 is gone as a screen — taking a road LANDS ON BUILD.**
+"Take this road" used to jump straight to a confirm page carrying a send button, so the
+guided flow could reach an order without ever passing the screen where the trade can
+actually be looked at. It now loads the road onto Build, names it there ("the road you
+took"), and the confirm step — what is being sent, the risk checks in plain language, and
+the exit plan already decided — is the **bottom of the Build screen** (`ConfirmSteps` in
+`wizard.jsx`). It reads the LIVE Build state, so a strike changed above changes the checks
+below: what is confirmed is what is on screen. The risk gate still runs **after** the tap,
+and a refusal stays on that screen with its reasons. There is one route to an order from
+Build, not two.
 
 **Screen 5 — Nothing today**
-A real screen, not an error state. States why: signals not aligned, or options priced expensively versus their average. Offers to notify.
+A real screen, not an error state. `runWizard` decides in order: data missing → signals not
+aligned → options expensive versus their own history → **every candidate filtered out by the
+quality floors (§4b)** → nothing fits the budget → only one road survives. A missing-data answer
+is never dressed up as a market verdict, and a board emptied by the floors is never reported as
+a budget problem: they are different sentences on screen, and `wizard.test.jsx` holds that line.
+Offers to notify.
 
 ---
 
@@ -131,7 +213,7 @@ Every visual is generated from the same `payoff(legs, S)` function. Never comput
 | Wizard open | none — text only | — |
 | Three questions | none | — |
 | Two roads | band thumbnails, one per candidate | — |
-| Compare (optional, max 3) | overlaid payoff curves | shared histogram with each breakeven marked |
+| Compare (optional, max 3) — **NOT BUILT** | overlaid payoff curves | shared histogram with each breakeven marked |
 | Confirm | unified position component | risk checklist |
 | Positions list | band thumbnails | — |
 | Position detail | gauge (large) | payoff (small), histogram on demand only |
@@ -145,7 +227,7 @@ Price is the **vertical** axis, exactly as it is in the unified component, so th
 
 **Unified position component** — price history → dispersion cone → terminal distribution → payoff rotated 90°, all sharing ONE vertical price axis, with a horizontal dashed line running from today's spot through to the payoff. Cone and distribution switch on based on available width: one component, two levels of detail.
 
-**Backtest** — always straight, never arced. Empirical histogram of historical outcomes with the theoretical model curve overlaid; the divergence between them is the point. Explicit percentages on each zone. Seasonal filter (same-month windows only). Year-by-year bar row so a single good year can't hide behind an average. Grey out and warn when the sample drops below 30 windows.
+**Backtest** — always straight, never arced. Empirical histogram of historical outcomes with the theoretical model curve overlaid; the divergence between them is the point. Built: the Monte Carlo histogram, the year-by-year row (one clickable button per year, opening a month-by-month replay of that year under the exit rules), and the same-month window — `histBacktest` replays forward from the current month, so the seasonal filter is inherent rather than a toggle. **NOT BUILT:** the "grey out and warn below 30 windows" guard. Alpha Vantage gives roughly 10–20 years for these ETFs, so the sample is *always* under 30 windows; the screen shows YEARS TESTED but does not warn that the number is small.
 
 **Every visual exposes two functions.** `takeaway()` returns one always-visible sentence stating the conclusion, generated from the numbers. `explain(element)` returns the explanation of a single data point, on tap. Neither is ever hand-written text.
 
@@ -157,7 +239,11 @@ On mobile there is no hover. Tap to open, tap outside to close, and on narrow sc
 
 ## 7. Signal engine — 4-factor confluence
 
-Currently weather and news are decoration: they render tabs and never reach any decision. Fix that.
+**BUILT.** Weather and news were once decoration — they rendered tabs and reached no
+decision. They now reach every decision: `fuseSignals()` is what ranks the Radar, what
+scales the guided flow's candidate scores, and what the "Why this trade" panel renders.
+Weather and News are no longer tabs at all; they are the drill-down behind their own bars
+in that panel (see §12).
 
 `fuseSignals()` returns a score (−100..+100), a confidence (0..100), four components, an agreement verdict, and a narrative.
 
@@ -166,9 +252,15 @@ Currently weather and news are decoration: they render tabs and never reach any 
 - **Seasonal and technical** — reuse existing functions.
 - **Fusion** — 3+ agreeing → CONFLUENT, high confidence. Opposing directions → CONFLICT, confidence under 40, and the narrative must name which factors contradict each other. Weather and geopolitical news agreeing on the same ticker is a reinforced signal and applies a multiplier.
 
-Narratives must contain numbers. "Signals are positive" is a failure.
+Narratives must contain numbers. "Signals are positive" is a failure. `verdictNarrative()`
+in `signals.js` writes the guided flow's narrative from the real counts, and only writes a
+clause when there is a number to put in it — so "we read 0 headlines" says something
+different from "we read 14, 3 of them geopolitical" rather than being the same sentence
+with a zero in it. It also reports what the quality floors (§4b) removed, and where the
+liquidity floor was skipped for want of open-interest data.
 
-News must load at startup for the current ticker, not lazily when a tab opens.
+News loads at startup for the current ticker, not lazily when a tab opens: `loadNews` runs
+from a `useEffect` keyed on the ticker, and the ticker has a value on first render.
 
 ---
 
@@ -193,7 +285,12 @@ The third one is the hard case and the point of the exercise: the P&L is fine, n
 Pure function: `evaluateTrade({ proposal, portfolio, capital, signals })` → `{ pass, violations, warnings }`.
 
 Hard blocks: undefined risk; per-trade limit exceeded; total exposure exceeded; DTE at entry below threshold; account not in paper mode (if unverifiable, reject).
-Warnings: signal agreement is CONFLICT; confidence under 40; stop-loss threshold reached.
+Warnings: signal agreement is CONFLICT; confidence under 40; stop-loss threshold reached; **the capital questions are unanswered**, so the limits being enforced are the suggested starting point rather than the user's own (§3).
+
+The gate is about whether an order may leave. The **quality floors (§4b) are a different
+question** — whether a structure should ever have been offered — and they are applied where
+candidates are generated, not here. A trade the user builds by hand on the full desk is his
+to make; a trade the app *proposes* has to clear both.
 
 Every violation carries readable numbers: `"Max loss $340 = 6.8% of capital (your limit: 5%, i.e. $250)"`.
 
@@ -203,35 +300,194 @@ Every violation carries readable numbers: `"Max loss $340 = 6.8% of capital (you
 
 ## 9. Autopilot
 
-Today it exits immediately when there are no positions. Restructure into two phases.
+A Netlify scheduled function, weekdays at 11:00 UTC.
 
-**MANAGE** — existing logic, plus `fuseSignals` added to the facts sent to the model.
-**OPEN** — runs always. Scan watchlist, keep only CONFLUENT and confidence ≥ 70, build defined-risk structures matching the signal direction at ~45 DTE, run every proposal through the gate.
+**MANAGE — BUILT.** For each open position it fetches the chain, marks the position,
+computes the Thesis Integrity Score and the exit simulation, and asks the model for a
+verdict; mechanical rules then override the model in the three cases where a rule is not
+negotiable (take-profit reached, stop warning reached, inside the exit-DTE window). Every
+non-HOLD verdict goes through `evaluateTrade` **before** an approval link is created, and
+`approve.mjs` runs the gate again at execution time, up to 24 hours later.
 
-The brief has three sections: OPEN POSITIONS, NEW PROPOSALS, **REJECTED BY GATE** — the last with exact reasons. Nothing executes without a human tapping an approval link.
+It no longer exits immediately when there are no positions: "Notify me" on the
+nothing-today screen sets `settings.notifyWhenReady`, that flag reaches the server in the
+`/api/state` payload, and with it on the autopilot still produces a brief when nothing is
+open — because "still nothing, and here is why" is exactly what was asked for. The brief
+states whether the watch is on rather than obeying it silently.
+
+**OPEN — NOT BUILT.** Nothing scans the watchlist for new positions; the brief's NEW
+PROPOSALS section says so in as many words rather than sitting empty. When it is built it
+must apply the §4b quality floors as well as the gate.
+
+The brief has three sections: OPEN POSITIONS, NEW PROPOSALS, **REJECTED BY GATE** — the
+last exists even when it is empty, and carries the gate's exact reasons. Nothing executes
+without a human tapping an approval link.
 
 ---
 
-## 10. Build order
+## 10. What shipped
 
-| When | What | Done when |
+The build order was a plan for a future builder. It is now a record.
+
+| What | Status |
+|---|---|
+| Repo on GitHub, Netlify linked for auto-deploy | **DONE** — a push publishes the site |
+| `CLAUDE.md` written from this file | **DONE**, and carrying the standing rule about session debts |
+| `src/engine.js` extracted; the duplicated Black-Scholes, payoff, probability and seasonal tables deleted from `autopilot.mjs` | **DONE** — client and functions both import it |
+| `src/signals.js` + tests; narratives contain numbers | **DONE** |
+| Signals wired into scan ranking and UI; news load at startup; CONFLICT candidates rank last | **DONE** (`compareCandidates` puts CONFLICT last whatever its expected value) |
+| `src/riskGate.js` + tests; every order path routed through it | **DONE** — six paths, all gated (see CLAUDE.md) |
+| Wizard screens 1–5; capital model and pills | **DONE**; the capital model became one derived source in this session (§3) |
+| Demo access for judges (`?demo=<DEMO_TOKEN>`, broker buttons disabled, three didactic positions) | **DONE** (§7b) |
+| Alpaca as the primary option-chain source, CBOE as the net | **DONE** (§11) |
+| Open interest from the trading API, non-blocking and labelled | **DONE** (§11) |
+| Quality floors on every candidate | **DONE** (§4b) |
+| Backtest: 7 vs 14 vs 21 DTE on two underlyings, `report.md` | **NOT BUILT** (§4) |
+| Video and deck | **NOT VERIFIED HERE** — outside the repo |
+
+---
+
+## 10b. The copilot, and what the Journal is a record of
+
+**The call streams.** `ai.mjs` passes Anthropic's server-sent events straight through and
+`askAI` always asks for them. Buffering the whole answer first left the connection silent for
+the tens of seconds an analysis takes to write, and a gateway kills a silent connection — the
+browser got an HTML page reading *"Too much time has passed without sending any data for
+document"* where the analysis should have been. Streaming also means the answer is shown as it
+is written rather than after a motionless wait, which is the difference between "thinking" and
+"hung". An HTML body is now reported as the timeout it is (`gatewayPageMessage()`), never
+dumped as markup.
+
+The copilot answers in **markdown**, and the panel renders it (`Markdown` in `pro.jsx`).
+Printing it raw put `## 1. STRUCTURE`, `**Ticker:**` and a wall of `|---|` pipes on screen —
+the content was fine, it was being shown as source. The system prompt now writes for someone
+learning rather than a professional: prose, at most four plain-English sections, terms defined
+on first use, and an explicit ban on restating the legs, the greeks and the max loss that the
+Build screen already shows a centimetre away. Tables coming back is a sign the prompt drifted.
+
+**The Journal is the record of what the app did, and the copilot is part of that.** An analysis
+run from the panel is filed in `store.copilotLog` — local only, capped, never in the shared
+`/api/state` blob — listed in the Journal under the question that produced it, and quoted in
+the report. Before, the report cited "the copilot's read" from its own separate model call
+while the panel's runs left no trace anywhere, so the two documents described the same day
+differently. The panel can also print what is on screen.
+
+---
+
+## 11. Data sources — what each number on screen actually is
+
+| What | Where it comes from | What it is *not* |
 |---|---|---|
-| Day 0 | Repo `options-strategy-lab` on GitHub, Netlify linked for auto-deploy | A push publishes the site |
-| Day 0 | `CLAUDE.md` written from this file | Rules present in repo |
-| Day 1 | Extract `src/engine.js`; delete the duplicated Black-Scholes, payoff, probability and seasonal tables from `autopilot.mjs` | Build passes, three sample positions return identical numbers before and after |
-| Day 1 | `src/signals.js` + tests | Six test cases pass; narratives contain numbers |
-| Day 2 | Signals wired into scan ranking and UI; news load at startup | CONFLICT candidates rank last |
-| Day 2 | `src/riskGate.js` + tests; every order path routed through it | A trade at 10% of capital is refused with the exact figure |
-| Day 3 | Wizard screens 1–5; capital model and pills | A new user reaches a confirmable proposal without seeing a Greek |
-| Day 3 | Demo access for judges (read-only token, three example positions) | `?demo=<DEMO_TOKEN>` opens the site, every broker button is disabled, three didactic positions are preloaded |
-| Day 4 | Backtest: 7 vs 14 vs 21 DTE on two underlyings | `report.md` with assumptions and limitations |
-| Day 4 | Video and deck | Recorded |
-| Day 5 | Submit, morning | Submitted |
+| Option chain, greeks, implied volatility | **Alpaca snapshots** (`data.alpaca.markets`, via `chainAlpaca.mjs`), with **CBOE delayed quotes as the fallback** | Not OPRA, not the consolidated tape. The Basic plan is an **indicative** feed and delayed. The UI must never call it real-time. |
+| Which feed a given chain came from | `feedName(chain)` / `sourceNote(chain)` in `src/chain.js` — the ONLY things that decide what the data is called | Never a literal "CBOE" or "Alpaca" typed into a component. Two places naming one feed is a screen that contradicts itself. |
+| Open interest | **Alpaca's trading API**, `GET /v2/options/contracts` (`open_interest`, `open_interest_date`), through the existing `/api/alpaca` proxy, fired *after* the chain is on screen | Not live, and never estimated. It is the **previous session's close**; `openInterestNote()` says so with the broker's own date. When the call does not land the column disappears rather than printing dashes. |
+| Price history (underlying daily bars) | **Alpha Vantage**, with Alpaca's IEX bars tried first when keys are present | — |
+| Weather forecasts | **Open-Meteo**, 14-day, read against each region's own monthly climate norm | Never a fixed temperature threshold. |
+| Execution | **Alpaca paper** only, `paper-api.alpaca.markets`, verified by the `X-OSL-Paper-Endpoint` header the gate checks | If paper cannot be verified, the order is rejected. |
+| The autopilot's chain | Its own CBOE delayed-quote fetch, independent of the client's `chain.js` | This is the one place that names a feed outside `chain.js`, and it is accurate there because that function really does only call CBOE. |
 
 ---
 
-## OPEN — decide before Day 1
+## 12. Desk navigation — three places, and evidence underneath
 
-1. **Computer access before Thursday?** Needed for the local MCP server and video recording. If not available, the MCP demo moves server-side and the plan changes now, not Wednesday.
-2. **Which two underlyings for the backtest?** Default assumption: UNG and CORN.
-3. **Autopilot notifications** — currently approval links by brief. Push notifications are out of scope before submission.
+The desk has **three destinations only**: **Build** (one trade, taken apart), **Positions**,
+**Journal**. Settings sits behind the gear, not in the row.
+
+Everything that used to be a tab is now **evidence for the trade on Build**, opening directly
+underneath the strip that reveals it: **Radar** (was Scan), **Shortlist** (was Optimize),
+**Market levels**, **History**, **Copilot**.
+
+- **Bench was renamed Build.** It was the Builder, then the Bench; the tab id is `"build"` and
+  "Bench" survives nowhere in the code or the copy, because a beginner cannot guess what a
+  bench is for. **Shortlist keeps its name** — it is the list of candidate structures, which
+  is what the word means.
+- **Weather and News are not tabs.** They are the drill-down behind the "Why this trade" panel:
+  tapping the weather bar opens the regions and their anomalies, tapping the news bar opens the
+  headlines with their tags. The toggle that opens the four factor bars **names them** —
+  "Show the four readings: Seasonality, Price trend, Weather and News flow" — because "show
+  detail" was a door with no sign on it and nobody opened it.
+- **An evidence panel is written next to the strip that opens it.** Market levels, History and
+  Copilot were once written after the whole builder block, so opening one rendered it ~2,000px
+  down a page that does not scroll: on a phone the tap looked like it did nothing, and both were
+  reported as broken features. A panel that needs prices and has none must **say so**; rendering
+  nothing is the same failure with a different cause.
+- **An evidence panel owns no state.** It is mounted only while it is the open one, so every
+  other chip in the strip unmounts it. The Copilot's conversation lived inside it and was
+  destroyed on the next tap — an answer that arrived while the panel was shut never reached the
+  screen at all. The conversation belongs to `App.jsx`; the panel is a view of it, and the chip
+  says when it is thinking or holding an answer.
+- **Anything the app does by itself has to say that it did.** The Journal's report writes itself
+  when one is due and you open the tab, copilot section included. Silently finding a document
+  where there was nothing is indistinguishable from a bug, so the report says it wrote itself
+  and why.
+- A trade reaches Build through **one function**, `openOnBuild()` in `App.jsx`, built on
+  `buildHandOff()` in `src/handoff.js`.
+
+---
+
+## NEXT — the plan for the next two sessions
+
+Do not re-derive this. One numbered path, macro to micro:
+
+1. **Radar** — the wide scan across all markets, already filtered by the quality floors (§4b).
+2. **Shortlist** — the candidates that survived, where up to three can be compared side by side
+   and saved to come back to.
+3. **Build** — the detail: chain, greeks, charts, order.
+
+The guided "Find opportunities" flow feeds into that same Radar rather than jumping straight to
+two roads. Evidence — weather, news, seasonal, technical — stays as sub-panels at every level.
+
+After that:
+
+- **Settle the liquidity floor with the readout, and write the number down.** The Shortlist now
+  prints the open-interest distribution of every loaded chain against the floor (§4b). The next
+  session with live access should load all five markets on a quiet day, read the near-the-money
+  "clear 25" share for each, and either confirm 25 or move it — then record the measured
+  distribution in §4b so the constant stops being an inference from one walkthrough. This is the
+  oldest carried-forward debt in the file and the readout exists specifically to close it.
+- One simplified multi-leg thumbnail used everywhere: shape, bands, meaningful vertical bars,
+  and no unreadable candles at 80px. **This is the next thing to build** — the candle line is
+  the least readable thing on the roads screen at the size it is drawn.
+- Gauge plus thumbnail on Radar and Shortlist.
+- ~~On Build, place the payoff beside the price chart on the shared price axis.~~ **DONE** —
+  it is the right-hand strip of `UnifiedView`, cut from the same `curve` as the green bands,
+  shown above `PAY_MIN_W` and folded away on a phone.
+
+### AFTER THE SUBMISSION
+
+- The guided flow and the desk are two implementations of the same path and do not share state.
+  Unify them behind one state object.
+- Remove concepts repeated across panels so each idea lives in exactly one place.
+
+---
+
+## OPEN — still undecided
+
+1. **Which two underlyings for the backtest?** Default assumption: UNG and CORN. Moot until the
+   7-vs-14-vs-21 backtest is built at all (§4).
+2. **Autopilot notifications** — approval links by brief. Push notifications remain out of scope.
+
+---
+
+## NOT VERIFIED — carried forward for the next session
+
+The standing rule in `CLAUDE.md`: every session starts by fixing what the last one flagged, and
+ends by writing down what it could not verify. Currently open:
+
+- **The two quality-floor values have not been measured against a live chain.** The sandbox that
+  wrote them has no outbound access to `cdn.cboe.com` or `data.alpaca.markets` (the egress proxy
+  answers 403), so 25 and 0.25 come from the reported live SOYB and WEAT examples and from the
+  structure of these markets, not from a survey of all five chains. **The next session with live
+  access should print the open-interest distribution per expiry for UNG, CORN, SOYB, BOIL and
+  WEAT and confirm that 25 does not empty a quiet market.** The app now does the printing
+  itself — the readout at the bottom of the Shortlist (§4b) — so this needs a session with live
+  chains and a screenshot, not new code. If 25 is wrong, the floors are named constants in one
+  file and the screens read them.
+- **The live Anthropic call.** No `ANTHROPIC_KEY` in the sandbox. `ai.mjs` now returns what it
+  sent — the model, the header names, and whether `anthropic-workspace-id` went out — alongside
+  the API's own error, so the screen distinguishes an unset variable from a bad key from a bad
+  request.
+- **The live open-interest call.** No `ALPACA_KEY` in the sandbox; the request shape is verified
+  against Alpaca's SDK and driven against a stub, not the broker.
+- **`src/fixtures/alpaca-chain-UNG.json` is still synthetic.** `node scripts/capture-alpaca-chain.mjs UNG`
+  with real keys replaces it.

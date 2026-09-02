@@ -126,7 +126,7 @@ export function parseCboeJson(sym, j, now = Date.now()) {
     };
   }
   const expirations = Object.keys(byExp).sort();
-  if (!expirations.length) throw new Error("chain vuota");
+  if (!expirations.length) throw new Error("the chain came back with no usable expirations");
   return { spot, byExp, expirations, updated: new Date().toISOString(), source: SOURCE.cboeDirect };
 }
 
@@ -376,6 +376,53 @@ export async function enrichOpenInterest(sym, chain, opts = {}) {
 export function openInterestNote(chain) {
   if (!chain?.oiSource) return "Open interest as reported by the feed.";
   return `Open interest is the previous session's close${chain.oiAsOf ? `, as of ${chain.oiAsOf}` : ""}, from the broker's contract list — not a live count.`;
+}
+
+/* ---------------------------------------------------------------------------
+ * WHAT THE CHAIN ACTUALLY CONTAINS, so the floor can be argued with.
+ *
+ * `RULES.minOpenInterestPerLeg` was chosen from a handful of live legs seen in
+ * one walkthrough. That is evidence, not a measurement, and nobody can settle
+ * it from inside the app's code: it needs a market-data feed the developer
+ * cannot reach. So the app reports what it sees instead — the distribution of
+ * open interest across the chains actually loaded, with the share of contracts
+ * that clear whatever floor is passed in.
+ *
+ * Two figures, because they answer different questions. `all` covers every
+ * contract in the chain and is dominated by far-out strikes nobody trades;
+ * `near` covers strikes within `nearPct` of spot, which is where these
+ * structures are actually built, and is the one that decides whether the floor
+ * is sensible or is emptying markets.
+ *
+ * Pure, and it never invents a number: a contract whose count is unknown is
+ * counted as unknown, never as zero. That is the same rule `qualityFloor()`
+ * applies, for the same reason.
+ * ------------------------------------------------------------------------- */
+export function oiProfile(chain, { floor = 0, nearPct = 0.1 } = {}) {
+  if (!chain?.expirations) return null;
+  const S = Number(chain.spot);
+  const all = [], near = [];
+  let total = 0, unknown = 0;
+  for (const e of chain.expirations) {
+    for (const side of ["calls", "puts"]) {
+      for (const [k, c] of Object.entries(chain.byExp?.[e]?.[side] || {})) {
+        total++;
+        const raw = c?.oi;
+        if (raw == null || raw === "" || !Number.isFinite(Number(raw))) { unknown++; continue; }
+        const n = Number(raw);
+        all.push(n);
+        if (S > 0 && Math.abs(Number(k) - S) <= S * nearPct) near.push(n);
+      }
+    }
+  }
+  const stat = (xs) => {
+    if (!xs.length) return { count: 0, median: null, p90: null, max: null, clearing: 0, share: null };
+    const s = [...xs].sort((a, b) => a - b);
+    const q = (f) => s[Math.min(s.length - 1, Math.floor(f * s.length))];
+    const clearing = s.filter((x) => x >= floor).length;
+    return { count: s.length, median: q(0.5), p90: q(0.9), max: s[s.length - 1], clearing, share: clearing / s.length };
+  };
+  return { total, unknown, known: all.length, reports: all.length > 0, all: stat(all), near: stat(near) };
 }
 
 /** Shape-check what came back over the wire before the app trusts it. */

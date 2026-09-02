@@ -717,7 +717,7 @@ const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
  * @returns an array of paragraphs.
  */
 export function verdictNarrative({ basket = [], examined = [], excluded = [], newsItems = [], weatherData = null,
-  month = new Date().getMonth(), weights = DRIVER_PRESETS.balanced, chosen = [], now = Date.now() } = {}) {
+  month = new Date().getMonth(), weights = DRIVER_PRESETS.balanced, chosen = [], floors = null, now = Date.now() } = {}) {
   const w = normaliseWeights(weights);
   const m = MONTHS[month];
   const out = [];
@@ -755,6 +755,35 @@ export function verdictNarrative({ basket = [], examined = [], excluded = [], ne
         `${read.length ? ` (${list(read)})` : ""}. ${clauses.map((c) => c[0].toUpperCase() + c.slice(1)).join("; ")}.`
       : `All ${basket.length} came through to the shortlist.`)
   );
+
+  /* 1b) What the QUALITY FLOORS threw out. A structure filtered for liquidity
+     or for reward-to-risk never reaches the screen, so the only place the user
+     can learn it existed is here — and being told "we built eleven and kept
+     two" is the difference between a shortlist and a shrug. When open interest
+     was unavailable the skip is stated too: missing data is not illiquidity,
+     and a floor that was never applied must not be reported as one that was. */
+  if (floors) {
+    const cut = (floors.liquidity || 0) + (floors.reward || 0);
+    const bits = [];
+    if (floors.liquidity > 0) {
+      bits.push(`${plural(floors.liquidity, "structure", "structures")} had a leg with fewer than ` +
+        `${RULES.minOpenInterestPerLeg} contracts open on it — a price nobody has traded is a quote, not a market`);
+    }
+    if (floors.reward > 0) {
+      bits.push(`${plural(floors.reward, "structure", "structures")} paid less than ` +
+        `${Math.round(RULES.minRewardRisk * 100)} cents for every dollar at risk, which needs a hit rate no ` +
+        `structure here actually prices`);
+    }
+    if (cut > 0) {
+      out.push(`${plural(cut, "candidate", "candidates")} on ${list(floors.markets || [])} ${cut === 1 ? "was" : "were"} ` +
+        `built and then thrown away before you saw ${cut === 1 ? "it" : "them"}: ${bits.join("; ")}.`);
+    }
+    if ((floors.oiUnavailable || []).length) {
+      out.push(`On ${list(floors.oiUnavailable)} the feed reported no open interest at all, so the liquidity ` +
+        `floor was SKIPPED there rather than applied. Nothing was rejected for it: not knowing how many ` +
+        `contracts are open is not the same as knowing that none are.`);
+    }
+  }
 
   /* 2) News — counted, not characterised. */
   const tagged = newsItems.filter((n) => (n.impacts || tagImpacts(n.title || "")).some((im) => basket.includes(im.tk)));

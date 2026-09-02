@@ -7,7 +7,7 @@ export default async (req) => {
   const k = Netlify.env.get("ALPACA_KEY"), s = Netlify.env.get("ALPACA_SECRET");
   // storico del singolo contratto opzione (OCC) via Alpaca options data
   if (occ) {
-    if (!k || !s) return Response.json({ error: "servono ALPACA_KEY/SECRET per lo storico opzioni" }, { status: 503 });
+    if (!k || !s) return Response.json({ error: "ALPACA_KEY and ALPACA_SECRET are needed for the price history of a single option contract." }, { status: 503 });
     try {
       const start = new Date(Date.now() - 180 * 864e5).toISOString();
       const r = await fetch(`https://data.alpaca.markets/v1beta1/options/bars?symbols=${occ}&timeframe=1Day&start=${start}&limit=200`, {
@@ -15,7 +15,7 @@ export default async (req) => {
       });
       const j = await r.json();
       const arr = j.bars?.[occ] || [];
-      if (!r.ok || !arr.length) return Response.json({ error: j.message || "nessun dato per questo contratto (potrebbe essere troppo recente o illiquido)" }, { status: 502 });
+      if (!r.ok || !arr.length) return Response.json({ error: j.message || "No price history for this contract — it may be too recently listed, or too thinly traded to have printed a daily bar." }, { status: 502 });
       const bars = arr.map((x) => ({ time: x.t.slice(0, 10), value: x.c, volume: x.v }));
       return Response.json({ bars, source: "Alpaca options" }, { headers: { "Cache-Control": "public, max-age=600" } });
     } catch (e) { return Response.json({ error: String(e.message || e) }, { status: 502 }); }
@@ -52,5 +52,5 @@ export default async (req) => {
       }
     } catch { /* niente */ }
   }
-  return Response.json({ error: "nessuna fonte barre configurata (ALPACA_KEY/SECRET o ALPHAVANTAGE_KEY)" }, { status: 503 });
+  return Response.json({ error: "No price-history source is configured: set ALPACA_KEY and ALPACA_SECRET, or ALPHAVANTAGE_KEY, in the Netlify environment." }, { status: 503 });
 };

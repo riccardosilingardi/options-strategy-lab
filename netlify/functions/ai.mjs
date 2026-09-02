@@ -22,7 +22,37 @@ export default async (req) => {
     if (workspace) headers["anthropic-workspace-id"] = workspace;
 
     const body = await req.text();
+    // STREAM WHEN ASKED TO, AND THAT IS THE DEFAULT FOR THE COPILOT.
+    //
+    // This function used to await the WHOLE answer before sending a single byte
+    // back. A pre-trade analysis takes tens of seconds to write, and a gateway
+    // that sees a connection sit silent that long kills it — the browser then
+    // gets an HTML error page ("Too much time has passed without sending any
+    // data for document") instead of JSON, which is exactly what happened.
+    //
+    // Passing the SSE stream straight through means bytes move from the first
+    // token onward, so nothing is ever idle long enough to be timed out, and the
+    // reader watches the answer arrive instead of watching a spinner.
+    let wantsStream = false;
+    try { wantsStream = JSON.parse(body)?.stream === true; } catch { /* body is checked below */ }
+
     const r = await fetch("https://api.anthropic.com/v1/messages", { method: "POST", headers, body });
+
+    // An error is JSON even on a streaming request: read it and fall through to
+    // the reporting below rather than streaming an error page.
+    if (wantsStream && r.ok && r.body) {
+      return new Response(r.body, {
+        status: 200,
+        headers: {
+          "Content-Type": "text/event-stream; charset=utf-8",
+          "Cache-Control": "no-cache, no-transform",
+          "Connection": "keep-alive",
+          // Some proxies buffer a response until it completes, which would put
+          // the silence back. This is the conventional ask not to.
+          "X-Accel-Buffering": "no",
+        },
+      });
+    }
     const out = await r.text();
 
     // Pass the real API error through unchanged where it already is one, and
@@ -42,7 +72,20 @@ export default async (req) => {
       const hint = !workspace && /workspace/i.test(message)
         ? " — set ANTHROPIC_WORKSPACE_ID in the Netlify environment variables: this key belongs to a workspace, and Anthropic will not accept the call without it."
         : "";
-      return Response.json({ error: { type, message: message + hint, status: r.status } }, { status: r.status });
+      // WHAT WE SENT, so the failure names its own cause. When this panel fails
+      // the three candidates are: the variable is not set, the key is wrong, or
+      // the request itself is malformed — and from the screen alone they look
+      // identical. These three facts separate them without exposing anything:
+      // whether the workspace header went out (not its value), which headers
+      // were attached (names only, never the key), and which model was asked
+      // for. Nothing secret is echoed: `x-api-key` appears as a name only.
+      const sent = {
+        workspaceHeader: workspace ? "sent" : "not sent (ANTHROPIC_WORKSPACE_ID is empty or unset)",
+        headers: Object.keys(headers).sort(),
+        endpoint: "https://api.anthropic.com/v1/messages",
+        model: (() => { try { return JSON.parse(body)?.model || null; } catch { return null; } })(),
+      };
+      return Response.json({ error: { type, message: message + hint, status: r.status, sent } }, { status: r.status });
     }
     return new Response(out, { status: r.status, headers: { "Content-Type": "application/json" } });
   } catch (e) {

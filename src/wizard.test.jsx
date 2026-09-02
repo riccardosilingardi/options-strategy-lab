@@ -1,7 +1,9 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { CapitalOnboarding, WizardOpen, FindOpportunities, WizardCandidates, WizardConfirm, NothingToday, statusLine, tradeOffSentence, roadHeadline, gateChecklist } from "./wizard.jsx";
+import { CapitalOnboarding, WizardOpen, FindOpportunities, WizardCandidates, ConfirmSteps, NothingToday, statusLine, tradeOffSentence, roadHeadline, gateChecklist } from "./wizard.jsx";
 import { evaluateTrade } from "./riskGate.js";
+import { WhyThisTrade } from "./why.jsx";
+import { Markdown, sseDeltas, gatewayPageMessage } from "./pro.jsx";
 import { sizing, NOTHING_TODAY, RULES } from "./rules.js";
 import { DRIVER_PRESETS, normaliseWeights, presetOf, rankByDrivers, verdictNarrative } from "./signals.js";
 
@@ -30,6 +32,152 @@ check("onboarding shows the 1-position pill before the choice", () => {
   has(h, "all your risk sits on one outcome");
   // the pill must appear BEFORE the Start button in the markup
   if (h.indexOf("all your risk sits on one outcome") > h.indexOf(">Start<")) throw new Error("pill rendered after the confirm button");
+});
+
+/* ---- THE COPILOT'S ANSWER IS RENDERED, NOT PRINTED ---- */
+
+check("the copilot's markdown is rendered, never shown as source", () => {
+  // This is the shape the model actually returns, taken from a live run that
+  // reached the screen as `## 1. STRUCTURE`, `**Ticker:**` and a wall of pipes.
+  const real = [
+    "---", "", "## 1. STRUCTURE", "",
+    "**Ticker:** UNG | Spot: **$10.58**", "",
+    "| Leg | Side | Strike |", "|-----|------|--------|", "| Long put | +1 | $10.00 |", "",
+    "- The $10.00/$10.50 put spread is a **short bull put spread**",
+    "- The $10.50/$11.50 call spread is a long call spread", "",
+    "```", "Max Profit: $58", "```", "",
+    "1. First step", "2. Second step",
+  ].join("\n");
+  const h = renderToStaticMarkup(<Markdown text={real} />);
+  for (const raw of ["##", "**", "|---", "```"]) {
+    if (h.includes(raw)) throw new Error(`markdown source ${JSON.stringify(raw)} reached the screen`);
+  }
+  for (const tag of ["<table", "<ul", "<ol", "<b ", "<hr"]) has(h, tag);
+  has(h, "STRUCTURE");
+  // the heading keeps its words and loses its numbering
+  if (h.includes(">1. STRUCTURE<")) throw new Error("the heading kept its numbering");
+});
+
+check("an empty or absent answer renders nothing rather than crashing", () => {
+  if (renderToStaticMarkup(<Markdown text="" />) !== "") throw new Error("empty text should render nothing");
+  if (renderToStaticMarkup(<Markdown text={null} />) !== "") throw new Error("null text should render nothing");
+});
+
+/* ---- THE COPILOT STREAMS, SO A GATEWAY CANNOT TIME IT OUT ---- */
+
+const delta = (t) => `event: content_block_delta\ndata: ${JSON.stringify({ type: "content_block_delta", delta: { type: "text_delta", text: t } })}\n\n`;
+
+check("the stream parser pulls the text out of Anthropic's frames", () => {
+  const buf = `event: message_start\ndata: {"type":"message_start"}\n\n` + delta("Hello ") + delta("world.");
+  const { text, rest } = sseDeltas(buf);
+  if (text !== "Hello world.") throw new Error(`assembled ${JSON.stringify(text)}`);
+  if (rest !== "") throw new Error("a complete buffer should leave no tail");
+});
+
+check("a delta split across two network reads is not dropped", () => {
+  // The whole reason the parser keeps a tail: TCP does not respect frame
+  // boundaries, and half a delta thrown away is text silently missing.
+  const whole = delta("Hello ") + delta("world.");
+  const cut = 30;
+  const first = sseDeltas(whole.slice(0, cut));
+  const second = sseDeltas(first.rest + whole.slice(cut));
+  if (first.text + second.text !== "Hello world.") {
+    throw new Error(`split read lost text: ${JSON.stringify(first.text + second.text)}`);
+  }
+});
+
+check("a finished message is told apart from a stream that just stops", () => {
+  // Without this the app cannot know the difference, and half an analysis gets
+  // filed in the Journal as a whole one.
+  const cut = sseDeltas(delta("Half a thought"));
+  if (cut.stopped) throw new Error("a stream with no message_stop was read as finished");
+  const whole = sseDeltas(delta("A whole thought.") + `event: message_stop\ndata: {"type":"message_stop"}\n\n`);
+  if (!whole.stopped) throw new Error("message_stop was not noticed");
+  if (whole.text !== "A whole thought.") throw new Error("the text was mangled by the stop frame");
+});
+
+check("an error frame stops the stream instead of being ignored", () => {
+  const buf = `event: error\ndata: ${JSON.stringify({ type: "error", error: { message: "overloaded" } })}\n\n`;
+  let threw = null;
+  try { sseDeltas(buf); } catch (e) { threw = e; }
+  if (!threw) throw new Error("an error frame passed silently");
+  has(threw.message, "overloaded");
+});
+
+check("a gateway page is reported as a timeout, never dumped as markup", () => {
+  // Exactly what came back from the live site when an analysis ran long.
+  const page = '<HTML> <HEAD> <TITLE>Inactivity Timeout</TITLE> </HEAD> <BODY BGCOLOR="white">'
+    + '<H1>Inactivity Timeout</H1><B>Description: Too much time has passed without sending any data for document.</B></BODY></HTML>';
+  const m = gatewayPageMessage(page);
+  if (!m) throw new Error("an HTML gateway page was not recognised");
+  if (/<HTML|<BODY|BGCOLOR|<H1/i.test(m)) throw new Error("the markup reached the message");
+  has(m, "Inactivity Timeout");          // the title names the cause, so it is kept
+  has(m, "gateway answered with a web page");
+  has(m, "timeout on a long analysis");
+});
+
+check("a real JSON error is left alone for the API's own sentence", () => {
+  if (gatewayPageMessage('{"error":{"message":"invalid x-api-key"}}') !== null) {
+    throw new Error("a JSON error body was mistaken for a gateway page");
+  }
+});
+
+/* ---- THE EVIDENCE TOGGLE NAMES WHAT IT OPENS ---- */
+
+check("the 'why this trade' toggle names the four readings behind it", () => {
+  const fused = {
+    ticker: "CORN", score: 30, confidence: 60, agreement: "MIXED", narrative: "CORN scores +30.",
+    components: {
+      seasonal: { dir: 1, strength: 50, why: "s" }, technical: { dir: 1, strength: 40, why: "t" },
+      weather: { dir: 0, strength: 10, why: "w" }, news: { dir: 1, strength: 20, why: "n" },
+    },
+  };
+  const h = renderToStaticMarkup(<WhyThisTrade fused={fused} />);
+  // "show detail" was a door with no sign on it and nobody opened it.
+  if (/show detail/i.test(h)) throw new Error("the toggle still hides what it opens behind the word 'detail'");
+  has(h, "Show the four readings:");
+  for (const label of ["Seasonality", "Price trend", "Weather", "News flow"]) has(h, label);
+});
+
+/* ---- THE CAPITAL MODEL: asked, never assumed (PRD §3) ---- */
+
+check("onboarding does not pre-answer either question", () => {
+  const h = renderToStaticMarkup(<CapitalOnboarding onDone={() => {}} />);
+  // Empty fields, and a button that names what is still missing rather than
+  // being a locked door with no sign on it.
+  has(h, "Still needed: how much you are trading with");
+  if (/value="5000"/.test(h)) throw new Error("the capital field pre-filled itself with the suggestion");
+  // The suggestion is on screen, visibly a suggestion the user can accept.
+  has(h, "No idea? Start from $5,000");
+});
+
+check("an unanswered capital question is labelled a suggestion, never a limit", () => {
+  const open = sizing({});
+  if (open.answered) throw new Error("nothing was answered, so nothing is answered");
+  const h = renderToStaticMarkup(<CapitalOnboarding onDone={() => {}} />);
+  has(h, "WHAT THE ANSWERS WOULD GIVE YOU");
+  if (h.includes(">YOUR LIMITS<")) throw new Error("a figure nobody chose was labelled YOUR LIMITS");
+});
+
+check("both answers given makes the same figures his", () => {
+  const h = renderToStaticMarkup(<CapitalOnboarding initial={{ capital: 5000, concurrentTarget: 4 }} onDone={() => {}} />);
+  has(h, "YOUR LIMITS");
+  has(h, "Start");
+  if (h.includes("Still needed")) throw new Error("both questions are answered; nothing is missing");
+});
+
+check("the wizard's budget step reads the capital model, and says whose it is", () => {
+  const open = sizing({});
+  const h = renderToStaticMarkup(
+    <FindOpportunities answers={{ ...ANSWERED, risk: null, horizon: null }} setAnswers={() => {}}
+      limits={open} universe={UNIVERSE} />);
+  has(h, "The suggested limit works out at");
+  has(h, "not from anything you chose");
+  const mine = sizing({ tradingCapital: 5000, concurrentTarget: 4 });
+  const h2 = renderToStaticMarkup(
+    <FindOpportunities answers={ANSWERED} setAnswers={() => {}} limits={mine} universe={UNIVERSE} />);
+  has(h2, "Your limit works out at");
+  if (h2.includes("not from anything you chose")) throw new Error("he answered; stop calling it a suggestion");
 });
 
 check("screen 1 offers TWO doors, and 'decide for me' is not one of them", () => {
@@ -360,9 +508,9 @@ const blockedResult = evaluateTrade({
   portfolio: { positions: [], account: PAPER }, capital: CAPITAL,
 });
 
-check("screen 4 states the checks in plain English with real numbers", () => {
+check("the confirm step states the checks in plain English with real numbers", () => {
   const h = renderToStaticMarkup(
-    <WizardConfirm candidate={ROADS[1]} preview={passResult} result={null} onConfirm={() => {}} onBack={() => {}} />);
+    <ConfirmSteps candidate={ROADS[1]} preview={passResult} result={null} onConfirm={() => {}} onBack={() => {}} />);
   has(h, "The checks that run when you tap");
   has(h, "$200");                       // the real max loss
   has(h, "$250 per-trade limit");       // the real derived limit
@@ -372,30 +520,30 @@ check("screen 4 states the checks in plain English with real numbers", () => {
   has(h, "Every option sold is covered by one bought");
 });
 
-check("screen 4 states the exit plan as already decided", () => {
+check("the confirm step states the exit plan as already decided", () => {
   const h = renderToStaticMarkup(
-    <WizardConfirm candidate={ROADS[1]} preview={passResult} onConfirm={() => {}} onBack={() => {}} />);
+    <ConfirmSteps candidate={ROADS[1]} preview={passResult} onConfirm={() => {}} onBack={() => {}} />);
   has(h, "Close at 50% of max gain, or at 21 days to expiration.");
   has(h, "decided now, not later");
   has(h, "not renegotiated while the position is open");
   for (const offered of ["Choose your exit", "Set a target", "Pick a stop"]) {
-    if (h.includes(offered)) throw new Error(`screen 4 is offering the exit rather than stating it: ${offered}`);
+    if (h.includes(offered)) throw new Error(`the confirm step is offering the exit rather than stating it: ${offered}`);
   }
 });
 
-check("screen 4 offers the order until the gate has spoken, then reports the refusal", () => {
+check("the confirm step offers the order until the gate has spoken, then reports the refusal", () => {
   const before = renderToStaticMarkup(
-    <WizardConfirm candidate={ROADS[1]} preview={passResult} result={null} onConfirm={() => {}} onBack={() => {}} />);
+    <ConfirmSteps candidate={ROADS[1]} preview={passResult} result={null} onConfirm={() => {}} onBack={() => {}} />);
   has(before, "Open this on paper");
   if (before.includes("Blocked by the risk gate")) throw new Error("refusing before the tap");
 
   const after = renderToStaticMarkup(
-    <WizardConfirm candidate={{ ...ROADS[1], maxLoss: -900, risk: 900 }} preview={passResult}
+    <ConfirmSteps candidate={{ ...ROADS[1], maxLoss: -900, risk: 900 }} preview={passResult}
       result={blockedResult} onConfirm={() => {}} onBack={() => {}} onDesk={() => {}} />);
   has(after, "The gate refused this");
   has(after, "Blocked by the risk gate");
   has(after, "your limit: 5%");   // the gate's own sentence, with its numbers
-  has(after, "Open it on the Build screen and change it");
+  has(after, "Change the trade above and try again");
 });
 
 check("the checklist is read off the gate, never recomputed", () => {
@@ -409,13 +557,26 @@ check("the checklist is read off the gate, never recomputed", () => {
   has(perTrade.text, "$250");
 });
 
-check("the unified component is the visual on screen 4", () => {
+check("the confirm step can carry the unified component as its visual", () => {
   const h = renderToStaticMarkup(
-    <WizardConfirm candidate={ROADS[1]} preview={passResult} onConfirm={() => {}} onBack={() => {}}
+    <ConfirmSteps candidate={ROADS[1]} preview={passResult} onConfirm={() => {}} onBack={() => {}}
       bars={[{ open: 98, high: 101, low: 97, close: 100 }]} sigma={0.25} />);
   has(h, "What this looks like");
   has(h, "<svg");
   has(h, "CORN is at $100.00");   // the generated takeaway under the chart
+});
+
+check("on Build the confirm step drops the chart and the heading it would duplicate", () => {
+  // The Build screen already shows the trade's name and its charts above. The
+  // block there is the CHECKS, the exit plan and the button — nothing repeated.
+  const h = renderToStaticMarkup(
+    <ConfirmSteps candidate={ROADS[1]} preview={passResult} heading={false} showFigure={false}
+      onConfirm={() => {}} />);
+  if (h.includes("What this looks like")) throw new Error("the chart is drawn twice on Build");
+  if (h.includes(">Confirm<")) throw new Error("the heading is drawn twice on Build");
+  has(h, "The checks that run when you tap");
+  has(h, "decided now, not later");
+  has(h, "Open this on paper");
 });
 
 check("screen 5 is a designed screen that states why and offers to notify", () => {

@@ -3,7 +3,7 @@
 
 import assert from "node:assert/strict";
 import { evaluateTrade, paperStatus, undefinedRiskLegs } from "./riskGate.js";
-import { RULES, sizing, ruleBadge } from "./rules.js";
+import { RULES, sizing, ruleBadge, qualityFloor, qualityFloorSentence, liquiditySkippedNote, NOTHING_TODAY } from "./rules.js";
 
 /* ---------------- tiny harness ---------------- */
 let passed = 0;
@@ -322,12 +322,79 @@ test("an override needs a typed reason: a bare number does not move the limit", 
   assert.equal(r.pass, true, "an override with a written reason is the user's call to make");
 });
 
-test("missing onboarding answers fall back to the defaults instead of throwing", () => {
+test("missing onboarding answers fall back to the SUGGESTED figures, and say so", () => {
   const r = evaluateTrade({ proposal: GOOD_TRADE, portfolio: EMPTY_BOOK });
-  assert.equal(r.limits.tradingCapital, RULES.defaultTradingCapital);
+  assert.equal(r.limits.tradingCapital, RULES.suggestedTradingCapital);
+  assert.equal(r.limits.answered, false, "nothing was answered, so nothing is the user's own limit");
+  // The gate still enforces — it just refuses to call a suggestion a decision.
+  assert.ok(r.warnings.some((w) => w.code === "CAPITAL_NOT_SET"),
+    "an unanswered capital question has to reach the screen, not stay in the gate");
+  assert.ok(r.warnings.find((w) => w.code === "CAPITAL_NOT_SET").message.includes("not from anything you chose"));
   assert.equal(r.pass, true);
   assert.doesNotThrow(() => evaluateTrade({}));
   assert.equal(evaluateTrade({}).pass, false, "no proposal, no account: nothing goes out");
+});
+
+/* ================= THE QUALITY FLOORS (rules.js) ================= */
+
+test("the live SOYB example is refused on both floors", () => {
+  // From the site: buy the 28 call at 1.16, sell the 29 at 0.30. $86 paid for a
+  // $15 maximum gain, on legs with 2 and 0 contracts open.
+  const r = qualityFloor({ openInterest: [2, 0], maxProfit: 15, maxLoss: -86 });
+  assert.equal(r.pass, false);
+  assert.equal(r.liquidity.pass, false);
+  assert.equal(r.reward.pass, false);
+  assert.ok(r.reasons[0].includes("0"), "the sentence carries the number that caused it");
+  assert.ok(r.reasons[1].includes("85%"), "and the break-even hit rate it implies");
+});
+
+test("the live WEAT example clears both floors", () => {
+  // Also from the site: $43 to make $57, on liquid strikes.
+  const r = qualityFloor({ openInterest: [900, 640], maxProfit: 57, maxLoss: -43 });
+  assert.equal(r.pass, true);
+  assert.deepEqual(r.reasons, []);
+});
+
+test("a high-probability credit spread is NOT collateral damage", () => {
+  // A 68%-chance credit spread collecting a third of its width: exactly the
+  // boring trade this app exists to teach. A floor that killed it would be a
+  // floor set too high.
+  const r = qualityFloor({ openInterest: [400, 400], maxProfit: 33, maxLoss: -67 });
+  assert.equal(r.pass, true, "0.49 reward-to-risk has to survive a 0.25 floor");
+});
+
+test("MISSING open interest skips the liquidity floor, it does not fail it", () => {
+  // Alpaca snapshots carry no open interest: `null`, not 0. Reading that as
+  // zero would reject the entire feed and call it illiquidity.
+  const r = qualityFloor({ openInterest: [null, 300], maxProfit: 57, maxLoss: -43 });
+  assert.equal(r.liquidity.checked, false, "the check was skipped");
+  assert.equal(r.pass, true, "nothing may be rejected for a number we do not have");
+  const u = qualityFloor({ openInterest: [undefined, undefined], maxProfit: 57, maxLoss: -43 });
+  assert.equal(u.liquidity.checked, false);
+  assert.equal(u.pass, true);
+  // ...and a REAL zero, which CBOE does report, still fails.
+  const z = qualityFloor({ openInterest: [0, 300], maxProfit: 57, maxLoss: -43 });
+  assert.equal(z.liquidity.checked, true);
+  assert.equal(z.pass, false);
+});
+
+test("the skip is stated, never silent", () => {
+  assert.ok(liquiditySkippedNote("Alpaca").includes("SKIPPED"));
+  assert.ok(liquiditySkippedNote("Alpaca").includes("Missing data is not evidence"));
+});
+
+test("a market emptied by the floors gets a sentence, not a blank screen", () => {
+  const t = NOTHING_TODAY.belowQualityFloor({ liquidity: 3, reward: 1, markets: ["CORN"] });
+  assert.ok(t.includes("CORN"));
+  assert.ok(t.includes("3"), "the counts are in the sentence");
+  assert.ok(t.includes(String(RULES.minOpenInterestPerLeg)) || t.includes("open on one of its legs"));
+});
+
+test("the floors are named numbers, and the copy quotes those numbers", () => {
+  assert.equal(typeof RULES.minOpenInterestPerLeg, "number");
+  assert.equal(typeof RULES.minRewardRisk, "number");
+  assert.ok(qualityFloorSentence().includes(String(RULES.minOpenInterestPerLeg)),
+    "the sentence on screen and the constant in the code cannot drift apart");
 });
 
 /* ---------------- summary ---------------- */

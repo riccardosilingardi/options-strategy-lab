@@ -45,10 +45,56 @@ An agent that cannot execute a trade it cannot justify.
 
 ## Position sizing
 
-Derived, not hardcoded. See PRD §3. The user supplies trading capital and how
-many positions they hold at once; the app derives the per-trade limit and shows
-the best-practice cap as an explained suggestion. Overrides require a typed
-reason and are stored with the position.
+Derived, not hardcoded, and **asked rather than assumed**. See PRD §3. The user
+supplies trading capital and how many positions they hold at once; `sizing()` in
+`src/rules.js` derives the per-trade and total limits and shows the best-practice
+cap as an explained suggestion. Overrides require a typed reason and are stored
+with the position.
+
+**One home, read everywhere.** Never derive, default or hardcode a capital,
+per-trade or exposure figure anywhere else. The Build screen's risk field once
+defaulted to a hardcoded 500 while the wizard quoted a derived 250 — two numbers
+for the same thing, neither of them the user's. Everything now reads
+`limits` (the `sizing()` result) from `App.jsx`.
+
+**Until both questions are answered, nothing is his limit.** `capital` and
+`concurrentTarget` are stored `null`, `sizing()` returns `answered: false`, and
+every screen printing a figure derived from the fallback labels it a suggestion
+(`capitalSourceNote()`, `limitOwner()`, `perTradeLimitPhrase()`). No literacy
+pill is generated while the questions are open — a pill explains an answer, and
+there is no answer to explain. The gate still enforces the suggested figures,
+because a proposal cannot wait for a questionnaire, and warns that it is doing so.
+
+## Quality floors — the app will not propose an indefensible trade
+
+Two named constants in `src/rules.js`, with the reasoning beside them, applied by
+one pure function `qualityFloor()` at **every** point candidates are generated:
+the guided flow's pool in `runWizard`, the Shortlist (`shortlistWithFloors`) and
+the multi-market scan. See PRD §4b for the numbers and the evidence behind them.
+
+- `minOpenInterestPerLeg` — a leg nobody trades is a quote, not a price.
+- `minRewardRisk` — below it you must be right more often than anything on these
+  chains actually prices.
+
+Two rules hold them, and both are the point:
+
+1. **Missing open interest is not low open interest.** Alpaca snapshots carry
+   `oi: null`; reading that as `0` would reject a whole feed and call it
+   illiquidity. Unknown → the check is SKIPPED and the screen says so
+   (`liquiditySkippedNote()`). A real `0` from CBOE still fails.
+2. **Never an empty screen without an explanation.** If the floors empty a
+   market, say which floor and how many: `NOTHING_TODAY.belowQualityFloor()` on
+   the refusal screen, a line on the Shortlist naming what it removed, and the
+   counts in `verdictNarrative()`.
+
+Adding a third generation site means calling `qualityFloor()` there too.
+
+**The floor is held up against the chains it is applied to.** `oiProfile()` in `chain.js`
+and `OpenInterestReadout` at the bottom of the Shortlist print what open interest the
+loaded chains actually carry — near the money and whole chain — beside the floor. It
+reports and never estimates: unknown stays unknown, and a feed with no open interest is
+named rather than drawn as zeros. It exists so `minOpenInterestPerLeg` can be settled from
+a live screen instead of re-argued from one walkthrough.
 
 ## Exit rules
 
@@ -64,12 +110,15 @@ while the position is open.
 
 - `src/rules.js` — **the single source of truth for the trading rules**. Take
   profit, stop loss, exit DTE, the entry-DTE floor and the PRD §3 sizing model
-  (`sizing()`), plus the generated rule strings (`ruleBadge()`,
-  `perTradeCapLabel()`, `copilotRulesBlock()`, `RULE_PILLS`, `NOTHING_TODAY`).
+  (`sizing()`), the two quality floors and `qualityFloor()` that applies them,
+  plus the generated rule strings (`ruleBadge()`, `perTradeCapLabel()`,
+  `copilotRulesBlock()`, `capitalSourceNote()`, `qualityFloorSentence()`,
+  `RULE_PILLS`, `NOTHING_TODAY`).
   Never write a rule number or a rule sentence anywhere else — not in a
-  component, not in a prompt, not in a serverless function. The two thresholds
-  that make the app refuse (`lowConfidence`, `expensiveIVRank`) live here too,
-  so the "nothing today" screen can only ever explain a rule the code applies.
+  component, not in a prompt, not in a serverless function. The thresholds
+  that make the app refuse (`lowConfidence`, `expensiveIVRank`,
+  `minOpenInterestPerLeg`, `minRewardRisk`) live here too, so the "nothing
+  today" screen can only ever explain a rule the code applies.
 - `src/riskGate.js` — `evaluateTrade({ proposal, portfolio, capital, signals })`,
   a pure function returning `{ pass, violations, warnings }`. Every order path
   calls it, and a screen with no gate wired in fails closed
@@ -81,10 +130,16 @@ while the position is open.
   sliders, then **"Decide for me"** as the last button), screen 3 (the verdict:
   the copilot narrative, the answers read back with a *change* link, then **two
   roads, never one** — each with a band thumbnail, a gauge, the "Why this trade"
-  evidence panel and one generated sentence naming what it gives up), screen 4
-  (confirm: the unified component, the gate's checks in plain English, the exit
-  plan stated as already decided) and screen 5 ("nothing today"). On screen 4 the
-  gate runs **after** the tap. `App.jsx` owns the `view` (`wizard` | `desk`).
+  evidence panel and one generated sentence naming what it gives up) and
+  screen 5 ("nothing today").
+  **There is no confirm SCREEN.** "Take this road" lands on Build with the trade
+  loaded, and the confirm step — what is being sent, the gate's checks in plain
+  English, the exit plan stated as already decided — is `ConfirmSteps` at the
+  BOTTOM of the Build screen, reading the live Build state, so a strike changed
+  above changes the checks below. The gate runs **after** the tap and a refusal
+  stays there with its reasons. A road must not be able to reach an order
+  without passing the screen that shows the trade.
+  `App.jsx` owns the `view` (`wizard` | `desk`).
 
   **Never pre-answer a question.** `wiz.risk` and `wiz.horizon` start `null` and
   stay null until the user answers; the button is disabled and names what is
@@ -99,8 +154,11 @@ while the position is open.
   reads as a bad trade to a beginner before they know what is being judged.
 
 - `src/why.jsx` — **the "Why this trade" panel**, and the only copy of it. The
-  agreement badge, the four factors as direction/strength bars, and the
-  drill-down behind them: weather opens the regions and their anomalies, news
+  agreement badge, the four factors as direction/strength bars behind a toggle
+  that **names them** ("Show the four readings: Seasonality, Price trend,
+  Weather and News flow", built from `FACTOR_ORDER`/`FACTOR_LABEL` so it cannot
+  drift from the bars it opens — "show detail" was a door with no sign on it and
+  nobody opened it), and the drill-down behind them: weather opens the regions and their anomalies, news
   opens the headlines with their tags. It lives here rather than in `pro.jsx`
   because the wizard's decision screen needs it too — a road with no evidence
   under it is a recommendation, and this app does not make recommendations.
@@ -258,10 +316,71 @@ send as well as on the button, so a path called some other way still cannot reac
 Alpaca. `saveState()` also stops writing to `/api/state`: that blob is a single
 shared document and a visitor must not overwrite the owner's book.
 
-Positions are opened through one function, `commitPosition()` in `App.jsx`:
-both Build's "open on paper" and the wizard's screen 4 land there, so a
-position carries the same gate record, thesis and timeline whichever way it was
-opened.
+Positions are opened through one function, `commitPosition()` in `App.jsx`, and
+there is now ONE control that calls it: the confirm step at the bottom of Build.
+The small "Open on paper" button that used to sit in the builder's header opened
+a position without the checks or the exit plan ever being read, and a road that
+went straight to a confirm page skipped the trade itself. Both are gone.
+
+- **An evidence panel owns no state.** All five are mounted only while open, so
+  every other chip unmounts them. The Copilot's conversation lived inside its
+  panel and was destroyed on the next tap — an answer that landed while it was
+  shut never reached the screen. It belongs to `App.jsx` now and is passed in;
+  the chip shows when the copilot is thinking or holding an answer. Anything
+  long-running inside a panel has to live above it.
+- **A wide chart scrolls inside ITS OWN box, never the page.** `UnifiedView` has
+  a 560px floor below which the candles, the cone and the payoff are unreadable.
+  On a 390px phone that floor made the whole page scroll sideways. The svg sits
+  in an `overflowX: auto` wrapper; the page must never move.
+- **A ResizeObserver must observe a node that exists ON MOUNT.** `UnifiedView`
+  returned its loading and error states BEFORE the wrapper carrying the ref, so
+  the ref was null when the effect ran, nothing was ever observed, and the width
+  kept its initial value for the life of the component — invisible while that
+  value happened to suit a desktop, a chart frozen at 560px in a 1382px column
+  the moment it changed. Every state renders through the same wrapper now.
+- **The payoff sits BESIDE the price chart, on the shared price axis**, in the
+  right-hand strip of `UnifiedView`, cut from the same `curve` as the green
+  bands — so the strip and the bands are the same fact read two ways. It appears
+  above `PAY_MIN_W` and folds away below it, where the full-width payoff chart
+  underneath carries it instead.
+- **THE COPILOT CALL MUST STREAM.** `ai.mjs` passes Anthropic's SSE straight
+  through when the body carries `stream: true`, and `askAI` always asks for it.
+  Buffering the whole answer first left the connection silent for the tens of
+  seconds an analysis takes to write, and a gateway kills a silent connection:
+  the browser got an HTML page — "Too much time has passed without sending any
+  data for document" — where the analysis should have been. Bytes must move from
+  the first token. `sseDeltas()` keeps the partial tail between reads, because
+  TCP does not respect frame boundaries and half a delta dropped is text
+  silently missing. `gatewayPageMessage()` turns an HTML body into a sentence
+  naming the timeout instead of dumping markup on screen. Both are pure and
+  tested; the autopilot calls Anthropic directly and has a background budget, so
+  it does not need this.
+- **A CUT-OFF ANSWER IS NEVER PRESENTED AS A FINISHED ONE.** A stream that just
+  stops is indistinguishable from one that finished unless the end is announced,
+  so `sseDeltas()` reports `stopped` (Anthropic's `message_stop`) and `askAI`
+  throws when the stream ends without it, carrying the partial text on
+  `err.partial`. The panel keeps those words — they are worth reading — under a
+  "COPILOT · CUT OFF" label that says the connection was cut rather than the
+  copilot finishing, and the analysis is NOT filed in the Journal. Half an
+  analysis recorded as a whole one is the app lying about its own work.
+- **The copilot answers in MARKDOWN.** Render it with `Markdown` in `pro.jsx` —
+  never `white-space: pre-wrap`, which put `## 1. STRUCTURE`, `**Ticker:**` and
+  a wall of `|---|` pipes on screen. The prompt asks for prose for a non-expert
+  and forbids restating the legs, greeks and max loss the screen already shows;
+  if tables start coming back, the prompt drifted, not the renderer.
+- **Anything the app does by itself has to say that it did.** The Journal's
+  report writes itself when one is due and the tab is opened. Finding a document
+  where there was nothing, with no explanation, is indistinguishable from a bug.
+- **The Journal is the record of what the app did, and that includes the
+  copilot.** An analysis run from the Copilot panel is filed in `store.copilotLog`
+  (local only, capped, never in the `/api/state` blob), listed in the Journal
+  with the question that produced it, and quoted in the report. The report used
+  to cite "the copilot's read" from its own model call while the panel's runs
+  left no trace, so the two documents described the same day differently.
+
+The gate answers "may this order leave"; the quality floors answer "should this
+have been offered at all", and they live where candidates are generated, not in
+the gate — a trade the user builds by hand is his to make.
 
 Adding a seventh means adding a gate call. Paper mode is *verified*, not
 assumed: `alpaca.mjs` returns an `X-OSL-Paper-Endpoint` header and the gate
@@ -308,7 +427,8 @@ than comparing two markets — they share a fate.
 
 The refusal is a screen, not a toast. `runWizard` in `App.jsx` decides, in order:
 data missing → signals not aligned → options expensive versus their own history →
-nothing fits the budget → only one road survives. A missing-data answer must
+every candidate below the quality floors → nothing fits the budget → only one road
+survives. A missing-data answer must
 never be dressed up as a market verdict — they are different sentences on
 screen, and `wizard.test.jsx` holds that line. "Only one candidate" is also a
 refusal: one answer is advice, two answers with their price is teaching.

@@ -25,7 +25,7 @@
 import React, { useState } from "react";
 import { Compass, Briefcase, Bell, ArrowLeft, SlidersHorizontal, ShieldCheck, ShieldAlert, AlertTriangle, Sparkles } from "lucide-react";
 import { T, BADGE_SAFE, BADGE_BTN_GAP } from "./theme.js";
-import { RULES, sizing, money, pctText, perTradeCapLabel, ruleBadge } from "./rules.js";
+import { RULES, sizing, money, pctText, perTradeCapLabel, ruleBadge, capitalSourceNote, perTradeLimitPhrase, limitOwner, qualityFloorSentence } from "./rules.js";
 import { BandThumbnail, Gauge, payoffBands, bandTakeaway, gaugeTakeaway, explainElement, UnifiedFigure, exitPlanSentence, exitPlanDetail, inTenPhrase, price } from "./visuals.jsx";
 import { DRIVERS, DRIVER_PRESETS, presetOf, normaliseWeights } from "./signals.js";
 import { WhyThisTrade } from "./why.jsx";
@@ -112,22 +112,30 @@ const BackLink = ({ onClick, label = "Back" }) => (
 ==================================================================== */
 
 export function CapitalOnboarding({ initial = {}, onDone }) {
-  const [capital, setCapital] = useState(initial.capital ?? RULES.defaultTradingCapital);
-  const [concurrent, setConcurrent] = useState(initial.concurrentTarget ?? RULES.defaultConcurrentTarget);
+  // NOTHING IS PRE-ANSWERED (PRD §5). The fields start empty and stay empty
+  // until the user types or taps. The suggested figures are offered as a
+  // visible, tappable suggestion below the box — a starting point he can see
+  // himself accepting — never as a value already sitting in the field, which is
+  // the app answering its own question and then quoting the answer back to him.
+  const [capital, setCapital] = useState(initial.capital ?? "");
+  const [concurrent, setConcurrent] = useState(initial.concurrentTarget ?? "");
   const [savings, setSavings] = useState(initial.savings ?? "");
   const [wantOverride, setWantOverride] = useState(false);
   const [ovAmount, setOvAmount] = useState("");
   const [ovReason, setOvReason] = useState("");
 
   const override = wantOverride && ovAmount ? { perTrade: +ovAmount, reason: ovReason } : null;
+  // An empty box is NULL, not a 1 and not a 0. `+concurrent || 1` turned "not
+  // answered yet" into "one position at a time" and then the app wrote a pill
+  // about it — inventing the answer and then explaining it back to him.
   const answers = {
-    tradingCapital: +capital || 0,
-    concurrentTarget: +concurrent || 1,
+    tradingCapital: capital === "" ? null : +capital || null,
+    concurrentTarget: concurrent === "" ? null : +concurrent || null,
     savings: savings === "" ? null : +savings,
     override,
   };
   const limits = sizing(answers);
-  const ready = +capital > 0 && +concurrent >= 1;
+  const ready = limits.answered;
   const reasonShort = wantOverride && ovAmount && ovReason.trim().length < RULES.minOverrideReasonChars;
 
   return (
@@ -147,8 +155,15 @@ export function CapitalOnboarding({ initial = {}, onDone }) {
             Not your savings — just the part you have decided to trade with.
           </div>
           <div style={{ marginTop: 10 }}>
-            <NumberField value={capital} onChange={setCapital} prefix="$" min={100} step={500} />
+            <NumberField value={capital} onChange={setCapital} prefix="$" min={100} step={500}
+              placeholder="amount" />
           </div>
+          {capital === "" && (
+            <button onClick={() => setCapital(RULES.suggestedTradingCapital)}
+              style={{ ...sans, fontSize: 13.5, minHeight: TAP, marginTop: 6, padding: "8px 4px", background: "transparent", border: "none", color: T.blue, cursor: "pointer", textAlign: "left" }}>
+              No idea? Start from {money(RULES.suggestedTradingCapital)} — you can change it any time.
+            </button>
+          )}
         </Question>
 
         <Question n={2} of={3} title="How many trades do you expect to have open at the same time?">
@@ -177,8 +192,10 @@ export function CapitalOnboarding({ initial = {}, onDone }) {
         {/* Pills come BEFORE the confirm button, never after it (PRD §2). */}
         {limits.pills.map((p) => <Pill key={p.id}>{p.text}</Pill>)}
 
-        <div style={{ marginTop: 18, padding: "14px 16px", background: T.bg, borderRadius: 10, border: `1px solid ${T.line}` }}>
-          <div style={{ ...mono, fontSize: 10.5, color: T.dim, letterSpacing: "0.1em" }}>YOUR LIMITS</div>
+        <div style={{ marginTop: 18, padding: "14px 16px", background: T.bg, borderRadius: 10, border: `1px solid ${limits.answered ? T.line : T.blue}` }}>
+          <div style={{ ...mono, fontSize: 10.5, color: limits.answered ? T.dim : T.blue, letterSpacing: "0.1em" }}>
+            {limits.answered ? "YOUR LIMITS" : "WHAT THE ANSWERS WOULD GIVE YOU"}
+          </div>
           <div style={{ ...sans, fontSize: 16, color: T.ink, fontWeight: 700, marginTop: 6 }}>
             {money(limits.perTradeLimit)} at risk per trade
           </div>
@@ -186,6 +203,11 @@ export function CapitalOnboarding({ initial = {}, onDone }) {
             and no more than {money(limits.totalLimit)} at risk across everything at once
             ({pctText(RULES.totalExposurePct)} of your capital). The app will refuse an order that breaks either one.
           </div>
+          {!limits.answered && (
+            <div style={{ ...sans, fontSize: 12.5, color: T.blue, marginTop: 6, lineHeight: 1.5 }}>
+              Worked from an example, because both questions above are still open. Answer them and these become yours.
+            </div>
+          )}
         </div>
 
         {/* An override is allowed, but it costs a written reason (PRD §3). */}
@@ -221,7 +243,7 @@ export function CapitalOnboarding({ initial = {}, onDone }) {
           style={{ ...sans, width: "100%", minHeight: 56, marginTop: 20, marginBottom: BADGE_BTN_GAP, fontSize: 16, fontWeight: 700, borderRadius: 10,
             cursor: ready ? "pointer" : "not-allowed", opacity: ready ? 1 : 0.5,
             background: T.amber, color: T.onAccent, border: "none" }}>
-          Start
+          {ready ? "Start" : !(+capital > 0) ? "Still needed: how much you are trading with" : "Still needed: how many positions at once"}
         </button>
         <div style={{ ...sans, fontSize: 12, color: T.dim, marginTop: 12, textAlign: "center", lineHeight: 1.5 }}>
           You can change all of this later in Settings. Educational software on a paper account, not financial advice.
@@ -462,12 +484,14 @@ export function FindOpportunities({ answers, setAnswers, limits, universe = [], 
           {/* The pill lands before the choice, not after it (PRD §2). */}
           <Pill>
             This is the most you can lose, whatever happens — the app will not build anything that risks
-            more. Your limit works out at {money(limits.perTradeLimit)} per trade, {perTradeCapLabel()}.
+            more. {limits.answered ? "Your limit works out at" : "The suggested limit works out at"}{" "}
+            {money(limits.perTradeLimit)} per trade, {perTradeCapLabel()}.
           </Pill>
+          {!limits.answered && <Pill tone={T.blue}>{capitalSourceNote(limits)}</Pill>}
           <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
             {presets.map((v) => (
               <Chip key={v} on={risk === v} onClick={() => setAnswers({ ...answers, risk: v })}>
-                {money(v)}{v === cap ? " · your limit" : ""}
+                {money(v)}{v === cap ? (limits.answered ? " · your limit" : " · suggested limit") : ""}
               </Chip>
             ))}
           </div>
@@ -478,7 +502,7 @@ export function FindOpportunities({ answers, setAnswers, limits, universe = [], 
           </div>
           {overLimit && (
             <Pill tone={T.red}>
-              {money(risk)} is over your own per-trade limit of {money(limits.perTradeLimit)}. The risk gate will
+              {money(risk)} is over {perTradeLimitPhrase(limits)} of {money(limits.perTradeLimit)}. The risk gate will
               refuse the order — change the amount here, or raise the limit in Settings and write down why.
             </Pill>
           )}
@@ -784,8 +808,11 @@ export function gateChecklist(result, proposal = {}) {
     {
       id: "per-trade",
       ok: !blocked("PER_TRADE_LIMIT"),
-      text: `${money(L.tradeRisk)} at risk against your ${money(L.perTrade)} per-trade limit` +
-        (cap ? ` — ${pctText(L.tradeRisk / cap)} of your ${money(cap)} of trading capital.` : "."),
+      // "your limit" only when it IS his. With the capital questions still open
+      // this is the suggested figure, and the confirm screen is the last place
+      // that should blur the difference.
+      text: `${money(L.tradeRisk)} at risk against ${limitOwner(L)} ${money(L.perTrade)} per-trade limit` +
+        (cap ? ` — ${pctText(L.tradeRisk / cap)} of ${L.answered ? "your" : "an assumed"} ${money(cap)} of trading capital.` : "."),
     },
     {
       id: "total",
@@ -821,9 +848,29 @@ const CheckRow = ({ ok, text }) => (
   </div>
 );
 
-export function WizardConfirm({
+/**
+ * THE CONFIRM STEP — the checks in plain English, the exit plan stated as
+ * already decided, and the one button that opens the position.
+ *
+ * It is a BLOCK, not a screen, because it now lives at the bottom of the Build
+ * screen. "Take this road" used to jump from the two roads straight to a
+ * confirm page with a send button on it, which meant the guided flow could
+ * reach an order without ever passing the desk where the trade can actually be
+ * looked at — the chain, the legs, the greeks. The road now hands off to Build
+ * and this block is the end of that screen, so there is ONE route to an order
+ * and it runs through the place where the trade is visible.
+ *
+ * Nothing here decides anything: `gateChecklist()` puts English around what
+ * `evaluateTrade()` already returned.
+ *
+ * @param candidate  { ticker, name, legs, expKey, dte, risk, maxProfit, entryNet, spot }
+ * @param preview    the gate's reading BEFORE the tap
+ * @param result     the gate's answer AFTER the tap, when there is one
+ * @param heading    false on Build, where the trade's name is already above
+ */
+export function ConfirmSteps({
   candidate, preview, result, bars = [], sigma = 0.3, driftAnnual = 0,
-  busy, onConfirm, onBack, onDesk,
+  busy, onConfirm, onDesk, heading = true, showFigure = true,
 }) {
   if (!candidate) return null;
   const c = candidate;
@@ -832,24 +879,27 @@ export function WizardConfirm({
   const refused = !!(result && !result.pass);
 
   return (
-    <div style={{ ...sans, maxWidth: 720, margin: "0 auto", padding: `16px 16px ${BADGE_SAFE}px` }}>
-      <BackLink onClick={onBack} label="Back to the two roads" />
-      <Eyebrow>Confirm</Eyebrow>
-      <h1 style={{ ...sans, fontSize: 25, fontWeight: 800, color: T.ink, margin: "6px 0 4px", lineHeight: 1.25 }}>
-        {c.ticker} · {c.name}
-      </h1>
-      <p style={{ ...sans, fontSize: 15, color: T.mut, lineHeight: 1.55, margin: 0 }}>
-        {c.legs.length} legs, expiring {c.expKey || `in ${Math.round(c.dte)} days`}. Risking {money(c.risk)} to make
-        up to {money(c.maxProfit)}.
-      </p>
+    <div>
+      {heading && (
+        <>
+          <Eyebrow>Confirm</Eyebrow>
+          <h1 style={{ ...sans, fontSize: 25, fontWeight: 800, color: T.ink, margin: "6px 0 4px", lineHeight: 1.25 }}>
+            {c.ticker} · {c.name}
+          </h1>
+          <p style={{ ...sans, fontSize: 15, color: T.mut, lineHeight: 1.55, margin: 0 }}>
+            {c.legs.length} legs, expiring {c.expKey || `in ${Math.round(c.dte)} days`}. Risking {money(c.risk)} to make
+            up to {money(c.maxProfit)}.
+          </p>
+        </>
+      )}
 
-      <Card style={{ marginTop: 14 }}>
+      {showFigure && <Card style={{ marginTop: 14 }}>
         <Eyebrow>What this looks like</Eyebrow>
         <div style={{ marginTop: 10 }}>
           <UnifiedFigure legs={c.legs} entryNet={c.entryNet} spot={c.spot} bars={bars}
             dte={c.dte} sigma={sigma} driftAnnual={driftAnnual} ticker={c.ticker} height={340} />
         </div>
-      </Card>
+      </Card>}
 
       <Card style={{ marginTop: 12 }}>
         <Eyebrow>What is being sent</Eyebrow>
@@ -903,7 +953,7 @@ export function WizardConfirm({
       {refused && onDesk && (
         <button onClick={onDesk}
           style={{ ...sans, fontSize: 14, minHeight: TAP, marginTop: 8, padding: "8px 4px", background: "transparent", border: "none", color: T.blue, cursor: "pointer", textAlign: "left", width: "100%" }}>
-          Open it on the Build screen and change it →
+          Change the trade above and try again →
         </button>
       )}
 
