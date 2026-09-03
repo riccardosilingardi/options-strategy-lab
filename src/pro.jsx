@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { RefreshCw, Send, Trash2, Download, Sparkles, FileText, XCircle } from "lucide-react";
 import { T } from "./theme.js";
-import { RULES, ruleBadge, takeProfitLabel, scaleOutLabel, stopLossLabel, exitDTELabel, perTradeCapLabel, copilotRulesBlock, money, pctText, MIN_NET_DOLLARS } from "./rules.js";
+import { RULES, ruleBadge, takeProfitLabel, scaleOutLabel, stopLossLabel, exitDTELabel, perTradeCapLabel, copilotRulesBlock, money, pctText, MIN_NET_DOLLARS,
+  NO_CEILING, reportNarrativePrompt } from "./rules.js";
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, LineStyle } from "lightweight-charts";
 import { erf, netBS } from "./engine.js";
 import { ARROW, REGIONS, regionSignals, tagImpacts, taRead } from "./signals.js";
@@ -23,6 +24,8 @@ const fmt$ = (x) => {
   const r = Math.abs(x).toFixed(0);
   return `${x < 0 && Number(r) > 0 ? "-" : ""}$${r}`;
 };
+/** A dollar figure for a model or a document, or null when there is not one. */
+const dollarsOrNull = (x) => (Number.isFinite(x) ? +Number(x).toFixed(0) : null);
 const Btn = ({ children, onClick, color = T.amber, ghost, disabled, small, title }) => (
   <button onClick={onClick} disabled={disabled} title={title}
     style={{ ...mono, fontSize: small ? 11 : 12, padding: small ? "4px 8px" : "8px 12px", borderRadius: 6, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.5 : 1, background: ghost ? "transparent" : color, color: ghost ? color : T.onAccent, border: ghost ? `1px solid ${color}66` : "none", display: "inline-flex", alignItems: "center", gap: 6 }}>{children}</button>
@@ -606,8 +609,12 @@ export function buildContext(ctx) {
     date: new Date().toISOString().slice(0, 10),
     currentTicker: ticker,
     spot,
-    currentStrategy: A ? { legs, expKey, entry: +(A.entry * 100).toFixed(0), maxProfit: +A.maxProfit.toFixed(0), maxLoss: +A.maxLoss.toFixed(0), breakevens: A.breakevens, greeks: { delta: +A.greeks.delta.toFixed(2), theta: +A.greeks.theta.toFixed(0), vega: +A.greeks.vega.toFixed(0) } } : null,
-    paperPositions: store.positions.map((p) => ({ ticker: p.ticker, name: p.name, legs: p.legs, exp: p.expKey, entry: +(p.entryNet * 100).toFixed(0), maxProfit: +p.maxProfit.toFixed(0), maxLoss: +p.maxLoss.toFixed(0), openedAt: p.openedAt.slice(0, 10), thesis: p.thesis || null, timeline: (p.timeline || []).slice(-5).map((e) => e.text) })),
+    // A BEST CASE THE APP DOES NOT HAVE IS `null` IN THE JSON, not a number.
+    // `+null.toFixed(0)` also throws, so this is the crash guard as well as the
+    // honesty one: a model handed a maximum profit of 0 for a long call would
+    // write a take-profit target of $0 into the report.
+    currentStrategy: A ? { legs, expKey, entry: +(A.entry * 100).toFixed(0), maxProfit: dollarsOrNull(A.maxProfit), maxLoss: dollarsOrNull(A.maxLoss), breakevens: A.breakevens, greeks: { delta: +A.greeks.delta.toFixed(2), theta: +A.greeks.theta.toFixed(0), vega: +A.greeks.vega.toFixed(0) } } : null,
+    paperPositions: store.positions.map((p) => ({ ticker: p.ticker, name: p.name, legs: p.legs, exp: p.expKey, entry: +(p.entryNet * 100).toFixed(0), maxProfit: dollarsOrNull(p.maxProfit), maxLoss: dollarsOrNull(p.maxLoss), openedAt: p.openedAt.slice(0, 10), thesis: p.thesis || null, timeline: (p.timeline || []).slice(-5).map((e) => e.text) })),
     scanner: (scan || []).map((s) => ({ tk: s.tk, seasonalMonthPct: +s.seasonalScore.toFixed(1), sentiment: s.sugg, source: s.real ? "real history" : "estimate",
       fourFactorSignal: s.fused ? { score: s.fused.score, confidence: s.fused.confidence, agreement: s.fused.agreement, narrative: s.fused.narrative } : null })),
     taggedNews: (news || []).slice(0, 10).map((n) => ({ title: n.title, geo: !!n.geo,
@@ -776,12 +783,17 @@ export function buildReportMd(ctx, weatherSig, aiText) {
   if (!store.positions.length) L.push("No open positions.");
   store.positions.forEach((p) => {
     const dte = Math.max(0, Math.round((new Date(p.expiry) - Date.now()) / 86400000));
-    L.push(`- **${p.ticker} · ${p.name}** — expires ${p.expKey || "n/a"} (${dte} days)${dte <= RULES.exitDTE ? ` ⚠ **${RULES.exitDTE} days or fewer: close or roll**` : ""} · opened at ${fmt$(Math.abs(p.entryNet) * 100)} · can make ${fmt$(p.maxProfit)} / can lose ${fmt$(p.maxLoss)}`);
+    L.push(`- **${p.ticker} · ${p.name}** — expires ${p.expKey || "n/a"} (${dte} days)${dte <= RULES.exitDTE ? ` ⚠ **${RULES.exitDTE} days or fewer: close or roll**` : ""} · opened at ${fmt$(Math.abs(p.entryNet) * 100)} · can make ${Number.isFinite(p.maxProfit) ? fmt$(p.maxProfit) : NO_CEILING} / can lose ${fmt$(p.maxLoss)}`);
   });
   if (store.positions.length) {
     const totRisk = store.positions.reduce((a, p) => a + Math.abs(p.maxLoss), 0);
-    const totMaxP = store.positions.reduce((a, p) => a + Math.max(0, p.maxProfit), 0);
-    L.push(`\n**Across everything:** ${fmt$(totRisk)} at risk · up to ${fmt$(totMaxP)} to be made`);
+    // A TOTAL CANNOT INCLUDE AN UNKNOWN AND STILL BE A TOTAL. `Math.max(0, null)`
+    // is 0, which would quietly report a position with no ceiling as adding
+    // nothing to what can be made.
+    const noCeil = store.positions.filter((p) => !Number.isFinite(p.maxProfit)).length;
+    const totMaxP = store.positions.reduce((a, p) => a + (Number.isFinite(p.maxProfit) ? Math.max(0, p.maxProfit) : 0), 0);
+    L.push(`\n**Across everything:** ${fmt$(totRisk)} at risk · up to ${fmt$(totMaxP)} to be made` +
+      (noCeil ? ` from the ${store.positions.length - noCeil} with a ceiling, plus ${noCeil} with ${NO_CEILING} on the profit, which cannot be added to a total` : ""));
   }
   L.push(`\n## 3 · Headlines that matter (cause → effect, politics included)`);
   (news || []).filter((n) => (n.impacts || []).length).slice(0, 8).forEach((n) => {
@@ -823,7 +835,7 @@ export function exportPdf(ctx, md) {
   const posHtml = store.positions.map((p2) => `
     <div class="pos"><h3>${p2.ticker} · ${p2.name}</h3>
       ${svgPayoff(p2.legs, p2.entryNet, p2.entrySpot)}
-      <p class="m">${p2.legs.map((l) => `${l.side > 0 ? "+" : "−"}${l.qty} ${l.strike}${l.type === "call" ? "C" : "P"}`).join(" / ")} · exp ${p2.expKey || "n/d"} · max profit $${p2.maxProfit?.toFixed(0)} · max loss $${Math.abs(p2.maxLoss)?.toFixed(0)}</p>
+      <p class="m">${p2.legs.map((l) => `${l.side > 0 ? "+" : "−"}${l.qty} ${l.strike}${l.type === "call" ? "C" : "P"}`).join(" / ")} · exp ${p2.expKey || "n/d"} · max profit ${Number.isFinite(p2.maxProfit) ? `$${p2.maxProfit.toFixed(0)}` : NO_CEILING} · max loss $${Math.abs(p2.maxLoss)?.toFixed(0)}</p>
       ${(p2.timeline || []).slice(-4).map((e) => `<p class="tl">${new Date(e.t).toLocaleDateString("en-GB")} · ${e.text.replace(/\[approva:.*?\]/, "")}</p>`).join("")}
     </div>`).join("");
   const body = md
@@ -861,7 +873,13 @@ export function ReportTab({ ctx, apiKey, setSetting }) {
     try { wsig = weatherSignals(await fetchWeather()); } catch { /* meteo opzionale */ }
     let ai = null;
     if (useAI && apiKey) {
-      try { ai = await askAI(apiKey, [{ role: "user", content: "Write the narrative section of the periodic report: what happened this week, what to prioritise on the open positions, two opportunities from the radar, and the political or weather risks to watch. Bullet points, 250 words maximum." }], buildContext(ctx)); }
+      // THE PROMPT IS GENERATED FROM THE BOOK, not written as if there were
+      // always one. `reportNarrativePrompt()` in src/rules.js: with no open
+      // positions it does not ask about them and states that `paperPositions`
+      // is authoritative, which is how "the BOIL $20.50/$22.50 call spread
+      // entered at $68 debit" appeared in a report whose own section 2 said
+      // "No open positions."
+      try { ai = await askAI(apiKey, [{ role: "user", content: reportNarrativePrompt(store.positions) }], buildContext(ctx)); }
       catch (e) { ai = `(the copilot could not be reached: ${e.message})`; }
     }
     const out = buildReportMd(ctx, wsig, ai);
@@ -1007,7 +1025,11 @@ export function computeTIS(pos, cur) {
 // Exit Path Simulator: MC giornaliero DA OGGI, regole da src/rules.js
 export function exitPathSim(pos, S, dteLeft, iv, sigma, nSim = 2000) {
   const { legs, entryNet, maxProfit, maxLoss } = pos;
-  const tp = RULES.takeProfitPct * maxProfit, sl = RULES.stopLossPct * maxLoss;
+  // `RULES.takeProfitPct * null` is 0: without this the simulator would count
+  // every path that ever touched break-even as a take-profit exit, and report a
+  // rule the app never applied.
+  const tp = Number.isFinite(maxProfit) ? RULES.takeProfitPct * maxProfit : null;
+  const sl = RULES.stopLossPct * maxLoss;
   const days = Math.max(1, dteLeft - RULES.exitDTE);
   const dt = 1 / 365, sq = sigma * Math.sqrt(dt);
   let nTP = 0, nSL = 0, nTimePos = 0, nTimeNeg = 0, sumExit = 0;
@@ -1020,7 +1042,7 @@ export function exitPathSim(pos, S, dteLeft, iv, sigma, nSim = 2000) {
       const z = Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
       s = s * Math.exp(-0.5 * sigma * sigma * dt + sq * z);
       const pnl = (netBS(legs, s, dteLeft - d, iv) - entryNet) * 100;
-      if (pnl >= tp) { nTP++; tpDays.push(d); sumExit += pnl; done = true; break; }
+      if (tp != null && pnl >= tp) { nTP++; tpDays.push(d); sumExit += pnl; done = true; break; }
       if (pnl <= sl) { nSL++; sumExit += pnl; done = true; break; }
     }
     if (!done) {
@@ -1116,8 +1138,18 @@ export function GuardianPanel({ pos, spot, dteLeft, ivNow, sigma, seasonalNow, p
       <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap", alignItems: "center" }}>
         <Btn small ghost color={T.blue} onClick={runSim} disabled={busy}>{busy ? "Simulating…" : "▶ How does this end?"}</Btn>
         {alpaca && (<>
-          <Btn small ghost color={T.green} title={DEMO ? DEMO_TOOLTIP : undefined} onClick={() => placeExit(takeProfitLabel(), RULES.takeProfitPct * pos.maxProfit)} disabled={!!ladderBusy || DEMO}>GTC {takeProfitLabel()} @ ${Math.abs(ladderNet(pos.entryNet, RULES.takeProfitPct * pos.maxProfit)).toFixed(2)}</Btn>
-          <Btn small ghost color={T.green} title={DEMO ? DEMO_TOOLTIP : undefined} onClick={() => placeExit(`TP ${scaleOutLabel()}`, RULES.scaleOutPct * pos.maxProfit)} disabled={!!ladderBusy || DEMO}>GTC TP {scaleOutLabel()} @ ${Math.abs(ladderNet(pos.entryNet, RULES.scaleOutPct * pos.maxProfit)).toFixed(2)}</Btn>
+          {/* THE PROFIT RUNGS OF THE LADDER NEED A MAXIMUM TO BE A SHARE OF.
+              With no ceiling they priced at $0 and would have sent an order to
+              close the position for nothing. The stop rung stays: the maximum
+              LOSS is always known, which is non-negotiable rule 2. */}
+          {Number.isFinite(pos.maxProfit) ? (<>
+            <Btn small ghost color={T.green} title={DEMO ? DEMO_TOOLTIP : undefined} onClick={() => placeExit(takeProfitLabel(), RULES.takeProfitPct * pos.maxProfit)} disabled={!!ladderBusy || DEMO}>GTC {takeProfitLabel()} @ ${Math.abs(ladderNet(pos.entryNet, RULES.takeProfitPct * pos.maxProfit)).toFixed(2)}</Btn>
+            <Btn small ghost color={T.green} title={DEMO ? DEMO_TOOLTIP : undefined} onClick={() => placeExit(`TP ${scaleOutLabel()}`, RULES.scaleOutPct * pos.maxProfit)} disabled={!!ladderBusy || DEMO}>GTC TP {scaleOutLabel()} @ ${Math.abs(ladderNet(pos.entryNet, RULES.scaleOutPct * pos.maxProfit)).toFixed(2)}</Btn>
+          </>) : (
+            <span style={{ ...mono, fontSize: 10, color: T.dim }}>
+              {`No profit rung: this position has ${NO_CEILING}, so ${pctText(RULES.takeProfitPct)} of the maximum is not a price. The ${RULES.exitDTE}-day exit still applies.`}
+            </span>
+          )}
           <Btn small ghost color={T.red} title={DEMO ? DEMO_TOOLTIP : undefined} onClick={() => placeExit(stopLossLabel(), RULES.stopLossPct * pos.maxLoss)} disabled={!!ladderBusy || DEMO}>{stopLossLabel()} @ ${Math.abs(ladderNet(pos.entryNet, RULES.stopLossPct * pos.maxLoss)).toFixed(2)}</Btn>
         </>)}
       </div>

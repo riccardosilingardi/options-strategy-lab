@@ -25,7 +25,8 @@
 import React, { useState, useEffect, useRef } from "react";
 import { payoff, N as normCdf } from "./engine.js";
 import { T } from "./theme.js";
-import { money, RULES, pctText, liquidityThreshold, RECOMMENDED_LIQUIDITY } from "./rules.js";
+import { money, RULES, pctText, liquidityThreshold, RECOMMENDED_LIQUIDITY,
+  payoffCeiling, scratchLevel, NO_CEILING } from "./rules.js";
 
 const mono = { fontFamily: "ui-monospace, Menlo, monospace" };
 const sans = { fontFamily: "ui-sans-serif, system-ui" };
@@ -95,15 +96,90 @@ export function payoffBands({ legs = [], entryNet = 0, spot = null, lo, hi, n = 
   bands.push({ lo: startS, hi: samples[samples.length - 1].s, sign: curSign });
 
   const pnls = samples.map((p) => p.pnl);
+  const sampledMax = Math.max(...pnls);
+  // THE SAMPLED TOP IS NOT THE BEST CASE WHEN THERE IS NO CEILING
+  // (`payoffCeiling()` in src/rules.js). The range above stops at +30%, so for
+  // a long call `Math.max(...pnls)` is the payoff at 1.3 x spot and nothing
+  // more: a number produced by where the sampling stopped. `sampledTop` stays
+  // for the drawing code, which has to scale a picture to something; the
+  // SENTENCES read `maxProfit` and get null, which is the truth.
+  const unbounded = !payoffCeiling(legs).above;
   return {
     samples, bands, breakevens,
-    maxProfit: Math.max(...pnls), maxLoss: Math.min(...pnls),
+    maxProfit: unbounded ? null : sampledMax,
+    unbounded, sampledTop: sampledMax,
+    maxLoss: Math.min(...pnls),
     at, lo: LO, hi: HI, spot: Number.isFinite(spot) ? spot : null,
   };
 }
 
 /** The profit bands only, in price order — what the eye reads as "green". */
 export const profitBands = (b) => b.bands.filter((x) => x.sign > 0);
+
+/* --------------------------------------------------------------------
+   A SCRATCH IS NOT A WIN — AND THIS IS FOR THE COPY ONLY.
+
+   Nothing below filters a candidate, moves a zone or changes a colour.
+   `payoffBands()`, `profitBands()` and `chanceInProfit()` are untouched and
+   still answer exactly what they answered before: where the payoff is positive,
+   and how often the price lands there. That arithmetic was never wrong.
+
+   What was wrong was joining those two true numbers into one sentence. On the
+   live UNG broken-wing butterfly the green ran from the bottom of the range up
+   to $11.51 and the price lands inside it about 73% of the time — but most of
+   that green is the flat lower wing paying ONE DOLLAR against a $51 peak. Read
+   next to "up to $50", 73% becomes a claim nobody made.
+
+   So the profit region is cut a second time, at `scratchLevel()` in
+   src/rules.js: above the line is where the money actually is, below it the
+   trade merely scratches. The cut uses the same samples and the same linear
+   interpolation the sign cut above uses, so the two can never disagree about a
+   crossing — and a whole band whose own peak sits under the line simply
+   disappears from the result, which is the band-level test read off the same
+   arithmetic instead of a second one beside it.
+-------------------------------------------------------------------- */
+
+/** The regions where the payoff clears `level`, interpolated like the sign cut. */
+export function bandsAbove(b, level) {
+  if (!Number.isFinite(level)) return [];
+  const sp = b?.samples || [];
+  if (sp.length < 2) return [];
+  const out = [];
+  let start = null;
+  const cross = (a, c) => (a.pnl === c.pnl ? a.s : a.s + ((level - a.pnl) / (c.pnl - a.pnl)) * (c.s - a.s));
+  if (sp[0].pnl > level) start = sp[0].s;
+  for (let i = 1; i < sp.length; i++) {
+    const was = sp[i - 1].pnl > level, is = sp[i].pnl > level;
+    if (is && !was) start = cross(sp[i - 1], sp[i]);
+    else if (!is && was) { out.push({ lo: start, hi: cross(sp[i - 1], sp[i]) }); start = null; }
+  }
+  if (start != null) out.push({ lo: start, hi: sp[sp.length - 1].s });
+  return out;
+}
+
+/** Where the money is: the profit region minus the scratch. Empty when unknown. */
+export const payingBands = (b) => {
+  const lv = scratchLevel(b?.maxProfit);
+  return lv == null ? [] : bandsAbove(b, lv);
+};
+
+/**
+ * How the green splits between money and scratch, as probabilities.
+ * `null` when there is no ceiling to take a share of, or no distribution to
+ * measure against — in both cases there is nothing to say and the takeaway
+ * says nothing rather than guessing.
+ */
+export function scratchSplit(b, { spot, sigma, dte, driftAnnual = 0 } = {}) {
+  const lv = scratchLevel(b?.maxProfit);
+  const inProfit = chanceInProfit(b, { spot, sigma, dte, driftAnnual });
+  if (lv == null || inProfit == null) return null;
+  const Tyr = dte / 365, sq = sigma * Math.sqrt(Tyr);
+  const mu = Math.log(spot) + (driftAnnual - 0.5 * sigma * sigma) * Tyr;
+  const cdf = (x) => (x <= 0 ? 0 : normCdf((Math.log(x) - mu) / sq));
+  const paying = bandsAbove(b, lv);
+  const pPaying = paying.reduce((a, z) => a + Math.max(0, cdf(z.hi) - cdf(z.lo)), 0);
+  return { level: lv, paying, inProfit, pPaying, pScratch: Math.max(0, inProfit - pPaying) };
+}
 
 /** Chance the price finishes inside the green, under a lognormal at `dte`. */
 export function chanceInProfit(b, { spot, sigma, dte, driftAnnual = 0 }) {
@@ -122,18 +198,23 @@ export function chanceInProfit(b, { spot, sigma, dte, driftAnnual = 0 }) {
  * Describe the green zones as an English predicate — no subject, so the caller
  * can put the ticker in front of it: "CORN makes money above $4.20".
  */
-function greenPhrase(b) {
-  const g = profitBands(b);
-  if (!g.length) return "makes money at no price at expiry";
+function zonesPhrase(zones, b) {
   const open = (z) => z.lo <= b.lo + 1e-9;
   const openTop = (z) => z.hi >= b.hi - 1e-9;
   const one = (z) => (open(z) && openTop(z) ? "at any price"
     : open(z) ? `below ${price(z.hi)}`
       : openTop(z) ? `above ${price(z.lo)}`
         : `between ${price(z.lo)} and ${price(z.hi)}`);
-  if (g.length === 1) return `makes money ${one(g[0])}`;
-  if (g.length === 2) return `makes money ${one(g[0])} and ${one(g[1])}`;
-  return `makes money in ${g.length} separate bands, the widest ${one(g.slice().sort((x, y) => (y.hi - y.lo) - (x.hi - x.lo))[0])}`;
+  if (!zones.length) return null;
+  if (zones.length === 1) return one(zones[0]);
+  if (zones.length === 2) return `${one(zones[0])} and ${one(zones[1])}`;
+  return `in ${zones.length} separate bands, the widest ${one(zones.slice().sort((x, y) => (y.hi - y.lo) - (x.hi - x.lo))[0])}`;
+}
+
+function greenPhrase(b) {
+  const g = profitBands(b);
+  if (!g.length) return "makes money at no price at expiry";
+  return `makes money ${zonesPhrase(g, b)}`;
 }
 
 /** `1 time in 10`, `5 times in 10` — never "1 times". */
@@ -174,15 +255,33 @@ export function gaugeTakeaway(b, { ticker = "this market" } = {}) {
     `${move > b.spot ? "a rise" : "a fall"} to ${price(move)} — ${pctText(pct)} away — to break even.`;
 }
 
-/** UNIFIED takeaway. Spot, the payoff there, and how often the cone lands green. */
+/**
+ * UNIFIED takeaway. Spot, the payoff there, and how often the cone lands green —
+ * and, when most of that green is a scratch, WHERE THE MONEY ACTUALLY IS.
+ *
+ * Still ONE sentence (PRD §6). The extra clause is only written when the numbers
+ * demand it: when the chance of finishing in a band that pays a real share of
+ * the best case is SMALLER than the chance of finishing in one that merely
+ * scratches. That comparison is read off the distribution, not tuned — "more of
+ * this green is a scratch than is money" is a fact about the trade, and it is
+ * the fact a beginner cannot see when 73% sits next to "up to $50".
+ */
 export function unifiedTakeaway(b, { ticker = "this market", sigma, dte, driftAnnual = 0 } = {}) {
   if (b.spot == null) return `${ticker}: today's price is not loaded, so nothing can be projected yet.`;
   const now = b.at(b.spot);
   const p = chanceInProfit(b, { spot: b.spot, sigma, dte, driftAnnual });
+  const paid = `expiring at today's price would ${now > 0 ? "pay" : "lose"} ${amount$(now)}`;
   const head = `${ticker} is at ${price(b.spot)} and ${greenPhrase(b)}`;
-  if (p == null) return `${head} — expiring at today's price would ${now > 0 ? "pay" : "lose"} ${amount$(now)}.`;
-  return `${head}, which the next ${Math.round(dte)} days reach about ${pctText(p)} of the time — ` +
-    `and expiring at today's price would ${now > 0 ? "pay" : "lose"} ${amount$(now)}.`;
+  if (p == null) return `${head} — ${paid}.`;
+
+  const sp = scratchSplit(b, { spot: b.spot, sigma, dte, driftAnnual });
+  const where = sp && sp.paying.length ? zonesPhrase(sp.paying, b) : null;
+  if (sp && where && sp.pScratch > sp.pPaying) {
+    return `${ticker} is at ${price(b.spot)} and ${greenPhrase(b)} about ${pctText(p)} of the time in the next ` +
+      `${Math.round(dte)} days, but most of that is a scratch — it pays more than ${amount$(sp.level)} only ` +
+      `${where}, about ${pctText(sp.pPaying)} of the time — and ${paid}.`;
+  }
+  return `${head}, which the next ${Math.round(dte)} days reach about ${pctText(p)} of the time — and ${paid}.`;
 }
 
 /* ====================================================================
@@ -194,12 +293,31 @@ export function unifiedTakeaway(b, { ticker = "this market", sigma, dte, driftAn
 export function explainElement(el, b, ctx = {}) {
   const { ticker = "this market", sigma, dte, driftAnnual = 0 } = ctx;
   switch (el) {
-    case "green":
-      return profitBands(b).length
-        ? `Green is every price at which this trade is worth more at expiry than it cost. ` +
-          `Here that is ${greenPhrase(b).replace(/^makes money /, "")}, worth up to ${pnl$(b.maxProfit)}.`
-        : `There is no green here: no price at expiry pays this structure back what it cost. ` +
-          `The best it can do is ${pnl$(b.maxProfit)}.`;
+    case "green": {
+      if (!profitBands(b).length) {
+        return `There is no green here: no price at expiry pays this structure back what it cost. ` +
+          (b.unbounded ? `` : `The best it can do is ${pnl$(b.maxProfit)}.`);
+      }
+      const head = `Green is every price at which this trade is worth more at expiry than it cost. ` +
+        `Here that is ${greenPhrase(b).replace(/^makes money /, "")}`;
+      // NO CEILING: the top of the drawn range is where the sampling stopped,
+      // not what the trade can make, and "worth up to" that number is the lie
+      // this whole file exists to avoid.
+      if (b.unbounded) {
+        return `${head}, with ${NO_CEILING} on what it can be worth: the payoff keeps rising with the price, ` +
+          `so there is no "up to" to print.`;
+      }
+      const pay = payingBands(b);
+      const lv = scratchLevel(b.maxProfit);
+      // Green is one colour but not one outcome. Where a real part of that band
+      // pays back a rounding of the peak, say so here rather than let the eye
+      // read the whole stripe as the best case.
+      if (pay.length && lv != null && zonesPhrase(pay, b) !== greenPhrase(b).replace(/^makes money /, "")) {
+        return `${head}, worth up to ${pnl$(b.maxProfit)} — but only ${zonesPhrase(pay, b)} pays more than ` +
+          `${amount$(lv)}; the rest of the green hands back roughly what it cost.`;
+      }
+      return `${head}, worth up to ${pnl$(b.maxProfit)}.`;
+    }
     case "red":
       return `Red is every price at which it expires worth less than you paid. The worst case is ` +
         `${pnl$(b.maxLoss)}, and it cannot get worse than that — that is what "defined risk" means.`;
@@ -231,7 +349,11 @@ export function explainElement(el, b, ctx = {}) {
     }
     case "payoff":
       return `The payoff is turned on its side so it shares the price axis: read a price on the left, follow ` +
-        `it across, and the width tells you the money. Best case ${pnl$(b.maxProfit)}, worst case ${pnl$(b.maxLoss)}.`;
+        `it across, and the width tells you the money. ` +
+        (b.unbounded
+          ? `The worst case is ${pnl$(b.maxLoss)}; there is ${NO_CEILING} on the best one — the payoff keeps ` +
+            `widening as the price rises, and the chart simply stops where the sampling does.`
+          : `Best case ${pnl$(b.maxProfit)}, worst case ${pnl$(b.maxLoss)}.`);
     case "spotline":
       return b.spot == null
         ? `The dashed line runs from today's price across to what the trade is worth there.`
@@ -925,8 +1047,20 @@ export const sharesOneMarket = (items = []) =>
 export function compareTakeaway(items = []) {
   if (!items.length) return "Nothing ticked to compare yet.";
   if (items.length === 1) return `Only ${items[0].name} is ticked — tick a second one and the two payoffs are drawn on the same axis.`;
-  const payer = items.reduce((a, c) => ((c.maxProfit || 0) > (a.maxProfit || 0) ? c : a), items[0]);
   const often = items.reduce((a, c) => ((c.pop || 0) > (a.pop || 0) ? c : a), items[0]);
+  // A CANDIDATE WITH NO CEILING CANNOT BE "THE ONE THAT PAYS MOST", because
+  // there is no number to compare. `(c.maxProfit || 0)` would have scored it
+  // ZERO and handed the title to whichever bounded structure happened to be
+  // beside it, which is the artefact in reverse. It is named instead.
+  const unbounded = items.filter((c) => c.maxProfit == null);
+  const priced = items.filter((c) => Number.isFinite(c.maxProfit));
+  if (unbounded.length) {
+    const names = unbounded.map((c) => c.name).join(" and ");
+    return `${names} ${unbounded.length === 1 ? "has" : "have"} ${NO_CEILING} on the profit, so ${unbounded.length === 1 ? "it" : "they"} ` +
+      `cannot be ranked against the others on what ${unbounded.length === 1 ? "it pays" : "they pay"} — ` +
+      `${often.name} works most often at ${inTenPhrase(often.pop)}, for ${amount$(often.risk)} at risk.`;
+  }
+  const payer = priced.reduce((a, c) => ((c.maxProfit || 0) > (a.maxProfit || 0) ? c : a), priced[0] || items[0]);
   if (payer === often) {
     return `${payer.name} both pays the most, up to ${amount$(payer.maxProfit)}, and works most often at ${inTenPhrase(payer.pop)}, for ${amount$(payer.risk)} at risk.`;
   }
@@ -1102,7 +1236,20 @@ export function CompareFigure({ items = [], height, width, style }) {
 export const exitPlanSentence = () =>
   `Close at ${pctText(RULES.takeProfitPct)} of max gain, or at ${RULES.exitDTE} days to expiration.`;
 
-export const exitPlanDetail = (maxProfit) =>
-  `That is ${money(RULES.takeProfitPct * Math.abs(maxProfit || 0))} of profit, or the ${RULES.exitDTE}-day mark, ` +
-  `whichever comes first. A loss of ${pctText(RULES.stopLossPct)} of the maximum raises a warning, never an ` +
-  `automatic close. These are chosen now and not renegotiated while the position is open.`;
+export const exitPlanDetail = (maxProfit) => {
+  const tail = `A loss of ${pctText(RULES.stopLossPct)} of the maximum raises a warning, never an ` +
+    `automatic close. These are chosen now and not renegotiated while the position is open.`;
+  // NO CEILING MEANS NO TARGET. Half of an unknown is not $0, and printing
+  // "that is $0 of profit" under a long call would turn the take-profit rule
+  // into an instruction to close at break-even. The rule stands, its number
+  // does not exist, and the DTE half of it still does.
+  // `Number(null)` is 0 and 0 IS finite, so the coercion has to go: the whole
+  // point is telling a missing maximum apart from a maximum of zero.
+  if (!Number.isFinite(maxProfit)) {
+    return `There is ${NO_CEILING} on this one, so ${pctText(RULES.takeProfitPct)} of the maximum is not a ` +
+      `dollar figure the app can put here — the ${RULES.exitDTE}-day mark is the exit that still applies, and ` +
+      `a profit target on this trade is yours to set. ${tail}`;
+  }
+  return `That is ${money(RULES.takeProfitPct * Math.abs(maxProfit))} of profit, or the ${RULES.exitDTE}-day mark, ` +
+    `whichever comes first. ${tail}`;
+};

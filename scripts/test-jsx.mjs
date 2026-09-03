@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
-const FILES = ["src/visuals.test.jsx", "src/wizard.test.jsx", "src/steps.test.jsx"];
+const FILES = ["src/visuals.test.jsx", "src/wizard.test.jsx", "src/steps.test.jsx", "src/ceiling.test.jsx"];
 const dir = mkdtempSync(join(tmpdir(), "osl-jsx-test-"));
 let failed = 0;
 try {

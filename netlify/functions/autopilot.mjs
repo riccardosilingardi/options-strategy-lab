@@ -105,7 +105,10 @@ export default async () => {
       try {
         const facts = {
           position: { ticker: pos.ticker, name: pos.name, legs: pos.legs, exp: pos.expKey, dteLeft },
-          targets: { takeProfit: +(RULES.takeProfitPct * pos.maxProfit).toFixed(0), stopWarning: +(RULES.stopLossPct * pos.maxLoss).toFixed(0), exitDTE: RULES.exitDTE },
+          // A TAKE-PROFIT TARGET NEEDS A MAXIMUM TO BE HALF OF. `0.5 * null` is
+          // 0, which would hand the model "take profit at $0" for a position
+          // with no ceiling; null says the target does not exist, which is true.
+          targets: { takeProfit: Number.isFinite(pos.maxProfit) ? +(RULES.takeProfitPct * pos.maxProfit).toFixed(0) : null, stopWarning: +(RULES.stopLossPct * pos.maxLoss).toFixed(0), exitDTE: RULES.exitDTE },
           entryThesis: pos.thesis,
           today: { chainSource: data ? "CBOE delayed" : "Black-Scholes model", spot: +spot.toFixed(2), pnl: +pnl.toFixed(0), pct_max_profit: +pctMax.toFixed(0), popNow: +(pop * 100).toFixed(0), ivNow: +(iv * 100).toFixed(0), tis, seasonalThisMonth: seasonalNow },
           simulator_from_today: { p_take_profit_first: +(sim.pTP * 100).toFixed(0), p_stop_first: +(sim.pSL * 100).toFixed(0), p_exit_at_exit_dte_positive: +(sim.pTimePos * 100).toFixed(0), expected_pnl_following_rules: +sim.ev.toFixed(0), median_days_to_take_profit: sim.medDays },

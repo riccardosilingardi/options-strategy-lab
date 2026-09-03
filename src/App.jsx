@@ -17,7 +17,9 @@ import { parseOcc, buildOcc, fetchChain, hasOpenInterest, enrichOpenInterest, fe
 import { T, themeName, setTheme, BADGE_SAFE } from "./theme.js";
 import { RULES, sizing, ruleBadge, takeProfitLabel, stopLossLabel, perTradeCapLabel, RULE_PILLS, NOTHING_TODAY, money, pctText, capitalSourceNote, perTradeLimitPhrase, qualityFloor, qualityFloorSentence, liquiditySkippedNote,
   LIQUIDITY_LEVELS, RECOMMENDED_LIQUIDITY, LIQUIDITY_MEASUREMENT, liquidityMeasurementNote, liquidityLevel, liquidityThreshold, looseningWarning, liquiditySettingNote, isLoosened, ordinal,
-  priceability, unpriceableNote, rewardRisk, MIN_NET_DOLLARS } from "./rules.js";
+  priceability, unpriceableNote, rewardRisk, MIN_NET_DOLLARS,
+  payoffCeiling, NO_CEILING, noCeilingNote, noCeilingRankNote,
+  impossibleLoss, impossibleLossNote } from "./rules.js";
 import { evaluateTrade, gateSummary } from "./riskGate.js";
 import { DEMO, DEMO_BANNER, DEMO_TOOLTIP, DEMO_SEED_TICKERS, demoPositions } from "./demo.js";
 import { CapitalOnboarding, WizardOpen, FindOpportunities, WizardCandidates, ConfirmSteps, NothingToday, Card, Pill } from "./wizard.jsx";
@@ -180,7 +182,7 @@ function snapStrike(x, strikes, step) {
   if (!strikes || !strikes.length) return Math.round(x / step) * step;
   return strikes.reduce((best, k) => (Math.abs(k - x) < Math.abs(best - x) ? k : best), strikes[0]);
 }
-function buildPresets(sent, S, step, strikes) {
+export function buildPresets(sent, S, step, strikes) {
   const K = (pct) => snapStrike(S * (1 + pct), strikes, step);
   const P = {
     verybear: [
@@ -250,14 +252,18 @@ function netGreeks(legs, S, dte, baseIV, ivMap) {
     return { delta: a.delta + m * g.delta, gamma: a.gamma + m * g.gamma, theta: a.theta + m * g.theta * 100, vega: a.vega + m * g.vega * 100 };
   }, { delta: 0, gamma: 0, theta: 0, vega: 0 });
 }
-function analyze(legs, S, dte, baseIV, q) {
+export function analyze(legs, S, dte, baseIV, q) {
   const legPx = legs.map((l) => priceLeg(l, S, dte, baseIV, q));
   const ivMap = legPx.map((p) => p.iv);
   const entry = legs.reduce((a, l, i) => a + Math.sign(l.side) * l.qty * legPx[i].px, 0);
   const realCount = legPx.filter((p) => p.real).length;
   const lo = S * 0.7, hi = S * 1.3, N = 240;
   let maxP = -Infinity, maxL = Infinity;
-  const curve = []; const bes = []; let prev = null;
+  const curve = []; const bes = []; let prev = null; let prevS = null;
+  // THE SAME CONVENTION `payoffBands()` USES (src/visuals.jsx): a P&L of exactly
+  // zero is not a profit, it is your money back. Two screens that split the sign
+  // differently produce two breakevens for one trade, which is the fault below.
+  const signOf = (v) => (v > 0 ? 1 : -1);
   for (let i = 0; i <= N; i++) {
     const s = lo + (i / N) * (hi - lo);
     const pnl = (payoffExp(legs, s) - entry) * 100;
@@ -266,10 +272,36 @@ function analyze(legs, S, dte, baseIV, q) {
     curve.push({ s: +s.toFixed(2), exp: +pnl.toFixed(0), mid: +pnlMid.toFixed(0), now: +pnlNow.toFixed(0) });
     if (pnl > maxP) maxP = pnl;
     if (pnl < maxL) maxL = pnl;
-    if (prev !== null && Math.sign(prev) !== Math.sign(pnl) && Math.sign(pnl) !== 0) bes.push(+(lo + ((i - 0.5) / N) * (hi - lo)).toFixed(2));
-    prev = pnl;
+    // THE BREAKEVEN IS INTERPOLATED, NOT THE MIDDLE OF THE STEP IT FELL IN.
+    // The expiry payoff is piecewise linear, so the crossing inside a bracket is
+    // exact arithmetic rather than an estimate — and the grid step here is 0.051
+    // of a dollar, which is how the Shortlist came to say BOIL makes money above
+    // $20.67 while Build and its chart said 20.68 about the same trade. Both are
+    // now the same string because both are the same calculation.
+    if (prev !== null && signOf(prev) !== signOf(pnl)) {
+      const t = prev === pnl ? 0.5 : prev / (prev - pnl);
+      bes.push(+(prevS + t * (s - prevS)).toFixed(2));
+    }
+    prev = pnl; prevS = s;
   }
-  return { entry, curve, maxProfit: maxP, maxLoss: maxL, breakevens: bes, greeks: netGreeks(legs, S, dte, baseIV, ivMap), realCount, legPx };
+  // NO CEILING MEANS NO MAXIMUM, NOT A MAXIMUM AT THE EDGE OF THE GRID
+  // (`payoffCeiling()` in src/rules.js). `maxP` above is the largest payoff
+  // SAMPLED; for a long call that is simply the payoff at +30%, and printing it
+  // as the best case is the same lie as printing an unreadable debit as $0.
+  //
+  // The loss side is deliberately left alone. Non-negotiable rule 2 is that the
+  // maximum loss is always known, and the only way this grid understates a loss
+  // is an uncovered short call — which the risk gate refuses by name
+  // (UNDEFINED_RISK) before any order can be built on it.
+  const ceiling = payoffCeiling(legs);
+  return {
+    entry, curve,
+    maxProfit: ceiling.above ? maxP : null,
+    profitUnbounded: !ceiling.above,
+    sampledMaxProfit: maxP,   // for drawing only — never a figure on screen
+    maxLoss: maxL, breakevens: bes,
+    greeks: netGreeks(legs, S, dte, baseIV, ivMap), realCount, legPx,
+  };
 }
 
 /**
@@ -281,10 +313,10 @@ function analyze(legs, S, dte, baseIV, q) {
  * `cut` carries the name and the reason — because a list that silently
  * shortens itself is indistinguishable from a broken one.
  */
-function shortlistWithFloors(sent, S, step, strikes, dte, baseIV, q, { peers = null, level = RECOMMENDED_LIQUIDITY } = {}) {
+export function shortlistWithFloors(sent, S, step, strikes, dte, baseIV, q, { peers = null, level = RECOMMENDED_LIQUIDITY } = {}) {
   const rows = [], cut = [];
   let oiSkipped = false;
-  const tally = { liquidity: 0, reward: 0, skipped: 0, unpriceable: 0 };
+  const tally = { liquidity: 0, reward: 0, skipped: 0, unpriceable: 0, impossible: 0 };
   for (const p of buildPresets(sent, S, step, strikes)) {
     const a = analyze(p.legs, S, dte, baseIV, q);
     // UNPRICEABLE FIRST, because it is prior to both floors: they judge a
@@ -298,9 +330,20 @@ function shortlistWithFloors(sent, S, step, strikes, dte, baseIV, q, { peers = n
       cut.push({ name: p.name, reasons: pz.reasons, why: "unpriceable" });
       continue;
     }
+    // AND A WORST CASE THAT IS A PROFIT, in the same register and at the same
+    // point in the order (src/rules.js, `impossibleLoss`). This is the debt
+    // PR #14 wrote down and left open: the wizard already skipped it, the
+    // Shortlist ranked it. An arbitrage on these chains is a mispriced leg, and
+    // a mispriced leg is not a candidate.
+    const imp = impossibleLoss(a.maxLoss);
+    if (imp) {
+      tally.impossible++;
+      cut.push({ name: p.name, reasons: [imp], why: "impossible" });
+      continue;
+    }
     const qf = qualityFloor({
       openInterest: a.legPx.map((l) => l.oi), peerOpenInterest: peers, level,
-      maxProfit: a.maxProfit, maxLoss: a.maxLoss,
+      maxProfit: a.maxProfit, maxLoss: a.maxLoss, unboundedProfit: a.profitUnbounded,
     });
     if (!qf.liquidity.checked) { oiSkipped = true; tally.skipped++; }
     if (qf.pass) rows.push({ p, a });
@@ -679,6 +722,17 @@ const fmt$ = (x) => {
   const r = Math.abs(x).toFixed(0);
   return `${x < 0 && Number(r) > 0 ? "-" : ""}$${r}`;
 };
+/**
+ * A BEST CASE, OR THE WORDS FOR NOT HAVING ONE.
+ *
+ * `fmt$(null)` is "—", and a dash where a maximum profit belongs reads as a
+ * loading state or a bug. A payoff with no ceiling is neither: it is a fact
+ * about the trade, and the screen says it in words (`NO_CEILING` in
+ * src/rules.js, so the three words are written once).
+ */
+// No `Number(x)` here: `Number(null)` is 0 and 0 is finite, which would print
+// a maximum profit of $0 for a payoff that has no maximum at all.
+const ceil$ = (x) => (Number.isFinite(x) ? fmt$(x) : NO_CEILING);
 const ago = (d) => { const m = Math.round((Date.now() - new Date(d)) / 60000); return m < 60 ? `${m}m ago` : m < 1440 ? `${Math.round(m / 60)}h ago` : `${Math.round(m / 1440)}d ago`; };
 
 /* ============================== MAIN ============================== */
@@ -1299,7 +1353,7 @@ export default function OptionsStrategyLab() {
     try {
       const out = [];
       // What the quality floors removed, so an empty or short result can say why.
-      const cutFloors = { n: 0, liquidity: 0, reward: 0, unpriceable: 0, markets: new Set(), oiSkipped: new Set() };
+      const cutFloors = { n: 0, liquidity: 0, reward: 0, unpriceable: 0, impossible: 0, markets: new Set(), oiSkipped: new Set() };
       // le barre servono al fattore tecnico: caricale prima di fondere i segnali
       const barsMap = Object.fromEntries(await Promise.all(multi.sel.map(async (tk) => [tk, await loadBars(tk)])));
       const fz = Object.fromEntries(multi.sel.map((tk) => [tk, fuseFor(tk, barsMap[tk] ?? barsCache[tk])]));
@@ -1322,15 +1376,23 @@ export default function OptionsStrategyLab() {
         const peers = expiryOpenInterest(c, ek);
         for (const pr of buildPresets(sent, sp, getU(tk).step, strikes)) {
           const a = analyze(pr.legs, sp, d2, getU(tk).iv, qq);
-          if (!Number.isFinite(a.maxProfit) || a.maxProfit <= 0 || !Number.isFinite(a.maxLoss)) continue;
+          // A MISSING CEILING IS NOT A MISSING CANDIDATE. This guard used to
+          // read `a.maxProfit <= 0`, and `null <= 0` is true in JavaScript, so
+          // making the best case honestly unknown would have made every long
+          // call disappear from the wide search without a word. Unbounded
+          // candidates stay in; they are ranked last below, with a sentence.
+          if (!a.profitUnbounded && (!Number.isFinite(a.maxProfit) || a.maxProfit <= 0)) continue;
+          if (!Number.isFinite(a.maxLoss)) continue;
           // Unpriceable first, and by the same function as the other two
           // generation sites: a hit with no readable price is not a hit.
           const pz = priceability({ legs: pr.legs, quotes: quotesOf(a), net: a.entry, maxLoss: a.maxLoss });
           if (!pz.priceable) { cutFloors.unpriceable++; cutFloors.markets.add(tk); continue; }
+          // ...and a worst case that is a profit, the same way (PR #14's debt).
+          if (impossibleLoss(a.maxLoss)) { cutFloors.impossible++; cutFloors.markets.add(tk); continue; }
           // Same floors as the Shortlist and the wizard, from the same function.
           const qf = qualityFloor({
             openInterest: a.legPx.map((l) => l.oi), peerOpenInterest: peers, level: liqLevel,
-            maxProfit: a.maxProfit, maxLoss: a.maxLoss,
+            maxProfit: a.maxProfit, maxLoss: a.maxLoss, unboundedProfit: a.profitUnbounded,
           });
           if (!qf.liquidity.checked) cutFloors.oiSkipped.add(tk);
           if (!qf.pass) {
@@ -1343,7 +1405,8 @@ export default function OptionsStrategyLab() {
           const unit = Math.abs(a.maxLoss);
           const n = Math.floor(optAmt / Math.max(1, a.entry >= 0 ? Math.abs(a.entry) * 100 : unit));
           if (n < 1) continue;
-          out.push({ tk, sent, name: pr.name, legs: pr.legs, expKey: ek, dte: d2, a, pop, n, spot: sp, ev: pop * a.maxProfit * n });
+          out.push({ tk, sent, name: pr.name, legs: pr.legs, expKey: ek, dte: d2, a, pop, n, spot: sp,
+            ev: a.profitUnbounded ? null : pop * a.maxProfit * n });
         }
       }
       // Ranking: valore atteso CORRETTO dal segnale a 4 fattori, e i CONFLICT in
@@ -1355,7 +1418,7 @@ export default function OptionsStrategyLab() {
       setMulti((m) => ({ ...m, busy: false, res: ranked.slice(0, 8),
         floors: {
           n: cutFloors.n, liquidity: cutFloors.liquidity, reward: cutFloors.reward,
-          unpriceable: cutFloors.unpriceable,
+          unpriceable: cutFloors.unpriceable, impossible: cutFloors.impossible,
           markets: [...cutFloors.markets], oiSkipped: [...cutFloors.oiSkipped], level: liqLevel,
         } }));
     } catch (e) { setMulti((m) => ({ ...m, busy: false, err: String(e.message || e) })); }
@@ -1373,7 +1436,12 @@ export default function OptionsStrategyLab() {
       const rem = Math.max(1, dte - i * 30);
       const pnl = ((i === span ? payoffExp(legs, Sx) : scenarioValue(legs, Sx, rem, iv)) - A.entry) * 100;
       let note = `price ${r >= 0 ? "+" : ""}${r.toFixed(1)}%`;
-      if (!closed && pnl >= RULES.takeProfitPct * A.maxProfit) { closed = { i, pnl: RULES.takeProfitPct * A.maxProfit, why: takeProfitLabel() }; note += ` → TAKE PROFIT: ${takeProfitLabel()} hit: you take the profit`; }
+      // NO CEILING, NO TAKE-PROFIT LEVEL. `0.5 * null` is 0 in JavaScript, so
+      // without this the replay would "take profit" at break-even on every path
+      // and report a discipline the rule never asked for. The DTE exit below
+      // still runs: that half of the plan does not need a maximum.
+      const tpLevel = Number.isFinite(A.maxProfit) ? RULES.takeProfitPct * A.maxProfit : null;
+      if (!closed && tpLevel != null && pnl >= tpLevel) { closed = { i, pnl: tpLevel, why: takeProfitLabel() }; note += ` → TAKE PROFIT: ${takeProfitLabel()} hit: you take the profit`; }
       else if (!closed && pnl <= RULES.stopLossPct * A.maxLoss) { closed = { i, pnl: RULES.stopLossPct * A.maxLoss, why: stopLossLabel() }; note += ` → STOP: ${stopLossLabel()}: a warning, think about closing`; }
       steps.push({ m: i, label: MONTHS[(NOW_MONTH + i) % 12], S: Sx, pnl, note });
       if (closed) break;
@@ -1555,7 +1623,7 @@ export default function OptionsStrategyLab() {
       // What the quality floors threw out, and where. Counted per reason so the
       // refusal can name the floor: "nothing on CORN clears the liquidity floor
       // today" is a useful answer, an empty screen is not.
-      const floors = { liquidity: 0, reward: 0, unpriceable: 0, markets: new Set(), oiUnavailable: new Set() };
+      const floors = { liquidity: 0, reward: 0, unpriceable: 0, impossible: 0, markets: new Set(), oiUnavailable: new Set() };
       for (const r of priced) {
         const tk = r.tk;
         const c = chains[tk] || (await refreshChain(tk, true));
@@ -1581,13 +1649,24 @@ export default function OptionsStrategyLab() {
             // never proposes one.
             if (pr.legs.length < 2) continue;
             const a = analyze(pr.legs, sp, d2, getU(tk).iv, qq);
-            if (!Number.isFinite(a.maxProfit) || a.maxProfit <= 0 || !Number.isFinite(a.maxLoss) || a.maxLoss >= 0) continue;
+            // A road has to have a ceiling: the verdict compares two roads on
+            // what each pays, and a best case that is unknown cannot be one side
+            // of that comparison. Every multi-leg preset this flow builds is
+            // call-neutral, so this is a guard rather than a filter — but it is
+            // the honest guard now, not `maxProfit <= 0` reading a null as zero.
+            if (a.profitUnbounded || !Number.isFinite(a.maxProfit) || a.maxProfit <= 0) continue;
+            if (!Number.isFinite(a.maxLoss)) continue;
             // UNPRICEABLE BEFORE ANYTHING ELSE (src/rules.js). A road whose
             // price the app cannot read is not a cheap road: every number the
             // verdict would put on it — what you risk, what it pays, how it
             // ranks against the other road — divides by that price.
             const pz = priceability({ legs: pr.legs, quotes: quotesOf(a), net: a.entry, maxLoss: a.maxLoss });
             if (!pz.priceable) { floors.unpriceable++; floors.markets.add(tk); continue; }
+            // A WORST CASE THAT IS A PROFIT IS COUNTED AND NAMED, not skipped in
+            // silence. This flow already dropped `maxLoss >= 0` with the rest of
+            // the arithmetic guards above, which meant the one refusal the user
+            // most deserves to read never reached the screen (PR #14's debt).
+            if (impossibleLoss(a.maxLoss)) { floors.impossible++; floors.markets.add(tk); continue; }
             const ivA = a.legPx.reduce((x, y) => x + y.iv, 0) / Math.max(1, a.legPx.length);
             const pop = probProfit(a.curve, sp, ivA, d2) || 0;
             const unit = Math.abs(a.maxLoss);
@@ -1599,7 +1678,7 @@ export default function OptionsStrategyLab() {
             // emptied the board rather than shrugging at an empty page.
             const qf = qualityFloor({
               openInterest: a.legPx.map((l) => l.oi), peerOpenInterest: peers, level: liqLevel,
-              maxProfit: a.maxProfit, maxLoss: a.maxLoss,
+              maxProfit: a.maxProfit, maxLoss: a.maxLoss, unboundedProfit: a.profitUnbounded,
             });
             if (!qf.liquidity.checked) floors.oiUnavailable.add(tk);
             if (!qf.pass) {
@@ -1628,18 +1707,28 @@ export default function OptionsStrategyLab() {
         // priced is not a board emptied by the floors and is certainly not a
         // budget problem — saying either would blame the user, or the market,
         // for a chain the app could not read. Three refusals, three sentences.
-        if (floors.unpriceable > 0 && cut === 0) {
+        if (floors.unpriceable > 0 && cut === 0 && floors.impossible === 0) {
           return stop([{
             id: "unpriceable",
             text: NOTHING_TODAY.unpriceable({ unpriceable: floors.unpriceable, markets: [...floors.markets] }),
           }]);
         }
-        if (cut > 0) {
+        // A BOARD THE APP PRICED AND THEN DISBELIEVED. Different from a board it
+        // could not price, and further still from one the floors emptied: here
+        // the quotes were read and what they produced — a trade that cannot lose
+        // — is impossible. Four refusals, four sentences.
+        if (floors.impossible > 0 && cut === 0 && floors.unpriceable === 0) {
+          return stop([{
+            id: "impossible-loss",
+            text: NOTHING_TODAY.impossibleLoss({ impossible: floors.impossible, markets: [...floors.markets] }),
+          }]);
+        }
+        if (cut > 0 || floors.impossible > 0 || floors.unpriceable > 0) {
           return stop([{
             id: "quality-floor",
             text: NOTHING_TODAY.belowQualityFloor({
               liquidity: floors.liquidity, reward: floors.reward, unpriceable: floors.unpriceable,
-              markets: [...floors.markets], level: liqLevel,
+              impossible: floors.impossible, markets: [...floors.markets], level: liqLevel,
             }),
           }]);
         }
@@ -1694,6 +1783,7 @@ export default function OptionsStrategyLab() {
         basket, examined, excluded, newsItems: newsPool, weatherData: weather,
         month: NOW_MONTH, weights: ans.weights, chosen: roads,
         floors: { liquidity: floors.liquidity, reward: floors.reward, unpriceable: floors.unpriceable,
+          impossible: floors.impossible,
           markets: [...floors.markets], oiUnavailable: [...floors.oiUnavailable] },
       }));
 
@@ -2495,7 +2585,9 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                           ? `Nothing on ${multi.floors.markets.join(", ")} clears the quality floors today — ${multi.floors.n} structure${multi.floors.n === 1 ? " was" : "s were"} built and filtered out. ${qualityFloorSentence(multi.floors.level || liqLevel)}`
                           : multi.floors?.unpriceable
                             ? unpriceableNote(multi.floors.unpriceable, multi.floors.markets.join(", "))
-                            : "Nothing fits your budget on the markets you picked."}
+                            : multi.floors?.impossible
+                              ? impossibleLossNote(multi.floors.impossible, multi.floors.markets.join(", "))
+                              : "Nothing fits your budget on the markets you picked."}
                       </div>
                     )}
                     {multi.res.length > 0 && multi.floors?.n > 0 && (
@@ -2511,6 +2603,25 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                     {multi.floors?.unpriceable > 0 && (
                       <div style={{ ...mono, fontSize: 10, color: T.amber, lineHeight: 1.6 }}>
                         {unpriceableNote(multi.floors.unpriceable, multi.floors.markets.join(", "))}
+                      </div>
+                    )}
+                    {/* AND WHAT COULD NOT LOSE. PR #14's debt: a structure
+                        whose worst case priced as a profit used to be ranked
+                        here as the best trade on the board. It is refused, and
+                        the count travels separately from the floors' because
+                        no floor did the work. */}
+                    {multi.floors?.impossible > 0 && (
+                      <div style={{ ...mono, fontSize: 10, color: T.red, lineHeight: 1.6 }}>
+                        {impossibleLossNote(multi.floors.impossible, multi.floors.markets.join(", "))}
+                      </div>
+                    )}
+                    {/* AND WHAT COULD NOT BE SCORED. An unbounded profit has no
+                        expected value, so it sits last — said in words, because
+                        a candidate at the bottom of a list with a dash where its
+                        score should be looks broken rather than honest. */}
+                    {(multi.res || []).some((r) => r.a?.profitUnbounded) && (
+                      <div style={{ ...mono, fontSize: 10, color: T.dim, lineHeight: 1.6 }}>
+                        {noCeilingRankNote((multi.res || []).filter((r) => r.a?.profitUnbounded).length)}
                       </div>
                     )}
                     {multi.floors?.oiSkipped?.length > 0 && (
@@ -2566,9 +2677,16 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                           </span>
                         )}
                         <Stat k="CHANCE" v={`${(r.pop * 100).toFixed(0)}%`} c={r.pop >= 0.5 ? T.green : T.violet} />
-                        <Stat k="EV/$100" v={`${r.ev100 >= 0 ? "+" : ""}$${r.ev100.toFixed(0)}`} c={r.ev100 >= 0 ? T.green : T.red} />
-                        <Stat k="RANK" v={`${r.rank >= 0 ? "+" : ""}${r.rank.toFixed(0)}`} c={r.conflict ? T.red : T.amber} />
-                        <Stat k="MAX TOT" v={fmt$(r.n * r.a.maxProfit)} c={T.green} />
+                        {/* AN EXPECTED VALUE NEEDS A BEST CASE. With no ceiling
+                            there is none, so nothing is printed here and the
+                            candidate sits last by construction (its rank is the
+                            -999 `evProfile()` returns) rather than being scored
+                            off the edge of a sampling grid. */}
+                        <Stat k="EV/$100" v={r.a.profitUnbounded ? "—" : `${r.ev100 >= 0 ? "+" : ""}$${r.ev100.toFixed(0)}`}
+                          c={r.a.profitUnbounded ? T.dim : r.ev100 >= 0 ? T.green : T.red}
+                          tip={r.a.profitUnbounded ? noCeilingNote(`${r.tk} ${r.name}`) : undefined} />
+                        <Stat k="RANK" v={r.a.profitUnbounded ? "last" : `${r.rank >= 0 ? "+" : ""}${r.rank.toFixed(0)}`} c={r.conflict ? T.red : T.amber} />
+                        <Stat k="MAX TOT" v={r.a.profitUnbounded ? NO_CEILING : fmt$(r.n * r.a.maxProfit)} c={T.green} />
                         {/* A hit here hands the MARKET to step 2, where the
                             structures on it are compared and kept. Radar
                             answers "which market"; the Shortlist answers
@@ -2745,6 +2863,19 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   {unpriceableNote(shortlist.tally.unpriceable, ticker)}
                 </div>
               )}
+              {/* AND A WORST CASE THAT CAME OUT AS A PROFIT. The debt PR #14
+                  wrote down: the wizard skipped these, this list ranked them. */}
+              {shortlist.tally.impossible > 0 && (
+                <div style={{ ...mono, fontSize: 10.5, color: T.red, marginTop: 8, lineHeight: 1.6 }}>
+                  {impossibleLossNote(shortlist.tally.impossible, ticker)}
+                </div>
+              )}
+              {/* AND WHAT HAS NO CEILING. Kept, shown, and named — never scored. */}
+              {shortlist.rows.some(({ a }) => a.profitUnbounded) && (
+                <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 8, lineHeight: 1.6 }}>
+                  {noCeilingRankNote(shortlist.rows.filter(({ a }) => a.profitUnbounded).length)}
+                </div>
+              )}
               {shortlist.rows.length === 0 && (
                 <div style={{ ...mono, fontSize: 11, color: T.red, marginTop: 8, lineHeight: 1.6 }}>
                   Nothing on {ticker} clears the quality floors at this expiry today. That is an answer, not an
@@ -2794,7 +2925,8 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                       </div>
                       <div style={{ display: "flex", gap: 14, marginTop: 8, flexWrap: "wrap" }}>
                         <Stat k={a.entry >= 0 ? "YOU PAY" : "YOU RECEIVE"} v={fmt$(Math.abs(a.entry) * 100)} />
-                        <Stat k="MAX PROFIT" v={fmt$(a.maxProfit)} c={T.green} />
+                        <Stat k="MAX PROFIT" v={ceil$(a.maxProfit)} c={T.green}
+                          tip={a.profitUnbounded ? noCeilingNote(p.name) : undefined} />
                         <Stat k="MAX LOSS" v={fmt$(a.maxLoss)} c={T.red} />
                         <Stat k="R/R" v={rr ? rr.toFixed(2) : "—"} c={T.amber} />
                         <Stat k="CHANCE" v={pop != null ? `${(pop * 100).toFixed(0)}%` : "—"} c={pop >= 0.5 ? T.green : T.violet} />
@@ -2857,9 +2989,11 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                         </div>
                         <div style={{ display: "flex", gap: 14, marginTop: 8, flexWrap: "wrap" }}>
                           <Stat k="CHANCE" v={`${(r.pop * 100).toFixed(0)}%`} c={r.pop >= 0.5 ? T.green : T.violet} />
-                          <Stat k="MAX PROFIT" v={fmt$(r.a.maxProfit)} c={T.green} />
+                          <Stat k="MAX PROFIT" v={ceil$(r.a.maxProfit)} c={T.green}
+                            tip={r.a.profitUnbounded ? noCeilingNote(r.name) : undefined} />
                           <Stat k="MAX LOSS" v={fmt$(r.a.maxLoss)} c={T.red} />
-                          <Stat k="EV/$100" v={`${r.ev100 >= 0 ? "+" : ""}$${r.ev100.toFixed(0)}`} c={r.ev100 >= 0 ? T.green : T.red} />
+                          <Stat k="EV/$100" v={r.a.profitUnbounded ? "—" : `${r.ev100 >= 0 ? "+" : ""}$${r.ev100.toFixed(0)}`}
+                            c={r.a.profitUnbounded ? T.dim : r.ev100 >= 0 ? T.green : T.red} />
                         </div>
                         <div style={{ marginTop: 8 }}>
                           <CandidateActions
@@ -2952,7 +3086,8 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                         <div style={{ ...mono, fontSize: 10, color: T.dim }}>{legsLine(c.legs)}</div>
                       </div>
                       <Stat k="RISK" v={fmt$(c.risk)} c={T.red} />
-                      <Stat k="MAX PROFIT" v={fmt$(c.maxProfit)} c={T.green} />
+                      <Stat k="MAX PROFIT" v={ceil$(c.maxProfit)} c={T.green}
+                        tip={c.maxProfit == null ? noCeilingNote(c.name) : undefined} />
                       <Stat k="CHANCE" v={c.pop != null ? `${(c.pop * 100).toFixed(0)}%` : "—"} c={(c.pop || 0) >= 0.5 ? T.green : T.violet} />
                       <Btn small onClick={() => openOnBuild({ ticker: c.ticker, expKey: c.expKey, legs: c.legs, name: c.name })}>Take to Build →</Btn>
                     </div>
@@ -3194,10 +3329,19 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
               {/* Stats */}
               <div style={{ display: "flex", gap: 16, marginTop: 14, flexWrap: "wrap" }}>
                 <Stat k={A.entry >= 0 ? "YOU PAY" : "YOU RECEIVE"} v={fmt$(Math.abs(A.entry) * 100)} tip="What it costs to open this trade, or what you are paid to open it. With live quotes this is the midpoint between the buy and sell price." />
-                <Stat k="MOST YOU CAN MAKE" v={fmt$(A.maxProfit)} c={T.green} tip="The best this trade can do at expiry. It cannot make more than this." />
+                {/* THE TOOLTIP USED TO SAY "It cannot make more than this" UNDER
+                    A NUMBER THAT WAS THE EDGE OF A GRID. For a long call it can
+                    make more than that, and there is no number at which it
+                    cannot: the figure and the claim under it are both gone. */}
+                <Stat k="MOST YOU CAN MAKE" v={ceil$(A.maxProfit)} c={T.green}
+                  tip={A.profitUnbounded ? noCeilingNote(stratName || "This structure")
+                    : "The best this trade can do at expiry. It cannot make more than this."} />
                 <Stat k="MOST YOU CAN LOSE" v={fmt$(A.maxLoss)} c={T.red} tip="The worst this trade can do. It is fixed the moment you open it — never a dollar more." />
                 <Stat k="BREAKEVEN" v={A.breakevens.map((b) => b.toFixed(2)).join(" · ") || "—"} c={T.blue} />
-                <Stat k={takeProfitLabel()} v={fmt$(A.maxProfit * RULES.takeProfitPct)} c={T.green} tip={RULE_PILLS.takeProfit()} />
+                <Stat k={takeProfitLabel()} v={A.profitUnbounded ? "—" : fmt$(A.maxProfit * RULES.takeProfitPct)} c={T.green}
+                  tip={A.profitUnbounded
+                    ? `${RULE_PILLS.takeProfit()} ${noCeilingNote(stratName || "This structure")}`
+                    : RULE_PILLS.takeProfit()} />
                 <Stat k={stopLossLabel()} v={fmt$(A.maxLoss * RULES.stopLossPct)} c={T.red} tip={RULE_PILLS.stopLoss()} />
               </div>
               <div style={{ display: "flex", gap: 16, marginTop: 10, flexWrap: "wrap" }}>

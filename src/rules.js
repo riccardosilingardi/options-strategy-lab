@@ -168,10 +168,48 @@ export const RULES = {
   // structure this app builds, because it is not a quality judgement: it is the
   // line under which there is nothing to judge.
   minNetPremium: 0.05,
+
+  // --- scratchPayoffShare — FOR COPY ONLY, AND FOR NOTHING ELSE.
+  //
+  // It filters no candidate, blocks no order and changes no arithmetic. It
+  // exists because a band drawn green and a band worth having are not the same
+  // thing, and the sentence under the chart was conflating them.
+  //
+  // Read live on UNG: a broken-wing call butterfly, +1 10.50C / -2 11.00C /
+  // +1 12.00C opened for a $1 credit, spot 10.57. Its payoff is +$1 anywhere
+  // below 10.50, +$8 at spot, +$51 at the 11.00 peak and -$49 above 12.00. The
+  // screen said it "makes money below $11.51, which the next 30 days reach
+  // about 73.1% of the time". Every number in that was true, and it was still
+  // the wrong impression: most of that 73.1% is the flat lower wing paying ONE
+  // DOLLAR. A beginner reads "73% of the time" next to "up to $50" and joins
+  // them into a claim nobody made.
+  //
+  // So a payoff at or under this share of the trade's best case is a SCRATCH:
+  // you got your money back and a tip, not a win. A fifth is where the two stop
+  // being the same story — at 20% of a $51 peak the wing would have to pay $10
+  // to count, and $1 plainly does not; setting it much higher would start
+  // calling the shoulders of a butterfly a scratch when they are most of what a
+  // butterfly is for, and much lower would let a rounding error count as a win.
+  // It is a threshold for a sentence, so it is allowed to be a judgement — but
+  // it is a judgement written down once, with its reasoning, rather than a bare
+  // number inside visuals.jsx.
+  scratchPayoffShare: 0.20,
 };
 
 /** The same minimum in dollars for ONE contract, which is how screens print it. */
 export const MIN_NET_DOLLARS = RULES.minNetPremium * 100;
+
+/**
+ * The dollar payoff below which a green band is a SCRATCH rather than a win.
+ * Null when there is no best case to take a share of — with no ceiling there is
+ * nothing for a payoff to be a small share OF, and inventing one here would put
+ * the grid artefact back in through the copy.
+ */
+export const scratchLevel = (maxProfit) => {
+  const m = Number(maxProfit);
+  if (!Number.isFinite(m) || m <= 0) return null;
+  return RULES.scratchPayoffShare * m;
+};
 
 /* ============================== formatting ============================== */
 
@@ -269,6 +307,19 @@ export const NOTHING_TODAY = {
       `cannot compute is not a maximum loss of zero, and this platform does not send an order whose worst case it ` +
       `cannot print.`;
   },
+  // A WORST CASE THAT IS A PROFIT IS ITS OWN ANSWER, and not the same one as an
+  // unreadable price: the price was read, and what it produced is impossible.
+  // Pooling the two would tell the user "we could not price it" about a board
+  // the app priced perfectly well and then disbelieved.
+  impossibleLoss: (tally) => {
+    const t = tally || {};
+    const markets = (t.markets || []).join(", ");
+    return `Every structure that fit your answers on ${markets || "the markets you picked"} came back unable ` +
+      `to lose: ${t.impossible || "each one"} priced with a worst case that is a PROFIT at every price at ` +
+      `expiry. That is a risk-free arbitrage, and there is not one on these chains — it means a leg was priced ` +
+      `off a quote nobody has traded against. This platform does not offer a trade on the strength of a number ` +
+      `that would have to be wrong for the trade to work.`;
+  },
   // The quality floors emptied the board. This is a real answer — "nothing on
   // CORN clears the liquidity floor today" is worth more than a screen of
   // structures nobody trades — so it gets a sentence with the counts in it.
@@ -280,8 +331,18 @@ export const NOTHING_TODAY = {
     if (t.liquidity > 0) parts.push(`${t.liquidity} because ${lab.liquidity}`);
     if (t.reward > 0) parts.push(`${t.reward} because ${lab.reward}`);
     if (t.unpriceable > 0) parts.push(`${t.unpriceable} because ${lab.unpriceable}`);
-    return `Every structure that fit your answers on ${markets || "the markets you picked"} was ` +
-      `filtered out by the quality floors: ${parts.join(", and ")}. ` +
+    if (t.impossible > 0) parts.push(`${t.impossible} because ${lab.impossible}`);
+    // WHICH RULE DID THE WORK. `unpriceable` and `impossible` are counted here
+    // so a mixed board can be explained in one screen, but they are NOT the
+    // floors and the sentence must not say they are: a structure whose price
+    // could not be read never reached a floor, and one that could not lose was
+    // refused before either floor looked at it.
+    const byFloor = (t.liquidity > 0 || t.reward > 0);
+    const lead = byFloor
+      ? `was filtered out by the quality floors`
+      : `was refused before the quality floors were even applied`;
+    return `Every structure that fit your answers on ${markets || "the markets you picked"} ` +
+      `${lead}: ${parts.join(", and ")}. ` +
       `Those floors are the difference between a price and a market. Nothing here today is the honest answer, ` +
       `and it is a better one than a trade nobody else is willing to take the other side of.`;
   },
@@ -496,6 +557,7 @@ export const qualityFloorLabels = (level = RECOMMENDED_LIQUIDITY) => {
         `or has fewer than ${l.absolute} contracts open`,
     reward: `it pays under ${money(RULES.minRewardRisk * 100)} for every ${money(100)} at risk`,
     unpriceable: `its price could not be read from the chain at all — a leg with no bid, or a net of about nothing`,
+    impossible: `its worst case priced as a PROFIT, which is an arbitrage and therefore a mispriced leg`,
   };
 };
 
@@ -525,6 +587,7 @@ export const liquiditySettingNote = (level, counts) => {
   // Not removed BY this setting, and the note says so rather than letting a
   // count the floor never made appear as one of its own.
   if (c.unpriceable > 0) bits.push(`${c.unpriceable} left out before the floor, with no price we could read`);
+  if (c.impossible > 0) bits.push(`${c.impossible} left out before the floor, unable to lose at any price`);
   return `LIQUIDITY FLOOR: ${l.label.toUpperCase()}${l.recommended ? " — the app's recommendation" : ""}` +
     `${shown ? ` · ${shown}` : ""}${bits.length ? ` · ${bits.join(" · ")}` : ""}. ` +
     `Measured against all ${LIQUIDITY_MEASUREMENT.markets} live chains on the ${LIQUIDITY_MEASUREMENT.asOf} close.`;
@@ -621,6 +684,125 @@ export const unpriceableNote = (n, what) =>
   `price could not be read${what ? ` on ${what}` : ""}: a leg nobody bids for, or a net of about nothing. ` +
   `A maximum loss the app cannot compute is not a maximum loss of zero, and nothing here is shown at ${money(0)}.`;
 
+/* -------------------------------------------------------------------------
+ * IS THERE A CEILING AT ALL? — THE PROPERTY OF THE LEGS, NOT OF A GRID.
+ *
+ * `analyze()` used to report a maximum profit taken as the largest payoff on a
+ * fixed grid running from 70% to 130% of spot. For a long call the expiry
+ * payoff never stops rising, so that "maximum" was simply the payoff at +30%:
+ * an artefact of where somebody stopped sampling. The Shortlist printed MOST
+ * YOU CAN MAKE $459 under the tooltip "It cannot make more than this", which is
+ * false, and the same artefact fed the expected value that put WEAT Long Call
+ * ATM at the top of the wide search. It is the same disease as the $0 debit in
+ * `minNetPremium` above: an UNKNOWN printed as a known number.
+ *
+ * Boundedness is decided from the legs, and the whole test is the slope of the
+ * payoff at the two ends of the price line:
+ *
+ *  - AS S RISES WITHOUT LIMIT only calls keep paying, each long call adding one
+ *    share of payoff per dollar and each short call subtracting one. Above the
+ *    highest strike every call is in the money, so the far-right slope is the
+ *    NET SIGNED CALL QUANTITY. Positive and the payoff runs away upwards: there
+ *    is no maximum profit. Negative and it runs away downwards: there is no
+ *    maximum loss, which is the uncovered short call the risk gate already
+ *    refuses by name (UNDEFINED_RISK).
+ *  - AS S FALLS the price line STOPS AT ZERO — a share cannot be worth less
+ *    than nothing — so the put side can never be infinite: a long put is worth
+ *    at most its strike and a short put loses at most its strike. That is why
+ *    the test below reads the call quantity for both directions and reports the
+ *    put quantity only as the number behind the worst case at S = 0. Puts make
+ *    the downside LARGE, never unbounded, and calling it unbounded would be as
+ *    wrong in the other direction.
+ *
+ * A structure can therefore be unbounded above, or unbounded below, or neither,
+ * and never both.
+ * ------------------------------------------------------------------------- */
+
+/**
+ * @param legs  [{ side, type, strike, qty }]
+ * @returns {{ above, below, callQty, putQty }}
+ *   `above` — is the expiry profit bounded above? When false the maximum profit
+ *             is UNKNOWN and must never be printed as a number.
+ *   `below` — is the expiry loss bounded below? False means an uncovered short
+ *             call; the gate refuses those before any order is sent.
+ *   `callQty`/`putQty` — the net signed quantities the answer was read from.
+ */
+export function payoffCeiling(legs = []) {
+  const qtyOf = (type) => (Array.isArray(legs) ? legs : []).reduce((a, l) => {
+    if (l?.type !== type) return a;
+    const q = Number(l.qty);
+    return a + Math.sign(Number(l.side) || 0) * (Number.isFinite(q) ? Math.abs(q) : 0);
+  }, 0);
+  const callQty = qtyOf("call");
+  const putQty = qtyOf("put");
+  return { above: callQty <= 0, below: callQty >= 0, callQty, putQty };
+}
+
+/** Is this structure's best case unknown? The one question every screen asks. */
+export const profitUnbounded = (legs) => !payoffCeiling(legs).above;
+
+/**
+ * What a screen prints where a maximum profit would have gone. Three words the
+ * app owns in one place, so no component invents its own way of saying it.
+ */
+export const NO_CEILING = "no ceiling";
+
+/** The sentence under a figure that is missing because there is no ceiling. */
+export const noCeilingNote = (what = "This structure") =>
+  `${what} has NO CEILING: the payoff keeps rising as the price rises, so the best case is not a number — ` +
+  `it is unknown. Anything computed from it (a reward-to-risk ratio, an expected value, the ` +
+  `${pctText(RULES.takeProfitPct)}-of-maximum target) is left blank rather than taken from the edge of a chart.`;
+
+/** The line a ranked list prints beside a candidate whose value cannot be scored. */
+export const noCeilingRankNote = (n) =>
+  `${n} candidate${n === 1 ? "" : "s"} here ${n === 1 ? "has" : "have"} no ceiling on the profit, so ` +
+  `${n === 1 ? "its" : "their"} expected value cannot be computed and ${n === 1 ? "it sits" : "they sit"} last ` +
+  `rather than being scored against the others. That is not a verdict on the trade: an unlimited best case ` +
+  `is a real thing to want. It is a refusal to rank a number the app does not have.`;
+
+/* -------------------------------------------------------------------------
+ * A MAXIMUM LOSS THAT IS A PROFIT.
+ *
+ * PR #14 left this open in writing: "A structure whose maximum loss is POSITIVE
+ * is still offered. The wizard already skips maxLoss >= 0; the Shortlist does
+ * not." A worst case that is a gain says the structure cannot lose at any price
+ * at expiry — a risk-free arbitrage. Those do not exist on five commodity ETF
+ * chains: what exists is a leg priced off a market maker's placeholder, which
+ * is the same fault as the $0 debit and belongs in the same register as
+ * UNPRICEABLE rather than being quietly ranked as the best trade on the board.
+ *
+ * It is a SEPARATE test from `priceability()` on purpose. Priceability asks
+ * whether the quotes behind a structure exist; this asks whether the arithmetic
+ * they produced is possible. Keeping them apart means the screen can say which
+ * of the two happened, and the counts do not get pooled into one number that
+ * explains neither.
+ *
+ * The figure passed here is SIGNED, the way `analyze()` produces it: a real
+ * worst case is negative. Callers that carry a positive magnitude (the risk
+ * gate, `qualityFloor()`) must not use this function — they have already thrown
+ * the sign away, which is exactly the information it reads.
+ * ------------------------------------------------------------------------- */
+
+/**
+ * @param maxLoss  dollars for ONE contract, SIGNED: a loss is negative.
+ * @returns a finished English sentence, or null when the worst case is a loss.
+ */
+export const impossibleLoss = (maxLoss) => {
+  const n = Number(maxLoss);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return `The worst this structure can do at expiry is a PROFIT of ${money(n)}: at no price does it lose ` +
+    `anything. That is a risk-free arbitrage, and there is not one on these chains — at least one leg was ` +
+    `priced off a quote nobody has traded against, so the ${money(n)} is invented rather than earned. ` +
+    `A trade that cannot lose is not a trade this app can price.`;
+};
+
+/** The one line a list prints in place of a structure whose loss came out positive. */
+export const impossibleLossNote = (n, what) =>
+  `${n} structure${n === 1 ? "" : "s"} ${n === 1 ? "was" : "were"} left out because ${n === 1 ? "its" : "their"} ` +
+  `worst case came out as a PROFIT${what ? ` on ${what}` : ""}: a trade that cannot lose at any price is an ` +
+  `arbitrage, and an arbitrage on these chains is a mispriced leg. Nothing here is offered on the strength of ` +
+  `a quote that would have to be wrong for the number to be right.`;
+
 /**
  * Reward-to-risk, or null when there is nothing to divide by.
  *
@@ -644,13 +826,23 @@ export const rewardRisk = (maxProfit, maxLoss) => {
  *   openInterest — one entry per leg. A number is a known count (0 included:
  *                  CBOE really does report zero). `null`/`undefined` means the
  *                  feed did not tell us, and skips the check.
- *   maxProfit    — dollars, the best case
+ *   maxProfit    — dollars, the best case, or null when there is no ceiling
  *   maxLoss      — dollars, the worst case (negative, or positive magnitude)
+ *   unboundedProfit — true when the payoff has no ceiling (`payoffCeiling()`),
+ *                  in which case the reward-to-risk floor is SKIPPED rather
+ *                  than failed. This is the same rule as the liquidity half
+ *                  one paragraph up: a measurement the app does not have is not
+ *                  a measurement that came out badly. A structure with no
+ *                  ceiling clears any ratio you care to name in the limit, so
+ *                  failing it would be the floor rejecting a candidate for
+ *                  paying too MUCH, and dropping it silently would hide the one
+ *                  kind of trade whose upside the app cannot bound.
  * @returns {{ pass, liquidity, reward, reasons }} — `reasons` are finished
  *   English sentences with the numbers already in them.
  */
 export function qualityFloor({
-  openInterest = [], peerOpenInterest = null, level = RECOMMENDED_LIQUIDITY, maxProfit, maxLoss,
+  openInterest = [], peerOpenInterest = null, level = RECOMMENDED_LIQUIDITY,
+  maxProfit, maxLoss, unboundedProfit = false,
 } = {}) {
   const risk = Math.abs(Number(maxLoss));
   const reward = Number(maxProfit);
@@ -685,11 +877,14 @@ export function qualityFloor({
     level: lv,
   };
 
-  const rewardCheck = {
+  const rewardCheck = unboundedProfit ? {
+    checked: false, pass: true, rr: null, floor: RULES.minRewardRisk, unbounded: true,
+  } : {
     checked: rr != null,
     pass: rr != null && rr >= RULES.minRewardRisk,
     rr,
     floor: RULES.minRewardRisk,
+    unbounded: false,
   };
 
   const reasons = [];
@@ -722,6 +917,48 @@ export const copilotRulesBlock = () =>
   `${pctText(RULES.bestPracticePerTradePct)} of trading capital; total options exposure at or ` +
   `below ${pctText(RULES.totalExposurePct)} of trading capital; seasonality is a primary signal ` +
   `and a position against it needs extra scrutiny.`;
+
+/* -------------------------------------------------------------------------
+ * THE PERIODIC REPORT'S NARRATIVE SECTION, AS A PROMPT.
+ *
+ * It lives here rather than inline in the Journal tab for the reason every rule
+ * sentence does: it is generated, it is tested, and it cannot drift from what
+ * the deterministic half of the same document says.
+ *
+ * IT INVENTED A POSITION. Section 2 of the report is built from
+ * `store.positions` and correctly said "No open positions." Section 5, written
+ * by the model, said: "The BOIL $20.50/$22.50 call spread entered at $68 debit
+ * — monitor daily against the 50% max-profit target ($434 credit)". No such
+ * position was ever opened and the target was wrong as well. The cause was one
+ * clause: the prompt asked for "what to prioritise on the open positions"
+ * UNCONDITIONALLY, so with nothing to prioritise the model filled the hole from
+ * the structure that happened to be loaded on the Build screen.
+ *
+ * Two fixes, and the second is the one that generalises. The clause is only
+ * asked for when there is something to ask about; and the prompt states which
+ * field is AUTHORITATIVE, so a structure sitting on the desk can never be
+ * written up as a trade that was entered.
+ * ------------------------------------------------------------------------- */
+
+/**
+ * @param positions  `store.positions` — the paper book. Only its length is read.
+ * @returns the user message for the report's narrative section.
+ */
+export const reportNarrativePrompt = (positions = []) => {
+  const n = Array.isArray(positions) ? positions.length : 0;
+  const asks = ["what happened this week"];
+  if (n > 0) asks.push(`what to prioritise on the ${n} open position${n === 1 ? "" : "s"}`);
+  asks.push("two opportunities from the radar", "and the political or weather risks to watch");
+  return `Write the narrative section of the periodic report: ${asks.join(", ")}. ` +
+    `Bullet points, 250 words maximum.\n\n` +
+    `THE OPEN POSITIONS ARE EXACTLY THE \`paperPositions\` ARRAY IN THE CONTEXT AND NOTHING ELSE. ` +
+    (n > 0
+      ? `There ${n === 1 ? "is" : "are"} ${n} of them. Do not describe any other trade as open, and take every ` +
+        `entry price, maximum profit and target from that array rather than restating one from memory.`
+      : `It is EMPTY: there are no open positions. Say so plainly and move on. The \`currentStrategy\` in the ` +
+        `context is a structure being looked at on the Build screen — it has NOT been entered, it is not a ` +
+        `position, and writing it up as one puts a trade in the record that never happened.`);
+};
 
 /* ============================== sizing, PRD §3 ==============================
    The old spec hardcoded "max 5% per trade, max 25% total". Those numbers were
