@@ -12,6 +12,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { buildHandOff, buildScreenState, BUILD_TAB } from "./handoff.js";
+import { STEPS } from "./path.js";
 
 /* ---------------- tiny harness ---------------- */
 let passed = 0;
@@ -100,11 +101,11 @@ test("no button sets the legs and the tab by hand: they all go through openOnBui
   assert.deepEqual(inline.map(([n]) => n), [], "inline hand-off left in App.jsx — use openOnBuild");
 });
 
-test("openOnBuild does all four things", () => {
+test("openOnBuild does all five things", () => {
   const start = APP.indexOf("const openOnBuild =");
   assert.ok(start > 0, "openOnBuild is gone");
   const body = APP.slice(start, APP.indexOf("const applyPreset", start));
-  for (const needed of ["setLegs(", "setEv(", "setTab(", "refreshChain(", "setScrollBuild("]) {
+  for (const needed of ["setLegs(", "setEv(", "setTab(", "setStep(", "refreshChain(", "setScrollBuild("]) {
     assert.ok(body.includes(needed), `openOnBuild no longer does ${needed}`);
   }
 });
@@ -118,7 +119,11 @@ test("every button that hands a trade to Build uses it", () => {
 /* ---------------- the rename ---------------- */
 
 test('the place is called Build, and "bench" survives nowhere', () => {
-  assert.ok(APP.includes('{ id: "build", label: "Build"'), "PLACES no longer holds Build");
+  // Build is step 3 of the path now (src/path.js) rather than one of three
+  // tabs, but the name and the tab id are unchanged: `BUILD_TAB` is still
+  // "build" and every hand-off still lands there.
+  assert.equal(STEPS[STEPS.length - 1].id, BUILD_TAB, "the last step is no longer the Build screen");
+  assert.equal(STEPS[STEPS.length - 1].label, "Build", "the last step is no longer called Build");
   const leftovers = APP.split("\n")
     .map((line, i) => [i + 1, line])
     .filter(([, line]) => /bench/i.test(line));

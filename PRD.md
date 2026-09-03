@@ -172,11 +172,11 @@ Then **Decide for me**, which applies the weights and produces the verdict.
 
 **NOTHING IS PRE-ANSWERED.** The flow cannot proceed past the questions until they are actually answered, and the button names which answer is missing. An earlier build shipped with $250 and 45 days already filled in, and then told the user "the $250 you said you were willing to lose" when they had said nothing at all. An app that invents your answer and quotes it back to you has stopped being trustworthy about anything else it says.
 
-**Screen 3 — The verdict: two roads, never one**
-Always at least two candidates with an explicit trade-off. One answer is advice; two answers with their price is teaching. Three things belong on this screen and nowhere else:
+**Screen 3 — The verdict: two roads, never one — NOW ON THE PATH (§12)**
+Always at least two candidates with an explicit trade-off. One answer is advice; two answers with their price is teaching. The verdict is no longer a screen of its own: a guided run lands on **step 1, Radar**, carrying what it examined, and the roads are on **step 2, Shortlist**, beside every other candidate on that market. Nothing on it was cut — the narrative moved to the step that asks "which market", the roads to the step that asks "which structure". Three things still belong to it and nowhere else:
 
-- **The copilot narrative, first.** What was actually examined, in English, with the real numbers: how many news items and which of them were geopolitical, which weather regions are outside their own monthly norm and by how much, what seasonality says for this month, and how the user's weights tipped the choice. Generated from the data (`verdictNarrative()` in `signals.js`), never templated prose.
-- **The answers, read back**, with a *change* link.
+- **The copilot narrative, first — now the top of step 1.** What was actually examined, in English, with the real numbers: how many news items and which of them were geopolitical, which weather regions are outside their own monthly norm and by how much, what seasonality says for this month, and how the user's weights tipped the choice. Generated from the data (`verdictNarrative()` in `signals.js`), never templated prose.
+- **The answers, read back**, with a *change* link, above the roads on step 2.
 - **The evidence, on each road**: the "Why this trade" panel — agreement badge, the four factors as direction/strength bars, and the tap-through to the weather regions and the news headlines behind them — plus the gauge next to the band thumbnail. The four-factor engine exists and is wired; the screen where the decision happens must not be the one screen that shows none of it.
 
 **The two roads may come from different underlyings.** When the basket holds more than one commodity, every readable market in it contributes candidates, they are ranked together on one scale, and road 2 is free to come from a different market than road 1. Two structures on one underlying share a fate, and comparing them teaches less than comparing two markets.
@@ -213,7 +213,7 @@ Every visual is generated from the same `payoff(legs, S)` function. Never comput
 | Wizard open | none — text only | — |
 | Three questions | none | — |
 | Two roads | band thumbnails, one per candidate | — |
-| Compare (optional, max 3) — **NOT BUILT** | overlaid payoff curves | shared histogram with each breakeven marked |
+| Compare (step 2, max 3) — **BUILT** | overlaid payoff curves on one axis | one shared distribution, every breakeven marked |
 | Confirm | unified position component | risk checklist |
 | Positions list | band thumbnails | — |
 | Position detail | gauge (large) | payoff (small), histogram on demand only |
@@ -226,6 +226,19 @@ Price is the **vertical** axis, exactly as it is in the unified component, so th
 **Gauge** — the payoff curve projected into polar coordinates. Colours self-calibrate from the sign of the payoff, so left is not necessarily red. Needle = spot.
 
 **Unified position component** — price history → dispersion cone → terminal distribution → payoff rotated 90°, all sharing ONE vertical price axis, with a horizontal dashed line running from today's spot through to the payoff. Cone and distribution switch on based on available width: one component, two levels of detail.
+
+**Compare** — `ComparePayoffs` in `visuals.jsx`. Up to three candidates, ONE picture: the payoffs
+overlaid on a single axis, with one shared distribution underneath and every breakeven marked on it.
+Not three charts side by side, and not a table of every number the app knows — the reader has to be
+able to say which one they prefer, and why, from the picture.
+
+The shared axis is the **move from today's price**, not the price itself, because two roads can be in
+two different markets and $4.55 of CORN has no common axis with $13.20 of UNG — "up 8%" does. The
+vertical axis is dollars per contract, shared, so the taller curve really is the bigger win. The
+distribution is drawn **only when the candidates share a market and a horizon**: there is no such
+thing as one distribution over two markets, so when they differ the breakevens are still marked and
+the picture says why the curve is missing rather than averaging two things that are not the same
+thing. `terminalDist()` is that curve, lifted out of `UnifiedPosition` so both read one function.
 
 **Backtest** — always straight, never arced. Empirical histogram of historical outcomes with the theoretical model curve overlaid; the divergence between them is the point. Built: the Monte Carlo histogram, the year-by-year row (one clickable button per year, opening a month-by-month replay of that year under the exit rules), and the same-month window — `histBacktest` replays forward from the current month, so the seasonal filter is inherent rather than a toggle. **NOT BUILT:** the "grey out and warn below 30 windows" guard. Alpha Vantage gives roughly 10–20 years for these ETFs, so the sample is *always* under 30 windows; the screen shows YEARS TESTED but does not warn that the number is small.
 
@@ -388,70 +401,94 @@ differently. The panel can also print what is on screen.
 
 ---
 
-## 12. Desk navigation — three places, and evidence underneath
+## 12. Desk navigation — ONE NUMBERED PATH, macro to micro
 
-The desk has **three destinations only**: **Build** (one trade, taken apart), **Positions**,
-**Journal**. Settings sits behind the gear, not in the row.
+The desk was one page that grew. Evidence panels replaced nothing: they appended. Open the
+Shortlist and the page got longer; open History and it got longer again. Scrolling down it you met
+"Why this trade", then "Agreement", then "How to read it", then "Three probabilities", then the
+totals, then the legend — none of them duplicated in the code, every one of them needed at some
+moment, all of them on screen at the same moment. It read as repetitive and unclear, and no part of
+it felt like a step, because there was no navigation: only accumulation.
 
-Everything that used to be a tab is now **evidence for the trade on Build**, opening directly
-underneath the strip that reveals it: **Radar** (was Scan), **Shortlist** (was Optimize),
-**Market levels**, **History**, **Copilot**.
+The desk's first place is now **three numbered steps, one on screen at a time** (`src/path.js`):
 
-- **Bench was renamed Build.** It was the Builder, then the Bench; the tab id is `"build"` and
-  "Bench" survives nowhere in the code or the copy, because a beginner cannot guess what a
-  bench is for. **Shortlist keeps its name** — it is the list of candidate structures, which
-  is what the word means.
-- **Weather and News are not tabs.** They are the drill-down behind the "Why this trade" panel:
-  tapping the weather bar opens the regions and their anomalies, tapping the news bar opens the
-  headlines with their tags. The toggle that opens the four factor bars **names them** —
-  "Show the four readings: Seasonality, Price trend, Weather and News flow" — because "show
-  detail" was a door with no sign on it and nobody opened it.
-- **An evidence panel is written next to the strip that opens it.** Market levels, History and
-  Copilot were once written after the whole builder block, so opening one rendered it ~2,000px
-  down a page that does not scroll: on a phone the tap looked like it did nothing, and both were
-  reported as broken features. A panel that needs prices and has none must **say so**; rendering
-  nothing is the same failure with a different cause.
-- **An evidence panel owns no state.** It is mounted only while it is the open one, so every
-  other chip in the strip unmounts it. The Copilot's conversation lived inside it and was
-  destroyed on the next tap — an answer that arrived while the panel was shut never reached the
-  screen at all. The conversation belongs to `App.jsx`; the panel is a view of it, and the chip
-  says when it is thinking or holding an answer.
-- **Anything the app does by itself has to say that it did.** The Journal's report writes itself
-  when one is due and you open the tab, copilot section included. Silently finding a document
-  where there was nothing is indistinguishable from a bug, so the report says it wrote itself
-  and why.
+1. **RADAR** — the wide scan across every market **in the basket** (never SPY: it is in the table so
+   the desk can price a hedge, it is not a market the path goes looking for), already filtered by the
+   quality floors (§4b). Macro: which markets have something worth looking at today, and which do not
+   **and why** — a row that found nothing names the floor that emptied it or says nobody has searched
+   it yet. The multi-market search lives here, because "which market" is the question it answers.
+2. **SHORTLIST** — the candidates that survived, on the market carried in from step 1: the roads from
+   a guided run, the per-market structures priced from the live chain, and the wide search's hits on
+   that market. Up to **three** can be compared side by side (§6) and any of them kept for later.
+3. **BUILD** — the detail for one chosen structure: chain, greeks, charts, and the confirm step at the
+   bottom. Unchanged.
+
+**Moving forward carries the selection; moving back does not lose it.** The selection lives in
+`App.jsx`, above all three screens, so a step is only which part of it is being shown. The nav writes
+what each step is carrying under its number (`stepCarry`), because "back" has to look free before
+anyone will use it.
+
+**The guided door feeds the same path.** "Find opportunities" used to jump from the three questions
+straight to two roads — the middle of the path with the macro view skipped. It now lands on step 1
+with what was examined in front of it, and the roads are on step 2 beside every other candidate. Same
+three steps whether the user came through the guided door or the desk. The "nothing today" refusal is
+unchanged and still its own screen.
+
+**Evidence opens OVER the step, never under it** (`EvidenceOverlay` in `src/steps.jsx`): Why this
+market (the four readings, and the weather regions and headlines behind them), Market levels, History
+and the Copilot, at every step, as a sheet fixed to the viewport that scrolls inside itself. When
+evidence is open the step behind it is not also on screen; closing it puts the step back where it was.
+This also settles the older fault by construction — a panel written 2,000px down a page that does not
+scroll looked, on a phone, like a tap that did nothing, and a sheet fixed to the viewport cannot land
+below the fold.
+
+- **Bench was renamed Build.** It was the Builder, then the Bench; the tab id is still `"build"`,
+  `BUILD_TAB`, and "Bench" survives nowhere in the code or the copy. **Shortlist keeps its name** — it
+  is the list of candidate structures, which is what the word means.
+- **Weather and News are not tabs.** They are the drill-down behind the "Why this trade" panel, which
+  is now one of the evidence sheets. The toggle that opens the four factor bars **names them**.
+- **An evidence panel owns no state.** It is mounted only while its sheet is open, so anything
+  long-running lives above it: the copilot's conversation belongs to `App.jsx` and the chip says when
+  it is thinking or holding an answer.
+- **Anything the app does by itself has to say that it did.** The Journal's report writes itself when
+  one is due and you open the tab, copilot section included.
 - A trade reaches Build through **one function**, `openOnBuild()` in `App.jsx`, built on
-  `buildHandOff()` in `src/handoff.js`.
+  `buildHandOff()` in `src/handoff.js` — it now also moves the path to step 3, because a hand-off is
+  what "forward" means here.
+- **One shape for a candidate.** A guided road, a Shortlist row and a wide-search hit are three
+  different objects; `candidateOf()` in `path.js` normalises them, so comparing and keeping have one
+  implementation instead of three. Kept candidates are `store.saved` items — the array the Build
+  screen's Save button already writes to, with the same hydration check and the same sync. There is no
+  second store.
 
 ---
 
-## NEXT — the plan for the next two sessions
+## NEXT — the plan for the next session
 
-Do not re-derive this. One numbered path, macro to micro:
+~~One numbered path, macro to micro: Radar → Shortlist → Build, with the guided flow feeding the
+same Radar and evidence available at every level.~~ **BUILT — see §12.** Three numbered steps, one
+on screen at a time; the selection travels forward and survives going back; evidence opens over the
+step instead of lengthening it; up to three candidates compared on one picture (§6) and kept in
+`store.saved`.
 
-1. **Radar** — the wide scan across all markets, already filtered by the quality floors (§4b).
-2. **Shortlist** — the candidates that survived, where up to three can be compared side by side
-   and saved to come back to.
-3. **Build** — the detail: chain, greeks, charts, order.
+What is left:
 
-The guided "Find opportunities" flow feeds into that same Radar rather than jumping straight to
-two roads. Evidence — weather, news, seasonal, technical — stays as sub-panels at every level.
-
-After that:
-
-- **Settle the liquidity floor with the readout, and write the number down.** The Shortlist now
-  prints the open-interest distribution of every loaded chain against the floor (§4b). The next
-  session with live access should load all five markets on a quiet day, read the near-the-money
-  "clear 25" share for each, and either confirm 25 or move it — then record the measured
-  distribution in §4b so the constant stops being an inference from one walkthrough. This is the
-  oldest carried-forward debt in the file and the readout exists specifically to close it.
-- One simplified multi-leg thumbnail used everywhere: shape, bands, meaningful vertical bars,
-  and no unreadable candles at 80px. **This is the next thing to build** — the candle line is
-  the least readable thing on the roads screen at the size it is drawn.
-- Gauge plus thumbnail on Radar and Shortlist.
-- ~~On Build, place the payoff beside the price chart on the shared price axis.~~ **DONE** —
-  it is the right-hand strip of `UnifiedView`, cut from the same `curve` as the green bands,
-  shown above `PAY_MIN_W` and folded away on a phone.
+- **Settle the liquidity floor with the readout, and write the number down.** Step 2 prints the
+  open-interest distribution of every loaded chain against the floor (§4b). The next session with
+  live access should load all five markets on a quiet day, read the near-the-money "clear 25" share
+  for each, and either confirm 25 or move it — then record the measured distribution in §4b so the
+  constant stops being an inference from one walkthrough. This is the oldest carried-forward debt in
+  the file and the readout exists specifically to close it.
+- ~~One simplified multi-leg thumbnail used everywhere: no unreadable candles at 80px.~~ **DONE** —
+  `simplifyCloses()` reduces the price line to what the width can carry (about one point per 7px),
+  keeping the first and last close exactly, so the line is a shape at 80px instead of a scribble.
+  A series already short enough is left untouched.
+- ~~Gauge plus thumbnail on Radar and Shortlist.~~ **DONE** — the gauge sits beside the thumbnail on
+  every candidate row on step 2, and step 1 carries the thumbnail of the best structure found in each
+  market. Both are cut from the same `payoffBands()` result, so they cannot disagree.
+- **The verdict narrative is long on a phone.** It is the app explaining what it looked at, so it is
+  not for cutting; but on a 390px screen it is roughly two screens of text at the top of step 1.
+  Worth a "read the rest" fold — a fold is not a deletion.
 
 ### AFTER THE SUBMISSION
 
@@ -474,20 +511,29 @@ After that:
 The standing rule in `CLAUDE.md`: every session starts by fixing what the last one flagged, and
 ends by writing down what it could not verify. Currently open:
 
-- **The two quality-floor values have not been measured against a live chain.** The sandbox that
-  wrote them has no outbound access to `cdn.cboe.com` or `data.alpaca.markets` (the egress proxy
-  answers 403), so 25 and 0.25 come from the reported live SOYB and WEAT examples and from the
-  structure of these markets, not from a survey of all five chains. **The next session with live
-  access should print the open-interest distribution per expiry for UNG, CORN, SOYB, BOIL and
-  WEAT and confirm that 25 does not empty a quiet market.** The app now does the printing
-  itself — the readout at the bottom of the Shortlist (§4b) — so this needs a session with live
-  chains and a screenshot, not new code. If 25 is wrong, the floors are named constants in one
-  file and the screens read them.
-- **The live Anthropic call.** No `ANTHROPIC_KEY` in the sandbox. `ai.mjs` now returns what it
-  sent — the model, the header names, and whether `anthropic-workspace-id` went out — alongside
-  the API's own error, so the screen distinguishes an unset variable from a bad key from a bad
-  request.
-- **The live open-interest call.** No `ALPACA_KEY` in the sandbox; the request shape is verified
-  against Alpaca's SDK and driven against a stub, not the broker.
+- **The two quality-floor values have still not been measured against a live chain.** Re-checked
+  from this session's sandbox: `cdn.cboe.com` and `data.alpaca.markets` are both refused by the
+  egress proxy (CONNECT rejected), and there is no `ALPACA_KEY` in the environment. So 25 and 0.25
+  remain an inference from the reported live SOYB and WEAT examples, not a survey of all five
+  chains. **The next session with live access should load all five markets, read the readout on
+  step 2 and confirm that 25 does not empty a quiet market.** The printing is done; what is missing
+  is live chains and a screenshot, not code.
+- **The live Anthropic call.** No `ANTHROPIC_KEY` in this sandbox either. The streaming copilot has
+  been proven against a simulated stream, not the live endpoint.
+- **The live open-interest call.** No `ALPACA_KEY`; the request shape is verified against Alpaca's
+  SDK and driven against a stub, not the broker.
 - **`src/fixtures/alpaca-chain-UNG.json` is still synthetic.** `node scripts/capture-alpaca-chain.mjs UNG`
   with real keys replaces it.
+- **The whole path was walked against STUBBED chains, not live ones.** Chromium at 390px and 1440px,
+  guided door → step 1 → evidence sheet → step 2 → tick two → compare → keep one → step 3 → the
+  confirm step → back to step 2 with the ticks and the kept row still there: 0px horizontal overflow
+  at every stage and no page errors. But the option chains, bars, weather and news were served by a
+  local stub (a Black-Scholes-consistent CBOE payload), so what is verified is the NAVIGATION, not
+  how the steps read against a real market on a quiet day.
+- **The compare picture has not been read across two real markets.** The refusal to draw one
+  distribution over two markets is exercised in `steps.test.jsx` and was seen on screen, but with
+  stubbed volatilities. Whether the ±38% axis cap is wide enough for a live BOIL-versus-SOYB pair is
+  untested against real prices.
+- **Nobody has walked the path who did not build it.** The steps were driven by a script and read in
+  screenshots. The one thing a script cannot check is whether a beginner reads "1 Radar / 2 Shortlist
+  / 3 Build" as three steps or as three tabs with numbers on them.

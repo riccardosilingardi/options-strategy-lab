@@ -332,11 +332,50 @@ const closes = (bars) => (Array.isArray(bars) ? bars : [])
   .map((x) => Number(x?.close ?? x?.c ?? x?.value ?? x))
   .filter((x) => Number.isFinite(x) && x > 0);
 
+/**
+ * THE PRICE LINE, REDUCED TO WHAT THE SIZE CAN CARRY.
+ *
+ * A hundred and twenty daily closes drawn across 230px is a scribble: every
+ * day gets under two pixels, the line reads as noise, and at 80px in a list it
+ * is a grey smudge that says nothing about where the market has been. This was
+ * the last thing on the PRD's NEXT list that was code rather than access — "no
+ * unreadable candles at 80px" — and it is one function, not a new chart.
+ *
+ * The series is bucketed into at most `maxPts` points and each bucket becomes
+ * its mean, so the SHAPE survives and the wiggle does not. Two rules keep it
+ * honest: the first and the last close are always kept exactly, because the
+ * last one is today and the picture is about where today sits, and a series
+ * already short enough is returned untouched rather than smoothed for no reason.
+ *
+ * @param {number[]} hist   closes, oldest first
+ * @param {number}   maxPts the most points the width can show
+ * @returns {number[]} at most `maxPts` closes, first and last preserved
+ */
+export function simplifyCloses(hist = [], maxPts = 40) {
+  const xs = hist.filter((x) => Number.isFinite(x) && x > 0);
+  const n = Math.max(2, Math.floor(maxPts));
+  if (xs.length <= n) return xs;
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const from = Math.floor((i / n) * xs.length);
+    const to = Math.max(from + 1, Math.floor(((i + 1) / n) * xs.length));
+    let s = 0;
+    for (let j = from; j < to; j++) s += xs[j];
+    out.push(s / (to - from));
+  }
+  out[0] = xs[0];
+  out[out.length - 1] = xs[xs.length - 1];
+  return out;
+}
+
+/** How many points a line this wide can actually show. One point per ~7px. */
+export const thumbPoints = (width) => Math.max(6, Math.round(width / 7));
+
 export function BandThumbnail({ bands, width = 160, height = 44, spot = null, bars = [], onExplain, title }) {
   const b = bands;
   if (!b || !b.bands.length) return null;
   const s0 = spot ?? b.spot;
-  const hist = closes(bars);
+  const hist = simplifyCloses(closes(bars), thumbPoints(width * 0.78));
 
   // The price axis has to hold the bands AND the history, or the line walks off
   // the top of the picture the moment the market moves outside the payoff range.
@@ -484,6 +523,33 @@ export function GaugeFigure({ legs, entryNet, spot, ticker, size, style }) {
    one component, two levels of detail, never two components that can drift.
 ==================================================================== */
 
+/**
+ * WHERE THE PRICE COULD FINISH, as a set of bars over a price range.
+ *
+ * Lifted out of `UnifiedPosition` so the compare view can draw the SAME
+ * distribution the position detail draws. Two lognormals written twice is two
+ * screens that can disagree about the same market, which is the one thing this
+ * file exists to prevent.
+ *
+ * @returns {{ bins: {lo,hi,mid,p}[], peak: number }} probability per bin, and
+ *   the tallest bin, so a caller can scale bars without rescanning them.
+ */
+export function terminalDist({ spot, sigma, dte, driftAnnual = 0, lo, hi, bins = 26 }) {
+  if (!(Number.isFinite(spot) && spot > 0) || !(sigma > 0) || !(dte > 0) || !(hi > lo)) return { bins: [], peak: 0 };
+  const Tyr = Math.max(1, dte) / 365, sq = sigma * Math.sqrt(Tyr);
+  const mu = Math.log(spot) + (driftAnnual - 0.5 * sigma * sigma) * Tyr;
+  const cdf = (x) => (x <= 0 ? 0 : normCdf((Math.log(x) - mu) / sq));
+  const out = [];
+  let peak = 0;
+  for (let i = 0; i < bins; i++) {
+    const a = lo + (i / bins) * (hi - lo), z = lo + ((i + 1) / bins) * (hi - lo);
+    const p = Math.max(0, cdf(z) - cdf(a));
+    peak = Math.max(peak, p);
+    out.push({ lo: a, hi: z, mid: (a + z) / 2, p });
+  }
+  return { bins: out, peak };
+}
+
 export const UNIFIED_DETAIL_WIDTH = 560; // below this, history and payoff only
 
 /** The column layout, as data: a test can check the panels turn off. */
@@ -543,21 +609,12 @@ export function UnifiedPosition({
 
   // --- the terminal distribution, as a histogram rotated onto the price axis ---
   const distW = L.xDistEnd - L.xConeEnd;
-  const distBars = [];
-  if (distW > 4 && Number.isFinite(spot) && sigma > 0) {
-    const Tyr = days / 365, sq = sigma * Math.sqrt(Tyr);
-    const mu = Math.log(spot) + (driftAnnual - 0.5 * sigma * sigma) * Tyr;
-    const cdf = (x) => (x <= 0 ? 0 : normCdf((Math.log(x) - mu) / sq));
-    const NB = 26;
-    let peak = 0;
-    for (let i = 0; i < NB; i++) {
-      const lo = yMin + (i / NB) * (yMax - yMin), hi = yMin + ((i + 1) / NB) * (yMax - yMin);
-      const p = Math.max(0, cdf(hi) - cdf(lo));
-      peak = Math.max(peak, p);
-      distBars.push({ lo, hi, p, profit: b.at((lo + hi) / 2) > 0 });
-    }
-    for (const d of distBars) d.w = peak > 0 ? (d.p / peak) * (distW - 2) : 0;
-  }
+  const dist = distW > 4 ? terminalDist({ spot, sigma, dte: days, driftAnnual, lo: yMin, hi: yMax }) : { bins: [], peak: 0 };
+  const distBars = dist.bins.map((d) => ({
+    ...d,
+    profit: b.at(d.mid) > 0,
+    w: dist.peak > 0 ? (d.p / dist.peak) * (distW - 2) : 0,
+  }));
 
   // --- the payoff, rotated 90°: price up the axis, money across ---
   const payW = L.xPayEnd - L.xDistEnd;
@@ -666,6 +723,209 @@ export function UnifiedFigure({ legs, entryNet, spot, bars, dte, sigma, driftAnn
       explanation={open ? explainElement(open, b, ctx) : null} onClose={() => setOpen(null)}>
       <UnifiedPosition legs={legs} entryNet={entryNet} spot={spot} bars={bars} dte={dte}
         sigma={sigma} driftAnnual={driftAnnual} ticker={ticker} height={height} width={width} onExplain={setOpen} />
+    </Figure>
+  );
+}
+
+/* ====================================================================
+   4) COMPARE — up to three candidates, ONE picture (PRD §6)
+
+   Three payoffs overlaid on one shared axis, and one shared distribution with
+   every breakeven marked on it. Not three charts side by side, and not a table
+   of every number the app knows: the reader has to be able to say which one
+   they prefer, and why, from the picture.
+
+   The shared axis is the MOVE from today's price, not the price itself, because
+   two roads can be in two different markets — $4.55 of CORN and $13.20 of UNG
+   have no common axis, "up 8%" does. The vertical axis is dollars of profit per
+   contract, shared, so the taller curve really is the bigger win.
+
+   The distribution is drawn only when the candidates share a market and a
+   horizon, because there is no such thing as one distribution over two
+   different markets. When they do not, the breakevens are still marked and the
+   picture says why the curve is missing rather than drawing an average of two
+   things that are not the same thing.
+==================================================================== */
+
+/** The three curve colours, in order. Never more: the cap is three. */
+export const COMPARE_COLORS = [T.blue, T.amber, T.violet];
+
+/** Do these candidates share one market and one expiry? */
+export const sharesOneMarket = (items = []) =>
+  items.length > 0
+  && items.every((c) => c.ticker === items[0].ticker)
+  && items.every((c) => Math.abs((c.dte || 0) - (items[0].dte || 0)) <= 1)
+  && Number.isFinite(items[0].spot) && items[0].spot > 0;
+
+/** One sentence: who pays most, who works most often, and what it costs. */
+export function compareTakeaway(items = []) {
+  if (!items.length) return "Nothing ticked to compare yet.";
+  if (items.length === 1) return `Only ${items[0].name} is ticked — tick a second one and the two payoffs are drawn on the same axis.`;
+  const payer = items.reduce((a, c) => ((c.maxProfit || 0) > (a.maxProfit || 0) ? c : a), items[0]);
+  const often = items.reduce((a, c) => ((c.pop || 0) > (a.pop || 0) ? c : a), items[0]);
+  if (payer === often) {
+    return `${payer.name} both pays the most, up to ${amount$(payer.maxProfit)}, and works most often at ${inTenPhrase(payer.pop)}, for ${amount$(payer.risk)} at risk.`;
+  }
+  return `${payer.name} pays the most — up to ${amount$(payer.maxProfit)}, ${inTenPhrase(payer.pop)} — while ${often.name} works most often at ${inTenPhrase(often.pop)} for up to ${amount$(often.maxProfit)}.`;
+}
+
+/** The explanation of one element of the compare picture, on tap. */
+export function explainCompareElement(el, items = []) {
+  const one = items[0];
+  switch (el) {
+    case "curve":
+      return "Each line is one candidate's profit or loss at expiry, in dollars for a single contract, read against the same move across the bottom. Where a line is above the middle rule it makes money; the height is how much.";
+    case "zero":
+      return "The middle rule is breaking even. A line crossing it is that candidate's breakeven, marked underneath in the same colour.";
+    case "breakeven":
+      return "A marker is where that candidate stops losing and starts making money. Two markers means the trade needs the price to finish between them.";
+    case "distribution":
+      return `The grey bars are where the price could finish by expiry, under the market's own volatility${one?.ticker ? ` for ${one.ticker}` : ""}. Read them under the lines: a candidate whose green stretch sits under the tall bars is one the market is more likely to reach.`;
+    case "today":
+      return "The dashed line is today: no move at all. Everything to the left is the market falling, everything to the right is it rising.";
+    default:
+      return "";
+  }
+}
+
+/**
+ * The compare picture itself.
+ *
+ * @param {object[]} items up to three normalised candidates (src/path.js)
+ */
+export function ComparePayoffs({ items = [], height = 300, width: fixedWidth, onExplain }) {
+  const [ref, measured] = useWidth(760);
+  const shown = items.slice(0, COMPARE_COLORS.length);
+  // The svg has a floor below which the curves are unreadable, and it scrolls
+  // inside its OWN box when the column is narrower than that — the page never
+  // moves sideways (CLAUDE.md).
+  const W = Math.max(300, fixedWidth || measured);
+  const H = height;
+  const padL = 46, padR = 12, padT = 12, padB = 58;
+  const distH = 34;
+
+  // Everything renders through this wrapper, in every state, so the
+  // ResizeObserver always has a node to observe on mount.
+  const frame = (children) => (
+    <div ref={ref}>
+      <div style={{ overflowX: "auto", maxWidth: "100%" }}>{children}</div>
+    </div>
+  );
+  if (!shown.length) return frame(null);
+
+  const bandsOf = (c) => payoffBands({
+    legs: c.legs, entryNet: c.entryNet, spot: c.spot,
+    lo: c.spot * 0.62, hi: c.spot * 1.38,
+  });
+  const drawn = shown.map((c, i) => ({ c, color: COMPARE_COLORS[i], b: bandsOf(c) }));
+
+  // The shared axis: the move from today, wide enough to hold every breakeven
+  // on the picture plus a margin, and never narrower than ±12%.
+  const moves = drawn.flatMap(({ c, b }) => b.breakevens.map((s) => s / c.spot - 1));
+  const reach = Math.min(0.38, Math.max(0.12, ...moves.map((m) => Math.abs(m) * 1.6)));
+  const X = (m) => padL + ((m + reach) / (2 * reach)) * (W - padL - padR);
+
+  const pnls = drawn.flatMap(({ c, b }) => b.samples
+    .filter((p) => Math.abs(p.s / c.spot - 1) <= reach)
+    .map((p) => p.pnl));
+  const pHi = Math.max(1, ...pnls), pLo = Math.min(-1, ...pnls);
+  const Y = (v) => padT + (1 - (v - pLo) / (pHi - pLo)) * (H - padT - padB);
+
+  const shared = sharesOneMarket(shown);
+  const yDist = H - padB + 16;
+  const dist = shared
+    ? terminalDist({
+      spot: shown[0].spot, sigma: shown[0].sigma || 0.3, dte: shown[0].dte || 45,
+      lo: shown[0].spot * (1 - reach), hi: shown[0].spot * (1 + reach), bins: 30,
+    })
+    : { bins: [], peak: 0 };
+
+  const tap = (el) => (onExplain ? () => onExplain(el) : undefined);
+  const pct = (m) => `${m > 0 ? "+" : ""}${Math.round(m * 100)}%`;
+
+  return frame(
+    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} role="img"
+      aria-label={compareTakeaway(shown)}
+      style={{ display: "block", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 8, cursor: onExplain ? "pointer" : "default" }}>
+      {/* dollars up the left-hand side, shared by every curve */}
+      {Array.from({ length: 5 }, (_, i) => {
+        const v = pLo + (i / 4) * (pHi - pLo);
+        return (
+          <g key={i}>
+            <line x1={padL} x2={W - padR} y1={Y(v)} y2={Y(v)} stroke={T.line} strokeWidth={0.6} />
+            <text x={padL - 5} y={Y(v) + 3} textAnchor="end" fill={T.dim} fontSize={9.5} fontFamily="ui-monospace, Menlo, monospace">
+              {v >= 0 ? `$${Math.round(v)}` : `-$${Math.abs(Math.round(v))}`}
+            </text>
+          </g>
+        );
+      })}
+
+      {/* breaking even, and today */}
+      <line x1={padL} x2={W - padR} y1={Y(0)} y2={Y(0)} stroke={T.mut} strokeWidth={1.2} onClick={tap("zero")} />
+      <line x1={X(0)} x2={X(0)} y1={padT} y2={H - padB} stroke={T.amber} strokeWidth={1} strokeDasharray="3 3" onClick={tap("today")} />
+
+      {/* the move across the bottom */}
+      {[-reach, -reach / 2, 0, reach / 2, reach].map((m, i) => (
+        <text key={i} x={X(m)} y={H - padB + 12} textAnchor="middle" fill={T.dim} fontSize={9.5} fontFamily="ui-monospace, Menlo, monospace">{pct(m)}</text>
+      ))}
+
+      {/* where the price could finish — one distribution, under every curve */}
+      {dist.bins.map((d, i) => {
+        const x0 = X(d.lo / shown[0].spot - 1), x1 = X(d.hi / shown[0].spot - 1);
+        const h = dist.peak > 0 ? (d.p / dist.peak) * distH : 0;
+        return (
+          <rect key={i} x={x0} y={yDist + (distH - h)} width={Math.max(0.6, x1 - x0 - 0.8)} height={Math.max(0.4, h)}
+            fill={T.mut} opacity={0.35} onClick={tap("distribution")} />
+        );
+      })}
+
+      {/* the payoffs, overlaid */}
+      {drawn.map(({ c, b, color }, i) => {
+        const pts = b.samples.filter((p) => Math.abs(p.s / c.spot - 1) <= reach);
+        const d = pts.map((p, j) => `${j ? "L" : "M"}${X(p.s / c.spot - 1).toFixed(1)},${Y(p.pnl).toFixed(1)}`).join("");
+        return (
+          <g key={c.key || i} onClick={tap("curve")}>
+            <path d={d} fill="none" stroke={color} strokeWidth={2.2} strokeLinejoin="round" opacity={0.95} />
+            {b.breakevens.map((s, k) => (
+              <g key={k} onClick={tap("breakeven")}>
+                <line x1={X(s / c.spot - 1)} x2={X(s / c.spot - 1)} y1={Y(0) - 5} y2={yDist + distH}
+                  stroke={color} strokeWidth={1} strokeDasharray="2 3" opacity={0.75} />
+                <circle cx={X(s / c.spot - 1)} cy={yDist + distH} r={3.2} fill={color} />
+              </g>
+            ))}
+          </g>
+        );
+      })}
+
+      {/* which line is which */}
+      {drawn.map(({ c, color }, i) => (
+        <g key={`k${c.key || i}`}>
+          <rect x={padL + i * Math.min(190, (W - padL - padR) / drawn.length)} y={H - 14} width={9} height={9} fill={color} rx={2} />
+          <text x={padL + i * Math.min(190, (W - padL - padR) / drawn.length) + 13} y={H - 6}
+            fill={T.body} fontSize={10.5} fontFamily="ui-sans-serif, system-ui">
+            {c.ticker} {c.name}
+          </text>
+        </g>
+      ))}
+    </svg>
+  );
+}
+
+/** The compare picture with its takeaway and tap-to-explain. */
+export function CompareFigure({ items = [], height, width, style }) {
+  const [open, setOpen] = useState(null);
+  const shown = items.slice(0, COMPARE_COLORS.length);
+  return (
+    <Figure style={style} takeaway={compareTakeaway(shown)}
+      explanation={open ? explainCompareElement(open, shown) : null} onClose={() => setOpen(null)}>
+      <ComparePayoffs items={shown} height={height} width={width} onExplain={setOpen} />
+      {!sharesOneMarket(shown) && shown.length > 1 && (
+        <div style={{ ...sans, fontSize: 12.5, color: T.mut, lineHeight: 1.5, marginTop: 6 }}>
+          These are not all the same market and horizon, so there is no single distribution to draw underneath
+          them: one curve of where the price could finish would have to be two. The payoffs and the breakevens
+          are still on one axis, read as the move from each market{"’"}s own price today.
+        </div>
+      )}
     </Figure>
   );
 }

@@ -127,11 +127,15 @@ while the position is open.
   not a tab: capital onboarding on a first run, then screen 1 (greeting, one line
   of status, **two** doors — and "what needs attention today" once positions
   exist), screen 2 (`FindOpportunities`: basket, budget and time, three driver
-  sliders, then **"Decide for me"** as the last button), screen 3 (the verdict:
-  the copilot narrative, the answers read back with a *change* link, then **two
-  roads, never one** — each with a band thumbnail, a gauge, the "Why this trade"
-  evidence panel and one generated sentence naming what it gives up) and
-  screen 5 ("nothing today").
+  sliders, then **"Decide for me"** as the last button), the verdict (the copilot
+  narrative, the answers read back with a *change* link, then **two roads, never
+  one** — each with a band thumbnail, a gauge, the "Why this trade" evidence panel
+  and one generated sentence naming what it gives up) and the "nothing today"
+  refusal.
+  **The verdict is no longer a screen of its own.** A guided run lands on step 1 of
+  the desk's path with its narrative, and `WizardCandidates` — the roads, unchanged
+  — renders on step 2 beside every other candidate (see Navigation). The refusal
+  stays a screen: it has nothing to hand to a path.
   **There is no confirm SCREEN.** "Take this road" lands on Build with the trade
   loaded, and the confirm step — what is being sent, the gate's checks in plain
   English, the exit plan stated as already decided — is `ConfirmSteps` at the
@@ -153,6 +157,12 @@ while the position is open.
   payout in the same sentence (`roadHeadline()`). Opening with "3 times in 10"
   reads as a bad trade to a beginner before they know what is being judged.
 
+- `src/path.js` — **the numbered path**: the three steps and their order, what each
+  one carries, `candidateOf()` (one shape for anything that can be compared or kept),
+  the compare cap and the `store.saved` item a kept candidate becomes. Plain JS, no
+  React, for the same reason `rules.js` and `handoff.js` are.
+- `src/steps.jsx` — `StepNav`, `StepForward`, `EvidenceBar`, `EvidenceOverlay`,
+  `CompareTray`, `CandidateActions`. The navigation, and nothing about a trade.
 - `src/why.jsx` — **the "Why this trade" panel**, and the only copy of it. The
   agreement badge, the four factors as direction/strength bars behind a toggle
   that **names them** ("Show the four readings: Seasonality, Price trend,
@@ -238,35 +248,61 @@ while the position is open.
   says so on screen
 - `netlify/edge-functions/gate.js` — password gate, with demo-token bypass
 
-## Navigation — tabs are not destinations, they are evidence
+## Navigation — ONE NUMBERED PATH, macro to micro
 
-The desk has **three places only**: **Build** (one trade, taken apart),
-**Positions**, **Journal**. Settings sits behind the gear, not in the row.
+The desk's first place is **three numbered steps and one is on screen at a time**
+(`src/path.js`, `src/steps.jsx`). **Positions** and **Journal** are the other two
+places; Settings sits behind the gear.
 
-What used to be tabs is now evidence for the trade on **Build**, opening
-underneath it: **Radar** (was Scan), **Shortlist** (was Optimize), Market
-levels, History, Copilot. **Build** was the Builder, then the Bench — the tab
-id is `"build"`, and "Bench" survives nowhere in the code or the copy, because
-a beginner cannot guess what a bench is for. **Shortlist keeps its name**: it
-is the list of candidate structures, which is what the word means. Weather and
-News are not tabs at all any more: they are the drill-down behind the
-"Why this trade" panel — tapping the weather bar reveals the regions and their
-anomalies, tapping the news bar reveals the headlines with their tags.
+1. **RADAR** — every market **in the basket** (never SPY: it is in the table so the
+   desk can price a hedge), read by the four factors and filtered by the quality
+   floors. A market that produced nothing says which floor emptied it, or that
+   nobody has searched it yet. The multi-market search lives here.
+2. **SHORTLIST** — the candidates that survived on the market carried in from
+   step 1: the guided run's roads, the structures priced from the live chain, and
+   the wide search's hits. Up to **three** compared side by side, any of them kept.
+3. **BUILD** — one trade taken apart: chain, greeks, charts, and the confirm step
+   at the bottom. Unchanged by this work.
 
-**An evidence panel must be written next to the strip that opens it.** Market
-levels, History and Copilot were once written after the whole builder block, so
-opening one rendered it ~2,000px down a page that does not scroll: on a phone
-the tap looked like it did nothing, and both were reported as broken features.
-All five panels now open directly under the button that opened them. A panel
-that needs prices and has none must SAY so — rendering nothing at all is the
-same failure with a different cause.
+**Moving forward carries the selection; moving back does not lose it.** The
+selection lives in `App.jsx`, above all three screens, so a step is only which part
+of it is being shown, and the nav writes what each step carries under its number
+(`stepCarry`). Radar and Shortlist used to be evidence panels that APPENDED to the
+Build page, which is why the desk was one page that only ever got longer, with
+"Why this trade", "Agreement", "How to read it", "Three probabilities", the totals
+and the legend all on screen at once. None of that copy was cut; each piece now
+appears at the step that needs it.
 
-A trade reaches Build through **one function**, `openOnBuild()` in `App.jsx`,
-built on `buildHandOff()` in `src/handoff.js`. It closes the open evidence
-panel, loads the target ticker's chain if it is missing and scrolls Build into
-view. A hand-off written inline at the button instead silently does nothing
-when the user is already on the Build tab: the evidence panel stays expanded
-above and the trade lands below the fold.
+**The guided door feeds the same path.** "Find opportunities" lands on step 1 with
+what it examined, and its roads are on step 2 beside every other candidate — same
+three steps whichever door you came through. The "nothing today" refusal is
+unchanged and still its own screen.
+
+**Evidence opens OVER the step, never under it** (`EvidenceOverlay`): Why this
+market, Market levels, History and the Copilot, at every step, as a sheet fixed to
+the viewport that scrolls inside itself and closes back onto the step. That also
+settles the old fault by construction — a panel written 2,000px down a page that
+does not scroll looked, on a phone, like a tap that did nothing, and a sheet fixed
+to the viewport cannot land below the fold. Weather and News are still the
+drill-down inside the "Why this trade" panel, not places of their own.
+
+**Build was the Builder, then the Bench**; the tab id is `"build"` and "Bench"
+survives nowhere. **Shortlist keeps its name**: it is the list of candidate
+structures, which is what the word means.
+
+A trade reaches Build through **one function**, `openOnBuild()` in `App.jsx`, built
+on `buildHandOff()` in `src/handoff.js`. It closes the evidence sheet, loads the
+target ticker's chain if it is missing, **moves the path to step 3** and scrolls
+Build into view. A hand-off written inline at the button instead silently does
+nothing when the user is already there.
+
+**One shape for a candidate.** A guided road, a Shortlist row and a wide-search hit
+are three different objects; `candidateOf()` in `path.js` normalises them, so
+comparing and keeping have one implementation instead of three. Ticking is capped
+at three and **the fourth tap is refused in words**, never swallowed. Kept
+candidates are `store.saved` items — the array the Build screen's Save button
+already writes to, with the same hydration check and the same sync. Never build a
+second store for them.
 
 ## Visual contract
 
@@ -278,6 +314,9 @@ The three components:
 - **Band thumbnail** — the **underlying's own price line** over green/red bands
   from the sign of the payoff. No numbers, no labels, readable at 80px. An iron
   condor produces three bands with no special-casing. Used in every list.
+  The price line is reduced to what the width can carry (`simplifyCloses`, about one
+  point per 7px, first and last close kept exactly), because 120 daily closes across
+  230px is a scribble and at 80px a smudge.
   Price is the **vertical** axis, as it is in the unified component, so the bands
   are horizontal stripes and the price line runs across them, ending at today's
   price on the right-hand edge. Pass `bars`; with none it falls back to a flat
@@ -287,6 +326,12 @@ The three components:
   arc, needle at spot. Colours come from the sign of the payoff, so left is NOT
   always red: a bear spread is green on the left. Primary visual on position
   detail.
+- **Compare** — `ComparePayoffs`: up to three payoffs overlaid on ONE axis, with one
+  shared distribution underneath and every breakeven marked. The axis is the move
+  from today's price, not the price, because two roads can be in two markets. The
+  distribution is drawn only when the candidates share a market and a horizon, and
+  when they do not the picture SAYS why rather than averaging two markets.
+  `terminalDist()` is that curve, and `UnifiedPosition` reads the same function.
 - **Unified position component** — price history, dispersion cone, terminal
   distribution as a rotated histogram and the payoff rotated 90°, all on ONE
   shared vertical price axis, with a horizontal dashed line from today's spot

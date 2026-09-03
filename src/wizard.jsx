@@ -636,7 +636,7 @@ export function roadHeadline(c) {
 }
 
 /** One road. Every visual on it is tappable and explains itself. */
-function RoadCard({ c, other, onPick, i, bars = [], weatherData, newsItems, month }) {
+function RoadCard({ c, other, onPick, i, bars = [], weatherData, newsItems, month, actions }) {
   const [open, setOpen] = useState(null);
   const bands = payoffBands({ legs: c.legs, entryNet: c.entryNet, spot: c.spot });
   const inTen = Math.max(0, Math.min(10, Math.round((c.pop || 0) * 10)));
@@ -694,6 +694,11 @@ function RoadCard({ c, other, onPick, i, bars = [], weatherData, newsItems, mont
       {/* The one sentence that makes this two roads rather than a ranking. */}
       <Pill tone={T.violet}>{tradeOffSentence(c, other)}</Pill>
 
+      {/* A road is a candidate like any other on the Shortlist step: it can be
+          put beside two others on one picture, or kept for later. The desk
+          passes these in; the guided screen on its own does not have them. */}
+      {actions ? <div style={{ marginTop: 10 }}>{actions}</div> : null}
+
       <button onClick={() => onPick(c)}
         style={{ ...sans, width: "100%", minHeight: 56, marginTop: 14, fontSize: 16, fontWeight: 700, borderRadius: 10,
           cursor: "pointer", background: T.amber, color: T.onAccent, border: "none" }}>
@@ -736,7 +741,7 @@ function AnswersBack({ answers, onChange }) {
 }
 
 export function WizardCandidates({ candidates = [], answers = {}, narrative = [], barsFor,
-  weatherData, newsItems, month, onPick, onBack }) {
+  weatherData, newsItems, month, onPick, onBack, actionsFor }) {
   const tickers = [...new Set(candidates.map((c) => c.ticker))];
   return (
     <div style={{ ...sans, maxWidth: 760, margin: "0 auto", padding: `16px 16px ${BADGE_SAFE}px` }}>
@@ -769,6 +774,7 @@ export function WizardCandidates({ candidates = [], answers = {}, narrative = []
         <RoadCard key={c.id || i} c={c} i={i} onPick={onPick}
           bars={barsFor ? barsFor(c.ticker) : []}
           weatherData={weatherData} newsItems={newsItems} month={month}
+          actions={actionsFor ? actionsFor(c) : null}
           other={candidates.find((x) => x !== c) || null} />
       ))}
       <div style={{ ...sans, fontSize: 12.5, color: T.dim, marginTop: 16, lineHeight: 1.5, textAlign: "center" }}>
