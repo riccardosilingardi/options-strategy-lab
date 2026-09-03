@@ -803,6 +803,15 @@ ends by writing down what it could not verify. Currently open:
   floor, nothing was read off a broker to choose it. The reasoning is written beside it and it
   only ever changes a sentence, but it has not been tried against a spread of real structures
   to see whether it calls the shoulders of a butterfly a scratch too readily.
+- **THE DEPLOY PREVIEW EXISTS AND CANNOT BE REACHED FROM A SANDBOX.** PR #15 built and
+  deployed cleanly to `deploy-preview-15--strategy-lab-optiontrading.netlify.app`, which is
+  the one place these screens can be read against a REAL chain with real keys. The session
+  that wrote them could not open it: the sandbox's own egress proxy refuses the CONNECT, the
+  same wall that made an earlier `/api/liquidity` attempt prove nothing. **Only the owner can
+  close the live-walk debts below.** What to look at, in one pass on a phone: the Shortlist
+  for a Very Bull market, where a Long Call ATM must read MAX PROFIT `no ceiling` and R/R `—`,
+  and the same trade on Build, where MOST YOU CAN MAKE, TP 50% and the BREAKEVEN string must
+  agree with the Shortlist to the penny.
 - **THE 390px RE-WALK WAS AGAINST A STUBBED BOIL BOARD.** Radar → Look at BOIL → Very Bull →
   Shortlist → Build was driven in Chromium at 390px: the Long Call ATM printed MAX PROFIT
   **no ceiling**, R/R **—**, TP 50% **—**, the exit plan named the 21-day mark instead of a
