@@ -41,7 +41,12 @@ export function probProfit(legs, entry, S, iv, dte) {
 }
 
 export function exitSim(pos, S, dteLeft, iv, sigma, n = 1500) {
-  const tp = 0.5 * pos.maxProfit, sl = 0.5 * pos.maxLoss, days = Math.max(1, dteLeft - 7);
+  // `0.5 * null` is 0 in JavaScript. A position with no ceiling on its profit
+  // has no take-profit level (src/rules.js, `payoffCeiling`), and without this
+  // guard every path that touched break-even would be counted as one — the
+  // simulator reporting a rule the app does not apply.
+  const tp = Number.isFinite(pos.maxProfit) ? 0.5 * pos.maxProfit : null;
+  const sl = 0.5 * pos.maxLoss, days = Math.max(1, dteLeft - 7);
   let nTP = 0, nSL = 0, nPos = 0, sum = 0; const tds = [];
   for (let i = 0; i < n; i++) {
     let s = S, done = false;
@@ -49,7 +54,7 @@ export function exitSim(pos, S, dteLeft, iv, sigma, n = 1500) {
       let u = 0, v = 0; while (!u) u = Math.random(); while (!v) v = Math.random();
       s *= Math.exp(-0.5 * sigma * sigma / 365 + sigma * Math.sqrt(1 / 365) * Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v));
       const pnl = (netBS(pos.legs, s, dteLeft - d, iv) - pos.entryNet) * 100;
-      if (pnl >= tp) { nTP++; tds.push(d); sum += pnl; done = true; break; }
+      if (tp != null && pnl >= tp) { nTP++; tds.push(d); sum += pnl; done = true; break; }
       if (pnl <= sl) { nSL++; sum += pnl; done = true; break; }
     }
     if (!done) { const pnl = (netBS(pos.legs, s, 7, iv) - pos.entryNet) * 100; if (pnl > 0) nPos++; sum += pnl; }

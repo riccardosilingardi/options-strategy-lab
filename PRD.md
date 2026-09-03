@@ -150,6 +150,97 @@ What follows from that:
 
 ---
 
+## 4c. An unknown is not a number — the ceiling, the arbitrage and the breakeven
+
+Four faults with one shape: the app printing something it does not know as something it
+does. §4a settled it for the PRICE. This settles it for the BEST CASE, for a WORST
+CASE that came out impossible, for a breakeven read off a grid instead of arithmetic,
+and for a weekly report that filled an empty section by inventing a position.
+
+### The maximum profit of an unbounded payoff does not exist
+
+`analyze()` reported the largest payoff SAMPLED on a fixed grid from 70% to 130% of spot.
+For a long call the payoff never stops rising, so that "maximum" was the payoff at +30%:
+an artefact of where somebody stopped sampling. The Shortlist printed MOST YOU CAN MAKE
+$459 under the tooltip *"It cannot make more than this"*, and the same artefact fed the
+expected value that put **WEAT Long Call ATM (EV/$100 +$290)** and **UNG Long Call ATM
+(+$120)** at the top of the wide search.
+
+`payoffCeiling(legs)` in `src/rules.js` decides it from the LEGS:
+
+| Direction | Bounded when | Why |
+|---|---|---|
+| above | net signed **call** quantity ≤ 0 | Above the highest strike every call is in the money, so the far-right slope IS that quantity. Positive and the profit runs away. |
+| below | net signed **call** quantity ≥ 0 | Negative and the loss runs away — an uncovered short call, which the gate already refuses by name (`UNDEFINED_RISK`). |
+| puts | always | The price line stops at zero, so a long put is worth at most its strike and a short put loses at most its strike. Large, never infinite. Calling the put side unbounded would be the same mistake pointing the other way. |
+
+What follows:
+
+- **`maxProfit` is `null`, never a number**, in `analyze()` and in `payoffBands()`. The
+  sampled top survives as `sampledMaxProfit` / `sampledTop` for the code that has to
+  scale a picture, and is never a figure on a screen.
+- **The UI says it in words** — `NO_CEILING` ("no ceiling") in `rules.js`, written once.
+  R/R prints "—", the take-profit target prints "—", the exit plan says the
+  `RULES.exitDTE` mark is the half that still applies, and the profit rungs of the exit
+  ladder are not offered because `takeProfitPct × null` is `0` and would have sent an
+  order to close for nothing.
+- **Nothing that needs a finite best case is computed.** `rewardRisk()` and `evProfile()`
+  already return null on a non-finite reward; `exitSim()`, `exitPathSim()` and the
+  seasonal replay skip the take-profit branch rather than triggering it at break-even.
+- **It is ranked last, never dropped.** `qualityFloor()` takes `unboundedProfit` and
+  SKIPS the reward-to-risk floor instead of failing it — the same rule the liquidity half
+  applies to unknown open interest, and for the same reason. The multi-market scan's
+  guard was `maxProfit <= 0`, and `null <= 0` is **true** in JavaScript, so the honest
+  answer would have made every long call vanish without a word. The candidate is shown,
+  its expected value is left blank, it sorts last on the `-999` `evProfile()` returns,
+  and `noCeilingRankNote()` says why in the list.
+- **The loss side is untouched.** Non-negotiable rule 2 stands: `maxLoss` is still the
+  grid minimum and still always a finite number.
+
+### A maximum loss that is a profit is an arbitrage
+
+The debt PR #14 wrote down and left open: *"A structure whose maximum loss is POSITIVE is
+still offered. The wizard already skips `maxLoss >= 0`; the Shortlist does not."* A worst
+case that is a gain says the structure cannot lose at any price at expiry. There is no
+such thing on five commodity ETF chains — what there is, is a leg priced off a market
+maker's placeholder, the same fault as the $0 debit.
+
+`impossibleLoss(maxLoss)` in `rules.js` is that test, run at all three generation sites in
+the same register as UNPRICEABLE and immediately after it: a named sentence with the
+number in it (`impossibleLossNote()`, `NOTHING_TODAY.impossibleLoss()`), its own count in
+the tally, and its own refusal screen. It is deliberately SEPARATE from `priceability()`:
+that asks whether the quotes exist, this asks whether the arithmetic they produced is
+possible, and pooling the counts would explain neither. It reads the SIGNED figure, so
+callers that carry a positive magnitude (the gate, `qualityFloor()`) must not use it.
+
+### One trade, one breakeven
+
+The Shortlist said *"BOIL makes money above $20.67"* and Build said *20.68*. Exact is
+20.67 (20.50 + 0.17). `payoffBands()` interpolated the crossing; `analyze()` took the
+midpoint of the grid step it fell in, resolution 0.051. The expiry payoff is piecewise
+linear, so the crossing inside a bracket is exact arithmetic — `analyze()` now interpolates
+it with the same zero-is-a-loss sign convention `payoffBands()` uses, and the two screens
+print the same string by construction, across every preset in every direction.
+
+### The report cannot invent a position
+
+Section 2 of the generated report is deterministic (`buildReportMd`) and correctly said
+**"No open positions."** Section 5, written by the model, said: *"The BOIL $20.50/$22.50
+call spread entered at $68 debit — monitor daily against the 50% max-profit target ($434
+credit)."* No such position was ever opened, and the target was wrong as well. The cause
+was one clause: the prompt asked for *"what to prioritise on the open positions"*
+unconditionally, so with nothing to prioritise the model filled the hole from the
+structure that happened to be loaded on the Build screen.
+
+`reportNarrativePrompt(positions)` lives in `src/rules.js` with `copilotRulesBlock()` —
+a generated prompt is a generated sentence, and it belongs where they all do. Two changes,
+and the second is the one that generalises: the clause is only asked for when there is
+something to ask about, and the prompt states that **`paperPositions` is authoritative**,
+naming `currentStrategy` as a structure being LOOKED at rather than one that was entered.
+`src/ceiling.test.jsx` fails the build if the prompt does not change with an empty array.
+
+---
+
 ## 4b. Quality floors — the app will not propose an indefensible trade
 
 A structure can satisfy every rule in §4 and still be one nobody should take. Two floors,
@@ -397,6 +488,33 @@ thing. `terminalDist()` is that curve, lifted out of `UnifiedPosition` so both r
 **Every visual exposes two functions.** `takeaway()` returns one always-visible sentence stating the conclusion, generated from the numbers. `explain(element)` returns the explanation of a single data point, on tap. Neither is ever hand-written text.
 
 > If the takeaway cannot be written in one sentence, the chart is wrong. Change the chart, not the copy.
+
+**A SCRATCH IS NOT A WIN, AND THE SENTENCE HAS TO SEPARATE THEM.** Two true numbers can
+make a false impression when they are joined. Live UNG: a broken-wing call butterfly,
++1 10.50C / -2 11.00C / +1 12.00C opened for a $1 credit with spot at 10.57 — +$1 anywhere
+below 10.50, +$8 at spot, +$51 at the 11.00 peak, -$49 above 12.00. The screen said it
+*"makes money below $11.51, which the next 30 days reach about 73.1% of the time — and
+expiring at today's price would pay $8."* Every figure is correct. Most of that 73.1% is
+the flat lower wing paying **one dollar**, and a beginner reads 73% next to "up to $50" and
+joins them into a claim nobody made.
+
+`RULES.scratchPayoffShare` (**0.20**) is the one named constant, in `src/rules.js` with its
+reasoning, and it is **for copy only**: it filters no candidate, blocks no order and changes
+no arithmetic. `payoffBands()`, `profitBands()` and `chanceInProfit()` are untouched — they
+were already correct. What is new is a SECOND cut of the profit region, at
+`scratchLevel(maxProfit)`, using the same samples and the same linear interpolation the
+sign cut already uses (`bandsAbove()` → `payingBands()` → `scratchSplit()`), so the two can
+never disagree about a crossing and a whole band whose own peak sits under the line simply
+falls out. The unified takeaway then states both in one sentence, and only when the numbers
+demand it — when the chance of finishing where it really pays is SMALLER than the chance of
+finishing where it merely scratches:
+
+> "UNG is at $10.57 and makes money below $11.51 about 71.8% of the time in the next 30
+> days, but most of that is a scratch — it pays more than $10 only between $10.59 and
+> $11.41, about 17.7% of the time — and expiring at today's price would pay $8."
+
+With no ceiling there is no share to take, `scratchLevel()` returns null, and nothing is
+said rather than something guessed.
 
 On mobile there is no hover. Tap to open, tap outside to close, and on narrow screens the explanation appears below the chart.
 
@@ -663,6 +781,42 @@ What is left:
 
 The standing rule in `CLAUDE.md`: every session starts by fixing what the last one flagged, and
 ends by writing down what it could not verify. Currently open:
+
+- **CLOSED THIS SESSION:** PR #14's *"a structure whose maximum loss is POSITIVE is still
+  offered"* — `impossibleLoss()` now refuses it at all three generation sites (§4c).
+- **THE POSITIVE-MAX-LOSS CASE HAS NEVER BEEN SEEN ON A REAL BOARD.** It is refused, counted
+  and tested — but the test constructs the mispriced quote by hand (a 105 call quoted above a
+  100 call). Nobody has watched a live chain produce one, so how OFTEN it fires, and on which
+  market, is unknown. If the Shortlist starts printing that line, that is the evidence.
+- **THE POSITIVE-MAX-LOSS TEST IS NOT IN THE RISK GATE.** The task forbade touching the gate's
+  arithmetic, so a hand-built structure on the desk whose worst case prices as a profit is
+  still sendable. It is a narrow hole — the generation sites cannot offer one — but it is a
+  hole, and it is the obvious next `evaluateTrade()` violation. Note the sign trap before
+  doing it: `impossibleLoss()` reads a SIGNED figure and the gate carries `Math.abs(maxLoss)`.
+- **THE GRID CAN STILL MISREAD A VERY WIDE SHORT STRUCTURE.** `maxLoss` is deliberately left
+  as the minimum over ±30% of spot (rule 2 was not to be weakened, and the presets all break
+  inside ±12%). A hand-built condor whose short strikes sit beyond ±30% would report a maximum
+  loss that is really a maximum-inside-the-window — and would then trip the new arbitrage
+  refusal as a false positive. Computing both extremes from the STRIKES rather than the grid
+  is the real fix and was out of scope here.
+- **`scratchPayoffShare` (0.20) IS A JUDGEMENT, NOT A MEASUREMENT.** Unlike the liquidity
+  floor, nothing was read off a broker to choose it. The reasoning is written beside it and it
+  only ever changes a sentence, but it has not been tried against a spread of real structures
+  to see whether it calls the shoulders of a butterfly a scratch too readily.
+- **THE 390px RE-WALK WAS AGAINST A STUBBED BOIL BOARD.** Radar → Look at BOIL → Very Bull →
+  Shortlist → Build was driven in Chromium at 390px: the Long Call ATM printed MAX PROFIT
+  **no ceiling**, R/R **—**, TP 50% **—**, the exit plan named the 21-day mark instead of a
+  dollar target, both screens printed BREAKEVEN **22.87** (and 21.67 for the spread), 0 page
+  errors and 0px horizontal overflow. But the chain and the bars came from a local stub server
+  written for the walk, so the STRINGS are verified and the live feed is not.
+- **THE UNG SENTENCE WAS REPRODUCED, NOT OBSERVED.** The scratch takeaway is tested against
+  the broken-wing butterfly from the report (+1 10.50C / -2 11.00C / +1 12.00C, $1 credit,
+  spot 10.57) rebuilt from those figures. Nobody has seen the new sentence on the live site
+  next to the old one.
+- **THE REPORT'S SECTION 5 HAS NOT BEEN RE-GENERATED.** The prompt is fixed and tested, but
+  running it needs `ANTHROPIC_KEY`, which this sandbox does not have. What is proven is that
+  the prompt text changes with an empty book and names `paperPositions` as authoritative — not
+  that the model then obeys it.
 
 - **THE READING IS ONE DAY, AND IT IS NOT A QUIET ONE.** The floor is measured now, but from
   the 2026-09-01 close — roughly two weeks before a September expiry, with the front month fat

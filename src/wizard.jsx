@@ -25,7 +25,11 @@
 import React, { useState } from "react";
 import { Compass, Briefcase, Bell, ArrowLeft, SlidersHorizontal, ShieldCheck, ShieldAlert, AlertTriangle, Sparkles } from "lucide-react";
 import { T, BADGE_SAFE, BADGE_BTN_GAP } from "./theme.js";
-import { RULES, sizing, money, pctText, perTradeCapLabel, ruleBadge, capitalSourceNote, perTradeLimitPhrase, limitOwner, qualityFloorSentence } from "./rules.js";
+import { RULES, sizing, money, pctText, perTradeCapLabel, ruleBadge, capitalSourceNote, perTradeLimitPhrase, limitOwner, qualityFloorSentence,
+  NO_CEILING } from "./rules.js";
+
+/** A best case, or the words for not having one — never `money(null)`. */
+const upTo = (x) => (Number.isFinite(x) ? money(x) : NO_CEILING);
 import { BandThumbnail, Gauge, payoffBands, bandTakeaway, gaugeTakeaway, explainElement, UnifiedFigure, exitPlanSentence, exitPlanDetail, inTenPhrase, price } from "./visuals.jsx";
 import { DRIVERS, DRIVER_PRESETS, presetOf, normaliseWeights } from "./signals.js";
 import { WhyThisTrade } from "./why.jsx";
@@ -606,7 +610,10 @@ export function tradeOffSentence(me, other) {
   if (inTen(me.pop) < inTen(other.pop)) {
     gives.push(`how often it works — about ${inTenPhrase(me.pop)} against ${inTen(other.pop)}`);
   }
-  if (me.maxProfit < other.maxProfit * 0.98) {
+  // Only compare two numbers that exist. `null < x` is true in JavaScript, so
+  // a road with no ceiling would have been written up as giving up the size of
+  // the win — the exact opposite of what an unbounded payoff does.
+  if (Number.isFinite(me.maxProfit) && Number.isFinite(other.maxProfit) && me.maxProfit < other.maxProfit * 0.98) {
     gives.push(`the size of the win — up to ${money(me.maxProfit)} against ${money(other.maxProfit)}`);
   }
   if (me.risk > other.risk * 1.02) {
@@ -632,6 +639,10 @@ export function tradeOffSentence(me, other) {
 export function roadHeadline(c) {
   if (!c) return "";
   const often = inTenPhrase(c.pop);
+  if (!Number.isFinite(c.maxProfit)) {
+    return `Pays with ${NO_CEILING} — the profit keeps growing with the price — for ${money(c.risk)} at risk, ` +
+      `and it starts paying ${often}.`;
+  }
   return `Pays up to ${money(c.maxProfit)} for ${money(c.risk)} at risk — and that happens ${often}.`;
 }
 
@@ -674,7 +685,7 @@ function RoadCard({ c, other, onPick, i, bars = [], weatherData, newsItems, mont
 
       <div style={{ display: "flex", gap: 18, marginTop: 12, flexWrap: "wrap" }}>
         {[["YOU RISK", money(c.risk), T.ink],
-          ["YOU CAN MAKE", money(c.maxProfit), T.green],
+          ["YOU CAN MAKE", upTo(c.maxProfit), T.green],
           ["WORKS OUT", inTenPhrase(c.pop), inTen >= 6 ? T.green : inTen >= 4 ? T.blue : T.violet],
           ["DAYS", `${Math.round(c.dte)}`, T.ink]].map(([k, v, col]) => (
             <span key={k}>
@@ -899,8 +910,8 @@ export function ConfirmSteps({
             {c.ticker} · {c.name}
           </h1>
           <p style={{ ...sans, fontSize: 15, color: T.mut, lineHeight: 1.55, margin: 0 }}>
-            {c.legs.length} legs, expiring {c.expKey || `in ${Math.round(c.dte)} days`}. Risking {money(c.risk)} to make
-            up to {money(c.maxProfit)}.
+            {c.legs.length} legs, expiring {c.expKey || `in ${Math.round(c.dte)} days`}. Risking {money(c.risk)}
+            {Number.isFinite(c.maxProfit) ? ` to make up to ${money(c.maxProfit)}.` : `, with ${NO_CEILING} on what it can make.`}
           </p>
         </>
       )}

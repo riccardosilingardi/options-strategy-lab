@@ -108,6 +108,77 @@ always known. Hence:
 - The desk still shows a hand-built structure, and says above the figures that its
   price could not be read.
 
+## An unknown is not a number — the ceiling, the arbitrage, the breakeven
+
+The same disease as the $0 debit above, in three more places. `analyze()` in `App.jsx`
+took its maximum profit as the largest payoff on a grid from `S*0.7` to `S*1.3`.
+
+**A PAYOFF WITH NO CEILING HAS NO MAXIMUM PROFIT.** `payoffCeiling(legs)` in `rules.js`
+decides it from the legs, never from a grid: bounded above when the net signed CALL
+quantity is <= 0 (above the highest strike every call is in the money, so that quantity IS
+the far-right slope), bounded below when it is >= 0 — and puts can make neither side
+infinite, because the price line stops at zero and a long put is worth at most its strike.
+For a long call the old "maximum" was simply the payoff at +30%, printed under the tooltip
+"It cannot make more than this", and the same artefact fed the expected value that topped
+the wide search with WEAT Long Call ATM (EV/$100 +$290).
+
+- **`maxProfit` is `null`, never a number**, in `analyze()` and in `payoffBands()`. The
+  sampled top survives as `sampledMaxProfit` / `sampledTop` for code that has to scale a
+  picture, and is never a figure on screen. `NO_CEILING` in `rules.js` is the one place the
+  words "no ceiling" are written; `ceil$()` in `App.jsx` and `upTo()` in `wizard.jsx` are
+  the only two formatters that reach for it. **Never `Number.isFinite(Number(x))` on a
+  maximum profit** — `Number(null)` is 0 and 0 is finite, which is how a missing maximum
+  becomes a maximum of zero.
+- **Nothing that needs a finite best case is computed.** R/R and the take-profit target
+  print "—", `exitPlanDetail()` says the 21-day mark is the half that still applies, the
+  profit rungs of the exit ladder are not offered, and `exitSim()` / `exitPathSim()` / the
+  seasonal replay skip the take-profit branch — `takeProfitPct * null` is `0`, which would
+  have closed every path at break-even and sent an order to close for nothing.
+- **It is ranked last, never dropped.** `qualityFloor()` takes `unboundedProfit` and SKIPS
+  the reward floor rather than failing it, exactly as the liquidity half skips on unknown
+  open interest. The multi-scan guard was `maxProfit <= 0` and `null <= 0` is TRUE, so
+  telling the truth would have made every long call vanish in silence: it is now explicit,
+  the candidate is shown, its EV is blank, it sorts last on `evProfile()`'s `-999`, and
+  `noCeilingRankNote()` says why.
+- **The loss side is untouched.** Rule 2 stands: `maxLoss` is still finite and always known.
+
+**A MAXIMUM LOSS THAT IS A PROFIT IS AN ARBITRAGE** — the debt PR #14 wrote down and left
+open. `impossibleLoss(maxLoss)` in `rules.js`, run at all three generation sites right
+after `priceability()`, in the same register: a named sentence with the number in it
+(`impossibleLossNote()`, `NOTHING_TODAY.impossibleLoss()`), its own count in the tally, its
+own refusal screen. Deliberately SEPARATE from `priceability()`: that asks whether the
+quotes exist, this asks whether the arithmetic they produced is possible, and one pooled
+count would explain neither. It reads the SIGNED figure, so callers holding a positive
+magnitude (`riskGate.js`, `qualityFloor()`) must never use it.
+
+**ONE TRADE, ONE BREAKEVEN.** The Shortlist said BOIL makes money above $20.67 and Build
+said 20.68; exact is 20.67. `analyze()` took the midpoint of the grid step the sign changed
+in, resolution 0.051. The expiry payoff is piecewise linear, so the crossing is exact
+arithmetic: `analyze()` interpolates it now, with the same zero-is-a-loss sign convention
+`payoffBands()` uses, and the two screens print the same string by construction.
+
+**A SCRATCH IS NOT A WIN — AND THIS IS COPY ONLY.** `RULES.scratchPayoffShare` (0.20),
+one named constant with its reasoning, filters nothing and changes no arithmetic:
+`payoffBands()`, `profitBands()` and `chanceInProfit()` are untouched because they were
+already right. Live UNG, a broken-wing call butterfly opened for a $1 credit at spot 10.57:
+"makes money below $11.51, which the next 30 days reach about 73.1% of the time" was true,
+and most of that 73.1% was the flat wing paying ONE DOLLAR against a $51 peak. The profit
+region is cut a SECOND time at `scratchLevel(maxProfit)` — `bandsAbove()` → `payingBands()`
+→ `scratchSplit()` in `visuals.jsx`, using the same samples and the same interpolation as
+the sign cut, so the two cannot disagree about a crossing — and `unifiedTakeaway()` states
+both facts in ONE sentence, only when more of the green is scratch than money.
+
+**THE REPORT CANNOT INVENT A POSITION.** `reportNarrativePrompt(positions)` in `rules.js`
+(a generated prompt is a generated sentence, so it lives with `copilotRulesBlock()`): the
+"what to prioritise on the open positions" clause is conditional on the book, and the
+prompt states that `paperPositions` is authoritative and that `currentStrategy` is a
+structure being LOOKED at, not one that was entered. Section 5 once described a BOIL call
+spread "entered at $68 debit" in a report whose own section 2 said "No open positions."
+
+`src/ceiling.test.jsx` holds all four, against the REAL generation site — `analyze`,
+`shortlistWithFloors` and `buildPresets` are exported from `App.jsx` for it, so no second
+implementation of these decisions can appear beside them.
+
 ## Quality floors — the app will not propose an indefensible trade
 
 Two named constants in `src/rules.js`, with the reasoning beside them, applied by
@@ -199,8 +270,11 @@ while the position is open.
 - `src/rules.js` — **the single source of truth for the trading rules**. Take
   profit, stop loss, exit DTE, the entry-DTE floor and the PRD §3 sizing model
   (`sizing()`), `minNetPremium` with `priceability()` and `rewardRisk()` (is there a
-  price at all — the check before the floors), the two quality floors and
-  `qualityFloor()` that applies them,
+  price at all — the check before the floors), `payoffCeiling()` /
+  `profitUnbounded()` / `NO_CEILING` (is there a maximum profit at all),
+  `impossibleLoss()` (is the worst case actually a loss), `scratchPayoffShare`
+  with `scratchLevel()` (copy only) and `reportNarrativePrompt()`,
+  the two quality floors and `qualityFloor()` that applies them,
   plus the generated rule strings (`ruleBadge()`, `perTradeCapLabel()`,
   `copilotRulesBlock()`, `capitalSourceNote()`, `qualityFloorSentence()`,
   `RULE_PILLS`, `NOTHING_TODAY`), and the liquidity floor as a SETTING —
@@ -420,7 +494,10 @@ second store for them.
 
 Every visual is generated from `payoff(legs, S)`, through `payoffBands()` in
 `src/visuals.jsx` — never compute zones separately or two screens will disagree
-about the same trade.
+about the same trade. `payoffBands().maxProfit` is `null` when the payoff has no
+ceiling; `sampledTop` is what the drawing code scales to, and it is never printed.
+`bandsAbove()` cuts the same samples at any level and is the only way to split a
+band — the scratch cut is a caller of it, not a second sampler.
 
 The three components:
 - **Band thumbnail** — the **underlying's own price line** over green/red bands
@@ -623,8 +700,8 @@ than comparing two markets — they share a fate.
 
 The refusal is a screen, not a toast. `runWizard` in `App.jsx` decides, in order:
 data missing → signals not aligned → options expensive versus their own history →
-every candidate unpriceable → every candidate below the quality floors → nothing
-fits the budget → only one road survives. A board where nothing could be PRICED is
+every candidate unpriceable → every candidate unable to lose → every candidate below
+the quality floors → nothing fits the budget → only one road survives. A board where nothing could be PRICED is
 not a board the floors emptied, and neither of them is a budget problem. A missing-data answer must
 never be dressed up as a market verdict — they are different sentences on
 screen, and `wizard.test.jsx` holds that line. "Only one candidate" is also a
