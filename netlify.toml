@@ -38,6 +38,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/liquidity"
+  to = "/.netlify/functions/liquidity"
+  status = 200
+
+[[redirects]]
   from = "/api/alpaca"
   to = "/.netlify/functions/alpaca"
   status = 200

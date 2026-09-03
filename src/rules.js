@@ -52,17 +52,57 @@ export const RULES = {
   // indefensible. These two are the floors under a PROPOSAL: a candidate that
   // fails either one is never offered, and the screen says which floor it hit.
   //
-  // minOpenInterestPerLeg — how many contracts must already be open on a leg
-  // before this app will build with it. Open interest is the count of contracts
-  // in existence at the previous session's close: it is the closest thing to a
-  // headcount of the people on the other side of your trade. On a contract with
-  // 2 open and 0 open, the bid and the ask are a market maker's placeholder,
-  // not a price anybody has agreed to — you can be quoted 1.16 and 0.30 on two
-  // adjacent strikes whose implied volatility disagrees by ten points, because
-  // no trade has ever tested either number. 25 is the floor: it is far above
-  // the single digits that mark a strike nobody has touched, and far below what
-  // a genuinely traded near-the-money strike on these ETFs carries.
-  minOpenInterestPerLeg: 25,
+  // THE LIQUIDITY FLOOR, IN TWO PARTS — RELATIVE FIRST, ABSOLUTE UNDERNEATH.
+  //
+  // Open interest is the count of contracts in existence at the previous
+  // session's close: the closest thing to a headcount of the people on the
+  // other side of your trade. On a contract with 2 open and 0 open, the bid and
+  // the ask are a market maker's placeholder, not a price anybody has agreed
+  // to — you can be quoted 1.16 and 0.30 on two adjacent strikes whose implied
+  // volatility disagrees by ten points, because no trade has ever tested either
+  // number.
+  //
+  // This used to be ONE absolute number, 25 contracts on every leg of every
+  // market. That was the mistake. 25 is nothing on UNG and a great deal on
+  // SOYB, so a single figure either empties the thin markets or waves the junk
+  // through on the liquid ones — and which of the two it does depends on a
+  // market it was never measured against. A count only means something next to
+  // the other counts on the same board.
+  //
+  // liquidityPercentile — WHERE A LEG SITS AMONG THE OTHER STRIKES ON ITS OWN
+  // EXPIRY. At 0.40 a leg has to carry more open interest than the bottom 40%
+  // of that expiry. A strike in the bottom of its own chain's distribution is
+  // untraded whatever its raw count says, and that judgement travels between
+  // markets in a way a fixed number cannot: it asks the same question of UNG
+  // and of SOYB and gets an answer in each market's own terms.
+  liquidityPercentile: 0.40,
+
+  // minOpenInterestAbsolute — THE FLOOR UNDER THE FLOOR. A percentile on its
+  // own lets a chain certify itself: where nothing trades, the 40th percentile
+  // is one contract, every leg clears it, and the emptiness has become the
+  // standard it is measured against. Nothing under this is a market at any
+  // percentile. It is deliberately well below the old 25 — the relative test
+  // now does the work on a liquid board, and this one only has to catch
+  // "nobody trades anything here at all".
+  minOpenInterestAbsolute: 10,
+
+  // minPeersForPercentile — below this many known counts on an expiry there is
+  // no distribution to take a percentile of, so the relative half is dropped
+  // and the absolute floor applies alone. The screen says which of the two
+  // bound, because "we could not measure the neighbours" is a different fact
+  // from "the neighbours are all busy".
+  minPeersForPercentile: 12,
+
+  // >>> BOTH NUMBERS ARE PROVISIONAL AND PENDING A MEASUREMENT. <<<
+  // Nobody has yet counted the open interest actually present on UNG, CORN,
+  // SOYB, BOIL and WEAT. 0.40 and 10 are chosen to be conservative in the one
+  // direction that matters — they cut the tail of untouched strikes without
+  // emptying a quiet market — but they are still an argument, not a reading.
+  // `netlify/functions/liquidity.mjs`, opened at /api/liquidity behind the
+  // site's own password, fetches the five chains where the keys already are and
+  // returns the distribution of open interest per market and per expiry. When
+  // that JSON exists, set these two from it and delete this block; until then
+  // every screen that prints the floor says it is provisional.
 
   // minRewardRisk — the least a structure may pay per dollar it puts at risk.
   // Read it as a break-even hit rate: at a ratio r a win pays r and a loss costs
@@ -163,9 +203,10 @@ export const NOTHING_TODAY = {
   belowQualityFloor: (tally) => {
     const t = tally || {};
     const markets = (t.markets || []).join(", ");
+    const lab = qualityFloorLabels(t.level);
     const parts = [];
-    if (t.liquidity > 0) parts.push(`${t.liquidity} because ${qualityFloorLabels().liquidity}`);
-    if (t.reward > 0) parts.push(`${t.reward} because ${qualityFloorLabels().reward}`);
+    if (t.liquidity > 0) parts.push(`${t.liquidity} because ${lab.liquidity}`);
+    if (t.reward > 0) parts.push(`${t.reward} because ${lab.reward}`);
     return `Every structure that fit your answers on ${markets || "the markets you picked"} was ` +
       `filtered out by the quality floors: ${parts.join(", and ")}. ` +
       `Those floors are the difference between a price and a market. Nothing here today is the honest answer, ` +
@@ -214,17 +255,172 @@ export const limitOwner = (limits) => ((limits && limits.answered) ? "your" : "t
    And it will not invent a reason. Every rejection comes back with the number
    that caused it, so the sentence on screen is the arithmetic, not a verdict. */
 
-/** The floors as phrases, generated so no screen can quote a different number. */
-export const qualityFloorLabels = () => ({
-  liquidity: `fewer than ${RULES.minOpenInterestPerLeg} contracts are open on one of its legs`,
-  reward: `it pays under ${money(RULES.minRewardRisk * 100)} for every ${money(100)} at risk`,
-});
+/* ---------------------------------------------------------------------------
+ * THE LIQUIDITY FLOOR AS A SETTING THE USER OWNS.
+ *
+ * The app recommends; the user decides; the screen always says which setting
+ * produced what is on it. A floor nobody can move is the app asserting a number
+ * it has not measured, and this one has not been measured yet (see RULES).
+ *
+ * Four settings, and the RECOMMENDED one reads its numbers straight out of
+ * RULES so "the app's recommendation" is literally the constant in the code
+ * rather than a copy of it that can drift. STRICT keeps the old absolute 25,
+ * which is where this floor started; OFF is honestly named — it is not a
+ * gentler floor, it is no floor, and the screen says what that lets back in.
+ * ------------------------------------------------------------------------- */
+export const LIQUIDITY_LEVELS = [
+  {
+    id: "strict", label: "Strict", percentile: 0.60, absolute: 25,
+    blurb: "A leg must beat 60% of the strikes on its own expiry, and never carry under 25 open contracts.",
+  },
+  {
+    id: "recommended", label: "Recommended", recommended: true,
+    percentile: RULES.liquidityPercentile, absolute: RULES.minOpenInterestAbsolute,
+    blurb: "A leg must beat the bottom 40% of the strikes on its own expiry, and never carry under 10 open contracts.",
+  },
+  {
+    id: "relaxed", label: "Relaxed", percentile: 0.20, absolute: 5,
+    blurb: "Only the emptiest fifth of each expiry is removed, and nothing under 5 open contracts.",
+  },
+  {
+    id: "off", label: "Off", percentile: 0, absolute: 0,
+    blurb: "No liquidity floor at all: every strike the feed lists is offered, however few contracts are open on it.",
+  },
+];
 
-/** `at least 25 open contracts per leg and $0.25 of reward per $1 at risk` */
-export const qualityFloorSentence = () =>
-  `Every structure offered here has at least ${RULES.minOpenInterestPerLeg} contracts of open interest on ` +
-  `every leg and pays at least ${pctText(RULES.minRewardRisk)} of what it risks. Open interest is how many ` +
-  `contracts are actually open: a price on a contract nobody trades is a quote, not a market.`;
+export const RECOMMENDED_LIQUIDITY = LIQUIDITY_LEVELS.find((l) => l.recommended);
+
+/** A level by id, and never undefined: an unknown id falls back to the advice. */
+export const liquidityLevel = (id) =>
+  LIQUIDITY_LEVELS.find((l) => l.id === id) || RECOMMENDED_LIQUIDITY;
+
+/** Is this setting looser than what the app recommends? */
+export const isLoosened = (level) => {
+  const l = liquidityLevel(level?.id ?? level);
+  return l.percentile < RECOMMENDED_LIQUIDITY.percentile || l.absolute < RECOMMENDED_LIQUIDITY.absolute;
+};
+
+/**
+ * The warning that has to be visible whenever the floor is loosened, naming
+ * what it lets back in rather than saying "be careful".
+ */
+export const looseningWarning = (level) => {
+  const l = liquidityLevel(level?.id ?? level);
+  if (!isLoosened(l)) return null;
+  if (l.id === "off") {
+    return `THE LIQUIDITY FLOOR IS OFF. What comes back includes contracts nobody trades: on a strike with a ` +
+      `handful of contracts open, the bid and the ask are a market maker's placeholder, not a price anyone has ` +
+      `agreed to, and you can be quoted two adjacent strikes whose implied volatility disagrees by ten points. ` +
+      `You would be paying whatever was typed, and you may not find anyone to sell it back to.`;
+  }
+  return `LOOSER THAN RECOMMENDED. This lets back in legs in the bottom ${pctText(l.percentile)} of their own ` +
+    `expiry and legs with as few as ${l.absolute} contracts open. A price on a contract nobody trades is a quote, ` +
+    `not a market: the exit can cost more than the entry saved.`;
+};
+
+/** Sorted, ascending, unknowns dropped. The one place a count is judged known. */
+export const knownCounts = (xs) => (Array.isArray(xs) ? xs : [])
+  .filter((x) => x != null && x !== "" && Number.isFinite(Number(x)))
+  .map(Number)
+  .sort((a, b) => a - b);
+
+/**
+ * The value at fraction `f` of a SORTED array. One convention for the whole
+ * app: `oiProfile()` in chain.js reads this too, so the distribution the screen
+ * prints and the threshold the floor applies cannot be computed two ways.
+ */
+export function quantile(sorted, f) {
+  if (!sorted?.length) return null;
+  return sorted[Math.min(sorted.length - 1, Math.floor(f * sorted.length))];
+}
+
+/**
+ * What open interest a leg needs, given the other strikes on its own expiry.
+ *
+ * @param peers  every known open-interest count on that expiry (the leg's own
+ *               included — it is one of the strikes on the board)
+ * @param level  one of LIQUIDITY_LEVELS
+ * @returns {{ threshold, relative, absolute, peers, basis }}
+ *   `basis` is which half bound: "relative" when the chain's own distribution
+ *   set the number, "absolute" when the floor under the floor did, and
+ *   "absolute (too few strikes to measure)" when there was no distribution to
+ *   take a percentile of. The screen prints it, because a floor that will not
+ *   say where its number came from is the thing this replaces.
+ */
+export function liquidityThreshold(peers, level = RECOMMENDED_LIQUIDITY) {
+  const l = liquidityLevel(level?.id ?? level);
+  const known = knownCounts(peers);
+  // Three different reasons the relative half can be absent, and they are not
+  // the same fact: a setting that asks for no percentile, a chain with too few
+  // strikes to take one from, and a percentile that simply came out below the
+  // absolute minimum. Reporting all three as "too few strikes" would be the app
+  // blaming the data for its own setting.
+  const wanted = l.percentile > 0;
+  const measurable = wanted && known.length >= RULES.minPeersForPercentile;
+  const relative = measurable ? quantile(known, l.percentile) : null;
+  const threshold = Math.max(l.absolute, relative ?? 0);
+  const basis = relative != null && relative > l.absolute ? "relative"
+    : !wanted ? "absolute (no relative test at this setting)"
+    : measurable ? "absolute"                       // measured, and it lost
+    : known.length ? "absolute (too few strikes to measure)"
+    : "absolute";
+  return { threshold, relative, absolute: l.absolute, peers: known.length, basis, level: l };
+}
+
+/** `at least 12 open contracts — the 40th percentile of that expiry` */
+export const thresholdPhrase = (t) => {
+  if (!t) return "";
+  return t.basis === "relative"
+    ? `${t.threshold} open contracts — the ${ordinal(Math.round(t.level.percentile * 100))} percentile of that expiry`
+    : `${t.threshold} open contracts${t.threshold === t.absolute ? " — the absolute floor, which bound here" : ""}`;
+};
+
+/** `40th`, `60th`, `1st`. Only ever used on a percentile. */
+export const ordinal = (n) => {
+  const v = Math.round(n);
+  const s = ["th", "st", "nd", "rd"][(v % 100 - v % 10 !== 10) ? Math.min(v % 10, 4) % 4 : 0] || "th";
+  return `${v}${s}`;
+};
+
+/** The floors as phrases, generated so no screen can quote a different number. */
+export const qualityFloorLabels = (level = RECOMMENDED_LIQUIDITY) => {
+  const l = liquidityLevel(level?.id ?? level);
+  return {
+    liquidity: l.id === "off"
+      ? `one of its legs failed the liquidity floor`
+      : `one of its legs is among the ${pctText(l.percentile)} least-traded strikes on its own expiry, ` +
+        `or has fewer than ${l.absolute} contracts open`,
+    reward: `it pays under ${money(RULES.minRewardRisk * 100)} for every ${money(100)} at risk`,
+  };
+};
+
+/** The floors, in one sentence, naming the setting that produced this screen. */
+export const qualityFloorSentence = (level = RECOMMENDED_LIQUIDITY) => {
+  const l = liquidityLevel(level?.id ?? level);
+  const liq = l.id === "off"
+    ? `The liquidity floor is OFF on this screen, so nothing here was removed for being untraded.`
+    : `Every structure offered here carries at least ${l.absolute} open contracts on every leg and ` +
+      `beats the bottom ${pctText(l.percentile)} of the strikes on its own expiry — the floor is measured ` +
+      `against the chain it is judging, because ${l.absolute} contracts means one thing on a busy market ` +
+      `and another on a quiet one.`;
+  return `${liq} Everything here also pays at least ${pctText(RULES.minRewardRisk)} of what it risks. ` +
+    `Open interest is how many contracts are actually open: a price on a contract nobody trades is a quote, ` +
+    `not a market. Setting: ${l.label.toUpperCase()}${l.recommended ? " (the app's recommendation)" : ""}.`;
+};
+
+/** The one line that says which setting produced the list underneath it. */
+export const liquiditySettingNote = (level, counts) => {
+  const l = liquidityLevel(level?.id ?? level);
+  const c = counts || {};
+  const shown = c.kept != null ? `${c.kept} shown` : null;
+  const bits = [];
+  if (c.liquidity > 0) bits.push(`${c.liquidity} removed for liquidity`);
+  if (c.reward > 0) bits.push(`${c.reward} removed for reward-to-risk`);
+  if (c.skipped > 0) bits.push(`${c.skipped} not liquidity-checked (the feed reports no open interest)`);
+  return `LIQUIDITY FLOOR: ${l.label.toUpperCase()}${l.recommended ? " — the app's recommendation" : ""}` +
+    `${shown ? ` · ${shown}` : ""}${bits.length ? ` · ${bits.join(" · ")}` : ""}. ` +
+    `Both numbers are provisional until the five chains are measured.`;
+};
 
 /** The one sentence shown when the liquidity floor could not be applied. */
 export const liquiditySkippedNote = (feed) =>
@@ -243,10 +439,13 @@ export const liquiditySkippedNote = (feed) =>
  * @returns {{ pass, liquidity, reward, reasons }} — `reasons` are finished
  *   English sentences with the numbers already in them.
  */
-export function qualityFloor({ openInterest = [], maxProfit, maxLoss } = {}) {
+export function qualityFloor({
+  openInterest = [], peerOpenInterest = null, level = RECOMMENDED_LIQUIDITY, maxProfit, maxLoss,
+} = {}) {
   const risk = Math.abs(Number(maxLoss));
   const reward = Number(maxProfit);
   const rr = risk > 0 && Number.isFinite(reward) ? reward / risk : null;
+  const lv = liquidityLevel(level?.id ?? level);
 
   const counts = Array.isArray(openInterest) ? openInterest : [];
   // `Number(null)` is 0 and `Number(undefined)` is NaN, so the unknowns have to
@@ -257,11 +456,20 @@ export function qualityFloor({ openInterest = [], maxProfit, maxLoss } = {}) {
   const known = counts.filter(isKnown).map(Number);
   const checked = counts.length > 0 && known.length === counts.length;
   const worst = checked ? Math.min(...known) : null;
+
+  // The floor is RELATIVE to the expiry the leg sits on. `peerOpenInterest` is
+  // every known count on that expiry; with none passed the relative half simply
+  // has nothing to measure and the absolute floor applies alone, which `basis`
+  // reports rather than hiding.
+  const t = liquidityThreshold(peerOpenInterest ?? known, lv);
+
   const liquidity = {
     checked,
-    pass: checked ? worst >= RULES.minOpenInterestPerLeg : true,
+    pass: checked ? worst >= t.threshold : true,
     worst,
-    floor: RULES.minOpenInterestPerLeg,
+    floor: t.threshold,
+    threshold: t,
+    level: lv,
   };
 
   const rewardCheck = {
@@ -273,8 +481,12 @@ export function qualityFloor({ openInterest = [], maxProfit, maxLoss } = {}) {
 
   const reasons = [];
   if (!liquidity.pass) {
+    const where = t.basis === "relative"
+      ? `That expiry's own strikes set the bar at ${t.threshold} — it is the ${ordinal(lv.percentile * 100)} ` +
+        `percentile of the ${t.peers} strikes priced beside it, so this leg is among the least-traded on its own board.`
+      : `The bar is ${t.threshold}, the absolute floor${t.basis.startsWith("absolute (") ? " (too few strikes on that expiry report open interest to measure a distribution)" : ""}.`;
     reasons.push(
-      `Open interest is ${worst} on its thinnest leg, under the ${RULES.minOpenInterestPerLeg} this app needs. ` +
+      `Open interest is ${worst} on its thinnest leg. ${where} ` +
       `A price on a contract nobody trades is a quote, not a market: you would be paying whatever the ` +
       `market maker felt like typing.`);
   }

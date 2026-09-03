@@ -72,9 +72,38 @@ one pure function `qualityFloor()` at **every** point candidates are generated:
 the guided flow's pool in `runWizard`, the Shortlist (`shortlistWithFloors`) and
 the multi-market scan. See PRD §4b for the numbers and the evidence behind them.
 
-- `minOpenInterestPerLeg` — a leg nobody trades is a quote, not a price.
+- The **liquidity floor**, in two parts — `liquidityPercentile` and
+  `minOpenInterestAbsolute`. A leg nobody trades is a quote, not a price, and
+  how many contracts count as "nobody" depends on the market: 25 is nothing on
+  UNG and a lot on SOYB. So a leg is judged **against the other strikes on its
+  own expiry** (`expiryOpenInterest()` in `chain.js` is the peer set,
+  `liquidityThreshold()` in `rules.js` turns it into a number), with an absolute
+  minimum underneath so a chain where nothing trades cannot certify itself by
+  being uniformly empty. `minPeersForPercentile` is when there is no
+  distribution to take a percentile of, and the screen says which of the two
+  bound rather than printing a number with no provenance.
 - `minRewardRisk` — below it you must be right more often than anything on these
   chains actually prices.
+
+**BOTH LIQUIDITY NUMBERS ARE PROVISIONAL AND MARKED AS SUCH IN `rules.js`.**
+Nobody has counted the open interest actually present on the five markets. The
+measurement runs at `/api/liquidity` (`netlify/functions/liquidity.mjs`), behind
+the site's own password, where the broker keys already are: it returns aggregate
+statistics only — per market and per expiry, how many strikes, how many report
+open interest at all, and the distribution of it. When that JSON exists, set the
+two constants from it and delete the provisional block. Until then every screen
+that prints the floor says it is provisional.
+
+**THE FLOOR IS THE USER'S SETTING, NOT THE APP'S ASSERTION.** `LIQUIDITY_LEVELS`
+in `rules.js` is Strict / **Recommended** / Relaxed / Off, and the recommended
+one reads `RULES.liquidityPercentile` and `RULES.minOpenInterestAbsolute`
+directly, so "the app's recommendation" IS the constant rather than a copy of it.
+`LiquidityFilter` on step 2 carries the live consequence of every setting — how
+many survive, how many go for liquidity and how many for reward-to-risk — and
+`looseningWarning()` names what a looser setting lets back in, in those words:
+quotes on contracts nobody trades. Every filtered list on Radar and Shortlist
+prints `liquiditySettingNote()` saying which setting produced it, and the wide
+search prints the setting **it actually ran at**, not the one now in force.
 
 Two rules hold them, and both are the point:
 
@@ -91,10 +120,12 @@ Adding a third generation site means calling `qualityFloor()` there too.
 
 **The floor is held up against the chains it is applied to.** `oiProfile()` in `chain.js`
 and `OpenInterestReadout` at the bottom of the Shortlist print what open interest the
-loaded chains actually carry — near the money and whole chain — beside the floor. It
-reports and never estimates: unknown stays unknown, and a feed with no open interest is
-named rather than drawn as zeros. It exists so `minOpenInterestPerLeg` can be settled from
-a live screen instead of re-argued from one walkthrough.
+loaded chains actually carry — near the money and whole chain — beside the floor, plus the
+value the RELATIVE half asks for on that distribution, so the two halves can be compared on
+one screen. It reports and never estimates: unknown stays unknown, and a feed with no open
+interest is named rather than drawn as zeros. It exists so the floor can be settled from a
+live screen instead of re-argued from one walkthrough; `/api/liquidity` is the same
+question asked of all five markets at once, where the keys are.
 
 ## Exit rules
 
@@ -113,12 +144,16 @@ while the position is open.
   (`sizing()`), the two quality floors and `qualityFloor()` that applies them,
   plus the generated rule strings (`ruleBadge()`, `perTradeCapLabel()`,
   `copilotRulesBlock()`, `capitalSourceNote()`, `qualityFloorSentence()`,
-  `RULE_PILLS`, `NOTHING_TODAY`).
+  `RULE_PILLS`, `NOTHING_TODAY`), and the liquidity floor as a SETTING —
+  `LIQUIDITY_LEVELS`, `liquidityThreshold()`, `looseningWarning()`,
+  `liquiditySettingNote()`, and the shared `quantile()` that `oiProfile()` reads
+  so the distribution on screen and the threshold applied come from one function.
   Never write a rule number or a rule sentence anywhere else — not in a
   component, not in a prompt, not in a serverless function. The thresholds
   that make the app refuse (`lowConfidence`, `expensiveIVRank`,
-  `minOpenInterestPerLeg`, `minRewardRisk`) live here too, so the "nothing
-  today" screen can only ever explain a rule the code applies.
+  `liquidityPercentile`, `minOpenInterestAbsolute`, `minRewardRisk`) live here
+  too, so the "nothing today" screen can only ever explain a rule the code
+  applies.
 - `src/riskGate.js` — `evaluateTrade({ proposal, portfolio, capital, signals })`,
   a pure function returning `{ pass, violations, warnings }`. Every order path
   calls it, and a screen with no gate wired in fails closed
@@ -214,6 +249,12 @@ while the position is open.
   "Alpaca (indicative)": two places deciding what to call the same numbers is a
   screen that contradicts itself about where its own data came from.
 
+  `expiryOpenInterest(chain, expKey)` is every known open-interest count on ONE
+  expiry — the peer set the liquidity floor judges a leg against. Per expiry and
+  not per chain on purpose: a front-month strike and one thirteen months out are
+  not neighbours, and pooling them would let the busiest expiry set the bar for
+  the quietest.
+
   **Open interest comes from the TRADING API, not the market-data feed.**
   `fetchOpenInterest()` / `enrichOpenInterest()` read
   `GET /v2/options/contracts` (fields `open_interest`, `open_interest_date` —
@@ -246,6 +287,16 @@ while the position is open.
   `X-OSL-Paper-Endpoint` header a verification rather than a claim. Market data
   never goes through it. The feed is indicative, not OPRA, and the source string
   says so on screen
+  `liquidity.mjs` is the **measurement**, at `/api/liquidity`: it reads
+  `/v2/options/contracts` from the trading API and the underlying's last trade
+  from the market-data API, and returns AGGREGATE STATISTICS ONLY — per market
+  and per expiry, how many strikes, how many report open interest, and its
+  distribution. No credentials, no account data, no contract-level row. It is
+  GET-only, places no order, touches no account endpoint and returns no
+  `X-OSL-Paper-Endpoint` header, so it cannot weaken the verification that
+  `alpaca.mjs`'s single host provides. It exists because the two liquidity-floor
+  numbers cannot be settled from a sandbox with no broker access, and it is
+  gated by `gate.js` like every other path.
 - `netlify/edge-functions/gate.js` — password gate, with demo-token bypass
 
 ## Navigation — ONE NUMBERED PATH, macro to micro
@@ -313,7 +364,15 @@ about the same trade.
 The three components:
 - **Band thumbnail** — the **underlying's own price line** over green/red bands
   from the sign of the payoff. No numbers, no labels, readable at 80px. An iron
-  condor produces three bands with no special-casing. Used in every list.
+  condor produces three bands with no special-casing. Used in **every** list where
+  a candidate appears — the Radar market rows, the wide-search hits, the Shortlist
+  rows, the kept rows and the compare rows — and the **gauge sits beside it** on
+  all of them, both cut from ONE `payoffBands()` result so they cannot disagree
+  about the same trade. A list row gets those two and nothing else: the candles
+  belong on Build, where there is room to read them. `PriceChart` in `pro.jsx` is
+  the candle chart, and `App.jsx` does not import it at all — it was imported and
+  never rendered, and a dead import of a chart module is how "the candidates carry
+  a shrunken candlestick chart" survives as a belief about the code.
   The price line is reduced to what the width can carry (`simplifyCloses`, about one
   point per 7px, first and last close kept exactly), because 120 daily closes across
   230px is a scribble and at 80px a smudge.
@@ -461,6 +520,12 @@ rejects anything it cannot confirm.
 `BASKET` in `App.jsx` is derived from the `commodity: true` flag on `UNDERLYINGS`,
 never typed out a second time — SPY is in the table so the desk can price a hedge,
 it is not something the guided flow goes looking for.
+
+`src/basket.js` carries the same five as a plain array, and ONLY because a Netlify
+function cannot import `App.jsx` (React, recharts, lightweight-charts). The
+derivation in `App.jsx` stays the source; `src/liquidity.test.js` reads that table
+and **fails the build** if the two lists drift. A copy nothing checks is the bug;
+a copy nobody can quietly break is a copy the code can live with.
 
 `runWizard` ranks the **whole basket on one scale**: every readable market
 contributes candidates and road 2 is free to come from a different market than
