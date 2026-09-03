@@ -2,6 +2,28 @@
   command = "npm run build"
   publish = "dist"
 
+# EDGE FUNCTIONS, DECLARED HERE AND IN THIS ORDER, ON PURPOSE.
+#
+# They run in the order they are written below. `gate` is the password and it
+# has to be first: `ai` proxies the Anthropic key, and an unauthenticated proxy
+# on the open internet is the one mistake in this repository that would matter
+# to somebody other than its owner. In-source `export const config` makes no
+# promise about the order BETWEEN files, so neither file uses it — one
+# mechanism, one written order, nothing to reason about.
+#
+# `ai` is an edge function rather than a Netlify Function because a synchronous
+# function is killed at roughly ten seconds and a 1200-token streamed analysis
+# takes longer than that every time. There is no /api/ai redirect any more: the
+# edge function claims the path itself.
+[[edge_functions]]
+  function = "gate"
+  path = "/*"
+  excludedPath = ["/api/approve"]
+
+[[edge_functions]]
+  function = "ai"
+  path = "/api/ai"
+
 [[redirects]]
   from = "/api/chain"
   to = "/.netlify/functions/chain"
@@ -45,11 +67,6 @@
 [[redirects]]
   from = "/api/alpaca"
   to = "/.netlify/functions/alpaca"
-  status = 200
-
-[[redirects]]
-  from = "/api/ai"
-  to = "/.netlify/functions/ai"
   status = 200
 
 [[redirects]]

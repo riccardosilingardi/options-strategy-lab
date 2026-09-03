@@ -17,7 +17,11 @@
 // demo mode and to disable every button that would reach the broker. It carries
 // no secret — it says "this session came in through the demo door", nothing
 // more, and the token itself is never written into it.
-const DEMO_COOKIE = "osl_demo";
+// The DECISION — which of the two doors this request came through, if either —
+// lives in lib/access.js, because /api/ai is an edge function now and has to
+// ask the same question. This file still owns what to DO about the answer: the
+// popup, the cookie, and the way back out.
+import { accessOf, DEMO_COOKIE } from "./lib/access.js";
 
 /** Attach a Set-Cookie without letting an immutable response break the page. */
 const withCookie = (res, cookie) => {
@@ -28,39 +32,34 @@ const SET = (secure) => `${DEMO_COOKIE}=1; Path=/; Max-Age=86400; SameSite=Lax${
 const CLEAR = `${DEMO_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax`;
 
 export default async (request, context) => {
-  const PW = Deno.env.get("SITE_PASSWORD");
-  const DEMO = Deno.env.get("DEMO_TOKEN");
-
   const url = new URL(request.url);
-  const asked = url.searchParams.get("demo");
-  const leaving = asked === "off";
-  const cookies = request.headers.get("cookie") || "";
-  const inDemo = !leaving && new RegExp(`(?:^|;\\s*)${DEMO_COOKIE}=1(?:;|$)`).test(cookies);
+  const access = accessOf(request, {
+    password: Deno.env.get("SITE_PASSWORD"),
+    demoToken: Deno.env.get("DEMO_TOKEN"),
+  });
 
-  // The demo door. A token is only a door if it is set: an empty DEMO_TOKEN
-  // must never match an empty ?demo=, or the password would be optional.
-  if (DEMO && !leaving && asked && asked === DEMO) {
+  if (!access.ok) {
+    return new Response("Access required", {
+      status: 401,
+      headers: { "WWW-Authenticate": 'Basic realm="Options Desk", charset="UTF-8"' },
+    });
+  }
+  // The token door SETS the cookie so the rest of the session stays in demo
+  // mode: the app is one page that then fetches /api/chain, /api/bars and the
+  // rest, and those requests carry no query string of their own.
+  if (access.how === "demo-token") {
     return withCookie(await context.next(), SET(url.protocol === "https:"));
   }
-  if (DEMO && inDemo) return context.next();
-
-  // Everything below here needs the password. `leaving` changes nothing about
-  // that — it only decides whether the cookie is cleared on the way through.
-  const pass = async () => (leaving ? withCookie(await context.next(), CLEAR) : context.next());
-
-  if (!PW) return pass(); // no password set: the site is open
-
-  const auth = request.headers.get("authorization") || "";
-  if (auth.startsWith("Basic ")) {
-    try {
-      const decoded = atob(auth.slice(6));
-      const given = decoded.includes(":") ? decoded.slice(decoded.indexOf(":") + 1) : decoded;
-      if (given === PW) return pass();
-    } catch { /* malformed credentials: ask again */ }
-  }
-  return new Response("Access required", {
-    status: 401,
-    headers: { "WWW-Authenticate": 'Basic realm="Options Desk", charset="UTF-8"' },
-  });
+  // `leaving` is not a way in — the request had to satisfy a door above — it
+  // only decides whether the cookie is cleared on the way through.
+  return access.leaving ? withCookie(await context.next(), CLEAR) : context.next();
 };
-export const config = { path: "/*", excludedPath: ["/api/approve"] };
+
+// DECLARED IN netlify.toml, NOT HERE. There are two edge functions now, and
+// their order decides whether the AI proxy is behind the password. netlify.toml
+// runs them in the order they are written; in-source configuration does not
+// promise anything about the order between files. Both are declared there, this
+// one first. (ai.js checks the password itself as well — see lib/access.js —
+// so a wrong order would still not open the proxy. Belt and braces, because
+// this is the one mistake in this repository that would matter to somebody
+// other than its owner.)

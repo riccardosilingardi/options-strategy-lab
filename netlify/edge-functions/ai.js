@@ -1,19 +1,54 @@
-// Anthropic API proxy. The key never reaches the browser: it lives only in the
-// Netlify environment (ANTHROPIC_KEY) and is attached here.
+// ============================================================================
+// Anthropic API proxy — AN EDGE FUNCTION, and that is the whole point.
+//
+// WHY IT MOVED. This was netlify/functions/ai.mjs, an ordinary synchronous
+// Netlify Function. Those are capped at roughly TEN SECONDS of execution. A
+// 1200-token analysis written for a non-expert takes longer than that every
+// single time, so the copilot panel and the weekly report did not fail
+// intermittently — they were STRUCTURALLY cut off, and no amount of streaming
+// inside a ten-second box was going to fix it. Edge functions carry no such
+// limit and streaming is the case they exist for.
+//
+// The redirect path is unchanged: the browser still POSTs to /api/ai and
+// nothing else in the app moved. `netlify.toml` no longer redirects /api/ai to
+// a function — this file claims that path directly.
+//
+// Deno, not Node: `Deno.env.get` instead of `Netlify.env.get`, and `fetch`,
+// `Response` and `ReadableStream` are already there.
 //
 // ANTHROPIC_WORKSPACE_ID is OPTIONAL. An identity-linked API key belongs to a
 // workspace and Anthropic refuses the call without the header
 // ("anthropic-workspace-id is required when authenticating with an
 // identity-linked API key"); a classic key rejects the header if it is sent
 // with nothing in it. So the header exists only when the variable does.
+// ============================================================================
+import { accessOf } from "./lib/access.js";
+
 export default async (req) => {
   try {
+    // THE PASSWORD, ASKED HERE TOO. gate.js is declared first in netlify.toml
+    // and covers /* — but two edge functions on one request run in an order
+    // this repository cannot prove, and the failure mode if that order is ever
+    // wrong is an unauthenticated Anthropic proxy on the open internet. The
+    // decision is the one gate.js uses, imported rather than copied, so there
+    // is still exactly one place a password is compared.
+    const access = accessOf(req, {
+      password: Deno.env.get("SITE_PASSWORD"),
+      demoToken: Deno.env.get("DEMO_TOKEN"),
+    });
+    if (!access.ok) {
+      return new Response("Access required", {
+        status: 401,
+        headers: { "WWW-Authenticate": 'Basic realm="Options Desk", charset="UTF-8"' },
+      });
+    }
+
     if (req.method !== "POST") return Response.json({ error: { message: "POST only" } }, { status: 405 });
-    const key = Netlify.env.get("ANTHROPIC_KEY");
+    const key = Deno.env.get("ANTHROPIC_KEY");
     if (!key) {
       return Response.json({ error: { message: "The server is not configured: set ANTHROPIC_KEY in the Netlify environment variables." } }, { status: 503 });
     }
-    const workspace = (Netlify.env.get("ANTHROPIC_WORKSPACE_ID") || "").trim();
+    const workspace = (Deno.env.get("ANTHROPIC_WORKSPACE_ID") || "").trim();
     const headers = {
       "x-api-key": key,
       "anthropic-version": "2023-06-01",
@@ -24,15 +59,11 @@ export default async (req) => {
     const body = await req.text();
     // STREAM WHEN ASKED TO, AND THAT IS THE DEFAULT FOR THE COPILOT.
     //
-    // This function used to await the WHOLE answer before sending a single byte
-    // back. A pre-trade analysis takes tens of seconds to write, and a gateway
-    // that sees a connection sit silent that long kills it — the browser then
-    // gets an HTML error page ("Too much time has passed without sending any
-    // data for document") instead of JSON, which is exactly what happened.
-    //
     // Passing the SSE stream straight through means bytes move from the first
-    // token onward, so nothing is ever idle long enough to be timed out, and the
-    // reader watches the answer arrive instead of watching a spinner.
+    // token onward, so nothing is ever idle long enough to be timed out, and
+    // the reader watches the answer arrive instead of watching a spinner. On
+    // the edge there is no execution ceiling underneath it either, which is the
+    // half that was missing.
     let wantsStream = false;
     try { wantsStream = JSON.parse(body)?.stream === true; } catch { /* body is checked below */ }
 
@@ -46,7 +77,6 @@ export default async (req) => {
         headers: {
           "Content-Type": "text/event-stream; charset=utf-8",
           "Cache-Control": "no-cache, no-transform",
-          "Connection": "keep-alive",
           // Some proxies buffer a response until it completes, which would put
           // the silence back. This is the conventional ask not to.
           "X-Accel-Buffering": "no",
@@ -72,18 +102,14 @@ export default async (req) => {
       const hint = !workspace && /workspace/i.test(message)
         ? " — set ANTHROPIC_WORKSPACE_ID in the Netlify environment variables: this key belongs to a workspace, and Anthropic will not accept the call without it."
         : "";
-      // WHAT WE SENT, so the failure names its own cause. When this panel fails
-      // the three candidates are: the variable is not set, the key is wrong, or
-      // the request itself is malformed — and from the screen alone they look
-      // identical. These three facts separate them without exposing anything:
-      // whether the workspace header went out (not its value), which headers
-      // were attached (names only, never the key), and which model was asked
-      // for. Nothing secret is echoed: `x-api-key` appears as a name only.
+      // WHAT WE SENT, so the failure names its own cause. Nothing secret is
+      // echoed: `x-api-key` appears as a name only.
       const sent = {
         workspaceHeader: workspace ? "sent" : "not sent (ANTHROPIC_WORKSPACE_ID is empty or unset)",
         headers: Object.keys(headers).sort(),
         endpoint: "https://api.anthropic.com/v1/messages",
         model: (() => { try { return JSON.parse(body)?.model || null; } catch { return null; } })(),
+        runtime: "netlify edge (no 10s execution ceiling)",
       };
       return Response.json({ error: { type, message: message + hint, status: r.status, sent } }, { status: r.status });
     }
@@ -92,3 +118,6 @@ export default async (req) => {
     return Response.json({ error: { message: `Could not reach the Anthropic API: ${String(e.message || e)}` } }, { status: 502 });
   }
 };
+
+// Declared in netlify.toml, AFTER gate.js, so the password runs first. See the
+// note at the bottom of gate.js.

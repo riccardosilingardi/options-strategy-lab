@@ -13,13 +13,15 @@ import { BandThumbnail, payoffBands, bandTakeaway, GaugeFigure, Gauge, CompareFi
   OpenInterestStrip, oiStripTakeaway, oiCutAt, oiGhostCut, explainOiStrip, useWidth } from "./visuals.jsx";
 import { fuseSignals, sentimentDirection, withSignalRank, compareCandidates, againstSignal, DRIVER_PRESETS, rankByDrivers, verdictNarrative } from "./signals.js";
 import { N as nCDF, bs as bsPrice, smile as smileIV, payoff as payoffExp, SEASONAL, SIGMA } from "./engine.js";
-import { parseOcc, buildOcc, fetchChain, hasOpenInterest, enrichOpenInterest, feedName, sourceNote, openInterestNote, oiProfile, expiryOpenInterest } from "./chain.js";
+import { parseOcc, buildOcc, fetchChain, hasOpenInterest, enrichOpenInterest, feedName, sourceNote, openInterestNote, oiProfile, expiryOpenInterest, nearMoneyOpenInterest, monotonicityBreaks, monotonicityNote, spotOf } from "./chain.js";
 import { T, themeName, setTheme, BADGE_SAFE } from "./theme.js";
 import { RULES, sizing, ruleBadge, takeProfitLabel, stopLossLabel, perTradeCapLabel, RULE_PILLS, NOTHING_TODAY, money, pctText, capitalSourceNote, perTradeLimitPhrase, qualityFloor, qualityFloorSentence, liquiditySkippedNote,
   LIQUIDITY_LEVELS, RECOMMENDED_LIQUIDITY, LIQUIDITY_MEASUREMENT, liquidityMeasurementNote, liquidityLevel, liquidityThreshold, looseningWarning, liquiditySettingNote, isLoosened, ordinal,
   priceability, unpriceableNote, rewardRisk, MIN_NET_DOLLARS,
   payoffCeiling, NO_CEILING, noCeilingNote, noCeilingRankNote,
-  impossibleLoss, impossibleLossNote } from "./rules.js";
+  impossibleLoss, impossibleLossNote,
+  expiryChoice, expiryChoiceNote, emptyExpiryNote, wideSpreadNote, spreadSkippedNote } from "./rules.js";
+import { isStale, freshnessNote, staleAmong } from "./freshness.js";
 import { evaluateTrade, gateSummary } from "./riskGate.js";
 import { DEMO, DEMO_BANNER, DEMO_TOOLTIP, DEMO_SEED_TICKERS, demoPositions } from "./demo.js";
 import { CapitalOnboarding, WizardOpen, FindOpportunities, WizardCandidates, ConfirmSteps, NothingToday, Card, Pill } from "./wizard.jsx";
@@ -124,10 +126,47 @@ function parseAvJson(j) {
 async function fetchHistory(sym) {
   const r = await fetch(`/api/av?sym=${encodeURIComponent(sym)}`);
   if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `HTTP ${r.status}`); }
-  const h = parseAvJson(await r.json()); h.src = "Alpha Vantage (server)";
+  const j = await r.json();
+  const h = parseAvJson(j);
   const st = statsFromMatrix(h.matrix);
-  return { ...st, matrix: h.matrix, from: h.from, src: `${h.src} · ${st.years}y` };
+  // WHERE IT CAME FROM AND HOW OLD IT IS. `_osl` is stamped by av.mjs: "live"
+  // straight off Alpha Vantage, "cache" inside the seven-day TTL, "cache-stale"
+  // when the upstream call failed and a month-old answer was served instead.
+  // The screen prints this, so seasonality can never look fresher than it is.
+  const meta = j._osl || {};
+  const provenance = meta.source === "cache" ? "Alpha Vantage (cached)"
+    : meta.source === "cache-stale" ? "Alpha Vantage (cached, upstream unavailable)"
+    : "Alpha Vantage";
+  // ONE SERIES, ONE NUMBER OF YEARS. The header said "10y history" while the
+  // panel beside it said "11y" about the same numbers: the ten-year cutoff in
+  // `parseAvJson` lands mid-year, so the matrix carries eleven CALENDAR YEARS
+  // of which the first and last are partial. `st.years` is the count of rows
+  // and it is the only figure any screen may print.
+  return {
+    ...st, matrix: h.matrix, from: h.from,
+    src: `${provenance} · ${st.years}y`,
+    provenance, at: meta.at || Date.now(), cached: meta.source !== "live",
+    upstreamError: meta.upstreamError || null,
+  };
 }
+
+/* ---- WHY A MARKET IS STILL ON THE HAND-WRITTEN TABLE ----
+   `SEASONAL` in engine.js is hand-written and carries the heaviest of the four
+   weights. Measured against 195 months of real data for CORN it has the WRONG
+   SIGN on eight months of twelve — June reads +1.5 against a real ten-year mean
+   of -3.46, September -1.1 against a real +1.03 — so the Radar has been calling
+   CORN bearish in a month that is historically positive. It survives ONLY as a
+   fallback now, and a fallback that will not say why it is in use is
+   indistinguishable from a measurement. "Estimate" is not a reason. */
+const seasonalFallbackNote = (state) => {
+  const st = state || {};
+  if (st.loading) return "the real history is loading";
+  if (st.error) return `the price history did not load — ${st.error}`;
+  return "the real price history has not been requested yet";
+};
+const seasonalSourceLine = (entry, state) => entry
+  ? `${entry.src}${entry.upstreamError ? ` — Alpha Vantage refused the refresh (${entry.upstreamError}), so this is the last good answer` : ""}`
+  : `hand-written estimate: ${seasonalFallbackNote(state)}`;
 
 /* ============================== ALPACA PAPER (via proxy serverless /api/alpaca) ============================== */
 async function alpacaGet(path) {
@@ -316,7 +355,7 @@ export function analyze(legs, S, dte, baseIV, q) {
 export function shortlistWithFloors(sent, S, step, strikes, dte, baseIV, q, { peers = null, level = RECOMMENDED_LIQUIDITY } = {}) {
   const rows = [], cut = [];
   let oiSkipped = false;
-  const tally = { liquidity: 0, reward: 0, skipped: 0, unpriceable: 0, impossible: 0 };
+  const tally = { liquidity: 0, spread: 0, reward: 0, skipped: 0, spreadSkipped: 0, unpriceable: 0, impossible: 0 };
   for (const p of buildPresets(sent, S, step, strikes)) {
     const a = analyze(p.legs, S, dte, baseIV, q);
     // UNPRICEABLE FIRST, because it is prior to both floors: they judge a
@@ -341,15 +380,24 @@ export function shortlistWithFloors(sent, S, step, strikes, dte, baseIV, q, { pe
       cut.push({ name: p.name, reasons: [imp], why: "impossible" });
       continue;
     }
+    // The two-sided quotes go in as well now: the SPREAD floor reads them, and
+    // it is a different question from the headcount the liquidity floor asks.
+    // A leg can have 300 contracts open and a market 145% of the mid wide.
     const qf = qualityFloor({
       openInterest: a.legPx.map((l) => l.oi), peerOpenInterest: peers, level,
+      quotes: quotesOf(a),
       maxProfit: a.maxProfit, maxLoss: a.maxLoss, unboundedProfit: a.profitUnbounded,
     });
     if (!qf.liquidity.checked) { oiSkipped = true; tally.skipped++; }
+    if (!qf.spread.checked) tally.spreadSkipped++;
     if (qf.pass) rows.push({ p, a });
     else {
-      if (!qf.liquidity.pass) tally.liquidity++; else tally.reward++;
-      cut.push({ name: p.name, reasons: qf.reasons, why: !qf.liquidity.pass ? "liquidity" : "reward" });
+      // WHICH FLOOR DID THE WORK, in the order they are applied. Pooling them
+      // would leave the screen unable to say whether the leg was untraded or
+      // simply unpriced, which are different faults with different answers.
+      const why = !qf.liquidity.pass ? "liquidity" : !qf.spread.pass ? "spread" : "reward";
+      tally[why]++;
+      cut.push({ name: p.name, reasons: qf.reasons, why });
     }
   }
   return { rows, cut, oiSkipped, tally: { ...tally, kept: rows.length } };
@@ -798,7 +846,15 @@ export default function OptionsStrategyLab() {
   const [showSettings, setShowSettings] = useState(false);
   const [ticker, setTicker] = useState("SOYB");
   const [chains, setChains] = useState({});      // ticker -> normalised chain (Alpaca, or CBOE as the net)
-  const [seasonal, setSeasonal] = useState({});  // ticker -> {monthlyMean, sigma, rets, years} da Alpha Vantage
+  const [seasonal, setSeasonal] = useState({});  // ticker -> {monthlyMean, sigma, matrix, years, src, at} from Alpha Vantage
+  // WHY a market is not in `seasonal`: loading, or a named failure. A fallback
+  // that cannot say why it is in use is indistinguishable from a measurement.
+  const [seasonalState, setSeasonalState] = useState({});   // ticker -> { loading, error }
+  // The loaders run in sequence across the basket and each one needs what the
+  // previous one wrote; a state variable captured in a closure would still hold
+  // the value from before the loop started, so the accumulating map lives in a
+  // ref and `seasonal` is what the screen renders from.
+  const seasonalRef = useRef({});
   const [news, setNews] = useState({});          // ticker -> items
   const [sentiment, setSentiment] = useState("bull");
   const [expKey, setExpKey] = useState(null);
@@ -931,6 +987,67 @@ export default function OptionsStrategyLab() {
     } finally { if (!silent) setBusy(null); }
   }, []);
 
+  /* ---- SEASONALITY, FOR EVERY MARKET IN THE BASKET ----
+     This used to be one button for whichever ticker was on screen, and every
+     other market scored on the hand-written table in engine.js — which is wrong
+     on eight months of twelve for CORN. Seasonality is the heaviest of the four
+     weights, so a market scored on the fallback is a market scored wrongly.
+
+     The server caches for seven days (netlify/functions/av.mjs), which is what
+     makes loading five markets affordable at all: Alpha Vantage's free tier is
+     25 requests a DAY, so refetching per tab switch would exhaust the quota
+     during a demo. Nothing here refetches an entry inside its budget.
+
+     Failures are per-market and never fatal: one market that will not load
+     leaves the other four on real data and itself on the table, SAYING SO. */
+  const persistSeasonal = useCallback(async (s2) => {
+    setSeasonal(s2);
+    setStore((st0) => {
+      const st = { ...st0, seasonal: Object.fromEntries(Object.entries(s2).map(([k, v]) => [k,
+        { monthlyMean: v.monthlyMean, sigma: v.sigma, matrix: v.matrix, years: v.years, from: v.from,
+          src: v.src, provenance: v.provenance, at: v.at, cached: v.cached, upstreamError: v.upstreamError }])) };
+      saveState(st);
+      return st;
+    });
+  }, []);
+
+  /** One market. `force` ignores the freshness budget (the manual button). */
+  const loadSeasonalFor = useCallback(async (tk, { force = false } = {}) => {
+    if (!force && !isStale("seasonal", seasonalRef.current[tk]?.at)) return seasonalRef.current[tk];
+    setSeasonalState((m) => ({ ...m, [tk]: { loading: true, error: null } }));
+    try {
+      const h = await fetchHistory(tk);
+      const s2 = { ...seasonalRef.current, [tk]: h };
+      seasonalRef.current = s2;
+      await persistSeasonal(s2);
+      setSeasonalState((m) => ({ ...m, [tk]: { loading: false, error: null } }));
+      return h;
+    } catch (e) {
+      // The REASON is kept, not just the failure: the screen has to be able to
+      // say why this market is on the fallback table.
+      setSeasonalState((m) => ({ ...m, [tk]: { loading: false, error: String(e.message || e) } }));
+      return null;
+    }
+  }, [persistSeasonal]);
+
+  /** The whole basket, one at a time so five calls are not five at once. */
+  const loadSeasonalBasket = useCallback(async ({ force = false } = {}) => {
+    const todo = force ? BASKET : BASKET.filter((tk) => isStale("seasonal", seasonalRef.current[tk]?.at));
+    if (!todo.length) return;
+    for (const tk of todo) await loadSeasonalFor(tk, { force });
+  }, [loadSeasonalFor]);
+
+  /** The manual button on the History panel: this market, now, budget ignored. */
+  const loadSeasonal = async () => {
+    setBusy("av"); setMsg(null);
+    const h = await loadSeasonalFor(ticker, { force: true });
+    setMsg(h
+      ? `${ticker}: seasonality worked out from ${h.years} years of real prices (${h.provenance}).`
+      : `Could not load the ${ticker} price history — ${seasonalState[ticker]?.error || "the call did not land"}. ` +
+        `${ticker} stays on the hand-written estimate until it does.`);
+    setBusy(null);
+  };
+
   /* ---- avvio: storage + refresh automatico ---- */
   useEffect(() => {
     (async () => {
@@ -972,7 +1089,9 @@ export default function OptionsStrategyLab() {
       if (DEMO) settings.onboarded = true;
       setStore({ ...EMPTY, ...st, v: 2, settings });
       setHydrated(true);
-      if (st.seasonal) setSeasonal(st.seasonal);
+      // The ref is what the sequential loaders accumulate into; restoring only
+      // the state would make the first fetch overwrite everything saved.
+      if (st.seasonal) { seasonalRef.current = st.seasonal; setSeasonal(st.seasonal); }
       const seedTickers = DEMO ? DEMO_SEED_TICKERS : [];
       const tickers = [...new Set([(st.positions || []).map((p) => p.ticker), "SOYB", ...seedTickers].flat())];
       setBusy("auto"); setMsg("Loading live option chains…");
@@ -990,17 +1109,46 @@ export default function OptionsStrategyLab() {
       }
       setMsg(null);
       setBusy(null);
+      // SEASONALITY FOR THE WHOLE BASKET, AFTER the chains are on screen.
+      // It is the heaviest of the four weights and the hand-written table it
+      // falls back to is wrong on eight months of twelve for CORN, so every
+      // market needs the real series — but nothing waits for it, and the
+      // seven-day server cache is what makes five calls affordable against a
+      // 25-a-day quota. `store.seasonal` is already restored above, so on a
+      // second visit inside the budget this fetches nothing at all.
+      loadSeasonalBasket().catch(() => { /* per-market failures are reported per market */ });
       } finally { setHydrated(true); }
     })();
-  }, [refreshChain]);
+  }, [refreshChain, loadSeasonalBasket]);
 
-  /* ---- default legs quando chain e exp disponibili ---- */
+  /* ---- WHICH EXPIRY THE APP OPENS ON ----
+     The rule and its reasoning live in `expiryChoice()` in rules.js. What used
+     to be here was "the first expiry between 35 and 60 days out", which on BOIL
+     picked 2026-10-09 — 2 of its 7 near-the-money contracts clear the floor,
+     against 12 of 14 on the expiry a week earlier. The Shortlist then said
+     nothing cleared while the Radar said four structures did, and both were
+     telling the truth about different boards.
+
+     The floor used to rank the expiries is the one in force, so moving the
+     liquidity setting moves the choice — which is the honest behaviour: the
+     question "which board can I build on" has no answer independent of what
+     counts as buildable. */
+  const expiryOptions = useMemo(() => {
+    if (!chain?.expirations) return [];
+    return chain.expirations.map((e) => ({
+      key: e, dte: chain.byExp[e]?.dte,
+      ...nearMoneyOpenInterest(chain, e, { floor: liqLevel.absolute }),
+    }));
+  }, [chain, liqLevel]);
+  const expChoice = useMemo(() => expiryChoice(expiryOptions), [expiryOptions]);
   useEffect(() => {
     if (chain && !expKey) {
-      const target = chain.expirations.find((e) => chain.byExp[e].dte >= 35 && chain.byExp[e].dte <= 60) || chain.expirations.find((e) => chain.byExp[e].dte >= 20) || chain.expirations[0];
-      setExpKey(target || null);
+      // Never nothing: with no eligible expiry at all the app still opens on
+      // the board the feed gave it rather than showing an empty screen, and
+      // the risk gate refuses the entry by name (ENTRY_DTE) if it is too near.
+      setExpKey(expChoice.chosen?.key || chain.expirations[0] || null);
     }
-  }, [chain, expKey]);
+  }, [chain, expKey, expChoice]);
   useEffect(() => {
     if (spot && legs.length === 0) {
       setLegs(buildPresets(sentiment, spot, U.step, expStrikes)[0].legs);
@@ -1041,20 +1189,6 @@ export default function OptionsStrategyLab() {
   }, [autoMon, store.positions, refreshChain]);
 
   const switchTicker = (tk) => { setTicker(tk); setExpKey(null); setLegs([]); setMc(null); setBt(null); setAgainst({ reason: "" }); if (!chains[tk]) refreshChain(tk); };
-
-  /* ---- seasonal da Alpha Vantage ---- */
-  const loadSeasonal = async () => {
-    setBusy("av"); setMsg(null);
-    try {
-      const h = await fetchHistory(ticker);
-      const s2 = { ...seasonal, [ticker]: h };
-      setSeasonal(s2);
-      const st = { ...store, seasonal: Object.fromEntries(Object.entries(s2).map(([k, v]) => [k, { monthlyMean: v.monthlyMean, sigma: v.sigma, matrix: v.matrix, years: v.years, from: v.from, src: v.src }])) };
-      setStore(st); await saveState(st);
-      setMsg(`${ticker}: seasonality worked out from ${h.years} years of real prices.`);
-    } catch (e) { setMsg(`Could not load the price history: ${e.message}`); }
-    setBusy(null);
-  };
 
   /* ---- news ----
      PRD §7: le news devono caricarsi all'AVVIO per il ticker corrente, non
@@ -1353,7 +1487,8 @@ export default function OptionsStrategyLab() {
     try {
       const out = [];
       // What the quality floors removed, so an empty or short result can say why.
-      const cutFloors = { n: 0, liquidity: 0, reward: 0, unpriceable: 0, impossible: 0, markets: new Set(), oiSkipped: new Set() };
+      const cutFloors = { n: 0, liquidity: 0, spread: 0, reward: 0, unpriceable: 0, impossible: 0,
+        markets: new Set(), oiSkipped: new Set(), spreadSkipped: new Set() };
       // le barre servono al fattore tecnico: caricale prima di fondere i segnali
       const barsMap = Object.fromEntries(await Promise.all(multi.sel.map(async (tk) => [tk, await loadBars(tk)])));
       const fz = Object.fromEntries(multi.sel.map((tk) => [tk, fuseFor(tk, barsMap[tk] ?? barsCache[tk])]));
@@ -1392,12 +1527,16 @@ export default function OptionsStrategyLab() {
           // Same floors as the Shortlist and the wizard, from the same function.
           const qf = qualityFloor({
             openInterest: a.legPx.map((l) => l.oi), peerOpenInterest: peers, level: liqLevel,
+            quotes: quotesOf(a),
             maxProfit: a.maxProfit, maxLoss: a.maxLoss, unboundedProfit: a.profitUnbounded,
           });
           if (!qf.liquidity.checked) cutFloors.oiSkipped.add(tk);
+          if (!qf.spread.checked) cutFloors.spreadSkipped.add(tk);
           if (!qf.pass) {
             cutFloors.n++; cutFloors.markets.add(tk);
-            if (!qf.liquidity.pass) cutFloors.liquidity++; else cutFloors.reward++;
+            if (!qf.liquidity.pass) cutFloors.liquidity++;
+            else if (!qf.spread.pass) cutFloors.spread++;
+            else cutFloors.reward++;
             continue;
           }
           const ivA = a.legPx.reduce((x, y) => x + y.iv, 0) / Math.max(1, a.legPx.length);
@@ -1417,9 +1556,10 @@ export default function OptionsStrategyLab() {
       }).sort(compareCandidates);
       setMulti((m) => ({ ...m, busy: false, res: ranked.slice(0, 8),
         floors: {
-          n: cutFloors.n, liquidity: cutFloors.liquidity, reward: cutFloors.reward,
+          n: cutFloors.n, liquidity: cutFloors.liquidity, spread: cutFloors.spread, reward: cutFloors.reward,
           unpriceable: cutFloors.unpriceable, impossible: cutFloors.impossible,
-          markets: [...cutFloors.markets], oiSkipped: [...cutFloors.oiSkipped], level: liqLevel,
+          markets: [...cutFloors.markets], oiSkipped: [...cutFloors.oiSkipped],
+          spreadSkipped: [...cutFloors.spreadSkipped], level: liqLevel,
         } }));
     } catch (e) { setMulti((m) => ({ ...m, busy: false, err: String(e.message || e) })); }
   };
@@ -1623,7 +1763,8 @@ export default function OptionsStrategyLab() {
       // What the quality floors threw out, and where. Counted per reason so the
       // refusal can name the floor: "nothing on CORN clears the liquidity floor
       // today" is a useful answer, an empty screen is not.
-      const floors = { liquidity: 0, reward: 0, unpriceable: 0, impossible: 0, markets: new Set(), oiUnavailable: new Set() };
+      const floors = { liquidity: 0, spread: 0, reward: 0, unpriceable: 0, impossible: 0,
+        markets: new Set(), oiUnavailable: new Set(), spreadUnavailable: new Set() };
       for (const r of priced) {
         const tk = r.tk;
         const c = chains[tk] || (await refreshChain(tk, true));
@@ -1678,11 +1819,14 @@ export default function OptionsStrategyLab() {
             // emptied the board rather than shrugging at an empty page.
             const qf = qualityFloor({
               openInterest: a.legPx.map((l) => l.oi), peerOpenInterest: peers, level: liqLevel,
+              quotes: quotesOf(a),
               maxProfit: a.maxProfit, maxLoss: a.maxLoss, unboundedProfit: a.profitUnbounded,
             });
             if (!qf.liquidity.checked) floors.oiUnavailable.add(tk);
+            if (!qf.spread.checked) floors.spreadUnavailable.add(tk);
             if (!qf.pass) {
               if (!qf.liquidity.pass) floors.liquidity++;
+              else if (!qf.spread.pass) floors.spread++;
               else floors.reward++;
               floors.markets.add(tk);
               continue;
@@ -1702,7 +1846,7 @@ export default function OptionsStrategyLab() {
       // emptied by the quality floors is a different sentence from a board
       // emptied by the budget, and the user is owed the one that is true.
       if (!pool.length) {
-        const cut = floors.liquidity + floors.reward;
+        const cut = floors.liquidity + floors.spread + floors.reward;
         // AN UNREADABLE PRICE IS ITS OWN ANSWER. A board where nothing could be
         // priced is not a board emptied by the floors and is certainly not a
         // budget problem — saying either would blame the user, or the market,
@@ -1727,7 +1871,8 @@ export default function OptionsStrategyLab() {
           return stop([{
             id: "quality-floor",
             text: NOTHING_TODAY.belowQualityFloor({
-              liquidity: floors.liquidity, reward: floors.reward, unpriceable: floors.unpriceable,
+              liquidity: floors.liquidity, spread: floors.spread, reward: floors.reward,
+              unpriceable: floors.unpriceable,
               impossible: floors.impossible, markets: [...floors.markets], level: liqLevel,
             }),
           }]);
@@ -1782,9 +1927,10 @@ export default function OptionsStrategyLab() {
       setVerdict(verdictNarrative({
         basket, examined, excluded, newsItems: newsPool, weatherData: weather,
         month: NOW_MONTH, weights: ans.weights, chosen: roads,
-        floors: { liquidity: floors.liquidity, reward: floors.reward, unpriceable: floors.unpriceable,
-          impossible: floors.impossible,
-          markets: [...floors.markets], oiUnavailable: [...floors.oiUnavailable] },
+        floors: { liquidity: floors.liquidity, spread: floors.spread, reward: floors.reward,
+          unpriceable: floors.unpriceable, impossible: floors.impossible,
+          markets: [...floors.markets], oiUnavailable: [...floors.oiUnavailable],
+          spreadUnavailable: [...floors.spreadUnavailable] },
       }));
 
       setTicker(first.tk); setExpKey(first.ek);

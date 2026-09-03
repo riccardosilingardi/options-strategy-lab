@@ -690,6 +690,111 @@ test("a board emptied by unreadable prices is a different sentence from one empt
   assert.ok(!unpriced.includes("budget"), "and neither of them is the budget answer");
 });
 
+/* ============================================================================
+   TASK 0 — THE POSITIVE-MAX-LOSS TEST IS NOW IN THE RISK GATE.
+   The debt PR #15 left open, and the case is LIVE: on BOIL 2026-10-09 six call
+   pairs price a bull call spread as a CREDIT (buy 19 / sell 19.5 nets -0.290,
+   buy 22 / sell 22.5 nets -0.171), which cannot lose at expiry.
+   ========================================================================= */
+
+const BOIL_CREDIT_SPREAD = [
+  { side: 1, type: "call", strike: 19, qty: 1 },
+  { side: -1, type: "call", strike: 19.5, qty: 1 },
+];
+
+test("A HAND-BUILT STRUCTURE WHOSE WORST CASE IS A PROFIT DOES NOT LEAVE", () => {
+  const r = evaluateTrade({
+    proposal: { intent: "open", ticker: "BOIL", legs: BOIL_CREDIT_SPREAD, dte: 36, contracts: 1,
+      maxLoss: 29, maxProfit: 79 },   // SIGNED: positive means it cannot lose
+    portfolio: EMPTY_BOOK, capital: { tradingCapital: 5000, concurrentTarget: 4 },
+  });
+  assert.equal(r.pass, false, "an arbitrage is not sendable");
+  const v = r.violations.find((x) => x.code === "IMPOSSIBLE_LOSS");
+  assert.ok(v, "and it is refused BY NAME, not swept into UNDEFINED_RISK");
+  assert.ok(v.message.includes("$29"), "the sentence carries the number that produced it");
+  assert.ok(/PROFIT/.test(v.message), "and says what is wrong: the worst case is a gain");
+});
+
+test("the ordinary debit spread — a NEGATIVE worst case — is untouched by it", () => {
+  const r = evaluateTrade({
+    proposal: { intent: "open", ticker: "BOIL", legs: BOIL_CREDIT_SPREAD, dte: 36, contracts: 1,
+      maxLoss: -29, maxProfit: 21 },
+    portfolio: EMPTY_BOOK, capital: { tradingCapital: 5000, concurrentTarget: 4 },
+  });
+  assert.equal(r.violations.some((v) => v.code === "IMPOSSIBLE_LOSS"), false);
+  assert.equal(r.pass, true, "a real trade still passes");
+});
+
+test("THE SIGN TRAP: a CLOSING order carrying a positive magnitude is never sign-tested", () => {
+  // pro.jsx closeGroup() passes the cost basis, which is a positive magnitude.
+  // Reading that as an arbitrage would block every close on the desk.
+  const r = evaluateTrade({
+    proposal: { intent: "close", ticker: "BOIL", legs: BOIL_CREDIT_SPREAD, contracts: 1, maxLoss: 340 },
+    portfolio: EMPTY_BOOK, capital: { tradingCapital: 5000, concurrentTarget: 4 },
+  });
+  assert.equal(r.violations.some((v) => v.code === "IMPOSSIBLE_LOSS"), false);
+  assert.equal(r.pass, true, "a close is never blocked by an entry-only rule");
+});
+
+test("a max loss of exactly zero is UNPRICEABLE, not an arbitrage — the two stay separate", () => {
+  const r = evaluateTrade({
+    proposal: { intent: "open", ticker: "BOIL", legs: BOIL_CREDIT_SPREAD, dte: 36, contracts: 1, maxLoss: 0 },
+    portfolio: EMPTY_BOOK, capital: { tradingCapital: 5000, concurrentTarget: 4 },
+  });
+  assert.ok(r.violations.some((v) => v.code === "UNPRICEABLE"), "zero is a price we could not read");
+  assert.equal(r.violations.some((v) => v.code === "IMPOSSIBLE_LOSS"), false,
+    "and it is NOT reported as a trade that cannot lose");
+});
+
+/* ============================================================================
+   TASK 4a — THE COPILOT CALL IS ON THE EDGE, AND STILL BEHIND THE PASSWORD.
+   A synchronous Netlify Function is killed at roughly ten seconds; a 1200-token
+   streamed analysis takes longer than that EVERY time, so the copilot was
+   structurally cut off rather than intermittently unlucky. Moving it to the
+   edge is the fix — and the thing that must not go wrong while doing it is the
+   password, so these read the repository rather than trusting a memory of it.
+   ========================================================================= */
+
+test("the AI proxy is an EDGE function, and the old synchronous one is gone", () => {
+  const edge = readFileSync(new URL("../netlify/edge-functions/ai.js", import.meta.url), "utf8");
+  assert.ok(edge.includes("api.anthropic.com/v1/messages"), "it still proxies Anthropic");
+  assert.ok(edge.includes("Deno.env.get(\"ANTHROPIC_KEY\")"), "and reads the key from the Deno environment");
+  // A CALL, not the word: the header comment names Netlify.env to explain why
+  // it is not used, and a test that cannot tell prose from code is a test that
+  // stops the comment being written.
+  assert.ok(!edge.includes("Netlify.env.get("), "Netlify.env is the Node runtime and does not exist on the edge");
+  assert.throws(
+    () => readFileSync(new URL("../netlify/functions/ai.mjs", import.meta.url), "utf8"),
+    "the ten-second version must not survive beside the edge one");
+});
+
+test("THE PASSWORD RUNS FIRST — the AI proxy is never reachable without it", () => {
+  const toml = readFileSync(new URL("../netlify.toml", import.meta.url), "utf8");
+  const gateAt = toml.indexOf('function = "gate"');
+  const aiAt = toml.indexOf('function = "ai"');
+  assert.ok(gateAt > -1 && aiAt > -1, "both edge functions are declared in netlify.toml");
+  assert.ok(gateAt < aiAt, "and the gate is declared FIRST: netlify.toml runs them in written order");
+  assert.ok(!/from = "\/api\/ai"/.test(toml), "the old redirect to a Netlify Function is gone");
+
+  // Belt and braces: the order above is a deployment behaviour this repository
+  // cannot execute, so ai.js asks the same question itself. The failure this
+  // guards against is an unauthenticated Anthropic proxy on the open internet.
+  const edge = readFileSync(new URL("../netlify/edge-functions/ai.js", import.meta.url), "utf8");
+  assert.ok(/accessOf\(req/.test(edge), "ai.js checks access itself as well");
+  assert.ok(edge.includes("401"), "and refuses with a 401 when it fails");
+});
+
+test("there is still exactly ONE place a password is compared", () => {
+  const access = readFileSync(new URL("../netlify/edge-functions/lib/access.js", import.meta.url), "utf8");
+  const gate = readFileSync(new URL("../netlify/edge-functions/gate.js", import.meta.url), "utf8");
+  const edge = readFileSync(new URL("../netlify/edge-functions/ai.js", import.meta.url), "utf8");
+  assert.ok(access.includes("given === password"), "the comparison lives in lib/access.js");
+  for (const [name, src] of [["gate.js", gate], ["ai.js", edge]]) {
+    assert.ok(/from "\.\/lib\/access\.js"|from "\.\/lib\/access\.js"/.test(src), `${name} imports it`);
+    assert.ok(!src.includes("given === "), `${name} does not carry a second copy of the comparison`);
+  }
+});
+
 /* ---------------- summary ---------------- */
 console.log(`\n${passed} passed, ${failures.length} failed\n`);
 if (failures.length) {
