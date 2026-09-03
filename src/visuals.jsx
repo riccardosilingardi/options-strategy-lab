@@ -437,6 +437,114 @@ export function BandThumbFigure({ legs, entryNet, spot, bars, ticker, width, hei
 }
 
 /* ====================================================================
+   1b) OPEN-INTEREST STRIP
+   The liquidity floor, drawn instead of described.
+
+   WHAT IT SHOWS: every strike on ONE expiry, lined up from the emptiest to the
+   busiest, with the line where the floor cuts. Left of the line is what the
+   setting removes; right of it is what survives. Move the filter and the line
+   moves. That is the entire concept of a relative floor in one picture, and it
+   took three paragraphs of prose to fail to explain.
+
+   THIS IS THE ONE VISUAL IN THIS FILE NOT CUT FROM `payoffBands()`, and that is
+   not an exception to the rule — the rule is that the ZONES OF A TRADE come
+   from one place, and this chart has no trade in it. It draws how crowded each
+   strike is, which is a fact about the market and not about a structure.
+   Do not confuse it with `terminalDist()`: that one is where the PRICE may end
+   up, a forecast built from volatility and time. This one is a headcount of who
+   is already there.
+
+   THE HEIGHT IS ON A COMPRESSED SCALE, AND THE PICTURE SAYS SO. Open interest
+   on these chains runs from 1 to 66,130 on a single expiry: drawn linearly you
+   would see two bars and a flat grey floor. Heights are log-compressed so the
+   SHAPE survives, and because that makes height unreadable as a quantity, the
+   real smallest and largest are printed at the ends and the takeaway carries
+   the numbers. A chart whose vertical axis cannot be read as a number must not
+   pretend otherwise.
+==================================================================== */
+
+/** Bar heights for a sorted list, log-compressed so the shape survives. */
+export function oiBarHeights(sorted = [], height = 46) {
+  if (!sorted.length) return [];
+  const top = Math.log1p(Math.max(...sorted, 1));
+  return sorted.map((v) => {
+    const h = top > 0 ? (Math.log1p(Math.max(0, v)) / top) * height : 0;
+    return Math.max(1, h);   // a strike with nothing open is still a strike
+  });
+}
+
+/** How many of the sorted counts the floor removes. */
+export const oiCutAt = (sorted = [], threshold = 0) =>
+  sorted.filter((v) => v < threshold).length;
+
+/** One generated sentence: what this setting does to this expiry. */
+export function oiStripTakeaway(sorted = [], threshold = 0, { expKey } = {}) {
+  if (!sorted.length) return "";
+  const cut = oiCutAt(sorted, threshold);
+  const where = expKey ? ` on ${expKey}` : "";
+  // "At least 0 open contracts" is true and silly: with no floor at all the
+  // fact worth stating is that nothing is being filtered, not the threshold.
+  if (threshold <= 0) {
+    return `No strike is removed at this setting: all ${sorted.length}${where} are offered, from the ` +
+      `${sorted[0]} open contracts on the emptiest to ${sorted[sorted.length - 1]} on the busiest.`;
+  }
+  if (cut === 0) {
+    return `All ${sorted.length} strikes${where} carry at least ${threshold} open contracts, so this setting ` +
+      `removes none of them.`;
+  }
+  return `The ${cut} emptiest of the ${sorted.length} strikes${where} are removed for carrying under ` +
+    `${threshold} open contracts, against ${sorted[sorted.length - 1]} on the busiest strike here.`;
+}
+
+export function OpenInterestStrip({
+  peers = [], threshold = 0, expKey, width = 320, height = 46, onExplain,
+}) {
+  const sorted = [...peers].filter((x) => Number.isFinite(x)).sort((a, b) => a - b);
+  if (!sorted.length) return null;
+  const heights = oiBarHeights(sorted, height);
+  const cut = oiCutAt(sorted, threshold);
+  const bw = width / sorted.length;
+  const tap = (el) => (onExplain ? () => onExplain(el) : undefined);
+  const lineX = cut * bw;
+
+  return (
+    <svg width={width} height={height + 14} viewBox={`0 0 ${width} ${height + 14}`} role="img"
+      aria-label={oiStripTakeaway(sorted, threshold, { expKey })}
+      style={{ display: "block", maxWidth: "100%", background: T.bg, borderRadius: 4, cursor: onExplain ? "pointer" : "default" }}>
+      {sorted.map((v, i) => {
+        const removed = v < threshold;
+        return (
+          <rect key={i} x={i * bw} y={height - heights[i]} width={Math.max(0.5, bw - (bw > 3 ? 1 : 0))}
+            height={heights[i]} fill={removed ? T.red : T.green} opacity={removed ? 0.45 : 0.9}
+            onClick={tap(removed ? "cut" : "kept")} />
+        );
+      })}
+      {/* where the floor lands. Drawn at a RANK, not at a value: the horizontal
+          axis is the ordering of the strikes, not how many contracts each has. */}
+      {cut > 0 && cut < sorted.length && (
+        <line x1={lineX} x2={lineX} y1={0} y2={height} stroke={T.ink} strokeWidth={1.5} strokeDasharray="3 2" />
+      )}
+      <line x1={0} x2={width} y1={height} y2={height} stroke={T.line} strokeWidth={1} />
+      {/* the real numbers at the ends, because the height cannot be read as one */}
+      <text x={0} y={height + 11} style={{ ...mono }} fontSize={8.5} fill={T.dim}>{sorted[0]}</text>
+      <text x={width} y={height + 11} textAnchor="end" style={{ ...mono }} fontSize={8.5} fill={T.dim}>
+        {sorted[sorted.length - 1]}
+      </text>
+    </svg>
+  );
+}
+
+/** What one part of the strip means, on tap. */
+export const explainOiStrip = (el, { threshold, cut, total } = {}) => ({
+  cut: `These ${cut} strikes are the emptiest on this expiry: each carries fewer than ${threshold} open contracts. ` +
+    `A price quoted on one of them is a market maker's placeholder rather than something two people agreed on, ` +
+    `and you may not find anyone to sell it back to.`,
+  kept: `These strikes clear the floor: at least ${threshold} contracts are already open on each. That number is not ` +
+    `fixed — it comes from this expiry's own strikes, so a busy market asks for more of a leg than a quiet one.`,
+}[el] || `${total} strikes on this expiry, ordered from the emptiest to the busiest. The dashed line is where the floor cuts.`);
+
+/* ====================================================================
+   2) GAUGE/* ====================================================================
    2) GAUGE
    The payoff projected into polar coordinates: the price range becomes a
    semicircle, left = lowest price, right = highest. The arc is coloured by

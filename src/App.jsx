@@ -9,7 +9,8 @@ import {
   SlidersHorizontal, ArrowLeft, Sun, Moon, AlertTriangle,
 } from "lucide-react";
 import { fetchAllNews, fetchWeather, ImpactTags, CopilotTab, ReportTab, OrderTicket, AlpacaDesk, scaleStrategy, probProfit, buildContext, GuardianPanel, ChainMatrix, OptionPanel, UnifiedView, taSignals, confluence, WhyThisTrade, Markdown } from "./pro.jsx";
-import { BandThumbnail, payoffBands, bandTakeaway, GaugeFigure, Gauge, CompareFigure, exitPlanSentence } from "./visuals.jsx";
+import { BandThumbnail, payoffBands, bandTakeaway, GaugeFigure, Gauge, CompareFigure, exitPlanSentence,
+  OpenInterestStrip, oiStripTakeaway, oiCutAt, explainOiStrip, useWidth } from "./visuals.jsx";
 import { fuseSignals, sentimentDirection, withSignalRank, compareCandidates, againstSignal, DRIVER_PRESETS, rankByDrivers, verdictNarrative } from "./signals.js";
 import { N as nCDF, bs as bsPrice, smile as smileIV, payoff as payoffExp, SEASONAL, SIGMA } from "./engine.js";
 import { parseOcc, buildOcc, fetchChain, hasOpenInterest, enrichOpenInterest, feedName, sourceNote, openInterestNote, oiProfile, expiryOpenInterest } from "./chain.js";
@@ -459,6 +460,14 @@ const Lbl = ({ children }) => <div style={{ ...mono, fontSize: 10, letterSpacing
  * ------------------------------------------------------------------------- */
 function LiquidityFilter({ levelId, onLevel, previews, threshold, ticker, expKey, peers, feed }) {
   const level = liquidityLevel(levelId);
+  const [open, setOpen] = useState(null);
+  // The strip is drawn at the panel's own width, so it fits a 390px phone and
+  // grows on a desk screen rather than being cropped or letterboxed. The ref
+  // goes on a wrapper that renders in EVERY state (see below): a ResizeObserver
+  // handed a node that only exists once the data arrives observes nothing, and
+  // the width stays at its fallback for the life of the component.
+  const [wrapRef, panelW] = useWidth(320);
+  const stripW = Math.max(180, panelW - 2);
   const here = previews?.[levelId];
   const warn = looseningWarning(level);
   const t = threshold;
@@ -496,6 +505,33 @@ function LiquidityFilter({ levelId, onLevel, previews, threshold, ticker, expKey
       </div>
 
       <div style={{ ...sansUI, fontSize: 12.5, color: T.mut, lineHeight: 1.5, marginTop: 10 }}>{level.blurb}</div>
+
+      {/* THE FLOOR, DRAWN. Every strike on this expiry from the emptiest to the
+          busiest, and the line where the setting above cuts. It sits directly
+          under the buttons because the point is cause and effect: move the
+          setting, watch the line move. Three paragraphs of prose could not
+          explain this; the picture does it at a glance. */}
+      {/* The wrapper is unconditional so the ResizeObserver has a node on mount;
+          only its contents wait for the chain. */}
+      <div ref={wrapRef} style={{ marginTop: 12 }}>
+      {peers?.length > 0 && (
+        <div>
+          <OpenInterestStrip peers={peers} threshold={t?.threshold ?? 0} expKey={expKey}
+            width={stripW} onExplain={setOpen} />
+          <div style={{ ...sansUI, fontSize: 12.5, color: T.body, lineHeight: 1.5, marginTop: 6 }}>
+            {oiStripTakeaway([...peers].sort((a, b) => a - b), t?.threshold ?? 0, { expKey })}
+          </div>
+          {open && (
+            <div style={{ marginTop: 8, padding: "9px 11px", background: T.bg, border: `1px solid ${T.blue}55`, borderLeft: `3px solid ${T.blue}`, borderRadius: 8 }}>
+              <div style={{ ...sansUI, fontSize: 12.5, color: T.body, lineHeight: 1.5 }}>
+                {explainOiStrip(open, { threshold: t?.threshold ?? 0, cut: oiCutAt(peers, t?.threshold ?? 0), total: peers.length })}
+              </div>
+              <button onClick={() => setOpen(null)} style={{ ...mono, fontSize: 10, marginTop: 6, background: "transparent", border: "none", color: T.blue, cursor: "pointer", padding: 0 }}>close</button>
+            </div>
+          )}
+        </div>
+      )}
+      </div>
 
       {/* THE CONSEQUENCE, LIVE. Not a promise about the setting: the count this
           setting produces on the list directly below it. */}

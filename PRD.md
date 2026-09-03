@@ -314,6 +314,15 @@ imported by `App.jsx` at all.
 
 Price is the **vertical** axis, exactly as it is in the unified component, so the two never disagree about which way is up: the bands are horizontal stripes and the underlying's recent path runs left to right across them, ending at today's price on the right-hand edge. Without that line the thumbnail is a row of coloured bars — it says where the trade pays, but not where the market is in relation to it, which is the whole question. With no history loaded the line degrades to a flat one at today's price; it is never absent.
 
+**Open-interest strip** — the liquidity floor (§4b) as a picture rather than a paragraph:
+every strike on one expiry from emptiest to busiest, with the line where the setting cuts.
+Red left, green right, and the line moves when the filter moves. It is the answer to the
+one thing three paragraphs of prose could not explain — that the floor is a POSITION IN A
+RANKING, not a quantity. Not derived from `payoffBands()` and not an exception to that
+rule: it draws no trade. Heights are log-compressed (1 to 66,130 on one expiry), so the
+real extremes are printed at the ends and the takeaway carries the numbers — a vertical
+axis that cannot be read as a number must not pretend otherwise.
+
 **Gauge** — the payoff curve projected into polar coordinates. Colours self-calibrate from the sign of the payoff, so left is not necessarily red. Needle = spot.
 
 **Unified position component** — price history → dispersion cone → terminal distribution → payoff rotated 90°, all sharing ONE vertical price axis, with a horizontal dashed line running from today's spot through to the payoff. Cone and distribution switch on based on available width: one component, two levels of detail.

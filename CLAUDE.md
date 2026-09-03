@@ -391,6 +391,19 @@ The three components:
   price on the right-hand edge. Pass `bars`; with none it falls back to a flat
   dashed line at spot. Without that line it is a row of coloured bars that never
   says where the market is in relation to the trade.
+- **Open-interest strip** (`OpenInterestStrip`) — **the liquidity floor, drawn instead
+  of described.** Every strike on ONE expiry, lined up emptiest to busiest, with a
+  dashed line where the setting cuts: red to the left is what it removes, green to
+  the right is what survives, and moving the filter moves the line. It sits directly
+  under the four level buttons so the setting and its effect are one glance apart.
+  **The one visual in `visuals.jsx` not cut from `payoffBands()`, and not an exception
+  to that rule** — the rule is that the ZONES OF A TRADE come from one place, and this
+  chart has no trade in it. Do not confuse it with `terminalDist()`: that is where the
+  PRICE may end up (a forecast from volatility and time); this is a headcount of who is
+  already there. **The height is log-compressed and the picture says so**: open interest
+  runs 1 to 66,130 on a single expiry, so drawn linearly you would see two bars and a
+  grey floor. Because that makes height unreadable as a quantity, the real smallest and
+  largest are printed at the ends and the takeaway carries the numbers.
 - **Gauge** — the payoff projected into polar coordinates as a semicircular
   arc, needle at spot. Colours come from the sign of the payoff, so left is NOT
   always red: a bear spread is green on the left. Primary visual on position
