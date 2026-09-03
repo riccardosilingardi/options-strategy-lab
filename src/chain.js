@@ -384,13 +384,13 @@ export function openInterestNote(chain) {
  * WHAT THE CHAIN ACTUALLY CONTAINS, so the floor can be argued with.
  *
  * The liquidity floor is now two numbers (`RULES.liquidityPercentile` and
- * `RULES.minOpenInterestAbsolute`), and BOTH are provisional: nobody has
- * counted the open interest actually present on these five markets, and it
- * cannot be settled from inside the app's code — it needs a feed the developer
- * cannot reach. So the app reports what it sees instead: the distribution of
- * open interest across the chains actually loaded, the value the relative half
- * of the floor asks for on that distribution, and the share of contracts that
- * clear the absolute minimum underneath it.
+ * `RULES.minOpenInterestAbsolute`), and both were SET from a measurement of
+ * all five live chains (see the table in `rules.js`). This panel is how the
+ * setting is re-checked from inside the app as the market moves: it prints the
+ * distribution of open interest across the chains actually loaded, the value
+ * the relative half of the floor asks for on that distribution, and the share
+ * of contracts that clear the absolute minimum underneath it. One day's close
+ * is a reading, not a law — the numbers are worth looking at again.
  *
  * Two figures, because they answer different questions. `all` covers every
  * contract in the chain and is dominated by far-out strikes nobody trades;

@@ -238,7 +238,8 @@ export default async (req) => {
         liquidityPercentile: RULES.liquidityPercentile,
         minOpenInterestAbsolute: RULES.minOpenInterestAbsolute,
         minPeersForPercentile: RULES.minPeersForPercentile,
-        status: "PROVISIONAL — these are the numbers this reading is meant to replace.",
+        status: "Measured from this endpoint's own reading of the 2026-09-01 close (see src/rules.js). " +
+          "Re-run it to check them against a later market: open interest moves with the expiry cycle.",
         howToRead: "Per expiry, `openInterest.atFloorPercentile` is what the relative half of the floor would demand " +
           "there, and `clearingAbsolute` is how many contracts clear the absolute minimum. Where atFloorPercentile " +
           "sits well above the absolute minimum near the money, the relative half is doing the work and the " +

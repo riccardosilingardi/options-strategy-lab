@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { evaluateTrade, paperStatus, undefinedRiskLegs } from "./riskGate.js";
 import { RULES, sizing, ruleBadge, qualityFloor, qualityFloorSentence, liquiditySkippedNote, NOTHING_TODAY,
-  LIQUIDITY_LEVELS, RECOMMENDED_LIQUIDITY, liquidityThreshold, looseningWarning, liquiditySettingNote } from "./rules.js";
+  LIQUIDITY_LEVELS, RECOMMENDED_LIQUIDITY, LIQUIDITY_MEASUREMENT, liquidityMeasurementNote, liquidityThreshold, looseningWarning, liquiditySettingNote } from "./rules.js";
 
 /* ---------------- tiny harness ---------------- */
 let passed = 0;
@@ -489,15 +489,61 @@ test("a filtered list always says which setting produced it", () => {
   assert.ok(n.includes("4 shown"));
   assert.ok(n.includes("2 removed for liquidity"));
   assert.ok(n.includes("1 removed for reward-to-risk"));
-  assert.ok(n.includes("provisional"), "and that the numbers are not measured yet");
+  assert.ok(n.includes(LIQUIDITY_MEASUREMENT.asOf), "and the close the floor was measured against");
   const rec = liquiditySettingNote("recommended", { kept: 9 });
   assert.ok(rec.includes("recommendation"));
 });
 
-test("the floor numbers are marked provisional in the file that owns them", () => {
+test("the floor numbers carry the measurement they were set from", () => {
   const src = readFileSync(new URL("./rules.js", import.meta.url), "utf8");
-  assert.ok(/PROVISIONAL/.test(src), "the constants say they have not been measured");
-  assert.ok(src.includes("/api/liquidity"), "and name the endpoint that will settle them");
+  assert.ok(/MEASURED/.test(src), "the constants say where they came from");
+  assert.ok(src.includes("/api/liquidity"), "and name the endpoint that produced it");
+  assert.ok(!/PROVISIONAL/.test(src), "and no longer claim to be provisional");
+});
+
+test("the measurement is a reading, and is never derived from the floor it justifies", () => {
+  const M = LIQUIDITY_MEASUREMENT;
+  assert.equal(M.markets, 5);
+  assert.ok(M.reporting > 0 && M.reporting <= M.contracts, "you cannot report more strikes than you read");
+  // The whole point of the two-part floor: the bar a leg must clear is not one
+  // number across these markets. If this spread ever collapses, a single
+  // absolute floor would do just as well and this design has lost its reason.
+  assert.ok(M.high.bar >= M.low.bar * 4,
+    "the measured near-the-money bar spans several times over between markets");
+  assert.notEqual(M.low.market, M.high.market);
+  // And it must not be computable from the floor's own constants: a screen that
+  // recomputed the finding out of the setting would report a new measurement
+  // every time somebody moved the setting.
+  for (const k of ["liquidityPercentile", "minOpenInterestAbsolute", "minPeersForPercentile"]) {
+    assert.notEqual(M.low.bar, RULES[k]);
+    assert.notEqual(M.high.bar, RULES[k]);
+  }
+});
+
+test("the measurement sentence is generated, and no two words are glued together", () => {
+  // JSX drops whitespace-only text that spans a newline, so a paragraph built
+  // out of {expr} and prose across several lines silently produces "read1035
+  // strikes" and "all 5markets". This sentence is generated in one string for
+  // that reason; this test is what stops it being reassembled in a component.
+  const t = liquidityMeasurementNote();
+  assert.ok(!/[0-9][A-Za-z]/.test(t), `a number is glued to a word: ${t}`);
+  assert.ok(!/[A-Za-z][0-9]/.test(t.replace(/\b\d{4}-\d{2}-\d{2}\b/g, "")), "and a word to a number");
+  assert.ok(t.includes(LIQUIDITY_MEASUREMENT.asOf), "it names the close it was taken on");
+  assert.ok(t.includes(String(LIQUIDITY_MEASUREMENT.low.bar)) && t.includes(LIQUIDITY_MEASUREMENT.low.market));
+  assert.ok(t.includes(String(LIQUIDITY_MEASUREMENT.high.bar)) && t.includes(LIQUIDITY_MEASUREMENT.high.market));
+});
+
+test("the measurement explains the number it actually moved", () => {
+  // The reading's one real change: the peer threshold. The app aims at ~45 DTE
+  // and the grain markets carried 10-11 REPORTING strikes there, so 12 would
+  // have switched the relative half off exactly where the app builds.
+  assert.ok(RULES.minPeersForPercentile <= 10,
+    "an expiry with 10 reporting strikes must still get a percentile");
+  assert.ok(RULES.minPeersForPercentile >= 5,
+    "but a handful of numbers is not a distribution");
+  const tenStrikeExpiry = [2, 5, 7, 12, 20, 33, 60, 90, 180, 353];
+  const t = liquidityThreshold(tenStrikeExpiry, RECOMMENDED_LIQUIDITY);
+  assert.ok(Number.isFinite(t.relative), "the 43-day grain board is measurable at this setting");
 });
 
 /* ---------------- summary ---------------- */

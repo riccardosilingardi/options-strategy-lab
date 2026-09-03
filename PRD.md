@@ -116,9 +116,9 @@ and offered on another.
 
 | Floor | Value | Why that number |
 |---|---|---|
-| `liquidityPercentile` | **0.40 — PROVISIONAL** | Where a leg must sit among the other strikes **on its own expiry**. A single absolute count was the mistake: 25 contracts is nothing on UNG and a great deal on SOYB, so one figure either empties the thin markets or waves the junk through on the liquid ones, and which it does depends on a market it was never measured against. A strike in the bottom 40% of its own chain's distribution is untraded whatever its raw count says, and that judgement travels between markets in a way a fixed number cannot. |
-| `minOpenInterestAbsolute` | **10 contracts — PROVISIONAL** | The floor under the floor. A percentile alone lets a chain certify itself: where nothing trades the 40th percentile is one contract, every leg clears it, and the emptiness has become the standard. Well below the old 25 on purpose — the relative test now does the work on a liquid board, and this one only has to catch "nobody trades anything here". The live case that prompted the whole floor: a SOYB call spread quoted at 1.16 and 0.30 on adjacent strikes whose implied volatility disagreed by ten points, on legs with **2** and **0** open. Those were placeholders, not prices. |
-| `minPeersForPercentile` | **12 strikes** | Below this there is no distribution to take a percentile of, so the absolute floor applies alone — and the screen says so. "We could not measure the neighbours" is a different fact from "the neighbours are all busy", and reporting them as one would be the app blaming the data for its own setting. |
+| `liquidityPercentile` | **0.40 — MEASURED** | Where a leg must sit among the other strikes **on its own expiry**. A single absolute count was the mistake: 25 contracts is nothing on UNG and a great deal on SOYB, so one figure either empties the thin markets or waves the junk through on the liquid ones, and which it does depends on a market it was never measured against. A strike in the bottom 40% of its own chain's distribution is untraded whatever its raw count says, and that judgement travels between markets in a way a fixed number cannot. |
+| `minOpenInterestAbsolute` | **10 contracts — MEASURED** | The floor under the floor. A percentile alone lets a chain certify itself: where nothing trades the 40th percentile is one contract, every leg clears it, and the emptiness has become the standard. Well below the old 25 on purpose — the relative test now does the work on a liquid board, and this one only has to catch "nobody trades anything here". The live case that prompted the whole floor: a SOYB call spread quoted at 1.16 and 0.30 on adjacent strikes whose implied volatility disagreed by ten points, on legs with **2** and **0** open. Those were placeholders, not prices. |
+| `minPeersForPercentile` | **8 strikes — MOVED BY THE READING, from 12** | Below this there is no distribution to take a percentile of, so the absolute floor applies alone — and the screen says so. "We could not measure the neighbours" is a different fact from "the neighbours are all busy", and reporting them as one would be the app blaming the data for its own setting. |
 | `minRewardRisk` | **0.25** | The least a structure may pay per dollar risked. At a ratio *r* you break even at a hit rate of 1/(1+*r*), so 0.25 means being right 80% of the time just to come out level. The SOYB spread paid $15 for $86 at risk — 0.17, an 85% break-even. It is also the practitioner floor for a credit spread: collect at least a quarter of the width. A two-thirds-chance credit spread collecting a third of its width scores 0.5 and clears it comfortably. |
 
 Two rules hold them:
@@ -135,18 +135,63 @@ Two rules hold them:
   Shortlist lists what it removed and why, and the verdict narrative reports how many
   candidates were built and thrown away before the user saw them.
 
-**BOTH LIQUIDITY NUMBERS ARE PROVISIONAL, AND THE APP SAYS SO ON SCREEN.** They were
-chosen from the live examples above and from the structure of these five option markets;
-nobody has yet counted the open interest actually present on UNG, CORN, SOYB, BOIL and
-WEAT. That cannot be done from a development sandbox — the broker keys live only in
-Netlify's environment — so the measurement runs where the keys already are:
-`netlify/functions/liquidity.mjs`, opened at **`/api/liquidity`** behind the site's own
-password. It fetches the five chains and returns AGGREGATE STATISTICS ONLY: per market and
-per expiry, how many strikes, how many report open interest at all, and the distribution of
-it (min, quartiles, median, 90th, max), plus what each half of the current floor would ask
-of that distribution. No credentials, no account data, no contract-level row. When that
-JSON exists, the two constants are set from it and the provisional block in `rules.js` is
-deleted.
+**BOTH LIQUIDITY NUMBERS ARE MEASURED, AND THIS IS THE MEASUREMENT.** They were
+originally chosen from two live examples and the structure of these markets; nobody had
+counted the open interest actually present on UNG, CORN, SOYB, BOIL and WEAT, and it could
+not be counted from a development sandbox because the broker keys live only in Netlify's
+environment. So the measurement was built to run where the keys already are —
+`netlify/functions/liquidity.mjs`, at **`/api/liquidity`**, behind the site's own password —
+and it was run against the broker on **the 2026-09-01 close**: 1,654 contracts inside the
++/-45% band the app builds in, 1,035 of them reporting open interest at all.
+
+**Near the money (within 10% of spot), which is where these structures get built:**
+
+| market | strikes | 1st quartile | median | 40th pct — the bar | clears 10 |
+|---|---|---|---|---|---|
+| SOYB | 38 | 11 | 58 | **33** | 82% |
+| CORN | 38 | 40 | 216 | **100** | 89% |
+| UNG | 67 | 90 | 360 | **202** | 90% |
+| BOIL | 143 | 11 | 50 | **28** | 78% |
+| WEAT | 45 | 50 | 164 | **150** | 84% |
+
+**The bar a leg must clear ranges from 28 contracts on BOIL to 202 on UNG — a sevenfold
+spread across five markets this app otherwise treats alike.** That is the whole case for a
+relative floor, and it is now a reading rather than an argument. It also convicts the number
+it replaced: the old fixed 25 sat *above* the first quartile on SOYB and BOIL (both 11) and
+*below* it on CORN, UNG and WEAT (40, 90, 50) — it bit hardest on exactly the thin markets it
+was least equipped to judge, and was close to inert on the liquid ones.
+
+**What the reading confirmed, and the one thing it changed:**
+
+- `liquidityPercentile` **0.40 — confirmed.** On all five markets the 40th percentile near
+  the money lands far above the absolute minimum (28 to 202, against 10), so the relative
+  half does the work everywhere and the absolute one is left catching dead chains. That is
+  the shape this was designed to have, and the reading says it has it.
+- `minOpenInterestAbsolute` **10 — confirmed, and it earns its keep.** Near the money it
+  removes 10–22% per market and empties none of them; and it catches the case it exists for.
+  BOIL's 2026-10-09 board had a near-the-money *median* of 3 contracts and a 40th percentile
+  of **2** — below the minimum, so 10 is what binds there and only 2 of its 7 near-the-money
+  strikes survive. A purely relative floor would have waved that whole expiry through on the
+  strength of its own emptiness.
+- `minPeersForPercentile` **12 → 8 — the one number the measurement moved.** Only 34–76% of
+  contracts report open interest at all, so an expiry's peer set is far smaller than its
+  strike count, and at the horizon this app aims for (§4, `targetEntryDTE` 45) the grain
+  markets are thin in *reporting* strikes: SOYB's 43-day board carried 10 and CORN's 11. At
+  12 the relative half would have switched itself off exactly where the app builds — and on
+  CORN that expiry's own 40th percentile was 30, three times the absolute minimum, so
+  switching it off was a real loss of protection rather than a harmless fallback. Eight is
+  where a percentile still means something; below it you are picking one of a handful.
+
+**Two whole expiries reported no open interest at all** (UNG and BOIL, both 2026-10-23). The
+skip rule handles them by construction: unknown is not zero, nothing is rejected for it, and
+the screen says the floor was skipped rather than passed.
+
+`LIQUIDITY_MEASUREMENT` in `src/rules.js` is the one home for these findings, so the copy
+explaining the floor cannot drift from the evidence behind it. It must never be **derived**
+from the floor's own constants: a screen that recomputed "the bar ran from 28 to 202" out of
+`minOpenInterestAbsolute` would report a different measurement the moment somebody changed
+the setting, which is the opposite of a measurement. One close is a reading, not a law —
+`/api/liquidity` takes it again whenever the market has moved.
 
 ### The floor is the USER'S setting, and the screen says which one produced what is on it
 
@@ -402,7 +447,7 @@ The build order was a plan for a future builder. It is now a record.
 | Open interest from the trading API, non-blocking and labelled | **DONE** (§11) |
 | Quality floors on every candidate | **DONE** (§4b) |
 | Liquidity floor relative to the chain being judged, with an absolute floor underneath | **DONE** (§4b) — and it is the user's setting, with the app's recommendation marked and the consequence of every setting shown live |
-| `/api/liquidity`, the measurement that will replace the two provisional numbers | **BUILT, NEVER RUN** — it needs the broker keys, which live only in Netlify |
+| `/api/liquidity`, the measurement behind the liquidity floor | **BUILT AND RUN** (2026-09-01 close) — the floor's two numbers are set from it, and §4b carries the distribution |
 | Backtest: 7 vs 14 vs 21 DTE on two underlyings, `report.md` | **NOT BUILT** (§4) |
 | Video and deck | **NOT VERIFIED HERE** — outside the repo |
 
@@ -445,7 +490,7 @@ differently. The panel can also print what is on screen.
 | Price history (underlying daily bars) | **Alpha Vantage**, with Alpaca's IEX bars tried first when keys are present | — |
 | Weather forecasts | **Open-Meteo**, 14-day, read against each region's own monthly climate norm | Never a fixed temperature threshold. |
 | Execution | **Alpaca paper** only, `paper-api.alpaca.markets`, verified by the `X-OSL-Paper-Endpoint` header the gate checks | If paper cannot be verified, the order is rejected. |
-| The open-interest **measurement** (`/api/liquidity`) | Alpaca's trading API for `/v2/options/contracts` and the market-data API for the underlying's last trade, aggregated in `netlify/functions/liquidity.mjs` | Not a chain and not an order path: GET-only, aggregate statistics only, no credentials, no account data, no contract-level row, and no `X-OSL-Paper-Endpoint` header for anything to trust. It exists to settle the liquidity floor's two provisional numbers from a reading rather than an argument. |
+| The open-interest **measurement** (`/api/liquidity`) | Alpaca's trading API for `/v2/options/contracts` and the market-data API for the underlying's last trade, aggregated in `netlify/functions/liquidity.mjs` | Not a chain and not an order path: GET-only, aggregate statistics only, no credentials, no account data, no contract-level row, and no `X-OSL-Paper-Endpoint` header for anything to trust. It is where the liquidity floor's two numbers came from (§4b), and how they are re-checked as the market moves. |
 | The autopilot's chain | Its own CBOE delayed-quote fetch, independent of the client's `chain.js` | This is the one place that names a feed outside `chain.js`, and it is accurate there because that function really does only call CBOE. |
 
 ---
@@ -522,23 +567,13 @@ step instead of lengthening it; up to three candidates compared on one picture (
 
 What is left:
 
-- **SET THE TWO LIQUIDITY NUMBERS FROM THE READING.** This is still the oldest carried-forward
-  debt, but it is no longer blocked on anything a session can do: the owner opens
-  **`https://<the site>/api/liquidity`** in a browser (the site password, the same one as every
-  other page) and pastes the JSON back. Then, per market and per expiry: read
-  `nearTheMoney.atFloorPercentile` against `minOpenInterestAbsolute`. Where the percentile sits
-  well above the absolute minimum near the money, the relative half is doing the work and the
-  shape is right; where it sits below on a market worth trading, the absolute minimum is too high
-  for that market. Set `liquidityPercentile` and `minOpenInterestAbsolute` from that, record the
-  measured distribution in §4b, and delete the PROVISIONAL block in `src/rules.js`. Add `?sym=UNG`
-  to read one market, or `?near=15` to widen the near-the-money band.
-- ~~One simplified multi-leg thumbnail used everywhere: no unreadable candles at 80px.~~ **DONE** —
-  `simplifyCloses()` reduces the price line to what the width can carry (about one point per 7px),
-  keeping the first and last close exactly, so the line is a shape at 80px instead of a scribble.
-  A series already short enough is left untouched.
-- ~~Gauge plus thumbnail on Radar and Shortlist.~~ **DONE** — the gauge sits beside the thumbnail on
-  every candidate row on step 2, and step 1 carries the thumbnail of the best structure found in each
-  market. Both are cut from the same `payoffBands()` result, so they cannot disagree.
+- ~~Set the two liquidity numbers from the reading.~~ **DONE — the oldest carried-forward debt
+  in this file is closed.** `/api/liquidity` was opened against the live broker on the
+  2026-09-01 close and the distribution is recorded in §4b. 0.40 and 10 were confirmed;
+  `minPeersForPercentile` moved 12 → 8. What is left is not a debt but a habit: **re-run
+  `/api/liquidity` when the market has moved** (add `?sym=UNG` for one market, `?near=15` to
+  widen the band) and check the §4b table still describes it. Open interest moves with the
+  expiry cycle, and this reading was taken two weeks before a September expiry.
 - ~~The verdict narrative is long on a phone.~~ **DONE** — the first paragraph stays and the rest
   opens on a tap that says how many paragraphs are behind it, so nobody has to guess whether it is
   worth the scroll. A fold is not a deletion: nothing was cut.
@@ -568,33 +603,38 @@ What is left:
 The standing rule in `CLAUDE.md`: every session starts by fixing what the last one flagged, and
 ends by writing down what it could not verify. Currently open:
 
-- **THE TWO LIQUIDITY NUMBERS ARE STILL PROVISIONAL.** 0.40 and 10 are chosen to be conservative
-  in the one direction that matters — they cut the tail of untouched strikes without emptying a
-  quiet market — but they are an argument, not a reading. Re-checked from this session's sandbox
-  and the position is unchanged: no `ALPACA_KEY` and no `ANTHROPIC_KEY` in the environment, and
-  both `data.alpaca.markets` and `cdn.cboe.com` refused by the egress proxy (`curl` returns
-  HTTP 000, connection never established). What is different is that the measurement no longer
-  needs a session with access: `/api/liquidity` runs where the keys are and the owner can open it.
-  **Until that JSON is pasted back, the floor on screen says it is provisional, and so does this.**
-- **THE PASSWORD GATE OVER `/api/liquidity` IS AN INFERENCE, NOT AN OBSERVATION.** It follows
-  from `gate.js` running on `path: "/*"` with only `/api/approve` excluded, and Netlify's
-  Redirect-rules check passing on the branch means the route itself parsed — but nobody has
-  watched the endpoint refuse an unauthenticated request. An attempt from this session's
-  sandbox against the deploy preview returned a 403 that turned out to be the SANDBOX'S OWN
-  egress proxy refusing the CONNECT (`example.com` returns the identical 403), so it proved
-  nothing either way. One look when the URL is first opened settles it: it should ask for
-  the site password.
-- **`/api/liquidity` HAS NEVER BEEN RUN AGAINST THE BROKER.** Its two upstream request shapes are
-  the ones `chain.js` and `chainAlpaca.mjs` already use in production (`/v2/options/contracts` with
-  `open_interest` as a string, and `/v2/stocks/trades/latest`), and its aggregation is driven by
-  `src/liquidity.test.js` against fixtures — but the handler itself has been executed by nothing.
-  The first real call may need its page limit or its 8-second upstream budget adjusted, and a
-  market that errors comes back as `{ market, error }` beside the four that worked rather than
-  taking the whole report down.
+- **THE READING IS ONE DAY, AND IT IS NOT A QUIET ONE.** The floor is measured now, but from
+  the 2026-09-01 close — roughly two weeks before a September expiry, with the front month fat
+  and the back months thin. Open interest moves with the cycle, so the §4b table describes that
+  day and not every day. Re-run `/api/liquidity` mid-cycle and check the sevenfold spread and
+  the per-market bars still look like the table.
+- **THE REJECTION RATE IS BOUNDED, NOT COMPUTED.** The endpoint returns quantiles and no
+  contract-level rows — deliberately, so no raw chain leaves it — which means how many
+  near-the-money strikes the 40th percentile actually removes can only be estimated between the
+  quartiles it reports. On BOIL, the thinnest market, that bound is roughly a quarter to a half
+  of its near-the-money strikes, and a spread needs EVERY leg to clear. **Watch BOIL first if
+  the Shortlist starts coming up empty**; the `OpenInterestReadout` on step 2 is where it shows.
+- **NOTHING HAS WATCHED THE FLOOR RUN AGAINST A LIVE CHAIN.** The constants are measured and the
+  arithmetic is tested, but the app itself has still only been driven against stubs: no session
+  has loaded a real chain, seen `expiryOpenInterest` build a real peer set, and read what the
+  four settings then do to a real Shortlist. That is the next thing worth a screenshot, and it
+  needs no new code.
+- **`/api/liquidity` has been run exactly once.** It worked first time — one page per market,
+  nothing truncated, no market erroring, comfortably inside its 8-second budget. A quieter or
+  busier day may page differently, and the per-market error path (`{ market, error }` beside the
+  markets that worked) has never actually fired.
+- **The password gate over `/api/liquidity` is confirmed by use, not by test.** The owner opened
+  it behind the site password and it answered; nobody has watched it refuse an unauthenticated
+  request. An earlier attempt from a sandbox proved nothing — the 403 was that sandbox's own
+  egress proxy refusing the CONNECT, and `example.com` returned the identical 403.
 - **The live Anthropic call.** No `ANTHROPIC_KEY` in this sandbox either. The streaming copilot has
   been proven against a simulated stream, not the live endpoint.
-- **The live open-interest call.** No `ALPACA_KEY`; the request shape is verified against Alpaca's
-  SDK and driven against a stub, not the broker.
+- **The live open-interest call — HALF of this is now settled.** `/api/liquidity` read
+  `/v2/options/contracts` from the real broker, so the request shape, the `open_interest` /
+  `open_interest_date` fields and the fact that the count arrives as a STRING are all confirmed
+  against Alpaca rather than against a stub. What is still unproven is the CLIENT'S path to the
+  same data: `fetchOpenInterest` reaches it through the `/api/alpaca` proxy with its own
+  3.5-second budget and its own paging, and that has still only been driven against a stub.
 - **`src/fixtures/alpaca-chain-UNG.json` is still synthetic.** `node scripts/capture-alpaca-chain.mjs UNG`
   with real keys replaces it.
 - **THE WHOLE PATH WAS WALKED AGAINST STUBBED CHAINS AGAIN.** Chromium at 390px, capital

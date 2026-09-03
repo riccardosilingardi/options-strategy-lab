@@ -15,7 +15,7 @@ import { N as nCDF, bs as bsPrice, smile as smileIV, payoff as payoffExp, SEASON
 import { parseOcc, buildOcc, fetchChain, hasOpenInterest, enrichOpenInterest, feedName, sourceNote, openInterestNote, oiProfile, expiryOpenInterest } from "./chain.js";
 import { T, themeName, setTheme, BADGE_SAFE } from "./theme.js";
 import { RULES, sizing, ruleBadge, takeProfitLabel, stopLossLabel, perTradeCapLabel, RULE_PILLS, NOTHING_TODAY, money, pctText, capitalSourceNote, perTradeLimitPhrase, qualityFloor, qualityFloorSentence, liquiditySkippedNote,
-  LIQUIDITY_LEVELS, RECOMMENDED_LIQUIDITY, liquidityLevel, liquidityThreshold, looseningWarning, liquiditySettingNote, isLoosened, ordinal } from "./rules.js";
+  LIQUIDITY_LEVELS, RECOMMENDED_LIQUIDITY, LIQUIDITY_MEASUREMENT, liquidityMeasurementNote, liquidityLevel, liquidityThreshold, looseningWarning, liquiditySettingNote, isLoosened, ordinal } from "./rules.js";
 import { evaluateTrade, gateSummary } from "./riskGate.js";
 import { DEMO, DEMO_BANNER, DEMO_TOOLTIP, DEMO_SEED_TICKERS, demoPositions } from "./demo.js";
 import { CapitalOnboarding, WizardOpen, FindOpportunities, WizardCandidates, ConfirmSteps, NothingToday, Card, Pill } from "./wizard.jsx";
@@ -529,9 +529,7 @@ function LiquidityFilter({ levelId, onLevel, previews, threshold, ticker, expKey
       )}
 
       <div style={{ ...mono, fontSize: 9.5, color: T.dim, marginTop: 8, lineHeight: 1.6 }}>
-        Both numbers behind the recommendation are PROVISIONAL: nobody has yet counted the open interest actually
-        present on these five markets. The measurement that will settle them runs at /api/liquidity, where the
-        broker keys already are.
+        {liquidityMeasurementNote()}
       </div>
     </Panel>
   );
@@ -602,7 +600,7 @@ function OpenInterestReadout({ chains, floor, percentile = 0, level }) {
       <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 8, lineHeight: 1.6 }}>
         {reporting.length === 0
           ? "No loaded feed reports open interest yet, so there is nothing here to judge the floor against. Open interest arrives after the chain, and only from the broker's contract list."
-          : `Read it this way. The ${ordinal(percentile * 100)} column is what the RELATIVE half of the floor asks for on that set, and it moves with the market: where it sits above ${floor} the chain's own distribution is doing the work, and where it sits below, the ${floor}-contract minimum underneath is what bound. If "clear ${floor}" falls towards zero near the money on a market worth trading, the absolute minimum is too high for it. Every number here is a reported count, never an estimate — and both floor numbers are PROVISIONAL until /api/liquidity has been read.`}
+          : `Read it this way. The ${ordinal(percentile * 100)} column is what the RELATIVE half of the floor asks for on that set, and it moves with the market: where it sits above ${floor} the chain's own distribution is doing the work, and where it sits below, the ${floor}-contract minimum underneath is what bound. If "clear ${floor}" falls towards zero near the money on a market worth trading, the absolute minimum is too high for it. Every number here is a reported count, never an estimate. The floor's two numbers were set from exactly this reading, taken across all ${LIQUIDITY_MEASUREMENT.markets} chains on the ${LIQUIDITY_MEASUREMENT.asOf} close; /api/liquidity takes it again.`}
       </div>
     </Panel>
   );

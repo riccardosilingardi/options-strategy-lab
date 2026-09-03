@@ -85,14 +85,24 @@ the multi-market scan. See PRD §4b for the numbers and the evidence behind them
 - `minRewardRisk` — below it you must be right more often than anything on these
   chains actually prices.
 
-**BOTH LIQUIDITY NUMBERS ARE PROVISIONAL AND MARKED AS SUCH IN `rules.js`.**
-Nobody has counted the open interest actually present on the five markets. The
-measurement runs at `/api/liquidity` (`netlify/functions/liquidity.mjs`), behind
-the site's own password, where the broker keys already are: it returns aggregate
-statistics only — per market and per expiry, how many strikes, how many report
-open interest at all, and the distribution of it. When that JSON exists, set the
-two constants from it and delete the provisional block. Until then every screen
-that prints the floor says it is provisional.
+**BOTH LIQUIDITY NUMBERS ARE NOW MEASURED, AND `rules.js` CARRIES THE TABLE.**
+`/api/liquidity` (`netlify/functions/liquidity.mjs`) was run against the broker
+on the 2026-09-01 close — 1,654 contracts in the band the app builds in, 1,035
+of them reporting. Near the money the 40th-percentile bar ran from **28**
+contracts on BOIL to **202** on UNG: a sevenfold spread across five markets the
+app treats alike, and the reason one fixed number could never have served them.
+The old 25 sat above the first quartile on SOYB and BOIL and below it on CORN,
+UNG and WEAT — hardest on exactly the markets it was least able to judge.
+`liquidityPercentile` (0.40) and `minOpenInterestAbsolute` (10) were both
+confirmed; **`minPeersForPercentile` moved 12 → 8**, the one number the reading
+changed, because only 34–76% of contracts report open interest at all and the
+grain markets carry 10–11 reporting strikes at the ~45-DTE horizon this app aims
+for — at 12 the relative half switched itself off exactly where the app builds.
+`LIQUIDITY_MEASUREMENT` in `rules.js` is the one home for the findings, so the
+copy explaining the floor cannot drift from the evidence: **never derive those
+figures from the floor's own constants**, or the screen reports a new
+measurement every time somebody moves the setting. One close is a reading, not a
+law — re-run the endpoint as the market moves.
 
 **THE FLOOR IS THE USER'S SETTING, NOT THE APP'S ASSERTION.** `LIQUIDITY_LEVELS`
 in `rules.js` is Strict / **Recommended** / Relaxed / Off, and the recommended

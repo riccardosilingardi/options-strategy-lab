@@ -69,21 +69,51 @@ export const RULES = {
   // market it was never measured against. A count only means something next to
   // the other counts on the same board.
   //
+  // >>> MEASURED, 2026-09-03, against all five live chains. <<<
+  // `/api/liquidity` (netlify/functions/liquidity.mjs) was run against the
+  // broker on the 2026-09-01 close: 1,654 contracts inside the band the app
+  // builds in, 1,035 of them reporting open interest. What it found, NEAR THE
+  // MONEY (within 10% of spot), is the whole argument for this floor:
+  //
+  //   market  strikes  1st quartile  median  40th pct  clears 10
+  //   SOYB      38          11          58       33       82%
+  //   CORN      38          40         216      100       89%
+  //   UNG       67          90         360      202       90%
+  //   BOIL     143          11          50       28       78%
+  //   WEAT      45          50         164      150       84%
+  //
+  // The bar a leg must clear ranges from 28 contracts on BOIL to 202 on UNG —
+  // a SEVENFOLD spread across five markets the app treats alike. The old fixed
+  // 25 sat ABOVE the first quartile on SOYB and BOIL (both 11) and BELOW it on
+  // CORN, UNG and WEAT (40, 90, 50): it bit hardest on exactly the thin markets
+  // it was least able to judge, and was close to inert on the liquid ones. That
+  // is the failure this replaces, and it is now measured rather than argued.
+
   // liquidityPercentile — WHERE A LEG SITS AMONG THE OTHER STRIKES ON ITS OWN
   // EXPIRY. At 0.40 a leg has to carry more open interest than the bottom 40%
   // of that expiry. A strike in the bottom of its own chain's distribution is
   // untraded whatever its raw count says, and that judgement travels between
   // markets in a way a fixed number cannot: it asks the same question of UNG
   // and of SOYB and gets an answer in each market's own terms.
+  //
+  // CONFIRMED by the reading. On all five markets the 40th percentile near the
+  // money lands well above the absolute minimum below (28 to 202, against 10),
+  // so the relative half does the work everywhere and the absolute one is only
+  // catching dead chains — which is the shape this was designed to have.
   liquidityPercentile: 0.40,
 
   // minOpenInterestAbsolute — THE FLOOR UNDER THE FLOOR. A percentile on its
   // own lets a chain certify itself: where nothing trades, the 40th percentile
   // is one contract, every leg clears it, and the emptiness has become the
-  // standard it is measured against. Nothing under this is a market at any
-  // percentile. It is deliberately well below the old 25 — the relative test
-  // now does the work on a liquid board, and this one only has to catch
-  // "nobody trades anything here at all".
+  // standard it is measured against.
+  //
+  // CONFIRMED by the reading, and it earns its keep. Near the money 10 removes
+  // 10-22% per market and empties none of them. It also catches the genuinely
+  // dead expiry, which is the case it exists for: BOIL's 2026-10-09 board had a
+  // near-the-money MEDIAN of 3 contracts and a 40th percentile of 2 — below the
+  // minimum, so 10 is what binds there and only 2 of its 7 near-the-money
+  // strikes survive. A purely relative floor would have waved that whole expiry
+  // through on the strength of its own emptiness.
   minOpenInterestAbsolute: 10,
 
   // minPeersForPercentile — below this many known counts on an expiry there is
@@ -91,18 +121,18 @@ export const RULES = {
   // and the absolute floor applies alone. The screen says which of the two
   // bound, because "we could not measure the neighbours" is a different fact
   // from "the neighbours are all busy".
-  minPeersForPercentile: 12,
-
-  // >>> BOTH NUMBERS ARE PROVISIONAL AND PENDING A MEASUREMENT. <<<
-  // Nobody has yet counted the open interest actually present on UNG, CORN,
-  // SOYB, BOIL and WEAT. 0.40 and 10 are chosen to be conservative in the one
-  // direction that matters — they cut the tail of untouched strikes without
-  // emptying a quiet market — but they are still an argument, not a reading.
-  // `netlify/functions/liquidity.mjs`, opened at /api/liquidity behind the
-  // site's own password, fetches the five chains where the keys already are and
-  // returns the distribution of open interest per market and per expiry. When
-  // that JSON exists, set these two from it and delete this block; until then
-  // every screen that prints the floor says it is provisional.
+  //
+  // MOVED FROM 12 TO 8 BY THE READING, and this is the one number the
+  // measurement actually changed. Only 34-76% of contracts report open interest
+  // at all, so the peer set on an expiry is far smaller than its strike count —
+  // and at the horizon this app aims for (targetEntryDTE 45) the grain markets
+  // are thin in REPORTING strikes: SOYB's 43-day board had 10 and CORN's had
+  // 11. At 12 the relative half would have switched itself off exactly where
+  // the app builds, and on CORN that expiry's own 40th percentile was 30 —
+  // three times the absolute minimum, so switching it off was a real loss of
+  // protection rather than a harmless fallback. Eight is where a percentile
+  // still means something: below it you are picking one of a handful.
+  minPeersForPercentile: 8,
 
   // minRewardRisk — the least a structure may pay per dollar it puts at risk.
   // Read it as a break-even hit rate: at a ratio r a win pays r and a loss costs
@@ -254,6 +284,37 @@ export const limitOwner = (limits) => ((limits && limits.answered) ? "your" : "t
 
    And it will not invent a reason. Every rejection comes back with the number
    that caused it, so the sentence on screen is the arithmetic, not a verdict. */
+
+/**
+ * WHAT THE MEASUREMENT FOUND — one home, so a screen can quote it.
+ *
+ * These are readings, not rules: they are the output of `/api/liquidity` on one
+ * close, and they exist so the copy explaining the floor cannot drift from the
+ * evidence behind it. They must never be DERIVED from the floor's own constants
+ * — a screen that recomputed "the bar ran from 28 to 202" out of
+ * `minOpenInterestAbsolute` would report a different measurement the moment
+ * somebody changed the floor, which is the opposite of a measurement.
+ */
+export const LIQUIDITY_MEASUREMENT = {
+  asOf: "2026-09-01",     // the close the broker stamped on the counts
+  markets: 5,
+  contracts: 1654,        // inside the band the app builds in
+  reporting: 1035,        // ...and how many of those reported open interest
+  // The 40th-percentile bar near the money, at its thinnest and its busiest.
+  low: { market: "BOIL", bar: 28 },
+  high: { market: "UNG", bar: 202 },
+};
+
+/** The measurement, as one sentence. Generated so no screen can misquote it. */
+export const liquidityMeasurementNote = () => {
+  const M = LIQUIDITY_MEASUREMENT;
+  const spread = Math.round(M.high.bar / M.low.bar);
+  return `The recommendation is MEASURED, not guessed. On the ${M.asOf} close, /api/liquidity read ` +
+    `${M.reporting} strikes reporting open interest across all ${M.markets} markets: near the money the bar ` +
+    `ran from ${M.low.bar} contracts on ${M.low.market} to ${M.high.bar} on ${M.high.market}, a ${spread}-fold ` +
+    `spread, which is why one fixed number could not serve all ${M.markets}. That is one day's close and not a ` +
+    `law: re-read it as the market moves.`;
+};
 
 /* ---------------------------------------------------------------------------
  * THE LIQUIDITY FLOOR AS A SETTING THE USER OWNS.
@@ -419,7 +480,7 @@ export const liquiditySettingNote = (level, counts) => {
   if (c.skipped > 0) bits.push(`${c.skipped} not liquidity-checked (the feed reports no open interest)`);
   return `LIQUIDITY FLOOR: ${l.label.toUpperCase()}${l.recommended ? " — the app's recommendation" : ""}` +
     `${shown ? ` · ${shown}` : ""}${bits.length ? ` · ${bits.join(" · ")}` : ""}. ` +
-    `Both numbers are provisional until the five chains are measured.`;
+    `Measured against all ${LIQUIDITY_MEASUREMENT.markets} live chains on the ${LIQUIDITY_MEASUREMENT.asOf} close.`;
 };
 
 /** The one sentence shown when the liquidity floor could not be applied. */
