@@ -15,9 +15,11 @@ import {
   payoffBands, profitBands, gaugeArcs, unifiedLayout, UNIFIED_DETAIL_WIDTH,
   bandTakeaway, gaugeTakeaway, unifiedTakeaway, explainElement, chanceInProfit,
   BandThumbnail, Gauge, UnifiedPosition, exitPlanSentence, inTenPhrase,
+  OpenInterestStrip, oiBarHeights, oiCutAt, oiStripTakeaway, explainOiStrip,
 } from "./visuals.jsx";
 import { payoff } from "./engine.js";
 import { RULES } from "./rules.js";
+import { T } from "./theme.js";
 
 const ok = [], bad = [];
 const check = (name, fn) => { try { fn(); ok.push(name); } catch (e) { bad.push([name, e.message]); } };
@@ -249,5 +251,81 @@ check("the exit plan sentence comes from the rules, not from a component", () =>
 
 console.log(ok.map((n) => "  ok   " + n).join("\n"));
 if (bad.length) console.log(bad.map(([n, e]) => "  FAIL " + n + " — " + e).join("\n"));
+/* ============ THE OPEN-INTEREST STRIP — the floor, drawn ============ */
+
+check("one bar per strike, and the cut lands at the right rank", () => {
+  const peers = [0, 2, 5, 9, 14, 30, 60, 120, 400, 900];
+  const html = renderToStaticMarkup(<OpenInterestStrip peers={peers} threshold={10} width={200} />);
+  eq((html.match(/<rect/g) || []).length, peers.length, "every strike on the expiry is drawn");
+  eq(oiCutAt(peers, 10), 4, "0, 2, 5 and 9 are under the floor");
+});
+
+check("the strip is coloured by the floor, not by the order", () => {
+  const peers = [1, 3, 50, 900];
+  const html = renderToStaticMarkup(<OpenInterestStrip peers={peers} threshold={10} width={200} />);
+  eq((html.match(new RegExp(T.red, "g")) || []).length, 2, "the two under the floor are drawn as removed");
+  eq((html.match(new RegExp(T.green, "g")) || []).length, 2, "and the two above it as kept");
+});
+
+check("moving the floor moves the cut, and nothing else about the picture", () => {
+  const peers = [1, 3, 50, 900, 12, 7, 200, 33];
+  eq(oiCutAt(peers, 5), 2, "at 5");
+  eq(oiCutAt(peers, 40), 5, "at 40");
+  eq(oiCutAt(peers, 0), 0, "a floor of zero removes nothing");
+  const loose = renderToStaticMarkup(<OpenInterestStrip peers={peers} threshold={0} width={200} />);
+  const tight = renderToStaticMarkup(<OpenInterestStrip peers={peers} threshold={40} width={200} />);
+  eq((loose.match(/<rect/g) || []).length, (tight.match(/<rect/g) || []).length,
+    "the same strikes are drawn at every setting: only the cut moves");
+});
+
+check("a 66,000-to-1 range still draws a shape rather than two bars", () => {
+  // Real UNG numbers. Drawn linearly, everything but the tallest bar would be
+  // an invisible sliver, which is why the height is compressed.
+  const h = oiBarHeights([1, 8, 40, 300, 2000, 12000, 66130], 46);
+  eq(h.length, 7, "one height per strike");
+  if (!h.every((x, i) => i === 0 || x >= h[i - 1])) throw new Error("taller for busier, always");
+  if (!(h[0] >= 1)) throw new Error("the emptiest strike is still visible");
+  if (!(h[1] > h[0] * 1.5)) throw new Error("and the small ones stay distinguishable from each other");
+  if (!(h[h.length - 1] <= 46)) throw new Error("nothing draws outside the box");
+});
+
+check("a strike with nothing open is drawn, not skipped", () => {
+  const h = oiBarHeights([0, 0, 5], 40);
+  eq(h.length, 3, "three strikes");
+  if (!(h[0] >= 1)) throw new Error("zero open interest is a fact about a strike, not an absent strike");
+});
+
+check("no strikes means no chart, not a broken one", () => {
+  eq(renderToStaticMarkup(<OpenInterestStrip peers={[]} threshold={10} />), "", "nothing to draw");
+  eq(oiStripTakeaway([], 10), "", "and nothing to say");
+});
+
+check("the strip's takeaway is ONE generated sentence carrying the real numbers", () => {
+  const t = oiStripTakeaway([0, 2, 5, 9, 14, 30, 60, 120, 400, 900], 10, { expKey: "2026-10-16" });
+  oneSentence(t);
+  has(t, "10");           // the floor
+  has(t, "4");            // how many it removes
+  has(t, "900");          // what the busiest strike here carries
+  has(t, "2026-10-16");
+  const none = oiStripTakeaway([50, 60, 70], 10);
+  oneSentence(none);
+  has(none, "removes none");
+  // With the floor OFF, "carry at least 0 open contracts" is true and useless.
+  const off = oiStripTakeaway([0, 3, 70], 0, { expKey: "2026-10-16" });
+  oneSentence(off);
+  has(off, "No strike is removed");
+  has(off, "70");
+  if (/at least 0/.test(off)) throw new Error("the no-floor case must not quote a floor of zero");
+});
+
+check("every part of the strip explains itself on tap", () => {
+  const cut = explainOiStrip("cut", { threshold: 30, cut: 4, total: 11 });
+  has(cut, "30"); has(cut, "4");
+  has(cut, "placeholder");     // it names what a price on an untraded strike really is
+  has(explainOiStrip("kept", { threshold: 30, cut: 4, total: 11 }), "this expiry's own strikes");
+  has(explainOiStrip("elsewhere", { total: 11 }), "11");
+});
+
 console.log(`\n${ok.length} passed, ${bad.length} failed`);
 process.exit(bad.length ? 1 : 0);
+

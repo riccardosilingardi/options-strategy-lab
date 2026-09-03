@@ -6,15 +6,17 @@ import {
 import {
   RefreshCw, ShieldCheck, Save, Trash2, Layers, Radar, Box,
   FlaskConical, Briefcase, Plus, Plug, Send, ExternalLink, MessageSquare, FileText, Bell,
-  SlidersHorizontal, ArrowLeft, Sun, Moon,
+  SlidersHorizontal, ArrowLeft, Sun, Moon, AlertTriangle,
 } from "lucide-react";
-import { fetchAllNews, fetchWeather, ImpactTags, CopilotTab, ReportTab, OrderTicket, AlpacaDesk, scaleStrategy, probProfit, buildContext, GuardianPanel, PriceChart, ChainMatrix, OptionPanel, UnifiedView, taSignals, confluence, WhyThisTrade, Markdown } from "./pro.jsx";
-import { BandThumbnail, payoffBands, bandTakeaway, GaugeFigure, Gauge, CompareFigure, exitPlanSentence } from "./visuals.jsx";
+import { fetchAllNews, fetchWeather, ImpactTags, CopilotTab, ReportTab, OrderTicket, AlpacaDesk, scaleStrategy, probProfit, buildContext, GuardianPanel, ChainMatrix, OptionPanel, UnifiedView, taSignals, confluence, WhyThisTrade, Markdown } from "./pro.jsx";
+import { BandThumbnail, payoffBands, bandTakeaway, GaugeFigure, Gauge, CompareFigure, exitPlanSentence,
+  OpenInterestStrip, oiStripTakeaway, oiCutAt, explainOiStrip, useWidth } from "./visuals.jsx";
 import { fuseSignals, sentimentDirection, withSignalRank, compareCandidates, againstSignal, DRIVER_PRESETS, rankByDrivers, verdictNarrative } from "./signals.js";
 import { N as nCDF, bs as bsPrice, smile as smileIV, payoff as payoffExp, SEASONAL, SIGMA } from "./engine.js";
-import { parseOcc, buildOcc, fetchChain, hasOpenInterest, enrichOpenInterest, feedName, sourceNote, openInterestNote, oiProfile } from "./chain.js";
+import { parseOcc, buildOcc, fetchChain, hasOpenInterest, enrichOpenInterest, feedName, sourceNote, openInterestNote, oiProfile, expiryOpenInterest } from "./chain.js";
 import { T, themeName, setTheme, BADGE_SAFE } from "./theme.js";
-import { RULES, sizing, ruleBadge, takeProfitLabel, stopLossLabel, perTradeCapLabel, RULE_PILLS, NOTHING_TODAY, money, pctText, capitalSourceNote, perTradeLimitPhrase, qualityFloor, qualityFloorSentence, liquiditySkippedNote } from "./rules.js";
+import { RULES, sizing, ruleBadge, takeProfitLabel, stopLossLabel, perTradeCapLabel, RULE_PILLS, NOTHING_TODAY, money, pctText, capitalSourceNote, perTradeLimitPhrase, qualityFloor, qualityFloorSentence, liquiditySkippedNote,
+  LIQUIDITY_LEVELS, RECOMMENDED_LIQUIDITY, LIQUIDITY_MEASUREMENT, liquidityMeasurementNote, liquidityLevel, liquidityThreshold, looseningWarning, liquiditySettingNote, isLoosened, ordinal } from "./rules.js";
 import { evaluateTrade, gateSummary } from "./riskGate.js";
 import { DEMO, DEMO_BANNER, DEMO_TOOLTIP, DEMO_SEED_TICKERS, demoPositions } from "./demo.js";
 import { CapitalOnboarding, WizardOpen, FindOpportunities, WizardCandidates, ConfirmSteps, NothingToday, Card, Pill } from "./wizard.jsx";
@@ -66,6 +68,8 @@ const UNDERLYINGS = {
 // The BASKET is the five commodity ETFs this app is about, derived from the
 // table above rather than typed out a second time: SPY is here so the desk can
 // price a hedge, it is not something the guided flow goes looking for.
+// `src/basket.js` carries the same five for the Netlify function that cannot
+// import this file, and `src/chain.test.js` fails the build if the two drift.
 const BASKET = Object.keys(UNDERLYINGS).filter((k) => UNDERLYINGS[k].commodity);
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const NOW_MONTH = new Date().getMonth();
@@ -269,17 +273,24 @@ function analyze(legs, S, dte, baseIV, q) {
  * `cut` carries the name and the reason — because a list that silently
  * shortens itself is indistinguishable from a broken one.
  */
-function shortlistWithFloors(sent, S, step, strikes, dte, baseIV, q) {
+function shortlistWithFloors(sent, S, step, strikes, dte, baseIV, q, { peers = null, level = RECOMMENDED_LIQUIDITY } = {}) {
   const rows = [], cut = [];
   let oiSkipped = false;
+  const tally = { liquidity: 0, reward: 0, skipped: 0 };
   for (const p of buildPresets(sent, S, step, strikes)) {
     const a = analyze(p.legs, S, dte, baseIV, q);
-    const qf = qualityFloor({ openInterest: a.legPx.map((l) => l.oi), maxProfit: a.maxProfit, maxLoss: a.maxLoss });
-    if (!qf.liquidity.checked) oiSkipped = true;
+    const qf = qualityFloor({
+      openInterest: a.legPx.map((l) => l.oi), peerOpenInterest: peers, level,
+      maxProfit: a.maxProfit, maxLoss: a.maxLoss,
+    });
+    if (!qf.liquidity.checked) { oiSkipped = true; tally.skipped++; }
     if (qf.pass) rows.push({ p, a });
-    else cut.push({ name: p.name, reasons: qf.reasons });
+    else {
+      if (!qf.liquidity.pass) tally.liquidity++; else tally.reward++;
+      cut.push({ name: p.name, reasons: qf.reasons, why: !qf.liquidity.pass ? "liquidity" : "reward" });
+    }
   }
-  return { rows, cut, oiSkipped };
+  return { rows, cut, oiSkipped, tally: { ...tally, kept: rows.length } };
 }
 
 /* ============================== MONTE CARLO + BACKTEST STORICO ============================== */
@@ -411,7 +422,7 @@ const DemoBanner = () => (DEMO ? (
 const Lbl = ({ children }) => <div style={{ ...mono, fontSize: 10, letterSpacing: "0.15em", color: T.amber }}>{children}</div>;
 /* ============================== IS THE LIQUIDITY FLOOR RIGHT? ==============================
  *
- * `RULES.minOpenInterestPerLeg` was chosen from a handful of legs seen once in
+ * The liquidity floor's two numbers were chosen from a handful of legs seen once in
  * a live walkthrough. That is evidence, not a measurement, and it cannot be
  * settled from inside the code: it needs chains nobody here can fetch. So the
  * app reports what it sees. This panel reads every chain the session has
@@ -424,9 +435,145 @@ const Lbl = ({ children }) => <div style={{ ...mono, fontSize: 10, letterSpacing
  * open interest is named as such rather than drawn as a row of zeros — the same
  * rule `qualityFloor()` applies when it skips.
  */
-function OpenInterestReadout({ chains, floor }) {
+/* ---------------------------------------------------------------------------
+ * THE LIQUIDITY FLOOR, AS A CONTROL RATHER THAN AN ASSERTION.
+ *
+ * The app recommends and the user decides. Three things this has to do, and it
+ * is not the filter if it does not do all three:
+ *
+ *   SAY WHICH SETTING PRODUCED WHAT IS ON SCREEN, always and on the same screen
+ *   as the list. A filtered list with no visible filter is a list that lies by
+ *   omission about what it left out.
+ *
+ *   SHOW THE CONSEQUENCE AS IT MOVES. Each setting carries the count that
+ *   setting produces — how many survive, and how many go for liquidity and how
+ *   many for reward-to-risk — so moving the control is an experiment with a
+ *   visible result rather than a guess.
+ *
+ *   NAME WHAT LOOSENING LETS BACK IN. Not "be careful": quotes on contracts
+ *   nobody trades, in those words (`looseningWarning` in src/rules.js).
+ *
+ * It also prints the THRESHOLD IN CONTRACTS for the expiry on screen and says
+ * which half of the floor bound — the chain's own distribution or the absolute
+ * minimum underneath it. A relative floor that will not show its own arithmetic
+ * is worse than the fixed number it replaced.
+ * ------------------------------------------------------------------------- */
+function LiquidityFilter({ levelId, onLevel, previews, threshold, ticker, expKey, peers, feed }) {
+  const level = liquidityLevel(levelId);
+  const [open, setOpen] = useState(null);
+  // The strip is drawn at the panel's own width, so it fits a 390px phone and
+  // grows on a desk screen rather than being cropped or letterboxed. The ref
+  // goes on a wrapper that renders in EVERY state (see below): a ResizeObserver
+  // handed a node that only exists once the data arrives observes nothing, and
+  // the width stays at its fallback for the life of the component.
+  const [wrapRef, panelW] = useWidth(320);
+  const stripW = Math.max(180, panelW - 2);
+  const here = previews?.[levelId];
+  const warn = looseningWarning(level);
+  const t = threshold;
+  return (
+    <Panel style={{ marginTop: 12 }}>
+      <Lbl>LIQUIDITY FLOOR · YOUR SETTING, THE APP{"\u2019"}S RECOMMENDATION MARKED</Lbl>
+      <div style={{ ...sansUI, fontSize: 13, color: T.body, lineHeight: 1.55, marginTop: 8 }}>
+        A leg is judged against the other strikes on its own expiry, not against one number picked for every
+        market: {RULES.minOpenInterestAbsolute} open contracts means one thing on a busy board and another on a
+        quiet one. Underneath the relative test sits an absolute minimum, so a chain where nothing trades cannot
+        pass itself by being uniformly empty.
+      </div>
+
+      <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
+        {LIQUIDITY_LEVELS.map((l) => {
+          const on = l.id === levelId;
+          const col = l.id === "off" ? T.red : l.recommended ? T.green : T.blue;
+          const pv = previews?.[l.id];
+          return (
+            <button key={l.id} onClick={() => onLevel(l.id)}
+              style={{
+                ...mono, fontSize: 11, padding: "8px 10px", borderRadius: 8, cursor: "pointer",
+                minHeight: 44, textAlign: "left", flex: "1 1 44%",
+                background: on ? col : "transparent", color: on ? T.onAccent : col,
+                border: `1.5px solid ${col}`, fontWeight: 700,
+              }}>
+              {l.label.toUpperCase()}{l.recommended ? " \u2713" : ""}
+              <span style={{ display: "block", fontWeight: 400, fontSize: 9.5, marginTop: 2, opacity: 0.9 }}>
+                {l.recommended ? "recommended \u00b7 " : ""}
+                {pv ? `${pv.kept} of ${pv.total} shown` : "\u2014"}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div style={{ ...sansUI, fontSize: 12.5, color: T.mut, lineHeight: 1.5, marginTop: 10 }}>{level.blurb}</div>
+
+      {/* THE FLOOR, DRAWN. Every strike on this expiry from the emptiest to the
+          busiest, and the line where the setting above cuts. It sits directly
+          under the buttons because the point is cause and effect: move the
+          setting, watch the line move. Three paragraphs of prose could not
+          explain this; the picture does it at a glance. */}
+      {/* The wrapper is unconditional so the ResizeObserver has a node on mount;
+          only its contents wait for the chain. */}
+      <div ref={wrapRef} style={{ marginTop: 12 }}>
+      {peers?.length > 0 && (
+        <div>
+          <OpenInterestStrip peers={peers} threshold={t?.threshold ?? 0} expKey={expKey}
+            width={stripW} onExplain={setOpen} />
+          <div style={{ ...sansUI, fontSize: 12.5, color: T.body, lineHeight: 1.5, marginTop: 6 }}>
+            {oiStripTakeaway([...peers].sort((a, b) => a - b), t?.threshold ?? 0, { expKey })}
+          </div>
+          {open && (
+            <div style={{ marginTop: 8, padding: "9px 11px", background: T.bg, border: `1px solid ${T.blue}55`, borderLeft: `3px solid ${T.blue}`, borderRadius: 8 }}>
+              <div style={{ ...sansUI, fontSize: 12.5, color: T.body, lineHeight: 1.5 }}>
+                {explainOiStrip(open, { threshold: t?.threshold ?? 0, cut: oiCutAt(peers, t?.threshold ?? 0), total: peers.length })}
+              </div>
+              <button onClick={() => setOpen(null)} style={{ ...mono, fontSize: 10, marginTop: 6, background: "transparent", border: "none", color: T.blue, cursor: "pointer", padding: 0 }}>close</button>
+            </div>
+          )}
+        </div>
+      )}
+      </div>
+
+      {/* THE CONSEQUENCE, LIVE. Not a promise about the setting: the count this
+          setting produces on the list directly below it. */}
+      <div style={{ ...mono, fontSize: 11, color: T.ink, marginTop: 8, lineHeight: 1.6, padding: "8px 10px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 6 }}>
+        {here
+          ? `${here.kept} of ${here.total} structures on ${ticker} are shown at this setting` +
+            `${here.liquidity ? ` \u00b7 ${here.liquidity} removed because a leg is too thinly traded` : ""}` +
+            `${here.reward ? ` \u00b7 ${here.reward} removed for paying too little per dollar at risk` : ""}` +
+            `${here.skipped ? ` \u00b7 ${here.skipped} not liquidity-checked at all` : ""}.`
+          : `Nothing is priced on ${ticker} yet, so there is nothing for this setting to filter.`}
+      </div>
+
+      {/* THE ARITHMETIC, on the expiry actually on screen. */}
+      <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 8, lineHeight: 1.6 }}>
+        {!(t && t.peers > 0)
+          ? `${feed || "This feed"} reports no open interest for ${ticker} ${expKey ? `on ${expKey}` : ""}, so the liquidity floor is SKIPPED rather than applied \u2014 nothing here was rejected for it.`
+          : level.percentile <= 0 && level.absolute <= 0
+            ? `Nothing on ${expKey} was removed for liquidity at this setting. ${feed || "The feed"} prices ${t.peers} strikes there and every one of them is on offer, whatever is open on it.`
+            : t.basis === "relative"
+              ? `On ${expKey} that works out at ${t.threshold} open contracts per leg \u2014 the ${ordinal(level.percentile * 100)} percentile of the ${t.peers} strikes ${feed || "the feed"} prices there.`
+              : `On ${expKey} the ${t.absolute}-contract absolute minimum is what binds: ${
+                  t.relative == null
+                    ? `only ${t.peers} strike${t.peers === 1 ? "" : "s"} there report open interest, too few to take a percentile of`
+                    : `the ${ordinal(level.percentile * 100)} percentile of the ${t.peers} strikes there is only ${t.relative}`}.`}
+      </div>
+
+      {warn && (
+        <div style={{ ...sansUI, fontSize: 12.5, color: T.red, marginTop: 10, lineHeight: 1.55, padding: "9px 11px", background: `${T.red}0f`, border: `1px solid ${T.red}66`, borderRadius: 6 }}>
+          <AlertTriangle size={13} style={{ verticalAlign: "-2px", marginRight: 5 }} />{warn}
+        </div>
+      )}
+
+      <div style={{ ...mono, fontSize: 9.5, color: T.dim, marginTop: 8, lineHeight: 1.6 }}>
+        {liquidityMeasurementNote()}
+      </div>
+    </Panel>
+  );
+}
+
+function OpenInterestReadout({ chains, floor, percentile = 0, level }) {
   const rows = Object.entries(chains || {})
-    .map(([tk, c]) => ({ tk, feed: feedName(c) || "the feed", p: oiProfile(c, { floor }) }))
+    .map(([tk, c]) => ({ tk, feed: feedName(c) || "the feed", p: oiProfile(c, { floor, percentile }) }))
     .filter((r) => r.p);
   if (!rows.length) return null;
   const num = (x) => (x == null ? "\u2014" : String(Math.round(x)));
@@ -435,9 +582,9 @@ function OpenInterestReadout({ chains, floor }) {
   const th = { padding: "4px 8px" };
   return (
     <Panel style={{ marginTop: 10 }}>
-      <Lbl>3 · WHAT THESE CHAINS ACTUALLY CARRY — IS {floor} THE RIGHT FLOOR?</Lbl>
+      <Lbl>3 · WHAT THESE CHAINS ACTUALLY CARRY — IS THIS THE RIGHT FLOOR?</Lbl>
       <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 8, lineHeight: 1.6 }}>
-        {`The liquidity floor rejects any leg with fewer than ${floor} contracts open. Whether ${floor} is the right number is a question about real chains, not about the code, so here is what the ${rows.length === 1 ? "one chain" : "chains"} loaded in this session ${rows.length === 1 ? "contains" : "contain"}. The row that matters is `}
+        {`The floor in force rejects a leg below the ${ordinal(percentile * 100)} percentile of its own expiry, and never accepts one under ${floor} open contracts. Whether those are the right numbers is a question about real chains, not about the code, so here is what the ${rows.length === 1 ? "one chain" : "chains"} loaded in this session ${rows.length === 1 ? "contains" : "contain"}. The row that matters is `}
         <b>near the money</b>{" (within 10% of spot): that is where these structures get built."}
       </div>
       <div style={{ overflowX: "auto", marginTop: 10 }}>
@@ -449,6 +596,7 @@ function OpenInterestReadout({ chains, floor }) {
               <th style={th}>MEDIAN OI</th>
               <th style={th}>90th</th>
               <th style={th}>MAX</th>
+              <th style={th}>{ordinal(percentile * 100)}</th>
               <th style={{ ...th, paddingRight: 0 }}>CLEAR {floor}</th>
             </tr>
           </thead>
@@ -461,6 +609,7 @@ function OpenInterestReadout({ chains, floor }) {
                   <td style={{ padding: "5px 8px", color: T.ink }}>{num(p.near.median)}</td>
                   <td style={{ padding: "5px 8px", color: T.mut }}>{num(p.near.p90)}</td>
                   <td style={{ padding: "5px 8px", color: T.mut }}>{num(p.near.max)}</td>
+                  <td style={{ padding: "5px 8px", color: T.violet }}>{num(p.near.atPercentile)}</td>
                   <td style={{ padding: "5px 0 5px 8px", color: p.near.share >= 0.5 ? T.green : T.red }}>{pct(p.near.share)}</td>
                 </tr>
                 <tr style={{ textAlign: "right", color: T.dim }}>
@@ -469,13 +618,14 @@ function OpenInterestReadout({ chains, floor }) {
                   <td style={{ padding: "0 8px 6px" }}>{num(p.all.median)}</td>
                   <td style={{ padding: "0 8px 6px" }}>{num(p.all.p90)}</td>
                   <td style={{ padding: "0 8px 6px" }}>{num(p.all.max)}</td>
+                  <td style={{ padding: "0 8px 6px" }}>{num(p.all.atPercentile)}</td>
                   <td style={{ padding: "0 0 6px 8px" }}>{pct(p.all.share)}</td>
                 </tr>
               </React.Fragment>
             ) : (
               <tr key={tk} style={{ borderTop: `1px solid ${T.line}` }}>
                 <td style={{ padding: "5px 8px 5px 0", color: T.ink, fontWeight: 700 }}>{tk}</td>
-                <td colSpan={5} style={{ padding: "5px 8px", color: T.dim }}>
+                <td colSpan={6} style={{ padding: "5px 8px", color: T.dim }}>
                   {`${feed} does not report open interest for these ${p.total} contracts — the floor is skipped, not failed.`}
                 </td>
               </tr>
@@ -486,7 +636,7 @@ function OpenInterestReadout({ chains, floor }) {
       <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 8, lineHeight: 1.6 }}>
         {reporting.length === 0
           ? "No loaded feed reports open interest yet, so there is nothing here to judge the floor against. Open interest arrives after the chain, and only from the broker's contract list."
-          : `Read it this way: if "clear ${floor}" stays high near the money, the floor is removing untraded strikes and nothing else. If it falls towards zero on a market you want to trade, ${floor} is too high for that market — and it is one line in src/rules.js. Every number here is a reported count, never an estimate.`}
+          : `Read it this way. The ${ordinal(percentile * 100)} column is what the RELATIVE half of the floor asks for on that set, and it moves with the market: where it sits above ${floor} the chain's own distribution is doing the work, and where it sits below, the ${floor}-contract minimum underneath is what bound. If "clear ${floor}" falls towards zero near the money on a market worth trading, the absolute minimum is too high for it. Every number here is a reported count, never an estimate. The floor's two numbers were set from exactly this reading, taken across all ${LIQUIDITY_MEASUREMENT.markets} chains on the ${LIQUIDITY_MEASUREMENT.asOf} close; /api/liquidity takes it again.`}
       </div>
     </Panel>
   );
@@ -613,6 +763,14 @@ export default function OptionsStrategyLab() {
   const [replay, setReplay] = useState(null);
   const [nf, setNf] = useState({ tk: "ALL", kind: "all", q: "", days: 7 });
   const [multi, setMulti] = useState({ sel: ["SOYB", "CORN", "UNG"], busy: false, res: null, err: null, dteT: 45, senMode: "auto" });
+  // THE LIQUIDITY FLOOR IS A SETTING, NOT AN ASSERTION. The app recommends and
+  // the user decides; every list filtered by it says which setting produced it,
+  // and loosening it carries a warning naming what comes back (src/rules.js).
+  const [liqLevelId, setLiqLevelId] = useState(RECOMMENDED_LIQUIDITY.id);
+  // The guided run's narrative is folded to its first paragraph on arrival. It
+  // is the last thing PR #12 handed forward that was code rather than access.
+  const [verdictOpen, setVerdictOpen] = useState(false);
+  const liqLevel = liquidityLevel(liqLevelId);
   // FAULT A: risk and horizon start NULL and stay null until the user answers.
   // The old defaults ($250, 45 days) were quoted back on the verdict screen as
   // "the $250 you said you were willing to lose" to a user who had said nothing,
@@ -889,9 +1047,28 @@ export default function OptionsStrategyLab() {
   const A = useMemo(() => (spot && legs.length ? analyze(legs, spot, dte, iv, q) : null), [legs, spot, dte, iv, q]);
   // The Shortlist, already past the quality floors. Computed here rather than
   // inside the render so the filtered-out list and the rows come from one call.
+  // Every known open-interest count on the expiry being shown: the peer set the
+  // liquidity floor judges each leg against, so a strike is compared with its
+  // own neighbours rather than with a number chosen for another market.
+  const expiryOI = useMemo(() => (chain && expKey ? expiryOpenInterest(chain, expKey) : []), [chain, expKey]);
   const shortlist = useMemo(
-    () => (spot ? shortlistWithFloors(sentiment, spot, U.step, expStrikes, dte, iv, q) : { rows: [], cut: [], oiSkipped: false }),
-    [sentiment, spot, U.step, expStrikes, dte, iv, q]);
+    () => (spot
+      ? shortlistWithFloors(sentiment, spot, U.step, expStrikes, dte, iv, q, { peers: expiryOI, level: liqLevel })
+      : { rows: [], cut: [], oiSkipped: false, tally: { kept: 0, liquidity: 0, reward: 0, skipped: 0 } }),
+    [sentiment, spot, U.step, expStrikes, dte, iv, q, expiryOI, liqLevel]);
+  // WHAT EVERY SETTING WOULD DO TO THIS LIST, so moving the control shows its
+  // own consequence instead of promising one. Four runs of a pure function over
+  // eight presets: cheap, and the only honest way to label the buttons.
+  const liqPreview = useMemo(() => {
+    if (!spot) return null;
+    const out = {};
+    for (const l of LIQUIDITY_LEVELS) {
+      const r = shortlistWithFloors(sentiment, spot, U.step, expStrikes, dte, iv, q, { peers: expiryOI, level: l });
+      out[l.id] = { ...r.tally, total: r.rows.length + r.cut.length };
+    }
+    return out;
+  }, [sentiment, spot, U.step, expStrikes, dte, iv, q, expiryOI]);
+  const liqThreshold = useMemo(() => liquidityThreshold(expiryOI, liqLevel), [expiryOI, liqLevel]);
   const oiGrid = useMemo(() => oiGridFromChain(chain, spot), [chain, spot]);
   // A chain that is still being fetched is not a chain that failed. `busy` is
   // the ticker of the request in flight ("all" during a refresh-all), so the
@@ -1090,7 +1267,7 @@ export default function OptionsStrategyLab() {
     try {
       const out = [];
       // What the quality floors removed, so an empty or short result can say why.
-      const cutFloors = { n: 0, markets: new Set(), oiSkipped: new Set() };
+      const cutFloors = { n: 0, liquidity: 0, reward: 0, markets: new Set(), oiSkipped: new Set() };
       // le barre servono al fattore tecnico: caricale prima di fondere i segnali
       const barsMap = Object.fromEntries(await Promise.all(multi.sel.map(async (tk) => [tk, await loadBars(tk)])));
       const fz = Object.fromEntries(multi.sel.map((tk) => [tk, fuseFor(tk, barsMap[tk] ?? barsCache[tk])]));
@@ -1108,13 +1285,23 @@ export default function OptionsStrategyLab() {
         const sSet = new Set([...Object.keys(c.byExp[ek].calls), ...Object.keys(c.byExp[ek].puts)].map(Number));
         const strikes = Array.from(sSet).sort((a, b) => a - b);
         const qq = makeQuote(c, ek);
+        // The peer set for THIS expiry on THIS market: the floor is relative to
+        // the chain it is judging, so each market is measured against itself.
+        const peers = expiryOpenInterest(c, ek);
         for (const pr of buildPresets(sent, sp, getU(tk).step, strikes)) {
           const a = analyze(pr.legs, sp, d2, getU(tk).iv, qq);
           if (!Number.isFinite(a.maxProfit) || a.maxProfit <= 0 || !Number.isFinite(a.maxLoss)) continue;
           // Same floors as the Shortlist and the wizard, from the same function.
-          const qf = qualityFloor({ openInterest: a.legPx.map((l) => l.oi), maxProfit: a.maxProfit, maxLoss: a.maxLoss });
+          const qf = qualityFloor({
+            openInterest: a.legPx.map((l) => l.oi), peerOpenInterest: peers, level: liqLevel,
+            maxProfit: a.maxProfit, maxLoss: a.maxLoss,
+          });
           if (!qf.liquidity.checked) cutFloors.oiSkipped.add(tk);
-          if (!qf.pass) { cutFloors.n++; cutFloors.markets.add(tk); continue; }
+          if (!qf.pass) {
+            cutFloors.n++; cutFloors.markets.add(tk);
+            if (!qf.liquidity.pass) cutFloors.liquidity++; else cutFloors.reward++;
+            continue;
+          }
           const ivA = a.legPx.reduce((x, y) => x + y.iv, 0) / Math.max(1, a.legPx.length);
           const pop = probProfit(a.curve, sp, ivA, d2) || 0;
           const unit = Math.abs(a.maxLoss);
@@ -1130,7 +1317,10 @@ export default function OptionsStrategyLab() {
         return withSignalRank({ ...o, ev100: pr ? pr.ev100 : -999, tag: pr?.tag }, fz[o.tk], sentimentDirection(o.sent));
       }).sort(compareCandidates);
       setMulti((m) => ({ ...m, busy: false, res: ranked.slice(0, 8),
-        floors: { n: cutFloors.n, markets: [...cutFloors.markets], oiSkipped: [...cutFloors.oiSkipped] } }));
+        floors: {
+          n: cutFloors.n, liquidity: cutFloors.liquidity, reward: cutFloors.reward,
+          markets: [...cutFloors.markets], oiSkipped: [...cutFloors.oiSkipped], level: liqLevel,
+        } }));
     } catch (e) { setMulti((m) => ({ ...m, busy: false, err: String(e.message || e) })); }
   };
 
@@ -1341,6 +1531,7 @@ export default function OptionsStrategyLab() {
         const sSet = new Set([...Object.keys(c.byExp[ek].calls), ...Object.keys(c.byExp[ek].puts)].map(Number));
         const strikes = Array.from(sSet).sort((a, b) => a - b);
         const qq = makeQuote(c, ek);
+        const peers = expiryOpenInterest(c, ek);
         examined.push({ tk, fused: r.fused, spot: sp, dte: d2 });
         loadBars(tk);
         // candidati da ENTRAMBE le famiglie: direzionale (sentiment scanner) + intervallo (neutral)
@@ -1363,7 +1554,10 @@ export default function OptionsStrategyLab() {
             // ticket that pays $15 for $86 at risk. Neither becomes a road, and
             // the tally below is what lets the refusal screen say WHICH floor
             // emptied the board rather than shrugging at an empty page.
-            const qf = qualityFloor({ openInterest: a.legPx.map((l) => l.oi), maxProfit: a.maxProfit, maxLoss: a.maxLoss });
+            const qf = qualityFloor({
+              openInterest: a.legPx.map((l) => l.oi), peerOpenInterest: peers, level: liqLevel,
+              maxProfit: a.maxProfit, maxLoss: a.maxLoss,
+            });
             if (!qf.liquidity.checked) floors.oiUnavailable.add(tk);
             if (!qf.pass) {
               if (!qf.liquidity.pass) floors.liquidity++;
@@ -1391,7 +1585,7 @@ export default function OptionsStrategyLab() {
           return stop([{
             id: "quality-floor",
             text: NOTHING_TODAY.belowQualityFloor({
-              liquidity: floors.liquidity, reward: floors.reward, markets: [...floors.markets],
+              liquidity: floors.liquidity, reward: floors.reward, markets: [...floors.markets], level: liqLevel,
             }),
           }]);
         }
@@ -2097,7 +2291,7 @@ export default function OptionsStrategyLab() {
             </div>
             <div style={{ ...sansUI, fontSize: 14, color: T.mut, lineHeight: 1.55, marginTop: 4 }}>
               Every market in the basket, read by the four factors, and — once you search — what each one
-              actually produced after the quality floors. {qualityFloorSentence()}
+              actually produced after the quality floors. {qualityFloorSentence(liqLevel)}
             </div>
 
             {/* What the guided run examined, in English. It used to sit on the
@@ -2106,11 +2300,31 @@ export default function OptionsStrategyLab() {
             {guided && verdict.length > 0 && (
               <Panel style={{ marginTop: 12 }}>
                 <Lbl>WHAT I LOOKED AT · FROM YOUR ANSWERS</Lbl>
+                {/* A FOLD IS NOT A DELETION. This narrative is the app saying
+                    what it actually examined, so none of it is for cutting —
+                    but on a 390px phone it is roughly two screens of text
+                    standing between the user and the markets underneath it, and
+                    a wall of prose at the top of a step reads as something to
+                    scroll past rather than something to read. The first
+                    paragraph stays; the rest opens on a tap that SAYS how much
+                    is behind it, so nobody has to guess whether it is worth it. */}
                 <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
-                  {verdict.map((para, i) => (
+                  {(verdictOpen ? verdict : verdict.slice(0, 1)).map((para, i) => (
                     <p key={i} style={{ ...sansUI, fontSize: 14, color: T.body, lineHeight: 1.6, margin: 0 }}>{para}</p>
                   ))}
                 </div>
+                {verdict.length > 1 && (
+                  <button onClick={() => setVerdictOpen((v) => !v)}
+                    style={{
+                      ...mono, fontSize: 11, marginTop: 10, minHeight: 40, padding: "8px 12px", cursor: "pointer",
+                      background: "transparent", color: T.blue, border: `1px solid ${T.blue}`, borderRadius: 6,
+                      width: "100%", textAlign: "left", fontWeight: 700,
+                    }}>
+                    {verdictOpen
+                      ? "\u2191 Show less"
+                      : `\u2193 Read the rest \u2014 ${verdict.length - 1} more paragraph${verdict.length === 2 ? "" : "s"} on what was examined`}
+                  </button>
+                )}
                 <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 8 }}>
                   {candidates.length} road{candidates.length === 1 ? "" : "s"} came out of it, and they are waiting on step 2.
                 </div>
@@ -2136,12 +2350,21 @@ export default function OptionsStrategyLab() {
                   return (
                     <div key={r.tk} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: T.bg, border: `1px solid ${ticker === r.tk ? T.amber : T.line}`, borderRadius: 7, flexWrap: "wrap" }}>
                       <span style={{ ...mono, fontSize: 11, color: T.dim, width: 18 }}>#{i + 1}</span>
-                      {/* The shape of the best thing found here, at a glance. */}
-                      {best && (
-                        <BandThumbnail bands={payoffBands({ legs: best.legs, entryNet: best.entryNet, spot: best.spot })}
-                          bars={barsCache[r.tk] || []} width={110} height={40}
-                          title={bandTakeaway(payoffBands({ legs: best.legs, entryNet: best.entryNet, spot: best.spot }), { ticker: r.tk })} />
-                      )}
+                      {/* THE STRUCTURE, NOT THE UNDERLYING. The two visuals a
+                          list row gets are the payoff thumbnail and the gauge,
+                          and both are cut from ONE payoffBands() result so they
+                          cannot disagree about the same trade. The candles stay
+                          on Build, where there is room to read them. */}
+                      {best && (() => {
+                        const bb = payoffBands({ legs: best.legs, entryNet: best.entryNet, spot: best.spot });
+                        return (
+                          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                            <BandThumbnail bands={bb} bars={barsCache[r.tk] || []} width={110} height={40}
+                              title={bandTakeaway(bb, { ticker: r.tk })} />
+                            <Gauge bands={bb} size={86} ticker={r.tk} />
+                          </div>
+                        );
+                      })()}
                       <div style={{ flex: 1, minWidth: 150 }}>
                         <div style={{ fontWeight: 700, color: T.ink, fontSize: 14 }}>{r.tk} <span style={{ color: T.dim, fontWeight: 400, fontSize: 11 }}>{r.name}</span></div>
                         <div style={{ ...mono, fontSize: 10.5, color: T.mut }}>
@@ -2211,19 +2434,36 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                     {multi.res.length === 0 && (
                       <div style={{ ...mono, fontSize: 11.5, color: T.mut, lineHeight: 1.6 }}>
                         {multi.floors?.n
-                          ? `Nothing on ${multi.floors.markets.join(", ")} clears the quality floors today — ${multi.floors.n} structure${multi.floors.n === 1 ? " was" : "s were"} built and filtered out. ${qualityFloorSentence()}`
+                          ? `Nothing on ${multi.floors.markets.join(", ")} clears the quality floors today — ${multi.floors.n} structure${multi.floors.n === 1 ? " was" : "s were"} built and filtered out. ${qualityFloorSentence(multi.floors.level || liqLevel)}`
                           : "Nothing fits your budget on the markets you picked."}
                       </div>
                     )}
                     {multi.res.length > 0 && multi.floors?.n > 0 && (
                       <div style={{ ...mono, fontSize: 10, color: T.amber, lineHeight: 1.6 }}>
                         {multi.floors.n} structure{multi.floors.n === 1 ? "" : "s"} on {multi.floors.markets.join(", ")} did
-                        not clear the quality floors and {multi.floors.n === 1 ? "is" : "are"} not listed. {qualityFloorSentence()}
+                        not clear the quality floors and {multi.floors.n === 1 ? "is" : "are"} not listed. {qualityFloorSentence(multi.floors.level || liqLevel)}
                       </div>
                     )}
                     {multi.floors?.oiSkipped?.length > 0 && (
                       <div style={{ ...mono, fontSize: 10, color: T.dim, lineHeight: 1.6 }}>
                         {liquiditySkippedNote(`the feed for ${multi.floors.oiSkipped.join(", ")}`)}
+                      </div>
+                    )}
+                    {/* WHICH SETTING PRODUCED THIS SCAN. Not the setting in
+                        force now: the one the scan actually ran at, because a
+                        list produced at a different floor answers a different
+                        question, and saying otherwise would be the same lie by
+                        omission the filter exists to stop. */}
+                    <div style={{ ...mono, fontSize: 10, color: isLoosened(multi.floors?.level || liqLevel) ? T.red : T.dim, lineHeight: 1.6 }}>
+                      {liquiditySettingNote(multi.floors?.level || liqLevel, {
+                        kept: multi.res.length, liquidity: multi.floors?.liquidity, reward: multi.floors?.reward,
+                      })}
+                      {(multi.floors?.level || liqLevel).id !== liqLevel.id
+                        ? ` The setting has changed since this ran \u2014 search again to see it at ${liqLevel.label.toUpperCase()}.` : ""}
+                    </div>
+                    {looseningWarning(multi.floors?.level || liqLevel) && (
+                      <div style={{ ...sansUI, fontSize: 12, color: T.red, lineHeight: 1.5 }}>
+                        {looseningWarning(multi.floors?.level || liqLevel)}
                       </div>
                     )}
                     {multi.res.some((r) => r.conflict) && (
@@ -2234,7 +2474,16 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                     {multi.res.map((r, i) => (
                       <div key={i} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "8px 10px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7 }}>
                         <span style={{ ...mono, fontSize: 10, color: T.dim, width: 16 }}>#{i + 1}</span>
-                        <BandThumbnail bands={payoffBands({ legs: r.legs, entryNet: r.a.entry, spot: r.spot })} bars={barsCache[r.tk] || []} width={130} height={34} title={bandTakeaway(payoffBands({ legs: r.legs, entryNet: r.a.entry, spot: r.spot }), { ticker: r.tk })} />
+                        {(() => {
+                          const bb = payoffBands({ legs: r.legs, entryNet: r.a.entry, spot: r.spot });
+                          return (
+                            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                              <BandThumbnail bands={bb} bars={barsCache[r.tk] || []} width={130} height={34}
+                                title={bandTakeaway(bb, { ticker: r.tk })} />
+                              <Gauge bands={bb} size={80} ticker={r.tk} />
+                            </div>
+                          );
+                        })()}
                         <div style={{ flex: 1, minWidth: 140 }}>
                           <div style={{ fontWeight: 700, color: T.ink, fontSize: 12.5 }}>{r.tk} · {r.name}</div>
                           <div style={{ ...mono, fontSize: 10, color: T.dim }}>{r.expKey} · {r.dte} DTE · ×{r.n}</div>
@@ -2387,6 +2636,14 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
               </span>
             </button>
 
+            {/* THE FLOOR IS THE USER'S SETTING. It sits directly above the list
+                it filters, because a filter written anywhere else is a filter
+                the reader has to be told about rather than one they can see. */}
+            <LiquidityFilter
+              levelId={liqLevelId} onLevel={setLiqLevelId} previews={liqPreview}
+              threshold={liqThreshold} ticker={ticker} expKey={expKey}
+              peers={expiryOI} feed={feedName(chain)} />
+
             <Panel style={{ marginTop: 10 }}>
               <Lbl>2 · {SENT.label.toUpperCase()} STRATEGIES — {ticker} · PRICED FROM THE LIVE CHAIN</Lbl>
               {/* THE QUALITY FLOORS, before anything is drawn. A structure that
@@ -2405,7 +2662,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
               {shortlist.rows.length === 0 && (
                 <div style={{ ...mono, fontSize: 11, color: T.red, marginTop: 8, lineHeight: 1.6 }}>
                   Nothing on {ticker} clears the quality floors at this expiry today. That is an answer, not an
-                  empty screen: {qualityFloorSentence()}
+                  empty screen: {qualityFloorSentence(liqLevel)}
                 </div>
               )}
               {shortlist.oiSkipped && (
@@ -2480,7 +2737,12 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   );
                 })}
               </div>
-              <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 8 }}>Budget is the most you will pay, taken from live {feedName(chain) || "market"} prices. For trades where you receive money up front, the limit becomes the capital tied up instead. Chance is the probability of ending in profit at expiry. {limits.answered ? "Your" : "The suggested"} per-trade limit: {money(limits.perTradeLimit)} ({perTradeCapLabel()}). {qualityFloorSentence()}</div>
+              {/* WHICH SETTING PRODUCED THIS LIST. On the same screen as the
+                  list, in every state of it, including the empty one. */}
+              <div style={{ ...mono, fontSize: 10, color: isLoosened(liqLevel) ? T.red : T.dim, marginTop: 10, lineHeight: 1.6 }}>
+                {liquiditySettingNote(liqLevel, shortlist.tally)}
+              </div>
+              <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 8 }}>Budget is the most you will pay, taken from live {feedName(chain) || "market"} prices. For trades where you receive money up front, the limit becomes the capital tied up instead. Chance is the probability of ending in profit at expiry. {limits.answered ? "Your" : "The suggested"} per-trade limit: {money(limits.perTradeLimit)} ({perTradeCapLabel()}). {qualityFloorSentence(liqLevel)}</div>
             </Panel>
 
             {/* WHAT THE WIDE SEARCH FOUND ON THIS MARKET. The multi-market
@@ -2532,6 +2794,19 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                     const cand = candidateFromSaved(sv);
                     return (
                       <div key={sv.id} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "8px 10px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7 }}>
+                        {/* A kept row is a candidate too, so it gets the same
+                            pair. Without them it was a line of text: the one
+                            list where you cannot see what you kept. */}
+                        {cand && Number.isFinite(cand.spot) && (() => {
+                          const bb = payoffBands({ legs: sv.legs, entryNet: cand.entryNet ?? 0, spot: cand.spot });
+                          return (
+                            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                              <BandThumbnail bands={bb} bars={barsCache[sv.ticker] || []} width={110} height={34}
+                                title={bandTakeaway(bb, { ticker: sv.ticker })} />
+                              <Gauge bands={bb} size={80} ticker={sv.ticker} />
+                            </div>
+                          );
+                        })()}
                         <div style={{ flex: 1, minWidth: 150 }}>
                           <div style={{ fontWeight: 700, color: T.ink, fontSize: 12.5 }}>{sv.ticker} · {sv.name}</div>
                           <div style={{ ...mono, fontSize: 10, color: T.dim }}>{legsLine(sv.legs)}{sv.expKey ? ` · ${sv.expKey}` : ""} · {savedAge(sv)}</div>
@@ -2572,6 +2847,16 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   {compare.map((c, i) => (
                     <div key={c.key} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "8px 10px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7 }}>
                       <span style={{ width: 10, height: 10, borderRadius: 3, background: [T.blue, T.amber, T.violet][i], flexShrink: 0 }} />
+                      {Number.isFinite(c.spot) && (() => {
+                        const bb = payoffBands({ legs: c.legs, entryNet: c.entryNet ?? 0, spot: c.spot });
+                        return (
+                          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                            <BandThumbnail bands={bb} bars={barsCache[c.ticker] || []} width={100} height={32}
+                              title={bandTakeaway(bb, { ticker: c.ticker })} />
+                            <Gauge bands={bb} size={74} ticker={c.ticker} />
+                          </div>
+                        );
+                      })()}
                       <div style={{ flex: 1, minWidth: 140 }}>
                         <div style={{ fontWeight: 700, color: T.ink, fontSize: 12.5 }}>{c.ticker} · {c.name}</div>
                         <div style={{ ...mono, fontSize: 10, color: T.dim }}>{legsLine(c.legs)}</div>
@@ -2589,7 +2874,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
             {/* The floor, held up against the chains it is applied to. The
                 developer cannot fetch a live chain; the app can, so it reports.
                 See OpenInterestReadout above. */}
-            <OpenInterestReadout chains={chains} floor={RULES.minOpenInterestPerLeg} />
+            <OpenInterestReadout chains={chains} floor={liqLevel.absolute} percentile={liqLevel.percentile} level={liqLevel} />
 
             <StepForward
               label={legs.length ? `Go to Build \u2014 ${stratName} \u2192` : "Pick one above to go to Build"}

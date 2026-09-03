@@ -1,9 +1,11 @@
 // Tests for the risk gate (src/riskGate.js) and the rule config (src/rules.js).
 // Plain Node, no test framework: `npm test` runs this file directly.
 
+import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { evaluateTrade, paperStatus, undefinedRiskLegs } from "./riskGate.js";
-import { RULES, sizing, ruleBadge, qualityFloor, qualityFloorSentence, liquiditySkippedNote, NOTHING_TODAY } from "./rules.js";
+import { RULES, sizing, ruleBadge, qualityFloor, qualityFloorSentence, liquiditySkippedNote, NOTHING_TODAY,
+  LIQUIDITY_LEVELS, RECOMMENDED_LIQUIDITY, LIQUIDITY_MEASUREMENT, liquidityMeasurementNote, liquidityThreshold, looseningWarning, liquiditySettingNote } from "./rules.js";
 
 /* ---------------- tiny harness ---------------- */
 let passed = 0;
@@ -387,14 +389,161 @@ test("a market emptied by the floors gets a sentence, not a blank screen", () =>
   const t = NOTHING_TODAY.belowQualityFloor({ liquidity: 3, reward: 1, markets: ["CORN"] });
   assert.ok(t.includes("CORN"));
   assert.ok(t.includes("3"), "the counts are in the sentence");
-  assert.ok(t.includes(String(RULES.minOpenInterestPerLeg)) || t.includes("open on one of its legs"));
+  assert.ok(t.includes(String(RULES.minOpenInterestAbsolute)) || t.includes("least-traded strikes"));
 });
 
 test("the floors are named numbers, and the copy quotes those numbers", () => {
-  assert.equal(typeof RULES.minOpenInterestPerLeg, "number");
+  assert.equal(typeof RULES.liquidityPercentile, "number");
+  assert.equal(typeof RULES.minOpenInterestAbsolute, "number");
   assert.equal(typeof RULES.minRewardRisk, "number");
-  assert.ok(qualityFloorSentence().includes(String(RULES.minOpenInterestPerLeg)),
+  assert.ok(qualityFloorSentence().includes(String(RULES.minOpenInterestAbsolute)),
     "the sentence on screen and the constant in the code cannot drift apart");
+  assert.ok(qualityFloorSentence().includes("40%"), "and the relative half is quoted too");
+});
+
+/* ---- THE FLOOR IS RELATIVE TO THE CHAIN IT IS JUDGING ---- */
+
+test("the same raw count passes on a thin chain and fails on a busy one", () => {
+  // 30 open contracts. On a quiet expiry that is a well-traded strike; on a
+  // busy one it is the tail. A single absolute number cannot tell them apart,
+  // which is exactly why this floor is not one.
+  const thin = [0, 0, 1, 2, 3, 4, 6, 8, 11, 14, 18, 22, 26, 30];
+  const busy = [40, 60, 90, 120, 180, 240, 300, 420, 600, 900, 1400, 2000, 3000, 5000];
+  const onThin = qualityFloor({ openInterest: [30, 30], peerOpenInterest: thin, maxProfit: 57, maxLoss: -43 });
+  const onBusy = qualityFloor({ openInterest: [30, 30], peerOpenInterest: busy, maxProfit: 57, maxLoss: -43 });
+  assert.equal(onThin.liquidity.pass, true, "30 beats most of a quiet expiry");
+  assert.equal(onBusy.liquidity.pass, false, "30 is the tail of a busy one");
+  assert.equal(onBusy.liquidity.threshold.basis, "relative");
+  assert.ok(onBusy.reasons[0].includes("percentile"), "the sentence says where the bar came from");
+});
+
+test("a chain where nothing trades cannot certify itself", () => {
+  // Every strike on the expiry is single digits, so the 40th percentile is 1.
+  // Without the absolute floor underneath, the emptiness would BE the standard.
+  const empty = [0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 4, 4, 5];
+  const r = qualityFloor({ openInterest: [3, 4], peerOpenInterest: empty, maxProfit: 57, maxLoss: -43 });
+  assert.equal(r.liquidity.pass, false, "beating a distribution of nothing is not liquidity");
+  assert.equal(r.liquidity.threshold.threshold, RULES.minOpenInterestAbsolute);
+  assert.equal(r.liquidity.threshold.basis, "absolute");
+});
+
+test("the three reasons the relative half is absent are three different sentences", () => {
+  // A setting that asks for no percentile, a chain with too few strikes to take
+  // one from, and a percentile that was measured and simply lost to the
+  // absolute floor are not the same fact, and the screen must not report them
+  // as one. Blaming "too few strikes" for the app's own setting is the app
+  // blaming the data.
+  const tooFew = liquidityThreshold([100, 200, 300], RECOMMENDED_LIQUIDITY);
+  assert.equal(tooFew.relative, null, "three numbers are not a distribution");
+  assert.equal(tooFew.threshold, RULES.minOpenInterestAbsolute);
+  assert.ok(tooFew.basis.includes("too few strikes"));
+
+  const notAsked = liquidityThreshold([100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200], "off");
+  assert.ok(notAsked.basis.includes("no relative test"), "OFF asks for no percentile: that is not a data problem");
+
+  const lost = liquidityThreshold([0, 0, 1, 2, 3, 4, 6, 8, 11, 14, 18, 22, 26, 30], RECOMMENDED_LIQUIDITY);
+  assert.ok(Number.isFinite(lost.relative), "it WAS measured");
+  assert.equal(lost.basis, "absolute", "it just lost to the floor underneath");
+});
+
+test("MISSING open interest still skips the floor, whatever the peers say", () => {
+  const busy = [40, 60, 90, 120, 180, 240, 300, 420, 600, 900, 1400, 2000, 3000, 5000];
+  const r = qualityFloor({ openInterest: [null, 5], peerOpenInterest: busy, maxProfit: 57, maxLoss: -43 });
+  assert.equal(r.liquidity.checked, false);
+  assert.equal(r.pass, true, "the relative floor changed nothing about missing data");
+});
+
+/* ---- THE SETTING IS THE USER'S, AND THE SCREEN SAYS WHICH ONE PRODUCED IT ---- */
+
+test("the recommendation is marked, and it IS the constant in the code", () => {
+  assert.equal(LIQUIDITY_LEVELS.filter((l) => l.recommended).length, 1, "exactly one recommendation");
+  assert.equal(RECOMMENDED_LIQUIDITY.percentile, RULES.liquidityPercentile);
+  assert.equal(RECOMMENDED_LIQUIDITY.absolute, RULES.minOpenInterestAbsolute);
+});
+
+test("every level is ordered from strictest to loosest, and OFF is really off", () => {
+  const ids = LIQUIDITY_LEVELS.map((l) => l.id);
+  assert.deepEqual(ids, ["strict", "recommended", "relaxed", "off"]);
+  for (let i = 1; i < LIQUIDITY_LEVELS.length; i++) {
+    assert.ok(LIQUIDITY_LEVELS[i].absolute <= LIQUIDITY_LEVELS[i - 1].absolute);
+    assert.ok(LIQUIDITY_LEVELS[i].percentile <= LIQUIDITY_LEVELS[i - 1].percentile);
+  }
+  const off = qualityFloor({ openInterest: [0, 0], level: "off", maxProfit: 57, maxLoss: -43 });
+  assert.equal(off.liquidity.pass, true, "OFF is no floor, not a gentler one");
+});
+
+test("loosening carries a warning that NAMES what it lets back in", () => {
+  assert.equal(looseningWarning("strict"), null, "stricter than recommended needs no warning");
+  assert.equal(looseningWarning("recommended"), null);
+  const relaxed = looseningWarning("relaxed");
+  assert.ok(relaxed && relaxed.includes("20%"), "it says how much of the expiry comes back");
+  assert.ok(relaxed.includes("5"), "and how few open contracts it allows");
+  const off = looseningWarning("off");
+  assert.ok(off.includes("OFF"));
+  assert.ok(off.includes("nobody trades"), "the warning names the thing, not a mood");
+});
+
+test("a filtered list always says which setting produced it", () => {
+  const n = liquiditySettingNote("relaxed", { kept: 4, liquidity: 2, reward: 1, skipped: 0 });
+  assert.ok(n.includes("RELAXED"));
+  assert.ok(n.includes("4 shown"));
+  assert.ok(n.includes("2 removed for liquidity"));
+  assert.ok(n.includes("1 removed for reward-to-risk"));
+  assert.ok(n.includes(LIQUIDITY_MEASUREMENT.asOf), "and the close the floor was measured against");
+  const rec = liquiditySettingNote("recommended", { kept: 9 });
+  assert.ok(rec.includes("recommendation"));
+});
+
+test("the floor numbers carry the measurement they were set from", () => {
+  const src = readFileSync(new URL("./rules.js", import.meta.url), "utf8");
+  assert.ok(/MEASURED/.test(src), "the constants say where they came from");
+  assert.ok(src.includes("/api/liquidity"), "and name the endpoint that produced it");
+  assert.ok(!/PROVISIONAL/.test(src), "and no longer claim to be provisional");
+});
+
+test("the measurement is a reading, and is never derived from the floor it justifies", () => {
+  const M = LIQUIDITY_MEASUREMENT;
+  assert.equal(M.markets, 5);
+  assert.ok(M.reporting > 0 && M.reporting <= M.contracts, "you cannot report more strikes than you read");
+  // The whole point of the two-part floor: the bar a leg must clear is not one
+  // number across these markets. If this spread ever collapses, a single
+  // absolute floor would do just as well and this design has lost its reason.
+  assert.ok(M.high.bar >= M.low.bar * 4,
+    "the measured near-the-money bar spans several times over between markets");
+  assert.notEqual(M.low.market, M.high.market);
+  // And it must not be computable from the floor's own constants: a screen that
+  // recomputed the finding out of the setting would report a new measurement
+  // every time somebody moved the setting.
+  for (const k of ["liquidityPercentile", "minOpenInterestAbsolute", "minPeersForPercentile"]) {
+    assert.notEqual(M.low.bar, RULES[k]);
+    assert.notEqual(M.high.bar, RULES[k]);
+  }
+});
+
+test("the measurement sentence is generated, and no two words are glued together", () => {
+  // JSX drops whitespace-only text that spans a newline, so a paragraph built
+  // out of {expr} and prose across several lines silently produces "read1035
+  // strikes" and "all 5markets". This sentence is generated in one string for
+  // that reason; this test is what stops it being reassembled in a component.
+  const t = liquidityMeasurementNote();
+  assert.ok(!/[0-9][A-Za-z]/.test(t), `a number is glued to a word: ${t}`);
+  assert.ok(!/[A-Za-z][0-9]/.test(t.replace(/\b\d{4}-\d{2}-\d{2}\b/g, "")), "and a word to a number");
+  assert.ok(t.includes(LIQUIDITY_MEASUREMENT.asOf), "it names the close it was taken on");
+  assert.ok(t.includes(String(LIQUIDITY_MEASUREMENT.low.bar)) && t.includes(LIQUIDITY_MEASUREMENT.low.market));
+  assert.ok(t.includes(String(LIQUIDITY_MEASUREMENT.high.bar)) && t.includes(LIQUIDITY_MEASUREMENT.high.market));
+});
+
+test("the measurement explains the number it actually moved", () => {
+  // The reading's one real change: the peer threshold. The app aims at ~45 DTE
+  // and the grain markets carried 10-11 REPORTING strikes there, so 12 would
+  // have switched the relative half off exactly where the app builds.
+  assert.ok(RULES.minPeersForPercentile <= 10,
+    "an expiry with 10 reporting strikes must still get a percentile");
+  assert.ok(RULES.minPeersForPercentile >= 5,
+    "but a handful of numbers is not a distribution");
+  const tenStrikeExpiry = [2, 5, 7, 12, 20, 33, 60, 90, 180, 353];
+  const t = liquidityThreshold(tenStrikeExpiry, RECOMMENDED_LIQUIDITY);
+  assert.ok(Number.isFinite(t.relative), "the 43-day grain board is measurable at this setting");
 });
 
 /* ---------------- summary ---------------- */

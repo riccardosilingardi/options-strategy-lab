@@ -29,6 +29,8 @@
  */
 
 /** How far out we look. CBOE hands us everything; this is the ceiling for both. */
+import { quantile, knownCounts } from "./rules.js";
+
 export const MAX_DTE = 400;
 
 /** The label the user sees. Never call the indicative feed real-time (PRD: honesty about data). */
@@ -381,12 +383,14 @@ export function openInterestNote(chain) {
 /* ---------------------------------------------------------------------------
  * WHAT THE CHAIN ACTUALLY CONTAINS, so the floor can be argued with.
  *
- * `RULES.minOpenInterestPerLeg` was chosen from a handful of live legs seen in
- * one walkthrough. That is evidence, not a measurement, and nobody can settle
- * it from inside the app's code: it needs a market-data feed the developer
- * cannot reach. So the app reports what it sees instead — the distribution of
- * open interest across the chains actually loaded, with the share of contracts
- * that clear whatever floor is passed in.
+ * The liquidity floor is now two numbers (`RULES.liquidityPercentile` and
+ * `RULES.minOpenInterestAbsolute`), and both were SET from a measurement of
+ * all five live chains (see the table in `rules.js`). This panel is how the
+ * setting is re-checked from inside the app as the market moves: it prints the
+ * distribution of open interest across the chains actually loaded, the value
+ * the relative half of the floor asks for on that distribution, and the share
+ * of contracts that clear the absolute minimum underneath it. One day's close
+ * is a reading, not a law — the numbers are worth looking at again.
  *
  * Two figures, because they answer different questions. `all` covers every
  * contract in the chain and is dominated by far-out strikes nobody trades;
@@ -398,7 +402,7 @@ export function openInterestNote(chain) {
  * counted as unknown, never as zero. That is the same rule `qualityFloor()`
  * applies, for the same reason.
  * ------------------------------------------------------------------------- */
-export function oiProfile(chain, { floor = 0, nearPct = 0.1 } = {}) {
+export function oiProfile(chain, { floor = 0, nearPct = 0.1, percentile = 0 } = {}) {
   if (!chain?.expirations) return null;
   const S = Number(chain.spot);
   const all = [], near = [];
@@ -416,13 +420,38 @@ export function oiProfile(chain, { floor = 0, nearPct = 0.1 } = {}) {
     }
   }
   const stat = (xs) => {
-    if (!xs.length) return { count: 0, median: null, p90: null, max: null, clearing: 0, share: null };
+    if (!xs.length) return { count: 0, median: null, p90: null, max: null, atPercentile: null, clearing: 0, share: null };
     const s = [...xs].sort((a, b) => a - b);
-    const q = (f) => s[Math.min(s.length - 1, Math.floor(f * s.length))];
     const clearing = s.filter((x) => x >= floor).length;
-    return { count: s.length, median: q(0.5), p90: q(0.9), max: s[s.length - 1], clearing, share: clearing / s.length };
+    return {
+      count: s.length,
+      median: quantile(s, 0.5), p90: quantile(s, 0.9), max: s[s.length - 1],
+      // What the RELATIVE half of the floor would ask for on this set. Printed
+      // beside the absolute floor so the two can be compared on one screen.
+      atPercentile: percentile > 0 ? quantile(s, percentile) : null,
+      clearing, share: clearing / s.length,
+    };
   };
   return { total, unknown, known: all.length, reports: all.length > 0, all: stat(all), near: stat(near) };
+}
+
+/**
+ * Every known open-interest count on ONE expiry — the peer set the liquidity
+ * floor measures a leg against (src/rules.js, `liquidityThreshold`).
+ *
+ * The comparison is per EXPIRY and not per chain on purpose: a front-month
+ * strike and a strike thirteen months out are not neighbours, and pooling them
+ * would let the busiest expiry set the bar for the quietest. Unknown counts are
+ * dropped, never read as zero — the same rule everywhere else in this file.
+ */
+export function expiryOpenInterest(chain, expKey) {
+  const e = chain?.byExp?.[expKey];
+  if (!e) return [];
+  const out = [];
+  for (const side of ["calls", "puts"]) {
+    for (const c of Object.values(e[side] || {})) out.push(c?.oi);
+  }
+  return knownCounts(out);
 }
 
 /** Shape-check what came back over the wire before the app trusts it. */

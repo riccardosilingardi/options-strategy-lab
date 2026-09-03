@@ -16,7 +16,7 @@
 // then two screens disagree about the same trade.
 
 import { SEASONAL } from "./engine.js";
-import { RULES } from "./rules.js";
+import { RULES, liquidityLevel } from "./rules.js";
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
@@ -766,8 +766,13 @@ export function verdictNarrative({ basket = [], examined = [], excluded = [], ne
     const cut = (floors.liquidity || 0) + (floors.reward || 0);
     const bits = [];
     if (floors.liquidity > 0) {
-      bits.push(`${plural(floors.liquidity, "structure", "structures")} had a leg with fewer than ` +
-        `${RULES.minOpenInterestPerLeg} contracts open on it — a price nobody has traded is a quote, not a market`);
+      // The floor is relative to the chain being judged, so the sentence has to
+      // be too: "fewer than 25" was a number that meant different things on UNG
+      // and on SOYB, and reporting it as one fact was the same mistake.
+      const lv = liquidityLevel(floors.level?.id ?? floors.level);
+      bits.push(`${plural(floors.liquidity, "structure", "structures")} had a leg among the ` +
+        `${Math.round(lv.percentile * 100)}% least-traded strikes on its own expiry, or under ` +
+        `${lv.absolute} contracts open outright — a price nobody has traded is a quote, not a market`);
     }
     if (floors.reward > 0) {
       bits.push(`${plural(floors.reward, "structure", "structures")} paid less than ` +
