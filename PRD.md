@@ -576,6 +576,14 @@ ends by writing down what it could not verify. Currently open:
   HTTP 000, connection never established). What is different is that the measurement no longer
   needs a session with access: `/api/liquidity` runs where the keys are and the owner can open it.
   **Until that JSON is pasted back, the floor on screen says it is provisional, and so does this.**
+- **THE PASSWORD GATE OVER `/api/liquidity` IS AN INFERENCE, NOT AN OBSERVATION.** It follows
+  from `gate.js` running on `path: "/*"` with only `/api/approve` excluded, and Netlify's
+  Redirect-rules check passing on the branch means the route itself parsed — but nobody has
+  watched the endpoint refuse an unauthenticated request. An attempt from this session's
+  sandbox against the deploy preview returned a 403 that turned out to be the SANDBOX'S OWN
+  egress proxy refusing the CONNECT (`example.com` returns the identical 403), so it proved
+  nothing either way. One look when the URL is first opened settles it: it should ask for
+  the site password.
 - **`/api/liquidity` HAS NEVER BEEN RUN AGAINST THE BROKER.** Its two upstream request shapes are
   the ones `chain.js` and `chainAlpaca.mjs` already use in production (`/v2/options/contracts` with
   `open_interest` as a string, and `/v2/stocks/trades/latest`), and its aggregation is driven by
