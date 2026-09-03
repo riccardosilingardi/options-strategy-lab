@@ -4,12 +4,12 @@ import {
   BarChart, Bar, CartesianGrid, Cell,
 } from "recharts";
 import {
-  RefreshCw, ShieldCheck, Save, Trash2, Play, Layers, Radar, Box,
+  RefreshCw, ShieldCheck, Save, Trash2, Layers, Radar, Box,
   FlaskConical, Briefcase, Plus, Plug, Send, ExternalLink, MessageSquare, FileText, Bell,
   SlidersHorizontal, ArrowLeft, Sun, Moon,
 } from "lucide-react";
 import { fetchAllNews, fetchWeather, ImpactTags, CopilotTab, ReportTab, OrderTicket, AlpacaDesk, scaleStrategy, probProfit, buildContext, GuardianPanel, PriceChart, ChainMatrix, OptionPanel, UnifiedView, taSignals, confluence, WhyThisTrade, Markdown } from "./pro.jsx";
-import { BandThumbnail, payoffBands, bandTakeaway, GaugeFigure, exitPlanSentence } from "./visuals.jsx";
+import { BandThumbnail, payoffBands, bandTakeaway, GaugeFigure, Gauge, CompareFigure, exitPlanSentence } from "./visuals.jsx";
 import { fuseSignals, sentimentDirection, withSignalRank, compareCandidates, againstSignal, DRIVER_PRESETS, rankByDrivers, verdictNarrative } from "./signals.js";
 import { N as nCDF, bs as bsPrice, smile as smileIV, payoff as payoffExp, SEASONAL, SIGMA } from "./engine.js";
 import { parseOcc, buildOcc, fetchChain, hasOpenInterest, enrichOpenInterest, feedName, sourceNote, openInterestNote, oiProfile } from "./chain.js";
@@ -19,6 +19,8 @@ import { evaluateTrade, gateSummary } from "./riskGate.js";
 import { DEMO, DEMO_BANNER, DEMO_TOOLTIP, DEMO_SEED_TICKERS, demoPositions } from "./demo.js";
 import { CapitalOnboarding, WizardOpen, FindOpportunities, WizardCandidates, ConfirmSteps, NothingToday, Card, Pill } from "./wizard.jsx";
 import { buildHandOff, buildScreenState, BUILD_TAB } from "./handoff.js";
+import { FIRST_STEP, stepCarry, candidateOf, candidateKey, legsLine, toggleCompare, inCompare, MAX_COMPARE, savedFromCandidate, candidateFromSaved, savedAge } from "./path.js";
+import { StepNav, StepForward, EvidenceBar, EvidenceOverlay, CompareTray, CandidateActions } from "./steps.jsx";
 
 /* ============================== THEME ============================== */
 const mono = { fontFamily: "ui-monospace, Menlo, monospace" };
@@ -433,7 +435,7 @@ function OpenInterestReadout({ chains, floor }) {
   const th = { padding: "4px 8px" };
   return (
     <Panel style={{ marginTop: 10 }}>
-      <Lbl>4 · WHAT THESE CHAINS ACTUALLY CARRY — IS {floor} THE RIGHT FLOOR?</Lbl>
+      <Lbl>3 · WHAT THESE CHAINS ACTUALLY CARRY — IS {floor} THE RIGHT FLOOR?</Lbl>
       <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 8, lineHeight: 1.6 }}>
         {`The liquidity floor rejects any leg with fewer than ${floor} contracts open. Whether ${floor} is the right number is a question about real chains, not about the code, so here is what the ${rows.length === 1 ? "one chain" : "chains"} loaded in this session ${rows.length === 1 ? "contains" : "contain"}. The row that matters is `}
         <b>near the money</b>{" (within 10% of spot): that is where these structures get built."}
@@ -526,7 +528,11 @@ export default function OptionsStrategyLab() {
   // The desk is three places, not eleven: the Build screen where a trade is put
   // together, the positions you hold and the journal of what happened. Everything
   // that used to be a tab of its own is evidence for one of those three (see `ev`).
-  const [wizStep, setWizStep] = useState("open"); // open | questions | candidates | nothing
+  // open | questions | nothing. There is no "candidates" screen any more: the
+  // roads the guided run produced are step 2 of the desk's own path, shown
+  // beside every other candidate, so the guided door and the desk door walk
+  // the same three steps.
+  const [wizStep, setWizStep] = useState("open");
   const [nothing, setNothing] = useState(null);   // [{ id, text }] — why not today
   const [candidates, setCandidates] = useState([]); // screen 3: always two roads
   const [verdict, setVerdict] = useState([]);       // screen 3: what was examined, in English
@@ -537,7 +543,27 @@ export default function OptionsStrategyLab() {
   const [openResult, setOpenResult] = useState(null);
   const [hydrated, setHydrated] = useState(false);
   const [tab, setTab] = useState("build");       // "build" | "positions" | "journal"
-  const [ev, setEv] = useState(null);           // which evidence section is open on the Build screen
+  /* ---- THE ONE NUMBERED PATH (src/path.js) ----
+     The desk's first place is not a screen any more, it is three of them, and
+     ONE is on screen at a time: 1 Radar (which markets have something today),
+     2 Shortlist (the structures that survived, compared and saved), 3 Build
+     (one trade taken apart). Radar and Shortlist used to be evidence panels
+     that APPENDED to the Build page, which is why the desk read as one long
+     page that only ever got longer. */
+  const [step, setStep] = useState(FIRST_STEP);   // "radar" | "shortlist" | "build"
+  const [ev, setEv] = useState(null);           // which evidence sheet is open OVER the step
+  /* ---- comparing, on step 2 ----
+     Up to three candidates, ticked from any of the three places that produce
+     them (the guided roads, the per-market shortlist, the multi-market scan)
+     and normalised into one shape by `candidateOf` so there is one comparison,
+     not three. The list lives HERE and not inside the step, so walking forward
+     to Build and back does not lose it. */
+  const [compare, setCompare] = useState([]);
+  const [compareNote, setCompareNote] = useState(null);
+  const [showCompare, setShowCompare] = useState(false);
+  // Did the candidates on screen come through the guided door? The roads and
+  // the verdict are shown on the path itself, so the path has to know.
+  const [guided, setGuided] = useState(null);   // { at, basket } | null
   const [showSettings, setShowSettings] = useState(false);
   const [ticker, setTicker] = useState("SOYB");
   const [chains, setChains] = useState({});      // ticker -> normalised chain (Alpaca, or CBOE as the net)
@@ -889,10 +915,46 @@ export default function OptionsStrategyLab() {
     setTicker(h.ticker); setExpKey(h.expKey); setLegs(h.legs); setStratName(h.name);
     setMc(null); setBt(null);
     setOptRef(ref);
-    setEv(h.ev);          // close the evidence panel: the trade goes underneath it
+    setEv(h.ev);          // close the evidence sheet: it covers the trade
     setTab(h.tab);
+    // Step 3. A hand-off is what "forward" means on this path: the selection
+    // travels, the step changes with it, and Build is where it lands.
+    setStep("build");
     if (h.loadChain) refreshChain(h.ticker);   // no chain, no price, no trade to show
     setScrollBuild((n) => n + 1);
+  };
+
+  /* ---- moving along the path ----
+     One step is on screen at a time, and every step stays reachable: going back
+     must not lose what was selected, so the selection lives in this component
+     and the step is only which part of it is being shown. */
+  const goStep = (id) => {
+    setView("desk"); setTab(BUILD_TAB); setStep(id); setEv(null); setShowSettings(false);
+    window.scrollTo?.({ top: 0 });
+  };
+
+  /* ---- comparing and keeping a candidate ----
+     `candidateOf` normalises whatever produced it, so a guided road, a
+     shortlist row and a multi-market hit are the same kind of thing here. */
+  const tickCompare = (c) => {
+    const r = toggleCompare(compare, c);
+    setCompare(r.list); setCompareNote(r.note);
+    if (r.changed && r.list.length < 2) setShowCompare(false);
+  };
+  const savedKeys = useMemo(
+    () => new Set((store.saved || []).map((sv) => candidateKey(candidateFromSaved(sv) || {}))),
+    [store.saved]);
+  const isSaved = (c) => !!c && savedKeys.has(c.key);
+  // Saving a candidate uses the mechanism positions and strategies already use:
+  // the same `store.saved` array, the same hydration check, the same sync. A
+  // second store for "things to come back to" would be a second thing to keep
+  // correct for no reason.
+  const saveCandidate = async (c) => {
+    const item = savedFromCandidate(c);
+    if (!item || isSaved(c)) return;
+    const st = { ...store, saved: [...store.saved, item] };
+    setStore(st); await saveState(st);
+    setMsg(`${c.ticker} ${c.name} kept. It is at the bottom of this step, and with your saved strategies on the Positions screen.`);
   };
   const applyPreset = (p, a) => openOnBuild({
     ticker, expKey, legs: p.legs, name: p.name,
@@ -1391,7 +1453,16 @@ export default function OptionsStrategyLab() {
       setWiz((w) => ({ ...w, busy: false }));
       setCandidates(roads);
       setPicked(null); setOpenResult(null);
-      setWizStep("candidates");
+      /* THE GUIDED DOOR FEEDS THE SAME PATH (PRD §12).
+         It used to jump from the three questions straight to two roads, which
+         is the middle of the path with the macro view skipped: the user never
+         saw which markets were looked at, only the answer. It now lands on
+         step 1 with what was examined in front of it — the roads are on step 2
+         where every other candidate is, and the walk is the same one whether
+         the user came through the guided door or through the desk. */
+      setGuided({ at: Date.now(), basket, roads: roads.length });
+      setCompare([]); setShowCompare(false); setCompareNote(null);
+      goStep("radar");
     } catch (e) { setWiz((w) => ({ ...w, busy: false, err: String(e.message || e) })); }
   };
 
@@ -1405,9 +1476,12 @@ export default function OptionsStrategyLab() {
      the place that shows the chain, the legs and the greeks. */
   const pickRoad = (c) => {
     setPicked(c); setOpenResult(null);
+    setView("desk");
+    // `openOnBuild` is the one hand-off: it carries the trade, closes the
+    // evidence sheet, loads the chain if it is missing, moves the path to
+    // step 3 and scrolls the trade into view.
     openOnBuild({ ticker: c.ticker, expKey: c.expKey, legs: c.legs, name: c.name });
     setStratName(c.name);
-    goDesk();
   };
 
 
@@ -1561,27 +1635,54 @@ export default function OptionsStrategyLab() {
       fused: f, conflict: f?.agreement === "CONFLICT", agreement: f?.agreement, signalScore: f?.score ?? 0, confidence: f?.confidence ?? 0 };
   }).sort((a, b) => (a.conflict !== b.conflict ? (a.conflict ? 1 : -1) : b.score - a.score)), [chains, seasonal, fused]);
 
+  /* ---- what the last search found in each market ----
+     The Radar's job is to say which markets have something and which do not,
+     and "do not" has to carry its reason: a row with nothing on it is the empty
+     screen this app is not allowed to show. Roads from the guided run and hits
+     from the multi-market search are counted together, because to the person
+     reading the row they are the same fact — something cleared the floors here. */
+  const marketFacts = useMemo(() => {
+    const m = {};
+    const touch = (tk) => (m[tk] = m[tk] || { n: 0, roads: 0, best: null, cut: false, oiSkipped: false });
+    for (const c of candidates) {
+      const f = touch(c.ticker); f.n++; f.roads++;
+      if (!f.best) f.best = { legs: c.legs, entryNet: c.entryNet, spot: c.spot };
+    }
+    for (const r of (multi.res || [])) {
+      const f = touch(r.tk); f.n++;
+      if (!f.best) f.best = { legs: r.legs, entryNet: r.a.entry, spot: r.spot };
+    }
+    for (const tk of (multi.floors?.markets || [])) touch(tk).cut = true;
+    for (const tk of (multi.floors?.oiSkipped || [])) touch(tk).oiSkipped = true;
+    return m;
+  }, [candidates, multi.res, multi.floors]);
+
   /* ============================== RENDER ============================== */
   // The old "Today" tab is gone: what needs attention today is the wizard's
   // front page now (PRD §5), so keeping a second copy behind a flag would just
   // be two screens that can disagree about the same positions.
-  // THREE places, and only three. A place is somewhere you go and stay: Build,
-  // where a trade is put together, the Positions you hold, the Journal of what
-  // happened. Everything that used to be a tab of its own — Radar, Shortlist,
-  // market levels, history, the copilot — is EVIDENCE for the trade on the
-  // Build screen, so it opens underneath it instead of taking you somewhere else.
-  const PLACES = [
-    { id: "build", label: "Build", I: Play },
+  // THE PATH IS THE FIRST PLACE, and it is three steps rather than one page:
+  // 1 Radar (every market), 2 Shortlist (the structures that survived), 3 Build
+  // (one trade taken apart). Positions and the Journal are the other two places.
+  // Settings sits behind the gear, not in the row.
+  //
+  // Radar and Shortlist used to be EVIDENCE panels appended to the Build page.
+  // They are steps now, because they are not evidence for a trade — they are
+  // how you arrive at one, and each of them is a decision of its own.
+  const OTHER_PLACES = [
     { id: "positions", label: "Positions", I: Briefcase },
     { id: "journal", label: "Journal", I: FileText },
   ];
+  // What is left IS evidence: it answers a question about the step in front of
+  // you, at any step, and it opens OVER that step (src/steps.jsx) rather than
+  // making the page longer.
   const EVIDENCE = [
-    { id: "radar", label: "Radar", I: Radar, sub: "which market, and why" },
-    { id: "shortlist", label: "Shortlist", I: Layers, sub: "which structures fit" },
+    { id: "why", label: "Why this market", I: Radar, sub: "seasonality, price trend, weather, news" },
     { id: "levels", label: "Market levels", I: Box, sub: "where the open interest sits" },
     { id: "history", label: "History", I: FlaskConical, sub: "what happened in past years" },
     { id: "copilot", label: "Copilot", I: MessageSquare, sub: "ask about this trade" },
   ];
+  const EV_META = Object.fromEntries(EVIDENCE.map((e) => [e.id, e]));
   const SENT = SENTIMENTS.find((s) => s.id === sentiment);
 
   /* ---------- the shell (PRD §5) ----------
@@ -1589,16 +1690,9 @@ export default function OptionsStrategyLab() {
      shows: setup on a first run, the wizard by default, the tabs on request. */
 
   const goHome = () => { setView("wizard"); setWizStep("open"); setNothing(null); };
-  /* Leaving the wizard for the desk. `ev` is set explicitly every time: a
-     panel left open from a previous visit hides whatever is on Build. */
-  const goDesk = (evId = null) => {
-    setView("desk"); setTab(BUILD_TAB); setEv(evId);
-    // Land where the button promised. Coming off a scrolled wizard screen the
-    // browser keeps the old scroll position, which drops you into the middle
-    // of the desk: "Open it on the Build screen" has to end on the trade.
-    if (evId) window.scrollTo?.({ top: 0 });
-    else setScrollBuild((n) => n + 1);
-  };
+  /* Leaving the wizard for the desk lands on a STEP of the path — `goStep`
+     above. `ev` is cleared every time: a sheet left open from a previous visit
+     covers whatever the button promised to show. */
   const marketReady = !!spot || Object.keys(chains).length > 0;
 
   if (!hydrated) {
@@ -1640,7 +1734,7 @@ export default function OptionsStrategyLab() {
             marketReady={marketReady} barsFor={(tk) => barsCache[tk] || []}
             onPositions={() => { setView("desk"); setTab("positions"); }}
             onFind={() => { setNothing(null); setWizStep("questions"); }}
-            onDesk={() => goDesk("radar")}
+            onDesk={() => goStep("radar")}
             onSettings={() => { setView("desk"); setShowSettings(true); }}
           />
         )}
@@ -1651,15 +1745,6 @@ export default function OptionsStrategyLab() {
             onBack={goHome} onDecide={() => runWizard()}
           />
         )}
-        {wizStep === "candidates" && (
-          <WizardCandidates
-            candidates={candidates} answers={wiz} narrative={verdict}
-            barsFor={(tk) => barsCache[tk] || []}
-            weatherData={weather} newsItems={newsPool} month={NOW_MONTH}
-            onPick={pickRoad}
-            onBack={() => setWizStep("questions")}
-          />
-        )}
         {wizStep === "nothing" && (
           <NothingToday
             reasons={nothing || []} notified={!!store.settings.notifyWhenReady}
@@ -1667,7 +1752,7 @@ export default function OptionsStrategyLab() {
             onNotify={() => setNotify(true)}
             onBack={() => setWizStep("questions")}
             onPositions={() => { setView("desk"); setTab("positions"); }}
-            onDesk={() => goDesk("radar")}
+            onDesk={() => goStep("radar")}
           />
         )}
       </div>
@@ -1735,7 +1820,7 @@ export default function OptionsStrategyLab() {
 
         {msg && <div style={{ ...mono, fontSize: 11.5, color: T.amber, border: `1px solid ${T.amber}44`, background: `${T.amber}10`, borderRadius: 6, padding: "7px 10px", marginTop: 10 }}>{msg}</div>}
 
-        <TabBoundary k={`${tab}/${ev}`}>
+        <TabBoundary k={`${tab}/${step}/${ev}`}>
         {/* Alert Center: morning check */}
         {posAlerts.length > 0 && (
           <div style={{ marginTop: 12, padding: "10px 12px", background: T.panel, border: `1px solid ${nAttention ? T.red : T.line}55`, borderRadius: 8 }}>
@@ -1759,12 +1844,21 @@ export default function OptionsStrategyLab() {
           </div>
         )}
 
-        {/* The three places */}
-        <div style={{ display: "flex", gap: 6, marginTop: 14, flexWrap: "wrap" }}>
-          {PLACES.map(({ id, label, I }) => {
+        {/* THE PATH: three numbered steps, one on screen at a time. The nav
+            says what each step is carrying, because "back" has to be visibly
+            free — the selection lives above these screens, so walking back and
+            forward again cannot lose it. */}
+        <StepNav step={tab === "build" && !showSettings ? step : null}
+          carry={stepCarry({ ticker, trade: legs.length ? `${ticker} · ${stratName}` : null, compare: compare.length })}
+          onStep={goStep} />
+
+        {/* The other two places. A place is somewhere you go and stay; the three
+            steps above are one place walked through in order. */}
+        <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+          {OTHER_PLACES.map(({ id, label, I }) => {
             const on = tab === id && !showSettings;
             return (
-              <button key={id} onClick={() => { setTab(id); setShowSettings(false); }}
+              <button key={id} onClick={() => { setTab(id); setShowSettings(false); setEv(null); }}
                 style={{
                   ...sansUI, fontSize: 14, fontWeight: on ? 700 : 500, minHeight: 46,
                   padding: "8px 16px", borderRadius: 8, whiteSpace: "nowrap", cursor: "pointer",
@@ -1779,221 +1873,316 @@ export default function OptionsStrategyLab() {
           })}
         </div>
 
-        {/* The evidence, under the Build screen where the trade is. Tabs are not
-            destinations: each of these answers a question about THIS trade. */}
+        {/* THE EVIDENCE, at every step, opening OVER it. A chip that is doing
+            something, or holding something you have not read, says so on the
+            chip itself: the copilot answering into a closed sheet was
+            indistinguishable from the copilot doing nothing at all. */}
         {tab === "build" && !showSettings && (
-          <div style={{ marginTop: 10 }}>
-            <div style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center" }}>
-              <span style={{ ...mono, fontSize: 10, letterSpacing: "0.15em", color: T.dim, marginRight: 4 }}>EVIDENCE</span>
-              {EVIDENCE.map(({ id, label, I, sub }) => {
-                // A panel that is doing something, or holding something you have
-                // not read, has to say so ON THE CHIP. The copilot answering into
-                // a closed panel was indistinguishable from the copilot doing
-                // nothing at all.
-                const working = id === "copilot" && copilot.busy;
-                const waiting = id === "copilot" && ev !== "copilot" && !copilot.busy
-                  && copilot.msgs.length > 0 && copilot.msgs[copilot.msgs.length - 1].role === "assistant";
-                const marked = working || waiting;
-                const col = marked ? T.amber : ev === id ? T.blue : T.mut;
-                return (
-                  <button key={id} onClick={() => setEv(ev === id ? null : id)}
-                    title={working ? "The copilot is answering" : waiting ? "An answer is waiting here" : sub}
-                    style={{
-                      ...mono, fontSize: 11, padding: "7px 10px", borderRadius: 6, whiteSpace: "nowrap", cursor: "pointer",
-                      background: marked ? `${T.amber}18` : ev === id ? `${T.blue}18` : "transparent", color: col,
-                      border: `1px solid ${marked ? T.amber : ev === id ? T.blue : T.line}`, display: "inline-flex", gap: 5, alignItems: "center",
-                    }}>
-                    <I size={12} /> {label}
-                    {working ? " · thinking" : waiting ? " · answer ready" : ""} {ev === id ? "▲" : "▼"}
-                  </button>
-                );
-              })}
-            </div>
-            {ev && (
-              <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 6 }}>
-                {EVIDENCE.find((e) => e.id === ev)?.sub} — evidence for the trade on the Build screen, not a place of its own.
-              </div>
+          <EvidenceBar items={EVIDENCE} open={ev} onOpen={setEv}
+            mark={{
+              copilot: copilot.busy ? "thinking"
+                : (ev !== "copilot" && copilot.msgs.length > 0
+                  && copilot.msgs[copilot.msgs.length - 1].role === "assistant") ? "answer ready" : null,
+            }} />
+        )}
+
+        {/* The sheet itself. Every panel below renders inside it, so opening one
+            covers the step instead of lengthening it — and because it is fixed
+            to the viewport it can never land below the fold, which is what made
+            History and the Copilot look like broken buttons on a phone. */}
+        {tab === "build" && !showSettings && ev && (
+          <EvidenceOverlay title={EV_META[ev]?.label || "Evidence"} sub={EV_META[ev]?.sub} onClose={() => setEv(null)}>
+            {ev === "why" && (
+              <WhyThisTrade
+                fused={fused[ticker]}
+                ticker={ticker} weatherData={weather} newsItems={newsPool} month={NOW_MONTH}
+                title={`WHY THIS MARKET · ${ticker}`} defaultDetail
+                note={fused[ticker]?.agreement === "CONFLICT"
+                  ? "Candidates on a CONFLICT market rank last wherever they appear, whatever their expected value."
+                  : "The Radar and the Shortlist both rank candidates on expected value adjusted by this read."}
+              />
             )}
-          </div>
-        )}
-
-        {/* ============ SCANNER ============ */}
-        {tab === "build" && !showSettings && ev === "radar" && (
-          <Panel style={{ marginTop: 12 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-              <Lbl>BEST OPPORTUNITIES · 4-FACTOR SIGNAL · {MONTHS[NOW_MONTH].toUpperCase()}</Lbl>
-              <Btn small ghost onClick={async () => { setBusy("all"); for (const tk of Object.keys(UNDERLYINGS)) await refreshChain(tk, true); setBusy(null); setMsg("All markets refreshed."); }}>
-                <RefreshCw size={11} /> Refresh all
-              </Btn>
-            </div>
-            <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
-              {scan.map((r, i) => {
-                const sObj = SENTIMENTS.find((s) => s.id === r.sugg);
-                return (
-                  <div key={r.tk} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7, flexWrap: "wrap" }}>
-                    <span style={{ ...mono, fontSize: 11, color: T.dim, width: 18 }}>#{i + 1}</span>
-                    <div style={{ flex: 1, minWidth: 140 }}>
-                      <div style={{ fontWeight: 700, color: T.ink, fontSize: 14 }}>{r.tk} <span style={{ color: T.dim, fontWeight: 400, fontSize: 11 }}>{r.name}</span></div>
-                      <div style={{ ...mono, fontSize: 10.5, color: T.mut }}>
-                        seasonal {r.seasonalScore > 0 ? "+" : ""}{r.seasonalScore.toFixed(1)}%/mo {r.real ? "(10y history)" : "(estimate)"} · {r.spot ? `$${r.spot.toFixed(2)}` : "prices not loaded"}{ta[r.tk] ? ` · trend ${ta[r.tk].trend > 0 ? "↑" : ta[r.tk].trend < 0 ? "↓" : "→"} RSI ${ta[r.tk].rsi.toFixed(0)}` : ""}
-                      </div>
-                    </div>
-                    {r.fused && (() => {
-                      const c = r.conflict ? T.red : r.agreement === "CONFLUENT" ? T.green : T.blue;
-                      return (
-                        <span title={r.fused.narrative} style={{ ...mono, fontSize: 9.5, color: c, border: `1px solid ${c}66`, padding: "3px 8px", borderRadius: 5, cursor: "help" }}>
-                          {r.agreement} · {r.signalScore > 0 ? "+" : ""}{r.signalScore}/100 · conf {r.confidence}
-                        </span>
-                      );
-                    })()}
-                    <span style={{ ...mono, fontSize: 10, color: sObj.color, border: `1px solid ${sObj.color}66`, padding: "3px 8px", borderRadius: 5 }}>{sObj.icon} {sObj.label.toUpperCase()}</span>
-                    <Btn small ghost onClick={() => { switchTicker(r.tk); setSentiment(r.sugg); setTab("build"); setEv("shortlist"); }}>→ Shortlist</Btn>
-                  </div>
-                );
-              })}
-            </div>
-            <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 10 }}>
-The order weighs the 4-factor signal (seasonality, price trend, weather, news): CONFLICT tickers stay last regardless. Tap the badge for the full narrative. Under History, "Real 10y seasonality" replaces the estimates with ten years of actual data for that market.
-            </div>
-          </Panel>
-        )}
-
-        {/* ============ OPTIMIZE ============ */}
-        {tab === "build" && !showSettings && ev === "shortlist" && spot && (
-          <div style={{ marginTop: 12 }}>
-            <Panel>
-              <Lbl>1 · WHICH WAY DO YOU THINK IT GOES?</Lbl>
-              <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
-                {SENTIMENTS.map((s) => (
-                  <button key={s.id} onClick={() => setSentiment(s.id)}
-                    style={{
-                      ...mono, fontSize: 11, padding: "10px 12px", borderRadius: 24, cursor: "pointer", flex: "1 1 auto",
-                      background: sentiment === s.id ? s.color : "transparent",
-                      color: sentiment === s.id ? T.onAccent : s.color,
-                      border: `1.5px solid ${s.color}`, fontWeight: 700,
-                    }}>
-                    {s.icon} {s.label}
-                  </button>
-                ))}
-              </div>
-              <div style={{ display: "flex", gap: 16, marginTop: 12, alignItems: "center", flexWrap: "wrap" }}>
-                <Stat k="IMPLIED TARGET" v={`$${(spot * (1 + SENT.tgt)).toFixed(2)} (${SENT.tgt >= 0 ? "+" : ""}${(SENT.tgt * 100).toFixed(0)}%)`} c={T.blue} />
-                <div>
-                  <div style={{ ...mono, fontSize: 9.5, color: T.dim }}>SIZE BY</div>
-                  <div style={{ display: "flex", gap: 4 }}>
-                    <Btn small ghost={optMode !== "budget"} onClick={() => setOptMode("budget")}>What I can spend</Btn>
-                    <Btn small ghost={optMode !== "target"} onClick={() => setOptMode("target")}>What I want to make</Btn>
-                  </div>
-                </div>
-                <div>
-                  <div style={{ ...mono, fontSize: 9.5, color: T.dim }}>{optMode === "budget" ? "MOST I WILL RISK ($)" : "PROFIT I AM AIMING FOR ($)"}</div>
-                  <Inp type="number" min={50} step={50} value={optAmt} onChange={(e) => setOptAmt(Math.max(0, +e.target.value))} style={{ width: 100 }} />
-                </div>
-                {chain && (
-                  <div>
-                    <div style={{ ...mono, fontSize: 9.5, color: T.dim }}>EXPIRY</div>
-                    <select value={expKey || ""} onChange={(e) => setExpKey(e.target.value)}
-                      style={{ ...mono, background: T.bg, color: T.ink, border: `1px solid ${T.line}`, borderRadius: 5, padding: "5px 8px", fontSize: 12 }}>
-                      {chain.expirations.map((e) => (
-                        <option key={e} value={e}>{e} · {chain.byExp[e].dte} DTE</option>
-                      ))}
-                    </select>
-                    {chain.expirations.length <= 4 && (
-                      <div style={{ ...mono, fontSize: 9, color: T.dim, marginTop: 3, maxWidth: 220 }}>
-                        These are every expiry {feedName(chain) || "the feed"} lists for {ticker} — this ETF only has monthly ones, it is not a limit of the app.
-                      </div>
-                    )}
+            {ev === "levels" && (
+              <>
+                <Lbl>WHERE THE MARKET IS POSITIONED (OPEN INTEREST)</Lbl>
+                {!oiGrid && <div style={{ ...mono, fontSize: 12, color: T.mut, padding: 30, textAlign: "center" }}>
+                  {!chain ? "Press Refresh at the top to load the prices first."
+                    : !hasOpenInterest(chain) ? `Open interest is not part of the ${chain.source} feed. It is fetched separately from the broker\u2019s contract list, and that has not come back \u2014 so this panel has nothing to draw yet.`
+                      : "Not enough strikes near today's price to draw this."}
+                </div>}
+                {oiGrid && (
+                  <div style={{ height: 190, marginTop: 10 }}>
+                    <ResponsiveContainer>
+                      <BarChart data={oiGrid.strikes.map((k, j) => ({ k, put: -oiGrid.oiPutTot[j], call: oiGrid.oiCallTot[j] }))} margin={{ top: 4, right: 4, bottom: 0, left: 0 }} stackOffset="sign">
+                        <XAxis dataKey="k" stroke={T.dim} tick={{ fontSize: 9, fontFamily: "monospace" }} />
+                        <YAxis stroke={T.dim} tick={{ fontSize: 9, fontFamily: "monospace" }} width={44} tickFormatter={(v) => Math.abs(v)} />
+                        <Tooltip contentStyle={{ background: T.panel, border: `1px solid ${T.line}`, fontFamily: "monospace", fontSize: 11 }} formatter={(v, n2) => [Math.abs(v), n2 === "put" ? "put contracts" : "call contracts"]} />
+                        <ReferenceLine y={0} stroke={T.mut} />
+                        {spot && <ReferenceLine x={oiGrid.strikes.reduce((b2, k) => Math.abs(k - spot) < Math.abs(b2 - spot) ? k : b2, oiGrid.strikes[0])} stroke={T.amber} strokeDasharray="4 3" />}
+                        <Bar dataKey="put" fill={`${T.green}bb`} stackId="a" />
+                        <Bar dataKey="call" fill={`${T.red}bb`} stackId="a" />
+                      </BarChart>
+                    </ResponsiveContainer>
                   </div>
                 )}
-              </div>
-            </Panel>
-
-            <WhyThisTrade
-              fused={fused[ticker]}
-              ticker={ticker} weatherData={weather} newsItems={newsPool} month={NOW_MONTH}
-              title={`WHY THIS TRADE · ${ticker}`}
-              note={fused[ticker]?.agreement === "CONFLICT"
-                ? "Candidates on a CONFLICT ticker rank last in the multi-market scan below, whatever their expected value."
-                : "The scan below ranks candidates on expected value adjusted by this read."}
-            />
-
-            <Panel style={{ marginTop: 10 }}>
-              <Lbl>2 · {SENT.label.toUpperCase()} STRATEGIES — {ticker} · PRICED FROM THE LIVE CHAIN</Lbl>
-              {/* THE QUALITY FLOORS, before anything is drawn. A structure that
-                  fails one is never rendered as an option — but the count of
-                  what went and why is, because a list that silently shortens
-                  itself teaches nothing and looks broken. */}
-              {shortlist.cut.length > 0 && (
-                <div style={{ ...mono, fontSize: 10.5, color: T.amber, marginTop: 8, lineHeight: 1.6, padding: "8px 10px", background: `${T.amber}0f`, border: `1px solid ${T.amber}44`, borderRadius: 6 }}>
-                  {shortlist.cut.length} of {shortlist.cut.length + shortlist.rows.length} structures for this
-                  direction did not clear the quality floors and are not shown:
-                  <div style={{ marginTop: 4 }}>
-                    {shortlist.cut.map((c) => <div key={c.name}>· {c.name} — {c.reasons[0]}</div>)}
+                {oiGrid && <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 2 }}>Green bars below zero are where put buyers cluster — prices tend to hold there. Red bars above are where call buyers cluster — prices tend to stall there. The amber line is today's price.</div>}
+                {lv && (
+                  <div style={{ display: "flex", gap: 20, marginTop: 10, flexWrap: "wrap" }}>
+                    <div>
+                      <div style={{ ...mono, fontSize: 10, color: T.green }}>PRICES THAT TEND TO HOLD</div>
+                      <div style={{ ...mono, fontSize: 14, fontWeight: 700, color: T.ink }}>{lv.supports.map((x) => `$${x}`).join(" · ") || "—"}</div>
+                    </div>
+                    <div>
+                      <div style={{ ...mono, fontSize: 10, color: T.red }}>PRICES THAT TEND TO STALL</div>
+                      <div style={{ ...mono, fontSize: 14, fontWeight: 700, color: T.ink }}>{lv.resistances.map((x) => `$${x}`).join(" · ") || "—"}</div>
+                    </div>
                   </div>
+                )}
+                <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 8 }}>
+                  {openInterestNote(chain)} Added up across the first six expiries within 120 days. A big wall is a price the market has an interest in defending — useful when picking strikes and exits.
                 </div>
-              )}
-              {shortlist.rows.length === 0 && (
-                <div style={{ ...mono, fontSize: 11, color: T.red, marginTop: 8, lineHeight: 1.6 }}>
-                  Nothing on {ticker} clears the quality floors at this expiry today. That is an answer, not an
-                  empty screen: {qualityFloorSentence()}
+              </>
+            )}
+            {ev === "history" && !spot && (
+              <div style={{ ...mono, fontSize: 12, color: T.mut }}>
+                The seasonality chart, the 8,000-run simulation and the year-by-year replay are all drawn from {ticker}{"\u2019"}s own prices, and they have not loaded yet. Press Refresh at the top of the screen.
+              </div>
+            )}
+            {ev === "history" && spot && (
+            <div style={{ marginTop: 12 }}>
+              <Panel>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+                  <Lbl>SEASONALITY {seasonal[ticker] ? `· ${seas.src}` : "(ESTIMATE — load the real history)"}</Lbl>
+                  <Btn small ghost color={T.blue} onClick={loadSeasonal} disabled={busy === "av"}>
+                    <RefreshCw size={11} /> Real 10y seasonality
+                  </Btn>
                 </div>
-              )}
-              {shortlist.oiSkipped && (
-                <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 8, lineHeight: 1.6 }}>
-                  {liquiditySkippedNote(feedName(chain))}
-                </div>
-              )}
-              <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
-                {shortlist.rows.map(({ p, a }) => {
-                  const rr = a.maxProfit > 0 && a.maxLoss < 0 ? (a.maxProfit / Math.abs(a.maxLoss)) : null;
-                  const ivAvg = a.legPx.reduce((x, y) => x + y.iv, 0) / Math.max(1, a.legPx.length);
-                  const pop = probProfit(a.curve, spot, ivAvg, dte);
+                {(() => {
+                  const mm = seas.monthlyMean;
+                  const bi = mm.indexOf(Math.max(...mm)), wi = mm.indexOf(Math.min(...mm));
+                  const cur = mm[NOW_MONTH];
+                  const rank = [...mm].sort((a, b) => b - a).indexOf(cur) + 1;
                   return (
-                    <div key={p.name} style={{ padding: "10px 12px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-                        <div style={{ fontWeight: 700, color: T.ink, fontSize: 13.5 }}>
-                          {p.name}{" "}
-                          <span style={{ ...mono, fontSize: 9, color: a.realCount === p.legs.length ? T.green : T.amber }}>
-                            {a.realCount === p.legs.length ? "● live prices" : `◐ ${a.realCount}/${p.legs.length} live`}
-                          </span>
+                    <div style={{ fontSize: 12.5, color: T.body, marginTop: 8, padding: "8px 10px", background: `${T.amber}0a`, borderRadius: 6 }}>
+                      <b style={{ color: T.ink }}>In plain words:</b> {ticker}'s best month historically is <b style={{ color: T.green }}>{MONTHS[bi]}</b> ({mm[bi] > 0 ? "+" : ""}{mm[bi].toFixed(1)}% a month on average), its worst is <b style={{ color: T.red }}>{MONTHS[wi]}</b> ({mm[wi].toFixed(1)}%). {MONTHS[NOW_MONTH]} (the amber bar) ranks {rank} of 12: {cur > 0.8 ? "the season is behind you — a directional trade makes sense." : cur < -0.8 ? "the season is against you — favour downside or non-directional trades." : "no clear push this month — a range trade suits it better."}
+                    </div>
+                  );
+                })()}
+                <div style={{ height: 170, marginTop: 10 }}>
+                  <ResponsiveContainer>
+                    <BarChart data={seas.monthlyMean.map((v, i) => ({ m: MONTHS[i], v: +v.toFixed(2) }))} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
+                      <XAxis dataKey="m" stroke={T.dim} tick={{ fontSize: 9.5, fontFamily: "monospace" }} />
+                      <YAxis stroke={T.dim} tick={{ fontSize: 9.5, fontFamily: "monospace" }} width={34} unit="%" />
+                      <Tooltip contentStyle={{ background: T.panel, border: `1px solid ${T.line}`, fontFamily: "monospace", fontSize: 11 }} />
+                      <ReferenceLine y={0} stroke={T.mut} />
+                      <Bar dataKey="v">
+                        {seas.monthlyMean.map((v, i) => <Cell key={i} fill={i === NOW_MONTH ? T.amber : v >= 0 ? `${T.green}bb` : `${T.red}bb`} />)}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </Panel>
+
+              <Panel style={{ marginTop: 10 }}>
+                <Lbl>THREE PROBABILITIES · WHICH ONE TO READ, AND WHEN</Lbl>
+                <div style={{ fontSize: 12.5, color: T.body, marginTop: 8, lineHeight: 1.6 }}>
+                  <b style={{ color: T.blue }}>CHANCE</b> (Shortlist and Build): a snapshot — the odds of finishing in profit <i>at expiry</i>, worked out from what the market is pricing right now. Use it to <b>compare trades before you open one</b>.<br/>
+                  <b style={{ color: T.amber }}>SIMULATION</b> (below): the same question asked of history — 8,000 runs using the last ten years of seasonality and volatility. Use it to <b>check the season really is on your side</b>. If the two disagree sharply, the market is pricing something history has not seen: an event is coming.<br/>
+                  <b style={{ color: T.violet }}>EXIT PATH</b> (on open positions): the most realistic — it walks day by day <i>from today</i> and applies your own rules ({ruleBadge()}). It is the only one that answers "from here, how does this end if I stick to the plan?". Use it to <b>decide whether to hold or take the money</b>.
+                </div>
+              </Panel>
+
+              <Panel style={{ marginTop: 10 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+                  <Lbl>8,000 SIMULATIONS + REAL HISTORY — "{stratName}"</Lbl>
+                  <Btn small onClick={runMC} disabled={!A}><FlaskConical size={12} /> Run it</Btn>
+                </div>
+                {mc ? (
+                  <>
+                    <div style={{ display: "flex", gap: 16, marginTop: 12, flexWrap: "wrap" }}>
+                      <Stat k="CHANCE OF PROFIT" v={`${(mc.pop * 100).toFixed(1)}%`} c={mc.pop >= 0.5 ? T.green : T.red} tip="The share of simulated runs that finish in profit at expiry." />
+                      <Stat k="AVERAGE RESULT" v={fmt$(mc.ev)} c={mc.ev >= 0 ? T.green : T.red} />
+                      <Stat k="BAD CASE" v={fmt$(mc.p5)} c={T.red} tip="Only 1 run in 20 turns out worse than this." />
+                      <Stat k="TYPICAL" v={fmt$(mc.p50)} />
+                      <Stat k="GOOD CASE" v={fmt$(mc.p95)} c={T.green} tip="Only 1 run in 20 turns out better than this." />
+                      <Stat k="YEARLY DRIFT" v={`${(mc.muAnn * 100).toFixed(1)}%`} c={T.blue} />
+                    </div>
+                    <div style={{ marginTop: 10, padding: "9px 11px", background: `${T.blue}0d`, border: `1px solid ${T.blue}33`, borderRadius: 7, fontSize: 12.5, color: T.body }}>
+                      <b style={{ color: T.ink }}>In plain words:</b> out of 8,000 simulated runs, {Math.round(mc.pop * 100)} in 100 finish in profit.
+                      In the worst 5% you lose about {fmt$(Math.abs(mc.p5))}{guard ? (Math.abs(mc.p5) <= guard.limits.perTrade ? ` — inside your per-trade limit of ${money(guard.limits.perTrade)} ✓` : ` — CAREFUL: past your per-trade limit of ${money(guard.limits.perTrade)}`) : ""}.
+                      The typical result is {fmt$(mc.p50)}.
+                    </div>
+                    <div style={{ height: 180, marginTop: 12 }}>
+                      <ResponsiveContainer>
+                        <BarChart data={mc.bins} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
+                          <XAxis dataKey="x" stroke={T.dim} tick={{ fontSize: 9, fontFamily: "monospace" }} />
+                          <YAxis stroke={T.dim} tick={{ fontSize: 9, fontFamily: "monospace" }} width={40} />
+                          <Tooltip contentStyle={{ background: T.panel, border: `1px solid ${T.line}`, fontFamily: "monospace", fontSize: 11 }} />
+                          <Bar dataKey="n">
+                            {mc.bins.map((b, i) => <Cell key={i} fill={b.x >= 0 ? `${T.green}cc` : `${T.red}cc`} />)}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                    {bt ? (
+                      <div style={{ marginTop: 12 }}>
+                        <Lbl>WHAT ACTUALLY HAPPENED · {MONTHS[NOW_MONTH]} → +{Math.max(1, Math.round(dte / 30))} MONTHS, EVERY YEAR</Lbl>
+                        <div style={{ display: "flex", gap: 16, marginTop: 8, flexWrap: "wrap" }}>
+                          <Stat k="YEARS IT WORKED" v={`${(bt.winRate * 100).toFixed(0)}%`} c={bt.winRate >= 0.5 ? T.green : T.red} />
+                          <Stat k="AVERAGE RESULT" v={fmt$(bt.avg)} c={bt.avg >= 0 ? T.green : T.red} />
+                          <Stat k="YEARS TESTED" v={bt.rows.length} />
                         </div>
-                        <Btn small onClick={() => applyPreset(p, a)}>Open on Build →</Btn>
+                        <div style={{ display: "flex", gap: 4, marginTop: 8, flexWrap: "wrap" }}>
+                          {bt.rows.map((r) => (
+                            <button key={r.year} onClick={() => { const row = (seas.matrix || []).find((x) => String(x[0]) === r.year); if (row) runReplay(row); }}
+                              style={{ ...mono, fontSize: 10, padding: "3px 7px", borderRadius: 4, cursor: "pointer", background: replay?.year === +r.year ? `${T.amber}22` : "transparent", color: r.pnl >= 0 ? T.green : T.red, border: `1px solid ${r.pnl >= 0 ? T.green : T.red}44` }}>
+                              ▶ {r.year}: {fmt$(r.pnl)}
+                            </button>
+                          ))}
+                        </div>
                       </div>
-                      <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 4 }}>
-                        {p.legs.map((l) => `${l.side > 0 ? "+" : "−"}${l.qty} ${l.strike}${l.type === "call" ? "C" : "P"}`).join(" / ")}
+                    ) : (
+                      <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 10 }}>
+                        The year-by-year history unlocks once you load the real seasonality above.
                       </div>
-                      <div style={{ marginTop: 6 }}><BandThumbnail bands={payoffBands({ legs: p.legs, entryNet: a.entry, spot })} bars={barsCache[ticker] || []} width={220} height={40} title={bandTakeaway(payoffBands({ legs: p.legs, entryNet: a.entry, spot }), { ticker })} /></div>
-                      <div style={{ display: "flex", gap: 14, marginTop: 8, flexWrap: "wrap" }}>
-                        <Stat k={a.entry >= 0 ? "YOU PAY" : "YOU RECEIVE"} v={fmt$(Math.abs(a.entry) * 100)} />
-                        <Stat k="MAX PROFIT" v={fmt$(a.maxProfit)} c={T.green} />
-                        <Stat k="MAX LOSS" v={fmt$(a.maxLoss)} c={T.red} />
-                        <Stat k="R/R" v={rr ? rr.toFixed(2) : "—"} c={T.amber} />
-                        <Stat k="CHANCE" v={pop != null ? `${(pop * 100).toFixed(0)}%` : "—"} c={pop >= 0.5 ? T.green : T.violet} />
-                        <Stat k="BREAKEVEN" v={a.breakevens.map((b) => b.toFixed(2)).join(" · ") || "—"} c={T.blue} />
+                    )}
+                    {replay && (
+                      <div style={{ marginTop: 12, padding: "10px 12px", background: `${T.amber}0a`, border: `1px solid ${T.amber}44`, borderRadius: 7 }}>
+                        <Lbl>WHAT WOULD HAVE HAPPENED IN {replay.year} · "{stratName}" OPENED IN {MONTHS[NOW_MONTH].toUpperCase()}</Lbl>
+                        <div style={{ display: "grid", gap: 4, marginTop: 8 }}>
+                          {replay.steps.map((st2) => (
+                            <div key={st2.m} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                              <span style={{ ...mono, fontSize: 10, color: T.dim, width: 58 }}>{st2.label}</span>
+                              <span style={{ ...mono, fontSize: 11, color: T.ink }}>${st2.S.toFixed(2)}</span>
+                              <span style={{ ...mono, fontSize: 11, fontWeight: 700, color: st2.pnl >= 0 ? T.green : T.red, width: 60 }}>{fmt$(st2.pnl)}</span>
+                              <span style={{ fontSize: 11.5, color: T.body }}>{st2.note}</span>
+                            </div>
+                          ))}
+                        </div>
+                        <div style={{ fontSize: 12.5, color: T.ink, fontWeight: 700, marginTop: 8 }}>
+                          Following your rules: {fmt$(replay.finale)} {replay.closed ? `(${replay.closed.why} in month ${replay.closed.i})` : "(held to expiry)"}
+                        </div>
+                        <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 4 }}>Replayed on real monthly returns. The point is to watch the rules work before you rely on them.</div>
                       </div>
-                      {(() => {
-                        const sc = scaleStrategy(a, optMode, optAmt);
-                        if (!sc) return <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6 }}>Cannot scale this one (unlimited profit or no defined risk): judge it at a single contract.</div>;
-                        if (!sc.ok) return <div style={{ ...mono, fontSize: 10.5, color: T.red, marginTop: 6 }}>✗ Not enough budget: one of these {sc.isCredit ? `ties up ${fmt$(sc.unit)} of risk` : `costs ${fmt$(sc.unit)} to buy`}.</div>;
+                    )}
+                    <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 8 }}>
+                      Simulated with {seasonal[ticker] ? "real" : "estimated"} seasonal drift and {(seas.sigma * 100).toFixed(0)}% volatility. A simplified model: no price jumps, no volatility term structure.
+                    </div>
+                  </>
+                ) : (
+                  <div style={{ ...mono, fontSize: 12, color: T.mut, marginTop: 10 }}>Press "Run it" for the odds, the spread of outcomes, and what happened in each of the last ten years.</div>
+                )}
+              </Panel>
+            </div>
+            )}
+            {ev === "copilot" && (
+              <CopilotTab
+                apiKey={"server"}
+                convo={copilot} setConvo={setCopilot} onAnalysis={logAnalysis}
+                ctx={{ store, scan, news: news[ticker]?.items || [], ticker, legs, expKey, A, spot, seasonalSrc: seas.src, setMsg }}
+              />
+            )}
+          </EvidenceOverlay>
+        )}
+
+        {/* ============ STEP 1 · RADAR — THE MACRO VIEW ============
+             Which markets have something worth looking at today, and which do
+             not and why. This was an evidence panel that appended to the Build
+             page; it is a step now, because "which market" is a decision and a
+             decision is not evidence for something else. */}
+        {tab === "build" && !showSettings && step === "radar" && (
+          <div style={{ marginTop: 12 }}>
+            <div style={{ ...sansUI, fontSize: 19, fontWeight: 800, color: T.ink, marginTop: 4 }}>
+              Step 1 — where is there something today?
+            </div>
+            <div style={{ ...sansUI, fontSize: 14, color: T.mut, lineHeight: 1.55, marginTop: 4 }}>
+              Every market in the basket, read by the four factors, and — once you search — what each one
+              actually produced after the quality floors. {qualityFloorSentence()}
+            </div>
+
+            {/* What the guided run examined, in English. It used to sit on the
+                verdict screen above the two roads; it belongs here, where the
+                question is which market rather than which structure. */}
+            {guided && verdict.length > 0 && (
+              <Panel style={{ marginTop: 12 }}>
+                <Lbl>WHAT I LOOKED AT · FROM YOUR ANSWERS</Lbl>
+                <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
+                  {verdict.map((para, i) => (
+                    <p key={i} style={{ ...sansUI, fontSize: 14, color: T.body, lineHeight: 1.6, margin: 0 }}>{para}</p>
+                  ))}
+                </div>
+                <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 8 }}>
+                  {candidates.length} road{candidates.length === 1 ? "" : "s"} came out of it, and they are waiting on step 2.
+                </div>
+              </Panel>
+            )}
+
+            <Panel style={{ marginTop: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+                <Lbl>EVERY MARKET · 4-FACTOR SIGNAL · {MONTHS[NOW_MONTH].toUpperCase()}</Lbl>
+                <Btn small ghost onClick={async () => { setBusy("all"); for (const tk of BASKET) await refreshChain(tk, true); setBusy(null); setMsg("All markets refreshed."); }}>
+                  <RefreshCw size={11} /> Refresh all
+                </Btn>
+              </div>
+              <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
+                {/* THE BASKET, not every symbol in the table. SPY is there so
+                    the desk can price a hedge; the path does not go looking for
+                    it, and a row for it on the Radar reads as a sixth market to
+                    trade (CLAUDE.md, the basket). */}
+                {scan.filter((r) => BASKET.includes(r.tk)).map((r, i) => {
+                  const sObj = SENTIMENTS.find((s) => s.id === r.sugg);
+                  const f = marketFacts[r.tk] || { n: 0 };
+                  const best = f.best || null;
+                  return (
+                    <div key={r.tk} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: T.bg, border: `1px solid ${ticker === r.tk ? T.amber : T.line}`, borderRadius: 7, flexWrap: "wrap" }}>
+                      <span style={{ ...mono, fontSize: 11, color: T.dim, width: 18 }}>#{i + 1}</span>
+                      {/* The shape of the best thing found here, at a glance. */}
+                      {best && (
+                        <BandThumbnail bands={payoffBands({ legs: best.legs, entryNet: best.entryNet, spot: best.spot })}
+                          bars={barsCache[r.tk] || []} width={110} height={40}
+                          title={bandTakeaway(payoffBands({ legs: best.legs, entryNet: best.entryNet, spot: best.spot }), { ticker: r.tk })} />
+                      )}
+                      <div style={{ flex: 1, minWidth: 150 }}>
+                        <div style={{ fontWeight: 700, color: T.ink, fontSize: 14 }}>{r.tk} <span style={{ color: T.dim, fontWeight: 400, fontSize: 11 }}>{r.name}</span></div>
+                        <div style={{ ...mono, fontSize: 10.5, color: T.mut }}>
+                          seasonal {r.seasonalScore > 0 ? "+" : ""}{r.seasonalScore.toFixed(1)}%/mo {r.real ? "(10y history)" : "(estimate)"} · {r.spot ? `$${r.spot.toFixed(2)}` : "prices not loaded"}{ta[r.tk] ? ` · trend ${ta[r.tk].trend > 0 ? "↑" : ta[r.tk].trend < 0 ? "↓" : "→"} RSI ${ta[r.tk].rsi.toFixed(0)}` : ""}
+                        </div>
+                        {/* What the search actually found here. An empty market
+                            NEVER appears as a blank row: it says which floor
+                            emptied it, or that nobody has searched it yet. */}
+                        <div style={{ ...mono, fontSize: 10.5, color: f.n > 0 ? T.green : f.cut ? T.amber : T.dim, marginTop: 2 }}>
+                          {f.n > 0
+                            ? `${f.n} structure${f.n === 1 ? "" : "s"} cleared the floors here${f.roads ? ` · ${f.roads} of them a road from your answers` : ""}`
+                            : f.cut
+                              ? "nothing here cleared the quality floors today"
+                              : "not searched yet — use the search below, or answer the three questions"}
+                          {f.oiSkipped ? " · open interest unknown on this feed, so that floor was skipped" : ""}
+                        </div>
+                      </div>
+                      {r.fused && (() => {
+                        const c = r.conflict ? T.red : r.agreement === "CONFLUENT" ? T.green : T.blue;
                         return (
-                          <div style={{ display: "flex", gap: 14, marginTop: 8, flexWrap: "wrap", padding: "6px 8px", background: `${T.amber}0d`, borderRadius: 5 }}>
-                            <Stat k="HOW MANY" v={`×${sc.n}`} c={T.amber} />
-                            <Stat k={sc.isCredit ? "YOU RECEIVE" : "YOU PAY"} v={fmt$(sc.totPrem)} c={sc.isCredit ? T.green : T.ink} />
-                            <Stat k="MOST YOU CAN LOSE" v={fmt$(sc.totRisk)} c={T.red} />
-                            <Stat k="MOST YOU CAN MAKE" v={fmt$(sc.totProfit)} c={T.green} />
-                            {pop != null && <Stat k="PROFIT × CHANCE" v={fmt$(sc.totProfit * pop)} c={T.blue} />}
-                            <Stat k={optMode === "target" ? "HITS THE TARGET" : "BUDGET USED"} v={optMode === "target" ? (sc.totProfit >= optAmt ? "✓ yes" : "✗ no") : `${((sc.n * sc.unit / Math.max(1, optAmt)) * 100).toFixed(0)}%`} c={T.blue} />
-                            <div style={{ ...mono, fontSize: 9, color: T.dim, width: "100%" }}>Totals for ×{sc.n} · Build always shows one, so divide by {sc.n} to compare.</div>
-                          </div>
+                          <span title={r.fused.narrative} style={{ ...mono, fontSize: 9.5, color: c, border: `1px solid ${c}66`, padding: "3px 8px", borderRadius: 5, cursor: "help" }}>
+                            {r.agreement} · {r.signalScore > 0 ? "+" : ""}{r.signalScore}/100 · conf {r.confidence}
+                          </span>
                         );
                       })()}
+                      <span style={{ ...mono, fontSize: 10, color: sObj.color, border: `1px solid ${sObj.color}66`, padding: "3px 8px", borderRadius: 5 }}>{sObj.icon} {sObj.label.toUpperCase()}</span>
+                      <Btn small ghost={ticker !== r.tk} onClick={() => { switchTicker(r.tk); setSentiment(r.sugg); goStep("shortlist"); }}>
+                        Look at {r.tk} →
+                      </Btn>
                     </div>
                   );
                 })}
               </div>
-              <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px dashed ${T.line}` }}>
+              <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 10 }}>
+The order weighs the 4-factor signal (seasonality, price trend, weather, news): CONFLICT markets stay last regardless. Tap the badge for the full narrative, or open Why this market above for the four readings and what is behind them. Under History, "Real 10y seasonality" replaces the estimates with ten years of actual data for that market.
+              </div>
+            </Panel>
+
+              <Panel style={{ marginTop: 12 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-                  <Lbl>3 · COMPARE MARKETS · USES THE DIRECTION YOU PICKED ABOVE</Lbl>
+                  <Lbl>SEARCH SEVERAL MARKETS AT ONCE · WHAT SURVIVES THE FLOORS</Lbl>
                   <Btn small onClick={runMultiScan} disabled={multi.busy}><Radar size={11} /> {multi.busy ? "Searching…" : "Search the selected markets"}</Btn>
                 </div>
                 <div style={{ display: "flex", gap: 12, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -2006,7 +2195,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   <span style={{ ...mono, fontSize: 9.5, color: T.dim }}>change the horizon, then search again</span>
                 </div>
                 <div style={{ display: "flex", gap: 5, marginTop: 8, flexWrap: "wrap" }}>
-                  {Object.keys(UNDERLYINGS).map((tk) => (
+                  {BASKET.map((tk) => (
                     <Btn key={tk} small ghost={!multi.sel.includes(tk)}
                       onClick={() => setMulti((m) => ({ ...m, sel: m.sel.includes(tk) ? m.sel.filter((x) => x !== tk) : [...m.sel, tk] }))}>
                       {tk}
@@ -2061,19 +2250,353 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                         <Stat k="EV/$100" v={`${r.ev100 >= 0 ? "+" : ""}$${r.ev100.toFixed(0)}`} c={r.ev100 >= 0 ? T.green : T.red} />
                         <Stat k="RANK" v={`${r.rank >= 0 ? "+" : ""}${r.rank.toFixed(0)}`} c={r.conflict ? T.red : T.amber} />
                         <Stat k="MAX TOT" v={fmt$(r.n * r.a.maxProfit)} c={T.green} />
-                        <Btn small ghost onClick={() => openOnBuild({ ticker: r.tk, expKey: r.expKey, legs: r.legs, name: `${r.name} (multi)` })}>Build →</Btn>
+                        {/* A hit here hands the MARKET to step 2, where the
+                            structures on it are compared and kept. Radar
+                            answers "which market"; the Shortlist answers
+                            "which structure", and jumping from here straight
+                            to Build would skip the second question. */}
+                        <Btn small ghost={ticker !== r.tk} onClick={() => { switchTicker(r.tk); setSentiment(r.sent); setExpKey(r.expKey); goStep("shortlist"); }}>
+                          Look at {r.tk} →
+                        </Btn>
                       </div>
                     ))}
                   </div>
                 )}
+              </Panel>
+
+            <StepForward
+              label={`See the shortlist for ${ticker} \u2192`}
+              sub={`Step 2 is every structure that clears the floors on ${ticker} today, where up to ${MAX_COMPARE} of them can be put side by side.`}
+              onClick={() => goStep("shortlist")} />
+          </div>
+        )}
+
+        {/* ============ STEP 2 · SHORTLIST — THE CANDIDATES THAT SURVIVED ============
+             What clears the quality floors on the market carried from step 1,
+             plus the roads the guided run produced. Up to three of them can be
+             put side by side, and any of them kept for later. */}
+        {tab === "build" && !showSettings && step === "shortlist" && !spot && (
+          <Panel style={{ marginTop: 12 }}>
+            <div style={{ ...mono, fontSize: 12, color: T.mut }}>
+              The shortlist is built out of real {ticker} contracts, and they have not loaded yet. Press Refresh
+              at the top of the screen, or go back to step 1 and pick a market whose prices are in.
+            </div>
+            <div style={{ marginTop: 10 }}><Btn small ghost onClick={() => goStep("radar")}>← Back to step 1</Btn></div>
+          </Panel>
+        )}
+
+        {tab === "build" && !showSettings && step === "shortlist" && spot && (
+          <div style={{ marginTop: 12 }}>
+            <div style={{ ...sansUI, fontSize: 19, fontWeight: 800, color: T.ink, marginTop: 4 }}>
+              Step 2 — which structure, on {ticker}?
+            </div>
+            <div style={{ ...sansUI, fontSize: 14, color: T.mut, lineHeight: 1.55, marginTop: 4 }}>
+              Everything below already clears the quality floors. Tick up to {MAX_COMPARE} to see them on one
+              picture, keep any of them for later, and take one to step 3 when you have chosen.
+            </div>
+
+            {/* THE ROADS FROM THE GUIDED RUN, on the step where candidates live.
+                This is the same verdict screen the guided flow used to jump to,
+                with its narrative moved to step 1: what was examined is a
+                question about markets, what to do about it is a question about
+                structures, and they are now on the steps that ask them. */}
+            {candidates.length > 0 && (
+              <div style={{ marginTop: 10, padding: "10px 12px", background: `${T.violet}0d`, border: `1px solid ${T.violet}44`, borderRadius: 8 }}>
+                <div style={{ ...mono, fontSize: 10, letterSpacing: "0.15em", color: T.violet }}>
+                  FROM YOUR ANSWERS · {candidates.length} ROAD{candidates.length === 1 ? "" : "S"}
+                </div>
+                <WizardCandidates
+                  candidates={candidates} answers={wiz} narrative={[]}
+                  barsFor={(tk) => barsCache[tk] || []}
+                  weatherData={weather} newsItems={newsPool} month={NOW_MONTH}
+                  onPick={pickRoad}
+                  onBack={() => { setView("wizard"); setWizStep("questions"); }}
+                  actionsFor={(c) => {
+                    const cand = candidateOf(c, { source: "road" });
+                    return (
+                      <CandidateActions
+                        ticked={inCompare(compare, cand)} onTick={() => tickCompare(cand)}
+                        saved={isSaved(cand)} onSave={() => saveCandidate(cand)} />
+                    );
+                  }}
+                />
+              </div>
+            )}
+
+            <Panel style={{ marginTop: 12 }}>
+              <Lbl>1 · WHICH WAY DO YOU THINK IT GOES?</Lbl>
+              <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
+                {SENTIMENTS.map((s) => (
+                  <button key={s.id} onClick={() => setSentiment(s.id)}
+                    style={{
+                      ...mono, fontSize: 11, padding: "10px 12px", borderRadius: 24, cursor: "pointer", flex: "1 1 auto",
+                      background: sentiment === s.id ? s.color : "transparent",
+                      color: sentiment === s.id ? T.onAccent : s.color,
+                      border: `1.5px solid ${s.color}`, fontWeight: 700,
+                    }}>
+                    {s.icon} {s.label}
+                  </button>
+                ))}
+              </div>
+              <div style={{ display: "flex", gap: 16, marginTop: 12, alignItems: "center", flexWrap: "wrap" }}>
+                <Stat k="IMPLIED TARGET" v={`$${(spot * (1 + SENT.tgt)).toFixed(2)} (${SENT.tgt >= 0 ? "+" : ""}${(SENT.tgt * 100).toFixed(0)}%)`} c={T.blue} />
+                <div>
+                  <div style={{ ...mono, fontSize: 9.5, color: T.dim }}>SIZE BY</div>
+                  <div style={{ display: "flex", gap: 4 }}>
+                    <Btn small ghost={optMode !== "budget"} onClick={() => setOptMode("budget")}>What I can spend</Btn>
+                    <Btn small ghost={optMode !== "target"} onClick={() => setOptMode("target")}>What I want to make</Btn>
+                  </div>
+                </div>
+                <div>
+                  <div style={{ ...mono, fontSize: 9.5, color: T.dim }}>{optMode === "budget" ? "MOST I WILL RISK ($)" : "PROFIT I AM AIMING FOR ($)"}</div>
+                  <Inp type="number" min={50} step={50} value={optAmt} onChange={(e) => setOptAmt(Math.max(0, +e.target.value))} style={{ width: 100 }} />
+                </div>
+                {chain && (
+                  <div>
+                    <div style={{ ...mono, fontSize: 9.5, color: T.dim }}>EXPIRY</div>
+                    <select value={expKey || ""} onChange={(e) => setExpKey(e.target.value)}
+                      style={{ ...mono, background: T.bg, color: T.ink, border: `1px solid ${T.line}`, borderRadius: 5, padding: "5px 8px", fontSize: 12 }}>
+                      {chain.expirations.map((e) => (
+                        <option key={e} value={e}>{e} · {chain.byExp[e].dte} DTE</option>
+                      ))}
+                    </select>
+                    {chain.expirations.length <= 4 && (
+                      <div style={{ ...mono, fontSize: 9, color: T.dim, marginTop: 3, maxWidth: 220 }}>
+                        These are every expiry {feedName(chain) || "the feed"} lists for {ticker} — this ETF only has monthly ones, it is not a limit of the app.
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </Panel>
+
+            {/* The four readings are EVIDENCE, and evidence opens over the step
+                rather than lengthening it (PRD §12). The panel itself is
+                unchanged and still the only copy — it moved, it was not cut. */}
+            <button onClick={() => setEv("why")}
+              style={{
+                ...sansUI, width: "100%", textAlign: "left", marginTop: 10, padding: "10px 12px",
+                background: T.panel, border: `1px solid ${T.line}`, borderLeft: `3px solid ${T.blue}`,
+                borderRadius: 8, cursor: "pointer", minHeight: 52,
+              }}>
+              <span style={{ ...mono, fontSize: 10, letterSpacing: "0.15em", color: T.blue }}>WHY THIS MARKET · {ticker}</span>
+              <span style={{ display: "block", fontSize: 13.5, color: T.body, marginTop: 3, lineHeight: 1.5 }}>
+                {fused[ticker]
+                  ? `${fused[ticker].agreement} · ${fused[ticker].score > 0 ? "+" : ""}${fused[ticker].score}/100 with ${fused[ticker].confidence} confidence — open the four readings, the weather regions and the headlines behind them.`
+                  : "Open the four readings — seasonality, price trend, weather and news flow — and what is behind each one."}
+              </span>
+            </button>
+
+            <Panel style={{ marginTop: 10 }}>
+              <Lbl>2 · {SENT.label.toUpperCase()} STRATEGIES — {ticker} · PRICED FROM THE LIVE CHAIN</Lbl>
+              {/* THE QUALITY FLOORS, before anything is drawn. A structure that
+                  fails one is never rendered as an option — but the count of
+                  what went and why is, because a list that silently shortens
+                  itself teaches nothing and looks broken. */}
+              {shortlist.cut.length > 0 && (
+                <div style={{ ...mono, fontSize: 10.5, color: T.amber, marginTop: 8, lineHeight: 1.6, padding: "8px 10px", background: `${T.amber}0f`, border: `1px solid ${T.amber}44`, borderRadius: 6 }}>
+                  {shortlist.cut.length} of {shortlist.cut.length + shortlist.rows.length} structures for this
+                  direction did not clear the quality floors and are not shown:
+                  <div style={{ marginTop: 4 }}>
+                    {shortlist.cut.map((c) => <div key={c.name}>· {c.name} — {c.reasons[0]}</div>)}
+                  </div>
+                </div>
+              )}
+              {shortlist.rows.length === 0 && (
+                <div style={{ ...mono, fontSize: 11, color: T.red, marginTop: 8, lineHeight: 1.6 }}>
+                  Nothing on {ticker} clears the quality floors at this expiry today. That is an answer, not an
+                  empty screen: {qualityFloorSentence()}
+                </div>
+              )}
+              {shortlist.oiSkipped && (
+                <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 8, lineHeight: 1.6 }}>
+                  {liquiditySkippedNote(feedName(chain))}
+                </div>
+              )}
+              <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
+                {shortlist.rows.map(({ p, a }) => {
+                  const rr = a.maxProfit > 0 && a.maxLoss < 0 ? (a.maxProfit / Math.abs(a.maxLoss)) : null;
+                  const ivAvg = a.legPx.reduce((x, y) => x + y.iv, 0) / Math.max(1, a.legPx.length);
+                  const pop = probProfit(a.curve, spot, ivAvg, dte);
+                  // One shape for everything that can be compared or kept
+                  // (src/path.js), so a road, a shortlist row and a
+                  // multi-market hit are the same kind of thing here.
+                  const bands = payoffBands({ legs: p.legs, entryNet: a.entry, spot });
+                  const cand = candidateOf({ name: p.name, legs: p.legs, a, pop, dte, expKey },
+                    { ticker, spot, sigma: seas.sigma, source: "shortlist" });
+                  return (
+                    <div key={p.name} style={{ padding: "10px 12px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+                        <div style={{ fontWeight: 700, color: T.ink, fontSize: 13.5 }}>
+                          {p.name}{" "}
+                          <span style={{ ...mono, fontSize: 9, color: a.realCount === p.legs.length ? T.green : T.amber }}>
+                            {a.realCount === p.legs.length ? "● live prices" : `◐ ${a.realCount}/${p.legs.length} live`}
+                          </span>
+                        </div>
+                      </div>
+                      <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 4 }}>
+                        {p.legs.map((l) => `${l.side > 0 ? "+" : "−"}${l.qty} ${l.strike}${l.type === "call" ? "C" : "P"}`).join(" / ")}
+                      </div>
+                      {/* The thumbnail says where the trade pays against where
+                          the market has been; the gauge says the same thing as
+                          one arc with the needle on today. Both are cut from
+                          the same bands, so they cannot disagree. */}
+                      <div style={{ display: "flex", gap: 12, marginTop: 6, flexWrap: "wrap", alignItems: "center" }}>
+                        <BandThumbnail bands={bands} bars={barsCache[ticker] || []} width={220} height={40}
+                          title={bandTakeaway(bands, { ticker })} />
+                        <Gauge bands={bands} size={128} ticker={ticker} />
+                      </div>
+                      <div style={{ display: "flex", gap: 14, marginTop: 8, flexWrap: "wrap" }}>
+                        <Stat k={a.entry >= 0 ? "YOU PAY" : "YOU RECEIVE"} v={fmt$(Math.abs(a.entry) * 100)} />
+                        <Stat k="MAX PROFIT" v={fmt$(a.maxProfit)} c={T.green} />
+                        <Stat k="MAX LOSS" v={fmt$(a.maxLoss)} c={T.red} />
+                        <Stat k="R/R" v={rr ? rr.toFixed(2) : "—"} c={T.amber} />
+                        <Stat k="CHANCE" v={pop != null ? `${(pop * 100).toFixed(0)}%` : "—"} c={pop >= 0.5 ? T.green : T.violet} />
+                        <Stat k="BREAKEVEN" v={a.breakevens.map((b) => b.toFixed(2)).join(" · ") || "—"} c={T.blue} />
+                      </div>
+                      {(() => {
+                        const sc = scaleStrategy(a, optMode, optAmt);
+                        if (!sc) return <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6 }}>Cannot scale this one (unlimited profit or no defined risk): judge it at a single contract.</div>;
+                        if (!sc.ok) return <div style={{ ...mono, fontSize: 10.5, color: T.red, marginTop: 6 }}>✗ Not enough budget: one of these {sc.isCredit ? `ties up ${fmt$(sc.unit)} of risk` : `costs ${fmt$(sc.unit)} to buy`}.</div>;
+                        return (
+                          <div style={{ display: "flex", gap: 14, marginTop: 8, flexWrap: "wrap", padding: "6px 8px", background: `${T.amber}0d`, borderRadius: 5 }}>
+                            <Stat k="HOW MANY" v={`×${sc.n}`} c={T.amber} />
+                            <Stat k={sc.isCredit ? "YOU RECEIVE" : "YOU PAY"} v={fmt$(sc.totPrem)} c={sc.isCredit ? T.green : T.ink} />
+                            <Stat k="MOST YOU CAN LOSE" v={fmt$(sc.totRisk)} c={T.red} />
+                            <Stat k="MOST YOU CAN MAKE" v={fmt$(sc.totProfit)} c={T.green} />
+                            {pop != null && <Stat k="PROFIT × CHANCE" v={fmt$(sc.totProfit * pop)} c={T.blue} />}
+                            <Stat k={optMode === "target" ? "HITS THE TARGET" : "BUDGET USED"} v={optMode === "target" ? (sc.totProfit >= optAmt ? "✓ yes" : "✗ no") : `${((sc.n * sc.unit / Math.max(1, optAmt)) * 100).toFixed(0)}%`} c={T.blue} />
+                            <div style={{ ...mono, fontSize: 9, color: T.dim, width: "100%" }}>Totals for ×{sc.n} · Build always shows one, so divide by {sc.n} to compare.</div>
+                          </div>
+                        );
+                      })()}
+                      <div style={{ marginTop: 8 }}>
+                        <CandidateActions
+                          ticked={inCompare(compare, cand)} onTick={() => tickCompare(cand)}
+                          saved={isSaved(cand)} onSave={() => saveCandidate(cand)}
+                          onBuild={() => applyPreset(p, a)} />
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
               <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 8 }}>Budget is the most you will pay, taken from live {feedName(chain) || "market"} prices. For trades where you receive money up front, the limit becomes the capital tied up instead. Chance is the probability of ending in profit at expiry. {limits.answered ? "Your" : "The suggested"} per-trade limit: {money(limits.perTradeLimit)} ({perTradeCapLabel()}). {qualityFloorSentence()}</div>
             </Panel>
+
+            {/* WHAT THE WIDE SEARCH FOUND ON THIS MARKET. The multi-market
+                scan runs on step 1, where the question is which market; its
+                hits for the market you carried in belong here, where the
+                question is which structure. */}
+            {(multi.res || []).filter((r) => r.tk === ticker).length > 0 && (
+              <Panel style={{ marginTop: 10 }}>
+                <Lbl>ALSO FOUND BY THE WIDE SEARCH ON {ticker}</Lbl>
+                <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
+                  {(multi.res || []).filter((r) => r.tk === ticker).map((r, i) => {
+                    const cand = candidateOf({ name: r.name, legs: r.legs, a: r.a, pop: r.pop, dte: r.dte, expKey: r.expKey },
+                      { ticker: r.tk, spot: r.spot, sigma: (seasonal[r.tk]?.sigma) || getU(r.tk).sigma, source: "wide search" });
+                    const bands = payoffBands({ legs: r.legs, entryNet: r.a.entry, spot: r.spot });
+                    return (
+                      <div key={`${r.name}-${i}`} style={{ padding: "10px 12px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7 }}>
+                        <div style={{ fontWeight: 700, color: T.ink, fontSize: 13 }}>{r.name}</div>
+                        <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 3 }}>{legsLine(r.legs)} · {r.expKey} · {r.dte} DTE</div>
+                        <div style={{ display: "flex", gap: 12, marginTop: 6, flexWrap: "wrap", alignItems: "center" }}>
+                          <BandThumbnail bands={bands} bars={barsCache[r.tk] || []} width={200} height={40} title={bandTakeaway(bands, { ticker: r.tk })} />
+                          <Gauge bands={bands} size={112} ticker={r.tk} />
+                        </div>
+                        <div style={{ display: "flex", gap: 14, marginTop: 8, flexWrap: "wrap" }}>
+                          <Stat k="CHANCE" v={`${(r.pop * 100).toFixed(0)}%`} c={r.pop >= 0.5 ? T.green : T.violet} />
+                          <Stat k="MAX PROFIT" v={fmt$(r.a.maxProfit)} c={T.green} />
+                          <Stat k="MAX LOSS" v={fmt$(r.a.maxLoss)} c={T.red} />
+                          <Stat k="EV/$100" v={`${r.ev100 >= 0 ? "+" : ""}$${r.ev100.toFixed(0)}`} c={r.ev100 >= 0 ? T.green : T.red} />
+                        </div>
+                        <div style={{ marginTop: 8 }}>
+                          <CandidateActions
+                            ticked={inCompare(compare, cand)} onTick={() => tickCompare(cand)}
+                            saved={isSaved(cand)} onSave={() => saveCandidate(cand)}
+                            onBuild={() => openOnBuild({ ticker: r.tk, expKey: r.expKey, legs: r.legs, name: r.name })} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </Panel>
+            )}
+
+            {/* KEPT FOR LATER — the same `store.saved` array the Build screen
+                writes to, so there is one place saved things live. */}
+            {(store.saved || []).length > 0 && (
+              <Panel style={{ marginTop: 10 }}>
+                <Lbl>KEPT TO COME BACK TO ({store.saved.length})</Lbl>
+                <div style={{ display: "grid", gap: 6, marginTop: 10 }}>
+                  {[...store.saved].reverse().map((sv) => {
+                    const cand = candidateFromSaved(sv);
+                    return (
+                      <div key={sv.id} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "8px 10px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7 }}>
+                        <div style={{ flex: 1, minWidth: 150 }}>
+                          <div style={{ fontWeight: 700, color: T.ink, fontSize: 12.5 }}>{sv.ticker} · {sv.name}</div>
+                          <div style={{ ...mono, fontSize: 10, color: T.dim }}>{legsLine(sv.legs)}{sv.expKey ? ` · ${sv.expKey}` : ""} · {savedAge(sv)}</div>
+                        </div>
+                        {cand && Number.isFinite(cand.spot) && (
+                          <button onClick={() => tickCompare(cand)}
+                            style={{ ...mono, fontSize: 10.5, minHeight: 36, padding: "6px 10px", borderRadius: 6, cursor: "pointer", background: inCompare(compare, cand) ? T.blue : "transparent", color: inCompare(compare, cand) ? T.onAccent : T.blue, border: `1px solid ${T.blue}` }}>
+                            {inCompare(compare, cand) ? "✓ comparing" : "Compare"}
+                          </button>
+                        )}
+                        <Btn small ghost onClick={() => openOnBuild({ ticker: sv.ticker, expKey: sv.expKey, legs: sv.legs, name: sv.name })}>Take to Build →</Btn>
+                        <Btn small ghost color={T.red} onClick={() => delSaved(sv.id)}><Trash2 size={11} /></Btn>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 8 }}>
+                  These are kept in this browser and travel with your saved strategies. The prices shown are the
+                  ones from when you kept them; taking one to Build re-prices it from the live chain.
+                </div>
+              </Panel>
+            )}
+
+            {/* COMPARING — up to three, one picture (PRD §6): the payoffs
+                overlaid on one axis with one shared distribution and every
+                breakeven marked. Ticking gathers them here. */}
+            <CompareTray items={compare} max={MAX_COMPARE} note={compareNote}
+              onRemove={(c) => tickCompare(c)}
+              onClear={() => { setCompare([]); setShowCompare(false); setCompareNote(null); }}
+              onCompare={() => setShowCompare((v) => !v)} showing={showCompare} />
+            {showCompare && compare.length >= 2 && (
+              <Panel style={{ marginTop: 10 }}>
+                <Lbl>{compare.length} SIDE BY SIDE · SAME AXIS, SAME PICTURE</Lbl>
+                <div style={{ marginTop: 10 }}>
+                  <CompareFigure items={compare} height={300} />
+                </div>
+                <div style={{ display: "grid", gap: 6, marginTop: 12 }}>
+                  {compare.map((c, i) => (
+                    <div key={c.key} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "8px 10px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7 }}>
+                      <span style={{ width: 10, height: 10, borderRadius: 3, background: [T.blue, T.amber, T.violet][i], flexShrink: 0 }} />
+                      <div style={{ flex: 1, minWidth: 140 }}>
+                        <div style={{ fontWeight: 700, color: T.ink, fontSize: 12.5 }}>{c.ticker} · {c.name}</div>
+                        <div style={{ ...mono, fontSize: 10, color: T.dim }}>{legsLine(c.legs)}</div>
+                      </div>
+                      <Stat k="RISK" v={fmt$(c.risk)} c={T.red} />
+                      <Stat k="MAX PROFIT" v={fmt$(c.maxProfit)} c={T.green} />
+                      <Stat k="CHANCE" v={c.pop != null ? `${(c.pop * 100).toFixed(0)}%` : "—"} c={(c.pop || 0) >= 0.5 ? T.green : T.violet} />
+                      <Btn small onClick={() => openOnBuild({ ticker: c.ticker, expKey: c.expKey, legs: c.legs, name: c.name })}>Take to Build →</Btn>
+                    </div>
+                  ))}
+                </div>
+              </Panel>
+            )}
 
             {/* The floor, held up against the chains it is applied to. The
                 developer cannot fetch a live chain; the app can, so it reports.
                 See OpenInterestReadout above. */}
             <OpenInterestReadout chains={chains} floor={RULES.minOpenInterestPerLeg} />
+
+            <StepForward
+              label={legs.length ? `Go to Build \u2014 ${stratName} \u2192` : "Pick one above to go to Build"}
+              disabled={!legs.length}
+              disabledNote={`Step 3 is one structure taken apart. Use "Take to Build" on whichever of these you want to look at properly \u2014 nothing is sent until the checks at the bottom of that screen.`}
+              sub={`${stratName} is loaded on step 3. Nothing is sent until the checks at the bottom of that screen.`}
+              onClick={() => goStep("build")} />
           </div>
         )}
 
@@ -2088,204 +2611,40 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
            Shortlist worked only because they happened to sit next to the strip.
            All five now open directly under the button that opened them. */}
 
-        {/* An evidence panel that needs prices and has none must SAY so. Rendering
-            nothing at all is the same failure as rendering below the fold: the
-            user taps, the screen does not change, and the app has no answer. */}
-        {tab === "build" && !showSettings && (ev === "history" || ev === "shortlist") && !spot && (
-          <Panel style={{ marginTop: 12 }}>
-            <div style={{ ...mono, fontSize: 12, color: T.mut }}>
-              {ev === "history"
-                ? `The seasonality chart, the 8,000-run simulation and the year-by-year replay are all drawn from ${ticker}'s own prices, and they have not loaded yet.`
-                : `The shortlist is built out of real ${ticker} contracts, and they have not loaded yet.`}
-              {" "}Press Refresh at the top of the screen.
-            </div>
-          </Panel>
-        )}
+        {/* THE EVIDENCE SHEETS ARE NOT WRITTEN HERE ANY MORE.
+            Market levels, History and the Copilot used to be written after the
+            whole builder block, so opening one rendered it ~2000px down a page
+            that does not scroll: on a phone the tap looked like it did nothing,
+            which is how "History and Copilot are broken" was reported. They now
+            render inside `EvidenceOverlay` at the top of this screen — fixed to
+            the viewport, so where they sit in the tree cannot put them below the
+            fold, and opening one covers the step instead of lengthening it. */}
 
-        {tab === "build" && !showSettings && ev === "levels" && (
-          <Panel style={{ marginTop: 12 }}>
-            <Lbl>WHERE THE MARKET IS POSITIONED (OPEN INTEREST)</Lbl>
-            {!oiGrid && <div style={{ ...mono, fontSize: 12, color: T.mut, padding: 30, textAlign: "center" }}>
-              {!chain ? "Press Refresh at the top to load the prices first."
-                : !hasOpenInterest(chain) ? `Open interest is not part of the ${chain.source} feed. It is fetched separately from the broker\u2019s contract list, and that has not come back \u2014 so this panel has nothing to draw yet.`
-                : "Not enough strikes near today's price to draw this."}
-            </div>}
-            {oiGrid && (
-              <div style={{ height: 190, marginTop: 10 }}>
-                <ResponsiveContainer>
-                  <BarChart data={oiGrid.strikes.map((k, j) => ({ k, put: -oiGrid.oiPutTot[j], call: oiGrid.oiCallTot[j] }))} margin={{ top: 4, right: 4, bottom: 0, left: 0 }} stackOffset="sign">
-                    <XAxis dataKey="k" stroke={T.dim} tick={{ fontSize: 9, fontFamily: "monospace" }} />
-                    <YAxis stroke={T.dim} tick={{ fontSize: 9, fontFamily: "monospace" }} width={44} tickFormatter={(v) => Math.abs(v)} />
-                    <Tooltip contentStyle={{ background: T.panel, border: `1px solid ${T.line}`, fontFamily: "monospace", fontSize: 11 }} formatter={(v, n2) => [Math.abs(v), n2 === "put" ? "put contracts" : "call contracts"]} />
-                    <ReferenceLine y={0} stroke={T.mut} />
-                    {spot && <ReferenceLine x={oiGrid.strikes.reduce((b2, k) => Math.abs(k - spot) < Math.abs(b2 - spot) ? k : b2, oiGrid.strikes[0])} stroke={T.amber} strokeDasharray="4 3" />}
-                    <Bar dataKey="put" fill={`${T.green}bb`} stackId="a" />
-                    <Bar dataKey="call" fill={`${T.red}bb`} stackId="a" />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            )}
-            {oiGrid && <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 2 }}>Green bars below zero are where put buyers cluster — prices tend to hold there. Red bars above are where call buyers cluster — prices tend to stall there. The amber line is today's price.</div>}
-            {lv && (
-              <div style={{ display: "flex", gap: 20, marginTop: 10, flexWrap: "wrap" }}>
-                <div>
-                  <div style={{ ...mono, fontSize: 10, color: T.green }}>PRICES THAT TEND TO HOLD</div>
-                  <div style={{ ...mono, fontSize: 14, fontWeight: 700, color: T.ink }}>{lv.supports.map((x) => `$${x}`).join(" · ") || "—"}</div>
-                </div>
-                <div>
-                  <div style={{ ...mono, fontSize: 10, color: T.red }}>PRICES THAT TEND TO STALL</div>
-                  <div style={{ ...mono, fontSize: 14, fontWeight: 700, color: T.ink }}>{lv.resistances.map((x) => `$${x}`).join(" · ") || "—"}</div>
-                </div>
-              </div>
-            )}
-            <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 8 }}>
-              {openInterestNote(chain)} Added up across the first six expiries within 120 days. A big wall is a price the market has an interest in defending — useful when picking strikes and exits.
-            </div>
-          </Panel>
-        )}
 
-        {/* ============ BACKTEST ============ */}
-        {tab === "build" && !showSettings && ev === "history" && spot && (
+        {tab === "build" && !showSettings && step === "build" && (
           <div style={{ marginTop: 12 }}>
-            <Panel>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-                <Lbl>SEASONALITY {seasonal[ticker] ? `· ${seas.src}` : "(ESTIMATE — load the real history)"}</Lbl>
-                <Btn small ghost color={T.blue} onClick={loadSeasonal} disabled={busy === "av"}>
-                  <RefreshCw size={11} /> Real 10y seasonality
+            <div style={{ ...sansUI, fontSize: 19, fontWeight: 800, color: T.ink }}>
+              Step 3 — {legs.length ? `${ticker} · ${stratName}` : "one trade, taken apart"}
+            </div>
+            <div style={{ ...sansUI, fontSize: 14, color: T.mut, lineHeight: 1.55, marginTop: 4 }}>
+              The chain, the greeks, the charts and the order. Everything you chose on the way here is still
+              on step 2 — going back does not lose it.
+            </div>
+            <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+              <Btn small ghost color={T.blue} onClick={() => goStep("shortlist")}>← Back to the shortlist</Btn>
+              {compare.length > 0 && (
+                <Btn small ghost color={T.blue} onClick={() => { setShowCompare(true); goStep("shortlist"); }}>
+                  {compare.length} still ticked to compare
                 </Btn>
-              </div>
-              {(() => {
-                const mm = seas.monthlyMean;
-                const bi = mm.indexOf(Math.max(...mm)), wi = mm.indexOf(Math.min(...mm));
-                const cur = mm[NOW_MONTH];
-                const rank = [...mm].sort((a, b) => b - a).indexOf(cur) + 1;
-                return (
-                  <div style={{ fontSize: 12.5, color: T.body, marginTop: 8, padding: "8px 10px", background: `${T.amber}0a`, borderRadius: 6 }}>
-                    <b style={{ color: T.ink }}>In plain words:</b> {ticker}'s best month historically is <b style={{ color: T.green }}>{MONTHS[bi]}</b> ({mm[bi] > 0 ? "+" : ""}{mm[bi].toFixed(1)}% a month on average), its worst is <b style={{ color: T.red }}>{MONTHS[wi]}</b> ({mm[wi].toFixed(1)}%). {MONTHS[NOW_MONTH]} (the amber bar) ranks {rank} of 12: {cur > 0.8 ? "the season is behind you — a directional trade makes sense." : cur < -0.8 ? "the season is against you — favour downside or non-directional trades." : "no clear push this month — a range trade suits it better."}
-                  </div>
-                );
-              })()}
-              <div style={{ height: 170, marginTop: 10 }}>
-                <ResponsiveContainer>
-                  <BarChart data={seas.monthlyMean.map((v, i) => ({ m: MONTHS[i], v: +v.toFixed(2) }))} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
-                    <XAxis dataKey="m" stroke={T.dim} tick={{ fontSize: 9.5, fontFamily: "monospace" }} />
-                    <YAxis stroke={T.dim} tick={{ fontSize: 9.5, fontFamily: "monospace" }} width={34} unit="%" />
-                    <Tooltip contentStyle={{ background: T.panel, border: `1px solid ${T.line}`, fontFamily: "monospace", fontSize: 11 }} />
-                    <ReferenceLine y={0} stroke={T.mut} />
-                    <Bar dataKey="v">
-                      {seas.monthlyMean.map((v, i) => <Cell key={i} fill={i === NOW_MONTH ? T.amber : v >= 0 ? `${T.green}bb` : `${T.red}bb`} />)}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </Panel>
-
-            <Panel style={{ marginTop: 10 }}>
-              <Lbl>THREE PROBABILITIES · WHICH ONE TO READ, AND WHEN</Lbl>
-              <div style={{ fontSize: 12.5, color: T.body, marginTop: 8, lineHeight: 1.6 }}>
-                <b style={{ color: T.blue }}>CHANCE</b> (Shortlist and Build): a snapshot — the odds of finishing in profit <i>at expiry</i>, worked out from what the market is pricing right now. Use it to <b>compare trades before you open one</b>.<br/>
-                <b style={{ color: T.amber }}>SIMULATION</b> (below): the same question asked of history — 8,000 runs using the last ten years of seasonality and volatility. Use it to <b>check the season really is on your side</b>. If the two disagree sharply, the market is pricing something history has not seen: an event is coming.<br/>
-                <b style={{ color: T.violet }}>EXIT PATH</b> (on open positions): the most realistic — it walks day by day <i>from today</i> and applies your own rules ({ruleBadge()}). It is the only one that answers "from here, how does this end if I stick to the plan?". Use it to <b>decide whether to hold or take the money</b>.
-              </div>
-            </Panel>
-
-            <Panel style={{ marginTop: 10 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-                <Lbl>8,000 SIMULATIONS + REAL HISTORY — "{stratName}"</Lbl>
-                <Btn small onClick={runMC} disabled={!A}><FlaskConical size={12} /> Run it</Btn>
-              </div>
-              {mc ? (
-                <>
-                  <div style={{ display: "flex", gap: 16, marginTop: 12, flexWrap: "wrap" }}>
-                    <Stat k="CHANCE OF PROFIT" v={`${(mc.pop * 100).toFixed(1)}%`} c={mc.pop >= 0.5 ? T.green : T.red} tip="The share of simulated runs that finish in profit at expiry." />
-                    <Stat k="AVERAGE RESULT" v={fmt$(mc.ev)} c={mc.ev >= 0 ? T.green : T.red} />
-                    <Stat k="BAD CASE" v={fmt$(mc.p5)} c={T.red} tip="Only 1 run in 20 turns out worse than this." />
-                    <Stat k="TYPICAL" v={fmt$(mc.p50)} />
-                    <Stat k="GOOD CASE" v={fmt$(mc.p95)} c={T.green} tip="Only 1 run in 20 turns out better than this." />
-                    <Stat k="YEARLY DRIFT" v={`${(mc.muAnn * 100).toFixed(1)}%`} c={T.blue} />
-                  </div>
-                  <div style={{ marginTop: 10, padding: "9px 11px", background: `${T.blue}0d`, border: `1px solid ${T.blue}33`, borderRadius: 7, fontSize: 12.5, color: T.body }}>
-                    <b style={{ color: T.ink }}>In plain words:</b> out of 8,000 simulated runs, {Math.round(mc.pop * 100)} in 100 finish in profit.
-                    In the worst 5% you lose about {fmt$(Math.abs(mc.p5))}{guard ? (Math.abs(mc.p5) <= guard.limits.perTrade ? ` — inside your per-trade limit of ${money(guard.limits.perTrade)} ✓` : ` — CAREFUL: past your per-trade limit of ${money(guard.limits.perTrade)}`) : ""}.
-                    The typical result is {fmt$(mc.p50)}.
-                  </div>
-                  <div style={{ height: 180, marginTop: 12 }}>
-                    <ResponsiveContainer>
-                      <BarChart data={mc.bins} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
-                        <XAxis dataKey="x" stroke={T.dim} tick={{ fontSize: 9, fontFamily: "monospace" }} />
-                        <YAxis stroke={T.dim} tick={{ fontSize: 9, fontFamily: "monospace" }} width={40} />
-                        <Tooltip contentStyle={{ background: T.panel, border: `1px solid ${T.line}`, fontFamily: "monospace", fontSize: 11 }} />
-                        <Bar dataKey="n">
-                          {mc.bins.map((b, i) => <Cell key={i} fill={b.x >= 0 ? `${T.green}cc` : `${T.red}cc`} />)}
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                  {bt ? (
-                    <div style={{ marginTop: 12 }}>
-                      <Lbl>WHAT ACTUALLY HAPPENED · {MONTHS[NOW_MONTH]} → +{Math.max(1, Math.round(dte / 30))} MONTHS, EVERY YEAR</Lbl>
-                      <div style={{ display: "flex", gap: 16, marginTop: 8, flexWrap: "wrap" }}>
-                        <Stat k="YEARS IT WORKED" v={`${(bt.winRate * 100).toFixed(0)}%`} c={bt.winRate >= 0.5 ? T.green : T.red} />
-                        <Stat k="AVERAGE RESULT" v={fmt$(bt.avg)} c={bt.avg >= 0 ? T.green : T.red} />
-                        <Stat k="YEARS TESTED" v={bt.rows.length} />
-                      </div>
-                      <div style={{ display: "flex", gap: 4, marginTop: 8, flexWrap: "wrap" }}>
-                        {bt.rows.map((r) => (
-                          <button key={r.year} onClick={() => { const row = (seas.matrix || []).find((x) => String(x[0]) === r.year); if (row) runReplay(row); }}
-                            style={{ ...mono, fontSize: 10, padding: "3px 7px", borderRadius: 4, cursor: "pointer", background: replay?.year === +r.year ? `${T.amber}22` : "transparent", color: r.pnl >= 0 ? T.green : T.red, border: `1px solid ${r.pnl >= 0 ? T.green : T.red}44` }}>
-                            ▶ {r.year}: {fmt$(r.pnl)}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  ) : (
-                    <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 10 }}>
-                      The year-by-year history unlocks once you load the real seasonality above.
-                    </div>
-                  )}
-                  {replay && (
-                    <div style={{ marginTop: 12, padding: "10px 12px", background: `${T.amber}0a`, border: `1px solid ${T.amber}44`, borderRadius: 7 }}>
-                      <Lbl>WHAT WOULD HAVE HAPPENED IN {replay.year} · "{stratName}" OPENED IN {MONTHS[NOW_MONTH].toUpperCase()}</Lbl>
-                      <div style={{ display: "grid", gap: 4, marginTop: 8 }}>
-                        {replay.steps.map((st2) => (
-                          <div key={st2.m} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                            <span style={{ ...mono, fontSize: 10, color: T.dim, width: 58 }}>{st2.label}</span>
-                            <span style={{ ...mono, fontSize: 11, color: T.ink }}>${st2.S.toFixed(2)}</span>
-                            <span style={{ ...mono, fontSize: 11, fontWeight: 700, color: st2.pnl >= 0 ? T.green : T.red, width: 60 }}>{fmt$(st2.pnl)}</span>
-                            <span style={{ fontSize: 11.5, color: T.body }}>{st2.note}</span>
-                          </div>
-                        ))}
-                      </div>
-                      <div style={{ fontSize: 12.5, color: T.ink, fontWeight: 700, marginTop: 8 }}>
-                        Following your rules: {fmt$(replay.finale)} {replay.closed ? `(${replay.closed.why} in month ${replay.closed.i})` : "(held to expiry)"}
-                      </div>
-                      <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 4 }}>Replayed on real monthly returns. The point is to watch the rules work before you rely on them.</div>
-                    </div>
-                  )}
-                  <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 8 }}>
-                    Simulated with {seasonal[ticker] ? "real" : "estimated"} seasonal drift and {(seas.sigma * 100).toFixed(0)}% volatility. A simplified model: no price jumps, no volatility term structure.
-                  </div>
-                </>
-              ) : (
-                <div style={{ ...mono, fontSize: 12, color: T.mut, marginTop: 10 }}>Press "Run it" for the odds, the spread of outcomes, and what happened in each of the last ten years.</div>
               )}
-            </Panel>
+            </div>
           </div>
         )}
-
-        {tab === "build" && !showSettings && ev === "copilot" && (
-          <CopilotTab
-            apiKey={"server"}
-            convo={copilot} setConvo={setCopilot} onAnalysis={logAnalysis}
-            ctx={{ store, scan, news: news[ticker]?.items || [], ticker, legs, expKey, A, spot, seasonalSrc: seas.src, setMsg }}
-          />
-        )}
-
-        {tab === "build" && !showSettings && <div ref={buildAnchor} style={{ scrollMarginTop: 12 }} />}
+        {tab === "build" && !showSettings && step === "build" && <div ref={buildAnchor} style={{ scrollMarginTop: 12 }} />}
         {/* Where the guided flow lands. Without this the trade simply appears on
             Build and the user has no way to tell that the road they picked is
             the thing in front of them. */}
-        {tab === "build" && !showSettings && picked && (
+        {tab === "build" && !showSettings && step === "build" && picked && (
           <div style={{ marginTop: 12, padding: "10px 12px", background: `${T.blue}0f`, border: `1px solid ${T.blue}55`, borderLeft: `3px solid ${T.blue}`, borderRadius: 8 }}>
             <div style={{ ...mono, fontSize: 10, color: T.blue, letterSpacing: "0.1em" }}>THE ROAD YOU TOOK</div>
             <div style={{ fontSize: 13.5, color: T.body, marginTop: 4, lineHeight: 1.55 }}>
@@ -2298,7 +2657,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
             </button>
           </div>
         )}
-        {tab === "build" && !showSettings && buildScreen === "builder" && (
+        {tab === "build" && !showSettings && step === "build" && buildScreen === "builder" && (
           <div style={{ marginTop: 12 }}>
             <Panel>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
@@ -2897,13 +3256,13 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
 
         {/* The chain is on its way. Saying "no market data" here would blame
             the user for a request that has not come back yet. */}
-        {tab === "build" && !showSettings && buildScreen === "loading" && (
+        {tab === "build" && !showSettings && step === "build" && buildScreen === "loading" && (
           <Panel style={{ marginTop: 12 }}>
             <div style={{ ...mono, fontSize: 12, color: T.blue }}>Loading {ticker} option prices — the trade appears here as soon as they arrive.</div>
           </Panel>
         )}
 
-        {tab === "build" && !showSettings && buildScreen === "no-market-data" && (
+        {tab === "build" && !showSettings && step === "build" && buildScreen === "no-market-data" && (
           <Panel style={{ marginTop: 12 }}>
             <div style={{ ...mono, fontSize: 12, color: T.amber }}>Option prices for {ticker} have not loaded yet — press Refresh at the top.</div>
           </Panel>
@@ -2911,7 +3270,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
 
         {/* An empty Build screen is a normal state, not a blank screen: say what
             it is for and where the trades come from. */}
-        {tab === "build" && !showSettings && buildScreen === "empty" && (
+        {tab === "build" && !showSettings && step === "build" && buildScreen === "empty" && (
           <Panel style={{ marginTop: 12 }}>
             <Lbl>NOTHING TO BUILD YET</Lbl>
             <div style={{ fontSize: 13.5, color: T.body, marginTop: 8, lineHeight: 1.55 }}>
@@ -2919,13 +3278,13 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
               the four factors behind it. Nothing is on it yet.
             </div>
             <div style={{ fontSize: 13.5, color: T.mut, marginTop: 8, lineHeight: 1.55 }}>
-              Open <b style={{ color: T.blue }}>Radar</b> to see which market is worth looking at, or
-              <b style={{ color: T.blue }}> Shortlist</b> to see which structures fit — both are evidence buttons
-              just above. Or go back Home and answer three questions instead.
+              This is step 3, and a trade gets here from step 2. Go back to <b style={{ color: T.blue }}>1 Radar</b> to
+              see which market is worth looking at, or to <b style={{ color: T.blue }}>2 Shortlist</b> to pick a
+              structure on {ticker}. Or go back Home and answer three questions instead.
             </div>
             <div style={{ display: "flex", gap: 6, marginTop: 12, flexWrap: "wrap" }}>
-              <Btn small onClick={() => setEv("radar")}><Radar size={11} /> Radar</Btn>
-              <Btn small ghost onClick={() => setEv("shortlist")}><Layers size={11} /> Shortlist</Btn>
+              <Btn small onClick={() => goStep("radar")}><Radar size={11} /> 1 Radar</Btn>
+              <Btn small ghost onClick={() => goStep("shortlist")}><Layers size={11} /> 2 Shortlist</Btn>
               <Btn small ghost color={T.blue} onClick={goHome}>← Home</Btn>
             </div>
           </Panel>
