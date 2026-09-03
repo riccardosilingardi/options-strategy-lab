@@ -41,12 +41,19 @@ const livePnl = (p, spot) => {
    code that does not do what it looks like it does, and this file is the only
    thing standing between a public token and the owner's account. */
 
-const gateSrc = readFileSync(new URL("../netlify/edge-functions/gate.js", import.meta.url), "utf8");
+const GATE_URL = new URL("../netlify/edge-functions/gate.js", import.meta.url);
+let gateLoads = 0;
 
-/** Load the edge function with a fake Deno.env and a fake context.next(). */
+/** Load the edge function with a fake Deno.env and a fake context.next().
+ *
+ *  IMPORTED BY PATH, not as a data: URL. The gate now imports its access
+ *  decision from ./lib/access.js — the same module /api/ai reads, so there is
+ *  one place a password is compared — and a data: URL has no base to resolve a
+ *  relative import against. A query string is what re-runs the module for each
+ *  environment; the file itself is the one that ships. */
 async function loadGate(env) {
   globalThis.Deno = { env: { get: (k) => env[k] } };
-  const mod = await import(`data:text/javascript;base64,${Buffer.from(gateSrc).toString("base64")}`);
+  const mod = await import(`${GATE_URL.href}?load=${++gateLoads}`);
   return async ({ url = "https://site.test/", cookie = "", auth = "" } = {}) => {
     const headers = new Headers();
     if (cookie) headers.set("cookie", cookie);

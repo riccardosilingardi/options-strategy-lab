@@ -327,7 +327,7 @@ check("with the floor OFF the strip shows where the recommendation WOULD cut", (
   // nothing is filtered.
   const t = oiStripTakeaway([...peers].sort((a, b) => a - b), 0);
   oneSentence(t);
-  has(t, "No strike is removed");
+  has(t, "No contract is removed");
   // At any real setting there is a real line, and no ghost.
   const on = renderToStaticMarkup(<OpenInterestStrip peers={peers} threshold={10} width={240} />);
   if (on.includes("RECOMMENDED WOULD CUT HERE")) throw new Error("the ghost belongs to the OFF setting only");
@@ -358,7 +358,7 @@ check("the strip's takeaway is ONE generated sentence carrying the real numbers"
   // With the floor OFF, "carry at least 0 open contracts" is true and useless.
   const off = oiStripTakeaway([0, 3, 70], 0, { expKey: "2026-10-16" });
   oneSentence(off);
-  has(off, "No strike is removed");
+  has(off, "No contract is removed");
   has(off, "70");
   if (/at least 0/.test(off)) throw new Error("the no-floor case must not quote a floor of zero");
 });

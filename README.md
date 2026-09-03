@@ -42,5 +42,8 @@ never written to the shared `/api/state` blob. See PRD §7b.
 
 Optional environment variable: `ANTHROPIC_WORKSPACE_ID`. Set it only when the
 Anthropic key is identity-linked — the API then requires an
-`anthropic-workspace-id` header, and `netlify/functions/ai.mjs` sends it only
-when the variable is present.
+`anthropic-workspace-id` header, and `netlify/edge-functions/ai.js` sends it
+only when the variable is present. That proxy is an EDGE function: an ordinary
+Netlify Function is killed at roughly ten seconds, and a streamed analysis takes
+longer than that every time. It is declared in `netlify.toml` AFTER the password
+gate, and checks the password itself as well, so the order cannot leave it open.

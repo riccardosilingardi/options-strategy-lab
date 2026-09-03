@@ -6,7 +6,11 @@ import assert from "node:assert/strict";
 import { evaluateTrade, paperStatus, undefinedRiskLegs } from "./riskGate.js";
 import { RULES, sizing, ruleBadge, qualityFloor, qualityFloorSentence, liquiditySkippedNote, NOTHING_TODAY,
   LIQUIDITY_LEVELS, RECOMMENDED_LIQUIDITY, LIQUIDITY_MEASUREMENT, liquidityMeasurementNote, liquidityThreshold, looseningWarning, liquiditySettingNote,
-  priceability, rewardRisk, unpriceableNote, money, MIN_NET_DOLLARS } from "./rules.js";
+  priceability, rewardRisk, unpriceableNote, money, MIN_NET_DOLLARS,
+  spreadShare, spreadFloor, spreadFloorReason, wideSpreadNote, spreadSkippedNote,
+  expiryChoice, expiryChoiceNote, emptyExpiryNote,
+  chancePct, chanceText, chanceInTen, signedMoney } from "./rules.js";
+import { isStale, staleAmong, agePhrase, freshnessNote, BUDGETS } from "./freshness.js";
 
 /* ---------------- tiny harness ---------------- */
 let passed = 0;
@@ -429,15 +433,15 @@ test("a chain where nothing trades cannot certify itself", () => {
 });
 
 test("the three reasons the relative half is absent are three different sentences", () => {
-  // A setting that asks for no percentile, a chain with too few strikes to take
+  // A setting that asks for no percentile, a chain with too few contracts to take
   // one from, and a percentile that was measured and simply lost to the
   // absolute floor are not the same fact, and the screen must not report them
-  // as one. Blaming "too few strikes" for the app's own setting is the app
+  // as one. Blaming "too few contracts" for the app's own setting is the app
   // blaming the data.
   const tooFew = liquidityThreshold([100, 200, 300], RECOMMENDED_LIQUIDITY);
   assert.equal(tooFew.relative, null, "three numbers are not a distribution");
   assert.equal(tooFew.threshold, RULES.minOpenInterestAbsolute);
-  assert.ok(tooFew.basis.includes("too few strikes"));
+  assert.ok(tooFew.basis.includes("too few contracts"));
 
   const notAsked = liquidityThreshold([100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200], "off");
   assert.ok(notAsked.basis.includes("no relative test"), "OFF asks for no percentile: that is not a data problem");
@@ -688,6 +692,332 @@ test("a board emptied by unreadable prices is a different sentence from one empt
   const floored = NOTHING_TODAY.belowQualityFloor({ liquidity: 2, reward: 0, markets: ["BOIL"] });
   assert.notEqual(unpriced, floored);
   assert.ok(!unpriced.includes("budget"), "and neither of them is the budget answer");
+});
+
+/* ============================================================================
+   TASK 0 — THE POSITIVE-MAX-LOSS TEST IS NOW IN THE RISK GATE.
+   The debt PR #15 left open, and the case is LIVE: on BOIL 2026-10-09 six call
+   pairs price a bull call spread as a CREDIT (buy 19 / sell 19.5 nets -0.290,
+   buy 22 / sell 22.5 nets -0.171), which cannot lose at expiry.
+   ========================================================================= */
+
+const BOIL_CREDIT_SPREAD = [
+  { side: 1, type: "call", strike: 19, qty: 1 },
+  { side: -1, type: "call", strike: 19.5, qty: 1 },
+];
+
+test("A HAND-BUILT STRUCTURE WHOSE WORST CASE IS A PROFIT DOES NOT LEAVE", () => {
+  const r = evaluateTrade({
+    proposal: { intent: "open", ticker: "BOIL", legs: BOIL_CREDIT_SPREAD, dte: 36, contracts: 1,
+      maxLoss: 29, maxProfit: 79 },   // SIGNED: positive means it cannot lose
+    portfolio: EMPTY_BOOK, capital: { tradingCapital: 5000, concurrentTarget: 4 },
+  });
+  assert.equal(r.pass, false, "an arbitrage is not sendable");
+  const v = r.violations.find((x) => x.code === "IMPOSSIBLE_LOSS");
+  assert.ok(v, "and it is refused BY NAME, not swept into UNDEFINED_RISK");
+  assert.ok(v.message.includes("$29"), "the sentence carries the number that produced it");
+  assert.ok(/PROFIT/.test(v.message), "and says what is wrong: the worst case is a gain");
+});
+
+test("the ordinary debit spread — a NEGATIVE worst case — is untouched by it", () => {
+  const r = evaluateTrade({
+    proposal: { intent: "open", ticker: "BOIL", legs: BOIL_CREDIT_SPREAD, dte: 36, contracts: 1,
+      maxLoss: -29, maxProfit: 21 },
+    portfolio: EMPTY_BOOK, capital: { tradingCapital: 5000, concurrentTarget: 4 },
+  });
+  assert.equal(r.violations.some((v) => v.code === "IMPOSSIBLE_LOSS"), false);
+  assert.equal(r.pass, true, "a real trade still passes");
+});
+
+test("THE SIGN TRAP: a CLOSING order carrying a positive magnitude is never sign-tested", () => {
+  // pro.jsx closeGroup() passes the cost basis, which is a positive magnitude.
+  // Reading that as an arbitrage would block every close on the desk.
+  const r = evaluateTrade({
+    proposal: { intent: "close", ticker: "BOIL", legs: BOIL_CREDIT_SPREAD, contracts: 1, maxLoss: 340 },
+    portfolio: EMPTY_BOOK, capital: { tradingCapital: 5000, concurrentTarget: 4 },
+  });
+  assert.equal(r.violations.some((v) => v.code === "IMPOSSIBLE_LOSS"), false);
+  assert.equal(r.pass, true, "a close is never blocked by an entry-only rule");
+});
+
+test("a max loss of exactly zero is UNPRICEABLE, not an arbitrage — the two stay separate", () => {
+  const r = evaluateTrade({
+    proposal: { intent: "open", ticker: "BOIL", legs: BOIL_CREDIT_SPREAD, dte: 36, contracts: 1, maxLoss: 0 },
+    portfolio: EMPTY_BOOK, capital: { tradingCapital: 5000, concurrentTarget: 4 },
+  });
+  assert.ok(r.violations.some((v) => v.code === "UNPRICEABLE"), "zero is a price we could not read");
+  assert.equal(r.violations.some((v) => v.code === "IMPOSSIBLE_LOSS"), false,
+    "and it is NOT reported as a trade that cannot lose");
+});
+
+/* ============================================================================
+   TASK 4a — THE COPILOT CALL IS ON THE EDGE, AND STILL BEHIND THE PASSWORD.
+   A synchronous Netlify Function is killed at roughly ten seconds; a 1200-token
+   streamed analysis takes longer than that EVERY time, so the copilot was
+   structurally cut off rather than intermittently unlucky. Moving it to the
+   edge is the fix — and the thing that must not go wrong while doing it is the
+   password, so these read the repository rather than trusting a memory of it.
+   ========================================================================= */
+
+test("the AI proxy is an EDGE function, and the old synchronous one is gone", () => {
+  const edge = readFileSync(new URL("../netlify/edge-functions/ai.js", import.meta.url), "utf8");
+  assert.ok(edge.includes("api.anthropic.com/v1/messages"), "it still proxies Anthropic");
+  assert.ok(edge.includes("Deno.env.get(\"ANTHROPIC_KEY\")"), "and reads the key from the Deno environment");
+  // A CALL, not the word: the header comment names Netlify.env to explain why
+  // it is not used, and a test that cannot tell prose from code is a test that
+  // stops the comment being written.
+  assert.ok(!edge.includes("Netlify.env.get("), "Netlify.env is the Node runtime and does not exist on the edge");
+  assert.throws(
+    () => readFileSync(new URL("../netlify/functions/ai.mjs", import.meta.url), "utf8"),
+    "the ten-second version must not survive beside the edge one");
+});
+
+test("THE PASSWORD RUNS FIRST — the AI proxy is never reachable without it", () => {
+  const toml = readFileSync(new URL("../netlify.toml", import.meta.url), "utf8");
+  const gateAt = toml.indexOf('function = "gate"');
+  const aiAt = toml.indexOf('function = "ai"');
+  assert.ok(gateAt > -1 && aiAt > -1, "both edge functions are declared in netlify.toml");
+  assert.ok(gateAt < aiAt, "and the gate is declared FIRST: netlify.toml runs them in written order");
+  assert.ok(!/from = "\/api\/ai"/.test(toml), "the old redirect to a Netlify Function is gone");
+
+  // Belt and braces: the order above is a deployment behaviour this repository
+  // cannot execute, so ai.js asks the same question itself. The failure this
+  // guards against is an unauthenticated Anthropic proxy on the open internet.
+  const edge = readFileSync(new URL("../netlify/edge-functions/ai.js", import.meta.url), "utf8");
+  assert.ok(/accessOf\(req/.test(edge), "ai.js checks access itself as well");
+  assert.ok(edge.includes("401"), "and refuses with a 401 when it fails");
+});
+
+test("there is still exactly ONE place a password is compared", () => {
+  const access = readFileSync(new URL("../netlify/edge-functions/lib/access.js", import.meta.url), "utf8");
+  const gate = readFileSync(new URL("../netlify/edge-functions/gate.js", import.meta.url), "utf8");
+  const edge = readFileSync(new URL("../netlify/edge-functions/ai.js", import.meta.url), "utf8");
+  assert.ok(access.includes("given === password"), "the comparison lives in lib/access.js");
+  for (const [name, src] of [["gate.js", gate], ["ai.js", edge]]) {
+    assert.ok(/from "\.\/lib\/access\.js"|from "\.\/lib\/access\.js"/.test(src), `${name} imports it`);
+    assert.ok(!src.includes("given === "), `${name} does not carry a second copy of the comparison`);
+  }
+});
+
+/* ============================================================================
+   TASK 3 — A WIDE MARKET IS NOT A PRICE.
+   Measured on BOIL 2026-10-09 near the money: bid/ask spreads of 66%, 91%,
+   145% and 166% of the mid, on strikes the app builds on.
+   ========================================================================= */
+
+test("the spread is measured as a SHARE of the mid, not in cents", () => {
+  // 10 cents wide is nothing on a $4 option and the whole trade on a $0.12 one.
+  assert.equal(Math.round(spreadShare(3.95, 4.05) * 1000) / 1000, 0.025);
+  assert.equal(Math.round(spreadShare(0.07, 0.17) * 100) / 100, 0.83);
+});
+
+test("THE FOUR LIVE BOIL READINGS ARE ALL REFUSED, and a normal market is not", () => {
+  // Each pair below is a bid/ask whose spread is the measured share of its mid.
+  for (const [bid, ask] of [[0.30, 0.60], [0.20, 0.52], [0.10, 0.60], [0.05, 0.45]]) {
+    const r = spreadFloor([{ bid, ask }]);
+    assert.equal(r.pass, false, `${bid}/${ask} should be refused`);
+    assert.ok(r.widest > RULES.maxSpreadShareOfMid);
+  }
+  assert.equal(spreadFloor([{ bid: 1.20, ask: 1.26 }]).pass, true, "a real market passes");
+});
+
+test("UNKNOWN IS NOT WIDE — a leg the feed quoted one side of tests nothing", () => {
+  // The same rule as `oi: null`. A model-priced leg carries no bid or ask at
+  // all, and reading that as a bad market would reject a whole feed.
+  assert.equal(spreadShare(null, 0.6), null);
+  assert.equal(spreadShare(0.3, undefined), null);
+  assert.equal(spreadShare(0, 0.6), null, "a zero bid is the no-bid case, not a 200% spread");
+  const skipped = spreadFloor([{ bid: null, ask: null }, {}]);
+  assert.equal(skipped.checked, false);
+  assert.equal(skipped.pass, true, "unmeasurable is not failed");
+  assert.equal(skipped.unknown, 2);
+});
+
+test("it is judged on the WIDEST leg, and it names itself", () => {
+  const r = spreadFloor([{ bid: 1.2, ask: 1.26 }, { bid: 0.1, ask: 0.6 }]);
+  assert.equal(r.pass, false, "one bad leg is enough: the structure is priced off all of them");
+  const why = spreadFloorReason(r.widest, r.floor);
+  assert.ok(why.includes("bid to ask") && why.includes("MID"));
+  assert.ok(wideSpreadNote(2, "BOIL").includes("2 structures"));
+  assert.ok(spreadSkippedNote("Alpaca").includes("Alpaca"));
+});
+
+test("A LEG CAN BE BUSY AND STILL UNPRICEABLY WIDE — the two floors are independent", () => {
+  // The whole reason this floor exists: 300 contracts open, a 145%-wide market,
+  // and the liquidity floor waves it straight through.
+  const r = qualityFloor({
+    openInterest: [300, 300], peerOpenInterest: [300, 300, 280, 260, 240, 220, 200, 180],
+    quotes: [{ bid: 0.10, ask: 0.60 }, { bid: 1.2, ask: 1.26 }],
+    maxProfit: 200, maxLoss: -100,
+  });
+  assert.equal(r.liquidity.pass, true, "the headcount is fine");
+  assert.equal(r.spread.pass, false, "and the market is still not a price");
+  assert.equal(r.pass, false);
+});
+
+test("the spread floor does NOT move with the liquidity setting", () => {
+  // Loosening the headcount is not an answer to "may the two sides disagree by
+  // a factor of three".
+  const wide = [{ bid: 0.10, ask: 0.60 }];
+  for (const level of LIQUIDITY_LEVELS) {
+    const r = qualityFloor({ openInterest: [500], quotes: wide, level, maxProfit: 200, maxLoss: -100 });
+    assert.equal(r.spread.pass, false, `still refused at ${level.id}`);
+  }
+});
+
+test("the liquidity floor's own two constants are untouched by any of this", () => {
+  assert.equal(RULES.liquidityPercentile, 0.40);
+  assert.equal(RULES.minOpenInterestAbsolute, 10);
+});
+
+/* ============================================================================
+   TASK 2 — THE APP OPENED ON THE DEADEST EXPIRY ON THE BOARD.
+   Measured on BOIL near the money, contracts clearing the 10-contract floor:
+     2026-09-18 (14 DTE) 19 of 23 | 2026-10-02 (28 DTE) 12 of 14
+     2026-10-09 (35 DTE)  2 of  7   <- the one the app selected
+   ========================================================================= */
+
+const BOIL_BOARD = [
+  { key: "2026-09-18", dte: 14, clears: 19, near: 23 },
+  { key: "2026-10-02", dte: 28, clears: 12, near: 14 },
+  { key: "2026-10-09", dte: 35, clears: 2, near: 7 },
+  { key: "2026-11-20", dte: 77, clears: 9, near: 12 },
+];
+
+test("THE BOARD DECIDES, NOT THE CALENDAR: the dead 35-DTE expiry is not chosen", () => {
+  const c = expiryChoice(BOIL_BOARD);
+  assert.notEqual(c.chosen.key, "2026-10-09", "2 of 7 is why the Shortlist kept saying nothing clears");
+  assert.equal(c.chosen.key, "2026-11-20", "the busiest board past the entry floor");
+  assert.equal(c.reason, "liquidity");
+});
+
+test("the 30-DTE entry floor is NOT broken to reach a busier board — and it says so", () => {
+  const c = expiryChoice(BOIL_BOARD);
+  assert.ok(c.eligible.every((e) => e.dte >= RULES.minEntryDTE), "nothing under the floor is eligible");
+  assert.equal(c.passedOver.key, "2026-09-18", "the nearer, thicker board is named");
+  const note = expiryChoiceNote(c);
+  assert.ok(note.includes("2026-09-18") && note.includes("19 of 23"), "the screen says what was passed over");
+  assert.ok(note.includes(String(RULES.minEntryDTE)) && note.includes(String(RULES.exitDTE)),
+    "and why: the entry floor exists so the exit rule has room");
+});
+
+test("a year-out board does not win on volume alone", () => {
+  const c = expiryChoice([...BOIL_BOARD, { key: "2027-06-18", dte: 288, clears: 40, near: 44 }]);
+  assert.equal(c.chosen.key, "2026-11-20", "past the horizon it is a different trade, not a better one");
+});
+
+test("UNKNOWN OPEN INTEREST RANKS ON DTE, and is never read as an empty board", () => {
+  // `Number(null)` is 0 and 0 is finite: coercing first would rank every expiry
+  // the feed has not reported LAST, which is exactly backwards.
+  const c = expiryChoice([{ key: "A", dte: 33, clears: null, near: null },
+                          { key: "B", dte: 46, clears: null, near: null }]);
+  assert.equal(c.measured, false, "nothing was measured");
+  assert.equal(c.chosen.key, "B", "so it falls back to distance from the target DTE");
+  assert.ok(expiryChoiceNote(c).includes("not known yet"));
+});
+
+test("a REAL zero is still a real zero", () => {
+  const c = expiryChoice([{ key: "X", dte: 35, clears: 0, near: 7 }, { key: "Y", dte: 48, clears: 5, near: 9 }]);
+  assert.equal(c.measured, true);
+  assert.equal(c.chosen.key, "Y");
+});
+
+test("an empty list NAMES THE EXPIRY it emptied", () => {
+  // Radar said 4 cleared at 28 DTE while the Shortlist said none at 35 DTE.
+  // Both were true, and on screen it read as a contradiction.
+  const note = emptyExpiryNote("2026-10-09", { liquidity: 3, spread: 1, reward: 0 });
+  assert.ok(note.includes("2026-10-09"), "the expiry is in the sentence");
+  assert.ok(note.includes("3 for liquidity") && note.includes("1 for a bid/ask spread"));
+  assert.ok(note.includes("another expiry"), "and it says the verdict is about this board only");
+});
+
+test("with no expiry past the entry floor the answer is nothing, not a bad expiry", () => {
+  const c = expiryChoice([{ key: "soon", dte: 9, clears: 40, near: 44 }]);
+  assert.equal(c.chosen, null);
+  assert.ok(expiryChoiceNote(c).includes(String(RULES.minEntryDTE)));
+});
+
+/* ============================================================================
+   TASK 6 — ONE ROUNDING, ONE FUNCTION, AND A SIGN WHERE THE SIGN IS THE POINT.
+   ========================================================================= */
+
+test("ONE PROBABILITY, ONE ROUNDING: the percent and the phrase cannot disagree", () => {
+  // One spread read 44%, 45% and "5 times in 10" across three screens.
+  for (const p of [0.44, 0.449, 0.75, 0.5, 0.03, 1]) {
+    const pc = chancePct(p);
+    assert.equal(chanceText(p), `${pc}%`);
+    assert.equal(chanceInTen(p), `${Math.round(pc / 10)} time${Math.round(pc / 10) === 1 ? "" : "s"} in 10`,
+      "the phrase is derived from the percent, not rounded a second time");
+  }
+});
+
+test("a missing probability is a dash, never a confident 0%", () => {
+  for (const p of [null, undefined, NaN, ""]) {
+    assert.equal(chancePct(p), null);
+    assert.equal(chanceText(p), "\u2014");
+    assert.equal(chanceInTen(p), "\u2014");
+  }
+  assert.equal(chanceText(0), "0%", "but a real zero is a real zero");
+});
+
+test("THETA AND VEGA ALWAYS CARRY A SIGN — a rate of change is not a price", () => {
+  // Theta printed "$3" on a long debit spread where the holder LOSES it daily.
+  assert.equal(signedMoney(-3.4), "-$3");
+  assert.equal(signedMoney(3.4), "+$3");
+  assert.equal(money(-3.4), "-$3", "money() is unchanged: a price does not need a plus");
+});
+
+test("vega is not rounded away to a $0 it does not mean", () => {
+  // "$0" on a 35-day spread reads as "volatility does not move this", which is
+  // a claim, and a false one.
+  assert.notEqual(signedMoney(0.004), "$0");
+  assert.ok(signedMoney(0.004).includes("0.004"));
+  assert.equal(signedMoney(0), "$0", "an exact zero IS the number");
+  assert.equal(signedMoney(null), "\u2014", "and an absent one is still a dash");
+});
+
+/* ============================================================================
+   TASK 5 — EVERY SOURCE HAS ITS OWN BUDGET, AND ITS AGE IS ON SCREEN.
+   ========================================================================= */
+
+test("the budgets are ordered the way the data actually moves", () => {
+  assert.ok(BUDGETS.chain.ttlMs < BUDGETS.bars.ttlMs, "quotes move faster than daily bars");
+  assert.ok(BUDGETS.bars.ttlMs < BUDGETS.openInterest.ttlMs, "which move faster than a session's close");
+  assert.ok(BUDGETS.openInterest.ttlMs < BUDGETS.seasonal.ttlMs, "which moves faster than monthly history");
+});
+
+test("NEVER LOADED is stale — the caller's question is whether to fetch", () => {
+  assert.equal(isStale("chain", null), true);
+  assert.equal(isStale("chain", Date.now()), false);
+  assert.equal(isStale("chain", Date.now() - 10 * 60 * 1000), true);
+  // ...but it is not the same as OLD, and the sentence must not invent an age.
+  assert.ok(freshnessNote("seasonal", null).includes("not loaded yet"));
+  assert.ok(!/\d+ day/.test(freshnessNote("seasonal", null)));
+});
+
+test("ONLY WHAT EXPIRED IS REFETCHED — the quota is 25 calls a day", () => {
+  const now = Date.now();
+  const stale = staleAmong(["chain", "openInterest", "seasonal"], {
+    chain: now - 10 * 60 * 1000,          // past its five minutes
+    openInterest: now - 60 * 60 * 1000,   // an hour old, and it changed last night
+    seasonal: now - 24 * 60 * 60 * 1000,  // a day old, inside a seven-day budget
+  }, now);
+  assert.deepEqual(stale, ["chain"], "one call, not three");
+});
+
+test("an age is spoken in the unit that suits its source", () => {
+  assert.equal(agePhrase(30 * 1000, "minutes"), "just now");
+  assert.equal(agePhrase(4 * 60 * 1000, "minutes"), "4 minutes");
+  assert.equal(agePhrase(3 * 24 * 3600 * 1000, "days"), "3 days");
+  assert.equal(agePhrase(24 * 3600 * 1000, "days"), "1 day", "never \"1 days\"");
+});
+
+test("a number past its budget SAYS SO rather than looking live", () => {
+  const fresh = freshnessNote("chain", Date.now() - 60 * 1000);
+  const old = freshnessNote("chain", Date.now() - 20 * 60 * 1000);
+  assert.ok(!/past the/.test(fresh));
+  assert.ok(/past the/.test(old), "a stale number pretending to be live is the fault");
+  assert.ok(old.includes("refreshed"));
 });
 
 /* ---------------- summary ---------------- */

@@ -782,17 +782,88 @@ What is left:
 The standing rule in `CLAUDE.md`: every session starts by fixing what the last one flagged, and
 ends by writing down what it could not verify. Currently open:
 
+### WRITTEN THIS SESSION — the things this session changed and could NOT check
+
+- **NOTHING IN THIS SESSION WAS RUN AGAINST A LIVE FEED, A BROWSER OR A DEPLOY.** The same wall
+  as PR #15: the sandbox's egress proxy refuses the CONNECT to the deploy preview, there are no
+  broker or Anthropic keys here, and no screen was opened. What is proven is `npm test` (365
+  assertions) and `npm run build`. Everything below is a consequence of that.
+- **THE MEASUREMENTS ARE THE OWNER'S, NOT THIS SESSION'S.** Every number driving TASK 1, 2, 3
+  and 5 — CORN's eight wrong months, BOIL's three expiries, the four spreads, the five
+  monotonicity breaks, the 20.19-versus-20.22 spot — was captured by the owner on
+  2026-09-03T17:57Z and reproduced from the brief. This session did not re-read any of them and
+  cannot. They are written into the code as the reasoning beside each constant, so if any of
+  them is wrong the comment is wrong with it.
+- **THE EDGE-FUNCTION ORDER IS THE ONE THING HERE THAT COULD MATTER TO SOMEBODY ELSE, AND IT IS
+  STILL UNVERIFIED.** `/api/ai` is now an edge function alongside the `/*` password gate. The
+  documented behaviour — netlify.toml runs edge functions in the order they are declared — could
+  not be checked against Netlify's own docs (the proxy blocks docs.netlify.com), so it is
+  written from memory. **The mitigation is that `ai.js` checks access itself**, through the same
+  `lib/access.js` the gate uses, which makes the order irrelevant to security.
+
+  **WHAT THE DEPLOY DID PROVE, and it is not nothing.** PR #16 deployed cleanly to
+  `deploy-preview-16--strategy-lab-optiontrading.netlify.app`, and Netlify's "Redirect rules"
+  check passed. So the two `[[edge_functions]]` declarations are valid TOML that Netlify
+  accepts, both files bundled, and — the real risk — the relative import of `./lib/access.js`
+  RESOLVES: a subdirectory inside `netlify/edge-functions/` is treated as a module rather than
+  as a third edge function. A syntax error or an unresolvable import there fails the deploy,
+  and it did not.
+
+  **WHAT IT DID NOT PROVE:** the execution order, the 401, and streaming. The sandbox cannot
+  reach the preview — the egress proxy answers 403 to the CONNECT, the same wall PR #15 hit —
+  so this is the owner's, and it is one request: **open `/api/ai` in a private window with no
+  password and confirm a 401.** If it answers anything else, that is the whole finding, and
+  the fix is to delete the `[[edge_functions]]` block for `ai` and put its body back behind a
+  `/api/ai` redirect until the order is understood.
+- **THE COPILOT FIX IS TESTED ON SYNTHETIC FRAMES.** The final flush and `stop_reason` are held
+  down by tests that build Anthropic's SSE by hand. Nobody has watched a real 1200-token answer
+  arrive complete on the edge — which is, after all, the fault being fixed. On the preview: run
+  a pre-trade analysis and confirm it reaches an end WITHOUT the "CUT OFF" label. If it labels
+  **RAN OUT OF ROOM** instead, that is not a regression, it is the new label telling the truth
+  about `max_tokens: 1200`, and the budget is what to raise.
+- **THE SEVEN-DAY AV CACHE HAS NEVER SERVED A HIT.** `av.mjs` writes to the blob store the
+  autopilot already uses; that path is untested here because the store is not reachable from the
+  sandbox. Every touch of it is wrapped so a missing store degrades to "no cache", but the WARM
+  path — and the stale-on-failure path that matters most during a demo — has only been reasoned
+  about. Watch for it: the second market to load should be near-instant.
+- **NO SEASONAL SERIES WAS EVER FETCHED.** The client now loads all five markets at startup, and
+  `statsFromMatrix()` is unchanged code that was already in use — but whether Alpha Vantage
+  actually returns five series inside the quota, and what the real monthly means come out at for
+  the four markets nobody has measured, is unknown. **Only CORN has been checked, by the owner,
+  and only against the hand table.** UNG, BOIL, SOYB and WEAT may be as wrong.
+- **THE EXPIRY RULE HAS NEVER PICKED AN EXPIRY ON A REAL CHAIN.** `expiryChoice()` is tested on
+  BOIL's three measured boards as a fixture. On the preview, check that Build opens on a board
+  whose Shortlist is not empty — that single observation is what this task was for.
+- **`maxSpreadShareOfMid` (0.35) AND `maxEntryDTE` (90) ARE JUDGEMENTS.** Like
+  `scratchPayoffShare`, and unlike the liquidity floor, nothing was read off a broker to choose
+  either. The reasoning is written beside both and 0.35 refuses all four measured BOIL spreads
+  while passing a normal market — but it has not been run across five chains to see how much it
+  removes. **If the Shortlist is suddenly empty everywhere, this is the first suspect**, and
+  `/api/liquidity` is the endpoint to extend with a spread distribution to settle it properly.
+- **THE PROBABILITY FORMATTER UNIFIES THE ROUNDING, NOT THE ARITHMETIC.** "44% / 45% /
+  5 times in 10" had two causes. One rounding is now one function, everywhere. But `mc.pop`
+  (8,000-run Monte Carlo), `r.pop` (`probProfit` on a curve) and `chanceInProfit` (band
+  integration) are still three different calculations of "the chance", and two of them on one
+  screen can still differ in the first decimal. Changing that is arithmetic, and TASK 6 was
+  copy only. **It is the obvious next debt.**
+- **THE GATE'S `IMPOSSIBLE_LOSS` INHERITS THE GRID'S BLIND SPOT.** The note below about a very
+  wide short structure now applies to the gate as well as the generation sites: a hand-built
+  condor whose short strikes sit beyond ±30% of spot reports a maximum-inside-the-window, and
+  can trip the refusal as a false positive. Computing both extremes from the STRIKES is still
+  the real fix.
+
 - **CLOSED THIS SESSION:** PR #14's *"a structure whose maximum loss is POSITIVE is still
   offered"* — `impossibleLoss()` now refuses it at all three generation sites (§4c).
-- **THE POSITIVE-MAX-LOSS CASE HAS NEVER BEEN SEEN ON A REAL BOARD.** It is refused, counted
-  and tested — but the test constructs the mispriced quote by hand (a 105 call quoted above a
-  100 call). Nobody has watched a live chain produce one, so how OFTEN it fires, and on which
-  market, is unknown. If the Shortlist starts printing that line, that is the evidence.
-- **THE POSITIVE-MAX-LOSS TEST IS NOT IN THE RISK GATE.** The task forbade touching the gate's
-  arithmetic, so a hand-built structure on the desk whose worst case prices as a profit is
-  still sendable. It is a narrow hole — the generation sites cannot offer one — but it is a
-  hole, and it is the obvious next `evaluateTrade()` violation. Note the sign trap before
-  doing it: `impossibleLoss()` reads a SIGNED figure and the gate carries `Math.abs(maxLoss)`.
+- **CLOSED THIS SESSION:** *"the positive-max-loss case has never been seen on a real board"*.
+  **IT IS LIVE.** On BOIL 2026-10-09, captured by the owner on 2026-09-03T17:57Z, SIX call
+  pairs price a bull call spread as a CREDIT: buy 19 / sell 19.5 nets **-0.290**, buy 22 /
+  sell 22.5 nets **-0.171**. A debit spread taken in for a credit cannot lose at expiry. The
+  refusal is no longer a hypothetical about a hand-built quote.
+- **CLOSED THIS SESSION:** *"the positive-max-loss test is not in the risk gate"*.
+  `evaluateTrade()` refuses it by name (`IMPOSSIBLE_LOSS`), entry-only, and the sign trap the
+  note warned about is handled and tested in both directions: the check reads the SIGNED
+  figure, the dollar limits around it keep reading `Math.abs`, and a CLOSING order carrying a
+  positive magnitude (`closeGroup()` sends the cost basis) is never sign-tested.
 - **THE GRID CAN STILL MISREAD A VERY WIDE SHORT STRUCTURE.** `maxLoss` is deliberately left
   as the minimum over ±30% of spot (rule 2 was not to be weakened, and the presets all break
   inside ±12%). A hand-built condor whose short strikes sit beyond ±30% would report a maximum

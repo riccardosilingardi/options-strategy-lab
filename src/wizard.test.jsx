@@ -104,6 +104,50 @@ check("an error frame stops the stream instead of being ignored", () => {
   has(threw.message, "overloaded");
 });
 
+check("THE LAST FRAME IS FLUSHED, so a complete answer is not reported as cut off", () => {
+  // The bug: `sseDeltas` holds the trailing frame back on every read because
+  // TCP does not respect frame boundaries — but on the LAST read there is no
+  // next read to hand it to. Anthropic's closing message_stop does not always
+  // arrive with a blank line after it, so the frame that says the answer
+  // finished was discarded as partial. Every time.
+  const noTrailingBlank = delta("A whole thought.")
+    + `event: message_stop\ndata: {"type":"message_stop"}`;   // no \n\n at the end
+  const streaming = sseDeltas(noTrailingBlank);
+  if (streaming.stopped) throw new Error("mid-stream, an unterminated frame must still be held back");
+  const flushed = sseDeltas(streaming.rest, { final: true });
+  if (!flushed.stopped) throw new Error("the final flush did not see message_stop");
+});
+
+check("the final flush does not double-count text already read", () => {
+  const whole = delta("Hello ") + delta("world.") + `event: message_stop\ndata: {"type":"message_stop"}`;
+  const first = sseDeltas(whole);
+  const tail = sseDeltas(first.rest, { final: true });
+  if (first.text + tail.text !== "Hello world.") {
+    throw new Error(`flush changed the text: ${JSON.stringify(first.text + tail.text)}`);
+  }
+});
+
+check("RUNNING OUT OF ROOM IS NOT A DROPPED CONNECTION — stop_reason is read", () => {
+  // message_delta carries stop_reason and was being ignored entirely, so an
+  // answer cut at the token budget arrived WITH message_stop, was judged
+  // complete, and was filed in the Journal as finished.
+  const md = (reason) => `event: message_delta\ndata: ${JSON.stringify({ type: "message_delta", delta: { stop_reason: reason } })}\n\n`;
+  const stop = `event: message_stop\ndata: {"type":"message_stop"}\n\n`;
+
+  const truncated = sseDeltas(delta("Half an answer") + md("max_tokens") + stop);
+  if (!truncated.stopped) throw new Error("message_stop was not seen");
+  if (truncated.stopReason !== "max_tokens") throw new Error("stop_reason was not read");
+
+  const finished = sseDeltas(delta("A whole answer.") + md("end_turn") + stop);
+  if (finished.stopReason !== "end_turn") throw new Error("a normal ending is reported too");
+  if (finished.stopReason === "max_tokens") throw new Error("a normal ending was called truncation");
+});
+
+check("a stream with no message_delta at all still reports no reason, not a wrong one", () => {
+  const r = sseDeltas(delta("text") + `event: message_stop\ndata: {"type":"message_stop"}\n\n`);
+  if (r.stopReason !== null) throw new Error("a reason was invented where none was sent");
+});
+
 check("a gateway page is reported as a timeout, never dumped as markup", () => {
   // Exactly what came back from the live site when an analysis ran long.
   const page = '<HTML> <HEAD> <TITLE>Inactivity Timeout</TITLE> </HEAD> <BODY BGCOLOR="white">'

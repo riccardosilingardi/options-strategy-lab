@@ -16,7 +16,7 @@
 // import this file.
 // ============================================================================
 
-import { RULES, sizing, money, pctText, capitalSourceNote, priceability, MIN_NET_DOLLARS } from "./rules.js";
+import { RULES, sizing, money, pctText, capitalSourceNote, priceability, impossibleLoss, MIN_NET_DOLLARS } from "./rules.js";
 
 /* ============================== helpers ============================== */
 
@@ -99,6 +99,10 @@ const V = (code, message) => ({ code, message });
  *        `intent` is "open" (default) or "close". Entry-only rules — sizing,
  *        exposure, entry DTE, defined risk — do not apply to an order that
  *        REDUCES risk; the paper-mode block and the warnings always apply.
+ *        `maxLoss` ON AN OPENING PROPOSAL IS SIGNED: a real worst case is
+ *        NEGATIVE, the way `analyze()` produces it. The arbitrage check reads
+ *        that sign; every dollar limit below it reads `Math.abs`. A closing
+ *        proposal may carry a positive magnitude and is never sign-tested.
  *        Two optional fields feed the priceability check, and the more of them
  *        a caller passes the more it can catch: `quotes` — one `{ bid, ask }`
  *        per leg, aligned with `legs`, straight off the chain — and `net`, the
@@ -181,6 +185,36 @@ export function evaluateTrade({ proposal, portfolio, capital, signals } = {}) {
         `loss to measure against ${limits.answered ? "your" : "the suggested"} ` +
         `${money(limits.perTradeLimit)} per-trade limit.`));
     }
+  }
+
+  /* ---- 3c. A WORST CASE THAT IS A PROFIT IS AN ARBITRAGE ----
+     The debt PR #15 wrote down and left open: `impossibleLoss()` refuses this
+     at all three generation sites, but the gate did not, so a structure the
+     user assembled BY HAND on the desk whose worst case priced as a gain was
+     still sendable. The floors stay out of the gate on purpose — a trade the
+     user builds is his to make — but this is not a quality judgement. It is
+     the same class of fault as UNPRICEABLE: an arbitrage on five commodity ETF
+     chains does not exist, so a maximum loss that came out positive says at
+     least one leg was priced off a quote nobody has traded against, and rule 2
+     is that the maximum loss is always KNOWN.
+
+     >>> AND IT IS LIVE. <<< The PRD recorded this as never having been seen on
+     a real board. It has been now: on BOIL 2026-10-09, SIX call pairs price a
+     bull call spread as a CREDIT — buy 19 / sell 19.5 nets -0.290, buy 22 /
+     sell 22.5 nets -0.171. A debit spread taken in for a credit cannot lose at
+     expiry, which is exactly the structure this refuses.
+
+     THE SIGN TRAP, which is why this sits here and not next to `tradeRiskOf`:
+     `impossibleLoss()` reads a SIGNED figure — a real worst case is NEGATIVE —
+     while everything below this line runs on `Math.abs(maxLoss)` and has
+     already thrown that sign away. `p.maxLoss` on an OPENING proposal is the
+     signed number `analyze()` produces, which is what both open-intent callers
+     pass. A closing order is never tested: `closeGroup()` in pro.jsx sends a
+     positive magnitude (the cost basis), and reading that as an arbitrage
+     would block every close on the desk. */
+  if (isOpen && isNum(p.maxLoss)) {
+    const arb = impossibleLoss(Number(p.maxLoss));
+    if (arb) violations.push(V("IMPOSSIBLE_LOSS", `${arb} Nothing is sent.`));
   }
 
   /* ---- 4. per-trade limit (the one the demo video shows) ---- */

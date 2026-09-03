@@ -21,6 +21,7 @@ import {
   fetchChain, resetChainSource, SOURCE, MAX_DTE,
   feedName, sourceNote, openInterestPath, applyOpenInterest, fetchOpenInterest,
   hasOpenInterest, oiProfile,
+  spotOf, spotAt, nearMoneyOpenInterest, monotonicityBreaks, monotonicityNote,
 } from "./chain.js";
 
 const ok = [], bad = [];
@@ -338,6 +339,90 @@ check("a feed with no open interest is reported as such, not as zeros", () => {
   eq(p.known, 0, "no known counts");
   eq(p.all.median, null, "and no median invented from nothing");
   eq(oiProfile(null), null, "no chain, no profile");
+});
+
+/* ---------------- 4. ONE SPOT, AND WHETHER THE BOARD MAKES SENSE ----------------
+   Two live captures seventeen seconds apart on 2026-09-03T17:57Z: the chain
+   said BOIL was 20.19 and /api/liquidity said 20.22, and the app printed one
+   "PRICE NOW". And on BOIL 2026-10-09, five of 25 adjacent near-the-money pairs
+   were priced in an order that cannot happen. */
+
+check("spotOf is the one accessor, and it refuses a price that is not one", () => {
+  eq(spotOf({ spot: 20.19 }), 20.19, "the chain's own reading");
+  eq(spotOf({ spot: 0 }), null, "zero is not a price");
+  eq(spotOf({ spot: null }), null, "and neither is a missing one");
+  eq(spotOf(null), null, "nor a missing chain");
+  eq(spotOf({}), null, "Number(undefined) is NaN, and NaN is not a spot");
+});
+
+check("the spot carries the time it was read, so a screen can say how old it is", () => {
+  const c = { spot: 20.19, updated: "2026-09-03T17:57:00.000Z" };
+  eq(spotAt(c), Date.parse("2026-09-03T17:57:00.000Z"), "the reading's own timestamp");
+  eq(spotAt({ spot: 20.19 }), null, "and never a made-up one");
+});
+
+const BOIL_EXP = "2026-10-09";
+const boilChain = (oi) => ({
+  spot: 21.23,
+  byExp: {
+    [BOIL_EXP]: {
+      dte: 35,
+      // the 19.5 call priced ABOVE the 19 call, and the 22.5 above the 22
+      calls: { 19: { mid: 2.50, oi: oi?.[0] }, 19.5: { mid: 2.80, oi: oi?.[1] },
+               22: { mid: 0.50, oi: oi?.[2] }, 22.5: { mid: 0.70, oi: oi?.[3] } },
+      puts: { 20: { mid: 0.80, oi: oi?.[4] }, 21: { mid: 1.10, oi: oi?.[5] } },
+    },
+  },
+});
+
+check("A CALL CANNOT COST MORE THAN A LOWER-STRIKE CALL — the board is checked", () => {
+  const m = monotonicityBreaks(boilChain(), BOIL_EXP);
+  truthy(m.checked, "there was a board to look at");
+  eq(m.breaks, 2, "both impossible pairs are found");
+  eq(m.worst.side, "calls", "and the worst one is named");
+  const note = monotonicityNote(m, BOIL_EXP);
+  truthy(note.includes(BOIL_EXP), "the note names the expiry");
+  truthy(/unreliable/i.test(note), "and says the feed looks unreliable rather than pricing off it silently");
+});
+
+check("a board whose prices agree with themselves produces no warning at all", () => {
+  const clean = { spot: 21.23, byExp: { [BOIL_EXP]: { dte: 35,
+    calls: { 19: { mid: 2.80 }, 19.5: { mid: 2.50 }, 22: { mid: 0.70 }, 22.5: { mid: 0.50 } },
+    puts: { 20: { mid: 0.80 }, 21: { mid: 1.10 } } } } };
+  const m = monotonicityBreaks(clean, BOIL_EXP);
+  eq(m.breaks, 0, "nothing impossible here");
+  eq(monotonicityNote(m, BOIL_EXP), null, "and so nothing is said");
+});
+
+check("a missing price is skipped, never counted as an impossible one", () => {
+  const gappy = { spot: 21, byExp: { E: { dte: 35,
+    calls: { 19: { mid: null }, 19.5: { mid: 2.5 }, 22: { mid: 0 } }, puts: {} } } };
+  const m = monotonicityBreaks(gappy, "E");
+  eq(m.breaks, 0, "an unknown price cannot contradict anything");
+  eq(monotonicityBreaks({ byExp: {} }, "E").checked, false, "and no board is not a clean board");
+});
+
+check("near-the-money open interest counts CONTRACTS, and unknown stays unknown", () => {
+  // The two numbers `expiryChoice()` in rules.js ranks expiries on.
+  // Spot 21.23, so the band is 19.11 to 23.35: the 19 call sits just outside it
+  // and the other five contracts are in. That is the point of measuring NEAR
+  // the money — the whole board is dominated by strikes nobody trades, and
+  // through it every expiry looks equally dead.
+  const r = nearMoneyOpenInterest(boilChain([40, 2, 30, 5, 12, 900]), BOIL_EXP, { floor: 10 });
+  eq(r.near, 5, "every call and every put within 10% of spot, and nothing outside it");
+  eq(r.clears, 3, "30, 12 and 900 clear a floor of 10; the 19.5 call's 2 and the 22.5's 5 do not");
+
+  // `Number(null)` is 0 and 0 is finite. An expiry the feed has not reported is
+  // not an expiry with nothing on it, and reporting it as 0 would rank exactly
+  // the boards we cannot read as the deadest ones.
+  const blind = nearMoneyOpenInterest(boilChain(), BOIL_EXP, { floor: 10 });
+  eq(blind.clears, null, "unknown, not zero");
+  eq(blind.near, 5, "the contracts were still looked at");
+});
+
+check("with no spot there is no near-the-money to measure", () => {
+  const c = boilChain([40, 40, 40, 40, 40, 40]);
+  eq(nearMoneyOpenInterest({ ...c, spot: null }, BOIL_EXP, { floor: 10 }).clears, null);
 });
 
 await run();

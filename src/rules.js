@@ -22,6 +22,15 @@ export const RULES = {
   // the position would be opened already inside its own exit window.
   minEntryDTE: 30,             // hard floor at entry
   targetEntryDTE: 45,          // what autopilot aims for (PRD §9)
+  // maxEntryDTE — THE FAR EDGE OF THE WINDOW THE APP BUILDS IN, and it exists
+  // only so `expiryChoice()` cannot answer "the busiest board" with a board a
+  // year out. Twice the target: past about three months the trade stops being
+  // the one these exit rules were chosen for — the 21-DTE exit is most of the
+  // position's life away, the seasonal window it was entered on has closed, and
+  // an option that far out is bought mostly on volatility rather than on the
+  // idea. It is a HORIZON, not a floor: nothing is refused for sitting outside
+  // it, it just is not what the app opens on by default.
+  maxEntryDTE: 90,
 
   // --- sizing, PRD §3. These two percentages are best practice, not law:
   // they cap a *derived* number, they do not replace it.
@@ -146,6 +155,45 @@ export const RULES = {
   // removing the boring trades that are the point of this app.
   minRewardRisk: 0.25,
 
+  // --- A WIDE MARKET IS NOT A PRICE. THE THIRD FLOOR, BESIDE THE OTHER TWO.
+  //
+  // maxSpreadShareOfMid — how far apart the bid and the ask may be, AS A SHARE
+  // OF THE MID PRICE BETWEEN THEM. A share and not a number of cents, for the
+  // same reason the liquidity half is a percentile and not a count: 10 cents
+  // wide is nothing on a $4 option and the whole trade on a $0.12 one.
+  //
+  // WHY THIS EXISTS AT ALL, when the liquidity floor is already here. They test
+  // different things and neither implies the other. Open interest is a
+  // HEADCOUNT — how many contracts are open, from last night's close. The
+  // spread is TODAY'S DISAGREEMENT about what one is worth. A leg can have 300
+  // contracts open and still be quoted 0.10 bid / 0.60 ask, and the liquidity
+  // floor waves it straight through: it asked whether anybody is there, not
+  // whether they agree. Every MAX PROFIT, CHANCE and EV in this app is computed
+  // from the MID (`midOf()` in chain.js), and the mid of a market that wide is
+  // the midpoint of an argument, not a price.
+  //
+  // >>> MEASURED, live, on BOIL 2026-10-09 near the money. <<< Bid/ask spreads
+  // of 66%, 91%, 145% and 166% OF THE MID on strikes the app builds on. A
+  // spread of 145% of the mid means the ask is more than three times the bid:
+  // the two sides of that market do not agree within a factor of three about
+  // what the contract is worth, and the number this app would print — half way
+  // between them — is a figure neither of them quoted.
+  //
+  // WHY 0.35. You pay half the spread getting in and half getting out, so at a
+  // spread share s the ROUND TRIP costs s times what the leg is worth: at 0.35
+  // a third of the position's value goes to the market maker before the trade
+  // is right or wrong about anything. That is already a punishing number to
+  // accept, and it is deliberately well ABOVE what a liquid market quotes
+  // (these chains trade in whole cents, so a $2 option two cents wide is 1%)
+  // rather than tuned to be tight: like the liquidity floor, it is drawn where
+  // a quote stops being a price, not where a trade stops being good. All four
+  // BOIL readings above are refused by it and a normal strike is nowhere near
+  // it.
+  //
+  // It sits BESIDE the liquidity floor and does not touch its two constants.
+  // A leg is judged on both, and the screen says which one removed it.
+  maxSpreadShareOfMid: 0.35,
+
   // minNetPremium — THE PRICE HAS TO EXIST BEFORE ANY OTHER RULE CAN BE
   // APPLIED TO IT. In dollars per share, the unit an option is quoted in:
   // multiply by 100 for one contract, as every screen does.
@@ -224,12 +272,80 @@ export const money = (x) => {
   return `${n < 0 && r > 0 ? "-" : ""}$${r.toLocaleString("en-US")}`;
 };
 
+/**
+ * A NUMBER WHOSE DIRECTION IS THE POINT — theta and vega, and nothing else yet.
+ *
+ * `money()` prints a minus for a loss and nothing for a gain, which is right for
+ * a price: nobody needs "+$340" to understand what a maximum profit is. It is
+ * WRONG for a rate of change. THETA on a long debit spread printed "$3" and the
+ * holder LOSES that every day; read as a gain it inverts the one thing the
+ * number is there to say. So these two always carry a sign.
+ *
+ * AND IT WILL NOT ROUND A REAL NUMBER AWAY TO NOTHING. VEGA printed exactly
+ * "$0" on a 35-day spread, which reads as "volatility does not affect this" —
+ * a claim, and a false one. Under a dollar it gains the precision it needs;
+ * under a cent it says so in words rather than showing a zero it does not mean.
+ * An exact zero is still "$0", because that one IS the number.
+ */
+export const signedMoney = (x) => {
+  if (!known(x)) return "\u2014";
+  const n = Number(x);
+  if (n === 0) return "$0";
+  const sign = n < 0 ? "-" : "+";
+  const a = Math.abs(n);
+  if (a >= 1) return `${sign}$${Math.round(a).toLocaleString("en-US")}`;
+  if (a >= 0.01) return `${sign}$${a.toFixed(2)}`;
+  // Below a cent, ONE SIGNIFICANT FIGURE rather than a rounded zero. `$0` on a
+  // vega that is really 0.004 is a claim that volatility does not move this
+  // trade; `+$0.004` is the same fact told truthfully, and it is no longer.
+  return `${sign}$${Number(a.toPrecision(1))}`;
+};
+
 /** `5%`, `6.8%`. One decimal only when the number needs it. */
 export const pctText = (frac, decimals = 1) => {
   const n = Number(frac) * 100;
   if (!Number.isFinite(n)) return "n/a";
   const r = Math.round(n * 10) / 10;
   return `${Number.isInteger(r) ? r : r.toFixed(decimals)}%`;
+};
+
+/* -------------------------------------------------------------------------
+ * ONE PROBABILITY, ONE ROUNDING, EVERYWHERE.
+ *
+ * The compare card printed "CHANCE 75%" next to "8 times in 10", and one spread
+ * read 44%, 45% and "5 times in 10" across three screens. Some of that was
+ * three different roundings of the same number; the rest was the same number
+ * spoken two ways with nothing tying the two together. Both are fixed by having
+ * ONE function: the phrase is derived FROM the rounded percentage, so the two
+ * cannot disagree about a probability they are both describing.
+ * ------------------------------------------------------------------------- */
+
+/** The rounded whole percent, or null when there is no probability to print. */
+export const chancePct = (p) => {
+  // `known()` first: `Number(null)` is 0 and 0 is finite, so coercing straight
+  // away turns "we have no probability" into "a 0% chance" — a confident claim
+  // built out of a missing one, which is the fault this whole file is about.
+  if (!known(p)) return null;
+  return Math.round(Math.max(0, Math.min(1, Number(p))) * 100);
+};
+
+/** `75%`, or the dash every unknown in this app prints. */
+export const chanceText = (p) => {
+  const pc = chancePct(p);
+  return pc == null ? "\u2014" : `${pc}%`;
+};
+
+/**
+ * `8 times in 10` — DERIVED FROM THE PERCENTAGE ABOVE, not from the raw float.
+ * Rounding twice is how 0.749 became "75%" on one line and "7 times in 10" on
+ * the next; there is one rounding now and the second phrasing is a restatement
+ * of its result.
+ */
+export const chanceInTen = (p) => {
+  const pc = chancePct(p);
+  if (pc == null) return "\u2014";
+  const n = Math.round(pc / 10);
+  return `${n} time${n === 1 ? "" : "s"} in 10`;
 };
 
 /* ============================== rule text ==============================
@@ -329,6 +445,7 @@ export const NOTHING_TODAY = {
     const lab = qualityFloorLabels(t.level);
     const parts = [];
     if (t.liquidity > 0) parts.push(`${t.liquidity} because ${lab.liquidity}`);
+    if (t.spread > 0) parts.push(`${t.spread} because ${lab.spread}`);
     if (t.reward > 0) parts.push(`${t.reward} because ${lab.reward}`);
     if (t.unpriceable > 0) parts.push(`${t.unpriceable} because ${lab.unpriceable}`);
     if (t.impossible > 0) parts.push(`${t.impossible} because ${lab.impossible}`);
@@ -337,7 +454,7 @@ export const NOTHING_TODAY = {
     // floors and the sentence must not say they are: a structure whose price
     // could not be read never reached a floor, and one that could not lose was
     // refused before either floor looked at it.
-    const byFloor = (t.liquidity > 0 || t.reward > 0);
+    const byFloor = (t.liquidity > 0 || t.spread > 0 || t.reward > 0);
     const lead = byFloor
       ? `was filtered out by the quality floors`
       : `was refused before the quality floors were even applied`;
@@ -414,7 +531,7 @@ export const liquidityMeasurementNote = () => {
   const M = LIQUIDITY_MEASUREMENT;
   const spread = Math.round(M.high.bar / M.low.bar);
   return `The recommendation is MEASURED, not guessed. On the ${M.asOf} close, /api/liquidity read ` +
-    `${M.reporting} strikes reporting open interest across all ${M.markets} markets: near the money the bar ` +
+    `${M.reporting} contracts reporting open interest across all ${M.markets} markets: near the money the bar ` +
     `ran from ${M.low.bar} contracts on ${M.low.market} to ${M.high.bar} on ${M.high.market}, a ${spread}-fold ` +
     `spread, which is why one fixed number could not serve all ${M.markets}. That is one day's close and not a ` +
     `law: re-read it as the market moves.`;
@@ -483,9 +600,17 @@ export const looseningWarning = (level) => {
     `not a market: the exit can cost more than the entry saved.`;
 };
 
+/**
+ * Is this a count the feed actually gave us? `Number(null)` is 0 and 0 is
+ * finite, so every place that reads a count has to ask this BEFORE coercing or
+ * an unknown arrives as a zero — which is the one thing this app must never say
+ * about data it does not have.
+ */
+export const known = (x) => x != null && x !== "" && Number.isFinite(Number(x));
+
 /** Sorted, ascending, unknowns dropped. The one place a count is judged known. */
 export const knownCounts = (xs) => (Array.isArray(xs) ? xs : [])
-  .filter((x) => x != null && x !== "" && Number.isFinite(Number(x)))
+  .filter(known)
   .map(Number)
   .sort((a, b) => a - b);
 
@@ -508,7 +633,7 @@ export function quantile(sorted, f) {
  * @returns {{ threshold, relative, absolute, peers, basis }}
  *   `basis` is which half bound: "relative" when the chain's own distribution
  *   set the number, "absolute" when the floor under the floor did, and
- *   "absolute (too few strikes to measure)" when there was no distribution to
+ *   "absolute (too few contracts to measure)" when there was no distribution to
  *   take a percentile of. The screen prints it, because a floor that will not
  *   say where its number came from is the thing this replaces.
  */
@@ -518,7 +643,7 @@ export function liquidityThreshold(peers, level = RECOMMENDED_LIQUIDITY) {
   // Three different reasons the relative half can be absent, and they are not
   // the same fact: a setting that asks for no percentile, a chain with too few
   // strikes to take one from, and a percentile that simply came out below the
-  // absolute minimum. Reporting all three as "too few strikes" would be the app
+  // absolute minimum. Reporting all three as "too few contracts" would be the app
   // blaming the data for its own setting.
   const wanted = l.percentile > 0;
   const measurable = wanted && known.length >= RULES.minPeersForPercentile;
@@ -527,7 +652,7 @@ export function liquidityThreshold(peers, level = RECOMMENDED_LIQUIDITY) {
   const basis = relative != null && relative > l.absolute ? "relative"
     : !wanted ? "absolute (no relative test at this setting)"
     : measurable ? "absolute"                       // measured, and it lost
-    : known.length ? "absolute (too few strikes to measure)"
+    : known.length ? "absolute (too few contracts to measure)"
     : "absolute";
   return { threshold, relative, absolute: l.absolute, peers: known.length, basis, level: l };
 }
@@ -555,6 +680,8 @@ export const qualityFloorLabels = (level = RECOMMENDED_LIQUIDITY) => {
       ? `one of its legs failed the liquidity floor`
       : `one of its legs is among the ${pctText(l.percentile)} least-traded strikes on its own expiry, ` +
         `or has fewer than ${l.absolute} contracts open`,
+    spread: `the bid and the ask on one of its legs are more than ${pctText(RULES.maxSpreadShareOfMid)} apart, ` +
+      `so the mid it would be priced from is not a number either side quoted`,
     reward: `it pays under ${money(RULES.minRewardRisk * 100)} for every ${money(100)} at risk`,
     unpriceable: `its price could not be read from the chain at all — a leg with no bid, or a net of about nothing`,
     impossible: `its worst case priced as a PROFIT, which is an arbitrage and therefore a mispriced leg`,
@@ -570,9 +697,12 @@ export const qualityFloorSentence = (level = RECOMMENDED_LIQUIDITY) => {
       `beats the bottom ${pctText(l.percentile)} of the strikes on its own expiry — the floor is measured ` +
       `against the chain it is judging, because ${l.absolute} contracts means one thing on a busy market ` +
       `and another on a quiet one.`;
-  return `${liq} Everything here also pays at least ${pctText(RULES.minRewardRisk)} of what it risks. ` +
-    `Open interest is how many contracts are actually open: a price on a contract nobody trades is a quote, ` +
-    `not a market. Setting: ${l.label.toUpperCase()}${l.recommended ? " (the app's recommendation)" : ""}.`;
+  return `${liq} Every leg here is also quoted within ${pctText(RULES.maxSpreadShareOfMid)} bid to ask, and ` +
+    `everything here pays at least ${pctText(RULES.minRewardRisk)} of what it risks. Open interest is how many ` +
+    `contracts are actually open and the spread is how far apart the two sides are today: a contract nobody ` +
+    `trades is a quote and not a market, and a market that wide has no agreed price to be the middle of. ` +
+    `The spread ceiling does not move with this setting. ` +
+    `Setting: ${l.label.toUpperCase()}${l.recommended ? " (the app's recommendation)" : ""}.`;
 };
 
 /** The one line that says which setting produced the list underneath it. */
@@ -582,8 +712,10 @@ export const liquiditySettingNote = (level, counts) => {
   const shown = c.kept != null ? `${c.kept} shown` : null;
   const bits = [];
   if (c.liquidity > 0) bits.push(`${c.liquidity} removed for liquidity`);
+  if (c.spread > 0) bits.push(`${c.spread} removed for a bid/ask spread over ${pctText(RULES.maxSpreadShareOfMid)} of the mid`);
   if (c.reward > 0) bits.push(`${c.reward} removed for reward-to-risk`);
   if (c.skipped > 0) bits.push(`${c.skipped} not liquidity-checked (the feed reports no open interest)`);
+  if (c.spreadSkipped > 0) bits.push(`${c.spreadSkipped} not spread-checked (the feed quoted only one side)`);
   // Not removed BY this setting, and the note says so rather than letting a
   // count the floor never made appear as one of its own.
   if (c.unpriceable > 0) bits.push(`${c.unpriceable} left out before the floor, with no price we could read`);
@@ -683,6 +815,233 @@ export const unpriceableNote = (n, what) =>
   `${n} structure${n === 1 ? "" : "s"} ${n === 1 ? "was" : "were"} left out because ${n === 1 ? "its" : "their"} ` +
   `price could not be read${what ? ` on ${what}` : ""}: a leg nobody bids for, or a net of about nothing. ` +
   `A maximum loss the app cannot compute is not a maximum loss of zero, and nothing here is shown at ${money(0)}.`;
+
+/* -------------------------------------------------------------------------
+ * WHICH EXPIRY THE APP OPENS ON — THE BOARD DECIDES, NOT THE CALENDAR.
+ *
+ * THE FAULT, MEASURED ON BOIL. Near the money, counting contracts that clear
+ * the 10-contract absolute floor:
+ *
+ *     2026-09-18 (14 DTE)   19 of 23
+ *     2026-10-02 (28 DTE)   12 of 14
+ *     2026-10-09 (35 DTE)    2 of  7   <- the one the app selected
+ *
+ * The app picked its expiry by DISTANCE FROM A TARGET DTE alone — the first one
+ * between 35 and 60 days out — and landed on the deadest board of the three. So
+ * the Shortlist kept saying "nothing clears", the Radar (looking at 28 DTE)
+ * kept saying four structures did, and both were telling the truth about
+ * different expiries. The floor was never the problem. The floor is measured
+ * and it is right; what was wrong was handing it a board with nothing on it.
+ *
+ * THE RULE. Among the expiries that satisfy the risk gate's `minEntryDTE` — a
+ * hard floor that is not negotiable here, because an entry inside the exit
+ * window has no days to work in — prefer the one whose NEAR-THE-MONEY strikes
+ * actually clear the liquidity floor in force. Distance from `targetEntryDTE`
+ * stays, but as the TIE-BREAK it always should have been: it decides between
+ * two boards you could build on, it does not decide to build on an empty one.
+ *
+ * TWO THINGS IT WILL NOT DO, and they are the same discipline as everywhere
+ * else in this file.
+ *
+ *  - IT WILL NOT BREAK THE 30-DAY FLOOR TO FIND A BUSIER BOARD. BOIL's thickest
+ *    expiry by far is 14 DTE, and it is not eligible: opening there would put
+ *    the position inside its own 21-DTE exit rule within a fortnight. But
+ *    passing it over is a FACT THE SCREEN OWES THE USER, so `passedOver`
+ *    carries the nearer, thicker expiry and why it was not taken. Silently
+ *    choosing the third-best board and saying nothing is how the contradiction
+ *    above survived.
+ *  - IT WILL NOT COUNT AN UNKNOWN AS A ZERO. An expiry whose open interest has
+ *    not landed yet (Alpaca snapshots carry none until the contract-list call
+ *    patches it in) is `clears: null`, not `clears: 0`. Unknown expiries are
+ *    ranked on DTE alone and `measured` says so, because "we could not read
+ *    this board" is not "this board is empty".
+ * ------------------------------------------------------------------------- */
+
+/**
+ * @param candidates  one entry per expiry, already read off the chain:
+ *        `{ key, dte, clears, near }` — `clears` is how many near-the-money
+ *        contracts clear the floor in force and `near` how many were looked at.
+ *        `clears: null` means the feed has not said yet.
+ * @param opts.minEntryDTE / opts.targetEntryDTE  the rules, overridable only so
+ *        the tests can state them explicitly.
+ * @returns {{ chosen, passedOver, eligible, measured, reason }}
+ *   `chosen` the expiry to open on, or null when nothing is eligible.
+ *   `passedOver` a NEARER expiry, below the DTE floor, that carries strictly
+ *   more tradeable strikes than the one chosen — the thing the screen has to
+ *   say out loud.
+ */
+export function expiryChoice(candidates = [], {
+  minEntryDTE = RULES.minEntryDTE, targetEntryDTE = RULES.targetEntryDTE,
+  maxEntryDTE = RULES.maxEntryDTE,
+} = {}) {
+  const all = (Array.isArray(candidates) ? candidates : [])
+    .filter((c) => c && c.key != null && Number.isFinite(Number(c.dte)))
+    // `Number(null)` IS 0, AND 0 IS FINITE. Coercing first would turn an expiry
+    // whose open interest has not landed into an expiry with nothing tradeable
+    // on it, and this function would then rank the boards it cannot read LAST —
+    // the same lie `qualityFloor()` refuses to tell about a single leg.
+    .map((c) => ({
+      key: c.key,
+      dte: Number(c.dte),
+      clears: known(c.clears) ? Number(c.clears) : null,
+      near: known(c.near) ? Number(c.near) : null,
+    }));
+  // The window, and a fallback that can never leave the app with no expiry: if
+  // every board past the entry floor is beyond the horizon, the horizon yields
+  // — it is a preference about which trade this app is for, and refusing to
+  // open anything at all would be a stronger statement than it is entitled to
+  // make. The entry floor never yields; that one is the gate's.
+  const past = all.filter((c) => c.dte >= minEntryDTE);
+  const inWindow = past.filter((c) => c.dte <= maxEntryDTE);
+  const eligible = inWindow.length ? inWindow : past;
+  const measured = eligible.some((c) => c.clears != null);
+  const gap = (c) => Math.abs(c.dte - targetEntryDTE);
+
+  // Most tradeable strikes first; the target DTE breaks the tie. With nothing
+  // measured this collapses to the old behaviour — nearest to target — which is
+  // correct: with no counts there is nothing better to go on.
+  const ranked = [...eligible].sort((a, b) => {
+    const ca = a.clears ?? -1, cb = b.clears ?? -1;
+    if (ca !== cb) return cb - ca;
+    return gap(a) - gap(b);
+  });
+  const chosen = ranked[0] || null;
+
+  // The nearer board we are not allowed to use, and only when it is genuinely
+  // better: naming an expiry that is no thicker would be noise.
+  const passedOver = chosen == null ? null : all
+    .filter((c) => c.dte < minEntryDTE && c.clears != null && chosen.clears != null && c.clears > chosen.clears)
+    .sort((a, b) => (b.clears - a.clears) || (b.dte - a.dte))[0] || null;
+
+  const reason = chosen == null ? "none"
+    : !measured ? "dte"
+    : ranked.length > 1 && (ranked[0].clears ?? -1) > (ranked[1].clears ?? -1) ? "liquidity"
+    : "dte";
+
+  return { chosen, passedOver, eligible, measured, reason };
+}
+
+/** Why the app is on this expiry, in one sentence, with the counts in it. */
+export const expiryChoiceNote = (choice, level = RECOMMENDED_LIQUIDITY) => {
+  const c = choice?.chosen;
+  if (!c) return `No expiry is far enough out to open on: the entry floor is ${RULES.minEntryDTE} days, ` +
+    `so the exit rule at ${RULES.exitDTE} days has room to work.`;
+  const l = liquidityLevel(level?.id ?? level);
+  const head = c.clears == null
+    ? `Building on ${c.key} (${c.dte} days out), the closest to the ${RULES.targetEntryDTE}-day mark this app ` +
+      `aims for. How many of its strikes are actually tradeable is not known yet — the feed has not reported ` +
+      `open interest for this expiry.`
+    : choice.reason === "liquidity"
+      ? `Building on ${c.key} (${c.dte} days out): ${c.clears} of its ${c.near} near-the-money contracts clear ` +
+        `the ${l.label.toUpperCase()} liquidity floor, more than any other expiry past the ` +
+        `${RULES.minEntryDTE}-day entry minimum.`
+      : `Building on ${c.key} (${c.dte} days out), the closest to the ${RULES.targetEntryDTE}-day mark, with ` +
+        `${c.clears} of its ${c.near} near-the-money contracts clearing the ${l.label.toUpperCase()} floor.`;
+  const over = choice.passedOver
+    ? ` ${choice.passedOver.key} is busier — ${choice.passedOver.clears} of ${choice.passedOver.near} clear — ` +
+      `but it is only ${choice.passedOver.dte} days out, inside the ${RULES.minEntryDTE}-day entry floor: ` +
+      `opening there would put the trade inside its own ${RULES.exitDTE}-day exit rule almost immediately, ` +
+      `so it is passed over.`
+    : "";
+  return head + over;
+};
+
+/** `nothing cleared on 2026-10-09` — an empty list always names its expiry. */
+export const emptyExpiryNote = (expKey, tally, level = RECOMMENDED_LIQUIDITY) => {
+  const t = tally || {};
+  const l = liquidityLevel(level?.id ?? level);
+  const bits = [];
+  if (t.liquidity > 0) bits.push(`${t.liquidity} for liquidity`);
+  if (t.spread > 0) bits.push(`${t.spread} for a bid/ask spread over ${pctText(RULES.maxSpreadShareOfMid)} of the mid`);
+  if (t.reward > 0) bits.push(`${t.reward} for reward-to-risk`);
+  if (t.unpriceable > 0) bits.push(`${t.unpriceable} with no readable price`);
+  if (t.impossible > 0) bits.push(`${t.impossible} unable to lose at any price`);
+  return `NOTHING CLEARED ON ${expKey || "this expiry"}${bits.length ? ` — ${bits.join(", ")}` : ""}. ` +
+    `That is a verdict on ${expKey || "this expiry"} and on nothing else: another expiry on the same market ` +
+    `can be far busier, and the count on any other screen is about the expiry that screen names. ` +
+    `Setting: ${l.label.toUpperCase()}.`;
+};
+
+/* -------------------------------------------------------------------------
+ * A WIDE MARKET IS NOT A PRICE — THE SPREAD FLOOR.
+ *
+ * The liquidity floor counts who is there. This one reads whether they agree.
+ * They are independent: a leg with 300 contracts open and a 145%-wide market
+ * passes the liquidity floor untouched, and that leg's MID — which is what
+ * every maximum profit, chance and expected value in this app is computed
+ * from — is the midpoint of an argument rather than a price anybody quoted.
+ *
+ * SAME TWO RULES AS THE LIQUIDITY HALF, and they are the point:
+ *   1. UNKNOWN IS NOT WIDE. A leg the feed quoted one side of, or none, is not
+ *      tested. A model-priced leg carries no bid or ask at all. Missing data is
+ *      not evidence of a bad market, exactly as `oi: null` is not evidence that
+ *      nobody trades a strike.
+ *   2. IT NAMES ITSELF. The removal is counted separately from the liquidity
+ *      one and says which of the two happened, because "nobody is holding this"
+ *      and "nobody agrees what it is worth" are different facts about a leg and
+ *      pooling them would explain neither.
+ * ------------------------------------------------------------------------- */
+
+/**
+ * The bid/ask spread of one leg as a share of its mid, or null when unknown.
+ *
+ * Both sides have to be positive numbers. A zero or missing bid is NOT a
+ * hundred-percent spread: it is the no-bid case, and `priceability()` already
+ * refuses a long leg nobody is bidding for, by name and before the floors.
+ */
+export const spreadShare = (bid, ask) => {
+  const b = Number(bid), a = Number(ask);
+  if (!Number.isFinite(b) || !Number.isFinite(a)) return null;
+  if (!(b > 0) || !(a > 0) || a < b) return null;
+  const mid = (b + a) / 2;
+  if (!(mid > 0)) return null;
+  return (a - b) / mid;
+};
+
+/**
+ * Run the two-sided quotes of a structure past the spread floor.
+ *
+ * @param quotes  one `{ bid, ask }` per leg, aligned with the legs, straight
+ *                off the chain. A missing entry is UNKNOWN and tests nothing.
+ * @param level   accepted so a caller can pass the liquidity setting through
+ *                without special-casing; the spread floor is NOT part of that
+ *                setting and does not move with it.
+ * @returns {{ checked, pass, widest, floor, tested, unknown }}
+ *   `widest` is the worst share found among the legs that could be measured.
+ */
+export function spreadFloor(quotes = [], { floor = RULES.maxSpreadShareOfMid } = {}) {
+  const shares = [];
+  let unknown = 0;
+  for (const q of (Array.isArray(quotes) ? quotes : [])) {
+    const sh = spreadShare(q?.bid, q?.ask);
+    if (sh == null) { unknown++; continue; }
+    shares.push(sh);
+  }
+  const checked = shares.length > 0;
+  const widest = checked ? Math.max(...shares) : null;
+  return { checked, pass: checked ? widest <= floor : true, widest, floor, tested: shares.length, unknown };
+}
+
+/** The refusal sentence, with the number that produced it already in it. */
+export const spreadFloorReason = (widest, floor = RULES.maxSpreadShareOfMid) =>
+  `Its widest leg is quoted ${pctText(widest)} apart, bid to ask, against a ${pctText(floor)} ceiling. ` +
+  `Every profit, chance and expected value on this screen is worked out from the MID — half way between ` +
+  `those two — and half way between numbers that far apart is a figure neither side quoted. You pay half ` +
+  `the spread getting in and half getting out, so the round trip alone would cost ${pctText(widest)} of ` +
+  `what the leg is worth.`;
+
+/** The one line a list prints in place of the structures this floor removed. */
+export const wideSpreadNote = (n, what) =>
+  `${n} structure${n === 1 ? "" : "s"} ${n === 1 ? "was" : "were"} left out because the bid and the ask on ` +
+  `${n === 1 ? "one of its legs" : "one of their legs"} are more than ${pctText(RULES.maxSpreadShareOfMid)} ` +
+  `apart${what ? ` on ${what}` : ""}. That is a different fault from an untraded strike: contracts can be ` +
+  `open and the two sides still disagree about what one is worth, and the mid this app prices from sits ` +
+  `between them.`;
+
+/** The one sentence shown when the spread floor could not be applied. */
+export const spreadSkippedNote = (feed) =>
+  `The bid/ask spread floor was SKIPPED${feed ? ` — ${feed} did not quote both sides of these contracts` : ""}. ` +
+  `A quote we do not have is not a wide quote, so nothing was rejected for it.`;
 
 /* -------------------------------------------------------------------------
  * IS THERE A CEILING AT ALL? — THE PROPERTY OF THE LEGS, NOT OF A GRID.
@@ -826,6 +1185,12 @@ export const rewardRisk = (maxProfit, maxLoss) => {
  *   openInterest — one entry per leg. A number is a known count (0 included:
  *                  CBOE really does report zero). `null`/`undefined` means the
  *                  feed did not tell us, and skips the check.
+ *   quotes       — one `{ bid, ask }` per leg, for the SPREAD floor. A leg the
+ *                  feed quoted one side of, or none, is unknown and tests
+ *                  nothing — the same rule as the open interest above. This
+ *                  floor is independent of the liquidity SETTING: a user who
+ *                  loosens the headcount has not said the two sides of a market
+ *                  may disagree by a factor of three.
  *   maxProfit    — dollars, the best case, or null when there is no ceiling
  *   maxLoss      — dollars, the worst case (negative, or positive magnitude)
  *   unboundedProfit — true when the payoff has no ceiling (`payoffCeiling()`),
@@ -842,7 +1207,7 @@ export const rewardRisk = (maxProfit, maxLoss) => {
  */
 export function qualityFloor({
   openInterest = [], peerOpenInterest = null, level = RECOMMENDED_LIQUIDITY,
-  maxProfit, maxLoss, unboundedProfit = false,
+  quotes = [], maxProfit, maxLoss, unboundedProfit = false,
 } = {}) {
   const risk = Math.abs(Number(maxLoss));
   const reward = Number(maxProfit);
@@ -877,6 +1242,12 @@ export function qualityFloor({
     level: lv,
   };
 
+  // A WIDE MARKET IS NOT A PRICE, and it is a different fault from an untraded
+  // one. Deliberately NOT moved by `level`: the liquidity setting is the user's
+  // answer to "how thin a strike will you accept", which is not an answer to
+  // "how far apart may the two sides be".
+  const spread = spreadFloor(quotes);
+
   const rewardCheck = unboundedProfit ? {
     checked: false, pass: true, rr: null, floor: RULES.minRewardRisk, unbounded: true,
   } : {
@@ -890,14 +1261,18 @@ export function qualityFloor({
   const reasons = [];
   if (!liquidity.pass) {
     const where = t.basis === "relative"
-      ? `That expiry's own strikes set the bar at ${t.threshold} — it is the ${ordinal(lv.percentile * 100)} ` +
-        `percentile of the ${t.peers} strikes priced beside it, so this leg is among the least-traded on its own board.`
-      : `The bar is ${t.threshold}, the absolute floor${t.basis.startsWith("absolute (") ? " (too few strikes on that expiry report open interest to measure a distribution)" : ""}.`;
+      // CONTRACTS. `expiryOpenInterest()` walks the calls AND the puts, so the
+      // peer count is contracts, and naming it "strikes" halves the board in the
+      // reader's head — 26 strikes on BOIL 2026-10-09, 52 contracts.
+      ? `That expiry's own board sets the bar at ${t.threshold} — it is the ${ordinal(lv.percentile * 100)} ` +
+        `percentile of the ${t.peers} contracts priced beside it, so this leg is among the least-traded on its own board.`
+      : `The bar is ${t.threshold}, the absolute floor${t.basis.startsWith("absolute (") ? " (too few contracts on that expiry report open interest to measure a distribution)" : ""}.`;
     reasons.push(
       `Open interest is ${worst} on its thinnest leg. ${where} ` +
       `A price on a contract nobody trades is a quote, not a market: you would be paying whatever the ` +
       `market maker felt like typing.`);
   }
+  if (!spread.pass) reasons.push(spreadFloorReason(spread.widest, spread.floor));
   if (!rewardCheck.pass) {
     reasons.push(rr == null
       ? `The best case cannot be measured against the worst, so there is no reward-to-risk to judge.`
@@ -905,7 +1280,7 @@ export function qualityFloor({
         `floor: you would have to be right ${pctText(1 / (1 + rr), 0)} of the time just to break even.`);
   }
 
-  return { pass: liquidity.pass && rewardCheck.pass, liquidity, reward: rewardCheck, reasons };
+  return { pass: liquidity.pass && spread.pass && rewardCheck.pass, liquidity, spread, reward: rewardCheck, reasons };
 }
 
 /** The rules block injected into every model prompt. English, generated. */

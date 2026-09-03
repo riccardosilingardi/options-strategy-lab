@@ -763,7 +763,7 @@ export function verdictNarrative({ basket = [], examined = [], excluded = [], ne
      was unavailable the skip is stated too: missing data is not illiquidity,
      and a floor that was never applied must not be reported as one that was. */
   if (floors) {
-    const cut = (floors.liquidity || 0) + (floors.reward || 0);
+    const cut = (floors.liquidity || 0) + (floors.spread || 0) + (floors.reward || 0);
     const bits = [];
     if (floors.liquidity > 0) {
       // The floor is relative to the chain being judged, so the sentence has to
@@ -773,6 +773,16 @@ export function verdictNarrative({ basket = [], examined = [], excluded = [], ne
       bits.push(`${plural(floors.liquidity, "structure", "structures")} had a leg among the ` +
         `${Math.round(lv.percentile * 100)}% least-traded strikes on its own expiry, or under ` +
         `${lv.absolute} contracts open outright — a price nobody has traded is a quote, not a market`);
+    }
+    // A DIFFERENT FAULT FROM AN UNTRADED STRIKE, and so a different sentence.
+    // Contracts can be open in quantity and the two sides still disagree about
+    // what one is worth: the headcount says somebody is there, the spread says
+    // they do not agree, and the mid every number here is computed from sits
+    // between them.
+    if (floors.spread > 0) {
+      bits.push(`${plural(floors.spread, "structure", "structures")} had a leg quoted more than ` +
+        `${Math.round(RULES.maxSpreadShareOfMid * 100)}% of its own mid apart, bid to ask — half way between ` +
+        `two numbers that far apart is a price neither side quoted`);
     }
     if (floors.reward > 0) {
       bits.push(`${plural(floors.reward, "structure", "structures")} paid less than ` +

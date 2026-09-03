@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { RefreshCw, Send, Trash2, Download, Sparkles, FileText, XCircle } from "lucide-react";
 import { T } from "./theme.js";
 import { RULES, ruleBadge, takeProfitLabel, scaleOutLabel, stopLossLabel, exitDTELabel, perTradeCapLabel, copilotRulesBlock, money, pctText, MIN_NET_DOLLARS,
-  NO_CEILING, reportNarrativePrompt } from "./rules.js";
+  NO_CEILING, reportNarrativePrompt, chanceText } from "./rules.js";
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, LineStyle } from "lightweight-charts";
 import { erf, netBS } from "./engine.js";
 import { ARROW, REGIONS, regionSignals, tagImpacts, taRead } from "./signals.js";
@@ -478,16 +478,24 @@ export const SKILLS = [
  * silent — text simply goes missing.
  *
  * @param chunk raw bytes decoded to text; may end mid-frame
- * @returns { text, rest, stopped } — the deltas found, the unparsed tail to
- *   keep, and whether Anthropic said the message was FINISHED. That last one
- *   matters: a stream that just stops is indistinguishable from one that
- *   finished unless the end is announced, and half an analysis presented as a
- *   whole one is the app lying about its own work.
+ * @param final when true the chunk is everything that is left, so the trailing
+ *   frame is COMPLETE rather than partial and must be parsed instead of kept.
+ *   See `askAI` below: without this the last frame of every stream is thrown
+ *   away, and the last frame is where `message_stop` lives.
+ * @returns { text, rest, stopped, stopReason } — the deltas found, the unparsed
+ *   tail to keep, whether Anthropic said the message was FINISHED, and WHY it
+ *   ended. The last two are different facts and the screen owes both: a stream
+ *   that just stops is indistinguishable from one that finished unless the end
+ *   is announced, and an answer that ran out of TOKEN BUDGET announces its end
+ *   perfectly while still stopping mid-thought.
  */
-export function sseDeltas(chunk) {
+export function sseDeltas(chunk, { final = false } = {}) {
   const frames = String(chunk).split("\n\n");
-  const rest = frames.pop() || "";     // a partial frame: keep it for next time
-  let text = "", stopped = false;
+  // A PARTIAL FRAME IS ONLY PARTIAL WHILE MORE BYTES ARE COMING. On the last
+  // read there is nothing more to arrive, so the tail is a whole frame and
+  // discarding it drops the end of the message.
+  const rest = final ? "" : (frames.pop() || "");
+  let text = "", stopped = false, stopReason = null;
   for (const frame of frames) {
     for (const line of frame.split("\n")) {
       if (!line.startsWith("data:")) continue;
@@ -496,11 +504,17 @@ export function sseDeltas(chunk) {
       let ev = null;
       try { ev = JSON.parse(payload); } catch { continue; }
       if (ev.type === "content_block_delta" && ev.delta?.type === "text_delta") text += ev.delta.text;
+      // `message_delta` IS WHERE THE REASON LIVES, and it was being ignored.
+      // Anthropic reports `stop_reason: "max_tokens"` here when the answer hit
+      // the budget — and it still sends `message_stop` afterwards, so a
+      // truncated answer arrived looking exactly like a finished one and was
+      // filed in the Journal as complete.
+      else if (ev.type === "message_delta" && ev.delta?.stop_reason) stopReason = ev.delta.stop_reason;
       else if (ev.type === "message_stop") stopped = true;
       else if (ev.type === "error") throw new Error(ev.error?.message || "The copilot stream failed part-way through.");
     }
   }
-  return { text, rest, stopped };
+  return { text, rest, stopped, stopReason };
 }
 
 /**
@@ -550,17 +564,46 @@ export async function askAI(_key, messages, contextStr, onDelta) {
   if (r.ok && r.body && /text\/event-stream/i.test(r.headers.get("content-type") || "")) {
     const reader = r.body.getReader();
     const dec = new TextDecoder();
-    let buf = "", text = "", finished = false;
+    let buf = "", text = "", finished = false, why = null;
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
       buf += dec.decode(value, { stream: true });
-      const { text: more, rest, stopped } = sseDeltas(buf);
+      const { text: more, rest, stopped, stopReason } = sseDeltas(buf);
       buf = rest;
       if (stopped) finished = true;
+      if (stopReason) why = stopReason;
       if (more) { text += more; if (onDelta) onDelta(text); }
     }
+    // FLUSH BEFORE DECIDING. `sseDeltas` holds the trailing frame back on every
+    // read because TCP does not respect frame boundaries — but once the reader
+    // says `done` there is no next read to hand it to, and Anthropic's closing
+    // `message_stop` does not always arrive with a blank line after it. Without
+    // this the last frame of every stream is discarded as partial, so a
+    // COMPLETE answer was reported as cut off every single time.
+    if (buf.trim()) {
+      const tail = sseDeltas(buf, { final: true });
+      if (tail.stopped) finished = true;
+      if (tail.stopReason) why = tail.stopReason;
+      if (tail.text) { text += tail.text; if (onDelta) onDelta(text); }
+    }
     if (!text.trim()) throw new Error("The copilot returned an empty answer.");
+    // RUNNING OUT OF ROOM IS NOT A DROPPED CONNECTION. Both stop the answer
+    // mid-thought and neither may be filed as finished, but they need different
+    // things from the reader: a cut connection is worth asking again, a budget
+    // that ran out will do the same thing next time unless the question is
+    // narrower. This is checked FIRST, because such a stream DOES carry
+    // `message_stop` — Anthropic announces the end perfectly, and the answer is
+    // still truncated — so without reading `stop_reason` it passes as whole.
+    if (finished && why === "max_tokens") {
+      const err = new Error(
+        "The copilot ran out of room before it finished: this answer hit its length limit rather than " +
+        "reaching an end. What arrived is kept below and stops mid-thought — a narrower question gets a " +
+        "whole answer, where asking the same one again would hit the same limit.");
+      err.partial = text;
+      err.reason = "max_tokens";
+      throw err;
+    }
     if (!finished) {
       // The stream stopped without Anthropic saying the message was done: the
       // connection was cut mid-sentence. Returning what arrived would file half
@@ -568,9 +611,11 @@ export async function askAI(_key, messages, contextStr, onDelta) {
       // are still worth reading — but they travel WITH the fact that they stop
       // early, and the caller decides what to do about it.
       const err = new Error(
-        "The copilot was cut off before it finished this answer. What arrived is kept below, but it stops " +
-        "mid-thought — ask again to get the whole thing.");
+        "The copilot was cut off before it finished this answer: the connection ended without the copilot " +
+        "ever saying it was done. What arrived is kept below, but it stops mid-thought — ask again to get " +
+        "the whole thing.");
       err.partial = text;
+      err.reason = "cut";
       throw err;
     }
     return text;
@@ -673,8 +718,12 @@ export function CopilotTab({ ctx, apiKey, convo, setConvo, onAnalysis }) {
       // words that did arrive are worth reading, they are just not the whole
       // thing, and the difference has to be visible rather than assumed.
       const cut = e && e.partial;
+      // WHICH OF THE TWO HAPPENED travels with the words. Running out of room
+      // and losing the connection both leave half an answer, and the label has
+      // to say which — "ask again" is the right advice for one of them and
+      // useless for the other.
       setConvo({
-        msgs: cut ? [...next, { role: "assistant", content: cut, truncated: true }] : next,
+        msgs: cut ? [...next, { role: "assistant", content: cut, truncated: true, reason: e.reason || "cut" }] : next,
         busy: false, err: String(e.message || e), partial: "",
       });
     }
@@ -727,7 +776,7 @@ export function CopilotTab({ ctx, apiKey, convo, setConvo, onAnalysis }) {
           {msgs.length === 0 && !busy && <div style={{ ...mono, fontSize: 11.5, color: T.mut }}>Pick one above or just ask. The copilot already knows your open positions, the trade on the Build screen, the Radar, the tagged news and your own risk rules.</div>}
           {msgs.map((m, i) => (
             <div key={i} style={{ padding: m.role === "user" ? "9px 11px" : "11px 13px", borderRadius: 7, background: m.role === "user" ? `${T.blue}14` : T.bg, border: `1px solid ${m.role === "user" ? T.blue + "44" : T.line}` }}>
-              <div style={{ ...mono, fontSize: 9, letterSpacing: "0.1em", color: m.role === "user" ? T.blue : T.amber, marginBottom: m.role === "user" ? 3 : 7 }}>{m.role === "user" ? "YOU ASKED" : m.truncated ? "COPILOT · CUT OFF" : "COPILOT"}</div>
+              <div style={{ ...mono, fontSize: 9, letterSpacing: "0.1em", color: m.role === "user" ? T.blue : T.amber, marginBottom: m.role === "user" ? 3 : 7 }}>{m.role === "user" ? "YOU ASKED" : m.truncated ? (m.reason === "max_tokens" ? "COPILOT · RAN OUT OF ROOM" : "COPILOT · CUT OFF") : "COPILOT"}</div>
               {m.role === "user"
                 ? <div style={{ fontSize: 12.5, color: T.body, lineHeight: 1.5 }}>{m.content}</div>
                 : <>
@@ -999,7 +1048,7 @@ export function computeTIS(pos, cur) {
   // 1) PoP vs entry (40)
   let popPts = 20;
   if (th.pop != null && cur.pop != null && th.pop > 0) popPts = Math.round(Math.max(0, Math.min(1.2, cur.pop / th.pop)) / 1.2 * 40);
-  comp.push({ k: "Chance of profit", pts: popPts, max: 40, note: cur.pop != null ? `${(cur.pop * 100).toFixed(0)}% now versus ${th.pop != null ? (th.pop * 100).toFixed(0) : "?"}% when you opened it` : "n/a" });
+  comp.push({ k: "Chance of profit", pts: popPts, max: 40, note: cur.pop != null ? `${chanceText(cur.pop)} now versus ${th.pop != null ? chanceText(th.pop) : "?"} when you opened it` : "n/a" });
   // 2) Stagionalità (20)
   let seaPts = 10;
   if (th.seasonal != null && cur.seasonalNow != null) {
@@ -1601,7 +1650,7 @@ export function UnifiedView({ ticker, dte, sigma, driftM, curve, legs, breakeven
         ))}
       </div>
       <div style={{ marginTop: 8, padding: "8px 11px", background: `${T.blue}0d`, border: `1px solid ${T.blue}33`, borderRadius: 7, fontSize: 12.5, color: T.body }}>
-        <b style={{ color: T.ink }}>How to read it:</b> the purple cone is where the price can realistically get to by expiry; the green bands are where this trade makes money. They overlap about <b style={{ color: pIn >= 0.5 ? T.green : T.violet }}>{(pIn * 100).toFixed(0)}%</b> of the time — which is the same number as the CHANCE shown above, worked out the same way.
+        <b style={{ color: T.ink }}>How to read it:</b> the purple cone is where the price can realistically get to by expiry; the green bands are where this trade makes money. They overlap about <b style={{ color: pIn >= 0.5 ? T.green : T.violet }}>{chanceText(pIn)}</b> of the time — which is the same number as the CHANCE shown above, worked out the same way.
       </div>
     </div>
   );

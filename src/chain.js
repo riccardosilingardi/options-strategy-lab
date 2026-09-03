@@ -29,7 +29,7 @@
  */
 
 /** How far out we look. CBOE hands us everything; this is the ceiling for both. */
-import { quantile, knownCounts } from "./rules.js";
+import { quantile, knownCounts, known } from "./rules.js";
 
 export const MAX_DTE = 400;
 
@@ -381,6 +381,82 @@ export function openInterestNote(chain) {
 }
 
 /* ---------------------------------------------------------------------------
+ * IS THIS EXPIRY'S FEED TELLING THE TRUTH? — MONOTONICITY.
+ *
+ * An option's price has one property no market can argue with: a call can never
+ * cost MORE than a call on the same expiry at a LOWER strike, and a put can
+ * never cost more than a put at a HIGHER strike. The right to buy at $19 is
+ * worth at least as much as the right to buy at $19.50 — you can always throw
+ * the cheaper right away. It is not a model, an assumption or a smoothing rule;
+ * it is arithmetic, and a chain that breaks it is quoting numbers nobody has
+ * traded against.
+ *
+ * >>> MEASURED, live, on BOIL 2026-10-09 near the money. <<< FIVE violations in
+ * 25 adjacent pairs: the 19.5 call's mid sits ABOVE the 19 call's, the 22.5
+ * above the 22. Those mids are not prices — they are last night's placeholders
+ * on strikes nobody traded, left where they were while the strikes around them
+ * moved.
+ *
+ * This does NOT filter anything. The spread floor in rules.js removes a leg
+ * whose own market is too wide to price; this is a statement about the whole
+ * EXPIRY, and the right response to it is to say on screen that the feed looks
+ * unreliable here rather than to price off it silently. Which is the whole
+ * point: the app already refuses to print a maximum profit it cannot know, and
+ * a board whose own prices contradict each other is the same kind of unknown
+ * one level up.
+ *
+ * It reads the MID, because the mid is what every number in this app is
+ * computed from. A contract with no mid is skipped: a missing price is not an
+ * impossible one.
+ * ------------------------------------------------------------------------- */
+
+/**
+ * @returns {{ pairs, breaks, share, worst, checked }} for ONE expiry.
+ *   `pairs`  adjacent strike pairs that could be compared at all
+ *   `breaks` how many of them are in the impossible order
+ *   `worst`  the largest violation found, in dollars per share, with its strikes
+ *   `checked` false when there was not enough of a board to look at
+ */
+export function monotonicityBreaks(chain, expKey) {
+  const e = chain?.byExp?.[expKey];
+  if (!e) return { pairs: 0, breaks: 0, share: 0, worst: null, checked: false };
+  let pairs = 0, breaks = 0, worst = null;
+  const scan = (book, side) => {
+    const ks = Object.keys(book || {}).map(Number).filter((k) => Number.isFinite(k)).sort((a, b) => a - b);
+    for (let i = 0; i + 1 < ks.length; i++) {
+      const lo = book[ks[i]]?.mid, hi = book[ks[i + 1]]?.mid;
+      if (!(Number(lo) > 0) || !(Number(hi) > 0)) continue;   // unknown, not impossible
+      pairs++;
+      // Calls fall as the strike rises; puts rise. A break is the strictly
+      // impossible direction — equal prices on two strikes are legal.
+      const gap = side === "calls" ? Number(hi) - Number(lo) : Number(lo) - Number(hi);
+      if (gap > 0) {
+        breaks++;
+        if (!worst || gap > worst.gap) worst = { side, gap, lower: ks[i], upper: ks[i + 1] };
+      }
+    }
+  };
+  scan(e.calls, "calls");
+  scan(e.puts, "puts");
+  return { pairs, breaks, share: pairs ? breaks / pairs : 0, worst, checked: pairs > 0 };
+}
+
+/** What the screen says about an expiry whose own prices contradict each other. */
+export function monotonicityNote(m, expKey) {
+  if (!m || !m.checked || !m.breaks) return null;
+  const w = m.worst;
+  const where = w
+    ? ` The clearest one: the ${w.upper} ${w.side === "calls" ? "call" : "put"} is priced above the ${w.lower} ` +
+      `${w.side === "calls" ? "call" : "put"}, which cannot happen — the ${w.side === "calls" ? "lower" : "higher"} ` +
+      `strike gives you strictly more.`
+    : "";
+  return `THIS FEED LOOKS UNRELIABLE ON ${expKey || "this expiry"}. ${m.breaks} of its ${m.pairs} neighbouring ` +
+    `strike pairs are priced in an impossible order.${where} That is what a stale quote on a strike nobody ` +
+    `traded looks like: the number is still there from last night while everything around it has moved. ` +
+    `Read every figure on this expiry as an estimate, and prefer an expiry whose prices agree with themselves.`;
+}
+
+/* ---------------------------------------------------------------------------
  * WHAT THE CHAIN ACTUALLY CONTAINS, so the floor can be argued with.
  *
  * The liquidity floor is now two numbers (`RULES.liquidityPercentile` and
@@ -452,6 +528,61 @@ export function expiryOpenInterest(chain, expKey) {
     for (const c of Object.values(e[side] || {})) out.push(c?.oi);
   }
   return knownCounts(out);
+}
+
+/* ---------------------------------------------------------------------------
+ * ONE SPOT, ONE HOME — the same discipline the capital model has.
+ *
+ * THE FAULT, MEASURED. Two live captures seventeen seconds apart on
+ * 2026-09-03T17:57Z: the option chain reported BOIL at 20.19 and
+ * /api/liquidity reported 20.22. The app printed one "PRICE NOW". Neither
+ * number was wrong; printing them as one number was.
+ *
+ * The chain is the home, because it is the thing the trade is priced from: a
+ * spot that disagreed with the strikes beside it would make every payoff on
+ * screen a picture of a different market. Any other endpoint that happens to
+ * return an underlying price — the liquidity measurement does — is reporting
+ * ITS OWN reading for its own purposes and must never be printed as the price.
+ * ------------------------------------------------------------------------- */
+
+/** The underlying's price, and the only accessor any screen may use. */
+export const spotOf = (chain) => {
+  const s = Number(chain?.spot);
+  return Number.isFinite(s) && s > 0 ? s : null;
+};
+
+/** When that price was read, so a screen can say how old it is. */
+export const spotAt = (chain) => (chain?.updated ? Date.parse(chain.updated) || null : null);
+
+/**
+ * How many contracts NEAR THE MONEY on one expiry clear a given floor, and how
+ * many were looked at — the two numbers `expiryChoice()` in rules.js ranks on.
+ *
+ * NEAR the money and not the whole board, because the whole board is dominated
+ * by far-out strikes nobody trades and every expiry looks equally dead through
+ * it. This is where the app actually builds.
+ *
+ * @returns {{ clears, near }} with `clears: null` when the feed has not
+ *   reported open interest for this expiry at all. NULL, NOT ZERO: an expiry we
+ *   cannot read is not an expiry with nothing on it, and `expiryChoice()` ranks
+ *   the unreadable ones on DTE rather than putting them last.
+ */
+export function nearMoneyOpenInterest(chain, expKey, { floor = 0, nearPct = 0.1 } = {}) {
+  const e = chain?.byExp?.[expKey];
+  const S = spotOf(chain);
+  if (!e || S == null) return { clears: null, near: 0 };
+  let near = 0, clears = 0, seen = 0;
+  for (const side of ["calls", "puts"]) {
+    for (const [k, c] of Object.entries(e[side] || {})) {
+      const strike = Number(k);
+      if (!Number.isFinite(strike) || Math.abs(strike - S) > S * nearPct) continue;
+      near++;
+      if (!known(c?.oi)) continue;      // unknown: counted as looked-at, never as empty
+      seen++;
+      if (Number(c.oi) >= floor) clears++;
+    }
+  }
+  return { clears: seen > 0 ? clears : null, near };
 }
 
 /** Shape-check what came back over the wire before the app trusts it. */
