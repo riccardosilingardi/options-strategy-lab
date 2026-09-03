@@ -16,7 +16,7 @@
 // import this file.
 // ============================================================================
 
-import { RULES, sizing, money, pctText, capitalSourceNote } from "./rules.js";
+import { RULES, sizing, money, pctText, capitalSourceNote, priceability, MIN_NET_DOLLARS } from "./rules.js";
 
 /* ============================== helpers ============================== */
 
@@ -99,6 +99,11 @@ const V = (code, message) => ({ code, message });
  *        `intent` is "open" (default) or "close". Entry-only rules — sizing,
  *        exposure, entry DTE, defined risk — do not apply to an order that
  *        REDUCES risk; the paper-mode block and the warnings always apply.
+ *        Two optional fields feed the priceability check, and the more of them
+ *        a caller passes the more it can catch: `quotes` — one `{ bid, ask }`
+ *        per leg, aligned with `legs`, straight off the chain — and `net`, the
+ *        structure's net price per share. Neither is required: the maximum loss
+ *        alone already blocks the case that got through.
  * @param {object}   arg.portfolio { positions[] | openRisk, account }
  * @param {object}   arg.capital   the onboarding answers, PRD §3:
  *        { tradingCapital, concurrentTarget, savings, override }
@@ -147,6 +152,35 @@ export function evaluateTrade({ proposal, portfolio, capital, signals } = {}) {
       `Maximum loss is ${p.maxLoss === undefined ? "missing" : String(p.maxLoss)}, not a finite number, ` +
       `so it cannot be measured against your ${money(limits.perTradeLimit)} per-trade limit. ` +
       `A trade whose worst case cannot be computed cannot be sent.`));
+  }
+
+  /* ---- 3b. THE WORST CASE HAS TO COME FROM A REAL PRICE ----
+     A finite maximum loss is not the same as a known one. A butterfly on BOIL
+     priced at a net debit of zero reported a maximum loss of -$0 and passed
+     every check below it, because -1e-14 is a finite number: the arithmetic was
+     sound and the input was a market maker's placeholder on a strike nobody
+     trades. Unknown is a VIOLATION, not a pass — rule 2 is that the maximum
+     loss is always known, and nothing about "always" is satisfied by a zero the
+     app cannot account for.
+
+     `priceability()` in rules.js is the one implementation of that test, shared
+     with the three places candidates are generated. The quality floors are NOT
+     applied here and never will be: they ask whether a structure was worth
+     offering, and a trade the user builds by hand on the desk is his to make.
+     Whether it has a price at all is a different question, and it is this one. */
+  if (isOpen && legs.length) {
+    const pr = priceability({
+      legs,
+      quotes: Array.isArray(p.quotes) ? p.quotes : [],
+      net: isNum(p.net) ? Number(p.net) : null,
+      maxLoss: isNum(p.maxLoss) ? Number(p.maxLoss) : null,
+    });
+    if (!pr.priceable) {
+      violations.push(V("UNPRICEABLE",
+        `${pr.reasons[0]} Nothing is sent: below ${money(MIN_NET_DOLLARS)} a contract there is no maximum ` +
+        `loss to measure against ${limits.answered ? "your" : "the suggested"} ` +
+        `${money(limits.perTradeLimit)} per-trade limit.`));
+    }
   }
 
   /* ---- 4. per-trade limit (the one the demo video shows) ---- */

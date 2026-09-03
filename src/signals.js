@@ -783,6 +783,16 @@ export function verdictNarrative({ basket = [], examined = [], excluded = [], ne
       out.push(`${plural(cut, "candidate", "candidates")} on ${list(floors.markets || [])} ${cut === 1 ? "was" : "were"} ` +
         `built and then thrown away before you saw ${cut === 1 ? "it" : "them"}: ${bits.join("; ")}.`);
     }
+    // NOT A FLOOR, AND SO NOT IN THE SENTENCE ABOVE. These were never judged:
+    // their price could not be read, so there was nothing to hold against a
+    // floor. Reporting them as "filtered out for liquidity" would credit the
+    // floor with work it did not do.
+    if (floors.unpriceable > 0) {
+      out.push(`${plural(floors.unpriceable, "structure", "structures")} never reached the floors at all: ` +
+        `${floors.unpriceable === 1 ? "it" : "they"} had a leg nobody is bidding for, or netted out to about ` +
+        `nothing across the legs. A maximum loss the app cannot compute is not a maximum loss of zero, so ` +
+        `${floors.unpriceable === 1 ? "it was" : "they were"} left out rather than offered at a price we made up.`);
+    }
     if ((floors.oiUnavailable || []).length) {
       out.push(`On ${list(floors.oiUnavailable)} the feed reported no open interest at all, so the liquidity ` +
         `floor was SKIPPED there rather than applied. Nothing was rejected for it: not knowing how many ` +

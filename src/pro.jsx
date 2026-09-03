@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { RefreshCw, Send, Trash2, Download, Sparkles, FileText, XCircle } from "lucide-react";
 import { T } from "./theme.js";
-import { RULES, ruleBadge, takeProfitLabel, scaleOutLabel, stopLossLabel, exitDTELabel, perTradeCapLabel, copilotRulesBlock, money, pctText } from "./rules.js";
+import { RULES, ruleBadge, takeProfitLabel, scaleOutLabel, stopLossLabel, exitDTELabel, perTradeCapLabel, copilotRulesBlock, money, pctText, MIN_NET_DOLLARS } from "./rules.js";
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, LineStyle } from "lightweight-charts";
 import { erf, netBS } from "./engine.js";
 import { ARROW, REGIONS, regionSignals, tagImpacts, taRead } from "./signals.js";
@@ -16,7 +16,13 @@ export { useNarrow };
 
 /* ============ theme (condiviso) ============ */
 const mono = { fontFamily: "ui-monospace, Menlo, monospace" };
-const fmt$ = (x) => (x == null || Number.isNaN(x) || !Number.isFinite(x)) ? "—" : `${x < 0 ? "-" : ""}$${Math.abs(x).toFixed(0)}`;
+// Never "-$0": a figure that rounds to zero is one the app could not read,
+// and a minus sign in front of it invents a direction it does not have.
+const fmt$ = (x) => {
+  if (x == null || Number.isNaN(x) || !Number.isFinite(x)) return "—";
+  const r = Math.abs(x).toFixed(0);
+  return `${x < 0 && Number(r) > 0 ? "-" : ""}$${r}`;
+};
 const Btn = ({ children, onClick, color = T.amber, ghost, disabled, small, title }) => (
   <button onClick={onClick} disabled={disabled} title={title}
     style={{ ...mono, fontSize: small ? 11 : 12, padding: small ? "4px 8px" : "8px 12px", borderRadius: 6, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.5 : 1, background: ghost ? "transparent" : color, color: ghost ? color : T.onAccent, border: ghost ? `1px solid ${color}66` : "none", display: "inline-flex", alignItems: "center", gap: 6 }}>{children}</button>
@@ -932,7 +938,16 @@ export function scaleStrategy(a, mode, amt) {
   const isCredit = a.entry < 0;
   if (!Number.isFinite(risk) || risk <= 0 || !Number.isFinite(a.maxProfit) || a.maxProfit <= 0) return null;
   // Budget = premio max da pagare (debit) oppure capitale a rischio (credit, dove il premio si incassa)
-  const unit = isCredit ? risk : Math.max(prem, 1);
+  const unit = isCredit ? risk : prem;
+  // NOTHING IS EVER DIVIDED BY A COST THE APP COULD NOT READ. `Math.max(prem, 1)`
+  // used to stand in for a premium of zero, and on the BOIL butterfly that
+  // turned a $250 budget into 250 contracts of a structure whose price was a
+  // placeholder. A unit under the minimum is not a cheap trade: it is an
+  // unpriced one (`priceability()` in rules.js), and the caller says so instead
+  // of printing a quantity.
+  if (!Number.isFinite(unit) || unit < MIN_NET_DOLLARS) {
+    return { n: 0, ok: false, unpriceable: true, risk, prem, isCredit, unit };
+  }
   let n;
   if (mode === "budget") n = Math.floor(amt / unit);
   else n = Math.ceil(amt / a.maxProfit);

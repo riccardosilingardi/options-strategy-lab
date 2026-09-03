@@ -106,6 +106,50 @@ a number taken from published research, not from this app's own evidence.
 
 ---
 
+## 4a. Unpriceable is not free — the test that comes before the floors
+
+A structure has to have a price before any rule can be applied to it. `priceability()`
+in `src/rules.js` is that test, run at all three generation sites and inside the risk
+gate, against one named constant with the reasoning beside it.
+
+| Rule | Value | Why |
+|---|---|---|
+| `minNetPremium` | **0.05 a share — $5 a contract** (`MIN_NET_DOLLARS`) | Below this a net is not a number, it is the rounding of two placeholders against each other. These chains quote in whole cents, the round trip on four legs costs more than that on its own, and every arithmetic that divides by the cost — sizing, reward-to-risk — is meaningless underneath it. It sits far below any real structure this app builds, because it is not a quality judgement: it is the line under which there is nothing to judge. |
+| every LONG leg needs `bid > 0` | hard | You are buying it, so you must be able to sell it back. A bid of zero means the mid on screen is half of an ask nobody agreed to. Short legs are not tested — the net catches an imaginary credit — and a leg the feed said nothing about is UNKNOWN, never zero, the same rule the liquidity floor already applies to open interest. |
+| the net test is on the ABSOLUTE value | hard | A credit structure has a negative net and is perfectly priceable. It is a net of about nothing, in either direction, that says the two halves cancelled. |
+
+**THE LIVE CASE.** BOIL, 2026-10-09, spot $21.23, 54 strikes, liquidity floor OFF. A
+Bullish Call Butterfly (+1 21C / -2 22.5C / +1 24C) priced at a **net debit of $0** and
+was offered as: YOU PAY $0, MAX LOSS -$0, **R/R 6748644041614687.00**, HOW MANY **×250**,
+MOST YOU CAN MAKE $37,462, BUDGET USED 100%. A butterfly with 1.5-point wings on a $21
+underlying does not cost nothing: at least one leg's mid was a market maker's placeholder
+on a strike nobody trades, which is exactly what the liquidity floor exists to remove and
+it was switched off. **A butterfly's maximum loss IS its debit, so a debit of zero means
+the price is UNKNOWN, not that the loss is zero** — and non-negotiable rule 2 is that the
+maximum loss is always known.
+
+What follows from that:
+
+- **An unpriceable candidate is excluded at every liquidity setting**, with a sentence
+  naming why in the same register as the refusal screen (`unpriceableNote()`,
+  `NOTHING_TODAY.unpriceable()`). It is never rendered with $0 in it. Its count travels
+  separately from the floors': a structure whose price could not be read never reached
+  them, and reporting it as one they removed would credit them with work they did not do.
+- **The risk gate rejects an unknown maximum loss** (`UNPRICEABLE`). A finite number is
+  not a known one — -1e-14 passed every check below it. Entry only: a closing order is
+  never blocked by it. The quality floors stay out of the gate for the reason given in
+  §8; this test is in both places, because it is a different question from either.
+- **Nothing divides by a cost under the minimum.** `rewardRisk()` is the only place the
+  ratio is formed and returns null below it, so R/R prints "—"; `scaleStrategy()` returns
+  an `unpriceable` flag instead of a quantity, and the `Math.max(prem, 1)` that turned a
+  $250 budget into 250 contracts is gone.
+- **Nothing ever renders as `-$0`.** `money()` and both `fmt$` copies round first and
+  decide the sign afterwards.
+- The desk still builds what the user asks it to, and says above the figures that this
+  one's price could not be read.
+
+---
+
 ## 4b. Quality floors — the app will not propose an indefensible trade
 
 A structure can satisfy every rule in §4 and still be one nobody should take. Two floors,
@@ -279,8 +323,10 @@ Build, not two.
 
 **Screen 5 — Nothing today**
 A real screen, not an error state. `runWizard` decides in order: data missing → signals not
-aligned → options expensive versus their own history → **every candidate filtered out by the
-quality floors (§4b)** → nothing fits the budget → only one road survives. A missing-data answer
+aligned → options expensive versus their own history → **every candidate unpriceable (§4a)**
+→ **every candidate filtered out by the quality floors (§4b)** → nothing fits the budget →
+only one road survives. A board where nothing could be priced is not a board the floors
+emptied and is certainly not a budget problem: three refusals, three sentences. A missing-data answer
 is never dressed up as a market verdict, and a board emptied by the floors is never reported as
 a budget problem: they are different sentences on screen, and `wizard.test.jsx` holds that line.
 Offers to notify.
@@ -316,7 +362,13 @@ Price is the **vertical** axis, exactly as it is in the unified component, so th
 
 **Open-interest strip** — the liquidity floor (§4b) as a picture rather than a paragraph:
 every strike on one expiry from emptiest to busiest, with the line where the setting cuts.
-Red left, green right, and the line moves when the filter moves. It is the answer to the
+Red left, green right, and the line moves when the filter moves. **A strike with nothing
+open is grey and 2px tall**, never green and never invisible: `log1p(0)` is 0, and on
+BOIL's 2026-10-09 board 60 of 108 strikes carry no open contracts, so most of the picture
+drew at zero height and read as "not drawn". Three colours, because "nobody is here" is a
+different fact from "this setting removed it". **With the floor OFF the strip carries a
+ghost line** where Recommended would cut — dashed, dimmed, labelled with the count,
+filtering nothing. Off only means something against what is being switched off. It is the answer to the
 one thing three paragraphs of prose could not explain — that the floor is a POSITION IN A
 RANKING, not a quantity. Not derived from `payoffBands()` and not an exception to that
 rule: it draws no trade. Heights are log-compressed (1 to 66,130 on one expiry), so the
@@ -397,7 +449,7 @@ The third one is the hard case and the point of the exercise: the P&L is fine, n
 
 Pure function: `evaluateTrade({ proposal, portfolio, capital, signals })` → `{ pass, violations, warnings }`.
 
-Hard blocks: undefined risk; per-trade limit exceeded; total exposure exceeded; DTE at entry below threshold; account not in paper mode (if unverifiable, reject).
+Hard blocks: undefined risk; **a maximum loss that cannot be read off real quotes (§4a) — unknown is a violation, not a pass**; per-trade limit exceeded; total exposure exceeded; DTE at entry below threshold; account not in paper mode (if unverifiable, reject).
 Warnings: signal agreement is CONFLICT; confidence under 40; stop-loss threshold reached; **the capital questions are unanswered**, so the limits being enforced are the suggested starting point rather than the user's own (§3).
 
 The gate is about whether an order may leave. The **quality floors (§4b) are a different

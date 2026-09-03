@@ -10,13 +10,14 @@ import {
 } from "lucide-react";
 import { fetchAllNews, fetchWeather, ImpactTags, CopilotTab, ReportTab, OrderTicket, AlpacaDesk, scaleStrategy, probProfit, buildContext, GuardianPanel, ChainMatrix, OptionPanel, UnifiedView, taSignals, confluence, WhyThisTrade, Markdown } from "./pro.jsx";
 import { BandThumbnail, payoffBands, bandTakeaway, GaugeFigure, Gauge, CompareFigure, exitPlanSentence,
-  OpenInterestStrip, oiStripTakeaway, oiCutAt, explainOiStrip, useWidth } from "./visuals.jsx";
+  OpenInterestStrip, oiStripTakeaway, oiCutAt, oiGhostCut, explainOiStrip, useWidth } from "./visuals.jsx";
 import { fuseSignals, sentimentDirection, withSignalRank, compareCandidates, againstSignal, DRIVER_PRESETS, rankByDrivers, verdictNarrative } from "./signals.js";
 import { N as nCDF, bs as bsPrice, smile as smileIV, payoff as payoffExp, SEASONAL, SIGMA } from "./engine.js";
 import { parseOcc, buildOcc, fetchChain, hasOpenInterest, enrichOpenInterest, feedName, sourceNote, openInterestNote, oiProfile, expiryOpenInterest } from "./chain.js";
 import { T, themeName, setTheme, BADGE_SAFE } from "./theme.js";
 import { RULES, sizing, ruleBadge, takeProfitLabel, stopLossLabel, perTradeCapLabel, RULE_PILLS, NOTHING_TODAY, money, pctText, capitalSourceNote, perTradeLimitPhrase, qualityFloor, qualityFloorSentence, liquiditySkippedNote,
-  LIQUIDITY_LEVELS, RECOMMENDED_LIQUIDITY, LIQUIDITY_MEASUREMENT, liquidityMeasurementNote, liquidityLevel, liquidityThreshold, looseningWarning, liquiditySettingNote, isLoosened, ordinal } from "./rules.js";
+  LIQUIDITY_LEVELS, RECOMMENDED_LIQUIDITY, LIQUIDITY_MEASUREMENT, liquidityMeasurementNote, liquidityLevel, liquidityThreshold, looseningWarning, liquiditySettingNote, isLoosened, ordinal,
+  priceability, unpriceableNote, rewardRisk, MIN_NET_DOLLARS } from "./rules.js";
 import { evaluateTrade, gateSummary } from "./riskGate.js";
 import { DEMO, DEMO_BANNER, DEMO_TOOLTIP, DEMO_SEED_TICKERS, demoPositions } from "./demo.js";
 import { CapitalOnboarding, WizardOpen, FindOpportunities, WizardCandidates, ConfirmSteps, NothingToday, Card, Pill } from "./wizard.jsx";
@@ -221,10 +222,17 @@ function makeQuote(chain, expKey) {
 }
 function priceLeg(leg, S, dte, baseIV, q) {
   const quote = q ? q(leg) : null;
-  if (quote && quote.mid != null) return { px: quote.mid, iv: quote.iv || smileIV(baseIV, S, leg.strike), real: true, occ: quote.occ, oi: quote.oi, vol: quote.vol };
+  // bid and ask travel with the leg, not just the mid they were averaged into:
+  // `priceability()` in rules.js has to be able to see that the bid on a leg we
+  // would be BUYING is zero, which a mid can never show — half of a placeholder
+  // ask looks exactly like a price. A leg priced from the model carries no
+  // bid at all, and undefined there means unknown, never zero.
+  if (quote && quote.mid != null) return { px: quote.mid, iv: quote.iv || smileIV(baseIV, S, leg.strike), real: true, occ: quote.occ, oi: quote.oi, vol: quote.vol, bid: quote.bid, ask: quote.ask };
   const iv = smileIV(baseIV, S, leg.strike);
   return { px: bsPrice(S, leg.strike, dte / 365, iv, leg.type), iv, real: false };
 }
+/** The two-sided quotes behind an analysis, one per leg, for `priceability()`. */
+const quotesOf = (a) => (a?.legPx || []).map((l) => ({ bid: l.bid, ask: l.ask }));
 function netValue(legs, S, dte, baseIV, q) {
   return legs.reduce((a, l) => a + Math.sign(l.side) * l.qty * priceLeg(l, S, dte, baseIV, q).px, 0);
 }
@@ -276,9 +284,20 @@ function analyze(legs, S, dte, baseIV, q) {
 function shortlistWithFloors(sent, S, step, strikes, dte, baseIV, q, { peers = null, level = RECOMMENDED_LIQUIDITY } = {}) {
   const rows = [], cut = [];
   let oiSkipped = false;
-  const tally = { liquidity: 0, reward: 0, skipped: 0 };
+  const tally = { liquidity: 0, reward: 0, skipped: 0, unpriceable: 0 };
   for (const p of buildPresets(sent, S, step, strikes)) {
     const a = analyze(p.legs, S, dte, baseIV, q);
+    // UNPRICEABLE FIRST, because it is prior to both floors: they judge a
+    // structure, and this asks whether there is a structure to judge. A leg
+    // nobody bids for or a net of about nothing means the numbers below —
+    // reward-to-risk, the maximum loss, how many contracts fit the budget —
+    // would all be arithmetic on a placeholder. It is never rendered.
+    const pz = priceability({ legs: p.legs, quotes: quotesOf(a), net: a.entry, maxLoss: a.maxLoss });
+    if (!pz.priceable) {
+      tally.unpriceable++;
+      cut.push({ name: p.name, reasons: pz.reasons, why: "unpriceable" });
+      continue;
+    }
     const qf = qualityFloor({
       openInterest: a.legPx.map((l) => l.oi), peerOpenInterest: peers, level,
       maxProfit: a.maxProfit, maxLoss: a.maxLoss,
@@ -524,7 +543,8 @@ function LiquidityFilter({ levelId, onLevel, previews, threshold, ticker, expKey
           {open && (
             <div style={{ marginTop: 8, padding: "9px 11px", background: T.bg, border: `1px solid ${T.blue}55`, borderLeft: `3px solid ${T.blue}`, borderRadius: 8 }}>
               <div style={{ ...sansUI, fontSize: 12.5, color: T.body, lineHeight: 1.5 }}>
-                {explainOiStrip(open, { threshold: t?.threshold ?? 0, cut: oiCutAt(peers, t?.threshold ?? 0), total: peers.length })}
+                {explainOiStrip(open, { threshold: t?.threshold ?? 0, cut: oiCutAt(peers, t?.threshold ?? 0), total: peers.length,
+                  ghost: (t?.threshold ?? 0) > 0 ? null : oiGhostCut([...peers].sort((a, b) => a - b)).threshold })}
               </div>
               <button onClick={() => setOpen(null)} style={{ ...mono, fontSize: 10, marginTop: 6, background: "transparent", border: "none", color: T.blue, cursor: "pointer", padding: 0 }}>close</button>
             </div>
@@ -651,7 +671,14 @@ const Stat = ({ k, v, c, tip }) => (
 const Inp = (props) => (
   <input {...props} style={{ ...mono, background: T.bg, color: T.ink, border: `1px solid ${T.line}`, borderRadius: 5, padding: "6px 8px", fontSize: 12, ...(props.style || {}) }} />
 );
-const fmt$ = (x) => (x === Infinity || x === -Infinity || x == null || Number.isNaN(x)) ? "—" : `${x < 0 ? "-" : ""}$${Math.abs(x).toFixed(0)}`;
+// "-$0" is not a smaller number than "$0": it is a figure the app could not
+// read, wearing a minus sign. Round first, then decide the sign — same rule as
+// `money()` in rules.js, which is where the reasoning lives.
+const fmt$ = (x) => {
+  if (x === Infinity || x === -Infinity || x == null || Number.isNaN(x)) return "—";
+  const r = Math.abs(x).toFixed(0);
+  return `${x < 0 && Number(r) > 0 ? "-" : ""}$${r}`;
+};
 const ago = (d) => { const m = Math.round((Date.now() - new Date(d)) / 60000); return m < 60 ? `${m}m ago` : m < 1440 ? `${Math.round(m / 60)}h ago` : `${Math.round(m / 1440)}d ago`; };
 
 /* ============================== MAIN ============================== */
@@ -1162,7 +1189,12 @@ export default function OptionsStrategyLab() {
   const commitPosition = async ({ ticker: tk, expKey: ek, legs: lg, dte: d, analysis, spot: sp, name, alpacaOrder, clashInfo, reason }) => {
     // Anche la posizione interna passa dal cancello: non tocca il broker, ma
     // entra nell'esposizione totale che il cancello misura al prossimo ordine.
-    const gLocal = gate({ ticker: tk, intent: "open", legs: lg, dte: d, contracts: 1, maxLoss: analysis?.maxLoss, maxProfit: analysis?.maxProfit }, LOCAL_BOOK);
+    // The quotes travel with the proposal: the gate's priceability check can
+    // then see a long leg nobody bids for, which a mid price hides by
+    // construction (src/rules.js, `priceability`).
+    const gLocal = gate({ ticker: tk, intent: "open", legs: lg, dte: d, contracts: 1,
+      maxLoss: analysis?.maxLoss, maxProfit: analysis?.maxProfit,
+      quotes: quotesOf(analysis), net: analysis?.entry }, LOCAL_BOOK);
     if (!gLocal.pass) return { ok: false, gate: gLocal };
     const seasM = ((seasonal[tk]?.monthlyMean) || getU(tk).monthlyMean)[NOW_MONTH];
     const expiry = ek ? new Date(ek).toISOString() : new Date(Date.now() + d * 86400000).toISOString();
@@ -1267,7 +1299,7 @@ export default function OptionsStrategyLab() {
     try {
       const out = [];
       // What the quality floors removed, so an empty or short result can say why.
-      const cutFloors = { n: 0, liquidity: 0, reward: 0, markets: new Set(), oiSkipped: new Set() };
+      const cutFloors = { n: 0, liquidity: 0, reward: 0, unpriceable: 0, markets: new Set(), oiSkipped: new Set() };
       // le barre servono al fattore tecnico: caricale prima di fondere i segnali
       const barsMap = Object.fromEntries(await Promise.all(multi.sel.map(async (tk) => [tk, await loadBars(tk)])));
       const fz = Object.fromEntries(multi.sel.map((tk) => [tk, fuseFor(tk, barsMap[tk] ?? barsCache[tk])]));
@@ -1291,6 +1323,10 @@ export default function OptionsStrategyLab() {
         for (const pr of buildPresets(sent, sp, getU(tk).step, strikes)) {
           const a = analyze(pr.legs, sp, d2, getU(tk).iv, qq);
           if (!Number.isFinite(a.maxProfit) || a.maxProfit <= 0 || !Number.isFinite(a.maxLoss)) continue;
+          // Unpriceable first, and by the same function as the other two
+          // generation sites: a hit with no readable price is not a hit.
+          const pz = priceability({ legs: pr.legs, quotes: quotesOf(a), net: a.entry, maxLoss: a.maxLoss });
+          if (!pz.priceable) { cutFloors.unpriceable++; cutFloors.markets.add(tk); continue; }
           // Same floors as the Shortlist and the wizard, from the same function.
           const qf = qualityFloor({
             openInterest: a.legPx.map((l) => l.oi), peerOpenInterest: peers, level: liqLevel,
@@ -1319,6 +1355,7 @@ export default function OptionsStrategyLab() {
       setMulti((m) => ({ ...m, busy: false, res: ranked.slice(0, 8),
         floors: {
           n: cutFloors.n, liquidity: cutFloors.liquidity, reward: cutFloors.reward,
+          unpriceable: cutFloors.unpriceable,
           markets: [...cutFloors.markets], oiSkipped: [...cutFloors.oiSkipped], level: liqLevel,
         } }));
     } catch (e) { setMulti((m) => ({ ...m, busy: false, err: String(e.message || e) })); }
@@ -1518,7 +1555,7 @@ export default function OptionsStrategyLab() {
       // What the quality floors threw out, and where. Counted per reason so the
       // refusal can name the floor: "nothing on CORN clears the liquidity floor
       // today" is a useful answer, an empty screen is not.
-      const floors = { liquidity: 0, reward: 0, markets: new Set(), oiUnavailable: new Set() };
+      const floors = { liquidity: 0, reward: 0, unpriceable: 0, markets: new Set(), oiUnavailable: new Set() };
       for (const r of priced) {
         const tk = r.tk;
         const c = chains[tk] || (await refreshChain(tk, true));
@@ -1545,6 +1582,12 @@ export default function OptionsStrategyLab() {
             if (pr.legs.length < 2) continue;
             const a = analyze(pr.legs, sp, d2, getU(tk).iv, qq);
             if (!Number.isFinite(a.maxProfit) || a.maxProfit <= 0 || !Number.isFinite(a.maxLoss) || a.maxLoss >= 0) continue;
+            // UNPRICEABLE BEFORE ANYTHING ELSE (src/rules.js). A road whose
+            // price the app cannot read is not a cheap road: every number the
+            // verdict would put on it — what you risk, what it pays, how it
+            // ranks against the other road — divides by that price.
+            const pz = priceability({ legs: pr.legs, quotes: quotesOf(a), net: a.entry, maxLoss: a.maxLoss });
+            if (!pz.priceable) { floors.unpriceable++; floors.markets.add(tk); continue; }
             const ivA = a.legPx.reduce((x, y) => x + y.iv, 0) / Math.max(1, a.legPx.length);
             const pop = probProfit(a.curve, sp, ivA, d2) || 0;
             const unit = Math.abs(a.maxLoss);
@@ -1568,7 +1611,7 @@ export default function OptionsStrategyLab() {
             const pr2 = evProfile(pop, a.maxProfit, a.maxLoss);
             pool.push({
               tk, sent, pr, a, pop, unit, ek, spot: sp, dte: d2,
-              ev100: pr2 ? pr2.ev100 : -999, rr: a.maxProfit / unit,
+              ev100: pr2 ? pr2.ev100 : -999, rr: rewardRisk(a.maxProfit, a.maxLoss),
               risk: unit, fused: r.fused,
             });
           }
@@ -1581,11 +1624,22 @@ export default function OptionsStrategyLab() {
       // emptied by the budget, and the user is owed the one that is true.
       if (!pool.length) {
         const cut = floors.liquidity + floors.reward;
+        // AN UNREADABLE PRICE IS ITS OWN ANSWER. A board where nothing could be
+        // priced is not a board emptied by the floors and is certainly not a
+        // budget problem — saying either would blame the user, or the market,
+        // for a chain the app could not read. Three refusals, three sentences.
+        if (floors.unpriceable > 0 && cut === 0) {
+          return stop([{
+            id: "unpriceable",
+            text: NOTHING_TODAY.unpriceable({ unpriceable: floors.unpriceable, markets: [...floors.markets] }),
+          }]);
+        }
         if (cut > 0) {
           return stop([{
             id: "quality-floor",
             text: NOTHING_TODAY.belowQualityFloor({
-              liquidity: floors.liquidity, reward: floors.reward, markets: [...floors.markets], level: liqLevel,
+              liquidity: floors.liquidity, reward: floors.reward, unpriceable: floors.unpriceable,
+              markets: [...floors.markets], level: liqLevel,
             }),
           }]);
         }
@@ -1639,7 +1693,7 @@ export default function OptionsStrategyLab() {
       setVerdict(verdictNarrative({
         basket, examined, excluded, newsItems: newsPool, weatherData: weather,
         month: NOW_MONTH, weights: ans.weights, chosen: roads,
-        floors: { liquidity: floors.liquidity, reward: floors.reward,
+        floors: { liquidity: floors.liquidity, reward: floors.reward, unpriceable: floors.unpriceable,
           markets: [...floors.markets], oiUnavailable: [...floors.oiUnavailable] },
       }));
 
@@ -1689,9 +1743,12 @@ export default function OptionsStrategyLab() {
   const evProfile = (pop, maxProfit, maxLoss) => {
     if (pop == null || !Number.isFinite(maxProfit) || !Number.isFinite(maxLoss) || maxLoss >= 0) return null;
     const risk = Math.abs(maxLoss);
+    // Nothing divides by a risk the app could not read. `rewardRisk()` is the
+    // one place that judgement is made, and everything here divides by `risk`.
+    const rr = rewardRisk(maxProfit, maxLoss);
+    if (rr == null) return null;
     const ev = pop * maxProfit - (1 - pop) * risk;
     const ev100 = (ev / risk) * 100;
-    const rr = maxProfit / risk;
     const tag = pop >= 0.6 ? { t: "WINS OFTEN", c: T.green, d: `works out about ${Math.round(pop * 10)} times in 10, for a smaller gain` }
       : pop < 0.45 && rr >= 2 ? { t: "WINS BIG", c: T.violet, d: `works out about ${Math.round(pop * 10)} times in 10, but pays ${rr.toFixed(1)}× what you risk` }
       : { t: "BALANCED", c: T.blue, d: "a middle path between how often and how much" };
@@ -1793,7 +1850,8 @@ export default function OptionsStrategyLab() {
 
   const guard = useMemo(() => {
     if (!A) return null;
-    return gate({ ticker, intent: "open", legs, dte, contracts: 1, maxLoss: A.maxLoss, maxProfit: A.maxProfit }, LOCAL_BOOK);
+    return gate({ ticker, intent: "open", legs, dte, contracts: 1, maxLoss: A.maxLoss, maxProfit: A.maxProfit,
+      quotes: quotesOf(A), net: A.entry }, LOCAL_BOOK);
   }, [A, gate, legs, dte, ticker]); // eslint-disable-line
 
 
@@ -2435,13 +2493,24 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                       <div style={{ ...mono, fontSize: 11.5, color: T.mut, lineHeight: 1.6 }}>
                         {multi.floors?.n
                           ? `Nothing on ${multi.floors.markets.join(", ")} clears the quality floors today — ${multi.floors.n} structure${multi.floors.n === 1 ? " was" : "s were"} built and filtered out. ${qualityFloorSentence(multi.floors.level || liqLevel)}`
-                          : "Nothing fits your budget on the markets you picked."}
+                          : multi.floors?.unpriceable
+                            ? unpriceableNote(multi.floors.unpriceable, multi.floors.markets.join(", "))
+                            : "Nothing fits your budget on the markets you picked."}
                       </div>
                     )}
                     {multi.res.length > 0 && multi.floors?.n > 0 && (
                       <div style={{ ...mono, fontSize: 10, color: T.amber, lineHeight: 1.6 }}>
                         {multi.floors.n} structure{multi.floors.n === 1 ? "" : "s"} on {multi.floors.markets.join(", ")} did
                         not clear the quality floors and {multi.floors.n === 1 ? "is" : "are"} not listed. {qualityFloorSentence(multi.floors.level || liqLevel)}
+                      </div>
+                    )}
+                    {/* WHAT COULD NOT BE PRICED AT ALL. Not a floor and not a
+                        budget: a structure whose price the chain could not
+                        give us is left out, and the count says so rather than
+                        the list quietly being shorter. */}
+                    {multi.floors?.unpriceable > 0 && (
+                      <div style={{ ...mono, fontSize: 10, color: T.amber, lineHeight: 1.6 }}>
+                        {unpriceableNote(multi.floors.unpriceable, multi.floors.markets.join(", "))}
                       </div>
                     )}
                     {multi.floors?.oiSkipped?.length > 0 && (
@@ -2457,6 +2526,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                     <div style={{ ...mono, fontSize: 10, color: isLoosened(multi.floors?.level || liqLevel) ? T.red : T.dim, lineHeight: 1.6 }}>
                       {liquiditySettingNote(multi.floors?.level || liqLevel, {
                         kept: multi.res.length, liquidity: multi.floors?.liquidity, reward: multi.floors?.reward,
+                        unpriceable: multi.floors?.unpriceable,
                       })}
                       {(multi.floors?.level || liqLevel).id !== liqLevel.id
                         ? ` The setting has changed since this ran \u2014 search again to see it at ${liqLevel.label.toUpperCase()}.` : ""}
@@ -2653,10 +2723,26 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
               {shortlist.cut.length > 0 && (
                 <div style={{ ...mono, fontSize: 10.5, color: T.amber, marginTop: 8, lineHeight: 1.6, padding: "8px 10px", background: `${T.amber}0f`, border: `1px solid ${T.amber}44`, borderRadius: 6 }}>
                   {shortlist.cut.length} of {shortlist.cut.length + shortlist.rows.length} structures for this
-                  direction did not clear the quality floors and are not shown:
+                  direction are not shown{(() => {
+                    // Three different facts, and the sentence says which one it
+                    // is: a structure with no readable price never reached the
+                    // floors, so reporting it as one they removed would credit
+                    // them with work they did not do.
+                    const un = shortlist.tally.unpriceable, floors = shortlist.cut.length - un;
+                    if (un > 0 && floors > 0) return ` — ${un} could not be priced at all, and ${floors} did not clear the quality floors`;
+                    if (un > 0) return ` — the price could not be read from the chain`;
+                    return " because they did not clear the quality floors";
+                  })()}:
                   <div style={{ marginTop: 4 }}>
                     {shortlist.cut.map((c) => <div key={c.name}>· {c.name} — {c.reasons[0]}</div>)}
                   </div>
+                </div>
+              )}
+              {/* A price the app could not read is never drawn as $0. The count
+                  is here instead, in the same register as the refusal screen. */}
+              {shortlist.tally.unpriceable > 0 && (
+                <div style={{ ...mono, fontSize: 10.5, color: T.red, marginTop: 8, lineHeight: 1.6 }}>
+                  {unpriceableNote(shortlist.tally.unpriceable, ticker)}
                 </div>
               )}
               {shortlist.rows.length === 0 && (
@@ -2672,7 +2758,10 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
               )}
               <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
                 {shortlist.rows.map(({ p, a }) => {
-                  const rr = a.maxProfit > 0 && a.maxLoss < 0 ? (a.maxProfit / Math.abs(a.maxLoss)) : null;
+                  // `rewardRisk()` and never a division here: a ratio taken
+                  // against a max loss the app could not read printed
+                  // "6748644041614687.00" on BOIL. Below the minimum it is "—".
+                  const rr = rewardRisk(a.maxProfit, a.maxLoss);
                   const ivAvg = a.legPx.reduce((x, y) => x + y.iv, 0) / Math.max(1, a.legPx.length);
                   const pop = probProfit(a.curve, spot, ivAvg, dte);
                   // One shape for everything that can be compared or kept
@@ -2714,6 +2803,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                       {(() => {
                         const sc = scaleStrategy(a, optMode, optAmt);
                         if (!sc) return <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6 }}>Cannot scale this one (unlimited profit or no defined risk): judge it at a single contract.</div>;
+                        if (sc.unpriceable) return <div style={{ ...mono, fontSize: 10.5, color: T.red, marginTop: 6 }}>✗ No quantity is shown: one of these prices at under {money(MIN_NET_DOLLARS)}, so there is no cost to divide your budget by.</div>;
                         if (!sc.ok) return <div style={{ ...mono, fontSize: 10.5, color: T.red, marginTop: 6 }}>✗ Not enough budget: one of these {sc.isCredit ? `ties up ${fmt$(sc.unit)} of risk` : `costs ${fmt$(sc.unit)} to buy`}.</div>;
                         return (
                           <div style={{ display: "flex", gap: 14, marginTop: 8, flexWrap: "wrap", padding: "6px 8px", background: `${T.amber}0d`, borderRadius: 5 }}>
@@ -3083,6 +3173,21 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                 return (
                   <div style={{ ...mono, fontSize: 10, color: T.amber, marginTop: 10 }}>
                     ⚠ The price moved {fmt$(Math.abs(d))} {d > 0 ? "against you" : "in your favour"} since the Shortlist was drawn: the quotes refreshed in between. This one is the current price.
+                  </div>
+                );
+              })()}
+              {/* A HAND-BUILT TRADE IS THE USER'S TO MAKE — the quality floors
+                  do not apply here — but a price the chain could not give us is
+                  not a cheap trade, and the figures underneath would be read as
+                  one. The desk says so where the numbers are, and the gate at
+                  the bottom of this screen refuses the order (src/rules.js). */}
+              {(() => {
+                const pz = priceability({ legs, quotes: quotesOf(A), net: A.entry, maxLoss: A.maxLoss });
+                if (pz.priceable) return null;
+                return (
+                  <div style={{ ...mono, fontSize: 10.5, color: T.red, marginTop: 12, lineHeight: 1.6, padding: "8px 10px", background: `${T.red}0f`, border: `1px solid ${T.red}55`, borderRadius: 6 }}>
+                    ⚠ THE PRICE OF THIS STRUCTURE CANNOT BE READ. {pz.reasons[0]} The figures below are what the
+                    feed gives, not what this would cost: the risk gate will refuse the order.
                   </div>
                 );
               })()}

@@ -5,7 +5,8 @@ import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { evaluateTrade, paperStatus, undefinedRiskLegs } from "./riskGate.js";
 import { RULES, sizing, ruleBadge, qualityFloor, qualityFloorSentence, liquiditySkippedNote, NOTHING_TODAY,
-  LIQUIDITY_LEVELS, RECOMMENDED_LIQUIDITY, LIQUIDITY_MEASUREMENT, liquidityMeasurementNote, liquidityThreshold, looseningWarning, liquiditySettingNote } from "./rules.js";
+  LIQUIDITY_LEVELS, RECOMMENDED_LIQUIDITY, LIQUIDITY_MEASUREMENT, liquidityMeasurementNote, liquidityThreshold, looseningWarning, liquiditySettingNote,
+  priceability, rewardRisk, unpriceableNote, money, MIN_NET_DOLLARS } from "./rules.js";
 
 /* ---------------- tiny harness ---------------- */
 let passed = 0;
@@ -544,6 +545,149 @@ test("the measurement explains the number it actually moved", () => {
   const tenStrikeExpiry = [2, 5, 7, 12, 20, 33, 60, 90, 180, 353];
   const t = liquidityThreshold(tenStrikeExpiry, RECOMMENDED_LIQUIDITY);
   assert.ok(Number.isFinite(t.relative), "the 43-day grain board is measurable at this setting");
+});
+
+test("RECOMMENDED is what the app STARTS at — a measured floor shipped switched off is a measurement nobody applies", () => {
+  assert.equal(RECOMMENDED_LIQUIDITY.recommended, true);
+  assert.equal(RECOMMENDED_LIQUIDITY.percentile, RULES.liquidityPercentile);
+  assert.equal(RECOMMENDED_LIQUIDITY.absolute, RULES.minOpenInterestAbsolute);
+  const app = readFileSync(new URL("./App.jsx", import.meta.url), "utf8");
+  assert.ok(/useState\(RECOMMENDED_LIQUIDITY\.id\)/.test(app),
+    "the liquidity level must start at the recommended one, not at OFF");
+});
+
+/* ================= UNPRICEABLE IS NOT FREE (rules.js, riskGate.js) =================
+   Read live on BOIL 2026-10-09, spot $21.23, liquidity floor OFF: a Bullish
+   Call Butterfly (+1 21C / -2 22.5C / +1 24C) priced at a net debit of ZERO and
+   was offered with YOU PAY $0, MAX LOSS -$0, R/R 6748644041614687.00 and 250
+   contracts. Everything below holds that case shut. */
+
+// The structure as the screen had it: the 24C nobody bids for, and a net that
+// cancels to nothing because half of an ask is not a price.
+const BOIL_FLY = [
+  { side: 1, qty: 1, type: "call", strike: 21 },
+  { side: -1, qty: 2, type: "call", strike: 22.5 },
+  { side: 1, qty: 1, type: "call", strike: 24 },
+];
+const BOIL_QUOTES = [{ bid: 0.62, ask: 0.70 }, { bid: 0.31, ask: 0.36 }, { bid: 0, ask: 0.05 }];
+
+test("the BOIL butterfly is UNPRICEABLE, not free", () => {
+  const r = priceability({ legs: BOIL_FLY, quotes: BOIL_QUOTES, net: 0, maxLoss: -1e-14 });
+  assert.equal(r.priceable, false);
+  assert.equal(r.why, "no-bid", "the long leg nobody bids for is named first");
+  assert.ok(r.reasons.join(" ").includes("24C"), "and the sentence says WHICH leg");
+  assert.ok(r.reasons.join(" ").includes(money(MIN_NET_DOLLARS)), "with the minimum it failed against");
+});
+
+test("a long leg with no bid is unpriceable on its own, whatever the net says", () => {
+  // The net can look perfectly healthy while one leg is a placeholder: you
+  // cannot sell back what nobody is bidding for, so what it cost is unknown.
+  const r = priceability({ legs: BOIL_FLY, quotes: [{ bid: 0.62, ask: 0.7 }, { bid: 0.31, ask: 0.36 }, { bid: 0, ask: 0.05 }], net: 0.42, maxLoss: -42 });
+  assert.equal(r.priceable, false);
+  assert.equal(r.why, "no-bid");
+});
+
+test("a genuine CREDIT structure is priceable: the test is on the absolute value", () => {
+  const credit = [{ side: -1, qty: 1, type: "put", strike: 20 }, { side: 1, qty: 1, type: "put", strike: 19 }];
+  const r = priceability({ legs: credit, quotes: [{ bid: 0.48, ask: 0.55 }, { bid: 0.18, ask: 0.22 }], net: -0.30, maxLoss: -70 });
+  assert.equal(r.priceable, true, "a negative net is money received, not a missing price");
+  assert.deepEqual(r.reasons, []);
+});
+
+test("a SHORT leg with no bid does not fail on its own — the net is what catches it", () => {
+  // Symmetry would be wrong here: you are not buying that leg. What matters is
+  // whether the structure as a whole still prices to something.
+  const legs = [{ side: 1, qty: 1, type: "call", strike: 21 }, { side: -1, qty: 1, type: "call", strike: 24 }];
+  const r = priceability({ legs, quotes: [{ bid: 0.62, ask: 0.7 }, { bid: 0, ask: 0.05 }], net: 0.6, maxLoss: -60 });
+  assert.equal(r.priceable, true);
+});
+
+test("a quote the feed did not give is UNKNOWN, never a bid of zero", () => {
+  // The same rule the liquidity floor already applies to open interest: a leg
+  // priced from the model carries no bid at all, and that rejects nothing.
+  const r = priceability({ legs: BOIL_FLY, quotes: [null, undefined, {}], net: 0.45, maxLoss: -45 });
+  assert.equal(r.priceable, true, "missing quotes reject nothing");
+  assert.equal(r.unknownQuotes, 3, "but the caller can see they were missing");
+});
+
+test("the minimum bites on the NET, so a structure that prices to nothing is out with no quotes at all", () => {
+  const r = priceability({ legs: BOIL_FLY, net: 0.01, maxLoss: -1 });
+  assert.equal(r.priceable, false);
+  assert.equal(r.why, "no-net");
+  const fine = priceability({ legs: BOIL_FLY, net: 0.35, maxLoss: -35 });
+  assert.equal(fine.priceable, true);
+});
+
+test("THE GATE REJECTS AN UNKNOWN MAXIMUM LOSS — a finite number is not a known one", () => {
+  const r = evaluateTrade({
+    proposal: trade({ legs: BOIL_FLY, quotes: BOIL_QUOTES, net: 0, maxLoss: -1e-14, maxProfit: 37462 }),
+    portfolio: EMPTY_BOOK, capital: CAPITAL,
+  });
+  assert.equal(r.pass, false, "-1e-14 is finite, and it is still not a maximum loss");
+  assert.ok(codes(r).includes("UNPRICEABLE"));
+  assert.ok(messageFor(r, "UNPRICEABLE").includes("24C"), "the block says what is wrong with the trade");
+});
+
+test("the gate blocks a zero max loss even when the caller passes no quotes", () => {
+  const r = evaluateTrade({
+    proposal: trade({ legs: BOIL_FLY, maxLoss: -0.0001, maxProfit: 37462 }),
+    portfolio: EMPTY_BOOK, capital: CAPITAL,
+  });
+  assert.equal(r.pass, false);
+  assert.ok(codes(r).includes("UNPRICEABLE"));
+});
+
+test("the priceability block never touches a CLOSING order", () => {
+  // Getting out is always allowed: the rules that gate an entry do not gate an
+  // exit, and a position already open is not made safer by being unclosable.
+  const r = evaluateTrade({
+    proposal: trade({ intent: "close", legs: BOIL_FLY, maxLoss: -1e-14 }),
+    portfolio: EMPTY_BOOK, capital: CAPITAL,
+  });
+  assert.ok(!codes(r).includes("UNPRICEABLE"));
+});
+
+test("the ordinary spread still passes with quotes attached", () => {
+  const r = evaluateTrade({
+    proposal: trade({ quotes: [{ bid: 1.10, ask: 1.20 }, { bid: 0.28, ask: 0.33 }], net: 0.85 }),
+    portfolio: EMPTY_BOOK, capital: CAPITAL, signals: CONFLUENT,
+  });
+  assert.equal(r.pass, true, r.violations.map((v) => v.message).join(" | "));
+});
+
+test("R/R is a dash, never a ratio, when there is nothing to divide by", () => {
+  assert.equal(rewardRisk(37462, -1e-14), null, "6748644041614687.00 was arithmetic on a placeholder");
+  assert.equal(rewardRisk(37462, -0), null);
+  assert.equal(rewardRisk(57, -43).toFixed(2), "1.33", "and a real one is still a ratio");
+  assert.equal(rewardRisk(0, -43), null, "no upside is not a reward-to-risk either");
+});
+
+test("nothing prints as -$0", () => {
+  assert.equal(money(-0.0001), "$0", "a minus sign in front of zero invents a direction");
+  assert.equal(money(-0), "$0");
+  assert.equal(money(-340), "-$340", "and a real loss keeps its sign");
+});
+
+test("the quality floor cannot judge a structure whose price could not be read", () => {
+  const r = qualityFloor({ openInterest: [900, 640], maxProfit: 37462, maxLoss: -1e-14 });
+  assert.equal(r.reward.rr, null, "no ratio is formed against a max loss under the minimum");
+  assert.equal(r.pass, false);
+});
+
+test("an unpriceable structure is left out WITH A SENTENCE, and never at $0", () => {
+  const note = unpriceableNote(3, "BOIL");
+  assert.ok(note.includes("3") && note.includes("BOIL"));
+  assert.ok(note.includes("not a maximum loss of zero"), "it says what a zero actually means");
+  const refusal = NOTHING_TODAY.unpriceable({ unpriceable: 3, markets: ["BOIL"] });
+  assert.ok(refusal.includes("BOIL") && refusal.includes("unpriced"));
+  assert.ok(!/-\$0/.test(refusal), "the refusal screen does not print -$0 either");
+});
+
+test("a board emptied by unreadable prices is a different sentence from one emptied by the floors", () => {
+  const unpriced = NOTHING_TODAY.unpriceable({ unpriceable: 2, markets: ["BOIL"] });
+  const floored = NOTHING_TODAY.belowQualityFloor({ liquidity: 2, reward: 0, markets: ["BOIL"] });
+  assert.notEqual(unpriced, floored);
+  assert.ok(!unpriced.includes("budget"), "and neither of them is the budget answer");
 });
 
 /* ---------------- summary ---------------- */
