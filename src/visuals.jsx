@@ -25,7 +25,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { payoff, N as normCdf } from "./engine.js";
 import { T } from "./theme.js";
-import { money, RULES, pctText } from "./rules.js";
+import { money, RULES, pctText, liquidityThreshold, RECOMMENDED_LIQUIDITY } from "./rules.js";
 
 const mono = { fontFamily: "ui-monospace, Menlo, monospace" };
 const sans = { fontFamily: "ui-sans-serif, system-ui" };
@@ -463,19 +463,48 @@ export function BandThumbFigure({ legs, entryNet, spot, bars, ticker, width, hei
    pretend otherwise.
 ==================================================================== */
 
+/** The floor under a bar with NOTHING open, in pixels. See `oiBarHeights`. */
+export const OI_EMPTY_BAR = 2;
+
 /** Bar heights for a sorted list, log-compressed so the shape survives. */
 export function oiBarHeights(sorted = [], height = 46) {
   if (!sorted.length) return [];
   const top = Math.log1p(Math.max(...sorted, 1));
   return sorted.map((v) => {
     const h = top > 0 ? (Math.log1p(Math.max(0, v)) / top) * height : 0;
-    return Math.max(1, h);   // a strike with nothing open is still a strike
+    // A STRIKE WITH NOTHING OPEN IS A FACT, AND IT HAS TO BE VISIBLE.
+    // (Drawn at nearly full opacity for the same reason: two pixels at half
+    // strength is fainter than the one pixel this replaced.)
+    // log1p(0) is 0, so on BOIL's 2026-10-09 board — where the emptiest third
+    // of the strikes carry no open contracts at all — two thirds of the strip
+    // drew at zero height and read as "not drawn". One pixel was not enough to
+    // tell the two apart on a phone. Two is, and the colour says which it is.
+    return Math.max(v <= 0 ? OI_EMPTY_BAR : 1, h);
   });
 }
+
+/** Is this bar a strike with nothing open at all? Drawn grey, never as a count. */
+export const isEmptyStrike = (v) => Number(v) <= 0;
 
 /** How many of the sorted counts the floor removes. */
 export const oiCutAt = (sorted = [], threshold = 0) =>
   sorted.filter((v) => v < threshold).length;
+
+/**
+ * WHERE THE APP'S OWN RECOMMENDATION WOULD CUT THIS EXPIRY.
+ *
+ * Only used when the floor is OFF. At that setting the strip is a solid green
+ * block with no line in it, which teaches nothing: "off" is only meaningful
+ * against what is being switched off. The ghost line is drawn from
+ * `liquidityThreshold()` at the recommended level, so it is the real cut this
+ * chain would take and not an illustration — and it is dashed, dimmed and
+ * labelled, because nothing here is being filtered.
+ */
+export const oiGhostCut = (sorted = []) => {
+  const t = liquidityThreshold(sorted, RECOMMENDED_LIQUIDITY);
+  const cut = oiCutAt(sorted, t.threshold);
+  return { threshold: t.threshold, cut, basis: t.basis };
+};
 
 /** One generated sentence: what this setting does to this expiry. */
 export function oiStripTakeaway(sorted = [], threshold = 0, { expKey } = {}) {
@@ -506,6 +535,12 @@ export function OpenInterestStrip({
   const bw = width / sorted.length;
   const tap = (el) => (onExplain ? () => onExplain(el) : undefined);
   const lineX = cut * bw;
+  // With the floor OFF there is no cut to draw, and a solid green block says
+  // nothing about what has been switched off. The ghost shows where the app's
+  // own recommendation would land on THIS expiry — dashed, dimmed, labelled,
+  // and filtering nothing.
+  const ghost = threshold > 0 ? null : oiGhostCut(sorted);
+  const ghostX = ghost ? ghost.cut * bw : 0;
 
   return (
     <svg width={width} height={height + 14} viewBox={`0 0 ${width} ${height + 14}`} role="img"
@@ -513,16 +548,31 @@ export function OpenInterestStrip({
       style={{ display: "block", maxWidth: "100%", background: T.bg, borderRadius: 4, cursor: onExplain ? "pointer" : "default" }}>
       {sorted.map((v, i) => {
         const removed = v < threshold;
+        // THREE STATES, THREE COLOURS. A strike with nothing open is not the
+        // same fact as one the floor removed or one that survived: at OFF it is
+        // not removed at all, and drawing it green would say the app is happy
+        // with a strike on which nobody holds a single contract.
+        const empty = isEmptyStrike(v);
+        const fill = empty ? T.mut : removed ? T.red : T.green;
         return (
           <rect key={i} x={i * bw} y={height - heights[i]} width={Math.max(0.5, bw - (bw > 3 ? 1 : 0))}
-            height={heights[i]} fill={removed ? T.red : T.green} opacity={removed ? 0.45 : 0.9}
-            onClick={tap(removed ? "cut" : "kept")} />
+            height={heights[i]} fill={fill} opacity={empty ? 0.85 : removed ? 0.45 : 0.9}
+            onClick={tap(empty ? "empty" : removed ? "cut" : "kept")} />
         );
       })}
       {/* where the floor lands. Drawn at a RANK, not at a value: the horizontal
           axis is the ordering of the strikes, not how many contracts each has. */}
       {cut > 0 && cut < sorted.length && (
         <line x1={lineX} x2={lineX} y1={0} y2={height} stroke={T.ink} strokeWidth={1.5} strokeDasharray="3 2" />
+      )}
+      {ghost && ghost.cut > 0 && ghost.cut < sorted.length && (
+        <g onClick={tap("ghost")}>
+          <line x1={ghostX} x2={ghostX} y1={0} y2={height} stroke={T.mut} strokeWidth={1} strokeDasharray="2 3" opacity={0.85} />
+          <text x={Math.min(width - 2, ghostX + 3)} y={9} textAnchor={ghostX > width * 0.6 ? "end" : "start"}
+            style={{ ...mono }} fontSize={7.5} fill={T.mut}>
+            {`RECOMMENDED WOULD CUT HERE (${ghost.threshold})`}
+          </text>
+        </g>
       )}
       <line x1={0} x2={width} y1={height} y2={height} stroke={T.line} strokeWidth={1} />
       {/* the real numbers at the ends, because the height cannot be read as one */}
@@ -535,7 +585,13 @@ export function OpenInterestStrip({
 }
 
 /** What one part of the strip means, on tap. */
-export const explainOiStrip = (el, { threshold, cut, total } = {}) => ({
+export const explainOiStrip = (el, { threshold, cut, total, ghost } = {}) => ({
+  empty: `These strikes have NOTHING open: not one contract exists on them. They are drawn grey and kept at a ` +
+    `sliver of height so they can be seen at all — a bar of zero height is indistinguishable from a strike ` +
+    `that was never drawn, and "nobody is here" is the most important thing this picture can tell you.`,
+  ghost: `The liquidity floor is OFF, so nothing on this expiry is being removed. The grey dashed line is where ` +
+    `the app's recommendation WOULD cut it${ghost ? `: under ${ghost} open contracts` : ""} — everything to the ` +
+    `left of it is what you are choosing to keep in the list.`,
   cut: `These ${cut} strikes are the emptiest on this expiry: each carries fewer than ${threshold} open contracts. ` +
     `A price quoted on one of them is a market maker's placeholder rather than something two people agreed on, ` +
     `and you may not find anyone to sell it back to.`,

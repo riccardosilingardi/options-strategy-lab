@@ -804,12 +804,18 @@ export function gateChecklist(result, proposal = {}) {
   const L = result.limits || {};
   const blocked = (code) => (result.violations || []).some((v) => v.code === code);
   const cap = L.tradingCapital || 0;
+  const unpriceable = (result.violations || []).find((v) => v.code === "UNPRICEABLE");
   const rows = [
     {
       id: "defined",
-      ok: !blocked("UNDEFINED_RISK") && !blocked("NO_STRUCTURE"),
-      text: `The worst case is a number you can read: ${money(L.tradeRisk)}. Every option sold is covered by ` +
-        `one bought, so the loss cannot run past it.`,
+      ok: !blocked("UNDEFINED_RISK") && !blocked("NO_STRUCTURE") && !blocked("UNPRICEABLE"),
+      // A maximum loss of zero is not a worst case you can read — it is one the
+      // app could not compute, and this row is where that has to be said rather
+      // than printed as $0 next to a tick. The sentence is the gate's own.
+      text: unpriceable
+        ? unpriceable.message
+        : `The worst case is a number you can read: ${money(L.tradeRisk)}. Every option sold is covered by ` +
+          `one bought, so the loss cannot run past it.`,
     },
     {
       id: "per-trade",

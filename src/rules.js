@@ -145,7 +145,33 @@ export const RULES = {
   // its width is 0.5), so the floor removes the lottery tickets without
   // removing the boring trades that are the point of this app.
   minRewardRisk: 0.25,
+
+  // minNetPremium — THE PRICE HAS TO EXIST BEFORE ANY OTHER RULE CAN BE
+  // APPLIED TO IT. In dollars per share, the unit an option is quoted in:
+  // multiply by 100 for one contract, as every screen does.
+  //
+  // Read live on BOIL, 2026-10-09, spot $21.23, with the liquidity floor OFF: a
+  // Bullish Call Butterfly (+1 21C / -2 22.5C / +1 24C) priced at a net debit of
+  // ZERO. The screen said YOU PAY $0, MAX LOSS -$0, R/R 6748644041614687.00 and
+  // offered 250 contracts. A butterfly with 1.5-point wings on a $21 underlying
+  // does not cost nothing: at least one leg's mid was a market maker's
+  // placeholder on a strike nobody trades, and half of a placeholder ask is not
+  // a price. A butterfly's maximum loss IS its debit, so a debit of zero means
+  // the worst case is UNKNOWN, not that it is zero — and non-negotiable rule 2
+  // is that the maximum loss is always known.
+  //
+  // Five cents a share ($5 a contract) is where a net stops being a number and
+  // becomes the rounding of two placeholders against each other: these chains
+  // quote in whole cents, the round trip on four legs costs more than that on
+  // its own, and every arithmetic that divides by the cost — sizing, reward to
+  // risk — is meaningless below it. It is deliberately far under any real
+  // structure this app builds, because it is not a quality judgement: it is the
+  // line under which there is nothing to judge.
+  minNetPremium: 0.05,
 };
+
+/** The same minimum in dollars for ONE contract, which is how screens print it. */
+export const MIN_NET_DOLLARS = RULES.minNetPremium * 100;
 
 /* ============================== formatting ============================== */
 
@@ -153,8 +179,11 @@ export const RULES = {
 export const money = (x) => {
   const n = Number(x);
   if (!Number.isFinite(n)) return "n/a";
-  const s = Math.round(Math.abs(n)).toLocaleString("en-US");
-  return `${n < 0 ? "-" : ""}$${s}`;
+  const r = Math.round(Math.abs(n));
+  // "-$0" is not a smaller loss than "$0": it is a number the app could not
+  // read, wearing a minus sign. Round FIRST, then decide the sign, so nothing
+  // that prints as zero can also print as negative.
+  return `${n < 0 && r > 0 ? "-" : ""}$${r.toLocaleString("en-US")}`;
 };
 
 /** `5%`, `6.8%`. One decimal only when the number needs it. */
@@ -227,6 +256,19 @@ export const NOTHING_TODAY = {
   noData: (what) =>
     `Market data for ${what} did not load, so there is nothing to judge. This is a missing-data problem, not a ` +
     `verdict on the market: try again in a minute.`,
+  // Not a verdict on the market either, and not the same sentence as a board
+  // emptied by the floors: every structure was built and then found to have no
+  // readable price. Saying "nothing fits your budget" here would blame the user
+  // for a chain the app could not read.
+  unpriceable: (tally) => {
+    const t = tally || {};
+    const markets = (t.markets || []).join(", ");
+    return `Every structure that fit your answers on ${markets || "the markets you picked"} came back without a ` +
+      `price we can stand behind: ${t.unpriceable || "each one"} had a leg nobody is bidding for, or netted out to ` +
+      `about ${money(0)} across its legs. That is not a free trade, it is an unpriced one — a maximum loss the app ` +
+      `cannot compute is not a maximum loss of zero, and this platform does not send an order whose worst case it ` +
+      `cannot print.`;
+  },
   // The quality floors emptied the board. This is a real answer — "nothing on
   // CORN clears the liquidity floor today" is worth more than a screen of
   // structures nobody trades — so it gets a sentence with the counts in it.
@@ -237,6 +279,7 @@ export const NOTHING_TODAY = {
     const parts = [];
     if (t.liquidity > 0) parts.push(`${t.liquidity} because ${lab.liquidity}`);
     if (t.reward > 0) parts.push(`${t.reward} because ${lab.reward}`);
+    if (t.unpriceable > 0) parts.push(`${t.unpriceable} because ${lab.unpriceable}`);
     return `Every structure that fit your answers on ${markets || "the markets you picked"} was ` +
       `filtered out by the quality floors: ${parts.join(", and ")}. ` +
       `Those floors are the difference between a price and a market. Nothing here today is the honest answer, ` +
@@ -452,6 +495,7 @@ export const qualityFloorLabels = (level = RECOMMENDED_LIQUIDITY) => {
       : `one of its legs is among the ${pctText(l.percentile)} least-traded strikes on its own expiry, ` +
         `or has fewer than ${l.absolute} contracts open`,
     reward: `it pays under ${money(RULES.minRewardRisk * 100)} for every ${money(100)} at risk`,
+    unpriceable: `its price could not be read from the chain at all — a leg with no bid, or a net of about nothing`,
   };
 };
 
@@ -478,6 +522,9 @@ export const liquiditySettingNote = (level, counts) => {
   if (c.liquidity > 0) bits.push(`${c.liquidity} removed for liquidity`);
   if (c.reward > 0) bits.push(`${c.reward} removed for reward-to-risk`);
   if (c.skipped > 0) bits.push(`${c.skipped} not liquidity-checked (the feed reports no open interest)`);
+  // Not removed BY this setting, and the note says so rather than letting a
+  // count the floor never made appear as one of its own.
+  if (c.unpriceable > 0) bits.push(`${c.unpriceable} left out before the floor, with no price we could read`);
   return `LIQUIDITY FLOOR: ${l.label.toUpperCase()}${l.recommended ? " — the app's recommendation" : ""}` +
     `${shown ? ` · ${shown}` : ""}${bits.length ? ` · ${bits.join(" · ")}` : ""}. ` +
     `Measured against all ${LIQUIDITY_MEASUREMENT.markets} live chains on the ${LIQUIDITY_MEASUREMENT.asOf} close.`;
@@ -487,6 +534,108 @@ export const liquiditySettingNote = (level, counts) => {
 export const liquiditySkippedNote = (feed) =>
   `The liquidity floor was SKIPPED${feed ? ` — ${feed} does not report open interest for these contracts` : ""}. ` +
   `Missing data is not evidence that nobody trades them, so nothing was rejected for it.`;
+
+/* -------------------------------------------------------------------------
+ * UNPRICEABLE IS NOT FREE.
+ *
+ * This runs BEFORE the quality floors and it is a different question from
+ * either of them. The floors ask whether a structure is worth offering; this
+ * asks whether it has a price at all. That is also why the risk gate applies
+ * THIS and never the floors: a trade the user builds by hand on the desk is his
+ * to make, but a maximum loss that cannot be read off real quotes is not a
+ * small maximum loss — it is an unknown one, and rule 2 says the worst case is
+ * always known.
+ *
+ * Two tests, both from the live BOIL case in RULES.minNetPremium:
+ *
+ *  1. EVERY LONG LEG NEEDS A BID ABOVE ZERO. You are buying it, so you have to
+ *     be able to sell it back; nobody bidding means nobody is on the other
+ *     side, and the mid the app priced it at is half of an ask nobody agreed
+ *     to. Short legs are not tested here — the net test below catches a
+ *     structure whose credit is imaginary, and a leg the feed said nothing
+ *     about is UNKNOWN rather than zero, exactly as with open interest.
+ *  2. THE NET MUST CLEAR THE MINIMUM, IN ABSOLUTE VALUE. A credit structure has
+ *     a negative net and is perfectly priceable; it is a net of approximately
+ *     nothing, either way round, that says the two halves cancelled because at
+ *     least one of them was invented.
+ * ------------------------------------------------------------------------- */
+
+/**
+ * @param {object} arg
+ *   legs   — [{ side, type, strike, qty }]
+ *   quotes — one entry per leg, aligned with `legs`: `{ bid, ask }`. A missing
+ *            entry, or a bid that is null/undefined, is UNKNOWN and tests
+ *            nothing. A real `0` fails.
+ *   net    — the structure's net price PER SHARE, positive for a debit and
+ *            negative for a credit (`analyze().entry`). Multiply by 100 for one
+ *            contract.
+ *   maxLoss — dollars for ONE contract, if known: it is the same fact seen from
+ *            the other end, and for a debit structure it IS the debit.
+ * @returns {{ priceable, reasons, why, noBid, unknownQuotes, netDollars }}
+ *   `reasons` are finished English sentences with the numbers already in them.
+ */
+export function priceability({ legs = [], quotes = [], net = null, maxLoss = null } = {}) {
+  const reasons = [];
+  const known = (x) => x != null && x !== "" && Number.isFinite(Number(x));
+
+  const noBid = [];
+  let unknownQuotes = 0;
+  (Array.isArray(legs) ? legs : []).forEach((l, i) => {
+    const qt = (Array.isArray(quotes) ? quotes[i] : null) || null;
+    if (!qt || !known(qt.bid)) { unknownQuotes++; return; }
+    if (Number(l?.side) > 0 && Number(qt.bid) <= 0) noBid.push(l);
+  });
+  if (noBid.length) {
+    const names = noBid.map((l) => `${l.strike}${l.type === "call" ? "C" : "P"}`).join(", ");
+    reasons.push(
+      `Nobody is bidding for the ${names} you would be buying: its bid is 0, so the price on screen is half ` +
+      `of an ask that no one has agreed to. You could not sell it back at any price, and what this structure ` +
+      `costs is therefore unknown rather than cheap.`);
+  }
+
+  const netDollars = known(net) ? Math.abs(Number(net)) * 100 : null;
+  const lossDollars = known(maxLoss) ? Math.abs(Number(maxLoss)) : null;
+  const netTooSmall = netDollars != null && netDollars < MIN_NET_DOLLARS;
+  const lossTooSmall = lossDollars != null && lossDollars < MIN_NET_DOLLARS;
+  if (netTooSmall) {
+    reasons.push(
+      `The whole structure prices at ${money(netDollars)} for one contract, under the ${money(MIN_NET_DOLLARS)} ` +
+      `minimum. ${legs.length ? `${legs.length} legs` : "Legs"} on a chain quoted in whole cents cannot net to ` +
+      `nothing: the halves cancelled because ` +
+      `at least one of them was a placeholder, and a maximum loss of ${money(0)} is a number the app could not ` +
+      `read, not a trade that cannot lose.`);
+  } else if (lossTooSmall) {
+    reasons.push(
+      `The worst case prices at ${money(lossDollars)} for one contract, under the ${money(MIN_NET_DOLLARS)} ` +
+      `minimum. A defined-risk structure that risks nothing is not a free trade, it is an unpriced one, and ` +
+      `the maximum loss has to be a number you can read before anything is sent.`);
+  }
+
+  const why = noBid.length ? "no-bid" : (netTooSmall || lossTooSmall) ? "no-net" : null;
+  return { priceable: reasons.length === 0, reasons, why, noBid, unknownQuotes, netDollars };
+}
+
+/** The one line a list prints in place of a structure it could not price. */
+export const unpriceableNote = (n, what) =>
+  `${n} structure${n === 1 ? "" : "s"} ${n === 1 ? "was" : "were"} left out because ${n === 1 ? "its" : "their"} ` +
+  `price could not be read${what ? ` on ${what}` : ""}: a leg nobody bids for, or a net of about nothing. ` +
+  `A maximum loss the app cannot compute is not a maximum loss of zero, and nothing here is shown at ${money(0)}.`;
+
+/**
+ * Reward-to-risk, or null when there is nothing to divide by.
+ *
+ * The one place the ratio is formed, because the BOIL butterfly printed
+ * "R/R 6748644041614687.00" from a max loss of about 1e-16: dividing by a
+ * number the app could not read produces a number nobody can read either.
+ * Below the minimum the answer is "—", never a ratio.
+ */
+export const rewardRisk = (maxProfit, maxLoss) => {
+  const risk = Math.abs(Number(maxLoss));
+  const reward = Number(maxProfit);
+  if (!Number.isFinite(risk) || !Number.isFinite(reward)) return null;
+  if (risk < MIN_NET_DOLLARS || reward <= 0) return null;
+  return reward / risk;
+};
 
 /**
  * Run one candidate past both floors.
@@ -505,7 +654,10 @@ export function qualityFloor({
 } = {}) {
   const risk = Math.abs(Number(maxLoss));
   const reward = Number(maxProfit);
-  const rr = risk > 0 && Number.isFinite(reward) ? reward / risk : null;
+  // `rewardRisk()` and nothing else: a max loss under the minimum is a price
+  // the app could not read, and a ratio taken against it is arithmetic on a
+  // placeholder. It returns null there, and null reads as "cannot be judged".
+  const rr = rewardRisk(reward, risk);
   const lv = liquidityLevel(level?.id ?? level);
 
   const counts = Array.isArray(openInterest) ? openInterest : [];

@@ -520,6 +520,26 @@ check("the confirm step states the checks in plain English with real numbers", (
   has(h, "Every option sold is covered by one bought");
 });
 
+check("an unpriceable trade is NOT ticked as a worst case you can read", () => {
+  // The BOIL butterfly: a maximum loss of about zero is one the app could not
+  // compute, and the confirm row must say that rather than printing $0 next to
+  // a tick. The sentence is the gate's own — this screen never writes a rule.
+  const unpriced = evaluateTrade({
+    proposal: { intent: "open", ticker: "BOIL", legs: bullCall, dte: 45, contracts: 1, maxLoss: -1e-14, maxProfit: 37462 },
+    portfolio: { positions: [], account: PAPER }, capital: CAPITAL,
+  });
+  const rows = gateChecklist(unpriced, { dte: 45 });
+  const defined = rows.find((r) => r.id === "defined");
+  if (defined.ok) throw new Error("a maximum loss of zero cannot be ticked");
+  has(defined.text, "unpriced one");
+  if (/The worst case is a number you can read/.test(defined.text)) {
+    throw new Error("it is claiming to have read a number it could not read");
+  }
+  const h = renderToStaticMarkup(
+    <ConfirmSteps candidate={ROADS[1]} preview={unpriced} result={null} onConfirm={() => {}} onBack={() => {}} />);
+  if (/-\$0/.test(h)) throw new Error("the confirm step printed -$0");
+});
+
 check("the confirm step states the exit plan as already decided", () => {
   const h = renderToStaticMarkup(
     <ConfirmSteps candidate={ROADS[1]} preview={passResult} onConfirm={() => {}} onBack={() => {}} />);

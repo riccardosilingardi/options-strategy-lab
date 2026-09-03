@@ -16,9 +16,10 @@ import {
   bandTakeaway, gaugeTakeaway, unifiedTakeaway, explainElement, chanceInProfit,
   BandThumbnail, Gauge, UnifiedPosition, exitPlanSentence, inTenPhrase,
   OpenInterestStrip, oiBarHeights, oiCutAt, oiStripTakeaway, explainOiStrip,
+  oiGhostCut, isEmptyStrike, OI_EMPTY_BAR,
 } from "./visuals.jsx";
 import { payoff } from "./engine.js";
-import { RULES } from "./rules.js";
+import { RULES, RECOMMENDED_LIQUIDITY, liquidityThreshold } from "./rules.js";
 import { T } from "./theme.js";
 
 const ok = [], bad = [];
@@ -295,6 +296,50 @@ check("a strike with nothing open is drawn, not skipped", () => {
   if (!(h[0] >= 1)) throw new Error("zero open interest is a fact about a strike, not an absent strike");
 });
 
+check("a strike with nothing open is VISIBLE, and grey rather than green or red", () => {
+  // Read on BOIL 2026-10-09: the emptiest strikes on that expiry carry 0 open
+  // contracts, log1p(0) is 0, and two thirds of the strip drew at zero height —
+  // indistinguishable from not drawn at all, at any setting.
+  const h = oiBarHeights([0, 0, 0, 4, 90], 46);
+  if (!(h[0] >= OI_EMPTY_BAR)) throw new Error(`an empty strike must clear ${OI_EMPTY_BAR}px, got ${h[0]}`);
+  eq(isEmptyStrike(0), true, "nothing open");
+  eq(isEmptyStrike(1), false, "one contract is not nothing");
+  // Off: nothing is removed, so nothing is red — but the empties are not green
+  // either, because the app is not calling a strike with no contracts on it fine.
+  const off = renderToStaticMarkup(<OpenInterestStrip peers={[0, 0, 0, 4, 90]} threshold={0} width={200} />);
+  eq((off.match(new RegExp(T.red, "g")) || []).length, 0, "nothing is removed at Off");
+  eq((off.match(new RegExp(T.mut, "g")) || []).length >= 3, true, "the three empty strikes are grey");
+  eq((off.match(new RegExp(T.green, "g")) || []).length, 2, "and only the two with contracts on them are green");
+});
+
+check("with the floor OFF the strip shows where the recommendation WOULD cut", () => {
+  // A solid green block with no line in it teaches nothing: "off" only means
+  // something against what is being switched off.
+  const peers = [0, 0, 1, 3, 8, 14, 30, 60, 120, 400, 900, 1800];
+  const ghost = oiGhostCut(peers);
+  eq(ghost.threshold, liquidityThreshold(peers, RECOMMENDED_LIQUIDITY).threshold,
+    "the ghost is the real recommended cut for this expiry, not an illustration");
+  eq(ghost.cut, oiCutAt(peers, ghost.threshold), "at the rank that threshold actually falls on");
+  const off = renderToStaticMarkup(<OpenInterestStrip peers={peers} threshold={0} width={240} />);
+  has(off, "RECOMMENDED WOULD CUT HERE");
+  has(off, String(ghost.threshold));
+  // ...and it is labelled as a ghost, not applied: the takeaway still says
+  // nothing is filtered.
+  const t = oiStripTakeaway([...peers].sort((a, b) => a - b), 0);
+  oneSentence(t);
+  has(t, "No strike is removed");
+  // At any real setting there is a real line, and no ghost.
+  const on = renderToStaticMarkup(<OpenInterestStrip peers={peers} threshold={10} width={240} />);
+  if (on.includes("RECOMMENDED WOULD CUT HERE")) throw new Error("the ghost belongs to the OFF setting only");
+});
+
+check("the empty strikes and the ghost line explain themselves on tap", () => {
+  has(explainOiStrip("empty", { total: 12 }), "NOTHING open");
+  has(explainOiStrip("ghost", { ghost: 10 }), "OFF");
+  has(explainOiStrip("ghost", { ghost: 10 }), "10");
+});
+
+
 check("no strikes means no chart, not a broken one", () => {
   eq(renderToStaticMarkup(<OpenInterestStrip peers={[]} threshold={10} />), "", "nothing to draw");
   eq(oiStripTakeaway([], 10), "", "and nothing to say");
@@ -326,6 +371,7 @@ check("every part of the strip explains itself on tap", () => {
   has(explainOiStrip("elsewhere", { total: 11 }), "11");
 });
 
+for (const [n, m] of bad) console.log(`  FAIL ${n}\n       ${m}`);
 console.log(`\n${ok.length} passed, ${bad.length} failed`);
 process.exit(bad.length ? 1 : 0);
 

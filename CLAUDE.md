@@ -65,6 +65,49 @@ pill is generated while the questions are open — a pill explains an answer, an
 there is no answer to explain. The gate still enforces the suggested figures,
 because a proposal cannot wait for a questionnaire, and warns that it is doing so.
 
+## Unpriceable is not free — the check BEFORE the floors
+
+`priceability()` in `src/rules.js`, applied at every one of the three generation
+sites and in `riskGate.js`. It answers a question that comes before both quality
+floors: **is there a price at all?** Two tests, and `RULES.minNetPremium` (0.05 a
+share, `MIN_NET_DOLLARS` = $5 a contract) is the one home for the number.
+
+1. **Every LONG leg needs a bid above zero.** You are buying it, so you have to be
+   able to sell it back; nobody bidding means the mid you priced it at is half of
+   an ask nobody agreed to. A short leg is not tested — the net below catches an
+   imaginary credit — and a leg the feed said nothing about is UNKNOWN, never a
+   bid of zero, exactly as with open interest.
+2. **The net must clear the minimum, in ABSOLUTE value.** A credit structure has a
+   negative net and is perfectly priceable; it is a net of about nothing, either
+   way round, that says the halves cancelled because one of them was invented.
+
+Read live on BOIL 2026-10-09, spot $21.23, floor OFF: a Bullish Call Butterfly
+(+1 21C / -2 22.5C / +1 24C) priced at a net debit of **$0** and was offered with
+YOU PAY $0, MAX LOSS -$0, R/R 6748644041614687.00 and **250 contracts**. A
+butterfly's maximum loss IS its debit, so a debit of zero means the price is
+UNKNOWN, not that the loss is zero — and rule 2 is that the maximum loss is
+always known. Hence:
+
+- **An unpriceable candidate is never rendered**, at any liquidity setting: it is
+  cut with a sentence naming why (`unpriceableNote()`, `NOTHING_TODAY.unpriceable()`),
+  and its count travels separately from the floors' — a structure whose price could
+  not be read never reached them, and crediting them with it would be a lie about
+  which rule did the work.
+- **The gate rejects an unknown maximum loss** (`UNPRICEABLE`). A finite number is
+  not a known one: -1e-14 passed every check. Entry only — a closing order is
+  never blocked by it. The quality floors stay OUT of the gate: they ask whether a
+  structure was worth offering, and a hand-built trade is the user's to make;
+  whether it has a price at all is a different question.
+- **Nothing divides by a cost under the minimum.** `rewardRisk()` is the only place
+  a ratio is formed and returns null below it (R/R prints "—"); `scaleStrategy()`
+  returns `unpriceable` instead of a quantity — `Math.max(prem, 1)` is what turned
+  a $250 budget into 250 contracts.
+- **Nothing renders as `-$0`.** `money()` and both `fmt$` copies round first and
+  decide the sign after: a minus in front of zero invents a direction the number
+  does not have.
+- The desk still shows a hand-built structure, and says above the figures that its
+  price could not be read.
+
 ## Quality floors — the app will not propose an indefensible trade
 
 Two named constants in `src/rules.js`, with the reasoning beside them, applied by
@@ -103,6 +146,10 @@ copy explaining the floor cannot drift from the evidence: **never derive those
 figures from the floor's own constants**, or the screen reports a new
 measurement every time somebody moves the setting. One close is a reading, not a
 law — re-run the endpoint as the market moves.
+
+**RECOMMENDED IS WHERE THE APP STARTS.** A measured floor that ships switched off is a
+measurement nobody applies. `src/riskGate.test.js` reads `App.jsx` and fails the build if
+the initial level is anything but the recommended one.
 
 **THE FLOOR IS THE USER'S SETTING, NOT THE APP'S ASSERTION.** `LIQUIDITY_LEVELS`
 in `rules.js` is Strict / **Recommended** / Relaxed / Off, and the recommended
@@ -151,7 +198,9 @@ while the position is open.
 
 - `src/rules.js` — **the single source of truth for the trading rules**. Take
   profit, stop loss, exit DTE, the entry-DTE floor and the PRD §3 sizing model
-  (`sizing()`), the two quality floors and `qualityFloor()` that applies them,
+  (`sizing()`), `minNetPremium` with `priceability()` and `rewardRisk()` (is there a
+  price at all — the check before the floors), the two quality floors and
+  `qualityFloor()` that applies them,
   plus the generated rule strings (`ruleBadge()`, `perTradeCapLabel()`,
   `copilotRulesBlock()`, `capitalSourceNote()`, `qualityFloorSentence()`,
   `RULE_PILLS`, `NOTHING_TODAY`), and the liquidity floor as a SETTING —
@@ -167,7 +216,9 @@ while the position is open.
 - `src/riskGate.js` — `evaluateTrade({ proposal, portfolio, capital, signals })`,
   a pure function returning `{ pass, violations, warnings }`. Every order path
   calls it, and a screen with no gate wired in fails closed
-  (`runGate` in `pro.jsx`).
+  (`runGate` in `pro.jsx`). A proposal may carry `quotes` (one `{ bid, ask }` per leg)
+  and `net`: the more of them a caller passes the more `priceability()` can catch, and
+  the maximum loss alone already blocks the case that got through.
 - `src/wizard.jsx` — **the app shell (PRD §5)**. The wizard is the entry point,
   not a tab: capital onboarding on a first run, then screen 1 (greeting, one line
   of status, **two** doors — and "what needs attention today" once positions
@@ -394,7 +445,16 @@ The three components:
 - **Open-interest strip** (`OpenInterestStrip`) — **the liquidity floor, drawn instead
   of described.** Every strike on ONE expiry, lined up emptiest to busiest, with a
   dashed line where the setting cuts: red to the left is what it removes, green to
-  the right is what survives, and moving the filter moves the line. It sits directly
+  the right is what survives, and moving the filter moves the line.
+  **Three colours, not two, and a floor under the empty ones.** A strike with NOTHING
+  open is drawn in muted grey at a 2px minimum (`OI_EMPTY_BAR`): `log1p(0)` is 0, so on
+  BOIL's 2026-10-09 board — 60 of its 108 strikes carry no open contracts — most of the
+  strip drew at zero height and read as "not drawn". Grey is distinct from both the
+  removed-red and the surviving-green on purpose: "nobody is here" is a different fact
+  from "this setting removed it".
+  **At OFF the strip carries a GHOST line** (`oiGhostCut()`) where Recommended would cut,
+  dashed, dimmed and labelled with the count — "off" only means something against what is
+  being switched off. It filters nothing and the takeaway still says nothing is removed. It sits directly
   under the four level buttons so the setting and its effect are one glance apart.
   **The one visual in `visuals.jsx` not cut from `payoffBands()`, and not an exception
   to that rule** — the rule is that the ZONES OF A TRADE come from one place, and this
@@ -507,7 +567,10 @@ went straight to a confirm page skipped the trade itself. Both are gone.
 
 The gate answers "may this order leave"; the quality floors answer "should this
 have been offered at all", and they live where candidates are generated, not in
-the gate — a trade the user builds by hand is his to make.
+the gate — a trade the user builds by hand is his to make. "Is there a price at
+all" is a third question, and it is asked in BOTH places: the floors cannot judge
+a structure whose price is a placeholder, and the gate cannot let a maximum loss
+it could not compute out of the door.
 
 Adding a seventh means adding a gate call. Paper mode is *verified*, not
 assumed: `alpaca.mjs` returns an `X-OSL-Paper-Endpoint` header and the gate
@@ -560,8 +623,9 @@ than comparing two markets — they share a fate.
 
 The refusal is a screen, not a toast. `runWizard` in `App.jsx` decides, in order:
 data missing → signals not aligned → options expensive versus their own history →
-every candidate below the quality floors → nothing fits the budget → only one road
-survives. A missing-data answer must
+every candidate unpriceable → every candidate below the quality floors → nothing
+fits the budget → only one road survives. A board where nothing could be PRICED is
+not a board the floors emptied, and neither of them is a budget problem. A missing-data answer must
 never be dressed up as a market verdict — they are different sentences on
 screen, and `wizard.test.jsx` holds that line. "Only one candidate" is also a
 refusal: one answer is advice, two answers with their price is teaching.
