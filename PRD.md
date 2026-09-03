@@ -795,13 +795,26 @@ ends by writing down what it could not verify. Currently open:
   cannot. They are written into the code as the reasoning beside each constant, so if any of
   them is wrong the comment is wrong with it.
 - **THE EDGE-FUNCTION ORDER IS THE ONE THING HERE THAT COULD MATTER TO SOMEBODY ELSE, AND IT IS
-  UNVERIFIED.** `/api/ai` is now an edge function alongside the `/*` password gate. The
+  STILL UNVERIFIED.** `/api/ai` is now an edge function alongside the `/*` password gate. The
   documented behaviour — netlify.toml runs edge functions in the order they are declared — could
   not be checked against Netlify's own docs (the proxy blocks docs.netlify.com), so it is
   written from memory. **The mitigation is that `ai.js` checks access itself**, through the same
-  `lib/access.js` the gate uses, which makes the order irrelevant to security. The first thing
-  to do on the deploy preview is: open `/api/ai` in a private window with no password and
-  confirm a 401. If it answers anything else, that is the whole finding.
+  `lib/access.js` the gate uses, which makes the order irrelevant to security.
+
+  **WHAT THE DEPLOY DID PROVE, and it is not nothing.** PR #16 deployed cleanly to
+  `deploy-preview-16--strategy-lab-optiontrading.netlify.app`, and Netlify's "Redirect rules"
+  check passed. So the two `[[edge_functions]]` declarations are valid TOML that Netlify
+  accepts, both files bundled, and — the real risk — the relative import of `./lib/access.js`
+  RESOLVES: a subdirectory inside `netlify/edge-functions/` is treated as a module rather than
+  as a third edge function. A syntax error or an unresolvable import there fails the deploy,
+  and it did not.
+
+  **WHAT IT DID NOT PROVE:** the execution order, the 401, and streaming. The sandbox cannot
+  reach the preview — the egress proxy answers 403 to the CONNECT, the same wall PR #15 hit —
+  so this is the owner's, and it is one request: **open `/api/ai` in a private window with no
+  password and confirm a 401.** If it answers anything else, that is the whole finding, and
+  the fix is to delete the `[[edge_functions]]` block for `ai` and put its body back behind a
+  `/api/ai` redirect until the order is understood.
 - **THE COPILOT FIX IS TESTED ON SYNTHETIC FRAMES.** The final flush and `stop_reason` are held
   down by tests that build Anthropic's SSE by hand. Nobody has watched a real 1200-token answer
   arrive complete on the edge — which is, after all, the fault being fixed. On the preview: run
