@@ -13,14 +13,15 @@ import { BandThumbnail, payoffBands, bandTakeaway, GaugeFigure, Gauge, CompareFi
   OpenInterestStrip, oiStripTakeaway, oiCutAt, oiGhostCut, explainOiStrip, useWidth } from "./visuals.jsx";
 import { fuseSignals, sentimentDirection, withSignalRank, compareCandidates, againstSignal, DRIVER_PRESETS, rankByDrivers, verdictNarrative } from "./signals.js";
 import { N as nCDF, bs as bsPrice, smile as smileIV, payoff as payoffExp, SEASONAL, SIGMA } from "./engine.js";
-import { parseOcc, buildOcc, fetchChain, hasOpenInterest, enrichOpenInterest, feedName, sourceNote, openInterestNote, oiProfile, expiryOpenInterest, nearMoneyOpenInterest, monotonicityBreaks, monotonicityNote, spotOf } from "./chain.js";
+import { parseOcc, buildOcc, fetchChain, hasOpenInterest, enrichOpenInterest, feedName, sourceNote, openInterestNote, oiProfile, expiryOpenInterest, nearMoneyOpenInterest, monotonicityBreaks, monotonicityNote, spotOf, spotAt } from "./chain.js";
 import { T, themeName, setTheme, BADGE_SAFE } from "./theme.js";
 import { RULES, sizing, ruleBadge, takeProfitLabel, stopLossLabel, perTradeCapLabel, RULE_PILLS, NOTHING_TODAY, money, pctText, capitalSourceNote, perTradeLimitPhrase, qualityFloor, qualityFloorSentence, liquiditySkippedNote,
   LIQUIDITY_LEVELS, RECOMMENDED_LIQUIDITY, LIQUIDITY_MEASUREMENT, liquidityMeasurementNote, liquidityLevel, liquidityThreshold, looseningWarning, liquiditySettingNote, isLoosened, ordinal,
   priceability, unpriceableNote, rewardRisk, MIN_NET_DOLLARS,
   payoffCeiling, NO_CEILING, noCeilingNote, noCeilingRankNote,
   impossibleLoss, impossibleLossNote,
-  expiryChoice, expiryChoiceNote, emptyExpiryNote, wideSpreadNote, spreadSkippedNote } from "./rules.js";
+  expiryChoice, expiryChoiceNote, emptyExpiryNote, wideSpreadNote, spreadSkippedNote,
+  chancePct, chanceText, chanceInTen, signedMoney } from "./rules.js";
 import { isStale, freshnessNote, staleAmong } from "./freshness.js";
 import { evaluateTrade, gateSummary } from "./riskGate.js";
 import { DEMO, DEMO_BANNER, DEMO_TOOLTIP, DEMO_SEED_TICKERS, demoPositions } from "./demo.js";
@@ -92,7 +93,7 @@ const getU = (tk) => UNDERLYINGS[tk] || FALLBACK_U(tk || "?");
    silent broker costs a few seconds, never a blank screen.
    ======================================================================== */
 
-/* ============================== ALPHA VANTAGE: storico 10y+ ============================== */
+/* ============================== ALPHA VANTAGE: real monthly history ============================== */
 function statsFromMatrix(matrix) {
   // matrix: [[year, r1..r12 in %], ...] — calcola medie mensili e sigma localmente
   const all = [];
@@ -433,8 +434,15 @@ function histBacktest(legs, S, dte, entry, matrix) {
   if (!matrix || !matrix.length) return null;
   const span = Math.max(1, Math.round(dte / 30));
   const out = [];
+  // THE CURRENT YEAR HAS NOT FINISHED ITS OWN WINDOW. A trade opened in
+  // September and held for two months has no November yet, so this year's row
+  // is a partial window sitting in a list of complete ones — and it is counted
+  // in the win rate as if it were finished. It is excluded, and the screen says
+  // so rather than quietly showing one row fewer than the years on the chart.
+  const thisYear = new Date().getFullYear();
   for (const row of matrix) {
     const [y, ...ms] = row;
+    if (+y === thisYear) continue;
     let cum = 1, ok = true;
     for (let i = 0; i < span; i++) {
       const r = ms[(NOW_MONTH + i) % 12];
@@ -447,7 +455,8 @@ function histBacktest(legs, S, dte, entry, matrix) {
   }
   if (!out.length) return null;
   const wins = out.filter((o) => o.pnl > 0).length;
-  return { rows: out, winRate: wins / out.length, avg: out.reduce((a, b) => a + b.pnl, 0) / out.length };
+  return { rows: out, winRate: wins / out.length, avg: out.reduce((a, b) => a + b.pnl, 0) / out.length,
+    excludedYear: matrix.some((r) => +r[0] === thisYear) ? thisYear : null };
 }
 
 /* ============================== 3D DATA da chain reale ============================== */
@@ -616,7 +625,8 @@ function LiquidityFilter({ levelId, onLevel, previews, threshold, ticker, expKey
 
       <div style={{ ...sansUI, fontSize: 12.5, color: T.mut, lineHeight: 1.5, marginTop: 10 }}>{level.blurb}</div>
 
-      {/* THE FLOOR, DRAWN. Every strike on this expiry from the emptiest to the
+      {/* THE FLOOR, DRAWN. Every CONTRACT on this expiry \u2014 calls and puts,
+          which is twice the number of strikes \u2014 from the emptiest to the
           busiest, and the line where the setting above cuts. It sits directly
           under the buttons because the point is cause and effect: move the
           setting, watch the line move. Three paragraphs of prose could not
@@ -651,22 +661,30 @@ function LiquidityFilter({ levelId, onLevel, previews, threshold, ticker, expKey
           ? `${here.kept} of ${here.total} structures on ${ticker} are shown at this setting` +
             `${here.liquidity ? ` \u00b7 ${here.liquidity} removed because a leg is too thinly traded` : ""}` +
             `${here.reward ? ` \u00b7 ${here.reward} removed for paying too little per dollar at risk` : ""}` +
-            `${here.skipped ? ` \u00b7 ${here.skipped} not liquidity-checked at all` : ""}.`
+            `${here.skipped ? ` \u00b7 ${here.skipped} not liquidity-checked at all \u2014 the open interest has not arrived, so those have not cleared this floor either` : ""}.`
           : `Nothing is priced on ${ticker} yet, so there is nothing for this setting to filter.`}
       </div>
 
       {/* THE ARITHMETIC, on the expiry actually on screen. */}
       <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 8, lineHeight: 1.6 }}>
         {!(t && t.peers > 0)
-          ? `${feed || "This feed"} reports no open interest for ${ticker} ${expKey ? `on ${expKey}` : ""}, so the liquidity floor is SKIPPED rather than applied \u2014 nothing here was rejected for it.`
+          // NOT LANDED IS NOT PASSED. Alpaca snapshots carry `oi: null` on every
+          // contract — all 26 of the tested expiry — and the count arrives later
+          // from a separate trading-API call. Until it does the floor has
+          // NOTHING TO JUDGE, and the sentence has to say that rather than
+          // leaving a reader to assume the structures on screen cleared it.
+          ? `${feed || "This feed"} has not reported open interest for ${ticker} ${expKey ? `on ${expKey}` : ""} yet, ` +
+            `so the liquidity floor has NOTHING TO JUDGE: it was skipped, not passed. Nothing here was rejected ` +
+            `for it and nothing here has cleared it. The count arrives from a separate call to the broker's ` +
+            `contract list and is patched in when it lands \u2014 missing data is not evidence that nobody trades these.`
           : level.percentile <= 0 && level.absolute <= 0
-            ? `Nothing on ${expKey} was removed for liquidity at this setting. ${feed || "The feed"} prices ${t.peers} strikes there and every one of them is on offer, whatever is open on it.`
+            ? `Nothing on ${expKey} was removed for liquidity at this setting. ${feed || "The feed"} prices ${t.peers} contracts there \u2014 every call and every put \u2014 and every one of them is on offer, whatever is open on it.`
             : t.basis === "relative"
-              ? `On ${expKey} that works out at ${t.threshold} open contracts per leg \u2014 the ${ordinal(level.percentile * 100)} percentile of the ${t.peers} strikes ${feed || "the feed"} prices there.`
+              ? `On ${expKey} that works out at ${t.threshold} open contracts per leg \u2014 the ${ordinal(level.percentile * 100)} percentile of the ${t.peers} contracts ${feed || "the feed"} prices there.`
               : `On ${expKey} the ${t.absolute}-contract absolute minimum is what binds: ${
                   t.relative == null
-                    ? `only ${t.peers} strike${t.peers === 1 ? "" : "s"} there report open interest, too few to take a percentile of`
-                    : `the ${ordinal(level.percentile * 100)} percentile of the ${t.peers} strikes there is only ${t.relative}`}.`}
+                    ? `only ${t.peers} contract${t.peers === 1 ? "" : "s"} there report open interest, too few to take a percentile of`
+                    : `the ${ordinal(level.percentile * 100)} percentile of the ${t.peers} contracts there is only ${t.relative}`}.`}
       </div>
 
       {warn && (
@@ -930,7 +948,13 @@ export default function OptionsStrategyLab() {
 
   const U = getU(ticker);
   const chain = chains[ticker];
-  const spot = chain?.spot ?? null;
+  // ONE SPOT, ONE HOME (src/chain.js, `spotOf`). The chain is the home because
+  // it is the thing the trade is priced from; /api/liquidity also returns an
+  // underlying price and read 20.22 seventeen seconds after the chain read
+  // 20.19, and the app printed one PRICE NOW. That endpoint reports its own
+  // reading for its own purpose and is never the price on screen.
+  const spot = spotOf(chain);
+  const spotAge = spotAt(chain);
   const seas = seasonal[ticker] || { monthlyMean: U.monthlyMean, sigma: U.sigma, matrix: null, years: null, src: "estimate" };
   const iv = U.iv;
   const dte = expKey && chain?.byExp[expKey] ? chain.byExp[expKey].dte : dteManual;
@@ -1024,9 +1048,13 @@ export default function OptionsStrategyLab() {
       return h;
     } catch (e) {
       // The REASON is kept, not just the failure: the screen has to be able to
-      // say why this market is on the fallback table.
-      setSeasonalState((m) => ({ ...m, [tk]: { loading: false, error: String(e.message || e) } }));
-      return null;
+      // say why this market is on the fallback table. It is also RETURNED, not
+      // only stored — a caller that reads it back out of `seasonalState`
+      // straight after awaiting this gets the value from before the render and
+      // reports "the call did not land" over the top of the real cause.
+      const why = String(e.message || e);
+      setSeasonalState((m) => ({ ...m, [tk]: { loading: false, error: why } }));
+      return { error: why };
     }
   }, [persistSeasonal]);
 
@@ -1034,6 +1062,9 @@ export default function OptionsStrategyLab() {
   const loadSeasonalBasket = useCallback(async ({ force = false } = {}) => {
     const todo = force ? BASKET : BASKET.filter((tk) => isStale("seasonal", seasonalRef.current[tk]?.at));
     if (!todo.length) return;
+    // One at a time, and a market that fails does not stop the next: four
+    // markets on real data and one saying why it is not is a far better screen
+    // than five on a table that is wrong eight months out of twelve.
     for (const tk of todo) await loadSeasonalFor(tk, { force });
   }, [loadSeasonalFor]);
 
@@ -1041,10 +1072,10 @@ export default function OptionsStrategyLab() {
   const loadSeasonal = async () => {
     setBusy("av"); setMsg(null);
     const h = await loadSeasonalFor(ticker, { force: true });
-    setMsg(h
+    setMsg(h && !h.error
       ? `${ticker}: seasonality worked out from ${h.years} years of real prices (${h.provenance}).`
-      : `Could not load the ${ticker} price history — ${seasonalState[ticker]?.error || "the call did not land"}. ` +
-        `${ticker} stays on the hand-written estimate until it does.`);
+      : `Could not load the ${ticker} price history — ${h?.error || "the call did not land"}. ` +
+        `${ticker} stays on the hand-written estimate until it does, and the Build screen says so.`);
     setBusy(null);
   };
 
@@ -1284,6 +1315,13 @@ export default function OptionsStrategyLab() {
     return out;
   }, [sentiment, spot, U.step, expStrikes, dte, iv, q, expiryOI]);
   const liqThreshold = useMemo(() => liquidityThreshold(expiryOI, liqLevel), [expiryOI, liqLevel]);
+  // IS THIS BOARD'S OWN ARITHMETIC POSSIBLE? Not a floor and it filters nothing:
+  // it is a statement about the whole expiry, and the honest response to a chain
+  // that contradicts itself is to say so rather than to price off it silently.
+  const monoNote = useMemo(() => {
+    if (!chain || !expKey) return null;
+    return monotonicityNote(monotonicityBreaks(chain, expKey), expKey);
+  }, [chain, expKey]);
   const oiGrid = useMemo(() => oiGridFromChain(chain, spot), [chain, spot]);
   // A chain that is still being fetched is not a chain that failed. `busy` is
   // the ticker of the request in flight ("all" during a refresh-all), so the
@@ -1323,7 +1361,25 @@ export default function OptionsStrategyLab() {
   const goStep = (id) => {
     setView("desk"); setTab(BUILD_TAB); setStep(id); setEv(null); setShowSettings(false);
     window.scrollTo?.({ top: 0 });
+    refreshExpired();
   };
+
+  /* ---- WHAT IS OUT OF DATE, AND NOTHING ELSE ----
+     Every source has its own budget (src/freshness.js) and they are wildly
+     different: quotes go stale in minutes, open interest is the previous
+     session's close and cannot change during a day, and seasonality is monthly
+     data behind a free quota of 25 requests A DAY across five markets.
+     Refetching everything on arriving at a screen is how a demo runs out of
+     quota half way through — and how the same open-interest number gets read
+     forty times. `staleAmong` answers which of them actually need it. */
+  const refreshExpired = useCallback(() => {
+    const stale = staleAmong(["chain", "seasonal"], {
+      chain: spotAt(chains[ticker]),
+      seasonal: seasonalRef.current[ticker]?.at,
+    });
+    if (stale.includes("chain")) refreshChain(ticker, true);
+    if (stale.includes("seasonal")) loadSeasonalFor(ticker).catch(() => { /* reported per market */ });
+  }, [chains, ticker, refreshChain, loadSeasonalFor]);
 
   /* ---- comparing and keeping a candidate ----
      `candidateOf` normalises whatever produced it, so a guided road, a
@@ -1985,8 +2041,11 @@ export default function OptionsStrategyLab() {
     if (rr == null) return null;
     const ev = pop * maxProfit - (1 - pop) * risk;
     const ev100 = (ev / risk) * 100;
-    const tag = pop >= 0.6 ? { t: "WINS OFTEN", c: T.green, d: `works out about ${Math.round(pop * 10)} times in 10, for a smaller gain` }
-      : pop < 0.45 && rr >= 2 ? { t: "WINS BIG", c: T.violet, d: `works out about ${Math.round(pop * 10)} times in 10, but pays ${rr.toFixed(1)}× what you risk` }
+    // ONE ROUNDING, from rules.js: the phrase is derived from the same whole
+    // percent every CHANCE on screen prints, so a card cannot say "75%" beside
+    // "8 times in 10" about two different roundings of one number.
+    const tag = pop >= 0.6 ? { t: "WINS OFTEN", c: T.green, d: `works out about ${chanceInTen(pop)}, for a smaller gain` }
+      : pop < 0.45 && rr >= 2 ? { t: "WINS BIG", c: T.violet, d: `works out about ${chanceInTen(pop)}, but pays ${rr.toFixed(1)}× what you risk` }
       : { t: "BALANCED", c: T.blue, d: "a middle path between how often and how much" };
     return { ev, ev100, rr, tag };
   };
@@ -2119,7 +2178,13 @@ export default function OptionsStrategyLab() {
     // sulla stessa scala prima di sommarle.
     const score = seasonalScore * 1.5 + (f ? (f.score / 25) * (f.confidence / 100) : 0);
     const sugg = score > 1.5 ? "verybull" : score > 0.5 ? "bull" : score < -1.5 ? "verybear" : score < -0.5 ? "bear" : "neutral";
-    return { tk, name: u.name, spot: c?.spot ?? null, seasonalScore, score, sugg, real: !!seasonal[tk], hasChain: !!c,
+    return { tk, name: u.name, spot: c?.spot ?? null, seasonalScore, score, sugg, real: !!seasonal[tk],
+      // ONE SERIES, ONE NUMBER OF YEARS. The header said "10y history" and the
+      // panel beside it said "11y" about the same numbers: the ten-year cutoff
+      // lands mid-year, so the matrix holds eleven calendar years of which the
+      // first and last are partial. `years` is the row count and the only
+      // figure any screen prints.
+      years: seasonal[tk]?.years ?? null, hasChain: !!c,
       fused: f, conflict: f?.agreement === "CONFLICT", agreement: f?.agreement, signalScore: f?.score ?? 0, confidence: f?.confidence ?? 0 };
   }).sort((a, b) => (a.conflict !== b.conflict ? (a.conflict ? 1 : -1) : b.score - a.score)), [chains, seasonal, fused]);
 
@@ -2131,17 +2196,25 @@ export default function OptionsStrategyLab() {
      reading the row they are the same fact — something cleared the floors here. */
   const marketFacts = useMemo(() => {
     const m = {};
-    const touch = (tk) => (m[tk] = m[tk] || { n: 0, roads: 0, best: null, cut: false, oiSkipped: false });
+    const touch = (tk) => (m[tk] = m[tk] || { n: 0, roads: 0, best: null, cut: false, oiSkipped: false, exps: new Set() });
+    // WHICH EXPIRY THE COUNT IS ABOUT. Radar said "4 cleared" at 28 DTE while
+    // the Shortlist said none at 35 DTE, and on screen that read as the app
+    // contradicting itself. Both were true; neither said which board it meant.
+    // A count with no expiry beside it is not a fact the user can act on.
     for (const c of candidates) {
       const f = touch(c.ticker); f.n++; f.roads++;
+      if (c.expKey) f.exps.add(c.expKey);
       if (!f.best) f.best = { legs: c.legs, entryNet: c.entryNet, spot: c.spot };
     }
     for (const r of (multi.res || [])) {
       const f = touch(r.tk); f.n++;
+      if (r.expKey) f.exps.add(r.expKey);
       if (!f.best) f.best = { legs: r.legs, entryNet: r.a.entry, spot: r.spot };
     }
     for (const tk of (multi.floors?.markets || [])) touch(tk).cut = true;
     for (const tk of (multi.floors?.oiSkipped || [])) touch(tk).oiSkipped = true;
+    for (const tk of (multi.floors?.spreadSkipped || [])) touch(tk).spreadSkipped = true;
+    for (const k of Object.keys(m)) m[k].expiries = [...m[k].exps].sort();
     return m;
   }, [candidates, multi.res, multi.floors]);
 
@@ -2297,10 +2370,21 @@ export default function OptionsStrategyLab() {
               reads from it. This one used to say "(CBOE)" three centimetres under a
               badge that said "Alpaca (indicative)": a screen contradicting itself
               about where its own numbers came from. */}
-          <Stat k={`PRICE NOW${feedName(chain) ? ` (${feedName(chain).toUpperCase()})` : ""}`} v={spot ? `$${spot.toFixed(2)}` : "—"} />
+          {/* AND HOW OLD IT IS. A stale number is acceptable; a stale number
+              pretending to be live is not — "NOW" is a claim, and it has to be
+              one the screen can back up (src/freshness.js). */}
+          <Stat k={`PRICE NOW${feedName(chain) ? ` (${feedName(chain).toUpperCase()})` : ""}`} v={spot ? `$${spot.toFixed(2)}` : "—"}
+            c={spot && isStale("chain", spotAge) ? T.amber : undefined}
+            tip={freshnessNote("chain", spotAge, { what: "this price" })} />
           <Stat k="EXPIRY" v={expKey ? `${expKey} · ${dte} DTE` : `${dte} DTE (model)`} c={T.blue} />
           <Stat k={`SEASONALITY ${MONTHS[NOW_MONTH].toUpperCase()}`} v={`${seas.monthlyMean[NOW_MONTH] > 0 ? "+" : ""}${seas.monthlyMean[NOW_MONTH].toFixed(1)}%`} c={seas.monthlyMean[NOW_MONTH] > 0 ? T.green : T.red} />
-          <Stat k="SEASONAL SOURCE" v={seas.src || "estimate"} c={seasonal[ticker] ? T.green : T.dim} />
+          {/* A MARKET ON THE FALLBACK SAYS WHY. `SEASONAL` in engine.js is
+              hand-written and wrong on eight months of twelve for CORN, and it
+              carries the heaviest of the four weights. "Estimate" is not a
+              reason; "the call failed" and "nobody asked yet" are. */}
+          <Stat k="SEASONAL SOURCE" v={seasonal[ticker] ? seas.src : "hand-written estimate"}
+            c={seasonal[ticker] ? (seasonalState[ticker]?.error ? T.amber : T.green) : T.amber}
+            tip={`${seasonalSourceLine(seasonal[ticker], seasonalState[ticker])} · ${freshnessNote("seasonal", seasonal[ticker]?.at)}`} />
           <Stat k="IV RANK" v={ivRank ? (ivRank.rank != null ? `${ivRank.rank}` : `${ivRank.collecting}d collected`) : "—"}
             c={ivRank?.rank != null ? (ivRank.rank >= 60 ? T.red : ivRank.rank <= 40 ? T.green : T.mut) : T.dim}
             tip="Where today's option prices sit against their own past year (0 = cheapest ever, 100 = dearest). High means selling premium pays better; low means buying options is good value. The history builds up with one refresh a day." />
@@ -2442,7 +2526,7 @@ export default function OptionsStrategyLab() {
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
                   <Lbl>SEASONALITY {seasonal[ticker] ? `· ${seas.src}` : "(ESTIMATE — load the real history)"}</Lbl>
                   <Btn small ghost color={T.blue} onClick={loadSeasonal} disabled={busy === "av"}>
-                    <RefreshCw size={11} /> Real 10y seasonality
+                    <RefreshCw size={11} /> Refresh real seasonality
                   </Btn>
                 </div>
                 {(() => {
@@ -2488,7 +2572,7 @@ export default function OptionsStrategyLab() {
                 {mc ? (
                   <>
                     <div style={{ display: "flex", gap: 16, marginTop: 12, flexWrap: "wrap" }}>
-                      <Stat k="CHANCE OF PROFIT" v={`${(mc.pop * 100).toFixed(1)}%`} c={mc.pop >= 0.5 ? T.green : T.red} tip="The share of simulated runs that finish in profit at expiry." />
+                      <Stat k="CHANCE OF PROFIT" v={chanceText(mc.pop)} c={mc.pop >= 0.5 ? T.green : T.red} tip="The share of simulated runs that finish in profit at expiry." />
                       <Stat k="AVERAGE RESULT" v={fmt$(mc.ev)} c={mc.ev >= 0 ? T.green : T.red} />
                       <Stat k="BAD CASE" v={fmt$(mc.p5)} c={T.red} tip="Only 1 run in 20 turns out worse than this." />
                       <Stat k="TYPICAL" v={fmt$(mc.p50)} />
@@ -2496,7 +2580,7 @@ export default function OptionsStrategyLab() {
                       <Stat k="YEARLY DRIFT" v={`${(mc.muAnn * 100).toFixed(1)}%`} c={T.blue} />
                     </div>
                     <div style={{ marginTop: 10, padding: "9px 11px", background: `${T.blue}0d`, border: `1px solid ${T.blue}33`, borderRadius: 7, fontSize: 12.5, color: T.body }}>
-                      <b style={{ color: T.ink }}>In plain words:</b> out of 8,000 simulated runs, {Math.round(mc.pop * 100)} in 100 finish in profit.
+                      <b style={{ color: T.ink }}>In plain words:</b> out of 8,000 simulated runs, {chancePct(mc.pop)} in 100 finish in profit.
                       In the worst 5% you lose about {fmt$(Math.abs(mc.p5))}{guard ? (Math.abs(mc.p5) <= guard.limits.perTrade ? ` — inside your per-trade limit of ${money(guard.limits.perTrade)} ✓` : ` — CAREFUL: past your per-trade limit of ${money(guard.limits.perTrade)}`) : ""}.
                       The typical result is {fmt$(mc.p50)}.
                     </div>
@@ -2528,6 +2612,20 @@ export default function OptionsStrategyLab() {
                             </button>
                           ))}
                         </div>
+                        {/* A YEAR WHOSE WINDOW HAS NOT FINISHED IS NOT A RESULT.
+                            The current year was in this list and in the win rate
+                            with a partial window — a trade opened in September
+                            and held two months has no November yet. It is left
+                            out, and left out OUT LOUD: a list quietly one row
+                            shorter than the chart above it is the same silent
+                            shortening the shortlist is not allowed either. */}
+                        {bt.excludedYear && (
+                          <div style={{ ...mono, fontSize: 9.5, color: T.dim, marginTop: 6, lineHeight: 1.55 }}>
+                            {bt.excludedYear} is not in this list: its {Math.max(1, Math.round(dte / 30))}-month
+                            window from {MONTHS[NOW_MONTH]} has not finished yet, so counting it as a year that
+                            worked or did not would be scoring a trade that is still open.
+                          </div>
+                        )}
                       </div>
                     ) : (
                       <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 10 }}>
@@ -2583,9 +2681,14 @@ export default function OptionsStrategyLab() {
             <div style={{ ...sansUI, fontSize: 19, fontWeight: 800, color: T.ink, marginTop: 4 }}>
               Step 1 — where is there something today?
             </div>
+            {/* ONE LINE HERE, THE FULL SENTENCE WHERE IT HAS A REFERENT.
+                `qualityFloorSentence()` was printed twice on this screen: once
+                at the top, describing a filter applied to content that is not
+                on screen yet, and again under the results where there is
+                something for it to be about. The second one is kept. */}
             <div style={{ ...sansUI, fontSize: 14, color: T.mut, lineHeight: 1.55, marginTop: 4 }}>
               Every market in the basket, read by the four factors, and — once you search — what each one
-              actually produced after the quality floors. {qualityFloorSentence(liqLevel)}
+              actually produced after the quality floors, at the {liqLevel.label.toUpperCase()} setting.
             </div>
 
             {/* What the guided run examined, in English. It used to sit on the
@@ -2662,18 +2765,21 @@ export default function OptionsStrategyLab() {
                       <div style={{ flex: 1, minWidth: 150 }}>
                         <div style={{ fontWeight: 700, color: T.ink, fontSize: 14 }}>{r.tk} <span style={{ color: T.dim, fontWeight: 400, fontSize: 11 }}>{r.name}</span></div>
                         <div style={{ ...mono, fontSize: 10.5, color: T.mut }}>
-                          seasonal {r.seasonalScore > 0 ? "+" : ""}{r.seasonalScore.toFixed(1)}%/mo {r.real ? "(10y history)" : "(estimate)"} · {r.spot ? `$${r.spot.toFixed(2)}` : "prices not loaded"}{ta[r.tk] ? ` · trend ${ta[r.tk].trend > 0 ? "↑" : ta[r.tk].trend < 0 ? "↓" : "→"} RSI ${ta[r.tk].rsi.toFixed(0)}` : ""}
+                          seasonal {r.seasonalScore > 0 ? "+" : ""}{r.seasonalScore.toFixed(1)}%/mo {r.real ? `(${r.years}y history)` : "(hand-written estimate)"} · {r.spot ? `$${r.spot.toFixed(2)}` : "prices not loaded"}{ta[r.tk] ? ` · trend ${ta[r.tk].trend > 0 ? "↑" : ta[r.tk].trend < 0 ? "↓" : "→"} RSI ${ta[r.tk].rsi.toFixed(0)}` : ""}
                         </div>
                         {/* What the search actually found here. An empty market
                             NEVER appears as a blank row: it says which floor
                             emptied it, or that nobody has searched it yet. */}
                         <div style={{ ...mono, fontSize: 10.5, color: f.n > 0 ? T.green : f.cut ? T.amber : T.dim, marginTop: 2 }}>
                           {f.n > 0
-                            ? `${f.n} structure${f.n === 1 ? "" : "s"} cleared the floors here${f.roads ? ` · ${f.roads} of them a road from your answers` : ""}`
+                            ? `${f.n} structure${f.n === 1 ? "" : "s"} cleared the floors on ` +
+                              `${(f.expiries || []).length ? (f.expiries || []).join(" and ") : "the expiry searched"}` +
+                              `${f.roads ? ` · ${f.roads} of them a road from your answers` : ""}`
                             : f.cut
                               ? "nothing here cleared the quality floors today"
                               : "not searched yet — use the search below, or answer the three questions"}
                           {f.oiSkipped ? " · open interest unknown on this feed, so that floor was skipped" : ""}
+                          {f.spreadSkipped ? " · only one side quoted on some legs, so the spread floor was skipped there" : ""}
                         </div>
                       </div>
                       {r.fused && (() => {
@@ -2693,7 +2799,7 @@ export default function OptionsStrategyLab() {
                 })}
               </div>
               <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 10 }}>
-The order weighs the 4-factor signal (seasonality, price trend, weather, news): CONFLICT markets stay last regardless. Tap the badge for the full narrative, or open Why this market above for the four readings and what is behind them. Under History, "Real 10y seasonality" replaces the estimates with ten years of actual data for that market.
+The order weighs the 4-factor signal (seasonality, price trend, weather, news): CONFLICT markets stay last regardless. Tap the badge for the full narrative, or open Why this market above for the four readings and what is behind them. Seasonality is loaded for the whole basket from real monthly prices; a market still showing an estimate says why on the Build screen, and History has a button to fetch it now.
               </div>
             </Panel>
 
@@ -2822,7 +2928,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                             {r.fused.agreement} {r.fused.score > 0 ? "+" : ""}{r.fused.score}
                           </span>
                         )}
-                        <Stat k="CHANCE" v={`${(r.pop * 100).toFixed(0)}%`} c={r.pop >= 0.5 ? T.green : T.violet} />
+                        <Stat k="CHANCE" v={chanceText(r.pop)} c={r.pop >= 0.5 ? T.green : T.violet} />
                         {/* AN EXPECTED VALUE NEEDS A BEST CASE. With no ceiling
                             there is none, so nothing is printed here and the
                             candidate sits last by construction (its rank is the
@@ -2948,6 +3054,24 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                         These are every expiry {feedName(chain) || "the feed"} lists for {ticker} — this ETF only has monthly ones, it is not a limit of the app.
                       </div>
                     )}
+                    {/* WHY THIS EXPIRY, AND WHAT WAS PASSED OVER. The app used
+                        to pick by distance from a target DTE alone and land on
+                        the deadest board on the market without a word about it
+                        (src/rules.js, `expiryChoice`). When a nearer, busier
+                        expiry is refused by the 30-day entry floor, the screen
+                        says so — a rule the user cannot see is a rule they
+                        cannot trust. */}
+                    <div style={{ ...mono, fontSize: 9, color: T.mut, marginTop: 4, maxWidth: 260, lineHeight: 1.55 }}>
+                      {expiryChoiceNote(expChoice, liqLevel)}
+                    </div>
+                    {/* AND WHETHER THIS BOARD'S OWN PRICES AGREE WITH THEMSELVES.
+                        A call cannot cost more than a call at a lower strike;
+                        five of BOIL's 25 adjacent near-the-money pairs did. */}
+                    {monoNote && (
+                      <div style={{ ...mono, fontSize: 9.5, color: T.red, marginTop: 4, maxWidth: 260, lineHeight: 1.55 }}>
+                        {monoNote}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -3022,15 +3146,30 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   {noCeilingRankNote(shortlist.rows.filter(({ a }) => a.profitUnbounded).length)}
                 </div>
               )}
+              {/* AN EMPTY LIST NAMES THE EXPIRY IT EMPTIED. "Nothing clears"
+                  read as a verdict on the market while the Radar, looking at a
+                  different board, said four structures had cleared — both true,
+                  and together they read as a contradiction. `emptyExpiryNote()`
+                  in rules.js carries the counts and the expiry in one sentence. */}
               {shortlist.rows.length === 0 && (
                 <div style={{ ...mono, fontSize: 11, color: T.red, marginTop: 8, lineHeight: 1.6 }}>
-                  Nothing on {ticker} clears the quality floors at this expiry today. That is an answer, not an
-                  empty screen: {qualityFloorSentence(liqLevel)}
+                  {emptyExpiryNote(expKey, shortlist.tally, liqLevel)} That is an answer about {ticker} on this
+                  board, not an empty screen: {qualityFloorSentence(liqLevel)}
                 </div>
               )}
               {shortlist.oiSkipped && (
                 <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 8, lineHeight: 1.6 }}>
                   {liquiditySkippedNote(feedName(chain))}
+                </div>
+              )}
+              {shortlist.tally.spreadSkipped > 0 && (
+                <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6, lineHeight: 1.6 }}>
+                  {spreadSkippedNote(feedName(chain))}
+                </div>
+              )}
+              {shortlist.tally.spread > 0 && (
+                <div style={{ ...mono, fontSize: 10.5, color: T.amber, marginTop: 6, lineHeight: 1.6 }}>
+                  {wideSpreadNote(shortlist.tally.spread, `${ticker} ${expKey || ""}`.trim())}
                 </div>
               )}
               <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
@@ -3075,7 +3214,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                           tip={a.profitUnbounded ? noCeilingNote(p.name) : undefined} />
                         <Stat k="MAX LOSS" v={fmt$(a.maxLoss)} c={T.red} />
                         <Stat k="R/R" v={rr ? rr.toFixed(2) : "—"} c={T.amber} />
-                        <Stat k="CHANCE" v={pop != null ? `${(pop * 100).toFixed(0)}%` : "—"} c={pop >= 0.5 ? T.green : T.violet} />
+                        <Stat k="CHANCE" v={chanceText(pop)} c={pop >= 0.5 ? T.green : T.violet} />
                         <Stat k="BREAKEVEN" v={a.breakevens.map((b) => b.toFixed(2)).join(" · ") || "—"} c={T.blue} />
                       </div>
                       {(() => {
@@ -3134,7 +3273,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                           <Gauge bands={bands} size={112} ticker={r.tk} />
                         </div>
                         <div style={{ display: "flex", gap: 14, marginTop: 8, flexWrap: "wrap" }}>
-                          <Stat k="CHANCE" v={`${(r.pop * 100).toFixed(0)}%`} c={r.pop >= 0.5 ? T.green : T.violet} />
+                          <Stat k="CHANCE" v={chanceText(r.pop)} c={r.pop >= 0.5 ? T.green : T.violet} />
                           <Stat k="MAX PROFIT" v={ceil$(r.a.maxProfit)} c={T.green}
                             tip={r.a.profitUnbounded ? noCeilingNote(r.name) : undefined} />
                           <Stat k="MAX LOSS" v={fmt$(r.a.maxLoss)} c={T.red} />
@@ -3234,7 +3373,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                       <Stat k="RISK" v={fmt$(c.risk)} c={T.red} />
                       <Stat k="MAX PROFIT" v={ceil$(c.maxProfit)} c={T.green}
                         tip={c.maxProfit == null ? noCeilingNote(c.name) : undefined} />
-                      <Stat k="CHANCE" v={c.pop != null ? `${(c.pop * 100).toFixed(0)}%` : "—"} c={(c.pop || 0) >= 0.5 ? T.green : T.violet} />
+                      <Stat k="CHANCE" v={chanceText(c.pop)} c={(c.pop || 0) >= 0.5 ? T.green : T.violet} />
                       <Btn small onClick={() => openOnBuild({ ticker: c.ticker, expKey: c.expKey, legs: c.legs, name: c.name })}>Take to Build →</Btn>
                     </div>
                   ))}
@@ -3493,8 +3632,16 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
               <div style={{ display: "flex", gap: 16, marginTop: 10, flexWrap: "wrap" }}>
                 <Stat k="Δ DELTA" v={A.greeks.delta.toFixed(2)} />
                 <Stat k="Γ GAMMA" v={A.greeks.gamma.toFixed(3)} />
-                <Stat k="Θ PER DAY" v={fmt$(A.greeks.theta)} c={A.greeks.theta >= 0 ? T.green : T.red} tip="What you gain (+) or lose (−) for each day that passes, if the price stays put. Positive means time is on your side." />
-                <Stat k="V PER 1% VOL" v={fmt$(A.greeks.vega)} c={T.violet} tip="How much the value moves if the market gets 1% more jumpy. Positive means a nervous market helps you." />
+                {/* SIGNS ARE MANDATORY ON A RATE OF CHANGE. `fmt$` prints a
+                    minus for a loss and nothing for a gain, which is right for
+                    a price and wrong for these two: theta printed "$3" on a
+                    long debit spread where the holder LOSES it every day, and
+                    read as a gain it inverts the one thing the number says.
+                    `signedMoney()` in rules.js also refuses to round a real
+                    vega away to "$0" — that zero was a claim that volatility
+                    does not move the trade, and it was false. */}
+                <Stat k="Θ PER DAY" v={signedMoney(A.greeks.theta)} c={A.greeks.theta >= 0 ? T.green : T.red} tip="What you gain (+) or lose (−) for each day that passes, if the price stays put. Positive means time is on your side." />
+                <Stat k="V PER 1% VOL" v={signedMoney(A.greeks.vega)} c={A.greeks.vega >= 0 ? T.violet : T.amber} tip="How much the value moves if the market gets 1% more jumpy. Positive means a nervous market helps you; negative means it hurts." />
               </div>
 
               <div style={{ marginTop: 14 }}>
@@ -3973,7 +4120,12 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
         </TabBoundary>
 
         <div style={{ ...mono, fontSize: 10, color: T.dim, textAlign: "center", marginTop: 22 }}>
-          Paper trading only · {sourceNote(chain)} · {perTradeCapLabel()} · Total exposure ≤{pctText(RULES.totalExposurePct)} · Educational software, not financial advice
+          {/* THE LIMIT IS DERIVED, NOT FIXED (PRD §3). This said "max 5% of
+              capital" — the hardcoded rule the capital model replaced — while
+              every other screen quoted the figure `sizing()` derives from the
+              user's own answers. One home, read everywhere; and until both
+              questions are answered the phrase calls it a suggestion. */}
+          Paper trading only · {sourceNote(chain)} · {perTradeLimitPhrase(limits)} · Total exposure ≤{money(limits.totalLimit)} ({pctText(RULES.totalExposurePct)}) · Educational software, not financial advice
         </div>
       </div>
     </div>

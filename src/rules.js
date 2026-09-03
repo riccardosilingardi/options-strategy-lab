@@ -272,12 +272,80 @@ export const money = (x) => {
   return `${n < 0 && r > 0 ? "-" : ""}$${r.toLocaleString("en-US")}`;
 };
 
+/**
+ * A NUMBER WHOSE DIRECTION IS THE POINT — theta and vega, and nothing else yet.
+ *
+ * `money()` prints a minus for a loss and nothing for a gain, which is right for
+ * a price: nobody needs "+$340" to understand what a maximum profit is. It is
+ * WRONG for a rate of change. THETA on a long debit spread printed "$3" and the
+ * holder LOSES that every day; read as a gain it inverts the one thing the
+ * number is there to say. So these two always carry a sign.
+ *
+ * AND IT WILL NOT ROUND A REAL NUMBER AWAY TO NOTHING. VEGA printed exactly
+ * "$0" on a 35-day spread, which reads as "volatility does not affect this" —
+ * a claim, and a false one. Under a dollar it gains the precision it needs;
+ * under a cent it says so in words rather than showing a zero it does not mean.
+ * An exact zero is still "$0", because that one IS the number.
+ */
+export const signedMoney = (x) => {
+  if (!known(x)) return "\u2014";
+  const n = Number(x);
+  if (n === 0) return "$0";
+  const sign = n < 0 ? "-" : "+";
+  const a = Math.abs(n);
+  if (a >= 1) return `${sign}$${Math.round(a).toLocaleString("en-US")}`;
+  if (a >= 0.01) return `${sign}$${a.toFixed(2)}`;
+  // Below a cent, ONE SIGNIFICANT FIGURE rather than a rounded zero. `$0` on a
+  // vega that is really 0.004 is a claim that volatility does not move this
+  // trade; `+$0.004` is the same fact told truthfully, and it is no longer.
+  return `${sign}$${Number(a.toPrecision(1))}`;
+};
+
 /** `5%`, `6.8%`. One decimal only when the number needs it. */
 export const pctText = (frac, decimals = 1) => {
   const n = Number(frac) * 100;
   if (!Number.isFinite(n)) return "n/a";
   const r = Math.round(n * 10) / 10;
   return `${Number.isInteger(r) ? r : r.toFixed(decimals)}%`;
+};
+
+/* -------------------------------------------------------------------------
+ * ONE PROBABILITY, ONE ROUNDING, EVERYWHERE.
+ *
+ * The compare card printed "CHANCE 75%" next to "8 times in 10", and one spread
+ * read 44%, 45% and "5 times in 10" across three screens. Some of that was
+ * three different roundings of the same number; the rest was the same number
+ * spoken two ways with nothing tying the two together. Both are fixed by having
+ * ONE function: the phrase is derived FROM the rounded percentage, so the two
+ * cannot disagree about a probability they are both describing.
+ * ------------------------------------------------------------------------- */
+
+/** The rounded whole percent, or null when there is no probability to print. */
+export const chancePct = (p) => {
+  // `known()` first: `Number(null)` is 0 and 0 is finite, so coercing straight
+  // away turns "we have no probability" into "a 0% chance" — a confident claim
+  // built out of a missing one, which is the fault this whole file is about.
+  if (!known(p)) return null;
+  return Math.round(Math.max(0, Math.min(1, Number(p))) * 100);
+};
+
+/** `75%`, or the dash every unknown in this app prints. */
+export const chanceText = (p) => {
+  const pc = chancePct(p);
+  return pc == null ? "\u2014" : `${pc}%`;
+};
+
+/**
+ * `8 times in 10` — DERIVED FROM THE PERCENTAGE ABOVE, not from the raw float.
+ * Rounding twice is how 0.749 became "75%" on one line and "7 times in 10" on
+ * the next; there is one rounding now and the second phrasing is a restatement
+ * of its result.
+ */
+export const chanceInTen = (p) => {
+  const pc = chancePct(p);
+  if (pc == null) return "\u2014";
+  const n = Math.round(pc / 10);
+  return `${n} time${n === 1 ? "" : "s"} in 10`;
 };
 
 /* ============================== rule text ==============================
@@ -463,7 +531,7 @@ export const liquidityMeasurementNote = () => {
   const M = LIQUIDITY_MEASUREMENT;
   const spread = Math.round(M.high.bar / M.low.bar);
   return `The recommendation is MEASURED, not guessed. On the ${M.asOf} close, /api/liquidity read ` +
-    `${M.reporting} strikes reporting open interest across all ${M.markets} markets: near the money the bar ` +
+    `${M.reporting} contracts reporting open interest across all ${M.markets} markets: near the money the bar ` +
     `ran from ${M.low.bar} contracts on ${M.low.market} to ${M.high.bar} on ${M.high.market}, a ${spread}-fold ` +
     `spread, which is why one fixed number could not serve all ${M.markets}. That is one day's close and not a ` +
     `law: re-read it as the market moves.`;
@@ -565,7 +633,7 @@ export function quantile(sorted, f) {
  * @returns {{ threshold, relative, absolute, peers, basis }}
  *   `basis` is which half bound: "relative" when the chain's own distribution
  *   set the number, "absolute" when the floor under the floor did, and
- *   "absolute (too few strikes to measure)" when there was no distribution to
+ *   "absolute (too few contracts to measure)" when there was no distribution to
  *   take a percentile of. The screen prints it, because a floor that will not
  *   say where its number came from is the thing this replaces.
  */
@@ -575,7 +643,7 @@ export function liquidityThreshold(peers, level = RECOMMENDED_LIQUIDITY) {
   // Three different reasons the relative half can be absent, and they are not
   // the same fact: a setting that asks for no percentile, a chain with too few
   // strikes to take one from, and a percentile that simply came out below the
-  // absolute minimum. Reporting all three as "too few strikes" would be the app
+  // absolute minimum. Reporting all three as "too few contracts" would be the app
   // blaming the data for its own setting.
   const wanted = l.percentile > 0;
   const measurable = wanted && known.length >= RULES.minPeersForPercentile;
@@ -584,7 +652,7 @@ export function liquidityThreshold(peers, level = RECOMMENDED_LIQUIDITY) {
   const basis = relative != null && relative > l.absolute ? "relative"
     : !wanted ? "absolute (no relative test at this setting)"
     : measurable ? "absolute"                       // measured, and it lost
-    : known.length ? "absolute (too few strikes to measure)"
+    : known.length ? "absolute (too few contracts to measure)"
     : "absolute";
   return { threshold, relative, absolute: l.absolute, peers: known.length, basis, level: l };
 }
@@ -1193,9 +1261,12 @@ export function qualityFloor({
   const reasons = [];
   if (!liquidity.pass) {
     const where = t.basis === "relative"
-      ? `That expiry's own strikes set the bar at ${t.threshold} — it is the ${ordinal(lv.percentile * 100)} ` +
-        `percentile of the ${t.peers} strikes priced beside it, so this leg is among the least-traded on its own board.`
-      : `The bar is ${t.threshold}, the absolute floor${t.basis.startsWith("absolute (") ? " (too few strikes on that expiry report open interest to measure a distribution)" : ""}.`;
+      // CONTRACTS. `expiryOpenInterest()` walks the calls AND the puts, so the
+      // peer count is contracts, and naming it "strikes" halves the board in the
+      // reader's head — 26 strikes on BOIL 2026-10-09, 52 contracts.
+      ? `That expiry's own board sets the bar at ${t.threshold} — it is the ${ordinal(lv.percentile * 100)} ` +
+        `percentile of the ${t.peers} contracts priced beside it, so this leg is among the least-traded on its own board.`
+      : `The bar is ${t.threshold}, the absolute floor${t.basis.startsWith("absolute (") ? " (too few contracts on that expiry report open interest to measure a distribution)" : ""}.`;
     reasons.push(
       `Open interest is ${worst} on its thinnest leg. ${where} ` +
       `A price on a contract nobody trades is a quote, not a market: you would be paying whatever the ` +

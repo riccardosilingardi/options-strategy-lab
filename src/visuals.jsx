@@ -26,7 +26,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { payoff, N as normCdf } from "./engine.js";
 import { T } from "./theme.js";
 import { money, RULES, pctText, liquidityThreshold, RECOMMENDED_LIQUIDITY,
-  payoffCeiling, scratchLevel, NO_CEILING } from "./rules.js";
+  payoffCeiling, scratchLevel, NO_CEILING, chanceInTen } from "./rules.js";
 
 const mono = { fontFamily: "ui-monospace, Menlo, monospace" };
 const sans = { fontFamily: "ui-sans-serif, system-ui" };
@@ -217,11 +217,17 @@ function greenPhrase(b) {
   return `makes money ${zonesPhrase(g, b)}`;
 }
 
-/** `1 time in 10`, `5 times in 10` — never "1 times". */
-export const inTenPhrase = (p) => {
-  const n = Math.max(0, Math.min(10, Math.round((p || 0) * 10)));
-  return `${n} time${n === 1 ? "" : "s"} in 10`;
-};
+/**
+ * `1 time in 10`, `5 times in 10` — never "1 times".
+ *
+ * ONE ROUNDING, IN ONE PLACE. This used to round the raw probability itself,
+ * while every "CHANCE 75%" on screen rounded the same number separately — which
+ * is how one spread came to read 44%, 45% and "5 times in 10" across three
+ * screens. `chanceInTen()` in rules.js derives the phrase FROM the percentage,
+ * so the two ways of saying it cannot disagree. Kept as a name because half the
+ * visual takeaways read better with it.
+ */
+export const inTenPhrase = (p) => chanceInTen(p);
 
 /** BAND THUMBNAIL takeaway. Names the market, then where the green is. */
 export function bandTakeaway(b, { ticker = "this market" } = {}) {
@@ -562,7 +568,8 @@ export function BandThumbFigure({ legs, entryNet, spot, bars, ticker, width, hei
    1b) OPEN-INTEREST STRIP
    The liquidity floor, drawn instead of described.
 
-   WHAT IT SHOWS: every strike on ONE expiry, lined up from the emptiest to the
+   WHAT IT SHOWS: every CONTRACT on ONE expiry — the calls and the puts, which
+   is twice the number of strikes — lined up from the emptiest to the
    busiest, with the line where the floor cuts. Left of the line is what the
    setting removes; right of it is what survives. Move the filter and the line
    moves. That is the entire concept of a relative floor in one picture, and it
@@ -635,16 +642,21 @@ export function oiStripTakeaway(sorted = [], threshold = 0, { expKey } = {}) {
   const where = expKey ? ` on ${expKey}` : "";
   // "At least 0 open contracts" is true and silly: with no floor at all the
   // fact worth stating is that nothing is being filtered, not the threshold.
+  // CONTRACTS, NOT STRIKES, and the difference is a factor of two. The peer
+  // set is `expiryOpenInterest()`, which walks the CALLS AND THE PUTS on the
+  // expiry: BOIL 2026-10-09 has 26 strikes and 52 contracts, so "the 45
+  // emptiest of the 52 strikes" was counting one thing and naming another.
+  // Every count in this file is a count of contracts.
   if (threshold <= 0) {
-    return `No strike is removed at this setting: all ${sorted.length}${where} are offered, from the ` +
+    return `No contract is removed at this setting: all ${sorted.length}${where} are offered, from the ` +
       `${sorted[0]} open contracts on the emptiest to ${sorted[sorted.length - 1]} on the busiest.`;
   }
   if (cut === 0) {
-    return `All ${sorted.length} strikes${where} carry at least ${threshold} open contracts, so this setting ` +
+    return `All ${sorted.length} contracts${where} carry at least ${threshold} open contracts, so this setting ` +
       `removes none of them.`;
   }
-  return `The ${cut} emptiest of the ${sorted.length} strikes${where} are removed for carrying under ` +
-    `${threshold} open contracts, against ${sorted[sorted.length - 1]} on the busiest strike here.`;
+  return `The ${cut} emptiest of the ${sorted.length} contracts${where} are removed for carrying under ` +
+    `${threshold} open contracts, against ${sorted[sorted.length - 1]} on the busiest contract here.`;
 }
 
 export function OpenInterestStrip({
@@ -708,18 +720,18 @@ export function OpenInterestStrip({
 
 /** What one part of the strip means, on tap. */
 export const explainOiStrip = (el, { threshold, cut, total, ghost } = {}) => ({
-  empty: `These strikes have NOTHING open: not one contract exists on them. They are drawn grey and kept at a ` +
-    `sliver of height so they can be seen at all — a bar of zero height is indistinguishable from a strike ` +
-    `that was never drawn, and "nobody is here" is the most important thing this picture can tell you.`,
+  empty: `These contracts have NOTHING open: not one of them exists in anybody's account. They are drawn grey ` +
+    `and kept at a sliver of height so they can be seen at all — a bar of zero height is indistinguishable ` +
+    `from one that was never drawn, and "nobody is here" is the most important thing this picture can tell you.`,
   ghost: `The liquidity floor is OFF, so nothing on this expiry is being removed. The grey dashed line is where ` +
     `the app's recommendation WOULD cut it${ghost ? `: under ${ghost} open contracts` : ""} — everything to the ` +
     `left of it is what you are choosing to keep in the list.`,
-  cut: `These ${cut} strikes are the emptiest on this expiry: each carries fewer than ${threshold} open contracts. ` +
+  cut: `These ${cut} contracts are the emptiest on this expiry: each carries fewer than ${threshold} open contracts. ` +
     `A price quoted on one of them is a market maker's placeholder rather than something two people agreed on, ` +
     `and you may not find anyone to sell it back to.`,
-  kept: `These strikes clear the floor: at least ${threshold} contracts are already open on each. That number is not ` +
+  kept: `These contracts clear the floor: at least ${threshold} are already open on each. That number is not ` +
     `fixed — it comes from this expiry's own strikes, so a busy market asks for more of a leg than a quiet one.`,
-}[el] || `${total} strikes on this expiry, ordered from the emptiest to the busiest. The dashed line is where the floor cuts.`);
+}[el] || `${total} contracts on this expiry — every call and every put — ordered from the emptiest to the busiest. The dashed line is where the floor cuts.`);
 
 /* ====================================================================
    2) GAUGE/* ====================================================================

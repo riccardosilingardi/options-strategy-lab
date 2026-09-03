@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { RefreshCw, Send, Trash2, Download, Sparkles, FileText, XCircle } from "lucide-react";
 import { T } from "./theme.js";
 import { RULES, ruleBadge, takeProfitLabel, scaleOutLabel, stopLossLabel, exitDTELabel, perTradeCapLabel, copilotRulesBlock, money, pctText, MIN_NET_DOLLARS,
-  NO_CEILING, reportNarrativePrompt } from "./rules.js";
+  NO_CEILING, reportNarrativePrompt, chanceText } from "./rules.js";
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, LineStyle } from "lightweight-charts";
 import { erf, netBS } from "./engine.js";
 import { ARROW, REGIONS, regionSignals, tagImpacts, taRead } from "./signals.js";
@@ -1048,7 +1048,7 @@ export function computeTIS(pos, cur) {
   // 1) PoP vs entry (40)
   let popPts = 20;
   if (th.pop != null && cur.pop != null && th.pop > 0) popPts = Math.round(Math.max(0, Math.min(1.2, cur.pop / th.pop)) / 1.2 * 40);
-  comp.push({ k: "Chance of profit", pts: popPts, max: 40, note: cur.pop != null ? `${(cur.pop * 100).toFixed(0)}% now versus ${th.pop != null ? (th.pop * 100).toFixed(0) : "?"}% when you opened it` : "n/a" });
+  comp.push({ k: "Chance of profit", pts: popPts, max: 40, note: cur.pop != null ? `${chanceText(cur.pop)} now versus ${th.pop != null ? chanceText(th.pop) : "?"} when you opened it` : "n/a" });
   // 2) Stagionalità (20)
   let seaPts = 10;
   if (th.seasonal != null && cur.seasonalNow != null) {
@@ -1650,7 +1650,7 @@ export function UnifiedView({ ticker, dte, sigma, driftM, curve, legs, breakeven
         ))}
       </div>
       <div style={{ marginTop: 8, padding: "8px 11px", background: `${T.blue}0d`, border: `1px solid ${T.blue}33`, borderRadius: 7, fontSize: 12.5, color: T.body }}>
-        <b style={{ color: T.ink }}>How to read it:</b> the purple cone is where the price can realistically get to by expiry; the green bands are where this trade makes money. They overlap about <b style={{ color: pIn >= 0.5 ? T.green : T.violet }}>{(pIn * 100).toFixed(0)}%</b> of the time — which is the same number as the CHANCE shown above, worked out the same way.
+        <b style={{ color: T.ink }}>How to read it:</b> the purple cone is where the price can realistically get to by expiry; the green bands are where this trade makes money. They overlap about <b style={{ color: pIn >= 0.5 ? T.green : T.violet }}>{chanceText(pIn)}</b> of the time — which is the same number as the CHANCE shown above, worked out the same way.
       </div>
     </div>
   );

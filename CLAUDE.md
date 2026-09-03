@@ -40,7 +40,9 @@ An agent that cannot execute a trade it cannot justify.
    WEBHOOK_URL and optional
    ANTHROPIC_WORKSPACE_ID (needed only for an identity-linked Anthropic key;
    `ai.mjs` sends the `anthropic-workspace-id` header only when it is set).
-4. No order reaches Alpaca without passing `src/riskGate.js`.
+4. No order reaches Alpaca without passing `src/riskGate.js`. That includes a worst case that
+   prices as a PROFIT: `IMPOSSIBLE_LOSS` refuses an arbitrage on entry, reading the SIGNED
+   figure while every dollar limit around it reads `Math.abs`.
 5. Nothing executes without an explicit human confirmation.
 
 ## Position sizing
@@ -142,7 +144,18 @@ the wide search with WEAT Long Call ATM (EV/$100 +$290).
   `noCeilingRankNote()` says why.
 - **The loss side is untouched.** Rule 2 stands: `maxLoss` is still finite and always known.
 
-**A MAXIMUM LOSS THAT IS A PROFIT IS AN ARBITRAGE** — the debt PR #14 wrote down and left
+**A MAXIMUM LOSS THAT IS A PROFIT IS AN ARBITRAGE — AND IT IS NOW IN THE GATE TOO.** PR #15
+left that half open in writing: a hand-built structure on the desk whose worst case priced as a
+gain was still sendable. `evaluateTrade()` refuses it by name (`IMPOSSIBLE_LOSS`), entry-only.
+**Mind the sign**: `impossibleLoss()` reads a SIGNED figure — a real worst case is NEGATIVE —
+while everything else in the gate runs on `Math.abs(maxLoss)`. Both open-intent callers pass
+`analyze().maxLoss`, which is signed; `closeGroup()` in `pro.jsx` passes a positive magnitude
+and is never tested, because reading a cost basis as an arbitrage would block every close.
+**And the PRD said this had never been seen live. It has been now:** on BOIL 2026-10-09 SIX
+call pairs price a bull call spread as a CREDIT — buy 19 / sell 19.5 nets **-0.290**, buy 22 /
+sell 22.5 nets **-0.171**. A debit spread taken in for a credit cannot lose at expiry.
+
+`impossibleLoss()` itself — the debt PR #14 wrote down and left
 open. `impossibleLoss(maxLoss)` in `rules.js`, run at all three generation sites right
 after `priceability()`, in the same register: a named sentence with the number in it
 (`impossibleLossNote()`, `NOTHING_TODAY.impossibleLoss()`), its own count in the tally, its
@@ -178,6 +191,62 @@ spread "entered at $68 debit" in a report whose own section 2 said "No open posi
 `src/ceiling.test.jsx` holds all four, against the REAL generation site — `analyze`,
 `shortlistWithFloors` and `buildPresets` are exported from `App.jsx` for it, so no second
 implementation of these decisions can appear beside them.
+
+## A wide market is not a price — the THIRD floor, beside the liquidity one
+
+`RULES.maxSpreadShareOfMid` (0.35) with `spreadShare()` / `spreadFloor()` in `src/rules.js`,
+applied inside `qualityFloor()` at all three generation sites. **The liquidity floor's two
+constants are untouched: this sits beside them.**
+
+They test different things and neither implies the other. Open interest is a HEADCOUNT — how
+many contracts exist, from last night's close. The spread is TODAY'S DISAGREEMENT about what
+one is worth. **A leg with 300 contracts open and a 145%-wide market passes the liquidity
+floor untouched**, and every MAX PROFIT, CHANCE and EV in this app is computed from the MID.
+
+Read live on BOIL 2026-10-09 near the money: bid/ask spreads of **66%, 91%, 145% and 166% of
+the mid** on strikes the app builds on. At 145% the ask is more than three times the bid.
+
+- **Why 0.35.** You pay half the spread getting in and half getting out, so at share `s` the
+  round trip costs `s` of what the leg is worth. A third of the position going to the market
+  maker before the trade is right about anything is already punishing, and it is drawn where a
+  quote stops being a price — not where a trade stops being good.
+- **It does not move with the liquidity SETTING.** Loosening the headcount is not an answer to
+  "may the two sides disagree by a factor of three".
+- Same two rules as the liquidity half: **unknown is not wide** (a leg quoted on one side, or
+  priced from the model, is skipped — `spreadSkippedNote()`), and **it names itself**
+  (`spreadFloorReason()`, `wideSpreadNote()`, its own count in every tally).
+
+**And a chain whose own prices contradict each other is named, not priced off.**
+`monotonicityBreaks()` / `monotonicityNote()` in `chain.js`: a call can never cost more than a
+call at a lower strike. FIVE of 25 adjacent near-the-money pairs on that BOIL board broke it.
+It filters nothing — it is a statement about the whole EXPIRY, and the honest response is to
+say the feed looks unreliable here.
+
+## Which expiry the app opens on — the board decides, not the calendar
+
+`expiryChoice()` / `expiryChoiceNote()` / `emptyExpiryNote()` in `src/rules.js`.
+
+Measured on BOIL, near the money, contracts clearing the 10-contract floor:
+
+    2026-09-18 (14 DTE)   19 of 23
+    2026-10-02 (28 DTE)   12 of 14
+    2026-10-09 (35 DTE)    2 of  7   <- the one the app selected
+
+The app picked by DISTANCE FROM A TARGET DTE alone and landed on the deadest board on the
+market. That is why the Shortlist kept saying "nothing clears" while the Radar, looking at a
+different expiry, said four structures had. **The floor was never the problem.**
+
+Among expiries past `minEntryDTE` and inside the new `maxEntryDTE` horizon (90 — twice the
+target, so "busiest board" cannot answer with one a year out), it prefers the one whose
+near-the-money contracts actually clear the floor in force; distance from `targetEntryDTE` is
+the TIE-BREAK it always should have been.
+
+- **The 30-day entry floor never yields** — that one is the gate's — but a nearer, thicker
+  expiry passed over because of it is named on screen (`passedOver`).
+- **An unknown board is not an empty one.** `Number(null)` is 0 and 0 is finite; unmeasured
+  expiries rank on DTE and `measured` says so.
+- **Every count names its expiry.** The Radar rows, the Shortlist's empty state and the
+  removal tallies all carry the board they are about.
 
 ## Quality floors — the app will not propose an indefensible trade
 
@@ -244,7 +313,8 @@ Two rules hold them, and both are the point:
    the refusal screen, a line on the Shortlist naming what it removed, and the
    counts in `verdictNarrative()`.
 
-Adding a third generation site means calling `qualityFloor()` there too.
+Adding a third generation site means calling `qualityFloor()` there too, and passing it
+`quotes` as well as `openInterest` — the spread floor above lives in the same function.
 
 **The floor is held up against the chains it is applied to.** `oiProfile()` in `chain.js`
 and `OpenInterestReadout` at the bottom of the Shortlist print what open interest the
@@ -254,6 +324,36 @@ one screen. It reports and never estimates: unknown stays unknown, and a feed wi
 interest is named rather than drawn as zeros. It exists so the floor can be settled from a
 live screen instead of re-argued from one walkthrough; `/api/liquidity` is the same
 question asked of all five markets at once, where the keys are.
+
+## Seasonality is MEASURED, and the hand table is a labelled fallback
+
+`SEASONAL` in `src/engine.js` is hand-written and carries **30% of the four-factor score, the
+heaviest weight**. Measured against 195 months of Alpha Vantage data for CORN it has the
+**WRONG SIGN on eight months of twelve**: June reads +1.5 against a real ten-year mean of
+**-3.46**, September -1.1 against a real **+1.03** — so the Radar has been calling CORN bearish
+in a month that is historically positive.
+
+- **Every market in the basket loads the real monthly series**, through the existing `/api/av`
+  path, at startup. It used to be one button for whichever ticker was on screen, which left
+  four markets scored on the wrong table.
+- **The server caches it, with a TTL in DAYS** (`netlify/functions/av.mjs`, seven days, in the
+  blob store the autopilot already uses). Monthly data changes once a month and Alpha Vantage's
+  free tier allows **25 requests a day**: refetching per tab switch would exhaust the quota
+  during a demo. Every answer is stamped with `_osl` — where it came from and how old it is —
+  and a STALE cache entry is served when the upstream call fails, because six weeks of
+  month-old seasonality beats today's hand-written wrong sign. Alpha Vantage refuses with HTTP
+  200 and a "Note" body, so the failure is read out of the payload, never the status.
+- **A market still on the fallback says WHY on screen**, not merely "estimate":
+  `seasonalFallbackNote()` / `seasonalSourceLine()` in `App.jsx` separate "the call failed —
+  <the error>" from "nobody has asked yet" from "loading".
+- **The weights and the scoring arithmetic are untouched.** Only the numbers being scored
+  changed, and they changed from invented to measured.
+- **One series, one number of years.** The ten-year cutoff lands mid-year, so the matrix holds
+  eleven CALENDAR years of which the first and last are partial. `years` is the row count and
+  the only figure any screen prints — the header said "10y history" beside a panel saying
+  "11y" about the same numbers. The **current year is excluded from the year-by-year
+  backtest**, out loud: its window has not finished, and scoring it as a year that worked is
+  scoring a trade that is still open.
 
 ## Exit rules
 
@@ -402,6 +502,16 @@ while the position is open.
   session's close, `openInterestNote()` says so with the date, and when the call
   does not land the OI column disappears rather than printing dashes). Never
   invent or estimate an open-interest number.
+- `src/freshness.js` — **how old is the number on screen, and may it be.** One budget per
+  source (`BUDGETS`: chain in minutes, bars in hours, open interest daily because it IS the
+  previous session's close, seasonality in days because the free quota is 25 calls a DAY),
+  `isStale()`, `agePhrase()`, `freshnessNote()` and `staleAmong()` — which is what a screen
+  asks on arrival instead of refetching everything. A stale number is acceptable; a stale
+  number pretending to be live is not. Measured: the chain read BOIL at 20.19 and
+  `/api/liquidity` at 20.22, seventeen seconds apart, and the app printed one PRICE NOW.
+  **Spot has ONE home** — `spotOf(chain)` in `chain.js`, with `spotAt()` for its age. Any
+  other endpoint returning an underlying price is reporting its own reading for its own
+  purpose and is never the price on screen.
 - `src/signals.js` — the 4-factor confluence engine (`fuseSignals`) and the
   single source of the region table, the climate norms, the news cause→effect
   rules, the SMA/RSI read and the candidate ranking. Plain JS, no React imports.
@@ -432,7 +542,21 @@ while the position is open.
   `alpaca.mjs`'s single host provides. It exists because the two liquidity-floor
   numbers cannot be settled from a sandbox with no broker access, and it is
   gated by `gate.js` like every other path.
-- `netlify/edge-functions/gate.js` — password gate, with demo-token bypass
+- `netlify/edge-functions/gate.js` — password gate, with demo-token bypass. The DECISION it
+  makes lives in `netlify/edge-functions/lib/access.js`, so `ai.js` can ask the same question
+  without a second copy of a password comparison.
+- `netlify/edge-functions/ai.js` — **the Anthropic proxy, and it is on the EDGE on purpose.**
+  It was `netlify/functions/ai.mjs`, an ordinary synchronous function, and those are killed at
+  roughly TEN SECONDS. A 1200-token analysis written for a non-expert takes longer than that
+  every single time, so the copilot panel and the weekly report were **structurally** cut off
+  rather than intermittently unlucky — no amount of streaming inside a ten-second box was
+  going to fix it. The redirect path `/api/ai` is unchanged and nothing else moved.
+  **Both edge functions are declared in `netlify.toml`, gate first, and neither uses in-source
+  `config`.** netlify.toml runs them in written order; in-source configuration promises nothing
+  about the order BETWEEN files, and if `ai.js` ever ran first it would be an unauthenticated
+  Anthropic proxy on the open internet. `ai.js` also checks access itself, so the ordering
+  cannot matter — belt and braces, because this is the one mistake in this repository that
+  would matter to somebody other than its owner.
 
 ## Navigation — ONE NUMBERED PATH, macro to micro
 
@@ -619,6 +743,19 @@ went straight to a confirm page skipped the trade itself. Both are gone.
   naming the timeout instead of dumping markup on screen. Both are pure and
   tested; the autopilot calls Anthropic directly and has a background budget, so
   it does not need this.
+- **FLUSH THE LAST FRAME BEFORE DECIDING ANYTHING.** `sseDeltas()` holds the trailing frame
+  back on every read because TCP does not respect frame boundaries — but once the reader says
+  `done` there is no next read to hand it to, and Anthropic's closing `message_stop` does not
+  always arrive with a blank line after it. Without the final `sseDeltas(buf, { final: true })`
+  the last frame of EVERY stream was discarded as partial, so a COMPLETE answer was reported
+  as cut off every single time.
+- **RUNNING OUT OF ROOM IS NOT A DROPPED CONNECTION.** `message_delta` carries `stop_reason`
+  and was being ignored, so an answer cut at the token budget arrived WITH `message_stop`, was
+  judged complete, and was filed in the Journal as finished. `sseDeltas()` reports
+  `stopReason`; `askAI` checks `max_tokens` FIRST (such a stream does announce its end) and
+  throws with `err.reason = "max_tokens"`, which the panel labels **COPILOT · RAN OUT OF ROOM**
+  rather than **CUT OFF**. Asking again is the right advice for one of them and useless for
+  the other.
 - **A CUT-OFF ANSWER IS NEVER PRESENTED AS A FINISHED ONE.** A stream that just
   stops is indistinguishable from one that finished unless the end is announced,
   so `sseDeltas()` reports `stopped` (Anthropic's `message_stop`) and `askAI`
@@ -652,6 +789,28 @@ it could not compute out of the door.
 Adding a seventh means adding a gate call. Paper mode is *verified*, not
 assumed: `alpaca.mjs` returns an `X-OSL-Paper-Endpoint` header and the gate
 rejects anything it cannot confirm.
+
+## One rounding, one function — and a sign where the sign is the point
+
+- **`chancePct()` / `chanceText()` / `chanceInTen()` in `rules.js` are the only way a
+  probability is printed.** The compare card said "CHANCE 75%" beside "8 times in 10" and one
+  spread read 44%, 45% and "5 times in 10" across three screens: some of that was three
+  roundings of one number, the rest was one number spoken two ways with nothing tying them
+  together. The phrase is now DERIVED from the rounded percentage, so the two cannot disagree.
+  `inTenPhrase()` in `visuals.jsx` delegates to it. A missing probability is a dash, never a
+  confident 0% — `Number(null)` is 0 and 0 is finite.
+- **`signedMoney()` for theta and vega, and for nothing else yet.** `money()` prints a minus
+  for a loss and nothing for a gain, which is right for a price and wrong for a RATE OF
+  CHANGE: theta printed "$3" on a long debit spread where the holder LOSES it every day, and
+  read as a gain it inverts the one thing the number is there to say. It also refuses to round
+  a real vega away to "$0" — that zero was a claim that volatility does not move the trade, and
+  it was false; under a cent it prints one significant figure instead. An exact zero is still
+  "$0", because that one IS the number.
+- **CONTRACTS ARE NOT STRIKES.** `expiryOpenInterest()` walks the calls AND the puts, so its
+  peer set is CONTRACTS: BOIL 2026-10-09 has 26 strikes and 52 contracts, and "the 45 emptiest
+  of the 52 strikes" was counting one thing and naming another. Every count read off that peer
+  set — the strip, its takeaway, its explanations, the floor's own refusal sentence, the
+  threshold line — says contracts.
 
 ## Known traps
 
