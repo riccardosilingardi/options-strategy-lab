@@ -784,43 +784,45 @@ ends by writing down what it could not verify. Currently open:
 
 ### WRITTEN THIS SESSION — the things this session changed and could NOT check
 
-- **NOTHING IN THIS SESSION WAS RUN AGAINST A LIVE FEED, A BROWSER OR A DEPLOY.** The same wall
-  as PR #15: the sandbox's egress proxy refuses the CONNECT to the deploy preview, there are no
-  broker or Anthropic keys here, and no screen was opened. What is proven is `npm test` (365
-  assertions) and `npm run build`. Everything below is a consequence of that.
-- **THE MEASUREMENTS ARE THE OWNER'S, NOT THIS SESSION'S.** Every number driving TASK 1, 2, 3
-  and 5 — CORN's eight wrong months, BOIL's three expiries, the four spreads, the five
-  monotonicity breaks, the 20.19-versus-20.22 spot — was captured by the owner on
-  2026-09-03T17:57Z and reproduced from the brief. This session did not re-read any of them and
-  cannot. They are written into the code as the reasoning beside each constant, so if any of
-  them is wrong the comment is wrong with it.
-- **THE EDGE-FUNCTION ORDER IS THE ONE THING HERE THAT COULD MATTER TO SOMEBODY ELSE, AND IT IS
-  STILL UNVERIFIED.** `/api/ai` is now an edge function alongside the `/*` password gate. The
-  documented behaviour — netlify.toml runs edge functions in the order they are declared — could
-  not be checked against Netlify's own docs (the proxy blocks docs.netlify.com), so it is
-  written from memory. **The mitigation is that `ai.js` checks access itself**, through the same
-  `lib/access.js` the gate uses, which makes the order irrelevant to security.
+This session made ONE code change: `expiryChoice()` no longer names a board that settles today
+as the alternative the entry floor took away. What is proven for it is `npm test`
+(**367 assertions**, up from 365 — the two new ones are the owner's 0-DTE board and the 1-DTE
+edge) and `npm run build`.
 
-  **WHAT THE DEPLOY DID PROVE, and it is not nothing.** PR #16 deployed cleanly to
-  `deploy-preview-16--strategy-lab-optiontrading.netlify.app`, and Netlify's "Redirect rules"
-  check passed. So the two `[[edge_functions]]` declarations are valid TOML that Netlify
-  accepts, both files bundled, and — the real risk — the relative import of `./lib/access.js`
-  RESOLVES: a subdirectory inside `netlify/edge-functions/` is treated as a module rather than
-  as a third edge function. A syntax error or an unresolvable import there fails the deploy,
-  and it did not.
+- **NOTHING IN THIS SESSION WAS RUN AGAINST A LIVE FEED, A BROWSER OR A DEPLOY EITHER.** The
+  same wall as PR #15 and #16: the sandbox's egress proxy refuses the CONNECT to the deploy
+  preview, there are no broker or Anthropic keys here, and no screen was opened. The fault
+  being fixed was READ ON A SCREEN by the owner and the fix has not been read back on one.
+- **THE MEASUREMENTS ARE THE OWNER'S, NOT THIS SESSION'S.** Every number driving the previous
+  session's TASK 1, 2, 3 and 5 — CORN's eight wrong months, BOIL's three expiries, the four
+  spreads, the five monotonicity breaks, the 20.19-versus-20.22 spot — and every number driving
+  this session's change — the 2026-09-04 board at 0 DTE with 16 of 16 clearing, the live
+  2026-10-16 pick, the 26-over-25 monotonicity break — was captured by the owner and reproduced
+  from the brief. No session has re-read any of them and none can. They are written into the
+  code as the reasoning beside each constant and into the tests as fixtures, so if any of them
+  is wrong the comment and the test are wrong with it.
+- **CLOSED ON THE LIVE PREVIEW (owner, 2026-09-04): THE EDGE-FUNCTION ORDER QUESTION IS
+  SETTLED — ACCESS IS ENFORCED.** `/api/ai` answers **"POST only"** when authenticated and the
+  **password gate** when not. That is the whole finding the previous session asked for: an
+  unauthenticated request never reaches the Anthropic proxy, whichever of the two edge
+  functions ran first. The order itself remains undocumented here — Netlify's own docs are
+  still unreachable from a sandbox — but it no longer matters to security, which was always
+  the point of `ai.js` checking `lib/access.js` itself. The contingency the last session wrote
+  down (delete the `[[edge_functions]]` block for `ai` and put its body back behind a
+  `/api/ai` redirect) is **not needed and can be forgotten**.
 
-  **WHAT IT DID NOT PROVE:** the execution order, the 401, and streaming. The sandbox cannot
-  reach the preview — the egress proxy answers 403 to the CONNECT, the same wall PR #15 hit —
-  so this is the owner's, and it is one request: **open `/api/ai` in a private window with no
-  password and confirm a 401.** If it answers anything else, that is the whole finding, and
-  the fix is to delete the `[[edge_functions]]` block for `ai` and put its body back behind a
-  `/api/ai` redirect until the order is understood.
-- **THE COPILOT FIX IS TESTED ON SYNTHETIC FRAMES.** The final flush and `stop_reason` are held
-  down by tests that build Anthropic's SSE by hand. Nobody has watched a real 1200-token answer
-  arrive complete on the edge — which is, after all, the fault being fixed. On the preview: run
-  a pre-trade analysis and confirm it reaches an end WITHOUT the "CUT OFF" label. If it labels
-  **RAN OUT OF ROOM** instead, that is not a regression, it is the new label telling the truth
-  about `max_tokens: 1200`, and the budget is what to raise.
+  What the deploy had already proved, and still holds: both `[[edge_functions]]` declarations
+  are valid TOML that Netlify accepts, both files bundle, and the relative import of
+  `./lib/access.js` RESOLVES — a subdirectory inside `netlify/edge-functions/` is treated as a
+  module rather than as a third edge function.
+- **CLOSED ON THE LIVE PREVIEW (owner, 2026-09-04): THE TEN-SECOND WALL IS GONE.** A pre-trade
+  analysis was run against the real Anthropic endpoint and **reached its verdict with no
+  "CUT OFF" label and no "RAN OUT OF ROOM" label**. So the move from a synchronous function to
+  the edge did what it was for — a 1200-token answer written for a non-expert now has room to
+  finish — and the 1200-token budget is not binding on an analysis of that size either. The
+  final `sseDeltas(buf, { final: true })` flush and the `stop_reason` check are no longer held
+  down only by hand-built frames: a real stream has now ended cleanly and been reported as
+  ended cleanly.
 - **THE SEVEN-DAY AV CACHE HAS NEVER SERVED A HIT.** `av.mjs` writes to the blob store the
   autopilot already uses; that path is untested here because the store is not reachable from the
   sandbox. Every touch of it is wrapped so a missing store degrades to "no cache", but the WARM
@@ -831,9 +833,32 @@ ends by writing down what it could not verify. Currently open:
   actually returns five series inside the quota, and what the real monthly means come out at for
   the four markets nobody has measured, is unknown. **Only CORN has been checked, by the owner,
   and only against the hand table.** UNG, BOIL, SOYB and WEAT may be as wrong.
-- **THE EXPIRY RULE HAS NEVER PICKED AN EXPIRY ON A REAL CHAIN.** `expiryChoice()` is tested on
-  BOIL's three measured boards as a fixture. On the preview, check that Build opens on a board
-  whose Shortlist is not empty — that single observation is what this task was for.
+- **CLOSED ON THE LIVE PREVIEW (owner, 2026-09-04): THE EXPIRY RULE HAS NOW PICKED AN EXPIRY ON
+  A REAL CHAIN, AND THE BOARD IT PICKED WAS BUILDABLE.** On the real BOIL chain `expiryChoice()`
+  selected **2026-10-16 (42 DTE)** and the Shortlist showed **2 of 2 structures at RECOMMENDED**.
+  That is the single observation the task was for: the app no longer opens on a board its own
+  floor empties, and the Radar-says-four / Shortlist-says-none contradiction had one cause and it
+  was the expiry, not the floor.
+- **AND `maxSpreadShareOfMid` AT 0.35 DOES NOT EMPTY THE APP.** Same run, same board: 2 of 2
+  survived with the spread floor in force, so the first suspect the last session named — "if the
+  Shortlist is suddenly empty everywhere, this is it" — is ruled out on BOIL, the thinnest market
+  in the basket. One board is not five, so this is evidence rather than a settlement; what it
+  removes is the fear that the number was set so tight nothing could ever clear it.
+- **AND THE MONOTONICITY WARNING FIRED LIVE.** On that same 2026-10-16 board the **26 call priced
+  above the 25**, and `monotonicityBreaks()` said so on screen. It has now done in production
+  exactly what it was written for: name a chain whose own prices contradict each other instead of
+  quietly pricing structures off it.
+- **WHAT THE 2026-10-16 RUN DID NOT SETTLE.** It is ONE market on ONE day. The other four markets
+  have not been watched choosing an expiry, and no session has yet seen the four liquidity
+  settings moved against a real chain and read what each does to a real Shortlist.
+- **`expiryChoiceNote()` NAMED A BOARD THAT SETTLES TODAY, AND THAT IS FIXED (this session).**
+  The same live screen offered "2026-09-04 is busier — 16 of 16 clear — but it is only 0 days
+  out" as the passed-over alternative. Nobody weighs a 45-day position against a contract with
+  hours left on it, so on the main screen that read as a bug rather than as a rule explaining
+  itself. `expiryChoice()` now excludes anything at or below `SETTLING_DTE` (1 DTE) from
+  `passedOver` entirely; on the owner's boards 2026-09-18 (19 of 23) is named instead. **The
+  choice itself is untouched** — a settling board was never eligible — and this is verified by
+  test, not on screen: nobody has re-read the sentence on the live preview.
 - **`maxSpreadShareOfMid` (0.35) AND `maxEntryDTE` (90) ARE JUDGEMENTS.** Like
   `scratchPayoffShare`, and unlike the liquidity floor, nothing was read off a broker to choose
   either. The reasoning is written beside both and 0.35 refuses all four measured BOIL spreads
@@ -922,8 +947,11 @@ ends by writing down what it could not verify. Currently open:
   it behind the site password and it answered; nobody has watched it refuse an unauthenticated
   request. An earlier attempt from a sandbox proved nothing — the 403 was that sandbox's own
   egress proxy refusing the CONNECT, and `example.com` returned the identical 403.
-- **The live Anthropic call.** No `ANTHROPIC_KEY` in this sandbox either. The streaming copilot has
-  been proven against a simulated stream, not the live endpoint.
+- **The live Anthropic call — CLOSED (owner, 2026-09-04).** A pre-trade analysis completed
+  against the real endpoint with no CUT OFF and no RAN OUT OF ROOM label, so the streaming
+  copilot is no longer proven only against a simulated stream. Still unwatched from a sandbox:
+  there is no `ANTHROPIC_KEY` here and there never has been, so every future change to
+  `ai.js` or `sseDeltas()` is again the owner's to confirm on the preview.
 - **The live open-interest call — HALF of this is now settled.** `/api/liquidity` read
   `/v2/options/contracts` from the real broker, so the request shape, the `open_interest` /
   `open_interest_date` fields and the fact that the count arrives as a STRING are all confirmed

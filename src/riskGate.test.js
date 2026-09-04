@@ -901,6 +901,31 @@ test("the 30-DTE entry floor is NOT broken to reach a busier board — and it sa
     "and why: the entry floor exists so the exit rule has room");
 });
 
+test("AN EXPIRY THAT SETTLES TODAY IS NOT A BOARD ANYBODY PASSED OVER", () => {
+  // Read live on 2026-09-04. The note named "2026-09-04 ... only 0 days out"
+  // as the busier alternative, which on the main screen reads as a bug rather
+  // than as a rule explaining itself: nobody was weighing a 45-day position
+  // against a contract with hours left on it. The sentence is for a REAL
+  // trade-off the 30-day entry floor forced, so 2026-09-18 is what it owes.
+  const c = expiryChoice([{ key: "2026-09-04", dte: 0, clears: 16, near: 16 }, ...BOIL_BOARD]);
+  assert.equal(c.chosen.key, "2026-11-20", "the choice itself is unchanged");
+  assert.equal(c.passedOver.key, "2026-09-18", "the nearest REAL alternative is named instead");
+  const note = expiryChoiceNote(c);
+  assert.ok(note.includes("2026-09-18") && note.includes("19 of 23"), "and it is the one in the sentence");
+  assert.ok(!note.includes("2026-09-04"), "the settling board is not named at all");
+  assert.ok(!note.includes("0 days out"), "nor is its DTE");
+});
+
+test("a board with ONE day left is the same non-choice", () => {
+  // Expiry-day open interest does not vanish at midnight, so the cut is at 1,
+  // not at 0. With nothing else under the floor there is no sentence to print.
+  const c = expiryChoice([{ key: "tomorrow", dte: 1, clears: 40, near: 44 },
+                          { key: "2026-10-16", dte: 42, clears: 9, near: 12 }]);
+  assert.equal(c.chosen.key, "2026-10-16");
+  assert.equal(c.passedOver, null, "a board with hours left is not an alternative");
+  assert.ok(!expiryChoiceNote(c).includes("passed over"));
+});
+
 test("a year-out board does not win on volume alone", () => {
   const c = expiryChoice([...BOIL_BOARD, { key: "2027-06-18", dte: 288, clears: 40, near: 44 }]);
   assert.equal(c.chosen.key, "2026-11-20", "past the horizon it is a different trade, not a better one");
