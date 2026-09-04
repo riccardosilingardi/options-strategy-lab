@@ -4,6 +4,7 @@ import { getStore } from "@netlify/blobs";
 import { netBS, probProfit, exitSim, SEASONAL, SIGMA } from "../../src/engine.js";
 import { RULES, ruleBadge, copilotRulesBlock, money, pctText } from "../../src/rules.js";
 import { evaluateTrade } from "../../src/riskGate.js";
+import { orderBody } from "../../src/order.js";
 
 // L'autopilot parla solo con paper-api.alpaca.markets (vedi approve.mjs, dove
 // l'host e' costante): la verifica paper e' vera per costruzione, non presunta.
@@ -154,14 +155,15 @@ export default async () => {
     }
     if (verdict !== "HOLD" && gateResult && gateResult.pass) {
       const exp = (pos.expKey || "").replaceAll("-", "").slice(2);
-      const mlegs2 = pos.legs.map((l) => ({
-        symbol: `${pos.ticker}${exp}${l.type === "call" ? "C" : "P"}${String(Math.round(l.strike * 1000)).padStart(8, "0")}`,
-        ratio_qty: String(l.qty), side: l.side > 0 ? "sell" : "buy",
-        position_intent: l.side > 0 ? "sell_to_close" : "buy_to_close",
-      }));
-      const order = mlegs2.length === 1
-        ? { symbol: mlegs2[0].symbol, qty: mlegs2[0].ratio_qty, side: mlegs2[0].side, type: "market", time_in_force: "day" }
-        : { order_class: "mleg", qty: "1", type: "market", time_in_force: "day", legs: mlegs2.slice(0, 4) };
+      // Le quote di gamba devono essere prime fra loro (Alpaca 422/42210000):
+      // la TAGLIA sta in qty, la FORMA nei rapporti. Stessa funzione del
+      // ticket, src/order.js, perche' due copie divergono.
+      const closeLegs = pos.legs.slice(0, 4);
+      const order = orderBody({
+        legs: closeLegs,
+        occs: closeLegs.map((l) => `${pos.ticker}${exp}${l.type === "call" ? "C" : "P"}${String(Math.round(l.strike * 1000)).padStart(8, "0")}`),
+        userQty: 1, type: "market", tif: "day", intent: "close",
+      });
       const id = crypto.randomUUID();
       // Il contesto viaggia con l'autorizzazione: approve.mjs rifa' girare il
       // cancello al momento dell'esecuzione, che puo' essere 24h dopo.

@@ -8,6 +8,7 @@ import { erf, netBS } from "./engine.js";
 import { ARROW, REGIONS, regionSignals, tagImpacts, taRead } from "./signals.js";
 import { useNarrow, BandThumbnail, payoffBands, bandTakeaway } from "./visuals.jsx";
 import { DEMO, DEMO_TOOLTIP } from "./demo.js";
+import { reduceRatios, orderQty, unitLimit, orderBody, orderPreviewLines, orderOutcome, alpacaErrorText } from "./order.js";
 import { hasOpenInterest, sourceNote, openInterestNote } from "./chain.js";
 // "Why this trade" and the headline tags moved to src/why.jsx: the wizard's
 // decision screen needs them too, and a road with no evidence under it is a
@@ -146,6 +147,12 @@ export function runGate(gate, proposal) {
   return gate(proposal);
 }
 
+// THE STATUS AND THE BODY TRAVEL WITH THE ERROR. An mleg rejection is
+// unreadable without them — "leg ratio quantities should be relatively prime:
+// GCD[5 5] = 5" is the entire diagnosis and it arrives in Alpaca's own body.
+// The 200-character slice used to cut it out of the only sentence the user
+// ever saw. `alpacaErrorText(e)` in src/order.js turns these into that
+// sentence; nothing else is allowed to invent a shorter one.
 export async function alpacaReq(path, method = "GET", body = null) {
   const r = await fetch(`/api/alpaca?path=${encodeURIComponent(path)}`, {
     method,
@@ -153,44 +160,131 @@ export async function alpacaReq(path, method = "GET", body = null) {
     body: body ? JSON.stringify(body) : undefined,
   });
   const text = await r.text();
-  if (!r.ok) throw new Error(`Alpaca ${r.status}: ${text.slice(0, 200)}`);
+  if (!r.ok) {
+    const e = new Error(alpacaErrorText({ status: r.status, body: text }));
+    e.status = r.status; e.body = text; e.path = path;
+    throw e;
+  }
   return text ? JSON.parse(text) : {};
 }
+/* ====================================================================
+   WHAT HAPPENED TO THE ORDER, WHERE THE ORDER WAS SENT FROM.
+
+   Every outcome of the ticket used to go to `setMsg`, which renders at the
+   TOP of a page whose send button is at the bottom: the owner confirmed
+   twice, Alpaca rejected the order, and nothing appeared on screen. The
+   order did not vanish — the reason did.
+
+   So the ticket says it itself, beside the button, and it STAYS until it is
+   dismissed. `setMsg` is still called: the banner is useful when the page is
+   scrolled up, it just cannot be the only place the answer lives.
+==================================================================== */
+export function OrderOutcome({ outcome, onDismiss }) {
+  if (!outcome) return null;
+  const tone = outcome.tone || T.dim;
+  return (
+    <div style={{ marginTop: 9, padding: "9px 11px", background: `${tone}0f`, border: `1px solid ${tone}66`, borderRadius: 7 }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "flex-start", justifyContent: "space-between" }}>
+        <div style={{ ...mono, fontSize: 9.5, color: tone, fontWeight: 700, letterSpacing: 0.4 }}>{outcome.label}</div>
+        <button onClick={onDismiss} style={{ ...mono, fontSize: 10, color: T.dim, background: "transparent", border: `1px solid ${T.line}`, borderRadius: 5, padding: "2px 7px", cursor: "pointer", minHeight: 24 }}>Dismiss</button>
+      </div>
+      <div style={{ fontSize: 13, color: T.ink, marginTop: 5, lineHeight: 1.5, fontWeight: 600 }}>{outcome.headline}</div>
+      {outcome.detail && <div style={{ fontSize: 12.5, color: T.body, marginTop: 4, lineHeight: 1.5 }}>{outcome.detail}</div>}
+      {/* ALPACA'S OWN WORDS, WHOLE. A rejection is a diagnosis and it is
+          written in the body of the reply; a wrapped, scrollable box is
+          what it takes to show one on a phone without breaking the page. */}
+      {outcome.body && (
+        <pre style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 7, marginBottom: 0, padding: "7px 8px", background: T.bg,
+          border: `1px solid ${T.line}`, borderRadius: 5, maxHeight: 160, overflow: "auto", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{outcome.body}</pre>
+      )}
+    </div>
+  );
+}
+
+/** The armed confirmation, written out: one tap must never look like nothing. */
+export function OrderPending({ lines = [], onCancel }) {
+  return (
+    <div style={{ marginTop: 9, padding: "9px 11px", background: `${T.amber}0f`, border: `1px solid ${T.amber}66`, borderRadius: 7 }}>
+      <div style={{ ...mono, fontSize: 9.5, color: T.amber, fontWeight: 700, letterSpacing: 0.4 }}>NOT SENT YET · THIS IS WHAT THE SECOND TAP SENDS</div>
+      <div style={{ ...mono, fontSize: 12, color: T.ink, marginTop: 6, lineHeight: 1.7 }}>
+        {lines.map((line, i) => <div key={i}>{line}</div>)}
+      </div>
+      <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
+        <Btn small ghost onClick={onCancel}>Cancel — send nothing</Btn>
+        <span style={{ ...mono, fontSize: 10.5, color: T.dim }}>or tap the button above again to send it</span>
+      </div>
+    </div>
+  );
+}
+
 export function OrderTicket({ creds, legs, expKey, ticker, buildOcc, quoteFn, estNet, setMsg, onSent, gate, dte, maxLoss, maxProfit }) {
   const [cfg, setCfg] = useState({ qty: 1, type: "limit", tif: "day", limit: "" });
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [outcome, setOutcome] = useState(null);
   useEffect(() => { if (estNet != null && cfg.limit === "") setCfg((c) => ({ ...c, limit: Math.abs(estNet).toFixed(2) })); }, [estNet]); // eslint-disable-line
   // Il cancello gira PRIMA di costruire l'ordine: quello che si vede nel
   // pannello e' esattamente quello che decide se l'ordine parte.
   const preview = runGate(gate, { ticker, intent: "open", legs, dte, contracts: cfg.qty, maxLoss, maxProfit });
+  // THE SIZE GOES IN THE ORDER'S QTY, THE SHAPE GOES IN THE LEG RATIOS.
+  // Alpaca refused a five-lot vertical with 422 / 42210000, "leg ratio
+  // quantities should be relatively prime: GCD[5 5] = 5", because the ticket
+  // wrote the multiplier into every leg. `reduceRatios` divides it out and
+  // `orderQty` puts it back where the broker expects it; a genuine 1:2:1
+  // butterfly has a GCD of 1 and comes through untouched. See src/order.js.
+  const shape = reduceRatios(legs);
+  const sendQty = orderQty(cfg.qty, shape.factor);
   const send = async () => {
     if (DEMO) { setMsg(DEMO_TOOLTIP); return; }   // order path 2 of six
     if (!confirm) { setConfirm(true); return; }
-    setConfirm(false); setBusy(true);
+    setConfirm(false); setBusy(true); setOutcome(null);
     try {
       const g = runGate(gate, { ticker, intent: "open", legs, dte, contracts: cfg.qty, maxLoss, maxProfit });
-      if (!g.pass) { setMsg(`Risk gate: order not sent. ${g.violations.map((v) => v.message).join(" ")}`); setBusy(false); return; }
-      const mlegs = legs.map((l) => {
+      if (!g.pass) {
+        const why = g.violations.map((v) => v.message).join(" ");
+        setMsg(`Risk gate: order not sent. ${why}`);
+        setOutcome({ label: "NOT SENT · THE RISK GATE REFUSED IT", tone: T.red,
+          headline: "Nothing was sent to Alpaca.", detail: why });
+        setBusy(false); return;
+      }
+      const occs = legs.map((l) => {
         const q = quoteFn ? quoteFn(l) : null;
         const occ = q?.occ || (expKey ? buildOcc(ticker, expKey, l.type, l.strike) : null);
         if (!occ) throw new Error("pick a real expiry from the chain first");
-        return { symbol: occ, ratio_qty: String(l.qty), side: l.side > 0 ? "buy" : "sell", position_intent: l.side > 0 ? "buy_to_open" : "sell_to_open" };
+        return occ;
       });
-      if (mlegs.length > 4) throw new Error("Alpaca takes at most 4 legs per order: split the strategy in two");
-      let body;
-      if (mlegs.length === 1) {
-        // singola gamba: ordine semplice (mleg richiede 2-4 gambe)
-        body = { symbol: mlegs[0].symbol, qty: String(cfg.qty * (+mlegs[0].ratio_qty || 1)), side: mlegs[0].side, type: cfg.type, time_in_force: cfg.tif };
-        if (cfg.type === "limit") body.limit_price = String((Math.abs(+cfg.limit) / (+mlegs[0].ratio_qty || 1)).toFixed(2));
-      } else {
-        body = { order_class: "mleg", qty: String(cfg.qty), type: cfg.type, time_in_force: cfg.tif, legs: mlegs };
-        if (cfg.type === "limit") body.limit_price = String(Math.abs(+cfg.limit).toFixed(2));
-      }
+      if (occs.length > 4) throw new Error("Alpaca takes at most 4 legs per order: split the strategy in two");
+      // A limit of nothing is not a limit. An empty field coerces to 0 and
+      // would leave as limit_price "0.00" — the same disease as the $0 debit
+      // in rules.js: a missing number sent as if it were a price.
+      if (cfg.type === "limit" && !(Math.abs(+cfg.limit) > 0)) throw new Error("type a limit price first — $0.00 is a missing price, not a cheap one");
+      // The price on screen is the price of the structure AS BUILT, and
+      // `orderBody` divides it by the same factor it took out of the ratios,
+      // so the money at stake is what the ticket says it is.
+      const body = orderBody({ legs, occs, userQty: cfg.qty, type: cfg.type, limit: cfg.limit, tif: cfg.tif, intent: "open" });
       const o = await alpacaReq("/v2/orders", "POST", body);
       if (onSent) onSent(o, cfg);
-      setMsg(`${cfg.type === "limit" ? "Limit" : "Market"} order ×${cfg.qty} sent to your Alpaca paper account · id ${o.id?.slice(0, 8)}… · ${o.status}`);
-    } catch (e) { setMsg(`The order was not sent: ${e.message}`); }
+      // ACCEPTED IS NOT FILLED. A limit at the mid of a wide market, or any
+      // order sent outside market hours, comes back accepted with nothing
+      // bought — that is a third outcome, not a failure, and it says where
+      // the order is waiting rather than claiming a position.
+      const res = orderOutcome(o);
+      const tone = res.kind === "filled" ? T.green : res.kind === "dead" ? T.red : res.kind === "unknown" ? T.amber : T.blue;
+      const label = res.kind === "filled" ? "FILLED" : res.kind === "partial" ? "PARTLY FILLED"
+        : res.kind === "dead" ? `ALPACA ${String(res.status).toUpperCase().replace(/_/g, " ")} IT`
+          : res.kind === "unknown" ? "SENT · THE REPLY DID NOT SAY" : "SENT · WORKING, NOT FILLED";
+      setOutcome({ label, tone, headline: res.headline, detail: res.detail });
+      setMsg(`${cfg.type === "limit" ? "Limit" : "Market"} order ×${sendQty} sent to your Alpaca paper account · id ${o.id?.slice(0, 8)}… · ${res.headline}`);
+    } catch (e) {
+      const sentence = alpacaErrorText(e);
+      setMsg(`The order was not sent: ${sentence}`);
+      // A precondition that failed here never reached the broker, and saying
+      // Alpaca refused it would be a lie about which of the two said no.
+      setOutcome({ label: e.status ? "NOT SENT · ALPACA REFUSED IT" : "NOT SENT · THE ORDER COULD NOT BE BUILT",
+        tone: T.red, headline: sentence,
+        detail: e.status ? "Nothing was bought and nothing is working. The whole of Alpaca's reply is below." : null,
+        body: e.body || null });
+    }
     setBusy(false);
   };
   return (
@@ -210,8 +304,28 @@ export function OrderTicket({ creds, legs, expKey, ticker, buildOcc, quoteFn, es
           title={DEMO ? DEMO_TOOLTIP : undefined}>
           <Send size={12} /> {busy ? "Sending…" : DEMO ? DEMO_TOOLTIP : !preview.pass ? "BLOCKED BY THE RISK GATE" : confirm ? "TAP AGAIN TO CONFIRM" : "Send the order"}
         </Btn>
-        {confirm && <Btn small ghost onClick={() => setConfirm(false)}>Cancel</Btn>}
       </div>
+      {/* A SIZED STRUCTURE IS PRICED TWO WAYS AND BOTH ARE ON SCREEN. The
+          field above is the price of the structure as it is built; Alpaca is
+          sent the price of ONE of the relatively-prime combinations, times
+          the quantity. Silence here is what made "x5" look like a fifth of
+          the trade the user was reading. */}
+      {shape.factor > 1 && (
+        <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 7 }}>
+          {`This structure is ${shape.factor} × (${shape.ratios.join(":")}). Alpaca is sent ${sendQty} combination${sendQty === 1 ? "" : "s"}${cfg.type === "limit" ? ` at $${unitLimit(cfg.limit, shape.factor)} each` : ""} — the same trade, written the way the broker requires.`}
+        </div>
+      )}
+      {/* ONE TAP MUST NEVER LOOK LIKE NOTHING. The first tap arms the
+          confirmation; what it armed is written out here, at the button, so
+          the second tap is made against the order itself and not against a
+          button whose label changed. */}
+      {confirm && (
+        <OrderPending
+          lines={orderPreviewLines({ legs, ratios: shape.ratios, factor: shape.factor, ticker, expKey,
+            qty: cfg.qty, type: cfg.type, limit: cfg.limit, tif: cfg.tif })}
+          onCancel={() => setConfirm(false)} />
+      )}
+      <OrderOutcome outcome={outcome} onDismiss={() => setOutcome(null)} />
       {!preview.pass && (
         <div style={{ display: "grid", gap: 3, marginTop: 7 }}>
           {preview.violations.map((v) => (
@@ -238,11 +352,11 @@ export function AlpacaDesk({ creds, setMsg, gate }) {
         alpacaReq("/v2/orders?status=open&limit=30&nested=true"),
       ]);
       setPos(p); setOrds(o);
-    } catch (e) { setMsg(`Could not sync with Alpaca: ${e.message}`); }
+    } catch (e) { setMsg(`Could not sync with Alpaca: ${alpacaErrorText(e)}`); }
     setBusy(false);
   };
   useEffect(() => { sync(); }, []); // eslint-disable-line
-  const cancel = async (id) => { try { await alpacaReq(`/v2/orders/${id}`, "DELETE"); setMsg("Order cancelled."); sync(); } catch (e) { setMsg(e.message); } };
+  const cancel = async (id) => { try { await alpacaReq(`/v2/orders/${id}`, "DELETE"); setMsg("Order cancelled."); sync(); } catch (e) { setMsg(`The cancellation did not go through: ${alpacaErrorText(e)}`); } };
   // Chiusura strategia intera: 1) cancella ordini aperti sugli stessi contratti (evita "wash trade detected")
   // 2) invia UN ordine complesso di chiusura (mleg) — mai gambe separate
   const closeGroup = async (grp) => {
@@ -261,18 +375,20 @@ export function AlpacaDesk({ creds, setMsg, gate }) {
         const oSyms = o.order_class === "mleg" ? (o.legs || []).map((l) => l.symbol) : [o.symbol];
         if (oSyms.some((sy) => syms.has(sy))) { try { await alpacaReq(`/v2/orders/${o.id}`, "DELETE"); } catch { /* già chiuso */ } }
       }
-      const mlegs = grp.items.map((x) => ({
-        symbol: x.symbol, ratio_qty: String(Math.abs(+x.qty)),
-        side: +x.qty > 0 ? "sell" : "buy",
-        position_intent: +x.qty > 0 ? "sell_to_close" : "buy_to_close",
-      }));
-      const body = mlegs.length === 1
-        ? { symbol: mlegs[0].symbol, qty: mlegs[0].ratio_qty, side: mlegs[0].side, type: "market", time_in_force: "day" }
-        : { order_class: "mleg", qty: "1", type: "market", time_in_force: "day", legs: mlegs.slice(0, 4) };
-      await alpacaReq("/v2/orders", "POST", body);
-      setMsg(`Closing ${grp.key} — sent as a single order.`);
+      // A five-lot spread is five of a 1:1 combination, not one of a 5:5:
+      // the same GCD rule that refused the opening order refuses the close,
+      // and being unable to close what you opened is the worse half of it.
+      // Same `orderBody` as the ticket — one implementation, five paths.
+      const items = grp.items.slice(0, 4);
+      const body = orderBody({
+        legs: items.map((x) => ({ side: +x.qty > 0 ? 1 : -1, qty: Math.abs(+x.qty) })),
+        occs: items.map((x) => x.symbol),
+        userQty: 1, type: "market", tif: "day", intent: "close",
+      });
+      const co = await alpacaReq("/v2/orders", "POST", body);
+      setMsg(`Closing ${grp.key} — sent as a single order. ${orderOutcome(co).headline}`);
       setTimeout(sync, 1500);
-    } catch (e) { setMsg(`The close was not sent: ${e.message}`); }
+    } catch (e) { setMsg(`The close was not sent: ${alpacaErrorText(e)}`); }
   };
   return (
     <Panel style={{ marginTop: 10 }}>
@@ -1134,23 +1250,26 @@ export function GuardianPanel({ pos, spot, dteLeft, ivNow, sigma, seasonalNow, p
       if (!g.pass) { setMsg(`Risk gate: the ${label} order was not sent. ${g.violations.map((v) => v.message).join(" ")}`); setLadderBusy(null); return; }
       for (const w of g.warnings) logEvent(pos.id, "gate-warning", w.message);
       const net = ladderNet(pos.entryNet, targetPnl);
-      const mlegs = pos.legs.map((l) => {
+      // Same GCD rule as the opening ticket: the size belongs in qty, the
+      // shape in the ratios, and the price the ladder computed is the price
+      // of the WHOLE position, so it is divided by the same factor.
+      const occs = pos.legs.map((l) => {
         const q = quoteFn ? quoteFn(l) : null;
         const occ = q?.occ || (pos.expKey ? buildOcc(pos.ticker, pos.expKey, l.type, l.strike) : null);
         if (!occ) throw new Error("live prices are needed to name the contracts");
-        return { symbol: occ, ratio_qty: String(l.qty), side: l.side > 0 ? "sell" : "buy", position_intent: l.side > 0 ? "sell_to_close" : "buy_to_close" };
+        return occ;
       });
-      let body;
-      if (mlegs.length === 1) {
-        body = { symbol: mlegs[0].symbol, qty: mlegs[0].ratio_qty, side: mlegs[0].side, type: "limit", time_in_force: "gtc", limit_price: (Math.abs(net) / (+mlegs[0].ratio_qty || 1)).toFixed(2) };
-      } else if (mlegs.length > 4) { throw new Error("Alpaca takes at most 4 legs per order"); }
-      else {
-        body = { order_class: "mleg", qty: "1", type: "limit", time_in_force: "gtc", limit_price: Math.abs(net).toFixed(2), legs: mlegs };
-      }
+      if (occs.length > 4) throw new Error("Alpaca takes at most 4 legs per order");
+      const body = orderBody({ legs: pos.legs, occs, userQty: 1, type: "limit", limit: net, tif: "gtc", intent: "close" });
       const o = await alpacaReq("/v2/orders", "POST", body);
-      setMsg(`${label} exit order placed at $${Math.abs(net).toFixed(2)}, standing until you cancel it (${o.id?.slice(0, 8)}…)`);
-      logEvent(pos.id, "ladder", `${label} exit order placed at $${Math.abs(net).toFixed(2)}`);
-    } catch (e) { setMsg(`The ${label} exit order failed: ${e.message}`); }
+      const res = orderOutcome(o);
+      // The ladder's price is the price of the WHOLE position; the broker was
+      // sent the price of one combination. Both are true and printing only
+      // one of them next to Alpaca's own echo reads as a contradiction.
+      const per = +body.qty > 1 ? ` — sent as ${body.qty} × $${body.limit_price}` : "";
+      setMsg(`${label} exit order placed at $${Math.abs(net).toFixed(2)}${per}, standing until you cancel it (${o.id?.slice(0, 8)}…). ${res.headline}`);
+      logEvent(pos.id, "ladder", `${label} exit order placed at $${Math.abs(net).toFixed(2)} — ${res.headline}`);
+    } catch (e) { setMsg(`The ${label} exit order failed: ${alpacaErrorText(e)}`); }
     setLadderBusy(null);
   };
   const pct = pos.maxProfit > 0 && pnlNow != null ? Math.max(-100, Math.min(130, (pnlNow / pos.maxProfit) * 100)) : null;

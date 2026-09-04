@@ -1,11 +1,13 @@
 // One-tap approve: esegue su Alpaca PAPER l'ordine proposto dall'Autopilot, previa validazione token
 import { getStore } from "@netlify/blobs";
 import { evaluateTrade } from "../../src/riskGate.js";
+import { orderOutcome, alpacaErrorText } from "../../src/order.js";
 
 // L'host paper e' una costante di questo file: e' la prova che l'ordine
 // autorizzato finisce su un conto paper, ed e' cio' che il cancello verifica.
 const PAPER_HOST = "paper-api.alpaca.markets";
 const PAPER_ACCOUNT = { paperVerified: true, paperSource: `this endpoint posts only to ${PAPER_HOST}` };
+const esc = (x) => String(x == null ? "" : x).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 const page = (title, body, ok) => new Response(
   `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title>
 <style>body{margin:0;height:100vh;display:flex;align-items:center;justify-content:center;background:#14181d;font-family:ui-monospace,monospace;color:#f5f0e6}
@@ -44,11 +46,17 @@ export default async (req) => {
       body: JSON.stringify(a.order),
     });
     const out = await r.json();
-    if (!r.ok) return page("Alpaca refused the order", JSON.stringify(out).slice(0, 300), false);
+    // LA RISPOSTA PER INTERO, NON I PRIMI 300 CARATTERI. Il motivo del rifiuto
+    // sta nel corpo ("GCD[5 5] = 5"), ed e' l'unica cosa che rende leggibile
+    // un 422. `esc` perche' quel testo arriva da fuori e finisce in una pagina.
+    if (!r.ok) return page("Alpaca refused the order", esc(alpacaErrorText({ status: r.status, body: JSON.stringify(out) })), false);
     a.used = true; a.usedAt = Date.now(); a.orderId = out.id;
     approvals[id] = a;
     await store.set("approvals", JSON.stringify(approvals));
-    return page("Order sent ✓", `${a.label} · ${a.posName}<br>Alpaca PAPER order ${out.id?.slice(0, 8)}… sent (${out.status}).`, true);
+    // ACCETTATO NON E' ESEGUITO: fuori orario l'ordine resta in coda, e
+    // "sent" da solo lascia credere che la posizione sia chiusa.
+    const res = orderOutcome(out);
+    return page("Order sent ✓", `${esc(a.label)} · ${esc(a.posName)}<br>Alpaca PAPER order ${esc(String(out.id || "").slice(0, 8))}…<br>${esc(res.headline)}<br>${esc(res.detail)}`, true);
   } catch (e) {
     return page("Something went wrong", String(e.message || e), false);
   }

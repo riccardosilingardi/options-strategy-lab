@@ -393,6 +393,15 @@ while the position is open.
   `liquidityPercentile`, `minOpenInterestAbsolute`, `minRewardRisk`) live here
   too, so the "nothing today" screen can only ever explain a rule the code
   applies.
+- `src/order.js` — **what is actually sent, and what came back.** Plain JS, no React,
+  for the same reason `rules.js` and `handoff.js` are: `orderBody()` (the one Alpaca
+  body builder, used by all five sites that construct one), `reduceRatios()` /
+  `orderQty()` / `unitLimit()` (the size in the quantity, the shape in the ratios),
+  `orderPreviewLines()` (what an armed tap will send), `orderOutcome()` (filled,
+  partly filled, working, killed — and which of them starts an exit plan) and
+  `alpacaErrorText()` (the status and Alpaca's own body, untruncated). It writes no
+  rule number and no rule sentence: `orderOutcome()` reports whether a reply is the
+  kind that STARTS the exit plan, and the plan's words stay in `exitPlanSentence()`.
 - `src/riskGate.js` — `evaluateTrade({ proposal, portfolio, capital, signals })`,
   a pure function returning `{ pass, violations, warnings }`. Every order path
   calls it, and a screen with no gate wired in fails closed
@@ -704,6 +713,44 @@ There are **six** ways an order can reach Alpaca, and every one routes through
 4. `pro.jsx` → `GuardianPanel.placeExit()` — the exit ladder
 5. `autopilot.mjs` — gates each proposal before it becomes an approve link
 6. `approve.mjs` — re-runs the gate at execution time, up to 24h later
+
+**Five of them build the body with `orderBody()` in `src/order.js`, and the sixth
+sends the body the fifth built.** Never write `ratio_qty` in a component again.
+
+- **THE SIZE GOES IN `qty`, THE SHAPE GOES IN THE RATIOS.** Alpaca refused a sized
+  spread live on 2026-09-04 — 422 / 42210000, *"leg ratio quantities should be
+  relatively prime: GCD[5 5] = 5"* — because every path wrote the leg's own
+  quantity into `ratio_qty`. A five-lot vertical is not "5 and 5"; it is "1 and 1,
+  five times". `reduceRatios()` divides the legs by their greatest common divisor,
+  `orderQty()` puts the factor into the order's quantity and `unitLimit()` takes it
+  out of the price, so the money at stake is unchanged and only the spelling moves.
+  A genuine ratio has a GCD of 1 and survives untouched: a 1x2x1 butterfly is still
+  1, 2, 1. Every structure the Shortlist sized above x1 — and it routinely suggests
+  x5, x6, x7 — was unsendable until this, in every direction: the same refusal
+  applied to closing what had been opened.
+- **ACCEPTED IS NOT OPENED.** `orderOutcome(order)` reads the reply, and filled,
+  partly filled, working and killed-by-the-broker are four different sentences.
+  Only a complete fill carries `startsExitPlan`, because an exit plan measured from
+  a fill that never happened is a plan about nothing. The live order came back
+  `status: "accepted"`, `filled_qty: 0` — submitted outside market hours, queued —
+  and the app announced *"Position opened. Close at 50% of max gain, or at 21 days
+  to expiration."* over it. A working order NAMES WHERE IT IS WAITING (its limit
+  and how long it stands): a limit at the mid of a wide market can be accepted and
+  never fill, and that is a third outcome, not a failure. The position record
+  carries `alpacaStatus` / `alpacaFilled` and the Positions row says so.
+- **AN ORDER THAT FAILS MUST FAIL WHERE THE BUTTON IS.** Every outcome used to go
+  to `setMsg`, which renders at the TOP of a page whose send button is at the
+  BOTTOM: the owner confirmed twice, Alpaca rejected the order, and nothing
+  appeared. The order did not vanish — the reason did. `OrderOutcome` renders all
+  of them inside the ticket, beside the button, and it stays until it is dismissed.
+  `setMsg` is still called; it just cannot be the only place the answer lives.
+- **THE STATUS AND THE BODY ARE THE DIAGNOSIS.** `alpacaReq` carries `status` and
+  the WHOLE body on the error, and `alpacaErrorText()` writes the sentence from
+  them. The old 200-character slice cut *"GCD[5 5] = 5"* out of the only sentence
+  the user ever saw. Alpaca's raw reply is shown under it, verbatim.
+- **ONE TAP MUST NEVER LOOK LIKE NOTHING.** The first tap arms the confirmation and
+  `OrderPending` writes out what the second tap sends — the contracts, the number
+  of combinations, the unit price, how long it stands — with a cancel beside it.
 
 In **demo mode** every one of the six is disabled, and the check sits next to the
 send as well as on the button, so a path called some other way still cannot reach

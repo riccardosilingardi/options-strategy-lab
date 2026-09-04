@@ -27,6 +27,7 @@ import { evaluateTrade, gateSummary } from "./riskGate.js";
 import { DEMO, DEMO_BANNER, DEMO_TOOLTIP, DEMO_SEED_TICKERS, demoPositions } from "./demo.js";
 import { CapitalOnboarding, WizardOpen, FindOpportunities, WizardCandidates, ConfirmSteps, NothingToday, Card, Pill } from "./wizard.jsx";
 import { buildHandOff, buildScreenState, BUILD_TAB } from "./handoff.js";
+import { orderBody, orderOutcome, alpacaErrorText } from "./order.js";
 import { FIRST_STEP, stepCarry, candidateOf, candidateKey, legsLine, toggleCompare, inCompare, MAX_COMPARE, savedFromCandidate, candidateFromSaved, savedAge } from "./path.js";
 import { StepNav, StepForward, EvidenceBar, EvidenceOverlay, CompareTray, CandidateActions } from "./steps.jsx";
 
@@ -187,21 +188,23 @@ async function alpacaAccount() {
   return { ...acc, paperVerified: host === PAPER_HOST, paperSource: host ? `the proxy routed this to ${host}` : null };
 }
 async function alpacaOrderMleg(legs) {
-  const body = {
-    order_class: "mleg", qty: "1", type: "market", time_in_force: "day",
-    legs: legs.map((l) => ({
-      symbol: l.occ,
-      ratio_qty: String(l.qty),
-      side: l.side > 0 ? "buy" : "sell",
-      position_intent: l.side > 0 ? "buy_to_open" : "sell_to_open",
-    })),
-  };
+  // THE SIZE GOES IN QTY, THE SHAPE GOES IN THE RATIOS (src/order.js).
+  // Alpaca refuses leg ratios that share a factor — 422 / 42210000,
+  // "GCD[5 5] = 5" — so a five-lot vertical is five of a 1:1 combination.
+  const body = orderBody({ legs, occs: legs.map((l) => l.occ), userQty: 1, type: "market", tif: "day", intent: "open" });
   const r = await fetch(`/api/alpaca?path=${encodeURIComponent("/v2/orders")}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  if (!r.ok) throw new Error(`Alpaca ${r.status}: ${await r.text()}`);
+  if (!r.ok) {
+    // The status and the body are the diagnosis; they travel with the error
+    // so the sentence on screen can carry them (`alpacaErrorText`).
+    const text = await r.text();
+    const e = new Error(alpacaErrorText({ status: r.status, body: text }));
+    e.status = r.status; e.body = text;
+    throw e;
+  }
   return r.json();
 }
 
@@ -1440,6 +1443,12 @@ export default function OptionsStrategyLab() {
       maxLoss: analysis?.maxLoss, maxProfit: analysis?.maxProfit,
       quotes: quotesOf(analysis), net: analysis?.entry }, LOCAL_BOOK);
     if (!gLocal.pass) return { ok: false, gate: gLocal };
+    // ACCEPTED IS NOT OPENED. The reply is read once, here, and every
+    // sentence about this position downstream is composed from that reading
+    // (`orderOutcome` in src/order.js). With no broker order at all this is
+    // the app's own book and "opened" is simply true.
+    const outcome = alpacaOrder ? orderOutcome(alpacaOrder) : null;
+    const working = !!(outcome && !outcome.filled);
     const seasM = ((seasonal[tk]?.monthlyMean) || getU(tk).monthlyMean)[NOW_MONTH];
     const expiry = ek ? new Date(ek).toISOString() : new Date(Date.now() + d * 86400000).toISOString();
     const ivAvg0 = analysis.legPx.reduce((x, y) => x + y.iv, 0) / Math.max(1, analysis.legPx.length);
@@ -1453,16 +1462,25 @@ export default function OptionsStrategyLab() {
       thesis: { pop: pop0, iv: ivAvg0, seasonal: seasM, regime: seasM > 0.8 ? "strong up" : seasM < -0.8 ? "strong down" : "weak", spot: sp, breakevens: analysis.breakevens, delta: analysis.greeks.delta, vega: analysis.greeks.vega,
         signal: f ? { score: f.score, confidence: f.confidence, agreement: f.agreement, narrative: f.narrative } : null,
         againstSignal: clashInfo ? { ...clashInfo, reason: (reason || "").trim(), at: Date.now() } : null },
+      // WHAT THE BROKER ACTUALLY SAID, ON THE POSITION'S OWN RECORD. An
+      // order can come back "accepted" with nothing bought (queued outside
+      // market hours, or a limit at the mid of a wide market), and a
+      // timeline that reads "Opened" over that reply is the app describing
+      // a fill that has not happened.
+      alpacaStatus: outcome ? outcome.status : null,
+      alpacaFilled: outcome ? outcome.filled : null,
       timeline: [
         { t: Date.now(), type: "gate", text: `Risk gate — ${gateSummary(gLocal)}` },
-        { t: Date.now(), type: "open", text: `${alpacaOrder ? "Alpaca order " + alpacaOrder.id.slice(0, 8) + "… sent · " : ""}Opened with a ${pop0 != null ? (pop0 * 100).toFixed(0) + "%" : "n/a"} chance · volatility ${(ivAvg0 * 100).toFixed(0)}% · season ${seasM.toFixed(1)}%/mo${f ? ` · signal ${f.score > 0 ? "+" : ""}${f.score}/100 ${f.agreement}` : ""}` },
-        { t: Date.now(), type: "plan", text: `Exit plan frozen at entry — ${exitPlanSentence()}` },
+        { t: Date.now(), type: "open", text: `${alpacaOrder ? `Alpaca order ${String(alpacaOrder.id).slice(0, 8)}… — ${outcome.headline} ` : ""}${working ? "Recorded" : "Opened"} with a ${pop0 != null ? (pop0 * 100).toFixed(0) + "%" : "n/a"} chance · volatility ${(ivAvg0 * 100).toFixed(0)}% · season ${seasM.toFixed(1)}%/mo${f ? ` · signal ${f.score > 0 ? "+" : ""}${f.score}/100 ${f.agreement}` : ""}` },
+        { t: Date.now(), type: "plan", text: working
+          ? `Exit plan frozen at entry — ${exitPlanSentence()} It starts counting when the order fills; it has not filled yet.`
+          : `Exit plan frozen at entry — ${exitPlanSentence()}` },
         ...(clashInfo ? [{ t: Date.now(), type: "against", text: `Against ${clashInfo.n} of ${clashInfo.total} factors. Reason: "${(reason || "").trim()}"` }] : []),
       ],
     };
     const st = { ...store, positions: [...store.positions, pos] };
     setStore(st); await saveState(st);
-    return { ok: true, gate: gLocal, pos };
+    return { ok: true, gate: gLocal, pos, outcome };
   };
 
   const openPaper = async (alpacaOrder) => {
@@ -1477,7 +1495,20 @@ export default function OptionsStrategyLab() {
     setOpenResult(r.gate);
     if (!r.ok) { setMsg(`Risk gate: position not opened. ${r.gate.violations.map((v) => v.message).join(" ")}`); return; }
     setAgainst({ reason: "" }); setPicked(null); setOpenResult(null);
-    setMsg(`Position opened. ${exitPlanSentence()}`); setTab("positions");
+    // "POSITION OPENED" IS NOT TRUE OF AN ACCEPTED ORDER. The live run came
+    // back status "accepted", filled_qty 0 — queued outside market hours —
+    // and the app announced a position and an exit plan over it. Filled,
+    // partly filled and working are three sentences, and only the first
+    // starts the plan. With no broker order this is the app's own paper
+    // book, where "opened" is the whole of the truth.
+    setMsg(r.outcome
+      ? `${r.outcome.headline} ${r.outcome.startsExitPlan ? exitPlanSentence() : r.outcome.detail}`
+      : `Position opened on the app's own paper book. ${exitPlanSentence()}`);
+    // AN ORDER THAT IS STILL WORKING KEEPS THE SCREEN THAT EXPLAINS IT.
+    // Jumping to Positions unmounts the ticket, and the ticket is where the
+    // "working, not filled" answer and the price it is waiting at are written.
+    // A fill has somewhere better to be: the position it just opened.
+    if (!r.outcome || r.outcome.filled) setTab("positions");
   };
   /* ---- an analysis run in the Copilot panel is filed in the Journal ----
      The Journal's report already quoted "the copilot's read" while the runs
@@ -1683,8 +1714,9 @@ export default function OptionsStrategyLab() {
         return { ...l, occ };
       });
       const o = await alpacaOrderMleg(withOcc);
-      setMsg(`Order sent to your Alpaca paper account · id ${o.id?.slice(0, 8)}…`);
-    } catch (e) { setMsg(`The order was not sent: ${e.message}`); }
+      const res = orderOutcome(o);
+      setMsg(`Order sent to your Alpaca paper account · id ${o.id?.slice(0, 8)}… · ${res.headline} ${res.detail}`);
+    } catch (e) { setMsg(`The order was not sent: ${alpacaErrorText(e)}`); }
     setBusy(null);
   };
 
@@ -3776,6 +3808,16 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                       <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 3 }}>
                         {p.legs.map((l) => `${l.side > 0 ? "+" : "−"}${l.qty} ${l.strike}${l.type === "call" ? "C" : "P"}`).join(" / ")} · expires {p.expKey || new Date(p.expiry).toLocaleDateString("en-GB")} · opened {new Date(p.openedAt).toLocaleDateString("en-GB")}
                       </div>
+                      {/* THE ORDER BEHIND THIS ONE HAS NOT FILLED. It was
+                          recorded at the moment it was sent, and an order can
+                          sit accepted for a whole session; a row that says
+                          nothing about that is a position the user does not
+                          own yet, drawn as one he does. */}
+                      {p.alpacaFilled === false && (
+                        <div style={{ ...mono, fontSize: 10.5, color: T.amber, marginTop: 5 }}>
+                          {`⚠ The Alpaca order behind this one was "${p.alpacaStatus}" when it was sent, not filled. Check it on your paper account: until it fills, nothing here is a position you own, and the exit plan has not started.`}
+                        </div>
+                      )}
                       {/* PRD §6: the gauge is the primary visual on position detail.
                           It is drawn from payoff() like every other zone in the app. */}
                       <GaugeFigure legs={p.legs} entryNet={p.entryNet} spot={s ?? p.entrySpot}
