@@ -581,6 +581,62 @@ Every violation carries readable numbers: `"Max loss $340 = 6.8% of capital (you
 
 ---
 
+## 8b. The order itself — the shape that is sent, and the answer that comes back
+
+Two faults confirmed live on 2026-09-04, both of them about the moment the app stops
+reasoning and starts transacting. `src/order.js` is where both are answered, and
+`src/order.test.js` / `src/order.test.jsx` hold them.
+
+### An order that fails must fail visibly
+
+The owner confirmed twice on Build. The request reached Alpaca, Alpaca rejected it, and
+**nothing appeared on screen**: every outcome of the ticket's `send()` — success, risk-gate
+refusal, caught error — went to `setMsg`, which renders at the TOP of a long page whose send
+button is at the BOTTOM. The order did not vanish; the reason did.
+
+- **The ticket answers where the button is.** `OrderOutcome` renders inside the ticket and
+  persists until it is dismissed. `setMsg` still fires — the banner is useful when the page
+  is scrolled up — it simply cannot be the only place the answer lives.
+- **The status and the body are the diagnosis.** `alpacaReq` now carries `status` and the
+  whole body on the error; `alpacaErrorText()` writes the sentence and the raw reply is
+  shown under it. The old `text.slice(0, 200)` is what removed *"leg ratio quantities should
+  be relatively prime: GCD[5 5] = 5"* from the one sentence the user read. An mleg rejection
+  — a bad OCC symbol, insufficient buying power, a refused leg — is unreadable without it.
+- **A limit at the mid of a wide market can be ACCEPTED AND NOT FILL.** That is a third
+  outcome, not a failure: the ticket says the order is working and names where it is waiting
+  — its limit, and how long it stands.
+- **One tap never looks like nothing.** The armed confirmation writes out what the second tap
+  sends (`OrderPending` over `orderPreviewLines()`), with a cancel beside it.
+
+### The app proposed sizes it could not send
+
+Alpaca refused a sized spread with **422 / 42210000**: *"leg ratio quantities should be
+relatively prime: GCD[5 5] = 5"*. Every path put the size multiplier into each leg's
+`ratio_qty` (5 and 5) instead of into the order's `qty`. Correct is `ratio_qty` 1/1 with
+`qty` 5 — and since the Shortlist routinely suggests x5, x6, x7, **every structure it sized
+above x1 was unsendable**, opening and closing alike.
+
+`reduceRatios()` divides the legs by their greatest common divisor, `orderQty()` puts the
+factor into the order's quantity, `unitLimit()` divides the price by the same factor so the
+money at stake is unchanged, and `orderBody()` is the single builder all five construction
+sites use. A genuine ratio survives untouched: GCD(1,2,1) is 1, so a butterfly is still
+1, 2, 1.
+
+### "Position opened" is not true of an accepted order
+
+The confirmed order came back `status: "accepted"`, `filled_qty: 0` — submitted outside
+market hours and queued — and the app announced *"Position opened. Close at 50% of max gain,
+or at 21 days to expiration."* Both halves were false: nothing was bought, and a plan
+measured from a fill that has not happened is a plan about nothing.
+
+`orderOutcome(order)` reads the reply. **Filled, partly filled, working and
+killed-by-the-broker are four different sentences, and only a complete fill carries
+`startsExitPlan`.** The position record keeps `alpacaStatus` / `alpacaFilled`, the Positions
+row says the order behind it has not filled, and a working order keeps the screen that
+explains it instead of jumping to a tab of positions the user does not own yet.
+
+---
+
 ## 9. Autopilot
 
 A Netlify scheduled function, weekdays at 11:00 UTC.
@@ -784,10 +840,51 @@ ends by writing down what it could not verify. Currently open:
 
 ### WRITTEN THIS SESSION — the things this session changed and could NOT check
 
-This session made ONE code change: `expiryChoice()` no longer names a board that settles today
-as the alternative the entry floor took away. What is proven for it is `npm test`
-(**367 assertions**, up from 365 — the two new ones are the owner's 0-DTE board and the 1-DTE
-edge) and `npm run build`.
+This session did the order work in §8b: `src/order.js` (new), the in-ticket outcome, the
+untruncated Alpaca error, the GCD fix at all five body-building sites, and the reading of the
+order status wherever the app spoke about a fill. What is proven for it is `npm test`
+(**400 checks**, up from 367 — the 33 new ones are `src/order.test.js` and `src/order.test.jsx`)
+and `npm run build`.
+
+- **THE FIX FOR THE 422 HAS NEVER BEEN SENT TO ALPACA.** The refusal is reproduced from the
+  owner's own message — `422 / 42210000, "leg ratio quantities should be relatively prime:
+  GCD[5 5] = 5"` — and the corrected body is asserted field by field against what that message
+  says Alpaca wants (`ratio_qty` 1/1, `qty` 5). **Nobody has watched the broker ACCEPT the new
+  shape.** There are no keys here and there never have been. The first live x5 order is the
+  test that matters, and the thing to read on the reply is the `qty` and the leg ratios Alpaca
+  echoes back.
+- **THE LIMIT PRICE IS THE PART TO WATCH ON THAT FIRST ORDER.** The factor that left the
+  ratios has to leave the price with it, or a five-lot limit becomes the unit price of one
+  combination — five times too generous. The arithmetic is tested (`qty × limit_price` equals
+  the price on screen) but only against the app's own reading of Alpaca's mleg semantics: that
+  `qty` counts combinations and `limit_price` is the net per combination. **The division is
+  the safe way to be wrong**: if that reading is right, the trade costs what the ticket says;
+  if it is wrong and `limit_price` were the whole order's net, the limit is five times too
+  TIGHT and the order sits unfilled. So the symptom to look for on the first live x5 is a
+  debit spread that never fills at a price it obviously should have — not an overpayment.
+- **THE THREE OUTCOMES WERE RENDERED, NOT TAPPED.** `OrderOutcome` and `OrderPending` are
+  rendered to markup in `src/order.test.jsx` with real replies and a real refusal body, and
+  every sentence they print is unit-tested. But no browser has been opened here: nobody has
+  armed the confirmation with a finger and watched the block appear under the button, and
+  nobody has dismissed one. The 390px question — whether the raw-body box scrolls inside
+  itself rather than widening the page — is answered by `overflow: auto` and
+  `word-break: break-word` in the style, not by a screenshot.
+- **"WORKING, NOT FILLED" HAS NOT BEEN READ ON A REAL QUEUED ORDER.** The fixture is the
+  reply the owner reported (`accepted`, `filled_qty: 0`) rebuilt from those figures, exactly
+  as the UNG scratch sentence was. What has not been seen is the app printing it while an
+  order actually sits in Alpaca's queue overnight, nor the Positions row carrying its warning
+  the next morning, nor what the row says once that order fills — **nothing re-reads
+  `alpacaStatus` after the fact.** The position is written once, at send time, and the
+  warning stays until the user checks the broker. Making the Positions screen re-read the
+  order's status from Alpaca is the obvious next piece of work and this session did not do it.
+- **PARTIAL FILLS ARE UNTESTED AGAINST REALITY.** The sentence exists and is unit-tested, but
+  the app still records ONE position for the whole intended size — a partial fill is described
+  honestly in words and not in the numbers. A position that is half filled is not half a
+  position anywhere in the arithmetic.
+- **THE INHERITED DEBTS ARE STILL OPEN, UNTOUCHED.** Everything below this section needs a
+  live feed, a browser, a deploy or broker keys, and this sandbox has none of them: the egress
+  proxy refuses the CONNECT, exactly as it did for PR #15, #16 and #17. This session started
+  by reading them and could close none.
 
 - **NOTHING IN THIS SESSION WAS RUN AGAINST A LIVE FEED, A BROWSER OR A DEPLOY EITHER.** The
   same wall as PR #15 and #16: the sandbox's egress proxy refuses the CONNECT to the deploy
