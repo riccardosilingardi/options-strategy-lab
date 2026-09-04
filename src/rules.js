@@ -850,12 +850,37 @@ export const unpriceableNote = (n, what) =>
  *    carries the nearer, thicker expiry and why it was not taken. Silently
  *    choosing the third-best board and saying nothing is how the contradiction
  *    above survived.
+ *    AND IT WILL NOT NAME A BOARD THAT SETTLES TODAY. See `SETTLING_DTE`
+ *    below: the sentence exists to describe a real trade-off, and an expiry
+ *    at 0 or 1 DTE is not one of the alternatives anybody was weighing.
  *  - IT WILL NOT COUNT AN UNKNOWN AS A ZERO. An expiry whose open interest has
  *    not landed yet (Alpaca snapshots carry none until the contract-list call
  *    patches it in) is `clears: null`, not `clears: 0`. Unknown expiries are
  *    ranked on DTE alone and `measured` says so, because "we could not read
  *    this board" is not "this board is empty".
  * ------------------------------------------------------------------------- */
+
+/**
+ * THE NEAREST BOARD `passedOver` MAY NAME. An expiry at or below this is
+ * excluded from the sentence entirely.
+ *
+ * `passedOver` exists to name a REAL TRADE-OFF the entry floor forced: a board
+ * you could have built on, that is genuinely busier, that the 30-day floor took
+ * away from you. An expiry that settles today or tomorrow is not that. Nobody
+ * was choosing between a 45-day position and a contract with hours left on it —
+ * there is no trade there to have been passed over, only a strip of open
+ * interest that belongs to positions already being closed. Read live on
+ * 2026-09-04, where the note offered "2026-09-04 is busier — 16 of 16 clear —
+ * but it is only 0 days out": on the main screen that reads as a bug in the
+ * app, not as a rule explaining itself, which is the opposite of what the
+ * sentence is for.
+ *
+ * ONE, not zero, because expiry-day open interest does not vanish at midnight:
+ * a board with a single day left is the same non-choice for the same reason.
+ * It is deliberately NOT in `RULES` — it refuses nothing and sizes nothing, it
+ * only decides whether one sentence is worth printing.
+ */
+const SETTLING_DTE = 1;
 
 /**
  * @param candidates  one entry per expiry, already read off the chain:
@@ -908,9 +933,11 @@ export function expiryChoice(candidates = [], {
   const chosen = ranked[0] || null;
 
   // The nearer board we are not allowed to use, and only when it is genuinely
-  // better: naming an expiry that is no thicker would be noise.
+  // better: naming an expiry that is no thicker would be noise. A board that
+  // settles today is not an alternative either — see `SETTLING_DTE`.
   const passedOver = chosen == null ? null : all
-    .filter((c) => c.dte < minEntryDTE && c.clears != null && chosen.clears != null && c.clears > chosen.clears)
+    .filter((c) => c.dte > SETTLING_DTE && c.dte < minEntryDTE
+      && c.clears != null && chosen.clears != null && c.clears > chosen.clears)
     .sort((a, b) => (b.clears - a.clears) || (b.dte - a.dte))[0] || null;
 
   const reason = chosen == null ? "none"

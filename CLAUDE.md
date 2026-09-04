@@ -243,6 +243,12 @@ the TIE-BREAK it always should have been.
 
 - **The 30-day entry floor never yields** — that one is the gate's — but a nearer, thicker
   expiry passed over because of it is named on screen (`passedOver`).
+- **A BOARD THAT SETTLES TODAY IS NOT AN ALTERNATIVE**, so `passedOver` excludes anything at or
+  below `SETTLING_DTE` (1 DTE). The note offered "2026-09-04 is busier — 16 of 16 clear — but it
+  is only 0 days out": nobody was choosing between a 45-day position and a contract with hours
+  left on it, and on the main screen a sentence like that reads as a bug rather than as a rule
+  explaining itself. The sentence exists to name a REAL trade-off the entry floor forced. The
+  CHOICE is untouched — a settling board was never eligible — only what the app says about it.
 - **An unknown board is not an empty one.** `Number(null)` is 0 and 0 is finite; unmeasured
   expiries rank on DTE and `measured` says so.
 - **Every count names its expiry.** The Radar rows, the Shortlist's empty state and the
