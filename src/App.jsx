@@ -8,7 +8,7 @@ import {
   FlaskConical, Briefcase, Plus, Plug, Send, ExternalLink, MessageSquare, FileText, Bell,
   SlidersHorizontal, ArrowLeft, Sun, Moon, AlertTriangle,
 } from "lucide-react";
-import { fetchAllNews, fetchWeather, ImpactTags, CopilotTab, ReportTab, OrderTicket, AlpacaDesk, scaleStrategy, probProfit, buildContext, GuardianPanel, ChainMatrix, OptionPanel, UnifiedView, taSignals, confluence, WhyThisTrade, Markdown } from "./pro.jsx";
+import { fetchAllNews, fetchWeather, ImpactTags, CopilotTab, ReportTab, OrderTicket, AlpacaDesk, scaleStrategy, probProfit, buildContext, GuardianPanel, ChainMatrix, OptionPanel, UnifiedView, taSignals, confluence, WhyThisTrade, Markdown, alpacaReq } from "./pro.jsx";
 import { BandThumbnail, payoffBands, bandTakeaway, GaugeFigure, Gauge, CompareFigure, exitPlanSentence,
   OpenInterestStrip, oiStripTakeaway, oiCutAt, oiGhostCut, explainOiStrip, useWidth } from "./visuals.jsx";
 import { fuseSignals, sentimentDirection, withSignalRank, compareCandidates, againstSignal, DRIVER_PRESETS, rankByDrivers, verdictNarrative } from "./signals.js";
@@ -21,13 +21,18 @@ import { RULES, sizing, ruleBadge, takeProfitLabel, stopLossLabel, perTradeCapLa
   payoffCeiling, NO_CEILING, noCeilingNote, noCeilingRankNote,
   impossibleLoss, impossibleLossNote,
   expiryChoice, expiryChoiceNote, emptyExpiryNote, wideSpreadNote, spreadSkippedNote,
-  chancePct, chanceText, chanceInTen, signedMoney } from "./rules.js";
+  chancePct, chanceText, chanceInTen, signedMoney,
+  ruleExitOf, stopWarningSentence } from "./rules.js";
 import { isStale, freshnessNote, staleAmong } from "./freshness.js";
 import { evaluateTrade, gateSummary } from "./riskGate.js";
 import { DEMO, DEMO_BANNER, DEMO_TOOLTIP, DEMO_SEED_TICKERS, demoPositions } from "./demo.js";
 import { CapitalOnboarding, WizardOpen, FindOpportunities, WizardCandidates, ConfirmSteps, NothingToday, Card, Pill } from "./wizard.jsx";
 import { buildHandOff, buildScreenState, BUILD_TAB } from "./handoff.js";
 import { orderBody, orderOutcome, alpacaErrorText } from "./order.js";
+// THE PERMANENT RECORD: the ref a position is given at open, the sequence on
+// every timeline entry, the close reason, and what survives into the Journal.
+import { nextRef, refCounter, appendTimeline, stampTimeline, orderStatusRecheck, closeDecision,
+  journalEntry, searchJournal, CLOSE_REASON_MIN, refNumber } from "./journal.js";
 import { FIRST_STEP, stepCarry, candidateOf, candidateKey, legsLine, toggleCompare, inCompare, MAX_COMPARE, savedFromCandidate, candidateFromSaved, savedAge } from "./path.js";
 import { StepNav, StepForward, EvidenceBar, EvidenceOverlay, CompareTray, CandidateActions } from "./steps.jsx";
 
@@ -510,7 +515,9 @@ async function loadState() {
 // and every screen downstream would print "$250 per trade" as his limit. Null
 // means unanswered, `sizing()` reports `answered: false`, and the screens say
 // "suggested" until he answers (PRD §3).
-const EMPTY = { saved: [], positions: [], settings: { webhook: "", reportFreq: "weekly", reportLast: 0, reportLastMd: "", capital: null, concurrentTarget: null, savings: null, sizeOverride: null, mode: "pro", onboarded: false, notifyWhenReady: false }, seasonal: {}, journal: [], ivHist: {}, copilotLog: [] };
+// `journalSeq` is the highest position ref this state has ever issued. It only
+// ever goes up: closing a position does not hand its number back (src/journal.js).
+const EMPTY = { journalSeq: 0, saved: [], positions: [], settings: { webhook: "", reportFreq: "weekly", reportLast: 0, reportLastMd: "", capital: null, concurrentTarget: null, savings: null, sizeOverride: null, mode: "pro", onboarded: false, notifyWhenReady: false }, seasonal: {}, journal: [], ivHist: {}, copilotLog: [] };
 async function saveState(st) {
   try { localStorage.setItem(SKEY, JSON.stringify(st)); } catch (e) { console.error(e); }
   // The server blob is ONE shared document, so a demo visitor writing to it
@@ -915,6 +922,10 @@ export default function OptionsStrategyLab() {
   const [optAmtTyped, setOptAmt] = useState(null);
   const optAmt = optAmtTyped == null ? Math.round(limits.perTradeLimit) : optAmtTyped;
   const [autoMon, setAutoMon] = useState(true);
+  // THE CLOSE ASKS WHY. `{ id, written, err }` while a close is being written.
+  const [closing, setClosing] = useState(null);
+  // The Journal's search box. Sorted and searched by ref (src/journal.js).
+  const [jq, setJq] = useState("");
   const [optLeg, setOptLeg] = useState(null); // {occ, label, quote}
   const [alSync, setAlSync] = useState({ orders: [], positions: [], t: 0 });
   const [ta, setTa] = useState({}); // per ticker
@@ -1112,6 +1123,19 @@ export default function OptionsStrategyLab() {
       st.positions = (st.positions || []).filter(okPos);
       st.saved = (st.saved || []).filter((sv) => sv && Array.isArray(sv.legs) && typeof sv.ticker === "string");
       if (droppedPos > 0) setMsg(`${droppedPos} position${droppedPos === 1 ? "" : "s"} saved by an older version were damaged and have been removed. Everything else is intact.`);
+      // EVERY POSITION HAS A REF, INCLUDING THE ONES OPENED BEFORE THERE WERE
+      // REFS. A position saved by an older build has a timeline and no ref and
+      // no sequences; it gets both here, once, and the counter moves with it so
+      // no number is ever handed out twice. Autopilot entries merged from
+      // `/api/state` a moment ago are numbered by the same pass — they arrive in
+      // the MIDDLE of the list by time while being the last thing recorded.
+      let seq = Math.max(0, +st.journalSeq || 0,
+        ...[...(st.positions || []), ...(st.journal || [])].map((x) => refNumber(x && x.ref) || 0));
+      st.positions = (st.positions || []).map((p) => {
+        const withRef = p.ref ? p : { ...p, ref: nextRef({ journalSeq: seq++ }).ref };
+        return stampTimeline(withRef);
+      });
+      st.journalSeq = seq;
       // Anyone who already has positions or saved strategies has been through
       // setup on an older build: do not send them back to onboarding.
       const settings = { ...EMPTY.settings, ...(st.settings || {}) };
@@ -1138,7 +1162,15 @@ export default function OptionsStrategyLab() {
       if (DEMO && !(st.positions || []).length) {
         const seeded = demoPositions({ spots: loaded, underlying: getU });
         if (seeded.length) {
-          setStore((s) => { const ns = { ...s, positions: seeded }; saveState(ns); return ns; });
+          setStore((s) => {
+            // The demo's three positions are positions, so they get refs and
+            // sequences like any other. A visitor who opens the Journal and
+            // finds rows with no ref is looking at a different app.
+            let n = refCounter(s);
+            const withRefs = seeded.map((p) => stampTimeline({ ...p, ref: nextRef({ journalSeq: n++ }).ref }));
+            const ns = { ...s, positions: withRefs, journalSeq: n };
+            saveState(ns); return ns;
+          });
         }
       }
       setMsg(null);
@@ -1454,8 +1486,12 @@ export default function OptionsStrategyLab() {
     const ivAvg0 = analysis.legPx.reduce((x, y) => x + y.iv, 0) / Math.max(1, analysis.legPx.length);
     const pop0 = probProfit(analysis.curve, sp, ivAvg0, d);
     const f = fused[tk];
+    // THE REF IS GIVEN HERE, ONCE, AND IS THE POSITION'S NAME FOR THE REST OF
+    // ITS LIFE — including after it is closed, which is the whole point: the
+    // Journal entry keeps it, so a closed trade can still be pointed at.
+    const { n: refN, ref } = nextRef(store);
     const pos = {
-      id: Date.now(), name, ticker: tk, expKey: ek, legs: lg, entryNet: analysis.entry, entrySpot: sp,
+      id: Date.now(), ref, name, ticker: tk, expKey: ek, legs: lg, entryNet: analysis.entry, entrySpot: sp,
       openedAt: new Date().toISOString(), expiry, maxProfit: analysis.maxProfit, maxLoss: analysis.maxLoss,
       realEntry: analysis.realCount === lg.length,
       alpacaId: alpacaOrder?.id || null,
@@ -1478,9 +1514,13 @@ export default function OptionsStrategyLab() {
         ...(clashInfo ? [{ t: Date.now(), type: "against", text: `Against ${clashInfo.n} of ${clashInfo.total} factors. Reason: "${(reason || "").trim()}"` }] : []),
       ],
     };
-    const st = { ...store, positions: [...store.positions, pos] };
+    // The four opening entries are stamped J-0007·01 … ·04 by the same function
+    // every later append goes through, so there is one way an entry gets a
+    // sequence and it cannot disagree with itself.
+    const stamped = stampTimeline(pos);
+    const st = { ...store, journalSeq: refN, positions: [...store.positions, stamped] };
     setStore(st); await saveState(st);
-    return { ok: true, gate: gLocal, pos, outcome };
+    return { ok: true, gate: gLocal, pos: stamped, outcome };
   };
 
   const openPaper = async (alpacaOrder) => {
@@ -1546,7 +1586,8 @@ export default function OptionsStrategyLab() {
         const dup = (p.timeline || []).some((e) => e.type === type && new Date(e.t).toDateString() === day);
         if (dup) return p;
         changed = true;
-        return { ...p, timeline: [...(p.timeline || []), { t: Date.now(), type, text }] };
+        const t = appendTimeline(p, { t: Date.now(), type, text });
+        return { ...p, timeline: t.timeline, seqNext: t.seqNext };
       });
       if (!changed) return st;
       const ns = { ...st, positions };
@@ -1555,19 +1596,108 @@ export default function OptionsStrategyLab() {
     });
   }, []);
 
-  const closePos = async (id) => {
+  /* ---- CLOSING A POSITION KEEPS ITS HISTORY ----
+
+     What it used to keep, measured: ticker, pnl, ruleExit, riskOk. The
+     timeline, the thesis, the order ids and the reason were dropped on the
+     floor, so the Journal — the app's own record of what it did, and the only
+     place its discipline number comes from — could say a trade ended at a
+     profit and could not say why it was opened, what it was told while it was
+     open, or who decided to end it.
+
+     `journalEntry()` in src/journal.js decides what survives; this function
+     decides the two things only the screen knows: what the position is worth
+     right now, and what the user wrote.
+
+     AND THE STOP IS NOT A RULE THAT CLOSES ANYTHING. `posAlerts` raises the
+     stop warning to level "action" so the row is impossible to miss, and this
+     read that level as "a rule said so" — so a warning the user chose to act on
+     was filed as obedience, in the one number that is supposed to be honest
+     about the difference. `ruleExitOf()` says which rules actually end a trade:
+     the take-profit and the exit window, and nothing else. */
+  const closePos = async (id, { written = "" } = {}) => {
     const p = store.positions.find((x) => x.id === id);
-    let entry = null;
-    if (p) {
-      const al = posAlerts.find((a) => a.p.id === id);
-      const pnl = al?.pnl ?? null;
-      const ruleExit = !!(al && (al.level === "action"));
-      entry = { id, t: Date.now(), ticker: p.ticker, name: p.name, openedAt: p.openedAt, pnl, ruleExit,
-        riskOk: Math.abs(p.maxLoss) <= limits.perTradeLimit };
-    }
-    const st = { ...store, positions: store.positions.filter((x) => x.id !== id), journal: entry ? [...(store.journal || []), entry] : (store.journal || []) };
+    if (!p) return { ok: true };
+    const al = posAlerts.find((a) => a.p.id === id) || null;
+    const decision = closeDecision({ alert: al, written });
+    if (!decision.reason.ok) return { ok: false, decision };
+    const entry = journalEntry({
+      pos: p,
+      pnl: al?.pnl ?? null,
+      reason: decision.reason,
+      riskOk: Math.abs(p.maxLoss) <= limits.perTradeLimit,
+    });
+    const st = { ...store,
+      positions: store.positions.filter((x) => x.id !== id),
+      journal: [...(store.journal || []), entry] };
     setStore(st); await saveState(st);
+    setMsg(`${p.ref ? `${p.ref} · ` : ""}${p.ticker} ${p.name} closed and filed in the Journal with its whole timeline. ` +
+      `${decision.reason.kind === "rule" ? decision.reason.text : `Your reason: "${decision.reason.text}"`}`);
+    return { ok: true, decision, entry };
   };
+
+  /* ---- RE-READING AN ORDER THAT HAD NOT FILLED ----
+
+     The debt the last session wrote down, in its own words: "nothing re-reads
+     `alpacaStatus` after the fact. The position is written once, at send time,
+     and the warning stays until the user checks the broker."
+
+     An order can come back `accepted` with `filled_qty: 0` — queued outside
+     market hours, or a limit sitting in a wide market. The position row then
+     carries a warning saying nothing here is a position you own yet. Overnight
+     it fills, and the app goes on warning about it because nobody asked again.
+
+     Three rules hold this. It only asks about orders that had NOT filled (a
+     filled order is finished and re-reading it is noise). It writes only when
+     the answer CHANGED, so a timeline does not gain "still accepted" every
+     minute. And it is silent about failure: this is a background read, and a
+     broker that cannot be reached is not an event worth interrupting anybody
+     for — the warning simply stays until it can be. */
+  const rechecking = useRef(false);
+  const recheckOrders = useCallback(async () => {
+    if (DEMO || rechecking.current) return;               // no broker call in the demo
+    const todo = store.positions.filter((p) => p.alpacaId && p.alpacaFilled === false);
+    if (!todo.length) return;
+    rechecking.current = true;
+    const changes = [];
+    for (const p of todo) {
+      try {
+        const o = await alpacaReq(`/v2/orders/${encodeURIComponent(p.alpacaId)}`);
+        const r = orderStatusRecheck(p, o);
+        if (r.changed) changes.push({ id: p.id, r });
+      } catch { /* the broker is not reachable: the warning stays, nothing is written */ }
+    }
+    rechecking.current = false;
+    if (!changes.length) return;
+    setStore((st) => {
+      const positions = st.positions.map((p) => {
+        const c = changes.find((x) => x.id === p.id);
+        if (!c) return p;
+        // A fill that happens after the fact starts the exit plan, and says so:
+        // the plan entry written at open said it had not started yet.
+        const entries = [c.r.entry,
+          ...(c.r.outcome.startsExitPlan ? [{ t: Date.now(), type: "plan",
+            text: `The order has filled, so the exit plan starts now — ${exitPlanSentence()}` }] : [])];
+        const t = appendTimeline(p, entries);
+        return { ...p, alpacaStatus: c.r.status, alpacaFilled: c.r.filled, timeline: t.timeline, seqNext: t.seqNext };
+      });
+      const ns = { ...st, positions };
+      saveState(ns);
+      return ns;
+    });
+    const filled = changes.filter((c) => c.r.outcome.filled).length;
+    setMsg(`${changes.length} order${changes.length === 1 ? "" : "s"} moved on since ${changes.length === 1 ? "it was" : "they were"} sent` +
+      `${filled ? `: ${filled} ${filled === 1 ? "has" : "have"} filled` : ""}. The timeline says what changed.`);
+  }, [store.positions]);
+
+  // On arrival, and with the 60-second monitor. A position whose order has not
+  // filled is the only thing this asks about, so the usual case is no call.
+  useEffect(() => { if (hydrated) recheckOrders(); }, [hydrated]); // eslint-disable-line
+  useEffect(() => {
+    if (!autoMon) return;
+    const id = setInterval(() => recheckOrders(), 60000);
+    return () => clearInterval(id);
+  }, [autoMon, recheckOrders]);
 
   const runMultiScan = async () => {
     setMulti((m) => ({ ...m, busy: true, err: null, res: null }));
@@ -2161,6 +2291,11 @@ export default function OptionsStrategyLab() {
     if (closed >= 10 && (disciplina ?? 0) >= 0.8) { level = 5; next = "You have the full set of habits. Ask the copilot whether you are ready for real money."; }
     return { level, next, score, disciplina, coerenza, pazienza, closed, opened, ruled };
   }, [store.journal, store.positions, store.settings.capital]);
+
+  // The Journal list: filtered by the search box, newest ref first. The sort is
+  // by REF and not by date, so the order on screen is the order the trades were
+  // opened in and a ref you are holding is where you expect to find it.
+  const journalRows = useMemo(() => searchJournal(store.journal || [], jq), [store.journal, jq]);
 
   /* ---- risk gate (PRD §8) ----
      Un solo cancello per ogni ordine. La UI non ricalcola mai i limiti: chiede
@@ -3799,10 +3934,17 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   return (
                     <div key={p.id} style={{ padding: "10px 12px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7 }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
-                        <div style={{ fontWeight: 700, color: T.ink, fontSize: 13.5 }}>{p.ticker} · {p.name}</div>
+                        <div style={{ fontWeight: 700, color: T.ink, fontSize: 13.5 }}>
+                          {/* THE REF, ON SCREEN, FROM THE MOMENT IT IS OPENED. It is
+                              how this trade is referred to for the rest of its life and
+                              after it: the Journal entry keeps it when the position is
+                              gone, and every timeline entry is numbered from it. */}
+                          {p.ref && <span style={{ ...mono, fontSize: 10.5, color: T.dim, marginRight: 7 }}>{p.ref}</span>}
+                          {p.ticker} · {p.name}
+                        </div>
                         <div style={{ display: "flex", gap: 6 }}>
                           <Btn small ghost color={T.blue} onClick={() => openOnBuild({ ticker: p.ticker, expKey: p.expKey || null, legs: p.legs, name: p.name + " (monitor)" })}>Monitor ↗</Btn>
-                          <Btn small ghost color={T.red} onClick={() => closePos(p.id)}><Trash2 size={11} /> Close</Btn>
+                          <Btn small ghost color={T.red} onClick={() => setClosing({ id: p.id, written: "", err: null })}><Trash2 size={11} /> Close</Btn>
                         </div>
                       </div>
                       <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 3 }}>
@@ -3818,6 +3960,52 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                           {`⚠ The Alpaca order behind this one was "${p.alpacaStatus}" when it was sent, not filled. Check it on your paper account: until it fills, nothing here is a position you own, and the exit plan has not started.`}
                         </div>
                       )}
+                      {/* CLOSING ASKS WHY, AND THE ANSWER IS KEPT.
+                          A rule close names its rule and needs nothing typed. A close
+                          with no rule behind it needs the same written reason as an
+                          against-the-signal override — including a close taken on the
+                          stop WARNING, which is a decision and is recorded as one. */}
+                      {closing && closing.id === p.id && (() => {
+                        const al = posAlerts.find((a) => a.p.id === p.id) || null;
+                        const d = closeDecision({ alert: al, written: closing.written });
+                        return (
+                          <div style={{ marginTop: 8, padding: "10px 12px", background: T.bg, border: `1px solid ${T.red}55`, borderRadius: 7 }}>
+                            <Lbl>CLOSE {p.ref || p.ticker} — WHY?</Lbl>
+                            {d.ruleExit ? (
+                              <div style={{ ...mono, fontSize: 11, color: T.green, marginTop: 6, lineHeight: 1.5 }}>{d.text}</div>
+                            ) : (
+                              <div style={{ ...mono, fontSize: 11, color: T.mut, marginTop: 6, lineHeight: 1.5 }}>
+                                No rule ended this trade, so this is a close you are choosing. Write why: it is stored
+                                with the trade and it is what the Journal can teach you something from later.
+                              </div>
+                            )}
+                            {d.stopWarning && (
+                              <div style={{ ...mono, fontSize: 10.5, color: T.amber, marginTop: 6, lineHeight: 1.5 }}>
+                                {`⚠ ${stopWarningSentence(al?.pnl ?? null)}`}
+                              </div>
+                            )}
+                            <textarea
+                              value={closing.written} rows={2}
+                              onChange={(e) => setClosing((c) => ({ ...c, written: e.target.value, err: null }))}
+                              placeholder={d.ruleExit ? "Anything you want on the record (optional)" : `Why are you closing this? At least ${CLOSE_REASON_MIN} characters.`}
+                              style={{ width: "100%", marginTop: 8, padding: "7px 9px", background: T.panel, color: T.ink,
+                                border: `1px solid ${T.line}`, borderRadius: 6, ...mono, fontSize: 11.5, boxSizing: "border-box", resize: "vertical" }} />
+                            {!d.ruleExit && !d.reason.ok && (
+                              <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 4 }}>{d.reason.message}</div>
+                            )}
+                            {closing.err && <div style={{ ...mono, fontSize: 10.5, color: T.red, marginTop: 4 }}>{closing.err}</div>}
+                            <div style={{ display: "flex", gap: 6, marginTop: 9, flexWrap: "wrap" }}>
+                              <Btn small color={T.red} disabled={!d.reason.ok}
+                                onClick={async () => {
+                                  const r = await closePos(p.id, { written: closing.written });
+                                  if (r.ok) setClosing(null);
+                                  else setClosing((c) => ({ ...c, err: r.decision.reason.message }));
+                                }}>Close and file it</Btn>
+                              <Btn small ghost onClick={() => setClosing(null)}>Keep it open</Btn>
+                            </div>
+                          </div>
+                        );
+                      })()}
                       {/* PRD §6: the gauge is the primary visual on position detail.
                           It is drawn from payoff() like every other zone in the app. */}
                       <GaugeFigure legs={p.legs} entryNet={p.entryNet} spot={s ?? p.entrySpot}
@@ -4055,28 +4243,91 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
               </div>
             </Panel>
 
+            {/* CLOSED TRADES — THE WHOLE RECORD, NOT FOUR FIELDS OF IT.
+                Each entry opens on its full timeline (every entry, not the last
+                six), the thesis it was opened on, the reason it ended and both
+                Alpaca order ids in full — eight characters is right on a row and
+                useless when you are looking a trade up on the broker.
+                Sorted and searched by ref, which is what a ref is for. */}
             <Panel style={{ marginTop: 10 }}>
-              <Lbl>CLOSED TRADES</Lbl>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+                <Lbl>CLOSED TRADES</Lbl>
+                {(store.journal || []).length > 0 && (
+                  <input value={jq} onChange={(e) => setJq(e.target.value)}
+                    placeholder="find by ref — J-0003, 3, or a ticker"
+                    style={{ ...mono, fontSize: 11, padding: "5px 8px", background: T.bg, color: T.ink,
+                      border: `1px solid ${T.line}`, borderRadius: 6, minWidth: 210 }} />
+                )}
+              </div>
               {!(store.journal || []).length && (
-                <div style={{ ...mono, fontSize: 12, color: T.mut, marginTop: 8 }}>Nothing closed yet. Every trade you close lands here with the reason it ended.</div>
+                <div style={{ ...mono, fontSize: 12, color: T.mut, marginTop: 8 }}>Nothing closed yet. Every trade you close lands here with the reason it ended, its whole timeline and the orders behind it.</div>
+              )}
+              {(store.journal || []).length > 0 && !journalRows.length && (
+                <div style={{ ...mono, fontSize: 12, color: T.mut, marginTop: 8 }}>
+                  {`Nothing matches "${jq}". The refs run from ${(store.journal || []).map((e) => e.ref).filter(Boolean).sort()[0] || "—"} upwards.`}
+                </div>
               )}
               <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
-                {(store.journal || []).slice().reverse().map((e) => (
-                  <div key={e.id} style={{ padding: "9px 11px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7 }}>
-                    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                      <span style={{ fontWeight: 700, color: T.ink, fontSize: 13 }}>{e.ticker} · {e.name}</span>
-                      <span style={{ ...mono, fontSize: 13, fontWeight: 700, color: e.pnl == null ? T.dim : e.pnl >= 0 ? T.green : T.red }}>{e.pnl == null ? "—" : fmt$(e.pnl)}</span>
-                      <span style={{ ...mono, fontSize: 10, color: e.ruleExit ? T.green : T.amber, border: `1px solid ${(e.ruleExit ? T.green : T.amber)}55`, borderRadius: 4, padding: "1px 6px" }}>
-                        {e.ruleExit ? "closed by the rules" : "closed by hand"}
-                      </span>
-                      <span style={{ ...mono, fontSize: 10, color: e.riskOk ? T.dim : T.red }}>
-                        {e.riskOk ? "inside the per-trade limit" : "over the per-trade limit at the time"}
-                      </span>
+                {journalRows.map((e) => (
+                  <details key={e.id} style={{ padding: "9px 11px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7 }}>
+                    <summary style={{ cursor: "pointer", listStyle: "none" }}>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                        {e.ref && <span style={{ ...mono, fontSize: 11, fontWeight: 700, color: T.blue }}>{e.ref}</span>}
+                        <span style={{ fontWeight: 700, color: T.ink, fontSize: 13 }}>{e.ticker} · {e.name}</span>
+                        <span style={{ ...mono, fontSize: 13, fontWeight: 700, color: e.pnl == null ? T.dim : e.pnl >= 0 ? T.green : T.red }}>{e.pnl == null ? "—" : fmt$(e.pnl)}</span>
+                        <span style={{ ...mono, fontSize: 10, color: e.ruleExit ? T.green : T.amber, border: `1px solid ${(e.ruleExit ? T.green : T.amber)}55`, borderRadius: 4, padding: "1px 6px" }}>
+                          {e.ruleExit ? "closed by the rules" : "closed by hand"}
+                        </span>
+                        <span style={{ ...mono, fontSize: 10, color: e.riskOk ? T.dim : T.red }}>
+                          {e.riskOk ? "inside the per-trade limit" : "over the per-trade limit at the time"}
+                        </span>
+                      </div>
+                      <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 3 }}>
+                        opened {new Date(e.openedAt).toLocaleDateString("en-GB")} · closed {new Date(e.t).toLocaleDateString("en-GB")}
+                        {(e.timeline || []).length ? ` · ${e.timeline.length} entr${e.timeline.length === 1 ? "y" : "ies"} — tap to open` : ""}
+                      </div>
+                    </summary>
+
+                    <div style={{ ...mono, fontSize: 11, color: T.body, marginTop: 9, paddingTop: 8, borderTop: `1px solid ${T.line}`, lineHeight: 1.55 }}>
+                      <span style={{ color: T.dim }}>WHY IT ENDED · </span>
+                      {e.closeReason?.text || (e.ruleExit ? "closed by the rules" : "no reason was recorded")}
+                      {e.closeReason?.kind === "rule" && e.closeReason.written
+                        ? <span style={{ color: T.mut }}>{` — you also wrote: "${e.closeReason.written}"`}</span> : null}
                     </div>
-                    <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 3 }}>
-                      opened {new Date(e.openedAt).toLocaleDateString("en-GB")} · closed {new Date(e.t).toLocaleDateString("en-GB")}
+
+                    {e.thesis && (
+                      <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 7, lineHeight: 1.55 }}>
+                        <span style={{ color: T.dim }}>THE REASON YOU OPENED IT · </span>
+                        {`chance ${e.thesis.pop != null ? chanceText(e.thesis.pop) : "n/a"} · volatility ${e.thesis.iv != null ? (e.thesis.iv * 100).toFixed(0) + "%" : "n/a"} · season ${e.thesis.seasonal != null ? e.thesis.seasonal.toFixed(1) + "%/mo" : "n/a"}${e.thesis.regime ? ` · ${e.thesis.regime}` : ""}`}
+                        {e.thesis.againstSignal
+                          ? <div style={{ color: T.amber, marginTop: 3 }}>{`Opened against ${e.thesis.againstSignal.n} of ${e.thesis.againstSignal.total} factors — "${e.thesis.againstSignal.reason}"`}</div>
+                          : null}
+                      </div>
+                    )}
+
+                    {/* THE ORDER IDS IN FULL. This is the record, not a screen:
+                        the whole id is what you paste into the broker. */}
+                    <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 7, lineHeight: 1.6, wordBreak: "break-all" }}>
+                      <div>{`OPENING ORDER · ${e.openOrderId || "none — this was the app's own paper book"}${e.openStatus ? ` (${e.openStatus})` : ""}`}</div>
+                      <div>{`CLOSING ORDER · ${e.closeOrderId || "none — closed in the app, no broker order"}`}</div>
                     </div>
-                  </div>
+
+                    {/* THE WHOLE TIMELINE. The position screen shows the last six
+                        because it is a live screen with a chart under it; the
+                        record has no reason to stop at six. */}
+                    {(e.timeline || []).length > 0 && (
+                      <div style={{ marginTop: 9, paddingTop: 8, borderTop: `1px solid ${T.line}` }}>
+                        <div style={{ ...mono, fontSize: 9, color: T.dim }}>TIMELINE · {e.timeline.length} ENTRIES, ALL OF THEM</div>
+                        {e.timeline.map((x, i) => (
+                          <div key={x.seq || i} style={{ ...mono, fontSize: 10, color: T.mut, marginTop: 3, lineHeight: 1.5 }}>
+                            <span style={{ color: T.blue }}>{x.seq || `${e.ref || ""}·??`}</span>
+                            <span style={{ color: T.dim }}>{` ${new Date(x.t).toLocaleDateString("en-GB")} · `}</span>
+                            {x.text}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </details>
                 ))}
               </div>
             </Panel>

@@ -368,7 +368,13 @@ while the position is open.
 
 - Take profit at 50% of max profit — keep
 - Exit at 21 DTE — changed from 7, see PRD §4
-- Stop at 50% of max loss — warning only, pending backtest
+- Stop at 50% of max loss — **warning only, and the code now agrees.** `autopilot.mjs` used to
+  set verdict `STOP` on the crossing and issue a one-tap approve link out of it, on the
+  weakest-evidenced rule in the app. It produces verdict HOLD and one named warning now
+  (`stopWarningSentence()`), never a link; `AUTOPILOT_VERDICTS` is `["HOLD", "CLOSE_ALL"]` and
+  the model's prompt is generated from it, so STOP is not on the menu. A close taken on the
+  warning is a MANUAL close with a written reason — `ruleExitOf()` says which rules actually end
+  a trade, and the stop is not one of them
 - DTE = days to expiration
 
 ## Architecture
@@ -393,6 +399,21 @@ while the position is open.
   `liquidityPercentile`, `minOpenInterestAbsolute`, `minRewardRisk`) live here
   too, so the "nothing today" screen can only ever explain a rule the code
   applies.
+- **The autopilot's verdict and the closing price are rules, so they live in `rules.js`.**
+  `markProvenance()` (did this number come from the feed or from `netBS`), `autopilotVerdict()`
+  (which rule fired, and whether it may become an approve link — `approvable` is a SEPARATE
+  field from `verdict`), `AUTOPILOT_VERDICTS`, `stopWarningSentence()`, `ruleExitOf()`,
+  `closeMarket()` / `closeLimitPrice()` / `CLOSE_LIMIT_SLIPPAGE`. A rule of action written
+  inside a `.mjs` that runs on a server nobody is watching is a rule nothing can test.
+- `src/journal.js` — **the permanent record of a position.** Plain JS, no React, for the same
+  reason `rules.js` and `order.js` are. The ref given at open (`J-0001`, from a counter that
+  only ever goes up — closing a position never hands its number back), the sequence on every
+  timeline entry (`J-0001·03`, given when it is RECORDED, not by where a merge puts it),
+  `appendTimeline()` / `stampTimeline()` (every append goes through one of these, so an entry
+  cannot get its number two different ways), `orderStatusRecheck()`, `closeReason()` /
+  `closeDecision()`, `journalEntry()` (what a closed trade keeps) and `searchJournal()`.
+  **`closePos()` used to keep four fields** — ticker, pnl, ruleExit, riskOk — and drop the
+  timeline, the thesis, both order ids and the reason. Never build a closed entry by hand.
 - `src/order.js` — **what is actually sent, and what came back.** Plain JS, no React,
   for the same reason `rules.js` and `handoff.js` are: `orderBody()` (the one Alpaca
   body builder, used by all five sites that construct one), `reduceRatios()` /
@@ -831,6 +852,32 @@ went straight to a confirm page skipped the trade itself. Both are gone.
   with the question that produced it, and quoted in the report. The report used
   to cite "the copilot's read" from its own model call while the panel's runs
   left no trace, so the two documents described the same day differently.
+
+**A CLOSING ORDER IS A LIMIT, AND ITS PRICE IS WORKED OUT AT THE TAP.** `autopilot.mjs` built
+the close with `type: "market"` and stored the finished body; tapping the link sent it, up to 24
+hours later. BOIL quoted bid/ask spreads of **66%, 91%, 145% and 166% of the mid** near the
+money — the app refuses to PRICE a candidate off a market that wide (`spreadFloor`) and then
+closed one at the touch. The approval now carries the **order intent** and `approve.mjs` fetches
+a fresh chain, reads each leg's live two-sided quote and calls **`orderBody()` unchanged with
+`type: "limit"`**. The price starts at the mid and concedes `CLOSE_LIMIT_SLIPPAGE` (0.25,
+**CHOSEN not measured**, and on the NOT VERIFIED list) of the spread, always SUBTRACTED from the
+signed net so there is no branch in the arithmetic — and **never flipped round**: a +0.02
+structure conceded by 0.10 would price at −0.08, which the broker reads as "sell it for eight
+cents" because the body carries the magnitude. A leg with no live bid stops the send and the
+page says which leg. A working order says so, and the next run proposes a fresh price rather
+than retrying in silence.
+
+**AN ESTIMATED PRICE CAN NEVER BECOME AN ORDER.** `markFromChain()` returns `net: null` unless
+every leg is quoted on both sides and the caller falls back to `netBS()`; the brief said
+"CBOE delayed" whenever the chain had merely LOADED. `markProvenance()` reads the NET: the source
+is `"model"` whenever `netBS` produced it, the brief says the figures are estimates above them,
+and the take-profit and exit-DTE triggers produce a warning instead of an approve link.
+
+**THE ORDER STATUS IS RE-READ AFTER THE FACT.** `recheckOrders()` in `App.jsx` asks Alpaca about
+any position whose order had not filled — on arrival and with the 60-second monitor — and
+appends a timeline entry only when the answer CHANGED. Never on a filled order (finished), never
+in demo (no broker call), and silent on failure: the warning simply stays until the broker can
+be reached.
 
 The gate answers "may this order leave"; the quality floors answer "should this
 have been offered at all", and they live where candidates are generated, not in

@@ -242,6 +242,33 @@ export const RULES = {
   // it is a judgement written down once, with its reasoning, rather than a bare
   // number inside visuals.jsx.
   scratchPayoffShare: 0.20,
+
+  // --- closeLimitSlippage — HOW FAR A CLOSING LIMIT MAY WALK AWAY FROM THE MID.
+  //
+  // >>> CHOSEN, NOT MEASURED. <<< Every other number in this object either comes
+  // from published research (the exits, PRD §4) or from a reading taken off the
+  // live chains (the three floors). This one comes from neither. It is a
+  // judgement written down once, with its reasoning, and it goes on the NOT
+  // VERIFIED list in PRD.md until a filled closing order has been watched.
+  //
+  // What it is for. A closing order used to be sent as a MARKET order, which on
+  // these chains is not a price at all: BOIL quoted bid/ask spreads of 66%, 91%,
+  // 145% and 166% of the mid near the money, and a market order into a 145%-wide
+  // book pays whatever the far side is asking. So a close is a LIMIT, and a
+  // limit needs a number.
+  //
+  // The number starts at the MID and is allowed to concede a quarter of the
+  // spread, in the direction that is worse for whoever is closing. A quarter and
+  // not a half: half the spread IS the far side of the market, which is the
+  // market order this replaces. A quarter is a real concession — enough that the
+  // order is not sitting at a price nobody will meet — while keeping the close
+  // nearer the mid than the touch. On a 10-cent-wide $2 option it gives up 2.5
+  // cents; on the 145%-wide BOIL strike it refuses to chase.
+  //
+  // It is NOT a licence to retry. An order that does not fill at this price is
+  // reported as working, and the next autopilot run proposes the close again at
+  // a limit computed from a fresh chain. Nothing walks the price up by itself.
+  closeLimitSlippage: 0.25,
 };
 
 /** The same minimum in dollars for ONE contract, which is how screens print it. */
@@ -1452,5 +1479,290 @@ export function sizing(answers = {}) {
     pills,
   };
 }
+
+/* =====================================================================
+   THE AUTOPILOT'S VERDICT — WHICH RULE FIRED, WHAT IT SAYS, AND WHETHER
+   ANYTHING MAY BE ACTED ON.
+
+   This lives here for the reason every rule sentence does: the autopilot
+   runs on a server nobody is watching, it writes the brief that the owner
+   reads on his phone, and the difference between "a rule fired" and "here
+   is a link that sends an order" is the whole of the safety of this app.
+   A `.mjs` function is not the place to decide that.
+
+   Three findings, and each one is a rule of action that was being written
+   somewhere it could not be tested:
+
+   1. THE STOP IS A WARNING IN THE PRD AND WAS AN ORDER IN THE CODE.
+      PRD §4 downgraded the 50%-of-max-loss stop to an alert — "show a
+      warning, do not auto-close, until backtest says otherwise" — and
+      `RULES.stopLossEnforcement` has said `"warn"` since. The autopilot
+      set `verdict = "STOP"` on it and then built an approve link, which
+      is a one-tap close on the weakest-evidenced rule in the app. The
+      backtest that would justify it is still NOT BUILT (PRD §4).
+
+   2. A MODEL PRICE IS NOT A MARKET PRICE. When a leg is missing from the
+      chain the mark is computed from Black-Scholes. That is a fine number
+      to THINK with and a terrible one to ACT on: it is the app's own
+      opinion of what the contract is worth, and an approve link built on
+      it closes a real position at a price nobody quoted.
+
+   3. A VERDICT IS NOT AN AUTHORISATION. `approvable` is separate from
+      `verdict` on purpose. CLOSE_ALL can be the right call while the link
+      is still refused, and the brief has to be able to say both.
+===================================================================== */
+
+/** The one home for how far a closing limit may walk from the mid. */
+export const CLOSE_LIMIT_SLIPPAGE = RULES.closeLimitSlippage;
+
+/** What the app calls a price it worked out itself. */
+export const MODEL_PRICE = "model";
+
+/**
+ * WHERE THE MARK CAME FROM — and it must never be the feed's name when the
+ * feed did not supply it.
+ *
+ * `markFromChain()` in the autopilot returns `net: null` unless EVERY leg was
+ * found with a two-sided quote, and the caller then falls back to `netBS()`.
+ * The brief went on reporting the feed's name whenever the chain had loaded at
+ * all, so a position marked entirely by Black-Scholes was handed to the model —
+ * and printed in the brief — as delayed market data.
+ *
+ * @param chainNet  the net the CHAIN produced, or null if it could not
+ * @param feed      what to call the feed when it did produce one. The caller
+ *                  names its own feed; this function never does (CLAUDE.md:
+ *                  never write a feed's name into anything but `chain.js`).
+ */
+export function markProvenance(chainNet, feed = "the option chain") {
+  const modelled = chainNet == null;
+  return {
+    modelled,
+    source: modelled ? MODEL_PRICE : feed,
+    note: modelled ? modelPriceNote(feed) : null,
+  };
+}
+
+/** Why an estimated price is not something to act on, in one sentence. */
+export const modelPriceNote = (feed = "the option chain") =>
+  `This position's value is ESTIMATED: at least one leg had no two-sided quote on ${feed}, so the ` +
+  `price here was worked out from a volatility model rather than read from the market. Every figure ` +
+  `derived from it — the profit, the share of the maximum, the distance to the exit — is an estimate ` +
+  `too, and nothing can be sent to the broker on it.`;
+
+/**
+ * THE STOP, IN THE WORDS THE PRD USES FOR IT.
+ * A sentence, never a verdict: `stopLossEnforcement` is "warn" and this is what
+ * warning looks like. The first clause is the phrase the brief and the screen
+ * both carry, so the two cannot drift apart.
+ */
+export const stopWarningSentence = (pnl = null) =>
+  `Stop threshold crossed — not validated by backtest` +
+  `${pnl != null && Number.isFinite(+pnl) ? ` (${money(pnl)}, at or past ${pctText(RULES.stopLossPct)} of the maximum loss)` : ""}. ` +
+  `Nothing closes on this and no order is offered for it. Closing here is your decision, and it is ` +
+  `recorded as a manual close with the reason you write, never as a trade the rules ended.`;
+
+/**
+ * WHICH RULE ENDED A TRADE — and the stop is not one of them.
+ *
+ * The Journal counts "closed by the rules" as the app's one measure of
+ * discipline, and it was counting a stop-warning close among them: `posAlerts`
+ * raises the stop to level "action" so the row is impossible to miss, and
+ * `closePos` read that level as "a rule said so". A warning the user chose to
+ * act on is a decision, and filing it as obedience flatters the number that is
+ * supposed to be the honest one.
+ *
+ * @returns { ruleExit, rule, text, stopWarning }
+ */
+export function ruleExitOf({ tpHit = false, dteExit = false, slHit = false, dteLeft = null } = {}) {
+  if (tpHit) {
+    return { ruleExit: true, rule: "take-profit", stopWarning: !!slHit,
+      text: `Closed by the rules: ${pctText(RULES.takeProfitPct)} of the maximum profit was reached.` };
+  }
+  if (dteExit) {
+    return { ruleExit: true, rule: "exit-dte", stopWarning: !!slHit,
+      text: `Closed by the rules: inside the ${RULES.exitDTE}-day exit window` +
+        `${dteLeft != null ? ` (${dteLeft} day${dteLeft === 1 ? "" : "s"} left)` : ""}.` };
+  }
+  return { ruleExit: false, rule: null, stopWarning: !!slHit, text: null };
+}
+
+/** The verdicts the model is allowed to return. STOP is deliberately absent. */
+export const AUTOPILOT_VERDICTS = ["HOLD", "CLOSE_ALL"];
+
+/**
+ * THE VERDICT, AND WHETHER IT MAY BECOME AN APPROVE LINK.
+ *
+ * @param verdict   what the model said, already normalised to upper case
+ * @param pctMax    percent of the maximum profit reached (null when unbounded)
+ * @param pnl       profit or loss in dollars, SIGNED
+ * @param maxLoss   the position's maximum loss, SIGNED (negative)
+ * @param dteLeft   days to expiration
+ * @param modelled  true when the mark came from the model, not from quotes
+ * @returns { verdict, rule, rationale, warnings, approvable }
+ */
+export function autopilotVerdict({ verdict = "HOLD", pctMax = null, pnl = null,
+  maxLoss = null, dteLeft = null, modelled = false } = {}) {
+  const warnings = [];
+  let v = String(verdict || "HOLD").toUpperCase();
+  let rationale = null, rule = null;
+
+  // A model that answers STOP is answering a question that is no longer asked.
+  // The prompt no longer offers it; this is what happens if one comes back
+  // anyway, and it is the same treatment the mechanical crossing gets below.
+  if (v === "STOP") { v = "HOLD"; rationale = null; }
+  if (!AUTOPILOT_VERDICTS.includes(v)) v = "HOLD";
+
+  // 1) take profit — a rule of action, and it keeps its link.
+  const tp = pctMax != null && Number.isFinite(+pctMax) && +pctMax >= RULES.takeProfitPct * 100;
+  if (tp) {
+    v = "CLOSE_ALL"; rule = "take-profit";
+    rationale = `Rule: reached ${pctText(RULES.takeProfitPct)} of max profit.`;
+  }
+
+  // 2) the stop — NEVER a verdict, NEVER a link, ALWAYS a warning.
+  const stopCrossed = pnl != null && maxLoss != null
+    && Number.isFinite(+pnl) && Number.isFinite(+maxLoss) && +maxLoss < 0
+    && +pnl <= RULES.stopLossPct * +maxLoss;
+  if (stopCrossed) warnings.push(stopWarningSentence(pnl));
+
+  // 3) the exit window — a rule of action, and it keeps its link.
+  if (!tp && v === "HOLD" && dteLeft != null && Number.isFinite(+dteLeft) && +dteLeft <= RULES.exitDTE) {
+    v = "CLOSE_ALL"; rule = "exit-dte";
+    rationale = `Rule: inside the ${RULES.exitDTE} DTE exit window.`;
+  }
+
+  // 4) AN ESTIMATED PRICE CANNOT AUTHORISE AN ORDER. The trigger is real and is
+  // reported as a warning; what it may not do is produce a one-tap close at a
+  // price the market never quoted. The verdict goes back to HOLD so the brief
+  // does not read as an instruction the app is refusing to act on.
+  if (modelled && rule) {
+    warnings.push(
+      `${rule === "take-profit" ? `The ${pctText(RULES.takeProfitPct)} take-profit level` : `The ${RULES.exitDTE}-day exit window`} ` +
+      `has been reached on an ESTIMATED price, so this is a warning and not a proposal: no order is offered. ` +
+      `Check the position against a live chain before doing anything.`);
+    v = "HOLD";
+    rationale = `${rule === "take-profit" ? `The take-profit level` : `The exit window`} was reached on an estimated ` +
+      `price. The rule is reported, not acted on.`;
+    rule = null;
+  }
+
+  return {
+    verdict: v, rule,
+    // null means "no rule spoke": the caller keeps whatever the model said.
+    rationale,
+    warnings,
+    // A link exists only for an action verdict reached on a real price.
+    approvable: v !== "HOLD" && !modelled,
+  };
+}
+
+/* =====================================================================
+   THE PRICE A CLOSING ORDER IS SENT AT.
+
+   A close used to go out as a MARKET order. On these chains that is not a
+   price: BOIL quoted bid/ask spreads of 66%, 91%, 145% and 166% of the mid
+   on strikes this app builds on, and a market order into a book that wide
+   pays whatever the far side is asking. The whole app refuses to PRICE a
+   candidate off a market that wide (`spreadFloor`), and then closed one at
+   the touch.
+
+   So a close is a limit, and the limit is computed AT TAP TIME from a fresh
+   chain — never at proposal time, which can be a day earlier.
+===================================================================== */
+
+/**
+ * THE CLOSING MARKET, READ OFF THE LEGS AND THEIR QUOTES.
+ *
+ * @param legs    [{ side, qty }] — the position AS HELD (side +1 long, -1 short)
+ * @param quotes  [{ bid, ask }] one per leg, in the same order
+ * @returns { ok, missing, netMid, spread }
+ *
+ * `netMid` is the net of the structure at the mids, SIGNED the way the position
+ * is: positive for something you would sell to close, negative for something you
+ * would buy back. `spread` is how wide the whole structure's market is.
+ *
+ * A LEG WITHOUT A TWO-SIDED QUOTE MAKES THE WHOLE THING UNREADABLE, and a bid
+ * of zero is not a quote — it is the same test `priceability()` applies at
+ * entry, for the same reason: nobody bidding means the mid is half of an ask
+ * nobody agreed to. `ok` false means DO NOT SEND, and `missing` names which legs.
+ */
+export function closeMarket(legs = [], quotes = []) {
+  const missing = [];
+  let netMid = 0, spread = 0;
+  (legs || []).forEach((l, i) => {
+    const q = (quotes || [])[i] || {};
+    const bid = Number(q.bid), ask = Number(q.ask);
+    if (!Number.isFinite(bid) || !Number.isFinite(ask) || !(bid > 0) || !(ask > 0) || ask < bid) {
+      missing.push(i); return;
+    }
+    const qty = Math.abs(Math.round(+(l && l.qty) || 0)) || 1;
+    netMid += Math.sign(+(l && l.side) || 1) * qty * (bid + ask) / 2;
+    spread += qty * (ask - bid);
+  });
+  const ok = missing.length === 0 && (legs || []).length > 0;
+  return { ok, missing, netMid: ok ? netMid : null, spread: ok ? spread : null };
+}
+
+/**
+ * THE LIMIT, STARTING AT THE MID AND NEVER WORSE THAN THE ALLOWANCE.
+ *
+ * The concession is `CLOSE_LIMIT_SLIPPAGE × (ask − bid)` summed over the legs,
+ * and it is always subtracted from the SIGNED net, which is the same direction
+ * in both cases and is why the arithmetic has no branch in it:
+ *
+ *   a long structure  netMid +3.00, spread 0.40 → +2.90  you receive 10c less
+ *   a short structure netMid −3.00, spread 0.40 → −3.10  you pay 10c more
+ *
+ * `limit` is the MAGNITUDE, because that is what `orderBody()` sends: it takes
+ * the absolute value and lets the legs' own sides say which way the money goes.
+ *
+ * The floor at one cent is the smallest price a broker takes. If the allowance
+ * would drive the net through zero the structure is worth about nothing and the
+ * order is priced at the minimum, which is honest: it is not worth chasing.
+ */
+export function closeLimitPrice({ netMid, spread, slippage = CLOSE_LIMIT_SLIPPAGE } = {}) {
+  // `Number(null)` is 0 and 0 is finite — the trap this repository has written
+  // down three times (the ceiling, the expiry choice, the probability). A
+  // missing net is not a net of nothing; it is no price at all.
+  if (netMid == null || spread == null) return null;
+  if (!Number.isFinite(+netMid) || !Number.isFinite(+spread)) return null;
+  const mid = +netMid;
+  const allowance = Math.max(0, +spread) * Math.max(0, +slippage);
+  const conceded = mid - allowance;
+  const dir = Math.sign(mid) || -1;
+  // FLOORED AT A CENT, AND NEVER FLIPPED ROUND. A structure worth +0.02 into a
+  // 0.40-wide market would concede its way to −0.08, and since `orderBody()`
+  // sends the MAGNITUDE and lets the legs say which way the money goes, that
+  // 0.08 would reach the broker as "sell it for 8 cents" — four times BETTER
+  // than the mid, on an order that was meant to concede. A concession that
+  // turns the trade round is not a concession.
+  const net = Math.sign(conceded) === dir && Math.abs(conceded) >= 0.01
+    ? +conceded.toFixed(4)
+    : dir * 0.01;
+  return { netMid: mid, spread: +spread, slippage: Math.max(0, +slippage), allowance, net, limit: Math.abs(net) };
+}
+
+/** What the limit is, and where it came from, in one sentence for the page. */
+export const closeLimitNote = (r) => {
+  if (!r) return `The closing price could not be worked out, so nothing was sent.`;
+  return `Limit ${money(r.limit * 100)} per combination, worked out just now from the live chain: ` +
+    `the structure's mid is ${money(Math.abs(r.netMid) * 100)} and the two sides of its market are ` +
+    `${money(r.spread * 100)} apart, so the order concedes ${pctText(r.slippage)} of that — ` +
+    `${money(r.allowance * 100)} — and no more. It is a limit, not a market order: if nobody meets it ` +
+    `the order sits, and the next run works the price out again from a fresh chain.`;
+};
+
+/** Why a close was refused before it was sent. */
+export const closeUnreadableNote = (missing = [], legs = []) => {
+  const n = missing.length;
+  const which = missing.map((i) => {
+    const l = (legs || [])[i] || {};
+    return l.strike != null ? `${l.strike}${l.type === "put" ? "P" : "C"}` : `leg ${i + 1}`;
+  }).join(", ");
+  return `Nothing was sent. ${n === 1 ? "One leg has" : `${n} legs have`} no live two-sided quote right now` +
+    `${which ? ` (${which})` : ""}, so the closing price cannot be read from the market — and a close priced ` +
+    `off a guess is the thing this app refuses to do. Nothing has changed on the broker. The autopilot will ` +
+    `work the price out again on its next run, when the market is quoting.`;
+};
 
 export default RULES;

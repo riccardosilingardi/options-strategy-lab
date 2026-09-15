@@ -1332,16 +1332,40 @@ export function GuardianPanel({ pos, spot, dteLeft, ivNow, sigma, seasonalNow, p
           <Stat k="TAKE IT NOW OR WAIT?" v={pnlNow != null ? (pnlNow >= sim.evExit ? "→ TAKE IT NOW" : "→ WAIT") : "—"} c={T.amber} />
         </div>
       )}
-      {(pos.timeline || []).length > 0 && (
-        <div style={{ marginTop: 10 }}>
-          <div style={{ ...mono, fontSize: 9, color: T.dim }}>TIMELINE</div>
-          {(pos.timeline || []).slice(-6).map((e, i) => (
-            <div key={i} style={{ ...mono, fontSize: 10, color: T.mut, marginTop: 2 }}>
-              <span style={{ color: T.dim }}>{new Date(e.t).toLocaleDateString("en-GB")}</span> · {e.text}
+      {/* THE TIMELINE IS ALL OF IT, WITH THE RECENT SIX IN FRONT.
+          It used to be `slice(-6)` and nothing else, so everything a position
+          was told in its first weeks was simply not reachable from the screen
+          that manages it — and the Journal, where it might have been read
+          later, was throwing the timeline away at close. Six is a sensible
+          number to have open on a live screen with a chart under it; it is not
+          a sensible number to be able to see at all. */}
+      {(pos.timeline || []).length > 0 && (() => {
+        const tl = pos.timeline || [];
+        const recent = tl.slice(-6);
+        const earlier = tl.slice(0, Math.max(0, tl.length - 6));
+        const Line = ({ e }) => (
+          <div style={{ ...mono, fontSize: 10, color: T.mut, marginTop: 2, lineHeight: 1.5 }}>
+            {e.seq ? <span style={{ color: T.blue }}>{e.seq} </span> : null}
+            <span style={{ color: T.dim }}>{new Date(e.t).toLocaleDateString("en-GB")}</span> · {e.text}
+          </div>
+        );
+        return (
+          <div style={{ marginTop: 10 }}>
+            <div style={{ ...mono, fontSize: 9, color: T.dim }}>
+              TIMELINE{pos.ref ? ` · ${pos.ref}` : ""} · {tl.length} ENTR{tl.length === 1 ? "Y" : "IES"}
             </div>
-          ))}
-        </div>
-      )}
+            {earlier.length > 0 && (
+              <details style={{ marginTop: 2 }}>
+                <summary style={{ ...mono, fontSize: 10, color: T.blue, cursor: "pointer" }}>
+                  {`Show the earlier ${earlier.length} ${earlier.length === 1 ? "entry" : "entries"}`}
+                </summary>
+                {earlier.map((e, i) => <Line key={e.seq || `e${i}`} e={e} />)}
+              </details>
+            )}
+            {recent.map((e, i) => <Line key={e.seq || `r${i}`} e={e} />)}
+          </div>
+        );
+      })()}
     </div>
   );
 }
