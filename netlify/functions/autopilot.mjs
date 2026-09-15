@@ -2,9 +2,10 @@
 // Ciclo: posizioni → dati oggettivi (chain CBOE, stagionalità) → TIS + Exit Simulator → brief Claude → approve link → webhook
 import { getStore } from "@netlify/blobs";
 import { netBS, probProfit, exitSim, SEASONAL, SIGMA } from "../../src/engine.js";
-import { RULES, ruleBadge, copilotRulesBlock, money, pctText } from "../../src/rules.js";
+import { RULES, ruleBadge, copilotRulesBlock, pctText,
+  markProvenance, autopilotVerdict, AUTOPILOT_VERDICTS, MODEL_PRICE } from "../../src/rules.js";
 import { evaluateTrade } from "../../src/riskGate.js";
-import { orderBody } from "../../src/order.js";
+import { appendTimeline } from "../../src/journal.js";
 
 // L'autopilot parla solo con paper-api.alpaca.markets (vedi approve.mjs, dove
 // l'host e' costante): la verifica paper e' vera per costruzione, non presunta.
@@ -42,8 +43,16 @@ function markFromChain(data, pos) {
     const o = data.options.find((x) => x.option === occ);
     if (o?.iv) ivs.push(o.iv);
   }
-  return { spot, net: found === pos.legs.length ? net : null, iv: ivs.length ? ivs.reduce((a, b) => a + b, 0) / ivs.length : null };
+  // NET IS NULL UNLESS EVERY LEG WAS FOUND WITH A TWO-SIDED QUOTE. That null is
+  // the whole of the signal that the mark below came from the model instead —
+  // it must never be smoothed over into "some of it came from the chain".
+  return { spot, net: found === pos.legs.length ? net : null, found,
+    iv: ivs.length ? ivs.reduce((a, b) => a + b, 0) / ivs.length : null };
 }
+// WHAT THIS FUNCTION'S OWN FEED IS CALLED. `rules.js` never writes a feed's
+// name (CLAUDE.md) — it is handed one, and this is the site that knows it.
+const CHAIN_FEED = "CBOE delayed";
+
 function computeTIS(pos, cur) {
   const th = pos.thesis || {};
   let pts = 0;
@@ -89,6 +98,11 @@ export default async () => {
     const m = markFromChain(data, pos);
     const spot = m?.spot ?? pos.entrySpot;
     const iv = m?.iv ?? pos.thesis?.iv ?? 0.25;
+    // WHERE THE PRICE CAME FROM, DECIDED ONCE AND CARRIED EVERYWHERE. `m.net` is
+    // null unless every leg was quoted on both sides; the fallback is the app's
+    // own volatility model, and the brief used to go on calling it the feed's
+    // name whenever the chain had loaded at all.
+    const prov = markProvenance(m?.net ?? null, CHAIN_FEED);
     const markNet = m?.net ?? netBS(pos.legs, spot, dteLeft, iv);
     const pnl = (markNet - pos.entryNet) * 100;
     const pop = probProfit(pos.legs, pos.entryNet, spot, iv, Math.max(1, dteLeft));
@@ -111,7 +125,10 @@ export default async () => {
           // with no ceiling; null says the target does not exist, which is true.
           targets: { takeProfit: Number.isFinite(pos.maxProfit) ? +(RULES.takeProfitPct * pos.maxProfit).toFixed(0) : null, stopWarning: +(RULES.stopLossPct * pos.maxLoss).toFixed(0), exitDTE: RULES.exitDTE },
           entryThesis: pos.thesis,
-          today: { chainSource: data ? "CBOE delayed" : "Black-Scholes model", spot: +spot.toFixed(2), pnl: +pnl.toFixed(0), pct_max_profit: +pctMax.toFixed(0), popNow: +(pop * 100).toFixed(0), ivNow: +(iv * 100).toFixed(0), tis, seasonalThisMonth: seasonalNow },
+          // "model" WHENEVER THE NUMBER CAME FROM `netBS`, not merely when the
+          // chain failed to load: a chain that loaded and was missing one leg
+          // produced a modelled net and was reported as market data.
+          today: { chainSource: prov.source, priceIsEstimated: prov.modelled, spot: +spot.toFixed(2), pnl: +pnl.toFixed(0), pct_max_profit: +pctMax.toFixed(0), popNow: +(pop * 100).toFixed(0), ivNow: +(iv * 100).toFixed(0), tis, seasonalThisMonth: seasonalNow },
           simulator_from_today: { p_take_profit_first: +(sim.pTP * 100).toFixed(0), p_stop_first: +(sim.pSL * 100).toFixed(0), p_exit_at_exit_dte_positive: +(sim.pTimePos * 100).toFixed(0), expected_pnl_following_rules: +sim.ev.toFixed(0), median_days_to_take_profit: sim.medDays },
         };
         const r = await fetch("https://api.anthropic.com/v1/messages", {
@@ -119,7 +136,14 @@ export default async () => {
           headers: { "x-api-key": anthKey, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
           body: JSON.stringify({
             model: "claude-sonnet-4-6", max_tokens: 700,
-            system: `You are the autopilot of a PAPER options trader. ${copilotRulesBlock()} You receive OBJECTIVE DATA ONLY. Reply with VALID JSON ONLY: {"verdict":"HOLD|CLOSE_ALL|STOP","confidence":0-100,"rationale":"one sentence","evidence":["3-5 pieces of evidence, each with a number taken from the data"],"invalidation":"the spot or P&L level at which this verdict changes"}. Verdict CLOSE_ALL when pct_max_profit >= ${RULES.takeProfitPct * 100} or the simulator clearly favours taking the money; STOP when pnl <= the stop warning or the thesis has collapsed (tis < 40 with negative P&L); otherwise HOLD. Never quote a rule number other than the ones above.`,
+            // STOP IS NOT ON THE MENU. It was, and the model was told to
+            // return it "when pnl <= the stop warning or the thesis has
+            // collapsed" — on a rule the PRD downgraded to an alert because
+            // its evidence is the weakest in the app and the backtest that
+            // would settle it is NOT BUILT. Offering it as a verdict made a
+            // one-tap close out of a warning. The two verdicts below are the
+            // two the app will act on, and `AUTOPILOT_VERDICTS` is the list.
+            system: `You are the autopilot of a PAPER options trader. ${copilotRulesBlock()} You receive OBJECTIVE DATA ONLY. Reply with VALID JSON ONLY: {"verdict":"${AUTOPILOT_VERDICTS.join("|")}","confidence":0-100,"rationale":"one sentence","evidence":["3-5 pieces of evidence, each with a number taken from the data"],"invalidation":"the spot or P&L level at which this verdict changes"}. Verdict CLOSE_ALL when pct_max_profit >= ${RULES.takeProfitPct * 100} or the simulator clearly favours taking the money; otherwise HOLD. There is no STOP verdict: a loss at or past ${pctText(RULES.stopLossPct)} of max loss is a WARNING the app raises by itself, never an action you propose, so say so in the rationale and still answer HOLD. When chainSource is "${MODEL_PRICE}" every figure you are given is an ESTIMATE worked out from a volatility model rather than read from the market: say so in the rationale and do not propose closing on it. Never quote a rule number other than the ones above.`,
             messages: [{ role: "user", content: JSON.stringify(facts) }],
           }),
         });
@@ -130,10 +154,18 @@ export default async () => {
         evidence = parsed.evidence || []; invalidation = parsed.invalidation || "";
       } catch (e) { rationale = `The model could not be reached (${String(e.message).slice(0, 80)}): the mechanical rules decide instead.`; }
     }
-    // fallback regole meccaniche
-    if (pctMax >= RULES.takeProfitPct * 100 && verdict === "HOLD") { verdict = "CLOSE_ALL"; rationale = `Rule: reached ${pctText(RULES.takeProfitPct)} of max profit.`; }
-    if (pnl <= RULES.stopLossPct * pos.maxLoss) { verdict = "STOP"; rationale = `Rule: P&L reached the ${pctText(RULES.stopLossPct)} stop warning (${money(pnl)}).`; }
-    if (dteLeft <= RULES.exitDTE && verdict === "HOLD") { verdict = "CLOSE_ALL"; rationale = `Rule: inside the ≤${RULES.exitDTE} DTE exit window.`; }
+    // THE MECHANICAL RULES, IN ONE TESTED FUNCTION (`autopilotVerdict` in
+    // rules.js). It decides three things the loop used to decide inline:
+    //   * take profit and the exit window are actions, and keep their links;
+    //   * the stop is a WARNING and can never be a verdict — it used to set
+    //     `verdict = "STOP"` and then build an approve link out of it;
+    //   * a price that came from the model can produce a warning but never a
+    //     proposal, whichever rule fired.
+    const dec = autopilotVerdict({ verdict, pctMax, pnl, maxLoss: pos.maxLoss, dteLeft, modelled: prov.modelled });
+    verdict = dec.verdict;
+    if (dec.rationale) rationale = dec.rationale;
+    const ruleWarnings = [...dec.warnings];
+    if (prov.modelled) ruleWarnings.push(prov.note);
 
     // ordine proposto + approve link (solo se azione richiesta)
     let approveUrl = null, gateResult = null;
@@ -150,24 +182,39 @@ export default async () => {
     }
     if (verdict !== "HOLD" && gateResult && !gateResult.pass) {
       rejected.push({ pos: `${pos.ticker} ${pos.name}`, verdict, reasons: gateResult.violations.map((v) => v.message) });
-      pos.timeline = [...(pos.timeline || []), { t: Date.now(), type: "gate",
-        text: `RISK GATE: ${verdict} not proposed — ${gateResult.violations.map((v) => v.message).join(" ")}` }];
+      const g = appendTimeline(pos, { t: Date.now(), type: "gate",
+        text: `RISK GATE: ${verdict} not proposed — ${gateResult.violations.map((v) => v.message).join(" ")}` });
+      pos.timeline = g.timeline; pos.seqNext = g.seqNext;
     }
-    if (verdict !== "HOLD" && gateResult && gateResult.pass) {
+    if (dec.approvable && verdict !== "HOLD" && gateResult && gateResult.pass) {
       const exp = (pos.expKey || "").replaceAll("-", "").slice(2);
-      // Le quote di gamba devono essere prime fra loro (Alpaca 422/42210000):
-      // la TAGLIA sta in qty, la FORMA nei rapporti. Stessa funzione del
-      // ticket, src/order.js, perche' due copie divergono.
       const closeLegs = pos.legs.slice(0, 4);
-      const order = orderBody({
-        legs: closeLegs,
-        occs: closeLegs.map((l) => `${pos.ticker}${exp}${l.type === "call" ? "C" : "P"}${String(Math.round(l.strike * 1000)).padStart(8, "0")}`),
-        userQty: 1, type: "market", tif: "day", intent: "close",
-      });
+      // THE ORDER IS NOT BUILT HERE ANY MORE, AND THAT IS THE POINT.
+      //
+      // It used to be built here as a MARKET order — `type: "market"` — and
+      // stored whole, so the price the position was closed at was whatever the
+      // far side happened to be asking when somebody tapped the link, up to 24
+      // hours later. On these chains that is not a price: BOIL quoted markets
+      // 145% of the mid wide near the money, and the app refuses to PRICE a new
+      // candidate off a market that wide (`spreadFloor`) while closing one at
+      // the touch.
+      //
+      // So what travels is the INTENT — which legs, which contracts, which way —
+      // and `approve.mjs` builds the body with `orderBody({ type: "limit" })`
+      // from a chain it fetches AT TAP TIME. A limit worked out now would be a
+      // day old by then, which is the same mistake in a different hat.
       const id = crypto.randomUUID();
-      // Il contesto viaggia con l'autorizzazione: approve.mjs rifa' girare il
-      // cancello al momento dell'esecuzione, che puo' essere 24h dopo.
-      approvals[id] = { order, posName: `${pos.ticker} ${pos.name}`, label: verdict,
+      approvals[id] = {
+        orderIntent: {
+          ticker: pos.ticker, expKey: pos.expKey, legs: closeLegs,
+          occs: closeLegs.map((l) => `${pos.ticker}${exp}${l.type === "call" ? "C" : "P"}${String(Math.round(l.strike * 1000)).padStart(8, "0")}`),
+          userQty: 1, tif: "day", intent: "close",
+        },
+        // WHICH POSITION THIS IS, not just what it is called. The timeline entry
+        // `approve.mjs` appends has to land on the right record, and a display
+        // name is not an identity.
+        posId: pos.id, posRef: pos.ref || null,
+        posName: `${pos.ticker} ${pos.name}`, label: verdict,
         exp: Date.now() + 24 * 36e5, used: false,
         gateContext: {
           proposal: { intent: "close", ticker: pos.ticker, name: pos.name, legs: pos.legs,
@@ -177,9 +224,31 @@ export default async () => {
       approveUrl = `${siteUrl}/api/approve?id=${id}`;
     }
 
-    const brief = { t: Date.now(), verdict, rationale, evidence, invalidation, pnl: +pnl.toFixed(0), pctMax: +pctMax.toFixed(0), tis, pop: +(pop * 100).toFixed(0), dteLeft, sim, approveUrl, gateWarnings: (gateResult?.warnings || []).map((w) => w.message), gateBlocked: !!(gateResult && !gateResult.pass) };
+    // A CLOSE THAT IS STILL WORKING IS NOT A CLOSE, AND IT IS NOT RETRIED IN
+    // SILENCE. `approve.mjs` writes the broker's answer into this timeline; if
+    // the last one is an order that never filled, the brief says so beside the
+    // fresh proposal rather than the app quietly sending a second order.
+    const lastClose = [...(pos.timeline || [])].reverse()
+      .find((e) => e && e.type === "order" && e.orderWorking);
+    const workingClose = lastClose
+      ? `A close approved on ${new Date(lastClose.t).toLocaleDateString("en-GB")} (order ${lastClose.orderId}) ` +
+        `was taken by the broker and has not filled. Nothing has been re-sent by itself: the proposal above is a ` +
+        `fresh one, priced from today's chain, and it is yours to approve or ignore. Cancel the old order first ` +
+        `if it is still standing.`
+      : null;
+    if (workingClose) ruleWarnings.push(workingClose);
+
+    const brief = { t: Date.now(), verdict, rationale, evidence, invalidation, pnl: +pnl.toFixed(0), pctMax: +pctMax.toFixed(0), tis, pop: +(pop * 100).toFixed(0), dteLeft, sim, approveUrl,
+      priceSource: prov.source, priceIsEstimated: prov.modelled,
+      // THE WARNINGS THE RULES RAISED, BESIDE THE GATE'S OWN. The stop lives
+      // here now: it is a sentence in the brief and never a link.
+      ruleWarnings,
+      gateWarnings: (gateResult?.warnings || []).map((w) => w.message), gateBlocked: !!(gateResult && !gateResult.pass) };
     briefsPrev[pos.id] = { tis, dteLeft, t: brief.t };
-    pos.timeline = [...(pos.timeline || []), { t: brief.t, type: "autopilot", text: `AUTOPILOT ${verdict} (${brief.pctMax}% maxP, TIS ${tis}) — ${rationale}${approveUrl ? " · [approve: " + approveUrl + "]" : ""}` }];
+    const tl = appendTimeline(pos, { t: brief.t, type: "autopilot",
+      text: `AUTOPILOT ${verdict} (${brief.pctMax}% maxP, TIS ${tis}${prov.modelled ? `, price ${MODEL_PRICE}` : ""}) — ${rationale}` +
+        `${ruleWarnings.length ? ` · ${ruleWarnings.join(" ")}` : ""}${approveUrl ? " · [approve: " + approveUrl + "]" : ""}` });
+    pos.timeline = tl.timeline; pos.seqNext = tl.seqNext;
     out.push({ pos: `${pos.ticker} ${pos.name}`, brief });
   }
 
@@ -191,7 +260,15 @@ export default async () => {
     // PRD §9: il brief ha tre sezioni, e la terza esiste anche quando e' vuota.
     const openMd = out.map((o) => {
       const b = o.brief;
-      return `## ${o.pos} → **${b.verdict}** (TIS ${b.tis}/100)\n${b.rationale}\n${(b.evidence || []).map((e) => `- ${e}`).join("\n")}\n${b.invalidation ? `_Invalidated if: ${b.invalidation}_\n` : ""}P&L ${b.pnl}$ (${b.pctMax}% maxP) · PoP ${b.pop}% · ${b.dteLeft} DTE · Sim: take profit ${(b.sim.pTP * 100).toFixed(0)}% / stop ${(b.sim.pSL * 100).toFixed(0)}%${(b.gateWarnings || []).map((w) => `\n⚠ ${w}`).join("")}${b.approveUrl ? `\n\n**→ APPROVE (valid 24h): ${b.approveUrl}**` : ""}`;
+      // THE PRICE THE WHOLE SECTION IS BUILT ON, NAMED AT THE TOP OF IT. Every
+      // figure below — the P&L, the share of the maximum, the simulation — is
+      // an estimate when the mark came from the model, and a line of warnings
+      // at the bottom is not where you say that.
+      const est = b.priceIsEstimated
+        ? `\n\n> **These figures are ESTIMATES.** The price came from the ${b.priceSource}, not from the market: ` +
+          `at least one leg had no two-sided quote. Nothing can be approved on it.\n`
+        : "";
+      return `## ${o.pos} → **${b.verdict}** (TIS ${b.tis}/100)${est}\n${b.rationale}\n${(b.evidence || []).map((e) => `- ${e}`).join("\n")}\n${b.invalidation ? `_Invalidated if: ${b.invalidation}_\n` : ""}P&L ${b.pnl}$ (${b.pctMax}% maxP) · PoP ${b.pop}% · ${b.dteLeft} DTE · price from ${b.priceSource} · Sim: take profit ${(b.sim.pTP * 100).toFixed(0)}% / stop ${(b.sim.pSL * 100).toFixed(0)}%${(b.ruleWarnings || []).map((w) => `\n⚠ ${w}`).join("")}${(b.gateWarnings || []).map((w) => `\n⚠ ${w}`).join("")}${b.approveUrl ? `\n\n**→ APPROVE (valid 24h): ${b.approveUrl}**` : ""}`;
     }).join("\n\n---\n\n");
     const rejectedMd = rejected.length
       ? rejected.map((r) => `## ${r.pos} → ${r.verdict} **REJECTED**\n${r.reasons.map((x) => `- ${x}`).join("\n")}`).join("\n\n")

@@ -90,7 +90,7 @@ Rules are **parameters chosen once per position and then frozen**. The copilot p
 |---|---|---|
 | Take profit at 50% of max profit | **KEEP** | tastytrade research: 50% management beats holding to expiration on a risk-adjusted basis |
 | Exit at **21 DTE** | **CHANGED from 7** | Original research says 21. Holding from 21 down to 7 adds little premium for sharply higher gamma risk |
-| Stop loss at 50% of max loss | **DOWNGRADED to alert** | Weakest evidence. Show a warning, do not auto-close, until backtest says otherwise |
+| Stop loss at 50% of max loss | **DOWNGRADED to alert**, and the code now agrees | Weakest evidence. Show a warning, do not auto-close, until backtest says otherwise. **The autopilot used to set verdict `STOP` on it and issue a one-tap approve link**; it now produces verdict HOLD and a named warning, and the model is no longer offered STOP as a verdict at all (§9b) |
 | Defined risk only (spreads) | **KEEP, hard** | Non-negotiable |
 | Paper trading only | **KEEP, hard** | Non-negotiable |
 
@@ -637,6 +637,49 @@ explains it instead of jumping to a tab of positions the user does not own yet.
 
 ---
 
+## 8c. The closing order — a LIMIT, priced at the moment of the tap
+
+**Measured: `autopilot.mjs` built the close with `type: "market"`.** The body was built at
+proposal time, stored whole, and sent when somebody tapped the approve link — up to 24 hours
+later. Two faults in one:
+
+- **A market order into these books is not a price.** BOIL quoted bid/ask spreads of **66%,
+  91%, 145% and 166% of the mid** near the money on strikes this app builds on (§4b). At 145%
+  the ask is more than three times the bid. The app refuses to *price a candidate* off a market
+  that wide (`spreadFloor`) and then closed one at whatever the far side was asking.
+- **Even a limit worked out at proposal time would be a day old** by the time it was sent.
+
+So the approval carries the **order intent** — which legs, which contracts, which way — and
+nothing else. `approve.mjs` fetches a fresh chain at tap time, reads each leg's live two-sided
+quote, and builds the body with **`orderBody()` unchanged, `type: "limit"`**. `order.js`'s
+internals were not touched: the size still goes in `qty`, the shape still goes in the ratios,
+and the limit is still the net of ONE combination.
+
+**The price starts at the mid and concedes a quarter of the spread, and no more.**
+`RULES.closeLimitSlippage` (0.25, exported as `CLOSE_LIMIT_SLIPPAGE`) is **CHOSEN, NOT
+MEASURED** — the only number in `RULES` that is neither research nor a reading — and it is on
+the NOT VERIFIED list below. A quarter rather than a half because half the spread *is* the far
+side of the market, which is the market order this replaces.
+
+The concession is always **subtracted from the signed net**, which is the same direction in
+both cases and is why the arithmetic has no branch in it: a long structure at +3.00 in a
+0.40-wide market is offered at +2.90 (you receive ten cents less), a short one at −3.00 is
+offered at −3.10 (you pay ten cents more). It is floored at a cent and **never flipped round**:
+a structure worth +0.02 conceded by 0.10 would land on −0.08, and since the body carries the
+MAGNITUDE the broker would read that as "sell it for eight cents" — four times *better* than
+the mid, on an order meant to give something up.
+
+- **A leg with no live two-sided quote stops the send**, and the page says which leg and why.
+  A bid of zero is not a quote: it is the same test `priceability()` applies at entry.
+- **A working order is said to be working.** `orderOutcome()` reads the reply, the position's
+  timeline records `orderWorking`, and the page says nothing has filled. The next autopilot run
+  reads that entry back, says a close is still outstanding, and proposes a fresh one priced
+  from today's chain. **Nothing is re-sent by itself.**
+- **A link issued by the old build is refused**, not silently re-priced: it proposed a market
+  order and nobody proposed the limit that would replace it.
+
+---
+
 ## 9. Autopilot
 
 A Netlify scheduled function, weekdays at 11:00 UTC.
@@ -664,6 +707,48 @@ without a human tapping an approval link.
 
 ---
 
+## 9b. What the autopilot may act on — the verdict, and whether it is an authorisation
+
+`autopilotVerdict()` in `src/rules.js`, because a rule of action written inside a `.mjs`
+function that runs on a server nobody is watching is a rule nothing can test. The loop used to
+decide all of this inline. Three findings:
+
+**1. A MODEL PRICE WAS LABELLED AS MARKET DATA.** `markFromChain()` returns `net: null` unless
+EVERY leg is found with a two-sided quote; the caller then falls back to `netBS()`. The brief
+reported `chainSource: "CBOE delayed"` whenever the chain had **loaded at all** — so a position
+marked entirely by Black-Scholes was handed to the model, printed in the brief, and used to
+build an approve link, as delayed market data. `markProvenance()` decides it from the NET and
+nothing else: the source is **`"model"`** whenever the number came from `netBS`, `rules.js`
+never writes the feed's name itself (it is handed one), and the brief says *"These figures are
+ESTIMATES"* above the figures rather than in a footnote under them.
+
+**With a model price, the take-profit and exit-DTE triggers produce a WARNING and never an
+approve link.** The rule is reported, not acted on: nothing can be sent to the broker at a
+price nobody quoted. `approvable` is a separate field from `verdict` for exactly this.
+
+**2. THE STOP WAS A WARNING IN THIS DOCUMENT AND AN ORDER IN THE CODE.** §4 downgraded the
+50%-of-max-loss stop to an alert — *"show a warning, do not auto-close, until backtest says
+otherwise"* — and `RULES.stopLossEnforcement` has read `"warn"` ever since. The autopilot set
+`verdict = "STOP"` on the crossing and then built a one-tap close out of it, on the
+weakest-evidenced rule in the app, whose backtest is still **NOT BUILT** (§4). It also applied
+the stop *after* the take-profit and unconditionally, so a crossing could replace a `CLOSE_ALL`
+with a `STOP` and its link.
+
+Now: the crossing produces verdict **HOLD** and one named warning — *"Stop threshold crossed —
+not validated by backtest"* — with the figure in it, and never an approve link. **The model is
+not offered STOP as a verdict**: `AUTOPILOT_VERDICTS` is `["HOLD", "CLOSE_ALL"]`, the prompt is
+generated from that constant, and a `STOP` returned anyway is turned back into HOLD. **Take
+profit and exit DTE keep their approve links**, on a real price.
+
+**3. A MANUAL CLOSE AFTER A STOP WARNING IS A MANUAL CLOSE.** `posAlerts` raises the stop to
+level `"action"` so the row is impossible to miss, and `closePos()` read that level as *"a rule
+said so"* — filing a decision the user made as obedience, in the one number meant to measure
+discipline honestly. `ruleExitOf()` says which rules actually end a trade: the take-profit and
+the exit window, and nothing else. A close taken on the stop warning needs the same written
+reason as any other close with no rule behind it (§10c).
+
+---
+
 ## 10. What shipped
 
 The build order was a plan for a future builder. It is now a record.
@@ -684,6 +769,11 @@ The build order was a plan for a future builder. It is now a record.
 | Liquidity floor relative to the chain being judged, with an absolute floor underneath | **DONE** (§4b) — and it is the user's setting, with the app's recommendation marked and the consequence of every setting shown live |
 | `/api/liquidity`, the measurement behind the liquidity floor | **BUILT AND RUN** (2026-09-01 close) — the floor's two numbers are set from it, and §4b carries the distribution |
 | Backtest: 7 vs 14 vs 21 DTE on two underlyings, `report.md` | **NOT BUILT** (§4) |
+| The order status is re-read after the fact (`recheckOrders`) | **DONE** (§10c) — the last session's open debt |
+| The Journal keeps the ref, the whole timeline, the thesis, both order ids and the reason | **DONE** (§10c) |
+| The stop is a warning in the autopilot as well as in this document | **DONE** (§9b) |
+| A model price can never become an approve link | **DONE** (§9b) |
+| Closing orders are limits, priced at tap time from a fresh chain | **DONE in code, NEVER SENT** (§8c) — see NOT VERIFIED |
 | Video and deck | **NOT VERIFIED HERE** — outside the repo |
 
 ---
@@ -712,6 +802,65 @@ run from the panel is filed in `store.copilotLog` — local only, capped, never 
 the report. Before, the report cited "the copilot's read" from its own separate model call
 while the panel's runs left no trace anywhere, so the two documents described the same day
 differently. The panel can also print what is on screen.
+
+---
+
+## 10c. The Journal keeps the record — the ref, the timeline, the reason
+
+**Measured: `closePos()` in `App.jsx` kept four fields.**
+
+```
+entry = { id, t, ticker, name, openedAt, pnl, ruleExit, riskOk }
+```
+
+The timeline went, the thesis went, both Alpaca order ids went, and the reason went with them.
+So the Journal — the app's own record of what it did, and the only place its discipline number
+comes from — could say a trade ended at a profit and could not say why it was opened, what the
+app told the owner while it was open, which order opened it, which order closed it, or who
+decided to end it. A position managed for six weeks became one line with a number in it.
+
+`src/journal.js` is where this lives now, plain JS for the same reason `rules.js`, `order.js`,
+`path.js` and `handoff.js` are.
+
+**A REF, GIVEN AT OPEN AND NEVER REUSED.** `J-0001`. A position used to be identified by
+`Date.now()`, which is fine for a React key and useless for a human: you cannot say *"look at
+J-0007"* to somebody, and you cannot sort by it in a way that means anything. `journalSeq` in
+the state is the highest number ever issued, and `refCounter()` takes the maximum of it, every
+open position's ref and every closed entry's ref — **closing or deleting a position does not
+hand its number back.** Positions saved by an older build are given refs once, at hydration.
+
+**A SEQUENCE PER ENTRY.** `J-0001·03` is the third thing recorded against J-0001. The autopilot
+writes into this timeline from a server while the app is shut, the app writes into it from the
+browser, and the two are merged on the next load — so an entry needs an identity given when it
+is **recorded**, not a position in an array that a merge can shuffle. A middle dot, because
+CLAUDE.md's rule about rare glyphs is not optional on the phone this is demoed on.
+
+**THE CLOSED ENTRY KEEPS:** the ref, the **full** timeline, the thesis, both Alpaca order ids
+**in full** (the screens slice them to eight characters, which is right on a row and useless
+when you are looking a trade up on the broker), and the close reason. The four old fields are
+all still there.
+
+**THE CLOSE REASON IS A RULE OR A SENTENCE THE USER WROTE, AND THERE IS NO THIRD OPTION.** A
+rule close names its rule (`ruleExitOf()`) and asks for nothing, though anything typed is kept.
+A close with no rule behind it — including one taken on the stop **warning** — requires the same
+minimum as the against-the-signal override, `RULES.minOverrideReasonChars`, and the Close
+button opens a form that says so rather than closing outright.
+
+**THE TIMELINE IS FULLY VIEWABLE.** The position screen showed `slice(-6)` and nothing else, so
+everything a position was told in its first weeks was unreachable from the screen that manages
+it. The recent six are still in front; the rest open behind a control that says how many there
+are. The Journal shows every entry with no cap at all.
+
+**`approve.mjs` WRITES INTO IT TOO.** When an approve link is tapped, the position gains a
+timeline entry carrying the full order id, the limit it was sent at and `orderOutcome()`'s
+headline — so the record does not end at *"the autopilot proposed a close"* with the order that
+actually went out living only in a brief nothing keeps. The approval carries `posId`, because a
+display name is not an identity.
+
+**SORTED AND SEARCHED BY REF.** Newest ref first — by ref and not by close date, so the order on
+screen is the order the trades were opened in. The search box finds `J-0002`, `0002` and `2`,
+and it finds a trade from a **sequence** off its timeline (`J-0002·04`), which is the string
+somebody is most likely to be holding. Ticker and name match too.
 
 ---
 
@@ -840,51 +989,66 @@ ends by writing down what it could not verify. Currently open:
 
 ### WRITTEN THIS SESSION — the things this session changed and could NOT check
 
-This session did the order work in §8b: `src/order.js` (new), the in-ticket outcome, the
-untruncated Alpaca error, the GCD fix at all five body-building sites, and the reading of the
-order status wherever the app spoke about a fill. What is proven for it is `npm test`
-(**400 checks**, up from 367 — the 33 new ones are `src/order.test.js` and `src/order.test.jsx`)
-and `npm run build`.
+This session did §8c (the closing limit), §9b (the verdict and the stop) and §10c (the
+Journal), plus the debt the last session wrote down: **`alpacaStatus` is re-read after the
+fact** — `recheckOrders()` in `App.jsx` asks Alpaca about any position whose order had not
+filled, on arrival and with the 60-second monitor, and appends a timeline entry only when the
+answer has CHANGED. What is proven for all of it is `npm test` (**491 checks**, up from 400 —
+the 91 new ones are `src/journal.test.js` and `src/autopilot.test.js`) and `npm run build`.
 
-- **THE FIX FOR THE 422 HAS NEVER BEEN SENT TO ALPACA.** The refusal is reproduced from the
-  owner's own message — `422 / 42210000, "leg ratio quantities should be relatively prime:
-  GCD[5 5] = 5"` — and the corrected body is asserted field by field against what that message
-  says Alpaca wants (`ratio_qty` 1/1, `qty` 5). **Nobody has watched the broker ACCEPT the new
-  shape.** There are no keys here and there never have been. The first live x5 order is the
-  test that matters, and the thing to read on the reply is the `qty` and the leg ratios Alpaca
-  echoes back.
-- **THE LIMIT PRICE IS THE PART TO WATCH ON THAT FIRST ORDER.** The factor that left the
-  ratios has to leave the price with it, or a five-lot limit becomes the unit price of one
-  combination — five times too generous. The arithmetic is tested (`qty × limit_price` equals
-  the price on screen) but only against the app's own reading of Alpaca's mleg semantics: that
-  `qty` counts combinations and `limit_price` is the net per combination. **The division is
-  the safe way to be wrong**: if that reading is right, the trade costs what the ticket says;
-  if it is wrong and `limit_price` were the whole order's net, the limit is five times too
-  TIGHT and the order sits unfilled. So the symptom to look for on the first live x5 is a
-  debit spread that never fills at a price it obviously should have — not an overpayment.
-- **THE THREE OUTCOMES WERE RENDERED, NOT TAPPED.** `OrderOutcome` and `OrderPending` are
-  rendered to markup in `src/order.test.jsx` with real replies and a real refusal body, and
-  every sentence they print is unit-tested. But no browser has been opened here: nobody has
-  armed the confirmation with a finger and watched the block appear under the button, and
-  nobody has dismissed one. The 390px question — whether the raw-body box scrolls inside
-  itself rather than widening the page — is answered by `overflow: auto` and
-  `word-break: break-word` in the style, not by a screenshot.
-- **"WORKING, NOT FILLED" HAS NOT BEEN READ ON A REAL QUEUED ORDER.** The fixture is the
-  reply the owner reported (`accepted`, `filled_qty: 0`) rebuilt from those figures, exactly
-  as the UNG scratch sentence was. What has not been seen is the app printing it while an
-  order actually sits in Alpaca's queue overnight, nor the Positions row carrying its warning
-  the next morning, nor what the row says once that order fills — **nothing re-reads
-  `alpacaStatus` after the fact.** The position is written once, at send time, and the
-  warning stays until the user checks the broker. Making the Positions screen re-read the
-  order's status from Alpaca is the obvious next piece of work and this session did not do it.
-- **PARTIAL FILLS ARE UNTESTED AGAINST REALITY.** The sentence exists and is unit-tested, but
-  the app still records ONE position for the whole intended size — a partial fill is described
-  honestly in words and not in the numbers. A position that is half filled is not half a
-  position anywhere in the arithmetic.
-- **THE INHERITED DEBTS ARE STILL OPEN, UNTOUCHED.** Everything below this section needs a
-  live feed, a browser, a deploy or broker keys, and this sandbox has none of them: the egress
-  proxy refuses the CONNECT, exactly as it did for PR #15, #16 and #17. This session started
-  by reading them and could close none.
+- **NO LIMIT CLOSE HAS BEEN ACCEPTED BY ALPACA, AND NONE HAS BEEN SENT.** This is the single
+  biggest thing open. `approve.mjs` now fetches a chain at tap time, prices the close and posts
+  `orderBody({ type: "limit" })`. Every piece of that is unit-tested against a fixture — the
+  BOIL 145%-of-mid market, the tight market, a leg with no bid — and **the endpoint has never
+  been run.** There are no broker keys here and there never have been; the egress proxy refuses
+  the CONNECT, as it did for PR #15, #16, #17 and #18. What has NOT been watched: the broker
+  accepting a limit mleg close at all, whether `limit_price` is read as the net of one
+  combination on a CLOSE the way the app assumes it is on an open (the same unverified reading
+  the last session flagged, now load-bearing in a second place), and whether a limit a quarter
+  of the spread off the mid actually fills on these chains or simply sits. **The symptom to
+  look for is a close that never fills at a price it obviously should have** — the division is
+  still the safe way round to be wrong.
+- **`CLOSE_LIMIT_SLIPPAGE` IS CHOSEN, NOT MEASURED.** 0.25. It is the only number in `RULES`
+  that comes from neither published research nor a reading off the live chains, and its comment
+  says so. The reasoning is written down (a quarter, because half the spread IS the far side of
+  the market) and it has been tested against nothing. **The measurement that would settle it is
+  how often a close at mid-minus-a-quarter-of-the-spread fills within a session on these five
+  markets, and nobody has taken it.** It stays on this list until one does.
+- **THE STOP CHANGE HAS NOT BEEN SEEN IN A BRIEF.** The verdict logic is unit-tested against
+  the crossing that used to produce `STOP` and its link (−110 on a −210 maximum loss). The
+  webhook has not fired here, so nobody has read the sentence *"Stop threshold crossed — not
+  validated by backtest"* in an actual brief on a phone, and nobody has confirmed the model
+  stops returning STOP now that the prompt no longer offers it — **a prompt change is not a
+  model behaviour until a model has answered it.**
+- **THE MODEL-PRICE PATH HAS NOT BEEN TRIGGERED LIVE.** `markProvenance(null, …)` is exercised
+  from a fixture. What has not happened is a real run where CBOE is missing one leg of a real
+  position, so nobody has read the estimate banner in a brief, and nobody has watched the
+  approve link NOT be issued on a day when the old code would have issued one.
+- **NOTHING RE-READ AN ORDER AGAINST A REAL BROKER EITHER.** The debt from last session is
+  closed in code and not on a screen: the `accepted` → `filled` transition is the payload the
+  owner reported, rebuilt, and the test proves the app writes one entry and then stops writing.
+  **Nobody has left an order in Alpaca's queue overnight and watched the row change in the
+  morning.** Nor has the failure path been seen: a broker that cannot be reached is deliberately
+  silent, and "silent" is exactly what a bug looks like.
+- **THE JOURNAL HAS NOT BEEN OPENED IN A BROWSER.** Refs, sequences, the search box, the
+  expandable timeline and the close form are asserted from the source and from `journal.js`'s
+  unit tests. No browser has been opened here: nobody has typed `J-0002` into the box, nobody
+  has tapped a closed trade open, and the 390px question — whether the full timeline and the
+  36-character order ids wrap instead of widening the page — is answered by `word-break` in the
+  style, not by a screenshot.
+- **THE MIGRATION OF AN EXISTING BOOK IS UNTESTED AGAINST A REAL SAVED STATE.** Positions
+  opened by an older build are given refs and sequences at hydration. That path is tested with
+  a hand-built object; it has not been run against the owner's actual `localStorage` or the
+  `/api/state` blob, and the first load after this ships is what proves it. If it is wrong the
+  symptom is refs that jump or repeat, and the counter is stored so it cannot repeat twice.
+- **PARTIAL FILLS ARE STILL UNTESTED AGAINST REALITY**, unchanged from last session. The
+  re-read reports one honestly and still records ONE position for the whole intended size.
+
+- **THE INHERITED DEBTS ARE STILL OPEN, EXCEPT ONE.** This session started by reading the
+  last one's list, as the standing rule requires, and closed **"nothing re-reads
+  `alpacaStatus` after the fact"** — in code, with the caveats above. Everything else on it
+  needs a live feed, a browser, a deploy or broker keys, and this sandbox has none of them:
+  the egress proxy refuses the CONNECT, exactly as it did for PR #15, #16, #17 and #18.
 
 - **NOTHING IN THIS SESSION WAS RUN AGAINST A LIVE FEED, A BROWSER OR A DEPLOY EITHER.** The
   same wall as PR #15 and #16: the sandbox's egress proxy refuses the CONNECT to the deploy
