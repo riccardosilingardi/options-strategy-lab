@@ -1,0 +1,16 @@
+{
+  "name": "Options Strategy Lab",
+  "short_name": "OSL",
+  "description": "Paper trading for multi-leg options strategies on commodity ETFs. An agent that cannot execute a trade it cannot justify.",
+  "display": "standalone",
+  "start_url": "/",
+  "scope": "/",
+  "orientation": "portrait-primary",
+  "theme_color": "#f5f6f7",
+  "background_color": "#f5f6f7",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

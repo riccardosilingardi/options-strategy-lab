@@ -578,6 +578,24 @@ while the position is open.
   `alpaca.mjs`'s single host provides. It exists because the two liquidity-floor
   numbers cannot be settled from a sandbox with no broker access, and it is
   gated by `gate.js` like every other path.
+- `public/sw.js` — **the service worker, and the shell is ALL it may remember.** Hand-written,
+  no plugin. `routeOf()` **denies by default**: a request is network-only unless it is GET,
+  same-origin, not under `/api/` or `/.netlify/`, and either a navigation or a file with a
+  shell extension. So a new endpoint is network-only without anybody coming back here. Never
+  cache a price, a position or an order — offline those fetches FAIL, and the app already says
+  "prices not loaded" and prints a dash. Navigations are network-FIRST (a cached `index.html`
+  names a hashed bundle, so a stale shell pins a stale app); the hashed bundle is **precached
+  by name** because the visit that installs a worker is never one it controls. The cache name
+  carries the build, stamped by `stampServiceWorker` in `vite.config.js` — a browser only
+  reinstalls a worker whose script changed, so a constant version never updates.
+  `OfflineBanner` in `App.jsx` says **"Offline — no live data"** on every screen.
+- `public/manifest.webmanifest` + `scripts/make-icons.mjs` — **installable, and the icons are
+  generated from `src/theme.js`** with nothing but node's `zlib`, so a tile cannot drift from
+  the palette and no image library enters the tree. Re-run the script after any palette change.
+  The manifest's two colours are a COPY of theme tokens (static JSON cannot import), held by
+  `src/pwa.test.js` the way `basket.js` is held by `liquidity.test.js`. **The manifest and its
+  icons are the only things excluded from the gate**, because the browser fetches a manifest
+  WITHOUT credentials and a 401 there kills the install offer silently. Nothing else leaves it.
 - `netlify/edge-functions/gate.js` — password gate, with demo-token bypass. The DECISION it
   makes lives in `netlify/edge-functions/lib/access.js`, so `ai.js` can ask the same question
   without a second copy of a password comparison.

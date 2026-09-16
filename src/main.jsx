@@ -33,3 +33,29 @@ class RootBoundary extends React.Component {
 ReactDOM.createRoot(document.getElementById("root")).render(
   <RootBoundary><App /></RootBoundary>
 );
+
+/* ---------------------------------------------------------------------------
+   THE SERVICE WORKER — registered last, and never in the way.
+
+   It is what makes the app installable and lets it open from the home-screen
+   icon with no network. Everything it is allowed to remember is in public/sw.js
+   and it is only the shell: no price, no position and no order is ever cached.
+
+   Registered AFTER the app has rendered, and a failure is logged rather than
+   shown. If it does not register, the app is exactly what it was before this
+   existed — a web page that needs a network — so a broken registration must
+   never be allowed to become a broken app. The site sits behind a password, and
+   whether the browser sends those credentials when it fetches the worker script
+   is a question only a real device answers: if it does not, this logs and the
+   app carries on.
+
+   Not in dev: `vite dev` serves modules that change on every save, and a worker
+   in front of them turns an edit into a mystery.
+--------------------------------------------------------------------------- */
+if ("serviceWorker" in navigator && import.meta.env.PROD) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch((e) => {
+      console.warn("Service worker not registered — the app runs online only.", e);
+    });
+  });
+}

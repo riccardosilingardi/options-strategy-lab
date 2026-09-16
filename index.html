@@ -2,16 +2,60 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- `viewport-fit=cover` lets the page use the whole screen on a phone with
+         a notch or a home indicator. It is only safe alongside the safe-area
+         insets the app applies (BADGE_SAFE and env(safe-area-inset-*) in
+         src/theme.js and the shells in App.jsx): without them, content would
+         sit under the notch. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="robots" content="noindex, nofollow" />
     <title>Options Strategy Lab</title>
-    <style>body{margin:0;background:#f5f6f7}</style>
+
+    <!-- INSTALLABLE. The manifest is what turns this from a page into something
+         with a home-screen icon that launches standalone.
+         NOTE: the browser fetches the manifest and its icons WITHOUT
+         credentials, so they are excluded from the password gate in
+         netlify.toml — see the comment there. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+
+    <!-- iOS reads these from the page, not from the manifest. -->
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon-180.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="OSL" />
+    <!-- `default` keeps the status bar legible over the light page; the script
+         below switches it with the theme, as it does the first paint. -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <!-- Kept in step with theme.js's palettes by src/pwa.test.js, the same way
+         the manifest's colours are: one home for a colour, checked by a test. -->
+    <meta name="theme-color" content="#f5f6f7" />
+
+    <style>
+      body{margin:0;background:#f5f6f7}
+      /* Standalone on a phone means there is no browser chrome to keep content
+         out of the notch and off the home indicator. Every screen already pads
+         itself horizontally; these add whatever the device says it needs on
+         top, and are 0 everywhere else. */
+      #root{
+        padding-left:env(safe-area-inset-left);
+        padding-right:env(safe-area-inset-right);
+        padding-top:env(safe-area-inset-top);
+      }
+    </style>
     <!-- The first paint happens before React runs. Light is the default, so
-         only a stored dark choice needs applying here to avoid a white flash. -->
+         only a stored dark choice needs applying here to avoid a white flash.
+         The browser UI colour is part of that paint on an installed app: the
+         status bar is the top of the page when there is no address bar, and a
+         light bar over a dark page is the same flash one strip further up. -->
     <script>
       try {
         if (localStorage.getItem("osl-theme") === "dark") {
           document.documentElement.style.background = "#14181d";
+          var tc = document.querySelector('meta[name="theme-color"]');
+          if (tc) tc.setAttribute("content", "#14181d");
+          var sb = document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
+          if (sb) sb.setAttribute("content", "black-translucent");
           document.addEventListener("DOMContentLoaded", function () { document.body.style.background = "#14181d"; });
         }
       } catch (e) { /* private mode */ }
