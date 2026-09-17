@@ -774,6 +774,7 @@ The build order was a plan for a future builder. It is now a record.
 | The stop is a warning in the autopilot as well as in this document | **DONE** (§9b) |
 | A model price can never become an approve link | **DONE** (§9b) |
 | Closing orders are limits, priced at tap time from a fresh chain | **DONE in code, NEVER SENT** (§8c) — see NOT VERIFIED |
+| Installable PWA: manifest, icons, standalone launch, offline shell | **DONE in code, NEVER INSTALLED ON A PHONE** (§10d) — see NOT VERIFIED |
 | Video and deck | **NOT VERIFIED HERE** — outside the repo |
 
 ---
@@ -861,6 +862,66 @@ display name is not an identity.
 screen is the order the trades were opened in. The search box finds `J-0002`, `0002` and `2`,
 and it finds a trade from a **sequence** off its timeline (`J-0002·04`), which is the string
 somebody is most likely to be holding. Ticker and name match too.
+
+---
+
+## 10d. Installable — a home-screen icon, and a cache that may not hold a price
+
+The app is a **PWA**: `public/manifest.webmanifest` gives it a name, an icon and
+`display: "standalone"`, so Android's "Install app" and iOS's "Add to Home Screen" produce a
+tile that launches with no address bar. Nothing about the trading behaviour changes; this is
+packaging.
+
+**THE MANIFEST AND THE ICONS ARE OUTSIDE THE PASSWORD GATE, AND THEY HAVE TO BE.** The browser
+fetches a manifest **without credentials** — it is not the page asking, it is the install
+machinery, and it does not send the Basic-Auth header the user typed into the popup. Behind the
+gate it gets a 401, the manifest never parses, and the browser simply does not offer to install,
+with no error on any screen. So `netlify.toml` excludes exactly five files: the manifest and the
+four PNGs it names. **Nothing else leaves the gate** — not the app, not any `/api/*` path, not
+the service worker — and `src/pwa.test.js` fails the build if anything else ever does.
+
+**THE ICONS ARE GENERATED, NOT PASTED IN.** `scripts/make-icons.mjs` draws them from
+`src/theme.js` with nothing but node's `zlib`, so the tile cannot drift away from the app's
+palette and no image library enters the tree to draw four rectangles and a line. What it draws
+is the app's own visual language reduced until it survives at 192px: a bull call spread's payoff
+over its zero line, **green where it makes money and red where it loses**, the same rule
+`payoffBands()` applies on screen. Re-run it after any change to the palette.
+
+### The service worker, and the one rule it has
+
+`public/sw.js` is hand-written — no plugin, no generated file nobody can read. A cache sitting
+in front of every request is, by default, a machine for showing yesterday's prices as today's,
+so the rule is a single sentence: **the shell may be cached and nothing else may be.**
+
+- **`routeOf()` DENIES BY DEFAULT.** A request is network-only unless it positively proves it is
+  a static shell asset: GET, same-origin, not under `/api/` or `/.netlify/`, and either a
+  navigation or a file whose extension is on a short list. An endpoint added to `netlify.toml`
+  tomorrow is network-only without anybody remembering to come back to this file.
+- **Network-only means no `respondWith` at all.** The request goes to the network exactly as it
+  would with no worker installed, credentials and all, and when it fails it fails in the app's
+  own hands — which already knows how to say "prices not loaded" and print a dash.
+- **Navigations are network-FIRST.** The cached `index.html` is the offline fallback, never the
+  normal path. `index.html` names a hashed bundle, so a shell served from cache while the
+  network was there is how a PWA pins itself to the build it was installed from.
+- **The cache name carries the build** (`osl-shell-<hash>`), stamped into the worker by the
+  `stampServiceWorker` plugin in `vite.config.js` from the emitted assets' own content hashes.
+  A browser only reinstalls a worker whose SCRIPT changed, so a constant version would mean a
+  worker that never updates; `activate` then deletes every older cache, so a deploy REPLACES the
+  shell instead of layering on it.
+- **THE BUNDLE IS PRECACHED BY NAME, not picked up on the way past.** The visit that installs a
+  worker is never a visit it controls, so nothing it merely intercepts is in the cache yet.
+  Measured here: an app installed and taken straight offline booted anyway — off the browser's
+  own HTTP cache, which lasts exactly as long as the phone feels like it. The same plugin stamps
+  the hashed filenames into the shell list, so the offline launch is a property of the file
+  rather than a piece of luck.
+
+**And the app says which it is.** `OfflineBanner` in `App.jsx` prints **"Offline — no live
+data"** on every screen, from `navigator.onLine` and the browser's own two events. It hides no
+number and invents none: with `/api/*` network-only there is no cached price for it to show, and
+the existing empty states do the rest. Verified in Chromium at 390px: after fetching an `/api`
+answer through the worker, **nothing under `/api/` is in any cache and no cached body carries
+the price**; offline, the shell relaunches from cache with the banner, 0px horizontal overflow
+and no price anywhere on screen.
 
 ---
 
@@ -987,14 +1048,91 @@ What is left:
 The standing rule in `CLAUDE.md`: every session starts by fixing what the last one flagged, and
 ends by writing down what it could not verify. Currently open:
 
-### WRITTEN THIS SESSION — the things this session changed and could NOT check
+### WRITTEN THIS SESSION — the PWA, and the Journal debt that is now CLOSED
+
+This session did TASK 0 (the Journal at 390px, from the last session's list) and §10d (the
+installable PWA). `npm test` reports **528 checks**, up from 492 — the 36 new ones are
+`src/pwa.test.js` — and `npm run build` is clean.
+
+- **CLOSED THIS SESSION: "THE JOURNAL HAS NOT BEEN OPENED IN A BROWSER", AND THE 390px
+  QUESTION IS ANSWERED — THE PAGE DOES NOT SCROLL SIDEWAYS.** `vite preview` was driven in
+  headless Chromium at 390x844 with a seeded book: two closed trades, a nine-entry timeline and
+  two real-shaped 36-character Alpaca order ids. Measured `document.documentElement.scrollWidth`
+  against `clientWidth` at every stage — front page, desk, Journal with the rows collapsed,
+  Journal with every timeline expanded, and Journal with `J-0002` typed into the search box:
+  **390 against 390, 0px of horizontal overflow, every time**, and no element's right edge past
+  the viewport. The order-id block renders 308px wide inside a 390px screen, the full id wrapping
+  on the `word-break: break-all` that was previously only reasoned about. The search box was
+  typed into and narrowed two rows to one. Zero JavaScript exceptions. **Nothing was changed** —
+  the styling was already right, and this session's job was to find that out rather than assume it.
+- **BUT IT WAS A SEEDED BOOK, NOT THE OWNER'S.** The two closed trades were written into
+  `localStorage` by the walk script, so what is verified is the LAYOUT under a realistic load.
+  The migration debt below is untouched by this: nobody has opened the Journal against a state
+  the app itself wrote over weeks, and a ref that jumps or repeats would not show up here.
+- **NOBODY HAS INSTALLED IT ON A PHONE.** This is the biggest thing this session opens. What is
+  proven is: the worker registers and takes control, its cache holds exactly the shell and the
+  hashed bundle, fetching an `/api` answer through it leaves **nothing** under `/api/` in any
+  cache and **no cached body carrying the price**, the offline banner appears with the words
+  "Offline — no live data", and an offline relaunch renders the shell with 0px overflow and no
+  price on screen. All of that is **Chromium on a desktop, at a phone's width**. What has NOT
+  happened: Android's "Install app" has never been tapped, iOS's "Add to Home Screen" has never
+  been tapped, and no tile has ever appeared on a home screen. The phone test checklist is in
+  the pull request, and only the owner can run it.
+- **THE MANIFEST HAS NEVER BEEN FETCHED WITHOUT CREDENTIALS FROM BEHIND THE REAL GATE.** The
+  whole reason for the `excludedPath` change is that the browser fetches a manifest without the
+  Basic-Auth header. That is documented behaviour, not something measured here: there is no
+  `SITE_PASSWORD` in this sandbox and the egress proxy refuses the CONNECT to the preview, as it
+  has for PR #15 through #19. **The symptom if the exclusion is wrong is exactly nothing** — no
+  error, no message, just an "Install app" item that never appears. That is what checklist item 1
+  is for.
+- **AND `/sw.js` IS STILL BEHIND THE GATE, DELIBERATELY, AND NOBODY HAS WATCHED IT REGISTER
+  THERE.** The worker is the app, so it stays behind the password. Whether the browser sends the
+  stored Basic-Auth credentials when it fetches a service-worker script is a question only a real
+  device answers; the specification says it should, and this has not seen it happen. If it does
+  not, `navigator.serviceWorker.register` rejects, `main.jsx` logs a warning and **the app is
+  exactly what it was before this PR — a web page that needs a network.** It fails to the safe
+  side, but it fails quietly, and quiet is what a bug looks like. Checklist items 2 and 3 are
+  what would catch it.
+- **THE OFFLINE BANNER IS `navigator.onLine`, WHICH IS NOT THE SAME QUESTION.** The browser
+  reports whether it has a network interface, not whether it can reach this site. A phone on a
+  captive-portal wifi, or one whose signal is nominally present and useless, reports itself
+  online and the banner stays away — while every fetch fails and the screens print dashes. That
+  is not a regression (it is what the app did before), but the banner is a statement about the
+  radio, not about the server, and nobody should read more into it than that.
+- **A CACHED SHELL IS READABLE ON THAT DEVICE WITHOUT THE PASSWORD.** Once installed, the HTML
+  and the bundle sit in the phone's cache and open offline without the gate being asked. That is
+  what "installed app" means and it leaks nothing: **no API key has ever been in the client**
+  (rule 3), the API paths are network-only and still gated, and the positions in `localStorage`
+  were already on that device. It is written down here because it is a real change to what an
+  unauthenticated person holding the unlocked phone can see, and it was a deliberate choice
+  rather than an oversight.
+- **THE ICON HAS BEEN LOOKED AT ON A SCREEN, NOT ON A HOME SCREEN.** The 192 and the maskable 512
+  were rendered and read here, and the maskable's content sits inside the safe zone by
+  construction (a 26% inset). How Android's circular, squircle and rounded-square masks actually
+  crop it, and how the tile reads among other icons on a real wallpaper, has not been seen.
+- **`viewport-fit=cover` AND THE SAFE-AREA INSETS HAVE NOT MET A NOTCH.** `env(safe-area-inset-*)`
+  is 0 on every browser that has no notch, which is every browser this session could run. What
+  the app looks like on a phone whose status bar overlaps the page — which is precisely the
+  configuration `viewport-fit=cover` creates — is unverified. If it is wrong the symptom is the
+  top of the first banner under the clock.
+- **THE BUILD STAMP HAS NEVER SURVIVED A SECOND DEPLOY.** `stampServiceWorker` was watched
+  changing the cache version when the bundle changed (`5795598acacc` to `37aa2b2291ca`) and
+  precaching the emitted file, both locally. What has not been observed is the sequence that
+  matters: deploy, install, deploy again, and watch the phone pick up the new shell rather than
+  keeping the old one. That is the failure this design exists to prevent and it is the one nobody
+  has reproduced.
+
+### INHERITED, STILL OPEN — the things earlier sessions changed and could NOT check
 
 This session did §8c (the closing limit), §9b (the verdict and the stop) and §10c (the
 Journal), plus the debt the last session wrote down: **`alpacaStatus` is re-read after the
 fact** — `recheckOrders()` in `App.jsx` asks Alpaca about any position whose order had not
 filled, on arrival and with the 60-second monitor, and appends a timeline entry only when the
-answer has CHANGED. What is proven for all of it is `npm test` (**491 checks**, up from 400 —
-the 91 new ones are `src/journal.test.js` and `src/autopilot.test.js`) and `npm run build`.
+answer has CHANGED. What is proven for all of it is `npm test` (**492 checks**, up from 400 —
+the 92 new ones are `src/journal.test.js` and `src/autopilot.test.js`) and `npm run build`.
+*(Corrected the session after: this said 491. The suite reports 492 and always did — the
+figure was written down by hand and one check was missed in the counting. Nothing changed in
+the code; the number in this document was simply wrong.)*
 
 - **NO LIMIT CLOSE HAS BEEN ACCEPTED BY ALPACA, AND NONE HAS BEEN SENT.** This is the single
   biggest thing open. `approve.mjs` now fetches a chain at tap time, prices the close and posts

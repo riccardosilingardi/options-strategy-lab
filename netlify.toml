@@ -15,10 +15,31 @@
 # function is killed at roughly ten seconds and a 1200-token streamed analysis
 # takes longer than that every time. There is no /api/ai redirect any more: the
 # edge function claims the path itself.
+# THE MANIFEST AND THE ICONS ARE OUTSIDE THE GATE, AND THEY HAVE TO BE.
+#
+# The browser fetches a web app manifest WITHOUT CREDENTIALS. It is not the page
+# asking; it is the install machinery, and it does not send the Basic-Auth
+# header the user typed into the popup. Behind the gate it gets a 401, the
+# manifest never parses, and the browser simply does not offer "Install app" —
+# with no error anywhere, on any screen. The same is true of the icons the
+# manifest names: they are fetched by the same credential-less path, so an icon
+# behind the gate is a home-screen tile that never appears.
+#
+# What leaves the gate is therefore exactly four PNGs and one JSON file naming
+# them. No data, no account, no key — the app's own name and its picture. The
+# app itself, every /api/* path and the service worker all stay behind the
+# password, which is where the actual secrets and the actual money are.
 [[edge_functions]]
   function = "gate"
   path = "/*"
-  excludedPath = ["/api/approve"]
+  excludedPath = [
+    "/api/approve",
+    "/manifest.webmanifest",
+    "/icon-192.png",
+    "/icon-512.png",
+    "/icon-512-maskable.png",
+    "/apple-touch-icon-180.png",
+  ]
 
 [[edge_functions]]
   function = "ai"

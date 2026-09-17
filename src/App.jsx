@@ -6,7 +6,7 @@ import {
 import {
   RefreshCw, ShieldCheck, Save, Trash2, Layers, Radar, Box,
   FlaskConical, Briefcase, Plus, Plug, Send, ExternalLink, MessageSquare, FileText, Bell,
-  SlidersHorizontal, ArrowLeft, Sun, Moon, AlertTriangle,
+  SlidersHorizontal, ArrowLeft, Sun, Moon, AlertTriangle, WifiOff,
 } from "lucide-react";
 import { fetchAllNews, fetchWeather, ImpactTags, CopilotTab, ReportTab, OrderTicket, AlpacaDesk, scaleStrategy, probProfit, buildContext, GuardianPanel, ChainMatrix, OptionPanel, UnifiedView, taSignals, confluence, WhyThisTrade, Markdown, alpacaReq } from "./pro.jsx";
 import { BandThumbnail, payoffBands, bandTakeaway, GaugeFigure, Gauge, CompareFigure, exitPlanSentence,
@@ -548,6 +548,36 @@ const DemoBanner = () => (DEMO ? (
     <ShieldCheck size={13} style={{ flexShrink: 0 }} /> {DEMO_BANNER}
   </div>
 ) : null);
+/* THE OFFLINE BANNER — the counterpart to the service worker's one rule.
+ *
+ * Installed on a home screen, this app opens with no network at all, and every
+ * screen it opens on was written on the assumption that a number on it is a
+ * number from today. `public/sw.js` never caches a price, a position or an
+ * order, so offline the fetches simply fail and the screens already say
+ * "prices not loaded" and print dashes where a figure would be. That is the
+ * truth, but it reads like a fault.
+ *
+ * This says which it is, in the app's own voice, on every screen. It does not
+ * guess: `navigator.onLine` is the browser's own answer and the two events are
+ * the browser telling us it changed. It never hides a number and it never shows
+ * one — the app's existing empty states do that work. */
+const OfflineBanner = () => {
+  const [off, setOff] = useState(typeof navigator !== "undefined" && navigator.onLine === false);
+  useEffect(() => {
+    const on = () => setOff(false), down = () => setOff(true);
+    window.addEventListener("online", on);
+    window.addEventListener("offline", down);
+    return () => { window.removeEventListener("online", on); window.removeEventListener("offline", down); };
+  }, []);
+  if (!off) return null;
+  return (
+    <div style={{ ...mono, fontSize: 11.5, color: T.amber, background: `${T.amber}12`, borderBottom: `1px solid ${T.amber}44`,
+      padding: "9px 14px", display: "flex", gap: 8, alignItems: "center", justifyContent: "center", flexWrap: "wrap", textAlign: "center" }}>
+      <WifiOff size={13} style={{ flexShrink: 0 }} />
+      Offline — no live data. Nothing on screen is a current price, and no order can be sent until you are back on a network.
+    </div>
+  );
+};
 const Lbl = ({ children }) => <div style={{ ...mono, fontSize: 10, letterSpacing: "0.15em", color: T.amber }}>{children}</div>;
 /* ============================== IS THE LIQUIDITY FLOOR RIGHT? ==============================
  *
@@ -2435,6 +2465,7 @@ export default function OptionsStrategyLab() {
     return (
       <div style={{ minHeight: "100vh", background: T.bg, color: T.body }}>
         <DemoBanner />
+        <OfflineBanner />
         <CapitalOnboarding
           initial={{ capital: store.settings.capital, concurrentTarget: store.settings.concurrentTarget, savings: store.settings.savings }}
           onDone={async (a) => {
@@ -2453,6 +2484,7 @@ export default function OptionsStrategyLab() {
     return (
       <div style={{ minHeight: "100vh", background: T.bg, color: T.body }}>
         <DemoBanner />
+        <OfflineBanner />
         {msg && (
           <div style={{ ...mono, fontSize: 12, color: T.amber, background: `${T.amber}12`, borderBottom: `1px solid ${T.amber}44`, padding: "10px 14px" }}>{msg}</div>
         )}
@@ -2490,6 +2522,7 @@ export default function OptionsStrategyLab() {
   return (
     <div style={{ minHeight: "100vh", background: T.bg, color: T.body, fontFamily: "ui-sans-serif, system-ui" }}>
       <DemoBanner />
+      <OfflineBanner />
       {/* The bottom padding is the strip reserved for the injected Netlify
              badge (see BADGE_SAFE in theme.js): it is fixed to the viewport and
              was covering whatever happened to be at the bottom right. */}
