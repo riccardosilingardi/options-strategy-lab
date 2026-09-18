@@ -25,6 +25,7 @@
 import {
   payoffCeiling, profitUnbounded, impossibleLoss, impossibleLossNote, scratchLevel,
   qualityFloor, rewardRisk, reportNarrativePrompt, NOTHING_TODAY, NO_CEILING, RULES,
+  modelSanity, modelDisagreementNote, MIN_NET_DOLLARS,
 } from "./rules.js";
 import { payoffBands, payingBands, bandsAbove, scratchSplit, unifiedTakeaway, explainElement, exitPlanDetail, compareTakeaway } from "./visuals.jsx";
 import { analyze, shortlistWithFloors, buildPresets } from "./App.jsx";
@@ -357,5 +358,107 @@ check("the default argument is safe: no positions at all is the empty case", () 
 
 for (const [n, m] of bad) console.log(`  FAIL ${n}\n       ${m}`);
 for (const n of ok) console.log(`  ok   ${n}`);
+const oneSentenceish = (s) => { if (String(s).trim().length < 60) throw new Error(`too short to explain anything: ${s}`); };
+
+/* ============================================================================
+   5. A PRICE THE MODEL DISBELIEVES IS NOT OFFERED — AT THE REAL GENERATION SITE.
+
+   The fifth coat of the same fault, and the one that reached the broker.
+   `minNetPremium` is an ABSOLUTE floor: it knows what a price may not be
+   smaller than and nothing about what THIS structure should cost. A BOIL
+   20/21 call spread priced at $0.05 — exactly MIN_NET_DOLLARS, one cent above
+   the line drawn to catch the $0 butterfly — against a model value of $33.29
+   cleared it by rounding, was sent, and never filled. The maximum loss on
+   screen said $50 where the real one would have been $333.
+
+   These run against `shortlistWithFloors` from App.jsx, not a copy of it.
+============================================================================ */
+
+/* The board, at S=100, 45 days, iv 0.30 — marks taken straight off the same
+   model the check uses, so an honest chain is honest BY CONSTRUCTION and the
+   only thing a fixture can be accused of is the fault it introduces. Every leg
+   has 500 contracts open and a 10-cent market, so neither quality floor can be
+   what does the work below. */
+const MODEL_C = { 90: 11.396, 95: 7.536, 100: 4.471, 105: 2.556, 110: 1.384, 115: 0.719 };
+const MODEL_P = { 90: 0.898, 95: 2.010, 100: 3.918, 105: 6.975, 110: 10.775, 115: 15.083 };
+const mark = (px) => ({ mid: px, bid: px - 0.05, ask: px + 0.05, iv: 0.3, oi: 500, vol: 10 });
+const honestQuote = (leg) => {
+  const px = (leg.type === "put" ? MODEL_P : MODEL_C)[leg.strike];
+  return px == null ? null : mark(px);
+};
+/* THE FAULT, IN THE SHAPE IT ACTUALLY TOOK ON BOIL: the LONG leg marked too
+   low, so the net collapses towards nothing while staying a perfectly ordinary
+   debit that clears MIN_NET_DOLLARS. The 100-strike call is marked at 2.75
+   where the model says 4.47, which prices the 100/105 spread at $19 a contract
+   against a model value of $192 — ratio 0.10, the same order of magnitude as
+   the $0.05-against-$0.333 order that reached the broker. */
+const placeholderQuote = (leg) => {
+  if (leg.type === "call" && leg.strike === 100) return mark(2.75);
+  return honestQuote(leg);
+};
+const FIX = { S: 100, step: 5, strikes: [90, 95, 100, 105, 110, 115], dte: 45, iv: 0.3 };
+
+check("a structure whose market net disagrees with the model is NOT OFFERED", () => {
+  const r = shortlistWithFloors("bull", FIX.S, FIX.step, FIX.strikes, FIX.dte, FIX.iv, placeholderQuote);
+  const cut = r.cut.filter((c) => c.why === "model");
+  if (!cut.length) throw new Error("a price the model cannot account for must be cut, not ranked");
+  eq(r.tally.model, cut.length, "and counted under its own name");
+  has(cut[0].reasons[0], "the model says");
+  // It never reaches the rows. This is the assertion the live order needed.
+  for (const row of r.rows) {
+    const ms = modelSanity({
+      legs: row.p.legs, net: row.a.entry, marks: row.a.legPx.map((l) => l.px),
+      spot: FIX.S, dte: FIX.dte, iv: FIX.iv,
+    });
+    if (ms.checked && !ms.pass) {
+      throw new Error(`${row.p.name} was offered at a ratio of ${ms.ratio.toFixed(2)}`);
+    }
+  }
+});
+
+check("the same chain priced honestly offers those structures again", () => {
+  // The check has to be capable of passing, or it is not a check, it is a wall.
+  const r = shortlistWithFloors("bull", FIX.S, FIX.step, FIX.strikes, FIX.dte, FIX.iv, honestQuote);
+  eq(r.tally.model, 0, "nothing is refused on a chain that agrees with the model");
+  if (!r.rows.length) throw new Error("and structures are actually offered");
+});
+
+check("the model count travels separately — no floor and no other refusal did that work", () => {
+  const r = shortlistWithFloors("bull", FIX.S, FIX.step, FIX.strikes, FIX.dte, FIX.iv, placeholderQuote);
+  if (r.tally.model === 0) throw new Error("the fixture must actually trip it");
+  eq(r.tally.liquidity, 0, "not blamed on liquidity — every leg has 500 open");
+  eq(r.tally.spread, 0, "not blamed on the spread — every market is 10 cents wide");
+  // A structure cut for the model never reached a floor, and crediting one with
+  // it would be a lie about which rule did the work. Same discipline as
+  // `unpriceable` and `impossible`.
+  for (const c of r.cut.filter((x) => x.why === "model")) {
+    hasNot(c.reasons[0], "open interest");
+    hasNot(c.reasons[0], "reward-to-risk");
+  }
+});
+
+check("the refusal names the leg responsible, which is the only actionable part", () => {
+  const r = shortlistWithFloors("bull", FIX.S, FIX.step, FIX.strikes, FIX.dte, FIX.iv, placeholderQuote);
+  const cut = r.cut.filter((c) => c.why === "model");
+  if (!cut.length) throw new Error("nothing was cut");
+  // The 100-strike is the placeholder in this fixture, so it is the one named.
+  has(cut[0].reasons[0], "100C");
+  has(cut[0].reasons[0], "the quote to go and look at");
+});
+
+check("a chain the app cannot model is SKIPPED, never emptied", () => {
+  // UNKNOWN IS NOT DISAGREEMENT — the same rule as `oi: null`. Without a
+  // volatility there is no model, and a board must not vanish because of it.
+  const r = shortlistWithFloors("bull", FIX.S, FIX.step, FIX.strikes, FIX.dte, 0, honestQuote);
+  eq(r.tally.model, 0, "no model means nothing judged");
+});
+
+check("the model refusal is in the same register as the other four — a sentence and a count", () => {
+  oneSentenceish(modelDisagreementNote(1, "BOIL"));
+  has(modelDisagreementNote(2, "BOIL"), "2 structures");
+  has(NOTHING_TODAY.modelDisagreement({ modelDisagreement: 1, markets: ["BOIL"] }), String(RULES.modelDisagreementRatio));
+});
+
+for (const [name, why] of bad) console.error(`  FAIL ${name}\n       ${why}`);
 console.log(`\n${ok.length} passed, ${bad.length} failed`);
 process.exit(bad.length ? 1 : 0);

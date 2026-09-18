@@ -1,6 +1,11 @@
 # Options Strategy Lab — Product Requirements
 
 **Status:** master spec. Everything in this file is decided unless marked OPEN.
+**Read alongside `ROADMAP.md`**, which every session reads with this file and every
+pull request updates: the session that ships P-n marks it done there and restates what
+the next one inherits. ROADMAP.md is the single source for WHAT COMES NEXT; this file
+is the single source for WHAT THE PRODUCT IS AND WHAT IS VERIFIED. Do not duplicate
+content between them.
 **Product language:** English. All UI copy, function names, and generated text are English.
 
 ---
@@ -366,6 +371,96 @@ removing untraded strikes and nothing else; falling towards zero on a market wor
 means the absolute minimum is too high for it, and it is one line in `src/rules.js`.
 `/api/liquidity` is the same question asked of all five markets at once, from where the
 keys are.
+
+---
+
+## 4e. A price has to survive a sanity check, not just a floor
+
+`minNetPremium` is an **absolute** floor. It knows what a price may not be smaller than and
+nothing whatever about what *this* structure should cost. On 17 September 2026 that gap
+reached the broker.
+
+**The order.** BOIL 2026-10-23, buy 10x 20C, sell 10x 21C, limit **$0.05**, time in force day.
+Status "new", filled quantity 0.00, never filled. It is the only order this app has ever sent.
+With spot at 19.84, 36 days out, and the implied volatility this app itself uses for BOIL, that
+spread is worth **$0.333 a share — $33.29 a contract**. $0.05 is *exactly* `MIN_NET_DOLLARS`:
+it cleared the floor built to catch the $0 butterfly **by one cent**, and it was wrong by a
+factor of 6.7 in the direction of "too cheap". The maximum loss shown to the owner was **$50**
+where the real one, had it filled, would have been **$333**.
+
+So there is a third question, after "is there a price at all" (`priceability()`) and before the
+quality floors: **do the price and the model describe the same structure?** `modelSanity()` in
+`src/rules.js` compares the structure's net off the chain against `netBS()` from `engine.js` —
+the same function and the same `smile()` every other screen prices with — and refuses a
+proposal more than `RULES.modelDisagreementRatio` (**4**) away either side.
+
+**Why four, and what was actually measured.** The denominator is Black-Scholes at a *hardcoded
+per-ticker sigma*, so the bar cannot be tighter than that model's own error or the app would
+refuse real structures for the crime of its own volatility guess being off. That error budget
+was measured: every structure family the app builds, all five markets, 30/36/45/60/90 days,
+five strikes either side of the money, repriced with the assumed volatility deliberately wrong,
+counting only cases where both nets clear `MIN_NET_DOLLARS`:
+
+| family | IV wrong ±25% | IV wrong ×0.5 .. ×2 |
+|---|---|---|
+| call vertical | 0.63 .. 1.28 | 0.39 .. 1.68 |
+| put vertical | 0.61 .. 1.44 | 0.41 .. 2.33 |
+| butterfly | 0.81 .. 1.31 | 0.59 .. 1.87 |
+| iron condor | 0.59 .. 1.53 | 0.27 .. 2.83 |
+| **the live failure (BOIL 20/21)** | | **0.15** |
+
+Four accepts 0.25 to 4.00: outside every artefact in that table — even a volatility guess wrong
+by a factor of two cannot make this fire — and the one real fault sits outside it by 1.67x.
+
+**It is deliberately loose, and it is CHOSEN, NOT MEASURED.** What was not read is the
+distribution of market-net over model-net on the five live chains, which is what would set this
+number the way `/api/liquidity` set the liquidity percentiles. The table above is the
+*denominator's* error budget, not the numerator's behaviour. It is on the NOT VERIFIED list,
+and the expectation is that a real reading brings the number down.
+
+**Four rules hold it**, and three are the same discipline as every other check in this file:
+
+1. **Unknown is not disagreement.** No spot, no DTE or no volatility means no model, and the
+   check is SKIPPED rather than failed — as the liquidity half skips on `oi: null`.
+2. **Nothing is judged against a price under the minimum**, either side. A model net of pennies
+   is not a valuation; it is where the measured error budget blows out from 0.27 to 0.11.
+3. **It names the leg.** "The price is wrong" is not actionable, so `worstLeg` is the leg whose
+   own mark disagrees most, in dollars, with its own model price — the quote to go and look at.
+4. **It is a proposal floor, not a gate.** It lives at the three generation sites beside
+   `qualityFloor()` and is deliberately NOT in `riskGate.js`, which `riskGate.test.js` asserts
+   by reading the source. A trade the user builds by hand on the desk is his to make — what the
+   desk owes him is the model value printed *beside* the market value, which §8d is.
+
+---
+
+## 4f. The entry floor is room, not a cliff
+
+`minEntryDTE` is 30 and it was a hard violation at 29. The quantity that actually matters is not
+the expiry, it is the **room before the exit rule fires**: `room = dte - exitDTE`. Thirty days
+is nine days of room, and there is nothing about nine that is right and seven that is wrong —
+it is an inherited tastytrade default like the rest of §4, and this app has never measured it.
+
+**The number 30 is unchanged.** What changed is what happens either side of it, so that a
+reading can be taken before the floor is moved. Three bands, in `entryRoom()`:
+
+| band | what happens |
+|---|---|
+| `dte <= exitDTE` | **hard violation**, unchanged in spirit, and **not overridable** — the position would open already inside its own exit window, and the exit rule is frozen at construction |
+| `exitDTE < dte < minEntryDTE` | **warning carrying the number** ("this board gives you 7 days before the 21-day exit fires; the app aims for 24"), unlocked by a typed reason of `minOverrideReasonChars` — the same mechanism `sizing()` uses for the per-trade cap. Without the reason it blocks and says what would unlock it; with it, it warns and the reason goes to the Journal |
+| `dte >= minEntryDTE` | unchanged: nothing is said |
+
+**And `passedOver` becomes offerable, not merely narrated.** `expiryChoice()` has been naming a
+nearer, busier board and then not letting anybody take it — a door with no handle. A
+passed-over board past the exit rule can now be taken through the override; one at or inside it
+still cannot, by anybody. **The choice itself is untouched:** a passed-over board is never what
+the app opens on by itself.
+
+**It is instrumented, because the 30 has to be settled from a reading.** `passedOverRecord()`
+writes one row per market per board into `store.expiryLog` — which board was chosen, which was
+passed over, how much busier it was, and whether it was offerable — and the Journal reads it
+back through `passedOverSummary()`. It is local, capped at 60, and never goes to the shared
+`/api/state` blob: it is calibration data about this user's markets, not a position. ROADMAP P5
+is what reads it.
 
 ---
 
@@ -774,7 +869,12 @@ The build order was a plan for a future builder. It is now a record.
 | The stop is a warning in the autopilot as well as in this document | **DONE** (§9b) |
 | A model price can never become an approve link | **DONE** (§9b) |
 | Closing orders are limits, priced at tap time from a fresh chain | **DONE in code, NEVER SENT** (§8c) — see NOT VERIFIED |
-| Installable PWA: manifest, icons, standalone launch, offline shell | **DONE in code, NEVER INSTALLED ON A PHONE** (§10d) — see NOT VERIFIED |
+| Installable PWA: manifest, icons, standalone launch, offline shell | **DONE, AND INSTALLED** (§10d) — on the owner's phone, and it works |
+| Model-vs-market sanity check on every proposed price | **DONE** (§4e) — the ratio itself is CHOSEN, see NOT VERIFIED |
+| An opening limit that concedes part of the spread | **DONE in code, NEVER FILLED** (§8d) — see NOT VERIFIED |
+| The ticket shows the combo book, the model value and the notional | **DONE** (§8d) |
+| Working orders visible in the main flow, with age, re-price and cancel | **DONE** (§10e) |
+| The entry floor as ROOM: hard block only inside the exit window | **DONE** (§4f) — the number 30 is unchanged and uncalibrated |
 | Video and deck | **NOT VERIFIED HERE** — outside the repo |
 
 ---
@@ -925,6 +1025,92 @@ and no price anywhere on screen.
 
 ---
 
+## 8d. The opening order — a limit that can fill, and a ticket that shows the book
+
+Two faults in one order, and this is the second (§4e is the first).
+
+**The ticket seeded the bare mid.** `pro.jsx` set the limit field to
+`Math.abs(estNet).toFixed(2)`. Closing orders have conceded a quarter of the spread since §8c,
+with the reasoning written down; opening orders conceded **nothing**, and `OrderTicket` carried
+a comment saying so while the code went on doing it. On BOIL, where this repo has measured
+bid/ask spreads of **66%, 91%, 145% and 166% of the mid**, a limit at the mid is a limit nobody
+has to meet. The only order this app has ever sent was one, and it sat all day.
+
+`openLimitPrice()` in `src/rules.js` mirrors `closeLimitPrice()`: start at the mid, concede
+`RULES.openLimitSlippage` (0.25) of the spread in the direction that fills, never past the
+touch, and **never flip the sign round** — a +0.02 debit conceded by 0.10 would price at −0.08,
+which the broker reads as "sell it for eight cents" because the body carries the magnitude.
+
+**Why it is a sibling constant and not the same one.** The number is the same and the arithmetic
+is the same. They are two constants because they answer two questions and a later session has
+to be able to move one without the other:
+
+- **A close has to happen.** The exit rule has fired; the only choice is the price.
+- **An open never has to happen.** Nothing is forced, and "nothing today" is a feature.
+- **And conceding on the way IN raises the debit**, which *is* the maximum loss on every
+  structure this app builds, measured against the per-trade limit by the risk gate. A quarter
+  of a wide spread can push a trade through that limit, and the right answer then is the gate
+  refusing it — not a quieter concession.
+
+Both are **CHOSEN, NOT MEASURED**, and both say so beside themselves.
+
+**And the ticket shows the book.** The owner's words: *"it is not clear what price to put in
+the app, or what the information is, or how to choose it."* It offered a text field with a
+number in it and nothing else. It now shows four things, for the **whole structure** and never
+leg by leg, because a leg is not a thing anybody here trades:
+
+1. **Combo bid, mid and ask** (`comboBook()`), each leg at the side that actually trades — to
+   buy the structure you lift the ask on every leg you are buying and hit the bid on every leg
+   you are selling. Summing "the bids" and "the asks" leg by leg would produce two numbers that
+   belong to no trade anybody can do. A leg without a two-sided quote means there is **no book**,
+   not a book of zeros, and the panel says which leg.
+2. **Where the typed limit falls in it** (`limitPlacement()`), with one plain sentence:
+   **fills now** / **you are waiting** / **this will not fill**. At the mid is named explicitly
+   as the thing that does not fill, because that is the price this app sent.
+3. **The model value beside the market value** — the same `modelSanity()` that refuses a
+   proposal at the three generation sites. It refuses **nothing** here: the desk is the user's.
+   What it owes him is the number he is accepting, in the same size as the one he is accepting
+   it against.
+4. **Notional controlled** — contracts × 100 × spot — next to capital at risk. The app has
+   always computed this implicitly and never once shown it, and the owner reads the product as
+   having no leverage because of it. Ten contracts of a $1 spread on a $20 underlying risks
+   $1,000 and controls **$20,000**. Both numbers are true and only one was ever on screen.
+
+**Time in force is stated in words, never left as a dropdown.** A `day` order that expires at
+the close without anybody saying so is the same invisible failure as an order that never fills.
+
+---
+
+## 10e. An order that is working needs a home in the main flow
+
+`orderOutcome()` has distinguished accepted from filled since §10c, and the position row has
+carried the warning. What was missing was anywhere **in the main flow** to see an order that is
+working: it lived only on the full desk, inside the Alpaca panel. So the one order this app has
+ever sent was invisible from the moment it left — failure class 8, the app knowing and not
+saying.
+
+**Working orders are listed first on Positions, above the positions**, because "this has not
+happened yet" has to be read before "here is what you own". Each row carries its **age**, its
+limit, its time in force, and — when a `day` order is old enough to have outlived its session —
+a sentence saying it has almost certainly expired unfilled. They also appear on the front page
+beside "what needs attention today", which until now only ever contained things that had
+already happened.
+
+**Two things can be done with one, and only two.** **Cancel** it, which is a DELETE and not an
+order. Or **re-price** it, which is a new order — and a new order does not get a new path to
+the broker: it cancels the old one and lands the trade back on **Build**, where the chain, the
+legs, the greeks, the book and the confirm step are. *A road must not be able to reach an order
+without passing the screen that shows the trade*, and a re-price is a road. **There are still
+six order paths.**
+
+**Sent and filled are two events and they get two Journal entries.** The live order came back
+`accepted` with `filled_qty: 0` and the app wrote one entry that read as an opening. `sent` is
+written when the order leaves, naming its price and how long it stands; `fill` is written by
+`recheckOrders()` when and if the broker says so, and never before. A position opened on the
+app's own book has no `sent` entry at all, because nothing was.
+
+---
+
 ## 11. Data sources — what each number on screen actually is
 
 | What | Where it comes from | What it is *not* |
@@ -1048,93 +1234,108 @@ What is left:
 The standing rule in `CLAUDE.md`: every session starts by fixing what the last one flagged, and
 ends by writing down what it could not verify. Currently open:
 
-### WRITTEN THIS SESSION — the PWA, and the Journal debt that is now CLOSED
+### WRITTEN THIS SESSION — the order that never filled, and the two floors it walked past
 
-This session did TASK 0 (the Journal at 390px, from the last session's list) and §10d (the
-installable PWA). `npm test` reports **528 checks**, up from 492 — the 36 new ones are
-`src/pwa.test.js` — and `npm run build` is clean.
+This session did TASK 0 (the PWA items below, from the last session's list) and ROADMAP P0:
+the model-vs-market sanity check (§4e), the opening limit (§8d), the ticket's book and
+notional (§8d), working orders in the main flow (§10e) and the entry floor as room (§4f).
+`npm test` reports **564 checks**, up from 528 — the 36 new ones are in `riskGate.test.js`
+and `ceiling.test.jsx` — and `npm run build` is clean.
 
-- **CLOSED THIS SESSION: "THE JOURNAL HAS NOT BEEN OPENED IN A BROWSER", AND THE 390px
-  QUESTION IS ANSWERED — THE PAGE DOES NOT SCROLL SIDEWAYS.** `vite preview` was driven in
-  headless Chromium at 390x844 with a seeded book: two closed trades, a nine-entry timeline and
-  two real-shaped 36-character Alpaca order ids. Measured `document.documentElement.scrollWidth`
-  against `clientWidth` at every stage — front page, desk, Journal with the rows collapsed,
-  Journal with every timeline expanded, and Journal with `J-0002` typed into the search box:
-  **390 against 390, 0px of horizontal overflow, every time**, and no element's right edge past
-  the viewport. The order-id block renders 308px wide inside a 390px screen, the full id wrapping
-  on the `word-break: break-all` that was previously only reasoned about. The search box was
-  typed into and narrowed two rows to one. Zero JavaScript exceptions. **Nothing was changed** —
-  the styling was already right, and this session's job was to find that out rather than assume it.
-- **BUT IT WAS A SEEDED BOOK, NOT THE OWNER'S.** The two closed trades were written into
-  `localStorage` by the walk script, so what is verified is the LAYOUT under a realistic load.
-  The migration debt below is untouched by this: nobody has opened the Journal against a state
-  the app itself wrote over weeks, and a ref that jumps or repeats would not show up here.
-- **NOBODY HAS INSTALLED IT ON A PHONE.** This is the biggest thing this session opens. What is
-  proven is: the worker registers and takes control, its cache holds exactly the shell and the
-  hashed bundle, fetching an `/api` answer through it leaves **nothing** under `/api/` in any
-  cache and **no cached body carrying the price**, the offline banner appears with the words
-  "Offline — no live data", and an offline relaunch renders the shell with 0px overflow and no
-  price on screen. All of that is **Chromium on a desktop, at a phone's width**. What has NOT
-  happened: Android's "Install app" has never been tapped, iOS's "Add to Home Screen" has never
-  been tapped, and no tile has ever appeared on a home screen. The phone test checklist is in
-  the pull request, and only the owner can run it.
-- **THE MANIFEST HAS NEVER BEEN FETCHED WITHOUT CREDENTIALS FROM BEHIND THE REAL GATE.** The
-  whole reason for the `excludedPath` change is that the browser fetches a manifest without the
-  Basic-Auth header. That is documented behaviour, not something measured here: there is no
-  `SITE_PASSWORD` in this sandbox and the egress proxy refuses the CONNECT to the preview, as it
-  has for PR #15 through #19. **The symptom if the exclusion is wrong is exactly nothing** — no
-  error, no message, just an "Install app" item that never appears. That is what checklist item 1
-  is for.
-- **AND `/sw.js` IS STILL BEHIND THE GATE, DELIBERATELY, AND NOBODY HAS WATCHED IT REGISTER
-  THERE.** The worker is the app, so it stays behind the password. Whether the browser sends the
-  stored Basic-Auth credentials when it fetches a service-worker script is a question only a real
-  device answers; the specification says it should, and this has not seen it happen. If it does
-  not, `navigator.serviceWorker.register` rejects, `main.jsx` logs a warning and **the app is
-  exactly what it was before this PR — a web page that needs a network.** It fails to the safe
-  side, but it fails quietly, and quiet is what a bug looks like. Checklist items 2 and 3 are
-  what would catch it.
-- **THE OFFLINE BANNER IS `navigator.onLine`, WHICH IS NOT THE SAME QUESTION.** The browser
-  reports whether it has a network interface, not whether it can reach this site. A phone on a
-  captive-portal wifi, or one whose signal is nominally present and useless, reports itself
-  online and the banner stays away — while every fetch fails and the screens print dashes. That
-  is not a regression (it is what the app did before), but the banner is a statement about the
-  radio, not about the server, and nobody should read more into it than that.
-- **A CACHED SHELL IS READABLE ON THAT DEVICE WITHOUT THE PASSWORD.** Once installed, the HTML
-  and the bundle sit in the phone's cache and open offline without the gate being asked. That is
-  what "installed app" means and it leaks nothing: **no API key has ever been in the client**
-  (rule 3), the API paths are network-only and still gated, and the positions in `localStorage`
-  were already on that device. It is written down here because it is a real change to what an
-  unauthenticated person holding the unlocked phone can see, and it was a deliberate choice
-  rather than an oversight.
-- **THE ICON HAS BEEN LOOKED AT ON A SCREEN, NOT ON A HOME SCREEN.** The 192 and the maskable 512
-  were rendered and read here, and the maskable's content sits inside the safe zone by
-  construction (a 26% inset). How Android's circular, squircle and rounded-square masks actually
-  crop it, and how the tile reads among other icons on a real wallpaper, has not been seen.
-- **`viewport-fit=cover` AND THE SAFE-AREA INSETS HAVE NOT MET A NOTCH.** `env(safe-area-inset-*)`
-  is 0 on every browser that has no notch, which is every browser this session could run. What
-  the app looks like on a phone whose status bar overlaps the page — which is precisely the
-  configuration `viewport-fit=cover` creates — is unverified. If it is wrong the symptom is the
-  top of the first banner under the clock.
-- **THE BUILD STAMP HAS NEVER SURVIVED A SECOND DEPLOY.** `stampServiceWorker` was watched
-  changing the cache version when the bundle changed (`5795598acacc` to `37aa2b2291ca`) and
-  precaching the emitted file, both locally. What has not been observed is the sequence that
-  matters: deploy, install, deploy again, and watch the phone pick up the new shell rather than
-  keeping the old one. That is the failure this design exists to prevent and it is the one nobody
-  has reproduced.
+- **CLOSED THIS SESSION: THE PWA IS INSTALLED ON THE OWNER'S PHONE AND IT WORKS.** Everything
+  the last session opened about the install — Android's "Install app" never tapped, no tile
+  ever on a home screen, the manifest never fetched without credentials from behind the real
+  gate, `/sw.js` never watched registering there, the icon never seen on a home screen among
+  other icons — is answered by the owner having done it. Those items are removed from this
+  list rather than reworded: they were questions about whether the thing works, and it does.
+  Two PWA items are NOT closed and stay below, because installing does not answer them.
+- **THE 4x MODEL RATIO IS CHOSEN, NOT MEASURED, AND THIS IS THE BIGGEST THING THIS SESSION
+  OPENS.** `RULES.modelDisagreementRatio` refuses a proposal whose price off the chain is more
+  than four times away from `netBS()` either way. The task asked for the ratio to be read off
+  the five live chains — the distribution of market-net over model-net near the money,
+  tabulated the way `LIQUIDITY_MEASUREMENT` is. **That reading was not taken.** There are no
+  broker keys in this sandbox and the egress proxy refuses the CONNECT to `/api/liquidity`,
+  `/api/chain`, `cdn.cboe.com` and the deploy preview, exactly as it has since PR #15.
+
+  What WAS measured, here, and is in the comment beside the constant: the DENOMINATOR'S error
+  budget. Every structure family the app builds, on all five markets, at 30/36/45/60/90 days
+  and five strikes either side of the money, repriced with the assumed volatility deliberately
+  wrong by up to a factor of two — call verticals 0.39..1.68, put verticals 0.41..2.33,
+  butterflies 0.59..1.87, iron condors 0.27..2.83. Four is outside all of it, and the live
+  failure (BOIL 20/21, market $0.05 against a model $33.29) sits at 0.15, outside four by
+  1.67x. So the bar tolerates every artefact the app's own model can produce and still catches
+  the one real fault. **The honest expectation is that a real reading brings it DOWN**, because
+  a genuine chain should sit near 1 and nothing here knows how near. Until somebody takes it,
+  a structure that is really mispriced by a factor of three is still offered.
+- **NO OPENING ORDER HAS EVER BEEN FILLED ON THE PAPER ACCOUNT, AND THIS SESSION CANNOT PROVE
+  OTHERWISE FROM A SANDBOX.** One order has ever reached the broker: BOIL 2026-10-23, buy 10x
+  20C / sell 10x 21C, limit $0.05, day — status "new", filled 0.00, never filled. Both causes
+  are fixed in code (the price would now be refused by `modelSanity()`, and the limit would now
+  concede a quarter of the spread instead of sitting at the mid), and **neither fix has been
+  watched working against Alpaca.** Only a fill on the owner's account closes this. It is
+  ROADMAP P0's DONE WHEN, and it is the one item on this list that the owner alone can settle.
+- **THE OPENING CONCESSION IS CHOSEN, NOT MEASURED, EXACTLY LIKE ITS SIBLING.**
+  `RULES.openLimitSlippage` is 0.25 and its reasoning is written down beside
+  `closeLimitSlippage`, whose own comment has said the same thing since PR #19. The measurement
+  that would settle either is how often a limit a quarter of the spread off the mid fills
+  within a session on these five markets, and nobody has taken it. **There is now a second
+  place that number is load-bearing**, and a second reason to take it.
+- **THE COMBO BOOK HAS NEVER BEEN DRAWN FROM A LIVE CHAIN.** `comboBook()` takes each leg at
+  the side that actually trades and `limitPlacement()` says which of three zones a typed price
+  falls in. Both are unit-tested against the BOIL-shaped 145%-of-mid market and a tight one;
+  neither has been rendered next to a real quote, and nobody has checked that the numbers the
+  panel prints match what Alpaca's own ticket shows for the same structure.
+- **NOTIONAL CONTROLLED IS ARITHMETIC AND IT IS RIGHT; WHETHER IT CHANGES ANYTHING IS NOT
+  KNOWN.** The point of putting contracts x 100 x spot next to capital at risk is that the
+  owner reads the product as having no leverage. Whether seeing "$19,840 of BOIL moves under
+  this trade" beside "$500" actually changes how he sizes is a claim about a person, and it
+  has not been read on a screen by the person it is about.
+- **THE WORKING-ORDERS PANEL HAS NEVER HAD A WORKING ORDER IN IT.** It lists positions whose
+  `alpacaFilled` is false, with age, the limit, the time in force and whether a DAY order is
+  old enough to have expired. Every one of those fields comes from a reply the app stored, and
+  **no reply has been stored since the fields were added.** The stale-DAY-order warning fires
+  after eight hours by a clock, not by a session calendar: on a weekend, or a holiday, it will
+  say an order has almost certainly expired when the session it was sent in has not opened yet.
+  That is the safe way round to be wrong and it is still wrong.
+- **RE-PRICING CANCELS AND RETURNS TO BUILD, AND THAT ROUND TRIP HAS NOT BEEN WALKED.** It is
+  deliberately not a seventh order path: it cancels at the broker and lands the trade back on
+  the screen that shows it, so the send goes down path 2 like everything else there. What has
+  not been seen is the cancel failing and the hand-off happening anyway — the code awaits the
+  cancel, but `cancelWorking` swallows a broker error into a message, so a failed cancel still
+  reaches Build. If that happens the old order is still live at Alpaca while a new one is being
+  built, and the only thing that stops two orders existing is the user reading the message.
+- **THE ENTRY-ROOM OVERRIDE HAS NEVER BEEN TYPED INTO.** The three bands are unit-tested at the
+  gate and the rule functions are tested directly. Nobody has been shown a 25-DTE board, written
+  a reason, and watched the trade unlock — and nobody has checked that the Journal entry reads
+  well next to the against-the-signal one, which uses the same mechanism and the same constant.
+- **AND THE 30 IS STILL UNCALIBRATED. THAT IS THE POINT OF THE INSTRUMENT, NOT AN OVERSIGHT.**
+  `minEntryDTE` was not changed this session, deliberately. `passedOverRecord()` now writes one
+  row per market per board into `store.expiryLog` and the Journal reads it back, so a later
+  session can see how often the floor took a busier board away and by how much. **That log is
+  empty.** It fills as the owner uses the app and it is what ROADMAP P5 calibrates from; until
+  then 30 remains an inherited tastytrade default that this app has never tested.
+- **THE OFFLINE BANNER IS `navigator.onLine`, WHICH IS NOT THE SAME QUESTION** (carried, and
+  installing did not answer it). The browser reports whether it has a network interface, not
+  whether it can reach this site. A phone on a captive-portal wifi reports itself online and
+  the banner stays away while every fetch fails and the screens print dashes.
+- **THE BUILD STAMP HAS NEVER SURVIVED A SECOND DEPLOY** (carried, and installing did not
+  answer it either — if anything it is now the live question). `stampServiceWorker` was watched
+  changing the cache version locally when the bundle changed. What has not been observed is the
+  sequence that matters: deploy, install, deploy again, and watch the phone pick up the new
+  shell rather than keeping the old one. **The app is now on a real home screen, so the next
+  deploy is the first time this can fail for real.**
 
 ### INHERITED, STILL OPEN — the things earlier sessions changed and could NOT check
 
-This session did §8c (the closing limit), §9b (the verdict and the stop) and §10c (the
-Journal), plus the debt the last session wrote down: **`alpacaStatus` is re-read after the
-fact** — `recheckOrders()` in `App.jsx` asks Alpaca about any position whose order had not
-filled, on arrival and with the 60-second monitor, and appends a timeline entry only when the
-answer has CHANGED. What is proven for all of it is `npm test` (**492 checks**, up from 400 —
-the 92 new ones are `src/journal.test.js` and `src/autopilot.test.js`) and `npm run build`.
-*(Corrected the session after: this said 491. The suite reports 492 and always did — the
-figure was written down by hand and one check was missed in the counting. Nothing changed in
-the code; the number in this document was simply wrong.)*
+Everything below was written by an earlier session and is STILL OPEN. Two of these are the
+ones the current session was told to carry forward by name, and they lead the list: **no
+closing limit order has ever been filled**, and **the Journal has never been opened against a
+state the app itself wrote over weeks.** Everything on this list needs a live feed, a browser
+on the owner's phone, a deploy or broker keys, and this sandbox has none of them — the egress
+proxy refuses the CONNECT, exactly as it did for PR #15 through #20.
 
-- **NO LIMIT CLOSE HAS BEEN ACCEPTED BY ALPACA, AND NONE HAS BEEN SENT.** This is the single
+- **RESTATED, AND STILL THE SINGLE BIGGEST THING OPEN: NO LIMIT CLOSE HAS BEEN ACCEPTED BY
+  ALPACA, AND NONE HAS BEEN SENT.** This is the single
   biggest thing open. `approve.mjs` now fetches a chain at tap time, prices the close and posts
   `orderBody({ type: "limit" })`. Every piece of that is unit-tested against a fixture — the
   BOIL 145%-of-mid market, the tight market, a leg with no bid — and **the endpoint has never
@@ -1152,6 +1353,21 @@ the code; the number in this document was simply wrong.)*
   the market) and it has been tested against nothing. **The measurement that would settle it is
   how often a close at mid-minus-a-quarter-of-the-spread fills within a session on these five
   markets, and nobody has taken it.** It stays on this list until one does.
+- **RESTATED: THE JOURNAL HAS NEVER BEEN OPENED AGAINST A STATE THE APP ITSELF WROTE OVER
+  WEEKS — ONLY AGAINST A SEEDED BOOK.** A previous session drove `vite preview` in headless
+  Chromium at 390x844 with two closed trades, a nine-entry timeline and two real-shaped
+  36-character Alpaca order ids, and measured 0px of horizontal overflow at every stage. That
+  settled the LAYOUT under a realistic load and it settled nothing else: the book was written
+  into `localStorage` by the walk script. Refs that jump or repeat, a sequence that a
+  `/api/state` merge shuffles, a position opened by an older build and given its ref at
+  hydration — none of that shows up against a book written all at once by a script. **The
+  first load after this ships, against the owner's real `localStorage`, is what proves it.**
+  This session made the debt slightly larger rather than smaller: the timeline now carries two
+  new entry types (`sent` and `fill`) and one new one (`override`), and positions carry five
+  new fields, so an existing book will hydrate into a shape that has never held real history.
+  `{ ...EMPTY, ...st }` defaults the new `expiryLog` to an empty array and every read of the
+  new position fields is null-guarded, which is the reasoning, not the evidence.
+
 - **THE STOP CHANGE HAS NOT BEEN SEEN IN A BRIEF.** The verdict logic is unit-tested against
   the crossing that used to produce `STOP` and its link (−110 on a −210 maximum loss). The
   webhook has not fired here, so nobody has read the sentence *"Stop threshold crossed — not
@@ -1168,12 +1384,6 @@ the code; the number in this document was simply wrong.)*
   **Nobody has left an order in Alpaca's queue overnight and watched the row change in the
   morning.** Nor has the failure path been seen: a broker that cannot be reached is deliberately
   silent, and "silent" is exactly what a bug looks like.
-- **THE JOURNAL HAS NOT BEEN OPENED IN A BROWSER.** Refs, sequences, the search box, the
-  expandable timeline and the close form are asserted from the source and from `journal.js`'s
-  unit tests. No browser has been opened here: nobody has typed `J-0002` into the box, nobody
-  has tapped a closed trade open, and the 390px question — whether the full timeline and the
-  36-character order ids wrap instead of widening the page — is answered by `word-break` in the
-  style, not by a screenshot.
 - **THE MIGRATION OF AN EXISTING BOOK IS UNTESTED AGAINST A REAL SAVED STATE.** Positions
   opened by an older build are given refs and sequences at hydration. That path is tested with
   a hand-built object; it has not been run against the owner's actual `localStorage` or the

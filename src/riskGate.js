@@ -16,7 +16,8 @@
 // import this file.
 // ============================================================================
 
-import { RULES, sizing, money, pctText, capitalSourceNote, priceability, impossibleLoss, MIN_NET_DOLLARS } from "./rules.js";
+import { RULES, sizing, money, pctText, capitalSourceNote, priceability, impossibleLoss, MIN_NET_DOLLARS,
+  entryRoom, entryInsideExitNote, entryRoomWarning, entryRoomOverrideAsk, entryOverrideOk } from "./rules.js";
 
 /* ============================== helpers ============================== */
 
@@ -108,6 +109,9 @@ const V = (code, message) => ({ code, message });
  *        per leg, aligned with `legs`, straight off the chain — and `net`, the
  *        structure's net price per share. Neither is required: the maximum loss
  *        alone already blocks the case that got through.
+ *        `entryOverride` is the WRITTEN REASON for entering between the exit
+ *        rule and the entry floor (rule 6 below). It unlocks nothing else, and
+ *        nothing unlocks a board at or inside the exit window.
  * @param {object}   arg.portfolio { positions[] | openRisk, account }
  * @param {object}   arg.capital   the onboarding answers, PRD §3:
  *        { tradingCapital, concurrentTarget, savings, override }
@@ -235,13 +239,37 @@ export function evaluateTrade({ proposal, portfolio, capital, signals } = {}) {
       `Your limit: ${pctText(RULES.totalExposurePct)}, i.e. ${money(limits.totalLimit)}.`));
   }
 
-  /* ---- 6. DTE at entry ---- */
-  if (isOpen && isNum(p.dte) && Number(p.dte) < RULES.minEntryDTE) {
-    const room = Math.round(Number(p.dte) - RULES.exitDTE);
-    violations.push(V("ENTRY_DTE",
-      `Entry at ${Math.round(Number(p.dte))} DTE is below the ${RULES.minEntryDTE} DTE minimum. ` +
-      `The exit rule fires at ${RULES.exitDTE} DTE, so this trade would have ` +
-      `${room <= 0 ? "no days at all" : `only ${room} day${room === 1 ? "" : "s"}`} to work before it must be closed.`));
+  /* ---- 6. DTE at entry — THREE BANDS, NOT A CLIFF ----
+     `minEntryDTE` was a hard violation at 29 DTE and a silent pass at 30. The
+     quantity that matters is the ROOM before the exit rule fires — dte minus
+     `exitDTE` — and 30 days is nine days of room, a number inherited rather
+     than measured. `entryRoom()` in rules.js draws the three bands and this is
+     the only place they are enforced (see its comment for the reasoning, and
+     ROADMAP P5 for the reading that would settle the 30).
+
+       inside-exit  the position would open at or inside its own exit window.
+                    HARD VIOLATION, unchanged in spirit, and NOT overridable:
+                    the exit rule is frozen at construction, so there is no
+                    version of the trade the rule does not immediately end.
+       tight        WARNING with the number in it, unlocked by a typed reason
+                    of `minOverrideReasonChars` — the same mechanism `sizing()`
+                    uses for the per-trade cap. Without the reason it blocks and
+                    says exactly what would unlock it; with it, it warns and the
+                    reason is recorded (`entryOverrideNote()` → the Journal).
+       clear        nothing is said.
+
+     THE OVERRIDE IS NOT A WEAKENING OF THE FLOOR. It is what makes
+     `expiryChoice()`'s `passedOver` mean something: the app has been naming a
+     nearer, busier board and then refusing to let anybody take it. */
+  const room = entryRoom(isNum(p.dte) ? Number(p.dte) : null);
+  if (isOpen && room.known && room.band === "inside-exit") {
+    violations.push(V("ENTRY_DTE", entryInsideExitNote(room)));
+  } else if (isOpen && room.known && room.band === "tight") {
+    if (entryOverrideOk(p.entryOverride)) {
+      warnings.push(V("ENTRY_DTE_ROOM", entryRoomWarning(room)));
+    } else {
+      violations.push(V("ENTRY_DTE_ROOM", entryRoomOverrideAsk(room)));
+    }
   }
 
   /* ---- warnings: shown, never blocking ---- */

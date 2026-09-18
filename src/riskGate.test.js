@@ -9,7 +9,12 @@ import { RULES, sizing, ruleBadge, qualityFloor, qualityFloorSentence, liquidity
   priceability, rewardRisk, unpriceableNote, money, MIN_NET_DOLLARS,
   spreadShare, spreadFloor, spreadFloorReason, wideSpreadNote, spreadSkippedNote,
   expiryChoice, expiryChoiceNote, emptyExpiryNote,
+  modelSanity, modelSanityReason, modelDisagreementNote,
+  comboBook, openLimitPrice, openLimitNote, limitPlacement, notionalControlled, notionalNote,
+  entryRoom, entryInsideExitNote, entryRoomWarning, entryRoomOverrideAsk, entryOverrideOk, entryOverrideNote,
+  passedOverRecord, passedOverSummary, OPEN_LIMIT_SLIPPAGE, CLOSE_LIMIT_SLIPPAGE,
   chancePct, chanceText, chanceInTen, signedMoney } from "./rules.js";
+import { netBS, SIGMA } from "./engine.js";
 import { isStale, staleAmong, agePhrase, freshnessNote, BUDGETS } from "./freshness.js";
 
 /* ---------------- tiny harness ---------------- */
@@ -139,19 +144,81 @@ test("TOTAL EXPOSURE — $1,150 already at risk plus a $180 trade breaks the 25%
     "Your limit: 25%, i.e. $1,250.");
 });
 
+/* ---- THE ENTRY FLOOR IS THREE BANDS NOW, NOT A CLIFF (src/rules.js,
+   `entryRoom`). The 30 is UNCHANGED and so is the refusal inside the exit
+   window; what is new is the band between them and the typed override. ---- */
+
 test("ENTRY DTE — an entry at 12 DTE is refused: the 21 DTE exit would already have fired", () => {
   const r = evaluateTrade({ proposal: trade({ dte: 12 }), portfolio: EMPTY_BOOK, capital: CAPITAL, signals: CONFLUENT });
   assert.equal(r.pass, false);
   assert.deepEqual(codes(r), ["ENTRY_DTE"]);
-  assert.match(messageFor(r, "ENTRY_DTE"), /12 DTE is below the 30 DTE minimum/);
-  assert.match(messageFor(r, "ENTRY_DTE"), /exit rule fires at 21 DTE/);
+  assert.match(messageFor(r, "ENTRY_DTE"), /at or inside the 21-day exit rule/);
   assert.match(messageFor(r, "ENTRY_DTE"), /no days at all/);
+  assert.match(messageFor(r, "ENTRY_DTE"), /not overridable/);
 });
 
-test("ENTRY DTE — 28 DTE is refused as well, and the message counts the days it would have", () => {
+test("ENTRY DTE — exactly AT the exit rule is still the hard refusal, not the warning band", () => {
+  const r = evaluateTrade({ proposal: trade({ dte: RULES.exitDTE }), portfolio: EMPTY_BOOK, capital: CAPITAL, signals: CONFLUENT });
+  assert.equal(r.pass, false);
+  assert.deepEqual(codes(r), ["ENTRY_DTE"]);
+  // And a written reason does NOT unlock it: there is no version of the trade
+  // the frozen exit rule does not immediately end.
+  const r2 = evaluateTrade({
+    proposal: trade({ dte: RULES.exitDTE, entryOverride: "the 21-day board is the only liquid one on this market" }),
+    portfolio: EMPTY_BOOK, capital: CAPITAL, signals: CONFLUENT,
+  });
+  assert.equal(r2.pass, false);
+  assert.deepEqual(codes(r2), ["ENTRY_DTE"]);
+});
+
+test("ENTRY DTE — 28 DTE blocks WITHOUT a reason, and the block says what would unlock it", () => {
   const r = evaluateTrade({ proposal: trade({ dte: 28 }), portfolio: EMPTY_BOOK, capital: CAPITAL, signals: CONFLUENT });
   assert.equal(r.pass, false);
-  assert.match(messageFor(r, "ENTRY_DTE"), /only 7 days to work/);
+  assert.deepEqual(codes(r), ["ENTRY_DTE_ROOM"]);
+  const m = messageFor(r, "ENTRY_DTE_ROOM");
+  assert.match(m, /7 days before the 21-day exit/);      // the room, in the sentence
+  assert.match(m, /the app aims for 9/);                 // and what it aims for
+  assert.match(m, new RegExp(`at least ${RULES.minOverrideReasonChars} characters`));
+});
+
+test("ENTRY DTE — a reason that is too short is not an override", () => {
+  const short = "x".repeat(RULES.minOverrideReasonChars - 1);
+  const r = evaluateTrade({ proposal: trade({ dte: 28, entryOverride: short }), portfolio: EMPTY_BOOK, capital: CAPITAL, signals: CONFLUENT });
+  assert.equal(r.pass, false);
+  assert.deepEqual(codes(r), ["ENTRY_DTE_ROOM"]);
+  // Whitespace is not a reason either.
+  const blank = evaluateTrade({ proposal: trade({ dte: 28, entryOverride: "              " }), portfolio: EMPTY_BOOK, capital: CAPITAL, signals: CONFLUENT });
+  assert.equal(blank.pass, false);
+});
+
+test("ENTRY DTE — a written reason of sufficient length turns the block into a warning", () => {
+  const why = "the 28-day board is the only one on BOIL with any open interest near the money";
+  const r = evaluateTrade({ proposal: trade({ dte: 28, entryOverride: why }), portfolio: EMPTY_BOOK, capital: CAPITAL, signals: CONFLUENT });
+  assert.equal(r.pass, true, "the trade unlocks");
+  assert.deepEqual(codes(r), [], "and nothing is left blocking it");
+  const w = r.warnings.find((x) => x.code === "ENTRY_DTE_ROOM");
+  assert.ok(w, "but it is still warned about — an override is not a dismissal");
+  assert.match(w.message, /7 days before the 21-day exit/);
+});
+
+test("ENTRY DTE — at and above the floor nothing is said at all, warning included", () => {
+  for (const dte of [RULES.minEntryDTE, 45, 90]) {
+    const r = evaluateTrade({ proposal: trade({ dte }), portfolio: EMPTY_BOOK, capital: CAPITAL, signals: CONFLUENT });
+    assert.equal(codes(r).includes("ENTRY_DTE_ROOM"), false, `${dte} DTE does not block`);
+    assert.equal(codes(r).includes("ENTRY_DTE"), false, `${dte} DTE does not block`);
+    assert.equal(r.warnings.some((w) => w.code === "ENTRY_DTE_ROOM"), false, `${dte} DTE does not warn`);
+  }
+});
+
+test("ENTRY DTE — a CLOSING order is never held by any of the three bands", () => {
+  for (const dte of [5, 12, 21, 28]) {
+    const r = evaluateTrade({
+      proposal: { ...trade({ dte }), intent: "close" },
+      portfolio: EMPTY_BOOK, capital: CAPITAL, signals: CONFLUENT,
+    });
+    assert.equal(codes(r).includes("ENTRY_DTE"), false, `close at ${dte} DTE is not refused`);
+    assert.equal(codes(r).includes("ENTRY_DTE_ROOM"), false, `close at ${dte} DTE is not refused`);
+  }
 });
 
 test("PAPER MODE — an unverifiable account is refused, on an otherwise perfect trade", () => {
@@ -1043,6 +1110,385 @@ test("a number past its budget SAYS SO rather than looking live", () => {
   assert.ok(!/past the/.test(fresh));
   assert.ok(/past the/.test(old), "a stale number pretending to be live is the fault");
   assert.ok(old.includes("refreshed"));
+});
+
+/* ============================================================================
+   A PRICE HAS TO SURVIVE A SANITY CHECK, NOT JUST A FLOOR (src/rules.js,
+   `modelSanity`). The fixture IS the order that reached the broker on
+   17 September 2026: BOIL 2026-10-23, buy 20C / sell 21C, spot 19.84, 36 days
+   out, limit $0.05 — exactly MIN_NET_DOLLARS, one cent above the floor built
+   to catch the $0 butterfly, against a model value of $33.29.
+============================================================================ */
+
+const BOIL_SPREAD = [
+  { side: 1, qty: 1, type: "call", strike: 20 },
+  { side: -1, qty: 1, type: "call", strike: 21 },
+];
+const BOIL = { spot: 19.84, dte: 36, iv: SIGMA.BOIL };
+
+test("MODEL SANITY — the live order that never filled is refused, by name and by the numbers", () => {
+  const r = modelSanity({ legs: BOIL_SPREAD, net: 0.05, marks: [0.40, 0.35], ...BOIL });
+  assert.equal(r.checked, true);
+  assert.equal(r.pass, false, "$0.05 against a $33 model value is not a price");
+  assert.equal(r.marketNet, MIN_NET_DOLLARS, "it cleared the absolute floor exactly");
+  assert.ok(Math.abs(r.modelNet - 33.29) < 0.5, `model says ${r.modelNet}`);
+  assert.ok(r.ratio < 0.2 && r.ratio > 0.1, `ratio ${r.ratio}`);
+  // RULE 3: it names the leg, because "the price is wrong" is not actionable.
+  assert.ok(r.worstLeg, "a leg is named");
+  assert.equal(r.worstLeg.name, "20C");
+  assert.match(r.reason, /20C/);
+  assert.match(r.reason, /6\.7 times less/);
+});
+
+test("MODEL SANITY — the same structure at its model value passes untouched", () => {
+  const honest = netBS(BOIL_SPREAD, BOIL.spot, BOIL.dte, BOIL.iv);
+  const r = modelSanity({ legs: BOIL_SPREAD, net: honest, marks: [2.33, 2.00], ...BOIL });
+  assert.equal(r.pass, true);
+  assert.ok(Math.abs(r.ratio - 1) < 0.01, "a real structure sits at 1");
+  assert.equal(r.reason, null, "nothing to say about a price that is the price");
+});
+
+test("MODEL SANITY — the bar is symmetric: too expensive is refused as well as too cheap", () => {
+  const honest = netBS(BOIL_SPREAD, BOIL.spot, BOIL.dte, BOIL.iv);
+  const rich = modelSanity({ legs: BOIL_SPREAD, net: honest * (RULES.modelDisagreementRatio + 1), ...BOIL });
+  assert.equal(rich.pass, false);
+  assert.match(rich.reason, /times more/);
+  // ...and exactly AT the bar is inside it, either way round.
+  for (const m of [RULES.modelDisagreementRatio, 1 / RULES.modelDisagreementRatio]) {
+    const edge = modelSanity({ legs: BOIL_SPREAD, net: honest * m, ...BOIL });
+    assert.equal(edge.pass, true, `exactly ${m}x is not beyond ${RULES.modelDisagreementRatio}x`);
+  }
+});
+
+test("MODEL SANITY — UNKNOWN IS NOT DISAGREEMENT: no model means SKIPPED, never failed", () => {
+  // The same rule the liquidity half applies to `oi: null` and the spread half
+  // to a one-sided quote. `Number(null)` is 0 and 0 is finite, which would
+  // price the whole board at a spot of zero and refuse all of it.
+  for (const missing of [{ spot: null }, { dte: null }, { iv: null }, { spot: 0 }, { iv: 0 }]) {
+    const r = modelSanity({ legs: BOIL_SPREAD, net: 0.05, ...BOIL, ...missing });
+    assert.equal(r.checked, false, `${JSON.stringify(missing)} skips`);
+    assert.equal(r.pass, true, "skipped is not failed");
+    assert.equal(r.reason, null);
+  }
+  assert.equal(modelSanity({ legs: [], net: 0.05, ...BOIL }).checked, false, "no legs, nothing to judge");
+  assert.equal(modelSanity({ legs: BOIL_SPREAD, net: null, ...BOIL }).checked, false, "no net, nothing to judge");
+});
+
+test("MODEL SANITY — nothing is judged against a price under the minimum, either side", () => {
+  // A model net of pennies is not a valuation. This is the same discipline as
+  // `rewardRisk()` refusing to divide by a cost under the minimum, and it is
+  // where the measured error budget blows out from 0.27 to 0.11.
+  const far = [{ side: 1, qty: 1, type: "call", strike: 60 }, { side: -1, qty: 1, type: "call", strike: 61 }];
+  const r = modelSanity({ legs: far, net: 0.05, ...BOIL });
+  assert.equal(r.checked, false, "a model value of about nothing judges nothing");
+  assert.equal(r.pass, true);
+  assert.equal(modelSanity({ legs: BOIL_SPREAD, net: 0.0001, ...BOIL }).checked, false,
+    "and a market net under the minimum is priceability()'s refusal, not this one's");
+});
+
+test("MODEL SANITY — the bar tolerates every artefact the app's own model can produce", () => {
+  // THE MEASUREMENT BEHIND `RULES.modelDisagreementRatio`. The denominator is
+  // Black-Scholes at a hardcoded per-ticker sigma, so the bar cannot be tighter
+  // than that model's own error. Reprice every family on every market with the
+  // volatility deliberately wrong by anything up to a factor of two: nothing
+  // that is really worth what the model says may be refused.
+  const U = { CORN: 19, SOYB: 22.5, WEAT: 5.4, UNG: 10.6, BOIL: 19.8 };
+  const step = 0.5;
+  let checked = 0;
+  for (const [tk, S] of Object.entries(U)) {
+    const iv = SIGMA[tk];
+    for (const dte of [30, 45, 90]) {
+      for (const off of [-2, 0, 2]) {
+        const k = Math.round((S + off * step) / step) * step;
+        const fams = [
+          [{ side: 1, qty: 1, type: "call", strike: k }, { side: -1, qty: 1, type: "call", strike: k + step }],
+          [{ side: 1, qty: 1, type: "put", strike: k }, { side: -1, qty: 1, type: "put", strike: k - step }],
+          [{ side: 1, qty: 1, type: "call", strike: k - step }, { side: -1, qty: 2, type: "call", strike: k }, { side: 1, qty: 1, type: "call", strike: k + step }],
+        ];
+        for (const legs of fams) {
+          for (const m of [0.5, 0.75, 1, 1.5, 2]) {
+            const real = netBS(legs, S, dte, iv * m);
+            const r = modelSanity({ legs, net: real, spot: S, dte, iv });
+            if (!r.checked) continue;        // under the minimum: not judged, by rule 2
+            checked++;
+            assert.equal(r.pass, true,
+              `${tk} ${dte}d iv x${m} would be refused at ratio ${r.ratio && r.ratio.toFixed(2)}`);
+          }
+        }
+      }
+    }
+  }
+  assert.ok(checked > 100, `the sweep has to actually judge things (${checked})`);
+});
+
+test("MODEL SANITY — its refusal is a finished sentence with its own count", () => {
+  const note = modelDisagreementNote(3, "BOIL");
+  assert.match(note, /3 structures/);
+  assert.match(note, /BOIL/);
+  assert.match(note, new RegExp(`${RULES.modelDisagreementRatio}x`));
+  assert.match(NOTHING_TODAY.modelDisagreement({ modelDisagreement: 2, markets: ["BOIL"] }),
+    new RegExp(`${RULES.modelDisagreementRatio}x`));
+  // It is a DIFFERENT sentence from the other four refusals, not a rewording.
+  const others = [
+    NOTHING_TODAY.unpriceable({ unpriceable: 2, markets: ["BOIL"] }),
+    NOTHING_TODAY.impossibleLoss({ impossible: 2, markets: ["BOIL"] }),
+  ];
+  for (const o of others) {
+    assert.notEqual(o, NOTHING_TODAY.modelDisagreement({ modelDisagreement: 2, markets: ["BOIL"] }));
+  }
+});
+
+test("MODEL SANITY — IT IS A PROPOSAL FLOOR AND IT IS NOT IN THE GATE", () => {
+  // A trade the user builds by hand on the desk is his to make. The gate's job
+  // is "is there a price at all"; this one's is "is it this structure's price".
+  const src = readFileSync(new URL("./riskGate.js", import.meta.url), "utf8");
+  assert.equal(/modelSanity/.test(src), false,
+    "the model check must never become a reason an order is refused");
+  // ...and it IS at all three generation sites.
+  const app = readFileSync(new URL("./App.jsx", import.meta.url), "utf8");
+  const n = (app.match(/modelSanity\(/g) || []).length;
+  assert.ok(n >= 3, `all three generation sites call it (found ${n})`);
+});
+
+/* ============================================================================
+   AN OPENING LIMIT THAT CAN ACTUALLY FILL, AND A TICKET THAT SHOWS THE BOOK.
+============================================================================ */
+
+// A BOIL-shaped market: a 145%-of-mid spread on the long leg, which is what
+// this repo measured on the real board.
+const WIDE = [{ bid: 0.30, ask: 0.50 }, { bid: 0.10, ask: 0.24 }];
+const TIGHT = [{ bid: 2.30, ask: 2.36 }, { bid: 1.98, ask: 2.02 }];
+
+test("COMBO BOOK — each leg at the side that actually trades, for the whole structure", () => {
+  const b = comboBook(BOIL_SPREAD, WIDE);
+  assert.equal(b.ok, true);
+  // To BUY this you lift the 0.50 ask and receive the 0.10 bid: 0.40.
+  assert.ok(Math.abs(b.ask - 0.40) < 1e-9, `ask ${b.ask}`);
+  // To SELL it you receive the 0.30 bid and pay the 0.24 ask: 0.06.
+  assert.ok(Math.abs(b.bid - 0.06) < 1e-9, `bid ${b.bid}`);
+  assert.ok(Math.abs(b.mid - 0.23) < 1e-9, `mid ${b.mid}`);
+  assert.ok(b.bid < b.mid && b.mid < b.ask, "a person reads them in that order");
+  assert.ok(Math.abs(b.spread - 0.34) < 1e-9, "and the structure's own spread");
+});
+
+test("COMBO BOOK — a leg with no two-sided quote means there is no book, not a book of zeros", () => {
+  for (const q of [[{ bid: 0.30, ask: 0.50 }, {}], [{ bid: 0, ask: 0.50 }, { bid: 0.10, ask: 0.24 }],
+    [{ bid: 0.30, ask: 0.50 }, { bid: 0.30, ask: 0.10 }]]) {
+    const b = comboBook(BOIL_SPREAD, q);
+    assert.equal(b.ok, false);
+    assert.equal(b.bid, null); assert.equal(b.mid, null); assert.equal(b.ask, null);
+    assert.ok(b.missing.length > 0, "and it names which leg");
+  }
+  assert.equal(comboBook([], []).ok, false, "no legs is no book either");
+});
+
+test("OPENING LIMIT — IT IS NOT THE BARE MID: it concedes a share of the spread", () => {
+  const b = comboBook(BOIL_SPREAD, WIDE);
+  const o = openLimitPrice({ netMid: b.mid, spread: b.spread });
+  assert.notEqual(o.limit, Math.abs(b.mid), "THE FAULT: the ticket seeded the bare mid");
+  assert.ok(o.limit > Math.abs(b.mid), "a debit concedes UPWARDS — the direction that fills");
+  assert.ok(Math.abs(o.allowance - RULES.openLimitSlippage * b.spread) < 1e-9);
+  assert.ok(Math.abs(o.limit - (b.mid + RULES.openLimitSlippage * b.spread)) < 1e-9);
+  // ...and never past the touch, which is the market order this replaces.
+  assert.ok(o.limit < Math.abs(b.ask), "a quarter of the spread is not the far side of it");
+});
+
+test("OPENING LIMIT — a CREDIT structure concedes downwards, and the arithmetic has no branch", () => {
+  const credit = openLimitPrice({ netMid: -0.40, spread: 0.20 });
+  assert.ok(Math.abs(credit.net + 0.45) < 1e-9, "you accept less, not more");
+  assert.equal(credit.limit, 0.45, "and the MAGNITUDE is what orderBody() sends");
+  const debit = openLimitPrice({ netMid: 0.40, spread: 0.20 });
+  assert.ok(Math.abs(debit.net - 0.45) < 1e-9);
+});
+
+test("OPENING LIMIT — a concession may never flip the sign round", () => {
+  // The same trap as the close: a +0.02 debit conceded through zero reaches the
+  // broker as a magnitude, i.e. as an order on the wrong side of the market.
+  const r = openLimitPrice({ netMid: 0.02, spread: 0.40 });
+  assert.ok(r.net > 0, "a debit stays a debit");
+  const c = openLimitPrice({ netMid: -0.02, spread: 0.40 });
+  assert.ok(c.net < 0, "and a credit stays a credit");
+});
+
+test("OPENING LIMIT — a missing market is no price at all, never a price of zero", () => {
+  assert.equal(openLimitPrice({ netMid: null, spread: 0.2 }), null);
+  assert.equal(openLimitPrice({ netMid: 0.4, spread: null }), null);
+  assert.match(openLimitNote(null), /cannot be read on both sides/);
+  assert.match(openLimitNote(openLimitPrice({ netMid: 0.23, spread: 0.34 })), /concedes 25%/);
+});
+
+test("OPENING LIMIT — it is a SIBLING of the closing one, with its own constant", () => {
+  assert.equal(OPEN_LIMIT_SLIPPAGE, RULES.openLimitSlippage);
+  assert.equal(CLOSE_LIMIT_SLIPPAGE, RULES.closeLimitSlippage);
+  // They happen to be equal today. What must hold is that moving one does not
+  // move the other: two questions, two numbers.
+  const b = comboBook(BOIL_SPREAD, WIDE);
+  const a = openLimitPrice({ netMid: b.mid, spread: b.spread, slippage: 0.5 });
+  const c = openLimitPrice({ netMid: b.mid, spread: b.spread, slippage: 0.1 });
+  assert.ok(a.limit > c.limit, "the allowance is what moves the price");
+});
+
+test("THE LIMIT IS PLACED IN THE BOOK, with one plain sentence about each zone", () => {
+  const b = comboBook(BOIL_SPREAD, WIDE);        // bid 0.06, mid 0.23, ask 0.40
+  assert.equal(limitPlacement(0.40, b).zone, "fills");
+  assert.equal(limitPlacement(0.45, b).zone, "fills");
+  assert.equal(limitPlacement(0.31, b).zone, "waiting");
+  assert.equal(limitPlacement(0.06, b).zone, "no-fill");
+  assert.equal(limitPlacement(0.01, b).zone, "no-fill");
+  for (const L of [0.40, 0.31, 0.06]) {
+    const p = limitPlacement(L, b);
+    assert.ok(p.known && p.label && p.sentence.length > 40, "every zone says something");
+  }
+});
+
+test("THE LIMIT AT THE MID IS NAMED AS THE THING THAT DOES NOT FILL", () => {
+  // This is the case that matters: it is the price the app seeded and the one
+  // order this app has ever sent sat at it. Floating point must not lose it —
+  // the mid of two two-decimal quotes is 0.23000000000000004.
+  const b = comboBook(BOIL_SPREAD, WIDE);
+  const p = limitPlacement(0.23, b);
+  assert.equal(p.zone, "unlikely");
+  assert.equal(p.label, "THIS WILL NOT FILL");
+  assert.match(p.sentence, /middle of the market/);
+});
+
+test("THE DIRECTION OF \"MORE AGGRESSIVE\" INVERTS ON A CREDIT, and the sentence follows it", () => {
+  // THE BUG THIS LOCKS: on a DEBIT you pay, so a bigger number is a better
+  // offer and the fill price is the LARGEST of the three magnitudes. On a
+  // CREDIT you receive, so a smaller number is the better offer and the fill
+  // price is the SMALLEST. Comparing magnitudes with `>=` in both cases reads a
+  // credit exactly backwards — it calls a limit DEMANDING MORE than the market
+  // is offering "fills now", which is the one sentence here that must never be
+  // wrong, on the one screen where being wrong sends an order.
+  const credit = comboBook(
+    [{ side: -1, qty: 1 }, { side: 1, qty: 1 }],
+    [{ bid: 1.00, ask: 1.10 }, { bid: 0.40, ask: 0.50 }]);
+  assert.equal(credit.ok, true);
+  assert.ok(credit.mid < 0, "a credit structure has a negative net");
+  // Opening it sells the structure: hit the 1.00 bid, lift the 0.50 ask = 0.50.
+  assert.ok(Math.abs(Math.abs(credit.ask) - 0.50) < 1e-9, `fills at ${credit.ask}`);
+  assert.ok(Math.abs(Math.abs(credit.mid) - 0.60) < 1e-9);
+  assert.equal(limitPlacement(0.45, credit).zone, "fills", "accepting less than offered fills");
+  assert.equal(limitPlacement(0.50, credit).zone, "fills", "and exactly the offer fills");
+  assert.equal(limitPlacement(0.55, credit).zone, "waiting");
+  assert.equal(limitPlacement(0.60, credit).zone, "unlikely", "at the mid, on a credit too");
+  assert.equal(limitPlacement(0.80, credit).zone, "no-fill", "demanding well over the mid never fills");
+  // The sentence has to say "accept", not "pay" — it is the other way round.
+  assert.match(limitPlacement(0.45, credit).sentence, /accept/);
+  assert.match(limitPlacement(0.40, comboBook([{ side: 1, qty: 1 }, { side: -1, qty: 1 }],
+    [{ bid: 0.30, ask: 0.50 }, { bid: 0.10, ask: 0.24 }])).sentence, /pay/);
+});
+
+test("A LIMIT SITTING ON THE FAR TOUCH JOINS THE QUEUE, it does not trade", () => {
+  // A buy limit exactly ON the bid does not cross it. That belongs with the
+  // prices that do not fill, not with the ones that might.
+  const b = comboBook([{ side: 1, qty: 1 }, { side: -1, qty: 1 }], WIDE);
+  assert.equal(limitPlacement(Math.abs(b.bid), b).zone, "no-fill");
+  assert.equal(limitPlacement(Math.abs(b.bid) + 0.02, b).zone, "unlikely", "just inside it is not the same");
+});
+
+test("THE LIMIT PLACEMENT SAYS SO when there is no book to place it in", () => {
+  const none = comboBook(BOIL_SPREAD, [{ bid: 0.3, ask: 0.5 }, {}]);
+  const p = limitPlacement(0.40, none);
+  assert.equal(p.known, false);
+  assert.match(p.sentence, /no two-sided market/);
+  assert.equal(limitPlacement(0, comboBook(BOIL_SPREAD, WIDE)).known, false, "and no price is not a price");
+});
+
+test("NOTIONAL CONTROLLED — contracts x 100 x spot, which was never on screen", () => {
+  assert.equal(notionalControlled(10, 19.84), 19840);
+  assert.equal(notionalControlled(1, 19.84), 1984);
+  for (const bad of [[0, 19.84], [10, 0], [null, 19.84], [10, null]]) {
+    assert.equal(notionalControlled(...bad), null, "and it is never invented");
+  }
+  const n = notionalNote(19840, 500, "BOIL");
+  assert.match(n, /\$19,840/);
+  assert.match(n, /\$500/);
+  assert.match(n, /40 times/, "the leverage stated as a number, which is the point");
+});
+
+/* ============================================================================
+   THE ENTRY FLOOR AS ROOM. The gate's three bands are tested above; these are
+   the rule functions behind them, and the board that can now be offered.
+============================================================================ */
+
+test("ENTRY ROOM — three bands, and the boundaries are where the rules are", () => {
+  assert.equal(entryRoom(RULES.exitDTE - 1).band, "inside-exit");
+  assert.equal(entryRoom(RULES.exitDTE).band, "inside-exit", "AT the exit rule is inside it");
+  assert.equal(entryRoom(RULES.exitDTE + 1).band, "tight");
+  assert.equal(entryRoom(RULES.minEntryDTE - 1).band, "tight");
+  assert.equal(entryRoom(RULES.minEntryDTE).band, "clear", "AT the floor is clear of it");
+  assert.equal(entryRoom(90).band, "clear");
+  // The quantity that matters, and what the app aims for.
+  assert.equal(entryRoom(28).room, 28 - RULES.exitDTE);
+  assert.equal(entryRoom(28).target, RULES.minEntryDTE - RULES.exitDTE);
+  assert.equal(entryRoom(null).known, false, "and an unknown DTE is not a DTE of zero");
+});
+
+test("ENTRY ROOM — a written reason is the same mechanism as every other override", () => {
+  assert.equal(entryOverrideOk(""), false);
+  assert.equal(entryOverrideOk("   "), false);
+  assert.equal(entryOverrideOk("x".repeat(RULES.minOverrideReasonChars - 1)), false);
+  assert.equal(entryOverrideOk("x".repeat(RULES.minOverrideReasonChars)), true);
+  assert.equal(entryOverrideOk(null), false, "and nothing is not a reason");
+  const note = entryOverrideNote(entryRoom(28), "the 28-day board is the only liquid one");
+  assert.match(note, /28 DTE/);
+  assert.match(note, /7 days/);
+  assert.match(note, /only liquid one/, "the reason itself is in the record");
+});
+
+test("ENTRY ROOM — the 30 IS NOT CHANGED, and neither is the 21", () => {
+  // This session rewrote what happens either side of the floor and deliberately
+  // did not move it: the reading that would settle it is ROADMAP P5's.
+  assert.equal(RULES.minEntryDTE, 30);
+  assert.equal(RULES.exitDTE, 21);
+  assert.equal(RULES.bestPracticePerTradePct, 0.05);
+  assert.equal(RULES.totalExposurePct, 0.25);
+});
+
+test("EXPIRY CHOICE — a passed-over board past the exit rule is OFFERABLE now", () => {
+  const c = expiryChoice([
+    { key: "2026-10-02", dte: 28, clears: 12, near: 14 },
+    { key: "2026-10-09", dte: 35, clears: 2, near: 7 },
+  ]);
+  assert.equal(c.chosen.key, "2026-10-09", "the CHOICE is untouched");
+  assert.equal(c.passedOver.key, "2026-10-02");
+  assert.equal(c.passedOver.offerable, true);
+  assert.match(expiryChoiceNote(c), /writing down why/, "and the sentence says what you may do");
+});
+
+test("EXPIRY CHOICE — a board at or inside the exit rule is named and NOT offerable", () => {
+  const c = expiryChoice([
+    { key: "2026-09-18", dte: 14, clears: 19, near: 23 },
+    { key: "2026-10-09", dte: 35, clears: 2, near: 7 },
+  ]);
+  assert.equal(c.passedOver.offerable, false);
+  assert.match(expiryChoiceNote(c), /not offered to anybody/);
+});
+
+test("THE FLOOR IS INSTRUMENTED so a later session can calibrate it from a reading", () => {
+  const c = expiryChoice([
+    { key: "2026-10-02", dte: 28, clears: 12, near: 14 },
+    { key: "2026-10-09", dte: 35, clears: 2, near: 7 },
+  ]);
+  const row = passedOverRecord("BOIL", c);
+  assert.ok(row);
+  assert.equal(row.ticker, "BOIL");
+  assert.equal(row.chosen.key, "2026-10-09");
+  assert.equal(row.passedOver.key, "2026-10-02");
+  assert.equal(row.busierBy, 10);
+  assert.equal(row.busierFactor, 6);
+  assert.equal(row.offerable, true);
+  // NOTHING PASSED OVER IS NOT AN EVENT. A log full of nulls is not a reading.
+  const none = expiryChoice([{ key: "2026-10-09", dte: 35, clears: 2, near: 7 }]);
+  assert.equal(passedOverRecord("BOIL", none), null);
+  assert.equal(passedOverRecord("BOIL", null), null);
+  // And the summary reads the rows rather than asserting anything.
+  assert.match(passedOverSummary([]), /has not taken a busier board away/);
+  const sum = passedOverSummary([row, { ...row, ticker: "UNG", offerable: false }]);
+  assert.match(sum, /2 times/);
+  assert.match(sum, /BOIL/);
+  assert.match(sum, /UNG/);
 });
 
 /* ---------------- summary ---------------- */

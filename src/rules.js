@@ -9,6 +9,13 @@
 // functions all import this file.
 // ============================================================================
 
+// THE MODEL, FOR THE ONE CHECK THAT NEEDS ONE. `engine.js` imports nothing, so
+// this is a leaf-ward import and not a cycle. `modelSanity()` below compares a
+// price off the chain against `netBS()` — the SAME function and the SAME smile
+// every other screen in this app prices with, which is the point: a second
+// implementation of the model would make the check a comparison of two guesses.
+import { netBS, bs, smile } from "./engine.js";
+
 /** The config object. Everything else in this file is derived from it. */
 export const RULES = {
   // --- exits, PRD §4. Chosen once per position at construction, then frozen.
@@ -217,6 +224,69 @@ export const RULES = {
   // line under which there is nothing to judge.
   minNetPremium: 0.05,
 
+  // --- modelDisagreementRatio — A PRICE HAS TO SURVIVE A SANITY CHECK, NOT
+  // JUST A FLOOR.
+  //
+  // >>> CHOSEN, NOT MEASURED — see the two paragraphs at the end. <<<
+  //
+  // THE FAULT, READ ON THE OWNER'S PHONE AND ON HIS ALPACA PAPER ACCOUNT,
+  // 17 September 2026. A two-leg order reached the broker: BOIL 2026-10-23,
+  // buy 10x 20C, sell 10x 21C, limit $0.05, day. It sat at "new" with a filled
+  // quantity of 0.00 and never filled. It is the only order this app has ever
+  // sent.
+  //
+  // With spot at 19.84, 36 days out and the implied volatility this app itself
+  // uses for BOIL, that spread is worth $0.333 a share — $33.29 a contract.
+  // The app priced it at $0.05, which is EXACTLY `minNetPremium`: it cleared
+  // `priceability()` by rounding. Wrong by a factor of 6.7 in the direction of
+  // "too cheap" means at least one leg's mid was a placeholder, and the
+  // MAXIMUM LOSS SHOWN TO THE USER WAS $50 WHERE THE REAL ONE, HAD IT FILLED,
+  // WOULD HAVE BEEN $333.
+  //
+  // That is the same disease as the $0 butterfly above, one cent ABOVE the
+  // floor built to catch it — which is the whole lesson. `minNetPremium` is an
+  // ABSOLUTE floor: it knows what a price may not be smaller than, and nothing
+  // at all about what THIS structure should cost. A relative check does: the
+  // app already has a theoretical value for every structure it builds
+  // (`netBS()` in engine.js, with the same `smile()` used everywhere else), so
+  // it can ask whether the chain and the model are telling the same story.
+  //
+  // WHY FOUR, AND WHAT IT IS MEASURED AGAINST. The numerator is a real chain.
+  // The denominator is Black-Scholes at a HARDCODED per-ticker sigma, so the
+  // bar cannot be tighter than that model's own error, or the app would refuse
+  // real structures for the crime of the app's own volatility guess being off.
+  // That error budget WAS measured here, by repricing every structure family
+  // this app builds, on all five markets, at 30/36/45/60/90 days and five
+  // strikes either side of the money, with the assumed volatility deliberately
+  // wrong — `netBS(legs, S, dte, iv * m) / netBS(legs, S, dte, iv)`, counting
+  // only cases where both nets clear MIN_NET_DOLLARS:
+  //
+  //     family          IV wrong +/-25%    IV wrong x0.5 .. x2
+  //     call vertical   0.63 .. 1.28       0.39 .. 1.68
+  //     put vertical    0.61 .. 1.44       0.41 .. 2.33
+  //     butterfly       0.81 .. 1.31       0.59 .. 1.87
+  //     iron condor     0.59 .. 1.53       0.27 .. 2.83
+  //
+  //     the live failure above (BOIL 20/21): 0.15
+  //
+  // A bar of FOUR accepts 0.25 to 4.00. Every artefact in that table sits
+  // inside it — even a volatility guess wrong by a factor of TWO cannot make
+  // this floor fire — and the one real fault sits outside it by 1.67x. It is
+  // deliberately loose: it is not there to say a price is a bad price, only
+  // that a price and its model cannot both be describing the same structure.
+  //
+  // >>> WHAT WAS NOT MEASURED, AND IT IS THE THING THE TASK ASKED FOR. <<<
+  // The distribution of market-net over model-net on the five LIVE chains. It
+  // would have been read through /api/liquidity and /api/chain and tabulated
+  // here the way `LIQUIDITY_MEASUREMENT` is; there are no broker keys in this
+  // sandbox and the egress proxy refuses the CONNECT, as it has since PR #15.
+  // So the table above is the DENOMINATOR'S error budget, not the numerator's
+  // behaviour, and 4 is a judgement written down once rather than a reading.
+  // It goes on the NOT VERIFIED list in PRD.md until somebody takes that
+  // reading — and the honest expectation is that it will come DOWN, because a
+  // real chain should sit near 1 and nothing here knows how near.
+  modelDisagreementRatio: 4,
+
   // --- scratchPayoffShare — FOR COPY ONLY, AND FOR NOTHING ELSE.
   //
   // It filters no candidate, blocks no order and changes no arithmetic. It
@@ -269,6 +339,40 @@ export const RULES = {
   // reported as working, and the next autopilot run proposes the close again at
   // a limit computed from a fresh chain. Nothing walks the price up by itself.
   closeLimitSlippage: 0.25,
+
+  // --- openLimitSlippage — AND THE SAME QUESTION FOR AN ORDER GOING ON.
+  //
+  // >>> CHOSEN, NOT MEASURED, exactly like its sibling above. <<<
+  //
+  // THE FAULT, SAME ORDER AS `modelDisagreementRatio`. The ticket seeded its
+  // limit with the bare mid — `Math.abs(estNet).toFixed(2)` — and a limit at
+  // the mid of a BOIL book quoting 66%, 91%, 145% and 166% of the mid is a
+  // price nobody meets. Closing orders have conceded a quarter of the spread
+  // since PR #19, with the reasoning written down; opening orders conceded
+  // NOTHING, and the ticket carried a comment saying so. The order sat.
+  //
+  // WHY IT IS A SIBLING AND NOT THE SAME CONSTANT. The number is the same and
+  // the arithmetic is the same, and it would have been easy to export one. It
+  // is two constants because the two concessions are answers to two different
+  // questions, and a later session has to be able to move one without moving
+  // the other:
+  //
+  //  - A CLOSE HAS TO HAPPEN. The exit rule has fired; the only choice is the
+  //    price. Conceding buys the fill that the rule already decided on.
+  //  - AN OPEN NEVER HAS TO HAPPEN. Nothing is forced, and "nothing today" is
+  //    a feature of this app. So the concession is not buying a necessary
+  //    fill, it is buying a fill the user may simply decline to pay for.
+  //  - AND IT COSTS SOMETHING A CLOSE CANNOT COST: conceding on the way IN
+  //    raises the debit, which IS the maximum loss on every structure this app
+  //    builds — measured against the per-trade limit by the risk gate. A
+  //    quarter of a wide spread can push a trade through that limit, and the
+  //    right answer then is the gate refusing it, not a quieter concession.
+  //    That is why the ticket prints the conceded price, the mid and the model
+  //    value side by side, and why the gate reads what will actually be sent.
+  //
+  // A quarter for the same reason as the close: half the spread IS the far
+  // side of the market, which is the market order this exists to avoid.
+  openLimitSlippage: 0.25,
 };
 
 /** The same minimum in dollars for ONE contract, which is how screens print it. */
@@ -463,6 +567,21 @@ export const NOTHING_TODAY = {
       `off a quote nobody has traded against. This platform does not offer a trade on the strength of a number ` +
       `that would have to be wrong for the trade to work.`;
   },
+  // A PRICE THE MODEL DISBELIEVES IS A FIFTH ANSWER, and it is not any of the
+  // four above. The price was read, it cleared the absolute minimum, and the
+  // worst case it produced is a perfectly possible loss — it is simply not the
+  // loss this structure has. Folding it into "unpriceable" would say the app
+  // could not read the chain when it read it fine and disagreed with it.
+  modelDisagreement: (tally) => {
+    const t = tally || {};
+    const markets = (t.markets || []).join(", ");
+    return `Every structure that fit your answers on ${markets || "the markets you picked"} is priced by the ` +
+      `chain at something the app's own model cannot account for: ${t.modelDisagreement || "each one"} came ` +
+      `back more than ${RULES.modelDisagreementRatio}x away from its theoretical value, in one direction or ` +
+      `the other. A price like that clears the ${money(MIN_NET_DOLLARS)} minimum and is still a placeholder — ` +
+      `and the maximum loss on screen would have been wrong by the same factor. Nothing is offered on a number ` +
+      `the app would have to disbelieve to offer it.`;
+  },
   // The quality floors emptied the board. This is a real answer — "nothing on
   // CORN clears the liquidity floor today" is worth more than a screen of
   // structures nobody trades — so it gets a sentence with the counts in it.
@@ -476,6 +595,7 @@ export const NOTHING_TODAY = {
     if (t.reward > 0) parts.push(`${t.reward} because ${lab.reward}`);
     if (t.unpriceable > 0) parts.push(`${t.unpriceable} because ${lab.unpriceable}`);
     if (t.impossible > 0) parts.push(`${t.impossible} because ${lab.impossible}`);
+    if (t.model > 0) parts.push(`${t.model} because ${lab.model}`);
     // WHICH RULE DID THE WORK. `unpriceable` and `impossible` are counted here
     // so a mixed board can be explained in one screen, but they are NOT the
     // floors and the sentence must not say they are: a structure whose price
@@ -712,6 +832,8 @@ export const qualityFloorLabels = (level = RECOMMENDED_LIQUIDITY) => {
     reward: `it pays under ${money(RULES.minRewardRisk * 100)} for every ${money(100)} at risk`,
     unpriceable: `its price could not be read from the chain at all — a leg with no bid, or a net of about nothing`,
     impossible: `its worst case priced as a PROFIT, which is an arbitrage and therefore a mispriced leg`,
+    model: `the chain's price and the app's own model disagree by more than ${RULES.modelDisagreementRatio}x, `
+      + `so one of them is describing a different structure`,
   };
 };
 
@@ -844,6 +966,149 @@ export const unpriceableNote = (n, what) =>
   `A maximum loss the app cannot compute is not a maximum loss of zero, and nothing here is shown at ${money(0)}.`;
 
 /* -------------------------------------------------------------------------
+ * A PRICE HAS TO SURVIVE A SANITY CHECK, NOT JUST A FLOOR.
+ *
+ * `priceability()` above asks whether there is a price AT ALL, and it answers
+ * with an absolute minimum. That minimum is now proven insufficient: the BOIL
+ * 20/21 call spread that reached the broker on 17 September 2026 priced at
+ * $0.05 — exactly `minNetPremium`, one cent above the line drawn to catch the
+ * $0 butterfly — against a model value of $0.333. It cleared the floor by
+ * rounding and was wrong by a factor of 6.7.
+ *
+ * So this is the THIRD question, after "is there a price" and before the
+ * quality floors: DOES THE PRICE AND THE MODEL DESCRIBE THE SAME STRUCTURE?
+ * The reasoning behind the ratio, and the table it was drawn from, is in
+ * `RULES.modelDisagreementRatio`.
+ *
+ * FOUR RULES HOLD IT, and three of them are the same discipline as every other
+ * check in this file:
+ *
+ *  1. UNKNOWN IS NOT DISAGREEMENT. Without a spot, a DTE and a volatility there
+ *     is no model to compare against, and the check is SKIPPED rather than
+ *     failed — exactly as the liquidity half skips on `oi: null` and the spread
+ *     half skips on a one-sided quote.
+ *  2. NOTHING IS JUDGED AGAINST A PRICE UNDER THE MINIMUM. Both sides have to
+ *     clear MIN_NET_DOLLARS before a ratio is formed. A model net of pennies is
+ *     not a valuation, it is the same rounding `rewardRisk()` refuses to divide
+ *     by, and the measured error budget blows out precisely there.
+ *  3. IT NAMES THE LEG. The refusal is useless as "the price is wrong": the
+ *     screen has to say WHICH quote is responsible, so `worstLeg` is the leg
+ *     whose own mark disagrees most, in dollars, with its own model price.
+ *  4. IT IS A PROPOSAL FLOOR, NOT A GATE. It lives at the three generation
+ *     sites beside `qualityFloor()` and it is deliberately NOT in
+ *     `riskGate.js`: a trade the user builds by hand on the desk is his to
+ *     make. What the desk owes him instead is the model value printed BESIDE
+ *     the market value, so he can see what he is accepting.
+ * ------------------------------------------------------------------------- */
+
+/**
+ * @param {object} arg
+ *   legs   — [{ side, type, strike, qty }]
+ *   net    — the structure's net PER SHARE off the chain, signed
+ *            (`analyze().entry`). Positive is a debit.
+ *   marks  — one market price per leg, aligned with `legs` (`analyze().legPx`'s
+ *            `px`). Optional: without it the ratio is still computed, only
+ *            `worstLeg` cannot be named.
+ *   spot / dte / iv — what the model needs. Any of them missing skips the check.
+ *   ratio  — the bar, overridable only so the tests can state it explicitly.
+ * @returns {{ checked, pass, ratio, bar, marketNet, modelNet, worstLeg, reason }}
+ *   dollars for ONE contract on `marketNet`/`modelNet`; `reason` is a finished
+ *   English sentence with the numbers already in it, or null.
+ */
+export function modelSanity({
+  legs = [], net = null, marks = [], spot = null, dte = null, iv = null,
+  ratio = RULES.modelDisagreementRatio,
+} = {}) {
+  const skip = (why) => ({
+    checked: false, pass: true, ratio: null, bar: ratio, marketNet: null,
+    modelNet: null, worstLeg: null, reason: null, why,
+  });
+  const ls = Array.isArray(legs) ? legs : [];
+  if (!ls.length) return skip("no-legs");
+  if (!known(net)) return skip("no-net");
+  // RULE 1: unknown is not disagreement. A model needs all three of these and
+  // `Number(null)` is 0, which would silently price everything at a spot of
+  // zero and refuse the whole board.
+  if (!known(spot) || !known(dte) || !known(iv)) return skip("no-model");
+  const S = Number(spot), D = Number(dte), V = Number(iv);
+  if (!(S > 0) || !(D > 0) || !(V > 0)) return skip("no-model");
+
+  const marketNet = Math.abs(Number(net)) * 100;
+  let modelShare;
+  try { modelShare = netBS(ls, S, D, V); } catch { return skip("no-model"); }
+  if (!Number.isFinite(modelShare)) return skip("no-model");
+  const modelNet = Math.abs(modelShare) * 100;
+
+  // RULE 2: nothing is judged against a price under the minimum. The market
+  // side under it is `priceability()`'s refusal, not this one's, and a model
+  // side under it is a valuation of about nothing — the region where the
+  // measured error budget runs from 0.11 to 2.8 and a ratio means nothing.
+  if (marketNet < MIN_NET_DOLLARS || modelNet < MIN_NET_DOLLARS) {
+    return { ...skip("below-minimum"), marketNet, modelNet };
+  }
+
+  const r = marketNet / modelNet;
+  const bar = Math.max(1, Number(ratio) || RULES.modelDisagreementRatio);
+  const pass = r >= 1 / bar && r <= bar;
+
+  // RULE 3: name the leg. The leg whose own mark disagrees most, in dollars,
+  // with its own model price at the same smile — which is the quote a person
+  // would go and look at.
+  let worstLeg = null;
+  if (Array.isArray(marks) && marks.length === ls.length) {
+    let worstGap = -1;
+    ls.forEach((l, i) => {
+      const m = marks[i];
+      if (!known(m)) return;
+      let theo;
+      try { theo = bs(S, Number(l.strike), D / 365, smile(V, S, Number(l.strike)), l.type); }
+      catch { return; }
+      if (!Number.isFinite(theo)) return;
+      const qty = Math.abs(Number(l.qty)) || 1;
+      const gap = Math.abs(Number(m) - theo) * qty * 100;
+      if (gap > worstGap) {
+        worstGap = gap;
+        worstLeg = {
+          i, strike: Number(l.strike), type: l.type, side: Number(l.side) > 0 ? 1 : -1,
+          mark: Number(m) * 100, model: theo * 100, gap,
+          name: `${l.strike}${l.type === "put" ? "P" : "C"}`,
+        };
+      }
+    });
+  }
+
+  const reason = pass ? null : modelSanityReason({ marketNet, modelNet, r, bar, worstLeg });
+  return { checked: true, pass, ratio: r, bar, marketNet, modelNet, worstLeg, reason, why: null };
+}
+
+/** The refusal, as one finished sentence with the leg named in it. */
+export const modelSanityReason = ({ marketNet, modelNet, r, bar = RULES.modelDisagreementRatio, worstLeg } = {}) => {
+  const cheap = r < 1;
+  const times = r > 0 ? (cheap ? 1 / r : r) : null;
+  const how = times != null && Number.isFinite(times)
+    ? `${times.toFixed(1)} times ${cheap ? "less" : "more"} than`
+    : `nothing like`;
+  const leg = worstLeg
+    ? ` The ${worstLeg.name} is what does it: the chain marks it at ${money(worstLeg.mark)} a contract ` +
+      `where the model says ${money(worstLeg.model)}, a gap of ${money(worstLeg.gap)} on that leg alone. ` +
+      `That is the quote to go and look at.`
+    : ``;
+  return `The chain prices this structure at ${money(marketNet)} a contract and the model says ` +
+    `${money(modelNet)} — ${how} it should be.${leg} A price ${cheap ? "that far under" : "that far over"} ` +
+    `its own theoretical value is not ${cheap ? "a bargain" : "expensive"}, it is at least one leg quoted off ` +
+    `a placeholder: ${money(marketNet)} was also what the maximum loss would have been shown as, and the real ` +
+    `one would have been ${money(modelNet)}. Anything beyond ${bar}x either way is refused.`;
+};
+
+/** The one line a list prints in place of a structure the model disbelieved. */
+export const modelDisagreementNote = (n, what) =>
+  `${n} structure${n === 1 ? "" : "s"} ${n === 1 ? "was" : "were"} left out because the price on the chain and ` +
+  `the app's own model disagree by more than ${RULES.modelDisagreementRatio}x${what ? ` on ${what}` : ""}. ` +
+  `A net that clears the ${money(MIN_NET_DOLLARS)} minimum can still be a placeholder — the order that started ` +
+  `this priced at ${money(MIN_NET_DOLLARS)} against a model value of ${money(33)} — and the maximum loss on ` +
+  `screen would have been wrong by the same factor.`;
+
+/* -------------------------------------------------------------------------
  * WHICH EXPIRY THE APP OPENS ON — THE BOARD DECIDES, NOT THE CALENDAR.
  *
  * THE FAULT, MEASURED ON BOIL. Near the money, counting contracts that clear
@@ -962,10 +1227,19 @@ export function expiryChoice(candidates = [], {
   // The nearer board we are not allowed to use, and only when it is genuinely
   // better: naming an expiry that is no thicker would be noise. A board that
   // settles today is not an alternative either — see `SETTLING_DTE`.
-  const passedOver = chosen == null ? null : all
+  const po = chosen == null ? null : all
     .filter((c) => c.dte > SETTLING_DTE && c.dte < minEntryDTE
       && c.clears != null && chosen.clears != null && c.clears > chosen.clears)
     .sort((a, b) => (b.clears - a.clears) || (b.dte - a.dte))[0] || null;
+  // AND NOW IT IS OFFERABLE, NOT MERELY NARRATED. `passedOver` has been a
+  // sentence on the screen naming a board the user was not allowed to take,
+  // which is a door with no handle. A board in the WARNING band — past the
+  // exit rule, under the entry floor — can be taken with a written reason
+  // (`entryRoom()` below, and the gate). A board at or inside the exit rule
+  // still cannot, by anybody, for any reason: it would open inside its own
+  // exit window. The CHOICE is untouched — a passed-over board is never what
+  // the app opens on by itself — only what the app lets you do about it.
+  const passedOver = po ? { ...po, offerable: po.dte > RULES.exitDTE } : null;
 
   const reason = chosen == null ? "none"
     : !measured ? "dte"
@@ -991,11 +1265,19 @@ export const expiryChoiceNote = (choice, level = RECOMMENDED_LIQUIDITY) => {
         `${RULES.minEntryDTE}-day entry minimum.`
       : `Building on ${c.key} (${c.dte} days out), the closest to the ${RULES.targetEntryDTE}-day mark, with ` +
         `${c.clears} of its ${c.near} near-the-money contracts clearing the ${l.label.toUpperCase()} floor.`;
-  const over = choice.passedOver
-    ? ` ${choice.passedOver.key} is busier — ${choice.passedOver.clears} of ${choice.passedOver.near} clear — ` +
-      `but it is only ${choice.passedOver.dte} days out, inside the ${RULES.minEntryDTE}-day entry floor: ` +
-      `opening there would put the trade inside its own ${RULES.exitDTE}-day exit rule almost immediately, ` +
-      `so it is passed over.`
+  const p = choice.passedOver;
+  const over = p
+    ? ` ${p.key} is busier — ${p.clears} of ${p.near} clear — but it is only ${p.dte} days out, inside the ` +
+      `${RULES.minEntryDTE}-day entry floor, so it is not what the app opens on.` +
+      // THE SENTENCE NOW SAYS WHAT YOU MAY DO ABOUT IT. Naming a better board
+      // and stopping there was the fault: past the exit rule it is a warning
+      // with a door, at or inside it there is no trade to have.
+      (p.offerable
+        ? ` It is ${p.dte - RULES.exitDTE} day${p.dte - RULES.exitDTE === 1 ? "" : "s"} clear of the ` +
+          `${RULES.exitDTE}-day exit rather than the ${RULES.minEntryDTE - RULES.exitDTE} the app aims for, ` +
+          `so you can take it anyway by writing down why.`
+        : ` Opening there would put the trade at or inside its own ${RULES.exitDTE}-day exit rule, so it is ` +
+          `not offered to anybody.`)
     : "";
   return head + over;
 };
@@ -1010,6 +1292,7 @@ export const emptyExpiryNote = (expKey, tally, level = RECOMMENDED_LIQUIDITY) =>
   if (t.reward > 0) bits.push(`${t.reward} for reward-to-risk`);
   if (t.unpriceable > 0) bits.push(`${t.unpriceable} with no readable price`);
   if (t.impossible > 0) bits.push(`${t.impossible} unable to lose at any price`);
+  if (t.model > 0) bits.push(`${t.model} priced more than ${RULES.modelDisagreementRatio}x away from the model`);
   return `NOTHING CLEARED ON ${expKey || "this expiry"}${bits.length ? ` — ${bits.join(", ")}` : ""}. ` +
     `That is a verdict on ${expKey || "this expiry"} and on nothing else: another expiry on the same market ` +
     `can be far busier, and the count on any other screen is about the expiry that screen names. ` +
@@ -1515,6 +1798,9 @@ export function sizing(answers = {}) {
 /** The one home for how far a closing limit may walk from the mid. */
 export const CLOSE_LIMIT_SLIPPAGE = RULES.closeLimitSlippage;
 
+/** The same allowance for an order going ON. See `RULES.openLimitSlippage`. */
+export const OPEN_LIMIT_SLIPPAGE = RULES.openLimitSlippage;
+
 /** What the app calls a price it worked out itself. */
 export const MODEL_PRICE = "model";
 
@@ -1763,6 +2049,359 @@ export const closeUnreadableNote = (missing = [], legs = []) => {
     `${which ? ` (${which})` : ""}, so the closing price cannot be read from the market — and a close priced ` +
     `off a guess is the thing this app refuses to do. Nothing has changed on the broker. The autopilot will ` +
     `work the price out again on its next run, when the market is quoting.`;
+};
+
+
+/* =====================================================================
+   THE OPENING ORDER: WHAT THE MARKET IS, WHERE YOUR LIMIT SITS, AND HOW
+   MUCH OF THE UNDERLYING YOU ARE ACTUALLY CONTROLLING.
+
+   The owner's words, on the ticket as it stood: "it is not clear what price
+   to put in the app, or what the information is, or how to choose it." The
+   ticket offered a text field with the bare mid in it and nothing else — no
+   book, no sense of which side of it a number falls on, and no notional.
+
+   These four functions are what the ticket prints. They are here rather
+   than in `pro.jsx` for the same reason `closeMarket()` is: a number a
+   screen shows next to a limit price is part of the decision, and two
+   screens deriving it separately is how they come to disagree.
+===================================================================== */
+
+/**
+ * THE COMBO BOOK — the whole structure's bid, mid and ask, not leg by leg.
+ *
+ * Each leg is taken at THE SIDE THAT ACTUALLY TRADES. To buy the structure
+ * you lift the ask on every leg you are buying and hit the bid on every leg
+ * you are selling; to sell it, the other way round. Summing "the bids" and
+ * "the asks" leg by leg would produce two numbers that belong to no trade
+ * anybody can do.
+ *
+ * SIGNED THE WAY `analyze().entry` IS: positive is a debit (you pay),
+ * negative is a credit (you are paid). So for a debit structure
+ * `bid < mid < ask` reads as "the cheapest you might get it for" through to
+ * "the most it would cost", which is the order a person reads them in.
+ *
+ * @param legs    [{ side, qty }] — side +1 you are buying, -1 you are selling
+ * @param quotes  [{ bid, ask }] one per leg, in the same order
+ * @returns {{ ok, missing, bid, mid, ask, spread }} — PER SHARE, like every
+ *   other net in this file. `ok` false means at least one leg has no
+ *   two-sided quote and there is no book to print; `missing` names which.
+ */
+export function comboBook(legs = [], quotes = []) {
+  const missing = [];
+  let bid = 0, mid = 0, ask = 0, spread = 0;
+  const ls = Array.isArray(legs) ? legs : [];
+  ls.forEach((l, i) => {
+    const q = (quotes || [])[i] || {};
+    const b = Number(q.bid), a = Number(q.ask);
+    if (!Number.isFinite(b) || !Number.isFinite(a) || !(b > 0) || !(a > 0) || a < b) { missing.push(i); return; }
+    const qty = Math.abs(Math.round(+(l && l.qty) || 0)) || 1;
+    const side = Math.sign(+(l && l.side) || 1);
+    // Buying the structure: pay the ask on longs, receive the bid on shorts.
+    ask += qty * (side > 0 ? a : -b);
+    // Selling it: receive the bid on longs, pay the ask on shorts.
+    bid += qty * (side > 0 ? b : -a);
+    mid += qty * side * (b + a) / 2;
+    spread += qty * (a - b);
+  });
+  const ok = missing.length === 0 && ls.length > 0;
+  return ok
+    ? { ok, missing, bid, mid, ask, spread }
+    : { ok: false, missing, bid: null, mid: null, ask: null, spread: null };
+}
+
+/**
+ * THE OPENING LIMIT: START AT THE MID, CONCEDE A SHARE OF THE SPREAD.
+ *
+ * The mirror of `closeLimitPrice()`, with `openLimitSlippage` in place of
+ * `closeLimitSlippage` — see both comments in `RULES` for why they are two
+ * constants. The concession is ADDED to the signed net, which is the
+ * direction that fills in both cases and is why there is no branch:
+ *
+ *   a debit  netMid +0.40, spread 0.20 → +0.45  you offer to pay 5c more
+ *   a credit netMid −0.40, spread 0.20 → −0.35  you accept 5c less
+ *
+ * `limit` is the MAGNITUDE, because that is what `orderBody()` sends.
+ *
+ * A concession may never flip the sign, for the same reason it may not on a
+ * close: a +0.02 debit conceded by 0.10 would price at −0.08, and the broker
+ * reads the magnitude as "sell it for eight cents".
+ */
+export function openLimitPrice({ netMid, spread, slippage = OPEN_LIMIT_SLIPPAGE } = {}) {
+  if (netMid == null || spread == null) return null;
+  if (!Number.isFinite(+netMid) || !Number.isFinite(+spread)) return null;
+  const mid = +netMid;
+  const allowance = Math.max(0, +spread) * Math.max(0, +slippage);
+  const dir = Math.sign(mid) || 1;
+  const conceded = mid + dir * allowance;
+  const net = Math.abs(conceded) >= 0.01 ? +conceded.toFixed(4) : dir * 0.01;
+  return { netMid: mid, spread: +spread, slippage: Math.max(0, +slippage), allowance, net, limit: Math.abs(net) };
+}
+
+/** Where the opening limit came from, in one sentence for the ticket. */
+export const openLimitNote = (r) => {
+  if (!r) return `The market on this structure cannot be read on both sides, so there is no price to suggest: ` +
+    `type one yourself, or wait until it is quoted.`;
+  return `Suggested limit ${money(r.limit * 100)} a contract: the structure's mid is ` +
+    `${money(Math.abs(r.netMid) * 100)} and the two sides of its market are ${money(r.spread * 100)} apart, so ` +
+    `this concedes ${pctText(r.slippage)} of that — ${money(r.allowance * 100)} — in the direction that fills. ` +
+    `A limit AT the mid is a limit nobody has to meet, and the only order this app has ever sent sat at one ` +
+    `all day. Nothing walks the price further by itself: if this does not fill, you change it.`;
+};
+
+/**
+ * WHERE THE TYPED LIMIT FALLS BETWEEN THE BID AND THE ASK — and one plain
+ * sentence about what that means for the order.
+ *
+ * Read on the DEBIT convention and then mirrored, so both directions get the
+ * same three answers:
+ *
+ *   at or past the ask  → "fills now"      you are paying what is being asked
+ *   between mid and ask → "you are waiting" a real chance, not a certainty
+ *   at or under the mid → "this will not fill" on a market this wide
+ *
+ * @param limit  the MAGNITUDE the user typed (the ticket's field)
+ * @param book   `comboBook()`'s result
+ * @param sign   +1 when the structure is a debit, -1 when it is a credit;
+ *               taken from the book's own mid when not given
+ * @returns {{ known, zone, label, sentence }} — `known` false when there is
+ *   no book to place it against, which is a real state and not a failure.
+ */
+export function limitPlacement(limit, book, sign = null) {
+  const L = Math.abs(Number(limit));
+  if (!book || !book.ok || !Number.isFinite(L) || L <= 0) {
+    return { known: false, zone: null, label: null,
+      sentence: !book || !book.ok
+        ? `There is no two-sided market on every leg right now, so the app cannot say where your price sits ` +
+          `in it. That is also why it is not suggesting one.`
+        : `Type a price and the app will say where it falls between the two sides of the market.` };
+  }
+  const dir = sign != null ? (Number(sign) >= 0 ? 1 : -1) : (book.mid >= 0 ? 1 : -1);
+  const mid = Math.abs(book.mid);
+  // `ask` is the price at which the structure AS BUILT trades right now — longs
+  // lifted at their ask, shorts hit at their bid. `bid` is the reverse trade,
+  // which is nobody's side of this one.
+  const fill = Math.abs(book.ask);
+  const rest = Math.abs(book.bid);
+
+  // >>> THE DIRECTION OF "MORE AGGRESSIVE" INVERTS ON A CREDIT. <<<
+  // On a debit you PAY, so a bigger number is a better offer and `fill` is the
+  // LARGEST of the three magnitudes. On a credit you RECEIVE, so a smaller
+  // number is the better offer and `fill` is the SMALLEST. Comparing magnitudes
+  // with `>=` in both cases reads a credit exactly backwards: it would call a
+  // limit demanding MORE than the market is offering "fills now", which is the
+  // one sentence on this panel that must never be wrong. Every comparison below
+  // goes through this, so there is one place the direction is decided.
+  const keener = (a, b) => (dir > 0 ? a >= b : a <= b);
+  const pay = dir > 0 ? "pay" : "accept";
+  const away = Math.abs(L - fill);
+
+  if (keener(L, fill)) {
+    return { known: true, zone: "fills", label: "FILLS NOW",
+      sentence: `At ${money(L * 100)} you are willing to ${pay} the whole of what the other side is offering ` +
+        `(${money(fill * 100)}), so this should fill as soon as the market is open.` +
+        (away >= 0.005
+          ? ` You are ${money(away * 100)} past it — anything beyond the touch is money you did not have to give up.`
+          : ``) };
+  }
+  // AT the mid is its own answer, and floating point will not give it to you
+  // for free: the mid of two two-decimal quotes is 0.23000000000000004, so an
+  // exact comparison against a typed 0.23 is false and the case that MATTERS
+  // MOST — the limit this app actually sent — would fall through to a softer
+  // sentence. Half a cent is under the smallest price a broker takes.
+  const atMid = Math.abs(L - mid) < 0.005;
+  if (atMid) {
+    return { known: true, zone: "unlikely", label: "THIS WILL NOT FILL",
+      sentence: `At ${money(L * 100)} you are exactly at the middle of the market. Nobody is obliged to meet ` +
+        `the middle, and on a spread this wide (${money(book.spread * 100)}) nobody does: the only order this ` +
+        `app has ever sent was a limit at the mid and it never filled.` };
+  }
+  if (keener(L, mid)) {
+    return { known: true, zone: "waiting", label: "YOU ARE WAITING",
+      sentence: `At ${money(L * 100)} you are between the middle of the market (${money(mid * 100)}) and what ` +
+        `the other side is offering (${money(fill * 100)}). That is a real chance of a fill and not a promise: ` +
+        `the order stands until somebody meets it or it expires.` };
+  }
+  // STRICTLY keener than the far touch. A buy limit sitting exactly ON the bid
+  // does not cross it, it joins it — that is not a trade, it is a queue, and it
+  // belongs with the prices that do not fill rather than with the ones that
+  // might. Same on a credit: an offer exactly at the ask joins the offer.
+  if (dir > 0 ? L > rest : L < rest) {
+    return { known: true, zone: "unlikely", label: "YOU ARE WAITING, BARELY",
+      sentence: `At ${money(L * 100)} you are on the wrong side of the middle (${money(mid * 100)}) — nearer ` +
+        `the price you would get if you were on the other side of this trade. It can fill if the market moves ` +
+        `to you. It will not fill because you waited.` };
+  }
+  return { known: true, zone: "no-fill", label: "THIS WILL NOT FILL",
+    sentence: `At ${money(L * 100)} you are at or past the far side of the market (${money(rest * 100)}): that ` +
+      `is the price somebody on the other side of this trade would take, not one anybody will trade with you ` +
+      `at. The order will sit until it expires.` };
+}
+
+/**
+ * NOTIONAL CONTROLLED — contracts × 100 × spot.
+ *
+ * The app has always computed this implicitly and never once shown it, and
+ * the owner reads the product as having no leverage because of it. Ten
+ * contracts of a $1 spread on a $20 underlying risks $1,000 and CONTROLS
+ * $20,000 of BOIL. Both numbers are true and only one was ever on screen.
+ *
+ * It is deliberately not a rule and refuses nothing: it is the fact that
+ * makes "capital at risk" mean something.
+ */
+export const notionalControlled = (contracts, spot) => {
+  const n = Math.round(Number(contracts));
+  const s = Number(spot);
+  if (!Number.isFinite(n) || !Number.isFinite(s) || n <= 0 || s <= 0) return null;
+  return n * 100 * s;
+};
+
+/** The sentence that goes beside it, with the risk it is standing next to. */
+export const notionalNote = (notional, risk, ticker) => {
+  if (notional == null) return `The notional cannot be worked out without a live price.`;
+  const r = Math.abs(Number(risk));
+  const mult = Number.isFinite(r) && r > 0 ? notional / r : null;
+  return `${money(notional)} of ${ticker || "the underlying"} moves under this trade. You can only lose ` +
+    `${Number.isFinite(r) ? money(r) : "the premium"}${mult != null ? `, so the position moves with ` +
+      `${mult.toFixed(0)} times the money you have at risk` : ""} — that is what an option is, and it is ` +
+    `the reason the per-trade limit is a percentage of capital rather than a feeling.`;
+};
+
+
+/* =====================================================================
+   THE ENTRY FLOOR STOPS BEING A CLIFF.
+
+   `minEntryDTE` is 30 and it was a HARD VIOLATION at 29. The quantity that
+   actually matters is not the expiry, it is the ROOM BEFORE THE EXIT RULE
+   FIRES: room = dte - exitDTE. Thirty days is nine days of room, and there
+   is nothing about nine that is right and seven that is wrong — the number
+   is an inherited tastytrade default like the rest of §4, and the app has
+   never measured it.
+
+   >>> THE NUMBER 30 IS NOT CHANGED IN THIS SESSION, DELIBERATELY. <<< What
+   changes is what happens either side of it, so that a reading can be taken
+   before the floor is moved (ROADMAP P5). Three bands:
+
+     dte <= exitDTE                 HARD VIOLATION, unchanged in spirit. The
+                                    position would open already INSIDE its own
+                                    exit window: there is no trade there, only
+                                    an instruction to close something you have
+                                    just bought.
+     exitDTE < dte < minEntryDTE    WARNING, carrying the number, and
+                                    OVERRIDABLE WITH A TYPED REASON — the same
+                                    mechanism `sizing()` uses for the per-trade
+                                    cap, and the same constant
+                                    (`minOverrideReasonChars`). The override
+                                    and its reason go to the Journal.
+     dte >= minEntryDTE             unchanged: nothing is said.
+
+   WHY AN OVERRIDE AND NOT JUST A WARNING. Because the thing this unlocks is
+   a real trade the app was refusing: `expiryChoice()` has been naming a
+   nearer, busier board in `passedOver` and then not letting anybody take it.
+   A sentence that describes a door and does not open it is worse than no
+   sentence. And because a written reason is this app's one pattern for "you
+   may, and it is recorded that you did".
+===================================================================== */
+
+/**
+ * How much room a board gives before the exit rule fires, and which band it
+ * falls in.
+ *
+ * @param dte  days to expiration at entry
+ * @returns {{ known, dte, room, target, band, blocking }}
+ *   band: "inside-exit" | "tight" | "clear"
+ *   `blocking` is true only for "inside-exit"; "tight" blocks until a reason
+ *   is written, which is the caller's question and not this function's.
+ */
+export function entryRoom(dte, {
+  exitDTE = RULES.exitDTE, minEntryDTE = RULES.minEntryDTE,
+} = {}) {
+  if (!known(dte)) return { known: false, dte: null, room: null, target: minEntryDTE - exitDTE, band: null, blocking: false };
+  const d = Math.round(Number(dte));
+  const room = d - exitDTE;
+  const target = minEntryDTE - exitDTE;
+  const band = d <= exitDTE ? "inside-exit" : d < minEntryDTE ? "tight" : "clear";
+  return { known: true, dte: d, room, target, band, blocking: band === "inside-exit" };
+}
+
+/** The hard refusal: the position would open inside its own exit window. */
+export const entryInsideExitNote = (r) =>
+  `${r?.dte ?? "This board"} days to expiration is at or inside the ${RULES.exitDTE}-day exit rule, so this ` +
+  `trade would be opened with ${r && r.room > 0 ? `${r.room} day${r.room === 1 ? "" : "s"}` : "no days at all"} ` +
+  `before it must be closed. That is not a short trade, it is an order to buy something and an order to sell ` +
+  `it back, and this one is not overridable: the exit rule is chosen at construction and frozen, so there is ` +
+  `no version of this position that the rule does not immediately end.`;
+
+/** The warning in the middle band, with the number in it. */
+export const entryRoomWarning = (r) =>
+  `This board gives you ${r.room} day${r.room === 1 ? "" : "s"} before the ${RULES.exitDTE}-day exit fires; ` +
+  `the app aims for ${r.target}. ${r.dte} days to expiration is under the ${RULES.minEntryDTE}-day entry ` +
+  `floor — which is an inherited default, not a measured one, so it warns rather than refuses. Less room ` +
+  `means the idea has less time to be right and time decay has more of the position to eat.`;
+
+/** What it takes to take it anyway. */
+export const entryRoomOverrideAsk = (r) =>
+  `${entryRoomWarning(r)} Write why this expiry is worth taking — at least ` +
+  `${RULES.minOverrideReasonChars} characters — and the trade unlocks. The reason is stored with the ` +
+  `position and appears in the Journal, so a run of these can be read back later.`;
+
+/** Whether a typed reason is enough to unlock it. One rule, one home. */
+export const entryOverrideOk = (reason) =>
+  String(reason || "").trim().length >= RULES.minOverrideReasonChars;
+
+/** The Journal entry the override writes. */
+export const entryOverrideNote = (r, reason) =>
+  `Entered at ${r.dte} DTE, under the ${RULES.minEntryDTE}-day floor: ${r.room} day${r.room === 1 ? "" : "s"} ` +
+  `of room before the ${RULES.exitDTE}-day exit, where the app aims for ${r.target}. ` +
+  `Reason: "${String(reason || "").trim()}"`;
+
+/* ---------------------------------------------------------------------
+   INSTRUMENTING THE FLOOR SO IT CAN BE CALIBRATED LATER (ROADMAP P5).
+
+   `expiryChoice()` names a nearer, busier board in `passedOver` and, from
+   this session on, may offer it. How often that happens, on which market,
+   and HOW MUCH busier the passed-over board was, is exactly the reading the
+   30 was never chosen from. It is recorded rather than argued about.
+--------------------------------------------------------------------- */
+
+/**
+ * One row for the Journal's record of a passed-over board.
+ * @returns null when nothing was passed over — there is no event to log.
+ */
+export function passedOverRecord(ticker, choice) {
+  const po = choice && choice.passedOver;
+  const ch = choice && choice.chosen;
+  if (!po || !ch) return null;
+  const busier = known(po.clears) && known(ch.clears) ? Number(po.clears) - Number(ch.clears) : null;
+  const factor = known(po.clears) && known(ch.clears) && Number(ch.clears) > 0
+    ? Number(po.clears) / Number(ch.clears) : null;
+  return {
+    t: Date.now(), ticker: ticker || null,
+    chosen: { key: ch.key, dte: ch.dte, clears: ch.clears ?? null, near: ch.near ?? null },
+    passedOver: { key: po.key, dte: po.dte, clears: po.clears ?? null, near: po.near ?? null },
+    busierBy: busier, busierFactor: factor,
+    offerable: !!po.offerable,
+  };
+}
+
+/** What the accumulated rows say, in one sentence for the Journal. */
+export const passedOverSummary = (rows = []) => {
+  const rs = (Array.isArray(rows) ? rows : []).filter(Boolean);
+  if (!rs.length) return `The entry floor has not taken a busier board away from you yet — nothing to calibrate ` +
+    `it from. This is the reading ROADMAP P5 needs, and it is collected as you use the app rather than argued for.`;
+  const byTk = {};
+  for (const r of rs) { const k = r.ticker || "?"; (byTk[k] ??= []).push(r); }
+  const parts = Object.entries(byTk).map(([tk, xs]) => {
+    const fs = xs.map((x) => x.busierFactor).filter((x) => Number.isFinite(x) && x > 0);
+    const med = fs.length ? fs.slice().sort((a, b) => a - b)[(fs.length / 2) | 0] : null;
+    return `${tk} ${xs.length}×${med != null ? ` (typically ${med.toFixed(1)}× busier)` : ""}`;
+  });
+  const offerable = rs.filter((r) => r.offerable).length;
+  return `The ${RULES.minEntryDTE}-day entry floor has passed over a busier board ${rs.length} ` +
+    `time${rs.length === 1 ? "" : "s"}: ${parts.join(", ")}. ${offerable} of those ` +
+    `${offerable === 1 ? "was" : "were"} inside the warning band and could be taken with a written reason; ` +
+    `the rest sat at or inside the ${RULES.exitDTE}-day exit rule and could not. The floor is an inherited ` +
+    `default and this is what a measured one would be drawn from.`;
 };
 
 export default RULES;

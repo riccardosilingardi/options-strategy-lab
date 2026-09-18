@@ -1,6 +1,10 @@
 # Options Strategy Lab — project memory
 
-Read `PRD.md` before any substantial change. This file is the short version.
+Read `PRD.md` and `ROADMAP.md` before any substantial change, and every pull
+request updates ROADMAP.md — the session that ships P-n marks it done and
+restates what the next one inherits. ROADMAP.md is the single source for WHAT
+COMES NEXT; PRD.md is the single source for WHAT THE PRODUCT IS AND WHAT IS
+VERIFIED. Nothing is duplicated between them. This file is the short version.
 
 ## Standing rule — start with the last session's debts
 
@@ -192,6 +196,117 @@ spread "entered at $68 debit" in a report whose own section 2 said "No open posi
 `shortlistWithFloors` and `buildPresets` are exported from `App.jsx` for it, so no second
 implementation of these decisions can appear beside them.
 
+## A price that clears the floor can still be the wrong price — `modelSanity()`
+
+`RULES.modelDisagreementRatio` (**4**) with `modelSanity()` / `modelSanityReason()` /
+`modelDisagreementNote()` in `src/rules.js`, applied at all three generation sites right after
+`impossibleLoss()`. It is the THIRD question — `priceability()` asks whether there is a price,
+this asks whether it is THIS STRUCTURE'S price — and it is **not in the gate**, by the same rule
+as the quality floors: a hand-built trade is the user's to make. `riskGate.test.js` reads
+`riskGate.js` and fails the build if `modelSanity` ever appears in it.
+
+**`minNetPremium` IS AN ABSOLUTE FLOOR AND IT IS NOW PROVEN INSUFFICIENT.** Read live on the
+owner's Alpaca paper account, 17 Sep 2026: BOIL 2026-10-23, buy 10x 20C / sell 10x 21C, limit
+**$0.05**, day — status "new", filled 0.00, never filled. At spot 19.84, 36 DTE, at the IV this
+app itself uses for BOIL, that spread is worth **$0.333 a share, $33.29 a contract**. $0.05 is
+*exactly* `MIN_NET_DOLLARS`: it cleared the floor built to catch the $0 butterfly **by one
+cent** and was wrong by 6.7x. The max loss on screen said $50; the real one was $333.
+
+`rules.js` imports `netBS`, `bs` and `smile` from `engine.js` for this — the SAME model every
+other screen prices with, because a second implementation would make the check a comparison of
+two guesses. (`engine.js` imports nothing, so it is a leaf-ward import, not a cycle.)
+
+- **Why 4, and what was measured.** The denominator is BS at a HARDCODED per-ticker sigma, so
+  the bar cannot be tighter than that model's own error. That error budget IS measured and the
+  table is in the comment: repricing every family, all five markets, 30–90 DTE, with the
+  volatility deliberately wrong by up to 2x, verticals run 0.39–2.33 and condors 0.27–2.83.
+  Four is outside all of it and still catches the live failure (0.15) by 1.67x.
+- **THE RATIO IS CHOSEN, NOT MEASURED, AND IT IS ON THE NOT VERIFIED LIST.** What was NOT read
+  is the distribution of market-net over model-net on the five LIVE chains — the reading
+  `/api/liquidity` gave the liquidity percentiles. No broker keys, egress proxy refuses the
+  CONNECT. Expect a real reading to bring the number DOWN.
+- Same discipline as every other check: **unknown is not disagreement** (no spot, DTE or IV →
+  SKIPPED, never failed — `Number(null)` is 0 and 0 is finite), **nothing is judged against a
+  price under `MIN_NET_DOLLARS` on EITHER side** (that is where the error budget blows out from
+  0.27 to 0.11), and **it names the leg** — `worstLeg` is the leg whose own mark disagrees most
+  in dollars with its own model price, because "the price is wrong" is not actionable.
+- **Its count travels separately** (`tally.model`, `floors.model`) and it has its own refusal
+  screen, `NOTHING_TODAY.modelDisagreement()`. It is none of the other four: the chain quoted,
+  the net cleared the minimum, the worst case is a perfectly possible loss — it is simply not
+  this structure's loss. Saying "we could not price it" would be false.
+- **The desk prints the model value BESIDE the market value** instead of refusing
+  (`ComboBookPanel` in `pro.jsx`), so nothing can be accepted without being seen.
+
+## The opening limit concedes, and the ticket shows the book
+
+`RULES.openLimitSlippage` (0.25) with `openLimitPrice()` / `openLimitNote()` — a **sibling** of
+`closeLimitSlippage`, not a copy of it. Same number, same arithmetic, two questions: **a close
+has to happen** (the rule fired, only the price is open), **an open never has to** (nothing is
+forced), and **conceding on the way IN raises the debit, which IS the maximum loss** the gate
+measures against the per-trade limit. Both are CHOSEN NOT MEASURED and both say so.
+
+`pro.jsx` seeded the ticket with `Math.abs(estNet).toFixed(2)` — the BARE MID — while carrying
+a comment saying a mid does not fill on these books. It now seeds mid + a quarter of the spread,
+in the direction that fills, never past the touch and **never flipped round** (a +0.02 debit
+conceded by 0.10 prices at −0.08, which the broker reads as "sell it for eight cents").
+
+`comboBook()`, `limitPlacement()`, `notionalControlled()` and `notionalNote()` in `rules.js`
+are what the ticket prints, for the **WHOLE structure and never leg by leg**:
+
+- **Each leg at the side that actually trades.** To buy, lift the ask on the longs and hit the
+  bid on the shorts. Summing "the bids" and "the asks" gives two numbers belonging to no trade.
+  A leg with no two-sided quote means there is **no book**, never a book of zeros.
+- **Where the typed limit falls**, with one sentence: fills now / you are waiting / this will
+  not fill. **At the mid is named explicitly as the thing that does not fill** — and the
+  comparison is tolerance-based, because the mid of two two-decimal quotes is
+  0.23000000000000004 and an exact `===` would lose the one case that matters.
+- **NOTIONAL CONTROLLED — contracts x 100 x spot.** Always computed implicitly, never once
+  shown, which is why the owner reads the product as having no leverage. It refuses nothing; it
+  is the fact that makes "capital at risk" mean something.
+- **Time in force is stated in words.** A `day` order that expires at the close without a word
+  is the same invisible failure as an order that never fills.
+
+## The entry floor is ROOM, not a cliff
+
+`entryRoom()` in `rules.js`, enforced in `riskGate.js` and nowhere else. The quantity that
+matters is `room = dte - exitDTE`, not the expiry: 30 days is nine days of room and there is
+nothing about nine that is right and seven that is wrong.
+
+**THE NUMBER 30 IS UNCHANGED, DELIBERATELY.** What changed is either side of it:
+
+- `dte <= exitDTE` → **hard violation** (`ENTRY_DTE`), and **not overridable**: the exit rule is
+  frozen at construction, so there is no version of the trade it does not immediately end.
+- `exitDTE < dte < minEntryDTE` → **`ENTRY_DTE_ROOM`**, carrying the number. Without a typed
+  reason it BLOCKS and says what would unlock it; with one (`RULES.minOverrideReasonChars`, the
+  same constant `sizing()` and the against-the-signal override use) it becomes a WARNING and
+  the reason goes to the Journal. An override is not a dismissal: the warning stays.
+- `dte >= minEntryDTE` → unchanged, nothing is said.
+
+**`passedOver` IS OFFERABLE NOW, NOT MERELY NARRATED.** `expiryChoice()` has been naming a
+nearer, busier board and not letting anybody take it — a door with no handle. Past the exit rule
+it can be taken through the override; at or inside it, it cannot, by anybody. **The CHOICE is
+untouched** — a passed-over board is never what the app opens on by itself.
+
+**And it is instrumented, because the 30 has to be settled from a reading.**
+`passedOverRecord()` writes one row per market per board into `store.expiryLog` (local, capped
+at 60, never in the `/api/state` blob — it is calibration data, not a position) and the Journal
+reads it back with `passedOverSummary()`. ROADMAP P5 is what reads it. **The log is empty until
+the app is used.**
+
+## Working orders have a home, and SENT is not FILLED
+
+`orderOutcome()` has distinguished the two since PR #18, but an order that was working lived
+only on the full desk — so the one order this app has ever sent was invisible from the moment
+it left. Working orders are listed **first on Positions, above the positions**, with their age,
+limit and time in force, and on the front page beside "what needs attention today".
+
+- **Re-pricing is NOT a seventh order path.** It cancels at the broker and lands the trade back
+  on Build, so the send goes down path 2 like everything else on that screen. A road must not
+  reach an order without passing the screen that shows the trade.
+- **SENT and FILLED are two timeline entries.** `sent` when the order leaves, naming its price
+  and how long it stands; `fill` from `recheckOrders()` when and only when the broker says so.
+  A position on the app's own book has no `sent` entry, because nothing was.
+
 ## A wide market is not a price — the THIRD floor, beside the liquidity one
 
 `RULES.maxSpreadShareOfMid` (0.35) with `spreadShare()` / `spreadFloor()` in `src/rules.js`,
@@ -321,6 +436,9 @@ Two rules hold them, and both are the point:
 
 Adding a third generation site means calling `qualityFloor()` there too, and passing it
 `quotes` as well as `openInterest` — the spread floor above lives in the same function.
+It also means calling `priceability()`, `impossibleLoss()` and `modelSanity()` before it,
+in that order: they are four different questions and each one has its own count and its own
+sentence, so a site that skips one cannot say which rule did the work.
 
 **The floor is held up against the chains it is applied to.** `oiProfile()` in `chain.js`
 and `OpenInterestReadout` at the bottom of the Shortlist print what open interest the
@@ -384,7 +502,13 @@ while the position is open.
   (`sizing()`), `minNetPremium` with `priceability()` and `rewardRisk()` (is there a
   price at all — the check before the floors), `payoffCeiling()` /
   `profitUnbounded()` / `NO_CEILING` (is there a maximum profit at all),
-  `impossibleLoss()` (is the worst case actually a loss), `scratchPayoffShare`
+  `impossibleLoss()` (is the worst case actually a loss),
+  `modelDisagreementRatio` with `modelSanity()` (is it THIS structure's price —
+  the only thing in this file that imports `engine.js`, and deliberately so),
+  `openLimitSlippage` with `openLimitPrice()`, and what the ticket prints:
+  `comboBook()`, `limitPlacement()`, `notionalControlled()`;
+  `entryRoom()` with its override sentences and `passedOverRecord()`,
+  `scratchPayoffShare`
   with `scratchLevel()` (copy only) and `reportNarrativePrompt()`,
   the two quality floors and `qualityFloor()` that applies them,
   plus the generated rule strings (`ruleBadge()`, `perTradeCapLabel()`,
@@ -426,7 +550,10 @@ while the position is open.
 - `src/riskGate.js` — `evaluateTrade({ proposal, portfolio, capital, signals })`,
   a pure function returning `{ pass, violations, warnings }`. Every order path
   calls it, and a screen with no gate wired in fails closed
-  (`runGate` in `pro.jsx`). A proposal may carry `quotes` (one `{ bid, ask }` per leg)
+  (`runGate` in `pro.jsx`). It is where `entryRoom()`'s three bands are
+  ENFORCED and the only place they are: `ENTRY_DTE` inside the exit window is
+  not overridable, `ENTRY_DTE_ROOM` above it is unlocked by
+  `proposal.entryOverride`. A proposal may carry `quotes` (one `{ bid, ask }` per leg)
   and `net`: the more of them a caller passes the more `priceability()` can catch, and
   the maximum loss alone already blocks the case that got through.
 - `src/wizard.jsx` — **the app shell (PRD §5)**. The wizard is the entry point,
