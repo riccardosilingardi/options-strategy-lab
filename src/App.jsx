@@ -20,6 +20,9 @@ import { RULES, sizing, ruleBadge, takeProfitLabel, stopLossLabel, perTradeCapLa
   priceability, unpriceableNote, rewardRisk, MIN_NET_DOLLARS,
   payoffCeiling, NO_CEILING, noCeilingNote, noCeilingRankNote,
   impossibleLoss, impossibleLossNote,
+  modelSanity, modelDisagreementNote,
+  entryRoom, entryRoomWarning, entryOverrideOk, entryOverrideNote, entryInsideExitNote,
+  passedOverRecord, passedOverSummary,
   expiryChoice, expiryChoiceNote, emptyExpiryNote, wideSpreadNote, spreadSkippedNote,
   chancePct, chanceText, chanceInTen, signedMoney,
   ruleExitOf, stopWarningSentence } from "./rules.js";
@@ -364,7 +367,7 @@ export function analyze(legs, S, dte, baseIV, q) {
 export function shortlistWithFloors(sent, S, step, strikes, dte, baseIV, q, { peers = null, level = RECOMMENDED_LIQUIDITY } = {}) {
   const rows = [], cut = [];
   let oiSkipped = false;
-  const tally = { liquidity: 0, spread: 0, reward: 0, skipped: 0, spreadSkipped: 0, unpriceable: 0, impossible: 0 };
+  const tally = { liquidity: 0, spread: 0, reward: 0, skipped: 0, spreadSkipped: 0, unpriceable: 0, impossible: 0, model: 0 };
   for (const p of buildPresets(sent, S, step, strikes)) {
     const a = analyze(p.legs, S, dte, baseIV, q);
     // UNPRICEABLE FIRST, because it is prior to both floors: they judge a
@@ -387,6 +390,18 @@ export function shortlistWithFloors(sent, S, step, strikes, dte, baseIV, q, { pe
     if (imp) {
       tally.impossible++;
       cut.push({ name: p.name, reasons: [imp], why: "impossible" });
+      continue;
+    }
+    // AND A PRICE THE MODEL CANNOT ACCOUNT FOR (src/rules.js, `modelSanity`).
+    // Third question, third refusal, and it is not either of the two above: the
+    // price was read and it clears the absolute minimum, it is simply not this
+    // structure's price. The BOIL 20/21 spread that reached the broker priced
+    // at $0.05 against a model value of $0.333 — one cent above the floor built
+    // to catch the $0 butterfly, and wrong by a factor of 6.7.
+    const ms = modelSanity({ legs: p.legs, net: a.entry, marks: a.legPx.map((l) => l.px), spot: S, dte, iv: baseIV });
+    if (!ms.pass) {
+      tally.model++;
+      cut.push({ name: p.name, reasons: [ms.reason], why: "model" });
       continue;
     }
     // The two-sided quotes go in as well now: the SPREAD floor reads them, and
@@ -517,7 +532,7 @@ async function loadState() {
 // "suggested" until he answers (PRD §3).
 // `journalSeq` is the highest position ref this state has ever issued. It only
 // ever goes up: closing a position does not hand its number back (src/journal.js).
-const EMPTY = { journalSeq: 0, saved: [], positions: [], settings: { webhook: "", reportFreq: "weekly", reportLast: 0, reportLastMd: "", capital: null, concurrentTarget: null, savings: null, sizeOverride: null, mode: "pro", onboarded: false, notifyWhenReady: false }, seasonal: {}, journal: [], ivHist: {}, copilotLog: [] };
+const EMPTY = { journalSeq: 0, saved: [], positions: [], expiryLog: [], settings: { webhook: "", reportFreq: "weekly", reportLast: 0, reportLastMd: "", capital: null, concurrentTarget: null, savings: null, sizeOverride: null, mode: "pro", onboarded: false, notifyWhenReady: false }, seasonal: {}, journal: [], ivHist: {}, copilotLog: [] };
 async function saveState(st) {
   try { localStorage.setItem(SKEY, JSON.stringify(st)); } catch (e) { console.error(e); }
   // The server blob is ONE shared document, so a demo visitor writing to it
@@ -984,6 +999,11 @@ export default function OptionsStrategyLab() {
   const [weather, setWeather] = useState(null);  // regionId -> forecast 14g (fuseSignals)
   const [barsCache, setBarsCache] = useState({}); // ticker -> daily bars (fattore tecnico)
   const [against, setAgainst] = useState({ reason: "" }); // motivazione per un trade contro il segnale
+  /* THE ENTRY-ROOM OVERRIDE (src/rules.js, `entryRoom`). The same written-reason
+     mechanism as `against` above and as the per-trade cap in `sizing()`, and the
+     same constant behind all three. It unlocks ONE band — past the exit rule,
+     under the entry floor — and nothing unlocks a board inside the exit window. */
+  const [roomReason, setRoomReason] = useState("");
   // A hand-off has to end where the trade is. `buildAnchor` marks the top of
   // the Build section and `scrollBuild` is bumped by every hand-off, so the
   // scroll happens after React has applied the new state, not before it.
@@ -1237,6 +1257,35 @@ export default function OptionsStrategyLab() {
     }));
   }, [chain, liqLevel]);
   const expChoice = useMemo(() => expiryChoice(expiryOptions), [expiryOptions]);
+
+  /* INSTRUMENTING THE ENTRY FLOOR SO IT CAN BE CALIBRATED FROM A READING
+     (src/rules.js, `passedOverRecord`; ROADMAP P5).
+
+     `minEntryDTE` is 30 and nobody has ever measured it — it is an inherited
+     tastytrade default, like the rest of §4. The evidence that would settle it
+     is how often the floor takes a genuinely busier board away, on which
+     market, and by how much. That happens as the owner uses the app, so it is
+     RECORDED rather than argued about: one row per market per board, capped,
+     local, and read back in the Journal.
+
+     ONE ROW PER MARKET PER BOARD, not per render. `expChoice` recomputes on
+     every chain refresh and every move of the liquidity setting; without the
+     key check below the log would fill with the same fact. */
+  const EXPIRY_LOG_MAX = 60;
+  useEffect(() => {
+    const row = passedOverRecord(ticker, expChoice);
+    if (!row) return;
+    setStore((st) => {
+      const log = st.expiryLog || [];
+      const seen = log.some((x) => x && x.ticker === row.ticker
+        && x.chosen?.key === row.chosen.key && x.passedOver?.key === row.passedOver.key);
+      if (seen) return st;                       // nothing changed: no write, no render loop
+      const ns = { ...st, expiryLog: [row, ...log].slice(0, EXPIRY_LOG_MAX) };
+      saveState(ns);
+      return ns;
+    });
+  }, [ticker, expChoice]); // eslint-disable-line
+
   useEffect(() => {
     if (chain && !expKey) {
       // Never nothing: with no eligible expiry at all the app still opens on
@@ -1419,6 +1468,66 @@ export default function OptionsStrategyLab() {
     setScrollBuild((n) => n + 1);
   };
 
+  /* ====================================================================
+     AN ORDER THAT IS WORKING NEEDS A HOME IN THE MAIN FLOW.
+
+     `orderOutcome()` has distinguished accepted from filled since PR #18, and
+     the position row has carried the warning. What was missing is anywhere in
+     the main flow to SEE an order that is working: it lived only on the desk,
+     behind "Open the full desk", inside the Alpaca panel. So the one order
+     this app has ever sent — accepted, filled 0.00, never filled, expired at
+     the close of the session — was invisible from the moment it was sent.
+     That is failure class 8: the app knew and did not say.
+
+     Two things can be done about one, and only two. CANCEL it, which is a
+     DELETE and not an order — the same call `AlpacaDesk` already makes.
+     Or RE-PRICE it, which is a new order, and a new order does not get a new
+     path to the broker: it cancels the old one and lands the trade back on
+     BUILD, where the chain, the legs, the greeks, the book and the confirm
+     step are. "A road must not be able to reach an order without passing the
+     screen that shows the trade" — a re-price is a road. So there are still
+     SIX order paths, and re-pricing goes down path 2 like everything else on
+     that screen.
+  ==================================================================== */
+  const [orderBusy, setOrderBusy] = useState(null);
+
+  /** Positions whose order left and has not come back filled, newest first. */
+  const workingOrders = useMemo(() => store.positions
+    .filter((p) => p.alpacaId && p.alpacaFilled === false)
+    .sort((a, b) => (b.alpacaSentAt || b.id || 0) - (a.alpacaSentAt || a.id || 0)), [store.positions]);
+
+  const cancelWorking = async (p) => {
+    if (DEMO) { setMsg(DEMO_TOOLTIP); return; }
+    setOrderBusy(p.id);
+    try {
+      await alpacaReq(`/v2/orders/${encodeURIComponent(p.alpacaId)}`, "DELETE");
+      setStore((st) => {
+        const positions = st.positions.map((x) => {
+          if (x.id !== p.id) return x;
+          const t = appendTimeline(x, [{
+            t: Date.now(), type: "status", orderId: String(x.alpacaId),
+            text: `Alpaca order ${x.alpacaId} was CANCELLED from the Positions screen. Nothing was bought, ` +
+              `nothing is working, and this position is the app's own record of a trade that never opened.`,
+          }]);
+          return { ...x, alpacaStatus: "canceled", timeline: t.timeline, seqNext: t.seqNext };
+        });
+        const ns = { ...st, positions }; saveState(ns); return ns;
+      });
+      setMsg("The order was cancelled at the broker. The position row says so, and the timeline records it.");
+    } catch (e) { setMsg(`The cancellation did not go through: ${alpacaErrorText(e)}`); }
+    setOrderBusy(null);
+  };
+
+  /** Cancel what is working, then put the same trade back on Build to re-price. */
+  const repriceWorking = async (p) => {
+    if (DEMO) { setMsg(DEMO_TOOLTIP); return; }
+    await cancelWorking(p);
+    openOnBuild({ ticker: p.ticker, expKey: p.expKey, legs: p.legs, name: p.name });
+    setMsg(`The working order was cancelled and ${p.ref || p.ticker} is back on Build. The chain has been ` +
+      `re-read, so the suggested limit is worked out from the market as it is now — not as it was when the ` +
+      `first order went out. Send it again from the confirm step at the bottom.`);
+  };
+
   /* ---- moving along the path ----
      One step is on screen at a time, and every step stays reachable: going back
      must not lose what was selected, so the selection lives in this component
@@ -1495,7 +1604,7 @@ export default function OptionsStrategyLab() {
      The Build screen and the wizard's confirm screen both land here, so a
      position opened from screen 4 carries exactly the same gate record, thesis
      and timeline as one built by hand. Two paths would mean two truths. */
-  const commitPosition = async ({ ticker: tk, expKey: ek, legs: lg, dte: d, analysis, spot: sp, name, alpacaOrder, clashInfo, reason }) => {
+  const commitPosition = async ({ ticker: tk, expKey: ek, legs: lg, dte: d, analysis, spot: sp, name, alpacaOrder, clashInfo, reason, roomOverride }) => {
     // Anche la posizione interna passa dal cancello: non tocca il broker, ma
     // entra nell'esposizione totale che il cancello misura al prossimo ordine.
     // The quotes travel with the proposal: the gate's priceability check can
@@ -1503,7 +1612,7 @@ export default function OptionsStrategyLab() {
     // construction (src/rules.js, `priceability`).
     const gLocal = gate({ ticker: tk, intent: "open", legs: lg, dte: d, contracts: 1,
       maxLoss: analysis?.maxLoss, maxProfit: analysis?.maxProfit,
-      quotes: quotesOf(analysis), net: analysis?.entry }, LOCAL_BOOK);
+      quotes: quotesOf(analysis), net: analysis?.entry, entryOverride: roomOverride }, LOCAL_BOOK);
     if (!gLocal.pass) return { ok: false, gate: gLocal };
     // ACCEPTED IS NOT OPENED. The reply is read once, here, and every
     // sentence about this position downstream is composed from that reading
@@ -1535,13 +1644,45 @@ export default function OptionsStrategyLab() {
       // a fill that has not happened.
       alpacaStatus: outcome ? outcome.status : null,
       alpacaFilled: outcome ? outcome.filled : null,
+      // WHAT THE ORDER ACTUALLY WAS, so the working-orders list can show its
+      // price and how long it stands without asking the broker again.
+      alpacaOrderType: alpacaOrder?.type ?? null,
+      alpacaLimit: alpacaOrder?.limit_price != null ? Math.abs(+alpacaOrder.limit_price) : null,
+      alpacaTif: alpacaOrder?.time_in_force ?? null,
+      alpacaSentAt: alpacaOrder ? Date.now() : null,
+      entryRoomOverride: entryOverrideOk(roomOverride) && entryRoom(d).band === "tight"
+        ? { dte: d, room: entryRoom(d).room, reason: String(roomOverride).trim(), at: Date.now() } : null,
+      /* SENT AND FILLED ARE TWO EVENTS, AND THEY GET TWO ENTRIES.
+         The live order came back `accepted` with `filled_qty: 0` and the app
+         wrote one entry that read as an opening. Nothing in the record then
+         distinguished "this left the building" from "this became a position",
+         which is the same fault as the headline that said "Position opened"
+         over a queued order — one fact wearing another fact's words.
+
+         So: `sent` is written here, now, and says where the order is waiting
+         and how long it stands. `fill` is written by `recheckOrders()` when
+         and if the broker says so, and never before. A position the app opened
+         on its own book has no `sent` entry at all, because nothing was. */
       timeline: [
         { t: Date.now(), type: "gate", text: `Risk gate — ${gateSummary(gLocal)}` },
-        { t: Date.now(), type: "open", text: `${alpacaOrder ? `Alpaca order ${String(alpacaOrder.id).slice(0, 8)}… — ${outcome.headline} ` : ""}${working ? "Recorded" : "Opened"} with a ${pop0 != null ? (pop0 * 100).toFixed(0) + "%" : "n/a"} chance · volatility ${(ivAvg0 * 100).toFixed(0)}% · season ${seasM.toFixed(1)}%/mo${f ? ` · signal ${f.score > 0 ? "+" : ""}${f.score}/100 ${f.agreement}` : ""}` },
+        ...(alpacaOrder ? [{
+          t: Date.now(), type: "sent", orderId: alpacaOrder.id ? String(alpacaOrder.id) : null,
+          text: `SENT to Alpaca — order ${String(alpacaOrder.id || "(id unknown)")}, ` +
+            `${String(alpacaOrder.type || "?")} ${alpacaOrder.limit_price != null ? `at ${money(Math.abs(+alpacaOrder.limit_price) * 100)} a combination ` : ""}` +
+            `${String(alpacaOrder.time_in_force || "").toLowerCase() === "gtc" ? "standing until cancelled" : "good for today's session only"}. ` +
+            `${outcome.headline}`,
+        }] : []),
+        { t: Date.now(), type: "open", text: `${working ? "Recorded" : "Opened"} with a ${pop0 != null ? (pop0 * 100).toFixed(0) + "%" : "n/a"} chance · volatility ${(ivAvg0 * 100).toFixed(0)}% · season ${seasM.toFixed(1)}%/mo${f ? ` · signal ${f.score > 0 ? "+" : ""}${f.score}/100 ${f.agreement}` : ""}` },
         { t: Date.now(), type: "plan", text: working
           ? `Exit plan frozen at entry — ${exitPlanSentence()} It starts counting when the order fills; it has not filled yet.`
           : `Exit plan frozen at entry — ${exitPlanSentence()}` },
         ...(clashInfo ? [{ t: Date.now(), type: "against", text: `Against ${clashInfo.n} of ${clashInfo.total} factors. Reason: "${(reason || "").trim()}"` }] : []),
+        // THE ENTRY-ROOM OVERRIDE AND ITS REASON GO TO THE JOURNAL. That is
+        // the whole point of asking for one: a run of these is what ROADMAP P5
+        // calibrates the 30 from.
+        ...(entryOverrideOk(roomOverride) && entryRoom(d).band === "tight"
+          ? [{ t: Date.now(), type: "override", text: entryOverrideNote(entryRoom(d), roomOverride) }]
+          : []),
       ],
     };
     // The four opening entries are stamped J-0007·01 … ·04 by the same function
@@ -1561,10 +1702,10 @@ export default function OptionsStrategyLab() {
       return;
     }
     const r = await commitPosition({ ticker, expKey, legs, dte, analysis: A, spot, name: stratName,
-      alpacaOrder, clashInfo: clash, reason: against.reason });
+      alpacaOrder, clashInfo: clash, reason: against.reason, roomOverride: roomReason });
     setOpenResult(r.gate);
     if (!r.ok) { setMsg(`Risk gate: position not opened. ${r.gate.violations.map((v) => v.message).join(" ")}`); return; }
-    setAgainst({ reason: "" }); setPicked(null); setOpenResult(null);
+    setAgainst({ reason: "" }); setRoomReason(""); setPicked(null); setOpenResult(null);
     // "POSITION OPENED" IS NOT TRUE OF AN ACCEPTED ORDER. The live run came
     // back status "accepted", filled_qty 0 — queued outside market hours —
     // and the app announced a position and an exit plan over it. Filled,
@@ -1705,9 +1846,16 @@ export default function OptionsStrategyLab() {
         if (!c) return p;
         // A fill that happens after the fact starts the exit plan, and says so:
         // the plan entry written at open said it had not started yet.
-        const entries = [c.r.entry,
+        // FILLED IS ITS OWN EVENT, WITH ITS OWN TYPE. `sent` was written when
+        // the order left; this is the other half, and only the broker can say
+        // it. Anything that moved but did not fill stays a `status` entry.
+        const entries = [
+          c.r.outcome.filled
+            ? { ...c.r.entry, type: "fill" }
+            : c.r.entry,
           ...(c.r.outcome.startsExitPlan ? [{ t: Date.now(), type: "plan",
-            text: `The order has filled, so the exit plan starts now — ${exitPlanSentence()}` }] : [])];
+            text: `The order has filled, so the exit plan starts now — ${exitPlanSentence()}` }] : []),
+        ];
         const t = appendTimeline(p, entries);
         return { ...p, alpacaStatus: c.r.status, alpacaFilled: c.r.filled, timeline: t.timeline, seqNext: t.seqNext };
       });
@@ -1734,7 +1882,7 @@ export default function OptionsStrategyLab() {
     try {
       const out = [];
       // What the quality floors removed, so an empty or short result can say why.
-      const cutFloors = { n: 0, liquidity: 0, spread: 0, reward: 0, unpriceable: 0, impossible: 0,
+      const cutFloors = { n: 0, liquidity: 0, spread: 0, reward: 0, unpriceable: 0, impossible: 0, model: 0,
         markets: new Set(), oiSkipped: new Set(), spreadSkipped: new Set() };
       // le barre servono al fattore tecnico: caricale prima di fondere i segnali
       const barsMap = Object.fromEntries(await Promise.all(multi.sel.map(async (tk) => [tk, await loadBars(tk)])));
@@ -1771,6 +1919,10 @@ export default function OptionsStrategyLab() {
           if (!pz.priceable) { cutFloors.unpriceable++; cutFloors.markets.add(tk); continue; }
           // ...and a worst case that is a profit, the same way (PR #14's debt).
           if (impossibleLoss(a.maxLoss)) { cutFloors.impossible++; cutFloors.markets.add(tk); continue; }
+          // ...and a price the app's own model cannot account for, same function.
+          if (!modelSanity({ legs: pr.legs, net: a.entry, marks: a.legPx.map((l) => l.px), spot: sp, dte: d2, iv: getU(tk).iv }).pass) {
+            cutFloors.model++; cutFloors.markets.add(tk); continue;
+          }
           // Same floors as the Shortlist and the wizard, from the same function.
           const qf = qualityFloor({
             openInterest: a.legPx.map((l) => l.oi), peerOpenInterest: peers, level: liqLevel,
@@ -1804,7 +1956,7 @@ export default function OptionsStrategyLab() {
       setMulti((m) => ({ ...m, busy: false, res: ranked.slice(0, 8),
         floors: {
           n: cutFloors.n, liquidity: cutFloors.liquidity, spread: cutFloors.spread, reward: cutFloors.reward,
-          unpriceable: cutFloors.unpriceable, impossible: cutFloors.impossible,
+          unpriceable: cutFloors.unpriceable, impossible: cutFloors.impossible, model: cutFloors.model,
           markets: [...cutFloors.markets], oiSkipped: [...cutFloors.oiSkipped],
           spreadSkipped: [...cutFloors.spreadSkipped], level: liqLevel,
         } }));
@@ -2011,7 +2163,7 @@ export default function OptionsStrategyLab() {
       // What the quality floors threw out, and where. Counted per reason so the
       // refusal can name the floor: "nothing on CORN clears the liquidity floor
       // today" is a useful answer, an empty screen is not.
-      const floors = { liquidity: 0, spread: 0, reward: 0, unpriceable: 0, impossible: 0,
+      const floors = { liquidity: 0, spread: 0, reward: 0, unpriceable: 0, impossible: 0, model: 0,
         markets: new Set(), oiUnavailable: new Set(), spreadUnavailable: new Set() };
       for (const r of priced) {
         const tk = r.tk;
@@ -2056,6 +2208,13 @@ export default function OptionsStrategyLab() {
             // the arithmetic guards above, which meant the one refusal the user
             // most deserves to read never reached the screen (PR #14's debt).
             if (impossibleLoss(a.maxLoss)) { floors.impossible++; floors.markets.add(tk); continue; }
+            // A PRICE THE MODEL DISBELIEVES IS NOT A ROAD. Every figure the
+            // verdict would put on it — what you risk, what it pays, how it
+            // ranks — is that price, and the maximum loss it would print would
+            // be wrong by the same factor it is wrong by (src/rules.js).
+            if (!modelSanity({ legs: pr.legs, net: a.entry, marks: a.legPx.map((l) => l.px), spot: sp, dte: d2, iv: getU(tk).iv }).pass) {
+              floors.model++; floors.markets.add(tk); continue;
+            }
             const ivA = a.legPx.reduce((x, y) => x + y.iv, 0) / Math.max(1, a.legPx.length);
             const pop = probProfit(a.curve, sp, ivA, d2) || 0;
             const unit = Math.abs(a.maxLoss);
@@ -2099,7 +2258,7 @@ export default function OptionsStrategyLab() {
         // priced is not a board emptied by the floors and is certainly not a
         // budget problem — saying either would blame the user, or the market,
         // for a chain the app could not read. Three refusals, three sentences.
-        if (floors.unpriceable > 0 && cut === 0 && floors.impossible === 0) {
+        if (floors.unpriceable > 0 && cut === 0 && floors.impossible === 0 && floors.model === 0) {
           return stop([{
             id: "unpriceable",
             text: NOTHING_TODAY.unpriceable({ unpriceable: floors.unpriceable, markets: [...floors.markets] }),
@@ -2109,18 +2268,30 @@ export default function OptionsStrategyLab() {
         // could not price, and further still from one the floors emptied: here
         // the quotes were read and what they produced — a trade that cannot lose
         // — is impossible. Four refusals, four sentences.
-        if (floors.impossible > 0 && cut === 0 && floors.unpriceable === 0) {
+        if (floors.impossible > 0 && cut === 0 && floors.unpriceable === 0 && floors.model === 0) {
           return stop([{
             id: "impossible-loss",
             text: NOTHING_TODAY.impossibleLoss({ impossible: floors.impossible, markets: [...floors.markets] }),
           }]);
         }
-        if (cut > 0 || floors.impossible > 0 || floors.unpriceable > 0) {
+        // A BOARD THE APP PRICED AND THEN DID NOT BELIEVE THE PRICE OF. The
+        // fifth sentence, and it is none of the other four: the chain quoted,
+        // the net cleared the minimum, the worst case is a perfectly possible
+        // loss — it is simply not this structure's loss. Saying "we could not
+        // price it" would be false, and saying "the floors emptied it" would
+        // credit a floor that never looked at it.
+        if (floors.model > 0 && cut === 0 && floors.unpriceable === 0 && floors.impossible === 0) {
+          return stop([{
+            id: "model-disagreement",
+            text: NOTHING_TODAY.modelDisagreement({ modelDisagreement: floors.model, markets: [...floors.markets] }),
+          }]);
+        }
+        if (cut > 0 || floors.impossible > 0 || floors.unpriceable > 0 || floors.model > 0) {
           return stop([{
             id: "quality-floor",
             text: NOTHING_TODAY.belowQualityFloor({
               liquidity: floors.liquidity, spread: floors.spread, reward: floors.reward,
-              unpriceable: floors.unpriceable,
+              unpriceable: floors.unpriceable, model: floors.model,
               impossible: floors.impossible, markets: [...floors.markets], level: liqLevel,
             }),
           }]);
@@ -2343,8 +2514,11 @@ export default function OptionsStrategyLab() {
   const guard = useMemo(() => {
     if (!A) return null;
     return gate({ ticker, intent: "open", legs, dte, contracts: 1, maxLoss: A.maxLoss, maxProfit: A.maxProfit,
-      quotes: quotesOf(A), net: A.entry }, LOCAL_BOOK);
-  }, [A, gate, legs, dte, ticker]); // eslint-disable-line
+      quotes: quotesOf(A), net: A.entry, entryOverride: roomReason }, LOCAL_BOOK);
+  }, [A, gate, legs, dte, ticker, roomReason]); // eslint-disable-line
+  /* Which band this expiry falls in, for the screen. The gate decides; this
+     only decides what the screen has to ASK for. */
+  const room = useMemo(() => entryRoom(dte), [dte]);
 
 
   /* ---- direzione del trade e scontro col segnale (PRD §7) ----
@@ -2357,7 +2531,10 @@ export default function OptionsStrategyLab() {
     return Math.abs(d) < 0.05 ? 0 : Math.sign(d);
   }, [A]);
   const clash = useMemo(() => againstSignal(fused[ticker], tradeDir), [fused, ticker, tradeDir]);
-  const REASON_MIN = 15;
+  // ONE HOME FOR THE OVERRIDE MINIMUM. This was a bare 15 sitting beside the
+  // constant it is a copy of; the entry-room override added a second caller and
+  // a second copy is how the two come to disagree about what a reason is.
+  const REASON_MIN = RULES.minOverrideReasonChars;
   const reasonOk = !clash || against.reason.trim().length >= REASON_MIN;
 
   /* ---- scanner ----
@@ -2593,6 +2770,30 @@ export default function OptionsStrategyLab() {
         {msg && <div style={{ ...mono, fontSize: 11.5, color: T.amber, border: `1px solid ${T.amber}44`, background: `${T.amber}10`, borderRadius: 6, padding: "7px 10px", marginTop: 10 }}>{msg}</div>}
 
         <TabBoundary k={`${tab}/${step}/${ev}`}>
+        {/* AND A WORKING ORDER IS SOMETHING THAT NEEDS A DECISION TODAY. It
+            is not a position, so it is not in `posAlerts`, and that is exactly
+            how it stayed invisible: the app's own list of what needs attention
+            only ever contained things that had already happened. */}
+        {workingOrders.length > 0 && (
+          <div style={{ marginTop: 12, padding: "10px 12px", background: T.panel, border: `1px solid ${T.amber}66`, borderRadius: 8 }}>
+            <div style={{ ...mono, fontSize: 10, letterSpacing: "0.15em", color: T.amber, display: "flex", alignItems: "center", gap: 6 }}>
+              <Bell size={11} /> {workingOrders.length} ORDER{workingOrders.length === 1 ? "" : "S"} WORKING AT THE BROKER · NOT FILLED
+            </div>
+            <div style={{ display: "grid", gap: 5, marginTop: 8 }}>
+              {workingOrders.map((p) => (
+                <button key={p.id} onClick={() => { setView("desk"); setTab("positions"); }}
+                  style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", background: "transparent", border: "none", cursor: "pointer", padding: 0, textAlign: "left" }}>
+                  <span style={{ width: 7, height: 7, borderRadius: 4, background: T.amber, flexShrink: 0 }} />
+                  <span style={{ ...mono, fontSize: 11.5, color: T.ink, fontWeight: 700 }}>{p.ref ? `${p.ref} ` : ""}{p.ticker} {p.name}</span>
+                  <span style={{ ...mono, fontSize: 10.5, color: T.mut }}>
+                    · sent, nothing bought{p.alpacaLimit != null ? ` · limit ${money(p.alpacaLimit * 100)}` : ""} →
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Alert Center: morning check */}
         {posAlerts.length > 0 && (
           <div style={{ marginTop: 12, padding: "10px 12px", background: T.panel, border: `1px solid ${nAttention ? T.red : T.line}55`, borderRadius: 8 }}>
@@ -3039,7 +3240,9 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                             ? unpriceableNote(multi.floors.unpriceable, multi.floors.markets.join(", "))
                             : multi.floors?.impossible
                               ? impossibleLossNote(multi.floors.impossible, multi.floors.markets.join(", "))
-                              : "Nothing fits your budget on the markets you picked."}
+                              : multi.floors?.model
+                                ? modelDisagreementNote(multi.floors.model, multi.floors.markets.join(", "))
+                                : "Nothing fits your budget on the markets you picked."}
                       </div>
                     )}
                     {multi.res.length > 0 && multi.floors?.n > 0 && (
@@ -3065,6 +3268,15 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                     {multi.floors?.impossible > 0 && (
                       <div style={{ ...mono, fontSize: 10, color: T.red, lineHeight: 1.6 }}>
                         {impossibleLossNote(multi.floors.impossible, multi.floors.markets.join(", "))}
+                      </div>
+                    )}
+                    {/* AND WHAT THE MODEL DISBELIEVED. A wide search covering
+                        five markets is exactly where a placeholder mid slips
+                        through: it ranks on expected value, and a structure
+                        priced at a fifth of its worth ranks first. */}
+                    {multi.floors?.model > 0 && (
+                      <div style={{ ...mono, fontSize: 10, color: T.red, lineHeight: 1.6 }}>
+                        {modelDisagreementNote(multi.floors.model, multi.floors.markets.join(", "))}
                       </div>
                     )}
                     {/* AND WHAT COULD NOT BE SCORED. An unbounded profit has no
@@ -3316,9 +3528,15 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                     // is: a structure with no readable price never reached the
                     // floors, so reporting it as one they removed would credit
                     // them with work they did not do.
-                    const un = shortlist.tally.unpriceable, floors = shortlist.cut.length - un;
-                    if (un > 0 && floors > 0) return ` — ${un} could not be priced at all, and ${floors} did not clear the quality floors`;
-                    if (un > 0) return ` — the price could not be read from the chain`;
+                    const un = shortlist.tally.unpriceable, md = shortlist.tally.model;
+                    const floors = shortlist.cut.length - un - md;
+                    const bits = [];
+                    if (un > 0) bits.push(`${un} could not be priced at all`);
+                    if (md > 0) bits.push(`${md} ${md === 1 ? "is" : "are"} priced more than ${RULES.modelDisagreementRatio}x away from what the model says they are worth`);
+                    if (floors > 0) bits.push(`${floors} did not clear the quality floors`);
+                    if (bits.length > 1) return ` — ${bits.slice(0, -1).join(", ")} and ${bits[bits.length - 1]}`;
+                    if (un > 0) return " — the price could not be read from the chain";
+                    if (md > 0) return " — the chain's price and the app's own model do not agree";
                     return " because they did not clear the quality floors";
                   })()}:
                   <div style={{ marginTop: 4 }}>
@@ -3338,6 +3556,15 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
               {shortlist.tally.impossible > 0 && (
                 <div style={{ ...mono, fontSize: 10.5, color: T.red, marginTop: 8, lineHeight: 1.6 }}>
                   {impossibleLossNote(shortlist.tally.impossible, ticker)}
+                </div>
+              )}
+              {/* AND A PRICE THE MODEL CANNOT ACCOUNT FOR. This is the one the
+                  BOIL order that reached the broker would have been stopped by:
+                  $0.05 against a model value of $0.333, one cent above the
+                  absolute floor built to catch the $0 butterfly. */}
+              {shortlist.tally.model > 0 && (
+                <div style={{ ...mono, fontSize: 10.5, color: T.red, marginTop: 8, lineHeight: 1.6 }}>
+                  {modelDisagreementNote(shortlist.tally.model, ticker)}
                 </div>
               )}
               {/* AND WHAT HAS NO CEILING. Kept, shown, and named — never scored. */}
@@ -3721,6 +3948,41 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                 </div>
               )}
 
+              {/* THE ENTRY FLOOR IS NOT A CLIFF ANY MORE (src/rules.js,
+                  `entryRoom`). Three bands, and only the middle one has a door:
+                  at or inside the 21-day exit rule there is no trade to have,
+                  above the 30-day floor there is nothing to say. The number 30
+                  is UNCHANGED this session — what changed is that the board
+                  `expiryChoice()` has been naming in `passedOver` can now
+                  actually be taken, which is what makes that sentence honest. */}
+              {room.known && room.band === "inside-exit" && (
+                <div style={{ ...mono, fontSize: 11, color: T.red, marginTop: 12, lineHeight: 1.6, padding: "9px 11px", background: `${T.red}0f`, border: `1px solid ${T.red}66`, borderRadius: 7 }}>
+                  ✗ {entryInsideExitNote(room)}
+                </div>
+              )}
+              {room.known && room.band === "tight" && (
+                <div style={{ marginTop: 12, padding: "9px 11px", background: `${T.amber}0f`, border: `1px solid ${T.amber}66`, borderRadius: 7 }}>
+                  <div style={{ ...mono, fontSize: 9.5, color: T.amber, fontWeight: 800, letterSpacing: 0.4 }}>
+                    {room.room} DAYS OF ROOM · THE APP AIMS FOR {room.target}
+                  </div>
+                  <div style={{ fontSize: 12.5, color: T.body, marginTop: 5, lineHeight: 1.55 }}>
+                    {entryRoomWarning(room)}
+                  </div>
+                  <textarea
+                    value={roomReason}
+                    onChange={(e) => setRoomReason(e.target.value)}
+                    placeholder="Why is this expiry worth taking with less room than the app aims for? The reason is stored with the position and appears in the Journal."
+                    rows={2}
+                    style={{ ...mono, width: "100%", boxSizing: "border-box", marginTop: 9, background: T.bg, color: T.ink, border: `1px solid ${entryOverrideOk(roomReason) ? T.green : T.amber}`, borderRadius: 6, padding: "8px 9px", fontSize: 12, resize: "vertical" }}
+                  />
+                  <div style={{ ...mono, fontSize: 10, color: entryOverrideOk(roomReason) ? T.green : T.dim, marginTop: 4, lineHeight: 1.5 }}>
+                    {entryOverrideOk(roomReason)
+                      ? "✓ Reason recorded. The trade is unlocked and the warning stays — an override is not a dismissal."
+                      : `${Math.max(0, RULES.minOverrideReasonChars - roomReason.trim().length)} more characters and this unlocks. Until then the risk gate holds it, and it says so below.`}
+                  </div>
+                </div>
+              )}
+
               {/* Il verdetto del risk gate, non un calcolo parallelo: la stessa
                   funzione che decide se l'ordine parte scrive anche queste righe. */}
               {guard && !guard.pass && (
@@ -3909,6 +4171,9 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   buildOcc={buildOcc} quoteFn={q} estNet={A.entry * 100 / 100}
                   setMsg={setMsg}
                   gate={gate} dte={dte} maxLoss={A.maxLoss} maxProfit={A.maxProfit}
+                  /* the model half of the ticket needs what the model needs, and
+                     `iv` is the same base volatility `analyze()` priced with */
+                  spot={spot} iv={iv} entryOverride={roomReason}
                 />
               )}
               {!alpaca && <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 8 }}>Connect Alpaca in Positions → Integrations to unlock the full order ticket: limit or market, time in force, quantity and cancellations.</div>}
@@ -3944,6 +4209,77 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
         {/* ============ PAPER + INTEGRAZIONI ============ */}
         {tab === "positions" && !showSettings && (
           <div style={{ marginTop: 12 }}>
+            {/* WORKING ORDERS, FIRST ON THE SCREEN, BECAUSE THEY ARE NOT
+                POSITIONS YET. An order that never fills used to be visible
+                only on the full desk, so the one order this app has ever sent
+                sat at "new" with a filled quantity of 0.00 and nothing in the
+                main flow ever mentioned it again. It sits ABOVE the positions
+                because "this has not happened yet" has to be read before
+                "here is what you own", not after. */}
+            {workingOrders.length > 0 && (
+              <Panel style={{ border: `1px solid ${T.amber}66`, marginBottom: 10 }}>
+                <Lbl>WORKING AT THE BROKER ({workingOrders.length}) · SENT, NOT FILLED</Lbl>
+                <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 6, lineHeight: 1.6 }}>
+                  {workingOrders.length === 1 ? "This order has" : "These orders have"} left the app and
+                  {workingOrders.length === 1 ? " has" : " have"} not bought anything. Nothing here is a position,
+                  no exit plan has started, and the risk on {workingOrders.length === 1 ? "it" : "them"} is not
+                  open risk. A limit at the middle of a wide market can wait all day; a DAY order that is still
+                  here at the close is gone.
+                </div>
+                <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
+                  {workingOrders.map((p) => {
+                    const sentAt = p.alpacaSentAt || p.id || null;
+                    const mins = sentAt ? Math.max(0, Math.round((Date.now() - sentAt) / 60000)) : null;
+                    const age = mins == null ? "age unknown"
+                      : mins < 60 ? `${mins} minute${mins === 1 ? "" : "s"} old`
+                      : mins < 1440 ? `${Math.round(mins / 60)} hour${Math.round(mins / 60) === 1 ? "" : "s"} old`
+                      : `${Math.round(mins / 1440)} day${Math.round(mins / 1440) === 1 ? "" : "s"} old`;
+                    const tif = String(p.alpacaTif || "").toLowerCase();
+                    const stands = tif === "gtc" ? "stands until you cancel it"
+                      : tif === "day" ? "dies at the close of the session it was sent in"
+                      : "time in force not recorded";
+                    // A DAY order older than a session is almost certainly gone
+                    // already, and saying so is the whole point of this panel.
+                    const stale = tif === "day" && mins != null && mins > 8 * 60;
+                    return (
+                      <div key={p.id} style={{ padding: "10px 12px", background: T.bg, border: `1px solid ${stale ? T.red : T.amber}55`, borderRadius: 7 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", alignItems: "baseline" }}>
+                          <div style={{ fontWeight: 700, color: T.ink, fontSize: 13 }}>
+                            {p.ref ? `${p.ref} · ` : ""}{p.ticker} {p.name}
+                          </div>
+                          <div style={{ ...mono, fontSize: 10.5, color: stale ? T.red : T.amber, fontWeight: 700 }}>
+                            {String(p.alpacaStatus || "working").toUpperCase().replace(/_/g, " ")} · {age}
+                          </div>
+                        </div>
+                        <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 5, lineHeight: 1.6 }}>
+                          {p.alpacaOrderType === "limit" && p.alpacaLimit != null
+                            ? `A limit of ${money(p.alpacaLimit * 100)} a combination, which ${stands}.`
+                            : `A ${p.alpacaOrderType || "?"} order, which ${stands}.`}
+                          {" "}Order <span style={{ wordBreak: "break-all" }}>{p.alpacaId}</span>.
+                        </div>
+                        {stale && (
+                          <div style={{ ...mono, fontSize: 10.5, color: T.red, marginTop: 5, lineHeight: 1.6 }}>
+                            ⚠ This is a DAY order and it is {age}. It has almost certainly expired unfilled at the
+                            close of its session without a word from anybody. Nothing was bought. Cancel it to tidy
+                            the record, or re-price it and send it again.
+                          </div>
+                        )}
+                        <div style={{ display: "flex", gap: 6, marginTop: 9, flexWrap: "wrap", alignItems: "center" }}>
+                          <Btn small ghost disabled={orderBusy === p.id || DEMO} onClick={() => repriceWorking(p)}
+                            title={DEMO ? DEMO_TOOLTIP : undefined}>Re-price it →</Btn>
+                          <Btn small color={T.red} disabled={orderBusy === p.id || DEMO} onClick={() => cancelWorking(p)}
+                            title={DEMO ? DEMO_TOOLTIP : undefined}>{orderBusy === p.id ? "Working…" : "Cancel it"}</Btn>
+                          <Btn small ghost disabled={DEMO} onClick={() => recheckOrders()}>Ask Alpaca again</Btn>
+                          <span style={{ ...mono, fontSize: 10, color: T.dim }}>
+                            Re-pricing cancels this one and puts the trade back on Build at today's market.
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </Panel>
+            )}
             <Panel>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
                 <Lbl>YOUR POSITIONS ({store.positions.length}) · VALUED LIVE</Lbl>
@@ -4370,6 +4706,36 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                 analysis or an opportunity radar is part of that record, and
                 leaving it only in a panel that is one tap from being closed
                 made the Journal and the Copilot disagree about the same day. */}
+            {/* WHAT THE ENTRY FLOOR HAS COST, COUNTED RATHER THAN ARGUED ABOUT.
+                `minEntryDTE` is 30 and no session has ever measured it — it is
+                an inherited default. The reading that would settle it is how
+                often the floor takes a genuinely busier board away and by how
+                much, and the only place that can be collected is here, as the
+                app is used. ROADMAP P5 is what reads it back. It is local: it
+                is calibration data about this user's markets, not a position. */}
+            <Panel style={{ marginTop: 12 }}>
+              <Lbl>THE {RULES.minEntryDTE}-DAY ENTRY FLOOR · {(store.expiryLog || []).length} BOARD{(store.expiryLog || []).length === 1 ? "" : "S"} PASSED OVER</Lbl>
+              <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 6, lineHeight: 1.6 }}>
+                {passedOverSummary(store.expiryLog || [])}
+              </div>
+              {(store.expiryLog || []).length > 0 && (
+                <div style={{ display: "grid", gap: 5, marginTop: 9 }}>
+                  {(store.expiryLog || []).map((r, i) => (
+                    <div key={r.t + "-" + i} style={{ ...mono, fontSize: 10.5, color: T.body, lineHeight: 1.6, padding: "6px 9px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 6 }}>
+                      <span style={{ color: T.amber, fontWeight: 700 }}>{r.ticker}</span>
+                      {" "}built on {r.chosen.key} ({r.chosen.dte}d, {r.chosen.clears ?? "?"} of {r.chosen.near ?? "?"} clear)
+                      {" "}· passed over {r.passedOver.key} ({r.passedOver.dte}d, {r.passedOver.clears ?? "?"} of {r.passedOver.near ?? "?"} clear
+                      {r.busierFactor != null ? `, ${r.busierFactor.toFixed(1)}× busier` : ""})
+                      {" "}· <span style={{ color: r.offerable ? T.green : T.red }}>
+                        {r.offerable ? "could be taken with a written reason" : `at or inside the ${RULES.exitDTE}-day exit — not offerable`}
+                      </span>
+                      <span style={{ color: T.dim }}> · {ago(r.t)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Panel>
+
             {(store.copilotLog || []).length > 0 && (
               <Panel style={{ marginTop: 12 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
