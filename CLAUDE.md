@@ -293,6 +293,51 @@ at 60, never in the `/api/state` blob — it is calibration data, not a position
 reads it back with `passedOverSummary()`. ROADMAP P5 is what reads it. **The log is empty until
 the app is used.**
 
+## The position remembers its size — and an assumed 1 is not a measured 1
+
+`riskGate.js` read `p.contracts` in three places — the 25% exposure ceiling, the dollars a
+proposal risks, the stop threshold — and **nothing ever wrote that field.** Every open
+position counted as ONE contract for the rest of its life however many were really bought,
+and the Build screen's gate ran at a hardcoded `contracts: 1` while the ticket below it sized
+the order at `cfg.qty`. A cap that reads the wrong quantity is not a display bug.
+
+- **ONE HOME.** `commitPosition()` in `App.jsx` stores `contracts`: the broker order body's
+  **`qty`** where an order was sent, the number the **user confirmed** where the app opened on
+  its own book. `positionSize(pos)` in `src/journal.js` is the only way it is read back and
+  returns `{ contracts, assumed }`. Never spell `Number(p.contracts) || 1` anywhere again.
+- **THE SIZE IS THE SCREEN'S, NOT THE TICKET'S.** `contracts` is Build-screen state in
+  `App.jsx`, above `OrderTicket` (now a controlled input on it), the `guard` memo, the
+  confirm step and the record. It resets on a ticker, expiry or hand-off change.
+- **AN ASSUMED 1 IS NEVER A MEASURED 1.** An older record carries no size and it cannot be
+  recovered. `withPositionSize()` gives it one at hydration the way the `v: 2` pass gives it
+  a ref, marks `contractsAssumed`, and `positionSizeNote()` says so on the row. The flag
+  survives `localStorage` and `/api/state`, so saving cannot launder it.
+- **PER COMBINATION STAYS PER COMBINATION.** `entryNet`, `maxProfit` and `maxLoss` describe
+  the STRUCTURE and are never scaled in storage. The size is applied at the boundaries: the
+  gate's dollar limits and stop threshold, the P&L on a position row (Alpaca's
+  `unrealized_pl` was always a total and the app's own number was one combination), `riskOk`
+  in the Journal, the exit ladder's `userQty`, the autopilot's close, and the Build screen,
+  which NAMES the totals when the ticket is above x1. The wizard's road keeps `contracts: 1`
+  because a road is built to fit the budget at one combination, and the card says so.
+- Every order path is sized by the number its gate measured. `sendToAlpaca()` passes it to
+  `alpacaOrderMleg()`; `placeExit()` and `autopilot.mjs` pass `contractsOf(pos)`.
+
+## `modelCheckOf()` — one model check, four consumers
+
+`modelSanity()` is spelled ONCE in `App.jsx`, inside `modelCheckOf(analysis, { legs, spot,
+dte, iv })`. The three generation sites call it and the Build screen memoises it on `analyze()`
+and hands the verdict to the order ticket. `ComboBookPanel` in `pro.jsx` used to run it inline
+on every render AND re-derive the marks from `quoteFn(leg).mid` where the Shortlist passes
+`legPx[i].px` — the same number for a quoted leg, **different for one priced off the model** —
+so two screens could name different legs for one trade. `riskGate.test.js` fails the build if
+`pro.jsx` calls `modelSanity` again or if `App.jsx` calls it more than once;
+`ceiling.test.jsx` holds the ticket's reading against the Shortlist's.
+
+**A RULE NUMBER HAS ONE HOME, AND A TEST REFUSES THE COPIES.** `REASON_MIN = 15` was one; the
+sweep found three more, all `45` where `RULES.targetEntryDTE` lives. `riskGate.test.js` refuses
+the shapes a copy takes here — a `useState` default, a property, a local constant — against
+eleven rule numbers, and a second test proves the matcher can still see one.
+
 ## Working orders have a home, and SENT is not FILLED
 
 `orderOutcome()` has distinguished the two since PR #18, but an order that was working lived
@@ -536,6 +581,9 @@ while the position is open.
   `appendTimeline()` / `stampTimeline()` (every append goes through one of these, so an entry
   cannot get its number two different ways), `orderStatusRecheck()`, `closeReason()` /
   `closeDecision()`, `journalEntry()` (what a closed trade keeps) and `searchJournal()`.
+  **`positionSize()` / `contractsOf()` / `withPositionSize()` / `positionSizeNote()` live
+  here too** — how big a position is, and whether that is known, is a fact about its record.
+  `riskGate.js` imports them; nothing else may re-derive a size.
   **`closePos()` used to keep four fields** — ticker, pnl, ruleExit, riskOk — and drop the
   timeline, the thesis, both order ids and the reason. Never build a closed entry by hand.
 - `src/order.js` — **what is actually sent, and what came back.** Plain JS, no React,
@@ -555,7 +603,10 @@ while the position is open.
   not overridable, `ENTRY_DTE_ROOM` above it is unlocked by
   `proposal.entryOverride`. A proposal may carry `quotes` (one `{ bid, ask }` per leg)
   and `net`: the more of them a caller passes the more `priceability()` can catch, and
-  the maximum loss alone already blocks the case that got through.
+  the maximum loss alone already blocks the case that got through. **`contracts` is the
+  size that will ACTUALLY be sent** and every dollar limit is `maxLoss x contracts`; a
+  caller that leaves it out is read as one combination and `positionSize()` marks that
+  assumed, so a screen evaluating one combination has to SAY it is a per-contract figure.
 - `src/wizard.jsx` — **the app shell (PRD §5)**. The wizard is the entry point,
   not a tab: capital onboarding on a first run, then screen 1 (greeting, one line
   of status, **two** doors — and "what needs attention today" once positions

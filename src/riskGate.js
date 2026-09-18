@@ -18,6 +18,13 @@
 
 import { RULES, sizing, money, pctText, capitalSourceNote, priceability, impossibleLoss, MIN_NET_DOLLARS,
   entryRoom, entryInsideExitNote, entryRoomWarning, entryRoomOverrideAsk, entryOverrideOk } from "./rules.js";
+// HOW MANY COMBINATIONS A POSITION IS, read from ONE place (src/journal.js).
+// This file used to spell `Math.max(1, Number(p?.contracts) || 1)` in three
+// separate expressions, and nothing anywhere ever WROTE that field — so every
+// open position counted as a single contract whatever was really bought, and
+// the 25% exposure ceiling was measuring a fraction of the book. `positionSize`
+// also says whether the 1 it returned is the record's or its own.
+import { positionSize } from "./journal.js";
 
 /* ============================== helpers ============================== */
 
@@ -80,13 +87,13 @@ function openRiskOf(portfolio) {
   if (!portfolio) return 0;
   if (isNum(portfolio.openRisk)) return abs(portfolio.openRisk);
   return (portfolio.positions || []).reduce(
-    (a, p) => a + abs(p?.maxLoss) * Math.max(1, Number(p?.contracts) || 1), 0);
+    (a, p) => a + abs(p?.maxLoss) * positionSize(p).contracts, 0);
 }
 
 /** Dollars this proposal puts at risk: max loss per combo × number of combos. */
 function tradeRiskOf(proposal) {
   if (isNum(proposal?.riskDollars)) return abs(proposal.riskDollars);
-  return abs(proposal?.maxLoss) * Math.max(1, Number(proposal?.contracts) || 1);
+  return abs(proposal?.maxLoss) * positionSize(proposal).contracts;
 }
 
 const V = (code, message) => ({ code, message });
@@ -97,6 +104,13 @@ const V = (code, message) => ({ code, message });
  * @param {object}   arg
  * @param {object}   arg.proposal  what we want to send:
  *        { legs, maxLoss, maxProfit, dte, contracts, intent, pnl, ticker, name }
+ *        `contracts` IS THE SIZE THAT WILL ACTUALLY BE SENT, and `maxLoss` is
+ *        the worst case of ONE combination: the dollars at risk are the product
+ *        of the two. A caller that leaves it out is read as one combination and
+ *        `positionSize()` marks that as assumed, so a screen evaluating a single
+ *        combination before a size has been chosen has to SAY it is a
+ *        per-contract figure. `pnl`, where it is passed, is the WHOLE
+ *        position's — the stop threshold is scaled to `contracts` to match it.
  *        `intent` is "open" (default) or "close". Entry-only rules — sizing,
  *        exposure, entry DTE, defined risk — do not apply to an order that
  *        REDUCES risk; the paper-mode block and the warnings always apply.
@@ -292,7 +306,11 @@ export function evaluateTrade({ proposal, portfolio, capital, signals } = {}) {
       `${RULES.lowConfidence} mark. The signal is not saying much either way.`));
   }
   if (isNum(p.pnl) && isNum(p.maxLoss) && abs(p.maxLoss) > 0) {
-    const stopAt = -RULES.stopLossPct * abs(p.maxLoss) * Math.max(1, Number(p.contracts) || 1);
+    // `maxLoss` is the worst case of ONE combination and `pnl` is the whole
+    // position's, so the threshold is scaled to the size before they are
+    // compared. With `contracts` never written this was always ×1 and the two
+    // sides happened to agree; on a seven-lot position they would not.
+    const stopAt = -RULES.stopLossPct * abs(p.maxLoss) * positionSize(p).contracts;
     if (Number(p.pnl) <= stopAt) {
       warnings.push(V("STOP_LOSS_REACHED",
         `P&L is ${money(p.pnl)}, at or past the ${pctText(RULES.stopLossPct)} stop ` +

@@ -31,32 +31,74 @@ SHIPPED (PR "the order that never filled", 564 checks, build clean):
     typed override between there and the 30-day floor, `passedOver` offerable.
     PRD §4f.
 
-WHAT P1 INHERITS FROM THIS WORK:
-  - **The 4x ratio is CHOSEN, not measured.** The live-chain distribution of
-    market-net over model-net was not readable from the sandbox (no broker
-    keys, egress proxy refuses the CONNECT). What was measured is the model's
-    own error budget, and the table is in the comment beside the constant.
-    Expect a real reading to bring 4 down. Same for `openLimitSlippage`.
-  - **`store.expiryLog` is empty.** `passedOverRecord()` writes one row per
-    market per board as the app is used; P5 calibrates the 30-day floor from
-    it. Nothing can be read until the owner has used the app.
-  - **The ticket now shows the model value beside the market value**, which is
-    a second consumer of `analyze()`'s per-leg marks. P1's "one number, one
-    source" sweep should check that panel against the Shortlist's figures.
-  - `ComboBookPanel` in pro.jsx computes `modelSanity()` on every render of the
-    ticket. That is cheap and it is a second call site for the same arithmetic;
-    if P1 centralises it, this is one of the places to look.
-  - `App.jsx`'s `REASON_MIN` was a bare 15 beside `RULES.minOverrideReasonChars`
-    and now reads the constant. There may be more copies like it.
+WHAT P1 INHERITED FROM THIS WORK — and what it did with it:
+  - **The 4x ratio is CHOSEN, not measured. STILL OPEN.** The live-chain
+    distribution of market-net over model-net was not readable from the sandbox
+    (no broker keys, egress proxy refuses the CONNECT). What was measured is the
+    model's own error budget, and the table is in the comment beside the
+    constant. Expect a real reading to bring 4 down. Same for
+    `openLimitSlippage` and `closeLimitSlippage`.
+  - **`store.expiryLog` is empty. STILL OPEN.** `passedOverRecord()` writes one
+    row per market per board as the app is used; P5 calibrates the 30-day floor
+    from it. Nothing can be read until the owner has used the app.
+  - ~~The ticket is a second consumer of `analyze()`'s per-leg marks.~~
+    **CLOSED by P1.** It was: the Shortlist passed `legPx[i].px` and the ticket
+    re-derived the marks from `quoteFn(leg).mid`, which differ for a leg priced
+    off the model. `modelCheckOf()` in App.jsx is the one expression now, and
+    `ceiling.test.jsx` holds the ticket's reading against the Shortlist's.
+  - ~~`ComboBookPanel` computes `modelSanity()` on every render.~~ **CLOSED by
+    P1** — the verdict is computed once in a `useMemo` on the Build screen and
+    passed down; `riskGate.test.js` fails the build if `pro.jsx` calls
+    `modelSanity` again.
+  - ~~`REASON_MIN` was a bare 15; there may be more copies like it.~~ **SWEPT.**
+    Three more were found, all of them `45` where `RULES.targetEntryDTE` lives:
+    the Build screen's default horizon, the wide search's default and its
+    fallback. `riskGate.test.js` now refuses the SHAPES a copy takes here.
 
-## P1 — Coherence: one number, one source
-One `probProfit` (engine.js; delete the copy in pro.jsx), one EV formula
-(delete `pop * maxProfit * n` and the PROFIT x CHANCE stat), the risk gate
-called with the real contract quantity instead of the hardcoded
-`contracts: 1` at App.jsx 1504, 1865, 2345 and in `riskOk` at 1658.
-DONE WHEN: a test proves Radar, Shortlist, Bench, Guardian and the autopilot
-print the same number for the same position, and a proposal that passes the
-gate on screen passes it again in the ticket at the quantity shown.
+## P1 — Coherence: one number, one source  (PART DONE — the quantity half is shipped)
+
+**NEVER CITE A LINE NUMBER IN THIS FILE.** The version of this section that
+shipped with P0 sent the next session to App.jsx 1504, 1865, 2345 and 1658, and
+by the time anybody read it the real sites were 1613, 2017, 2337, 2516 and 1799.
+A line number is stale the moment the file above it changes; the function name
+is not. Find these by searching for the name.
+
+SHIPPED (PR "the position that did not remember its size"):
+  - **The position remembers its size.** `commitPosition()` in App.jsx stores
+    `contracts` — the broker order body's `qty` where there was an order, the
+    number the user confirmed where the app opened on its own book.
+    `positionSize()` in `src/journal.js` is the one way it is read back, and it
+    reports whether the 1 it returned is the record's or its own. Positions
+    saved by older builds are given an ASSUMED 1 at hydration
+    (`withPositionSize()`) and every screen that prints a size says which it is.
+  - **The gate runs at the quantity that will be sent.** The hardcoded
+    `contracts: 1` is gone from `commitPosition()`, `sendToAlpaca()`, the
+    `guard` memo on Build, `GuardianPanel.placeExit()` in pro.jsx and the
+    autopilot's close proposal. The ticket's quantity is no longer the ticket's:
+    it is Build-screen state (`contracts` in App.jsx) that the gate preview, the
+    confirm step, the order body and the position record all read.
+  - The one place a `contracts: 1` survives is the wizard's road candidate, and
+    it is genuine: a road is built to fit the budget answer at ONE combination.
+    The road card says so in those words.
+  - **One model check.** `modelCheckOf()` in App.jsx, used by all three
+    generation sites and by the order ticket.
+  - **`riskGate.js` no longer spells `Math.max(1, Number(p?.contracts) || 1)`
+    three times.**
+
+STILL OPEN IN P1:
+  - One `probProfit`. `pro.jsx` keeps its own with a different signature
+    (`pTimeNeg`, `pWin`, `horizon`) — CLAUDE.md says this is deliberate and must
+    not be merged, so what P1 owes is a decision written down, not a deletion.
+  - One EV formula: `pop * maxProfit * n` and the PROFIT × CHANCE stat are still
+    on the Build screen beside `evProfile()`.
+  - `mc.pop`, `r.pop` and `chanceInProfit` are still three different
+    calculations of "the chance" (PRD's NOT VERIFIED list calls this the obvious
+    next debt). The ROUNDING is unified; the arithmetic is not.
+DONE WHEN: a test proves Radar, Shortlist, Build, Guardian and the autopilot
+print the same number for the same position. ~~and a proposal that passes the
+gate on screen passes it again in the ticket at the quantity shown~~ — that half
+is done and tested (`SIZE — a proposal that passes the gate passes it again at
+the quantity shown`, `src/riskGate.test.js`).
 
 ## P2 — Proposals ranked by edge, not by score
 At market prices every structure has expected value near zero: high

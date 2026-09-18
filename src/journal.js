@@ -248,6 +248,80 @@ export function closeDecision({ alert = null, written = "" } = {}) {
 }
 
 /* ------------------------------------------------------------------
+   4b) HOW BIG THE POSITION IS — AND WHETHER THAT IS KNOWN
+
+   MEASURED: nothing ever wrote `contracts` onto a position. `riskGate.js`
+   reads it in three places — the 25% total-exposure ceiling, the dollars a
+   proposal puts at risk, and the stop threshold — and every one of them fell
+   back to ONE. So a seven-lot spread counted against the exposure ceiling as
+   a single contract for the rest of its life, and the cap that is supposed to
+   stop a run of trades from adding up to more than a quarter of the capital
+   was measuring a seventh of what was really out there. That is not a display
+   bug: it is a limit that does not hold.
+
+   `commitPosition()` in App.jsx now stores the size — the order body's `qty`
+   where a broker filled it, the number the user confirmed where the app opened
+   it on its own book. This function is how everything else reads it back.
+
+   AND AN ASSUMED ONE IS NOT A MEASURED ONE. A position saved by an older build
+   carries no size at all, and there is no way to recover it: the order is gone
+   and the record never held it. Defaulting it to 1 is the only safe direction
+   to be wrong in — it under-counts exposure rather than over-counting it, which
+   is the direction that refuses trades rather than letting them through — but a
+   1 nobody wrote must never print as a 1 somebody did (failure class 1). So the
+   answer carries `assumed`, and the screens that print a size say which it is.
+------------------------------------------------------------------ */
+
+/** The size an older record is read as when it does not carry one. */
+export const ASSUMED_CONTRACTS = 1;
+
+/**
+ * How many combinations this position is, and whether the app actually knows.
+ *
+ * @param   {object} pos  a position record (or a closed Journal entry)
+ * @returns {{ contracts: number, assumed: boolean }}
+ *          `contracts` is always a whole number of at least 1. `assumed` is
+ *          true when the record carried no readable size and the 1 is this
+ *          function's, not the user's.
+ */
+export function positionSize(pos = {}) {
+  const raw = Number(pos && pos.contracts);
+  if (Number.isFinite(raw) && raw >= 1) {
+    // A record migrated at hydration carries the flag as well as the number, so
+    // a size written by an older build cannot launder itself into a measured one
+    // by being saved again.
+    return { contracts: Math.round(raw), assumed: !!(pos && pos.contractsAssumed) };
+  }
+  return { contracts: ASSUMED_CONTRACTS, assumed: true };
+}
+
+/** Just the number, for the arithmetic that only needs that. */
+export const contractsOf = (pos) => positionSize(pos).contracts;
+
+/**
+ * What a screen prints beside a position's size. It never says "1 contract"
+ * flatly about a record that does not carry one.
+ */
+export function positionSizeNote(pos = {}) {
+  const { contracts, assumed } = positionSize(pos);
+  if (!assumed) return `${contracts} contract${contracts === 1 ? "" : "s"}`;
+  return `${contracts} contract${contracts === 1 ? "" : "s"} — assumed, not recorded: ` +
+    `this position was opened before the app kept its size, so every figure below is read as one combination.`;
+}
+
+/**
+ * Gives a position a size when it has none, at hydration, the way the `v: 2`
+ * sanitising gives it a ref. It marks what it did: a record that goes through
+ * here is one whose size was never written down.
+ */
+export function withPositionSize(pos) {
+  if (!pos || typeof pos !== "object") return pos;
+  const raw = Number(pos.contracts);
+  if (Number.isFinite(raw) && raw >= 1) return pos;
+  return { ...pos, contracts: ASSUMED_CONTRACTS, contractsAssumed: true };
+}
+
+/* ------------------------------------------------------------------
    5) THE CLOSED ENTRY
 ------------------------------------------------------------------ */
 
@@ -280,6 +354,13 @@ export function journalEntry({ pos = {}, pnl = null, reason = null, closeOrderId
     entryNet: pos.entryNet ?? null,
     maxProfit: pos.maxProfit ?? null,
     maxLoss: pos.maxLoss ?? null,
+    // HOW BIG IT WAS. `entryNet`, `maxProfit` and `maxLoss` are all figures for
+    // ONE combination, so without this the Journal cannot say what the trade
+    // actually risked — and `riskOk`, the discipline number, is computed from
+    // the total. The flag travels with it: an assumed size stays assumed in the
+    // record it is filed under.
+    contracts: contractsOf(pos),
+    contractsAssumed: positionSize(pos).assumed,
     pnl,
     riskOk,
     // "Closed by the rules" is the app's one measure of discipline, so it is

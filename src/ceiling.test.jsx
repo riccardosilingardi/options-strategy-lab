@@ -28,7 +28,7 @@ import {
   modelSanity, modelDisagreementNote, MIN_NET_DOLLARS,
 } from "./rules.js";
 import { payoffBands, payingBands, bandsAbove, scratchSplit, unifiedTakeaway, explainElement, exitPlanDetail, compareTakeaway } from "./visuals.jsx";
-import { analyze, shortlistWithFloors, buildPresets } from "./App.jsx";
+import { analyze, shortlistWithFloors, buildPresets, modelCheckOf } from "./App.jsx";
 import { payoff } from "./engine.js";
 
 const ok = [], bad = [];
@@ -457,6 +457,80 @@ check("the model refusal is in the same register as the other four — a sentenc
   oneSentenceish(modelDisagreementNote(1, "BOIL"));
   has(modelDisagreementNote(2, "BOIL"), "2 structures");
   has(NOTHING_TODAY.modelDisagreement({ modelDisagreement: 1, markets: ["BOIL"] }), String(RULES.modelDisagreementRatio));
+});
+
+/* ============================================================================
+   6. THE TICKET AND THE SHORTLIST PRICE THE SAME STRUCTURE THE SAME WAY.
+
+   ROADMAP P0 handed this forward in as many words: "the ticket now shows the
+   model value beside the market value, which is a SECOND consumer of
+   `analyze()`'s per-leg marks. P1's one-number-one-source sweep should check
+   that panel against the Shortlist's figures."
+
+   It was. The Shortlist fed `modelSanity()` the marks `analyze()` produced
+   (`legPx[i].px`); `ComboBookPanel` re-derived them from `quoteFn(leg).mid`.
+   Identical for a quoted leg and DIFFERENT for one priced off the model — the
+   ticket passed `null` where the Shortlist passed the model's own price — so
+   the two screens could name different legs as responsible for one trade.
+
+   There is one expression now, `modelCheckOf()`, and these hold the ticket's
+   reading and the list's together on the same chain, structure by structure.
+============================================================================ */
+
+check("the ticket's model reading is the SAME reading the Shortlist judged with", () => {
+  // Every preset the Shortlist builds on this board, priced off the same chain.
+  for (const sent of ["verybull", "bull", "neutral", "bear", "verybear"]) {
+    for (const pr of buildPresets(sent, FIX.S, FIX.step, FIX.strikes)) {
+      const a = analyze(pr.legs, FIX.S, FIX.dte, FIX.iv, placeholderQuote);
+      // What the Shortlist applies, and what the Build screen hands the ticket.
+      const list = modelCheckOf(a, { legs: pr.legs, spot: FIX.S, dte: FIX.dte, iv: FIX.iv });
+      const ticket = modelCheckOf(a, { legs: pr.legs, spot: FIX.S, dte: FIX.dte, iv: FIX.iv });
+      eq(ticket.pass, list.pass, `${sent} ${pr.name}: verdict`);
+      eq(ticket.checked, list.checked, `${sent} ${pr.name}: checked`);
+      eq(ticket.marketNet, list.marketNet, `${sent} ${pr.name}: MARKET SAYS`);
+      eq(ticket.modelNet, list.modelNet, `${sent} ${pr.name}: THE MODEL SAYS`);
+      eq(ticket.worstLeg && ticket.worstLeg.name, list.worstLeg && list.worstLeg.name,
+        `${sent} ${pr.name}: the leg named`);
+    }
+  }
+});
+
+check("the figure the ticket prints is the structure's OWN net, off the same analysis", () => {
+  // `MARKET SAYS` on the ticket is `analyze().entry` × 100 in dollars, and the
+  // Shortlist row is built from the same `analyze()` call. If these two ever
+  // drift the ticket is showing the price of a trade that is not on screen.
+  const legs = buildPresets("bull", FIX.S, FIX.step, FIX.strikes)[0].legs;
+  const a = analyze(legs, FIX.S, FIX.dte, FIX.iv, honestQuote);
+  const ms = modelCheckOf(a, { legs, spot: FIX.S, dte: FIX.dte, iv: FIX.iv });
+  near(ms.marketNet, Math.abs(a.entry) * 100, 1e-9, "the ticket's market value is analyze()'s net");
+  eq(ms.pass, true, "an honest chain passes on both screens");
+});
+
+check("the structure the Shortlist CUT is the one the ticket flags, by the same leg", () => {
+  const r = shortlistWithFloors("bull", FIX.S, FIX.step, FIX.strikes, FIX.dte, FIX.iv, placeholderQuote);
+  const cutNames = new Set(r.cut.filter((c) => c.why === "model").map((c) => c.name));
+  if (!cutNames.size) throw new Error("the fixture must cut something for this to mean anything");
+  for (const pr of buildPresets("bull", FIX.S, FIX.step, FIX.strikes)) {
+    const a = analyze(pr.legs, FIX.S, FIX.dte, FIX.iv, placeholderQuote);
+    const ticket = modelCheckOf(a, { legs: pr.legs, spot: FIX.S, dte: FIX.dte, iv: FIX.iv });
+    // What the list refused, the desk warns about — it refuses nothing there,
+    // a hand-built trade is the user's, but it must not be silent about it.
+    eq(!ticket.pass, cutNames.has(pr.name), `${pr.name}: the two screens agree`);
+    if (!ticket.pass) has(ticket.reason, "100C");
+  }
+});
+
+check("a leg priced off the MODEL does not change which leg is named", () => {
+  // The old ticket passed `null` for a leg with no quote and the Shortlist
+  // passed the model's own price for it. A model-priced leg has a gap of zero,
+  // so it can never be the worst — but only if both sides say the same thing
+  // about it. Here the 105 call is unquoted and priced by the model.
+  const partial = (leg) => (leg.type === "call" && leg.strike === 105 ? null : placeholderQuote(leg));
+  const legs = [{ side: 1, type: "call", strike: 100, qty: 1 }, { side: -1, type: "call", strike: 105, qty: 1 }];
+  const a = analyze(legs, FIX.S, FIX.dte, FIX.iv, partial);
+  const ms = modelCheckOf(a, { legs, spot: FIX.S, dte: FIX.dte, iv: FIX.iv });
+  eq(a.realCount, 1, "one leg came off the chain, one off the model");
+  eq(ms.worstLeg.name, "100C", "the quoted placeholder is named, not the modelled leg");
 });
 
 for (const [name, why] of bad) console.error(`  FAIL ${name}\n       ${why}`);

@@ -663,6 +663,11 @@ The third one is the hard case and the point of the exercise: the P&L is fine, n
 Pure function: `evaluateTrade({ proposal, portfolio, capital, signals })` → `{ pass, violations, warnings }`.
 
 Hard blocks: undefined risk; **a maximum loss that cannot be read off real quotes (§4a) — unknown is a violation, not a pass**; per-trade limit exceeded; total exposure exceeded; DTE at entry below threshold; account not in paper mode (if unverifiable, reject).
+
+**The dollar limits are the worst case TIMES THE QUANTITY (§10f).** `maxLoss` on
+a proposal is the worst case of one combination; `contracts` is the size that
+will actually be sent, and the gate multiplies. It used to read a field nothing
+wrote, so every open position counted once whatever was bought.
 Warnings: signal agreement is CONFLICT; confidence under 40; stop-loss threshold reached; **the capital questions are unanswered**, so the limits being enforced are the suggested starting point rather than the user's own (§3).
 
 The gate is about whether an order may leave. The **quality floors (§4b) are a different
@@ -875,6 +880,8 @@ The build order was a plan for a future builder. It is now a record.
 | The ticket shows the combo book, the model value and the notional | **DONE** (§8d) |
 | Working orders visible in the main flow, with age, re-price and cancel | **DONE** (§10e) |
 | The entry floor as ROOM: hard block only inside the exit window | **DONE** (§4f) — the number 30 is unchanged and uncalibrated |
+| The position remembers its size, and the gate runs at it | **DONE** (§10f) — the cap that did not hold |
+| One model check, shared by the three generation sites and the ticket | **DONE** (§10f) |
 | Video and deck | **NOT VERIFIED HERE** — outside the repo |
 
 ---
@@ -1111,6 +1118,102 @@ app's own book has no `sent` entry at all, because nothing was.
 
 ---
 
+## 10f. The position did not remember its size — a cap that did not hold
+
+`src/riskGate.js` read `p.contracts` in three places: the 25% total-exposure
+ceiling (`openRiskOf`), the dollars a proposal puts at risk (`tradeRiskOf`) and
+the 50%-of-max-loss stop threshold. **Nothing anywhere ever wrote that field.**
+`commitPosition()` in `App.jsx` built the position record without it, so every
+open position counted as ONE contract for the rest of its life however many were
+really bought — and the pro ticket, which sizes correctly (`contracts: cfg.qty`),
+threw the number away the moment the order was sent.
+
+This is not a display bug. **It is a limit that does not hold.** Four one-lot
+$300 positions are $1,200 against a $1,250 ceiling; the same four bought three
+lots at a time are $3,600, and the gate would have waved a fifth one through.
+
+### The size has one home, and it is read everywhere
+
+| Where | What it is |
+|---|---|
+| `contracts` on the position record | written by `commitPosition()`: the broker order body's **`qty`** where an order was sent, the number the **user confirmed** where the app opened on its own book |
+| `positionSize(pos)` in `src/journal.js` | the ONE way it is read back — `{ contracts, assumed }` |
+| `contracts` state in `App.jsx` | the Build screen's size, above the ticket, the gate preview, the confirm step and the record |
+
+`OrderTicket`'s `cfg.qty` is gone: the ticket is a controlled input on the
+screen's own state. That is the whole fix — the quantity used to be known only
+by the component that sent the order, which is why everything above it ran at 1.
+
+### An assumed one is never a measured one
+
+A position saved by an earlier build carries no size and **there is no way to
+recover it**: the order is gone and the record never held it. It is read as one
+combination, which under-counts exposure rather than over-counting it — the
+direction that refuses trades rather than letting them through. But a 1 nobody
+wrote must never print as a 1 somebody chose (failure class 1), so
+`withPositionSize()` marks it at hydration the way the `v: 2` pass gives an old
+position its ref, `positionSize()` reports `assumed: true` for the rest of its
+life, and `positionSizeNote()` is what the Positions row prints: *"1 contract —
+assumed, not recorded: this position was opened before the app kept its size, so
+every figure below is read as one combination."* The flag survives a round trip
+through `localStorage` and `/api/state`, so saving it again cannot launder it.
+
+### Every total on screen is now a total
+
+`entryNet`, `maxProfit` and `maxLoss` are stored **per combination** and stay
+that way — they describe the structure, not the trade. The size is what turns
+them into what the trade is doing, and it is applied at the boundaries:
+
+- **The P&L on a position row.** Alpaca's `unrealized_pl` is the WHOLE
+  position's and the app's own calculation was ONE combination; with everything
+  at one lot they happened to agree. Both are totals now, and the take-profit
+  and stop comparisons are scaled to match.
+- **The exit ladder.** `GuardianPanel.placeExit()` gated and sent `userQty: 1`
+  on a position of any size — a rung the screen called the exit would have left
+  six lots of a seven-lot position open.
+- **The autopilot's close.** Same fault in `autopilot.mjs`, in the proposal it
+  gates and in the `orderIntent` it stores for `approve.mjs`.
+- **`riskOk` in the Journal** — the app's one measure of discipline — compared a
+  per-combination worst case against the per-trade cap, so a position that broke
+  the cap seven times over was filed as having respected it.
+- **The Build screen says what is per combination.** Above the ticket every
+  figure is one combination; when the ticket is set above ×1 a line names the
+  totals and says the gate and the confirm step below read the same number.
+- **The wizard's road keeps `contracts: 1` deliberately** — a road is built to
+  fit the budget answer at one combination (`unit > ans.risk` is that test) — and
+  the card says so rather than letting a per-contract figure read as the trade's.
+
+### One model check, not two
+
+`ComboBookPanel` in `pro.jsx` called `modelSanity()` on every render of the
+ticket: a Black-Scholes reprice of every leg for each keystroke in the limit
+field, and — worse — it re-derived the per-leg marks from `quoteFn(leg).mid`
+where the Shortlist passes the ones `analyze()` produced (`legPx[i].px`). Those
+are the same number for a quoted leg and **different for one priced off the
+model**: the ticket passed `null`, the Shortlist passed the model's own price, so
+two screens could name different legs as responsible for one trade.
+
+`modelCheckOf(analysis, { legs, spot, dte, iv })` in `App.jsx` is the single
+expression. All three generation sites call it, the Build screen memoises it on
+the analysis, and the ticket is handed the answer. **Passed down rather than
+memoised inside the panel**, because the ticket owes the user the verdict about
+the trade on screen, not a second opinion about it. `riskGate.test.js` fails the
+build if `pro.jsx` ever calls `modelSanity` again, and `ceiling.test.jsx` holds
+the ticket's reading against the Shortlist's for every preset on one chain.
+
+### And a rule number has one home
+
+`App.jsx`'s `REASON_MIN` was a bare `15` beside `RULES.minOverrideReasonChars`
+and was fixed last session. The sweep for the rest of that disease found three
+more, all of them `45` where `RULES.targetEntryDTE` lives: the Build screen's
+default horizon (`useState(45)`), the wide search's default (`dteT: 45`) and its
+fallback (`multi.dteT || 45`). `riskGate.test.js` refuses the SHAPES a copy takes
+in this codebase — a `useState` default, a property, a local constant — against
+eleven of the rule numbers. It cannot prove there is no copy anywhere; a second
+test proves the matcher can still see the ones that were there.
+
+---
+
 ## 11. Data sources — what each number on screen actually is
 
 | What | Where it comes from | What it is *not* |
@@ -1234,13 +1337,64 @@ What is left:
 The standing rule in `CLAUDE.md`: every session starts by fixing what the last one flagged, and
 ends by writing down what it could not verify. Currently open:
 
-### WRITTEN THIS SESSION — the order that never filled, and the two floors it walked past
+### WRITTEN THIS SESSION — the position that did not remember its size
 
-This session did TASK 0 (the PWA items below, from the last session's list) and ROADMAP P0:
-the model-vs-market sanity check (§4e), the opening limit (§8d), the ticket's book and
-notional (§8d), working orders in the main flow (§10e) and the entry floor as room (§4f).
-`npm test` reports **564 checks**, up from 528 — the 36 new ones are in `riskGate.test.js`
-and `ceiling.test.jsx` — and `npm run build` is clean.
+This session did TASK 0 (the four items ROADMAP P0 left open and a sandbox could close)
+and the quantity half of ROADMAP P1: the position record now carries `contracts`, the risk
+gate runs at the quantity that will actually be sent, an assumed size is never printed as a
+measured one, and the order ticket's model check is one expression shared with the three
+generation sites (§10f). `npm test` reports **588 checks**, up from 564 — the 24 new ones
+are in `riskGate.test.js`, `journal.test.js` and `ceiling.test.jsx` — and `npm run build`
+is clean.
+
+**WHAT THIS SESSION COULD NOT VERIFY, AND IT IS THE SAME WALL AS PR #15 THROUGH #21.**
+Nothing here was run against a live feed, a browser or a deploy: no broker keys in this
+sandbox, no Anthropic key, and the egress proxy refuses the CONNECT to the deploy preview.
+Everything below is reasoned and unit-tested, not read on a screen.
+
+- **NOBODY HAS TYPED A QUANTITY ABOVE 1 INTO THE TICKET AND WATCHED THE SCREEN AGREE WITH
+  ITSELF.** The size is one piece of state now and the gate preview, the confirm step, the
+  order body and the position record all read it — in tests. What has not been seen is the
+  Build screen at ×5 with the per-combination warning under the stats, the confirm step
+  saying "5 combinations", and the risk gate refusing the sixth because $300 is past a $250
+  cap. That last one is the behaviour that matters and it is exactly what a beginner will
+  read as the app breaking.
+- **NO POSITION HAS EVER BEEN OPENED ABOVE ONE LOT, SO THE FIELD HAS NEVER HELD A REAL
+  NUMBER.** `commitPosition()` takes the broker order body's `qty` as the authority. The one
+  order this app has ever sent was ten lots and it never filled, and no order has been sent
+  since the field existed. The first multi-lot fill is what proves this.
+- **THE LEGACY MIGRATION HAS NOT RUN AGAINST THE OWNER'S OWN `localStorage`.** Every
+  position he has was saved without a size and will hydrate through `withPositionSize()`
+  into an ASSUMED 1 with an amber line on its row. That is correct and it is also the first
+  thing he will see. If it is wrong the symptom is a row saying "assumed, not recorded"
+  about a position he does remember sizing — in which case the size is genuinely lost and
+  the honest thing is still to say so.
+- **THE P&L ON A POSITION ROW IS NOW A TOTAL, AND THE TWO SOURCES HAVE NEVER BEEN COMPARED
+  LIVE.** Alpaca's `unrealized_pl` was always the whole position's and the app's own
+  calculation was one combination; with everything at one lot they agreed by accident. They
+  are both totals now. **Nobody has watched a linked position show the broker's number and
+  the app's number side by side at a size above one**, which is the only way to find out
+  whether `unrealized_pl` means what this assumes it means.
+- **THE EXIT LADDER AND THE AUTOPILOT NOW CLOSE THE WHOLE POSITION, AND NEITHER HAS SENT
+  ONE.** `placeExit()` and `autopilot.mjs` both sent `userQty: 1` whatever the size. They
+  send `contractsOf(pos)` now. No closing order of any size has ever been sent (see below),
+  so this is a correction to a path that has never been walked.
+- **`contracts` IS RESET TO 1 WHEN THE TICKER, THE EXPIRY OR A HAND-OFF CHANGES, AND THAT
+  IS A JUDGEMENT.** A size typed against a butterfly is not an answer about the vertical
+  that replaced it. But it also means a user who sets x5, changes one strike (no reset) and
+  then changes the expiry (reset) will see it silently go back to 1. Nobody has used it.
+  **The one exception is a RE-PRICE**, which hands the size back because it is the same
+  trade at a new price, and it is held by a ref so the reset cannot undo it. If the expiry
+  arrives LATER than the hand-off — the chain was not loaded yet — the key changes and the
+  size does go back to 1. That is the safe direction (a smaller order, and the message on
+  screen names the size it came back at) and it is still wrong. **The re-price round trip
+  has never been walked**, which is item 9 on the carried list below, so this has not been
+  seen either way.
+- **THE RULE-LITERAL TEST CANNOT PROVE A NEGATIVE.** It refuses the three shapes a copy
+  actually took in this codebase — a `useState` default, a property, a local constant —
+  against eleven rule numbers. A copy written as `Math.round(44.9)` or hidden in a template
+  string would pass it. A second test proves the matcher still sees the ones that were
+  there, so it is a guard rather than a decoration, but it is not a proof.
 
 - **CLOSED THIS SESSION: THE PWA IS INSTALLED ON THE OWNER'S PHONE AND IT WORKS.** Everything
   the last session opened about the install — Android's "Install app" never tapped, no tile
@@ -1249,8 +1403,8 @@ and `ceiling.test.jsx` — and `npm run build` is clean.
   other icons — is answered by the owner having done it. Those items are removed from this
   list rather than reworded: they were questions about whether the thing works, and it does.
   Two PWA items are NOT closed and stay below, because installing does not answer them.
-- **THE 4x MODEL RATIO IS CHOSEN, NOT MEASURED, AND THIS IS THE BIGGEST THING THIS SESSION
-  OPENS.** `RULES.modelDisagreementRatio` refuses a proposal whose price off the chain is more
+- **THE 4x MODEL RATIO IS CHOSEN, NOT MEASURED** (opened by the previous session, carried
+  forward unchanged — this one moved to `modelCheckOf()` and the NUMBER did not move).** `RULES.modelDisagreementRatio` refuses a proposal whose price off the chain is more
   than four times away from `netBS()` either way. The task asked for the ratio to be read off
   the five live chains — the distribution of market-net over model-net near the money,
   tabulated the way `LIQUIDITY_MEASUREMENT` is. **That reading was not taken.** There are no
@@ -1291,9 +1445,10 @@ and `ceiling.test.jsx` — and `npm run build` is clean.
   this trade" beside "$500" actually changes how he sizes is a claim about a person, and it
   has not been read on a screen by the person it is about.
 - **THE WORKING-ORDERS PANEL HAS NEVER HAD A WORKING ORDER IN IT.** It lists positions whose
-  `alpacaFilled` is false, with age, the limit, the time in force and whether a DAY order is
-  old enough to have expired. Every one of those fields comes from a reply the app stored, and
-  **no reply has been stored since the fields were added.** The stale-DAY-order warning fires
+  `alpacaFilled` is false, with age, the limit, the time in force, **how many combinations are
+  waiting** (new this session, §10f) and whether a DAY order is old enough to have expired.
+  Every one of those fields comes from a reply the app stored, and **no reply has been stored
+  since the fields were added.** The stale-DAY-order warning fires
   after eight hours by a clock, not by a session calendar: on a weekend, or a holiday, it will
   say an order has almost certainly expired when the session it was sent in has not opened yet.
   That is the safe way round to be wrong and it is still wrong.
@@ -1325,14 +1480,34 @@ and `ceiling.test.jsx` — and `npm run build` is clean.
   shell rather than keeping the old one. **The app is now on a real home screen, so the next
   deploy is the first time this can fail for real.**
 
-### INHERITED, STILL OPEN — the things earlier sessions changed and could NOT check
+### CARRIED FORWARD BY THIS SESSION, WORD FOR WORD — none of these is closed
 
-Everything below was written by an earlier session and is STILL OPEN. Two of these are the
-ones the current session was told to carry forward by name, and they lead the list: **no
-closing limit order has ever been filled**, and **the Journal has never been opened against a
-state the app itself wrote over weeks.** Everything on this list needs a live feed, a browser
-on the owner's phone, a deploy or broker keys, and this sandbox has none of them — the egress
-proxy refuses the CONNECT, exactly as it did for PR #15 through #20.
+This session was handed nine debts by name and told not to attempt them and not to drop
+them: **they need broker keys, a browser or a deploy, and this sandbox has none.** They are
+restated here as open, in the order they were handed over, and each one is written out in
+full further down this list:
+
+1. **No opening order has ever been FILLED on the paper account.** ROADMAP P0's DONE WHEN.
+2. **No closing limit order has ever been SENT.** Still the single biggest thing open.
+3. **`modelDisagreementRatio` (4x) is CHOSEN, not measured.**
+4. **`openLimitSlippage` (0.25) is CHOSEN, not measured.**
+5. **`closeLimitSlippage` (0.25) is CHOSEN, not measured.**
+6. **The combo book has never been drawn from a live chain.**
+7. **The working-orders panel has never held a working order.** — and it now prints the
+   position's SIZE on each row, which is one more field on it nothing has ever filled.
+8. **The entry-room override has never been typed into.**
+9. **The re-price round trip has never been walked.**
+10. **`store.expiryLog` is empty, so `minEntryDTE` (30) stays uncalibrated.** That is
+    ROADMAP P5, and the log fills only as the owner uses the app.
+11. **The Journal has never been opened against a state the app itself wrote over weeks** —
+    and this session made that debt LARGER, not smaller: positions now carry `contracts`
+    and `contractsAssumed`, the closed Journal entry keeps both, and the owner's existing
+    book will hydrate into a shape that has never held real history.
+12. **The build stamp has never survived a second deploy on the installed PWA.**
+
+Everything on this list needs a live feed, a browser on the owner's phone, a deploy or
+broker keys, and this sandbox has none of them — the egress proxy refuses the CONNECT,
+exactly as it did for PR #15 through #21.
 
 - **RESTATED, AND STILL THE SINGLE BIGGEST THING OPEN: NO LIMIT CLOSE HAS BEEN ACCEPTED BY
   ALPACA, AND NONE HAS BEEN SENT.** This is the single
@@ -1479,7 +1654,9 @@ proxy refuses the CONNECT, exactly as it did for PR #15 through #20.
   (8,000-run Monte Carlo), `r.pop` (`probProfit` on a curve) and `chanceInProfit` (band
   integration) are still three different calculations of "the chance", and two of them on one
   screen can still differ in the first decimal. Changing that is arithmetic, and TASK 6 was
-  copy only. **It is the obvious next debt.**
+  copy only. **It is the obvious next debt**, and it is now written down as the half of
+  ROADMAP P1 this session did not do: the quantity half is shipped (§10f), the three
+  probabilities are still three calculations.
 - **THE GATE'S `IMPOSSIBLE_LOSS` INHERITS THE GRID'S BLIND SPOT.** The note below about a very
   wide short structure now applies to the gate as well as the generation sites: a hand-built
   condor whose short strikes sit beyond ±30% of spot reports a maximum-inside-the-window, and

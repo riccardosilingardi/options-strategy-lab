@@ -35,6 +35,7 @@ import { orderBody, orderOutcome, alpacaErrorText } from "./order.js";
 // THE PERMANENT RECORD: the ref a position is given at open, the sequence on
 // every timeline entry, the close reason, and what survives into the Journal.
 import { nextRef, refCounter, appendTimeline, stampTimeline, orderStatusRecheck, closeDecision,
+  positionSize, positionSizeNote, contractsOf, withPositionSize,
   journalEntry, searchJournal, CLOSE_REASON_MIN, refNumber } from "./journal.js";
 import { FIRST_STEP, stepCarry, candidateOf, candidateKey, legsLine, toggleCompare, inCompare, MAX_COMPARE, savedFromCandidate, candidateFromSaved, savedAge } from "./path.js";
 import { StepNav, StepForward, EvidenceBar, EvidenceOverlay, CompareTray, CandidateActions } from "./steps.jsx";
@@ -195,11 +196,14 @@ async function alpacaAccount() {
   const host = r.headers.get("X-OSL-Paper-Endpoint");
   return { ...acc, paperVerified: host === PAPER_HOST, paperSource: host ? `the proxy routed this to ${host}` : null };
 }
-async function alpacaOrderMleg(legs) {
+async function alpacaOrderMleg(legs, userQty = 1) {
   // THE SIZE GOES IN QTY, THE SHAPE GOES IN THE RATIOS (src/order.js).
   // Alpaca refuses leg ratios that share a factor — 422 / 42210000,
   // "GCD[5 5] = 5" — so a five-lot vertical is five of a 1:1 combination.
-  const body = orderBody({ legs, occs: legs.map((l) => l.occ), userQty: 1, type: "market", tif: "day", intent: "open" });
+  // The size is the caller's, and it is the SAME number the risk gate was run
+  // at: a gate that measured one combination and an order that sends seven is
+  // a cap that does not hold.
+  const body = orderBody({ legs, occs: legs.map((l) => l.occ), userQty, type: "market", tif: "day", intent: "open" });
   const r = await fetch(`/api/alpaca?path=${encodeURIComponent("/v2/orders")}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -286,6 +290,25 @@ function priceLeg(leg, S, dte, baseIV, q) {
 }
 /** The two-sided quotes behind an analysis, one per leg, for `priceability()`. */
 const quotesOf = (a) => (a?.legPx || []).map((l) => ({ bid: l.bid, ask: l.ask }));
+/**
+ * IS IT THIS STRUCTURE'S PRICE? — asked ONCE, from an analysis, everywhere.
+ *
+ * `modelSanity()` (src/rules.js) was spelled out at each of the three
+ * generation sites and a fourth time inside the order ticket, which made the
+ * ticket a SECOND consumer of `analyze()`'s per-leg marks: the Shortlist fed it
+ * `legPx[i].px` and the ticket re-derived the marks from `quoteFn(leg).mid`.
+ * Those are the same number for a quoted leg and different for one priced off
+ * the model — the ticket passed `null`, the Shortlist passed the model's own
+ * price — so two screens could name a different leg as the culprit for one
+ * trade. One expression, one answer, and `ceiling.test.jsx` holds the two
+ * together against the same chain.
+ *
+ * `marketNet` and `modelNet` never depended on the marks; `worstLeg` did, and
+ * "which quote to go and look at" is the only actionable half of the refusal.
+ */
+export const modelCheckOf = (a, { legs, spot, dte, iv }) => modelSanity({
+  legs, net: a?.entry, marks: (a?.legPx || []).map((l) => l.px), spot, dte, iv,
+});
 function netValue(legs, S, dte, baseIV, q) {
   return legs.reduce((a, l) => a + Math.sign(l.side) * l.qty * priceLeg(l, S, dte, baseIV, q).px, 0);
 }
@@ -398,7 +421,7 @@ export function shortlistWithFloors(sent, S, step, strikes, dte, baseIV, q, { pe
     // structure's price. The BOIL 20/21 spread that reached the broker priced
     // at $0.05 against a model value of $0.333 — one cent above the floor built
     // to catch the $0 butterfly, and wrong by a factor of 6.7.
-    const ms = modelSanity({ legs: p.legs, net: a.entry, marks: a.legPx.map((l) => l.px), spot: S, dte, iv: baseIV });
+    const ms = modelCheckOf(a, { legs: p.legs, spot: S, dte, iv: baseIV });
     if (!ms.pass) {
       tally.model++;
       cut.push({ name: p.name, reasons: [ms.reason], why: "model" });
@@ -931,7 +954,7 @@ export default function OptionsStrategyLab() {
   const [news, setNews] = useState({});          // ticker -> items
   const [sentiment, setSentiment] = useState("bull");
   const [expKey, setExpKey] = useState(null);
-  const [dteManual, setDteManual] = useState(45);
+  const [dteManual, setDteManual] = useState(RULES.targetEntryDTE);
   const [legs, setLegs] = useState([]);
   const [stratName, setStratName] = useState("Bull Call Spread");
   const [store, setStore] = useState(EMPTY);
@@ -954,6 +977,37 @@ export default function OptionsStrategyLab() {
   const [bt, setBt] = useState(null);
   const [alpaca, setAlpaca] = useState(null);    // account info
   const [confirmSend, setConfirmSend] = useState(false);
+  /* ---- HOW MANY COMBINATIONS — ONE HOME, READ EVERYWHERE (ROADMAP P1) ----
+
+     MEASURED: this number lived inside `OrderTicket` as `cfg.qty`, which meant
+     the ticket sized the order correctly and NOTHING ELSE on the screen knew.
+     The risk gate ran at a hardcoded `contracts: 1` in four places here, so a
+     seven-lot spread was measured against the 5% per-trade cap as a one-lot
+     one; `commitPosition()` then wrote a position with no size at all, and the
+     25% total-exposure ceiling counted it as a single contract for the rest of
+     its life. A cap that reads the wrong quantity is not a display bug.
+
+     It is a piece of Build-screen state like `legs` and `dte`, so it lives with
+     them, above the ticket, the confirm step, the gate preview and the position
+     that gets written. The ticket is now a controlled input on it. */
+  const [contracts, setContracts] = useState(1);
+  /* Changing the market or the expiry resets the size: "×7" typed against a
+     butterfly is not an answer about the vertical that replaced it, and an
+     order sized for a trade that is no longer on screen is the failure this
+     whole item is about.
+
+     THE REF IS NOT DECORATION. `openOnBuild()` sets the ticker, the expiry AND
+     the size in one go, and a re-price hands back the size the order was sent
+     at. Without this guard the effect would fire on the ticker it just set and
+     put the size back to 1 — quietly shrinking an order the user had already
+     sized, which is the same class of fault as the hardcoded 1 this replaces. */
+  const sizedFor = useRef(null);
+  useEffect(() => {
+    const key = `${ticker}|${expKey}`;
+    if (sizedFor.current === key) return;
+    sizedFor.current = key;
+    setContracts(1);
+  }, [ticker, expKey]);
   // THE COPILOT'S CONVERSATION LIVES HERE, not inside the panel. The panel is
   // an evidence panel: every other chip in the strip unmounts it, so state kept
   // inside it was destroyed on the next tap and an answer that landed while it
@@ -976,7 +1030,7 @@ export default function OptionsStrategyLab() {
   const [ta, setTa] = useState({}); // per ticker
   const [replay, setReplay] = useState(null);
   const [nf, setNf] = useState({ tk: "ALL", kind: "all", q: "", days: 7 });
-  const [multi, setMulti] = useState({ sel: ["SOYB", "CORN", "UNG"], busy: false, res: null, err: null, dteT: 45, senMode: "auto" });
+  const [multi, setMulti] = useState({ sel: ["SOYB", "CORN", "UNG"], busy: false, res: null, err: null, dteT: RULES.targetEntryDTE, senMode: "auto" });
   // THE LIQUIDITY FLOOR IS A SETTING, NOT AN ASSERTION. The app recommends and
   // the user decides; every list filtered by it says which setting produced it,
   // and loosening it carries a warning naming what comes back (src/rules.js).
@@ -1181,9 +1235,17 @@ export default function OptionsStrategyLab() {
       // the MIDDLE of the list by time while being the last thing recorded.
       let seq = Math.max(0, +st.journalSeq || 0,
         ...[...(st.positions || []), ...(st.journal || [])].map((x) => refNumber(x && x.ref) || 0));
+      // AND EVERY POSITION HAS A SIZE, INCLUDING THE ONES OPENED BEFORE THE
+      // APP RECORDED ONE. Nothing ever wrote `contracts`, so every position
+      // saved by an earlier build carries no size at all and there is no way to
+      // recover it — the order is gone and the record never held it. It is read
+      // as one combination, which under-counts exposure rather than over-counts
+      // it (the direction that refuses trades rather than letting them through),
+      // and `withPositionSize()` marks it as ASSUMED so no screen can print it
+      // as a size somebody chose.
       st.positions = (st.positions || []).map((p) => {
         const withRef = p.ref ? p : { ...p, ref: nextRef({ journalSeq: seq++ }).ref };
-        return stampTimeline(withRef);
+        return stampTimeline(withPositionSize(withRef));
       });
       st.journalSeq = seq;
       // Anyone who already has positions or saved strategies has been through
@@ -1405,6 +1467,17 @@ export default function OptionsStrategyLab() {
 
   /* ---- analisi ---- */
   const A = useMemo(() => (spot && legs.length ? analyze(legs, spot, dte, iv, q) : null), [legs, spot, dte, iv, q]);
+  /* IS IT THIS STRUCTURE'S PRICE — COMPUTED ONCE, HERE.
+     `ComboBookPanel` in pro.jsx ran the model check on every render of the
+     ticket, which is a Black-Scholes reprice of every leg for each keystroke in
+     the limit field, and it re-derived the per-leg marks from `quoteFn` instead
+     of reading the ones `analyze()` already produced. Two consumers of one set
+     of marks is how two screens come to name different legs for one trade.
+     `modelCheckOf()` is the expression the three generation sites use; the
+     ticket is handed its answer. */
+  const modelCheck = useMemo(
+    () => (A ? modelCheckOf(A, { legs, spot, dte, iv }) : null),
+    [A, legs, spot, dte, iv]);
   // The Shortlist, already past the quality floors. Computed here rather than
   // inside the render so the filtered-out list and the rows come from one call.
   // Every known open-interest count on the expiry being shown: the peer set the
@@ -1454,10 +1527,18 @@ export default function OptionsStrategyLab() {
      (src/handoff.js) decides what changes; this applies it. Written inline at
      each button instead, a hand-off forgets one of the four things it has to
      do and the tap looks like it did nothing — see the comment there. */
-  const openOnBuild = ({ ticker: tk, expKey: ek = null, legs: lg, name, ref = null }) => {
+  const openOnBuild = ({ ticker: tk, expKey: ek = null, legs: lg, name, ref = null, contracts: n = 1 }) => {
     const h = buildHandOff({ ticker: tk, expKey: ek, legs: lg, name, chains });
     setTicker(h.ticker); setExpKey(h.expKey); setLegs(h.legs); setStratName(h.name);
     setMc(null); setBt(null);
+    // A HAND-OFF IS A DIFFERENT TRADE, SO IT IS NOT THE PREVIOUS ONE'S SIZE.
+    // The ticket's quantity now drives the gate and the position record, and a
+    // "×7" left over from the structure that was on this screen a moment ago
+    // would size a trade nobody sized. The one caller that passes a size is a
+    // RE-PRICE, which is the same trade at a different price: sending it back
+    // at one lot would quietly shrink an order the user already sized.
+    sizedFor.current = `${h.ticker}|${h.expKey}`;
+    setContracts(Math.max(1, Math.round(Number(n) || 1)));
     setOptRef(ref);
     setEv(h.ev);          // close the evidence sheet: it covers the trade
     setTab(h.tab);
@@ -1522,8 +1603,9 @@ export default function OptionsStrategyLab() {
   const repriceWorking = async (p) => {
     if (DEMO) { setMsg(DEMO_TOOLTIP); return; }
     await cancelWorking(p);
-    openOnBuild({ ticker: p.ticker, expKey: p.expKey, legs: p.legs, name: p.name });
-    setMsg(`The working order was cancelled and ${p.ref || p.ticker} is back on Build. The chain has been ` +
+    openOnBuild({ ticker: p.ticker, expKey: p.expKey, legs: p.legs, name: p.name, contracts: contractsOf(p) });
+    setMsg(`The working order was cancelled and ${p.ref || p.ticker} is back on Build at ` +
+      `${contractsOf(p)} combination${contractsOf(p) === 1 ? "" : "s"} — the size it was sent at. The chain has been ` +
       `re-read, so the suggested limit is worked out from the market as it is now — not as it was when the ` +
       `first order went out. Send it again from the confirm step at the bottom.`);
   };
@@ -1604,13 +1686,21 @@ export default function OptionsStrategyLab() {
      The Build screen and the wizard's confirm screen both land here, so a
      position opened from screen 4 carries exactly the same gate record, thesis
      and timeline as one built by hand. Two paths would mean two truths. */
-  const commitPosition = async ({ ticker: tk, expKey: ek, legs: lg, dte: d, analysis, spot: sp, name, alpacaOrder, clashInfo, reason, roomOverride }) => {
+  const commitPosition = async ({ ticker: tk, expKey: ek, legs: lg, dte: d, analysis, spot: sp, name, alpacaOrder, clashInfo, reason, roomOverride, contracts: n }) => {
+    /* HOW MANY, AND WHERE THAT NUMBER COMES FROM.
+       Where a broker order was built, the ORDER BODY'S `qty` is the authority:
+       it is what Alpaca was actually asked for, and the app's own idea of the
+       size is only a wish. Where the app opened on its own book there is no
+       body, and the authority is the number the user confirmed on screen.
+       Nothing ever wrote this field before, so `riskGate.js` counted every open
+       position as one contract however many were really bought. */
+    const sized = Math.max(1, Math.round(Number(alpacaOrder?.qty) || Number(n) || 1));
     // Anche la posizione interna passa dal cancello: non tocca il broker, ma
     // entra nell'esposizione totale che il cancello misura al prossimo ordine.
     // The quotes travel with the proposal: the gate's priceability check can
     // then see a long leg nobody bids for, which a mid price hides by
     // construction (src/rules.js, `priceability`).
-    const gLocal = gate({ ticker: tk, intent: "open", legs: lg, dte: d, contracts: 1,
+    const gLocal = gate({ ticker: tk, intent: "open", legs: lg, dte: d, contracts: sized,
       maxLoss: analysis?.maxLoss, maxProfit: analysis?.maxProfit,
       quotes: quotesOf(analysis), net: analysis?.entry, entryOverride: roomOverride }, LOCAL_BOOK);
     if (!gLocal.pass) return { ok: false, gate: gLocal };
@@ -1631,6 +1721,11 @@ export default function OptionsStrategyLab() {
     const { n: refN, ref } = nextRef(store);
     const pos = {
       id: Date.now(), ref, name, ticker: tk, expKey: ek, legs: lg, entryNet: analysis.entry, entrySpot: sp,
+      // THE POSITION REMEMBERS ITS SIZE. `entryNet`, `maxProfit` and `maxLoss`
+      // below are all figures for ONE combination; without this number none of
+      // the totals — the exposure ceiling, the stop threshold, the P&L on the
+      // row — can be formed, and the app was forming them from an assumed 1.
+      contracts: sized,
       openedAt: new Date().toISOString(), expiry, maxProfit: analysis.maxProfit, maxLoss: analysis.maxLoss,
       realEntry: analysis.realCount === lg.length,
       alpacaId: alpacaOrder?.id || null,
@@ -1702,7 +1797,7 @@ export default function OptionsStrategyLab() {
       return;
     }
     const r = await commitPosition({ ticker, expKey, legs, dte, analysis: A, spot, name: stratName,
-      alpacaOrder, clashInfo: clash, reason: against.reason, roomOverride: roomReason });
+      alpacaOrder, clashInfo: clash, reason: against.reason, roomOverride: roomReason, contracts });
     setOpenResult(r.gate);
     if (!r.ok) { setMsg(`Risk gate: position not opened. ${r.gate.violations.map((v) => v.message).join(" ")}`); return; }
     setAgainst({ reason: "" }); setRoomReason(""); setPicked(null); setOpenResult(null);
@@ -1796,7 +1891,10 @@ export default function OptionsStrategyLab() {
       pos: p,
       pnl: al?.pnl ?? null,
       reason: decision.reason,
-      riskOk: Math.abs(p.maxLoss) <= limits.perTradeLimit,
+      // THE DISCIPLINE NUMBER IS ABOUT THE WHOLE TRADE. `maxLoss` is one
+      // combination; a seven-lot position that broke the per-trade cap seven
+      // times over was filed as having respected it.
+      riskOk: Math.abs(p.maxLoss) * contractsOf(p) <= limits.perTradeLimit,
     });
     const st = { ...store,
       positions: store.positions.filter((x) => x.id !== id),
@@ -1891,7 +1989,7 @@ export default function OptionsStrategyLab() {
         let c = chains[tk] || (await refreshChain(tk, true));
         if (!c?.spot) continue;
         const sp = c.spot;
-        const dT = multi.dteT || 45;
+        const dT = multi.dteT || RULES.targetEntryDTE;
         const exps = c.expirations.filter((e) => c.byExp[e].dte >= dT - 20 && c.byExp[e].dte <= dT + 35);
         const ek = exps[0] ? exps.reduce((b2, e) => Math.abs(c.byExp[e].dte - dT) < Math.abs(c.byExp[b2].dte - dT) ? e : b2, exps[0]) : null;
         if (!ek) continue;
@@ -1920,7 +2018,7 @@ export default function OptionsStrategyLab() {
           // ...and a worst case that is a profit, the same way (PR #14's debt).
           if (impossibleLoss(a.maxLoss)) { cutFloors.impossible++; cutFloors.markets.add(tk); continue; }
           // ...and a price the app's own model cannot account for, same function.
-          if (!modelSanity({ legs: pr.legs, net: a.entry, marks: a.legPx.map((l) => l.px), spot: sp, dte: d2, iv: getU(tk).iv }).pass) {
+          if (!modelCheckOf(a, { legs: pr.legs, spot: sp, dte: d2, iv: getU(tk).iv }).pass) {
             cutFloors.model++; cutFloors.markets.add(tk); continue;
           }
           // Same floors as the Shortlist and the wizard, from the same function.
@@ -2014,7 +2112,7 @@ export default function OptionsStrategyLab() {
     setConfirmSend(false); setBusy("order");
     try {
       // PRD §8: nessun ordine raggiunge Alpaca senza passare da qui.
-      const g = gate({ ticker, intent: "open", legs, dte, contracts: 1, maxLoss: A?.maxLoss, maxProfit: A?.maxProfit });
+      const g = gate({ ticker, intent: "open", legs, dte, contracts, maxLoss: A?.maxLoss, maxProfit: A?.maxProfit });
       if (!g.pass) {
         setMsg(`Risk gate: order not sent. ${g.violations.map((v) => v.message).join(" ")}`);
         setBusy(null); return;
@@ -2025,7 +2123,7 @@ export default function OptionsStrategyLab() {
         if (!occ) throw new Error("pick a real expiry from the chain first, so the contracts can be named");
         return { ...l, occ };
       });
-      const o = await alpacaOrderMleg(withOcc);
+      const o = await alpacaOrderMleg(withOcc, contracts);
       const res = orderOutcome(o);
       setMsg(`Order sent to your Alpaca paper account · id ${o.id?.slice(0, 8)}… · ${res.headline} ${res.detail}`);
     } catch (e) { setMsg(`The order was not sent: ${alpacaErrorText(e)}`); }
@@ -2048,7 +2146,15 @@ export default function OptionsStrategyLab() {
     const sp = c?.spot;
     const dteLeft = Math.max(0, Math.round((new Date(p.expiry) - Date.now()) / 86400000));
     const qp = makeQuote(c, p.expKey);
-    // P&L: preferisci il dato REALE del conto Alpaca se la posizione è collegata
+    /* THE TWO P&L SOURCES HAVE TO BE THE SAME QUANTITY.
+       Alpaca's `unrealized_pl` is the WHOLE position's — every contract of it —
+       and the app's own calculation below is one combination. With `contracts`
+       never written the two happened to agree, because everything was one lot.
+       They are both totals now, and every per-combination figure they are
+       compared against (`maxProfit`, `maxLoss`, both stored per combination) is
+       scaled by the same number. */
+    const size = positionSize(p);
+    const n = size.contracts;
     let pnl = null, live = false;
     if (p.alpacaLive && alSync.positions.length) {
       const match = alSync.positions.filter((x) => {
@@ -2057,15 +2163,15 @@ export default function OptionsStrategyLab() {
       });
       if (match.length) { pnl = match.reduce((a, x) => a + (+x.unrealized_pl), 0); live = true; }
     }
-    if (pnl == null) pnl = sp != null ? (netValue(p.legs, sp, Math.max(1, dteLeft), getU(p.ticker).iv, qp) - p.entryNet) * 100 : null;
-    const tpHit = pnl != null && p.maxProfit > 0 && pnl >= RULES.takeProfitPct * p.maxProfit;
-    const slHit = pnl != null && p.maxLoss < 0 && pnl <= RULES.stopLossPct * p.maxLoss;
+    if (pnl == null) pnl = sp != null ? (netValue(p.legs, sp, Math.max(1, dteLeft), getU(p.ticker).iv, qp) - p.entryNet) * 100 * n : null;
+    const tpHit = pnl != null && p.maxProfit > 0 && pnl >= RULES.takeProfitPct * p.maxProfit * n;
+    const slHit = pnl != null && p.maxLoss < 0 && pnl <= RULES.stopLossPct * p.maxLoss * n;
     const dteExit = dteLeft <= RULES.exitDTE;
     // verdetto autopilot recente non-HOLD in attesa
     const ap = (p.timeline || []).filter((e) => e.type === "autopilot" && Date.now() - e.t < 48 * 36e5 && !e.text.includes("HOLD")).slice(-1)[0];
-    const level = tpHit || slHit || dteExit || ap ? "action" : pnl != null && pnl < 0.35 * p.maxLoss ? "watch" : "ok";
+    const level = tpHit || slHit || dteExit || ap ? "action" : pnl != null && pnl < 0.35 * p.maxLoss * n ? "watch" : "ok";
     const label = tpHit ? `${takeProfitLabel()} reached — take the profit` : slHit ? `${stopLossLabel()} reached — a warning, not an order` : dteExit ? `${dteLeft} days left — close or roll` : ap ? "The autopilot has something waiting for your OK" : pnl == null ? "waiting for prices…" : level === "watch" ? "Losing: check the reason you opened it" : "On plan";
-    return { p, pnl, dteLeft, level, label, ap, live, spotNow: sp, tpHit, slHit, dteExit };
+    return { p, pnl, dteLeft, level, label, ap, live, spotNow: sp, tpHit, slHit, dteExit, contracts: n, sizeAssumed: size.assumed };
   }), [store.positions, chains, alSync]);
 
   // Log eventi regola (TP/SL/DTE) fuori dal render: prima veniva chiamato logEvent
@@ -2212,7 +2318,7 @@ export default function OptionsStrategyLab() {
             // verdict would put on it — what you risk, what it pays, how it
             // ranks — is that price, and the maximum loss it would print would
             // be wrong by the same factor it is wrong by (src/rules.js).
-            if (!modelSanity({ legs: pr.legs, net: a.entry, marks: a.legPx.map((l) => l.px), spot: sp, dte: d2, iv: getU(tk).iv }).pass) {
+            if (!modelCheckOf(a, { legs: pr.legs, spot: sp, dte: d2, iv: getU(tk).iv }).pass) {
               floors.model++; floors.markets.add(tk); continue;
             }
             const ivA = a.legPx.reduce((x, y) => x + y.iv, 0) / Math.max(1, a.legPx.length);
@@ -2334,6 +2440,12 @@ export default function OptionsStrategyLab() {
         ticker: x.tk, name: x.pr.name, legs: x.pr.legs.map((l) => ({ ...l })),
         entryNet: x.a.entry, spot: x.spot, expKey: x.ek, dte: x.dte,
         maxProfit: x.a.maxProfit, maxLoss: x.a.maxLoss, risk: x.risk, pop: x.pop,
+        // ONE COMBINATION, DELIBERATELY, AND THE CARD SAYS SO. A road is built
+        // to fit the budget answer at one contract (`unit > ans.risk` above is
+        // that test), so this genuinely is a per-contract figure and not a
+        // hardcoded quantity standing in for one nobody asked for. The size is
+        // chosen on Build, where the ticket, the gate and the position record
+        // all read the same number.
         rr: x.rr, contracts: 1, a: x.a, fused: x.fused,
         driver: x.driver, drivers: x.drivers,
         sigma: (seasonal[x.tk]?.sigma) || getU(x.tk).sigma,
@@ -2513,9 +2625,14 @@ export default function OptionsStrategyLab() {
 
   const guard = useMemo(() => {
     if (!A) return null;
-    return gate({ ticker, intent: "open", legs, dte, contracts: 1, maxLoss: A.maxLoss, maxProfit: A.maxProfit,
+    // AT THE QUANTITY THAT WILL ACTUALLY BE SENT. This read `contracts: 1`
+    // while the ticket below it sized the order at `cfg.qty`, so the checks the
+    // user read and the checks the order had to pass were about two different
+    // trades — and the per-trade cap was measured against one combination of a
+    // seven-lot spread.
+    return gate({ ticker, intent: "open", legs, dte, contracts, maxLoss: A.maxLoss, maxProfit: A.maxProfit,
       quotes: quotesOf(A), net: A.entry, entryOverride: roomReason }, LOCAL_BOOK);
-  }, [A, gate, legs, dte, ticker, roomReason]); // eslint-disable-line
+  }, [A, gate, legs, dte, ticker, roomReason, contracts]); // eslint-disable-line
   /* Which band this expiry falls in, for the screen. The gate decides; this
      only decides what the screen has to ASK for. */
   const room = useMemo(() => entryRoom(dte), [dte]);
@@ -4091,6 +4208,19 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                     : RULE_PILLS.takeProfit()} />
                 <Stat k={stopLossLabel()} v={fmt$(A.maxLoss * RULES.stopLossPct)} c={T.red} tip={RULE_PILLS.stopLoss()} />
               </div>
+              {/* EVERY FIGURE ABOVE IS ONE COMBINATION. The ticket below can
+                  send seven, and until this session the gate was measuring one
+                  of them: a per-contract number read as the trade's is the same
+                  fault as an assumed size printed as a measured one. The number
+                  here is the ticket's own — there is one size on this screen. */}
+              {contracts > 1 && (
+                <div style={{ ...mono, fontSize: 10.5, color: T.amber, marginTop: 9, lineHeight: 1.6, padding: "7px 9px", background: `${T.amber}0f`, border: `1px solid ${T.amber}55`, borderRadius: 6 }}>
+                  {`Those are the figures for ONE combination. The ticket is set to ×${contracts}, so this trade pays ` +
+                   `${A.entry >= 0 ? "" : "you "}${fmt$(Math.abs(A.entry) * 100 * contracts)}${A.entry >= 0 ? " to open" : " to open"}, ` +
+                   `risks ${fmt$(Math.abs(A.maxLoss) * contracts)} and can make ` +
+                   `${A.profitUnbounded ? NO_CEILING : fmt$(A.maxProfit * contracts)}. The risk gate and the confirm step below both read the ×${contracts}.`}
+                </div>
+              )}
               <div style={{ display: "flex", gap: 16, marginTop: 10, flexWrap: "wrap" }}>
                 <Stat k="Δ DELTA" v={A.greeks.delta.toFixed(2)} />
                 <Stat k="Γ GAMMA" v={A.greeks.gamma.toFixed(3)} />
@@ -4171,9 +4301,15 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   buildOcc={buildOcc} quoteFn={q} estNet={A.entry * 100 / 100}
                   setMsg={setMsg}
                   gate={gate} dte={dte} maxLoss={A.maxLoss} maxProfit={A.maxProfit}
-                  /* the model half of the ticket needs what the model needs, and
-                     `iv` is the same base volatility `analyze()` priced with */
-                  spot={spot} iv={iv} entryOverride={roomReason}
+                  /* THE SIZE IS THE SCREEN'S, NOT THE TICKET'S. It used to be
+                     `cfg.qty` inside the ticket, which is why the gate above and
+                     the position written below both ran at a hardcoded 1. */
+                  qty={contracts} onQty={setContracts}
+                  /* AND THE MODEL VERDICT IS COMPUTED ONCE, not per render of
+                     the ticket, and from `analyze()`'s own marks — the same
+                     expression the Shortlist judges this structure with. */
+                  model={modelCheck}
+                  spot={spot} entryOverride={roomReason}
                 />
               )}
               {!alpaca && <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 8 }}>Connect Alpaca in Positions → Integrations to unlock the full order ticket: limit or market, time in force, quantity and cancellations.</div>}
@@ -4192,6 +4328,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   risk: Math.abs(A.maxLoss), maxProfit: A.maxProfit, entryNet: A.entry, spot,
                 }}
                 preview={guard} result={openResult}
+                contracts={contracts}
                 heading={false} showFigure={false}
                 busy={busy === "order"}
                 onConfirm={() => openPaper()}
@@ -4252,6 +4389,11 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                           </div>
                         </div>
                         <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 5, lineHeight: 1.6 }}>
+                          {/* HOW MANY COMBINATIONS ARE WAITING. The limit is the
+                              price of ONE, which is how the broker reads it, and a
+                              row that prints only that says nothing about the size
+                              of the order sitting in the market. */}
+                          {`${contractsOf(p)} combination${contractsOf(p) === 1 ? "" : "s"}. `}
                           {p.alpacaOrderType === "limit" && p.alpacaLimit != null
                             ? `A limit of ${money(p.alpacaLimit * 100)} a combination, which ${stands}.`
                             : `A ${p.alpacaOrderType || "?"} order, which ${stands}.`}
@@ -4295,9 +4437,15 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   const dteLeft = Math.max(0, Math.round((new Date(p.expiry) - Date.now()) / 86400000));
                   const qp = makeQuote(c, p.expKey);
                   const nowNet = s ? netValue(p.legs, s, dteLeft, getU(p.ticker).iv, qp) : null;
-                  const pnl = nowNet != null ? (nowNet - p.entryNet) * 100 : null;
-                  const tpHit = pnl != null && p.maxProfit > 0 && pnl >= RULES.takeProfitPct * p.maxProfit;
-                  const slHit = pnl != null && p.maxLoss < 0 && pnl <= RULES.stopLossPct * p.maxLoss;
+                  // EVERY FIGURE ON THIS ROW IS THE WHOLE POSITION'S. `entryNet`,
+                  // `maxProfit` and `maxLoss` are stored per combination, so the
+                  // size is what turns them into what this trade is actually
+                  // doing — and until this session nothing knew what the size was.
+                  const size = positionSize(p);
+                  const n = size.contracts;
+                  const pnl = nowNet != null ? (nowNet - p.entryNet) * 100 * n : null;
+                  const tpHit = pnl != null && p.maxProfit > 0 && pnl >= RULES.takeProfitPct * p.maxProfit * n;
+                  const slHit = pnl != null && p.maxLoss < 0 && pnl <= RULES.stopLossPct * p.maxLoss * n;
                   const dteExit = dteLeft <= RULES.exitDTE;
                   const rec = tpHit ? { t: `→ TAKE THE PROFIT: ${takeProfitLabel()}`, c: T.green } : slHit ? { t: `→ WARNING: ${stopLossLabel()}`, c: T.red } : dteExit ? { t: `→ CLOSE OR ROLL: ${RULES.exitDTE} days left`, c: T.amber } : { t: "→ HOLD", c: T.mut };
                   return (
@@ -4318,6 +4466,14 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                       </div>
                       <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 3 }}>
                         {p.legs.map((l) => `${l.side > 0 ? "+" : "−"}${l.qty} ${l.strike}${l.type === "call" ? "C" : "P"}`).join(" / ")} · expires {p.expKey || new Date(p.expiry).toLocaleDateString("en-GB")} · opened {new Date(p.openedAt).toLocaleDateString("en-GB")}
+                      </div>
+                      {/* HOW BIG IT IS — AND WHETHER THAT IS KNOWN.
+                          An assumed 1 must never print as a measured 1: nothing
+                          wrote this field before this build, so a position saved
+                          earlier has no size and every figure on the row is read
+                          as one combination. `positionSizeNote()` says which. */}
+                      <div style={{ ...mono, fontSize: 10.5, color: size.assumed ? T.amber : T.mut, marginTop: 3, lineHeight: 1.5 }}>
+                        {size.assumed ? "⚠ " : "× "}{positionSizeNote(p)}
                       </div>
                       {/* THE ORDER BEHIND THIS ONE HAS NOT FILLED. It was
                           recorded at the moment it was sent, and an order can
@@ -4380,9 +4536,9 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                       <GaugeFigure legs={p.legs} entryNet={p.entryNet} spot={s ?? p.entrySpot}
                         ticker={p.ticker} size={230} style={{ marginTop: 10 }} />
                       <div style={{ display: "flex", gap: 14, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
-                        <Stat k="ENTRY" v={fmt$(Math.abs(p.entryNet) * 100)} />
+                        <Stat k="ENTRY" v={fmt$(Math.abs(p.entryNet) * 100 * n)} tip={n > 1 ? `${n} × ${fmt$(Math.abs(p.entryNet) * 100)} a combination` : undefined} />
                         <Stat k="PROFIT NOW" v={pnl != null ? fmt$(pnl) : "loading…"} c={pnl >= 0 ? T.green : T.red} />
-                        <Stat k="OF THE MAXIMUM" v={pnl != null && p.maxProfit > 0 ? `${((pnl / p.maxProfit) * 100).toFixed(0)}%` : "—"} />
+                        <Stat k="OF THE MAXIMUM" v={pnl != null && p.maxProfit > 0 ? `${((pnl / (p.maxProfit * n)) * 100).toFixed(0)}%` : "—"} />
                         <Stat k="DTE" v={dteLeft} c={dteExit ? T.amber : T.ink} />
                         <span style={{ ...mono, fontSize: 11.5, fontWeight: 700, color: rec.c }}>{rec.t}</span>
                       </div>

@@ -3,8 +3,8 @@ import { RefreshCw, Send, Trash2, Download, Sparkles, FileText, XCircle } from "
 import { T } from "./theme.js";
 import { RULES, ruleBadge, takeProfitLabel, scaleOutLabel, stopLossLabel, exitDTELabel, perTradeCapLabel, copilotRulesBlock, money, pctText, MIN_NET_DOLLARS,
   NO_CEILING, reportNarrativePrompt, chanceText,
-  comboBook, openLimitPrice, openLimitNote, limitPlacement, notionalControlled, notionalNote,
-  modelSanity } from "./rules.js";
+  comboBook, openLimitPrice, openLimitNote, limitPlacement, notionalControlled, notionalNote } from "./rules.js";
+import { contractsOf } from "./journal.js";
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, LineStyle } from "lightweight-charts";
 import { erf, netBS } from "./engine.js";
 import { ARROW, REGIONS, regionSignals, tagImpacts, taRead } from "./signals.js";
@@ -246,7 +246,21 @@ export function OrderPending({ lines = [], onCancel }) {
    Every figure comes from `rules.js`, so this panel cannot drift from the
    arithmetic the gate and the proposal floors run on.
 ==================================================================== */
-function ComboBookPanel({ legs, quoteFn, limit, type, qty, spot, dte, iv, ticker, estNet, maxLoss }) {
+/* ONE COMPUTATION, ONE ANSWER — the model verdict is handed in, not redone.
+
+   This panel used to call `modelSanity()` inline, so every keystroke in the
+   limit field repriced every leg with Black-Scholes, and it re-derived the
+   per-leg marks from `quoteFn(leg).mid` instead of reading the ones
+   `analyze()` had already produced. That made the ticket a SECOND consumer of
+   the same marks with a different spelling: for a leg priced off the model the
+   Shortlist passed the model's own price and the ticket passed null, so the two
+   screens could name different legs as responsible for one trade.
+
+   `modelCheckOf()` in App.jsx is the single expression, memoised on the
+   analysis, and the three generation sites use it too. `model` arriving null
+   means nobody computed one — which is what the panel says, rather than
+   quietly computing a second opinion. */
+function ComboBookPanel({ legs, quoteFn, limit, type, qty, spot, ticker, estNet, maxLoss, model }) {
   const quotes = (legs || []).map((l) => {
     const q = quoteFn ? quoteFn(l) : null;
     return q ? { bid: q.bid, ask: q.ask } : {};
@@ -254,9 +268,7 @@ function ComboBookPanel({ legs, quoteFn, limit, type, qty, spot, dte, iv, ticker
   const book = comboBook(legs, quotes);
   const dir = Number(estNet) >= 0 ? 1 : -1;
   const place = type === "limit" ? limitPlacement(limit, book, dir) : null;
-  const ms = modelSanity({ legs, net: estNet, marks: (legs || []).map((l) => {
-    const q = quoteFn ? quoteFn(l) : null; return q && q.mid != null ? q.mid : null;
-  }), spot, dte, iv });
+  const ms = model || { checked: false, pass: true, marketNet: null, modelNet: null, reason: null };
   const notional = notionalControlled(qty, spot);
   const risk = Math.abs(Number(maxLoss)) * Math.max(1, Math.round(Number(qty) || 1));
   const tone = place?.zone === "fills" ? T.green : place?.zone === "waiting" ? T.blue : place?.known ? T.red : T.dim;
@@ -335,8 +347,23 @@ function ComboBookPanel({ legs, quoteFn, limit, type, qty, spot, dte, iv, ticker
   );
 }
 
-export function OrderTicket({ creds, legs, expKey, ticker, buildOcc, quoteFn, estNet, setMsg, onSent, gate, dte, maxLoss, maxProfit, spot, iv, entryOverride }) {
-  const [cfg, setCfg] = useState({ qty: 1, type: "limit", tif: "day", limit: "" });
+/**
+ * THE SIZE IS NOT THE TICKET'S ANY MORE (ROADMAP P1).
+ *
+ * `cfg.qty` lived here, and it was the only place in the app that knew how many
+ * combinations were about to be sent: the gate preview on the screen above ran
+ * at a hardcoded `contracts: 1`, and `commitPosition()` wrote a position with no
+ * size at all. The quantity is now Build-screen state passed in as `qty` with
+ * `onQty` to change it, so the ticket, the gate, the confirm step and the
+ * position record are four readings of ONE number.
+ *
+ * `model` is the `modelSanity()` verdict, computed once from `analyze()`'s own
+ * marks — see `ComboBookPanel` below.
+ */
+export function OrderTicket({ creds, legs, expKey, ticker, buildOcc, quoteFn, estNet, setMsg, onSent, gate, dte, maxLoss, maxProfit, spot, entryOverride, qty = 1, onQty, model = null }) {
+  const [cfg, setCfg] = useState({ type: "limit", tif: "day", limit: "" });
+  const qtyNum = Math.max(1, Math.round(Number(qty) || 1));
+  const setQty = (v) => { if (onQty) onQty(Math.max(1, Math.min(20, Math.round(Number(v) || 1)))); };
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState(null);
@@ -364,7 +391,7 @@ export function OrderTicket({ creds, legs, expKey, ticker, buildOcc, quoteFn, es
   }, [estNet, seedPrice && seedPrice.limit]); // eslint-disable-line
   // Il cancello gira PRIMA di costruire l'ordine: quello che si vede nel
   // pannello e' esattamente quello che decide se l'ordine parte.
-  const preview = runGate(gate, { ticker, intent: "open", legs, dte, contracts: cfg.qty, maxLoss, maxProfit, entryOverride });
+  const preview = runGate(gate, { ticker, intent: "open", legs, dte, contracts: qtyNum, maxLoss, maxProfit, entryOverride });
   // THE SIZE GOES IN THE ORDER'S QTY, THE SHAPE GOES IN THE LEG RATIOS.
   // Alpaca refused a five-lot vertical with 422 / 42210000, "leg ratio
   // quantities should be relatively prime: GCD[5 5] = 5", because the ticket
@@ -372,13 +399,13 @@ export function OrderTicket({ creds, legs, expKey, ticker, buildOcc, quoteFn, es
   // `orderQty` puts it back where the broker expects it; a genuine 1:2:1
   // butterfly has a GCD of 1 and comes through untouched. See src/order.js.
   const shape = reduceRatios(legs);
-  const sendQty = orderQty(cfg.qty, shape.factor);
+  const sendQty = orderQty(qtyNum, shape.factor);
   const send = async () => {
     if (DEMO) { setMsg(DEMO_TOOLTIP); return; }   // order path 2 of six
     if (!confirm) { setConfirm(true); return; }
     setConfirm(false); setBusy(true); setOutcome(null);
     try {
-      const g = runGate(gate, { ticker, intent: "open", legs, dte, contracts: cfg.qty, maxLoss, maxProfit, entryOverride });
+      const g = runGate(gate, { ticker, intent: "open", legs, dte, contracts: qtyNum, maxLoss, maxProfit, entryOverride });
       if (!g.pass) {
         const why = g.violations.map((v) => v.message).join(" ");
         setMsg(`Risk gate: order not sent. ${why}`);
@@ -400,9 +427,9 @@ export function OrderTicket({ creds, legs, expKey, ticker, buildOcc, quoteFn, es
       // The price on screen is the price of the structure AS BUILT, and
       // `orderBody` divides it by the same factor it took out of the ratios,
       // so the money at stake is what the ticket says it is.
-      const body = orderBody({ legs, occs, userQty: cfg.qty, type: cfg.type, limit: cfg.limit, tif: cfg.tif, intent: "open" });
+      const body = orderBody({ legs, occs, userQty: qtyNum, type: cfg.type, limit: cfg.limit, tif: cfg.tif, intent: "open" });
       const o = await alpacaReq("/v2/orders", "POST", body);
-      if (onSent) onSent(o, cfg);
+      if (onSent) onSent(o, { ...cfg, qty: qtyNum });
       // ACCEPTED IS NOT FILLED. A limit at the mid of a wide market, or any
       // order sent outside market hours, comes back accepted with nothing
       // bought — that is a third outcome, not a failure, and it says where
@@ -430,7 +457,7 @@ export function OrderTicket({ creds, legs, expKey, ticker, buildOcc, quoteFn, es
     <div style={{ marginTop: 12, padding: "10px 12px", background: T.bg, border: `1px solid ${T.violet}44`, borderRadius: 7 }}>
       <Lbl>SEND THE ORDER · ALPACA PAPER ACCOUNT</Lbl>
       <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
-        <div><div style={{ ...mono, fontSize: 9.5, color: T.dim }}>QTY</div><Inp type="number" min={1} max={20} value={cfg.qty} onChange={(e) => setCfg({ ...cfg, qty: Math.max(1, +e.target.value) })} style={{ width: 56 }} /></div>
+        <div><div style={{ ...mono, fontSize: 9.5, color: T.dim }}>QTY</div><Inp type="number" min={1} max={20} value={qtyNum} onChange={(e) => setQty(e.target.value)} style={{ width: 56 }} /></div>
         <div><div style={{ ...mono, fontSize: 9.5, color: T.dim }}>ORDER TYPE</div>
           <Sel value={cfg.type} onChange={(e) => setCfg({ ...cfg, type: e.target.value })}><option value="limit">Limit — set my price</option><option value="market">Market — take what is there</option></Sel></div>
         {cfg.type === "limit" && (
@@ -466,8 +493,8 @@ export function OrderTicket({ creds, legs, expKey, ticker, buildOcc, quoteFn, es
 
       {/* THE BOOK, THE MODEL AND THE NOTIONAL. */}
       <ComboBookPanel
-        legs={legs} quoteFn={quoteFn} limit={cfg.limit} type={cfg.type} qty={cfg.qty}
-        spot={spot} dte={dte} iv={iv} ticker={ticker} estNet={estNet} maxLoss={maxLoss} />
+        legs={legs} quoteFn={quoteFn} limit={cfg.limit} type={cfg.type} qty={qtyNum}
+        spot={spot} ticker={ticker} estNet={estNet} maxLoss={maxLoss} model={model} />
       {cfg.type === "limit" && seedPrice && (
         <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 7, lineHeight: 1.6 }}>{openLimitNote(seedPrice)}</div>
       )}
@@ -489,7 +516,7 @@ export function OrderTicket({ creds, legs, expKey, ticker, buildOcc, quoteFn, es
       {confirm && (
         <OrderPending
           lines={orderPreviewLines({ legs, ratios: shape.ratios, factor: shape.factor, ticker, expKey,
-            qty: cfg.qty, type: cfg.type, limit: cfg.limit, tif: cfg.tif })}
+            qty: qtyNum, type: cfg.type, limit: cfg.limit, tif: cfg.tif })}
           onCancel={() => setConfirm(false)} />
       )}
       <OrderOutcome outcome={outcome} onDismiss={() => setOutcome(null)} />
@@ -1395,6 +1422,9 @@ export function exitPathSim(pos, S, dteLeft, iv, sigma, nSim = 2000) {
 export const ladderNet = (entryNet, targetPnl) => entryNet + targetPnl / 100;
 
 export function GuardianPanel({ pos, spot, dteLeft, ivNow, sigma, seasonalNow, pnlNow, popNow, vegaSign, alpaca, quoteFn, buildOcc, setMsg, logEvent, gate }) {
+  // How many combinations this position is. `pos.maxProfit`, `pos.maxLoss` and
+  // `pos.entryNet` are all per combination; `pnlNow` is the whole position's.
+  const size = contractsOf(pos);
   const [sim, setSim] = useState(null);
   const [busy, setBusy] = useState(false);
   const [ladderBusy, setLadderBusy] = useState(null);
@@ -1412,8 +1442,13 @@ export function GuardianPanel({ pos, spot, dteLeft, ivNow, sigma, seasonalNow, p
     setLadderBusy(label);
     try {
       // Ogni gradino della scala e' un ordine su Alpaca: passa dal cancello.
+      // THE LADDER CLOSES THE WHOLE POSITION, SO IT IS SIZED LIKE IT.
+      // `contracts: 1` here meant a seven-lot position was gated — and sent —
+      // as a one-lot close: six lots would have been left open by a rung the
+      // screen called the exit. `pnlNow` is the whole position's, and the
+      // gate scales `maxLoss` to the same size before comparing them.
       const g = runGate(gate, { intent: "close", ticker: pos.ticker, legs: pos.legs,
-        dte: dteLeft, contracts: 1, maxLoss: pos.maxLoss, maxProfit: pos.maxProfit, pnl: pnlNow });
+        dte: dteLeft, contracts: size, maxLoss: pos.maxLoss, maxProfit: pos.maxProfit, pnl: pnlNow });
       if (!g.pass) { setMsg(`Risk gate: the ${label} order was not sent. ${g.violations.map((v) => v.message).join(" ")}`); setLadderBusy(null); return; }
       for (const w of g.warnings) logEvent(pos.id, "gate-warning", w.message);
       const net = ladderNet(pos.entryNet, targetPnl);
@@ -1427,7 +1462,7 @@ export function GuardianPanel({ pos, spot, dteLeft, ivNow, sigma, seasonalNow, p
         return occ;
       });
       if (occs.length > 4) throw new Error("Alpaca takes at most 4 legs per order");
-      const body = orderBody({ legs: pos.legs, occs, userQty: 1, type: "limit", limit: net, tif: "gtc", intent: "close" });
+      const body = orderBody({ legs: pos.legs, occs, userQty: size, type: "limit", limit: net, tif: "gtc", intent: "close" });
       const o = await alpacaReq("/v2/orders", "POST", body);
       const res = orderOutcome(o);
       // The ladder's price is the price of the WHOLE position; the broker was
@@ -1439,7 +1474,7 @@ export function GuardianPanel({ pos, spot, dteLeft, ivNow, sigma, seasonalNow, p
     } catch (e) { setMsg(`The ${label} exit order failed: ${alpacaErrorText(e)}`); }
     setLadderBusy(null);
   };
-  const pct = pos.maxProfit > 0 && pnlNow != null ? Math.max(-100, Math.min(130, (pnlNow / pos.maxProfit) * 100)) : null;
+  const pct = pos.maxProfit > 0 && pnlNow != null ? Math.max(-100, Math.min(130, (pnlNow / (pos.maxProfit * size)) * 100)) : null;
   return (
     <div style={{ marginTop: 8, padding: "10px 12px", background: `${T.bg}`, border: `1px solid ${tisColor}44`, borderRadius: 7 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
