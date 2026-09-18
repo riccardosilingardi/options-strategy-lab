@@ -24,6 +24,7 @@ import {
   positionSize, positionSizeNote, contractsOf, withPositionSize, ASSUMED_CONTRACTS,
 } from "./journal.js";
 import { RULES, ruleExitOf, stopWarningSentence } from "./rules.js";
+import { reduceRatios, orderQty } from "./order.js";
 
 let passed = 0;
 const failures = [];
@@ -459,7 +460,8 @@ test("the Journal shows every timeline entry, not the last six", () => {
 ============================================================================ */
 
 test("a size that was recorded is read back exactly, and is not assumed", () => {
-  assert.deepEqual(positionSize({ contracts: 7 }), { contracts: 7, assumed: false });
+  assert.deepEqual(positionSize({ contracts: 7 }),
+    { contracts: 7, assumed: false, perCombo: 1, brokerQty: 7 });
   assert.equal(contractsOf({ contracts: 7 }), 7);
   assert.equal(positionSizeNote({ contracts: 7 }), "7 contracts");
   assert.equal(positionSizeNote({ contracts: 1 }), "1 contract");
@@ -468,7 +470,8 @@ test("a size that was recorded is read back exactly, and is not assumed", () => 
 test("a record with no size loads, is read as one, and SAYS it was assumed", () => {
   // This is exactly the shape of every position saved before this build.
   const legacy = { id: 1, ticker: "CORN", legs: [], entryNet: 1.2, maxLoss: -120 };
-  assert.deepEqual(positionSize(legacy), { contracts: ASSUMED_CONTRACTS, assumed: true });
+  assert.deepEqual(positionSize(legacy),
+    { contracts: ASSUMED_CONTRACTS, assumed: true, perCombo: 1, brokerQty: 1 });
   assert.match(positionSizeNote(legacy), /assumed, not recorded/);
   assert.match(positionSizeNote(legacy), /one combination/);
 });
@@ -512,6 +515,85 @@ test("THE CLOSED ENTRY KEEPS THE SIZE, and keeps the assumption with it", () => 
   const old = journalEntry({ pos: { ...pos, contracts: undefined }, pnl: 30 });
   assert.equal(old.contracts, 1);
   assert.equal(old.contractsAssumed, true, "a closed entry from an older book says so too");
+});
+
+/* ============================================================================
+   TWO COUNTS, TWO UNITS — READ ON SCREEN, 18 SEP 2026.
+
+   J-0001 showed "1 contract — assumed, not recorded" on its row while its own
+   timeline said "0 of 10 combinations bought" and its legs read +10 20C / -10
+   21C. Both numbers were true and the screen said neither: the size of that
+   position is written into its LEG QUANTITIES, and `analyze()` had already
+   multiplied every dollar figure by the ten.
+============================================================================ */
+
+const TEN_LOT = {                      // saved the old way: the size is in the legs
+  ticker: "BOIL", name: "Bull Call Spread",
+  legs: [{ side: 1, type: "call", strike: 20, qty: 10 }, { side: -1, type: "call", strike: 21, qty: 10 }],
+  entryNet: 0.45, maxProfit: 550, maxLoss: -450,
+};
+const ONE_LOT = {
+  ticker: "CORN", name: "Bull Call Spread",
+  legs: [{ side: 1, type: "call", strike: 22, qty: 1 }, { side: -1, type: "call", strike: 24, qty: 1 }],
+  entryNet: 1.8, maxProfit: 320, maxLoss: -180,
+};
+
+test("a size written into the legs is READ, not guessed at", () => {
+  const r = positionSize({ ...TEN_LOT, contracts: 1, contractsAssumed: true });
+  assert.equal(r.perCombo, 10, "the legs' GCD is how many of the reduced shape one structure is");
+  assert.equal(r.brokerQty, 10, "which is the number Alpaca was asked for, and the one on the timeline");
+  assert.equal(r.contracts, 1, "and the number that multiplies maxLoss is still one");
+  // The dollars must NOT move: maxLoss already holds the ten.
+  assert.equal(Math.abs(TEN_LOT.maxLoss) * r.contracts, 450);
+});
+
+test("the note does not contradict the timeline beside it", () => {
+  const note = positionSizeNote({ ...TEN_LOT, contracts: 1, contractsAssumed: true });
+  assert.match(note, /10 combinations/, "it says the number the broker's reply says");
+  assert.match(note, /already the whole position/, "and that the figures are not per one");
+  assert.ok(!/read as one combination/.test(note),
+    "the sentence that contradicted a timeline reading '0 of 10 combinations bought'");
+});
+
+test("when the legs say nothing, an assumed 1 still says so", () => {
+  const r = positionSize(ONE_LOT);
+  assert.equal(r.perCombo, 1);
+  assert.equal(r.brokerQty, 1);
+  assert.equal(r.assumed, true);
+  assert.match(positionSizeNote(ONE_LOT), /assumed, not recorded/);
+  assert.match(positionSizeNote(ONE_LOT), /read as one combination/,
+    "here the figures really are for one, and the doubt really is total");
+});
+
+test("a recorded size multiplies the legs' own count for the broker", () => {
+  // Three of a structure whose legs are 1:2:1 is three butterflies: GCD 1.
+  const fly = { legs: [{ qty: 1 }, { qty: 2 }, { qty: 1 }], contracts: 3 };
+  assert.deepEqual(positionSize(fly), { contracts: 3, assumed: false, perCombo: 1, brokerQty: 3 });
+  // Two of a structure already saved as +10/-10 is twenty combinations.
+  const both = { ...TEN_LOT, contracts: 2 };
+  assert.equal(positionSize(both).brokerQty, 20);
+  assert.equal(positionSize(both).contracts, 2, "but only two multiply the dollars");
+});
+
+test("THE BROKER'S QTY IS NOT THE MULTIPLIER — divide by the legs' GCD first", () => {
+  // The bug this file is holding down. `orderBody` sends qty = userQty x GCD,
+  // and `analyze()` has already put the GCD into maxLoss. Reading the reply's
+  // qty as the multiplier counts a $450 worst case as $4,500.
+  const factor = reduceRatios(TEN_LOT.legs).factor;
+  assert.equal(factor, 10);
+  const brokerQtySent = orderQty(1, factor);             // the ticket said x1
+  assert.equal(brokerQtySent, 10, "what Alpaca was asked for");
+  const recovered = brokerQtySent / factor;
+  assert.equal(recovered, 1, "what multiplies the dollars");
+  assert.equal(Math.abs(TEN_LOT.maxLoss) * recovered, 450, "the real worst case");
+  assert.equal(Math.abs(TEN_LOT.maxLoss) * brokerQtySent, 4500, "and what reading it raw would have said");
+});
+
+test("App.jsx converts the broker's qty into the units maxLoss is in", () => {
+  const app = readFileSync(new URL("./App.jsx", import.meta.url), "utf8");
+  const commit = app.slice(app.indexOf("const commitPosition"), app.indexOf("const openPaper"));
+  assert.ok(/reduceRatios\(lg\)\.factor/.test(commit), "the legs' GCD is taken out");
+  assert.ok(/Number\(alpacaOrder\?\.qty\) \/ factor/.test(commit), "before the reply's qty is believed");
 });
 
 test("the position record that App.jsx writes carries the size", () => {
