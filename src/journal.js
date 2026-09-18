@@ -49,7 +49,7 @@
 ==================================================================== */
 
 import { RULES, ruleExitOf } from "./rules.js";
-import { orderOutcome } from "./order.js";
+import { orderOutcome, reduceRatios } from "./order.js";
 
 /* ------------------------------------------------------------------
    1) THE REF AND THE SEQUENCE
@@ -275,44 +275,104 @@ export function closeDecision({ alert = null, written = "" } = {}) {
 /** The size an older record is read as when it does not carry one. */
 export const ASSUMED_CONTRACTS = 1;
 
+/* THE SIZE IS WRITTEN IN TWO PLACES AND THEY ARE DIFFERENT UNITS.
+   This is the trap, and it was READ ON SCREEN before it was understood here:
+   position J-0001 showed "1 contract" on its row while its own timeline said
+   "0 of 10 combinations bought". Both were true and the screen said neither.
+
+     * `legs` carry a `qty` each. On the Build screen that box is how the app
+       used to be sized: a ten-lot vertical was saved as +10/-10, GCD 10.
+       `analyze()` multiplies by it, so `entryNet`, `maxProfit` and `maxLoss`
+       on such a record ALREADY hold the ten.
+     * `orderBody()` divides the legs by their GCD and puts the factor into the
+       order's `qty` (PRD 8b, the "relatively prime" refusal). So the broker was
+       asked for `userQty x GCD` combinations of the REDUCED shape.
+
+   So there are two counts and only one of them multiplies the dollars:
+
+     contracts  — combinations of the structure AS BUILT. This is the one that
+                  multiplies `maxLoss`, and it is the ticket's own quantity.
+     brokerQty  — contracts x GCD(legs). What Alpaca was asked for, what its
+                  reply counts, and the number on the timeline entry.
+
+   Reading the broker's `qty` as `contracts` multiplies the risk by the GCD a
+   second time: on +10/-10 that is a $450 worst case counted as $4,500. */
+
+/** How many of the reduced shape ONE structure-as-built is: the legs' GCD. */
+export const perCombination = (pos) => {
+  const legs = pos && Array.isArray(pos.legs) ? pos.legs : null;
+  if (!legs || !legs.length) return 1;
+  return Math.max(1, Math.round(reduceRatios(legs).factor) || 1);
+};
+
 /**
  * How many combinations this position is, and whether the app actually knows.
  *
  * @param   {object} pos  a position record (or a closed Journal entry)
- * @returns {{ contracts: number, assumed: boolean }}
- *          `contracts` is always a whole number of at least 1. `assumed` is
- *          true when the record carried no readable size and the 1 is this
- *          function's, not the user's.
+ * @returns {{ contracts: number, assumed: boolean, perCombo: number, brokerQty: number }}
+ *   `contracts` multiplies `maxLoss` / `entryNet` / `maxProfit` and is always a
+ *   whole number of at least 1. `brokerQty` is what the broker was asked for.
+ *   `assumed` is true when the record carried no readable size of its own and
+ *   the 1 is this function's rather than the user's.
  */
 export function positionSize(pos = {}) {
+  const perCombo = perCombination(pos);
   const raw = Number(pos && pos.contracts);
-  if (Number.isFinite(raw) && raw >= 1) {
+  const known = Number.isFinite(raw) && raw >= 1;
+  const contracts = known ? Math.round(raw) : ASSUMED_CONTRACTS;
+  return {
+    contracts,
     // A record migrated at hydration carries the flag as well as the number, so
     // a size written by an older build cannot launder itself into a measured one
     // by being saved again.
-    return { contracts: Math.round(raw), assumed: !!(pos && pos.contractsAssumed) };
-  }
-  return { contracts: ASSUMED_CONTRACTS, assumed: true };
+    assumed: known ? !!(pos && pos.contractsAssumed) : true,
+    perCombo,
+    brokerQty: contracts * perCombo,
+  };
 }
 
-/** Just the number, for the arithmetic that only needs that. */
+/** Just the number that multiplies the dollars, for arithmetic that needs only that. */
 export const contractsOf = (pos) => positionSize(pos).contracts;
 
 /**
- * What a screen prints beside a position's size. It never says "1 contract"
- * flatly about a record that does not carry one.
+ * What a screen prints beside a position's size.
+ *
+ * TWO CASES, because the doubt is not the same in both:
+ *
+ *  - THE SIZE IS IN THE LEGS (`perCombo > 1`). The app is not guessing: the
+ *    record says +10/-10 and every dollar figure on the row already holds the
+ *    ten. Saying "1 contract, assumed" over that is the screen contradicting
+ *    its own timeline, which is what this text used to do.
+ *  - THE LEGS SAY NOTHING (`perCombo === 1`). Here a missing `contracts` really
+ *    is unknown between one and any number, the figures really are for one
+ *    combination, and an assumed 1 must say so.
  */
 export function positionSizeNote(pos = {}) {
-  const { contracts, assumed } = positionSize(pos);
+  const { contracts, assumed, perCombo, brokerQty } = positionSize(pos);
+  const combos = `${brokerQty} combination${brokerQty === 1 ? "" : "s"}`;
+  if (perCombo > 1) {
+    return `${combos} — the size is written into the leg quantities, so every figure below is ` +
+      `already the whole position` +
+      (assumed
+        ? `. The record carries no separate size, so the app reads it as one of these: check ${brokerQty} ` +
+          `against the order on your paper account.`
+        : `.`);
+  }
   if (!assumed) return `${contracts} contract${contracts === 1 ? "" : "s"}`;
-  return `${contracts} contract${contracts === 1 ? "" : "s"} — assumed, not recorded: ` +
-    `this position was opened before the app kept its size, so every figure below is read as one combination.`;
+  return `1 contract — assumed, not recorded: this position was opened before the app kept its size, ` +
+    `so every figure below is read as one combination.`;
 }
 
 /**
  * Gives a position a size when it has none, at hydration, the way the `v: 2`
  * sanitising gives it a ref. It marks what it did: a record that goes through
- * here is one whose size was never written down.
+ * here is one whose size was never written down as a field of its own.
+ *
+ * ONE, NOT THE LEGS' GCD, AND DELIBERATELY. `entryNet`, `maxProfit` and
+ * `maxLoss` on such a record already hold the leg quantities, so this number is
+ * a SECOND multiplier on top of them — the ticket's own, which was never saved.
+ * Reading the legs into it would count the size twice. `positionSize()` reports
+ * the broker-facing count separately and the screen prints that one.
  */
 export function withPositionSize(pos) {
   if (!pos || typeof pos !== "object") return pos;

@@ -31,7 +31,7 @@ import { evaluateTrade, gateSummary } from "./riskGate.js";
 import { DEMO, DEMO_BANNER, DEMO_TOOLTIP, DEMO_SEED_TICKERS, demoPositions } from "./demo.js";
 import { CapitalOnboarding, WizardOpen, FindOpportunities, WizardCandidates, ConfirmSteps, NothingToday, Card, Pill } from "./wizard.jsx";
 import { buildHandOff, buildScreenState, BUILD_TAB } from "./handoff.js";
-import { orderBody, orderOutcome, alpacaErrorText } from "./order.js";
+import { orderBody, orderOutcome, alpacaErrorText, reduceRatios } from "./order.js";
 // THE PERMANENT RECORD: the ref a position is given at open, the sequence on
 // every timeline entry, the close reason, and what survives into the Journal.
 import { nextRef, refCounter, appendTimeline, stampTimeline, orderStatusRecheck, closeDecision,
@@ -1687,14 +1687,25 @@ export default function OptionsStrategyLab() {
      position opened from screen 4 carries exactly the same gate record, thesis
      and timeline as one built by hand. Two paths would mean two truths. */
   const commitPosition = async ({ ticker: tk, expKey: ek, legs: lg, dte: d, analysis, spot: sp, name, alpacaOrder, clashInfo, reason, roomOverride, contracts: n }) => {
-    /* HOW MANY, AND WHERE THAT NUMBER COMES FROM.
+    /* HOW MANY, AND IN WHICH UNITS — THE TRAP IS THE UNITS.
        Where a broker order was built, the ORDER BODY'S `qty` is the authority:
-       it is what Alpaca was actually asked for, and the app's own idea of the
-       size is only a wish. Where the app opened on its own book there is no
-       body, and the authority is the number the user confirmed on screen.
-       Nothing ever wrote this field before, so `riskGate.js` counted every open
-       position as one contract however many were really bought. */
-    const sized = Math.max(1, Math.round(Number(alpacaOrder?.qty) || Number(n) || 1));
+       it is what Alpaca was actually asked for. But it is NOT the number that
+       multiplies the dollars, and reading it as one was wrong by the legs' GCD.
+
+       `orderBody()` divides the legs by their greatest common divisor and puts
+       the factor into `qty` (PRD 8b). A vertical saved as +10/-10 therefore
+       goes out as qty 10 of a 1:1 shape — while `analysis.maxLoss` ALREADY
+       holds that ten, because `analyze()` multiplies by each leg's own qty. So
+       storing the broker's 10 here would have counted a $450 worst case as
+       $4,500 the moment the order filled.
+
+       Dividing by the same factor puts it back into the units `maxLoss` is in,
+       which is the ticket's own quantity. Where the app opened on its own book
+       there is no order body, and the authority is that quantity directly. */
+    const factor = Math.max(1, Math.round(reduceRatios(lg).factor) || 1);
+    const fromBroker = Number(alpacaOrder?.qty) / factor;
+    const sized = Math.max(1, Math.round(
+      Number.isFinite(fromBroker) && fromBroker >= 1 ? fromBroker : Number(n) || 1));
     // Anche la posizione interna passa dal cancello: non tocca il broker, ma
     // entra nell'esposizione totale che il cancello misura al prossimo ordine.
     // The quotes travel with the proposal: the gate's priceability check can
@@ -4389,11 +4400,12 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                           </div>
                         </div>
                         <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 5, lineHeight: 1.6 }}>
-                          {/* HOW MANY COMBINATIONS ARE WAITING. The limit is the
-                              price of ONE, which is how the broker reads it, and a
-                              row that prints only that says nothing about the size
-                              of the order sitting in the market. */}
-                          {`${contractsOf(p)} combination${contractsOf(p) === 1 ? "" : "s"}. `}
+                          {/* HOW MANY COMBINATIONS ARE WAITING, IN THE BROKER'S
+                              OWN UNITS — `contracts x GCD(legs)`, which is the
+                              number in Alpaca's reply and on the timeline entry.
+                              This row printed the structure count and read as a
+                              contradiction beside a timeline saying "0 of 10". */}
+                          {`${positionSize(p).brokerQty} combination${positionSize(p).brokerQty === 1 ? "" : "s"}. `}
                           {p.alpacaOrderType === "limit" && p.alpacaLimit != null
                             ? `A limit of ${money(p.alpacaLimit * 100)} a combination, which ${stands}.`
                             : `A ${p.alpacaOrderType || "?"} order, which ${stands}.`}
@@ -4472,8 +4484,8 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                           wrote this field before this build, so a position saved
                           earlier has no size and every figure on the row is read
                           as one combination. `positionSizeNote()` says which. */}
-                      <div style={{ ...mono, fontSize: 10.5, color: size.assumed ? T.amber : T.mut, marginTop: 3, lineHeight: 1.5 }}>
-                        {size.assumed ? "⚠ " : "× "}{positionSizeNote(p)}
+                      <div style={{ ...mono, fontSize: 10.5, color: size.assumed && size.perCombo === 1 ? T.amber : T.mut, marginTop: 3, lineHeight: 1.5 }}>
+                        {size.assumed && size.perCombo === 1 ? "⚠ " : "× "}{positionSizeNote(p)}
                       </div>
                       {/* THE ORDER BEHIND THIS ONE HAS NOT FILLED. It was
                           recorded at the moment it was sent, and an order can

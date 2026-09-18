@@ -1144,6 +1144,54 @@ lots at a time are $3,600, and the gate would have waved a fifth one through.
 screen's own state. That is the whole fix — the quantity used to be known only
 by the component that sent the order, which is why everything above it ran at 1.
 
+### TWO COUNTS, TWO UNITS — read on screen by the owner, 18 Sep 2026
+
+The first thing the owner saw after this shipped was a screen contradicting
+itself. Position **J-0001** printed, three lines apart:
+
+> `+10 20C / −10 21C`
+> ⚠ **1 contract** — assumed, not recorded … every figure below is read as one combination
+> `J-0001·02` … the order is working, not filled — **0 of 10 combinations bought**
+
+Every one of those is true, and together they say nothing. The size of that
+position is written into its **leg quantities**, and it has been all along:
+
+- `legs` carry a `qty` each. That box on the Build screen is how this app used
+  to be sized — a ten-lot vertical was saved as `+10 / −10`. **`analyze()`
+  multiplies by it**, so `entryNet`, `maxProfit` and `maxLoss` on such a record
+  already hold the ten. `$450` on that row IS the whole position's worst case.
+- `orderBody()` divides the legs by their greatest common divisor and puts the
+  factor into the order's `qty` (§8b, the "relatively prime" refusal). So the
+  broker was asked for `userQty × GCD` combinations of the **reduced** shape,
+  which is where the timeline's "0 of 10" comes from.
+
+**So there are two counts and only one of them multiplies the dollars.**
+
+| | what it is | where it shows |
+|---|---|---|
+| `contracts` | combinations of the structure **as built** — the ticket's own quantity | multiplies `maxLoss`, so it is what the risk gate uses |
+| `brokerQty` | `contracts × GCD(legs)` | Alpaca's reply, the timeline entry, the working-orders row |
+
+**And reading the broker's `qty` as the multiplier is a real bug, which this
+session shipped and this section fixes.** `commitPosition()` took
+`Number(alpacaOrder.qty)` as the size. On `+10 / −10` that is 10, against a
+`maxLoss` that already held the ten: **a $450 worst case counted as $4,500** the
+moment an order filled. It divides by `reduceRatios(legs).factor` first now,
+which puts the reply back into the units `maxLoss` is in. `journal.test.js`
+holds both numbers against each other.
+
+**The screen says the broker's count, because that is the one you can check.**
+`positionSizeNote()` splits the two cases, because the doubt is not the same:
+
+- **The size is in the legs** (`perCombo > 1`): the app is not guessing. The row
+  reads *"10 combinations — the size is written into the leg quantities, so every
+  figure below is already the whole position"*, in ordinary grey. The only
+  remaining doubt is whether the ticket multiplied it again, and that is one
+  clause, not a warning.
+- **The legs say nothing** (`perCombo === 1`): a missing `contracts` really is
+  unknown between one and any number, the figures really are for one
+  combination, and the amber "assumed, not recorded" line is right.
+
 ### An assumed one is never a measured one
 
 A position saved by an earlier build carries no size and **there is no way to
@@ -1363,12 +1411,14 @@ Everything below is reasoned and unit-tested, not read on a screen.
   NUMBER.** `commitPosition()` takes the broker order body's `qty` as the authority. The one
   order this app has ever sent was ten lots and it never filled, and no order has been sent
   since the field existed. The first multi-lot fill is what proves this.
-- **THE LEGACY MIGRATION HAS NOT RUN AGAINST THE OWNER'S OWN `localStorage`.** Every
-  position he has was saved without a size and will hydrate through `withPositionSize()`
-  into an ASSUMED 1 with an amber line on its row. That is correct and it is also the first
-  thing he will see. If it is wrong the symptom is a row saying "assumed, not recorded"
-  about a position he does remember sizing — in which case the size is genuinely lost and
-  the honest thing is still to say so.
+- **THE LEGACY MIGRATION RAN, AND IT WAS WRONG ON SCREEN THE FIRST TIME.** This is the one
+  item on this list that has now been READ on a real phone, and it failed: both of the
+  owner's positions showed "1 contract — assumed, not recorded" over legs reading `+10/−10`
+  and `+5`, beside a timeline saying "0 of 10 combinations bought". The cause was two
+  different units for "how many" and is fixed above (§10f, TWO COUNTS, TWO UNITS), together
+  with a real arithmetic bug it exposed. **What has NOT been re-read is the corrected
+  screen**: the rows should now say "10 combinations" and "5 combinations" in grey, and the
+  dollar figures must not move — `$450` and `$577` were already the whole position.
 - **THE P&L ON A POSITION ROW IS NOW A TOTAL, AND THE TWO SOURCES HAVE NEVER BEEN COMPARED
   LIVE.** Alpaca's `unrealized_pl` was always the whole position's and the app's own
   calculation was one combination; with everything at one lot they agreed by accident. They

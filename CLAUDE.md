@@ -301,17 +301,29 @@ position counted as ONE contract for the rest of its life however many were real
 and the Build screen's gate ran at a hardcoded `contracts: 1` while the ticket below it sized
 the order at `cfg.qty`. A cap that reads the wrong quantity is not a display bug.
 
-- **ONE HOME.** `commitPosition()` in `App.jsx` stores `contracts`: the broker order body's
-  **`qty`** where an order was sent, the number the **user confirmed** where the app opened on
-  its own book. `positionSize(pos)` in `src/journal.js` is the only way it is read back and
-  returns `{ contracts, assumed }`. Never spell `Number(p.contracts) || 1` anywhere again.
+- **ONE HOME.** `commitPosition()` in `App.jsx` stores `contracts`. `positionSize(pos)` in
+  `src/journal.js` is the only way it is read back. Never spell `Number(p.contracts) || 1`
+  anywhere again.
+- **TWO COUNTS, TWO UNITS, AND THIS IS THE TRAP.** `legs` carry a `qty` each and `analyze()`
+  MULTIPLIES BY IT, so a vertical saved as `+10/−10` has the ten inside `entryNet`,
+  `maxProfit` and `maxLoss` already. `orderBody()` then divides the legs by their GCD and
+  puts the factor in the order's `qty`, so the broker is asked for `contracts × GCD`.
+  `positionSize()` returns both: **`contracts`** multiplies the dollars and is what the gate
+  reads; **`brokerQty`** is Alpaca's own count and is what the screen prints, because it is
+  the number you can check against the account. Reading the reply's `qty` as the multiplier
+  counts the size twice — `$450` became `$4,500` — so `commitPosition()` divides it by
+  `reduceRatios(legs).factor` first. **Read on screen by the owner, 18 Sep 2026**: a row
+  saying "1 contract — assumed" beside its own timeline saying "0 of 10 combinations bought".
 - **THE SIZE IS THE SCREEN'S, NOT THE TICKET'S.** `contracts` is Build-screen state in
   `App.jsx`, above `OrderTicket` (now a controlled input on it), the `guard` memo, the
   confirm step and the record. It resets on a ticker, expiry or hand-off change.
-- **AN ASSUMED 1 IS NEVER A MEASURED 1.** An older record carries no size and it cannot be
-  recovered. `withPositionSize()` gives it one at hydration the way the `v: 2` pass gives it
-  a ref, marks `contractsAssumed`, and `positionSizeNote()` says so on the row. The flag
-  survives `localStorage` and `/api/state`, so saving cannot launder it.
+- **AN ASSUMED 1 IS NEVER A MEASURED 1 — BUT ONLY SAY "ASSUMED" WHERE THE DOUBT IS REAL.**
+  `withPositionSize()` gives an older record a `contracts` of 1 at hydration the way the
+  `v: 2` pass gives it a ref, marks `contractsAssumed`, and the flag survives `localStorage`
+  and `/api/state`. `positionSizeNote()` then splits two cases: where the legs carry the
+  size (`perCombo > 1`) the app is NOT guessing and the row says the broker's count in plain
+  grey; where the legs say nothing the amber "assumed, not recorded" line is right. A
+  warning printed over a number the record plainly holds is the screen contradicting itself.
 - **PER COMBINATION STAYS PER COMBINATION.** `entryNet`, `maxProfit` and `maxLoss` describe
   the STRUCTURE and are never scaled in storage. The size is applied at the boundaries: the
   gate's dollar limits and stop threshold, the P&L on a position row (Alpaca's
