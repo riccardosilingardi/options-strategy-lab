@@ -5,6 +5,10 @@ import { netBS, probProfit, exitSim, SEASONAL, SIGMA } from "../../src/engine.js
 import { RULES, ruleBadge, copilotRulesBlock, pctText,
   markProvenance, autopilotVerdict, AUTOPILOT_VERDICTS, MODEL_PRICE } from "../../src/rules.js";
 import { evaluateTrade } from "../../src/riskGate.js";
+// HOW MANY COMBINATIONS THE POSITION IS. A close proposed at one lot on a
+// seven-lot position leaves six open and calls it an exit — and the gate would
+// have measured a seventh of what was being closed.
+import { contractsOf } from "../../src/journal.js";
 import { appendTimeline } from "../../src/journal.js";
 
 // L'autopilot parla solo con paper-api.alpaca.markets (vedi approve.mjs, dove
@@ -174,7 +178,7 @@ export default async () => {
       // Una proposta respinta non sparisce: finisce in REJECTED BY GATE.
       gateResult = evaluateTrade({
         proposal: { intent: "close", ticker: pos.ticker, name: pos.name, legs: pos.legs,
-          dte: dteLeft, contracts: 1, maxLoss: pos.maxLoss, maxProfit: pos.maxProfit, pnl },
+          dte: dteLeft, contracts: contractsOf(pos), maxLoss: pos.maxLoss, maxProfit: pos.maxProfit, pnl },
         portfolio: { positions, account: PAPER_ACCOUNT },
         capital: capitalAnswers,
         signals: pos.thesis?.signal || null,
@@ -208,7 +212,7 @@ export default async () => {
         orderIntent: {
           ticker: pos.ticker, expKey: pos.expKey, legs: closeLegs,
           occs: closeLegs.map((l) => `${pos.ticker}${exp}${l.type === "call" ? "C" : "P"}${String(Math.round(l.strike * 1000)).padStart(8, "0")}`),
-          userQty: 1, tif: "day", intent: "close",
+          userQty: contractsOf(pos), tif: "day", intent: "close",
         },
         // WHICH POSITION THIS IS, not just what it is called. The timeline entry
         // `approve.mjs` appends has to land on the right record, and a display
@@ -218,7 +222,7 @@ export default async () => {
         exp: Date.now() + 24 * 36e5, used: false,
         gateContext: {
           proposal: { intent: "close", ticker: pos.ticker, name: pos.name, legs: pos.legs,
-            dte: dteLeft, contracts: 1, maxLoss: pos.maxLoss, maxProfit: pos.maxProfit },
+            dte: dteLeft, contracts: contractsOf(pos), maxLoss: pos.maxLoss, maxProfit: pos.maxProfit },
           capital: capitalAnswers,
         } };
       approveUrl = `${siteUrl}/api/approve?id=${id}`;

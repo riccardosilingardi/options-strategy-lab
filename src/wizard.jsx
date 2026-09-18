@@ -694,6 +694,16 @@ function RoadCard({ c, other, onPick, i, bars = [], weatherData, newsItems, mont
             </span>
           ))}
       </div>
+      {/* EVERY FIGURE ON THIS CARD IS ONE COMBINATION, AND IT HAS TO SAY SO.
+          A road is built to fit the budget at one contract — that is what the
+          "how much are you willing to lose" answer bounds — and the size is
+          chosen on Build, where the ticket, the gate and the position record
+          all read it. A per-contract number printed as if it were the trade's
+          is the same fault as an assumed size printed as a measured one. */}
+      <div style={{ ...mono, fontSize: 9.5, color: T.dim, marginTop: 7, lineHeight: 1.5 }}>
+        These are the figures for ONE combination. How many you buy is chosen on the next screen, and
+        everything here multiplies by it.
+      </div>
 
       {/* THE EVIDENCE. The same panel the desk shows, on the screen where the
           decision is actually made. The four bars are open by default here:
@@ -887,16 +897,23 @@ const CheckRow = ({ ok, text }) => (
  * `evaluateTrade()` already returned.
  *
  * @param candidate  { ticker, name, legs, expKey, dte, risk, maxProfit, entryNet, spot }
+ *                   `risk` and `maxProfit` are the figures for ONE combination.
+ * @param contracts  how many combinations the order will carry. This screen
+ *                   used to say "One contract of each" over a ticket that could
+ *                   send seven, so the totals below are the per-combination
+ *                   figures times this number and the card says which is which.
  * @param preview    the gate's reading BEFORE the tap
  * @param result     the gate's answer AFTER the tap, when there is one
  * @param heading    false on Build, where the trade's name is already above
  */
 export function ConfirmSteps({
   candidate, preview, result, bars = [], sigma = 0.3, driftAnnual = 0,
-  busy, onConfirm, onDesk, heading = true, showFigure = true,
+  busy, onConfirm, onDesk, heading = true, showFigure = true, contracts = 1,
 }) {
   if (!candidate) return null;
   const c = candidate;
+  const n = Math.max(1, Math.round(Number(contracts) || 1));
+  const totalRisk = Number(c.risk) * n;
   const shown = result || preview;
   const rows = gateChecklist(shown, { dte: c.dte });
   const refused = !!(result && !result.pass);
@@ -910,8 +927,8 @@ export function ConfirmSteps({
             {c.ticker} · {c.name}
           </h1>
           <p style={{ ...sans, fontSize: 15, color: T.mut, lineHeight: 1.55, margin: 0 }}>
-            {c.legs.length} legs, expiring {c.expKey || `in ${Math.round(c.dte)} days`}. Risking {money(c.risk)}
-            {Number.isFinite(c.maxProfit) ? ` to make up to ${money(c.maxProfit)}.` : `, with ${NO_CEILING} on what it can make.`}
+            {c.legs.length} legs, expiring {c.expKey || `in ${Math.round(c.dte)} days`}. Risking {money(totalRisk)}
+            {Number.isFinite(c.maxProfit) ? ` to make up to ${money(c.maxProfit * n)}.` : `, with ${NO_CEILING} on what it can make.`}
           </p>
         </>
       )}
@@ -929,12 +946,18 @@ export function ConfirmSteps({
         <div style={{ ...mono, fontSize: 13, color: T.ink, marginTop: 8, lineHeight: 1.7 }}>
           {c.legs.map((l, i) => (
             <div key={i}>
-              {l.side > 0 ? "BUY" : "SELL"} {l.qty} × {c.ticker} {price(l.strike)} {l.type === "call" ? "call" : "put"}
+              {l.side > 0 ? "BUY" : "SELL"} {l.qty * n} × {c.ticker} {price(l.strike)} {l.type === "call" ? "call" : "put"}
             </div>
           ))}
         </div>
+        {/* WHAT IS BEING SENT IS THE SIZE ON SCREEN. This said "One contract of
+            each" underneath a ticket whose quantity field could say seven —
+            the app describing an order it was not about to send. */}
         <div style={{ ...sans, fontSize: 13, color: T.mut, marginTop: 8, lineHeight: 1.5 }}>
-          One contract of each, on a paper account. Nothing is sent until you tap below.
+          {n === 1
+            ? "One combination, on a paper account. Nothing is sent until you tap below."
+            : `${n} combinations of the structure above, on a paper account — that is what each line already shows. ` +
+              `Everything this screen measures is for all ${n}. Nothing is sent until you tap below.`}
         </div>
       </Card>
 
@@ -970,7 +993,7 @@ export function ConfirmSteps({
         style={{ ...sans, width: "100%", minHeight: 58, marginTop: 18, marginBottom: BADGE_BTN_GAP, fontSize: 16.5, fontWeight: 700, borderRadius: 10,
           cursor: busy ? "wait" : refused ? "not-allowed" : "pointer", opacity: busy ? 0.6 : refused ? 0.45 : 1,
           background: T.amber, color: T.onAccent, border: "none" }}>
-        {busy ? "Checking…" : refused ? "Blocked by the risk gate" : `Open this on paper · ${money(c.risk)} at risk`}
+        {busy ? "Checking…" : refused ? "Blocked by the risk gate" : `Open this on paper · ${money(totalRisk)} at risk${n > 1 ? ` (${n} × ${money(c.risk)})` : ""}`}
       </button>
 
       {refused && onDesk && (

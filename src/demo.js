@@ -169,6 +169,11 @@ export function demoPositions({ spots = {}, underlying, now = Date.now() } = {})
       demo: true,
       name, ticker: tk, expKey: iso(now + dteLeft * DAY).slice(0, 10),
       legs, entryNet, entrySpot,
+      // ONE COMBINATION, AND IT IS A MEASURED ONE. These positions are built
+      // here, so the size is known — writing it means the demo's rows print
+      // "1 contract" rather than the "assumed, not recorded" warning that
+      // belongs to a record from an older build.
+      contracts: 1,
       openedAt: iso(openedAt), expiry: iso(now + dteLeft * DAY),
       maxProfit, maxLoss,
       realEntry: false, alpacaId: null,

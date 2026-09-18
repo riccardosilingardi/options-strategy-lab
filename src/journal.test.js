@@ -21,6 +21,7 @@ import {
   closeReason, closeDecision, CLOSE_REASON_MIN,
   journalEntry, lastCloseOrderId,
   byRefDesc, matchesRef, searchJournal, SEQ_SEP,
+  positionSize, positionSizeNote, contractsOf, withPositionSize, ASSUMED_CONTRACTS,
 } from "./journal.js";
 import { RULES, ruleExitOf, stopWarningSentence } from "./rules.js";
 
@@ -446,6 +447,80 @@ test("the Journal shows every timeline entry, not the last six", () => {
   const journalHalf = app.slice(app.indexOf("CLOSED TRADES"));
   assert.ok(/e\.timeline\.map\(/.test(journalHalf), "the whole list is mapped");
   assert.ok(!/e\.timeline \|\| \[\]\)\.slice\(-6\)/.test(journalHalf), "nothing truncates it");
+});
+
+/* ============================================================================
+   HOW BIG THE POSITION WAS — AND WHETHER THAT IS KNOWN.
+
+   MEASURED: `riskGate.js` read `p.contracts` in three places and NOTHING EVER
+   WROTE IT. A seven-lot spread counted against the 25% exposure ceiling as one
+   contract for the rest of its life, and the closed entry recorded `riskOk`
+   from a maximum loss that was one seventh of the real one.
+============================================================================ */
+
+test("a size that was recorded is read back exactly, and is not assumed", () => {
+  assert.deepEqual(positionSize({ contracts: 7 }), { contracts: 7, assumed: false });
+  assert.equal(contractsOf({ contracts: 7 }), 7);
+  assert.equal(positionSizeNote({ contracts: 7 }), "7 contracts");
+  assert.equal(positionSizeNote({ contracts: 1 }), "1 contract");
+});
+
+test("a record with no size loads, is read as one, and SAYS it was assumed", () => {
+  // This is exactly the shape of every position saved before this build.
+  const legacy = { id: 1, ticker: "CORN", legs: [], entryNet: 1.2, maxLoss: -120 };
+  assert.deepEqual(positionSize(legacy), { contracts: ASSUMED_CONTRACTS, assumed: true });
+  assert.match(positionSizeNote(legacy), /assumed, not recorded/);
+  assert.match(positionSizeNote(legacy), /one combination/);
+});
+
+test("the assumption survives being saved again — it cannot launder itself", () => {
+  const migrated = withPositionSize({ ticker: "CORN", maxLoss: -120 });
+  assert.equal(migrated.contracts, 1);
+  assert.equal(migrated.contractsAssumed, true);
+  // The whole point: a 1 nobody wrote must never print as a 1 somebody chose,
+  // and it goes through localStorage and /api/state between the two readings.
+  const roundTrip = JSON.parse(JSON.stringify(migrated));
+  assert.equal(positionSize(roundTrip).assumed, true);
+  assert.match(positionSizeNote(roundTrip), /assumed/);
+});
+
+test("a record that already carries a size is not rewritten at hydration", () => {
+  const real = { ticker: "CORN", contracts: 4, maxLoss: -120 };
+  assert.equal(withPositionSize(real), real, "the same object, untouched");
+  assert.equal(positionSize(real).assumed, false);
+});
+
+test("a size that makes no sense is read as one, and said to be assumed", () => {
+  for (const junk of [{ contracts: 0 }, { contracts: -2 }, { contracts: "seven" }, { contracts: NaN }, {}, null, undefined]) {
+    const r = positionSize(junk);
+    assert.equal(r.contracts, 1, JSON.stringify(junk));
+    assert.equal(r.assumed, true, JSON.stringify(junk));
+  }
+  // 2.6 contracts is not a thing a broker can fill.
+  assert.equal(positionSize({ contracts: 2.6 }).contracts, 3);
+});
+
+test("THE CLOSED ENTRY KEEPS THE SIZE, and keeps the assumption with it", () => {
+  const pos = { id: 1, ref: "J-0004", ticker: "BOIL", name: "Bull Call Spread",
+    legs: [], entryNet: 0.5, maxProfit: 50, maxLoss: -50, contracts: 7, timeline: [] };
+  const e = journalEntry({ pos, pnl: 210, riskOk: true });
+  assert.equal(e.contracts, 7, "without this the Journal cannot say what the trade risked");
+  assert.equal(e.contractsAssumed, false);
+  // `entryNet`, `maxProfit` and `maxLoss` are all per combination, so the size
+  // is the only thing that turns them into what the trade actually did.
+  assert.equal(e.maxLoss, -50, "still per combination, deliberately");
+  const old = journalEntry({ pos: { ...pos, contracts: undefined }, pnl: 30 });
+  assert.equal(old.contracts, 1);
+  assert.equal(old.contractsAssumed, true, "a closed entry from an older book says so too");
+});
+
+test("the position record that App.jsx writes carries the size", () => {
+  const app = readFileSync(new URL("./App.jsx", import.meta.url), "utf8");
+  const commit = app.slice(app.indexOf("const commitPosition"), app.indexOf("const openPaper"));
+  assert.ok(/contracts: sized/.test(commit), "the record stores it");
+  assert.ok(/Number\(alpacaOrder\?\.qty\)/.test(commit),
+    "and the broker order's own qty is the authority where there was one");
+  assert.ok(!/contracts: 1/.test(commit), "never a hardcoded one");
 });
 
 /* ---------------- report ---------------- */

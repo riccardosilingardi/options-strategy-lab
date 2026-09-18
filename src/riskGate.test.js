@@ -4,6 +4,8 @@
 import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { evaluateTrade, paperStatus, undefinedRiskLegs } from "./riskGate.js";
+import { positionSize, positionSizeNote, contractsOf, withPositionSize } from "./journal.js";
+import { orderBody } from "./order.js";
 import { RULES, sizing, ruleBadge, qualityFloor, qualityFloorSentence, liquiditySkippedNote, NOTHING_TODAY,
   LIQUIDITY_LEVELS, RECOMMENDED_LIQUIDITY, LIQUIDITY_MEASUREMENT, liquidityMeasurementNote, liquidityThreshold, looseningWarning, liquiditySettingNote,
   priceability, rewardRisk, unpriceableNote, money, MIN_NET_DOLLARS,
@@ -1238,16 +1240,240 @@ test("MODEL SANITY — its refusal is a finished sentence with its own count", (
   }
 });
 
+/** The source of a file with its COMMENTS REMOVED, for structural tests that
+ *  must not be satisfied by a sentence in a comment. This matters: the previous
+ *  version of the test below counted `modelSanity(` across the whole of App.jsx
+ *  and was green on two PROSE mentions and one real call, which is exactly the
+ *  fault it was written to catch. These files are heavily commented and the
+ *  comments name the functions they explain. */
+const codeOf = (name) => readFileSync(new URL(`./${name}`, import.meta.url), "utf8")
+  .replace(/\/\*[\s\S]*?\*\//g, " ")      // block comments, including the long ones
+  .replace(/(^|[^:])\/\/[^\n]*/g, "$1");   // line comments, but not "https://"
+
 test("MODEL SANITY — IT IS A PROPOSAL FLOOR AND IT IS NOT IN THE GATE", () => {
   // A trade the user builds by hand on the desk is his to make. The gate's job
   // is "is there a price at all"; this one's is "is it this structure's price".
   const src = readFileSync(new URL("./riskGate.js", import.meta.url), "utf8");
   assert.equal(/modelSanity/.test(src), false,
     "the model check must never become a reason an order is refused");
-  // ...and it IS at all three generation sites.
-  const app = readFileSync(new URL("./App.jsx", import.meta.url), "utf8");
-  const n = (app.match(/modelSanity\(/g) || []).length;
-  assert.ok(n >= 3, `all three generation sites call it (found ${n})`);
+});
+
+test("MODEL SANITY — ONE EXPRESSION, and the ticket does not run a second one", () => {
+  // ROADMAP P0 left this open: `ComboBookPanel` in pro.jsx called
+  // `modelSanity()` on every render of the ticket, which made it a SECOND
+  // consumer of `analyze()`'s per-leg marks with a different spelling — the
+  // Shortlist passed the model's own price for an unquoted leg, the ticket
+  // passed null. `modelCheckOf()` in App.jsx is now the only spelling.
+  const app = codeOf("App.jsx");
+  assert.equal((app.match(/modelSanity\(/g) || []).length, 1,
+    "modelSanity is called in exactly one place in App.jsx: inside modelCheckOf");
+  const uses = (app.match(/modelCheckOf\(/g) || []).length;
+  assert.ok(uses >= 4,
+    `all three generation sites and the ticket's memo read it (found ${uses})`);
+  const pro = codeOf("pro.jsx");
+  assert.equal((pro.match(/modelSanity\(/g) || []).length, 0,
+    "the order ticket takes the verdict as a prop, it does not compute one");
+});
+
+/* ============================================================================
+   THE POSITION REMEMBERS ITS SIZE (ROADMAP P1.1 / P1.2).
+
+   MEASURED: `riskGate.js` read `p.contracts` in three places — the 25% total
+   exposure ceiling, the dollars a proposal risks, and the stop threshold — and
+   NOTHING ANYWHERE EVER WROTE THAT FIELD. `commitPosition()` in App.jsx built
+   the record without it, so every open position counted as ONE contract for the
+   rest of its life however many were really bought, and the gate on the Build
+   screen ran at a hardcoded `contracts: 1` while the ticket below it sized the
+   order at `cfg.qty`. A cap that reads the wrong quantity is not a display bug.
+============================================================================ */
+
+test("SIZE — total exposure with a seven-lot position is seven times a one-lot one", () => {
+  const one = evaluateTrade({
+    proposal: trade({ maxLoss: -100 }),
+    portfolio: { positions: [{ maxLoss: -100, contracts: 1 }], account: PAPER },
+    capital: CAPITAL,
+  });
+  const seven = evaluateTrade({
+    proposal: trade({ maxLoss: -100 }),
+    portfolio: { positions: [{ maxLoss: -100, contracts: 7 }], account: PAPER },
+    capital: CAPITAL,
+  });
+  assert.equal(one.limits.openRisk, 100);
+  assert.equal(seven.limits.openRisk, 700, "seven lots of a $100 worst case are $700 at risk");
+  assert.equal(seven.limits.openRisk, one.limits.openRisk * 7);
+});
+
+test("SIZE — the proposal's own risk is the worst case TIMES the quantity", () => {
+  // $250 is the binding per-trade cap on $5,000 of capital. One combination of
+  // a $60 spread is well inside it; five of them are not.
+  const one = evaluateTrade({ proposal: trade({ maxLoss: -60, contracts: 1 }), portfolio: { account: PAPER }, capital: CAPITAL });
+  const five = evaluateTrade({ proposal: trade({ maxLoss: -60, contracts: 5 }), portfolio: { account: PAPER }, capital: CAPITAL });
+  assert.equal(one.limits.tradeRisk, 60);
+  assert.equal(five.limits.tradeRisk, 300);
+  assert.equal(one.pass, true, "one combination is inside the cap");
+  assert.deepEqual(codes(five), ["PER_TRADE_LIMIT"],
+    "five of the same combination is not, and this is the cap that did not hold");
+  assert.match(messageFor(five, "PER_TRADE_LIMIT"), /\$300/);
+});
+
+test("SIZE — the exposure ceiling counts the book at its real size", () => {
+  // $1,250 is 25% of $5,000. Four one-lot $300 positions sit under it; the same
+  // four as three-lot positions are $3,600 and are a long way over.
+  const small = Array.from({ length: 4 }, () => ({ maxLoss: -300, contracts: 1 }));
+  const big = Array.from({ length: 4 }, () => ({ maxLoss: -300, contracts: 3 }));
+  const a = evaluateTrade({ proposal: trade({ maxLoss: -50 }), portfolio: { positions: small, account: PAPER }, capital: CAPITAL });
+  const b = evaluateTrade({ proposal: trade({ maxLoss: -50 }), portfolio: { positions: big, account: PAPER }, capital: CAPITAL });
+  assert.equal(a.limits.openRisk, 1200);
+  assert.equal(b.limits.openRisk, 3600);
+  assert.equal(codes(a).includes("TOTAL_EXPOSURE"), false);
+  assert.deepEqual(codes(b), ["TOTAL_EXPOSURE"]);
+});
+
+test("SIZE — the stop threshold scales with the size", () => {
+  // Stop at 50% of the maximum loss. On one combination of a −$200 worst case
+  // that is −$100; on five it is −$500, and a −$300 P&L is NOT past it.
+  const at = (contracts, pnl) => warnCodes(evaluateTrade({
+    proposal: trade({ intent: "close", maxLoss: -200, contracts, pnl }),
+    portfolio: { account: PAPER }, capital: CAPITAL,
+  }));
+  assert.ok(at(1, -110).includes("STOP_LOSS_REACHED"), "one lot, past the stop");
+  assert.equal(at(5, -300).includes("STOP_LOSS_REACHED"), false,
+    "five lots: −$300 is not half of a −$1,000 worst case");
+  assert.ok(at(5, -550).includes("STOP_LOSS_REACHED"), "five lots, past the stop");
+});
+
+test("SIZE — a legacy position with no size still loads, and is READ AS ONE", () => {
+  // Nothing ever wrote `contracts`, so every position saved by an earlier build
+  // has none and there is no way to recover it. One is the safe direction to be
+  // wrong in: it under-counts exposure rather than over-counting it.
+  const legacy = { maxLoss: -400 };                 // exactly what an old record is
+  const r = evaluateTrade({
+    proposal: trade({ maxLoss: -50 }),
+    portfolio: { positions: [legacy], account: PAPER }, capital: CAPITAL,
+  });
+  assert.equal(r.limits.openRisk, 400, "it loads, and it counts once");
+  assert.equal(positionSize(legacy).contracts, 1);
+  assert.equal(positionSize(legacy).assumed, true, "and it is marked as assumed");
+});
+
+test("SIZE — an ASSUMED one never prints as a MEASURED one", () => {
+  assert.equal(positionSize({ contracts: 7 }).assumed, false);
+  assert.equal(positionSize({ contracts: 7 }).contracts, 7);
+  assert.equal(contractsOf({ contracts: 7 }), 7);
+  // A record migrated at hydration carries both the number and the flag, so
+  // saving it again cannot launder the assumption into a measurement.
+  const migrated = withPositionSize({ maxLoss: -400 });
+  assert.equal(migrated.contracts, 1);
+  assert.equal(migrated.contractsAssumed, true);
+  assert.equal(positionSize(migrated).assumed, true, "still assumed after a round trip");
+  assert.match(positionSizeNote(migrated), /assumed, not recorded/);
+  assert.match(positionSizeNote({ contracts: 3 }), /^3 contracts$/);
+  assert.match(positionSizeNote({ contracts: 1 }), /^1 contract$/);
+  // A record that already had a size is left exactly as it was.
+  const kept = { contracts: 4, maxLoss: -10 };
+  assert.equal(withPositionSize(kept), kept, "nothing is rewritten");
+  // Rubbish is read as one, and said to be assumed, rather than crashing.
+  for (const junk of [{ contracts: 0 }, { contracts: -3 }, { contracts: "x" }, {}, null]) {
+    assert.equal(positionSize(junk).contracts, 1);
+    assert.equal(positionSize(junk).assumed, true);
+  }
+});
+
+test("SIZE — a proposal that passes the gate passes it again at the quantity shown", () => {
+  // ROADMAP P1's DONE WHEN. The screen evaluates the trade; the ticket sends it.
+  // They have to be the same reading, so the gate is run at the number the order
+  // will carry and not at a hardcoded 1.
+  const shown = (contracts) => evaluateTrade({
+    proposal: trade({ maxLoss: -60, contracts }),
+    portfolio: { account: PAPER }, capital: CAPITAL,
+  });
+  for (const n of [1, 2, 3, 4]) {
+    const preview = shown(n);          // what the Build screen prints
+    const send = shown(n);             // what the ticket runs before it posts
+    assert.equal(preview.pass, send.pass, `×${n}: the two readings agree`);
+    assert.equal(preview.limits.tradeRisk, send.limits.tradeRisk);
+    assert.equal(preview.limits.tradeRisk, 60 * n, `×${n}: and it is the real number`);
+  }
+  // And the refusal really is the cap doing its job, not a coincidence.
+  assert.equal(shown(4).pass, true, "$240 is inside the $250 cap");
+  assert.equal(shown(5).pass, false, "$300 is not");
+});
+
+test("SIZE — the gate and the order body are sized by the same number", () => {
+  // `orderBody` puts the size in `qty` and the shape in the ratios (GCD rule,
+  // PRD §8b). The number it is given is the number the gate measured.
+  const legs = [{ side: 1, type: "call", strike: 20, qty: 1 }, { side: -1, type: "call", strike: 21, qty: 1 }];
+  const body = orderBody({ legs, occs: ["A", "B"], userQty: 7, type: "limit", limit: 1.4, tif: "day", intent: "open" });
+  assert.equal(+body.qty, 7, "seven combinations");
+  assert.deepEqual(body.legs.map((l) => +l.ratio_qty), [1, 1], "of a 1:1 shape");
+  const g = evaluateTrade({
+    proposal: trade({ legs, maxLoss: -30, contracts: +body.qty }),
+    portfolio: { account: PAPER }, capital: CAPITAL,
+  });
+  assert.equal(g.limits.tradeRisk, 210, "and the gate measured all seven");
+});
+
+/* ============================================================================
+   NO SECOND COPY OF A RULE NUMBER (ROADMAP P0's last inherited debt).
+
+   `App.jsx` carried a bare `REASON_MIN = 15` beside `RULES.minOverrideReasonChars`
+   and now reads the constant. The sweep for the rest of that disease found three
+   more: the Build screen's default horizon, the wide search's default horizon and
+   its fallback, all spelled `45` where `RULES.targetEntryDTE` lives.
+
+   This test cannot prove there is no copy anywhere — a number can be written a
+   hundred ways. What it does is refuse the SHAPES a copy actually takes in this
+   codebase: a default, an initial state, or a local constant holding a value
+   that already has a home.
+============================================================================ */
+
+test("RULES LITERALS — no UI file keeps its own copy of a rule number", () => {
+  const RULE_LITERALS = [
+    ["targetEntryDTE", RULES.targetEntryDTE],
+    ["minEntryDTE", RULES.minEntryDTE],
+    ["exitDTE", RULES.exitDTE],
+    ["maxEntryDTE", RULES.maxEntryDTE],
+    ["minOverrideReasonChars", RULES.minOverrideReasonChars],
+    ["lowConfidence", RULES.lowConfidence],
+    ["expensiveIVRank", RULES.expensiveIVRank],
+    ["suggestedTradingCapital", RULES.suggestedTradingCapital],
+    ["suggestedConcurrentTarget", RULES.suggestedConcurrentTarget],
+    ["minOpenInterestAbsolute", RULES.minOpenInterestAbsolute],
+    ["minPeersForPercentile", RULES.minPeersForPercentile],
+  ];
+  // The name has to be about a RULE, not about a pixel. `max: 40` on a progress
+  // bar and `minHeight: 40` on a button are not copies of `lowConfidence`.
+  const RULEISH = /(dte|day|horizon|capital|target|confidence|reason|chars|contract|percentile|interest|premium|slippage|exposure|entry|exit|override|floor)/i;
+  const COSMETIC = /(height|width|size|weight|radius|spacing|top|left|right|bottom|opacity|index|gap|padding|margin|font|stroke|delay|duration|color)/i;
+  const bad = [];
+  for (const file of ["App.jsx", "pro.jsx", "wizard.jsx"]) {
+    const code = codeOf(file);
+    for (const [name, value] of RULE_LITERALS) {
+      const v = String(value).replace(".", "\\.");
+      // Shape 1: an initial state — `useState(45)`.
+      for (const hit of code.match(new RegExp(`useState\\(\\s*${v}\\s*\\)`, "g")) || []) {
+        bad.push(`${file}: ${hit} — ${name} is ${value} in RULES`);
+      }
+      // Shape 2: a property or a local constant — `dteT: 45`, `REASON_MIN = 15`.
+      for (const hit of code.match(new RegExp(`\\b[A-Za-z_][A-Za-z0-9_]*\\s*[:=]\\s*${v}\\b(?![.\\d])`, "g")) || []) {
+        const ident = hit.split(/[:=]/)[0].trim();
+        if (RULEISH.test(ident) && !COSMETIC.test(ident)) {
+          bad.push(`${file}: ${hit.trim()} — ${name} is ${value} in RULES`);
+        }
+      }
+    }
+  }
+  assert.deepEqual(bad, [], `a rule number has a home; these are copies:\n  ${bad.join("\n  ")}`);
+});
+
+test("RULES LITERALS — the test can actually see a copy when there is one", () => {
+  // A guard that cannot fail is not a guard. This is the shape the sweep found
+  // three times in App.jsx, checked against the same matcher.
+  const sample = `const [dteManual, setDteManual] = useState(${RULES.targetEntryDTE});`;
+  assert.ok(new RegExp(`useState\\(\\s*${RULES.targetEntryDTE}\\s*\\)`).test(sample));
+  const sample2 = `  const REASON_MIN = ${RULES.minOverrideReasonChars};`;
+  const m = sample2.match(new RegExp(`\\b[A-Za-z_][A-Za-z0-9_]*\\s*[:=]\\s*${RULES.minOverrideReasonChars}\\b`));
+  assert.ok(m && /reason/i.test(m[0]), "the bare REASON_MIN this session inherited would be caught");
 });
 
 /* ============================================================================
