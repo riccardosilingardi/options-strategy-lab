@@ -97,7 +97,17 @@ export const legsLine = (legs = []) =>
  * @param {object} raw   a road, a shortlist row, a multi-scan hit or a saved item
  * @param {object} extra { source, ticker, spot, expKey, dte, sigma, bars }
  * @returns {?object} { key, source, ticker, name, legs, entryNet, spot, expKey,
- *                      dte, maxProfit, maxLoss, risk, pop, rr, sigma }
+ *                      dte, maxProfit, maxLoss, risk, pop, rr, sigma,
+ *                      seasonalSource, seasonalYears, seasonalAgeDays }
+ *
+ * THE CHANCE TRAVELS WITH ITS SOURCE. `pop` is drifted on a seasonal table, and
+ * which table decides it: one corrected CORN cell moves a printed chance by
+ * 18.8 points. A kept candidate is read back days later, so carrying the number
+ * without the stamp would make it unreadable exactly when it is re-read. The
+ * ABSENCE of the stamp is the marker, as with `contractsAssumed`: a candidate
+ * saved before this PR carries none, and `seasonalStampOf()` in rules.js reads
+ * that absence as the hand-written estimate, because at that point the
+ * hand-written table was the only one the app could reach.
  */
 export function candidateOf(raw, extra = {}) {
   if (!raw) return null;
@@ -120,6 +130,11 @@ export function candidateOf(raw, extra = {}) {
     dte: num(raw.dte, extra.dte),
     maxProfit, maxLoss, risk,
     pop: num(raw.pop, extra.pop),
+    // Never defaulted: an unstamped candidate stays unstamped, which is what
+    // `seasonalStampOf()` reads as the hand-written estimate.
+    seasonalSource: raw.seasonalSource ?? extra.seasonalSource ?? null,
+    seasonalYears: num(raw.seasonalYears, extra.seasonalYears),
+    seasonalAgeDays: num(raw.seasonalAgeDays, extra.seasonalAgeDays),
     rr: Number.isFinite(raw.rr) ? raw.rr
       : (Number.isFinite(maxProfit) && Number.isFinite(maxLoss) && maxLoss < 0 ? maxProfit / Math.abs(maxLoss) : null),
     sigma: num(raw.sigma, extra.sigma),
@@ -190,6 +205,10 @@ export function savedFromCandidate(c, now = Date.now()) {
     maxProfit: c.maxProfit ?? null,
     maxLoss: c.maxLoss ?? null,
     pop: c.pop ?? null,
+    // ...and the stamp is saved with it, for the same reason the price is.
+    seasonalSource: c.seasonalSource ?? null,
+    seasonalYears: c.seasonalYears ?? null,
+    seasonalAgeDays: c.seasonalAgeDays ?? null,
     from: c.source || "shortlist",
   };
 }

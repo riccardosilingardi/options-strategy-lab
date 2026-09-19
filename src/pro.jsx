@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { RefreshCw, Send, Trash2, Download, Sparkles, FileText, XCircle } from "lucide-react";
 import { T } from "./theme.js";
 import { RULES, ruleBadge, takeProfitLabel, scaleOutLabel, stopLossLabel, exitDTELabel, perTradeCapLabel, copilotRulesBlock, money, pctText, MIN_NET_DOLLARS,
-  NO_CEILING, reportNarrativePrompt, chanceText,
+  NO_CEILING, reportNarrativePrompt, chanceText, seasonalStampNote,
   comboBook, openLimitPrice, openLimitNote, limitPlacement, notionalControlled, notionalNote,
   ivProvenance } from "./rules.js";
 import { contractsOf, autopilotHorizonNote } from "./journal.js";
@@ -975,7 +975,12 @@ export function buildContext(ctx) {
       // whose simulation ran to a horizon the app no longer uses must not be
       // quoted back as if it described today's rule.
       timeline: (p.timeline || []).slice(-5).map((e) => [e.text, autopilotHorizonNote(e)].filter(Boolean).join(" ")) })),
-    scanner: (scan || []).map((s) => ({ tk: s.tk, seasonalMonthPct: +s.seasonalScore.toFixed(1), sentiment: s.sugg, source: s.real ? "real history" : "estimate",
+    // WHICH SEASONAL TABLE EACH MARKET IS ON, IN THE MODEL'S OWN CONTEXT. It
+    // read "real history" or "estimate" with no age and no year count, and the
+    // per-position `thesis` it is handed below now carries the same stamp for
+    // the chance recorded at entry — so the model cannot describe a
+    // hand-written guess as a measurement of the market.
+    scanner: (scan || []).map((s) => ({ tk: s.tk, seasonalMonthPct: +s.seasonalScore.toFixed(1), sentiment: s.sugg, source: seasonalStampNote(s, s.tk),
       fourFactorSignal: s.fused ? { score: s.fused.score, confidence: s.fused.confidence, agreement: s.fused.agreement, narrative: s.fused.narrative } : null })),
     taggedNews: (news || []).slice(0, 10).map((n) => ({ title: n.title, geo: !!n.geo,
       impacts: (n.impacts || []).map((im) => ({ tk: im.tk, dir: ARROW[im.dir], why: im.why })) })),
@@ -1142,7 +1147,15 @@ export function buildReportMd(ctx, weatherSig, aiText) {
   const L = [];
   L.push(`# Commodity Options Report — ${d}\n`);
   L.push(`## 1 · Opportunities (seasonal scanner)`);
-  (scan || []).slice(0, 3).forEach((s, i) => L.push(`${i + 1}. **${s.tk}** — seasonal ${s.seasonalScore > 0 ? "+" : ""}${s.seasonalScore.toFixed(1)}%/mo (${s.real ? "real history" : "estimate"}) → leaning **${s.sugg.toUpperCase()}**`));
+  // WHICH TABLE EACH FIGURE CAME FROM, PER MARKET. "(real history)" against
+  // "(estimate)" was two words with no age and no year count behind them, and
+  // the footer then asserted ONE seasonality source for a document covering
+  // five markets that routinely have two. `seasonalStampNote()` is the same
+  // sentence every screen prints, read off the row's own stamp — and a row with
+  // no stamp is one written before the app recorded one, which the sentence
+  // says rather than guessing.
+  (scan || []).slice(0, 3).forEach((s, i) => L.push(
+    `${i + 1}. **${s.tk}** — seasonal ${s.seasonalScore > 0 ? "+" : ""}${s.seasonalScore.toFixed(1)}%/mo → leaning **${s.sugg.toUpperCase()}**\n   _${seasonalStampNote(s, s.tk)}_`));
   L.push(`\n## 2 · Positions against the rules (${ruleBadge()})`);
   if (!store.positions.length) L.push("No open positions.");
   store.positions.forEach((p) => {
@@ -1178,7 +1191,10 @@ export function buildReportMd(ctx, weatherSig, aiText) {
       L.push(String(c.answer || ""));
     });
   }
-  L.push(`\n---\n_Seasonality source: ${seasonalSrc}. Paper trading only. Educational software, not financial advice._`);
+  // The footer names the screen the report was generated from, and NOT the
+  // whole document's seasonality: each market above carries its own, because
+  // four of five can be on the hand-written estimate while the fifth is not.
+  L.push(`\n---\n_Generated from the ${seasonalSrc} reading on screen; each market above states its own seasonal source. Paper trading only. Educational software, not financial advice._`);
   return L.join("\n");
 }
 function svgPayoff(legs, entryNet, S0) {
@@ -1436,7 +1452,7 @@ export function exitPathSim(pos, S, dteLeft, iv, sigma, nSim = 2000) {
 // Exit Ladder: prezzo netto combo per target P&L
 export const ladderNet = (entryNet, targetPnl) => entryNet + targetPnl / 100;
 
-export function GuardianPanel({ pos, spot, dteLeft, ivNow, sigma, seasonalNow, pnlNow, popNow, vegaSign, alpaca, quoteFn, buildOcc, setMsg, logEvent, gate }) {
+export function GuardianPanel({ pos, spot, dteLeft, ivNow, sigma, seasonalNow, pnlNow, popNow, chanceNow, seasonalNote, thesisSeasonalNote, vegaSign, alpaca, quoteFn, buildOcc, setMsg, logEvent, gate }) {
   // How many combinations this position is. `pos.maxProfit`, `pos.maxLoss` and
   // `pos.entryNet` are all per combination; `pnlNow` is the whole position's.
   const size = contractsOf(pos);
@@ -1444,6 +1460,11 @@ export function GuardianPanel({ pos, spot, dteLeft, ivNow, sigma, seasonalNow, p
   const [busy, setBusy] = useState(false);
   const [ladderBusy, setLadderBusy] = useState(null);
   const { tis, comp } = computeTIS(pos, { pop: popNow, ivNow, seasonalNow, dteLeft, vegaSign });
+  // The chance is HANDED to this file, sentence included — `chanceOf()` stamps
+  // its own result, so the panel reads the answer rather than deciding again
+  // which seasonal table it was drifted on. The caller may pass the sentence
+  // directly; `chanceNow` is the object it came from and is the fallback.
+  const nowSeasonalNote = seasonalNote || (chanceNow ? chanceNow.seasonalNote : null);
   const tisColor = tis >= 70 ? T.green : tis >= 40 ? T.amber : T.red;
   useEffect(() => {
     if (tis < 40) logEvent(pos.id, "tis-low", `The reason you opened this has weakened to ${tis}/100 — consider trimming or closing`);
@@ -1515,6 +1536,19 @@ export function GuardianPanel({ pos, spot, dteLeft, ivNow, sigma, seasonalNow, p
           ))}
         </div>
       </div>
+      {/* WHICH SEASONAL TABLE THE CHANCE WAS DRIFTED ON, ON BOTH SIDES OF THE
+          COMPARISON. The first bar above divides today's chance by the one
+          recorded at entry; if the market was on the hand-written estimate then
+          and on measured prices now, that bar reads a change in the TABLE as a
+          change in the trade. The two sentences make that visible instead of
+          scoring it. `chanceNow` is passed in and never recomputed here — this
+          file is handed the answer (see the note above `computeTIS`). */}
+      {(nowSeasonalNote || thesisSeasonalNote) && (
+        <div style={{ ...mono, fontSize: 9, color: T.dim, marginTop: 8, lineHeight: 1.6 }}>
+          {nowSeasonalNote ? <div>NOW · {nowSeasonalNote}</div> : null}
+          {thesisSeasonalNote ? <div>AT ENTRY · {thesisSeasonalNote}</div> : null}
+        </div>
+      )}
       {pct != null && (
         <div style={{ marginTop: 8 }}>
           <div style={{ ...mono, fontSize: 9, color: T.dim }}>PROGRESS TOWARDS THE MAXIMUM · {takeProfitLabel()} · rest out at {scaleOutLabel()}</div>

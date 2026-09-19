@@ -614,38 +614,64 @@ export const chanceSeedKey = ({ ticker = "?", expKey = "?", legs = [], spot = 0,
  * @param spot        today's price
  * @param iv          the structure's own implied volatility (chain average)
  * @param dte         days to expiry
- * @param monthlyMean twelve seasonal monthly means in percent
+ * @param seasonal    a `seasonalProvenance()` RESULT, never a bare row of means:
+ *                    the drift is the one input the market has no say in, so the
+ *                    chance may not be computed without knowing whose table it
+ *                    came from. A caller handing twelve numbers straight in is a
+ *                    programmer error and THROWS, the same discipline as
+ *                    `terminalMC()` throwing without an exit policy.
  * @param month       the month the window starts in, 0-11
  * @param ticker      part of the seed, and what the fallback sentence names
  * @param expKey      part of the seed
  * @param thesisIV    an implied volatility the position remembered, if any
- * @returns the `terminalMC` result plus `{ ivSource, ivNote, seedKey }`, or
- *          null when there is nothing to simulate.
+ * @returns the `terminalMC` result plus `{ ivSource, ivNote, seedKey }` and the
+ *          seasonal stamp (`seasonalSource`, `seasonalMeasured`, `seasonalYears`,
+ *          `seasonalAgeDays`, `seasonalNote`), or null when there is nothing to
+ *          simulate — including when there is no seasonal reading at all.
  */
-export function chanceOf({ legs, entryNet, spot, iv, dte, monthlyMean, month,
+export function chanceOf({ legs, entryNet, spot, iv, dte, seasonal, month,
   ticker = "this market", expKey = null, thesisIV = null } = {}) {
+  // THE SHAPE IS CHECKED BEFORE ANYTHING ELSE, and it throws rather than
+  // returning null: a missing INPUT is a dash on screen, a missing PROVENANCE
+  // is a call site that would print a number nobody can trace.
+  if (!seasonal || typeof seasonal !== "object" || Array.isArray(seasonal) || typeof seasonal.source !== "string") {
+    throw new Error("chanceOf needs a seasonalProvenance() result as `seasonal`, never a bare row of monthly means: see src/rules.js");
+  }
   if (!Array.isArray(legs) || !legs.length) return null;
   if (!Number.isFinite(entryNet) || !(spot > 0) || !(dte > 0)) return null;
-  const driftAnnual = seasonalDrift(monthlyMean, month, dte);
+  // NO SILENT SUBSTITUTION. No table at all means no chance — not a drift of
+  // zero, which would be a confident claim that the market goes nowhere.
+  if (seasonal.missing) return null;
+  const driftAnnual = seasonalDrift(seasonal.monthlyMean, month, dte);
   if (!Number.isFinite(driftAnnual)) return null;
   const vol = ivProvenance(iv, thesisIV, ticker);
   const seedKey = chanceSeedKey({ ticker, expKey, legs, spot, dte });
   const mc = terminalMC(legs, entryNet, spot, {
     driftAnnual, sigma: vol.iv, dte, runs: RULES.mcRuns, seed: seedFrom(seedKey),
   });
-  return { ...mc, ivSource: vol.source, ivNote: vol.fromFallback ? vol.note : null, seedKey };
+  return { ...mc, ivSource: vol.source, ivNote: vol.fromFallback ? vol.note : null, seedKey,
+    seasonalSource: seasonal.source, seasonalMeasured: seasonal.measured,
+    seasonalYears: seasonal.years, seasonalAgeDays: seasonal.ageDays, seasonalNote: seasonal.note };
 }
 
 /**
  * One sentence saying what the chance on screen is an answer about. It names
  * the drift, because the drift is what changed and what every one of these
- * numbers now depends on.
+ * numbers now depends on — AND IT NAMES WHOSE TABLE THE DRIFT CAME FROM.
+ *
+ * It used to say "${ticker}'s own seasonal reading" whatever the source was,
+ * which is true of a measured series and false of the hand-written row: that
+ * row is a guess somebody typed, not a reading of ${ticker}. `seasonalNote` is
+ * the one sentence and it is generated where the decision was made, so this
+ * cannot drift from what the Radar says about the same market.
  */
 export const chanceSourceNote = (mc, ticker = "this market") => {
   if (!mc) return "There is no chance to show: something this calculation needs — a price, a horizon or a seasonal reading — is missing.";
   return `Out of ${mc.runs.toLocaleString("en-US")} simulated runs, priced at ${pctText(mc.sigma)} implied volatility ` +
-    `and drifting at ${pctText(mc.driftAnnual)} a year — which is ${ticker}'s own seasonal reading over the window ` +
-    `this trade is held for, not a market-neutral assumption.`;
+    `and drifting at ${pctText(mc.driftAnnual)} a year over the window this trade is held for, not a ` +
+    `market-neutral assumption. ` +
+    (mc.seasonalNote || seasonalSourceSentence({ measured: !!mc.seasonalMeasured, ticker,
+      years: mc.seasonalYears ?? null, ageDays: mc.seasonalAgeDays ?? null }));
 };
 
 /* ============================== rule text ==============================
@@ -2104,6 +2130,171 @@ export const fallbackIVNote = (ticker = "this market", iv = FALLBACK_IV, source 
       : `THE OPTIONS ARE PRICED AT A FALLBACK VOLATILITY. Neither today's chain nor this position's own record ` +
         `gave one for ${ticker}, so ${pctText(iv)} was used — a number chosen as a middle for a commodity ETF, ` +
         `never measured. Every figure worked out from it is that assumption's.`;
+
+/* --------------------------------------------------------------------
+   AND THE SEASONAL MEANS THE DRIFT IS TAKEN FROM, WHICH IS A THIRD QUANTITY.
+
+   `sigmaProvenance()` answers "what realised volatility is the SHARE walked
+   at". `ivProvenance()` answers "what implied volatility are the OPTIONS priced
+   at". This answers "WHOSE SEASONALITY is the distribution leaning on" — the
+   drift, which is the app's own thesis and the one input to the chance that the
+   market has no say in at all.
+
+   WHY IT NEEDED A HOME OF ITS OWN.
+
+   `SEASONAL` in engine.js is hand-written and carries the heaviest of the four
+   weights. Measured against 195 months of real Alpha Vantage data for CORN it
+   has the WRONG SIGN on eight months of twelve. Correcting ONE cell moves the
+   printed chance by 18.8 points and flips the sign of the expected value: CORN
+   June reads +1.5 in the table against a measured ten-year mean of -3.46, which
+   is a drift of +16.8% a year against -13.0%, a chance of 52.7% against 33.9%
+   and an average result of +$16.86 against -$16.57 on one 19/21 call spread.
+   September is the same fault the other way round (-1.1 against +1.03).
+
+   So the sentence beside a chance is not decoration. Two markets on two tables
+   print two numbers of the same name, and until now nothing on any screen said
+   which of the two had produced the one being read. PR #25 wrote that debt down
+   and left it open; this is what closes it.
+
+   AND THE TWO SIDES DID NOT EVEN READ THE SAME TABLE. `App.jsx` loaded measured
+   means per basket market into state and fell back to the hand-written row per
+   market; `autopilot.mjs` passed `SEASONAL[pos.ticker] || SEASONAL.SPY` with no
+   measured means available to it at all. The brief and the screen could differ
+   on one position for a reason neither of them named.
+
+   THREE RULES, THE SAME THREE EVERY OTHER PROVENANCE IN THIS FILE KEEPS.
+
+   1. DECIDED ONCE AND CARRIED. `chanceOf()` takes the result of this function
+      and stamps it into its own, so every screen reads the answer rather than
+      re-deciding it.
+   2. NO DEFAULT AND NO SILENT SUBSTITUTION. With no means at all — neither
+      measured nor hand-written — `missing` is true, `chanceOf()` returns null
+      and the interface prints a dash with a sentence. A drift of zero standing
+      in for a reading nobody has is a confident claim that the market goes
+      nowhere, which is not the same thing as not knowing.
+   3. THE ABSENCE OF THE STAMP IS THE MARKER, exactly as `contractsAssumed` and
+      `simExitDTE` work: a record written before this existed carries no
+      seasonal source, and `seasonalStampOf()` reads that absence as the
+      hand-written estimate rather than inventing a measurement for it.
+
+   Deriving the TABLE itself from measured returns is ROADMAP P2 and is
+   deliberately not done here. Nothing inside `SEASONAL` is edited by hand: this
+   changes where the means come from and what the app SAYS about them.
+-------------------------------------------------------------------- */
+
+/** Twelve monthly means worked out from real monthly prices. */
+export const MEASURED_SEASONAL_SOURCE = "measured history";
+
+/** ...the hand-written row in engine.js, which is an estimate and says so. */
+export const ESTIMATED_SEASONAL_SOURCE = "hand-written estimate";
+
+/** ...and no reading at all, which is not a drift of zero. */
+export const NO_SEASONAL_SOURCE = "none";
+
+/** Twelve finite numbers, or it is not a seasonal row. */
+const seasonalRowOk = (m) => Array.isArray(m) && m.length === 12 && m.every((x) => Number.isFinite(x));
+
+/** How old the measured reading is, in words. Null is "not recorded", never "today". */
+export const seasonalAgePhrase = (ageDays) => {
+  if (!Number.isFinite(ageDays)) return "read on a date this record does not carry";
+  if (ageDays <= 0) return "read today";
+  if (ageDays === 1) return "read yesterday";
+  return `read ${Math.round(ageDays)} days ago`;
+};
+
+/**
+ * ONE SENTENCE NAMING WHICH TABLE DRIFTED A CHANCE AND HOW OLD IT IS.
+ * Every screen that prints a chance prints this beside it, and the autopilot's
+ * brief carries the same string, so a number cannot travel without its source.
+ */
+export const seasonalSourceSentence = ({ measured = false, missing = false, ticker = "this market",
+  years = null, ageDays = null } = {}) => {
+  if (missing) {
+    return `There is no seasonal reading for ${ticker} at all — neither measured prices nor a written estimate — ` +
+      `so no chance is worked out for it. A drift of zero would be a claim that ${ticker} goes nowhere, ` +
+      `which is a different thing from not knowing.`;
+  }
+  if (measured) {
+    return `Drifted on ${ticker}'s MEASURED seasonality: ` +
+      `${Number.isFinite(years) ? `${years} years of` : "its own"} monthly prices, ${seasonalAgePhrase(ageDays)}.`;
+  }
+  return `Drifted on the HAND-WRITTEN seasonal estimate for ${ticker}, not on measured prices. ` +
+    `That table is wrong on eight months of twelve where it has been checked, so this chance is an ` +
+    `estimate's estimate until ${ticker}'s real price history loads.`;
+};
+
+/**
+ * WHICH SEASONAL MEANS ARE IN FORCE, DECIDED ONCE.
+ *
+ * @param measured  the loaded Alpha Vantage reading for this market, or null:
+ *                  `{ monthlyMean, years, at }` — `at` is when it was read, in
+ *                  epoch ms, and is what the age in the sentence comes from.
+ * @param fallback  the hand-written row for this market (`SEASONAL[tk]`), or null
+ * @param ticker    what the sentence names
+ * @returns { monthlyMean, measured, missing, source, years, ageDays, ticker, note }
+ */
+export function seasonalProvenance(measured, fallback, ticker = "this market") {
+  const meas = measured && seasonalRowOk(measured.monthlyMean) ? measured : null;
+  const fall = seasonalRowOk(fallback) ? fallback : null;
+  const monthlyMean = meas ? meas.monthlyMean : fall;
+  const missing = !monthlyMean;
+  // `Number.isFinite` on both, because `Number(null)` is 0 and 0 is finite: a
+  // missing year count must not print as "0 years of monthly prices" and a
+  // missing timestamp must not read as "read today".
+  const years = meas && Number.isFinite(meas.years) ? meas.years : null;
+  const ageDays = meas && Number.isFinite(meas.at)
+    ? Math.max(0, Math.floor((Date.now() - meas.at) / 86400000)) : null;
+  const out = {
+    monthlyMean: monthlyMean || null,
+    measured: !!meas,
+    missing,
+    source: meas ? MEASURED_SEASONAL_SOURCE : fall ? ESTIMATED_SEASONAL_SOURCE : NO_SEASONAL_SOURCE,
+    years, ageDays, ticker,
+  };
+  out.note = seasonalSourceSentence(out);
+  return out;
+}
+
+/**
+ * THE STAMP ON A STORED RECORD, AND WHAT ITS ABSENCE MEANS.
+ *
+ * A position's entry thesis, a kept candidate and an autopilot entry all carry
+ * the chance they were written with. New ones carry `seasonalSource` beside it;
+ * everything written before this PR carries nothing, and nothing is exactly the
+ * evidence that the hand-written table was in force — it was the only table
+ * either side could reach. Reading a missing stamp as "measured" would invent a
+ * measurement; reading it as "unknown" would hide one the record can settle.
+ *
+ * `Number.isFinite` guards both numbers for the usual reason: a record with no
+ * year count must not read as zero years of history.
+ */
+export const seasonalStampOf = (rec) => {
+  const r = rec || {};
+  const stamped = r.seasonalSource === MEASURED_SEASONAL_SOURCE || r.seasonalSource === ESTIMATED_SEASONAL_SOURCE;
+  const measured = r.seasonalSource === MEASURED_SEASONAL_SOURCE;
+  return {
+    stamped,
+    measured,
+    source: stamped ? r.seasonalSource : ESTIMATED_SEASONAL_SOURCE,
+    years: measured && Number.isFinite(r.seasonalYears) ? r.seasonalYears : null,
+    ageDays: measured && Number.isFinite(r.seasonalAgeDays) ? r.seasonalAgeDays : null,
+  };
+};
+
+/** The same one sentence, for a record rather than a live reading. */
+export const seasonalStampNote = (rec, ticker = "this market") => {
+  const s = seasonalStampOf(rec);
+  return (s.stamped ? "" : "This record carries no seasonal stamp, which means it was written before the app " +
+    "recorded one — and at that point the hand-written table was the only one either side could reach. ") +
+    seasonalSourceSentence({ measured: s.measured, ticker, years: s.years, ageDays: s.ageDays });
+};
+
+/** The three fields a record keeps, from a `seasonalProvenance()` result. */
+export const seasonalStampFields = (prov) => ({
+  seasonalSource: prov?.source ?? null,
+  seasonalYears: prov?.years ?? null,
+  seasonalAgeDays: prov?.ageDays ?? null,
+});
 
 /* --------------------------------------------------------------------
    WHEN A POSITION ASKS TO BE LOOKED AT.

@@ -1,9 +1,9 @@
 // AUTOPILOT — Netlify Scheduled Function (giorni feriali 11:00 UTC ≈ 13:00 CET, pre-apertura USA)
 // Ciclo: posizioni → dati oggettivi (chain CBOE, stagionalità) → TIS + Exit Simulator → brief Claude → approve link → webhook
 import { getStore } from "@netlify/blobs";
-import { netBS, exitSim, SEASONAL, SIGMA } from "../../src/engine.js";
+import { netBS, exitSim, SEASONAL, SIGMA, parseAvJson, statsFromMatrix } from "../../src/engine.js";
 import { RULES, ruleBadge, copilotRulesBlock, pctText,
-  markProvenance, sigmaProvenance, ivProvenance, chanceOf, chanceSourceNote,
+  markProvenance, sigmaProvenance, ivProvenance, seasonalProvenance, chanceOf, chanceSourceNote,
   autopilotVerdict, AUTOPILOT_VERDICTS, MODEL_PRICE } from "../../src/rules.js";
 import { evaluateTrade } from "../../src/riskGate.js";
 // HOW MANY COMBINATIONS THE POSITION IS. A close proposed at one lot on a
@@ -64,11 +64,64 @@ const EXIT_POLICY = { exitDTE: RULES.exitDTE, takeProfitPct: RULES.takeProfitPct
 // name (CLAUDE.md) — it is handed one, and this is the site that knows it.
 const CHAIN_FEED = "CBOE delayed";
 
+/* ============================================================================
+   THE SAME SEASONAL MEANS THE SCREENS READ — AND NOT ONE EXTRA REQUEST.
+
+   Before this the brief drifted every chance on `SEASONAL[pos.ticker]`, the
+   HAND-WRITTEN table, while `App.jsx` had been loading measured monthly means
+   per basket market for four pull requests. The two sides answered "what is the
+   chance" from two different tables about the same position, and neither said
+   so. On CORN that is worth 18.8 percentage points and the sign of the expected
+   value from a single corrected cell.
+
+   THE QUOTA IS THE CONSTRAINT AND IT IS WHY NOTHING HERE FETCHES. Alpha
+   Vantage's free tier is 25 requests A DAY for five markets. `av.mjs` already
+   caches each market's body in this very blob store under `av/<SYM>.json` with
+   a seven-day TTL, so this reads WHAT THE CLIENT'S LOADS HAVE ALREADY PUT
+   THERE. Three rules hold it:
+
+     - IT NEVER CALLS ALPHA VANTAGE. A miss is a miss: the market falls back to
+       the hand-written row and the brief SAYS it did.
+     - A STALE ENTRY IS SERVED AS IS, with no TTL test. Month-old measured
+       seasonality beats a table with the wrong sign on eight months of twelve,
+       and the age travels with it into the sentence the brief prints.
+     - ONE READ PER TICKER, NEVER ONE PER POSITION. Three BOIL positions in the
+       book are one blob read, memoised below, because a loop that reads per
+       position is how a cheap read becomes a per-run cost nobody notices.
+
+   `parseAvJson` and `statsFromMatrix` come from engine.js, which is where they
+   were moved to for exactly this: the client and this function derive the means
+   from ONE parse of ONE body, or they are two seasonal tables again.
+============================================================================ */
+// Module scope, so a book with three BOIL positions is one blob read — and
+// CLEARED at the top of every run, because a warm container would otherwise pin
+// one run's reading for the life of the container and quietly serve it to the
+// next. A cache that outlives the question it answered is the same fault as a
+// number with two homes.
+const seasonalCache = new Map();
+async function measuredSeasonal(store, sym) {
+  if (seasonalCache.has(sym)) return seasonalCache.get(sym);
+  let out = null;
+  try {
+    const blob = await store.get(`av/${sym}.json`, { type: "json" });
+    if (blob?.body) {
+      const st = statsFromMatrix(parseAvJson(blob.body).matrix);
+      // `years > 0` because a matrix with no rows gives twelve zeros, and twelve
+      // zeros is a drift of zero — a confident claim rather than a reading.
+      if (st.years > 0) out = { monthlyMean: st.monthlyMean, years: st.years, at: blob.at ?? null };
+    }
+  } catch { out = null; }   // a missing, unreadable or refusal body is simply a miss
+  seasonalCache.set(sym, out);
+  return out;
+}
+
 function computeTIS(pos, cur) {
   const th = pos.thesis || {};
   let pts = 0;
   pts += th.pop && cur.pop ? Math.round(Math.max(0, Math.min(1.2, cur.pop / th.pop)) / 1.2 * 40) : 20;
-  const same = th.seasonal == null || Math.sign(th.seasonal) === Math.sign(cur.seasonalNow);
+  // UNKNOWN IS NOT DISAGREEMENT. `Math.sign(null)` is 0, so a market with no
+  // seasonal reading at all would score as having flipped against the thesis.
+  const same = th.seasonal == null || cur.seasonalNow == null || Math.sign(th.seasonal) === Math.sign(cur.seasonalNow);
   pts += same ? 16 : 4;
   // THE SAME FALLBACK, FROM THE SAME HOME. Both sides of this difference used
   // to spell a bare 0.25; when neither the chain nor the thesis has an implied
@@ -84,6 +137,7 @@ function computeTIS(pos, cur) {
 /* ---------- ciclo ---------- */
 export default async () => {
   const store = getStore("autopilot");
+  seasonalCache.clear();
   const state = JSON.parse((await store.get("state")) || "{}");
   const approvals = JSON.parse((await store.get("approvals")) || "{}");
   const briefsPrev = JSON.parse((await store.get("briefs")) || "{}");
@@ -128,7 +182,15 @@ export default async () => {
     const prov = markProvenance(m?.net ?? null, CHAIN_FEED);
     const markNet = m?.net ?? netBS(pos.legs, spot, dteLeft, iv);
     const pnl = (markNet - pos.entryNet) * 100;
-    const seasonalNow = (SEASONAL[pos.ticker] || SEASONAL.SPY)[month];
+    // WHICH SEASONAL TABLE THIS POSITION IS READ AGAINST, DECIDED ONCE AND
+    // CARRIED — the `markProvenance()` discipline applied to the drift, which is
+    // the one input to the chance the market has no say in at all.
+    const seas = seasonalProvenance(await measuredSeasonal(store, pos.ticker),
+      SEASONAL[pos.ticker] || SEASONAL.SPY, pos.ticker);
+    // UNKNOWN IS NOT A NUMBER, HERE TOO: with no table at all there is no
+    // seasonal reading to score the thesis against, and `computeTIS` treats a
+    // null the way it already treats a missing entry thesis.
+    const seasonalNow = seas.missing ? null : seas.monthlyMean[month];
     // THE ONE CHANCE, AND THE BRIEF READS THE SAME ENGINE THE SCREENS DO.
     // This was `probProfit()` in engine.js: a closed form at a RISK-NEUTRAL
     // drift of 0.045, while the Build screen drifted its own Monte Carlo on
@@ -138,7 +200,7 @@ export default async () => {
     // score was measuring the gap between two formulas as much as two days.
     const chance = chanceOf({
       legs: pos.legs, entryNet: pos.entryNet, spot, iv, dte: Math.max(1, dteLeft),
-      monthlyMean: SEASONAL[pos.ticker] || SEASONAL.SPY, month,
+      seasonal: seas, month,
       ticker: pos.ticker, expKey: pos.expKey || null, thesisIV: pos.thesis?.iv ?? null,
     });
     // UNKNOWN IS NOT A NUMBER. `chanceOf` returns null when it has no spot, no
@@ -182,7 +244,12 @@ export default async () => {
             // model was free to describe it as the market's own odds. It is a
             // simulation at THIS MARKET'S seasonal drift, which is a claim the
             // app is making rather than one the market is.
-            popNow_from: chance ? { runs: chance.runs, drift_pct_per_year: +(chance.driftAnnual * 100).toFixed(1), volatility_pct: +(chance.sigma * 100).toFixed(0), drift_source: "this market's own seasonal means over the window held" } : null },
+            // AND WHOSE SEASONALITY. `drift_source` said "this market's own
+            // seasonal means" whichever table produced them, which is true of a
+            // measured series and false of a row somebody typed. The model was
+            // free to describe a guess as a measurement; now it is told which,
+            // and how old, in the app's own sentence.
+            popNow_from: chance ? { runs: chance.runs, drift_pct_per_year: +(chance.driftAnnual * 100).toFixed(1), volatility_pct: +(chance.sigma * 100).toFixed(0), drift_source: chance.seasonalSource, drift_is_measured: !!chance.seasonalMeasured, drift_years: chance.seasonalYears, drift_age_days: chance.seasonalAgeDays, drift_note: chance.seasonalNote } : null },
           // THE HORIZON IS STATED BESIDE THE NUMBERS COMPUTED AT IT. The field
           // name `p_exit_at_exit_dte_positive` asserted a rule the arithmetic
           // did not apply; `simulated_to_dte` is the simulator's own answer to
@@ -303,6 +370,13 @@ export default async () => {
       // implied volatility, and — the half that changed — at whose drift.
       chanceNote: chanceSourceNote(chance, pos.ticker),
       chanceRuns: chance ? chance.runs : null, chanceDrift: chance ? chance.driftAnnual : null,
+      // AND THE STAMP GOES ON THE RECORD, not only into the sentence. The
+      // ABSENCE of these three is the marker — an entry written before this PR
+      // carries none, and at that point the hand-written table was the only one
+      // this function could reach (`seasonalStampOf()` in rules.js).
+      seasonalSource: chance ? chance.seasonalSource : null,
+      seasonalYears: chance ? chance.seasonalYears : null,
+      seasonalAgeDays: chance ? chance.seasonalAgeDays : null,
       priceSource: prov.source, priceIsEstimated: prov.modelled,
       // WHICH VOLATILITY THE SIMULATION ABOVE IS AN ANSWER ABOUT.
       simSigma: vol.sigma, simSigmaSource: vol.source, simSigmaFromTable: vol.fromTable,
