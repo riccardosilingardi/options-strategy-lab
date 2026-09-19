@@ -32,8 +32,14 @@ import {
   closeMarket, closeLimitPrice, closeLimitNote, closeUnreadableNote,
 } from "./rules.js";
 import { orderBody } from "./order.js";
-import { exitSim, SIGMA } from "./engine.js";
-import { sigmaProvenance, FALLBACK_SIGMA, FALLBACK_SIGMA_SOURCE, TABLE_SIGMA_SOURCE } from "./rules.js";
+import { exitSim, SIGMA, parseAvJson, statsFromMatrix } from "./engine.js";
+import { sigmaProvenance, FALLBACK_SIGMA, FALLBACK_SIGMA_SOURCE, TABLE_SIGMA_SOURCE,
+  MEASURED_SIGMA_SOURCE } from "./rules.js";
+// THE MEASURED PATH, DRIVEN AGAINST A FAKE BLOB STORE. PR #26 shipped this
+// read and wrote down that it had never run once; no key and no egress can
+// change that here, but "unexercised" it no longer is.
+import { measuredSeasonal, resetSeasonalCache } from "../netlify/functions/autopilot.mjs";
+import { avMonthlyBody, AV_REFUSALS } from "./avFixture.js";
 import { chanceOf, chanceSourceNote, seasonalProvenance } from "./rules.js";
 import { SEASONAL } from "./engine.js";
 
@@ -43,6 +49,10 @@ function test(name, fn) {
   try { fn(); passed++; console.log(`  ok   ${name}`); }
   catch (e) { failures.push({ name, e }); console.log(`  FAIL ${name}\n       ${e.message}`); }
 }
+// `measuredSeasonal()` reads a store and is async. Queued here and awaited at
+// the bottom, so the report still counts every check in one place.
+const pending = [];
+const atest = (name, fn) => pending.push([name, fn]);
 
 const AUTOPILOT = readFileSync(new URL("../netlify/functions/autopilot.mjs", import.meta.url), "utf8");
 const APPROVE = readFileSync(new URL("../netlify/functions/approve.mjs", import.meta.url), "utf8");
@@ -452,7 +462,7 @@ test("THE SIMULATOR IS RUN AT THE EXIT RULE, AND THE POLICY COMES FROM ITS HOME"
   // `exitSim` held its own copies (0.5, 0.5 and 7) and `RULES.exitDTE` is 21.
   assert.ok(/const EXIT_POLICY = \{ exitDTE: RULES\.exitDTE, takeProfitPct: RULES\.takeProfitPct, stopLossPct: RULES\.stopLossPct \}/
     .test(AUTOPILOT_CODE), "the policy is read from RULES, in one place");
-  assert.ok(/exitSim\(pos, spot, dteLeft, iv, vol\.sigma, EXIT_POLICY\)/.test(AUTOPILOT_CODE),
+  assert.ok(/exitSim\(pos, spot, dteLeft, iv, vol, EXIT_POLICY\)/.test(AUTOPILOT_CODE),
     "and handed to the simulator, which has no default for it");
 });
 
@@ -467,7 +477,7 @@ test("THE FIELD NAMES CLAIM THE HORIZON THE BLOCK WAS COMPUTED AT", () => {
   // And the number in `simulated_to_dte` is the rule, not a second opinion:
   // `exitSim` returns the `exitDTE` it was RUN with, and it was run with RULES'.
   assert.equal(exitSim({ legs: [{ side: 1, type: "call", strike: 20, qty: 1 }], entryNet: 0.5, maxProfit: 100, maxLoss: -50 },
-    20, 45, 0.3, 0.2, { exitDTE: RULES.exitDTE, takeProfitPct: RULES.takeProfitPct, stopLossPct: RULES.stopLossPct }, 5).exitDTE,
+    20, 45, 0.3, sigmaProvenance(null, 0.2, "TEST"), { exitDTE: RULES.exitDTE, takeProfitPct: RULES.takeProfitPct, stopLossPct: RULES.stopLossPct }, 5).exitDTE,
   RULES.exitDTE);
 });
 
@@ -475,22 +485,59 @@ test("THE FALLBACK VOLATILITY HAS A NAME, AND THE BRIEF SAYS WHICH ONE WAS IN FO
   // It was `SIGMA[pos.ticker] || 0.25`: a hand-written table with an unlabelled
   // hand-written fallback behind it, driving every figure the simulator prints.
   assert.ok(!/SIGMA\[pos\.ticker\] \|\| 0\.25/.test(AUTOPILOT_CODE), "the bare fallback is gone");
-  assert.ok(/sigmaProvenance\(SIGMA\[pos\.ticker\], pos\.ticker\)/.test(AUTOPILOT_CODE), "it is decided once");
-  assert.ok(/simSigma: vol\.sigma, simSigmaSource: vol\.source/.test(AUTOPILOT_CODE), "carried on the brief");
-  assert.ok(/if \(!vol\.fromTable\) ruleWarnings\.push\(vol\.note\)/.test(AUTOPILOT_CODE),
-    "and a simulation walked at a number nobody wrote down for this market says so");
-  assert.ok(/volatility_source: vol\.source/.test(AUTOPILOT_CODE), "the model is told too");
+  // ...and the MEASURED reading comes first now, from the blob read it already
+  // did for the means: one read of one series, two provenances off it.
+  assert.ok(/sigmaProvenance\(measured, SIGMA\[pos\.ticker\], pos\.ticker\)/.test(AUTOPILOT_CODE), "it is decided once");
+  assert.ok(/simSigma: sim\.sigma, simSigmaSource: sim\.sigmaSource/.test(AUTOPILOT_CODE),
+    "carried on the brief FROM THE SIMULATOR'S OWN ANSWER, never from the caller a second time");
+  assert.ok(/if \(vol\.fromFallback\) ruleWarnings\.push\(vol\.note\)/.test(AUTOPILOT_CODE),
+    "a simulation walked at a number nobody wrote down for this market WARNS");
+  assert.equal(/if \(!vol\.fromTable\) ruleWarnings/.test(AUTOPILOT_CODE), false,
+    "and not the old test, which is now true of a MEASURED reading as well");
+  // ...while all three sentences travel regardless, beside the figures.
+  assert.ok(/\$\{b\.simSigmaNote\}/.test(AUTOPILOT_CODE),
+    "the brief prints which volatility it walked on whichever source it was");
+  assert.ok(/volatility_source: sim\.sigmaSource/.test(AUTOPILOT_CODE), "the model is told too");
+  assert.ok(/volatility_age_days: vol\.ageDays/.test(AUTOPILOT_CODE), "and how old the reading is");
+  assert.ok(/simSigmaYears: vol\.years, simSigmaAgeDays: vol\.ageDays/.test(AUTOPILOT_CODE),
+    "the timeline entry is stamped too, so its ABSENCE marks an older one");
 });
 
-test("sigmaProvenance — a row in the table and no row are two different answers", () => {
-  const boil = sigmaProvenance(SIGMA.BOIL, "BOIL");
+test("sigmaProvenance — a measured reading, a row in the table and no row are THREE answers", () => {
+  const boil = sigmaProvenance(null, SIGMA.BOIL, "BOIL");
   assert.equal(boil.sigma, SIGMA.BOIL);
   assert.equal(boil.fromTable, true);
+  assert.equal(boil.measured, false);
   assert.equal(boil.source, TABLE_SIGMA_SOURCE);
   assert.ok(/written down, not measured/.test(boil.note), "and even the table says it was typed, not measured");
 
+  // THE THIRD SOURCE, AND THE SENTENCE STOPS CALLING IT "WRITTEN DOWN".
+  const meas = sigmaProvenance({ sigma: 0.41, years: 11, at: Date.now() - 3 * 86400000 }, SIGMA.BOIL, "BOIL");
+  assert.equal(meas.sigma, 0.41, "the measured reading beats the table");
+  assert.equal(meas.measured, true);
+  assert.equal(meas.fromTable, false);
+  assert.equal(meas.source, MEASURED_SIGMA_SOURCE);
+  assert.ok(/MEASURED/.test(meas.note) && /11 years/.test(meas.note) && /3 days ago/.test(meas.note), meas.note);
+  assert.equal(/written down, not measured from returns/.test(meas.note), false,
+    "it may not say that about a number that was measured");
+  // A position on a measured sigma and one on the table print DIFFERENT
+  // sentences. That is the whole point of the third source.
+  assert.notEqual(meas.note, boil.note);
+  // A measured reading with no year count must not print "0 years", and one
+  // with no timestamp must not read as "read today" — `Number(null)` is 0.
+  const undated = sigmaProvenance({ sigma: 0.41 }, SIGMA.BOIL, "BOIL");
+  assert.equal(undated.years, null);
+  assert.equal(undated.ageDays, null);
+  assert.equal(/0 years/.test(undated.note), false);
+  assert.equal(/read today/.test(undated.note), false);
+  // ...and a measured entry with no usable sigma is not a measurement at all.
+  for (const bad of [null, undefined, 0, NaN, -0.2, "0.4"]) {
+    assert.equal(sigmaProvenance({ sigma: bad, years: 11 }, SIGMA.BOIL, "BOIL").source, TABLE_SIGMA_SOURCE,
+      `a measured sigma of ${bad} falls through to the table`);
+  }
+
   for (const missing of [undefined, null, 0, NaN, -1]) {
-    const v = sigmaProvenance(missing, "GLD");
+    const v = sigmaProvenance(null, missing, "GLD");
     assert.equal(v.sigma, FALLBACK_SIGMA, `${missing} is not a volatility`);
     assert.equal(v.fromTable, false);
     assert.equal(v.source, FALLBACK_SIGMA_SOURCE);
@@ -528,7 +575,9 @@ test("the autopilot computes the chance through chanceOf, not a closed form", ()
   // while the screens had been reading measured means for four pull requests.
   assert.ok(/seasonal: seas,/.test(AUTOPILOT),
     "the drift is a seasonalProvenance() result, not a bare table");
-  assert.ok(/seasonalProvenance\(await measuredSeasonal\(store, pos\.ticker\)/.test(AUTOPILOT),
+  assert.ok(/const measured = await measuredSeasonal\(store, pos\.ticker\);/.test(AUTOPILOT),
+    "read ONCE per position, into one object");
+  assert.ok(/seasonalProvenance\(measured, SEASONAL\[pos\.ticker\]/.test(AUTOPILOT),
     "and the measured means come first, with the hand-written row behind them");
 });
 
@@ -545,6 +594,9 @@ test("the brief reads the cached seasonal means and never spends the quota", () 
   assert.equal(/TTL|ttl/.test(live), false, "a stale entry is served as is, not discarded");
   // ONE READ PER TICKER, never one per position.
   assert.ok(/seasonalCache\.has\(sym\)/.test(live), "the read is memoised per ticker");
+  // ...AND CLEARED PER RUN. A warm container would otherwise pin one run's
+  // reading for the life of the container and serve it to the next.
+  assert.ok(/resetSeasonalCache\(\);/.test(live), "and emptied at the top of every run");
 });
 
 test("the brief says what its probability is an answer about", () => {
@@ -596,6 +648,151 @@ test("the implied volatility has a home and a provenance, like the realised one"
     "rules.js says in one line why the two are not one constant");
 });
 
-/* ---------------- report ---------------- */
+/* ============================================================================
+   THE MEASURED READ, DRIVEN AGAINST A FAKE BLOB STORE (PR #27).
+
+   PR #26 handed this forward verbatim: "THE MEASURED PATH HAS NEVER RUN ONCE"
+   and "no test exercised either function before the move and none exercises
+   them on a real Alpha Vantage body now". No `ALPHAVANTAGE_KEY` and an egress
+   proxy that refuses the CONNECT means `/api/av` still cannot be called from
+   here — only the owner's own deploy closes that. What IS closed is that the
+   read, the parse and the two provenances off it are no longer unexercised:
+   the store is faked, the BODY is real in shape (src/avFixture.js), and every
+   branch of the miss is named.
+============================================================================ */
+
+/** A blob store with exactly the surface `measuredSeasonal` uses. */
+const fakeStore = (entries) => {
+  let reads = 0;
+  return {
+    reads: () => reads,
+    async get(key) { reads++; return Object.prototype.hasOwnProperty.call(entries, key) ? entries[key] : null; },
+  };
+};
+const AV_KEY = (sym) => `av/${sym}.json`;
+
+atest("MEASURED READ — a hit produces measured means AND the measured volatility", async () => {
+  resetSeasonalCache();
+  const at = Date.now() - 4 * 86400000;
+  const store = fakeStore({ [AV_KEY("CORN")]: { at, body: avMonthlyBody({ months: 132, seed: 21, drift: 0.008, vol: 0.05 }) } });
+  const out = await measuredSeasonal(store, "CORN");
+  assert.ok(out, "a body in the cache is a reading");
+  assert.equal(out.monthlyMean.length, 12);
+  out.monthlyMean.forEach((m) => assert.ok(Number.isFinite(m)));
+  // THE SIGMA IS THE HALF THAT USED TO BE THROWN AWAY. `statsFromMatrix()`
+  // returned it, `measuredSeasonal()` dropped it, and `sigmaProvenance()` was
+  // handed the hand-written row instead.
+  assert.ok(Number.isFinite(out.sigma) && out.sigma > 0, `a measured volatility, got ${out.sigma}`);
+  assert.ok(out.years > 0, "and how many calendar rows produced it");
+  assert.equal(out.at, at, "and when it was read, for the age in the sentence");
+
+  // ONE READING, TWO PROVENANCES — the same object feeds both, because the
+  // means and the volatility are two questions about one set of prices.
+  const seas = seasonalProvenance(out, SEASONAL.CORN, "CORN");
+  const vol = sigmaProvenance(out, SIGMA.CORN, "CORN");
+  assert.equal(seas.measured, true);
+  assert.equal(vol.measured, true);
+  assert.equal(vol.sigma, out.sigma, "the simulator walks the MEASURED volatility");
+  assert.notEqual(vol.sigma, SIGMA.CORN, "not the hand-written row");
+  assert.equal(seas.years, vol.years, "one reading, one year count");
+  assert.equal(seas.ageDays, vol.ageDays, "one reading, one age");
+  assert.ok(/4 days ago/.test(vol.note), vol.note);
+});
+
+atest("MEASURED READ — a MISS falls back to the hand-written row, and says so", async () => {
+  resetSeasonalCache();
+  const store = fakeStore({});
+  const out = await measuredSeasonal(store, "WEAT");
+  assert.equal(out, null, "nothing in the cache is a miss, never an empty reading");
+  const vol = sigmaProvenance(out, SIGMA.WEAT, "WEAT");
+  assert.equal(vol.source, TABLE_SIGMA_SOURCE);
+  assert.equal(vol.sigma, SIGMA.WEAT);
+  assert.ok(/written down, not measured/.test(vol.note));
+  const seas = seasonalProvenance(out, SEASONAL.WEAT, "WEAT");
+  assert.equal(seas.measured, false);
+});
+
+atest("MEASURED READ — an UNREADABLE body is a miss, not a table", async () => {
+  // Alpha Vantage answers a refusal with HTTP 200 and a note. `av.mjs` would
+  // not have cached one, but a corrupted or half-written entry is the same
+  // case and `parseAvJson` throws on all of them.
+  for (const [kind, body] of Object.entries(AV_REFUSALS)) {
+    resetSeasonalCache();
+    const store = fakeStore({ [AV_KEY("UNG")]: { at: Date.now(), body } });
+    assert.equal(await measuredSeasonal(store, "UNG"), null, `${kind} is a miss`);
+  }
+  for (const junk of [{ at: Date.now() }, { at: Date.now(), body: null }, { body: "not json" }, {}]) {
+    resetSeasonalCache();
+    const store = fakeStore({ [AV_KEY("UNG")]: junk });
+    assert.equal(await measuredSeasonal(store, "UNG"), null, `${JSON.stringify(junk)} is a miss`);
+  }
+  // A store that THROWS is a miss too — the brief must not die on a cache.
+  resetSeasonalCache();
+  const angry = { async get() { throw new Error("blobs unavailable"); } };
+  assert.equal(await measuredSeasonal(angry, "UNG"), null);
+});
+
+atest("MEASURED READ — a body with NO ROWS does not become twelve zeros", async () => {
+  // `statsFromMatrix([])` returns twelve zeros, a sigma of zero and `years` 0.
+  // Twelve zeros is a drift of zero — a confident claim that the market goes
+  // nowhere — and a sigma of zero is a share that never moves. Both would be
+  // read as measurements. The `years > 0` guard is what refuses them.
+  resetSeasonalCache();
+  const empty = avMonthlyBody({ months: 1, endYear: 2026, endMonth: 8, seed: 2 });
+  const store = fakeStore({ [AV_KEY("SOYB")]: { at: Date.now(), body: empty } });
+  const out = await measuredSeasonal(store, "SOYB");
+  assert.equal(out, null, "one row produces no returns at all, and no reading");
+  // And the consequence, stated: the fallbacks take over and name themselves.
+  assert.equal(sigmaProvenance(out, SIGMA.SOYB, "SOYB").source, TABLE_SIGMA_SOURCE);
+  assert.equal(seasonalProvenance(out, SEASONAL.SOYB, "SOYB").measured, false);
+  // A reading that IS all zeros but has rows is a different case and is NOT
+  // refused: measured zeros are a measurement.
+  const zeros = { monthlyMean: Array(12).fill(0), sigma: 0.2, years: 11, at: Date.now() };
+  assert.equal(seasonalProvenance(zeros, SEASONAL.SOYB, "SOYB").measured, true);
+});
+
+atest("MEASURED READ — memoised per TICKER, and cleared per RUN", async () => {
+  resetSeasonalCache();
+  const body = avMonthlyBody({ months: 132, seed: 33 });
+  const store = fakeStore({ [AV_KEY("BOIL")]: { at: Date.now(), body }, [AV_KEY("UNG")]: { at: Date.now(), body } });
+  // Three BOIL positions in the book are ONE blob read, not three.
+  await measuredSeasonal(store, "BOIL");
+  await measuredSeasonal(store, "BOIL");
+  await measuredSeasonal(store, "BOIL");
+  assert.equal(store.reads(), 1, "one read per ticker, never one per position");
+  await measuredSeasonal(store, "UNG");
+  assert.equal(store.reads(), 2, "a second ticker is a second read");
+  // A MISS is memoised too, or a book of five positions on a market with no
+  // cached body is five reads that all return nothing.
+  await measuredSeasonal(store, "WEAT");
+  await measuredSeasonal(store, "WEAT");
+  assert.equal(store.reads(), 3, "and a miss is remembered as a miss");
+  // ...AND THE NEXT RUN STARTS COLD. A warm Netlify container would otherwise
+  // pin today's reading and serve it tomorrow, silently.
+  resetSeasonalCache();
+  await measuredSeasonal(store, "BOIL");
+  assert.equal(store.reads(), 4, "the run boundary empties it");
+});
+
+atest("MEASURED READ — the cached body is parsed by the SAME two functions the client uses", async () => {
+  // A second parse would be a second seasonal table and a second volatility.
+  // This is the property PR #26 moved them to engine.js for, asserted rather
+  // than asserted-about-in-a-comment.
+  resetSeasonalCache();
+  const body = avMonthlyBody({ months: 132, seed: 41, drift: 0.006, vol: 0.055 });
+  const store = fakeStore({ [AV_KEY("CORN")]: { at: Date.now(), body } });
+  const server = await measuredSeasonal(store, "CORN");
+  const client = statsFromMatrix(parseAvJson(body).matrix);   // exactly what fetchHistory() does
+  assert.deepEqual(server.monthlyMean, client.monthlyMean, "one parse, one set of means");
+  assert.equal(server.sigma, client.sigma, "one parse, one volatility");
+  assert.equal(server.years, client.years);
+});
+
+/* ---------------- the async queue, then the report ---------------- */
+for (const [name, fn] of pending) {
+  try { await fn(); passed++; console.log(`  ok   ${name}`); }
+  catch (e) { failures.push({ name, e }); console.log(`  FAIL ${name}\n       ${e.message}`); }
+}
+
 console.log(`\n${passed} passed, ${failures.length} failed`);
 if (failures.length) { for (const f of failures) console.error(f.e); process.exit(1); }

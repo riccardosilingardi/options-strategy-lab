@@ -48,6 +48,12 @@
       order list when you are trying to work out what happened.
 ==================================================================== */
 
+// The two source NAMES a simulator-volatility stamp is compared against. They
+// have one home (`sigmaProvenance()` in rules.js) and a string literal here
+// would be a second one. `rules.js` imports `engine.js` and nothing else, so
+// this is a leaf-ward import and not a cycle.
+import { MEASURED_SIGMA_SOURCE, TABLE_SIGMA_SOURCE } from "./rules.js";
+
 import { RULES, ruleExitOf } from "./rules.js";
 import { orderOutcome, reduceRatios } from "./order.js";
 
@@ -438,6 +444,65 @@ export function autopilotHorizonNote(entry = {}) {
   if (!h.autopilot || h.stamped) return null;
   return "The simulation behind this entry ran to a day the app no longer uses, so any chance quoted inside it " +
     "is not the app's current exit rule.";
+}
+
+/* ------------------------------------------------------------------
+   AND WHICH VOLATILITY THAT SIMULATION WALKED ON.
+
+   The same fact about the same entry, one layer down. `exitSim` produces
+   `pTP`, `pSL`, `pTimePos`, `ev` and `medDays`, the model reads them and writes
+   the RATIONALE that this timeline entry's text is made of — so the volatility
+   those figures came from ends up buried inside prose no migration can reach,
+   exactly as the horizon did. And until this PR the two sides walked different
+   volatilities: the Guardian on the MEASURED realised sigma of the monthly
+   series, the brief on the hand-written `SIGMA` row it was the only one able to
+   read.
+
+   THE ABSENCE OF THE STAMP IS THE MARKER, the third time this file uses that
+   pattern (`contractsAssumed`, `simExitDTE`). An entry written before this
+   carries no `simSigmaSource`, and that absence reads as the HAND-WRITTEN TABLE
+   — because the table was the only volatility the autopilot could reach.
+   Inventing a measurement for it would be the same lie in the other direction.
+------------------------------------------------------------------ */
+
+
+/**
+ * WHICH VOLATILITY AN AUTOPILOT ENTRY'S SIMULATION RAN ON, off the entry itself.
+ *
+ * `Number.isFinite` guards every number for the usual reason: `Number(null)` is
+ * 0 and 0 is finite, so a missing year count must not read as zero years of
+ * returns and a missing age must not read as "read today".
+ */
+export function simVolOf(entry = {}) {
+  const autopilot = !!entry && entry.type === "autopilot";
+  const rawSource = entry?.simSigmaSource;
+  const source = typeof rawSource === "string" && rawSource ? rawSource : null;
+  const rawSigma = entry?.simSigma;
+  const sigma = typeof rawSigma === "number" && Number.isFinite(rawSigma) ? rawSigma : null;
+  const stamped = autopilot && !!source;
+  const measured = stamped && source === MEASURED_SIGMA_SOURCE;
+  return {
+    autopilot,
+    stamped,
+    source: stamped ? source : TABLE_SIGMA_SOURCE,
+    measured,
+    sigma: stamped ? sigma : null,
+    years: measured && Number.isFinite(entry?.simSigmaYears) ? entry.simSigmaYears : null,
+    ageDays: measured && Number.isFinite(entry?.simSigmaAgeDays) ? entry.simSigmaAgeDays : null,
+  };
+}
+
+/**
+ * ONE PLAIN SENTENCE, ON EVERY SCREEN THAT RENDERS AN UNSTAMPED ENTRY, and null
+ * everywhere else — the same contract `autopilotHorizonNote()` keeps. What the
+ * reader needs is that a figure inside the text below was walked at a
+ * volatility nobody measured, and that the record cannot say which.
+ */
+export function autopilotVolNote(entry = {}) {
+  const v = simVolOf(entry);
+  if (!v.autopilot || v.stamped) return null;
+  return "This entry does not say which volatility its simulation walked on, so it was the hand-written " +
+    "table — the only one the autopilot could reach when it was written.";
 }
 
 /* ------------------------------------------------------------------

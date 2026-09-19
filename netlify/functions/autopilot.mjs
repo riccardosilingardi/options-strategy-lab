@@ -99,16 +99,43 @@ const CHAIN_FEED = "CBOE delayed";
 // next. A cache that outlives the question it answered is the same fault as a
 // number with two homes.
 const seasonalCache = new Map();
-async function measuredSeasonal(store, sym) {
+
+/** Emptied at the top of every run — see the note above. Exported so a test can
+ *  prove the memoisation is per ticker AND per run rather than per container. */
+export const resetSeasonalCache = () => seasonalCache.clear();
+
+/**
+ * THE WHOLE MEASURED READING, FROM ONE BLOB READ.
+ *
+ * `statsFromMatrix()` returns the twelve monthly means AND the annualised
+ * realised volatility of the same monthly series, and this function used to
+ * throw the volatility away — so `sigmaProvenance()` below was handed
+ * `SIGMA[pos.ticker]`, the hand-written row, while `App.jsx` had been storing
+ * the measured figure as `seasonal[tk].sigma` and handing it to the Guardian's
+ * `exitPathSim` for four pull requests. One position, two volatilities, and
+ * every exit-simulator figure in the brief moved with the difference.
+ *
+ * The volatility comes out of the SAME read, the same parse and the same
+ * `statsFromMatrix()` call. A second read would be a second reading of one
+ * series, and the quota (25 requests a DAY for five markets) is exactly why
+ * nothing here fetches.
+ *
+ * @returns { monthlyMean, sigma, years, at } or null on a miss — the shape both
+ *          `seasonalProvenance()` and `sigmaProvenance()` take as their measured
+ *          argument, because it IS one reading of one set of prices.
+ */
+export async function measuredSeasonal(store, sym) {
   if (seasonalCache.has(sym)) return seasonalCache.get(sym);
   let out = null;
   try {
     const blob = await store.get(`av/${sym}.json`, { type: "json" });
     if (blob?.body) {
       const st = statsFromMatrix(parseAvJson(blob.body).matrix);
-      // `years > 0` because a matrix with no rows gives twelve zeros, and twelve
-      // zeros is a drift of zero — a confident claim rather than a reading.
-      if (st.years > 0) out = { monthlyMean: st.monthlyMean, years: st.years, at: blob.at ?? null };
+      // `years > 0` because a matrix with no rows gives twelve zeros AND a
+      // volatility of zero, and neither is a reading: twelve zeros is a drift
+      // of zero and a sigma of zero is a share that never moves. Both would be
+      // confident claims standing in for an empty body.
+      if (st.years > 0) out = { monthlyMean: st.monthlyMean, sigma: st.sigma, years: st.years, at: blob.at ?? null };
     }
   } catch { out = null; }   // a missing, unreadable or refusal body is simply a miss
   seasonalCache.set(sym, out);
@@ -137,7 +164,7 @@ function computeTIS(pos, cur) {
 /* ---------- ciclo ---------- */
 export default async () => {
   const store = getStore("autopilot");
-  seasonalCache.clear();
+  resetSeasonalCache();
   const state = JSON.parse((await store.get("state")) || "{}");
   const approvals = JSON.parse((await store.get("approvals")) || "{}");
   const briefsPrev = JSON.parse((await store.get("briefs")) || "{}");
@@ -185,8 +212,12 @@ export default async () => {
     // WHICH SEASONAL TABLE THIS POSITION IS READ AGAINST, DECIDED ONCE AND
     // CARRIED — the `markProvenance()` discipline applied to the drift, which is
     // the one input to the chance the market has no say in at all.
-    const seas = seasonalProvenance(await measuredSeasonal(store, pos.ticker),
-      SEASONAL[pos.ticker] || SEASONAL.SPY, pos.ticker);
+    // ONE READ OF ONE SERIES, TWO PROVENANCES OFF IT. The means drift the
+    // distribution and the realised volatility walks the share: two different
+    // questions about the same measured prices, so they are decided from the
+    // same object rather than read twice.
+    const measured = await measuredSeasonal(store, pos.ticker);
+    const seas = seasonalProvenance(measured, SEASONAL[pos.ticker] || SEASONAL.SPY, pos.ticker);
     // UNKNOWN IS NOT A NUMBER, HERE TOO: with no table at all there is no
     // seasonal reading to score the thesis against, and `computeTIS` treats a
     // null the way it already treats a missing entry thesis.
@@ -208,17 +239,24 @@ export default async () => {
     // confident zero per cent built out of a missing reading.
     const pop = chance ? chance.pop : null;
     const tis = computeTIS(pos, { pop, ivNow: iv, seasonalNow, dteLeft });
-    // WHICH VOLATILITY THE SIMULATOR WALKS ON, DECIDED ONCE AND CARRIED. This
-    // was `SIGMA[pos.ticker] || 0.25`: a hand-written table with an unlabelled
-    // hand-written fallback behind it, driving pTP, pSL, pTimePos, ev and
-    // medDays with nothing on screen to say which of the two produced them.
-    // `RULES.fallbackSigma` names the number; fixing the TABLE is ROADMAP P2.
-    const vol = sigmaProvenance(SIGMA[pos.ticker], pos.ticker);
+    // WHICH VOLATILITY THE SIMULATOR WALKS ON, DECIDED ONCE AND CARRIED — AND
+    // THERE ARE THREE SOURCES NOW, NOT TWO. It was `SIGMA[pos.ticker] || 0.25`,
+    // then `sigmaProvenance(SIGMA[pos.ticker], ...)`: a hand-written table with
+    // a named fallback behind it, driving pTP, pSL, pTimePos, ev and medDays —
+    // while `App.jsx` handed the Guardian the MEASURED realised volatility of
+    // the same monthly series this function has been reading for the means. One
+    // position, two volatilities, no screen saying which. The measured reading
+    // comes FIRST now, from the blob read above; `RULES.fallbackSigma` is still
+    // the named fallback and fixing the TABLE is still ROADMAP P2.
+    const vol = sigmaProvenance(measured, SIGMA[pos.ticker], pos.ticker);
     // AND THE EXIT POLICY IS PASSED IN, because `engine.js` imports nothing and
     // may not read RULES (see `exitSim`). It used to hold its own copies — 0.5,
     // 0.5 and 7 — so the walk ended at 7 DTE while `exitDTE` has been 21 since
     // it was changed from 7, and the field below still called it the exit DTE.
-    const sim = exitSim(pos, spot, dteLeft, iv, vol.sigma, EXIT_POLICY);
+    // AND THE VOLATILITY IS PASSED AS ITS PROVENANCE, not as a bare number:
+    // `exitSim` returns the sigma and the source it actually walked on, so
+    // nothing below asserts a reading the arithmetic did not use.
+    const sim = exitSim(pos, spot, dteLeft, iv, vol, EXIT_POLICY);
     const pctMax = pos.maxProfit > 0 ? (pnl / pos.maxProfit) * 100 : 0;
 
     // anti-rumore: nessun cambiamento materiale → riga singola
@@ -254,7 +292,16 @@ export default async () => {
           // name `p_exit_at_exit_dte_positive` asserted a rule the arithmetic
           // did not apply; `simulated_to_dte` is the simulator's own answer to
           // "at what point", and `days_simulated` is how far it walked.
-          simulator_from_today: { p_take_profit_first: +(sim.pTP * 100).toFixed(0), p_stop_first: +(sim.pSL * 100).toFixed(0), p_exit_at_exit_dte_positive: +(sim.pTimePos * 100).toFixed(0), expected_pnl_following_rules: +sim.ev.toFixed(0), median_days_to_take_profit: sim.medDays, simulated_to_dte: sim.exitDTE, days_simulated: sim.horizon, volatility_used: +(vol.sigma * 100).toFixed(0), volatility_source: vol.source },
+          simulator_from_today: { p_take_profit_first: +(sim.pTP * 100).toFixed(0), p_stop_first: +(sim.pSL * 100).toFixed(0), p_exit_at_exit_dte_positive: +(sim.pTimePos * 100).toFixed(0), expected_pnl_following_rules: +sim.ev.toFixed(0), median_days_to_take_profit: sim.medDays, simulated_to_dte: sim.exitDTE, days_simulated: sim.horizon,
+            // WHICH VOLATILITY, AND WHETHER ANYBODY MEASURED IT. `volatility_source`
+            // said "table" or "fallback" and the model was free to describe either as
+            // the market's own volatility; a measured reading is a third answer and it
+            // carries its year count and its age, exactly as `drift_*` above does.
+            // Read from `sim`, the simulator's own answers, never from `vol` a second
+            // time — that is the §4i rule: a field name may not assert a reading.
+            volatility_used: +(sim.sigma * 100).toFixed(0), volatility_source: sim.sigmaSource,
+            volatility_is_measured: vol.measured, volatility_years: vol.years, volatility_age_days: vol.ageDays,
+            volatility_note: vol.note },
         };
         const r = await fetch("https://api.anthropic.com/v1/messages", {
           method: "POST",
@@ -291,8 +338,16 @@ export default async () => {
     if (dec.rationale) rationale = dec.rationale;
     const ruleWarnings = [...dec.warnings];
     if (prov.modelled) ruleWarnings.push(prov.note);
-    // A SIMULATION WALKED AT A NUMBER NOBODY WROTE DOWN FOR THIS MARKET SAYS SO.
-    if (!vol.fromTable) ruleWarnings.push(vol.note);
+    // A SIMULATION WALKED AT A NUMBER NOBODY WROTE DOWN FOR THIS MARKET SAYS SO,
+    // AND ONLY THAT ONE. The condition was `!vol.fromTable`, which is now TRUE
+    // of a measured reading as well — the three-source shape made the old test
+    // mean the opposite of what it said. All three sentences travel: the brief
+    // prints `simSigmaNote` inline beside the figures whichever source it was,
+    // and the timeline entry carries `simSigmaSource` as a stamp. A WARNING is
+    // for the one case that is an assumption rather than a reading, and adding
+    // the table to it would put an amber line on every entry of every market
+    // for a fact the stamp already records.
+    if (vol.fromFallback) ruleWarnings.push(vol.note);
 
     // ordine proposto + approve link (solo se azione richiesta)
     let approveUrl = null, gateResult = null;
@@ -378,8 +433,13 @@ export default async () => {
       seasonalYears: chance ? chance.seasonalYears : null,
       seasonalAgeDays: chance ? chance.seasonalAgeDays : null,
       priceSource: prov.source, priceIsEstimated: prov.modelled,
-      // WHICH VOLATILITY THE SIMULATION ABOVE IS AN ANSWER ABOUT.
-      simSigma: vol.sigma, simSigmaSource: vol.source, simSigmaFromTable: vol.fromTable,
+      // WHICH VOLATILITY THE SIMULATION ABOVE IS AN ANSWER ABOUT, AND HOW OLD
+      // THAT READING IS. The sigma and the source are the SIMULATOR's own
+      // answers (`sim.sigma` / `sim.sigmaSource`), never `vol` written out a
+      // second time: the whole §4i lesson is that a field name must not assert
+      // a reading the arithmetic did not apply.
+      simSigma: sim.sigma, simSigmaSource: sim.sigmaSource, simSigmaMeasured: vol.measured,
+      simSigmaYears: vol.years, simSigmaAgeDays: vol.ageDays, simSigmaNote: vol.note,
       // THE WARNINGS THE RULES RAISED, BESIDE THE GATE'S OWN. The stop lives
       // here now: it is a sentence in the brief and never a link.
       ruleWarnings,
@@ -394,6 +454,13 @@ export default async () => {
       // (`simHorizonOf` / `autopilotHorizonNote` in src/journal.js) — the same
       // pattern `contractsAssumed` uses for a size nobody recorded.
       simExitDTE: sim.exitDTE, simDays: sim.horizon,
+      // AND WHICH VOLATILITY IT WALKED ON, for the same reason and by the same
+      // route: the figures behind the rationale below were produced at it, and
+      // the ABSENCE of these fields is what marks an entry written when the
+      // hand-written table was the only volatility this function could reach
+      // (`simVolOf` / `autopilotVolNote` in src/journal.js).
+      simSigma: sim.sigma, simSigmaSource: sim.sigmaSource,
+      simSigmaYears: vol.years, simSigmaAgeDays: vol.ageDays,
       text: `AUTOPILOT ${verdict} (${brief.pctMax}% maxP, TIS ${tis}${prov.modelled ? `, price ${MODEL_PRICE}` : ""}) — ${rationale}` +
         `${ruleWarnings.length ? ` · ${ruleWarnings.join(" ")}` : ""}${approveUrl ? " · [approve: " + approveUrl + "]" : ""}` });
     pos.timeline = tl.timeline; pos.seqNext = tl.seqNext;
@@ -416,7 +483,7 @@ export default async () => {
         ? `\n\n> **These figures are ESTIMATES.** The price came from the ${b.priceSource}, not from the market: ` +
           `at least one leg had no two-sided quote. Nothing can be approved on it.\n`
         : "";
-      return `## ${o.pos} → **${b.verdict}** (TIS ${b.tis}/100)${est}\n${b.rationale}\n${(b.evidence || []).map((e) => `- ${e}`).join("\n")}\n${b.invalidation ? `_Invalidated if: ${b.invalidation}_\n` : ""}P&L ${b.pnl}$ (${b.pctMax}% maxP) · PoP ${b.pop == null ? "n/a" : `${b.pop}%`} (${b.chanceNote}) · ${b.dteLeft} DTE · price from ${b.priceSource} · Sim to ${b.sim.exitDTE} DTE at ${pctText(b.simSigma)} vol (${b.simSigmaSource}): take profit ${(b.sim.pTP * 100).toFixed(0)}% / stop ${(b.sim.pSL * 100).toFixed(0)}%${(b.ruleWarnings || []).map((w) => `\n⚠ ${w}`).join("")}${(b.gateWarnings || []).map((w) => `\n⚠ ${w}`).join("")}${b.approveUrl ? `\n\n**→ APPROVE (valid 24h): ${b.approveUrl}**` : ""}`;
+      return `## ${o.pos} → **${b.verdict}** (TIS ${b.tis}/100)${est}\n${b.rationale}\n${(b.evidence || []).map((e) => `- ${e}`).join("\n")}\n${b.invalidation ? `_Invalidated if: ${b.invalidation}_\n` : ""}P&L ${b.pnl}$ (${b.pctMax}% maxP) · PoP ${b.pop == null ? "n/a" : `${b.pop}%`} (${b.chanceNote}) · ${b.dteLeft} DTE · price from ${b.priceSource} · Sim to ${b.sim.exitDTE} DTE at ${pctText(b.simSigma)} vol: take profit ${(b.sim.pTP * 100).toFixed(0)}% / stop ${(b.sim.pSL * 100).toFixed(0)}% — ${b.simSigmaNote}${(b.ruleWarnings || []).map((w) => `\n⚠ ${w}`).join("")}${(b.gateWarnings || []).map((w) => `\n⚠ ${w}`).join("")}${b.approveUrl ? `\n\n**→ APPROVE (valid 24h): ${b.approveUrl}**` : ""}`;
     }).join("\n\n---\n\n");
     const rejectedMd = rejected.length
       ? rejected.map((r) => `## ${r.pos} → ${r.verdict} **REJECTED**\n${r.reasons.map((x) => `- ${x}`).join("\n")}`).join("\n\n")

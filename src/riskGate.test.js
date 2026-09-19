@@ -18,8 +18,9 @@ import { RULES, sizing, ruleBadge, qualityFloor, qualityFloorSentence, liquidity
   comboBook, openLimitPrice, openLimitNote, limitPlacement, notionalControlled, notionalNote,
   entryRoom, entryInsideExitNote, entryRoomWarning, entryRoomOverrideAsk, entryOverrideOk, entryOverrideNote,
   passedOverRecord, passedOverSummary, OPEN_LIMIT_SLIPPAGE, CLOSE_LIMIT_SLIPPAGE,
-  chancePct, chanceText, chanceInTen, signedMoney } from "./rules.js";
-import { netBS, SIGMA } from "./engine.js";
+  chancePct, chanceText, chanceInTen, signedMoney,
+  sigmaProvenance, TABLE_SIGMA_SOURCE, MEASURED_SIGMA_SOURCE, FALLBACK_SIGMA_SOURCE } from "./rules.js";
+import { netBS, SIGMA, exitSim } from "./engine.js";
 import { isStale, staleAmong, agePhrase, freshnessNote, BUDGETS } from "./freshness.js";
 
 /* ---------------- tiny harness ---------------- */
@@ -1416,6 +1417,88 @@ test("ONE SEASONAL SOURCE — no call site may drift a chance without provenance
   for (const f of ["App.jsx", "../netlify/functions/autopilot.mjs"]) {
     assert.ok(/seasonalProvenance\(/.test(codeOf(f)), `${f} must read the one home`);
   }
+});
+
+/* ============================================================================
+   ...AND THE SAME SHAPE GUARD FOR THE REALISED VOLATILITY (PR #27, PRD §4k).
+
+   `exitSim` and `exitPathSim` took a bare sigma, and the two call sites read it
+   from two different places: `App.jsx` from `seasonal[tk]?.sigma ||
+   getU(tk).sigma` (measured, falling back to the hand-written row) and
+   `autopilot.mjs` from `SIGMA[pos.ticker]` with no measured value available to
+   it at all. One position, two volatilities, and pTP, pSL, pTimePos, ev and
+   medDays all move with the difference.
+
+   The throw in the two simulators catches the call that RUNS. This catches the
+   call written today that only runs on a market nobody demos — the same pair of
+   defences `chanceOf()` and the seasonal sweep above keep.
+============================================================================ */
+
+test("SHAPE — no call site hands a simulator a bare SIGMA lookup", () => {
+  const SIM_CALL = /(exitSim|exitPathSim)\s*\(/g;
+  // What a bare lookup looks like in this codebase, in the shapes it takes.
+  const BARE = [
+    /SIGMA\s*\[/,                    // SIGMA[pos.ticker]
+    /\bSIGMA\.\w+/,                  // SIGMA.BOIL
+    /getU\([^)]*\)\.sigma/,          // getU(tk).sigma
+    /seasonal\s*\[[^\]]*\]\s*\??\.sigma/, // seasonal[tk]?.sigma
+    /\bvol\.sigma\b/,                // the provenance unwrapped at the call
+    /\bsigma:\s*\d/,                 // a literal passed as the volatility
+  ];
+  for (const f of ["App.jsx", "pro.jsx", "wizard.jsx", "engine.js", "rules.js",
+    "../netlify/functions/autopilot.mjs", "../netlify/functions/approve.mjs"]) {
+    const code = codeOf(f);
+    for (const m of code.matchAll(SIM_CALL)) {
+      // The DEFINITIONS match this too; they are the one place the argument is
+      // named rather than passed, and they are what does the refusing.
+      const head = code.slice(Math.max(0, m.index - 20), m.index);
+      if (/(function|export function)\s*$/.test(head)) continue;
+      const args = code.slice(m.index, m.index + 220);
+      for (const bad of BARE) {
+        assert.equal(bad.test(args), false,
+          `${f}: a simulator is handed a volatility with no source attached — ${args.slice(0, 120)}`);
+      }
+    }
+  }
+});
+
+test("SHAPE — exitSim REFUSES a bare sigma at run time, not only in a sweep", () => {
+  const pos = { legs: [{ side: 1, type: "call", strike: 20, qty: 1 },
+    { side: -1, type: "call", strike: 22, qty: 1 }], entryNet: 0.6, maxProfit: 140, maxLoss: -60 };
+  const policy = { exitDTE: RULES.exitDTE, takeProfitPct: RULES.takeProfitPct, stopLossPct: RULES.stopLossPct };
+  // `exitPathSim` lives in pro.jsx, which this plain-node suite cannot import;
+  // the same assertion about it is in `ceiling.test.jsx`, which is bundled.
+  assert.throws(() => exitSim(pos, 20, 45, 0.3, SIGMA.CORN, policy, 5), /sigmaProvenance/);
+  const vol = sigmaProvenance(null, SIGMA.CORN, "CORN");
+  assert.equal(exitSim(pos, 20, 45, 0.3, vol, policy, 5).sigmaSource, TABLE_SIGMA_SOURCE);
+});
+
+test("SHAPE — sigmaProvenance has ONE definition, and both consumers read it", () => {
+  const rules2 = codeOf("rules.js");
+  assert.equal((rules2.match(/export function sigmaProvenance\(/g) || []).length, 1,
+    "sigmaProvenance has exactly one definition, in rules.js");
+  for (const f of ["App.jsx", "../netlify/functions/autopilot.mjs"]) {
+    assert.ok(/sigmaProvenance\(/.test(codeOf(f)), `${f} must read the one home`);
+  }
+  // The `||` that made a decision with no source attached is gone for good.
+  assert.equal(/seasonal\s*\[[^\]]*\]\s*\??\.sigma\s*\|\|/.test(codeOf("App.jsx")), false,
+    "App.jsx no longer picks a volatility with a bare fallback");
+});
+
+test("SHAPE — the realised fallback and the implied one are still two constants", () => {
+  // They are the same number today and merging them would make a correction to
+  // either silently move the other: one is what the SHARE is walked at, the
+  // other what the OPTIONS are priced at. PR #27 adds a third SOURCE to the
+  // realised one and must not have touched this.
+  assert.equal(RULES.fallbackSigma, 0.25, "unchanged in value");
+  assert.equal(RULES.fallbackIV, RULES.fallbackSigma);
+  const rules3 = readFileSync(new URL("./rules.js", import.meta.url), "utf8");
+  assert.ok(/fallbackSigma:/.test(rules3) && /fallbackIV:/.test(rules3), "two entries in RULES");
+  assert.ok(/0\.25 IS CHOSEN, NOT MEASURED/.test(rules3),
+    "and the realised fallback still says it was chosen rather than measured");
+  // The hand-written table itself is untouched: this PR changes where the
+  // volatility comes from, never what the typed row contains.
+  assert.deepEqual(SIGMA, { SOYB: 0.19, CORN: 0.22, UNG: 0.48, BOIL: 0.95, WEAT: 0.25, SPY: 0.16 });
 });
 
 test("ONE SEASONAL SOURCE — measured and hand-written print DIFFERENT sentences", () => {

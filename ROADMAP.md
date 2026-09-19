@@ -240,17 +240,63 @@ which seasonal reading drifted it.** PRD §4j.
     printed chance and the sign of the average result (§4j) — which is the argument for P2, not a
     licence to hand-edit the table here.
 
-WHAT THE NEXT SESSION INHERITS:
-  - **THE MEASURED PATH HAS NEVER RUN ONCE.** No Alpha Vantage key and the egress proxy refuses
-    the CONNECT (403), so the blob cache is empty in the sandbox and every sentence the app prints
-    here is the FALLBACK sentence. `/api/av` → blob → `measuredSeasonal()` → `seasonalProvenance()`
-    has been walked only by unit tests with a hand-built reading.
-  - **THE BEFORE/AFTER IS CORN ONLY.** SOYB, UNG, BOIL and WEAT have no measured cells anybody has
-    written down. How wrong the table is on them is unknown.
-  - **NONE OF THE NINE SENTENCES HAS BEEN READ ON A SCREEN.** Whether the Guardian's two-line
-    NOW/AT-ENTRY pair clarifies or crowds a 390px phone is a judgement nobody has made.
-  - **THE AUTOPILOT HAS STILL NEVER BEEN WATCHED RUNNING** — the third pull request in a row to
+WHAT P1-QUATER HANDED FORWARD — and what PR #27 did with it:
+  - ~~**THE MEASURED PATH HAS NEVER RUN ONCE.**~~ **HALF CLOSED BY PR #27.** "Unexercised" is
+    closed: `src/avFixture.js` builds a body in the shape Alpha Vantage returns (string values,
+    `"5. adjusted close"`, the refusal bodies served with HTTP 200), `engine.test.js` holds
+    `parseAvJson()` and `statsFromMatrix()` against it, and `autopilot.test.js` drives
+    `measuredSeasonal()` through every branch against a fake blob store. **"Never run" is STILL
+    OPEN**: no key, no egress, so the live call has not been made and only the owner's own deploy
+    can make it.
+  - **THE BEFORE/AFTER IS CORN ONLY. STILL OPEN.** SOYB, UNG, BOIL and WEAT have no measured
+    seasonal cells anybody has written down, and now no measured VOLATILITY either.
+  - **NONE OF THE SENTENCES HAS BEEN READ ON A SCREEN. STILL OPEN**, and PR #27 added one more
+    to the Guardian's panel.
+  - **THE AUTOPILOT HAS STILL NEVER BEEN WATCHED RUNNING** — the fourth pull request in a row to
     hand this forward.
+
+## P1-quinquies — PR #27: one volatility source, and an exercised parse  (DONE)
+
+The other debt P1-quater handed forward, and the volatility half ROADMAP P2 still owed.
+PRD §4k.
+
+  - **THE GUARDIAN AND THE BRIEF WALKED ONE POSITION ON TWO VOLATILITIES.**
+    `statsFromMatrix()` has always returned the MEASURED realised volatility of the monthly
+    series beside the twelve means; `App.jsx` stored it as `seasonal[tk].sigma` and handed it to
+    `exitPathSim`, while `autopilot.mjs` called `sigmaProvenance(SIGMA[pos.ticker], ...)` with no
+    measured value available to it at all. `pTP`, `pSL`, `pTimePos`, `ev` and `medDays` all move
+    with the difference, and neither screen said which number had produced its figures.
+  - **`sigmaProvenance()` LEARNS A THIRD SOURCE**, in the same shape `seasonalProvenance()` uses
+    - value, source, year count, age in days, one sentence - and it stops saying "written down,
+    not measured from returns" about a number that was measured.
+  - **THE SIMULATORS TAKE THE PROVENANCE AND REFUSE A BARE SIGMA.** `exitSim` and `exitPathSim`
+    throw on anything that is not `{ sigma, source }`, structurally (engine.js reads no RULES),
+    and RETURN the sigma and source they walked on — the §4i rule that a field name must never
+    assert a reading the arithmetic did not use.
+  - **ONE BLOB READ, TWO PROVENANCES.** `measuredSeasonal()` returns the volatility it was
+    already computing and throwing away. No second read, no fetch, one read per ticker, stale
+    served as is, cache emptied at the top of every run.
+  - **THE ABSENCE OF THE STAMP IS THE MARKER**, the third time: an autopilot entry with no
+    `simSigmaSource` reads as the hand-written table, because the table was the only volatility
+    the autopilot could reach. `simVolOf()` / `autopilotVolNote()` in `src/journal.js`.
+  - **THE BUILD FOOTNOTE WAS NAMING THE WRONG QUANTITY.** It printed `seas.sigma` — the realised
+    volatility, which nothing on that panel uses — so it now names the implied volatility and the
+    seasonal table that actually produced the figures above it.
+  - **NOTHING INSIDE `SIGMA` WAS EDITED**, and `fallbackSigma` is still a separate constant from
+    `fallbackIV`.
+
+WHAT THE NEXT SESSION INHERITS:
+  - **NO MARKET'S REALISED VOLATILITY HAS BEEN MEASURED.** §4k's table is the hand-written row
+    perturbed by a stated factor — a sensitivity of the simulator, never a measurement. The sign
+    and size of the correction to `SIGMA` are unknown. This is now the sharpest edge of P2.
+  - **THE LIVE ALPHA VANTAGE CALL HAS STILL NEVER HAPPENED.** The fixture proves the parse; only
+    a deploy proves the path.
+  - **THE GUARDIAN'S PANEL NOW CARRIES THREE PROVENANCE LINES** (two seasonal from PR #26, one
+    volatility from PR #27) under its figures. Nobody has looked at that on a phone.
+  - **THE WEEKLY REPORT PRINTS NO EXIT-SIMULATOR FIGURE OF ITS OWN.** The only route those
+    numbers take into it is the autopilot's rationale inside a timeline entry, which the PDF
+    export renders and which now carries the note. If the report ever gains its own simulation,
+    it needs the sentence too.
 
 ## P2 — Proposals ranked by edge, not by score
 At market prices every structure has expected value near zero: high
@@ -272,7 +318,12 @@ disagrees with the market's.
     corrected CORN cell moves the printed chance by 18.9 points and flips the
     sign of the average result (§4j). It also made every screen SAY which table
     it is on, so the cost is now visible rather than merely present — what P2
-    owes is the table itself;
+    owes is the table itself. **PR #27 DID THE SAME FOR THE VOLATILITY HALF**
+    (§4k): the exit simulator reads a measured realised sigma where one is
+    loaded, refuses a volatility with no source attached, and says on every
+    screen which of the three sources produced its figures. What P2 still owes
+    HERE is the same thing — `SIGMA` is five hand-typed numbers and **no
+    market's realised volatility has been measured at all**;
   - rank by edge = EV under the house minus EV under the market, net of
     spread and commissions. Below transaction cost, nothing is proposed —
     that will be the common case and it is correct;
