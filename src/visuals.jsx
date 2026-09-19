@@ -867,7 +867,9 @@ export function unifiedLayout(width) {
 }
 
 export function UnifiedPosition({
-  legs = [], entryNet = 0, spot, bars = [], dte = 45, sigma = 0.3, driftAnnual = 0,
+  // The horizon this draws over when the caller does not name one is the
+  // horizon the app aims at, and that has a home (it was a bare 45 here).
+  legs = [], entryNet = 0, spot, bars = [], dte = RULES.targetEntryDTE, sigma = 0.3, driftAnnual = 0,
   ticker = "this market", height = 380, width: fixedWidth, onExplain,
 }) {
   const [ref, measured] = useWidth(900);

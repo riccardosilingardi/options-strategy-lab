@@ -1,7 +1,7 @@
 // Tests for the risk gate (src/riskGate.js) and the rule config (src/rules.js).
 // Plain Node, no test framework: `npm test` runs this file directly.
 
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import assert from "node:assert/strict";
 import { evaluateTrade, paperStatus, undefinedRiskLegs } from "./riskGate.js";
 import { positionSize, positionSizeNote, contractsOf, withPositionSize } from "./journal.js";
@@ -1427,7 +1427,98 @@ test("SIZE — the gate and the order body are sized by the same number", () => 
    that already has a home.
 ============================================================================ */
 
-test("RULES LITERALS — no UI file keeps its own copy of a rule number", () => {
+/** Every file that computes a number a screen or a brief prints. Read off the
+ *  disk rather than typed out, so a new endpoint or a new module is swept
+ *  without anybody coming back here — which is how `engine.js` and the Netlify
+ *  functions stayed outside the sweep while the exit simulator held its own
+ *  copies of three rules. `rules.js` is the HOME and is excluded by name;
+ *  `main.jsx` mounts the app and computes nothing. */
+const SWEEP_EXCLUDED = {
+  "rules.js": "the HOME: every number in it is the original",
+  "main.jsx": "it mounts the app and computes nothing",
+  // TWO EXCLUSIONS WITH THEIR REASONS, so they are visible rather than absent.
+  // Both are places the matcher would name the WRONG rule, and a guard that
+  // says something false about a line is worse than one that misses it.
+  "demo.js": "a fixture: `entryDaysAgo: 30` is a fact about a made-up position, not the entry floor",
+  "signals.js": "it carries an un-homed confidence bar of 70 that COLLIDES in value with expensiveIVRank — giving that bar a home is its own change (PRD, NOT VERIFIED)",
+};
+const LITERAL_FILES = [
+  ...readdirSync(new URL(".", import.meta.url))
+    .filter((f) => /\.jsx?$/.test(f) && !/\.test\./.test(f) && !SWEEP_EXCLUDED[f]),
+  ...readdirSync(new URL("../netlify/functions", import.meta.url)).map((f) => `../netlify/functions/${f}`),
+  ...readdirSync(new URL("../netlify/edge-functions", import.meta.url))
+    .filter((f) => f.endsWith(".js")).map((f) => `../netlify/edge-functions/${f}`),
+];
+
+/* WHAT A COPY LOOKS LIKE, IN THE THREE SHAPES IT TAKES IN THIS CODEBASE.
+
+   Shapes 1 and 2 — a `useState` default and a property or local constant —
+   caught `REASON_MIN = 15` and the three loose `45`s. Shape 3 is the one this
+   session added, and it is the shape that hid the fault in `exitSim`: a rule
+   number as an operand of an arithmetic expression, `dteLeft - 7`,
+   `0.5 * pos.maxProfit`.
+
+   THE HARD PART OF SHAPE 3 IS NOT FINDING COPIES, IT IS NOT CRYING WOLF. `0.5`
+   is in Black-Scholes twice and in every Gaussian, `4` is in every coordinate,
+   `30` is how many days are in a month. Four rules keep it quiet, and each one
+   is a statement about what a rule number IS:
+
+     * the value must sit beside a RULE-NAMED identifier, matched on the
+       identifier's WORDS rather than as a substring — `dteLeft` is about DTE,
+       `xToday` is an x coordinate that happens to contain "day";
+     * division is not one of the operators. A rule number is compared against
+       or applied to a quantity; when something is divided BY it, it is a unit
+       (`Math.round(dte / 30)` is days into months, not the entry floor);
+     * an operand already anchored at the home — `RULES.targetEntryDTE + 30` —
+       is reading the home, whatever is added to it;
+     * the cosmetic names keep doing their job, so a `marginTop` is never a rule.
+
+   It still cannot prove a negative: `Math.round(44.9)`, a number inside a
+   template string, or a STALE copy of a rule whose value has since changed
+   (which is exactly what the bare 7 was) all pass it. The PRD says so. */
+const RULE_WORD = /^(dtes?|days?|horizons?|capital|targets?|confidence|reasons?|chars|contracts?|percentile|interest|premiums?|slippage|exposure|entry|exit|override|floors?|profits?|loss(es)?|pct)$/i;
+const RULEISH = /(dte|day|horizon|capital|target|confidence|reason|chars|contract|percentile|interest|premium|slippage|exposure|entry|exit|override|floor)/i;
+// The name has to be about a RULE, not about a pixel. `max: 40` on a progress
+// bar and `minHeight: 40` on a button are not copies of `lowConfidence`.
+const COSMETIC = /(height|width|size|weight|radius|spacing|top|left|right|bottom|opacity|index|gap|padding|margin|font|stroke|delay|duration|color)/i;
+const identWords = (id) => id.split(/[.[\]]+|(?=[A-Z])/).filter(Boolean);
+// NOTE THAT SHAPE 3 DOES NOT USE `COSMETIC`, AND MUST NOT: `dteLeft` is the
+// identifier the real fault sat beside, and "left" is in that list as a box
+// offset. The ruleish-WORD requirement already keeps the pixels out, because a
+// coordinate is not called after a rule — `xToday`, `marginTop`, `barHeight`
+// carry no rule word at all.
+const ruleNamed = (id) =>
+  !id.startsWith("RULES.") && identWords(id).some((w) => RULE_WORD.test(w));
+
+/** Every place `code` spells one of `literals` instead of reading its home.
+ *  One entry per site; two rules that share a value (`takeProfitPct` and
+ *  `stopLossPct` are both 0.5) are named together on the one hit. */
+function ruleLiteralHits(code, literals) {
+  const at = new Map();   // index -> { text, names[] }
+  const add = (i, text, name) => {
+    const cur = at.get(i);
+    if (cur) { if (!cur.names.includes(name)) cur.names.push(name); return; }
+    at.set(i, { text: text.trim(), names: [name] });
+  };
+  const OPERAND = "[A-Za-z_$][A-Za-z0-9_$.[\\]]*";
+  for (const [name, value] of literals) {
+    const v = String(value).replace(".", "\\.");
+    // Shape 1 — an initial state: `useState(45)`.
+    for (const m of code.matchAll(new RegExp(`useState\\(\\s*${v}\\s*\\)`, "g"))) add(m.index, m[0], name);
+    // Shape 2 — a property or a local constant: `dteT: 45`, `REASON_MIN = 15`.
+    for (const m of code.matchAll(new RegExp(`\\b[A-Za-z_][A-Za-z0-9_]*\\s*[:=]\\s*${v}\\b(?![.\\d])`, "g"))) {
+      const ident = m[0].split(/[:=]/)[0].trim();
+      if (RULEISH.test(ident) && !COSMETIC.test(ident)) add(m.index, m[0], name);
+    }
+    // Shape 3 — an operand of an arithmetic expression: `dteLeft - 7`.
+    const arith = new RegExp(
+      `(?:(${OPERAND})\\s*([-+*])\\s*${v}\\b(?![.\\d])|(?<![.\\w])${v}\\s*([-+*])\\s*(${OPERAND}))`, "g");
+    for (const m of code.matchAll(arith)) if (ruleNamed(m[1] || m[4])) add(m.index, m[0], name);
+  }
+  return [...at.entries()].sort((a, b) => a[0] - b[0]).map(([, h]) => h);
+}
+
+test("RULES LITERALS — no file that computes a printed number keeps its own copy", () => {
   const RULE_LITERALS = [
     ["targetEntryDTE", RULES.targetEntryDTE],
     ["minEntryDTE", RULES.minEntryDTE],
@@ -1440,40 +1531,72 @@ test("RULES LITERALS — no UI file keeps its own copy of a rule number", () => 
     ["suggestedConcurrentTarget", RULES.suggestedConcurrentTarget],
     ["minOpenInterestAbsolute", RULES.minOpenInterestAbsolute],
     ["minPeersForPercentile", RULES.minPeersForPercentile],
+    // THE TWO THE EXPRESSION SHAPE WAS ADDED FOR. `0.5` is a common number and
+    // these two are the same 0.5, so a hit names both: what the guard can say
+    // is that a rule's value is being applied here without reading its home,
+    // not which of the two rules the author had in mind.
+    ["takeProfitPct", RULES.takeProfitPct],
+    ["stopLossPct", RULES.stopLossPct],
+    ["fallbackSigma", RULES.fallbackSigma],
+    ["openLimitSlippage", RULES.openLimitSlippage],
+    ["closeLimitSlippage", RULES.closeLimitSlippage],
+    // `maxSpreadShareOfMid` (0.35) IS DELIBERATELY NOT ON THIS LIST, and this is
+    // the honest limit of the whole approach. App.jsx draws a position's
+    // attention level at `pnl < 0.35 * p.maxLoss * n` — a "watch" badge with no
+    // home in RULES, whose value COLLIDES with the spread floor's. The guard
+    // would report it as a copy of the spread floor, which it is not: a
+    // sentence that names the wrong rule is worse than one that is not printed.
+    // The un-homed 0.35 is written up in the PRD's NOT VERIFIED list instead.
+    ["minNetPremium", RULES.minNetPremium],
+    ["modelDisagreementRatio", RULES.modelDisagreementRatio],
+    ["liquidityPercentile", RULES.liquidityPercentile],
+    ["scratchPayoffShare", RULES.scratchPayoffShare],
   ];
-  // The name has to be about a RULE, not about a pixel. `max: 40` on a progress
-  // bar and `minHeight: 40` on a button are not copies of `lowConfidence`.
-  const RULEISH = /(dte|day|horizon|capital|target|confidence|reason|chars|contract|percentile|interest|premium|slippage|exposure|entry|exit|override|floor)/i;
-  const COSMETIC = /(height|width|size|weight|radius|spacing|top|left|right|bottom|opacity|index|gap|padding|margin|font|stroke|delay|duration|color)/i;
   const bad = [];
-  for (const file of ["App.jsx", "pro.jsx", "wizard.jsx"]) {
-    const code = codeOf(file);
-    for (const [name, value] of RULE_LITERALS) {
-      const v = String(value).replace(".", "\\.");
-      // Shape 1: an initial state — `useState(45)`.
-      for (const hit of code.match(new RegExp(`useState\\(\\s*${v}\\s*\\)`, "g")) || []) {
-        bad.push(`${file}: ${hit} — ${name} is ${value} in RULES`);
-      }
-      // Shape 2: a property or a local constant — `dteT: 45`, `REASON_MIN = 15`.
-      for (const hit of code.match(new RegExp(`\\b[A-Za-z_][A-Za-z0-9_]*\\s*[:=]\\s*${v}\\b(?![.\\d])`, "g")) || []) {
-        const ident = hit.split(/[:=]/)[0].trim();
-        if (RULEISH.test(ident) && !COSMETIC.test(ident)) {
-          bad.push(`${file}: ${hit.trim()} — ${name} is ${value} in RULES`);
-        }
-      }
+  for (const file of LITERAL_FILES) {
+    for (const hit of ruleLiteralHits(codeOf(file), RULE_LITERALS)) {
+      bad.push(`${file}: ${hit.text} — ${hit.names.join(" / ")} in RULES`);
     }
   }
   assert.deepEqual(bad, [], `a rule number has a home; these are copies:\n  ${bad.join("\n  ")}`);
 });
 
 test("RULES LITERALS — the test can actually see a copy when there is one", () => {
-  // A guard that cannot fail is not a guard. This is the shape the sweep found
-  // three times in App.jsx, checked against the same matcher.
-  const sample = `const [dteManual, setDteManual] = useState(${RULES.targetEntryDTE});`;
-  assert.ok(new RegExp(`useState\\(\\s*${RULES.targetEntryDTE}\\s*\\)`).test(sample));
-  const sample2 = `  const REASON_MIN = ${RULES.minOverrideReasonChars};`;
-  const m = sample2.match(new RegExp(`\\b[A-Za-z_][A-Za-z0-9_]*\\s*[:=]\\s*${RULES.minOverrideReasonChars}\\b`));
-  assert.ok(m && /reason/i.test(m[0]), "the bare REASON_MIN this session inherited would be caught");
+  // A guard that cannot fail is not a guard — and this one has just been handed
+  // a real catch, so it had better still be able to fail. Each of the three
+  // shapes is checked against the same matcher the sweep above uses.
+  const L = [["targetEntryDTE", RULES.targetEntryDTE], ["minOverrideReasonChars", RULES.minOverrideReasonChars],
+    ["exitDTE", RULES.exitDTE], ["takeProfitPct", RULES.takeProfitPct]];
+  const seen = (src) => ruleLiteralHits(src, L).map((h) => h.text);
+
+  // Shape 1 — an initial state. The sweep found this three times in App.jsx.
+  assert.deepEqual(seen(`const [dteManual, setDteManual] = useState(${RULES.targetEntryDTE});`),
+    [`useState(${RULES.targetEntryDTE})`]);
+  // Shape 2 — a local constant. This is the bare REASON_MIN PR #23 inherited.
+  assert.deepEqual(seen(`  const REASON_MIN = ${RULES.minOverrideReasonChars};`),
+    [`REASON_MIN = ${RULES.minOverrideReasonChars}`]);
+  // Shape 3 — INSIDE AN ARITHMETIC EXPRESSION. This is the one that let the
+  // simulator's exit policy sit in plain sight for four pull requests.
+  assert.deepEqual(seen(`  const days = Math.max(1, dteLeft - ${RULES.exitDTE});`),
+    [`dteLeft - ${RULES.exitDTE}`]);
+  assert.deepEqual(seen(`  const tp = ${RULES.takeProfitPct} * pos.maxProfit;`),
+    [`${RULES.takeProfitPct} * pos.maxProfit`]);
+  assert.deepEqual(seen(`  const sl = ${RULES.stopLossPct} * pos.maxLoss, x = 1;`),
+    [`${RULES.stopLossPct} * pos.maxLoss`]);
+  assert.deepEqual(seen(`  const back = entryDte + ${RULES.exitDTE};`), [`entryDte + ${RULES.exitDTE}`]);
+
+  // ...AND IT STILL HAS TO STAY QUIET ON THE THINGS THAT ARE NOT COPIES, or the
+  // build fails on arithmetic and the next session deletes the guard.
+  assert.deepEqual(seen(`const span = Math.round(dte / 30);`), [],
+    "days into months is a unit conversion, not the entry floor");
+  assert.deepEqual(seen(`<text x={xToday + 4} />`), [],
+    "a coordinate beside TODAY is not the suggested number of positions");
+  assert.deepEqual(seen(`const d1 = (Math.log(S / K) + (0.045 + ${RULES.takeProfitPct} * iv * iv) * T);`), [],
+    "Black-Scholes has a half in it and it is not the take-profit rule");
+  assert.deepEqual(seen(`{ days: RULES.targetEntryDTE + 30, label: "2-3 months" }`), [],
+    "an expression anchored at the home is already reading the home");
+  assert.deepEqual(seen(`const bar = { height: ${RULES.lowConfidence}, marginTop: ${RULES.exitDTE} };`), [],
+    "a pixel is not a rule, however ruleish the file it is in");
 });
 
 /* ============================================================================

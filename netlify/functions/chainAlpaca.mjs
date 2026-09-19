@@ -37,6 +37,8 @@
  *   GET /v2/stocks/trades/latest?symbols=UNG → { trades: { UNG: { p, t } } }
  */
 import { normaliseAlpacaChain, MAX_DTE } from "../../src/chain.js";
+// The horizon the app aims at is a RULE, and rules have one home (CLAUDE.md).
+import { RULES } from "../../src/rules.js";
 
 const DATA = "https://data.alpaca.markets";
 
@@ -171,8 +173,10 @@ export default async (req) => {
     if (url.searchParams.get("debug")) {
       // A shape report, not the chain: what came back, and whether the greeks
       // are really populated on this plan. No key, no upstream URL, no account.
+      // THE HORIZON THE APP AIMS AT HAS ONE HOME. This read `dte - 45` twice,
+      // which is `RULES.targetEntryDTE` spelled out in a serverless function.
       const mid = chain.expirations.reduce((b, e) =>
-        Math.abs(chain.byExp[e].dte - 45) < Math.abs(chain.byExp[b].dte - 45) ? e : b, chain.expirations[0]);
+        Math.abs(chain.byExp[e].dte - RULES.targetEntryDTE) < Math.abs(chain.byExp[b].dte - RULES.targetEntryDTE) ? e : b, chain.expirations[0]);
       const strikesAt = (e) => new Set([
         ...Object.keys(chain.byExp[e].calls), ...Object.keys(chain.byExp[e].puts),
       ].map(Number));
@@ -181,7 +185,7 @@ export default async (req) => {
         sym, feed, source: chain.source, spot, pages, truncated,
         expirations: chain.expirations.length,
         expiryDTEs: chain.expirations.map((e) => chain.byExp[e].dte),
-        nearest45: { exp: mid, dte: chain.byExp[mid].dte, strikes: strikesAt(mid).size },
+        nearestTarget: { targetDTE: RULES.targetEntryDTE, exp: mid, dte: chain.byExp[mid].dte, strikes: strikesAt(mid).size },
         sampleContract: chain.byExp[mid].calls[sampleK] || chain.byExp[mid].puts[sampleK] || null,
         coverage: coverage(chain),
       }, { headers: { "Cache-Control": "no-store" } });

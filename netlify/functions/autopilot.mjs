@@ -3,7 +3,7 @@
 import { getStore } from "@netlify/blobs";
 import { netBS, probProfit, exitSim, SEASONAL, SIGMA } from "../../src/engine.js";
 import { RULES, ruleBadge, copilotRulesBlock, pctText,
-  markProvenance, autopilotVerdict, AUTOPILOT_VERDICTS, MODEL_PRICE } from "../../src/rules.js";
+  markProvenance, sigmaProvenance, autopilotVerdict, AUTOPILOT_VERDICTS, MODEL_PRICE } from "../../src/rules.js";
 import { evaluateTrade } from "../../src/riskGate.js";
 // HOW MANY COMBINATIONS THE POSITION IS. A close proposed at one lot on a
 // seven-lot position leaves six open and calls it an exit — and the gate would
@@ -53,6 +53,12 @@ function markFromChain(data, pos) {
   return { spot, net: found === pos.legs.length ? net : null, found,
     iv: ivs.length ? ivs.reduce((a, b) => a + b, 0) / ivs.length : null };
 }
+// THE EXIT POLICY THE SIMULATOR IS RUN UNDER, READ FROM ITS ONE HOME.
+// `exitSim` takes these as an argument and has no default for them, because a
+// default is how a stale copy survives: the version before this PR held 0.5,
+// 0.5 and 7 of its own, and walked to 7 DTE while the rule closes at 21.
+const EXIT_POLICY = { exitDTE: RULES.exitDTE, takeProfitPct: RULES.takeProfitPct, stopLossPct: RULES.stopLossPct };
+
 // WHAT THIS FUNCTION'S OWN FEED IS CALLED. `rules.js` never writes a feed's
 // name (CLAUDE.md) — it is handed one, and this is the site that knows it.
 const CHAIN_FEED = "CBOE delayed";
@@ -112,7 +118,17 @@ export default async () => {
     const pop = probProfit(pos.legs, pos.entryNet, spot, iv, Math.max(1, dteLeft));
     const seasonalNow = (SEASONAL[pos.ticker] || SEASONAL.SPY)[month];
     const tis = computeTIS(pos, { pop, ivNow: iv, seasonalNow, dteLeft });
-    const sim = exitSim(pos, spot, dteLeft, iv, SIGMA[pos.ticker] || 0.25);
+    // WHICH VOLATILITY THE SIMULATOR WALKS ON, DECIDED ONCE AND CARRIED. This
+    // was `SIGMA[pos.ticker] || 0.25`: a hand-written table with an unlabelled
+    // hand-written fallback behind it, driving pTP, pSL, pTimePos, ev and
+    // medDays with nothing on screen to say which of the two produced them.
+    // `RULES.fallbackSigma` names the number; fixing the TABLE is ROADMAP P2.
+    const vol = sigmaProvenance(SIGMA[pos.ticker], pos.ticker);
+    // AND THE EXIT POLICY IS PASSED IN, because `engine.js` imports nothing and
+    // may not read RULES (see `exitSim`). It used to hold its own copies — 0.5,
+    // 0.5 and 7 — so the walk ended at 7 DTE while `exitDTE` has been 21 since
+    // it was changed from 7, and the field below still called it the exit DTE.
+    const sim = exitSim(pos, spot, dteLeft, iv, vol.sigma, EXIT_POLICY);
     const pctMax = pos.maxProfit > 0 ? (pnl / pos.maxProfit) * 100 : 0;
 
     // anti-rumore: nessun cambiamento materiale → riga singola
@@ -133,7 +149,11 @@ export default async () => {
           // chain failed to load: a chain that loaded and was missing one leg
           // produced a modelled net and was reported as market data.
           today: { chainSource: prov.source, priceIsEstimated: prov.modelled, spot: +spot.toFixed(2), pnl: +pnl.toFixed(0), pct_max_profit: +pctMax.toFixed(0), popNow: +(pop * 100).toFixed(0), ivNow: +(iv * 100).toFixed(0), tis, seasonalThisMonth: seasonalNow },
-          simulator_from_today: { p_take_profit_first: +(sim.pTP * 100).toFixed(0), p_stop_first: +(sim.pSL * 100).toFixed(0), p_exit_at_exit_dte_positive: +(sim.pTimePos * 100).toFixed(0), expected_pnl_following_rules: +sim.ev.toFixed(0), median_days_to_take_profit: sim.medDays },
+          // THE HORIZON IS STATED BESIDE THE NUMBERS COMPUTED AT IT. The field
+          // name `p_exit_at_exit_dte_positive` asserted a rule the arithmetic
+          // did not apply; `simulated_to_dte` is the simulator's own answer to
+          // "at what point", and `days_simulated` is how far it walked.
+          simulator_from_today: { p_take_profit_first: +(sim.pTP * 100).toFixed(0), p_stop_first: +(sim.pSL * 100).toFixed(0), p_exit_at_exit_dte_positive: +(sim.pTimePos * 100).toFixed(0), expected_pnl_following_rules: +sim.ev.toFixed(0), median_days_to_take_profit: sim.medDays, simulated_to_dte: sim.exitDTE, days_simulated: sim.horizon, volatility_used: +(vol.sigma * 100).toFixed(0), volatility_source: vol.source },
         };
         const r = await fetch("https://api.anthropic.com/v1/messages", {
           method: "POST",
@@ -170,6 +190,8 @@ export default async () => {
     if (dec.rationale) rationale = dec.rationale;
     const ruleWarnings = [...dec.warnings];
     if (prov.modelled) ruleWarnings.push(prov.note);
+    // A SIMULATION WALKED AT A NUMBER NOBODY WROTE DOWN FOR THIS MARKET SAYS SO.
+    if (!vol.fromTable) ruleWarnings.push(vol.note);
 
     // ordine proposto + approve link (solo se azione richiesta)
     let approveUrl = null, gateResult = null;
@@ -244,6 +266,8 @@ export default async () => {
 
     const brief = { t: Date.now(), verdict, rationale, evidence, invalidation, pnl: +pnl.toFixed(0), pctMax: +pctMax.toFixed(0), tis, pop: +(pop * 100).toFixed(0), dteLeft, sim, approveUrl,
       priceSource: prov.source, priceIsEstimated: prov.modelled,
+      // WHICH VOLATILITY THE SIMULATION ABOVE IS AN ANSWER ABOUT.
+      simSigma: vol.sigma, simSigmaSource: vol.source, simSigmaFromTable: vol.fromTable,
       // THE WARNINGS THE RULES RAISED, BESIDE THE GATE'S OWN. The stop lives
       // here now: it is a sentence in the brief and never a link.
       ruleWarnings,
@@ -272,7 +296,7 @@ export default async () => {
         ? `\n\n> **These figures are ESTIMATES.** The price came from the ${b.priceSource}, not from the market: ` +
           `at least one leg had no two-sided quote. Nothing can be approved on it.\n`
         : "";
-      return `## ${o.pos} → **${b.verdict}** (TIS ${b.tis}/100)${est}\n${b.rationale}\n${(b.evidence || []).map((e) => `- ${e}`).join("\n")}\n${b.invalidation ? `_Invalidated if: ${b.invalidation}_\n` : ""}P&L ${b.pnl}$ (${b.pctMax}% maxP) · PoP ${b.pop}% · ${b.dteLeft} DTE · price from ${b.priceSource} · Sim: take profit ${(b.sim.pTP * 100).toFixed(0)}% / stop ${(b.sim.pSL * 100).toFixed(0)}%${(b.ruleWarnings || []).map((w) => `\n⚠ ${w}`).join("")}${(b.gateWarnings || []).map((w) => `\n⚠ ${w}`).join("")}${b.approveUrl ? `\n\n**→ APPROVE (valid 24h): ${b.approveUrl}**` : ""}`;
+      return `## ${o.pos} → **${b.verdict}** (TIS ${b.tis}/100)${est}\n${b.rationale}\n${(b.evidence || []).map((e) => `- ${e}`).join("\n")}\n${b.invalidation ? `_Invalidated if: ${b.invalidation}_\n` : ""}P&L ${b.pnl}$ (${b.pctMax}% maxP) · PoP ${b.pop}% · ${b.dteLeft} DTE · price from ${b.priceSource} · Sim to ${b.sim.exitDTE} DTE at ${pctText(b.simSigma)} vol (${b.simSigmaSource}): take profit ${(b.sim.pTP * 100).toFixed(0)}% / stop ${(b.sim.pSL * 100).toFixed(0)}%${(b.ruleWarnings || []).map((w) => `\n⚠ ${w}`).join("")}${(b.gateWarnings || []).map((w) => `\n⚠ ${w}`).join("")}${b.approveUrl ? `\n\n**→ APPROVE (valid 24h): ${b.approveUrl}**` : ""}`;
     }).join("\n\n---\n\n");
     const rejectedMd = rejected.length
       ? rejected.map((r) => `## ${r.pos} → ${r.verdict} **REJECTED**\n${r.reasons.map((x) => `- ${x}`).join("\n")}`).join("\n\n")

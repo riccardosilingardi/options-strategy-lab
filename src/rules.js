@@ -64,6 +64,12 @@ export const RULES = {
                                // versus their own history: we are the buyer of
                                // an expensive option, so we stand down
 
+  // --- THE VOLATILITY THE EXIT SIMULATOR WALKS ON WHEN THE TABLE HAS NO ROW.
+  // `SIGMA` in engine.js is hand-written per ticker; this is the number behind
+  // it, and it was a bare `|| 0.25` in autopilot.mjs. CHOSEN, NOT MEASURED —
+  // see FALLBACK_SIGMA below for what that means and what would settle it.
+  fallbackSigma: 0.25,
+
   // --- QUALITY FLOORS. A structure can pass every rule above and still be
   // indefensible. These two are the floors under a PROPOSAL: a candidate that
   // fails either one is never offered, and the screen says which floor it hit.
@@ -1827,6 +1833,62 @@ export function markProvenance(chainNet, feed = "the option chain") {
     note: modelled ? modelPriceNote(feed) : null,
   };
 }
+
+/**
+ * THE VOLATILITY THE SIMULATOR WALKS ON, WHEN THE TABLE HAS NO ROW FOR A TICKER.
+ *
+ * `SIGMA` in `engine.js` is a HAND-WRITTEN per-ticker table, and `autopilot.mjs`
+ * read it as `SIGMA[pos.ticker] || 0.25` — an unlabelled hand-written fallback
+ * behind a hand-written table, driving every number the exit simulator produces:
+ * the chance of taking profit first, the chance of the stop first, the chance of
+ * being positive at the exit rule, the expected P&L and the median days to
+ * target. A brief that says "38% chance of taking profit first" reads the same
+ * whether the 38 came from a number somebody wrote down for BOIL or from a
+ * number nobody wrote down for anything.
+ *
+ * **0.25 IS CHOSEN, NOT MEASURED.** It is a mid-range annualised volatility for
+ * a commodity ETF — between the grain markets this app trades (0.19 to 0.25 in
+ * the table) and the leveraged ones (0.48, 0.95). Nothing was estimated from
+ * returns to arrive at it, and it is on the PRD's NOT VERIFIED list. Fixing the
+ * TABLE — measuring realised volatility per market instead of typing it — is
+ * ROADMAP P2's house distribution and is deliberately not done here.
+ *
+ * What IS done here is the `markProvenance()` discipline: decide once WHICH of
+ * the two was in force, and carry it everywhere the number goes.
+ */
+export const FALLBACK_SIGMA = RULES.fallbackSigma;
+
+/** What the app calls a volatility it did not have a row for. */
+export const FALLBACK_SIGMA_SOURCE = "fallback";
+
+/** And what it calls one it did. */
+export const TABLE_SIGMA_SOURCE = "table";
+
+/**
+ * WHICH VOLATILITY IS IN FORCE, decided once.
+ *
+ * @param tableSigma  the table's value for this ticker, or undefined/null
+ * @param ticker      what to name in the sentence when there is no row
+ */
+export function sigmaProvenance(tableSigma, ticker = "this market") {
+  const fromTable = Number.isFinite(tableSigma) && tableSigma > 0;
+  const sigma = fromTable ? tableSigma : FALLBACK_SIGMA;
+  return {
+    sigma,
+    fromTable,
+    source: fromTable ? TABLE_SIGMA_SOURCE : FALLBACK_SIGMA_SOURCE,
+    note: fallbackSigmaNote(ticker, sigma, fromTable),
+  };
+}
+
+/** One sentence saying where the simulator's volatility came from. */
+export const fallbackSigmaNote = (ticker = "this market", sigma = FALLBACK_SIGMA, fromTable = false) =>
+  fromTable
+    ? `The simulation below walks ${ticker} at ${pctText(sigma)} a year, the figure this app holds for it. ` +
+      `That figure is written down, not measured from returns.`
+    : `THE SIMULATION BELOW IS WALKED AT A FALLBACK VOLATILITY. This app holds no figure for ${ticker}, so ` +
+      `it used ${pctText(sigma)} a year — a number chosen as a middle for a commodity ETF, not measured from ` +
+      `${ticker}'s own returns. Every figure the simulator produces for it is that assumption's, not the market's.`;
 
 /** Why an estimated price is not something to act on, in one sentence. */
 export const modelPriceNote = (feed = "the option chain") =>

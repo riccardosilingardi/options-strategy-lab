@@ -347,8 +347,37 @@ so two screens could name different legs for one trade. `riskGate.test.js` fails
 
 **A RULE NUMBER HAS ONE HOME, AND A TEST REFUSES THE COPIES.** `REASON_MIN = 15` was one; the
 sweep found three more, all `45` where `RULES.targetEntryDTE` lives. `riskGate.test.js` refuses
-the shapes a copy takes here — a `useState` default, a property, a local constant — against
-eleven rule numbers, and a second test proves the matcher can still see one.
+the shapes a copy takes here — a `useState` default, a property, a local constant, and **a rule
+number inside an ARITHMETIC EXPRESSION** — against twenty rule numbers, over every file that
+computes a number a screen or a brief prints (the list is read off the disk, so a new module or
+endpoint is swept without anybody coming back). A second test proves the matcher can still see
+each shape AND still stays quiet on the things that are not copies.
+
+## The simulator walked to the wrong day — and the exit policy is the CALLER'S
+
+`exitSim()` in `engine.js` held `0.5 * pos.maxProfit`, `0.5 * pos.maxLoss`, `dteLeft - 7` and
+`netBS(pos.legs, s, 7, iv)`. Two were right by luck; **`RULES.exitDTE` is 21 and has been since
+it was CHANGED FROM 7**, so the simulator walked to 7 days and marked the survivors at 7 days
+while the app closes at 21 — and `autopilot.mjs` handed the result to the model in a field
+called `p_exit_at_exit_dte_positive`. The NAME asserted the rule the arithmetic had not applied.
+
+- **The policy is an ARGUMENT, and it has NO DEFAULT.** `engine.js` imports nothing and `rules.js`
+  imports `engine.js`; reading RULES from the engine would be a cycle. `exitSim(pos, S, dteLeft,
+  iv, sigma, { exitDTE, takeProfitPct, stopLossPct }, n)` THROWS when the policy is missing or
+  unreadable — a default is how the bare 7 comes back, silently, in a year. `autopilot.mjs` builds
+  `EXIT_POLICY` from `RULES` once.
+- **`exitSim` returns `horizon` and `exitDTE`**, and the brief prints them (`days_simulated`,
+  `simulated_to_dte`), so a field name cannot assert a rule on its own authority again.
+- **`pro.jsx`'s `exitPathSim` keeps its own body deliberately** (see Known traps) but not its own
+  numbers: it reads `RULES.exitDTE` for the survivor mark, which was a bare 7 disagreeing with
+  its own walk.
+- **Never call `netBS()` with a number where the days go.** `engine.test.js` fails the build if
+  either simulator does: that third argument is always a policy written down twice.
+- **The fallback volatility has a name.** `SIGMA[pos.ticker] || 0.25` was a hand-written table
+  with an unlabelled hand-written fallback behind it. `RULES.fallbackSigma` / `sigmaProvenance()`
+  decide once which of the two is in force and carry it to the brief, the warning and the model,
+  exactly as `markProvenance()` does for a price. **0.25 is CHOSEN, not measured**; fixing the
+  TABLE is ROADMAP P2.
 
 ## Working orders have a home, and SENT is not FILLED
 
@@ -581,7 +610,9 @@ while the position is open.
   too, so the "nothing today" screen can only ever explain a rule the code
   applies.
 - **The autopilot's verdict and the closing price are rules, so they live in `rules.js`.**
-  `markProvenance()` (did this number come from the feed or from `netBS`), `autopilotVerdict()`
+  `markProvenance()` (did this number come from the feed or from `netBS`), `sigmaProvenance()`
+  with `RULES.fallbackSigma` (did the simulator's volatility come from the table or from the
+  fallback behind it), `autopilotVerdict()`
   (which rule fired, and whether it may become an approve link — `approvable` is a SEPARATE
   field from `verdict`), `AUTOPILOT_VERDICTS`, `stopWarningSentence()`, `ruleExitOf()`,
   `closeMarket()` / `closeLimitPrice()` / `CLOSE_LIMIT_SLIPPAGE`. A rule of action written

@@ -464,6 +464,119 @@ is what reads it.
 
 ---
 
+## 4g. A rule number can hide in an expression — and the simulator walked to the wrong day
+
+### THE FAULT
+
+`exitSim()` in `src/engine.js` — the exit simulator the autopilot runs on every open position,
+every weekday — opened with this:
+
+    const tp = Number.isFinite(pos.maxProfit) ? 0.5 * pos.maxProfit : null;
+    const sl = 0.5 * pos.maxLoss, days = Math.max(1, dteLeft - 7);
+    ...
+    const pnl = (netBS(pos.legs, s, 7, iv) - pos.entryNet) * 100;
+
+Four copies of three rules that have a home in `src/rules.js`. Two of them were right by luck:
+`takeProfitPct` is 0.5 and `stopLossPct` is 0.5. **The other two were not.** `RULES.exitDTE` is
+**21**, and has been since it was CHANGED FROM 7 — §4 says so in the table and the comment beside
+the constant says so again. So the simulator walked each position forward to **7** days to
+expiration and marked whatever survived at **7** days, while the app's own rule closes or rolls
+the trade at **21**.
+
+`netlify/functions/autopilot.mjs` then handed the result to the model in a field called
+`p_exit_at_exit_dte_positive`. **The name asserted the rule the arithmetic had not applied**, and
+the model wrote prose on top of it: a brief that says "62% chance of still being positive at the
+exit rule" was describing a different trade from the one the app manages.
+
+The same bare 7 was in `exitPathSim()` in `pro.jsx` — the Guardian panel's version, which the
+owner runs by hand. That one walked the right number of days (`dteLeft - RULES.exitDTE`) and then
+**priced the survivors fourteen days later than the day it stopped at**, so its horizon and its
+marking disagreed with each other inside one function.
+
+### THE FIX, AND WHY THE POLICY IS AN ARGUMENT
+
+`engine.js` imports nothing, and `rules.js` imports `engine.js` — a leaf-ward import, stated as
+such in `rules.js` (§4e). Reading `RULES` from the engine would make that a cycle. So the exit
+policy is the CALLER'S:
+
+    exitSim(pos, S, dteLeft, iv, sigma, { exitDTE, takeProfitPct, stopLossPct }, n)
+
+**and it has no default value, deliberately.** A default is how the bare 7 comes back, silently,
+in a year: a new call site that forgets the argument would get whatever number this file happened
+to hold rather than the number the app applies. A missing or unreadable policy THROWS. The one
+caller, `autopilot.mjs`, builds `EXIT_POLICY` from `RULES` in one place. `pro.jsx` already imports
+`RULES` and now reads `RULES.exitDTE` for its survivor mark.
+
+`exitSim` also returns `horizon` (how far it walked) and `exitDTE` (the day it stopped at), and
+the brief prints both beside the probabilities — `simulated_to_dte` and `days_simulated` — so a
+field name can no longer assert a rule on its own authority.
+
+### WHAT THE NUMBERS DID
+
+Every simulator output moves, because the simulated window is `dteLeft - 21` instead of
+`dteLeft - 7`. Seeded at 1500 paths, in `src/engine.test.js` as real assertions:
+
+| Fixture | window | pTP | pSL | pTimePos | ev | medDays |
+|---|---|---|---|---|---|---|
+| CORN 20/22, 41 DTE | 34 → **20** days | 0.226 → **0.097** | 0.623 → **0.419** | 0.093 → **0.294** | -2.00 → **-1.30** | 22 → **15** |
+| BOIL 21/24, 50 DTE | 43 → **29** days | 0.435 → **0.393** | 0.557 → **0.519** | 0.003 → **0.054** | +20.56 → **+19.52** | 12 → **11** |
+| UNG 11C, 35 DTE (no ceiling) | 28 → **14** days | 0 → **0** | 0.767 → **0.554** | 0.192 → **0.281** | -9.10 → **-8.08** | — |
+
+Fourteen fewer days of price path is the whole of the change, and three of the five numbers move
+in one direction on every fixture: **fewer chances to touch either barrier**, so `pTP` and `pSL`
+both fall and the share still open when the rule acts rises. `medDays` falls because the late
+take-profits are the ones the shorter window cuts off, so the median of what is left is earlier.
+
+**`ev` has no single direction, and that is not a finding.** It is the average over three
+outcomes whose weights all changed at once, and the survivor mark itself moved: at an unchanged
+spot the same structure is worth $18 (CORN), $10 (BOIL) and $24 (UNG) more at 21 DTE than at 7,
+because two more weeks of time value are still in it. On CORN and UNG that lifts `ev`; on BOIL,
+where the take-profit paid more than the survivor mark does, it lowers it.
+
+### THE GUARD THAT FOUND IT, AND WHAT IT STILL CANNOT SEE
+
+`riskGate.test.js` refused two shapes of copy — a `useState` default and a property or local
+constant. It now refuses a third: **a rule number inside an arithmetic expression**, which is the
+shape that let this live in plain sight for four pull requests. The file list is read off the
+disk and now covers `engine.js` and the Netlify functions as well as the three UI files.
+
+Keeping it quiet is the hard half, because 0.5 is in Black-Scholes twice and 30 is how many days
+are in a month. Four rules do it, and each is a statement about what a rule number is: the value
+must sit beside a **rule-named** identifier, matched on the identifier's WORDS (so `dteLeft` is
+about DTE and `xToday` is an x coordinate); **division is not one of the operators** (something
+divided BY a number is using it as a unit — `dte / 30` is days into months); an operand already
+anchored at the home (`RULES.targetEntryDTE + 30`) is reading the home; and the cosmetic names go
+on being excluded.
+
+**It cannot catch a STALE copy, which is what the bare 7 was.** 7 is not the value of any rule
+any more, so no matcher can know it used to be one; what the widened guard caught was the two
+`0.5`s on the same two lines, and a person reading those lines found the 7. The shape itself is
+refused separately: `netBS()` is the app's one pricing call and its third argument is how many
+days are left, so a number literal there is always a policy written down twice —
+`engine.test.js` fails the build if either simulator does it again.
+
+Two files are excluded from the sweep by name, with their reasons in the code, because on both
+the matcher would name the WRONG rule: `demo.js` (`entryDaysAgo: 30` is a fact about a made-up
+position, not the entry floor) and `signals.js` (an un-homed confidence bar of 70 that collides
+in value with `expensiveIVRank` — see NOT VERIFIED).
+
+### THE FALLBACK TO A FALLBACK
+
+The same function was run on `SIGMA[pos.ticker] || 0.25`: a hand-written volatility table with an
+**unlabelled hand-written fallback behind it**, driving pTP, pSL, pTimePos, ev and medDays. A
+brief that says "38% chance of taking profit first" reads the same whether the 38 came from a
+number somebody wrote down for BOIL or from a number nobody wrote down for anything.
+
+`RULES.fallbackSigma` (`FALLBACK_SIGMA`) now names it, with the same discipline as
+`markProvenance()` (§9b): **decide once which of the two is in force, and carry it everywhere.**
+`sigmaProvenance()` returns the volatility, whether it came from the table, and one sentence; the
+brief carries `simSigmaSource`, the model is told `volatility_source`, and a position walked at
+the fallback gets a named warning. **0.25 is CHOSEN, not measured**, and the comment beside it
+says so. Fixing the TABLE — measuring realised volatility per market instead of typing it — is
+ROADMAP P2's house distribution and is deliberately not this change.
+
+---
+
 ## 5. The wizard IS the app
 
 The wizard is not a feature inside the app. It is the entry point and the spine. Existing tabs remain reachable but are no longer the front door.
@@ -882,6 +995,9 @@ The build order was a plan for a future builder. It is now a record.
 | The entry floor as ROOM: hard block only inside the exit window | **DONE** (§4f) — the number 30 is unchanged and uncalibrated |
 | The position remembers its size, and the gate runs at it | **DONE** (§10f) — the cap that did not hold |
 | One model check, shared by the three generation sites and the ticket | **DONE** (§10f) |
+| The exit simulator runs at the exit rule, and the policy is the caller's | **DONE** (§4g) — it walked to 7 DTE while the rule says 21 |
+| A rule number inside an arithmetic expression is refused by a test | **DONE** (§4g) — and it still cannot catch a STALE copy |
+| The simulator's fallback volatility has a name, and the brief carries which was in force | **DONE** (§4g) — 0.25 is CHOSEN, and the table behind it is P2 |
 | Video and deck | **NOT VERIFIED HERE** — outside the repo |
 
 ---
@@ -1385,7 +1501,87 @@ What is left:
 The standing rule in `CLAUDE.md`: every session starts by fixing what the last one flagged, and
 ends by writing down what it could not verify. Currently open:
 
-### WRITTEN THIS SESSION — the position that did not remember its size
+### WRITTEN THIS SESSION — a rule number can hide in an expression (PR #24)
+
+This session widened the rule-literal guard to a third shape and to every file that computes a
+number a screen or a brief prints, used it on the exit simulator, and gave the simulator's
+fallback volatility a name (§4g). `npm test` reports **606 checks**, up from **594** measured on
+`main` at the start of this session — the twelve new ones are the new `src/engine.test.js` (8)
+and four in `autopilot.test.js` — and `npm run build` is clean.
+
+**AND THE COUNT ITSELF IS A CORRECTION.** PR #23 wrote down **588**; the brief that opened this
+session said **561**. A clean checkout of `main` at 08eac36, after `npm install`, reports
+**594** — seventeen suite totals that sum to it, printed in full. Neither earlier number is
+reproducible here, so 594 is what this session treats as ground truth and 606 is measured
+against it. A test count nobody can re-derive is the same kind of fact as a rule number with
+two homes.
+
+**NOTHING HERE WAS RUN AGAINST A LIVE CHAIN, A BROWSER OR A DEPLOY.** Same wall as PR #15
+through #23: no broker keys in this sandbox, no Anthropic key, and the egress proxy refuses the
+CONNECT. Every number in §4g's table comes from the app's own model with a seeded generator, and
+every statement about the autopilot's brief is a statement about its source text. **The autopilot
+has never been watched running with this change in it**, and the corrected brief — the one whose
+`p_exit_at_exit_dte_positive` is finally computed at 21 DTE — has not been read by anybody.
+
+- **THE SIMULATOR WAS WRONG FOR FOUR PULL REQUESTS AND NOBODY NOTICED, WHICH IS THE REAL
+  FINDING.** The fix is arithmetic and it is tested. What is not known is how much of the
+  autopilot's past prose was built on it: every brief the owner has ever received described the
+  chance of being positive "at the exit rule" at a horizon fourteen days past the rule. Those
+  briefs are in the Journal and they are wrong in a way nothing in the app marks. **No brief has
+  been re-read against this.**
+- **THE BEFORE/AFTER TABLE IS THE APP'S MODEL TALKING TO ITSELF.** The fixtures are priced with
+  `netBS` at the hand-written `SIGMA` (§4g), walked at that same hand-written volatility, and
+  seeded so the run reproduces. It proves the change moved the numbers and in which direction. It
+  proves nothing about whether either set of numbers describes a real market, and the honest
+  reading of `ev` moving DOWN on BOIL while it moved UP on the other two is that `ev` was never a
+  one-directional quantity, not that one of them is wrong.
+- **`fallbackSigma` (0.25) IS CHOSEN, NOT MEASURED — and so is the whole table behind it.** This
+  session named the fallback and made the brief carry which of the two was in force. It did NOT
+  fix `SIGMA` in `engine.js`, which is five hand-typed numbers driving every probability the
+  simulator prints, for markets whose realised volatility nobody has computed here. That is
+  ROADMAP P2's house distribution.
+- **THE GUARD STILL CANNOT PROVE A NEGATIVE, AND NOW IT CANNOT CATCH A STALE COPY EITHER.** It
+  refuses three shapes across fourteen rule numbers. The bare 7 was not any rule's value, so no
+  matcher could have named it — what the widened guard caught was the two `0.5`s beside it. A
+  copy written as `Math.round(44.9)`, or inside a template string, still passes.
+- **THREE UN-HOMED NUMBERS WERE FOUND AND DELIBERATELY NOT FIXED**, because each one needs a
+  product decision rather than a rename, and a guard that names the wrong rule is worse than one
+  that stays quiet:
+  - `App.jsx` draws a position's attention level at `pnl < 0.35 * p.maxLoss * n` — a "watch"
+    badge whose 0.35 has no home and collides in value with `maxSpreadShareOfMid`, which is why
+    that constant is the one rule number deliberately kept off the sweep list.
+  - `signals.js` writes "this clears the 70-confidence bar the autopilot needs" in two generated
+    sentences, guarded by `confidence >= 70`. Nothing in `RULES` holds that bar; its value
+    collides with `expensiveIVRank`. The file is excluded from the sweep by name for that reason.
+  - `autopilot.mjs` and `pro.jsx` still fall back to a bare `0.25` for **implied volatility**
+    (`m?.iv ?? pos.thesis?.iv ?? 0.25`, `ivNow || 0.25`). That is a different quantity from the
+    simulator's sigma and was left alone rather than conflated with it.
+- **`chainAlpaca.mjs` AND `visuals.jsx` WERE CORRECTED BY THE WIDENED SWEEP AND NEITHER WAS
+  RE-RUN.** The debug endpoint's `?debug` payload now reports `nearestTarget` instead of
+  `nearest45` (nothing in the app reads it, and nothing has called it since), and
+  `UnifiedPosition`'s default `dte` is `RULES.targetEntryDTE` instead of a bare 45 — a default
+  that only applies when a caller passes no horizon, which no screen currently does.
+
+**CARRIED FORWARD FROM PR #23, UNCHANGED — a sandbox cannot close any of them:**
+
+1. **No multi-lot ticket has been read on a phone.** The size is one piece of state and every
+   consumer reads it, in tests; the Build screen at ×5 with the per-combination warning, the
+   confirm step saying "5 combinations" and the gate refusing the sixth have not been seen.
+2. **No position has ever been opened above one lot**, so `contracts` has never held a real
+   number from a fill.
+3. **The corrected legacy-migration screen has not been re-read.** The rows should now say "10
+   combinations" and "5 combinations" in grey, with `$450` and `$577` unmoved.
+4. **The broker's P&L and the app's have never been compared live** at a size above one.
+5. **No closing order of any size has ever been sent.**
+6. **The re-price round trip has never been walked.**
+
+Each of these is written out in full in the section below, which is PR #23's own list and stays
+open word for word.
+
+### WRITTEN BY PR #23, STILL OPEN — the position that did not remember its size
+
+*(Left as PR #23 wrote it, "this session" and all. Its check count is one of the two numbers PR
+#24 could not reproduce: see below.)*
 
 This session did TASK 0 (the four items ROADMAP P0 left open and a sandbox could close)
 and the quantity half of ROADMAP P1: the position record now carries `contracts`, the risk
