@@ -18,6 +18,7 @@ import assert from "node:assert/strict";
 import {
   refOf, refNumber, seqOf, highestSeq, refCounter, nextRef,
   appendTimeline, stampTimeline, orderStatusRecheck,
+  simHorizonOf, autopilotHorizonNote,
   closeReason, closeDecision, CLOSE_REASON_MIN,
   journalEntry, lastCloseOrderId,
   byRefDesc, matchesRef, searchJournal, SEQ_SEP,
@@ -603,6 +604,106 @@ test("the position record that App.jsx writes carries the size", () => {
   assert.ok(/Number\(alpacaOrder\?\.qty\)/.test(commit),
     "and the broker order's own qty is the authority where there was one");
   assert.ok(!/contracts: 1/.test(commit), "never a hardcoded one");
+});
+
+/* ============================================================================
+   THE BRIEFS WRITTEN AT THE WRONG HORIZON (PR #24's first inherited debt).
+
+   `exitSim()` walked every position to 7 DTE while `RULES.exitDTE` has been 21
+   since it was changed from 7, and `autopilot.mjs` handed the answer to the
+   model in a field called `p_exit_at_exit_dte_positive`. Four pull requests
+   shipped on top of it. What the Journal keeps is not the brief — it is the
+   verdict plus the model's RATIONALE, prose written after reading those
+   numbers — so the wrong horizon is inside the text of past entries where
+   nothing can reach it.
+
+   It is NOT marked by date: a deploy date is a second home for a fact the entry
+   can carry itself. Entries written since the fix carry the horizon; the
+   ABSENCE of that stamp is what identifies the rest.
+============================================================================ */
+
+const STAMPED = { t: 1, type: "autopilot", text: "AUTOPILOT HOLD — ...", simExitDTE: RULES.exitDTE, simDays: 24 };
+const UNSTAMPED = { t: 1, type: "autopilot", text: "AUTOPILOT HOLD — 62% positive at the exit rule." };
+
+test("an autopilot entry with no horizon stamp is the one written before the fix", () => {
+  const before = simHorizonOf(UNSTAMPED);
+  assert.equal(before.autopilot, true);
+  assert.equal(before.stamped, false);
+  assert.equal(before.exitDTE, null, "an unknown horizon is not a horizon of 0");
+  const after = simHorizonOf(STAMPED);
+  assert.equal(after.stamped, true);
+  assert.equal(after.exitDTE, RULES.exitDTE);
+  assert.equal(after.days, 24);
+});
+
+test("the note appears on an unstamped entry and on NOTHING else", () => {
+  const note = autopilotHorizonNote(UNSTAMPED);
+  assert.ok(note && note.length > 0, "an unstamped entry is marked");
+  assert.ok(/no longer uses/.test(note), "and it says what is wrong with it");
+  // ONE SENTENCE, NOT A PARAGRAPH, AND NEVER AN APOLOGY.
+  assert.equal((note.match(/\.(?=\s|$)/g) || []).length, 1, `not one sentence: ${note}`);
+  assert.ok(!/sorry|apolog|we regret/i.test(note));
+  // A stamped one is not marked, or the warning is noise on every entry.
+  assert.equal(autopilotHorizonNote(STAMPED), null);
+  // ...and neither is anything that never quoted a horizon.
+  for (const e of [{ t: 1, type: "open", text: "Opened" }, { t: 1, type: "order", text: "Sent" },
+    { t: 1, type: "gate", text: "RISK GATE" }, {}, null]) {
+    assert.equal(autopilotHorizonNote(e), null, `${JSON.stringify(e)} never quoted a horizon`);
+  }
+});
+
+test("a horizon of 0 is a stamp, and a garbage one is not", () => {
+  // The exit rule could in principle be 0. A stamp of 0 is a real reading.
+  assert.equal(simHorizonOf({ type: "autopilot", simExitDTE: 0 }).stamped, true);
+  // But `Number(null)` is 0 and 0 is finite — the fault this repository is
+  // about — so a null must never read as a stamp of zero.
+  assert.equal(simHorizonOf({ type: "autopilot", simExitDTE: null }).stamped, false);
+  assert.equal(simHorizonOf({ type: "autopilot", simExitDTE: "n/a" }).stamped, false);
+  assert.equal(simHorizonOf({ type: "autopilot", simExitDTE: -1 }).stamped, false);
+});
+
+test("the stamp survives a hydration of an old book", () => {
+  // `stampTimeline()` is what runs over every position on load. It gives
+  // sequences; it must not touch anything else on an entry, or the marker would
+  // be erased by the very pass that reads old records.
+  const pos = {
+    ref: "J-0007",
+    timeline: [
+      { t: 10, type: "open", text: "Opened" },
+      { ...UNSTAMPED, t: 20 },
+      { ...STAMPED, t: 30 },
+    ],
+  };
+  const st = stampTimeline(pos);
+  assert.equal(st.timeline.length, 3);
+  assert.equal(simHorizonOf(st.timeline[1]).stamped, false, "the old entry stays unstamped");
+  assert.equal(simHorizonOf(st.timeline[2]).stamped, true, "and the new one keeps its horizon");
+  assert.equal(st.timeline[2].simDays, 24);
+  assert.ok(st.timeline[2].seq, "while still gaining its sequence");
+  // And through an append, which is the other way a timeline is rebuilt.
+  const ap = appendTimeline(st, { t: 40, type: "autopilot", text: "again", simExitDTE: RULES.exitDTE, simDays: 9 });
+  assert.equal(simHorizonOf(ap.timeline[1]).stamped, false);
+  assert.equal(simHorizonOf(ap.timeline[3]).stamped, true);
+  assert.equal(autopilotHorizonNote(ap.timeline[1]) !== null, true);
+});
+
+test("both screens that render a timeline print the note", () => {
+  // The live one (the Guardian, in pro.jsx) and the permanent record (the
+  // Journal, in App.jsx). A closed trade's autopilot entries are exactly the
+  // ones nobody will ever re-read against the fix.
+  for (const f of ["pro.jsx", "App.jsx"]) {
+    const src = readFileSync(new URL(`./${f}`, import.meta.url), "utf8");
+    assert.ok(/autopilotHorizonNote\(/.test(src), `${f} does not render the note`);
+  }
+});
+
+test("the autopilot stamps the horizon it actually simulated to", () => {
+  const src = readFileSync(new URL("../netlify/functions/autopilot.mjs", import.meta.url), "utf8");
+  // The stamp is the simulator's OWN answer, never a rule number written twice:
+  // that is the whole fault — a field name asserting a rule the arithmetic had
+  // not applied.
+  assert.ok(/simExitDTE: sim\.exitDTE/.test(src), "the stamp must be the simulator's own exitDTE");
+  assert.ok(/simDays: sim\.horizon/.test(src), "and how far it actually walked");
 });
 
 /* ---------------- report ---------------- */

@@ -165,11 +165,42 @@ check("explain() answers about the element tapped, with this trade's numbers", (
 
 check("chance in profit is read off the same bands", () => {
   const b = payoffBands({ legs: ironCondor, entryNet: -2, spot: SPOT });
-  const p = chanceInProfit(b, { spot: SPOT, sigma: 0.25, dte: 45 });
+  const p = chanceInProfit(b, { spot: SPOT, sigma: 0.25, dte: 45, driftAnnual: 0 });
   if (!(p > 0.1 && p < 0.9)) throw new Error(`implausible probability ${p}`);
   // a condor centred on spot must beat a spread that needs a 2% move first
-  const p2 = chanceInProfit(payoffBands({ legs: bullCall, entryNet: 2, spot: SPOT }), { spot: SPOT, sigma: 0.25, dte: 45 });
+  const p2 = chanceInProfit(payoffBands({ legs: bullCall, entryNet: 2, spot: SPOT }), { spot: SPOT, sigma: 0.25, dte: 45, driftAnnual: 0 });
   if (!(p > p2)) throw new Error(`condor ${p} should beat the out-of-the-money spread ${p2}`);
+});
+
+check("a chance with no drift is no chance at all, not a chance at zero drift", () => {
+  // `driftAnnual` used to DEFAULT to 0 and nothing ever passed one, so every
+  // picture in this app was drawn against a market that goes nowhere while the
+  // number beside it came from somewhere else. The default is gone: a caller
+  // that has not said what the drift is gets a dash.
+  const b = payoffBands({ legs: ironCondor, entryNet: -2, spot: SPOT });
+  if (chanceInProfit(b, { spot: SPOT, sigma: 0.25, dte: 45 }) !== null) {
+    throw new Error("a missing drift must produce null, never a number");
+  }
+  if (chanceInProfit(b, { spot: SPOT, sigma: 0.25, dte: 45, driftAnnual: null }) !== null) {
+    throw new Error("Number(null) is 0 and 0 is finite — that is the whole fault");
+  }
+});
+
+check("the profit bands carry their tails, so the mass is a probability", () => {
+  // `payoffBands()` samples a FINITE window (±30% of spot). A profit band that
+  // reaches the edge of that window does not stop there — the payoff carries on
+  // — so integrating band by band used to throw away everything outside it and
+  // call the remainder a probability. On a long call at a 0.85 volatility over
+  // 45 days that is most of the answer.
+  const longCall = [{ side: 1, type: "call", strike: 100, qty: 1 }];
+  const b = payoffBands({ legs: longCall, entryNet: 4, spot: 100 });
+  const p = chanceInProfit(b, { spot: 100, sigma: 0.85, dte: 45, driftAnnual: 0 });
+  // Everything above the breakeven pays, and the breakeven is barely above
+  // spot, so a correct answer is somewhere near a half. A version that stopped
+  // at +30% could not exceed the mass between the breakeven and 1.3x spot.
+  if (!(p > 0.35)) throw new Error(`the right tail is missing: ${p}`);
+  const top = b.bands[b.bands.length - 1];
+  if (top.sign !== 1 || Math.abs(top.hi - b.hi) > 1e-9) throw new Error("this fixture needs a profit band at the edge");
 });
 
 check("the unified component drops the cone and the histogram when narrow", () => {

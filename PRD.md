@@ -577,6 +577,290 @@ ROADMAP P2's house distribution and is deliberately not this change.
 
 ---
 
+## 4h. One chance, one arithmetic — and the Monte Carlo is the one
+
+### THE FAULT
+
+This app computed "the chance of profit" **four different ways**, and the real difference between
+them was never the algorithm. It was the **drift** — the assumption each one made about which way
+the market is expected to move while the trade is open.
+
+| where | how | drift |
+|---|---|---|
+| `montecarlo()` in `App.jsx` | 8,000 runs, **unseeded** (`Math.random`) | the app's own **seasonal monthly means** |
+| `probProfit()` in `engine.js` | closed form, payoff integrated against a lognormal | **risk-neutral 0.045** |
+| `probProfit()` in `pro.jsx` | a second closed form, different signature | **risk-neutral 0.045** |
+| `chanceInProfit()` in `visuals.jsx` | band integration under the chart | **`driftAnnual` defaulting to 0** |
+
+Three drifts and one question. The Radar row, the Shortlist row, the Build panel, the Guardian
+and the autopilot's brief each reached for whichever of the four was nearest, so one position had
+several different chances depending on which screen you were standing on — and the Build panel's
+was **unseeded**, so it also had a different one each time the button was pressed.
+
+Two consequences beyond the display. The Guardian's Thesis Integrity Score divides today's chance
+by `thesis.pop`, the chance recorded at entry: entry came from a closed form, today came from
+whichever screen asked, so the score was measuring the gap between two FORMULAS as much as the
+gap between two days. And `autopilot.mjs` imported `SEASONAL` from `engine.js` — the very table
+the Build screen's Monte Carlo drifted on — three lines above computing its `pop` at a
+risk-neutral 0.045.
+
+### THE DECISION
+
+**The Monte Carlo is the single truth.** Every number a screen or a brief prints as "the chance
+of profit" comes out of one function, and the two closed forms are **deleted** rather than kept
+as a faster approximation. A faster approximation kept beside the truth is a second number
+waiting for a screen to reach for it — which is exactly how there came to be four.
+
+That decision also brings **ROADMAP P2's house distribution forward by half**: the seasonality
+this app already scores every market on now enters the probability it prints about them. P2 still
+owes the other half — REALISED volatility measured from returns instead of the hand-written
+`SIGMA` table.
+
+### HOW IT IS BUILT
+
+* **`terminalMC(legs, entryNet, S, { driftAnnual, sigma, dte, runs, seed })` in `engine.js`** is
+  the arithmetic. `engine.js` imports nothing and `rules.js` imports it, so it may not read
+  `RULES`: the drift, the volatility, the run count and the seed are the **caller's**, and there
+  are **no defaults** — a missing one THROWS, exactly as `exitSim()` now does (§4g). A default is
+  how a stale number comes back silently in a year.
+* **`chanceOf()` in `rules.js`** is the policy around it, and the only place `terminalMC` is
+  called. It assembles the run count from its home, the drift from `seasonalDrift()`, the
+  volatility through `ivProvenance()` and the seed from the position.
+* **`chanceCheckOf()` in `App.jsx`** is the one spelling of `chanceOf` in that file, the same
+  discipline `modelCheckOf()` follows. `riskGate.test.js` fails the build if App.jsx spells it
+  twice, if `pro.jsx` spells it at all, or if any file runs a `terminalMC` of its own.
+
+**THE DRIFT IS THE APP'S OWN THESIS.** `seasonalDrift(monthlyMean, month, dte)` averages the
+seasonal monthly means over the months the trade is actually held for and annualises them — the
+arithmetic that used to live inside `montecarlo()`, moved into the engine so the client and the
+server cannot derive it two ways.
+
+**THE VOLATILITY IS THE MARKET'S.** The structure's own implied volatility, averaged across its
+legs from the live chain. The market says how WIDE the distribution is; the app's thesis says
+which way it LEANS. Every price in this app — `analyze()`, `netBS()`, the model sanity check — is
+already worked out at that implied volatility, so anything else here would price a trade at one
+number and judge it at another. The realised `SIGMA` table keeps its own job: it is what the exit
+simulator walks the price on, which is a different question.
+
+**IT IS SEEDED, AND THE SEED IS THE POSITION'S.** Ticker, expiry, rounded days, the legs and the
+spot rounded to the cent. An unseeded Monte Carlo hands each caller a different answer for one
+object — failure class #3, engineered in on purpose — so the same trade gives the same seed gives
+the same number on the Radar, the Shortlist, Build, the Guardian and in the brief. The spot is
+rounded to the cent so a quote wobbling in the third decimal between two renders does not re-roll
+the simulation under the reader; a different strike or expiry is a different trade and gets its
+own stream.
+
+**RANKING IS NOT PRINTING — AND THE DECISION IS ONE RUN COUNT FOR BOTH.** The trap is that the
+Shortlist prices and ranks many candidates and prints the chance of each, so a cheaper count for
+ranking than for printing would mean the row you compared and the row you opened disagreeing
+about the same trade. Measured on the development machine: **0.54 ms per candidate at 8,000 runs**
+(0.24 ms at 2,000). The widest screen in the app — the guided flow's pool, five markets by two
+families by the presets — reaches about eighty candidates, so **roughly 43 ms** for the whole
+pool, against the `analyze()` call each candidate already pays for. Dropping to 2,000 would save
+about 25 ms and double the standard error on every printed percentage, from 0.55 points to 1.1,
+which is visible at the whole percent the screens round to. So `RULES.mcRuns` is **8,000
+everywhere**. **NOT VERIFIED ON A PHONE** — there is no browser in this sandbox, and a phone is
+the machine this app is demoed on.
+
+**UNKNOWN IS NOT A NUMBER.** No spot, no horizon, no entry price or no seasonal row and
+`chanceOf()` returns `null`, which every screen prints as a dash. `Number(null)` is 0 and 0 is
+finite: a missing chance must never arrive as a confident 0%. The one input with a named fallback
+instead of a null is the implied volatility, and `ivProvenance()` says on screen that it used one.
+
+### THE CHART CANNOT SAY SOMETHING ELSE — AND FIXING IT FOUND A SECOND FAULT
+
+`chanceInProfit()` feeds the distribution picture. Its `driftAnnual` **defaulted to zero and no
+caller ever passed one**, so the green under the histogram was drawn against a market that goes
+nowhere while the number printed beside it came from somewhere else. The default is gone: a
+caller that has not said what the drift is gets `null` and a dash, not a confident number worked
+out against an assumption nobody made.
+
+Giving it the right drift exposed the second fault. **`payoffBands()` samples a FINITE range —
+±30% of spot — so the outermost bands stop where the SAMPLING stops, not where the payoff does.**
+Integrating the lognormal band by band therefore threw away every path that finished outside that
+window and reported the remainder as a probability. On BOIL, at an implied 85% over 45 days, one
+standard deviation is about 30%: a long call's chance read **15%** when it is really **34%**.
+`bandMass()` now extends a band that reaches the edge of the sampling to the tail, which is what
+the payoff itself does — the deleted `probProfit` in `engine.js` always did this and the band
+integration never had.
+
+**THE TOLERANCE IS A MEASUREMENT, NOT A CHOICE.** With the same drift and the same volatility the
+chart and the simulation are two readings of one distribution, so any gap is the Monte Carlo's
+sampling error and nothing else. At 8,000 runs the standard error of a proportion near a half is
+**0.56 points**. The worst gap measured across the fifteen fixtures below is **1.59 points**, on
+the BOIL vertical; run at 400,000 the SAME structure lands within **0.01 points** of the chart,
+which is what proves the gap is noise rather than a disagreement about the trade.
+`ceiling.test.jsx` holds the pair at **2 percentage points** and says in the failure message not
+to widen it.
+
+### EV READS THE SIMULATION'S OWN MEAN
+
+`evProfile()` computed `pop * maxProfit - (1 - pop) * risk`, and the Build screen printed
+`maxProfit × pop` under the label PROFIT × CHANCE. That is a **two-outcome bet**: the best case
+or the worst case and nothing in between, weighted by a probability of landing anywhere in the
+green. An iron condor that finishes a dollar inside a short strike is neither of those numbers,
+and neither is a vertical that expires between its strikes — which is most of the distribution.
+Both now read the Monte Carlo's `ev`, the mean of every outcome it actually walked, and the stat
+on the Shortlist is relabelled AVERAGE RESULT because that is what it is.
+
+The no-ceiling rule (§4c) is **untouched, deliberately**: a structure with no maximum profit still
+returns `null` from `evProfile()` and still ranks last with a blank EV. `mc.ev` exists for it and
+is honest, but making it rankable is a change to that rule rather than to this arithmetic.
+
+### THE EXIT SIMULATOR IS A DIFFERENT QUESTION AND KEEPS ITS NAME
+
+`exitSim()` and `exitPathSim()` answer "what happens along the path under the exit rule", not
+"where does this finish". They stay, with their own bodies and their own signatures. What went is
+the screen that called two different quantities "the chance" without saying which question each
+answered: the Build screen's "THREE PROBABILITIES — which one to read, and when" panel is now
+**TWO QUESTIONS**, because there were only ever two questions and the third entry was an
+arithmetic that did not agree with itself.
+
+### BEFORE AND AFTER — every probability on screen, five markets
+
+Seeded fixtures, September, 45 DTE, each structure priced with the app's own model at the
+market's implied volatility. `vertical` is an ATM call spread two strike-steps wide, `condor` an
+iron condor at ±2 and ±4 steps, `longcall` an ATM call (no ceiling).
+
+| market | structure | drift now used | CHANCE before | CHANCE now | dir | chart before | chart now | dir |
+|---|---|---|---|---|---|---|---|---|
+| CORN | vertical | −9.6%/yr | 43% | **35%** | down | 40% | **34%** | down |
+| CORN | condor | −9.6%/yr | 59% | **59%** | same | 58% | **58%** | same |
+| CORN | longcall | −9.6%/yr | 35% | **28%** | down | 32% | **27%** | down |
+| SOYB | vertical | −8.4%/yr | 43% | **33%** | down | 39% | **34%** | down |
+| SOYB | condor | −8.4%/yr | 63% | **60%** | down | 61% | **61%** | same |
+| SOYB | longcall | −8.4%/yr | 35% | **27%** | down | 32% | **27%** | down |
+| WEAT | vertical | −3.6%/yr | 46% | **41%** | down | 43% | **41%** | down |
+| WEAT | condor | −3.6%/yr | 38% | **37%** | down | 38% | **38%** | same |
+| WEAT | longcall | −3.6%/yr | 35% | **30%** | down | 32% | **30%** | down |
+| UNG | vertical | +14.4%/yr | 41% | **43%** | up | 35% | **43%** | up |
+| UNG | condor | +14.4%/yr | 59% | **58%** | down | 59% | **58%** | down |
+| UNG | longcall | +14.4%/yr | 33% | **36%** | up | 27% | **36%** | up |
+| BOIL | vertical | +26.4%/yr | 41% | **46%** | up | 25% | **44%** | up |
+| BOIL | condor | +26.4%/yr | 37% | **38%** | up | 37% | **37%** | same |
+| BOIL | longcall | +26.4%/yr | 30% | **33%** | up | 15% | **34%** | up |
+
+**The direction is the drift and nothing else.** September reads negative on all three grain
+markets (−9.6, −8.4, −3.6) and positive on both gas markets (+14.4, +26.4), and every directional
+structure moves the way its market's season points: down on CORN, SOYB and WEAT, up on UNG and
+BOIL. The **condors barely move at all**, which is the check that the change is doing what it
+claims: a symmetric structure is nearly indifferent to a drift, so a large move there would have
+meant something else had changed.
+
+The chart column moves further than the CHANCE column on the two gas markets — 25% → 44% on the
+BOIL vertical, 15% → 34% on the long call — because that column carries **both** fixes: the drift
+and the missing tails. The tails are worth most exactly where the volatility is highest.
+
+| market | structure | EV before (pop × maxP) | EV now (simulated mean) | Build panel before | now |
+|---|---|---|---|---|---|
+| CORN | vertical | +$5 | **−$5** | 33% | **35%** |
+| CORN | condor | −$4 | **−$1** | 63% | **59%** |
+| CORN | longcall | — | **−$15** | 26% | **28%** |
+| SOYB | vertical | +$6 | **−$7** | 33% | **33%** |
+| SOYB | condor | −$4 | **−$2** | 63% | **60%** |
+| SOYB | longcall | — | **−$17** | 26% | **27%** |
+| WEAT | vertical | +$2 | **−$1** | 42% | **41%** |
+| WEAT | condor | −$0 | **−$2** | 39% | **37%** |
+| WEAT | longcall | — | **−$10** | 29% | **30%** |
+| UNG | vertical | +$7 | **+$6** | 43% | **43%** |
+| UNG | condor | −$5 | **−$2** | 55% | **58%** |
+| UNG | longcall | — | **+$8** | 37% | **36%** |
+| BOIL | vertical | +$18 | **+$24** | 44% | **46%** |
+| BOIL | condor | −$19 | **−$19** | 33% | **38%** |
+| BOIL | longcall | — | **+$38** | 35% | **33%** |
+
+**`ev` has no single direction and that is expected** — it is a mixture whose weights all changed
+at once. What is worth reading is the grain verticals: every one of them went from a positive
+expected value to a negative one. The old formula credited them with the full maximum profit at
+the probability of finishing anywhere green, and most of "anywhere green" on a two-strike spread
+pays a fraction of the maximum. The EV column for a `longcall` was blank before and is blank on
+screen still: the no-ceiling rule is unchanged, and the figure in this table is what the
+simulation would say if it were asked.
+
+The Build panel column is the closest thing to a like-for-like: it was already a Monte Carlo on
+the same seasonal drift, so what moved there is the **volatility** — implied instead of the
+realised `SIGMA` table — and the fact that it is seeded. Those numbers move by a few points and
+in both directions, which is the right size for that change.
+
+### WHAT THIS TABLE PROVES, AND WHAT IT DOES NOT
+
+It proves the change moved the numbers, that it moved them in the direction the drift points, and
+that a structure insensitive to drift barely moved. **It proves NOTHING about whether either set
+of numbers describes a real market.** Both are model output: a lognormal at an implied volatility
+this app reads off a delayed indicative feed, drifted on a seasonal table that is hand-written for
+four of the five markets until Alpha Vantage loads. Nothing here was run against a live chain, and
+nothing here was compared with what actually happened to a trade. Settling that is ROADMAP P5.
+
+---
+
+## 4i. What the entry itself has to carry — the horizon, and three numbers with no home
+
+### A BRIEF WRITTEN AT THE WRONG HORIZON IS STILL IN THE JOURNAL
+
+§4g fixed the arithmetic: `exitSim()` walked every position to 7 DTE while `RULES.exitDTE` has
+been 21 since it was changed from 7. It did not touch what had already been written. **Every
+autopilot brief the owner has received describes the chance of being positive "at the exit rule"
+at a horizon fourteen days past the rule**, and four pull requests shipped on top of that.
+
+What the Journal keeps is **not the brief**. `appendTimeline()` stores a `type: "autopilot"` entry
+whose `text` is the verdict, the share of the maximum, the TIS and **the model's rationale** —
+prose the model wrote *after reading* `simulator_from_today`. So the wrong numbers are inside the
+prose of past entries, where no migration can reach them, and nothing distinguishes those entries
+from the ones written since.
+
+**NOT BY DATE.** A deploy date is a second home for a fact the entry can carry itself, and it
+would have to be maintained by hand for the life of the record. So:
+
+* new autopilot entries carry **`simExitDTE`** and **`simDays`** — the simulator's OWN answers
+  (`sim.exitDTE`, `sim.horizon`), never `RULES` written out a second time, because a name
+  asserting a rule the arithmetic had not applied is the whole fault;
+* **the ABSENCE of that stamp identifies an entry written before the fix**, the same pattern
+  `contractsAssumed` uses for a size that was assumed rather than recorded (§10f);
+* `simHorizonOf()` and `autopilotHorizonNote()` in `src/journal.js` read it, because how a record
+  was produced is a fact about the record;
+* **every screen that renders an unstamped entry says so in one plain sentence** — the Guardian's
+  timeline, the Journal's timeline, the weekly report, and the context handed to the copilot.
+  One sentence, not a paragraph, and never an apology: *"The simulation behind this entry ran to a
+  day the app no longer uses, so any chance quoted inside it is not the app's current exit rule."*
+
+`Number(null)` is 0 and 0 is finite, so `simHorizonOf()` checks that the stamp **is a number**
+before coercing it — otherwise an entry with no stamp at all would read as a stamp of zero, which
+is the exact confusion the marker exists to end. A horizon of 0 is a real reading and counts.
+
+### THREE NUMBERS WITH NO HOME — AND NOT ONE OF THEM CHANGED VALUE
+
+PR #24 found them and deliberately left them, because each needed a product decision rather than a
+rename. The owner's decision: **give all three a home, change no value.** A rename that moves a
+number is two changes wearing one coat.
+
+| number | now | why it had no home |
+|---|---|---|
+| `0.35 * p.maxLoss` — the "watch" attention level in `App.jsx` | `RULES.watchAttentionShare`, read through `watchAttentionLevel()` | its value collides with `maxSpreadShareOfMid`, so the rule-literal sweep would have named the wrong rule on that line |
+| `confidence >= 70` in two generated sentences in `signals.js` | `RULES.autopilotConfidence` | nothing in `RULES` held the bar the autopilot waits for, and its value collides with `expensiveIVRank` |
+| the bare `0.25` implied-volatility fallbacks in `autopilot.mjs` and `pro.jsx` | `RULES.fallbackIV`, read through `ivProvenance()` | it is a DIFFERENT quantity from `fallbackSigma` and had to be homed without being conflated with it |
+
+**THE TWO COLLISIONS ARE NOW HARMLESS INSTEAD OF HIDDEN.** With the watch level reading
+`RULES.watchAttentionShare`, `maxSpreadShareOfMid` goes **back on the sweep list** — it was the
+one rule number deliberately kept off it — and with the confidence bar reading
+`RULES.autopilotConfidence`, **`signals.js` is back in the swept file set**. Both were clean on
+the first run: nothing else was hiding behind either collision. That is a negative result and it
+is worth recording, because the two exclusions were costing coverage rather than concealing a
+fault.
+
+**`fallbackIV` AND `fallbackSigma` ARE THE SAME NUMBER AND MUST NEVER BE ONE CONSTANT.**
+`fallbackSigma` is the **realised** volatility the exit simulator walks the SHARE's price on;
+`fallbackIV` is the **implied** volatility the OPTIONS are priced at (`bs`, `smile`, `netBS`).
+One is a property of the share, the other of the option market on it, and on these chains they
+differ — BOIL carries a realised 0.95 in `SIGMA` against an implied 0.85 in `UNDERLYINGS`. Merging
+them would make a future correction to either one silently move the other. `ivProvenance()`
+carries which of three sources produced the number — today's chain, the position's own entry
+thesis, or the fallback — exactly as `sigmaProvenance()` does for the simulator (§4g), and a
+fallback says so on screen rather than passing as a reading.
+
+All three are **CHOSEN, NOT MEASURED**, and all three are on the NOT VERIFIED list.
+
+---
+
 ## 5. The wizard IS the app
 
 The wizard is not a feature inside the app. It is the entry point and the spine. Existing tabs remain reachable but are no longer the front door.
@@ -990,6 +1274,9 @@ The build order was a plan for a future builder. It is now a record.
 | Installable PWA: manifest, icons, standalone launch, offline shell | **DONE, AND INSTALLED** (§10d) — on the owner's phone, and it works |
 | Model-vs-market sanity check on every proposed price | **DONE** (§4e) — the ratio itself is CHOSEN, see NOT VERIFIED |
 | An opening limit that concedes part of the spread | **DONE in code, NEVER FILLED** (§8d) — see NOT VERIFIED |
+| One chance, one arithmetic — the seeded Monte Carlo behind every probability | **DONE** (§4h) — the drift is the app's own seasonal thesis; the two closed forms are deleted |
+| Past autopilot entries written at the wrong horizon are marked | **DONE** (§4i) — by the absence of a stamp, never by a date |
+| The three un-homed numbers have homes in `RULES` | **DONE** (§4i) — no value changed, and two sweep exclusions are gone |
 | The ticket shows the combo book, the model value and the notional | **DONE** (§8d) |
 | Working orders visible in the main flow, with age, re-price and cancel | **DONE** (§10e) |
 | The entry floor as ROOM: hard block only inside the exit window | **DONE** (§4f) — the number 30 is unchanged and uncalibrated |
@@ -1501,7 +1788,66 @@ What is left:
 The standing rule in `CLAUDE.md`: every session starts by fixing what the last one flagged, and
 ends by writing down what it could not verify. Currently open:
 
-### WRITTEN THIS SESSION — a rule number can hide in an expression (PR #24)
+### WRITTEN THIS SESSION — one chance, one arithmetic (PR #25)
+
+This session did TASK 0 (the two debts PR #24 handed forward) and TASK 1 (ROADMAP P1's remaining
+half): past autopilot entries written at the wrong horizon are marked on every screen that renders
+one, the three un-homed numbers have homes in `RULES`, and every probability the app prints comes
+out of one seeded Monte Carlo drifted on the app's own seasonal thesis (§4h). `npm test` reports
+**644 checks across 18 suites**, up from the **606** PR #24 wrote down and which a clean clone of
+`main` at `b85beb3` reproduces exactly — so that debt is closed and 644 is measured against a
+number anybody can re-derive. `npm run build` is clean.
+
+Suite totals that sum to 644: signals 22, chain 33, engine 17, riskGate 146, theme 39, demo 16,
+handoff 9, path 14, liquidity 7, order 25, journal 66, autopilot 54, pwa 36, and the five JSX
+files — visuals 35, wizard 56, steps 20, ceiling 41, order.jsx 8.
+
+**NOTHING HERE WAS RUN AGAINST A LIVE CHAIN, A BROWSER OR A DEPLOY.** Same wall as PR #15 through
+#24: no broker keys in this sandbox, no Anthropic key, and the egress proxy refuses the CONNECT.
+Every number in §4h's tables is the app's own model talking to itself with a seeded generator.
+
+- **EVERY PROBABILITY ON EVERY SCREEN HAS MOVED AND NOBODY HAS SEEN ONE.** §4h's table is fifteen
+  fixtures priced by `netBS`; the app on a phone will show different structures off a live chain.
+  The direction is what was verified, not the magnitude on any real trade.
+- **THE 8,000 RUN COUNT WAS TIMED ON THE DEVELOPMENT MACHINE, NOT ON A PHONE.** 0.54 ms per
+  candidate here, about 43 ms for the widest pool. A phone is several times slower and it is the
+  machine this app is demoed on. If the Shortlist or the guided run feels slow, `RULES.mcRuns` is
+  the one number to move — and moving it moves every printed percentage by its sampling error.
+- **THE DRIFT IS NOW THE SEASONAL TABLE, AND FOUR OF THE FIVE MARKETS ARE STILL ON THE HAND-WRITTEN
+  ONE UNTIL ALPHA VANTAGE LOADS.** `SEASONAL` in `engine.js` has the WRONG SIGN on eight months of
+  twelve for CORN against 195 months of real data (§7). That table now drives the probability as
+  well as the score, so a market on the fallback is drifting its own chance on numbers this
+  repository already knows to be wrong. The app says on screen when a market is on the fallback;
+  it does not say it beside the CHANCE.
+- **THE VOLATILITY IS THE CHAIN'S IMPLIED ONE AND THAT IS A DECISION, NOT A MEASUREMENT.** The
+  market sets the width, the app's thesis sets the lean. The alternative — realised volatility
+  measured from returns — is the other half of ROADMAP P2 and is deliberately not done here.
+  Nothing compares the two on these five markets.
+- **THE CHART-VERSUS-SIMULATION TOLERANCE IS 2 PERCENTAGE POINTS AND THE WORST MEASURED GAP IS
+  1.59.** That is about three standard errors at 8,000 runs, which is a high but unremarkable
+  draw across fifteen fixtures; the same structure at 400,000 runs lands within 0.01 points of
+  the chart, which is the evidence that it is noise. If a future fixture exceeds 2 points the
+  chart is wrong — do not widen it.
+- **THE MARKED-UP AUTOPILOT ENTRIES HAVE NOT BEEN READ ON SCREEN.** `autopilotHorizonNote()`
+  renders on the Guardian's timeline and in the Journal's, and is carried into the weekly report
+  and the model's context. Whether the owner's actual Journal contains any unstamped autopilot
+  entries is unknown from here — the autopilot has never been watched running at all.
+- **THE THREE NEWLY HOMED NUMBERS DID NOT CHANGE VALUE, DELIBERATELY** (the owner's decision: a
+  rename that moves a number is two changes wearing one coat). All three are still CHOSEN, not
+  measured: `watchAttentionShare` (0.35 — nothing compares what happened to positions that crossed
+  it against positions that did not), `autopilotConfidence` (70 — nothing compares outcomes above
+  and below it), `fallbackIV` (0.25 — a middle for a commodity ETF, never estimated).
+- **THE SWEEP FOUND NOTHING HIDING BEHIND THE COLLISION.** `maxSpreadShareOfMid` is back on the
+  rule-literal list and `signals.js` is back in the swept file set; both were clean on the first
+  run. That is a negative result and it is worth recording: the two exclusions were costing
+  coverage, not concealing a second fault.
+- **`probProfit` IS DELETED FROM BOTH FILES AND NOTHING PROVES NOBODY WANTED IT.** The closed form
+  was roughly four times cheaper than 8,000 runs. If the phone reading says the Monte Carlo is too
+  slow for ranking, the decision recorded in §4h — one run count for printing and for ranking —
+  is the one to revisit, and the rule that survives either way is that no screen prints a
+  closed-form number as "the chance".
+
+### WRITTEN BY PR #24, STILL OPEN — a rule number can hide in an expression
 
 This session widened the rule-literal guard to a third shape and to every file that computes a
 number a screen or a brief prints, used it on the exit simulator, and gave the simulator's
@@ -1527,8 +1873,11 @@ has never been watched running with this change in it**, and the corrected brief
   FINDING.** The fix is arithmetic and it is tested. What is not known is how much of the
   autopilot's past prose was built on it: every brief the owner has ever received described the
   chance of being positive "at the exit rule" at a horizon fourteen days past the rule. Those
-  briefs are in the Journal and they are wrong in a way nothing in the app marks. **No brief has
-  been re-read against this.**
+  briefs are in the Journal. ~~and they are wrong in a way nothing in the app marks.~~ **THE
+  MARKING IS CLOSED BY PR #25**: entries written since the fix carry `simExitDTE` and `simDays`,
+  and the absence of that stamp is what every screen reads to say, in one sentence, that the
+  simulation behind an older entry ran to a day the app no longer uses. **No brief has still been
+  re-read against this**, and the autopilot has never been watched running.
 - **THE BEFORE/AFTER TABLE IS THE APP'S MODEL TALKING TO ITSELF.** The fixtures are priced with
   `netBS` at the hand-written `SIGMA` (§4g), walked at that same hand-written volatility, and
   seeded so the run reproduces. It proves the change moved the numbers and in which direction. It
@@ -1544,9 +1893,9 @@ has never been watched running with this change in it**, and the corrected brief
   refuses three shapes across fourteen rule numbers. The bare 7 was not any rule's value, so no
   matcher could have named it — what the widened guard caught was the two `0.5`s beside it. A
   copy written as `Math.round(44.9)`, or inside a template string, still passes.
-- **THREE UN-HOMED NUMBERS WERE FOUND AND DELIBERATELY NOT FIXED**, because each one needs a
-  product decision rather than a rename, and a guard that names the wrong rule is worse than one
-  that stays quiet:
+- ~~**THREE UN-HOMED NUMBERS WERE FOUND AND DELIBERATELY NOT FIXED.**~~ **CLOSED BY PR #25** —
+  all three have a home in `RULES` and not one of them changed value. `maxSpreadShareOfMid` is
+  back on the sweep list and `signals.js` is back in the swept file set. The three were:
   - `App.jsx` draws a position's attention level at `pnl < 0.35 * p.maxLoss * n` — a "watch"
     badge whose 0.35 has no home and collides in value with `maxSpreadShareOfMid`, which is why
     that constant is the one rule number deliberately kept off the sweep list.

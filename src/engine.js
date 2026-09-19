@@ -24,20 +24,146 @@ export const netBS = (legs, S, dte, iv) => legs.reduce((a, l) => a + Math.sign(l
 
 export const payoff = (legs, S) => legs.reduce((a, l) => a + Math.sign(l.side) * l.qty * (l.type === "call" ? Math.max(S - l.strike, 0) : Math.max(l.strike - S, 0)), 0);
 
-export function probProfit(legs, entry, S, iv, dte) {
-  const T = dte / 365, sq = iv * Math.sqrt(T);
-  const mu = Math.log(S) + (0.045 - 0.5 * iv * iv) * T;
-  const cdf = (x) => 0.5 * (1 + erf((Math.log(x) - mu) / (sq * Math.SQRT2)));
-  let p = 0, prevS = S * 0.7, prevPos = payoff(legs, prevS) - entry > 0;
-  if (prevPos) p += cdf(prevS);
-  for (let i = 1; i <= 240; i++) {
-    const s2 = S * 0.7 + (i / 240) * S * 0.6;
-    const pos = payoff(legs, s2) - entry > 0;
-    if (pos || prevPos) p += Math.max(0, cdf(s2) - cdf(prevS));
-    prevS = s2; prevPos = pos;
+/* ============================================================================
+   ONE CHANCE, ONE ARITHMETIC — AND THE MONTE CARLO IS THE ONE.
+
+   WHAT WAS HERE, AND WHY IT IS GONE. `probProfit(legs, entry, S, iv, dte)`
+   integrated the expiry payoff against a lognormal with a RISK-NEUTRAL drift of
+   0.045 — the same 4.5% that discounts an option in `bs()` above. It was one of
+   FOUR calculations this app called "the chance of profit", and the real
+   difference between them was never the algorithm, it was the drift:
+
+     · `montecarlo()` in App.jsx   8,000 unseeded runs, drift from the app's own
+                                   seasonal monthly means
+     · `probProfit()` here         closed form, risk-neutral drift 0.045
+     · `probProfit()` in pro.jsx   a second closed form, same risk-neutral drift
+     · `chanceInProfit()`          band integration, `driftAnnual` defaulting to 0
+
+   Three drifts, one question. The owner's decision is that the Monte Carlo is
+   the single truth, so the two closed forms are deleted rather than kept as a
+   faster approximation — a screen that prints one of them prints a different
+   number for the same trade, which is the fault this whole file exists to make
+   impossible.
+
+   AND IT IS SEEDED. An unseeded Monte Carlo gives each caller a different
+   answer for the same position, which is two screens disagreeing about one
+   object engineered in on purpose. `terminalMC` takes a seed and has no default
+   for it; `chanceOf()` in rules.js derives one from the position itself, so the
+   Radar, the Shortlist, Build, the Guardian and the autopilot all land on the
+   same stream of numbers for the same trade.
+
+   THE POLICY IS THE CALLER'S AND HAS NO DEFAULT, for the same reason `exitSim`
+   below has none: this file imports nothing and `rules.js` imports it, so
+   reading RULES here would be a cycle — and a default is how a stale number
+   comes back silently in a year.
+============================================================================ */
+
+/**
+ * A 32-bit seed from any string. FNV-1a: small, deterministic, and the same in
+ * the browser and in a Netlify function, which is the whole requirement.
+ */
+export function seedFrom(key) {
+  let h = 0x811c9dc5;
+  const str = String(key);
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
   }
-  if (prevPos) p += 1 - cdf(prevS);
-  return Math.min(1, Math.max(0, p));
+  return h >>> 0;
+}
+
+/**
+ * mulberry32 — a deterministic generator in place of `Math.random`. Thirty-two
+ * bits of state, uniform on [0, 1), and it is not cryptographic and does not
+ * need to be: what is being asked of it is that two callers holding the same
+ * seed walk the same path.
+ */
+export function rng(seed) {
+  let a = (Number(seed) >>> 0) || 1;
+  return function next() {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * THE APP'S OWN THESIS AS A DRIFT. The seasonal monthly means over the window
+ * the trade is actually held for, averaged and annualised — the same arithmetic
+ * `montecarlo()` in App.jsx used, moved here so the client and the server
+ * cannot derive it two ways.
+ *
+ * @param monthlyMean  twelve monthly means in PERCENT, as `SEASONAL` holds them
+ * @param month        the month the trade opens in, 0-11
+ * @param dte          days to expiry
+ * @returns the annualised drift as a fraction, or null when unreadable
+ */
+export function seasonalDrift(monthlyMean, month, dte) {
+  if (!Array.isArray(monthlyMean) || monthlyMean.length !== 12) return null;
+  if (!Number.isFinite(month) || !Number.isFinite(dte) || dte <= 0) return null;
+  const span = Math.max(1, Math.round(dte / 30));
+  let mu = 0;
+  for (let i = 0; i < span; i++) {
+    const v = monthlyMean[(((month + i) % 12) + 12) % 12];
+    if (!Number.isFinite(v)) return null;
+    mu += v / 100;
+  }
+  return (mu / span) * 12;
+}
+
+/**
+ * THE ONE CHANCE. Where the price finishes at expiry, under a lognormal with
+ * the caller's drift and the caller's volatility, and what the payoff is worth
+ * there. Everything a screen or a brief prints as "the chance of profit", "the
+ * average result" or the distribution behind them comes out of this function.
+ *
+ * @param legs      [{ side, type, strike, qty }]
+ * @param entryNet  what the structure cost per share (negative for a credit)
+ * @param S         today's price
+ * @param policy    { driftAnnual, sigma, dte, runs, seed } — NO DEFAULTS
+ * @returns { pop, ev, p5, p50, p95, bins, runs, driftAnnual, sigma, dte, seed }
+ *          with `ev`, `p5`, `p50` and `p95` in DOLLARS per combination.
+ */
+export function terminalMC(legs, entryNet, S, policy) {
+  const { driftAnnual, sigma, dte, runs, seed } = policy || {};
+  const finite = (x) => Number.isFinite(x);
+  if (![driftAnnual, sigma, dte, runs, seed].every(finite) || !Array.isArray(legs) || !finite(entryNet)) {
+    throw new TypeError(
+      "terminalMC needs { driftAnnual, sigma, dte, runs, seed } and finite legs/entryNet: see chanceOf() in src/rules.js",
+    );
+  }
+  if (!(S > 0) || !(sigma > 0) || !(dte > 0) || !(runs >= 1)) {
+    throw new RangeError("terminalMC needs a positive spot, volatility, horizon and run count");
+  }
+  const n = Math.round(runs);
+  const Tyr = dte / 365;
+  const next = rng(seed);
+  const pnls = new Float64Array(n);
+  let wins = 0, sum = 0;
+  for (let i = 0; i < n; i++) {
+    let u = 0, v = 0;
+    while (u === 0) u = next();
+    while (v === 0) v = next();
+    const z = Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+    const ST = S * Math.exp((driftAnnual - 0.5 * sigma * sigma) * Tyr + sigma * Math.sqrt(Tyr) * z);
+    // A P&L of exactly zero is not a profit: you got your money back. The same
+    // convention `payoffBands()` and `analyze()` use, so the chance and the
+    // green on the chart cannot disagree about where the line is.
+    const pnl = (payoff(legs, ST) - entryNet) * 100;
+    pnls[i] = pnl; sum += pnl; if (pnl > 0) wins++;
+  }
+  const sorted = Array.from(pnls).sort((a, b) => a - b);
+  const qq = (q) => sorted[Math.floor(q * (n - 1))];
+  const lo = qq(0.01), hi = qq(0.99), B = 30;
+  const span = hi - lo;
+  const bins = Array.from({ length: B }, (_, i) => ({ x: +(lo + ((i + 0.5) / B) * span).toFixed(0), n: 0 }));
+  for (const p of pnls) {
+    const idx = span > 0 ? Math.min(B - 1, Math.max(0, Math.floor(((p - lo) / span) * B))) : 0;
+    bins[idx].n++;
+  }
+  return { pop: wins / n, ev: sum / n, p5: qq(0.05), p50: qq(0.5), p95: qq(0.95),
+    bins, runs: n, driftAnnual, sigma, dte, seed };
 }
 
 /**

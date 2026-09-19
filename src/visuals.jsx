@@ -169,25 +169,58 @@ export const payingBands = (b) => {
  * measure against — in both cases there is nothing to say and the takeaway
  * says nothing rather than guessing.
  */
-export function scratchSplit(b, { spot, sigma, dte, driftAnnual = 0 } = {}) {
+export function scratchSplit(b, { spot, sigma, dte, driftAnnual } = {}) {
   const lv = scratchLevel(b?.maxProfit);
   const inProfit = chanceInProfit(b, { spot, sigma, dte, driftAnnual });
   if (lv == null || inProfit == null) return null;
+  const mass = bandMass(b, bandsAbove(b, lv), { spot, sigma, dte, driftAnnual });
+  const paying = bandsAbove(b, lv);
+  return { level: lv, paying, inProfit, pPaying: mass, pScratch: Math.max(0, inProfit - mass) };
+}
+
+/* --------------------------------------------------------------------
+   THE CHART CANNOT SAY SOMETHING ELSE — TWO FIXES IN ONE FUNCTION.
+
+   1) THE DRIFT. `driftAnnual` used to DEFAULT TO ZERO and no caller ever
+      passed one, so the green under the distribution was drawn against a
+      market that goes nowhere, while the CHANCE stat printed beside it was a
+      closed form at a risk-neutral 4.5% and the Build panel's Monte Carlo ran
+      on the app's seasonal means. Three drifts, one picture. The default is
+      gone: a caller that does not say what the drift is gets `null`, and a
+      dash, instead of a confident number worked out against an assumption
+      nobody made.
+
+   2) THE TAILS. `payoffBands()` samples a FINITE range — ±30% of spot — so the
+      outermost bands stop where the sampling stops, not where the payoff does.
+      Integrating the lognormal band by band therefore threw away every path
+      that finished outside that window and reported the remainder as a
+      probability. On BOIL, sigma 0.85 over 45 days, one standard deviation is
+      about 30%: roughly a third of the distribution was simply missing, and
+      the shortfall was worst on exactly the structures whose profit region
+      runs to an edge. A band that reaches the edge of the sampling now reaches
+      the tail, which is what the payoff itself does — `probProfit` in
+      engine.js always did this, and the band integration never did.
+-------------------------------------------------------------------- */
+
+/** The lognormal mass over a set of price zones, tails included. */
+export function bandMass(b, zones, { spot, sigma, dte, driftAnnual }) {
+  if (!Number.isFinite(spot) || !(sigma > 0) || !(dte > 0) || !Number.isFinite(driftAnnual)) return null;
   const Tyr = dte / 365, sq = sigma * Math.sqrt(Tyr);
   const mu = Math.log(spot) + (driftAnnual - 0.5 * sigma * sigma) * Tyr;
   const cdf = (x) => (x <= 0 ? 0 : normCdf((Math.log(x) - mu) / sq));
-  const paying = bandsAbove(b, lv);
-  const pPaying = paying.reduce((a, z) => a + Math.max(0, cdf(z.hi) - cdf(z.lo)), 0);
-  return { level: lv, paying, inProfit, pPaying, pScratch: Math.max(0, inProfit - pPaying) };
+  // The edges of the sampled window, to a hair: a zone that reaches one of them
+  // is a zone that continues past it.
+  const eps = Math.max(1e-9, (b.hi - b.lo) * 1e-9);
+  return (zones || []).reduce((a, z) => {
+    const lo = z.lo <= b.lo + eps ? 0 : cdf(z.lo);
+    const hi = z.hi >= b.hi - eps ? 1 : cdf(z.hi);
+    return a + Math.max(0, hi - lo);
+  }, 0);
 }
 
 /** Chance the price finishes inside the green, under a lognormal at `dte`. */
-export function chanceInProfit(b, { spot, sigma, dte, driftAnnual = 0 }) {
-  if (!Number.isFinite(spot) || !(sigma > 0) || !(dte > 0)) return null;
-  const Tyr = dte / 365, sq = sigma * Math.sqrt(Tyr);
-  const mu = Math.log(spot) + (driftAnnual - 0.5 * sigma * sigma) * Tyr;
-  const cdf = (x) => (x <= 0 ? 0 : normCdf((Math.log(x) - mu) / sq));
-  return profitBands(b).reduce((a, z) => a + Math.max(0, cdf(z.hi) - cdf(z.lo)), 0);
+export function chanceInProfit(b, { spot, sigma, dte, driftAnnual }) {
+  return bandMass(b, profitBands(b), { spot, sigma, dte, driftAnnual });
 }
 
 /* ====================================================================
@@ -272,7 +305,7 @@ export function gaugeTakeaway(b, { ticker = "this market" } = {}) {
  * this green is a scratch than is money" is a fact about the trade, and it is
  * the fact a beginner cannot see when 73% sits next to "up to $50".
  */
-export function unifiedTakeaway(b, { ticker = "this market", sigma, dte, driftAnnual = 0 } = {}) {
+export function unifiedTakeaway(b, { ticker = "this market", sigma, dte, driftAnnual } = {}) {
   if (b.spot == null) return `${ticker}: today's price is not loaded, so nothing can be projected yet.`;
   const now = b.at(b.spot);
   const p = chanceInProfit(b, { spot: b.spot, sigma, dte, driftAnnual });
@@ -297,7 +330,7 @@ export function unifiedTakeaway(b, { ticker = "this market", sigma, dte, driftAn
 ==================================================================== */
 
 export function explainElement(el, b, ctx = {}) {
-  const { ticker = "this market", sigma, dte, driftAnnual = 0 } = ctx;
+  const { ticker = "this market", sigma, dte, driftAnnual } = ctx;
   switch (el) {
     case "green": {
       if (!profitBands(b).length) {
@@ -869,9 +902,18 @@ export function unifiedLayout(width) {
 export function UnifiedPosition({
   // The horizon this draws over when the caller does not name one is the
   // horizon the app aims at, and that has a home (it was a bare 45 here).
-  legs = [], entryNet = 0, spot, bars = [], dte = RULES.targetEntryDTE, sigma = 0.3, driftAnnual = 0,
+  legs = [], entryNet = 0, spot, bars = [], dte = RULES.targetEntryDTE, sigma = 0.3, driftAnnual,
   ticker = "this market", height = 380, width: fixedWidth, onExplain,
 }) {
+  /* THE DRIFT HAS NO DEFAULT FOR THE SENTENCE AND A ZERO FOR THE DRAWING, and
+     the two are deliberately not the same thing. A picture has to be drawn at
+     something, so the cone and the histogram fall back to a flat market. A
+     PROBABILITY does not have to be printed at all: the takeaway is handed the
+     raw value, so a caller that never said what the drift is gets a sentence
+     with no percentage in it rather than a confident number worked out against
+     an assumption nobody made. That default zero was the fourth of the four
+     drifts this app used to call "the chance". */
+  const drawDrift = Number.isFinite(driftAnnual) ? driftAnnual : 0;
   const [ref, measured] = useWidth(900);
   const W = fixedWidth || measured;
   const b = payoffBands({ legs, entryNet, spot });
@@ -889,7 +931,7 @@ export function UnifiedPosition({
       const t = (i / 24) * (days / 365);
       const o = { x: L.xToday + (i / 24) * (L.xConeEnd - L.xToday) };
       for (const [k, z] of Object.entries(QZ)) {
-        o[k] = spot * Math.exp((driftAnnual - 0.5 * sigma * sigma) * t + sigma * Math.sqrt(t) * z);
+        o[k] = spot * Math.exp((drawDrift - 0.5 * sigma * sigma) * t + sigma * Math.sqrt(t) * z);
       }
       cone.push(o);
     }
@@ -909,7 +951,7 @@ export function UnifiedPosition({
 
   // --- the terminal distribution, as a histogram rotated onto the price axis ---
   const distW = L.xDistEnd - L.xConeEnd;
-  const dist = distW > 4 ? terminalDist({ spot, sigma, dte: days, driftAnnual, lo: yMin, hi: yMax }) : { bins: [], peak: 0 };
+  const dist = distW > 4 ? terminalDist({ spot, sigma, dte: days, driftAnnual: drawDrift, lo: yMin, hi: yMax }) : { bins: [], peak: 0 };
   const distBars = dist.bins.map((d) => ({
     ...d,
     profit: b.at(d.mid) > 0,

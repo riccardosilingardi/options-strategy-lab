@@ -22,7 +22,7 @@
 
 import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
-import { exitSim, netBS, SIGMA } from "./engine.js";
+import { exitSim, netBS, SIGMA, terminalMC, seedFrom, rng, seasonalDrift, SEASONAL } from "./engine.js";
 import { RULES } from "./rules.js";
 
 let passed = 0;
@@ -211,6 +211,149 @@ test("NO SIMULATOR MARKS A SURVIVOR AT A HARDCODED HORIZON", () => {
     const hits = codeOf(file).match(/netBS\(\s*[^),]+,\s*[^),]+,\s*-?\d+(\.\d+)?\s*[,)]/g) || [];
     assert.deepEqual(hits, [], `${file} prices at a hardcoded number of days: ${hits.join(", ")}`);
   }
+});
+
+/* ============================================================================
+   ONE CHANCE, ONE ARITHMETIC (PR #25) — THE ENGINE HALF.
+
+   `terminalMC()` replaces four calculations of "the chance of profit". What is
+   held here is the three properties that make it usable as a single truth: it
+   refuses to run without a policy, it is deterministic given a seed, and the
+   drift it is handed is the app's own seasonal reading rather than a constant
+   nobody chose.
+============================================================================ */
+
+const VERT = [{ side: 1, type: "call", strike: 20, qty: 1 }, { side: -1, type: "call", strike: 21, qty: 1 }];
+const MC_POLICY = { driftAnnual: 0.1, sigma: 0.85, dte: 45, runs: 4000, seed: seedFrom("fixture") };
+
+test("terminalMC THROWS without a policy — a default is how a stale number returns", () => {
+  assert.throws(() => terminalMC(VERT, 0.4, 20), TypeError);
+  assert.throws(() => terminalMC(VERT, 0.4, 20, {}), TypeError);
+  // ...and without ANY ONE of the five. A partial policy is the dangerous case:
+  // it looks like a call that was written deliberately.
+  for (const k of ["driftAnnual", "sigma", "dte", "runs", "seed"]) {
+    const partial = { ...MC_POLICY };
+    delete partial[k];
+    assert.throws(() => terminalMC(VERT, 0.4, 20, partial), TypeError, `missing ${k} must throw`);
+  }
+  // `Number(null)` is 0 and 0 is finite — the fault this whole repository is
+  // about — so null is refused where undefined is.
+  assert.throws(() => terminalMC(VERT, 0.4, 20, { ...MC_POLICY, seed: null }), TypeError);
+  // A run count or a volatility of zero is a RangeError, not a silent answer.
+  assert.throws(() => terminalMC(VERT, 0.4, 20, { ...MC_POLICY, runs: 0 }), RangeError);
+  assert.throws(() => terminalMC(VERT, 0.4, 20, { ...MC_POLICY, sigma: 0 }), RangeError);
+  assert.throws(() => terminalMC(VERT, 0.4, 0, MC_POLICY), RangeError);
+});
+
+test("SEEDED — two callers with one seed get the IDENTICAL number, to the last bit", () => {
+  // This is the whole reason the Monte Carlo can be the single truth. Unseeded,
+  // the Radar row and the Build panel would print two different percentages for
+  // one trade and both would be right.
+  const a = terminalMC(VERT, 0.4, 20, MC_POLICY);
+  const b = terminalMC(VERT, 0.4, 20, MC_POLICY);
+  assert.equal(a.pop, b.pop, "not approximately equal — equal");
+  assert.equal(a.ev, b.ev);
+  assert.equal(a.p5, b.p5);
+  assert.deepEqual(a.bins, b.bins);
+  // And a different seed really is a different stream, or the seed is doing
+  // nothing and the equality above proves nothing.
+  const c = terminalMC(VERT, 0.4, 20, { ...MC_POLICY, seed: seedFrom("another") });
+  assert.notEqual(a.pop, c.pop, "a different seed must walk a different path");
+  // ...but the same answer to within its own sampling error: 4,000 runs is a
+  // standard error of about 0.8 points, so two seeds inside 4 points is the
+  // behaviour of one distribution sampled twice, not of two distributions.
+  assert.ok(Math.abs(a.pop - c.pop) < 0.04, `${a.pop} vs ${c.pop}`);
+});
+
+test("seedFrom is stable — the same key gives the same seed on every machine", () => {
+  // If this ever changes, every chance in the app moves by its sampling error
+  // at once, for no reason a reader could see. The literals are the regression.
+  assert.equal(seedFrom("BOIL|2026-11-06|45|1C21x1,-1C22x1|21.23"), 1418194756);
+  assert.equal(seedFrom(""), 2166136261);
+  assert.equal(seedFrom("a"), 3826002220);
+  assert.notEqual(seedFrom("a"), seedFrom("b"));
+});
+
+test("rng is uniform enough to be a Monte Carlo and never returns 1", () => {
+  const next = rng(seedFrom("uniformity"));
+  let sum = 0, min = 1, max = 0;
+  const N = 200000;
+  for (let i = 0; i < N; i++) { const x = next(); sum += x; if (x < min) min = x; if (x > max) max = x; }
+  assert.ok(Math.abs(sum / N - 0.5) < 0.005, `mean ${sum / N}`);
+  assert.ok(min >= 0 && max < 1, `range ${min}..${max}`);
+});
+
+test("terminalMC is ARITHMETICALLY right where the answer is known", () => {
+  // At a volatility approaching zero the terminal price is S * exp(drift * T)
+  // and the payoff there is the only outcome, so the chance is exactly 1 or 0
+  // and the mean is exactly that payoff. Nothing here is a probability: it is
+  // the simulator's own arithmetic checked against closed-form arithmetic.
+  const tiny = { driftAnnual: 0, sigma: 1e-6, dte: 45, runs: 500, seed: seedFrom("tiny") };
+  const win = terminalMC(VERT, 0.4, 20.9, tiny);     // payoff 0.90 against a 0.40 cost
+  assert.equal(win.pop, 1);
+  assert.ok(Math.abs(win.ev - 50) < 0.1, `ev ${win.ev}`);
+  const lose = terminalMC(VERT, 0.4, 19, tiny);      // expires worthless
+  assert.equal(lose.pop, 0);
+  assert.ok(Math.abs(lose.ev + 40) < 0.1, `ev ${lose.ev}`);
+  // A P&L of exactly zero is NOT a profit — the convention `payoffBands()` and
+  // `analyze()` use. A call struck far above every path it walks pays nothing
+  // on every run; at a cost of nothing that is break-even on every run, and
+  // break-even is not a win.
+  const nothing = terminalMC([{ side: 1, type: "call", strike: 1000, qty: 1 }], 0, 20,
+    { ...MC_POLICY, runs: 1000 });
+  assert.equal(nothing.pop, 0, "getting your money back is not a win");
+  assert.equal(nothing.ev, 0);
+});
+
+test("terminalMC moves the right way when the DRIFT moves, and only then", () => {
+  const up = terminalMC(VERT, 0.4, 20, { ...MC_POLICY, driftAnnual: 0.5 });
+  const flat = terminalMC(VERT, 0.4, 20, { ...MC_POLICY, driftAnnual: 0 });
+  const down = terminalMC(VERT, 0.4, 20, { ...MC_POLICY, driftAnnual: -0.5 });
+  assert.ok(up.pop > flat.pop && flat.pop > down.pop,
+    `a call spread must do better in a rising market: ${down.pop} ${flat.pop} ${up.pop}`);
+});
+
+test("seasonalDrift is the app's own thesis, annualised over the window held", () => {
+  // The arithmetic that used to live inside `montecarlo()` in App.jsx: the mean
+  // of the monthly means over the months the trade is actually open for, times
+  // twelve. A 45-day trade opened in September spans two months.
+  const mm = Array(12).fill(0); mm[8] = 1.2; mm[9] = -0.6;
+  assert.ok(Math.abs(seasonalDrift(mm, 8, 45) - ((0.012 + -0.006) / 2) * 12) < 1e-12);
+  // One month when the window is one month.
+  assert.ok(Math.abs(seasonalDrift(mm, 8, 20) - 0.012 * 12) < 1e-12);
+  // It wraps round the end of the year rather than falling off it.
+  const dec = Array(12).fill(0); dec[11] = 2; dec[0] = 2;
+  assert.ok(Math.abs(seasonalDrift(dec, 11, 45) - 0.24) < 1e-12);
+  // UNKNOWN IS NOT A DRIFT OF ZERO. A short table, a missing month or no
+  // horizon is null, and `chanceOf()` turns that into a dash on screen.
+  assert.equal(seasonalDrift(null, 8, 45), null);
+  assert.equal(seasonalDrift([1, 2, 3], 8, 45), null);
+  assert.equal(seasonalDrift(Array(12).fill(null), 8, 45), null);
+  assert.equal(seasonalDrift(mm, 8, 0), null);
+});
+
+test("the REAL seasonal tables produce the drifts the PRD's table was built on", () => {
+  // September, 45 days: the grain markets read negative and the gas markets
+  // positive, which is why every CHANCE moved DOWN on CORN, SOYB and WEAT and
+  // UP on UNG and BOIL when the drift changed. PRD §4h carries the table.
+  const at = (tk) => +(seasonalDrift(SEASONAL[tk], 8, 45) * 100).toFixed(1);
+  assert.equal(at("CORN"), -9.6);
+  assert.equal(at("SOYB"), -8.4);
+  assert.equal(at("WEAT"), -3.6);
+  assert.equal(at("UNG"), 14.4);
+  assert.equal(at("BOIL"), 26.4);
+});
+
+test("THE CLOSED FORMS ARE GONE FROM THE ENGINE", () => {
+  // `probProfit` integrated the payoff against a lognormal at a RISK-NEUTRAL
+  // drift of 0.045 and was one of four answers to one question. Deleting it is
+  // the point of PR #25: a faster approximation kept beside the truth is a
+  // second number waiting for a screen to print it.
+  assert.ok(!/probProfit/.test(codeOf("engine.js")), "engine.js still defines probProfit");
+  // `codeOf` strips comments, so the note in pro.jsx explaining the deletion
+  // does not count as a definition — only live code does.
+  assert.ok(!/probProfit/.test(codeOf("pro.jsx")), "pro.jsx still defines probProfit");
+  assert.ok(!/probProfit/.test(codeOf("App.jsx")), "App.jsx still calls probProfit");
 });
 
 console.log(`\n${passed} passed, ${failures.length} failed`);

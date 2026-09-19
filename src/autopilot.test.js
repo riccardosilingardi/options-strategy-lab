@@ -34,6 +34,8 @@ import {
 import { orderBody } from "./order.js";
 import { exitSim, SIGMA } from "./engine.js";
 import { sigmaProvenance, FALLBACK_SIGMA, FALLBACK_SIGMA_SOURCE, TABLE_SIGMA_SOURCE } from "./rules.js";
+import { chanceOf, chanceSourceNote } from "./rules.js";
+import { SEASONAL } from "./engine.js";
 
 let passed = 0;
 const failures = [];
@@ -500,6 +502,74 @@ test("sigmaProvenance — a row in the table and no row are two different answer
   assert.equal(FALLBACK_SIGMA, RULES.fallbackSigma, "and it lives in RULES with every other chosen number");
   assert.equal(RULES_SRC.includes("**0.25 IS CHOSEN, NOT MEASURED.**"), true,
     "the constant carries its own provenance, like closeLimitSlippage");
+});
+
+/* ============================================================================
+   THE BRIEF READS THE SAME ENGINE THE SCREENS DO (PR #25, ROADMAP P1).
+
+   `autopilot.mjs` computed `pop` with `probProfit()` — a closed form at a
+   RISK-NEUTRAL drift of 0.045 — while importing `SEASONAL` from the same file,
+   three lines above, for the seasonal reading it put in the brief. The app's
+   Build screen meanwhile ran a Monte Carlo on exactly that table. So the brief
+   and the app disagreed about one position by construction, and `computeTIS`
+   divided today's figure by `thesis.pop`, which the APP had recorded: the score
+   was measuring the gap between two formulas as much as the gap between two
+   days.
+============================================================================ */
+
+test("the autopilot computes the chance through chanceOf, not a closed form", () => {
+  assert.ok(/chanceOf\(/.test(AUTOPILOT), "the brief must read the one engine");
+  // Comments stripped: the note explaining the deletion names the function it
+  // deleted, and a structural test must not be satisfied — or failed — by prose.
+  const live = AUTOPILOT.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+  assert.equal(/probProfit/.test(live), false, "no closed form survives here");
+  // And the drift it hands in is the app's own seasonal table for THAT market.
+  assert.ok(/monthlyMean: SEASONAL\[pos\.ticker\]/.test(AUTOPILOT),
+    "the drift is this market's seasonal reading, not a constant");
+});
+
+test("the brief says what its probability is an answer about", () => {
+  // `popNow` used to be a bare percentage with nothing saying where it came
+  // from, so the model was free to describe it as the market's own odds. It is
+  // a claim the APP is making: a simulation at this market's seasonal drift.
+  assert.ok(/popNow_from/.test(AUTOPILOT), "the facts name the drift behind popNow");
+  assert.ok(/chanceNote/.test(AUTOPILOT), "and the webhook brief prints the sentence");
+  const note = chanceSourceNote(chanceOf({
+    legs: [{ side: 1, type: "call", strike: 20, qty: 1 }, { side: -1, type: "call", strike: 21, qty: 1 }],
+    entryNet: 0.4, spot: 20, iv: 0.85, dte: 45,
+    monthlyMean: SEASONAL.BOIL, month: 8, ticker: "BOIL", expKey: "2026-11-06",
+  }), "BOIL");
+  assert.ok(note.includes("seasonal"), note);
+  assert.ok(note.includes("BOIL"), note);
+});
+
+test("a chance the autopilot could not work out is null, never a confident 0%", () => {
+  // `+(null * 100).toFixed(0)` is 0. The brief prints "PoP n/a" instead.
+  assert.ok(/pop == null \? null :/.test(AUTOPILOT),
+    "the brief must not coerce a missing chance into a number");
+  assert.ok(/PoP \$\{b\.pop == null \? "n\/a"/.test(AUTOPILOT),
+    "and the webhook line says n/a rather than 0%");
+});
+
+test("the autopilot entry carries the horizon its simulation ran to", () => {
+  assert.ok(/simExitDTE: sim\.exitDTE/.test(AUTOPILOT));
+  assert.ok(/simDays: sim\.horizon/.test(AUTOPILOT));
+  // From the SIMULATOR's own answer, never from RULES written out a second
+  // time here — that is the fault: a name asserting a rule the arithmetic had
+  // not applied.
+  assert.equal(/simExitDTE: RULES\./.test(AUTOPILOT), false);
+});
+
+test("the implied volatility has a home and a provenance, like the realised one", () => {
+  assert.ok(/ivProvenance\(/.test(AUTOPILOT), "autopilot.mjs reads the home");
+  assert.ok(/ivSource/.test(AUTOPILOT), "and the brief says which source produced it");
+  // The two fallbacks are the same number and DELIBERATELY two constants: one
+  // is the realised volatility the price is walked on, the other the implied
+  // volatility the options are priced at.
+  assert.equal(RULES.fallbackIV, RULES.fallbackSigma);
+  assert.ok(/fallbackIV/.test(RULES_SRC) && /fallbackSigma/.test(RULES_SRC));
+  assert.ok(/never be merged|must never be merged|not the same number|two constants/i.test(RULES_SRC),
+    "rules.js says in one line why the two are not one constant");
 });
 
 /* ---------------- report ---------------- */

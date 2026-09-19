@@ -12,6 +12,8 @@ import { RULES, sizing, ruleBadge, qualityFloor, qualityFloorSentence, liquidity
   spreadShare, spreadFloor, spreadFloorReason, wideSpreadNote, spreadSkippedNote,
   expiryChoice, expiryChoiceNote, emptyExpiryNote,
   modelSanity, modelSanityReason, modelDisagreementNote,
+  chanceOf, chanceSeedKey, watchAttentionLevel,
+  ivProvenance, CHAIN_IV_SOURCE, THESIS_IV_SOURCE, FALLBACK_IV_SOURCE,
   comboBook, openLimitPrice, openLimitNote, limitPlacement, notionalControlled, notionalNote,
   entryRoom, entryInsideExitNote, entryRoomWarning, entryRoomOverrideAsk, entryOverrideOk, entryOverrideNote,
   passedOverRecord, passedOverSummary, OPEN_LIMIT_SLIPPAGE, CLOSE_LIMIT_SLIPPAGE,
@@ -1276,6 +1278,169 @@ test("MODEL SANITY — ONE EXPRESSION, and the ticket does not run a second one"
 });
 
 /* ============================================================================
+   ONE CHANCE, ONE ARITHMETIC (PR #25, ROADMAP P1).
+
+   The app computed "the chance of profit" FOUR ways, and the real difference
+   between them was the drift: a Monte Carlo on the app's seasonal means, a
+   closed form in engine.js at a risk-neutral 0.045, a second closed form in
+   pro.jsx at the same 0.045, and a band integration at a drift of zero. The
+   owner's decision is that the Monte Carlo is the single truth.
+
+   What is held below is the STRUCTURE of that decision — one spelling, one run
+   count, no closed form left to print. The arithmetic is held in
+   `engine.test.js` and the agreement between screens in `ceiling.test.jsx`,
+   against the real generation sites.
+============================================================================ */
+
+test("ONE CHANCE — `chanceOf` is spelled once in App.jsx and nowhere in pro.jsx", () => {
+  // The same discipline as `modelSanity` above and for the same reason: two
+  // call sites are two chances to pass a different argument, and the whole
+  // point of the change is that one position has one number.
+  const app = codeOf("App.jsx");
+  assert.equal((app.match(/chanceOf\(/g) || []).length, 1,
+    "chanceOf is called in exactly one place in App.jsx: inside chanceCheckOf");
+  const uses = (app.match(/chanceFor\(/g) || []).length;
+  assert.ok(uses >= 5,
+    `the Radar, the Shortlist, Build, the record and the Guardian all read it (found ${uses})`);
+  const pro = codeOf("pro.jsx");
+  assert.equal((pro.match(/chanceOf\(/g) || []).length, 0,
+    "the Guardian takes the chance as a prop, it does not compute one");
+});
+
+test("ONE CHANCE — no closed form survives anywhere for a screen to print", () => {
+  // `probProfit` was the name both of them went under. A faster approximation
+  // kept beside the truth is a second number waiting for a screen to reach for
+  // it, so neither is kept.
+  for (const f of ["engine.js", "App.jsx", "pro.jsx", "visuals.jsx", "wizard.jsx",
+    "../netlify/functions/autopilot.mjs"]) {
+    assert.equal(/probProfit/.test(codeOf(f)), false, `${f} still carries a closed-form chance`);
+  }
+});
+
+test("ONE CHANCE — one run count, so ranking and printing cannot disagree", () => {
+  // THE TRAP THIS EXISTS FOR. The Shortlist prices and ranks many candidates
+  // and prints the chance of each one; a cheaper run count for ranking than for
+  // printing would mean the row you compared and the row you opened disagreeing
+  // about the same trade. The decision is ONE count for both, and the cost of
+  // it is measured in the comment beside `RULES.mcRuns`.
+  assert.equal(typeof RULES.mcRuns, "number");
+  assert.ok(RULES.mcRuns >= 1000, "a run count this low would be visible at the whole percent printed");
+  // `chanceOf` is the only entry point and it reads the home; nothing else in
+  // the app may hand `terminalMC` a run count of its own.
+  const rules = codeOf("rules.js");
+  assert.equal((rules.match(/terminalMC\(/g) || []).length, 1,
+    "terminalMC is called in exactly one place: inside chanceOf");
+  for (const f of ["App.jsx", "pro.jsx", "visuals.jsx", "wizard.jsx", "../netlify/functions/autopilot.mjs"]) {
+    assert.equal(/terminalMC/.test(codeOf(f)), false, `${f} runs its own simulation`);
+  }
+});
+
+test("ONE CHANCE — unknown is not a number, at every missing input", () => {
+  const legs = [{ side: 1, type: "call", strike: 20, qty: 1 }, { side: -1, type: "call", strike: 21, qty: 1 }];
+  const ok = { legs, entryNet: 0.4, spot: 20, iv: 0.85, dte: 45,
+    monthlyMean: Array(12).fill(1), month: 8, ticker: "BOIL", expKey: "2026-11-06" };
+  assert.ok(chanceOf(ok).pop > 0, "the fixture itself has to work");
+  for (const missing of [{ spot: null }, { spot: 0 }, { dte: null }, { dte: 0 },
+    { entryNet: null }, { legs: [] }, { legs: null }, { monthlyMean: null }, { month: null }]) {
+    assert.equal(chanceOf({ ...ok, ...missing }), null,
+      `a missing ${Object.keys(missing)[0]} must be null, never a confident 0%`);
+  }
+  // A MISSING IMPLIED VOLATILITY IS THE ONE THAT IS NOT NULL, and deliberately:
+  // `ivProvenance()` has a named fallback for it and says so on screen, exactly
+  // as `sigmaProvenance()` does for the simulator's volatility.
+  const noIV = chanceOf({ ...ok, iv: null });
+  assert.equal(noIV.sigma, RULES.fallbackIV);
+  assert.ok(noIV.ivNote.includes("FALLBACK"), "and it says so");
+});
+
+test("ONE CHANCE — the seed is the TRADE's, so it moves when the trade moves", () => {
+  const legs = [{ side: 1, type: "call", strike: 20, qty: 1 }, { side: -1, type: "call", strike: 21, qty: 1 }];
+  const base = { ticker: "BOIL", expKey: "2026-11-06", legs, spot: 21.23, dte: 45 };
+  assert.equal(chanceSeedKey(base), chanceSeedKey({ ...base }), "same trade, same key");
+  // A price wobbling in the third decimal between two renders must not re-roll
+  // the simulation under the reader; a different strike or expiry must.
+  assert.equal(chanceSeedKey({ ...base, spot: 21.2301 }), chanceSeedKey(base));
+  assert.notEqual(chanceSeedKey({ ...base, spot: 21.25 }), chanceSeedKey(base));
+  assert.notEqual(chanceSeedKey({ ...base, expKey: "2026-12-04" }), chanceSeedKey(base));
+  assert.notEqual(chanceSeedKey({ ...base, ticker: "UNG" }), chanceSeedKey(base));
+  assert.notEqual(chanceSeedKey({ ...base, dte: 46 }), chanceSeedKey(base));
+  assert.notEqual(
+    chanceSeedKey({ ...base, legs: [{ side: 1, type: "call", strike: 20, qty: 1 }, { side: -1, type: "call", strike: 22, qty: 1 }] }),
+    chanceSeedKey(base));
+});
+
+/* ============================================================================
+   THREE NUMBERS THAT HAD NO HOME (PR #24 found them and left them deliberately).
+   No value changed here — a rename that moves a number is two changes wearing
+   one coat — but all three read `RULES` now, and two exclusions the sweep above
+   carried because of them are gone.
+============================================================================ */
+
+test("HOMES — the watch level, the autopilot bar and the IV fallback are in RULES", () => {
+  assert.equal(RULES.watchAttentionShare, 0.35, "unchanged in value, as the owner decided");
+  assert.equal(RULES.autopilotConfidence, 70, "unchanged in value");
+  assert.equal(RULES.fallbackIV, 0.25, "unchanged in value");
+  // AND THE TWO COLLISIONS ARE NOW HARMLESS RATHER THAN HIDDEN. These pairs are
+  // the reason two files could not be swept for rule literals at all.
+  assert.equal(RULES.watchAttentionShare, RULES.maxSpreadShareOfMid,
+    "the collision is real and stays: what changed is that both have a home");
+  assert.equal(RULES.autopilotConfidence, RULES.expensiveIVRank);
+  assert.equal(RULES.fallbackIV, RULES.fallbackSigma,
+    "the same number and DELIBERATELY two constants: one is realised, one implied");
+});
+
+test("HOMES — the watch level reads its home and is a signed level, not a share", () => {
+  // `maxLoss` is negative, so the level is negative with it: a position is
+  // "watch" when its P&L is BELOW this.
+  assert.ok(watchAttentionLevel(-100) < 0);
+  assert.equal(watchAttentionLevel(-100), RULES.watchAttentionShare * -100);
+  // An unknown maximum loss has no share to take, and null is not a level of 0
+  // — which would mark every losing position at a cent down.
+  assert.equal(watchAttentionLevel(null), null);
+  assert.equal(watchAttentionLevel(undefined), null);
+  const app = codeOf("App.jsx");
+  assert.ok(/watchAttentionLevel\(/.test(app), "App.jsx reads the home");
+});
+
+test("HOMES — the autopilot's confidence bar is read from RULES by signals.js", () => {
+  const src = codeOf("signals.js");
+  assert.ok(/RULES\.autopilotConfidence/.test(src), "signals.js reads the home");
+  // The two generated sentences quote the constant rather than a typed 70.
+  // And no sentence in the file types the number out any more.
+  assert.equal(/the 70-confidence bar|not the 70 the autopilot/.test(readFileSync(new URL("./signals.js", import.meta.url), "utf8")),
+    false, "the bar is quoted from the constant, not typed into the sentence");
+});
+
+test("HOMES — ivProvenance names which of three sources produced the volatility", () => {
+  const chain = ivProvenance(0.42, 0.31, "BOIL");
+  assert.equal(chain.iv, 0.42);
+  assert.equal(chain.source, CHAIN_IV_SOURCE);
+  assert.equal(chain.fromFallback, false);
+  const thesis = ivProvenance(null, 0.31, "BOIL");
+  assert.equal(thesis.iv, 0.31);
+  assert.equal(thesis.source, THESIS_IV_SOURCE);
+  assert.ok(thesis.note.includes("when this position was opened"));
+  const none = ivProvenance(null, null, "BOIL");
+  assert.equal(none.iv, RULES.fallbackIV);
+  assert.equal(none.source, FALLBACK_IV_SOURCE);
+  assert.equal(none.fromFallback, true);
+  assert.ok(none.note.includes("FALLBACK"), "the fallback sentence is not a quiet one");
+  assert.ok(none.note.includes("BOIL"), "and it names the market it could not read");
+  // A zero or a negative is not a volatility: it is a missing one.
+  assert.equal(ivProvenance(0, null).iv, RULES.fallbackIV);
+  assert.equal(ivProvenance(-0.3, null).iv, RULES.fallbackIV);
+});
+
+test("HOMES — no bare IV fallback survives in the two files that carried one", () => {
+  for (const f of ["pro.jsx", "../netlify/functions/autopilot.mjs"]) {
+    const src = codeOf(f);
+    assert.ok(/ivProvenance\(/.test(src), `${f} reads the home`);
+    assert.equal(/\?\?\s*0\.25|\|\|\s*0\.25/.test(src), false,
+      `${f} still falls back to a bare 0.25`);
+  }
+});
+
+/* ============================================================================
    THE POSITION REMEMBERS ITS SIZE (ROADMAP P1.1 / P1.2).
 
    MEASURED: `riskGate.js` read `p.contracts` in three places — the 25% total
@@ -1440,7 +1605,11 @@ const SWEEP_EXCLUDED = {
   // Both are places the matcher would name the WRONG rule, and a guard that
   // says something false about a line is worse than one that misses it.
   "demo.js": "a fixture: `entryDaysAgo: 30` is a fact about a made-up position, not the entry floor",
-  "signals.js": "it carries an un-homed confidence bar of 70 that COLLIDES in value with expensiveIVRank — giving that bar a home is its own change (PRD, NOT VERIFIED)",
+  // `signals.js` WAS EXCLUDED HERE AND IS NOT ANY MORE. It carried a bare 70 in
+  // two generated sentences — "the 70-confidence bar the autopilot needs" —
+  // with no home in RULES and a value that collides with `expensiveIVRank`, so
+  // pointing the sweep at the file would have named the wrong rule. The bar has
+  // its own home now (`RULES.autopilotConfidence`) and the file is swept.
 };
 const LITERAL_FILES = [
   ...readdirSync(new URL(".", import.meta.url))
@@ -1540,13 +1709,17 @@ test("RULES LITERALS — no file that computes a printed number keeps its own co
     ["fallbackSigma", RULES.fallbackSigma],
     ["openLimitSlippage", RULES.openLimitSlippage],
     ["closeLimitSlippage", RULES.closeLimitSlippage],
-    // `maxSpreadShareOfMid` (0.35) IS DELIBERATELY NOT ON THIS LIST, and this is
-    // the honest limit of the whole approach. App.jsx draws a position's
-    // attention level at `pnl < 0.35 * p.maxLoss * n` — a "watch" badge with no
-    // home in RULES, whose value COLLIDES with the spread floor's. The guard
-    // would report it as a copy of the spread floor, which it is not: a
-    // sentence that names the wrong rule is worse than one that is not printed.
-    // The un-homed 0.35 is written up in the PRD's NOT VERIFIED list instead.
+    // `maxSpreadShareOfMid` (0.35) WAS DELIBERATELY OFF THIS LIST AND IS BACK ON
+    // IT. It was kept off because App.jsx drew a position's attention level at
+    // `pnl < 0.35 * p.maxLoss * n` — a "watch" badge with no home in RULES,
+    // whose value COLLIDES with the spread floor's — and a guard that names the
+    // wrong rule on a line is worse than one that is not printed. That level is
+    // `RULES.watchAttentionShare` now, read through `watchAttentionLevel()`, so
+    // the collision is harmless and the spread floor is swept like the rest.
+    ["maxSpreadShareOfMid", RULES.maxSpreadShareOfMid],
+    ["watchAttentionShare", RULES.watchAttentionShare],
+    ["autopilotConfidence", RULES.autopilotConfidence],
+    ["fallbackIV", RULES.fallbackIV],
     ["minNetPremium", RULES.minNetPremium],
     ["modelDisagreementRatio", RULES.modelDisagreementRatio],
     ["liquidityPercentile", RULES.liquidityPercentile],

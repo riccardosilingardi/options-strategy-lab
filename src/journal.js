@@ -382,6 +382,65 @@ export function withPositionSize(pos) {
 }
 
 /* ------------------------------------------------------------------
+   4b) WHAT HORIZON AN AUTOPILOT ENTRY WAS WRITTEN AT
+
+   THE FAULT THIS EXISTS TO MARK. `exitSim()` in engine.js walked every position
+   to 7 DTE and marked the survivors at 7 DTE while `RULES.exitDTE` has been 21
+   since it was changed from 7. Four pull requests shipped on top of that, and
+   every autopilot brief the owner received described the chance of being
+   positive "at the exit rule" at a horizon fourteen days past the rule. What
+   the Journal keeps is not the brief: `appendTimeline()` stores the verdict,
+   the share of the maximum, the TIS and the model's RATIONALE — prose the model
+   wrote after reading those numbers. So the wrong horizon is inside the prose
+   of past entries, where nothing can reach it.
+
+   IT IS NOT MARKED BY DATE, DELIBERATELY. A deploy date is a second home for a
+   fact the entry can carry itself, and it would have to be maintained by hand
+   for the life of the record. So the entries written SINCE the fix carry the
+   horizon the simulation actually used, and the ABSENCE of that stamp is what
+   identifies an entry written before it — exactly the pattern `contractsAssumed`
+   uses for a size that was assumed rather than recorded.
+
+   An entry that is not an autopilot entry has no horizon and is not marked: it
+   never quoted one.
+------------------------------------------------------------------ */
+
+/**
+ * What horizon this timeline entry's simulation ran to.
+ * @returns { autopilot, stamped, exitDTE, days } — `stamped` false on an entry
+ *          written before the simulator was corrected.
+ */
+export function simHorizonOf(entry = {}) {
+  const autopilot = !!entry && entry.type === "autopilot";
+  // `Number(null)` IS 0 AND 0 IS FINITE. An entry with no stamp at all would
+  // read as a stamp of zero — the very confusion this marker exists to end —
+  // so the raw value has to be a number before it is coerced to one.
+  const raw = entry?.simExitDTE;
+  const exitDTE = typeof raw === "number" ? raw : NaN;
+  const rawDays = entry?.simDays;
+  const days = typeof rawDays === "number" ? rawDays : NaN;
+  const stamped = autopilot && Number.isFinite(exitDTE) && exitDTE >= 0;
+  return {
+    autopilot,
+    stamped,
+    exitDTE: stamped ? exitDTE : null,
+    days: stamped && Number.isFinite(days) ? days : null,
+  };
+}
+
+/**
+ * ONE PLAIN SENTENCE, ON EVERY SCREEN THAT RENDERS AN UNSTAMPED ENTRY, and
+ * null everywhere else. Not an apology and not a paragraph: what the reader
+ * needs is that a number inside the text below is not the app's current rule.
+ */
+export function autopilotHorizonNote(entry = {}) {
+  const h = simHorizonOf(entry);
+  if (!h.autopilot || h.stamped) return null;
+  return "The simulation behind this entry ran to a day the app no longer uses, so any chance quoted inside it " +
+    "is not the app's current exit rule.";
+}
+
+/* ------------------------------------------------------------------
    5) THE CLOSED ENTRY
 ------------------------------------------------------------------ */
 

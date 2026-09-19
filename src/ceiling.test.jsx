@@ -27,9 +27,10 @@ import {
   qualityFloor, rewardRisk, reportNarrativePrompt, NOTHING_TODAY, NO_CEILING, RULES,
   modelSanity, modelDisagreementNote, MIN_NET_DOLLARS,
 } from "./rules.js";
-import { payoffBands, payingBands, bandsAbove, scratchSplit, unifiedTakeaway, explainElement, exitPlanDetail, compareTakeaway } from "./visuals.jsx";
-import { analyze, shortlistWithFloors, buildPresets, modelCheckOf } from "./App.jsx";
-import { payoff } from "./engine.js";
+import { chanceOf, chanceSourceNote } from "./rules.js";
+import { payoffBands, payingBands, bandsAbove, scratchSplit, unifiedTakeaway, explainElement, exitPlanDetail, compareTakeaway, chanceInProfit } from "./visuals.jsx";
+import { analyze, shortlistWithFloors, buildPresets, modelCheckOf, chanceCheckOf, structureIV } from "./App.jsx";
+import { payoff, netBS, SEASONAL, SIGMA, seasonalDrift } from "./engine.js";
 
 const ok = [], bad = [];
 const check = (name, fn) => { try { fn(); ok.push(name); } catch (e) { bad.push([name, e.message]); } };
@@ -248,20 +249,20 @@ check("bandsAbove() finds every crossing, including a band that never clears", (
 
 check("the takeaway separates where the money is from how often it scratches", () => {
   const b = payoffBands({ legs: ungBroken, entryNet: UNG_CREDIT, spot: UNG_SPOT });
-  const t = unifiedTakeaway(b, { ticker: "UNG", sigma: 0.55, dte: 30 });
+  const t = unifiedTakeaway(b, { ticker: "UNG", sigma: 0.55, dte: 30, driftAnnual: 0 });
   oneSentence(t);
   has(t, "UNG");
   has(t, "scratch");
   // Both halves are quoted: how often it is green at all, and how often it
   // actually pays.
-  const sp = scratchSplit(b, { spot: 10.57, sigma: 0.55, dte: 30 });
+  const sp = scratchSplit(b, { spot: 10.57, sigma: 0.55, dte: 30, driftAnnual: 0 });
   if (!(sp.pScratch > sp.pPaying)) throw new Error("this is the case where most of the green is a scratch");
   if (!(sp.pPaying < sp.inProfit)) throw new Error("the paying chance must be a subset of the profit chance");
 });
 
 check("a trade whose green is mostly money says nothing about scratches", () => {
   const b = payoffBands({ legs: bullCall, entryNet: 2, spot: 100 });
-  const t = unifiedTakeaway(b, { ticker: "CORN", sigma: 0.25, dte: 30 });
+  const t = unifiedTakeaway(b, { ticker: "CORN", sigma: 0.25, dte: 30, driftAnnual: 0 });
   oneSentence(t);
   hasNot(t, "scratch");
 });
@@ -531,6 +532,184 @@ check("a leg priced off the MODEL does not change which leg is named", () => {
   const ms = modelCheckOf(a, { legs, spot: FIX.S, dte: FIX.dte, iv: FIX.iv });
   eq(a.realCount, 1, "one leg came off the chain, one off the model");
   eq(ms.worstLeg.name, "100C", "the quoted placeholder is named, not the modelled leg");
+});
+
+/* ============================================================================
+   5. ONE CHANCE, ONE ARITHMETIC (PR #25) — AGAINST THE REAL GENERATION SITE.
+
+   `chanceCheckOf` is imported from App.jsx for the same reason `analyze` and
+   `shortlistWithFloors` are: the point of the change is that no second
+   implementation of the decision exists, and a test against a copy would prove
+   nothing about the app.
+============================================================================ */
+
+// Five markets, the numbers this repository actually holds for them.
+const MKT = {
+  CORN: { spot: 20.00, iv: 0.24, step: 0.5 },
+  SOYB: { spot: 22.00, iv: 0.20, step: 0.5 },
+  WEAT: { spot: 18.00, iv: 0.26, step: 0.25 },
+  UNG: { spot: 10.57, iv: 0.45, step: 0.5 },
+  BOIL: { spot: 21.23, iv: 0.85, step: 1 },
+};
+const MONTH = 8, FIXDTE = 45;
+const shapesFor = (S, step) => ({
+  vertical: [{ side: 1, type: "call", strike: S, qty: 1 }, { side: -1, type: "call", strike: S + step * 2, qty: 1 }],
+  condor: [
+    { side: -1, type: "put", strike: S - step * 2, qty: 1 }, { side: 1, type: "put", strike: S - step * 4, qty: 1 },
+    { side: -1, type: "call", strike: S + step * 2, qty: 1 }, { side: 1, type: "call", strike: S + step * 4, qty: 1 }],
+  longcall: [{ side: 1, type: "call", strike: S, qty: 1 }],
+});
+/** Every fixture, priced with the app's own model so the file needs no chain. */
+const fixtures = () => {
+  const out = [];
+  for (const [tk, u] of Object.entries(MKT)) {
+    for (const [shape, legs] of Object.entries(shapesFor(u.spot, u.step))) {
+      out.push({ tk, shape, legs, u, entry: netBS(legs, u.spot, FIXDTE, u.iv) });
+    }
+  }
+  return out;
+};
+/** What every screen calls, with the arguments the screen would have. */
+const chanceAt = (f) => chanceOf({
+  legs: f.legs, entryNet: f.entry, spot: f.u.spot, iv: f.u.iv, dte: FIXDTE,
+  monthlyMean: SEASONAL[f.tk], month: MONTH, ticker: f.tk, expKey: "2026-11-06",
+});
+
+check("P1 DONE WHEN — five screens, one position, ONE number", () => {
+  // Radar, Shortlist, Build, Guardian and the autopilot. The first four reach
+  // the chance through `chanceCheckOf` in App.jsx with whatever `analyze()`
+  // produced; the autopilot calls `chanceOf` in rules.js directly, because a
+  // Netlify function cannot import App.jsx. Both paths must land on the same
+  // number to the last bit, or the brief and the app disagree by construction.
+  for (const f of fixtures()) {
+    const a = { entry: f.entry, legPx: f.legs.map(() => ({ iv: f.u.iv })) };
+    const viaApp = chanceCheckOf(a, {
+      ticker: f.tk, legs: f.legs, spot: f.u.spot, dte: FIXDTE, expKey: "2026-11-06",
+      monthlyMean: SEASONAL[f.tk],
+    });
+    const viaServer = chanceAt(f);
+    eq(viaApp.pop, viaServer.pop, `${f.tk} ${f.shape}: pop`);
+    eq(viaApp.ev, viaServer.ev, `${f.tk} ${f.shape}: ev`);
+    eq(viaApp.seedKey, viaServer.seedKey, `${f.tk} ${f.shape}: seed`);
+    // ...and asking twice is asking once. An unseeded Monte Carlo would fail
+    // here and would have failed on every screen, silently.
+    eq(chanceAt(f).pop, viaServer.pop, `${f.tk} ${f.shape}: asked twice`);
+  }
+});
+
+check("P1 DONE WHEN — the chance travels with the trade, not with the screen", () => {
+  // The Guardian re-analyses an open position from today's spot, so its
+  // `analyze()` result is a different object from the one the Shortlist built.
+  // The seed is the TRADE's, so the number is the same whenever the inputs are.
+  const f = fixtures()[0];
+  const fromShortlist = chanceCheckOf({ entry: f.entry, legPx: [{ iv: f.u.iv }, { iv: f.u.iv }] },
+    { ticker: f.tk, legs: f.legs, spot: f.u.spot, dte: FIXDTE, expKey: "2026-11-06", monthlyMean: SEASONAL[f.tk] });
+  const fromGuardian = chanceCheckOf({ entry: f.entry, legPx: [{ iv: f.u.iv }, { iv: f.u.iv }] },
+    { ticker: f.tk, legs: [...f.legs], spot: f.u.spot, dte: FIXDTE, expKey: "2026-11-06",
+      monthlyMean: SEASONAL[f.tk], thesisIV: 0.9 });
+  // `thesisIV` is only reached when the chain gives nothing, so it changes
+  // nothing here — which is the property being held.
+  eq(fromShortlist.pop, fromGuardian.pop, "a remembered volatility must not override a live one");
+});
+
+check("THE CHART AND THE NUMBER AGREE — within the simulation's own sampling error", () => {
+  /* `chanceInProfit()` integrates the lognormal over the profit bands; the
+     Monte Carlo samples it. With the same drift and the same volatility they
+     are two readings of one distribution, so any gap is the Monte Carlo's
+     sampling error and nothing else.
+
+     THE TOLERANCE IS 2 PERCENTAGE POINTS, AND IT IS A MEASUREMENT, NOT A
+     CHOICE. At `RULES.mcRuns` = 8,000 the standard error of a proportion near
+     a half is 0.56 points, so two points is about 3.6 standard errors. The
+     worst gap measured across these fifteen fixtures is 1.59 points, on the
+     BOIL vertical; run at 400,000 the SAME structure lands within 0.01 points
+     of the chart, which is what proves the gap is noise rather than a
+     disagreement about the trade. PRD §4h carries the numbers. */
+  const TOL = 0.02;
+  let worst = 0, worstName = "";
+  for (const f of fixtures()) {
+    const mc = chanceAt(f);
+    const b = payoffBands({ legs: f.legs, entryNet: f.entry, spot: f.u.spot });
+    const chart = chanceInProfit(b, { spot: f.u.spot, sigma: mc.sigma, dte: FIXDTE, driftAnnual: mc.driftAnnual });
+    const gap = Math.abs(chart - mc.pop);
+    if (gap > worst) { worst = gap; worstName = `${f.tk} ${f.shape}`; }
+    if (!(gap <= TOL)) {
+      throw new Error(`${f.tk} ${f.shape}: chart ${(chart * 100).toFixed(2)}% vs simulation ` +
+        `${(mc.pop * 100).toFixed(2)}% — ${(gap * 100).toFixed(2)}pp apart. If this fails the chart is ` +
+        `wrong; do NOT widen the tolerance.`);
+    }
+  }
+  if (!(worst > 0)) throw new Error("the comparison has to actually be doing something");
+  if (worst > 0.018) throw new Error(`the measured worst gap has moved to ${(worst * 100).toFixed(2)}pp (${worstName})`);
+});
+
+check("THE CHART CARRIES ITS TAILS — a band at the edge of the sampling is not a band that ends", () => {
+  // The fault the tolerance above would otherwise have exposed. `payoffBands()`
+  // samples +/-30% of spot; on BOIL at 85% volatility over 45 days that is about
+  // one standard deviation, so integrating band by band threw away a third of
+  // the distribution and reported the remainder as a probability.
+  const u = MKT.BOIL;
+  const legs = shapesFor(u.spot, u.step).longcall;
+  const entry = netBS(legs, u.spot, FIXDTE, u.iv);
+  const b = payoffBands({ legs, entryNet: entry, spot: u.spot });
+  const drift = seasonalDrift(SEASONAL.BOIL, MONTH, FIXDTE);
+  const withTails = chanceInProfit(b, { spot: u.spot, sigma: u.iv, dte: FIXDTE, driftAnnual: drift });
+  // The old arithmetic, reproduced: no tail on the band that reaches the edge.
+  const noTails = (() => {
+    const T = FIXDTE / 365, sq = u.iv * Math.sqrt(T);
+    const mu = Math.log(u.spot) + (drift - 0.5 * u.iv * u.iv) * T;
+    const cdf = (x) => 0.5 * (1 + Math.min(1, Math.max(-1, erfApprox((Math.log(x) - mu) / (sq * Math.SQRT2)))));
+    return b.bands.filter((z) => z.sign > 0).reduce((acc, z) => acc + Math.max(0, cdf(z.hi) - cdf(z.lo)), 0);
+  })();
+  if (!(withTails > noTails + 0.1)) {
+    throw new Error(`the tail is worth more than ten points here: ${withTails} vs ${noTails}`);
+  }
+});
+function erfApprox(x) {
+  const sg = x < 0 ? -1 : 1; x = Math.abs(x);
+  const t = 1 / (1 + 0.3275911 * x);
+  return sg * (1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x));
+}
+
+check("THE EXPECTED VALUE IS THE SIMULATION'S OWN MEAN, not the best case weighted", () => {
+  /* `pop * maxProfit - (1 - pop) * risk` is a two-outcome bet: the best case or
+     the worst case and nothing between them. Most of a spread's distribution is
+     between them. The two answers are genuinely different numbers, and the one
+     the app prints is the one it simulated. */
+  let apart = 0, judged = 0;
+  for (const f of fixtures()) {
+    const mc = chanceAt(f);
+    const b = payoffBands({ legs: f.legs, entryNet: f.entry, spot: f.u.spot });
+    if (b.maxProfit == null) continue;                       // no ceiling: ranked last, blank EV
+    judged++;
+    // The simulation's mean can never be outside the range it walked. That is
+    // the property the old formula could not guarantee: `pop * maxProfit`
+    // weights a payoff that only happens at one price by the chance of landing
+    // anywhere in the green.
+    if (!(mc.ev >= b.maxLoss - 1e-6 && mc.ev <= b.maxProfit + 1e-6)) {
+      throw new Error(`${f.tk} ${f.shape}: mean ${mc.ev} outside [${b.maxLoss}, ${b.maxProfit}]`);
+    }
+    const twoOutcome = mc.pop * b.maxProfit - (1 - mc.pop) * Math.abs(b.maxLoss);
+    if (Math.abs(mc.ev - twoOutcome) > 1) apart++;
+  }
+  if (judged < 8) throw new Error(`not enough fixtures with a ceiling to judge (${judged})`);
+  // The two answers are genuinely different arithmetic. They CAN coincide on a
+  // structure whose distribution happens to sit near its own two endpoints —
+  // WEAT's vertical does — so what is held is that most of them do not.
+  if (!(apart >= judged / 2)) {
+    throw new Error(`only ${apart} of ${judged} differ by more than a dollar: one of the two is not being computed`);
+  }
+});
+
+check("THE CHANCE SAYS WHAT IT IS AN ANSWER ABOUT", () => {
+  const f = fixtures()[0];
+  const mc = chanceAt(f);
+  const note = chanceSourceNote(mc, f.tk);
+  has(note, "8,000");
+  has(note, "seasonal");
+  has(note, "not a market-neutral assumption");   // it names what this is NOT
+  // and a missing chance is a sentence, not a crash
+  has(chanceSourceNote(null), "There is no chance to show");
 });
 
 for (const [name, why] of bad) console.error(`  FAIL ${name}\n       ${why}`);

@@ -14,7 +14,7 @@
 // price off the chain against `netBS()` — the SAME function and the SAME smile
 // every other screen in this app prices with, which is the point: a second
 // implementation of the model would make the check a comparison of two guesses.
-import { netBS, bs, smile } from "./engine.js";
+import { netBS, bs, smile, terminalMC, seasonalDrift, seedFrom } from "./engine.js";
 
 /** The config object. Everything else in this file is derived from it. */
 export const RULES = {
@@ -64,11 +64,66 @@ export const RULES = {
                                // versus their own history: we are the buyer of
                                // an expensive option, so we stand down
 
+  // --- THE BAR THE AUTOPILOT WAITS FOR BEFORE PROPOSING ANYTHING UNPROMPTED.
+  // Two sentences in `signals.js` quoted a bare 70 and named it "the
+  // 70-confidence bar the autopilot needs". It had no home, and its VALUE
+  // collides with `expensiveIVRank` above — which is why the rule-literal sweep
+  // could not be pointed at that file: it would have named the wrong rule.
+  // Homed here, unchanged in value, so the sweep can see the file at last.
+  //
+  // IT IS NOT `lowConfidence`, AND THE DIFFERENCE IS THE WHOLE POINT. 40 is the
+  // bar under which the risk gate warns about a trade the USER asked for; 70 is
+  // the bar above which the app is willing to raise a trade the user did NOT
+  // ask for. A market at 55 is one you may take deliberately and one the app
+  // will not bring to you on its own. CHOSEN, NOT MEASURED — nothing in this
+  // repository has ever compared outcomes above and below it.
+  autopilotConfidence: 70,
+
   // --- THE VOLATILITY THE EXIT SIMULATOR WALKS ON WHEN THE TABLE HAS NO ROW.
   // `SIGMA` in engine.js is hand-written per ticker; this is the number behind
   // it, and it was a bare `|| 0.25` in autopilot.mjs. CHOSEN, NOT MEASURED —
   // see FALLBACK_SIGMA below for what that means and what would settle it.
   fallbackSigma: 0.25,
+
+  // --- THE IMPLIED VOLATILITY USED WHEN THE CHAIN DID NOT GIVE ONE, AND IT IS
+  // A DIFFERENT QUANTITY FROM `fallbackSigma` ABOVE. They are the same number
+  // today and they must never be merged into one: `fallbackSigma` is the
+  // REALISED volatility the simulator walks the underlying's price on, while
+  // this is the IMPLIED volatility the options themselves are PRICED at
+  // (`netBS`, `bs`, `smile`). One is a property of the share, the other a
+  // property of the option market on it, and on these chains they differ — BOIL
+  // carries a realised sigma of 0.95 in `SIGMA` against an implied 0.85 in
+  // `UNDERLYINGS`. Homing them in one constant would make a future correction
+  // to either one silently move the other.
+  //
+  // It was a bare `|| 0.25` in `autopilot.mjs` and in `pro.jsx`. CHOSEN, NOT
+  // MEASURED, and `ivProvenance()` below says which of the two produced the
+  // number a screen or a brief is showing.
+  fallbackIV: 0.25,
+
+  // --- HOW MANY RUNS THE ONE CHANCE IS MADE OF.
+  //
+  // Every probability this app prints comes out of `chanceOf()` below, which is
+  // a Monte Carlo — so this number is the precision of every CHANCE, every EV
+  // and every distribution on every screen. It is ONE number and not two: the
+  // Shortlist ranks many candidates and prints the chance of each, and a
+  // cheaper count for ranking than for printing would mean the row you compared
+  // and the row you opened disagreeing about the same trade.
+  //
+  // WHAT 8,000 COSTS, MEASURED. On the development machine one candidate takes
+  // 0.54 ms at this count (0.24 ms at 2,000). The widest screen in the app —
+  // the guided flow's pool, five markets x two families x the presets — reaches
+  // about eighty candidates, so roughly 43 ms of arithmetic for the whole pool,
+  // against the `analyze()` call each candidate already pays for. Dropping to
+  // 2,000 would save about 25 ms and cost a standard error on each printed
+  // percentage of 1.1 points instead of 0.55, which is visible at the whole
+  // percent the screens round to. NOT VERIFIED ON A PHONE: there is no browser
+  // in this sandbox, and a phone is the machine this app is demoed on.
+  //
+  // The sampling error is not a rounding error. At 8,000 runs a printed 50% is
+  // 50% give or take about one point of the answer an infinite run would give —
+  // the SAME one point for every screen, because the seed is the position's.
+  mcRuns: 8000,
 
   // --- QUALITY FLOORS. A structure can pass every rule above and still be
   // indefensible. These two are the floors under a PROPOSAL: a candidate that
@@ -206,6 +261,25 @@ export const RULES = {
   // It sits BESIDE the liquidity floor and does not touch its two constants.
   // A leg is judged on both, and the screen says which one removed it.
   maxSpreadShareOfMid: 0.35,
+
+  // --- WHEN A POSITION ASKS TO BE LOOKED AT. The share of the maximum loss the
+  // position has to be down before the Positions screen marks it "watch"
+  // instead of "ok". It refuses nothing, sends nothing and closes nothing: it
+  // is a colour and a word on a row, one step below the "action" level the real
+  // rules (take profit, the exit window, an autopilot proposal) produce.
+  //
+  // IT IS NOT THE STOP, AND IT IS NOT THE SPREAD FLOOR. The stop warning fires
+  // at `stopLossPct` (half the maximum loss); this is the earlier, quieter
+  // notice that the trade is going the wrong way. Its VALUE happens to equal
+  // `maxSpreadShareOfMid` above, and that collision is the reason the spread
+  // floor was the one rule number kept off the sweep list — a guard that named
+  // the wrong rule on this line would be worse than one that missed it. With
+  // this home the collision is harmless and the spread floor is back on the
+  // list.
+  //
+  // CHOSEN, NOT MEASURED. Nothing has compared what happened to positions that
+  // crossed it against positions that did not.
+  watchAttentionShare: 0.35,
 
   // minNetPremium — THE PRICE HAS TO EXIST BEFORE ANY OTHER RULE CAN BE
   // APPLIED TO IT. In dollars per share, the unit an option is quoted in:
@@ -483,6 +557,95 @@ export const chanceInTen = (p) => {
   if (pc == null) return "\u2014";
   const n = Math.round(pc / 10);
   return `${n} time${n === 1 ? "" : "s"} in 10`;
+};
+
+/* =========================================================================
+   ONE CHANCE, ONE ARITHMETIC — THIS IS THE ONE PLACE IT IS COMPUTED.
+
+   `terminalMC()` in engine.js is the arithmetic; this is the policy around it,
+   and it lives here for the same reason `modelSanity()` does: engine.js imports
+   nothing and may not read RULES, so the run count, the drift and the seed are
+   assembled at the one place that already reads the home.
+
+   WHAT THE APP DECIDED, AND WHAT IT DID NOT.
+
+   * THE DRIFT IS THE APP'S OWN SEASONAL THESIS, not the risk-neutral 4.5% the
+     two deleted closed forms used. That is ROADMAP P2's house distribution
+     arriving early, in its first half: the seasonality this app scores markets
+     on now enters the probability it prints about them. P2 still owes the other
+     half — REALISED volatility measured from returns instead of the hand-written
+     `SIGMA` table.
+   * THE VOLATILITY IS THE MARKET'S IMPLIED ONE, read off the structure's own
+     legs. The market says how wide the distribution is; the app's thesis says
+     which way it leans. Every price in this app — `analyze()`, `netBS()`, the
+     model sanity check — is already worked out at that implied volatility, so
+     anything else here would price the trade at one number and judge it at
+     another.
+   * THE SEED IS THE POSITION'S. Ticker, expiry, legs and the spot rounded to
+     the cent: the same trade gives the same seed gives the same number, on the
+     Radar, on the Shortlist, on Build, in the Guardian and in the autopilot's
+     brief. An unseeded Monte Carlo would hand each of them a different answer
+     for one object, which is the fault this file exists to prevent, engineered
+     in on purpose.
+   * UNKNOWN IS NOT A NUMBER. No spot, no horizon, no volatility or no seasonal
+     table and the answer is `null`, which every screen prints as a dash.
+     `Number(null)` is 0 and 0 is finite — a missing chance must never arrive as
+     a confident 0%.
+========================================================================= */
+
+/**
+ * The key the Monte Carlo is seeded from. Stable across screens and across the
+ * client/server boundary, and it MOVES when the trade moves: a different strike
+ * or a different expiry is a different trade and gets its own stream.
+ *
+ * The spot is rounded to the cent so that a quote wobbling in the third decimal
+ * between two renders does not re-roll the whole simulation under the reader.
+ */
+export const chanceSeedKey = ({ ticker = "?", expKey = "?", legs = [], spot = 0, dte = 0 } = {}) =>
+  [ticker, expKey, Math.round(dte),
+    (legs || []).map((l) => `${Math.sign(l.side)}${l.type === "call" ? "C" : "P"}${l.strike}x${l.qty}`).join(","),
+    (Math.round(Number(spot) * 100) / 100).toFixed(2)].join("|");
+
+/**
+ * THE CHANCE OF PROFIT, AND EVERYTHING THAT COMES WITH IT.
+ *
+ * @param legs        [{ side, type, strike, qty }]
+ * @param entryNet    what the structure cost per share (negative for a credit)
+ * @param spot        today's price
+ * @param iv          the structure's own implied volatility (chain average)
+ * @param dte         days to expiry
+ * @param monthlyMean twelve seasonal monthly means in percent
+ * @param month       the month the window starts in, 0-11
+ * @param ticker      part of the seed, and what the fallback sentence names
+ * @param expKey      part of the seed
+ * @param thesisIV    an implied volatility the position remembered, if any
+ * @returns the `terminalMC` result plus `{ ivSource, ivNote, seedKey }`, or
+ *          null when there is nothing to simulate.
+ */
+export function chanceOf({ legs, entryNet, spot, iv, dte, monthlyMean, month,
+  ticker = "this market", expKey = null, thesisIV = null } = {}) {
+  if (!Array.isArray(legs) || !legs.length) return null;
+  if (!Number.isFinite(entryNet) || !(spot > 0) || !(dte > 0)) return null;
+  const driftAnnual = seasonalDrift(monthlyMean, month, dte);
+  if (!Number.isFinite(driftAnnual)) return null;
+  const vol = ivProvenance(iv, thesisIV, ticker);
+  const seedKey = chanceSeedKey({ ticker, expKey, legs, spot, dte });
+  const mc = terminalMC(legs, entryNet, spot, {
+    driftAnnual, sigma: vol.iv, dte, runs: RULES.mcRuns, seed: seedFrom(seedKey),
+  });
+  return { ...mc, ivSource: vol.source, ivNote: vol.fromFallback ? vol.note : null, seedKey };
+}
+
+/**
+ * One sentence saying what the chance on screen is an answer about. It names
+ * the drift, because the drift is what changed and what every one of these
+ * numbers now depends on.
+ */
+export const chanceSourceNote = (mc, ticker = "this market") => {
+  if (!mc) return "There is no chance to show: something this calculation needs — a price, a horizon or a seasonal reading — is missing.";
+  return `Out of ${mc.runs.toLocaleString("en-US")} simulated runs, priced at ${pctText(mc.sigma)} implied volatility ` +
+    `and drifting at ${pctText(mc.driftAnnual)} a year — which is ${ticker}'s own seasonal reading over the window ` +
+    `this trade is held for, not a market-neutral assumption.`;
 };
 
 /* ============================== rule text ==============================
@@ -1889,6 +2052,74 @@ export const fallbackSigmaNote = (ticker = "this market", sigma = FALLBACK_SIGMA
     : `THE SIMULATION BELOW IS WALKED AT A FALLBACK VOLATILITY. This app holds no figure for ${ticker}, so ` +
       `it used ${pctText(sigma)} a year — a number chosen as a middle for a commodity ETF, not measured from ` +
       `${ticker}'s own returns. Every figure the simulator produces for it is that assumption's, not the market's.`;
+
+/* --------------------------------------------------------------------
+   AND THE IMPLIED VOLATILITY, WHICH IS A DIFFERENT QUANTITY.
+
+   `sigmaProvenance()` above answers "what realised volatility is the price of
+   the SHARE being walked at". This answers "what implied volatility are the
+   OPTIONS being priced at" — the number `bs()`, `smile()` and `netBS()` take.
+   They were both a bare `0.25` in `autopilot.mjs`, one line apart, and merging
+   them into one constant would mean a future correction to either silently
+   moving the other. See `RULES.fallbackIV`.
+-------------------------------------------------------------------- */
+
+/** The implied volatility used when neither the chain nor the thesis had one. */
+export const FALLBACK_IV = RULES.fallbackIV;
+
+/** What the app calls a volatility the chain gave it. */
+export const CHAIN_IV_SOURCE = "chain";
+
+/** ...one the position's own entry thesis remembered. */
+export const THESIS_IV_SOURCE = "entry thesis";
+
+/** ...and one nobody supplied. */
+export const FALLBACK_IV_SOURCE = "fallback";
+
+/**
+ * WHICH IMPLIED VOLATILITY IS IN FORCE, decided once and carried.
+ *
+ * The caller hands the two candidates in the order it trusts them: what the
+ * chain quoted today, then what the position remembered from the day it was
+ * opened. A number that is neither is the fallback, and it says so.
+ *
+ * @param chainIV   today's average implied volatility across the legs, or null
+ * @param thesisIV  the implied volatility recorded when the position opened
+ * @param ticker    what to name in the sentence when neither was readable
+ */
+export function ivProvenance(chainIV, thesisIV, ticker = "this market") {
+  const ok = (x) => Number.isFinite(x) && x > 0;
+  const iv = ok(chainIV) ? chainIV : ok(thesisIV) ? thesisIV : FALLBACK_IV;
+  const source = ok(chainIV) ? CHAIN_IV_SOURCE : ok(thesisIV) ? THESIS_IV_SOURCE : FALLBACK_IV_SOURCE;
+  return { iv, source, fromFallback: source === FALLBACK_IV_SOURCE, note: fallbackIVNote(ticker, iv, source) };
+}
+
+/** One sentence saying where the implied volatility came from. */
+export const fallbackIVNote = (ticker = "this market", iv = FALLBACK_IV, source = FALLBACK_IV_SOURCE) =>
+  source === CHAIN_IV_SOURCE
+    ? `The options are priced at ${pctText(iv)}, read from today's chain for ${ticker}.`
+    : source === THESIS_IV_SOURCE
+      ? `The options are priced at ${pctText(iv)}, the figure recorded for ${ticker} when this position was opened. ` +
+        `Today's chain did not give one.`
+      : `THE OPTIONS ARE PRICED AT A FALLBACK VOLATILITY. Neither today's chain nor this position's own record ` +
+        `gave one for ${ticker}, so ${pctText(iv)} was used — a number chosen as a middle for a commodity ETF, ` +
+        `never measured. Every figure worked out from it is that assumption's.`;
+
+/* --------------------------------------------------------------------
+   WHEN A POSITION ASKS TO BE LOOKED AT.
+   A colour and a word on a row, one step below "action". See
+   `RULES.watchAttentionShare` for why it is not the stop and not the spread
+   floor, whatever its value happens to equal.
+-------------------------------------------------------------------- */
+
+/**
+ * The P&L at or below which a position is marked "watch", in the same signed
+ * dollars `maxLoss` is in — so a real worst case is NEGATIVE and the level is
+ * negative with it. Null when the maximum loss is not a number, because an
+ * unknown loss has no share to take.
+ */
+export const watchAttentionLevel = (maxLoss) =>
+  (Number.isFinite(maxLoss) ? RULES.watchAttentionShare * maxLoss : null);
 
 /** Why an estimated price is not something to act on, in one sentence. */
 export const modelPriceNote = (feed = "the option chain") =>

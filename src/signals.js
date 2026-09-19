@@ -307,6 +307,11 @@ const WEIGHTS = { seasonal: 0.30, technical: 0.25, weather: 0.25, news: 0.20 };
 // The gate's warning floor, imported rather than written down again: a
 // narrative must only ever quote a threshold the code actually applies.
 const LOW_CONFIDENCE = RULES.lowConfidence;
+// THE BAR THE AUTOPILOT WAITS FOR, READ FROM ITS HOME. It was written out as a
+// bare 70 in the two sentences below — with no home in RULES, and a value that
+// collides with `expensiveIVRank`, which is why this file could not be swept
+// for rule literals at all. Both are fixed by the constant, not by the sweep.
+const AUTOPILOT_CONFIDENCE = RULES.autopilotConfidence;
 const LABEL = { seasonal: "seasonality", technical: "the price trend", weather: "weather", news: "news flow" };
 const REINFORCE = 1.25; // weather and geopolitical news agreeing on the same ticker
 const CONFLICT_DAMPING = 0.6;
@@ -417,20 +422,21 @@ function buildNarrative({ ticker, month, components, agreement, score, confidenc
   }
 
   // 4) What it means for an order, against the thresholds the app actually uses.
-  if (agreement === "CONFLUENT" && confidence >= 70) {
-    s.push(`At ${confidence}/100 this clears the 70-confidence bar the autopilot needs to propose a defined-risk spread in the ${dirWord(up.length ? 1 : -1)} direction`);
+  if (agreement === "CONFLUENT" && confidence >= AUTOPILOT_CONFIDENCE) {
+    s.push(`At ${confidence}/100 this clears the ${AUTOPILOT_CONFIDENCE}-confidence bar the autopilot needs to propose a defined-risk spread in the ${dirWord(up.length ? 1 : -1)} direction`);
   } else if (agreement === "CONFLICT") {
     s.push(`Confidence ${confidence}/100 is under the ${LOW_CONFIDENCE} the risk gate treats as a warning, so nothing here justifies an order today`);
   } else if (nActive === 0) {
     s.push(`With no factor above the noise floor the honest answer is nothing today, not a trade at ${confidence}/100 confidence`);
   } else {
-    // Two different bars, and saying "not a trade" conflates them. 70 is what
+    // Two different bars, and saying "not a trade" conflates them. The
+    // autopilot bar is what
     // the AUTOPILOT needs before it proposes something unprompted (PRD §9); the
     // guided flow's floor is the risk gate's 40. A market at 55 is one you may
     // trade deliberately but not one the app will bring to you on its own — and
     // on a screen that is offering it as a road, "this is not a trade" reads as
     // the app arguing with itself in front of the user.
-    s.push(`At ${confidence}/100 this clears the ${LOW_CONFIDENCE} the risk gate needs but not the 70 the autopilot ` +
+    s.push(`At ${confidence}/100 this clears the ${LOW_CONFIDENCE} the risk gate needs but not the ${AUTOPILOT_CONFIDENCE} the autopilot ` +
       `waits for before proposing anything unprompted, so it is worth taking deliberately rather than on autopilot`);
   }
 
