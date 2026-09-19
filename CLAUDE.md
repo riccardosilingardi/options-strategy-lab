@@ -266,6 +266,98 @@ are what the ticket prints, for the **WHOLE structure and never leg by leg**:
 - **Time in force is stated in words.** A `day` order that expires at the close without a word
   is the same invisible failure as an order that never fills.
 
+## ONE CHANCE, ONE ARITHMETIC — and the Monte Carlo is the one
+
+The app computed "the chance of profit" FOUR ways and the real difference was never the
+algorithm, it was **the drift**: `montecarlo()` in `App.jsx` (8,000 UNSEEDED runs on the
+seasonal means), `probProfit()` in `engine.js` (closed form, risk-neutral 0.045),
+`probProfit()` in `pro.jsx` (a second closed form, same 0.045) and `chanceInProfit()` in
+`visuals.jsx` (band integration, `driftAnnual` defaulting to 0). One position had several
+chances depending on which screen you stood on, and the Build panel's changed every time the
+button was pressed. PRD §4h.
+
+- **`terminalMC()` in `engine.js` is the arithmetic. It has NO DEFAULTS and THROWS without a
+  policy** — `{ driftAnnual, sigma, dte, runs, seed }` — for the same reason `exitSim()` does:
+  `engine.js` imports nothing, `rules.js` imports it, and a default is how a stale number comes
+  back silently in a year.
+- **`chanceOf()` in `rules.js` is the only caller of it.** The run count (`RULES.mcRuns`), the
+  drift (`seasonalDrift()`), the volatility (`ivProvenance()`) and the seed are assembled there,
+  at the one place that already reads the home. **`chanceCheckOf()` in `App.jsx` is the one
+  spelling of `chanceOf` in that file**, the same discipline as `modelCheckOf()`; the Guardian
+  is HANDED the answer. `riskGate.test.js` fails the build on a second spelling, on any
+  `chanceOf` in `pro.jsx`, and on any file running a `terminalMC` of its own.
+- **THE DRIFT IS THE APP'S OWN SEASONAL THESIS. THE VOLATILITY IS THE MARKET'S IMPLIED ONE.**
+  The market says how wide the distribution is; the app says which way it leans. Every price in
+  this app is already worked out at that implied volatility, so anything else would price a trade
+  at one number and judge it at another. The realised `SIGMA` table keeps its own job — it is
+  what the exit simulator walks the PRICE on, a different question. This is ROADMAP P2's house
+  distribution arriving half early; P2 still owes realised volatility.
+- **IT IS SEEDED FROM THE POSITION** (ticker, expiry, rounded DTE, legs, spot to the cent), so
+  the Radar row, the Shortlist row, Build, the Guardian and the brief land on one number by
+  construction. Spot is rounded so a quote wobbling in the third decimal cannot re-roll the
+  simulation under the reader.
+- **ONE RUN COUNT FOR RANKING AND FOR PRINTING, AND THAT IS THE TRAP.** The Shortlist ranks many
+  candidates and prints the chance of each; a cheaper count for ranking would mean the row you
+  compared and the row you opened disagreeing. Measured: 0.54 ms a candidate at 8,000 runs, about
+  43 ms for the widest pool in the app. **Never print a closed-form number as "the chance".**
+- **THE CHART READS THE SAME DRIFT — and fixing that found a second fault.** `chanceInProfit()`
+  had `driftAnnual = 0` and nothing ever passed one; the default is gone and a missing drift is
+  `null`, never a confident number. And `payoffBands()` samples only ±30% of spot, so integrating
+  band by band **threw the tails away**: on BOIL at 85% implied over 45 days a long call read 15%
+  where it is 34%. `bandMass()` extends a band that reaches the edge of the sampling to the tail.
+  `ceiling.test.jsx` holds the chart against the simulation at **2 percentage points** — the
+  worst measured gap is 1.59, and the same structure at 400,000 runs lands within 0.01 of the
+  chart, which is what proves the gap is sampling error. **If it ever fails, the chart is wrong;
+  do not widen the tolerance.**
+- **EV IS THE SIMULATION'S OWN MEAN.** `pop * maxProfit - (1 - pop) * risk` is a two-outcome bet
+  and most of a spread's distribution is between those two outcomes. `evProfile()` and the Build
+  stat (relabelled AVERAGE RESULT) read `mc.ev`. The no-ceiling rule is untouched: an unbounded
+  structure still ranks last with a blank EV.
+- **UNKNOWN IS NOT A NUMBER.** `chanceOf()` returns null without a spot, a horizon, an entry price
+  or a seasonal row, and every screen prints a dash. The one input with a named fallback is the
+  implied volatility, and `ivProvenance()` says on screen that it used one.
+- The Build screen's "THREE PROBABILITIES" panel is **TWO QUESTIONS** now. There were only ever
+  two — where it finishes, and how it ends under the exit rule — and the third entry was an
+  arithmetic that did not agree with itself.
+
+## A BRIEF WRITTEN AT THE WRONG HORIZON IS MARKED BY WHAT IT DOES NOT CARRY
+
+`exitSim()` walked every position to 7 DTE while `RULES.exitDTE` has been 21 since it was changed
+from 7, and four pull requests shipped on top of it. What the Journal keeps is not the brief: it
+is the verdict plus the model's RATIONALE — prose written after reading those numbers — so the
+wrong horizon sits inside the text where no migration can reach it.
+
+**NOT BY DATE**: a deploy date is a second home for a fact the entry can carry itself. New
+autopilot entries carry `simExitDTE` and `simDays`, taken from `sim.exitDTE` and `sim.horizon` —
+the simulator's OWN answers, never `RULES` written out a second time, because a field name
+asserting a rule the arithmetic had not applied is the whole fault. **The ABSENCE of the stamp is
+the marker**, exactly as `contractsAssumed` marks a size that was assumed rather than recorded.
+`simHorizonOf()` / `autopilotHorizonNote()` in `src/journal.js` read it — how a record was
+produced is a fact about the record — and every screen that renders an unstamped entry prints one
+plain sentence: the Guardian's timeline, the Journal's timeline, the weekly report and the model's
+context. `Number(null)` is 0 and 0 is finite, so the stamp must BE a number before it is coerced
+to one; a horizon of 0 is a real reading.
+
+## Three numbers that had no home — and two sweep exclusions that are gone
+
+No value changed: a rename that moves a number is two changes wearing one coat.
+
+- **`RULES.watchAttentionShare`** (0.35) with `watchAttentionLevel()` — the share of the maximum
+  loss at which a position asks to be looked at. It is not the stop and not the spread floor,
+  whatever its value equals. With it homed, **`maxSpreadShareOfMid` is back on the rule-literal
+  sweep list**, where it was the one number deliberately kept off.
+- **`RULES.autopilotConfidence`** (70) — the bar the autopilot waits for before proposing
+  anything unprompted. It is NOT `lowConfidence` (40, the bar under which the gate warns about a
+  trade the USER asked for). With it homed, **`signals.js` is back in the swept file set**.
+- **`RULES.fallbackIV`** (0.25) with `ivProvenance()` — the IMPLIED volatility the options are
+  priced at. **It is the same number as `fallbackSigma` and must never be one constant with it**:
+  that one is the REALISED volatility the simulator walks the share's price on. One is a property
+  of the share, the other of the option market on it, and merging them would make a correction to
+  either silently move the other. Provenance is carried the way `sigmaProvenance()` carries it.
+
+Both collisions were clean on the first sweep — nothing was hiding behind either. All three are
+CHOSEN, not measured, and all three are on the PRD's NOT VERIFIED list.
+
 ## The entry floor is ROOM, not a cliff
 
 `entryRoom()` in `rules.js`, enforced in `riskGate.js` and nowhere else. The quantity that
@@ -589,8 +681,13 @@ while the position is open.
   price at all — the check before the floors), `payoffCeiling()` /
   `profitUnbounded()` / `NO_CEILING` (is there a maximum profit at all),
   `impossibleLoss()` (is the worst case actually a loss),
+  `mcRuns` with `chanceOf()` / `chanceSeedKey()` / `chanceSourceNote()` (THE chance
+  of profit, and the only caller of `terminalMC`), `fallbackIV` with
+  `ivProvenance()`, `watchAttentionShare` with `watchAttentionLevel()`,
+  `autopilotConfidence`,
   `modelDisagreementRatio` with `modelSanity()` (is it THIS structure's price —
-  the only thing in this file that imports `engine.js`, and deliberately so),
+  one of the two reasons this file imports `engine.js`, the other being
+  `chanceOf()`, and deliberately so),
   `openLimitSlippage` with `openLimitPrice()`, and what the ticket prints:
   `comboBook()`, `limitPlacement()`, `notionalControlled()`;
   `entryRoom()` with its override sentences and `passedOverRecord()`,
@@ -624,6 +721,9 @@ while the position is open.
   `appendTimeline()` / `stampTimeline()` (every append goes through one of these, so an entry
   cannot get its number two different ways), `orderStatusRecheck()`, `closeReason()` /
   `closeDecision()`, `journalEntry()` (what a closed trade keeps) and `searchJournal()`.
+  **`simHorizonOf()` / `autopilotHorizonNote()` live here too** — what horizon an
+  autopilot entry's simulation ran to, and the absence of that stamp, are facts
+  about the record.
   **`positionSize()` / `contractsOf()` / `withPositionSize()` / `positionSizeNote()` live
   here too** — how big a position is, and whether that is known, is a fact about its record.
   `riskGate.js` imports them; nothing else may re-derive a size.
@@ -707,7 +807,12 @@ while the position is open.
   leave. It also builds the three didactic positions from today's live prices —
   never from typed-in numbers, and never for a ticker whose price did not load.
 - `src/visuals.jsx` — **the visual language (PRD §6)**. `payoffBands()` is the
-  only place zones are derived, and it reads `payoff()` from `engine.js`; the
+  only place zones are derived, and it reads `payoff()` from `engine.js`;
+  `bandMass()` is the only place a probability is read off those zones and it
+  carries the TAILS — a band that reaches the edge of the sampled range does not
+  end there — and it has NO default drift, because a picture drawn against a
+  market that goes nowhere beside a number drifted on the season is two screens
+  disagreeing about one trade; the
   band thumbnail, the gauge and the unified position component all consume its
   output. Every visual exposes `takeaway()` (one always-visible generated
   sentence) and `explainElement(el)` (on tap). Never compute a zone anywhere
@@ -719,9 +824,12 @@ while the position is open.
   filled accent — never write `#14181d` into a component. Every light accent
   clears 4.5:1 on white and on the page, and `src/theme.test.js` fails the build
   if a tweak breaks that.
-- `src/engine.js` — shared math (Black-Scholes, payoff, probabilities,
-  seasonal tables). Plain JS, no React imports. **Both the client and the
-  Netlify functions import from here.** Never duplicate this math.
+- `src/engine.js` — shared math (Black-Scholes, payoff, the exit simulator, the
+  seeded terminal Monte Carlo, seasonal tables). Plain JS, no React imports.
+  **Both the client and the Netlify functions import from here.** Never duplicate
+  this math. `terminalMC()`, `seasonalDrift()`, `seedFrom()` and `rng()` live here
+  and take their policy from the caller with NO DEFAULTS — this file imports
+  nothing and `rules.js` imports it, so it may never read `RULES`.
 - `src/chain.js` — **where the option chain comes from**, and **the only place
   that decides what to call the feed**. One internal shape
   (`{ spot, byExp, expirations, updated, source }`, each contract
@@ -1170,11 +1278,24 @@ rejects anything it cannot confirm.
 - `settings.notifyWhenReady` must be included in the `/api/state` sync payload:
   the autopilot is the only thing running while the app is closed, so a flag
   that never reaches the server makes "Notify me" a promise nobody keeps
-- `pro.jsx` keeps its own `probProfit(curve, S, sigma, dte)` and `exitPathSim(...)`
-  with signatures different from the ones in `engine.js`. This is intentional and
-  must not be merged: the UI depends on the extra fields these versions return
-  (`pTimeNeg`, `pWin`, `horizon`), and `probProfit` there works on an already
-  built payoff `curve` rather than on `legs`
+- **`probProfit` IS GONE FROM BOTH FILES, AND THE NOTE THAT SAID OTHERWISE WAS OUT
+  OF DATE.** This file used to say `pro.jsx`'s own `probProfit(curve, S, sigma,
+  dte)` was a deliberate duplication that must not be merged with `engine.js`'s,
+  because the two had different signatures and this one worked on an already-built
+  payoff `curve` rather than on `legs`. That was true about their SHAPE and it was
+  never a defence of their ANSWER — both integrated the expiry payoff against a
+  lognormal at a RISK-NEUTRAL drift of 0.045, while the Build screen's Monte Carlo
+  drifted on the app's seasonal thesis and `chanceInProfit()` drifted on nothing.
+  Four arithmetics, one question, four numbers on four screens. **Decided: the
+  Monte Carlo is the single truth and both closed forms are deleted** — a faster
+  approximation kept beside the truth is a second number waiting for a screen to
+  reach for it, which is how there came to be four. `riskGate.test.js` fails the
+  build if `probProfit` reappears anywhere
+- **`exitPathSim(...)` in `pro.jsx` KEEPS its own body and its own signature**, and
+  that half of the old note still stands: it answers a different question — what
+  happens along the path under the exit rule, not where the price finishes — and
+  the UI depends on the extra fields it returns (`pTimeNeg`, `pWin`, `horizon`).
+  It reads `RULES.exitDTE` for its numbers; only the body is its own
 
 ## The basket
 

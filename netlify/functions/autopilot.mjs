@@ -1,9 +1,10 @@
 // AUTOPILOT — Netlify Scheduled Function (giorni feriali 11:00 UTC ≈ 13:00 CET, pre-apertura USA)
 // Ciclo: posizioni → dati oggettivi (chain CBOE, stagionalità) → TIS + Exit Simulator → brief Claude → approve link → webhook
 import { getStore } from "@netlify/blobs";
-import { netBS, probProfit, exitSim, SEASONAL, SIGMA } from "../../src/engine.js";
+import { netBS, exitSim, SEASONAL, SIGMA } from "../../src/engine.js";
 import { RULES, ruleBadge, copilotRulesBlock, pctText,
-  markProvenance, sigmaProvenance, autopilotVerdict, AUTOPILOT_VERDICTS, MODEL_PRICE } from "../../src/rules.js";
+  markProvenance, sigmaProvenance, ivProvenance, chanceOf, chanceSourceNote,
+  autopilotVerdict, AUTOPILOT_VERDICTS, MODEL_PRICE } from "../../src/rules.js";
 import { evaluateTrade } from "../../src/riskGate.js";
 // HOW MANY COMBINATIONS THE POSITION IS. A close proposed at one lot on a
 // seven-lot position leaves six open and calls it an exit — and the gate would
@@ -69,7 +70,12 @@ function computeTIS(pos, cur) {
   pts += th.pop && cur.pop ? Math.round(Math.max(0, Math.min(1.2, cur.pop / th.pop)) / 1.2 * 40) : 20;
   const same = th.seasonal == null || Math.sign(th.seasonal) === Math.sign(cur.seasonalNow);
   pts += same ? 16 : 4;
-  const fav = (Math.sign(th.vega ?? 1) || 1) * ((cur.ivNow ?? th.iv ?? 0.25) - (th.iv ?? 0.25));
+  // THE SAME FALLBACK, FROM THE SAME HOME. Both sides of this difference used
+  // to spell a bare 0.25; when neither the chain nor the thesis has an implied
+  // volatility the two are the same number and the difference is zero, which is
+  // the honest answer — nothing is known about whether volatility moved.
+  const ivRef = ivProvenance(th.iv ?? null, null, pos.ticker).iv;
+  const fav = (Math.sign(th.vega ?? 1) || 1) * (ivProvenance(cur.ivNow ?? null, th.iv ?? null, pos.ticker).iv - ivRef);
   pts += fav > 0.01 ? 20 : fav < -0.02 ? 2 : 10;
   pts += cur.dteLeft > RULES.exitDTE * 2 ? 20 : cur.dteLeft > RULES.exitDTE ? 10 : 0;
   return pts;
@@ -107,7 +113,14 @@ export default async () => {
     const data = await fetchChain(pos.ticker);
     const m = markFromChain(data, pos);
     const spot = m?.spot ?? pos.entrySpot;
-    const iv = m?.iv ?? pos.thesis?.iv ?? 0.25;
+    // WHICH IMPLIED VOLATILITY EVERY PRICE BELOW IS WORKED OUT AT, DECIDED ONCE
+    // AND CARRIED — the `markProvenance()` discipline applied to the second
+    // number in this loop that had no home. It was a bare `?? 0.25`, and it is
+    // a DIFFERENT quantity from `RULES.fallbackSigma` one line down: that one
+    // is the realised volatility the simulator walks the SHARE on, this is the
+    // implied volatility the OPTIONS are priced at.
+    const ivUsed = ivProvenance(m?.iv ?? null, pos.thesis?.iv ?? null, pos.ticker);
+    const iv = ivUsed.iv;
     // WHERE THE PRICE CAME FROM, DECIDED ONCE AND CARRIED EVERYWHERE. `m.net` is
     // null unless every leg was quoted on both sides; the fallback is the app's
     // own volatility model, and the brief used to go on calling it the feed's
@@ -115,8 +128,23 @@ export default async () => {
     const prov = markProvenance(m?.net ?? null, CHAIN_FEED);
     const markNet = m?.net ?? netBS(pos.legs, spot, dteLeft, iv);
     const pnl = (markNet - pos.entryNet) * 100;
-    const pop = probProfit(pos.legs, pos.entryNet, spot, iv, Math.max(1, dteLeft));
     const seasonalNow = (SEASONAL[pos.ticker] || SEASONAL.SPY)[month];
+    // THE ONE CHANCE, AND THE BRIEF READS THE SAME ENGINE THE SCREENS DO.
+    // This was `probProfit()` in engine.js: a closed form at a RISK-NEUTRAL
+    // drift of 0.045, while the Build screen drifted its own Monte Carlo on
+    // exactly the seasonal table imported three lines above. The brief and the
+    // app disagreed about one position by construction — and the TIS below
+    // divides today's figure by `thesis.pop`, which the app recorded, so the
+    // score was measuring the gap between two formulas as much as two days.
+    const chance = chanceOf({
+      legs: pos.legs, entryNet: pos.entryNet, spot, iv, dte: Math.max(1, dteLeft),
+      monthlyMean: SEASONAL[pos.ticker] || SEASONAL.SPY, month,
+      ticker: pos.ticker, expKey: pos.expKey || null, thesisIV: pos.thesis?.iv ?? null,
+    });
+    // UNKNOWN IS NOT A NUMBER. `chanceOf` returns null when it has no spot, no
+    // horizon or no seasonal row, and `+(null * 100).toFixed(0)` is 0 — a
+    // confident zero per cent built out of a missing reading.
+    const pop = chance ? chance.pop : null;
     const tis = computeTIS(pos, { pop, ivNow: iv, seasonalNow, dteLeft });
     // WHICH VOLATILITY THE SIMULATOR WALKS ON, DECIDED ONCE AND CARRIED. This
     // was `SIGMA[pos.ticker] || 0.25`: a hand-written table with an unlabelled
@@ -148,7 +176,13 @@ export default async () => {
           // "model" WHENEVER THE NUMBER CAME FROM `netBS`, not merely when the
           // chain failed to load: a chain that loaded and was missing one leg
           // produced a modelled net and was reported as market data.
-          today: { chainSource: prov.source, priceIsEstimated: prov.modelled, spot: +spot.toFixed(2), pnl: +pnl.toFixed(0), pct_max_profit: +pctMax.toFixed(0), popNow: +(pop * 100).toFixed(0), ivNow: +(iv * 100).toFixed(0), tis, seasonalThisMonth: seasonalNow },
+          today: { chainSource: prov.source, priceIsEstimated: prov.modelled, spot: +spot.toFixed(2), pnl: +pnl.toFixed(0), pct_max_profit: +pctMax.toFixed(0), popNow: pop == null ? null : +(pop * 100).toFixed(0), ivNow: +(iv * 100).toFixed(0), ivSource: ivUsed.source, tis, seasonalThisMonth: seasonalNow,
+            // WHAT `popNow` IS AN ANSWER ABOUT. It used to be a closed form at
+            // a risk-neutral drift and the field said nothing about that; the
+            // model was free to describe it as the market's own odds. It is a
+            // simulation at THIS MARKET'S seasonal drift, which is a claim the
+            // app is making rather than one the market is.
+            popNow_from: chance ? { runs: chance.runs, drift_pct_per_year: +(chance.driftAnnual * 100).toFixed(1), volatility_pct: +(chance.sigma * 100).toFixed(0), drift_source: "this market's own seasonal means over the window held" } : null },
           // THE HORIZON IS STATED BESIDE THE NUMBERS COMPUTED AT IT. The field
           // name `p_exit_at_exit_dte_positive` asserted a rule the arithmetic
           // did not apply; `simulated_to_dte` is the simulator's own answer to
@@ -264,7 +298,11 @@ export default async () => {
       : null;
     if (workingClose) ruleWarnings.push(workingClose);
 
-    const brief = { t: Date.now(), verdict, rationale, evidence, invalidation, pnl: +pnl.toFixed(0), pctMax: +pctMax.toFixed(0), tis, pop: +(pop * 100).toFixed(0), dteLeft, sim, approveUrl,
+    const brief = { t: Date.now(), verdict, rationale, evidence, invalidation, pnl: +pnl.toFixed(0), pctMax: +pctMax.toFixed(0), tis, pop: pop == null ? null : +(pop * 100).toFixed(0), dteLeft, sim, approveUrl,
+      // WHAT THE CHANCE ABOVE IS AN ANSWER ABOUT: how many runs, at what
+      // implied volatility, and — the half that changed — at whose drift.
+      chanceNote: chanceSourceNote(chance, pos.ticker),
+      chanceRuns: chance ? chance.runs : null, chanceDrift: chance ? chance.driftAnnual : null,
       priceSource: prov.source, priceIsEstimated: prov.modelled,
       // WHICH VOLATILITY THE SIMULATION ABOVE IS AN ANSWER ABOUT.
       simSigma: vol.sigma, simSigmaSource: vol.source, simSigmaFromTable: vol.fromTable,
@@ -274,6 +312,14 @@ export default async () => {
       gateWarnings: (gateResult?.warnings || []).map((w) => w.message), gateBlocked: !!(gateResult && !gateResult.pass) };
     briefsPrev[pos.id] = { tis, dteLeft, t: brief.t };
     const tl = appendTimeline(pos, { t: brief.t, type: "autopilot",
+      // THE HORIZON THE SIMULATION BEHIND THIS ENTRY ACTUALLY RAN TO, ON THE
+      // ENTRY ITSELF. The rationale below is prose the model wrote after
+      // reading `simulator_from_today`, so the horizon is buried inside it and
+      // unreachable. Entries written before the simulator was corrected carry
+      // no stamp at all, and that ABSENCE is what every screen reads to say so
+      // (`simHorizonOf` / `autopilotHorizonNote` in src/journal.js) — the same
+      // pattern `contractsAssumed` uses for a size nobody recorded.
+      simExitDTE: sim.exitDTE, simDays: sim.horizon,
       text: `AUTOPILOT ${verdict} (${brief.pctMax}% maxP, TIS ${tis}${prov.modelled ? `, price ${MODEL_PRICE}` : ""}) — ${rationale}` +
         `${ruleWarnings.length ? ` · ${ruleWarnings.join(" ")}` : ""}${approveUrl ? " · [approve: " + approveUrl + "]" : ""}` });
     pos.timeline = tl.timeline; pos.seqNext = tl.seqNext;
@@ -296,7 +342,7 @@ export default async () => {
         ? `\n\n> **These figures are ESTIMATES.** The price came from the ${b.priceSource}, not from the market: ` +
           `at least one leg had no two-sided quote. Nothing can be approved on it.\n`
         : "";
-      return `## ${o.pos} → **${b.verdict}** (TIS ${b.tis}/100)${est}\n${b.rationale}\n${(b.evidence || []).map((e) => `- ${e}`).join("\n")}\n${b.invalidation ? `_Invalidated if: ${b.invalidation}_\n` : ""}P&L ${b.pnl}$ (${b.pctMax}% maxP) · PoP ${b.pop}% · ${b.dteLeft} DTE · price from ${b.priceSource} · Sim to ${b.sim.exitDTE} DTE at ${pctText(b.simSigma)} vol (${b.simSigmaSource}): take profit ${(b.sim.pTP * 100).toFixed(0)}% / stop ${(b.sim.pSL * 100).toFixed(0)}%${(b.ruleWarnings || []).map((w) => `\n⚠ ${w}`).join("")}${(b.gateWarnings || []).map((w) => `\n⚠ ${w}`).join("")}${b.approveUrl ? `\n\n**→ APPROVE (valid 24h): ${b.approveUrl}**` : ""}`;
+      return `## ${o.pos} → **${b.verdict}** (TIS ${b.tis}/100)${est}\n${b.rationale}\n${(b.evidence || []).map((e) => `- ${e}`).join("\n")}\n${b.invalidation ? `_Invalidated if: ${b.invalidation}_\n` : ""}P&L ${b.pnl}$ (${b.pctMax}% maxP) · PoP ${b.pop == null ? "n/a" : `${b.pop}%`} (${b.chanceNote}) · ${b.dteLeft} DTE · price from ${b.priceSource} · Sim to ${b.sim.exitDTE} DTE at ${pctText(b.simSigma)} vol (${b.simSigmaSource}): take profit ${(b.sim.pTP * 100).toFixed(0)}% / stop ${(b.sim.pSL * 100).toFixed(0)}%${(b.ruleWarnings || []).map((w) => `\n⚠ ${w}`).join("")}${(b.gateWarnings || []).map((w) => `\n⚠ ${w}`).join("")}${b.approveUrl ? `\n\n**→ APPROVE (valid 24h): ${b.approveUrl}**` : ""}`;
     }).join("\n\n---\n\n");
     const rejectedMd = rejected.length
       ? rejected.map((r) => `## ${r.pos} → ${r.verdict} **REJECTED**\n${r.reasons.map((x) => `- ${x}`).join("\n")}`).join("\n\n")

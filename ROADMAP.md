@@ -55,7 +55,7 @@ WHAT P1 INHERITED FROM THIS WORK — and what it did with it:
     the Build screen's default horizon, the wide search's default and its
     fallback. `riskGate.test.js` now refuses the SHAPES a copy takes here.
 
-## P1 — Coherence: one number, one source  (PART DONE — the quantity half is shipped)
+## P1 — Coherence: one number, one source  (DONE — both halves are shipped)
 
 **NEVER CITE A LINE NUMBER IN THIS FILE.** The version of this section that
 shipped with P0 sent the next session to App.jsx 1504, 1865, 2345 and 1658, and
@@ -85,20 +85,58 @@ SHIPPED (PR "the position that did not remember its size"):
   - **`riskGate.js` no longer spells `Math.max(1, Number(p?.contracts) || 1)`
     three times.**
 
-STILL OPEN IN P1:
-  - One `probProfit`. `pro.jsx` keeps its own with a different signature
-    (`pTimeNeg`, `pWin`, `horizon`) — CLAUDE.md says this is deliberate and must
-    not be merged, so what P1 owes is a decision written down, not a deletion.
-  - One EV formula: `pop * maxProfit * n` and the PROFIT × CHANCE stat are still
-    on the Build screen beside `evProfile()`.
-  - `mc.pop`, `r.pop` and `chanceInProfit` are still three different
-    calculations of "the chance" (PRD's NOT VERIFIED list calls this the obvious
-    next debt). The ROUNDING is unified; the arithmetic is not.
-DONE WHEN: a test proves Radar, Shortlist, Build, Guardian and the autopilot
-print the same number for the same position. ~~and a proposal that passes the
-gate on screen passes it again in the ticket at the quantity shown~~ — that half
-is done and tested (`SIZE — a proposal that passes the gate passes it again at
-the quantity shown`, `src/riskGate.test.js`).
+SHIPPED (PR #25, "one chance, one arithmetic") — THE OTHER HALF, AND P1 CLOSES:
+  - **The Monte Carlo is the single truth.** `terminalMC()` in `engine.js` is the
+    one arithmetic, `chanceOf()` in `rules.js` the one policy around it, and
+    `chanceCheckOf()` the one spelling of it in App.jsx. The FOUR calculations of
+    "the chance" are one, and the real difference between them was never the
+    algorithm — it was the drift: seasonal, risk-neutral 0.045, risk-neutral
+    0.045 again, and zero.
+  - ~~One `probProfit`.~~ **DECIDED AND DELETED.** Both closed forms are gone.
+    CLAUDE.md's note said the duplication was deliberate because the two had
+    different SIGNATURES; that was true and was never a defence of the ANSWER.
+    `exitPathSim` in `pro.jsx` keeps its own body and its own note — it answers a
+    different question and the UI depends on its extra fields.
+  - ~~One EV formula.~~ **DONE.** `evProfile()` and the Build stat read the
+    simulation's own mean. `pop * maxProfit` is a two-outcome bet and most of a
+    spread's distribution is between those two outcomes.
+  - **It is SEEDED**, from the position itself, so the same trade gives the same
+    number on every screen by construction rather than by coincidence.
+  - **The chart reads the same drift, and fixing it found a second fault**:
+    `chanceInProfit()` integrated the profit bands without their TAILS, and
+    `payoffBands()` only samples ±30% of spot — on BOIL that is one standard
+    deviation, so a long call's chance read 15% where it is 34%.
+  - **The server reads the same engine.** `autopilot.mjs` imported `SEASONAL`
+    from `engine.js` three lines above computing its `pop` at a risk-neutral
+    drift.
+  - **The seasonal thesis now enters the app's own probability, which is HALF OF
+    P2 ARRIVING EARLY.** P2's house distribution is "seasonality + the four
+    factors + REALISED volatility"; the drift half is here. The volatility half
+    is not: the chance is worked out at the chain's IMPLIED volatility, which is
+    a decision (the market sets the width, the app's thesis the lean) and not a
+    measurement.
+  - PRD §4h carries the before/after table across all five markets. Every
+    directional structure moves the way its market's season points and the
+    condors barely move, which is the check that the drift is what moved.
+DONE WHEN: ~~a test proves Radar, Shortlist, Build, Guardian and the autopilot
+print the same number for the same position~~ — done and tested (`P1 DONE WHEN —
+five screens, one position, ONE number`, `src/ceiling.test.jsx`, against the real
+generation sites). ~~and a proposal that passes the gate on screen passes it
+again in the ticket at the quantity shown~~ — done in PR #23 (`SIZE — a proposal
+that passes the gate passes it again at the quantity shown`, `src/riskGate.test.js`).
+
+WHAT P1 HANDS FORWARD:
+  - **Nobody has seen any of the new numbers on a phone.** Every probability in
+    the app moved, and the run count (8,000) was timed on the development machine
+    at 0.54 ms a candidate — about 43 ms for the widest pool. A phone is several
+    times slower and is the machine this app is demoed on.
+  - **The drift is only as good as `SEASONAL`**, which has the WRONG SIGN on
+    eight months of twelve for CORN against real data. That table now drives the
+    probability as well as the score. Fixing it is P2.
+  - **`probProfit` is deleted and the closed form was about four times cheaper.**
+    If the phone reading says the Monte Carlo is too slow for ranking, the
+    decision to run one count for both is the one to revisit. The rule that
+    survives either way: no screen prints a closed-form number as "the chance".
 
 ## P1-bis — PR #24: a rule number can hide in an expression  (DONE, and it found one)
 
@@ -150,14 +188,39 @@ WHAT THE NEXT SESSION INHERITS:
     #24 said 561, and a clean `main` measures 594. This session took 594 as ground truth and
     reports 606. A count nobody can re-derive is worth as little as a rule number with two homes.
 
+## P1-ter — PR #25: the two debts PR #24 handed forward  (DONE)
+
+  - **THE BRIEFS WRITTEN AT THE WRONG HORIZON ARE MARKED, AND NOT BY DATE.** New
+    autopilot timeline entries carry `simExitDTE` and `simDays` — the simulator's
+    own answers, never RULES written out a second time. The ABSENCE of that stamp
+    is what identifies an entry written before the fix, the same pattern
+    `contractsAssumed` uses for a size nobody recorded, and every screen that
+    renders one says so in a single sentence. PRD §4i.
+  - **THE THREE UN-HOMED NUMBERS HAVE HOMES, AND NOT ONE CHANGED VALUE.**
+    `watchAttentionShare` (0.35), `autopilotConfidence` (70) and `fallbackIV`
+    (0.25). `maxSpreadShareOfMid` is back on the rule-literal sweep list and
+    `signals.js` is back in the swept file set — both clean on the first run, so
+    nothing was hiding behind either collision. `fallbackIV` is deliberately a
+    SECOND constant beside `fallbackSigma`: one is realised, one implied, and
+    merging them would make a correction to either silently move the other.
+
 ## P2 — Proposals ranked by edge, not by score
 At market prices every structure has expected value near zero: high
 probability and large payoff are two ends of one lever. So the app must
 compute a distribution of its own and propose only where that distribution
 disagrees with the market's.
   - a house distribution per underlying: seasonality + the four factors +
-    REALISED volatility (today probProfit uses a risk-neutral drift, so the
-    app's whole thesis never enters its own probability);
+    REALISED volatility. ~~(today probProfit uses a risk-neutral drift, so the
+    app's whole thesis never enters its own probability)~~ **THE SEASONAL HALF
+    ARRIVED EARLY, IN P1.** Every probability the app prints is now a seeded
+    Monte Carlo drifted on `seasonalDrift()` — the app's own thesis is inside
+    its own probability. What P2 still owes here is the volatility: the chance
+    is worked out at the chain's IMPLIED volatility, and the exit simulator
+    walks on a hand-written `SIGMA` table with a labelled fallback behind it.
+    Neither is measured from returns. And the drift is only as good as
+    `SEASONAL`, which has the wrong sign on eight months of twelve for CORN —
+    that table now drives the probability as well as the score, which raises the
+    price of leaving it hand-written;
   - rank by edge = EV under the house minus EV under the market, net of
     spread and commissions. Below transaction cost, nothing is proposed —
     that will be the common case and it is correct;

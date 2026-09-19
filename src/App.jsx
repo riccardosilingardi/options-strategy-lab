@@ -8,7 +8,7 @@ import {
   FlaskConical, Briefcase, Plus, Plug, Send, ExternalLink, MessageSquare, FileText, Bell,
   SlidersHorizontal, ArrowLeft, Sun, Moon, AlertTriangle, WifiOff,
 } from "lucide-react";
-import { fetchAllNews, fetchWeather, ImpactTags, CopilotTab, ReportTab, OrderTicket, AlpacaDesk, scaleStrategy, probProfit, buildContext, GuardianPanel, ChainMatrix, OptionPanel, UnifiedView, taSignals, confluence, WhyThisTrade, Markdown, alpacaReq } from "./pro.jsx";
+import { fetchAllNews, fetchWeather, ImpactTags, CopilotTab, ReportTab, OrderTicket, AlpacaDesk, scaleStrategy, buildContext, GuardianPanel, ChainMatrix, OptionPanel, UnifiedView, taSignals, confluence, WhyThisTrade, Markdown, alpacaReq } from "./pro.jsx";
 import { BandThumbnail, payoffBands, bandTakeaway, GaugeFigure, Gauge, CompareFigure, exitPlanSentence,
   OpenInterestStrip, oiStripTakeaway, oiCutAt, oiGhostCut, explainOiStrip, useWidth } from "./visuals.jsx";
 import { fuseSignals, sentimentDirection, withSignalRank, compareCandidates, againstSignal, DRIVER_PRESETS, rankByDrivers, verdictNarrative } from "./signals.js";
@@ -25,7 +25,8 @@ import { RULES, sizing, ruleBadge, takeProfitLabel, stopLossLabel, perTradeCapLa
   passedOverRecord, passedOverSummary,
   expiryChoice, expiryChoiceNote, emptyExpiryNote, wideSpreadNote, spreadSkippedNote,
   chancePct, chanceText, chanceInTen, signedMoney,
-  ruleExitOf, stopWarningSentence } from "./rules.js";
+  ruleExitOf, stopWarningSentence, watchAttentionLevel,
+  chanceOf, chanceSourceNote } from "./rules.js";
 import { isStale, freshnessNote, staleAmong } from "./freshness.js";
 import { evaluateTrade, gateSummary } from "./riskGate.js";
 import { DEMO, DEMO_BANNER, DEMO_TOOLTIP, DEMO_SEED_TICKERS, demoPositions } from "./demo.js";
@@ -35,6 +36,7 @@ import { orderBody, orderOutcome, alpacaErrorText, reduceRatios } from "./order.
 // THE PERMANENT RECORD: the ref a position is given at open, the sequence on
 // every timeline entry, the close reason, and what survives into the Journal.
 import { nextRef, refCounter, appendTimeline, stampTimeline, orderStatusRecheck, closeDecision,
+  autopilotHorizonNote,
   positionSize, positionSizeNote, contractsOf, withPositionSize,
   journalEntry, searchJournal, CLOSE_REASON_MIN, refNumber } from "./journal.js";
 import { FIRST_STEP, stepCarry, candidateOf, candidateKey, legsLine, toggleCompare, inCompare, MAX_COMPARE, savedFromCandidate, candidateFromSaved, savedAge } from "./path.js";
@@ -309,6 +311,39 @@ const quotesOf = (a) => (a?.legPx || []).map((l) => ({ bid: l.bid, ask: l.ask })
 export const modelCheckOf = (a, { legs, spot, dte, iv }) => modelSanity({
   legs, net: a?.entry, marks: (a?.legPx || []).map((l) => l.px), spot, dte, iv,
 });
+
+/**
+ * THE STRUCTURE'S OWN IMPLIED VOLATILITY — the average of what the chain quoted
+ * for its legs, or null when `analyze()` produced no legs to average. It is the
+ * number `analyze()` already priced the trade at, so the chance below is worked
+ * out at the same volatility the P&L on screen is.
+ */
+export const structureIV = (a) => {
+  const px = a?.legPx || [];
+  if (!px.length) return null;
+  const ivs = px.map((l) => l.iv).filter((x) => Number.isFinite(x) && x > 0);
+  return ivs.length ? ivs.reduce((x, y) => x + y, 0) / ivs.length : null;
+};
+
+/**
+ * ONE CHANCE, ONE ARITHMETIC — `chanceOf()` IS SPELLED ONCE IN THIS FILE, HERE.
+ *
+ * The same discipline as `modelCheckOf()` above, for the same reason. Before
+ * this, App.jsx asked "what is the chance of profit" in three different places
+ * with `probProfit()` (a closed form at a risk-neutral drift) and in a fourth
+ * with its own unseeded `montecarlo()`, and pro.jsx had a fifth. The Radar row,
+ * the Shortlist row, the Build panel, the Guardian and the autopilot's brief
+ * therefore printed different numbers about one trade.
+ *
+ * `riskGate.test.js` fails the build if this file spells `chanceOf` more than
+ * once, exactly as it does for `modelSanity`.
+ */
+export const chanceCheckOf = (a, { ticker, legs, spot, dte, expKey = null, monthlyMean, thesisIV = null }) =>
+  chanceOf({
+    legs, entryNet: a?.entry, spot, dte, expKey, ticker, monthlyMean,
+    month: NOW_MONTH, iv: structureIV(a), thesisIV,
+  });
+
 function netValue(legs, S, dte, baseIV, q) {
   return legs.reduce((a, l) => a + Math.sign(l.side) * l.qty * priceLeg(l, S, dte, baseIV, q).px, 0);
 }
@@ -450,31 +485,21 @@ export function shortlistWithFloors(sent, S, step, strikes, dte, baseIV, q, { pe
   return { rows, cut, oiSkipped, tally: { ...tally, kept: rows.length } };
 }
 
-/* ============================== MONTE CARLO + BACKTEST STORICO ============================== */
-function montecarlo(legs, S, dte, entry, sigma, monthlyMean, nSim = 8000) {
-  const Tyr = dte / 365;
-  const span = Math.max(1, Math.round(dte / 30));
-  let mu = 0;
-  for (let i = 0; i < span; i++) mu += monthlyMean[(NOW_MONTH + i) % 12] / 100;
-  mu = (mu / span) * 12;
-  const pnls = new Float64Array(nSim);
-  let wins = 0, sum = 0;
-  for (let i = 0; i < nSim; i++) {
-    let u = 0, v = 0;
-    while (u === 0) u = Math.random();
-    while (v === 0) v = Math.random();
-    const z = Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
-    const ST = S * Math.exp((mu - 0.5 * sigma * sigma) * Tyr + sigma * Math.sqrt(Tyr) * z);
-    const pnl = (payoffExp(legs, ST) - entry) * 100;
-    pnls[i] = pnl; sum += pnl; if (pnl > 0) wins++;
-  }
-  const sorted = Array.from(pnls).sort((a, b) => a - b);
-  const qq = (p) => sorted[Math.floor(p * (nSim - 1))];
-  const lo = qq(0.01), hi = qq(0.99), B = 30;
-  const bins = Array.from({ length: B }, (_, i) => ({ x: +(lo + ((i + 0.5) / B) * (hi - lo)).toFixed(0), n: 0 }));
-  for (const p of pnls) { const idx = Math.min(B - 1, Math.max(0, Math.floor(((p - lo) / (hi - lo)) * B))); bins[idx].n++; }
-  return { pop: wins / nSim, ev: sum / nSim, p5: qq(0.05), p50: qq(0.5), p95: qq(0.95), bins, muAnn: mu };
-}
+/* ============================== THE ONE CHANCE + BACKTEST STORICO ==============================
+
+   `montecarlo(legs, S, dte, entry, sigma, monthlyMean, nSim = 8000)` USED TO
+   LIVE HERE. It was 8,000 UNSEEDED runs — `Math.random` — drifting on the
+   seasonal monthly means, and it fed exactly one panel on the Build screen
+   while every other screen in this app printed "the chance" from a closed form
+   with a different drift. Two faults in one function: a fourth arithmetic for
+   one question, and an answer that changed every time the button was pressed.
+
+   Both are gone. `terminalMC()` in engine.js is the arithmetic, `chanceOf()` in
+   rules.js is the policy around it, and `chanceFor()` below is the ONE place
+   this file spells it. The seed comes from the position, so the number on this
+   panel is the number on the Shortlist row, the Radar row, the Guardian and the
+   autopilot's brief — by construction rather than by coincidence.
+============================================================================== */
 // Backtest su rendimenti storici reali: applica il payoff alla finestra stagionale di ogni anno passato
 function histBacktest(legs, S, dte, entry, matrix) {
   if (!matrix || !matrix.length) return null;
@@ -973,7 +998,6 @@ export default function OptionsStrategyLab() {
   const limits = useMemo(() => sizing(capitalAnswers), [capitalAnswers]);
   const [busy, setBusy] = useState(null);
   const [msg, setMsg] = useState(null);
-  const [mc, setMc] = useState(null);
   const [bt, setBt] = useState(null);
   const [alpaca, setAlpaca] = useState(null);    // account info
   const [confirmSend, setConfirmSend] = useState(false);
@@ -1395,7 +1419,7 @@ export default function OptionsStrategyLab() {
     return () => clearInterval(id);
   }, [autoMon, store.positions, refreshChain]);
 
-  const switchTicker = (tk) => { setTicker(tk); setExpKey(null); setLegs([]); setMc(null); setBt(null); setAgainst({ reason: "" }); if (!chains[tk]) refreshChain(tk); };
+  const switchTicker = (tk) => { setTicker(tk); setExpKey(null); setLegs([]); setBt(null); setAgainst({ reason: "" }); if (!chains[tk]) refreshChain(tk); };
 
   /* ---- news ----
      PRD §7: le news devono caricarsi all'AVVIO per il ticker corrente, non
@@ -1478,6 +1502,26 @@ export default function OptionsStrategyLab() {
   const modelCheck = useMemo(
     () => (A ? modelCheckOf(A, { legs, spot, dte, iv }) : null),
     [A, legs, spot, dte, iv]);
+  /* THE SEASONAL MEANS A CHANCE IS DRIFTED ON, for any market, from the one
+     place they live: the loaded Alpha Vantage series when there is one, the
+     hand table behind it when there is not. Every call to `chanceFor` below
+     goes through this, so no screen can drift a probability on a different
+     table from the one the Radar scores that market with. */
+  const meansFor = useCallback(
+    (tk) => (seasonal[tk]?.monthlyMean) || getU(tk).monthlyMean,
+    [seasonal]);
+  /* THE ONE CHANCE, BOUND TO THIS COMPONENT'S SEASONAL STATE. `chanceCheckOf`
+     is the module-level expression; this supplies the only argument a screen
+     cannot know on its own. */
+  const chanceFor = useCallback(
+    (a, opts) => chanceCheckOf(a, { ...opts, monthlyMean: meansFor(opts.ticker) }),
+    [meansFor]);
+  /* AND THE BUILD SCREEN'S OWN, COMPUTED ONCE. The CHANCE stat, the PROFIT x
+     CHANCE stat, the simulation panel and the position record all read this
+     object — they used to read three different calculations. */
+  const chance = useMemo(
+    () => (A && spot && legs.length ? chanceFor(A, { ticker, legs, spot, dte, expKey }) : null),
+    [A, chanceFor, ticker, legs, spot, dte, expKey]);
   // The Shortlist, already past the quality floors. Computed here rather than
   // inside the render so the filtered-out list and the rows come from one call.
   // Every known open-interest count on the expiry being shown: the peer set the
@@ -1530,7 +1574,7 @@ export default function OptionsStrategyLab() {
   const openOnBuild = ({ ticker: tk, expKey: ek = null, legs: lg, name, ref = null, contracts: n = 1 }) => {
     const h = buildHandOff({ ticker: tk, expKey: ek, legs: lg, name, chains });
     setTicker(h.ticker); setExpKey(h.expKey); setLegs(h.legs); setStratName(h.name);
-    setMc(null); setBt(null);
+    setBt(null);
     // A HAND-OFF IS A DIFFERENT TRADE, SO IT IS NOT THE PREVIOUS ONE'S SIZE.
     // The ticket's quantity now drives the gate and the position record, and a
     // "×7" left over from the structure that was on this screen a moment ago
@@ -1672,7 +1716,7 @@ export default function OptionsStrategyLab() {
       if (L[i].side > 0) return L.map((l, j) => (j === i ? { ...l, side: -1 } : l));
       return L.filter((_, j) => j !== i);
     });
-    setMc(null); setBt(null);
+    setBt(null);
   };
   const addLeg = () => setLegs((L) => [...L, { side: 1, type: "call", strike: snapStrike(spot, expStrikes, U.step), qty: 1 }]);
   const rmLeg = (i) => setLegs((L) => L.filter((_, j) => j !== i));
@@ -1723,8 +1767,15 @@ export default function OptionsStrategyLab() {
     const working = !!(outcome && !outcome.filled);
     const seasM = ((seasonal[tk]?.monthlyMean) || getU(tk).monthlyMean)[NOW_MONTH];
     const expiry = ek ? new Date(ek).toISOString() : new Date(Date.now() + d * 86400000).toISOString();
-    const ivAvg0 = analysis.legPx.reduce((x, y) => x + y.iv, 0) / Math.max(1, analysis.legPx.length);
-    const pop0 = probProfit(analysis.curve, sp, ivAvg0, d);
+    const ivAvg0 = structureIV(analysis);
+    // THE CHANCE THIS POSITION IS OPENED ON, from the one expression. The TIS
+    // compares today's chance against this one for the rest of the position's
+    // life (`computeTIS` in pro.jsx and in autopilot.mjs), so an entry figure
+    // computed a different way from the monitoring figure would have made that
+    // comparison meaningless — it was a closed form at a risk-neutral drift
+    // against a Monte Carlo at the app's own.
+    const mc0 = chanceFor(analysis, { ticker: tk, legs: lg, spot: sp, dte: d, expKey: ek });
+    const pop0 = mc0 ? mc0.pop : null;
     const f = fused[tk];
     // THE REF IS GIVEN HERE, ONCE, AND IS THE POSITION'S NAME FOR THE REST OF
     // ITS LIFE — including after it is closed, which is the whole point: the
@@ -2047,19 +2098,27 @@ export default function OptionsStrategyLab() {
             else cutFloors.reward++;
             continue;
           }
-          const ivA = a.legPx.reduce((x, y) => x + y.iv, 0) / Math.max(1, a.legPx.length);
-          const pop = probProfit(a.curve, sp, ivA, d2) || 0;
+          // THE ONE CHANCE. This was `probProfit(a.curve, sp, ivA, d2) || 0` — a
+          // closed form at a risk-neutral drift, and `|| 0` turning a chance
+          // the app could not work out into a confident zero.
+          const mc = chanceFor(a, { ticker: tk, legs: pr.legs, spot: sp, dte: d2, expKey: ek });
+          const pop = mc ? mc.pop : null;
           const unit = Math.abs(a.maxLoss);
           const n = Math.floor(optAmt / Math.max(1, a.entry >= 0 ? Math.abs(a.entry) * 100 : unit));
           if (n < 1) continue;
-          out.push({ tk, sent, name: pr.name, legs: pr.legs, expKey: ek, dte: d2, a, pop, n, spot: sp,
-            ev: a.profitUnbounded ? null : pop * a.maxProfit * n });
+          out.push({ tk, sent, name: pr.name, legs: pr.legs, expKey: ek, dte: d2, a, mc, pop, n, spot: sp,
+            // AND THE EXPECTED VALUE IS THE SIMULATION'S OWN MEAN, times the
+            // size. It was `pop * a.maxProfit * n`: the best case weighted by
+            // the chance, which is the expected value of nothing the app
+            // simulated — it ignores every outcome between zero and the
+            // maximum, and every outcome below zero.
+            ev: mc && !a.profitUnbounded ? mc.ev * n : null });
         }
       }
       // Ranking: valore atteso CORRETTO dal segnale a 4 fattori, e i CONFLICT in
       // fondo comunque (PRD §7). Le funzioni pure stanno in src/signals.js.
       const ranked = out.map((o) => {
-        const pr = evProfile(o.pop, o.a.maxProfit, o.a.maxLoss);
+        const pr = evProfile(o.mc, o.a.maxProfit, o.a.maxLoss);
         return withSignalRank({ ...o, ev100: pr ? pr.ev100 : -999, tag: pr?.tag }, fz[o.tk], sentimentDirection(o.sent));
       }).sort(compareCandidates);
       setMulti((m) => ({ ...m, busy: false, res: ranked.slice(0, 8),
@@ -2098,7 +2157,11 @@ export default function OptionsStrategyLab() {
     setReplay({ year: row[0], steps, closed, finale });
   };
 
-  const runMC = () => { setMc(montecarlo(legs, spot, dte, A.entry, seas.sigma, seas.monthlyMean)); setBt(histBacktest(legs, spot, dte, A.entry, seas.matrix)); };
+  // ONLY THE HISTORICAL REPLAY IS BEHIND A BUTTON NOW. The simulation that
+  // produces the chance is a memo (`chance` above) because every screen in the
+  // app is already showing its answer; a button over it would suggest the panel
+  // and the stat were two separate readings, which is the fault this PR closes.
+  const runMC = () => { setBt(histBacktest(legs, spot, dte, A.entry, seas.matrix)); };
 
   /* ---- Alpaca ---- */
   const setSetting = async (k, v) => { const st = { ...store, settings: { ...store.settings, [k]: v } }; setStore(st); await saveState(st); };
@@ -2180,7 +2243,14 @@ export default function OptionsStrategyLab() {
     const dteExit = dteLeft <= RULES.exitDTE;
     // verdetto autopilot recente non-HOLD in attesa
     const ap = (p.timeline || []).filter((e) => e.type === "autopilot" && Date.now() - e.t < 48 * 36e5 && !e.text.includes("HOLD")).slice(-1)[0];
-    const level = tpHit || slHit || dteExit || ap ? "action" : pnl != null && pnl < 0.35 * p.maxLoss * n ? "watch" : "ok";
+    // THE "WATCH" LEVEL READS ITS HOME. This was a bare `0.35 * p.maxLoss`: a
+    // rule number with no home in RULES, and one whose value collides with
+    // `maxSpreadShareOfMid` — which is why that constant was the one rule
+    // number the literal sweep could not be pointed at. `watchAttentionLevel()`
+    // is that home, and the sweep covers the spread floor again.
+    const watchLevel = watchAttentionLevel(p.maxLoss);
+    const level = tpHit || slHit || dteExit || ap ? "action"
+      : pnl != null && watchLevel != null && pnl < watchLevel * n ? "watch" : "ok";
     const label = tpHit ? `${takeProfitLabel()} reached — take the profit` : slHit ? `${stopLossLabel()} reached — a warning, not an order` : dteExit ? `${dteLeft} days left — close or roll` : ap ? "The autopilot has something waiting for your OK" : pnl == null ? "waiting for prices…" : level === "watch" ? "Losing: check the reason you opened it" : "On plan";
     return { p, pnl, dteLeft, level, label, ap, live, spotNow: sp, tpHit, slHit, dteExit, contracts: n, sizeAssumed: size.assumed };
   }), [store.positions, chains, alSync]);
@@ -2332,8 +2402,10 @@ export default function OptionsStrategyLab() {
             if (!modelCheckOf(a, { legs: pr.legs, spot: sp, dte: d2, iv: getU(tk).iv }).pass) {
               floors.model++; floors.markets.add(tk); continue;
             }
-            const ivA = a.legPx.reduce((x, y) => x + y.iv, 0) / Math.max(1, a.legPx.length);
-            const pop = probProfit(a.curve, sp, ivA, d2) || 0;
+            // THE ONE CHANCE, from the same expression the Shortlist, the
+            // Radar, Build and the autopilot use.
+            const mc = chanceFor(a, { ticker: tk, legs: pr.legs, spot: sp, dte: d2, expKey: ek });
+            const pop = mc ? mc.pop : null;
             const unit = Math.abs(a.maxLoss);
             if (unit > ans.risk) continue;   // it does not fit the budget: not a road
             // THE QUALITY FLOORS (src/rules.js). A structure that clears every
@@ -2355,9 +2427,9 @@ export default function OptionsStrategyLab() {
               floors.markets.add(tk);
               continue;
             }
-            const pr2 = evProfile(pop, a.maxProfit, a.maxLoss);
+            const pr2 = evProfile(mc, a.maxProfit, a.maxLoss);
             pool.push({
-              tk, sent, pr, a, pop, unit, ek, spot: sp, dte: d2,
+              tk, sent, pr, a, mc, pop, unit, ek, spot: sp, dte: d2,
               ev100: pr2 ? pr2.ev100 : -999, rr: rewardRisk(a.maxProfit, a.maxLoss),
               risk: unit, fused: r.fused,
             });
@@ -2517,15 +2589,30 @@ export default function OptionsStrategyLab() {
     setStore(st); await saveState(st);
   };
 
-  /* ---- profilo strategia: EV per $100 a rischio + etichetta onesta ---- */
-  const evProfile = (pop, maxProfit, maxLoss) => {
-    if (pop == null || !Number.isFinite(maxProfit) || !Number.isFinite(maxLoss) || maxLoss >= 0) return null;
+  /* ---- profilo strategia: EV per $100 a rischio + etichetta onesta ----
+
+     THE EXPECTED VALUE IS THE SIMULATION'S OWN MEAN NOW. It was
+     `pop * maxProfit - (1 - pop) * risk`: a two-outcome bet, the best case or
+     the worst case and nothing in between, weighted by a probability computed
+     somewhere else entirely. An iron condor that finishes a dollar inside a
+     short strike is neither of those two numbers, and neither is a vertical
+     that expires between its strikes — which is most of the distribution. The
+     Monte Carlo has already walked every one of those outcomes and averaged
+     them, so this reads `mc.ev` and stops inventing a second arithmetic.
+
+     THE GUARDS ARE UNCHANGED, DELIBERATELY. A structure with no ceiling still
+     returns null and still ranks last with a blank EV — `mc.ev` exists for it
+     and is honest, but making it rankable is a change to the no-ceiling rule
+     (PRD §4c) rather than to this arithmetic, and it is not this PR's. */
+  const evProfile = (mc, maxProfit, maxLoss) => {
+    if (!mc || !Number.isFinite(mc.ev) || !Number.isFinite(maxProfit) || !Number.isFinite(maxLoss) || maxLoss >= 0) return null;
+    const pop = mc.pop;
     const risk = Math.abs(maxLoss);
     // Nothing divides by a risk the app could not read. `rewardRisk()` is the
     // one place that judgement is made, and everything here divides by `risk`.
     const rr = rewardRisk(maxProfit, maxLoss);
     if (rr == null) return null;
-    const ev = pop * maxProfit - (1 - pop) * risk;
+    const ev = mc.ev;
     const ev100 = (ev / risk) * 100;
     // ONE ROUNDING, from rules.js: the phrase is derived from the same whole
     // percent every CHANCE on screen prints, so a card cannot say "75%" beside
@@ -3084,43 +3171,57 @@ export default function OptionsStrategyLab() {
                 </div>
               </Panel>
 
+              {/* TWO QUESTIONS, NOT THREE PROBABILITIES. This panel used to
+                  name three numbers and explain which to read — because there
+                  really were three, computed three ways, and a paragraph of
+                  prose was standing in for an arithmetic that did not agree
+                  with itself. There is one chance now and it is the same number
+                  on every screen; what remains is a genuine difference of
+                  QUESTION, and two questions need two sentences, not three. */}
               <Panel style={{ marginTop: 10 }}>
-                <Lbl>THREE PROBABILITIES · WHICH ONE TO READ, AND WHEN</Lbl>
+                <Lbl>TWO QUESTIONS · WHERE IT ENDS, AND HOW IT ENDS</Lbl>
                 <div style={{ fontSize: 12.5, color: T.body, marginTop: 8, lineHeight: 1.6 }}>
-                  <b style={{ color: T.blue }}>CHANCE</b> (Shortlist and Build): a snapshot — the odds of finishing in profit <i>at expiry</i>, worked out from what the market is pricing right now. Use it to <b>compare trades before you open one</b>.<br/>
-                  <b style={{ color: T.amber }}>SIMULATION</b> (below): the same question asked of history — 8,000 runs using the last ten years of seasonality and volatility. Use it to <b>check the season really is on your side</b>. If the two disagree sharply, the market is pricing something history has not seen: an event is coming.<br/>
-                  <b style={{ color: T.violet }}>EXIT PATH</b> (on open positions): the most realistic — it walks day by day <i>from today</i> and applies your own rules ({ruleBadge()}). It is the only one that answers "from here, how does this end if I stick to the plan?". Use it to <b>decide whether to hold or take the money</b>.
+                  <b style={{ color: T.blue }}>CHANCE</b> (everywhere — Radar, Shortlist, Build, your open positions and the autopilot's brief): where the price finishes <i>at expiry</i>, and whether the trade is in profit there. One simulation, one seed, the same number on every screen. Use it to <b>compare trades</b>.<br/>
+                  <b style={{ color: T.violet }}>EXIT PATH</b> (on open positions): a different question — it walks day by day <i>from today</i> and applies your own rules ({ruleBadge()}), so it answers "from here, how does this end if I stick to the plan?" rather than "where does it finish". Use it to <b>decide whether to hold or take the money</b>.
                 </div>
               </Panel>
 
               <Panel style={{ marginTop: 10 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-                  <Lbl>8,000 SIMULATIONS + REAL HISTORY — "{stratName}"</Lbl>
-                  <Btn small onClick={runMC} disabled={!A}><FlaskConical size={12} /> Run it</Btn>
+                  <Lbl>THE SIMULATION BEHIND THE CHANCE — "{stratName}"</Lbl>
+                  <Btn small onClick={runMC} disabled={!A || !seas.matrix}><FlaskConical size={12} /> Replay the real years</Btn>
                 </div>
-                {mc ? (
+                {/* THE SIMULATION IS NOT BEHIND A BUTTON ANY MORE, and that is
+                    the point of the change rather than a convenience: it is no
+                    longer a panel with its own answer, it is the working behind
+                    the CHANCE stat at the top of this screen. A "Run it" button
+                    over a number the rest of the page has already printed would
+                    say the two are separate things. The historical replay below
+                    keeps its button — that one really is a second question. */}
+                {chance ? (
                   <>
                     <div style={{ display: "flex", gap: 16, marginTop: 12, flexWrap: "wrap" }}>
-                      <Stat k="CHANCE OF PROFIT" v={chanceText(mc.pop)} c={mc.pop >= 0.5 ? T.green : T.red} tip="The share of simulated runs that finish in profit at expiry." />
-                      <Stat k="AVERAGE RESULT" v={fmt$(mc.ev)} c={mc.ev >= 0 ? T.green : T.red} />
-                      <Stat k="BAD CASE" v={fmt$(mc.p5)} c={T.red} tip="Only 1 run in 20 turns out worse than this." />
-                      <Stat k="TYPICAL" v={fmt$(mc.p50)} />
-                      <Stat k="GOOD CASE" v={fmt$(mc.p95)} c={T.green} tip="Only 1 run in 20 turns out better than this." />
-                      <Stat k="YEARLY DRIFT" v={`${(mc.muAnn * 100).toFixed(1)}%`} c={T.blue} />
+                      <Stat k="CHANCE OF PROFIT" v={chanceText(chance.pop)} c={chance.pop >= 0.5 ? T.green : T.red} tip={chanceSourceNote(chance, ticker)} />
+                      <Stat k="AVERAGE RESULT" v={signedMoney(chance.ev)} c={chance.ev >= 0 ? T.green : T.red} tip="The mean of every simulated run, a combination at a time — not the best case weighted by the chance." />
+                      <Stat k="BAD CASE" v={fmt$(chance.p5)} c={T.red} tip="Only 1 run in 20 turns out worse than this." />
+                      <Stat k="TYPICAL" v={fmt$(chance.p50)} />
+                      <Stat k="GOOD CASE" v={fmt$(chance.p95)} c={T.green} tip="Only 1 run in 20 turns out better than this." />
+                      <Stat k="YEARLY DRIFT" v={pctText(chance.driftAnnual)} c={T.blue} tip="This market's own seasonal reading over the window the trade is held for. It is what makes this the app's probability rather than the market's." />
                     </div>
                     <div style={{ marginTop: 10, padding: "9px 11px", background: `${T.blue}0d`, border: `1px solid ${T.blue}33`, borderRadius: 7, fontSize: 12.5, color: T.body }}>
-                      <b style={{ color: T.ink }}>In plain words:</b> out of 8,000 simulated runs, {chancePct(mc.pop)} in 100 finish in profit.
-                      In the worst 5% you lose about {fmt$(Math.abs(mc.p5))}{guard ? (Math.abs(mc.p5) <= guard.limits.perTrade ? ` — inside your per-trade limit of ${money(guard.limits.perTrade)} ✓` : ` — CAREFUL: past your per-trade limit of ${money(guard.limits.perTrade)}`) : ""}.
-                      The typical result is {fmt$(mc.p50)}.
+                      <b style={{ color: T.ink }}>In plain words:</b> out of {chance.runs.toLocaleString("en-US")} simulated runs, {chancePct(chance.pop)} in 100 finish in profit.
+                      In the worst 5% you lose about {fmt$(Math.abs(chance.p5))}{guard ? (Math.abs(chance.p5) <= guard.limits.perTrade ? ` — inside your per-trade limit of ${money(guard.limits.perTrade)} ✓` : ` — CAREFUL: past your per-trade limit of ${money(guard.limits.perTrade)}`) : ""}.
+                      The typical result is {fmt$(chance.p50)}. {chanceSourceNote(chance, ticker)}
+                      {chance.ivNote ? ` ${chance.ivNote}` : ""}
                     </div>
                     <div style={{ height: 180, marginTop: 12 }}>
                       <ResponsiveContainer>
-                        <BarChart data={mc.bins} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
+                        <BarChart data={chance.bins} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
                           <XAxis dataKey="x" stroke={T.dim} tick={{ fontSize: 9, fontFamily: "monospace" }} />
                           <YAxis stroke={T.dim} tick={{ fontSize: 9, fontFamily: "monospace" }} width={40} />
                           <Tooltip contentStyle={{ background: T.panel, border: `1px solid ${T.line}`, fontFamily: "monospace", fontSize: 11 }} />
                           <Bar dataKey="n">
-                            {mc.bins.map((b, i) => <Cell key={i} fill={b.x >= 0 ? `${T.green}cc` : `${T.red}cc`} />)}
+                            {chance.bins.map((b, i) => <Cell key={i} fill={b.x >= 0 ? `${T.green}cc` : `${T.red}cc`} />)}
                           </Bar>
                         </BarChart>
                       </ResponsiveContainer>
@@ -3733,8 +3834,10 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   // against a max loss the app could not read printed
                   // "6748644041614687.00" on BOIL. Below the minimum it is "—".
                   const rr = rewardRisk(a.maxProfit, a.maxLoss);
-                  const ivAvg = a.legPx.reduce((x, y) => x + y.iv, 0) / Math.max(1, a.legPx.length);
-                  const pop = probProfit(a.curve, spot, ivAvg, dte);
+                  // THE ONE CHANCE. The row and the Build panel below it are
+                  // the same object for the same structure, seeded from it.
+                  const mcRow = chanceFor(a, { ticker, legs: p.legs, spot, dte, expKey });
+                  const pop = mcRow ? mcRow.pop : null;
                   // One shape for everything that can be compared or kept
                   // (src/path.js), so a road, a shortlist row and a
                   // multi-market hit are the same kind of thing here.
@@ -3783,7 +3886,15 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                             <Stat k={sc.isCredit ? "YOU RECEIVE" : "YOU PAY"} v={fmt$(sc.totPrem)} c={sc.isCredit ? T.green : T.ink} />
                             <Stat k="MOST YOU CAN LOSE" v={fmt$(sc.totRisk)} c={T.red} />
                             <Stat k="MOST YOU CAN MAKE" v={fmt$(sc.totProfit)} c={T.green} />
-                            {pop != null && <Stat k="PROFIT × CHANCE" v={fmt$(sc.totProfit * pop)} c={T.blue} />}
+                            {/* THE AVERAGE RESULT, NOT THE BEST CASE WEIGHTED BY
+                                A CHANCE. `sc.totProfit * pop` was the maximum
+                                profit multiplied by the probability of finishing
+                                anywhere in the green — two numbers that describe
+                                different events, multiplied together. The
+                                simulation's own mean already averages every
+                                outcome it walked. */}
+                            {mcRow && <Stat k="AVERAGE RESULT" v={signedMoney(mcRow.ev * sc.n)} c={mcRow.ev >= 0 ? T.green : T.red}
+                              tip={chanceSourceNote(mcRow, ticker)} />}
                             <Stat k={optMode === "target" ? "HITS THE TARGET" : "BUDGET USED"} v={optMode === "target" ? (sc.totProfit >= optAmt ? "✓ yes" : "✗ no") : `${((sc.n * sc.unit / Math.max(1, optAmt)) * 100).toFixed(0)}%`} c={T.blue} />
                             <div style={{ ...mono, fontSize: 9, color: T.dim, width: "100%" }}>Totals for ×{sc.n} · Build always shows one, so divide by {sc.n} to compare.</div>
                           </div>
@@ -4026,7 +4137,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
               {chain && (
                 <div style={{ marginTop: 10, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
                   <span style={{ ...mono, fontSize: 10, color: T.dim }}>EXPIRY</span>
-                  <select value={expKey || ""} onChange={(e) => { setExpKey(e.target.value); setMc(null); setBt(null); }}
+                  <select value={expKey || ""} onChange={(e) => { setExpKey(e.target.value); setBt(null); }}
                     style={{ ...mono, background: T.bg, color: T.ink, border: `1px solid ${T.line}`, borderRadius: 5, padding: "5px 8px", fontSize: 12 }}>
                     {chain.expirations.map((e) => (
                       <option key={e} value={e}>{e} · {chain.byExp[e].dte} DTE</option>
@@ -4340,6 +4451,10 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                 }}
                 preview={guard} result={openResult}
                 contracts={contracts}
+                // THE SAME VOLATILITY AND THE SAME DRIFT THE CHANCE ON THIS
+                // SCREEN WAS COMPUTED AT, so the figure and the number can
+                // never be two readings of one trade.
+                sigma={chance?.sigma} driftAnnual={chance?.driftAnnual}
                 heading={false} showFigure={false}
                 busy={busy === "order"}
                 onConfirm={() => openPaper()}
@@ -4561,15 +4676,23 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                           return ivs.length ? ivs.reduce((a, b) => a + b, 0) / ivs.length : (p.thesis?.iv ?? getU(p.ticker).iv);
                         })();
                         const seasNow = (seasonal[p.ticker]?.monthlyMean || getU(p.ticker).monthlyMean)[NOW_MONTH];
-                        const popNow = s ? (() => {
+                        // THE ONE CHANCE, ON A POSITION THAT IS ALREADY OPEN.
+                        // The Guardian's TIS compares this with `thesis.pop`,
+                        // recorded at entry — and until now the two came from
+                        // two different arithmetics, so the score measured the
+                        // gap between two formulas as much as the gap between
+                        // two days.
+                        const mcNow = s ? (() => {
                           const a2 = analyze(p.legs, s, Math.max(1, dteLeft), ivNow, qp);
-                          return probProfit(a2.curve, s, ivNow, Math.max(1, dteLeft));
+                          return chanceFor(a2, { ticker: p.ticker, legs: p.legs, spot: s,
+                            dte: Math.max(1, dteLeft), expKey: p.expKey || null, thesisIV: p.thesis?.iv ?? null });
                         })() : null;
+                        const popNow = mcNow ? mcNow.pop : null;
                         return (
                           <GuardianPanel
                             pos={p} spot={s || p.entrySpot} dteLeft={dteLeft} ivNow={ivNow}
                             sigma={(seasonal[p.ticker]?.sigma) || getU(p.ticker).sigma}
-                            seasonalNow={seasNow} pnlNow={pnl} popNow={popNow}
+                            seasonalNow={seasNow} pnlNow={pnl} popNow={popNow} chanceNow={mcNow}
                             vegaSign={Math.sign(p.thesis?.vega ?? 1) || 1}
                             alpaca={!!alpaca} quoteFn={qp} buildOcc={buildOcc}
                             setMsg={setMsg} logEvent={logEvent} gate={gate}
@@ -4855,13 +4978,24 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                     {(e.timeline || []).length > 0 && (
                       <div style={{ marginTop: 9, paddingTop: 8, borderTop: `1px solid ${T.line}` }}>
                         <div style={{ ...mono, fontSize: 9, color: T.dim }}>TIMELINE · {e.timeline.length} ENTRIES, ALL OF THEM</div>
-                        {e.timeline.map((x, i) => (
-                          <div key={x.seq || i} style={{ ...mono, fontSize: 10, color: T.mut, marginTop: 3, lineHeight: 1.5 }}>
-                            <span style={{ color: T.blue }}>{x.seq || `${e.ref || ""}·??`}</span>
-                            <span style={{ color: T.dim }}>{` ${new Date(x.t).toLocaleDateString("en-GB")} · `}</span>
-                            {x.text}
-                          </div>
-                        ))}
+                        {e.timeline.map((x, i) => {
+                          // THE SAME SENTENCE THE LIVE SCREEN SHOWS, in the
+                          // permanent record — a closed trade's autopilot
+                          // entries are exactly the ones nobody will re-read
+                          // against the fix. `autopilotHorizonNote()` is null
+                          // on every entry that carries its own horizon.
+                          const stale = autopilotHorizonNote(x);
+                          return (
+                            <div key={x.seq || i} style={{ marginTop: 3 }}>
+                              <div style={{ ...mono, fontSize: 10, color: T.mut, lineHeight: 1.5 }}>
+                                <span style={{ color: T.blue }}>{x.seq || `${e.ref || ""}·??`}</span>
+                                <span style={{ color: T.dim }}>{` ${new Date(x.t).toLocaleDateString("en-GB")} · `}</span>
+                                {x.text}
+                              </div>
+                              {stale && <div style={{ ...mono, fontSize: 9.5, color: T.amber, lineHeight: 1.5 }}>{`⚠ ${stale}`}</div>}
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
                   </details>

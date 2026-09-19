@@ -907,7 +907,11 @@ const CheckRow = ({ ok, text }) => (
  * @param heading    false on Build, where the trade's name is already above
  */
 export function ConfirmSteps({
-  candidate, preview, result, bars = [], sigma = 0.3, driftAnnual = 0,
+  // THE DRIFT HAS NO DEFAULT. It used to be 0 here and no caller ever passed
+  // one, so the chart under a trade was drawn — and its sentence computed —
+  // against a market that goes nowhere, while the CHANCE printed elsewhere on
+  // the same screen came from a different assumption entirely.
+  candidate, preview, result, bars = [], sigma = 0.3, driftAnnual,
   busy, onConfirm, onDesk, heading = true, showFigure = true, contracts = 1,
 }) {
   if (!candidate) return null;

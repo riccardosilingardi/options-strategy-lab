@@ -3,8 +3,9 @@ import { RefreshCw, Send, Trash2, Download, Sparkles, FileText, XCircle } from "
 import { T } from "./theme.js";
 import { RULES, ruleBadge, takeProfitLabel, scaleOutLabel, stopLossLabel, exitDTELabel, perTradeCapLabel, copilotRulesBlock, money, pctText, MIN_NET_DOLLARS,
   NO_CEILING, reportNarrativePrompt, chanceText,
-  comboBook, openLimitPrice, openLimitNote, limitPlacement, notionalControlled, notionalNote } from "./rules.js";
-import { contractsOf } from "./journal.js";
+  comboBook, openLimitPrice, openLimitNote, limitPlacement, notionalControlled, notionalNote,
+  ivProvenance } from "./rules.js";
+import { contractsOf, autopilotHorizonNote } from "./journal.js";
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, LineStyle } from "lightweight-charts";
 import { erf, netBS } from "./engine.js";
 import { ARROW, REGIONS, regionSignals, tagImpacts, taRead } from "./signals.js";
@@ -969,7 +970,11 @@ export function buildContext(ctx) {
     // honesty one: a model handed a maximum profit of 0 for a long call would
     // write a take-profit target of $0 into the report.
     currentStrategy: A ? { legs, expKey, entry: +(A.entry * 100).toFixed(0), maxProfit: dollarsOrNull(A.maxProfit), maxLoss: dollarsOrNull(A.maxLoss), breakevens: A.breakevens, greeks: { delta: +A.greeks.delta.toFixed(2), theta: +A.greeks.theta.toFixed(0), vega: +A.greeks.vega.toFixed(0) } } : null,
-    paperPositions: store.positions.map((p) => ({ ticker: p.ticker, name: p.name, legs: p.legs, exp: p.expKey, entry: +(p.entryNet * 100).toFixed(0), maxProfit: dollarsOrNull(p.maxProfit), maxLoss: dollarsOrNull(p.maxLoss), openedAt: p.openedAt.slice(0, 10), thesis: p.thesis || null, timeline: (p.timeline || []).slice(-5).map((e) => e.text) })),
+    paperPositions: store.positions.map((p) => ({ ticker: p.ticker, name: p.name, legs: p.legs, exp: p.expKey, entry: +(p.entryNet * 100).toFixed(0), maxProfit: dollarsOrNull(p.maxProfit), maxLoss: dollarsOrNull(p.maxLoss), openedAt: p.openedAt.slice(0, 10), thesis: p.thesis || null,
+      // THE MODEL READS THE TIMELINE, so it reads the warning too: an entry
+      // whose simulation ran to a horizon the app no longer uses must not be
+      // quoted back as if it described today's rule.
+      timeline: (p.timeline || []).slice(-5).map((e) => [e.text, autopilotHorizonNote(e)].filter(Boolean).join(" ")) })),
     scanner: (scan || []).map((s) => ({ tk: s.tk, seasonalMonthPct: +s.seasonalScore.toFixed(1), sentiment: s.sugg, source: s.real ? "real history" : "estimate",
       fourFactorSignal: s.fused ? { score: s.fused.score, confidence: s.fused.confidence, agreement: s.fused.agreement, narrative: s.fused.narrative } : null })),
     taggedNews: (news || []).slice(0, 10).map((n) => ({ title: n.title, geo: !!n.geo,
@@ -1195,7 +1200,7 @@ export function exportPdf(ctx, md) {
     <div class="pos"><h3>${p2.ticker} · ${p2.name}</h3>
       ${svgPayoff(p2.legs, p2.entryNet, p2.entrySpot)}
       <p class="m">${p2.legs.map((l) => `${l.side > 0 ? "+" : "−"}${l.qty} ${l.strike}${l.type === "call" ? "C" : "P"}`).join(" / ")} · exp ${p2.expKey || "n/d"} · max profit ${Number.isFinite(p2.maxProfit) ? `$${p2.maxProfit.toFixed(0)}` : NO_CEILING} · max loss $${Math.abs(p2.maxLoss)?.toFixed(0)}</p>
-      ${(p2.timeline || []).slice(-4).map((e) => `<p class="tl">${new Date(e.t).toLocaleDateString("en-GB")} · ${e.text.replace(/\[approva:.*?\]/, "")}</p>`).join("")}
+      ${(p2.timeline || []).slice(-4).map((e) => `<p class="tl">${new Date(e.t).toLocaleDateString("en-GB")} · ${e.text.replace(/\[approva:.*?\]/, "")}${autopilotHorizonNote(e) ? ` <b>\u26a0 ${autopilotHorizonNote(e)}</b>` : ""}</p>`).join("")}
     </div>`).join("");
   const body = md
     .replace(/^# (.*)$/gm, "<h1>$1</h1>").replace(/^## (.*)$/gm, "<h2>$1</h2>")
@@ -1331,21 +1336,27 @@ export function scaleStrategy(a, mode, amt) {
   if (!Number.isFinite(n) || n < 1) return { n: 0, ok: false, risk, prem, isCredit, unit };
   return { n, ok: true, isCredit, totProfit: n * a.maxProfit, totRisk: n * risk, totPrem: n * prem, prem, risk, unit };
 }
-// Probabilità di profitto a scadenza (stile "chance"): lognormale con IV reale della chain
-export function probProfit(curve, S, sigma, dte) {
-  if (!curve?.length || !S || !sigma || sigma <= 0 || dte <= 0) return null;
-  const Tyr = dte / 365, r = 0.045;
-  const sq = sigma * Math.sqrt(Tyr);
-  const mu = Math.log(S) + (r - 0.5 * sigma * sigma) * Tyr;
-  const cdf = (x) => 0.5 * (1 + erf((Math.log(x) - mu) / (sq * Math.SQRT2)));
-  let p = 0;
-  for (let i = 0; i < curve.length - 1; i++) {
-    if (curve[i].exp > 0 || curve[i + 1].exp > 0) p += Math.max(0, cdf(curve[i + 1].s) - cdf(curve[i].s));
-  }
-  if (curve[0].exp > 0) p += cdf(curve[0].s);                       // coda sinistra
-  if (curve[curve.length - 1].exp > 0) p += 1 - cdf(curve[curve.length - 1].s); // coda destra
-  return Math.min(1, Math.max(0, p));
-}
+/* `probProfit(curve, S, sigma, dte)` LIVED HERE AND IS DELETED.
+
+   CLAUDE.md used to say this duplication was deliberate and must not be merged
+   with `probProfit` in engine.js, because the two had different signatures and
+   this one worked on an already-built payoff `curve` rather than on `legs`.
+   That note was about the SHAPE of the two functions and it was true; it was
+   never a defence of the ANSWER, and the answer was the problem. Both of them
+   integrated the expiry payoff against a lognormal with a risk-neutral drift of
+   0.045, while the Build screen's own Monte Carlo drifted on the app's seasonal
+   thesis and `chanceInProfit()` drifted on nothing at all. Four arithmetics,
+   one question, four numbers.
+
+   There is one now: `terminalMC()` in engine.js, through `chanceOf()` in
+   rules.js, seeded from the position so every screen lands on the same figure.
+   This file is handed the answer (`popNow` / `chanceNow` on `GuardianPanel`)
+   rather than working one out of its own.
+
+   `exitPathSim` below KEEPS its own body and its own signature, and that note
+   still stands: it answers a different question — what happens along the path
+   under the exit rule — and the UI depends on the extra fields it returns.
+*/
 
 /* ================================================================
    7) POSITION GUARDIAN — TIS, Exit Path Simulator, Exit Ladder, Timeline
@@ -1439,7 +1450,13 @@ export function GuardianPanel({ pos, spot, dteLeft, ivNow, sigma, seasonalNow, p
   }, [tis]); // eslint-disable-line
   const runSim = () => {
     setBusy(true);
-    setTimeout(() => { setSim(exitPathSim(pos, spot, dteLeft, ivNow || 0.25, sigma)); setBusy(false); }, 30);
+    // WHICH IMPLIED VOLATILITY THE WALK PRICES THE LEGS AT, DECIDED ONCE. This
+    // was a bare `ivNow || 0.25` — a rule number with no home, and a DIFFERENT
+    // quantity from the `sigma` beside it, which is the realised volatility the
+    // price itself is walked on. `ivProvenance()` is that home and says which
+    // of the three sources produced the number.
+    const ivUsed = ivProvenance(ivNow, pos.thesis?.iv, pos.ticker);
+    setTimeout(() => { setSim({ ...exitPathSim(pos, spot, dteLeft, ivUsed.iv, sigma), ivSource: ivUsed.source, ivNote: ivUsed.fromFallback ? ivUsed.note : null }); setBusy(false); }, 30);
   };
   const placeExit = async (label, targetPnl) => {
     if (DEMO) { setMsg(DEMO_TOOLTIP); return; }   // order path 4 of six
@@ -1549,12 +1566,24 @@ export function GuardianPanel({ pos, spot, dteLeft, ivNow, sigma, seasonalNow, p
         const tl = pos.timeline || [];
         const recent = tl.slice(-6);
         const earlier = tl.slice(0, Math.max(0, tl.length - 6));
-        const Line = ({ e }) => (
-          <div style={{ ...mono, fontSize: 10, color: T.mut, marginTop: 2, lineHeight: 1.5 }}>
-            {e.seq ? <span style={{ color: T.blue }}>{e.seq} </span> : null}
-            <span style={{ color: T.dim }}>{new Date(e.t).toLocaleDateString("en-GB")}</span> · {e.text}
-          </div>
-        );
+        // AN ENTRY WRITTEN BEFORE THE SIMULATOR WAS CORRECTED SAYS SO, IN ONE
+        // SENTENCE. `autopilotHorizonNote()` returns null for every entry that
+        // carries its horizon and for every entry that never quoted one, so
+        // this is a line that appears exactly where it is true.
+        const Line = ({ e }) => {
+          const stale = autopilotHorizonNote(e);
+          return (
+            <div style={{ marginTop: 2 }}>
+              <div style={{ ...mono, fontSize: 10, color: T.mut, lineHeight: 1.5 }}>
+                {e.seq ? <span style={{ color: T.blue }}>{e.seq} </span> : null}
+                <span style={{ color: T.dim }}>{new Date(e.t).toLocaleDateString("en-GB")}</span> · {e.text}
+              </div>
+              {stale && (
+                <div style={{ ...mono, fontSize: 9.5, color: T.amber, lineHeight: 1.5 }}>⚠ {stale}</div>
+              )}
+            </div>
+          );
+        };
         return (
           <div style={{ marginTop: 10 }}>
             <div style={{ ...mono, fontSize: 9, color: T.dim }}>
