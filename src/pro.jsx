@@ -2,10 +2,10 @@ import React, { useState, useEffect } from "react";
 import { RefreshCw, Send, Trash2, Download, Sparkles, FileText, XCircle } from "lucide-react";
 import { T } from "./theme.js";
 import { RULES, ruleBadge, takeProfitLabel, scaleOutLabel, stopLossLabel, exitDTELabel, perTradeCapLabel, copilotRulesBlock, money, pctText, MIN_NET_DOLLARS,
-  NO_CEILING, reportNarrativePrompt, chanceText, seasonalStampNote,
+  NO_CEILING, reportNarrativePrompt, chanceText, seasonalStampNote, MEASURED_SIGMA_SOURCE,
   comboBook, openLimitPrice, openLimitNote, limitPlacement, notionalControlled, notionalNote,
   ivProvenance } from "./rules.js";
-import { contractsOf, autopilotHorizonNote } from "./journal.js";
+import { contractsOf, autopilotHorizonNote, autopilotVolNote } from "./journal.js";
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, LineStyle } from "lightweight-charts";
 import { erf, netBS } from "./engine.js";
 import { ARROW, REGIONS, regionSignals, tagImpacts, taRead } from "./signals.js";
@@ -974,7 +974,10 @@ export function buildContext(ctx) {
       // THE MODEL READS THE TIMELINE, so it reads the warning too: an entry
       // whose simulation ran to a horizon the app no longer uses must not be
       // quoted back as if it described today's rule.
-      timeline: (p.timeline || []).slice(-5).map((e) => [e.text, autopilotHorizonNote(e)].filter(Boolean).join(" ")) })),
+      // ...and the volatility warning too, for the same reason: the figures the
+      // rationale is written on were walked at it, and a record that cannot say
+      // which must not be quoted back as if it could.
+      timeline: (p.timeline || []).slice(-5).map((e) => [e.text, autopilotHorizonNote(e), autopilotVolNote(e)].filter(Boolean).join(" ")) })),
     // WHICH SEASONAL TABLE EACH MARKET IS ON, IN THE MODEL'S OWN CONTEXT. It
     // read "real history" or "estimate" with no age and no year count, and the
     // per-position `thesis` it is handed below now carries the same stamp for
@@ -1216,7 +1219,7 @@ export function exportPdf(ctx, md) {
     <div class="pos"><h3>${p2.ticker} · ${p2.name}</h3>
       ${svgPayoff(p2.legs, p2.entryNet, p2.entrySpot)}
       <p class="m">${p2.legs.map((l) => `${l.side > 0 ? "+" : "−"}${l.qty} ${l.strike}${l.type === "call" ? "C" : "P"}`).join(" / ")} · exp ${p2.expKey || "n/d"} · max profit ${Number.isFinite(p2.maxProfit) ? `$${p2.maxProfit.toFixed(0)}` : NO_CEILING} · max loss $${Math.abs(p2.maxLoss)?.toFixed(0)}</p>
-      ${(p2.timeline || []).slice(-4).map((e) => `<p class="tl">${new Date(e.t).toLocaleDateString("en-GB")} · ${e.text.replace(/\[approva:.*?\]/, "")}${autopilotHorizonNote(e) ? ` <b>\u26a0 ${autopilotHorizonNote(e)}</b>` : ""}</p>`).join("")}
+      ${(p2.timeline || []).slice(-4).map((e) => `<p class="tl">${new Date(e.t).toLocaleDateString("en-GB")} · ${e.text.replace(/\[approva:.*?\]/, "")}${[autopilotHorizonNote(e), autopilotVolNote(e)].filter(Boolean).map((n) => ` <b>\u26a0 ${n}</b>`).join("")}</p>`).join("")}
     </div>`).join("");
   const body = md
     .replace(/^# (.*)$/gm, "<h1>$1</h1>").replace(/^## (.*)$/gm, "<h2>$1</h2>")
@@ -1408,9 +1411,29 @@ export function computeTIS(pos, cur) {
   return { tis, comp };
 }
 
-// Exit Path Simulator: MC giornaliero DA OGGI, regole da src/rules.js
-export function exitPathSim(pos, S, dteLeft, iv, sigma, nSim = 2000) {
+/**
+ * Exit Path Simulator: MC giornaliero DA OGGI, regole da src/rules.js.
+ *
+ * AND THE VOLATILITY IS A PROVENANCE, NOT A NUMBER — the same change `exitSim`
+ * took in engine.js, for the same reason. `sigma` used to arrive here as
+ * `seasonal[tk]?.sigma || getU(tk).sigma` from App.jsx while the brief's
+ * `exitSim` read `SIGMA[pos.ticker]` with no measured value available to it at
+ * all, so the Guardian and the autopilot walked ONE position on TWO
+ * volatilities and every figure below moved with it. `sigmaProvenance()` in
+ * rules.js is the one home; this takes its RESULT and returns the sigma and the
+ * source it used, so the panel prints which volatility produced its own
+ * numbers instead of the caller asserting it.
+ *
+ * @param vol  a `sigmaProvenance()` result: { sigma, source, ... }
+ */
+export function exitPathSim(pos, S, dteLeft, iv, vol, nSim = 2000) {
   const { legs, entryNet, maxProfit, maxLoss } = pos;
+  const { sigma, source: sigmaSource } = vol || {};
+  if (!Number.isFinite(sigma) || sigma < 0 || typeof sigmaSource !== "string" || !sigmaSource) {
+    throw new TypeError(
+      "exitPathSim needs a sigmaProvenance() result as `vol`, never a bare SIGMA lookup: see src/rules.js",
+    );
+  }
   // `RULES.takeProfitPct * null` is 0: without this the simulator would count
   // every path that ever touched break-even as a take-profit exit, and report a
   // rule the app never applied.
@@ -1446,13 +1469,15 @@ export function exitPathSim(pos, S, dteLeft, iv, sigma, nSim = 2000) {
     pTP: nTP / nSim, pSL: nSL / nSim, pTimePos: nTimePos / nSim, pTimeNeg: nTimeNeg / nSim,
     evExit: sumExit / nSim, medTPdays: tpDays.length ? tpDays[Math.floor(tpDays.length / 2)] : null,
     pWin: (nTP + nTimePos) / nSim, horizon: days,
+    // WHAT THESE FIGURES ARE AN ANSWER ABOUT, from the walk itself.
+    sigma, sigmaSource,
   };
 }
 
 // Exit Ladder: prezzo netto combo per target P&L
 export const ladderNet = (entryNet, targetPnl) => entryNet + targetPnl / 100;
 
-export function GuardianPanel({ pos, spot, dteLeft, ivNow, sigma, seasonalNow, pnlNow, popNow, chanceNow, seasonalNote, thesisSeasonalNote, vegaSign, alpaca, quoteFn, buildOcc, setMsg, logEvent, gate }) {
+export function GuardianPanel({ pos, spot, dteLeft, ivNow, vol, seasonalNow, pnlNow, popNow, chanceNow, seasonalNote, thesisSeasonalNote, vegaSign, alpaca, quoteFn, buildOcc, setMsg, logEvent, gate }) {
   // How many combinations this position is. `pos.maxProfit`, `pos.maxLoss` and
   // `pos.entryNet` are all per combination; `pnlNow` is the whole position's.
   const size = contractsOf(pos);
@@ -1477,7 +1502,13 @@ export function GuardianPanel({ pos, spot, dteLeft, ivNow, sigma, seasonalNow, p
     // price itself is walked on. `ivProvenance()` is that home and says which
     // of the three sources produced the number.
     const ivUsed = ivProvenance(ivNow, pos.thesis?.iv, pos.ticker);
-    setTimeout(() => { setSim({ ...exitPathSim(pos, spot, dteLeft, ivUsed.iv, sigma), ivSource: ivUsed.source, ivNote: ivUsed.fromFallback ? ivUsed.note : null }); setBusy(false); }, 30);
+    // AND THE REALISED ONE IS HANDED IN AS ITS PROVENANCE, NOT AS A NUMBER.
+    // `sigma` used to arrive here as `seasonal[tk]?.sigma || getU(tk).sigma`
+    // from App.jsx while the autopilot's `exitSim` read `SIGMA[pos.ticker]`:
+    // one position, two volatilities, and the panel below printed neither.
+    setTimeout(() => { setSim({ ...exitPathSim(pos, spot, dteLeft, ivUsed.iv, vol),
+      ivSource: ivUsed.source, ivNote: ivUsed.fromFallback ? ivUsed.note : null,
+      volNote: vol?.note || null }); setBusy(false); }, 30);
   };
   const placeExit = async (label, targetPnl) => {
     if (DEMO) { setMsg(DEMO_TOOLTIP); return; }   // order path 4 of six
@@ -1589,6 +1620,16 @@ export function GuardianPanel({ pos, spot, dteLeft, ivNow, sigma, seasonalNow, p
           <Stat k="TAKE IT NOW OR WAIT?" v={pnlNow != null ? (pnlNow >= sim.evExit ? "→ TAKE IT NOW" : "→ WAIT") : "—"} c={T.amber} />
         </div>
       )}
+      {/* WHICH VOLATILITY EVERY FIGURE ABOVE WAS WALKED ON, AND HOW OLD THAT
+          READING IS. One sentence, from `sigmaProvenance()` — the same string
+          the autopilot's brief carries, so the panel and the brief cannot
+          describe one position two ways. It is amber only when nobody measured
+          the number: a measured reading is a statement, not a warning. */}
+      {sim && sim.volNote && (
+        <div style={{ ...mono, fontSize: 9.5, color: sim.sigmaSource === MEASURED_SIGMA_SOURCE ? T.dim : T.amber, marginTop: 6, lineHeight: 1.6 }}>
+          {sim.sigmaSource === MEASURED_SIGMA_SOURCE ? "" : "⚠ "}{sim.volNote}
+        </div>
+      )}
       {/* THE TIMELINE IS ALL OF IT, WITH THE RECENT SIX IN FRONT.
           It used to be `slice(-6)` and nothing else, so everything a position
           was told in its first weeks was simply not reachable from the screen
@@ -1605,16 +1646,18 @@ export function GuardianPanel({ pos, spot, dteLeft, ivNow, sigma, seasonalNow, p
         // carries its horizon and for every entry that never quoted one, so
         // this is a line that appears exactly where it is true.
         const Line = ({ e }) => {
-          const stale = autopilotHorizonNote(e);
+          // TWO FACTS ABOUT THE RECORD, BOTH READ OFF ITS OWN ABSENCES: the
+          // horizon its simulation ran to, and the volatility it walked on.
+          const notes = [autopilotHorizonNote(e), autopilotVolNote(e)].filter(Boolean);
           return (
             <div style={{ marginTop: 2 }}>
               <div style={{ ...mono, fontSize: 10, color: T.mut, lineHeight: 1.5 }}>
                 {e.seq ? <span style={{ color: T.blue }}>{e.seq} </span> : null}
                 <span style={{ color: T.dim }}>{new Date(e.t).toLocaleDateString("en-GB")}</span> · {e.text}
               </div>
-              {stale && (
-                <div style={{ ...mono, fontSize: 9.5, color: T.amber, lineHeight: 1.5 }}>⚠ {stale}</div>
-              )}
+              {notes.map((n) => (
+                <div key={n} style={{ ...mono, fontSize: 9.5, color: T.amber, lineHeight: 1.5 }}>⚠ {n}</div>
+              ))}
             </div>
           );
         };

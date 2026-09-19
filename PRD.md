@@ -575,6 +575,11 @@ the fallback gets a named warning. **0.25 is CHOSEN, not measured**, and the com
 says so. Fixing the TABLE — measuring realised volatility per market instead of typing it — is
 ROADMAP P2's house distribution and is deliberately not this change.
 
+**AND THE TABLE WAS ONLY HALF THE PROBLEM — SEE §4k.** `sigmaProvenance()` knew two sources and
+the app had a third all along: `statsFromMatrix()` returns the MEASURED realised volatility of the
+monthly series, `App.jsx` stored it and handed it to the Guardian, and `autopilot.mjs` could not
+reach it. One position, two volatilities. PR #27 closes that.
+
 ---
 
 ## 4h. One chance, one arithmetic — and the Monte Carlo is the one
@@ -991,6 +996,155 @@ read as a change in the trade**. The two sentences make that visible instead of 
 - Deriving `SEASONAL` itself from measured returns is **ROADMAP P2** and is deliberately not done
   here. This PR changes where the means come from and what the app *says* about them, never what
   the hand-written row contains.
+
+---
+
+## §4k — ONE VOLATILITY SOURCE, FOR THE SCREENS AND FOR THE BRIEF
+
+§4j settled *whose seasonality* drifts a chance. This settles *whose volatility* the exit
+simulator walks the share on — the same fault one layer down, and the volatility half ROADMAP P2
+still owes.
+
+### THE FAULT, READ OFF THE CODE
+
+`statsFromMatrix()` in `engine.js` has always returned `sqrt(var * 12)` of the measured monthly
+returns beside the twelve means. `App.jsx` stored it as `seasonal[tk].sigma` and handed it to the
+Guardian; `autopilot.mjs` had no measured volatility available to it at all:
+
+| side | what walked the share |
+|---|---|
+| `App.jsx` → `GuardianPanel` → `exitPathSim` | `seasonal[p.ticker]?.sigma \|\| getU(p.ticker).sigma` — the MEASURED realised volatility, falling back to the hand-written row |
+| `autopilot.mjs` → `exitSim` | `sigmaProvenance(SIGMA[pos.ticker], …)` — the hand-written row, always |
+
+So the Guardian's panel and the autopilot's brief walked the **same position on two different
+volatilities**, and `pTP`, `pSL`, `pTimePos`, `ev` and `medDays` all move with it. Neither screen
+said which number had produced its figures. `measuredSeasonal()` read the body, computed the sigma
+inside `statsFromMatrix()` and **threw it away**.
+
+### THE DECISION
+
+**`sigmaProvenance()` in `src/rules.js` learns a THIRD source**, in the same shape
+`seasonalProvenance()` uses — the value, which source produced it, the year count, the age in days
+and one sentence:
+
+| source | when | what the sentence says |
+|---|---|---|
+| `measured history` | a loaded reading with a usable sigma | "walks CORN at 37% a year, **MEASURED** from 11 years of monthly returns, read 3 days ago" |
+| `table` | the hand-written `SIGMA` row | "the figure this app holds for it. That figure is written down, not measured from returns." |
+| `fallback` | no row for this market at all | "**THE SIMULATION BELOW IS WALKED AT A FALLBACK VOLATILITY** … not measured from CORN's own returns." |
+
+It could only say "written down, not measured from returns" before, about all of them. That is now
+false of the first row, and the test that holds it asserts the measured sentence **does not**
+contain that phrase.
+
+- **THE SIMULATORS TAKE THE PROVENANCE, NOT A NUMBER, AND REFUSE A BARE SIGMA.**
+  `exitSim(pos, S, dteLeft, iv, vol, policy, n)` and `exitPathSim(pos, S, dteLeft, iv, vol, nSim)`
+  throw on anything that is not a `{ sigma, source }` — the same discipline as `exitSim` throwing
+  without an exit policy (§4g) and `chanceOf()` throwing on a bare row of means (§4j). The check is
+  **structural**, because `engine.js` imports nothing and may not read `RULES`. Both simulators
+  **return** `sigma` and `sigmaSource`, for the §4i reason: a field name must never assert a reading
+  the arithmetic did not use, so the brief reads `sim.sigma`, never the caller's `vol.sigma` written
+  out a second time.
+- **THE SERVER READS IT OUT OF THE SAME BLOB READ.** `measuredSeasonal()` in `autopilot.mjs` now
+  returns `{ monthlyMean, sigma, years, at }` from one `store.get("av/<SYM>.json")`, one
+  `parseAvJson()` and one `statsFromMatrix()`. **No second read, no fetch** — the free tier is 25
+  requests a DAY for five markets — one read per **ticker**, a **stale entry served as is**, and
+  the cache emptied at the top of every run so a warm container cannot pin yesterday's reading.
+  The means and the volatility are two questions about **one** set of prices, so both provenances
+  are decided from the one object.
+- **THE ABSENCE OF THE STAMP IS THE MARKER**, the third time (`contractsAssumed` §4i,
+  `simExitDTE` §4i, `seasonalSource` §4j). An autopilot timeline entry now carries `simSigma`,
+  `simSigmaSource`, `simSigmaYears` and `simSigmaAgeDays`; an entry written before this carries
+  none, and that absence reads as **the hand-written table** — because the table was the only
+  volatility the autopilot could reach. `simVolOf()` / `autopilotVolNote()` in `src/journal.js`
+  read it, beside `simHorizonOf()` / `autopilotHorizonNote()`, for the same reason: how a record
+  was produced is a fact about the record.
+- **NO DEFAULT AND NO SILENT SUBSTITUTION.** `RULES.fallbackSigma` (0.25) is still the named
+  fallback, still says it was **CHOSEN, NOT MEASURED**, and is still on the NOT VERIFIED list. It
+  must **never** be merged with `RULES.fallbackIV`: one is the realised volatility the SHARE is
+  walked on, the other the implied volatility the OPTIONS are priced at, and merging them would
+  make a correction to either silently move the other. A market with no reading at all is the
+  counter-example the tests keep.
+- **NOTHING INSIDE `SIGMA` WAS EDITED**, exactly as §4j left `SEASONAL` alone. This changes where
+  the volatility comes from and what the app says about it, never what the typed row contains.
+
+### WHERE THE SENTENCE APPEARS
+
+| surface | what it prints |
+|---|---|
+| Guardian — the exit-path panel | `sigmaProvenance().note` under the figures, amber unless the reading was measured |
+| Autopilot brief (webhook markdown) | the same sentence after `Sim to 21 DTE at N% vol` — it used to print one bare word, `(table)` |
+| Autopilot brief (record) | `simSigma`, `simSigmaSource`, `simSigmaMeasured`, `simSigmaYears`, `simSigmaAgeDays`, `simSigmaNote` |
+| The model's own facts | `volatility_used` / `volatility_source` **from the simulator**, plus `volatility_is_measured`, `volatility_years`, `volatility_age_days`, `volatility_note` |
+| Journal timeline, Guardian timeline, the report's PDF export, the copilot's context | `autopilotVolNote()` on every entry whose stamp is absent |
+| Autopilot rule warnings | raised when the volatility was **not measured** — it used to warn only about the fallback and stay silent about the table, the very number the fallback stands in for |
+| Build — the simulation footnote | **corrected, not decorated**: see below |
+
+**THE BUILD FOOTNOTE WAS NAMING THE WRONG QUANTITY.** It read *"Simulated with real/estimated
+seasonal drift and N% volatility"*, where N was `seas.sigma` — the REALISED volatility of the
+monthly series, which is what the exit simulator walks the SHARE on and which **nothing on that
+panel uses**. The chance, its distribution and its average result are all priced at the chain's
+IMPLIED volatility. Saying where that N came from would have been giving a provenance to a number
+that produced nothing on the screen it was printed on, so the sentence now names the two inputs
+that did produce the figures above it — the implied volatility and its source, and which seasonal
+table drifted them — and `seas.sigma` is gone from the screen. The `sigma` key is gone from that
+fallback object too: it was a second place deciding which realised volatility is in force.
+
+### THE MAGNITUDE — AND IT IS A SENSITIVITY, NOT A MEASUREMENT
+
+**THE MEASURED SIGMA IS NOT AVAILABLE IN THIS SANDBOX.** No `ALPHAVANTAGE_KEY`, and the egress
+proxy refuses the CONNECT to `alphavantage.co` (403). **How far any market's real realised
+volatility sits from its hand-written `SIGMA` row is UNKNOWN**, and nothing below may be read as a
+measurement of CORN, SOYB, UNG, BOIL or WEAT.
+
+What *can* be measured is what the simulator does when the volatility moves. Each market's own
+`SIGMA` row, perturbed by a stated factor, on an at-the-money 10%-wide call debit spread, 45 DTE,
+implied volatility 0.30, seeded (`Math.random` replaced by mulberry32 at 20260919), 4,000 paths,
+`RULES` exit policy:
+
+| market | volatility | pTP | pSL | positive at 21 DTE | average result |
+|---|---|---|---|---|---|
+| SOYB | 10% (half) | 0.1% | 13.6% | 31.4% | −$9.22 |
+| SOYB | **19% (table)** | **7.7%** | **36.3%** | **32.3%** | **−$2.05** |
+| SOYB | 38% (twice) | 30.3% | 56.6% | 8.9% | +$6.42 |
+| CORN | 11% (half) | 0.5% | 17.9% | 33.4% | −$6.83 |
+| CORN | **22% (table)** | **12.2%** | **41.7%** | **28.3%** | **−$0.05** |
+| CORN | 44% (twice) | 34.3% | 58.0% | 5.2% | +$7.30 |
+| UNG | 24% (half) | 15.4% | 44.3% | 25.1% | +$0.49 |
+| UNG | **48% (table)** | **35.9%** | **59.1%** | **3.4%** | **+$4.18** |
+| UNG | 96% (twice) | 39.9% | 60.2% | 0.0% | +$5.37 |
+| BOIL | 48% (half) | 35.6% | 58.7% | 3.9% | +$8.40 |
+| BOIL | **95% (table)** | **39.8%** | **60.2%** | **0.0%** | **+$10.74** |
+| BOIL | 190% (twice) | 41.5% | 58.5% | 0.0% | +$13.91 |
+| WEAT | 13% (half) | 1.1% | 22.7% | 34.9% | −$1.56 |
+| WEAT | **25% (table)** | **16.9%** | **45.6%** | **23.2%** | **+$0.39** |
+| WEAT | 50% (twice) | 36.4% | 59.2% | 2.9% | +$2.18 |
+
+Read it this way. **Every figure the brief prints moves, and some of them invert.** Halving CORN's
+volatility takes the take-profit rate from 12.2% to 0.5% and the average result from break-even to
+−$6.83; doubling it takes the same trade to +$7.30. A brief and a screen that disagree about the
+volatility are not disagreeing about a detail.
+
+**TWO PROPERTIES HOLD ON EVERY MARKET AND ONLY TWO.** More volatility means more paths reach *a*
+barrier (`pTP + pSL` never falls), and more of them reach the take-profit one (`pTP` never falls).
+`pSL` and `pTimePos` are **not** monotone — BOIL's stop rate goes 58.7% → 60.2% → 58.5%, because
+the two barriers compete for the same paths — and `ceiling.test.jsx` deliberately asserts only the
+two that hold. A test asserting a direction the arithmetic does not have would be the same fault
+this section is about.
+
+### NOT VERIFIED
+
+- **The measured volatility has never been read for any market.** Every number above labelled
+  "measured" is the table perturbed by a stated factor inside a test. Whether CORN's realised
+  volatility is 0.22, 0.15 or 0.40 is unknown here, and so is the SIGN of the correction.
+- **The measured path still has not run end to end.** `/api/av` → blob → `measuredSeasonal()` →
+  `sigmaProvenance()` is now exercised against a fake blob store and a real-shaped Alpha Vantage
+  body (`src/avFixture.js`), which is what makes it no longer *unexercised*. It is not a live call
+  and only the owner's own deploy can make it one.
+- **Nothing on a screen.** The Guardian's panel gained a sentence under its figures; whether that,
+  plus the two seasonal lines §4j added, crowds a 390px phone is a judgement nobody has made.
+- Deriving `SIGMA` itself from measured returns is **ROADMAP P2** and is deliberately not done
+  here.
 
 ---
 
@@ -1418,6 +1572,8 @@ The build order was a plan for a future builder. It is now a record.
 | The exit simulator runs at the exit rule, and the policy is the caller's | **DONE** (§4g) — it walked to 7 DTE while the rule says 21 |
 | A rule number inside an arithmetic expression is refused by a test | **DONE** (§4g) — and it still cannot catch a STALE copy |
 | The simulator's fallback volatility has a name, and the brief carries which was in force | **DONE** (§4g) — 0.25 is CHOSEN, and the table behind it is P2 |
+| One volatility source: the Guardian and the brief walk one position on one number | **DONE** (§4k) — `sigmaProvenance()` learns a third source, the simulators refuse a bare sigma, and the absence of the stamp reads as the hand-written table |
+| The measured Alpha Vantage parse is exercised, refusals included | **DONE** (§4k) — against a real-shaped fixture and a fake blob store; the LIVE call is still impossible here |
 | Video and deck | **NOT VERIFIED HERE** — outside the repo |
 
 ---
@@ -1921,7 +2077,43 @@ What is left:
 The standing rule in `CLAUDE.md`: every session starts by fixing what the last one flagged, and
 ends by writing down what it could not verify. Currently open:
 
-### WRITTEN THIS SESSION — one seasonal source, and a chance that names it (PR #26)
+### WRITTEN THIS SESSION — one volatility source, and a measured path that is exercised (PR #27)
+
+This session did TASK 0 (the two debts PR #26 handed forward: "THE MEASURED PATH HAS NEVER RUN
+ONCE" and "no test exercised either function before the move and none exercises them on a real
+Alpha Vantage body now") and TASK 1 (one volatility source for the screens and for the brief) —
+§4k. `npm test` reports **681 checks across 18 suites**, up from the **650** PR #26 wrote down and
+which a clean clone of `main` at `9232c0b` reproduces exactly. `npm run build` is clean.
+
+Suite totals that sum to 681: signals 22, chain 33, engine **28**, riskGate **152**, theme 39,
+demo 16, handoff 9, path 14, liquidity 7, order 25, journal **71**, autopilot **61**, pwa 36, and
+the five JSX files — visuals 35, wizard 56, steps 20, ceiling **49**, order.jsx 8. The thirty-one
+new checks are eleven in `engine.test.js` (four on the volatility provenance, seven on the Alpha
+Vantage parse), four in `riskGate.test.js` (the simulator shape guard and the two-constant rule),
+five in `journal.test.js` (the volatility stamp, its absence, and the hydration test), six in
+`autopilot.test.js` (`measuredSeasonal()` against a fake blob store) and five in
+`ceiling.test.jsx` (the Guardian-versus-brief agreement and the sensitivity table).
+
+**WHAT THIS CLOSES OF PR #26's DEBT, AND WHAT IT CANNOT.** It closes *unexercised*: `parseAvJson()`
+and `statsFromMatrix()` are held against a body in the shape Alpha Vantage returns — string values,
+`"5. adjusted close"`, the ten-year cutoff, the partial first and last calendar rows, `years` as
+the ROW COUNT — and the three refusal bodies Alpha Vantage serves with HTTP 200 are proved to throw
+rather than parse. `measuredSeasonal()` is driven against a fake blob store through every branch.
+It does **not** close *never run*: there is still no key and no egress, so the live call has never
+been made and only the owner's own deploy can make it.
+
+**NOTHING HERE WAS RUN AGAINST A LIVE CHAIN, A BROWSER, ALPHA VANTAGE OR A DEPLOY.** Same wall as
+PR #15 through #26.
+
+- **THE MEASURED VOLATILITY HAS NEVER BEEN READ FOR ANY MARKET.** §4k's table is the hand-written
+  row perturbed by a stated factor — a SENSITIVITY of this simulator, never a measurement of a
+  market. How far CORN's real realised volatility sits from 0.22, and in which direction, is
+  unknown here.
+- **THE GUARDIAN'S NEW SENTENCE HAS NOT BEEN SEEN.** It joins the two seasonal lines §4j added,
+  under the exit-path figures, on a screen nobody has opened on a phone.
+- **NOTHING INSIDE `SIGMA` WAS TOUCHED**, deliberately, exactly as §4j left `SEASONAL` alone.
+
+### WRITTEN BEFORE THIS — one seasonal source, and a chance that names it (PR #26)
 
 This session did TASK 0 (the debt PR #25 handed forward: no screen printed a chance beside the
 seasonal reading that drifted it) and TASK 1 (one seasonal source for the screens and for the
@@ -2078,11 +2270,14 @@ has never been watched running with this change in it**, and the corrected brief
   proves nothing about whether either set of numbers describes a real market, and the honest
   reading of `ev` moving DOWN on BOIL while it moved UP on the other two is that `ev` was never a
   one-directional quantity, not that one of them is wrong.
-- **`fallbackSigma` (0.25) IS CHOSEN, NOT MEASURED — and so is the whole table behind it.** This
-  session named the fallback and made the brief carry which of the two was in force. It did NOT
-  fix `SIGMA` in `engine.js`, which is five hand-typed numbers driving every probability the
-  simulator prints, for markets whose realised volatility nobody has computed here. That is
-  ROADMAP P2's house distribution.
+- **`fallbackSigma` (0.25) IS CHOSEN, NOT MEASURED — and so is the whole table behind it.** PR #24
+  named the fallback and made the brief carry which of the two was in force. **PR #27 (§4k) added
+  the third source and made both sides read it**, so the Guardian and the brief can no longer walk
+  one position on two volatilities. Neither PR fixed `SIGMA` in `engine.js`, which is five
+  hand-typed numbers, and **no market's realised volatility has been computed here at all** — the
+  measured branch exists, is tested, and has never been fed a real reading. §4k's table is a
+  SENSITIVITY of the simulator under a stated perturbation, never a measurement. Fixing the table
+  is ROADMAP P2's house distribution.
 - **THE GUARD STILL CANNOT PROVE A NEGATIVE, AND NOW IT CANNOT CATCH A STALE COPY EITHER.** It
   refuses three shapes across fourteen rule numbers. The bare 7 was not any rule's value, so no
   matcher could have named it — what the widened guard caught was the two `0.5`s beside it. A

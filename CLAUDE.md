@@ -368,6 +368,41 @@ No value changed: a rename that moves a number is two changes wearing one coat.
   of the share, the other of the option market on it, and merging them would make a correction to
   either silently move the other. Provenance is carried the way `sigmaProvenance()` carries it.
 
+## ONE VOLATILITY SOURCE — and `sigmaProvenance()` knows THREE
+
+`statsFromMatrix()` has always returned the MEASURED realised volatility of the monthly series
+beside the twelve means. `App.jsx` stored it as `seasonal[tk].sigma` and handed it to the
+Guardian's `exitPathSim`; `autopilot.mjs` read `SIGMA[pos.ticker]` with no measured value
+available to it at all. **One position, two volatilities**, and `pTP`, `pSL`, `pTimePos`, `ev` and
+`medDays` all move with the difference — the fault PR #26 fixed for the seasonal MEANS, one layer
+down. PRD §4k.
+
+- **`sigmaProvenance(measured, tableSigma, ticker)` in `rules.js` is the one home**, in the same
+  shape as `seasonalProvenance()`: the value, the source, the year count, the age in days and one
+  sentence. Three sources — `measured history`, `table`, `fallback` — and the sentence may no
+  longer say "written down, not measured from returns" about a number that was measured.
+  `readingAgePhrase()` is shared with the seasonal stamp because **it is one reading**: the means
+  and the sigma come out of one parse of one body.
+- **`exitSim` and `exitPathSim` take the PROVENANCE, not a number, and THROW on a bare sigma** —
+  the same discipline as `exitSim` throwing without an exit policy and `chanceOf()` throwing on a
+  bare row of means. The check is structural, because `engine.js` imports nothing. Both **return**
+  `sigma` and `sigmaSource`, so a field name cannot assert a reading the arithmetic did not use.
+  `riskGate.test.js` sweeps every file for a call site handing either one a bare `SIGMA[...]`,
+  `getU(tk).sigma` or `seasonal[tk]?.sigma`.
+- **ONE BLOB READ, TWO PROVENANCES.** `measuredSeasonal()` in `autopilot.mjs` returns
+  `{ monthlyMean, sigma, years, at }` — the sigma it was already computing and throwing away.
+  Never a second read and never a fetch.
+- **The ABSENCE of the stamp means the hand-written table**, the third time this pattern is used
+  (`contractsAssumed`, `simExitDTE`, `seasonalSource`). `simVolOf()` / `autopilotVolNote()` in
+  `src/journal.js`, rendered wherever `autopilotHorizonNote()` is.
+- **`RULES.fallbackSigma` is still the named fallback and still says it was CHOSEN**, and nothing
+  inside `SIGMA` was edited: this changed where the volatility comes from and what the app SAYS
+  about it. Fixing the table is ROADMAP P2.
+- **The Build screen's simulation footnote named the wrong quantity.** It printed `seas.sigma`,
+  the realised volatility, on a panel whose every figure is priced at the chain's IMPLIED
+  volatility. It names the implied volatility and the seasonal table now, and `seas` no longer
+  carries a `sigma` at all.
+
 Both collisions were clean on the first sweep — nothing was hiding behind either. All three are
 CHOSEN, not measured, and all three are on the PRD's NOT VERIFIED list.
 
@@ -478,10 +513,12 @@ called `p_exit_at_exit_dte_positive`. The NAME asserted the rule the arithmetic 
   its own walk.
 - **Never call `netBS()` with a number where the days go.** `engine.test.js` fails the build if
   either simulator does: that third argument is always a policy written down twice.
-- **The fallback volatility has a name.** `SIGMA[pos.ticker] || 0.25` was a hand-written table
-  with an unlabelled hand-written fallback behind it. `RULES.fallbackSigma` / `sigmaProvenance()`
-  decide once which of the two is in force and carry it to the brief, the warning and the model,
-  exactly as `markProvenance()` does for a price. **0.25 is CHOSEN, not measured**; fixing the
+- **The volatility has a name, a source and an age.** `SIGMA[pos.ticker] || 0.25` was a
+  hand-written table with an unlabelled hand-written fallback behind it. `RULES.fallbackSigma` /
+  `sigmaProvenance()` decide once which of THREE sources is in force — measured, table, fallback —
+  and carry it to the brief, the warning and the model, exactly as `markProvenance()` does for a
+  price. **The volatility is an ARGUMENT with no default, like the policy**: both simulators throw
+  on a bare sigma and return the one they walked on. **0.25 is CHOSEN, not measured**; fixing the
   TABLE is ROADMAP P2.
 
 ## Working orders have a home, and SENT is not FILLED
@@ -698,7 +735,11 @@ while the position is open.
   of profit, and the only caller of `terminalMC`), `seasonalProvenance()` /
   `seasonalStampOf()` / `seasonalSourceSentence()` (WHOSE seasonal table drifted it,
   and what the absence of a stamp on a record means), `fallbackIV` with
-  `ivProvenance()`, `watchAttentionShare` with `watchAttentionLevel()`,
+  `ivProvenance()`, `fallbackSigma` with `sigmaProvenance()` / `sigmaSourceSentence()` /
+  `sigmaStampFields()` (WHICH realised volatility the exit simulator walked the share on — three
+  sources, and the measured one is not "written down"), `readingAgePhrase()` (how old a reading
+  is, shared by the seasonal stamp and the volatility one because it is ONE reading),
+  `watchAttentionShare` with `watchAttentionLevel()`,
   `autopilotConfidence`,
   `modelDisagreementRatio` with `modelSanity()` (is it THIS structure's price —
   one of the two reasons this file imports `engine.js`, the other being
@@ -736,9 +777,9 @@ while the position is open.
   `appendTimeline()` / `stampTimeline()` (every append goes through one of these, so an entry
   cannot get its number two different ways), `orderStatusRecheck()`, `closeReason()` /
   `closeDecision()`, `journalEntry()` (what a closed trade keeps) and `searchJournal()`.
-  **`simHorizonOf()` / `autopilotHorizonNote()` live here too** — what horizon an
-  autopilot entry's simulation ran to, and the absence of that stamp, are facts
-  about the record.
+  **`simHorizonOf()` / `autopilotHorizonNote()` and `simVolOf()` / `autopilotVolNote()` live here
+  too** — what horizon an autopilot entry's simulation ran to and which volatility it walked on,
+  and the absence of either stamp, are facts about the record.
   **`positionSize()` / `contractsOf()` / `withPositionSize()` / `positionSizeNote()` live
   here too** — how big a position is, and whether that is known, is a fact about its record.
   `riskGate.js` imports them; nothing else may re-derive a size.
@@ -1313,7 +1354,8 @@ rejects anything it cannot confirm.
   that half of the old note still stands: it answers a different question — what
   happens along the path under the exit rule, not where the price finishes — and
   the UI depends on the extra fields it returns (`pTimeNeg`, `pWin`, `horizon`).
-  It reads `RULES.exitDTE` for its numbers; only the body is its own
+  It reads `RULES.exitDTE` for its numbers and takes its volatility as a
+  `sigmaProvenance()` result exactly as `exitSim` does; only the body is its own
 
 ## The basket
 

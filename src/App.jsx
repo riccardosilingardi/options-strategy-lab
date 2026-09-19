@@ -27,7 +27,8 @@ import { RULES, sizing, ruleBadge, takeProfitLabel, stopLossLabel, perTradeCapLa
   expiryChoice, expiryChoiceNote, emptyExpiryNote, wideSpreadNote, spreadSkippedNote,
   chancePct, chanceText, chanceInTen, signedMoney,
   ruleExitOf, stopWarningSentence, watchAttentionLevel,
-  chanceOf, chanceSourceNote, seasonalProvenance, seasonalStampNote, seasonalStampFields } from "./rules.js";
+  chanceOf, chanceSourceNote, seasonalProvenance, seasonalStampNote, seasonalStampFields,
+  sigmaProvenance } from "./rules.js";
 import { isStale, freshnessNote, staleAmong } from "./freshness.js";
 import { evaluateTrade, gateSummary } from "./riskGate.js";
 import { DEMO, DEMO_BANNER, DEMO_TOOLTIP, DEMO_SEED_TICKERS, demoPositions } from "./demo.js";
@@ -37,7 +38,7 @@ import { orderBody, orderOutcome, alpacaErrorText, reduceRatios } from "./order.
 // THE PERMANENT RECORD: the ref a position is given at open, the sequence on
 // every timeline entry, the close reason, and what survives into the Journal.
 import { nextRef, refCounter, appendTimeline, stampTimeline, orderStatusRecheck, closeDecision,
-  autopilotHorizonNote,
+  autopilotHorizonNote, autopilotVolNote,
   positionSize, positionSizeNote, contractsOf, withPositionSize,
   journalEntry, searchJournal, CLOSE_REASON_MIN, refNumber } from "./journal.js";
 import { FIRST_STEP, stepCarry, candidateOf, candidateKey, legsLine, toggleCompare, inCompare, MAX_COMPARE, savedFromCandidate, candidateFromSaved, savedAge } from "./path.js";
@@ -1098,7 +1099,11 @@ export default function OptionsStrategyLab() {
   // reading for its own purpose and is never the price on screen.
   const spot = spotOf(chain);
   const spotAge = spotAt(chain);
-  const seas = seasonal[ticker] || { monthlyMean: U.monthlyMean, sigma: U.sigma, matrix: null, years: null, src: "estimate" };
+  // NO `sigma` HERE. This fallback used to carry `sigma: U.sigma`, which was a
+  // second place deciding which realised volatility is in force when nothing
+  // is loaded — `sigmaProvenance()` is the one that decides that now, and
+  // nothing on this screen reads a realised volatility off `seas` at all.
+  const seas = seasonal[ticker] || { monthlyMean: U.monthlyMean, matrix: null, years: null, src: "estimate" };
   const iv = U.iv;
   const dte = expKey && chain?.byExp[expKey] ? chain.byExp[expKey].dte : dteManual;
   const expStrikes = useMemo(() => {
@@ -1512,6 +1517,18 @@ export default function OptionsStrategyLab() {
      screen can print the number without the sentence naming its source. */
   const seasonalFor = useCallback(
     (tk) => seasonalProvenance(seasonal[tk] || null, getU(tk).monthlyMean, tk),
+    [seasonal]);
+  /* AND WHICH REALISED VOLATILITY THE EXIT SIMULATION WALKS THE SHARE ON, from
+     the one place that decides THAT: `sigmaProvenance()` in rules.js. It is the
+     SAME loaded reading — `statsFromMatrix()` returns the twelve means and the
+     annualised sigma of one monthly series — and until now this screen read it
+     as `seasonal[tk]?.sigma || getU(tk).sigma` in four places while
+     `autopilot.mjs` had no measured sigma available to it at all. One position,
+     two volatilities, and every exit-simulator figure moved with the
+     difference. Never spell that `||` again: it is a decision with no source
+     attached, which is what `exitSim` and `exitPathSim` now refuse by shape. */
+  const sigmaFor = useCallback(
+    (tk) => sigmaProvenance(seasonal[tk] || null, getU(tk).sigma, tk),
     [seasonal]);
   /* THE ONE CHANCE, BOUND TO THIS COMPONENT'S SEASONAL STATE. `chanceCheckOf`
      is the module-level expression; this supplies the only argument a screen
@@ -2541,7 +2558,7 @@ export default function OptionsStrategyLab() {
         // all read the same number.
         rr: x.rr, contracts: 1, a: x.a, fused: x.fused,
         driver: x.driver, drivers: x.drivers,
-        sigma: (seasonal[x.tk]?.sigma) || getU(x.tk).sigma,
+        sigma: sigmaFor(x.tk).sigma,
         // A ROAD CARRIES THE SOURCE OF ITS OWN CHANCE. Two roads are ranked on
         // one scale across the whole basket, so road 1 and road 2 can be in
         // different markets — and with four of five markets on the hand-written
@@ -3303,7 +3320,17 @@ export default function OptionsStrategyLab() {
                       </div>
                     )}
                     <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 8 }}>
-                      Simulated with {seasonal[ticker] ? "real" : "estimated"} seasonal drift and {(seas.sigma * 100).toFixed(0)}% volatility. A simplified model: no price jumps, no volatility term structure.
+                      {/* WHAT THE PANEL ABOVE ACTUALLY RAN ON — AND THE N IN
+                          THIS SENTENCE USED TO BE THE WRONG QUANTITY. It read
+                          `seas.sigma`, the REALISED volatility of the monthly
+                          series, which is what the exit simulator walks the
+                          SHARE on; nothing on this panel uses it. The chance,
+                          its distribution and its average result are all priced
+                          at the chain's IMPLIED volatility. So the fix is not to
+                          say where that N came from — it is to name the number
+                          that produced the figures above, with its source, and
+                          stop printing one that produced nothing here. */}
+                      Simulated at {pctText(chance.sigma)} implied volatility from the {chance.ivSource}, drifted on {ticker}&apos;s {chance.seasonalMeasured ? "measured" : "hand-written"} seasonality — both named in full above. A simplified model: no price jumps, no volatility term structure.
                     </div>
                   </>
                 ) : (
@@ -3864,7 +3891,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   // multi-market hit are the same kind of thing here.
                   const bands = payoffBands({ legs: p.legs, entryNet: a.entry, spot });
                   const cand = candidateOf({ name: p.name, legs: p.legs, a, pop, dte, expKey, ...seasonalStampFields(mcRow) },
-                    { ticker, spot, sigma: seas.sigma, source: "shortlist" });
+                    { ticker, spot, sigma: sigmaFor(ticker).sigma, source: "shortlist" });
                   return (
                     <div key={p.name} style={{ padding: "10px 12px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7 }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
@@ -3949,7 +3976,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                 <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
                   {(multi.res || []).filter((r) => r.tk === ticker).map((r, i) => {
                     const cand = candidateOf({ name: r.name, legs: r.legs, a: r.a, pop: r.pop, dte: r.dte, expKey: r.expKey, ...seasonalStampFields(r.mc) },
-                      { ticker: r.tk, spot: r.spot, sigma: (seasonal[r.tk]?.sigma) || getU(r.tk).sigma, source: "wide search" });
+                      { ticker: r.tk, spot: r.spot, sigma: sigmaFor(r.tk).sigma, source: "wide search" });
                     const bands = payoffBands({ legs: r.legs, entryNet: r.a.entry, spot: r.spot });
                     return (
                       <div key={`${r.name}-${i}`} style={{ padding: "10px 12px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7 }}>
@@ -4712,7 +4739,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                         return (
                           <GuardianPanel
                             pos={p} spot={s || p.entrySpot} dteLeft={dteLeft} ivNow={ivNow}
-                            sigma={(seasonal[p.ticker]?.sigma) || getU(p.ticker).sigma}
+                            vol={sigmaFor(p.ticker)}
                             seasonalNow={seasNow} pnlNow={pnl} popNow={popNow} chanceNow={mcNow}
                             seasonalNote={chanceStamp(mcNow, p.ticker)}
                             thesisSeasonalNote={seasonalStampNote(p.thesis, p.ticker)}
@@ -5016,7 +5043,8 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                           // entries are exactly the ones nobody will re-read
                           // against the fix. `autopilotHorizonNote()` is null
                           // on every entry that carries its own horizon.
-                          const stale = autopilotHorizonNote(x);
+                          // ...and which volatility it walked on, the same way.
+                          const notes = [autopilotHorizonNote(x), autopilotVolNote(x)].filter(Boolean);
                           return (
                             <div key={x.seq || i} style={{ marginTop: 3 }}>
                               <div style={{ ...mono, fontSize: 10, color: T.mut, lineHeight: 1.5 }}>
@@ -5024,7 +5052,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                                 <span style={{ color: T.dim }}>{` ${new Date(x.t).toLocaleDateString("en-GB")} · `}</span>
                                 {x.text}
                               </div>
-                              {stale && <div style={{ ...mono, fontSize: 9.5, color: T.amber, lineHeight: 1.5 }}>{`⚠ ${stale}`}</div>}
+                              {notes.map((n) => <div key={n} style={{ ...mono, fontSize: 9.5, color: T.amber, lineHeight: 1.5 }}>{`⚠ ${n}`}</div>)}
                             </div>
                           );
                         })}
