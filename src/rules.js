@@ -2023,61 +2023,135 @@ export function markProvenance(chainNet, feed = "the option chain") {
   };
 }
 
+/* --------------------------------------------------------------------
+   HOW OLD A READING IS, IN WORDS — AND IT IS ONE READING.
+
+   The measured monthly series is parsed ONCE (`parseAvJson` /
+   `statsFromMatrix` in engine.js) and produces two things this file carries
+   provenance for: the twelve seasonal means the drift leans on, and the
+   annualised realised volatility the exit simulator walks the SHARE on. They
+   are the same reading of the same prices taken at the same moment, so they
+   share one age phrase. This used to be called `seasonalAgePhrase` and live
+   inside the seasonal block, which would have meant a second copy of four
+   lines the moment the volatility needed the same sentence.
+-------------------------------------------------------------------- */
+
+/** Null is "not recorded", never "today" — `Number(null)` is 0 and 0 is finite. */
+export const readingAgePhrase = (ageDays) => {
+  if (!Number.isFinite(ageDays)) return "read on a date this record does not carry";
+  if (ageDays <= 0) return "read today";
+  if (ageDays === 1) return "read yesterday";
+  return `read ${Math.round(ageDays)} days ago`;
+};
+
 /**
- * THE VOLATILITY THE SIMULATOR WALKS ON, WHEN THE TABLE HAS NO ROW FOR A TICKER.
+ * THE REALISED VOLATILITY THE EXIT SIMULATOR WALKS THE SHARE ON — and there are
+ * THREE places it can come from, not two.
  *
- * `SIGMA` in `engine.js` is a HAND-WRITTEN per-ticker table, and `autopilot.mjs`
- * read it as `SIGMA[pos.ticker] || 0.25` — an unlabelled hand-written fallback
- * behind a hand-written table, driving every number the exit simulator produces:
- * the chance of taking profit first, the chance of the stop first, the chance of
- * being positive at the exit rule, the expected P&L and the median days to
- * target. A brief that says "38% chance of taking profit first" reads the same
- * whether the 38 came from a number somebody wrote down for BOIL or from a
- * number nobody wrote down for anything.
+ * WHAT WAS HERE. This function knew `SIGMA` in `engine.js` (a HAND-WRITTEN
+ * per-ticker table) and `RULES.fallbackSigma` behind it, and its sentence said
+ * "written down, not measured from returns" about whichever of the two was in
+ * force. That was true of both. It is NOT true of the third source, which was
+ * already in the app and already on screen: `statsFromMatrix()` returns
+ * `sqrt(var * 12)` of the measured monthly returns, `App.jsx` has been storing
+ * it as `seasonal[tk].sigma` and handing it to the Guardian for four pull
+ * requests, and `autopilot.mjs` had no measured volatility available to it at
+ * all. So `exitSim` on the brief and `exitPathSim` on the Guardian walked the
+ * SAME position on TWO different volatilities, and every figure they produce —
+ * `pTP`, `pSL`, `pTimePos`, `ev`, `medDays` — moves with it. That is the fault
+ * PR #26 fixed for the seasonal MEANS, one layer down.
  *
- * **0.25 IS CHOSEN, NOT MEASURED.** It is a mid-range annualised volatility for
- * a commodity ETF — between the grain markets this app trades (0.19 to 0.25 in
- * the table) and the leveraged ones (0.48, 0.95). Nothing was estimated from
- * returns to arrive at it, and it is on the PRD's NOT VERIFIED list. Fixing the
- * TABLE — measuring realised volatility per market instead of typing it — is
- * ROADMAP P2's house distribution and is deliberately not done here.
+ * SAME SHAPE AS `seasonalProvenance()`, DELIBERATELY. That function is one pull
+ * request old and it is the house pattern now: the value, which of the sources
+ * produced it, the year count, the age in days, and one sentence. A third
+ * provenance invented in a third shape would be a third thing to learn.
  *
- * What IS done here is the `markProvenance()` discipline: decide once WHICH of
- * the two was in force, and carry it everywhere the number goes.
+ * **0.25 IS CHOSEN, NOT MEASURED.** `RULES.fallbackSigma` is a mid-range
+ * annualised volatility for a commodity ETF — between the grain markets this
+ * app trades (0.19 to 0.25 in the table) and the leveraged ones (0.48, 0.95).
+ * Nothing was estimated from returns to arrive at it and it is on the PRD's NOT
+ * VERIFIED list. It is STILL THE NAMED FALLBACK, behind both the measured
+ * reading and the table, and it still says so on screen.
+ *
+ * AND IT must NEVER be merged with `RULES.fallbackIV`: one is the REALISED volatility
+ * the share's price is walked on, the other the IMPLIED volatility the OPTIONS
+ * are priced at. Merging them would make a correction to either silently move
+ * the other. Nothing inside `SIGMA` is edited here either — what changes is
+ * where the volatility comes from and what the app SAYS about it, exactly as
+ * PR #26 left `SEASONAL` alone.
  */
 export const FALLBACK_SIGMA = RULES.fallbackSigma;
 
-/** What the app calls a volatility it did not have a row for. */
-export const FALLBACK_SIGMA_SOURCE = "fallback";
+/** A volatility worked out from the market's own measured monthly returns. */
+export const MEASURED_SIGMA_SOURCE = "measured history";
 
-/** And what it calls one it did. */
+/** ...the hand-written row in `SIGMA`, which is an estimate and says so. */
 export const TABLE_SIGMA_SOURCE = "table";
 
+/** ...and one nobody wrote down for this market at all. */
+export const FALLBACK_SIGMA_SOURCE = "fallback";
+
 /**
- * WHICH VOLATILITY IS IN FORCE, decided once.
- *
- * @param tableSigma  the table's value for this ticker, or undefined/null
- * @param ticker      what to name in the sentence when there is no row
+ * ONE SENTENCE SAYING WHICH VOLATILITY A SIMULATION WALKED ON AND HOW OLD THAT
+ * READING IS. Every screen that prints an exit-simulator figure prints this
+ * beside it, and the autopilot's brief carries the same string, so a number
+ * cannot travel without its source.
  */
-export function sigmaProvenance(tableSigma, ticker = "this market") {
-  const fromTable = Number.isFinite(tableSigma) && tableSigma > 0;
-  const sigma = fromTable ? tableSigma : FALLBACK_SIGMA;
-  return {
-    sigma,
-    fromTable,
-    source: fromTable ? TABLE_SIGMA_SOURCE : FALLBACK_SIGMA_SOURCE,
-    note: fallbackSigmaNote(ticker, sigma, fromTable),
+export const sigmaSourceSentence = ({ source = FALLBACK_SIGMA_SOURCE, sigma = FALLBACK_SIGMA,
+  ticker = "this market", years = null, ageDays = null } = {}) => {
+  if (source === MEASURED_SIGMA_SOURCE) {
+    return `The simulation below walks ${ticker} at ${pctText(sigma)} a year, MEASURED from ` +
+      `${Number.isFinite(years) ? `${years} years of` : "its own"} monthly returns, ${readingAgePhrase(ageDays)}.`;
+  }
+  if (source === TABLE_SIGMA_SOURCE) {
+    return `The simulation below walks ${ticker} at ${pctText(sigma)} a year, the figure this app holds for it. ` +
+      `That figure is written down, not measured from returns.`;
+  }
+  return `THE SIMULATION BELOW IS WALKED AT A FALLBACK VOLATILITY. This app holds no figure for ${ticker}, so ` +
+    `it used ${pctText(sigma)} a year — a number chosen as a middle for a commodity ETF, not measured from ` +
+    `${ticker}'s own returns. Every figure the simulator produces for it is that assumption's, not the market's.`;
+};
+
+/**
+ * WHICH VOLATILITY IS IN FORCE, DECIDED ONCE AND CARRIED.
+ *
+ * @param measured    the loaded measured reading for this market, or null:
+ *                    `{ sigma, years, at }` — the same object
+ *                    `seasonalProvenance()` takes, because it IS the same
+ *                    reading. `at` is when it was read, in epoch ms.
+ * @param tableSigma  the hand-written row for this market (`SIGMA[tk]`), or null
+ * @param ticker      what the sentence names
+ * @returns { sigma, source, measured, fromTable, fromFallback, years, ageDays, ticker, note }
+ */
+export function sigmaProvenance(measured, tableSigma, ticker = "this market") {
+  const ok = (x) => Number.isFinite(x) && x > 0;
+  const meas = measured && ok(measured.sigma) ? measured : null;
+  const source = meas ? MEASURED_SIGMA_SOURCE : ok(tableSigma) ? TABLE_SIGMA_SOURCE : FALLBACK_SIGMA_SOURCE;
+  const sigma = meas ? meas.sigma : ok(tableSigma) ? tableSigma : FALLBACK_SIGMA;
+  // `Number.isFinite` on both, for the reason `seasonalProvenance()` gives:
+  // `Number(null)` is 0, so a missing year count must not print as "0 years of
+  // monthly returns" and a missing timestamp must not read as "read today".
+  const years = meas && Number.isFinite(meas.years) ? meas.years : null;
+  const ageDays = meas && Number.isFinite(meas.at)
+    ? Math.max(0, Math.floor((Date.now() - meas.at) / 86400000)) : null;
+  const out = {
+    sigma, source,
+    measured: !!meas,
+    fromTable: source === TABLE_SIGMA_SOURCE,
+    fromFallback: source === FALLBACK_SIGMA_SOURCE,
+    years, ageDays, ticker,
   };
+  out.note = sigmaSourceSentence(out);
+  return out;
 }
 
-/** One sentence saying where the simulator's volatility came from. */
-export const fallbackSigmaNote = (ticker = "this market", sigma = FALLBACK_SIGMA, fromTable = false) =>
-  fromTable
-    ? `The simulation below walks ${ticker} at ${pctText(sigma)} a year, the figure this app holds for it. ` +
-      `That figure is written down, not measured from returns.`
-    : `THE SIMULATION BELOW IS WALKED AT A FALLBACK VOLATILITY. This app holds no figure for ${ticker}, so ` +
-      `it used ${pctText(sigma)} a year — a number chosen as a middle for a commodity ETF, not measured from ` +
-      `${ticker}'s own returns. Every figure the simulator produces for it is that assumption's, not the market's.`;
+/** The four fields a record keeps, from a `sigmaProvenance()` result. */
+export const sigmaStampFields = (prov) => ({
+  simSigma: Number.isFinite(prov?.sigma) ? prov.sigma : null,
+  simSigmaSource: prov?.source ?? null,
+  simSigmaYears: prov?.years ?? null,
+  simSigmaAgeDays: prov?.ageDays ?? null,
+});
 
 /* --------------------------------------------------------------------
    AND THE IMPLIED VOLATILITY, WHICH IS A DIFFERENT QUANTITY.
@@ -2194,14 +2268,6 @@ export const NO_SEASONAL_SOURCE = "none";
 /** Twelve finite numbers, or it is not a seasonal row. */
 const seasonalRowOk = (m) => Array.isArray(m) && m.length === 12 && m.every((x) => Number.isFinite(x));
 
-/** How old the measured reading is, in words. Null is "not recorded", never "today". */
-export const seasonalAgePhrase = (ageDays) => {
-  if (!Number.isFinite(ageDays)) return "read on a date this record does not carry";
-  if (ageDays <= 0) return "read today";
-  if (ageDays === 1) return "read yesterday";
-  return `read ${Math.round(ageDays)} days ago`;
-};
-
 /**
  * ONE SENTENCE NAMING WHICH TABLE DRIFTED A CHANCE AND HOW OLD IT IS.
  * Every screen that prints a chance prints this beside it, and the autopilot's
@@ -2216,7 +2282,7 @@ export const seasonalSourceSentence = ({ measured = false, missing = false, tick
   }
   if (measured) {
     return `Drifted on ${ticker}'s MEASURED seasonality: ` +
-      `${Number.isFinite(years) ? `${years} years of` : "its own"} monthly prices, ${seasonalAgePhrase(ageDays)}.`;
+      `${Number.isFinite(years) ? `${years} years of` : "its own"} monthly prices, ${readingAgePhrase(ageDays)}.`;
   }
   return `Drifted on the HAND-WRITTEN seasonal estimate for ${ticker}, not on measured prices. ` +
     `That table is wrong on eight months of twelve where it has been checked, so this chance is an ` +

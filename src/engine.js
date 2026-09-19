@@ -194,13 +194,37 @@ export function terminalMC(legs, entryNet, S, policy) {
  * number this file happens to hold rather than the number the app applies.
  * A missing or unreadable policy THROWS.
  *
+ * AND THE VOLATILITY IS A PROVENANCE, NOT A NUMBER, FOR THE SAME REASON.
+ * `vol` used to be a bare sigma, and the two call sites read it from two
+ * different places: the Guardian from `seasonal[tk].sigma` (the MEASURED
+ * realised volatility of the monthly series) falling back to the hand-written
+ * `SIGMA` row, and `autopilot.mjs` from `SIGMA[pos.ticker]` with no measured
+ * value available to it at all. So the brief and the screen walked the same
+ * position on two different volatilities and every figure below moved with it,
+ * while nothing either of them printed said which number had produced it.
+ * `sigmaProvenance()` in `rules.js` is the one home; this function takes its
+ * RESULT so a caller cannot hand in a lookup with no source attached, and
+ * RETURNS the sigma and the source it actually used, the same reason `horizon`
+ * and `exitDTE` come back: a field name must never assert a reading on its own
+ * authority. The shape is checked structurally — this file reads no `RULES`.
+ *
+ * @param vol     a `sigmaProvenance()` result: { sigma, source, ... }
  * @param policy  { exitDTE, takeProfitPct, stopLossPct } — from `RULES`.
  */
-export function exitSim(pos, S, dteLeft, iv, sigma, policy, n = 1500) {
+export function exitSim(pos, S, dteLeft, iv, vol, policy, n = 1500) {
   const { exitDTE, takeProfitPct, stopLossPct } = policy || {};
   if (![exitDTE, takeProfitPct, stopLossPct].every((x) => Number.isFinite(x))) {
     throw new TypeError(
       "exitSim needs the exit policy from RULES: { exitDTE, takeProfitPct, stopLossPct }",
+    );
+  }
+  const { sigma, source: sigmaSource } = vol || {};
+  // A bare number is refused BY SHAPE. Whether 0.22 is a plausible volatility
+  // is `sigmaProvenance()`'s question; whether anybody can say where it came
+  // from is this one, and a number on its own cannot answer it.
+  if (!Number.isFinite(sigma) || sigma < 0 || typeof sigmaSource !== "string" || !sigmaSource) {
+    throw new TypeError(
+      "exitSim needs a sigmaProvenance() result as `vol`, never a bare SIGMA lookup: see src/rules.js",
     );
   }
   // `takeProfitPct * null` is 0 in JavaScript. A position with no ceiling on
@@ -227,7 +251,7 @@ export function exitSim(pos, S, dteLeft, iv, sigma, policy, n = 1500) {
     if (!done) { const pnl = (netBS(pos.legs, s, exitDTE, iv) - pos.entryNet) * 100; if (pnl > 0) nPos++; sum += pnl; }
   }
   tds.sort((a, b) => a - b);
-  return { pTP: nTP / n, pSL: nSL / n, pTimePos: nPos / n, ev: sum / n, medDays: tds.length ? tds[(tds.length / 2) | 0] : null, horizon: days, exitDTE };
+  return { pTP: nTP / n, pSL: nSL / n, pTimePos: nPos / n, ev: sum / n, medDays: tds.length ? tds[(tds.length / 2) | 0] : null, horizon: days, exitDTE, sigma, sigmaSource };
 }
 
 export const SEASONAL = {

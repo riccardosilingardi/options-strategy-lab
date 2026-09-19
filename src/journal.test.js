@@ -18,13 +18,14 @@ import assert from "node:assert/strict";
 import {
   refOf, refNumber, seqOf, highestSeq, refCounter, nextRef,
   appendTimeline, stampTimeline, orderStatusRecheck,
-  simHorizonOf, autopilotHorizonNote,
+  simHorizonOf, autopilotHorizonNote, simVolOf, autopilotVolNote,
   closeReason, closeDecision, CLOSE_REASON_MIN,
   journalEntry, lastCloseOrderId,
   byRefDesc, matchesRef, searchJournal, SEQ_SEP,
   positionSize, positionSizeNote, contractsOf, withPositionSize, ASSUMED_CONTRACTS,
 } from "./journal.js";
-import { RULES, ruleExitOf, stopWarningSentence } from "./rules.js";
+import { RULES, ruleExitOf, stopWarningSentence,
+  seasonalStampOf, seasonalStampNote, ESTIMATED_SEASONAL_SOURCE, MEASURED_SEASONAL_SOURCE } from "./rules.js";
 import { reduceRatios, orderQty } from "./order.js";
 
 let passed = 0;
@@ -685,6 +686,138 @@ test("the stamp survives a hydration of an old book", () => {
   assert.equal(simHorizonOf(ap.timeline[1]).stamped, false);
   assert.equal(simHorizonOf(ap.timeline[3]).stamped, true);
   assert.equal(autopilotHorizonNote(ap.timeline[1]) !== null, true);
+});
+
+/* ============================================================================
+   AND WHICH VOLATILITY THAT SIMULATION WALKED ON (PR #27, PRD §4k).
+
+   The same fact about the same entry, one layer down. Until PR #27 the brief's
+   `exitSim` walked the hand-written `SIGMA` row — the only volatility the
+   autopilot could reach — while the Guardian's `exitPathSim` walked the
+   MEASURED realised volatility of the monthly series App.jsx had already
+   loaded. Every figure the model then wrote its rationale from moved with the
+   difference, and the rationale is what this entry's text is made of.
+============================================================================ */
+
+const VOL_STAMPED = { t: 1, type: "autopilot", text: "AUTOPILOT HOLD — ...",
+  simSigma: 0.41, simSigmaSource: "measured history", simSigmaYears: 11, simSigmaAgeDays: 2 };
+const VOL_TABLE = { t: 1, type: "autopilot", text: "AUTOPILOT HOLD — ...",
+  simSigma: 0.22, simSigmaSource: "table", simSigmaYears: null, simSigmaAgeDays: null };
+
+test("an autopilot entry with no volatility stamp reads as the HAND-WRITTEN table", () => {
+  // The absence is the marker, exactly as `contractsAssumed` and `simExitDTE`
+  // work — and it reads as the table because the table was the only volatility
+  // the autopilot could reach. Reading it as measured would invent one.
+  const before = simVolOf(UNSTAMPED);
+  assert.equal(before.autopilot, true);
+  assert.equal(before.stamped, false);
+  assert.equal(before.source, "table", "the only thing it can have been");
+  assert.equal(before.measured, false);
+  assert.equal(before.sigma, null, "an unknown volatility is not a volatility of 0");
+  assert.equal(before.years, null);
+  assert.equal(before.ageDays, null);
+
+  const meas = simVolOf(VOL_STAMPED);
+  assert.equal(meas.stamped, true);
+  assert.equal(meas.measured, true);
+  assert.equal(meas.sigma, 0.41);
+  assert.equal(meas.years, 11);
+  assert.equal(meas.ageDays, 2);
+
+  const table = simVolOf(VOL_TABLE);
+  assert.equal(table.stamped, true, "saying 'table' out loud is a stamp");
+  assert.equal(table.measured, false);
+  assert.equal(table.sigma, 0.22);
+  assert.equal(table.years, null, "a table figure has no year count to report");
+});
+
+test("a volatility of 0 and a garbage one are not stamps", () => {
+  // `Number(null)` is 0 and 0 is finite — the fault this repository is about.
+  assert.equal(simVolOf({ type: "autopilot", simSigmaSource: null, simSigma: 0.2 }).stamped, false);
+  assert.equal(simVolOf({ type: "autopilot", simSigmaSource: "" }).stamped, false);
+  assert.equal(simVolOf({ type: "autopilot", simSigmaSource: 21 }).stamped, false);
+  // A source WITHOUT a sigma is still a stamp about the source, and the sigma
+  // stays null rather than becoming zero.
+  const noSigma = simVolOf({ type: "autopilot", simSigmaSource: "table" });
+  assert.equal(noSigma.stamped, true);
+  assert.equal(noSigma.sigma, null);
+  assert.equal(simVolOf({ type: "autopilot", simSigmaSource: "table", simSigma: "0.22" }).sigma, null,
+    "a string is not a reading");
+});
+
+test("the volatility note appears on an unstamped entry and on NOTHING else", () => {
+  const note = autopilotVolNote(UNSTAMPED);
+  assert.ok(note && note.length > 0);
+  assert.ok(/hand-written table/.test(note), "and it says which one it must have been");
+  assert.equal((note.match(/\.(?=\s|$)/g) || []).length, 1, `not one sentence: ${note}`);
+  assert.ok(!/sorry|apolog|we regret/i.test(note));
+  // A stamped entry is not marked, whichever source it names — a measured
+  // reading is a statement and the table naming itself is not a surprise.
+  assert.equal(autopilotVolNote(VOL_STAMPED), null);
+  assert.equal(autopilotVolNote(VOL_TABLE), null);
+  for (const e of [{ t: 1, type: "open", text: "Opened" }, { t: 1, type: "order", text: "Sent" },
+    { t: 1, type: "gate", text: "RISK GATE" }, {}, null]) {
+    assert.equal(autopilotVolNote(e), null, `${JSON.stringify(e)} never ran a simulation`);
+  }
+});
+
+test("HYDRATION — a record with no seasonal or volatility stamp reads as the estimate", () => {
+  // The two hydration passes every stored position goes through on load:
+  // `withPositionSize()` gives it a size and `stampTimeline()` gives its
+  // entries their sequences. NEITHER may invent a provenance — a stamp added
+  // at hydration would be the app manufacturing a measurement for a record
+  // written when neither side could reach one.
+  const old = {
+    ref: "J-0003",
+    ticker: "CORN",
+    // A thesis written before the app recorded a seasonal source, which is the
+    // state every position saved by an earlier build is in.
+    thesis: { pop: 0.55, iv: 0.24, seasonal: 1.5 },
+    timeline: [{ t: 10, type: "open", text: "Opened" }, { ...UNSTAMPED, t: 20 }],
+  };
+  const hydrated = stampTimeline(withPositionSize(old));
+
+  // 1) The seasonal stamp is still absent, and reads as the hand-written row.
+  assert.equal(hydrated.thesis.seasonalSource, undefined, "hydration invents nothing");
+  const stamp = seasonalStampOf(hydrated.thesis);
+  assert.equal(stamp.stamped, false);
+  assert.equal(stamp.source, ESTIMATED_SEASONAL_SOURCE, "absence reads as the estimate");
+  assert.equal(stamp.measured, false);
+  assert.equal(stamp.years, null, "and not as zero years of history");
+  const sentence = seasonalStampNote(hydrated.thesis, "CORN");
+  assert.ok(/no seasonal stamp/.test(sentence), sentence);
+  assert.ok(/HAND-WRITTEN/.test(sentence), sentence);
+
+  // 2) So is the volatility stamp on its autopilot entry.
+  assert.equal(simVolOf(hydrated.timeline[1]).stamped, false);
+  assert.equal(simVolOf(hydrated.timeline[1]).source, "table");
+  assert.ok(autopilotVolNote(hydrated.timeline[1]));
+
+  // 3) And the passes did do their own jobs, so this is not a no-op test.
+  assert.equal(positionSize(hydrated).assumed, true, "the size is marked assumed");
+  assert.ok(hydrated.timeline[1].seq, "the entry gained its sequence");
+
+  // 4) A record that DOES carry a stamp keeps it through the same passes.
+  const stamped = stampTimeline(withPositionSize({
+    ...old, thesis: { ...old.thesis, seasonalSource: MEASURED_SEASONAL_SOURCE, seasonalYears: 11, seasonalAgeDays: 1 },
+    timeline: [{ t: 10, type: "open", text: "Opened" }, { ...VOL_STAMPED, t: 20 }],
+  }));
+  assert.equal(seasonalStampOf(stamped.thesis).measured, true, "a real stamp survives hydration");
+  assert.equal(simVolOf(stamped.timeline[1]).measured, true);
+  assert.equal(autopilotVolNote(stamped.timeline[1]), null);
+});
+
+test("every screen that renders a timeline prints the volatility note too", () => {
+  // The Guardian (pro.jsx), the Journal (App.jsx), the weekly report's PDF
+  // export and the model's own context — the four places an autopilot entry's
+  // text, and therefore its simulator figures, are read.
+  for (const f of ["pro.jsx", "App.jsx"]) {
+    const src = readFileSync(new URL(`./${f}`, import.meta.url), "utf8");
+    assert.ok(/autopilotVolNote\(/.test(src), `${f} does not render the note`);
+  }
+  const pro = readFileSync(new URL("./pro.jsx", import.meta.url), "utf8");
+  assert.equal((pro.match(/autopilotVolNote\(/g) || []).length >= 3, true,
+    "pro.jsx renders it in the Guardian, the PDF export and buildContext");
 });
 
 test("both screens that render a timeline print the note", () => {

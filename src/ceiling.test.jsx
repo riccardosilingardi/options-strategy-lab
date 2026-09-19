@@ -31,7 +31,9 @@ import { chanceOf, chanceSourceNote, seasonalProvenance, seasonalStampNote,
   MEASURED_SEASONAL_SOURCE, ESTIMATED_SEASONAL_SOURCE } from "./rules.js";
 import { payoffBands, payingBands, bandsAbove, scratchSplit, unifiedTakeaway, explainElement, exitPlanDetail, compareTakeaway, chanceInProfit } from "./visuals.jsx";
 import { analyze, shortlistWithFloors, buildPresets, modelCheckOf, chanceCheckOf, structureIV } from "./App.jsx";
-import { payoff, netBS, SEASONAL, SIGMA, seasonalDrift } from "./engine.js";
+import { payoff, netBS, SEASONAL, SIGMA, seasonalDrift, exitSim } from "./engine.js";
+import { exitPathSim } from "./pro.jsx";
+import { sigmaProvenance, MEASURED_SIGMA_SOURCE, TABLE_SIGMA_SOURCE, FALLBACK_SIGMA_SOURCE } from "./rules.js";
 
 const ok = [], bad = [];
 const check = (name, fn) => { try { fn(); ok.push(name); } catch (e) { bad.push([name, e.message]); } };
@@ -815,6 +817,146 @@ check("SEASONAL PROVENANCE — the stamp travels, and its ABSENCE is the marker"
   const old = seasonalStampNote({ pop: 0.5 }, "CORN");
   has(old, "no seasonal stamp");
   has(old, "HAND-WRITTEN");
+});
+
+/* ============================================================================
+   §4k DONE WHEN — THE GUARDIAN AND THE BRIEF WALK ONE POSITION ON ONE
+   VOLATILITY. The `five screens, one position, ONE number` precedent (§4h),
+   applied to the EXIT SIMULATION rather than to the chance.
+
+   `exitSim` in engine.js and `exitPathSim` in pro.jsx keep separate bodies on
+   purpose — they answer different questions and the UI depends on the extra
+   fields the second returns (CLAUDE.md, Known traps). What they may NOT do is
+   disagree about their INPUTS, which is exactly what happened: the Guardian
+   read the measured realised volatility off `seasonal[tk].sigma` while the
+   autopilot read the hand-written `SIGMA` row it was the only one able to
+   reach, and neither screen said which.
+============================================================================ */
+
+/** A seeded `Math.random` for the length of one call, as engine.test.js does. */
+function seeded(seed, fn) {
+  const real = Math.random;
+  let a = seed >>> 0;
+  Math.random = () => {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  try { return fn(); } finally { Math.random = real; }
+}
+
+const SIMPOS = {
+  ticker: "CORN",
+  legs: [{ side: 1, type: "call", strike: 20, qty: 1 }, { side: -1, type: "call", strike: 22, qty: 1 }],
+  entryNet: netBS([{ side: 1, type: "call", strike: 20, qty: 1 }, { side: -1, type: "call", strike: 22, qty: 1 }], 20, 45, 0.28),
+};
+SIMPOS.maxProfit = (2 - SIMPOS.entryNet) * 100;
+SIMPOS.maxLoss = -SIMPOS.entryNet * 100;
+const SIMPOLICY = { exitDTE: RULES.exitDTE, takeProfitPct: RULES.takeProfitPct, stopLossPct: RULES.stopLossPct };
+
+check("§4k DONE WHEN — the Guardian and the brief land on the SAME simulator inputs", () => {
+  const vol = sigmaProvenance({ sigma: 0.37, years: 11, at: Date.now() }, SIGMA.CORN, "CORN");
+  const SEED = 20260919, N = 600;
+  // The brief's simulator, and the Guardian's, on one position with one
+  // volatility and one exit policy. Same seed, same draws, same arithmetic.
+  const brief = seeded(SEED, () => exitSim(SIMPOS, 20, 45, 0.28, vol, SIMPOLICY, N));
+  const guardian = seeded(SEED, () => exitPathSim(SIMPOS, 20, 45, 0.28, vol, N));
+  eq(brief.sigma, guardian.sigma, "the volatility they walked on");
+  eq(brief.sigmaSource, guardian.sigmaSource, "and where it came from");
+  eq(brief.sigma, 0.37, "which is the MEASURED reading, not the table");
+  eq(brief.sigmaSource, MEASURED_SIGMA_SOURCE, "named as such");
+  eq(brief.horizon, guardian.horizon, "the same window");
+  // ...and therefore the same answers, to the last bit.
+  eq(brief.pTP, guardian.pTP, "chance of taking profit first");
+  eq(brief.pSL, guardian.pSL, "chance of the stop first");
+  eq(brief.pTimePos, guardian.pTimePos, "chance of being positive at the exit rule");
+  near(brief.ev, guardian.evExit, 1e-9, "the average result following the rules");
+});
+
+check("§4k — a measured sigma and the table one print DIFFERENT sentences", () => {
+  const meas = sigmaProvenance({ sigma: 0.37, years: 11, at: Date.now() - 5 * 86400000 }, SIGMA.CORN, "CORN");
+  const table = sigmaProvenance(null, SIGMA.CORN, "CORN");
+  if (meas.note === table.note) throw new Error("two sources, one sentence");
+  has(meas.note, "MEASURED");
+  has(meas.note, "11 years");
+  has(meas.note, "5 days ago");
+  hasNot(meas.note, "written down, not measured from returns");
+  has(table.note, "written down, not measured from returns");
+  hasNot(table.note, "MEASURED");
+  // THE COUNTER-EXAMPLE THAT MUST STILL PASS: a market with no reading at all
+  // falls to the named fallback and says so, rather than borrowing either.
+  const none = sigmaProvenance(null, undefined, "GLD");
+  eq(none.sigma, RULES.fallbackSigma, "the named fallback");
+  eq(none.source, FALLBACK_SIGMA_SOURCE);
+  has(none.note, "FALLBACK VOLATILITY");
+  has(none.note, "GLD");
+  if (none.note === table.note || none.note === meas.note) throw new Error("three sources, three sentences");
+});
+
+check("§4k — every sentence names the market and carries the number", () => {
+  for (const v of [sigmaProvenance({ sigma: 0.37, years: 11, at: Date.now() }, SIGMA.CORN, "CORN"),
+    sigmaProvenance(null, SIGMA.CORN, "CORN"), sigmaProvenance(null, null, "CORN")]) {
+    has(v.note, "CORN");
+    has(v.note, `${Math.round(v.sigma * 100)}%`);
+  }
+  // The MEASURED one is a single sentence: it is the one this PR writes, and
+  // it is what the Guardian prints under the figures. The other two keep the
+  // shape they already had — the table's second clause is the disclaimer that
+  // it was typed, and the fallback's is the whole point of the fallback.
+  oneSentence(sigmaProvenance({ sigma: 0.37, years: 11, at: Date.now() }, SIGMA.CORN, "CORN").note);
+});
+
+check("§4k — exitPathSim refuses a bare sigma, exactly as exitSim does", () => {
+  for (const bare of [SIGMA.CORN, null, undefined, {}, { sigma: 0.2 }, { source: "table" }]) {
+    let threw = false;
+    try { exitPathSim(SIMPOS, 20, 45, 0.28, bare, 5); } catch (e) { threw = /sigmaProvenance/.test(e.message); }
+    if (!threw) throw new Error(`${JSON.stringify(bare)} was accepted as a volatility`);
+  }
+});
+
+check("§4k — the SENSITIVITY the PRD records is reproducible from this repo", () => {
+  /* THE MEASURED SIGMA IS NOT AVAILABLE IN THIS SANDBOX. No Alpha Vantage key
+     and an egress proxy that refuses the CONNECT, so how far a market's real
+     realised volatility sits from its hand-written row is UNKNOWN and must not
+     be asserted. What CAN be measured is how much the simulator's answers move
+     when the volatility does — the table perturbed by a stated factor. PRD §4k
+     carries the table; this holds the arithmetic behind it. */
+  const SEED = 20260919, N = 800;
+  const at = { CORN: 20, SOYB: 24, UNG: 10.6, BOIL: 21.2, WEAT: 5.4 };
+  for (const tk of Object.keys(at)) {
+    const S = at[tk];
+    const legs = [{ side: 1, type: "call", strike: S, qty: 1 }, { side: -1, type: "call", strike: S * 1.1, qty: 1 }];
+    const entryNet = netBS(legs, S, 45, 0.3);
+    const pos = { ticker: tk, legs, entryNet, maxProfit: (S * 0.1 - entryNet) * 100, maxLoss: -entryNet * 100 };
+    const base = seeded(SEED, () => exitSim(pos, S, 45, 0.3, sigmaProvenance(null, SIGMA[tk], tk), SIMPOLICY, N));
+    const half = seeded(SEED, () => exitSim(pos, S, 45, 0.3,
+      sigmaProvenance({ sigma: SIGMA[tk] * 0.5, years: 11, at: Date.now() }, SIGMA[tk], tk), SIMPOLICY, N));
+    const twice = seeded(SEED, () => exitSim(pos, S, 45, 0.3,
+      sigmaProvenance({ sigma: SIGMA[tk] * 2, years: 11, at: Date.now() }, SIGMA[tk], tk), SIMPOLICY, N));
+    eq(base.sigma, SIGMA[tk], `${tk}: the table's own row`);
+    eq(half.sigma, SIGMA[tk] * 0.5, `${tk}: half of it`);
+    eq(twice.sigma, SIGMA[tk] * 2, `${tk}: twice it`);
+    // TWO PROPERTIES HOLD ON EVERY MARKET, and they are the only two that do.
+    // More volatility means more paths reach A BARRIER, and more of them reach
+    // the take-profit one. `pSL` and `pTimePos` are NOT monotone — on BOIL the
+    // stop rate goes 58.7 -> 60.2 -> 58.5 because the two barriers compete for
+    // the same paths — and asserting a direction for them would be asserting
+    // something this arithmetic does not do. The MAGNITUDES are in PRD §4k as a
+    // SENSITIVITY: a statement about this simulator under a stated
+    // perturbation, never a measurement of any market's real volatility.
+    const touches = (r) => r.pTP + r.pSL;
+    if (!(touches(half) <= touches(base) && touches(base) <= touches(twice))) {
+      throw new Error(`${tk}: barrier touches do not rise with volatility`);
+    }
+    if (!(half.pTP <= base.pTP && base.pTP <= twice.pTP)) {
+      throw new Error(`${tk}: the take-profit rate does not rise with volatility`);
+    }
+    // ...and every figure MOVES, which is the fault this PR is about: one
+    // position walked on two volatilities is two different briefs.
+    if (half.ev === base.ev || twice.ev === base.ev) throw new Error(`${tk}: the average result did not move`);
+  }
 });
 
 for (const [name, why] of bad) console.error(`  FAIL ${name}\n       ${why}`);
