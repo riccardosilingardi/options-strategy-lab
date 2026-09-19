@@ -286,6 +286,19 @@ button was pressed. PRD §4h.
   spelling of `chanceOf` in that file**, the same discipline as `modelCheckOf()`; the Guardian
   is HANDED the answer. `riskGate.test.js` fails the build on a second spelling, on any
   `chanceOf` in `pro.jsx`, and on any file running a `terminalMC` of its own.
+- **AND THE DRIFT SAYS WHOSE TABLE IT CAME FROM.** `seasonalProvenance()` in `rules.js`, beside
+  `markProvenance` / `sigmaProvenance` / `ivProvenance`, is the ONE home: measured history or the
+  hand-written estimate, the year count, the age in days and one sentence. **`chanceOf()` THROWS
+  when handed a bare row of monthly means** — the same discipline as `terminalMC()` throwing
+  without an exit policy — and `riskGate.test.js` sweeps every file for the shape too. A screen may
+  not print a chance without the sentence: one corrected CORN cell moves it 18.9 points and flips
+  the sign of the average result. `chanceSourceNote()` may NOT say "<ticker>'s own seasonal
+  reading" about a row somebody typed. **No table at all is not a drift of zero**: `missing` → no
+  chance and a sentence. **The ABSENCE of the stamp on a record is the marker**, as with
+  `contractsAssumed`. The SERVER reads the same measured means out of `av.mjs`'s blob cache
+  (`av/<SYM>.json`) — one read per TICKER, never a fetch (25 requests a DAY for five markets),
+  stale served as is — through `parseAvJson()` / `statsFromMatrix()`, which live in `engine.js`
+  because a Netlify function cannot import `App.jsx` and a second parse is a second table. PRD §4j.
 - **THE DRIFT IS THE APP'S OWN SEASONAL THESIS. THE VOLATILITY IS THE MARKET'S IMPLIED ONE.**
   The market says how wide the distribution is; the app says which way it leans. Every price in
   this app is already worked out at that implied volatility, so anything else would price a trade
@@ -682,7 +695,9 @@ while the position is open.
   `profitUnbounded()` / `NO_CEILING` (is there a maximum profit at all),
   `impossibleLoss()` (is the worst case actually a loss),
   `mcRuns` with `chanceOf()` / `chanceSeedKey()` / `chanceSourceNote()` (THE chance
-  of profit, and the only caller of `terminalMC`), `fallbackIV` with
+  of profit, and the only caller of `terminalMC`), `seasonalProvenance()` /
+  `seasonalStampOf()` / `seasonalSourceSentence()` (WHOSE seasonal table drifted it,
+  and what the absence of a stamp on a record means), `fallbackIV` with
   `ivProvenance()`, `watchAttentionShare` with `watchAttentionLevel()`,
   `autopilotConfidence`,
   `modelDisagreementRatio` with `modelSanity()` (is it THIS structure's price —
@@ -825,7 +840,10 @@ while the position is open.
   clears 4.5:1 on white and on the page, and `src/theme.test.js` fails the build
   if a tweak breaks that.
 - `src/engine.js` — shared math (Black-Scholes, payoff, the exit simulator, the
-  seeded terminal Monte Carlo, seasonal tables). Plain JS, no React imports.
+  seeded terminal Monte Carlo, seasonal tables, and `parseAvJson()` /
+  `statsFromMatrix()` — the ONE parse of an Alpha Vantage monthly body, read by
+  the client and by `autopilot.mjs`, which cannot import `App.jsx`). Plain JS,
+  no React imports.
   **Both the client and the Netlify functions import from here.** Never duplicate
   this math. `terminalMC()`, `seasonalDrift()`, `seedFrom()` and `rng()` live here
   and take their policy from the caller with NO DEFAULTS — this file imports

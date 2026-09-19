@@ -12,7 +12,8 @@ import { RULES, sizing, ruleBadge, qualityFloor, qualityFloorSentence, liquidity
   spreadShare, spreadFloor, spreadFloorReason, wideSpreadNote, spreadSkippedNote,
   expiryChoice, expiryChoiceNote, emptyExpiryNote,
   modelSanity, modelSanityReason, modelDisagreementNote,
-  chanceOf, chanceSeedKey, watchAttentionLevel,
+  chanceOf, chanceSeedKey, seasonalProvenance, seasonalStampOf, seasonalSourceSentence,
+  MEASURED_SEASONAL_SOURCE, ESTIMATED_SEASONAL_SOURCE, watchAttentionLevel,
   ivProvenance, CHAIN_IV_SOURCE, THESIS_IV_SOURCE, FALLBACK_IV_SOURCE,
   comboBook, openLimitPrice, openLimitNote, limitPlacement, notionalControlled, notionalNote,
   entryRoom, entryInsideExitNote, entryRoomWarning, entryRoomOverrideAsk, entryOverrideOk, entryOverrideNote,
@@ -1338,10 +1339,15 @@ test("ONE CHANCE — one run count, so ranking and printing cannot disagree", ()
 test("ONE CHANCE — unknown is not a number, at every missing input", () => {
   const legs = [{ side: 1, type: "call", strike: 20, qty: 1 }, { side: -1, type: "call", strike: 21, qty: 1 }];
   const ok = { legs, entryNet: 0.4, spot: 20, iv: 0.85, dte: 45,
-    monthlyMean: Array(12).fill(1), month: 8, ticker: "BOIL", expKey: "2026-11-06" };
+    seasonal: seasonalProvenance({ monthlyMean: Array(12).fill(1), years: 11, at: Date.now() }, null, "BOIL"),
+    month: 8, ticker: "BOIL", expKey: "2026-11-06" };
   assert.ok(chanceOf(ok).pop > 0, "the fixture itself has to work");
   for (const missing of [{ spot: null }, { spot: 0 }, { dte: null }, { dte: 0 },
-    { entryNet: null }, { legs: [] }, { legs: null }, { monthlyMean: null }, { month: null }]) {
+    { entryNet: null }, { legs: [] }, { legs: null }, { month: null },
+    // NO TABLE AT ALL IS NOT A DRIFT OF ZERO. `seasonalProvenance(null, null)`
+    // is `missing`, and a missing reading is a dash on screen, never a
+    // confident claim that the market goes nowhere.
+    { seasonal: seasonalProvenance(null, null, "BOIL") }]) {
     assert.equal(chanceOf({ ...ok, ...missing }), null,
       `a missing ${Object.keys(missing)[0]} must be null, never a confident 0%`);
   }
@@ -1351,6 +1357,92 @@ test("ONE CHANCE — unknown is not a number, at every missing input", () => {
   const noIV = chanceOf({ ...ok, iv: null });
   assert.equal(noIV.sigma, RULES.fallbackIV);
   assert.ok(noIV.ivNote.includes("FALLBACK"), "and it says so");
+});
+
+test("ONE SEASONAL SOURCE — no call site may drift a chance without provenance", () => {
+  /* THE SHAPE GUARD, in the register of the rule-literal sweep above.
+
+     `chanceOf()` used to take twelve monthly means and nothing else, so a call
+     site could hand it `SEASONAL[pos.ticker]` — the HAND-WRITTEN table — and
+     the number came back indistinguishable from one drifted on measured
+     prices. That is exactly what `autopilot.mjs` did for four pull requests
+     while App.jsx read measured means, and neither side said so. On CORN one
+     corrected cell is worth 18.8 percentage points and the sign of the EV.
+
+     Two halves, because a runtime throw and a source sweep catch different
+     mistakes: the throw catches the call that runs, the sweep catches the call
+     written today that only runs on a market nobody demos. */
+
+  // 1) A BARE ROW THROWS. Not null — a missing INPUT is a dash on screen, a
+  //    missing PROVENANCE is a call site printing a number nobody can trace.
+  const legs = [{ side: 1, type: "call", strike: 20, qty: 1 }, { side: -1, type: "call", strike: 21, qty: 1 }];
+  const base = { legs, entryNet: 0.4, spot: 20, iv: 0.85, dte: 45, month: 8, ticker: "CORN", expKey: "2026-11-06" };
+  for (const wrong of [Array(12).fill(1), null, undefined, "measured", 0.25, { monthlyMean: Array(12).fill(1) }]) {
+    assert.throws(() => chanceOf({ ...base, seasonal: wrong }), /seasonalProvenance/,
+      `chanceOf must refuse ${JSON.stringify(wrong)} as a drift`);
+  }
+  // ...and the legitimate shape does not throw.
+  assert.ok(chanceOf({ ...base, seasonal: seasonalProvenance(null, Array(12).fill(1), "CORN") }).pop > 0);
+
+  // 2) NO CALL SITE HANDS A SEASONAL ROW WHERE THE PROVENANCE GOES. Read off
+  //    the CALL rather than off the file, because `monthlyMean:` is legitimate
+  //    where the hand-written row is DEFINED — the `UNDERLYINGS` table in
+  //    App.jsx is its one honest home — and illegitimate only where a chance is
+  //    being asked for. Comments are stripped by `codeOf`, so the prose
+  //    explaining the deletion cannot satisfy or fail this.
+  const CHANCE_CALL = /(chanceOf|chanceCheckOf|chanceFor)\s*\(/g;
+  for (const f of ["App.jsx", "pro.jsx", "wizard.jsx", "visuals.jsx", "rules.js",
+    "../netlify/functions/autopilot.mjs", "../netlify/functions/approve.mjs"]) {
+    const code = codeOf(f);
+    // A per-ticker LOOKUP into a seasonal table is never an argument name; the
+    // table's own definition (`monthlyMean: SEASONAL.CORN`) is, and stays.
+    assert.equal(/monthlyMean:\s*(SEASONAL\[|getU\(|seasonal\[|SEASONAL\.\w+ *\|\|)/.test(code), false,
+      `${f} hands a raw seasonal row where a seasonalProvenance() result belongs`);
+    assert.equal(/seasonal:\s*(SEASONAL|getU\()/.test(code), false,
+      `${f} passes a bare seasonal table straight in as the drift`);
+    // ...and the arguments of every chance call are read directly.
+    for (const m of code.matchAll(CHANCE_CALL)) {
+      const args = code.slice(m.index, m.index + 400);
+      assert.equal(/monthlyMean/.test(args), false,
+        `${f}: a chance is asked for with monthly means instead of a provenance`);
+    }
+  }
+
+  // 3) THE PROVENANCE IS DECIDED IN ONE HOME, and the two consumers read it
+  //    rather than each deciding for themselves.
+  const rules = codeOf("rules.js");
+  assert.equal((rules.match(/export function seasonalProvenance\(/g) || []).length, 1,
+    "seasonalProvenance has exactly one definition, in rules.js");
+  for (const f of ["App.jsx", "../netlify/functions/autopilot.mjs"]) {
+    assert.ok(/seasonalProvenance\(/.test(codeOf(f)), `${f} must read the one home`);
+  }
+});
+
+test("ONE SEASONAL SOURCE — measured and hand-written print DIFFERENT sentences", () => {
+  // The whole point. Two markets, two tables, two numbers of the same name: if
+  // the sentence beside them is the same string, nothing on screen distinguishes
+  // a measurement from a guess.
+  const row = Array(12).fill(1);
+  const meas = seasonalProvenance({ monthlyMean: row, years: 11, at: Date.now() - 3 * 86400000 }, row, "CORN");
+  const hand = seasonalProvenance(null, row, "CORN");
+  assert.equal(meas.source, MEASURED_SEASONAL_SOURCE);
+  assert.equal(hand.source, ESTIMATED_SEASONAL_SOURCE);
+  assert.notEqual(meas.note, hand.note, "one sentence for two sources is no sentence at all");
+  assert.ok(/MEASURED/.test(meas.note) && /11 years/.test(meas.note) && /3 days ago/.test(meas.note), meas.note);
+  assert.ok(/HAND-WRITTEN/.test(hand.note), hand.note);
+  // AGE IS NEVER INVENTED. A reading with no timestamp does not read as today's.
+  const undated = seasonalProvenance({ monthlyMean: row, years: 11 }, row, "CORN");
+  assert.equal(undated.ageDays, null);
+  assert.equal(/read today/.test(undated.note), false, undated.note);
+
+  // AND THE ABSENCE OF A STAMP IS THE MARKER, as with `contractsAssumed`.
+  assert.equal(seasonalStampOf({}).source, ESTIMATED_SEASONAL_SOURCE);
+  assert.equal(seasonalStampOf({}).stamped, false);
+  assert.equal(seasonalStampOf({ seasonalSource: MEASURED_SEASONAL_SOURCE, seasonalYears: 11 }).measured, true);
+  // `Number(null)` is 0 and 0 is finite: a record with no year count must never
+  // read as zero years of history.
+  assert.equal(seasonalStampOf({ seasonalSource: MEASURED_SEASONAL_SOURCE }).years, null);
+  assert.equal(/0 years/.test(seasonalSourceSentence({ measured: true, ticker: "CORN" })), false);
 });
 
 test("ONE CHANCE — the seed is the TRADE's, so it moves when the trade moves", () => {

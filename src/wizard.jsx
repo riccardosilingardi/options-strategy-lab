@@ -26,7 +26,7 @@ import React, { useState } from "react";
 import { Compass, Briefcase, Bell, ArrowLeft, SlidersHorizontal, ShieldCheck, ShieldAlert, AlertTriangle, Sparkles } from "lucide-react";
 import { T, BADGE_SAFE, BADGE_BTN_GAP } from "./theme.js";
 import { RULES, sizing, money, pctText, perTradeCapLabel, ruleBadge, capitalSourceNote, perTradeLimitPhrase, limitOwner, qualityFloorSentence,
-  NO_CEILING } from "./rules.js";
+  NO_CEILING, seasonalStampNote } from "./rules.js";
 
 /** A best case, or the words for not having one — never `money(null)`. */
 const upTo = (x) => (Number.isFinite(x) ? money(x) : NO_CEILING);
@@ -703,6 +703,14 @@ function RoadCard({ c, other, onPick, i, bars = [], weatherData, newsItems, mont
       <div style={{ ...mono, fontSize: 9.5, color: T.dim, marginTop: 7, lineHeight: 1.5 }}>
         These are the figures for ONE combination. How many you buy is chosen on the next screen, and
         everything here multiplies by it.
+      </div>
+      {/* WHICH TABLE "WORKS OUT" WAS DRIFTED ON. Two roads are ranked across the
+          whole basket, so these two cards can be in two markets — and a market
+          still on the hand-written seasonal estimate produces a frequency that
+          is an estimate's estimate. Comparing two roads without knowing that is
+          comparing a measurement with a guess and calling it a choice. */}
+      <div style={{ ...mono, fontSize: 9.5, color: T.dim, marginTop: 5, lineHeight: 1.5 }}>
+        {seasonalStampNote(c, c.ticker)}
       </div>
 
       {/* THE EVIDENCE. The same panel the desk shows, on the screen where the

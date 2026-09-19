@@ -237,3 +237,67 @@ export const SEASONAL = {
 };
 
 export const SIGMA = { SOYB: 0.19, CORN: 0.22, UNG: 0.48, BOIL: 0.95, WEAT: 0.25, SPY: 0.16 };
+
+/* ============================================================================
+   THE MEASURED SEASONAL SERIES — ONE PARSE, READ BY THE CLIENT AND THE SERVER.
+
+   `SEASONAL` above is hand-written and wrong on eight months of twelve for
+   CORN. The measured means that replace it arrive as an Alpha Vantage
+   `TIME_SERIES_MONTHLY_ADJUSTED` body, through `/api/av`, and the SAME body is
+   what `netlify/functions/av.mjs` caches in the blob store. Two consumers read
+   it: the client, which puts the means on screen and drifts every chance on
+   them, and `autopilot.mjs`, which writes the brief while the app is closed.
+
+   These two functions used to live in App.jsx, which a Netlify function cannot
+   import (React, recharts, lightweight-charts). That is exactly the shape of
+   duplication this file exists to prevent: two parses of one payload are two
+   seasonal tables waiting to disagree about one market. They are plain data
+   arithmetic, they read no RULES and import nothing, so they belong here beside
+   `SEASONAL` and `seasonalDrift()`.
+============================================================================ */
+
+/**
+ * An Alpha Vantage monthly body → a year-by-month matrix of percentage returns.
+ *
+ * The ten-year cutoff lands MID-YEAR, so the matrix carries eleven CALENDAR
+ * rows of which the first and last are partial. `statsFromMatrix().years` is
+ * the row count and is the only figure any screen may print about it.
+ *
+ * @throws when the body is a refusal rather than a series — Alpha Vantage
+ *         answers a quota refusal with HTTP 200 and a "Note" body, so the
+ *         failure has to be read out of the payload, never the status.
+ */
+export function parseAvJson(j) {
+  const ts = j && j["Monthly Adjusted Time Series"];
+  if (!ts) throw new Error((j && (j["Note"] || j["Information"] || j["Error Message"])) || "risposta vuota (rate limit?)");
+  const rows = Object.entries(ts)
+    .map(([date, v]) => ({ date, close: parseFloat(v["5. adjusted close"]) }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+  const cutoff = new Date(); cutoff.setFullYear(cutoff.getFullYear() - 10);
+  const recent = rows.filter((r2) => new Date(r2.date) >= cutoff);
+  const byYM = {};
+  for (let i = 1; i < recent.length; i++) {
+    const d = new Date(recent[i].date);
+    if (!byYM[d.getFullYear()]) byYM[d.getFullYear()] = Array(12).fill(null);
+    byYM[d.getFullYear()][d.getMonth()] = (recent[i].close / recent[i - 1].close - 1) * 100;
+  }
+  const matrix = Object.entries(byYM).map(([y, ms]) => [+y, ...ms]);
+  return { matrix, from: recent[0]?.date };
+}
+
+/**
+ * The matrix → twelve monthly means in PERCENT (the units `SEASONAL` is in and
+ * `seasonalDrift()` expects), the annualised realised sigma of the same series,
+ * and how many rows produced them.
+ */
+export function statsFromMatrix(matrix) {
+  const all = [];
+  const monthlyMean = Array.from({ length: 12 }, (_, m) => {
+    const xs = matrix.map((row) => row[m + 1]).filter((x) => x != null && !Number.isNaN(x));
+    xs.forEach((x) => all.push(x / 100));
+    return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0;
+  });
+  const mean = all.reduce((a, b) => a + b, 0) / Math.max(1, all.length);
+  const varr = all.reduce((a, b) => a + (b - mean) ** 2, 0) / Math.max(1, all.length - 1);
+  return { monthlyMean, sigma: Math.sqrt(varr * 12), years: matrix.length };
+}

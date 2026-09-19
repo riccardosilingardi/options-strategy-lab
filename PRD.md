@@ -861,6 +861,139 @@ All three are **CHOSEN, NOT MEASURED**, and all three are on the NOT VERIFIED li
 
 ---
 
+## 4j. One seasonal source — and a chance that says whose table drifted it
+
+### THE DEBT §4h LEFT OPEN, VERBATIM
+
+> **THE DRIFT IS NOW THE SEASONAL TABLE, AND FOUR OF THE FIVE MARKETS ARE STILL ON THE
+> HAND-WRITTEN ONE UNTIL ALPHA VANTAGE LOADS.** The app says on screen when a market is on the
+> fallback; it does not say it beside the CHANCE.
+
+§4h made five screens agree on the *number*. It did not make any of them say what the number is an
+answer about, and the drift is the one input to it that the market has no say in at all: implied
+volatility says how wide the distribution is, the seasonal table says which way it leans.
+
+### AND THE TWO SIDES DID NOT EVEN READ THE SAME TABLE
+
+| side | what it drifted on |
+|---|---|
+| `App.jsx` | measured monthly means loaded per basket market, `meansFor()` falling back to the hand-written row |
+| `autopilot.mjs` | `SEASONAL[pos.ticker] \|\| SEASONAL.SPY`, with **no measured means available to it at all** |
+
+So the brief and the screen could print two different chances for one position, for a reason
+neither of them named — on top of the reason §4h already fixed.
+
+### WHAT ONE CELL IS WORTH
+
+Measured on this repo's own arithmetic, seeded exactly as §4h is (`chanceSeedKey`, 8,000 runs,
+`RULES.mcRuns`). CORN 19/21 call debit spread, spot 20, 45 DTE, at the repo's own
+`SIGMA.CORN` = 0.22. **Nothing inside `SEASONAL` was edited**: the corrected row is built in the
+test from the two cells `netlify/functions/av.mjs` documents against 195 months of real data.
+
+| month | cell | drift | chance | average result |
+|---|---|---|---|---|
+| June, hand-written | +1.50 %/mo | **+16.8 %/yr** | **57.5 %** | **+$13.51** |
+| June, measured | −3.46 %/mo | **−13.0 %/yr** | **38.5 %** | **−$21.73** |
+| | | *sign flips* | **−18.9 pp** | *sign flips* |
+| September, hand-written | −1.10 %/mo | −9.6 %/yr | 40.7 % | −$17.86 |
+| September, measured | +1.03 %/mo | +3.2 %/yr | 49.3 % | −$2.78 |
+| | | *sign flips* | **+8.6 pp** | +$15.08 |
+
+One cell of twelve, on one market of five, moves the printed chance by nearly nineteen points and
+reverses the sign of the average result. **The sentence beside the number is not a footnote about
+the number; it is the difference between a measurement and a guess wearing the same digits.**
+
+### WHAT THE FIVE MARKETS LOOK LIKE IN THIS SANDBOX
+
+**THE CACHE IS EMPTY HERE AND THERE IS NO WAY TO FILL IT.** No `ALPHAVANTAGE_KEY` is set and the
+egress proxy refuses the CONNECT to `alphavantage.co` (403), so no measured series exists to read
+and `/api/av` cannot be exercised. Every market below is therefore on the hand-written row — which
+is itself the reading that matters: **this is what the app prints today**, and until this PR it
+printed it with nothing saying so. At-the-money call debit spread, 45 DTE, each market's own
+`SIGMA`:
+
+| market | June drift | June chance | Sept drift | Sept chance | source |
+|---|---|---|---|---|---|
+| SOYB | +18.0 %/yr | 61.1 % | −8.4 %/yr | 41.5 % | hand-written estimate |
+| CORN | +16.8 %/yr | 57.5 % | −9.6 %/yr | 40.7 % | hand-written estimate |
+| UNG | −0.6 %/yr | 47.3 % | +14.4 %/yr | 51.4 % | hand-written estimate |
+| BOIL | −3.6 %/yr | 43.4 % | +26.4 %/yr | 48.1 % | hand-written estimate |
+| WEAT | −7.2 %/yr | 44.1 % | −3.6 %/yr | 46.1 % | hand-written estimate |
+
+**The before/after for the other four markets is NOT MEASURED and is on the NOT VERIFIED list.**
+Only CORN has documented measured cells. Whether the table is as wrong on SOYB, UNG, BOIL and WEAT
+as it is on CORN is unknown, and the honest expectation — given eight wrong signs of twelve on the
+one market that was checked — is that it is not better.
+
+### THE DECISION
+
+**`seasonalProvenance()` in `src/rules.js` is the ONE home**, beside `markProvenance()`,
+`sigmaProvenance()` and `ivProvenance()` and in the same register: decide once which of the two
+tables is in force, and carry the decision everywhere the number goes.
+
+- **`chanceOf()` takes it and will not work without it.** A caller handing twelve bare numbers
+  **throws** — the same discipline as `terminalMC()` throwing without an exit policy. A missing
+  *input* is a dash on screen; a missing *provenance* is a call site printing a number nobody can
+  trace, which is a programmer error and is treated as one. `riskGate.test.js` sweeps every source
+  file for the shape as well, because the throw catches the call that runs and the sweep catches
+  the call written today that only runs on a market nobody demos.
+- **`chanceSourceNote()` may no longer say "CORN's own seasonal reading" about a row somebody
+  typed.** It said exactly that, whichever table had produced the drift.
+- **The server reads the same measured means, and spends nothing to do it.** `av.mjs` already
+  caches each market's Alpha Vantage body in the `autopilot` blob store under `av/<SYM>.json` with
+  a seven-day TTL. `autopilot.mjs` reads what the client's loads have already put there — one read
+  per **ticker**, never one per position — and **never fetches**: the free tier is 25 requests a
+  DAY for five markets, and a scheduled job nobody watches must not be able to spend the
+  allowance. A **stale entry is served as is, with no TTL test**: month-old measured seasonality
+  beats a table with the wrong sign on eight months of twelve, and the age travels into the
+  sentence. `parseAvJson()` and `statsFromMatrix()` moved from `App.jsx` into `engine.js` so both
+  sides derive the means from **one parse of one body** — a Netlify function cannot import
+  `App.jsx`, and a second parse is a second seasonal table waiting to disagree.
+- **NO DEFAULT AND NO SILENT SUBSTITUTION.** With no table at all — neither measured nor
+  hand-written — `chanceOf()` returns null and the interface prints a dash with a sentence saying
+  why. A drift of zero standing in for a reading nobody has is a confident claim that the market
+  goes nowhere, which is a different thing from not knowing. A row of twelve measured **zeros** is
+  not the same case and is not treated as one.
+- **The absence of the stamp is the marker**, exactly as `contractsAssumed` (§4i) and `simExitDTE`
+  (§4i) work. A position thesis, a kept candidate, a Radar row and an autopilot entry written
+  before this PR carry no `seasonalSource`, and `seasonalStampOf()` reads that absence as the
+  hand-written estimate — because at that point the hand-written table was the only one either
+  side could reach. Inventing a measurement for it would be the same lie in the other direction.
+
+### WHERE THE SENTENCE APPEARS
+
+| screen | what it prints |
+|---|---|
+| Build — CHANCE OF PROFIT | `chanceSourceNote()` as the tip and in the "in plain words" paragraph |
+| Shortlist row, wide-search row, multi-market scan row | the sentence on the CHANCE stat |
+| Guided roads | one line under the per-combination note, on each road card |
+| Kept / compared candidates | read off the saved record's stamp, absence included |
+| Open positions — Guardian | **two** lines: the table in force NOW and the one recorded AT ENTRY |
+| Journal — a closed trade's entry thesis | the stamp beside the chance it was opened on |
+| Autopilot brief | `chanceNote`, plus `drift_source` / `drift_is_measured` / `drift_age_days` in the model's own facts |
+| Weekly report | per market in section 1; the footer no longer asserts one source for five markets |
+| Copilot context | per market in `scanner`, and on each position's `thesis` |
+
+The Guardian pair is the one that was doing real damage rather than merely staying silent: its
+Thesis Integrity Score divides today's chance by the one recorded at entry, so a market that was on
+the hand-written estimate in August and on measured prices in September had **a change in the table
+read as a change in the trade**. The two sentences make that visible instead of scoring it.
+
+### NOT VERIFIED
+
+- **No measured series was read.** No key, no egress; every number above that is labelled
+  "measured" comes from the two CORN cells `av.mjs` documents, applied to the hand-written row in a
+  test. `/api/av`, the blob cache and the server's read of it are **exercised only by their own
+  unit tests** — the whole round trip has never run.
+- **The before/after for SOYB, UNG, BOIL and WEAT is unknown.**
+- **Nothing on a phone, nothing against a live chain.** The sentences are held by tests, not by a
+  screenshot.
+- Deriving `SEASONAL` itself from measured returns is **ROADMAP P2** and is deliberately not done
+  here. This PR changes where the means come from and what the app *says* about them, never what
+  the hand-written row contains.
+
+---
+
 ## 5. The wizard IS the app
 
 The wizard is not a feature inside the app. It is the entry point and the spine. Existing tabs remain reachable but are no longer the front door.
@@ -1788,7 +1921,64 @@ What is left:
 The standing rule in `CLAUDE.md`: every session starts by fixing what the last one flagged, and
 ends by writing down what it could not verify. Currently open:
 
-### WRITTEN THIS SESSION — one chance, one arithmetic (PR #25)
+### WRITTEN THIS SESSION — one seasonal source, and a chance that names it (PR #26)
+
+This session did TASK 0 (the debt PR #25 handed forward: no screen printed a chance beside the
+seasonal reading that drifted it) and TASK 1 (one seasonal source for the screens and for the
+brief) — §4j. `npm test` reports **650 checks across 18 suites**, up from the **644** PR #25 wrote
+down and which a clean clone of `main` at `9fcd104` reproduces exactly. `npm run build` is clean.
+
+Suite totals that sum to 650: signals 22, chain 33, engine 17, riskGate **148**, theme 39, demo 16,
+handoff 9, path 14, liquidity 7, order 25, journal 66, autopilot **55**, pwa 36, and the five JSX
+files — visuals 35, wizard 56, steps 20, ceiling **44**, order.jsx 8. The six new checks are two in
+`riskGate.test.js` (the shape guard, and measured-versus-fallback), one in `autopilot.test.js` (the
+server reads the cache and never spends the quota) and three in `ceiling.test.jsx`.
+
+**NOTHING HERE WAS RUN AGAINST A LIVE CHAIN, A BROWSER, ALPHA VANTAGE OR A DEPLOY.** Same wall as
+PR #15 through #25.
+
+- **THE MEASURED PATH HAS NEVER RUN END TO END, AND THAT IS THIS PR'S CENTRAL GAP.** No
+  `ALPHAVANTAGE_KEY` is set here and the egress proxy refuses the CONNECT to `alphavantage.co`
+  (403), so the blob cache `av.mjs` fills is **empty** and `autopilot.mjs`'s read of it returns a
+  miss every time. Every sentence the app now prints in this sandbox is the *fallback* sentence.
+  The measured branch — the one that says "11 years of monthly prices, read 3 days ago" — is
+  exercised only by unit tests with a hand-built reading. **`/api/av` → blob → `measuredSeasonal()`
+  → `seasonalProvenance()` has never been walked once with a real body.**
+- **THE BEFORE/AFTER IN §4j IS CORN ONLY.** Only CORN has measured cells anybody has written down
+  (the two in `av.mjs`, from 195 months). What the table gets wrong on SOYB, UNG, BOIL and WEAT is
+  **unknown**; the honest expectation, from eight wrong signs of twelve on the one market checked,
+  is that it is not better. The five-market table in §4j is what the app prints **today**, on the
+  hand-written row, not a before/after.
+- **NOTHING INSIDE `SEASONAL` WAS TOUCHED, DELIBERATELY.** Deriving the table from measured returns
+  is ROADMAP P2. This PR changed where the means come from and what the app says about them. The
+  corrected CORN row used in §4j and in the tests is built in the test file, never in `engine.js`.
+- **THE SENTENCES HAVE NOT BEEN READ ON A PHONE, OR ANYWHERE.** Nine surfaces now carry the stamp
+  (§4j's table). Whether the Guardian's two-line NOW/AT-ENTRY pair reads as clarifying or as noise
+  on a 390px screen is a judgement nobody has made. The Journal, the report and the road cards
+  gained a line each; none has been looked at.
+- **THE STAMP ON OLD RECORDS IS AN INFERENCE, AND IT IS THE RIGHT ONE — BUT IT IS AN INFERENCE.**
+  `seasonalStampOf()` reads a missing `seasonalSource` as the hand-written estimate, because until
+  this PR neither side could reach anything else. That is true of every record in the owner's
+  actual store, and nothing here has read that store to confirm it contains what is expected.
+- **THE SERVER'S BLOB READ IS UNMEASURED.** One read per ticker, memoised, no TTL test, no fetch —
+  all held by a source sweep in `autopilot.test.js`, not by watching the function run. **The
+  autopilot has still never been watched running at all**, which is the same debt PR #24 and #25
+  each wrote down.
+- **`parseAvJson()` AND `statsFromMatrix()` MOVED FILES AND THEIR BEHAVIOUR IS ASSUMED UNCHANGED.**
+  `statsFromMatrix()` is byte-identical to the version in `App.jsx`. `parseAvJson()` differs by
+  **one deliberate hardening**: a null or undefined body now throws the same named `Error` the
+  refusal path throws instead of a bare `TypeError`, because the server reads it out of a blob
+  store where a miss is a normal event rather than off a `fetch` that already succeeded. Both
+  versions throw and every caller catches, so no caller can tell the difference — but that is an
+  argument, not a test. **No test exercised either function before the move and none exercises
+  them on a real Alpha Vantage body now.** What is verified is that the build is clean and every
+  suite still passes, not that the parse produces the same matrix it used to, because nothing ever
+  checked that it produced a correct one.
+- **THE DEAD `AV_URL` CONSTANT WAS REMOVED** with them. It was unreferenced and it templated an
+  `apikey` into a client-side URL; nothing on the client may call Alpha Vantage directly. That is a
+  deletion, not a fix, and nothing depended on it.
+
+### WRITTEN BY PR #25, STILL OPEN — one chance, one arithmetic
 
 This session did TASK 0 (the two debts PR #24 handed forward) and TASK 1 (ROADMAP P1's remaining
 half): past autopilot entries written at the wrong horizon are marked on every screen that renders
@@ -1817,8 +2007,12 @@ Every number in §4h's tables is the app's own model talking to itself with a se
   ONE UNTIL ALPHA VANTAGE LOADS.** `SEASONAL` in `engine.js` has the WRONG SIGN on eight months of
   twelve for CORN against 195 months of real data (§7). That table now drives the probability as
   well as the score, so a market on the fallback is drifting its own chance on numbers this
-  repository already knows to be wrong. The app says on screen when a market is on the fallback;
-  it does not say it beside the CHANCE.
+  repository already knows to be wrong. ~~The app says on screen when a market is on the fallback;
+  it does not say it beside the CHANCE.~~ **THE SAYING IS CLOSED BY PR #26** (§4j): every screen
+  that prints a chance prints one sentence naming which table drifted it and how old that reading
+  is, `chanceOf()` refuses to work without the provenance, and the autopilot reads the same
+  measured means the client does. **THE TABLE ITSELF IS STILL WRONG AND IS STILL ROADMAP P2** —
+  what changed is that the app no longer prints a number off it without saying so.
 - **THE VOLATILITY IS THE CHAIN'S IMPLIED ONE AND THAT IS A DECISION, NOT A MEASUREMENT.** The
   market sets the width, the app's thesis sets the lean. The alternative — realised volatility
   measured from returns — is the other half of ROADMAP P2 and is deliberately not done here.

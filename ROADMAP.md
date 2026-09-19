@@ -204,6 +204,54 @@ WHAT THE NEXT SESSION INHERITS:
     SECOND constant beside `fallbackSigma`: one is realised, one implied, and
     merging them would make a correction to either silently move the other.
 
+## P1-quater — PR #26: one seasonal source, and a chance that names it  (DONE)
+
+The debt P1-ter handed forward, closed: **no screen and no brief prints a chance without saying
+which seasonal reading drifted it.** PRD §4j.
+
+  - **`seasonalProvenance()` in `rules.js` is the one home**, beside `markProvenance()`,
+    `sigmaProvenance()` and `ivProvenance()`. It returns the means, whether they were MEASURED or
+    the HAND-WRITTEN estimate, the year count, the age in days and the one sentence.
+  - **`chanceOf()` will not work without it.** A caller handing twelve bare numbers THROWS — the
+    same discipline as `terminalMC()` throwing without an exit policy — and `riskGate.test.js`
+    sweeps every source file for the shape as well, because the throw catches the call that runs
+    and the sweep catches the call written today that runs only on a market nobody demos.
+  - **`chanceSourceNote()` may no longer call the hand-written row "this market's own seasonal
+    reading".** It did, whichever table had produced the drift.
+  - **The server reads what the client's loads have already cached.** `autopilot.mjs` was passing
+    `SEASONAL[pos.ticker] || SEASONAL.SPY` with no measured means available to it at all while
+    App.jsx had been loading them per market for four pull requests — two tables, one question.
+    It now reads `av/<SYM>.json` out of the blob store `av.mjs` already fills: **one read per
+    ticker**, never one per position, **never a fetch** (the free tier is 25 requests a DAY for
+    five markets), and **a stale entry served as is**, because month-old measured seasonality
+    beats a table with the wrong sign on eight months of twelve.
+  - **`parseAvJson()` and `statsFromMatrix()` moved from `App.jsx` to `engine.js`**, so the client
+    and the server derive the means from one parse of one body. A Netlify function cannot import
+    `App.jsx`; keeping the parse there would have meant a second seasonal table on the server.
+  - **Every surface that prints a chance prints the sentence** — Build, the Shortlist, the wide search, the multi-market
+    scan, the guided roads, kept candidates, the Guardian, the Journal's closed-trade thesis, the
+    autopilot brief, the weekly report and the copilot's context. The Guardian prints **two**: the
+    table in force now and the one recorded at entry, because its Thesis Integrity Score divides
+    one by the other and was reading a change in the TABLE as a change in the TRADE.
+  - **The absence of the stamp is the marker**, the same pattern `contractsAssumed` and
+    `simExitDTE` use: a record written before this carries no `seasonalSource`, and that absence
+    reads as the hand-written estimate because it was the only table either side could reach.
+  - **Nothing inside `SEASONAL` was edited.** One corrected CORN cell is worth 18.9 points of
+    printed chance and the sign of the average result (§4j) — which is the argument for P2, not a
+    licence to hand-edit the table here.
+
+WHAT THE NEXT SESSION INHERITS:
+  - **THE MEASURED PATH HAS NEVER RUN ONCE.** No Alpha Vantage key and the egress proxy refuses
+    the CONNECT (403), so the blob cache is empty in the sandbox and every sentence the app prints
+    here is the FALLBACK sentence. `/api/av` → blob → `measuredSeasonal()` → `seasonalProvenance()`
+    has been walked only by unit tests with a hand-built reading.
+  - **THE BEFORE/AFTER IS CORN ONLY.** SOYB, UNG, BOIL and WEAT have no measured cells anybody has
+    written down. How wrong the table is on them is unknown.
+  - **NONE OF THE NINE SENTENCES HAS BEEN READ ON A SCREEN.** Whether the Guardian's two-line
+    NOW/AT-ENTRY pair clarifies or crowds a 390px phone is a judgement nobody has made.
+  - **THE AUTOPILOT HAS STILL NEVER BEEN WATCHED RUNNING** — the third pull request in a row to
+    hand this forward.
+
 ## P2 — Proposals ranked by edge, not by score
 At market prices every structure has expected value near zero: high
 probability and large payoff are two ends of one lever. So the app must
@@ -220,7 +268,11 @@ disagrees with the market's.
     Neither is measured from returns. And the drift is only as good as
     `SEASONAL`, which has the wrong sign on eight months of twelve for CORN —
     that table now drives the probability as well as the score, which raises the
-    price of leaving it hand-written;
+    price of leaving it hand-written. **PR #26 PUT A NUMBER ON THAT PRICE**: one
+    corrected CORN cell moves the printed chance by 18.9 points and flips the
+    sign of the average result (§4j). It also made every screen SAY which table
+    it is on, so the cost is now visible rather than merely present — what P2
+    owes is the table itself;
   - rank by edge = EV under the house minus EV under the market, net of
     spread and commissions. Below transaction cost, nothing is proposed —
     that will be the common case and it is correct;

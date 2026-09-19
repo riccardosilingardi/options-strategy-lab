@@ -34,7 +34,7 @@ import {
 import { orderBody } from "./order.js";
 import { exitSim, SIGMA } from "./engine.js";
 import { sigmaProvenance, FALLBACK_SIGMA, FALLBACK_SIGMA_SOURCE, TABLE_SIGMA_SOURCE } from "./rules.js";
-import { chanceOf, chanceSourceNote } from "./rules.js";
+import { chanceOf, chanceSourceNote, seasonalProvenance } from "./rules.js";
 import { SEASONAL } from "./engine.js";
 
 let passed = 0;
@@ -523,9 +523,28 @@ test("the autopilot computes the chance through chanceOf, not a closed form", ()
   // deleted, and a structural test must not be satisfied — or failed — by prose.
   const live = AUTOPILOT.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
   assert.equal(/probProfit/.test(live), false, "no closed form survives here");
-  // And the drift it hands in is the app's own seasonal table for THAT market.
-  assert.ok(/monthlyMean: SEASONAL\[pos\.ticker\]/.test(AUTOPILOT),
-    "the drift is this market's seasonal reading, not a constant");
+  // And the drift it hands in is this market's seasonal reading WITH ITS
+  // PROVENANCE — never the bare hand-written row, which is what it used to be
+  // while the screens had been reading measured means for four pull requests.
+  assert.ok(/seasonal: seas,/.test(AUTOPILOT),
+    "the drift is a seasonalProvenance() result, not a bare table");
+  assert.ok(/seasonalProvenance\(await measuredSeasonal\(store, pos\.ticker\)/.test(AUTOPILOT),
+    "and the measured means come first, with the hand-written row behind them");
+});
+
+test("the brief reads the cached seasonal means and never spends the quota", () => {
+  // Alpha Vantage's free tier is 25 requests A DAY for five markets. The blob
+  // store already holds what the client's loads put there; this function reads
+  // it and, on a miss, falls back to the hand-written row and SAYS so. A fetch
+  // here would exhaust the day's allowance from a scheduled job nobody watches.
+  const live = AUTOPILOT.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+  assert.equal(/alphavantage/i.test(live), false, "the autopilot must never call Alpha Vantage itself");
+  assert.ok(/store\.get\(`av\/\$\{sym\}\.json`/.test(live), "it reads av.mjs's own cache key");
+  // NO TTL TEST: a stale measured reading beats a table with the wrong sign on
+  // eight months of twelve, and its age travels into the sentence on screen.
+  assert.equal(/TTL|ttl/.test(live), false, "a stale entry is served as is, not discarded");
+  // ONE READ PER TICKER, never one per position.
+  assert.ok(/seasonalCache\.has\(sym\)/.test(live), "the read is memoised per ticker");
 });
 
 test("the brief says what its probability is an answer about", () => {
@@ -534,13 +553,18 @@ test("the brief says what its probability is an answer about", () => {
   // a claim the APP is making: a simulation at this market's seasonal drift.
   assert.ok(/popNow_from/.test(AUTOPILOT), "the facts name the drift behind popNow");
   assert.ok(/chanceNote/.test(AUTOPILOT), "and the webhook brief prints the sentence");
+  assert.ok(/drift_source: chance\.seasonalSource/.test(AUTOPILOT),
+    "and it names WHICH table, not merely that there was one");
   const note = chanceSourceNote(chanceOf({
     legs: [{ side: 1, type: "call", strike: 20, qty: 1 }, { side: -1, type: "call", strike: 21, qty: 1 }],
     entryNet: 0.4, spot: 20, iv: 0.85, dte: 45,
-    monthlyMean: SEASONAL.BOIL, month: 8, ticker: "BOIL", expKey: "2026-11-06",
+    seasonal: seasonalProvenance(null, SEASONAL.BOIL, "BOIL"), month: 8, ticker: "BOIL", expKey: "2026-11-06",
   }), "BOIL");
   assert.ok(note.includes("seasonal"), note);
   assert.ok(note.includes("BOIL"), note);
+  // ON THE FALLBACK IT SAYS SO. The sentence used to call the hand-written row
+  // "BOIL's own seasonal reading" whatever had produced it.
+  assert.ok(note.includes("HAND-WRITTEN"), note);
 });
 
 test("a chance the autopilot could not work out is null, never a confident 0%", () => {

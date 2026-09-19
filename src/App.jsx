@@ -12,7 +12,8 @@ import { fetchAllNews, fetchWeather, ImpactTags, CopilotTab, ReportTab, OrderTic
 import { BandThumbnail, payoffBands, bandTakeaway, GaugeFigure, Gauge, CompareFigure, exitPlanSentence,
   OpenInterestStrip, oiStripTakeaway, oiCutAt, oiGhostCut, explainOiStrip, useWidth } from "./visuals.jsx";
 import { fuseSignals, sentimentDirection, withSignalRank, compareCandidates, againstSignal, DRIVER_PRESETS, rankByDrivers, verdictNarrative } from "./signals.js";
-import { N as nCDF, bs as bsPrice, smile as smileIV, payoff as payoffExp, SEASONAL, SIGMA } from "./engine.js";
+import { N as nCDF, bs as bsPrice, smile as smileIV, payoff as payoffExp, SEASONAL, SIGMA,
+  parseAvJson, statsFromMatrix } from "./engine.js";
 import { parseOcc, buildOcc, fetchChain, hasOpenInterest, enrichOpenInterest, feedName, sourceNote, openInterestNote, oiProfile, expiryOpenInterest, nearMoneyOpenInterest, monotonicityBreaks, monotonicityNote, spotOf, spotAt } from "./chain.js";
 import { T, themeName, setTheme, BADGE_SAFE } from "./theme.js";
 import { RULES, sizing, ruleBadge, takeProfitLabel, stopLossLabel, perTradeCapLabel, RULE_PILLS, NOTHING_TODAY, money, pctText, capitalSourceNote, perTradeLimitPhrase, qualityFloor, qualityFloorSentence, liquiditySkippedNote,
@@ -26,7 +27,7 @@ import { RULES, sizing, ruleBadge, takeProfitLabel, stopLossLabel, perTradeCapLa
   expiryChoice, expiryChoiceNote, emptyExpiryNote, wideSpreadNote, spreadSkippedNote,
   chancePct, chanceText, chanceInTen, signedMoney,
   ruleExitOf, stopWarningSentence, watchAttentionLevel,
-  chanceOf, chanceSourceNote } from "./rules.js";
+  chanceOf, chanceSourceNote, seasonalProvenance, seasonalStampNote, seasonalStampFields } from "./rules.js";
 import { isStale, freshnessNote, staleAmong } from "./freshness.js";
 import { evaluateTrade, gateSummary } from "./riskGate.js";
 import { DEMO, DEMO_BANNER, DEMO_TOOLTIP, DEMO_SEED_TICKERS, demoPositions } from "./demo.js";
@@ -105,37 +106,20 @@ const getU = (tk) => UNDERLYINGS[tk] || FALLBACK_U(tk || "?");
    silent broker costs a few seconds, never a blank screen.
    ======================================================================== */
 
-/* ============================== ALPHA VANTAGE: real monthly history ============================== */
-function statsFromMatrix(matrix) {
-  // matrix: [[year, r1..r12 in %], ...] — calcola medie mensili e sigma localmente
-  const all = [];
-  const monthlyMean = Array.from({ length: 12 }, (_, m) => {
-    const xs = matrix.map((row) => row[m + 1]).filter((x) => x != null && !Number.isNaN(x));
-    xs.forEach((x) => all.push(x / 100));
-    return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0;
-  });
-  const mean = all.reduce((a, b) => a + b, 0) / Math.max(1, all.length);
-  const varr = all.reduce((a, b) => a + (b - mean) ** 2, 0) / Math.max(1, all.length - 1);
-  return { monthlyMean, sigma: Math.sqrt(varr * 12), years: matrix.length };
-}
-const AV_URL = (sym, key) => `https://www.alphavantage.co/query?function=TIME_SERIES_MONTHLY_ADJUSTED&symbol=${sym}&apikey=${key}`;
-function parseAvJson(j) {
-  const ts = j["Monthly Adjusted Time Series"];
-  if (!ts) throw new Error(j["Note"] || j["Information"] || j["Error Message"] || "risposta vuota (rate limit?)");
-  const rows = Object.entries(ts)
-    .map(([date, v]) => ({ date, close: parseFloat(v["5. adjusted close"]) }))
-    .sort((a, b) => a.date.localeCompare(b.date));
-  const cutoff = new Date(); cutoff.setFullYear(cutoff.getFullYear() - 10);
-  const recent = rows.filter((r2) => new Date(r2.date) >= cutoff);
-  const byYM = {};
-  for (let i = 1; i < recent.length; i++) {
-    const d = new Date(recent[i].date);
-    if (!byYM[d.getFullYear()]) byYM[d.getFullYear()] = Array(12).fill(null);
-    byYM[d.getFullYear()][d.getMonth()] = (recent[i].close / recent[i - 1].close - 1) * 100;
-  }
-  const matrix = Object.entries(byYM).map(([y, ms]) => [+y, ...ms]);
-  return { matrix, from: recent[0]?.date };
-}
+/* ============================== ALPHA VANTAGE: real monthly history ==============================
+   `parseAvJson()` and `statsFromMatrix()` USED TO LIVE HERE and are now in
+   engine.js, imported above. The autopilot has to derive the same measured
+   monthly means from the same cached body while the app is closed, and a
+   Netlify function cannot import this file (React, recharts,
+   lightweight-charts) — so keeping the parse here would have meant a second
+   implementation of the seasonal table on the server, which is precisely the
+   disagreement this PR exists to end.
+
+   The dead `AV_URL` constant went with them. Nothing on the client may call
+   Alpha Vantage directly: the key lives in a Netlify environment variable and
+   `/api/av` is the only door. A URL template with an `apikey` slot in bundled
+   code is an invitation to reopen that door by accident.
+   ================================================================================================ */
 async function fetchHistory(sym) {
   const r = await fetch(`/api/av?sym=${encodeURIComponent(sym)}`);
   if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `HTTP ${r.status}`); }
@@ -338,11 +322,28 @@ export const structureIV = (a) => {
  * `riskGate.test.js` fails the build if this file spells `chanceOf` more than
  * once, exactly as it does for `modelSanity`.
  */
-export const chanceCheckOf = (a, { ticker, legs, spot, dte, expKey = null, monthlyMean, thesisIV = null }) =>
+export const chanceCheckOf = (a, { ticker, legs, spot, dte, expKey = null, seasonal, thesisIV = null }) =>
   chanceOf({
-    legs, entryNet: a?.entry, spot, dte, expKey, ticker, monthlyMean,
+    legs, entryNet: a?.entry, spot, dte, expKey, ticker, seasonal,
     month: NOW_MONTH, iv: structureIV(a), thesisIV,
   });
+
+/**
+ * THE ONE SENTENCE THAT TRAVELS WITH EVERY PRINTED CHANCE.
+ *
+ * PR #25 made all five screens agree on the NUMBER and left the debt it wrote
+ * down open: four of the five markets sit on the hand-written seasonal table
+ * until Alpha Vantage loads, the app says so on the Build screen's SEASONAL
+ * SOURCE stat, and it said nothing beside the CHANCE — which is the figure that
+ * table actually moves. Correcting one CORN cell to the value av.mjs documents
+ * moves the printed chance by 18.8 points and flips the sign of the average
+ * result, so the source is not a footnote about the number, it IS the number.
+ *
+ * `chanceOf()` stamps its own result, so this reads the answer rather than
+ * re-deciding it. A row with no chance gets the sentence that says why there
+ * is none, never a blank.
+ */
+const chanceStamp = (mc, ticker = "this market") => (mc ? mc.seasonalNote : chanceSourceNote(null, ticker));
 
 function netValue(legs, S, dte, baseIV, q) {
   return legs.reduce((a, l) => a + Math.sign(l.side) * l.qty * priceLeg(l, S, dte, baseIV, q).px, 0);
@@ -1502,20 +1503,22 @@ export default function OptionsStrategyLab() {
   const modelCheck = useMemo(
     () => (A ? modelCheckOf(A, { legs, spot, dte, iv }) : null),
     [A, legs, spot, dte, iv]);
-  /* THE SEASONAL MEANS A CHANCE IS DRIFTED ON, for any market, from the one
-     place they live: the loaded Alpha Vantage series when there is one, the
-     hand table behind it when there is not. Every call to `chanceFor` below
-     goes through this, so no screen can drift a probability on a different
-     table from the one the Radar scores that market with. */
-  const meansFor = useCallback(
-    (tk) => (seasonal[tk]?.monthlyMean) || getU(tk).monthlyMean,
+  /* WHICH SEASONAL TABLE A CHANCE IS DRIFTED ON, AND WHERE IT CAME FROM, for
+     any market, from the one place that decides it: `seasonalProvenance()` in
+     rules.js, given the loaded Alpha Vantage series when there is one and the
+     hand-written row behind it when there is not. Every call to `chanceFor`
+     below goes through this, so no screen can drift a probability on a
+     different table from the one the Radar scores that market with — and no
+     screen can print the number without the sentence naming its source. */
+  const seasonalFor = useCallback(
+    (tk) => seasonalProvenance(seasonal[tk] || null, getU(tk).monthlyMean, tk),
     [seasonal]);
   /* THE ONE CHANCE, BOUND TO THIS COMPONENT'S SEASONAL STATE. `chanceCheckOf`
      is the module-level expression; this supplies the only argument a screen
      cannot know on its own. */
   const chanceFor = useCallback(
-    (a, opts) => chanceCheckOf(a, { ...opts, monthlyMean: meansFor(opts.ticker) }),
-    [meansFor]);
+    (a, opts) => chanceCheckOf(a, { ...opts, seasonal: seasonalFor(opts.ticker) }),
+    [seasonalFor]);
   /* AND THE BUILD SCREEN'S OWN, COMPUTED ONCE. The CHANCE stat, the PROFIT x
      CHANCE stat, the simulation panel and the position record all read this
      object — they used to read three different calculations. */
@@ -1791,7 +1794,14 @@ export default function OptionsStrategyLab() {
       openedAt: new Date().toISOString(), expiry, maxProfit: analysis.maxProfit, maxLoss: analysis.maxLoss,
       realEntry: analysis.realCount === lg.length,
       alpacaId: alpacaOrder?.id || null,
-      thesis: { pop: pop0, iv: ivAvg0, seasonal: seasM, regime: seasM > 0.8 ? "strong up" : seasM < -0.8 ? "strong down" : "weak", spot: sp, breakevens: analysis.breakevens, delta: analysis.greeks.delta, vega: analysis.greeks.vega,
+      // WHICH SEASONAL TABLE THE CHANCE ABOVE WAS DRIFTED ON, ON THE RECORD.
+      // The Guardian's TIS divides today's chance by `thesis.pop`, so if the
+      // market was on the hand-written estimate at entry and on measured prices
+      // today, the score reads a change in the TABLE as a change in the TRADE.
+      // The absence of these three fields on an older record is the marker, the
+      // way `contractsAssumed` marks a size that was assumed: at that point the
+      // hand-written table was the only one either side could reach.
+      thesis: { pop: pop0, ...seasonalStampFields(mc0), iv: ivAvg0, seasonal: seasM, regime: seasM > 0.8 ? "strong up" : seasM < -0.8 ? "strong down" : "weak", spot: sp, breakevens: analysis.breakevens, delta: analysis.greeks.delta, vega: analysis.greeks.vega,
         signal: f ? { score: f.score, confidence: f.confidence, agreement: f.agreement, narrative: f.narrative } : null,
         againstSignal: clashInfo ? { ...clashInfo, reason: (reason || "").trim(), at: Date.now() } : null },
       // WHAT THE BROKER ACTUALLY SAID, ON THE POSITION'S OWN RECORD. An
@@ -2532,6 +2542,12 @@ export default function OptionsStrategyLab() {
         rr: x.rr, contracts: 1, a: x.a, fused: x.fused,
         driver: x.driver, drivers: x.drivers,
         sigma: (seasonal[x.tk]?.sigma) || getU(x.tk).sigma,
+        // A ROAD CARRIES THE SOURCE OF ITS OWN CHANCE. Two roads are ranked on
+        // one scale across the whole basket, so road 1 and road 2 can be in
+        // different markets — and with four of five markets on the hand-written
+        // table until Alpha Vantage loads, two roads compared side by side can
+        // have their "works out N times in 10" drifted on two different tables.
+        ...seasonalStampFields(x.mc),
       });
       const roads = [toCandidate(first, 1), toCandidate(second, 2)];
 
@@ -2774,8 +2790,13 @@ export default function OptionsStrategyLab() {
       // first and last are partial. `years` is the row count and the only
       // figure any screen prints.
       years: seasonal[tk]?.years ?? null, hasChain: !!c,
+      // AND THE STAMP TRAVELS WITH THE ROW, because the weekly report is built
+      // from `scan` and is read away from the screen: "seasonal +1.5%/mo" in a
+      // document with nothing saying which table produced it is the same fault
+      // as a chance with nothing saying which table drifted it.
+      ...seasonalStampFields(seasonalFor(tk)),
       fused: f, conflict: f?.agreement === "CONFLICT", agreement: f?.agreement, signalScore: f?.score ?? 0, confidence: f?.confidence ?? 0 };
-  }).sort((a, b) => (a.conflict !== b.conflict ? (a.conflict ? 1 : -1) : b.score - a.score)), [chains, seasonal, fused]);
+  }).sort((a, b) => (a.conflict !== b.conflict ? (a.conflict ? 1 : -1) : b.score - a.score)), [chains, seasonal, fused, seasonalFor]);
 
   /* ---- what the last search found in each market ----
      The Radar's job is to say which markets have something and which do not,
@@ -3569,7 +3590,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                             {r.fused.agreement} {r.fused.score > 0 ? "+" : ""}{r.fused.score}
                           </span>
                         )}
-                        <Stat k="CHANCE" v={chanceText(r.pop)} c={r.pop >= 0.5 ? T.green : T.violet} />
+                        <Stat k="CHANCE" v={chanceText(r.pop)} c={r.pop >= 0.5 ? T.green : T.violet} tip={chanceStamp(r.mc, r.tk)} />
                         {/* AN EXPECTED VALUE NEEDS A BEST CASE. With no ceiling
                             there is none, so nothing is printed here and the
                             candidate sits last by construction (its rank is the
@@ -3842,7 +3863,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   // (src/path.js), so a road, a shortlist row and a
                   // multi-market hit are the same kind of thing here.
                   const bands = payoffBands({ legs: p.legs, entryNet: a.entry, spot });
-                  const cand = candidateOf({ name: p.name, legs: p.legs, a, pop, dte, expKey },
+                  const cand = candidateOf({ name: p.name, legs: p.legs, a, pop, dte, expKey, ...seasonalStampFields(mcRow) },
                     { ticker, spot, sigma: seas.sigma, source: "shortlist" });
                   return (
                     <div key={p.name} style={{ padding: "10px 12px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7 }}>
@@ -3872,7 +3893,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                           tip={a.profitUnbounded ? noCeilingNote(p.name) : undefined} />
                         <Stat k="MAX LOSS" v={fmt$(a.maxLoss)} c={T.red} />
                         <Stat k="R/R" v={rr ? rr.toFixed(2) : "—"} c={T.amber} />
-                        <Stat k="CHANCE" v={chanceText(pop)} c={pop >= 0.5 ? T.green : T.violet} />
+                        <Stat k="CHANCE" v={chanceText(pop)} c={pop >= 0.5 ? T.green : T.violet} tip={chanceStamp(mcRow, ticker)} />
                         <Stat k="BREAKEVEN" v={a.breakevens.map((b) => b.toFixed(2)).join(" · ") || "—"} c={T.blue} />
                       </div>
                       {(() => {
@@ -3927,7 +3948,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                 <Lbl>ALSO FOUND BY THE WIDE SEARCH ON {ticker}</Lbl>
                 <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
                   {(multi.res || []).filter((r) => r.tk === ticker).map((r, i) => {
-                    const cand = candidateOf({ name: r.name, legs: r.legs, a: r.a, pop: r.pop, dte: r.dte, expKey: r.expKey },
+                    const cand = candidateOf({ name: r.name, legs: r.legs, a: r.a, pop: r.pop, dte: r.dte, expKey: r.expKey, ...seasonalStampFields(r.mc) },
                       { ticker: r.tk, spot: r.spot, sigma: (seasonal[r.tk]?.sigma) || getU(r.tk).sigma, source: "wide search" });
                     const bands = payoffBands({ legs: r.legs, entryNet: r.a.entry, spot: r.spot });
                     return (
@@ -3939,7 +3960,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                           <Gauge bands={bands} size={112} ticker={r.tk} />
                         </div>
                         <div style={{ display: "flex", gap: 14, marginTop: 8, flexWrap: "wrap" }}>
-                          <Stat k="CHANCE" v={chanceText(r.pop)} c={r.pop >= 0.5 ? T.green : T.violet} />
+                          <Stat k="CHANCE" v={chanceText(r.pop)} c={r.pop >= 0.5 ? T.green : T.violet} tip={chanceStamp(r.mc, r.tk)} />
                           <Stat k="MAX PROFIT" v={ceil$(r.a.maxProfit)} c={T.green}
                             tip={r.a.profitUnbounded ? noCeilingNote(r.name) : undefined} />
                           <Stat k="MAX LOSS" v={fmt$(r.a.maxLoss)} c={T.red} />
@@ -4039,7 +4060,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                       <Stat k="RISK" v={fmt$(c.risk)} c={T.red} />
                       <Stat k="MAX PROFIT" v={ceil$(c.maxProfit)} c={T.green}
                         tip={c.maxProfit == null ? noCeilingNote(c.name) : undefined} />
-                      <Stat k="CHANCE" v={chanceText(c.pop)} c={(c.pop || 0) >= 0.5 ? T.green : T.violet} />
+                      <Stat k="CHANCE" v={chanceText(c.pop)} c={(c.pop || 0) >= 0.5 ? T.green : T.violet} tip={seasonalStampNote(c, c.ticker || "this market")} />
                       <Btn small onClick={() => openOnBuild({ ticker: c.ticker, expKey: c.expKey, legs: c.legs, name: c.name })}>Take to Build →</Btn>
                     </div>
                   ))}
@@ -4693,6 +4714,8 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                             pos={p} spot={s || p.entrySpot} dteLeft={dteLeft} ivNow={ivNow}
                             sigma={(seasonal[p.ticker]?.sigma) || getU(p.ticker).sigma}
                             seasonalNow={seasNow} pnlNow={pnl} popNow={popNow} chanceNow={mcNow}
+                            seasonalNote={chanceStamp(mcNow, p.ticker)}
+                            thesisSeasonalNote={seasonalStampNote(p.thesis, p.ticker)}
                             vegaSign={Math.sign(p.thesis?.vega ?? 1) || 1}
                             alpaca={!!alpaca} quoteFn={qp} buildOcc={buildOcc}
                             setMsg={setMsg} logEvent={logEvent} gate={gate}
@@ -4959,6 +4982,15 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                       <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 7, lineHeight: 1.55 }}>
                         <span style={{ color: T.dim }}>THE REASON YOU OPENED IT · </span>
                         {`chance ${e.thesis.pop != null ? chanceText(e.thesis.pop) : "n/a"} · volatility ${e.thesis.iv != null ? (e.thesis.iv * 100).toFixed(0) + "%" : "n/a"} · season ${e.thesis.seasonal != null ? e.thesis.seasonal.toFixed(1) + "%/mo" : "n/a"}${e.thesis.regime ? ` · ${e.thesis.regime}` : ""}`}
+                        {/* WHICH TABLE THAT CHANCE WAS DRIFTED ON. A closed
+                            trade is re-read months later, when nothing else on
+                            screen can still say which seasonal reading was in
+                            force the day it was opened. An entry with no stamp
+                            is one written before the app recorded one, and the
+                            sentence says that rather than guessing. */}
+                        {e.thesis.pop != null
+                          ? <div style={{ color: T.dim, marginTop: 3 }}>{seasonalStampNote(e.thesis, e.ticker || "this market")}</div>
+                          : null}
                         {e.thesis.againstSignal
                           ? <div style={{ color: T.amber, marginTop: 3 }}>{`Opened against ${e.thesis.againstSignal.n} of ${e.thesis.againstSignal.total} factors — "${e.thesis.againstSignal.reason}"`}</div>
                           : null}

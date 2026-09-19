@@ -27,7 +27,8 @@ import {
   qualityFloor, rewardRisk, reportNarrativePrompt, NOTHING_TODAY, NO_CEILING, RULES,
   modelSanity, modelDisagreementNote, MIN_NET_DOLLARS,
 } from "./rules.js";
-import { chanceOf, chanceSourceNote } from "./rules.js";
+import { chanceOf, chanceSourceNote, seasonalProvenance, seasonalStampNote,
+  MEASURED_SEASONAL_SOURCE, ESTIMATED_SEASONAL_SOURCE } from "./rules.js";
 import { payoffBands, payingBands, bandsAbove, scratchSplit, unifiedTakeaway, explainElement, exitPlanDetail, compareTakeaway, chanceInProfit } from "./visuals.jsx";
 import { analyze, shortlistWithFloors, buildPresets, modelCheckOf, chanceCheckOf, structureIV } from "./App.jsx";
 import { payoff, netBS, SEASONAL, SIGMA, seasonalDrift } from "./engine.js";
@@ -570,9 +571,12 @@ const fixtures = () => {
   return out;
 };
 /** What every screen calls, with the arguments the screen would have. */
+/** The hand-written row, named as what it is — which is what every one of these
+ *  fixtures is actually on, because no measured series exists in a test run. */
+const seasOf = (tk) => seasonalProvenance(null, SEASONAL[tk], tk);
 const chanceAt = (f) => chanceOf({
   legs: f.legs, entryNet: f.entry, spot: f.u.spot, iv: f.u.iv, dte: FIXDTE,
-  monthlyMean: SEASONAL[f.tk], month: MONTH, ticker: f.tk, expKey: "2026-11-06",
+  seasonal: seasOf(f.tk), month: MONTH, ticker: f.tk, expKey: "2026-11-06",
 });
 
 check("P1 DONE WHEN — five screens, one position, ONE number", () => {
@@ -585,7 +589,7 @@ check("P1 DONE WHEN — five screens, one position, ONE number", () => {
     const a = { entry: f.entry, legPx: f.legs.map(() => ({ iv: f.u.iv })) };
     const viaApp = chanceCheckOf(a, {
       ticker: f.tk, legs: f.legs, spot: f.u.spot, dte: FIXDTE, expKey: "2026-11-06",
-      monthlyMean: SEASONAL[f.tk],
+      seasonal: seasOf(f.tk),
     });
     const viaServer = chanceAt(f);
     eq(viaApp.pop, viaServer.pop, `${f.tk} ${f.shape}: pop`);
@@ -603,10 +607,10 @@ check("P1 DONE WHEN — the chance travels with the trade, not with the screen",
   // The seed is the TRADE's, so the number is the same whenever the inputs are.
   const f = fixtures()[0];
   const fromShortlist = chanceCheckOf({ entry: f.entry, legPx: [{ iv: f.u.iv }, { iv: f.u.iv }] },
-    { ticker: f.tk, legs: f.legs, spot: f.u.spot, dte: FIXDTE, expKey: "2026-11-06", monthlyMean: SEASONAL[f.tk] });
+    { ticker: f.tk, legs: f.legs, spot: f.u.spot, dte: FIXDTE, expKey: "2026-11-06", seasonal: seasOf(f.tk) });
   const fromGuardian = chanceCheckOf({ entry: f.entry, legPx: [{ iv: f.u.iv }, { iv: f.u.iv }] },
     { ticker: f.tk, legs: [...f.legs], spot: f.u.spot, dte: FIXDTE, expKey: "2026-11-06",
-      monthlyMean: SEASONAL[f.tk], thesisIV: 0.9 });
+      seasonal: seasOf(f.tk), thesisIV: 0.9 });
   // `thesisIV` is only reached when the chain gives nothing, so it changes
   // nothing here — which is the property being held.
   eq(fromShortlist.pop, fromGuardian.pop, "a remembered volatility must not override a live one");
@@ -710,6 +714,107 @@ check("THE CHANCE SAYS WHAT IT IS AN ANSWER ABOUT", () => {
   has(note, "not a market-neutral assumption");   // it names what this is NOT
   // and a missing chance is a sentence, not a crash
   has(chanceSourceNote(null), "There is no chance to show");
+});
+
+/* ============================================================================
+   THE DEBT PR #25 WROTE DOWN: no screen prints a chance without saying which
+   seasonal reading drifted it.
+
+   Held against the REAL expression the screens call — `chanceCheckOf` exported
+   from App.jsx — not against a re-implementation, for the same reason
+   `analyze` and `shortlistWithFloors` are.
+============================================================================ */
+
+/** The same trade, priced twice: once on a measured series, once on the table. */
+const CORN_SPREAD = {
+  legs: [{ side: 1, type: "call", strike: 19, qty: 1 }, { side: -1, type: "call", strike: 21, qty: 1 }],
+  tk: "CORN", spot: 19, iv: 0.22, dte: 45, expKey: "2026-11-06",
+};
+const cornAt = (seasonal) => {
+  const f = CORN_SPREAD;
+  const entry = netBS(f.legs, f.spot, f.dte, f.iv);
+  return chanceCheckOf({ entry, legPx: f.legs.map(() => ({ iv: f.iv })) },
+    { ticker: f.tk, legs: f.legs, spot: f.spot, dte: f.dte, expKey: f.expKey, seasonal });
+};
+
+check("SEASONAL PROVENANCE — a measured market and a fallback market say DIFFERENT things", () => {
+  /* THE FIXTURE IS THE ONLY HONEST ONE AVAILABLE. No broker and no Alpha
+     Vantage key reach this sandbox, so there is no live measured series to read
+     — the blob cache `/api/av` fills is empty here. What IS documented, in
+     netlify/functions/av.mjs and in the PRD, is two CORN cells measured against
+     195 months of real data: June -3.46 against the table's +1.5, September
+     +1.03 against the table's -1.1. Those two cells are the fixture, and
+     nothing inside `SEASONAL` is edited to build it — the corrected row is made
+     here, in the test. */
+  const measuredRow = SEASONAL.CORN.slice();
+  measuredRow[5] = -3.46;   // June
+  measuredRow[8] = 1.03;    // September
+
+  const measured = chanceOf({
+    legs: CORN_SPREAD.legs, entryNet: 0.5, spot: 19, iv: 0.22, dte: 45, month: 5, ticker: "CORN",
+    seasonal: seasonalProvenance({ monthlyMean: measuredRow, years: 11, at: Date.now() }, SEASONAL.CORN, "CORN"),
+  });
+  const fallback = chanceOf({
+    legs: CORN_SPREAD.legs, entryNet: 0.5, spot: 19, iv: 0.22, dte: 45, month: 5, ticker: "CORN",
+    seasonal: seasonalProvenance(null, SEASONAL.CORN, "CORN"),
+  });
+
+  // 1) THE SENTENCES DIFFER, and each names its own table.
+  if (measured.seasonalNote === fallback.seasonalNote) {
+    throw new Error("one sentence for two sources is no sentence at all");
+  }
+  has(measured.seasonalNote, "MEASURED");
+  has(measured.seasonalNote, "11 years");
+  has(fallback.seasonalNote, "HAND-WRITTEN");
+  // ...and the full note the screens print carries whichever applies.
+  has(chanceSourceNote(measured, "CORN"), "MEASURED");
+  has(chanceSourceNote(fallback, "CORN"), "HAND-WRITTEN");
+  // THE OLD SENTENCE CALLED BOTH OF THEM "CORN's own seasonal reading". It is
+  // true of a measured series and false of a row somebody typed.
+  if (/CORN.s own seasonal reading/.test(chanceSourceNote(fallback, "CORN"))) {
+    throw new Error("the hand-written table is not CORN's own reading of anything");
+  }
+
+  // 2) AND THE NUMBER ITSELF MOVES, which is why the sentence is not decoration.
+  if (Math.abs(measured.pop - fallback.pop) < 0.05) {
+    throw new Error(`one corrected cell should move the chance materially, moved ${(measured.pop - fallback.pop) * 100}pp`);
+  }
+  if (Math.sign(measured.driftAnnual) === Math.sign(fallback.driftAnnual)) {
+    throw new Error("June is the cell whose SIGN the table has wrong; the drift must flip");
+  }
+});
+
+check("SEASONAL PROVENANCE — a market with no reading at all prints NO chance", () => {
+  // THE COUNTER-EXAMPLE THAT MUST STILL PASS. Neither measured prices nor a
+  // hand-written row: the answer is null and every screen prints a dash. A
+  // drift of zero standing in would be a confident claim that the market goes
+  // nowhere, which is not the same thing as not knowing — and `Number(null)`
+  // is 0, which is how a missing reading becomes a 0% on screen.
+  const none = seasonalProvenance(null, null, "XYZ");
+  eq(none.missing, true, "no table either side is missing, not estimated");
+  eq(none.monthlyMean, null, "and there is no row to drift on");
+  eq(cornAt(none), null, "the chance is not computed");
+  has(chanceSourceNote(null, "XYZ"), "There is no chance to show");
+  has(none.note, "no seasonal reading");
+  // A row of twelve zeros is NOT the same thing, and must not be read as one:
+  // it is a real reading that happens to average out.
+  const zeros = seasonalProvenance(null, Array(12).fill(0), "XYZ");
+  eq(zeros.missing, false, "twelve measured zeros is a reading, not an absence");
+  if (!cornAt(zeros)) throw new Error("a flat table still produces a chance");
+});
+
+check("SEASONAL PROVENANCE — the stamp travels, and its ABSENCE is the marker", () => {
+  // The same pattern `contractsAssumed` and `simExitDTE` already use. A record
+  // written before the app recorded a source carries none, and at that point
+  // the hand-written table was the only one either side could reach.
+  const mc = cornAt(seasonalProvenance({ monthlyMean: SEASONAL.CORN, years: 11, at: Date.now() }, SEASONAL.CORN, "CORN"));
+  eq(mc.seasonalMeasured, true, "the chance carries its own stamp");
+  eq(mc.seasonalYears, 11, "...and the year count");
+  has(seasonalStampNote({ seasonalSource: mc.seasonalSource, seasonalYears: 11, seasonalAgeDays: 0 }, "CORN"), "MEASURED");
+  // An unstamped record reads as the estimate, and SAYS that is why.
+  const old = seasonalStampNote({ pop: 0.5 }, "CORN");
+  has(old, "no seasonal stamp");
+  has(old, "HAND-WRITTEN");
 });
 
 for (const [name, why] of bad) console.error(`  FAIL ${name}\n       ${why}`);
