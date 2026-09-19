@@ -32,6 +32,8 @@ import {
   closeMarket, closeLimitPrice, closeLimitNote, closeUnreadableNote,
 } from "./rules.js";
 import { orderBody } from "./order.js";
+import { exitSim, SIGMA } from "./engine.js";
+import { sigmaProvenance, FALLBACK_SIGMA, FALLBACK_SIGMA_SOURCE, TABLE_SIGMA_SOURCE } from "./rules.js";
 
 let passed = 0;
 const failures = [];
@@ -42,6 +44,7 @@ function test(name, fn) {
 
 const AUTOPILOT = readFileSync(new URL("../netlify/functions/autopilot.mjs", import.meta.url), "utf8");
 const APPROVE = readFileSync(new URL("../netlify/functions/approve.mjs", import.meta.url), "utf8");
+const RULES_SRC = readFileSync(new URL("./rules.js", import.meta.url), "utf8");
 
 /**
  * THE CODE WITHOUT ITS COMMENTS.
@@ -437,6 +440,66 @@ test("the position's record is written back to the store after the order", () =>
 test("a record that fails to write never undoes an order that went", () => {
   const tail = APPROVE.slice(APPROVE.indexOf("THE POSITION'S OWN RECORD"));
   assert.ok(/\} catch \{ \/\* the order went/.test(tail));
+});
+
+/* ================================================================
+   7) PR #24 — THE SIMULATOR'S HORIZON, AND THE VOLATILITY IT WALKS ON
+================================================================ */
+
+test("THE SIMULATOR IS RUN AT THE EXIT RULE, AND THE POLICY COMES FROM ITS HOME", () => {
+  // `exitSim` held its own copies (0.5, 0.5 and 7) and `RULES.exitDTE` is 21.
+  assert.ok(/const EXIT_POLICY = \{ exitDTE: RULES\.exitDTE, takeProfitPct: RULES\.takeProfitPct, stopLossPct: RULES\.stopLossPct \}/
+    .test(AUTOPILOT_CODE), "the policy is read from RULES, in one place");
+  assert.ok(/exitSim\(pos, spot, dteLeft, iv, vol\.sigma, EXIT_POLICY\)/.test(AUTOPILOT_CODE),
+    "and handed to the simulator, which has no default for it");
+});
+
+test("THE FIELD NAMES CLAIM THE HORIZON THE BLOCK WAS COMPUTED AT", () => {
+  // `p_exit_at_exit_dte_positive` asserted the exit rule while the arithmetic
+  // ran to 7 days. The model writes prose on top of these names.
+  const block = AUTOPILOT_CODE.slice(AUTOPILOT_CODE.indexOf("simulator_from_today"));
+  assert.ok(/p_exit_at_exit_dte_positive: \+\(sim\.pTimePos \* 100\)/.test(block));
+  assert.ok(/simulated_to_dte: sim\.exitDTE/.test(block),
+    "the block states the day it stopped at, from the simulator's own answer");
+  assert.ok(/days_simulated: sim\.horizon/.test(block), "and how far it walked");
+  // And the number in `simulated_to_dte` is the rule, not a second opinion:
+  // `exitSim` returns the `exitDTE` it was RUN with, and it was run with RULES'.
+  assert.equal(exitSim({ legs: [{ side: 1, type: "call", strike: 20, qty: 1 }], entryNet: 0.5, maxProfit: 100, maxLoss: -50 },
+    20, 45, 0.3, 0.2, { exitDTE: RULES.exitDTE, takeProfitPct: RULES.takeProfitPct, stopLossPct: RULES.stopLossPct }, 5).exitDTE,
+  RULES.exitDTE);
+});
+
+test("THE FALLBACK VOLATILITY HAS A NAME, AND THE BRIEF SAYS WHICH ONE WAS IN FORCE", () => {
+  // It was `SIGMA[pos.ticker] || 0.25`: a hand-written table with an unlabelled
+  // hand-written fallback behind it, driving every figure the simulator prints.
+  assert.ok(!/SIGMA\[pos\.ticker\] \|\| 0\.25/.test(AUTOPILOT_CODE), "the bare fallback is gone");
+  assert.ok(/sigmaProvenance\(SIGMA\[pos\.ticker\], pos\.ticker\)/.test(AUTOPILOT_CODE), "it is decided once");
+  assert.ok(/simSigma: vol\.sigma, simSigmaSource: vol\.source/.test(AUTOPILOT_CODE), "carried on the brief");
+  assert.ok(/if \(!vol\.fromTable\) ruleWarnings\.push\(vol\.note\)/.test(AUTOPILOT_CODE),
+    "and a simulation walked at a number nobody wrote down for this market says so");
+  assert.ok(/volatility_source: vol\.source/.test(AUTOPILOT_CODE), "the model is told too");
+});
+
+test("sigmaProvenance — a row in the table and no row are two different answers", () => {
+  const boil = sigmaProvenance(SIGMA.BOIL, "BOIL");
+  assert.equal(boil.sigma, SIGMA.BOIL);
+  assert.equal(boil.fromTable, true);
+  assert.equal(boil.source, TABLE_SIGMA_SOURCE);
+  assert.ok(/written down, not measured/.test(boil.note), "and even the table says it was typed, not measured");
+
+  for (const missing of [undefined, null, 0, NaN, -1]) {
+    const v = sigmaProvenance(missing, "GLD");
+    assert.equal(v.sigma, FALLBACK_SIGMA, `${missing} is not a volatility`);
+    assert.equal(v.fromTable, false);
+    assert.equal(v.source, FALLBACK_SIGMA_SOURCE);
+    assert.ok(/FALLBACK VOLATILITY/.test(v.note) && /GLD/.test(v.note), "and it names the market it is guessing about");
+  }
+  // The number itself is CHOSEN, and the comment beside it says so. This test
+  // holds the value so a silent edit is a failing build rather than a drift.
+  assert.equal(FALLBACK_SIGMA, 0.25);
+  assert.equal(FALLBACK_SIGMA, RULES.fallbackSigma, "and it lives in RULES with every other chosen number");
+  assert.equal(RULES_SRC.includes("**0.25 IS CHOSEN, NOT MEASURED.**"), true,
+    "the constant carries its own provenance, like closeLimitSlippage");
 });
 
 /* ---------------- report ---------------- */

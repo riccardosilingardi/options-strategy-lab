@@ -1405,7 +1405,11 @@ export function exitPathSim(pos, S, dteLeft, iv, sigma, nSim = 2000) {
       if (pnl <= sl) { nSL++; sumExit += pnl; done = true; break; }
     }
     if (!done) {
-      const pnl = (netBS(legs, s, 7, iv) - entryNet) * 100;
+      // THE SURVIVORS ARE MARKED WHERE THE RULE ENDS THE TRADE, and this was a
+      // bare 7 — the fourth copy of the fault `exitSim` carried in engine.js.
+      // The walk above already stops at `RULES.exitDTE`; marking the survivors
+      // at 7 priced them fourteen days past the day the app closes them.
+      const pnl = (netBS(legs, s, RULES.exitDTE, iv) - entryNet) * 100;
       if (pnl > 0) nTimePos++; else nTimeNeg++;
       sumExit += pnl;
     }

@@ -40,13 +40,52 @@ export function probProfit(legs, entry, S, iv, dte) {
   return Math.min(1, Math.max(0, p));
 }
 
-export function exitSim(pos, S, dteLeft, iv, sigma, n = 1500) {
-  // `0.5 * null` is 0 in JavaScript. A position with no ceiling on its profit
-  // has no take-profit level (src/rules.js, `payoffCeiling`), and without this
-  // guard every path that touched break-even would be counted as one — the
-  // simulator reporting a rule the app does not apply.
-  const tp = Number.isFinite(pos.maxProfit) ? 0.5 * pos.maxProfit : null;
-  const sl = 0.5 * pos.maxLoss, days = Math.max(1, dteLeft - 7);
+/**
+ * THE EXIT SIMULATOR — and the exit policy is the CALLER'S, never this file's.
+ *
+ * THE FAULT THIS SIGNATURE EXISTS TO MAKE IMPOSSIBLE. This function used to
+ * open with
+ *
+ *     const tp = Number.isFinite(pos.maxProfit) ? 0.5 * pos.maxProfit : null;
+ *     const sl = 0.5 * pos.maxLoss, days = Math.max(1, dteLeft - 7);
+ *
+ * and mark the survivors with `netBS(pos.legs, s, 7, iv)`. Four copies of three
+ * rules that have a home in `src/rules.js`: `takeProfitPct` (0.5),
+ * `stopLossPct` (0.5) and `exitDTE` — which is **21**, and has been since it
+ * was CHANGED FROM 7 (PRD §4). So the simulator walked the position to 7 days
+ * and marked whatever survived at 7 days, while the app's own rule closes or
+ * rolls it at 21. `autopilot.mjs` then handed the result to the model in a
+ * field called `p_exit_at_exit_dte_positive`: the NAME asserted the rule the
+ * arithmetic had not applied, and the model wrote prose on top of it.
+ *
+ * WHY THE POLICY IS AN ARGUMENT AND NOT AN IMPORT. `engine.js` imports nothing,
+ * and `rules.js` imports `engine.js` — a leaf-ward import, stated as such in
+ * `rules.js`. Reading `RULES` from here would turn that into a cycle. So the
+ * policy comes from the caller, which already reads the home.
+ *
+ * AND IT HAS NO DEFAULT, DELIBERATELY. A default is how the bare 7 comes back,
+ * silently, in a year: a new call site that forgets the argument gets the
+ * number this file happens to hold rather than the number the app applies.
+ * A missing or unreadable policy THROWS.
+ *
+ * @param policy  { exitDTE, takeProfitPct, stopLossPct } — from `RULES`.
+ */
+export function exitSim(pos, S, dteLeft, iv, sigma, policy, n = 1500) {
+  const { exitDTE, takeProfitPct, stopLossPct } = policy || {};
+  if (![exitDTE, takeProfitPct, stopLossPct].every((x) => Number.isFinite(x))) {
+    throw new TypeError(
+      "exitSim needs the exit policy from RULES: { exitDTE, takeProfitPct, stopLossPct }",
+    );
+  }
+  // `takeProfitPct * null` is 0 in JavaScript. A position with no ceiling on
+  // its profit has no take-profit level (src/rules.js, `payoffCeiling`), and
+  // without this guard every path that touched break-even would be counted as
+  // one — the simulator reporting a rule the app does not apply.
+  const tp = Number.isFinite(pos.maxProfit) ? takeProfitPct * pos.maxProfit : null;
+  const sl = stopLossPct * pos.maxLoss;
+  // The window is what is left BEFORE the exit rule ends the trade, so the
+  // last day simulated is the day the rule acts.
+  const days = Math.max(1, dteLeft - exitDTE);
   let nTP = 0, nSL = 0, nPos = 0, sum = 0; const tds = [];
   for (let i = 0; i < n; i++) {
     let s = S, done = false;
@@ -57,10 +96,12 @@ export function exitSim(pos, S, dteLeft, iv, sigma, n = 1500) {
       if (tp != null && pnl >= tp) { nTP++; tds.push(d); sum += pnl; done = true; break; }
       if (pnl <= sl) { nSL++; sum += pnl; done = true; break; }
     }
-    if (!done) { const pnl = (netBS(pos.legs, s, 7, iv) - pos.entryNet) * 100; if (pnl > 0) nPos++; sum += pnl; }
+    // WHAT SURVIVES IS MARKED WHERE THE RULE ENDS IT, which is the same number
+    // the walk above stopped at. These two were 7 and 7 while the rule said 21.
+    if (!done) { const pnl = (netBS(pos.legs, s, exitDTE, iv) - pos.entryNet) * 100; if (pnl > 0) nPos++; sum += pnl; }
   }
   tds.sort((a, b) => a - b);
-  return { pTP: nTP / n, pSL: nSL / n, pTimePos: nPos / n, ev: sum / n, medDays: tds.length ? tds[(tds.length / 2) | 0] : null };
+  return { pTP: nTP / n, pSL: nSL / n, pTimePos: nPos / n, ev: sum / n, medDays: tds.length ? tds[(tds.length / 2) | 0] : null, horizon: days, exitDTE };
 }
 
 export const SEASONAL = {

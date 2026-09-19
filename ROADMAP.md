@@ -100,6 +100,56 @@ gate on screen passes it again in the ticket at the quantity shown~~ — that ha
 is done and tested (`SIZE — a proposal that passes the gate passes it again at
 the quantity shown`, `src/riskGate.test.js`).
 
+## P1-bis — PR #24: a rule number can hide in an expression  (DONE, and it found one)
+
+The rule-literal guard could only see a copy that was a `useState` default, a property or a
+local constant. It now also refuses **a rule number inside an arithmetic expression**, and it
+sweeps every file that computes a number a screen or a brief prints — the list is read off the
+disk, so `engine.js` and the Netlify functions are in it and so is whatever is added next.
+
+SHIPPED:
+  - **The exit simulator was running at the wrong rule.** `exitSim()` in `engine.js` held four
+    copies of three rules: `takeProfitPct` (0.5) and `stopLossPct` (0.5), right by luck, and
+    `exitDTE` twice as a bare **7** when the rule has been **21** since it was changed from 7.
+    It walked each position to 7 days and marked the survivors at 7 days, and `autopilot.mjs`
+    handed the answer to the model in a field called `p_exit_at_exit_dte_positive`. The name
+    asserted the rule the arithmetic had not applied. PRD §4g carries the before/after table:
+    every simulator output moves, `pTP` and `pSL` fall on every fixture, `pTimePos` rises, and
+    `ev` has no single direction because it is a mixture whose three weights all changed.
+  - **The policy is the caller's and has NO DEFAULT.** `engine.js` imports nothing and `rules.js`
+    imports `engine.js`, so the engine may not read RULES; `exitSim` takes
+    `{ exitDTE, takeProfitPct, stopLossPct }` and throws without them. A default is how the bare
+    7 comes back silently in a year.
+  - `pro.jsx`'s own `exitPathSim` had the same bare 7 in its survivor mark, disagreeing with its
+    own walk; `chainAlpaca.mjs` had `dte - 45` twice and `visuals.jsx` a default `dte = 45`. All
+    read their home now.
+  - **The fallback volatility has a name.** `SIGMA[pos.ticker] || 0.25` became
+    `RULES.fallbackSigma` with `sigmaProvenance()`, and the brief, the model and the warnings all
+    carry which of the two was in force. The TABLE is still five typed numbers — that is P2.
+  - New `src/engine.test.js`: the throw, the horizon proved arithmetically at sigma zero, the
+    seeded before/after fixtures as real assertions, and a guard that `netBS()` is never called
+    with a number where the days go.
+
+WHAT THE NEXT SESSION INHERITS:
+  - **THE PAST BRIEFS ARE WRONG AND NOTHING MARKS THEM.** Every autopilot brief the owner has
+    received described the chance of being positive "at the exit rule" at a horizon fourteen days
+    past the rule. Those briefs are in the Journal. Nobody has re-read one against this fix, and
+    the autopilot has never been watched running with the fix in it.
+  - **THREE UN-HOMED NUMBERS, FOUND AND DELIBERATELY NOT FIXED**, each because it needs a product
+    decision rather than a rename: the "watch" attention level at `0.35 * p.maxLoss` in App.jsx
+    (its value collides with `maxSpreadShareOfMid`, which is the one rule number kept off the
+    sweep list for that reason); the "70-confidence bar" in two generated sentences in
+    `signals.js` (nothing in RULES holds it; its value collides with `expensiveIVRank`, and the
+    file is excluded from the sweep by name); and the bare `0.25` IMPLIED-VOLATILITY fallbacks in
+    `autopilot.mjs` and `pro.jsx`, which are a different quantity from the simulator's sigma and
+    were left rather than conflated with it.
+  - **The guard cannot catch a STALE copy**, which is what the bare 7 was: 7 is not the value of
+    any rule, so nothing could name it. What was caught were the two `0.5`s beside it. The shape
+    is refused separately for `netBS()` only.
+  - **The check count has three different values in the record.** PR #23 wrote 588, the brief for
+    #24 said 561, and a clean `main` measures 594. This session took 594 as ground truth and
+    reports 606. A count nobody can re-derive is worth as little as a rule number with two homes.
+
 ## P2 — Proposals ranked by edge, not by score
 At market prices every structure has expected value near zero: high
 probability and large payoff are two ends of one lever. So the app must
