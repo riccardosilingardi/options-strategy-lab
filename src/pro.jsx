@@ -3,7 +3,8 @@ import { RefreshCw, Send, Trash2, Download, Sparkles, FileText, XCircle } from "
 import { T } from "./theme.js";
 import { RULES, ruleBadge, takeProfitLabel, scaleOutLabel, stopLossLabel, exitDTELabel, perTradeCapLabel, copilotRulesBlock, money, pctText, MIN_NET_DOLLARS,
   NO_CEILING, reportNarrativePrompt, chanceText, seasonalStampNote, MEASURED_SIGMA_SOURCE,
-  comboBook, openLimitPrice, openLimitNote, limitPlacement, notionalControlled, notionalNote,
+  comboBook, notionalControlled, notionalNote,
+  legBook, sizeSkippedNote, onTick, netFromLegs, limitCeilingNote, rewardRisk,
   ivProvenance } from "./rules.js";
 import { contractsOf, autopilotHorizonNote, autopilotVolNote } from "./journal.js";
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, LineStyle } from "lightweight-charts";
@@ -261,18 +262,150 @@ export function OrderPending({ lines = [], onCancel }) {
    analysis, and the three generation sites use it too. `model` arriving null
    means nobody computed one — which is what the panel says, rather than
    quietly computing a second opinion. */
-function ComboBookPanel({ legs, quoteFn, limit, type, qty, spot, ticker, estNet, maxLoss, model }) {
-  const quotes = (legs || []).map((l) => {
-    const q = quoteFn ? quoteFn(l) : null;
-    return q ? { bid: q.bid, ask: q.ask } : {};
-  });
+/* THE MARKET, READ-ONLY, FIRST — the thing the owner asked for by name three
+   times: "devo vedere il bid/ask di quel 0.48 e 0.34 per capire quanto sono
+   vicino a un ordine probabile." One row per leg, its BID and its ASK and the
+   SIZE at each, with the two sides that actually trade in full contrast and
+   the other two dimmed. `legBook()` in rules.js is the data; this only draws
+   it, so the table and the combination price below it cannot disagree. */
+function LegMarketTable({ legs, quotes, ticker, expKey, feed }) {
+  const lb = legBook(legs, quotes);
+  const Head = ({ children, right }) => (
+    <div style={{ ...mono, fontSize: 9, color: T.dim, letterSpacing: 0.4, textAlign: right ? "right" : "left" }}>{children}</div>
+  );
+  const cell = (on) => ({ ...mono, fontSize: 12, fontWeight: on ? 800 : 500, color: on ? T.ink : T.dim, textAlign: "right" });
+  return (
+    <div style={{ marginTop: 10, padding: "9px 11px", background: T.panel, border: `1px solid ${T.line}`, borderRadius: 7 }}>
+      <div style={{ ...mono, fontSize: 9.5, color: T.dim, letterSpacing: 0.4, fontWeight: 700 }}>
+        THE MARKET, LEG BY LEG{expKey ? ` · ${ticker} ${expKey}` : ""}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr 0.7fr 1fr 0.7fr", gap: "4px 8px", marginTop: 7, alignItems: "center" }}>
+        <Head>LEG</Head><Head right>BID</Head><Head right>SIZE</Head><Head right>ASK</Head><Head right>SIZE</Head>
+        {lb.rows.map((r) => {
+          const buying = r.side > 0;
+          return (
+            <React.Fragment key={r.i}>
+              <div style={{ ...mono, fontSize: 11.5, color: buying ? T.green : T.red, fontWeight: 700 }}>
+                {buying ? "BUY" : "SELL"} {r.qty > 1 ? `${r.qty}× ` : ""}{r.strike}{r.type === "call" ? "C" : "P"}
+              </div>
+              <div style={cell(r.trades === "bid")}>{r.bid != null ? r.bid.toFixed(2) : "—"}</div>
+              <div style={{ ...cell(r.trades === "bid"), fontSize: 10.5, fontWeight: 500 }}>{r.bidSize != null ? r.bidSize : "?"}</div>
+              <div style={cell(r.trades === "ask")}>{r.ask != null ? r.ask.toFixed(2) : "—"}</div>
+              <div style={{ ...cell(r.trades === "ask"), fontSize: 10.5, fontWeight: 500 }}>{r.askSize != null ? r.askSize : "?"}</div>
+            </React.Fragment>
+          );
+        })}
+      </div>
+      <div style={{ ...mono, fontSize: 9.5, color: T.dim, marginTop: 7, lineHeight: 1.6 }}>
+        In full contrast: the side that trades when you send this. To buy the structure you lift the ask on
+        every leg you are buying and hit the bid on every leg you are selling — the other two are the reverse
+        trade, which is nobody{"’"}s side of this one.
+      </div>
+      {/* A MISSING SIZE IS UNKNOWN, NEVER ZERO. A "?" and a sentence, rather
+          than a blank that reads as a market with nobody in it. */}
+      {lb.missingSizes > 0 && (
+        <div style={{ ...mono, fontSize: 9.5, color: T.amber, marginTop: 5, lineHeight: 1.6 }}>
+          {sizeSkippedNote(lb.missingSizes, feed)}
+        </div>
+      )}
+      {lb.unquoted > 0 && (
+        <div style={{ ...mono, fontSize: 9.5, color: T.amber, marginTop: 5, lineHeight: 1.6 }}>
+          {lb.unquoted === 1 ? "One leg has" : `${lb.unquoted} legs have`} no two-sided quote at all, so there is
+          no side of {lb.unquoted === 1 ? "it" : "them"} that trades and no combination price to place your own
+          against.
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ONE SLIDER PER LEG, IN ONE-CENT STEPS. The user prices each leg and the app
+   computes the net, which is the reverse of the single net field this ticket
+   used to offer and is the direction the owner thinks in.
+
+   THE STEPS ARE CENTS BECAUSE OPTIONS DO NOT HAVE CONTINUOUS PRICES: a penny
+   class ticks at $0.01 under $3.00, and 0.525 is not a price anybody can send.
+   The old `<Inp type="number" step="0.01">` constrained the spinner and not
+   what could be typed; `onTick()` in rules.js is applied to the value itself,
+   so what reaches `orderBody()` is on the tick whatever route it came by. */
+function LegPriceSliders({ legs, quotes, prices, onPrice }) {
+  const lb = legBook(legs, quotes);
+  return (
+    <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
+      {lb.rows.map((r) => {
+        const px = Number((prices || [])[r.i]);
+        const has = Number.isFinite(px);
+        const lo = r.bid != null ? r.bid : null, hi = r.ask != null ? r.ask : null;
+        const spannable = lo != null && hi != null && hi > lo;
+        return (
+          <div key={r.i}>
+            <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+              <span style={{ ...mono, fontSize: 11, fontWeight: 700, color: r.side > 0 ? T.green : T.red }}>
+                {r.side > 0 ? "BUY" : "SELL"} {r.qty > 1 ? `${r.qty}× ` : ""}{r.strike}{r.type === "call" ? "C" : "P"}
+              </span>
+              <span style={{ ...mono, fontSize: 10, color: T.dim }}>
+                bid {r.bid != null ? r.bid.toFixed(2) : "—"} · mid {r.mid != null ? r.mid.toFixed(2) : "—"} · ask {r.ask != null ? r.ask.toFixed(2) : "—"}
+              </span>
+              <span style={{ ...mono, fontSize: 13, fontWeight: 800, color: T.ink, marginLeft: "auto" }}>
+                {has ? `$${px.toFixed(2)}` : "—"}
+              </span>
+            </div>
+            {spannable ? (
+              <input type="range" min={lo} max={hi} step={0.01} value={has ? px : lo}
+                aria-label={`price for leg ${r.i + 1}`}
+                onChange={(e) => onPrice(r.i, onTick(e.target.value))}
+                style={{ width: "100%", marginTop: 4, accentColor: r.side > 0 ? T.green : T.red }} />
+            ) : (
+              <div style={{ ...mono, fontSize: 10, color: T.amber, marginTop: 3, lineHeight: 1.6 }}>
+                No two-sided quote on this leg, so there is no range to move inside. Its price is what the feed
+                gave, and the app is not inventing one either side of it.
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ====================================================================
+   THE COMBINATION: WHAT THE MARKET IS, WHERE THE LIMIT SITS, WHAT WOULD
+   REALLY BE PAID, AND HOW MUCH OF THE UNDERLYING IS BEING CONTROLLED.
+
+   Five facts, for the WHOLE structure and never leg by leg, because a leg
+   is not a thing anybody here trades:
+
+     1. the combo book — bid, mid, ask, each leg at the side that trades;
+     2. ONE VERDICT BAND, coloured, three states, naming the distance, and
+        reading the TIME IN FORCE — the same price is a different order
+        depending on how long it stands;
+     3. A LIMIT IS A CEILING, NOT A PRICE: at or past the touch you fill AT
+        the touch, so "you offer $30, you pay $24" and every figure on the
+        screen above is worked out at the $24;
+     4. the model value beside the market value — the same `modelSanity()`
+        that refuses a proposal at the three generation sites. It refuses
+        NOTHING here: a hand-built trade is the user's to make;
+     5. NOTIONAL CONTROLLED, next to capital at risk.
+
+   Every figure comes from `rules.js`, so this panel cannot drift from the
+   arithmetic the gate and the proposal floors run on.
+==================================================================== */
+/* ONE COMPUTATION, ONE ANSWER — the model verdict is handed in, not redone.
+   This panel used to call `modelSanity()` inline, so every keystroke in the
+   limit field repriced every leg with Black-Scholes, and it re-derived the
+   per-leg marks from `quoteFn(leg).mid` instead of reading the ones
+   `analyze()` had already produced. `modelCheckOf()` in App.jsx is the single
+   expression; `model` arriving null means nobody computed one, which is what
+   the panel says rather than quietly computing a second opinion. */
+function ComboBookPanel({ legs, quotes, verdict, effective, type, qty, spot, ticker, estNet, maxLoss, maxProfit, model }) {
   const book = comboBook(legs, quotes);
   const dir = Number(estNet) >= 0 ? 1 : -1;
-  const place = type === "limit" ? limitPlacement(limit, book, dir) : null;
   const ms = model || { checked: false, pass: true, marketNet: null, modelNet: null, reason: null };
   const notional = notionalControlled(qty, spot);
   const risk = Math.abs(Number(maxLoss)) * Math.max(1, Math.round(Number(qty) || 1));
-  const tone = place?.zone === "fills" ? T.green : place?.zone === "waiting" ? T.blue : place?.known ? T.red : T.dim;
+  const tone = verdict?.state === "fills" ? T.green : verdict?.state === "waiting" ? T.blue : verdict?.known ? T.red : T.dim;
+  const ceiling = limitCeilingNote(effective);
+  const rr = rewardRisk(maxProfit, maxLoss);
   const Cell = ({ k, v, c, note }) => (
     <div style={{ minWidth: 92 }}>
       <div style={{ ...mono, fontSize: 9, color: T.dim, letterSpacing: 0.4 }}>{k}</div>
@@ -302,14 +435,28 @@ function ComboBookPanel({ legs, quoteFn, limit, type, qty, spot, ticker, estNet,
             <Cell k="SPREAD" v={money(book.spread * 100)} c={T.amber}
               note={Math.abs(book.mid) > 0 ? `${pctText(book.spread / Math.abs(book.mid), 0)} of the mid` : null} />
           </div>
-          {place && place.known && (
-            <div style={{ marginTop: 8, padding: "7px 9px", background: `${tone}0f`, border: `1px solid ${tone}55`, borderRadius: 6 }}>
-              <div style={{ ...mono, fontSize: 9.5, color: tone, fontWeight: 800, letterSpacing: 0.4 }}>{place.label}</div>
-              <div style={{ fontSize: 12, color: T.body, marginTop: 3, lineHeight: 1.5 }}>{place.sentence}</div>
+          {/* >>> ONE VERDICT BAND: three states, the distance, and the horizon.
+              Time in force was stated in words AFTER the fact, underneath a
+              verdict that had not read it. The same price inside the spread is
+              a real trade good-until-cancelled and a wasted evening as a day
+              order, and that is the half the owner said unlocked it. <<< */}
+          {verdict && verdict.known && (
+            <div style={{ marginTop: 8, padding: "8px 10px", background: `${tone}12`, border: `1.5px solid ${tone}`, borderRadius: 6 }}>
+              <div style={{ ...mono, fontSize: 11, color: tone, fontWeight: 800, letterSpacing: 0.4 }}>{verdict.label}</div>
+              <div style={{ fontSize: 12.5, color: T.body, marginTop: 4, lineHeight: 1.5 }}>{verdict.sentence}</div>
+              {verdict.tifSentence && (
+                <div style={{ fontSize: 12.5, color: T.body, marginTop: 5, lineHeight: 1.5 }}>{verdict.tifSentence}</div>
+              )}
             </div>
           )}
-          {place && !place.known && (
-            <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 7, lineHeight: 1.5 }}>{place.sentence}</div>
+          {verdict && !verdict.known && (
+            <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 7, lineHeight: 1.5 }}>{verdict.sentence}</div>
+          )}
+          {/* A LIMIT IS A CEILING, NOT A PRICE — and nothing said so. */}
+          {ceiling && (
+            <div style={{ fontSize: 12.5, color: T.body, marginTop: 7, lineHeight: 1.55, padding: "7px 9px", background: `${T.blue}0f`, border: `1px solid ${T.blue}55`, borderRadius: 6 }}>
+              {ceiling}
+            </div>
           )}
         </>
       ) : (
@@ -320,6 +467,20 @@ function ComboBookPanel({ legs, quoteFn, limit, type, qty, spot, ticker, estNet,
         </div>
       )}
 
+      {/* FOUR NUMBERS THAT MOVE, at the effective price and never at the mid.
+          They are the same four the screen above prints, from the same
+          `analyze()` result, so the ticket cannot say one thing and the stats
+          another about the trade about to be sent. */}
+      <div style={{ display: "flex", gap: 18, marginTop: 10, flexWrap: "wrap", paddingTop: 9, borderTop: `1px solid ${T.line}` }}>
+        <Cell k="MOST YOU CAN MAKE" v={Number.isFinite(maxProfit) ? money(maxProfit * Math.max(1, Math.round(Number(qty) || 1))) : NO_CEILING}
+          c={T.green} note="at the price below, not at the mid" />
+        <Cell k="MOST YOU CAN LOSE" v={Number.isFinite(risk) ? money(risk) : "—"} c={T.red} note="the most you can lose" />
+        <Cell k="MADE PER $1 RISKED" v={rr == null ? "—" : rr.toFixed(2)} c={T.violet}
+          note={rr == null ? "no ceiling, or no readable price" : "best case over worst case"} />
+        <Cell k="NOTIONAL CONTROLLED" v={notional != null ? money(notional) : "—"} c={T.violet}
+          note={`${Math.max(1, Math.round(Number(qty) || 1))} × 100 × ${spot != null ? `$${(+spot).toFixed(2)}` : "spot"}`} />
+      </div>
+
       {/* THE MODEL VALUE BESIDE THE MARKET VALUE. This is what would have
           caught the BOIL 20/21 order: $5 a contract on the chain against $33
           from the model. It refuses nothing here — the desk is the user's —
@@ -329,9 +490,6 @@ function ComboBookPanel({ legs, quoteFn, limit, type, qty, spot, ticker, estNet,
           c={T.ink} note="one contract, off the chain" />
         <Cell k="THE MODEL SAYS" v={ms.modelNet != null ? money(ms.modelNet) : "—"}
           c={ms.checked && !ms.pass ? T.red : T.mut} note={ms.checked ? "same maths as every other screen" : "not enough to price it"} />
-        <Cell k="NOTIONAL CONTROLLED" v={notional != null ? money(notional) : "—"} c={T.violet}
-          note={`${Math.max(1, Math.round(Number(qty) || 1))} × 100 × ${spot != null ? `$${(+spot).toFixed(2)}` : "spot"}`} />
-        <Cell k="CAPITAL AT RISK" v={Number.isFinite(risk) ? money(risk) : "—"} c={T.red} note="the most you can lose" />
       </div>
       {ms.checked && !ms.pass && (
         <div style={{ ...mono, fontSize: 10.5, color: T.red, marginTop: 8, lineHeight: 1.6, padding: "7px 9px", background: `${T.red}0f`, border: `1px solid ${T.red}55`, borderRadius: 6 }}>
@@ -349,47 +507,60 @@ function ComboBookPanel({ legs, quoteFn, limit, type, qty, spot, ticker, estNet,
 }
 
 /**
- * THE SIZE IS NOT THE TICKET'S ANY MORE (ROADMAP P1).
+ * THE ORDER TICKET, REBUILT — designed with the owner against his own
+ * screenshots, on a 390px phone, top to bottom:
  *
- * `cfg.qty` lived here, and it was the only place in the app that knew how many
- * combinations were about to be sent: the gate preview on the screen above ran
- * at a hardcoded `contracts: 1`, and `commitPosition()` wrote a position with no
- * size at all. The quantity is now Build-screen state passed in as `qty` with
- * `onQty` to change it, so the ticket, the gate, the confirm step and the
- * position record are four readings of ONE number.
+ *   1. THE MARKET, READ-ONLY, FIRST — one row per leg, its bid and its ask and
+ *      the SIZE at each, the two sides that trade in full contrast.
+ *   2. ONE SLIDER PER LEG, in one-cent steps, each labelled with that leg's
+ *      bid, mid and ask. The user prices the legs; the app computes the net.
+ *   3. THE NET, BIG, BESIDE ITS OWN ARITHMETIC — `0.52 − 0.30 → $22` — so it
+ *      is never a number that appears from nowhere.
+ *   4. TIME IN FORCE AS PART OF THE VERDICT, not a dropdown with a paragraph
+ *      underneath it.
+ *   5. ONE VERDICT BAND, three states, naming the distance.
+ *   6. FOUR NUMBERS THAT MOVE, at the effective price and never at the mid.
+ *
+ * NEITHER THE PRICE NOR THE SIZE IS THE TICKET'S ANY MORE. `cfg.qty` went up
+ * to the Build screen in PR #23 for the reason the price goes up now: the
+ * screen above was computing every figure it printed from the mid while this
+ * panel two thousand pixels down knew the real price and said nothing. Type,
+ * time in force and one price per leg are Build-screen state; this is a
+ * controlled input on them, and `verdict` and `effective` are handed in from
+ * the one place they are worked out.
  *
  * `model` is the `modelSanity()` verdict, computed once from `analyze()`'s own
- * marks — see `ComboBookPanel` below.
+ * marks — see `ComboBookPanel` above.
  */
-export function OrderTicket({ creds, legs, expKey, ticker, buildOcc, quoteFn, estNet, setMsg, onSent, gate, dte, maxLoss, maxProfit, spot, entryOverride, qty = 1, onQty, model = null }) {
-  const [cfg, setCfg] = useState({ type: "limit", tif: "day", limit: "" });
+export function OrderTicket({
+  creds, legs, expKey, ticker, buildOcc, quoteFn, estNet, setMsg, onSent, gate, dte,
+  maxLoss, maxProfit, spot, entryOverride, qty = 1, onQty, model = null, feed = null,
+  /* The price, from the screen above. `net` is signed per share.
+
+     `cfg` HAS A DISPLAY DEFAULT AND IT IS NOT A SECOND HOME. The real one is
+     `ticket` in App.jsx; this only keeps a ticket rendered without it from
+     blanking the screen, and such a ticket cannot send anything — with no
+     `legPrices` the net is null and the limit branch of `send()` refuses it by
+     name, the same way `runGate(undefined, …)` fails closed. */
+  cfg = { type: "limit", tif: "day" }, onCfg, quotes = [], legPrices = [], net = null,
+  verdict = null, effective = null, seed = null, onReseed,
+}) {
   const qtyNum = Math.max(1, Math.round(Number(qty) || 1));
   const setQty = (v) => { if (onQty) onQty(Math.max(1, Math.min(20, Math.round(Number(v) || 1)))); };
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState(null);
-  /* AN OPENING LIMIT THAT CAN ACTUALLY FILL (src/rules.js, `openLimitPrice`).
-     This line seeded the field with `Math.abs(estNet).toFixed(2)` — the BARE
-     MID. Closing orders have conceded a quarter of the spread since PR #19;
-     opening orders conceded nothing, and the comment three lines down said so
-     while the code went on doing it. On BOIL, where this repo has measured
-     bid/ask spreads of 66%, 91%, 145% and 166% of the mid, a limit at the mid
-     is a limit nobody meets: the only order this app has ever sent was one,
-     and it sat at "new" with a filled quantity of 0.00 until it expired.
-
-     The seed is now the mid plus `openLimitSlippage` of the spread, in the
-     direction that fills, and `ComboBookPanel` below prints the mid, the touch
-     and where this number sits between them. With no two-sided market on every
-     leg there is nothing to concede FROM, and the field falls back to the mid
-     rather than inventing a spread — the panel says the market is unquoted. */
-  const seedQuotes = (legs || []).map((l) => { const q = quoteFn ? quoteFn(l) : null; return q ? { bid: q.bid, ask: q.ask } : {}; });
-  const seedBook = comboBook(legs, seedQuotes);
-  const seedPrice = seedBook.ok ? openLimitPrice({ netMid: seedBook.mid, spread: seedBook.spread }) : null;
-  useEffect(() => {
-    if (cfg.limit !== "") return;
-    if (seedPrice) { setCfg((c) => ({ ...c, limit: seedPrice.limit.toFixed(2) })); return; }
-    if (estNet != null) setCfg((c) => ({ ...c, limit: Math.abs(estNet).toFixed(2) }));
-  }, [estNet, seedPrice && seedPrice.limit]); // eslint-disable-line
+  const arith = netFromLegs(legs, legPrices);
+  // THE MAGNITUDE IS WHAT `orderBody()` SENDS, and it is on the tick because
+  // every leg price it was summed from is (`onTick()` in rules.js).
+  const limit = Number.isFinite(net) ? Math.abs(net) : null;
+  const limitStr = limit == null ? "" : limit.toFixed(2);
+  const setLeg = (i, px) => {
+    if (!onCfg) return;
+    const next = (legPrices || []).slice();
+    next[i] = px;
+    onCfg({ legPx: next });
+  };
   // Il cancello gira PRIMA di costruire l'ordine: quello che si vede nel
   // pannello e' esattamente quello che decide se l'ordine parte.
   const preview = runGate(gate, { ticker, intent: "open", legs, dte, contracts: qtyNum, maxLoss, maxProfit, entryOverride });
@@ -424,13 +595,13 @@ export function OrderTicket({ creds, legs, expKey, ticker, buildOcc, quoteFn, es
       // A limit of nothing is not a limit. An empty field coerces to 0 and
       // would leave as limit_price "0.00" — the same disease as the $0 debit
       // in rules.js: a missing number sent as if it were a price.
-      if (cfg.type === "limit" && !(Math.abs(+cfg.limit) > 0)) throw new Error("type a limit price first — $0.00 is a missing price, not a cheap one");
+      if (cfg.type === "limit" && !(limit > 0)) throw new Error("price the legs first — $0.00 is a missing price, not a cheap one");
       // The price on screen is the price of the structure AS BUILT, and
       // `orderBody` divides it by the same factor it took out of the ratios,
       // so the money at stake is what the ticket says it is.
-      const body = orderBody({ legs, occs, userQty: qtyNum, type: cfg.type, limit: cfg.limit, tif: cfg.tif, intent: "open" });
+      const body = orderBody({ legs, occs, userQty: qtyNum, type: cfg.type, limit: limitStr, tif: cfg.tif, intent: "open" });
       const o = await alpacaReq("/v2/orders", "POST", body);
-      if (onSent) onSent(o, { ...cfg, qty: qtyNum });
+      if (onSent) onSent(o, { ...cfg, limit: limitStr, qty: qtyNum });
       // ACCEPTED IS NOT FILLED. A limit at the mid of a wide market, or any
       // order sent outside market hours, comes back accepted with nothing
       // bought — that is a third outcome, not a failure, and it says where
@@ -454,60 +625,74 @@ export function OrderTicket({ creds, legs, expKey, ticker, buildOcc, quoteFn, es
     }
     setBusy(false);
   };
+  const seedDiffers = Array.isArray(seed) && seed.length === (legPrices || []).length
+    && seed.some((v, i) => Math.abs(Number(v) - Number(legPrices[i])) > 0.0049);
   return (
     <div style={{ marginTop: 12, padding: "10px 12px", background: T.bg, border: `1px solid ${T.violet}44`, borderRadius: 7 }}>
       <Lbl>SEND THE ORDER · ALPACA PAPER ACCOUNT</Lbl>
-      <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+
+      {/* 1 — THE MARKET, READ-ONLY, FIRST. */}
+      <LegMarketTable legs={legs} quotes={quotes} ticker={ticker} expKey={expKey} feed={feed} />
+
+      {/* 2 — ONE SLIDER PER LEG. */}
+      {cfg.type === "limit" && (
+        <>
+          <div style={{ ...mono, fontSize: 9.5, color: T.dim, letterSpacing: 0.4, fontWeight: 700, marginTop: 12 }}>
+            YOUR PRICE, LEG BY LEG · ONE-CENT STEPS
+          </div>
+          <LegPriceSliders legs={legs} quotes={quotes} prices={legPrices} onPrice={setLeg} />
+        </>
+      )}
+
+      {/* 3 — THE NET, BIG, BESIDE ITS OWN ARITHMETIC. */}
+      {cfg.type === "limit" && (
+        <div style={{ marginTop: 10, display: "flex", gap: 12, alignItems: "baseline", flexWrap: "wrap" }}>
+          <div>
+            <div style={{ ...mono, fontSize: 9, color: T.dim, letterSpacing: 0.4 }}>
+              {Number.isFinite(net) && net < 0 ? "YOUR LIMIT · YOU RECEIVE" : "YOUR LIMIT · YOU PAY"}
+            </div>
+            <div style={{ ...mono, fontSize: 26, fontWeight: 800, color: T.ink, lineHeight: 1.1 }}>
+              {limit == null ? "—" : money(limit * 100)}
+            </div>
+          </div>
+          <div style={{ ...mono, fontSize: 12, color: T.mut }}>{arith.line || "price every leg and the net appears here"}</div>
+          {seedDiffers && onReseed && (
+            <button onClick={onReseed}
+              style={{ ...mono, fontSize: 9.5, color: T.blue, background: "transparent", border: "none", padding: 0, cursor: "pointer", textDecoration: "underline", marginLeft: "auto" }}>
+              back to the suggested prices
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* 4 — ORDER TYPE, TIME IN FORCE AND SIZE. The time in force is an input
+          to the verdict band below, not a dropdown with a paragraph under it. */}
+      <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
         <div><div style={{ ...mono, fontSize: 9.5, color: T.dim }}>QTY</div><Inp type="number" min={1} max={20} value={qtyNum} onChange={(e) => setQty(e.target.value)} style={{ width: 56 }} /></div>
         <div><div style={{ ...mono, fontSize: 9.5, color: T.dim }}>ORDER TYPE</div>
-          <Sel value={cfg.type} onChange={(e) => setCfg({ ...cfg, type: e.target.value })}><option value="limit">Limit — set my price</option><option value="market">Market — take what is there</option></Sel></div>
-        {cfg.type === "limit" && (
-          <div><div style={{ ...mono, fontSize: 9.5, color: T.dim }}>MY PRICE $ (mid is {seedBook.ok ? Math.abs(seedBook.mid).toFixed(2) : estNet != null ? Math.abs(estNet).toFixed(2) : "—"})</div>
-            <Inp type="number" step="0.01" value={cfg.limit} onChange={(e) => setCfg({ ...cfg, limit: e.target.value })} style={{ width: 90 }} />
-            {seedPrice && (
-              <button onClick={() => setCfg((c) => ({ ...c, limit: seedPrice.limit.toFixed(2) }))}
-                style={{ ...mono, fontSize: 9.5, color: T.blue, background: "transparent", border: "none", padding: "3px 0 0", cursor: "pointer", textDecoration: "underline" }}>
-                back to the suggested ${seedPrice.limit.toFixed(2)}
-              </button>
-            )}
-          </div>
-        )}
+          <Sel value={cfg.type} onChange={(e) => onCfg({ type: e.target.value })}><option value="limit">Limit — set my price</option><option value="market">Market — take what is there</option></Sel></div>
         <div><div style={{ ...mono, fontSize: 9.5, color: T.dim }}>HOW LONG IT STANDS</div>
-          <Sel value={cfg.tif} onChange={(e) => setCfg({ ...cfg, tif: e.target.value })}><option value="day">Today only</option><option value="gtc">Until I cancel</option></Sel></div>
+          <Sel value={cfg.tif} onChange={(e) => onCfg({ tif: e.target.value })}><option value="day">Today only</option><option value="gtc">Until I cancel</option></Sel></div>
         <Btn color={confirm ? T.red : T.violet} onClick={send} disabled={busy || !preview.pass || DEMO}
           title={DEMO ? DEMO_TOOLTIP : undefined}>
           <Send size={12} /> {busy ? "Sending…" : DEMO ? DEMO_TOOLTIP : !preview.pass ? "BLOCKED BY THE RISK GATE" : confirm ? "TAP AGAIN TO CONFIRM" : "Send the order"}
         </Btn>
       </div>
-      {/* TIME IN FORCE, IN WORDS, NEVER JUST A DROPDOWN. A `day` order that
-          expires at the close without a word is the same invisible failure as
-          an order that never fills: the app knew, and said nothing. */}
-      <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 7, lineHeight: 1.6 }}>
-        {cfg.tif === "day"
-          ? `TIME IN FORCE: DAY. This order dies at the close of today's session whether it filled or not, and
-             Alpaca does not tell you when it does. If it is still working this evening it is gone — nothing was
-             bought, nothing is waiting, and you would have to send it again tomorrow.`
-          : `TIME IN FORCE: GOOD UNTIL CANCELLED. This order keeps working across sessions until it fills or you
-             cancel it. It will still be there tomorrow at this price, on a market that has moved — which is
-             why the Positions screen lists it with its age.`}
-      </div>
 
-      {/* THE BOOK, THE MODEL AND THE NOTIONAL. */}
+      {/* 5 and 6 — THE BOOK, THE VERDICT BAND, THE CEILING SENTENCE, THE FOUR
+          NUMBERS AT THE EFFECTIVE PRICE, THE MODEL AND THE NOTIONAL. */}
       <ComboBookPanel
-        legs={legs} quoteFn={quoteFn} limit={cfg.limit} type={cfg.type} qty={qtyNum}
-        spot={spot} ticker={ticker} estNet={estNet} maxLoss={maxLoss} model={model} />
-      {cfg.type === "limit" && seedPrice && (
-        <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 7, lineHeight: 1.6 }}>{openLimitNote(seedPrice)}</div>
-      )}
+        legs={legs} quotes={quotes} verdict={verdict} effective={effective} type={cfg.type} qty={qtyNum}
+        spot={spot} ticker={ticker} estNet={estNet} maxLoss={maxLoss} maxProfit={maxProfit} model={model} />
 
       {/* A SIZED STRUCTURE IS PRICED TWO WAYS AND BOTH ARE ON SCREEN. The
-          field above is the price of the structure as it is built; Alpaca is
+          price above is the price of the structure as it is built; Alpaca is
           sent the price of ONE of the relatively-prime combinations, times
           the quantity. Silence here is what made "x5" look like a fifth of
           the trade the user was reading. */}
       {shape.factor > 1 && (
         <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 7 }}>
-          {`This structure is ${shape.factor} × (${shape.ratios.join(":")}). Alpaca is sent ${sendQty} combination${sendQty === 1 ? "" : "s"}${cfg.type === "limit" ? ` at $${unitLimit(cfg.limit, shape.factor)} each` : ""} — the same trade, written the way the broker requires.`}
+          {`This structure is ${shape.factor} × (${shape.ratios.join(":")}). Alpaca is sent ${sendQty} combination${sendQty === 1 ? "" : "s"}${cfg.type === "limit" && limit != null ? ` at $${unitLimit(limitStr, shape.factor)} each` : ""} — the same trade, written the way the broker requires.`}
         </div>
       )}
       {/* ONE TAP MUST NEVER LOOK LIKE NOTHING. The first tap arms the
@@ -517,7 +702,7 @@ export function OrderTicket({ creds, legs, expKey, ticker, buildOcc, quoteFn, es
       {confirm && (
         <OrderPending
           lines={orderPreviewLines({ legs, ratios: shape.ratios, factor: shape.factor, ticker, expKey,
-            qty: qtyNum, type: cfg.type, limit: cfg.limit, tif: cfg.tif })}
+            qty: qtyNum, type: cfg.type, limit: limitStr, tif: cfg.tif })}
           onCancel={() => setConfirm(false)} />
       )}
       <OrderOutcome outcome={outcome} onDismiss={() => setOutcome(null)} />
@@ -528,13 +713,11 @@ export function OrderTicket({ creds, legs, expKey, ticker, buildOcc, quoteFn, es
           ))}
         </div>
       )}
-      {preview.warnings.map((w) => (
-        <div key={w.code} style={{ ...mono, fontSize: 10.5, color: T.amber, marginTop: 5 }}>⚠ {w.message}</div>
-      ))}
       <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6 }}>Paper account only. The price is for the whole combination, not one leg. Every order asks you twice, and every order goes through the risk gate first.</div>
     </div>
   );
 }
+
 export function AlpacaDesk({ creds, setMsg, gate }) {
   const [pos, setPos] = useState(null);
   const [ords, setOrds] = useState(null);

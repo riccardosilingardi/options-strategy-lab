@@ -919,8 +919,18 @@ export function ConfirmSteps({
   // one, so the chart under a trade was drawn — and its sentence computed —
   // against a market that goes nowhere, while the CHANCE printed elsewhere on
   // the same screen came from a different assumption entirely.
-  candidate, preview, result, bars = [], sigma = 0.3, driftAnnual,
+  /* AND NEITHER DOES THE VOLATILITY. `sigma = 0.3` was a number with no home
+     and no provenance — not the value of any rule, so the rule-literal sweep
+     could never name it — sitting under a picture of a trade priced at the
+     chain's implied volatility. It is null with none, and `UnifiedFigure`
+     draws what it can and says what it cannot. */
+  candidate, preview, result, bars = [], sigma = null, driftAnnual = null,
   busy, onConfirm, onDesk, heading = true, showFigure = true, contracts = 1,
+  /* THE WARNINGS APPEAR ONCE ON A PAGE. On Build they are in the collapsed
+     panel above this card, with the count in its summary line; printing them
+     again here is how the CONFLICT paragraph came to be on one screen four
+     times. A caller with no panel of its own leaves this true. */
+  showWarnings = true,
 }) {
   if (!candidate) return null;
   const c = candidate;
@@ -978,12 +988,19 @@ export function ConfirmSteps({
         <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
           {rows.map((r) => <CheckRow key={r.id} ok={r.ok} text={r.text} />)}
         </div>
-        {(shown?.warnings || []).map((w, i) => (
+        {showWarnings && (shown?.warnings || []).map((w, i) => (
           <div key={i} style={{ display: "flex", gap: 10, alignItems: "flex-start", marginTop: 12 }}>
             <AlertTriangle size={17} style={{ color: T.amber, flexShrink: 0, marginTop: 1 }} />
             <span style={{ ...sans, fontSize: 13.5, color: T.body, lineHeight: 1.5 }}>{w.message}</span>
           </div>
         ))}
+        {!showWarnings && (shown?.warnings || []).length > 0 && (
+          <div style={{ ...sans, fontSize: 12.5, color: T.mut, marginTop: 12, lineHeight: 1.5 }}>
+            {(shown.warnings || []).length} warning{(shown.warnings || []).length === 1 ? "" : "s"} apply to this
+            trade. {(shown.warnings || []).length === 1 ? "It is" : "They are"} in the warnings panel above,
+            written once — none of them stops the order.
+          </div>
+        )}
         {refused && (
           <Pill tone={T.red}>
             The order was not sent. {shown.violations.map((v) => v.message).join(" ")}

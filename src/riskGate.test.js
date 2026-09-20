@@ -1797,10 +1797,21 @@ const LITERAL_FILES = [
 /* WHAT A COPY LOOKS LIKE, IN THE THREE SHAPES IT TAKES IN THIS CODEBASE.
 
    Shapes 1 and 2 — a `useState` default and a property or local constant —
-   caught `REASON_MIN = 15` and the three loose `45`s. Shape 3 is the one this
-   session added, and it is the shape that hid the fault in `exitSim`: a rule
-   number as an operand of an arithmetic expression, `dteLeft - 7`,
-   `0.5 * pos.maxProfit`.
+   caught `REASON_MIN = 15` and the three loose `45`s. Shape 3 is the one PR #24
+   added, and it is the shape that hid the fault in `exitSim`: a rule number as
+   an operand of an arithmetic expression, `dteLeft - 7`, `0.5 * pos.maxProfit`.
+
+   SHAPE 4 IS THIS SESSION'S, AND IT HID IN PLAIN SIGHT FOR THREE PULL REQUESTS.
+   `ComparePayoffs()` in visuals.jsx read `dte: shown[0].dte || 45` — a FALLBACK
+   OPERAND, where the rule number is neither assigned to a name nor added to
+   anything, so shapes 1, 2 and 3 all walk straight past it. PR #24 caught a
+   parameter default of 45 in that very file and fixed it; this spelling of the
+   same number, four lines away, survived. `||` and `??` both, because they are
+   the same sentence about the same number.
+
+   IT STAYS QUIET THE SAME WAY SHAPE 3 DOES: the identifier on the left has to
+   carry a RULE WORD, matched on words and not as a substring. `c.dte || 45` is
+   a copy; `bins.length || 45` and `RULES.exitDTE ?? 21` are not.
 
    THE HARD PART OF SHAPE 3 IS NOT FINDING COPIES, IT IS NOT CRYING WOLF. `0.5`
    is in Black-Scholes twice and in every Gaussian, `4` is in every coordinate,
@@ -1858,6 +1869,11 @@ function ruleLiteralHits(code, literals) {
     const arith = new RegExp(
       `(?:(${OPERAND})\\s*([-+*])\\s*${v}\\b(?![.\\d])|(?<![.\\w])${v}\\s*([-+*])\\s*(${OPERAND}))`, "g");
     for (const m of code.matchAll(arith)) if (ruleNamed(m[1] || m[4])) add(m.index, m[0], name);
+    // Shape 4 — a FALLBACK operand: `shown[0].dte || 45`, `c.dte ?? 45`. The
+    // rule number is not assigned to anything and not added to anything, so
+    // none of the three shapes above can see it.
+    const fallback = new RegExp(`(${OPERAND})\\s*(?:\\|\\||\\?\\?)\\s*${v}\\b(?![.\\d])`, "g");
+    for (const m of code.matchAll(fallback)) if (ruleNamed(m[1])) add(m.index, m[0], name);
   }
   return [...at.entries()].sort((a, b) => a[0] - b[0]).map(([, h]) => h);
 }
@@ -1932,6 +1948,14 @@ test("RULES LITERALS — the test can actually see a copy when there is one", ()
   assert.deepEqual(seen(`  const sl = ${RULES.stopLossPct} * pos.maxLoss, x = 1;`),
     [`${RULES.stopLossPct} * pos.maxLoss`]);
   assert.deepEqual(seen(`  const back = entryDte + ${RULES.exitDTE};`), [`entryDte + ${RULES.exitDTE}`]);
+  // Shape 4 — A FALLBACK OPERAND. This is the live catch this session made:
+  // `ComparePayoffs()` read `dte: shown[0].dte || 45` where
+  // `RULES.targetEntryDTE` lives, and PR #24 had fixed a parameter default of
+  // the same number four lines away in the same file.
+  assert.deepEqual(seen(`  dte: shown[0].dte || ${RULES.targetEntryDTE},`),
+    [`shown[0].dte || ${RULES.targetEntryDTE}`]);
+  assert.deepEqual(seen(`  const horizon = c.dte ?? ${RULES.targetEntryDTE};`),
+    [`c.dte ?? ${RULES.targetEntryDTE}`]);
 
   // ...AND IT STILL HAS TO STAY QUIET ON THE THINGS THAT ARE NOT COPIES, or the
   // build fails on arithmetic and the next session deletes the guard.
@@ -1945,6 +1969,14 @@ test("RULES LITERALS — the test can actually see a copy when there is one", ()
     "an expression anchored at the home is already reading the home");
   assert.deepEqual(seen(`const bar = { height: ${RULES.lowConfidence}, marginTop: ${RULES.exitDTE} };`), [],
     "a pixel is not a rule, however ruleish the file it is in");
+  // ...AND SHAPE 4 HAS TO STAY QUIET TOO, or a guard that has just been given a
+  // real catch starts failing the build on ordinary defaulting.
+  assert.deepEqual(seen(`const n = bins.length || ${RULES.targetEntryDTE};`), [],
+    "a bin count is not the target horizon, however convenient the number");
+  assert.deepEqual(seen(`const d = RULES.targetEntryDTE ?? ${RULES.targetEntryDTE};`), [],
+    "an expression anchored at the home is already reading the home");
+  assert.deepEqual(seen(`const w = barWidth || ${RULES.exitDTE};`), [],
+    "a pixel fallback is not the exit rule");
 });
 
 /* ============================================================================

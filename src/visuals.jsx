@@ -865,8 +865,20 @@ export function GaugeFigure({ legs, entryNet, spot, ticker, size, style }) {
  * @returns {{ bins: {lo,hi,mid,p}[], peak: number }} probability per bin, and
  *   the tallest bin, so a caller can scale bars without rescanning them.
  */
-export function terminalDist({ spot, sigma, dte, driftAnnual = 0, lo, hi, bins = 26 }) {
+/* >>> THE DEFAULT DRIFT IS GONE, AND IT WAS THE LAST ONE. <<<
+   `bandMass()` had `driftAnnual = 0` removed in PR #25 for the reason written at
+   the top of this file: a picture drawn against a market that goes nowhere,
+   beside a number drifted on the season, is two screens disagreeing about one
+   trade. `terminalDist()` kept its own, and `ComparePayoffs()` below was the
+   caller relying on it — it passed no drift at all, so every compare card
+   printed a seasonal chance above a risk-free picture. `UnifiedPosition` was
+   never at fault: it has always passed `drawDrift`.
+
+   A MISSING DRIFT IS NOT A DRIFT OF ZERO. With none, there is no distribution
+   to draw and the caller says so, exactly as it already does for two markets. */
+export function terminalDist({ spot, sigma, dte, driftAnnual, lo, hi, bins = 26 }) {
   if (!(Number.isFinite(spot) && spot > 0) || !(sigma > 0) || !(dte > 0) || !(hi > lo)) return { bins: [], peak: 0 };
+  if (!Number.isFinite(driftAnnual)) return { bins: [], peak: 0 };
   const Tyr = Math.max(1, dte) / 365, sq = sigma * Math.sqrt(Tyr);
   const mu = Math.log(spot) + (driftAnnual - 0.5 * sigma * sigma) * Tyr;
   const cdf = (x) => (x <= 0 ? 0 : normCdf((Math.log(x) - mu) / sq));
@@ -1099,6 +1111,60 @@ export const sharesOneMarket = (items = []) =>
   && items.every((c) => Math.abs((c.dte || 0) - (items[0].dte || 0)) <= 1)
   && Number.isFinite(items[0].spot) && items[0].spot > 0;
 
+/**
+ * THE ONE DISTRIBUTION UNDER THE COMPARE CURVES, AND THE TWO NUMBERS IT NEEDS.
+ *
+ * >>> THE FAULT PR #27's WORK EXPOSED WITHOUT TOUCHING. <<< This read
+ * `sigma: shown[0].sigma || 0.3, dte: shown[0].dte || 45` and passed NO DRIFT,
+ * so `terminalDist()`'s own `driftAnnual = 0` took over. `shown[0].sigma` was
+ * the candidate's REALISED volatility (`sigmaFor(ticker).sigma`) while the
+ * `pop` printed on the cards directly above the curve comes from `chanceOf()` —
+ * the chain's IMPLIED volatility and the SEASONAL drift. One trade, drawn one
+ * way and counted another, which is the rule `bandMass()` had its own default
+ * removed for.
+ *
+ * The candidate now carries the two numbers THE CHANCE WAS WORKED OUT AT
+ * (`chanceDrawFields()` in rules.js, spread into `candidateOf()`), and there is
+ * NO fallback for either: an unstamped candidate — one saved before this — has
+ * no distribution to draw and the picture says so, which is the same answer it
+ * already gives for two markets.
+ *
+ * @returns {{ ok, why }} `why` names what is missing, for the sentence.
+ */
+export const compareDistInputs = (items = []) => {
+  const c = items[0];
+  if (!sharesOneMarket(items)) return { ok: false, why: "markets", sigma: null, driftAnnual: null };
+  // `Number(null)` IS 0 AND 0 IS FINITE, so an unstamped candidate would arrive
+  // here as a candidate drifting at exactly zero — which is the very picture
+  // this function exists to stop being drawn. The null goes out first.
+  const sigma = c.sigma == null ? NaN : Number(c.sigma);
+  const driftAnnual = c.driftAnnual == null ? NaN : Number(c.driftAnnual);
+  if (!(sigma > 0)) return { ok: false, why: "sigma", sigma: null, driftAnnual: null };
+  if (!Number.isFinite(driftAnnual)) return { ok: false, why: "drift", sigma, driftAnnual: null };
+  if (!(Number(c.dte) > 0)) return { ok: false, why: "horizon", sigma, driftAnnual };
+  return { ok: true, why: null, sigma, driftAnnual, dte: Number(c.dte) };
+};
+
+/** What the picture says instead of drawing a curve it cannot stand behind. */
+export const compareDistNote = (why) => {
+  if (why === "markets") {
+    return `These are not all the same market and horizon, so there is no single distribution to draw ` +
+      `underneath them: one curve of where the price could finish would have to be two. The payoffs and the ` +
+      `breakevens are still on one axis, read as the move from each market\u2019s own price today.`;
+  }
+  if (why === "sigma" || why === "horizon") {
+    return `Where the price could finish is not drawn: ${why === "sigma" ? "the volatility" : "the horizon"} ` +
+      `these candidates were priced at did not travel with them. The payoffs and the breakevens are unaffected ` +
+      `\u2014 they are arithmetic on the legs, not a forecast.`;
+  }
+  if (why === "drift") {
+    return `Where the price could finish is not drawn: these candidates carry no seasonal drift, and a missing ` +
+      `drift is not a drift of zero. Drawing a market that goes nowhere under a chance worked out on the ` +
+      `season would be two readings of one trade. Candidates saved before this was recorded have none.`;
+  }
+  return null;
+};
+
 /** One sentence: who pays most, who works most often, and what it costs. */
 export function compareTakeaway(items = []) {
   if (!items.length) return "Nothing ticked to compare yet.";
@@ -1185,11 +1251,14 @@ export function ComparePayoffs({ items = [], height = 300, width: fixedWidth, on
   const pHi = Math.max(1, ...pnls), pLo = Math.min(-1, ...pnls);
   const Y = (v) => padT + (1 - (v - pLo) / (pHi - pLo)) * (H - padT - padB);
 
-  const shared = sharesOneMarket(shown);
+  // ONE READING OF ONE TRADE: the volatility and the drift the chance on the
+  // card above was computed at, or no distribution at all. No `|| 0.3`, no
+  // `|| 45`, no default drift — see `compareDistInputs()`.
+  const inputs = compareDistInputs(shown);
   const yDist = H - padB + 16;
-  const dist = shared
+  const dist = inputs.ok
     ? terminalDist({
-      spot: shown[0].spot, sigma: shown[0].sigma || 0.3, dte: shown[0].dte || 45,
+      spot: shown[0].spot, sigma: inputs.sigma, dte: inputs.dte, driftAnnual: inputs.driftAnnual,
       lo: shown[0].spot * (1 - reach), hi: shown[0].spot * (1 + reach), bins: 30,
     })
     : { bins: [], peak: 0 };
@@ -1273,11 +1342,9 @@ export function CompareFigure({ items = [], height, width, style }) {
     <Figure style={style} takeaway={compareTakeaway(shown)}
       explanation={open ? explainCompareElement(open, shown) : null} onClose={() => setOpen(null)}>
       <ComparePayoffs items={shown} height={height} width={width} onExplain={setOpen} />
-      {!sharesOneMarket(shown) && shown.length > 1 && (
+      {shown.length > 1 && !compareDistInputs(shown).ok && (
         <div style={{ ...sans, fontSize: 12.5, color: T.mut, lineHeight: 1.5, marginTop: 6 }}>
-          These are not all the same market and horizon, so there is no single distribution to draw underneath
-          them: one curve of where the price could finish would have to be two. The payoffs and the breakevens
-          are still on one axis, read as the move from each market{"’"}s own price today.
+          {compareDistNote(compareDistInputs(shown).why)}
         </div>
       )}
     </Figure>

@@ -98,7 +98,7 @@ export const legsLine = (legs = []) =>
  * @param {object} extra { source, ticker, spot, expKey, dte, sigma, bars }
  * @returns {?object} { key, source, ticker, name, legs, entryNet, spot, expKey,
  *                      dte, maxProfit, maxLoss, risk, pop, rr, sigma,
- *                      seasonalSource, seasonalYears, seasonalAgeDays }
+ *                      driftAnnual, seasonalSource, seasonalYears, seasonalAgeDays }
  *
  * THE CHANCE TRAVELS WITH ITS SOURCE. `pop` is drifted on a seasonal table, and
  * which table decides it: one corrected CORN cell moves a printed chance by
@@ -137,7 +137,17 @@ export function candidateOf(raw, extra = {}) {
     seasonalAgeDays: num(raw.seasonalAgeDays, extra.seasonalAgeDays),
     rr: Number.isFinite(raw.rr) ? raw.rr
       : (Number.isFinite(maxProfit) && Number.isFinite(maxLoss) && maxLoss < 0 ? maxProfit / Math.abs(maxLoss) : null),
+    // THE PICTURE IS DRAWN AT THE NUMBERS THE CHANCE WAS WORKED OUT AT.
+    // `sigma` used to arrive as `sigmaFor(ticker).sigma` — the REALISED
+    // volatility — and there was no drift at all, so `ComparePayoffs` drew a
+    // risk-free lognormal at a realised sigma under a `pop` computed at the
+    // chain's IMPLIED volatility on the seasonal drift. Both now come from
+    // `chanceDrawFields()` on the same `chanceOf()` result that produced `pop`,
+    // and NEITHER IS DEFAULTED: a candidate saved before this carries null and
+    // the compare picture says so instead of drawing something it cannot stand
+    // behind (`compareDistInputs()` in visuals.jsx).
     sigma: num(raw.sigma, extra.sigma),
+    driftAnnual: num(raw.driftAnnual, extra.driftAnnual),
   };
   c.key = candidateKey(c);
   return c;

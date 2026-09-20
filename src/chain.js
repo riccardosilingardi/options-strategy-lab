@@ -7,7 +7,7 @@
  *
  * and every contract inside it:
  *
- *   { bid, ask, mid, iv, oi, vol, delta, theta, occ }
+ *   { bid, ask, mid, bidSize, askSize, iv, oi, vol, delta, theta, occ }
  *
  * That shape is the contract with the rest of the app. The Shortlist, the
  * wizard's ranking and every visual read it, so a new source is allowed to
@@ -123,6 +123,11 @@ export function parseCboeJson(sym, j, now = Date.now()) {
     if (!byExp[p.exp]) byExp[p.exp] = { dte, calls: {}, puts: {} };
     byExp[p.exp][p.type === "call" ? "calls" : "puts"][p.strike] = {
       bid: o.bid, ask: o.ask, mid: midOf(o.bid, o.ask, o.last_trade_price),
+      // HOW MANY ARE OFFERED AT THAT PRICE. CBOE's delayed payload does not
+      // carry quote sizes, so they are `null` here — UNKNOWN, never zero, the
+      // same rule open interest follows. `legBook()` in rules.js says which
+      // legs have no size rather than drawing a blank that reads as "nobody".
+      bidSize: null, askSize: null,
       iv: o.iv || null, oi: o.open_interest || 0, vol: o.volume || 0,
       delta: o.delta, theta: o.theta, occ: p.occ,
     };
@@ -190,8 +195,15 @@ export function normaliseAlpacaChain(sym, payload, { spot, feed = "indicative", 
     const t = s?.latestTrade || {};
     const g = s?.greeks || {};
     const bid = q.bp ?? 0, ask = q.ap ?? 0;
+    // THE SIZES ARRIVE FOR FREE AND WERE BEING PARSED AWAY. `latestQuote`
+    // carries `bs` and `as` — how many contracts are bid for and offered at
+    // those two prices — and the order ticket needs them to say how close a
+    // typed limit is to a probable fill. A missing size is UNKNOWN, never 0:
+    // `?? null` and not `?? 0`, for the same reason `oi` above is null.
+    const sizeOf = (x) => (Number.isFinite(Number(x)) && x != null ? Number(x) : null);
     byExp[p.exp][p.type === "call" ? "calls" : "puts"][p.strike] = {
       bid, ask, mid: midOf(bid, ask, t.p),
+      bidSize: sizeOf(q.bs), askSize: sizeOf(q.as),
       iv: s?.impliedVolatility ?? null,
       oi: null, vol: null,                       // not in an Alpaca snapshot — see above
       delta: g.delta ?? null, theta: g.theta ?? null,

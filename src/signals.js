@@ -769,7 +769,7 @@ export function verdictNarrative({ basket = [], examined = [], excluded = [], ne
      was unavailable the skip is stated too: missing data is not illiquidity,
      and a floor that was never applied must not be reported as one that was. */
   if (floors) {
-    const cut = (floors.liquidity || 0) + (floors.spread || 0) + (floors.reward || 0);
+    const cut = (floors.liquidity || 0) + (floors.spread || 0) + (floors.comboSpread || 0) + (floors.reward || 0);
     const bits = [];
     if (floors.liquidity > 0) {
       // The floor is relative to the chain being judged, so the sentence has to
@@ -789,6 +789,17 @@ export function verdictNarrative({ basket = [], examined = [], excluded = [], ne
       bits.push(`${plural(floors.spread, "structure", "structures")} had a leg quoted more than ` +
         `${Math.round(RULES.maxSpreadShareOfMid * 100)}% of its own mid apart, bid to ask — half way between ` +
         `two numbers that far apart is a price neither side quoted`);
+    }
+    // AND THE PAIR IS NOT THE LEGS — a fourth sentence, because it is a fourth
+    // fault. Two leg spreads ADD onto one net that SUBTRACTS, so a combination
+    // built entirely out of legs anybody would trade can still cost more to get
+    // in and out of than it is worth. Read live on UNG: both legs inside the
+    // per-leg ceiling, the pair 143% of its own mid wide.
+    if (floors.comboSpread > 0) {
+      bits.push(`${plural(floors.comboSpread, "structure", "structures")} had a WHOLE COMBINATION quoted more ` +
+        `than ${Math.round(RULES.maxComboSpreadShareOfNet * 100)}% of its own net apart, with every leg inside ` +
+        `the per-leg ceiling — two leg spreads land on one net, and the round trip costs more than the trade ` +
+        `is worth`);
     }
     if (floors.reward > 0) {
       bits.push(`${plural(floors.reward, "structure", "structures")} paid less than ` +
