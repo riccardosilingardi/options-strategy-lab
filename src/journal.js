@@ -54,8 +54,8 @@
 // this is a leaf-ward import and not a cycle.
 import { MEASURED_SIGMA_SOURCE, TABLE_SIGMA_SOURCE } from "./rules.js";
 
-import { RULES, ruleExitOf } from "./rules.js";
-import { orderOutcome, reduceRatios } from "./order.js";
+import { RULES, ruleExitOf, money } from "./rules.js";
+import { orderOutcome, reduceRatios, orderLifecycle } from "./order.js";
 
 /* ------------------------------------------------------------------
    1) THE REF AND THE SEQUENCE
@@ -310,6 +310,118 @@ export const perCombination = (pos) => {
   if (!legs || !legs.length) return 1;
   return Math.max(1, Math.round(reduceRatios(legs).factor) || 1);
 };
+
+/* ====================================================================
+   WHAT IS THIS RECORD, ACTUALLY? — owned, working, or never taken.
+
+   >>> READ ON THE OWNER'S PHONE, 20 Sep 2026. <<< "YOUR POSITIONS (3) ·
+   VALUED LIVE", with -$80, -$27 and $0 beside them and "TODAY · EVERYTHING
+   IS ON PLAN" over the lot — while the panel directly above said, from the
+   broker's own mouth, "OPEN POSITIONS (0) — Nothing open on Alpaca."
+
+   Not one of the three had ever been bought. The -$80 was the loss on a
+   trade that does not exist, printed in red, in the largest figure on the
+   card, under a gauge and a 76/100 score. The card even carried the correct
+   warning — "until it fills, nothing here is a position you own" — in small
+   amber text under the number that contradicted it. A screen that argues
+   with itself is worse than one that says nothing, because the part that
+   shouts loudest wins, and here the part that shouted was the false one.
+
+   `store.positions` is a record of what the app DECIDED, which is not the
+   same thing as what the user OWNS. Three stages, one function, and every
+   list in the app is built from it rather than from a hand-written filter:
+
+     owned      the broker filled it, or it never went to a broker at all
+                (the app's own paper book, where deciding IS owning).
+     working    it was sent and the broker is still holding it. No position,
+                no exit plan, and the risk on it is not open risk.
+     not-taken  it was sent and came back with nothing bought. There is no
+                trade here and there never was one.
+
+   ONLY `owned` IS A POSITION. Only `owned` carries a real profit and loss,
+   only `owned` is counted in the exposure the risk gate measures, and only
+   `owned` has an exit plan running. The other two are worth keeping and
+   worth looking at — they are the record of what this app's prices actually
+   achieved — but they are not the book.
+==================================================================== */
+
+/**
+ * Which of the three stages a position record is at.
+ *
+ * @param {object} pos  a `store.positions` record
+ * @returns {"owned"|"working"|"not-taken"}
+ *
+ * A record with NO `alpacaId` never went to a broker: it is the app's own
+ * paper book and it is owned by construction, which is how every screen has
+ * always treated it. Everything else is decided by `orderLifecycle()` in
+ * order.js — the one place that knows which broker statuses are finished —
+ * so a status added to that list is understood here without anybody coming
+ * back. An order the broker has not been asked about yet is WORKING, never
+ * dead: unknown is not a verdict (the same rule as a missing open interest).
+ */
+export function positionStage(pos = {}) {
+  if (!pos || !pos.alpacaId) return "owned";
+  const life = orderLifecycle({ status: pos.alpacaStatus, filled: pos.alpacaFilled });
+  if (life === "filled") return "owned";
+  if (life === "dead") return "not-taken";
+  return "working";
+}
+
+/** True only for something the user actually holds. */
+export const isOwnedPosition = (pos) => positionStage(pos) === "owned";
+
+/**
+ * One sentence saying what a record is, for the screen that renders it.
+ * The stage is a FACT ABOUT THE RECORD, so the words for it live here beside
+ * `positionSizeNote()` and `autopilotHorizonNote()` rather than in a component.
+ */
+export const positionStageNote = (pos = {}) => {
+  const stage = positionStage(pos);
+  if (stage === "owned") return null;   // nothing to explain: it is a position
+  if (stage === "working") {
+    return `This order is still at the broker and has not bought anything. Nothing here is a position you own, ` +
+      `no exit plan has started, and the money is not at risk yet — it is an offer that has not been met.`;
+  }
+  const what = pos.alpacaStatus ? String(pos.alpacaStatus).replace(/_/g, " ") : "finished";
+  return `This trade was never taken: the order was ${what} at the broker with nothing bought. What you see ` +
+    `below is what it WOULD have done, priced from the day it was sent — not a position, not a profit, and ` +
+    `not a loss.`;
+};
+
+/**
+ * WHAT A TRADE THAT WAS NEVER TAKEN WOULD HAVE DONE.
+ *
+ * The same arithmetic as a real position's profit and loss, and deliberately
+ * NOT the same words. A theoretical figure printed the way a real one is
+ * printed is the fault this whole section exists to remove, so the caller gets
+ * the number AND the sentence that says what it is not, and neither can be
+ * rendered without the other.
+ *
+ * @param entryNet  what the structure would have been opened at, per share
+ * @param nowNet    what it is worth today, per share
+ * @param contracts how many combinations
+ * @returns {?{ pnl, sentence }} null when today's price cannot be read — an
+ *   unknown is never a theoretical zero.
+ */
+export function wouldHaveDone({ entryNet, nowNet, contracts = 1 } = {}) {
+  // `Number(null)` IS 0 AND 0 IS FINITE — the fifth time that coercion has
+  // produced a wrong number in this repository. A trade whose price today
+  // cannot be read would arrive here as a trade worth nothing, and the
+  // sentence would say it is "down $450" when the truth is that nobody knows.
+  // The nulls go out BEFORE the coercion, exactly as `qualityFloor()` throws
+  // out an unknown open interest before it counts one.
+  const num = (x) => (x == null || x === "" ? NaN : Number(x));
+  const a = num(entryNet), b = num(nowNet);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+  const n = Math.max(1, Math.round(Number(contracts) || 1));
+  const pnl = (b - a) * 100 * n;
+  const dir = pnl > 0 ? "up" : pnl < 0 ? "down" : "level";
+  return {
+    pnl,
+    sentence: `If you had opened this, it would be ${dir}${pnl === 0 ? "" : ` ${money(Math.abs(pnl))}`} today. ` +
+      `You did not open it, so this is not money you have made or lost.`,
+  };
+}
 
 /**
  * How many combinations this position is, and whether the app actually knows.

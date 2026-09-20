@@ -376,6 +376,58 @@ WHAT PR #28 HANDS FORWARD:
     TASK 2b removed, deliberately left rather than widened into unasked scope. It is the obvious
     next thing to point the sweep at.
 
+## P4-bis — The app stops arguing with the broker  (PR #29 — DONE)
+
+The SECOND live reading, one day after the first, same phone. §4l found three numbers that were
+wrong; this found a screen **contradicting itself and the broker, in one scroll**. PRD §4m.
+
+    OPEN POSITIONS (0)   Nothing open on Alpaca.        <- the broker
+    WORKING AT THE BROKER (3)   CANCELED / EXPIRED / CANCELED
+    YOUR POSITIONS (3)   -$80  -$27  $0
+    TODAY · EVERYTHING IS ON PLAN
+
+None of those three trades had ever been bought. The -$80 was the loss on a trade that does not
+exist, in the largest, reddest figure on the card — with the correct warning in small amber text
+directly underneath it.
+
+SHIPPED (PR #29, 717 checks across 19 suites, build clean):
+
+  - **DEAD IS NOT WORKING.** The live-orders filter was `p.alpacaId && p.alpacaFilled === false` —
+    it asks whether an order was FILLED and never whether it is still ALIVE, so a cancelled order
+    stayed "working" for ever. `order.js` had known which statuses are finished since PR #18 and
+    nobody asked it; the row even PRINTED the status, which is why CANCELED appeared inside a panel
+    headed WORKING. `orderLifecycle()` is the one home, and `riskGate.test.js` refuses that filter
+    shape ever again.
+  - **ONLY WHAT THE BROKER FILLED IS A POSITION.** `positionStage()` in `journal.js`: `owned` /
+    `working` / `not-taken`, one function, every list derived from it in one pass. Positions counts
+    only `owned`; the attention alert reads only `owned`; `recheckOrders()` stops re-asking the
+    broker about orders that have been dead for days. **Unknown is not dead** — an order nobody has
+    asked about is `working`, never buried on the app's own authority.
+  - **WATCHING IS THE FOURTH PLACE**, and the owner asked for it in those words. Trades that were
+    sent and came back with nothing bought arrive by themselves; structures saved from the Shortlist
+    join them. `store.saved` has carried the entry price and the date since the path was built and
+    did nothing with them but offer a Load button — from the bottom of the Positions screen, which
+    is precisely the crowding he was complaining about. It has left that screen.
+  - **A THEORETICAL FIGURE MAY NEVER BE PAINTED LIKE A REAL ONE.** `wouldHaveDone()` returns the
+    number and its sentence together so neither can be rendered alone, in muted grey, never the red
+    the Positions cards use — otherwise the fault is rebuilt one tab across. Held by a test.
+  - **AND THE STARTING PRICE IS THE TRAP §4l JUST FIXED.** A saved row's entry came off the
+    Shortlist, which prices at the MID. Every row says which of the two prices it began from, and an
+    unstamped one is named rather than flattered — the fifth use of "the absence of the stamp is the
+    marker".
+  - **`Number(null)` IS 0 AND 0 IS FINITE, for the fifth time**, caught by its own test on the first
+    run: a structure with no readable price today read "down $450" instead of unreadable.
+
+WHAT PR #29 HANDS FORWARD:
+  - **NOBODY HAS SEEN THE WATCHING TAB.** A fourth tab on a 390px phone is a real cost and the
+    owner chose it from a description, not a screen. Sixth item in a row only a phone can settle.
+  - **NO WATCHED ROW HAS BEEN RE-PRICED AGAINST A LIVE CHAIN**, and **the `entrySource` stamp has
+    never been written by a real open** — so only the "starts from the MID" branch has ever
+    rendered.
+  - **EVERY §4l DEBT IS STILL OPEN AND UNTOUCHED**: the pair ceiling is still chosen not measured,
+    the rebuilt ticket still unseen, the size column still never fed a real size, and the effective
+    price still unreconciled against a fill. **That last one is P0's**, and P0 has not moved.
+
 ## P2 — Proposals ranked by edge, not by score
 At market prices every structure has expected value near zero: high
 probability and large payoff are two ends of one lever. So the app must
