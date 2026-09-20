@@ -43,6 +43,7 @@ import { orderBody, orderOutcome, alpacaErrorText, reduceRatios } from "./order.
 import { nextRef, refCounter, appendTimeline, stampTimeline, orderStatusRecheck, closeDecision,
   autopilotHorizonNote, autopilotVolNote,
   positionSize, positionSizeNote, contractsOf, withPositionSize,
+  positionStage, positionStageNote, wouldHaveDone,
   journalEntry, searchJournal, CLOSE_REASON_MIN, refNumber } from "./journal.js";
 import { FIRST_STEP, stepCarry, candidateOf, candidateKey, legsLine, toggleCompare, inCompare, MAX_COMPARE, savedFromCandidate, candidateFromSaved, savedAge } from "./path.js";
 import { StepNav, StepForward, EvidenceBar, EvidenceOverlay, CompareTray, CandidateActions } from "./steps.jsx";
@@ -1798,10 +1799,38 @@ export default function OptionsStrategyLab() {
   ==================================================================== */
   const [orderBusy, setOrderBusy] = useState(null);
 
-  /** Positions whose order left and has not come back filled, newest first. */
-  const workingOrders = useMemo(() => store.positions
-    .filter((p) => p.alpacaId && p.alpacaFilled === false)
-    .sort((a, b) => (b.alpacaSentAt || b.id || 0) - (a.alpacaSentAt || a.id || 0)), [store.positions]);
+  /* ====================================================================
+     THREE LISTS, ONE FUNCTION — and DEAD IS NOT WORKING.
+
+     This was ONE list picked with `p.alpacaId && p.alpacaFilled === false`,
+     which asks whether an order was filled and never whether it is still
+     alive. A cancelled order was never filled, so it stayed in "WORKING AT
+     THE BROKER" for ever: the owner's phone showed that heading over three
+     rows badged CANCELED, EXPIRED and CANCELED, two of them three days old.
+
+     Every list below comes out of `positionStage()` in journal.js, so no
+     screen can decide for itself what a record is. Only `owned` is a
+     position: it is the only one with a real profit and loss, the only one
+     the exposure ceiling counts, and the only one with an exit plan running.
+  ==================================================================== */
+  const byStage = useMemo(() => {
+    const newest = (a, b) => (b.alpacaSentAt || b.id || 0) - (a.alpacaSentAt || a.id || 0);
+    const out = { owned: [], working: [], notTaken: [] };
+    for (const p of store.positions) {
+      const stage = positionStage(p);
+      if (stage === "owned") out.owned.push(p);
+      else if (stage === "working") out.working.push(p);
+      else out.notTaken.push(p);
+    }
+    out.working.sort(newest); out.notTaken.sort(newest);
+    return out;
+  }, [store.positions]);
+  /** What the user actually holds. The only list that is a book. */
+  const ownedPositions = byStage.owned;
+  /** Sent, still at the broker, nothing bought yet. */
+  const workingOrders = byStage.working;
+  /** Sent and finished with nothing bought — no trade here, and there never was. */
+  const notTakenOrders = byStage.notTaken;
 
   const cancelWorking = async (p) => {
     if (DEMO) { setMsg(DEMO_TOOLTIP); return; }
@@ -2089,6 +2118,18 @@ export default function OptionsStrategyLab() {
   }, []);
 
   const delSaved = async (id) => { const st = { ...store, saved: store.saved.filter((s) => s.id !== id) }; setStore(st); await saveState(st); };
+  /* STOP WATCHING a trade that was never taken. It deletes the record, and
+     that is the whole of it: nothing was ever bought, so there is nothing to
+     close, no profit to bank and nothing the Journal needs to keep. A record
+     of a trade that did not happen is worth exactly as much as the owner
+     finds it worth, which is why the button exists at all. */
+  const dropWatched = async (id) => {
+    const target = store.positions.find((p) => p.id === id);
+    if (!target || positionStage(target) !== "not-taken") return;
+    const st = { ...store, positions: store.positions.filter((p) => p.id !== id) };
+    setStore(st); await saveState(st);
+    setMsg("Stopped watching it. Nothing was bought and nothing was closed — the record is simply gone.");
+  };
   // A day's event is logged ONCE. When it has already been logged, this has to
   // return the state it was given — the SAME object, not a copy of it.
   //
@@ -2181,7 +2222,10 @@ export default function OptionsStrategyLab() {
   const rechecking = useRef(false);
   const recheckOrders = useCallback(async () => {
     if (DEMO || rechecking.current) return;               // no broker call in the demo
-    const todo = store.positions.filter((p) => p.alpacaId && p.alpacaFilled === false);
+    // ONLY THE ONES STILL ALIVE. This asked the broker about every unfilled
+    // order, which meant re-reading three orders that had been cancelled for
+    // days, once a minute, for ever. A finished order has no news to give.
+    const todo = store.positions.filter((p) => positionStage(p) === "working");
     if (!todo.length) return;
     rechecking.current = true;
     const changes = [];
@@ -2415,7 +2459,77 @@ export default function OptionsStrategyLab() {
   }, [store.ivHist, ticker]);
 
   /* ---- alert center: valutazione rapida posizioni ---- */
-  const posAlerts = useMemo(() => store.positions.map((p) => {
+  /* ====================================================================
+     WATCHING — WHAT WOULD HAVE HAPPENED, AND IT IS NOT A BOOK.
+
+     Two sources, one list, because they are the same question asked twice:
+
+       - a trade that WAS sent and came back with nothing bought
+         (`positionStage()` says "not-taken"). The owner tried to take it and
+         the market did not meet him. These arrive here by themselves.
+       - a structure SAVED from the Shortlist and never sent. `store.saved`
+         has carried `entryNet`, `spot` and `savedAt` since the path was
+         built — everything needed to answer "how would it have gone" — and
+         did nothing with them but offer a Load button.
+
+     Every row is re-priced against today's chain and carries a THEORETICAL
+     figure produced by `wouldHaveDone()` in journal.js, which returns the
+     sentence with the number so that neither can be rendered alone. Null
+     where today's price cannot be read: an unknown is never a hopeful zero.
+
+     >>> THE STARTING PRICE IS THE TRAP, AND IT IS THE ONE PR #28 JUST FIXED.
+     A saved row's `entryNet` came off the Shortlist, which prices at the MID
+     — the price this app has just finished proving nobody gives you. Started
+     from there, every watched trade would read better than it could have
+     been, and three months of that is a story about being right. The row
+     says which of the two prices it began from, and an unstamped record —
+     everything saved before this — is named rather than flattered. <<<
+  ==================================================================== */
+  const watchRows = useMemo(() => {
+    const priceToday = (ticker, legs, expKey, expiry) => {
+      const c = chains[ticker];
+      const sp = c?.spot;
+      if (!sp || !legs?.length) return { net: null, spot: sp ?? null };
+      const left = expiry ? Math.max(0, Math.round((new Date(expiry) - Date.now()) / 86400000)) : null;
+      const qp = makeQuote(c, expKey);
+      return { net: netValue(legs, sp, Math.max(1, left ?? RULES.targetEntryDTE), getU(ticker).iv, qp), spot: sp };
+    };
+    const rows = [];
+    for (const p of notTakenOrders) {
+      const { net, spot: sp } = priceToday(p.ticker, p.legs, p.expKey, p.expiry);
+      rows.push({
+        key: `p-${p.id}`, kind: "not-taken", pos: p,
+        ref: p.ref, ticker: p.ticker, name: p.name, legs: p.legs, expKey: p.expKey,
+        at: p.alpacaSentAt || p.openedAt, status: p.alpacaStatus,
+        entryNet: p.entryNet, nowNet: net, spot: sp,
+        contracts: contractsOf(p),
+        // The ABSENCE of the stamp is the marker, the fifth time this
+        // codebase uses that pattern: a record written before PR #28 carries
+        // no `entrySource`, and at that point the mid was the only price
+        // `analyze()` could produce.
+        entrySource: p.entrySource ?? null,
+      });
+    }
+    for (const sv of store.saved) {
+      const { net, spot: sp } = priceToday(sv.ticker, sv.legs, sv.expKey, sv.expKey);
+      rows.push({
+        key: `s-${sv.id}`, kind: "saved", saved: sv,
+        ref: null, ticker: sv.ticker, name: sv.name, legs: sv.legs, expKey: sv.expKey,
+        at: sv.savedAt ? new Date(sv.savedAt).getTime() : sv.id, status: null,
+        entryNet: sv.entryNet, nowNet: net, spot: sp, contracts: 1,
+        entrySource: sv.entrySource ?? null,
+      });
+    }
+    return rows
+      .map((r) => ({ ...r, would: wouldHaveDone({ entryNet: r.entryNet, nowNet: r.nowNet, contracts: r.contracts }) }))
+      .sort((a, b) => (b.at || 0) - (a.at || 0));
+  }, [notTakenOrders, store.saved, chains]);
+
+  /* ONLY WHAT IS OWNED NEEDS A DECISION TODAY. This read every record, so the
+     front page said "EVERYTHING IS ON PLAN" over three trades that had never
+     been bought — and would equally have said "3 POSITIONS NEED A DECISION"
+     about them. There is no decision to take on a trade you do not hold. */
+  const posAlerts = useMemo(() => ownedPositions.map((p) => {
     const c = chains[p.ticker];
     const sp = c?.spot;
     const dteLeft = Math.max(0, Math.round((new Date(p.expiry) - Date.now()) / 86400000));
@@ -2453,7 +2567,7 @@ export default function OptionsStrategyLab() {
       : pnl != null && watchLevel != null && pnl < watchLevel * n ? "watch" : "ok";
     const label = tpHit ? `${takeProfitLabel()} reached — take the profit` : slHit ? `${stopLossLabel()} reached — a warning, not an order` : dteExit ? `${dteLeft} days left — close or roll` : ap ? "The autopilot has something waiting for your OK" : pnl == null ? "waiting for prices…" : level === "watch" ? "Losing: check the reason you opened it" : "On plan";
     return { p, pnl, dteLeft, level, label, ap, live, spotNow: sp, tpHit, slHit, dteExit, contracts: n, sizeAssumed: size.assumed };
-  }), [store.positions, chains, alSync]);
+  }), [ownedPositions, chains, alSync]);
 
   // Log eventi regola (TP/SL/DTE) fuori dal render: prima veniva chiamato logEvent
   // DENTRO il JSX del tab Paper (setState durante il render) => instabilità del tab.
@@ -3045,8 +3159,17 @@ export default function OptionsStrategyLab() {
   // Radar and Shortlist used to be EVIDENCE panels appended to the Build page.
   // They are steps now, because they are not evidence for a trade — they are
   // how you arrive at one, and each of them is a decision of its own.
+  /* WATCHING IS THE THIRD PLACE, AND IT EXISTS BECAUSE THE FIRST TWO WERE
+     BEING ASKED TO HOLD SOMETHING THAT IS NEITHER. A trade you did not take
+     is not a position and it is not history: it is a live observation, and
+     the owner asked for it in those words — "magari voglio vedere come
+     sarebbe andata, ma non deve stare nella stessa schermata delle posizioni
+     e ordini." Putting it inside the Journal would have been the compromise
+     that gets undone in two months, because the Journal is the record of what
+     HAPPENED and this is a question about what is happening now. */
   const OTHER_PLACES = [
     { id: "positions", label: "Positions", I: Briefcase },
+    { id: "watching", label: "Watching", I: Layers },
     { id: "journal", label: "Journal", I: FileText },
   ];
   // What is left IS evidence: it answers a question about the step in front of
@@ -4896,14 +5019,24 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
             )}
             <Panel>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-                <Lbl>YOUR POSITIONS ({store.positions.length}) · VALUED LIVE</Lbl>
+                <Lbl>YOUR POSITIONS ({ownedPositions.length}) · VALUED LIVE</Lbl>
                 <label style={{ ...mono, fontSize: 10.5, color: autoMon ? T.green : T.dim, display: "flex", gap: 5, alignItems: "center", cursor: "pointer" }}>
                   <input type="checkbox" checked={autoMon} onChange={(e) => setAutoMon(e.target.checked)} /> refresh every 60s
                 </label>
               </div>
-              {store.positions.length === 0 && <div style={{ ...mono, fontSize: 12, color: T.mut, marginTop: 8 }}>Nothing open yet. Build a trade, then press "Open on paper".</div>}
+              {ownedPositions.length === 0 && (
+                <div style={{ ...mono, fontSize: 12, color: T.mut, marginTop: 8, lineHeight: 1.6 }}>
+                  {/* A POSITION IS SOMETHING THE BROKER FILLED. An order that was
+                      sent and is still waiting, or that came back cancelled, is
+                      not a position however much the app wanted it to be — and
+                      this list said otherwise for three trades at once. */}
+                  Nothing is open. {workingOrders.length > 0 || notTakenOrders.length > 0
+                    ? `You have ${workingOrders.length > 0 ? `${workingOrders.length} order${workingOrders.length === 1 ? "" : "s"} still working at the broker` : ""}${workingOrders.length > 0 && notTakenOrders.length > 0 ? " and " : ""}${notTakenOrders.length > 0 ? `${notTakenOrders.length} that ended with nothing bought — ${notTakenOrders.length === 1 ? "it is" : "they are"} under Watching` : ""}. A position appears here only when Alpaca has actually filled the order.`
+                    : `Build a trade, then confirm it at the bottom of the Build screen.`}
+                </div>
+              )}
               <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
-                {store.positions.map((p) => {
+                {ownedPositions.map((p) => {
                   const c = chains[p.ticker];
                   const s = c?.spot;
                   const dteLeft = Math.max(0, Math.round((new Date(p.expiry) - Date.now()) / 86400000));
@@ -4947,14 +5080,17 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                       <div style={{ ...mono, fontSize: 10.5, color: size.assumed && size.perCombo === 1 ? T.amber : T.mut, marginTop: 3, lineHeight: 1.5 }}>
                         {size.assumed && size.perCombo === 1 ? "⚠ " : "× "}{positionSizeNote(p)}
                       </div>
-                      {/* THE ORDER BEHIND THIS ONE HAS NOT FILLED. It was
-                          recorded at the moment it was sent, and an order can
-                          sit accepted for a whole session; a row that says
-                          nothing about that is a position the user does not
-                          own yet, drawn as one he does. */}
-                      {p.alpacaFilled === false && (
-                        <div style={{ ...mono, fontSize: 10.5, color: T.amber, marginTop: 5 }}>
-                          {`⚠ The Alpaca order behind this one was "${p.alpacaStatus}" when it was sent, not filled. Check it on your paper account: until it fills, nothing here is a position you own, and the exit plan has not started.`}
+                      {/* THE ORDER BEHIND THIS ONE HAS NOT FILLED. This list is
+                          `ownedPositions` now, so the case should be impossible
+                          — but a record whose two broker fields contradict each
+                          other is exactly the kind of thing that put three
+                          phantom positions on this screen, and a guard that
+                          self-suppresses costs nothing. `positionStageNote()`
+                          returns null for anything genuinely owned, so the
+                          words have one home and cannot drift from Watching's. */}
+                      {positionStageNote(p) && (
+                        <div style={{ ...mono, fontSize: 10.5, color: T.amber, marginTop: 5, lineHeight: 1.6 }}>
+                          ⚠ {positionStageNote(p)}
                         </div>
                       )}
                       {/* CLOSING ASKS WHY, AND THE ANSWER IS KEPT.
@@ -5054,22 +5190,10 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
 
             {alpaca && <AlpacaDesk setMsg={setMsg} gate={gate} />}
 
-            <Panel style={{ marginTop: 10 }}>
-              <Lbl>SAVED STRATEGIES ({store.saved.length})</Lbl>
-              <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
-                {store.saved.map((sv) => (
-                  <div key={sv.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7, flexWrap: "wrap" }}>
-                    <div style={{ flex: 1, minWidth: 150 }}>
-                      <div style={{ color: T.ink, fontWeight: 600, fontSize: 12.5 }}>{sv.ticker} · {sv.name}</div>
-                      <div style={{ ...mono, fontSize: 10, color: T.dim }}>{sv.legs.map((l) => `${l.side > 0 ? "+" : "−"}${l.qty} ${l.strike}${l.type === "call" ? "C" : "P"}`).join(" / ")} · {sv.expKey || `${sv.dte} DTE`}</div>
-                    </div>
-                    <Btn small ghost onClick={() => openOnBuild({ ticker: sv.ticker, expKey: sv.expKey || null, legs: sv.legs, name: sv.name })}>Load</Btn>
-                    <button onClick={() => delSaved(sv.id)} style={{ background: "none", border: "none", color: T.dim, cursor: "pointer" }}><Trash2 size={13} /></button>
-                  </div>
-                ))}
-                {store.saved.length === 0 && <div style={{ ...mono, fontSize: 11.5, color: T.mut }}>Nothing saved yet.</div>}
-              </div>
-            </Panel>
+            {/* SAVED STRATEGIES USED TO SIT HERE, under the broker panel and
+                above Integrations — a list of trades you have NOT taken, on the
+                screen whose whole job is the trades you have. It is the first
+                row of the Watching tab now. */}
 
             <Panel style={{ marginTop: 10 }}>
               <Lbl><Plug size={11} style={{ verticalAlign: "-1px" }} /> INTEGRATIONS</Lbl>
@@ -5234,10 +5358,119 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
         {/* ============ JOURNAL — the third place ============
             What actually happened, and what it says about the habits. The
             report lives here too: it is a written record, not a workspace. */}
+        {/* ============ WATCHING ============ */}
+        {tab === "watching" && !showSettings && (
+          <div>
+            <Panel style={{ marginTop: 10 }}>
+              <Lbl>WATCHING ({watchRows.length}) · TRADES YOU DID NOT TAKE</Lbl>
+              <div style={{ ...sansUI, fontSize: 13, color: T.body, lineHeight: 1.55, marginTop: 8 }}>
+                Nothing here is a position and nothing here is money. These are structures you saved, and orders
+                that were sent and came back with nothing bought — kept so you can see what they would have done.
+                No exit plan runs on them, none of them counts towards your exposure, and none of the figures
+                below is a profit or a loss.
+              </div>
+              {watchRows.length === 0 && (
+                <div style={{ ...mono, fontSize: 12, color: T.mut, marginTop: 10, lineHeight: 1.6 }}>
+                  Nothing is being watched. Save a structure from the Shortlist to follow it without taking it —
+                  and an order that ends without filling arrives here by itself.
+                </div>
+              )}
+              <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
+                {watchRows.map((r) => {
+                  const w = r.would;
+                  const bands = r.spot ? payoffBands({ legs: r.legs, entryNet: r.entryNet, spot: r.spot }) : null;
+                  return (
+                    <div key={r.key} style={{ padding: "10px 12px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 8 }}>
+                      <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+                        <span style={{ color: T.ink, fontWeight: 700, fontSize: 13.5 }}>
+                          {r.ref ? `${r.ref} ` : ""}{r.ticker} · {r.name}
+                        </span>
+                        {/* WHICH OF THE TWO IT IS, on the row, because "I chose
+                            not to" and "I tried and missed" are different facts
+                            about the same picture. */}
+                        <span style={{ ...mono, fontSize: 9, fontWeight: 800, letterSpacing: 0.4, padding: "2px 6px", borderRadius: 4,
+                          background: r.kind === "saved" ? `${T.blue}22` : `${T.amber}22`, color: r.kind === "saved" ? T.blue : T.amber }}>
+                          {r.kind === "saved" ? "SAVED, NEVER SENT" : `SENT · ${String(r.status || "finished").toUpperCase().replace(/_/g, " ")}`}
+                        </span>
+                        <span style={{ ...mono, fontSize: 10, color: T.dim, marginLeft: "auto" }}>{r.at ? ago(r.at) : ""}</span>
+                      </div>
+                      <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 3 }}>
+                        {legsLine(r.legs)}{r.expKey ? ` · ${r.expKey}` : ""}
+                      </div>
+
+                      {bands && (
+                        <div style={{ display: "flex", gap: 12, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
+                          <BandThumbnail bands={bands} bars={barsCache[r.ticker] || []} width={200} height={40}
+                            title={bandTakeaway(bands, { ticker: r.ticker })} />
+                          <Gauge bands={bands} size={96} ticker={r.ticker} />
+                        </div>
+                      )}
+
+                      {/* THE THEORETICAL FIGURE, AND IT MAY NEVER LOOK LIKE A REAL
+                          ONE. Muted, never red or green, with the sentence beside
+                          it — `wouldHaveDone()` returns the two together so one
+                          cannot be rendered without the other. Printing -$80 in
+                          the same red the Positions screen uses is exactly the
+                          fault this whole tab exists to undo. */}
+                      <div style={{ marginTop: 9, padding: "8px 10px", background: T.panel, border: `1px solid ${T.line}`, borderRadius: 6 }}>
+                        <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "baseline" }}>
+                          <div>
+                            <div style={{ ...mono, fontSize: 9, color: T.dim, letterSpacing: 0.4 }}>WOULD HAVE OPENED AT</div>
+                            <div style={{ ...mono, fontSize: 13, fontWeight: 800, color: T.mut }}>
+                              {Number.isFinite(Number(r.entryNet)) ? fmt$(Math.abs(Number(r.entryNet)) * 100 * r.contracts) : "—"}
+                            </div>
+                          </div>
+                          <div>
+                            <div style={{ ...mono, fontSize: 9, color: T.dim, letterSpacing: 0.4 }}>WORTH TODAY</div>
+                            <div style={{ ...mono, fontSize: 13, fontWeight: 800, color: T.mut }}>
+                              {r.nowNet != null ? fmt$(Math.abs(r.nowNet) * 100 * r.contracts) : "—"}
+                            </div>
+                          </div>
+                          <div>
+                            <div style={{ ...mono, fontSize: 9, color: T.dim, letterSpacing: 0.4 }}>DIFFERENCE</div>
+                            <div style={{ ...mono, fontSize: 13, fontWeight: 800, color: T.mut }}>
+                              {w ? `${w.pnl >= 0 ? "+" : "−"}${fmt$(Math.abs(w.pnl))}` : "—"}
+                            </div>
+                          </div>
+                        </div>
+                        <div style={{ ...sansUI, fontSize: 12.5, color: T.body, marginTop: 6, lineHeight: 1.5 }}>
+                          {w ? w.sentence
+                            : `Today's price for this structure cannot be read, so there is nothing to compare the ` +
+                              `opening price with. That is a missing number, not a flat result.`}
+                        </div>
+                        {/* AND WHICH PRICE IT STARTED FROM. A row begun at the mid
+                            flatters itself for ever, and every row saved before
+                            PR #28 was begun at the mid. */}
+                        <div style={{ ...mono, fontSize: 9.5, color: T.dim, marginTop: 5, lineHeight: 1.6 }}>
+                          {r.entrySource === "limit"
+                            ? `Opened at the price that would really have been paid, not the mid.`
+                            : `This one starts from the MID — the middle of the market, which is not a price anybody ` +
+                              `has to give you. Read it as the friendliest version of what would have happened.`}
+                        </div>
+                      </div>
+
+                      <div style={{ display: "flex", gap: 6, marginTop: 9, flexWrap: "wrap" }}>
+                        <Btn small ghost onClick={() => openOnBuild({ ticker: r.ticker, expKey: r.expKey || null, legs: r.legs, name: r.name })}>
+                          Open it on Build →
+                        </Btn>
+                        <button
+                          onClick={() => (r.kind === "saved" ? delSaved(r.saved.id) : dropWatched(r.pos.id))}
+                          style={{ ...mono, fontSize: 10.5, background: "transparent", border: `1px solid ${T.line}`, color: T.dim, borderRadius: 6, padding: "6px 10px", cursor: "pointer", minHeight: 36 }}>
+                          <Trash2 size={12} style={{ verticalAlign: "-2px" }} /> Stop watching
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </Panel>
+          </div>
+        )}
+
         {tab === "journal" && !showSettings && (
           <div style={{ marginTop: 12 }}>
             <Panel>
-              <Lbl>THE RECORD · {(store.journal || []).length} CLOSED · {store.positions.length} OPEN</Lbl>
+              <Lbl>THE RECORD · {(store.journal || []).length} CLOSED · {ownedPositions.length} OPEN</Lbl>
               <div style={{ display: "flex", gap: 18, marginTop: 10, flexWrap: "wrap" }}>
                 <Stat k="LEVEL" v={journey.level} c={T.amber} />
                 <Stat k="AWARENESS" v={journey.score == null ? "—" : `${journey.score}/100`} c={journey.score >= 70 ? T.green : journey.score >= 40 ? T.amber : T.dim} />

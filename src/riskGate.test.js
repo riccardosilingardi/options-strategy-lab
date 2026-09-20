@@ -1262,6 +1262,62 @@ test("MODEL SANITY — IT IS A PROPOSAL FLOOR AND IT IS NOT IN THE GATE", () => 
     "the model check must never become a reason an order is refused");
 });
 
+test("DEAD IS NOT WORKING — the filter that outlived three cancelled orders", () => {
+  /* >>> READ ON THE OWNER'S PHONE, 20 Sep 2026. <<< A panel headed "WORKING
+     AT THE BROKER (3) · SENT, NOT FILLED" containing three rows badged
+     CANCELED, EXPIRED and CANCELED — two of them three days old. The filter
+     was
+
+         p.alpacaId && p.alpacaFilled === false
+
+     which asks whether an order was FILLED and never whether it is still
+     ALIVE. `order.js` had known which statuses are finished since PR #18 and
+     nobody asked it. Every list is built from `positionStage()` now. */
+  const app = codeOf("App.jsx");
+  assert.equal(/alpacaFilled\s*===\s*false/.test(app), false,
+    "a working order is not 'one that was never filled': ask orderLifecycle() through positionStage()");
+  assert.ok(/positionStage\(/.test(app), "App.jsx reads the stage from journal.js");
+
+  // ...and the three lists come out of that one function, not three filters.
+  assert.ok(/const byStage = useMemo/.test(app), "one pass over the book, three lists");
+  for (const name of ["ownedPositions", "workingOrders", "notTakenOrders"]) {
+    assert.ok(new RegExp(`\\b${name}\\b`).test(app), `${name} exists`);
+  }
+
+  // ONLY WHAT IS OWNED IS A POSITION. The Positions screen and the attention
+  // alert both read the owned list — the alert said "EVERYTHING IS ON PLAN"
+  // over three trades that had never been bought.
+  assert.ok(/YOUR POSITIONS \(\{ownedPositions\.length\}\)/.test(app),
+    "the Positions count is the owned count, not every record");
+  assert.ok(/const posAlerts = useMemo\(\(\) => ownedPositions\.map/.test(app),
+    "and nothing that was never bought asks for a decision today");
+});
+
+test("WATCHING IS A PLACE OF ITS OWN, and its figures are not money", () => {
+  // The owner's words: "magari voglio vedere come sarebbe andata, ma non deve
+  // stare nella stessa schermata delle posizioni e ordini."
+  const app = codeOf("App.jsx");
+  assert.ok(/id: "watching"/.test(app), "a fourth place beside Positions and the Journal");
+  assert.ok(/tab === "watching"/.test(app), "and a screen behind it");
+  assert.ok(/wouldHaveDone\(/.test(app), "the theoretical figure comes from journal.js, with its sentence");
+
+  // SAVED STRATEGIES LEFT THE POSITIONS SCREEN. It was a list of trades NOT
+  // taken, sitting on the screen whose whole job is the trades you have.
+  const positionsTab = app.slice(app.indexOf('{tab === "positions"'), app.indexOf('{tab === "watching"'));
+  assert.equal(/SAVED STRATEGIES/.test(positionsTab), false,
+    "saved strategies belong to Watching, not to the book");
+
+  // A THEORETICAL P&L MAY NEVER BE PAINTED LIKE A REAL ONE. Printing it in
+  // the red the Positions cards use would rebuild, one tab across, the exact
+  // fault this session removed.
+  const watchTab = app.slice(app.indexOf('{tab === "watching"'), app.indexOf('{tab === "journal"'));
+  assert.ok(watchTab.length > 500, "the Watching screen is really in there");
+  assert.equal(/WOULD HAVE OPENED AT[\s\S]{0,400}c=\{T\.red\}/.test(watchTab), false,
+    "no red on a figure that is not a loss");
+  assert.ok(/Nothing here is a position and nothing here is money/.test(watchTab),
+    "and the screen says so in its own words, at the top");
+});
+
 test("MODEL SANITY — ONE EXPRESSION, and the ticket does not run a second one", () => {
   // ROADMAP P0 left this open: `ComboBookPanel` in pro.jsx called
   // `modelSanity()` on every render of the ticket, which made it a SECOND

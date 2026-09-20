@@ -23,10 +23,11 @@ import {
   journalEntry, lastCloseOrderId,
   byRefDesc, matchesRef, searchJournal, SEQ_SEP,
   positionSize, positionSizeNote, contractsOf, withPositionSize, ASSUMED_CONTRACTS,
+  positionStage, isOwnedPosition, positionStageNote, wouldHaveDone,
 } from "./journal.js";
 import { RULES, ruleExitOf, stopWarningSentence,
   seasonalStampOf, seasonalStampNote, ESTIMATED_SEASONAL_SOURCE, MEASURED_SEASONAL_SOURCE } from "./rules.js";
-import { reduceRatios, orderQty } from "./order.js";
+import { reduceRatios, orderQty, orderLifecycle, orderIsWorking, orderIsDead, deadOrderNote } from "./order.js";
 
 let passed = 0;
 const failures = [];
@@ -837,6 +838,134 @@ test("the autopilot stamps the horizon it actually simulated to", () => {
   // not applied.
   assert.ok(/simExitDTE: sim\.exitDTE/.test(src), "the stamp must be the simulator's own exitDTE");
   assert.ok(/simDays: sim\.horizon/.test(src), "and how far it actually walked");
+});
+
+/* ================================================================
+   DEAD IS NOT WORKING — and a trade nobody bought is not a position.
+
+   >>> BOTH READ ON THE OWNER'S PHONE, 20 Sep 2026, one scroll apart. <<<
+
+     "WORKING AT THE BROKER (3) · SENT, NOT FILLED"
+        J-0003 UNG   CANCELED · 8 hours old
+        J-0002 CORN  EXPIRED  · 3 days old
+        J-0001 BOIL  CANCELED · 3 days old
+
+     "YOUR POSITIONS (3) · VALUED LIVE"     ... -$80, -$27, $0
+     "TODAY · EVERYTHING IS ON PLAN"
+
+   ...directly under the broker's own panel reading "OPEN POSITIONS (0) —
+   Nothing open on Alpaca." Not one of the three had ever been bought, and
+   the -$80 was printed in red, in the biggest figure on the card.
+================================================================ */
+
+test("A CANCELLED ORDER IS NOT A WORKING ORDER — the three rows on the phone", () => {
+  // The exact three, with the statuses their own badges carried.
+  const ung = { status: "canceled", filled: false };
+  const corn = { status: "expired", filled: false };
+  const boil = { status: "canceled", filled: false };
+  for (const [name, o] of [["UNG", ung], ["CORN", corn], ["BOIL", boil]]) {
+    assert.equal(orderLifecycle(o), "dead", `${name} is finished, not waiting`);
+    assert.equal(orderIsWorking(o), false, `${name} must not be counted as working`);
+    assert.equal(orderIsDead(o), true, `${name} is dead`);
+  }
+  // THE OLD TEST, which is the bug: "not filled" was the whole question.
+  for (const o of [ung, corn, boil]) {
+    assert.equal(o.filled, false, "all three were unfilled, which is why the old filter kept them");
+  }
+});
+
+test("...and an order the broker is still holding IS working", () => {
+  for (const st of ["accepted", "new", "pending_new", "held", "partially_filled", "replaced"]) {
+    assert.equal(orderLifecycle({ status: st, filled: false }), "working", `${st} is still alive`);
+  }
+  assert.equal(orderLifecycle({ status: "filled", filled: true }), "filled", "and a fill is a fill");
+});
+
+test("UNKNOWN IS NOT DEAD, and it is not the app's decision to make", () => {
+  // A record the broker has not been asked about yet. `recheckOrders()` is
+  // what resolves it; until then the app may not bury it on its own.
+  assert.equal(orderLifecycle({ status: null, filled: false }), "working", "no status yet is still waiting");
+  assert.equal(orderLifecycle({}), "unknown", "and nothing at all is unknown, not dead");
+  assert.equal(orderIsDead({}), false, "an unknown order was never declared finished");
+});
+
+test("THE DEAD LIST IS NOT A SECOND COPY — order.js already knew", () => {
+  // `orderOutcome()` has reported `working: false` for these statuses since
+  // PR #18. The fault was never the knowledge, it was that nobody asked.
+  const src = readFileSync(new URL("./order.js", import.meta.url), "utf8");
+  const lists = src.match(/^const DEAD = \[/gm) || [];
+  assert.equal(lists.length, 1, "one home for which statuses are finished");
+  assert.ok(/orderLifecycle/.test(src), "and one function that reads it");
+});
+
+test("POSITION STAGE — owned, working, or never taken", () => {
+  // The app's own paper book: nothing was sent, so deciding IS owning.
+  assert.equal(positionStage({ ticker: "UNG", legs: [] }), "owned", "no broker, no doubt");
+  assert.equal(positionStage({ alpacaId: "x", alpacaStatus: "filled", alpacaFilled: true }), "owned", "the broker filled it");
+  assert.equal(positionStage({ alpacaId: "x", alpacaStatus: "accepted", alpacaFilled: false }), "working", "sent and waiting");
+  assert.equal(positionStage({ alpacaId: "x", alpacaStatus: "canceled", alpacaFilled: false }), "not-taken", "sent and finished with nothing");
+  assert.equal(positionStage({ alpacaId: "x", alpacaStatus: "expired", alpacaFilled: false }), "not-taken", "same for an expiry");
+  // And the one that matters for every dollar figure in the app.
+  assert.equal(isOwnedPosition({ alpacaId: "x", alpacaStatus: "canceled", alpacaFilled: false }), false,
+    "a trade nobody bought must never be counted as a position");
+});
+
+test("THE THREE LIVE RECORDS SPLIT THE WAY THE BROKER SAYS THEY SHOULD", () => {
+  const book = [
+    { id: 1, ref: "J-0001", alpacaId: "d5c286ab", alpacaStatus: "canceled", alpacaFilled: false },
+    { id: 2, ref: "J-0002", alpacaId: "8a3dc861", alpacaStatus: "expired", alpacaFilled: false },
+    { id: 3, ref: "J-0003", alpacaId: "15160c4e", alpacaStatus: "canceled", alpacaFilled: false },
+  ];
+  const owned = book.filter(isOwnedPosition);
+  const working = book.filter((p) => positionStage(p) === "working");
+  const notTaken = book.filter((p) => positionStage(p) === "not-taken");
+  // Alpaca said: OPEN POSITIONS (0). The app said: YOUR POSITIONS (3).
+  assert.equal(owned.length, 0, "the app must agree with the broker: nothing is open");
+  assert.equal(working.length, 0, "and nothing is waiting either — all three are finished");
+  assert.equal(notTaken.length, 3, "all three are trades that were never taken");
+});
+
+test("A record says what it is, and only when there is something to say", () => {
+  assert.equal(positionStageNote({ ticker: "UNG" }), null, "a real position explains nothing");
+  const working = positionStageNote({ alpacaId: "x", alpacaStatus: "accepted", alpacaFilled: false });
+  assert.ok(/Nothing here is a position you own/.test(working), "a working order says so");
+  assert.ok(/no exit plan has started/.test(working), "and that the plan has not begun");
+  assert.ok(/not at risk yet/.test(working), "and that the money is not at risk");
+  const dead = positionStageNote({ alpacaId: "x", alpacaStatus: "canceled", alpacaFilled: false });
+  const flat = dead.replace(/\s+/g, " ");
+  assert.ok(/never taken/.test(flat), "a dead one says the trade never happened");
+  assert.ok(/canceled/.test(flat), "and names what the broker did");
+  assert.ok(/not a position, not a profit, and not a loss/.test(flat),
+    "and refuses all three words for it, in one breath");
+});
+
+test("WOULD HAVE DONE — the BOIL card, and it is not money", () => {
+  // The live figures: entry $450 for one combination, worth $370 today.
+  const w = wouldHaveDone({ entryNet: 4.50, nowNet: 3.70, contracts: 1 });
+  assert.ok(Math.abs(w.pnl - -80) < 0.01, `the same -$80 that was on screen, got ${w.pnl}`);
+  assert.ok(/would be down/.test(w.sentence), "phrased as a hypothetical");
+  assert.ok(/not money you have made or lost/.test(w.sentence), "and it refuses to be read as a result");
+  // The size multiplies it, exactly as a real position's does.
+  assert.ok(Math.abs(wouldHaveDone({ entryNet: 4.50, nowNet: 3.70, contracts: 10 }).pnl - -800) < 0.01, "×10");
+});
+
+test("`Number(null)` IS 0 AND 0 IS FINITE — for the fifth time in this repo", () => {
+  // Without the null thrown out BEFORE the coercion, a trade whose price
+  // today cannot be read reads as a trade worth nothing, and the sentence
+  // says "down $450" where the truth is that nobody knows.
+  assert.equal(wouldHaveDone({ entryNet: 4.50, nowNet: null }), null, "a missing price is not a price of zero");
+  assert.equal(wouldHaveDone({ entryNet: 4.50, nowNet: undefined }), null, "nor is a missing one");
+  assert.equal(wouldHaveDone({ entryNet: 4.50, nowNet: "" }), null, "nor an empty string");
+  assert.equal(wouldHaveDone({ entryNet: null, nowNet: 3.70 }), null, "and it cuts both ways");
+  // A real zero is a real reading and still answers.
+  assert.ok(wouldHaveDone({ entryNet: 0.50, nowNet: 0 }) !== null, "worth nothing today IS a reading");
+});
+
+test("the note over a finished order names it and refuses to call it risk", () => {
+  const one = deadOrderNote(1), many = deadOrderNote(3);
+  assert.ok(/One order/.test(one) && /3 orders/.test(many), "it counts");
+  assert.ok(/nothing is waiting/.test(one), "nothing is pending");
+  assert.ok(/no risk/.test(one), "and nothing is at risk");
 });
 
 /* ---------------- report ---------------- */

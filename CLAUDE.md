@@ -671,6 +671,50 @@ FALLBACK OPERAND (`IDENT || 45`, `IDENT ?? 45`) is none of them, because the num
 assigned nor added. Shape 4 refuses it and stays quiet the same way shape 3 does — the identifier
 must carry a RULE WORD, so `c.dte || 45` is a copy and `bins.length || 45` is not.
 
+## DEAD IS NOT WORKING — and a trade nobody bought is not a position
+
+Three lists, two pure functions, and **only one of the three is a book**. PRD §4m.
+
+- **`orderLifecycle({ status, filled })` in `order.js`** — filled / working / dead / unknown. It
+  reads the `DEAD` list that has been in that file since PR #18, so there is no second copy. The
+  live-orders filter used to be `p.alpacaId && p.alpacaFilled === false`, which asks whether an
+  order was FILLED and never whether it is ALIVE: the owner's phone showed "WORKING AT THE BROKER
+  (3) · SENT, NOT FILLED" over three rows badged **CANCELED, EXPIRED, CANCELED**, two of them three
+  days old, each row printing its own status directly under the heading that contradicted it.
+  **SENT is not FILLED and DEAD is not WORKING are the same rule at two moments of an order's life.**
+- **`positionStage(pos)` in `journal.js`** — `owned` / `working` / `not-taken`. `store.positions` is
+  what the app DECIDED, not what the user OWNS. No `alpacaId` means the app's own paper book, where
+  deciding IS owning. **ONLY `owned` IS A POSITION**: only it has a real P&L, only it counts towards
+  the exposure ceiling, only it has an exit plan running. `App.jsx` derives all three lists in one
+  pass (`byStage`); never write the filter by hand again, and `riskGate.test.js` fails the build on
+  the old shape.
+- **UNKNOWN IS NOT DEAD.** A record the broker has not been asked about is `working` — the app may
+  not bury an order on its own authority. Same rule as a missing open interest, quote size or drift.
+- The app said **YOUR POSITIONS (3)** with -$80 / -$27 / $0 and **"EVERYTHING IS ON PLAN"** directly
+  under the broker's own **"OPEN POSITIONS (0) — Nothing open on Alpaca."** The -$80 was the loss on
+  a trade that does not exist, in the biggest red figure on the card, with the correct warning in
+  small amber text beneath it. **A screen that argues with itself is worse than one that says
+  nothing: the part that shouts loudest wins, and here that part was the false one.**
+
+## Watching — the fourth place, for trades that were never taken
+
+Beside Positions and the Journal, because a trade you did not take is **neither a position nor
+history**: it is a live observation, and the Journal is the record of what HAPPENED. Two sources,
+one list: records whose order came back with nothing bought (they arrive by themselves), and
+structures saved from the Shortlist. **`store.saved` moved off the Positions screen** — it was a list
+of trades NOT taken sitting on the screen whose whole job is the trades you have.
+
+- **`wouldHaveDone()` in `journal.js` returns the number AND the sentence**, so neither can be
+  rendered alone, and the screen prints it in muted grey — **never the red the Positions cards use**.
+  A theoretical figure painted like a real one rebuilds the fault one tab across; a test refuses it.
+- **THE STARTING PRICE IS THE TRAP.** A saved row's `entryNet` came off the Shortlist, which prices
+  at the MID — the price this app has just proved nobody gives you. Started there, every watched
+  trade flatters itself for ever. Each row says which price it began from, and an unstamped record
+  is named rather than flattered: **the absence of the stamp is the marker**, the fifth time
+  (`contractsAssumed`, `simExitDTE`, `seasonalSource`, `driftAnnual`, `entrySource`).
+- **`Number(null)` is 0 and 0 is finite** — for the FIFTH time in this repository, and caught by its
+  own test on the first run. The nulls go out before the coercion.
+
 ## Which expiry the app opens on — the board decides, not the calendar
 
 `expiryChoice()` / `expiryChoiceNote()` / `emptyExpiryNote()` in `src/rules.js`.
