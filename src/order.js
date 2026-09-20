@@ -169,6 +169,63 @@ const asInt = (x) => {
   return Number.isFinite(n) ? n : null;
 };
 
+/* ------------------------------------------------------------------
+   IS THIS ORDER STILL ALIVE? — THE QUESTION NOBODY ASKED.
+
+   >>> READ ON THE OWNER'S PHONE, 20 Sep 2026. <<< A panel headed
+   "WORKING AT THE BROKER (3) · SENT, NOT FILLED" with three orders inside
+   it whose own badges read CANCELED, EXPIRED and CANCELED. They are not
+   working. They are dead, and two of them had been dead for three days.
+
+   The cause is one expression. `App.jsx` picked the live orders with
+
+       p.alpacaId && p.alpacaFilled === false
+
+   which asks whether the order was FILLED and never whether it is still
+   ALIVE. A cancelled order was never filled, so it stayed "working" for
+   ever. `DEAD` above has always known better and `orderOutcome()` has
+   returned `working: false` for those statuses since PR #18 — nobody was
+   asking it. The knowledge was in the file; the screen contradicted it.
+
+   SENT is not FILLED (PR #18) and DEAD is not WORKING (this one) are the
+   same rule read at two different moments of an order's life.
+------------------------------------------------------------------ */
+
+/**
+ * Where an order stands, from what the broker last said about it.
+ *
+ * @param {object} o  `{ status, filled }` — the two fields a position record
+ *   keeps (`alpacaStatus`, `alpacaFilled`). A whole Alpaca reply works too.
+ * @returns {"filled"|"working"|"dead"|"unknown"}
+ *
+ * UNKNOWN IS NOT DEAD AND IT IS NOT WORKING. A record with no status is one
+ * the broker has not been asked about yet; `recheckOrders()` is what resolves
+ * it, and until it does the app may not decide for itself which it was. The
+ * same rule as a missing open interest or a missing quote size.
+ */
+export function orderLifecycle(o = {}) {
+  if (o.filled === true) return "filled";
+  const status = String(o.status ?? "").toLowerCase();
+  if (!status) return o.filled === false ? "working" : "unknown";
+  if (FILLED.includes(status)) return "filled";
+  if (DEAD.includes(status)) return "dead";
+  if (PARTIAL.includes(status)) return "working";
+  return "working";
+}
+
+/** True only for an order the broker is still holding. */
+export const orderIsWorking = (o) => orderLifecycle(o) === "working";
+
+/** True for an order that ended without buying anything. */
+export const orderIsDead = (o) => orderLifecycle(o) === "dead";
+
+/** The one line a list prints over the orders that ended with nothing bought. */
+export const deadOrderNote = (n) =>
+  `${n === 1 ? "One order" : `${n} orders`} left the app and came back with nothing bought — cancelled, ` +
+  `rejected or expired at the broker. ${n === 1 ? "It is" : "They are"} finished: nothing is waiting, nothing ` +
+  `is open, and there is no risk on ${n === 1 ? "it" : "them"}. ${n === 1 ? "It" : "They"} stay here because ` +
+  `an order that did not fill is the most useful thing this app can show you about its own prices.`;
+
 /** Where an order is waiting, named rather than implied. */
 export function orderWaitingPhrase(order = {}) {
   const type = String(order.type || "").toLowerCase();

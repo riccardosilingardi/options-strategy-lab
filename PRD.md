@@ -1366,6 +1366,130 @@ four shapes AND still stays quiet on the five things that are not copies.
 
 ---
 
+## §4m — DEAD IS NOT WORKING, AND A TRADE NOBODY BOUGHT IS NOT A POSITION
+
+**The second live reading, one day after the first**, and it found a fault one layer above §4l: not
+a number that was wrong, but a screen **arguing with itself and with the broker**.
+
+### What was on the phone, 20 Sep 2026, in one scroll
+
+    ON YOUR ALPACA PAPER ACCOUNT
+      OPEN POSITIONS (0)   Nothing open on Alpaca.
+
+    WORKING AT THE BROKER (3) · SENT, NOT FILLED
+      J-0003 UNG    CANCELED · 8 hours old
+      J-0002 CORN   EXPIRED  · 3 days old
+      J-0001 BOIL   CANCELED · 3 days old
+
+    YOUR POSITIONS (3) · VALUED LIVE
+      BOIL −$80      CORN −$27      UNG $0
+    TODAY · EVERYTHING IS ON PLAN
+
+Three statements, all on one screen, and the only true one is the broker's. **Not one of those three
+trades had ever been bought.** The −$80 was the loss on a trade that does not exist, printed in red,
+in the largest figure on the card, under a gauge and a 76/100 "is the reason still good?" score. The
+card even carried the correct sentence — *"until it fills, nothing here is a position you own"* — in
+small amber text **underneath the number that contradicted it**. A screen that argues with itself is
+worse than one that says nothing, because the part that shouts loudest wins, and here that part was
+the false one.
+
+### The cause, and it is one expression
+
+```js
+p.alpacaId && p.alpacaFilled === false      // "working orders"
+```
+
+It asks whether an order was **filled** and never whether it is still **alive**. A cancelled order
+was never filled, so it stayed in the working list for ever. **`order.js` has known which statuses
+are finished since PR #18** — `DEAD = ["rejected","canceled","cancelled","expired","done_for_day",
+"suspended","stopped"]`, and `orderOutcome()` has returned `working: false` for every one of them.
+Nobody asked it. The row even *printed* `alpacaStatus` — which is why the badge said CANCELED inside
+a panel headed WORKING, on the same line.
+
+**SENT is not FILLED** (PR #18) and **DEAD is not WORKING** (this one) are the same rule read at two
+different moments of an order's life, and the second was missing.
+
+### Three stages, one function
+
+`positionStage(pos)` in `src/journal.js`. `store.positions` is a record of what the app **decided**,
+which is not what the user **owns**:
+
+| stage | what it is | a position? | exit plan? | counted in exposure? |
+|---|---|---|---|---|
+| `owned` | the broker filled it, or it never went to a broker (the app's own paper book, where deciding IS owning) | **yes** | running | yes |
+| `working` | sent, still held by the broker | no | not started | no |
+| `not-taken` | sent, came back with nothing bought | no | never | no |
+
+It reads `orderLifecycle()` in `order.js` — the one place that knows which statuses are finished — so
+a status added to that list is understood here without anybody coming back. **UNKNOWN IS NOT DEAD**:
+a record the broker has not been asked about yet is `working`, never buried by the app on its own
+authority. The same rule as a missing open interest, a missing quote size and a missing drift.
+
+Every list in `App.jsx` comes out of one pass (`byStage`), so no screen can decide for itself what a
+record is. `recheckOrders()` also reads it — it had been re-asking Alpaca about three cancelled
+orders once a minute, for days.
+
+### WATCHING — the fourth place, and it exists because the owner asked for it
+
+> *"cosa diversa invece se lo salvo come trade (magari voglio vedere come sarebbe andata) ma non deve
+> stare nella stessa schermata delle posizioni e ordini"*
+
+A trade you did not take is **neither a position nor history**: it is a live observation. Putting it
+in the Journal would have been the compromise that gets undone in two months, because the Journal is
+the record of what HAPPENED and this is a question about what is happening now. So: a fourth place,
+beside Positions and the Journal.
+
+Two sources, one list, because they are the same question asked twice:
+
+- a trade that **was sent** and came back with nothing bought (`not-taken`) — these arrive by
+  themselves, which is what happens to the three above;
+- a structure **saved** from the Shortlist and never sent. `store.saved` has carried `entryNet`,
+  `spot` and `savedAt` since the path was built — everything needed to answer "how would it have
+  gone" — and did nothing with them but offer a Load button, **from the bottom of the Positions
+  screen**: a list of trades NOT taken, on the screen whose whole job is the trades you have.
+
+**THE FIGURE IS THEORETICAL AND MAY NEVER BE PAINTED LIKE A REAL ONE.** `wouldHaveDone()` in
+`journal.js` returns the number **and** the sentence together, so neither can be rendered alone, and
+the screen prints it in muted grey — never the red the Positions cards use. Printing −$80 in that red
+one tab across would have rebuilt the exact fault this work removes. `riskGate.test.js` fails the
+build if it ever does.
+
+**AND THE STARTING PRICE IS THE TRAP — the one §4l just fixed.** A saved row's `entryNet` came off
+the Shortlist, which prices at the **MID**: the price this app has just finished proving nobody gives
+you. Started from there, every watched trade reads better than it could have been, and three months
+of that is a story about being right. Each row says which of the two prices it began from, and an
+unstamped record — everything saved before §4l — is **named rather than flattered**. The absence of
+the stamp is the marker, for the fifth time (`contractsAssumed`, `simExitDTE`, `seasonalSource`,
+`driftAnnual`, and now `entrySource`).
+
+### `Number(null)` is 0 and 0 is finite — the fifth time
+
+`wouldHaveDone()` coerced its two prices before testing them, so a structure whose price today cannot
+be read arrived as a structure worth nothing and the sentence said *"it would be down $450"* where
+the truth is that nobody knows. Caught by its own test on the first run. The nulls go out **before**
+the coercion, exactly as `qualityFloor()` throws out an unknown open interest before counting one.
+
+### What this does NOT do
+
+- **The gate is untouched.** Six order paths, six. Nothing about what may be sent has changed; this
+  is about what the app SAYS it has.
+- **Nothing is deleted behind the owner's back.** The three trades move, they do not vanish — which
+  is the whole of what he asked for. "Stop watching" is a button he presses.
+- **It does not make anything fill.** P0 is still open and its DONE WHEN is unchanged.
+
+### NOT VERIFIED
+
+- **Nobody has seen the Watching tab.** A fourth tab on a 390px phone is a real cost, and the
+  judgement that it is worth paying is the owner's, made from a description rather than a screen.
+- **No watched row has ever been re-priced against a live chain.** The arithmetic is tested against
+  the BOIL figures read off the phone; the re-pricing path runs through `netValue()` on a loaded
+  chain, and no chain loads here.
+- **The `entrySource` stamp has never been written by a real open**, because nothing has ever
+  filled. Every row that exists today is an unstamped one, so the "starts from the MID" sentence is
+  the only branch anybody has seen.
+
+---
+
 ## 5. The wizard IS the app
 
 The wizard is not a feature inside the app. It is the entry point and the spine. Existing tabs remain reachable but are no longer the front door.
@@ -1797,6 +1921,9 @@ The build order was a plan for a future builder. It is now a record.
 | A limit is a ceiling, not a price, and the app says so | **DONE** (§4l) — `effectiveLimit()` / `limitCeilingNote()`: you offer $30, you pay $24 |
 | The order ticket shows the book, the sizes and one verdict that reads the time in force | **DONE** (§4l) — and nobody has seen it on a phone |
 | The compare picture is drawn at the numbers its own chance was computed at | **DONE** (§4l) — `terminalDist()` loses its default drift; the sweep gains the fallback shape that hid the 45 |
+| A cancelled order is not a working order | **DONE** (§4m) — `orderLifecycle()`; the phone showed CANCELED / EXPIRED / CANCELED under a heading reading "WORKING" |
+| Only what the broker filled is a position | **DONE** (§4m) — `positionStage()`; the app said 3 positions over the broker's own "OPEN POSITIONS (0)" |
+| Trades you did not take have a place of their own | **DONE** (§4m) — the Watching tab, with a theoretical figure that may never be painted like a real one |
 | Video and deck | **NOT VERIFIED HERE** — outside the repo |
 
 ---
@@ -2300,7 +2427,38 @@ What is left:
 The standing rule in `CLAUDE.md`: every session starts by fixing what the last one flagged, and
 ends by writing down what it could not verify. Currently open:
 
-### WRITTEN THIS SESSION — the first live reading, and the ticket it produced (§4l)
+### WRITTEN THIS SESSION — dead is not working, and Watching (§4m)
+
+The second live reading, a day after the first, from the same phone. `npm test` reports **717 checks
+across 19 suites**, up from the **705** §4l wrote down. `npm run build` is clean.
+
+Suite totals that sum to 717: signals 22, chain 35, engine 28, riskGate **154**, theme 39, demo 16,
+handoff 9, path 14, liquidity 7, order 25, journal **81**, autopilot 61, pwa 36, visuals 35, wizard
+56, steps 20, ceiling 49, order.jsx 8, ticket 22. The twelve new checks are ten in `journal.test.js`
+(the three live rows, the three stages, the theoretical figure and the null trap) and two source
+guards in `riskGate.test.js` — one that refuses `alpacaFilled === false` as a liveness test ever
+again, one that holds Watching to its own register and keeps SAVED STRATEGIES off the Positions
+screen.
+
+**WHAT THE TEST FOUND THAT I DID NOT.** `wouldHaveDone()` failed its own first run: `Number(null)` is
+0 and 0 is finite, so a structure with no readable price today came back "down $450" instead of
+unreadable. **Fifth time** that coercion has produced a wrong number in this repository.
+
+**NOTHING HERE WAS RUN AGAINST A LIVE CHAIN, A BROWSER, ALPHA VANTAGE OR A DEPLOY.** Same wall as
+PR #15 through #28.
+
+- **NOBODY HAS SEEN THE WATCHING TAB.** A fourth tab on a 390px phone is a real cost; the owner
+  chose it from a description, not a screen.
+- **NO WATCHED ROW HAS BEEN RE-PRICED AGAINST A LIVE CHAIN.** The arithmetic is held against the
+  BOIL figures read off the phone; the re-pricing path needs a loaded chain and none loads here.
+- **THE `entrySource` STAMP HAS NEVER BEEN WRITTEN BY A REAL OPEN**, because nothing has ever
+  filled — so every row that exists today takes the "starts from the MID" branch, and the other one
+  has never been rendered.
+- **THE §4l DEBTS ARE ALL STILL OPEN**, untouched by this session: `maxComboSpreadShareOfNet` is
+  still chosen not measured, the rebuilt ticket has still not been seen on a phone, the size column
+  has still never held a real size, and the effective price is still not reconciled against a fill.
+
+### WRITTEN BEFORE THIS — the first live reading, and the ticket it produced (§4l)
 
 This session did TASK 0 (three arithmetic faults found on a phone against the live market), TASK 1
 (the order ticket, rebuilt to the design agreed with the owner) and TASK 2 (the compare screen's
