@@ -262,6 +262,58 @@ export const RULES = {
   // A leg is judged on both, and the screen says which one removed it.
   maxSpreadShareOfMid: 0.35,
 
+  // --- AND THE PAIR IS NOT THE LEGS. THE FOURTH FLOOR, BESIDE THE THIRD.
+  //
+  // maxComboSpreadShareOfNet — how far apart the two sides of THE WHOLE
+  // STRUCTURE'S market may be, as a share of the net between them.
+  //
+  // >>> READ LIVE ON THE OWNER'S PHONE, UNG 2026-09-20, spot $10.42, the
+  // 2026-10-23 board at 33 DTE. <<< Buy the 10.50 call at a mid of 0.48, sell
+  // the 11.00 call at a mid of 0.34. Each leg was quoted about ten cents wide,
+  // so each leg's own spread is 21% and 29% of its own mid and BOTH PASS
+  // `maxSpreadShareOfMid` comfortably. The combination is bid $4, mid $14,
+  // ask $24: a spread of $20, which is 143% OF ITS OWN MID — more than four
+  // times the per-leg ceiling — and the app offered it.
+  //
+  // WHY THE PER-LEG TEST CANNOT SEE THIS. `spreadFloor()` takes the WORST SHARE
+  // FOUND AMONG THE LEGS. On a vertical the two leg spreads ADD (you cross one
+  // getting long and one getting short) while the two mids SUBTRACT, so the
+  // share of the NET is roughly the sum of the leg spreads over the difference
+  // of the leg mids. A structure whose legs are worth $48 and $34 and whose net
+  // is worth $14 concentrates both spreads onto a seventh of the money: there
+  // is no per-leg number that catches it without also refusing every leg on
+  // these chains.
+  //
+  // IT SITS BESIDE THE PER-LEG FLOOR AND DOES NOT REPLACE IT, for the same
+  // reason `priceability()`, `impossibleLoss()` and `modelSanity()` are four
+  // separate questions with four separate counts. They are not the same fault:
+  //   - a LEG 145% wide is a contract nobody can trade at a readable price,
+  //     whatever it is combined with. That is the per-leg floor.
+  //   - a PAIR 143% wide can be built entirely out of legs anybody would trade.
+  //     What it says is that the round trip on THIS TRADE costs more than the
+  //     trade is worth. That is this one.
+  // Pooling their counts would explain neither, and a screen that cannot say
+  // which of the two removed a structure cannot say what to do about it.
+  //
+  // WHY 1.0, AND IT IS A DIFFERENT ARGUMENT FROM 0.35 RATHER THAN A COPY OF IT.
+  // At a share s the two sides differ by s of the number between them, so
+  // ask = bid x (2 + s) / (2 - s): 0.35 is "the ask is at most 1.4 times the
+  // bid" and 1.0 is "the ask is at most THREE times the bid". One is the bar
+  // for a contract, which is quoted in its own right and trades all day; the
+  // other is the bar for a combination, which is quoted as the arithmetic of
+  // two contracts and is structurally wider on every chain in this basket. A
+  // share of 1.0 is also the point at which the round trip costs the WHOLE of
+  // what the structure is worth, and the point past which the mid every figure
+  // on screen is computed from is further from both quoted sides than they are
+  // from each other. The UNG pair above is 1.43 and is refused by 43%.
+  //
+  // CHOSEN, NOT MEASURED, and on the PRD's NOT VERIFIED list with the other
+  // chosen numbers. What has NOT been read is the distribution of combination
+  // spread over combination net on the five live chains — the same reading
+  // `modelDisagreementRatio` is still waiting for, and for the same reason
+  // (no broker keys in the sandbox). Expect a real reading to bring it DOWN.
+  maxComboSpreadShareOfNet: 1.0,
+
   // --- WHEN A POSITION ASKS TO BE LOOKED AT. The share of the maximum loss the
   // position has to be down before the Positions screen marks it "watch"
   // instead of "ok". It refuses nothing, sends nothing and closes nothing: it
@@ -787,6 +839,7 @@ export const NOTHING_TODAY = {
     const parts = [];
     if (t.liquidity > 0) parts.push(`${t.liquidity} because ${lab.liquidity}`);
     if (t.spread > 0) parts.push(`${t.spread} because ${lab.spread}`);
+    if (t.comboSpread > 0) parts.push(`${t.comboSpread} because ${lab.comboSpread}`);
     if (t.reward > 0) parts.push(`${t.reward} because ${lab.reward}`);
     if (t.unpriceable > 0) parts.push(`${t.unpriceable} because ${lab.unpriceable}`);
     if (t.impossible > 0) parts.push(`${t.impossible} because ${lab.impossible}`);
@@ -796,7 +849,7 @@ export const NOTHING_TODAY = {
     // floors and the sentence must not say they are: a structure whose price
     // could not be read never reached a floor, and one that could not lose was
     // refused before either floor looked at it.
-    const byFloor = (t.liquidity > 0 || t.spread > 0 || t.reward > 0);
+    const byFloor = (t.liquidity > 0 || t.spread > 0 || t.comboSpread > 0 || t.reward > 0);
     const lead = byFloor
       ? `was filtered out by the quality floors`
       : `was refused before the quality floors were even applied`;
@@ -806,6 +859,62 @@ export const NOTHING_TODAY = {
       `and it is a better one than a trade nobody else is willing to take the other side of.`;
   },
 };
+
+/* --------------------------------------------------------------------
+   THE WARNINGS, ONCE.
+
+   >>> COUNTED ON THE OWNER'S PHONE, one Build screen, UNG. <<< The four-factor
+   CONFLICT paragraph — the same ~400 characters — appeared FOUR TIMES on that
+   single page: inside "Why this trade", again in the amber against-the-signal
+   block, again in the order ticket's warning list, and again in "The checks
+   that run when you tap". The gate embeds `signals.narrative` in its
+   SIGNAL_CONFLICT warning because the gate has no screen; every surface that
+   renders a gate verdict then prints the paragraph a second time beside the
+   panel that already carries it.
+
+   The gate is NOT changed for a copy problem. What changes is what a screen
+   PRINTS: the narrative has one home — the evidence panel — and everywhere
+   else on the same page carries the summary line with the number in it.
+-------------------------------------------------------------------- */
+
+/** The one line that stands in for the paragraph, with the count in it. */
+export const conflictSummaryLine = (clash, fused) => {
+  const n = Number(clash?.n), total = Number(clash?.total);
+  const conf = Number(fused?.confidence ?? clash?.confidence);
+  const agree = fused?.agreement || clash?.agreement || null;
+  const bits = [];
+  if (Number.isFinite(n) && Number.isFinite(total)) bits.push(`${n} of ${total} factors read against this trade`);
+  else if (agree) bits.push(`the four factors read ${agree}`);
+  if (Number.isFinite(conf)) bits.push(`confidence ${Math.round(conf)}/100`);
+  return `${bits.join(" · ") || "The four-factor reading needs looking at"}. The full reading is in "Why this trade" above.`;
+};
+
+/**
+ * The warnings to PRINT on a screen that already shows the narrative.
+ *
+ * Pure string surgery and deliberately nothing more: the gate's verdict, its
+ * codes and its pass/fail are untouched — this only stops one page printing
+ * the same paragraph twice. A warning that does not contain the narrative
+ * comes back exactly as it was.
+ *
+ * @param warnings  the gate's `warnings` array
+ * @param narrative `fused.narrative`, the paragraph that has its own home
+ * @param pointer   what to say instead, usually `conflictSummaryLine()`
+ */
+export function warningsToPrint(warnings = [], { narrative = null, pointer = null } = {}) {
+  const nar = typeof narrative === "string" ? narrative.trim() : "";
+  const list = Array.isArray(warnings) ? warnings : [];
+  if (!nar) return list.slice();
+  const seen = new Set();
+  return list.map((w) => {
+    const msg = String(w?.message ?? "");
+    if (!msg.includes(nar)) return w;
+    const trimmed = msg.replace(nar, "").replace(/\s+/g, " ").trim();
+    const tail = pointer && !seen.has("pointer") ? ` ${pointer}` : "";
+    seen.add("pointer");
+    return { ...w, message: `${trimmed}${tail}`.trim(), narrativeRemoved: true };
+  });
+}
 
 /**
  * Where the limits on screen came from, in one sentence. Any screen that prints
@@ -1024,6 +1133,8 @@ export const qualityFloorLabels = (level = RECOMMENDED_LIQUIDITY) => {
         `or has fewer than ${l.absolute} contracts open`,
     spread: `the bid and the ask on one of its legs are more than ${pctText(RULES.maxSpreadShareOfMid)} apart, ` +
       `so the mid it would be priced from is not a number either side quoted`,
+    comboSpread: `the two sides of the WHOLE combination are more than ` +
+      `${pctText(RULES.maxComboSpreadShareOfNet)} of its net apart, even though each leg on its own is fine`,
     reward: `it pays under ${money(RULES.minRewardRisk * 100)} for every ${money(100)} at risk`,
     unpriceable: `its price could not be read from the chain at all — a leg with no bid, or a net of about nothing`,
     impossible: `its worst case priced as a PROFIT, which is an arbitrage and therefore a mispriced leg`,
@@ -1041,7 +1152,9 @@ export const qualityFloorSentence = (level = RECOMMENDED_LIQUIDITY) => {
       `beats the bottom ${pctText(l.percentile)} of the strikes on its own expiry — the floor is measured ` +
       `against the chain it is judging, because ${l.absolute} contracts means one thing on a busy market ` +
       `and another on a quiet one.`;
-  return `${liq} Every leg here is also quoted within ${pctText(RULES.maxSpreadShareOfMid)} bid to ask, and ` +
+  return `${liq} Every leg here is also quoted within ${pctText(RULES.maxSpreadShareOfMid)} bid to ask, the ` +
+    `WHOLE combination within ${pctText(RULES.maxComboSpreadShareOfNet)} of its own net — two leg spreads land ` +
+    `on one net, so a pair of ordinary legs can still be unaffordable — and ` +
     `everything here pays at least ${pctText(RULES.minRewardRisk)} of what it risks. Open interest is how many ` +
     `contracts are actually open and the spread is how far apart the two sides are today: a contract nobody ` +
     `trades is a quote and not a market, and a market that wide has no agreed price to be the middle of. ` +
@@ -1057,9 +1170,11 @@ export const liquiditySettingNote = (level, counts) => {
   const bits = [];
   if (c.liquidity > 0) bits.push(`${c.liquidity} removed for liquidity`);
   if (c.spread > 0) bits.push(`${c.spread} removed for a bid/ask spread over ${pctText(RULES.maxSpreadShareOfMid)} of the mid`);
+  if (c.comboSpread > 0) bits.push(`${c.comboSpread} removed for a combination spread over ${pctText(RULES.maxComboSpreadShareOfNet)} of its net`);
   if (c.reward > 0) bits.push(`${c.reward} removed for reward-to-risk`);
   if (c.skipped > 0) bits.push(`${c.skipped} not liquidity-checked (the feed reports no open interest)`);
   if (c.spreadSkipped > 0) bits.push(`${c.spreadSkipped} not spread-checked (the feed quoted only one side)`);
+  if (c.comboSpreadSkipped > 0) bits.push(`${c.comboSpreadSkipped} not combination-spread-checked (no two-sided book on every leg)`);
   // Not removed BY this setting, and the note says so rather than letting a
   // count the floor never made appear as one of its own.
   if (c.unpriceable > 0) bits.push(`${c.unpriceable} left out before the floor, with no price we could read`);
@@ -1484,6 +1599,7 @@ export const emptyExpiryNote = (expKey, tally, level = RECOMMENDED_LIQUIDITY) =>
   const bits = [];
   if (t.liquidity > 0) bits.push(`${t.liquidity} for liquidity`);
   if (t.spread > 0) bits.push(`${t.spread} for a bid/ask spread over ${pctText(RULES.maxSpreadShareOfMid)} of the mid`);
+  if (t.comboSpread > 0) bits.push(`${t.comboSpread} for a COMBINATION spread over ${pctText(RULES.maxComboSpreadShareOfNet)} of its net`);
   if (t.reward > 0) bits.push(`${t.reward} for reward-to-risk`);
   if (t.unpriceable > 0) bits.push(`${t.unpriceable} with no readable price`);
   if (t.impossible > 0) bits.push(`${t.impossible} unable to lose at any price`);
@@ -1574,6 +1690,89 @@ export const wideSpreadNote = (n, what) =>
 export const spreadSkippedNote = (feed) =>
   `The bid/ask spread floor was SKIPPED${feed ? ` — ${feed} did not quote both sides of these contracts` : ""}. ` +
   `A quote we do not have is not a wide quote, so nothing was rejected for it.`;
+
+/* -------------------------------------------------------------------------
+ * AND THE PAIR IS NOT THE LEGS — THE FOURTH FLOOR.
+ *
+ * `spreadFloor()` above measures ONE LEG AT A TIME and reports the worst share
+ * it found. What the user actually pays is the spread of the COMBINATION, and
+ * on a structure whose net is small against its legs the two leg spreads ADD
+ * while the two mids SUBTRACT. UNG 2026-09-20, 2026-10-23, spot $10.42: buy the
+ * 10.50 call (mid 0.48), sell the 11.00 call (mid 0.34). Each leg about ten
+ * cents wide — 21% and 29% of its own mid, both well inside the per-leg 35%
+ * ceiling — and the pair quoted bid $4 / mid $14 / ask $24. A spread of $20 on
+ * a mid of $14 is 143%, four times the per-leg ceiling, and it was offered.
+ *
+ * SEPARATE FROM THE PER-LEG FLOOR, DELIBERATELY, with its own count and its own
+ * sentence — the same discipline that keeps `priceability()`, `impossibleLoss()`
+ * and `modelSanity()` apart. "This leg cannot be traded at a readable price" and
+ * "the round trip on this trade costs more than the trade is worth" are two
+ * different facts, and a pooled count would explain neither.
+ *
+ * It reads `comboBook()` — the one place each leg is taken at the side that
+ * actually trades — so the number this floor judges is the same number the
+ * order ticket prints. See `RULES.maxComboSpreadShareOfNet` for why 1.0.
+ * ------------------------------------------------------------------------- */
+
+/**
+ * The combination's spread as a share of its own net, or null when unknown.
+ *
+ * `book.spread` is already `ask - bid` for the whole structure (each leg at the
+ * side that trades), so this is one division and not a second summation.
+ * A net of about nothing has no share to take: `priceability()` refuses that
+ * case by name, before this one, and a division by it here would produce the
+ * same infinity that printed "R/R 6748644041614687.00" on BOIL.
+ */
+export const comboSpreadShare = (book) => {
+  if (!book || !book.ok) return null;
+  const sp = Number(book.spread), mid = Math.abs(Number(book.mid));
+  if (!Number.isFinite(sp) || !Number.isFinite(mid)) return null;
+  if (!(mid >= RULES.minNetPremium)) return null;
+  if (!(sp >= 0)) return null;
+  return sp / mid;
+};
+
+/**
+ * Run the WHOLE structure past the combination spread ceiling.
+ *
+ * @param legs    [{ side, qty }] — the structure, because which side of each
+ *                leg trades depends on whether you are buying or selling it
+ * @param quotes  one `{ bid, ask }` per leg, aligned with the legs
+ * @returns {{ checked, pass, share, floor, spread, mid, book }}
+ *   `checked` false means there was no two-sided book to measure, or the net
+ *   is under `minNetPremium` and belongs to `priceability()` rather than here.
+ *   UNKNOWN IS NOT WIDE, exactly as on the per-leg half.
+ */
+export function comboSpreadFloor(legs = [], quotes = [], { floor = RULES.maxComboSpreadShareOfNet } = {}) {
+  const book = comboBook(legs, quotes);
+  const share = comboSpreadShare(book);
+  if (share == null) {
+    return { checked: false, pass: true, share: null, floor, spread: book.ok ? book.spread : null,
+      mid: book.ok ? book.mid : null, book };
+  }
+  return { checked: true, pass: share <= floor, share, floor, spread: book.spread, mid: book.mid, book };
+}
+
+/** The refusal sentence, with the live numbers in it. */
+export const comboSpreadFloorReason = (share, spread, mid, floor = RULES.maxComboSpreadShareOfNet) =>
+  `Its LEGS are each quoted tightly enough, but the COMBINATION is not: the two sides of this structure's ` +
+  `own market are ${money(Math.abs(spread) * 100)} apart on a mid of ${money(Math.abs(mid) * 100)} — ` +
+  `${pctText(share)} of it, against a ${pctText(floor)} ceiling. On a spread the two legs' spreads add while ` +
+  `their mids subtract, so a pair built from perfectly ordinary legs can cost more to get in and out of than ` +
+  `it is worth. You pay half of that getting in and half getting out.`;
+
+/** The one line a list prints in place of the structures this floor removed. */
+export const wideComboNote = (n, what) =>
+  `${n} structure${n === 1 ? "" : "s"} ${n === 1 ? "was" : "were"} left out because the two sides of the ` +
+  `WHOLE COMBINATION are more than ${pctText(RULES.maxComboSpreadShareOfNet)} of its net apart` +
+  `${what ? ` on ${what}` : ""} — not because any one leg is wide. Two ordinary legs make an unaffordable ` +
+  `pair when their spreads add and their mids subtract, which is what a vertical does.`;
+
+/** The one sentence shown when the combination spread floor could not be applied. */
+export const comboSpreadSkippedNote = (feed) =>
+  `The combination spread floor was SKIPPED${feed ? ` — ${feed} did not quote both sides of every leg` : ""}. ` +
+  `Without a two-sided quote on every leg there is no combination market to measure, and a book we do not ` +
+  `have is not a wide one.`;
 
 /* -------------------------------------------------------------------------
  * IS THERE A CEILING AT ALL? — THE PROPERTY OF THE LEGS, NOT OF A GRID.
@@ -1723,6 +1922,12 @@ export const rewardRisk = (maxProfit, maxLoss) => {
  *                  floor is independent of the liquidity SETTING: a user who
  *                  loosens the headcount has not said the two sides of a market
  *                  may disagree by a factor of three.
+ *   legs         — [{ side, qty }] for the COMBINATION spread floor, which is a
+ *                  different question from the per-leg one above: each leg is
+ *                  taken at the side that actually trades and the whole
+ *                  structure's book is measured against its own net. Without
+ *                  the legs there is no combination to price, so the check is
+ *                  SKIPPED rather than passed silently.
  *   maxProfit    — dollars, the best case, or null when there is no ceiling
  *   maxLoss      — dollars, the worst case (negative, or positive magnitude)
  *   unboundedProfit — true when the payoff has no ceiling (`payoffCeiling()`),
@@ -1739,7 +1944,7 @@ export const rewardRisk = (maxProfit, maxLoss) => {
  */
 export function qualityFloor({
   openInterest = [], peerOpenInterest = null, level = RECOMMENDED_LIQUIDITY,
-  quotes = [], maxProfit, maxLoss, unboundedProfit = false,
+  quotes = [], legs = [], maxProfit, maxLoss, unboundedProfit = false,
 } = {}) {
   const risk = Math.abs(Number(maxLoss));
   const reward = Number(maxProfit);
@@ -1780,6 +1985,12 @@ export function qualityFloor({
   // "how far apart may the two sides be".
   const spread = spreadFloor(quotes);
 
+  // AND THE PAIR IS NOT THE LEGS. Both leg spreads land on one net, so a
+  // structure every leg of which clears the line above can still cost more to
+  // get in and out of than it is worth. Also NOT moved by `level`, and counted
+  // separately from the per-leg half: they are different faults.
+  const comboSpread = comboSpreadFloor(legs, quotes);
+
   const rewardCheck = unboundedProfit ? {
     checked: false, pass: true, rr: null, floor: RULES.minRewardRisk, unbounded: true,
   } : {
@@ -1805,6 +2016,7 @@ export function qualityFloor({
       `market maker felt like typing.`);
   }
   if (!spread.pass) reasons.push(spreadFloorReason(spread.widest, spread.floor));
+  if (!comboSpread.pass) reasons.push(comboSpreadFloorReason(comboSpread.share, comboSpread.spread, comboSpread.mid, comboSpread.floor));
   if (!rewardCheck.pass) {
     reasons.push(rr == null
       ? `The best case cannot be measured against the worst, so there is no reward-to-risk to judge.`
@@ -1812,7 +2024,8 @@ export function qualityFloor({
         `floor: you would have to be right ${pctText(1 / (1 + rr), 0)} of the time just to break even.`);
   }
 
-  return { pass: liquidity.pass && spread.pass && rewardCheck.pass, liquidity, spread, reward: rewardCheck, reasons };
+  return { pass: liquidity.pass && spread.pass && comboSpread.pass && rewardCheck.pass,
+    liquidity, spread, comboSpread, reward: rewardCheck, reasons };
 }
 
 /** The rules block injected into every model prompt. English, generated. */
@@ -2362,6 +2575,24 @@ export const seasonalStampFields = (prov) => ({
   seasonalAgeDays: prov?.ageDays ?? null,
 });
 
+/**
+ * THE TWO NUMBERS A PICTURE OF THIS CANDIDATE HAS TO BE DRAWN AT.
+ *
+ * A sibling of `seasonalStampFields()` above and for the same reason: the
+ * chance printed on a card and the distribution drawn under it must be one
+ * reading. `chanceOf()`'s result carries the volatility it priced at (the
+ * chain's IMPLIED one) and the drift it leaned on (`seasonalDrift()`); the
+ * compare picture was drawing a REALISED volatility and no drift at all.
+ *
+ * NEVER DEFAULTED. A candidate with no chance carries nulls, and the picture
+ * draws no distribution and says why — the same discipline as the stamp above,
+ * where the ABSENCE is the marker.
+ */
+export const chanceDrawFields = (mc) => ({
+  sigma: Number.isFinite(mc?.sigma) ? mc.sigma : null,
+  driftAnnual: Number.isFinite(mc?.driftAnnual) ? mc.driftAnnual : null,
+});
+
 /* --------------------------------------------------------------------
    WHEN A POSITION ASKS TO BE LOOKED AT.
    A colour and a word on a row, one step below "action". See
@@ -2742,7 +2973,11 @@ export function limitPlacement(limit, book, sign = null) {
   // limit demanding MORE than the market is offering "fills now", which is the
   // one sentence on this panel that must never be wrong. Every comparison below
   // goes through this, so there is one place the direction is decided.
-  const keener = (a, b) => (dir > 0 ? a >= b : a <= b);
+  // ...AND IT CARRIES THE SAME HALF-CENT SLACK AS THE MID COMPARISON BELOW,
+  // for the same reason: `book.ask` is a SUM of leg quotes, so a limit typed at
+  // exactly the price that trades comes out 0.24 against 0.24000000000000005
+  // and read "you are waiting" at the one price that fills. See `TICK_EPS`.
+  const keener = (a, b) => (dir > 0 ? a >= b - 0.005 : a <= b + 0.005);
   const pay = dir > 0 ? "pay" : "accept";
   const away = Math.abs(L - fill);
 
@@ -2786,6 +3021,302 @@ export function limitPlacement(limit, book, sign = null) {
     sentence: `At ${money(L * 100)} you are at or past the far side of the market (${money(rest * 100)}): that ` +
       `is the price somebody on the other side of this trade would take, not one anybody will trade with you ` +
       `at. The order will sit until it expires.` };
+}
+
+/* =====================================================================
+   A LIMIT IS A CEILING, NOT A PRICE — AND EVERY FIGURE ON THE SCREEN
+   IS WORKED OUT AT WHAT WOULD REALLY BE PAID.
+
+   >>> READ ON THE OWNER'S PHONE, UNG 2026-09-20. <<< The Build screen said
+   YOU PAY $14 · MOST YOU CAN MAKE $36 · MOST YOU CAN LOSE -$14 · BREAKEVEN
+   10.64 — every one of those four numbers worked out from the MID — while
+   `limitPlacement()` two thousand pixels below said, in these words, that a
+   limit AT the mid is a limit nobody has to meet. At $24, the price that
+   actually trades, the same structure pays $26, risks $24 and breaks even at
+   10.74: NEARLY HALF THE REWARD AND NEARLY DOUBLE THE RISK. The user decided
+   on 2.6:1 and could only have 1.1:1.
+
+   Two facts, and neither of them was on screen:
+
+     1. AN ORDER AT OR PAST THE TOUCH FILLS AT THE TOUCH. Offering more than
+        the ask costs nothing — the broker fills you at the ask — and it buys
+        a little protection against the quote moving while the order travels.
+        The app explains far smaller things at length and never said this.
+     2. SO THE PRICE THAT DECIDES THE TRADE IS `min(limit, ask)` ON A DEBIT
+        AND `max(limit, bid)` ON A CREDIT, never the number typed. The mid
+        stays on screen as the mid — it is still the honest "what it is
+        worth" — but it is not the number the decision is made on.
+===================================================================== */
+
+/**
+ * Which of two prices is the more aggressive offer, in the one place the
+ * direction is decided. On a DEBIT you pay, so a bigger magnitude is keener;
+ * on a CREDIT you receive, so a smaller one is. Every comparison in this
+ * section and in `limitPlacement()` reads the same rule.
+ */
+/* HALF A CENT, WHICH IS UNDER THE SMALLEST PRICE A BROKER TAKES. Options on
+   these chains are quoted in whole cents, so any difference smaller than this
+   is floating point and not a decision: the mid of two two-decimal quotes is
+   0.23000000000000004, and a typed 0.24 against a touch that came out of a
+   summation as 0.24000000000000005 is EXACTLY at the touch. Without the slack
+   a limit AT the price that trades reads as one that does not fill, which is
+   the one sentence on this panel that must never be wrong. The same tolerance
+   the mid comparison in `limitPlacement()` has always used. */
+const TICK_EPS = 0.005;
+const keenerThan = (dir, a, b) => (dir > 0 ? a >= b - TICK_EPS : a <= b + TICK_EPS);
+
+/**
+ * WHAT WOULD ACTUALLY BE PAID (or received) for a typed limit.
+ *
+ * @param limit  the MAGNITUDE the user typed, per share
+ * @param book   `comboBook()`'s result
+ * @param sign   +1 debit, -1 credit; taken from the book's own mid when null
+ * @returns {{ known, dir, typed, touch, effective, net, capped, give }}
+ *   `effective` is a MAGNITUDE per share, `net` the same figure signed the way
+ *   `analyze().entry` is. `capped` is true when the limit is at or past the
+ *   touch, which is the case the app never named. `give` is how far past.
+ *   `known` false means there is no two-sided book: the typed number is then
+ *   all there is, and it is returned unchanged rather than invented over.
+ */
+export function effectiveLimit(limit, book, sign = null) {
+  const L = Math.abs(Number(limit));
+  const dir = sign != null ? (Number(sign) >= 0 ? 1 : -1) : (book && book.ok && book.mid < 0 ? -1 : 1);
+  if (!Number.isFinite(L) || L <= 0) {
+    return { known: false, dir, typed: null, touch: null, effective: null, net: null, capped: false, give: null };
+  }
+  if (!book || !book.ok || !Number.isFinite(book.ask)) {
+    return { known: false, dir, typed: L, touch: null, effective: L, net: dir * L, capped: false, give: null };
+  }
+  const touch = Math.abs(book.ask);   // the side that trades for the structure AS BUILT
+  const capped = keenerThan(dir, L, touch);
+  const effective = capped ? touch : L;
+  return { known: true, dir, typed: L, touch, effective, net: dir * effective,
+    capped, give: capped ? Math.abs(L - touch) : 0 };
+}
+
+/**
+ * THE SENTENCE THE APP NEVER SAID. Only produced when the limit is past the
+ * touch, because that is the only case where the two numbers differ — at or
+ * inside the spread the typed price IS the price, and saying so twice would
+ * be noise on a panel that is already dense.
+ */
+export const limitCeilingNote = (r) => {
+  if (!r || !r.known || !r.capped) return null;
+  const pay = r.dir > 0 ? "pay" : "receive";
+  const offer = r.dir > 0 ? "offer" : "ask for";
+  if (!(r.give > 0.0049)) {
+    return `You ${offer} ${money(r.typed * 100)}, which is exactly what the other side is ` +
+      `${r.dir > 0 ? "asking" : "bidding"}. Everything below is worked out at that price, not at the mid.`;
+  }
+  return `You ${offer} ${money(r.typed * 100)}, you ${pay} ${money(r.effective * 100)}. A limit is a CEILING, ` +
+    `not a price: an order at or past the other side fills AT the other side, so the ` +
+    `${money(r.give * 100)} beyond it costs you nothing and buys a little protection against the quote moving ` +
+    `while the order travels. Every figure below is worked out at ${money(r.effective * 100)}.`;
+};
+
+/* =====================================================================
+   TIME IN FORCE IS PART OF THE VERDICT, NOT A DROPDOWN.
+
+   The same price is a different order depending on how long it stands. A
+   limit inside the spread with GTC is "nobody is there now, but the order
+   survives the close and over days this market moves"; the same price with
+   DAY is "gone tonight, filled or not". The app stated the time in force in
+   words AFTER the fact, underneath a verdict that had not read it.
+===================================================================== */
+
+/** The three states the ticket colours, and nothing else. */
+export const ORDER_VERDICTS = ["fills", "waiting", "no-fill"];
+
+/**
+ * ONE VERDICT BAND: where the limit falls, how far from what trades today,
+ * and what the chosen time in force does to that answer.
+ *
+ * Built ON `limitPlacement()` rather than beside it — the placement arithmetic
+ * has one home and this adds the horizon to it. Its four zones collapse to
+ * three because a band is a colour: "waiting, barely" and "will not fill" are
+ * the same instruction to the reader.
+ *
+ * @param tif  "day" | "gtc"
+ * @returns {{ known, state, label, distance, sentence, tifSentence, place }}
+ */
+export function orderVerdict(limit, book, { sign = null, tif = "day", type = "limit" } = {}) {
+  if (type === "market") {
+    return { known: true, state: "fills", label: "FILLS NOW", distance: null, place: null,
+      sentence: `A market order takes whatever the other side is offering, whatever that turns out to be. On ` +
+        `these chains the two sides can be a factor of three apart, so this is the one order type where you ` +
+        `do not find out the price until after it is done.`,
+      tifSentence: `Time in force does not apply: a market order is filled or killed at once.` };
+  }
+  const place = limitPlacement(limit, book, sign);
+  if (!place.known) {
+    return { known: false, state: null, label: null, distance: null, place, sentence: place.sentence, tifSentence: null };
+  }
+  const state = place.zone === "fills" ? "fills" : place.zone === "waiting" ? "waiting" : "no-fill";
+  const dir = sign != null ? (Number(sign) >= 0 ? 1 : -1) : (book.mid >= 0 ? 1 : -1);
+  const distance = Math.abs(Math.abs(Number(limit)) - Math.abs(book.ask));
+  const under = money(distance * 100);
+  const label = state === "fills" ? "FILLS NOW"
+    : state === "waiting" ? `WAITING — ${under} ${dir > 0 ? "under" : "over"} what trades today`
+      : "WILL NOT FILL";
+  // >>> THE HALF THE OWNER SAID UNLOCKED IT. <<<
+  const tifSentence = state === "fills"
+    ? (tif === "gtc"
+      ? `Good until cancelled, but it should not need the time: this price crosses the market now.`
+      : `Today only, and that is enough: this price crosses the market now.`)
+    : state === "waiting"
+      ? (tif === "gtc"
+        ? `GOOD UNTIL CANCELLED changes this answer. Nobody is at your price now — but the order survives ` +
+          `tonight's close and keeps working, and over days this market moves. That is what makes a limit ` +
+          `inside the spread a real trade rather than a wish.`
+        : `TODAY ONLY makes this a different order. Nobody is at your price now, and at the close it is gone ` +
+          `— filled or not, with nothing to show and nothing waiting. The same price good until cancelled ` +
+          `would still be working tomorrow.`)
+      : (tif === "gtc"
+        ? `Good until cancelled will not rescue this one: the market has to come all the way to you, and you ` +
+          `are on the far side of it.`
+        : `Today only, and it will not fill today. At the close it is gone.`);
+  return { known: true, state, label, distance, place, sentence: place.sentence, tifSentence };
+}
+
+/* =====================================================================
+   THE MARKET, READ-ONLY, FIRST — AND ONE SLIDER PER LEG.
+
+   The owner, three times, in his own words: "devo vedere il bid/ask di quel
+   0.48 e 0.34 per capire quanto sono vicino a un ordine probabile." He set
+   a limit at the exact mid because the panel gave him no way to see that
+   nothing lives there.
+
+   `legBook()` is that table as data, and `legLimitSeed()` is where the
+   sliders start. Both are here rather than in the component for the reason
+   every number beside a price is: a screen that derives it separately is a
+   screen that can disagree with the one that sends the order.
+===================================================================== */
+
+/** A price on the tick. Options do not have continuous prices: a penny class
+ *  ticks at a cent under $3.00, and 0.525 is not a price anybody can send. */
+export const onTick = (x) => {
+  const v = Number(x);
+  if (!Number.isFinite(v)) return null;
+  return Math.round(v * 100) / 100;
+};
+
+/**
+ * THE FOUR-ROW TABLE: each leg with its bid and its ask and the SIZE at each,
+ * and which of the two is the side that trades when you buy the structure.
+ *
+ * THE SIZES WERE NEVER IN THE APP AND THEY ARRIVE FOR FREE. Alpaca's option
+ * snapshot carries `latestQuote { bp, ap, bs, as }` and `chain.js` parsed the
+ * two sizes away. They are carried now, with the same discipline as open
+ * interest: A MISSING SIZE IS UNKNOWN, NEVER ZERO. `Number(null)` is 0 and 0
+ * is finite, so a size has to BE a number before it is read as one — a row
+ * drawn with a blank where a size should be reads as "nobody is there", which
+ * is a different and much worse claim than "the feed did not say".
+ *
+ * @param legs   [{ side, qty, type, strike }]
+ * @param quotes [{ bid, ask, bidSize, askSize }] one per leg, same order
+ * @returns {{ rows, anySize, missingSizes, quoted, unquoted }}
+ */
+export function legBook(legs = [], quotes = []) {
+  const ls = Array.isArray(legs) ? legs : [];
+  let anySize = false, missingSizes = 0, quoted = 0, unquoted = 0;
+  const rows = ls.map((l, i) => {
+    const q = (quotes || [])[i] || {};
+    const b = Number(q.bid), a = Number(q.ask);
+    const twoSided = Number.isFinite(b) && Number.isFinite(a) && b > 0 && a > 0 && a >= b;
+    if (twoSided) quoted++; else unquoted++;
+    const side = Math.sign(+(l && l.side) || 1);
+    const sizeOf = (x) => (x != null && x !== "" && Number.isFinite(Number(x)) ? Number(x) : null);
+    const bidSize = sizeOf(q.bidSize), askSize = sizeOf(q.askSize);
+    if (bidSize != null || askSize != null) anySize = true;
+    if (bidSize == null || askSize == null) missingSizes++;
+    return {
+      i, side, qty: Math.abs(Math.round(+(l && l.qty) || 0)) || 1,
+      type: l && l.type, strike: l && l.strike,
+      bid: twoSided ? b : (Number.isFinite(b) && b > 0 ? b : null),
+      ask: twoSided ? a : (Number.isFinite(a) && a > 0 ? a : null),
+      mid: twoSided ? (a + b) / 2 : null,
+      bidSize, askSize,
+      twoSided,
+      // The side that trades when you BUY the structure: lift the ask on a leg
+      // you are buying, hit the bid on a leg you are selling. The other side of
+      // each row belongs to nobody's version of this trade and is dimmed.
+      trades: side > 0 ? "ask" : "bid",
+    };
+  });
+  return { rows, anySize, missingSizes, quoted, unquoted };
+}
+
+/** What a screen says instead of drawing a size it does not have. */
+export const sizeSkippedNote = (n, feed) =>
+  `${n === 1 ? "One leg" : `${n} legs`} came back with no size on ${n === 1 ? "its" : "their"} quote` +
+  `${feed ? `, which is normal for ${feed}` : ""}. How many contracts are offered at a price is a fact the ` +
+  `app either has or does not: an empty column is not a market with nobody in it.`;
+
+/**
+ * WHERE THE SLIDERS START — one price per leg, on the cent.
+ *
+ * Each leg is seeded at its own mid conceded `openLimitSlippage` of its own
+ * spread TOWARD THE SIDE THAT TRADES, which sums to exactly `openLimitPrice()`
+ * on the combination: a long leg conceded up and a short leg conceded down
+ * both raise the debit, so the net is the combo mid plus the same share of the
+ * combo spread. One arithmetic seen two ways, not two arithmetics.
+ *
+ * A leg with no two-sided quote has nothing to concede from and is seeded at
+ * whatever single number it has (its mid, if any) — never invented, and the
+ * table says which legs those are.
+ *
+ * @returns {?number[]} one price per leg, or null with no legs
+ */
+export function legLimitSeed(legs = [], quotes = [], { slippage = OPEN_LIMIT_SLIPPAGE } = {}) {
+  const ls = Array.isArray(legs) ? legs : [];
+  if (!ls.length) return null;
+  const slip = Math.max(0, Number(slippage) || 0);
+  return ls.map((l, i) => {
+    const q = (quotes || [])[i] || {};
+    const b = Number(q.bid), a = Number(q.ask);
+    if (!Number.isFinite(b) || !Number.isFinite(a) || !(b > 0) || !(a > 0) || a < b) {
+      const m = Number(q.mid);
+      return Number.isFinite(m) && m > 0 ? onTick(m) : null;
+    }
+    const side = Math.sign(+(l && l.side) || 1);
+    const mid = (a + b) / 2;
+    const p = onTick(mid + side * slip * (a - b));
+    // Cent rounding can push a concession a hair past the touch; it never may.
+    return Math.min(a, Math.max(b, p));
+  });
+}
+
+/**
+ * THE NET, FROM THE LEGS — and the arithmetic that produced it, in words.
+ *
+ * The user prices each leg and the app computes the net, which is the reverse
+ * of the single net field the ticket had. That is the direction he thinks in,
+ * and it is why the net is never a number that appears from nowhere.
+ *
+ * @returns {{ net, ok, unpriced, terms, line }} `net` is signed per share the
+ *   way `analyze().entry` is; `line` is `0.52 − 0.30 → $22`.
+ */
+export function netFromLegs(legs = [], prices = []) {
+  const ls = Array.isArray(legs) ? legs : [];
+  let net = 0, unpriced = 0;
+  const terms = [];
+  ls.forEach((l, i) => {
+    // `Number(null)` IS 0 AND 0 IS FINITE. A leg nobody priced would arrive
+    // here as a leg priced at nothing and be summed into the net as a free
+    // option — the same coercion that turns a missing maximum profit into a
+    // maximum of zero. The null has to be thrown out BEFORE the coercion.
+    const raw = (prices || [])[i];
+    const px = raw == null || raw === "" ? NaN : Number(raw);
+    const side = Math.sign(+(l && l.side) || 1);
+    const qty = Math.abs(Math.round(+(l && l.qty) || 0)) || 1;
+    if (!Number.isFinite(px) || px < 0) { unpriced++; return; }
+    net += side * qty * px;
+    terms.push({ side, qty, px, text: `${side > 0 ? "" : "−"}${qty > 1 ? `${qty}×` : ""}${px.toFixed(2)}` });
+  });
+  const ok = ls.length > 0 && unpriced === 0;
+  const body = terms.map((t, i) => (i === 0 ? t.text : `${t.side > 0 ? "+" : "−"} ${t.text.replace("−", "")}`)).join(" ");
+  return { net: ok ? +net.toFixed(4) : null, ok, unpriced, terms,
+    line: ok ? `${body} → ${money(Math.abs(net) * 100)}${net < 0 ? " credit" : ""}` : null };
 }
 
 /**

@@ -62,7 +62,7 @@ check("the Alpaca normaliser produces the internal chain shape", () => {
     truthy(x.calls && x.puts, `calls/puts on ${e}`);
     for (const [k, q] of [...Object.entries(x.calls), ...Object.entries(x.puts)]) {
       truthy(Number.isFinite(+k), "strike key is a number");
-      for (const f of ["bid", "ask", "mid", "iv", "oi", "vol", "delta", "theta", "occ"]) {
+      for (const f of ["bid", "ask", "mid", "bidSize", "askSize", "iv", "oi", "vol", "delta", "theta", "occ"]) {
         if (!(f in q)) throw new Error(`contract ${q.occ} has no ${f}`);
       }
       eq(parseOcc(q.occ).strike, +k, `occ ↔ strike key for ${q.occ}`);
@@ -83,6 +83,38 @@ check("iv, delta and theta are actually populated, not just present", () => {
   truthy(iv / n > 0.9, `implied volatility on only ${iv}/${n} contracts`);
   truthy(delta / n > 0.9, `delta on only ${delta}/${n} contracts`);
   truthy(theta / n > 0.9, `theta on only ${theta}/${n} contracts`);
+});
+
+check("the quote SIZES are carried, and a missing one is UNKNOWN and not zero", () => {
+  // >>> THEY ARRIVE FOR FREE AND WERE BEING PARSED AWAY. <<< `latestQuote`
+  // carries `bs` and `as` — how many contracts are bid for and offered at the
+  // two prices — and the order ticket needs them to say how close a typed limit
+  // is to a probable fill. The rule is open interest's: `?? null`, never `?? 0`,
+  // because `Number(null)` is 0 and 0 is finite, and a zero drawn in a size
+  // column is a claim that nobody is there.
+  const c = normaliseAlpacaChain("UNG", {
+    snapshots: {
+      UNG261016C00013000: { latestQuote: { bp: 0.4, ap: 0.5, bs: 12, as: 8 } },
+      UNG261016C00014000: { latestQuote: { bp: 0.2, ap: 0.3 } },
+      UNG261016C00015000: { latestQuote: { bp: 0.1, ap: 0.2, bs: 0, as: 4 } },
+    },
+  }, { spot: 13, now: NOW });
+  const calls = c.byExp["2026-10-16"].calls;
+  eq(calls[13].bidSize, 12, "a size that came back");
+  eq(calls[13].askSize, 8, "and the other side of it");
+  eq(calls[14].bidSize, null, "a size the feed did not send is UNKNOWN");
+  eq(calls[14].askSize, null, "on both sides");
+  eq(calls[15].bidSize, 0, "a reported zero is a real reading and stays one");
+});
+
+check("CBOE reports no sizes, and says so with nulls rather than blanks", () => {
+  const c = parseCboeJson("UNG", {
+    data: { current_price: 13, options: [{ option: "UNG261016C00013000", bid: 0.4, ask: 0.5, iv: 0.5, open_interest: 40, volume: 3 }] },
+  }, NOW);
+  const q = c.byExp["2026-10-16"].calls[13];
+  eq(q.bidSize, null, "CBOE's delayed payload has no quote size");
+  eq(q.askSize, null, "on either side");
+  eq(q.oi, 40, "and the fields it does have are untouched");
 });
 
 check("a contract the feed could not price keeps its fields as nulls", () => {

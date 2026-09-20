@@ -13,6 +13,11 @@ window, warning and typed override above it).
 DONE WHEN: an opening order is really filled on the paper account and appears
 in Positions. Not a test — a fill.
 
+**PR #28 IS THE LATEST THING STANDING BETWEEN THE OWNER AND THIS.** Three orders have been sent
+and none has filled; one of them sat at the exact mid, which the app now names as the price nobody
+has to meet. The reasons are on screen — see the P4 section below, brought forward off the first
+live reading the owner took himself.
+
 SHIPPED (PR "the order that never filled", 564 checks, build clean):
   - `modelSanity()` in rules.js at all three generation sites, refusing a price
     more than 4x away from `netBS()` either side, naming the leg responsible.
@@ -298,6 +303,79 @@ WHAT THE NEXT SESSION INHERITS:
     export renders and which now carries the note. If the report ever gains its own simulation,
     it needs the sentence too.
 
+## P4 — UX  (BROUGHT FORWARD, and PR #28 is the first half of it — DONE)
+
+**WHY IT CAME FORWARD, AND IT IS NOT QUEUE-JUMPING.** P4's stated premise below — "the THREE
+PROBABILITIES panel is deleted, an ambiguity P2 resolves in code" — was ALREADY SATISFIED BY P1:
+PR #25 made that panel TWO QUESTIONS, because there were only ever two and the third was an
+arithmetic that did not agree with itself. P4 had been waiting on something that had already
+happened. **P0 IS STILL OPEN** and its DONE WHEN is unchanged — a real fill, not a test — and this
+work is what stands between the owner and that fill.
+
+**AND THE REAL REASON: THE OWNER USED THE APP ON HIS PHONE, AGAINST THE LIVE MARKET, FOR THE FIRST
+TIME.** Six pull requests in a row had been interior coherence work, because a sandbox with no
+keys, no egress and no browser can only make the code honest about itself. That ended. There are
+screenshots now, and they found **three faults in the ARITHMETIC that no test in this repository
+could have caught, because every one of them is a number that is internally consistent and
+describes a trade the user cannot have.** PRD §4l.
+
+SHIPPED (PR #28, 705 checks across 19 suites, build clean):
+
+  - **THE SPREAD FLOOR MEASURED ONE LEG AT A TIME AND CHARGED THE PAIR.** UNG 2026-09-20, the
+    10.50/11.00 call spread: each leg about ten cents wide — 21% and 29% of its own mid, both
+    comfortably inside the 35% per-leg ceiling — and the combination **143% of its own mid**, four
+    times that ceiling, offered. Two leg spreads ADD while two mids SUBTRACT, and no per-leg number
+    can see it. `RULES.maxComboSpreadShareOfNet` (1.0 — "the ask is at most three times the bid")
+    with `comboSpreadFloor()` sits BESIDE the per-leg one, with its own count and its own sentence,
+    at all three generation sites. It changes what is OFFERED, never what may be SENT.
+  - **EVERY FIGURE ON BUILD WAS WORKED OUT AT A PRICE THE APP ITSELF SAID WOULD NOT FILL.** At the
+    mid: pay $14, make $36, lose $14, break even 10.64, 2.6:1. At $24, the price that trades: pay
+    $24, make $26, lose $24, break even 10.74, **1.1:1**. `analyze()` takes the entry price as an
+    argument now, `AE` on the Build screen is the analysis at the price that will be SENT, and the
+    stats, the gate, the confirm step, the ticket and **the position record** all read it.
+  - **A LIMIT IS A CEILING, NOT A PRICE.** An order past the touch fills AT the touch, so offering
+    more costs nothing — and the app, which explains far smaller things at length, never said it.
+    `effectiveLimit()` / `limitCeilingNote()`: *"you offer $30, you pay $24."*
+  - **THE TICKET, REBUILT TO THE DESIGN AGREED WITH THE OWNER.** The market read-only first with
+    the bid, the ask and **the SIZE at each** (`bs`/`as` were in Alpaca's payload all along and
+    `chain.js` parsed them away); one slider per leg in one-cent steps; the net big beside its own
+    arithmetic; **time in force as part of the verdict, not a dropdown**; one coloured band with
+    three states naming the distance; four numbers that move at the effective price. And the
+    CONFLICT paragraph, which was on that one page FOUR TIMES, collapsed into one panel with the
+    count in its summary line — **without touching the gate**.
+  - **THE COMPARE PICTURE DREW ONE TRADE TWO WAYS.** `ComparePayoffs` drew at the candidate's
+    REALISED volatility with no drift at all, under a `pop` computed at the chain's IMPLIED
+    volatility on the seasonal drift. `terminalDist()` loses its default drift, the candidate
+    carries `chanceDrawFields()`, and an unstamped one draws nothing and says why.
+  - **AND THE SWEEP GAINED THE SHAPE THAT HID IT.** `|| 45` is `RULES.targetEntryDTE` in a
+    FALLBACK OPERAND — not assigned, not added — which shapes 1, 2 and 3 all walked past. PR #24
+    fixed a parameter default of 45 in that very file while this spelling survived four lines away.
+    Shape 4 now refuses `IDENT || 45` and `IDENT ?? 45`, with five more quiet-cases proving it does
+    not cry wolf.
+
+**THE REST OF P4 IS STILL OPEN**: the trade card's five fixed lines (what you are betting on, what
+you risk in euros, how often it works under your own exit rule, when it exits, what would
+invalidate it), everything else one tap away. The THREE PROBABILITIES deletion is DONE (P1, PR #25).
+
+WHAT PR #28 HANDS FORWARD:
+  - **`maxComboSpreadShareOfNet` (1.0) IS CHOSEN, NOT MEASURED**, and joins the same list as
+    `modelDisagreementRatio`, `openLimitSlippage` and `closeLimitSlippage`. Nobody has read the
+    distribution of combination spread over combination net on the five live chains. **Expect a
+    real reading to bring it down** — and the pair floor has never emptied a real board, so how
+    much of a live chain it removes is unknown.
+  - **NOBODY HAS SEEN THE REBUILT TICKET ON A PHONE.** A table, four sliders and a coloured band
+    added to the screen three previous pull requests also added to. This is now the FIFTH item in a
+    row handed forward that only a phone can settle.
+  - **THE SIZE COLUMN HAS NEVER BEEN FED A REAL SIZE.** `bs`/`as` come from a hand-built fixture.
+    Whether the indicative feed populates them is unknown, which is why a missing size draws "?"
+    and a sentence.
+  - **THE EFFECTIVE PRICE IS NOT THE FILL PRICE.** The record carries `min(limit, ask)`; the broker
+    records the fill, and `recheckOrders()` does not reconcile the two. Nothing has ever filled, so
+    they have never been compared. **This is P0's business.**
+  - **`UnifiedPosition()` KEEPS ITS OWN `sigma = 0.3`.** The same species of number as the two
+    TASK 2b removed, deliberately left rather than widened into unasked scope. It is the obvious
+    next thing to point the sweep at.
+
 ## P2 — Proposals ranked by edge, not by score
 At market prices every structure has expected value near zero: high
 probability and large payoff are two ends of one lever. So the app must
@@ -361,13 +439,13 @@ approve.mjs).
 REGRESSION TEST: the copilot can never again write "paste the chain data" or
 estimate a price by hand.
 
-## P4 — UX
+## P4 — UX  (PARTLY DONE — see the section above, which came forward)
 The trade card, five fixed lines: what you are betting on, what you risk in
 euros, how often it works under your own exit rule, when it exits, what would
-invalidate it. Everything else one tap away. The "THREE PROBABILITIES — which
-one to read, and when" panel is deleted: three paragraphs of prose explaining
-which probability to read is prose compensating for an ambiguity that P2
-resolves in code.
+invalidate it. Everything else one tap away. ~~The "THREE PROBABILITIES — which
+one to read, and when" panel is deleted~~ — **DONE BY P1** (PR #25 made it TWO
+QUESTIONS), which is why the premise this item was waiting on had already been
+satisfied and the rest of P4 came forward as PR #28.
 
 ## P5 — Measure
 Backtest the exit rules (take profit 50%, 21 DTE, stop loss as warning) on

@@ -565,6 +565,112 @@ call at a lower strike. FIVE of 25 adjacent near-the-money pairs on that BOIL bo
 It filters nothing — it is a statement about the whole EXPIRY, and the honest response is to
 say the feed looks unreliable here.
 
+## THE PAIR IS NOT THE LEGS — the FOURTH floor, beside the third
+
+`RULES.maxComboSpreadShareOfNet` (**1.0**) with `comboSpreadShare()` / `comboSpreadFloor()` /
+`comboSpreadFloorReason()` / `wideComboNote()` / `comboSpreadSkippedNote()` in `src/rules.js`,
+applied inside `qualityFloor()` at all three generation sites. **The per-leg floor's constant is
+untouched: this sits beside it**, with its own count (`tally.comboSpread`, `floors.comboSpread`)
+and its own sentence.
+
+`spreadFloor()` measures ONE LEG AT A TIME and reports the worst share among the legs. Read live on
+the owner's phone, UNG 2026-09-20, 2026-10-23 at 33 DTE, spot $10.42: buy the 10.50 call (mid 0.48),
+sell the 11.00 call (mid 0.34), each leg about ten cents wide — **21% and 29% of its own mid, both
+inside the 35% per-leg ceiling** — and the pair quoted bid $4 / mid $14 / ask $24. **A spread of $20
+on a mid of $14 is 143%, four times the per-leg ceiling, and it was offered.**
+
+On a vertical the two leg spreads ADD (you cross one getting long and one getting short) while the
+two mids SUBTRACT, so both spreads land on a seventh of the money. No per-leg number can catch that
+without refusing every leg on these chains.
+
+- **WHY 1.0, AND IT IS NOT A COPY OF 0.35.** At share `s`, `ask = bid × (2 + s) / (2 − s)`: 0.35 is
+  "the ask is at most 1.4× the bid", 1.0 is "at most 3×". One is the bar for a CONTRACT, quoted in
+  its own right; the other for a COMBINATION, quoted as the arithmetic of two contracts and
+  structurally wider. At 1.0 the round trip costs the whole of what the structure is worth.
+  **CHOSEN, not measured** — on the PRD's NOT VERIFIED list, and expect a real reading to bring it
+  DOWN, exactly like `modelDisagreementRatio`.
+- **DELIBERATELY SEPARATE FROM THE PER-LEG FLOOR**, the same reasoning that keeps `priceability()`,
+  `impossibleLoss()` and `modelSanity()` apart: "this leg is untradeable" and "this trade is
+  unaffordable" are different facts, and a pooled count would explain neither.
+- It reads `comboBook()`, so the number the floor judges IS the number the ticket prints. Same two
+  rules as everything else: **unknown is not wide** (no two-sided quote on every leg → SKIPPED), and
+  a net under `MIN_NET_DOLLARS` belongs to `priceability()`, never to a division here.
+- **It changes what is OFFERED, never what may be SENT.** Out of the gate, like the other floors.
+
+## EVERY FIGURE IS WORKED OUT AT THE PRICE THAT WILL BE SENT
+
+`analyze(legs, S, dte, baseIV, q, { net })` in `App.jsx`. It priced at the mid, full stop, so Build
+said YOU PAY $14 · MOST YOU CAN MAKE $36 · MOST YOU CAN LOSE -$14 · BREAKEVEN 10.64 while
+`limitPlacement()` two thousand pixels below said a limit AT the mid is a limit nobody has to meet.
+At $24, the price that trades: pay $24, make $26, lose $24, break even 10.74. **Nearly half the
+reward and nearly double the risk** — 2.6:1 becomes 1.1:1.
+
+- **`AE` on the Build screen is that analysis and everything reads it**: the six stats, the
+  reward-to-risk, the chance, the gate preview, the confirm step, the ticket and **the record**. A
+  position recorded at the mid describes a trade nobody made, and the Guardian reads it for life.
+- **`entryMid` and `entrySource` ALWAYS travel** — the mid is still the honest "what it is worth",
+  and a field name may never assert a price the arithmetic did not use. With no `net` it is the mid,
+  so every existing caller is unchanged. The leg marks, the greeks and the volatility are untouched:
+  those are properties of the chain, not of the price you chose.
+- The Shortlist row still prints its candidate at the MID — a candidate is a structure, not yet a
+  price — and Build says so in one sentence where the two are side by side.
+
+**A LIMIT IS A CEILING, NOT A PRICE.** An order at or past the touch fills AT the touch, so offering
+more costs nothing and buys protection against the quote moving while the order travels.
+`effectiveLimit()` is `min(limit, ask)` on a debit and `max(limit, bid)` on a credit, through ONE
+`keenerThan(dir, …)`; `limitCeilingNote()` says *"you offer $30, you pay $24"* and only when the two
+differ. **`TICK_EPS` (half a cent) is not cosmetic**: `book.ask` is a SUM of leg quotes, so a limit
+typed at exactly the price that trades meets 0.24000000000000005 and read "you are waiting" at the
+one price that fills — the same tolerance `limitPlacement()`'s mid comparison always carried.
+
+## The order ticket — the market first, one slider per leg, one verdict
+
+Designed with the owner against his own screenshots. He set a limit at the exact mid because the
+panel gave him no way to see that nothing lives there. **Neither the price nor the size is the
+ticket's**: `ticket` (`{ type, tif, legPx }`) is Build-screen state in `App.jsx` beside `contracts`,
+and the ticket is a controlled input on it. Top to bottom:
+
+1. **THE MARKET, READ-ONLY, FIRST** — `legBook()` in `rules.js`. One row per leg, its bid and its
+   ask and the SIZE at each, the two sides that trade in full contrast. **The sizes arrive for
+   free**: Alpaca's `latestQuote { bp, ap, bs, as }` was being parsed away by `chain.js`. Same
+   discipline as open interest — **a missing size is UNKNOWN, never zero** (`?? null`), a reported
+   zero is a real reading, and `sizeSkippedNote()` says which legs have none. CBOE has no sizes.
+2. **ONE SLIDER PER LEG, IN ONE-CENT STEPS.** The user prices each leg, the app computes the net —
+   the reverse of the single net field, and the direction the owner thinks in. Cents because
+   **options do not have continuous prices** and 0.525 is not one; `onTick()` is applied to the
+   VALUE, not to a spinner. `legLimitSeed()` concedes each leg toward the side that trades and
+   **sums to exactly `openLimitPrice()`** on the combination: one arithmetic seen two ways.
+3. **THE NET, BIG, BESIDE ITS OWN ARITHMETIC** (`netFromLegs()` → `0.52 − 0.30 → $22`), so it is
+   never a number that appears from nowhere.
+4. **TIME IN FORCE IS PART OF THE VERDICT, NOT A DROPDOWN.** Inside the spread on GTC is "nobody is
+   there now, but the order survives the close and over days this market moves"; the same price on
+   DAY is "gone tonight, filled or not". `orderVerdict()` is built ON `limitPlacement()`.
+5. **ONE VERDICT BAND**, three states (`ORDER_VERDICTS`), naming the distance: FILLS NOW / WAITING —
+   $N under what trades today / WILL NOT FILL.
+6. **FOUR NUMBERS THAT MOVE**, at the effective price: most you can make, most you can lose, break
+   even, made per $1 risked.
+7. **THE WARNINGS, ONCE.** The CONFLICT paragraph was on one page FOUR times. The narrative keeps
+   its home in "Why this trade"; `warningsToPrint()` replaces it elsewhere with
+   `conflictSummaryLine()` (the count and a pointer), and `BuildWarnings` is one collapsed panel
+   that opens by itself while a written reason is still required. **The gate is NOT changed for a
+   copy problem** — what changed is what a screen prints. `ConfirmSteps` takes `showWarnings={false}`.
+
+## A picture is drawn at the numbers its own chance was computed at
+
+`terminalDist()` in `visuals.jsx` has **no default drift**, the last one in the file.
+`ComparePayoffs()` was the caller relying on it: `sigma: shown[0].sigma || 0.3, dte: shown[0].dte || 45`
+and no drift at all, so it drew a risk-free lognormal at the candidate's REALISED volatility under a
+`pop` computed at the chain's IMPLIED volatility on the seasonal drift. `chanceDrawFields()` in
+`rules.js` puts the chance's own two numbers on the candidate beside `seasonalStampFields()`;
+`compareDistInputs()` refuses to draw without both and `compareDistNote()` names what is missing.
+**The ABSENCE of the stamp is the marker**, the fourth use of that pattern. `UnifiedPosition()`
+passes `drawDrift` and was never at fault.
+
+**AND THE SWEEP LEARNED THE SHAPE THAT HID THE 45.** `riskGate.test.js` knew three shapes; a
+FALLBACK OPERAND (`IDENT || 45`, `IDENT ?? 45`) is none of them, because the number is neither
+assigned nor added. Shape 4 refuses it and stays quiet the same way shape 3 does — the identifier
+must carry a RULE WORD, so `c.dte || 45` is a copy and `bins.length || 45` is not.
+
 ## Which expiry the app opens on — the board decides, not the calendar
 
 `expiryChoice()` / `expiryChoiceNote()` / `emptyExpiryNote()` in `src/rules.js`.
@@ -663,7 +769,9 @@ Two rules hold them, and both are the point:
    counts in `verdictNarrative()`.
 
 Adding a third generation site means calling `qualityFloor()` there too, and passing it
-`quotes` as well as `openInterest` — the spread floor above lives in the same function.
+`quotes`, `legs` AND `openInterest` — the per-leg spread floor and the COMBINATION spread
+floor both live in the same function, and the second one needs the legs to know which side
+of each trades.
 It also means calling `priceability()`, `impossibleLoss()` and `modelSanity()` before it,
 in that order: they are four different questions and each one has its own count and its own
 sentence, so a site that skips one cannot say which rule did the work.
@@ -745,7 +853,14 @@ while the position is open.
   one of the two reasons this file imports `engine.js`, the other being
   `chanceOf()`, and deliberately so),
   `openLimitSlippage` with `openLimitPrice()`, and what the ticket prints:
-  `comboBook()`, `limitPlacement()`, `notionalControlled()`;
+  `comboBook()`, `limitPlacement()`, `notionalControlled()`, `effectiveLimit()` /
+  `limitCeilingNote()` (a limit is a CEILING, not a price), `orderVerdict()` with
+  `ORDER_VERDICTS` (where the price falls AND what the time in force does to it),
+  `legBook()` / `sizeSkippedNote()` / `legLimitSeed()` / `netFromLegs()` / `onTick()`
+  (the market table and the per-leg sliders), `maxComboSpreadShareOfNet` with
+  `comboSpreadFloor()` (the PAIR is not the legs — the fourth floor),
+  `chanceDrawFields()` (the two numbers a picture of a candidate is drawn at) and
+  `conflictSummaryLine()` / `warningsToPrint()` (the warnings, once);
   `entryRoom()` with its override sentences and `passedOverRecord()`,
   `scratchPayoffShare`
   with `scratchLevel()` (copy only) and `reportNarrativePrompt()`,
@@ -892,7 +1007,7 @@ while the position is open.
 - `src/chain.js` — **where the option chain comes from**, and **the only place
   that decides what to call the feed**. One internal shape
   (`{ spot, byExp, expirations, updated, source }`, each contract
-  `{ bid, ask, mid, iv, oi, vol, delta, theta, occ }`) and two sources:
+  `{ bid, ask, mid, bidSize, askSize, iv, oi, vol, delta, theta, occ }`) and two sources:
   **Alpaca first, CBOE as the net**. `fetchChain()` gives the broker a 4-second
   timeout and falls back — a slow broker costs seconds, never a blank screen —
   and after two failures in a row it stops asking for the rest of the session.
@@ -900,7 +1015,11 @@ while the position is open.
   disagree about the price of the same contract for a reason that is only a
   formula. Alpaca snapshots carry no open interest and no volume, so those come
   back `null` (never `0`, which on screen reads as "nobody trades this") and the
-  open-interest panel says which feed cannot fill it.
+  open-interest panel says which feed cannot fill it. **The QUOTE SIZES do come
+  from Alpaca** (`latestQuote { bs, as }`) and were being parsed away; they are
+  `bidSize` / `askSize` now, `null` when the feed does not send them and `null`
+  always on CBOE, which has none. The ticket's market table draws a "?" and a
+  sentence rather than a blank, because a missing size is UNKNOWN, never zero.
 
   **`feedName(chain)` and `sourceNote(chain)` name the feed, and every label on
   screen reads from them.** Never write "CBOE" or "Alpaca" into a component. The

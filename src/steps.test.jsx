@@ -215,13 +215,20 @@ check("a thumbnail at 80px draws a line, not one point per day", () => {
 /* ---------------- the shared distribution ---------------- */
 
 check("the terminal distribution is one function, used by both charts", () => {
-  const d = terminalDist({ spot: 22, sigma: 0.3, dte: 45, lo: 22 * 0.5, hi: 22 * 1.6, bins: 40 });
+  const d = terminalDist({ spot: 22, sigma: 0.3, dte: 45, driftAnnual: 0.06, lo: 22 * 0.5, hi: 22 * 1.6, bins: 40 });
   eq(d.bins.length, 40, "bin count");
   const total = d.bins.reduce((a, x) => a + x.p, 0);
   if (total < 0.9 || total > 1.001) throw new Error(`the probabilities sum to ${total}`);
   if (!(d.peak > 0)) throw new Error("no peak");
   // and it refuses rather than inventing when it is not told enough
-  eq(terminalDist({ spot: 22, sigma: 0, dte: 45, lo: 10, hi: 30 }).bins.length, 0, "drew a distribution with no volatility");
+  eq(terminalDist({ spot: 22, sigma: 0, dte: 45, driftAnnual: 0, lo: 10, hi: 30 }).bins.length, 0, "drew a distribution with no volatility");
+  // THE DRIFT HAS NO DEFAULT ANY MORE, and a missing one is not a zero: this is
+  // the rule `bandMass()` already followed and `terminalDist()` did not, which
+  // is how `ComparePayoffs` came to draw a risk-free picture under a seasonal
+  // chance. A drift of zero is still a real reading and still draws.
+  eq(terminalDist({ spot: 22, sigma: 0.3, dte: 45, lo: 10, hi: 30 }).bins.length, 0, "invented a drift of zero");
+  eq(terminalDist({ spot: 22, sigma: 0.3, dte: 45, driftAnnual: 0, lo: 10, hi: 30 }).bins.length > 0, true,
+    "an explicit zero drift is a reading and must draw");
 });
 
 /* ---------------- report ---------------- */

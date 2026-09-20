@@ -25,9 +25,12 @@ import { RULES, sizing, ruleBadge, takeProfitLabel, stopLossLabel, perTradeCapLa
   entryRoom, entryRoomWarning, entryOverrideOk, entryOverrideNote, entryInsideExitNote,
   passedOverRecord, passedOverSummary,
   expiryChoice, expiryChoiceNote, emptyExpiryNote, wideSpreadNote, spreadSkippedNote,
+  wideComboNote, comboSpreadSkippedNote, comboBook, effectiveLimit, limitCeilingNote,
+  orderVerdict, legBook, legLimitSeed, netFromLegs, onTick, sizeSkippedNote,
+  conflictSummaryLine, warningsToPrint,
   chancePct, chanceText, chanceInTen, signedMoney,
   ruleExitOf, stopWarningSentence, watchAttentionLevel,
-  chanceOf, chanceSourceNote, seasonalProvenance, seasonalStampNote, seasonalStampFields,
+  chanceOf, chanceSourceNote, seasonalProvenance, seasonalStampNote, seasonalStampFields, chanceDrawFields,
   sigmaProvenance } from "./rules.js";
 import { isStale, freshnessNote, staleAmong } from "./freshness.js";
 import { evaluateTrade, gateSummary } from "./riskGate.js";
@@ -271,7 +274,11 @@ function priceLeg(leg, S, dte, baseIV, q) {
   // would be BUYING is zero, which a mid can never show — half of a placeholder
   // ask looks exactly like a price. A leg priced from the model carries no
   // bid at all, and undefined there means unknown, never zero.
-  if (quote && quote.mid != null) return { px: quote.mid, iv: quote.iv || smileIV(baseIV, S, leg.strike), real: true, occ: quote.occ, oi: quote.oi, vol: quote.vol, bid: quote.bid, ask: quote.ask };
+  // ...and the SIZES travel with them, for the same reason. The ticket's market
+  // table says how many contracts are bid for and offered at those two prices,
+  // which is what "how close am I to a probable fill" actually means. A missing
+  // size stays undefined — UNKNOWN, never zero (`legBook()` in rules.js).
+  if (quote && quote.mid != null) return { px: quote.mid, iv: quote.iv || smileIV(baseIV, S, leg.strike), real: true, occ: quote.occ, oi: quote.oi, vol: quote.vol, bid: quote.bid, ask: quote.ask, bidSize: quote.bidSize, askSize: quote.askSize };
   const iv = smileIV(baseIV, S, leg.strike);
   return { px: bsPrice(S, leg.strike, dte / 365, iv, leg.type), iv, real: false };
 }
@@ -363,10 +370,35 @@ function netGreeks(legs, S, dte, baseIV, ivMap) {
     return { delta: a.delta + m * g.delta, gamma: a.gamma + m * g.gamma, theta: a.theta + m * g.theta * 100, vega: a.vega + m * g.vega * 100 };
   }, { delta: 0, gamma: 0, theta: 0, vega: 0 });
 }
-export function analyze(legs, S, dte, baseIV, q) {
+/**
+ * EVERY FIGURE ON THIS SCREEN IS WORKED OUT AT ONE PRICE, AND IT IS NOT ALWAYS
+ * THE MID (the second of the three faults read on the owner's phone).
+ *
+ * `analyze()` priced the structure at the mid, full stop. On UNG 2026-09-20
+ * that produced YOU PAY $14 · MOST YOU CAN MAKE $36 · MOST YOU CAN LOSE -$14 ·
+ * BREAKEVEN 10.64, while `limitPlacement()` two thousand pixels below said in
+ * these words that a limit AT the mid is a limit nobody has to meet. At $24 —
+ * the price that actually trades — the same structure pays $26, risks $24 and
+ * breaks even at 10.74: NEARLY HALF THE REWARD AND NEARLY DOUBLE THE RISK.
+ *
+ * So the entry price is an ARGUMENT now. `opts.net` is the signed net per share
+ * the trade would really be done at (`effectiveLimit()` in rules.js, which is
+ * `min(limit, ask)` on a debit and never the number typed), and with none the
+ * mid is used exactly as before — every existing caller is unchanged.
+ *
+ * `entryMid` and `entrySource` always travel, because the mid is still the
+ * honest "what it is worth" and a screen must be able to print both without
+ * deciding which is which for itself. The LEG marks, the greeks and the
+ * volatility are untouched: those are properties of the chain, not of the
+ * price you chose to pay.
+ */
+export function analyze(legs, S, dte, baseIV, q, opts = {}) {
   const legPx = legs.map((l) => priceLeg(l, S, dte, baseIV, q));
   const ivMap = legPx.map((p) => p.iv);
-  const entry = legs.reduce((a, l, i) => a + Math.sign(l.side) * l.qty * legPx[i].px, 0);
+  const entryMid = legs.reduce((a, l, i) => a + Math.sign(l.side) * l.qty * legPx[i].px, 0);
+  const override = Number(opts && opts.net);
+  const usesOverride = Number.isFinite(override);
+  const entry = usesOverride ? override : entryMid;
   const realCount = legPx.filter((p) => p.real).length;
   const lo = S * 0.7, hi = S * 1.3, N = 240;
   let maxP = -Infinity, maxL = Infinity;
@@ -406,7 +438,7 @@ export function analyze(legs, S, dte, baseIV, q) {
   // (UNDEFINED_RISK) before any order can be built on it.
   const ceiling = payoffCeiling(legs);
   return {
-    entry, curve,
+    entry, entryMid, entrySource: usesOverride ? "limit" : "mid", curve,
     maxProfit: ceiling.above ? maxP : null,
     profitUnbounded: !ceiling.above,
     sampledMaxProfit: maxP,   // for drawing only — never a figure on screen
@@ -427,7 +459,8 @@ export function analyze(legs, S, dte, baseIV, q) {
 export function shortlistWithFloors(sent, S, step, strikes, dte, baseIV, q, { peers = null, level = RECOMMENDED_LIQUIDITY } = {}) {
   const rows = [], cut = [];
   let oiSkipped = false;
-  const tally = { liquidity: 0, spread: 0, reward: 0, skipped: 0, spreadSkipped: 0, unpriceable: 0, impossible: 0, model: 0 };
+  const tally = { liquidity: 0, spread: 0, comboSpread: 0, reward: 0, skipped: 0, spreadSkipped: 0,
+    comboSpreadSkipped: 0, unpriceable: 0, impossible: 0, model: 0 };
   for (const p of buildPresets(sent, S, step, strikes)) {
     const a = analyze(p.legs, S, dte, baseIV, q);
     // UNPRICEABLE FIRST, because it is prior to both floors: they judge a
@@ -469,17 +502,23 @@ export function shortlistWithFloors(sent, S, step, strikes, dte, baseIV, q, { pe
     // A leg can have 300 contracts open and a market 145% of the mid wide.
     const qf = qualityFloor({
       openInterest: a.legPx.map((l) => l.oi), peerOpenInterest: peers, level,
-      quotes: quotesOf(a),
+      // AND THE LEGS, because the COMBINATION spread floor needs to know which
+      // side of each leg trades. The pair is not the legs: UNG's 10.50/11.00
+      // call spread passed the per-leg test on both legs and its combination
+      // was 143% of its own mid wide (src/rules.js, `comboSpreadFloor`).
+      quotes: quotesOf(a), legs: p.legs,
       maxProfit: a.maxProfit, maxLoss: a.maxLoss, unboundedProfit: a.profitUnbounded,
     });
     if (!qf.liquidity.checked) { oiSkipped = true; tally.skipped++; }
     if (!qf.spread.checked) tally.spreadSkipped++;
+    if (!qf.comboSpread.checked) tally.comboSpreadSkipped++;
     if (qf.pass) rows.push({ p, a });
     else {
       // WHICH FLOOR DID THE WORK, in the order they are applied. Pooling them
       // would leave the screen unable to say whether the leg was untraded or
       // simply unpriced, which are different faults with different answers.
-      const why = !qf.liquidity.pass ? "liquidity" : !qf.spread.pass ? "spread" : "reward";
+      const why = !qf.liquidity.pass ? "liquidity" : !qf.spread.pass ? "spread"
+        : !qf.comboSpread.pass ? "comboSpread" : "reward";
       tally[why]++;
       cut.push({ name: p.name, reasons: qf.reasons, why });
     }
@@ -765,6 +804,10 @@ function LiquidityFilter({ levelId, onLevel, previews, threshold, ticker, expKey
         {here
           ? `${here.kept} of ${here.total} structures on ${ticker} are shown at this setting` +
             `${here.liquidity ? ` \u00b7 ${here.liquidity} removed because a leg is too thinly traded` : ""}` +
+            `${here.spread ? ` \u00b7 ${here.spread} removed because one leg's own market is too wide` : ""}` +
+            // THE PAIR, NAMED SEPARATELY FROM THE LEG. It does not move with
+            // this setting either, and the two are different faults.
+            `${here.comboSpread ? ` \u00b7 ${here.comboSpread} removed because the WHOLE combination is too wide, though each leg is fine` : ""}` +
             `${here.reward ? ` \u00b7 ${here.reward} removed for paying too little per dollar at risk` : ""}` +
             `${here.skipped ? ` \u00b7 ${here.skipped} not liquidity-checked at all \u2014 the open interest has not arrived, so those have not cleared this floor either` : ""}.`
           : `Nothing is priced on ${ticker} yet, so there is nothing for this setting to filter.`}
@@ -906,6 +949,50 @@ const fmt$ = (x) => {
 const ceil$ = (x) => (Number.isFinite(x) ? fmt$(x) : NO_CEILING);
 const ago = (d) => { const m = Math.round((Date.now() - new Date(d)) / 60000); return m < 60 ? `${m}m ago` : m < 1440 ? `${Math.round(m / 60)}h ago` : `${Math.round(m / 1440)}d ago`; };
 
+/* ====================================================================
+   THE WARNINGS, ONCE.
+
+   >>> COUNTED ON THE OWNER'S PHONE, one Build screen, UNG 2026-09-20. <<<
+   The four-factor CONFLICT paragraph — the same ~400 characters — was on that
+   page FOUR TIMES: inside "Why this trade", again in the amber
+   against-the-signal block, again in the order ticket's warning list, and
+   again in "The checks that run when you tap". The gate embeds
+   `signals.narrative` in its SIGNAL_CONFLICT warning because the gate has no
+   screen of its own, so every surface rendering a gate verdict printed the
+   paragraph a second time beside the panel that already carried it.
+
+   ONE PLACE, COLLAPSED, WITH THE NUMBER IN THE SUMMARY LINE. The narrative
+   keeps its home — the evidence panel — and everything here carries the count
+   and a pointer (`warningsToPrint()` / `conflictSummaryLine()` in rules.js).
+   The gate is UNCHANGED: what changed is what a screen prints.
+
+   IT OPENS BY ITSELF WHEN SOMETHING IS REQUIRED OF THE USER. A textarea that
+   unlocks the ticket cannot be behind a tap nobody knows to make.
+==================================================================== */
+function BuildWarnings({ summary, count, forceOpen = false, children }) {
+  const [open, setOpen] = useState(false);
+  const shown = open || forceOpen;
+  if (!count) return null;
+  return (
+    <div style={{ marginTop: 10, padding: "9px 11px", background: `${T.amber}0d`, border: `1px solid ${T.amber}66`, borderRadius: 8 }}>
+      <button onClick={() => setOpen((o) => !o)} disabled={forceOpen}
+        style={{ display: "flex", gap: 8, alignItems: "baseline", width: "100%", textAlign: "left",
+          background: "transparent", border: "none", padding: 0, cursor: forceOpen ? "default" : "pointer" }}>
+        <span style={{ ...mono, fontSize: 10, fontWeight: 800, color: T.amber, letterSpacing: 0.4 }}>
+          ⚠ {count} WARNING{count === 1 ? "" : "S"}
+        </span>
+        <span style={{ fontSize: 12.5, color: T.body, lineHeight: 1.5 }}>{summary}</span>
+        {!forceOpen && (
+          <span style={{ ...mono, fontSize: 10.5, color: T.blue, marginLeft: "auto", whiteSpace: "nowrap" }}>
+            {shown ? "hide ▲" : "read them ▼"}
+          </span>
+        )}
+      </button>
+      {shown && <div style={{ marginTop: 9 }}>{children}</div>}
+    </div>
+  );
+}
+
 /* ============================== MAIN ============================== */
 class TabBoundary extends React.Component {
   constructor(p) { super(p); this.state = { err: null }; }
@@ -1033,6 +1120,9 @@ export default function OptionsStrategyLab() {
     if (sizedFor.current === key) return;
     sizedFor.current = key;
     setContracts(1);
+    // ...and the PRICE with it, for the same reason: a per-leg limit typed
+    // against a butterfly is not an answer about the vertical that replaced it.
+    setTicket((t) => ({ ...t, legPx: null }));
   }, [ticker, expKey]);
   // THE COPILOT'S CONVERSATION LIVES HERE, not inside the panel. The panel is
   // an evidence panel: every other chip in the strip unmounts it, so state kept
@@ -1496,7 +1586,73 @@ export default function OptionsStrategyLab() {
   );
 
   /* ---- analisi ---- */
+  /* `A` IS THE STRUCTURE AT THE MID — what it is WORTH. It is still the honest
+     answer to that question and it is still on screen. It is no longer the
+     answer to "what will this trade do", because that depends on the price it
+     will be done at: see `AE` below. */
   const A = useMemo(() => (spot && legs.length ? analyze(legs, spot, dte, iv, q) : null), [legs, spot, dte, iv, q]);
+
+  /* ===================================================================
+     THE PRICE THE ORDER WILL BE SENT AT IS BUILD-SCREEN STATE.
+
+     It lived inside `OrderTicket` as `cfg`, exactly as the quantity did before
+     PR #23 — so the screen above the ticket had no idea what price it was
+     about to send, and every figure on it was worked out from the MID while
+     the ticket two thousand pixels below said a limit at the mid does not
+     fill. Type, time in force and ONE PRICE PER LEG live here now; the ticket
+     is a controlled input on them, like the quantity field beside it.
+
+     `legPx` is null until the user moves something, and the seed is derived
+     (`legLimitSeed()` in rules.js): a stored seed would go stale the moment
+     the chain refreshed, and a stale seed presented as the user's price is the
+     same fault as a suggested capital figure quoted back as his answer.
+  =================================================================== */
+  const [ticket, setTicket] = useState({ type: "limit", tif: "day", legPx: null });
+  const bookQuotes = useMemo(
+    () => (A ? A.legPx.map((l) => ({ bid: l.bid, ask: l.ask, mid: l.px, bidSize: l.bidSize, askSize: l.askSize })) : []),
+    [A]);
+  const book = useMemo(() => comboBook(legs, bookQuotes), [legs, bookQuotes]);
+  const seedPx = useMemo(() => legLimitSeed(legs, bookQuotes), [legs, bookQuotes]);
+  /* THE USER'S PRICES, OR THE SEED — never a mix. A `legPx` of the wrong
+     length belongs to a structure that is no longer on screen. */
+  const legPrices = useMemo(
+    () => (Array.isArray(ticket.legPx) && ticket.legPx.length === legs.length ? ticket.legPx : seedPx),
+    [ticket.legPx, seedPx, legs.length]);
+  /* THE NET IS DERIVED FROM THE LEGS, which is the reverse of the single net
+     field the ticket had, and is the direction the owner thinks in. */
+  const ticketNet = useMemo(() => netFromLegs(legs, legPrices || []), [legs, legPrices]);
+  const ticketDir = useMemo(
+    () => (book.ok ? (book.mid >= 0 ? 1 : -1) : (A && A.entry < 0 ? -1 : 1)),
+    [book, A]);
+  /* A LIMIT IS A CEILING, NOT A PRICE (src/rules.js, `effectiveLimit`). An
+     order at or past the touch fills AT the touch, so the price that decides
+     the trade is `min(limit, ask)` on a debit — never the number typed. A
+     MARKET order has no limit at all: it takes the touch, and that is what
+     every figure below is then worked out at. */
+  const effective = useMemo(() => {
+    if (ticket.type === "market") {
+      if (!book.ok) return { known: false, dir: ticketDir, typed: null, touch: null, effective: null, net: null, capped: false, give: null };
+      const touch = Math.abs(book.ask);
+      return { known: true, dir: ticketDir, typed: null, touch, effective: touch, net: ticketDir * touch, capped: true, give: 0 };
+    }
+    return effectiveLimit(ticketNet.net == null ? null : Math.abs(ticketNet.net), book, ticketDir);
+  }, [ticket.type, book, ticketNet, ticketDir]);
+  /* >>> AND THIS IS THE ANALYSIS EVERY FIGURE ON THE SCREEN READS. <<<
+     Same legs, same chain, same volatility — one different number, the entry
+     price, and on UNG it is the difference between 2.6:1 and 1.1:1. With no
+     readable price it falls back to `A`, which is the old behaviour and says
+     so rather than blanking the screen. */
+  const AE = useMemo(() => {
+    if (!A) return null;
+    if (!Number.isFinite(effective.net)) return A;
+    return analyze(legs, spot, dte, iv, q, { net: effective.net });
+  }, [A, effective.net, legs, spot, dte, iv, q]);
+  /* WHERE THAT PRICE FALLS AND WHAT THE TIME IN FORCE DOES TO IT. One verdict,
+     read by the band in the ticket and by the confirm step. */
+  const ticketVerdict = useMemo(
+    () => orderVerdict(ticketNet.net == null ? null : Math.abs(ticketNet.net), book,
+      { sign: ticketDir, tif: ticket.tif, type: ticket.type }),
+    [ticketNet, book, ticketDir, ticket.tif, ticket.type]);
   /* IS IT THIS STRUCTURE'S PRICE — COMPUTED ONCE, HERE.
      `ComboBookPanel` in pro.jsx ran the model check on every render of the
      ticket, which is a Black-Scholes reprice of every leg for each keystroke in
@@ -1539,9 +1695,15 @@ export default function OptionsStrategyLab() {
   /* AND THE BUILD SCREEN'S OWN, COMPUTED ONCE. The CHANCE stat, the PROFIT x
      CHANCE stat, the simulation panel and the position record all read this
      object — they used to read three different calculations. */
+  /* AT THE PRICE THAT WILL BE SENT, like every other figure on this screen.
+     `chanceOf()` reads `entryNet`, so a chance worked out at the mid beside a
+     maximum loss worked out at the ask would be two readings of one trade —
+     the fault this whole section exists to remove. The Shortlist row still
+     prints its candidate at the MID, because a candidate is not yet a price;
+     the Build screen says so where the two are side by side. */
   const chance = useMemo(
-    () => (A && spot && legs.length ? chanceFor(A, { ticker, legs, spot, dte, expKey }) : null),
-    [A, chanceFor, ticker, legs, spot, dte, expKey]);
+    () => (AE && spot && legs.length ? chanceFor(AE, { ticker, legs, spot, dte, expKey }) : null),
+    [AE, chanceFor, ticker, legs, spot, dte, expKey]);
   // The Shortlist, already past the quality floors. Computed here rather than
   // inside the render so the filtered-out list and the rows come from one call.
   // Every known open-interest count on the expiry being shown: the peer set the
@@ -1885,7 +2047,12 @@ export default function OptionsStrategyLab() {
       setMsg(`Write why you are going against ${clash.n} of ${clash.total} factors (at least ${REASON_MIN} characters). The reason is stored with the position.`);
       return;
     }
-    const r = await commitPosition({ ticker, expKey, legs, dte, analysis: A, spot, name: stratName,
+    // THE RECORD CARRIES THE PRICE THE TRADE WAS DONE AT, NOT THE MID. `AE` is
+    // `analyze()` at `effectiveLimit()`'s net, which is what the confirm step
+    // above showed and what the ticket sent. A position recorded at the mid is
+    // a position whose maximum loss, breakeven and take-profit target describe
+    // a trade nobody made — and the Guardian reads it for the rest of its life.
+    const r = await commitPosition({ ticker, expKey, legs, dte, analysis: AE, spot, name: stratName,
       alpacaOrder, clashInfo: clash, reason: against.reason, roomOverride: roomReason, contracts });
     setOpenResult(r.gate);
     if (!r.ok) { setMsg(`Risk gate: position not opened. ${r.gate.violations.map((v) => v.message).join(" ")}`); return; }
@@ -2069,8 +2236,8 @@ export default function OptionsStrategyLab() {
     try {
       const out = [];
       // What the quality floors removed, so an empty or short result can say why.
-      const cutFloors = { n: 0, liquidity: 0, spread: 0, reward: 0, unpriceable: 0, impossible: 0, model: 0,
-        markets: new Set(), oiSkipped: new Set(), spreadSkipped: new Set() };
+      const cutFloors = { n: 0, liquidity: 0, spread: 0, comboSpread: 0, reward: 0, unpriceable: 0, impossible: 0, model: 0,
+        markets: new Set(), oiSkipped: new Set(), spreadSkipped: new Set(), comboSpreadSkipped: new Set() };
       // le barre servono al fattore tecnico: caricale prima di fondere i segnali
       const barsMap = Object.fromEntries(await Promise.all(multi.sel.map(async (tk) => [tk, await loadBars(tk)])));
       const fz = Object.fromEntries(multi.sel.map((tk) => [tk, fuseFor(tk, barsMap[tk] ?? barsCache[tk])]));
@@ -2113,15 +2280,18 @@ export default function OptionsStrategyLab() {
           // Same floors as the Shortlist and the wizard, from the same function.
           const qf = qualityFloor({
             openInterest: a.legPx.map((l) => l.oi), peerOpenInterest: peers, level: liqLevel,
-            quotes: quotesOf(a),
+            // ...and the LEGS, for the combination spread floor beside it.
+            quotes: quotesOf(a), legs: pr.legs,
             maxProfit: a.maxProfit, maxLoss: a.maxLoss, unboundedProfit: a.profitUnbounded,
           });
           if (!qf.liquidity.checked) cutFloors.oiSkipped.add(tk);
           if (!qf.spread.checked) cutFloors.spreadSkipped.add(tk);
+          if (!qf.comboSpread.checked) cutFloors.comboSpreadSkipped.add(tk);
           if (!qf.pass) {
             cutFloors.n++; cutFloors.markets.add(tk);
             if (!qf.liquidity.pass) cutFloors.liquidity++;
             else if (!qf.spread.pass) cutFloors.spread++;
+            else if (!qf.comboSpread.pass) cutFloors.comboSpread++;
             else cutFloors.reward++;
             continue;
           }
@@ -2150,10 +2320,12 @@ export default function OptionsStrategyLab() {
       }).sort(compareCandidates);
       setMulti((m) => ({ ...m, busy: false, res: ranked.slice(0, 8),
         floors: {
-          n: cutFloors.n, liquidity: cutFloors.liquidity, spread: cutFloors.spread, reward: cutFloors.reward,
+          n: cutFloors.n, liquidity: cutFloors.liquidity, spread: cutFloors.spread,
+          comboSpread: cutFloors.comboSpread, reward: cutFloors.reward,
           unpriceable: cutFloors.unpriceable, impossible: cutFloors.impossible, model: cutFloors.model,
           markets: [...cutFloors.markets], oiSkipped: [...cutFloors.oiSkipped],
-          spreadSkipped: [...cutFloors.spreadSkipped], level: liqLevel,
+          spreadSkipped: [...cutFloors.spreadSkipped],
+          comboSpreadSkipped: [...cutFloors.comboSpreadSkipped], level: liqLevel,
         } }));
     } catch (e) { setMulti((m) => ({ ...m, busy: false, err: String(e.message || e) })); }
   };
@@ -2213,7 +2385,8 @@ export default function OptionsStrategyLab() {
     setConfirmSend(false); setBusy("order");
     try {
       // PRD §8: nessun ordine raggiunge Alpaca senza passare da qui.
-      const g = gate({ ticker, intent: "open", legs, dte, contracts, maxLoss: A?.maxLoss, maxProfit: A?.maxProfit });
+      // At the price that will be sent, like the preview above it (`AE`).
+      const g = gate({ ticker, intent: "open", legs, dte, contracts, maxLoss: AE?.maxLoss, maxProfit: AE?.maxProfit });
       if (!g.pass) {
         setMsg(`Risk gate: order not sent. ${g.violations.map((v) => v.message).join(" ")}`);
         setBusy(null); return;
@@ -2377,8 +2550,9 @@ export default function OptionsStrategyLab() {
       // What the quality floors threw out, and where. Counted per reason so the
       // refusal can name the floor: "nothing on CORN clears the liquidity floor
       // today" is a useful answer, an empty screen is not.
-      const floors = { liquidity: 0, spread: 0, reward: 0, unpriceable: 0, impossible: 0, model: 0,
-        markets: new Set(), oiUnavailable: new Set(), spreadUnavailable: new Set() };
+      const floors = { liquidity: 0, spread: 0, comboSpread: 0, reward: 0, unpriceable: 0, impossible: 0, model: 0,
+        markets: new Set(), oiUnavailable: new Set(), spreadUnavailable: new Set(),
+        comboSpreadUnavailable: new Set() };
       for (const r of priced) {
         const tk = r.tk;
         const c = chains[tk] || (await refreshChain(tk, true));
@@ -2442,14 +2616,17 @@ export default function OptionsStrategyLab() {
             // emptied the board rather than shrugging at an empty page.
             const qf = qualityFloor({
               openInterest: a.legPx.map((l) => l.oi), peerOpenInterest: peers, level: liqLevel,
-              quotes: quotesOf(a),
+              // ...and the LEGS, for the combination spread floor beside it.
+              quotes: quotesOf(a), legs: pr.legs,
               maxProfit: a.maxProfit, maxLoss: a.maxLoss, unboundedProfit: a.profitUnbounded,
             });
             if (!qf.liquidity.checked) floors.oiUnavailable.add(tk);
             if (!qf.spread.checked) floors.spreadUnavailable.add(tk);
+            if (!qf.comboSpread.checked) floors.comboSpreadUnavailable.add(tk);
             if (!qf.pass) {
               if (!qf.liquidity.pass) floors.liquidity++;
               else if (!qf.spread.pass) floors.spread++;
+              else if (!qf.comboSpread.pass) floors.comboSpread++;
               else floors.reward++;
               floors.markets.add(tk);
               continue;
@@ -2469,7 +2646,7 @@ export default function OptionsStrategyLab() {
       // emptied by the quality floors is a different sentence from a board
       // emptied by the budget, and the user is owed the one that is true.
       if (!pool.length) {
-        const cut = floors.liquidity + floors.spread + floors.reward;
+        const cut = floors.liquidity + floors.spread + floors.comboSpread + floors.reward;
         // AN UNREADABLE PRICE IS ITS OWN ANSWER. A board where nothing could be
         // priced is not a board emptied by the floors and is certainly not a
         // budget problem — saying either would blame the user, or the market,
@@ -2506,7 +2683,8 @@ export default function OptionsStrategyLab() {
           return stop([{
             id: "quality-floor",
             text: NOTHING_TODAY.belowQualityFloor({
-              liquidity: floors.liquidity, spread: floors.spread, reward: floors.reward,
+              liquidity: floors.liquidity, spread: floors.spread, comboSpread: floors.comboSpread,
+              reward: floors.reward,
               unpriceable: floors.unpriceable, model: floors.model,
               impossible: floors.impossible, markets: [...floors.markets], level: liqLevel,
             }),
@@ -2558,7 +2736,11 @@ export default function OptionsStrategyLab() {
         // all read the same number.
         rr: x.rr, contracts: 1, a: x.a, fused: x.fused,
         driver: x.driver, drivers: x.drivers,
-        sigma: sigmaFor(x.tk).sigma,
+        // THE TWO NUMBERS THE PICTURE IS DRAWN AT ARE THE TWO THE CHANCE WAS
+        // WORKED OUT AT. This was `sigmaFor(x.tk).sigma` — the REALISED
+        // volatility — beside a `pop` computed at the chain's IMPLIED one, and
+        // with no drift travelling at all.
+        ...chanceDrawFields(x.mc),
         // A ROAD CARRIES THE SOURCE OF ITS OWN CHANCE. Two roads are ranked on
         // one scale across the whole basket, so road 1 and road 2 can be in
         // different markets — and with four of five markets on the hand-written
@@ -2574,10 +2756,12 @@ export default function OptionsStrategyLab() {
       setVerdict(verdictNarrative({
         basket, examined, excluded, newsItems: newsPool, weatherData: weather,
         month: NOW_MONTH, weights: ans.weights, chosen: roads,
-        floors: { liquidity: floors.liquidity, spread: floors.spread, reward: floors.reward,
+        floors: { liquidity: floors.liquidity, spread: floors.spread, comboSpread: floors.comboSpread,
+          reward: floors.reward,
           unpriceable: floors.unpriceable, impossible: floors.impossible,
           markets: [...floors.markets], oiUnavailable: [...floors.oiUnavailable],
-          spreadUnavailable: [...floors.spreadUnavailable] },
+          spreadUnavailable: [...floors.spreadUnavailable],
+          comboSpreadUnavailable: [...floors.comboSpreadUnavailable] },
       }));
 
       setTicker(first.tk); setExpKey(first.ek);
@@ -2755,15 +2939,19 @@ export default function OptionsStrategyLab() {
   }), [store.positions, alpaca, capitalAnswers, fused, ticker]);
 
   const guard = useMemo(() => {
-    if (!A) return null;
+    if (!AE) return null;
     // AT THE QUANTITY THAT WILL ACTUALLY BE SENT. This read `contracts: 1`
     // while the ticket below it sized the order at `cfg.qty`, so the checks the
     // user read and the checks the order had to pass were about two different
     // trades — and the per-trade cap was measured against one combination of a
     // seven-lot spread.
-    return gate({ ticker, intent: "open", legs, dte, contracts, maxLoss: A.maxLoss, maxProfit: A.maxProfit,
-      quotes: quotesOf(A), net: A.entry, entryOverride: roomReason }, LOCAL_BOOK);
-  }, [A, gate, legs, dte, ticker, roomReason, contracts]); // eslint-disable-line
+    // ...AND AT THE PRICE THAT WILL ACTUALLY BE SENT. The per-trade cap is
+    // measured against the maximum loss, and on UNG the maximum loss at the
+    // mid is $14 while the maximum loss at the price that trades is $24 — the
+    // gate was reading a figure the order could not be filled at.
+    return gate({ ticker, intent: "open", legs, dte, contracts, maxLoss: AE.maxLoss, maxProfit: AE.maxProfit,
+      quotes: quotesOf(AE), net: AE.entry, entryOverride: roomReason }, LOCAL_BOOK);
+  }, [AE, gate, legs, dte, ticker, roomReason, contracts]); // eslint-disable-line
   /* Which band this expiry falls in, for the screen. The gate decides; this
      only decides what the screen has to ASK for. */
   const room = useMemo(() => entryRoom(dte), [dte]);
@@ -3556,6 +3744,12 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                         {modelDisagreementNote(multi.floors.model, multi.floors.markets.join(", "))}
                       </div>
                     )}
+                    {/* AND THE COMBINATIONS WHOSE LEGS WERE FINE. */}
+                    {multi.floors?.comboSpread > 0 && (
+                      <div style={{ ...mono, fontSize: 10, color: T.amber, lineHeight: 1.6 }}>
+                        {wideComboNote(multi.floors.comboSpread, multi.floors.markets.join(", "))}
+                      </div>
+                    )}
                     {/* AND WHAT COULD NOT BE SCORED. An unbounded profit has no
                         expected value, so it sits last — said in words, because
                         a candidate at the bottom of a list with a dash where its
@@ -3876,6 +4070,21 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   {wideSpreadNote(shortlist.tally.spread, `${ticker} ${expKey || ""}`.trim())}
                 </div>
               )}
+              {/* AND THE PAIR, WHICH IS NOT THE LEGS. Its own count and its own
+                  sentence: UNG's 10.50/11.00 call spread passed the per-leg test
+                  on both legs and its combination was 143% of its own mid wide.
+                  Pooling the two would leave the screen unable to say whether a
+                  leg is untradeable or the trade is unaffordable. */}
+              {shortlist.tally.comboSpread > 0 && (
+                <div style={{ ...mono, fontSize: 10.5, color: T.amber, marginTop: 6, lineHeight: 1.6 }}>
+                  {wideComboNote(shortlist.tally.comboSpread, `${ticker} ${expKey || ""}`.trim())}
+                </div>
+              )}
+              {shortlist.tally.comboSpreadSkipped > 0 && (
+                <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6, lineHeight: 1.6 }}>
+                  {comboSpreadSkippedNote(feedName(chain))}
+                </div>
+              )}
               <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
                 {shortlist.rows.map(({ p, a }) => {
                   // `rewardRisk()` and never a division here: a ratio taken
@@ -3890,8 +4099,12 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   // (src/path.js), so a road, a shortlist row and a
                   // multi-market hit are the same kind of thing here.
                   const bands = payoffBands({ legs: p.legs, entryNet: a.entry, spot });
-                  const cand = candidateOf({ name: p.name, legs: p.legs, a, pop, dte, expKey, ...seasonalStampFields(mcRow) },
-                    { ticker, spot, sigma: sigmaFor(ticker).sigma, source: "shortlist" });
+                  const cand = candidateOf({ name: p.name, legs: p.legs, a, pop, dte, expKey,
+                    ...seasonalStampFields(mcRow), ...chanceDrawFields(mcRow) },
+                  // NO `sigma` FROM THE REALISED TABLE HERE ANY MORE. The two
+                  // numbers a compare picture is drawn at are the two the
+                  // chance was computed at, and they come off `mcRow` above.
+                  { ticker, spot, source: "shortlist" });
                   return (
                     <div key={p.name} style={{ padding: "10px 12px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7 }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
@@ -3975,8 +4188,9 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                 <Lbl>ALSO FOUND BY THE WIDE SEARCH ON {ticker}</Lbl>
                 <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
                   {(multi.res || []).filter((r) => r.tk === ticker).map((r, i) => {
-                    const cand = candidateOf({ name: r.name, legs: r.legs, a: r.a, pop: r.pop, dte: r.dte, expKey: r.expKey, ...seasonalStampFields(r.mc) },
-                      { ticker: r.tk, spot: r.spot, sigma: sigmaFor(r.tk).sigma, source: "wide search" });
+                    const cand = candidateOf({ name: r.name, legs: r.legs, a: r.a, pop: r.pop, dte: r.dte, expKey: r.expKey,
+                      ...seasonalStampFields(r.mc), ...chanceDrawFields(r.mc) },
+                    { ticker: r.tk, spot: r.spot, source: "wide search" });
                     const bands = payoffBands({ legs: r.legs, entryNet: r.a.entry, spot: r.spot });
                     return (
                       <div key={`${r.name}-${i}`} style={{ padding: "10px 12px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7 }}>
@@ -4206,34 +4420,64 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   : `This structure needs ${ticker} to go ${tradeDir > 0 ? "up" : "down"}.`}
               />
 
-              {/* ---- Andare contro il segnale (PRD §7) ----
-                  Non si chiude e non blocca il trade: chiede la motivazione
-                  scritta, che viene salvata nella tesi della posizione. */}
-              {clash && (
-                <div style={{ marginTop: 10, padding: "11px 13px", background: `${T.amber}12`, border: `1.5px solid ${T.amber}`, borderRadius: 8 }}>
-                  <div style={{ ...mono, fontSize: 12.5, fontWeight: 800, color: T.amber }}>{clash.question}</div>
-                  <div style={{ fontSize: 12.5, color: T.body, marginTop: 5, lineHeight: 1.5 }}>{clash.detail}.</div>
-                  <div style={{ display: "grid", gap: 4, marginTop: 8 }}>
-                    {clash.opposing.map((o) => (
-                      <div key={o.key} style={{ ...mono, fontSize: 10.5, color: T.mut }}>
-                        <span style={{ color: T.red, fontWeight: 700 }}>✗ {o.label}</span> ({o.strength}/100) — {o.why}
+              {/* ---- ONE WARNINGS PANEL, COLLAPSED (PRD §4l, TASK 1.7) ----
+                  The against-the-signal block (PRD §7) and the gate's own
+                  warnings, in one place, with the number in the summary line.
+                  It does not close and does not block the trade: it asks for
+                  the written reason, which is saved in the position's thesis.
+
+                  It opens by itself while a reason is still required, because a
+                  textarea that unlocks the ticket cannot be behind a tap. */}
+              {(() => {
+                const fusedHere = fused[ticker] || null;
+                // THE NARRATIVE HAS ONE HOME — "Why this trade", just above.
+                // Everything here carries the count and points at it.
+                const gateWarnings = warningsToPrint(guard?.warnings || [], {
+                  narrative: fusedHere?.narrative || null,
+                  pointer: conflictSummaryLine(clash, fusedHere),
+                });
+                const count = (clash ? 1 : 0) + gateWarnings.length;
+                if (!count) return null;
+                const summary = clash
+                  ? conflictSummaryLine(clash, fusedHere)
+                  : `${gateWarnings.length} thing${gateWarnings.length === 1 ? "" : "s"} the risk gate wants you to have read before you send this.`;
+                return (
+                  <BuildWarnings summary={summary} count={count} forceOpen={!!clash && !reasonOk}>
+                    {clash && (
+                      <>
+                        <div style={{ ...mono, fontSize: 12.5, fontWeight: 800, color: T.amber }}>{clash.question}</div>
+                        <div style={{ fontSize: 12.5, color: T.body, marginTop: 5, lineHeight: 1.5 }}>{clash.detail}.</div>
+                        <div style={{ display: "grid", gap: 4, marginTop: 8 }}>
+                          {clash.opposing.map((o) => (
+                            <div key={o.key} style={{ ...mono, fontSize: 10.5, color: T.mut }}>
+                              <span style={{ color: T.red, fontWeight: 700 }}>✗ {o.label}</span> ({o.strength}/100) — {o.why}
+                            </div>
+                          ))}
+                        </div>
+                        <textarea
+                          value={against.reason}
+                          onChange={(e) => setAgainst({ reason: e.target.value })}
+                          placeholder="Why are you taking this trade anyway? Write the reason — it is stored with the position and you will read it again when you close."
+                          rows={3}
+                          style={{ ...mono, width: "100%", boxSizing: "border-box", marginTop: 9, background: T.bg, color: T.ink, border: `1px solid ${reasonOk ? T.green : T.amber}`, borderRadius: 6, padding: "8px 9px", fontSize: 12, resize: "vertical" }}
+                        />
+                        <div style={{ ...mono, fontSize: 10, color: reasonOk ? T.green : T.dim, marginTop: 4 }}>
+                          {reasonOk
+                            ? "✓ Reason recorded: it will be saved with the position and shown again when you close it."
+                            : `${Math.max(0, REASON_MIN - against.reason.trim().length)} more characters. Nothing here stops you taking this trade — you are only asked to write down why.`}
+                        </div>
+                      </>
+                    )}
+                    {gateWarnings.length > 0 && (
+                      <div style={{ display: "grid", gap: 6, marginTop: clash ? 10 : 0 }}>
+                        {gateWarnings.map((w) => (
+                          <div key={w.code} style={{ ...mono, fontSize: 10.5, color: T.amber, lineHeight: 1.6 }}>⚠ {w.message}</div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
-                  <textarea
-                    value={against.reason}
-                    onChange={(e) => setAgainst({ reason: e.target.value })}
-                    placeholder="Why are you taking this trade anyway? Write the reason — it is stored with the position and you will read it again when you close."
-                    rows={3}
-                    style={{ ...mono, width: "100%", boxSizing: "border-box", marginTop: 9, background: T.bg, color: T.ink, border: `1px solid ${reasonOk ? T.green : T.amber}`, borderRadius: 6, padding: "8px 9px", fontSize: 12, resize: "vertical" }}
-                  />
-                  <div style={{ ...mono, fontSize: 10, color: reasonOk ? T.green : T.dim, marginTop: 4 }}>
-                    {reasonOk
-                      ? "✓ Reason recorded: it will be saved with the position and shown again when you close it."
-                      : `${Math.max(0, REASON_MIN - against.reason.trim().length)} more characters. Nothing here stops you taking this trade — you are only asked to write down why.`}
-                  </div>
-                </div>
-              )}
+                    )}
+                  </BuildWarnings>
+                );
+              })()}
 
               {/* THE ENTRY FLOOR IS NOT A CLIFF ANY MORE (src/rules.js,
                   `entryRoom`). Three bands, and only the middle one has a door:
@@ -4360,24 +4604,54 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   </div>
                 );
               })()}
-              {/* Stats */}
+              {/* >>> EVERY FIGURE HERE IS WORKED OUT AT THE PRICE THAT WILL BE
+                  SENT, NOT AT THE MID. <<< Read on the owner's phone, UNG
+                  2026-09-20: this block said YOU PAY $14 · MOST YOU CAN MAKE
+                  $36 · MOST YOU CAN LOSE -$14 · BREAKEVEN 10.64, all worked out
+                  from the mid, while the ticket below said in these words that
+                  a limit at the mid is a limit nobody has to meet. At $24 — the
+                  price that trades — the same structure pays $26, risks $24 and
+                  breaks even at 10.74. He decided on 2.6:1 and could only have
+                  1.1:1. `AE` is `analyze()` at `effectiveLimit()`'s net; the
+                  MID is still on screen, beside it, as what it is worth. */}
               <div style={{ display: "flex", gap: 16, marginTop: 14, flexWrap: "wrap" }}>
-                <Stat k={A.entry >= 0 ? "YOU PAY" : "YOU RECEIVE"} v={fmt$(Math.abs(A.entry) * 100)} tip="What it costs to open this trade, or what you are paid to open it. With live quotes this is the midpoint between the buy and sell price." />
+                <Stat k={AE.entry >= 0 ? "YOU PAY" : "YOU RECEIVE"} v={fmt$(Math.abs(AE.entry) * 100)}
+                  tip={`What this trade costs at the price the order will be sent at. The MID — what the structure is worth, half way between the two sides of its market — is ${fmt$(Math.abs(AE.entryMid) * 100)}. A limit at the mid is a limit nobody has to meet, so the figures beside this one are worked out at the price that trades.`} />
+                <Stat k="WORTH (MID)" v={fmt$(Math.abs(AE.entryMid) * 100)} c={T.mut}
+                  tip="Half way between the two sides of the market. It is the honest answer to what this structure is WORTH, and it is not the price anybody has to trade with you at." />
                 {/* THE TOOLTIP USED TO SAY "It cannot make more than this" UNDER
                     A NUMBER THAT WAS THE EDGE OF A GRID. For a long call it can
                     make more than that, and there is no number at which it
                     cannot: the figure and the claim under it are both gone. */}
-                <Stat k="MOST YOU CAN MAKE" v={ceil$(A.maxProfit)} c={T.green}
-                  tip={A.profitUnbounded ? noCeilingNote(stratName || "This structure")
-                    : "The best this trade can do at expiry. It cannot make more than this."} />
-                <Stat k="MOST YOU CAN LOSE" v={fmt$(A.maxLoss)} c={T.red} tip="The worst this trade can do. It is fixed the moment you open it — never a dollar more." />
-                <Stat k="BREAKEVEN" v={A.breakevens.map((b) => b.toFixed(2)).join(" · ") || "—"} c={T.blue} />
-                <Stat k={takeProfitLabel()} v={A.profitUnbounded ? "—" : fmt$(A.maxProfit * RULES.takeProfitPct)} c={T.green}
-                  tip={A.profitUnbounded
+                <Stat k="MOST YOU CAN MAKE" v={ceil$(AE.maxProfit)} c={T.green}
+                  tip={AE.profitUnbounded ? noCeilingNote(stratName || "This structure")
+                    : "The best this trade can do at expiry, at the price it will be opened at. It cannot make more than this."} />
+                <Stat k="MOST YOU CAN LOSE" v={fmt$(AE.maxLoss)} c={T.red} tip="The worst this trade can do, at the price it will be opened at. It is fixed the moment you open it — never a dollar more." />
+                <Stat k="BREAKEVEN" v={AE.breakevens.map((b) => b.toFixed(2)).join(" · ") || "—"} c={T.blue} />
+                <Stat k="MADE PER $1 RISKED" v={(() => { const r = rewardRisk(AE.maxProfit, AE.maxLoss); return r == null ? "—" : `${r.toFixed(2)}`; })()}
+                  c={T.violet}
+                  tip={AE.profitUnbounded ? noCeilingNote(stratName || "This structure")
+                    : "The best case divided by the worst, at the price that will be sent. At the mid it would read better than this and you cannot trade at the mid."} />
+                <Stat k={takeProfitLabel()} v={AE.profitUnbounded ? "—" : fmt$(AE.maxProfit * RULES.takeProfitPct)} c={T.green}
+                  tip={AE.profitUnbounded
                     ? `${RULE_PILLS.takeProfit()} ${noCeilingNote(stratName || "This structure")}`
                     : RULE_PILLS.takeProfit()} />
-                <Stat k={stopLossLabel()} v={fmt$(A.maxLoss * RULES.stopLossPct)} c={T.red} tip={RULE_PILLS.stopLoss()} />
+                <Stat k={stopLossLabel()} v={fmt$(AE.maxLoss * RULES.stopLossPct)} c={T.red} tip={RULE_PILLS.stopLoss()} />
               </div>
+              {/* ONE SENTENCE SAYING WHICH PRICE THE BLOCK ABOVE IS AT, because
+                  the Shortlist row for the same structure is at the MID and a
+                  reader moving between the two screens is owed the reason they
+                  differ. `entrySource` comes off `analyze()` itself, so a label
+                  cannot assert a price the arithmetic did not use. */}
+              {AE.entrySource === "limit" && Math.abs(AE.entry - AE.entryMid) > 0.0049 && (
+                <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 8, lineHeight: 1.6 }}>
+                  {`These figures are worked out at ${fmt$(Math.abs(AE.entry) * 100)} — the price the ticket below ` +
+                   `will send, and what would really be ${AE.entry >= 0 ? "paid" : "received"} for it. The mid is ` +
+                   `${fmt$(Math.abs(AE.entryMid) * 100)}, which is what the Shortlist row for this structure shows: ` +
+                   `a candidate is a structure, and this is a price. Move a leg's price in the ticket and every ` +
+                   `number above moves with it.`}
+                </div>
+              )}
               {/* EVERY FIGURE ABOVE IS ONE COMBINATION. The ticket below can
                   send seven, and until this session the gate was measuring one
                   of them: a per-contract number read as the trade's is the same
@@ -4386,9 +4660,9 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
               {contracts > 1 && (
                 <div style={{ ...mono, fontSize: 10.5, color: T.amber, marginTop: 9, lineHeight: 1.6, padding: "7px 9px", background: `${T.amber}0f`, border: `1px solid ${T.amber}55`, borderRadius: 6 }}>
                   {`Those are the figures for ONE combination. The ticket is set to ×${contracts}, so this trade pays ` +
-                   `${A.entry >= 0 ? "" : "you "}${fmt$(Math.abs(A.entry) * 100 * contracts)}${A.entry >= 0 ? " to open" : " to open"}, ` +
-                   `risks ${fmt$(Math.abs(A.maxLoss) * contracts)} and can make ` +
-                   `${A.profitUnbounded ? NO_CEILING : fmt$(A.maxProfit * contracts)}. The risk gate and the confirm step below both read the ×${contracts}.`}
+                   `${AE.entry >= 0 ? "" : "you "}${fmt$(Math.abs(AE.entry) * 100 * contracts)}${AE.entry >= 0 ? " to open" : " to open"}, ` +
+                   `risks ${fmt$(Math.abs(AE.maxLoss) * contracts)} and can make ` +
+                   `${AE.profitUnbounded ? NO_CEILING : fmt$(AE.maxProfit * contracts)}. The risk gate and the confirm step below both read the ×${contracts}.`}
                 </div>
               )}
               <div style={{ display: "flex", gap: 16, marginTop: 10, flexWrap: "wrap" }}>
@@ -4468,13 +4742,27 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                 <OrderTicket
                   onSent={(o) => openPaper(o)}
                   legs={legs} expKey={expKey} ticker={ticker}
-                  buildOcc={buildOcc} quoteFn={q} estNet={A.entry * 100 / 100}
+                  buildOcc={buildOcc} quoteFn={q} estNet={AE.entry}
                   setMsg={setMsg}
-                  gate={gate} dte={dte} maxLoss={A.maxLoss} maxProfit={A.maxProfit}
+                  /* THE FIGURES THE TICKET PRINTS ARE THE ONES THE SCREEN ABOVE
+                     PRINTS, at the price about to be sent (`AE`). They used to
+                     be `A`'s — the mid — which is how the ticket came to say a
+                     limit at the mid does not fill under a maximum loss worked
+                     out at exactly that mid. */
+                  gate={gate} dte={dte} maxLoss={AE.maxLoss} maxProfit={AE.maxProfit}
                   /* THE SIZE IS THE SCREEN'S, NOT THE TICKET'S. It used to be
                      `cfg.qty` inside the ticket, which is why the gate above and
                      the position written below both ran at a hardcoded 1. */
                   qty={contracts} onQty={setContracts}
+                  /* AND NEITHER IS THE PRICE, for the same reason and one
+                     session later. Type, time in force and one price per leg
+                     are Build-screen state; the verdict and the effective price
+                     are worked out once, above, and handed down. */
+                  cfg={ticket} onCfg={(patch) => setTicket((t) => ({ ...t, ...patch }))}
+                  quotes={bookQuotes} legPrices={legPrices || []} net={ticketNet.net}
+                  verdict={ticketVerdict} effective={effective}
+                  seed={seedPx} onReseed={() => setTicket((t) => ({ ...t, legPx: null }))}
+                  feed={feedName(chain)}
                   /* AND THE MODEL VERDICT IS COMPUTED ONCE, not per render of
                      the ticket, and from `analyze()`'s own marks — the same
                      expression the Shortlist judges this structure with. */
@@ -4493,9 +4781,14 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                 what is confirmed is what is on screen. */}
             <div style={{ marginTop: 12 }}>
               <ConfirmSteps
+                /* AT THE PRICE THAT WILL BE SENT (`AE`), like every other
+                   figure on this screen and like the record that is written
+                   when the button is tapped. The confirm step used to describe
+                   a trade at the mid over a ticket about to send a different
+                   price. */
                 candidate={{
                   ticker, name: stratName, legs, expKey, dte,
-                  risk: Math.abs(A.maxLoss), maxProfit: A.maxProfit, entryNet: A.entry, spot,
+                  risk: Math.abs(AE.maxLoss), maxProfit: AE.maxProfit, entryNet: AE.entry, spot,
                 }}
                 preview={guard} result={openResult}
                 contracts={contracts}
@@ -4504,6 +4797,10 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                 // never be two readings of one trade.
                 sigma={chance?.sigma} driftAnnual={chance?.driftAnnual}
                 heading={false} showFigure={false}
+                /* THE WARNINGS ARE IN THE ONE PANEL ABOVE. Printing them here
+                   as well is how the same 400-character CONFLICT paragraph
+                   came to be on one screen four times. */
+                showWarnings={false}
                 busy={busy === "order"}
                 onConfirm={() => openPaper()}
               />
