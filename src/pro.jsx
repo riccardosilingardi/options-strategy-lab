@@ -414,7 +414,7 @@ function LegPriceSliders({ legs, quotes, prices, onPrice }) {
    `analyze()` had already produced. `modelCheckOf()` in App.jsx is the single
    expression; `model` arriving null means nobody computed one, which is what
    the panel says rather than quietly computing a second opinion. */
-function ComboBookPanel({ legs, quotes, verdict, effective, type, qty, spot, ticker, estNet, maxLoss, maxProfit, model }) {
+function ComboBookPanel({ legs, quotes, verdict, effective, type, qty, spot, ticker, estNet, maxLoss, maxProfit, model, limits = null }) {
   const book = comboBook(legs, quotes);
   const dir = Number(estNet) >= 0 ? 1 : -1;
   const ms = model || { checked: false, pass: true, marketNet: null, modelNet: null, reason: null };
@@ -496,7 +496,19 @@ function ComboBookPanel({ legs, quotes, verdict, effective, type, qty, spot, tic
             takes, and saying otherwise names a control that is not there. */}
         <Cell k="MOST YOU CAN MAKE" v={Number.isFinite(maxProfit) ? money(maxProfit * Math.max(1, Math.round(Number(qty) || 1))) : NO_CEILING}
           c={T.green} note={type === "market" ? "at the touch a market order takes" : "at the price below, not at the mid"} />
-        <Cell k="MOST YOU CAN LOSE" v={Number.isFinite(risk) ? money(risk) : "—"} c={T.red} note="the most you can lose" />
+        {/* >>> THE LIMIT CHECK IS WHERE THE SEND IS. <<< This note used to
+            repeat its own label back ("the most you can lose"), while the one
+            sentence that makes the figure mean something — the per-trade limit
+            it is measured against — was printed ONLY on the trade card, which
+            this sheet covers while the sliders are being moved. So the owner
+            read "risking $44 of $1,000" on the card, moved the price to the ask
+            and sent $60 with nothing on screen restating the check at the new
+            price. `limits` is the SAME `guard.limits` the card prints, from the
+            one gate call on the Build screen, so the two cannot disagree. */}
+        <Cell k="MOST YOU CAN LOSE" v={Number.isFinite(risk) ? money(risk) : "—"} c={T.red}
+          note={limits && Number.isFinite(limits.perTrade)
+            ? `of ${money(limits.perTrade)} ${limits.answered === false ? "suggested" : "allowed"}`
+            : "the most you can lose"} />
         <Cell k="MADE PER $1 RISKED" v={rr == null ? "—" : rr.toFixed(2)} c={T.violet}
           note={rr == null ? "no ceiling, or no readable price" : "best case over worst case"} />
         <Cell k="NOTIONAL CONTROLLED" v={notional != null ? money(notional) : "—"} c={T.violet}
@@ -582,6 +594,10 @@ export function OrderTicket({
      name, the same way `runGate(undefined, …)` fails closed. */
   cfg = { type: "limit", tif: "day" }, onCfg, quotes = [], legPrices = [], net = null,
   verdict = null, effective = null, seed = null, onReseed,
+  /* THE GATE'S OWN LIMITS, from the one gate call on the Build screen. Never
+     re-derived here: the figure beside the send has to be the figure the card
+     printed, or the two are two answers to one question. */
+  limits = null,
 }) {
   const qtyNum = Math.max(1, Math.round(Number(qty) || 1));
   const setQty = (v) => { if (onQty) onQty(Math.max(1, Math.min(20, Math.round(Number(v) || 1)))); };
@@ -728,7 +744,8 @@ export function OrderTicket({
           NUMBERS AT THE EFFECTIVE PRICE, THE MODEL AND THE NOTIONAL. */}
       <ComboBookPanel
         legs={legs} quotes={quotes} verdict={verdict} effective={effective} type={cfg.type} qty={qtyNum}
-        spot={spot} ticker={ticker} estNet={estNet} maxLoss={maxLoss} maxProfit={maxProfit} model={model} />
+        spot={spot} ticker={ticker} estNet={estNet} maxLoss={maxLoss} maxProfit={maxProfit} model={model}
+        limits={limits} />
 
       {/* A SIZED STRUCTURE IS PRICED TWO WAYS AND BOTH ARE ON SCREEN. The
           price above is the price of the structure as it is built; Alpaca is
@@ -1216,7 +1233,10 @@ export function buildContext(ctx) {
     // per-position `thesis` it is handed below now carries the same stamp for
     // the chance recorded at entry — so the model cannot describe a
     // hand-written guess as a measurement of the market.
-    scanner: (scan || []).map((s) => ({ tk: s.tk, seasonalMonthPct: +s.seasonalScore.toFixed(1), sentiment: s.sugg, source: seasonalStampNote(s, s.tk),
+    // NULL, NEVER A ROUNDED NOTHING. A market with no seasonal reading must not
+    // reach the model as `seasonalMonthPct: 0` — `Number(null).toFixed(1)` is
+    // "0.0", and the model would read that as a measurement of no edge.
+    scanner: (scan || []).map((s) => ({ tk: s.tk, seasonalMonthPct: s.seasonalScore == null ? null : +s.seasonalScore.toFixed(1), sentiment: s.sugg, source: seasonalStampNote(s, s.tk),
       fourFactorSignal: s.fused ? { score: s.fused.score, confidence: s.fused.confidence, agreement: s.fused.agreement, narrative: s.fused.narrative } : null })),
     taggedNews: (news || []).slice(0, 10).map((n) => ({ title: n.title, geo: !!n.geo,
       impacts: (n.impacts || []).map((im) => ({ tk: im.tk, dir: ARROW[im.dir], why: im.why })) })),
@@ -1391,7 +1411,7 @@ export function buildReportMd(ctx, weatherSig, aiText) {
   // no stamp is one written before the app recorded one, which the sentence
   // says rather than guessing.
   (scan || []).slice(0, 3).forEach((s, i) => L.push(
-    `${i + 1}. **${s.tk}** — seasonal ${s.seasonalScore > 0 ? "+" : ""}${s.seasonalScore.toFixed(1)}%/mo → leaning **${s.sugg.toUpperCase()}**\n   _${seasonalStampNote(s, s.tk)}_`));
+    `${i + 1}. **${s.tk}** — seasonal ${s.seasonalScore == null ? "not read" : `${s.seasonalScore > 0 ? "+" : ""}${s.seasonalScore.toFixed(1)}%/mo`} → leaning **${s.sugg.toUpperCase()}**\n   _${seasonalStampNote(s, s.tk)}_`));
   L.push(`\n## 2 · Positions against the rules (${ruleBadge()})`);
   /* THE SAME BOOK THE RISK GATE MEASURES, AND THE SAME UNITS.
      Two faults in one paragraph, both read on the phone on 21 September 2026:

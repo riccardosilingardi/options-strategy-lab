@@ -28,6 +28,7 @@ import { RULES, sizing, ruleBadge, takeProfitLabel, stopLossLabel, perTradeCapLa
   passedOverRecord, passedOverSummary,
   expiryChoice, expiryChoiceNote, emptyExpiryNote, unloadedBoardNote, checkedAgainstNote, wideSpreadNote, spreadSkippedNote,
   wideComboNote, comboSpreadSkippedNote, comboBook, effectiveLimit, limitCeilingNote, notionalControlled,
+  radarSplit, radarQuietNote,
   orderVerdict, legBook, legLimitSeed, netFromLegs, onTick, sizeSkippedNote,
   conflictSummaryLine, warningsToPrint,
   chancePct, chanceText, chanceInTen, signedMoney,
@@ -87,6 +88,53 @@ const UNDERLYINGS = {
   WEAT: { commodity: true, name: "Wheat", iv: 0.26, sigma: SIGMA.WEAT, step: 0.25,
     monthlyMean: SEASONAL.WEAT,
     newsQ: "wheat futures prices" },
+
+  /* ============ THE LIQUID COMMODITY TIER (ROADMAP P2-bis) ============
+     Read on the owner's phone: SOYB and CORN produced "0 of 2 shown" and a wall
+     of refusal text. The grain chains are too thin for the floors this app
+     measured on live data, so most of what is on screen is an explanation of
+     why there is nothing on screen. These five are real commodities — the
+     seasonal engine still applies — with option books an order of magnitude
+     deeper, and calibrating P2's edge on them is worth far more than
+     calibrating it on CORN.
+
+     >>> NOT ONE NUMBER IS INVENTED FOR THEM. <<< Three things every row above
+     carries are deliberately absent here:
+
+       - `monthlyMean`. There is no `SEASONAL` row and there will not be one.
+         Seasonality is UNKNOWN for these markets until Alpha Vantage's real
+         monthly history loads, `seasonalProvenance()` reports `missing`, and
+         every screen prints a dash and the sentence rather than a zero. A
+         hand-written row would be a fifth estimate on a table this repository
+         has already measured as wrong on eight months of twelve.
+       - `sigma`. No `SIGMA` row either, so `sigmaProvenance()` falls to
+         `RULES.fallbackSigma` and says on screen that the number was CHOSEN,
+         not measured — until the same Alpha Vantage read supplies the measured
+         realised volatility it has always returned beside the means.
+       - a per-market `iv`. `RULES.fallbackIV` is the one home for "the implied
+         volatility the options are priced at when nothing else is known", and
+         `ivProvenance()` already says so wherever it is used. Writing 0.15 for
+         GLD out of memory would be exactly the estimate-as-a-reading this
+         codebase keeps refusing; the live chain quotes its own IV per contract
+         and that is what every figure is worked out at the moment it loads.
+
+     `step` IS A FALLBACK AND ONLY A FALLBACK. Strikes are a property of the
+     board (`expiryStrikes()` in chain.js), `buildPresets()` refuses to build
+     without one (PR #31), and `snapStrike()`'s grid is unreachable from it.
+     These are the conventional listing increments, kept so a dropdown has
+     something to offer before the chain lands, not so a trade can be built on
+     them. ======================================================== */
+  GLD: { commodity: true, name: "Gold", iv: RULES.fallbackIV, step: 1,
+    newsQ: "gold price fed real yields dollar" },
+  SLV: { commodity: true, name: "Silver", iv: RULES.fallbackIV, step: 0.5,
+    newsQ: "silver price industrial demand dollar" },
+  USO: { commodity: true, name: "Crude Oil", iv: RULES.fallbackIV, step: 1,
+    newsQ: "crude oil price OPEC EIA inventories" },
+  XLE: { commodity: true, name: "Energy Sector", iv: RULES.fallbackIV, step: 1,
+    newsQ: "energy sector oil majors outlook" },
+  GDX: { commodity: true, name: "Gold Miners", iv: RULES.fallbackIV, step: 1,
+    newsQ: "gold miners production costs outlook" },
+
   SPY: { name: "S&P 500 ETF", iv: 0.13, sigma: SIGMA.SPY, step: 5,
     monthlyMean: SEASONAL.SPY,
     newsQ: "S&P 500 stock market outlook" },
@@ -104,6 +152,20 @@ const NOW_MONTH = new Date().getMonth();
 // Questo elimina la causa n.1 delle "schermate nere" (crash su UNDERLYINGS[ticker] undefined).
 const FALLBACK_U = (tk) => ({ name: tk, iv: 0.30, sigma: 0.30, step: 0.5, monthlyMean: Array(12).fill(0), newsQ: `${tk} price outlook`, fallback: true });
 const getU = (tk) => UNDERLYINGS[tk] || FALLBACK_U(tk || "?");
+
+/* WHICH SEASONAL MEANS ARE IN FORCE FOR A MARKET — ONE EXPRESSION.
+   `seasonalProvenance()` in rules.js is the home; this binds it to the loaded
+   Alpha Vantage state and the table row behind it (which the liquid tier does
+   not have, and must not). Every reader goes through it, so a screen cannot
+   print `monthlyMean[NOW_MONTH]` off a row that is not there — `undefined[8]`
+   throws, and the guard people reach for instead is `|| 0`, which prints a
+   market as having no seasonal edge when nobody has measured one. */
+const seasonalOf = (state, tk) => seasonalProvenance((state || {})[tk] || null, getU(tk).monthlyMean, tk);
+/** This month's seasonal mean, or null. Never a zero nobody measured. */
+const seasonalNowOf = (state, tk) => {
+  const mm = seasonalOf(state, tk).monthlyMean;
+  return Array.isArray(mm) && Number.isFinite(mm[NOW_MONTH]) ? mm[NOW_MONTH] : null;
+};
 
 /* ============================== OPTION CHAIN: ALPACA FIRST, CBOE AS THE NET ==============================
    The chain lives in src/chain.js — one internal shape, two sources, and the
@@ -168,9 +230,13 @@ const seasonalFallbackNote = (state) => {
   if (st.error) return `the price history did not load — ${st.error}`;
   return "the real price history has not been requested yet";
 };
-const seasonalSourceLine = (entry, state) => entry
+/* WHAT IS IN FORCE, AND IT IS NOT ALWAYS AN ESTIMATE. The liquid tier carries
+   no hand-written row, so "hand-written estimate: …" would be naming a table
+   that does not exist for that market. `prov.missing` is the third case and it
+   is the one this app has to be able to say out loud. */
+const seasonalSourceLine = (entry, state, prov) => entry
   ? `${entry.src}${entry.upstreamError ? ` — Alpha Vantage refused the refresh (${entry.upstreamError}), so this is the last good answer` : ""}`
-  : `hand-written estimate: ${seasonalFallbackNote(state)}`;
+  : `${prov && prov.missing ? "no seasonal reading at all" : "hand-written estimate"}: ${seasonalFallbackNote(state)}`;
 
 /* ============================== ALPACA PAPER (via proxy serverless /api/alpaca) ============================== */
 async function alpacaGet(path) {
@@ -1312,7 +1378,13 @@ export default function OptionsStrategyLab() {
   const [ta, setTa] = useState({}); // per ticker
   const [replay, setReplay] = useState(null);
   const [nf, setNf] = useState({ tk: "ALL", kind: "all", q: "", days: 7 });
-  const [multi, setMulti] = useState({ sel: ["SOYB", "CORN", "UNG"], busy: false, res: null, err: null, dteT: RULES.targetEntryDTE, senMode: "auto" });
+  /* THE WIDE SEARCH OPENS ON THE MARKETS THAT HAVE SOMETHING TO FIND. It
+     started on SOYB, CORN and UNG, and the first two are the two chains this
+     app measured producing "0 of 2 shown" and a screen of refusal text. The
+     selection is the user's — every market in the basket is one tap away right
+     under it — but the default it offers should be a search with results in it
+     (ROADMAP P2-bis). */
+  const [multi, setMulti] = useState({ sel: ["GLD", "SLV", "USO"], busy: false, res: null, err: null, dteT: RULES.targetEntryDTE, senMode: "auto" });
   // THE LIQUIDITY FLOOR IS A SETTING, NOT AN ASSERTION. The app recommends and
   // the user decides; every list filtered by it says which setting produced it,
   // and loosening it carries a warning naming what comes back (src/rules.js).
@@ -1359,7 +1431,13 @@ export default function OptionsStrategyLab() {
   // second place deciding which realised volatility is in force when nothing
   // is loaded — `sigmaProvenance()` is the one that decides that now, and
   // nothing on this screen reads a realised volatility off `seas` at all.
-  const seas = seasonal[ticker] || { monthlyMean: U.monthlyMean, matrix: null, years: null, src: "estimate" };
+  /* AND `monthlyMean` MAY BE NULL. The liquid tier carries no hand-written row
+     at all, so a market whose Alpha Vantage history has not loaded has UNKNOWN
+     seasonality rather than an estimate — every reader of `seas.monthlyMean`
+     below checks before it indexes. */
+  const seas = seasonal[ticker] || { monthlyMean: U.monthlyMean || null, matrix: null, years: null, src: null };
+  const seasProv = seasonalOf(seasonal, ticker);
+  const seasNow = seasonalNowOf(seasonal, ticker);
   const iv = U.iv;
   const dte = expKey && chain?.byExp[expKey] ? chain.byExp[expKey].dte : dteManual;
   /* ONE IMPLEMENTATION OF "WHICH STRIKES DOES THIS BOARD CARRY". This was a
@@ -1578,7 +1656,7 @@ export default function OptionsStrategyLab() {
       // It is the heaviest of the four weights and the hand-written table it
       // falls back to is wrong on eight months of twelve for CORN, so every
       // market needs the real series — but nothing waits for it, and the
-      // seven-day server cache is what makes five calls affordable against a
+      // seven-day server cache is what makes ten calls affordable against a
       // 25-a-day quota. `store.seasonal` is already restored above, so on a
       // second visit inside the budget this fetches nothing at all.
       loadSeasonalBasket().catch(() => { /* per-market failures are reported per market */ });
@@ -1768,7 +1846,10 @@ export default function OptionsStrategyLab() {
     ticker: tk, month: NOW_MONTH,
     weatherData: weather, newsItems: newsPool,
     bars: barsOverride !== undefined ? barsOverride : barsCache[tk],
-    seasonalMean: ((seasonal[tk]?.monthlyMean) || getU(tk).monthlyMean)[NOW_MONTH],
+    // NULL, NEVER A ZERO NOBODY MEASURED. `seasonalComponent()` reads a null
+    // as "no seasonal history for this market" and says so on the bar; a 0
+    // would read as a market measured to have no seasonal edge.
+    seasonalMean: seasonalNowOf(seasonal, tk),
   }), [weather, newsPool, barsCache, seasonal]);
 
   const fused = useMemo(
@@ -1866,9 +1947,7 @@ export default function OptionsStrategyLab() {
      below goes through this, so no screen can drift a probability on a
      different table from the one the Radar scores that market with — and no
      screen can print the number without the sentence naming its source. */
-  const seasonalFor = useCallback(
-    (tk) => seasonalProvenance(seasonal[tk] || null, getU(tk).monthlyMean, tk),
-    [seasonal]);
+  const seasonalFor = useCallback((tk) => seasonalOf(seasonal, tk), [seasonal]);
   /* AND WHICH REALISED VOLATILITY THE EXIT SIMULATION WALKS THE SHARE ON, from
      the one place that decides THAT: `sigmaProvenance()` in rules.js. It is the
      SAME loaded reading — `statsFromMatrix()` returns the twelve means and the
@@ -2200,7 +2279,7 @@ export default function OptionsStrategyLab() {
     // the app's own book and "opened" is simply true.
     const outcome = alpacaOrder ? orderOutcome(alpacaOrder) : null;
     const working = !!(outcome && !outcome.filled);
-    const seasM = ((seasonal[tk]?.monthlyMean) || getU(tk).monthlyMean)[NOW_MONTH];
+    const seasM = seasonalNowOf(seasonal, tk);
     const expiry = ek ? new Date(ek).toISOString() : new Date(Date.now() + d * 86400000).toISOString();
     const ivAvg0 = structureIV(analysis);
     // THE CHANCE THIS POSITION IS OPENED ON, from the one expression. The TIS
@@ -3235,7 +3314,7 @@ export default function OptionsStrategyLab() {
             openedAt: new Date().toISOString(), expiry: g.exp,
             maxProfit: Number.isFinite(mp) ? mp : 0, maxLoss: Number.isFinite(ml) ? ml : 0,
             realEntry: true, alpacaId: "sync", alpacaLive: true,
-            thesis: { imported: true, iv: getU(g.und).iv, seasonal: (seasonal[g.und]?.monthlyMean || getU(g.und).monthlyMean)[NOW_MONTH], pop: null, spot: chains[g.und]?.spot ?? null, vega: 1 },
+            thesis: { imported: true, iv: getU(g.und).iv, seasonal: seasonalNowOf(seasonal, g.und), pop: null, spot: chains[g.und]?.spot ?? null, vega: 1 },
             timeline: [{ t: Date.now(), type: "open", text: `Imported from your Alpaca paper account (${g.legs.length} legs, ${dte0} days to expiry). It is now being watched.` }],
           });
           added++;
@@ -3392,6 +3471,12 @@ export default function OptionsStrategyLab() {
       ticker, name: stratName, dir: tradeDir, spot, expKey, dte,
       maxLoss: AE.maxLoss, maxProfit: AE.maxProfit, breakevens: AE.breakevens,
       profitUnbounded: AE.profitUnbounded, contracts,
+      /* THE PRICE THE FIGURES WERE WORKED OUT AT, BY NAME. `AE.entry` is
+         `effectiveLimit()`'s net whenever the ticket has a readable one and the
+         mid when it has not, and `AE.entrySource` says which — the same pair
+         `analyze()` has carried since §4l. The card printing the risk without
+         the price is how "$44" and an order for "$60" read as two trades. */
+      entry: AE.entry, entrySource: AE.entrySource,
       chance, chanceNote: chance ? chanceSourceNote(chance, ticker) : null,
       limits: guard ? guard.limits : null,
       notional: notionalControlled(contracts, spot),
@@ -3407,13 +3492,18 @@ export default function OptionsStrategyLab() {
      contraddicono non sappiamo abbastanza, e nessun rendimento atteso può
      farci cambiare idea. */
   const scan = useMemo(() => Object.entries(UNDERLYINGS).map(([tk, u]) => {
-    const s = seasonal[tk] || { monthlyMean: u.monthlyMean };
-    const seasonalScore = s.monthlyMean[NOW_MONTH];
+    // NULL WHERE NOBODY HAS MEASURED IT. The liquid tier has no hand-written
+    // row, so this is null until Alpha Vantage lands — and the ROW below prints
+    // a sentence rather than "+0.0%/mo", which is a claim about a market.
+    const seasonalScore = seasonalNowOf(seasonal, tk);
     const c = chains[tk];
     const f = fused[tk];
     // fuseSignals vive in -100..+100, la stagionalità in %/mese: /25 le riporta
     // sulla stessa scala prima di sommarle.
-    const score = seasonalScore * 1.5 + (f ? (f.score / 25) * (f.confidence / 100) : 0);
+    // A SORT KEY CANNOT BE NULL, so an unknown season contributes nothing to
+    // the ORDER of the list. That is not the same as printing a zero: the
+    // number on screen is `seasonalScore`, which stays null and says so.
+    const score = (seasonalScore ?? 0) * 1.5 + (f ? (f.score / 25) * (f.confidence / 100) : 0);
     const sugg = score > 1.5 ? "verybull" : score > 0.5 ? "bull" : score < -1.5 ? "verybear" : score < -0.5 ? "bear" : "neutral";
     return { tk, name: u.name, spot: c?.spot ?? null, seasonalScore, score, sugg, real: !!seasonal[tk],
       // ONE SERIES, ONE NUMBER OF YEARS. The header said "10y history" and the
@@ -3465,6 +3555,16 @@ export default function OptionsStrategyLab() {
   // front page now (PRD §5), so keeping a second copy behind a flag would just
   // be two screens that can disagree about the same positions.
   // THE PATH IS THE FIRST PLACE, and it is three steps rather than one page:
+  /* WHICH MARKETS GET A ROW, AND WHICH GET A NAME IN ONE LINE.
+     `radarSplit()` in rules.js decides; this only supplies the two facts it
+     reads. The basket is ten markets since the liquid tier, and a screen whose
+     content is ten paragraphs explaining why it is empty is not a screen. */
+  const radarRows = useMemo(
+    () => radarSplit(scan.filter((r) => BASKET.includes(r.tk))
+      .map((r) => ({ ...r, n: (marketFacts[r.tk] || {}).n || 0, cut: !!(marketFacts[r.tk] || {}).cut }))),
+    [scan, marketFacts]);
+  const radarQuiet = useMemo(() => radarQuietNote(radarRows), [radarRows]);
+
   // 1 Radar (every market), 2 Shortlist (the structures that survived), 3 Build
   // (one trade taken apart). Positions and the Journal are the other two places.
   // Settings sits behind the gear, not in the row.
@@ -3635,14 +3735,20 @@ export default function OptionsStrategyLab() {
             c={spot && isStale("chain", spotAge) ? T.amber : undefined}
             tip={freshnessNote("chain", spotAge, { what: "this price" })} />
           <Stat k="EXPIRY" v={expKey ? `${expKey} · ${dte} DTE` : `${dte} DTE (model)`} c={T.blue} />
-          <Stat k={`SEASONALITY ${MONTHS[NOW_MONTH].toUpperCase()}`} v={`${seas.monthlyMean[NOW_MONTH] > 0 ? "+" : ""}${seas.monthlyMean[NOW_MONTH].toFixed(1)}%`} c={seas.monthlyMean[NOW_MONTH] > 0 ? T.green : T.red} />
+          {/* A DASH, NOT A ZERO. `seasNow` is null for a market whose monthly
+              history has not loaded and has no written row behind it, and
+              "+0.0%" there would be the app claiming it measured no edge. */}
+          <Stat k={`SEASONALITY ${MONTHS[NOW_MONTH].toUpperCase()}`}
+            v={seasNow == null ? "—" : `${seasNow > 0 ? "+" : ""}${seasNow.toFixed(1)}%`}
+            c={seasNow == null ? T.dim : seasNow > 0 ? T.green : T.red}
+            tip={seasNow == null ? seasProv.note : undefined} />
           {/* A MARKET ON THE FALLBACK SAYS WHY. `SEASONAL` in engine.js is
               hand-written and wrong on eight months of twelve for CORN, and it
               carries the heaviest of the four weights. "Estimate" is not a
               reason; "the call failed" and "nobody asked yet" are. */}
           <Stat k="SEASONAL SOURCE" v={seasonal[ticker] ? seas.src : "hand-written estimate"}
             c={seasonal[ticker] ? (seasonalState[ticker]?.error ? T.amber : T.green) : T.amber}
-            tip={`${seasonalSourceLine(seasonal[ticker], seasonalState[ticker])} · ${freshnessNote("seasonal", seasonal[ticker]?.at)}`} />
+            tip={`${seasonalSourceLine(seasonal[ticker], seasonalState[ticker], seasProv)} · ${freshnessNote("seasonal", seasonal[ticker]?.at)}`} />
           <Stat k="IV RANK" v={ivRank ? (ivRank.rank != null ? `${ivRank.rank}` : `${ivRank.collecting}d collected`) : "—"}
             c={ivRank?.rank != null ? (ivRank.rank >= 60 ? T.red : ivRank.rank <= 40 ? T.green : T.mut) : T.dim}
             tip="Where today's option prices sit against their own past year (0 = cheapest ever, 100 = dearest). High means selling premium pays better; low means buying options is good value. The history builds up with one refresh a day." />
@@ -3806,13 +3912,22 @@ export default function OptionsStrategyLab() {
             <div style={{ marginTop: 12 }}>
               <Panel>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-                  <Lbl>SEASONALITY {seasonal[ticker] ? `· ${seas.src}` : "(ESTIMATE — load the real history)"}</Lbl>
+                  <Lbl>SEASONALITY · {seasonal[ticker] ? seas.src : seasProv.missing ? "NOT LOADED — NO READING AT ALL" : "ESTIMATE — LOAD THE REAL HISTORY"}</Lbl>
                   <Btn small ghost color={T.blue} onClick={loadSeasonal} disabled={busy === "av"}>
                     <RefreshCw size={11} /> Refresh real seasonality
                   </Btn>
                 </div>
                 {(() => {
                   const mm = seas.monthlyMean;
+                  // NO ROW, NO CHART AND NO PLAIN WORDS. `Math.max(...null)` is
+                  // a crash and `mm[NOW_MONTH] || 0` is a lie; the honest third
+                  // option is the sentence `seasonalProvenance()` already
+                  // writes for exactly this case.
+                  if (!Array.isArray(mm)) return (
+                    <div style={{ fontSize: 12.5, color: T.body, marginTop: 8, padding: "8px 10px", background: `${T.amber}0a`, borderRadius: 6, lineHeight: 1.55 }}>
+                      {seasProv.note}
+                    </div>
+                  );
                   const bi = mm.indexOf(Math.max(...mm)), wi = mm.indexOf(Math.min(...mm));
                   const cur = mm[NOW_MONTH];
                   const rank = [...mm].sort((a, b) => b - a).indexOf(cur) + 1;
@@ -3822,6 +3937,7 @@ export default function OptionsStrategyLab() {
                     </div>
                   );
                 })()}
+                {Array.isArray(seas.monthlyMean) && (
                 <div style={{ height: 170, marginTop: 10 }}>
                   <ResponsiveContainer>
                     <BarChart data={seas.monthlyMean.map((v, i) => ({ m: MONTHS[i], v: +v.toFixed(2) }))} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
@@ -3835,6 +3951,7 @@ export default function OptionsStrategyLab() {
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
+                )}
               </Panel>
 
               {/* TWO QUESTIONS, NOT THREE PROBABILITIES. This panel used to
@@ -4046,7 +4163,7 @@ export default function OptionsStrategyLab() {
                     the desk can price a hedge; the path does not go looking for
                     it, and a row for it on the Radar reads as a sixth market to
                     trade (CLAUDE.md, the basket). */}
-                {scan.filter((r) => BASKET.includes(r.tk)).map((r, i) => {
+                {radarRows.shown.map((r, i) => {
                   const sObj = SENTIMENTS.find((s) => s.id === r.sugg);
                   const f = marketFacts[r.tk] || { n: 0 };
                   const best = f.best || null;
@@ -4071,19 +4188,22 @@ export default function OptionsStrategyLab() {
                       <div style={{ flex: 1, minWidth: 150 }}>
                         <div style={{ fontWeight: 700, color: T.ink, fontSize: 14 }}>{r.tk} <span style={{ color: T.dim, fontWeight: 400, fontSize: 11 }}>{r.name}</span></div>
                         <div style={{ ...mono, fontSize: 10.5, color: T.mut }}>
-                          seasonal {r.seasonalScore > 0 ? "+" : ""}{r.seasonalScore.toFixed(1)}%/mo {r.real ? `(${r.years}y history)` : "(hand-written estimate)"} · {r.spot ? `$${r.spot.toFixed(2)}` : "prices not loaded"}{ta[r.tk] ? ` · trend ${ta[r.tk].trend > 0 ? "↑" : ta[r.tk].trend < 0 ? "↓" : "→"} RSI ${ta[r.tk].rsi.toFixed(0)}` : ""}
+                          {/* UNKNOWN IS NOT +0.0%/mo, AND "ESTIMATE" IS NOT
+                              THE ONLY ALTERNATIVE TO MEASURED. Five of the ten
+                              markets have no written row behind them at all. */}
+                          seasonal {r.seasonalScore == null ? "not loaded" : `${r.seasonalScore > 0 ? "+" : ""}${r.seasonalScore.toFixed(1)}%/mo`} {r.real ? `(${r.years}y history)` : r.seasonalScore == null ? "(no reading yet)" : "(hand-written estimate)"} · {r.spot ? `$${r.spot.toFixed(2)}` : "prices not loaded"}{ta[r.tk] ? ` · trend ${ta[r.tk].trend > 0 ? "↑" : ta[r.tk].trend < 0 ? "↓" : "→"} RSI ${ta[r.tk].rsi.toFixed(0)}` : ""}
                         </div>
-                        {/* What the search actually found here. An empty market
-                            NEVER appears as a blank row: it says which floor
-                            emptied it, or that nobody has searched it yet. */}
-                        <div style={{ ...mono, fontSize: 10.5, color: f.n > 0 ? T.green : f.cut ? T.amber : T.dim, marginTop: 2 }}>
-                          {f.n > 0
-                            ? `${f.n} structure${f.n === 1 ? "" : "s"} cleared the floors on ` +
-                              `${(f.expiries || []).length ? (f.expiries || []).join(" and ") : "the expiry searched"}` +
-                              `${f.roads ? ` · ${f.roads} of them a road from your answers` : ""}`
-                            : f.cut
-                              ? "nothing here cleared the quality floors today"
-                              : "not searched yet — use the search below, or answer the three questions"}
+                        {/* WHAT THE SEARCH FOUND HERE — and this row only
+                            exists BECAUSE it found something. The two empty
+                            cases, "nothing cleared" and "not searched yet",
+                            used to be printed here once per market and are now
+                            the one line under the list (`radarQuietNote()`).
+                            An empty market still never appears as a blank row;
+                            it appears as a name in that line. */}
+                        <div style={{ ...mono, fontSize: 10.5, color: T.green, marginTop: 2 }}>
+                          {`${f.n} structure${f.n === 1 ? "" : "s"} cleared the floors on ` +
+                            `${(f.expiries || []).length ? (f.expiries || []).join(" and ") : "the expiry searched"}` +
+                            `${f.roads ? ` · ${f.roads} of them a road from your answers` : ""}`}
                           {f.oiSkipped ? " · open interest unknown on this feed, so that floor was skipped" : ""}
                           {f.spreadSkipped ? " · only one side quoted on some legs, so the spread floor was skipped there" : ""}
                         </div>
@@ -4103,6 +4223,26 @@ export default function OptionsStrategyLab() {
                     </div>
                   );
                 })}
+                {/* ============ AND EVERYTHING WITH NOTHING ON IT, IN ONE LINE.
+                    `radarSplit()` / `radarQuietNote()` in rules.js. This
+                    REPLACES the per-market sentence that used to sit inside
+                    every quiet row — "not searched yet — use the search below"
+                    ten times over — with one line carrying the same two facts
+                    and the same ten taps. Nothing is unreachable: each name is
+                    the button that opens that market. ============ */}
+                {radarQuiet && (
+                  <div style={{ padding: "9px 12px", background: T.bg, border: `1px dashed ${T.line}`, borderRadius: 7 }}>
+                    <div style={{ ...mono, fontSize: 10.5, color: T.dim, lineHeight: 1.6 }}>{radarQuiet}</div>
+                    <div style={{ display: "flex", gap: 5, marginTop: 7, flexWrap: "wrap" }}>
+                      {radarRows.quiet.map((r) => (
+                        <Btn key={r.tk} small ghost
+                          onClick={() => { switchTicker(r.tk); setSentiment(r.sugg); goStep("shortlist"); }}>
+                          {r.tk} →
+                        </Btn>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
               <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 10 }}>
 The order weighs the 4-factor signal (seasonality, price trend, weather, news): CONFLICT markets stay last regardless. Tap the badge for the full narrative, or open Why this market above for the four readings and what is behind them. Seasonality is loaded for the whole basket from real monthly prices; a market still showing an estimate says why on the Build screen, and History has a button to fetch it now.
@@ -5158,7 +5298,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   <UnifiedView
                     ticker={ticker} dte={dte} spot={spot}
                     sigma={A.legPx.length ? A.legPx.reduce((x, y) => x + y.iv, 0) / A.legPx.length : iv}
-                    driftM={seas.monthlyMean[NOW_MONTH]}
+                    driftM={seasNow}
                     curve={A.curve} legs={legs} breakevens={A.breakevens}
                     onTa={(t2) => setTa((m) => ({ ...m, [ticker]: t2 }))}
                   />
@@ -5167,13 +5307,17 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
 
               {(() => {
                 const t2 = ta[ticker];
-                const cf = confluence(seas.monthlyMean[NOW_MONTH], t2);
+                // NO SEASONAL READING, NO AGREEMENT PANEL. `confluence()`
+                // compares the season with the trend; with one of the two
+                // unknown there is nothing to agree or disagree about, and a
+                // zero would make "the season is flat" out of "nobody looked".
+                const cf = seasNow == null ? null : confluence(seasNow, t2);
                 if (!cf) return null;
                 return (
                   <div style={{ marginTop: 10, padding: "10px 12px", background: `${cf.c}0d`, border: `1px solid ${cf.c}55`, borderRadius: 8 }}>
                     <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
                       <span style={{ ...mono, fontSize: 12, fontWeight: 800, color: cf.c }}>AGREEMENT: {cf.verdict}</span>
-                      <span style={{ ...mono, fontSize: 10.5, color: T.mut }}>seasonality {seas.monthlyMean[NOW_MONTH] >= 0 ? "+" : ""}{seas.monthlyMean[NOW_MONTH].toFixed(1)}%/mo · trend {t2.trendTxt} · RSI14 {t2.rsi.toFixed(0)}{t2.cross ? ` · ${t2.cross === "golden" ? "✚ recent golden cross" : "✖ recent death cross"}` : ""}</span>
+                      <span style={{ ...mono, fontSize: 10.5, color: T.mut }}>seasonality {seasNow >= 0 ? "+" : ""}{seasNow.toFixed(1)}%/mo · trend {t2.trendTxt} · RSI14 {t2.rsi.toFixed(0)}{t2.cross ? ` · ${t2.cross === "golden" ? "✚ recent golden cross" : "✖ recent death cross"}` : ""}</span>
                     </div>
                     <div style={{ fontSize: 12.5, color: T.body, marginTop: 5 }}>{cf.advice}</div>
                     {cf.warn && <div style={{ fontSize: 12, color: T.amber, marginTop: 4 }}>{cf.warn}</div>}
@@ -5249,6 +5393,11 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                      the ticket, and from `analyze()`'s own marks — the same
                      expression the Shortlist judges this structure with. */
                   model={modelCheck}
+                  /* AND THE LIMIT THE SEND IS MEASURED AGAINST, from the one
+                     gate call above — the same `guard.limits` the trade card
+                     prints. The card is behind this sheet while the sliders are
+                     being moved, so the check has to be readable here too. */
+                  limits={guard ? guard.limits : null}
                   spot={spot} entryOverride={roomReason}
                 />
               )}
@@ -5528,7 +5677,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                           const ivs = p.legs.map((l) => qp(l)?.iv).filter(Boolean);
                           return ivs.length ? ivs.reduce((a, b) => a + b, 0) / ivs.length : (p.thesis?.iv ?? getU(p.ticker).iv);
                         })();
-                        const seasNow = (seasonal[p.ticker]?.monthlyMean || getU(p.ticker).monthlyMean)[NOW_MONTH];
+                        const seasNow = seasonalNowOf(seasonal, p.ticker);
                         // THE ONE CHANCE, ON A POSITION THAT IS ALREADY OPEN.
                         // The Guardian's TIS compares this with `thesis.pop`,
                         // recorded at entry — and until now the two came from

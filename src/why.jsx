@@ -65,6 +65,17 @@ const AGREEMENT_STYLE = {
 };
 const FACTOR_LABEL = { seasonal: "Seasonality", technical: "Price trend", weather: "Weather", news: "News flow" };
 const FACTOR_ORDER = ["seasonal", "technical", "weather", "news"];
+/** The weights this market was actually scored on, in words. */
+const weightList = (fused) => {
+  const w = fused.weights || {};
+  const keys = (fused.factors || FACTOR_ORDER).filter((k) => Number.isFinite(w[k]));
+  if (!keys.length) return "these factors weighted together";
+  const parts = keys.map((k) => `${FACTOR_LABEL[k].toLowerCase()} ${Math.round(w[k] * 100)}%`);
+  const excluded = (fused.excluded || []).map((k) => FACTOR_LABEL[k].toLowerCase());
+  return `${keys.length === FACTOR_ORDER.length ? "these four" : `these ${keys.length}`} weighted together: ${parts.join(", ")}` +
+    (excluded.length ? ` — ${excluded.join(" and ")} does not apply to this market, so it is not in the score and its share is spread over the rest` : "");
+};
+
 /** `Seasonality, Price trend, Weather and News flow` — generated, never typed. */
 const FACTOR_LIST = FACTOR_ORDER.map((k) => FACTOR_LABEL[k])
   .reduce((acc, x, i, all) => (i === 0 ? x : i === all.length - 1 ? `${acc} and ${x}` : `${acc}, ${x}`), "");
@@ -186,7 +197,13 @@ export function WhyThisTrade({ fused, title = "WHY THIS TRADE", note, ticker, we
         <div style={{ marginTop: 9, display: "grid", gap: 6 }}>
           {FACTOR_ORDER.map((k) => {
             const cp = fused.components[k];
-            const col = cp.dir > 0 ? T.green : cp.dir < 0 ? T.red : T.mut;
+            // DOES NOT APPLY IS NOT A READING OF ZERO (src/signals.js,
+            // `factorsOf`). Weather on a metal has no bar, no strength and no
+            // arrow: drawing an empty 0/100 bar for it says the app looked and
+            // found nothing, where the truth is that the question does not
+            // arise — and it was not in the score either.
+            const na = cp.applies === false;
+            const col = na ? T.dim : cp.dir > 0 ? T.green : cp.dir < 0 ? T.red : T.mut;
             const isOpen = open === k;
             // Weather and News carry their own evidence with them: the same tap
             // that explains the bar shows what the bar is made of.
@@ -210,21 +227,27 @@ export function WhyThisTrade({ fused, title = "WHY THIS TRADE", note, ticker, we
                 <button onClick={() => setOpen(isOpen ? null : k)}
                   style={{ width: "100%", textAlign: "left", background: isOpen ? `${col}14` : T.bg, border: `1px solid ${isOpen ? col : T.line}`, borderRadius: 6, padding: "7px 9px", cursor: "pointer" }}>
                   <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                    <span style={{ ...mono, fontSize: 13, fontWeight: 800, color: col, width: 14 }}>{ARROW[cp.dir]}</span>
-                    <span style={{ ...mono, fontSize: 11, color: T.ink, minWidth: 96 }}>{FACTOR_LABEL[k]}</span>
+                    <span style={{ ...mono, fontSize: 13, fontWeight: 800, color: col, width: 14 }}>{na ? "–" : ARROW[cp.dir]}</span>
+                    <span style={{ ...mono, fontSize: 11, color: na ? T.dim : T.ink, minWidth: 96 }}>{FACTOR_LABEL[k]}</span>
                     <span style={{ flex: 1, minWidth: 90, height: 7, background: T.line, borderRadius: 4, overflow: "hidden" }}>
-                      <span style={{ display: "block", width: `${cp.strength}%`, height: "100%", background: col, borderRadius: 4 }} />
+                      {!na && <span style={{ display: "block", width: `${cp.strength}%`, height: "100%", background: col, borderRadius: 4 }} />}
                     </span>
-                    <span style={{ ...mono, fontSize: 10.5, color: T.dim, width: 52, textAlign: "right" }}>{cp.strength}/100</span>
-                    <span style={{ ...mono, fontSize: 10, color: T.blue }}>{isOpen ? "▲" : k === "weather" ? "regions?" : k === "news" ? "headlines?" : "why?"}</span>
+                    <span style={{ ...mono, fontSize: 10.5, color: T.dim, width: 52, textAlign: "right" }}>{na ? "n/a" : `${cp.strength}/100`}</span>
+                    <span style={{ ...mono, fontSize: 10, color: T.blue }}>{isOpen ? "▲" : na ? "why not?" : k === "weather" ? "regions?" : k === "news" ? "headlines?" : "why?"}</span>
                   </div>
                 </button>
                 {isOpen && explanation}
               </div>
             );
           })}
+          {/* THE SCALE IS THE ONE THIS MARKET WAS SCORED ON. This sentence
+              used to be typed out — "seasonality 30%, price trend 25%, weather
+              25%, news 20%" — which is the right scale for a crop and the wrong
+              one for a metal, where weather does not apply and the other three
+              are renormalised over it. It is generated from `fused.weights`
+              now, so it cannot describe a scale nothing was measured against. */}
           <div style={{ ...mono, fontSize: 9.5, color: T.dim }}>
-            Direction is the arrow, strength is the bar (0-100). The score above is these four weighted together: seasonality 30%, price trend 25%, weather 25%, news 20%.
+            Direction is the arrow, strength is the bar (0-100). The score above is {weightList(fused)}.
           </div>
         </div>
       )}

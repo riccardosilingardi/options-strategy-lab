@@ -178,7 +178,10 @@ export function demoPositions({ spots = {}, underlying, now = Date.now() } = {})
       maxProfit, maxLoss,
       realEntry: false, alpacaId: null,
       thesis: {
-        pop: null, iv: u.iv, seasonal: SEASONAL[tk] ? SEASONAL[tk][entryMonth] : 0,
+        // NULL, NOT ZERO. A market with no row in `SEASONAL` has no seasonal
+        // reading; a 0 here prints as "season 0.0%/mo" in the Journal, which is
+        // a measurement nobody made.
+        pop: null, iv: u.iv, seasonal: SEASONAL[tk] ? SEASONAL[tk][entryMonth] : null,
         regime: "demo", spot: entrySpot, breakevens: [],
         delta: 0, vega: 1, ...(thesisOver || {}),
       },

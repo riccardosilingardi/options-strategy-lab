@@ -1163,6 +1163,58 @@ export const qualityFloorSentence = (level = RECOMMENDED_LIQUIDITY) => {
 };
 
 /** The one line that says which setting produced the list underneath it. */
+/* =====================================================================
+   THE RADAR MUST NOT GET LONGER WHEN THE BASKET DOES.
+
+   Read on the owner's phone: SOYB and CORN produced "0 of 2 shown" and most of
+   the screen was a paragraph per market explaining why that market had nothing
+   on it. The basket went from five to ten with the liquid tier, and ten copies
+   of "not searched yet — use the search below" is not a radar, it is a wall.
+
+   A market with something on it keeps its full row. Every market with nothing
+   collapses into ONE line, which names them and says which of the two things
+   happened — nobody has looked, or somebody looked and nothing cleared. Those
+   are different facts and the line keeps them apart, exactly as
+   `unloadedBoardNote()` keeps "no board" apart from "nothing cleared on this
+   board". Every name in the line is still one tap from its market; nothing is
+   removed from the app, only from the page.
+
+   IT COLLAPSES EVEN WHEN EVERY MARKET IS QUIET. A first run has searched
+   nothing, so nothing has a full row — and a list of ten identical rows saying
+   "not searched yet" is exactly the screen this exists to stop. One line with
+   ten names in it is shorter and says the same thing once.
+===================================================================== */
+
+/**
+ * @param rows  `[{ tk, n, cut }]` — `n` structures that cleared, `cut` true when
+ *              the floors emptied it. Neither is a count this function makes.
+ * @returns {{ shown: object[], quiet: object[], empty: string[], notSearched: string[] }}
+ */
+export function radarSplit(rows = []) {
+  const rs = Array.isArray(rows) ? rows : [];
+  const shown = rs.filter((r) => Number(r?.n) > 0);
+  const quiet = rs.filter((r) => !(Number(r?.n) > 0));
+  return {
+    shown, quiet,
+    // SEARCHED AND EMPTY is not NEVER SEARCHED, and one word for both would
+    // make the app report a market verdict it never reached.
+    empty: quiet.filter((r) => r?.cut).map((r) => r.tk),
+    notSearched: quiet.filter((r) => !r?.cut).map((r) => r.tk),
+  };
+}
+
+/** The one line, or null when every market has a row of its own. */
+export const radarQuietNote = (split) => {
+  const s = split || {};
+  const empty = s.empty || [], notSearched = s.notSearched || [];
+  const n = empty.length + notSearched.length;
+  if (!n) return null;
+  const bits = [];
+  if (empty.length) bits.push(`nothing cleared on ${empty.join(", ")}`);
+  if (notSearched.length) bits.push(`not searched yet: ${notSearched.join(", ")}`);
+  return `${n} market${n === 1 ? "" : "s"} with nothing to show \u2014 ${bits.join(" \u00b7 ")}.`;
+};
+
 export const liquiditySettingNote = (level, counts) => {
   const l = liquidityLevel(level?.id ?? level);
   const c = counts || {};
@@ -2739,11 +2791,17 @@ export function seasonalProvenance(measured, fallback, ticker = "this market") {
  */
 export const seasonalStampOf = (rec) => {
   const r = rec || {};
-  const stamped = r.seasonalSource === MEASURED_SEASONAL_SOURCE || r.seasonalSource === ESTIMATED_SEASONAL_SOURCE;
+  // THREE SOURCES, NOT TWO, SINCE THE LIQUID TIER. A record can now be stamped
+  // "none": the market has no measured history loaded AND no hand-written row
+  // behind it, which is a real, recorded answer and not a missing stamp. Reading
+  // it as the estimate would name a table that does not exist for that market.
+  const missing = r.seasonalSource === NO_SEASONAL_SOURCE;
+  const stamped = missing || r.seasonalSource === MEASURED_SEASONAL_SOURCE || r.seasonalSource === ESTIMATED_SEASONAL_SOURCE;
   const measured = r.seasonalSource === MEASURED_SEASONAL_SOURCE;
   return {
     stamped,
     measured,
+    missing,
     source: stamped ? r.seasonalSource : ESTIMATED_SEASONAL_SOURCE,
     years: measured && Number.isFinite(r.seasonalYears) ? r.seasonalYears : null,
     ageDays: measured && Number.isFinite(r.seasonalAgeDays) ? r.seasonalAgeDays : null,
@@ -2755,7 +2813,7 @@ export const seasonalStampNote = (rec, ticker = "this market") => {
   const s = seasonalStampOf(rec);
   return (s.stamped ? "" : "This record carries no seasonal stamp, which means it was written before the app " +
     "recorded one — and at that point the hand-written table was the only one either side could reach. ") +
-    seasonalSourceSentence({ measured: s.measured, ticker, years: s.years, ageDays: s.ageDays });
+    seasonalSourceSentence({ measured: s.measured, missing: s.missing, ticker, years: s.years, ageDays: s.ageDays });
 };
 
 /** The three fields a record keeps, from a `seasonalProvenance()` result. */
@@ -3739,6 +3797,7 @@ export function tradeCard({
   maxLoss = null, maxProfit = null, breakevens = [], profitUnbounded = false,
   contracts = 1, chance = null, chanceNote = null, limits = null, notional = null,
   agreement = null, clashCount = 0, seasonalNote = null,
+  entry = null, entrySource = null,
 } = {}) {
   const n = Math.max(1, Math.round(Number(contracts) || 1));
   const risk = known(maxLoss) ? Math.abs(Number(maxLoss)) * n : null;
@@ -3756,13 +3815,28 @@ export function tradeCard({
     expKey ? `. Expiry ${expKey}${days != null ? `, ${days} day${days === 1 ? "" : "s"} away` : ""}` : ""}.`;
 
   /* 2 — WHAT YOU RISK. The worst case, what share of capital it is, and what
-     it CONTROLS — the fact that makes "capital at risk" mean anything. */
+     it CONTROLS — the fact that makes "capital at risk" mean anything.
+
+     >>> AND THE PRICE IT WAS WORKED OUT AT, BY NAME. <<< Read on the owner's
+     phone, SOYB 21 September 2026: the card said "risking $44 of $1,000", he
+     then moved the ticket's sliders to the ask and sent $60. Both figures come
+     from ONE expression — `AE` in App.jsx is `analyze()` at `effectiveLimit()`'s
+     net, and the gate, this card and the ticket all read it — but the card
+     never SAID which price it had read, and the order sheet that holds the
+     sliders covers the card while they are being moved. A figure with no price
+     attached, read before the price changed, is indistinguishable from a
+     figure that disagrees with the order. Naming the price is what makes the
+     two readable as one fact at two moments instead of two facts. */
   const perTrade = limits && known(limits.perTrade) ? Number(limits.perTrade) : null;
   const cap = limits && known(limits.tradingCapital) ? Number(limits.tradingCapital) : null;
   const owned = limits && limits.answered === false ? "the suggested" : "your";
+  const atPrice = known(entry)
+    ? ` at the ${money(Math.abs(Number(entry)) * 100)} ${Number(entry) < 0 ? "credit" : "debit"} ${
+      entrySource === "limit" ? "the ticket is holding" : "the middle of the market"}`
+    : "";
   const riskLine = risk == null
     ? `The worst case could not be computed, so there is nothing to measure against ${owned} per-trade limit. Nothing is sent.`
-    : `${money(risk)}, and that is the most this can lose — fixed the moment it opens, never a dollar more${
+    : `${money(risk)}${atPrice}, and that is the most this can lose — fixed the moment it opens, never a dollar more${
       n > 1 ? ` (${n} combinations)` : ""}.${
       perTrade != null && cap ? ` That is ${pctText(risk / cap)} of capital, ${risk > perTrade ? "PAST" : "inside"} ${owned} ${money(perTrade)} per-trade limit.` : ""}${
       known(notional) ? ` It controls ${money(notional)} of ${ticker}: you can only lose the ${money(risk)}, and the position moves with all of it.` : ""}`;

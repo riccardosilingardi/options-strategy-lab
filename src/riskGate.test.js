@@ -10,6 +10,7 @@ import { RULES, sizing, ruleBadge, qualityFloor, qualityFloorSentence, liquidity
   LIQUIDITY_LEVELS, RECOMMENDED_LIQUIDITY, LIQUIDITY_MEASUREMENT, liquidityMeasurementNote, liquidityThreshold, looseningWarning, liquiditySettingNote,
   priceability, rewardRisk, unpriceableNote, money, MIN_NET_DOLLARS,
   contractListing, unlistedContractNote, legName, tradeCard, TRADE_CARD_IDS, cardCurrencyNote,
+  radarSplit, radarQuietNote,
   unquotedLegNote, unquotedLegPointer, marketOrderNote, strikeSnapNote,
   spreadShare, spreadFloor, spreadFloorReason, wideSpreadNote, spreadSkippedNote,
   expiryChoice, expiryChoiceNote, emptyExpiryNote, unloadedBoardNote, checkedAgainstNote, offBoardStrikeLabel,
@@ -2622,6 +2623,48 @@ test("buildPresets() REFUSES A NULL BOARD, and the preset effect waits for one",
   // And the two inline copies of expiryStrikes() are gone.
   const copies = (app.match(/new Set\(\[\.\.\.Object\.keys\([a-z.]*\.?byExp\[[a-zA-Z]+\]\.calls\)/g) || []).length;
   assert.equal(copies, 0, `App.jsx re-implements expiryStrikes() ${copies} time(s)`);
+});
+
+/* ================================================================
+   THE RADAR MUST NOT GET LONGER WHEN THE BASKET DOES (ROADMAP P2-bis)
+================================================================ */
+
+test("RADAR — a market with something keeps its row, everything else is one line", () => {
+  const rows = [
+    { tk: "GLD", n: 4 }, { tk: "SLV", n: 2 },
+    { tk: "CORN", n: 0, cut: true }, { tk: "SOYB", n: 0, cut: true },
+    { tk: "USO", n: 0 }, { tk: "XLE", n: 0 },
+  ];
+  const r = radarSplit(rows);
+  assert.deepEqual(r.shown.map((x) => x.tk), ["GLD", "SLV"]);
+  assert.deepEqual(r.quiet.map((x) => x.tk), ["CORN", "SOYB", "USO", "XLE"]);
+  // SEARCHED AND EMPTY IS NOT NEVER SEARCHED. A missing-data answer wearing a
+  // market verdict's words is the line this repository keeps everywhere else.
+  assert.deepEqual(r.empty, ["CORN", "SOYB"]);
+  assert.deepEqual(r.notSearched, ["USO", "XLE"]);
+  const note = radarQuietNote(r);
+  assert.ok(note.includes("4 markets"));
+  assert.ok(note.includes("nothing cleared on CORN, SOYB"));
+  assert.ok(note.includes("not searched yet: USO, XLE"));
+  assert.equal(note.split(".").filter((x) => x.trim()).length, 1, "ONE line, not one per market");
+});
+
+test("RADAR — a first run collapses too: ten identical rows is the wall this replaces", () => {
+  const rows = ["SOYB", "CORN", "UNG", "BOIL", "WEAT", "GLD", "SLV", "USO", "XLE", "GDX"]
+    .map((tk) => ({ tk, n: 0 }));
+  const r = radarSplit(rows);
+  assert.equal(r.shown.length, 0);
+  assert.equal(r.quiet.length, 10);
+  assert.ok(radarQuietNote(r).includes("10 markets"));
+  assert.ok(radarQuietNote(r).includes("GDX"), "every market is still named, so every one is one tap away");
+});
+
+test("RADAR — with every market producing something there is no extra line at all", () => {
+  const r = radarSplit([{ tk: "GLD", n: 3 }, { tk: "SLV", n: 1 }]);
+  assert.equal(r.quiet.length, 0);
+  assert.equal(radarQuietNote(r), null);
+  assert.equal(radarQuietNote(null), null);
+  assert.equal(radarQuietNote(radarSplit([])), null);
 });
 
 /* ---------------- summary ---------------- */

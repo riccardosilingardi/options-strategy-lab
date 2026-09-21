@@ -1873,23 +1873,277 @@ cannot fail is not a check.
   measures and which account it measures against.
 - **It does not make anything fill.** P0's DONE WHEN is unchanged: a real fill.
 
+### SETTLED ON THE OWNER'S PHONE — SOYB, 21 September 2026, 10:12-10:15 CEST
+
+Every item §4o put on the NOT VERIFIED list has been read on a real screen except one. Each is moved
+out here with the evidence that settled it, and what is left is listed below it.
+
+- **THE PRESET RACE IS CLOSED, AND IT WAS READ.** A fresh SOYB load produced **28 / 29**. The strike
+  select shows **28** — not 16, not 27.5 — and the chain row below it is highlighted **+BUY 28 /
+  −SELL 29**. Three screens, one trade. This settles both §4o item 1 (nobody had watched a fresh load)
+  and §4o item 2 (the dropdown's behaviour was asserted from rendered markup): the dropdown, the card
+  and the order now agree on a live board, which is the whole of what failure class 1 was about.
+- **THE PAPER CHECK NAMES THE BROKER'S OWN ACCOUNT.** The checklist read *"account number
+  PA3E1WPIW9SZ (Alpaca paper accounts start with PA)"*. That is `bookFor(!!alpaca)` working: the
+  account the send uses, verified by its number, printed under the checks — not `LOCAL_BOOK`'s "local
+  simulation, no broker involved" over an order about to leave for a broker.
+- **THE EXPOSURE READS $0 AGAINST THREE WATCHING ROWS.** Open risk **$0** with **3** rows under
+  WATCHING, and Positions, the risk gate and the working-order panel all agreeing. That is
+  `bookPositions()`: the $1,042 of phantom exposure is gone, and the three trades nobody bought are
+  in the one place that is for trades nobody bought. §4o item 4 — *which* of the three rows was the
+  QTY 14 order — is retired rather than settled: `not-taken` records no longer reach the gate, the
+  report, the model's context, `autopilot.mjs` or `approve.mjs` at all, so no decision anywhere
+  depends on the answer.
+- **AND THE FOURTH ORDER REACHED THE MARKET.** J-0004, SOYB 28/29 bull call spread, **1
+  combination**, DAY limit **$60** (combo bid $4, mid $28, model $35 — so the limit is the combo
+  ask), Alpaca status **ACCEPTED**, order id `29fdee45-9104-41f2-87cf-2ea9e00f967d`, sent 04:15 ET.
+  §4n's order never got past the broker's validator; this one is at the exchange. **The
+  `UNLISTED_CONTRACT` class of failure is closed on live data.**
+
+**STILL NOT VERIFIED: THE FILL.** It was sent at 04:15 ET, before the options open, so nothing could
+have filled yet and nothing had. **P0's DONE WHEN is unchanged: a real fill.** Also still open:
+`working` counting towards the exposure ceiling is a decision and not a measurement, and the
+`/api/state` blob has still not been read directly — $20,000 of capital is inferred from a $1,000
+per-trade limit and `sizing()`'s 5% cap, read twice now on two days and two screens, which is
+corroboration and not the store.
+
+### THE ONE INCONSISTENCY IN THAT READING — and it is failure class 3
+
+The trade card said **"✓ Inside your rules: risking $44 of $1,000"**. The owner then moved the
+ticket's sliders to the ask and sent **$60**. One screen, two figures, one trade.
+
+**BOTH FIGURES ALREADY CAME FROM ONE EXPRESSION.** `AE` on the Build screen is `analyze()` at
+`effectiveLimit()`'s net (§4l), and the gate, the card and the ticket are all handed it — there is no
+second arithmetic to delete. On this book the seed is the mid plus a quarter of the spread, which is
+where the $44 came from, and the ask is $60. What was missing is the two things that made those read
+as a disagreement rather than as one figure at two moments:
+
+1. **THE CARD NEVER SAID WHICH PRICE IT HAD READ.** *"$44, and that is the most this can lose"* is
+   silent about the $0.44 it was worked out at. `tradeCard()` takes `entry` and `entrySource` now —
+   the pair `analyze()` has carried since §4l — and line 2 names them: *"$60 at the $60 debit the
+   ticket is holding"*, or *"…at the $28 debit the middle of the market"* when no ticket price is
+   readable. A figure with its price attached cannot be mistaken for a figure about a different one.
+2. **THE LIMIT CHECK WAS NOT WHERE THE SEND IS.** The sliders live in `DeskSheet`, which covers the
+   card while they are being moved, and the per-trade check existed only on the card. The ticket's
+   MOST YOU CAN LOSE cell used to carry the note *"the most you can lose"* — its own label, repeated
+   — and now carries *"of $1,000 allowed"*, read from the **same `guard.limits`** the card prints.
+   Nothing new is computed and no sentence is added: one redundant note is replaced.
+
+`src/ticket.test.jsx` drives the whole chain — `legLimitSeed` → `netFromLegs` → `effectiveLimit` →
+`analyze` → `evaluateTrade` → `tradeCard` → the rendered `OrderTicket` — at the seed AND at the ask,
+and holds the three figures equal at each of them. The fixture is the live book ($4 / $28 / $60) and
+the test fails if the two prices stop being different trades.
+
 ### NOT VERIFIED
 
-- **NO FILL, AND NO ORDER SENT SINCE THE FIX.** The preset fault is reproduced from the code and
-  from the arithmetic (spot 27.64, step 0.5 → 27.5) and held by a test; **nobody has watched a fresh
-  SOYB load produce 28/29 in a browser.** The live chain cannot be reached from here.
-- **THE DROPDOWN'S BEHAVIOUR IS ASSERTED FROM THE RENDERED MARKUP**, not from a browser. That a
-  `<select>` with an unmatched `value` displays its first option is documented behaviour and it
-  matches what the phone showed; the disabled option is held against `renderToStaticMarkup`.
-- **$20,000 AND $1,000 ARE READ OFF A CHECKLIST, NOT OUT OF THE STORE.** They are consistent with
-  `sizing()`'s 5% cap and with §4n's QTY 14 arithmetic, which is why they are treated as settled —
-  but the `/api/state` blob itself has not been read.
-- **WHETHER ANY OF THE THREE WATCHING ROWS WAS THE QTY 14 ORDER** is not established. The figures
-  ($450 / $577 / $14) are what the gate summed; which order each came from was not read.
+- **NO FILL.** The only item left from §4o's list, and it is P0's.
 - **`working` COUNTING TOWARDS THE CEILING IS A DECISION, NOT A MEASUREMENT.** Nothing in this
   sandbox can say how often a working order fills. If it turns out they almost never do, this makes
   the ceiling tighter than it needs to be — which is the side to be wrong on.
-- **NO LIVE CHAIN, NO BROWSER, NO ALPHA VANTAGE, NO DEPLOY.** The same wall as PR #15 through #30.
+- **THE `/api/state` BLOB HAS NOT BEEN READ.** $20,000 of capital is inferred from the $1,000
+  per-trade limit printed on two different days.
+- **NO BROWSER HERE.** The card's new clause and the ticket's new note are held against
+  `renderToStaticMarkup`, like everything else on a screen in this repository. The owner has now read
+  the screens around them, which is what settled the rest of this list.
+
+---
+
+## §4p — THE LIQUID COMMODITY TIER, AND A FACTOR THAT DOES NOT APPLY
+
+ROADMAP P2-bis. **GLD, SLV, USO, XLE, GDX** join SOYB, CORN, UNG, BOIL and WEAT. The basket is ten.
+
+### Why, and it was read on the phone
+
+SOYB and CORN produced **"0 of 2 shown"** and a wall of refusal text. That is not a bug — the floors
+are measured and they are doing their job — but it means most of what is on screen is an explanation
+of why there is nothing on screen. The grain chains carry ten or eleven reporting strikes at the
+~45-day horizon this app aims for, spreads this repository has measured at 66-166% of the mid, and
+combination spreads that routinely exceed the whole net. Almost nothing can clear four floors there.
+
+These five are real commodities, so the seasonal engine still applies; their option books are an
+order of magnitude deeper; and the notional per contract is larger. **Calibrating P2's edge on a
+liquid chain is worth far more than calibrating it on CORN.**
+
+### NOT ONE NUMBER IS INVENTED FOR THEM — failure classes 1 and 5
+
+Three things every existing row carries are deliberately absent from the five new ones, and
+`src/liquidity.test.js` fails the build if any of them appears:
+
+- **NO `SEASONAL` ROW.** Seasonality is **UNKNOWN** until Alpha Vantage's real monthly history loads.
+  `seasonalProvenance()` reports `missing`, `chanceOf()` returns null, every screen prints a dash and
+  the sentence — *"There is no seasonal reading for GLD at all… a drift of zero would be a claim that
+  GLD goes nowhere, which is a different thing from not knowing."* That machinery has existed since
+  §4j; what is new is that five markets actually reach it. A hand-written row would be a fifth
+  estimate on a table this repository has already measured as wrong on eight months of twelve.
+- **NO `SIGMA` ROW.** `sigmaProvenance()` falls to `RULES.fallbackSigma` and says on screen that the
+  number was **CHOSEN, not measured** — until the same Alpha Vantage read supplies the measured
+  realised volatility it has always returned beside the means (§4k).
+- **NO PER-MARKET `iv`.** `RULES.fallbackIV` is the one home for "the implied volatility the options
+  are priced at when nothing else is known", and `ivProvenance()` already says so wherever it is
+  used. Writing 0.15 for GLD out of memory is exactly the estimate-as-a-reading this codebase keeps
+  refusing. The live chain quotes its own IV per contract, and that is what every figure is worked
+  out at the moment it lands. **See NOT VERIFIED: 0.25 is a poor guess for GLD and it matters for
+  unquoted legs.**
+
+**`step` IS A FALLBACK AND ONLY A FALLBACK.** Strikes are a property of the board
+(`expiryStrikes()`), `buildPresets()` refuses to build without one (§4o), and `snapStrike()`'s grid
+is unreachable from it. The listing increments are there so a dropdown has something to offer before
+the chain lands, not so a trade can be built on them.
+
+**EVERY READER OF `monthlyMean` NOW GOES THROUGH ONE HOME.** `seasonalOf()` / `seasonalNowOf()` in
+`App.jsx` wrap `seasonalProvenance()`, and there were **eleven** raw `…monthlyMean[NOW_MONTH]`
+readers, every one of which would have thrown on `undefined[8]` — and the guard people reach for
+instead is `|| 0`, which prints a market as having no seasonal edge when nobody has measured one. The
+Radar row, the Build stat tile, the monthly bar chart, the agreement panel, the weekly report, the
+model's `scanner` context, the position thesis and the Guardian all read the one expression now.
+
+**AND `autopilot.mjs` HAD THE WORST VERSION OF IT.** `SEASONAL[pos.ticker] || SEASONAL.SPY` — for any
+market without a hand-written row, a brief written overnight would have drifted that position's
+chance on **the S&P 500's seasonality** and called it the position's own. It passes `|| null` now and
+gets `missing`.
+
+### WEATHER DOES NOT APPLY TO A METAL — and that is not a quiet zero
+
+`weatherApplies()` / `weatherNaReason()` / `factorsOf()` in `src/signals.js`.
+
+Nothing about a forecast moves an ounce of gold. Scoring GLD's weather as **0/100** would put a
+quarter of the weighted sum on a question that has no answer, drag every score toward zero, and —
+worse — spend one of the four slots the CONFLUENT / MIXED read is counted out of. A market with three
+real factors would then look *less* certain than one with four, purely because a fourth had been
+invented and then silently failed.
+
+**TWO CASES, AND THEY ARE DIFFERENT:**
+
+- **DOES NOT APPLY** (weather on a metal): dropped from the weights, from the agreement count and
+  from the confidence denominator. The remaining weights are **renormalised** so they still sum to
+  one — the quarter is spread over the other three in proportion, not left unused — and the bar
+  renders `n/a` with the reason behind a tap instead of an empty 0/100 bar.
+- **APPLIES BUT IS UNKNOWN** (no forecast loaded; no seasonal history yet): **kept**, contributing
+  nothing. Not knowing something that does matter is real uncertainty about this market and belongs
+  in the score and in the confidence. Only the first case is an exclusion.
+
+**IT IS DERIVED, NEVER A SECOND LIST.** `REGIONS` already declares which markets each region drives;
+a hand-typed "these have weather" beside it would be two answers to one question. **The four weights
+are unchanged in value** — `BASE_WEIGHTS` is the same 30/25/25/20 — and `why.jsx` prints the scale
+from `fused.weights` instead of the sentence it used to have typed into it, so it can no longer
+describe a scale nothing was measured against.
+
+**CONFLUENT STILL NEEDS THREE AGREEING.** On a three-factor market that means all three, which is a
+*higher* bar than three of four. Deliberately: there is less evidence, so the word has to be harder
+to earn, not easier. Scaling the bar with the count would have made a market with a factor removed
+look more certain than one with it.
+
+**CRUDE AND ENERGY EQUITIES ARE EXCLUDED TOO, AND THAT IS A JUDGEMENT.** A Gulf hurricane really can
+shut crude production in. But this app's regions measure crop stress and heating/cooling degree days,
+and neither of those is what moves a barrel — so rather than invent a hurricane region, storm supply
+risk reaches USO and XLE through the **news** rules, and `weatherNaReason()` says exactly that on
+screen. On the NOT VERIFIED list.
+
+### News: eleven new rules, each with its one-line why
+
+Same shape as everything already in `TAG_RULES` — a regular expression, the markets it moves, and one
+line saying why. Gold and silver: rate cuts and real yields, the dollar both ways, reserve and haven
+buying, and solar demand for silver's industrial half. Crude: OPEC (the existing rule reaches USO and
+XLE now), EIA crude inventories, Hormuz / Red Sea / tanker attacks, refinery outages, and US shale
+output. Miners: mine disruption, plus every gold rule, because a miner's revenue is the gold price
+and its costs are not.
+
+**A HEADLINE WHOSE DIRECTION DEPENDS ON THE NUMBER IS TAGGED `0`**, exactly as the USDA and EIA
+storage rules already are. A guess dressed as a direction is worse than saying the print decides.
+
+**AND THE ORDER OF THE LIST IS NOW LOAD-BEARING.** `tagImpacts()` gives each ticker to the FIRST rule
+that claims it. The macro catch-all — `fed|fomc|interest rate|inflation|cpi|payrolls|recession` — sat
+in the middle of the list, which was harmless with SPY as its only ticker and stopped being harmless
+the moment the metals were added to it: *"Fed signals a rate cut as real yields fall"* matched both it
+and the sharper rule, and the catch-all won, so a clearly bullish headline for gold was tagged
+ambiguous. It is last now, with a comment saying why, and a test holds each of the eleven.
+
+### The Radar must not get longer when the basket does
+
+`radarSplit()` / `radarQuietNote()` in `rules.js`. A market with something on it keeps its full row.
+**Every market with nothing collapses into ONE line**, which names them and keeps the two facts apart
+— *"6 markets with nothing to show — nothing cleared on CORN, SOYB · not searched yet: GLD, SLV, USO,
+XLE."* Each name in that line is still the button that opens that market, so nothing is removed from
+the app, only from the page.
+
+**IT COLLAPSES EVEN WHEN EVERY MARKET IS QUIET.** A first run has searched nothing, and ten identical
+rows saying *"not searched yet — use the search below"* is exactly the screen this exists to stop.
+
+**TEXT BUDGET: this REPLACES, it does not add.** The per-market sentence inside every quiet row is
+gone; one line carries the same two facts. The ticket's MOST YOU CAN LOSE note replaced its own
+repeated label. The only genuinely new sentences are `weatherNaReason()` — which appears where the
+weather bar used to draw an empty 0/100 — and the card's price clause, which replaced silence about
+the one number that had moved.
+
+**And the wide search now opens on GLD, SLV, USO** instead of SOYB, CORN, UNG. The selection is still
+the user's and every market is one tap away underneath it, but the default it offers should be a
+search with results in it.
+
+### The Alpha Vantage quota at ten markets
+
+25 requests a day, free tier. A cold start spends **ten** of the twenty-five; the server cache's TTL
+is seven days, so steady state is at most ten a week. When the quota is spent:
+
+- a cached answer inside the TTL is served, as always;
+- a cached answer **outside** the TTL is served as `cache-stale`, carrying its age in days and Alpha
+  Vantage's own refusal text, and the screen prints both;
+- with **no** cached answer the endpoint returns the refusal and that market's seasonality stays
+  **UNKNOWN**. `seasonalProvenance()` reports `missing`, `chanceOf()` returns null, screens print a
+  dash and the sentence, and the four-factor read scores that market with its seasonal bar reading
+  "no seasonal history".
+
+**There is no fall back to a table**, because for five of the ten there is no table to fall back to —
+and inventing one is the failure this whole section is about.
+
+### THE PREDICTION, WRITTEN BEFORE THE MEASUREMENT
+
+On a board near 45 DTE, at the RECOMMENDED liquidity setting, of the eight presets
+`shortlistWithFloors()` builds per direction, **how many clear all four floors** (liquidity, per-leg
+spread, combination spread, reward-to-risk) plus `priceability()` and `modelSanity()`:
+
+| market | predicted to clear | why |
+|---|---|---|
+| **GLD** | **7 of 8** (6-8) | penny-to-nickel markets, open interest in the thousands on $1 strikes |
+| **GDX** | **6 of 8** (5-8) | one of the most heavily traded ETF option books there is |
+| **SLV** | **6 of 8** (5-7) | deep, slightly wider than GLD in absolute cents on a lower price |
+| **XLE** | **6 of 8** (4-7) | good depth, $1 strikes, but a lower-volatility book so nets are small |
+| **USO** | **5 of 8** (3-7) | decent but the thinnest of the five, and the wildcard |
+| **SOYB** | **0-2 of 8** | measured: "0 of 2 shown" |
+| **CORN** | **0-2 of 8** | same chains, same reading |
+
+**AND THE FALSIFIABLE PART, which is the one worth measuring:** the floor that does the cutting on
+the grains is the **COMBINATION spread** (`comboSpreadFloor`, 100% of net), not open interest — the
+per-leg floor passes and the pair does not, which is the §4l fault the combination floor was built
+for. On the metals I expect `comboSpread` to cut **at most one** of the eight and open interest to cut
+**none**. If the grains turn out to be cut by `liquidity` instead, the diagnosis in this PRD is wrong
+and the liquidity percentile is the number to look at rather than the pair ceiling.
+
+### NOT VERIFIED
+
+- **NO CHAIN HAS EVER BEEN FETCHED FOR ANY OF THE FIVE.** Whether Alpaca lists options on all of
+  them, what expiries come back, what the strike increments really are near the money, and whether
+  anything at all clears the floors — none of it is read. The prediction above is a prediction.
+- **THE LIQUIDITY FLOOR'S CONSTANTS WERE MEASURED ON THE ORIGINAL FIVE**, on the 2026-09-01 close.
+  `LIQUIDITY_MEASUREMENT` says so and is unchanged. `/api/liquidity` now covers all ten but **has not
+  been run against them**, and the `minPeersForPercentile` of 8 was tuned to grain chains with ten or
+  eleven reporting strikes — on a board with a hundred it is not the binding consideration it was.
+- **`RULES.fallbackIV` (0.25) IS A POOR NUMBER FOR GLD**, whose implied volatility runs closer to
+  half that, and a low one for GDX. It only bites on a leg the chain does not quote — every quoted
+  contract is priced at its own IV — but that is exactly where `modelSanity()`'s denominator lives,
+  so an unquoted leg on GLD could be judged against a model priced at twice the right volatility.
+  The honest fix is a measured per-market IV, which is the same Alpha Vantage work as the sigma.
+- **EXCLUDING WEATHER FROM USO AND XLE IS A JUDGEMENT, NOT A MEASUREMENT.** The alternative was to
+  invent a Gulf-hurricane region, and inventing a region is worse than routing the fact through the
+  news rules and saying so.
+- **THE ELEVEN NEWS RULES ARE WRITTEN, NOT MEASURED.** They are held against eleven synthetic
+  headlines. Nobody has run them over a real feed to see how often they fire, or how often a real
+  headline matches two of them and the first one wins.
+- **THE SEASONAL ENGINE APPLIES TO THESE MARKETS AS AN ASSERTION.** Gold has a documented seasonal
+  pattern and crude a strong one; GDX and XLE are equities whose seasonality is their underlying
+  commodity's plus the equity market's, which this app does not separate. The measured Alpha Vantage
+  series is what will settle it, and it is 30% of the score.
+- **NOBODY HAS SEEN THE RADAR COLLAPSE, THE `n/a` WEATHER BAR OR THE CARD'S PRICE CLAUSE.** Eighth
+  pull request in a row handing a screen forward unseen.
 
 ---
 

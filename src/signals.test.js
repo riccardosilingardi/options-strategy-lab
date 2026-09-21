@@ -3,7 +3,8 @@
 
 import assert from "node:assert/strict";
 import { fuseSignals, weatherComponent, newsComponent, ageDecay, regionSignals,
-  sentimentDirection, signalAdjustment, rankScore, compareCandidates, withSignalRank, againstSignal } from "./signals.js";
+  sentimentDirection, signalAdjustment, rankScore, compareCandidates, withSignalRank, againstSignal,
+  weatherApplies, weatherNaReason, factorsOf, tagImpacts, seasonalComponent, REGIONS } from "./signals.js";
 
 /* ---------------- tiny harness ---------------- */
 let passed = 0;
@@ -312,6 +313,114 @@ test("regionSignals returns one row per region with data, same direction as the 
   }
   assert.ok(rows.every((r) => r.numDir === 1), "hot and dry in July reads bullish everywhere here");
   assert.deepEqual(regionSignals(null, JULY), [], "no forecast means no rows, not a throw");
+});
+
+
+/* ================================================================
+   THE LIQUID TIER (ROADMAP P2-bis): weather does not apply to a metal,
+   and a missing seasonal row is UNKNOWN rather than a quiet zero.
+================================================================ */
+
+test("weather applicability is DERIVED from the region table, never a second list", () => {
+  for (const tk of ["CORN", "SOYB", "WEAT", "UNG", "BOIL"]) {
+    assert.equal(weatherApplies(tk), true, `${tk} has regions in the table`);
+    assert.ok(REGIONS.some((r) => r.affects.includes(tk)));
+  }
+  for (const tk of ["GLD", "SLV", "GDX", "USO", "XLE"]) {
+    assert.equal(weatherApplies(tk), false, `${tk} has no region driving it`);
+  }
+});
+
+const sum4 = (w) => Object.values(w).reduce((a, b) => a + b, 0);
+
+test("a factor that DOES NOT APPLY is out of the weights, and they still sum to one", () => {
+  const corn = factorsOf("CORN");
+  assert.deepEqual(corn.keys, ["seasonal", "technical", "weather", "news"]);
+  assert.equal(corn.excluded.length, 0);
+  assert.equal(corn.note, null);
+  assert.equal(+sum4(corn.weights).toFixed(6), 1, "four factors still sum to one");
+  // ...and the four are unchanged in value.
+  assert.equal(+corn.weights.seasonal.toFixed(2), 0.30);
+  assert.equal(+corn.weights.weather.toFixed(2), 0.25);
+
+  const gld = factorsOf("GLD");
+  assert.deepEqual(gld.keys, ["seasonal", "technical", "news"]);
+  assert.deepEqual(gld.excluded, ["weather"]);
+  assert.equal(+sum4(gld.weights).toFixed(6), 1, "three factors are RENORMALISED to one");
+  assert.equal(gld.weights.weather, undefined, "weather is not in the scale at all");
+  // The share is spread in proportion, not dropped on the floor.
+  assert.ok(gld.weights.seasonal > 0.30 && gld.weights.news > 0.20);
+  assert.ok(/gold/i.test(gld.note), "and the reason names the market");
+});
+
+test("weather on a metal is n/a, not a reading of zero", () => {
+  const c = weatherComponent("GLD", null, JULY);
+  assert.equal(c.applies, false);
+  assert.equal(c.strength, 0);
+  assert.deepEqual(c.regions, []);
+  assert.ok(!/no forecast available/.test(c.why), "a missing forecast is a different sentence");
+  assert.ok(/does not apply/i.test(c.why));
+  // A market that HAS regions but no data loaded is the other case, and it stays in.
+  const corn = weatherComponent("CORN", null, JULY);
+  assert.equal(corn.applies, true);
+  assert.ok(/no forecast available/.test(corn.why));
+});
+
+test("the excluded factor is out of the AGREEMENT count and the confidence, not scored 0", () => {
+  const newsItems = [{ title: "Fed signals a rate cut as real yields fall", date: daysAgo(0) }];
+  const gld = fuseSignals({ ticker: "GLD", month: JULY, weatherData: null, newsItems, bars: bars("up"), seasonalMean: 2.0, now: NOW });
+  assert.deepEqual(gld.factors, ["seasonal", "technical", "news"]);
+  assert.equal(gld.components.weather.applies, false);
+  // Three of three agreeing is CONFLUENT; the fourth slot is not a quiet factor
+  // holding it down to MIXED.
+  assert.equal(gld.agreement, "CONFLUENT");
+  assert.ok(gld.confidence >= 75, `three-factor confluence keeps its confidence (${gld.confidence})`);
+  assert.ok(/does not apply/i.test(gld.narrative), "and the narrative says so once");
+
+  // THE PROOF THAT IT IS THE EXCLUSION DOING THE WORK: the same readings on a
+  // market that HAS weather, with none loaded, cannot reach CONFLUENT.
+  const corn = fuseSignals({ ticker: "CORN", month: JULY, weatherData: null, newsItems: [{ title: "Beneficial rains improve the crop", date: daysAgo(0) }], bars: bars("up"), seasonalMean: 2.0, now: NOW });
+  assert.equal(corn.components.weather.applies, true);
+  assert.equal(corn.components.weather.strength, 0);
+});
+
+test("a market with no seasonal row at all reads UNKNOWN, never 0%/mo", () => {
+  const c = seasonalComponent("GLD", JULY, null);
+  assert.equal(c.mean, null, "null, not zero");
+  assert.equal(c.strength, 0);
+  assert.ok(/no seasonal history/.test(c.why));
+  // And it is NOT excluded: seasonality applies to gold, it simply has not been
+  // read yet, and not knowing something that matters is real uncertainty.
+  assert.ok(factorsOf("GLD").keys.includes("seasonal"));
+});
+
+test("the new news rules tag the new markets, each with its one-line why", () => {
+  const cases = [
+    ["Fed signals a rate cut as real yields fall", "GLD", 1],
+    ["Hawkish Fed: higher for longer, real yields rising", "GLD", -1],
+    ["Dollar index surges to a two-year high", "SLV", -1],
+    ["Central bank gold buying hits a record", "GLD", 1],
+    ["Solar panel demand lifts industrial metals", "SLV", 1],
+    ["OPEC announces a production cut", "USO", 1],
+    ["EIA reports a large crude inventory build", "USO", 0],
+    ["Tanker attack in the Strait of Hormuz", "USO", 1],
+    ["US crude production from the Permian hits a record", "USO", -1],
+    ["Refinery outage widens the crack spread", "XLE", 1],
+    ["Mine strike halts output at a major producer", "GDX", 0],
+  ];
+  for (const [title, tk, dir] of cases) {
+    const hit = tagImpacts(title).find((x) => x.tk === tk);
+    assert.ok(hit, `"${title}" should tag ${tk}`);
+    assert.equal(hit.dir, dir, `"${title}" → ${tk}`);
+    assert.ok(hit.why && hit.why.length > 12, "every rule carries a one-line why");
+  }
+});
+
+test("a headline about gold does not quietly tag a grain, and vice versa", () => {
+  const gold = tagImpacts("Central bank gold buying hits a record").map((x) => x.tk);
+  assert.ok(!gold.includes("CORN") && !gold.includes("WEAT"));
+  const grain = tagImpacts("Heatwave and drought stress the corn belt").map((x) => x.tk);
+  assert.ok(!grain.includes("GLD") && !grain.includes("USO"));
 });
 
 /* ---------------- summary ---------------- */

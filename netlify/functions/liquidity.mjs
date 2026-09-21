@@ -10,7 +10,7 @@
  * next session; the percentile and the absolute minimum then come from a
  * reading instead of an argument.
  *
- *   /api/liquidity                 all five markets
+ *   /api/liquidity                 every market in the basket (ten)
  *   /api/liquidity?sym=UNG,CORN    just those
  *   /api/liquidity?near=15         widen the near-the-money band to +/-15%
  *

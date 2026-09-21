@@ -116,13 +116,22 @@ export function readRegion(region, forecast, month) {
  */
 export function weatherComponent(ticker, weatherData, month) {
   const relevant = REGIONS.filter((r) => r.affects.includes(ticker));
+  // >>> DOES NOT APPLY IS NOT QUIET. <<< See `weatherApplies()` below: with no
+  // region declaring this market there is no weather READING to be had, ever,
+  // and the old sentence here — "no forecast available for the 0 regions that
+  // drive GLD" — was a missing forecast where the truth is that the question
+  // does not arise. `applies: false` is what keeps it out of the weighted sum
+  // and out of the confidence denominator rather than scoring it 0/100.
+  if (!relevant.length) {
+    return { dir: 0, strength: 0, applies: false, why: weatherNaReason(ticker), regions: [] };
+  }
   const reads = [];
   for (const r of relevant) {
     const read = readRegion(r, weatherData?.[r.id], month);
     if (read) reads.push({ region: r.name, ...read });
   }
   if (!reads.length) {
-    return { dir: 0, strength: 0, why: `no forecast available for the ${relevant.length} regions that drive ${ticker}`, regions: [] };
+    return { dir: 0, strength: 0, applies: true, why: `no forecast available for the ${relevant.length} regions that drive ${ticker}`, regions: [] };
   }
 
   const net = sum(reads.map((r) => r.dir * r.weight));
@@ -141,7 +150,67 @@ export function weatherComponent(ticker, weatherData, month) {
     why = `${concurring.length} of ${reads.length} regions affecting ${ticker} point ${dir > 0 ? "up" : "down"} (combined weight ${signed(net, 2)}): ${lead}`;
     if (against.length) why += `; ${against.length} ${against.length === 1 ? "region pulls" : "regions pull"} the other way`;
   }
-  return { dir: strength >= 10 ? dir : 0, strength, why, regions: reads };
+  return { dir: strength >= 10 ? dir : 0, strength, applies: true, why, regions: reads };
+}
+
+/* ================================================================
+   WHICH OF THE FOUR FACTORS APPLY TO A MARKET
+
+   >>> WEATHER DOES NOT APPLY TO A METAL, AND A FACTOR THAT DOES NOT APPLY IS
+   NOT A QUIET ONE. <<< Nothing about a forecast moves an ounce of gold, so
+   scoring GLD's weather as 0/100 would put a quarter of the weighted sum on a
+   question that has no answer, drag every score toward zero, and — worse —
+   spend one of the four slots the CONFLUENT/MIXED read is counted out of. A
+   market with three real factors would then look less certain than one with
+   four, purely because a fourth had been invented and then silently failed.
+
+   TWO CASES, AND THEY ARE DIFFERENT:
+     - DOES NOT APPLY (weather on a metal): dropped from the weights and from
+       the counts. The remaining weights are renormalised so they still sum to
+       one, and the screen says so.
+     - APPLIES BUT IS UNKNOWN (no forecast loaded yet; no seasonal history yet):
+       kept, contributing nothing. Not knowing something that matters IS real
+       uncertainty about this market and belongs in the score and in the
+       confidence. Only the first case is an exclusion.
+
+   IT IS DERIVED, NEVER A SECOND LIST. `REGIONS` already declares which markets
+   each region drives; a hand-typed "these have weather" beside it would be two
+   answers to one question waiting to disagree.
+================================================================ */
+
+/** True when some region in the table declares that it drives this market. */
+export const weatherApplies = (ticker) => REGIONS.some((r) => r.affects.includes(ticker));
+
+/* WHY NOT, IN ONE LINE EACH. These are sentences, not thresholds: nothing here
+   decides anything, `weatherApplies()` above does. Written per market because
+   "no region drives it" is true and useless — the reader wants to know whether
+   that is a gap in the table or a fact about the asset. */
+const WEATHER_NA = {
+  GLD: "Weather does not apply to gold: an ounce is not grown, not stored in degree-days and not consumed by a cold winter. What moves it — real yields, the dollar, central-bank buying — reaches this app through the news factor.",
+  SLV: "Weather does not apply to silver. Its industrial half moves with manufacturing demand and its monetary half with real yields, and neither is a forecast; both reach this app through the news factor.",
+  GDX: "Weather does not apply to gold miners. They are equities whose earnings track the gold price, so the same reasoning as GLD holds one step removed.",
+  USO: "Weather is not read for crude here. A Gulf hurricane really can shut production in, but this app's regions are crop stress and heating or cooling demand, and neither of those is what moves a barrel — storm supply risk reaches crude through the news rules instead.",
+  XLE: "Weather is not read for energy equities here, for the same reason as crude: this app's regions measure crop stress and degree-days, and an integrated oil company's earnings are not a function of either.",
+};
+
+/** The sentence a screen prints where the weather bar would have been. */
+export const weatherNaReason = (ticker) => WEATHER_NA[ticker]
+  || `No region in this app's table drives ${ticker}, so there is no weather reading for it — and no reading is not a reading of zero.`;
+
+/**
+ * THE APPLICABLE FACTORS AND THEIR WEIGHTS, for one market.
+ * @returns {{ keys: string[], weights: object, excluded: string[], note: ?string }}
+ *   `weights` always sums to 1 across `keys`, so dropping a factor redistributes
+ *   its share in proportion rather than leaving a quarter of the scale unused.
+ */
+export function factorsOf(ticker) {
+  const applies = { seasonal: true, technical: true, weather: weatherApplies(ticker), news: true };
+  const keys = Object.keys(BASE_WEIGHTS).filter((k) => applies[k]);
+  const total = sum(keys.map((k) => BASE_WEIGHTS[k]));
+  const weights = Object.fromEntries(keys.map((k) => [k, BASE_WEIGHTS[k] / total]));
+  const excluded = Object.keys(BASE_WEIGHTS).filter((k) => !applies[k]);
+  return { keys, weights, excluded,
+    note: excluded.includes("weather") ? weatherNaReason(ticker) : null };
 }
 
 /* ================================================================
@@ -158,15 +227,47 @@ const TAG_RULES = [
   { re: /(natural gas storage|eia.{0,30}(storage|inventory|injection)|working gas)/i, imp: [["UNG", 0], ["BOIL", 0]], why: "EIA storage figure: build above consensus bearish, below bullish" },
   { re: /(lng (export|terminal|plant)|freeport|cheniere|sabine)/i, imp: [["UNG", 1], ["BOIL", 1]], why: "more LNG export means more US gas demand" },
   { re: /(hurricane|tropical storm|gulf (of mexico|coast).{0,30}(gas|oil|energy))/i, imp: [["UNG", 1], ["BOIL", 1]], why: "Gulf production and infrastructure at risk" },
-  { re: /(opec|crude .{0,10}(cut|sanction)|oil sanction|energy sanction|pipeline (halt|attack|outage)|nord stream)/i, imp: [["UNG", 1], ["SPY", -1]], why: "an energy supply shock spills over into gas" },
-  { re: /(fed|fomc|interest rate|inflation|cpi|payrolls|recession)/i, imp: [["SPY", 0]], why: "US macro: hawkish prints bearish, dovish bullish" },
+  { re: /(opec|crude .{0,10}(cut|sanction)|oil sanction|energy sanction|pipeline (halt|attack|outage)|nord stream)/i, imp: [["UNG", 1], ["USO", 1], ["XLE", 1], ["SPY", -1]], why: "an energy supply shock lifts the barrel and spills over into gas" },
   { re: /(la ni[nñ]a|el ni[nñ]o|monsoon|frost|freeze|polar vortex)/i, imp: [["CORN", 0], ["SOYB", 0], ["UNG", 1]], why: "climate pattern; extreme cold lifts heating demand" },
   { re: /(ethanol|biofuel|renewable (fuel|diesel))/i, imp: [["CORN", 1], ["SOYB", 1]], why: "biofuel demand pulls on the crop" },
+
+  /* ---- THE LIQUID TIER (ROADMAP P2-bis) ----
+     Same shape as everything above: a regular expression, the markets it moves,
+     and ONE LINE saying why it moves them. A headline whose direction genuinely
+     depends on the number against consensus is tagged 0 — ambiguous — exactly
+     as the USDA and EIA storage rules already are, because a guess dressed as a
+     direction is worse than saying the print decides.
+
+     GDX RIDES WITH GOLD, LEVERAGED. A miner's revenue is the gold price and its
+     costs are not, so the same cause reaches it amplified rather than
+     differently — which is why it appears beside GLD rather than in rules of
+     its own, except where the cause really is specific to a mine. */
+  { re: /(rate cut|dovish|easing cycle|(lower|falling|negative) real yields)/i, imp: [["GLD", 1], ["SLV", 1], ["GDX", 1]], why: "lower real yields cut the cost of holding an asset that pays no income" },
+  { re: /(rate hike|hawkish|higher for longer|(rising|higher) real yields)/i, imp: [["GLD", -1], ["SLV", -1], ["GDX", -1]], why: "higher real yields raise the cost of holding an asset that pays no income" },
+  { re: /(dollar (index|rally|strength|surge)|\bdxy\b|stronger dollar)/i, imp: [["GLD", -1], ["SLV", -1], ["GDX", -1]], why: "a stronger dollar makes dollar-priced metal dearer in every other currency" },
+  { re: /(weaker dollar|dollar (slide|weakness|falls|slips))/i, imp: [["GLD", 1], ["SLV", 1], ["GDX", 1]], why: "a weaker dollar makes dollar-priced metal cheaper in every other currency" },
+  { re: /(safe.haven|bullion|central bank.{0,20}(gold|buying|reserves)|gold reserves)/i, imp: [["GLD", 1], ["SLV", 1], ["GDX", 1]], why: "reserve and haven buying is demand that does not care about the price" },
+  { re: /(solar (panel|demand|installation)|photovoltaic|industrial (silver|metal) demand)/i, imp: [["SLV", 1]], why: "silver is half an industrial metal, and solar is its largest single use" },
+  { re: /(mine (strike|closure|accident|outage)|mining (strike|output|production)|ore grade|all.in sustaining)/i, imp: [["GDX", 0]], why: "a mine disruption cuts a miner's output and lifts the metal: which dominates depends on the miner" },
+  { re: /(eia.{0,30}(crude|petroleum|oil).{0,25}(stock|inventor)|crude (inventories|stocks|stockpiles))/i, imp: [["USO", 0], ["XLE", 0]], why: "EIA crude inventory: a build above consensus is bearish, a draw bullish" },
+  { re: /(hormuz|red sea|houthi|tanker (attack|seiz|strike)|shipping (lane|disruption|attack)|suez)/i, imp: [["USO", 1], ["XLE", 1], ["SPY", -1]], why: "a threat to the sea lanes that carry crude puts a risk premium on the barrel" },
+  { re: /(refinery (outage|fire|shutdown|closure)|refining margin|crack spread)/i, imp: [["XLE", 1], ["USO", 0]], why: "lost refining capacity widens margins for those still running and backs crude up at the wellhead" },
+  { re: /(shale|permian|rig count|us (oil|crude) (output|production))/i, imp: [["USO", -1], ["XLE", -1]], why: "more US output is more supply, and the marginal barrel sets the price" },
+
+  /* >>> LAST, AND THE ORDER IS THE POINT. <<< `tagImpacts()` gives each ticker
+     to the FIRST rule that claims it, so a catch-all has to sit below every
+     rule that says something sharper. "Fed signals a rate cut as real yields
+     fall" matches both this and the rule above it; the specific one knows the
+     direction and this one only knows the subject, so the specific one must
+     get there first. This used to sit in the middle of the list, where it was
+     harmless with SPY as its only ticker and stopped being harmless the moment
+     the metals were added to it. */
+  { re: /(fed|fomc|interest rate|inflation|cpi|payrolls|recession)/i, imp: [["SPY", 0], ["GLD", 0], ["SLV", 0], ["GDX", 0]], why: "US macro: hawkish prints bearish for an asset that pays no income, dovish bullish" },
 ];
 
 // Geopolitical / government sources move supply structurally rather than for a
 // session, so they carry more weight than ordinary market chatter (PRD §7).
-const GEO_RE = /(opec|sanction|embargo|black sea|ukrain|russia|usda|wasde|\beia\b|export ban|export restriction|tariff|trade war|china|government|ministry|nord stream|grain corridor|odesa|crop report|grain stocks|acreage)/i;
+const GEO_RE = /(opec|sanction|embargo|black sea|ukrain|russia|usda|wasde|\beia\b|export ban|export restriction|tariff|trade war|china|government|ministry|nord stream|grain corridor|odesa|crop report|grain stocks|acreage|hormuz|red sea|houthi|central bank|federal reserve|fomc)/i;
 
 const GEO_WEIGHT = 1.8;
 const MARKET_WEIGHT = 1.0;
@@ -303,7 +404,10 @@ export function seasonalComponent(ticker, month, seasonalMean) {
    Fusion
 ================================================================ */
 
-const WEIGHTS = { seasonal: 0.30, technical: 0.25, weather: 0.25, news: 0.20 };
+/* THE FOUR WEIGHTS AS WRITTEN. `factorsOf()` above renormalises them over the
+   factors that apply to a given market, so this is the shape of the scale and
+   never the scale a particular market is scored on. Unchanged in value. */
+const BASE_WEIGHTS = { seasonal: 0.30, technical: 0.25, weather: 0.25, news: 0.20 };
 // The gate's warning floor, imported rather than written down again: a
 // narrative must only ever quote a threshold the code actually applies.
 const LOW_CONFIDENCE = RULES.lowConfidence;
@@ -341,7 +445,12 @@ export function fuseSignals({ ticker, month, weatherData, newsItems, bars, seaso
   };
   for (const k of Object.keys(components)) components[k].arrow = ARROW[components[k].dir];
 
-  const keys = Object.keys(WEIGHTS);
+  // WHICH FACTORS THIS MARKET HAS AT ALL, and the weights renormalised over
+  // them. Everything below counts `keys` and never the four: a factor that does
+  // not apply is not in the sum, not in the agreement count and not in the
+  // confidence denominator.
+  const { keys, weights, excluded, note: factorNote } = factorsOf(ticker);
+  for (const k of excluded) components[k].applies = false;
   const up = keys.filter((k) => components[k].dir > 0);
   const down = keys.filter((k) => components[k].dir < 0);
   const quiet = keys.filter((k) => components[k].dir === 0);
@@ -349,11 +458,16 @@ export function fuseSignals({ ticker, month, weatherData, newsItems, bars, seaso
 
   let agreement;
   if (up.length && down.length) agreement = "CONFLICT";
+  // THREE AGREEING IS STILL THREE. On a market with only three factors that
+  // means all three, which is a HIGHER bar than three of four — deliberately:
+  // there is less evidence, so the word CONFLUENT has to be harder to earn, not
+  // easier. Scaling the bar with the count would have made a market with one
+  // factor removed look more certain than one with it.
   else if (nActive >= 3) agreement = "CONFLUENT";
   else agreement = "MIXED";
 
   // Score: weighted sum of signed strengths, so it already lives in -100..100.
-  let raw = sum(keys.map((k) => WEIGHTS[k] * components[k].dir * components[k].strength));
+  let raw = sum(keys.map((k) => weights[k] * components[k].dir * components[k].strength));
 
   const reinforced = components.weather.dir !== 0 && components.weather.dir === components.news.geoDir;
   if (reinforced) raw *= REINFORCE;
@@ -379,13 +493,17 @@ export function fuseSignals({ ticker, month, weatherData, newsItems, bars, seaso
     confidence = 20;
   }
 
-  const narrative = buildNarrative({ ticker, month: m, components, agreement, score, confidence, up, down, quiet, reinforced });
+  const narrative = buildNarrative({ ticker, month: m, components, agreement, score, confidence, up, down, quiet, reinforced, keys, factorNote });
 
-  return { ticker, month: m, score, confidence, components, agreement, narrative, reinforced };
+  return { ticker, month: m, score, confidence, components, agreement, narrative, reinforced,
+    // THE SCALE THIS MARKET WAS SCORED ON TRAVELS WITH THE SCORE. `why.jsx`
+    // printed "seasonality 30%, price trend 25%, weather 25%, news 20%" as a
+    // fixed sentence under the bars; on a market with no weather that sentence
+    // would have been describing a scale nothing was measured against.
+    factors: keys, weights, excluded, factorNote };
 }
 
-function buildNarrative({ ticker, month, components, agreement, score, confidence, up, down, quiet, reinforced }) {
-  const keys = Object.keys(WEIGHTS);
+function buildNarrative({ ticker, month, components, agreement, score, confidence, up, down, quiet, reinforced, keys, factorNote }) {
   const nActive = up.length + down.length;
   const strongest = [...keys].sort((a, b) => components[b].strength - components[a].strength);
   const s = [];
@@ -393,14 +511,14 @@ function buildNarrative({ ticker, month, components, agreement, score, confidenc
   // 1) The verdict, with both numbers.
   if (agreement === "CONFLUENT") {
     const d = up.length ? 1 : -1;
-    s.push(`${ticker}: ${nActive} of the 4 factors point ${dirWord(d)} together, giving a score of ${scoreTxt(score)} out of 100 at ${confidence}/100 confidence`);
+    s.push(`${ticker}: ${nActive} of the ${keys.length} factors point ${dirWord(d)} together, giving a score of ${scoreTxt(score)} out of 100 at ${confidence}/100 confidence`);
   } else if (agreement === "CONFLICT") {
     s.push(`${ticker}: the factors contradict each other, so the score is held down to ${scoreTxt(score)} out of 100 and confidence to ${confidence}/100`);
   } else if (nActive === 0) {
-    s.push(`${ticker}: none of the 4 factors is pushing in either direction, so the score is ${scoreTxt(score)} out of 100 at ${confidence}/100 confidence`);
+    s.push(`${ticker}: none of the ${keys.length} factors is pushing in either direction, so the score is ${scoreTxt(score)} out of 100 at ${confidence}/100 confidence`);
   } else {
     const d = up.length ? 1 : -1;
-    s.push(`${ticker}: ${nActive} of the 4 factors ${verb(nActive, "points", "point")} ${dirWord(d)} and ${quiet.length} ${verb(quiet.length, "is", "are")} neutral, giving a score of ${scoreTxt(score)} out of 100 at ${confidence}/100 confidence`);
+    s.push(`${ticker}: ${nActive} of the ${keys.length} factors ${verb(nActive, "points", "point")} ${dirWord(d)} and ${quiet.length} ${verb(quiet.length, "is", "are")} neutral, giving a score of ${scoreTxt(score)} out of 100 at ${confidence}/100 confidence`);
   }
 
   // 2) The strongest reading, in full, with its numbers.
@@ -418,8 +536,13 @@ function buildNarrative({ ticker, month, components, agreement, score, confidenc
     const quietTxt = quiet.map((k) => `${LABEL[k]} (${components[k].strength}/100)`).join(", ");
     s.push(`Adding nothing this week: ${quietTxt}`);
   } else {
-    s.push(`All 4 factors are active and none contradicts the others, which is the ${nActive}-factor case the engine is built to find`);
+    s.push(`All ${keys.length} factors are active and none contradicts the others, which is the ${nActive}-factor case the engine is built to find`);
   }
+
+  // 3b) AND IF ONE OF THE FOUR IS NOT THERE AT ALL, THAT IS SAID ONCE. It is a
+  // fact about the market rather than about today, so it comes after the read
+  // and not instead of it.
+  if (factorNote) s.push(factorNote.replace(/\.$/, ""));
 
   // 4) What it means for an order, against the thresholds the app actually uses.
   if (agreement === "CONFLUENT" && confidence >= AUTOPILOT_CONFIDENCE) {
@@ -535,7 +658,9 @@ export function againstSignal(fused, dir) {
   if (Math.abs(fused.score) < AGAINST_MIN_SCORE) return null;
   if (Math.sign(fused.score) === dir) return null;
 
-  const keys = Object.keys(WEIGHTS);
+  // THE FACTORS THIS MARKET HAS, not the four in the abstract. "3 of 4 factors
+  // disagree" on a market with no weather counts a factor nobody read.
+  const keys = fused.factors || Object.keys(BASE_WEIGHTS);
   const opposing = keys.filter((k) => fused.components[k].dir === -dir && fused.components[k].dir !== 0);
   const supporting = keys.filter((k) => fused.components[k].dir === dir);
   return {
