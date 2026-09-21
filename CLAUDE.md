@@ -17,9 +17,12 @@ instead of being re-discovered.
 
 ## What this is
 
-A paper-trading platform for multi-leg options strategies on commodity ETFs
-(CORN, UNG, SOYB, BOIL, WEAT). It guides non-expert traders toward disciplined
-trading. The owner is not a software developer: explain changes in plain
+A paper-trading platform for multi-leg options strategies on commodity ETFs.
+**Ten markets since ROADMAP P2-bis**: the grain and gas tier (CORN, UNG, SOYB,
+BOIL, WEAT) and the liquid tier (GLD, SLV, USO, XLE, GDX), which exists because
+the grain chains are so thin that almost nothing clears the floors and most of
+what was on screen was an explanation of why the screen was empty. It guides
+non-expert traders toward disciplined trading. The owner is not a software developer: explain changes in plain
 language, define technical terms on first use.
 
 **Product language is English.** All UI copy, function names and generated
@@ -219,6 +222,25 @@ it, so **the list the owner read could not fail**. A checklist that cannot fail 
 - `LOCAL_BOOK` survives for the one case it is true of: the confirm step with no broker connected.
 - `checkedAgainstNote()` in `rules.js` says under the checklist whose account it checked, because
   that sheet holds two taps and the checks shown are the SEND'S — the stricter of the two.
+
+## THE CARD READS THE FIGURE THE TICKET WILL SEND — and it NAMES the price
+
+Read on the owner's phone, SOYB 21 September 2026: the card said *"risking $44 of $1,000"*, the
+owner moved the ticket's sliders to the ask and sent **$60**. PRD §4o.
+
+**BOTH FIGURES ALREADY CAME FROM ONE EXPRESSION** — `AE` is `analyze()` at `effectiveLimit()`'s net
+and the gate, the card and the ticket are all handed it. What was missing:
+
+- **`tradeCard()` TAKES `entry` AND `entrySource`** and line 2 names them: *"$60 at the $60 debit
+  the ticket is holding"*, or *"the middle of the market"* when no ticket price is readable. A
+  figure with no price attached, read before the price changed, is indistinguishable from a figure
+  that disagrees with the order.
+- **THE LIMIT CHECK IS WHERE THE SEND IS.** The sliders live in `DeskSheet`, which COVERS the card
+  while they are moved. The ticket's MOST YOU CAN LOSE note repeated its own label back; it prints
+  the per-trade limit from the SAME `guard.limits` the card prints. Nothing new is computed and no
+  sentence is added — one redundant note is replaced.
+- `ticket.test.jsx` drives seed → ask through the real chain and holds the three figures equal at
+  both prices. If they can ever differ again, that test says so.
 
 ## THE DECISION IS FIVE LINES — the trade card, and everything else one tap away
 
@@ -1055,7 +1077,9 @@ while the position is open.
   `legBook()` / `sizeSkippedNote()` / `legLimitSeed()` / `netFromLegs()` / `onTick()`
   (the market table and the per-leg sliders), `maxComboSpreadShareOfNet` with
   `comboSpreadFloor()` (the PAIR is not the legs — the fourth floor),
-  `chanceDrawFields()` (the two numbers a picture of a candidate is drawn at) and
+  `chanceDrawFields()` (the two numbers a picture of a candidate is drawn at),
+  `radarSplit()` / `radarQuietNote()` (which markets get a row and which get a
+  name in the one line at the bottom) and
   `conflictSummaryLine()` / `warningsToPrint()` (the warnings, once);
   `entryRoom()` with its override sentences and `passedOverRecord()`,
   `scratchPayoffShare`
@@ -1264,7 +1288,10 @@ while the position is open.
   **Spot has ONE home** — `spotOf(chain)` in `chain.js`, with `spotAt()` for its age. Any
   other endpoint returning an underlying price is reporting its own reading for its own
   purpose and is never the price on screen.
-- `src/signals.js` — the 4-factor confluence engine (`fuseSignals`) and the
+- `src/signals.js` — the 4-factor confluence engine (`fuseSignals`), which
+  factors apply to which market (`weatherApplies()` / `weatherNaReason()` /
+  `factorsOf()` — weather does not apply to a metal, and that is not a quiet
+  zero), and the
   single source of the region table, the climate norms, the news cause→effect
   rules, the SMA/RSI read and the candidate ranking. Plain JS, no React imports.
   `pro.jsx` imports all of it and keeps only the rendering. Never copy a
@@ -1690,13 +1717,76 @@ rejects anything it cannot confirm.
   It reads `RULES.exitDTE` for its numbers and takes its volatility as a
   `sigmaProvenance()` result exactly as `exitSim` does; only the body is its own
 
-## The basket
+## The basket — TEN markets, and FIVE of them have NO hand-written numbers
 
 `BASKET` in `App.jsx` is derived from the `commodity: true` flag on `UNDERLYINGS`,
 never typed out a second time — SPY is in the table so the desk can price a hedge,
 it is not something the guided flow goes looking for.
 
-`src/basket.js` carries the same five as a plain array, and ONLY because a Netlify
+**THE LIQUID TIER CARRIES NO `SEASONAL` ROW, NO `SIGMA` ROW AND NO PER-MARKET `iv`**
+(PRD §4p). GLD, SLV, USO, XLE and GDX start with seasonality **UNKNOWN** —
+`seasonalProvenance()` reports `missing`, `chanceOf()` returns null, every screen
+prints a dash and the sentence — and pick up measured means AND a measured realised
+volatility from the one Alpha Vantage read when it lands. The realised volatility
+falls to `RULES.fallbackSigma` meanwhile and the implied one to `RULES.fallbackIV`,
+both with their provenance sentence saying the number was CHOSEN. `liquidity.test.js`
+fails the build if a hand-written row appears for any of them. **Never add one**: a
+sixth estimate on a table this repository has measured as wrong on eight months of
+twelve is not a fix, and `|| 0` on a missing mean prints a market as having no
+seasonal edge when nobody measured one.
+
+**`seasonalOf()` / `seasonalNowOf()` IN `App.jsx` ARE THE ONE HOME**, wrapping
+`seasonalProvenance()`. There were ELEVEN raw `…monthlyMean[NOW_MONTH]` readers and
+every one would have thrown on `undefined[8]`. Never index a monthly row again.
+`autopilot.mjs` had the worst of them, `SEASONAL[pos.ticker] || SEASONAL.SPY`, which
+would have drifted an overnight brief on the S&P 500's seasonality and called it the
+position's own.
+
+**WEATHER DOES NOT APPLY TO A METAL, AND THAT IS NOT A QUIET 0/100.**
+`weatherApplies()` / `weatherNaReason()` / `factorsOf()` in `signals.js`. A factor
+that DOES NOT APPLY is dropped from the weights, from the agreement count and from
+the confidence denominator, and the remaining weights are renormalised to sum to one;
+a factor that APPLIES but is UNKNOWN stays in and contributes nothing, because not
+knowing something that matters is real uncertainty. Applicability is DERIVED from
+`REGIONS`' own `affects` lists — never a second list. `BASE_WEIGHTS` is the same
+30/25/25/20 it always was, and `why.jsx` prints the scale from `fused.weights`.
+
+**`TAG_RULES` IS ORDER-SENSITIVE.** `tagImpacts()` gives each ticker to the FIRST rule
+that claims it, so the macro catch-all (`fed|fomc|…`) is LAST. It was harmless in the
+middle of the list with SPY as its only ticker and stopped being harmless the moment
+the metals were added to it.
+
+**THE RADAR MUST NOT GET LONGER WHEN THE BASKET DOES.** `radarSplit()` /
+`radarQuietNote()` in `rules.js`: a market with something keeps its row, everything
+else collapses into ONE line that names them, keeps **"looked at, nothing on the
+radar"** apart from **"not searched yet"**, and leaves every name a tap away. It
+replaces the per-row sentence.
+
+**AND "LOOKED AT" IS NOT "NOT SEARCHED".** Read on the phone: *"4 of them came through
+to the shortlist (BOIL, WEAT, XLE and USO)"* four lines above *"not searched yet: BOIL,
+USO, …"*. Those boards were priced and their structures cleared; they were simply not
+the two roads taken forward. `marketFacts` knew only roads, wide-search hits and floor
+casualties, so `runWizard` records `examined` now and every consumer reads `searched`.
+The line may NOT say "nothing cleared" about that group — it is a verdict the line
+cannot support.
+
+**A STAMP IS TAKEN FROM A PROVENANCE, NEVER FROM A CHANCE.** `seasonalStampFields()`
+reads `source` / `years` / `ageDays`; a `chanceOf()` result carries the same facts as
+`seasonalSource` / `seasonalYears` / `seasonalAgeDays`. Handing it the chance produces
+three `undefined`s, an unstamped record, and `seasonalStampOf()` reading that absence
+as the hand-written table — which on the liquid tier names a table that does not exist.
+Read live on XLE: the road card said HAND-WRITTEN under a header saying "Alpha Vantage ·
+11y". `toCandidate()` passes `seasonalFor(tk)`, and `ceiling.test.jsx` holds the two
+shapes apart by name.
+
+**AN EVIDENCE PANEL SHOWS TODAY'S READING.** A road carries the fusion from the moment
+the guided run finished; on XLE that was before the daily bars loaded, so the card read
++24/56 while the Radar row and Build both read +57/69. `WizardCandidates` takes
+`fusedFor` and `RoadCard` prefers it, falling back to the snapshot only when there is no
+live one. **The RANKING is still the snapshot's** — re-ranking live would swap the two
+cards under the reader — and that is on the NOT VERIFIED list.
+
+`src/basket.js` carries the same ten as a plain array, and ONLY because a Netlify
 function cannot import `App.jsx` (React, recharts, lightweight-charts). The
 derivation in `App.jsx` stays the source; `src/liquidity.test.js` reads that table
 and **fails the build** if the two lists drift. A copy nothing checks is the bug;
@@ -1705,8 +1795,14 @@ a copy nobody can quietly break is a copy the code can live with.
 `runWizard` ranks the **whole basket on one scale**: every readable market
 contributes candidates and road 2 is free to come from a different market than
 road 1. Building both roads out of the single best-scoring ticker gives a user
-who picked five commodities two structures on one of them, which teaches less
+who picked several commodities two structures on one of them, which teaches less
 than comparing two markets — they share a fate.
+
+**THE ALPHA VANTAGE QUOTA IS 25 A DAY AND THE BASKET IS TEN.** A cold start spends
+ten; the server cache's TTL is seven days, so steady state is ten a week. When the
+quota is spent: cached inside the TTL, then `cache-stale` carrying its age and Alpha
+Vantage's own refusal text, then **UNKNOWN**. There is no fall back to a table,
+because for five of the ten there is no table to fall back to.
 
 ## Saying "nothing today"
 

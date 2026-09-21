@@ -14,5 +14,12 @@
 //
 // SPY is deliberately absent. It is in the underlyings table so the desk can
 // price a hedge; it is not a market the path goes looking for.
+//
+// TEN MARKETS SINCE ROADMAP P2-bis. The five grain and gas ETFs this app was
+// built on, plus the liquid tier — GLD, SLV, USO, XLE, GDX — which are real
+// commodities the seasonal engine applies to, with option books deep enough
+// that the quality floors have something to pass. The grain chains are so thin
+// that almost nothing clears them, and a screen whose content is mostly an
+// explanation of why it is empty is not a screen.
 // ============================================================================
-export const BASKET = ["SOYB", "CORN", "UNG", "BOIL", "WEAT"];
+export const BASKET = ["SOYB", "CORN", "UNG", "BOIL", "WEAT", "GLD", "SLV", "USO", "XLE", "GDX"];

@@ -33,14 +33,16 @@ gate, the weekly report, the model's context, `autopilot.mjs` and `approve.mjs` 
 evaluated against the app's own book while the send beside it gated against Alpaca. `bookFor()` is
 the one expression that chooses an account now.
 
-**FOUR ORDERS HAVE NOW BEEN SENT AND NONE HAS FILLED — AND THE FOURTH DID NOT EVEN REACH THE
-MARKET.** The first three were not met by the market; one of them sat at the exact mid, which the app
-now names as the price nobody has to meet. The fourth was **refused by the broker for a reason the
-app created itself**: SOYB, 20 September 2026, HTTP 422 / 42210000, *invalid legs: [leg.0 asset
+**ORDERS HAVE NOW BEEN SENT AND NONE HAS FILLED — BUT ONE HAS FINALLY REACHED THE MARKET.** The
+first three were not met by the market; one of them sat at the exact mid, which the app now names as
+the price nobody has to meet. The next was **refused by the broker for a reason the app created
+itself**: SOYB, 20 September 2026, HTTP 422 / 42210000, *invalid legs: [leg.0 asset
 "SOYB261120C00027500" not found]* — a well-formed symbol for a contract nobody has ever issued,
 because `buildOcc()` was a FALLBACK in four of the six order paths. That is closed (PR #30, §4n) and
-it is in the gate, where all six pass through. Whether what is left fills is a market question, and
-P0's DONE WHEN is unchanged.
+it is in the gate, where all six pass through. **On 21 September, J-0004 — SOYB 28/29, one
+combination, DAY limit $60 — came back ACCEPTED from Alpaca with an order id.** It was sent at 04:15
+ET, before the options opened, so nothing could have filled. Whether it fills is a market question,
+and P0's DONE WHEN is unchanged.
 
 SHIPPED (PR "the order that never filled", 564 checks, build clean):
   - `modelSanity()` in rules.js at all three generation sites, refusing a price
@@ -78,16 +80,39 @@ SHIPPED (PR #31 "the app manufactured its own refusal", 769 checks, build clean)
     survives only where nothing leaves the browser. `checkedAgainstNote()` says
     which. PRD §4o.
 
-WHAT P0 STILL OWES, AFTER PR #31:
-  - **A FILL.** Unchanged. The blocker is closed in code and reproduced by a
-    test; nobody has watched a fresh SOYB load produce 28/29 in a browser, and
-    no order has been sent since.
+SETTLED ON THE OWNER'S PHONE — SOYB, 21 Sep 2026, 10:12-10:15 CEST (PR #32, PRD §4o):
+  - **A FRESH SOYB LOAD PRODUCES 28 / 29.** The strike select shows 28, the
+    chain row is highlighted +BUY 28 / −SELL 29, and the card agrees. The preset
+    race and failure class 1 are both closed on a live board.
+  - **THE PAPER CHECK NAMES THE BROKER'S ACCOUNT**: "account number
+    PA3E1WPIW9SZ (Alpaca paper accounts start with PA)". `bookFor()` works.
+  - **OPEN RISK READS $0 WITH 3 WATCHING ROWS**, and Positions, the gate and the
+    working-order panel agree. `bookPositions()` works; the $1,042 of phantom
+    exposure is gone.
+  - **THE FOURTH ORDER REACHED THE MARKET.** J-0004, SOYB 28/29, 1 combination,
+    DAY limit $60 (= the combo ask; bid $4, mid $28, model $35), Alpaca
+    **ACCEPTED**, id 29fdee45-9104-41f2-87cf-2ea9e00f967d, sent 04:15 ET.
+    `UNLISTED_CONTRACT` is closed on live data.
+
+AND A SECOND ORDER IS NOW AT THE BROKER (21 Sep, deploy preview 32): J-0001,
+XLE Bull Put Spread (credit), 1 combination, limit $75 GTC, Alpaca ACCEPTED,
+id e98ad0e8-3a2e-4a1b-8c76-4e6c95d62ac0. Alpaca's own panel lists TWO orders
+waiting — this one and the morning's SOYB `limit @ 0.6 · day`. Neither has
+filled. Trading capital on that phone is $7,000 ($350 per trade, $1,750 total),
+which corrects the $20,000 §4o inferred from a checklist.
+
+WHAT P0 STILL OWES, AFTER PR #32:
+  - **A FILL.** Unchanged, and it is now the ONLY item left from §4o's list.
+    Two orders are accepted and waiting; neither has been met by the market.
   - **The effective price against the fill price.** `recheckOrders()` still
     does not compare `min(limit, ask)` with what the broker recorded, because
     nothing has ever filled.
   - **Whether `working` should count towards the exposure ceiling.** It does
     now, deliberately: an order at the broker is money committed. Nothing here
     can measure how often one fills.
+  - **The `/api/state` blob has still not been read.** $20,000 of capital is
+    inferred from a $1,000 per-trade limit, now read on two days and two
+    screens. Corroboration, not the store.
 
 WHAT P1 INHERITED FROM THIS WORK — and what it did with it:
   - **The 4x ratio is CHOSEN, not measured. STILL OPEN.** The live-chain
@@ -598,13 +623,98 @@ disagrees with the market's.
   - on screen, probability and payoff always together, with edge as the third
     number. Never rank on one number alone.
 
-## P2-bis — The liquid commodity tier
-Add GLD, SLV, USO, XLE, GDX. Same chain code, same order code: one table row
-per ticker plus the news and weather mappings in signals.js. Real commodities,
-so the seasonal engine still applies; far better option liquidity than the
-grain ETFs, which is where the placeholder mids come from; larger notional
-per contract. Calibrating the edge of P2 on liquid chains is far more
-trustworthy than calibrating it on CORN.
+## P2-bis — The liquid commodity tier  (PR #32 — SHIPPED, and unmeasured)
+~~Add GLD, SLV, USO, XLE, GDX.~~ **DONE.** The basket is ten. PRD §4p.
+
+SHIPPED (783 checks across 22 suites, build clean):
+  - Five rows in `UNDERLYINGS` and in `src/basket.js`, and the existing sync
+    test covers them. **Not one number is invented for them**: no `SEASONAL`
+    row, no `SIGMA` row, no per-market `iv` — seasonality is UNKNOWN until
+    Alpha Vantage lands, the realised volatility is `RULES.fallbackSigma` with
+    its provenance sentence, the implied one is `RULES.fallbackIV` with
+    `ivProvenance()`, and `liquidity.test.js` fails the build if any of the
+    three appears. `step` is a dropdown fallback and `buildPresets()` still
+    refuses a null board.
+  - **Eleven raw `monthlyMean[NOW_MONTH]` readers went through one home**
+    (`seasonalOf` / `seasonalNowOf` in App.jsx, wrapping `seasonalProvenance()`).
+    Every one of them would have thrown on a market with no row, and the guard
+    people reach for instead is `|| 0`.
+  - **`autopilot.mjs` was drifting any unrowed market on `SEASONAL.SPY`.** It
+    passes null now and gets `missing`.
+  - **Weather does not apply to a metal, and that is not a quiet 0/100.**
+    `weatherApplies()` is derived from the `REGIONS` table, `factorsOf()` drops
+    the factor from the weights, the agreement count and the confidence
+    denominator, and renormalises the other three. The four weights are
+    unchanged in value. A factor that applies but is UNKNOWN stays in,
+    contributing nothing — those are different facts.
+  - **Eleven news rules** for gold/silver (real yields, the dollar, reserve
+    buying, solar), crude (OPEC, EIA inventories, Hormuz, refineries, shale) and
+    miners, each with its one-line why. The macro catch-all moved to the END of
+    `TAG_RULES`: `tagImpacts()` gives each ticker to the first rule that claims
+    it, so a rule that only knows the subject must not beat one that knows the
+    direction.
+  - **The Radar does not get longer.** `radarSplit()` / `radarQuietNote()`: a
+    market with something keeps its row, everything else is ONE line naming them
+    and keeping "nothing cleared" apart from "not searched", every name still a
+    tap. It replaces the per-row sentence rather than adding one.
+  - `/api/liquidity` covers all ten, and `av.mjs` states what happens at the
+    quota: cache, then stale cache with its age and the upstream refusal, then
+    UNKNOWN. Never a table.
+
+MEASURED ON THE DEPLOY PREVIEW, 21 Sep 2026 (PRD §4p). The prediction was
+written before the chains were fetched; this is what they carry:
+
+| market | contracts near the money | whole chain | clear the 10 minimum |
+|---|---|---|---|
+| WEAT | 50 | 208 | 72% |
+| SOYB | 60 | 202 | 48% |
+| BOIL | 120 | 427 | 70% |
+| **XLE** | **526** | **1,492** | **74%** |
+| **USO** | **900** | **2,788** | **88%** |
+
+  - **Eight to eighteen times the population near the money.** That is the
+    whole reason this section exists, measured rather than argued.
+  - **On XLE the floors removed NOTHING** — "3 of 3 shown" at STRICT,
+    RECOMMENDED, RELAXED and OFF alike. The falsifiable half of the prediction
+    holds there. **The denominator in it was wrong**: the Shortlist builds
+    THREE presets per direction, not eight.
+  - **The 10-contract ABSOLUTE minimum is what binds on a deep chain**: XLE's
+    chosen expiry carries 82 contracts and its 40th percentile is 7.
+    `minPeersForPercentile` was tuned for chains with ten reporting strikes.
+    That is a P2 input.
+  - Seasonality loads for the new markets (XLE: Alpha Vantage, 11y, +0.1%/mo),
+    `weatherNaReason()` and the renormalised weights sentence render as
+    written, and the Radar collapsed to one line.
+
+AND THE SAME FIVE SCREENS CAUGHT THREE FAULTS, ALL FIXED IN THIS PR:
+  - **A road said it was drifted on a table that does not exist.**
+    `toCandidate()` passed `seasonalStampFields(x.mc)`; that function reads a
+    PROVENANCE (`source`/`years`/`ageDays`) and a chance result carries
+    `seasonalSource`/`seasonalYears`/`seasonalAgeDays`. Three undefineds, an
+    unstamped record, and `seasonalStampOf()` reading the absence as the
+    hand-written table — for XLE, which has none. It takes `seasonalFor()` now.
+  - **The Radar denied having looked at markets the paragraph above named.**
+    "4 of them came through … (BOIL, WEAT, XLE and USO)" over "not searched
+    yet: BOIL, USO". `radarSplit()` takes `searched`, `runWizard` records the
+    boards it read, and the line says "looked at, nothing on the radar".
+  - **The road card printed +24/56 where the Radar and Build both said
+    +57/69.** The candidate carries the fusion from run time, before the bars
+    had loaded. `WizardCandidates` takes `fusedFor` and reads today's.
+
+WHAT P2-bis HANDS FORWARD:
+  - **THE GRAIN HALF OF THE PREDICTION IS UNMEASURED**, and so are GLD, SLV,
+    USO and GDX: only XLE has had a Shortlist run. Search them.
+  - **Re-run `/api/liquidity` against all ten**, and settle
+    `minPeersForPercentile` from reading 3 above.
+  - **`RULES.fallbackIV` of 0.25 is roughly twice GLD's real implied
+    volatility.** It only bites on an unquoted leg, which is exactly where
+    `modelSanity()`'s denominator lives. A measured per-market IV is the same
+    Alpha Vantage work as the sigma, and both are P2's.
+  - **The app's working-order count and the broker's disagree, 1 against 2**,
+    because the local store was reset and the morning's order has no record.
+    Neither panel is wrong and nothing says why they differ.
+  - **A road's RANKING is still a snapshot** even though its evidence panel is
+    now live, and nothing on the card says so.
 
 ## P3 — The harness
 buildContext also carries the computed probability, the gate verdict with its

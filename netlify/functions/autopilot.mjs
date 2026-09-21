@@ -75,7 +75,7 @@ const CHAIN_FEED = "CBOE delayed";
    value from a single corrected cell.
 
    THE QUOTA IS THE CONSTRAINT AND IT IS WHY NOTHING HERE FETCHES. Alpha
-   Vantage's free tier is 25 requests A DAY for five markets. `av.mjs` already
+   Vantage's free tier is 25 requests A DAY for the basket. `av.mjs` already
    caches each market's body in this very blob store under `av/<SYM>.json` with
    a seven-day TTL, so this reads WHAT THE CLIENT'S LOADS HAVE ALREADY PUT
    THERE. Three rules hold it:
@@ -117,7 +117,7 @@ export const resetSeasonalCache = () => seasonalCache.clear();
  *
  * The volatility comes out of the SAME read, the same parse and the same
  * `statsFromMatrix()` call. A second read would be a second reading of one
- * series, and the quota (25 requests a DAY for five markets) is exactly why
+ * series, and the quota (25 requests a DAY for the whole basket) is exactly why
  * nothing here fetches.
  *
  * @returns { monthlyMean, sigma, years, at } or null on a miss — the shape both
@@ -223,7 +223,15 @@ export default async () => {
     // questions about the same measured prices, so they are decided from the
     // same object rather than read twice.
     const measured = await measuredSeasonal(store, pos.ticker);
-    const seas = seasonalProvenance(measured, SEASONAL[pos.ticker] || SEASONAL.SPY, pos.ticker);
+    /* >>> ANOTHER MARKET'S TABLE IS NOT THIS MARKET'S FALLBACK. <<< This read
+       `SEASONAL[pos.ticker] || SEASONAL.SPY`, which for any market without a
+       hand-written row — every one of the liquid tier — would have drifted the
+       chance in a brief written overnight on the S&P 500's seasonality and
+       called it the position's own. `seasonalProvenance()` already has a name
+       for having no row: `missing`, which produces no chance and one sentence
+       saying why. That is the honest third option, and it has been in place
+       since PR #26; this line was the one caller reaching past it. */
+    const seas = seasonalProvenance(measured, SEASONAL[pos.ticker] || null, pos.ticker);
     // UNKNOWN IS NOT A NUMBER, HERE TOO: with no table at all there is no
     // seasonal reading to score the thesis against, and `computeTIS` treats a
     // null the way it already treats a missing entry thesis.

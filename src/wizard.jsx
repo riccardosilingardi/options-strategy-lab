@@ -647,7 +647,7 @@ export function roadHeadline(c) {
 }
 
 /** One road. Every visual on it is tappable and explains itself. */
-function RoadCard({ c, other, onPick, i, bars = [], weatherData, newsItems, month, actions }) {
+function RoadCard({ c, other, onPick, i, bars = [], weatherData, newsItems, month, actions, fusedNow = null }) {
   const [open, setOpen] = useState(null);
   const bands = payoffBands({ legs: c.legs, entryNet: c.entryNet, spot: c.spot });
   const inTen = Math.max(0, Math.min(10, Math.round((c.pop || 0) * 10)));
@@ -716,7 +716,7 @@ function RoadCard({ c, other, onPick, i, bars = [], weatherData, newsItems, mont
       {/* THE EVIDENCE. The same panel the desk shows, on the screen where the
           decision is actually made. The four bars are open by default here:
           behind a tap they were, in practice, not on the screen at all. */}
-      <WhyThisTrade fused={c.fused} ticker={c.ticker} weatherData={weatherData} newsItems={newsItems}
+      <WhyThisTrade fused={fusedNow || c.fused} ticker={c.ticker} weatherData={weatherData} newsItems={newsItems}
         month={month} defaultDetail title="WHY THIS MARKET"
         note={`Tap Weather for the regions behind that bar, or News for the headlines behind that one.`} />
 
@@ -770,7 +770,18 @@ function AnswersBack({ answers, onChange }) {
 }
 
 export function WizardCandidates({ candidates = [], answers = {}, narrative = [], barsFor,
-  weatherData, newsItems, month, onPick, onBack, actionsFor }) {
+  weatherData, newsItems, month, onPick, onBack, actionsFor,
+  /* >>> TODAY'S FOUR-FACTOR READING, NOT THE ONE THE RUN WAS BUILT ON. <<<
+     Read on the owner's phone, XLE 21 September 2026: this card said
+     "+24 / 100, 56 / 100 — XLE: 1 of the 3 factors points higher … the heaviest
+     reading is news flow at 89/100" while the Radar row and the Build screen
+     both said "+57 / 100, 69 / 100 … the heaviest reading is the price trend at
+     100/100". One market, one day, two numbers. The candidate carries the
+     reading from the moment the guided run finished — before the daily bars had
+     loaded, so the trend factor read 0 — and nothing refreshed it. The evidence
+     panel answers "why this market TODAY", so it reads the live fusion and
+     falls back to the snapshot only when the caller has none. */
+  fusedFor }) {
   const tickers = [...new Set(candidates.map((c) => c.ticker))];
   return (
     <div style={{ ...sans, maxWidth: 760, margin: "0 auto", padding: `16px 16px ${BADGE_SAFE}px` }}>
@@ -804,6 +815,7 @@ export function WizardCandidates({ candidates = [], answers = {}, narrative = []
           bars={barsFor ? barsFor(c.ticker) : []}
           weatherData={weatherData} newsItems={newsItems} month={month}
           actions={actionsFor ? actionsFor(c) : null}
+          fusedNow={fusedFor ? fusedFor(c.ticker) : null}
           other={candidates.find((x) => x !== c) || null} />
       ))}
       <div style={{ ...sans, fontSize: 12.5, color: T.dim, marginTop: 16, lineHeight: 1.5, textAlign: "center" }}>

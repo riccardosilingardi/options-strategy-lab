@@ -90,7 +90,7 @@ test("no spot means no near-the-money split, and the rest still reads", () => {
 
 /* ---- the basket, which must not drift ---- */
 
-test("src/basket.js and the commodity flags in App.jsx are the same five markets", () => {
+test("src/basket.js and the commodity flags in App.jsx are the same markets", () => {
   // A serverless function cannot import App.jsx, so the list exists twice. This
   // is what stops the copy from quietly rotting: the derivation in App.jsx
   // stays the source, and the build fails the moment the two disagree.
@@ -100,6 +100,36 @@ test("src/basket.js and the commodity flags in App.jsx are the same five markets
   assert.ok(flagged.length > 0, "the commodity flags are still readable in App.jsx");
   assert.deepEqual([...flagged].sort(), [...BASKET].sort(),
     "src/basket.js has drifted from the commodity: true flags in App.jsx");
+  // AND THE LIQUID TIER IS REALLY IN IT (ROADMAP P2-bis). A sync test that only
+  // checks two lists agree is happy when both are wrong together.
+  for (const tk of ["GLD", "SLV", "USO", "XLE", "GDX"]) {
+    assert.ok(BASKET.includes(tk), `${tk} is in the basket`);
+  }
+  assert.equal(BASKET.length, 10);
+  assert.ok(!BASKET.includes("SPY"), "SPY is in the table to price a hedge, not to be traded");
+});
+
+test("NOT ONE SEASONAL, SIGMA OR IV NUMBER IS INVENTED FOR THE LIQUID TIER", () => {
+  // Failure classes 1 and 5: a value nobody measured must never print as one
+  // somebody did. `SEASONAL` and `SIGMA` in engine.js carry the original five
+  // and SPY; a row added for GLD would be a hand-written estimate driving 30%
+  // of that market's score and every probability the app prints for it.
+  const eng = readFileSync(new URL("./engine.js", import.meta.url), "utf8");
+  const seasonalBlock = eng.slice(eng.indexOf("export const SEASONAL = {"), eng.indexOf("export const SIGMA"));
+  const sigmaLine = eng.slice(eng.indexOf("export const SIGMA"), eng.indexOf("\n", eng.indexOf("export const SIGMA")));
+  const app = readFileSync(new URL("./App.jsx", import.meta.url), "utf8");
+  const table = app.slice(app.indexOf("const UNDERLYINGS = {"), app.indexOf("const BASKET ="));
+  for (const tk of ["GLD", "SLV", "USO", "XLE", "GDX"]) {
+    assert.ok(!seasonalBlock.includes(`${tk}:`), `${tk} must have no hand-written SEASONAL row`);
+    assert.ok(!sigmaLine.includes(`${tk}:`), `${tk} must have no hand-written SIGMA row`);
+    const row = table.slice(table.indexOf(`  ${tk}: {`), table.indexOf("newsQ", table.indexOf(`  ${tk}: {`)));
+    assert.ok(row.length > 0, `${tk} is in the underlyings table`);
+    assert.ok(!/monthlyMean/.test(row), `${tk} must carry no monthlyMean`);
+    assert.ok(!/sigma:/.test(row), `${tk} must carry no sigma`);
+    // The implied volatility is the NAMED fallback with provenance, never a
+    // per-market guess typed out of memory.
+    assert.ok(/iv: RULES\.fallbackIV/.test(row), `${tk}'s IV must be RULES.fallbackIV`);
+  }
 });
 
 console.log(`\n${pass} passed, ${fail} failed\n`);

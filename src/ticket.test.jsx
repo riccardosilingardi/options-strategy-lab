@@ -42,6 +42,8 @@ import {
 import { analyze, shortlistWithFloors, TradeCard } from "./App.jsx";
 import { terminalDist, compareDistInputs, compareDistNote, ComparePayoffs } from "./visuals.jsx";
 import { candidateOf } from "./path.js";
+import { evaluateTrade } from "./riskGate.js";
+import { money } from "./rules.js";
 import { OrderTicket, buildReportMd } from "./pro.jsx";
 import { bookPositions } from "./journal.js";
 
@@ -663,6 +665,118 @@ check("checkedAgainstNote() distinguishes the two books in words", () => {
   has(a, "PA3XYZ01");
   hasNot(b, "Alpaca");
   if (a === b) throw new Error("one sentence for two different accounts");
+});
+
+/* ==================================================================
+   THE CARD READS THE FIGURE THE TICKET WILL SEND — SOYB, 21 Sep 2026
+
+   >>> THE LIVE READING. <<< The trade card said "Inside your rules: risking
+   $44 of $1,000". The owner then moved the ticket's sliders to the ask and
+   sent a DAY limit of $60 — the combo ask, on a book quoting bid $4 / mid $28
+   / ask $60, model $35.
+
+   The two figures come from ONE expression and always did: `AE` on the Build
+   screen is `analyze()` at `effectiveLimit()`'s net, and the gate, the card
+   and the ticket are all handed it. What was missing is that the card never
+   NAMED the price it had read, and the order sheet holding the sliders covers
+   the card while they are moved — so a figure read at one price and an order
+   sent at another were indistinguishable from two screens disagreeing.
+
+   This runs the whole chain at BOTH prices, through the real functions, and
+   holds the three numbers equal at each of them.
+================================================================== */
+
+const SOYB_SPOT = 27.64;
+const SOYB_DTE = 60;
+const SOYB_IV = 0.20;
+const SOYB_LEGS = [
+  { side: 1, qty: 1, type: "call", strike: 28 },
+  { side: -1, qty: 1, type: "call", strike: 29 },
+];
+/* Per-leg quotes whose combination is the book the owner read:
+   ask = 0.70 - 0.10 = 0.60, bid = 0.34 - 0.30 = 0.04, mid = 0.52 - 0.20 = 0.32. */
+const SOYB_QUOTES = [
+  { bid: 0.34, ask: 0.70, mid: 0.52, bidSize: 20, askSize: 15, occ: "SOYB261120C00028000" },
+  { bid: 0.10, ask: 0.30, mid: 0.20, bidSize: 12, askSize: 9, occ: "SOYB261120C00029000" },
+];
+const SOYB_CAPITAL = { tradingCapital: 20000, concurrentTarget: 4 };
+
+/** The Build screen's chain, end to end, for one set of per-leg prices. */
+const buildAt = (legPx) => {
+  const book = comboBook(SOYB_LEGS, SOYB_QUOTES);
+  const net = netFromLegs(SOYB_LEGS, legPx).net;
+  const eff = effectiveLimit(net == null ? null : Math.abs(net), book, 1);
+  const AE = analyze(SOYB_LEGS, SOYB_SPOT, SOYB_DTE, SOYB_IV, (l) => SOYB_QUOTES[SOYB_LEGS.indexOf(l)],
+    Number.isFinite(eff.net) ? { net: eff.net } : {});
+  const gate = evaluateTrade({
+    proposal: { ticker: "SOYB", intent: "open", legs: SOYB_LEGS, dte: SOYB_DTE, contracts: 1,
+      maxLoss: AE.maxLoss, maxProfit: AE.maxProfit, net: AE.entry,
+      quotes: SOYB_QUOTES, occs: SOYB_QUOTES.map((x) => x.occ) },
+    portfolio: { positions: [], account: { paperVerified: true, note: "the app's own paper book" } },
+    capital: SOYB_CAPITAL, signals: null,
+  });
+  const card = tradeCard({
+    ticker: "SOYB", name: "Bull Call Spread", dir: 1, spot: SOYB_SPOT, expKey: "2026-11-20", dte: SOYB_DTE,
+    maxLoss: AE.maxLoss, maxProfit: AE.maxProfit, breakevens: AE.breakevens,
+    profitUnbounded: AE.profitUnbounded, contracts: 1, limits: gate.limits,
+    entry: AE.entry, entrySource: AE.entrySource,
+  });
+  const html = renderToStaticMarkup(
+    <OrderTicket
+      legs={SOYB_LEGS} expKey="2026-11-20" ticker="SOYB"
+      quoteFn={() => null} estNet={AE.entry} setMsg={() => {}}
+      gate={() => ({ pass: true, violations: [], warnings: [] })}
+      dte={SOYB_DTE} maxLoss={AE.maxLoss} maxProfit={AE.maxProfit} spot={SOYB_SPOT}
+      cfg={{ type: "limit", tif: "day" }} onCfg={() => {}}
+      quotes={SOYB_QUOTES} legPrices={legPx} net={net}
+      verdict={orderVerdict(Math.abs(net), book, { sign: 1, tif: "day" })}
+      effective={eff} seed={legPx} limits={gate.limits} feed="Alpaca (indicative)" />);
+  return { book, net, eff, AE, gate, card, html,
+    riskLine: card.lines.find((l) => l.id === "risk").text };
+};
+
+check("the card, the gate and the ticket read ONE figure — at the seed and at the ask", () => {
+  const seed = legLimitSeed(SOYB_LEGS, SOYB_QUOTES);
+  const atSeed = buildAt(seed);
+  // The seed concedes a quarter of the combination's spread and no more.
+  near(atSeed.eff.effective, openLimitPrice({ netMid: atSeed.book.mid, spread: atSeed.book.spread }).limit, 0.011,
+    "the seed is mid plus a quarter of the spread");
+  // ...and the ask, which is where the owner dragged them: long lifted, short hit.
+  const atAsk = buildAt([SOYB_QUOTES[0].ask, SOYB_QUOTES[1].bid]);
+  near(atAsk.eff.effective, 0.60, 1e-9, "dragging to the side that trades IS the combo ask");
+
+  for (const [what, r] of [["at the seed", atSeed], ["at the ask", atAsk]]) {
+    const sent = Math.abs(r.eff.net) * 100;               // what `orderBody()` carries
+    near(Math.abs(r.AE.maxLoss), sent, 0.51, `${what}: the analysis risks the money the order sends`);
+    near(r.gate.limits.tradeRisk, sent, 0.51, `${what}: the gate measures that same money`);
+    has(r.riskLine, money(r.gate.limits.tradeRisk));      // the card prints the gate's own figure
+    has(r.html, money(r.gate.limits.tradeRisk));          // ...and so does the ticket, beside the button
+  }
+  // The two prices really are different trades: $44-ish against $60.
+  if (Math.abs(atSeed.gate.limits.tradeRisk - atAsk.gate.limits.tradeRisk) < 10) {
+    throw new Error("the fixture does not move the price, so it proves nothing");
+  }
+  hasNot(atSeed.riskLine, money(atAsk.gate.limits.tradeRisk));
+});
+
+check("the card NAMES the price its figure was worked out at, and which price it is", () => {
+  const atAsk = buildAt([SOYB_QUOTES[0].ask, SOYB_QUOTES[1].bid]);
+  has(atAsk.riskLine, "$60");
+  has(atAsk.riskLine, "debit the ticket is holding");
+  // With no readable ticket price the analysis falls back to the mid, and the
+  // card has to say THAT rather than claiming a limit nobody typed.
+  const atMid = buildAt([null, null]);
+  eq(atMid.AE.entrySource, "mid", "an unpriced leg leaves the analysis at the mid");
+  has(atMid.riskLine, "the middle of the market");
+  hasNot(atMid.riskLine, "the ticket is holding");
+});
+
+check("the per-trade limit is printed where the SEND is, not only on the card it covers", () => {
+  const atAsk = buildAt([SOYB_QUOTES[0].ask, SOYB_QUOTES[1].bid]);
+  has(atAsk.html, "MOST YOU CAN LOSE");
+  has(atAsk.html, `of ${money(1000)} allowed`);
+  // The old note repeated its own label back and said nothing.
+  hasNot(atAsk.html, "the most you can lose");
 });
 
 console.log(`\n${ok.length} passed, ${bad.length} failed\n`);

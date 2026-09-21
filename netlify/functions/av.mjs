@@ -13,9 +13,21 @@
 // it, not just whichever one the user pressed a button on.
 //
 // That makes the quota the constraint. Alpha Vantage's free tier allows 25
-// requests A DAY, and the basket is five markets: refetching per tab switch
-// would exhaust the day's allowance during a demo and leave every market on the
-// wrong hand-written table. So:
+// requests A DAY and the basket is TEN markets since the liquid tier, so a cold
+// start spends ten of the twenty-five and refetching per tab switch would
+// exhaust the day's allowance during a demo. So:
+//
+// AND WHAT HAPPENS WHEN THE QUOTA IS SPENT IS THE POINT, not an edge case. Five
+// of the ten markets have no hand-written `SEASONAL` row at all and never will,
+// so "fall back to the table" is not available to them and must not be invented:
+//   - a cached answer inside the TTL is served, as always;
+//   - a cached answer OUTSIDE the TTL is served as `cache-stale`, carrying its
+//     age and Alpha Vantage's own refusal text, and the screen prints both;
+//   - with no cached answer at all the endpoint returns the refusal and the
+//     market's seasonality stays UNKNOWN. `seasonalProvenance()` reports
+//     `missing`, `chanceOf()` returns null, every screen prints a dash and the
+//     sentence, and the four-factor read scores that market with its seasonal
+//     bar reading "no seasonal history". Nothing is estimated in the meantime.
 //
 //   - The answer is cached SERVER-SIDE, in the blob store the autopilot already
 //     uses, with a TTL measured in DAYS. Monthly data changes once a month; a
@@ -35,7 +47,8 @@
 import { getStore } from "@netlify/blobs";
 
 /** Monthly data changes once a month. A week is well inside that and well
- *  outside the 25-a-day quota: five markets refresh at most five times a week. */
+ *  outside the 25-a-day quota: ten markets refresh at most ten times a week,
+ *  and a cold start costs ten of the day's twenty-five once. */
 const TTL_DAYS = 7;
 const TTL_MS = TTL_DAYS * 24 * 60 * 60 * 1000;
 
