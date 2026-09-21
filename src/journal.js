@@ -339,10 +339,12 @@ export const perCombination = (pos) => {
                 trade here and there never was one.
 
    ONLY `owned` IS A POSITION. Only `owned` carries a real profit and loss,
-   only `owned` is counted in the exposure the risk gate measures, and only
-   `owned` has an exit plan running. The other two are worth keeping and
-   worth looking at — they are the record of what this app's prices actually
-   achieved — but they are not the book.
+   and only `owned` has an exit plan running. The other two are worth keeping
+   and worth looking at — they are the record of what this app's prices
+   actually achieved — but they are not the book.
+
+   THE EXPOSURE CEILING IS THE ONE PLACE `working` COUNTS TOO, and that is a
+   decision rather than an oversight. See `bookPositions()` below.
 ==================================================================== */
 
 /**
@@ -366,6 +368,35 @@ export function positionStage(pos = {}) {
   if (life === "dead") return "not-taken";
   return "working";
 }
+
+/**
+ * WHAT COUNTS AS THE BOOK — owned, PLUS working. The one home for it.
+ *
+ * Read on the owner's phone, SOYB, 21 September 2026: the gate said
+ * "$1,042 already at risk" — 450 + 577 + 14 — against ZERO positions. All
+ * three rows were `not-taken`: orders that came back from the broker with
+ * nothing bought. The gate read `store.positions` whole, and `store.positions`
+ * is what the app DECIDED, not what the user owns. So a trade nobody bought
+ * was eating a quarter of the exposure ceiling for the rest of its life.
+ *
+ * `working` DOES count, and the reason is the opposite of the one that makes
+ * it not a position: a working order can still fill. The exposure ceiling is
+ * not a report of what is open — it is a limit on what may be COMMITTED, and
+ * an order standing at the broker is committed. Counting it is the
+ * conservative reading and the only one that survives the order filling one
+ * second after the next order is sent. (That is a different question from
+ * `positionStageNote()`'s "the money is not at risk yet", which is about
+ * profit and loss: there is nothing to value until it fills.)
+ *
+ * `not-taken` NEVER counts, anywhere. There is no trade there and there never
+ * was one.
+ *
+ * Every consumer that measures money or writes a brief reads this: the risk
+ * gate in App.jsx, the weekly report, the model's context, `autopilot.mjs` and
+ * `approve.mjs`. Never write the filter by hand.
+ */
+export const bookPositions = (positions = []) =>
+  (Array.isArray(positions) ? positions : []).filter((p) => positionStage(p) !== "not-taken");
 
 /** True only for something the user actually holds. */
 export const isOwnedPosition = (pos) => positionStage(pos) === "owned";

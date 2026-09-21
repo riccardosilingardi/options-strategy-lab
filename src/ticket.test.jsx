@@ -37,12 +37,13 @@ import {
   legBook, sizeSkippedNote, legLimitSeed, netFromLegs, onTick, openLimitPrice,
   rewardRisk, conflictSummaryLine, warningsToPrint, NOTHING_TODAY,
   tradeCard, TRADE_CARD_IDS, unlistedContractNote, unquotedLegNote, unquotedLegPointer,
-  strikeSnapNote, NO_CEILING,
+  strikeSnapNote, offBoardStrikeLabel, checkedAgainstNote, NO_CEILING,
 } from "./rules.js";
 import { analyze, shortlistWithFloors, TradeCard } from "./App.jsx";
 import { terminalDist, compareDistInputs, compareDistNote, ComparePayoffs } from "./visuals.jsx";
 import { candidateOf } from "./path.js";
-import { OrderTicket } from "./pro.jsx";
+import { OrderTicket, buildReportMd } from "./pro.jsx";
+import { bookPositions } from "./journal.js";
 
 const ok = [], bad = [];
 const check = (name, fn) => { try { fn(); ok.push(name); } catch (e) { bad.push([name, e.message]); } };
@@ -580,6 +581,88 @@ check("a strike that moved onto a new board says so", () => {
   has(note, "27.5 → 28");
   has(note, "2026-11-20");
   eq(strikeSnapNote([], "2026-11-20"), null, "nothing moved is not an event");
+});
+
+/* ==========================================================================
+   THE WEEKLY REPORT DESCRIBED A BOOK THAT WAS NOT THERE.
+
+   Section 2's job is to say what is open against the rules. It listed
+   `store.positions` whole, so the three WATCHING rows from the phone — orders
+   the broker came back on with nothing bought — were reported as positions.
+   And it summed `maxLoss` RAW, while `maxLoss` describes ONE combination.
+   ========================================================================== */
+const reportCtx = (positions) => ({
+  store: { positions, journal: [], settings: {} },
+  scan: [], news: [], seasonalSrc: {},
+});
+const NOT_TAKEN_3 = [
+  { ticker: "SOYB", name: "Bull Call Spread", expKey: "2026-11-20", expiry: "2026-11-20T00:00:00.000Z",
+    entryNet: 4.5, maxProfit: 550, maxLoss: -450, contracts: 1,
+    alpacaId: "o1", alpacaStatus: "canceled", alpacaFilled: false },
+  { ticker: "BOIL", name: "Iron Condor", expKey: "2026-11-20", expiry: "2026-11-20T00:00:00.000Z",
+    entryNet: -5.77, maxProfit: 577, maxLoss: -577, contracts: 1,
+    alpacaId: "o2", alpacaStatus: "expired", alpacaFilled: false },
+  { ticker: "UNG", name: "Bull Put Spread", expKey: "2026-11-20", expiry: "2026-11-20T00:00:00.000Z",
+    entryNet: -0.14, maxProfit: 14, maxLoss: -14, contracts: 1,
+    alpacaId: "o3", alpacaStatus: "canceled", alpacaFilled: false },
+];
+
+check("SECTION 2 SAYS NO OPEN POSITIONS over the three rows nobody bought", () => {
+  const md = buildReportMd(reportCtx(NOT_TAKEN_3), null, null);
+  const sec2 = md.slice(md.indexOf("## 2 \u00b7"), md.indexOf("## 3 \u00b7"));
+  has(sec2, "No open positions.");
+  hasNot(sec2, "SOYB");
+  hasNot(sec2, "Across everything");
+  hasNot(sec2, "$1,04");
+});
+
+check("A FILLED POSITION IS STILL REPORTED, and at the size the record holds", () => {
+  const owned = [{ ...NOT_TAKEN_3[0], contracts: 10, alpacaStatus: "filled", alpacaFilled: true }];
+  const md = buildReportMd(reportCtx(owned), null, null);
+  const sec2 = md.slice(md.indexOf("## 2 \u00b7"), md.indexOf("## 3 \u00b7"));
+  has(sec2, "SOYB");
+  has(sec2, "\u00d710 on this position");
+  // $450 a combination \u00d7 10 = $4,500, the figure the risk gate measures.
+  has(sec2, "$4500 at risk");
+  has(sec2, "up to $5500 to be made");
+});
+
+check("one combination prints no size, because there is nothing to disambiguate", () => {
+  const owned = [{ ...NOT_TAKEN_3[0], contracts: 1, alpacaStatus: "filled", alpacaFilled: true }];
+  const sec2 = (() => { const md = buildReportMd(reportCtx(owned), null, null);
+    return md.slice(md.indexOf("## 2 \u00b7"), md.indexOf("## 3 \u00b7")); })();
+  hasNot(sec2, "on this position");
+  has(sec2, "$450 at risk");
+});
+
+check("a WORKING order is in the report, because it can still fill", () => {
+  const working = [{ ...NOT_TAKEN_3[0], alpacaStatus: "new", alpacaFilled: false }];
+  eq(bookPositions(working).length, 1);
+  const md = buildReportMd(reportCtx(working), null, null);
+  has(md.slice(md.indexOf("## 2 \u00b7"), md.indexOf("## 3 \u00b7")), "SOYB");
+});
+
+check("A MISSING CEILING STILL CANNOT BE ADDED TO A TOTAL, at any size", () => {
+  const owned = [{ ...NOT_TAKEN_3[0], contracts: 4, maxProfit: null, alpacaStatus: "filled", alpacaFilled: true }];
+  const md = buildReportMd(reportCtx(owned), null, null);
+  const sec2 = md.slice(md.indexOf("## 2 \u00b7"), md.indexOf("## 3 \u00b7"));
+  has(sec2, NO_CEILING);
+  has(sec2, "$1800 at risk");
+  has(sec2, "up to $0 to be made");
+  has(sec2, "which cannot be added to a total");
+});
+
+check("offBoardStrikeLabel() names the strike and nothing else", () => {
+  eq(offBoardStrikeLabel(27.5), "27.5 \u00b7 not on this board");
+  eq(offBoardStrikeLabel(16), "16 \u00b7 not on this board");
+});
+
+check("checkedAgainstNote() distinguishes the two books in words", () => {
+  const a = checkedAgainstNote(true, "account number PA3XYZ01 (Alpaca paper accounts start with PA)");
+  const b = checkedAgainstNote(false, null);
+  has(a, "PA3XYZ01");
+  hasNot(b, "Alpaca");
+  if (a === b) throw new Error("one sentence for two different accounts");
 });
 
 console.log(`\n${ok.length} passed, ${bad.length} failed\n`);

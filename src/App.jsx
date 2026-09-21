@@ -14,19 +14,19 @@ import { BandThumbnail, payoffBands, bandTakeaway, GaugeFigure, Gauge, CompareFi
 import { fuseSignals, sentimentDirection, withSignalRank, compareCandidates, againstSignal, DRIVER_PRESETS, rankByDrivers, verdictNarrative } from "./signals.js";
 import { N as nCDF, bs as bsPrice, smile as smileIV, payoff as payoffExp, SEASONAL, SIGMA,
   parseAvJson, statsFromMatrix } from "./engine.js";
-import { parseOcc, buildOcc, snapStrike, resnapLegs, expiryStrikes, fetchChain, hasOpenInterest, enrichOpenInterest, feedName, sourceNote, openInterestNote, oiProfile, expiryOpenInterest, nearMoneyOpenInterest, monotonicityBreaks, monotonicityNote, spotOf, spotAt } from "./chain.js";
+import { parseOcc, buildOcc, snapStrike, resnapLegs, expiryStrikes, strikeOptions, fetchChain, hasOpenInterest, enrichOpenInterest, feedName, sourceNote, openInterestNote, oiProfile, expiryOpenInterest, nearMoneyOpenInterest, monotonicityBreaks, monotonicityNote, spotOf, spotAt } from "./chain.js";
 import { T, themeName, setTheme, BADGE_SAFE } from "./theme.js";
 import { RULES, sizing, ruleBadge, takeProfitLabel, stopLossLabel, perTradeCapLabel, RULE_PILLS, NOTHING_TODAY, money, pctText, capitalSourceNote, perTradeLimitPhrase, qualityFloor, qualityFloorSentence, liquiditySkippedNote,
   LIQUIDITY_LEVELS, RECOMMENDED_LIQUIDITY, LIQUIDITY_MEASUREMENT, liquidityMeasurementNote, liquidityLevel, liquidityThreshold, looseningWarning, liquiditySettingNote, isLoosened, ordinal,
   priceability, unpriceableNote, rewardRisk, MIN_NET_DOLLARS,
   payoffCeiling, NO_CEILING, noCeilingNote, noCeilingRankNote,
   impossibleLoss, impossibleLossNote,
-  contractListing, unlistedContractNote, unlistedContractListNote, strikeSnapNote,
+  contractListing, unlistedContractNote, unlistedContractListNote, strikeSnapNote, offBoardStrikeLabel,
   tradeCard, cardCurrencyNote, CARD_CURRENCY, limitOwner,
   modelSanity, modelDisagreementNote,
   entryRoom, entryRoomWarning, entryOverrideOk, entryOverrideNote, entryInsideExitNote,
   passedOverRecord, passedOverSummary,
-  expiryChoice, expiryChoiceNote, emptyExpiryNote, wideSpreadNote, spreadSkippedNote,
+  expiryChoice, expiryChoiceNote, emptyExpiryNote, unloadedBoardNote, checkedAgainstNote, wideSpreadNote, spreadSkippedNote,
   wideComboNote, comboSpreadSkippedNote, comboBook, effectiveLimit, limitCeilingNote, notionalControlled,
   orderVerdict, legBook, legLimitSeed, netFromLegs, onTick, sizeSkippedNote,
   conflictSummaryLine, warningsToPrint,
@@ -45,7 +45,7 @@ import { orderBody, orderOutcome, alpacaErrorText, reduceRatios } from "./order.
 import { nextRef, refCounter, appendTimeline, stampTimeline, orderStatusRecheck, closeDecision,
   autopilotHorizonNote, autopilotVolNote,
   positionSize, positionSizeNote, contractsOf, withPositionSize,
-  positionStage, positionStageNote, wouldHaveDone,
+  positionStage, positionStageNote, bookPositions, wouldHaveDone,
   journalEntry, searchJournal, CLOSE_REASON_MIN, refNumber } from "./journal.js";
 import { FIRST_STEP, stepCarry, candidateOf, candidateKey, legsLine, toggleCompare, inCompare, MAX_COMPARE, savedFromCandidate, candidateFromSaved, savedAge } from "./path.js";
 import { StepNav, StepForward, EvidenceBar, EvidenceOverlay, DeskSheet, CompareTray, CandidateActions } from "./steps.jsx";
@@ -182,6 +182,23 @@ async function alpacaGet(path) {
 // header. Leggerlo qui e' l'unico modo di VERIFICARE (non presumere) che il
 // conto sia paper: senza questa prova src/riskGate.js rifiuta l'ordine.
 const PAPER_HOST = "paper-api.alpaca.markets";
+/* THE APP'S OWN BOOK — AND IT IS NOT A STAND-IN FOR THE BROKER'S.
+   A position recorded on the app's own paper book never leaves the browser,
+   so rule 1 (paper trading only) is satisfied by construction and the gate is
+   told so. It is at module scope because it is a constant, and because being
+   a constant is what makes `bookFor()` below able to say, in one expression,
+   which account a given tap is actually measured against.
+
+   NEVER use it for anything that reaches Alpaca. Read on the phone, SOYB,
+   21 September 2026: the checklist on the Build screen was evaluated against
+   THIS while the send beside it was gated against the broker account, so the
+   list the owner read said "paper mode verified — local simulation, no broker
+   involved" about an order that was about to go to a broker. The two agreed
+   by luck (the gate reads the account for `paperStatus()` and nothing else,
+   and this one always passes), which is worse than disagreeing: a checklist
+   that cannot fail is not a check. */
+const LOCAL_BOOK = { paperVerified: true, paperSource: "local simulation, no broker involved" };
+
 async function alpacaAccount() {
   const r = await fetch(`/api/alpaca?path=${encodeURIComponent("/v2/account")}`);
   if (!r.ok) throw new Error(`Alpaca ${r.status}: ${await r.text()}`);
@@ -225,7 +242,64 @@ const SENTIMENTS = [
   { id: "bull", label: "Bull", color: T.green, icon: "↑", tgt: 0.04 },
   { id: "verybull", label: "Very Bull", color: T.greenDeep, icon: "↑↑", tgt: 0.08 },
 ];
+/* AN UNLOADED BOARD IS UNKNOWN, NOT A GRID — AND THIS IS WHERE THE 27.5 CAME
+   FROM. The Build screen's preset effect fired on the render where the chain
+   (and so `spot`) arrived, while `expKey` was being set by a SIBLING effect in
+   that same render, so `expStrikes` was still null. `snapStrike()` then fell
+   back to `Math.round(x / step) * step`: SOYB at 27.64, step 0.5, Bull Call
+   Spread [0, +0.05] gives 27.5 / 29 — exactly the leg the broker refused, on
+   a board that lists whole dollars. Nothing re-snapped afterwards, so every
+   fresh load of such a board produced an order the gate had to refuse.
+
+   The guard is HERE rather than at the four call sites for the same reason
+   `snapStrike()` itself lives in chain.js: one question, one answer. With no
+   board there are no presets, so no caller can produce tradeable legs from
+   one — each of them says on screen what it does with the empty answer. The
+   `step` fallback inside `snapStrike()` is now unreachable from this
+   function, which is the point: a percentage of spot rounded to a grid is a
+   guess about what the market lists, and this app does not guess those. */
+/* ==========================================================================
+   THE STRIKE DROPDOWN SAYS WHAT IT IS SHOWING — failure class 1, read on the
+   owner's phone.
+
+   `<select value={27.5}>` over options 16…32 does not render empty and does
+   not warn: the browser displays the FIRST option. So the dropdown read 16
+   while the trade card above it read 27.5, and the two disagreed about which
+   trade was on screen with nothing on the page saying so. The order carried
+   the 27.5; the number the user could see was the 16.
+
+   `strikeOptions()` in chain.js always includes the current strike, flagged
+   `listed: false` when the board does not carry it. Here that becomes a
+   DISABLED option named by `offBoardStrikeLabel()` in rules.js: the leg is
+   shown, it is selected, it can be changed, and it cannot be chosen. The gate
+   is what refuses the order (`UNLISTED_CONTRACT`); this is what stops the
+   screen from quietly showing a different strike instead.
+
+   Exported so a test can render it. With no board at all it is a plain number
+   field, exactly as before — an unloaded board is UNKNOWN, and a dropdown of
+   strikes nobody has confirmed would be the same invention one control over.
+   ========================================================================== */
+export function StrikeSelect({ strikes, value, step, onChange }) {
+  const opts = strikeOptions(strikes, value);
+  if (!opts) {
+    return <Inp type="number" step={step} value={value} onChange={(e) => onChange(+e.target.value)} style={{ width: 76 }} />;
+  }
+  const off = opts.find((o) => !o.listed);
+  return (
+    <select value={value} onChange={(e) => onChange(+e.target.value)}
+      title={off ? offBoardStrikeLabel(off.k) : undefined}
+      style={{ ...mono, background: T.panel, color: off ? T.red : T.ink, border: `1px solid ${off ? T.red : T.line}`, borderRadius: 5, padding: "5px 6px", fontSize: 12, width: off ? 150 : 90 }}>
+      {opts.map((o) => (
+        <option key={o.k} value={o.k} disabled={!o.listed}>
+          {o.listed ? o.k : offBoardStrikeLabel(o.k)}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 export function buildPresets(sent, S, step, strikes) {
+  if (!strikes || !strikes.length) return [];
   const K = (pct) => snapStrike(S * (1 + pct), strikes, step);
   const P = {
     verybear: [
@@ -1288,11 +1362,12 @@ export default function OptionsStrategyLab() {
   const seas = seasonal[ticker] || { monthlyMean: U.monthlyMean, matrix: null, years: null, src: "estimate" };
   const iv = U.iv;
   const dte = expKey && chain?.byExp[expKey] ? chain.byExp[expKey].dte : dteManual;
-  const expStrikes = useMemo(() => {
-    if (!chain || !expKey || !chain.byExp[expKey]) return null;
-    const s = new Set([...Object.keys(chain.byExp[expKey].calls), ...Object.keys(chain.byExp[expKey].puts)].map(Number));
-    return Array.from(s).sort((a, b) => a - b);
-  }, [chain, expKey]);
+  /* ONE IMPLEMENTATION OF "WHICH STRIKES DOES THIS BOARD CARRY". This was a
+     second copy of `expiryStrikes()` in chain.js, written out again here and
+     twice more below in the wide search and the guided run — four answers to
+     one question, any of which could have been corrected without the others.
+     A strike is a fact about a board, so the board decides. */
+  const expStrikes = useMemo(() => expiryStrikes(chain, expKey), [chain, expKey]);
   const q = useMemo(() => makeQuote(chain, expKey), [chain, expKey]);
 
   /* ---- a hand-off ends where the trade is ---- */
@@ -1568,11 +1643,35 @@ export default function OptionsStrategyLab() {
       setExpKey(expChoice.chosen?.key || chain.expirations[0] || null);
     }
   }, [chain, expKey, expChoice]);
+  /* NOTHING IS BUILT UNTIL THE BOARD IS KNOWN. `buildPresets()` returns an
+     empty list without one (see its comment), so this waits instead of
+     inventing: the chain arrives a render or two later and the effect fires
+     again on `expStrikes`. An empty legs editor for one render is a far
+     smaller failure than a default trade naming a contract nobody issued. */
   useEffect(() => {
-    if (spot && legs.length === 0) {
-      setLegs(buildPresets(sentiment, spot, U.step, expStrikes)[0].legs);
-    }
+    if (!spot || !expStrikes || legs.length !== 0) return;
+    const first = buildPresets(sentiment, spot, U.step, expStrikes)[0];
+    if (first) setLegs(first.legs);
   }, [spot, expStrikes]); // eslint-disable-line
+
+  /* AND WHATEVER IS ALREADY IN STATE MOVES ONTO THE BOARD WHEN IT ARRIVES.
+     `resnapTo()` below covers the expiry dropdown, where the target board is
+     read straight off the chain inside the handler. It cannot cover the case
+     this effect is for: legs that were in state BEFORE any board was loaded —
+     carried in by `goStep()`, which moves the path to Build with the state
+     legs exactly as they are, or left over from a ticker that had a chain.
+     `resnapLegs()` returns the SAME array when nothing moves, so React bails
+     out of the update and this cannot loop; and a board that never loads is
+     left alone rather than snapped against a fallback grid. */
+  useEffect(() => {
+    if (!expStrikes) return;
+    setLegs((L) => {
+      if (!L.length) return L;
+      const r = resnapLegs(L, expStrikes);
+      if (r.moved.length) setSnapNote(strikeSnapNote(r.moved, expKey));
+      return r.legs;
+    });
+  }, [expStrikes]); // eslint-disable-line
 
   /* ---- sync continuo col conto Alpaca: ordini pendenti + fill → posizioni guidate ---- */
   useEffect(() => {
@@ -1806,16 +1905,23 @@ export default function OptionsStrategyLab() {
   // liquidity floor judges each leg against, so a strike is compared with its
   // own neighbours rather than with a number chosen for another market.
   const expiryOI = useMemo(() => (chain && expKey ? expiryOpenInterest(chain, expKey) : []), [chain, expKey]);
+  /* AND THE BOARD IS A PRECONDITION HERE TOO, NOT JUST A FILTER. Without it
+     `buildPresets()` returns nothing, and an empty Shortlist rendered through
+     `emptyExpiryNote()` would say NOTHING CLEARED ON <expiry> about a board
+     that has not loaded — a missing-data answer wearing a market verdict's
+     words. `board` carries which of the two this is. */
   const shortlist = useMemo(
-    () => (spot
-      ? shortlistWithFloors(sentiment, spot, U.step, expStrikes, dte, iv, q, { peers: expiryOI, level: liqLevel })
-      : { rows: [], cut: [], oiSkipped: false, tally: { kept: 0, liquidity: 0, reward: 0, skipped: 0 } }),
+    () => (spot && expStrikes
+      ? { board: "loaded", ...shortlistWithFloors(sentiment, spot, U.step, expStrikes, dte, iv, q, { peers: expiryOI, level: liqLevel }) }
+      : { board: null, rows: [], cut: [], oiSkipped: false, tally: { kept: 0, liquidity: 0, reward: 0, skipped: 0 } }),
     [sentiment, spot, U.step, expStrikes, dte, iv, q, expiryOI, liqLevel]);
   // WHAT EVERY SETTING WOULD DO TO THIS LIST, so moving the control shows its
   // own consequence instead of promising one. Four runs of a pure function over
   // eight presets: cheap, and the only honest way to label the buttons.
   const liqPreview = useMemo(() => {
-    if (!spot) return null;
+    // No board, no consequence to preview: four runs over an empty preset list
+    // would label every setting "0 survive" and blame the filter for it.
+    if (!spot || !expStrikes) return null;
     const out = {};
     for (const l of LIQUIDITY_LEVELS) {
       const r = shortlistWithFloors(sentiment, spot, U.step, expStrikes, dte, iv, q, { peers: expiryOI, level: l });
@@ -2074,12 +2180,19 @@ export default function OptionsStrategyLab() {
       Number.isFinite(fromBroker) && fromBroker >= 1 ? fromBroker : Number(n) || 1));
     // Anche la posizione interna passa dal cancello: non tocca il broker, ma
     // entra nell'esposizione totale che il cancello misura al prossimo ordine.
+    // WHICH BOOK IT PASSED THROUGH IS THE ONE THE TRADE WENT TO. With a broker
+    // order this record IS that order, so the gate summary written onto its
+    // timeline has to name the account it went to; without one nothing left
+    // the browser and the app's own book is the whole of the truth. It used to
+    // say "local simulation, no broker involved" in the Journal entry of an
+    // order Alpaca was holding.
     // The quotes travel with the proposal: the gate's priceability check can
     // then see a long leg nobody bids for, which a mid price hides by
     // construction (src/rules.js, `priceability`).
     const gLocal = gate({ ticker: tk, intent: "open", legs: lg, dte: d, contracts: sized,
       maxLoss: analysis?.maxLoss, maxProfit: analysis?.maxProfit,
-      quotes: quotesOf(analysis), net: analysis?.entry, occs: occsOf(analysis), entryOverride: roomOverride }, LOCAL_BOOK);
+      quotes: quotesOf(analysis), net: analysis?.entry, occs: occsOf(analysis), entryOverride: roomOverride },
+      bookFor(!!alpacaOrder));
     if (!gLocal.pass) return { ok: false, gate: gLocal };
     // ACCEPTED IS NOT OPENED. The reply is read once, here, and every
     // sentence about this position downstream is composed from that reading
@@ -2407,8 +2520,13 @@ export default function OptionsStrategyLab() {
         const d2 = c.byExp[ek].dte;
         const row = scan.find((r) => r.tk === tk);
         const sent = multi.senMode === "fixed" ? sentiment : (row && row.sugg !== "neutral" ? row.sugg : "neutral");
-        const sSet = new Set([...Object.keys(c.byExp[ek].calls), ...Object.keys(c.byExp[ek].puts)].map(Number));
-        const strikes = Array.from(sSet).sort((a, b) => a - b);
+        // The board, from the one function that knows what a board carries.
+        // `ek` came out of `c.expirations`, so this is non-null by
+        // construction — the skip is the belt to that brace, and it is a skip
+        // rather than a grid because a market whose strikes cannot be read is
+        // a market this search has nothing to say about.
+        const strikes = expiryStrikes(c, ek);
+        if (!strikes) continue;
         const qq = makeQuote(c, ek);
         // The peer set for THIS expiry on THIS market: the floor is relative to
         // the chain it is judging, so each market is measured against itself.
@@ -2797,8 +2915,12 @@ export default function OptionsStrategyLab() {
         if (!exps.length) { excluded.push({ tk, reason: "nodata" }); continue; }
         const ek = exps.reduce((b2, e) => Math.abs(c.byExp[e].dte - ans.horizon) < Math.abs(c.byExp[b2].dte - ans.horizon) ? e : b2, exps[0]);
         const d2 = c.byExp[ek].dte;
-        const sSet = new Set([...Object.keys(c.byExp[ek].calls), ...Object.keys(c.byExp[ek].puts)].map(Number));
-        const strikes = Array.from(sSet).sort((a, b) => a - b);
+        // The board, from `expiryStrikes()`. `ek` was reduced out of
+        // `c.expirations`, so a null here means the chain changed under the
+        // run; the market is excluded with the reason it already has for a
+        // market it could not read, never carried on with an invented grid.
+        const strikes = expiryStrikes(c, ek);
+        if (!strikes) { excluded.push({ tk, reason: "nodata" }); continue; }
         const qq = makeQuote(c, ek);
         const peers = expiryOpenInterest(c, ek);
         examined.push({ tk, fused: r.fused, spot: sp, dte: d2 });
@@ -3140,13 +3262,18 @@ export default function OptionsStrategyLab() {
     const ruled = j.filter((x) => x.ruleExit).length;
     const disciplina = closed ? ruled / closed : null;
     const coerenza = closed ? j.filter((x) => x.riskOk).length / closed : null;
-    const opens = [...j.map((x) => new Date(x.openedAt).getTime()), ...store.positions.map((p) => new Date(p.openedAt).getTime())].sort();
+    // A TRADE NOBODY BOUGHT IS NOT A TRADE YOU OPENED. This counted every
+    // record in `store.positions`, so three orders that came back with
+    // nothing bought moved the owner up a level and spent his "patience"
+    // budget — three trades in a week that never happened.
+    const opened0 = bookPositions(store.positions);
+    const opens = [...j.map((x) => new Date(x.openedAt).getTime()), ...opened0.map((p) => new Date(p.openedAt).getTime())].sort();
     let maxWk = 0;
     for (let i = 0; i < opens.length; i++) { let c2 = 1; for (let k = i + 1; k < opens.length && opens[k] - opens[i] < 6048e5; k++) c2++; maxWk = Math.max(maxWk, c2); }
     const pazienza = opens.length === 0 ? null : maxWk <= 3 ? 1 : maxWk <= 5 ? 0.6 : 0.2;
     const parts = [disciplina, coerenza, pazienza].filter((x) => x != null);
     const score = parts.length ? Math.round(parts.reduce((a, b) => a + b, 0) / parts.length * 100) : null;
-    const opened = closed + store.positions.length;
+    const opened = closed + opened0.length;
     let level = 1, next = "Open your first paper trade";
     if (opened >= 1) { level = 2; next = `Open ${Math.max(0, 3 - opened)} more to reach level 3`; }
     if (opened >= 3) { level = 3; next = `Close ${Math.max(0, 5 - ruled)} trades by the rules to reach level 4`; }
@@ -3163,12 +3290,31 @@ export default function OptionsStrategyLab() {
   /* ---- risk gate (PRD §8) ----
      Un solo cancello per ogni ordine. La UI non ricalcola mai i limiti: chiede
      a src/riskGate.js e mostra quello che risponde. */
-  // Conto locale: la posizione "Paper interno" non lascia il browser, quindi la
-  // verifica paper e' soddisfatta per costruzione. Non usarlo mai per un ordine.
-  const LOCAL_BOOK = { paperVerified: true, paperSource: "local simulation, no broker involved" };
+  /* THE EXPOSURE IS MEASURED ON THE BOOK, NOT ON THE DECISIONS LOG.
+     `store.positions` is what the app DECIDED; the gate was reading it whole
+     and charging the 25% exposure ceiling for trades the broker never filled.
+     Read on the phone, SOYB, 21 September 2026: "$1,042 already at risk" —
+     450 + 577 + 14, the three rows sitting under WATCHING — against zero
+     positions. `bookPositions()` in journal.js is the one home for which of
+     the three stages count, and why `working` is one of them. */
+  /* THE CHECKS ON SCREEN ARE THE CHECKS THE TAP RUNS — one expression, so
+     they cannot be two answers.
+
+     `bookFor(viaBroker)` is the ONLY place this app decides which account a
+     gate call is measured against. `true` means the order will reach Alpaca,
+     so it is measured against the Alpaca account: whatever `paperStatus()`
+     makes of it — verified by the proxy's own header, verified by a PA account
+     number, or NOT VERIFIED AT ALL, which refuses the order — is what the
+     screen prints and what the send enforces. `false` means nothing leaves the
+     browser, and only then is `LOCAL_BOOK` the truth.
+
+     Non-negotiable rule 1 is "if paper mode cannot be verified, reject", and a
+     checklist that answers it about a different account than the send does is
+     not an answer at all. */
+  const bookFor = useCallback((viaBroker) => (viaBroker ? alpaca : LOCAL_BOOK), [alpaca]);
   const gate = useCallback((proposal, account) => evaluateTrade({
     proposal,
-    portfolio: { positions: store.positions, account: account === undefined ? alpaca : account },
+    portfolio: { positions: bookPositions(store.positions), account: account === undefined ? alpaca : account },
     capital: capitalAnswers,
     signals: fused[proposal?.ticker || ticker] || null,
   }), [store.positions, alpaca, capitalAnswers, fused, ticker]);
@@ -3187,9 +3333,16 @@ export default function OptionsStrategyLab() {
     // ...AND AT THE CONTRACTS THE CHAIN REALLY LISTED. Without `occs` the gate
     // cannot see that a leg names a symbol nobody issued, which is what the
     // broker refused on 20 September before the order reached the market.
+    // ...AND AGAINST THE ACCOUNT THE SEND WILL USE. This passed `LOCAL_BOOK`,
+    // so the trade card's checklist — the one thing on the Build screen that
+    // answers "is this paper?" — was answering about the app's own book while
+    // the order ticket beside it gates against Alpaca. With the broker
+    // connected the route to an order on this screen IS that ticket, so this
+    // is the broker's account; with none connected the only route is the
+    // confirm step, which records locally. One expression, `bookFor()`.
     return gate({ ticker, intent: "open", legs, dte, contracts, maxLoss: AE.maxLoss, maxProfit: AE.maxProfit,
-      quotes: quotesOf(AE), net: AE.entry, occs: occsOf(AE), entryOverride: roomReason }, LOCAL_BOOK);
-  }, [AE, gate, legs, dte, ticker, roomReason, contracts]); // eslint-disable-line
+      quotes: quotesOf(AE), net: AE.entry, occs: occsOf(AE), entryOverride: roomReason }, bookFor(!!alpaca));
+  }, [AE, gate, bookFor, alpaca, legs, dte, ticker, roomReason, contracts]); // eslint-disable-line
   /* Which band this expiry falls in, for the screen. The gate decides; this
      only decides what the screen has to ASK for. */
   const room = useMemo(() => entryRoom(dte), [dte]);
@@ -3391,7 +3544,11 @@ export default function OptionsStrategyLab() {
         )}
         {wizStep === "open" && (
           <WizardOpen
-            positions={store.positions} posAlerts={posAlerts} attention={nAttention}
+            /* "N OPEN POSITIONS" MEANS OWNED. Working orders have their own
+               panel on this screen and trades nobody bought are under
+               Watching; counting all three here is how the front page came to
+               say "3 open positions" over a broker holding none. */
+            positions={ownedPositions} posAlerts={posAlerts} attention={nAttention}
             marketReady={marketReady} barsFor={(tk) => barsCache[tk] || []}
             onPositions={() => { setView("desk"); setTab("positions"); }}
             onFind={() => { setNothing(null); setWizStep("questions"); }}
@@ -3409,7 +3566,7 @@ export default function OptionsStrategyLab() {
         {wizStep === "nothing" && (
           <NothingToday
             reasons={nothing || []} notified={!!store.settings.notifyWhenReady}
-            hasPositions={store.positions.length > 0}
+            hasPositions={bookPositions(store.positions).length > 0}
             onNotify={() => setNotify(true)}
             onBack={() => setWizStep("questions")}
             onPositions={() => { setView("desk"); setTab("positions"); }}
@@ -4332,7 +4489,12 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   different board, said four structures had cleared — both true,
                   and together they read as a contradiction. `emptyExpiryNote()`
                   in rules.js carries the counts and the expiry in one sentence. */}
-              {shortlist.rows.length === 0 && (
+              {shortlist.rows.length === 0 && shortlist.board === null && (
+                <div style={{ ...mono, fontSize: 11, color: T.amber, marginTop: 8, lineHeight: 1.6 }}>
+                  {unloadedBoardNote(ticker, expKey)}
+                </div>
+              )}
+              {shortlist.rows.length === 0 && shortlist.board !== null && (
                 <div style={{ ...mono, fontSize: 11, color: T.red, marginTop: 8, lineHeight: 1.6 }}>
                   {emptyExpiryNote(expKey, shortlist.tally, liqLevel)} That is an answer about {ticker} on this
                   board, not an empty screen: {qualityFloorSentence(liqLevel)}
@@ -4837,14 +4999,8 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                       <button onClick={() => updLeg(i, "type", l.type === "call" ? "put" : "call")} style={{ ...mono, fontSize: 11, fontWeight: 700, width: 52, padding: "5px 0", borderRadius: 5, cursor: "pointer", background: `${T.blue}18`, color: T.blue, border: `1px solid ${T.blue}44` }}>
                         {l.type.toUpperCase()}
                       </button>
-                      {expStrikes ? (
-                        <select value={l.strike} onChange={(e) => updLeg(i, "strike", +e.target.value)}
-                          style={{ ...mono, background: T.panel, color: T.ink, border: `1px solid ${T.line}`, borderRadius: 5, padding: "5px 6px", fontSize: 12, width: 90 }}>
-                          {expStrikes.map((k) => <option key={k} value={k}>{k}</option>)}
-                        </select>
-                      ) : (
-                        <Inp type="number" step={U.step} value={l.strike} onChange={(e) => updLeg(i, "strike", +e.target.value)} style={{ width: 76 }} />
-                      )}
+                      <StrikeSelect strikes={expStrikes} value={l.strike} step={U.step}
+                        onChange={(v) => updLeg(i, "strike", v)} />
                       <Inp type="number" min={1} max={10} value={l.qty} onChange={(e) => updLeg(i, "qty", Math.max(1, +e.target.value))} style={{ width: 48 }} />
                       <span style={{ ...mono, fontSize: 11, color: lp.real ? T.green : T.mut, marginLeft: "auto" }}>
                         ${lp.px.toFixed(2)} {lp.real ? "●" : "◌"} <span style={{ color: T.dim }}>IV {(lp.iv * 100).toFixed(0)}%{lp.oi != null ? ` · OI ${lp.oi}` : ""}</span>
@@ -5131,6 +5287,16 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                 busy={busy === "order"}
                 onConfirm={() => openPaper()}
               />
+              {/* AND THE LIST SAYS WHOSE ACCOUNT IT CHECKED. This sheet holds
+                  two taps — the ticket, which sends, and the confirm step,
+                  which records on the app's own book — and the checks above
+                  are the SEND'S, run against the same account the send uses.
+                  They used to be run against `LOCAL_BOOK` whatever was
+                  connected, so the paper row read "local simulation, no broker
+                  involved" directly above a button that reaches Alpaca. */}
+              <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 10, lineHeight: 1.6 }}>
+                {checkedAgainstNote(!!alpaca, guard?.limits?.paper?.why)}
+              </div>
             </div>
               </DeskSheet>
             </Panel>

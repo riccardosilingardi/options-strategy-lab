@@ -143,6 +143,41 @@ export function resnapLegs(legs = [], strikes = null) {
 }
 
 /**
+ * THE OPTIONS A STRIKE DROPDOWN MAY OFFER — AND THE ONE IT IS SHOWING.
+ *
+ * A `<select>` whose `value` matches none of its `<option>`s does not stay
+ * empty: the browser silently displays the FIRST option. Read live on the
+ * owner's phone, SOYB 2026-11-20 — the leg was 27.5, the board starts at 16,
+ * and the dropdown read 16 while the trade card two blocks up read 27.5. One
+ * screen, two strikes, and the number the user could see was not the number
+ * the order carried.
+ *
+ * So the current strike is always among the options. When the board does not
+ * list it, it comes back `listed: false` — the caller renders it disabled and
+ * names it (`offBoardStrikeLabel()` in rules.js) instead of letting the
+ * browser choose a different trade on the user's behalf.
+ *
+ * It lives here for the same reason `snapStrike()` does: which strikes exist
+ * is a fact about the BOARD.
+ *
+ * @param strikes  the board, or null when no chain is loaded
+ * @param strike   the leg's current strike
+ * @returns {{ k: number, listed: boolean }[] | null}  null with no board
+ */
+export function strikeOptions(strikes, strike) {
+  if (!strikes || !strikes.length) return null;
+  const opts = strikes.map((k) => ({ k: Number(k), listed: true }));
+  const cur = Number(strike);
+  // `Number(null)` is 0 and 0 is finite, so the finite check is not enough on
+  // its own: a leg with no strike at all has nothing to show off-board.
+  if (strike == null || !Number.isFinite(cur)) return opts;
+  if (opts.some((o) => o.k === cur)) return opts;
+  const out = [...opts, { k: cur, listed: false }];
+  out.sort((a, b) => a.k - b.k);
+  return out;
+}
+
+/**
  * The price of one contract, decided once for every source.
  * Mid of bid and ask when both sides are quoted; the last trade otherwise;
  * null when neither exists, which is how `priceLeg()` knows to fall back to

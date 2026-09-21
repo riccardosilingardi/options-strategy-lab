@@ -7,7 +7,7 @@ import { RULES, ruleBadge, takeProfitLabel, scaleOutLabel, stopLossLabel, exitDT
   legBook, sizeSkippedNote, onTick, netFromLegs, limitCeilingNote, rewardRisk,
   contractListing, unlistedContractNote, unquotedLegNote, unquotedLegPointer, marketOrderNote,
   ivProvenance } from "./rules.js";
-import { contractsOf, autopilotHorizonNote, autopilotVolNote } from "./journal.js";
+import { contractsOf, positionSize, bookPositions, autopilotHorizonNote, autopilotVolNote } from "./journal.js";
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, LineStyle } from "lightweight-charts";
 import { erf, netBS } from "./engine.js";
 import { ARROW, REGIONS, regionSignals, tagImpacts, taRead } from "./signals.js";
@@ -1198,7 +1198,12 @@ export function buildContext(ctx) {
     // honesty one: a model handed a maximum profit of 0 for a long call would
     // write a take-profit target of $0 into the report.
     currentStrategy: A ? { legs, expKey, entry: +(A.entry * 100).toFixed(0), maxProfit: dollarsOrNull(A.maxProfit), maxLoss: dollarsOrNull(A.maxLoss), breakevens: A.breakevens, greeks: { delta: +A.greeks.delta.toFixed(2), theta: +A.greeks.theta.toFixed(0), vega: +A.greeks.vega.toFixed(0) } } : null,
-    paperPositions: store.positions.map((p) => ({ ticker: p.ticker, name: p.name, legs: p.legs, exp: p.expKey, entry: +(p.entryNet * 100).toFixed(0), maxProfit: dollarsOrNull(p.maxProfit), maxLoss: dollarsOrNull(p.maxLoss), openedAt: p.openedAt.slice(0, 10), thesis: p.thesis || null,
+    // THE MODEL'S BOOK IS THE BOOK. `reportNarrativePrompt()` tells it that
+    // `paperPositions` is AUTHORITATIVE, so a trade the broker never filled
+    // handed over in this array is a position the model is entitled to write
+    // about — the §4c fault ("entered at $68 debit" under a section saying
+    // "No open positions") rebuilt one array across.
+    paperPositions: bookPositions(store.positions).map((p) => ({ ticker: p.ticker, name: p.name, legs: p.legs, exp: p.expKey, entry: +(p.entryNet * 100).toFixed(0), maxProfit: dollarsOrNull(p.maxProfit), maxLoss: dollarsOrNull(p.maxLoss), openedAt: p.openedAt.slice(0, 10), thesis: p.thesis || null,
       // THE MODEL READS THE TIMELINE, so it reads the warning too: an entry
       // whose simulation ran to a horizon the app no longer uses must not be
       // quoted back as if it described today's rule.
@@ -1388,20 +1393,31 @@ export function buildReportMd(ctx, weatherSig, aiText) {
   (scan || []).slice(0, 3).forEach((s, i) => L.push(
     `${i + 1}. **${s.tk}** — seasonal ${s.seasonalScore > 0 ? "+" : ""}${s.seasonalScore.toFixed(1)}%/mo → leaning **${s.sugg.toUpperCase()}**\n   _${seasonalStampNote(s, s.tk)}_`));
   L.push(`\n## 2 · Positions against the rules (${ruleBadge()})`);
-  if (!store.positions.length) L.push("No open positions.");
-  store.positions.forEach((p) => {
+  /* THE SAME BOOK THE RISK GATE MEASURES, AND THE SAME UNITS.
+     Two faults in one paragraph, both read on the phone on 21 September 2026:
+     it listed `store.positions` whole — so three orders that came back with
+     nothing bought were reported as positions, in a document whose job is to
+     say what is open — and it summed `maxLoss` RAW. `maxLoss` describes ONE
+     combination (`analyze()` multiplies by each leg's own qty, never by the
+     order's); the size lives on the record and is read through
+     `positionSize()`, which is what the gate multiplies by. A ten-lot spread
+     was therefore reported at a tenth of the money it risks. */
+  const book = bookPositions(store.positions);
+  if (!book.length) L.push("No open positions.");
+  book.forEach((p) => {
     const dte = Math.max(0, Math.round((new Date(p.expiry) - Date.now()) / 86400000));
-    L.push(`- **${p.ticker} · ${p.name}** — expires ${p.expKey || "n/a"} (${dte} days)${dte <= RULES.exitDTE ? ` ⚠ **${RULES.exitDTE} days or fewer: close or roll**` : ""} · opened at ${fmt$(Math.abs(p.entryNet) * 100)} · can make ${Number.isFinite(p.maxProfit) ? fmt$(p.maxProfit) : NO_CEILING} / can lose ${fmt$(p.maxLoss)}`);
+    const n = positionSize(p).contracts;
+    L.push(`- **${p.ticker} · ${p.name}** — expires ${p.expKey || "n/a"} (${dte} days)${dte <= RULES.exitDTE ? ` ⚠ **${RULES.exitDTE} days or fewer: close or roll**` : ""} · opened at ${fmt$(Math.abs(p.entryNet) * 100)} · can make ${Number.isFinite(p.maxProfit) ? fmt$(p.maxProfit) : NO_CEILING} / can lose ${fmt$(p.maxLoss)}${n > 1 ? ` · per combination, ×${n} on this position` : ""}`);
   });
-  if (store.positions.length) {
-    const totRisk = store.positions.reduce((a, p) => a + Math.abs(p.maxLoss), 0);
+  if (book.length) {
+    const totRisk = book.reduce((a, p) => a + Math.abs(p.maxLoss) * positionSize(p).contracts, 0);
     // A TOTAL CANNOT INCLUDE AN UNKNOWN AND STILL BE A TOTAL. `Math.max(0, null)`
     // is 0, which would quietly report a position with no ceiling as adding
     // nothing to what can be made.
-    const noCeil = store.positions.filter((p) => !Number.isFinite(p.maxProfit)).length;
-    const totMaxP = store.positions.reduce((a, p) => a + (Number.isFinite(p.maxProfit) ? Math.max(0, p.maxProfit) : 0), 0);
+    const noCeil = book.filter((p) => !Number.isFinite(p.maxProfit)).length;
+    const totMaxP = book.reduce((a, p) => a + (Number.isFinite(p.maxProfit) ? Math.max(0, p.maxProfit) * positionSize(p).contracts : 0), 0);
     L.push(`\n**Across everything:** ${fmt$(totRisk)} at risk · up to ${fmt$(totMaxP)} to be made` +
-      (noCeil ? ` from the ${store.positions.length - noCeil} with a ceiling, plus ${noCeil} with ${NO_CEILING} on the profit, which cannot be added to a total` : ""));
+      (noCeil ? ` from the ${book.length - noCeil} with a ceiling, plus ${noCeil} with ${NO_CEILING} on the profit, which cannot be added to a total` : ""));
   }
   L.push(`\n## 3 · Headlines that matter (cause → effect, politics included)`);
   (news || []).filter((n) => (n.impacts || []).length).slice(0, 8).forEach((n) => {
@@ -1443,7 +1459,9 @@ function svgPayoff(legs, entryNet, S0) {
 }
 export function exportPdf(ctx, md) {
   const { store } = ctx;
-  const posHtml = store.positions.map((p2) => `
+  // THE PDF DRAWS THE SAME BOOK THE MARKDOWN LISTS. A payoff chart for a trade
+  // nobody bought is the §4m fault in a picture.
+  const posHtml = bookPositions(store.positions).map((p2) => `
     <div class="pos"><h3>${p2.ticker} · ${p2.name}</h3>
       ${svgPayoff(p2.legs, p2.entryNet, p2.entrySpot)}
       <p class="m">${p2.legs.map((l) => `${l.side > 0 ? "+" : "−"}${l.qty} ${l.strike}${l.type === "call" ? "C" : "P"}`).join(" / ")} · exp ${p2.expKey || "n/d"} · max profit ${Number.isFinite(p2.maxProfit) ? `$${p2.maxProfit.toFixed(0)}` : NO_CEILING} · max loss $${Math.abs(p2.maxLoss)?.toFixed(0)}</p>
@@ -1490,7 +1508,7 @@ export function ReportTab({ ctx, apiKey, setSetting }) {
       // is authoritative, which is how "the BOIL $20.50/$22.50 call spread
       // entered at $68 debit" appeared in a report whose own section 2 said
       // "No open positions."
-      try { ai = await askAI(apiKey, [{ role: "user", content: reportNarrativePrompt(store.positions) }], buildContext(ctx)); }
+      try { ai = await askAI(apiKey, [{ role: "user", content: reportNarrativePrompt(bookPositions(store.positions)) }], buildContext(ctx)); }
       catch (e) { ai = `(the copilot could not be reached: ${e.message})`; }
     }
     const out = buildReportMd(ctx, wsig, ai);

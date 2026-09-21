@@ -150,6 +150,76 @@ does not exist and ask the broker to trade it. The app created its own refusal.
   new expiry; both do, an unloaded chain is UNKNOWN and left alone rather than snapped against a
   fallback grid, and what moved is said (`strikeSnapNote()`).
 
+## AN UNLOADED BOARD IS UNKNOWN, NOT A GRID — and the dropdown says what it shows
+
+PRD §4o. PR #30 named two ways a 27.5 could reach a board that lists whole dollars and proved
+neither. **It was a third path**: the Build screen's DEFAULT PRESET, on the first render of a fresh
+market. The effect fires on the render where `chain` — and so `spot` — arrives; `expKey` is set by a
+SIBLING effect in that same render, so `expStrikes` is still null; `snapStrike()` falls back to
+`Math.round(x / step) * step`; SOYB at 27.64, step 0.5, Bull Call Spread → **27.5 / 29**. Nothing
+re-snapped afterwards, so `UNLISTED_CONTRACT` fired on **every fresh load of every board without
+half-dollar strikes**. The app was manufacturing its own refusal.
+
+- **`buildPresets()` REFUSES A NULL BOARD** and returns `[]`. The guard is in the function, not at
+  its call sites, for the same reason `snapStrike()` lives in `chain.js`: a fifth generation site
+  added next year is covered without anybody coming back. The fallback grid is unreachable from it.
+- **The preset effect WAITS**, and legs already in state are **re-snapped when the board arrives**
+  (`resnapLegs()` + `strikeSnapNote()`). That is what covers `goStep()`, which carries state legs
+  unchanged. `resnapLegs()` returns the SAME array when nothing moves, so React bails out and it
+  cannot loop.
+- **`expiryStrikes()` IS THE ONE IMPLEMENTATION.** There were four: `expStrikes` in `App.jsx`, the
+  wide search's and `runWizard`'s inline `new Set([...calls, ...puts])`, and the real one.
+- **AN EMPTY SHORTLIST IS NOT A VERDICT WHEN THERE IS NO BOARD.** `unloadedBoardNote()` in
+  `rules.js`, never `emptyExpiryNote()`'s "NOTHING CLEARED ON <expiry>" — a missing-data answer
+  wearing a market verdict's words is the line `wizard.test.jsx` already holds on the refusal screen.
+- **FAILURE CLASS 1: `<select value={27.5}>` OVER OPTIONS 16…32 DISPLAYS 16.** It does not render
+  empty and it does not warn. The leg editor read 16 while the trade card read 27.5 and the order
+  carried the 27.5. `strikeOptions()` in `chain.js` always includes the current strike, flagged
+  `listed: false`; `StrikeSelect` in `App.jsx` renders it **disabled**, named by
+  `offBoardStrikeLabel()` in `rules.js`. The gate refuses the order; this stops the SCREEN choosing
+  a different trade.
+
+## THE EXPOSURE IS THE BOOK, NOT THE DECISIONS LOG — `bookPositions()`
+
+`bookPositions()` in `src/journal.js`. Read on the owner's phone, SOYB 21 Sep 2026: **"$1,042
+already at risk"** — 450 + 577 + 14 — against **zero** positions, with all three figures sitting one
+tab across under WATCHING as orders the broker came back on with nothing bought. §4m split
+`store.positions` into three stages and rebuilt every LIST from it; the gate and the weekly report
+were the two consumers that never got the split.
+
+- **owned + working COUNT. `not-taken` NEVER counts.** `working` counts because an order at the
+  broker **can still fill**: the exposure ceiling is a limit on what may be COMMITTED, not a report
+  of what is open. That is a different question from `positionStageNote()`'s "the money is not at
+  risk yet", which is about profit and loss.
+- **ONE HOME, READ EVERYWHERE**: the risk gate in `App.jsx`, `buildReportMd()` section 2, the report
+  PDF, `reportNarrativePrompt()`, the model's `paperPositions` context, `autopilot.mjs` (which was
+  proposing exits for trades nobody bought) and `approve.mjs`. Never write the filter by hand.
+- **THE REPORT MULTIPLIES BY `positionSize()`, LIKE THE GATE DOES.** `maxLoss` describes ONE
+  combination, so a ten-lot spread was reported at a tenth of the money it risks.
+- Not changed, deliberately: `nextRef()` scans every record (the counter only goes up), and the
+  auto-monitor walks positions for TICKERS, which is a set of chains and not a sum of money.
+
+## THE CHECKS SHOWN ARE THE CHECKS THE TAP RUNS — `bookFor()`
+
+`bookFor(viaBroker)` in `App.jsx` is the **only** place this app chooses which account a gate call is
+measured against, and `riskGate.test.js` fails the build if `LOCAL_BOOK` is named anywhere but its
+own declaration and inside `bookFor()`.
+
+The Build screen's checklist was evaluated against `LOCAL_BOOK` — *"local simulation, no broker
+involved"* — while the order ticket beside it gates against Alpaca. They agreed only by luck: the
+gate reads the account for `paperStatus()` **and nothing else**, and the app's own book always passes
+it, so **the list the owner read could not fail**. A checklist that cannot fail is not a check.
+
+- The **displayed** `guard` uses `bookFor(!!alpaca)`. With the broker connected the route to an order
+  on that screen IS the ticket, so the checklist is the broker's — and a paper mode it cannot verify
+  refuses the order where the button is.
+- The **record** uses `bookFor(!!alpacaOrder)`: the account the trade actually went to. The gate
+  summary goes on the position's timeline and used to say "no broker involved" about an order Alpaca
+  was holding.
+- `LOCAL_BOOK` survives for the one case it is true of: the confirm step with no broker connected.
+- `checkedAgainstNote()` in `rules.js` says under the checklist whose account it checked, because
+  that sheet holds two taps and the checks shown are the SEND'S — the stricter of the two.
+
 ## THE DECISION IS FIVE LINES — the trade card, and everything else one tap away
 
 `tradeCard()` / `TRADE_CARD_IDS` / `cardCurrencyNote()` in `src/rules.js`, rendered by `TradeCard` in
@@ -957,6 +1027,10 @@ while the position is open.
   `impossibleLoss()` (is the worst case actually a loss),
   `contractListing()` / `unlistedContractNote()` / `legName()` (does the contract
   EXIST — the one the gate asks and `buildOcc()` cannot answer),
+  `offBoardStrikeLabel()` (what a dropdown calls a strike the board does not list)
+  and `unloadedBoardNote()` (a board that has not loaded is not a board that
+  emptied), `checkedAgainstNote()` (which account the checks on screen were run
+  against),
   `tradeCard()` / `TRADE_CARD_IDS` / `cardCurrencyNote()` (the five lines of the
   decision, and which currency they are in),
   `unquotedLegNote()` / `unquotedLegPointer()` (one fact, one place, on one
@@ -1020,6 +1094,9 @@ while the position is open.
   **`positionSize()` / `contractsOf()` / `withPositionSize()` / `positionSizeNote()` live
   here too** — how big a position is, and whether that is known, is a fact about its record.
   `riskGate.js` imports them; nothing else may re-derive a size.
+  **`bookPositions()` lives here too** — which records are the BOOK (owned + working, never
+  not-taken) is a fact about the records, and it is the one home every consumer that measures
+  money or writes a brief reads.
   **`closePos()` used to keep four fields** — ticker, pnl, ruleExit, riskOk — and drop the
   timeline, the thesis, both order ids and the reason. Never build a closed entry by hand.
 - `src/order.js` — **what is actually sent, and what came back.** Plain JS, no React,
@@ -1141,7 +1218,11 @@ while the position is open.
   disagree about the price of the same contract for a reason that is only a
   formula. **`snapStrike()` / `expiryStrikes()` / `resnapLegs()` live here too**:
   a strike is a fact about a BOARD, not about a trade, and two implementations of
-  "the nearest strike that exists" would be two answers to one question. Alpaca snapshots carry no open interest and no volume, so those come
+  "the nearest strike that exists" would be two answers to one question. There were
+  FOUR of `expiryStrikes()` and there is one. **`strikeOptions()` is here too**: which
+  options a strike dropdown may offer, including the current strike flagged
+  `listed: false` when the board does not carry it, because a `<select>` whose value
+  matches no option silently displays the first one. Alpaca snapshots carry no open interest and no volume, so those come
   back `null` (never `0`, which on screen reads as "nobody trades this") and the
   open-interest panel says which feed cannot fill it. **The QUOTE SIZES do come
   from Alpaca** (`latestQuote { bs, as }`) and were being parsed away; they are

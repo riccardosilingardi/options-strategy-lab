@@ -13,6 +13,26 @@ window, warning and typed override above it).
 DONE WHEN: an opening order is really filled on the paper account and appears
 in Positions. Not a test — a fill.
 
+**AND THE CAUSE OF THE FOURTH WAS NOT WHAT PR #30 GUESSED. THE APP WAS MANUFACTURING ITS OWN
+REFUSAL, ON EVERY FRESH MARKET** (PR #31, PRD §4o). PR #30 named two ways a 27.5 could reach a board
+that lists whole dollars — the expiry dropdown and `buildHandOff()` — closed both, and put "which of
+them it was" on the NOT VERIFIED list. It was neither. The Build screen's **default preset effect**
+fires on the render where the chain arrives, `expKey` is set by a sibling effect in that same
+render, so `expStrikes` is still null, and `snapStrike()` falls back to a grid: SOYB at 27.64, step
+0.5, Bull Call Spread → **27.5 / 29**. Nothing re-snapped afterwards, so `UNLISTED_CONTRACT` fired on
+**every fresh load of every board without half-dollar strikes**. `buildPresets()` refuses a null
+board now, the effect waits for one, legs already in state are re-snapped when it arrives, and the
+strike dropdown names a leg the board does not list instead of silently displaying its first option.
+
+**AND THE GATE WAS CHARGING $1,042 OF EXPOSURE FOR TRADES NOBODY BOUGHT.** Read on the same screen:
+450 + 577 + 14 against zero positions, all three sitting under WATCHING. `bookPositions()` in
+`journal.js` is the one home for what counts — owned plus working, never not-taken — and the risk
+gate, the weekly report, the model's context, `autopilot.mjs` and `approve.mjs` all read it.
+
+**AND THE CHECKS SHOWN BEFORE THE TAP WERE NOT THE CHECKS THE TAP RAN.** The Build checklist was
+evaluated against the app's own book while the send beside it gated against Alpaca. `bookFor()` is
+the one expression that chooses an account now.
+
 **FOUR ORDERS HAVE NOW BEEN SENT AND NONE HAS FILLED — AND THE FOURTH DID NOT EVEN REACH THE
 MARKET.** The first three were not met by the market; one of them sat at the exact mid, which the app
 now names as the price nobody has to meet. The fourth was **refused by the broker for a reason the
@@ -39,6 +59,35 @@ SHIPPED (PR "the order that never filled", 564 checks, build clean):
   - `entryRoom()`: three bands, hard block only at or inside the exit window,
     typed override between there and the 30-day floor, `passedOver` offerable.
     PRD §4f.
+
+SHIPPED (PR #31 "the app manufactured its own refusal", 769 checks, build clean):
+  - `buildPresets()` returns nothing without a board, the preset effect waits
+    for one, and legs already in state are re-snapped when it arrives. The
+    fallback grid inside `snapStrike()` is unreachable from the preset path.
+    PRD §4o.
+  - `expiryStrikes()` is the ONE implementation of "which strikes does this
+    board carry". There were four.
+  - `strikeOptions()` / `offBoardStrikeLabel()` / `StrikeSelect`: a leg the
+    board does not list is a disabled option that names itself, instead of the
+    browser quietly displaying the first option (16 under a card reading 27.5).
+  - `bookPositions()` in journal.js: owned + working, never not-taken. The risk
+    gate, the report, the model's context, `autopilot.mjs` and `approve.mjs`.
+    The report also multiplies by `positionSize()`, as the gate does.
+  - `bookFor()`: the displayed checklist is gated against the account the send
+    uses, the record against the account the trade went to, and `LOCAL_BOOK`
+    survives only where nothing leaves the browser. `checkedAgainstNote()` says
+    which. PRD §4o.
+
+WHAT P0 STILL OWES, AFTER PR #31:
+  - **A FILL.** Unchanged. The blocker is closed in code and reproduced by a
+    test; nobody has watched a fresh SOYB load produce 28/29 in a browser, and
+    no order has been sent since.
+  - **The effective price against the fill price.** `recheckOrders()` still
+    does not compare `min(limit, ask)` with what the broker recorded, because
+    nothing has ever filled.
+  - **Whether `working` should count towards the exposure ceiling.** It does
+    now, deliberately: an order at the broker is money committed. Nothing here
+    can measure how often one fills.
 
 WHAT P1 INHERITED FROM THIS WORK — and what it did with it:
   - **The 4x ratio is CHOSEN, not measured. STILL OPEN.** The live-chain
