@@ -5,6 +5,7 @@ import { RULES, ruleBadge, takeProfitLabel, scaleOutLabel, stopLossLabel, exitDT
   NO_CEILING, reportNarrativePrompt, chanceText, seasonalStampNote, MEASURED_SIGMA_SOURCE,
   comboBook, notionalControlled, notionalNote,
   legBook, sizeSkippedNote, onTick, netFromLegs, limitCeilingNote, rewardRisk,
+  contractListing, unlistedContractNote, unquotedLegNote, unquotedLegPointer, marketOrderNote,
   ivProvenance } from "./rules.js";
 import { contractsOf, autopilotHorizonNote, autopilotVolNote } from "./journal.js";
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, LineStyle } from "lightweight-charts";
@@ -270,6 +271,10 @@ export function OrderPending({ lines = [], onCancel }) {
    it, so the table and the combination price below it cannot disagree. */
 function LegMarketTable({ legs, quotes, ticker, expKey, feed }) {
   const lb = legBook(legs, quotes);
+  // WHICH LEGS THE CHAIN NEVER LISTED. `quotes` carries the chain's own `occ`
+  // per leg now; its absence is the absence of a contract (src/rules.js,
+  // `contractListing`), and it is what the broker refused on 20 September.
+  const unlisted = contractListing({ legs, occs: (quotes || []).map((x) => (x && x.occ) || null) }).missing;
   const Head = ({ children, right }) => (
     <div style={{ ...mono, fontSize: 9, color: T.dim, letterSpacing: 0.4, textAlign: right ? "right" : "left" }}>{children}</div>
   );
@@ -308,11 +313,23 @@ function LegMarketTable({ legs, quotes, ticker, expKey, feed }) {
           {sizeSkippedNote(lb.missingSizes, feed)}
         </div>
       )}
+      {/* ONE FACT, ONE PLACE. This sentence was written out here AND in the
+          combination panel below, so the Build screen said it twice — inside
+          the work PR #28 did to stop the CONFLICT paragraph appearing four
+          times. It keeps its home HERE, where the legs are named, and the
+          combination panel prints `unquotedLegPointer()` instead. */}
       {lb.unquoted > 0 && (
         <div style={{ ...mono, fontSize: 9.5, color: T.amber, marginTop: 5, lineHeight: 1.6 }}>
-          {lb.unquoted === 1 ? "One leg has" : `${lb.unquoted} legs have`} no two-sided quote at all, so there is
-          no side of {lb.unquoted === 1 ? "it" : "them"} that trades and no combination price to place your own
-          against.
+          {unquotedLegNote(lb.unquoted)}
+        </div>
+      )}
+      {/* AND A LEG THE CHAIN NEVER LISTED IS A DIFFERENT FACT FROM AN UNQUOTED
+          ONE: no quote means nobody is making a market, no LISTING means the
+          contract does not exist. The order cannot be sent either way, and
+          only one of the two can be fixed by waiting. */}
+      {unlisted.length > 0 && (
+        <div style={{ ...mono, fontSize: 9.5, color: T.red, marginTop: 5, lineHeight: 1.6 }}>
+          ✗ {unlistedContractNote(unlisted, lb.rows.length)}
         </div>
       )}
     </div>
@@ -461,9 +478,10 @@ function ComboBookPanel({ legs, quotes, verdict, effective, type, qty, spot, tic
         </>
       ) : (
         <div style={{ ...mono, fontSize: 10.5, color: T.amber, marginTop: 6, lineHeight: 1.6 }}>
-          {book.missing.length === 1 ? "One leg has" : `${book.missing.length} legs have`} no live two-sided
-          quote, so there is no combination price to show you and the app is not suggesting one. A limit typed
-          against a market nobody is quoting is a number, not a price.
+          {/* A POINTER, NOT A SECOND COPY. The full sentence belongs to the leg
+              table above, where the legs are named — the same rule
+              `warningsToPrint()` applies to the CONFLICT paragraph. */}
+          {unquotedLegPointer(book.missing.length)}
         </div>
       )}
 
@@ -472,8 +490,12 @@ function ComboBookPanel({ legs, quotes, verdict, effective, type, qty, spot, tic
           `analyze()` result, so the ticket cannot say one thing and the stats
           another about the trade about to be sent. */}
       <div style={{ display: "flex", gap: 18, marginTop: 10, flexWrap: "wrap", paddingTop: 9, borderTop: `1px solid ${T.line}` }}>
+        {/* THE NOTE USED TO SAY "at the price below, not at the mid" WITH NO
+            PRICE BELOW. On a MARKET order there is no limit to point at: the
+            figures are worked out at the touch, which is what a market order
+            takes, and saying otherwise names a control that is not there. */}
         <Cell k="MOST YOU CAN MAKE" v={Number.isFinite(maxProfit) ? money(maxProfit * Math.max(1, Math.round(Number(qty) || 1))) : NO_CEILING}
-          c={T.green} note="at the price below, not at the mid" />
+          c={T.green} note={type === "market" ? "at the touch a market order takes" : "at the price below, not at the mid"} />
         <Cell k="MOST YOU CAN LOSE" v={Number.isFinite(risk) ? money(risk) : "—"} c={T.red} note="the most you can lose" />
         <Cell k="MADE PER $1 RISKED" v={rr == null ? "—" : rr.toFixed(2)} c={T.violet}
           note={rr == null ? "no ceiling, or no readable price" : "best case over worst case"} />
@@ -495,6 +517,16 @@ function ComboBookPanel({ legs, quotes, verdict, effective, type, qty, spot, tic
         <div style={{ ...mono, fontSize: 10.5, color: T.red, marginTop: 8, lineHeight: 1.6, padding: "7px 9px", background: `${T.red}0f`, border: `1px solid ${T.red}55`, borderRadius: 6 }}>
           ⚠ {ms.reason} The app will not PROPOSE a structure priced like this. On the desk it is yours to
           send, and this is what you are accepting.
+        </div>
+      )}
+      {/* >>> THE MARKET OPTION EARNS ITS WARNING. <<< The fourth order this app
+          sent was a MARKET order on a structure with an unquoted leg, on boards
+          this repository has measured at 66-166% of the mid. Everything above —
+          the sliders, the net, the verdict band — is bypassed the moment it is
+          chosen, and nothing said so. `marketOrderNote()` in rules.js. */}
+      {type === "market" && (
+        <div style={{ fontSize: 12.5, color: T.body, marginTop: 8, lineHeight: 1.55, padding: "7px 9px", background: `${T.amber}12`, border: `1px solid ${T.amber}88`, borderRadius: 6 }}>
+          ⚠ {marketOrderNote(book)}
         </div>
       )}
       {notional != null && (
@@ -533,7 +565,13 @@ function ComboBookPanel({ legs, quotes, verdict, effective, type, qty, spot, tic
  * marks — see `ComboBookPanel` above.
  */
 export function OrderTicket({
-  creds, legs, expKey, ticker, buildOcc, quoteFn, estNet, setMsg, onSent, gate, dte,
+  /* `buildOcc` IS GONE FROM THIS SIGNATURE AND IT IS NOT AN OVERSIGHT. It was
+     the fallback behind `quoteFn(l).occ`, and a formatter that turns a strike
+     the app chose into a symbol cannot know whether anybody issued it: on SOYB
+     2026-11-20 it produced SOYB261120C00027500, which the broker refused by
+     name before the order reached the market. The CHAIN is the only thing that
+     knows which contracts exist, and it travels on `quotes[i].occ`. */
+  creds, legs, expKey, ticker, quoteFn, estNet, setMsg, onSent, gate, dte,
   maxLoss, maxProfit, spot, entryOverride, qty = 1, onQty, model = null, feed = null,
   /* The price, from the screen above. `net` is signed per share.
 
@@ -563,7 +601,16 @@ export function OrderTicket({
   };
   // Il cancello gira PRIMA di costruire l'ordine: quello che si vede nel
   // pannello e' esattamente quello che decide se l'ordine parte.
-  const preview = runGate(gate, { ticker, intent: "open", legs, dte, contracts: qtyNum, maxLoss, maxProfit, entryOverride });
+  /* >>> THE EVIDENCE THE SCREEN ABOVE ALREADY HAS. <<< These two calls used to
+     pass the maximum loss alone, so the gate guarding the SEND was weaker than
+     the `guard` memo the user had just read at the top of the screen:
+     `priceability()` could not see an unquoted leg and nothing could see a
+     contract the chain never listed. `riskGate.test.js` fails the build if an
+     open-intent gate call leaves `quotes`, `net` or `occs` out. */
+  const occs = (quotes || []).map((x) => (x && x.occ) || null);
+  const evidence = { ticker, intent: "open", legs, dte, contracts: qtyNum, maxLoss, maxProfit,
+    quotes, net: estNet, occs, entryOverride };
+  const preview = runGate(gate, evidence);
   // THE SIZE GOES IN THE ORDER'S QTY, THE SHAPE GOES IN THE LEG RATIOS.
   // Alpaca refused a five-lot vertical with 422 / 42210000, "leg ratio
   // quantities should be relatively prime: GCD[5 5] = 5", because the ticket
@@ -577,7 +624,7 @@ export function OrderTicket({
     if (!confirm) { setConfirm(true); return; }
     setConfirm(false); setBusy(true); setOutcome(null);
     try {
-      const g = runGate(gate, { ticker, intent: "open", legs, dte, contracts: qtyNum, maxLoss, maxProfit, entryOverride });
+      const g = runGate(gate, evidence);
       if (!g.pass) {
         const why = g.violations.map((v) => v.message).join(" ");
         setMsg(`Risk gate: order not sent. ${why}`);
@@ -585,12 +632,10 @@ export function OrderTicket({
           headline: "Nothing was sent to Alpaca.", detail: why });
         setBusy(false); return;
       }
-      const occs = legs.map((l) => {
-        const q = quoteFn ? quoteFn(l) : null;
-        const occ = q?.occ || (expKey ? buildOcc(ticker, expKey, l.type, l.strike) : null);
-        if (!occ) throw new Error("pick a real expiry from the chain first");
-        return occ;
-      });
+      // NO FALLBACK. An unlisted leg is UNKNOWN, the gate above has already
+      // refused it by name, and this is the belt to that pair of braces.
+      const listing = contractListing({ legs, occs });
+      if (listing.checked && !listing.listed) throw new Error(listing.reasons[0]);
       if (occs.length > 4) throw new Error("Alpaca takes at most 4 legs per order: split the strategy in two");
       // A limit of nothing is not a limit. An empty field coerces to 0 and
       // would leave as limit_price "0.00" — the same disease as the $0 debit
@@ -1660,7 +1705,7 @@ export function exitPathSim(pos, S, dteLeft, iv, vol, nSim = 2000) {
 // Exit Ladder: prezzo netto combo per target P&L
 export const ladderNet = (entryNet, targetPnl) => entryNet + targetPnl / 100;
 
-export function GuardianPanel({ pos, spot, dteLeft, ivNow, vol, seasonalNow, pnlNow, popNow, chanceNow, seasonalNote, thesisSeasonalNote, vegaSign, alpaca, quoteFn, buildOcc, setMsg, logEvent, gate }) {
+export function GuardianPanel({ pos, spot, dteLeft, ivNow, vol, seasonalNow, pnlNow, popNow, chanceNow, seasonalNote, thesisSeasonalNote, vegaSign, alpaca, quoteFn, setMsg, logEvent, gate }) {
   // How many combinations this position is. `pos.maxProfit`, `pos.maxLoss` and
   // `pos.entryNet` are all per combination; `pnlNow` is the whole position's.
   const size = contractsOf(pos);
@@ -1711,12 +1756,19 @@ export function GuardianPanel({ pos, spot, dteLeft, ivNow, vol, seasonalNow, pnl
       // Same GCD rule as the opening ticket: the size belongs in qty, the
       // shape in the ratios, and the price the ladder computed is the price
       // of the WHOLE position, so it is divided by the same factor.
-      const occs = pos.legs.map((l) => {
-        const q = quoteFn ? quoteFn(l) : null;
-        const occ = q?.occ || (pos.expKey ? buildOcc(pos.ticker, pos.expKey, l.type, l.strike) : null);
-        if (!occ) throw new Error("live prices are needed to name the contracts");
-        return occ;
-      });
+      // THE CHAIN NAMES THE CONTRACTS, HERE TOO. `buildOcc()` was the fallback
+      // and it is gone from every order path: a close sent for a symbol nobody
+      // lists is refused by the broker and leaves the position open in silence,
+      // which is the worse half of the SOYB 422. The gate does NOT test this on
+      // a close — refusing to let somebody out of a position because a feed is
+      // quiet would be worse still — so the refusal is here, by name, where the
+      // button is.
+      const occs = pos.legs.map((l) => (quoteFn ? quoteFn(l)?.occ : null) || null);
+      const missing = contractListing({ legs: pos.legs, occs }).missing;
+      if (missing.length) {
+        throw new Error(`${unlistedContractNote(missing, pos.legs.length)} Until the chain lists ` +
+          `${missing.length === 1 ? "it" : "them"} again, close this from the broker's own screen.`);
+      }
       if (occs.length > 4) throw new Error("Alpaca takes at most 4 legs per order");
       const body = orderBody({ legs: pos.legs, occs, userQty: size, type: "limit", limit: net, tif: "gtc", intent: "close" });
       const o = await alpacaReq("/v2/orders", "POST", body);

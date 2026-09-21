@@ -997,8 +997,8 @@ export function ConfirmSteps({
         {!showWarnings && (shown?.warnings || []).length > 0 && (
           <div style={{ ...sans, fontSize: 12.5, color: T.mut, marginTop: 12, lineHeight: 1.5 }}>
             {(shown.warnings || []).length} warning{(shown.warnings || []).length === 1 ? "" : "s"} apply to this
-            trade. {(shown.warnings || []).length === 1 ? "It is" : "They are"} in the warnings panel above,
-            written once — none of them stops the order.
+            trade. {(shown.warnings || []).length === 1 ? "It is" : "They are"} in the warnings panel on
+            the step this sheet closes back onto, written once — none of them stops the order.
           </div>
         )}
         {refused && (

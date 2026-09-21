@@ -9,6 +9,8 @@ import { orderBody } from "./order.js";
 import { RULES, sizing, ruleBadge, qualityFloor, qualityFloorSentence, liquiditySkippedNote, NOTHING_TODAY,
   LIQUIDITY_LEVELS, RECOMMENDED_LIQUIDITY, LIQUIDITY_MEASUREMENT, liquidityMeasurementNote, liquidityThreshold, looseningWarning, liquiditySettingNote,
   priceability, rewardRisk, unpriceableNote, money, MIN_NET_DOLLARS,
+  contractListing, unlistedContractNote, legName, tradeCard, TRADE_CARD_IDS, cardCurrencyNote,
+  unquotedLegNote, unquotedLegPointer, marketOrderNote, strikeSnapNote,
   spreadShare, spreadFloor, spreadFloorReason, wideSpreadNote, spreadSkippedNote,
   expiryChoice, expiryChoiceNote, emptyExpiryNote,
   modelSanity, modelSanityReason, modelDisagreementNote,
@@ -2274,6 +2276,180 @@ test("THE FLOOR IS INSTRUMENTED so a later session can calibrate it from a readi
   assert.match(sum, /2 times/);
   assert.match(sum, /BOIL/);
   assert.match(sum, /UNG/);
+});
+
+/* ================================================================
+   THE APP INVENTED A CONTRACT THAT DOES NOT EXIST (PRD §4n)
+
+   >>> THE FOURTH ORDER, SOYB, 20 Sep 2026, 21:49, spot $27.64. <<<
+
+       Alpaca refused it — HTTP 422. code 42210000:
+       invalid legs: [leg.0 asset "SOYB261120C00027500" not found]
+
+   Well formed, never issued. Four of the six order paths spelled
+   `q?.occ || buildOcc(...)`, and `buildOcc()` FORMATS a symbol out of a strike
+   the app chose — so an unquoted leg made the app name a contract nobody has
+   ever listed and ask the broker to trade it.
+================================================================ */
+
+// The real leg off that board: the 27.5 call the chain never listed, sold
+// against the 29 it did.
+const SOYB_LEGS = [
+  { side: 1, qty: 1, type: "call", strike: 27.5 },
+  { side: -1, qty: 1, type: "call", strike: 29 },
+];
+const SOYB = (over = {}) => ({
+  ticker: "SOYB", name: "Bull Call Spread", intent: "open", dte: 61, contracts: 1,
+  legs: SOYB_LEGS, maxLoss: -67, maxProfit: 83,
+  quotes: [{ bid: 0.6, ask: 0.75 }, { bid: 0.05, ask: 0.12 }], net: 0.67,
+  ...over,
+});
+const BIG = { tradingCapital: 20000, concurrentTarget: 4 };
+const run = (proposal, capital = BIG) =>
+  evaluateTrade({ proposal, portfolio: EMPTY_BOOK, capital, signals: CONFLUENT });
+
+test("THE SOYB LEG — an order whose leg has no occ from the chain is REFUSED, by name", () => {
+  const r = run(SOYB({ occs: [null, "SOYB261120C00029000"] }));
+  assert.equal(r.pass, false);
+  assert.ok(codes(r).includes("UNLISTED_CONTRACT"), `expected UNLISTED_CONTRACT, got ${codes(r)}`);
+  const m = messageFor(r, "UNLISTED_CONTRACT");
+  // IT SAYS WHICH LEG. "The price is wrong" is not actionable and neither is
+  // "a contract is missing"; the strike and the side are the whole of it.
+  assert.match(m, /27\.5C/, "the refusal does not name the leg");
+  assert.match(m, /buying/, "the refusal does not say which side of it he is on");
+  assert.ok(!m.includes("29C"), "it names the leg the chain DID list");
+  assert.match(m, /Nothing is sent/);
+});
+
+test("a leg the chain DID quote is unaffected, and a genuine ratio still sends", () => {
+  const both = run(SOYB({ occs: ["SOYB261120C00027500", "SOYB261120C00029000"] }));
+  assert.equal(both.pass, true, `${codes(both)}`);
+  // A 1x2x1 butterfly: a genuine ratio, every contract listed. It passes the
+  // gate and `orderBody` still writes 1, 2, 1 — the GCD rule is untouched.
+  const fly = run({
+    ticker: "SOYB", intent: "open", dte: 61, contracts: 1, maxLoss: -120, maxProfit: 380,
+    legs: [
+      { side: 1, qty: 1, type: "call", strike: 27 },
+      { side: -1, qty: 2, type: "call", strike: 28 },
+      { side: 1, qty: 1, type: "call", strike: 29 },
+    ],
+    quotes: [{ bid: 1.0, ask: 1.1 }, { bid: 0.5, ask: 0.6 }, { bid: 0.2, ask: 0.3 }],
+    net: 1.2,
+    occs: ["SOYB261120C00027000", "SOYB261120C00028000", "SOYB261120C00029000"],
+  });
+  assert.equal(fly.pass, true, `${codes(fly)}`);
+  const body = orderBody({
+    legs: [{ side: 1, qty: 1 }, { side: -1, qty: 2 }, { side: 1, qty: 1 }],
+    occs: ["A", "B", "C"], userQty: 1, type: "limit", limit: "1.20", tif: "day", intent: "open",
+  });
+  assert.deepEqual(body.legs.map((l) => String(l.ratio_qty)), ["1", "2", "1"]);
+});
+
+test("UNKNOWN IS NOT MISSING — no occs at all tests nothing; an EMPTY array is an answer", () => {
+  // The same discipline `quotes` gets: evidence the caller either has or does
+  // not. A path that cannot answer is not told it failed.
+  const silent = run(SOYB());
+  assert.ok(!codes(silent).includes("UNLISTED_CONTRACT"), "a caller with no evidence was refused anyway");
+  // ...but an empty array beside two real legs IS an answer: the chain listed
+  // nothing. That is the case the SOYB order was.
+  const empty = run(SOYB({ occs: [] }));
+  assert.ok(codes(empty).includes("UNLISTED_CONTRACT"));
+  const blank = run(SOYB({ occs: ["", "   "] }));
+  assert.ok(codes(blank).includes("UNLISTED_CONTRACT"), "a blank string is not a symbol");
+});
+
+test("ENTRY ONLY — a close is never blocked because a feed went quiet", () => {
+  const close = evaluateTrade({
+    proposal: { ...SOYB(), intent: "close", occs: [null, null], maxLoss: 67 },
+    portfolio: EMPTY_BOOK, capital: BIG,
+  });
+  assert.ok(!codes(close).includes("UNLISTED_CONTRACT"),
+    "refusing to let somebody OUT of a position because a feed is quiet is the worse failure");
+});
+
+test("IT IS THE GATE'S BUSINESS, AND THE QUALITY FLOORS STILL ARE NOT", () => {
+  const src = readFileSync(new URL("./riskGate.js", import.meta.url), "utf8");
+  assert.match(src, /contractListing/, "the gate does not ask whether the contract exists");
+  // The floors stay out, as they always have: a hand-built trade is the user's
+  // to make. "Does this contract exist" is not a judgement about a trade.
+  assert.equal(/qualityFloor|spreadFloor|comboSpreadFloor|modelSanity/.test(src), false);
+});
+
+test("contractListing() reports rather than deciding", () => {
+  const none = contractListing({ legs: SOYB_LEGS, occs: null });
+  assert.equal(none.checked, false);
+  assert.equal(none.listed, true);
+  assert.equal(none.reasons.length, 0);
+  const one = contractListing({ legs: SOYB_LEGS, occs: [null, "X"] });
+  assert.equal(one.checked, true);
+  assert.equal(one.listed, false);
+  assert.equal(one.missing.length, 1);
+  assert.equal(one.missing[0].i, 0);
+  assert.equal(one.missing[0].side, 1);
+  // No legs at all is NO_STRUCTURE's business, not this one's.
+  assert.equal(contractListing({ legs: [], occs: [] }).checked, false);
+});
+
+/* ---------------------------------------------------------------------
+   THE TICKET'S GATE CALL WAS WEAKER THAN THE SCREEN ABOVE IT.
+
+   `runGate(gate, { ticker, intent: "open", legs, dte, contracts, maxLoss,
+   maxProfit, entryOverride })` passed NO quotes and NO net, so
+   `priceability()` inside the gate saw only the maximum loss and could not
+   refuse an unquoted leg — while the Build screen's `guard` memo, twenty lines
+   of the same file away, passed both. The weaker of the two was the one
+   guarding the send.
+
+   This sweeps the SOURCE rather than the behaviour, for the same reason the
+   rule-literal sweep does: the throw catches the call that runs, and the sweep
+   catches the call written today that only runs on a market nobody demos.
+--------------------------------------------------------------------- */
+const GATE_CALL = /\b(?:runGate\s*\(\s*[A-Za-z_$][\w$]*\s*,\s*|gate\s*\(\s*|evaluateTrade\s*\(\s*)\{/g;
+/** The object literal that starts at `i` (the `{`), balanced. */
+function literalAt(src, i) {
+  let depth = 0;
+  for (let j = i; j < src.length; j++) {
+    const c = src[j];
+    if (c === "{") depth++;
+    else if (c === "}") { depth--; if (depth === 0) return src.slice(i, j + 1); }
+  }
+  return src.slice(i);
+}
+const OPEN_INTENT_EVIDENCE = ["quotes", "net", "occs"];
+
+test("EVERY OPEN-INTENT GATE CALL CARRIES THE SAME EVIDENCE", () => {
+  const files = ["App.jsx", "pro.jsx", "wizard.jsx", "riskGate.js"];
+  let found = 0;
+  for (const f of files) {
+    const src = codeOf(f);
+    let m;
+    GATE_CALL.lastIndex = 0;
+    while ((m = GATE_CALL.exec(src)) !== null) {
+      const lit = literalAt(src, m.index + m[0].length - 1);
+      if (!/intent:\s*"open"/.test(lit)) continue;
+      found++;
+      for (const key of OPEN_INTENT_EVIDENCE) {
+        assert.ok(new RegExp(`(^|[{,\\s])${key}\\s*:`).test(lit),
+          `${f}: an open-intent gate call leaves out \`${key}\`:\n${lit.slice(0, 260)}`);
+      }
+    }
+  }
+  // The guard itself has to have found something, or it is green on nothing.
+  assert.ok(found >= 3, `only ${found} open-intent gate calls were swept`);
+});
+
+test("NO ORDER PATH MAY NAME A CONTRACT THE CHAIN DID NOT SUPPLY", () => {
+  // `buildOcc()` stays — the Journal and the option-history panel legitimately
+  // NAME a contract — but naming one is not asserting that it trades.
+  const pro = codeOf("pro.jsx");
+  assert.equal(/buildOcc/.test(pro), false,
+    "pro.jsx builds an OCC symbol again; the chain is the only thing that knows which exist");
+  const app = codeOf("App.jsx");
+  // In App.jsx exactly ONE call survives, and it is the price-history button.
+  const calls = (app.match(/buildOcc\s*\(/g) || []).length;
+  assert.equal(calls, 1, `App.jsx calls buildOcc() ${calls} times; only the chart button may`);
+  const send = app.slice(app.indexOf("const sendToAlpaca"), app.indexOf("const ivRank"));
+  assert.equal(/buildOcc/.test(send), false, "the manual multileg ticket invents a symbol again");
 });
 
 /* ---------------- summary ---------------- */

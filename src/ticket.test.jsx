@@ -36,8 +36,10 @@ import {
   effectiveLimit, limitCeilingNote, orderVerdict, ORDER_VERDICTS,
   legBook, sizeSkippedNote, legLimitSeed, netFromLegs, onTick, openLimitPrice,
   rewardRisk, conflictSummaryLine, warningsToPrint, NOTHING_TODAY,
+  tradeCard, TRADE_CARD_IDS, unlistedContractNote, unquotedLegNote, unquotedLegPointer,
+  strikeSnapNote, NO_CEILING,
 } from "./rules.js";
-import { analyze, shortlistWithFloors } from "./App.jsx";
+import { analyze, shortlistWithFloors, TradeCard } from "./App.jsx";
 import { terminalDist, compareDistInputs, compareDistNote, ComparePayoffs } from "./visuals.jsx";
 import { candidateOf } from "./path.js";
 import { OrderTicket } from "./pro.jsx";
@@ -352,7 +354,7 @@ check("the rebuilt ticket renders the market, the sliders and the verdict band",
   const net = netFromLegs(UNG_LEGS, seed).net;
   const html = renderToStaticMarkup(
     <OrderTicket
-      legs={UNG_LEGS} expKey="2026-10-23" ticker="UNG" buildOcc={() => "UNG261023C00010500"}
+      legs={UNG_LEGS} expKey="2026-10-23" ticker="UNG"
       quoteFn={() => null} estNet={0.14} setMsg={() => {}} gate={() => ({ pass: true, violations: [], warnings: [] })}
       dte={UNG_DTE} maxLoss={-24} maxProfit={26} spot={UNG_SPOT}
       cfg={{ type: "limit", tif: "gtc" }} onCfg={() => {}}
@@ -449,6 +451,135 @@ check("ComparePayoffs draws at the numbers the CHANCE was worked out at", () => 
   // The picture still renders in every state.
   renderToStaticMarkup(<ComparePayoffs items={[cand, old]} width={700} />);
   renderToStaticMarkup(<ComparePayoffs items={[cand]} width={700} />);
+});
+
+/* ====================================================================
+   THE TRADE CARD — FIVE FIXED LINES, AND A REFUSAL THAT IS NOT BEHIND A TAP.
+   PRD §4n, ROADMAP P4. Rendered against the REAL component out of App.jsx and
+   the REAL sentences out of rules.js — no second implementation of either.
+==================================================================== */
+
+const CARD_ARGS = {
+  ticker: "SOYB", name: "Bull Call Spread", dir: 1, spot: 27.64,
+  expKey: "2026-11-20", dte: 61,
+  maxLoss: -67.3, maxProfit: 82.7, breakevens: [27.67], profitUnbounded: false,
+  contracts: 14,
+  chance: { pop: 0.44, runs: 8000, ev: 3.2 },
+  chanceNote: "SOYB's own seasonal reading drifted it.",
+  limits: { answered: true, perTrade: 1000, tradingCapital: 20000 },
+  notional: 38696,
+  agreement: "CONFLUENT",
+};
+
+check("the five-line card renders all five lines, with real numbers", () => {
+  const card = tradeCard(CARD_ARGS);
+  eq(card.lines.length, 5, "the card is not five lines");
+  eq(card.lines.map((l) => l.id).join(","), TRADE_CARD_IDS.join(","), "the five are not the five");
+  const html = renderToStaticMarkup(
+    <TradeCard ticker="SOYB" name="Bull Call Spread" card={card} refusals={[]}
+      onNumbers={() => {}} onOrder={() => {}} />);
+  for (const l of card.lines) {
+    has(html, l.label);
+    // every sentence, whole, not a summary of it
+    has(html, l.text.slice(0, 40));
+  }
+  // 1 — what you are betting on: the direction, the level and the horizon.
+  has(html, "SOYB goes up");
+  has(html, "$27.67");
+  has(html, "2026-11-20");
+  // 2 — what you risk, at the SIZE on screen, against the limit that binds.
+  has(html, "$942");
+  has(html, "$1,000 per-trade limit");
+  has(html, "$38,696");
+  // 3 — how often it works, and WHICH question that answers.
+  has(html, "4 times in 10");
+  has(html, "AT EXPIRY");
+  // A CHANCE NEVER TRAVELS WITHOUT THE TABLE THAT DRIFTED IT.
+  has(html, "seasonal reading");
+  // 4 — when it exits, and the stop named as the warning it is.
+  has(html, "21 days to expiration");
+  has(html, "WARNING");
+  // 5 — what would make it wrong.
+  has(html, "the exit rule closes it there");
+  // THE CURRENCY IS THE BROKER'S, SAID ONCE, NOT CONVERTED.
+  has(html, "US dollars");
+  hasNot(html, "euro");
+  hasNot(html, "€");
+});
+
+check("A REFUSAL IS ON THE FIRST SCREEN, NEVER BEHIND THE TAP", () => {
+  const card = tradeCard(CARD_ARGS);
+  const refusals = [{ code: "UNLISTED_CONTRACT", message: unlistedContractNote(
+    [{ i: 0, leg: { strike: 27.5, type: "call" }, side: 1 }], 2) }];
+  const html = renderToStaticMarkup(
+    <TradeCard ticker="SOYB" name="Bull Call Spread" card={card} refusals={refusals}
+      onNumbers={() => {}} onOrder={() => {}} />);
+  has(html, "THIS ORDER WOULD NOT BE SENT");
+  has(html, "27.5C");
+  has(html, "never listed");
+  // ...and the two taps that hide the NUMBERS are still offered beside it: the
+  // tap only ever hides figures that explain a trade, never a reason it cannot
+  // be made.
+  has(html, "All the numbers");
+  has(html, "Price it and send");
+});
+
+check("an unknown is still not a number on the card", () => {
+  const blank = tradeCard({ ticker: "SOYB", name: "x" });
+  eq(blank.lines.length, 5, "a card with nothing in it is still five lines");
+  has(blank.lines[1].text, "could not be computed");
+  has(blank.lines[2].text, "not a confident zero");
+  // NO CEILING IS NOT A TAKE-PROFIT OF ZERO.
+  const unbounded = tradeCard({ ...CARD_ARGS, profitUnbounded: true, maxProfit: null });
+  has(unbounded.lines[3].text, NO_CEILING);
+  hasNot(unbounded.lines[3].text, "$0");
+});
+
+check("THE UNQUOTED-LEG SENTENCE APPEARS ONCE, NOT TWICE", () => {
+  /* >>> COUNTED ON THE BUILD SCREEN OF 20 Sep 2026. <<< "One leg has no
+     two-sided quote" was printed by the leg table AND by the combination
+     panel — the same fault as the CONFLICT paragraph that was on one page four
+     times, inside the panel PR #28 built to fix it. One fact, one place. */
+  const oneSided = [{ bid: 0.43, ask: 0.53, mid: 0.48, occ: "UNG261023C00010500" },
+    { bid: 0.3, ask: null, mid: 0.3, occ: "UNG261023C00011000" }];
+  const html = renderToStaticMarkup(
+    <OrderTicket
+      legs={UNG_LEGS} expKey="2026-10-23" ticker="UNG"
+      quoteFn={() => null} estNet={0.14} setMsg={() => {}}
+      gate={() => ({ pass: true, violations: [], warnings: [] })}
+      dte={UNG_DTE} maxLoss={-24} maxProfit={26} spot={UNG_SPOT}
+      cfg={{ type: "limit", tif: "gtc" }} onCfg={() => {}}
+      quotes={oneSided} legPrices={[0.5, 0.3]} net={0.2}
+      seed={[0.5, 0.3]} feed="Alpaca (indicative)" />);
+  const full = unquotedLegNote(1);
+  const n = html.split(full.slice(0, 50)).length - 1;
+  eq(n, 1, `the unquoted-leg sentence is on the screen ${n} times`);
+  // ...and the other panel points at it instead of repeating it.
+  has(html, unquotedLegPointer(1).slice(0, 40));
+});
+
+check("A MARKET ORDER EARNS ITS WARNING, and stops claiming a price below", () => {
+  const html = renderToStaticMarkup(
+    <OrderTicket
+      legs={UNG_LEGS} expKey="2026-10-23" ticker="UNG"
+      quoteFn={() => null} estNet={0.14} setMsg={() => {}}
+      gate={() => ({ pass: true, violations: [], warnings: [] })}
+      dte={UNG_DTE} maxLoss={-24} maxProfit={26} spot={UNG_SPOT}
+      cfg={{ type: "market", tif: "day" }} onCfg={() => {}}
+      quotes={UNG_QUOTES} legPrices={[]} net={null}
+      seed={[]} feed="Alpaca (indicative)" />);
+  has(html, "A market order has no price");
+  // The stat tile used to say "at the price below, not at the mid" under a
+  // MARKET order, which names a control that is not on the screen.
+  hasNot(html, "at the price below, not at the mid");
+  has(html, "at the touch a market order takes");
+});
+
+check("a strike that moved onto a new board says so", () => {
+  const note = strikeSnapNote([{ i: 0, from: 27.5, to: 28 }], "2026-11-20");
+  has(note, "27.5 → 28");
+  has(note, "2026-11-20");
+  eq(strikeSnapNote([], "2026-11-20"), null, "nothing moved is not an event");
 });
 
 console.log(`\n${ok.length} passed, ${bad.length} failed\n`);

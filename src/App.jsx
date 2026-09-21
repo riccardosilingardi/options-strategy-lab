@@ -14,18 +14,20 @@ import { BandThumbnail, payoffBands, bandTakeaway, GaugeFigure, Gauge, CompareFi
 import { fuseSignals, sentimentDirection, withSignalRank, compareCandidates, againstSignal, DRIVER_PRESETS, rankByDrivers, verdictNarrative } from "./signals.js";
 import { N as nCDF, bs as bsPrice, smile as smileIV, payoff as payoffExp, SEASONAL, SIGMA,
   parseAvJson, statsFromMatrix } from "./engine.js";
-import { parseOcc, buildOcc, fetchChain, hasOpenInterest, enrichOpenInterest, feedName, sourceNote, openInterestNote, oiProfile, expiryOpenInterest, nearMoneyOpenInterest, monotonicityBreaks, monotonicityNote, spotOf, spotAt } from "./chain.js";
+import { parseOcc, buildOcc, snapStrike, resnapLegs, expiryStrikes, fetchChain, hasOpenInterest, enrichOpenInterest, feedName, sourceNote, openInterestNote, oiProfile, expiryOpenInterest, nearMoneyOpenInterest, monotonicityBreaks, monotonicityNote, spotOf, spotAt } from "./chain.js";
 import { T, themeName, setTheme, BADGE_SAFE } from "./theme.js";
 import { RULES, sizing, ruleBadge, takeProfitLabel, stopLossLabel, perTradeCapLabel, RULE_PILLS, NOTHING_TODAY, money, pctText, capitalSourceNote, perTradeLimitPhrase, qualityFloor, qualityFloorSentence, liquiditySkippedNote,
   LIQUIDITY_LEVELS, RECOMMENDED_LIQUIDITY, LIQUIDITY_MEASUREMENT, liquidityMeasurementNote, liquidityLevel, liquidityThreshold, looseningWarning, liquiditySettingNote, isLoosened, ordinal,
   priceability, unpriceableNote, rewardRisk, MIN_NET_DOLLARS,
   payoffCeiling, NO_CEILING, noCeilingNote, noCeilingRankNote,
   impossibleLoss, impossibleLossNote,
+  contractListing, unlistedContractNote, unlistedContractListNote, strikeSnapNote,
+  tradeCard, cardCurrencyNote, CARD_CURRENCY, limitOwner,
   modelSanity, modelDisagreementNote,
   entryRoom, entryRoomWarning, entryOverrideOk, entryOverrideNote, entryInsideExitNote,
   passedOverRecord, passedOverSummary,
   expiryChoice, expiryChoiceNote, emptyExpiryNote, wideSpreadNote, spreadSkippedNote,
-  wideComboNote, comboSpreadSkippedNote, comboBook, effectiveLimit, limitCeilingNote,
+  wideComboNote, comboSpreadSkippedNote, comboBook, effectiveLimit, limitCeilingNote, notionalControlled,
   orderVerdict, legBook, legLimitSeed, netFromLegs, onTick, sizeSkippedNote,
   conflictSummaryLine, warningsToPrint,
   chancePct, chanceText, chanceInTen, signedMoney,
@@ -46,7 +48,7 @@ import { nextRef, refCounter, appendTimeline, stampTimeline, orderStatusRecheck,
   positionStage, positionStageNote, wouldHaveDone,
   journalEntry, searchJournal, CLOSE_REASON_MIN, refNumber } from "./journal.js";
 import { FIRST_STEP, stepCarry, candidateOf, candidateKey, legsLine, toggleCompare, inCompare, MAX_COMPARE, savedFromCandidate, candidateFromSaved, savedAge } from "./path.js";
-import { StepNav, StepForward, EvidenceBar, EvidenceOverlay, CompareTray, CandidateActions } from "./steps.jsx";
+import { StepNav, StepForward, EvidenceBar, EvidenceOverlay, DeskSheet, CompareTray, CandidateActions } from "./steps.jsx";
 
 /* ============================== THEME ============================== */
 const mono = { fontFamily: "ui-monospace, Menlo, monospace" };
@@ -223,11 +225,6 @@ const SENTIMENTS = [
   { id: "bull", label: "Bull", color: T.green, icon: "↑", tgt: 0.04 },
   { id: "verybull", label: "Very Bull", color: T.greenDeep, icon: "↑↑", tgt: 0.08 },
 ];
-// se c'è la chain reale, gli strike vengono agganciati ai più vicini disponibili
-function snapStrike(x, strikes, step) {
-  if (!strikes || !strikes.length) return Math.round(x / step) * step;
-  return strikes.reduce((best, k) => (Math.abs(k - x) < Math.abs(best - x) ? k : best), strikes[0]);
-}
 export function buildPresets(sent, S, step, strikes) {
   const K = (pct) => snapStrike(S * (1 + pct), strikes, step);
   const P = {
@@ -285,6 +282,18 @@ function priceLeg(leg, S, dte, baseIV, q) {
 }
 /** The two-sided quotes behind an analysis, one per leg, for `priceability()`. */
 const quotesOf = (a) => (a?.legPx || []).map((l) => ({ bid: l.bid, ask: l.ask }));
+/**
+ * THE CONTRACTS THE CHAIN ACTUALLY LISTED, one per leg, for
+ * `contractListing()` in rules.js — null where it listed none.
+ *
+ * `priceLeg()` carries `occ` only when the chain answered about that leg, so
+ * the absence of a symbol here is the absence of a contract, not a contract
+ * with no name. That is the whole of the SOYB 422: four order paths filled the
+ * gap with `buildOcc()`, which FORMATS a symbol from a strike the app chose
+ * and cannot know whether anybody issued it. Never write that fallback into an
+ * order path again — the gate refuses it by name now (UNLISTED_CONTRACT).
+ */
+const occsOf = (a) => (a?.legPx || []).map((l) => l.occ || null);
 /**
  * IS IT THIS STRUCTURE'S PRICE? — asked ONCE, from an analysis, everywhere.
  *
@@ -951,6 +960,77 @@ const ceil$ = (x) => (Number.isFinite(x) ? fmt$(x) : NO_CEILING);
 const ago = (d) => { const m = Math.round((Date.now() - new Date(d)) / 60000); return m < 60 ? `${m}m ago` : m < 1440 ? `${Math.round(m / 60)}h ago` : `${Math.round(m / 1440)}d ago`; };
 
 /* ====================================================================
+   THE TRADE CARD — FIVE FIXED LINES (ROADMAP P4, PRD §4n).
+
+   What you are betting on, what you risk, how often it works, when it exits,
+   what would invalidate it. The sentences are generated in `rules.js` by
+   `tradeCard()`, with every other generated sentence, so they cannot drift
+   from the numbers they describe — and no number on this card is new: it is
+   `analyze()` at the price that will be sent, `chanceOf()`'s one simulation,
+   `sizing()`'s limits through the gate, and the rules themselves.
+
+   >>> A REFUSAL IS NEVER BEHIND A TAP. <<< Anything that stops the order — a
+   gate violation, an unpriceable leg, a contract the chain never listed —
+   renders HERE, beside the button, under the same rule as "an order that fails
+   must fail where the button is". The tap only ever hides numbers that explain
+   a trade, never a reason it cannot be made.
+
+   LAID OUT FOR A 390px PHONE: one column, a 18px rail for the line number, no
+   horizontal scroll, and every control at least 44px tall.
+==================================================================== */
+export function TradeCard({ ticker, name, card, refusals = [], warnings = 0, onNumbers, onOrder, orderLabel, children }) {
+  if (!card) return null;
+  return (
+    <div style={{ marginTop: 14, padding: "12px 13px", background: T.panel, border: `1px solid ${T.violet}66`, borderLeft: `3px solid ${T.violet}`, borderRadius: 9 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+        <div style={{ ...mono, fontSize: 10, letterSpacing: "0.15em", color: T.violet }}>THE TRADE</div>
+        <div style={{ ...mono, fontSize: 9.5, color: T.dim }}>FIGURES IN {CARD_CURRENCY.toUpperCase()}</div>
+      </div>
+      <div style={{ ...sansUI, fontSize: 17, fontWeight: 800, color: T.ink, marginTop: 3, lineHeight: 1.3 }}>
+        {ticker} · {name}
+      </div>
+      <div style={{ display: "grid", gap: 11, marginTop: 12 }}>
+        {card.lines.map((l, i) => (
+          <div key={l.id} style={{ display: "grid", gridTemplateColumns: "18px minmax(0, 1fr)", gap: 8, alignItems: "start" }}>
+            <div style={{ ...mono, fontSize: 11.5, fontWeight: 800, color: T.violet, lineHeight: 1.6 }}>{i + 1}</div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ ...mono, fontSize: 9.5, letterSpacing: 0.4, color: T.dim, fontWeight: 700 }}>{l.label}</div>
+              <div style={{ ...sansUI, fontSize: 14, color: T.body, lineHeight: 1.55, marginTop: 2 }}>{l.text}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* THE REFUSALS, ON THE FIRST SCREEN, ALWAYS. */}
+      {refusals.length > 0 && (
+        <div style={{ marginTop: 12, padding: "9px 11px", background: `${T.red}12`, border: `1px solid ${T.red}88`, borderRadius: 7 }}>
+          <div style={{ ...mono, fontSize: 10.5, color: T.red, fontWeight: 800, letterSpacing: 0.4 }}>
+            ✗ THIS ORDER WOULD NOT BE SENT
+          </div>
+          <div style={{ display: "grid", gap: 7, marginTop: 6 }}>
+            {refusals.map((r) => (
+              <div key={r.code} style={{ ...sansUI, fontSize: 13, color: T.body, lineHeight: 1.55 }}>{r.message}</div>
+            ))}
+          </div>
+        </div>
+      )}
+      {children}
+
+      <div style={{ display: "flex", gap: 8, marginTop: 13, flexWrap: "wrap" }}>
+        <Btn ghost color={T.blue} onClick={onNumbers}>All the numbers →</Btn>
+        <Btn color={T.violet} onClick={onOrder}>{orderLabel || "Price it and send →"}</Btn>
+      </div>
+      {warnings > 0 && (
+        <div style={{ ...mono, fontSize: 10, color: T.amber, marginTop: 7, lineHeight: 1.6 }}>
+          {`${warnings} warning${warnings === 1 ? "" : "s"} apply to this trade. ${warnings === 1 ? "It is" : "They are"} in the warnings panel above, written once — none of them stops the order.`}
+        </div>
+      )}
+      <div style={{ ...mono, fontSize: 9.5, color: T.dim, marginTop: 7, lineHeight: 1.6 }}>{card.currency}</div>
+    </div>
+  );
+}
+
+/* ====================================================================
    THE WARNINGS, ONCE.
 
    >>> COUNTED ON THE OWNER'S PHONE, one Build screen, UNG 2026-09-20. <<<
@@ -1143,6 +1223,17 @@ export default function OptionsStrategyLab() {
   // The Journal's search box. Sorted and searched by ref (src/journal.js).
   const [jq, setJq] = useState("");
   const [optLeg, setOptLeg] = useState(null); // {occ, label, quote}
+  // What re-snapping the legs onto a new board moved, in one sentence, until
+  // the next board change. A strike that moves under the reader without a word
+  // is the same fault as a size the app assumed and printed as measured.
+  const [snapNote, setSnapNote] = useState(null);
+  /* WHICH SHEET IS OPEN OVER THE DECISION AREA (PRD §4n, ROADMAP P4).
+     The Build screen's decision is FIVE LINES; the numbers behind them and the
+     ticket that sends them open OVER the step, never under it — the same
+     pattern and the same component as the evidence panels, for the same reason
+     a panel written 2,000px down a page looked on a phone like a tap that did
+     nothing. One at a time: null | "numbers" | "order". */
+  const [deskSheet, setDeskSheet] = useState(null);
   const [alSync, setAlSync] = useState({ orders: [], positions: [], t: 0 });
   const [ta, setTa] = useState({}); // per ticker
   const [replay, setReplay] = useState(null);
@@ -1610,7 +1701,11 @@ export default function OptionsStrategyLab() {
   =================================================================== */
   const [ticket, setTicket] = useState({ type: "limit", tif: "day", legPx: null });
   const bookQuotes = useMemo(
-    () => (A ? A.legPx.map((l) => ({ bid: l.bid, ask: l.ask, mid: l.px, bidSize: l.bidSize, askSize: l.askSize })) : []),
+    // THE OCC TRAVELS WITH THE QUOTE, for the same reason the bid and the
+    // sizes do: the ticket has to be able to see that the chain never listed a
+    // leg, and a mid can never show that. It is what the ticket hands the gate
+    // as `occs`, and what it names the contracts with when it sends.
+    () => (A ? A.legPx.map((l) => ({ bid: l.bid, ask: l.ask, mid: l.px, bidSize: l.bidSize, askSize: l.askSize, occ: l.occ || null })) : []),
     [A]);
   const book = useMemo(() => comboBook(legs, bookQuotes), [legs, bookQuotes]);
   const seedPx = useMemo(() => legLimitSeed(legs, bookQuotes), [legs, bookQuotes]);
@@ -1758,6 +1853,10 @@ export default function OptionsStrategyLab() {
     const h = buildHandOff({ ticker: tk, expKey: ek, legs: lg, name, chains });
     setTicker(h.ticker); setExpKey(h.expKey); setLegs(h.legs); setStratName(h.name);
     setBt(null);
+    // A STRIKE THAT MOVED ONTO THIS BOARD IS SAID, NOT SLID UNDER THE READER.
+    // `buildHandOff` re-snaps onto the expiry it is handing the trade to; a leg
+    // this board does not list is what became SOYB261120C00027500 (PRD §4n).
+    setSnapNote(h.moved && h.moved.length ? strikeSnapNote(h.moved, h.expKey) : null);
     // A HAND-OFF IS A DIFFERENT TRADE, SO IT IS NOT THE PREVIOUS ONE'S SIZE.
     // The ticket's quantity now drives the gate and the position record, and a
     // "×7" left over from the structure that was on this screen a moment ago
@@ -1920,6 +2019,18 @@ export default function OptionsStrategyLab() {
     ref: a ? { name: p.name, entry: a.entry, maxProfit: a.maxProfit, maxLoss: a.maxLoss, expKey, t: Date.now() } : null,
   });
   const updLeg = (i, f, v) => setLegs((L) => L.map((l, j) => (j === i ? { ...l, [f]: v } : l)));
+  /* MOVING THE BOARD MOVES THE STRIKES WITH IT. `expStrikes` is memoised on
+     the expiry that is still in state when this runs, so the target board's
+     strikes are read straight off the chain here rather than waited for. */
+  const resnapTo = (ek) => {
+    const ks = expiryStrikes(chain, ek);
+    if (!ks) { setSnapNote(null); return; }
+    setLegs((L) => {
+      const r = resnapLegs(L, ks);
+      setSnapNote(r.moved.length ? strikeSnapNote(r.moved, ek) : null);
+      return r.legs;
+    });
+  };
   const onChainCell = (k, t) => {
     setLegs((L) => {
       const i = L.findIndex((l) => l.strike === k && l.type === t);
@@ -1968,7 +2079,7 @@ export default function OptionsStrategyLab() {
     // construction (src/rules.js, `priceability`).
     const gLocal = gate({ ticker: tk, intent: "open", legs: lg, dte: d, contracts: sized,
       maxLoss: analysis?.maxLoss, maxProfit: analysis?.maxProfit,
-      quotes: quotesOf(analysis), net: analysis?.entry, entryOverride: roomOverride }, LOCAL_BOOK);
+      quotes: quotesOf(analysis), net: analysis?.entry, occs: occsOf(analysis), entryOverride: roomOverride }, LOCAL_BOOK);
     if (!gLocal.pass) return { ok: false, gate: gLocal };
     // ACCEPTED IS NOT OPENED. The reply is read once, here, and every
     // sentence about this position downstream is composed from that reading
@@ -2430,15 +2541,25 @@ export default function OptionsStrategyLab() {
     try {
       // PRD §8: nessun ordine raggiunge Alpaca senza passare da qui.
       // At the price that will be sent, like the preview above it (`AE`).
-      const g = gate({ ticker, intent: "open", legs, dte, contracts, maxLoss: AE?.maxLoss, maxProfit: AE?.maxProfit });
+      // THE SAME EVIDENCE THE SCREEN ABOVE GAVE THE GATE. This call used to
+      // pass the maximum loss alone, so the gate guarding the send was weaker
+      // than the gate preview the user had just read: it could not see an
+      // unquoted leg and it could not see a contract the chain never listed.
+      const g = gate({ ticker, intent: "open", legs, dte, contracts, maxLoss: AE?.maxLoss, maxProfit: AE?.maxProfit,
+        quotes: quotesOf(AE), net: AE?.entry, occs: occsOf(AE) });
       if (!g.pass) {
         setMsg(`Risk gate: order not sent. ${g.violations.map((v) => v.message).join(" ")}`);
         setBusy(null); return;
       }
-      const withOcc = legs.map((l) => {
-        const quote = q(l);
-        const occ = quote?.occ || (expKey ? buildOcc(ticker, expKey, l.type, l.strike) : null);
-        if (!occ) throw new Error("pick a real expiry from the chain first, so the contracts can be named");
+      // >>> THE CHAIN IS THE ONLY THING THAT KNOWS WHICH CONTRACTS EXIST. <<<
+      // This line used to read `quote?.occ || buildOcc(...)`, and `buildOcc()`
+      // formats a symbol out of a strike the app chose. On SOYB 2026-11-20 that
+      // produced SOYB261120C00027500, which the broker refused by name. There
+      // is no fallback any more: an unlisted leg is UNKNOWN, the gate above has
+      // already refused it, and this throw is the belt to that pair of braces.
+      const withOcc = legs.map((l, i) => {
+        const occ = occsOf(AE)[i];
+        if (!occ) throw new Error(unlistedContractNote([{ i, leg: l, side: Math.sign(Number(l.side) || 1) }], legs.length));
         return { ...l, occ };
       });
       const o = await alpacaOrderMleg(withOcc, contracts);
@@ -3063,8 +3184,11 @@ export default function OptionsStrategyLab() {
     // measured against the maximum loss, and on UNG the maximum loss at the
     // mid is $14 while the maximum loss at the price that trades is $24 — the
     // gate was reading a figure the order could not be filled at.
+    // ...AND AT THE CONTRACTS THE CHAIN REALLY LISTED. Without `occs` the gate
+    // cannot see that a leg names a symbol nobody issued, which is what the
+    // broker refused on 20 September before the order reached the market.
     return gate({ ticker, intent: "open", legs, dte, contracts, maxLoss: AE.maxLoss, maxProfit: AE.maxProfit,
-      quotes: quotesOf(AE), net: AE.entry, entryOverride: roomReason }, LOCAL_BOOK);
+      quotes: quotesOf(AE), net: AE.entry, occs: occsOf(AE), entryOverride: roomReason }, LOCAL_BOOK);
   }, [AE, gate, legs, dte, ticker, roomReason, contracts]); // eslint-disable-line
   /* Which band this expiry falls in, for the screen. The gate decides; this
      only decides what the screen has to ASK for. */
@@ -3086,6 +3210,42 @@ export default function OptionsStrategyLab() {
   // a second copy is how the two come to disagree about what a reason is.
   const REASON_MIN = RULES.minOverrideReasonChars;
   const reasonOk = !clash || against.reason.trim().length >= REASON_MIN;
+
+  /* ====================================================================
+     THE TRADE CARD (PRD §4n, ROADMAP P4) — FIVE LINES, ASSEMBLED HERE AND
+     WRITTEN IN rules.js.
+
+     >>> NO NEW ARITHMETIC. <<< Every argument below is a figure this screen
+     already computes: `AE` is `analyze()` at the price that will be sent,
+     `chance` is the one seeded Monte Carlo every other screen prints, `guard`
+     is the gate at the quantity that will be sent, and `tradeDir` is the net
+     delta. The card READS them and writes English.
+
+     THE CHANCE TRAVELS WITH ITS PROVENANCE, as it must everywhere:
+     `chanceSourceNote()` says which seasonal table drifted it, so the card
+     cannot be the one screen that prints a probability without its source.
+  ==================================================================== */
+  const buildPriceable = useMemo(
+    () => (A ? priceability({ legs, quotes: quotesOf(A), net: A.entry, maxLoss: A.maxLoss })
+      : { priceable: true, reasons: [] }),
+    [A, legs]);
+  /* THE REFUSALS ARE THE GATE'S OWN, VERBATIM. Every reason an order does not
+     leave is a gate violation — including the two this session added to it —
+     so there is one list and it is not re-derived here. */
+  const buildRefusals = useMemo(() => (guard && !guard.pass ? guard.violations : []), [guard]);
+  const buildCard = useMemo(() => {
+    if (!AE) return null;
+    return tradeCard({
+      ticker, name: stratName, dir: tradeDir, spot, expKey, dte,
+      maxLoss: AE.maxLoss, maxProfit: AE.maxProfit, breakevens: AE.breakevens,
+      profitUnbounded: AE.profitUnbounded, contracts,
+      chance, chanceNote: chance ? chanceSourceNote(chance, ticker) : null,
+      limits: guard ? guard.limits : null,
+      notional: notionalControlled(contracts, spot),
+      agreement: fused[ticker]?.agreement || null,
+      clashCount: clash ? clash.n : 0,
+    });
+  }, [AE, ticker, stratName, tradeDir, spot, expKey, dte, contracts, chance, guard, fused, clash]);
 
   /* ---- scanner ----
      Il punteggio non è più la sola stagionalità: pesa fuseSignals(), che
@@ -4522,7 +4682,15 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
               {chain && (
                 <div style={{ marginTop: 10, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
                   <span style={{ ...mono, fontSize: 10, color: T.dim }}>EXPIRY</span>
-                  <select value={expKey || ""} onChange={(e) => { setExpKey(e.target.value); setBt(null); }}
+                  {/* >>> CHANGING THE BOARD RE-SNAPS THE STRIKES. <<< It did
+                      not, and that is one of the two ways the app came to name
+                      a contract nobody has issued: strikes are a property of
+                      the EXPIRY, and a 27.5 carried over from a board that
+                      lists half dollars onto one that does not is a leg the
+                      chain will never quote. `snapStrike()` has always done
+                      this for a preset; a hand-off and this dropdown skipped
+                      it. What moved is said out loud (`strikeSnapNote`). */}
+                  <select value={expKey || ""} onChange={(e) => { setExpKey(e.target.value); setBt(null); resnapTo(e.target.value); }}
                     style={{ ...mono, background: T.bg, color: T.ink, border: `1px solid ${T.line}`, borderRadius: 5, padding: "5px 8px", fontSize: 12 }}>
                     {chain.expirations.map((e) => (
                       <option key={e} value={e}>{e} · {chain.byExp[e].dte} DTE</option>
@@ -4637,28 +4805,21 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                 </div>
               )}
 
-              {/* Il verdetto del risk gate, non un calcolo parallelo: la stessa
-                  funzione che decide se l'ordine parte scrive anche queste righe. */}
-              {guard && !guard.pass && (
-                <div style={{ marginTop: 10, padding: "9px 11px", background: `${T.red}12`, border: `1px solid ${T.red}66`, borderRadius: 7 }}>
-                  <div style={{ ...mono, fontSize: 11, color: T.red, fontWeight: 700 }}>⚠ RISK GATE: this order would not be sent</div>
-                  <div style={{ display: "grid", gap: 4, marginTop: 4 }}>
-                    {guard.violations.map((v) => (
-                      <div key={v.code} style={{ fontSize: 12, color: T.body }}>{v.message}</div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {guard && guard.pass && (
-                <div style={{ ...mono, fontSize: 10, color: T.green, marginTop: 8 }}>
-                  ✓ Inside your rules: risking {money(guard.limits.tradeRisk)} of {money(guard.limits.perTrade)} allowed · total {money(guard.limits.totalAfter)} of {money(guard.limits.total)}
-                </div>
-              )}
-              {guard && guard.warnings.length > 0 && (
-                <div style={{ display: "grid", gap: 4, marginTop: 6 }}>
-                  {guard.warnings.map((w) => (
-                    <div key={w.code} style={{ ...mono, fontSize: 10.5, color: T.amber }}>⚠ {w.message}</div>
-                  ))}
+              {/* THE GATE VERDICT HAS MOVED ONTO THE TRADE CARD, BESIDE THE
+                  BUTTON. It used to be printed here, above the chain and the
+                  legs editor — hundreds of pixels from the control it governs —
+                  and the gate's WARNINGS were printed here raw as well, while
+                  the collapsed warnings panel above was already printing the
+                  same list through `warningsToPrint()`. That is the CONFLICT
+                  paragraph fault again, one panel further down the same screen.
+                  One fact, one place: the refusals sit on the card, the
+                  warnings in the warnings panel, and neither is anywhere else.
+                  A refusal is never behind a tap (PRD §4n). */}
+
+              {/* THE STRIKES FOLLOW THE BOARD, AND IT SAYS WHEN THEY MOVED. */}
+              {snapNote && (
+                <div style={{ ...mono, fontSize: 10.5, color: T.blue, marginTop: 10, lineHeight: 1.6, padding: "8px 10px", background: `${T.blue}0d`, border: `1px solid ${T.blue}55`, borderRadius: 6 }}>
+                  {snapNote}
                 </div>
               )}
 
@@ -4688,8 +4849,15 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                       <span style={{ ...mono, fontSize: 11, color: lp.real ? T.green : T.mut, marginLeft: "auto" }}>
                         ${lp.px.toFixed(2)} {lp.real ? "●" : "◌"} <span style={{ color: T.dim }}>IV {(lp.iv * 100).toFixed(0)}%{lp.oi != null ? ` · OI ${lp.oi}` : ""}</span>
                       </span>
-                      {(() => { const qq = q(l); const occ = qq?.occ || (expKey ? buildOcc(ticker, expKey, l.type, l.strike) : null); return occ ? (
-                        <button title="price history for this contract" onClick={() => setOptLeg({ occ, label: `${ticker} ${l.strike}${l.type === "call" ? "C" : "P"} ${expKey}`, quote: qq })}
+                      {/* `buildOcc()` SURVIVES HERE AND ONLY HERE ON THIS
+                          SCREEN, because NAMING a contract is not asserting
+                          that it trades: this opens a price-history panel, it
+                          is not an order path, and the Journal needs the same
+                          ability. It says when the chain did not list it, so
+                          an empty chart is explained rather than mysterious. */}
+                      {(() => { const qq = q(l); const listed = !!qq?.occ; const occ = qq?.occ || (expKey ? buildOcc(ticker, expKey, l.type, l.strike) : null); return occ ? (
+                        <button title={listed ? "price history for this contract" : "the chain never listed this contract — no order can be sent for it"}
+                          onClick={() => setOptLeg({ occ, label: `${ticker} ${l.strike}${l.type === "call" ? "C" : "P"} ${expKey}${listed ? "" : " \u00b7 not listed on this board"}`, quote: qq })}
                           style={{ background: "none", border: "none", color: T.violet, cursor: "pointer", ...mono, fontSize: 11 }}>chart</button>
                       ) : null; })()}
                       <button onClick={() => rmLeg(i)} style={{ background: "none", border: "none", color: T.dim, cursor: "pointer" }}><Trash2 size={14} /></button>
@@ -4712,21 +4880,35 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   </div>
                 );
               })()}
-              {/* A HAND-BUILT TRADE IS THE USER'S TO MAKE — the quality floors
-                  do not apply here — but a price the chain could not give us is
-                  not a cheap trade, and the figures underneath would be read as
-                  one. The desk says so where the numbers are, and the gate at
-                  the bottom of this screen refuses the order (src/rules.js). */}
-              {(() => {
-                const pz = priceability({ legs, quotes: quotesOf(A), net: A.entry, maxLoss: A.maxLoss });
-                if (pz.priceable) return null;
-                return (
-                  <div style={{ ...mono, fontSize: 10.5, color: T.red, marginTop: 12, lineHeight: 1.6, padding: "8px 10px", background: `${T.red}0f`, border: `1px solid ${T.red}55`, borderRadius: 6 }}>
-                    ⚠ THE PRICE OF THIS STRUCTURE CANNOT BE READ. {pz.reasons[0]} The figures below are what the
-                    feed gives, not what this would cost: the risk gate will refuse the order.
+              {/* ============ THE DECISION, IN FIVE LINES (PRD §4n) ============
+                  Everything this screen printed here is still here; it opens
+                  behind a tap, in a sheet over the step, because a decision is
+                  what this part of the screen is for and eleven blocks of
+                  correct arithmetic are not a decision. The refusals never
+                  move: they are on the card, beside the button. */}
+              <TradeCard
+                ticker={ticker} name={stratName}
+                card={buildCard}
+                refusals={buildRefusals}
+                warnings={(guard?.warnings || []).length}
+                onNumbers={() => setDeskSheet("numbers")}
+                onOrder={() => setDeskSheet("order")}
+                orderLabel={alpaca ? "Price it and send →" : "Open it on the app's own book →"}>
+                {guard && guard.pass && (
+                  <div style={{ ...mono, fontSize: 10.5, color: T.green, marginTop: 10, lineHeight: 1.6 }}>
+                    ✓ Inside {limitOwner(guard.limits)} rules: risking {money(guard.limits.tradeRisk)} of {money(guard.limits.perTrade)} allowed · total {money(guard.limits.totalAfter)} of {money(guard.limits.total)}
                   </div>
-                );
-              })()}
+                )}
+              </TradeCard>
+
+              {/* ---- SHEET 1: ALL THE NUMBERS. Not one figure, tooltip or
+                  sentence below is changed; the block simply opens over the
+                  step instead of standing between the trade and the decision.
+                  The comment that follows is the one PR #28 wrote here. ---- */}
+              <DeskSheet open={deskSheet === "numbers"} eyebrow="THE NUMBERS"
+                title={`${ticker} · ${stratName}`}
+                sub={`Every figure at the price that will be sent \u00b7 ${CARD_CURRENCY}`}
+                onClose={() => setDeskSheet(null)}>
               {/* >>> EVERY FIGURE HERE IS WORKED OUT AT THE PRICE THAT WILL BE
                   SENT, NOT AT THE MID. <<< Read on the owner's phone, UNG
                   2026-09-20: this block said YOU PAY $14 · MOST YOU CAN MAKE
@@ -4802,6 +4984,17 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                 <Stat k="Θ PER DAY" v={signedMoney(A.greeks.theta)} c={A.greeks.theta >= 0 ? T.green : T.red} tip="What you gain (+) or lose (−) for each day that passes, if the price stays put. Positive means time is on your side." />
                 <Stat k="V PER 1% VOL" v={signedMoney(A.greeks.vega)} c={A.greeks.vega >= 0 ? T.violet : T.amber} tip="How much the value moves if the market gets 1% more jumpy. Positive means a nervous market helps you; negative means it hurts." />
               </div>
+              {/* THE PRICE THE CHAIN COULD NOT READ, WHERE THE NUMBERS ARE.
+                  The refusal itself is on the card, on the first screen; this
+                  is the sentence that stops the figures above being read as a
+                  cheap trade rather than an unread one. */}
+              {!buildPriceable.priceable && (
+                <div style={{ ...mono, fontSize: 10.5, color: T.red, marginTop: 12, lineHeight: 1.6, padding: "8px 10px", background: `${T.red}0f`, border: `1px solid ${T.red}55`, borderRadius: 6 }}>
+                  ⚠ THE PRICE OF THIS STRUCTURE CANNOT BE READ. {buildPriceable.reasons[0]} The figures above are
+                  what the feed gives, not what this would cost: the risk gate refuses the order.
+                </div>
+              )}
+              </DeskSheet>
 
               <div style={{ marginTop: 14 }}>
                 <Lbl>PRICE HISTORY × WHERE IT COULD GO × WHERE YOU MAKE MONEY</Lbl>
@@ -4856,6 +5049,16 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
               </div>
               </div>
 
+              {/* ---- SHEET 2: PRICE IT AND SEND. The ticket PR #28 designed
+                  with the owner, and the confirm step, in one sheet over the
+                  step — because they are one act. Nothing in either is changed.
+                  The confirm step USED TO SIT BELOW THIS PANEL, at the very
+                  bottom of the longest screen in the app; it is beside the
+                  ticket now, which is where the decision is made. ---- */}
+              <DeskSheet open={deskSheet === "order"} eyebrow="THE ORDER"
+                title={`${ticker} · ${stratName}`}
+                sub={alpaca ? `Alpaca paper account \u00b7 nothing is sent until you confirm` : `The app's own paper book \u00b7 no broker involved`}
+                onClose={() => setDeskSheet(null)}>
               {alpaca && !reasonOk && (
                 <div style={{ ...mono, fontSize: 11, color: T.amber, marginTop: 10, padding: "9px 11px", border: `1px solid ${T.amber}66`, borderRadius: 7 }}>
                   The order ticket unlocks as soon as you write why you are going against {clash.n} of {clash.total} factors. The trade is not forbidden — the written reason is required.
@@ -4865,7 +5068,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                 <OrderTicket
                   onSent={(o) => openPaper(o)}
                   legs={legs} expKey={expKey} ticker={ticker}
-                  buildOcc={buildOcc} quoteFn={q} estNet={AE.entry}
+                  quoteFn={q} estNet={AE.entry}
                   setMsg={setMsg}
                   /* THE FIGURES THE TICKET PRINTS ARE THE ONES THE SCREEN ABOVE
                      PRINTS, at the price about to be sent (`AE`). They used to
@@ -4894,14 +5097,15 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                 />
               )}
               {!alpaca && <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 8 }}>Connect Alpaca in Positions → Integrations to unlock the full order ticket: limit or market, time in force, quantity and cancellations.</div>}
-            </Panel>
 
-            {/* THE CONFIRM STEP, AT THE END OF THE SCREEN THAT SHOWS THE TRADE.
+            {/* THE CONFIRM STEP, BESIDE THE TICKET IT CONFIRMS.
                 It used to be a wizard screen of its own that "Take this road"
                 jumped to, which let the guided flow reach an order without ever
-                passing the chain, the legs or the greeks. It reads the LIVE
-                Build state, so a strike changed above changes the checks below:
-                what is confirmed is what is on screen. */}
+                passing the chain, the legs or the greeks. Then it was the last
+                thing on the longest screen in the app, a full scroll below the
+                ticket. It reads the LIVE Build state, so a strike changed
+                outside this sheet changes the checks inside it: what is
+                confirmed is what is on screen. */}
             <div style={{ marginTop: 12 }}>
               <ConfirmSteps
                 /* AT THE PRICE THAT WILL BE SENT (`AE`), like every other
@@ -4928,6 +5132,8 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                 onConfirm={() => openPaper()}
               />
             </div>
+              </DeskSheet>
+            </Panel>
           </div>
         )}
 
@@ -5177,7 +5383,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                             seasonalNote={chanceStamp(mcNow, p.ticker)}
                             thesisSeasonalNote={seasonalStampNote(p.thesis, p.ticker)}
                             vegaSign={Math.sign(p.thesis?.vega ?? 1) || 1}
-                            alpaca={!!alpaca} quoteFn={qp} buildOcc={buildOcc}
+                            alpaca={!!alpaca} quoteFn={qp}
                             setMsg={setMsg} logEvent={logEvent} gate={gate}
                           />
                         );
