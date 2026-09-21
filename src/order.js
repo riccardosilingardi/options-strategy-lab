@@ -18,6 +18,15 @@
    whether the reply is the kind of reply that STARTS one.
 ==================================================================== */
 
+/* THE BROKER'S OWN CONTRACT, MIRRORED FROM alpaca-py. There is no official
+   JavaScript SDK for multi-leg option orders, so the field names, the enums
+   and the validators are written down once in `alpacaContract.js` with the
+   alpaca-py file each rule came from cited beside it. This file SPELLS a
+   body; that file says what a body IS. It imports nothing, so this is
+   leaf-ward like every import in this repository. */
+import { ORDER_CLASS, ORDER_TYPE, ORDER_STATUS, optionLegRequest, validateOrderRequest,
+  contractRefusal, wireNumber } from "./alpacaContract.js";
+
 /* ------------------------------------------------------------------
    1) THE RATIOS AND THE QUANTITY
 
@@ -236,27 +245,41 @@ export function limitKind(limitPrice) {
 export function orderBody({ legs = [], occs = [], userQty = 1, type = "market", limit = null, tif = "day", intent = "open" } = {}) {
   const { ratios, factor } = reduceRatios(legs);
   const qty = orderQty(userQty, factor);
-  const buy = (side) => (intent === "close" ? side <= 0 : side > 0);
-  const mlegs = legs.map((l, i) => ({
-    symbol: occs[i],
-    ratio_qty: String(ratios[i]),
-    side: buy(l.side) ? "buy" : "sell",
-    position_intent: intent === "close"
-      ? (l.side > 0 ? "sell_to_close" : "buy_to_close")
-      : (l.side > 0 ? "buy_to_open" : "sell_to_open"),
+  /* THE LEG IS THE CONTRACT'S, NOT THIS FILE'S. The four `position_intent`
+     values and the side that has to agree with each of them were written out
+     here from memory; `optionLegRequest()` mirrors alpaca-py's
+     `OptionLegRequest`, decides both from one table, and is the only place
+     either is spelled. */
+  const mlegs = legs.map((l, i) => optionLegRequest({
+    symbol: occs[i], ratioQty: ratios[i], legSide: l.side, intent,
   }));
-  if (mlegs.length === 1) {
+  const body = mlegs.length === 1
     // A SIMPLE ORDER'S PRICE IS UNSIGNED, and that is not an oversight: its
     // own `side` already says whether the money is going out or coming in,
     // and Alpaca rejects a negative limit on one.
-    const body = { symbol: mlegs[0].symbol, qty: String(qty * ratios[0]), side: mlegs[0].side, type, time_in_force: tif };
-    if (type === "limit") body.limit_price = unitLimit(limit, factor, ratios[0]);
-    return body;
-  }
-  const body = { order_class: "mleg", qty: String(qty), type, time_in_force: tif, legs: mlegs };
-  // AN MLEG PRICE IS SIGNED. See `mlegLimitPrice()` and the measurement above
-  // it: `unitLimit()` here sent a $75 credit as a $75 debit and it filled.
-  if (type === "limit") body.limit_price = mlegLimitPrice(limit, factor, intent);
+    ? {
+      symbol: mlegs[0].symbol, qty: String(qty * ratios[0]), side: mlegs[0].side,
+      type, time_in_force: tif,
+      ...(type === ORDER_TYPE.LIMIT ? { limit_price: unitLimit(limit, factor, ratios[0]) } : {}),
+    }
+    : {
+      order_class: ORDER_CLASS.MLEG, qty: String(qty), type, time_in_force: tif, legs: mlegs,
+      // AN MLEG PRICE IS SIGNED. See `mlegLimitPrice()` and the measurement
+      // above it: `unitLimit()` here sent a $75 credit as a $75 debit and it
+      // filled. Alpaca's own documentation states the convention in one
+      // sentence: "For the mleg order class, a positive value indicates a
+      // debit ... while a negative value signifies a credit."
+      ...(type === ORDER_TYPE.LIMIT ? { limit_price: mlegLimitPrice(limit, factor, intent) } : {}),
+    };
+  /* AND IT IS HELD AGAINST THE CONTRACT BEFORE IT LEAVES. Every fault this
+     file has ever had was a body the broker refused after a round trip — the
+     GCD 422, the unlisted symbol, the inverted sign — and every one of those
+     rules is written down in `alpacaContract.js`. A body that alpaca-py would
+     not build is not sent, and the sentence names the rule rather than
+     waiting for a 422 to name it worse. All six order paths pass through
+     here, which is the only reason one check is enough. */
+  const v = validateOrderRequest(body);
+  if (!v.ok) throw new Error(contractRefusal(v.errors));
   return body;
 }
 
@@ -302,10 +325,17 @@ export function orderPreviewLines({ legs = [], ratios, ticker = "", expKey = "",
    a plan about nothing.
 ------------------------------------------------------------------ */
 
-// Alpaca's order statuses, sorted by what they mean to the person who tapped.
-const FILLED = ["filled"];
-const PARTIAL = ["partially_filled"];
-const DEAD = ["rejected", "canceled", "cancelled", "expired", "done_for_day", "suspended", "stopped"];
+/* ALPACA'S ORDER STATUSES, SORTED BY WHAT THEY MEAN TO THE PERSON WHO TAPPED.
+   The VOCABULARY is the broker's and is mirrored once in `alpacaContract.js`
+   (alpaca-py `OrderStatus`); what each status MEANS to this app is decided
+   here, because that is a product decision and not a fact about the wire.
+   `"cancelled"` with two Ls is not one of Alpaca's spellings and is kept
+   deliberately: a defensive reading costs nothing and a status read wrong
+   buries a live order. */
+const FILLED = [ORDER_STATUS.FILLED];
+const PARTIAL = [ORDER_STATUS.PARTIALLY_FILLED];
+const DEAD = [ORDER_STATUS.REJECTED, ORDER_STATUS.CANCELED, "cancelled", ORDER_STATUS.EXPIRED,
+  ORDER_STATUS.DONE_FOR_DAY, ORDER_STATUS.SUSPENDED, ORDER_STATUS.STOPPED];
 // Everything else that the broker holds: new, accepted, pending_new,
 // accepted_for_bidding, held, calculated, pending_review, replaced, …
 
@@ -324,10 +354,11 @@ const asInt = (x) => {
  * null, never 0, for the same reason a missing open interest is not a zero.
  */
 export function fillPriceOf(order = {}) {
-  const raw = order && order.filled_avg_price;
-  if (raw == null || raw === "") return null;
-  const n = Number(raw);
-  return Number.isFinite(n) ? n : null;
+  // ONE READER FOR EVERY NUMBER OFF THE WIRE. alpaca-py types this field
+  // `Optional[Union[str, float]]` because the wire sends strings, and
+  // `Number("")` is 0: `wireNumber()` in alpacaContract.js is where the nulls
+  // go out before the coercion, once, for every field the app reads.
+  return wireNumber(order && order.filled_avg_price);
 }
 
 /* ------------------------------------------------------------------

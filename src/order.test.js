@@ -420,9 +420,15 @@ test("NEVER AGAIN — no mleg limit may be wrapped in Math.abs()", () => {
   }
   // ...and the mleg branch of orderBody uses the signed spelling, not unitLimit.
   const order = strip(readFileSync("src/order.js", "utf8"));
-  assert.ok(/order_class: "mleg"[\s\S]{0,400}?limit_price = mlegLimitPrice\(/.test(order),
+  // The mleg branch is priced by `mlegLimitPrice()` and the single-leg branch
+  // by `unitLimit()`. The branches are named by the contract's own enum now
+  // (`ORDER_CLASS.MLEG`), so the sweep reads the order they appear in.
+  const mlegAt = order.indexOf("ORDER_CLASS.MLEG");
+  const singleAt = order.indexOf("mlegs.length === 1");
+  assert.ok(mlegAt > 0 && singleAt > 0, "both branches of orderBody() must be findable");
+  assert.ok(/order_class: ORDER_CLASS\.MLEG[\s\S]{0,600}?limit_price: mlegLimitPrice\(/.test(order),
     "the mleg body must be priced by mlegLimitPrice(), the one home for the sign");
-  assert.ok(/mlegs\.length === 1[\s\S]{0,400}?limit_price = unitLimit\(/.test(order),
+  assert.ok(/mlegs\.length === 1[\s\S]{0,600}?limit_price: unitLimit\(/.test(order),
     "and a single-leg order must stay unsigned");
 
   /* THE STORED LIMIT IS THE BROKER'S, SIGNED — and a screen that prints its
