@@ -16,7 +16,7 @@
 // then two screens disagree about the same trade.
 
 import { SEASONAL } from "./engine.js";
-import { RULES, liquidityLevel } from "./rules.js";
+import { RULES, liquidityLevel, butterflySkipNote } from "./rules.js";
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
@@ -944,6 +944,15 @@ export function verdictNarrative({ basket = [], examined = [], excluded = [], ne
         `${floors.unpriceable === 1 ? "it" : "they"} had a leg nobody is bidding for, or netted out to about ` +
         `nothing across the legs. A maximum loss the app cannot compute is not a maximum loss of zero, so ` +
         `${floors.unpriceable === 1 ? "it was" : "they were"} left out rather than offered at a price we made up.`);
+    }
+    // NOT A FLOOR EITHER, AND ITS COUNT IS ITS OWN. A butterfly is not
+    // refused for being a bad price — the guided path does not offer one at
+    // all, for a reason about the EXIT RULE rather than about the market
+    // (ROADMAP P2, `butterflySkipNote()` in rules.js). Pooling it with a
+    // floor's count would explain neither.
+    if (floors.butterfly > 0) {
+      out.push(`${plural(floors.butterfly, "structure", "structures")} ${floors.butterfly === 1 ? "was" : "were"} ` +
+        `a butterfly and ${floors.butterfly === 1 ? "was" : "were"} not built here. ${butterflySkipNote()}`);
     }
     if ((floors.oiUnavailable || []).length) {
       out.push(`On ${list(floors.oiUnavailable)} the feed reported no open interest at all, so the liquidity ` +

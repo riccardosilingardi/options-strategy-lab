@@ -13,7 +13,7 @@ import { erf, netBS } from "./engine.js";
 import { ARROW, REGIONS, regionSignals, tagImpacts, taRead } from "./signals.js";
 import { useNarrow, BandThumbnail, payoffBands, bandTakeaway } from "./visuals.jsx";
 import { DEMO, DEMO_TOOLTIP } from "./demo.js";
-import { reduceRatios, orderQty, unitLimit, orderBody, orderPreviewLines, orderOutcome, alpacaErrorText } from "./order.js";
+import { reduceRatios, orderQty, mlegLimitPrice, limitWords, orderBody, orderPreviewLines, orderOutcome, alpacaErrorText } from "./order.js";
 import { hasOpenInterest, sourceNote, openInterestNote } from "./chain.js";
 // "Why this trade" and the headline tags moved to src/why.jsx: the wizard's
 // decision screen needs them too, and a road with no evidence under it is a
@@ -605,10 +605,18 @@ export function OrderTicket({
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState(null);
   const arith = netFromLegs(legs, legPrices);
-  // THE MAGNITUDE IS WHAT `orderBody()` SENDS, and it is on the tick because
-  // every leg price it was summed from is (`onTick()` in rules.js).
+  /* TWO READINGS OF ONE NUMBER, AND ONLY ONE OF THEM GOES TO THE BROKER.
+     `limit` is the MAGNITUDE — what the screen compares against a bid and an
+     ask, and what the "is this a price at all" guard tests. `signedLimit` is
+     the STRUCTURE'S OWN NET, positive for a debit and negative for a credit,
+     and it is what `orderBody()` must be handed: `mlegLimitPrice()` turns it
+     into the order's direction. Handing the magnitude here is what sent a $75
+     XLE credit spread out as a $75 DEBIT and filled it for $4 (src/order.js).
+     Both are on the tick because every leg price they were summed from is
+     (`onTick()` in rules.js). */
   const limit = Number.isFinite(net) ? Math.abs(net) : null;
   const limitStr = limit == null ? "" : limit.toFixed(2);
+  const signedLimit = Number.isFinite(net) ? net.toFixed(2) : "";
   const setLeg = (i, px) => {
     if (!onCfg) return;
     const next = (legPrices || []).slice();
@@ -660,9 +668,9 @@ export function OrderTicket({
       // The price on screen is the price of the structure AS BUILT, and
       // `orderBody` divides it by the same factor it took out of the ratios,
       // so the money at stake is what the ticket says it is.
-      const body = orderBody({ legs, occs, userQty: qtyNum, type: cfg.type, limit: limitStr, tif: cfg.tif, intent: "open" });
+      const body = orderBody({ legs, occs, userQty: qtyNum, type: cfg.type, limit: signedLimit, tif: cfg.tif, intent: "open" });
       const o = await alpacaReq("/v2/orders", "POST", body);
-      if (onSent) onSent(o, { ...cfg, limit: limitStr, qty: qtyNum });
+      if (onSent) onSent(o, { ...cfg, limit: signedLimit, qty: qtyNum });
       // ACCEPTED IS NOT FILLED. A limit at the mid of a wide market, or any
       // order sent outside market hours, comes back accepted with nothing
       // bought — that is a third outcome, not a failure, and it says where
@@ -754,7 +762,7 @@ export function OrderTicket({
           the trade the user was reading. */}
       {shape.factor > 1 && (
         <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 7 }}>
-          {`This structure is ${shape.factor} × (${shape.ratios.join(":")}). Alpaca is sent ${sendQty} combination${sendQty === 1 ? "" : "s"}${cfg.type === "limit" && limit != null ? ` at $${unitLimit(limitStr, shape.factor)} each` : ""} — the same trade, written the way the broker requires.`}
+          {`This structure is ${shape.factor} × (${shape.ratios.join(":")}). Alpaca is sent ${sendQty} combination${sendQty === 1 ? "" : "s"}${cfg.type === "limit" && limit != null ? ` at ${limitWords(mlegLimitPrice(signedLimit, shape.factor, "open")) || "a price the app could not read"} each` : ""} — the same trade, written the way the broker requires.`}
         </div>
       )}
       {/* ONE TAP MUST NEVER LOOK LIKE NOTHING. The first tap arms the
@@ -764,7 +772,7 @@ export function OrderTicket({
       {confirm && (
         <OrderPending
           lines={orderPreviewLines({ legs, ratios: shape.ratios, factor: shape.factor, ticker, expKey,
-            qty: qtyNum, type: cfg.type, limit: limitStr, tif: cfg.tif })}
+            qty: qtyNum, type: cfg.type, limit: signedLimit, tif: cfg.tif, intent: "open" })}
           onCancel={() => setConfirm(false)} />
       )}
       <OrderOutcome outcome={outcome} onDismiss={() => setOutcome(null)} />
@@ -870,7 +878,7 @@ export function AlpacaDesk({ creds, setMsg, gate }) {
           <div key={o.id} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "8px 10px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7 }}>
             <div style={{ flex: 1, minWidth: 160 }}>
               <div style={{ ...mono, fontWeight: 700, color: T.ink, fontSize: 12 }}>{o.order_class === "mleg" ? `MULTILEG x${o.qty} (${(o.legs || []).length} legs)` : `${o.symbol} ${o.side} ${o.qty}`}</div>
-              <div style={{ ...mono, fontSize: 10, color: T.dim }}>{o.type}{o.limit_price ? ` @ ${o.limit_price}` : ""} · {o.time_in_force} · {o.status}</div>
+              <div style={{ ...mono, fontSize: 10, color: T.dim }}>{o.type}{o.limit_price != null ? ` @ ${limitWords(o.limit_price) || o.limit_price}` : ""} · {o.time_in_force} · {o.status}</div>
             </div>
             <Btn small ghost color={T.red} onClick={() => cancel(o.id)}><Trash2 size={11} /> Cancel</Btn>
           </div>
@@ -1814,9 +1822,14 @@ export function GuardianPanel({ pos, spot, dteLeft, ivNow, vol, seasonalNow, pnl
       // The ladder's price is the price of the WHOLE position; the broker was
       // sent the price of one combination. Both are true and printing only
       // one of them next to Alpaca's own echo reads as a contradiction.
-      const per = +body.qty > 1 ? ` — sent as ${body.qty} × $${body.limit_price}` : "";
-      setMsg(`${label} exit order placed at $${Math.abs(net).toFixed(2)}${per}, standing until you cancel it (${o.id?.slice(0, 8)}…). ${res.headline}`);
-      logEvent(pos.id, "ladder", `${label} exit order placed at $${Math.abs(net).toFixed(2)} — ${res.headline}`);
+      // AND IT SAYS WHICH WAY THE MONEY GOES. A close is a credit when the
+      // structure is a debit and a debit when it is a credit, and the body
+      // carries that sign now; printing its magnitude alone was how the same
+      // mistake stayed invisible on the opening path for four pull requests.
+      const words = limitWords(body.limit_price) || "a price the app could not read";
+      const per = +body.qty > 1 ? ` — sent as ${body.qty} × ${words}` : "";
+      setMsg(`${label} exit order placed at ${words}${per}, standing until you cancel it (${o.id?.slice(0, 8)}…). ${res.headline}`);
+      logEvent(pos.id, "ladder", `${label} exit order placed at ${words} — ${res.headline}`);
     } catch (e) { setMsg(`The ${label} exit order failed: ${alpacaErrorText(e)}`); }
     setLadderBusy(null);
   };

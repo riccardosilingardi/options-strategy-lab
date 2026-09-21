@@ -197,12 +197,24 @@ export function orderStatusRecheck(pos = {}, order = null) {
     return { changed: false, outcome, status, filled };
   }
   const id = order.id || pos.alpacaId || null;
+  /* WHAT THE BROKER GAVE, AGAINST WHAT THE APP ASKED FOR — the comparison
+     ROADMAP P0 has owed since PR #28 and could not make, because nothing had
+     ever filled. `pos.alpacaLimit` is the SIGNED limit the order carried;
+     `outcome.fillPrice` is Alpaca's own signed average. Neither is invented:
+     a record with no limit says so in words (`fillVsLimit`). */
+  const fillPrice = outcome.fillPrice;
+  const against = filled
+    ? fillVsLimit({ limit: pos.alpacaLimit, fill: fillPrice, contracts: positionSize(pos).contracts })
+    : null;
   return {
-    changed: true, outcome, status, filled,
+    changed: true, outcome, status, filled, fillPrice,
+    against,
     entry: {
       t: Date.now(), type: "status", orderId: id ? String(id) : null,
+      fillPrice: fillPrice ?? null,
       text: `Alpaca order ${id ? String(id) : "(id unknown)"} is now "${status}"` +
-        `${was ? ` — it was "${was}" when it was sent` : ""}. ${outcome.headline}`,
+        `${was ? ` — it was "${was}" when it was sent` : ""}. ${outcome.headline}` +
+        `${against ? ` ${against.sentence}` : ""}`,
     },
   };
 }
@@ -362,12 +374,62 @@ export const perCombination = (pos) => {
  * dead: unknown is not a verdict (the same rule as a missing open interest).
  */
 export function positionStage(pos = {}) {
-  if (!pos || !pos.alpacaId) return "owned";
+  if (!pos) return "owned";
+  // A HOLDING THE BROKER ITSELF LISTS IS OWNED, AND THERE IS NO ORDER TO WAIT
+  // FOR. See `isBrokerHolding()` below: `/v2/positions` returns only what the
+  // account actually holds, so asking `orderLifecycle()` about it is asking
+  // the wrong question of the wrong object.
+  if (isBrokerHolding(pos)) return "owned";
+  if (!pos.alpacaId) return "owned";
   const life = orderLifecycle({ status: pos.alpacaStatus, filled: pos.alpacaFilled });
   if (life === "filled") return "owned";
   if (life === "dead") return "not-taken";
   return "working";
 }
+
+/* ------------------------------------------------------------------
+   THE FILL THE APP COULD NOT SEE — and it is one sentinel
+
+   >>> READ ON THE OWNER'S PHONE, 21 Sep 2026, one screen, one minute. <<<
+
+       YOUR POSITIONS (0) · Nothing is open
+       XLE  Imported from Alpaca · WORKING · A ? order, which time in
+            force not recorded
+       -- and directly below, the broker's own panel --
+       OPEN POSITIONS: XLE, 2 legs
+       ORDERS WAITING: MULTILEG limit @ 0.6 · day        (that is SOYB)
+
+   The app called the XLE POSITION a waiting order and did not list the
+   SOYB ORDER at all, so the two read as swapped.
+
+   THE CAUSE IS `importAlpaca()` WRITING `alpacaId: "sync"`. That is a
+   sentinel, not an order id. `positionStage()` saw a truthy `alpacaId`,
+   asked `orderLifecycle()` about a record carrying no status and no
+   `filled` flag, correctly got "unknown" — unknown is not dead — and
+   returned "working". So every position imported from the broker's own
+   holdings was filed as an order still waiting to fill.
+
+   And it could never resolve: `recheckOrders()` then asked Alpaca for
+   `GET /v2/orders/sync`, which 404s, and that read swallows its own
+   failure by design. The record was stuck as "working" for ever.
+
+   THE BROKER'S HOLDINGS ARE NOT ORDERS. `/v2/positions` lists what the
+   account OWNS — there is nothing pending about it, no limit, no time in
+   force and no order id, which is exactly why "?" and "not recorded"
+   appeared on that row. The record says what it is now, and no order
+   field is invented for it.
+------------------------------------------------------------------ */
+
+/**
+ * Is this record a holding read off the broker's own positions list?
+ *
+ * `alpacaId: "sync"` is the LEGACY spelling and is recognised here rather
+ * than migrated in ten places: a record saved by an earlier build is still
+ * in `localStorage` and in the `/api/state` blob, and it must read correctly
+ * on the first render after this ships, not after a write.
+ */
+export const isBrokerHolding = (pos) =>
+  !!(pos && (pos.alpacaHeld === true || pos.alpacaId === "sync"));
 
 /**
  * WHAT COUNTS AS THE BOOK — owned, PLUS working. The one home for it.
@@ -400,6 +462,112 @@ export const bookPositions = (positions = []) =>
 
 /** True only for something the user actually holds. */
 export const isOwnedPosition = (pos) => positionStage(pos) === "owned";
+
+/* ------------------------------------------------------------------
+   THE LIMIT AGAINST THE FILL — the comparison ROADMAP P0 has owed
+   since PR #28, and could not make because nothing had ever filled.
+
+   The app records what it OFFERED (`effectiveLimit()`'s net — min(limit,
+   ask) on a debit, max(limit, bid) on a credit) and the broker records
+   what it GAVE. Until 21 Sep 2026 those two numbers had never sat beside
+   each other, and the first time they did the gap was the whole story:
+   +0.75 offered, −0.04 given, because the offer went out with the wrong
+   sign (PRD §4q).
+
+   BOTH FIGURES ARE SIGNED, and the comparison is made on the signed
+   numbers, because a credit received and a debit paid of the same size
+   are as far apart as two prices can be.
+------------------------------------------------------------------ */
+
+/**
+ * @param limit  the SIGNED limit the app sent, per combination, or null
+ * @param fill   the SIGNED average fill price Alpaca reported, or null
+ * @param contracts  how many combinations, for the dollar figure
+ * @returns {{ known, limit, fill, diff, dollars, sentence }}
+ *
+ * `known` is false when either side is missing, and the sentence then SAYS
+ * which one — it never invents a limit for a record that has none. A
+ * position imported from the broker's holdings is the standing example:
+ * the app never saw the order, so there is no intended price to compare,
+ * and pretending otherwise would be the same class of fault as reading a
+ * missing open interest as a zero.
+ */
+export function fillVsLimit({ limit = null, fill = null, contracts = 1 } = {}) {
+  // `Number(null)` IS 0 AND 0 IS FINITE. The nulls go out before the
+  // coercion, for the sixth time in this repository.
+  const num = (x) => (x == null || x === "" ? NaN : Number(x));
+  const L = num(limit), F = num(fill);
+  const n = Math.max(1, Math.round(Number(contracts) || 1));
+  const hasL = Number.isFinite(L), hasF = Number.isFinite(F);
+  if (!hasL || !hasF) {
+    const missing = !hasF
+      ? `the broker has not reported a fill price`
+      : `this record does not carry the limit the order was sent at`;
+    return {
+      known: false, limit: hasL ? L : null, fill: hasF ? F : null, diff: null, dollars: null,
+      sentence: `The price you offered and the price you got cannot be compared here, because ` +
+        `${missing}. Nothing is estimated in its place.`,
+    };
+  }
+  // POSITIVE MEANS THE FILL WAS BETTER FOR YOU than the offer: you paid less
+  // than your debit, or received more than your credit. The signed limit and
+  // the signed fill are both "money out per combination", so better is lower.
+  const diff = L - F;
+  const dollars = diff * 100 * n;
+  const word = (x) => `${x < 0 ? "a credit of " : "a debit of "}$${Math.abs(+x.toFixed(2)).toFixed(2)}`;
+  const verdict = Math.abs(dollars) < 0.5
+    ? `That is the price you asked for.`
+    : dollars > 0
+      ? `That is $${Math.abs(dollars).toFixed(2)} BETTER than you asked for, across ${n} combination${n === 1 ? "" : "s"}.`
+      : `That is $${Math.abs(dollars).toFixed(2)} WORSE than you asked for, across ${n} combination${n === 1 ? "" : "s"}.`;
+  return {
+    known: true, limit: L, fill: F, diff, dollars,
+    sentence: `You offered ${word(L)} a combination and the broker filled it at ${word(F)}. ${verdict}`,
+  };
+}
+
+/* ------------------------------------------------------------------
+   WHY THE APP'S ORDER COUNT AND THE BROKER'S DISAGREE
+
+   PR #32 handed this forward: "the app's working-order count and the
+   broker's disagree, 1 against 2 ... both panels are labelled and neither
+   is wrong, but nothing on that screen SAYS why the two numbers differ."
+
+   Two causes, and they are different facts. One was the sentinel above —
+   a holding counted as an order. The other is real and cannot be fixed by
+   arithmetic: the local store was reset, so an order the broker is still
+   holding has no record in this app at all. The app cannot invent the
+   record; it CAN say the order exists and that it has no record of it.
+------------------------------------------------------------------ */
+
+/**
+ * @param working  the app's own working-order records (`positionStage` === "working")
+ * @param brokerOrders  what `GET /v2/orders?status=open` returned, or null if not asked
+ * @returns {{ asked, mine, theirs, unknownToApp, sentence }}
+ *   `unknownToApp` are the broker's order ids this app holds no record of.
+ *   `sentence` is null when the two agree, or when the broker has not been asked.
+ */
+export function orderReconciliation(working = [], brokerOrders = null) {
+  const mine = (Array.isArray(working) ? working : []).filter(Boolean);
+  if (!Array.isArray(brokerOrders)) {
+    return { asked: false, mine: mine.length, theirs: null, unknownToApp: [], sentence: null };
+  }
+  const known = new Set(mine.map((p) => String(p.alpacaId || "")).filter(Boolean));
+  const unknownToApp = brokerOrders.filter((o) => o && o.id && !known.has(String(o.id)));
+  if (!unknownToApp.length) {
+    return { asked: true, mine: mine.length, theirs: brokerOrders.length, unknownToApp: [], sentence: null };
+  }
+  const n = unknownToApp.length;
+  const ids = unknownToApp.map((o) => String(o.id).slice(0, 8)).join(", ");
+  return {
+    asked: true, mine: mine.length, theirs: brokerOrders.length, unknownToApp,
+    sentence: `Your Alpaca account is holding ${brokerOrders.length} waiting order` +
+      `${brokerOrders.length === 1 ? "" : "s"} and this app has a record of ${mine.length}. ` +
+      `${n === 1 ? "One of them" : `${n} of them`} was not sent from this browser, or was sent before the ` +
+      `app's local record was cleared (${ids}…). It is a real order and it can still fill: the broker's own ` +
+      `panel below is the authority on it. This app can only cancel or re-price the orders it has records of.`,
+  };
+}
 
 /**
  * One sentence saying what a record is, for the screen that renders it.

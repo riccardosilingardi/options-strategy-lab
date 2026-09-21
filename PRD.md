@@ -2259,6 +2259,338 @@ one. The snapshot is not removed: a card with no reading at all would be worse.
 
 ---
 
+## §4q — CREDIT LIMITS WERE SENT AS DEBITS, AND THE READ-BACK HID IT
+
+**THE FIRST FILL THIS APP HAS EVER HAD, AND IT IS A FAULT REPORT.** ROADMAP P0's
+DONE WHEN has been "an opening order is really filled on the paper account" for six pull
+requests. It filled. It filled because the order was wrong.
+
+### The reading — Alpaca paper account, 21 September 2026
+
+J-0001, XLE Bull Put Spread 2026-10-30, **−1 62.5P / +1 59P**. The ticket said **CREDIT
+$75**, time in force GTC. The gate passed it, the card agreed with the ticket, the
+confirm step agreed with both.
+
+Alpaca now holds it as an **OPEN POSITION**:
+
+| leg | quantity | average price |
+|---|---|---|
+| XLE261030P00059000 | +1 | 1.12 |
+| XLE261030P00062500 | −1 | 1.16 |
+
+= a net **credit of $0.04 a combination**. **$4 received against $75 intended.** The
+maximum loss is **$346** instead of $275 — the spread is 3.50 wide and the credit that
+was supposed to reduce it did not arrive — and the Positions screen reads **−$112**.
+
+And Alpaca's own Orders panel, the same day, states the convention in two fields side by
+side: the XLE 2-Leg Order reads **"Limit @ $0.75"** — no minus, a debit — beside **"Avg.
+Fill Price −0.04"**, the credit printed as a negative.
+
+### The cause — one `Math.abs()`, in the one place that spells the body
+
+```js
+export function unitLimit(comboLimit, factor, perContract = 1) {
+  const d = ...;
+  return (Math.abs(+comboLimit || 0) / d).toFixed(2);   // <- here
+}
+```
+
+**Alpaca's multi-leg `limit_price` is SIGNED.** Positive is a debit — "pay at most this";
+negative is a credit — "receive at least this" (alpaca-py's `LimitOrderRequest` reference
+for multi-leg orders, and the broker's own display above). So `+0.75` on a structure the
+app meant to SELL for 0.75 was read as **"pay up to 75 cents for it"**. Against a book
+quoting that spread as a credit, an offer to pay is marketable by a wide margin: it filled
+at once, at whatever the book gave, which was four cents the other way.
+
+A **single-leg** order is different and stays unsigned: its own `side` already says which
+way the money goes, and Alpaca rejects a negative limit on one.
+
+### IT IS THE ORDER'S DIRECTION, NOT THE STRUCTURE'S
+
+The same structure is a credit one way and a debit the other, so the sign is
+`sign(structure net)` **flipped when the intent is close**:
+
+| | structure net | order limit |
+|---|---|---|
+| open a credit structure (bull put) | −0.75 | **−0.75** you receive |
+| open a debit structure (bull call) | +0.24 | **+0.24** you pay |
+| close a debit structure | +0.64 | **−0.64** you receive |
+| close a credit structure | −0.37 | **+0.37** you pay |
+
+**The closing half had never been read by anybody.** Closing the butterfly or a bull call
+spread with `Math.abs()` offers to BUY BACK what the order is selling — which a market
+maker meets at any price at all. `src/autopilot.test.js` carried that fault as an
+EXPECTATION (`assert.equal(body.limit_price, "0.48")` on a long call spread being closed);
+that assertion is now `"-0.48"` and says why.
+
+### ONE HOME FOR THE SIGN
+
+- **`limitDirection(structureNet, intent)`** in `src/order.js` — +1 debit, −1 credit,
+  0 unreadable. The only place the rule above is written.
+- **`mlegLimitPrice(structureNet, factor, intent)`** — the string an mleg body carries.
+  It **rounds first and decides the sign after**, the same rule `money()` keeps: a net of
+  −0.0001 rounds to zero and `-0.00` is a direction the number does not have.
+- **`unitLimit()` keeps its job and its name**: the MAGNITUDE, for the single-leg body and
+  for every screen that compares a price against a bid and an ask.
+- **The callers hand over the SIGNED net.** `pro.jsx`'s ticket keeps `limit` (the
+  magnitude, for the screen and for the "is this a price at all" guard) and passes
+  `signedLimit` to `orderBody()`. `placeExit()` and `approve.mjs` already passed
+  `ladderNet()` and `closeLimitPrice().net`, both signed — those two were only ever wrong
+  because `orderBody()` threw the sign away.
+- **`rules.js` said the opposite and was corrected.** `closeLimitPrice()` and
+  `openLimitPrice()` both carried the comment *"`limit` is the MAGNITUDE, because that is
+  what `orderBody()` sends"*. It was true and it was the bug. They return `net` (signed,
+  for the order) and `limit` (magnitude, for the ticket), and the comments now say which
+  is which and why.
+
+### AND EVERY DISPLAYED LIMIT SAYS DEBIT OR CREDIT, IN WORDS
+
+The read-back is the second half of this fault and the reason it survived: **three screens
+printed `Math.abs()` of the broker's own number**, so nothing anywhere showed that a credit
+spread had gone out as a debit. The app sent the wrong number and then hid it on the way
+home.
+
+- `orderWaitingPhrase()` and `orderOutcome()` in `order.js` — a credit fill said "at
+  $0.04" where the truth is "you received four cents".
+- `App.jsx`'s `alpacaLimit` on the position record, and its `sent` timeline sentence.
+- The working-orders row on Positions, which rendered `money(p.alpacaLimit * 100)` — a
+  credit and a debit of the same size read identically.
+
+**`limitWords()`** ("a credit of $0.75 (you receive it)") and **`limitKind()`** (the one
+word, for a screen that formats its own dollars) are the two spellings, and a price that
+cannot be read gets **no sentence at all** rather than "$0".
+
+### THE TEST THAT REFUSES IT AGAIN
+
+`src/order.test.js` holds all six directions (bull put open, bull call open, bull call
+close, bull put close, butterfly open and close), the single leg unchanged, the size still
+leaving the price on a five-lot, and `-0.00` never appearing. Two sweeps fail the build:
+no source file may take `Math.abs()` of a `limit_price` or a `filled_avg_price`, no order
+path may hand `orderBody()` a magnitude (`limit: Math.abs(…)`, `limit: limitStr`), the
+mleg branch must be priced by `mlegLimitPrice()` and the single-leg branch by
+`unitLimit()`, and `App.jsx` may not render `money(p.alpacaLimit * 100)` without the word
+beside it.
+
+### NOT VERIFIED
+
+- **NO ORDER CAN BE SENT FROM THIS SANDBOX.** No broker keys, and the egress proxy refuses
+  the CONNECT. **The sign is checked against Alpaca's documented convention and against the
+  broker's own display of this very order, and against nothing else.** Only a deploy can
+  send one.
+- **THE CLOSING DIRECTION HAS NEVER BEEN SENT AT ALL**, in either spelling. Nothing has
+  ever been closed through this app.
+- **WHETHER A CORRECTLY SIGNED CREDIT ORDER FILLS IS A MARKET QUESTION.** The $75 was
+  probably never available: the fill says the book was near zero. The next correctly signed
+  order may simply sit, which would be the right outcome and would look like a regression.
+- **THE XLE POSITION IS STILL OPEN AND STILL WRONG.** This changes what the app SENDS; it
+  cannot unwind a fill. That position carries a $346 maximum loss against a $4 credit and
+  is the owner's to close.
+
+---
+
+## §4r — THE FILL THE APP COULD NOT SEE, AND ONE CHAIN WITH TWO VERDICTS
+
+### 1. A FILLED POSITION LISTED AS AN ORDER STILL WAITING
+
+**Read on the owner's phone, 21 September 2026, one screen, one minute:**
+
+```
+YOUR POSITIONS (0) · Nothing is open
+XLE  Imported from Alpaca · WORKING · A ? order, which time in force not recorded
+--- and directly below, the broker's own panel ---
+OPEN POSITIONS:  XLE, 2 legs
+ORDERS WAITING:  MULTILEG limit @ 0.6 · day          (that is J-0004, SOYB)
+```
+
+The app called the XLE **position** a waiting order, and did not list the SOYB **order**
+at all. Read down the screen, the two look swapped.
+
+**THE CAUSE IS ONE SENTINEL.** `importAlpaca()` wrote
+
+```js
+realEntry: true, alpacaId: "sync", alpacaLive: true,
+```
+
+`"sync"` is a sentinel, not an order id, and no status was written beside it.
+`positionStage()` saw a truthy `alpacaId`, asked `orderLifecycle()` about a record with no
+status and no `filled` flag, correctly got **"unknown"** — unknown is not dead — and
+returned **"working"**. So every position imported from the broker's own holdings was filed
+as an order still waiting to fill. The `?` and the "time in force not recorded" on that row
+are the same fault seen from the other end: the screen was printing an order's fields for
+something that is not an order.
+
+And it could never resolve. `recheckOrders()` then asked Alpaca for `GET /v2/orders/sync`,
+which 404s into a catch that swallows its own failure by design. The record was stuck as
+"working" for ever, which is why the app had "the fill it cannot see".
+
+**`/v2/positions` RETURNS ONLY WHAT THE ACCOUNT HOLDS.** There is nothing pending about it:
+no order id, no limit, no time in force. So:
+
+- **`isBrokerHolding(pos)`** in `journal.js` is the one home, and `positionStage()`
+  short-circuits on it: a holding is `owned`, full stop. It recognises the legacy `"sync"`
+  spelling too, because a record saved by an earlier build is still in `localStorage` and
+  in the `/api/state` blob and has to read correctly on the FIRST render after this ships,
+  not after a write.
+- **NO ORDER FIELD IS INVENTED FOR IT.** The record carries `alpacaHeld: true` and
+  `alpacaId: null`, and **no `alpacaStatus`** — writing `"filled"` there would be the app
+  asserting an order the broker never told it about, which is the same class of fault as
+  the sentinel it replaces.
+- **IT IS A FILL, SO IT CARRIES THE PRICE IT FILLED AT.** `entryNet` is already the sum of
+  the broker's own `avg_entry_price` per leg; it is stamped **`entrySource: "fill"`**, the
+  sixth use of "the absence of the stamp is the marker".
+- **THE SIZE IS MEASURED, NOT ASSUMED.** The legs carry the broker's own quantities and
+  `payoffExp` multiplies by them, so `contracts: 1` here is the real per-combination unit
+  and `contractsAssumed` is correctly absent.
+- **THE EXIT PLAN STARTS, AND NAMES ITS DATE.** The timeline gets three entries: a `fill`
+  naming the legs and the net, a note about the limit (below), and a `plan` — *"Exit plan
+  starts now — close at 50% of max gain, or at 21 days to expiration. On this expiry the
+  21-day mark is 2026-10-09."*
+- **`recheckOrders()` no longer asks about records that are not orders**
+  (`p.alpacaId && p.alpacaId !== "sync"`).
+
+**UNKNOWN IS STILL NOT DEAD.** A real order the broker has not been asked about is still
+`working`, and a test holds that: the fix must not buy its correctness by burying genuine
+unknowns.
+
+### 2. THE LIMIT AGAINST THE FILL — the comparison P0 has owed since PR #28
+
+PR #28 handed this forward and every session since repeated it: *"the record carries
+`min(limit, ask)`; the broker records the fill, and `recheckOrders()` does not reconcile
+the two. Nothing has ever filled, so they have never been compared."*
+
+Something has filled. **`fillVsLimit({ limit, fill, contracts })`** in `journal.js` is the
+comparison, on the SIGNED numbers both ways, because a credit received and a debit paid of
+the same size are as far apart as two prices can be. On J-0001 it reads:
+
+> You offered a debit of $0.75 a combination and the broker filled it at a credit of
+> $0.04. That is $79.00 BETTER than you asked for, across 1 combination.
+
+— which is arithmetically true and is the §4q fault stated in the app's own words, because
+the "better" price is a credit of four cents on a trade meant to collect seventy-five.
+
+`orderStatusRecheck()` carries it onto the timeline when and only when the broker says
+filled, and the position record gains `alpacaFillPrice` (signed). The Positions row prints
+the sentence under the size.
+
+**IT NEVER INVENTS THE LIMIT.** An imported holding has no intended price — the app did not
+send that order, or sent it before its local record was cleared — and the sentence says so:
+*"The price you offered and the price you got cannot be compared here, because this record
+does not carry the limit the order was sent at. Nothing is estimated in its place."*
+`Number(null)` is 0 and 0 is finite, for the **sixth** time in this repository: the nulls go
+out before the coercion, and a real zero on either side is still a real reading.
+
+### 3. WHY THE APP'S ORDER COUNT AND THE BROKER'S DISAGREE
+
+PR #32 handed forward: *"the app's working-order count and the broker's disagree, 1 against
+2 … both panels are labelled and neither is wrong, but nothing on that screen SAYS why the
+two numbers differ."*
+
+**Two causes, and they are different facts.** One was the sentinel above — a holding counted
+as an order. The other is real and arithmetic cannot fix it: the local store was reset, so an
+order the broker is still holding has no record in this app at all.
+
+**`orderReconciliation(working, brokerOrders)`** in `journal.js` names it. The app cannot
+invent the record; it can say the order exists, that it can still fill, that the broker's own
+panel is the authority on it, and that this app can only cancel or re-price the orders it has
+records of. **An unasked broker is not an empty one** — the sentence is null until
+`alSync` has been answered — and when the two agree there is no line at all. The WORKING
+panel now opens for a gap as well as for the app's own rows, because with zero records and
+one order at the broker it previously said nothing whatsoever.
+
+### 4. ONE CHAIN, ONE OPEN INTEREST, ONE VERDICT
+
+**Read in the same session.** The Radar said:
+
+> On BOIL, WEAT, USO, SLV and GDX the feed reported no open interest at all, so the
+> liquidity floor was SKIPPED.
+
+The GDX 2026-10-30 chain was on screen printing open interest per strike (as of
+2026-09-17). The Shortlist read GDX's near-the-money **median OI 84**, **76% clearing the
+10-contract minimum**, and removed *"the 63 emptiest of the 96 contracts"*. And the guided
+run's **number-one road** was a GDX Bearish Put Butterfly 94.5 / 89×2 / 85 **with legs at
+OI 3 and OI 4**.
+
+**Two paths, two verdicts, one chain — and the difference is a return value.** Open
+interest is not in an option snapshot; it comes from the trading API's contract list and is
+**patched in** after the chain is on screen. So `refreshChain()` sets the bare chain, fires
+the enrichment, and **returns the bare one**. The Shortlist reads `chains[tk]` out of state,
+which by then carries the numbers. The wizard and the wide search read what `refreshChain()`
+handed back, which never does.
+
+- **`ensureOpenInterest(tk, chain)` in `App.jsx` is the one home.** The SCREEN still never
+  waits — `refreshChain()` fires it and moves on, exactly as before, and that rule was
+  always about the screen and never about a caller holding a liquidity floor. A caller that
+  is about to JUDGE open interest awaits it. The promise is memoised per chain object, so
+  the background fire and the awaiting caller share one fetch.
+- **UNKNOWN IS STILL SKIPPED, NEVER REJECTED.** A chain that genuinely carries no open
+  interest comes back unreported and the floor still skips. That half was always right and
+  a test holds it, together with the rule that a real `0` is a real reading and still fails.
+- `enrichOpenInterest()` is now called in exactly one place, and a test fails the build if a
+  second appears or if a generation site awaits the bare chain.
+
+### 5. BUTTERFLIES LEAVE THE GUIDED PATH — and it is a SHAPE, not a name
+
+ROADMAP P2 decided this and nobody had implemented it: *"drop butterflies from the guided
+path (pTP near 0: incompatible with the 50% take profit before the 21-DTE exit)."*
+
+A butterfly is worth its maximum only **at** the middle strike **at** expiry. Half of that
+maximum is therefore out of reach while there is time value left, and this app closes at
+`RULES.exitDTE` — 21 days out. So the take-profit rung of a structure the guided flow
+offers as a **first trade** can essentially never be hit, and the trade ends at the
+calendar every time. That is a fine trade for somebody who chose it; it is a poor one for
+somebody being taught what a rule is for.
+
+- **`isButterfly(legs)` in `rules.js` reads the SHAPE.** "Bearish Put Butterfly", "Iron
+  Butterfly", "Call Butterfly ATM" and "Bullish Call Butterfly" are four spellings today
+  and a fifth is one preset away. A butterfly is the structure whose **short legs all sit
+  on ONE strike with long legs on both sides of it** — which is exactly what makes its peak
+  a point. An iron condor has its shorts on TWO strikes and is not caught; a vertical has
+  nothing above or below its short and is not caught. All six cases are tested.
+- **It sits beside the single-leg exclusion in `runWizard`, and nowhere else.** The
+  Shortlist, the wide search and the Build screen are untouched: a hand-built trade is the
+  user's to make, the same line the quality floors are drawn on. A test fails the build if
+  `isButterfly` appears more than once in `App.jsx`, and another holds the four preset names
+  in `buildPresets()`.
+- **ITS COUNT TRAVELS SEPARATELY AND IT IS NOT A FLOOR.** A butterfly is not refused for
+  being a bad price; it is not offered here at all, for a reason about the EXIT RULE rather
+  than about the market. `floors.butterfly` and `butterflySkipNote()` have their own
+  sentence in `verdictNarrative()`, exactly as `unpriceable` does.
+
+### What this does NOT do
+
+- It does not re-price, re-send or unwind the XLE position. Only the owner can close it.
+- It does not change any floor's number, any exit parameter, the Monte Carlo, the seasonal
+  drift, the signal weights or the 5% / 25% caps.
+- It does not give the app a second opinion about anything the broker reports. Every number
+  here is Alpaca's own, read rather than re-derived — which is the standing rule this whole
+  section is an instance of.
+
+### NOT VERIFIED
+
+- **NONE OF THIS HAS BEEN SEEN ON A PHONE**, which is now the **eighth** pull request in a
+  row handing that item forward.
+- **THE IMPORT PATH HAS NOT RUN AGAINST A LIVE ACCOUNT SINCE THE CHANGE.** The record shape
+  is tested; the fetch is not reachable from here.
+- **NO FILL COMPARISON HAS EVER RENDERED.** `fillVsLimit()` is tested on the numbers read
+  off the broker's panel, and the sentence has never been on a screen.
+- **THE `orderReconciliation()` LINE HAS NEVER FIRED.** It needs `alSync` to have been
+  answered by a real account.
+- **THE OPEN-INTEREST FIX IS STRUCTURAL, NOT MEASURED.** Whether the guided run now removes
+  that GDX butterfly for LIQUIDITY as well as for shape — and what else the floor removes on
+  the four other markets the Radar reported as unmeasured — cannot be read from here. It is
+  the first thing to look at on the next live run.
+- **HOW MUCH THE GUIDED POOL SHRINKS IS UNMEASURED.** Removing butterflies leaves the
+  `verybear` and `verybull` families with one multi-leg preset each and `neutral` with the
+  iron condor alone. "Only one road survives" is already a refusal the app knows how to
+  make, and it may now be reached more often. Nobody has run it.
+- **ALPACA REPORTS `delta` AND `theta` PER CONTRACT AND THE APP STILL COMPUTES ITS OWN**
+  (`netGreeks()` in `App.jsx`, Black-Scholes at the app's own IV). It is the same species of
+  fault as the two above — re-deriving what the broker already reported — and it is
+  deliberately NOT touched here rather than widened into unasked scope. It is the obvious
+  next thing.
+
+---
+
 ## 5. The wizard IS the app
 
 The wizard is not a feature inside the app. It is the entry point and the spine. Existing tabs remain reachable but are no longer the front door.
@@ -3196,7 +3528,43 @@ What is left:
 The standing rule in `CLAUDE.md`: every session starts by fixing what the last one flagged, and
 ends by writing down what it could not verify. Currently open:
 
-### WRITTEN THIS SESSION — the contract the app invented, and the trade card (§4n)
+### WRITTEN THIS SESSION — the sign on a credit order, and the fill (§4q, §4r)
+
+The FOURTH live reading, and the first one with a FILL in it. `npm test` reports **818 checks
+across 19 suites**, up from the **787** a clean `main` measures. `npm run build` is clean.
+(ROADMAP P2-bis wrote 783 for PR #32; 787 is what this session measured on untouched `main` and
+took as ground truth, the same way PR #24 took 594 over three recorded values.)
+
+- **NO ORDER CAN BE SENT FROM THIS SANDBOX.** No broker keys, egress proxy refuses the CONNECT.
+  **The signed multi-leg limit is checked against Alpaca's documented convention and against the
+  broker's own display of the XLE order — "Limit @ $0.75" beside "Avg. Fill Price −0.04" — and
+  against nothing else.** Only a deploy can send one.
+- **THE CLOSING DIRECTION HAS NEVER BEEN SENT, IN EITHER SPELLING.** Nothing has ever been closed
+  through this app, so the half of §4q that flips the sign on `intent: "close"` is reasoned and
+  tested and unexercised.
+- **A CORRECTLY SIGNED CREDIT ORDER MAY SIMPLY NOT FILL**, and that would be the right outcome
+  looking like a regression. The $75 was probably never there: the fill says the book was near zero.
+- **THE XLE POSITION IS STILL OPEN AND STILL WRONG.** $346 of maximum loss against a $4 credit.
+  This changes what the app SENDS; it cannot unwind a fill.
+- **THE IMPORT PATH, THE FILL COMPARISON AND THE RECONCILIATION LINE HAVE NEVER RENDERED.** All
+  three are tested on the numbers read off the broker's panel and none has been on a screen.
+- **THE OPEN-INTEREST FIX IS STRUCTURAL, NOT MEASURED.** Whether the guided run now removes that
+  GDX butterfly for LIQUIDITY as well as for shape, and what the floor removes on BOIL, WEAT, USO
+  and SLV once it can see the column, is the first thing to look at on the next live run.
+- **HOW MUCH THE GUIDED POOL SHRINKS WITHOUT BUTTERFLIES IS UNMEASURED.** `verybear` and `verybull`
+  are left with one multi-leg preset each and `neutral` with the iron condor alone.
+- **ALPACA REPORTS `delta` AND `theta` PER CONTRACT AND THE APP STILL COMPUTES ITS OWN**
+  (`netGreeks()`, Black-Scholes at the app's own IV). Same species as the two faults fixed here —
+  re-deriving what the broker already reported — deliberately not touched, and the obvious next one.
+- **A RECORD WRITTEN BEFORE THIS BUILD CARRIES AN UNSIGNED `alpacaLimit`**, because the old
+  `commitPosition()` stored `Math.abs()` of it. If such a record ever fills, `fillVsLimit()`
+  will compare a magnitude against a signed fill and read a credit structure backwards. It is
+  deliberately NOT migrated: nothing has ever filled, and the one order that did was sent at a
+  positive limit anyway, so there is no record this can be wrong about today. The honest fix if
+  it matters later is the same stamp pattern used five times already, not a guess at the sign.
+- **NOBODY HAS SEEN ANY OF IT ON A PHONE.** Eighth pull request in a row.
+
+### WRITTEN BEFORE THIS — the contract the app invented, and the trade card (§4n)
 
 The THIRD live reading. `npm test` reports **735 checks across 19 suites**, up from the **717** §4m
 wrote down. `npm run build` is clean.

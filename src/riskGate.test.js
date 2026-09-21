@@ -10,7 +10,7 @@ import { RULES, sizing, ruleBadge, qualityFloor, qualityFloorSentence, liquidity
   LIQUIDITY_LEVELS, RECOMMENDED_LIQUIDITY, LIQUIDITY_MEASUREMENT, liquidityMeasurementNote, liquidityThreshold, looseningWarning, liquiditySettingNote,
   priceability, rewardRisk, unpriceableNote, money, MIN_NET_DOLLARS,
   contractListing, unlistedContractNote, legName, tradeCard, TRADE_CARD_IDS, cardCurrencyNote,
-  radarSplit, radarQuietNote,
+  radarSplit, radarQuietNote, isButterfly, butterflySkipNote,
   unquotedLegNote, unquotedLegPointer, marketOrderNote, strikeSnapNote,
   spreadShare, spreadFloor, spreadFloorReason, wideSpreadNote, spreadSkippedNote,
   expiryChoice, expiryChoiceNote, emptyExpiryNote, unloadedBoardNote, checkedAgainstNote, offBoardStrikeLabel,
@@ -2695,6 +2695,109 @@ test("RADAR — with every market producing something there is no extra line at 
   assert.equal(radarQuietNote(r), null);
   assert.equal(radarQuietNote(null), null);
   assert.equal(radarQuietNote(radarSplit([])), null);
+});
+
+/* ================================================================
+   TASK 3 — ONE CHAIN, ONE OPEN INTEREST, ONE VERDICT
+
+   >>> READ ON THE OWNER'S PHONE, 21 Sep 2026, one session. <<<
+   Radar: "on BOIL, WEAT, USO, SLV and GDX the feed reported no open
+   interest at all, so the liquidity floor was SKIPPED".
+   Shortlist, same session, same chain: GDX near-the-money median OI 84,
+   76% clearing the 10-contract minimum, "the 63 emptiest of the 96
+   contracts" removed. And the guided run's number-one road was a GDX
+   butterfly 94.5 / 89×2 / 85 with legs at OI 3 and OI 4.
+
+   The cause is a return value. Open interest is not in an option
+   snapshot; it is fetched separately and PATCHED IN, so `refreshChain()`
+   returned the BARE chain while `chains[tk]` in state later carried the
+   numbers. The Shortlist read state, the wizard and the wide search read
+   the return value.
+================================================================ */
+
+test("OPEN INTEREST — the wizard and the wide search await the same chain the Shortlist reads", () => {
+  const app = codeOf("App.jsx");
+  // ONE HOME for "the chain with its open interest".
+  assert.ok(/const ensureOpenInterest = useCallback/.test(app),
+    "there must be one function that answers 'has this chain's open interest landed'");
+  // Both generation sites go through it. The Shortlist is handed `chains[tk]`
+  // from state, which the same function patches.
+  const bare = app.match(/chains\[tk\] \|\| \(await refreshChain\(tk, true\)\)/g) || [];
+  const wrapped = app.match(/ensureOpenInterest\(tk, chains\[tk\] \|\| \(await refreshChain\(tk, true\)\)\)/g) || [];
+  assert.equal(bare.length, wrapped.length,
+    "every generation site that judges a liquidity floor must await the open interest, not the bare chain");
+  assert.ok(wrapped.length >= 2, "the guided run and the wide search are both sites");
+  // ...and the SCREEN still never waits: refreshChain fires it and moves on.
+  assert.ok(/ensureOpenInterest\(tk, c\);/.test(app),
+    "refreshChain must fire the enrichment without awaiting it");
+  assert.equal(/await ensureOpenInterest\(tk, c\)/.test(app), false,
+    "the chain must still reach the screen before its open interest does");
+  // The old shape — a second enrichOpenInterest call site — is gone.
+  assert.equal((app.match(/enrichOpenInterest\(/g) || []).length, 1,
+    "enrichOpenInterest is called in exactly one place");
+});
+
+test("OPEN INTEREST — unknown is still SKIPPED, never rejected", () => {
+  /* The half that was always right: a chain that genuinely carries no open
+     interest must still skip the floor rather than fail every leg on it.
+     `qualityFloor()` is unchanged by this work and this holds it so. */
+  const unknown = qualityFloor({
+    openInterest: [null, null], peerOpenInterest: [], level: RECOMMENDED_LIQUIDITY,
+    quotes: [{ bid: 1.0, ask: 1.1 }, { bid: 0.5, ask: 0.6 }],
+    legs: [{ side: 1, qty: 1 }, { side: -1, qty: 1 }],
+    maxProfit: 60, maxLoss: -40,
+  });
+  assert.equal(unknown.liquidity.checked, false, "no open interest: the floor is SKIPPED");
+  assert.equal(unknown.liquidity.pass, true, "and never failed");
+  // A REAL ZERO IS A REAL READING and still fails.
+  const zero = qualityFloor({
+    openInterest: [0, 0], peerOpenInterest: [40, 50, 60, 80, 100, 120, 140, 160],
+    level: RECOMMENDED_LIQUIDITY,
+    quotes: [{ bid: 1.0, ask: 1.1 }, { bid: 0.5, ask: 0.6 }],
+    legs: [{ side: 1, qty: 1 }, { side: -1, qty: 1 }],
+    maxProfit: 60, maxLoss: -40,
+  });
+  assert.equal(zero.liquidity.checked, true);
+  assert.equal(zero.liquidity.pass, false);
+});
+
+test("BUTTERFLIES — the guided path does not offer one, and it is a SHAPE not a name", () => {
+  const K = (strike, type, q) => ({ side: Math.sign(q), qty: Math.abs(q), type, strike });
+  // The four spellings `buildPresets()` carries today.
+  assert.equal(isButterfly([K(58, "call", 1), K(60, "call", -2), K(62, "call", 1)]), true, "Call Butterfly ATM");
+  assert.equal(isButterfly([K(62, "put", 1), K(60, "put", -2), K(58, "put", 1)]), true, "Bearish Put Butterfly");
+  assert.equal(isButterfly([K(60, "call", 1), K(63, "call", -2), K(66, "call", 1)]), true, "Bullish Call Butterfly");
+  assert.equal(isButterfly([K(58, "put", 1), K(60, "put", -1), K(60, "call", -1), K(62, "call", 1)]), true, "Iron Butterfly");
+  // AND NOTHING ELSE. A condor's shorts are on TWO strikes; that is the whole
+  // difference, and it is why the test is on the shape rather than the name.
+  assert.equal(isButterfly([K(56, "put", 1), K(58, "put", -1), K(62, "call", -1), K(64, "call", 1)]), false, "Iron Condor");
+  assert.equal(isButterfly([K(60, "call", 1), K(62, "call", -1)]), false, "vertical");
+  assert.equal(isButterfly([K(60, "call", 1)]), false, "single leg");
+  assert.equal(isButterfly([]), false);
+  assert.equal(isButterfly(null), false);
+});
+
+test("BUTTERFLIES — excluded in runWizard only, and they stay on the full desk", () => {
+  const app = codeOf("App.jsx");
+  // Exactly one exclusion, beside the single-leg one, in the guided pool.
+  assert.equal((app.match(/isButterfly\(/g) || []).length, 1,
+    "the guided run is the only place that refuses one");
+  assert.ok(/if \(isButterfly\(pr\.legs\)\) \{ floors\.butterfly\+\+; continue; \}/.test(app),
+    "and it is counted, so the narrative can say what it did");
+  // `buildPresets()` still builds them: the desk is unchanged.
+  const src = readFileSync(new URL("./App.jsx", import.meta.url), "utf8");
+  for (const name of ["Bearish Put Butterfly", "Iron Butterfly", "Call Butterfly ATM", "Bullish Call Butterfly"]) {
+    assert.ok(src.includes(name), `${name} must survive in buildPresets() for the full desk`);
+  }
+});
+
+test("BUTTERFLIES — the count travels separately and has its own sentence", () => {
+  // Not a floor: it is not a judgement about the price, so pooling it with a
+  // floor's count would explain neither. Same discipline as `unpriceable`.
+  const n = butterflySkipNote();
+  assert.ok(n.includes(String(RULES.exitDTE)), "the sentence names the rule it is about");
+  assert.ok(/full desk/.test(n), "and says where they are still reachable");
+  assert.ok(!/liquidity|spread|reward/.test(n), "it is not a quality floor and must not sound like one");
 });
 
 /* ---------------- summary ---------------- */
