@@ -67,7 +67,7 @@ const PASS = () => ({ pass: true, violations: [], warnings: [] });
 
 check("the ticket asks twice before it sends", () => {
   const h = renderToStaticMarkup(
-    <OrderTicket legs={LEGS} expKey="2026-09-18" ticker="BOIL" buildOcc={() => "BOIL260918C00019000"}
+    <OrderTicket legs={LEGS} expKey="2026-09-18" ticker="BOIL"
       estNet={1.45} setMsg={() => {}} gate={PASS} dte={14} maxLoss={-145} maxProfit={105} />);
   has(h, "Send the order");
   has(h, "every order goes through the risk gate first");
@@ -75,7 +75,7 @@ check("the ticket asks twice before it sends", () => {
 
 check("a screen with no gate wired in fails closed, in words", () => {
   const h = renderToStaticMarkup(
-    <OrderTicket legs={LEGS} expKey="2026-09-18" ticker="BOIL" buildOcc={() => "X"} estNet={1.45} setMsg={() => {}} />);
+    <OrderTicket legs={LEGS} expKey="2026-09-18" ticker="BOIL" estNet={1.45} setMsg={() => {}} />);
   has(h, "BLOCKED BY THE RISK GATE");
   if (runGate(undefined, {}).pass) throw new Error("a missing gate must never pass");
 });

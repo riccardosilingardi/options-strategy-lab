@@ -130,6 +130,71 @@ test('the place is called Build, and "bench" survives nowhere', () => {
   assert.deepEqual(leftovers.map(([n]) => n), [], "the word Bench is still in App.jsx");
 });
 
+/* ----------------------------------------------------------------------
+   A HAND-OFF CARRIES THE TRADE ONTO THE BOARD IT IS HANDING IT TO.
+
+   PRD §4n. The SOYB order the broker refused named a 27.5 call on a board that
+   does not list one, and the legs could only have got there two ways: the
+   expiry dropdown, or a hand-off. Neither re-snapped. This closes the second.
+---------------------------------------------------------------------- */
+const BOARD = {
+  SOYB: {
+    byExp: {
+      "2026-11-20": { calls: { 27: {}, 28: {}, 29: {} }, puts: { 27: {}, 28: {} }, dte: 61 },
+      "2026-10-16": { calls: { 27: {}, 27.5: {}, 28: {} }, puts: { 27.5: {} }, dte: 26 },
+    },
+  },
+};
+
+test("a leg carried from another board is snapped onto this one, and it says so", () => {
+  const h = buildHandOff({
+    ticker: "SOYB", expKey: "2026-11-20", name: "x", chains: BOARD,
+    legs: [{ side: 1, type: "call", strike: 27.5 }, { side: -1, type: "call", strike: 29 }],
+  });
+  // 27.5 is exactly between the 27 and the 28 this board carries, and
+  // `snapStrike()` has always resolved a tie to the first equally-near strike
+  // it met. That is arbitrary and it is DETERMINISTIC, which is what matters:
+  // the leg lands on a contract that exists either way, and nothing here
+  // changes the arithmetic `buildPresets()` has always used.
+  assert.equal(h.legs[0].strike, 27, "the 27.5 the 2026-11-20 board does not list survived");
+  assert.equal(h.legs[1].strike, 29, "a strike the board DOES list was moved");
+  assert.equal(h.moved.length, 1);
+  assert.deepEqual(h.moved[0], { i: 0, from: 27.5, to: 27 });
+});
+
+test("a leg the board already lists is untouched, and nothing is said", () => {
+  const h = buildHandOff({
+    ticker: "SOYB", expKey: "2026-10-16", name: "x", chains: BOARD,
+    legs: [{ side: 1, type: "call", strike: 27.5 }],
+  });
+  assert.equal(h.legs[0].strike, 27.5);
+  assert.deepEqual(h.moved, []);
+});
+
+test("AN UNLOADED CHAIN IS UNKNOWN, NOT A GRID TO SNAP AGAINST", () => {
+  // Snapping against a fallback step is how an invented strike is invented.
+  const h = buildHandOff({
+    ticker: "SOYB", expKey: "2026-11-20", name: "x", chains: {},
+    legs: [{ side: 1, type: "call", strike: 27.5 }],
+  });
+  assert.equal(h.legs[0].strike, 27.5, "a leg was moved against a board nobody has loaded");
+  assert.deepEqual(h.moved, []);
+  assert.equal(h.loadChain, true);
+  // ...and neither is an expiry the loaded chain does not carry.
+  const other = buildHandOff({
+    ticker: "SOYB", expKey: "2027-01-15", name: "x", chains: BOARD,
+    legs: [{ side: 1, type: "call", strike: 27.5 }],
+  });
+  assert.equal(other.legs[0].strike, 27.5);
+});
+
+test("the legs are still COPIES — snapping must not rewrite the position it came from", () => {
+  const legs = [{ side: 1, type: "call", strike: 27.5 }];
+  const h = buildHandOff({ ticker: "SOYB", expKey: "2026-11-20", name: "x", chains: BOARD, legs });
+  assert.equal(legs[0].strike, 27.5, "the caller's legs were mutated");
+  assert.notEqual(h.legs[0], legs[0]);
+});
+
 /* ---------------- summary ---------------- */
 console.log(`\n${passed} passed, ${failures.length} failed\n`);
 if (failures.length) {

@@ -114,6 +114,78 @@ always known. Hence:
 - The desk still shows a hand-built structure, and says above the figures that its
   price could not be read.
 
+## A CONTRACT THE FEED NEVER LISTED IS UNKNOWN, NOT A WELL-FORMED SYMBOL
+
+`contractListing()` / `unlistedContractNote()` / `legName()` in `src/rules.js`, enforced as
+`UNLISTED_CONTRACT` in `riskGate.js`. **Read live: SOYB 2026-11-20, 20 Sep 2026** — the fourth order
+this app has sent did not reach the market at all. `HTTP 422 / 42210000: invalid legs: [leg.0 asset
+"SOYB261120C00027500" not found]`. That symbol is perfectly well formed and nobody has ever issued
+it.
+
+Four of the six order paths spelled `const occ = q?.occ || buildOcc(ticker, expKey, l.type,
+l.strike)`. **`buildOcc()` FORMATS a symbol out of a strike the APP chose** and cannot know whether
+anybody lists it — only the chain knows that. So an unquoted leg made the app name a contract that
+does not exist and ask the broker to trade it. The app created its own refusal.
+
+- **`buildOcc()` STAYS, AND IT IS NEVER A FALLBACK.** Naming a contract is legitimate — the Journal
+  and the option-history panel have to be able to write one down — but naming one is not asserting
+  that it trades. **Exactly ONE call survives in `App.jsx`** (the price-history button, which says on
+  screen when the chain did not list what it is charting) and **none in `pro.jsx`**;
+  `riskGate.test.js` fails the build if either changes.
+- **IT IS IN THE GATE, AND IT IS NOT A QUALITY FLOOR.** Four paths made one mistake and the gate is
+  the one place all six pass through. It is the same KIND of question as `priceability()` — which has
+  been in the gate since PR #14 — and not the same kind as the floors, which stay out for ever: a
+  hand-built trade is the user's to make, but a contract that does not exist is not a trade at all.
+- **ENTRY ONLY**, like `UNPRICEABLE` and `IMPOSSIBLE_LOSS`. Refusing to let somebody OUT of a
+  position because a feed went quiet is the worse failure by a distance; the close path refuses in
+  `placeExit()` instead, beside the button, naming the leg.
+- **UNKNOWN IS NOT MISSING.** `occs` is evidence a caller either has or does not, exactly like
+  `quotes`: no array means nothing is tested; an EMPTY array beside real legs is an answer.
+- **EVERY OPEN-INTENT GATE CALL CARRIES THE SAME EVIDENCE.** `OrderTicket`'s two `runGate` calls
+  passed no `quotes` and no `net`, so the gate guarding the SEND was weaker than the `guard` memo the
+  user had just read. A source sweep in `riskGate.test.js` fails the build on an open-intent gate call
+  that leaves out `quotes`, `net` or `occs`.
+- **STRIKES ARE A PROPERTY OF THE BOARD.** `snapStrike()` / `expiryStrikes()` / `resnapLegs()` live
+  in `chain.js` now. Neither the expiry dropdown nor `buildHandOff()` re-snapped a leg carried onto a
+  new expiry; both do, an unloaded chain is UNKNOWN and left alone rather than snapped against a
+  fallback grid, and what moved is said (`strikeSnapNote()`).
+
+## THE DECISION IS FIVE LINES — the trade card, and everything else one tap away
+
+`tradeCard()` / `TRADE_CARD_IDS` / `cardCurrencyNote()` in `src/rules.js`, rendered by `TradeCard` in
+`App.jsx` as the DEFAULT state of the Build screen's decision area. ROADMAP P4, PRD §4n.
+
+Counted on one Build screen, for ONE decision: a leg-by-leg market table, TWO paragraphs about an
+unquoted leg, the quantity, the order type, the time in force, the send button, a combination-market
+panel, four stat tiles, a market-versus-model pair, a notional paragraph and an error box. The owner
+has said three times: *"si capisce poco dalla UI. Troppe info da leggere, poco intuitivo."*
+
+1. **YOU ARE BETTING** · 2. **YOU RISK** · 3. **HOW OFTEN IT WORKS** · 4. **WHEN IT EXITS** ·
+5. **WHAT WOULD MAKE IT WRONG.**
+
+- **NO NEW ARITHMETIC.** Every figure already existed: `analyze()` at the price that will be sent,
+  `chanceOf()`'s one simulation (with `chanceSourceNote()` beside it, as everywhere), `sizing()`'s
+  limits through the gate, `notionalControlled()`, and the rules. The card READS and writes English.
+- **NONE OF THE OLD COPY IS CUT.** It opens behind a tap in `DeskSheet` (`src/steps.jsx`), which is
+  `EvidenceOverlay` — the same viewport-fixed sheet, for the same reason a panel written 2,000px down
+  a page looked on a phone like a tap that did nothing. `DeskSheet` is chrome with no trade in it,
+  which is why it lives beside the navigation.
+- **A REFUSAL IS NEVER BEHIND A TAP.** Every gate violation renders on the card, beside the button,
+  under the same rule as "an order that fails must fail where the button is".
+- **ONE FACT, ONE PLACE, AND IT NEEDS A RULE RATHER THAN ANOTHER PASS.** `unquotedLegNote()` keeps its
+  home where the legs are NAMED; everywhere else prints `unquotedLegPointer()` — the discipline
+  `warningsToPrint()` already applies to the CONFLICT paragraph. The gate's verdict moved onto the
+  card from hundreds of pixels above the control it governs, and the gate's raw warning list is gone
+  from beside the panel that was already printing it.
+- **THE CURRENCY IS THE BROKER'S.** ROADMAP P4 said euros; the account is an Alpaca paper account in
+  US dollars and every figure in this app is a dollar. Said once, converted never, roadmap corrected.
+- **THE MARKET ORDER EARNS ITS WARNING** (`marketOrderNote()`). It bypasses the sliders, the net and
+  the verdict band, and the stat tile under it used to say "at the price below, not at the mid" with
+  no price below.
+- **LINE 3 ANSWERS THE QUESTION IT CAN.** `chanceOf()` is where the price FINISHES; the exit-rule
+  figure is `exitSim` / `exitPathSim` and exists only on an OPEN position. The line says so rather
+  than letting a label assert a reading nobody took.
+
 ## An unknown is not a number — the ceiling, the arbitrage, the breakeven
 
 The same disease as the $0 debit above, in three more places. `analyze()` in `App.jsx`
@@ -883,6 +955,12 @@ while the position is open.
   price at all — the check before the floors), `payoffCeiling()` /
   `profitUnbounded()` / `NO_CEILING` (is there a maximum profit at all),
   `impossibleLoss()` (is the worst case actually a loss),
+  `contractListing()` / `unlistedContractNote()` / `legName()` (does the contract
+  EXIST — the one the gate asks and `buildOcc()` cannot answer),
+  `tradeCard()` / `TRADE_CARD_IDS` / `cardCurrencyNote()` (the five lines of the
+  decision, and which currency they are in),
+  `unquotedLegNote()` / `unquotedLegPointer()` (one fact, one place, on one
+  screen), `marketOrderNote()`, `strikeSnapNote()`,
   `mcRuns` with `chanceOf()` / `chanceSeedKey()` / `chanceSourceNote()` (THE chance
   of profit, and the only caller of `terminalMC`), `seasonalProvenance()` /
   `seasonalStampOf()` / `seasonalSourceSentence()` (WHOSE seasonal table drifted it,
@@ -1004,7 +1082,11 @@ while the position is open.
   the compare cap and the `store.saved` item a kept candidate becomes. Plain JS, no
   React, for the same reason `rules.js` and `handoff.js` are.
 - `src/steps.jsx` — `StepNav`, `StepForward`, `EvidenceBar`, `EvidenceOverlay`,
-  `CompareTray`, `CandidateActions`. The navigation, and nothing about a trade.
+  `DeskSheet`, `CompareTray`, `CandidateActions`. The navigation, and nothing
+  about a trade. `DeskSheet` is the Build screen's own sheet — its numbers and
+  its order ticket — and it is here rather than in `App.jsx` because it is
+  chrome with no trade in it, and because there is exactly ONE `EvidenceOverlay`
+  mount point in `App.jsx` and a test holds it there.
 - `src/why.jsx` — **the "Why this trade" panel**, and the only copy of it. The
   agreement badge, the four factors as direction/strength bars behind a toggle
   that **names them** ("Show the four readings: Seasonality, Price trend,
@@ -1057,7 +1139,9 @@ while the position is open.
   and after two failures in a row it stops asking for the rest of the session.
   `midOf()` is the only place a mid price is computed, so the two sources cannot
   disagree about the price of the same contract for a reason that is only a
-  formula. Alpaca snapshots carry no open interest and no volume, so those come
+  formula. **`snapStrike()` / `expiryStrikes()` / `resnapLegs()` live here too**:
+  a strike is a fact about a BOARD, not about a trade, and two implementations of
+  "the nearest strike that exists" would be two answers to one question. Alpaca snapshots carry no open interest and no volume, so those come
   back `null` (never `0`, which on screen reads as "nobody trades this") and the
   open-interest panel says which feed cannot fill it. **The QUOTE SIZES do come
   from Alpaca** (`latestQuote { bs, as }`) and were being parsed away; they are
@@ -1305,7 +1389,10 @@ There are **six** ways an order can reach Alpaca, and every one routes through
 6. `approve.mjs` — re-runs the gate at execution time, up to 24h later
 
 **Five of them build the body with `orderBody()` in `src/order.js`, and the sixth
-sends the body the fifth built.** Never write `ratio_qty` in a component again.
+sends the body the fifth built.** Never write `ratio_qty` in a component again,
+and **never name a contract the chain did not supply**: `buildOcc()` is not a
+fallback, it is a formatter, and the gate refuses an order whose leg the chain
+never listed (`UNLISTED_CONTRACT`).
 
 - **THE SIZE GOES IN `qty`, THE SHAPE GOES IN THE RATIOS.** Alpaca refused a sized
   spread live on 2026-09-04 — 422 / 42210000, *"leg ratio quantities should be
@@ -1453,7 +1540,9 @@ have been offered at all", and they live where candidates are generated, not in
 the gate — a trade the user builds by hand is his to make. "Is there a price at
 all" is a third question, and it is asked in BOTH places: the floors cannot judge
 a structure whose price is a placeholder, and the gate cannot let a maximum loss
-it could not compute out of the door.
+it could not compute out of the door. **"Does this contract exist" is a FOURTH
+question and it is the gate's alone** (`UNLISTED_CONTRACT`): it is not a judgement
+about a trade, because a contract nobody has issued is not a trade.
 
 Adding a seventh means adding a gate call. Paper mode is *verified*, not
 assumed: `alpaca.mjs` returns an `X-OSL-Paper-Endpoint` header and the gate

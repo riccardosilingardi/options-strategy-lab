@@ -1276,6 +1276,141 @@ export const unpriceableNote = (n, what) =>
   `A maximum loss the app cannot compute is not a maximum loss of zero, and nothing here is shown at ${money(0)}.`;
 
 /* -------------------------------------------------------------------------
+ * A CONTRACT THE FEED NEVER LISTED IS UNKNOWN, NOT A WELL-FORMED SYMBOL.
+ *
+ * >>> READ LIVE ON THE OWNER'S PHONE, SOYB, 20 Sep 2026, 21:49, spot $27.64,
+ * the 2026-11-20 board. <<< The fourth order this app has ever sent did not
+ * reach the market at all:
+ *
+ *     HTTP 422 · code 42210000
+ *     invalid legs: [leg.0 asset "SOYB261120C00027500" not found]
+ *
+ * That symbol is perfectly well formed. Nobody has ever issued it. Four of the
+ * six order paths spelled
+ *
+ *     const occ = q?.occ || buildOcc(ticker, expKey, l.type, l.strike);
+ *
+ * and `buildOcc()` FORMATS a symbol out of a strike the app chose. It cannot
+ * know whether anybody lists it — only the chain knows that — so an unquoted
+ * leg made the app name a contract that does not exist and ask the broker to
+ * trade it. The app created the refusal itself.
+ *
+ * THIS IS THE RULE THE REST OF THIS FILE ALREADY KEEPS. A missing open interest
+ * is UNKNOWN and never zero. A missing quote size is UNKNOWN and never zero. A
+ * missing drift is UNKNOWN and never a confident zero. A contract the feed did
+ * not list is UNKNOWN and never a well-formed symbol.
+ *
+ * `buildOcc()` STAYS. Naming a contract is legitimate — the Journal and the
+ * option-history panel have to be able to write one down — but naming one is
+ * not the same as asserting it trades, and no ORDER PATH may reach the broker
+ * with a symbol the chain did not supply.
+ *
+ * IT BELONGS IN THE GATE, not only in a component, because four paths made the
+ * same mistake and the gate is the one place all six pass through. It is the
+ * same KIND of question as "is there a price at all" — which is already in the
+ * gate — and not the same kind as the quality floors, which stay out of it: a
+ * hand-built trade is the user's to make, but a contract that does not exist is
+ * not a trade at all.
+ * ------------------------------------------------------------------------- */
+
+/** `22.5C`, `19P` — how a leg is named in a sentence. One spelling. */
+export const legName = (l) => `${l && l.strike}${l && l.type === "call" ? "C" : "P"}`;
+
+/**
+ * DID THE CHAIN LIST EVERY CONTRACT THIS ORDER NAMES?
+ *
+ * @param legs  [{ side, type, strike, qty }]
+ * @param occs  one entry per leg, aligned with `legs`: the OCC symbol the CHAIN
+ *              gave for that contract, or null where it gave none. Passing no
+ *              array at all means the caller cannot answer the question and
+ *              nothing is tested (`checked: false`) — the same discipline
+ *              `priceability()` applies to `quotes`. An EMPTY array beside real
+ *              legs is an answer: the chain listed nothing.
+ * @returns {{ checked, listed, missing, reasons }}
+ */
+export function contractListing({ legs = [], occs = null } = {}) {
+  const ls = Array.isArray(legs) ? legs : [];
+  if (!Array.isArray(occs) || !ls.length) {
+    return { checked: false, listed: true, missing: [], reasons: [] };
+  }
+  const missing = [];
+  ls.forEach((l, i) => {
+    const s = occs[i];
+    if (typeof s !== "string" || !s.trim()) missing.push({ i, leg: l, side: Math.sign(+(l && l.side) || 1) });
+  });
+  return {
+    checked: true,
+    listed: missing.length === 0,
+    missing,
+    reasons: missing.length ? [unlistedContractNote(missing, ls.length)] : [],
+  };
+}
+
+/** The refusal, with the leg in it. "Which leg" is the only actionable half. */
+export const unlistedContractNote = (missing = [], total = 0) => {
+  const ms = Array.isArray(missing) ? missing : [];
+  if (!ms.length) return "";
+  const names = ms.map((m) => `${legName(m.leg)}${m.side < 0 ? " you would be selling" : " you would be buying"}`).join(", ");
+  return `The option chain never listed ${ms.length === 1 ? "the" : "the"} ${names}${total ? ` (${ms.length} of ${total} leg${total === 1 ? "" : "s"})` : ""}, ` +
+    `so the app would have to invent ${ms.length === 1 ? "its symbol" : "their symbols"} to send this order — and a symbol it ` +
+    `invented is exactly what the broker refused on 20 September, by name, before the order reached the market. A contract ` +
+    `the feed did not give us is UNKNOWN, not a contract that exists at a price of nothing: only the chain knows which ` +
+    `strikes are really issued on this board. Pick a strike the board carries, or reload the chain for this expiry.`;
+};
+
+/** The one line a list prints in place of a structure it could not name. */
+export const unlistedContractListNote = (n, what) =>
+  `${n} structure${n === 1 ? "" : "s"} named a contract the chain never listed${what ? ` on ${what}` : ""}. ` +
+  `A well-formed symbol is not an issued one, and the app does not make one up.`;
+
+/* -------------------------------------------------------------------------
+ * ONE FACT, ONE PLACE, ON ONE SCREEN.
+ *
+ * "One leg has no two-sided quote" was printed TWICE on the Build screen — once
+ * by the leg table and once by the combination panel — inside the panel PR #28
+ * built to stop the CONFLICT paragraph appearing four times. Deduplicating
+ * warnings needs a RULE, not another pass, and the rule is the one
+ * `warningsToPrint()` already uses: the fact keeps its home where the legs are
+ * NAMED, and everywhere else points at it.
+ * ------------------------------------------------------------------------- */
+
+/** The full sentence. It belongs where the legs are named, and nowhere else. */
+export const unquotedLegNote = (n) =>
+  `${n === 1 ? "One leg has" : `${n} legs have`} no two-sided quote at all, so there is no side of ` +
+  `${n === 1 ? "it" : "them"} that trades and no combination price to place your own against.`;
+
+/** What every OTHER place on the same screen prints instead of repeating it. */
+export const unquotedLegPointer = (n) =>
+  `No combination price: ${n === 1 ? "one leg is" : `${n} legs are`} not quoted on both sides. The leg table above ` +
+  `says which, and says it once.`;
+
+/* -------------------------------------------------------------------------
+ * A MARKET ORDER TAKES WHATEVER IS THERE, AND ON THESE CHAINS THAT IS THE
+ * POINT. The fourth order was sent MARKET on a structure with an unquoted leg,
+ * on boards this repository has measured at 66-166% of the mid. Everything the
+ * ticket builds — the per-leg sliders, the net, the verdict band — is bypassed
+ * the moment it is chosen, so the choice has to carry its own sentence.
+ * ------------------------------------------------------------------------- */
+export const marketOrderNote = (book = null) => {
+  const wide = book && book.ok && Math.abs(book.mid) > 0 ? book.spread / Math.abs(book.mid) : null;
+  return `A market order has no price. It takes whatever the book is showing when it arrives, ` +
+    `${wide != null ? `and this book is ${pctText(wide, 0)} of its own mid wide` : `and this book is not quoted on both sides, so there is no touch to take`} — ` +
+    `the sliders, the net and the verdict band above are all bypassed. On these chains that is how a ` +
+    `${money(MIN_NET_DOLLARS)} structure gets filled at several times what it is worth. Use a limit unless you ` +
+    `have a reason not to.`;
+};
+
+/** Where a strike moved because the board it moved to does not carry it. */
+export const strikeSnapNote = (moved = [], expKey = null) => {
+  const ms = Array.isArray(moved) ? moved : [];
+  if (!ms.length) return null;
+  return `${ms.length === 1 ? "One strike was" : `${ms.length} strikes were`} moved onto ` +
+    `${expKey ? `the ${expKey} board` : "this board"}: ${ms.map((m) => `${m.from} → ${m.to}`).join(", ")}. ` +
+    `Strikes are a property of the board, not of the trade, and a leg carried over from another expiry can name a ` +
+    `contract this one does not list. That is the symbol the broker refused on 20 September.`;
+};
+
+/* -------------------------------------------------------------------------
  * A PRICE HAS TO SURVIVE A SANITY CHECK, NOT JUST A FLOOR.
  *
  * `priceability()` above asks whether there is a price AT ALL, and it answers
@@ -3484,5 +3619,147 @@ export const passedOverSummary = (rows = []) => {
     `the rest sat at or inside the ${RULES.exitDTE}-day exit rule and could not. The floor is an inherited ` +
     `default and this is what a measured one would be drawn from.`;
 };
+
+/* =====================================================================
+   THE TRADE CARD — FIVE FIXED LINES, AND EVERYTHING ELSE ONE TAP AWAY.
+
+   ROADMAP P4, unchanged since it was written: what you are betting on, what
+   you risk, how often it works under your own exit rule, when it exits, what
+   would invalidate it.
+
+   >>> WHY IT IS FIVE SENTENCES AND NOT A LAYOUT. <<< The owner has said three
+   times, in his own words, that the screens are unreadable — "si capisce poco
+   dalla UI. Troppe info da leggere, poco intuitivo." Measured on the Build
+   screen of 20 September, ONE decision: a leg-by-leg market table, two
+   paragraphs about an unquoted leg, the quantity, the order type, the time in
+   force, the send button, a combination-market panel, four stat tiles, a
+   market-versus-model pair, a notional paragraph and an error box. None of it
+   is wrong and none of it is cut; it simply is not a decision, and a decision
+   is what that part of the screen is for.
+
+   THE LINES ARE GENERATED SENTENCES AND THEY LIVE HERE, with every other
+   generated sentence, so they cannot drift from the numbers they describe.
+
+   >>> NO NEW ARITHMETIC. <<< Every figure on this card already exists on the
+   screen: `analyze()` at the price that will be sent, `chanceOf()`'s one
+   simulation, `sizing()`'s limits through the gate, `notionalControlled()`,
+   and the rules themselves. This function READS them and writes English.
+
+   >>> THE CURRENCY IS THE BROKER'S. <<< ROADMAP P4 said "what you risk in
+   euros". The account is an Alpaca paper account denominated in US dollars and
+   every figure in this app is a dollar; converting would put a second number
+   on a card whose whole purpose is that there is one. It is SAID once, here,
+   and the roadmap line is corrected rather than obeyed.
+===================================================================== */
+
+/** The one place the card says which money it is counting. */
+export const CARD_CURRENCY = "US dollars";
+export const cardCurrencyNote = () =>
+  `Every figure on this card is in ${CARD_CURRENCY}. The account is an Alpaca paper account denominated in ` +
+  `USD, so that is the currency the broker fills in and the one the app counts in — nothing here is converted.`;
+
+/** Where a payoff pays, in words, from the breakevens the analysis produced. */
+const profitWhere = (breakevens = [], dir = 0) => {
+  const bs = (Array.isArray(breakevens) ? breakevens : []).filter((b) => known(b)).map(Number).sort((a, b) => a - b);
+  if (!bs.length) return null;
+  const px = (b) => `$${b.toFixed(2)}`;
+  if (bs.length === 1) return `${dir < 0 ? "below" : "above"} ${px(bs[0])}`;
+  if (bs.length === 2) return dir === 0 ? `between ${px(bs[0])} and ${px(bs[1])}` : `between ${px(bs[0])} and ${px(bs[1])}`;
+  return `around ${bs.map(px).join(" / ")}`;
+};
+
+/**
+ * FIVE LINES. Each one is an id, a fixed label and one generated sentence.
+ *
+ * Nothing here decides anything and nothing here is a floor: it is the reading
+ * of figures other functions produced. A field it was not given becomes an
+ * honest "not known" rather than a confident number — `Number(null)` is 0 and
+ * 0 is finite, for the sixth time in this repository.
+ *
+ * @returns {{ lines: {id,label,text}[], currency: string, ids: string[] }}
+ */
+export function tradeCard({
+  ticker = "this market", name = "this structure", dir = 0,
+  spot = null, expKey = null, dte = null,
+  maxLoss = null, maxProfit = null, breakevens = [], profitUnbounded = false,
+  contracts = 1, chance = null, chanceNote = null, limits = null, notional = null,
+  agreement = null, clashCount = 0, seasonalNote = null,
+} = {}) {
+  const n = Math.max(1, Math.round(Number(contracts) || 1));
+  const risk = known(maxLoss) ? Math.abs(Number(maxLoss)) * n : null;
+  const best = profitUnbounded || !known(maxProfit) ? null : Number(maxProfit) * n;
+  const where = profitWhere(breakevens, dir);
+  const days = known(dte) ? Math.round(Number(dte)) : null;
+  const room = days == null ? null : days - RULES.exitDTE;
+
+  /* 1 — WHAT YOU ARE BETTING ON. Direction, the level, and the horizon. */
+  const dirWord = dir > 0 ? "goes up" : dir < 0 ? "goes down" : "stays where it is";
+  const bet = `${ticker} ${dirWord}. ${where
+    ? `You make money ${where} at expiry`
+    : `Where it pays cannot be read: this structure has no breakeven the app could compute`}${
+    known(spot) ? `, and ${ticker} is $${Number(spot).toFixed(2)} now` : ""}${
+    expKey ? `. Expiry ${expKey}${days != null ? `, ${days} day${days === 1 ? "" : "s"} away` : ""}` : ""}.`;
+
+  /* 2 — WHAT YOU RISK. The worst case, what share of capital it is, and what
+     it CONTROLS — the fact that makes "capital at risk" mean anything. */
+  const perTrade = limits && known(limits.perTrade) ? Number(limits.perTrade) : null;
+  const cap = limits && known(limits.tradingCapital) ? Number(limits.tradingCapital) : null;
+  const owned = limits && limits.answered === false ? "the suggested" : "your";
+  const riskLine = risk == null
+    ? `The worst case could not be computed, so there is nothing to measure against ${owned} per-trade limit. Nothing is sent.`
+    : `${money(risk)}, and that is the most this can lose — fixed the moment it opens, never a dollar more${
+      n > 1 ? ` (${n} combinations)` : ""}.${
+      perTrade != null && cap ? ` That is ${pctText(risk / cap)} of capital, ${risk > perTrade ? "PAST" : "inside"} ${owned} ${money(perTrade)} per-trade limit.` : ""}${
+      known(notional) ? ` It controls ${money(notional)} of ${ticker}: you can only lose the ${money(risk)}, and the position moves with all of it.` : ""}`;
+
+  /* 3 — HOW OFTEN IT WORKS. The one chance, and an honest statement of WHICH
+     question it answers: `chanceOf()` is where the price FINISHES. How it ends
+     under the exit rule is walked day by day, and only on an open position —
+     saying otherwise would be a field name asserting a reading nobody took. */
+  const pop = chance && known(chance.pop) ? Number(chance.pop) : null;
+  const often = pop == null
+    ? `Not known: without a live price, a horizon and a seasonal reading there is no simulation to quote, and a missing chance is not a confident zero.`
+    : `${chanceInTen(pop)} — ${chanceText(pop)} of ${Number(chance.runs || 0).toLocaleString("en-US")} simulated runs finish in profit AT EXPIRY${
+      known(chance.ev) ? `, and the average of all of them is ${signedMoney(Number(chance.ev) * n)}` : ""}. ` +
+      `That is where it ENDS. How it ends under your own exit rule is walked day by day, and the app only does ` +
+      `that once the position is open.${chanceNote ? ` ${chanceNote}` : ""}`;
+
+  /* 4 — WHEN IT EXITS. Chosen now, frozen now, and the stop named as a warning
+     rather than an order, because that is what `RULES.stopLossEnforcement`
+     says and what `autopilotVerdict()` does. */
+  const exits = `${best != null
+    ? `At ${pctText(RULES.takeProfitPct)} of the best case — ${money(best * RULES.takeProfitPct)} of ${money(best)} — or at `
+    : `This structure has ${NO_CEILING}, so there is no take-profit figure to aim at. It exits at `}` +
+    `${RULES.exitDTE} days to expiration${room != null ? `, ${room} day${room === 1 ? "" : "s"} from now` : ""}` +
+    `${best != null ? ", whichever comes first" : ""}. Chosen now and frozen: the plan is not renegotiated while the ` +
+    `trade is open. The ${pctText(RULES.stopLossPct)} stop is a WARNING and never an automatic close — the evidence for ` +
+    `closing on it has not been measured.`;
+
+  /* 5 — WHAT WOULD MAKE IT WRONG. */
+  const wrong = `${where
+    ? `${ticker} not ${where} with ${RULES.exitDTE} days left: the exit rule closes it there whatever you think at the time`
+    : `The price of this structure cannot be read, which is already enough to make it wrong`}. ${
+    clashCount > 0
+      ? `${clashCount} of the four factors already disagree with this direction — that is what the written reason above is for.`
+      : agreement
+        ? `The four factors read ${agreement} today; if that turns, the reason you took this is gone even while the price has not moved.`
+        : `The four factors have not been read for this market, so nothing is confirming the idea either.`}${
+    seasonalNote ? ` ${seasonalNote}` : ""}`;
+
+  return {
+    ids: TRADE_CARD_IDS,
+    currency: cardCurrencyNote(),
+    lines: [
+      { id: "bet", label: "YOU ARE BETTING", text: bet },
+      { id: "risk", label: "YOU RISK", text: riskLine },
+      { id: "often", label: "HOW OFTEN IT WORKS", text: often },
+      { id: "exits", label: "WHEN IT EXITS", text: exits },
+      { id: "wrong", label: "WHAT WOULD MAKE IT WRONG", text: wrong },
+    ],
+  };
+}
+
+/** The five, in order, so nothing can render four of them and call it the card. */
+export const TRADE_CARD_IDS = ["bet", "risk", "often", "exits", "wrong"];
 
 export default RULES;

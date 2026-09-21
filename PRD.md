@@ -1490,6 +1490,220 @@ the coercion, exactly as `qualityFloor()` throws out an unknown open interest be
 
 ---
 
+## §4n — THE APP INVENTED A CONTRACT, AND THE DECISION WAS ELEVEN BLOCKS LONG
+
+The THIRD live reading, and the first one where the order never reached the market at all. Same
+phone, same owner, SOYB, 20 September 2026, 21:49, spot $27.64, the 2026-11-20 board.
+
+    Alpaca refused it — HTTP 422. code 42210000:
+    invalid legs: [leg.0 asset "SOYB261120C00027500" not found]
+
+    QTY 14 · Market — take what is there · Until I cancel
+    MOST YOU CAN MAKE $1,158 · MOST YOU CAN LOSE $942
+    MADE PER $1 RISKED 1.23 · NOTIONAL CONTROLLED $38,696
+    MARKET SAYS $67 · THE MODEL SAYS $60
+
+Four orders have now been sent and none has filled. The first three were not met by the market. The
+fourth **was refused by the broker for a reason the app created itself**, which is a different and
+worse class of failure: nothing about the market stopped it.
+
+### The cause — `buildOcc()` was a fallback, and it must not be one
+
+Four of the six order paths spelled exactly this:
+
+    const occ = q?.occ || buildOcc(ticker, expKey, l.type, l.strike);
+
+`src/App.jsx` (`sendToAlpaca`, and the chart button beside each leg) and `src/pro.jsx`
+(`OrderTicket.send`, `GuardianPanel.placeExit`). `buildOcc()` FORMATS an OCC symbol out of a strike
+**the app chose**. It cannot know whether anybody issued it — only the chain knows that. So the
+moment a leg was unquoted, the app named a contract that has never existed and asked the broker to
+trade it. `SOYB261120C00027500` is a perfectly well-formed symbol for a contract nobody has ever
+listed.
+
+**THIS IS THE RULE THE REST OF THE CODEBASE ALREADY KEEPS.** A missing open interest is UNKNOWN and
+never zero. A missing quote size is UNKNOWN and never zero. A missing drift is UNKNOWN and never a
+confident zero. A missing maximum profit is UNKNOWN and never a maximum of zero. **A contract the
+feed did not list is UNKNOWN and never a well-formed symbol.**
+
+`buildOcc()` stays. Naming a contract is legitimate — the Journal and the option-history panel have
+to be able to write one down — but naming one is not the same as asserting it trades. Exactly ONE
+call survives in `App.jsx`, the price-history button beside each leg, and it says on screen when the
+chain did not list what it is about to chart. `pro.jsx` does not call it at all any more, and
+`riskGate.test.js` fails the build if either changes.
+
+### It is in the GATE, and that is not a widening of the gate
+
+`contractListing()` / `unlistedContractNote()` in `src/rules.js`, enforced as `UNLISTED_CONTRACT` in
+`src/riskGate.js` — a fourth refusal beside `UNPRICEABLE` and `IMPOSSIBLE_LOSS`, in the same
+register: its own code, its own sentence with the leg in it, its own test.
+
+- **Why the gate and not only the components.** Four paths made one mistake. The gate is the one
+  place all six pass through.
+- **Why it is not a quality floor.** The floors stay out of the gate for ever, because a hand-built
+  trade is the user's to make. This is not a judgement about whether a trade is worth taking: a
+  contract that does not exist is not a trade at all. It is the same KIND of question as "is there a
+  price at all", which has been in the gate since PR #14.
+- **ENTRY ONLY**, like both of its neighbours. A closing order names contracts the account already
+  holds, and refusing to let somebody OUT of a position because a feed went quiet is the worse
+  failure by a distance. The refusal on the close path lives in `placeExit()` instead, beside the
+  button, and it says which leg and what to do about it.
+- **UNKNOWN IS NOT MISSING.** `occs` is evidence a caller either has or does not, exactly like
+  `quotes`: no array at all means the caller cannot answer and nothing is tested. An EMPTY array
+  beside real legs is an answer — the chain listed nothing — and it fails. That is the case the SOYB
+  order was.
+
+### The ticket's own gate call was WEAKER than the screen above it
+
+`runGate(gate, { ticker, intent: "open", legs, dte, contracts, maxLoss, maxProfit, entryOverride })`
+in `pro.jsx` passed **no `quotes` and no `net`**, so `priceability()` inside the gate saw only the
+maximum loss and could not refuse an unquoted leg — while the Build screen's `guard` memo, in the
+same codebase, passed both. **The weaker of the two was the one guarding the send.** Both calls carry
+the same evidence now, and `riskGate.test.js` sweeps the source: an open-intent gate call that leaves
+out `quotes`, `net` or `occs` fails the build. The sweep is a source scan, not a behaviour test, for
+the same reason the rule-literal sweep is — the throw catches the call that runs, the sweep catches
+the call written today that only runs on a market nobody demos.
+
+### Where the strike came from — two ways, and both are closed
+
+`snapStrike()` snaps to the nearest strike ON THE LOADED BOARD and falls back to an invented
+`Math.round(x / step) * step` only when the board is empty. The live chain could not be reached from
+here, so the exact path that produced this 27.5 cannot be replayed. What CAN be established from the
+code is that there were two ways in, and **neither of them re-snapped**:
+
+1. **The expiry dropdown on Build** — `onChange={(e) => { setExpKey(e.target.value); setBt(null); }}`
+   changed the board and left the legs exactly where they were.
+2. **`buildHandOff()`** — it copies the legs verbatim onto whatever board it hands them to, from the
+   Shortlist, from a saved strategy, from "Monitor" on a position.
+
+A board that lists half-dollar strikes and one that does not are a real pair on these chains, so a
+27.5 carried from a nearer SOYB expiry onto 2026-11-20 is a complete explanation. It is **not proven**
+that this is what happened, and that is on the NOT VERIFIED list rather than written up as the cause.
+Both paths re-snap now (`resnapLegs()` / `expiryStrikes()` in `chain.js`, which is where a fact about
+a board belongs), an unloaded chain is left alone rather than snapped against a fallback grid, and
+what moved is said on screen in one sentence instead of sliding under the reader.
+
+**0a is the defence that holds whichever it was**, which is why it is in the gate and not in a
+validator on the strike field.
+
+### Two things the screenshot raised — reported, and only the wrong one fixed
+
+- **MARKET, on a board with an unquoted leg.** Everything PR #28 built — the per-leg sliders, the
+  net, the verdict band — is bypassed the moment MARKET is chosen, and the stat tile underneath still
+  read *"at the price below, not at the mid"* when there is no price below. That label names a
+  control that is not on the screen, and it is now correct (*"at the touch a market order takes"*).
+  The option itself is NOT removed — that is a product decision, not a bug — but it carries
+  `marketOrderNote()`, which says in words that it has no price, how wide this book is, and that on
+  these chains that is how a $5 structure is filled at several times what it is worth.
+- **QTY 14 against `sizing()`.** The figures reconcile exactly: $942 / 14 = $67.3 a combination,
+  which is the MARKET SAYS $67 above it, and 14 × 100 × $27.64 = $38,696, which is the notional. So
+  **$942 is the total and the gate measured the total**, which is what PR #23 built. The gate
+  therefore passed it correctly **only if trading capital is at least $18,840** ($942 ≤ 5% of
+  capital); with the capital questions unanswered the suggested $5,000 gives a $250 cap and this
+  order would have been blocked. The capital actually set is not readable from here and is on the
+  NOT VERIFIED list. **Nothing suggested the 14 into the ticket**: `openOnBuild()` resets the size to
+  1 on every hand-off and `applyPreset()` passes none, so 14 was typed. It is worth noting that the
+  Shortlist DOES print a suggested "HOW MANY ×N" from the budget and does not carry it to Build — a
+  number shown on one screen and retyped on another.
+
+## The decision was eleven blocks long — the trade card (ROADMAP P4)
+
+The owner has now said three times, in his own words: *"si capisce poco dalla UI. Troppe info da
+leggere, poco intuitivo."* The bug above blocks the fill; the density is why he could not see it
+coming.
+
+Counted on that one Build screen, for ONE decision: a leg-by-leg market table, TWO paragraphs about
+an unquoted leg, the quantity, the order type, the time in force, the send button, a
+combination-market panel, four stat tiles, a market-versus-model pair, a notional paragraph and an
+error box. **The sentence "one leg has no two-sided quote" appeared TWICE** — once in the leg table
+and once in the combination panel — inside the panel PR #28 built to stop the CONFLICT paragraph
+appearing four times.
+
+### Five fixed lines, and everything else one tap away
+
+`tradeCard()` in `src/rules.js`, with every other generated sentence, so the card cannot drift from
+the numbers it describes. `TradeCard` in `App.jsx` renders it as the DEFAULT state of the Build
+screen's decision area:
+
+1. **YOU ARE BETTING** — the direction, the level it pays at, the horizon, and where the market is now.
+2. **YOU RISK** — the worst case at the size on screen, what share of capital that is, which limit it
+   is inside, and what it CONTROLS.
+3. **HOW OFTEN IT WORKS** — the one seeded Monte Carlo, with the seasonal table that drifted it.
+4. **WHEN IT EXITS** — take profit, exit DTE, and the stop named as the warning it is.
+5. **WHAT WOULD MAKE IT WRONG** — the level the exit rule will close it at, and what the four factors
+   are saying today.
+
+- **NO NEW ARITHMETIC.** Every figure already existed on that screen: `analyze()` at the price that
+  will be sent, `chanceOf()`'s one simulation, `sizing()`'s limits through the gate,
+  `notionalControlled()`, and the rules themselves. The card READS them and writes English.
+- **NONE OF THE OLD COPY IS CUT.** The stat tiles, the greeks, the ticket and the confirm step all
+  open behind a tap, in `DeskSheet` — the same `EvidenceOverlay` the evidence panels use, fixed to
+  the viewport and scrolling inside itself, which is also what stops a panel landing below the fold.
+  `DeskSheet` lives in `steps.jsx` because it is chrome with no trade in it.
+- **A REFUSAL IS NEVER BEHIND A TAP.** Every gate violation — including the two this session added —
+  renders on the card, beside the button, under the same rule as "an order that fails must fail where
+  the button is". The tap only ever hides figures that explain a trade, never a reason it cannot be
+  made.
+- **AND IT CLOSED TWO MORE DUPLICATES ON THE WAY.** The gate's verdict was printed above the chain
+  and the legs editor, hundreds of pixels from the control it governs; the gate's WARNINGS were
+  printed there raw while the collapsed warnings panel above was already printing the same list
+  through `warningsToPrint()`. The refusals sit on the card, the warnings in the warnings panel, and
+  neither is anywhere else.
+- **ONE FACT, ONE PLACE, and it needed a rule rather than another pass.** `unquotedLegNote()` keeps
+  its home where the legs are NAMED; every other place on the screen prints `unquotedLegPointer()`,
+  which is the same discipline `warningsToPrint()` applies to the CONFLICT paragraph.
+
+### The currency is the broker's
+
+ROADMAP P4 said "what you risk **in euros**". The account is an Alpaca paper account denominated in
+US dollars and every figure in this app is a dollar; converting would put a second number on a card
+whose whole purpose is that there is one. `cardCurrencyNote()` says it once, on the card, and the
+roadmap line is corrected rather than obeyed.
+
+### Laid out for 390px
+
+One column. An 18px rail for the line number and `minmax(0, 1fr)` for the sentence, so nothing can
+force a horizontal scroll. Buttons wrap and are full-height. The sheets are the same
+`EvidenceOverlay` that was designed against a phone. **This is a statement about the CSS, not a
+reading**: nobody has opened it on a phone, and that is the seventh item in a row handed forward that
+only a phone can settle.
+
+### What this does NOT do
+
+- **The gate gains ONE rule and loses none.** Six order paths, six, every one through
+  `evaluateTrade`. Paper mode is still verified, not assumed. The quality floors are still out of it.
+- **`RULES.mcRuns`, the exit rule, the 5% and 25% caps, `terminalMC`, `exitSim` and the provenance
+  work of PR #26 through #29 are untouched.** Not one number changed value.
+- **It does not make anything fill.** P0 is still open and its DONE WHEN is unchanged: a real fill.
+
+### What a fill would still settle that this PR cannot
+
+- Whether `SOYB261120C00027500` was the only thing wrong with that order. The gate refuses it now;
+  whether what is left fills is a market question.
+- **The effective price against the fill price.** The record carries `min(limit, ask)`; the broker
+  records the fill; `recheckOrders()` still does not compare them. Nothing has ever filled, so the
+  two have never been compared. This is P0's, and it is unmoved.
+- Whether the indicative feed ever populates `bidSize` / `askSize`, and whether `occ` is ever absent
+  on a leg the board really does list — which would make the new refusal a false one.
+
+### NOT VERIFIED
+
+- **WHICH OF THE TWO PATHS PUT THE 27.5 ON THAT BOARD.** Both are closed; neither is proven to be the
+  one. The live chain cannot be reached from here.
+- **NOBODY HAS SEEN THE TRADE CARD, ON A PHONE OR ANYWHERE ELSE.** Seventh in a row.
+- **THE FIVE LINES HAVE NEVER BEEN READ BY THE PERSON THEY ARE FOR.** They are held against a
+  fixture; whether they are the five lines that make the screen legible to him is the only test that
+  matters and it has not been run.
+- **LINE 3 IS NOT THE LINE ROADMAP P4 ASKED FOR, AND IT SAYS SO.** P4 wanted "how often it works
+  under your own exit rule". The app's one chance (`chanceOf()`) is where the price FINISHES; the
+  exit-rule answer is `exitSim()` / `exitPathSim()`, which run only on an OPEN position. Computing
+  one here would have been new arithmetic, which this session was told not to add. The line therefore
+  states which question it answers and says the other is walked once the position is open.
+- **THE CAPITAL ACTUALLY SET IS UNKNOWN**, so "the gate passed QTY 14 correctly" is arithmetic, not
+  an observation.
+- **NO LIVE CHAIN, NO BROWSER, NO ALPHA VANTAGE, NO DEPLOY.** The same wall as PR #15 through #29.
+
+---
+
 ## 5. The wizard IS the app
 
 The wizard is not a feature inside the app. It is the entry point and the spine. Existing tabs remain reachable but are no longer the front door.
@@ -2427,7 +2641,49 @@ What is left:
 The standing rule in `CLAUDE.md`: every session starts by fixing what the last one flagged, and
 ends by writing down what it could not verify. Currently open:
 
-### WRITTEN THIS SESSION — dead is not working, and Watching (§4m)
+### WRITTEN THIS SESSION — the contract the app invented, and the trade card (§4n)
+
+The THIRD live reading. `npm test` reports **735 checks across 19 suites**, up from the **717** §4m
+wrote down. `npm run build` is clean.
+
+Suite totals that sum to 735: signals 22, chain 35, engine 28, riskGate **162**, theme 39, demo 16,
+handoff **13**, path 14, liquidity 7, order 25, journal 81, autopilot 61, pwa 36, visuals 35, wizard
+56, steps 20, ceiling 49, order.jsx 8, ticket **28**. The eighteen new checks are eight in
+`riskGate.test.js` (the SOYB leg refused by name, a listed leg and a genuine 1x2x1 ratio unaffected,
+unknown-is-not-missing, entry-only, the gate-not-a-floor guard, `contractListing()` itself, the
+open-intent evidence sweep and the no-invented-symbol sweep), six in `ticket.test.jsx` (the five
+lines with real numbers, the refusal on the first screen, unknown-is-still-not-a-number, the
+unquoted-leg sentence counted ONCE, the market-order warning, the strike-snap sentence) and four in
+`handoff.test.js` (the re-snap, the leg already on the board, the unloaded chain, and that the legs
+are still copies).
+
+**WHAT THE TESTS FOUND THAT I DID NOT.** The tie case in `snapStrike()`: 27.5 is exactly between the
+27 and the 28 a board carries, and it has always resolved to the first equally-near strike it meets.
+That is arbitrary and DETERMINISTIC, the leg lands on a contract that exists either way, and nothing
+about it was changed — but it was asserted rather than assumed.
+
+**NOTHING HERE WAS RUN AGAINST A LIVE CHAIN, A BROWSER, ALPHA VANTAGE OR A DEPLOY.** Same wall as
+PR #15 through #29.
+
+- **WHICH OF THE TWO PATHS PUT THE 27.5 ON THAT BOARD IS NOT KNOWN.** The expiry dropdown and
+  `buildHandOff()` both failed to re-snap; both are closed; neither is proven to be the one that did
+  it. 0a is the defence that holds whichever it was.
+- **NOBODY HAS SEEN THE TRADE CARD.** Seventh item in a row that only a phone can settle, and the
+  first one where the whole point of the change is what it looks like.
+- **THE FIVE LINES HAVE NEVER BEEN READ BY THE PERSON THEY ARE FOR.**
+- **LINE 3 IS NOT THE LINE ROADMAP P4 ASKED FOR.** It is the chance AT EXPIRY, because the
+  exit-rule figure only exists on an open position and computing one on Build would have been new
+  arithmetic. The line says which question it answers.
+- **THE CAPITAL ACTUALLY SET IS UNKNOWN**, so the QTY-14 finding is arithmetic ($942 needs at least
+  $18,840 of trading capital to clear the 5% cap), not an observation.
+- **THE §4l AND §4m DEBTS ARE ALL STILL OPEN**, untouched by this session: `maxComboSpreadShareOfNet`
+  is still chosen not measured and has still never emptied a real board; the rebuilt ticket has still
+  not been seen on a phone, and neither has the Watching tab or the four-tab row; the size column has
+  still never held a real quote size; `UnifiedPosition()` still carries its own `sigma = 0.3`; and
+  **the effective price is still not reconciled against a fill, because nothing has filled — that one
+  is P0's.**
+
+### WRITTEN BEFORE THIS — dead is not working, and Watching (§4m)
 
 The second live reading, a day after the first, from the same phone. `npm test` reports **717 checks
 across 19 suites**, up from the **705** §4l wrote down. `npm run build` is clean.

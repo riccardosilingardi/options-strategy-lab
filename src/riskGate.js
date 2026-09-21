@@ -17,6 +17,7 @@
 // ============================================================================
 
 import { RULES, sizing, money, pctText, capitalSourceNote, priceability, impossibleLoss, MIN_NET_DOLLARS,
+  contractListing,
   entryRoom, entryInsideExitNote, entryRoomWarning, entryRoomOverrideAsk, entryOverrideOk } from "./rules.js";
 // HOW MANY COMBINATIONS A POSITION IS, read from ONE place (src/journal.js).
 // This file used to spell `Math.max(1, Number(p?.contracts) || 1)` in three
@@ -118,6 +119,10 @@ const V = (code, message) => ({ code, message });
  *        NEGATIVE, the way `analyze()` produces it. The arbitrage check reads
  *        that sign; every dollar limit below it reads `Math.abs`. A closing
  *        proposal may carry a positive magnitude and is never sign-tested.
+ *        `occs` is one OCC symbol per leg AS THE CHAIN GAVE IT, aligned with
+ *        `legs`, null where the chain listed nothing. It is the evidence
+ *        behind UNLISTED_CONTRACT: no array means the caller cannot answer,
+ *        an empty array beside real legs means the chain answered "none".
  *        Two optional fields feed the priceability check, and the more of them
  *        a caller passes the more it can catch: `quotes` — one `{ bid, ask }`
  *        per leg, aligned with `legs`, straight off the chain — and `net`, the
@@ -202,6 +207,42 @@ export function evaluateTrade({ proposal, portfolio, capital, signals } = {}) {
         `${pr.reasons[0]} Nothing is sent: below ${money(MIN_NET_DOLLARS)} a contract there is no maximum ` +
         `loss to measure against ${limits.answered ? "your" : "the suggested"} ` +
         `${money(limits.perTradeLimit)} per-trade limit.`));
+    }
+  }
+
+  /* ---- 3bb. AND THE CONTRACT HAS TO EXIST ----
+     >>> THE FOURTH ORDER THIS APP EVER SENT DID NOT REACH THE MARKET. <<<
+     SOYB, 20 September 2026, 21:49, the 2026-11-20 board:
+
+         HTTP 422 / code 42210000
+         invalid legs: [leg.0 asset "SOYB261120C00027500" not found]
+
+     The symbol is well formed. Nobody has ever issued it. Four of the six
+     order paths built it with `buildOcc()` whenever the chain had not quoted
+     the leg — a formatter that turns a strike the APP chose into a symbol,
+     and it cannot know whether anybody lists it. The app created its own
+     refusal.
+
+     This is the same class of question as UNPRICEABLE directly above, and it
+     is asked here for the same reason: four paths made one mistake and the
+     gate is the one place all six pass through. It is NOT a quality floor —
+     those stay out of the gate for ever, because a hand-built trade is a
+     trade the user is entitled to make. A contract that does not exist is
+     not a trade at all.
+
+     ENTRY ONLY, like UNPRICEABLE and IMPOSSIBLE_LOSS. A closing order names
+     contracts the account already holds, and refusing to let somebody out of
+     a position because a feed is quiet is the worse failure by a distance.
+
+     `occs` IS EVIDENCE THE CALLER EITHER HAS OR DOES NOT, exactly like
+     `quotes`: no array at all means the caller cannot answer and nothing is
+     tested. An EMPTY array beside real legs is an answer — the chain listed
+     nothing — and it fails. `riskGate.test.js` sweeps the source and fails
+     the build if an open-intent gate call leaves the evidence out. */
+  if (isOpen && legs.length) {
+    const cl = contractListing({ legs, occs: Array.isArray(p.occs) ? p.occs : null });
+    if (cl.checked && !cl.listed) {
+      violations.push(V("UNLISTED_CONTRACT", `${cl.reasons[0]} Nothing is sent.`));
     }
   }
 

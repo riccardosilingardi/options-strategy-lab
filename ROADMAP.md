@@ -13,10 +13,14 @@ window, warning and typed override above it).
 DONE WHEN: an opening order is really filled on the paper account and appears
 in Positions. Not a test — a fill.
 
-**PR #28 IS THE LATEST THING STANDING BETWEEN THE OWNER AND THIS.** Three orders have been sent
-and none has filled; one of them sat at the exact mid, which the app now names as the price nobody
-has to meet. The reasons are on screen — see the P4 section below, brought forward off the first
-live reading the owner took himself.
+**FOUR ORDERS HAVE NOW BEEN SENT AND NONE HAS FILLED — AND THE FOURTH DID NOT EVEN REACH THE
+MARKET.** The first three were not met by the market; one of them sat at the exact mid, which the app
+now names as the price nobody has to meet. The fourth was **refused by the broker for a reason the
+app created itself**: SOYB, 20 September 2026, HTTP 422 / 42210000, *invalid legs: [leg.0 asset
+"SOYB261120C00027500" not found]* — a well-formed symbol for a contract nobody has ever issued,
+because `buildOcc()` was a FALLBACK in four of the six order paths. That is closed (PR #30, §4n) and
+it is in the gate, where all six pass through. Whether what is left fills is a market question, and
+P0's DONE WHEN is unchanged.
 
 SHIPPED (PR "the order that never filled", 564 checks, build clean):
   - `modelSanity()` in rules.js at all three generation sites, refusing a price
@@ -353,9 +357,13 @@ SHIPPED (PR #28, 705 checks across 19 suites, build clean):
     Shape 4 now refuses `IDENT || 45` and `IDENT ?? 45`, with five more quiet-cases proving it does
     not cry wolf.
 
-**THE REST OF P4 IS STILL OPEN**: the trade card's five fixed lines (what you are betting on, what
-you risk in euros, how often it works under your own exit rule, when it exits, what would
-invalidate it), everything else one tap away. The THREE PROBABILITIES deletion is DONE (P1, PR #25).
+~~**THE REST OF P4 IS STILL OPEN**: the trade card's five fixed lines~~ — **DONE BY PR #30**, see
+P4-ter below. The THREE PROBABILITIES deletion was DONE by P1 (PR #25).
+
+**AND THE "IN EUROS" IN THAT LINE IS CORRECTED, NOT OBEYED.** The account is an Alpaca paper account
+denominated in US dollars and every figure in this app is a dollar. Converting would put a second
+number on a card whose whole purpose is that there is one. The card SAYS which currency it is
+counting, once (`cardCurrencyNote()`), and this roadmap line is wrong rather than the code.
 
 WHAT PR #28 HANDS FORWARD:
   - **`maxComboSpreadShareOfNet` (1.0) IS CHOSEN, NOT MEASURED**, and joins the same list as
@@ -428,6 +436,75 @@ WHAT PR #29 HANDS FORWARD:
     the rebuilt ticket still unseen, the size column still never fed a real size, and the effective
     price still unreconciled against a fill. **That last one is P0's**, and P0 has not moved.
 
+## P4-ter — The app stops inventing contracts, and the decision is five lines  (PR #30 — DONE)
+
+The THIRD live reading, and the first where the order never reached the market. PRD §4n.
+**This is ROADMAP P0 and the remaining half of P4, and they were one session**: the bug blocks the
+fill, the density is why the owner could not see it coming, and both are on the same screen.
+
+SHIPPED (PR #30, 735 checks across 19 suites, build clean):
+
+  - **THE APP INVENTED A CONTRACT THAT DOES NOT EXIST.** Four of the six order paths spelled
+    `q?.occ || buildOcc(ticker, expKey, l.type, l.strike)`, and `buildOcc()` FORMATS a symbol out of
+    a strike the APP chose — it cannot know whether anybody issued it. An unquoted leg therefore made
+    the app name `SOYB261120C00027500` and ask the broker to trade it. **A contract the feed did not
+    list is UNKNOWN and never a well-formed symbol**, which is the same rule this codebase already
+    keeps for open interest, quote sizes, drift and maximum profit.
+  - **IT IS IN THE GATE**, as `UNLISTED_CONTRACT`, a fourth refusal beside `UNPRICEABLE` and
+    `IMPOSSIBLE_LOSS` and in the same register: its own code, its own sentence with the leg in it,
+    its own test. Four paths made one mistake; the gate is the one place all six pass through. It is
+    **not** a quality floor — those stay out for ever — because a contract that does not exist is not
+    a trade at all. Entry only: refusing to let somebody OUT of a position because a feed went quiet
+    is the worse failure, so the close path refuses in `placeExit()` instead, beside the button.
+    `buildOcc()` survives for NAMING a contract, in exactly one place, and a test holds it there.
+  - **THE TICKET'S OWN GATE CALL WAS WEAKER THAN THE SCREEN ABOVE IT.** It passed no `quotes` and no
+    `net`, so `priceability()` inside the gate could not refuse an unquoted leg, while the Build
+    screen's `guard` memo passed both. Both carry the same evidence now, and `riskGate.test.js` fails
+    the build if an open-intent gate call leaves `quotes`, `net` or `occs` out.
+  - **STRIKES ARE A PROPERTY OF THE BOARD.** Neither the expiry dropdown nor `buildHandOff()`
+    re-snapped a leg carried onto a new expiry, which is how a 27.5 from a board that lists half
+    dollars survives onto one that does not. Both re-snap now (`resnapLegs()` / `expiryStrikes()` in
+    `chain.js`), an unloaded chain is left alone rather than snapped against a fallback grid, and what
+    moved is said in one sentence. **Which of the two paths actually did it is not known** — the live
+    chain cannot be reached from here — and 0a is the defence that holds whichever it was.
+  - **THE DECISION WAS ELEVEN BLOCKS LONG, AND IT IS FIVE LINES.** `tradeCard()` in `rules.js`, with
+    every other generated sentence: what you are betting on, what you risk, how often it works, when
+    it exits, what would make it wrong. **No new arithmetic** — every figure already existed on that
+    screen. **None of the old copy is cut**: the stat tiles, the greeks, the ticket and the confirm
+    step open behind a tap in `DeskSheet`, the same viewport-fixed sheet the evidence panels use.
+    **A refusal is never behind a tap** — every gate violation renders on the card, beside the button.
+  - **AND IT CLOSED THREE DUPLICATES.** "One leg has no two-sided quote" was on the Build screen
+    TWICE — inside the panel PR #28 built to stop the CONFLICT paragraph being there four times — and
+    it needed a rule rather than another pass: `unquotedLegNote()` keeps its home where the legs are
+    NAMED and everywhere else prints `unquotedLegPointer()`. The gate's verdict was printed hundreds
+    of pixels above the control it governs, and the gate's warnings were printed raw beside a
+    collapsed panel already printing the same list.
+  - **THE MARKET ORDER EARNS ITS WARNING.** The refused order was MARKET, on a book with an unquoted
+    leg, on chains this repository has measured at 66-166% of the mid — and the stat tile under it
+    said "at the price below, not at the mid" with no price below. The label is correct now and
+    `marketOrderNote()` says what a market order actually does on these books. The OPTION is not
+    removed: that is a product decision, not a bug.
+
+WHAT PR #30 HANDS FORWARD:
+  - **NOBODY HAS SEEN THE TRADE CARD**, on a phone or anywhere else. Seventh item in a row that only
+    a phone can settle, and the second in a row whose entire subject is what the screen looks like.
+    The 390px layout is a statement about the CSS, not a reading.
+  - **LINE 3 OF THE CARD IS NOT THE LINE P4 ASKED FOR, AND IT SAYS SO.** P4 wanted "how often it
+    works under your own exit rule"; the app's one chance is where the price FINISHES, and the
+    exit-rule figure (`exitSim`) exists only on an OPEN position. Computing one on Build would have
+    been new arithmetic. **Giving Build its own exit-path figure is the obvious next thing**, and it
+    is a real piece of work rather than a rename.
+  - **WHICH PATH PUT THE 27.5 ON THAT BOARD IS STILL UNKNOWN.** Both are closed. Only a live chain
+    settles which one.
+  - **THE CAPITAL SET ON THAT PHONE IS UNKNOWN.** $942 of risk needs at least $18,840 of trading
+    capital to clear the 5% cap; whether that is what is set cannot be read from here.
+  - **EVERY §4l AND §4m DEBT IS STILL OPEN AND UNTOUCHED**: the pair ceiling is still chosen not
+    measured and has never emptied a real board, the rebuilt ticket and the Watching tab and the
+    four-tab row have still not been seen, the size column has still never been fed a real quote
+    size, and `UnifiedPosition()` still carries its own `sigma = 0.3`. **And the effective price is
+    still not reconciled against a fill, because nothing has filled. That one is P0's, and P0 has not
+    moved.**
+
 ## P2 — Proposals ranked by edge, not by score
 At market prices every structure has expected value near zero: high
 probability and large payoff are two ends of one lever. So the app must
@@ -491,13 +568,20 @@ approve.mjs).
 REGRESSION TEST: the copilot can never again write "paste the chain data" or
 estimate a price by hand.
 
-## P4 — UX  (PARTLY DONE — see the section above, which came forward)
-The trade card, five fixed lines: what you are betting on, what you risk in
+## P4 — UX  (DONE — PR #28 and PR #30, both brought forward)
+~~The trade card, five fixed lines: what you are betting on, what you risk in
 euros, how often it works under your own exit rule, when it exits, what would
-invalidate it. Everything else one tap away. ~~The "THREE PROBABILITIES — which
-one to read, and when" panel is deleted~~ — **DONE BY P1** (PR #25 made it TWO
+invalidate it. Everything else one tap away.~~ **DONE BY PR #30** (P4-ter).
+**"In euros" is corrected**: the broker's account is in US dollars, the card
+says so once and converts nothing. ~~The "THREE PROBABILITIES — which one to
+read, and when" panel is deleted~~ — **DONE BY P1** (PR #25 made it TWO
 QUESTIONS), which is why the premise this item was waiting on had already been
 satisfied and the rest of P4 came forward as PR #28.
+
+What P4 could NOT settle, and no code can: **nobody has seen any of it on a
+phone.** That is now seven pull requests in a row handing the same item
+forward, and the last two are pull requests whose entire subject is what the
+screen looks like.
 
 ## P5 — Measure
 Backtest the exit rules (take profit 50%, 21 DTE, stop loss as warning) on

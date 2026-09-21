@@ -91,6 +91,57 @@ export function buildOcc(sym, expISO, type, strike) {
   return `${sym.toUpperCase()}${d}${type === "call" ? "C" : "P"}${k}`;
 }
 
+/* -------------------------------------------------------------------------
+ * STRIKES ARE A PROPERTY OF THE BOARD, NOT OF THE TRADE.
+ *
+ * This lived in App.jsx, where `buildPresets()` used it to snap a percentage
+ * of spot onto a strike the chain really carries. What NOBODY did was re-snap
+ * a leg that was CARRIED to a different board — by the expiry dropdown, or by
+ * a hand-off from the Shortlist — so a 27.5 from a board that lists half
+ * dollars survived onto one that does not, and the app went on to name
+ * SOYB261120C00027500 to a broker that has never heard of it (PRD §4n).
+ *
+ * It belongs here for the same reason `midOf()` does: it is a fact about the
+ * chain, and two implementations of "the nearest strike that exists" would be
+ * two answers to one question.
+ * ------------------------------------------------------------------------- */
+
+/** The nearest strike the board really carries. With no board, a grid step. */
+export function snapStrike(x, strikes, step) {
+  if (!strikes || !strikes.length) return Math.round(x / step) * step;
+  return strikes.reduce((best, k) => (Math.abs(k - x) < Math.abs(best - x) ? k : best), strikes[0]);
+}
+
+/** Every strike on ONE expiry, calls and puts together, sorted. */
+export function expiryStrikes(chain, expKey) {
+  const b = chain && chain.byExp && chain.byExp[expKey];
+  if (!b) return null;
+  const set = new Set([...Object.keys(b.calls), ...Object.keys(b.puts)].map(Number));
+  return Array.from(set).sort((a, c) => a - c);
+}
+
+/**
+ * EVERY LEG ONTO THE BOARD IT IS ON — and what moved, so it can be said.
+ *
+ * With no strikes for the target board NOTHING is touched: an unloaded chain
+ * is UNKNOWN, and snapping against a fallback grid would invent exactly the
+ * kind of strike this exists to stop.
+ *
+ * @returns {{ legs, moved: {i, from, to}[] }}
+ */
+export function resnapLegs(legs = [], strikes = null) {
+  const ls = Array.isArray(legs) ? legs : [];
+  if (!strikes || !strikes.length) return { legs: ls, moved: [] };
+  const moved = [];
+  const out = ls.map((l, i) => {
+    const k = snapStrike(Number(l.strike), strikes, null);
+    if (!Number.isFinite(k) || k === Number(l.strike)) return l;
+    moved.push({ i, from: Number(l.strike), to: k });
+    return { ...l, strike: k };
+  });
+  return { legs: moved.length ? out : ls, moved };
+}
+
 /**
  * The price of one contract, decided once for every source.
  * Mid of bid and ask when both sides are quoted; the last trade otherwise;

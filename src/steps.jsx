@@ -6,6 +6,8 @@
 //   StepNav          the numbered path, 1 → 2 → 3, with what each step is
 //                    carrying written under its number.
 //   EvidenceOverlay  a sub-panel that opens OVER the step instead of below it.
+//   DeskSheet        the same sheet, for the Build screen's own numbers and its
+//                    own order ticket (PRD §4n) — chrome, with no trade in it.
 //   CompareTray      what is ticked for comparison, always visible while it has
 //                    something in it.
 //
@@ -140,7 +142,7 @@ export function EvidenceBar({ items = [], open, onOpen, mark = {} }) {
  * closable with Escape as well as the button — on a phone there is no second
  * way out of a full-screen panel.
  */
-export function EvidenceOverlay({ title, sub, onClose, children }) {
+export function EvidenceOverlay({ title, sub, onClose, children, eyebrow = "EVIDENCE" }) {
   useEffect(() => {
     if (typeof document === "undefined") return;
     const prev = document.body.style.overflow;
@@ -157,7 +159,11 @@ export function EvidenceOverlay({ title, sub, onClose, children }) {
         padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10,
       }}>
         <div style={{ minWidth: 0 }}>
-          <div style={{ ...mono, fontSize: 10, letterSpacing: "0.15em", color: T.amber }}>EVIDENCE</div>
+          {/* THE EYEBROW IS THE CALLER'S. The Build screen opens its own
+              numbers and its own order ticket in this sheet (PRD §4n), and
+              labelling the order ticket "EVIDENCE" would name the wrong thing
+              on the one screen where the word has to be exact. */}
+          <div style={{ ...mono, fontSize: 10, letterSpacing: "0.15em", color: T.amber }}>{eyebrow}</div>
           <div style={{ ...sans, fontSize: 16, fontWeight: 700, color: T.ink, overflow: "hidden", textOverflow: "ellipsis" }}>{title}</div>
           {sub && <div style={{ ...mono, fontSize: 10.5, color: T.dim }}>{sub}</div>}
         </div>
@@ -176,6 +182,27 @@ export function EvidenceOverlay({ title, sub, onClose, children }) {
       </div>
     </div>
   );
+}
+
+/* ====================================================================
+   A SHEET OVER THE DECISION, NOT A PAGE UNDER IT.
+
+   The Build screen's decision area was, measured on the owner's phone on
+   20 September, a leg-by-leg market table, two paragraphs about an unquoted
+   leg, the quantity, the order type, the time in force, the send button, a
+   combination-market panel, four stat tiles, a market-versus-model pair, a
+   notional paragraph and an error box — for ONE decision. Everything on it is
+   correct and none of it is cut. It moves behind a tap, into the same
+   `EvidenceOverlay` the evidence panels already use: fixed to the viewport,
+   scrolling inside itself, closing back onto the step. That is also what stops
+   it landing below the fold, which is the fault that component exists for.
+
+   ONE AT A TIME, from one piece of state, because two of these open at once
+   would both be `position: fixed; inset: 0`.
+==================================================================== */
+export function DeskSheet({ open, eyebrow, title, sub, onClose, children }) {
+  if (!open) return null;
+  return <EvidenceOverlay eyebrow={eyebrow} title={title} sub={sub} onClose={onClose}>{children}</EvidenceOverlay>;
 }
 
 /* ====================================================================

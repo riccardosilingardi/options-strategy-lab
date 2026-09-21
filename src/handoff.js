@@ -24,6 +24,8 @@
 // sure the chain is on its way, and scroll Build into view.
 // ============================================================================
 
+import { expiryStrikes, resnapLegs } from "./chain.js";
+
 /** The tab id of the Build screen. One string, one place. */
 export const BUILD_TAB = "build";
 
@@ -41,15 +43,29 @@ export const BUILD_TAB = "build";
  * @param {object[]} a.legs    the legs to load
  * @param {string}   a.name    what to call it on the Build screen
  * @param {object}   a.chains  ticker -> chain, to know whether one is missing
+ * >>> AND IT RE-SNAPS THE STRIKES ONTO THE BOARD IT IS HANDING THEM TO. <<<
+ * Strikes are a property of the EXPIRY, not of the trade (see `resnapLegs()`
+ * in chain.js). A leg carried from the Shortlist, from a saved strategy or
+ * from a position on another board could name a strike this one does not list,
+ * and four of the six order paths used to turn that into a well-formed symbol
+ * nobody has ever issued — which is the SOYB 422 of 20 September (PRD §4n).
+ * With no chain for the target board nothing is touched: an unloaded chain is
+ * UNKNOWN, and snapping against a fallback grid would invent exactly the kind
+ * of strike this exists to stop. `moved` travels so the screen can SAY it.
+ *
  * @returns {{tab: string, ticker: string, expKey: ?string, legs: object[],
- *            name: string, ev: null, loadChain: boolean, scroll: true}}
+ *            name: string, ev: null, loadChain: boolean, scroll: true,
+ *            moved: {i, from, to}[]}}
  */
 export function buildHandOff({ ticker, expKey = null, legs = [], name = "", chains = {} }) {
+  const copies = (legs || []).map((l) => ({ ...l }));
+  const snapped = resnapLegs(copies, expiryStrikes((chains || {})[ticker], expKey));
   return {
     tab: BUILD_TAB,
     ticker,
     expKey,
-    legs: (legs || []).map((l) => ({ ...l })),
+    legs: snapped.legs,
+    moved: snapped.moved,
     name,
     // Always null. The evidence panel answers a question about the trade on
     // Build; leaving it open pushes the trade the user just picked off screen.
