@@ -5,7 +5,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import assert from "node:assert/strict";
 import { evaluateTrade, paperStatus, undefinedRiskLegs } from "./riskGate.js";
 import { positionSize, positionSizeNote, contractsOf, withPositionSize, bookPositions, positionStage } from "./journal.js";
-import { orderBody } from "./order.js";
+import { orderBody, mlegLimitPrice } from "./order.js";
 import { RULES, sizing, ruleBadge, qualityFloor, qualityFloorSentence, liquiditySkippedNote, NOTHING_TODAY,
   LIQUIDITY_LEVELS, RECOMMENDED_LIQUIDITY, LIQUIDITY_MEASUREMENT, liquidityMeasurementNote, liquidityThreshold, looseningWarning, liquiditySettingNote,
   priceability, rewardRisk, unpriceableNote, money, MIN_NET_DOLLARS,
@@ -18,7 +18,7 @@ import { RULES, sizing, ruleBadge, qualityFloor, qualityFloorSentence, liquidity
   chanceOf, chanceSeedKey, seasonalProvenance, seasonalStampOf, seasonalSourceSentence,
   MEASURED_SEASONAL_SOURCE, ESTIMATED_SEASONAL_SOURCE, watchAttentionLevel,
   ivProvenance, CHAIN_IV_SOURCE, THESIS_IV_SOURCE, FALLBACK_IV_SOURCE,
-  comboBook, openLimitPrice, openLimitNote, limitPlacement, notionalControlled, notionalNote,
+  comboBook, limitAgainstBook, openLimitPrice, openLimitNote, limitPlacement, notionalControlled, notionalNote,
   entryRoom, entryInsideExitNote, entryRoomWarning, entryRoomOverrideAsk, entryOverrideOk, entryOverrideNote,
   passedOverRecord, passedOverSummary, OPEN_LIMIT_SLIPPAGE, CLOSE_LIMIT_SLIPPAGE,
   chancePct, chanceText, chanceInTen, signedMoney,
@@ -1253,9 +1253,136 @@ test("MODEL SANITY — its refusal is a finished sentence with its own count", (
  *  and was green on two PROSE mentions and one real call, which is exactly the
  *  fault it was written to catch. These files are heavily commented and the
  *  comments name the functions they explain. */
+/* =========================================================================
+   THE BODY THAT LEAVES MUST AGREE IN SIGN WITH THE BOOK IT MEETS
+
+   The third debt PR #33 handed forward, and the one check that would have
+   stopped J-0001 at the door: `limit_price: "0.75"`, a DEBIT, sent into a
+   book quoting that bull put spread as a CREDIT.
+========================================================================= */
+
+/** A two-sided book on every leg, from the leg prices given. */
+const quotesOf = (...pairs) => pairs.map(([bid, ask]) => ({ bid, ask }));
+
+test("LIMIT vs BOOK — the four §4q directions all agree with their own market", () => {
+  // Each row: the legs, a book, the intent, and the direction the order carries.
+  const bullPut = [{ side: -1, qty: 1, type: "put", strike: 62.5 }, { side: 1, qty: 1, type: "put", strike: 59 }];
+  const bullCall = [{ side: 1, qty: 1, type: "call", strike: 22 }, { side: -1, qty: 1, type: "call", strike: 24 }];
+  // A credit structure: short the dear put, long the cheap one → mid is negative.
+  const creditBook = comboBook(bullPut, quotesOf([1.10, 1.22], [0.30, 0.42]));
+  // A debit structure: long the dear call, short the cheap one → mid is positive.
+  const debitBook = comboBook(bullCall, quotesOf([0.90, 1.02], [0.30, 0.42]));
+  assert.ok(creditBook.ok && creditBook.mid < 0, `credit book mid ${creditBook.mid}`);
+  assert.ok(debitBook.ok && debitBook.mid > 0, `debit book mid ${debitBook.mid}`);
+
+  const check = (book, net, intent, legs) => limitAgainstBook({
+    limitPrice: mlegLimitPrice(net, 1, intent), book, intent, legCount: legs.length });
+
+  // 1. open a credit structure → the order is a credit.
+  const a = check(creditBook, creditBook.mid, "open", bullPut);
+  assert.equal(a.checked, true); assert.equal(a.ok, true); assert.equal(a.got, -1);
+  // 2. open a debit structure → the order is a debit.
+  const b = check(debitBook, debitBook.mid, "open", bullCall);
+  assert.equal(b.checked, true); assert.equal(b.ok, true); assert.equal(b.got, 1);
+  // 3. close a debit structure → the order is a CREDIT. The half nobody had read.
+  const c = check(debitBook, debitBook.mid, "close", bullCall);
+  assert.equal(c.checked, true); assert.equal(c.ok, true); assert.equal(c.got, -1);
+  // 4. close a credit structure → the order is a DEBIT.
+  const d = check(creditBook, creditBook.mid, "close", bullPut);
+  assert.equal(d.checked, true); assert.equal(d.ok, true); assert.equal(d.got, 1);
+});
+
+test("LIMIT vs BOOK — J-0001 AS IT WAS SENT is refused, in words", () => {
+  const legs = [{ side: -1, qty: 1, type: "put", strike: 62.5 }, { side: 1, qty: 1, type: "put", strike: 59 }];
+  const book = comboBook(legs, quotesOf([1.10, 1.22], [0.30, 0.42]));   // a CREDIT
+  // The body the app actually sent that day: "0.75", positive, a debit.
+  const r = limitAgainstBook({ limitPrice: "0.75", book, intent: "open", legCount: 2 });
+  assert.equal(r.checked, true);
+  assert.equal(r.ok, false, "an offer to PAY sent into a market that pays you must not leave");
+  assert.equal(r.expected, -1);
+  assert.equal(r.got, 1);
+  assert.ok(/WRONG WAY ROUND/.test(r.sentence), r.sentence);
+  assert.ok(/credit/.test(r.sentence) && /debit/.test(r.sentence), r.sentence);
+  assert.ok(/Nothing is sent/.test(r.sentence), r.sentence);
+  // AND THE CORRECTLY SIGNED VERSION OF THAT SAME ORDER GOES THROUGH.
+  assert.equal(limitAgainstBook({ limitPrice: "-0.75", book, intent: "open", legCount: 2 }).ok, true);
+});
+
+test("LIMIT vs BOOK — four unknowns SKIP, and each one names itself", () => {
+  const legs = [{ side: 1, qty: 1, type: "call", strike: 22 }, { side: -1, qty: 1, type: "call", strike: 24 }];
+  const book = comboBook(legs, quotesOf([0.90, 1.02], [0.30, 0.42]));
+  const cases = [
+    [{ limitPrice: "0.60", book, intent: "open", legCount: 1 }, "single-leg"],
+    [{ limitPrice: null, book, intent: "open", legCount: 2 }, "no-limit"],
+    [{ limitPrice: "0.00", book, intent: "open", legCount: 2 }, "no-limit"],
+    [{ limitPrice: "0.60", book: null, intent: "open", legCount: 2 }, "no-book"],
+    [{ limitPrice: "0.60", book: comboBook(legs, [{ bid: 0.9, ask: 1.02 }, {}]), intent: "open", legCount: 2 }, "no-book"],
+  ];
+  for (const [arg, reason] of cases) {
+    const r = limitAgainstBook(arg);
+    assert.equal(r.checked, false, `${reason} should skip`);
+    assert.equal(r.ok, true, "a skip is not a block");
+    assert.equal(r.reason, reason);
+    assert.ok(r.sentence && r.sentence.length > 40, `${reason} must say which unknown stopped it`);
+  }
+  // A MID UNDER THE MINIMUM IS `priceability()`'S QUESTION, NOT THIS ONE.
+  const tiny = comboBook(legs, quotesOf([0.50, 0.52], [0.49, 0.51]));
+  assert.ok(tiny.ok && Math.abs(tiny.mid) * 100 < MIN_NET_DOLLARS, `mid ${tiny.mid}`);
+  const t = limitAgainstBook({ limitPrice: "-0.60", book: tiny, intent: "open", legCount: 2 });
+  assert.equal(t.checked, false);
+  assert.equal(t.reason, "mid-too-small");
+  // `Number(null)` IS 0 AND 0 IS FINITE, and it does not become a direction.
+  assert.equal(limitAgainstBook({}).checked, false);
+  assert.equal(limitAgainstBook({ limitPrice: "", book, legCount: 2 }).reason, "no-limit");
+});
+
+test("LIMIT vs BOOK — the GATE refuses an inverted OPEN, and only an open", () => {
+  const legs = [{ side: -1, qty: 1, type: "put", strike: 62.5 }, { side: 1, qty: 1, type: "put", strike: 59 }];
+  const quotes = quotesOf([1.10, 1.22], [0.30, 0.42]);        // a credit book
+  const occs = ["XLE261030P00062500", "XLE261030P00059000"];
+  const base = { ticker: "XLE", name: "Bull Put Spread", dte: 45, contracts: 1, legs, quotes, occs,
+    maxLoss: -275, maxProfit: 75 };
+  // THE ORDER AS J-0001 WAS SENT: a POSITIVE net on a credit structure.
+  const bad = evaluateTrade({ proposal: { ...base, intent: "open", net: 0.75 },
+    portfolio: EMPTY_BOOK, capital: CAPITAL, signals: CONFLUENT });
+  assert.ok(codes(bad).includes("LIMIT_AGAINST_BOOK"), codes(bad).join(", "));
+  assert.equal(bad.pass, false);
+  assert.match(messageFor(bad, "LIMIT_AGAINST_BOOK"), /WRONG WAY ROUND/);
+
+  // The same structure priced the way the market quotes it passes.
+  const good = evaluateTrade({ proposal: { ...base, intent: "open", net: -0.75 },
+    portfolio: EMPTY_BOOK, capital: CAPITAL, signals: CONFLUENT });
+  assert.equal(codes(good).includes("LIMIT_AGAINST_BOOK"), false, codes(good).join(", "));
+
+  // ENTRY ONLY. A close is never refused by the gate for this — being unable to
+  // get OUT is the worse failure, and the close paths refuse it at the button.
+  const close = evaluateTrade({ proposal: { ...base, intent: "close", net: 0.75, maxLoss: 275 },
+    portfolio: EMPTY_BOOK, capital: CAPITAL, signals: CONFLUENT });
+  assert.equal(codes(close).includes("LIMIT_AGAINST_BOOK"), false, codes(close).join(", "));
+
+  // AND A CALLER WITH NO EVIDENCE IS NOT CHECKED, rather than quietly passed.
+  const blind = evaluateTrade({ proposal: { ...base, intent: "open" },
+    portfolio: EMPTY_BOOK, capital: CAPITAL, signals: CONFLUENT });
+  assert.equal(codes(blind).includes("LIMIT_AGAINST_BOOK"), false);
+});
+
 const codeOf = (name) => readFileSync(new URL(`./${name}`, import.meta.url), "utf8")
   .replace(/\/\*[\s\S]*?\*\//g, " ")      // block comments, including the long ones
   .replace(/(^|[^:])\/\/[^\n]*/g, "$1");   // line comments, but not "https://"
+
+test("LIMIT vs BOOK — every CLOSE path refuses it beside its own button", () => {
+  /* It is NOT in the gate for a close, so each close path has to ask for
+     itself. A path that never asks is a path where an inverted closing order
+     leaves in silence — and closing has never been exercised at all. */
+  for (const f of ["pro.jsx"]) {
+    const src = codeOf(f);
+    const hits = (src.match(/limitAgainstBook\(/g) || []).length;
+    assert.ok(hits >= 2, `${f} calls limitAgainstBook() ${hits} times: placeExit() and closeGroup() both need it`);
+  }
+  const approve = readFileSync(new URL("../netlify/functions/approve.mjs", import.meta.url), "utf8");
+  assert.ok(/limitAgainstBook\(/.test(approve),
+    "approve.mjs builds a fresh limit from a live chain and is the one close path that can invert by arithmetic");
+});
 
 test("MODEL SANITY — IT IS A PROPOSAL FLOOR AND IT IS NOT IN THE GATE", () => {
   // A trade the user builds by hand on the desk is his to make. The gate's job

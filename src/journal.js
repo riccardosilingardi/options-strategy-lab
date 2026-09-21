@@ -204,7 +204,8 @@ export function orderStatusRecheck(pos = {}, order = null) {
      a record with no limit says so in words (`fillVsLimit`). */
   const fillPrice = outcome.fillPrice;
   const against = filled
-    ? fillVsLimit({ limit: pos.alpacaLimit, fill: fillPrice, contracts: positionSize(pos).contracts })
+    ? fillVsLimit({ limit: pos.alpacaLimit, fill: fillPrice, contracts: positionSize(pos).contracts,
+        limitSigned: pos.alpacaLimitSigned === true })
     : null;
   return {
     changed: true, outcome, status, filled, fillPrice,
@@ -464,6 +465,71 @@ export const bookPositions = (positions = []) =>
 export const isOwnedPosition = (pos) => positionStage(pos) === "owned";
 
 /* ------------------------------------------------------------------
+   A RECORD WRITTEN BEFORE THIS BUILD CARRIES AN UNSIGNED LIMIT.
+
+   PR #33 made Alpaca's multi-leg `limit_price` SIGNED on the way out and
+   stored the broker's own echo of it on `alpacaLimit`. Everything written
+   before that stored `Math.abs()` of it — the very `Math.abs()` that sent
+   the XLE credit spread out as a debit (PRD §4q).
+
+   So one field now holds two different quantities depending on WHEN it was
+   written, and nothing on the record said which. `fillVsLimit()` compares
+   DIRECTIONS; `limitKind()` prints one in words. Both are confident, both
+   are wrong on an older record, and the one the owner has in front of him
+   is exactly such a record.
+
+   THE ABSENCE OF THE STAMP IS THE MARKER, for the SEVENTH time in this
+   repository — after `contractsAssumed`, `simExitDTE`, `seasonalSource`,
+   `driftAnnual`, `entrySource` and the `"sync"` holding. `commitPosition()`
+   writes `alpacaLimitSigned: true` beside every limit it stores from now
+   on; a record without it is a MAGNITUDE whose direction nobody kept, and
+   the app says so rather than choosing one.
+
+   THIS IS NOT A MIGRATION AND MUST NOT BECOME ONE. The direction cannot be
+   recovered: the order is at the broker and the record never held the sign.
+   Inferring it from the structure's own net would be inventing evidence —
+   the whole fault was the app spelling a direction the order did not have.
+------------------------------------------------------------------ */
+
+/** "a debit of $0.75" / "a credit of $0.04" — the one spelling of a signed
+ *  price in this file, shared by the stamp reader and the fill comparison so
+ *  the two cannot word the same number differently. */
+const SIGNED_WORD = (x) => `${x < 0 ? "a credit of " : "a debit of "}$${Math.abs(+Number(x).toFixed(2)).toFixed(2)}`;
+
+/**
+ * THE STORED LIMIT, AND WHETHER ITS DIRECTION IS KNOWN — the one way a
+ * position's `alpacaLimit` is read back. Never read the field directly: that
+ * is how a screen comes to print "a debit of $0.75" over a credit order.
+ *
+ * @param pos  a position record
+ * @returns {{ has, signed, limit, magnitude, kind, words, note }}
+ *   `has` false when the record carries no limit at all (a market order, or
+ *   a holding imported from `/v2/positions`, which was never an order here).
+ *   `kind` and `words` are NULL on an unstamped record — there is no word for
+ *   a direction nobody recorded — and `note` is the sentence that says so.
+ */
+export function storedLimitOf(pos = {}) {
+  const raw = pos && pos.alpacaLimit;
+  const n = raw == null || raw === "" ? NaN : Number(raw);
+  if (!Number.isFinite(n)) {
+    return { has: false, signed: false, limit: null, magnitude: null, kind: null, words: null, note: null };
+  }
+  const magnitude = Math.abs(n);
+  if (pos.alpacaLimitSigned !== true) {
+    return {
+      has: true, signed: false, limit: n, magnitude, kind: null, words: null,
+      note: `$${magnitude.toFixed(2)} a combination — this record predates the app storing which way a ` +
+        `limit went, so whether that was money paid or money received is not recorded here. Your Alpaca ` +
+        `account prints the order's own sign.`,
+    };
+  }
+  return {
+    has: true, signed: true, limit: n, magnitude, kind: n < 0 ? "credit" : "debit",
+    words: SIGNED_WORD(n), note: null,
+  };
+}
+
+/* ------------------------------------------------------------------
    THE LIMIT AGAINST THE FILL — the comparison ROADMAP P0 has owed
    since PR #28, and could not make because nothing had ever filled.
 
@@ -483,7 +549,11 @@ export const isOwnedPosition = (pos) => positionStage(pos) === "owned";
  * @param limit  the SIGNED limit the app sent, per combination, or null
  * @param fill   the SIGNED average fill price Alpaca reported, or null
  * @param contracts  how many combinations, for the dollar figure
- * @returns {{ known, limit, fill, diff, dollars, sentence }}
+ * @param limitSigned  TRUE only for a record written by a build that stores
+ *   the broker's SIGN on `alpacaLimit`. See `storedLimitOf()` above: the
+ *   absence of the stamp means the number is a MAGNITUDE and its direction
+ *   is unknown.
+ * @returns {{ known, signUnknown, limit, fill, diff, dollars, sentence }}
  *
  * `known` is false when either side is missing, and the sentence then SAYS
  * which one — it never invents a limit for a record that has none. A
@@ -491,8 +561,17 @@ export const isOwnedPosition = (pos) => positionStage(pos) === "owned";
  * the app never saw the order, so there is no intended price to compare,
  * and pretending otherwise would be the same class of fault as reading a
  * missing open interest as a zero.
+ *
+ * AND A LIMIT WHOSE DIRECTION IS UNKNOWN IS NOT COMPARED AT ALL. This
+ * function's whole arithmetic is `L - F` on two SIGNED numbers; run on a
+ * stored magnitude it reports the exact opposite verdict, with a dollar
+ * figure and a BETTER/WORSE in capitals. J-0001 is the case: stored 0.75
+ * against a fill of −0.04. Read as signed that is $79 worse, which is the
+ * truth; read as a magnitude that was written before the sign existed, the
+ * app cannot say whether 0.75 meant a debit or a credit — and guessing
+ * either way is how the §4q fault stayed invisible for four pull requests.
  */
-export function fillVsLimit({ limit = null, fill = null, contracts = 1 } = {}) {
+export function fillVsLimit({ limit = null, fill = null, contracts = 1, limitSigned = false } = {}) {
   // `Number(null)` IS 0 AND 0 IS FINITE. The nulls go out before the
   // coercion, for the sixth time in this repository.
   const num = (x) => (x == null || x === "" ? NaN : Number(x));
@@ -504,9 +583,20 @@ export function fillVsLimit({ limit = null, fill = null, contracts = 1 } = {}) {
       ? `the broker has not reported a fill price`
       : `this record does not carry the limit the order was sent at`;
     return {
-      known: false, limit: hasL ? L : null, fill: hasF ? F : null, diff: null, dollars: null,
+      known: false, signUnknown: false, limit: hasL ? L : null, fill: hasF ? F : null, diff: null, dollars: null,
       sentence: `The price you offered and the price you got cannot be compared here, because ` +
         `${missing}. Nothing is estimated in its place.`,
+    };
+  }
+  // A LIMIT WITH NO DIRECTION IS NOT HALF A COMPARISON, IT IS NONE.
+  if (limitSigned !== true) {
+    return {
+      known: false, signUnknown: true, limit: L, fill: F, diff: null, dollars: null,
+      sentence: `This record was written before the app stored which way its limit went, so the ` +
+        `$${Math.abs(L).toFixed(2)} it carries could be a debit or a credit and the two are as far apart ` +
+        `as two prices get. The broker filled it at ${SIGNED_WORD(F)} a combination. The app will not ` +
+        `guess the missing direction, so the comparison is not made — read the order on your Alpaca ` +
+        `account, where the limit is printed with its own sign.`,
     };
   }
   // POSITIVE MEANS THE FILL WAS BETTER FOR YOU than the offer: you paid less
@@ -514,14 +604,14 @@ export function fillVsLimit({ limit = null, fill = null, contracts = 1 } = {}) {
   // the signed fill are both "money out per combination", so better is lower.
   const diff = L - F;
   const dollars = diff * 100 * n;
-  const word = (x) => `${x < 0 ? "a credit of " : "a debit of "}$${Math.abs(+x.toFixed(2)).toFixed(2)}`;
+  const word = SIGNED_WORD;
   const verdict = Math.abs(dollars) < 0.5
     ? `That is the price you asked for.`
     : dollars > 0
       ? `That is $${Math.abs(dollars).toFixed(2)} BETTER than you asked for, across ${n} combination${n === 1 ? "" : "s"}.`
       : `That is $${Math.abs(dollars).toFixed(2)} WORSE than you asked for, across ${n} combination${n === 1 ? "" : "s"}.`;
   return {
-    known: true, limit: L, fill: F, diff, dollars,
+    known: true, signUnknown: false, limit: L, fill: F, diff, dollars,
     sentence: `You offered ${word(L)} a combination and the broker filled it at ${word(F)}. ${verdict}`,
   };
 }

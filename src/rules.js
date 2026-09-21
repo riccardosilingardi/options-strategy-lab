@@ -15,6 +15,13 @@
 // every other screen in this app prices with, which is the point: a second
 // implementation of the model would make the check a comparison of two guesses.
 import { netBS, bs, smile, terminalMC, seasonalDrift, seedFrom } from "./engine.js";
+// WHICH WAY THE MONEY MOVES ON AN ORDER, read from its one home. `order.js`
+// imports nothing, so this is leaf-ward exactly as the `engine.js` import above
+// it is, and it is here for the same reason: `limitAgainstBook()` below has to
+// know what direction an order of a given intent WOULD carry, and a second
+// spelling of that rule is how the §4q fault came to be sent by five paths at
+// once. The sign is decided in `limitDirection()` and nowhere else.
+import { limitDirection } from "./order.js";
 
 /** The config object. Everything else in this file is derived from it. */
 export const RULES = {
@@ -3218,6 +3225,107 @@ export function comboBook(legs = [], quotes = []) {
   return ok
     ? { ok, missing, bid, mid, ask, spread }
     : { ok: false, missing, bid: null, mid: null, ask: null, spread: null };
+}
+
+/* ------------------------------------------------------------------
+   DOES THE BODY THAT LEAVES AGREE IN SIGN WITH THE BOOK IT WILL MEET?
+
+   The third debt PR #33 handed forward, and the one that would have caught
+   the XLE order at the door. J-0001 went out as `limit_price: "0.75"` — a
+   DEBIT — against a book whose mid was a CREDIT. An offer to PAY, dropped
+   into a market that is paying YOU, is marketable by the whole width of the
+   structure: it filled at once at four cents the other way.
+
+   `limitDirection()` decides what direction an order of this intent SHOULD
+   have from the structure's own net. `comboBook()` above says what direction
+   the market is actually quoting. When those two disagree, one of them was
+   built from a number that had lost its sign somewhere, and the order must
+   not leave.
+
+   IT IS THE SAME KIND OF QUESTION AS `priceability()` AND `contractListing()`,
+   and it is asked in the same two places for the same reason: the gate is
+   where all six order paths meet. It is NOT a quality floor — it makes no
+   judgement about whether the trade is good. It asks whether the order says
+   what the app meant it to say.
+
+   FOUR THINGS MAKE IT SKIP, AND EACH IS A DIFFERENT UNKNOWN:
+
+   1. NO LIMIT. A market order carries no price, so there is no sign to check.
+   2. NO BOOK. `comboBook()` needs a two-sided quote on every leg; without one
+      there is no market direction to compare against, and an unquoted book is
+      UNKNOWN, never a book of zeros — the same rule as a missing open
+      interest.
+   3. A MID UNDER `MIN_NET_DOLLARS`. That is `priceability()`'s question and
+      it already has its own violation and its own sentence. A structure whose
+      mid is about nothing has no direction worth reading: the sign of $0.01
+      is noise, and refusing on it would refuse the arbitrage cases twice
+      under the wrong name.
+   4. A SINGLE LEG. Its own `side` carries the direction and Alpaca refuses a
+      negative limit on one, so the body is deliberately unsigned (order.js).
+
+   A SKIP IS NOT A PASS AND IT SAYS SO. Every one of the four returns a
+   sentence naming which unknown stopped it.
+------------------------------------------------------------------ */
+
+/**
+ * @param limitPrice  the SIGNED `limit_price` the body carries (string or
+ *   number, exactly as `mlegLimitPrice()` produced it), or null for a market
+ *   order.
+ * @param book        a `comboBook()` result — or null when the caller could
+ *   not build one.
+ * @param intent      "open" | "close"
+ * @param legCount    how many legs the order has; under two the body is a
+ *   simple order and is unsigned by design.
+ * @returns {{ checked, ok, expected, got, reason, sentence }}
+ *   `expected` and `got` are +1 debit / −1 credit / 0 unreadable.
+ */
+export function limitAgainstBook({ limitPrice = null, book = null, intent = "open", legCount = 0 } = {}) {
+  const skip = (reason, sentence) => ({ checked: false, ok: true, expected: null, got: null, reason, sentence });
+  const words = (d) => (d > 0 ? "a debit (money going out)" : "a credit (money coming in)");
+
+  if (Math.round(Number(legCount) || 0) < 2) {
+    return skip("single-leg", `This is a single-contract order, so its own buy-or-sell side already says which ` +
+      `way the money goes and its limit is deliberately unsigned. There is no sign to check.`);
+  }
+  // `Number(null)` IS 0 AND 0 IS FINITE. The nulls go out before the coercion.
+  const L = limitPrice == null || limitPrice === "" ? NaN : Number(limitPrice);
+  if (!Number.isFinite(L) || +Math.abs(L).toFixed(2) === 0) {
+    return skip("no-limit", `This order carries no readable limit price — a market order has none — so there is ` +
+      `no direction on it to hold against the market. Nothing is checked here.`);
+  }
+  if (!book || book.ok !== true || !Number.isFinite(Number(book.mid))) {
+    return skip("no-book", `The market on this structure cannot be read on both sides of every leg, so there is ` +
+      `no direction to compare your limit against. An unquoted book is unknown, not a book of zeros: the check ` +
+      `is skipped rather than passed.`);
+  }
+  const mid = Number(book.mid);
+  if (Math.abs(mid) * 100 < MIN_NET_DOLLARS) {
+    return skip("mid-too-small", `The middle of this structure's market is ${money(Math.abs(mid) * 100)} a ` +
+      `combination, under the ${money(MIN_NET_DOLLARS)} this app will read a price at, so which SIDE of zero ` +
+      `it falls on is noise rather than a direction. Whether there is a price at all is a different question, ` +
+      `and it is asked before this one.`);
+  }
+  // The direction an order of this intent SHOULD carry, from the market's own
+  // net, and the direction the body actually carries.
+  const expected = limitDirection(mid, intent);
+  const got = L > 0 ? 1 : -1;
+  if (expected === 0) {
+    return skip("mid-unreadable", `The middle of this structure's market does not fall on either side of zero, ` +
+      `so there is no direction to compare against.`);
+  }
+  if (expected === got) {
+    return { checked: true, ok: true, expected, got, reason: null,
+      sentence: `Your limit and the market agree: ${intent === "close" ? "closing" : "opening"} this structure ` +
+        `is ${words(got)}, and the order is written that way.` };
+  }
+  return {
+    checked: true, ok: false, expected, got, reason: "inverted",
+    sentence: `THE ORDER IS THE WRONG WAY ROUND. The market quotes this structure at ` +
+      `${money(Math.abs(mid) * 100)} a combination, so ${intent === "close" ? "closing" : "opening"} it is ` +
+      `${words(expected)} — and the order says ${words(got)}. An offer to pay, sent into a market that pays ` +
+      `you, is met instantly at whatever the book gives: that is exactly how the XLE credit spread filled for ` +
+      `$4 against $75 intended. Nothing is sent.`,
+  };
 }
 
 /**

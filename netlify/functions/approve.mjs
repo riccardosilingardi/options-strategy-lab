@@ -19,7 +19,8 @@
 import { getStore } from "@netlify/blobs";
 import { evaluateTrade } from "../../src/riskGate.js";
 import { orderBody, orderOutcome, alpacaErrorText, limitWords } from "../../src/order.js";
-import { closeMarket, closeLimitPrice, closeLimitNote, closeUnreadableNote } from "../../src/rules.js";
+import { closeMarket, closeLimitPrice, closeLimitNote, closeUnreadableNote,
+  comboBook, limitAgainstBook } from "../../src/rules.js";
 import { appendTimeline, bookPositions } from "../../src/journal.js";
 import { parseCboeJson, CBOE_URL } from "../../src/chain.js";
 
@@ -130,6 +131,23 @@ export default async (req) => {
       legs: oi.legs, occs: oi.occs, userQty: oi.userQty || 1,
       type: "limit", limit: priced.net, tif: oi.tif || "day", intent: oi.intent || "close",
     });
+
+    /* AND THE SIGN ON THE BODY HAS TO POINT THE SAME WAY AS THE BOOK.
+       This page is order path 6, tapped up to 24 hours after the proposal, and
+       it is the only close path that builds a live limit from a fresh chain —
+       so it is the one place a closing order can be inverted by arithmetic
+       rather than by a stale record. The check is NOT in the gate (a close
+       refused by the gate strands somebody in a position they asked to leave);
+       it is refused here, on the page, with the reason printed. The quotes are
+       the ones `closeMarket()` was just priced from, so the book the check
+       reads IS the book the price came out of. */
+    const lb = limitAgainstBook({
+      limitPrice: order.limit_price ?? null,
+      book: comboBook(oi.legs, quotes),
+      intent: oi.intent || "close",
+      legCount: (oi.legs || []).length,
+    });
+    if (lb.checked && !lb.ok) return page("The order was the wrong way round", esc(lb.sentence), false);
 
     const r = await fetch(`https://${PAPER_HOST}/v2/orders`, {
       method: "POST",

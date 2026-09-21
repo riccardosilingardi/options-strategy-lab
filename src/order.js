@@ -158,6 +158,32 @@ export function mlegLimitPrice(structureNet, factor, intent = "open") {
 }
 
 /**
+ * THE SIGNED PRICE AN ORDER OF THIS INTENT WOULD CARRY, as a NUMBER.
+ *
+ * For a screen that holds a structure net and has to name the direction before
+ * any body exists — the exit ladder's three buttons are the case. They printed
+ * `Math.abs(ladderNet(...))`: a bare magnitude, on the buttons the owner will
+ * use to close XLE J-0001, which is the first close this app has ever sent.
+ * "$0.37" does not distinguish receiving 37 cents from paying them, and that
+ * is the whole of the §4q fault read one screen later.
+ *
+ * It exists so a component never has to write `-net`: the rule that a close
+ * flips the sign lives in `limitDirection()` and nowhere else.
+ *
+ * @returns {?number} null when the net is unreadable; 0 when it rounds away.
+ */
+export function signedLimitFor(structureNet, intent = "open") {
+  // `Number(null)` IS 0 AND 0 IS FINITE — the seventh time in this repository,
+  // and it was caught by this function's own test on the first run. A missing
+  // net is not a rung priced at nothing: the nulls go out before the coercion.
+  if (structureNet == null || structureNet === "") return null;
+  const n = Number(structureNet);
+  if (!Number.isFinite(n)) return null;
+  const d = limitDirection(n, intent);
+  return d === 0 ? 0 : d * Math.abs(n);
+}
+
+/**
  * WHAT A SIGNED LIMIT MEANS, IN WORDS. Every limit this app displays says
  * "debit" or "credit" rather than leaving a minus sign to carry the whole
  * fact — the read-back that hid the fault above was three screens printing

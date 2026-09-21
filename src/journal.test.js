@@ -24,7 +24,7 @@ import {
   byRefDesc, matchesRef, searchJournal, SEQ_SEP,
   positionSize, positionSizeNote, contractsOf, withPositionSize, ASSUMED_CONTRACTS,
   positionStage, isOwnedPosition, positionStageNote, wouldHaveDone,
-  isBrokerHolding, fillVsLimit, orderReconciliation, bookPositions,
+  isBrokerHolding, fillVsLimit, storedLimitOf, orderReconciliation, bookPositions,
 } from "./journal.js";
 import { RULES, ruleExitOf, stopWarningSentence,
   seasonalStampOf, seasonalStampNote, ESTIMATED_SEASONAL_SOURCE, MEASURED_SEASONAL_SOURCE } from "./rules.js";
@@ -1035,7 +1035,7 @@ test("UNKNOWN IS STILL NOT DEAD: a real order nobody has asked about is working"
 
 test("FILL vs LIMIT — the XLE order, and the gap IS the §4q fault", () => {
   // +0.75 offered (a debit, wrongly), −0.04 given (a credit).
-  const r = fillVsLimit({ limit: 0.75, fill: -0.04, contracts: 1 });
+  const r = fillVsLimit({ limit: 0.75, fill: -0.04, contracts: 1, limitSigned: true });
   assert.equal(r.known, true);
   assert.ok(r.sentence.includes("a debit of $0.75"), r.sentence);
   assert.ok(r.sentence.includes("a credit of $0.04"), r.sentence);
@@ -1043,13 +1043,13 @@ test("FILL vs LIMIT — the XLE order, and the gap IS the §4q fault", () => {
 });
 
 test("FILL vs LIMIT — a fill worse than the limit says WORSE, in dollars, at the size", () => {
-  const r = fillVsLimit({ limit: 0.20, fill: 0.26, contracts: 5 });
+  const r = fillVsLimit({ limit: 0.20, fill: 0.26, contracts: 5, limitSigned: true });
   assert.ok(r.sentence.includes("WORSE"), r.sentence);
   assert.equal(Math.round(r.dollars), -30, "six cents over five combinations is $30");
 });
 
 test("FILL vs LIMIT — the price you asked for is neither better nor worse", () => {
-  const r = fillVsLimit({ limit: 0.24, fill: 0.24, contracts: 3 });
+  const r = fillVsLimit({ limit: 0.24, fill: 0.24, contracts: 3, limitSigned: true });
   assert.ok(r.sentence.includes("the price you asked for"), r.sentence);
 });
 
@@ -1069,11 +1069,13 @@ test("FILL vs LIMIT — NEVER INVENT THE LIMIT, and never a theoretical zero", (
   assert.equal(fillVsLimit({}).known, false);
   assert.equal(fillVsLimit({ limit: "", fill: "" }).known, false);
   // A real zero on either side is a real reading.
-  assert.equal(fillVsLimit({ limit: 0, fill: 0 }).known, true);
+  assert.equal(fillVsLimit({ limit: 0, fill: 0, limitSigned: true }).known, true);
 });
 
 test("THE RECHECK CARRIES THE FILL PRICE AND THE COMPARISON", () => {
-  const pos = { alpacaId: "x", alpacaStatus: "accepted", alpacaFilled: false, alpacaLimit: 0.75, contracts: 1 };
+  // J-0001 AS IT WAS SENT, with the stamp a build after PR #33 writes.
+  const pos = { alpacaId: "x", alpacaStatus: "accepted", alpacaFilled: false,
+    alpacaLimit: 0.75, alpacaLimitSigned: true, contracts: 1 };
   const r = orderStatusRecheck(pos, { id: "x", status: "filled", qty: "1", filled_qty: "1", filled_avg_price: "-0.04" });
   assert.equal(r.changed, true);
   assert.equal(r.fillPrice, -0.04, "the sign survives, as Alpaca prints it");
@@ -1083,6 +1085,72 @@ test("THE RECHECK CARRIES THE FILL PRICE AND THE COMPARISON", () => {
   // An order that merely MOVED carries no comparison: there is nothing to compare.
   const moved = orderStatusRecheck(pos, { id: "x", status: "new", qty: "1", filled_qty: "0" });
   assert.equal(moved.against, null);
+});
+
+/* ---- AN UNSTAMPED LIMIT IS SIGN UNKNOWN — the first debt PR #33 left ---- */
+
+test("A LIMIT WITH NO RECORDED DIRECTION IS NOT COMPARED, AND SAYS SO", () => {
+  // THE RECORD THE OWNER ACTUALLY HAS. J-0001 was written by a build that
+  // stored `Math.abs()` of the broker's limit, so the 0.75 on it could be a
+  // debit or a credit and nothing on the record says which.
+  const before = fillVsLimit({ limit: 0.75, fill: -0.04, contracts: 1 });
+  assert.equal(before.known, false, "an unstamped limit is not a comparison");
+  assert.equal(before.signUnknown, true);
+  assert.equal(before.diff, null);
+  assert.equal(before.dollars, null);
+  assert.ok(/direction/i.test(before.sentence) || /which way/i.test(before.sentence), before.sentence);
+  assert.ok(/will not\s+guess/i.test(before.sentence.replace(/\s+/g, " ")), before.sentence);
+  // NO MAGNITUDE COMPARISON EITHER: $79 and $71 are two different answers and
+  // the app has no way to choose between them.
+  assert.equal(/BETTER|WORSE/.test(before.sentence), false, before.sentence);
+
+  // THE SAME TWO NUMBERS, STAMPED: the comparison is made, in full.
+  const after = fillVsLimit({ limit: 0.75, fill: -0.04, contracts: 1, limitSigned: true });
+  assert.equal(after.known, true);
+  assert.equal(after.signUnknown, false);
+  assert.equal(+after.dollars.toFixed(2), 79);
+  assert.ok(after.sentence.includes("debit of $0.75"), after.sentence);
+  assert.ok(after.sentence.includes("credit of $0.04"), after.sentence);
+
+  // AND THE STAMP IS NOT INFERRED FROM THE SIGN: a NEGATIVE unstamped limit is
+  // just as unreadable, because `Math.abs()` never produced one and a record
+  // holding one came from somewhere the app cannot account for.
+  assert.equal(fillVsLimit({ limit: -0.75, fill: -0.04 }).signUnknown, true);
+
+  // The recheck carries the stamp through from the record.
+  const unstamped = { alpacaId: "x", alpacaStatus: "accepted", alpacaFilled: false, alpacaLimit: 0.75, contracts: 1 };
+  const r = orderStatusRecheck(unstamped, { id: "x", status: "filled", qty: "1", filled_qty: "1", filled_avg_price: "-0.04" });
+  assert.equal(r.against.known, false);
+  assert.equal(r.entry.text.includes("BETTER"), false, r.entry.text);
+});
+
+test("storedLimitOf — the one way a stored limit is read back", () => {
+  const signed = storedLimitOf({ alpacaLimit: -0.75, alpacaLimitSigned: true });
+  assert.equal(signed.has, true);
+  assert.equal(signed.signed, true);
+  assert.equal(signed.kind, "credit");
+  assert.equal(signed.magnitude, 0.75);
+  assert.ok(signed.words.includes("credit of $0.75"), signed.words);
+  assert.equal(signed.note, null);
+
+  const old = storedLimitOf({ alpacaLimit: 0.75 });
+  assert.equal(old.has, true);
+  assert.equal(old.signed, false);
+  assert.equal(old.kind, null, "no word for a direction nobody recorded");
+  assert.equal(old.words, null);
+  assert.equal(old.magnitude, 0.75);
+  assert.ok(/not recorded/i.test(old.note), old.note);
+
+  // A MARKET ORDER AND A BROKER HOLDING CARRY NO LIMIT AT ALL, and "has: false"
+  // is a different fact from "the direction is unknown".
+  for (const p of [{}, { alpacaLimit: null }, { alpacaLimit: "" }, { alpacaLimit: "abc" }]) {
+    const r = storedLimitOf(p);
+    assert.equal(r.has, false);
+    assert.equal(r.note, null);
+    assert.equal(r.kind, null);
+  }
+  // A REAL ZERO IS A REAL READING, and it still has no direction.
+  assert.equal(storedLimitOf({ alpacaLimit: 0, alpacaLimitSigned: true }).has, true);
 });
 
 /* ---- WHY THE TWO COUNTS DISAGREE — the debt PR #32 handed forward ---- */

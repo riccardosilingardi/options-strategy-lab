@@ -12,7 +12,7 @@ import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { gcdAll, reduceRatios, orderQty, unitLimit, orderBody, orderPreviewLines,
   orderOutcome, orderWaitingPhrase, alpacaErrorText, alpacaBodySentence,
-  limitDirection, mlegLimitPrice, limitWords, limitKind, fillPriceOf } from "./order.js";
+  limitDirection, mlegLimitPrice, signedLimitFor, limitWords, limitKind, fillPriceOf } from "./order.js";
 
 let passed = 0;
 const failures = [];
@@ -341,6 +341,31 @@ test("SIGN — round first, decide the sign after: nothing is ever '-0.00'", () 
   assert.equal(limitDirection(NaN, "close"), 0);
 });
 
+test("SIGN — signedLimitFor(): the ladder's rung knows which way its money goes", () => {
+  // A bull call spread entered at a +0.24 debit, closed at +0.37: you RECEIVE it.
+  assert.equal(signedLimitFor(0.37, "close"), -0.37);
+  assert.equal(limitKind(signedLimitFor(0.37, "close")), "credit");
+  // A bull put spread entered for a −0.75 credit, closed at −0.37: you PAY it.
+  assert.equal(signedLimitFor(-0.37, "close"), 0.37);
+  assert.equal(limitKind(signedLimitFor(-0.37, "close")), "debit");
+  // Opening keeps the structure's own direction.
+  assert.equal(signedLimitFor(0.24, "open"), 0.24);
+  assert.equal(signedLimitFor(-0.75, "open"), -0.75);
+  // UNKNOWN IS NOT A NUMBER, and zero has no direction to flip.
+  assert.equal(signedLimitFor(null, "close"), null);
+  assert.equal(signedLimitFor(NaN, "open"), null);
+  assert.equal(signedLimitFor(0, "close"), 0);
+  assert.equal(limitKind(signedLimitFor(0, "close")), null);
+  // It agrees with the body, which is the only reason it is allowed to exist.
+  for (const net of [0.37, -0.37, 1.04, -0.02]) {
+    for (const intent of ["open", "close"]) {
+      assert.equal(Math.sign(signedLimitFor(net, intent)),
+        Math.sign(Number(mlegLimitPrice(net, 1, intent))),
+        `the button and the body disagree on ${net} / ${intent}`);
+    }
+  }
+});
+
 test("SIGN — the words, and an unreadable price gets none rather than '$0'", () => {
   assert.equal(limitWords("-0.75"), "a credit of $0.75 (you receive it)");
   assert.equal(limitWords(0.24), "a debit of $0.24 (you pay it)");
@@ -408,7 +433,50 @@ test("NEVER AGAIN — no mleg limit may be wrapped in Math.abs()", () => {
   const app = strip(readFileSync("src/App.jsx", "utf8"));
   assert.equal(/money\(\s*p\.alpacaLimit\s*\*/.test(app), false,
     "a limit rendered without its direction says nothing about which way the money went");
-  assert.ok(/limitKind\(/.test(app), "App.jsx names the direction of every limit it prints");
+  /* AND IT READS THE STORED LIMIT THROUGH ITS ONE HOME. `limitKind(p.alpacaLimit)`
+     was the shape here until the stamp arrived: it prints a direction with
+     confidence over a record that predates the app storing one. `storedLimitOf()`
+     in journal.js is the only reader now, and it returns no word at all when the
+     sign is not recorded. */
+  assert.equal(/limitKind\(\s*p\.alpacaLimit/.test(app), false,
+    "App.jsx must read a stored limit through storedLimitOf(), which knows whether the sign was kept");
+  assert.ok(/storedLimitOf\(/.test(app), "App.jsx names the direction of every stored limit it prints");
+  assert.equal(/p\.alpacaLimit\s*\)\s*\*\s*100/.test(app), false,
+    "a stored limit is scaled through storedLimitOf().magnitude, not read raw");
+});
+
+test("NEVER AGAIN — no ladder rung or limit is DISPLAYED as a bare magnitude", () => {
+  /* PR #33 said every displayed limit says debit or credit. It missed the exit
+     ladder: `GuardianPanel`'s three buttons rendered
+     `$${Math.abs(ladderNet(pos.entryNet, ...)).toFixed(2)}` with no word on the
+     button at all — and those are the buttons the owner will use to close XLE
+     J-0001, the first close this app has ever sent.
+
+     The sweep is on the SHAPE, like its two siblings above: a `Math.abs()`
+     wrapped around a ladder net or around anything named after a limit, in a
+     place a screen reads. `ladderRungPrice()` in pro.jsx is the one spelling,
+     and it is built on `signedLimitFor()` so the sign keeps its one home. */
+  const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+  const files = ["src/pro.jsx", "src/App.jsx", "src/wizard.jsx", "src/steps.jsx", "src/visuals.jsx"];
+  for (const f of files) {
+    const code = strip(readFileSync(f, "utf8"));
+    assert.equal(/Math\.abs\(\s*ladderNet\(/.test(code), false,
+      `${f} displays a ladder rung as a bare magnitude: a close is a credit when the structure is a ` +
+      `debit, and "$0.37" does not say which (PRD §4q). Use ladderRungPrice().`);
+    // ...and the same shape around anything the code itself calls a limit.
+    const named = /Math\.abs\(\s*\+?([A-Za-z_$][\w$.?]*)\s*\)/g;
+    let m;
+    while ((m = named.exec(code)) !== null) {
+      const id = m[1];
+      if (!/(^|[^A-Za-z])(limit|Limit|ladder|Ladder)/.test(id)) continue;
+      // `signedLimitFor(...)` produces the direction separately and the caller
+      // prints the word beside it; a raw `limit` identifier does not.
+      assert.fail(`${f}: Math.abs(${id}) — a limit displayed without its direction (PRD §4q)`);
+    }
+  }
+  // AND THE GUARD CAN SEE IT: the shape it refuses is a shape it recognises.
+  assert.equal(/Math\.abs\(\s*ladderNet\(/.test("x = Math.abs(ladderNet(a, b)).toFixed(2)"), true);
+  assert.equal(/Math\.abs\(\s*ladderNet\(/.test("x = ladderRungPrice(a, b)"), false);
 });
 
 test("NEVER AGAIN — no order path hands orderBody() a magnitude", () => {

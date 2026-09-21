@@ -3,7 +3,7 @@ import { RefreshCw, Send, Trash2, Download, Sparkles, FileText, XCircle } from "
 import { T } from "./theme.js";
 import { RULES, ruleBadge, takeProfitLabel, scaleOutLabel, stopLossLabel, exitDTELabel, perTradeCapLabel, copilotRulesBlock, money, pctText, MIN_NET_DOLLARS,
   NO_CEILING, reportNarrativePrompt, chanceText, seasonalStampNote, MEASURED_SIGMA_SOURCE,
-  comboBook, notionalControlled, notionalNote,
+  comboBook, limitAgainstBook, notionalControlled, notionalNote,
   legBook, sizeSkippedNote, onTick, netFromLegs, limitCeilingNote, rewardRisk,
   contractListing, unlistedContractNote, unquotedLegNote, unquotedLegPointer, marketOrderNote,
   ivProvenance } from "./rules.js";
@@ -13,7 +13,7 @@ import { erf, netBS } from "./engine.js";
 import { ARROW, REGIONS, regionSignals, tagImpacts, taRead } from "./signals.js";
 import { useNarrow, BandThumbnail, payoffBands, bandTakeaway } from "./visuals.jsx";
 import { DEMO, DEMO_TOOLTIP } from "./demo.js";
-import { reduceRatios, orderQty, mlegLimitPrice, limitWords, orderBody, orderPreviewLines, orderOutcome, alpacaErrorText } from "./order.js";
+import { reduceRatios, orderQty, mlegLimitPrice, limitWords, limitKind, signedLimitFor, orderBody, orderPreviewLines, orderOutcome, alpacaErrorText } from "./order.js";
 import { hasOpenInterest, sourceNote, openInterestNote } from "./chain.js";
 // "Why this trade" and the headline tags moved to src/why.jsx: the wizard's
 // decision screen needs them too, and a road with no evidence under it is a
@@ -833,6 +833,19 @@ export function AlpacaDesk({ creds, setMsg, gate }) {
         occs: items.map((x) => x.symbol),
         userQty: 1, type: "market", tif: "day", intent: "close",
       });
+      /* THE SAME CHECK AS THE LADDER'S, AND ON THIS PATH IT ALWAYS SKIPS —
+         deliberately, and it is wired anyway. This close is a MARKET order, so
+         the body carries no limit_price at all, and the broker's positions
+         payload carries no bid or ask, so there is no book either. Two of the
+         four unknowns at once. It is written here because the day this path
+         gains a limit (P2 owes it: a market close on a book quoting 145% of
+         the mid is the fault §4l named) the check is already in place, and
+         because a path with no guard reads as a path nobody thought about. */
+      const lb = limitAgainstBook({
+        limitPrice: body.limit_price ?? null, book: null,
+        intent: "close", legCount: items.length,
+      });
+      if (lb.checked && !lb.ok) throw new Error(lb.sentence);
       const co = await alpacaReq("/v2/orders", "POST", body);
       setMsg(`Closing ${grp.key} — sent as a single order. ${orderOutcome(co).headline}`);
       setTimeout(sync, 1500);
@@ -1751,6 +1764,24 @@ export function exitPathSim(pos, S, dteLeft, iv, vol, nSim = 2000) {
 // Exit Ladder: prezzo netto combo per target P&L
 export const ladderNet = (entryNet, targetPnl) => entryNet + targetPnl / 100;
 
+/* THE RUNG'S PRICE, IN THE WORDS THE ORDER WILL USE.
+   The three ladder buttons printed `$${Math.abs(ladderNet(...)).toFixed(2)}` —
+   a bare magnitude, with no word anywhere on the button, on the controls the
+   owner will use to close XLE J-0001. That is the first close this app has
+   ever sent, and "$0.37" does not distinguish receiving 37 cents from paying
+   them: it is the §4q read-back fault, one screen further on.
+
+   THE ARITHMETIC IS UNCHANGED — the magnitude is the same number it always
+   was, and it is still the price of the WHOLE position, which the confirmation
+   message already explains. What is added is the direction, and it comes from
+   `signedLimitFor()` in order.js so that the rule "a close flips the sign"
+   stays spelled once, where `limitDirection()` lives. */
+const ladderRungPrice = (entryNet, targetPnl) => {
+  const signed = signedLimitFor(ladderNet(entryNet, targetPnl), "close");
+  const kind = limitKind(signed);
+  return `$${Math.abs(Number(signed) || 0).toFixed(2)}${kind ? ` ${kind}` : ""}`;
+};
+
 export function GuardianPanel({ pos, spot, dteLeft, ivNow, vol, seasonalNow, pnlNow, popNow, chanceNow, seasonalNote, thesisSeasonalNote, vegaSign, alpaca, quoteFn, setMsg, logEvent, gate }) {
   // How many combinations this position is. `pos.maxProfit`, `pos.maxLoss` and
   // `pos.entryNet` are all per combination; `pnlNow` is the whole position's.
@@ -1817,6 +1848,19 @@ export function GuardianPanel({ pos, spot, dteLeft, ivNow, vol, seasonalNow, pnl
       }
       if (occs.length > 4) throw new Error("Alpaca takes at most 4 legs per order");
       const body = orderBody({ legs: pos.legs, occs, userQty: size, type: "limit", limit: net, tif: "gtc", intent: "close" });
+      /* AND THE SIGN ON IT HAS TO POINT THE SAME WAY AS THE BOOK IT WILL MEET.
+         This is NOT in the gate and must not be: refusing a CLOSE because a
+         feed is quiet leaves somebody in a position they asked to leave, which
+         is the worse failure by a distance — the same reason UNPRICEABLE and
+         UNLISTED_CONTRACT are entry-only. So the refusal is here, beside the
+         button, where the person tapping can read it. An unreadable book skips
+         rather than blocks, and says which unknown stopped it. */
+      const lb = limitAgainstBook({
+        limitPrice: body.limit_price ?? null,
+        book: comboBook(pos.legs, pos.legs.map((l) => (quoteFn ? quoteFn(l) : null) || {})),
+        intent: "close", legCount: pos.legs.length,
+      });
+      if (lb.checked && !lb.ok) throw new Error(lb.sentence);
       const o = await alpacaReq("/v2/orders", "POST", body);
       const res = orderOutcome(o);
       // The ladder's price is the price of the WHOLE position; the broker was
@@ -1885,14 +1929,14 @@ export function GuardianPanel({ pos, spot, dteLeft, ivNow, vol, seasonalNow, pnl
               close the position for nothing. The stop rung stays: the maximum
               LOSS is always known, which is non-negotiable rule 2. */}
           {Number.isFinite(pos.maxProfit) ? (<>
-            <Btn small ghost color={T.green} title={DEMO ? DEMO_TOOLTIP : undefined} onClick={() => placeExit(takeProfitLabel(), RULES.takeProfitPct * pos.maxProfit)} disabled={!!ladderBusy || DEMO}>GTC {takeProfitLabel()} @ ${Math.abs(ladderNet(pos.entryNet, RULES.takeProfitPct * pos.maxProfit)).toFixed(2)}</Btn>
-            <Btn small ghost color={T.green} title={DEMO ? DEMO_TOOLTIP : undefined} onClick={() => placeExit(`TP ${scaleOutLabel()}`, RULES.scaleOutPct * pos.maxProfit)} disabled={!!ladderBusy || DEMO}>GTC TP {scaleOutLabel()} @ ${Math.abs(ladderNet(pos.entryNet, RULES.scaleOutPct * pos.maxProfit)).toFixed(2)}</Btn>
+            <Btn small ghost color={T.green} title={DEMO ? DEMO_TOOLTIP : undefined} onClick={() => placeExit(takeProfitLabel(), RULES.takeProfitPct * pos.maxProfit)} disabled={!!ladderBusy || DEMO}>GTC {takeProfitLabel()} @ {ladderRungPrice(pos.entryNet, RULES.takeProfitPct * pos.maxProfit)}</Btn>
+            <Btn small ghost color={T.green} title={DEMO ? DEMO_TOOLTIP : undefined} onClick={() => placeExit(`TP ${scaleOutLabel()}`, RULES.scaleOutPct * pos.maxProfit)} disabled={!!ladderBusy || DEMO}>GTC TP {scaleOutLabel()} @ {ladderRungPrice(pos.entryNet, RULES.scaleOutPct * pos.maxProfit)}</Btn>
           </>) : (
             <span style={{ ...mono, fontSize: 10, color: T.dim }}>
               {`No profit rung: this position has ${NO_CEILING}, so ${pctText(RULES.takeProfitPct)} of the maximum is not a price. The ${RULES.exitDTE}-day exit still applies.`}
             </span>
           )}
-          <Btn small ghost color={T.red} title={DEMO ? DEMO_TOOLTIP : undefined} onClick={() => placeExit(stopLossLabel(), RULES.stopLossPct * pos.maxLoss)} disabled={!!ladderBusy || DEMO}>{stopLossLabel()} @ ${Math.abs(ladderNet(pos.entryNet, RULES.stopLossPct * pos.maxLoss)).toFixed(2)}</Btn>
+          <Btn small ghost color={T.red} title={DEMO ? DEMO_TOOLTIP : undefined} onClick={() => placeExit(stopLossLabel(), RULES.stopLossPct * pos.maxLoss)} disabled={!!ladderBusy || DEMO}>{stopLossLabel()} @ {ladderRungPrice(pos.entryNet, RULES.stopLossPct * pos.maxLoss)}</Btn>
         </>)}
       </div>
       {sim && (
