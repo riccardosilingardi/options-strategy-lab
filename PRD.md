@@ -2118,11 +2118,119 @@ for. On the metals I expect `comboSpread` to cut **at most one** of the eight an
 **none**. If the grains turn out to be cut by `liquidity` instead, the diagnosis in this PRD is wrong
 and the liquidity percentile is the number to look at rather than the pair ceiling.
 
+### SEEN ON THE OWNER'S PHONE — 21 September 2026, five screens, deploy preview 32
+
+**THE LIQUID TIER WORKS, AND THE PREDICTION IS PART-MEASURED.** Everything below is read off the
+screens, not from the code.
+
+**1. The depth is what P2-bis was for, and it is now a number.** The Shortlist's own
+`OpenInterestReadout` — which reports and never estimates — on the chains loaded in that session:
+
+| market | contracts near the money | whole chain | clear the 10-contract minimum, near the money |
+|---|---|---|---|
+| WEAT | 50 | 208 | 72% |
+| SOYB | 60 | 202 | 48% |
+| BOIL | 120 | 427 | 70% |
+| **XLE** | **526** | **1,492** | **74%** |
+| **USO** | **900** | **2,788** | **88%** |
+
+**Eight to eighteen times the population near the money**, which is where every structure is built.
+That is the whole thesis of this section, measured on live chains rather than argued.
+
+**2. Nothing was cut on XLE, at any setting.** *"3 of 3 structures on XLE are shown at this
+setting"* — and the same "3 of 3 shown" under STRICT, RECOMMENDED, RELAXED and OFF. **The
+falsifiable half of the prediction holds for XLE: the combination-spread floor cut none of them and
+open interest cut none of them.** The grain half is NOT measured — SOYB and CORN were not searched
+in that session.
+
+**AND THE DENOMINATOR IN THE PREDICTION WAS WRONG.** It said "of the eight presets
+`shortlistWithFloors()` builds per direction". For VERY BULL on XLE it built **three**. The
+7-of-8 / 6-of-8 figures predicted are therefore not comparable to what was read; what IS comparable,
+and what held, is how many were REMOVED: zero.
+
+**3. The 10-contract absolute minimum is what binds on a deep chain, and that is new.**
+*"On 2026-10-23 the 10-contract absolute minimum is what binds: the 40th percentile of the 82
+contracts there is only 7."* `minPeersForPercentile` was moved 12 → 8 because the GRAIN chains carry
+ten or eleven reporting strikes; on a chain with 82 contracts on one expiry the relative half is
+still not the binding rule. That is an input to ROADMAP P2, not a change to make here.
+
+**4. The feed-reliability check fires on a liquid chain too, and proportionally less.**
+*"THIS FEED LOOKS UNRELIABLE ON 2026-10-23. 1 of its 78 neighbouring strike pairs are priced in an
+impossible order … the 53 put is priced above the 52 put"* — against BOIL's five of twenty-five.
+
+**5. Seasonality really does load for the new markets.** XLE reads *"SEASONAL SOURCE · Alpha Vantage
+· 11y"*, *"seasonal +0.1%/mo (11y history)"*, and the trade card says *"Drifted on XLE's MEASURED
+seasonality: 11 years of monthly prices, read today."* No hand-written row was needed and none was
+invented.
+
+**6. Weather says why it does not apply, and the scale says what it was measured on.** On XLE:
+*"Weather — n/a — why not?"*, and under the bars *"The score above is these 3 weighted together:
+seasonality 40%, price trend 33%, news flow 27% — weather does not apply to this market, so it is
+not in the score and its share is spread over the rest."* Both generated, neither typed.
+
+**7. The Radar collapsed to one line.** *"8 markets with nothing to show — …"* under two full rows,
+with every name still a tap.
+
+**8. §4o's card fix is on the screen.** *"YOU RISK — $267 **at the $83 credit the ticket is
+holding**… That is 3.8% of capital, inside your $350 per-trade limit"*, and inside the order sheet
+*"MOST YOU CAN LOSE $275 — **of $350 allowed**"*. **That closes the seven-pull-request-old debt for
+the trade card, the ticket, the Watching tab and the five-line layout: they have now been seen.**
+
+**9. A fifth order is at the broker.** J-0001, XLE Bull Put Spread (credit), 1 combination, limit
+**$75** GTC, Alpaca **accepted**, id `e98ad0e8-3a2e-4a1b-8c76-4e6c95d62ac0`. Alpaca's own panel shows
+**two** orders waiting — this one and the morning's `limit @ 0.6 · day`, which is §4o's SOYB order,
+still unfilled. **Still no fill.** Trading capital on that phone is **$7,000** ($350 per trade, $1,750
+total), not the $20,000 §4o inferred.
+
+### THREE THINGS THE SAME FIVE SCREENS CAUGHT, AND ALL THREE ARE FIXED HERE
+
+**A. A ROAD TOLD THE USER IT WAS DRIFTED ON A TABLE THAT DOES NOT EXIST.** The Shortlist road card
+for XLE: *"This record carries no seasonal stamp … Drifted on the HAND-WRITTEN seasonal estimate for
+XLE, not on measured prices. That table is wrong on eight months of twelve"* — four lines under a
+header reading *"SEASONAL SOURCE · Alpha Vantage · 11y"*, and on the same trade whose Build screen
+said *"Drifted on XLE's MEASURED seasonality"*. **XLE has no hand-written row at all.**
+
+The cause is one argument. `toCandidate()` spelled `seasonalStampFields(x.mc)`. A `chanceOf()`
+result carries the facts as `seasonalSource` / `seasonalYears` / `seasonalAgeDays`;
+`seasonalStampFields()` reads a **provenance**, whose fields are `source` / `years` / `ageDays`. All
+three came back `undefined`, the road went out unstamped, and `seasonalStampOf()` reads an absent
+stamp as the hand-written table — the right reading for a record written before stamps existed, the
+wrong one for a road generated three seconds ago. And where `chanceOf()` returns null, as it does for
+a market with no seasonal reading at all, there was no object to read from in the first place. It
+takes `seasonalFor(x.tk)` now: the same provenance `chanceFor()` drifted that candidate on, so the
+stamp and the arithmetic cannot disagree. `ceiling.test.jsx` holds the two shapes apart by name.
+
+**B. THE RADAR DENIED HAVING LOOKED AT MARKETS THE PARAGRAPH ABOVE NAMED.** One screen, four lines
+apart: *"4 of them came through to the shortlist (BOIL, WEAT, XLE and USO)"* over *"8 markets with
+nothing to show — not searched yet: BOIL, USO, UNG, …"*. BOIL and USO cleared every floor and were
+simply not the two roads taken forward. `marketFacts` only ever knew roads, wide-search hits and the
+markets the floors emptied, so a board the guided run priced and did not choose fell through to
+"nobody has looked". **Collapsing the quiet markets into one line is what put those two sentences
+next to each other** — the gap is older than the line, the contradiction is not.
+
+`radarSplit()` takes `searched` now, `runWizard` records the boards it read, and the sentence claims
+only what it can support: **"looked at, nothing on the radar: BOIL, USO · not searched yet: GLD, …"**.
+Not "nothing cleared" — their structures *did* clear.
+
+**C. THE ROAD CARD PRINTED A SIGNAL SCORE NOBODY ELSE AGREED WITH.** The XLE road card read
+*"+24 / 100 · 56 / 100 — XLE: 1 of the 3 factors points higher … the heaviest reading is news flow at
+89/100"*, while the Radar row and the Build screen both read *"+57 / 100 · 69 / 100 … the heaviest
+reading is the price trend at 100/100"*. One market, one day, three screens, two answers. The
+candidate carries the fusion from the moment the guided run finished — **before the daily bars had
+loaded**, so the trend factor read 0 — and nothing refreshed it. `WizardCandidates` takes `fusedFor`
+and the evidence panel reads today's fusion, falling back to the snapshot only when there is no live
+one. The snapshot is not removed: a card with no reading at all would be worse.
+
 ### NOT VERIFIED
 
-- **NO CHAIN HAS EVER BEEN FETCHED FOR ANY OF THE FIVE.** Whether Alpaca lists options on all of
-  them, what expiries come back, what the strike increments really are near the money, and whether
-  anything at all clears the floors — none of it is read. The prediction above is a prediction.
+- **NO FILL. STILL.** Two orders are at the broker, both accepted, neither filled.
+- **THE GRAIN HALF OF THE PREDICTION IS UNMEASURED.** SOYB and CORN were not searched in that
+  session, so "0-2 of 8" and "the combination spread is what cuts them" are still predictions. The
+  liquid half is measured only on XLE; GLD, SLV, USO and GDX have still never had a Shortlist run.
+- **THE APP'S WORKING-ORDER COUNT AND THE BROKER'S DISAGREE — 1 against 2.** The app lists the
+  orders it holds records of and Alpaca lists the account's; the local store had been reset and
+  renumbered from J-0001, so the morning's SOYB order has no record. Both panels are labelled and
+  neither is wrong, but nothing on that screen SAYS why the two numbers differ.
 - **THE LIQUIDITY FLOOR'S CONSTANTS WERE MEASURED ON THE ORIGINAL FIVE**, on the 2026-09-01 close.
   `LIQUIDITY_MEASUREMENT` says so and is unchanged. `/api/liquidity` now covers all ten but **has not
   been run against them**, and the `minPeersForPercentile` of 8 was tuned to grain chains with ten or
@@ -2136,14 +2244,18 @@ and the liquidity percentile is the number to look at rather than the pair ceili
   invent a Gulf-hurricane region, and inventing a region is worse than routing the fact through the
   news rules and saying so.
 - **THE ELEVEN NEWS RULES ARE WRITTEN, NOT MEASURED.** They are held against eleven synthetic
-  headlines. Nobody has run them over a real feed to see how often they fire, or how often a real
-  headline matches two of them and the first one wins.
+  headlines. XLE's card shows three headlines tagging it and WEAT's nineteen, so they do fire on a
+  real feed — but nobody has read the headlines themselves to see whether the tags are right, or how
+  often a real headline matches two rules and the first one wins.
 - **THE SEASONAL ENGINE APPLIES TO THESE MARKETS AS AN ASSERTION.** Gold has a documented seasonal
   pattern and crude a strong one; GDX and XLE are equities whose seasonality is their underlying
-  commodity's plus the equity market's, which this app does not separate. The measured Alpha Vantage
-  series is what will settle it, and it is 30% of the score.
-- **NOBODY HAS SEEN THE RADAR COLLAPSE, THE `n/a` WEATHER BAR OR THE CARD'S PRICE CLAUSE.** Eighth
-  pull request in a row handing a screen forward unseen.
+  commodity's plus the equity market's, which this app does not separate. XLE's measured September
+  reading is +0.1%/mo — almost nothing — which is consistent with either story and settles neither.
+- **THE SNAPSHOT A ROAD CARRIES IS STILL A SNAPSHOT.** Fix C makes the evidence PANEL read today's
+  fusion, but the road's own ranking — which two roads were chosen, and in what order — was decided
+  on the reading at run time. Re-ranking live would mean the two cards swapping places under the
+  reader, so it is deliberately not done, and nothing on the card says the ranking is older than the
+  panel beneath it.
 
 ---
 

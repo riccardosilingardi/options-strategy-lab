@@ -3177,12 +3177,33 @@ export default function OptionsStrategyLab() {
         // volatility — beside a `pop` computed at the chain's IMPLIED one, and
         // with no drift travelling at all.
         ...chanceDrawFields(x.mc),
-        // A ROAD CARRIES THE SOURCE OF ITS OWN CHANCE. Two roads are ranked on
-        // one scale across the whole basket, so road 1 and road 2 can be in
-        // different markets — and with four of five markets on the hand-written
-        // table until Alpha Vantage loads, two roads compared side by side can
-        // have their "works out N times in 10" drifted on two different tables.
-        ...seasonalStampFields(x.mc),
+        /* A ROAD CARRIES THE SOURCE OF ITS OWN CHANCE. Two roads are ranked on
+           one scale across the whole basket, so road 1 and road 2 can be in
+           different markets — and two roads compared side by side can have their
+           "works out N times in 10" drifted on two different tables.
+
+           >>> IT TAKES THE PROVENANCE, NOT THE CHANCE. <<< Read on the owner's
+           phone, XLE 21 September 2026: the road card said *"Drifted on the
+           HAND-WRITTEN seasonal estimate for XLE… that table is wrong on eight
+           months of twelve"* while the header two blocks above read "SEASONAL
+           SOURCE · Alpha Vantage · 11y" and the Build screen for the same trade
+           said "Drifted on XLE's MEASURED seasonality: 11 years of monthly
+           prices, read today". **XLE has no hand-written table at all** — the
+           liquid tier deliberately carries none — so the card was naming a table
+           that does not exist.
+
+           The cause is that this was handed `x.mc`. A `chanceOf()` result
+           carries `seasonalSource` / `seasonalYears` / `seasonalAgeDays`;
+           `seasonalStampFields()` reads a PROVENANCE, whose fields are `source`
+           / `years` / `ageDays`. Every one came back `undefined`, the record
+           went out unstamped, and `seasonalStampOf()` reads an absent stamp as
+           the hand-written table — which is the right reading for a record
+           written before stamps existed and the wrong one for a road generated
+           three seconds ago. And when `chanceOf()` returns null, as it does for
+           a market with no seasonal reading at all, there was no object to read
+           at all. `seasonalFor()` is the same provenance `chanceFor()` drifted
+           this candidate on, so the stamp and the arithmetic cannot disagree. */
+        ...seasonalStampFields(seasonalFor(x.tk)),
       });
       const roads = [toCandidate(first, 1), toCandidate(second, 2)];
 
@@ -3211,7 +3232,11 @@ export default function OptionsStrategyLab() {
          step 1 with what was examined in front of it — the roads are on step 2
          where every other candidate is, and the walk is the same one whether
          the user came through the guided door or through the desk. */
-      setGuided({ at: Date.now(), basket, roads: roads.length });
+      /* AND WHICH BOARDS IT ACTUALLY READ. `examined` is every market whose
+         chain and expiry this run got as far as pricing; without it the Radar
+         reported "not searched yet" about markets the narrative four lines
+         above named as having come through. See `radarSplit()` in rules.js. */
+      setGuided({ at: Date.now(), basket, roads: roads.length, examined: examined.map((e) => e.tk) });
       setCompare([]); setShowCompare(false); setCompareNote(null);
       goStep("radar");
     } catch (e) { setWiz((w) => ({ ...w, busy: false, err: String(e.message || e) })); }
@@ -3543,12 +3568,19 @@ export default function OptionsStrategyLab() {
       if (r.expKey) f.exps.add(r.expKey);
       if (!f.best) f.best = { legs: r.legs, entryNet: r.a.entry, spot: r.spot };
     }
-    for (const tk of (multi.floors?.markets || [])) touch(tk).cut = true;
+    /* SEARCHED, EVEN WHEN IT PRODUCED NOTHING. Three things count as having
+       read a board: the guided run examined it, the wide search ran on it, or
+       the floors emptied it. Without this a market the guided run priced and
+       did not choose read as "not searched yet" on the same screen that named
+       it as examined (`radarSplit()` in rules.js). */
+    for (const tk of (guided?.examined || [])) touch(tk).searched = true;
+    if (multi.res) for (const tk of (multi.sel || [])) touch(tk).searched = true;
+    for (const tk of (multi.floors?.markets || [])) { touch(tk).cut = true; touch(tk).searched = true; }
     for (const tk of (multi.floors?.oiSkipped || [])) touch(tk).oiSkipped = true;
     for (const tk of (multi.floors?.spreadSkipped || [])) touch(tk).spreadSkipped = true;
     for (const k of Object.keys(m)) m[k].expiries = [...m[k].exps].sort();
     return m;
-  }, [candidates, multi.res, multi.floors]);
+  }, [candidates, multi.res, multi.sel, multi.floors, guided]);
 
   /* ============================== RENDER ============================== */
   // The old "Today" tab is gone: what needs attention today is the wizard's
@@ -3561,7 +3593,8 @@ export default function OptionsStrategyLab() {
      content is ten paragraphs explaining why it is empty is not a screen. */
   const radarRows = useMemo(
     () => radarSplit(scan.filter((r) => BASKET.includes(r.tk))
-      .map((r) => ({ ...r, n: (marketFacts[r.tk] || {}).n || 0, cut: !!(marketFacts[r.tk] || {}).cut }))),
+      .map((r) => ({ ...r, n: (marketFacts[r.tk] || {}).n || 0,
+        cut: !!(marketFacts[r.tk] || {}).cut, searched: !!(marketFacts[r.tk] || {}).searched }))),
     [scan, marketFacts]);
   const radarQuiet = useMemo(() => radarQuietNote(radarRows), [radarRows]);
 
@@ -4461,6 +4494,10 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   candidates={candidates} answers={wiz} narrative={[]}
                   barsFor={(tk) => barsCache[tk] || []}
                   weatherData={weather} newsItems={newsPool} month={NOW_MONTH}
+                  /* THE LIVE READING, so the road card, the Radar row and the
+                     Build screen cannot print three signal scores for one
+                     market on one day. */
+                  fusedFor={(tk) => fused[tk] || null}
                   onPick={pickRoad}
                   onBack={() => { setView("wizard"); setWizStep("questions"); }}
                   actionsFor={(c) => {

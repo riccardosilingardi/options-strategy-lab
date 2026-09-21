@@ -27,7 +27,7 @@ import {
   qualityFloor, rewardRisk, reportNarrativePrompt, NOTHING_TODAY, NO_CEILING, RULES,
   modelSanity, modelDisagreementNote, MIN_NET_DOLLARS,
 } from "./rules.js";
-import { chanceOf, chanceSourceNote, seasonalProvenance, seasonalStampNote,
+import { chanceOf, chanceSourceNote, seasonalProvenance, seasonalStampNote, seasonalStampFields,
   MEASURED_SEASONAL_SOURCE, ESTIMATED_SEASONAL_SOURCE } from "./rules.js";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -819,6 +819,54 @@ check("SEASONAL PROVENANCE — the stamp travels, and its ABSENCE is the marker"
   const old = seasonalStampNote({ pop: 0.5 }, "CORN");
   has(old, "no seasonal stamp");
   has(old, "HAND-WRITTEN");
+});
+
+check("SEASONAL STAMP — a market with NO table is never told it has a hand-written one", () => {
+  /* >>> READ ON THE OWNER'S PHONE, XLE, 21 September 2026. <<< The road card on
+     the Shortlist said "Drifted on the HAND-WRITTEN seasonal estimate for XLE …
+     that table is wrong on eight months of twelve" while the header two blocks
+     above read "SEASONAL SOURCE · Alpha Vantage · 11y" and the Build screen for
+     the very same trade said "Drifted on XLE's MEASURED seasonality: 11 years of
+     monthly prices, read today". XLE has no hand-written table at ALL — the
+     liquid tier deliberately carries none — so the card was naming a table that
+     does not exist, about a market whose real history was loaded. */
+  const measured = seasonalProvenance({ monthlyMean: SEASONAL.CORN, years: 11, at: Date.now() }, null, "XLE");
+  eq(measured.measured, true, "the fixture really is the measured reading");
+  const stamped = seasonalStampFields(measured);
+  eq(stamped.seasonalSource, MEASURED_SEASONAL_SOURCE);
+  has(seasonalStampNote(stamped, "XLE"), "MEASURED");
+  hasNot(seasonalStampNote(stamped, "XLE"), "HAND-WRITTEN");
+
+  // ...AND WITH NO READING AT ALL IT SAYS SO, rather than inventing the table.
+  const none = seasonalStampFields(seasonalProvenance(null, null, "XLE"));
+  const note = seasonalStampNote(none, "XLE");
+  has(note, "no seasonal reading for XLE at all");
+  hasNot(note, "HAND-WRITTEN");
+  hasNot(note, "no seasonal stamp");
+
+  /* THE CAUSE, HELD BY NAME. `seasonalStampFields()` reads a PROVENANCE —
+     `source` / `years` / `ageDays`. A `chanceOf()` result carries the same facts
+     under `seasonalSource` / `seasonalYears` / `seasonalAgeDays`, so handing it
+     one produces three undefineds and an unstamped record that then reads as the
+     hand-written table. The two shapes must stay distinguishable. */
+  const mc = cornAt(seasonalProvenance({ monthlyMean: SEASONAL.CORN, years: 11, at: Date.now() }, SEASONAL.CORN, "CORN"));
+  eq(seasonalStampFields(mc).seasonalSource, null,
+    "a chance result is NOT a provenance, and passing one must not quietly produce a stamp");
+  eq(mc.seasonalSource, MEASURED_SEASONAL_SOURCE, "...it carries the fact under its own name instead");
+});
+
+check("A GUIDED ROAD CARRIES THE SAME STAMP ITS CHANCE WAS DRIFTED ON", () => {
+  // The road and the Build screen read one market on one day: whatever
+  // `seasonalFor()` says is what both print. This is the shape App.jsx uses.
+  for (const [prov, want] of [
+    [seasonalProvenance({ monthlyMean: SEASONAL.CORN, years: 11, at: Date.now() }, null, "XLE"), MEASURED_SEASONAL_SOURCE],
+    [seasonalProvenance(null, SEASONAL.CORN, "CORN"), ESTIMATED_SEASONAL_SOURCE],
+  ]) {
+    const road = { ticker: prov.ticker, ...seasonalStampFields(prov) };
+    eq(road.seasonalSource, want, `${prov.ticker} stamps what it was drifted on`);
+    // The road's sentence and the live provenance's sentence are one reading.
+    eq(seasonalStampNote(road, prov.ticker), prov.note);
+  }
 });
 
 /* ============================================================================

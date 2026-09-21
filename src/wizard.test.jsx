@@ -18,6 +18,7 @@ const ANSWERED = { basket: ALL, risk: 250, horizon: 45, weights: DRIVER_PRESETS.
 const ok = [], bad = [];
 const check = (name, fn) => { try { fn(); ok.push(name); } catch (e) { bad.push([name, e.message]); } };
 const has = (html, s) => { if (!html.includes(s)) throw new Error(`missing ${JSON.stringify(s)}`); };
+const hasNot = (html, s) => { if (html.includes(s)) throw new Error(`should not contain ${JSON.stringify(s)}`); };
 
 const limits = sizing({ tradingCapital: 5000, concurrentTarget: 4 });
 
@@ -420,6 +421,25 @@ check("FAULT B — each road carries the evidence, with the factor bars open", (
   has(h, "61/100");                          // a factor's strength, as a bar
   // the drill-through to the regions and the headlines is offered, not buried
   has(h, "regions?"); has(h, "headlines?");
+
+  /* >>> AND IT IS TODAY'S READING, NOT THE ONE THE RUN WAS BUILT ON. <<<
+     Read on the owner's phone, XLE 21 September 2026: this card said "+24 / 100
+     … 56 / 100" while the Radar row and the Build screen both said "+57 / 100 …
+     69 / 100" about the same market on the same day. The candidate carries the
+     fusion from the moment the guided run finished — before the daily bars had
+     loaded — and nothing refreshed it. */
+  const live = { ...fused, score: 57, confidence: 69,
+    narrative: "CORN: 2 of the 3 factors point higher, giving a score of +57 out of 100 at 69/100 confidence" };
+  const h2 = renderToStaticMarkup(
+    <WizardCandidates candidates={[{ ...ROADS[0], fused }, ROADS[1]]} answers={ANSWERED} onPick={() => {}}
+      weatherData={{}} newsItems={[]} month={8} fusedFor={(tk) => (tk === ROADS[0].ticker ? live : null)} />);
+  has(h2, "69 / 100");
+  hasNot(h2, "78 / 100");
+  // ...and with no live reading to be had, the snapshot is still better than nothing.
+  const h3 = renderToStaticMarkup(
+    <WizardCandidates candidates={[{ ...ROADS[0], fused }, ROADS[1]]} answers={ANSWERED} onPick={() => {}}
+      weatherData={{}} newsItems={[]} month={8} fusedFor={() => null} />);
+  has(h3, "78 / 100");
 });
 
 check("FAULT D — two roads may come from two different markets", () => {

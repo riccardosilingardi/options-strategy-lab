@@ -94,9 +94,16 @@ SETTLED ON THE OWNER'S PHONE — SOYB, 21 Sep 2026, 10:12-10:15 CEST (PR #32, PR
     **ACCEPTED**, id 29fdee45-9104-41f2-87cf-2ea9e00f967d, sent 04:15 ET.
     `UNLISTED_CONTRACT` is closed on live data.
 
+AND A SECOND ORDER IS NOW AT THE BROKER (21 Sep, deploy preview 32): J-0001,
+XLE Bull Put Spread (credit), 1 combination, limit $75 GTC, Alpaca ACCEPTED,
+id e98ad0e8-3a2e-4a1b-8c76-4e6c95d62ac0. Alpaca's own panel lists TWO orders
+waiting — this one and the morning's SOYB `limit @ 0.6 · day`. Neither has
+filled. Trading capital on that phone is $7,000 ($350 per trade, $1,750 total),
+which corrects the $20,000 §4o inferred from a checklist.
+
 WHAT P0 STILL OWES, AFTER PR #32:
-  - **A FILL.** Unchanged, and it is now the ONLY item left from §4o's list. The
-    order was sent before the options opened, so nothing could have filled yet.
+  - **A FILL.** Unchanged, and it is now the ONLY item left from §4o's list.
+    Two orders are accepted and waiting; neither has been met by the market.
   - **The effective price against the fill price.** `recheckOrders()` still
     does not compare `min(limit, ask)` with what the broker recorded, because
     nothing has ever filled.
@@ -654,17 +661,60 @@ SHIPPED (783 checks across 22 suites, build clean):
     quota: cache, then stale cache with its age and the upstream refusal, then
     UNKNOWN. Never a table.
 
-WHAT P2-bis HANDS FORWARD, AND IT IS THE WHOLE OF THE VALUE:
-  - **NO CHAIN HAS EVER BEEN FETCHED FOR ANY OF THE FIVE.** The prediction is
-    written down in PRD §4p with a number per market and a falsifiable claim
-    about WHICH floor cuts what. Measure it on the deploy.
-  - **The liquidity constants were measured on the original five.** Re-run
-    `/api/liquidity` against all ten; `minPeersForPercentile` (8) was tuned to
-    chains with ten reporting strikes and these have hundreds.
+MEASURED ON THE DEPLOY PREVIEW, 21 Sep 2026 (PRD §4p). The prediction was
+written before the chains were fetched; this is what they carry:
+
+| market | contracts near the money | whole chain | clear the 10 minimum |
+|---|---|---|---|
+| WEAT | 50 | 208 | 72% |
+| SOYB | 60 | 202 | 48% |
+| BOIL | 120 | 427 | 70% |
+| **XLE** | **526** | **1,492** | **74%** |
+| **USO** | **900** | **2,788** | **88%** |
+
+  - **Eight to eighteen times the population near the money.** That is the
+    whole reason this section exists, measured rather than argued.
+  - **On XLE the floors removed NOTHING** — "3 of 3 shown" at STRICT,
+    RECOMMENDED, RELAXED and OFF alike. The falsifiable half of the prediction
+    holds there. **The denominator in it was wrong**: the Shortlist builds
+    THREE presets per direction, not eight.
+  - **The 10-contract ABSOLUTE minimum is what binds on a deep chain**: XLE's
+    chosen expiry carries 82 contracts and its 40th percentile is 7.
+    `minPeersForPercentile` was tuned for chains with ten reporting strikes.
+    That is a P2 input.
+  - Seasonality loads for the new markets (XLE: Alpha Vantage, 11y, +0.1%/mo),
+    `weatherNaReason()` and the renormalised weights sentence render as
+    written, and the Radar collapsed to one line.
+
+AND THE SAME FIVE SCREENS CAUGHT THREE FAULTS, ALL FIXED IN THIS PR:
+  - **A road said it was drifted on a table that does not exist.**
+    `toCandidate()` passed `seasonalStampFields(x.mc)`; that function reads a
+    PROVENANCE (`source`/`years`/`ageDays`) and a chance result carries
+    `seasonalSource`/`seasonalYears`/`seasonalAgeDays`. Three undefineds, an
+    unstamped record, and `seasonalStampOf()` reading the absence as the
+    hand-written table — for XLE, which has none. It takes `seasonalFor()` now.
+  - **The Radar denied having looked at markets the paragraph above named.**
+    "4 of them came through … (BOIL, WEAT, XLE and USO)" over "not searched
+    yet: BOIL, USO". `radarSplit()` takes `searched`, `runWizard` records the
+    boards it read, and the line says "looked at, nothing on the radar".
+  - **The road card printed +24/56 where the Radar and Build both said
+    +57/69.** The candidate carries the fusion from run time, before the bars
+    had loaded. `WizardCandidates` takes `fusedFor` and reads today's.
+
+WHAT P2-bis HANDS FORWARD:
+  - **THE GRAIN HALF OF THE PREDICTION IS UNMEASURED**, and so are GLD, SLV,
+    USO and GDX: only XLE has had a Shortlist run. Search them.
+  - **Re-run `/api/liquidity` against all ten**, and settle
+    `minPeersForPercentile` from reading 3 above.
   - **`RULES.fallbackIV` of 0.25 is roughly twice GLD's real implied
     volatility.** It only bites on an unquoted leg, which is exactly where
     `modelSanity()`'s denominator lives. A measured per-market IV is the same
     Alpha Vantage work as the sigma, and both are P2's.
+  - **The app's working-order count and the broker's disagree, 1 against 2**,
+    because the local store was reset and the morning's order has no record.
+    Neither panel is wrong and nothing says why they differ.
+  - **A road's RANKING is still a snapshot** even though its evidence panel is
+    now live, and nothing on the card says so.
 
 ## P3 — The harness
 buildContext also carries the computed probability, the gate verdict with its

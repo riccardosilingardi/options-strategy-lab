@@ -1186,8 +1186,25 @@ export const qualityFloorSentence = (level = RECOMMENDED_LIQUIDITY) => {
 ===================================================================== */
 
 /**
- * @param rows  `[{ tk, n, cut }]` — `n` structures that cleared, `cut` true when
- *              the floors emptied it. Neither is a count this function makes.
+ * >>> LOOKED AT IS NOT NOT-SEARCHED, AND THAT WAS ON THE OWNER'S PHONE. <<<
+ * Read 21 September 2026, one screen, two sentences four lines apart:
+ *
+ *     "You asked about 10 markets … 4 of them came through to the shortlist
+ *      (BOIL, WEAT, XLE and USO)."
+ *     "8 markets with nothing to show — not searched yet: BOIL, USO, UNG, …"
+ *
+ * BOIL and USO are in both. The guided run priced their boards and their
+ * candidates cleared every floor; they simply were not the two roads it took
+ * forward. `marketFacts` only ever knew about roads, the wide search's hits and
+ * the markets the floors emptied, so a market the guided run looked at and did
+ * not choose fell through to "nobody has looked". Collapsing the quiet markets
+ * into one line put those two sentences next to each other, which is how a
+ * long-standing gap became a visible contradiction.
+ *
+ * @param rows  `[{ tk, n, cut, searched }]` — `n` structures on screen for it,
+ *              `cut` true when the floors emptied it, `searched` true when
+ *              anything in this session actually read its board. None of the
+ *              three is a count this function makes.
  * @returns {{ shown: object[], quiet: object[], empty: string[], notSearched: string[] }}
  */
 export function radarSplit(rows = []) {
@@ -1196,10 +1213,11 @@ export function radarSplit(rows = []) {
   const quiet = rs.filter((r) => !(Number(r?.n) > 0));
   return {
     shown, quiet,
-    // SEARCHED AND EMPTY is not NEVER SEARCHED, and one word for both would
-    // make the app report a market verdict it never reached.
-    empty: quiet.filter((r) => r?.cut).map((r) => r.tk),
-    notSearched: quiet.filter((r) => !r?.cut).map((r) => r.tk),
+    // LOOKED AT AND EMPTY is not NEVER LOOKED AT, and one word for both would
+    // make the app report a market verdict it never reached — or deny having
+    // read a board it named in the paragraph above.
+    empty: quiet.filter((r) => r?.cut || r?.searched).map((r) => r.tk),
+    notSearched: quiet.filter((r) => !(r?.cut || r?.searched)).map((r) => r.tk),
   };
 }
 
@@ -1210,7 +1228,11 @@ export const radarQuietNote = (split) => {
   const n = empty.length + notSearched.length;
   if (!n) return null;
   const bits = [];
-  if (empty.length) bits.push(`nothing cleared on ${empty.join(", ")}`);
+  // "NOTHING CLEARED" WOULD BE A VERDICT THIS LINE CANNOT SUPPORT. A market is
+  // in this group when the floors emptied it OR when its structures cleared and
+  // were not taken forward, and those are different facts with one thing in
+  // common: there is nothing on the Radar for it. The sentence claims only that.
+  if (empty.length) bits.push(`looked at, nothing on the radar: ${empty.join(", ")}`);
   if (notSearched.length) bits.push(`not searched yet: ${notSearched.join(", ")}`);
   return `${n} market${n === 1 ? "" : "s"} with nothing to show \u2014 ${bits.join(" \u00b7 ")}.`;
 };

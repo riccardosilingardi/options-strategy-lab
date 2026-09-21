@@ -1758,8 +1758,33 @@ the metals were added to it.
 
 **THE RADAR MUST NOT GET LONGER WHEN THE BASKET DOES.** `radarSplit()` /
 `radarQuietNote()` in `rules.js`: a market with something keeps its row, everything
-else collapses into ONE line that names them, keeps "nothing cleared" apart from "not
-searched", and leaves every name a tap away. It replaces the per-row sentence.
+else collapses into ONE line that names them, keeps **"looked at, nothing on the
+radar"** apart from **"not searched yet"**, and leaves every name a tap away. It
+replaces the per-row sentence.
+
+**AND "LOOKED AT" IS NOT "NOT SEARCHED".** Read on the phone: *"4 of them came through
+to the shortlist (BOIL, WEAT, XLE and USO)"* four lines above *"not searched yet: BOIL,
+USO, …"*. Those boards were priced and their structures cleared; they were simply not
+the two roads taken forward. `marketFacts` knew only roads, wide-search hits and floor
+casualties, so `runWizard` records `examined` now and every consumer reads `searched`.
+The line may NOT say "nothing cleared" about that group — it is a verdict the line
+cannot support.
+
+**A STAMP IS TAKEN FROM A PROVENANCE, NEVER FROM A CHANCE.** `seasonalStampFields()`
+reads `source` / `years` / `ageDays`; a `chanceOf()` result carries the same facts as
+`seasonalSource` / `seasonalYears` / `seasonalAgeDays`. Handing it the chance produces
+three `undefined`s, an unstamped record, and `seasonalStampOf()` reading that absence
+as the hand-written table — which on the liquid tier names a table that does not exist.
+Read live on XLE: the road card said HAND-WRITTEN under a header saying "Alpha Vantage ·
+11y". `toCandidate()` passes `seasonalFor(tk)`, and `ceiling.test.jsx` holds the two
+shapes apart by name.
+
+**AN EVIDENCE PANEL SHOWS TODAY'S READING.** A road carries the fusion from the moment
+the guided run finished; on XLE that was before the daily bars loaded, so the card read
++24/56 while the Radar row and Build both read +57/69. `WizardCandidates` takes
+`fusedFor` and `RoadCard` prefers it, falling back to the snapshot only when there is no
+live one. **The RANKING is still the snapshot's** — re-ranking live would swap the two
+cards under the reader — and that is on the NOT VERIFIED list.
 
 `src/basket.js` carries the same ten as a plain array, and ONLY because a Netlify
 function cannot import `App.jsx` (React, recharts, lightweight-charts). The
