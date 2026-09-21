@@ -4,7 +4,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import assert from "node:assert/strict";
 import { evaluateTrade, paperStatus, undefinedRiskLegs } from "./riskGate.js";
-import { positionSize, positionSizeNote, contractsOf, withPositionSize } from "./journal.js";
+import { positionSize, positionSizeNote, contractsOf, withPositionSize, bookPositions, positionStage } from "./journal.js";
 import { orderBody } from "./order.js";
 import { RULES, sizing, ruleBadge, qualityFloor, qualityFloorSentence, liquiditySkippedNote, NOTHING_TODAY,
   LIQUIDITY_LEVELS, RECOMMENDED_LIQUIDITY, LIQUIDITY_MEASUREMENT, liquidityMeasurementNote, liquidityThreshold, looseningWarning, liquiditySettingNote,
@@ -12,7 +12,7 @@ import { RULES, sizing, ruleBadge, qualityFloor, qualityFloorSentence, liquidity
   contractListing, unlistedContractNote, legName, tradeCard, TRADE_CARD_IDS, cardCurrencyNote,
   unquotedLegNote, unquotedLegPointer, marketOrderNote, strikeSnapNote,
   spreadShare, spreadFloor, spreadFloorReason, wideSpreadNote, spreadSkippedNote,
-  expiryChoice, expiryChoiceNote, emptyExpiryNote,
+  expiryChoice, expiryChoiceNote, emptyExpiryNote, unloadedBoardNote, checkedAgainstNote, offBoardStrikeLabel,
   modelSanity, modelSanityReason, modelDisagreementNote,
   chanceOf, chanceSeedKey, seasonalProvenance, seasonalStampOf, seasonalSourceSentence,
   MEASURED_SEASONAL_SOURCE, ESTIMATED_SEASONAL_SOURCE, watchAttentionLevel,
@@ -2450,6 +2450,178 @@ test("NO ORDER PATH MAY NAME A CONTRACT THE CHAIN DID NOT SUPPLY", () => {
   assert.equal(calls, 1, `App.jsx calls buildOcc() ${calls} times; only the chart button may`);
   const send = app.slice(app.indexOf("const sendToAlpaca"), app.indexOf("const ivRank"));
   assert.equal(/buildOcc/.test(send), false, "the manual multileg ticket invents a symbol again");
+});
+
+/* ==========================================================================
+   TASK 2 — THE EXPOSURE COUNTED TRADES NOBODY BOUGHT.
+
+   Read on the owner's phone, SOYB, 21 September 2026, 09:14: the gate said
+   "$1,042 already at risk" against ZERO open positions. The three rows were
+   450 + 577 + 14 — the three entries sitting under WATCHING, every one of
+   them an order the broker came back on with nothing bought.
+   ========================================================================== */
+// The three rows exactly as the phone showed them: sent, dead at the broker.
+const NOT_TAKEN = [
+  { ticker: "SOYB", maxLoss: -450, contracts: 1, alpacaId: "o1", alpacaStatus: "canceled", alpacaFilled: false },
+  { ticker: "BOIL", maxLoss: -577, contracts: 1, alpacaId: "o2", alpacaStatus: "expired", alpacaFilled: false },
+  { ticker: "UNG", maxLoss: -14, contracts: 1, alpacaId: "o3", alpacaStatus: "canceled", alpacaFilled: false },
+];
+
+test("THE THREE PHONE ROWS ARE not-taken, and bookPositions() drops all three", () => {
+  assert.deepEqual(NOT_TAKEN.map(positionStage), ["not-taken", "not-taken", "not-taken"]);
+  assert.deepEqual(bookPositions(NOT_TAKEN), []);
+});
+
+test("$1,042 OF PHANTOM EXPOSURE IS $0 — the gate measures the book, not the decisions log", () => {
+  const raw = evaluateTrade({
+    proposal: GOOD_TRADE, portfolio: { positions: NOT_TAKEN, account: PAPER },
+    capital: CAPITAL, signals: CONFLUENT });
+  assert.equal(raw.limits.openRisk, 1041, "the fixture must reproduce the phone's figure");
+
+  const fixed = evaluateTrade({
+    proposal: GOOD_TRADE, portfolio: { positions: bookPositions(NOT_TAKEN), account: PAPER },
+    capital: CAPITAL, signals: CONFLUENT });
+  assert.equal(fixed.limits.openRisk, 0, "a trade nobody bought is still eating the exposure ceiling");
+  assert.match(raw.limits.paper.why, /paper/);
+
+  // AND IT DOES NOT ONLY PRINT A FALSE NUMBER — IT SPENDS THE CEILING.
+  // $5,000 of capital gives a $1,250 total ceiling. $1,041 of phantom risk
+  // leaves $209, so a $220 trade — comfortably inside the $250 per-trade cap
+  // — is refused for an exposure that does not exist.
+  const sized = trade({ maxLoss: -220 });
+  const blocked = evaluateTrade({ proposal: sized, portfolio: { positions: NOT_TAKEN, account: PAPER },
+    capital: CAPITAL, signals: CONFLUENT });
+  assert.deepEqual(codes(blocked), ["TOTAL_EXPOSURE"]);
+  const allowed = evaluateTrade({ proposal: sized, portfolio: { positions: bookPositions(NOT_TAKEN), account: PAPER },
+    capital: CAPITAL, signals: CONFLUENT });
+  assert.equal(allowed.pass, true, "the same trade against the real book is inside every limit");
+});
+
+test("A WORKING ORDER COUNTS, BECAUSE IT CAN STILL FILL", () => {
+  const working = [{ ticker: "SOYB", maxLoss: -450, contracts: 1, alpacaId: "o9", alpacaStatus: "new", alpacaFilled: false }];
+  assert.equal(positionStage(working[0]), "working");
+  assert.deepEqual(bookPositions(working), working);
+  const r = evaluateTrade({ proposal: GOOD_TRADE, portfolio: { positions: bookPositions(working), account: PAPER },
+    capital: CAPITAL, signals: CONFLUENT });
+  assert.equal(r.limits.openRisk, 450, "an order standing at the broker is money committed");
+});
+
+test("UNKNOWN IS NOT DEAD — a record the broker has not been asked about stays in the book", () => {
+  const unknown = [{ ticker: "SOYB", maxLoss: -450, contracts: 1, alpacaId: "o9" }];
+  assert.deepEqual(bookPositions(unknown), unknown);
+});
+
+test("AN OWNED POSITION IS COUNTED AT ITS SIZE, not at one combination", () => {
+  const owned = [{ ticker: "SOYB", maxLoss: -100, contracts: 5, alpacaId: "o1", alpacaStatus: "filled", alpacaFilled: true }];
+  const r = evaluateTrade({ proposal: GOOD_TRADE, portfolio: { positions: bookPositions(owned), account: PAPER },
+    capital: CAPITAL, signals: CONFLUENT });
+  assert.equal(r.limits.openRisk, 500);
+});
+
+test("bookPositions() survives the shapes a store can really hold", () => {
+  assert.deepEqual(bookPositions(), []);
+  assert.deepEqual(bookPositions(null), []);
+  assert.deepEqual(bookPositions(undefined), []);
+  assert.deepEqual(bookPositions([{}]), [{}], "a record with no alpacaId is the app's own book: owned");
+});
+
+test("NO CONSUMER THAT MEASURES MONEY READS store.positions RAW AGAIN", () => {
+  // A source sweep, for the same reason the rule-literal sweep is one: the
+  // throw catches the call that runs, the sweep catches the one written today
+  // that only runs on a book nobody demos.
+  const app = codeOf("App.jsx");
+  const gateCall = app.slice(app.indexOf("const gate = useCallback"), app.indexOf("const gate = useCallback") + 420);
+  assert.equal(/positions:\s*bookPositions\(store\.positions\)/.test(gateCall), true,
+    "the risk gate reads store.positions whole again");
+  const pro = codeOf("pro.jsx");
+  for (const m of pro.match(/store\.positions/g) || []) void m;
+  const raw = (pro.match(/(?<!bookPositions\()store\.positions/g) || []).length;
+  assert.equal(raw, 0, `pro.jsx reads store.positions raw ${raw} time(s); the report is the book`);
+  for (const f of ["autopilot.mjs", "approve.mjs"]) {
+    const src = readFileSync(new URL(`../netlify/functions/${f}`, import.meta.url), "utf8");
+    assert.equal(/bookPositions\(/.test(src), true, `${f} does not read the book through bookPositions()`);
+  }
+});
+
+/* ==========================================================================
+   TASK 3 — THE CHECKS SHOWN ARE THE CHECKS THE TAP RUNS.
+
+   The Build screen's checklist was evaluated against LOCAL_BOOK ("local
+   simulation, no broker involved") while the send beside it gates against the
+   Alpaca account. They agreed only by luck: the gate reads the account for
+   `paperStatus()` and nothing else, and the local book always passes it — so
+   the list the owner read could not fail.
+   ========================================================================== */
+test("THE TWO BOOKS GIVE DIFFERENT ANSWERS, so which one is displayed is not cosmetic", () => {
+  const LOCAL = { paperVerified: true, paperSource: "local simulation, no broker involved" };
+  const UNVERIFIED = { account_number: "8899XYZ" };   // a connected account that is not provably paper
+  const local = evaluateTrade({ proposal: GOOD_TRADE, portfolio: { positions: [], account: LOCAL },
+    capital: CAPITAL, signals: CONFLUENT });
+  const broker = evaluateTrade({ proposal: GOOD_TRADE, portfolio: { positions: [], account: UNVERIFIED },
+    capital: CAPITAL, signals: CONFLUENT });
+  assert.equal(local.pass, true);
+  assert.equal(broker.pass, false, "an unverifiable account must refuse the order — rule 1");
+  assert.deepEqual(codes(broker), ["PAPER_MODE"]);
+  assert.notEqual(local.limits.paper.why, broker.limits.paper.why,
+    "the paper SOURCE is what the checklist prints; the two must be distinguishable");
+});
+
+test("THE DISPLAYED CHECKLIST AND THE SEND USE ONE EXPRESSION, and App.jsx spells it once", () => {
+  const app = codeOf("App.jsx");
+  // LOCAL_BOOK may be named exactly twice: where it is defined, and inside
+  // `bookFor()`. A third mention is a screen choosing its own account again.
+  const mentions = (app.match(/LOCAL_BOOK/g) || []).length;
+  assert.equal(mentions, 2, `App.jsx names LOCAL_BOOK ${mentions} times; only the constant and bookFor() may`);
+  assert.equal(/const bookFor = useCallback\(\(viaBroker\) => \(viaBroker \? alpaca : LOCAL_BOOK\)/.test(app), true,
+    "bookFor() is not the one place the account is chosen any more");
+  // The displayed guard is the SEND's account.
+  const guard = app.slice(app.indexOf("const guard = useMemo"), app.indexOf("const guard = useMemo") + 1800);
+  assert.equal(/bookFor\(!!alpaca\)/.test(guard), true, "the checklist is gated against a different account than the send");
+  // And the record is gated against the account the trade actually went to.
+  const commit = app.slice(app.indexOf("const commitPosition"), app.indexOf("const commitPosition") + 4000);
+  assert.equal(/bookFor\(!!alpacaOrder\)/.test(commit), true, "the record names an account the trade did not go to");
+});
+
+test("checkedAgainstNote() names the account, and says which tap the checks belong to", () => {
+  const via = checkedAgainstNote(true, "the proxy routed this to paper-api.alpaca.markets");
+  assert.match(via, /Alpaca paper account/);
+  assert.match(via, /paper-api\.alpaca\.markets/);
+  assert.match(via, /SEND button/);
+  const local = checkedAgainstNote(false, null);
+  assert.match(local, /own paper book/);
+  assert.match(local, /leaves the browser/);
+  assert.equal(/could not be established/.test(checkedAgainstNote(true, null)), true,
+    "a missing source must be named, never left blank");
+});
+
+/* ==========================================================================
+   TASK 1 — the sentences that came with the preset fix.
+   ========================================================================== */
+test("unloadedBoardNote() is NOT a market verdict", () => {
+  const n = unloadedBoardNote("SOYB", "2026-11-20");
+  assert.match(n, /have not loaded/);
+  assert.match(n, /not a verdict on the market/);
+  assert.equal(/NOTHING CLEARED/.test(n), false, "a board that has not loaded is not a board that emptied");
+  assert.match(unloadedBoardNote(null, null), /this market/);
+});
+
+test("offBoardStrikeLabel() is written once, and it names the strike", () => {
+  assert.equal(offBoardStrikeLabel(27.5), "27.5 \u00b7 not on this board");
+  const app = codeOf("App.jsx");
+  assert.equal(/not on this board/.test(app.replace(/offBoardStrikeLabel/g, "")), false,
+    "App.jsx writes the sentence itself instead of reading the one home for it");
+});
+
+test("buildPresets() REFUSES A NULL BOARD, and the preset effect waits for one", () => {
+  const app = codeOf("App.jsx");
+  const fn = app.slice(app.indexOf("export function buildPresets"), app.indexOf("export function buildPresets") + 300);
+  assert.equal(/if \(!strikes \|\| !strikes\.length\) return \[\];/.test(fn), true,
+    "buildPresets() builds from a fallback grid again");
+  assert.equal(/if \(!spot \|\| !expStrikes \|\| legs\.length !== 0\) return;/.test(app), true,
+    "the default-preset effect fires before the board is known again");
+  // And the two inline copies of expiryStrikes() are gone.
+  const copies = (app.match(/new Set\(\[\.\.\.Object\.keys\([a-z.]*\.?byExp\[[a-zA-Z]+\]\.calls\)/g) || []).length;
+  assert.equal(copies, 0, `App.jsx re-implements expiryStrikes() ${copies} time(s)`);
 });
 
 /* ---------------- summary ---------------- */

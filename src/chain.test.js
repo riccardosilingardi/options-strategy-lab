@@ -22,6 +22,7 @@ import {
   feedName, sourceNote, openInterestPath, applyOpenInterest, fetchOpenInterest,
   hasOpenInterest, oiProfile,
   spotOf, spotAt, nearMoneyOpenInterest, monotonicityBreaks, monotonicityNote,
+  snapStrike, expiryStrikes, resnapLegs, strikeOptions,
 } from "./chain.js";
 
 const ok = [], bad = [];
@@ -455,6 +456,57 @@ check("near-the-money open interest counts CONTRACTS, and unknown stays unknown"
 check("with no spot there is no near-the-money to measure", () => {
   const c = boilChain([40, 40, 40, 40, 40, 40]);
   eq(nearMoneyOpenInterest({ ...c, spot: null }, BOIL_EXP, { floor: 10 }).clears, null);
+});
+
+/* =========================================================================
+   THE DROPDOWN SAYS WHAT IT IS SHOWING (failure class 1, SOYB 21 Sep 2026).
+
+   `<select value={27.5}>` over options 16..32 does not render empty and does
+   not warn: the browser shows the FIRST option. The dropdown read 16 while
+   the trade card read 27.5, and the order carried the 27.5.
+   ========================================================================= */
+check("a strike the board carries produces the board and nothing else", () => {
+  const o = strikeOptions([16, 17, 18], 17);
+  eq(o.length, 3, "an extra option was invented for a strike the board lists");
+  eq(o.every((x) => x.listed), true);
+  eq(o.map((x) => x.k).join(","), "16,17,18");
+});
+check("THE OFF-BOARD STRIKE IS AN OPTION OF ITS OWN, flagged and in place", () => {
+  // The live case: SOYB 2026-11-20 lists whole dollars, the leg was 27.5.
+  const o = strikeOptions([26, 27, 28, 29], 27.5);
+  eq(o.length, 5, "the current strike was dropped, so the browser would show 26");
+  const off = o.filter((x) => !x.listed);
+  eq(off.length, 1);
+  eq(off[0].k, 27.5);
+  eq(o.map((x) => x.k).join(","), "26,27,27.5,28,29", "sorted, not appended at the end");
+});
+check("no board is NOT an empty dropdown — it is no dropdown", () => {
+  eq(strikeOptions(null, 27.5), null);
+  eq(strikeOptions([], 27.5), null);
+});
+check("a leg with no strike at all adds nothing: Number(null) is 0 and 0 is finite", () => {
+  eq(strikeOptions([16, 17], null).length, 2, "a null strike became an off-board option at 0");
+  eq(strikeOptions([16, 17], undefined).length, 2);
+});
+
+/* THE FALLBACK GRID IS WHAT INVENTED THE 27.5, and it is still what
+   `snapStrike()` does with no board — which is exactly why `buildPresets()`
+   refuses to call it that way. Held here so the arithmetic cannot change
+   under the guard that now stands in front of it. */
+check("snapStrike with no board still rounds to the grid — 27.64 at 0.5 is 27.5", () => {
+  eq(snapStrike(27.64, null, 0.5), 27.5);
+  eq(snapStrike(27.64 * 1.05, null, 0.5), 29);
+});
+check("snapStrike WITH the board lands on a strike the board really carries", () => {
+  const board = Array.from({ length: 17 }, (_, i) => 16 + i);   // 16..32, whole dollars
+  eq(snapStrike(27.64, board, 0.5), 28);
+  eq(snapStrike(27.64 * 1.05, board, 0.5), 29);
+});
+check("resnapLegs leaves an unloaded board alone rather than snapping to a grid", () => {
+  const legs = [{ side: 1, type: "call", strike: 27.5, qty: 1 }];
+  const r = resnapLegs(legs, null);
+  eq(r.moved.length, 0);
+  eq(r.legs, legs, "the same array, so React bails out of the update");
 });
 
 await run();

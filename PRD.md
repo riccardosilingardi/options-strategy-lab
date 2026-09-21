@@ -1685,22 +1685,211 @@ only a phone can settle.
 - Whether the indicative feed ever populates `bidSize` / `askSize`, and whether `occ` is ever absent
   on a leg the board really does list — which would make the new refusal a false one.
 
+### SETTLED ON THE OWNER'S PHONE — SOYB, 21 September 2026, 09:14
+
+Four things §4n could only write down as unverified were read off a screen. Each one is moved here
+with the evidence that settled it; none of them is still on the NOT VERIFIED list below.
+
+- ~~**NOBODY HAS SEEN THE TRADE CARD, ON A PHONE OR ANYWHERE ELSE.** Seventh in a row.~~
+  **SEEN.** The trade card rendered on the owner's phone and **all five lines are on the screen**:
+  YOU ARE BETTING, YOU RISK, HOW OFTEN IT WORKS, WHEN IT EXITS, WHAT WOULD MAKE IT WRONG. The
+  seven-in-a-row run of "this is a statement about the CSS, not a reading" ends here for the card.
+  What is still NOT settled is the only question that mattered underneath it — whether these are the
+  five lines that make the screen legible to him — and that stays below.
+- ~~**THE CAPITAL ACTUALLY SET IS NOT READABLE FROM HERE.**~~ **READ.** The ticket checklist on that
+  screen states **$20,000 of trading capital and a $1,000 per-trade limit**. $1,000 is 5% of
+  $20,000, so `sizing()`'s best-practice cap is the binding one and both questions have been
+  answered — `answered: true`, no suggested figure in force. This also settles §4n's arithmetic on
+  the QTY 14 order: it reconciled "only if trading capital is at least $18,840", and $20,000 clears
+  that. **The gate passed that order correctly.**
+- ~~**THE WATCHING TAB AND THE POSITIONS / WATCHING / JOURNAL ROW HAVE NOT BEEN SEEN.**~~ **SEEN.**
+  The fourth place §4m built is on the phone, in the navigation row beside Positions and the
+  Journal, with the three not-taken rows in it. That is also what made TASK 2 below findable: the
+  three figures the gate was charging — 450 + 577 + 14 = $1,042 — were sitting in that list, named,
+  while the gate called them open risk.
+- ~~**WHICH OF THE TWO PATHS PUT THE 27.5 ON THAT BOARD.**~~ **NEITHER. IT WAS A THIRD PATH, AND IT
+  IS NOW MEASURED.** §4n named two candidates — the expiry dropdown and `buildHandOff()` — closed
+  both, and said neither was proven. Both were wrong. The 27.5 was put there by the Build screen's
+  **default preset effect, on the very first render of a fresh market, before any board existed**:
+
+      the effect calls buildPresets(sentiment, spot, U.step, expStrikes) when legs.length === 0
+      it fires on the render where `chain` — and so `spot` — arrives
+      `expKey` is set by a SIBLING effect in that same render, so `expStrikes` is still null
+      snapStrike() then falls back to Math.round(x / step) * step
+      SOYB: spot 27.64, step 0.5, Bull Call Spread [0, +0.05]  ->  27.5 / 29
+
+  27.5 is not a strike the app carried from anywhere. It is a strike the app **computed**, from a
+  percentage of spot rounded to a grid, because nothing had told it what the board carries. And
+  nothing re-snapped afterwards, so the gate's `UNLISTED_CONTRACT` refusal fired on **every fresh
+  load of a board that lists whole-dollar strikes** — the app manufacturing its own refusal, for
+  every market, not once. That is written up as **§4o** below and it is what made this a P0 blocker
+  rather than a loose end.
+
 ### NOT VERIFIED
 
-- **WHICH OF THE TWO PATHS PUT THE 27.5 ON THAT BOARD.** Both are closed; neither is proven to be the
-  one. The live chain cannot be reached from here.
-- **NOBODY HAS SEEN THE TRADE CARD, ON A PHONE OR ANYWHERE ELSE.** Seventh in a row.
-- **THE FIVE LINES HAVE NEVER BEEN READ BY THE PERSON THEY ARE FOR.** They are held against a
-  fixture; whether they are the five lines that make the screen legible to him is the only test that
-  matters and it has not been run.
+- **THE FIVE LINES HAVE NEVER BEEN READ BY THE PERSON THEY ARE FOR.** The card has now been SEEN
+  on a phone and all five lines render; whether they are the five lines that make the screen
+  legible to him is a different question and it has not been asked.
 - **LINE 3 IS NOT THE LINE ROADMAP P4 ASKED FOR, AND IT SAYS SO.** P4 wanted "how often it works
   under your own exit rule". The app's one chance (`chanceOf()`) is where the price FINISHES; the
   exit-rule answer is `exitSim()` / `exitPathSim()`, which run only on an OPEN position. Computing
   one here would have been new arithmetic, which this session was told not to add. The line therefore
   states which question it answers and says the other is walked once the position is open.
-- **THE CAPITAL ACTUALLY SET IS UNKNOWN**, so "the gate passed QTY 14 correctly" is arithmetic, not
-  an observation.
 - **NO LIVE CHAIN, NO BROWSER, NO ALPHA VANTAGE, NO DEPLOY.** The same wall as PR #15 through #29.
+
+---
+
+## §4o — THE APP MANUFACTURED ITS OWN REFUSAL, ON EVERY FRESH MARKET
+
+Three faults read off one phone screen on 21 September 2026. The first is the P0 blocker §4n could
+only guess at; the other two are a screen and a document that argued with the truth.
+
+### 0. THE DEFAULT PRESET INVENTED STRIKES — and it was not a carry, it was a computation
+
+§4n named two ways a 27.5 could reach a board that lists whole dollars, closed both, and put
+"which of them it was" on the NOT VERIFIED list. It was neither. **It was the Build screen's default
+preset, on the first render of a fresh market**, and the sequence is four lines long:
+
+1. `legs` starts empty on a new ticker, so the preset effect is armed.
+2. It fires on the render where `chain` arrives — which is the render where `spot` becomes readable.
+3. `expKey` is set by a **sibling effect in that same render**, so `expStrikes` is still `null` when
+   the preset effect runs.
+4. `snapStrike(x, null, step)` falls back to `Math.round(x / step) * step`. SOYB at spot 27.64,
+   step 0.5, Bull Call Spread at [0, +0.05]: **27.5 / 29**.
+
+Nothing re-snapped afterwards, so those legs sat on the Build screen, went into the trade card, went
+into the order ticket, and were refused by the gate — correctly — as `UNLISTED_CONTRACT`. **On every
+fresh load of every market whose board does not carry half dollars.** Not a carry from another
+expiry, not a one-off: a structural first-render race that made a whole class of market unsendable.
+
+**AN UNLOADED BOARD IS UNKNOWN, NOT A GRID.** The fix is one guard in one place:
+
+- **`buildPresets()` returns an empty list without a board**, so the fallback grid inside
+  `snapStrike()` is unreachable from it. The guard is in the function rather than at its four call
+  sites for the same reason `snapStrike()` itself lives in `chain.js`: one question, one answer, and
+  a fifth generation site added next year is covered without anybody coming back.
+- **The preset effect waits.** It no longer fires without `expStrikes`; the chain arrives a render or
+  two later and it fires then. An empty legs editor for one render is a far smaller failure than a
+  default trade naming a contract nobody issued.
+- **Legs already in state are re-snapped when the board arrives** (`resnapLegs()` / `strikeSnapNote()`,
+  both already in `chain.js` and `rules.js` from §4n). This is what covers "Go to Build" through
+  `goStep()`, which carries the state legs exactly as they are. `resnapLegs()` returns the SAME
+  array when nothing moves, so React bails out of the update and it cannot loop.
+- **The four callers, and what each does now.** `buildPresets()` is called from the Build screen's
+  preset effect (waits for the board), from `shortlistWithFloors()` (the Shortlist memo requires a
+  board and the empty state says the board has not loaded, through `unloadedBoardNote()`, rather
+  than printing `emptyExpiryNote()`'s "NOTHING CLEARED ON <expiry>" about a board nobody read),
+  from the wide multi-market search and from `runWizard` (both read the board through
+  `expiryStrikes()` and skip the market when it comes back null, which cannot happen because the
+  expiry was reduced out of that chain's own list — it is the belt to that brace).
+- **`expStrikes` WAS A SECOND IMPLEMENTATION OF `expiryStrikes()`**, and the wide search and the
+  guided run were the third and fourth. All four were the same `new Set([...calls, ...puts])`
+  written out again. One function now, in `chain.js`, where a fact about a board belongs.
+
+**FAILURE CLASS 1 — THE DROPDOWN SHOWED A DIFFERENT STRIKE FROM THE TRADE.** `<select value={27.5}>`
+over options 16…32 does not render empty and does not warn: **the browser displays the FIRST
+option.** So the leg editor read **16** while the trade card two blocks above read **27.5**, and the
+order carried the 27.5. One screen, two trades, nothing saying so. `strikeOptions()` in `chain.js`
+always includes the current strike, flagged `listed: false` when the board does not carry it, and
+`StrikeSelect` renders it as its own **disabled** option reading `offBoardStrikeLabel()` —
+*"27.5 · not on this board"*. The leg is shown, it is selected, it can be changed, and it cannot be
+chosen. The gate is what refuses the order; this is what stops the screen choosing a different
+trade on the user's behalf.
+
+### 1. THE EXPOSURE COUNTED TRADES NOBODY BOUGHT
+
+The phone showed **"$1,042 already at risk"** — 450 + 577 + 14 — against **zero** open positions, and
+all three figures were sitting one tab across under WATCHING, correctly labelled as orders the
+broker came back on with nothing bought.
+
+`evaluateTrade`'s `portfolio.positions` was `store.positions`, and `store.positions` is what the app
+**DECIDED**, not what the user OWNS. §4m split that into three stages and rebuilt every list from
+`positionStage()`; the gate was the one consumer that never got the split. So was
+`buildReportMd()`'s section 2, whose entire job is to say what is open.
+
+**`bookPositions()` in `journal.js` is the one home**, and it is `owned` + `working`:
+
+- **`working` COUNTS, and the reason is the opposite of the one that makes it not a position:** a
+  working order can still fill. The exposure ceiling is not a report of what is open, it is a limit
+  on what may be **committed**, and an order standing at the broker is committed. That is a
+  different question from `positionStageNote()`'s "the money is not at risk yet", which is about
+  profit and loss — there is nothing to value until it fills.
+- **`not-taken` NEVER counts, anywhere.** There is no trade there and there never was one.
+
+Read against the $5,000 fixture: $1,041 of phantom risk leaves $209 under the $1,250 total ceiling,
+so a $220 trade — comfortably inside the $250 per-trade cap — was refused for an exposure that does
+not exist. It did not only print a false number; it spent the ceiling.
+
+**WHAT CHANGED, IN FULL.** The risk gate in `App.jsx`; the weekly report's section 2 (which also
+**multiplies by `positionSize()`**, exactly as the gate does — `maxLoss` describes ONE combination,
+so a ten-lot spread was being reported at a tenth of the money it risks, and a row above a total
+now prints its own size); the report's PDF payoff pages; `reportNarrativePrompt()`'s argument; the
+model's `paperPositions` context (which `reportNarrativePrompt()` tells it is AUTHORITATIVE — the
+§4c "entered at $68 debit" fault rebuilt one array across); `autopilot.mjs`, which was walking
+every record and proposing exits for trades nobody bought; and `approve.mjs`'s gate. The front
+page's "N open positions" and the journey counter read `owned` alone, because those words mean
+owned and working orders have their own panel on that screen.
+
+**NOT CHANGED, AND WHY.** `nextRef()` in `journal.js` scans every record for the highest ref — the
+counter only ever goes up, and a not-taken trade still has a name. The auto-monitor and the bar
+loader walk `store.positions` for TICKERS, which is a set of chains to refresh and not a sum of
+money. The Watching screen reads `not-taken` on purpose: that is what it is for.
+
+### 2. THE CHECKS SHOWN WERE NOT THE CHECKS THE TAP RAN
+
+The Build screen's checklist — the one thing on that screen that answers *"is this paper?"* — was
+evaluated against `LOCAL_BOOK`, *"local simulation, no broker involved"*, while the order ticket
+beside it gates against the Alpaca account. Non-negotiable rule 1 is **"if paper mode cannot be
+verified, reject"**, and a checklist that answers it about a different account than the send does is
+not an answer at all.
+
+They agreed only by luck. The gate reads the account for `paperStatus()` **and nothing else**, and
+the app's own book always passes it — so the list the owner read **could not fail**. A checklist that
+cannot fail is not a check.
+
+**`bookFor(viaBroker)` in `App.jsx` is the only place this app chooses an account**, and
+`riskGate.test.js` fails the build if `LOCAL_BOOK` is named anywhere else:
+
+- The **displayed** `guard` is gated against `bookFor(!!alpaca)`. With the broker connected, the
+  route to an order on that screen IS the ticket, so the checklist is the broker's — verified by the
+  proxy's own `X-OSL-Paper-Endpoint` header, or by a PA account number, or **not verified at all**,
+  which refuses the order and now says so where the button is.
+- The **record** is gated against `bookFor(!!alpacaOrder)` — the account the trade actually went to.
+  The gate summary goes onto the position's timeline, and it used to say "local simulation, no
+  broker involved" in the Journal entry of an order Alpaca was holding.
+- `LOCAL_BOOK` survives for the one case it is true of: the confirm step with no broker connected,
+  where nothing leaves the browser.
+- **And the list says whose account it checked.** `checkedAgainstNote()` in `rules.js` sits under the
+  checklist. That sheet holds two taps — the ticket, which sends, and the confirm step, which
+  records locally — and the checks shown are the SEND'S, which is the stricter of the two. Saying so
+  is cheaper than splitting the checklist in half.
+
+### What this does NOT do
+
+- **Not one rule number changed value.** Take profit 50%, stop 50% warning-only, 21 DTE,
+  `terminalMC` and the chance policy, `signals.js`, every liquidity constant and the gate's
+  `UNLISTED_CONTRACT` refusal itself are all untouched.
+- **The gate gains no rule and loses none.** Six order paths, six. What changed is which book it
+  measures and which account it measures against.
+- **It does not make anything fill.** P0's DONE WHEN is unchanged: a real fill.
+
+### NOT VERIFIED
+
+- **NO FILL, AND NO ORDER SENT SINCE THE FIX.** The preset fault is reproduced from the code and
+  from the arithmetic (spot 27.64, step 0.5 → 27.5) and held by a test; **nobody has watched a fresh
+  SOYB load produce 28/29 in a browser.** The live chain cannot be reached from here.
+- **THE DROPDOWN'S BEHAVIOUR IS ASSERTED FROM THE RENDERED MARKUP**, not from a browser. That a
+  `<select>` with an unmatched `value` displays its first option is documented behaviour and it
+  matches what the phone showed; the disabled option is held against `renderToStaticMarkup`.
+- **$20,000 AND $1,000 ARE READ OFF A CHECKLIST, NOT OUT OF THE STORE.** They are consistent with
+  `sizing()`'s 5% cap and with §4n's QTY 14 arithmetic, which is why they are treated as settled —
+  but the `/api/state` blob itself has not been read.
+- **WHETHER ANY OF THE THREE WATCHING ROWS WAS THE QTY 14 ORDER** is not established. The figures
+  ($450 / $577 / $14) are what the gate summed; which order each came from was not read.
+- **`working` COUNTING TOWARDS THE CEILING IS A DECISION, NOT A MEASUREMENT.** Nothing in this
+  sandbox can say how often a working order fills. If it turns out they almost never do, this makes
+  the ceiling tighter than it needs to be — which is the side to be wrong on.
+- **NO LIVE CHAIN, NO BROWSER, NO ALPHA VANTAGE, NO DEPLOY.** The same wall as PR #15 through #30.
 
 ---
 

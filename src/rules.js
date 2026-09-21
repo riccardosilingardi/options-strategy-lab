@@ -1410,6 +1410,19 @@ export const strikeSnapNote = (moved = [], expKey = null) => {
     `contract this one does not list. That is the symbol the broker refused on 20 September.`;
 };
 
+/**
+ * WHAT THE DROPDOWN CALLS A STRIKE THE BOARD DOES NOT LIST.
+ *
+ * `strikeOptions()` in chain.js decides WHICH options a strike select may
+ * offer; this is the one place the words for the odd one out are written, so
+ * a component cannot invent a softer phrasing for it. It is deliberately
+ * flat: the leg is still shown, still selected and still editable — it simply
+ * cannot be chosen, because choosing it would be choosing a contract nobody
+ * issued. The gate's `UNLISTED_CONTRACT` is what actually stops the order;
+ * this stops the SCREEN from quietly showing a different strike instead.
+ */
+export const offBoardStrikeLabel = (strike) => `${strike} \u00b7 not on this board`;
+
 /* -------------------------------------------------------------------------
  * A PRICE HAS TO SURVIVE A SANITY CHECK, NOT JUST A FLOOR.
  *
@@ -1728,6 +1741,48 @@ export const expiryChoiceNote = (choice, level = RECOMMENDED_LIQUIDITY) => {
 };
 
 /** `nothing cleared on 2026-10-09` — an empty list always names its expiry. */
+/**
+ * WHICH ACCOUNT THE CHECKS ON SCREEN WERE RUN AGAINST.
+ *
+ * The Build screen's checklist and the order ticket beside it used to be
+ * evaluated against two different accounts: the list said "paper mode
+ * verified — local simulation, no broker involved" while the send it sat
+ * above was gated against Alpaca. They are one account now (`bookFor()` in
+ * App.jsx), and this is the sentence that says which, because a checklist
+ * that does not name what it checked is a checklist you cannot audit.
+ *
+ * The second half exists because that one sheet holds TWO taps: the ticket,
+ * which sends, and the confirm step, which records on the app's own book. The
+ * checks shown are the SEND'S — the stricter of the two, since the gate reads
+ * the account for `paperStatus()` and nothing else and the app's own book
+ * always passes it — and the sentence says so rather than letting the reader
+ * assume.
+ *
+ * @param viaBroker    true when an order on this screen would reach the broker
+ * @param paperSource  `paperStatus().why` — how paper mode was established
+ */
+export const checkedAgainstNote = (viaBroker, paperSource) => (viaBroker
+  ? `These checks were run against your Alpaca paper account — ${paperSource || "paper mode could not be established"} — ` +
+    `which is the account the SEND button above uses. Recording the trade on the app's own book instead is not an ` +
+    `order and reaches no broker; it passes the same checks bar this one.`
+  : `These checks were run against the app's own paper book. Nothing on this screen leaves the browser: no broker is ` +
+    `connected, so there is no account to check and no order to send.`);
+
+/**
+ * A BOARD THAT HAS NOT LOADED IS NOT A BOARD THAT EMPTIED.
+ *
+ * `emptyExpiryNote()` below is a VERDICT ON A MARKET — "nothing cleared on
+ * this expiry" — and with no board loaded there is nothing for it to be a
+ * verdict about. Printing it anyway is a missing-data answer dressed up as a
+ * market one, which is the line `wizard.test.jsx` holds on the refusal screen
+ * and the same line applies here.
+ */
+export const unloadedBoardNote = (ticker, expKey) =>
+  `The strikes for ${ticker || "this market"}${expKey ? ` on ${expKey}` : ""} have not loaded, so nothing ` +
+  `has been judged yet. This is not a verdict on the market: no structure can be built before the board ` +
+  `says which strikes it carries, and a percentage of today's price rounded to a grid is a guess about ` +
+  `that — which is how this app once named a contract nobody had ever issued.`;
+
 export const emptyExpiryNote = (expKey, tally, level = RECOMMENDED_LIQUIDITY) => {
   const t = tally || {};
   const l = liquidityLevel(level?.id ?? level);

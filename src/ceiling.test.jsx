@@ -29,8 +29,10 @@ import {
 } from "./rules.js";
 import { chanceOf, chanceSourceNote, seasonalProvenance, seasonalStampNote,
   MEASURED_SEASONAL_SOURCE, ESTIMATED_SEASONAL_SOURCE } from "./rules.js";
+import React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { payoffBands, payingBands, bandsAbove, scratchSplit, unifiedTakeaway, explainElement, exitPlanDetail, compareTakeaway, chanceInProfit } from "./visuals.jsx";
-import { analyze, shortlistWithFloors, buildPresets, modelCheckOf, chanceCheckOf, structureIV } from "./App.jsx";
+import { analyze, shortlistWithFloors, buildPresets, StrikeSelect, modelCheckOf, chanceCheckOf, structureIV } from "./App.jsx";
 import { payoff, netBS, SEASONAL, SIGMA, seasonalDrift, exitSim } from "./engine.js";
 import { exitPathSim } from "./pro.jsx";
 import { sigmaProvenance, MEASURED_SIGMA_SOURCE, TABLE_SIGMA_SOURCE, FALLBACK_SIGMA_SOURCE } from "./rules.js";
@@ -957,6 +959,76 @@ check("§4k — the SENSITIVITY the PRD records is reproducible from this repo",
     // position walked on two volatilities is two different briefs.
     if (half.ev === base.ev || twice.ev === base.ev) throw new Error(`${tk}: the average result did not move`);
   }
+});
+
+/* ==========================================================================
+   THE DEFAULT PRESET INVENTED STRIKES, SO A FRESH MARKET COULD NOT SEND AN
+   ORDER. (P0 blocker, measured 21 September 2026.)
+
+   The Build screen's preset effect fired on the render where the chain — and
+   so `spot` — arrived. `expKey` was set by a SIBLING effect in that same
+   render, so `expStrikes` was still null, and `snapStrike()` fell back to
+   `Math.round(x / step) * step`. SOYB: spot 27.64, step 0.5, Bull Call Spread
+   at [0, +0.05] gives 27.5 / 29. The board lists whole dollars. Nothing
+   re-snapped afterwards, so the gate correctly refused UNLISTED_CONTRACT on
+   every fresh load of that market — the app creating its own refusal.
+   ========================================================================== */
+const SOYB_BOARD = Array.from({ length: 17 }, (_, i) => 16 + i);   // 16..32, whole dollars
+
+check("THE DEFAULT BULL CALL SPREAD ON SOYB IS 28/29, AND NEVER 27.5", () => {
+  const first = buildPresets("bull", 27.64, 0.5, SOYB_BOARD)[0];
+  eq(first.name, "Bull Call Spread", "the preset order changed under the test");
+  eq(first.legs.map((l) => l.strike).join("/"), "28/29");
+  for (const p of buildPresets("bull", 27.64, 0.5, SOYB_BOARD)) {
+    for (const l of p.legs) {
+      if (!SOYB_BOARD.includes(l.strike)) throw new Error(`${p.name}: ${l.strike} is not on the board`);
+    }
+  }
+});
+
+check("the fallback grid is what produced the refused leg, and it is unreachable now", () => {
+  // What the old code did, spelled out so the number in the report is held.
+  eq(Math.round((27.64 * 1.00) / 0.5) * 0.5, 27.5, "the fixture no longer reproduces the live failure");
+  eq(buildPresets("bull", 27.64, 0.5, null).length, 0, "a null board still produces presets");
+});
+
+check("WITH A NULL BOARD, NO PRESET LEGS ARE PRODUCED — at any sentiment", () => {
+  for (const sent of ["verybear", "bear", "neutral", "bull", "verybull"]) {
+    eq(buildPresets(sent, 27.64, 0.5, null).length, 0, `${sent} built from nothing`);
+    eq(buildPresets(sent, 27.64, 0.5, []).length, 0, `${sent} built from an empty board`);
+  }
+});
+
+check("and the Shortlist generates nothing from a board it has not read", () => {
+  const r = shortlistWithFloors("bull", 27.64, 0.5, null, 45, 0.25, () => null, {});
+  eq(r.rows.length, 0);
+  eq(r.cut.length, 0, "a structure that was never built cannot have been cut by a floor");
+});
+
+/* ---- failure class 1: the dropdown showed a different strike ---- */
+check("THE STRIKE SELECT RENDERS THE OFF-BOARD LEG AS ITS OWN DISABLED OPTION", () => {
+  const html = renderToStaticMarkup(
+    <StrikeSelect strikes={[26, 27, 28, 29]} value={27.5} step={0.5} onChange={() => {}} />);
+  has(html, "not on this board");
+  has(html, 'value="27.5"');
+  has(html, "disabled");
+  // The browser would otherwise have shown the first option, 26.
+  const firstOpt = html.slice(html.indexOf("<option"), html.indexOf("</option>"));
+  if (/selected/.test(firstOpt)) throw new Error("the first option is selected: the dropdown is showing 26");
+});
+
+check("a strike the board carries renders as an ordinary dropdown", () => {
+  const html = renderToStaticMarkup(
+    <StrikeSelect strikes={[26, 27, 28, 29]} value={28} step={1} onChange={() => {}} />);
+  hasNot(html, "not on this board");
+  hasNot(html, "disabled");
+});
+
+check("no board at all is a number field, not a dropdown of strikes nobody confirmed", () => {
+  const html = renderToStaticMarkup(
+    <StrikeSelect strikes={null} value={27.5} step={0.5} onChange={() => {}} />);
+  hasNot(html, "<select");
+  has(html, "input");
 });
 
 for (const [name, why] of bad) console.error(`  FAIL ${name}\n       ${why}`);

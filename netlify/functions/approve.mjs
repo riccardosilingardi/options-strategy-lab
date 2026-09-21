@@ -20,7 +20,7 @@ import { getStore } from "@netlify/blobs";
 import { evaluateTrade } from "../../src/riskGate.js";
 import { orderBody, orderOutcome, alpacaErrorText } from "../../src/order.js";
 import { closeMarket, closeLimitPrice, closeLimitNote, closeUnreadableNote } from "../../src/rules.js";
-import { appendTimeline } from "../../src/journal.js";
+import { appendTimeline, bookPositions } from "../../src/journal.js";
 import { parseCboeJson, CBOE_URL } from "../../src/chain.js";
 
 // L'host paper e' una costante di questo file: e' la prova che l'ordine
@@ -92,7 +92,10 @@ export default async (req) => {
     const state = JSON.parse((await store.get("state")) || "{}");
     const g = evaluateTrade({
       proposal: a.gateContext?.proposal || { intent: "close", legs: [], maxLoss: 0 },
-      portfolio: { positions: state.positions || [], account: PAPER_ACCOUNT },
+      // THE EXPOSURE IS THE BOOK'S, not every record the app ever wrote. The
+      // same fault as the client gate: a trade the broker never filled was
+      // charging the 25% ceiling here too, up to 24 hours after the tap.
+      portfolio: { positions: bookPositions(state.positions), account: PAPER_ACCOUNT },
       capital: a.gateContext?.capital || {},
       signals: null,
     });

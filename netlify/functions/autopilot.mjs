@@ -9,7 +9,7 @@ import { evaluateTrade } from "../../src/riskGate.js";
 // HOW MANY COMBINATIONS THE POSITION IS. A close proposed at one lot on a
 // seven-lot position leaves six open and calls it an exit — and the gate would
 // have measured a seventh of what was being closed.
-import { contractsOf } from "../../src/journal.js";
+import { contractsOf, bookPositions } from "../../src/journal.js";
 import { appendTimeline } from "../../src/journal.js";
 
 // L'autopilot parla solo con paper-api.alpaca.markets (vedi approve.mjs, dove
@@ -168,7 +168,13 @@ export default async () => {
   const state = JSON.parse((await store.get("state")) || "{}");
   const approvals = JSON.parse((await store.get("approvals")) || "{}");
   const briefsPrev = JSON.parse((await store.get("briefs")) || "{}");
-  const positions = state.positions || [];
+  /* THE BOOK, NOT THE DECISIONS LOG. This walked every record in
+     `state.positions` — so it proposed exits, simulated exit paths and wrote
+     briefs about orders that came back from the broker with nothing bought.
+     There is no position to close there and there never was one. It is also
+     what `evaluateTrade` below measures the exposure ceiling on.
+     `bookPositions()` in journal.js is the one home for the split. */
+  const positions = bookPositions(state.positions);
   // "Notify me" on the nothing-today screen writes settings.notifyWhenReady.
   // The autopilot is the only thing that runs while the app is closed, so if it
   // ignored the flag the button would be a promise nobody keeps. With the flag
