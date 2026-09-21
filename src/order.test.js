@@ -11,7 +11,8 @@
 import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { gcdAll, reduceRatios, orderQty, unitLimit, orderBody, orderPreviewLines,
-  orderOutcome, orderWaitingPhrase, alpacaErrorText, alpacaBodySentence } from "./order.js";
+  orderOutcome, orderWaitingPhrase, alpacaErrorText, alpacaBodySentence,
+  limitDirection, mlegLimitPrice, limitWords, limitKind, fillPriceOf } from "./order.js";
 
 let passed = 0;
 const failures = [];
@@ -268,6 +269,159 @@ test("only a filled order lets App.jsx print the exit plan as started", () => {
   assert.ok(!/setMsg\(`Position opened\. \$\{exitPlanSentence\(\)\}`\)/.test(src),
     "App.jsx still announces a position over any Alpaca reply");
   assert.ok(src.includes("startsExitPlan"), "the exit plan must be conditional on the fill");
+});
+
+/* ================================================================
+   CREDIT LIMITS WERE SENT AS DEBITS — PRD §4q
+
+   >>> MEASURED ON THE OWNER'S ALPACA PAPER ACCOUNT, 21 Sep 2026. <<<
+   J-0001, XLE Bull Put Spread 2026-10-30 (−1 62.5P / +1 59P), ticket CREDIT
+   $75, GTC. Alpaca holds it as an OPEN POSITION at a net credit of $0.04 a
+   combination: $4 received against $75 intended, max loss $346 not $275.
+   `unitLimit()` returned `Math.abs()` and the mleg body used it, so +0.75
+   read as "pay up to 75 cents" — marketable, filled at once.
+================================================================ */
+
+const V_PUT = [{ side: -1, qty: 1, type: "put" }, { side: 1, qty: 1, type: "put" }];
+const V_CALL = [{ side: 1, qty: 1, type: "call" }, { side: -1, qty: 1, type: "call" }];
+const FLY = [{ side: 1, qty: 1, type: "call" }, { side: -2, qty: 2, type: "call" }, { side: 1, qty: 1, type: "call" }];
+const lim = (legs, net, intent) => orderBody({
+  legs, occs: legs.map((_, i) => `X${i}`), userQty: 1, type: "limit", limit: net, intent,
+}).limit_price;
+
+test("SIGN — opening a CREDIT structure is negative: the XLE order that filled for $4", () => {
+  // The structure's net is −0.75 (you receive it). The order says so.
+  assert.equal(lim(V_PUT, -0.75, "open"), "-0.75");
+});
+
+test("SIGN — opening a DEBIT structure is positive", () => {
+  assert.equal(lim(V_CALL, 0.24, "open"), "0.24");
+});
+
+test("SIGN — CLOSING a debit structure is a CREDIT, and this is the half nobody had read", () => {
+  // Selling back a long call spread worth +0.64 brings money IN. With
+  // Math.abs() this offered to BUY it at 0.64, which fills at any price.
+  assert.equal(lim(V_CALL, 0.64, "close"), "-0.64");
+});
+
+test("SIGN — closing a CREDIT structure is a DEBIT", () => {
+  assert.equal(lim(V_PUT, -0.37, "close"), "0.37");
+});
+
+test("SIGN — a butterfly opens as a debit and closes as a credit", () => {
+  assert.equal(lim(FLY, 0.30, "open"), "0.30");
+  assert.equal(lim(FLY, 0.30, "close"), "-0.30");
+});
+
+test("SIGN — a SINGLE-LEG order stays unsigned: its own side carries the direction", () => {
+  const one = [{ side: 1, qty: 1, type: "call" }];
+  const body = orderBody({ legs: one, occs: ["X0"], userQty: 1, type: "limit", limit: 1.25, intent: "open" });
+  assert.equal(body.limit_price, "1.25");
+  assert.equal(body.order_class, undefined, "a single leg is a simple order, never mleg");
+  // ...and it is unsigned on a close too, where the side flips to "sell".
+  const close = orderBody({ legs: one, occs: ["X0"], userQty: 1, type: "limit", limit: 1.25, intent: "close" });
+  assert.equal(close.limit_price, "1.25");
+  assert.equal(close.side, "sell");
+});
+
+test("SIGN — the size still leaves the price, exactly as before", () => {
+  // A five-lot credit vertical: qty 5, ratios 1:1, and ONE combination priced.
+  const legs = [{ side: -1, qty: 5 }, { side: 1, qty: 5 }];
+  const body = orderBody({ legs, occs: ["A", "B"], userQty: 1, type: "limit", limit: -3.75, intent: "open" });
+  assert.equal(body.qty, "5");
+  assert.deepEqual(body.legs.map((l) => l.ratio_qty), ["1", "1"]);
+  assert.equal(body.limit_price, "-0.75");
+});
+
+test("SIGN — round first, decide the sign after: nothing is ever '-0.00'", () => {
+  assert.equal(mlegLimitPrice(-0.0001, 1, "open"), "0.00");
+  assert.equal(mlegLimitPrice(0, 1, "open"), "0.00");
+  assert.equal(limitDirection(0, "open"), 0);
+  assert.equal(limitDirection(null, "open"), 0);
+  assert.equal(limitDirection(NaN, "close"), 0);
+});
+
+test("SIGN — the words, and an unreadable price gets none rather than '$0'", () => {
+  assert.equal(limitWords("-0.75"), "a credit of $0.75 (you receive it)");
+  assert.equal(limitWords(0.24), "a debit of $0.24 (you pay it)");
+  assert.equal(limitWords(null), null);
+  assert.equal(limitWords("0.00"), null);
+  assert.equal(limitKind(-0.04), "credit");
+  assert.equal(limitKind(1), "debit");
+  assert.equal(limitKind(null), null);
+});
+
+test("READ-BACK — the broker's own credit is never reported as money paid", () => {
+  // Alpaca prints a multi-leg credit fill as NEGATIVE: "Avg. Fill Price -0.04".
+  const r = orderOutcome({ status: "filled", qty: "1", filled_qty: "1", filled_avg_price: "-0.04", id: "abcdef1234" });
+  assert.equal(r.fillPrice, -0.04, "the sign survives the read");
+  assert.ok(r.headline.includes("credit"), `a credit fill must say so: ${r.headline}`);
+  assert.ok(!r.headline.includes("debit"));
+  const d = orderOutcome({ status: "filled", qty: "1", filled_qty: "1", filled_avg_price: "0.24" });
+  assert.ok(d.headline.includes("debit"), d.headline);
+  // UNKNOWN IS NOT ZERO.
+  assert.equal(fillPriceOf({}), null);
+  assert.equal(fillPriceOf({ filled_avg_price: null }), null);
+  assert.equal(fillPriceOf({ filled_avg_price: "" }), null);
+  assert.equal(fillPriceOf({ filled_avg_price: "0" }), 0, "a real zero is a real reading");
+});
+
+test("READ-BACK — a waiting order says which way its limit goes", () => {
+  const p = orderWaitingPhrase({ type: "limit", limit_price: "-0.75", time_in_force: "gtc" });
+  assert.ok(p.includes("credit"), p);
+  assert.ok(!p.includes("debit"), p);
+});
+
+test("PREVIEW — the tap that arms the order says debit or credit, never a bare $", () => {
+  const lines = orderPreviewLines({ legs: V_PUT, ticker: "XLE", expKey: "2026-10-30",
+    qty: 1, factor: 1, type: "limit", limit: -0.75, tif: "gtc", intent: "open" });
+  const last = lines[lines.length - 1];
+  assert.ok(last.includes("credit"), last);
+});
+
+test("NEVER AGAIN — no mleg limit may be wrapped in Math.abs()", () => {
+  /* The fault was one `Math.abs()` in `unitLimit()` plus three read-backs that
+     hid it: App.jsx's `alpacaLimit`, its timeline sentence and the waiting
+     phrase here. A sweep, because the shape is what comes back, not the name. */
+  const files = ["src/order.js", "src/App.jsx", "src/pro.jsx", "netlify/functions/approve.mjs"];
+  const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+  for (const f of files) {
+    const code = strip(readFileSync(f, "utf8"));
+    for (const field of ["limit_price", "filled_avg_price"]) {
+      const re = new RegExp(`Math\\.abs\\(\\s*\\+?[A-Za-z_$][\\w$.?]*\\.?${field}`, "g");
+      assert.equal(re.test(code), false,
+        `${f} takes Math.abs() of ${field}: the sign IS the direction of the money (PRD §4q)`);
+    }
+  }
+  // ...and the mleg branch of orderBody uses the signed spelling, not unitLimit.
+  const order = strip(readFileSync("src/order.js", "utf8"));
+  assert.ok(/order_class: "mleg"[\s\S]{0,400}?limit_price = mlegLimitPrice\(/.test(order),
+    "the mleg body must be priced by mlegLimitPrice(), the one home for the sign");
+  assert.ok(/mlegs\.length === 1[\s\S]{0,400}?limit_price = unitLimit\(/.test(order),
+    "and a single-leg order must stay unsigned");
+
+  /* THE STORED LIMIT IS THE BROKER'S, SIGNED — and a screen that prints its
+     MAGNITUDE must print the word beside it. `money(p.alpacaLimit * 100)` was
+     the old shape: it renders a credit and a debit of the same size
+     identically, which is how the XLE order looked correct on every screen
+     the app has. The magnitude is allowed; a magnitude ALONE is not. */
+  const app = strip(readFileSync("src/App.jsx", "utf8"));
+  assert.equal(/money\(\s*p\.alpacaLimit\s*\*/.test(app), false,
+    "a limit rendered without its direction says nothing about which way the money went");
+  assert.ok(/limitKind\(/.test(app), "App.jsx names the direction of every limit it prints");
+});
+
+test("NEVER AGAIN — no order path hands orderBody() a magnitude", () => {
+  // `Math.abs(net)` reaching `limit:` is the exact call that sent the XLE
+  // credit out as a debit. The ticket keeps a magnitude for the SCREEN; the
+  // body takes `signedLimit`.
+  const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+  for (const f of ["src/pro.jsx", "src/App.jsx", "netlify/functions/approve.mjs"]) {
+    const code = strip(readFileSync(f, "utf8"));
+    assert.equal(/limit:\s*Math\.abs\(/.test(code), false, `${f} passes a magnitude as an order limit`);
+    assert.equal(/limit:\s*limitStr\b/.test(code), false,
+      `${f} passes the screen's magnitude (limitStr) to the broker; pass signedLimit`);
+  }
 });
 
 /* ---------------- report ---------------- */

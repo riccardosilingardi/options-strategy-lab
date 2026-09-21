@@ -18,7 +18,7 @@
 // `orderBody()` is used exactly as it is, with `type: "limit"`.
 import { getStore } from "@netlify/blobs";
 import { evaluateTrade } from "../../src/riskGate.js";
-import { orderBody, orderOutcome, alpacaErrorText } from "../../src/order.js";
+import { orderBody, orderOutcome, alpacaErrorText, limitWords } from "../../src/order.js";
 import { closeMarket, closeLimitPrice, closeLimitNote, closeUnreadableNote } from "../../src/rules.js";
 import { appendTimeline, bookPositions } from "../../src/journal.js";
 import { parseCboeJson, CBOE_URL } from "../../src/chain.js";
@@ -122,6 +122,10 @@ export default async (req) => {
 
     // `orderBody()` UNCHANGED, with `type: "limit"`. The size goes in qty and
     // the shape in the ratios exactly as it does at every other order site.
+    // `priced.net` is the SIGNED net of the structure and it must stay signed:
+    // `orderBody()` flips it for the close intent, so a debit structure is
+    // sold for a credit. Handing it `priced.limit` would offer to BUY BACK
+    // what this order is selling, at any price (src/order.js, 1b).
     const order = orderBody({
       legs: oi.legs, occs: oi.occs, userQty: oi.userQty || 1,
       type: "limit", limit: priced.net, tif: oi.tif || "day", intent: oi.intent || "close",
@@ -161,7 +165,7 @@ export default async (req) => {
           orderStatus: res.status, orderFilled: res.filled, orderWorking: res.working,
           limit: order.limit_price,
           text: `${a.label} approved and sent — Alpaca order ${out.id ? String(out.id) : "(no id)"} at a limit of ` +
-            `$${order.limit_price} per combination. ${res.headline}`,
+            `${limitWords(order.limit_price) || "a price the page could not read"} per combination. ${res.headline}`,
         });
         pos.timeline = t.timeline; pos.seqNext = t.seqNext;
         await store.set("state", JSON.stringify(state));

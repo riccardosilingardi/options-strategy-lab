@@ -2206,6 +2206,60 @@ export const rewardRisk = (maxProfit, maxLoss) => {
  * @returns {{ pass, liquidity, reward, reasons }} — `reasons` are finished
  *   English sentences with the numbers already in them.
  */
+/* ------------------------------------------------------------------
+   WHAT THE GUIDED FLOW WILL NOT PROPOSE — and it is a SHAPE, not a name
+
+   The wizard already excludes a single long option (rule 2 in CLAUDE.md):
+   it pays for time a beginner usually does not get, and the loss reads as
+   bad luck rather than as decay. ROADMAP P2 decided the same about
+   BUTTERFLIES and nobody had implemented it: "drop butterflies from the
+   guided path (pTP near 0: incompatible with the 50% take profit before
+   the 21-DTE exit)."
+
+   The reason, in one line: a butterfly is worth its maximum only AT the
+   middle strike AT expiry. Half of that maximum is therefore unreachable
+   while there is time value left, and this app closes at `exitDTE` — 21
+   days out. So the take-profit rung of a structure the guided flow offers
+   as a first trade can essentially never be hit, and the trade ends at the
+   calendar every time. That is a fine trade for somebody who chose it; it
+   is a poor one for somebody being taught what a rule is for.
+
+   IT IS NOT A NAME MATCH. "Bearish Put Butterfly" and "Iron Butterfly" are
+   two of four spellings today and a fifth is one preset away. A butterfly
+   is the structure whose short legs all sit on ONE strike with long legs
+   on both sides of it — which is exactly what makes its peak a point. An
+   iron condor has its shorts on TWO strikes and is not caught; a vertical
+   has nothing above or below its short and is not caught.
+
+   THEY STAY ON THE FULL DESK. This removes nothing from the Shortlist, the
+   wide search or the Build screen: a hand-built trade is the user's to
+   make, the same line the quality floors are drawn on.
+------------------------------------------------------------------ */
+
+/**
+ * Is this structure a butterfly (including an iron butterfly)?
+ * @param legs  [{ side, qty, strike }]
+ */
+export function isButterfly(legs = []) {
+  const ls = (Array.isArray(legs) ? legs : []).filter((l) => l && Number.isFinite(+l.strike));
+  if (ls.length < 3) return false;
+  const shorts = ls.filter((l) => +l.side < 0);
+  const longs = ls.filter((l) => +l.side > 0);
+  if (!shorts.length || longs.length < 2) return false;
+  const body = +shorts[0].strike;
+  // Every short on ONE strike: that is what makes the peak a single point.
+  if (!shorts.every((l) => +l.strike === body)) return false;
+  return longs.some((l) => +l.strike < body) && longs.some((l) => +l.strike > body);
+}
+
+/** Why the guided flow passed one over, for the screen that lists what it did. */
+export const butterflySkipNote = () =>
+  `Butterflies are not offered on the guided path. A butterfly is worth its most only if the market ` +
+  `finishes exactly on the middle strike on the last day, so half of that maximum — the take-profit ` +
+  `rule this app closes on — is out of reach while there is still time value in it, and every one of ` +
+  `them would end at the ${RULES.exitDTE}-day mark instead. They are still on the full desk, where a ` +
+  `trade you build yourself is yours to make.`;
+
 export function qualityFloor({
   openInterest = [], peerOpenInterest = null, level = RECOMMENDED_LIQUIDITY,
   quotes = [], legs = [], maxProfit, maxLoss, unboundedProfit = false,
@@ -3050,8 +3104,14 @@ export function closeMarket(legs = [], quotes = []) {
  *   a long structure  netMid +3.00, spread 0.40 → +2.90  you receive 10c less
  *   a short structure netMid −3.00, spread 0.40 → −3.10  you pay 10c more
  *
- * `limit` is the MAGNITUDE, because that is what `orderBody()` sends: it takes
- * the absolute value and lets the legs' own sides say which way the money goes.
+ * TWO FIELDS COME BACK AND THE ORDER TAKES `net`, NOT `limit`. `net` is the
+ * SIGNED net of the structure and it is what `orderBody()` must be handed —
+ * `mlegLimitPrice()` in order.js turns it into the order's own direction, and
+ * a close flips it, because selling a debit structure is a credit. `limit` is
+ * the MAGNITUDE and it is for the SCREEN: a number to compare against a bid
+ * and an ask. This comment used to say the opposite, and the mleg body really
+ * did take `Math.abs()` — which sent a $75 XLE credit spread as a $75 DEBIT
+ * and filled it for $4 on 21 Sep 2026 (src/order.js, 1b).
  *
  * The floor at one cent is the smallest price a broker takes. If the allowance
  * would drive the net through zero the structure is worth about nothing and the
@@ -3068,11 +3128,10 @@ export function closeLimitPrice({ netMid, spread, slippage = CLOSE_LIMIT_SLIPPAG
   const conceded = mid - allowance;
   const dir = Math.sign(mid) || -1;
   // FLOORED AT A CENT, AND NEVER FLIPPED ROUND. A structure worth +0.02 into a
-  // 0.40-wide market would concede its way to −0.08, and since `orderBody()`
-  // sends the MAGNITUDE and lets the legs say which way the money goes, that
-  // 0.08 would reach the broker as "sell it for 8 cents" — four times BETTER
-  // than the mid, on an order that was meant to concede. A concession that
-  // turns the trade round is not a concession.
+  // 0.40-wide market would concede its way to −0.08, and the sign IS the
+  // order's direction: that −0.08 reaches the broker as "sell it for 8 cents"
+  // — four times BETTER than the mid, on an order that was meant to concede.
+  // A concession that turns the trade round is not a concession.
   const net = Math.sign(conceded) === dir && Math.abs(conceded) >= 0.01
     ? +conceded.toFixed(4)
     : dir * 0.01;
@@ -3172,11 +3231,12 @@ export function comboBook(legs = [], quotes = []) {
  *   a debit  netMid +0.40, spread 0.20 → +0.45  you offer to pay 5c more
  *   a credit netMid −0.40, spread 0.20 → −0.35  you accept 5c less
  *
- * `limit` is the MAGNITUDE, because that is what `orderBody()` sends.
+ * `net` is SIGNED and is what the order takes; `limit` is the magnitude and is
+ * what the ticket prints. See `closeLimitPrice()` above for why.
  *
  * A concession may never flip the sign, for the same reason it may not on a
- * close: a +0.02 debit conceded by 0.10 would price at −0.08, and the broker
- * reads the magnitude as "sell it for eight cents".
+ * close: a +0.02 debit conceded by 0.10 would price at −0.08, and a negative
+ * mleg limit IS "sell it for eight cents".
  */
 export function openLimitPrice({ netMid, spread, slippage = OPEN_LIMIT_SLIPPAGE } = {}) {
   if (netMid == null || spread == null) return null;

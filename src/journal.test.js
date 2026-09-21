@@ -24,6 +24,7 @@ import {
   byRefDesc, matchesRef, searchJournal, SEQ_SEP,
   positionSize, positionSizeNote, contractsOf, withPositionSize, ASSUMED_CONTRACTS,
   positionStage, isOwnedPosition, positionStageNote, wouldHaveDone,
+  isBrokerHolding, fillVsLimit, orderReconciliation, bookPositions,
 } from "./journal.js";
 import { RULES, ruleExitOf, stopWarningSentence,
   seasonalStampOf, seasonalStampNote, ESTIMATED_SEASONAL_SOURCE, MEASURED_SEASONAL_SOURCE } from "./rules.js";
@@ -966,6 +967,149 @@ test("the note over a finished order names it and refuses to call it risk", () =
   assert.ok(/One order/.test(one) && /3 orders/.test(many), "it counts");
   assert.ok(/nothing is waiting/.test(one), "nothing is pending");
   assert.ok(/no risk/.test(one), "and nothing is at risk");
+});
+
+/* ================================================================
+   THE FILL THE APP COULD NOT SEE — PRD §4r
+
+   >>> READ ON THE OWNER'S PHONE, 21 Sep 2026, one screen, one minute. <<<
+       YOUR POSITIONS (0) · Nothing is open
+       XLE Imported from Alpaca · WORKING · A ? order, which time in
+           force not recorded
+   …directly above the broker's own panel listing XLE as an OPEN POSITION
+   and its only waiting order as the SOYB multileg. The two read as swapped.
+================================================================ */
+
+// What `importAlpaca()` used to write for a position read off /v2/positions.
+const IMPORTED_OLD = {
+  id: 1, ticker: "XLE", name: "Imported from Alpaca", expKey: "2026-10-30",
+  legs: [{ side: 1, qty: 1, type: "put", strike: 59 }, { side: -1, qty: 1, type: "put", strike: 62.5 }],
+  entryNet: -0.04, maxLoss: -346, maxProfit: 4,
+  alpacaId: "sync", alpacaLive: true, timeline: [],
+};
+// What it writes now: a HOLDING, with the fill it was read at.
+const IMPORTED_NEW = {
+  // NO ORDER FIELDS: there is no order, so no status is written for one.
+  ...IMPORTED_OLD, alpacaId: null, alpacaHeld: true, entrySource: "fill", contracts: 1,
+};
+
+test("A HOLDING READ OFF THE BROKER IS OWNED, NOT AN ORDER WAITING TO FILL", () => {
+  assert.equal(positionStage(IMPORTED_NEW), "owned");
+  assert.ok(isOwnedPosition(IMPORTED_NEW));
+  assert.equal(positionStageNote(IMPORTED_NEW), null, "there is nothing to explain about a position");
+});
+
+test("…AND THE LEGACY `sync` SENTINEL READS THE SAME WAY, without a migration", () => {
+  /* A record saved by an earlier build is still in localStorage and in the
+     /api/state blob. It has to read correctly on the FIRST render after this
+     ships, not after a write — so `isBrokerHolding()` knows the old spelling. */
+  assert.equal(positionStage(IMPORTED_OLD), "owned");
+  assert.ok(isBrokerHolding(IMPORTED_OLD));
+  assert.ok(isBrokerHolding(IMPORTED_NEW));
+  assert.equal(isBrokerHolding({ alpacaId: "abc-123" }), false, "a real order id is not a holding");
+  assert.equal(isBrokerHolding({}), false);
+  assert.equal(isBrokerHolding(null), false);
+});
+
+test("the sentinel is why the two panels looked swapped, and the count was wrong", () => {
+  // Before: the holding counted as a working order and NOTHING counted as a
+  // position, which is exactly the screen the owner read.
+  const before = [IMPORTED_OLD];
+  assert.equal(before.filter((p) => positionStage(p) === "owned").length, 1,
+    "with the fix, the holding is the position");
+  assert.equal(before.filter((p) => positionStage(p) === "working").length, 0,
+    "and nothing is pretending to be an order");
+  // It is still on the book either way — that half was never wrong.
+  assert.equal(bookPositions(before).length, 1);
+});
+
+test("UNKNOWN IS STILL NOT DEAD: a real order nobody has asked about is working", () => {
+  // The fix must not have bought its correctness by burying genuine unknowns.
+  assert.equal(positionStage({ alpacaId: "real-id-1" }), "working");
+  assert.equal(positionStage({ alpacaId: "real-id-1", alpacaStatus: "accepted", alpacaFilled: false }), "working");
+  assert.equal(positionStage({ alpacaId: "real-id-1", alpacaStatus: "canceled", alpacaFilled: false }), "not-taken");
+  assert.equal(positionStage({ alpacaId: "real-id-1", alpacaStatus: "filled", alpacaFilled: true }), "owned");
+});
+
+/* ---- THE LIMIT AGAINST THE FILL — ROADMAP P0's comparison ---- */
+
+test("FILL vs LIMIT — the XLE order, and the gap IS the §4q fault", () => {
+  // +0.75 offered (a debit, wrongly), −0.04 given (a credit).
+  const r = fillVsLimit({ limit: 0.75, fill: -0.04, contracts: 1 });
+  assert.equal(r.known, true);
+  assert.ok(r.sentence.includes("a debit of $0.75"), r.sentence);
+  assert.ok(r.sentence.includes("a credit of $0.04"), r.sentence);
+  assert.equal(Math.round(r.dollars), 79);
+});
+
+test("FILL vs LIMIT — a fill worse than the limit says WORSE, in dollars, at the size", () => {
+  const r = fillVsLimit({ limit: 0.20, fill: 0.26, contracts: 5 });
+  assert.ok(r.sentence.includes("WORSE"), r.sentence);
+  assert.equal(Math.round(r.dollars), -30, "six cents over five combinations is $30");
+});
+
+test("FILL vs LIMIT — the price you asked for is neither better nor worse", () => {
+  const r = fillVsLimit({ limit: 0.24, fill: 0.24, contracts: 3 });
+  assert.ok(r.sentence.includes("the price you asked for"), r.sentence);
+});
+
+test("FILL vs LIMIT — NEVER INVENT THE LIMIT, and never a theoretical zero", () => {
+  /* An imported holding has no limit: the app did not send that order. It says
+     so rather than quoting the fill back as though it had been the target —
+     and `Number(null)` is 0 and 0 is finite, for the SIXTH time here. */
+  const none = fillVsLimit({ limit: null, fill: -0.04, contracts: 1 });
+  assert.equal(none.known, false);
+  assert.equal(none.limit, null);
+  assert.equal(none.diff, null);
+  assert.ok(/does not carry the limit/.test(none.sentence), none.sentence);
+  assert.ok(/Nothing is estimated/.test(none.sentence));
+  const noFill = fillVsLimit({ limit: 0.75, fill: null });
+  assert.equal(noFill.known, false);
+  assert.ok(/has not reported a fill price/.test(noFill.sentence), noFill.sentence);
+  assert.equal(fillVsLimit({}).known, false);
+  assert.equal(fillVsLimit({ limit: "", fill: "" }).known, false);
+  // A real zero on either side is a real reading.
+  assert.equal(fillVsLimit({ limit: 0, fill: 0 }).known, true);
+});
+
+test("THE RECHECK CARRIES THE FILL PRICE AND THE COMPARISON", () => {
+  const pos = { alpacaId: "x", alpacaStatus: "accepted", alpacaFilled: false, alpacaLimit: 0.75, contracts: 1 };
+  const r = orderStatusRecheck(pos, { id: "x", status: "filled", qty: "1", filled_qty: "1", filled_avg_price: "-0.04" });
+  assert.equal(r.changed, true);
+  assert.equal(r.fillPrice, -0.04, "the sign survives, as Alpaca prints it");
+  assert.ok(r.against && r.against.known);
+  assert.ok(r.entry.text.includes("BETTER"), r.entry.text);
+  assert.equal(r.entry.fillPrice, -0.04);
+  // An order that merely MOVED carries no comparison: there is nothing to compare.
+  const moved = orderStatusRecheck(pos, { id: "x", status: "new", qty: "1", filled_qty: "0" });
+  assert.equal(moved.against, null);
+});
+
+/* ---- WHY THE TWO COUNTS DISAGREE — the debt PR #32 handed forward ---- */
+
+test("RECONCILIATION — an order at the broker this app has no record of is NAMED", () => {
+  const r = orderReconciliation([], [{ id: "29fdee45-9104-41f2-87cf-2ea9e00f967d" }]);
+  assert.equal(r.asked, true);
+  assert.equal(r.mine, 0);
+  assert.equal(r.theirs, 1);
+  assert.equal(r.unknownToApp.length, 1);
+  assert.ok(r.sentence.includes("29fdee45"), r.sentence);
+  assert.ok(/can still fill/.test(r.sentence));
+});
+
+test("RECONCILIATION — when the two agree there is no line at all", () => {
+  const mine = [{ alpacaId: "a" }, { alpacaId: "b" }];
+  const r = orderReconciliation(mine, [{ id: "a" }, { id: "b" }]);
+  assert.equal(r.sentence, null);
+  assert.equal(r.unknownToApp.length, 0);
+});
+
+test("RECONCILIATION — AN UNASKED BROKER IS NOT AN EMPTY ONE", () => {
+  // The same rule as a missing open interest: not having asked is not an answer.
+  const r = orderReconciliation([{ alpacaId: "a" }], null);
+  assert.equal(r.asked, false);
+  assert.equal(r.theirs, null);
+  assert.equal(r.sentence, null, "silence, not a claim that the broker holds nothing");
 });
 
 /* ---------------- report ---------------- */

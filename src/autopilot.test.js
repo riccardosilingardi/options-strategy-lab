@@ -380,8 +380,15 @@ test("THE CLOSING BODY IS A LIMIT, BUILT BY orderBody() UNCHANGED", () => {
   // The size is in qty and the shape is in the ratios — the 2026-09-04 refusal.
   assert.deepEqual(body.legs.map((l) => l.ratio_qty), ["1", "1"]);
   assert.equal(body.qty, "5");
-  // The five-lot net priced as ONE combination: 2.40 / 5.
-  assert.equal(body.limit_price, "0.48");
+  /* The five-lot net priced as ONE combination: 2.40 / 5 — AND IT IS NEGATIVE.
+     This expected "0.48" until 21 Sep 2026 and that expectation was the bug:
+     the position is a long call spread, so CLOSING it is a SALE and the money
+     comes IN. Alpaca's mleg `limit_price` is signed (positive debit, negative
+     credit), so "0.48" here offered to BUY BACK at 48 cents what this order is
+     selling — an offer any market maker meets at any price at all. Measured
+     on the opening path the same day: a $75 XLE credit spread sent as a $75
+     DEBIT, filled for $4 (src/order.js, 1b; PRD §4q). */
+  assert.equal(body.limit_price, "-0.48");
   assert.equal(body.legs[0].position_intent, "sell_to_close");
   assert.equal(body.legs[1].position_intent, "buy_to_close");
 });

@@ -34,19 +34,19 @@ import { RULES, sizing, ruleBadge, takeProfitLabel, stopLossLabel, perTradeCapLa
   chancePct, chanceText, chanceInTen, signedMoney,
   ruleExitOf, stopWarningSentence, watchAttentionLevel,
   chanceOf, chanceSourceNote, seasonalProvenance, seasonalStampNote, seasonalStampFields, chanceDrawFields,
-  sigmaProvenance } from "./rules.js";
+  sigmaProvenance, isButterfly } from "./rules.js";
 import { isStale, freshnessNote, staleAmong } from "./freshness.js";
 import { evaluateTrade, gateSummary } from "./riskGate.js";
 import { DEMO, DEMO_BANNER, DEMO_TOOLTIP, DEMO_SEED_TICKERS, demoPositions } from "./demo.js";
 import { CapitalOnboarding, WizardOpen, FindOpportunities, WizardCandidates, ConfirmSteps, NothingToday, Card, Pill } from "./wizard.jsx";
 import { buildHandOff, buildScreenState, BUILD_TAB } from "./handoff.js";
-import { orderBody, orderOutcome, alpacaErrorText, reduceRatios } from "./order.js";
+import { orderBody, orderOutcome, alpacaErrorText, reduceRatios, limitWords, limitKind, fillPriceOf } from "./order.js";
 // THE PERMANENT RECORD: the ref a position is given at open, the sequence on
 // every timeline entry, the close reason, and what survives into the Journal.
 import { nextRef, refCounter, appendTimeline, stampTimeline, orderStatusRecheck, closeDecision,
   autopilotHorizonNote, autopilotVolNote,
-  positionSize, positionSizeNote, contractsOf, withPositionSize,
-  positionStage, positionStageNote, bookPositions, wouldHaveDone,
+  positionSize, positionSizeNote, contractsOf, withPositionSize, fillVsLimit, orderReconciliation,
+  positionStage, positionStageNote, bookPositions, wouldHaveDone, isBrokerHolding,
   journalEntry, searchJournal, CLOSE_REASON_MIN, refNumber } from "./journal.js";
 import { FIRST_STEP, stepCarry, candidateOf, candidateKey, legsLine, toggleCompare, inCompare, MAX_COMPARE, savedFromCandidate, candidateFromSaved, savedAge } from "./path.js";
 import { StepNav, StepForward, EvidenceBar, EvidenceOverlay, DeskSheet, CompareTray, CandidateActions } from "./steps.jsx";
@@ -1454,6 +1454,50 @@ export default function OptionsStrategyLab() {
     buildAnchor.current?.scrollIntoView?.({ behavior: "smooth", block: "start" });
   }, [scrollBuild]);
 
+  /* ---- THE OPEN INTEREST THE FLOOR JUDGES IS THE OPEN INTEREST ON SCREEN ----
+
+     >>> READ ON THE OWNER'S PHONE, 21 Sep 2026, one session, one chain. <<<
+     The Radar said "on BOIL, WEAT, USO, SLV and GDX the feed reported no open
+     interest at all, so the liquidity floor was SKIPPED" — while the GDX
+     2026-10-30 chain on screen printed open interest per strike, the Shortlist
+     read its near-the-money median at 84 and removed "the 63 emptiest of the
+     96 contracts", and the wizard's number-one road was a butterfly with legs
+     at OI 3 and OI 4.
+
+     TWO PATHS, TWO VERDICTS, ONE CHAIN, and the difference is a return value.
+     Open interest is not in an option snapshot: it is fetched separately and
+     PATCHED IN, so `refreshChain()` sets the bare chain, fires the enrichment
+     and returns the BARE one. The Shortlist reads `chains[tk]` out of state,
+     which by then carries the numbers; the wizard and the wide search read
+     what `refreshChain()` handed back, which never does. So one path judged a
+     chain with open interest and the other called the same chain unreported.
+
+     `ensureOpenInterest()` is the one home. The SCREEN is still never made to
+     wait — `refreshChain()` fires this and does not await it, exactly as
+     before — but a caller that is about to apply a liquidity floor awaits the
+     answer instead of judging a column that has not landed. The promise is
+     memoised per ticker so the two callers share one fetch, and a chain that
+     genuinely carries no open interest still comes back unreported, because
+     UNKNOWN IS NOT LOW and that half is right. */
+  const oiInFlight = useRef(new Map());
+  const ensureOpenInterest = useCallback(async (tk, c) => {
+    if (!c || hasOpenInterest(c)) return c;
+    let pending = oiInFlight.current.get(c);
+    if (!pending) {
+      pending = enrichOpenInterest(tk, c)
+        .then((withOI) => {
+          if (withOI) setChains((m) => (m[tk] === c ? { ...m, [tk]: withOI } : m));
+          return withOI || c;
+        })
+        // A missing column is never a failed load: the chain comes back as it
+        // was and the floor reports SKIPPED, which is the truth about it.
+        .catch(() => c)
+        .finally(() => { oiInFlight.current.delete(c); });
+      oiInFlight.current.set(c, pending);
+    }
+    return pending;
+  }, []);
+
   /* ---- chain fetch ---- */
   const refreshChain = useCallback(async (tk, silent) => {
     if (!silent) { setBusy(tk); setMsg(`Loading ${tk} option prices…`); }
@@ -1466,11 +1510,10 @@ export default function OptionsStrategyLab() {
       // the chain is on screen, and patched in when it lands. It has its own
       // short timeout, it swallows its own failure, and nothing waits for it.
       // The guard keeps a late answer from overwriting a fresher chain.
-      if (!hasOpenInterest(c)) {
-        enrichOpenInterest(tk, c)
-          .then((withOI) => { if (withOI) setChains((m) => (m[tk] === c ? { ...m, [tk]: withOI } : m)); })
-          .catch(() => { /* no open interest is a missing column, never a failed load */ });
-      }
+      // Fired, never awaited — the screen does not wait for a nice-to-have.
+      // A caller that is about to judge a liquidity floor awaits the same
+      // promise through `ensureOpenInterest()`, and gets this one fetch.
+      ensureOpenInterest(tk, c);
       // snapshot IV ATM giornaliero → costruisce lo storico per l'IV Rank
       try {
         const ek2 = c.expirations.find((e) => c.byExp[e].dte >= 25 && c.byExp[e].dte <= 70) || c.expirations[0];
@@ -1492,7 +1535,7 @@ export default function OptionsStrategyLab() {
       if (!silent) setMsg(`Could not load ${tk} option prices — ${e.message}`);
       return null;
     } finally { if (!silent) setBusy(null); }
-  }, []);
+  }, [ensureOpenInterest]);
 
   /* ---- SEASONALITY, FOR EVERY MARKET IN THE BASKET ----
      This used to be one button for whichever ticker was on screen, and every
@@ -2115,6 +2158,16 @@ export default function OptionsStrategyLab() {
   const workingOrders = byStage.working;
   /** Sent and finished with nothing bought — no trade here, and there never was. */
   const notTakenOrders = byStage.notTaken;
+  /* WHY THE TWO COUNTS DIFFER — the debt PR #32 handed forward. The app lists
+     the orders it holds records of and Alpaca lists the account's; neither
+     panel is wrong and nothing said why they disagreed. One cause was the
+     import sentinel (PRD §4r). The other is real and arithmetic cannot fix
+     it: an order sent before the local store was cleared has no record here.
+     `alSync.orders` is what the broker last reported; null until it has been
+     asked, and an unasked broker is not an empty one. */
+  const orderGap = useMemo(
+    () => orderReconciliation(workingOrders, alSync.t ? alSync.orders : null),
+    [workingOrders, alSync]);
 
   const cancelWorking = async (p) => {
     if (DEMO) { setMsg(DEMO_TOOLTIP); return; }
@@ -2325,7 +2378,14 @@ export default function OptionsStrategyLab() {
       // WHAT THE ORDER ACTUALLY WAS, so the working-orders list can show its
       // price and how long it stands without asking the broker again.
       alpacaOrderType: alpacaOrder?.type ?? null,
-      alpacaLimit: alpacaOrder?.limit_price != null ? Math.abs(+alpacaOrder.limit_price) : null,
+      /* THE BROKER'S OWN LIMIT, WITH ITS SIGN. This took `Math.abs()`, and so
+         did the timeline sentence below it and the working-orders row on the
+         Positions screen — which is why the app could send a $75 credit
+         spread out as a $75 DEBIT and no screen anywhere showed it. The app
+         sent the wrong number and then hid it on the way back. Positive is a
+         debit, negative a credit, exactly as Alpaca prints it (src/order.js). */
+      alpacaLimit: alpacaOrder?.limit_price != null && Number.isFinite(+alpacaOrder.limit_price)
+        ? +alpacaOrder.limit_price : null,
       alpacaTif: alpacaOrder?.time_in_force ?? null,
       alpacaSentAt: alpacaOrder ? Date.now() : null,
       entryRoomOverride: entryOverrideOk(roomOverride) && entryRoom(d).band === "tight"
@@ -2346,7 +2406,8 @@ export default function OptionsStrategyLab() {
         ...(alpacaOrder ? [{
           t: Date.now(), type: "sent", orderId: alpacaOrder.id ? String(alpacaOrder.id) : null,
           text: `SENT to Alpaca — order ${String(alpacaOrder.id || "(id unknown)")}, ` +
-            `${String(alpacaOrder.type || "?")} ${alpacaOrder.limit_price != null ? `at ${money(Math.abs(+alpacaOrder.limit_price) * 100)} a combination ` : ""}` +
+            `${String(alpacaOrder.type || "an order whose type Alpaca did not report")} ` +
+            `${limitWords(alpacaOrder.limit_price) ? `at ${limitWords(alpacaOrder.limit_price)} a share, a combination at a time, ` : ""}` +
             `${String(alpacaOrder.time_in_force || "").toLowerCase() === "gtc" ? "standing until cancelled" : "good for today's session only"}. ` +
             `${outcome.headline}`,
         }] : []),
@@ -2528,7 +2589,10 @@ export default function OptionsStrategyLab() {
     // ONLY THE ONES STILL ALIVE. This asked the broker about every unfilled
     // order, which meant re-reading three orders that had been cancelled for
     // days, once a minute, for ever. A finished order has no news to give.
-    const todo = store.positions.filter((p) => positionStage(p) === "working");
+    // ...AND ONLY THE ONES THAT ARE REALLY ORDERS. A record imported from the
+    // broker's holdings has no order id, and asking `/v2/orders/sync` for one
+    // 404s into the silent catch below for ever (PRD §4r).
+    const todo = store.positions.filter((p) => positionStage(p) === "working" && p.alpacaId && p.alpacaId !== "sync");
     if (!todo.length) return;
     rechecking.current = true;
     const changes = [];
@@ -2558,7 +2622,13 @@ export default function OptionsStrategyLab() {
             text: `The order has filled, so the exit plan starts now — ${exitPlanSentence()}` }] : []),
         ];
         const t = appendTimeline(p, entries);
-        return { ...p, alpacaStatus: c.r.status, alpacaFilled: c.r.filled, timeline: t.timeline, seqNext: t.seqNext };
+        // WHAT THE BROKER GAVE GOES ON THE RECORD, SIGNED. Until 21 Sep 2026
+        // nothing had ever filled, so the app stored what it OFFERED and had
+        // nothing to hold it against. `c.r.against` is that comparison and it
+        // is already in the timeline entry above (journal.js, `fillVsLimit`).
+        return { ...p, alpacaStatus: c.r.status, alpacaFilled: c.r.filled,
+          alpacaFillPrice: c.r.fillPrice ?? p.alpacaFillPrice ?? null,
+          timeline: t.timeline, seqNext: t.seqNext };
       });
       const ns = { ...st, positions };
       saveState(ns);
@@ -2589,7 +2659,10 @@ export default function OptionsStrategyLab() {
       const barsMap = Object.fromEntries(await Promise.all(multi.sel.map(async (tk) => [tk, await loadBars(tk)])));
       const fz = Object.fromEntries(multi.sel.map((tk) => [tk, fuseFor(tk, barsMap[tk] ?? barsCache[tk])]));
       for (const tk of multi.sel) {
-        let c = chains[tk] || (await refreshChain(tk, true));
+        // THE SAME CHAIN THE SHORTLIST JUDGES, open interest included. Without
+        // this await the floor was SKIPPED on every market in a wide search
+        // while the Shortlist read the numbers off the very same board.
+        let c = await ensureOpenInterest(tk, chains[tk] || (await refreshChain(tk, true)));
         if (!c?.spot) continue;
         const sp = c.spot;
         const dT = multi.dteT || RULES.targetEntryDTE;
@@ -2983,11 +3056,18 @@ export default function OptionsStrategyLab() {
       // refusal can name the floor: "nothing on CORN clears the liquidity floor
       // today" is a useful answer, an empty screen is not.
       const floors = { liquidity: 0, spread: 0, comboSpread: 0, reward: 0, unpriceable: 0, impossible: 0, model: 0,
+        // NOT A FLOOR, AND ITS COUNT TRAVELS SEPARATELY. A butterfly is not
+        // refused for being a bad price — it is not offered here at all, and
+        // pooling it with a floor's count would explain neither.
+        butterfly: 0,
         markets: new Set(), oiUnavailable: new Set(), spreadUnavailable: new Set(),
         comboSpreadUnavailable: new Set() };
       for (const r of priced) {
         const tk = r.tk;
-        const c = chains[tk] || (await refreshChain(tk, true));
+        // ...and the guided run reads it too. Its number-one GDX road had legs
+        // at 3 and 4 contracts open on a board whose median near the money is
+        // 84, because the floor it passed had been told there was no column.
+        const c = await ensureOpenInterest(tk, chains[tk] || (await refreshChain(tk, true)));
         if (!c?.spot) { excluded.push({ tk, reason: "nodata" }); continue; }
         const sp = c.spot;
         const exps = c.expirations.filter((e) => c.byExp[e].dte >= RULES.minEntryDTE && c.byExp[e].dte <= 130);
@@ -3013,6 +3093,14 @@ export default function OptionsStrategyLab() {
             // rather than as decay. They stay on the full desk; the guided flow
             // never proposes one.
             if (pr.legs.length < 2) continue;
+            // ...AND NEITHER IS A BUTTERFLY (ROADMAP P2, decided and until now
+            // not implemented). Its maximum needs the market to finish exactly
+            // on the middle strike on the last day, so the 50% take profit is
+            // unreachable before the 21-DTE exit and the rule the guided flow
+            // is teaching never fires. `isButterfly()` in rules.js reads the
+            // SHAPE — four presets spell one today and a fifth is one line
+            // away. The full desk still builds them.
+            if (isButterfly(pr.legs)) { floors.butterfly++; continue; }
             const a = analyze(pr.legs, sp, d2, getU(tk).iv, qq);
             // A road has to have a ceiling: the verdict compares two roads on
             // what each pays, and a best case that is unknown cannot be one side
@@ -3216,6 +3304,7 @@ export default function OptionsStrategyLab() {
         floors: { liquidity: floors.liquidity, spread: floors.spread, comboSpread: floors.comboSpread,
           reward: floors.reward,
           unpriceable: floors.unpriceable, impossible: floors.impossible,
+          butterfly: floors.butterfly,
           markets: [...floors.markets], oiUnavailable: [...floors.oiUnavailable],
           spreadUnavailable: [...floors.spreadUnavailable],
           comboSpreadUnavailable: [...floors.comboSpreadUnavailable] },
@@ -3333,14 +3422,55 @@ export default function OptionsStrategyLab() {
             mp = Math.max(mp, pnl); ml = Math.min(ml, pnl);
           }
           const dte0 = Math.round((new Date(g.exp) - Date.now()) / 864e5);
+          /* >>> THE FILL THE APP COULD NOT SEE (PRD §4r). <<< This record used
+             to carry `alpacaId: "sync"` — a sentinel, not an order id — and no
+             status at all, so `positionStage()` read a holding the broker
+             ALREADY OWNS as an order still waiting to fill, and printed it
+             under WORKING with "A ? order, which time in force not recorded".
+             It could never resolve either: `recheckOrders()` then asked for
+             `GET /v2/orders/sync`, which 404s into a silent catch.
+
+             `/v2/positions` RETURNS ONLY WHAT THE ACCOUNT HOLDS. There is no
+             order here, so no order field is invented for one: `alpacaHeld`
+             says what the record is and `positionStage()` reads it (journal.js).
+
+             And it is a FILL, so it carries the price it was filled at —
+             `avg_entry_price` summed over the legs, which is what `g.net`
+             already is — stamped `entrySource: "fill"`, the sixth use of "the
+             absence of the stamp is the marker". The legs carry the broker's
+             own quantities and `payoffExp` multiplies by them, so the size is
+             MEASURED and `contracts: 1` here is not an assumed one. */
+          const exitOn = new Date(new Date(g.exp).getTime() - RULES.exitDTE * 864e5)
+            .toISOString().slice(0, 10);
           next.push({
             id: Date.now() + added, name: "Imported from Alpaca", ticker: g.und, expKey: g.exp,
             legs: g.legs, entryNet: g.net, entrySpot: chains[g.und]?.spot ?? null,
             openedAt: new Date().toISOString(), expiry: g.exp,
             maxProfit: Number.isFinite(mp) ? mp : 0, maxLoss: Number.isFinite(ml) ? ml : 0,
-            realEntry: true, alpacaId: "sync", alpacaLive: true,
+            realEntry: true, alpacaId: null, alpacaHeld: true, alpacaLive: true,
+            // NO ORDER FIELDS. There is no order here, so there is no status
+            // to record and none is written: `positionStage()` reads
+            // `alpacaHeld` and never asks `orderLifecycle()` about a holding.
+            // Writing `alpacaStatus: "filled"` would be the app asserting an
+            // order the broker never told it about — the same class of fault
+            // as the sentinel this replaces.
+            entrySource: "fill", contracts: 1,
             thesis: { imported: true, iv: getU(g.und).iv, seasonal: seasonalNowOf(seasonal, g.und), pop: null, spot: chains[g.und]?.spot ?? null, vega: 1 },
-            timeline: [{ t: Date.now(), type: "open", text: `Imported from your Alpaca paper account (${g.legs.length} legs, ${dte0} days to expiry). It is now being watched.` }],
+            timeline: [
+              { t: Date.now(), type: "fill", text:
+                `Read from your Alpaca paper account as an OPEN POSITION — ${g.legs.length} legs, ` +
+                `${dte0} days to expiry, at the broker's own average entry prices ` +
+                `(${limitWords(g.net) || "a net the app could not read"} a combination). ` +
+                `This is a fill, not an order: the broker lists only what the account holds.` },
+              // NEVER INVENT THE LIMIT. The app did not send this order — or
+              // sent it before its local record was cleared — so there is no
+              // intended price to hold the fill against, and the row says so
+              // rather than quoting the fill back as if it were the target.
+              { t: Date.now(), type: "note", text: fillVsLimit({ limit: null, fill: g.net, contracts: 1 }).sentence },
+              { t: Date.now(), type: "plan", text:
+                `Exit plan starts now — ${exitPlanSentence()} On this expiry the ${RULES.exitDTE}-day mark ` +
+                `is ${exitOn}.` },
+            ],
           });
           added++;
         }
@@ -3806,7 +3936,7 @@ export default function OptionsStrategyLab() {
                   <span style={{ width: 7, height: 7, borderRadius: 4, background: T.amber, flexShrink: 0 }} />
                   <span style={{ ...mono, fontSize: 11.5, color: T.ink, fontWeight: 700 }}>{p.ref ? `${p.ref} ` : ""}{p.ticker} {p.name}</span>
                   <span style={{ ...mono, fontSize: 10.5, color: T.mut }}>
-                    · sent, nothing bought{p.alpacaLimit != null ? ` · limit ${money(p.alpacaLimit * 100)}` : ""} →
+                    · sent, nothing bought{limitKind(p.alpacaLimit) ? ` · a ${limitKind(p.alpacaLimit)} limit of ${money(Math.abs(p.alpacaLimit) * 100)}` : ""} →
                   </span>
                 </button>
               ))}
@@ -5505,9 +5635,13 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                 main flow ever mentioned it again. It sits ABOVE the positions
                 because "this has not happened yet" has to be read before
                 "here is what you own", not after. */}
-            {workingOrders.length > 0 && (
+            {/* THE PANEL OPENS FOR A GAP TOO, NOT ONLY FOR THE APP'S OWN ROWS.
+                With zero records and one order at the broker this said nothing
+                at all, which is the silence PR #32 handed forward. */}
+            {(workingOrders.length > 0 || orderGap.sentence) && (
               <Panel style={{ border: `1px solid ${T.amber}66`, marginBottom: 10 }}>
                 <Lbl>WORKING AT THE BROKER ({workingOrders.length}) · SENT, NOT FILLED</Lbl>
+                {workingOrders.length > 0 && (
                 <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 6, lineHeight: 1.6 }}>
                   {workingOrders.length === 1 ? "This order has" : "These orders have"} left the app and
                   {workingOrders.length === 1 ? " has" : " have"} not bought anything. Nothing here is a position,
@@ -5515,6 +5649,12 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   open risk. A limit at the middle of a wide market can wait all day; a DAY order that is still
                   here at the close is gone.
                 </div>
+                )}
+                {orderGap.sentence && (
+                  <div style={{ ...mono, fontSize: 10.5, color: T.amber, marginTop: 8, lineHeight: 1.6 }}>
+                    {orderGap.sentence}
+                  </div>
+                )}
                 <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
                   {workingOrders.map((p) => {
                     const sentAt = p.alpacaSentAt || p.id || null;
@@ -5547,9 +5687,18 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                               This row printed the structure count and read as a
                               contradiction beside a timeline saying "0 of 10". */}
                           {`${positionSize(p).brokerQty} combination${positionSize(p).brokerQty === 1 ? "" : "s"}. `}
-                          {p.alpacaOrderType === "limit" && p.alpacaLimit != null
-                            ? `A limit of ${money(p.alpacaLimit * 100)} a combination, which ${stands}.`
-                            : `A ${p.alpacaOrderType || "?"} order, which ${stands}.`}
+                          {/* WHICH WAY THE MONEY GOES, AND "?" IS NOT A FIELD.
+                              This row printed `money(alpacaLimit * 100)` over a
+                              magnitude, so a credit spread and a debit spread of
+                              the same size read identically — and a missing order
+                              type rendered as a literal question mark, which is
+                              failure class 1: a field nobody recorded, drawn as
+                              if it were a value. */}
+                          {p.alpacaOrderType === "limit" && limitKind(p.alpacaLimit)
+                            ? `A ${limitKind(p.alpacaLimit)} limit of ${money(Math.abs(p.alpacaLimit) * 100)} a combination, which ${stands}.`
+                            : p.alpacaOrderType
+                              ? `A ${p.alpacaOrderType} order, which ${stands}.`
+                              : `An order whose type was not recorded, which ${stands}.`}
                           {" "}Order <span style={{ wordBreak: "break-all" }}>{p.alpacaId}</span>.
                         </div>
                         {stale && (
@@ -5649,6 +5798,19 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                       {positionStageNote(p) && (
                         <div style={{ ...mono, fontSize: 10.5, color: T.amber, marginTop: 5, lineHeight: 1.6 }}>
                           ⚠ {positionStageNote(p)}
+                        </div>
+                      )}
+                      {/* WHAT YOU ASKED FOR AGAINST WHAT YOU GOT — the comparison
+                          ROADMAP P0 has owed since PR #28 and could not make,
+                          because nothing had ever filled. It prints only on a
+                          position that really did fill, and a record with no
+                          limit of its own SAYS so rather than quoting the fill
+                          back as though it had been the target (journal.js). */}
+                      {(p.alpacaFillPrice != null || (isBrokerHolding(p) && p.entrySource === "fill")) && (
+                        <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 5, lineHeight: 1.6 }}>
+                          {fillVsLimit({ limit: p.alpacaLimit,
+                            fill: p.alpacaFillPrice != null ? p.alpacaFillPrice : p.entryNet,
+                            contracts: size.contracts }).sentence}
                         </div>
                       )}
                       {/* CLOSING ASKS WHY, AND THE ANSWER IS KEPT.
