@@ -47,6 +47,7 @@ export const SCREEN_IDS = ["radar", "shortlist", "build"];
 const LEVEL = R.RECOMMENDED_LIQUIDITY;
 const TALLY = { kept: 2, liquidity: 3, spread: 1, comboSpread: 1, reward: 2, skipped: 0, unpriceable: 1, impossible: 0, model: 1 };
 const LIMITS = { answered: true, tradingCapital: 7000, concurrentTarget: 5, perTradeLimit: 350, totalExposureLimit: 1750 };
+const REQUEST = R.requestOf ? R.requestOf({ amt: 350 }, LIMITS) : { mode: "budget", amt: 350, amtAnswered: true, minChance: 0.5 };
 const CHOICE = R.expiryChoice([
   { key: "2026-10-16", dte: 24, clears: 9, near: 10 },
   { key: "2026-11-20", dte: 59, clears: 8, near: 10 },
@@ -118,6 +119,18 @@ export const COPY = {
   alpacaErrorText: () => O.alpacaErrorText(new Error("422")),
   pctText: () => R.pctText(0.35),
   chanceText: () => R.chanceText(0.55),
+  // ROADMAP P10 — the controls block and the card.
+  chanceAskLabel: () => (R.chanceAskLabel ? R.chanceAskLabel(REQUEST) : ""),
+  controlsFoldNote: () => (R.controlsFoldNote ? R.controlsFoldNote(REQUEST) : ""),
+  targetPriceNote: () => (R.targetPriceNote ? R.targetPriceNote(R.targetPriceOf(27.5, { tgt: 0.04 }), "SOYB") : ""),
+  requestAmountLabel: () => (R.requestAmountLabel ? R.requestAmountLabel("budget") : ""),
+  requestAmountOwner: () => (R.requestAmountOwner ? R.requestAmountOwner(REQUEST) : ""),
+  contractsSourceNote: () => (R.contractsSourceNote ? R.contractsSourceNote({ contracts: 3, typed: false, request: REQUEST }) : ""),
+  missReasonLine: () => (R.missReasonLine ? R.missReasonLine({ id: "budget", text: "over the budget by $40" }) : ""),
+  meetsHeading: () => (R.meetsHeading ? R.meetsHeading(REQUEST, 2) : ""),
+  otherwiseHeading: () => (R.otherwiseHeading ? R.otherwiseHeading(3) : ""),
+  fillPriceHeading: () => (R.fillPriceHeading ? R.fillPriceHeading() : ""),
+  crossingCostNote: () => (R.crossingCostNote ? R.crossingCostNote({ known: true, fill: 0.24, mid: 0.2, cost: 0.04, bid: 0.14 }) : ""),
 };
 
 export const words = (s) => String(s || "").trim().split(/\s+/).filter(Boolean).length;
@@ -286,7 +299,11 @@ export function uncountedIn(block) {
    of copy on the page, and the multiplicity that matters is the number of
    CALL SITES of a generator inside it, which is counted as usual. */
 export const COMPONENT_DEPTH = 3;
-const UI_FILES = ["App.jsx", "pro.jsx", "steps.jsx", "why.jsx", "visuals.jsx", "wizard.jsx"];
+// `card.jsx` IS IN THIS LIST FROM THE DAY IT EXISTED. The controls block and
+// the candidate card are mounted BY the step blocks, so their words are words
+// the reader scrolls past — and a counter that could not see a new component
+// would report a screen shrinking on the day it grew.
+const UI_FILES = ["App.jsx", "pro.jsx", "steps.jsx", "why.jsx", "visuals.jsx", "wizard.jsx", "card.jsx"];
 
 const sourcesOnce = (() => {
   let cache = null;
@@ -341,12 +358,30 @@ export function componentsIn(chunk) {
   return [...out];
 }
 
-/** The block, plus the bodies of everything it mounts, to COMPONENT_DEPTH. */
+/**
+ * The block, plus the bodies of everything it mounts, to COMPONENT_DEPTH.
+ *
+ * >>> EACH PIECE IS PUT AT REST BEFORE IT IS JOINED, AND THAT IS A FIX. <<<
+ * `atRest()` strips a fold with a NON-GREEDY match from `<Fold …>` to the next
+ * `</Fold>`. Run over the CONCATENATION, that pairing crosses the boundary
+ * between the block and a component body — so which words a fold hides depended
+ * on WHICH COMPONENTS the block happened to mount and in what order. Measured
+ * while adding the P10 controls block: the Shortlist's sum of its own parts is
+ * 776 words, and the concatenation scored it 533 before the block mounted one
+ * more component and 707 after. The screen had not grown by 174 words; the
+ * counter had stopped hiding them.
+ *
+ * Stripping per piece makes the reading the SUM OF ITS PARTS, so a measurement
+ * cannot move because a component was added somewhere else on the screen. The
+ * baseline in `voice.test.js` was re-derived from a whole-tree worktree of
+ * `main` with this same fix applied, by the procedure written beside it — both
+ * sides of the table are read by one counter or the table means nothing.
+ */
 export function screenSource(src, id, { depth = COMPONENT_DEPTH } = {}) {
   const ui = sourcesOnce();
   const seen = new Set();
-  let all = stepBlock(src, id);
-  let frontier = componentsIn(all);
+  const pieces = [atRest(stepBlock(src, id))];
+  let frontier = componentsIn(pieces[0]);
   for (let d = 0; d < depth && frontier.length; d++) {
     const next = [];
     for (const name of frontier) {
@@ -354,12 +389,12 @@ export function screenSource(src, id, { depth = COMPONENT_DEPTH } = {}) {
       seen.add(name);
       const body = componentBody(name, ui);
       if (!body) continue;
-      all += "\n" + body;
+      pieces.push(atRest(body));
       next.push(...componentsIn(body));
     }
     frontier = next.filter((n) => !seen.has(n));
   }
-  return all;
+  return pieces.join("\n");
 }
 
 export function measureScreens(src) {

@@ -3169,6 +3169,116 @@ Restored, and the failure is recorded here rather than quietly fixed.
 
 ---
 
+---
+
+## §4w — THE CONTROLS COME FIRST, THE LIST SPLITS, AND ONE PRICE
+
+ROADMAP P10, asked for by the owner on 22 September 2026 reading the P9 deploy preview:
+
+> *"Il reward/Risk è dinamico? Per me dovrebbe, così come lo deve essere il budget dedicato
+> all'operazione, oppure quanto vuoi guadagnare. E deve essere tab semplice e visibile."*
+>
+> *"...l'app propone anche altro, magari visivamente sposta in una sezione quelle che marchiano
+> le richieste e subito sotto le altre. Del resto se il filtro è dinamico devono poter entrare e
+> uscire dalla sezione specifica."*
+
+### 1. ONE STATE FOR "WHAT I WANT", ABOVE BOTH DOORS
+
+`optMode` / `optAmt` were Build-and-Shortlist state in `App.jsx`; the guided run had its own
+`wiz.risk`. **Two states, one question** — the shape CLAUDE.md's standing rule is about, and the
+same fault as the Build screen's hardcoded 500 beside the wizard's derived 250.
+
+- **`requestOf(want, limits)` in `rules.js` is the one reader** and `want` in `App.jsx` is the one
+  state. The default amount is **DERIVED from `limits.perTradeLimit`, never typed**, so the figure
+  on screen before anybody answers is the number the risk gate is about to measure against.
+- **`amtAnswered` TRAVELS**, exactly as `sizing().answered` does. Until the user types an amount
+  every screen calls it a suggestion (`requestAmountOwner()`). An app that quotes a figure the user
+  never chose back at them as their own limit has stopped being trustworthy about anything else.
+- **`wiz` NO LONGER CARRIES `risk`.** `wizAnswers` READS the one home and stays NULL until answered,
+  so the guided button still refuses to run on an answer nobody gave.
+- **THE SIZE TRAVELS ALL THREE STEPS.** `contracts` on Build is DERIVED — `scaleStrategy()`,
+  untouched, read at the price the order will be sent at. A ticker or expiry change **RE-DERIVES**
+  from the budget instead of resetting to 1: the structure changed, the user did not. A count typed
+  by hand WINS and says so in one clause (`contractsSourceNote()`), because a quantity that silently
+  stops following the budget is a control the user cannot tell is stuck.
+- **THE GATE IS UNCHANGED.** It measures whatever `contracts` says, whichever of the two produced it.
+
+### 2. FIVE CONTROLS, ONE BLOCK, ABOVE EVERY RESULT
+
+`RequestControls` in **`src/card.jsx`** — its own file, because it may not live in `steps.jsx` (that
+file is the navigation and holds nothing about a trade) and it may not live in `App.jsx` (`wizard.jsx`
+renders it too, and `App.jsx` imports `wizard.jsx`).
+
+**Direction · target price · budget or target profit · expiry · one slider.** On the desk journey the
+block sits at the top of the Radar, above the market list, and again at the top of the Shortlist,
+where it REPLACES the panel that was the same five controls spread out with a 100px number field
+buried among them. On the guided journey `FindOpportunities` already asks for the basket, the amount
+and the horizon in its own three numbered blocks, so it renders the one control it does not have —
+the slider — plus the budget/target toggle beside the amount it already asks for. The owner's rule
+allows exactly this: *"dipende dalla journey"*.
+
+- **THE TARGET PRICE IS A READ-OUT, AND THAT IS DELIBERATE** (`targetPriceOf()`). It is the direction
+  expressed as a price — the figure the Shortlist has printed as IMPLIED TARGET all along. **Nothing
+  in this app generates structures from a typed price**: all three generation sites build from the
+  DIRECTION and the BOARD. A free-text target that no generation site reads would be a control that
+  does nothing, which is the one thing this repository refuses to ship. No spot is UNKNOWN, never a
+  target of zero.
+- **THE EXPIRY COMES FROM `buildableExpiries()` ONLY**, and a refused board is still rendered, named
+  and disabled — the `strikeOptions()` / `offFloorExpiryLabel()` pattern. `expiryMenu` in `App.jsx`
+  is the ONE spelling of "which boards may be offered"; the Radar's block and the Shortlist's
+  dropdown read the same list, so the two screens cannot disagree.
+- **THE SLIDER SETS A MINIMUM CHANCE OF PROFIT**, read off `chanceOf()`'s Monte Carlo — the one
+  source every chance in this app comes from. Its range and step are four named constants in `RULES`
+  with their reasoning, **all CHOSEN NOT MEASURED**: `chanceAskMin` 0.20 (below it almost everything
+  clears, so the control stops grouping anything), `chanceAskMax` 0.80 (above it what clears pays at
+  or under `minRewardRisk` and never reached the list, so the top section empties and the control
+  teaches that asking for certainty is free), `chanceAskStep` 0.05 (the simulation's own standard
+  error at `mcRuns` is about 0.55 of a point, and a finer step would move rows on sampling noise) and
+  `chanceAskDefault` 0.50.
+- **IT CREATES NO STRUCTURE, BYPASSES NO FLOOR, AND NEVER MOVES `minRewardRisk`.** 0.25 stays a fixed
+  rule: a user-movable quality floor would be the app letting somebody switch off the reason it can
+  be trusted. The slider decides ONE thing — which heading a candidate sits under.
+- **PHONE FIRST AT 390px.** Labels and controls, no paragraphs; every explanation is in a `Fold`
+  (`controlsFoldNote()`). A control that asks a question earns its words; a paragraph explaining the
+  control does not.
+
+### 3. THE RADAR WORD READING — A GUARD, NOT A RESULT
+
+ROADMAP P10 §3-bis is explicit, in the owner's own verdict on P9: *"non me ne frega niente, basta si
+capisca il tutto, sia intuitivo e siano evidenti takeaway senza perdere sostanza."* `src/wordcount.mjs`
+stays because it is what stops a paragraph coming back. **It is a GUARD and no session may report it
+as the result.** The result is whether he can read a card without reading a sentence.
+
+    RADAR, WORDS AT REST        literal   generated   total   sites
+    before this session            199         179     378       6
+    after                          209         197     406      10
+
+**+28 words for five controls**, because the block is labels and values and its explanation folds.
+Four of the ten sites are the new controls' own labels.
+
+### 4. AND THE COUNTER ITSELF HAD A DEFECT, MEASURED HERE
+
+`atRest()` strips a fold with a non-greedy match from `<Fold …>` to the next `</Fold>`. It ran over
+the **concatenation** of the step block and every component body, so that match could cross the
+boundary between two pieces: **which words a fold hid depended on which components the block mounted,
+and in what order.** Measured while adding the controls block — the Shortlist's own parts sum to 776
+words, and the concatenation scored it **533** before the block mounted one more component and **707**
+after, on a source that had SHRUNK by three thousand characters.
+
+A counter that moves when nothing on the screen moved is not a guard. `screenSource()` puts each
+piece at rest BEFORE joining them, so a reading is the sum of its parts and appending a body can only
+add that body's own words. `voice.test.js` holds it: `atRest(screenSource(...))` must equal
+`screenSource(...)`, and a dangling `</Fold>` in a later piece must not reach back into an earlier one.
+
+**THE BASELINE WAS RE-DERIVED, BY THE PROCEDURE WRITTEN BESIDE IT**, from a whole-tree worktree of
+68b75a5 with the fixed counter. It read `{ radar 1162, shortlist 1881, build 963, total 4006 }` and
+reads `{ radar 1162, shortlist 1881, build 593, total 3636 }`: **only `build` moves**, and the other
+two screens are identical. Both sides of the table are measured by one counter, or the table means
+nothing. P9's 43.0% cut is a 47.5% cut on the corrected reading; this session sits at 42.0%, above
+the 40% the test asserts, with the controls block spending some of it back.
+
+---
+
 ## 5. The wizard IS the app
 
 The wizard is not a feature inside the app. It is the entry point and the spine. Existing tabs remain reachable but are no longer the front door.

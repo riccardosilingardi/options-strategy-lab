@@ -33,6 +33,9 @@ const upTo = (x) => (Number.isFinite(x) ? money(x) : NO_CEILING);
 import { BandThumbnail, Gauge, payoffBands, bandTakeaway, gaugeTakeaway, explainElement, UnifiedFigure, exitPlanSentence, exitPlanDetail, inTenPhrase, price } from "./visuals.jsx";
 import { DRIVERS, DRIVER_PRESETS, presetOf, normaliseWeights } from "./signals.js";
 import { WhyThisTrade } from "./why.jsx";
+// THE SAME CONTROLS BLOCK THE DESK JOURNEY GETS, writing to the same state.
+// Two doors, one question, asked before anything is proposed (P10 §2).
+import { RequestControls } from "./card.jsx";
 
 const mono = { fontFamily: "ui-monospace, Menlo, monospace" };
 const sans = { fontFamily: "ui-sans-serif, system-ui" };
@@ -441,7 +444,8 @@ const DriverSlider = ({ d, value, onChange }) => (
  *                 NULL until answered, and stay null. Never defaulted.
  * @param universe [{ tk, name }] the markets on offer.
  */
-export function FindOpportunities({ answers, setAnswers, limits, universe = [], busy, err, onBack, onDecide }) {
+export function FindOpportunities({ answers, setAnswers, limits, universe = [], busy, err, onBack, onDecide,
+  request = null, onRequest }) {
   const { risk, horizon } = answers;
   // An UNSET basket means "all five, not narrowed yet". An EMPTY one means the
   // user has just deselected the last market, and it has to stay empty — the
@@ -508,6 +512,15 @@ export function FindOpportunities({ answers, setAnswers, limits, universe = [], 
             {money(limits.perTradeLimit)} per trade, {perTradeCapLabel()}.
           </Pill>
           {!limits.answered && <Pill tone={T.blue}>{capitalSourceNote(limits)}</Pill>}
+          {/* WHICH QUESTION THIS BLOCK ASKS (P10 §2). The desk has had this
+              toggle since PR #23 and this door never did. Same state. */}
+          {request && onRequest && (
+            <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+              {[["budget", "What I can spend"], ["target", "What I want to make"]].map(([id, lbl]) => (
+                <Chip key={id} on={request.mode === id} onClick={() => onRequest({ mode: id })}>{lbl}</Chip>
+              ))}
+            </div>
+          )}
           <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
             {presets.map((v) => (
               <Chip key={v} on={risk === v} onClick={() => setAnswers({ ...answers, risk: v })}>
@@ -567,6 +580,16 @@ export function FindOpportunities({ answers, setAnswers, limits, universe = [], 
             Still missing: {missing.join(", ")}. Nothing here is filled in for you — an answer you did
             not give is not an answer, and the app is not going to quote one back at you later.
           </Pill>
+        )}
+
+        {/* THE ONE CONTROL THIS DOOR DOES NOT ALREADY ASK FOR (P10 §2). The
+            three blocks above are the basket, the amount and the horizon; the
+            slider is new, and it is the same component the desk renders,
+            reading the same state. */}
+        {request && onRequest && (
+          <RequestControls
+            journey="guided" only={["chance"]} style={{ marginTop: 18 }}
+            request={request} onChange={onRequest} />
         )}
 
         <button onClick={onDecide} disabled={busy || !ready}

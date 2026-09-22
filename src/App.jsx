@@ -43,6 +43,10 @@ import { isStale, freshnessNote, staleAmong } from "./freshness.js";
 import { evaluateTrade, gateSummary } from "./riskGate.js";
 import { DEMO, DEMO_BANNER, DEMO_TOOLTIP, DEMO_SEED_TICKERS, demoPositions } from "./demo.js";
 import { CapitalOnboarding, WizardOpen, FindOpportunities, WizardCandidates, ConfirmSteps, NothingToday, Card, Pill } from "./wizard.jsx";
+// THE CONTROLS AND THE ONE CANDIDATE CARD (ROADMAP P10). Its own file: it is
+// nothing but a trade, so it may not live in `steps.jsx`, and `wizard.jsx`
+// renders the same card, so it may not live here.
+import { RequestControls } from "./card.jsx";
 import { buildHandOff, buildScreenState, BUILD_TAB } from "./handoff.js";
 import { orderBody, orderOutcome, alpacaErrorText, reduceRatios, limitWords, fillPriceOf } from "./order.js";
 // THE PERMANENT RECORD: the ref a position is given at open, the sequence on
@@ -1805,6 +1809,20 @@ export default function OptionsStrategyLab() {
     }));
   }, [chain, liqLevel]);
   const expChoice = useMemo(() => expiryChoice(expiryOptions), [expiryOptions]);
+  /* >>> WHICH BOARDS A DROPDOWN MAY OFFER — ONE LIST, TWO SCREENS (P10 §2).
+     <<< The controls block on the Radar and the expiry dropdown on the
+     Shortlist are the same question, and a second spelling of "which boards may
+     be offered" is how the two come to disagree. `buildableExpiries()` decides
+     what the gate would pass WITHOUT an override; a refused board is still
+     RENDERED and NAMED, disabled — the `strikeOptions()` / `offFloorExpiryLabel()`
+     pattern, because a list that silently drops a row teaches nothing and a
+     `<select>` whose value matches no option displays the first one. The board
+     already selected is always offered, however it got there. */
+  const expiryMenu = useMemo(() => expiryOptions.map((e) => ({
+    key: e.key, dte: e.dte,
+    buildable: openableBoard(e.dte) || e.key === expKey,
+    label: offFloorExpiryLabel(e.key, e.dte),
+  })), [expiryOptions, expKey]);
 
   /* INSTRUMENTING THE ENTRY FLOOR SO IT CAN BE CALIBRATED FROM A READING
      (src/rules.js, `passedOverRecord`; ROADMAP P5).
@@ -4030,6 +4048,7 @@ export default function OptionsStrategyLab() {
         {wizStep === "questions" && (
           <FindOpportunities
             answers={wizAnswers} setAnswers={setWizAnswers} limits={limits} busy={wiz.busy} err={wiz.err}
+            request={request} onRequest={(patch) => setWant((w) => ({ ...w, ...patch }))}
             universe={BASKET.map((tk) => ({ tk, name: getU(tk).name }))}
             onBack={goHome} onDecide={() => runWizard()}
           />
@@ -4539,6 +4558,16 @@ export default function OptionsStrategyLab() {
               actually produced after the quality floors, at the {liqLevel.label.toUpperCase()} setting.
             </div>
 
+            {/* THE CONTROLS COME FIRST (P10 §2). One block, above every
+                result, and the guided door renders what it does not already
+                ask: "dipende dalla journey". */}
+            <RequestControls
+              journey="desk" style={{ marginTop: 12 }}
+              request={request} onChange={(patch) => setWant((w) => ({ ...w, ...patch }))}
+              sentiments={SENTIMENTS} sentiment={sentiment} onSentiment={setSentiment}
+              ticker={ticker} spot={spot}
+              expiries={expiryMenu} expKey={expKey} onExpiry={setExpKey} />
+
             {/* What the guided run examined, in English. It used to sit on the
                 verdict screen above the two roads; it belongs here, where the
                 question is which market rather than which structure. */}
@@ -4908,87 +4937,35 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
               </div>
             )}
 
-            <Panel style={{ marginTop: 12 }}>
-              <Lbl>1 · WHICH WAY DO YOU THINK IT GOES?</Lbl>
-              <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
-                {SENTIMENTS.map((s) => (
-                  <button key={s.id} onClick={() => setSentiment(s.id)}
-                    style={{
-                      ...mono, fontSize: 11, padding: "10px 12px", borderRadius: 24, cursor: "pointer", flex: "1 1 auto",
-                      background: sentiment === s.id ? s.color : "transparent",
-                      color: sentiment === s.id ? T.onAccent : s.color,
-                      border: `1.5px solid ${s.color}`, fontWeight: 700,
-                    }}>
-                    {s.icon} {s.label}
-                  </button>
-                ))}
-              </div>
-              <div style={{ display: "flex", gap: 16, marginTop: 12, alignItems: "center", flexWrap: "wrap" }}>
-                <Stat k="IMPLIED TARGET" v={`$${(spot * (1 + SENT.tgt)).toFixed(2)} (${SENT.tgt >= 0 ? "+" : ""}${(SENT.tgt * 100).toFixed(0)}%)`} c={T.blue} />
-                <div>
-                  <div style={{ ...mono, fontSize: 9.5, color: T.dim }}>SIZE BY</div>
-                  <div style={{ display: "flex", gap: 4 }}>
-                    <Btn small ghost={request.mode !== "budget"} onClick={() => setWant((w) => ({ ...w, mode: "budget" }))}>What I can spend</Btn>
-                    <Btn small ghost={request.mode !== "target"} onClick={() => setWant((w) => ({ ...w, mode: "target" }))}>What I want to make</Btn>
+            {/* THE CONTROLS COME FIRST HERE TOO (P10 §2). This panel WAS the
+                block, spread out, with a 100px number field buried in it. Same
+                component as the Radar's, same state, one spelling of each of
+                the five. Nothing cut: the implied target is TARGET PRICE, and
+                the two expiry sentences sit below, where they have a referent. */}
+            <RequestControls
+              journey="desk" style={{ marginTop: 12 }}
+              request={request} onChange={(patch) => setWant((w) => ({ ...w, ...patch }))}
+              sentiments={SENTIMENTS} sentiment={sentiment} onSentiment={setSentiment}
+              ticker={ticker} spot={spot}
+              expiries={expiryMenu} expKey={expKey} onExpiry={setExpKey} />
+            {chain && (
+              <div style={{ marginTop: 6 }}>
+                {chain.expirations.length <= 4 && (
+                  <div style={{ ...mono, fontSize: 9.5, color: T.dim, lineHeight: 1.55 }}>
+                    These are every expiry {feedName(chain) || "the feed"} lists for {ticker} — this ETF only has monthly ones, it is not a limit of the app.
                   </div>
+                )}
+                {/* WHY THIS EXPIRY, AND WHAT WAS PASSED OVER. */}
+                <div style={{ ...mono, fontSize: 9.5, color: T.mut, marginTop: 4, lineHeight: 1.55 }}>
+                  {expiryChoiceNote(expChoice, liqLevel, { selected: expKey })}
                 </div>
-                <div>
-                  <div style={{ ...mono, fontSize: 9.5, color: T.dim }}>{requestAmountLabel(request.mode)}</div>
-                  <Inp type="number" min={50} step={50} value={request.amt == null ? "" : request.amt}
-                    onChange={(e) => setWant((w) => ({ ...w, amt: e.target.value === "" ? null : Math.max(0, +e.target.value) }))}
-                    style={{ width: 100 }} />
-                </div>
-                {chain && (
-                  <div>
-                    <div style={{ ...mono, fontSize: 9.5, color: T.dim }}>EXPIRY</div>
-                    {/* >>> THE DROPDOWN AND THE SENTENCE UNDER IT NAME THE SAME
-                        BOARD (P9, TASK 1). <<< This offered every expiry the
-                        feed lists — so the owner's screen read 2026-10-16 here
-                        and "Building on 2026-11-20" directly below, and the
-                        24-DTE board it had selected was refused at the send.
-                        A board the entry floor will not open on is rendered
-                        DISABLED and NAMED, the `strikeOptions()` /
-                        `offBoardStrikeLabel()` pattern: a list that silently
-                        drops a row teaches nothing, and a `<select>` whose
-                        value matches no option displays the first one. */}
-                    <select value={expKey || ""} onChange={(e) => setExpKey(e.target.value)}
-                      style={{ ...mono, background: T.bg, color: T.ink, border: `1px solid ${T.line}`, borderRadius: 5, padding: "5px 8px", fontSize: 12 }}>
-                      {chain.expirations.map((e) => {
-                        const d0 = chain.byExp[e].dte;
-                        // The board already selected is always offered, however
-                        // it got here: refusing to render the current value is
-                        // how a dropdown comes to display a different trade.
-                        const on = openableBoard(d0) || e === expKey;
-                        return <option key={e} value={e} disabled={!on}>{offFloorExpiryLabel(e, d0)}</option>;
-                      })}
-                    </select>
-                    {chain.expirations.length <= 4 && (
-                      <div style={{ ...mono, fontSize: 9, color: T.dim, marginTop: 3, maxWidth: 220 }}>
-                        These are every expiry {feedName(chain) || "the feed"} lists for {ticker} — this ETF only has monthly ones, it is not a limit of the app.
-                      </div>
-                    )}
-                    {/* WHY THIS EXPIRY, AND WHAT WAS PASSED OVER. The app used
-                        to pick by distance from a target DTE alone and land on
-                        the deadest board on the market without a word about it
-                        (src/rules.js, `expiryChoice`). When a nearer, busier
-                        expiry is refused by the 30-day entry floor, the screen
-                        says so — a rule the user cannot see is a rule they
-                        cannot trust. */}
-                    <div style={{ ...mono, fontSize: 9, color: T.mut, marginTop: 4, maxWidth: 260, lineHeight: 1.55 }}>
-                      {expiryChoiceNote(expChoice, liqLevel, { selected: expKey })}
-                    </div>
-                    {/* AND WHETHER THIS BOARD'S OWN PRICES AGREE WITH THEMSELVES.
-                        A call cannot cost more than a call at a lower strike;
-                        five of BOIL's 25 adjacent near-the-money pairs did. */}
-                    {monoNote && (
-                      <div style={{ ...mono, fontSize: 9.5, color: T.red, marginTop: 4, maxWidth: 260, lineHeight: 1.55 }}>
-                        {monoNote}
-                      </div>
-                    )}
+                {monoNote && (
+                  <div style={{ ...mono, fontSize: 9.5, color: T.red, marginTop: 4, lineHeight: 1.55 }}>
+                    {monoNote}
                   </div>
                 )}
               </div>
-            </Panel>
+            )}
 
             {/* The four readings are EVIDENCE, and evidence opens over the step
                 rather than lengthening it (PRD §12). The panel itself is

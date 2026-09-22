@@ -2862,6 +2862,65 @@ export function requestOf(want = {}, limits = {}) {
 }
 
 /**
+ * THE TARGET PRICE — THE DIRECTION EXPRESSED AS A PRICE, AND A READ-OUT.
+ *
+ * >>> IT IS DELIBERATELY NOT A SECOND INPUT. <<< Nothing in this app generates
+ * structures from a typed price: all three generation sites build from the
+ * DIRECTION and the BOARD (`buildPresets()` takes a sentiment, a spot, a step
+ * and the strikes that exist). A free-text target that no generation site reads
+ * would be a control that does nothing, which is the one thing this repository
+ * refuses to ship — the whole of ROADMAP P10 is controls that visibly move the
+ * results. So the block shows what the direction MEANS in dollars, which is the
+ * figure the Shortlist has printed as IMPLIED TARGET all along, and moving the
+ * direction moves it.
+ *
+ * NO SPOT IS UNKNOWN, NOT A TARGET OF ZERO. `Number(null)` is 0 and 0 is
+ * finite, for the eighth time in this repository.
+ */
+export function targetPriceOf(spot, direction) {
+  const S = Number(spot);
+  const move = Number(direction && direction.tgt);
+  if (!Number.isFinite(S) || S <= 0 || !Number.isFinite(move)) {
+    return { known: false, price: null, move: null, movePct: null };
+  }
+  return { known: true, price: S * (1 + move), move, movePct: move * 100 };
+}
+
+/** What the target price is, for a reader who asks where it came from. */
+export const targetPriceNote = (t, ticker) =>
+  (t && t.known
+    ? `The target price is the direction read as a number: ${ticker || "this market"} at ` +
+      `${t.movePct >= 0 ? "+" : ""}${t.movePct.toFixed(0)}% of today's price. It is what the direction MEANS, ` +
+      `not a second answer — the app builds from the direction and the board, so typing a price here would be a ` +
+      `control that changes nothing.`
+    : `There is no price loaded for this market, so the direction cannot be read as a target. A missing price is ` +
+      `unknown, never a target of zero.`);
+
+/** The slider's own label, with the number it is asking for in it. */
+export const chanceAskLabel = (request) =>
+  `CHANCE OF PROFIT, AT LEAST ${chanceText(request && request.minChance)}`;
+
+/**
+ * WHAT THE FIVE CONTROLS DO — AND WHAT THEY CANNOT DO.
+ *
+ * It folds, because a control that asks a question earns its words and a
+ * paragraph explaining the control does not (ROADMAP P10 §5).
+ */
+export const controlsFoldNote = (request) =>
+  `These decide which candidates are listed under "meets what you asked for" and how many combinations the ` +
+  `budget buys. They do NOT create a structure and they do NOT relax a single check: the quality floors still ` +
+  `remove what they remove and still say why, and ${money(MIN_NET_DOLLARS)} is still the least a price may be ` +
+  `before anything is judged at all. The chance is the one this app computes everywhere — ` +
+  `${RULES.mcRuns.toLocaleString("en-GB")} simulated paths, seeded from the trade, so the figure on a card and ` +
+  `the figure on the Build screen are the same number. Asking for a higher chance moves lower-paying trades to ` +
+  `the top and better-paying ones below the line; it does not make either of them safer. The one thing this ` +
+  `slider will never touch is the reward floor of ${RULES.minRewardRisk}: under that the app does not propose at ` +
+  `all, and a floor a user can switch off is not a floor.` +
+  (request && !request.amtAnswered
+    ? ` The amount above is the suggested per-trade limit, derived from your capital answers — not a figure you gave.`
+    : ``);
+
+/**
  * WHOSE NUMBER THE CONTRACT COUNT IS — one clause, beside the field.
  *
  * The size is derived from the budget everywhere until somebody types one, and
