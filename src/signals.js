@@ -17,6 +17,7 @@
 
 import { SEASONAL } from "./engine.js";
 import { RULES, liquidityLevel, butterflySkipNote } from "./rules.js";
+import { trendRead } from "./indicators.js";
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
@@ -348,19 +349,20 @@ export function newsComponent(ticker, newsItems, now = Date.now()) {
    Technical: SMA / RSI read
 ================================================================ */
 
-/** SMA20 / SMA50 / RSI14 read of a daily bar series. Null under 60 bars. */
-export function taRead(bars) {
-  if (!bars || bars.length < 60) return null;
-  const cl = bars.map((b) => b.close);
-  const sma = (n, i = cl.length - 1) => avg(cl.slice(i - n + 1, i + 1));
-  const s20 = sma(20), s50 = sma(50), s20p = sma(20, cl.length - 6), s50p = sma(50, cl.length - 6);
-  let g = 0, l = 0;
-  for (let i = cl.length - 14; i < cl.length; i++) { const d = cl[i] - cl[i - 1]; if (d > 0) g += d; else l -= d; }
-  const rsi = l === 0 ? 100 : 100 - 100 / (1 + g / l);
-  const trend = s20 > s50 && s20 > s20p ? 1 : s20 < s50 && s20 < s20p ? -1 : 0;
-  const cross = s20 > s50 && s20p <= s50p ? "golden" : s20 < s50 && s20p >= s50p ? "death" : null;
-  return { trend, rsi, s20, s50, cross, px: cl[cl.length - 1] };
-}
+/** SMA20 / SMA50 / RSI14 read of a daily bar series. Null under 60 bars.
+ *
+ *  >>> THE ARITHMETIC MOVED TO `src/indicators.js` AND DID NOT CHANGE. <<<
+ *  It was written inline here, and the price chart drew none of it — so the
+ *  moment the chart gained a moving average there would have been two SMA20s
+ *  in this app, which is the fault this repository has already fixed for the
+ *  chance of profit, the seasonal drift, the realised volatility and open
+ *  interest. `indicators.js` is the one home; this is the one caller that
+ *  SCORES what it reads.
+ *
+ *  `indicators.test.js` runs the body this function used to have against the
+ *  body it has now, over the same bars, and holds every field equal —
+ *  because a refactor that moves a number is two changes wearing one coat. */
+export const taRead = (bars) => trendRead(bars);
 
 export function technicalComponent(bars) {
   const ta = taRead(bars);

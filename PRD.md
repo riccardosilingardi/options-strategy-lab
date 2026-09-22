@@ -2591,6 +2591,248 @@ somebody being taught what a rule is for.
 
 ---
 
+## §4s — THE THREE DEBTS PR #33 LEFT, AND THE ORDER THAT DID NOT AGREE WITH ITS OWN MARKET
+
+The standing rule: a session starts with what the last one flagged. PR #33 flagged three
+things and each one is closed here.
+
+### 1. A RECORD WRITTEN BEFORE PR #33 CARRIES AN UNSIGNED LIMIT
+
+PR #33 made Alpaca's multi-leg `limit_price` SIGNED on the way out, and stored the broker's
+own echo of it on the position record as `alpacaLimit`. Everything written before that stored
+`Math.abs()` of it — the very `Math.abs()` that sent the XLE credit spread out as a debit.
+
+So ONE FIELD NOW HOLDS TWO DIFFERENT QUANTITIES depending on WHEN it was written, and nothing
+on the record said which. `fillVsLimit()` compares DIRECTIONS on it. `limitKind()` printed one
+in words. Both are completely confident, both are wrong on an older record, and **the record
+the owner has in front of him is exactly such a record**: J-0001, limit 0.75, fill −0.04.
+
+- **`commitPosition()` stamps `alpacaLimitSigned: true`** beside every limit it stores.
+  **THE ABSENCE OF THE STAMP IS THE MARKER**, for the SEVENTH time in this repository, after
+  `contractsAssumed`, `simExitDTE`, `seasonalSource`, `driftAnnual`, `entrySource` and the
+  `"sync"` holding.
+- **`storedLimitOf(pos)` in `journal.js` is the one way a stored limit is read back.** An
+  unstamped one gets `kind: null` and `words: null` — there is no word for a direction nobody
+  recorded — and a `note` that says so. Never read the field directly again.
+- **`fillVsLimit()` makes NO comparison on an unstamped limit.** Not on directions and not on
+  magnitudes either: read as signed, J-0001 is $79 better than the offer; read as a magnitude
+  written before the sign existed, it could be $71 worse. Two different answers, and the app
+  has no way to choose between them, so it says which fact is missing and stops.
+- **IT IS NOT A MIGRATION AND MUST NOT BECOME ONE.** The direction cannot be recovered: the
+  order is at the broker and the record never held the sign. Inferring it from the structure's
+  own net would be inventing the evidence, which is the fault §4q was.
+
+### 2. THE EXIT LADDER PRINTED A BARE MAGNITUDE
+
+PR #33 said every displayed limit says debit or credit. It missed the one place it matters
+most. `GuardianPanel`'s three exit-ladder buttons rendered
+`$${Math.abs(ladderNet(...)).toFixed(2)}` with no word anywhere on the button — **and those
+are the buttons the owner will use to close XLE J-0001, the first close this app has ever
+sent.**
+
+`signedLimitFor(structureNet, intent)` in `order.js` gives a screen the signed number an order
+of that intent would carry, built on `limitDirection()` so the rule that a close flips the
+sign stays spelled once. `ladderRungPrice()` in `pro.jsx` is the one spelling, and the
+arithmetic is unchanged: the magnitude is the same number it always was. A sweep in
+`order.test.js` fails the build on `Math.abs(ladderNet(` and on any displayed `Math.abs()` of
+an identifier named after a limit.
+
+### 3. THE BODY THAT LEAVES MUST AGREE IN SIGN WITH THE BOOK IT MEETS
+
+The check that would have caught J-0001 at the door. It went out as `limit_price: "0.75"` — a
+DEBIT — into a book quoting that bull put spread as a CREDIT. **An offer to pay, dropped into
+a market that is paying you, is marketable by the whole width of the structure**: it filled at
+once at four cents the other way.
+
+`limitAgainstBook({ limitPrice, book, intent, legCount })` in `rules.js` compares the sign of
+the price the body will carry against the sign of `comboBook()`'s mid, with the intent applied
+to both. It imports `limitDirection` from `order.js` — leaf-ward, exactly as `rules.js`
+imports `engine.js` — so the sign is still decided in one place.
+
+- **OPEN is a gate violation**, `LIMIT_AGAINST_BOOK`, **ENTRY ONLY**, like `UNPRICEABLE`,
+  `UNLISTED_CONTRACT` and `IMPOSSIBLE_LOSS`. It needs NO new evidence: `quotes` and `net` are
+  already carried by every open-intent gate call, and the gate spells the body's own price with
+  the same `mlegLimitPrice()` `orderBody()` uses, so it reads the order rather than a number
+  that resembles it.
+- **CLOSE is never in the gate.** Refusing a close strands somebody in a position they asked to
+  leave, which is the worse failure by a distance. It is refused beside the button in
+  `placeExit()`, in `closeGroup()` and in `approve.mjs`.
+- **FOUR UNKNOWNS SKIP, AND EACH NAMES ITSELF**: no limit (a market order has none), no book (a
+  leg without a two-sided quote means there is no book, never a book of zeros), a mid under
+  `MIN_NET_DOLLARS` (that is `priceability()`'s question and refusing on it twice would name the
+  wrong rule), and a single leg (whose own `side` carries the direction, so the body is
+  deliberately unsigned).
+
+---
+
+## §4t — ORDERS SPEAK ALPACA'S OWN CONTRACT
+
+**There is no official JavaScript SDK for multi-leg option orders.** Every field name, every
+enum value and every validator lived in four order paths and a serverless function as four
+separate acts of memory — and every fault this repository has had on an order body was that
+memory being wrong: the GCD 422, the unlisted symbol, and the sign on a credit limit.
+
+`src/alpacaContract.js` mirrors **alpaca-py**, the reference implementation, with the file each
+rule came from cited beside it: `OptionLegRequest`, `OrderRequest`, `MarketOrderRequest`,
+`LimitOrderRequest`, the enums `OrderSide` / `PositionIntent` / `TimeInForce` / `OrderClass` /
+`OrderType` / `OrderStatus`, and the root validators with their exact messages. No Python is
+vendored — the Python it mirrors is QUOTED, in comments, so the mirror can be checked — and no
+dependency was added.
+
+- **`orderBody()` BUILDS THROUGH IT.** The leg is `optionLegRequest()`, which decides `side` and
+  `position_intent` from ONE table so the two vocabularies cannot disagree, and the finished
+  body is held against `validateOrderRequest()` before it leaves. All six order paths pass
+  through that one function, which is the only reason one check is enough: **a body alpaca-py
+  would not build is refused with the rule named, instead of after a 422 round trip that names
+  it worse.**
+- **TWO RULES ARE NOT ALPACA-PY'S AND ARE MARKED AS THIS APP'S OWN**: a leg whose `side`
+  contradicts its own `position_intent` (alpaca-py accepts either field alone; this app sends
+  both, and a body where the two disagree is a body it built wrong), and the relatively-prime
+  ratio rule that Alpaca answered with **422 / 42210000** on 2026-09-04 and that alpaca-py does
+  not check at all.
+- **THE RESPONSE SHAPES ARE MIRRORED TOO.** `parseOrder()` and `parsePosition()` read what the
+  broker says, with `limit_price` and `filled_avg_price` keeping their SIGN, and `wireNumber()`
+  is the one place the nulls go out before the coercion — alpaca-py types those fields
+  `Optional[Union[str, float]]` because the wire sends strings, and `Number("")` is 0.
+  `order.js` reads its lifecycle lists off the mirrored `ORDER_STATUS`.
+
+### ALPACA'S OpenAPI SPEC CANNOT VALIDATE AN MLEG BODY
+
+It exists — `alpacahq/alpaca-docs`, `oas/trading/openapi.yaml`, the machine-readable
+description of `POST /v2/orders` — **and it predates multi-leg options entirely.** Read on 21
+September 2026, the whole document contains no `mleg`, no `ratio_qty`, no `position_intent` and
+no request schema for `legs` (its one `legs:` is a RESPONSE field, *"an array of Order entities
+associated with this order"*). Its `OrderClass` enum reads, in full:
+
+```yaml
+enum: [simple, bracket, oco, oto, '']
+```
+
+So there is nothing in the spec to hold an mleg body against, and the suite says that rather
+than implying a validation that did not happen. What the spec CAN still settle is the
+vocabulary the two order classes share — `OrderType`, `TimeInForce`, `OrderSide` — and those
+three are held against its own enums, quoted verbatim.
+
+**AND ALPACA'S DOCUMENTATION STATES THE SIGN CONVENTION IN ITS OWN WORDS**, which is a second
+and independent confirmation of §4q: *"For the mleg order class, a positive value indicates a
+debit (representing a cost or payment to be made) while a negative value signifies a credit
+(reflecting an amount to be received)."* The suite also runs Alpaca's own documented multi-leg
+example — the SPY long straddle — as a fixture, so the mirror is held against a body the broker
+published and not only against bodies this app wrote.
+
+---
+
+## §4u — THE CHART CARRIES THE INDICATORS, AND A COPILOT THAT READS THEM
+
+### 0. `PriceChart` WAS RENDERED BY NOTHING
+
+It has been exported from `pro.jsx` since the desk was built and mounted by no screen in the
+app. The candles, the volume, the support and resistance lines, the break-evens and the leg
+lines were all code nobody could see — and everything below would have been invisible with it.
+It is mounted in the **History evidence panel** now, which is the panel whose whole subject is
+what this market has done.
+
+### 1. `src/indicators.js` IS THE ONE HOME
+
+Pure functions over daily bars, importing nothing: SMA(20/50/200), EMA(9/21), Bollinger(20,2),
+RSI(14), MACD(12/26/9), ATR(14), and volume against its 20-day average. Every period is a named
+constant in `PERIODS` with its reasoning beside it.
+
+**They are deliberately NOT in `RULES`.** That file is the single source of the TRADING rules —
+what the app will and will not do with money — and a moving-average length decides nothing the
+app does. It decides what a line on a chart is.
+
+**`signals.js` READS ITS TREND FROM HERE AND ITS OUTPUTS DO NOT CHANGE.** The four-factor
+engine has carried an inline SMA20/SMA50 + RSI14 body since it was written, and the chart drew
+none of it — so the moment the chart gained a moving average there would have been two SMA20s
+in this app, and the score would have read the other one. That is the fault this repository has
+already fixed for the chance of profit (§4h), the seasonal drift (§4j), the realised volatility
+(§4k) and open interest (§4r.4). `indicators.test.js` reproduces the OLD body verbatim and
+holds every field equal over 200 readings across 40 seeded series, with all three trend values
+and a crossing exercised — **because a refactor that moves a number is two changes wearing one
+coat.**
+
+### 2. THE RSI IS NOT WILDER'S, AND THE FILE SAYS SO
+
+Wilder's original smooths the average gain and loss the way an exponential average does. This
+app has always used the SIMPLE mean of the last 14 changes — the variant usually attributed to
+Cutler — and moving the trend read into one file must not move the score.
+
+So the chart draws **THE SAME reading the score uses**, and this app has one RSI rather than
+two that look alike. The consequence is real and stated out loud in the file, in the copilot's
+context and on the NOT VERIFIED list: a charting package will print a slightly different number
+on the same bars. Switching is a measured decision nobody has made, and it is ROADMAP P8.
+
+### 3. UNKNOWN IS NOT A NUMBER, AND NO LINE IS DRAWN FROM ZERO
+
+Every series is the same length as its input with `null` wherever there were not enough bars. A
+200-day average on 120 bars is not a 120-day average and it is not zero: it is nothing. The
+chip for it cannot be switched on and says "not enough history"; the takeaway becomes the
+sentence naming how many bars are missing; the copilot's context lists it under
+`indicators_not_available`. `Number(null)` is 0 and 0 is finite — caught again here, in
+`volumeRead`, by this file's own test on the first run.
+
+### 4. THE CHART, LAID OUT FOR 390px
+
+- **Overlays on the price pane** (the averages and the band), because they are prices.
+- **RSI and MACD in their own small panes, COLLAPSED by default.** A 0-100 oscillator drawn
+  against a $20 stock is a flat line at the top of the screen, and a phone that opens with
+  three charts on it has taught nobody anything.
+- **A chip row, remembered per viewer** in `localStorage`, every read and write wrapped: that
+  store throws in a private window and the chart has to render correctly without it.
+- **A crosshair readout** that reads the same arrays the lines were drawn from — never
+  recomputed for the tooltip, which is how a tooltip comes to disagree with its own line. On a
+  phone there is no pointer, so it falls back to the last bar and says which it is.
+- **One generated `takeaway()` per indicator**, the visual contract in `CLAUDE.md`.
+- **The existing lines stay**: support, resistance, break-even, entry and the legs.
+- **The averages are computed from ALL the bars that loaded and only the tail is drawn.** A
+  200-day average taken from the 180 days on screen would be a 180-day average with the wrong
+  name on it — and at 90 days it would not exist at all while the data to form it sat in the
+  same reply.
+
+### 5. THE COPILOT UNDER THE CHART NEVER RECEIVES RAW BARS
+
+Four one-tap questions and a free box, directly under `PriceChart`, on the existing streaming
+path (`askAI` takes a system prompt now; no new endpoint and no new key).
+
+**THIS IS THE RULE THE PANEL EXISTS FOR, and it is a rule about arithmetic rather than tone.**
+A model handed 400 daily closes will compute a moving average, and the number it computes will
+not be the number drawn six inches above its answer. So it is handed `taContext()` from
+`indicators.js` and nothing else: the last values, the crossings with their dates, the bands,
+and — when a trade is loaded on Build — that structure's own legs and break-evens, REPEATED
+from `analyze()` and not recomputed. Every figure in it is one some part of the screen is also
+showing.
+
+`taCopilotPrompt()` lives in `rules.js`, because a generated prompt is a generated sentence and
+because the report's prompt INVENTED A POSITION once — the only reason that fault is testable
+today is that the sentence which caused it is in a file a test can read. It forbids producing
+any figure not in the context, requires every number to be quoted from it, says that a null
+field is UNKNOWN and never zero, and states the educational register: what the indicator
+MEASURES, what it is SAYING now, and what would make that read WRONG. The disclaimer appears
+once. It may not recommend a trade, a strike or an expiry.
+
+The state lives in `App.jsx` (an evidence panel owns no state), the answers render with the
+existing `Markdown`, and a cut-off answer is labelled cut off and is not filed in the Journal.
+
+### 6. AND THE DESK PROMPT RECOMMENDED WHAT THE APP REFUSES TO OFFER
+
+ROADMAP P3's first item, open since the guided path was built. `SYSTEM_PROMPT` in `pro.jsx`
+read *"strong bullish seasonal signal + uptrend → bull call spread (small capital) or LONG CALL
+(larger capital)"* and *"event ahead with low IV → long ATM STRADDLE/STRANGLE"*. Every one of
+those is a structure this app will not put in front of this user: a long call is a single-leg
+long option, which `runWizard` excludes and which `payoffCeiling()` gives no maximum profit and
+so no take-profit rung; a straddle and a strangle are two single-leg longs bought together, and
+a short strangle is an uncovered leg, forbidden outright.
+
+**A copilot that recommends a structure the screen beside it will not build is the app arguing
+with itself, and the part that argues in prose wins with a reader who is learning.** The trees
+are rewritten around what the app actually offers — debit verticals, credit verticals when the
+options are expensive against their own history, iron condors — with **RECOMMEND NOTHING** as a
+named branch, and the excluded structures listed with their reasons. The chart copilot does not
+inherit any of it: it has its own prompt and may not propose a trade at all.
+
+---
+
 ## 5. The wizard IS the app
 
 The wizard is not a feature inside the app. It is the entry point and the spine. Existing tabs remain reachable but are no longer the front door.
@@ -3527,6 +3769,55 @@ What is left:
 
 The standing rule in `CLAUDE.md`: every session starts by fixing what the last one flagged, and
 ends by writing down what it could not verify. Currently open:
+
+### WRITTEN THIS SESSION — the contract, the indicators and the chart copilot (§4s, §4t, §4u)
+
+`npm test` reports **864 checks across 21 suites**, up from the **818 across 19** a clean `main`
+measures (measured on an untouched `main` at the start of this session, and it matches what PR #33
+recorded). `npm run build` is clean. Two new suites: `alpacaContract.test.js` and
+`indicators.test.js`.
+
+- **NO ORDER CAN BE SENT FROM THIS SANDBOX. NINTH SESSION IN A ROW.** No broker keys, and the
+  egress proxy refuses the CONNECT. Everything about the order body below is checked against
+  alpaca-py's source, against Alpaca's own documentation, and against nothing that was actually
+  sent.
+- **THE ALPACA-PY RULES WERE READ FROM SOURCE ON GitHub, NOT FROM MEMORY** — `alpaca/trading/
+  requests.py`, `enums.py` and `models.py`, fetched on 21 September 2026. **What could NOT be
+  confirmed from source is `master`'s exact commit**: the files were fetched from the default
+  branch by URL, so a rule that changed in alpaca-py after that fetch is a rule this mirror does
+  not have. The mirror cites the file for every rule, which is what makes a re-read cheap.
+- **ALPACA'S OpenAPI SPEC WAS SEARCHED AND HAS NO MLEG AT ALL** (§4t). That is a fact about the
+  spec, read on the same day, and it means the mleg half of `orderBody()` is validated against
+  alpaca-py alone. If the spec ever gains `mleg`, the contract suite has a line that says to
+  validate against it instead of explaining why it cannot.
+- **`validateOrderRequest()` NOW THROWS FROM `orderBody()`, AND NO PATH HAS EVER THROWN LIVE.**
+  Every one of the six paths already renders `alpacaErrorText(e)` beside its own button, so the
+  failure mode is a sentence where a 422 used to be — but that is reasoning about the code, not
+  a reading of it.
+- **THE CLOSING DIRECTION IS STILL UNEXERCISED.** Nothing has ever been closed through this app,
+  in either spelling, and `limitAgainstBook()` on the close paths has therefore never run against
+  a live book. `closeGroup()`'s call SKIPS by construction — that path sends a market order and
+  has no quotes — and is wired anyway, which is stated in the code rather than left to be
+  discovered.
+- **THE UNSTAMPED-LIMIT PATH IS THE ONE THE OWNER WILL SEE FIRST.** J-0001 predates the stamp, so
+  the Positions card will say the direction was not recorded rather than comparing the fill. That
+  is correct and it will look like a regression against PR #33's screenshot.
+- **THE RSI IS CUTLER'S, NOT WILDER'S** (§4u.2). It is the reading `signals.js` has always
+  scored, and the chart now draws the same one, so the app is internally consistent — but a
+  reader comparing it against TradingView will find a different number. The size of that
+  difference has NOT been measured. ROADMAP P8.
+- **NO INDICATOR HAS BEEN SEEN AGAINST A REAL CHART.** The arithmetic is held against direct
+  recomputation on 500-bar series and against the old inline body, all seeded and deterministic.
+  Whether the SMA line on this chart lands where the SMA line on a charting package lands has not
+  been read, because `/api/bars` needs the broker keys this sandbox does not have.
+- **THE CHART COPILOT HAS NEVER RUN.** No Anthropic key here either. The prompt, the context
+  builder and the panel are tested; not one answer has been generated, so whether the model
+  actually stays inside the context is unverified. The prompt forbids it, the context is the only
+  thing sent, and neither of those is a measurement.
+- **`PriceChart` HAS NEVER BEEN RENDERED BY ANYBODY, EVER** — that is the point of §4u.0 — so its
+  new mount, the two collapsed panes, the chip row and the crosshair have been read in code and in
+  a passing build, and on no screen.
+- **NOBODY HAS SEEN ANY OF IT ON A PHONE.** Ninth pull request in a row, and this one is a chart.
 
 ### WRITTEN THIS SESSION — the sign on a credit order, and the fill (§4q, §4r)
 

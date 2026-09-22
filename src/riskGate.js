@@ -17,7 +17,7 @@
 // ============================================================================
 
 import { RULES, sizing, money, pctText, capitalSourceNote, priceability, impossibleLoss, MIN_NET_DOLLARS,
-  contractListing,
+  contractListing, comboBook, limitAgainstBook,
   entryRoom, entryInsideExitNote, entryRoomWarning, entryRoomOverrideAsk, entryOverrideOk } from "./rules.js";
 // HOW MANY COMBINATIONS A POSITION IS, read from ONE place (src/journal.js).
 // This file used to spell `Math.max(1, Number(p?.contracts) || 1)` in three
@@ -26,6 +26,11 @@ import { RULES, sizing, money, pctText, capitalSourceNote, priceability, impossi
 // the 25% exposure ceiling was measuring a fraction of the book. `positionSize`
 // also says whether the 1 it returned is the record's or its own.
 import { positionSize } from "./journal.js";
+// THE PRICE THE BODY WILL ACTUALLY CARRY. The gate checks the number that
+// leaves, not a number beside it, so it spells the body's own limit with the
+// same function `orderBody()` uses — `order.js` imports nothing, so this is
+// leaf-ward like every other import here.
+import { mlegLimitPrice, reduceRatios } from "./order.js";
 
 /* ============================== helpers ============================== */
 
@@ -244,6 +249,40 @@ export function evaluateTrade({ proposal, portfolio, capital, signals } = {}) {
     if (cl.checked && !cl.listed) {
       violations.push(V("UNLISTED_CONTRACT", `${cl.reasons[0]} Nothing is sent.`));
     }
+  }
+
+  /* ---- 3bc. AND THE PRICE HAS TO POINT THE SAME WAY AS THE MARKET ----
+     >>> THE ONE CHECK THAT WOULD HAVE CAUGHT THE XLE ORDER AT THE DOOR. <<<
+     J-0001 left as `limit_price: "0.75"` — a DEBIT, "pay up to 75 cents" —
+     against a book quoting that bull put spread as a CREDIT. An offer to pay,
+     dropped into a market that is paying you, is marketable by the whole width
+     of the structure: it filled at once at four cents the other way, $4
+     received against $75 intended and a maximum loss of $346 instead of $275.
+
+     `limitAgainstBook()` in rules.js is the one implementation. It compares
+     the SIGN of the price this body will carry — built here with the same
+     `mlegLimitPrice()` `orderBody()` uses, so the gate is reading the order
+     and not a number that merely resembles it — against the sign of
+     `comboBook()`'s mid, with the intent applied to both.
+
+     ENTRY ONLY, like UNPRICEABLE, UNLISTED_CONTRACT and IMPOSSIBLE_LOSS, and
+     for the same reason each of those is: a closing order that cannot be sent
+     leaves somebody in a position they asked to leave. The close path refuses
+     this beside its own button instead — `placeExit()` and `closeGroup()` in
+     pro.jsx and `approve.mjs` — where the person tapping can read why.
+
+     IT NEEDS NO NEW EVIDENCE. `quotes` and `net` are already carried by every
+     open-intent gate call, and a sweep in riskGate.test.js fails the build if
+     one leaves them out. A caller with neither is simply not checked, and
+     `limitAgainstBook()` says which unknown stopped it. */
+  if (isOpen && legs.length > 1 && isNum(p.net)) {
+    const lb = limitAgainstBook({
+      limitPrice: mlegLimitPrice(Number(p.net), reduceRatios(legs).factor, intent),
+      book: comboBook(legs, Array.isArray(p.quotes) ? p.quotes : []),
+      intent,
+      legCount: legs.length,
+    });
+    if (lb.checked && !lb.ok) violations.push(V("LIMIT_AGAINST_BOOK", lb.sentence));
   }
 
   /* ---- 3c. A WORST CASE THAT IS A PROFIT IS AN ARBITRAGE ----

@@ -8,7 +8,7 @@ import {
   FlaskConical, Briefcase, Plus, Plug, Send, ExternalLink, MessageSquare, FileText, Bell,
   SlidersHorizontal, ArrowLeft, Sun, Moon, AlertTriangle, WifiOff,
 } from "lucide-react";
-import { fetchAllNews, fetchWeather, ImpactTags, CopilotTab, ReportTab, OrderTicket, AlpacaDesk, scaleStrategy, buildContext, GuardianPanel, ChainMatrix, OptionPanel, UnifiedView, taSignals, confluence, WhyThisTrade, Markdown, alpacaReq } from "./pro.jsx";
+import { fetchAllNews, fetchWeather, ImpactTags, CopilotTab, TaCopilot, ReportTab, OrderTicket, AlpacaDesk, scaleStrategy, buildContext, GuardianPanel, ChainMatrix, OptionPanel, PriceChart, UnifiedView, taSignals, confluence, WhyThisTrade, Markdown, alpacaReq } from "./pro.jsx";
 import { BandThumbnail, payoffBands, bandTakeaway, GaugeFigure, Gauge, CompareFigure, exitPlanSentence,
   OpenInterestStrip, oiStripTakeaway, oiCutAt, oiGhostCut, explainOiStrip, useWidth } from "./visuals.jsx";
 import { fuseSignals, sentimentDirection, withSignalRank, compareCandidates, againstSignal, DRIVER_PRESETS, rankByDrivers, verdictNarrative } from "./signals.js";
@@ -40,12 +40,13 @@ import { evaluateTrade, gateSummary } from "./riskGate.js";
 import { DEMO, DEMO_BANNER, DEMO_TOOLTIP, DEMO_SEED_TICKERS, demoPositions } from "./demo.js";
 import { CapitalOnboarding, WizardOpen, FindOpportunities, WizardCandidates, ConfirmSteps, NothingToday, Card, Pill } from "./wizard.jsx";
 import { buildHandOff, buildScreenState, BUILD_TAB } from "./handoff.js";
-import { orderBody, orderOutcome, alpacaErrorText, reduceRatios, limitWords, limitKind, fillPriceOf } from "./order.js";
+import { orderBody, orderOutcome, alpacaErrorText, reduceRatios, limitWords, fillPriceOf } from "./order.js";
 // THE PERMANENT RECORD: the ref a position is given at open, the sequence on
 // every timeline entry, the close reason, and what survives into the Journal.
 import { nextRef, refCounter, appendTimeline, stampTimeline, orderStatusRecheck, closeDecision,
   autopilotHorizonNote, autopilotVolNote,
   positionSize, positionSizeNote, contractsOf, withPositionSize, fillVsLimit, orderReconciliation,
+  storedLimitOf,
   positionStage, positionStageNote, bookPositions, wouldHaveDone, isBrokerHolding,
   journalEntry, searchJournal, CLOSE_REASON_MIN, refNumber } from "./journal.js";
 import { FIRST_STEP, stepCarry, candidateOf, candidateKey, legsLine, toggleCompare, inCompare, MAX_COMPARE, savedFromCandidate, candidateFromSaved, savedAge } from "./path.js";
@@ -1350,6 +1351,14 @@ export default function OptionsStrategyLab() {
   // inside it was destroyed on the next tap and an answer that landed while it
   // was shut never reached the screen at all.
   const [copilot, setCopilot] = useState({ msgs: [], busy: false, err: null, partial: "" });
+  /* AND SO DOES THE TECHNICAL COPILOT'S, for the same reason, and its BARS
+     with it. `PriceChart` fetches the daily history once per ticker and hands
+     it up here; the copilot under it reads the SAME bars rather than fetching
+     a second copy — one fetch, one history, one set of indicators, which is
+     the whole reason `indicators.js` exists. */
+  const [taChat, setTaChat] = useState({ msgs: [], busy: false, err: null, partial: "" });
+  const [taBars, setTaBars] = useState(null);
+  useEffect(() => { setTaBars(null); setTaChat({ msgs: [], busy: false, err: null, partial: "" }); }, [ticker]);
   const [optMode, setOptMode] = useState("budget");
   // NOT a hardcoded 500. The field starts at the per-trade limit the capital
   // model derives and only holds a number of its own once the user types one,
@@ -2386,6 +2395,16 @@ export default function OptionsStrategyLab() {
          debit, negative a credit, exactly as Alpaca prints it (src/order.js). */
       alpacaLimit: alpacaOrder?.limit_price != null && Number.isFinite(+alpacaOrder.limit_price)
         ? +alpacaOrder.limit_price : null,
+      /* AND THE RECORD SAYS THAT THE NUMBER ABOVE CARRIES A SIGN. Everything
+         written before PR #33 stored `Math.abs()` of it, so one field holds two
+         different quantities depending on WHEN it was written and nothing said
+         which. The ABSENCE of this stamp is the marker, the seventh time this
+         repository uses that pattern: `storedLimitOf()` in journal.js reads it
+         back, and an unstamped limit gets no direction word and no comparison
+         against the fill. It is never inferred — the direction is at the
+         broker, not in the record. */
+      alpacaLimitSigned: alpacaOrder?.limit_price != null && Number.isFinite(+alpacaOrder.limit_price)
+        ? true : null,
       alpacaTif: alpacaOrder?.time_in_force ?? null,
       alpacaSentAt: alpacaOrder ? Date.now() : null,
       entryRoomOverride: entryOverrideOk(roomOverride) && entryRoom(d).band === "tight"
@@ -3936,7 +3955,9 @@ export default function OptionsStrategyLab() {
                   <span style={{ width: 7, height: 7, borderRadius: 4, background: T.amber, flexShrink: 0 }} />
                   <span style={{ ...mono, fontSize: 11.5, color: T.ink, fontWeight: 700 }}>{p.ref ? `${p.ref} ` : ""}{p.ticker} {p.name}</span>
                   <span style={{ ...mono, fontSize: 10.5, color: T.mut }}>
-                    · sent, nothing bought{limitKind(p.alpacaLimit) ? ` · a ${limitKind(p.alpacaLimit)} limit of ${money(Math.abs(p.alpacaLimit) * 100)}` : ""} →
+                    · sent, nothing bought{(() => { const sl = storedLimitOf(p);
+                      return sl.has ? (sl.signed ? ` · a ${sl.kind} limit of ${money(sl.magnitude * 100)}`
+                        : ` · a limit of ${money(sl.magnitude * 100)}, direction not recorded`) : ""; })()} →
                   </span>
                 </button>
               ))}
@@ -4073,7 +4094,32 @@ export default function OptionsStrategyLab() {
             )}
             {ev === "history" && spot && (
             <div style={{ marginTop: 12 }}>
+              {/* THE PRICE CHART, WHICH NOTHING HAS EVER RENDERED.
+                  `PriceChart` has been exported from pro.jsx since the desk
+                  was built and mounted by no screen in the app: the candles,
+                  the support and resistance lines, the break-evens and the leg
+                  lines were all code nobody could see. This is where price
+                  history belongs — the panel whose whole subject is what this
+                  market has done — and it carries the indicators now.
+                  The break-evens and the legs are the ones on the Build screen
+                  above, so the chart is about THIS trade, not about the
+                  ticker in the abstract. */}
               <Panel>
+                <PriceChart ticker={ticker} levels={lv}
+                  breakevens={legs.length && AE ? AE.breakevens : []}
+                  legLines={legs.map((l) => ({ price: l.strike, side: l.side,
+                    label: `${l.side > 0 ? "+" : "\u2212"}${l.qty} ${l.strike}${l.type === "call" ? "C" : "P"}` }))}
+                  onBars={setTaBars} />
+                {/* THE TECHNICAL COPILOT SITS DIRECTLY UNDER THE CHART IT IS
+                    ABOUT, and its conversation lives in App.jsx — an evidence
+                    panel owns no state, or an answer that lands while the
+                    sheet is shut never reaches the screen. */}
+                <TaCopilot ticker={ticker} bars={taBars} convo={taChat} setConvo={setTaChat}
+                  onAnalysis={logAnalysis}
+                  structure={legs.length && AE ? { name: stratName, expKey, dte,
+                    legs, breakevens: AE.breakevens, entry: AE.entry, maxLoss: AE.maxLoss, spot } : null} />
+              </Panel>
+              <Panel style={{ marginTop: 10 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
                   <Lbl>SEASONALITY · {seasonal[ticker] ? seas.src : seasProv.missing ? "NOT LOADED — NO READING AT ALL" : "ESTIMATE — LOAD THE REAL HISTORY"}</Lbl>
                   <Btn small ghost color={T.blue} onClick={loadSeasonal} disabled={busy === "av"}>
@@ -5694,8 +5740,10 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                               type rendered as a literal question mark, which is
                               failure class 1: a field nobody recorded, drawn as
                               if it were a value. */}
-                          {p.alpacaOrderType === "limit" && limitKind(p.alpacaLimit)
-                            ? `A ${limitKind(p.alpacaLimit)} limit of ${money(Math.abs(p.alpacaLimit) * 100)} a combination, which ${stands}.`
+                          {p.alpacaOrderType === "limit" && storedLimitOf(p).has
+                            ? (storedLimitOf(p).signed
+                              ? `A ${storedLimitOf(p).kind} limit of ${money(storedLimitOf(p).magnitude * 100)} a combination, which ${stands}.`
+                              : `${storedLimitOf(p).note} It ${stands}.`)
                             : p.alpacaOrderType
                               ? `A ${p.alpacaOrderType} order, which ${stands}.`
                               : `An order whose type was not recorded, which ${stands}.`}
@@ -5810,7 +5858,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                         <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 5, lineHeight: 1.6 }}>
                           {fillVsLimit({ limit: p.alpacaLimit,
                             fill: p.alpacaFillPrice != null ? p.alpacaFillPrice : p.entryNet,
-                            contracts: size.contracts }).sentence}
+                            contracts: size.contracts, limitSigned: p.alpacaLimitSigned === true }).sentence}
                         </div>
                       )}
                       {/* CLOSING ASKS WHY, AND THE ANSWER IS KEPT.

@@ -762,6 +762,100 @@ screen still never waits** — that rule was always about the screen, never abou
 a liquidity floor — and a caller about to JUDGE open interest awaits it. **Unknown is still
 SKIPPED, never rejected**, and a real `0` is still a real reading.
 
+## AN UNSTAMPED LIMIT IS SIGN UNKNOWN — and the body must agree with its own book
+
+PRD §4s. Three things PR #33 left open, and all three are about the SIGN on a price.
+
+- **`alpacaLimitSigned` — the SEVENTH use of "the absence of the stamp is the marker."** One field
+  held two quantities depending on WHEN it was written: a signed limit since PR #33, `Math.abs()`
+  of one before it. `storedLimitOf(pos)` in `journal.js` is the ONE way `alpacaLimit` is read back
+  — never read the field directly — and an unstamped one gets NO direction word and NO comparison
+  at all. Not on directions and not on magnitudes: J-0001 is $79 better read as signed and $71
+  worse read as a magnitude, and the app cannot choose. **It is not a migration**: the direction is
+  at the broker and inferring it from the structure's own net would be inventing the evidence.
+- **`signedLimitFor(net, intent)` in `order.js` / `ladderRungPrice()` in `pro.jsx`.** The exit
+  ladder's three buttons printed `Math.abs(ladderNet(...))` with no word — the buttons the owner
+  will use for the first close this app ever sends. A component may never write `-net`: the rule
+  that a close flips the sign lives in `limitDirection()`.
+- **`limitAgainstBook()` in `rules.js` — the check that would have caught J-0001 at the door.** The
+  sign of the body's own `limit_price` against the sign of `comboBook()`'s mid, intent applied to
+  both. **OPEN is a gate violation** (`LIMIT_AGAINST_BOOK`, entry-only, needing no new evidence —
+  `quotes` and `net` are already carried, and the gate spells the body's price with the same
+  `mlegLimitPrice()` `orderBody()` uses). **CLOSE is never in the gate** — refusing a close strands
+  somebody in a position they asked to leave — and is refused beside the button in `placeExit()`,
+  `closeGroup()` and `approve.mjs`. Four unknowns SKIP and each names itself: no limit, no book, a
+  mid under `MIN_NET_DOLLARS`, a single leg. `rules.js` imports `limitDirection` from `order.js`,
+  leaf-ward like its `engine.js` import, so the sign is still spelled once.
+
+## ORDERS SPEAK ALPACA'S OWN CONTRACT — `src/alpacaContract.js`
+
+PRD §4t. **There is no official JavaScript SDK for multi-leg option orders**, so every field name,
+enum and validator lived in four order paths and a serverless function as four acts of memory —
+and every order-body fault this repository has had was that memory being wrong. The file mirrors
+**alpaca-py**, with the source file cited for each rule. No Python vendored (the Python it mirrors
+is QUOTED, in comments, so the mirror can be checked), no dependency added, no key anywhere near it.
+
+- **`orderBody()` BUILDS THROUGH IT** and all six order paths go through `orderBody()`, which is
+  the only reason one check is enough. The leg is `optionLegRequest()`, which decides `side` and
+  `position_intent` from ONE table so the two vocabularies cannot disagree; the finished body is
+  held against `validateOrderRequest()` and **a body alpaca-py would not build is refused with the
+  rule named, rather than after a 422 that names it worse.**
+- **TWO RULES ARE MARKED AS THIS APP'S OWN**, because a rule nobody can attribute is a rule nobody
+  can check: a leg whose `side` contradicts its `position_intent`, and the relatively-prime ratio
+  rule Alpaca answered with 422 / 42210000 and alpaca-py does not check.
+- **THE RESPONSE SHAPES ARE MIRRORED TOO.** `parseOrder()`, `parsePosition()` and `wireNumber()` —
+  the one place the nulls go out before the coercion, because alpaca-py types those fields
+  `Optional[Union[str, float]]` and `Number("")` is 0. `order.js` reads its lifecycle lists off the
+  mirrored `ORDER_STATUS`.
+- **ALPACA'S PUBLISHED OpenAPI SPEC PREDATES MULTI-LEG OPTIONS ENTIRELY** — no `mleg`, no
+  `ratio_qty`, no `position_intent`, and `OrderClass` is `[simple, bracket, oco, oto, '']`. The
+  suite says so rather than implying a check that did not happen, holds the three enums the spec
+  DOES carry, and runs Alpaca's own documented SPY straddle as a fixture.
+
+## THE INDICATORS HAVE ONE HOME — `src/indicators.js`
+
+PRD §4u. Pure functions over daily bars, **importing nothing**: SMA(20/50/200), EMA(9/21),
+Bollinger(20,2), RSI(14), MACD(12/26/9), ATR(14) and volume against its 20-day average. Every
+period is a named constant in `PERIODS` with its reasoning, and every period a sentence quotes is
+read FROM `PERIODS` — never typed twice.
+
+- **THEY ARE DELIBERATELY NOT IN `RULES`.** That file is the single source of the TRADING rules —
+  what the app will and will not do with money — and a moving-average length decides nothing the
+  app does.
+- **`signals.js` READS ITS TREND FROM HERE AND ITS OUTPUTS DID NOT CHANGE.** `indicators.test.js`
+  reproduces the old inline body verbatim and holds every field equal over 200 readings on 40
+  seeded series. A refactor that moves a number is two changes wearing one coat.
+- **THE RSI IS CUTLER'S, NOT WILDER'S, AND THE FILE SAYS SO.** The chart draws THE SAME number the
+  four-factor score reads rather than a second one that looks alike. A charting package prints
+  differently; switching is ROADMAP P8 and is measured first.
+- **UNKNOWN IS NOT A NUMBER**: every series is null where there were not enough bars, the chip says
+  "not enough history" and cannot be switched on, the takeaway becomes the sentence naming how many
+  bars are missing, and **no line is ever drawn from zero**.
+- **`PriceChart` WAS RENDERED BY NOTHING** until PR #34 — exported from `pro.jsx` and mounted by no
+  screen. It is in the History evidence panel now. The averages are computed from ALL the bars that
+  loaded and only the tail is drawn: a 200-day average taken from the 180 days on screen would be a
+  180-day average with the wrong name on it.
+
+## THE CHART COPILOT NEVER RECEIVES RAW BARS — `taContext()`
+
+PRD §4u.5. A model handed 400 daily closes computes a moving average, and the number it computes is
+not the number drawn six inches above its answer.
+
+- **`taContext(bars, structure)` in `indicators.js` is the ONLY source.** The last values, the
+  crossings with their dates, the bands, and the loaded trade's own legs and break-evens REPEATED
+  from `analyze()`. Every figure in it is one some part of the screen is also showing.
+- **`taCopilotPrompt()` / `TA_QUESTIONS` / `TA_DISCLAIMER` live in `rules.js`**, because a generated
+  prompt is a generated sentence — the same reason `reportNarrativePrompt()` does, and the only
+  reason the position that prompt once invented is testable at all.
+- **`askAI()` takes a system prompt.** ONE streaming path, two prompts: a second `askAI` would be a
+  second place the `message_stop` flush, the `max_tokens` check and the gateway-page sentence have
+  to be got right, and every one of those was a fault before it was a rule.
+- **The state lives in `App.jsx`** (`taChat`, `taBars`) — an evidence panel owns no state — and
+  `PriceChart` hands its bars up through `onBars`, so there is ONE fetch and one history.
+- **The desk `SYSTEM_PROMPT`'s decision trees recommended a long call and a long straddle**, both
+  of which `runWizard` excludes. They are rewritten around what the app offers, with RECOMMEND
+  NOTHING as a branch; the chart copilot does not inherit them and may not propose a trade at all.
+
 ## THE GUIDED PATH DOES NOT OFFER A BUTTERFLY — and it is a SHAPE, not a name
 
 `isButterfly()` / `butterflySkipNote()` in `rules.js`, ROADMAP P2's decision implemented. A
@@ -1159,7 +1253,11 @@ while the position is open.
   `modelDisagreementRatio` with `modelSanity()` (is it THIS structure's price —
   one of the two reasons this file imports `engine.js`, the other being
   `chanceOf()`, and deliberately so),
-  `openLimitSlippage` with `openLimitPrice()`, and what the ticket prints:
+  `openLimitSlippage` with `openLimitPrice()`, `limitAgainstBook()` (does the body
+  point the same way as the book it will meet — the one reason this file imports
+  `order.js`), `taCopilotPrompt()` / `TA_QUESTIONS` / `TA_DISCLAIMER` (the chart
+  copilot's prompt, beside `copilotRulesBlock()` because a generated prompt is a
+  generated sentence), and what the ticket prints:
   `comboBook()`, `limitPlacement()`, `notionalControlled()`, `effectiveLimit()` /
   `limitCeilingNote()` (a limit is a CEILING, not a price), `orderVerdict()` with
   `ORDER_VERDICTS` (where the price falls AND what the time in force does to it),
@@ -1211,12 +1309,31 @@ while the position is open.
   **`bookPositions()` lives here too** — which records are the BOOK (owned + working, never
   not-taken) is a fact about the records, and it is the one home every consumer that measures
   money or writes a brief reads.
+  **`storedLimitOf()` lives here too** — whether a stored `alpacaLimit` carries the broker's SIGN
+  is a fact about the record, and the absence of `alpacaLimitSigned` is the marker. It is the only
+  way that field may be read.
   **`isBrokerHolding()`, `fillVsLimit()` and `orderReconciliation()` live here too** — whether
   a record is a HOLDING read off `/v2/positions` rather than an order (and so `owned` with
   nothing to wait for), what the broker gave against what the app asked for, and why the app's
   order count and the broker's differ. All three are facts about the records.
   **`closePos()` used to keep four fields** — ticker, pnl, ruleExit, riskOk — and drop the
   timeline, the thesis, both order ids and the reason. Never build a closed entry by hand.
+- `src/alpacaContract.js` — **the broker's own contract, mirrored from alpaca-py**, because
+  there is no official JavaScript SDK for multi-leg option orders. The enums
+  (`ORDER_SIDE`, `POSITION_INTENT`, `TIME_IN_FORCE`, `ORDER_CLASS`, `ORDER_TYPE`,
+  `ORDER_STATUS`), `optionLegRequest()` / `validateLeg()` / `positionIntentFor()`,
+  `validateOrderRequest()` with alpaca-py's own messages, and the response readers
+  `parseOrder()` / `parsePosition()` / `wireNumber()`. Every rule cites the alpaca-py
+  file it came from, and the two that are NOT alpaca-py's say so. It imports nothing;
+  `order.js` imports it and builds every body through it. Never write a field name, an
+  enum value or a leg-count limit anywhere else.
+- `src/indicators.js` — **the one home for every indicator**, pure, importing nothing:
+  `PERIODS` with each period's reasoning, `sma()` / `ema()` / `bollinger()` / `rsi()` /
+  `macd()` / `atr()` / `volumeRead()`, `crossings()`, `indicatorSet()` (the whole
+  reading in one pass), `takeaway()` (one generated sentence each), `trendRead()` —
+  which `signals.js` scores and which must never move — and `taContext()`, the ONLY
+  thing the chart copilot is given. Unknown is null everywhere and no line is drawn
+  from zero. Never compute a moving average, an RSI or a MACD anywhere else.
 - `src/order.js` — **what is actually sent, and what came back.** Plain JS, no React,
   for the same reason `rules.js` and `handoff.js` are: `orderBody()` (the one Alpaca
   body builder, used by all five sites that construct one), `reduceRatios()` /
@@ -1386,7 +1503,9 @@ while the position is open.
   **Spot has ONE home** — `spotOf(chain)` in `chain.js`, with `spotAt()` for its age. Any
   other endpoint returning an underlying price is reporting its own reading for its own
   purpose and is never the price on screen.
-- `src/signals.js` — the 4-factor confluence engine (`fuseSignals`), which
+- `src/signals.js` — the 4-factor confluence engine (`fuseSignals`), which reads its
+  trend from `indicators.js` (`taRead` is `trendRead`, and its outputs are held
+  unchanged by a before/after test), which
   factors apply to which market (`weatherApplies()` / `weatherNaReason()` /
   `factorsOf()` — weather does not apply to a metal, and that is not a quiet
   zero), and the
