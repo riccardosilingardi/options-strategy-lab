@@ -37,7 +37,8 @@ import { RULES, sizing, ruleBadge, takeProfitLabel, stopLossLabel, perTradeCapLa
   chancePct, chanceText, chanceInTen, signedMoney,
   ruleExitOf, stopWarningSentence, watchAttentionLevel,
   chanceOf, chanceSourceNote, seasonalProvenance, seasonalStampNote, seasonalStampFields, chanceDrawFields,
-  sigmaProvenance, isButterfly } from "./rules.js";
+  sigmaProvenance, isButterfly,
+  requestOf, requestAmountLabel, requestAmountOwner, contractsSourceNote } from "./rules.js";
 import { isStale, freshnessNote, staleAmong } from "./freshness.js";
 import { evaluateTrade, gateSummary } from "./riskGate.js";
 import { DEMO, DEMO_BANNER, DEMO_TOOLTIP, DEMO_SEED_TICKERS, demoPositions } from "./demo.js";
@@ -1370,23 +1371,30 @@ export default function OptionsStrategyLab() {
      It is a piece of Build-screen state like `legs` and `dte`, so it lives with
      them, above the ticket, the confirm step, the gate preview and the position
      that gets written. The ticket is now a controlled input on it. */
-  const [contracts, setContracts] = useState(1);
-  /* Changing the market or the expiry resets the size: "×7" typed against a
-     butterfly is not an answer about the vertical that replaced it, and an
-     order sized for a trade that is no longer on screen is the failure this
-     whole item is about.
+  /* >>> AND IT IS DERIVED FROM THE BUDGET UNLESS SOMEBODY TYPES ONE (P10 §2).
+     <<< The state here is the OVERRIDE, not the size: `contractsTyped` is null
+     until the user sets a quantity by hand, and `contracts` below is read off
+     the request the same way the Shortlist reads it. The owner's "pt. 1" was
+     that what the budget decides has to be the count the Shortlist shows, Build
+     loads and the ticket sends; a size that reset to 1 on the way to Build was
+     a budget answered once and thrown away three screens later. */
+  const [contractsTyped, setContractsTyped] = useState(null);
+  /* Changing the market or the expiry RE-DERIVES the size from the budget; it
+     does not forget it. "×7" typed against a butterfly is not an answer about
+     the vertical that replaced it — so the typed override is dropped — but the
+     budget is an answer about the USER, not about the structure, and it
+     survives.
 
      THE REF IS NOT DECORATION. `openOnBuild()` sets the ticker, the expiry AND
      the size in one go, and a re-price hands back the size the order was sent
      at. Without this guard the effect would fire on the ticker it just set and
-     put the size back to 1 — quietly shrinking an order the user had already
-     sized, which is the same class of fault as the hardcoded 1 this replaces. */
+     drop an override the user had already made. */
   const sizedFor = useRef(null);
   useEffect(() => {
     const key = `${ticker}|${expKey}`;
     if (sizedFor.current === key) return;
     sizedFor.current = key;
-    setContracts(1);
+    setContractsTyped(null);
     // ...and the PRICE with it, for the same reason: a per-leg limit typed
     // against a butterfly is not an answer about the vertical that replaced it.
     setTicket((t) => ({ ...t, legPx: null }));
@@ -1404,13 +1412,15 @@ export default function OptionsStrategyLab() {
   const [taChat, setTaChat] = useState({ msgs: [], busy: false, err: null, partial: "" });
   const [taBars, setTaBars] = useState(null);
   useEffect(() => { setTaBars(null); setTaChat({ msgs: [], busy: false, err: null, partial: "" }); }, [ticker]);
-  const [optMode, setOptMode] = useState("budget");
-  // NOT a hardcoded 500. The field starts at the per-trade limit the capital
-  // model derives and only holds a number of its own once the user types one,
-  // so the Build screen and the wizard are incapable of disagreeing about how
-  // much this user may risk.
-  const [optAmtTyped, setOptAmt] = useState(null);
-  const optAmt = optAmtTyped == null ? Math.round(limits.perTradeLimit) : optAmtTyped;
+  /* >>> ONE STATE FOR "WHAT I WANT", ABOVE BOTH DOORS (ROADMAP P10 §2). <<<
+     `optMode` / `optAmt` lived here and the guided run had its own `wiz.risk`:
+     two homes for one answer, which is the shape CLAUDE.md's standing rule is
+     about. There is one now. Every field is NULL until answered — the amount
+     falls back to `limits.perTradeLimit`, DERIVED and never typed, and
+     `request.amtAnswered` is how every screen knows to call it a suggestion
+     rather than quoting a figure the user never chose back at them. */
+  const [want, setWant] = useState({ mode: "budget", amt: null, minChance: null });
+  const request = useMemo(() => requestOf(want, limits), [want, limits]);
   const [autoMon, setAutoMon] = useState(true);
   // THE CLOSE ASKS WHY. `{ id, written, err }` while a close is being written.
   const [closing, setClosing] = useState(null);
@@ -1454,9 +1464,23 @@ export default function OptionsStrategyLab() {
   // DO have a starting position, because "all five markets, evenly weighted" is
   // a visible state the user can see and change, not an invented answer.
   const [wiz, setWiz] = useState({
-    basket: BASKET, risk: null, horizon: null,
+    basket: BASKET, horizon: null,
     weights: { ...DRIVER_PRESETS.balanced }, priority: "balanced", busy: false, err: null,
   });
+  /* >>> `risk` IS NOT IN `wiz` ANY MORE, AND THAT IS THE POINT (P10 §2). <<<
+     The guided run's budget and the desk's budget were two states holding one
+     answer. `want.amt` is the one home; this is the wizard's READING of it, and
+     it stays NULL until the user answers — `request.amt` carries the derived
+     suggestion for screens that must print something, and this carries the
+     ANSWER, which is what the wizard may quote back and what its button waits
+     for. `setWizAnswers()` splits a write to `risk` back to that one home. */
+  const wizAnswers = useMemo(
+    () => ({ ...wiz, risk: request.amtAnswered ? request.amt : null }), [wiz, request]);
+  const setWizAnswers = useCallback((next) => {
+    const { risk, ...rest } = next || {};
+    setWant((w) => (risk === w.amt ? w : { ...w, amt: risk == null ? null : risk }));
+    setWiz((w) => ({ ...w, ...rest }));
+  }, []);
   const [optRef, setOptRef] = useState(null); // price snapshot from the Shortlist, to reconcile against the Build screen
   const [weather, setWeather] = useState(null);  // regionId -> forecast 14g (fuseSignals)
   const [barsCache, setBarsCache] = useState({}); // ticker -> daily bars (fattore tecnico)
@@ -2020,6 +2044,25 @@ export default function OptionsStrategyLab() {
     if (!Number.isFinite(effective.net)) return A;
     return analyze(legs, spot, dte, iv, q, { net: effective.net });
   }, [A, effective.net, legs, spot, dte, iv, q]);
+  /* >>> HOW MANY COMBINATIONS THE BUDGET BUYS, AND IT IS ONE HOME (P10 §2).
+     <<< `scaleStrategy()` is untouched — it is the same function the Shortlist
+     calls and it is on the DO-NOT-TOUCH list — and it is read HERE at the price
+     the order will be sent at, which is the same price the Shortlist card
+     prices its own figures at (`openLimitPrice()` on `comboBook()`, which is
+     what `legLimitSeed()` sums to). So the count on the card and the count in
+     the ticket agree by construction, and if the user moves the ticket's
+     sliders the budget re-derives against the price they are now offering —
+     which is the honest answer to "how many can I have", not a stale one. */
+  const budgetSize = useMemo(
+    () => (AE ? scaleStrategy(AE, request.mode, request.amt) : null),
+    [AE, request.mode, request.amt]);
+  /* A COUNT TYPED BY HAND WINS, AND THE SCREEN SAYS IT OVERRIDES THE BUDGET.
+     The gate is unchanged: it measures whatever `contracts` says, whichever of
+     the two produced it. */
+  const contracts = contractsTyped != null ? contractsTyped
+    : (budgetSize && budgetSize.ok ? budgetSize.n : 1);
+  const setContracts = useCallback(
+    (n) => setContractsTyped(Math.max(1, Math.round(Number(n) || 1))), []);
   /* WHERE THAT PRICE FALLS AND WHAT THE TIME IN FORCE DOES TO IT. One verdict,
      read by the band in the ticket and by the confirm step. */
   const ticketVerdict = useMemo(
@@ -2131,7 +2174,7 @@ export default function OptionsStrategyLab() {
      (src/handoff.js) decides what changes; this applies it. Written inline at
      each button instead, a hand-off forgets one of the four things it has to
      do and the tap looks like it did nothing — see the comment there. */
-  const openOnBuild = ({ ticker: tk, expKey: ek = null, legs: lg, name, ref = null, contracts: n = 1 }) => {
+  const openOnBuild = ({ ticker: tk, expKey: ek = null, legs: lg, name, ref = null, contracts: n = null }) => {
     const h = buildHandOff({ ticker: tk, expKey: ek, legs: lg, name, chains });
     setTicker(h.ticker); setExpKey(h.expKey); setLegs(h.legs); setStratName(h.name);
     setBt(null);
@@ -2146,7 +2189,11 @@ export default function OptionsStrategyLab() {
     // RE-PRICE, which is the same trade at a different price: sending it back
     // at one lot would quietly shrink an order the user already sized.
     sizedFor.current = `${h.ticker}|${h.expKey}`;
-    setContracts(Math.max(1, Math.round(Number(n) || 1)));
+    // A PLAIN HAND-OFF CARRIES NO SIZE, so the budget decides it on arrival.
+    // The one caller that DOES pass a size is a RE-PRICE — the same trade at a
+    // different price — and that is a size the user already set by hand, so it
+    // arrives as the typed override rather than as a number the budget derived.
+    setContractsTyped(n == null ? null : Math.max(1, Math.round(Number(n) || 1)));
     setOptRef(ref);
     setEv(h.ev);          // close the evidence sheet: it covers the trade
     setTab(h.tab);
@@ -2802,7 +2849,13 @@ export default function OptionsStrategyLab() {
           const mc = chanceFor(a, { ticker: tk, legs: pr.legs, spot: sp, dte: d2, expKey: ek });
           const pop = mc ? mc.pop : null;
           const unit = Math.abs(a.maxLoss);
-          const n = Math.floor(optAmt / Math.max(1, a.entry >= 0 ? Math.abs(a.entry) * 100 : unit));
+          // THE SIZE HAS ONE HOME AND THIS WAS A SECOND ONE. A hand-rolled
+          // division, in a file that already imports `scaleStrategy()` — and
+          // it divided by the PREMIUM on a debit and by the RISK on a credit
+          // with a `Math.max(, 1)` floor under it, which is the shape that
+          // turned a $250 budget into 250 contracts of an unpriced butterfly.
+          const sc = scaleStrategy(a, request.mode, request.amt);
+          const n = sc && sc.ok ? sc.n : 0;
           if (n < 1) continue;
           out.push({ tk, sent, name: pr.name, legs: pr.legs, expKey: ek, dte: d2, a, mc, pop, n, spot: sp,
             // AND THE EXPECTED VALUE IS THE SIMULATION'S OWN MEAN, times the
@@ -3103,7 +3156,8 @@ export default function OptionsStrategyLab() {
      user's three weights, and road 2 is free to come from a different market
      than road 1. That is the point of asking for a basket at all. */
   const runWizard = async (overrides) => {
-    const ans = { ...wiz, ...(overrides || {}) };
+    // THE BUDGET COMES FROM THE ONE HOME, not from a second copy on `wiz`.
+    const ans = { ...wizAnswers, ...(overrides || {}) };
     setWiz((w) => ({ ...w, ...(overrides || {}), busy: true, err: null }));
     setNothing(null);
     const stop = (reasons) => { setNothing(reasons); setWizStep("nothing"); setWiz((w) => ({ ...w, busy: false })); };
@@ -3975,7 +4029,7 @@ export default function OptionsStrategyLab() {
         )}
         {wizStep === "questions" && (
           <FindOpportunities
-            answers={wiz} setAnswers={setWiz} limits={limits} busy={wiz.busy} err={wiz.err}
+            answers={wizAnswers} setAnswers={setWizAnswers} limits={limits} busy={wiz.busy} err={wiz.err}
             universe={BASKET.map((tk) => ({ tk, name: getU(tk).name }))}
             onBack={goHome} onDecide={() => runWizard()}
           />
@@ -4833,7 +4887,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   FROM YOUR ANSWERS · {candidates.length} ROAD{candidates.length === 1 ? "" : "S"}
                 </div>
                 <WizardCandidates
-                  candidates={candidates} answers={wiz} narrative={[]}
+                  candidates={candidates} answers={wizAnswers} narrative={[]}
                   barsFor={(tk) => barsCache[tk] || []}
                   weatherData={weather} newsItems={newsPool} month={NOW_MONTH}
                   /* THE LIVE READING, so the road card, the Radar row and the
@@ -4874,13 +4928,15 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                 <div>
                   <div style={{ ...mono, fontSize: 9.5, color: T.dim }}>SIZE BY</div>
                   <div style={{ display: "flex", gap: 4 }}>
-                    <Btn small ghost={optMode !== "budget"} onClick={() => setOptMode("budget")}>What I can spend</Btn>
-                    <Btn small ghost={optMode !== "target"} onClick={() => setOptMode("target")}>What I want to make</Btn>
+                    <Btn small ghost={request.mode !== "budget"} onClick={() => setWant((w) => ({ ...w, mode: "budget" }))}>What I can spend</Btn>
+                    <Btn small ghost={request.mode !== "target"} onClick={() => setWant((w) => ({ ...w, mode: "target" }))}>What I want to make</Btn>
                   </div>
                 </div>
                 <div>
-                  <div style={{ ...mono, fontSize: 9.5, color: T.dim }}>{optMode === "budget" ? "MOST I WILL RISK ($)" : "PROFIT I AM AIMING FOR ($)"}</div>
-                  <Inp type="number" min={50} step={50} value={optAmt} onChange={(e) => setOptAmt(Math.max(0, +e.target.value))} style={{ width: 100 }} />
+                  <div style={{ ...mono, fontSize: 9.5, color: T.dim }}>{requestAmountLabel(request.mode)}</div>
+                  <Inp type="number" min={50} step={50} value={request.amt == null ? "" : request.amt}
+                    onChange={(e) => setWant((w) => ({ ...w, amt: e.target.value === "" ? null : Math.max(0, +e.target.value) }))}
+                    style={{ width: 100 }} />
                 </div>
                 {chain && (
                   <div>
@@ -5105,7 +5161,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                         <Stat k="BREAKEVEN" v={a.breakevens.map((b) => b.toFixed(2)).join(" · ") || "—"} c={T.blue} />
                       </div>
                       {(() => {
-                        const sc = scaleStrategy(a, optMode, optAmt);
+                        const sc = scaleStrategy(a, request.mode, request.amt);
                         if (!sc) return <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6 }}>Cannot scale this one (unlimited profit or no defined risk): judge it at a single contract.</div>;
                         if (sc.unpriceable) return <div style={{ ...mono, fontSize: 10.5, color: T.red, marginTop: 6 }}>✗ No quantity is shown: one of these prices at under {money(MIN_NET_DOLLARS)}, so there is no cost to divide your budget by.</div>;
                         if (!sc.ok) return <div style={{ ...mono, fontSize: 10.5, color: T.red, marginTop: 6 }}>✗ Not enough budget: one of these {sc.isCredit ? `ties up ${fmt$(sc.unit)} of risk` : `costs ${fmt$(sc.unit)} to buy`}.</div>;
@@ -5124,7 +5180,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                                 outcome it walked. */}
                             {mcRow && <Stat k="AVERAGE RESULT" v={signedMoney(mcRow.ev * sc.n)} c={mcRow.ev >= 0 ? T.green : T.red}
                               tip={chanceSourceNote(mcRow, ticker)} />}
-                            <Stat k={optMode === "target" ? "HITS THE TARGET" : "BUDGET USED"} v={optMode === "target" ? (sc.totProfit >= optAmt ? "✓ yes" : "✗ no") : `${((sc.n * sc.unit / Math.max(1, optAmt)) * 100).toFixed(0)}%`} c={T.blue} />
+                            <Stat k={request.mode === "target" ? "HITS THE TARGET" : "BUDGET USED"} v={request.mode === "target" ? (sc.totProfit >= request.amt ? "✓ yes" : "✗ no") : `${((sc.n * sc.unit / Math.max(1, request.amt)) * 100).toFixed(0)}%`} c={T.blue} />
                             <div style={{ ...mono, fontSize: 9, color: T.dim, width: "100%" }}>Totals for ×{sc.n} · Build always shows one, so divide by {sc.n} to compare.</div>
                           </div>
                         );
@@ -5796,6 +5852,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                      `cfg.qty` inside the ticket, which is why the gate above and
                      the position written below both ran at a hardcoded 1. */
                   qty={contracts} onQty={setContracts}
+                  qtyNote={contractsSourceNote({ contracts, typed: contractsTyped != null, request, fits: !!(budgetSize && budgetSize.ok) })}
                   /* AND NEITHER IS THE PRICE, for the same reason and one
                      session later. Type, time in force and one price per leg
                      are Build-screen state; the verdict and the effective price

@@ -340,6 +340,43 @@ export const RULES = {
   // crossed it against positions that did not.
   watchAttentionShare: 0.35,
 
+  // --- THE ONE CONTROL THAT TRADES RETURN AGAINST PROBABILITY (ROADMAP P10).
+  //
+  // The owner asked for a control that moves what the app puts in front of him
+  // between "pays more" and "works more often". These four numbers are its
+  // range, its step and where it starts. They set a MINIMUM CHANCE OF PROFIT,
+  // read off `chanceOf()`'s Monte Carlo — the one source every chance in this
+  // app comes from — and they decide ONE thing: which HEADING a candidate sits
+  // under. They create no structure, bypass no floor and move nothing in the
+  // gate. `minRewardRisk` stays a fixed rule and is deliberately NOT a control:
+  // a user-movable quality floor would be the app letting somebody switch off
+  // the reason it can be trusted.
+  //
+  // >>> ALL FOUR ARE CHOSEN, NOT MEASURED, and they are on the PRD's NOT
+  // VERIFIED list. <<< Nothing in this repository has read the distribution of
+  // `chanceOf()` over the candidates the five — now ten — live chains actually
+  // produce, which is the reading that would settle where the two ends belong.
+  //
+  // chanceAskMin — below this almost everything on these chains clears, so the
+  // control stops grouping anything and becomes a slider that does nothing.
+  chanceAskMin: 0.20,
+  // chanceAskMax — above this, on these chains, a structure that clears pays so
+  // little that it is at or under `minRewardRisk` and never reached the list at
+  // all, so the top section empties and the control teaches the wrong lesson:
+  // that asking for certainty is free.
+  chanceAskMax: 0.80,
+  // chanceAskStep — the Monte Carlo's standard error at `mcRuns` is about 0.55
+  // of a percentage point, and `chancePct()` rounds to the whole percent. A
+  // one-point step would move rows between the two sections on sampling noise,
+  // which is a control that appears to do something it did not do.
+  chanceAskStep: 0.05,
+  // chanceAskDefault — the middle of the band, and the point where "more often
+  // than not" becomes true. It is a STARTING POSITION the user can see and
+  // change, which is why it may have one at all: the same distinction the
+  // wizard draws between the basket (a visible default) and the budget (an
+  // answer that must never be invented).
+  chanceAskDefault: 0.50,
+
   // minNetPremium — THE PRICE HAS TO EXIST BEFORE ANY OTHER RULE CAN BE
   // APPLIED TO IT. In dollars per share, the unit an option is quoted in:
   // multiply by 100 for one contract, as every screen does.
@@ -2762,6 +2799,105 @@ export function sizing(answers = {}) {
     pills,
   };
 }
+
+/* =====================================================================
+   THE REQUEST — ONE STATE FOR "WHAT I WANT", ABOVE BOTH DOORS.
+
+   ROADMAP P10 §2. The owner: *"il budget dedicato all'operazione, oppure
+   quanto vuoi guadagnare... deve essere tab semplice e visibile"* and
+   *"tutti devono stare in radar, o prima di decide for me, dipende dalla
+   journey."*
+
+   >>> IT WAS TWO HOMES FOR ONE ANSWER. <<< `optMode` / `optAmt` were
+   Build-and-Shortlist state in App.jsx; the guided run had its own
+   `wiz.risk`. Two states, one question, and CLAUDE.md has a standing rule
+   about exactly this shape — the Build screen's hardcoded 500 beside the
+   wizard's derived 250 is the same fault with different numbers. There is
+   one now, and this is the function that reads it.
+
+   THE DEFAULT IS DERIVED, NEVER TYPED. It is `limits.perTradeLimit` — the
+   `sizing()` result — so the amount on screen before anybody types is the
+   same number the risk gate is about to measure against. And `answered`
+   travels beside it exactly as `sizing().answered` does: until the user
+   types an amount, every screen printing it has to call it a suggestion.
+   An app that quotes a figure the user never chose back at them as their
+   own limit has stopped being trustworthy about anything else it says.
+
+   IT DECIDES NOTHING AND REFUSES NOTHING. The quality floors remove; this
+   only decides which HEADING a candidate sits under (`meetsRequest()`
+   below) and how many combinations the budget buys (`scaleStrategy()` in
+   pro.jsx, unchanged). `minRewardRisk` is not in it and must never be: a
+   user-movable quality floor would be the app letting somebody switch off
+   the reason it can be trusted.
+===================================================================== */
+
+/** The two questions this app knows how to answer about size. */
+export const REQUEST_MODES = ["budget", "target"];
+
+/** What the amount field is asking for, in the words the screen uses. */
+export const requestAmountLabel = (mode) =>
+  (mode === "target" ? "PROFIT I AM AIMING FOR ($)" : "MOST I WILL RISK ($)");
+
+/**
+ * The user's request, read from the one state that holds it.
+ *
+ * @param want   { mode, amt, minChance } — every field NULL until answered
+ * @param limits the `sizing()` result, for the derived default
+ * @returns {{ mode, amt, amtAnswered, minChance, chanceAnswered, answered }}
+ */
+export function requestOf(want = {}, limits = {}) {
+  const mode = REQUEST_MODES.includes(want.mode) ? want.mode : REQUEST_MODES[0];
+  const typed = Number(want.amt);
+  const amtAnswered = Number.isFinite(typed) && typed > 0;
+  // `Number(null)` is 0 and 0 is finite — for the seventh time in this
+  // repository. The nulls go out before the coercion, and a derived default is
+  // never reported as an answer.
+  const derived = Number(limits.perTradeLimit);
+  const amt = amtAnswered ? Math.round(typed)
+    : (Number.isFinite(derived) && derived > 0 ? Math.round(derived) : null);
+  const raw = want.minChance;
+  const chanceAnswered = raw != null && raw !== "" && Number.isFinite(Number(raw));
+  const minChance = clampAskedChance(chanceAnswered ? Number(raw) : null);
+  return { mode, amt, amtAnswered, minChance, chanceAnswered, answered: amtAnswered };
+}
+
+/**
+ * WHOSE NUMBER THE CONTRACT COUNT IS — one clause, beside the field.
+ *
+ * The size is derived from the budget everywhere until somebody types one, and
+ * a typed one WINS. The clause exists because a quantity that silently stops
+ * following the budget is a control the user cannot tell is stuck, which is the
+ * same fault as a size the app assumed and printed as measured.
+ */
+export const contractsSourceNote = ({ contracts, typed, request, fits = true } = {}) => {
+  const n = Math.max(1, Math.round(Number(contracts) || 1));
+  if (typed) return `x${n} is yours \u2014 it overrides the budget.`;
+  if (!fits) return `x${n}: the budget buys none of these, so this is one combination.`;
+  return request && request.mode === "target"
+    ? `x${n} is what reaches ${requestAmountOwner(request)}.`
+    : `x${n} is what ${requestAmountOwner(request)} buys at this price.`;
+};
+
+/**
+ * The slider never leaves the band its two constants describe.
+ *
+ * `Number(null)` IS 0 AND 0 IS FINITE — the trap this repository has written
+ * down six times. A missing answer is not a request for the lowest chance in
+ * the band: it is no answer, and the default is what stands in for it.
+ */
+export const clampAskedChance = (x) => {
+  if (x == null || x === "" || typeof x === "boolean") return RULES.chanceAskDefault;
+  const v = Number(x);
+  if (!Number.isFinite(v)) return RULES.chanceAskDefault;
+  return Math.min(RULES.chanceAskMax, Math.max(RULES.chanceAskMin, v));
+};
+
+/**
+ * WHOSE FIGURE THE AMOUNT IS — one clause, the `capitalSourceNote()` pattern.
+ * A derived default is a SUGGESTION until somebody types one.
+ */
+export const requestAmountOwner = (request) =>
+  (request && request.amtAnswered ? "your answer" : "the suggested limit");
 
 /* =====================================================================
    THE AUTOPILOT'S VERDICT — WHICH RULE FIRED, WHAT IT SAYS, AND WHETHER

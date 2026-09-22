@@ -597,7 +597,7 @@ export function OrderTicket({
      name before the order reached the market. The CHAIN is the only thing that
      knows which contracts exist, and it travels on `quotes[i].occ`. */
   creds, legs, expKey, ticker, quoteFn, estNet, setMsg, onSent, gate, dte,
-  maxLoss, maxProfit, spot, entryOverride, qty = 1, onQty, model = null, feed = null,
+  maxLoss, maxProfit, spot, entryOverride, qty = 1, onQty, qtyNote = null, model = null, feed = null,
   /* The price, from the screen above. `net` is signed per share.
 
      `cfg` HAS A DISPLAY DEFAULT AND IT IS NOT A SECOND HOME. The real one is
@@ -750,7 +750,11 @@ export function OrderTicket({
       {/* 4 — ORDER TYPE, TIME IN FORCE AND SIZE. The time in force is an input
           to the verdict band below, not a dropdown with a paragraph under it. */}
       <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-        <div><div style={{ ...mono, fontSize: 9.5, color: T.dim }}>QTY</div><Inp type="number" min={1} max={20} value={qtyNum} onChange={(e) => setQty(e.target.value)} style={{ width: 56 }} /></div>
+        <div><div style={{ ...mono, fontSize: 9.5, color: T.dim }}>QTY</div><Inp type="number" min={1} max={20} value={qtyNum} onChange={(e) => setQty(e.target.value)} style={{ width: 56 }} />
+          {/* WHOSE NUMBER THIS IS (P10 §2). The count is derived from the
+              budget until somebody types one; a typed one wins and says so.
+              One clause, from its one home in rules.js. */}
+          {qtyNote && <div style={{ ...mono, fontSize: 9, color: T.dim, marginTop: 3, maxWidth: 190 }}>{qtyNote}</div>}</div>
         <div><div style={{ ...mono, fontSize: 9.5, color: T.dim }}>ORDER TYPE</div>
           <Sel value={cfg.type} onChange={(e) => onCfg({ type: e.target.value })}><option value="limit">Limit — set my price</option><option value="market">Market — take what is there</option></Sel></div>
         <div><div style={{ ...mono, fontSize: 9.5, color: T.dim }}>HOW LONG IT STANDS</div>
