@@ -834,10 +834,11 @@ export function WizardCandidates({ candidates = [], answers = {}, narrative = []
           fusedNow={fusedFor ? fusedFor(c.ticker) : null}
           other={candidates.find((x) => x !== c) || null} />
       ))}
+      {/* A LEGEND, AND EVERY VISUAL IN THIS APP ALREADY CARRIES ITS OWN
+          `takeaway()` — one always-visible generated sentence (PRD §6). This
+          explained the colours a fourth time (P9, TASK 3). */}
       <div style={{ ...sans, fontSize: 12.5, color: T.dim, marginTop: 16, lineHeight: 1.5, textAlign: "center" }}>
-        Green is where the trade makes money at expiry, red is where it does not, and the line across them is
-        where the price has actually been. Every chart here is drawn from the same payoff calculation, so they
-        can be compared directly.
+        Green makes money at expiry, red does not, and the line across them is where the price has been.
       </div>
     </div>
   );
@@ -1003,11 +1004,14 @@ export function ConfirmSteps({
         {/* WHAT IS BEING SENT IS THE SIZE ON SCREEN. This said "One contract of
             each" underneath a ticket whose quantity field could say seven —
             the app describing an order it was not about to send. */}
+        {/* THE SIZE, AND NOTHING ELSE (P9, TASK 3). "on a paper account" is
+            the header badge, and "nothing is sent until you tap below" is the
+            button four lines down saying so itself. What is left is the fact
+            only this line carries: every figure above is for all of them. */}
         <div style={{ ...sans, fontSize: 13, color: T.mut, marginTop: 8, lineHeight: 1.5 }}>
           {n === 1
-            ? "One combination, on a paper account. Nothing is sent until you tap below."
-            : `${n} combinations of the structure above, on a paper account — that is what each line already shows. ` +
-              `Everything this screen measures is for all ${n}. Nothing is sent until you tap below.`}
+            ? "One combination. Nothing is sent until you tap below."
+            : `${n} combinations — every figure above is for all ${n}.`}
         </div>
       </Card>
 

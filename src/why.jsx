@@ -21,6 +21,8 @@
 // ============================================================================
 import React, { useState, useEffect } from "react";
 import { T } from "./theme.js";
+// The fold lives in steps.jsx — chrome with no trade in it (P9, TASK 3).
+import { Fold } from "./steps.jsx";
 import { ARROW, regionSignals } from "./signals.js";
 import { useNarrow } from "./visuals.jsx";
 
@@ -109,9 +111,14 @@ function WeatherDrill({ ticker, weatherData, month }) {
           </div>
         );
       })}
-      <div style={{ ...mono, fontSize: 9.5, color: T.dim }}>
-        Each region is read against its OWN monthly norm, never a fixed temperature: +30°C is ordinary in Dallas in July and extreme in Odessa in April.
-      </div>
+      {/* A METHODOLOGY FOOTNOTE UNDER A LIST OF REGIONS (P9, TASK 3): worth
+          reading once, by somebody who has asked how the strength was got. */}
+      <Fold label="how these are read" tone={T.dim} style={{ marginTop: 2 }}
+        summary={`Each region is read against its OWN monthly norm, never a fixed temperature.`}>
+        <div style={{ ...mono, fontSize: 9.5, color: T.dim, marginTop: 5, lineHeight: 1.6 }}>
+          +30°C is ordinary in Dallas in July and extreme in Odessa in April.
+        </div>
+      </Fold>
     </div>
   );
 }
@@ -130,9 +137,14 @@ function NewsDrill({ ticker, newsItems = [] }) {
           <ImpactTags item={n} />
         </a>
       ))}
-      <div style={{ ...mono, fontSize: 9.5, color: T.dim }}>
-        A headline five days old counts half. Government and geopolitical items weigh more than market chatter because they move supply, not the session.
-      </div>
+      {/* Same rule, under the headlines (P9, TASK 3). */}
+      <Fold label="how these are weighted" tone={T.dim} style={{ marginTop: 2 }}
+        summary={`A headline five days old counts half.`}>
+        <div style={{ ...mono, fontSize: 9.5, color: T.dim, marginTop: 5, lineHeight: 1.6 }}>
+          Government and geopolitical items weigh more than market chatter because they move supply, not the
+          session.
+        </div>
+      </Fold>
     </div>
   );
 }

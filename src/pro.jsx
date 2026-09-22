@@ -7,9 +7,12 @@ import { RULES, ruleBadge, takeProfitLabel, scaleOutLabel, stopLossLabel, exitDT
   legBook, sizeSkippedNote, onTick, netFromLegs, limitCeilingNote, rewardRisk,
   contractListing, unlistedContractNote, unquotedLegNote, unquotedLegPointer, marketOrderNote,
   taCopilotPrompt, TA_QUESTIONS, TA_DISCLAIMER,
-  ivProvenance, sameCloseNote } from "./rules.js";
+  ivProvenance, sameCloseNote, copilotOverreach, copilotOverreachNote } from "./rules.js";
 import { contractsOf, positionSize, bookPositions, positionStage, autopilotHorizonNote, autopilotVolNote, positionForHolding } from "./journal.js";
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, LineStyle } from "lightweight-charts";
+// The fold lives in steps.jsx — chrome with no trade in it, and the one file
+// both App.jsx and pro.jsx can import without a cycle.
+import { Fold } from "./steps.jsx";
 // THE INDICATORS, FROM THEIR ONE HOME. Never compute a moving average, an
 // RSI or a MACD in this file: `signals.js` scores the same numbers, and two
 // implementations is two screens disagreeing about one market.
@@ -306,11 +309,15 @@ function LegMarketTable({ legs, quotes, ticker, expKey, feed }) {
           );
         })}
       </div>
-      <div style={{ ...mono, fontSize: 9.5, color: T.dim, marginTop: 7, lineHeight: 1.6 }}>
-        In full contrast: the side that trades when you send this. To buy the structure you lift the ask on
-        every leg you are buying and hit the bid on every leg you are selling — the other two are the reverse
-        trade, which is nobody{"’"}s side of this one.
-      </div>
+      {/* WHY ONE SIDE OF EACH ROW IS IN FULL CONTRAST. Worth reading once;
+          the table above it is what the reader is here for (P9, TASK 3). */}
+      <Fold label="which side trades" tone={T.dim} style={{ marginTop: 7 }}
+        summary={`In full contrast: the side that trades when you send this.`}>
+        <div style={{ ...mono, fontSize: 9.5, color: T.dim, marginTop: 6, lineHeight: 1.6 }}>
+          To buy the structure you lift the ask on every leg you are buying and hit the bid on every leg you
+          are selling — the other two are the reverse trade, which is nobody{"’"}s side of this one.
+        </div>
+      </Fold>
       {/* A MISSING SIZE IS UNKNOWN, NEVER ZERO. A "?" and a sentence, rather
           than a blank that reads as a market with nobody in it. */}
       {lb.missingSizes > 0 && (
@@ -788,7 +795,13 @@ export function OrderTicket({
           ))}
         </div>
       )}
-      <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6 }}>Paper account only. The price is for the whole combination, not one leg. Every order asks you twice, and every order goes through the risk gate first.</div>
+      {/* "Paper account only" is the header badge, three words tall, on every
+          screen (P9, TASK 3). The other two clauses STAY: one is only true of
+          this control, and the other is non-negotiable rule 5 standing beside
+          a send button — which is exactly the kind of sentence that never
+          folds. Trimming it was over-reading the rule, and `order.test.jsx`
+          said so. */}
+      <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6 }}>The price is for the whole combination, not one leg. Every order asks you twice, and every order goes through the risk gate first.</div>
     </div>
   );
 }
@@ -1702,13 +1715,29 @@ export function buildReportMd(ctx, weatherSig, aiText) {
   // The analyses run from the Copilot panel are part of the same record. The
   // report used to carry only its OWN model call, so a day with three pre-trade
   // analyses on it produced a report that mentioned none of them.
-  const runs = (store.copilotLog || []).slice(0, 5);
+  /* >>> THIS PERIOD'S ANALYSES, NOT THE LAST FIVE EVER (P9, TASK 3). <<<
+     `slice(0, 5)` is "the five most recent", and a weekly report that reprints
+     an analysis from three weeks ago is telling the owner something happened
+     this week that did not. The period is the one the report is for:
+     `settings.reportLast` is when the last one was written. With no previous
+     report there is no period to be older than, so everything qualifies — an
+     unknown boundary is not a boundary of zero.
+
+     AND AN ANALYSIS THAT CLAIMS IT CAN TRADE IS FLAGGED, NOT QUOTED. Rule 5
+     is that nothing executes without an explicit human confirmation, and a
+     document that reprints a model saying otherwise, unremarked, over the
+     app's own signature, is the app contradicting its own rule in its own
+     report. It stays in the Journal; it is named here instead of reproduced. */
+  const since = Number(store.settings?.reportLast) || 0;
+  const runs = (store.copilotLog || []).filter((c) => (Number(c.t) || 0) > since).slice(0, 5);
   if (runs.length) {
     L.push(`\n## 6 \u00b7 Analyses you ran in the copilot`);
+    if (since) L.push(`_Since the last report, ${new Date(since).toLocaleString("en-GB")}._`);
     runs.forEach((c) => {
       L.push(`\n### ${c.label || "Question"}${c.ticker ? ` \u2014 ${c.ticker}` : ""} \u00b7 ${new Date(c.t).toLocaleString("en-GB")}`);
       L.push(`_Asked:_ ${String(c.prompt).slice(0, 300)}`);
-      L.push(String(c.answer || ""));
+      const over = copilotOverreach(c.answer);
+      L.push(over.flagged ? `> \u26a0 ${copilotOverreachNote(over.phrase)}` : String(c.answer || ""));
     });
   }
   // The footer names the screen the report was generated from, and NOT the
@@ -2687,9 +2716,15 @@ export function OptionPanel({ occ, label, quote, onClose }) {
       )}
       {err && <div style={{ ...mono, fontSize: 11, color: T.red, marginTop: 6 }}>{err}</div>}
       <div ref={ref} style={{ marginTop: 8 }} />
-      <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 4 }}>
-        This tells you whether you are buying near the top of its price range or after it has deflated — something the payoff chart cannot show you.
-      </div>
+      {/* A CAPTION, NOT A DECISION (P9, TASK 3). It explains what the chart
+          above is FOR, which is worth reading once. */}
+      <Fold label="what this shows" tone={T.dim} style={{ marginTop: 4 }}
+        summary={`Whether you are buying near the top of its price range, or after it has deflated.`}>
+        <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6, lineHeight: 1.6 }}>
+          Something the payoff chart cannot show you: the payoff is about where the price finishes, and this is
+          about what you are paying for the option today against what it has cost over the past year.
+        </div>
+      </Fold>
     </div>
   );
 }

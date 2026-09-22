@@ -1162,4 +1162,54 @@ export function positionForHolding(positions = [], { ticker = null, expKey = nul
     && (p.expKey || "") === expKey && positionStage(p) === "owned") || null;
 }
 
-export default { refOf, seqOf, nextRef, appendTimeline, journalEntry, searchJournal, upgradeHolding, positionForHolding };
+/* ------------------------------------------------------------------
+   A TEST IS NOT A TRADE (P9, TASK 3)
+
+   The owner opened three trades and closed them again within the
+   minute, by hand, at zero profit and loss, to see what the buttons
+   did. `journey` in App.jsx counted them: they moved him up a level
+   and spent his "patience" budget — the score that measures whether
+   he is opening too many trades in a week.
+
+   It is §4m's fault one tab across. `store.positions` is what the app
+   DECIDED, not what the user OWNS, and `store.journal` is what
+   HAPPENED — and a record opened and closed on the same day, by hand,
+   for nothing, did not happen in the sense the level is measuring.
+
+   >>> THEY ARE NOT DELETED. <<< The Journal is the record of what the
+   app did, and deleting a record to make a score look better is the
+   opposite of what it is for. They stay, they are marked, and the
+   score steps over them.
+
+   THREE CONDITIONS, ALL OF THEM: zero P&L (nothing was at stake), the
+   same calendar day (nothing had time to happen), and closed BY HAND
+   (a rule exit on the same day is a real trade that hit its take
+   profit, however unlikely). Any one of them alone is an ordinary
+   trade: a scratch, a day trade, a manual close.
+------------------------------------------------------------------ */
+
+/** Was this closed record a button-test rather than a trade? */
+export function isTestRecord(entry = {}) {
+  if (!entry) return false;
+  // `Number(null)` IS 0 AND 0 IS FINITE, for the tenth time in this
+  // repository: a record whose P&L was never read is UNKNOWN, and an
+  // unknown result is not a zero one.
+  const pnl = entry.pnl == null || entry.pnl === "" ? NaN : Number(entry.pnl);
+  if (!Number.isFinite(pnl) || Math.abs(pnl) >= 0.005) return false;
+  if (entry.ruleExit === true) return false;          // a rule ended it: a real trade
+  const opened = entry.openedAt ? new Date(entry.openedAt) : null;
+  const closed = entry.t ? new Date(entry.t) : null;
+  if (!opened || !closed || Number.isNaN(+opened) || Number.isNaN(+closed)) return false;
+  return opened.toDateString() === closed.toDateString();
+}
+
+/** What the Journal row says about one, so it is marked rather than hidden. */
+export const testRecordNote = () =>
+  `Opened and closed by hand the same day for nothing — read as a test of the buttons, so it is not counted ` +
+  `towards your level or your awareness score. It stays on the record: the Journal is what happened, not what ` +
+  `flatters the score.`;
+
+/** The closed records a level or a score may be computed from. */
+export const scoredJournal = (entries = []) => (entries || []).filter((e) => !isTestRecord(e));
+
+export default { refOf, seqOf, nextRef, appendTimeline, journalEntry, searchJournal, upgradeHolding, positionForHolding, isTestRecord };

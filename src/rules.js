@@ -1169,6 +1169,155 @@ export const qualityFloorSentence = (level = RECOMMENDED_LIQUIDITY) => {
     `Setting: ${l.label.toUpperCase()}${l.recommended ? " (the app's recommendation)" : ""}.`;
 };
 
+/* =====================================================================
+   EACH EXPLANATION ONCE PER SCREEN (P9, TASK 3)
+
+   >>> COUNTED ON THE OWNER'S SCREENS, 22 Sep 2026. <<< The floor
+   paragraph — `qualityFloorSentence()`, ONE HUNDRED AND SIXTY-TWO WORDS —
+   renders TWICE on the Radar and TWICE on the Shortlist. The four-factor
+   CONFLICT narrative is on Build and its overlay three times. *"Every
+   figure on this card is in US dollars"* is on every card.
+
+   His words, for the fourth time: *"si capisce poco dalla UI. Troppe info
+   da leggere, poco intuitivo."*
+
+   THE RULE, AND IT IS `warningsToPrint()`'S RULE MADE GENERAL: a long
+   generated explanation has ONE HOME PER SCREEN. Everywhere else prints a
+   ONE-LINE POINTER that names where the full text is.
+
+   >>> FOLD, NEVER DELETE. <<< Not one fact leaves the app. Every pointer
+   names the place the explanation kept, and that place is one tap away —
+   the same discipline as `unquotedLegPointer()`, which keeps the unquoted-
+   leg fact where the legs are NAMED and prints a pointer everywhere else.
+
+   >>> AND A REFUSAL IS NEVER FOLDED. <<< The rule that a gate violation
+   renders beside the button is older than this one and outranks it. What
+   folds is an EXPLANATION of a rule; what never folds is the app saying no.
+===================================================================== */
+
+/** Where each long explanation lives, so a pointer can name it. */
+export const VOICE_HOMES = {
+  floors: "under the liquidity filter on the Shortlist",
+  conflict: `in "Why this trade"`,
+  currency: "on the trade card",
+};
+
+/**
+ * The one line that stands in for a long explanation, with the count in it.
+ * Modelled on `conflictSummaryLine()`, which has done exactly this for the
+ * CONFLICT paragraph since PR #28.
+ */
+export const voicePointer = (id, { count = null, what = null } = {}) => {
+  const home = VOICE_HOMES[id];
+  const head = id === "floors"
+    ? (Number.isFinite(Number(count)) && count > 0
+      ? `${count} structure${count === 1 ? "" : "s"}${what ? ` on ${what}` : ""} did not clear the quality floors`
+      : `Everything here cleared the quality floors`)
+    : `There is more on this`;
+  return `${head} — explained once, ${home || "one tap away"}.`;
+};
+
+/**
+ * THE FLOOR IN ONE LINE, for every site that is not its home.
+ *
+ * It states WHICH floors ran and at what setting, and nothing else. The
+ * hundred and sixty words of reasoning — why a percentile rather than a fixed
+ * number, why the spread is a separate question, what a contract nobody trades
+ * is — stay in `qualityFloorSentence()`, at the one place on each screen that
+ * prints them.
+ */
+export const qualityFloorLine = (level = RECOMMENDED_LIQUIDITY) => {
+  const l = liquidityLevel(level?.id ?? level);
+  return l.id === "off"
+    ? `Liquidity floor OFF; spread and reward-to-risk still apply.`
+    : `Filtered at ${l.label.toUpperCase()}: open interest, bid/ask spread, combination spread, reward-to-risk.`;
+};
+
+/**
+ * WHY THINGS ARE NOT ON A LIST, IN ONE FOLDED PANEL.
+ *
+ * The Shortlist printed a separate paragraph for each of nine reasons —
+ * liquidity, per-leg spread, combination spread, reward, unpriceable,
+ * impossible, model disagreement, no ceiling, and the three "was skipped"
+ * cases — about six hundred and fifty words for a list of at most eight rows.
+ * Every one of those paragraphs is worth reading ONCE, by somebody who has
+ * asked. None of them is worth reading every time the screen renders.
+ *
+ * @returns {{ total, summary, reasons }} — `summary` is the one line always on
+ *          screen, `reasons` the short clause per reason for the fold. The
+ *          LONG note for each reason keeps its own function and is printed
+ *          inside the fold, so nothing is rewritten and nothing is lost.
+ */
+export function filterFold(tally = {}, { level = RECOMMENDED_LIQUIDITY, what = null } = {}) {
+  const t = tally || {};
+  const n = (k) => (Number.isFinite(Number(t[k])) ? Number(t[k]) : 0);
+  const rows = [
+    ["unpriceable", n("unpriceable"), `could not be priced at all`],
+    ["impossible", n("impossible"), `priced as unable to lose`],
+    ["model", n("model"), `more than ${RULES.modelDisagreementRatio}x from the model's price`],
+    ["liquidity", n("liquidity"), `too little open interest`],
+    ["spread", n("spread"), `a leg quoted too wide`],
+    ["comboSpread", n("comboSpread"), `the combination quoted too wide`],
+    ["reward", n("reward"), `pays too little for what it risks`],
+  ].filter((r) => r[1] > 0);
+  const total = rows.reduce((a, r) => a + r[1], 0);
+  const summary = total === 0
+    ? null
+    : `${total} structure${total === 1 ? "" : "s"}${what ? ` on ${what}` : ""} not shown: ` +
+      `${rows.map((r) => `${r[1]} ${r[2]}`).join(", ")}. ${qualityFloorLine(level)}`;
+  return { total, summary, reasons: rows.map(([id, count, clause]) => ({ id, count, clause })) };
+}
+
+/* =====================================================================
+   AN ANALYSIS THAT CLAIMS IT CAN TRADE IS FLAGGED, NOT QUOTED (P9, TASK 3)
+
+   Non-negotiable rule 5: nothing executes without an explicit human
+   confirmation. The weekly report quotes the copilot's own analyses back
+   at the owner as section 6 — and a model that writes *"I'll route this
+   order for you"* would have that sentence reprinted, in the app's own
+   document, over the app's own signature.
+
+   The app cannot stop a model writing it. What it can do is refuse to
+   present it as advice: the analysis is still filed, still listed, still
+   openable, and the report says what is wrong with it instead of
+   reproducing it. A quotation is an endorsement in a document nobody
+   else is going to annotate.
+
+   IT IS A RULE, SO IT LIVES HERE — beside `copilotRulesBlock()` and
+   `reportNarrativePrompt()`, for the same reason: a generated sentence
+   and the rule that judges one are the same kind of thing.
+===================================================================== */
+
+/** Phrases a model uses when it thinks it can act. Deliberately narrow:
+ *  it must claim AGENCY over an order, not merely mention one. */
+const OVERREACH = [
+  /\b(?:I|we)(?:'|’)?(?:ll|ve| will| have| can| am going to| shall)?\s+(?:go ahead and\s+)?(?:place|submit|send|route|execute|enter|fill|open|close|cancel)\b[^.]{0,40}\b(?:order|trade|position|spread)\b/i,
+  /\b(?:placing|submitting|sending|routing|executing)\s+(?:the|this|your|a)\s+(?:order|trade)\b/i,
+  /\bI(?:'|’)?(?:ve| have)\s+(?:placed|submitted|sent|routed|executed|opened|closed)\b/i,
+  /\bon your behalf\b[^.]{0,40}\b(?:order|trade|broker|alpaca)\b/i,
+  /\bI(?:'|’)?ll\s+(?:handle|take care of)\s+(?:the|this|your)\s+(?:execution|order|trade)\b/i,
+];
+
+/**
+ * Does this copilot answer claim it can route or place an order?
+ * @returns {{ flagged, phrase }} — `phrase` is what tripped it, so the
+ *          report can name the sentence rather than assert a verdict.
+ */
+export function copilotOverreach(text = "") {
+  const t = String(text || "");
+  for (const re of OVERREACH) {
+    const m = re.exec(t);
+    if (m) return { flagged: true, phrase: m[0].trim() };
+  }
+  return { flagged: false, phrase: null };
+}
+
+/** What the report prints INSTEAD of the analysis, when it is flagged. */
+export const copilotOverreachNote = (phrase) =>
+  `NOT QUOTED. This analysis claims the copilot can act on an order — "${String(phrase || "").slice(0, 120)}" — ` +
+  `which it cannot: nothing in this app executes without you tapping twice, and the copilot has no order path ` +
+  `at all. It is kept in the Journal so you can read it there; it is not reproduced here as advice.`;
+
 /** The one line that says which setting produced the list underneath it. */
 /* =====================================================================
    THE RADAR MUST NOT GET LONGER WHEN THE BASKET DOES.
@@ -2146,6 +2295,14 @@ export const noCeilingRankNote = (n) =>
   `${n === 1 ? "its" : "their"} expected value cannot be computed and ${n === 1 ? "it sits" : "they sit"} last ` +
   `rather than being scored against the others. That is not a verdict on the trade: an unlimited best case ` +
   `is a real thing to want. It is a refusal to rank a number the app does not have.`;
+
+/** The same fact in one line, for the summary of the fold it lives in.
+ *  P9 TASK 3: the paragraph above is an explanation of a RANKING, not a
+ *  refusal, so it folds — and the line that stays says the thing that changes
+ *  what the reader sees, which is WHERE those candidates are in the list. */
+export const noCeilingRankLine = (n) =>
+  `${n} candidate${n === 1 ? "" : "s"} here ${n === 1 ? "has" : "have"} no ceiling on the profit, so ` +
+  `${n === 1 ? "it sits" : "they sit"} last with a blank expected value.`;
 
 /* -------------------------------------------------------------------------
  * A MAXIMUM LOSS THAT IS A PROFIT.
