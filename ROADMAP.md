@@ -759,6 +759,115 @@ WHAT PR #34 HANDS FORWARD (the full list is PRD NOT VERIFIED):
     broker key and no Anthropic key here.
   - **NOBODY HAS SEEN ANY OF IT ON A PHONE.** Ninth, and this one is a chart.
 
+## P9 — ONE VOICE  (PR #35 — DONE)
+
+The SIXTH session since the first live reading, and the second whose subject is
+not an order fault. Evidence: the owner's live reading of 22 September 2026, sixteen
+screens. His words: **"ancora abbastanza confusione, troppe info, trade suggestion non
+chiari."** PRD §4v.
+
+SHIPPED (911 checks across 22 suites, up from 864 across 21; build clean. One new
+suite, `src/voice.test.js`).
+
+**TASK 0 — the two debts the live reading exposed, first, as the standing rule requires.**
+
+  - **A HOLDING WRITTEN BEFORE THE STAMP NEVER UPGRADED.** XLE J-0002 is a position
+    Alpaca ITSELF lists, and the app showed it as "1 contract — assumed, not recorded",
+    with one timeline entry, no fill entry, no exit plan and no `fillVsLimit()` sentence.
+    The cause is a `continue`: `importAlpaca()` skipped any signature already in the
+    store, so a record written before PR #33 could never be reached by the upgrade PR #33
+    wrote — and the one holding the owner has is exactly such a record. `upgradeHolding()`
+    in `journal.js` is the one home; the size is MEASURED from the broker's own leg
+    quantities; NO ORDER FIELD IS INVENTED and an unstamped limit stays unstamped; it
+    returns the SAME object when nothing changes, so the 60-second sync cannot loop.
+  - **ONE P&L PER POSITION, AND IT IS THE BROKER'S.** The Positions card printed -$127 in
+    the largest red figure on the screen, directly above the broker's own -$130 for the
+    same position: `posAlerts` preferred `unrealized_pl`, the CARD re-derived its own from
+    `netValue()`. `positionPnl()` in `rules.js` decides which source a figure came from and
+    carries the sentence when it is the app's own mark; `pnlOf()` is its one spelling in
+    App.jsx, and `riskGate.test.js` fails the build on a second one.
+
+**TASK 1 — the app never proposes a trade its own gate would block.**
+
+  - Radar and the multi-market search ran at "HORIZON ~21 DTE", every structure they
+    offered sat at 24 DTE, and Build then said **THIS ORDER WOULD NOT BE SENT** —
+    `ENTRY_DTE_ROOM`, three days of room against the thirty-day floor. **The app built a
+    menu out of trades its own gate refuses**, which is worse than an empty screen: an
+    empty screen with a sentence teaches the rule, a menu that dead-ends teaches that the
+    rules are arbitrary.
+  - The cause is THREE different expiry windows in three places, none of them the rule.
+    `buildableExpiries()` / `openableBoard()` in `rules.js`, built ON `entryRoom()`, is the
+    one home; the third generation site holds the guard INSIDE itself, the way
+    `buildPresets()` refuses a null board. **The override is not withdrawn** — a door you
+    may choose to walk through is not a corridor you are led down.
+  - The horizon slider reads its rule at both ends; the expiry dropdown renders a refused
+    board DISABLED and NAMED (`offFloorExpiryLabel()`); `expiryChoiceNote()` names the
+    SELECTED board, so the dropdown and the sentence under it cannot read 2026-10-16 and
+    "Building on 2026-11-20" again; the step-2 CTA under an empty shortlist asks for
+    another expiry, another market or nothing today.
+  - **A REFUSAL AND A REASSURANCE MAY NOT SHARE A CARD**: "none of them stops the order"
+    is suppressed while a violation stands.
+  - THE TEST: every candidate every generation site returns goes through `evaluateTrade()`
+    in a dry run and must come back with ZERO violations, against the real generation
+    sites — and the fixture proves the gate really does refuse 24 DTE, so the filter is
+    load-bearing rather than decorative.
+
+**TASK 2 — a position says one thing.**
+
+  - Read in ONE scroll on XLE: home *"all inside the plan. Nothing to do"*, desk *"TODAY ·
+    EVERYTHING IS ON PLAN"*, the row *"Losing: check the reason"*, the verdict *"→ HOLD"*,
+    and **"OF THE MAXIMUM −3188%"** — for a trade that can make **$4** and lose **$346**.
+  - `remainingEdge()` asks the ENTRY question of an OPEN position, in TWO readings because
+    they answer two questions: from the current mark ($131 to make against $219 to lose,
+    which passes and is the honest answer to that question) and the position's own ceiling
+    ($4 against $346, which is the fact all five lines were silent about). Either being
+    thin is an attention item. **IT IS NOT AN EXIT RULE**: the exit rules are frozen,
+    nothing auto-closes, `AUTOPILOT_VERDICTS` is untouched, `ruleExitOf()` does not know it
+    exists, and it is not in the gate — a test holds all of that.
+  - `attentionCount()` is the one home for the headline, so no screen may say "nothing to
+    do" while a row says "check this".
+  - "OF THE MAXIMUM" prints a percent only above `MIN_NET_DOLLARS`: −3188% is a true
+    division and a false sentence.
+  - ONE CLOSE CONTROL PER POSITION. The broker panel's button survives only for a holding
+    the app has no record of, which would otherwise have no way out of this app at all.
+  - Report section 2: a working order is **"sent, not filled"**, never "opened at", listed
+    apart while still counted in the exposure as `bookPositions()` already decides.
+
+**TASK 3 — each explanation once per screen.**
+
+  - The floor paragraph (162 words) rendered TWICE on the Radar and TWICE on the
+    Shortlist; the CONFLICT narrative across Build and its overlay; the currency note on
+    every card. `Fold` in `steps.jsx` and `filterFold()` in `rules.js`: a summary WITH ITS
+    COUNT always on screen, the full text one tap behind it. **FOLD, NEVER DELETE** — and
+    **a refusal is never folded**, which is the older rule and outranks this one.
+  - **MEASURED, NOT ASSERTED.** `src/wordcount.mjs` reads the source and counts words AT
+    REST — what is behind a fold, a sheet or a tooltip does not count, which is what makes
+    "fold, never delete" falsifiable. Radar 1,162 → 378, Shortlist 1,881 → 998, Build 963
+    → 908; **4,006 → 2,284, a 43.0% cut**, both sides measured by the same counter over a
+    whole-tree checkout of `main`. The table is in PRD §4v.
+  - The header loses "IV RANK · 6d collected" — a progress bar for a number that is not
+    yet a number — to the History overlay.
+  - `isTestRecord()`: three records opened and closed by hand within the minute at zero
+    P&L moved the owner up a level and spent his patience budget. MARKED, NEVER DELETED.
+  - Report section 6 is THIS PERIOD'S, and an analysis claiming it can route an order is
+    FLAGGED, not quoted — rule 5 in the app's own document.
+  - **THE TEST FAILS THE BUILD** if any sentence over 20 words renders twice on one
+    screen, and it proves it can SEE one. It found a real site on the first run, and
+    `order.test.jsx` caught an OVER-TRIM on the same day: "every order goes through the
+    risk gate first" is rule 5 beside a send button and nothing else in that component
+    said it. Restored.
+
+WHAT P9 HANDS FORWARD (the full list is PRD NOT VERIFIED):
+  - **NO ORDER CAN BE SENT FROM THIS SANDBOX. TENTH SESSION IN A ROW.**
+  - **NOT ONE OF THESE SCREENS HAS BEEN SEEN ON A PHONE.** Tenth in a row, and this one
+    is the one whose whole subject is what a screen looks like.
+  - **`upgradeHolding()` HAS NEVER RUN AGAINST A REAL `/v2/positions` PAYLOAD.**
+  - **THE WORD COUNT IS A HEURISTIC AND SAYS SO**, and it counts conditional branches in
+    full, so it is an upper bound applied identically to both sides.
+  - **WHETHER J-0003 FILLED IS UNKNOWN** — SOYB 28/30, debit $0.80 GTC.
+  - **THE ANTHROPIC USAGE LIMIT DISABLED EVERY AI FEATURE UNTIL 2026-10-01**, so report
+    section 5 and both copilots were dead on the reading this session is built from.
+
 ## P2 — Proposals ranked by edge, not by score
 
 ### >>> THIS IS THE NEXT SESSION'S TASK. <<<

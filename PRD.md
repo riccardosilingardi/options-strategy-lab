@@ -2833,6 +2833,278 @@ inherit any of it: it has its own prompt and may not propose a trade at all.
 
 ---
 
+## §4v — ONE VOICE: THE MENU THE GATE REFUSED, THE POSITION THAT SAID FIVE THINGS, AND THE PARAGRAPH PRINTED FOUR TIMES
+
+The SIXTH live reading, 22 September 2026, sixteen screens. The owner's words:
+**"ancora abbastanza confusione, troppe info, trade suggestion non chiari."**
+
+Three faults, and none of them is an arithmetic error. Every number on those screens was
+correct. What was wrong is what the app SAID with them.
+
+### 0a. A HOLDING WRITTEN BEFORE THE STAMP NEVER UPGRADED
+
+XLE **J-0002** is a position Alpaca ITSELF lists under `/v2/positions`, and the app showed it
+as *"1 contract — assumed, not recorded"*, with one timeline entry, no fill entry, no exit
+plan, and no `fillVsLimit()` sentence anywhere on the row.
+
+**THE CAUSE IS A `continue`.** `importAlpaca()` builds a signature per broker group and skips
+any signature already in `store.positions`:
+
+    if (known.has(sigOf(g.und, g.exp, g.legs))) continue;
+
+That is right about ADDING and wrong about everything else. PR #33 (§4r.1) gave a holding
+`alpacaHeld`, `entrySource: "fill"`, the broker's own measured size and two timeline entries —
+and every record written BEFORE it matches the signature, so the upgrade could never reach it.
+**The one holding the owner actually has is exactly such a record.**
+
+A MATCH IS NOT A REASON TO DO NOTHING. It is a reason to UPGRADE: the sync is already holding
+the broker's own legs and the broker's own average entry prices, which is every input the
+missing fields need. `upgradeHolding()` in `journal.js` is the one home — whether a record is a
+holding, how big it is and where its price came from are facts about the RECORD.
+
+  - **THE SIZE IS MEASURED**, from the broker's own leg quantities through `reduceRatios()`, so
+    it clears `contractsAssumed` rather than agreeing with it by luck. Measured is not assumed
+    even when the two agree on the number.
+  - **NO ORDER FIELD IS INVENTED**: no `alpacaStatus`, no limit, no time in force. The broker
+    named a HOLDING. And the direction of a limit this app once sent is at the broker, not in a
+    positions payload, so **an unstamped limit stays unstamped** and `fillVsLimit()` goes on
+    refusing to compare it (§4s stands).
+  - **IT RETURNS THE SAME OBJECT WHEN NOTHING CHANGES**, so React bails out and the 60-second
+    sync cannot loop. Running it twice is running it once.
+
+### 0b. ONE P&L PER POSITION, AND IT IS THE BROKER'S
+
+The Positions screen printed **−$127** in the largest red figure on the card, directly above
+the broker's own panel printing **−$130** for the same XLE position. Two numbers for one trade,
+three dollars apart, neither labelled.
+
+`posAlerts` already preferred Alpaca's `unrealized_pl`; the Positions CARD, rendering a few
+hundred lines further down, re-derived its own from `netValue(legs, spot, …) − entryNet`.
+
+CLAUDE.md, in the owner's own words: **the broker's numbers are READ, never re-derived.**
+`unrealized_pl` is on that list; the app's mark is a MODEL of it, and a model beside a
+measurement is not a second opinion — it is a contradiction the reader has to arbitrate.
+
+`positionPnl()` in `rules.js` decides which of the two sources a figure came from and carries
+the sentence when it is the app's own — the same shape as `markProvenance()`. **The app's mark
+survives only where there is no broker figure, and it SAYS so, naming the feed it priced from.**
+`pnlOf()` in `App.jsx` is its one spelling there, and `riskGate.test.js` fails the build on a
+second `netValue(…) − p.entryNet` or a second read of `.unrealized_pl`.
+
+**AN UNASKED BROKER IS NOT A BROKER REPORTING ZERO** — `Number(null)` is 0 and 0 is finite, for
+the eighth time in this repository. A real `0` from the broker is still a real reading.
+
+### 1. THE APP BUILT A MENU OUT OF TRADES ITS OWN GATE REFUSES
+
+The Radar and the multi-market search both ran at **"HORIZON ~21 DTE"**. Every structure they
+offered sat on **2026-10-16, twenty-four days out**. Taking any of them to Build produced, at
+the bottom of that screen:
+
+    ✗ THIS ORDER WOULD NOT BE SENT
+    ENTRY_DTE_ROOM — 3 days of room against the 30-day floor
+
+**That is worse than an empty screen.** An empty screen with a sentence teaches the rule; a
+menu that dead-ends teaches that the rules are arbitrary.
+
+THE CAUSE IS THREE DIFFERENT EXPIRY WINDOWS IN THREE PLACES, none of them the rule:
+
+    runMultiScan   dte >= dT - 20 && dte <= dT + 35     at dT=21: ONE to 56 DTE
+    runWizard      dte >= minEntryDTE && dte <= 130     a bare 130, and maxEntryDTE is 90
+    the dropdown   every expiry the feed lists          no filter at all
+
+`buildableExpiries()` / `openableBoard()` in `rules.js` is the one home, built ON `entryRoom()`
+so there is no second spelling of the floor. A board is buildable when the gate would pass it
+**without an override**, and inside `maxEntryDTE`; the horizon yields when nothing is inside it
+and the floor never does, which is `expiryChoice()`'s rule read from one place.
+
+>>> **THE OVERRIDE IS NOT WITHDRAWN.** <<< `entryRoom()`'s middle band still unlocks with a
+typed reason and `passedOver` is still offerable. What changes is that the app will not OPEN a
+menu there by itself: **a door you may choose to walk through is not a corridor you are led
+down.**
+
+  - **THE THIRD GENERATION SITE HOLDS THE GUARD INSIDE ITSELF.** `shortlistWithFloors()`
+    returns nothing on an unbuildable board and says `offFloor`, the same reasoning that puts
+    `buildPresets()`'s null-board refusal in the function rather than at its call sites. An
+    empty list and "this board was never one the app opens on" are different answers.
+  - **THE HORIZON SLIDER READS ITS RULE AT BOTH ENDS.** `min` was 21 — `RULES.exitDTE` wearing
+    a horizon's clothes — and the label says why in one clause.
+  - **THE DROPDOWN AND THE SENTENCE NAME THE SAME BOARD.** The `<select>` offered every expiry
+    the feed lists while the line under it described `expChoice.chosen`, so the owner's screen
+    read **2026-10-16** above **"Building on 2026-11-20"**. A refused board renders DISABLED and
+    NAMED (`offFloorExpiryLabel()`, the `strikeOptions()` pattern), and `expiryChoiceNote()`
+    takes the SELECTED key.
+  - **"Go to Build — <structure>" IS NEVER OFFERED FOR A STRUCTURE THE FLOORS REMOVED.** It
+    carried whatever was in the Build screen's legs, which after a refusal is the structure the
+    list above has just said it will not offer.
+  - **A REFUSAL AND A REASSURANCE MAY NOT SHARE A CARD.** The owner read "THIS ORDER WOULD NOT
+    BE SENT" and, four lines below, "none of them stops the order" — §4m's fault on the card
+    §4n built to end it. While a violation stands the refusal is the whole verdict.
+
+**THE TEST**: every candidate every generation site returns is put through `evaluateTrade()` in
+a dry run and must come back with **zero violations**, against the real `shortlistWithFloors`
+and `analyze` out of `App.jsx` — and the fixture proves the gate really does refuse 24 DTE, so
+the filter is load-bearing rather than decorative.
+
+### 2. A POSITION SAID FIVE THINGS, AND TOGETHER THEY SAID NOTHING
+
+Read on XLE, in ONE scroll:
+
+    home      "all inside the plan. Nothing to do"
+    desk      "TODAY · EVERYTHING IS ON PLAN"
+    the row   "Losing: check the reason you opened it"
+    verdict   "→ HOLD"
+    stat      "OF THE MAXIMUM  −3188%"
+
+For a trade that can make **$4** and can lose **$346**.
+
+**THE MISSING FACT IS ON NONE OF THEM.** A position is judged at entry on what it pays against
+what it risks (`RULES.minRewardRisk`), and that question is then never asked again. The §4q
+inversion turned J-0002's $75 credit into $4 against $346 — a reward-to-risk of **0.01** against
+a floor of 0.25 — and nothing has asked since.
+
+`remainingEdge()` in `rules.js` asks the ENTRY question of an OPEN position, in **two readings**,
+because they answer two questions and one number could not:
+
+| reading | question | XLE |
+|---|---|---|
+| `ratio` | would the rules OPEN this structure today, at today's price? | $131 to make against $219 to lose = **0.60**, passes |
+| `ceilingRatio` | was this trade EVER something the rules would offer? | **$4 against $346 = 0.01**, forty times under the floor |
+
+The first is not a mistake; it is the honest answer to that question. The second is the fact all
+five lines were silent about. **Either being thin is an attention item**, and the sentence names
+both dollar figures and which reading fired.
+
+>>> **IT IS NOT AN EXIT RULE.** <<< The exit rules are chosen at construction and FROZEN — 50%
+of max profit, 21 DTE, the stop as a warning — and none of them changed. Nothing auto-closes,
+`AUTOPILOT_VERDICTS` is untouched, `ruleExitOf()` does not know this exists, and it is **not in
+the gate**. It is a WARNING, exactly like the stop, and a test holds all of that.
+
+  - **THE HEADLINE IS DERIVED FROM THE LIST.** Both headlines counted alerts at level `action`;
+    a `watch` row is not one, so a position the app had just told the reader to check sat under
+    a headline saying there was nothing to check. `attentionCount()` is the one home —
+    `decisions` draws the badge, `looks` is everything not on plan — and no headline may call
+    the book quiet while `looks` is above zero.
+  - **"OF THE MAXIMUM" PRINTS A PERCENT ONLY ABOVE `MIN_NET_DOLLARS`.** −$127 against a $4
+    maximum is −3188%: a true division and a false sentence. The rule is `rewardRisk()`'s —
+    nothing divides by a figure under the minimum — and below it the stat says so in words.
+  - **ONE CLOSE CONTROL PER POSITION.** Two buttons on two screens for one act, and only the
+    Positions card's asks WHY and files the answer. The broker panel's button survives for the
+    case that is genuinely its own — a holding with no record here, which
+    `orderReconciliation()` already names and which would otherwise have no way out of this app.
+  - **REPORT SECTION 2**: a working order is **"sent, not filled"**, never "opened at", listed
+    APART from positions while still counted in the exposure, exactly as `bookPositions()`
+    already decides. SENT is not FILLED, applied to the one consumer that read the book and then
+    described all of it as open.
+
+### 3. EACH EXPLANATION ONCE PER SCREEN — AND IT IS MEASURED
+
+Counted on those screens: the floor paragraph — `qualityFloorSentence()`, **162 words** —
+rendered TWICE on the Radar and TWICE on the Shortlist; the four-factor CONFLICT narrative
+across Build and its overlay; *"Every figure on this card is in US dollars"* on every card.
+
+**THE RULE IS `warningsToPrint()`'S RULE MADE GENERAL**: a long generated explanation has ONE
+HOME PER SCREEN, and everywhere else prints a one-line pointer naming where the full text is.
+
+>>> **FOLD, NEVER DELETE.** <<< `Fold` in `steps.jsx` — chrome with no trade in it, and the one
+file both `App.jsx` and `pro.jsx` can import without a cycle — puts a summary **with its count**
+always on screen and the full text one tap behind it, so nobody has to open it to learn whether
+it is worth opening. `filterFold()` in `rules.js` does the same for the nine separate paragraphs
+that explained why a structure was not on the Shortlist.
+
+>>> **AND A REFUSAL IS NEVER FOLDED.** <<< The rule that a gate violation renders beside the
+button is older than this one and outranks it. What folds is an EXPLANATION of a rule; what
+never folds is the app saying no.
+
+**MEASURED, NOT ASSERTED.** `src/wordcount.mjs` reads the SOURCE — the three step blocks,
+expanded through the components they mount — and counts **words at rest**: what is behind a
+fold, a sheet or a tooltip is one tap away and does not count. That is what makes "fold, never
+delete" falsifiable rather than a slogan.
+
+| screen | `main` | now | change |
+|---|---:|---:|---:|
+| Radar | 1,162 | 378 | **−67.5%** |
+| Shortlist | 1,881 | 998 | **−46.9%** |
+| Build | 963 | 908 | −5.7% |
+| **total** | **4,006** | **2,284** | **−43.0%** |
+
+Both sides measured by the same counter over a **whole-tree** checkout of `main`. Swapping only
+`App.jsx` under today's components reads 3,867 instead of 4,006 — a 3.5% error in the direction
+that flatters this session, which is why the recorded number is the worktree's.
+
+**WHAT THE COUNTER DOES NOT CLAIM.** Generated sentences are scored at their current wording
+whichever tree is read, so the delta measures SITES REMOVED OR FOLDED and never rewording —
+deliberately, because rewording is the thing this task must not do. Conditional branches are
+counted in full: a block with three mutually exclusive empty states renders one and this counts
+three. It is an upper bound applied identically to both sides, which is what makes the RATIO
+meaningful even though the absolute number is not a screenshot. A generator with no fixture
+scores zero and is NAMED in `uncounted`, so the coverage of the measurement travels with it.
+
+Also in this task:
+
+  - **THE HEADER CARRIES NOTHING THAT ASKS NOTHING OF THE USER.** *"IV RANK · 6d collected"* is
+    a progress bar for a number that is not yet a number, in the row the reader scans first on
+    every screen. The rank stays when it EXISTS — it is what `RULES.expensiveIVRank` refuses a
+    trade on — and the collection counter moved to the History overlay.
+  - **A TEST IS NOT A TRADE.** Three records opened and closed by hand within the minute at zero
+    P&L moved the owner up a level and spent his "patience" budget. `isTestRecord()` needs all
+    THREE conditions — zero P&L, same calendar day, closed by hand — because each alone is an
+    ordinary trade: a scratch, a day trade, a manual close. **THEY ARE MARKED, NEVER DELETED**:
+    the Journal is what happened, and deleting a record to make a score look better is the
+    opposite of what that screen is for.
+  - **REPORT SECTION 6 IS THIS PERIOD'S**, not the last five ever: a weekly report reprinting an
+    analysis from three weeks ago says something happened this week that did not. And an
+    analysis claiming it can route or place an order is **FLAGGED, not quoted** — rule 5 is that
+    nothing executes without an explicit human confirmation, and a document reproducing a model
+    saying otherwise, over the app's own signature, is the app contradicting its own rule in its
+    own report. It stays in the Journal; it is named, not reprinted.
+
+**THE TEST FAILS THE BUILD** if any sentence over 20 words renders twice on one screen, and it
+proves it can SEE one rather than passing by construction. It found a real site on the first
+run: `{looseningWarning(x) && <div>{looseningWarning(x)}</div>}` generates the sentence twice to
+render it once.
+
+**AND IT CAUGHT AN OVER-TRIM ON THE SAME DAY.** `order.test.jsx` failed on the order ticket's
+footer: *"every order goes through the risk gate first"* is rule 5 standing beside a send button,
+and nothing else in that component said it. Deleting it was over-reading this task's own rule.
+Restored, and the failure is recorded here rather than quietly fixed.
+
+### NOT VERIFIED
+
+- **NO ORDER CAN BE SENT FROM THIS SANDBOX. TENTH SESSION IN A ROW.** No broker keys, and the
+  egress proxy refuses the CONNECT.
+- **NOT ONE OF THESE SCREENS HAS BEEN SEEN ON A PHONE.** Tenth in a row — and this one's whole
+  subject is what a screen looks like. Every fold, every summary line and every trimmed
+  paragraph has been read in code and in a passing build, and on no screen. **A fold is a
+  judgement about what somebody will tap**, and nobody has tapped one.
+- **`upgradeHolding()` HAS NEVER RUN AGAINST A REAL `/v2/positions` PAYLOAD.** It is tested
+  against a record shaped exactly like J-0002 and a group shaped like the sync's own, both
+  hand-built. Whether the live payload produces the group shape this assumes is unverified.
+- **THE BROKER-PREFERRED P&L HAS NEVER BEEN READ OFF A LIVE ACCOUNT EITHER.** `positionPnl()` is
+  tested on both branches; which branch the owner's screen takes depends on `alpacaLive` and on
+  the leg match in `pnlOf()`, and that match has run against a fixture only.
+- **THE WORD COUNT IS A HEURISTIC AND SAYS SO.** "Prose" is four or more tokens of which 60%
+  look like English words; conditional branches are counted in full; six generators in `.jsx`
+  files cannot be scored by a plain-node counter and are named rather than silently zeroed.
+  **The 43% is a ratio between two runs of the same heuristic, not a count of pixels.**
+- **NOBODY HAS ASKED THE OWNER WHETHER THE FOLDS FOLD THE RIGHT THINGS.** The choice of what is
+  an EXPLANATION (folds) against what is a REFUSAL (never folds) was made here, from the rules
+  in CLAUDE.md, and not with him.
+- **`remainingEdge()`'S SECOND READING HAS NO THRESHOLD OF ITS OWN.** It reuses
+  `RULES.minRewardRisk`, which was chosen for ENTRY. Whether the bar for holding should be the
+  same as the bar for opening is a product decision nobody has taken, and 0.25 is itself an
+  inherited default like the rest of §4.
+- **WHETHER J-0003 FILLED IS UNKNOWN** — SOYB 28/30, a debit of $0.80, GTC. It was sent before
+  this session and nothing here can ask the broker.
+- **THE ANTHROPIC USAGE LIMIT DISABLED EVERY AI FEATURE UNTIL 2026-10-01.** Report section 5,
+  the desk copilot and the chart copilot were all dead on the reading this session is built
+  from, so `copilotOverreach()` has never seen a real model answer and section 6 has never been
+  generated with content in it.
+- **THE NEW SWEEPS ARE SOURCE SWEEPS.** `riskGate.test.js` and `voice.test.js` read `App.jsx`
+  and `pro.jsx` as text. A site written in a way the regex does not recognise is a site they do
+  not see, which is the same limit every sweep in this repository has.
+
+---
+
 ## 5. The wizard IS the app
 
 The wizard is not a feature inside the app. It is the entry point and the spine. Existing tabs remain reachable but are no longer the front door.
@@ -3770,7 +4042,30 @@ What is left:
 The standing rule in `CLAUDE.md`: every session starts by fixing what the last one flagged, and
 ends by writing down what it could not verify. Currently open:
 
-### WRITTEN THIS SESSION — the contract, the indicators and the chart copilot (§4s, §4t, §4u)
+### WRITTEN THIS SESSION — one voice (§4v)
+
+`npm test` reports **911 checks across 22 suites**, up from the **864 across 21** a clean `main`
+measures (measured on an untouched `main` at the start of this session, and it matches what
+PR #34 recorded). `npm run build` is clean. One new suite: `src/voice.test.js`.
+
+- **NO ORDER CAN BE SENT FROM THIS SANDBOX. TENTH SESSION IN A ROW.**
+- **NOT ONE OF THESE SCREENS HAS BEEN SEEN ON A PHONE**, and this session's whole subject is
+  what a screen looks like. Tenth in a row.
+- **`upgradeHolding()` HAS NEVER RUN AGAINST A REAL `/v2/positions` PAYLOAD**, and neither has
+  the broker-preferred P&L: both are tested against hand-built fixtures.
+- **THE 43% WORD CUT IS A RATIO BETWEEN TWO RUNS OF ONE HEURISTIC**, not a count of pixels, and
+  the heuristic states its own limits (§4v.3).
+- **NOBODY HAS ASKED THE OWNER WHETHER THE FOLDS FOLD THE RIGHT THINGS.**
+- **`remainingEdge()`'S SECOND READING REUSES `RULES.minRewardRisk`**, which was chosen for
+  ENTRY. Whether the bar for holding is the bar for opening is an untaken product decision.
+- **WHETHER J-0003 FILLED IS UNKNOWN** — SOYB 28/30, debit $0.80, GTC.
+- **THE ANTHROPIC USAGE LIMIT DISABLED EVERY AI FEATURE UNTIL 2026-10-01**, so report section 5
+  and both copilots were dead on the reading this session is built from, and
+  `copilotOverreach()` has never seen a real model answer.
+
+The full list, with the reasoning, is §4v NOT VERIFIED.
+
+### WRITTEN BEFORE THIS — the contract, the indicators and the chart copilot (§4s, §4t, §4u)
 
 `npm test` reports **864 checks across 21 suites**, up from the **818 across 19** a clean `main`
 measures (measured on an untouched `main` at the start of this session, and it matches what PR #33
@@ -3819,7 +4114,7 @@ recorded). `npm run build` is clean. Two new suites: `alpacaContract.test.js` an
   a passing build, and on no screen.
 - **NOBODY HAS SEEN ANY OF IT ON A PHONE.** Ninth pull request in a row, and this one is a chart.
 
-### WRITTEN THIS SESSION — the sign on a credit order, and the fill (§4q, §4r)
+### WRITTEN BEFORE THIS — the sign on a credit order, and the fill (§4q, §4r)
 
 The FOURTH live reading, and the first one with a FILL in it. `npm test` reports **818 checks
 across 19 suites**, up from the **787** a clean `main` measures. `npm run build` is clean.
