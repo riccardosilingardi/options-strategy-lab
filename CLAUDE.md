@@ -15,6 +15,19 @@ Carry this rule into whatever you hand to the next session — it is the only
 reason a note like "the fixture is not a live capture" ever gets resolved
 instead of being re-discovered.
 
+## WHAT THIS SESSION COULD NOT VERIFY — read this first, then PRD NOT VERIFIED
+
+1. **THE CLOSING DIRECTION VIA `closeGroup()` HAS NEVER BEEN SENT LIVE.** The path was rebuilt as
+   a limit priced at the tap and every part of it is held against fixtures. What no test can
+   settle is whether Alpaca accepts the body — in particular whether the SIGN comes out the way
+   `mlegLimitPrice()` says. The OPENING sign was wrong for four pull requests and only a fill
+   found it. **This is the highest-value single reading left in the app.**
+2. **J-0003 HAS NOT FILLED.** Is the indicative combination ask systematically INSIDE the real one
+   on thin chains, and by how much? The app names the feed now; it does not answer this.
+3. **P10'S FOUR SLIDER CONSTANTS ARE CHOSEN, NOT MEASURED**, like eight others before them.
+4. **NOBODY HAS SEEN THE SPLIT, THE CARDS OR THE CONTROLS ON A REAL SCREEN**, and ROADMAP P10
+   §3-bis says the result is whether the owner can read a card without reading a sentence.
+
 ## What this is
 
 A paper-trading platform for multi-leg options strategies on commodity ETFs.
@@ -242,6 +255,88 @@ and the gate, the card and the ticket are all handed it. What was missing:
   sentence is added — one redundant note is replaced.
 - `ticket.test.jsx` drives seed → ask through the real chain and holds the three figures equal at
   both prices. If they can ever differ again, that test says so.
+
+## THE CONTROLS COME FIRST, THE LIST SPLITS, AND A CARD HAS NO SENTENCES
+
+ROADMAP P10, PRD §4w. `src/card.jsx` is a new file and it holds two things: `RequestControls`
+(what the user wants) and `CandidateCard` (one result). It may not live in `steps.jsx` — that file
+is the navigation and holds nothing about a trade — and it may not live in `App.jsx`, because
+`wizard.jsx` renders the same card and `App.jsx` imports `wizard.jsx`. It is in `UI_FILES` in
+`wordcount.mjs` from the day it existed.
+
+- **ONE STATE FOR "WHAT I WANT", ABOVE BOTH DOORS.** `requestOf(want, limits)` in `rules.js` is
+  the one reader; `want` in `App.jsx` is the one state. `optMode` / `optAmt` / `wiz.risk` were two
+  homes for one answer and `riskGate.test.js` fails the build if any of those names comes back.
+  **The default amount is DERIVED from `limits.perTradeLimit` and never typed**, and
+  `amtAnswered` travels so every screen calls it a suggestion until the user answers.
+- **AND THE SIZE TRAVELS ALL THREE STEPS.** `contracts` on Build is DERIVED — `scaleStrategy()`,
+  untouched, read at the price the order will be sent at. A ticker or expiry change **RE-DERIVES**
+  from the budget; it does not reset to 1. A count typed by hand WINS and says so in one clause
+  (`contractsSourceNote()`). The gate is unchanged: it measures whatever `contracts` says.
+- **FIVE CONTROLS, ONE BLOCK, ABOVE EVERY RESULT**: direction, target price, budget-or-target,
+  expiry, and one slider. **THE TARGET PRICE IS A READ-OUT, DELIBERATELY** (`targetPriceOf()`) —
+  every generation site builds from the DIRECTION and the BOARD, and a typed price no site reads
+  would be a control that does nothing. **NEUTRAL carries a real move of ZERO**, so "no direction"
+  and "sideways" are told apart by hand: `Number(null)` is 0 and 0 is finite, for the eighth time.
+- **THE SLIDER SETS A MINIMUM CHANCE OF PROFIT**, off `chanceOf()`'s Monte Carlo. Four `RULES`
+  constants with their reasoning, **all CHOSEN NOT MEASURED**. It creates no structure, bypasses
+  no floor, and **never moves `minRewardRisk`** — a user-movable quality floor would be the app
+  letting somebody switch off the reason it can be trusted.
+- **THE LIST SPLITS, AND MEMBERSHIP IS DERIVED, NEVER STORED.** `meetsRequest()` /
+  `splitByRequest()` in `rules.js`, on all three generation sites. **IT GROUPS; THE FLOORS
+  REMOVE** — a test reads `meetsRequest()`'s own body and fails the build if it ever names one.
+  Every row in the second section says what it missed, because the function returns the REASONS
+  and the split reads them. The size is HANDED IN (`scaleStrategy()`'s result), never re-derived.
+- **ONE CARD, FOUR FIGURES, NO SENTENCES.** Name, legs on one line, RETURN ON RISK · CHANCE ·
+  PROFIT · RISK always in that order, the thumbnail and the gauge, one button. `card.test.jsx`
+  fails the build on a text node over six words except the name and the legs line.
+- **EVERY FIGURE ON A CARD IS AT THE PRICE THAT FILLS** — `fillNet()` = `openLimitPrice()` on
+  `comboBook()`, which is what `legLimitSeed()` sums to on the ticket. The section header says so
+  ONCE and `priceNote` is opt-in: a section whose rows are at the MID may not print it. The mid
+  reading survives beside it as `a`, because the compare picture and the stamp are drawn from it.
+- **A ROAD IS THE SAME CARD**, with its explanation folded — but `WhyThisTrade` and the one
+  sentence naming what it gives up **do not fold**: PRD §5 requires both, and P9 measured that
+  behind a tap those bars were in practice not on the screen at all.
+
+## ONE PRICE, AND WHAT CROSSING COSTS — `rewardRiskRange()`
+
+PRD §4w.3-quater. The owner: *"is it a good bet? yes — but how much do I pay for it?"*
+
+- **A BUDGET CANNOT CHANGE A REWARD-TO-RISK.** `analyze()` scales `maxProfit` and `maxLoss` by the
+  SAME leg quantities, so the ratio is invariant under size — $4 against $346 at one contract is
+  $40 against $3,460 at ten, and `ticket.test.jsx` holds it. Building one that moves with the
+  budget would be a number that looks live and never does. **What moves it is the PRICE**, because
+  `maxLoss` IS the debit.
+- **`rewardRiskRange()` IS DISPLAY ONLY**, beside `rewardRisk()`, which keeps its single-value job
+  for every existing caller. Three ratios WITH their three nets (bid, mid, fill), **nulls under
+  `minNetPremium`** exactly as `rewardRisk()` returns null under `MIN_NET_DOLLARS`. No new
+  arithmetic: the caller hands in its own `analyze()`, because `rules.js` does not own it.
+- **BUILD'S TOP IS FIVE FIGURES IN ONE ROW**, all at the price that will be sent, with one line —
+  `crossingCostNote()` — saying suggested, fair value and what the difference costs. The
+  breakdown and the range fold one tap below, and that fold says why a new position starts
+  negative (`openingMarkNote()`): it is marked at the BID the moment it opens, and that gap is the
+  round trip.
+
+## A CLOSE IS A LIMIT ON EVERY PATH — `closeGroup()`
+
+PRD §8c has said so since PR #22 and `closeGroup()` in `pro.jsx` was the one path that never got
+it. The owner hit Alpaca's refusal: **422 / 42210000, "options market orders are only allowed
+during market hours"**.
+
+- **`holdingLeg()` READS THE STRIKE AND THE TYPE OFF THE BROKER'S OWN OCC SYMBOL.** `/v2/positions`
+  carries neither as a field, and `buildOcc()` is not involved and never may be. A symbol the app
+  cannot parse is UNKNOWN and the close is refused by name — never a leg with a strike of zero.
+- `fetchChain()` at the tap, `closeMarket()`, `closeLimitPrice()`, `orderBody()` with
+  `type: "limit"` and the SIGNED net. **`limitAgainstBook()` stops SKIPPING here for the first
+  time** — it was wired with `book: null` and no limit at all, two of its four unknowns at once.
+  It is NOT in the gate and must not be: refusing a close strands somebody in a position they
+  asked to leave.
+- **NEVER FALL BACK TO A MARKET ORDER.** No chain, no book, no parseable symbol: refuse beside the
+  button with the reason. `order.test.js` sweeps every order path and fails the build on an
+  `orderBody()` call whose intent is close and whose type is the literal `"market"`.
+- **AND "FILLS NOW" NAMES THE FEED IT WAS JUDGED ON** (`INDICATIVE_CLAUSE`, PRD §4s-bis). Wording
+  only, on the fills branch alone: the other two zones claim nothing the feed can be wrong about
+  in the direction that costs somebody a day.
 
 ## THE DECISION IS FIVE LINES — the trade card, and everything else one tap away
 
@@ -1430,6 +1525,14 @@ while the position is open.
   file it came from, and the two that are NOT alpaca-py's say so. It imports nothing;
   `order.js` imports it and builds every body through it. Never write a field name, an
   enum value or a leg-count limit anywhere else.
+- `src/card.jsx` — **the controls, and the one candidate card.** `RequestControls` (direction,
+  target price, budget-or-target, expiry, the return-against-probability slider),
+  `CandidateCard` (name, legs, four figures, picture, one button — and NOT ONE SENTENCE),
+  `SplitSections` (the two headings, membership derived from `splitByRequest()` on every render)
+  and `MissLine`. It computes NOTHING: every figure is handed in, already worked out at the price
+  that fills, by the caller that owns `analyze()`. Its own `CardFigure` is NOT called `Figure` —
+  `visuals.jsx` exports one of those, and two components with one name is how a reader, a grep and
+  the word counter all resolve to the wrong one.
 - `src/wordcount.mjs` — **how many words a step renders, measured from the source.**
   Pure, importing `rules.js`, `chain.js`, `journal.js` and `order.js` only, and no React:
   a plain-node counter cannot import a `.jsx` file, which is why six generators are

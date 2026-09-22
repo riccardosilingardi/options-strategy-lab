@@ -110,22 +110,99 @@ test("MEASURED: the three screens, and the table in the PRD is this number", () 
      it — and it MUST be a whole-tree checkout, not `App.jsx` alone, because a
      screen is its block plus the components it mounts:
 
-         git worktree add --detach /tmp/wt main
+         git worktree add --detach /tmp/wt 68b75a5
          cp src/wordcount.mjs /tmp/wt/src/
          cp scripts/measure-words.mjs /tmp/wt/scripts/
          (cd /tmp/wt && node scripts/measure-words.mjs)
          git worktree remove /tmp/wt
 
-     Swapping only `App.jsx` under today's components reads 3,867 instead of
-     4,006 — a 3.5% error, in the direction that FLATTERS this session, which
-     is exactly why the number here is the worktree's. */
-  const BASELINE = { radar: 1162, shortlist: 1881, build: 963, total: 4006 };
+     Swapping only `App.jsx` under today's components reads low, in the
+     direction that FLATTERS the session doing the measuring, which is exactly
+     why the number here is the worktree's.
+
+     >>> RE-DERIVED BY P10, BECAUSE THE COUNTER WAS FIXED. <<< It read
+     { radar 1162, shortlist 1881, build 963, total 4006 } until `atRest()` was
+     made to strip each piece of a screen BEFORE they are joined. Run over the
+     concatenation, a fold's non-greedy `<Fold …>` → `</Fold>` match crossed the
+     boundary between the step block and a component body, so which words a fold
+     hid depended on which components the block mounted and in what order — the
+     Shortlist scored 533 words of its own 776 before the P10 controls block
+     mounted one more component and 707 after, on a screen whose source had
+     SHRUNK. Only `build` moves here (963 -> 593): the other two screens read
+     exactly as they did. Both sides of this table are measured by one counter,
+     or the table means nothing. */
+  const BASELINE = { radar: 1162, shortlist: 1872, build: 593, total: 3627 };
   const now = m.total.total;
   assert.ok(now < BASELINE.total, `the screens must not grow: ${now} against ${BASELINE.total}`);
   const cut = 1 - now / BASELINE.total;
-  // The target P9 was set. It is asserted, so it cannot quietly regress.
-  assert.ok(cut >= 0.40,
-    `words at rest fell ${(cut * 100).toFixed(1)}%, and the target is 40% (${now} against ${BASELINE.total})`);
+
+  /* >>> TWO ASSERTIONS, AND THE SECOND ONE IS THE REAL GUARD. <<<
+
+     P9 SET A 40% TARGET AND HIT 47.5% ON THE CORRECTED COUNTER. P10 SPENDS
+     SOME OF IT BACK, DELIBERATELY AND IN WRITING: ROADMAP P10 §5 says so
+     before a line of it was built — "P9 cut that screen from 1,162 words to
+     378 and a new always-visible panel spends some of that back... A control
+     that asks a question earns its words; a paragraph explaining the control
+     does not, and folds." Five controls now sit above every result on two
+     screens, and their explanation is behind a `Fold`.
+
+     SO THE FLOOR MOVES FROM 40% TO 35%, AND IT IS SAID RATHER THAN SLID. A
+     session that lowers a bar to clear it is doing the thing this whole file
+     exists to stop, so the number that actually stops growth is the CEILING
+     below: it is this session's own reading, and any screen that grows by one
+     word fails the build. The ratio is kept as the long-run direction.
+
+     THE OWNER'S OWN VERDICT ON THE RATIO, after P9 reported 43%: "non me ne
+     frega niente, basta si capisca il tutto, sia intuitivo e siano evidenti
+     takeaway senza perdere sostanza." It is a GUARD. It is not the result. */
+  assert.ok(cut >= 0.35,
+    `words at rest fell ${(cut * 100).toFixed(1)}%, and the floor is 35% (${now} against ${BASELINE.total})`);
+
+  /* THE CEILING: what this tree measures today. Nothing may grow past it
+     without a session deliberately raising it and saying why, which is the
+     same discipline the baseline above is kept under. */
+  /* RAISED ONCE, DELIBERATELY, BY P10 TASK 5: Build's top gained the five
+     figures, the one line saying what crossing costs, and a fold. `build` moves
+     533 -> 559. Nothing else moves. A ceiling is raised by a session that says
+     why, in the commit and in the PRD, and never by one quietly re-running the
+     counter. */
+  const CEILING = { radar: 481, shortlist: 1216, build: 559, total: 2256 };
+  assert.ok(now <= CEILING.total,
+    `the screens grew: ${now} against the ${CEILING.total} this ceiling records`);
+  for (const id of SCREEN_IDS) {
+    assert.ok(m[id].total <= CEILING[id],
+      `${id} grew: ${m[id].total} against ${CEILING[id]}`);
+  }
+});
+
+test("…and a screen's reading is the SUM OF ITS PARTS, not the order it was joined in", () => {
+  /* >>> THE DEFECT P10 MEASURED, AND THE GUARD AGAINST IT COMING BACK. <<<
+     `atRest()` strips a fold with a non-greedy match from `<Fold …>` to the next
+     `</Fold>`. It used to run over the CONCATENATION of the step block and every
+     component body, so that match could cross the boundary between two pieces:
+     which words a fold hid depended on which components the block mounted, and
+     in what order. The Shortlist scored 533 words before the P10 controls block
+     mounted one more component and 707 after, on a source that had SHRUNK.
+
+     A counter that moves when nothing on the screen moved is not a guard. Each
+     piece is put at rest BEFORE the join now, so appending a body can only ADD
+     that body's own words. */
+  const body = `<div>\n  Alpha beta gamma delta epsilon zeta.\n  <Fold summary={"x"}>\n    Hidden words that nobody reads at rest.\n  </Fold>\n</div>`;
+  // A piece whose fold is balanced hides its own children and nothing else.
+  assert.ok(!atRest(body).includes("Hidden words"));
+  assert.ok(atRest(body).includes("Alpha beta gamma"));
+  // AND A DANGLING CLOSE IN A LATER PIECE CANNOT REACH BACK INTO AN EARLIER ONE.
+  const opened = `<div>\n  <Fold summary={"y"}>\n  Visible after the fix: this fold never closes.\n</div>`;
+  const later = `<div>\n  Words in a component body that must still be counted.\n</Fold>\n</div>`;
+  const joined = [atRest(opened), atRest(later)].join("\n");
+  assert.ok(joined.includes("Words in a component body"),
+    "a later piece's </Fold> must not swallow it: that is the fault this guards");
+  // ...and the counter really is piecewise: the whole equals the sum of parts.
+  for (const id of SCREEN_IDS) {
+    const whole = screenSource(APP, id);
+    assert.equal(atRest(whole), whole,
+      `${id}: screenSource() must hand back text that is already at rest`);
+  }
 });
 
 test("…and the measurement counts PROSE, not JavaScript", () => {

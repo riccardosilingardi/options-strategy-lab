@@ -25,7 +25,10 @@ import { RULES, sizing, ruleBadge, qualityFloor, qualityFloorSentence, liquidity
   sigmaProvenance, TABLE_SIGMA_SOURCE, MEASURED_SIGMA_SOURCE, FALLBACK_SIGMA_SOURCE,
   positionPnl, modelPnlNote, BROKER_PNL, MODEL_PNL,
   buildableExpiries, openableBoard, offFloorExpiryLabel, horizonFloorNote, emptyShortlistCta,
-  remainingEdge, remainingEdgeNote, remainingEdgeLabel, shareOfMaximum, attentionCount, sameCloseNote } from "./rules.js";
+  remainingEdge, remainingEdgeNote, remainingEdgeLabel, shareOfMaximum, attentionCount, sameCloseNote,
+  requestOf, requestAmountLabel, requestAmountOwner, contractsSourceNote, clampAskedChance,
+  REQUEST_MODES, meetsRequest, splitByRequest, meetsHeading, otherwiseHeading,
+  targetPriceOf, chanceAskLabel } from "./rules.js";
 import { netBS, SIGMA, exitSim } from "./engine.js";
 import { isStale, staleAmong, agePhrase, freshnessNote, BUDGETS } from "./freshness.js";
 
@@ -3136,6 +3139,224 @@ test("TASK 2 — ONE CLOSE CONTROL PER POSITION", () => {
 });
 
 /* ---------------- summary ---------------- */
+/* ====================================================================
+   ROADMAP P10 §2 — ONE STATE FOR "WHAT I WANT", AND THE SIZE TRAVELS
+==================================================================== */
+
+test("REQUEST — the amount is DERIVED from the per-trade limit, never typed", () => {
+  const limits = sizing({ tradingCapital: 5000, concurrentTarget: 4 });
+  const r = requestOf({}, limits);
+  assert.equal(r.amt, Math.round(limits.perTradeLimit),
+    "the starting amount is the sizing() result, not a number somebody wrote down");
+  assert.equal(r.amtAnswered, false, "a derived default is not an answer");
+  assert.equal(r.answered, false);
+  assert.match(requestAmountOwner(r), /suggested/,
+    "until it is answered, every screen calls it a suggestion");
+  // ...and once it IS answered it is the user's, and it is what is read.
+  const typed = requestOf({ amt: 400 }, limits);
+  assert.equal(typed.amt, 400);
+  assert.equal(typed.amtAnswered, true);
+  assert.equal(requestAmountOwner(typed), "your answer");
+});
+
+test("REQUEST — Number(null) is 0 and 0 is finite, for the seventh time", () => {
+  // An amount of 0, null, "" or NaN is NOT an answer of zero.
+  for (const amt of [null, undefined, 0, "", NaN, -50]) {
+    const r = requestOf({ amt }, { perTradeLimit: 250 });
+    assert.equal(r.amtAnswered, false, `${String(amt)} is not an answer`);
+    assert.equal(r.amt, 250, "it falls back to the derived limit");
+  }
+  // ...and with no limits at all there is no number, rather than a zero.
+  assert.equal(requestOf({}, {}).amt, null);
+  assert.equal(requestOf({}, { perTradeLimit: 0 }).amt, null);
+});
+
+test("REQUEST — the mode is one of two, and the label follows it", () => {
+  assert.deepEqual(REQUEST_MODES, ["budget", "target"]);
+  assert.equal(requestOf({ mode: "nonsense" }, {}).mode, "budget", "an unknown mode is the default");
+  assert.match(requestAmountLabel("budget"), /RISK/);
+  assert.match(requestAmountLabel("target"), /PROFIT/);
+});
+
+test("REQUEST — the slider's band and step live in RULES, and it is clamped", () => {
+  for (const k of ["chanceAskMin", "chanceAskMax", "chanceAskStep", "chanceAskDefault"]) {
+    assert.equal(typeof RULES[k], "number", `${k} has a home in RULES`);
+  }
+  assert.ok(RULES.chanceAskMin < RULES.chanceAskDefault && RULES.chanceAskDefault < RULES.chanceAskMax,
+    "the default is inside the band it is the default of");
+  assert.equal(clampAskedChance(0.99), RULES.chanceAskMax);
+  assert.equal(clampAskedChance(0.01), RULES.chanceAskMin);
+  assert.equal(clampAskedChance(null), RULES.chanceAskDefault, "unknown is the default, never a zero");
+  assert.equal(requestOf({ minChance: 2 }, {}).minChance, RULES.chanceAskMax);
+  assert.equal(requestOf({}, {}).chanceAnswered, false);
+  // THE STEP IS COARSER THAN THE SIMULATION'S OWN ERROR. At `mcRuns` the
+  // standard error is about half a point; a step finer than that would move
+  // rows between the two sections on sampling noise.
+  assert.ok(RULES.chanceAskStep >= 0.02,
+    "a step finer than the Monte Carlo's own error is a control that appears to do what it did not");
+  // AND IT IS NOT THE REWARD FLOOR. `minRewardRisk` stays a FIXED rule.
+  assert.equal(RULES.minRewardRisk, 0.25, "the reward floor is not a control and does not move");
+});
+
+test("REQUEST — the contract count says whose number it is", () => {
+  const r = requestOf({ amt: 500 }, { perTradeLimit: 250 });
+  assert.match(contractsSourceNote({ contracts: 3, typed: true, request: r }), /yours/);
+  assert.match(contractsSourceNote({ contracts: 3, typed: true, request: r }), /overrides the budget/);
+  assert.match(contractsSourceNote({ contracts: 3, typed: false, request: r }), /buys/);
+  assert.match(contractsSourceNote({ contracts: 1, typed: false, request: r, fits: false }), /buys none/);
+  const t = requestOf({ mode: "target", amt: 500 }, {});
+  assert.match(contractsSourceNote({ contracts: 2, typed: false, request: t }), /reaches/);
+  // Every one of them names the count itself, so the clause cannot drift from
+  // the field it sits under.
+  for (const typed of [true, false]) {
+    assert.match(contractsSourceNote({ contracts: 7, typed, request: r }), /x7/);
+  }
+});
+
+test("ONE HOME — App.jsx keeps no second copy of the budget or the size", () => {
+  const app = codeOf("App.jsx");
+  /* `optMode` / `optAmt` were Build-and-Shortlist state and `wiz.risk` was the
+     guided run's: two states, one question. A reappearance of either name is a
+     second home, and the Build screen's hardcoded 500 beside the wizard's
+     derived 250 is what that costs. */
+  for (const name of ["optMode", "optAmt", "optAmtTyped", "setOptAmt", "setOptMode"]) {
+    assert.equal(new RegExp(`\\b${name}\\b`).test(app), false,
+      `${name} is back in App.jsx: the request has one home (ROADMAP P10 §2)`);
+  }
+  assert.equal(/risk:\s*null/.test(app), false,
+    "`wiz` carries its own budget again: it must READ `want.amt`, not hold a copy");
+  assert.ok(/requestOf\(/.test(app), "App.jsx reads the request through its one home");
+  /* AND THE SIZE IS DERIVED FROM IT RATHER THAN RESET. `setContracts(1)` on a
+     ticker change was a budget answered once and thrown away three screens
+     later. */
+  assert.equal(/setContracts\(1\)/.test(app), false,
+    "a ticker change RE-DERIVES the size from the budget; it does not forget it");
+  assert.ok(/scaleStrategy\(AE, request\.mode, request\.amt\)/.test(app),
+    "Build sizes from the one home, at the price the order will be sent at");
+  /* AND THE WIDE SEARCH STOPPED ROLLING ITS OWN. `Math.floor(amt / Math.max(1,
+     ...))` is the shape that turned a $250 budget into 250 contracts. */
+  assert.equal(/Math\.floor\(\s*optAmt/.test(app), false);
+  assert.equal(/Math\.floor\(\s*request\.amt/.test(app), false,
+    "the size has ONE home and scaleStrategy() is it");
+});
+
+/* ====================================================================
+   ROADMAP P10 §3 — THE LIST SPLITS, AND MEMBERSHIP IS LIVE
+==================================================================== */
+
+/* One fixture row, and a `scaleStrategy()`-shaped sizer for it. The sizer is
+   HANDED IN on purpose: how many combinations a budget buys has one home and
+   `rules.js` is not it. */
+const P10_ROW = { name: "Bull Call Spread", pop: 0.62, maxProfit: 180, maxLoss: -120, entryNet: 1.2, legs: [{}, {}] };
+const p10Size = (amt) => (c) => {
+  const unit = Math.abs(c.entryNet) * 100;
+  return unit <= amt
+    ? { ok: true, n: Math.floor(amt / unit), unit, isCredit: false, totProfit: Math.floor(amt / unit) * c.maxProfit }
+    : { ok: false, unit, isCredit: false };
+};
+
+test("SPLIT — a row crosses on the BUDGET and comes back", () => {
+  const rich = requestOf({ amt: 300 }, {});
+  const poor = requestOf({ amt: 100 }, {});
+  const inTop = splitByRequest([P10_ROW], rich, p10Size(300));
+  assert.equal(inTop.meets.length, 1, "$120 a combination is inside a $300 budget");
+  assert.equal(inTop.others.length, 0);
+  const dropped = splitByRequest([P10_ROW], poor, p10Size(100));
+  assert.equal(dropped.meets.length, 0, "and outside a $100 one");
+  assert.equal(dropped.others.length, 1);
+  assert.match(dropped.others[0].misses[0].short, /over budget by \$20/);
+  // ...AND BACK. Membership is derived, so nothing has to be un-stored.
+  assert.equal(splitByRequest([P10_ROW], rich, p10Size(300)).meets.length, 1);
+});
+
+test("SPLIT — a row crosses on the SLIDER and comes back", () => {
+  const easy = requestOf({ amt: 300, minChance: 0.5 }, {});
+  const hard = requestOf({ amt: 300, minChance: 0.75 }, {});
+  assert.equal(splitByRequest([P10_ROW], easy, p10Size(300)).meets.length, 1, "62% clears a 50% bar");
+  const below = splitByRequest([P10_ROW], hard, p10Size(300));
+  assert.equal(below.meets.length, 0, "and not a 75% one");
+  assert.match(below.others[0].misses[0].short, /chance 62% under the 75% asked/);
+  assert.equal(splitByRequest([P10_ROW], easy, p10Size(300)).meets.length, 1);
+});
+
+test("SPLIT — it GROUPS, it never removes, and no row lands without a reason", () => {
+  const req = requestOf({ amt: 100, minChance: 0.8 }, {});
+  const rows = [P10_ROW, { ...P10_ROW, name: "B", pop: 0.9 }, { ...P10_ROW, name: "C", pop: null }];
+  const sp = splitByRequest(rows, req, p10Size(100));
+  assert.equal(sp.total, rows.length, "nothing is dropped: the two sections are the whole list");
+  assert.equal(sp.meets.length + sp.others.length, rows.length);
+  for (const o of sp.others) {
+    assert.ok(o.misses.length > 0, `${o.cand.name} sits in the second section with no reason`);
+    for (const m of o.misses) assert.ok(m.short && m.text, "a reason is a phrase AND a sentence");
+  }
+  // UNKNOWN IS NOT A PASS AND NOT A ZERO. `Number(null)` is 0 and 0 is finite.
+  const unknown = sp.others.find((o) => o.cand.name === "C");
+  assert.ok(unknown.misses.some((m) => m.id === "chance-unknown"));
+  assert.match(unknown.misses.find((m) => m.id === "chance-unknown").text, /Unknown is not a low number/);
+});
+
+test("SPLIT — the target mode misses by the shortfall, in dollars", () => {
+  const req = requestOf({ mode: "target", amt: 1000 }, {});
+  const sized = () => ({ ok: true, n: 2, unit: 120, isCredit: false, totProfit: 360 });
+  const sp = splitByRequest([P10_ROW], req, sized);
+  assert.equal(sp.others.length, 1);
+  assert.match(sp.others[0].misses[0].short, /short of the target by \$640/);
+});
+
+test("SPLIT — the headings carry the counts, so neither needs a sentence", () => {
+  const req = requestOf({ amt: 300 }, {});
+  assert.match(meetsHeading(req, 3), /\(3\)/);
+  assert.match(otherwiseHeading(5), /\(5\)/);
+  assert.ok(meetsHeading(req, 3).split(/\s+/).length <= 8, "a heading is not a paragraph");
+  assert.ok(otherwiseHeading(5).split(/\s+/).length <= 10);
+});
+
+test("SPLIT — membership is NEVER stored on a candidate", () => {
+  const req = requestOf({ amt: 300 }, {});
+  const row = { ...P10_ROW };
+  const before = JSON.stringify(row);
+  splitByRequest([row], req, p10Size(300));
+  assert.equal(JSON.stringify(row), before,
+    "a stored membership is a stale one the moment the control moves");
+  // ...and App.jsx may not write one either.
+  const app = codeOf("App.jsx");
+  assert.equal(/\.meets\s*=|meetsRequest:\s/.test(app), false,
+    "membership is derived on every render, never assigned onto a candidate");
+});
+
+test("SPLIT — the quality floors are untouched by any of this", () => {
+  // The slider may not move the reward floor, and nothing here calls a floor.
+  assert.equal(RULES.minRewardRisk, 0.25);
+  const rules = codeOf("rules.js");
+  const at = rules.indexOf("export function meetsRequest");
+  const end = rules.indexOf("export function splitByRequest");
+  const body = rules.slice(at, end);
+  for (const floor of ["qualityFloor", "spreadFloor", "comboSpreadFloor", "liquidityThreshold", "minRewardRisk"]) {
+    assert.equal(body.includes(floor), false,
+      `meetsRequest() names ${floor}: this GROUPS, the floors REMOVE, and they are not the same question`);
+  }
+});
+
+test("TARGET PRICE — the direction read as a number, and unknown stays unknown", () => {
+  const t = targetPriceOf(27.5, { tgt: 0.04 });
+  assert.equal(t.known, true);
+  assert.ok(Math.abs(t.price - 28.6) < 1e-9);
+  assert.equal(t.movePct, 4);
+  // NO SPOT IS UNKNOWN, NEVER A TARGET OF ZERO.
+  for (const bad of [null, undefined, 0, NaN, ""]) {
+    assert.equal(targetPriceOf(bad, { tgt: 0.04 }).known, false, `${String(bad)} is not a price`);
+    assert.equal(targetPriceOf(bad, { tgt: 0.04 }).price, null);
+  }
+  assert.equal(targetPriceOf(27.5, null).known, false, "no direction, no target");
+  assert.equal(targetPriceOf(27.5, {}).known, false, "a direction with no move is not a move of zero");
+  // ...but NEUTRAL really is a move of zero, and that is a reading.
+  const flat = targetPriceOf(27.5, { tgt: 0 });
+  assert.equal(flat.known, true);
+  assert.equal(flat.price, 27.5);
+  // ...and the slider's label carries the number it is asking for.
+  assert.match(chanceAskLabel(requestOf({ minChance: 0.65 }, {})), /65%/);
+});
+
 console.log(`\n${passed} passed, ${failures.length} failed\n`);
 if (failures.length) {
   for (const f of failures) console.error(`${f.name}:\n${f.e.stack}\n`);

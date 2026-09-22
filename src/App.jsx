@@ -37,11 +37,18 @@ import { RULES, sizing, ruleBadge, takeProfitLabel, stopLossLabel, perTradeCapLa
   chancePct, chanceText, chanceInTen, signedMoney,
   ruleExitOf, stopWarningSentence, watchAttentionLevel,
   chanceOf, chanceSourceNote, seasonalProvenance, seasonalStampNote, seasonalStampFields, chanceDrawFields,
-  sigmaProvenance, isButterfly } from "./rules.js";
+  sigmaProvenance, isButterfly,
+  requestOf, requestAmountLabel, requestAmountOwner, contractsSourceNote,
+  splitByRequest, meetsHeading, otherwiseHeading, missReasonLine, fillPriceHeading, fillNet,
+  rewardRiskRange, RR_POINTS, crossingCost, crossingCostNote, openingMarkNote } from "./rules.js";
 import { isStale, freshnessNote, staleAmong } from "./freshness.js";
 import { evaluateTrade, gateSummary } from "./riskGate.js";
 import { DEMO, DEMO_BANNER, DEMO_TOOLTIP, DEMO_SEED_TICKERS, demoPositions } from "./demo.js";
 import { CapitalOnboarding, WizardOpen, FindOpportunities, WizardCandidates, ConfirmSteps, NothingToday, Card, Pill } from "./wizard.jsx";
+// THE CONTROLS AND THE ONE CANDIDATE CARD (ROADMAP P10). Its own file: it is
+// nothing but a trade, so it may not live in `steps.jsx`, and `wizard.jsx`
+// renders the same card, so it may not live here.
+import { RequestControls, SplitSections, MissLine, CandidateCard } from "./card.jsx";
 import { buildHandOff, buildScreenState, BUILD_TAB } from "./handoff.js";
 import { orderBody, orderOutcome, alpacaErrorText, reduceRatios, limitWords, fillPriceOf } from "./order.js";
 // THE PERMANENT RECORD: the ref a position is given at open, the sequence on
@@ -427,6 +434,25 @@ function priceLeg(leg, S, dte, baseIV, q) {
 }
 /** The two-sided quotes behind an analysis, one per leg, for `priceability()`. */
 const quotesOf = (a) => (a?.legPx || []).map((l) => ({ bid: l.bid, ask: l.ask }));
+/**
+ * THE SAME STRUCTURE, RE-READ AT THE PRICE THAT FILLS (ROADMAP P10 §3-bis).
+ *
+ * A candidate's `analyze()` is at the MID, deliberately: a candidate is a
+ * structure and not yet a price. But a CARD carries four figures somebody
+ * decides on, and §4l is the whole argument for which price they are read at —
+ * on UNG the same structure is 2.6:1 at the mid and 1.1:1 at the price that
+ * trades, and the mid is a price this app has proved nobody gives you.
+ *
+ * `analyze()` is UNCHANGED and is called exactly as the Build screen calls it,
+ * with `{ net }`. No readable book means the mid stands and the caller says so
+ * — never a price of zero.
+ */
+const atFillPrice = (legs, a, { spot: sp, dte: d, iv: v, q: qq }) => {
+  if (!a) return a;
+  const net = fillNet(legs, quotesOf(a));
+  if (!Number.isFinite(net) || !sp) return a;
+  return analyze(legs, sp, d, v, qq, { net });
+};
 /**
  * THE CONTRACTS THE CHAIN ACTUALLY LISTED, one per leg, for
  * `contractListing()` in rules.js — null where it listed none.
@@ -1370,23 +1396,30 @@ export default function OptionsStrategyLab() {
      It is a piece of Build-screen state like `legs` and `dte`, so it lives with
      them, above the ticket, the confirm step, the gate preview and the position
      that gets written. The ticket is now a controlled input on it. */
-  const [contracts, setContracts] = useState(1);
-  /* Changing the market or the expiry resets the size: "×7" typed against a
-     butterfly is not an answer about the vertical that replaced it, and an
-     order sized for a trade that is no longer on screen is the failure this
-     whole item is about.
+  /* >>> AND IT IS DERIVED FROM THE BUDGET UNLESS SOMEBODY TYPES ONE (P10 §2).
+     <<< The state here is the OVERRIDE, not the size: `contractsTyped` is null
+     until the user sets a quantity by hand, and `contracts` below is read off
+     the request the same way the Shortlist reads it. The owner's "pt. 1" was
+     that what the budget decides has to be the count the Shortlist shows, Build
+     loads and the ticket sends; a size that reset to 1 on the way to Build was
+     a budget answered once and thrown away three screens later. */
+  const [contractsTyped, setContractsTyped] = useState(null);
+  /* Changing the market or the expiry RE-DERIVES the size from the budget; it
+     does not forget it. "×7" typed against a butterfly is not an answer about
+     the vertical that replaced it — so the typed override is dropped — but the
+     budget is an answer about the USER, not about the structure, and it
+     survives.
 
      THE REF IS NOT DECORATION. `openOnBuild()` sets the ticker, the expiry AND
      the size in one go, and a re-price hands back the size the order was sent
      at. Without this guard the effect would fire on the ticker it just set and
-     put the size back to 1 — quietly shrinking an order the user had already
-     sized, which is the same class of fault as the hardcoded 1 this replaces. */
+     drop an override the user had already made. */
   const sizedFor = useRef(null);
   useEffect(() => {
     const key = `${ticker}|${expKey}`;
     if (sizedFor.current === key) return;
     sizedFor.current = key;
-    setContracts(1);
+    setContractsTyped(null);
     // ...and the PRICE with it, for the same reason: a per-leg limit typed
     // against a butterfly is not an answer about the vertical that replaced it.
     setTicket((t) => ({ ...t, legPx: null }));
@@ -1404,13 +1437,15 @@ export default function OptionsStrategyLab() {
   const [taChat, setTaChat] = useState({ msgs: [], busy: false, err: null, partial: "" });
   const [taBars, setTaBars] = useState(null);
   useEffect(() => { setTaBars(null); setTaChat({ msgs: [], busy: false, err: null, partial: "" }); }, [ticker]);
-  const [optMode, setOptMode] = useState("budget");
-  // NOT a hardcoded 500. The field starts at the per-trade limit the capital
-  // model derives and only holds a number of its own once the user types one,
-  // so the Build screen and the wizard are incapable of disagreeing about how
-  // much this user may risk.
-  const [optAmtTyped, setOptAmt] = useState(null);
-  const optAmt = optAmtTyped == null ? Math.round(limits.perTradeLimit) : optAmtTyped;
+  /* >>> ONE STATE FOR "WHAT I WANT", ABOVE BOTH DOORS (ROADMAP P10 §2). <<<
+     `optMode` / `optAmt` lived here and the guided run had its own `wiz.risk`:
+     two homes for one answer, which is the shape CLAUDE.md's standing rule is
+     about. There is one now. Every field is NULL until answered — the amount
+     falls back to `limits.perTradeLimit`, DERIVED and never typed, and
+     `request.amtAnswered` is how every screen knows to call it a suggestion
+     rather than quoting a figure the user never chose back at them. */
+  const [want, setWant] = useState({ mode: "budget", amt: null, minChance: null });
+  const request = useMemo(() => requestOf(want, limits), [want, limits]);
   const [autoMon, setAutoMon] = useState(true);
   // THE CLOSE ASKS WHY. `{ id, written, err }` while a close is being written.
   const [closing, setClosing] = useState(null);
@@ -1454,9 +1489,23 @@ export default function OptionsStrategyLab() {
   // DO have a starting position, because "all five markets, evenly weighted" is
   // a visible state the user can see and change, not an invented answer.
   const [wiz, setWiz] = useState({
-    basket: BASKET, risk: null, horizon: null,
+    basket: BASKET, horizon: null,
     weights: { ...DRIVER_PRESETS.balanced }, priority: "balanced", busy: false, err: null,
   });
+  /* >>> `risk` IS NOT IN `wiz` ANY MORE, AND THAT IS THE POINT (P10 §2). <<<
+     The guided run's budget and the desk's budget were two states holding one
+     answer. `want.amt` is the one home; this is the wizard's READING of it, and
+     it stays NULL until the user answers — `request.amt` carries the derived
+     suggestion for screens that must print something, and this carries the
+     ANSWER, which is what the wizard may quote back and what its button waits
+     for. `setWizAnswers()` splits a write to `risk` back to that one home. */
+  const wizAnswers = useMemo(
+    () => ({ ...wiz, risk: request.amtAnswered ? request.amt : null }), [wiz, request]);
+  const setWizAnswers = useCallback((next) => {
+    const { risk, ...rest } = next || {};
+    setWant((w) => (risk === w.amt ? w : { ...w, amt: risk == null ? null : risk }));
+    setWiz((w) => ({ ...w, ...rest }));
+  }, []);
   const [optRef, setOptRef] = useState(null); // price snapshot from the Shortlist, to reconcile against the Build screen
   const [weather, setWeather] = useState(null);  // regionId -> forecast 14g (fuseSignals)
   const [barsCache, setBarsCache] = useState({}); // ticker -> daily bars (fattore tecnico)
@@ -1781,6 +1830,20 @@ export default function OptionsStrategyLab() {
     }));
   }, [chain, liqLevel]);
   const expChoice = useMemo(() => expiryChoice(expiryOptions), [expiryOptions]);
+  /* >>> WHICH BOARDS A DROPDOWN MAY OFFER — ONE LIST, TWO SCREENS (P10 §2).
+     <<< The controls block on the Radar and the expiry dropdown on the
+     Shortlist are the same question, and a second spelling of "which boards may
+     be offered" is how the two come to disagree. `buildableExpiries()` decides
+     what the gate would pass WITHOUT an override; a refused board is still
+     RENDERED and NAMED, disabled — the `strikeOptions()` / `offFloorExpiryLabel()`
+     pattern, because a list that silently drops a row teaches nothing and a
+     `<select>` whose value matches no option displays the first one. The board
+     already selected is always offered, however it got there. */
+  const expiryMenu = useMemo(() => expiryOptions.map((e) => ({
+    key: e.key, dte: e.dte,
+    buildable: openableBoard(e.dte) || e.key === expKey,
+    label: offFloorExpiryLabel(e.key, e.dte),
+  })), [expiryOptions, expKey]);
 
   /* INSTRUMENTING THE ENTRY FLOOR SO IT CAN BE CALIBRATED FROM A READING
      (src/rules.js, `passedOverRecord`; ROADMAP P5).
@@ -2020,6 +2083,25 @@ export default function OptionsStrategyLab() {
     if (!Number.isFinite(effective.net)) return A;
     return analyze(legs, spot, dte, iv, q, { net: effective.net });
   }, [A, effective.net, legs, spot, dte, iv, q]);
+  /* >>> HOW MANY COMBINATIONS THE BUDGET BUYS, AND IT IS ONE HOME (P10 §2).
+     <<< `scaleStrategy()` is untouched — it is the same function the Shortlist
+     calls and it is on the DO-NOT-TOUCH list — and it is read HERE at the price
+     the order will be sent at, which is the same price the Shortlist card
+     prices its own figures at (`openLimitPrice()` on `comboBook()`, which is
+     what `legLimitSeed()` sums to). So the count on the card and the count in
+     the ticket agree by construction, and if the user moves the ticket's
+     sliders the budget re-derives against the price they are now offering —
+     which is the honest answer to "how many can I have", not a stale one. */
+  const budgetSize = useMemo(
+    () => (AE ? scaleStrategy(AE, request.mode, request.amt) : null),
+    [AE, request.mode, request.amt]);
+  /* A COUNT TYPED BY HAND WINS, AND THE SCREEN SAYS IT OVERRIDES THE BUDGET.
+     The gate is unchanged: it measures whatever `contracts` says, whichever of
+     the two produced it. */
+  const contracts = contractsTyped != null ? contractsTyped
+    : (budgetSize && budgetSize.ok ? budgetSize.n : 1);
+  const setContracts = useCallback(
+    (n) => setContractsTyped(Math.max(1, Math.round(Number(n) || 1))), []);
   /* WHERE THAT PRICE FALLS AND WHAT THE TIME IN FORCE DOES TO IT. One verdict,
      read by the band in the ticket and by the confirm step. */
   const ticketVerdict = useMemo(
@@ -2131,7 +2213,7 @@ export default function OptionsStrategyLab() {
      (src/handoff.js) decides what changes; this applies it. Written inline at
      each button instead, a hand-off forgets one of the four things it has to
      do and the tap looks like it did nothing — see the comment there. */
-  const openOnBuild = ({ ticker: tk, expKey: ek = null, legs: lg, name, ref = null, contracts: n = 1 }) => {
+  const openOnBuild = ({ ticker: tk, expKey: ek = null, legs: lg, name, ref = null, contracts: n = null }) => {
     const h = buildHandOff({ ticker: tk, expKey: ek, legs: lg, name, chains });
     setTicker(h.ticker); setExpKey(h.expKey); setLegs(h.legs); setStratName(h.name);
     setBt(null);
@@ -2146,7 +2228,11 @@ export default function OptionsStrategyLab() {
     // RE-PRICE, which is the same trade at a different price: sending it back
     // at one lot would quietly shrink an order the user already sized.
     sizedFor.current = `${h.ticker}|${h.expKey}`;
-    setContracts(Math.max(1, Math.round(Number(n) || 1)));
+    // A PLAIN HAND-OFF CARRIES NO SIZE, so the budget decides it on arrival.
+    // The one caller that DOES pass a size is a RE-PRICE — the same trade at a
+    // different price — and that is a size the user already set by hand, so it
+    // arrives as the typed override rather than as a number the budget derived.
+    setContractsTyped(n == null ? null : Math.max(1, Math.round(Number(n) || 1)));
     setOptRef(ref);
     setEv(h.ev);          // close the evidence sheet: it covers the trade
     setTab(h.tab);
@@ -2802,15 +2888,36 @@ export default function OptionsStrategyLab() {
           const mc = chanceFor(a, { ticker: tk, legs: pr.legs, spot: sp, dte: d2, expKey: ek });
           const pop = mc ? mc.pop : null;
           const unit = Math.abs(a.maxLoss);
-          const n = Math.floor(optAmt / Math.max(1, a.entry >= 0 ? Math.abs(a.entry) * 100 : unit));
-          if (n < 1) continue;
-          out.push({ tk, sent, name: pr.name, legs: pr.legs, expKey: ek, dte: d2, a, mc, pop, n, spot: sp,
+          // THE SIZE HAS ONE HOME AND THIS WAS A SECOND ONE. A hand-rolled
+          // division, in a file that already imports `scaleStrategy()` — and
+          // it divided by the PREMIUM on a debit and by the RISK on a credit
+          // with a `Math.max(, 1)` floor under it, which is the shape that
+          // turned a $250 budget into 250 contracts of an unpriced butterfly.
+          // THE CARD'S FIGURES ARE READ AT THE PRICE THAT FILLS (P10 §3-bis),
+          // and this is where the quote function for this board is in scope.
+          // `a` stays the MID reading: the compare picture and the stamp are
+          // drawn from it, and a candidate is a structure before it is a price.
+          const aFill = atFillPrice(pr.legs, a, { spot: sp, dte: d2, iv: getU(tk).iv, q: qq });
+          const sc = scaleStrategy(aFill, request.mode, request.amt);
+          const n = sc && sc.ok ? sc.n : 0;
+          /* >>> AND IT NO LONGER DROPS WHAT THE BUDGET WILL NOT BUY (P10 §3).
+             <<< `if (n < 1) continue` removed a structure that had cleared
+             every floor, in silence, because of an answer about the USER
+             rather than about the trade. The owner asked for the opposite:
+             "l'app propone anche altro". It is GROUPED now — the second
+             section names it and says what it missed — and the floors are
+             still the only thing that REMOVES. */
+          out.push({ tk, sent, name: pr.name, legs: pr.legs, expKey: ek, dte: d2, a, aFill, mc, pop, n, spot: sp,
             // AND THE EXPECTED VALUE IS THE SIMULATION'S OWN MEAN, times the
             // size. It was `pop * a.maxProfit * n`: the best case weighted by
             // the chance, which is the expected value of nothing the app
             // simulated — it ignores every outcome between zero and the
             // maximum, and every outcome below zero.
-            ev: mc && !a.profitUnbounded ? mc.ev * n : null });
+            // A SIZE OF ZERO IS "THE BUDGET BUYS NONE", NOT AN EV OF ZERO.
+            // The row is still shown — grouped, with its reason — so the
+            // figure beside it has to describe ONE combination rather than
+            // none of them.
+            ev: mc && !a.profitUnbounded ? mc.ev * Math.max(1, n) : null });
         }
       }
       // Ranking: valore atteso CORRETTO dal segnale a 4 fattori, e i CONFLICT in
@@ -3103,7 +3210,8 @@ export default function OptionsStrategyLab() {
      user's three weights, and road 2 is free to come from a different market
      than road 1. That is the point of asking for a basket at all. */
   const runWizard = async (overrides) => {
-    const ans = { ...wiz, ...(overrides || {}) };
+    // THE BUDGET COMES FROM THE ONE HOME, not from a second copy on `wiz`.
+    const ans = { ...wizAnswers, ...(overrides || {}) };
     setWiz((w) => ({ ...w, ...(overrides || {}), busy: true, err: null }));
     setNothing(null);
     const stop = (reasons) => { setNothing(reasons); setWizStep("nothing"); setWiz((w) => ({ ...w, busy: false })); };
@@ -3975,7 +4083,8 @@ export default function OptionsStrategyLab() {
         )}
         {wizStep === "questions" && (
           <FindOpportunities
-            answers={wiz} setAnswers={setWiz} limits={limits} busy={wiz.busy} err={wiz.err}
+            answers={wizAnswers} setAnswers={setWizAnswers} limits={limits} busy={wiz.busy} err={wiz.err}
+            request={request} onRequest={(patch) => setWant((w) => ({ ...w, ...patch }))}
             universe={BASKET.map((tk) => ({ tk, name: getU(tk).name }))}
             onBack={goHome} onDecide={() => runWizard()}
           />
@@ -4485,6 +4594,16 @@ export default function OptionsStrategyLab() {
               actually produced after the quality floors, at the {liqLevel.label.toUpperCase()} setting.
             </div>
 
+            {/* THE CONTROLS COME FIRST (P10 §2). One block, above every
+                result, and the guided door renders what it does not already
+                ask: "dipende dalla journey". */}
+            <RequestControls
+              journey="desk" style={{ marginTop: 12 }}
+              request={request} onChange={(patch) => setWant((w) => ({ ...w, ...patch }))}
+              sentiments={SENTIMENTS} sentiment={sentiment} onSentiment={setSentiment}
+              ticker={ticker} spot={spot}
+              expiries={expiryMenu} expKey={expKey} onExpiry={setExpKey} />
+
             {/* What the guided run examined, in English. It used to sit on the
                 verdict screen above the two roads; it belongs here, where the
                 question is which market rather than which structure. */}
@@ -4740,51 +4859,52 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                         Candidates marked CONFLICT sit at the bottom by construction: the four factors contradict each other on that underlying, and no expected value is worth a signal we cannot read.
                       </div>
                     )}
-                    {multi.res.map((r, i) => (
-                      <div key={i} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "8px 10px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7 }}>
-                        <span style={{ ...mono, fontSize: 10, color: T.dim, width: 16 }}>#{i + 1}</span>
-                        {(() => {
-                          const bb = payoffBands({ legs: r.legs, entryNet: r.a.entry, spot: r.spot });
-                          return (
-                            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                              <BandThumbnail bands={bb} bars={barsCache[r.tk] || []} width={130} height={34}
-                                title={bandTakeaway(bb, { ticker: r.tk })} />
-                              <Gauge bands={bb} size={80} ticker={r.tk} />
-                            </div>
-                          );
-                        })()}
-                        <div style={{ flex: 1, minWidth: 140 }}>
-                          <div style={{ fontWeight: 700, color: T.ink, fontSize: 12.5 }}>{r.tk} · {r.name}</div>
-                          <div style={{ ...mono, fontSize: 10, color: T.dim }}>{r.expKey} · {r.dte} DTE · ×{r.n}</div>
-                        </div>
-                        {r.tag && <span title={r.tag.d} style={{ ...mono, fontSize: 8.5, color: r.tag.c, border: `1px solid ${r.tag.c}55`, borderRadius: 4, padding: "1px 6px", cursor: "help" }}>{r.tag.t}</span>}
-                        {r.fused && (
-                          <span title={r.fused.narrative}
-                            style={{ ...mono, fontSize: 8.5, color: r.conflict ? T.red : r.fused.agreement === "CONFLUENT" ? T.green : T.blue, border: `1px solid ${(r.conflict ? T.red : r.fused.agreement === "CONFLUENT" ? T.green : T.blue)}55`, borderRadius: 4, padding: "1px 6px", cursor: "help" }}>
-                            {r.fused.agreement} {r.fused.score > 0 ? "+" : ""}{r.fused.score}
-                          </span>
-                        )}
-                        <Stat k="CHANCE" v={chanceText(r.pop)} c={r.pop >= 0.5 ? T.green : T.violet} tip={chanceStamp(r.mc, r.tk)} />
-                        {/* AN EXPECTED VALUE NEEDS A BEST CASE. With no ceiling
-                            there is none, so nothing is printed here and the
-                            candidate sits last by construction (its rank is the
-                            -999 `evProfile()` returns) rather than being scored
-                            off the edge of a sampling grid. */}
-                        <Stat k="EV/$100" v={r.a.profitUnbounded ? "—" : `${r.ev100 >= 0 ? "+" : ""}$${r.ev100.toFixed(0)}`}
-                          c={r.a.profitUnbounded ? T.dim : r.ev100 >= 0 ? T.green : T.red}
-                          tip={r.a.profitUnbounded ? noCeilingNote(`${r.tk} ${r.name}`) : undefined} />
-                        <Stat k="RANK" v={r.a.profitUnbounded ? "last" : `${r.rank >= 0 ? "+" : ""}${r.rank.toFixed(0)}`} c={r.conflict ? T.red : T.amber} />
-                        <Stat k="MAX TOT" v={r.a.profitUnbounded ? NO_CEILING : fmt$(r.n * r.a.maxProfit)} c={T.green} />
-                        {/* A hit here hands the MARKET to step 2, where the
-                            structures on it are compared and kept. Radar
-                            answers "which market"; the Shortlist answers
-                            "which structure", and jumping from here straight
-                            to Build would skip the second question. */}
-                        <Btn small ghost={ticker !== r.tk} onClick={() => { switchTicker(r.tk); setSentiment(r.sent); setExpKey(r.expKey); goStep("shortlist"); }}>
-                          Look at {r.tk} →
-                        </Btn>
-                      </div>
-                    ))}
+                    {/* THE LIST SPLITS HERE TOO (P10 §3). The wide search used
+                        to DROP a hit the budget would not buy, in silence. It
+                        groups now: the floors are still what removes. */}
+                    {(() => {
+                      const built = multi.res.map((r, i) => ({
+                        r, i,
+                        cand: candidateOf({ name: r.name, legs: r.legs, a: r.a, pop: r.pop, dte: r.dte, expKey: r.expKey,
+                          ...seasonalStampFields(r.mc), ...chanceDrawFields(r.mc) },
+                        { ticker: r.tk, spot: r.spot, source: "wide search" }),
+                        // THE FOUR FIGURES ARE READ AT THE PRICE THAT FILLS,
+                        // worked out where this hit was generated — this row
+                        // has no quote function of its own at render time.
+                        bands: payoffBands({ legs: r.legs, entryNet: r.a.entry, spot: r.spot }),
+                        size: scaleStrategy(r.aFill || r.a, request.mode, request.amt),
+                      }));
+                      const byKey = new Map(built.map((x) => [x.cand.key, x]));
+                      return (
+                        <SplitSections
+                          items={built.map((x) => x.cand)} request={request} priceNote
+                          sizeOf={(c) => (byKey.get(c.key) || {}).size || null}
+                          renderItem={(c, misses) => {
+                            const x = byKey.get(c.key);
+                            if (!x) return null;
+                            const { r, i, bands } = x;
+                            const af = r.aFill || r.a;
+                            return (
+                              <CandidateCard key={`${r.tk}-${r.name}-${i}`}
+                                name={`${r.tk} \u00b7 ${r.name}`} legs={`${legsLine(r.legs)} \u00b7 ${r.expKey}`}
+                                misses={misses}
+                                rr={rewardRisk(af.maxProfit, af.maxLoss)} pop={r.pop}
+                                profit={af.maxProfit} risk={af.maxLoss} noCeiling={af.profitUnbounded}
+                                bands={bands} bars={barsCache[r.tk] || []} ticker={r.tk}
+                                badge={r.fused ? (
+                                  <span title={r.fused.narrative}
+                                    style={{ ...mono, fontSize: 8.5, color: r.conflict ? T.red : r.fused.agreement === "CONFLUENT" ? T.green : T.blue, border: `1px solid ${(r.conflict ? T.red : r.fused.agreement === "CONFLUENT" ? T.green : T.blue)}55`, borderRadius: 4, padding: "1px 6px", cursor: "help" }}>
+                                    {r.fused.agreement} {r.fused.score > 0 ? "+" : ""}{r.fused.score}
+                                  </span>) : null}
+                                actions={
+                                  <Btn small ghost={ticker !== r.tk} onClick={() => { switchTicker(r.tk); setSentiment(r.sent); setExpKey(r.expKey); goStep("shortlist"); }}>
+                                    Look at {r.tk} →
+                                  </Btn>
+                                } />
+                            );
+                          }} />
+                      );
+                    })()}
                   </div>
                 )}
               </Panel>
@@ -4833,13 +4953,19 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   FROM YOUR ANSWERS · {candidates.length} ROAD{candidates.length === 1 ? "" : "S"}
                 </div>
                 <WizardCandidates
-                  candidates={candidates} answers={wiz} narrative={[]}
+                  candidates={candidates} answers={wizAnswers} narrative={[]}
                   barsFor={(tk) => barsCache[tk] || []}
                   weatherData={weather} newsItems={newsPool} month={NOW_MONTH}
                   /* THE LIVE READING, so the road card, the Radar row and the
                      Build screen cannot print three signal scores for one
                      market on one day. */
                   fusedFor={(tk) => fused[tk] || null}
+                  /* THE SAME SPLIT AS EVERY OTHER GENERATION SITE (P10 §3).
+                     A road is built to FIT the budget at one combination
+                     (`unit > ans.risk` in `runWizard`), so it normally sits
+                     above the line; the slider is what can move it. */
+                  request={request}
+                  sizeOf={(c) => (c && c.a ? scaleStrategy(c.a, request.mode, request.amt) : null)}
                   onPick={pickRoad}
                   onBack={() => { setView("wizard"); setWizStep("questions"); }}
                   actionsFor={(c) => {
@@ -4854,85 +4980,35 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
               </div>
             )}
 
-            <Panel style={{ marginTop: 12 }}>
-              <Lbl>1 · WHICH WAY DO YOU THINK IT GOES?</Lbl>
-              <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
-                {SENTIMENTS.map((s) => (
-                  <button key={s.id} onClick={() => setSentiment(s.id)}
-                    style={{
-                      ...mono, fontSize: 11, padding: "10px 12px", borderRadius: 24, cursor: "pointer", flex: "1 1 auto",
-                      background: sentiment === s.id ? s.color : "transparent",
-                      color: sentiment === s.id ? T.onAccent : s.color,
-                      border: `1.5px solid ${s.color}`, fontWeight: 700,
-                    }}>
-                    {s.icon} {s.label}
-                  </button>
-                ))}
-              </div>
-              <div style={{ display: "flex", gap: 16, marginTop: 12, alignItems: "center", flexWrap: "wrap" }}>
-                <Stat k="IMPLIED TARGET" v={`$${(spot * (1 + SENT.tgt)).toFixed(2)} (${SENT.tgt >= 0 ? "+" : ""}${(SENT.tgt * 100).toFixed(0)}%)`} c={T.blue} />
-                <div>
-                  <div style={{ ...mono, fontSize: 9.5, color: T.dim }}>SIZE BY</div>
-                  <div style={{ display: "flex", gap: 4 }}>
-                    <Btn small ghost={optMode !== "budget"} onClick={() => setOptMode("budget")}>What I can spend</Btn>
-                    <Btn small ghost={optMode !== "target"} onClick={() => setOptMode("target")}>What I want to make</Btn>
+            {/* THE CONTROLS COME FIRST HERE TOO (P10 §2). This panel WAS the
+                block, spread out, with a 100px number field buried in it. Same
+                component as the Radar's, same state, one spelling of each of
+                the five. Nothing cut: the implied target is TARGET PRICE, and
+                the two expiry sentences sit below, where they have a referent. */}
+            <RequestControls
+              journey="desk" style={{ marginTop: 12 }}
+              request={request} onChange={(patch) => setWant((w) => ({ ...w, ...patch }))}
+              sentiments={SENTIMENTS} sentiment={sentiment} onSentiment={setSentiment}
+              ticker={ticker} spot={spot}
+              expiries={expiryMenu} expKey={expKey} onExpiry={setExpKey} />
+            {chain && (
+              <div style={{ marginTop: 6 }}>
+                {chain.expirations.length <= 4 && (
+                  <div style={{ ...mono, fontSize: 9.5, color: T.dim, lineHeight: 1.55 }}>
+                    These are every expiry {feedName(chain) || "the feed"} lists for {ticker} — this ETF only has monthly ones, it is not a limit of the app.
                   </div>
+                )}
+                {/* WHY THIS EXPIRY, AND WHAT WAS PASSED OVER. */}
+                <div style={{ ...mono, fontSize: 9.5, color: T.mut, marginTop: 4, lineHeight: 1.55 }}>
+                  {expiryChoiceNote(expChoice, liqLevel, { selected: expKey })}
                 </div>
-                <div>
-                  <div style={{ ...mono, fontSize: 9.5, color: T.dim }}>{optMode === "budget" ? "MOST I WILL RISK ($)" : "PROFIT I AM AIMING FOR ($)"}</div>
-                  <Inp type="number" min={50} step={50} value={optAmt} onChange={(e) => setOptAmt(Math.max(0, +e.target.value))} style={{ width: 100 }} />
-                </div>
-                {chain && (
-                  <div>
-                    <div style={{ ...mono, fontSize: 9.5, color: T.dim }}>EXPIRY</div>
-                    {/* >>> THE DROPDOWN AND THE SENTENCE UNDER IT NAME THE SAME
-                        BOARD (P9, TASK 1). <<< This offered every expiry the
-                        feed lists — so the owner's screen read 2026-10-16 here
-                        and "Building on 2026-11-20" directly below, and the
-                        24-DTE board it had selected was refused at the send.
-                        A board the entry floor will not open on is rendered
-                        DISABLED and NAMED, the `strikeOptions()` /
-                        `offBoardStrikeLabel()` pattern: a list that silently
-                        drops a row teaches nothing, and a `<select>` whose
-                        value matches no option displays the first one. */}
-                    <select value={expKey || ""} onChange={(e) => setExpKey(e.target.value)}
-                      style={{ ...mono, background: T.bg, color: T.ink, border: `1px solid ${T.line}`, borderRadius: 5, padding: "5px 8px", fontSize: 12 }}>
-                      {chain.expirations.map((e) => {
-                        const d0 = chain.byExp[e].dte;
-                        // The board already selected is always offered, however
-                        // it got here: refusing to render the current value is
-                        // how a dropdown comes to display a different trade.
-                        const on = openableBoard(d0) || e === expKey;
-                        return <option key={e} value={e} disabled={!on}>{offFloorExpiryLabel(e, d0)}</option>;
-                      })}
-                    </select>
-                    {chain.expirations.length <= 4 && (
-                      <div style={{ ...mono, fontSize: 9, color: T.dim, marginTop: 3, maxWidth: 220 }}>
-                        These are every expiry {feedName(chain) || "the feed"} lists for {ticker} — this ETF only has monthly ones, it is not a limit of the app.
-                      </div>
-                    )}
-                    {/* WHY THIS EXPIRY, AND WHAT WAS PASSED OVER. The app used
-                        to pick by distance from a target DTE alone and land on
-                        the deadest board on the market without a word about it
-                        (src/rules.js, `expiryChoice`). When a nearer, busier
-                        expiry is refused by the 30-day entry floor, the screen
-                        says so — a rule the user cannot see is a rule they
-                        cannot trust. */}
-                    <div style={{ ...mono, fontSize: 9, color: T.mut, marginTop: 4, maxWidth: 260, lineHeight: 1.55 }}>
-                      {expiryChoiceNote(expChoice, liqLevel, { selected: expKey })}
-                    </div>
-                    {/* AND WHETHER THIS BOARD'S OWN PRICES AGREE WITH THEMSELVES.
-                        A call cannot cost more than a call at a lower strike;
-                        five of BOIL's 25 adjacent near-the-money pairs did. */}
-                    {monoNote && (
-                      <div style={{ ...mono, fontSize: 9.5, color: T.red, marginTop: 4, maxWidth: 260, lineHeight: 1.55 }}>
-                        {monoNote}
-                      </div>
-                    )}
+                {monoNote && (
+                  <div style={{ ...mono, fontSize: 9.5, color: T.red, marginTop: 4, lineHeight: 1.55 }}>
+                    {monoNote}
                   </div>
                 )}
               </div>
-            </Panel>
+            )}
 
             {/* The four readings are EVIDENCE, and evidence opens over the step
                 rather than lengthening it (PRD §12). The panel itself is
@@ -5053,8 +5129,14 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   {emptyExpiryNote(expKey, shortlist.tally, liqLevel)}
                 </div>
               )}
-              <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
-                {shortlist.rows.map(({ p, a }) => {
+              {/* ============ THE LIST SPLITS, AND MEMBERSHIP IS LIVE
+                  (ROADMAP P10 §3). ============ Above: what meets what was
+                  asked for. Below, never hidden and never folded: everything
+                  else that cleared the floors, each row saying what it missed.
+                  It GROUPS; the floors above are what REMOVES. Membership is
+                  derived on every render and never stored on a candidate. */}
+              {(() => {
+                const built = shortlist.rows.map(({ p, a }) => {
                   // `rewardRisk()` and never a division here: a ratio taken
                   // against a max loss the app could not read printed
                   // "6748644041614687.00" on BOIL. Below the minimum it is "—".
@@ -5073,72 +5155,43 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   // numbers a compare picture is drawn at are the two the
                   // chance was computed at, and they come off `mcRow` above.
                   { ticker, spot, source: "shortlist" });
-                  return (
-                    <div key={p.name} style={{ padding: "10px 12px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-                        <div style={{ fontWeight: 700, color: T.ink, fontSize: 13.5 }}>
-                          {p.name}{" "}
-                          <span style={{ ...mono, fontSize: 9, color: a.realCount === p.legs.length ? T.green : T.amber }}>
-                            {a.realCount === p.legs.length ? "● live prices" : `◐ ${a.realCount}/${p.legs.length} live`}
-                          </span>
-                        </div>
-                      </div>
-                      <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 4 }}>
-                        {p.legs.map((l) => `${l.side > 0 ? "+" : "−"}${l.qty} ${l.strike}${l.type === "call" ? "C" : "P"}`).join(" / ")}
-                      </div>
-                      {/* The thumbnail says where the trade pays against where
-                          the market has been; the gauge says the same thing as
-                          one arc with the needle on today. Both are cut from
-                          the same bands, so they cannot disagree. */}
-                      <div style={{ display: "flex", gap: 12, marginTop: 6, flexWrap: "wrap", alignItems: "center" }}>
-                        <BandThumbnail bands={bands} bars={barsCache[ticker] || []} width={220} height={40}
-                          title={bandTakeaway(bands, { ticker })} />
-                        <Gauge bands={bands} size={128} ticker={ticker} />
-                      </div>
-                      <div style={{ display: "flex", gap: 14, marginTop: 8, flexWrap: "wrap" }}>
-                        <Stat k={a.entry >= 0 ? "YOU PAY" : "YOU RECEIVE"} v={fmt$(Math.abs(a.entry) * 100)} />
-                        <Stat k="MAX PROFIT" v={ceil$(a.maxProfit)} c={T.green}
-                          tip={a.profitUnbounded ? noCeilingNote(p.name) : undefined} />
-                        <Stat k="MAX LOSS" v={fmt$(a.maxLoss)} c={T.red} />
-                        <Stat k="R/R" v={rr ? rr.toFixed(2) : "—"} c={T.amber} />
-                        <Stat k="CHANCE" v={chanceText(pop)} c={pop >= 0.5 ? T.green : T.violet} tip={chanceStamp(mcRow, ticker)} />
-                        <Stat k="BREAKEVEN" v={a.breakevens.map((b) => b.toFixed(2)).join(" · ") || "—"} c={T.blue} />
-                      </div>
-                      {(() => {
-                        const sc = scaleStrategy(a, optMode, optAmt);
-                        if (!sc) return <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6 }}>Cannot scale this one (unlimited profit or no defined risk): judge it at a single contract.</div>;
-                        if (sc.unpriceable) return <div style={{ ...mono, fontSize: 10.5, color: T.red, marginTop: 6 }}>✗ No quantity is shown: one of these prices at under {money(MIN_NET_DOLLARS)}, so there is no cost to divide your budget by.</div>;
-                        if (!sc.ok) return <div style={{ ...mono, fontSize: 10.5, color: T.red, marginTop: 6 }}>✗ Not enough budget: one of these {sc.isCredit ? `ties up ${fmt$(sc.unit)} of risk` : `costs ${fmt$(sc.unit)} to buy`}.</div>;
-                        return (
-                          <div style={{ display: "flex", gap: 14, marginTop: 8, flexWrap: "wrap", padding: "6px 8px", background: `${T.amber}0d`, borderRadius: 5 }}>
-                            <Stat k="HOW MANY" v={`×${sc.n}`} c={T.amber} />
-                            <Stat k={sc.isCredit ? "YOU RECEIVE" : "YOU PAY"} v={fmt$(sc.totPrem)} c={sc.isCredit ? T.green : T.ink} />
-                            <Stat k="MOST YOU CAN LOSE" v={fmt$(sc.totRisk)} c={T.red} />
-                            <Stat k="MOST YOU CAN MAKE" v={fmt$(sc.totProfit)} c={T.green} />
-                            {/* THE AVERAGE RESULT, NOT THE BEST CASE WEIGHTED BY
-                                A CHANCE. `sc.totProfit * pop` was the maximum
-                                profit multiplied by the probability of finishing
-                                anywhere in the green — two numbers that describe
-                                different events, multiplied together. The
-                                simulation's own mean already averages every
-                                outcome it walked. */}
-                            {mcRow && <Stat k="AVERAGE RESULT" v={signedMoney(mcRow.ev * sc.n)} c={mcRow.ev >= 0 ? T.green : T.red}
-                              tip={chanceSourceNote(mcRow, ticker)} />}
-                            <Stat k={optMode === "target" ? "HITS THE TARGET" : "BUDGET USED"} v={optMode === "target" ? (sc.totProfit >= optAmt ? "✓ yes" : "✗ no") : `${((sc.n * sc.unit / Math.max(1, optAmt)) * 100).toFixed(0)}%`} c={T.blue} />
-                            <div style={{ ...mono, fontSize: 9, color: T.dim, width: "100%" }}>Totals for ×{sc.n} · Build always shows one, so divide by {sc.n} to compare.</div>
-                          </div>
-                        );
-                      })()}
-                      <div style={{ marginTop: 8 }}>
-                        <CandidateActions
-                          ticked={inCompare(compare, cand)} onTick={() => tickCompare(cand)}
-                          saved={isSaved(cand)} onSave={() => saveCandidate(cand)}
-                          onBuild={() => applyPreset(p, a)} />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+                  /* >>> EVERY FIGURE ON THE CARD IS READ AT THE PRICE THAT
+                     FILLS (P10 §3-bis). <<< `a` stays the MID reading — a
+                     candidate is a structure and not yet a price, and the
+                     compare picture and the stamp are drawn from it. `aFill`
+                     is the same `analyze()` at `openLimitPrice()`, which is
+                     the number the ticket seeds to, so the card and the order
+                     agree by construction rather than by luck. */
+                  const aFill = atFillPrice(p.legs, a, { spot, dte, iv, q });
+                  return { p, a, aFill, cand, bands, mcRow, pop,
+                    rr: rewardRisk(aFill.maxProfit, aFill.maxLoss),
+                    size: scaleStrategy(aFill, request.mode, request.amt) };
+                });
+                const byKey = new Map(built.map((x) => [x.cand.key, x]));
+                return (
+                  <SplitSections
+                    items={built.map((x) => x.cand)} request={request} priceNote
+                    sizeOf={(c) => (byKey.get(c.key) || {}).size || null}
+                    renderItem={(c, misses) => {
+                      const x = byKey.get(c.key);
+                      if (!x) return null;
+                      const { p, a, aFill, cand, bands, mcRow, pop, rr } = x;
+                      return (
+                        <CandidateCard key={p.name}
+                          name={p.name} legs={legsLine(p.legs)} misses={misses}
+                          rr={rr} pop={pop} profit={aFill.maxProfit} risk={aFill.maxLoss}
+                          noCeiling={aFill.profitUnbounded}
+                          bands={bands} bars={barsCache[ticker] || []} ticker={ticker}
+                          actions={
+                            <CandidateActions
+                              ticked={inCompare(compare, cand)} onTick={() => tickCompare(cand)}
+                              saved={isSaved(cand)} onSave={() => saveCandidate(cand)}
+                              onBuild={() => applyPreset(p, a)} />
+                          } />
+                      );
+                    }} />
+                );
+              })()}
               {/* WHICH SETTING PRODUCED THIS LIST. On the same screen as the
                   list, in every state of it, including the empty one. */}
               <div style={{ ...mono, fontSize: 10, color: isLoosened(liqLevel) ? T.red : T.dim, marginTop: 10, lineHeight: 1.6 }}>
@@ -5170,38 +5223,42 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
             {(multi.res || []).filter((r) => r.tk === ticker).length > 0 && (
               <Panel style={{ marginTop: 10 }}>
                 <Lbl>ALSO FOUND BY THE WIDE SEARCH ON {ticker}</Lbl>
-                <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
-                  {(multi.res || []).filter((r) => r.tk === ticker).map((r, i) => {
-                    const cand = candidateOf({ name: r.name, legs: r.legs, a: r.a, pop: r.pop, dte: r.dte, expKey: r.expKey,
+                {/* TWO SECTIONS HERE TOO (P10 §3). */}
+                {(() => {
+                  const built = (multi.res || []).filter((r) => r.tk === ticker).map((r, i) => ({
+                    r, i,
+                    cand: candidateOf({ name: r.name, legs: r.legs, a: r.a, pop: r.pop, dte: r.dte, expKey: r.expKey,
                       ...seasonalStampFields(r.mc), ...chanceDrawFields(r.mc) },
-                    { ticker: r.tk, spot: r.spot, source: "wide search" });
-                    const bands = payoffBands({ legs: r.legs, entryNet: r.a.entry, spot: r.spot });
-                    return (
-                      <div key={`${r.name}-${i}`} style={{ padding: "10px 12px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7 }}>
-                        <div style={{ fontWeight: 700, color: T.ink, fontSize: 13 }}>{r.name}</div>
-                        <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 3 }}>{legsLine(r.legs)} · {r.expKey} · {r.dte} DTE</div>
-                        <div style={{ display: "flex", gap: 12, marginTop: 6, flexWrap: "wrap", alignItems: "center" }}>
-                          <BandThumbnail bands={bands} bars={barsCache[r.tk] || []} width={200} height={40} title={bandTakeaway(bands, { ticker: r.tk })} />
-                          <Gauge bands={bands} size={112} ticker={r.tk} />
-                        </div>
-                        <div style={{ display: "flex", gap: 14, marginTop: 8, flexWrap: "wrap" }}>
-                          <Stat k="CHANCE" v={chanceText(r.pop)} c={r.pop >= 0.5 ? T.green : T.violet} tip={chanceStamp(r.mc, r.tk)} />
-                          <Stat k="MAX PROFIT" v={ceil$(r.a.maxProfit)} c={T.green}
-                            tip={r.a.profitUnbounded ? noCeilingNote(r.name) : undefined} />
-                          <Stat k="MAX LOSS" v={fmt$(r.a.maxLoss)} c={T.red} />
-                          <Stat k="EV/$100" v={r.a.profitUnbounded ? "—" : `${r.ev100 >= 0 ? "+" : ""}$${r.ev100.toFixed(0)}`}
-                            c={r.a.profitUnbounded ? T.dim : r.ev100 >= 0 ? T.green : T.red} />
-                        </div>
-                        <div style={{ marginTop: 8 }}>
-                          <CandidateActions
-                            ticked={inCompare(compare, cand)} onTick={() => tickCompare(cand)}
-                            saved={isSaved(cand)} onSave={() => saveCandidate(cand)}
-                            onBuild={() => openOnBuild({ ticker: r.tk, expKey: r.expKey, legs: r.legs, name: r.name })} />
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
+                    { ticker: r.tk, spot: r.spot, source: "wide search" }),
+                    bands: payoffBands({ legs: r.legs, entryNet: r.a.entry, spot: r.spot }),
+                    size: scaleStrategy(r.aFill || r.a, request.mode, request.amt),
+                  }));
+                  const byKey = new Map(built.map((x) => [x.cand.key, x]));
+                  return (
+                    <SplitSections
+                      items={built.map((x) => x.cand)} request={request} priceNote
+                      sizeOf={(c) => (byKey.get(c.key) || {}).size || null}
+                      renderItem={(c, misses) => {
+                        const x = byKey.get(c.key);
+                        if (!x) return null;
+                        const { r, i, cand, bands } = x;
+                        const af = r.aFill || r.a;
+                        return (
+                          <CandidateCard key={`${r.name}-${i}`}
+                            name={r.name} legs={`${legsLine(r.legs)} \u00b7 ${r.expKey}`} misses={misses}
+                            rr={rewardRisk(af.maxProfit, af.maxLoss)} pop={r.pop}
+                            profit={af.maxProfit} risk={af.maxLoss} noCeiling={af.profitUnbounded}
+                            bands={bands} bars={barsCache[r.tk] || []} ticker={r.tk}
+                            actions={
+                              <CandidateActions
+                                ticked={inCompare(compare, cand)} onTick={() => tickCompare(cand)}
+                                saved={isSaved(cand)} onSave={() => saveCandidate(cand)}
+                                onBuild={() => openOnBuild({ ticker: r.tk, expKey: r.expKey, legs: r.legs, name: r.name })} />
+                            } />
+                        );
+                      }} />
+                  );
+                })()}
               </Panel>
             )}
 
@@ -5592,6 +5649,93 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   </div>
                 );
               })()}
+              {/* ============ ONE PRICE, AND WHAT CROSSING COSTS (P10 §1).
+                  ============ The owner's reading of the whole product: "is it
+                  a good bet? yes — but how much do I pay for it?" Measured on
+                  his own orders: J-0003 at the indicative combination ask has
+                  not filled after several sessions, and his earlier limits at
+                  the mid expired. So the app suggests ONE price, names what the
+                  structure is worth, and says what the difference costs.
+
+                  FIVE FIGURES, LABEL ABOVE VALUE, IN ONE ROW, all at the price
+                  that will be sent. `AE` is `analyze()` at `effectiveLimit()`'s
+                  net and it seeds at `openLimitPrice()`, so this row and the
+                  ticket cannot disagree. The bid/mid/ask breakdown and the
+                  reward-to-risk RANGE are one tap below, as the WHY. */}
+              {AE && (() => {
+                const cc = crossingCost({ book });
+                const rng = rewardRiskRange({
+                  book,
+                  // THE CALLER'S OWN `analyze()`, at each of the three nets.
+                  // This file owns it; `rules.js` does not, and a second
+                  // implementation would be a second answer.
+                  at: (net) => analyze(legs, spot, dte, iv, q, { net }),
+                });
+                return (
+                  <div style={{ marginTop: 12, padding: "12px 14px", background: T.panel,
+                    border: `1px solid ${T.line}`, borderLeft: `3px solid ${T.blue}`, borderRadius: 8 }}>
+                    <div style={{ ...sansUI, fontSize: 15, fontWeight: 700, color: T.ink }}>
+                      {ticker} · {stratName}
+                    </div>
+                    <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 2 }}>{legsLine(legs)}</div>
+                    <div style={{ display: "flex", gap: 12, marginTop: 10, flexWrap: "wrap" }}>
+                      {[[AE.entry >= 0 ? "YOU PAY" : "YOU RECEIVE", fmt$(Math.abs(AE.entry) * 100), T.ink],
+                        ["MAX LOSS", fmt$(AE.maxLoss), T.red],
+                        ["MAX PROFIT", ceil$(AE.maxProfit), T.green],
+                        ["CHANCE", chanceText(chance ? chance.pop : null), T.violet],
+                        ["BREAK-EVEN", AE.breakevens.map((b) => b.toFixed(2)).join(" · ") || "—", T.blue],
+                      ].map(([k, v, col]) => (
+                        <div key={k} style={{ minWidth: 68 }}>
+                          <div style={{ ...mono, fontSize: 9, letterSpacing: "0.08em", color: T.dim }}>{k}</div>
+                          <div style={{ ...mono, fontSize: 15, fontWeight: 800, color: col }}>{v}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ ...mono, fontSize: 11, color: T.blue, marginTop: 9, lineHeight: 1.5 }}>
+                      {crossingCostNote(cc)}
+                    </div>
+                    {/* THE BREAKDOWN AND THE RANGE FOLD, AS THE WHY. */}
+                    <Fold label="the price" tone={T.dim} style={{ marginTop: 8 }}
+                      summary={`Where that price sits in the market, and the range behind it`}>
+                      {cc.known ? (
+                        <>
+                          <div style={{ display: "flex", gap: 14, marginTop: 8, flexWrap: "wrap" }}>
+                            {[["BID", cc.bid], ["MID", cc.mid], ["ASK", cc.ask], ["SUGGESTED", cc.fill]].map(([k, v]) => (
+                              <div key={k}>
+                                <div style={{ ...mono, fontSize: 9, color: T.dim }}>{k}</div>
+                                <div style={{ ...mono, fontSize: 13, fontWeight: 700, color: T.ink }}>{fmt$(Math.abs(v) * 100)}</div>
+                              </div>
+                            ))}
+                          </div>
+                          {/* THE RANGE. A budget cannot move a reward-to-risk —
+                              `analyze()` scales both ends by the same leg
+                              quantities — and the PRICE can, because `maxLoss`
+                              IS the debit. */}
+                          {rng && (
+                            <div style={{ display: "flex", gap: 14, marginTop: 10, flexWrap: "wrap" }}>
+                              {RR_POINTS.map((k) => (
+                                <div key={k}>
+                                  <div style={{ ...mono, fontSize: 9, color: T.dim }}>
+                                    {k === "fill" ? "R/R SUGGESTED" : `R/R AT THE ${k.toUpperCase()}`}
+                                  </div>
+                                  <div style={{ ...mono, fontSize: 13, fontWeight: 700, color: T.amber }}>
+                                    {rng[k].rr == null ? "—" : rng[k].rr.toFixed(2)}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {/* WHY A NEW POSITION STARTS NEGATIVE. */}
+                          <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 10, lineHeight: 1.6 }}>
+                            {openingMarkNote(cc)}
+                          </div>
+                        </>
+                      ) : null}
+                    </Fold>
+                  </div>
+                );
+              })()}
+
               {/* ============ THE DECISION, IN FIVE LINES (PRD §4n) ============
                   Everything this screen printed here is still here; it opens
                   behind a tap, in a sheet over the step, because a decision is
@@ -5796,6 +5940,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                      `cfg.qty` inside the ticket, which is why the gate above and
                      the position written below both ran at a hardcoded 1. */
                   qty={contracts} onQty={setContracts}
+                  qtyNote={contractsSourceNote({ contracts, typed: contractsTyped != null, request, fits: !!(budgetSize && budgetSize.ok) })}
                   /* AND NEITHER IS THE PRICE, for the same reason and one
                      session later. Type, time in force and one price per leg
                      are Build-screen state; the verdict and the effective price

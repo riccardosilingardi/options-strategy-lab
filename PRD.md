@@ -2665,6 +2665,44 @@ imports `engine.js` — so the sign is still decided in one place.
 
 ---
 
+## §4s-bis — "FILLS NOW" WAS SAID ABOUT AN ORDER THAT HAS NOT FILLED
+
+**READ ON THE OWNER'S ALPACA PAPER ACCOUNT, 22 September 2026.** J-0003 — SOYB 28/30, a debit of
+**$0.80**, good until cancelled, typed at the combination **ASK** the ticket was showing. The
+ticket's verdict band read **FILLS NOW**. Several sessions later the order is still open and
+nothing has filled.
+
+Nothing in the arithmetic is wrong. `limitPlacement()` placed $0.80 at or past the touch of the
+book it was given, which is the fills-now zone by definition, and `effectiveLimit()` agreed. The
+fault is one word narrower than that: **the book it was given is not the book that fills.**
+
+The quotes this app prices from are Alpaca's option snapshots, which the feed itself calls
+**indicative** rather than OPRA — `chainAlpaca.mjs` says so, `feedName()` / `sourceNote()` say so
+on every screen that names the source, and the header badge has read "Alpaca (indicative)" since
+PR #19. An indicative ask is a READING of the market, not a quote anybody is obliged to trade
+against, and a *combination* ask is the arithmetic of two to four of them summed on the side that
+trades. "Fills now" is a statement about the book the app can SEE. It has never been a statement
+about the book that fills, and it read as one.
+
+- **THIS IS COPY, AND DELIBERATELY ONLY COPY.** `INDICATIVE_CLAUSE` in `rules.js` is one clause —
+  *"on the indicative feed — the book that fills can differ"* — added to the **fills** branch of
+  `limitPlacement()` and to nothing else. No threshold moves. No argument is added.
+  `limitPlacement()` keeps its signature, `orderVerdict()` is built on it unchanged, and every
+  other sentence on the panel is the sentence it was.
+- **ONLY THE CERTAINTY GETS THE CAVEAT.** "You are waiting" and "this will not fill" claim nothing
+  the feed can be wrong about in the direction that costs somebody a day. The one sentence that
+  does is the one that carries it, which is `warningsToPrint()`'s discipline applied to a caveat.
+- **IT IS NOT A NEW REFUSAL AND NOT A NEW FLOOR.** The order was and remains perfectly sendable.
+  What changed is that the app no longer promises a fill on a feed that cannot promise one.
+
+**AND THE MEASUREMENT IT ASKS FOR IS NOT TAKEN.** Whether the indicative combination ask is
+*systematically* inside the real one on thin chains — and by how much — is unknown. It is on the
+NOT VERIFIED list, and it is the kind of question one filled order would start to answer and a
+week of them would settle. Until then the app says what it knows and names the feed it knows it
+from.
+
+---
+
 ## §4t — ORDERS SPEAK ALPACA'S OWN CONTRACT
 
 **There is no official JavaScript SDK for multi-leg option orders.** Every field name, every
@@ -3128,6 +3166,244 @@ Restored, and the failure is recorded here rather than quietly fixed.
 - **THE NEW SWEEPS ARE SOURCE SWEEPS.** `riskGate.test.js` and `voice.test.js` read `App.jsx`
   and `pro.jsx` as text. A site written in a way the regex does not recognise is a site they do
   not see, which is the same limit every sweep in this repository has.
+
+---
+
+---
+
+## §4w — THE CONTROLS COME FIRST, THE LIST SPLITS, AND ONE PRICE
+
+ROADMAP P10, asked for by the owner on 22 September 2026 reading the P9 deploy preview:
+
+> *"Il reward/Risk è dinamico? Per me dovrebbe, così come lo deve essere il budget dedicato
+> all'operazione, oppure quanto vuoi guadagnare. E deve essere tab semplice e visibile."*
+>
+> *"...l'app propone anche altro, magari visivamente sposta in una sezione quelle che marchiano
+> le richieste e subito sotto le altre. Del resto se il filtro è dinamico devono poter entrare e
+> uscire dalla sezione specifica."*
+
+### 1. ONE STATE FOR "WHAT I WANT", ABOVE BOTH DOORS
+
+`optMode` / `optAmt` were Build-and-Shortlist state in `App.jsx`; the guided run had its own
+`wiz.risk`. **Two states, one question** — the shape CLAUDE.md's standing rule is about, and the
+same fault as the Build screen's hardcoded 500 beside the wizard's derived 250.
+
+- **`requestOf(want, limits)` in `rules.js` is the one reader** and `want` in `App.jsx` is the one
+  state. The default amount is **DERIVED from `limits.perTradeLimit`, never typed**, so the figure
+  on screen before anybody answers is the number the risk gate is about to measure against.
+- **`amtAnswered` TRAVELS**, exactly as `sizing().answered` does. Until the user types an amount
+  every screen calls it a suggestion (`requestAmountOwner()`). An app that quotes a figure the user
+  never chose back at them as their own limit has stopped being trustworthy about anything else.
+- **`wiz` NO LONGER CARRIES `risk`.** `wizAnswers` READS the one home and stays NULL until answered,
+  so the guided button still refuses to run on an answer nobody gave.
+- **THE SIZE TRAVELS ALL THREE STEPS.** `contracts` on Build is DERIVED — `scaleStrategy()`,
+  untouched, read at the price the order will be sent at. A ticker or expiry change **RE-DERIVES**
+  from the budget instead of resetting to 1: the structure changed, the user did not. A count typed
+  by hand WINS and says so in one clause (`contractsSourceNote()`), because a quantity that silently
+  stops following the budget is a control the user cannot tell is stuck.
+- **THE GATE IS UNCHANGED.** It measures whatever `contracts` says, whichever of the two produced it.
+
+### 2. FIVE CONTROLS, ONE BLOCK, ABOVE EVERY RESULT
+
+`RequestControls` in **`src/card.jsx`** — its own file, because it may not live in `steps.jsx` (that
+file is the navigation and holds nothing about a trade) and it may not live in `App.jsx` (`wizard.jsx`
+renders it too, and `App.jsx` imports `wizard.jsx`).
+
+**Direction · target price · budget or target profit · expiry · one slider.** On the desk journey the
+block sits at the top of the Radar, above the market list, and again at the top of the Shortlist,
+where it REPLACES the panel that was the same five controls spread out with a 100px number field
+buried among them. On the guided journey `FindOpportunities` already asks for the basket, the amount
+and the horizon in its own three numbered blocks, so it renders the one control it does not have —
+the slider — plus the budget/target toggle beside the amount it already asks for. The owner's rule
+allows exactly this: *"dipende dalla journey"*.
+
+- **THE TARGET PRICE IS A READ-OUT, AND THAT IS DELIBERATE** (`targetPriceOf()`). It is the direction
+  expressed as a price — the figure the Shortlist has printed as IMPLIED TARGET all along. **Nothing
+  in this app generates structures from a typed price**: all three generation sites build from the
+  DIRECTION and the BOARD. A free-text target that no generation site reads would be a control that
+  does nothing, which is the one thing this repository refuses to ship. No spot is UNKNOWN, never a
+  target of zero.
+- **THE EXPIRY COMES FROM `buildableExpiries()` ONLY**, and a refused board is still rendered, named
+  and disabled — the `strikeOptions()` / `offFloorExpiryLabel()` pattern. `expiryMenu` in `App.jsx`
+  is the ONE spelling of "which boards may be offered"; the Radar's block and the Shortlist's
+  dropdown read the same list, so the two screens cannot disagree.
+- **THE SLIDER SETS A MINIMUM CHANCE OF PROFIT**, read off `chanceOf()`'s Monte Carlo — the one
+  source every chance in this app comes from. Its range and step are four named constants in `RULES`
+  with their reasoning, **all CHOSEN NOT MEASURED**: `chanceAskMin` 0.20 (below it almost everything
+  clears, so the control stops grouping anything), `chanceAskMax` 0.80 (above it what clears pays at
+  or under `minRewardRisk` and never reached the list, so the top section empties and the control
+  teaches that asking for certainty is free), `chanceAskStep` 0.05 (the simulation's own standard
+  error at `mcRuns` is about 0.55 of a point, and a finer step would move rows on sampling noise) and
+  `chanceAskDefault` 0.50.
+- **IT CREATES NO STRUCTURE, BYPASSES NO FLOOR, AND NEVER MOVES `minRewardRisk`.** 0.25 stays a fixed
+  rule: a user-movable quality floor would be the app letting somebody switch off the reason it can
+  be trusted. The slider decides ONE thing — which heading a candidate sits under.
+- **PHONE FIRST AT 390px.** Labels and controls, no paragraphs; every explanation is in a `Fold`
+  (`controlsFoldNote()`). A control that asks a question earns its words; a paragraph explaining the
+  control does not.
+
+### 3. THE RADAR WORD READING — A GUARD, NOT A RESULT
+
+ROADMAP P10 §3-bis is explicit, in the owner's own verdict on P9: *"non me ne frega niente, basta si
+capisca il tutto, sia intuitivo e siano evidenti takeaway senza perdere sostanza."* `src/wordcount.mjs`
+stays because it is what stops a paragraph coming back. **It is a GUARD and no session may report it
+as the result.** The result is whether he can read a card without reading a sentence.
+
+    RADAR, WORDS AT REST        literal   generated   total   sites
+    before this session            199         179     378       6
+    after the controls block       209         197     406      10
+    after the cards                256         225     481      13
+
+**+28 words for five controls**, because the block is labels and values and its explanation folds.
+The second step is the wide-search rows becoming cards: the counter reaches further into a screen
+built out of components than into one built out of inline JSX, at the same depth budget, so part of
+that +75 is the counter seeing more of what the screen already rendered rather than the screen
+growing. That is a stated limit of the heuristic, like the others in `wordcount.mjs`, and it is why
+the CEILING below is per screen.
+
+### 3-bis. THE LIST SPLITS, AND MEMBERSHIP IS LIVE
+
+`meetsRequest()` / `splitByRequest()` in `rules.js`, rendered by `SplitSections` in `card.jsx`, on
+**every one of the three generation sites**: the Shortlist, the wide search (both where it runs, on
+the Radar, and where its hits for the carried market are listed, on the Shortlist) and the guided
+result.
+
+- **TWO SECTIONS, ONE LIST.** Above: what meets what was asked for — inside the budget, or reaching
+  the target, AND at or above the slider's chance. Directly below, under its own heading, **never
+  hidden and never folded**: everything else that cleared the floors.
+- **IT GROUPS. IT DOES NOT REMOVE.** That distinction is the whole feature. The quality floors
+  remove and say which floor did it, and they are untouched; `priceability()`, `impossibleLoss()`
+  and `modelSanity()` remove before them. This one decides which HEADING a row sits under.
+- **AND THE WIDE SEARCH STOPPED REMOVING.** `if (n < 1) continue` dropped a structure that had
+  cleared every floor, in silence, because of an answer about the USER rather than about the trade.
+  It is grouped now: *"l'app propone anche altro"*.
+- **MEMBERSHIP IS DERIVED AND NEVER STORED ON A CANDIDATE.** A stored membership is a stale one the
+  moment the control moves, and these controls are meant to be dragged. `splitByRequest()` is pure
+  and a test proves the candidate object is not written to.
+- **EVERY ROW IN THE SECOND SECTION SAYS WHAT IT MISSED** — over the budget by $X, short of the
+  target by $X, chance N% under the Y% asked — because `meetsRequest()` returns the REASONS and the
+  split reads them, so a reasonless row cannot be constructed. A row under a heading with no reason
+  is the "empty screen with no sentence" fault, one list down.
+- **UNKNOWN IS NOT A PASS AND NOT A ZERO.** A candidate whose chance could not be worked out misses
+  with its own sentence — *"Unknown is not a low number"* — rather than being read as 0%.
+  `Number(null)` is 0 and 0 is finite, for the seventh time, and it bit again in `targetPriceOf()`:
+  NEUTRAL carries a real move of **zero**, so "nobody picked a direction" and "the direction is
+  sideways" had to be told apart by hand.
+- **THE SIZE IS HANDED IN, NEVER RE-DERIVED.** `meetsRequest()` takes the `scaleStrategy()` result
+  rather than working out a unit cost of its own: how many combinations a budget buys has one home
+  and `rules.js` is not it. A test reads the function's own body and fails the build if it ever
+  names a floor.
+- **ONE FACT, ONE PLACE.** The row's three old sizing sentences — cannot be sized, no readable
+  price, over the budget — are exactly what the split now writes above them under the heading that
+  put the row there. Printing both is the CONFLICT paragraph again, two inches apart.
+
+### 3-ter. ONE CARD, FOUR NUMBERS, NO PROSE
+
+`CandidateCard` in `card.jsx`, rendered by every generation site: the Shortlist, the wide search on
+both screens, and the guided roads. **The same card everywhere** — the structure's name, the legs in
+plain words on one line, exactly **four figures always in the same four places** (RETURN ON RISK,
+CHANCE, PROFIT, RISK), the band thumbnail and the gauge, and one button.
+
+- **ZERO PROSE ON A CARD, AND IT IS FALSIFIABLE.** `card.test.jsx` renders one, strips the markup and
+  fails the build on any text node over six words except the NAME and the LEGS line. The four
+  figures answer three questions and nothing else: what do I get, what do I risk, how likely is it.
+- **EVERY FIGURE IS READ AT THE PRICE THAT FILLS** — `fillNet()` = `openLimitPrice()` on
+  `comboBook()`, which is the number `legLimitSeed()` sums to on the ticket, so a card and the order
+  it opens agree by construction rather than by luck. §4l is the whole argument: on UNG the same
+  structure is 2.6:1 at the mid and 1.1:1 at the price that trades. **The section header says so
+  once**, and `priceNote` is opt-in — a section whose rows are still at the mid may not print it.
+  `analyze()` is called exactly as the Build screen calls it, with `{ net }`, and is not changed.
+- **THE MID READING SURVIVES BESIDE IT.** `a` is still the candidate's mid analysis: the compare
+  picture, the seasonal stamp and the chance are drawn from it, and a candidate is a structure
+  before it is a price. `aFill` is the card's.
+- **THE ROADS ARE THE SAME CARD.** `RoadCard` was a card of its own — a headline sentence, a takeaway
+  sentence, four figures in its own labels, two footnotes and a trade-off paragraph, on the screen
+  where two roads are meant to be compared at a glance. The explanation **folds**; FOLD, NEVER
+  DELETE, with the summary naming what is inside.
+- **TWO THINGS ON A ROAD DO NOT FOLD, AND THAT IS PRD §5**: the `WhyThisTrade` evidence panel and the
+  one generated sentence naming what the road gives up. Without them a road is a recommendation, and
+  this app does not make one — and P9 measured that behind a tap the four bars were, in practice, not
+  on the screen at all.
+- **THE LEGEND IS GONE.** P9 cut it from four sites to one; on a screen of identical cards it
+  explained the colours a fifth time, under two headings that already say what each section is. So is
+  *"the sentence under each chart says where"*, which pointed at a sentence no card has any more.
+- **THE 1-3 COMPARISON IS UNTOUCHED.** It compares cards now. `CandidateActions` is the card's action
+  row, unchanged.
+
+### 3-quater. ONE PRICE, AND WHAT CROSSING COSTS
+
+The owner's reading of the whole product: *"is it a good bet? yes — but how much do I pay for it?"*
+**Measured on his own orders**: J-0003, typed at the indicative combination ASK, has not filled after
+several sessions (§4s-bis); his earlier limits at the MID expired. So the ask is not a guaranteed
+fill and paying it is not a strategy — and the mid is not a price either.
+
+- **`rewardRiskRange()` in `rules.js`, beside `rewardRisk()`.** Three ratios WITH their three nets:
+  the bid, the mid, and the price that fills. **NO NEW ARITHMETIC** — `comboBook()` already returns
+  the three prices, `openLimitPrice()` already decides which one fills, and the caller hands in its
+  own `analyze()` because this file does not own it. It is DISPLAY ONLY: it refuses nothing, filters
+  nothing, and `rewardRisk()` keeps its single-value job for every existing caller.
+- **NULLS UNDER `minNetPremium`, EXACTLY LIKE `rewardRisk()`.** A range with an unreadable end is not
+  a range. Read on the UNG fixture this repository already carries: the combination BIDS $0.04, under
+  the minimum, so that end of the range has no ratio and says so rather than dividing.
+- **A BUDGET CANNOT CHANGE A REWARD-TO-RISK, AND THE TEST SAYS SO.** `analyze()` multiplies
+  `maxProfit` AND `maxLoss` by the same leg quantities, so the ratio is invariant under size: $4
+  against $346 at one contract is $40 against $3,460 at ten. `ticket.test.jsx` holds it at one lot
+  and at ten, and checks that both ends really did scale so the invariance is not two nulls. A
+  "reward-to-risk as a function of the budget" would be a number that looks live and never moves —
+  this repository's oldest failure mode wearing a new coat. **What moves it is the PRICE**, because
+  `maxLoss` IS the debit.
+- **BUILD'S TOP IS FIVE FIGURES IN ONE ROW, LABEL ABOVE VALUE**: what you pay or receive, the maximum
+  loss, the maximum profit, the chance, the break-even — with the structure in plain words above
+  them. All five are read at the price that will be sent: `AE` is `analyze()` at `effectiveLimit()`'s
+  net, which seeds at `openLimitPrice()`, so this row and the ticket cannot disagree.
+- **ONE LINE SAYS WHAT CROSSING COSTS** (`crossingCost()` / `crossingCostNote()`): *"Suggested $80 ·
+  fair value (mid) $70 · entering here costs you $10."* The cost is the concession and nothing else.
+- **THE BREAKDOWN AND THE RANGE FOLD ONE TAP BELOW, AS THE WHY** — bid, mid, ask, suggested, and the
+  three reward-to-risks beside them.
+- **AND THE FOLD SAYS WHY A NEW POSITION STARTS NEGATIVE** (`openingMarkNote()`): a structure bought
+  at the fill price is immediately marked at what somebody would pay to take it back, which is the
+  BID. That gap is not a loss anybody made — it is the round trip, visible on day one — and the
+  Guardian's red figure on a position opened ten seconds ago has never had a sentence.
+
+### 4. AND THE COUNTER ITSELF HAD A DEFECT, MEASURED HERE
+
+`atRest()` strips a fold with a non-greedy match from `<Fold …>` to the next `</Fold>`. It ran over
+the **concatenation** of the step block and every component body, so that match could cross the
+boundary between two pieces: **which words a fold hid depended on which components the block mounted,
+and in what order.** Measured while adding the controls block — the Shortlist's own parts sum to 776
+words, and the concatenation scored it **533** before the block mounted one more component and **707**
+after, on a source that had SHRUNK by three thousand characters.
+
+A counter that moves when nothing on the screen moved is not a guard. `screenSource()` puts each
+piece at rest BEFORE joining them, so a reading is the sum of its parts and appending a body can only
+add that body's own words. `voice.test.js` holds it: `atRest(screenSource(...))` must equal
+`screenSource(...)`, and a dangling `</Fold>` in a later piece must not reach back into an earlier one.
+
+**AND A SECOND DEFECT, IN THE SAME FUNCTION.** `literalWords()` scores string and template literals
+as prose, and it scored the `${…}` INTERPOLATIONS inside them as words. `${r.tk}` and
+`${legsLine(legs)}` are code; what a reader sees is the text around them, and the value itself is a
+figure. Giving a component a template-literal prop moved the table. The interpolation is dropped now,
+for the same reason `copyOf()` scores a generator's OUTPUT rather than its call.
+
+**THE BASELINE WAS RE-DERIVED, BY THE PROCEDURE WRITTEN BESIDE IT**, from a whole-tree worktree of
+68b75a5 with both fixes. It read `{ radar 1162, shortlist 1881, build 963, total 4006 }` and reads
+`{ radar 1162, shortlist 1872, build 593, total 3627 }`. Both sides of the table are measured by one
+counter, or the table means nothing.
+
+**AND THE FLOOR MOVED FROM 40% TO 35%, SAID RATHER THAN SLID.** P9 hit 47.5% on the corrected
+counter. P10 spends some of it back, and ROADMAP P10 §5 said so before a line of it was built: *"a
+new always-visible panel spends some of that back... A control that asks a question earns its words;
+a paragraph explaining the control does not, and folds."* Five controls now sit above every result on
+two screens. This tree reads **2,256 against 3,627 — a 37.8% cut**.
+
+A session that lowers a bar to clear it is doing the thing this file exists to stop, so the number
+that now stops growth is a **CEILING**: `{ radar 481, shortlist 1216, build 559, total 2256 }`, this
+session's own reading, per screen and in total. **Any screen that grows by one word fails the build.**
+It was raised once inside this session, for TASK 5's five figures on Build (533 → 559), in the commit
+and here — never by quietly re-running the counter.
+The ratio stays as the long-run direction. The owner's own verdict on the ratio, after P9 reported
+43%: *"non me ne frega niente, basta si capisca il tutto, sia intuitivo e siano evidenti takeaway
+senza perdere sostanza."*
 
 ---
 
@@ -4068,7 +4344,49 @@ What is left:
 The standing rule in `CLAUDE.md`: every session starts by fixing what the last one flagged, and
 ends by writing down what it could not verify. Currently open:
 
-### WRITTEN THIS SESSION — one voice (§4v)
+### WRITTEN THIS SESSION — the controls come first (§4w, §4s-bis)
+
+`npm test` reports **942 checks across 23 suites**, up from the **911 across 22** a clean `main`
+measures (measured on an untouched `main` at the start of this session, and it matches what PR #35
+recorded). `npm run build` is clean. One new suite: `src/card.test.jsx`.
+
+- **NO ORDER CAN BE SENT FROM THIS SANDBOX. ELEVENTH SESSION IN A ROW.** No broker keys, and the
+  egress proxy refuses the CONNECT.
+- **J-0003 HAS NOT FILLED, AND THE QUESTION IT RAISES IS UNMEASURED.** SOYB 28/30, debit $0.80,
+  GTC, typed at the combination ask the ticket was showing, still open several sessions later.
+  **Is the indicative combination ask systematically INSIDE the real one on thin chains, and by
+  how much?** Nobody has read it. §4s-bis names the feed in the sentence; it does not answer this.
+- **THE CLOSING DIRECTION VIA `closeGroup()` HAS NEVER BEEN SENT LIVE.** TASK 0a rebuilt that path
+  as a limit priced at the tap, and every part of it is held against fixtures: `holdingLeg()`
+  against OCC strings, the sweep against the source. **What no test can settle is whether Alpaca
+  accepts the body** — in particular whether the SIGN on a close built from a broker holding comes
+  out the way `mlegLimitPrice()` says it does. The opening sign was wrong for four pull requests
+  and only a fill found it. `autopilot.test.js` carried the closing half as an EXPECTATION that
+  was itself wrong (§4q). **This is the highest-value single reading left in the app.**
+- **EVERY ONE OF P10'S FOUR NEW `RULES` CONSTANTS IS CHOSEN, NOT MEASURED** — `chanceAskMin` 0.20,
+  `chanceAskMax` 0.80, `chanceAskStep` 0.05, `chanceAskDefault` 0.50. What has NOT been read is
+  the distribution of `chanceOf()` over the candidates the ten live chains actually produce, which
+  is the reading that would settle where the two ends belong. They join
+  `modelDisagreementRatio`, `maxComboSpreadShareOfNet`, `openLimitSlippage`, `closeLimitSlippage`,
+  `watchAttentionShare`, `autopilotConfidence`, `fallbackIV` and `fallbackSigma` on this list.
+- **THE TARGET PRICE IS A READ-OUT AND NOBODY HAS ASKED THE OWNER WHETHER THAT IS WHAT HE MEANT.**
+  §4w says why it cannot be an input without a generation site that reads one. If he wants to type
+  a price and have the app build toward it, that is a new generation rule and a new session.
+- **NOBODY HAS SEEN THE SPLIT ON A REAL SCREEN.** The two sections, the cards and the controls are
+  held by `card.test.jsx` against fixtures and by `voice.test.js` against the counter. Whether the
+  owner can read a card without reading a sentence — which ROADMAP P10 §3-bis says is the actual
+  result — is a question only he can answer.
+- **THE WORD COUNTER'S DEPTH LIMIT IS NOW A KNOWN CONFOUND.** It reaches further into a screen
+  built out of components than into one built out of inline JSX at the same `COMPONENT_DEPTH`, so
+  part of the Radar's 378 → 481 is the counter seeing more of what the screen already rendered.
+  Stated, not corrected: correcting it would move the baseline a third time in one session.
+- **THE ANTHROPIC USAGE LIMIT DISABLED EVERY AI FEATURE UNTIL 2026-10-01**, so report section 5,
+  both copilots and `copilotOverreach()` are still dark, for the second session running. Nothing
+  in this session touches them, and nothing in this session has exercised them either.
+
+The full list, with the reasoning, is §4w and §4s-bis.
+
+### WRITTEN BEFORE THIS — one voice (§4v)
 
 `npm test` reports **911 checks across 22 suites**, up from the **864 across 21** a clean `main`
 measures (measured on an untouched `main` at the start of this session, and it matches what
@@ -4085,7 +4403,11 @@ PR #34 recorded). `npm run build` is clean. One new suite: `src/voice.test.js`.
 - **NOBODY HAS ASKED THE OWNER WHETHER THE FOLDS FOLD THE RIGHT THINGS.**
 - **`remainingEdge()`'S SECOND READING REUSES `RULES.minRewardRisk`**, which was chosen for
   ENTRY. Whether the bar for holding is the bar for opening is an untaken product decision.
-- **WHETHER J-0003 FILLED IS UNKNOWN** — SOYB 28/30, debit $0.80, GTC.
+- **J-0003 HAS NOT FILLED, AND THE QUESTION IT RAISES IS UNMEASURED** — SOYB 28/30, debit
+  $0.80, GTC, typed at the combination ask the ticket was showing, still open several sessions
+  later. The verdict said FILLS NOW because the indicative feed's ask said so. **Is the
+  indicative combination ask systematically INSIDE the real one on thin chains, and by how
+  much?** Nobody has read it. §4s-bis names the feed in the sentence; it does not answer this.
 - **THE ANTHROPIC USAGE LIMIT DISABLED EVERY AI FEATURE UNTIL 2026-10-01**, so report section 5
   and both copilots were dead on the reading this session is built from, and
   `copilotOverreach()` has never seen a real model answer.

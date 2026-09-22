@@ -498,6 +498,65 @@ test("NEVER AGAIN — no order path hands orderBody() a magnitude", () => {
   }
 });
 
+test("NEVER AGAIN — no close path builds a MARKET order for an option leg", () => {
+  /* >>> READ LIVE, 22 September 2026. <<< The owner tapped "Close the whole
+     trade" on XLE and Alpaca refused it: HTTP 422, code 42210000, "options
+     market orders are only allowed during market hours". `closeGroup()` in
+     pro.jsx was the one close path still writing `type: "market"` — the other
+     five have been limits since PR #22, and PRD §8c has said so in writing the
+     whole time.
+
+     The sweep is on the SHAPE, like its three siblings above: an `orderBody()`
+     call whose `intent` is "close" and whose `type` is the LITERAL "market".
+     A variable type is not caught and is not meant to be — what is refused is
+     an order path DECIDING to take whatever the other side is asking on books
+     this repository has measured at 145% of the mid. */
+  const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+  const FILES = ["src/pro.jsx", "src/App.jsx", "netlify/functions/approve.mjs", "netlify/functions/autopilot.mjs"];
+  // An `orderBody({ ... })` call, read whole, then asked two questions.
+  const closeMarketBody = (code) => {
+    const out = [];
+    const re = /orderBody\(\s*\{/g;
+    let m;
+    while ((m = re.exec(code)) !== null) {
+      let depth = 0, i = code.indexOf("{", m.index);
+      let j = i;
+      for (; j < code.length; j++) {
+        const c = code[j];
+        if (c === "{") depth++;
+        else if (c === "}") { depth--; if (depth === 0) break; }
+      }
+      const call = code.slice(i, j + 1);
+      if (/intent:\s*["'`]close["'`]/.test(call) && /type:\s*["']market["']/.test(call)) out.push(call);
+    }
+    return out;
+  };
+  for (const f of FILES) {
+    const hits = closeMarketBody(strip(readFileSync(f, "utf8")));
+    assert.deepEqual(hits, [],
+      `${f} closes at the market: Alpaca refuses an option market order outside market hours (422 / 42210000), ` +
+      `and on a book quoting 145% of the mid it is not a price. A close is a LIMIT priced at the tap (PRD §8c).`);
+  }
+  // AND THE GUARD CAN SEE ONE: the shape it refuses is a shape it recognises.
+  assert.equal(closeMarketBody(`orderBody({ legs, occs, userQty: 1, type: "market", tif: "day", intent: "close" })`).length, 1);
+  assert.equal(closeMarketBody(`orderBody({ legs, occs, userQty: 1, type: "limit", limit: n, tif: "day", intent: "close" })`).length, 0);
+  assert.equal(closeMarketBody(`orderBody({ legs, occs, userQty: 1, type: "market", tif: "day", intent: "open" })`).length, 0);
+});
+
+test("CLOSE — the one close path that had no book now hands limitAgainstBook a real one", () => {
+  /* `limitAgainstBook()` was wired into `closeGroup()` with `book: null` and a
+     body that carried no `limit_price` at all — two of its four unknowns at
+     once, so it could only ever skip. It was written that way deliberately,
+     against the day the path gained a limit. That day is this one. */
+  const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+  const pro = strip(readFileSync("src/pro.jsx", "utf8"));
+  assert.equal(/limitAgainstBook\(\{\s*limitPrice:\s*[^,]*,\s*book:\s*null/.test(pro), false,
+    "a close path that hands limitAgainstBook() a null book is a guard that can only skip");
+  // ...and the price it sends is worked out from a chain fetched at the tap.
+  assert.ok(/fetchChain\(/.test(pro), "the close prices from a chain read at the moment of the tap (PRD §8c)");
+  assert.ok(/closeLimitPrice\(/.test(pro), "the closing limit comes from closeLimitPrice(), its one home");
+});
+
 /* ---------------- report ---------------- */
 console.log(`\n${passed} passed, ${failures.length} failed`);
 if (failures.length) { for (const f of failures) console.error(`\nFAILED: ${f.name}\n${f.e.stack}`); process.exit(1); }

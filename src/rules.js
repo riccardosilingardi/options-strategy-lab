@@ -340,6 +340,43 @@ export const RULES = {
   // crossed it against positions that did not.
   watchAttentionShare: 0.35,
 
+  // --- THE ONE CONTROL THAT TRADES RETURN AGAINST PROBABILITY (ROADMAP P10).
+  //
+  // The owner asked for a control that moves what the app puts in front of him
+  // between "pays more" and "works more often". These four numbers are its
+  // range, its step and where it starts. They set a MINIMUM CHANCE OF PROFIT,
+  // read off `chanceOf()`'s Monte Carlo — the one source every chance in this
+  // app comes from — and they decide ONE thing: which HEADING a candidate sits
+  // under. They create no structure, bypass no floor and move nothing in the
+  // gate. `minRewardRisk` stays a fixed rule and is deliberately NOT a control:
+  // a user-movable quality floor would be the app letting somebody switch off
+  // the reason it can be trusted.
+  //
+  // >>> ALL FOUR ARE CHOSEN, NOT MEASURED, and they are on the PRD's NOT
+  // VERIFIED list. <<< Nothing in this repository has read the distribution of
+  // `chanceOf()` over the candidates the five — now ten — live chains actually
+  // produce, which is the reading that would settle where the two ends belong.
+  //
+  // chanceAskMin — below this almost everything on these chains clears, so the
+  // control stops grouping anything and becomes a slider that does nothing.
+  chanceAskMin: 0.20,
+  // chanceAskMax — above this, on these chains, a structure that clears pays so
+  // little that it is at or under `minRewardRisk` and never reached the list at
+  // all, so the top section empties and the control teaches the wrong lesson:
+  // that asking for certainty is free.
+  chanceAskMax: 0.80,
+  // chanceAskStep — the Monte Carlo's standard error at `mcRuns` is about 0.55
+  // of a percentage point, and `chancePct()` rounds to the whole percent. A
+  // one-point step would move rows between the two sections on sampling noise,
+  // which is a control that appears to do something it did not do.
+  chanceAskStep: 0.05,
+  // chanceAskDefault — the middle of the band, and the point where "more often
+  // than not" becomes true. It is a STARTING POSITION the user can see and
+  // change, which is why it may have one at all: the same distinction the
+  // wizard draws between the basket (a visible default) and the budget (an
+  // answer that must never be invented).
+  chanceAskDefault: 0.50,
+
   // minNetPremium — THE PRICE HAS TO EXIST BEFORE ANY OTHER RULE CAN BE
   // APPLIED TO IT. In dollars per share, the unit an option is quoted in:
   // multiply by 100 for one contract, as every screen does.
@@ -2363,6 +2400,108 @@ export const rewardRisk = (maxProfit, maxLoss) => {
   return reward / risk;
 };
 
+/* =====================================================================
+   THE SAME STRUCTURE HAS THREE REWARD-TO-RISKS (ROADMAP P10 §1)
+
+   The owner: *"Il reward/Risk è dinamico? Per me dovrebbe... con Range di
+   raccomandazioni a seconda del bid/ask dei contratti."*
+
+   >>> A BUDGET CANNOT CHANGE A REWARD-TO-RISK, AND THAT IS WHY THIS IS A
+   RANGE. <<< `analyze()` multiplies `maxProfit` and `maxLoss` by the SAME leg
+   quantities, so the RATIO is invariant under size: $4 against $346 at one
+   contract is $40 against $3,460 at ten. Building "R/R as a function of the
+   budget" would produce a number that looks live and never moves, which is
+   this repository's oldest failure mode wearing a new coat.
+
+   WHAT DOES MOVE IT IS THE PRICE, because `maxLoss` IS the debit. At the bid,
+   at the mid and at the price that fills the same structure has three
+   different reward-to-risks, and the honest form of his request is all three.
+
+   NO NEW ARITHMETIC. `comboBook()` already returns the three prices and
+   `openLimitPrice()` already decides which one fills; the caller hands in its
+   own `analyze()` because this file does not own it. It is DISPLAY ONLY: it
+   refuses nothing, filters nothing, and `rewardRisk()` keeps its single-value
+   job for every existing caller.
+===================================================================== */
+
+/** The three points of the range, in the order a screen reads them. */
+export const RR_POINTS = ["bid", "mid", "fill"];
+
+/**
+ * @param book the `comboBook()` result
+ * @param at   `(net) => analyze(...)` — the caller's own analysis at that net
+ * @returns {?{bid,mid,fill}} each `{ net, rr }`, with NULLS under
+ *          `minNetPremium` exactly as `rewardRisk()` returns null under
+ *          `MIN_NET_DOLLARS`: a range with an unreadable end is not a range.
+ */
+export function rewardRiskRange({ book, at } = {}) {
+  if (!book || !book.ok || typeof at !== "function") return null;
+  const filled = openLimitPrice({ netMid: book.mid, spread: book.spread });
+  const nets = { bid: book.bid, mid: book.mid, fill: filled ? filled.net : null };
+  const out = {};
+  for (const k of RR_POINTS) {
+    const net = nets[k];
+    // `Number(null)` is 0 and 0 is finite — the nets go out before the coercion.
+    if (net == null || !Number.isFinite(+net) || Math.abs(+net) < RULES.minNetPremium) {
+      out[k] = { net: null, rr: null };
+      continue;
+    }
+    const a = at(+net);
+    out[k] = { net: +net, rr: a ? rewardRisk(a.maxProfit, a.maxLoss) : null };
+  }
+  return out;
+}
+
+/**
+ * WHAT CROSSING COSTS, IN ONE LINE (ROADMAP P10 §1, §3-bis points 5-6).
+ *
+ * The owner's reading of the whole product: *"is it a good bet? yes — but how
+ * much do I pay for it?"* Measured on his own orders: J-0003, typed at the
+ * indicative combination ASK, has not filled after several sessions; his
+ * earlier limits at the MID expired. So the ask is not a guaranteed fill and
+ * paying it is not a strategy — and the mid is not a price either. The app
+ * suggests ONE price, names what it is worth, and says what the difference is.
+ */
+export const crossingCostNote = (r) => {
+  if (!r || !r.known) {
+    return `There is no two-sided market on every leg right now, so the app cannot suggest a price or say ` +
+      `what crossing would cost.`;
+  }
+  const cost = Math.abs(r.cost) * 100;
+  return `Suggested ${money(Math.abs(r.fill) * 100)} · fair value (mid) ${money(Math.abs(r.mid) * 100)} ` +
+    `· entering here costs you ${money(cost)}.`;
+};
+
+/** The figures that line names, worked out once. */
+export function crossingCost({ book } = {}) {
+  if (!book || !book.ok) return { known: false, fill: null, mid: null, bid: null, cost: null };
+  const filled = openLimitPrice({ netMid: book.mid, spread: book.spread });
+  if (!filled) return { known: false, fill: null, mid: null, bid: null, cost: null };
+  return {
+    known: true, fill: filled.net, mid: book.mid, bid: book.bid, ask: book.ask,
+    // The concession, and nothing else: the mid is what it is worth, the fill
+    // is what it takes, and the gap is what the market charges to be met.
+    cost: Math.abs(filled.net) - Math.abs(book.mid),
+  };
+}
+
+/**
+ * WHY A NEW POSITION STARTS NEGATIVE, said where the range is.
+ *
+ * A structure bought at the fill price is immediately marked at what somebody
+ * would pay to take it back off you, which is the BID. That gap is not a loss
+ * anybody made: it is the round trip, visible on day one. The Guardian's red
+ * figure on a position opened ten seconds ago has never had a sentence.
+ */
+export const openingMarkNote = (r) => {
+  if (!r || !r.known || r.bid == null) return null;
+  const drop = Math.abs(r.fill) - Math.abs(r.bid);
+  return `It is worth ${money(Math.abs(r.bid) * 100)} the moment it opens — that is what the other side ` +
+    `would pay to take it back — so a position bought at ${money(Math.abs(r.fill) * 100)} starts ` +
+    `${money(drop * 100)} down. Nothing has gone wrong: that gap is the round trip, and it is why a wide ` +
+    `market costs money before the trade is right or wrong about anything.`;
+};
+
 /**
  * Run one candidate past both floors.
  *
@@ -2762,6 +2901,297 @@ export function sizing(answers = {}) {
     pills,
   };
 }
+
+/* =====================================================================
+   THE REQUEST — ONE STATE FOR "WHAT I WANT", ABOVE BOTH DOORS.
+
+   ROADMAP P10 §2. The owner: *"il budget dedicato all'operazione, oppure
+   quanto vuoi guadagnare... deve essere tab semplice e visibile"* and
+   *"tutti devono stare in radar, o prima di decide for me, dipende dalla
+   journey."*
+
+   >>> IT WAS TWO HOMES FOR ONE ANSWER. <<< `optMode` / `optAmt` were
+   Build-and-Shortlist state in App.jsx; the guided run had its own
+   `wiz.risk`. Two states, one question, and CLAUDE.md has a standing rule
+   about exactly this shape — the Build screen's hardcoded 500 beside the
+   wizard's derived 250 is the same fault with different numbers. There is
+   one now, and this is the function that reads it.
+
+   THE DEFAULT IS DERIVED, NEVER TYPED. It is `limits.perTradeLimit` — the
+   `sizing()` result — so the amount on screen before anybody types is the
+   same number the risk gate is about to measure against. And `answered`
+   travels beside it exactly as `sizing().answered` does: until the user
+   types an amount, every screen printing it has to call it a suggestion.
+   An app that quotes a figure the user never chose back at them as their
+   own limit has stopped being trustworthy about anything else it says.
+
+   IT DECIDES NOTHING AND REFUSES NOTHING. The quality floors remove; this
+   only decides which HEADING a candidate sits under (`meetsRequest()`
+   below) and how many combinations the budget buys (`scaleStrategy()` in
+   pro.jsx, unchanged). `minRewardRisk` is not in it and must never be: a
+   user-movable quality floor would be the app letting somebody switch off
+   the reason it can be trusted.
+===================================================================== */
+
+/** The two questions this app knows how to answer about size. */
+export const REQUEST_MODES = ["budget", "target"];
+
+/** What the amount field is asking for, in the words the screen uses. */
+export const requestAmountLabel = (mode) =>
+  (mode === "target" ? "PROFIT I AM AIMING FOR ($)" : "MOST I WILL RISK ($)");
+
+/**
+ * The user's request, read from the one state that holds it.
+ *
+ * @param want   { mode, amt, minChance } — every field NULL until answered
+ * @param limits the `sizing()` result, for the derived default
+ * @returns {{ mode, amt, amtAnswered, minChance, chanceAnswered, answered }}
+ */
+export function requestOf(want = {}, limits = {}) {
+  const mode = REQUEST_MODES.includes(want.mode) ? want.mode : REQUEST_MODES[0];
+  const typed = Number(want.amt);
+  const amtAnswered = Number.isFinite(typed) && typed > 0;
+  // `Number(null)` is 0 and 0 is finite — for the seventh time in this
+  // repository. The nulls go out before the coercion, and a derived default is
+  // never reported as an answer.
+  const derived = Number(limits.perTradeLimit);
+  const amt = amtAnswered ? Math.round(typed)
+    : (Number.isFinite(derived) && derived > 0 ? Math.round(derived) : null);
+  const raw = want.minChance;
+  const chanceAnswered = raw != null && raw !== "" && Number.isFinite(Number(raw));
+  const minChance = clampAskedChance(chanceAnswered ? Number(raw) : null);
+  return { mode, amt, amtAnswered, minChance, chanceAnswered, answered: amtAnswered };
+}
+
+/* =====================================================================
+   DOES THIS CANDIDATE MEET WHAT WAS ASKED FOR? (ROADMAP P10 §3)
+
+   The owner: *"l'app propone anche altro, magari visivamente sposta in una
+   sezione quelle che marchiano le richieste e subito sotto le altre. Del
+   resto se il filtro è dinamico devono poter entrare e uscire dalla sezione
+   specifica."*
+
+   >>> THIS GROUPS. IT DOES NOT REMOVE. <<< That distinction is the whole
+   feature. The quality floors REMOVE and say which floor did it, and they
+   are untouched here; `priceability()`, `impossibleLoss()` and
+   `modelSanity()` remove before them. This one only decides which HEADING a
+   row sits under, and everything that cleared the floors is on the screen
+   either way — never hidden, never folded.
+
+   >>> MEMBERSHIP IS DERIVED AND MUST NEVER BE STORED ON A CANDIDATE. <<< A
+   stored membership is a stale one the moment the control moves, and the
+   controls are meant to be dragged. It is computed from `candidateOf()`'s
+   shape against the current request, on every render.
+
+   AND EVERY ROW IN THE SECOND SECTION SAYS WHAT IT MISSED. A row under a
+   heading with no reason is the "empty screen with no sentence" fault, one
+   list down — so `meetsRequest()` returns the REASONS and the split reads
+   them, which is why a reasonless row cannot be constructed.
+===================================================================== */
+
+/**
+ * @param cand    a `candidateOf()` shape: `{ pop, maxProfit, maxLoss, … }`
+ * @param request a `requestOf()` result
+ * @param size    the `scaleStrategy()` result for this candidate, or null.
+ *                IT IS HANDED IN RATHER THAN DERIVED: how many combinations a
+ *                budget buys has one home and this file is not it, and
+ *                re-deriving the unit here would be the `Math.max(prem, 1)`
+ *                fault wearing a second coat.
+ * @returns {{ meets, misses: [{id,text,short}] }}
+ */
+export function meetsRequest(cand, request, size = null) {
+  const misses = [];
+  if (!cand || !request) return { meets: false, misses: [{ id: "unknown", short: "not readable", text: "This candidate could not be read against your answers." }] };
+  const amt = Number(request.amt);
+  const haveAmt = Number.isFinite(amt) && amt > 0;
+
+  /* ---- THE MONEY HALF ---- */
+  if (haveAmt) {
+    if (!size) {
+      misses.push({ id: "unsized", short: "cannot be sized",
+        text: `It cannot be sized against ${request.mode === "target" ? "a target" : "a budget"}: it has no ` +
+          `readable cost or no maximum profit to divide by.` });
+    } else if (size.unpriceable) {
+      misses.push({ id: "unpriceable", short: "no readable price",
+        text: `One side of this prices at under ${money(MIN_NET_DOLLARS)}, so there is no cost to divide your ` +
+          `${request.mode === "target" ? "target" : "budget"} by.` });
+    } else if (!size.ok) {
+      const over = Number(size.unit) - amt;
+      misses.push({ id: "budget", short: `over budget by ${money(over)}`,
+        text: `Over the budget by ${money(over)}: one of these ${size.isCredit ? "ties up" : "costs"} ` +
+          `${money(size.unit)} and you said ${money(amt)}.` });
+    } else if (request.mode === "target" && Number(size.totProfit) < amt) {
+      const shortBy = amt - Number(size.totProfit);
+      misses.push({ id: "target", short: `short of the target by ${money(shortBy)}`,
+        text: `Short of the target by ${money(shortBy)}: the most this can make is ${money(size.totProfit)} and ` +
+          `you asked for ${money(amt)}.` });
+    }
+  }
+
+  /* ---- THE CHANCE HALF. UNKNOWN IS NOT A PASS AND NOT A ZERO. ---- */
+  const pop = Number(cand.pop);
+  const asked = Number(request.minChance);
+  if (!Number.isFinite(asked)) {
+    // No bar asked for: nothing to miss.
+  } else if (cand.pop == null || !Number.isFinite(pop)) {
+    misses.push({ id: "chance-unknown", short: "chance not known",
+      text: `Its chance of profit could not be worked out, so it cannot be held against the ${chanceText(asked)} ` +
+        `you asked for. Unknown is not a low number.` });
+  } else if (pop < asked - 1e-9) {
+    misses.push({ id: "chance", short: `chance ${chanceText(pop)} under the ${chanceText(asked)} asked`,
+      text: `Its chance is ${chanceText(pop)}, under the ${chanceText(asked)} you asked for.` });
+  }
+  return { meets: misses.length === 0, misses };
+}
+
+/**
+ * The same list, in two sections. `sizeOf` is the caller's `scaleStrategy()`.
+ *
+ * NOTHING IS DROPPED: `meets.length + others.length` is always the input
+ * length, and every entry in `others` carries at least one reason.
+ */
+export function splitByRequest(cands = [], request, sizeOf = () => null) {
+  const meets = [], others = [];
+  for (const c of cands || []) {
+    const r = meetsRequest(c, request, sizeOf(c));
+    if (r.meets) meets.push({ cand: c, misses: [] });
+    else others.push({ cand: c, misses: r.misses });
+  }
+  return { meets, others, total: meets.length + others.length };
+}
+
+/** The two headings. They carry the counts, so neither needs a sentence. */
+export const meetsHeading = (request, n) =>
+  `MEETS WHAT YOU ASKED FOR (${n})`;
+export const otherwiseHeading = (n) =>
+  `ALSO FOUND, AND WHAT EACH ONE MISSED (${n})`;
+/** One row's reason, in the fewest words that still say which rule. */
+export const missReasonLine = (miss) => (miss && miss.short ? miss.short : "");
+/**
+ * THE NET AT THE PRICE THAT FILLS — one expression, for every card.
+ *
+ * `openLimitPrice()` on `comboBook()`: the mid plus a quarter of the spread in
+ * the direction that fills, never past the touch. It is the same number
+ * `legLimitSeed()` sums to on the Build screen's ticket, so a card and the
+ * ticket it opens agree by construction rather than by luck.
+ *
+ * NEITHER FUNCTION IS CHANGED — both are on this session's do-not-touch list.
+ * This only spells the pair once so five call sites cannot spell it four ways.
+ * No book means NO PRICE, never a price of zero.
+ */
+export function fillNet(legs, quotes) {
+  const book = comboBook(legs, quotes);
+  if (!book || !book.ok) return null;
+  const p = openLimitPrice({ netMid: book.mid, spread: book.spread });
+  return p ? p.net : null;
+}
+
+/** The section header that says which price every figure below is read at. */
+export const fillPriceHeading = () =>
+  `Every figure below is read at the price that fills, not at the mid.`;
+
+/**
+ * THE TARGET PRICE — THE DIRECTION EXPRESSED AS A PRICE, AND A READ-OUT.
+ *
+ * >>> IT IS DELIBERATELY NOT A SECOND INPUT. <<< Nothing in this app generates
+ * structures from a typed price: all three generation sites build from the
+ * DIRECTION and the BOARD (`buildPresets()` takes a sentiment, a spot, a step
+ * and the strikes that exist). A free-text target that no generation site reads
+ * would be a control that does nothing, which is the one thing this repository
+ * refuses to ship — the whole of ROADMAP P10 is controls that visibly move the
+ * results. So the block shows what the direction MEANS in dollars, which is the
+ * figure the Shortlist has printed as IMPLIED TARGET all along, and moving the
+ * direction moves it.
+ *
+ * NO SPOT IS UNKNOWN, NOT A TARGET OF ZERO. `Number(null)` is 0 and 0 is
+ * finite, for the eighth time in this repository.
+ */
+export function targetPriceOf(spot, direction) {
+  const S = Number(spot);
+  // NO DIRECTION IS UNKNOWN, AND `Number(null)` IS 0 AND 0 IS FINITE — the trap
+  // this repository has written down seven times, and it is live here because
+  // NEUTRAL really does carry a move of ZERO. "Nobody picked a direction" and
+  // "the direction picked is sideways" are different facts and the second one
+  // is a real reading.
+  const raw = direction == null ? null : direction.tgt;
+  const move = raw == null || raw === "" ? NaN : Number(raw);
+  if (!Number.isFinite(S) || S <= 0 || !Number.isFinite(move)) {
+    return { known: false, price: null, move: null, movePct: null };
+  }
+  return { known: true, price: S * (1 + move), move, movePct: move * 100 };
+}
+
+/** What the target price is, for a reader who asks where it came from. */
+export const targetPriceNote = (t, ticker) =>
+  (t && t.known
+    ? `The target price is the direction read as a number: ${ticker || "this market"} at ` +
+      `${t.movePct >= 0 ? "+" : ""}${t.movePct.toFixed(0)}% of today's price. It is what the direction MEANS, ` +
+      `not a second answer — the app builds from the direction and the board, so typing a price here would be a ` +
+      `control that changes nothing.`
+    : `There is no price loaded for this market, so the direction cannot be read as a target. A missing price is ` +
+      `unknown, never a target of zero.`);
+
+/** The slider's own label, with the number it is asking for in it. */
+export const chanceAskLabel = (request) =>
+  `CHANCE OF PROFIT, AT LEAST ${chanceText(request && request.minChance)}`;
+
+/**
+ * WHAT THE FIVE CONTROLS DO — AND WHAT THEY CANNOT DO.
+ *
+ * It folds, because a control that asks a question earns its words and a
+ * paragraph explaining the control does not (ROADMAP P10 §5).
+ */
+export const controlsFoldNote = (request) =>
+  `These decide which candidates are listed under "meets what you asked for" and how many combinations the ` +
+  `budget buys. They do NOT create a structure and they do NOT relax a single check: the quality floors still ` +
+  `remove what they remove and still say why, and ${money(MIN_NET_DOLLARS)} is still the least a price may be ` +
+  `before anything is judged at all. The chance is the one this app computes everywhere — ` +
+  `${RULES.mcRuns.toLocaleString("en-GB")} simulated paths, seeded from the trade, so the figure on a card and ` +
+  `the figure on the Build screen are the same number. Asking for a higher chance moves lower-paying trades to ` +
+  `the top and better-paying ones below the line; it does not make either of them safer. The one thing this ` +
+  `slider will never touch is the reward floor of ${RULES.minRewardRisk}: under that the app does not propose at ` +
+  `all, and a floor a user can switch off is not a floor.` +
+  (request && !request.amtAnswered
+    ? ` The amount above is the suggested per-trade limit, derived from your capital answers — not a figure you gave.`
+    : ``);
+
+/**
+ * WHOSE NUMBER THE CONTRACT COUNT IS — one clause, beside the field.
+ *
+ * The size is derived from the budget everywhere until somebody types one, and
+ * a typed one WINS. The clause exists because a quantity that silently stops
+ * following the budget is a control the user cannot tell is stuck, which is the
+ * same fault as a size the app assumed and printed as measured.
+ */
+export const contractsSourceNote = ({ contracts, typed, request, fits = true } = {}) => {
+  const n = Math.max(1, Math.round(Number(contracts) || 1));
+  if (typed) return `x${n} is yours \u2014 it overrides the budget.`;
+  if (!fits) return `x${n}: the budget buys none of these, so this is one combination.`;
+  return request && request.mode === "target"
+    ? `x${n} is what reaches ${requestAmountOwner(request)}.`
+    : `x${n} is what ${requestAmountOwner(request)} buys at this price.`;
+};
+
+/**
+ * The slider never leaves the band its two constants describe.
+ *
+ * `Number(null)` IS 0 AND 0 IS FINITE — the trap this repository has written
+ * down six times. A missing answer is not a request for the lowest chance in
+ * the band: it is no answer, and the default is what stands in for it.
+ */
+export const clampAskedChance = (x) => {
+  if (x == null || x === "" || typeof x === "boolean") return RULES.chanceAskDefault;
+  const v = Number(x);
+  if (!Number.isFinite(v)) return RULES.chanceAskDefault;
+  return Math.min(RULES.chanceAskMax, Math.max(RULES.chanceAskMin, v));
+};
+
+/**
+ * WHOSE FIGURE THE AMOUNT IS — one clause, the `capitalSourceNote()` pattern.
+ * A derived default is a SUGGESTION until somebody types one.
+ */
+export const requestAmountOwner = (request) =>
+  (request && request.amtAnswered ? "your answer" : "the suggested limit");
 
 /* =====================================================================
    THE AUTOPILOT'S VERDICT — WHICH RULE FIRED, WHAT IT SAYS, AND WHETHER
@@ -3863,6 +4293,30 @@ export const openLimitNote = (r) => {
     `all day. Nothing walks the price further by itself: if this does not fill, you change it.`;
 };
 
+/* >>> WHICH BOOK THIS VERDICT WAS JUDGED ON, AND IT IS NOT THE ONE THAT FILLS.
+   <<< PRD §4s-bis. READ ON THE OWNER'S ACCOUNT: J-0003, SOYB 28/30, a debit of
+   $0.80 good until cancelled, typed at the combination ASK the ticket was
+   showing — so the ticket said FILLS NOW. Several sessions later it is still
+   open and nothing has filled.
+
+   The quotes this app prices from are Alpaca's option snapshots, which the feed
+   itself calls INDICATIVE rather than OPRA (`chainAlpaca.mjs`, and `feedName()`
+   says so on every screen that names the source). An indicative ask is a
+   reading of the market, not a quote anybody is obliged to trade against, and a
+   combination ask is the arithmetic of four of them. "Fills now" is a statement
+   about the book the app can SEE, and it has never been a statement about the
+   book that fills.
+
+   THIS IS COPY, AND DELIBERATELY ONLY COPY. No threshold moves, no argument is
+   added, `limitPlacement()` keeps its signature and every caller is unchanged:
+   the arithmetic was never the fault. What was wrong is that the strongest
+   sentence on the ticket asserted a certainty it had no way to have. Whether
+   the indicative combination ask is SYSTEMATICALLY inside the real one on thin
+   chains is a measurement nobody has taken — it is on the PRD's NOT VERIFIED
+   list with J-0003 beside it. */
+export const INDICATIVE_CLAUSE =
+  "on the indicative feed — the book that fills can differ";
+
 /**
  * WHERE THE TYPED LIMIT FALLS BETWEEN THE BID AND THE ASK — and one plain
  * sentence about what that means for the order.
@@ -3917,7 +4371,7 @@ export function limitPlacement(limit, book, sign = null) {
   if (keener(L, fill)) {
     return { known: true, zone: "fills", label: "FILLS NOW",
       sentence: `At ${money(L * 100)} you are willing to ${pay} the whole of what the other side is offering ` +
-        `(${money(fill * 100)}), so this should fill as soon as the market is open.` +
+        `(${money(fill * 100)}) ${INDICATIVE_CLAUSE}, so this should fill as soon as the market is open.` +
         (away >= 0.005
           ? ` You are ${money(away * 100)} past it — anything beyond the touch is money you did not have to give up.`
           : ``) };
