@@ -1788,9 +1788,35 @@ export function expiryChoice(candidates = [], {
   return { chosen, passedOver, eligible, measured, reason };
 }
 
-/** Why the app is on this expiry, in one sentence, with the counts in it. */
-export const expiryChoiceNote = (choice, level = RECOMMENDED_LIQUIDITY) => {
+/** Why the app is on this expiry, in one sentence, with the counts in it.
+ *
+ * >>> IT NAMES THE BOARD THAT IS SELECTED, NOT THE ONE THE APP WOULD HAVE
+ * PICKED (P9, TASK 1). <<< Read on the owner's phone: the expiry dropdown said
+ * 2026-10-16 and this sentence, directly underneath it, said "Building on
+ * 2026-11-20". Both were true — the dropdown carried a board handed over by
+ * the wide search, and this described `choice.chosen` — and together they were
+ * a screen contradicting itself about which trade it was showing.
+ *
+ * @param selected  the expiry the screen is actually on. When it differs from
+ *        the app's own choice, the sentence says so and names both, because
+ *        the app's reasoning is still worth reading — it is just not a
+ *        description of what is on screen.
+ */
+export const expiryChoiceNote = (choice, level = RECOMMENDED_LIQUIDITY, { selected = null } = {}) => {
   const c = choice?.chosen;
+  if (selected && c && selected !== c.key) {
+    const s2 = (choice?.eligible || []).find((e) => e.key === selected)
+      || (choice?.passedOver && choice.passedOver.key === selected ? choice.passedOver : null);
+    const room = s2 ? entryRoom(s2.dte) : null;
+    return `Building on ${selected}${s2 ? ` (${s2.dte} days out)` : ""}, which you chose. Left to itself the ` +
+      `app would open on ${c.key} (${c.dte} days out)` +
+      (c.clears == null ? `.` : `, where ${c.clears} of its ${c.near} near-the-money contracts clear the ` +
+        `${liquidityLevel(level?.id ?? level).label.toUpperCase()} floor.`) +
+      (room && room.band !== "clear"
+        ? ` ${selected} is inside the ${RULES.minEntryDTE}-day entry floor, so an order built here is ` +
+          `refused at the send unless you write down why.`
+        : ``);
+  }
   if (!c) return `No expiry is far enough out to open on: the entry floor is ${RULES.minEntryDTE} days, ` +
     `so the exit rule at ${RULES.exitDTE} days has room to work.`;
   const l = liquidityLevel(level?.id ?? level);
@@ -3987,6 +4013,110 @@ export function entryRoom(dte, {
   const band = d <= exitDTE ? "inside-exit" : d < minEntryDTE ? "tight" : "clear";
   return { known: true, dte: d, room, target, band, blocking: band === "inside-exit" };
 }
+
+/* =====================================================================
+   THE APP NEVER PROPOSES A TRADE ITS OWN GATE WOULD BLOCK (P9, TASK 1)
+
+   >>> READ ON THE OWNER'S PHONE, 22 Sep 2026. <<< The Radar and the
+   multi-market search both ran at "HORIZON ~21 DTE" and every structure
+   they offered sat on 2026-10-16, twenty-four days out. Taking any of them
+   to Build produced, at the bottom of that screen:
+
+       THIS ORDER WOULD NOT BE SENT
+       ENTRY_DTE_ROOM — 3 days of room against the 30-day floor
+
+   The app built a menu out of trades its own gate refuses. That is worse
+   than an empty screen: an empty screen with a sentence teaches the rule,
+   and a menu that dead-ends teaches that the rules are arbitrary.
+
+   THE CAUSE IS THREE DIFFERENT WINDOWS IN THREE PLACES, none of them the
+   rule:
+
+       runMultiScan   dte >= dT - 20 && dte <= dT + 35   (at dT=21: 1..56)
+       runWizard      dte >= minEntryDTE && dte <= 130   (a bare 130)
+       the dropdown   every expiry the feed lists        (no filter at all)
+
+   `buildableExpiries()` is the one home, and it is built ON `entryRoom()`
+   so there is no second spelling of the floor anywhere. A board is
+   BUILDABLE when the gate would pass it WITHOUT AN OVERRIDE — band
+   "clear" — and inside `maxEntryDTE`.
+
+   >>> THE OVERRIDE IS NOT WITHDRAWN. <<< `entryRoom()`'s middle band still
+   unlocks with a typed reason, and `expiryChoice()`'s `passedOver` still
+   offers a nearer, busier board. What changes is that the app will not
+   OPEN a menu there by itself: a door you may choose to walk through is
+   not the same as a corridor you are led down.
+
+   THE HORIZON YIELDS, THE FLOOR NEVER DOES — the same fallback
+   `expiryChoice()` already carries, and for the same reason: the far edge
+   is a preference about which trade this app is for, and the near edge is
+   the gate's.
+===================================================================== */
+
+/** Would the gate open a position on a board this far out, with no override? */
+export const openableBoard = (dte) => entryRoom(dte).band === "clear";
+
+/**
+ * Which boards a generation site may build on.
+ *
+ * @param entries  `[{ key, dte, ... }]`, read off the chain. Anything else on
+ *                 each entry is carried through untouched, so a caller can
+ *                 hand in its own rows.
+ * @returns {{ buildable, blocked, horizonYielded }}
+ *   `blocked` carries each refused board with its `entryRoom()` band, so a
+ *   screen can NAME what it is not offering instead of silently shortening a
+ *   list — the rule `emptyExpiryNote()` and `offBoardStrikeLabel()` follow.
+ */
+export function buildableExpiries(entries = [], {
+  maxEntryDTE = RULES.maxEntryDTE,
+} = {}) {
+  const all = (Array.isArray(entries) ? entries : [])
+    // `Number(null)` IS 0 AND 0 IS FINITE: a board whose DTE has not been read
+    // is UNKNOWN, and an unknown board is not a board that settles today. The
+    // null goes out BEFORE the coercion, for the ninth time in this repository
+    // — coercing first would file every unread board under "inside the exit
+    // rule", which is a verdict the app has no evidence for.
+    .filter((e) => e && e.key != null && e.dte != null && e.dte !== "" && Number.isFinite(Number(e.dte)))
+    .map((e) => ({ ...e, dte: Number(e.dte), room: entryRoom(e.dte) }));
+  const open = all.filter((e) => e.room.band === "clear");
+  const inWindow = open.filter((e) => e.dte <= maxEntryDTE);
+  const buildable = inWindow.length ? inWindow : open;
+  const keep = new Set(buildable.map((e) => e.key));
+  return {
+    buildable,
+    blocked: all.filter((e) => !keep.has(e.key)),
+    horizonYielded: open.length > 0 && inWindow.length === 0,
+  };
+}
+
+/** What a board the floor refuses is CALLED in a dropdown, so it can be shown
+ *  and disabled rather than silently offered. The `offBoardStrikeLabel()`
+ *  pattern: a `<select>` whose value matches no option displays the first one,
+ *  and a list that quietly drops a row teaches nothing. */
+export const offFloorExpiryLabel = (key, dte) => {
+  const r = entryRoom(dte);
+  if (r.band === "clear") return `${key} · ${dte} DTE`;
+  return r.band === "inside-exit"
+    ? `${key} · ${dte} DTE — inside the ${RULES.exitDTE}-day exit, not offered`
+    : `${key} · ${dte} DTE — under the ${RULES.minEntryDTE}-day floor`;
+};
+
+/** Why the horizon control stops where it does, in ONE clause, from the rule. */
+export const horizonFloorNote = () =>
+  `from ${RULES.minEntryDTE} days, because the app will not build on a board the gate would refuse`;
+
+/**
+ * WHAT STEP 2 OFFERS WHEN THE FLOORS EMPTIED IT.
+ *
+ * "Go to Build — <structure>" carried whatever was left in the Build screen's
+ * legs, which after a refusal is the structure the screen has just said it
+ * will not offer. A button onto a trade the list above it removed is the same
+ * fault as the menu this section exists to close, one screen later.
+ */
+export const emptyShortlistCta = ({ expKey = null, ticker = null } = {}) =>
+  `Nothing on ${expKey || "this board"}${ticker ? ` for ${ticker}` : ""} survived the floors, so there is ` +
+  `nothing here to take apart. Try another expiry above, another market on step 1, or take the answer: ` +
+  `some days there is no trade worth making, and that is the app working rather than failing.`;
 
 /** The hard refusal: the position would open inside its own exit window. */
 export const entryInsideExitNote = (r) =>

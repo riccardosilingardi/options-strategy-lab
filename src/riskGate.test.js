@@ -23,7 +23,8 @@ import { RULES, sizing, ruleBadge, qualityFloor, qualityFloorSentence, liquidity
   passedOverRecord, passedOverSummary, OPEN_LIMIT_SLIPPAGE, CLOSE_LIMIT_SLIPPAGE,
   chancePct, chanceText, chanceInTen, signedMoney,
   sigmaProvenance, TABLE_SIGMA_SOURCE, MEASURED_SIGMA_SOURCE, FALLBACK_SIGMA_SOURCE,
-  positionPnl, modelPnlNote, BROKER_PNL, MODEL_PNL } from "./rules.js";
+  positionPnl, modelPnlNote, BROKER_PNL, MODEL_PNL,
+  buildableExpiries, openableBoard, offFloorExpiryLabel, horizonFloorNote, emptyShortlistCta } from "./rules.js";
 import { netBS, SIGMA, exitSim } from "./engine.js";
 import { isStale, staleAmong, agePhrase, freshnessNote, BUDGETS } from "./freshness.js";
 
@@ -2977,6 +2978,47 @@ test("0b — `App.jsx` SPELLS THE POSITION P&L ONCE, through `pnlOf()`", () => {
   assert.equal((app.match(/\.unrealized_pl/g) || []).length, 1,
     "and the broker's own figure is READ in exactly one place, inside the same callback");
   assert.ok(/const pnlOf = useCallback/.test(app), "and that place is `pnlOf`");
+});
+
+/* ================================================================
+   P9 TASK 1 — THE SOURCE SWEEPS (the arithmetic half is in
+   ceiling.test.jsx, against the real generation sites).
+================================================================ */
+
+test("TASK 1 — the horizon control cannot ask for a board the gate would refuse", () => {
+  const app = readFileSync(new URL("./App.jsx", import.meta.url), "utf8");
+  const slider = app.match(/<input type="range"[^>]*multi\.dteT[^>]*>/);
+  assert.ok(slider, "the horizon slider moved; point this at it again");
+  assert.ok(!/min=\{21\}/.test(slider[0]), "21 is RULES.exitDTE wearing a horizon's clothes");
+  assert.ok(/min=\{RULES\.minEntryDTE\}/.test(slider[0]), "both ends read their rule");
+  assert.ok(/max=\{RULES\.maxEntryDTE\}/.test(slider[0]));
+  // ...and the label says WHY, in one clause, from the rule.
+  assert.ok(horizonFloorNote().includes(String(RULES.minEntryDTE)));
+  assert.ok(/the gate would refuse/.test(horizonFloorNote()));
+});
+
+test("TASK 1 — every generation site reads the one home, none filters expiries by hand", () => {
+  // COMMENTS STRIPPED, because the comments beside these sites QUOTE the
+  // windows they replaced — which is the point of them, and would otherwise
+  // make the sweep fail on its own explanation.
+  const app = codeOf("App.jsx");
+  // The three windows this closed: `dT - 20` / `dT + 35`, a bare 130, and none.
+  assert.ok(!/dte >= dT - 20/.test(app), "the wide search's own window is gone");
+  assert.ok(!/\.dte <= 130/.test(app), "and the guided run's bare 130");
+  const uses = app.match(/buildableExpiries\(/g) || [];
+  assert.ok(uses.length >= 2, `the wide search and the guided run must both read it; found ${uses.length}`);
+  // ...and the third site holds the guard INSIDE itself, so a fourth caller
+  // added next year is covered without anybody coming back.
+  assert.ok(/if \(!openableBoard\(dte\)\)/.test(app));
+});
+
+test("TASK 1 — an empty shortlist offers an honest next step, not a button onto a refused trade", () => {
+  const cta = emptyShortlistCta({ expKey: "2026-10-16", ticker: "XLE" });
+  assert.ok(cta.includes("2026-10-16"));
+  assert.ok(/another expiry/.test(cta) && /another market/.test(cta));
+  assert.ok(!/Go to Build/.test(cta));
+  const app = readFileSync(new URL("./App.jsx", import.meta.url), "utf8");
+  assert.ok(/Nothing here to take apart/.test(app), "and the button says so rather than naming a structure");
 });
 
 /* ---------------- summary ---------------- */

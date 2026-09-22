@@ -36,6 +36,9 @@ import { analyze, shortlistWithFloors, buildPresets, StrikeSelect, modelCheckOf,
 import { payoff, netBS, SEASONAL, SIGMA, seasonalDrift, exitSim } from "./engine.js";
 import { exitPathSim } from "./pro.jsx";
 import { sigmaProvenance, MEASURED_SIGMA_SOURCE, TABLE_SIGMA_SOURCE, FALLBACK_SIGMA_SOURCE } from "./rules.js";
+import { buildableExpiries, openableBoard, offFloorExpiryLabel, horizonFloorNote, emptyShortlistCta,
+  entryRoom, expiryChoice, expiryChoiceNote } from "./rules.js";
+import { evaluateTrade } from "./riskGate.js";
 
 const ok = [], bad = [];
 const check = (name, fn) => { try { fn(); ok.push(name); } catch (e) { bad.push([name, e.message]); } };
@@ -1078,6 +1081,133 @@ check("no board at all is a number field, not a dropdown of strikes nobody confi
   hasNot(html, "<select");
   has(html, "input");
 });
+
+/* ============================================================================
+   P9 TASK 1 — THE APP NEVER PROPOSES A TRADE ITS OWN GATE WOULD BLOCK
+
+   >>> READ ON THE OWNER'S PHONE, 22 Sep 2026. <<< The Radar and the
+   multi-market search ran at "HORIZON ~21 DTE"; every structure they offered
+   sat on 2026-10-16, twenty-four days out; and Build, at the bottom of the
+   screen, said THIS ORDER WOULD NOT BE SENT — ENTRY_DTE_ROOM, three days of
+   room against the thirty-day floor.
+
+   The DONE WHEN of this task, and it is the test below: every candidate every
+   generation site returns is put through `evaluateTrade()` in a dry run and
+   must come back with ZERO violations.
+============================================================================ */
+
+// The gate's own fixtures, spelled the way riskGate.test.js spells them, so a
+// pass here means a pass there.
+const P9_PAPER = { account_number: "PA3XYZ01", paperVerified: true, paperSource: "paper-api.alpaca.markets" };
+const P9_CAPITAL = { tradingCapital: 50000, concurrentTarget: 4, savings: 100000 };
+
+/* A dry run of one candidate through the REAL gate, carrying the evidence
+   every open-intent call must carry (CLAUDE.md: quotes, net and occs). The
+   chain listed every strike in the fixture, so `occs` is the honest answer
+   rather than a way of skipping `UNLISTED_CONTRACT`. */
+const p9DryRun = ({ legs, analysis, dte, quotes, contracts = 1 }) => evaluateTrade({
+  proposal: {
+    ticker: "TEST", name: "candidate", intent: "open", dte, contracts, legs,
+    maxLoss: analysis.maxLoss, maxProfit: analysis.maxProfit,
+    net: analysis.entry, quotes,
+    occs: legs.map((l) => `TEST${l.type[0].toUpperCase()}${l.strike}`),
+  },
+  portfolio: { positions: [], account: P9_PAPER }, capital: P9_CAPITAL,
+});
+
+check("TASK 1 — every Shortlist candidate passes evaluateTrade() with zero violations", () => {
+  // The real generation site, on the honest board, at a DTE the floor clears.
+  for (const sent of ["bull", "bear", "neutral"]) {
+    const r = shortlistWithFloors(sent, FIX.S, FIX.step, FIX.strikes, FIX.dte, FIX.iv, honestQuote);
+    if (!r.rows.length) throw new Error(`${sent}: the fixture must actually produce candidates`);
+    for (const row of r.rows) {
+      const g = p9DryRun({ legs: row.p.legs, analysis: row.a, dte: FIX.dte,
+        quotes: row.a.legPx.map((l) => ({ bid: l.px - 0.05, ask: l.px + 0.05 })) });
+      if (g.violations.length) {
+        throw new Error(`${sent} · ${row.p.name} was OFFERED and the gate refuses it: ` +
+          g.violations.map((v) => v.code).join(", "));
+      }
+    }
+  }
+});
+
+check("TASK 1 — …and a board inside the entry floor produces NO candidates at all", () => {
+  /* The 24-DTE board the owner's screen was on. `shortlistWithFloors` is a
+     generation site, so the guard is IN it: a fourth caller added next year is
+     covered without anybody coming back, the same reason `buildPresets()`
+     refuses a null board inside itself. */
+  const r = shortlistWithFloors("bull", FIX.S, FIX.step, FIX.strikes, 24, FIX.iv, honestQuote);
+  eq(r.rows.length, 0, "nothing is offered on a board the gate would refuse");
+  eq(r.cut.length, 0, "and no floor is credited with work it did not do");
+  if (!r.offFloor) throw new Error("the refusal has to NAME itself, not be an empty list");
+  eq(r.offFloor.band, "tight", "24 DTE is past the exit rule and under the entry floor");
+  // ...and the fixture can still pass, or this is a wall rather than a check.
+  if (!shortlistWithFloors("bull", FIX.S, FIX.step, FIX.strikes, 45, FIX.iv, honestQuote).rows.length) {
+    throw new Error("45 DTE must still produce candidates");
+  }
+});
+
+check("TASK 1 — the gate REALLY refuses 24 DTE, which is what makes the filter load-bearing", () => {
+  const a = analyze(
+    [{ side: 1, qty: 1, type: "call", strike: 100 }, { side: -1, qty: 1, type: "call", strike: 105 }],
+    FIX.S, 24, FIX.iv, honestQuote);
+  const g = p9DryRun({ legs: [{ side: 1, qty: 1, type: "call", strike: 100 }, { side: -1, qty: 1, type: "call", strike: 105 }],
+    analysis: a, dte: 24, quotes: a.legPx.map((l) => ({ bid: l.px - 0.05, ask: l.px + 0.05 })) });
+  if (!g.violations.some((v) => v.code === "ENTRY_DTE_ROOM")) {
+    throw new Error("the fixture must reproduce the live refusal, or the filter is untested");
+  }
+});
+
+check("TASK 1 — `buildableExpiries()` is the one home, built on `entryRoom()`", () => {
+  const boards = [{ key: "a", dte: 10 }, { key: "b", dte: 24 }, { key: "c", dte: 45 }, { key: "d", dte: 200 }];
+  const r = buildableExpiries(boards);
+  eq(r.buildable.map((e) => e.key).join(","), "c", "only the board past the floor and inside the horizon");
+  eq(r.blocked.length, 3);
+  // Each refused board carries WHY, so a screen can name it rather than shorten
+  // a list in silence.
+  eq(r.blocked.find((e) => e.key === "a").room.band, "inside-exit");
+  eq(r.blocked.find((e) => e.key === "b").room.band, "tight");
+  // THE HORIZON YIELDS, THE FLOOR NEVER DOES — `expiryChoice()`'s rule, one home.
+  const far = buildableExpiries([{ key: "z", dte: 400 }]);
+  eq(far.buildable.length, 1, "with nothing inside the horizon, the horizon gives way");
+  eq(far.horizonYielded, true, "and it says that is what happened");
+  eq(buildableExpiries([{ key: "q", dte: 10 }]).buildable.length, 0, "the floor does not");
+  // `Number(null)` IS 0 AND 0 IS FINITE, for the ninth time.
+  eq(buildableExpiries([{ key: "n", dte: null }]).buildable.length, 0);
+  eq(buildableExpiries([{ key: "n", dte: null }]).blocked.length, 0, "unknown is neither offered nor refused");
+});
+
+check("TASK 1 — a board the floor refuses is NAMED in the dropdown, never dropped", () => {
+  // The `strikeOptions()` / `offBoardStrikeLabel()` pattern: a <select> whose
+  // value matches no option displays the FIRST one.
+  has(offFloorExpiryLabel("2026-10-16", 24), "under the 30-day floor");
+  has(offFloorExpiryLabel("2026-09-30", 8), "inside the 21-day exit");
+  eq(offFloorExpiryLabel("2026-11-20", 59), "2026-11-20 · 59 DTE", "a buildable board reads plainly");
+  eq(openableBoard(RULES.minEntryDTE), true);
+  eq(openableBoard(RULES.minEntryDTE - 1), false);
+});
+
+check("TASK 1 — the dropdown and the sentence under it name the SAME board", () => {
+  /* Read on the phone: the dropdown said 2026-10-16 and the sentence directly
+     below it said "Building on 2026-11-20". Both true, and together a screen
+     contradicting itself about which trade it was showing. */
+  const choice = expiryChoice([
+    { key: "2026-10-16", dte: 24, clears: 9, near: 10 },
+    { key: "2026-11-20", dte: 59, clears: 8, near: 10 },
+  ]);
+  eq(choice.chosen.key, "2026-11-20", "the app still opens on the board past the floor");
+  const note = expiryChoiceNote(choice, undefined, { selected: "2026-10-16" });
+  has(note, "Building on 2026-10-16");
+  has(note, "refused at the send");
+  // And with no selection given, the old sentence is exactly as it was.
+  has(expiryChoiceNote(choice), "Building on 2026-11-20");
+  has(expiryChoiceNote(choice, undefined, { selected: "2026-11-20" }), "Building on 2026-11-20");
+});
+
+/* The three SOURCE sweeps for this task live in `riskGate.test.js`: this file
+   is bundled to CJS by scripts/test-jsx.mjs, where `import.meta.url` is not a
+   URL, so a file read here cannot work. They are: the horizon slider's two
+   ends, the three generation sites reading one home, and the step-2 CTA. */
 
 for (const [name, why] of bad) console.error(`  FAIL ${name}\n       ${why}`);
 console.log(`\n${ok.length} passed, ${bad.length} failed`);

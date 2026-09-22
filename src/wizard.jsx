@@ -1006,11 +1006,18 @@ export function ConfirmSteps({
             <span style={{ ...sans, fontSize: 13.5, color: T.body, lineHeight: 1.5 }}>{w.message}</span>
           </div>
         ))}
+        {/* A REFUSAL AND A REASSURANCE MAY NOT SHARE A SHEET EITHER (P9, TASK 1).
+            `refused` renders directly below; "none of them stops the order"
+            over "The order was not sent" is the same contradiction the trade
+            card carried. The count and the pointer stay — only the clause that
+            argues with the refusal below it goes. */}
         {!showWarnings && (shown?.warnings || []).length > 0 && (
           <div style={{ ...sans, fontSize: 12.5, color: T.mut, marginTop: 12, lineHeight: 1.5 }}>
             {(shown.warnings || []).length} warning{(shown.warnings || []).length === 1 ? "" : "s"} apply to this
             trade. {(shown.warnings || []).length === 1 ? "It is" : "They are"} in the warnings panel on
-            the step this sheet closes back onto, written once — none of them stops the order.
+            the step this sheet closes back onto, written once{refused
+              ? " — the refusal below is what decides."
+              : " — none of them stops the order."}
           </div>
         )}
         {refused && (

@@ -18,6 +18,7 @@ import { parseOcc, buildOcc, snapStrike, resnapLegs, expiryStrikes, strikeOption
 import { T, themeName, setTheme, BADGE_SAFE } from "./theme.js";
 import { RULES, sizing, ruleBadge, takeProfitLabel, stopLossLabel, perTradeCapLabel, RULE_PILLS, NOTHING_TODAY, money, pctText, capitalSourceNote, perTradeLimitPhrase, qualityFloor, qualityFloorSentence, liquiditySkippedNote,
   positionPnl, BROKER_PNL,
+  buildableExpiries, openableBoard, offFloorExpiryLabel, horizonFloorNote, emptyShortlistCta,
   LIQUIDITY_LEVELS, RECOMMENDED_LIQUIDITY, LIQUIDITY_MEASUREMENT, liquidityMeasurementNote, liquidityLevel, liquidityThreshold, looseningWarning, liquiditySettingNote, isLoosened, ordinal,
   priceability, unpriceableNote, rewardRisk, MIN_NET_DOLLARS,
   payoffCeiling, NO_CEILING, noCeilingNote, noCeilingRankNote,
@@ -613,6 +614,16 @@ export function shortlistWithFloors(sent, S, step, strikes, dte, baseIV, q, { pe
   let oiSkipped = false;
   const tally = { liquidity: 0, spread: 0, comboSpread: 0, reward: 0, skipped: 0, spreadSkipped: 0,
     comboSpreadSkipped: 0, unpriceable: 0, impossible: 0, model: 0 };
+  /* >>> THIS IS A GENERATION SITE, SO IT WILL NOT OFFER WHAT THE GATE REFUSES
+     (P9, TASK 1). <<< The guard is IN the function and not at its call sites,
+     for the same reason `buildPresets()` refuses a null board inside itself: a
+     fourth caller added next year is covered without anybody coming back.
+     `offFloor` is a separate answer from an empty list — the board did not
+     empty, it was never one this app opens on — and it travels with its own
+     name so the screen can print a sentence instead of a shrug. */
+  if (!openableBoard(dte)) {
+    return { rows, cut, oiSkipped: false, offFloor: entryRoom(dte), tally };
+  }
   for (const p of buildPresets(sent, S, step, strikes)) {
     const a = analyze(p.legs, S, dte, baseIV, q);
     // UNPRICEABLE FIRST, because it is prior to both floors: they judge a
@@ -1162,9 +1173,23 @@ export function TradeCard({ ticker, name, card, refusals = [], warnings = 0, onN
         <Btn ghost color={T.blue} onClick={onNumbers}>All the numbers →</Btn>
         <Btn color={T.violet} onClick={onOrder}>{orderLabel || "Price it and send →"}</Btn>
       </div>
-      {warnings > 0 && (
+      {/* >>> A REFUSAL AND A REASSURANCE MAY NOT SHARE A CARD (P9, TASK 1). <<<
+          The owner read "THIS ORDER WOULD NOT BE SENT" and, four lines below
+          it, "none of them stops the order". Both clauses were true of
+          different things — the first of a VIOLATION, the second of the
+          WARNINGS — and together they are §4m's fault on the card P4-ter built
+          to end it: a screen arguing with itself, where the part that shouts
+          loudest wins. While a violation stands, the refusal above is the whole
+          verdict and this line is suppressed. It is not deleted: the warnings
+          keep their home in the panel the sentence points at. */}
+      {warnings > 0 && refusals.length === 0 && (
         <div style={{ ...mono, fontSize: 10, color: T.amber, marginTop: 7, lineHeight: 1.6 }}>
           {`${warnings} warning${warnings === 1 ? "" : "s"} apply to this trade. ${warnings === 1 ? "It is" : "They are"} in the warnings panel above, written once — none of them stops the order.`}
+        </div>
+      )}
+      {warnings > 0 && refusals.length > 0 && (
+        <div style={{ ...mono, fontSize: 10, color: T.amber, marginTop: 7, lineHeight: 1.6 }}>
+          {`${warnings} warning${warnings === 1 ? "" : "s"} also apply, in the warnings panel above. The refusal above is what decides: nothing is sent while it stands.`}
         </div>
       )}
       <div style={{ ...mono, fontSize: 9.5, color: T.dim, marginTop: 7, lineHeight: 1.6 }}>{card.currency}</div>
@@ -2045,7 +2070,7 @@ export default function OptionsStrategyLab() {
   const shortlist = useMemo(
     () => (spot && expStrikes
       ? { board: "loaded", ...shortlistWithFloors(sentiment, spot, U.step, expStrikes, dte, iv, q, { peers: expiryOI, level: liqLevel }) }
-      : { board: null, rows: [], cut: [], oiSkipped: false, tally: { kept: 0, liquidity: 0, reward: 0, skipped: 0 } }),
+      : { board: null, rows: [], cut: [], oiSkipped: false, offFloor: null, tally: { kept: 0, liquidity: 0, reward: 0, skipped: 0 } }),
     [sentiment, spot, U.step, expStrikes, dte, iv, q, expiryOI, liqLevel]);
   // WHAT EVERY SETTING WOULD DO TO THIS LIST, so moving the control shows its
   // own consequence instead of promising one. Four runs of a pure function over
@@ -2674,7 +2699,11 @@ export default function OptionsStrategyLab() {
       const out = [];
       // What the quality floors removed, so an empty or short result can say why.
       const cutFloors = { n: 0, liquidity: 0, spread: 0, comboSpread: 0, reward: 0, unpriceable: 0, impossible: 0, model: 0,
-        markets: new Set(), oiSkipped: new Set(), spreadSkipped: new Set(), comboSpreadSkipped: new Set() };
+        markets: new Set(), oiSkipped: new Set(), spreadSkipped: new Set(), comboSpreadSkipped: new Set(),
+        // A MARKET WITH NO BOARD THE GATE WOULD OPEN ON IS NOT A MARKET THE
+        // FLOORS EMPTIED. Its own count, its own sentence — the same rule that
+        // keeps `unpriceable` apart from `liquidity`.
+        noBoard: new Set() };
       // le barre servono al fattore tecnico: caricale prima di fondere i segnali
       const barsMap = Object.fromEntries(await Promise.all(multi.sel.map(async (tk) => [tk, await loadBars(tk)])));
       const fz = Object.fromEntries(multi.sel.map((tk) => [tk, fuseFor(tk, barsMap[tk] ?? barsCache[tk])]));
@@ -2686,9 +2715,17 @@ export default function OptionsStrategyLab() {
         if (!c?.spot) continue;
         const sp = c.spot;
         const dT = multi.dteT || RULES.targetEntryDTE;
-        const exps = c.expirations.filter((e) => c.byExp[e].dte >= dT - 20 && c.byExp[e].dte <= dT + 35);
-        const ek = exps[0] ? exps.reduce((b2, e) => Math.abs(c.byExp[e].dte - dT) < Math.abs(c.byExp[b2].dte - dT) ? e : b2, exps[0]) : null;
-        if (!ek) continue;
+        /* >>> ONLY BOARDS THE GATE WOULD OPEN ON (P9, TASK 1). <<< This was
+           `dte >= dT - 20 && dte <= dT + 35`, which at the slider's old floor
+           of 21 meant ONE to fifty-six days: every hit this search produced on
+           22 September sat at 24 DTE and every one of them was refused by
+           `ENTRY_DTE_ROOM` the moment it reached Build. `buildableExpiries()`
+           in rules.js is the one home and it is built on `entryRoom()`, so the
+           search cannot disagree with the gate about the floor. The horizon is
+           a TIE-BREAK inside what is buildable, never a way past it. */
+        const ok2 = buildableExpiries(c.expirations.map((e) => ({ key: e, dte: c.byExp[e].dte }))).buildable;
+        const ek = ok2.length ? ok2.reduce((b2, e) => Math.abs(e.dte - dT) < Math.abs(b2.dte - dT) ? e : b2, ok2[0]).key : null;
+        if (!ek) { cutFloors.noBoard.add(tk); continue; }
         const d2 = c.byExp[ek].dte;
         const row = scan.find((r) => r.tk === tk);
         const sent = multi.senMode === "fixed" ? sentiment : (row && row.sugg !== "neutral" ? row.sugg : "neutral");
@@ -2769,7 +2806,7 @@ export default function OptionsStrategyLab() {
           comboSpread: cutFloors.comboSpread, reward: cutFloors.reward,
           unpriceable: cutFloors.unpriceable, impossible: cutFloors.impossible, model: cutFloors.model,
           markets: [...cutFloors.markets], oiSkipped: [...cutFloors.oiSkipped],
-          spreadSkipped: [...cutFloors.spreadSkipped],
+          spreadSkipped: [...cutFloors.spreadSkipped], noBoard: [...cutFloors.noBoard],
           comboSpreadSkipped: [...cutFloors.comboSpreadSkipped], level: liqLevel,
         } }));
     } catch (e) { setMulti((m) => ({ ...m, busy: false, err: String(e.message || e) })); }
@@ -3118,9 +3155,13 @@ export default function OptionsStrategyLab() {
         const c = await ensureOpenInterest(tk, chains[tk] || (await refreshChain(tk, true)));
         if (!c?.spot) { excluded.push({ tk, reason: "nodata" }); continue; }
         const sp = c.spot;
-        const exps = c.expirations.filter((e) => c.byExp[e].dte >= RULES.minEntryDTE && c.byExp[e].dte <= 130);
-        if (!exps.length) { excluded.push({ tk, reason: "nodata" }); continue; }
-        const ek = exps.reduce((b2, e) => Math.abs(c.byExp[e].dte - ans.horizon) < Math.abs(c.byExp[b2].dte - ans.horizon) ? e : b2, exps[0]);
+        // THE SAME ONE HOME AS THE OTHER TWO GENERATION SITES (P9, TASK 1).
+        // This was `>= RULES.minEntryDTE && <= 130` — right about the floor and
+        // a bare 130 about the horizon, which is `RULES.maxEntryDTE` written
+        // out a second time and forty days wrong.
+        const exps = buildableExpiries(c.expirations.map((e) => ({ key: e, dte: c.byExp[e].dte }))).buildable;
+        if (!exps.length) { excluded.push({ tk, reason: "noboard" }); continue; }
+        const ek = exps.reduce((b2, e) => Math.abs(e.dte - ans.horizon) < Math.abs(b2.dte - ans.horizon) ? e : b2, exps[0]).key;
         const d2 = c.byExp[ek].dte;
         // The board, from `expiryStrikes()`. `ek` was reduced out of
         // `c.expirations`, so a null here means the chain changed under the
@@ -4525,9 +4566,16 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                     <Btn small ghost={multi.senMode !== "auto"} onClick={() => setMulti((m) => ({ ...m, senMode: "auto", res: null }))}>Season decides each market</Btn>
                     <Btn small ghost={multi.senMode !== "fixed"} onClick={() => setMulti((m) => ({ ...m, senMode: "fixed", res: null }))}>My pick ({SENT.label}) everywhere</Btn>
                   </div>
+                  {/* THE CONTROL CANNOT ASK FOR A BOARD THE GATE WOULD REFUSE
+                      (P9, TASK 1). `min` was 21 — `RULES.exitDTE` wearing a
+                      horizon's clothes — and every hit at that setting was
+                      blocked by `ENTRY_DTE_ROOM` when it reached Build. Both
+                      ends read their rule, and the label says why in one
+                      clause rather than leaving the reader to find out at the
+                      send button. */}
                   <span style={{ ...mono, fontSize: 10, color: T.dim }}>HORIZON: ~{multi.dteT} DTE</span>
-                  <input type="range" min={21} max={90} step={1} value={multi.dteT} onChange={(e) => setMulti((m) => ({ ...m, dteT: +e.target.value, res: null }))} style={{ width: 160, accentColor: T.amber }} />
-                  <span style={{ ...mono, fontSize: 9.5, color: T.dim }}>change the horizon, then search again</span>
+                  <input type="range" min={RULES.minEntryDTE} max={RULES.maxEntryDTE} step={1} value={multi.dteT} onChange={(e) => setMulti((m) => ({ ...m, dteT: +e.target.value, res: null }))} style={{ width: 160, accentColor: T.amber }} />
+                  <span style={{ ...mono, fontSize: 9.5, color: T.dim }}>{horizonFloorNote()} — change it, then search again</span>
                 </div>
                 <div style={{ display: "flex", gap: 5, marginTop: 8, flexWrap: "wrap" }}>
                   {BASKET.map((tk) => (
@@ -4776,11 +4824,26 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                 {chain && (
                   <div>
                     <div style={{ ...mono, fontSize: 9.5, color: T.dim }}>EXPIRY</div>
+                    {/* >>> THE DROPDOWN AND THE SENTENCE UNDER IT NAME THE SAME
+                        BOARD (P9, TASK 1). <<< This offered every expiry the
+                        feed lists — so the owner's screen read 2026-10-16 here
+                        and "Building on 2026-11-20" directly below, and the
+                        24-DTE board it had selected was refused at the send.
+                        A board the entry floor will not open on is rendered
+                        DISABLED and NAMED, the `strikeOptions()` /
+                        `offBoardStrikeLabel()` pattern: a list that silently
+                        drops a row teaches nothing, and a `<select>` whose
+                        value matches no option displays the first one. */}
                     <select value={expKey || ""} onChange={(e) => setExpKey(e.target.value)}
                       style={{ ...mono, background: T.bg, color: T.ink, border: `1px solid ${T.line}`, borderRadius: 5, padding: "5px 8px", fontSize: 12 }}>
-                      {chain.expirations.map((e) => (
-                        <option key={e} value={e}>{e} · {chain.byExp[e].dte} DTE</option>
-                      ))}
+                      {chain.expirations.map((e) => {
+                        const d0 = chain.byExp[e].dte;
+                        // The board already selected is always offered, however
+                        // it got here: refusing to render the current value is
+                        // how a dropdown comes to display a different trade.
+                        const on = openableBoard(d0) || e === expKey;
+                        return <option key={e} value={e} disabled={!on}>{offFloorExpiryLabel(e, d0)}</option>;
+                      })}
                     </select>
                     {chain.expirations.length <= 4 && (
                       <div style={{ ...mono, fontSize: 9, color: T.dim, marginTop: 3, maxWidth: 220 }}>
@@ -4795,7 +4858,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                         says so — a rule the user cannot see is a rule they
                         cannot trust. */}
                     <div style={{ ...mono, fontSize: 9, color: T.mut, marginTop: 4, maxWidth: 260, lineHeight: 1.55 }}>
-                      {expiryChoiceNote(expChoice, liqLevel)}
+                      {expiryChoiceNote(expChoice, liqLevel, { selected: expKey })}
                     </div>
                     {/* AND WHETHER THIS BOARD'S OWN PRICES AGREE WITH THEMSELVES.
                         A call cannot cost more than a call at a lower strike;
@@ -4904,7 +4967,22 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   {unloadedBoardNote(ticker, expKey)}
                 </div>
               )}
-              {shortlist.rows.length === 0 && shortlist.board !== null && (
+              {/* >>> AND A BOARD THE GATE WOULD NOT OPEN ON IS A THIRD ANSWER
+                  (P9, TASK 1). <<< Not "nothing cleared" — nothing was built,
+                  because an order on this board is refused at the send. The
+                  same discipline as `unloadedBoardNote()`: a missing-data
+                  answer and a market verdict are different sentences, and so
+                  is a rule that stopped the app before either. */}
+              {shortlist.offFloor && (
+                <div style={{ ...mono, fontSize: 11, color: T.amber, marginTop: 8, lineHeight: 1.6 }}>
+                  {shortlist.offFloor.band === "inside-exit"
+                    ? entryInsideExitNote(shortlist.offFloor)
+                    : entryRoomWarning(shortlist.offFloor)}
+                  {" "}Nothing is offered on this board, because the app does not propose a trade its own
+                  checks would block. Pick a further expiry above.
+                </div>
+              )}
+              {shortlist.rows.length === 0 && shortlist.board !== null && !shortlist.offFloor && (
                 <div style={{ ...mono, fontSize: 11, color: T.red, marginTop: 8, lineHeight: 1.6 }}>
                   {emptyExpiryNote(expKey, shortlist.tally, liqLevel)} That is an answer about {ticker} on this
                   board, not an empty screen: {qualityFloorSentence(liqLevel)}
@@ -5169,12 +5247,26 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                 See OpenInterestReadout above. */}
             <OpenInterestReadout chains={chains} floor={liqLevel.absolute} percentile={liqLevel.percentile} level={liqLevel} />
 
-            <StepForward
-              label={legs.length ? `Go to Build \u2014 ${stratName} \u2192` : "Pick one above to go to Build"}
-              disabled={!legs.length}
-              disabledNote={`Step 3 is one structure taken apart. Use "Take to Build" on whichever of these you want to look at properly \u2014 nothing is sent until the checks at the bottom of that screen.`}
-              sub={`${stratName} is loaded on step 3. Nothing is sent until the checks at the bottom of that screen.`}
-              onClick={() => goStep("build")} />
+            {/* >>> A STRUCTURE THE FLOORS REMOVED IS NOT SOMETHING TO OFFER
+                (P9, TASK 1). <<< This carried whatever was in the Build
+                screen's legs, which after a refusal is the structure the list
+                above has just said it will not offer — so the honest button
+                and the honest sentence are the same one. Under an empty
+                shortlist it asks for another expiry, another market, or
+                nothing today. */}
+            {(() => {
+              const empty = shortlist.rows.length === 0;
+              return (
+                <StepForward
+                  label={empty ? "Nothing here to take apart" : legs.length ? `Go to Build \u2014 ${stratName} \u2192` : "Pick one above to go to Build"}
+                  disabled={empty || !legs.length}
+                  disabledNote={empty
+                    ? emptyShortlistCta({ expKey, ticker })
+                    : `Step 3 is one structure taken apart. Use "Take to Build" on whichever of these you want to look at properly \u2014 nothing is sent until the checks at the bottom of that screen.`}
+                  sub={`${stratName} is loaded on step 3. Nothing is sent until the checks at the bottom of that screen.`}
+                  onClick={() => goStep("build")} />
+              );
+            })()}
           </div>
         )}
 
