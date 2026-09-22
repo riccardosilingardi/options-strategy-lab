@@ -670,7 +670,204 @@ WHAT PR #33 HANDS FORWARD:
     species as all three faults above. Deliberately not touched. The obvious next one.
   - **NOBODY HAS SEEN ANY OF IT ON A PHONE.** Eighth in a row.
 
+## P4-quinquies — The contract, the indicators, and a chart nobody had ever seen  (PR #34 — DONE)
+
+The FIFTH session since the first live reading, and the first one whose subject is not an order
+fault. PRD §4s, §4t, §4u.
+
+SHIPPED (864 checks across 21 suites, up from 818 across 19; build clean):
+
+**TASK 0 — the three debts PR #33 handed forward, first, as the standing rule requires.**
+
+  - **AN UNSTAMPED `alpacaLimit` IS SIGN UNKNOWN.** One field held two different quantities
+    depending on WHEN it was written — a signed limit since PR #33, `Math.abs()` of one before
+    it — and nothing said which. `fillVsLimit()` compares DIRECTIONS on it and was completely
+    confident about a record that cannot support one, and **the record the owner has in front of
+    him is exactly such a record**. `commitPosition()` stamps `alpacaLimitSigned`; the ABSENCE of
+    the stamp is the marker, for the seventh time. `storedLimitOf()` in `journal.js` is the one
+    reader, an unstamped limit gets NO direction word, and no comparison is made at all — not on
+    directions and not on magnitudes, because $79 better and $71 worse are two answers and the
+    app cannot choose. It is NOT a migration: the direction is at the broker.
+  - **THE EXIT LADDER PRINTED A BARE MAGNITUDE.** PR #33 said every displayed limit says debit or
+    credit and missed the three buttons the owner will use to close XLE J-0001 — the first close
+    this app has ever sent. `signedLimitFor()` in `order.js`, `ladderRungPrice()` in `pro.jsx`,
+    arithmetic unchanged, and a sweep that fails the build on the shape.
+  - **THE BODY THAT LEAVES MUST AGREE IN SIGN WITH THE BOOK IT MEETS.** `limitAgainstBook()` in
+    `rules.js`: the sign of the body's own `limit_price` against the sign of `comboBook()`'s mid,
+    with the intent applied to both. OPEN is a gate violation (`LIMIT_AGAINST_BOOK`, entry-only,
+    needing no new evidence); CLOSE is never in the gate and is refused beside the button in
+    `placeExit()`, `closeGroup()` and `approve.mjs`. Four unknowns SKIP and each names itself.
+    **This is the check that would have caught J-0001 at the door.**
+
+**TASK 1 — `src/alpacaContract.js`: orders speak Alpaca's own contract.**
+
+  - There is no official JavaScript SDK for multi-leg option orders, so every field name, enum
+    and validator lived in four order paths and a serverless function as four acts of memory —
+    and every order-body fault this repository has had was that memory being wrong. The file
+    mirrors **alpaca-py** with the source file cited for each rule; no Python vendored, no
+    dependency added.
+  - **`orderBody()` builds through it** and all six order paths pass through `orderBody()`. A body
+    alpaca-py would not build is refused with the rule named, instead of after a 422.
+  - Two rules are marked as THIS APP'S OWN: a leg whose `side` contradicts its `position_intent`,
+    and the relatively-prime ratio rule Alpaca answered with 422 / 42210000 and alpaca-py does not
+    check.
+  - The RESPONSE shapes are mirrored too (`parseOrder`, `parsePosition`, `wireNumber`), so the
+    signs survive and the nulls go out before the coercion in one place.
+  - **ALPACA'S PUBLISHED OpenAPI SPEC PREDATES MULTI-LEG OPTIONS ENTIRELY** — no `mleg`, no
+    `ratio_qty`, no `position_intent`, and `OrderClass` is `[simple, bracket, oco, oto, '']`. The
+    suite says so instead of implying a check that did not happen, holds the three enums the spec
+    DOES carry, and runs Alpaca's own documented SPY straddle as a fixture.
+
+**TASK 2 — `src/indicators.js`, and a chart that was rendered by nothing.**
+
+  - **`PriceChart` was exported and mounted by no screen in the app.** Mounted in the History
+    evidence panel now, which is where price history belongs.
+  - One home for SMA(20/50/200), EMA(9/21), Bollinger(20,2), RSI(14), MACD(12/26/9), ATR(14) and
+    volume against its 20-day average, every period named with its reasoning and deliberately NOT
+    in `RULES`. `signals.js` reads its trend from here and **its outputs do not change** — the old
+    inline body is reproduced in the test and held equal over 200 readings on 40 seeded series.
+  - **The RSI is Cutler's, not Wilder's, and the file says so**: the chart draws the SAME number
+    the four-factor score reads, rather than a second one that looks alike.
+  - Unknown is null everywhere, the chip says "not enough history" and cannot be switched on, and
+    no line is drawn from zero. 390px first: overlays on the price pane, RSI and MACD in collapsed
+    panes, a chip row remembered per viewer, a crosshair readout, one generated takeaway each.
+
+**TASK 3 — a technical-analysis copilot under the chart.**
+
+  - Four one-tap questions and a free box on the existing streaming path; `askAI` takes a system
+    prompt, so there is no second endpoint and no second place the `message_stop` flush and the
+    `max_tokens` check have to be got right.
+  - **THE MODEL NEVER RECEIVES RAW BARS.** `taContext()` in `indicators.js` is the only source:
+    a model given 400 closes computes a moving average, and that number would not be the one
+    drawn above its answer. `taCopilotPrompt()` in `rules.js` forbids any figure not in the
+    context; a test holds the sentence, holds the serialised context free of series, and holds
+    the panel to `taContext()`.
+  - **AND THE DESK PROMPT'S DECISION TREES ARE FIXED — P3's first item**, open since the guided
+    path was built. They recommended a long call and a long ATM straddle, both of which
+    `runWizard` excludes, so the copilot argued in prose with the screen beside it.
+
+WHAT PR #34 HANDS FORWARD (the full list is PRD NOT VERIFIED):
+  - **NO ORDER CAN BE SENT FROM THE SANDBOX. NINTH IN A ROW.**
+  - **The alpaca-py rules were read from the default branch by URL**, so the exact commit is not
+    pinned. Every rule cites its file, which makes a re-read cheap.
+  - **`orderBody()` now throws** on a body the contract refuses, and no path has ever thrown live.
+  - **The closing direction is still unexercised**, so `limitAgainstBook()` on the close paths has
+    never run against a live book.
+  - **The unstamped-limit path is what the owner sees FIRST**, on J-0001, and it will look like a
+    regression against PR #33's screenshot. It is not.
+  - **No indicator has been seen against a real chart**, and the chart copilot has never run — no
+    broker key and no Anthropic key here.
+  - **NOBODY HAS SEEN ANY OF IT ON A PHONE.** Ninth, and this one is a chart.
+
 ## P2 — Proposals ranked by edge, not by score
+
+### >>> THIS IS THE NEXT SESSION'S TASK. <<<
+
+**READ ALPACA'S OWN GREEKS INSTEAD OF COMPUTING THEM.** PR #33 wrote this down as "the obvious
+next one" and it is still open: `netGreeks()` runs Black-Scholes at a hand-written per-ticker
+sigma while **Alpaca's option snapshots carry `delta`, `gamma`, `theta`, `vega`, `rho` and
+`implied_volatility` per contract**. It is the same species as every fault in PR #33 — the app
+re-deriving something the broker had already told it — and it is the input the rest of this
+section needs.
+
+The spec, in the order it has to be built:
+
+  1. **`chain.js` READS THE GREEKS IT IS ALREADY BEING SENT.** They are in the snapshot payload
+     and are parsed away today. Same two rules as the quote sizes and open interest: a missing
+     greek is UNKNOWN and never zero, CBOE has none, and `feedName()` says which feed produced
+     what is on screen. `markProvenance()` already has the shape to copy — **a greek that came
+     from the model must never be presented as one the broker reported.**
+  2. **STRIKES BY DELTA, NOT BY A PERCENTAGE OF SPOT.** The same iron condor template is 67% wide
+     on SOYB and 20% on BOIL today, because the offsets are a fixed share of the price. Delta is
+     the market's own answer to "how far is this", and now that it is read rather than computed it
+     is the broker's number.
+  3. **EDGE = HOUSE EV − MARKET EV − THE ROUND TRIP ACROSS THE COMBO SPREAD.** The house EV is
+     `chanceOf()`'s simulation mean, which already exists and already drifts on the app's own
+     seasonal thesis. The market EV is the same structure priced at the chain's implied
+     volatility with no drift. The round trip is `comboBook().spread` — the number
+     `comboSpreadFloor()` already measures — because an edge smaller than the cost of getting in
+     and out is not an edge. **Below transaction cost, nothing is proposed. That will be the
+     common case and it is correct.**
+  4. **THE STRUCTURE FOLLOWS FROM WHERE THE EDGE IS**, never from a sentiment label: directional
+     edge → a vertical in that direction; implied volatility rich against realised → sell premium
+     with defined risk; cheap → buy it; no edge → nothing. This removes at the root the state
+     where every market is tagged VERY BULL and the only menu contains debit structures. The
+     rewritten `SYSTEM_PROMPT` trees (PR #34) already describe exactly this: make the code agree
+     with them.
+  5. **UNKNOWN SEASONAL MEANS EDGE UNKNOWN, AND IT RANKS LAST.** Five of the ten markets carry no
+     `SEASONAL` row at all until Alpha Vantage lands, so the house distribution has no drift and
+     there is no house EV to subtract a market EV from. That is not an edge of zero. It is the
+     same rule `noCeilingRankNote()` already applies to an unbounded profit: shown, blank, sorted
+     last, with a sentence saying why — never silently dropped.
+  6. **A BEFORE/AFTER TABLE ON ALL TEN MARKETS**, in the PRD, written the way §4h's
+     before-and-after table was: what the current four-factor score ranks first on each market,
+     what edge ranks first, and how often the two disagree. A ranking change with no table under
+     it is an opinion.
+
+Still open in this section from earlier sessions:
+  - the house distribution still owes **realised volatility measured from returns**: `SIGMA` is
+    five hand-typed numbers and no market's realised volatility has been measured at all (§4k);
+  - `RULES.fallbackIV` (0.25) is roughly twice GLD's real implied volatility, and it bites exactly
+    where `modelSanity()`'s denominator lives — **reading Alpaca's own `implied_volatility` per
+    contract closes this too**, which is another reason 1 comes first;
+  - `minPeersForPercentile` was tuned for chains with ten reporting strikes and XLE's chosen
+    expiry carries 82 contracts with a 40th percentile of 7. Settle it from a fresh
+    `/api/liquidity` across all ten;
+  - drop BOIL or keep it with a declared short horizon — a 2x daily-rebalanced ETF is not
+    lognormal over 45 days;
+  - on screen, probability and payoff always together, with edge as the third number. Never rank
+    on one number alone.
+
+## P7 — The broker tells us about the fill; stop asking it
+
+`recheckOrders()` polls `GET /v2/orders/{id}` on arrival and on a 60-second timer, for every
+position whose order had not filled. That is the only way this app learns an order filled, and it
+has three faults that are all the same fault: **it only knows while the tab is open.**
+
+Alpaca's streaming API has a `trade_updates` channel that pushes every state change — `new`,
+`fill`, `partial_fill`, `canceled`, `expired` — the moment it happens.
+
+  - **`orderStatusRecheck()` STAYS AND IS THE ONE READER.** It already decides what changed, what
+    to append to the timeline and what the fill was against the limit. A stream is a different
+    TRANSPORT for the same event, not a second implementation of what an event means — and this
+    repository has been burned four times by a second implementation.
+  - **THE CREDENTIALS MAY NOT REACH THE CLIENT** (non-negotiable rule 3). A websocket opened from
+    the browser would carry the key, so the stream has to terminate server-side. That is a real
+    design question and it is the substance of this item: a Netlify function is not a long-lived
+    process. Decide between a background function that writes fills into the blob store for the
+    client to read, and simply keeping the poll and making it honest.
+  - **UNKNOWN IS NOT DEAD, AND A STREAM THAT DROPPED IS UNKNOWN.** A disconnected socket must
+    never be read as "no fills happened". The poll stays as the reconciliation pass, exactly as
+    `orderReconciliation()` treats an unasked broker as different from an empty one.
+  - **DONE WHEN**: a fill that happens while the tab is closed is on the Positions screen when it
+    is opened, with the right timeline entry, and nothing was invented in the meantime.
+
+## P8 — More indicators, and more than one timeframe — NOT BEFORE THE OWNER HAS USED THESE
+
+Deliberately last, and deliberately gated on a reading rather than on an argument. PR #34 put ten
+indicators on a chart that had never been rendered at all. **Nobody has used them.**
+
+Nothing in this section is built until the owner has had the current chart on his phone and said
+what he actually looked at. The candidates, in the order they are most likely to be worth it:
+
+  - **WILDER'S RSI, MEASURED AGAINST CUTLER'S** (§4u.2). The app's RSI is the simple mean of the
+    last 14 changes and every charting package smooths it. The two are internally consistent
+    today — the chart draws what the score reads — so this is one change or none. **Measure the
+    gap on all ten markets first**: if it moves the four-factor score's direction on any of them,
+    that is a P2 input and not a chart decision.
+  - **Weekly bars beside daily.** A 45-day option and a 200-day average are not on the same clock.
+    The honest version of this is a second timeframe with its own panes, not a switch that silently
+    changes what every number on screen means.
+  - **VWAP, Keltner channels, OBV, stochastics.** Each one needs a sentence saying what question it
+    answers that the current ten do not, or it is decoration.
+  - **Drawing on the chart** — trend lines, a measured move. The owner has never asked for it and
+    it is the most expensive thing here.
+
+**THE RULE FOR THIS SECTION**: every indicator added carries its own `takeaway()`, its own
+"unknown is not a number" guard and its own line in the copilot's typed context, or it does not go
+on the chart. The chip row is already at ten and a phone is 390px wide.
+
+
 At market prices every structure has expected value near zero: high
 probability and large payoff are two ends of one lever. So the app must
 compute a distribution of its own and propose only where that distribution
@@ -823,12 +1020,21 @@ WHAT P2-bis HANDS FORWARD:
 buildContext also carries the computed probability, the gate verdict with its
 violations, the real sizing, and the liquidity and spread of each leg. The
 copilot emits typed fields, never numbers: what it means, what to watch, what
-would disprove it. Rewrite the SYSTEM_PROMPT decision trees, which today
-recommend long calls and straddles the guided path excludes. Re-verification
-at apply time on the OPEN path as well (the close path already has it in
-approve.mjs).
+would disprove it.
+~~Rewrite the SYSTEM_PROMPT decision trees, which today recommend long calls
+and straddles the guided path excludes.~~ **DONE BY PR #34** (PRD §4u.6). They
+are built around the structures the app actually offers — debit verticals,
+credit verticals, iron condors — with RECOMMEND NOTHING as a named branch and
+the excluded structures listed with their reasons. A test in
+`indicators.test.js` fails the build if a long call or a straddle comes back.
+Re-verification at apply time on the OPEN path as well (the close path already
+has it in approve.mjs).
 REGRESSION TEST: the copilot can never again write "paste the chain data" or
-estimate a price by hand.
+estimate a price by hand. **THE CHART COPILOT ALREADY HAS THE STRONGER HALF OF
+THIS** (PR #34): it is handed `taContext()` and no bars at all, its prompt
+forbids any figure not in that context, and a test holds both. The desk
+copilot is still given a context it could in principle compute from — doing to
+`buildContext()` what `taContext()` did here is the substance of this item.
 
 ## P4 — UX  (DONE — PR #28 and PR #30, both brought forward)
 ~~The trade card, five fixed lines: what you are betting on, what you risk in
