@@ -39,6 +39,7 @@ import {
   tradeCard, TRADE_CARD_IDS, unlistedContractNote, unquotedLegNote, unquotedLegPointer,
   strikeSnapNote, offBoardStrikeLabel, checkedAgainstNote, NO_CEILING,
   limitPlacement, INDICATIVE_CLAUSE,
+  rewardRiskRange, RR_POINTS, crossingCost, crossingCostNote, openingMarkNote, MIN_NET_DOLLARS,
 } from "./rules.js";
 import { analyze, shortlistWithFloors, TradeCard } from "./App.jsx";
 import { terminalDist, compareDistInputs, compareDistNote, ComparePayoffs } from "./visuals.jsx";
@@ -290,6 +291,88 @@ check("the verdict band is three states and names the distance", () => {
   // No book, no verdict — and it says so rather than guessing.
   eq(orderVerdict(0.18, comboBook(UNG_LEGS, [{ bid: 0.43, ask: 0.53 }, {}]), { sign: 1 }).known, false,
     "an unquoted leg has no placement");
+});
+
+/* ==================================================================
+   ROADMAP P10 §1 — ONE PRICE, AND WHAT CROSSING COSTS
+================================================================== */
+
+check("R/R IS INVARIANT UNDER SIZE — nobody may build a budget-driven one", () => {
+  /* >>> READ THIS BEFORE BUILDING ANYTHING THAT LOOKS LIVE. <<< `analyze()`
+     multiplies `maxProfit` AND `maxLoss` by the same leg quantities, so the
+     RATIO cannot move with the size: $4 against $346 at one contract is $40
+     against $3,460 at ten. A "reward-to-risk as a function of the budget"
+     would be a number that looks live and never moves, which is this
+     repository's oldest failure mode wearing a new coat. */
+  const one = analyze(UNG_LEGS, 10.42, 33, 0.85, () => null, { net: 0.24 });
+  const ten = analyze(UNG_LEGS.map((l) => ({ ...l, qty: l.qty * 10 })), 10.42, 33, 0.85, () => null, { net: 2.4 });
+  const a = rewardRisk(one.maxProfit, one.maxLoss);
+  const b = rewardRisk(ten.maxProfit, ten.maxLoss);
+  if (a == null || b == null) throw new Error("both sizes must price");
+  if (Math.abs(a - b) > 1e-9) throw new Error(`the ratio moved with the size: ${a} against ${b}`);
+  // ...and both ends really did scale, so the invariance is not two nulls.
+  if (!(Math.abs(ten.maxLoss) > Math.abs(one.maxLoss) * 5)) throw new Error("the size did not scale the dollars");
+});
+
+check("THE RANGE IS THREE RATIOS WITH THEIR THREE NETS", () => {
+  const book = comboBook(UNG_LEGS, UNG_QUOTES);
+  const at = (net) => analyze(UNG_LEGS, 10.42, 33, 0.85, () => null, { net });
+  const r = rewardRiskRange({ book, at });
+  for (const k of RR_POINTS) {
+    if (!(k in r)) throw new Error(`${k} is missing from the range`);
+    if (!("net" in r[k]) || !("rr" in r[k])) throw new Error(`${k} carries a ratio with no price`);
+  }
+  /* >>> AND ON THIS BOOK THE BID END IS CORRECTLY NULL. <<< UNG's combination
+     bids $0.04, under `minNetPremium` — so there is no ratio to print at it,
+     exactly as `rewardRisk()` returns null under its own minimum. A range with
+     an unreadable end is not a range, and it says so rather than dividing. */
+  eq(r.bid.rr, null, "a combination bid under the minimum has no ratio");
+  eq(r.bid.net, null);
+  if (!(r.mid.rr > r.fill.rr)) {
+    throw new Error(`the range does not order with the price: ${r.mid.rr} ${r.fill.rr}`);
+  }
+  // THE PRICE IS WHAT MOVES IT: on a book whose three ends are all readable,
+  // cheaper in is a better ratio, all the way down.
+  const wide = comboBook(
+    [{ side: 1, qty: 1, type: "call", strike: 10.5 }, { side: -1, qty: 1, type: "call", strike: 12 }],
+    [{ bid: 1.00, ask: 1.20 }, { bid: 0.30, ask: 0.50 }]);
+  const wr = rewardRiskRange({
+    book: wide,
+    at: (net) => analyze(
+      [{ side: 1, qty: 1, type: "call", strike: 10.5 }, { side: -1, qty: 1, type: "call", strike: 12 }],
+      10.42, 33, 0.85, () => null, { net }),
+  });
+  for (const k of RR_POINTS) if (wr[k].rr == null) throw new Error(`${k} should be readable on this book`);
+  if (!(wr.bid.rr > wr.mid.rr && wr.mid.rr > wr.fill.rr)) {
+    throw new Error(`the range does not order with the price: ${wr.bid.rr} ${wr.mid.rr} ${wr.fill.rr}`);
+  }
+  // ...and `rewardRisk()` keeps its single-value job, unchanged.
+  const one = at(r.fill.net);
+  near(rewardRisk(one.maxProfit, one.maxLoss), r.fill.rr, 1e-9, "the range reads rewardRisk()");
+  // NO BOOK, NO RANGE — and a net under the minimum is a null end, not a ratio.
+  eq(rewardRiskRange({ book: comboBook(UNG_LEGS, [{ bid: 0.43, ask: 0.53 }, {}]), at }), null);
+  const tiny = rewardRiskRange({ book: { ok: true, bid: 0.001, mid: 0.001, ask: 0.001, spread: 0 }, at });
+  eq(tiny.mid.rr, null, "a price under the minimum has no ratio");
+  eq(tiny.mid.net, null, "and no price either");
+});
+
+check("WHAT CROSSING COSTS IS ONE LINE, AND THE MARK AT THE BID IS IN THE FOLD", () => {
+  const book = comboBook(UNG_LEGS, UNG_QUOTES);
+  const cc = crossingCost({ book });
+  eq(cc.known, true);
+  // The suggestion IS openLimitPrice(), not a fourth number.
+  near(cc.fill, openLimitPrice({ netMid: book.mid, spread: book.spread }).net, 1e-9, "one suggestion");
+  near(cc.cost, Math.abs(cc.fill) - Math.abs(cc.mid), 1e-9, "the cost is the concession and nothing else");
+  const line = crossingCostNote(cc);
+  has(line, "Suggested"); has(line, "fair value (mid)"); has(line, "costs you");
+  // WHY A NEW POSITION STARTS NEGATIVE, said where the range is.
+  has(openingMarkNote(cc), "the moment it opens");
+  has(openingMarkNote(cc), "round trip");
+  // NO BOOK IS NOT A PRICE OF ZERO.
+  const none = crossingCost({ book: comboBook(UNG_LEGS, [{ bid: 0.43, ask: 0.53 }, {}]) });
+  eq(none.known, false); eq(none.fill, null);
+  has(crossingCostNote(none), "cannot suggest a price");
+  eq(openingMarkNote(none), null);
 });
 
 check("FILLS NOW NAMES THE FEED IT WAS JUDGED ON — J-0003", () => {

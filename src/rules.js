@@ -2400,6 +2400,108 @@ export const rewardRisk = (maxProfit, maxLoss) => {
   return reward / risk;
 };
 
+/* =====================================================================
+   THE SAME STRUCTURE HAS THREE REWARD-TO-RISKS (ROADMAP P10 §1)
+
+   The owner: *"Il reward/Risk è dinamico? Per me dovrebbe... con Range di
+   raccomandazioni a seconda del bid/ask dei contratti."*
+
+   >>> A BUDGET CANNOT CHANGE A REWARD-TO-RISK, AND THAT IS WHY THIS IS A
+   RANGE. <<< `analyze()` multiplies `maxProfit` and `maxLoss` by the SAME leg
+   quantities, so the RATIO is invariant under size: $4 against $346 at one
+   contract is $40 against $3,460 at ten. Building "R/R as a function of the
+   budget" would produce a number that looks live and never moves, which is
+   this repository's oldest failure mode wearing a new coat.
+
+   WHAT DOES MOVE IT IS THE PRICE, because `maxLoss` IS the debit. At the bid,
+   at the mid and at the price that fills the same structure has three
+   different reward-to-risks, and the honest form of his request is all three.
+
+   NO NEW ARITHMETIC. `comboBook()` already returns the three prices and
+   `openLimitPrice()` already decides which one fills; the caller hands in its
+   own `analyze()` because this file does not own it. It is DISPLAY ONLY: it
+   refuses nothing, filters nothing, and `rewardRisk()` keeps its single-value
+   job for every existing caller.
+===================================================================== */
+
+/** The three points of the range, in the order a screen reads them. */
+export const RR_POINTS = ["bid", "mid", "fill"];
+
+/**
+ * @param book the `comboBook()` result
+ * @param at   `(net) => analyze(...)` — the caller's own analysis at that net
+ * @returns {?{bid,mid,fill}} each `{ net, rr }`, with NULLS under
+ *          `minNetPremium` exactly as `rewardRisk()` returns null under
+ *          `MIN_NET_DOLLARS`: a range with an unreadable end is not a range.
+ */
+export function rewardRiskRange({ book, at } = {}) {
+  if (!book || !book.ok || typeof at !== "function") return null;
+  const filled = openLimitPrice({ netMid: book.mid, spread: book.spread });
+  const nets = { bid: book.bid, mid: book.mid, fill: filled ? filled.net : null };
+  const out = {};
+  for (const k of RR_POINTS) {
+    const net = nets[k];
+    // `Number(null)` is 0 and 0 is finite — the nets go out before the coercion.
+    if (net == null || !Number.isFinite(+net) || Math.abs(+net) < RULES.minNetPremium) {
+      out[k] = { net: null, rr: null };
+      continue;
+    }
+    const a = at(+net);
+    out[k] = { net: +net, rr: a ? rewardRisk(a.maxProfit, a.maxLoss) : null };
+  }
+  return out;
+}
+
+/**
+ * WHAT CROSSING COSTS, IN ONE LINE (ROADMAP P10 §1, §3-bis points 5-6).
+ *
+ * The owner's reading of the whole product: *"is it a good bet? yes — but how
+ * much do I pay for it?"* Measured on his own orders: J-0003, typed at the
+ * indicative combination ASK, has not filled after several sessions; his
+ * earlier limits at the MID expired. So the ask is not a guaranteed fill and
+ * paying it is not a strategy — and the mid is not a price either. The app
+ * suggests ONE price, names what it is worth, and says what the difference is.
+ */
+export const crossingCostNote = (r) => {
+  if (!r || !r.known) {
+    return `There is no two-sided market on every leg right now, so the app cannot suggest a price or say ` +
+      `what crossing would cost.`;
+  }
+  const cost = Math.abs(r.cost) * 100;
+  return `Suggested ${money(Math.abs(r.fill) * 100)} · fair value (mid) ${money(Math.abs(r.mid) * 100)} ` +
+    `· entering here costs you ${money(cost)}.`;
+};
+
+/** The figures that line names, worked out once. */
+export function crossingCost({ book } = {}) {
+  if (!book || !book.ok) return { known: false, fill: null, mid: null, bid: null, cost: null };
+  const filled = openLimitPrice({ netMid: book.mid, spread: book.spread });
+  if (!filled) return { known: false, fill: null, mid: null, bid: null, cost: null };
+  return {
+    known: true, fill: filled.net, mid: book.mid, bid: book.bid, ask: book.ask,
+    // The concession, and nothing else: the mid is what it is worth, the fill
+    // is what it takes, and the gap is what the market charges to be met.
+    cost: Math.abs(filled.net) - Math.abs(book.mid),
+  };
+}
+
+/**
+ * WHY A NEW POSITION STARTS NEGATIVE, said where the range is.
+ *
+ * A structure bought at the fill price is immediately marked at what somebody
+ * would pay to take it back off you, which is the BID. That gap is not a loss
+ * anybody made: it is the round trip, visible on day one. The Guardian's red
+ * figure on a position opened ten seconds ago has never had a sentence.
+ */
+export const openingMarkNote = (r) => {
+  if (!r || !r.known || r.bid == null) return null;
+  const drop = Math.abs(r.fill) - Math.abs(r.bid);
+  return `It is worth ${money(Math.abs(r.bid) * 100)} the moment it opens — that is what the other side ` +
+    `would pay to take it back — so a position bought at ${money(Math.abs(r.fill) * 100)} starts ` +
+    `${money(drop * 100)} down. Nothing has gone wrong: that gap is the round trip, and it is why a wide ` +
+    `market costs money before the trade is right or wrong about anything.`;
+};
+
 /**
  * Run one candidate past both floors.
  *

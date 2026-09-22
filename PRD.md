@@ -3330,6 +3330,41 @@ CHANCE, PROFIT, RISK), the band thumbnail and the gauge, and one button.
 - **THE 1-3 COMPARISON IS UNTOUCHED.** It compares cards now. `CandidateActions` is the card's action
   row, unchanged.
 
+### 3-quater. ONE PRICE, AND WHAT CROSSING COSTS
+
+The owner's reading of the whole product: *"is it a good bet? yes — but how much do I pay for it?"*
+**Measured on his own orders**: J-0003, typed at the indicative combination ASK, has not filled after
+several sessions (§4s-bis); his earlier limits at the MID expired. So the ask is not a guaranteed
+fill and paying it is not a strategy — and the mid is not a price either.
+
+- **`rewardRiskRange()` in `rules.js`, beside `rewardRisk()`.** Three ratios WITH their three nets:
+  the bid, the mid, and the price that fills. **NO NEW ARITHMETIC** — `comboBook()` already returns
+  the three prices, `openLimitPrice()` already decides which one fills, and the caller hands in its
+  own `analyze()` because this file does not own it. It is DISPLAY ONLY: it refuses nothing, filters
+  nothing, and `rewardRisk()` keeps its single-value job for every existing caller.
+- **NULLS UNDER `minNetPremium`, EXACTLY LIKE `rewardRisk()`.** A range with an unreadable end is not
+  a range. Read on the UNG fixture this repository already carries: the combination BIDS $0.04, under
+  the minimum, so that end of the range has no ratio and says so rather than dividing.
+- **A BUDGET CANNOT CHANGE A REWARD-TO-RISK, AND THE TEST SAYS SO.** `analyze()` multiplies
+  `maxProfit` AND `maxLoss` by the same leg quantities, so the ratio is invariant under size: $4
+  against $346 at one contract is $40 against $3,460 at ten. `ticket.test.jsx` holds it at one lot
+  and at ten, and checks that both ends really did scale so the invariance is not two nulls. A
+  "reward-to-risk as a function of the budget" would be a number that looks live and never moves —
+  this repository's oldest failure mode wearing a new coat. **What moves it is the PRICE**, because
+  `maxLoss` IS the debit.
+- **BUILD'S TOP IS FIVE FIGURES IN ONE ROW, LABEL ABOVE VALUE**: what you pay or receive, the maximum
+  loss, the maximum profit, the chance, the break-even — with the structure in plain words above
+  them. All five are read at the price that will be sent: `AE` is `analyze()` at `effectiveLimit()`'s
+  net, which seeds at `openLimitPrice()`, so this row and the ticket cannot disagree.
+- **ONE LINE SAYS WHAT CROSSING COSTS** (`crossingCost()` / `crossingCostNote()`): *"Suggested $80 ·
+  fair value (mid) $70 · entering here costs you $10."* The cost is the concession and nothing else.
+- **THE BREAKDOWN AND THE RANGE FOLD ONE TAP BELOW, AS THE WHY** — bid, mid, ask, suggested, and the
+  three reward-to-risks beside them.
+- **AND THE FOLD SAYS WHY A NEW POSITION STARTS NEGATIVE** (`openingMarkNote()`): a structure bought
+  at the fill price is immediately marked at what somebody would pay to take it back, which is the
+  BID. That gap is not a loss anybody made — it is the round trip, visible on day one — and the
+  Guardian's red figure on a position opened ten seconds ago has never had a sentence.
+
 ### 4. AND THE COUNTER ITSELF HAD A DEFECT, MEASURED HERE
 
 `atRest()` strips a fold with a non-greedy match from `<Fold …>` to the next `</Fold>`. It ran over
@@ -3359,11 +3394,13 @@ counter, or the table means nothing.
 counter. P10 spends some of it back, and ROADMAP P10 §5 said so before a line of it was built: *"a
 new always-visible panel spends some of that back... A control that asks a question earns its words;
 a paragraph explaining the control does not, and folds."* Five controls now sit above every result on
-two screens. This tree reads **2,230 against 3,627 — a 38.5% cut**.
+two screens. This tree reads **2,256 against 3,627 — a 37.8% cut**.
 
 A session that lowers a bar to clear it is doing the thing this file exists to stop, so the number
-that now stops growth is a **CEILING**: `{ radar 481, shortlist 1216, build 533, total 2230 }`, this
+that now stops growth is a **CEILING**: `{ radar 481, shortlist 1216, build 559, total 2256 }`, this
 session's own reading, per screen and in total. **Any screen that grows by one word fails the build.**
+It was raised once inside this session, for TASK 5's five figures on Build (533 → 559), in the commit
+and here — never by quietly re-running the counter.
 The ratio stays as the long-run direction. The owner's own verdict on the ratio, after P9 reported
 43%: *"non me ne frega niente, basta si capisca il tutto, sia intuitivo e siano evidenti takeaway
 senza perdere sostanza."*

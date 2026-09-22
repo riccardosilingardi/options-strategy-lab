@@ -39,7 +39,8 @@ import { RULES, sizing, ruleBadge, takeProfitLabel, stopLossLabel, perTradeCapLa
   chanceOf, chanceSourceNote, seasonalProvenance, seasonalStampNote, seasonalStampFields, chanceDrawFields,
   sigmaProvenance, isButterfly,
   requestOf, requestAmountLabel, requestAmountOwner, contractsSourceNote,
-  splitByRequest, meetsHeading, otherwiseHeading, missReasonLine, fillPriceHeading, fillNet } from "./rules.js";
+  splitByRequest, meetsHeading, otherwiseHeading, missReasonLine, fillPriceHeading, fillNet,
+  rewardRiskRange, RR_POINTS, crossingCost, crossingCostNote, openingMarkNote } from "./rules.js";
 import { isStale, freshnessNote, staleAmong } from "./freshness.js";
 import { evaluateTrade, gateSummary } from "./riskGate.js";
 import { DEMO, DEMO_BANNER, DEMO_TOOLTIP, DEMO_SEED_TICKERS, demoPositions } from "./demo.js";
@@ -5648,6 +5649,93 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   </div>
                 );
               })()}
+              {/* ============ ONE PRICE, AND WHAT CROSSING COSTS (P10 §1).
+                  ============ The owner's reading of the whole product: "is it
+                  a good bet? yes — but how much do I pay for it?" Measured on
+                  his own orders: J-0003 at the indicative combination ask has
+                  not filled after several sessions, and his earlier limits at
+                  the mid expired. So the app suggests ONE price, names what the
+                  structure is worth, and says what the difference costs.
+
+                  FIVE FIGURES, LABEL ABOVE VALUE, IN ONE ROW, all at the price
+                  that will be sent. `AE` is `analyze()` at `effectiveLimit()`'s
+                  net and it seeds at `openLimitPrice()`, so this row and the
+                  ticket cannot disagree. The bid/mid/ask breakdown and the
+                  reward-to-risk RANGE are one tap below, as the WHY. */}
+              {AE && (() => {
+                const cc = crossingCost({ book });
+                const rng = rewardRiskRange({
+                  book,
+                  // THE CALLER'S OWN `analyze()`, at each of the three nets.
+                  // This file owns it; `rules.js` does not, and a second
+                  // implementation would be a second answer.
+                  at: (net) => analyze(legs, spot, dte, iv, q, { net }),
+                });
+                return (
+                  <div style={{ marginTop: 12, padding: "12px 14px", background: T.panel,
+                    border: `1px solid ${T.line}`, borderLeft: `3px solid ${T.blue}`, borderRadius: 8 }}>
+                    <div style={{ ...sansUI, fontSize: 15, fontWeight: 700, color: T.ink }}>
+                      {ticker} · {stratName}
+                    </div>
+                    <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 2 }}>{legsLine(legs)}</div>
+                    <div style={{ display: "flex", gap: 12, marginTop: 10, flexWrap: "wrap" }}>
+                      {[[AE.entry >= 0 ? "YOU PAY" : "YOU RECEIVE", fmt$(Math.abs(AE.entry) * 100), T.ink],
+                        ["MAX LOSS", fmt$(AE.maxLoss), T.red],
+                        ["MAX PROFIT", ceil$(AE.maxProfit), T.green],
+                        ["CHANCE", chanceText(chance ? chance.pop : null), T.violet],
+                        ["BREAK-EVEN", AE.breakevens.map((b) => b.toFixed(2)).join(" · ") || "—", T.blue],
+                      ].map(([k, v, col]) => (
+                        <div key={k} style={{ minWidth: 68 }}>
+                          <div style={{ ...mono, fontSize: 9, letterSpacing: "0.08em", color: T.dim }}>{k}</div>
+                          <div style={{ ...mono, fontSize: 15, fontWeight: 800, color: col }}>{v}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ ...mono, fontSize: 11, color: T.blue, marginTop: 9, lineHeight: 1.5 }}>
+                      {crossingCostNote(cc)}
+                    </div>
+                    {/* THE BREAKDOWN AND THE RANGE FOLD, AS THE WHY. */}
+                    <Fold label="the price" tone={T.dim} style={{ marginTop: 8 }}
+                      summary={`Where that price sits in the market, and the range behind it`}>
+                      {cc.known ? (
+                        <>
+                          <div style={{ display: "flex", gap: 14, marginTop: 8, flexWrap: "wrap" }}>
+                            {[["BID", cc.bid], ["MID", cc.mid], ["ASK", cc.ask], ["SUGGESTED", cc.fill]].map(([k, v]) => (
+                              <div key={k}>
+                                <div style={{ ...mono, fontSize: 9, color: T.dim }}>{k}</div>
+                                <div style={{ ...mono, fontSize: 13, fontWeight: 700, color: T.ink }}>{fmt$(Math.abs(v) * 100)}</div>
+                              </div>
+                            ))}
+                          </div>
+                          {/* THE RANGE. A budget cannot move a reward-to-risk —
+                              `analyze()` scales both ends by the same leg
+                              quantities — and the PRICE can, because `maxLoss`
+                              IS the debit. */}
+                          {rng && (
+                            <div style={{ display: "flex", gap: 14, marginTop: 10, flexWrap: "wrap" }}>
+                              {RR_POINTS.map((k) => (
+                                <div key={k}>
+                                  <div style={{ ...mono, fontSize: 9, color: T.dim }}>
+                                    {k === "fill" ? "R/R SUGGESTED" : `R/R AT THE ${k.toUpperCase()}`}
+                                  </div>
+                                  <div style={{ ...mono, fontSize: 13, fontWeight: 700, color: T.amber }}>
+                                    {rng[k].rr == null ? "—" : rng[k].rr.toFixed(2)}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {/* WHY A NEW POSITION STARTS NEGATIVE. */}
+                          <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 10, lineHeight: 1.6 }}>
+                            {openingMarkNote(cc)}
+                          </div>
+                        </>
+                      ) : null}
+                    </Fold>
+                  </div>
+                );
+              })()}
+
               {/* ============ THE DECISION, IN FIVE LINES (PRD §4n) ============
                   Everything this screen printed here is still here; it opens
                   behind a tap, in a sheet over the step, because a decision is

@@ -161,7 +161,12 @@ test("MEASURED: the three screens, and the table in the PRD is this number", () 
   /* THE CEILING: what this tree measures today. Nothing may grow past it
      without a session deliberately raising it and saying why, which is the
      same discipline the baseline above is kept under. */
-  const CEILING = { radar: 481, shortlist: 1216, build: 533, total: 2230 };
+  /* RAISED ONCE, DELIBERATELY, BY P10 TASK 5: Build's top gained the five
+     figures, the one line saying what crossing costs, and a fold. `build` moves
+     533 -> 559. Nothing else moves. A ceiling is raised by a session that says
+     why, in the commit and in the PRD, and never by one quietly re-running the
+     counter. */
+  const CEILING = { radar: 481, shortlist: 1216, build: 559, total: 2256 };
   assert.ok(now <= CEILING.total,
     `the screens grew: ${now} against the ${CEILING.total} this ceiling records`);
   for (const id of SCREEN_IDS) {
