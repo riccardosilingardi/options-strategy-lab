@@ -2861,6 +2861,114 @@ export function requestOf(want = {}, limits = {}) {
   return { mode, amt, amtAnswered, minChance, chanceAnswered, answered: amtAnswered };
 }
 
+/* =====================================================================
+   DOES THIS CANDIDATE MEET WHAT WAS ASKED FOR? (ROADMAP P10 §3)
+
+   The owner: *"l'app propone anche altro, magari visivamente sposta in una
+   sezione quelle che marchiano le richieste e subito sotto le altre. Del
+   resto se il filtro è dinamico devono poter entrare e uscire dalla sezione
+   specifica."*
+
+   >>> THIS GROUPS. IT DOES NOT REMOVE. <<< That distinction is the whole
+   feature. The quality floors REMOVE and say which floor did it, and they
+   are untouched here; `priceability()`, `impossibleLoss()` and
+   `modelSanity()` remove before them. This one only decides which HEADING a
+   row sits under, and everything that cleared the floors is on the screen
+   either way — never hidden, never folded.
+
+   >>> MEMBERSHIP IS DERIVED AND MUST NEVER BE STORED ON A CANDIDATE. <<< A
+   stored membership is a stale one the moment the control moves, and the
+   controls are meant to be dragged. It is computed from `candidateOf()`'s
+   shape against the current request, on every render.
+
+   AND EVERY ROW IN THE SECOND SECTION SAYS WHAT IT MISSED. A row under a
+   heading with no reason is the "empty screen with no sentence" fault, one
+   list down — so `meetsRequest()` returns the REASONS and the split reads
+   them, which is why a reasonless row cannot be constructed.
+===================================================================== */
+
+/**
+ * @param cand    a `candidateOf()` shape: `{ pop, maxProfit, maxLoss, … }`
+ * @param request a `requestOf()` result
+ * @param size    the `scaleStrategy()` result for this candidate, or null.
+ *                IT IS HANDED IN RATHER THAN DERIVED: how many combinations a
+ *                budget buys has one home and this file is not it, and
+ *                re-deriving the unit here would be the `Math.max(prem, 1)`
+ *                fault wearing a second coat.
+ * @returns {{ meets, misses: [{id,text,short}] }}
+ */
+export function meetsRequest(cand, request, size = null) {
+  const misses = [];
+  if (!cand || !request) return { meets: false, misses: [{ id: "unknown", short: "not readable", text: "This candidate could not be read against your answers." }] };
+  const amt = Number(request.amt);
+  const haveAmt = Number.isFinite(amt) && amt > 0;
+
+  /* ---- THE MONEY HALF ---- */
+  if (haveAmt) {
+    if (!size) {
+      misses.push({ id: "unsized", short: "cannot be sized",
+        text: `It cannot be sized against ${request.mode === "target" ? "a target" : "a budget"}: it has no ` +
+          `readable cost or no maximum profit to divide by.` });
+    } else if (size.unpriceable) {
+      misses.push({ id: "unpriceable", short: "no readable price",
+        text: `One side of this prices at under ${money(MIN_NET_DOLLARS)}, so there is no cost to divide your ` +
+          `${request.mode === "target" ? "target" : "budget"} by.` });
+    } else if (!size.ok) {
+      const over = Number(size.unit) - amt;
+      misses.push({ id: "budget", short: `over budget by ${money(over)}`,
+        text: `Over the budget by ${money(over)}: one of these ${size.isCredit ? "ties up" : "costs"} ` +
+          `${money(size.unit)} and you said ${money(amt)}.` });
+    } else if (request.mode === "target" && Number(size.totProfit) < amt) {
+      const shortBy = amt - Number(size.totProfit);
+      misses.push({ id: "target", short: `short of the target by ${money(shortBy)}`,
+        text: `Short of the target by ${money(shortBy)}: the most this can make is ${money(size.totProfit)} and ` +
+          `you asked for ${money(amt)}.` });
+    }
+  }
+
+  /* ---- THE CHANCE HALF. UNKNOWN IS NOT A PASS AND NOT A ZERO. ---- */
+  const pop = Number(cand.pop);
+  const asked = Number(request.minChance);
+  if (!Number.isFinite(asked)) {
+    // No bar asked for: nothing to miss.
+  } else if (cand.pop == null || !Number.isFinite(pop)) {
+    misses.push({ id: "chance-unknown", short: "chance not known",
+      text: `Its chance of profit could not be worked out, so it cannot be held against the ${chanceText(asked)} ` +
+        `you asked for. Unknown is not a low number.` });
+  } else if (pop < asked - 1e-9) {
+    misses.push({ id: "chance", short: `chance ${chanceText(pop)} under the ${chanceText(asked)} asked`,
+      text: `Its chance is ${chanceText(pop)}, under the ${chanceText(asked)} you asked for.` });
+  }
+  return { meets: misses.length === 0, misses };
+}
+
+/**
+ * The same list, in two sections. `sizeOf` is the caller's `scaleStrategy()`.
+ *
+ * NOTHING IS DROPPED: `meets.length + others.length` is always the input
+ * length, and every entry in `others` carries at least one reason.
+ */
+export function splitByRequest(cands = [], request, sizeOf = () => null) {
+  const meets = [], others = [];
+  for (const c of cands || []) {
+    const r = meetsRequest(c, request, sizeOf(c));
+    if (r.meets) meets.push({ cand: c, misses: [] });
+    else others.push({ cand: c, misses: r.misses });
+  }
+  return { meets, others, total: meets.length + others.length };
+}
+
+/** The two headings. They carry the counts, so neither needs a sentence. */
+export const meetsHeading = (request, n) =>
+  `MEETS WHAT YOU ASKED FOR (${n})`;
+export const otherwiseHeading = (n) =>
+  `ALSO FOUND, AND WHAT EACH ONE MISSED (${n})`;
+/** One row's reason, in the fewest words that still say which rule. */
+export const missReasonLine = (miss) => (miss && miss.short ? miss.short : "");
+/** The section header that says which price every figure below is read at. */
+export const fillPriceHeading = () =>
+  `Every figure below is read at the price that fills, not at the mid.`;
+
 /**
  * THE TARGET PRICE — THE DIRECTION EXPRESSED AS A PRICE, AND A READ-OUT.
  *
@@ -2879,7 +2987,13 @@ export function requestOf(want = {}, limits = {}) {
  */
 export function targetPriceOf(spot, direction) {
   const S = Number(spot);
-  const move = Number(direction && direction.tgt);
+  // NO DIRECTION IS UNKNOWN, AND `Number(null)` IS 0 AND 0 IS FINITE — the trap
+  // this repository has written down seven times, and it is live here because
+  // NEUTRAL really does carry a move of ZERO. "Nobody picked a direction" and
+  // "the direction picked is sideways" are different facts and the second one
+  // is a real reading.
+  const raw = direction == null ? null : direction.tgt;
+  const move = raw == null || raw === "" ? NaN : Number(raw);
   if (!Number.isFinite(S) || S <= 0 || !Number.isFinite(move)) {
     return { known: false, price: null, move: null, movePct: null };
   }

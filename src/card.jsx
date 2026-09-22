@@ -28,7 +28,8 @@ import { legsLine } from "./path.js";
 import { BandThumbnail, Gauge, bandTakeaway } from "./visuals.jsx";
 import { RULES, money, chancePct, chanceText, rewardRisk, NO_CEILING,
   requestAmountLabel, requestAmountOwner, chanceAskLabel, controlsFoldNote,
-  targetPriceOf, targetPriceNote } from "./rules.js";
+  targetPriceOf, targetPriceNote,
+  splitByRequest, meetsHeading, otherwiseHeading, missReasonLine, fillPriceHeading } from "./rules.js";
 
 const mono = { fontFamily: "ui-monospace, Menlo, monospace" };
 const sans = { fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, sans-serif" };
@@ -222,3 +223,62 @@ const chipStyle = (on) => ({
 });
 
 export { CardFigure };
+
+/* ====================================================================
+   2) THE LIST, IN TWO SECTIONS (ROADMAP P10 §3)
+
+   Above: what MEETS what was asked for. Directly below, under its own
+   heading, everything else that cleared the floors — never hidden, never
+   folded, and every row saying what it missed.
+
+   >>> IT GROUPS. IT DOES NOT REMOVE. <<< The quality floors remove and say
+   which floor did it; they are untouched. Membership is DERIVED on every
+   render from `splitByRequest()` and is never stored on a candidate — a
+   stored membership is a stale one the moment the control moves, and these
+   controls are meant to be dragged.
+==================================================================== */
+export function SplitSections({ items = [], request, sizeOf = () => null, renderItem,
+  /* THE PRICE NOTE IS OPT-IN AND MUST STAY THAT WAY. It says every figure
+     below is read at the price that fills, and a section whose rows are still
+     priced at the MID may not print it: a label asserting a price the
+     arithmetic did not use is the fault §4l is named after. */
+  priceNote = false, emptyTop = null, style }) {
+  const sp = splitByRequest(items, request, sizeOf);
+  const Head = ({ children, tone }) => (
+    <div style={{ ...mono, fontSize: 10, letterSpacing: "0.15em", color: tone, marginTop: 12 }}>{children}</div>
+  );
+  return (
+    <div style={style}>
+      <Head tone={T.green}>{meetsHeading(request, sp.meets.length)}</Head>
+      {priceNote && (
+        <div style={{ ...mono, fontSize: 9.5, color: T.dim, marginTop: 3 }}>{fillPriceHeading()}</div>
+      )}
+      {sp.meets.length === 0 && (
+        <div style={{ ...mono, fontSize: 11, color: T.mut, marginTop: 6, lineHeight: 1.5 }}>
+          {emptyTop || "Nothing answers all of it. What was found is below."}
+        </div>
+      )}
+      <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
+        {sp.meets.map((m, i) => renderItem(m.cand, [], i))}
+      </div>
+      {sp.others.length > 0 && (
+        <>
+          <Head tone={T.amber}>{otherwiseHeading(sp.others.length)}</Head>
+          <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
+            {sp.others.map((o, i) => renderItem(o.cand, o.misses, i))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** The one-line reason a row sits in the second section. Never a paragraph. */
+export function MissLine({ misses = [] }) {
+  if (!misses.length) return null;
+  return (
+    <div style={{ ...mono, fontSize: 10, color: T.amber, marginTop: 4 }}>
+      {misses.map(missReasonLine).filter(Boolean).join(" \u00b7 ")}
+    </div>
+  );
+}

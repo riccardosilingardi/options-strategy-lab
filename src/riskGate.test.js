@@ -27,7 +27,8 @@ import { RULES, sizing, ruleBadge, qualityFloor, qualityFloorSentence, liquidity
   buildableExpiries, openableBoard, offFloorExpiryLabel, horizonFloorNote, emptyShortlistCta,
   remainingEdge, remainingEdgeNote, remainingEdgeLabel, shareOfMaximum, attentionCount, sameCloseNote,
   requestOf, requestAmountLabel, requestAmountOwner, contractsSourceNote, clampAskedChance,
-  REQUEST_MODES } from "./rules.js";
+  REQUEST_MODES, meetsRequest, splitByRequest, meetsHeading, otherwiseHeading,
+  targetPriceOf, chanceAskLabel } from "./rules.js";
 import { netBS, SIGMA, exitSim } from "./engine.js";
 import { isStale, staleAmong, agePhrase, freshnessNote, BUDGETS } from "./freshness.js";
 
@@ -3237,6 +3238,123 @@ test("ONE HOME — App.jsx keeps no second copy of the budget or the size", () =
   assert.equal(/Math\.floor\(\s*optAmt/.test(app), false);
   assert.equal(/Math\.floor\(\s*request\.amt/.test(app), false,
     "the size has ONE home and scaleStrategy() is it");
+});
+
+/* ====================================================================
+   ROADMAP P10 §3 — THE LIST SPLITS, AND MEMBERSHIP IS LIVE
+==================================================================== */
+
+/* One fixture row, and a `scaleStrategy()`-shaped sizer for it. The sizer is
+   HANDED IN on purpose: how many combinations a budget buys has one home and
+   `rules.js` is not it. */
+const P10_ROW = { name: "Bull Call Spread", pop: 0.62, maxProfit: 180, maxLoss: -120, entryNet: 1.2, legs: [{}, {}] };
+const p10Size = (amt) => (c) => {
+  const unit = Math.abs(c.entryNet) * 100;
+  return unit <= amt
+    ? { ok: true, n: Math.floor(amt / unit), unit, isCredit: false, totProfit: Math.floor(amt / unit) * c.maxProfit }
+    : { ok: false, unit, isCredit: false };
+};
+
+test("SPLIT — a row crosses on the BUDGET and comes back", () => {
+  const rich = requestOf({ amt: 300 }, {});
+  const poor = requestOf({ amt: 100 }, {});
+  const inTop = splitByRequest([P10_ROW], rich, p10Size(300));
+  assert.equal(inTop.meets.length, 1, "$120 a combination is inside a $300 budget");
+  assert.equal(inTop.others.length, 0);
+  const dropped = splitByRequest([P10_ROW], poor, p10Size(100));
+  assert.equal(dropped.meets.length, 0, "and outside a $100 one");
+  assert.equal(dropped.others.length, 1);
+  assert.match(dropped.others[0].misses[0].short, /over budget by \$20/);
+  // ...AND BACK. Membership is derived, so nothing has to be un-stored.
+  assert.equal(splitByRequest([P10_ROW], rich, p10Size(300)).meets.length, 1);
+});
+
+test("SPLIT — a row crosses on the SLIDER and comes back", () => {
+  const easy = requestOf({ amt: 300, minChance: 0.5 }, {});
+  const hard = requestOf({ amt: 300, minChance: 0.75 }, {});
+  assert.equal(splitByRequest([P10_ROW], easy, p10Size(300)).meets.length, 1, "62% clears a 50% bar");
+  const below = splitByRequest([P10_ROW], hard, p10Size(300));
+  assert.equal(below.meets.length, 0, "and not a 75% one");
+  assert.match(below.others[0].misses[0].short, /chance 62% under the 75% asked/);
+  assert.equal(splitByRequest([P10_ROW], easy, p10Size(300)).meets.length, 1);
+});
+
+test("SPLIT — it GROUPS, it never removes, and no row lands without a reason", () => {
+  const req = requestOf({ amt: 100, minChance: 0.8 }, {});
+  const rows = [P10_ROW, { ...P10_ROW, name: "B", pop: 0.9 }, { ...P10_ROW, name: "C", pop: null }];
+  const sp = splitByRequest(rows, req, p10Size(100));
+  assert.equal(sp.total, rows.length, "nothing is dropped: the two sections are the whole list");
+  assert.equal(sp.meets.length + sp.others.length, rows.length);
+  for (const o of sp.others) {
+    assert.ok(o.misses.length > 0, `${o.cand.name} sits in the second section with no reason`);
+    for (const m of o.misses) assert.ok(m.short && m.text, "a reason is a phrase AND a sentence");
+  }
+  // UNKNOWN IS NOT A PASS AND NOT A ZERO. `Number(null)` is 0 and 0 is finite.
+  const unknown = sp.others.find((o) => o.cand.name === "C");
+  assert.ok(unknown.misses.some((m) => m.id === "chance-unknown"));
+  assert.match(unknown.misses.find((m) => m.id === "chance-unknown").text, /Unknown is not a low number/);
+});
+
+test("SPLIT — the target mode misses by the shortfall, in dollars", () => {
+  const req = requestOf({ mode: "target", amt: 1000 }, {});
+  const sized = () => ({ ok: true, n: 2, unit: 120, isCredit: false, totProfit: 360 });
+  const sp = splitByRequest([P10_ROW], req, sized);
+  assert.equal(sp.others.length, 1);
+  assert.match(sp.others[0].misses[0].short, /short of the target by \$640/);
+});
+
+test("SPLIT — the headings carry the counts, so neither needs a sentence", () => {
+  const req = requestOf({ amt: 300 }, {});
+  assert.match(meetsHeading(req, 3), /\(3\)/);
+  assert.match(otherwiseHeading(5), /\(5\)/);
+  assert.ok(meetsHeading(req, 3).split(/\s+/).length <= 8, "a heading is not a paragraph");
+  assert.ok(otherwiseHeading(5).split(/\s+/).length <= 10);
+});
+
+test("SPLIT — membership is NEVER stored on a candidate", () => {
+  const req = requestOf({ amt: 300 }, {});
+  const row = { ...P10_ROW };
+  const before = JSON.stringify(row);
+  splitByRequest([row], req, p10Size(300));
+  assert.equal(JSON.stringify(row), before,
+    "a stored membership is a stale one the moment the control moves");
+  // ...and App.jsx may not write one either.
+  const app = codeOf("App.jsx");
+  assert.equal(/\.meets\s*=|meetsRequest:\s/.test(app), false,
+    "membership is derived on every render, never assigned onto a candidate");
+});
+
+test("SPLIT — the quality floors are untouched by any of this", () => {
+  // The slider may not move the reward floor, and nothing here calls a floor.
+  assert.equal(RULES.minRewardRisk, 0.25);
+  const rules = codeOf("rules.js");
+  const at = rules.indexOf("export function meetsRequest");
+  const end = rules.indexOf("export function splitByRequest");
+  const body = rules.slice(at, end);
+  for (const floor of ["qualityFloor", "spreadFloor", "comboSpreadFloor", "liquidityThreshold", "minRewardRisk"]) {
+    assert.equal(body.includes(floor), false,
+      `meetsRequest() names ${floor}: this GROUPS, the floors REMOVE, and they are not the same question`);
+  }
+});
+
+test("TARGET PRICE — the direction read as a number, and unknown stays unknown", () => {
+  const t = targetPriceOf(27.5, { tgt: 0.04 });
+  assert.equal(t.known, true);
+  assert.ok(Math.abs(t.price - 28.6) < 1e-9);
+  assert.equal(t.movePct, 4);
+  // NO SPOT IS UNKNOWN, NEVER A TARGET OF ZERO.
+  for (const bad of [null, undefined, 0, NaN, ""]) {
+    assert.equal(targetPriceOf(bad, { tgt: 0.04 }).known, false, `${String(bad)} is not a price`);
+    assert.equal(targetPriceOf(bad, { tgt: 0.04 }).price, null);
+  }
+  assert.equal(targetPriceOf(27.5, null).known, false, "no direction, no target");
+  assert.equal(targetPriceOf(27.5, {}).known, false, "a direction with no move is not a move of zero");
+  // ...but NEUTRAL really is a move of zero, and that is a reading.
+  const flat = targetPriceOf(27.5, { tgt: 0 });
+  assert.equal(flat.known, true);
+  assert.equal(flat.price, 27.5);
+  // ...and the slider's label carries the number it is asking for.
+  assert.match(chanceAskLabel(requestOf({ minChance: 0.65 }, {})), /65%/);
 });
 
 console.log(`\n${passed} passed, ${failures.length} failed\n`);

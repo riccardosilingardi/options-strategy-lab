@@ -38,7 +38,8 @@ import { RULES, sizing, ruleBadge, takeProfitLabel, stopLossLabel, perTradeCapLa
   ruleExitOf, stopWarningSentence, watchAttentionLevel,
   chanceOf, chanceSourceNote, seasonalProvenance, seasonalStampNote, seasonalStampFields, chanceDrawFields,
   sigmaProvenance, isButterfly,
-  requestOf, requestAmountLabel, requestAmountOwner, contractsSourceNote } from "./rules.js";
+  requestOf, requestAmountLabel, requestAmountOwner, contractsSourceNote,
+  splitByRequest, meetsHeading, otherwiseHeading, missReasonLine, fillPriceHeading } from "./rules.js";
 import { isStale, freshnessNote, staleAmong } from "./freshness.js";
 import { evaluateTrade, gateSummary } from "./riskGate.js";
 import { DEMO, DEMO_BANNER, DEMO_TOOLTIP, DEMO_SEED_TICKERS, demoPositions } from "./demo.js";
@@ -46,7 +47,7 @@ import { CapitalOnboarding, WizardOpen, FindOpportunities, WizardCandidates, Con
 // THE CONTROLS AND THE ONE CANDIDATE CARD (ROADMAP P10). Its own file: it is
 // nothing but a trade, so it may not live in `steps.jsx`, and `wizard.jsx`
 // renders the same card, so it may not live here.
-import { RequestControls } from "./card.jsx";
+import { RequestControls, SplitSections, MissLine } from "./card.jsx";
 import { buildHandOff, buildScreenState, BUILD_TAB } from "./handoff.js";
 import { orderBody, orderOutcome, alpacaErrorText, reduceRatios, limitWords, fillPriceOf } from "./order.js";
 // THE PERMANENT RECORD: the ref a position is given at open, the sequence on
@@ -2874,14 +2875,24 @@ export default function OptionsStrategyLab() {
           // turned a $250 budget into 250 contracts of an unpriced butterfly.
           const sc = scaleStrategy(a, request.mode, request.amt);
           const n = sc && sc.ok ? sc.n : 0;
-          if (n < 1) continue;
+          /* >>> AND IT NO LONGER DROPS WHAT THE BUDGET WILL NOT BUY (P10 §3).
+             <<< `if (n < 1) continue` removed a structure that had cleared
+             every floor, in silence, because of an answer about the USER
+             rather than about the trade. The owner asked for the opposite:
+             "l'app propone anche altro". It is GROUPED now — the second
+             section names it and says what it missed — and the floors are
+             still the only thing that REMOVES. */
           out.push({ tk, sent, name: pr.name, legs: pr.legs, expKey: ek, dte: d2, a, mc, pop, n, spot: sp,
             // AND THE EXPECTED VALUE IS THE SIMULATION'S OWN MEAN, times the
             // size. It was `pop * a.maxProfit * n`: the best case weighted by
             // the chance, which is the expected value of nothing the app
             // simulated — it ignores every outcome between zero and the
             // maximum, and every outcome below zero.
-            ev: mc && !a.profitUnbounded ? mc.ev * n : null });
+            // A SIZE OF ZERO IS "THE BUDGET BUYS NONE", NOT AN EV OF ZERO.
+            // The row is still shown — grouped, with its reason — so the
+            // figure beside it has to describe ONE combination rather than
+            // none of them.
+            ev: mc && !a.profitUnbounded ? mc.ev * Math.max(1, n) : null });
         }
       }
       // Ranking: valore atteso CORRETTO dal segnale a 4 fattori, e i CONFLICT in
@@ -4823,7 +4834,27 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                         Candidates marked CONFLICT sit at the bottom by construction: the four factors contradict each other on that underlying, and no expected value is worth a signal we cannot read.
                       </div>
                     )}
-                    {multi.res.map((r, i) => (
+                    {/* THE LIST SPLITS HERE TOO (P10 §3). The wide search used
+                        to DROP a hit the budget would not buy, in silence. It
+                        groups now: the floors are still what removes. */}
+                    {(() => {
+                      const built = multi.res.map((r, i) => ({
+                        r, i,
+                        cand: candidateOf({ name: r.name, legs: r.legs, a: r.a, pop: r.pop, dte: r.dte, expKey: r.expKey,
+                          ...seasonalStampFields(r.mc), ...chanceDrawFields(r.mc) },
+                        { ticker: r.tk, spot: r.spot, source: "wide search" }),
+                        size: scaleStrategy(r.a, request.mode, request.amt),
+                      }));
+                      const byKey = new Map(built.map((x) => [x.cand.key, x]));
+                      return (
+                        <SplitSections
+                          items={built.map((x) => x.cand)} request={request} priceNote={false}
+                          sizeOf={(c) => (byKey.get(c.key) || {}).size || null}
+                          renderItem={(c, misses) => {
+                            const x = byKey.get(c.key);
+                            if (!x) return null;
+                            const { r, i } = x;
+                            return (
                       <div key={i} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "8px 10px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7 }}>
                         <span style={{ ...mono, fontSize: 10, color: T.dim, width: 16 }}>#{i + 1}</span>
                         {(() => {
@@ -4839,6 +4870,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                         <div style={{ flex: 1, minWidth: 140 }}>
                           <div style={{ fontWeight: 700, color: T.ink, fontSize: 12.5 }}>{r.tk} · {r.name}</div>
                           <div style={{ ...mono, fontSize: 10, color: T.dim }}>{r.expKey} · {r.dte} DTE · ×{r.n}</div>
+                          <MissLine misses={misses} />
                         </div>
                         {r.tag && <span title={r.tag.d} style={{ ...mono, fontSize: 8.5, color: r.tag.c, border: `1px solid ${r.tag.c}55`, borderRadius: 4, padding: "1px 6px", cursor: "help" }}>{r.tag.t}</span>}
                         {r.fused && (
@@ -4867,7 +4899,10 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                           Look at {r.tk} →
                         </Btn>
                       </div>
-                    ))}
+                            );
+                          }} />
+                      );
+                    })()}
                   </div>
                 )}
               </Panel>
@@ -4923,6 +4958,12 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                      Build screen cannot print three signal scores for one
                      market on one day. */
                   fusedFor={(tk) => fused[tk] || null}
+                  /* THE SAME SPLIT AS EVERY OTHER GENERATION SITE (P10 §3).
+                     A road is built to FIT the budget at one combination
+                     (`unit > ans.risk` in `runWizard`), so it normally sits
+                     above the line; the slider is what can move it. */
+                  request={request}
+                  sizeOf={(c) => (c && c.a ? scaleStrategy(c.a, request.mode, request.amt) : null)}
                   onPick={pickRoad}
                   onBack={() => { setView("wizard"); setWizStep("questions"); }}
                   actionsFor={(c) => {
@@ -5086,8 +5127,14 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   {emptyExpiryNote(expKey, shortlist.tally, liqLevel)}
                 </div>
               )}
-              <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
-                {shortlist.rows.map(({ p, a }) => {
+              {/* ============ THE LIST SPLITS, AND MEMBERSHIP IS LIVE
+                  (ROADMAP P10 §3). ============ Above: what meets what was
+                  asked for. Below, never hidden and never folded: everything
+                  else that cleared the floors, each row saying what it missed.
+                  It GROUPS; the floors above are what REMOVES. Membership is
+                  derived on every render and never stored on a candidate. */}
+              {(() => {
+                const built = shortlist.rows.map(({ p, a }) => {
                   // `rewardRisk()` and never a division here: a ratio taken
                   // against a max loss the app could not read printed
                   // "6748644041614687.00" on BOIL. Below the minimum it is "—".
@@ -5106,7 +5153,19 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   // numbers a compare picture is drawn at are the two the
                   // chance was computed at, and they come off `mcRow` above.
                   { ticker, spot, source: "shortlist" });
-                  return (
+                  return { p, a, cand, bands, mcRow, pop, rr,
+                    size: scaleStrategy(a, request.mode, request.amt) };
+                });
+                const byKey = new Map(built.map((x) => [x.cand.key, x]));
+                return (
+                  <SplitSections
+                    items={built.map((x) => x.cand)} request={request}
+                    sizeOf={(c) => (byKey.get(c.key) || {}).size || null}
+                    renderItem={(c, misses) => {
+                      const x = byKey.get(c.key);
+                      if (!x) return null;
+                      const { p, a, cand, bands, mcRow, pop, rr } = x;
+                      return (
                     <div key={p.name} style={{ padding: "10px 12px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7 }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
                         <div style={{ fontWeight: 700, color: T.ink, fontSize: 13.5 }}>
@@ -5119,6 +5178,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                       <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 4 }}>
                         {p.legs.map((l) => `${l.side > 0 ? "+" : "−"}${l.qty} ${l.strike}${l.type === "call" ? "C" : "P"}`).join(" / ")}
                       </div>
+                      <MissLine misses={misses} />
                       {/* The thumbnail says where the trade pays against where
                           the market has been; the gauge says the same thing as
                           one arc with the needle on today. Both are cut from
@@ -5139,9 +5199,13 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                       </div>
                       {(() => {
                         const sc = scaleStrategy(a, request.mode, request.amt);
-                        if (!sc) return <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6 }}>Cannot scale this one (unlimited profit or no defined risk): judge it at a single contract.</div>;
-                        if (sc.unpriceable) return <div style={{ ...mono, fontSize: 10.5, color: T.red, marginTop: 6 }}>✗ No quantity is shown: one of these prices at under {money(MIN_NET_DOLLARS)}, so there is no cost to divide your budget by.</div>;
-                        if (!sc.ok) return <div style={{ ...mono, fontSize: 10.5, color: T.red, marginTop: 6 }}>✗ Not enough budget: one of these {sc.isCredit ? `ties up ${fmt$(sc.unit)} of risk` : `costs ${fmt$(sc.unit)} to buy`}.</div>;
+                        /* ONE FACT, ONE PLACE (P10 §3). These three cases —
+                           cannot be sized, no readable price, over the budget —
+                           are exactly the three `meetsRequest()` writes on the
+                           row's own `MissLine` above, under the heading that
+                           put it there. Printing them twice on one row is the
+                           CONFLICT paragraph again, two inches apart. */
+                        if (!sc || sc.unpriceable || !sc.ok) return null;
                         return (
                           <div style={{ display: "flex", gap: 14, marginTop: 8, flexWrap: "wrap", padding: "6px 8px", background: `${T.amber}0d`, borderRadius: 5 }}>
                             <Stat k="HOW MANY" v={`×${sc.n}`} c={T.amber} />
@@ -5169,9 +5233,10 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                           onBuild={() => applyPreset(p, a)} />
                       </div>
                     </div>
-                  );
-                })}
-              </div>
+                      );
+                    }} />
+                );
+              })()}
               {/* WHICH SETTING PRODUCED THIS LIST. On the same screen as the
                   list, in every state of it, including the empty one. */}
               <div style={{ ...mono, fontSize: 10, color: isLoosened(liqLevel) ? T.red : T.dim, marginTop: 10, lineHeight: 1.6 }}>
@@ -5203,16 +5268,29 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
             {(multi.res || []).filter((r) => r.tk === ticker).length > 0 && (
               <Panel style={{ marginTop: 10 }}>
                 <Lbl>ALSO FOUND BY THE WIDE SEARCH ON {ticker}</Lbl>
-                <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
-                  {(multi.res || []).filter((r) => r.tk === ticker).map((r, i) => {
+                {/* TWO SECTIONS HERE TOO (P10 §3). */}
+                {(() => {
+                  const built = (multi.res || []).filter((r) => r.tk === ticker).map((r, i) => {
                     const cand = candidateOf({ name: r.name, legs: r.legs, a: r.a, pop: r.pop, dte: r.dte, expKey: r.expKey,
                       ...seasonalStampFields(r.mc), ...chanceDrawFields(r.mc) },
                     { ticker: r.tk, spot: r.spot, source: "wide search" });
                     const bands = payoffBands({ legs: r.legs, entryNet: r.a.entry, spot: r.spot });
-                    return (
+                    return { r, i, cand, bands, size: scaleStrategy(r.a, request.mode, request.amt) };
+                  });
+                  const byKey = new Map(built.map((x) => [x.cand.key, x]));
+                  return (
+                    <SplitSections
+                      items={built.map((x) => x.cand)} request={request} priceNote={false}
+                      sizeOf={(c) => (byKey.get(c.key) || {}).size || null}
+                      renderItem={(c, misses) => {
+                        const x = byKey.get(c.key);
+                        if (!x) return null;
+                        const { r, i, cand, bands } = x;
+                        return (
                       <div key={`${r.name}-${i}`} style={{ padding: "10px 12px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7 }}>
                         <div style={{ fontWeight: 700, color: T.ink, fontSize: 13 }}>{r.name}</div>
                         <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 3 }}>{legsLine(r.legs)} · {r.expKey} · {r.dte} DTE</div>
+                        <MissLine misses={misses} />
                         <div style={{ display: "flex", gap: 12, marginTop: 6, flexWrap: "wrap", alignItems: "center" }}>
                           <BandThumbnail bands={bands} bars={barsCache[r.tk] || []} width={200} height={40} title={bandTakeaway(bands, { ticker: r.tk })} />
                           <Gauge bands={bands} size={112} ticker={r.tk} />
@@ -5232,9 +5310,10 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                             onBuild={() => openOnBuild({ ticker: r.tk, expKey: r.expKey, legs: r.legs, name: r.name })} />
                         </div>
                       </div>
-                    );
-                  })}
-                </div>
+                        );
+                      }} />
+                  );
+                })()}
               </Panel>
             )}
 

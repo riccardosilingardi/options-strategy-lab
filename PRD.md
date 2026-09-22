@@ -3256,6 +3256,42 @@ as the result.** The result is whether he can read a card without reading a sent
 **+28 words for five controls**, because the block is labels and values and its explanation folds.
 Four of the ten sites are the new controls' own labels.
 
+### 3-bis. THE LIST SPLITS, AND MEMBERSHIP IS LIVE
+
+`meetsRequest()` / `splitByRequest()` in `rules.js`, rendered by `SplitSections` in `card.jsx`, on
+**every one of the three generation sites**: the Shortlist, the wide search (both where it runs, on
+the Radar, and where its hits for the carried market are listed, on the Shortlist) and the guided
+result.
+
+- **TWO SECTIONS, ONE LIST.** Above: what meets what was asked for — inside the budget, or reaching
+  the target, AND at or above the slider's chance. Directly below, under its own heading, **never
+  hidden and never folded**: everything else that cleared the floors.
+- **IT GROUPS. IT DOES NOT REMOVE.** That distinction is the whole feature. The quality floors
+  remove and say which floor did it, and they are untouched; `priceability()`, `impossibleLoss()`
+  and `modelSanity()` remove before them. This one decides which HEADING a row sits under.
+- **AND THE WIDE SEARCH STOPPED REMOVING.** `if (n < 1) continue` dropped a structure that had
+  cleared every floor, in silence, because of an answer about the USER rather than about the trade.
+  It is grouped now: *"l'app propone anche altro"*.
+- **MEMBERSHIP IS DERIVED AND NEVER STORED ON A CANDIDATE.** A stored membership is a stale one the
+  moment the control moves, and these controls are meant to be dragged. `splitByRequest()` is pure
+  and a test proves the candidate object is not written to.
+- **EVERY ROW IN THE SECOND SECTION SAYS WHAT IT MISSED** — over the budget by $X, short of the
+  target by $X, chance N% under the Y% asked — because `meetsRequest()` returns the REASONS and the
+  split reads them, so a reasonless row cannot be constructed. A row under a heading with no reason
+  is the "empty screen with no sentence" fault, one list down.
+- **UNKNOWN IS NOT A PASS AND NOT A ZERO.** A candidate whose chance could not be worked out misses
+  with its own sentence — *"Unknown is not a low number"* — rather than being read as 0%.
+  `Number(null)` is 0 and 0 is finite, for the seventh time, and it bit again in `targetPriceOf()`:
+  NEUTRAL carries a real move of **zero**, so "nobody picked a direction" and "the direction is
+  sideways" had to be told apart by hand.
+- **THE SIZE IS HANDED IN, NEVER RE-DERIVED.** `meetsRequest()` takes the `scaleStrategy()` result
+  rather than working out a unit cost of its own: how many combinations a budget buys has one home
+  and `rules.js` is not it. A test reads the function's own body and fails the build if it ever
+  names a floor.
+- **ONE FACT, ONE PLACE.** The row's three old sizing sentences — cannot be sized, no readable
+  price, over the budget — are exactly what the split now writes above them under the heading that
+  put the row there. Printing both is the CONFLICT paragraph again, two inches apart.
+
 ### 4. AND THE COUNTER ITSELF HAD A DEFECT, MEASURED HERE
 
 `atRest()` strips a fold with a non-greedy match from `<Fold …>` to the next `</Fold>`. It ran over

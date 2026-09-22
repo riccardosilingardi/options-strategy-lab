@@ -35,7 +35,7 @@ import { DRIVERS, DRIVER_PRESETS, presetOf, normaliseWeights } from "./signals.j
 import { WhyThisTrade } from "./why.jsx";
 // THE SAME CONTROLS BLOCK THE DESK JOURNEY GETS, writing to the same state.
 // Two doors, one question, asked before anything is proposed (P10 §2).
-import { RequestControls } from "./card.jsx";
+import { RequestControls, SplitSections, MissLine } from "./card.jsx";
 
 const mono = { fontFamily: "ui-monospace, Menlo, monospace" };
 const sans = { fontFamily: "ui-sans-serif, system-ui" };
@@ -686,7 +686,7 @@ export function roadHeadline(c) {
 }
 
 /** One road. Every visual on it is tappable and explains itself. */
-function RoadCard({ c, other, onPick, i, bars = [], weatherData, newsItems, month, actions, fusedNow = null }) {
+function RoadCard({ c, other, onPick, i, bars = [], weatherData, newsItems, month, actions, fusedNow = null, misses = [] }) {
   const [open, setOpen] = useState(null);
   const bands = payoffBands({ legs: c.legs, entryNet: c.entryNet, spot: c.spot });
   const inTen = Math.max(0, Math.min(10, Math.round((c.pop || 0) * 10)));
@@ -701,6 +701,11 @@ function RoadCard({ c, other, onPick, i, bars = [], weatherData, newsItems, mont
           </span>
         )}
       </div>
+
+      {/* WHAT THIS ROAD MISSED, when it is under the second heading (P10 §3).
+          A row there with no reason is the "empty screen with no sentence"
+          fault, one list down. */}
+      <MissLine misses={misses} />
 
       {/* What it gives and what it costs, first. */}
       <div style={{ ...sans, fontSize: 16, fontWeight: 700, color: T.ink, marginTop: 8, lineHeight: 1.4 }}>
@@ -820,7 +825,7 @@ export function WizardCandidates({ candidates = [], answers = {}, narrative = []
      loaded, so the trend factor read 0 — and nothing refreshed it. The evidence
      panel answers "why this market TODAY", so it reads the live fusion and
      falls back to the snapshot only when the caller has none. */
-  fusedFor }) {
+  fusedFor, request = null, sizeOf = null }) {
   const tickers = [...new Set(candidates.map((c) => c.ticker))];
   return (
     <div style={{ ...sans, maxWidth: 760, margin: "0 auto", padding: `16px 16px ${BADGE_SAFE}px` }}>
@@ -849,14 +854,28 @@ export function WizardCandidates({ candidates = [], answers = {}, narrative = []
 
       <AnswersBack answers={answers} onChange={onBack} />
 
-      {candidates.map((c, i) => (
-        <RoadCard key={c.id || i} c={c} i={i} onPick={onPick}
-          bars={barsFor ? barsFor(c.ticker) : []}
-          weatherData={weatherData} newsItems={newsItems} month={month}
-          actions={actionsFor ? actionsFor(c) : null}
-          fusedNow={fusedFor ? fusedFor(c.ticker) : null}
-          other={candidates.find((x) => x !== c) || null} />
-      ))}
+      {(() => {
+        const road = (c, i, misses) => (
+          <RoadCard key={c.id || i} c={c} i={i} onPick={onPick}
+            bars={barsFor ? barsFor(c.ticker) : []}
+            weatherData={weatherData} newsItems={newsItems} month={month}
+            actions={actionsFor ? actionsFor(c) : null}
+            misses={misses}
+            fusedNow={fusedFor ? fusedFor(c.ticker) : null}
+            other={candidates.find((x) => x !== c) || null} />
+        );
+        /* THE GUIDED RESULT SPLITS TOO (P10 §3), and it reads the same
+           `splitByRequest()` the Shortlist does. Without a request there is
+           nothing to be measured against, so the roads render as they always
+           did rather than under a heading the app cannot justify. */
+        if (!request) return candidates.map((c, i) => road(c, i, []));
+        return (
+          <SplitSections
+            items={candidates} request={request} priceNote={false}
+            sizeOf={sizeOf || (() => null)}
+            renderItem={(c, misses, i) => road(c, candidates.indexOf(c), misses)} />
+        );
+      })()}
       {/* A LEGEND, AND EVERY VISUAL IN THIS APP ALREADY CARRIES ITS OWN
           `takeaway()` — one always-visible generated sentence (PRD §6). This
           explained the colours a fourth time (P9, TASK 3). */}
