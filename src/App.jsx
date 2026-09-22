@@ -17,7 +17,7 @@ import { N as nCDF, bs as bsPrice, smile as smileIV, payoff as payoffExp, SEASON
 import { parseOcc, buildOcc, snapStrike, resnapLegs, expiryStrikes, strikeOptions, fetchChain, hasOpenInterest, enrichOpenInterest, feedName, sourceNote, openInterestNote, oiProfile, expiryOpenInterest, nearMoneyOpenInterest, monotonicityBreaks, monotonicityNote, spotOf, spotAt } from "./chain.js";
 import { T, themeName, setTheme, BADGE_SAFE } from "./theme.js";
 import { RULES, sizing, ruleBadge, takeProfitLabel, stopLossLabel, perTradeCapLabel, RULE_PILLS, NOTHING_TODAY, money, pctText, capitalSourceNote, perTradeLimitPhrase, qualityFloor, qualityFloorSentence, liquiditySkippedNote,
-  positionPnl, BROKER_PNL,
+  positionPnl, BROKER_PNL, remainingEdge, remainingEdgeLabel, shareOfMaximum, attentionCount,
   buildableExpiries, openableBoard, offFloorExpiryLabel, horizonFloorNote, emptyShortlistCta,
   LIQUIDITY_LEVELS, RECOMMENDED_LIQUIDITY, LIQUIDITY_MEASUREMENT, liquidityMeasurementNote, liquidityLevel, liquidityThreshold, looseningWarning, liquiditySettingNote, isLoosened, ordinal,
   priceability, unpriceableNote, rewardRisk, MIN_NET_DOLLARS,
@@ -3039,10 +3039,18 @@ export default function OptionsStrategyLab() {
     // number the literal sweep could not be pointed at. `watchAttentionLevel()`
     // is that home, and the sweep covers the spread floor again.
     const watchLevel = watchAttentionLevel(p.maxLoss);
-    const level = tpHit || slHit || dteExit || ap ? "action"
+    /* >>> THE ENTRY QUESTION, ASKED OF AN OPEN POSITION (P9, TASK 2). <<<
+       `remainingEdge()` in rules.js: what is left to make against what is left
+       to lose, and whether this structure was ever one the rules would offer.
+       XLE could make $4 and lose $346 — a reward-to-risk of 0.01 against a
+       floor of 0.25 — while five lines on two screens called it on plan.
+       It is a WARNING and it is an ATTENTION item: nothing closes on it, the
+       exit rules stay frozen, and `ruleExitOf()` does not know it exists. */
+    const edge = remainingEdge({ maxProfit: p.maxProfit == null ? null : p.maxProfit * n, maxLoss: p.maxLoss * n, pnl });
+    const level = tpHit || slHit || dteExit || ap || edge.thin ? "action"
       : pnl != null && watchLevel != null && pnl < watchLevel * n ? "watch" : "ok";
-    const label = tpHit ? `${takeProfitLabel()} reached — take the profit` : slHit ? `${stopLossLabel()} reached — a warning, not an order` : dteExit ? `${dteLeft} days left — close or roll` : ap ? "The autopilot has something waiting for your OK" : pnl == null ? "waiting for prices…" : level === "watch" ? "Losing: check the reason you opened it" : "On plan";
-    return { p, pnl, pnlNote: pv.sentence, dteLeft, level, label, ap, live, spotNow: sp, tpHit, slHit, dteExit, contracts: n, sizeAssumed: size.assumed };
+    const label = tpHit ? `${takeProfitLabel()} reached — take the profit` : slHit ? `${stopLossLabel()} reached — a warning, not an order` : dteExit ? `${dteLeft} days left — close or roll` : ap ? "The autopilot has something waiting for your OK" : edge.thin ? remainingEdgeLabel(edge) : pnl == null ? "waiting for prices…" : level === "watch" ? "Losing: check the reason you opened it" : "On plan";
+    return { p, pnl, pnlNote: pv.sentence, dteLeft, level, label, ap, live, spotNow: sp, tpHit, slHit, dteExit, edge, contracts: n, sizeAssumed: size.assumed };
   }), [ownedPositions, chains, alSync, pnlOf]);
 
   // Log eventi regola (TP/SL/DTE) fuori dal render: prima veniva chiamato logEvent
@@ -3054,7 +3062,13 @@ export default function OptionsStrategyLab() {
       if (a.dteExit) logEvent(a.p.id, "dte", `Inside the ${RULES.exitDTE}-day exit window`);
     }
   }, [posAlerts, logEvent]);
-  const nAttention = posAlerts.filter((a) => a.level === "action").length;
+  /* THE HEADLINE IS DERIVED FROM THE LIST (P9, TASK 2). `nAttention` counted
+     only `action`, so a `watch` row printed "Losing: check the reason you
+     opened it" under a headline reading "EVERYTHING IS ON PLAN".
+     `attentionCount()` in rules.js is the one home: `decisions` draws the
+     badge, and `looks` is what no headline may call quiet. */
+  const attn = useMemo(() => attentionCount(posAlerts), [posAlerts]);
+  const nAttention = attn.decisions;
 
   /* ---- the wizard search (PRD §5, screens 2 → 3) ----
      Two things can come out of here: two roads on screen 3, or the
@@ -3928,7 +3942,7 @@ export default function OptionsStrategyLab() {
                panel on this screen and trades nobody bought are under
                Watching; counting all three here is how the front page came to
                say "3 open positions" over a broker holding none. */
-            positions={ownedPositions} posAlerts={posAlerts} attention={nAttention}
+            positions={ownedPositions} posAlerts={posAlerts} attention={nAttention} looks={attn.looks}
             marketReady={marketReady} barsFor={(tk) => barsCache[tk] || []}
             onPositions={() => { setView("desk"); setTab("positions"); }}
             onFind={() => { setNothing(null); setWizStep("questions"); }}
@@ -4067,7 +4081,11 @@ export default function OptionsStrategyLab() {
         {posAlerts.length > 0 && (
           <div style={{ marginTop: 12, padding: "10px 12px", background: T.panel, border: `1px solid ${nAttention ? T.red : T.line}55`, borderRadius: 8 }}>
             <div style={{ ...mono, fontSize: 10, letterSpacing: "0.15em", color: nAttention ? T.red : T.amber, display: "flex", alignItems: "center", gap: 6 }}>
-              <Bell size={11} /> TODAY · {nAttention ? `${nAttention} POSITION${nAttention === 1 ? "" : "S"} NEED A DECISION` : "EVERYTHING IS ON PLAN"}
+              <Bell size={11} /> TODAY · {nAttention
+                ? `${nAttention} POSITION${nAttention === 1 ? "" : "S"} NEED A DECISION`
+                : attn.looks
+                  ? `${attn.looks} POSITION${attn.looks === 1 ? "" : "S"} TO LOOK AT`
+                  : "EVERYTHING IS ON PLAN"}
             </div>
             <div style={{ display: "grid", gap: 5, marginTop: 8 }}>
               {posAlerts.map(({ p, pnl, dteLeft, level, label }) => {
@@ -5960,7 +5978,8 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   const pnl = al0 ? al0.pnl : null;
                   const tpHit = !!al0 && al0.tpHit, slHit = !!al0 && al0.slHit;
                   const dteExit = dteLeft <= RULES.exitDTE;
-                  const rec = tpHit ? { t: `→ TAKE THE PROFIT: ${takeProfitLabel()}`, c: T.green } : slHit ? { t: `→ WARNING: ${stopLossLabel()}`, c: T.red } : dteExit ? { t: `→ CLOSE OR ROLL: ${RULES.exitDTE} days left`, c: T.amber } : { t: "→ HOLD", c: T.mut };
+                  const edge = al0 ? al0.edge : null;
+                  const rec = tpHit ? { t: `→ TAKE THE PROFIT: ${takeProfitLabel()}`, c: T.green } : slHit ? { t: `→ WARNING: ${stopLossLabel()}`, c: T.red } : dteExit ? { t: `→ CLOSE OR ROLL: ${RULES.exitDTE} days left`, c: T.amber } : edge && edge.thin ? { t: "→ LOOK AT THIS ONE", c: T.amber } : { t: "→ HOLD", c: T.mut };
                   return (
                     <div key={p.id} style={{ padding: "10px 12px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7 }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
@@ -6060,6 +6079,16 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                           </div>
                         );
                       })()}
+                      {/* >>> THE ENTRY QUESTION, ASKED AGAIN (P9, TASK 2). <<<
+                          A warning, never an exit rule: the exit rules were
+                          chosen at construction and are frozen, and nothing
+                          here closes anything. It renders where the figures
+                          are, because a refusal behind a tap is not a refusal. */}
+                      {edge && edge.thin && (
+                        <div style={{ ...mono, fontSize: 10.5, color: T.amber, marginTop: 7, lineHeight: 1.6, padding: "8px 10px", background: `${T.amber}0f`, border: `1px solid ${T.amber}44`, borderRadius: 6 }}>
+                          ⚠ {edge.sentence}
+                        </div>
+                      )}
                       {/* AND WHOSE NUMBER THE PROFIT IS. Null when the broker
                           answered — a figure read off the account needs no
                           apology, and printing one on every row would be the
@@ -6077,7 +6106,15 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                         <Stat k="ENTRY" v={fmt$(Math.abs(p.entryNet) * 100 * n)} tip={n > 1 ? `${n} × ${fmt$(Math.abs(p.entryNet) * 100)} a combination` : undefined} />
                         <Stat k="PROFIT NOW" v={pnl != null ? fmt$(pnl) : "loading…"} c={pnl >= 0 ? T.green : T.red}
                           tip={al0?.pnlNote || undefined} />
-                        <Stat k="OF THE MAXIMUM" v={pnl != null && p.maxProfit > 0 ? `${((pnl / (p.maxProfit * n)) * 100).toFixed(0)}%` : "—"} />
+                        {/* A PERCENTAGE OF ALMOST NOTHING IS NOT A SHARE OF
+                            ANYTHING. -$127 against a $4 maximum printed
+                            "-3188%" — a true division and a false sentence.
+                            `shareOfMaximum()` applies the rule `rewardRisk()`
+                            already applies: nothing divides by a figure under
+                            MIN_NET_DOLLARS, and below it this says what it
+                            means in words. */}
+                        {(() => { const sh = shareOfMaximum(pnl, p.maxProfit == null ? null : p.maxProfit * n);
+                          return <Stat k="OF THE MAXIMUM" v={sh.text} tip={sh.note || undefined} />; })()}
                         <Stat k="DTE" v={dteLeft} c={dteExit ? T.amber : T.ink} />
                         <span style={{ ...mono, fontSize: 11.5, fontWeight: 700, color: rec.c }}>{rec.t}</span>
                       </div>
@@ -6119,7 +6156,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
               </div>
             </Panel>
 
-            {alpaca && <AlpacaDesk setMsg={setMsg} gate={gate} />}
+            {alpaca && <AlpacaDesk setMsg={setMsg} gate={gate} positions={ownedPositions} />}
 
             {/* SAVED STRATEGIES USED TO SIT HERE, under the broker panel and
                 above Integrations — a list of trades you have NOT taken, on the

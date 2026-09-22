@@ -1129,4 +1129,37 @@ export function upgradeHolding(pos, group = {}, { plan = null, now = Date.now() 
   return out;
 }
 
-export default { refOf, seqOf, nextRef, appendTimeline, journalEntry, searchJournal, upgradeHolding };
+/* ------------------------------------------------------------------
+   ONE CLOSE CONTROL PER POSITION (P9, TASK 2)
+
+   There are two buttons on two screens for one act. The Positions card's
+   "Close" asks WHY, files a Journal entry with the reason, and is the only
+   one that keeps the record honest. The broker panel's "Close the whole
+   trade" sends a market order and files nothing — so which of the two the
+   owner happens to tap decides whether the trade has a history.
+
+   THEY ARE NOT MERGED INTO ONE CODE PATH, deliberately: the broker panel
+   can list a holding this app has no record of at all (an order sent before
+   the local store was cleared — `orderReconciliation()` already names that
+   case), and removing its button would strand that position with no way out
+   of this app. What is removed is the CHOICE where there is no choice to
+   make: when the group matches a record, the panel says so and points at
+   the one control that writes the reason down.
+------------------------------------------------------------------ */
+
+/**
+ * The position record a broker holding belongs to, or null.
+ *
+ * @param positions  `store.positions`
+ * @param ticker / expKey  read off the broker group's own OCC symbols.
+ */
+export function positionForHolding(positions = [], { ticker = null, expKey = null } = {}) {
+  if (!ticker || !expKey) return null;
+  // ONLY A POSITION THE APP CONSIDERS OPEN. Pointing the owner at a "Close"
+  // button on a record that is not in the Positions list would be a door with
+  // nothing behind it — the `passedOver` fault, one screen across.
+  return (positions || []).find((p) => p && p.ticker === ticker
+    && (p.expKey || "") === expKey && positionStage(p) === "owned") || null;
+}
+
+export default { refOf, seqOf, nextRef, appendTimeline, journalEntry, searchJournal, upgradeHolding, positionForHolding };

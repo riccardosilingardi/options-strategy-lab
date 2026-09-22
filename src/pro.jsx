@@ -7,8 +7,8 @@ import { RULES, ruleBadge, takeProfitLabel, scaleOutLabel, stopLossLabel, exitDT
   legBook, sizeSkippedNote, onTick, netFromLegs, limitCeilingNote, rewardRisk,
   contractListing, unlistedContractNote, unquotedLegNote, unquotedLegPointer, marketOrderNote,
   taCopilotPrompt, TA_QUESTIONS, TA_DISCLAIMER,
-  ivProvenance } from "./rules.js";
-import { contractsOf, positionSize, bookPositions, autopilotHorizonNote, autopilotVolNote } from "./journal.js";
+  ivProvenance, sameCloseNote } from "./rules.js";
+import { contractsOf, positionSize, bookPositions, positionStage, autopilotHorizonNote, autopilotVolNote, positionForHolding } from "./journal.js";
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, LineStyle } from "lightweight-charts";
 // THE INDICATORS, FROM THEIR ONE HOME. Never compute a moving average, an
 // RSI or a MACD in this file: `signals.js` scores the same numbers, and two
@@ -793,7 +793,11 @@ export function OrderTicket({
   );
 }
 
-export function AlpacaDesk({ creds, setMsg, gate }) {
+/* `positions` is passed in so the panel can tell a holding this app HAS a
+   record for from one it does not. Without it the panel offered a second
+   close button for every position on the Positions screen, and only one of
+   the two writes down why the trade ended (P9, TASK 2). */
+export function AlpacaDesk({ creds, setMsg, gate, positions = [] }) {
   const [pos, setPos] = useState(null);
   const [ords, setOrds] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -869,7 +873,9 @@ export function AlpacaDesk({ creds, setMsg, gate }) {
           for (const x of pos || []) {
             const m = (x.symbol || "").match(/^([A-Z]{1,6})(\d{6})([CP])(\d{8})$/);
             const key = m ? `${m[1]} · 20${m[2].slice(0, 2)}-${m[2].slice(2, 4)}-${m[2].slice(4, 6)}` : x.symbol;
-            if (!groups[key]) groups[key] = { key, items: [], pl: 0 };
+            if (!groups[key]) groups[key] = { key, items: [], pl: 0,
+              ticker: m ? m[1] : null,
+              expKey: m ? `20${m[2].slice(0, 2)}-${m[2].slice(2, 4)}-${m[2].slice(4, 6)}` : null };
             groups[key].items.push(x); groups[key].pl += +x.unrealized_pl;
           }
           return Object.values(groups).map((g) => (
@@ -882,9 +888,31 @@ export function AlpacaDesk({ creds, setMsg, gate }) {
                   ))}
                 </div>
                 <Stat k="PROFIT NOW" v={fmt$(g.pl)} c={g.pl >= 0 ? T.green : T.red} />
-                <Btn small ghost color={T.red} onClick={() => closeGroup(g)} disabled={DEMO}
-                  title={DEMO ? DEMO_TOOLTIP : undefined}><XCircle size={11} /> Close the whole trade</Btn>
+                {/* >>> ONE CLOSE CONTROL PER POSITION (P9, TASK 2). <<< Two
+                    buttons on two screens for one act, and only the Positions
+                    card's asks WHY and files the answer. Where this panel is
+                    looking at a holding the app has a record for, it says so
+                    and points there rather than offering a second door. The
+                    button survives for the case that is genuinely its own: a
+                    holding with no record here, which `orderReconciliation()`
+                    already names and which would otherwise have no way out of
+                    this app at all. */}
+                {(() => {
+                  const rec = positionForHolding(positions, { ticker: g.ticker, expKey: g.expKey });
+                  return rec
+                    ? null
+                    : <Btn small ghost color={T.red} onClick={() => closeGroup(g)} disabled={DEMO}
+                        title={DEMO ? DEMO_TOOLTIP : undefined}><XCircle size={11} /> Close the whole trade</Btn>;
+                })()}
               </div>
+              {(() => {
+                const rec = positionForHolding(positions, { ticker: g.ticker, expKey: g.expKey });
+                return rec ? (
+                  <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 5, lineHeight: 1.55 }}>
+                    {sameCloseNote(rec.ref)}
+                  </div>
+                ) : null;
+              })()}
             </div>
           ));
         })()}
@@ -1623,13 +1651,37 @@ export function buildReportMd(ctx, weatherSig, aiText) {
      order's); the size lives on the record and is read through
      `positionSize()`, which is what the gate multiplies by. A ten-lot spread
      was therefore reported at a tenth of the money it risks. */
+  /* >>> A WORKING ORDER IS "SENT, NOT FILLED", NEVER "OPENED AT" (P9, TASK 2).
+     <<< `bookPositions()` is owned PLUS working, because the exposure ceiling
+     is a limit on what may be COMMITTED and an order at the broker can still
+     fill. That is right about the MONEY and wrong about the WORDS: this
+     section listed the whole book under one heading and wrote "opened at"
+     against every row, so an order nobody has filled was reported as an open
+     position in a document whose job is to say what is open. SENT is not
+     FILLED — the same rule `orderOutcome()` has carried since PR #18 and
+     `positionStage()` since §4m — so the two are listed apart and the total
+     below still counts both, exactly as the gate does. */
   const book = bookPositions(store.positions);
-  if (!book.length) L.push("No open positions.");
-  book.forEach((p) => {
-    const dte = Math.max(0, Math.round((new Date(p.expiry) - Date.now()) / 86400000));
+  const held = book.filter((p) => positionStage(p) === "owned");
+  const working = book.filter((p) => positionStage(p) !== "owned");
+  const dteOf = (p) => Math.max(0, Math.round((new Date(p.expiry) - Date.now()) / 86400000));
+  if (!held.length) L.push("No open positions.");
+  held.forEach((p) => {
+    const dte = dteOf(p);
     const n = positionSize(p).contracts;
     L.push(`- **${p.ticker} · ${p.name}** — expires ${p.expKey || "n/a"} (${dte} days)${dte <= RULES.exitDTE ? ` ⚠ **${RULES.exitDTE} days or fewer: close or roll**` : ""} · opened at ${fmt$(Math.abs(p.entryNet) * 100)} · can make ${Number.isFinite(p.maxProfit) ? fmt$(p.maxProfit) : NO_CEILING} / can lose ${fmt$(p.maxLoss)}${n > 1 ? ` · per combination, ×${n} on this position` : ""}`);
   });
+  if (working.length) {
+    L.push(`\n**Sent, not filled (${working.length})** — these are orders standing at the broker. Nothing ` +
+      `has been bought, so none of them has a profit or an exit plan running; they are counted in the ` +
+      `exposure below because an order that can still fill is money committed.`);
+    working.forEach((p) => {
+      const n = positionSize(p).contracts;
+      L.push(`- **${p.ticker} · ${p.name}** — expires ${p.expKey || "n/a"} (${dteOf(p)} days) · sent at ` +
+        `${fmt$(Math.abs(p.entryNet) * 100)}, not filled · would risk ${fmt$(p.maxLoss)}` +
+        `${n > 1 ? ` per combination, ×${n}` : ""}`);
+    });
+  }
   if (book.length) {
     const totRisk = book.reduce((a, p) => a + Math.abs(p.maxLoss) * positionSize(p).contracts, 0);
     // A TOTAL CANNOT INCLUDE AN UNKNOWN AND STILL BE A TOTAL. `Math.max(0, null)`

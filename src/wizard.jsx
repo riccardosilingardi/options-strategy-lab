@@ -269,8 +269,16 @@ const greeting = (d = new Date()) => {
   return h < 12 ? "Good morning." : h < 18 ? "Good afternoon." : "Good evening.";
 };
 
-/** One line. Generated from the numbers, never hand-written per case. */
-export function statusLine({ positions = [], attention = 0, marketReady = true }) {
+/** One line. Generated from the numbers, never hand-written per case.
+ *
+ * >>> "NOTHING TO DO" IS DERIVED FROM THE SAME LIST THE ROWS ARE (P9, TASK 2).
+ * <<< `attention` counts only the positions a RULE has fired on. A position at
+ * the `watch` level is not one of them, so this line said *"all inside the
+ * plan. Nothing to do."* directly above a row reading *"Losing: check the
+ * reason you opened it"*. `looks` is everything that is not on plan
+ * (`attentionCount()` in rules.js), and this line may not call the book quiet
+ * while it is above zero. */
+export function statusLine({ positions = [], attention = 0, looks = null, marketReady = true }) {
   if (!positions.length) {
     return marketReady
       ? "No open positions. Nothing to manage — today is for looking."
@@ -283,10 +291,18 @@ export function statusLine({ positions = [], attention = 0, marketReady = true }
       ? `1 of your ${n} ${plural} needs a decision today.`
       : `${attention} of your ${n} ${plural} need a decision today.`;
   }
+  // `looks` is optional so an older caller reads exactly as it did; when it is
+  // given it decides, because a row that says "check this" outranks a headline.
+  const look = Number(looks) || 0;
+  if (look > 0) {
+    return look === 1
+      ? `1 of your ${n} ${plural} is worth a look — the row below says why.`
+      : `${look} of your ${n} ${plural} are worth a look — the rows below say why.`;
+  }
   return `${n} ${plural} open, all inside the plan. Nothing to do.`;
 }
 
-export function WizardOpen({ positions = [], posAlerts = [], attention = 0, marketReady = true,
+export function WizardOpen({ positions = [], posAlerts = [], attention = 0, looks = null, marketReady = true,
   onPositions, onFind, onDesk, onSettings, barsFor }) {
   const hasPositions = positions.length > 0;
   return (
@@ -295,7 +311,7 @@ export function WizardOpen({ positions = [], posAlerts = [], attention = 0, mark
         <div>
           <h1 style={{ ...sans, fontSize: 27, fontWeight: 800, color: T.ink, margin: 0, lineHeight: 1.2 }}>{greeting()}</h1>
           <p style={{ ...sans, fontSize: 15.5, color: T.mut, lineHeight: 1.5, margin: "8px 0 0" }}>
-            {statusLine({ positions, attention, marketReady })}
+            {statusLine({ positions, attention, looks, marketReady })}
           </p>
         </div>
         <button onClick={onSettings} title="Settings"
@@ -306,8 +322,8 @@ export function WizardOpen({ positions = [], posAlerts = [], attention = 0, mark
 
       {/* With positions open, what needs attention IS the front page. */}
       {hasPositions && (
-        <Card style={{ marginTop: 18, borderColor: attention ? `${T.red}66` : T.line }}>
-          <Eyebrow>{attention ? "Needs attention today" : "Your positions"}</Eyebrow>
+        <Card style={{ marginTop: 18, borderColor: attention ? `${T.red}66` : (Number(looks) || 0) ? `${T.amber}66` : T.line }}>
+          <Eyebrow>{attention ? "Needs attention today" : (Number(looks) || 0) ? "Worth a look" : "Your positions"}</Eyebrow>
           <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
             {posAlerts.map(({ p, pnl, dteLeft, level, label, spotNow }) => {
               const c = level === "action" ? T.red : level === "watch" ? T.amber : T.green;

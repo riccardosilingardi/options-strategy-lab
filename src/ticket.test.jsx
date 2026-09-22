@@ -644,6 +644,46 @@ check("a WORKING order is in the report, because it can still fill", () => {
   has(md.slice(md.indexOf("## 2 \u00b7"), md.indexOf("## 3 \u00b7")), "SOYB");
 });
 
+/* ==================================================================
+   P9 TASK 2 — SENT IS NOT FILLED, IN THE REPORT TOO
+
+   `bookPositions()` is owned PLUS working, because the exposure ceiling
+   limits what may be COMMITTED. That is right about the MONEY and was
+   wrong about the WORDS: section 2 listed the whole book under one
+   heading and wrote "opened at" against every row.
+================================================================== */
+
+check("TASK 2 — a working order is \"sent, not filled\", never \"opened at\"", () => {
+  const working = [{ ...NOT_TAKEN_3[0], alpacaStatus: "new", alpacaFilled: false }];
+  const md = buildReportMd(reportCtx(working), null, null);
+  const sec2 = md.slice(md.indexOf("## 2 \u00b7"), md.indexOf("## 3 \u00b7"));
+  has(sec2, "Sent, not filled (1)");
+  has(sec2, "not filled");
+  hasNot(sec2, "opened at");
+  // IT IS LISTED APART, and the heading above it is honest about the book.
+  has(sec2, "No open positions.");
+  // ...AND IT IS STILL COUNTED IN THE EXPOSURE, exactly as the gate counts it.
+  has(sec2, "$450 at risk");
+  has(sec2, "money committed");
+});
+
+check("TASK 2 — a filled position and a working order are listed apart, both counted", () => {
+  const mixed = [
+    { ...NOT_TAKEN_3[0], contracts: 1, alpacaStatus: "filled", alpacaFilled: true },
+    { ...NOT_TAKEN_3[1], contracts: 1, alpacaStatus: "new", alpacaFilled: false },
+  ];
+  const md = buildReportMd(reportCtx(mixed), null, null);
+  const sec2 = md.slice(md.indexOf("## 2 \u00b7"), md.indexOf("## 3 \u00b7"));
+  hasNot(sec2, "No open positions.");
+  // The filled one keeps "opened at"; the working one is under its own heading.
+  has(sec2, "SOYB");
+  has(sec2, "opened at");
+  has(sec2, "Sent, not filled (1)");
+  has(sec2, "BOIL");
+  // 450 + 577, the same total `bookPositions()` hands the gate.
+  has(sec2, "$1027 at risk");
+});
+
 check("A MISSING CEILING STILL CANNOT BE ADDED TO A TOTAL, at any size", () => {
   const owned = [{ ...NOT_TAKEN_3[0], contracts: 4, maxProfit: null, alpacaStatus: "filled", alpacaFilled: true }];
   const md = buildReportMd(reportCtx(owned), null, null);

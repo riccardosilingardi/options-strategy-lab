@@ -3111,6 +3111,173 @@ export const modelPnlNote = (feed = "the option chain") =>
   `${feed}'s prices right now, and the account has not reported a figure for this position. ` +
   `Your Alpaca account is the one that counts.`;
 
+/* =====================================================================
+   WHAT IS LEFT TO MAKE AGAINST WHAT IS LEFT TO LOSE (P9, TASK 2)
+
+   >>> READ ON THE OWNER'S PHONE, 22 Sep 2026, XLE, in one scroll. <<<
+
+       home      "all inside the plan. Nothing to do"
+       desk      "TODAY · EVERYTHING IS ON PLAN"
+       the row   "Losing: check the reason you opened it"
+       verdict   "-> HOLD"
+       stat      "OF THE MAXIMUM  -3188%"
+
+   For a trade that can make **$4** and can lose **$346**. Every one of
+   those five lines is true of something, and together they say nothing.
+
+   THE MISSING FACT IS NOT ON ANY OF THEM. A position is judged at entry on
+   what it pays against what it risks (`RULES.minRewardRisk`), and then
+   that question is never asked again — so a structure whose remaining
+   reward has collapsed to four dollars against three hundred and forty-six
+   of remaining risk is still "on plan", because the plan was written when
+   the numbers were different.
+
+   `remainingEdge()` asks the ENTRY question about an OPEN position: from
+   today's mark, what is left to make and what is left to lose. It is pure
+   subtraction on figures the screen is already holding — no new
+   arithmetic, no simulation, no model.
+
+   >>> AND IT IS NOT AN EXIT RULE. <<< The exit rules are chosen at
+   construction and FROZEN (50% of max profit, 21 DTE, the stop as a
+   warning). Nothing here closes anything, nothing here appears in
+   `AUTOPILOT_VERDICTS`, and `ruleExitOf()` is untouched — so this can
+   never be the reason a trade ends. It is a WARNING, exactly like the
+   stop, and for the same reason: it is the weakest-evidenced thing the app
+   can say, and the honest response to it is to look, not to act.
+===================================================================== */
+
+/**
+ * What a position has left to make, and left to lose, from where it is now.
+ *
+ * TWO READINGS, AND THE WORSE ONE DECIDES. They answer two different
+ * questions and the XLE position needs both:
+ *
+ *   `ratio`        reward / risk measured FROM THE CURRENT MARK — would the
+ *                  rules OPEN this structure today, at today's price? On XLE:
+ *                  $131 still to make against $219 still to lose, which is
+ *                  0.60 and passes. That is not a mistake; it is the honest
+ *                  answer to that question.
+ *   `ceilingRatio` maxProfit / |maxLoss| — was this trade EVER something the
+ *                  rules would offer? On XLE: **$4 against $346**, which is
+ *                  0.01, forty times under the floor, and it is the fact the
+ *                  five contradictory lines on that screen were all silent
+ *                  about. The §4q inversion turned a $75 credit into $4 and
+ *                  nothing has asked the entry question since.
+ *
+ * A position is an ATTENTION item when EITHER is under `RULES.minRewardRisk`,
+ * because either one being thin is a real answer and pooling them would
+ * explain neither — the same reasoning that keeps `priceability()`,
+ * `impossibleLoss()` and `modelSanity()` apart.
+ *
+ * @param maxProfit  maximum profit for the WHOLE position (per-combination
+ *                   figures scaled by the size before they get here — the
+ *                   boundary rule, unchanged). `null` for an unbounded payoff,
+ *                   which has no ceiling to take a ratio of.
+ * @param maxLoss    maximum loss, SIGNED and negative, whole position.
+ * @param pnl        the profit now, whole position, from `positionPnl()`.
+ */
+export function remainingEdge({ maxProfit = null, maxLoss = null, pnl = null } = {}) {
+  const num = (x) => (x == null || x === "" ? NaN : Number(x));
+  const P = num(maxProfit), L = num(maxLoss), now = num(pnl);
+  const none = { known: false, reward: null, risk: null, ratio: null, ceilingRatio: null,
+    maxProfit: null, maxLoss: null, thin: false, thinReason: null, sentence: null };
+  // `Number(null)` IS 0 AND 0 IS FINITE. An unbounded payoff has no ceiling to
+  // take a ratio of and a position with no readable mark has no "from here" —
+  // both are UNKNOWN, and unknown is never a thin edge (the rule
+  // `qualityFloor()` applies to an unknown open interest, one screen across).
+  if (!Number.isFinite(now) || !Number.isFinite(P) || !Number.isFinite(L)) return none;
+  const reward = Math.max(0, P - now);
+  const risk = Math.max(0, Math.abs(L) + now);
+  // NOTHING DIVIDES BY A COST UNDER THE MINIMUM — `rewardRisk()`'s rule, and
+  // the same one that makes "OF THE MAXIMUM" print words below.
+  const ratio = risk >= MIN_NET_DOLLARS ? reward / risk : null;
+  const ceilingRatio = Math.abs(L) >= MIN_NET_DOLLARS ? Math.max(0, P) / Math.abs(L) : null;
+  const ceilingThin = ceilingRatio != null && ceilingRatio < RULES.minRewardRisk;
+  const hereThin = ratio != null && ratio < RULES.minRewardRisk;
+  const thinReason = ceilingThin ? "ceiling" : hereThin ? "here" : null;
+  return {
+    known: true, reward, risk, ratio, ceilingRatio, maxProfit: P, maxLoss: L,
+    thin: !!thinReason, thinReason,
+    sentence: thinReason
+      ? remainingEdgeNote({ reward, risk, maxProfit: P, maxLoss: L, reason: thinReason })
+      : null,
+  };
+}
+
+/** The warning, with BOTH dollar figures in it, in the entry rule's own words. */
+export const remainingEdgeNote = ({ reward, risk, maxProfit, maxLoss, reason = "ceiling" } = {}) => {
+  const head = reason === "ceiling"
+    ? `The most this position can make is ${money(maxProfit)} and the most it can lose is ` +
+      `${money(Math.abs(maxLoss))}.`
+    : `From here this position has ${money(reward)} left to make and ${money(risk)} left to lose.`;
+  return `${head} That is under the ${pctText(RULES.minRewardRisk)} of what it risks that the app requires ` +
+    `before it will offer a trade at all — the rules would not open this trade today. Nothing closes on ` +
+    `this: the exit rules were chosen when you opened it and they are frozen. It is a reason to look at ` +
+    `it, the same way the stop is.`;
+};
+
+/** The one line a list row carries, short enough to sit beside a price. */
+export const remainingEdgeLabel = (e) =>
+  (e && e.thin
+    ? `Thin: ${money(e.thinReason === "here" ? e.reward : Math.max(0, e.maxProfit))} to make against ` +
+      `${money(e.thinReason === "here" ? e.risk : Math.abs(e.maxLoss))} at risk`
+    : null);
+
+/* =====================================================================
+   THE HEADLINE IS DERIVED FROM THE LIST, NOT WRITTEN BESIDE IT (P9, TASK 2)
+
+   Read in one scroll: the home page said *"all inside the plan. Nothing to
+   do."*, the desk said *"TODAY · EVERYTHING IS ON PLAN"*, and the row
+   between them said *"Losing: check the reason you opened it"*.
+
+   THE CAUSE IS ONE FILTER. Both headlines read a count of alerts at level
+   `action` — and a `watch` row is not `action`, so a position the app had
+   just told the reader to check could sit under a headline saying there was
+   nothing to check. §4m's rule, one tab across: a screen that argues with
+   itself is worse than one that says nothing, because the part that shouts
+   loudest wins and here that part was the reassurance.
+
+   `attentionCount()` is the one home. TWO counts, because they answer two
+   questions and one number could not: `decisions` is what a rule has fired
+   on and the badge is drawn from it; `looks` is everything that is not on
+   plan, and NO HEADLINE MAY SAY "nothing to do" WHILE IT IS ABOVE ZERO.
+===================================================================== */
+
+export function attentionCount(alerts = []) {
+  const list = Array.isArray(alerts) ? alerts : [];
+  const decisions = list.filter((a) => a && a.level === "action").length;
+  const looks = list.filter((a) => a && a.level && a.level !== "ok").length;
+  return { decisions, looks, quiet: looks === 0 };
+}
+
+/** THE SAME ACTION, SAID ONCE. The broker panel's close and the Positions
+ *  card's close are one act, and only the second one asks why and files the
+ *  reason. Where the two meet, this is what the broker panel says instead of
+ *  offering a second button. */
+export const sameCloseNote = (ref) =>
+  `This is ${ref || "a position"} on your Positions screen. Close it there: it is the same order, and ` +
+  `that button asks what ended the trade and files the answer with it. A close with no reason on the ` +
+  `record teaches nothing later.`;
+
+/* WHEN "OF THE MAXIMUM" IS A PERCENTAGE AND WHEN IT IS WORDS.
+   -$127 against a $4 maximum is -3188%, which is a true division and a false
+   sentence: a percentage of almost nothing is not a share of anything. The
+   rule is the one `rewardRisk()` already applies — nothing divides by a
+   figure under `MIN_NET_DOLLARS` — and below it the stat says what it means
+   instead of printing a number that reads as a bug. */
+export function shareOfMaximum(pnl, maxProfit) {
+  const num = (x) => (x == null || x === "" ? NaN : Number(x));
+  const now = num(pnl), P = num(maxProfit);
+  if (!Number.isFinite(now) || !Number.isFinite(P)) return { pct: null, text: "—" };
+  if (!(Math.abs(P) >= MIN_NET_DOLLARS)) {
+    return { pct: null, text: `too small to be a share`,
+      note: `The most this position can make is ${money(P)}, which is under the ${money(MIN_NET_DOLLARS)} ` +
+        `minimum this app will form a ratio against. A percentage of it would be a true division and a ` +
+        `false sentence.` };
+  }
+  return { pct: (now / P) * 100, text: `${((now / P) * 100).toFixed(0)}%` };
+}
+
 /** Why an estimated price is not something to act on, in one sentence. */
 export const modelPriceNote = (feed = "the option chain") =>
   `This position's value is ESTIMATED: at least one leg had no two-sided quote on ${feed}, so the ` +
