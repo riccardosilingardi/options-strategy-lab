@@ -4344,7 +4344,49 @@ What is left:
 The standing rule in `CLAUDE.md`: every session starts by fixing what the last one flagged, and
 ends by writing down what it could not verify. Currently open:
 
-### WRITTEN THIS SESSION — one voice (§4v)
+### WRITTEN THIS SESSION — the controls come first (§4w, §4s-bis)
+
+`npm test` reports **942 checks across 23 suites**, up from the **911 across 22** a clean `main`
+measures (measured on an untouched `main` at the start of this session, and it matches what PR #35
+recorded). `npm run build` is clean. One new suite: `src/card.test.jsx`.
+
+- **NO ORDER CAN BE SENT FROM THIS SANDBOX. ELEVENTH SESSION IN A ROW.** No broker keys, and the
+  egress proxy refuses the CONNECT.
+- **J-0003 HAS NOT FILLED, AND THE QUESTION IT RAISES IS UNMEASURED.** SOYB 28/30, debit $0.80,
+  GTC, typed at the combination ask the ticket was showing, still open several sessions later.
+  **Is the indicative combination ask systematically INSIDE the real one on thin chains, and by
+  how much?** Nobody has read it. §4s-bis names the feed in the sentence; it does not answer this.
+- **THE CLOSING DIRECTION VIA `closeGroup()` HAS NEVER BEEN SENT LIVE.** TASK 0a rebuilt that path
+  as a limit priced at the tap, and every part of it is held against fixtures: `holdingLeg()`
+  against OCC strings, the sweep against the source. **What no test can settle is whether Alpaca
+  accepts the body** — in particular whether the SIGN on a close built from a broker holding comes
+  out the way `mlegLimitPrice()` says it does. The opening sign was wrong for four pull requests
+  and only a fill found it. `autopilot.test.js` carried the closing half as an EXPECTATION that
+  was itself wrong (§4q). **This is the highest-value single reading left in the app.**
+- **EVERY ONE OF P10'S FOUR NEW `RULES` CONSTANTS IS CHOSEN, NOT MEASURED** — `chanceAskMin` 0.20,
+  `chanceAskMax` 0.80, `chanceAskStep` 0.05, `chanceAskDefault` 0.50. What has NOT been read is
+  the distribution of `chanceOf()` over the candidates the ten live chains actually produce, which
+  is the reading that would settle where the two ends belong. They join
+  `modelDisagreementRatio`, `maxComboSpreadShareOfNet`, `openLimitSlippage`, `closeLimitSlippage`,
+  `watchAttentionShare`, `autopilotConfidence`, `fallbackIV` and `fallbackSigma` on this list.
+- **THE TARGET PRICE IS A READ-OUT AND NOBODY HAS ASKED THE OWNER WHETHER THAT IS WHAT HE MEANT.**
+  §4w says why it cannot be an input without a generation site that reads one. If he wants to type
+  a price and have the app build toward it, that is a new generation rule and a new session.
+- **NOBODY HAS SEEN THE SPLIT ON A REAL SCREEN.** The two sections, the cards and the controls are
+  held by `card.test.jsx` against fixtures and by `voice.test.js` against the counter. Whether the
+  owner can read a card without reading a sentence — which ROADMAP P10 §3-bis says is the actual
+  result — is a question only he can answer.
+- **THE WORD COUNTER'S DEPTH LIMIT IS NOW A KNOWN CONFOUND.** It reaches further into a screen
+  built out of components than into one built out of inline JSX at the same `COMPONENT_DEPTH`, so
+  part of the Radar's 378 → 481 is the counter seeing more of what the screen already rendered.
+  Stated, not corrected: correcting it would move the baseline a third time in one session.
+- **THE ANTHROPIC USAGE LIMIT DISABLED EVERY AI FEATURE UNTIL 2026-10-01**, so report section 5,
+  both copilots and `copilotOverreach()` are still dark, for the second session running. Nothing
+  in this session touches them, and nothing in this session has exercised them either.
+
+The full list, with the reasoning, is §4w and §4s-bis.
+
+### WRITTEN BEFORE THIS — one voice (§4v)
 
 `npm test` reports **911 checks across 22 suites**, up from the **864 across 21** a clean `main`
 measures (measured on an untouched `main` at the start of this session, and it matches what

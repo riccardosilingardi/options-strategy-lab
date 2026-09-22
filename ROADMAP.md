@@ -872,9 +872,54 @@ WHAT P9 HANDS FORWARD (the full list is PRD NOT VERIFIED):
   - **THE ANTHROPIC USAGE LIMIT DISABLED EVERY AI FEATURE UNTIL 2026-10-01**, so report
     section 5 and both copilots were dead on the reading this session is built from.
 
-## P10 — THE CONTROLS COME FIRST, AND THE LIST SPLITS
+## P10 — THE CONTROLS COME FIRST, AND THE LIST SPLITS  (PR #36 — DONE)
 
-### >>> THIS IS THE NEXT SESSION'S TASK. <<<
+### >>> SHIPPED. WHAT FOLLOWS IS WHAT WAS BUILT; THE SPEC BELOW IT IS KEPT AS
+### WRITTEN, because a session that changes the spec to match what it built has
+### no record of what it decided not to do. <<<
+
+**WHAT SHIPPED**
+
+  - **TASK 0a — `closeGroup()` sends a LIMIT priced at the tap.** The owner hit
+    Alpaca's 422 / 42210000, *"options market orders are only allowed during
+    market hours"*. `holdingLeg()` reads the strike and type off the broker's own
+    OCC symbol, `fetchChain()` runs at the tap, `closeMarket()` →
+    `closeLimitPrice()` → `orderBody()` with `type: "limit"`, and
+    `limitAgainstBook()` stops SKIPPING on that path for the first time. Two
+    sweeps refuse a close built at the market or handed a null book. §6 below is
+    closed.
+  - **TASK 0b — the FILLS NOW verdict names the feed.** One clause, wording
+    only. J-0003 is on the PRD's NOT VERIFIED list with the question it raises.
+  - **TASK 1 — one state for "what I want", above both doors.** `requestOf()`;
+    `optMode` / `optAmt` / `wiz.risk` are one home; the size is DERIVED from the
+    budget on Build and RE-DERIVES on a ticker or expiry change; a typed count
+    wins and says so.
+  - **TASK 2 — five controls, one block, above every result**, on the Radar, on
+    the Shortlist (where it replaces the panel that was these same five spread
+    out) and on `FindOpportunities` (the slider and the mode toggle, the two it
+    did not have). The slider's band and step are four `RULES` constants, CHOSEN
+    NOT MEASURED.
+  - **TASK 3 — the list splits, membership derived live**, on all three
+    generation sites. It GROUPS; the floors still REMOVE. The wide search stopped
+    dropping what the budget will not buy.
+  - **TASK 4 — one card, four numbers, no prose**, everywhere, with a test that
+    fails the build on a text node over six words. Every figure at the price that
+    FILLS.
+  - **TASK 5 — `rewardRiskRange()`**, Build's five figures in one row, and one
+    line saying what crossing costs.
+
+**AND TWO DEFECTS IN THE WORD COUNTER, FOUND BY USING IT.** `atRest()` paired
+folds across the join between a step block and a component body, and
+`literalWords()` scored `${…}` interpolations as words. Both fixed, the baseline
+re-derived from a worktree of 68b75a5 (4,006 → 3,627), the floor moved 40% → 35%
+IN WRITING with ROADMAP P10 §5's own sentence as the reason, and a per-screen
+CEILING added that fails the build if any screen grows. PRD §4w has the table.
+
+**WHAT WAS NOT BUILT, DELIBERATELY** — §3-bis points 7-10: the expiry strip
+grouped by month, the strike ruler, the date slider on the payoff picture and
+the view-toggle buttons. They are P10-bis, after P2.
+
+### THE ORIGINAL SPEC FOLLOWS, UNCHANGED
 
 **ASKED FOR BY THE OWNER, 22 September 2026**, reading the P9 deploy preview. His
 words, verbatim:
@@ -1069,11 +1114,16 @@ result is whether he can read a card without reading a sentence.
     take the reading before and after and put it in the PRD, the way P9 did. A
     control that asks a question earns its words; a paragraph explaining the control
     does not, and folds.
-  - **WHETHER "CONVENIENZA DELL'OPERAZIONE" IS THE R/R RANGE OR SOMETHING MORE.** The
-    owner's phrase is read here as the bid/ask range above. If he means the EDGE —
-    house EV against market EV, minus the round trip — that is P2, and the two
-    sections' heading should then read off P2's number rather than a second one.
-    **ASK HIM RATHER THAN CHOOSING.**
+  - **WHETHER "CONVENIENZA DELL'OPERAZIONE" IS THE R/R RANGE OR SOMETHING MORE.**
+    **>>> ANSWERED BY THE OWNER, AND IT IS BOTH. <<<** His decision: the two
+    questions are ONE — *"is it a good bet AT THE PRICE I PAY?"*
+      - **PRICE convenience lives on Build, and it shipped in this session**: one
+        suggested price, what it costs against fair value, and the bid/mid/ask
+        breakdown with the reward-to-risk range folded one tap below.
+      - **TRADE convenience is P2's EDGE**, and it is the next session.
+    So the two sections' heading will read off P2's number when P2 lands, rather
+    than a second one — which is what this section said to do if the answer came
+    back "the edge".
   - **THE P9 PREVIEW WAS READ ON 22 SEPTEMBER AND IT CONFIRMED THE POSITION WORK**
     (PRD §4v NOT VERIFIED lists what it settled). What it did NOT settle is whether the
     folds fold the right things, which is this section's subject.
@@ -1099,14 +1149,36 @@ takes P10 must not widen into it. Whoever takes it: fetch the chain the way `app
 price with `closeLimitPrice()`, and `limitAgainstBook()` stops SKIPPING on that path for the
 first time.
 
+**>>> CLOSED. THE OWNER CHOSE TO TAKE IT AS THAT SESSION'S TASK 0, BEFORE P10,
+under CLAUDE.md's standing rule. <<<** It was taken exactly as written above and
+nothing adjacent was touched: no gate change, no autopilot change, no new rule
+number. The one thing the spec did not anticipate is that the broker's positions
+payload carries no strike and no type, so `holdingLeg()` reads both off the OCC
+symbol the account already holds — a symbol the app cannot parse is UNKNOWN and
+the close is refused by name, never a leg with a strike of zero.
+
 ## P2 — Proposals ranked by edge, not by score
 
-### >>> AFTER P10. <<< It was the next session's task until the owner read P9's
-### screens and asked for the controls to come first (P10 below). The two do not
-### conflict — P10 changes WHERE the user states what he wants and how the list
-### is grouped; P2 changes HOW candidates are ranked inside it — but P10 is the
-### one he asked for, and a ranking nobody can steer is the thing he is
-### complaining about.
+### >>> THIS IS THE NEXT SESSION'S TASK. <<< P10 shipped, so the controls now
+### come first and the list groups by what was asked for. P2 is what makes the
+### grouping mean something: a ranking.
+
+### >>> ONE CHANGE THE OWNER DECIDED, AND IT IS NOT NEGOTIABLE. <<<
+### **THE EDGE IS COMPUTED AT THE PRICE THAT FILLS (`openLimitPrice()` on
+### `comboBook()`, spelled once as `fillNet()` in `rules.js`), NEVER AT THE MID.**
+### His words, reading P10: the two questions are one — *"is it a good bet AT THE
+### PRICE I PAY?"* An edge computed at the mid answers a question about a price
+### nobody gives you: §4l measured the same UNG structure at 2.6:1 on the mid and
+### 1.1:1 at the price that trades, and the round trip is most of the edge on
+### these chains.
+###
+### So "is it a good bet" and "how much do I pay" become ONE NUMBER on Radar's
+### cards. That number SORTS the cards, and it FEEDS the "meets your request"
+### heading — replacing, not joining, the chance bar as the thing the top section
+### is ordered by. `splitByRequest()` already takes the candidate and the request;
+### the edge goes on the candidate's shape, and `meetsRequest()` reads it.
+### The five card figures stay five: the edge REPLACES one of them, it is not a
+### sixth. Which one it replaces is P2's to decide and to write down.
 
 **READ ALPACA'S OWN GREEKS INSTEAD OF COMPUTING THEM.** PR #33 wrote this down as "the obvious
 next one" and it is still open: `netGreeks()` runs Black-Scholes at a hand-written per-ticker
@@ -1162,6 +1234,40 @@ Still open in this section from earlier sessions:
     lognormal over 45 days;
   - on screen, probability and payoff always together, with edge as the third number. Never rank
     on one number alone.
+
+## P10-bis — THE SHAPE P10 DID NOT BUILD  (AFTER P2)
+
+ROADMAP P10 §3-bis listed ten properties read off the two reference screens the owner supplied.
+Six shipped in P10; **four are layout with no arithmetic behind them, and they wait for P2** —
+because P2 changes what a card SAYS, and rebuilding the controls around a card whose figures are
+about to change is two changes wearing one coat.
+
+  7. **THE EXPIRY IS A STRIP OF DATES, GROUPED BY MONTH, ONE TAP** — not a dropdown.
+     `buildableExpiries()` already returns exactly the boards that may be offered and
+     `offFloorExpiryLabel()` already names a refused one; `expiryMenu` in `App.jsx` is already the
+     one list both screens read. This is the same list drawn as chips under month headings, with
+     the refused ones rendered and disabled exactly as the `<select>` renders them today. **A
+     board the entry floor refuses must stay visible and named**: a strip that silently drops a
+     month teaches nothing, which is the whole of P9 TASK 1.
+  8. **THE STRIKE IS A RULER** with today's price marked on it and the chosen strike as a chip.
+     `strikeOptions()` in `chain.js` already returns which strikes a control may offer, including
+     the current one flagged `listed: false`, and `StrikeSelect` already renders that one
+     disabled and named. **Failure class 1 applies here too**: a ruler whose chip sits on a
+     strike the board does not list must say so, not silently snap.
+  9. **THE PICTURE CARRIES THE BREAK-EVEN AS A LABELLED LINE, AND A SLIDER MOVES THE DATE** from
+     today to expiry so the curve bends while you watch. `payoffBands().breakevens` is already
+     drawn and `analyze().curve` already carries `now` / `mid` / `exp`; the slider interpolates
+     between the curves that exist. **It may not compute a fourth curve** — three dates are what
+     `analyze()` produces, and a fourth would be a second arithmetic for one picture.
+  10. **THE VIEW TOGGLES ARE A ROW OF BUTTONS** — table or graph, dollars or per cent — not a menu
+      and not a setting.
+
+**AND ONE THING P10 MEASURED THAT BELONGS HERE.** `src/wordcount.mjs` reaches further into a
+screen built out of components than into one built out of inline JSX, at the same
+`COMPONENT_DEPTH`. Part of the Radar's 378 → 481 is the counter seeing more of what the screen
+already rendered. It is a stated limit of the heuristic, and the per-screen CEILING in
+`voice.test.js` is what actually stops growth — but a session that converts more inline JSX into
+components should expect the reading to move and should say so rather than be surprised.
 
 ## P7 — The broker tells us about the fill; stop asking it
 
