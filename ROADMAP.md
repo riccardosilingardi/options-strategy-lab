@@ -859,8 +859,12 @@ suite, `src/voice.test.js`).
 
 WHAT P9 HANDS FORWARD (the full list is PRD NOT VERIFIED):
   - **NO ORDER CAN BE SENT FROM THIS SANDBOX. TENTH SESSION IN A ROW.**
-  - **NOT ONE OF THESE SCREENS HAS BEEN SEEN ON A PHONE.** Tenth in a row, and this one
-    is the one whose whole subject is what a screen looks like.
+  - ~~**NOT ONE OF THESE SCREENS HAS BEEN SEEN ON A PHONE.**~~ **THAT WAS FALSE AND THE OWNER
+    SAID SO THE SAME DAY.** He has sent PDF captures since PR #32, and he read the P9 preview
+    within the hour: the attention line, the broker's P&L and "too small to be a share" are all
+    confirmed live, and he acted on the XLE warning by sending a close. PRD §4v NOT VERIFIED
+    carries what the reading settled and what it did not. What is genuinely unread is whether
+    the FOLDS fold the right things.
   - **`upgradeHolding()` HAS NEVER RUN AGAINST A REAL `/v2/positions` PAYLOAD.**
   - **THE WORD COUNT IS A HEURISTIC AND SAYS SO**, and it counts conditional branches in
     full, so it is an upper bound applied identically to both sides.
@@ -987,6 +991,63 @@ specifica."*
     the reward bar. A row in the second section with no reason is the "empty screen
     with no sentence" fault, one list down.
 
+### 3-bis. THE SHAPE, READ OFF THE REFERENCE SCREENS THE OWNER SUPPLIED
+
+He sent two captures of a tool he finds clear and said *"vedi com'è chiaro?"*. What follows is
+what those screens DO, written as this app's requirements. **Nothing here is a brand, a name or
+a copy of anyone's design** — it is a list of properties, and every one of them is a decision
+this app has already half-made and then buried.
+
+**THE DISCOVERY SCREEN — controls first, then a grid of cards.**
+
+  1. **EVERY CONTROL IS ABOVE EVERY RESULT, IN ONE BLOCK.** Direction, target price, budget,
+     expiry, and one slider that trades **return against probability**. Five controls, one
+     block, nothing between them and the results.
+  2. **THE RESULT IS A GRID OF CARDS, AND EVERY CARD IS THE SAME CARD.** Name of the structure;
+     the legs in PLAIN WORDS on one line; then exactly FOUR figures, always the same four in
+     the same places — **return on risk (%), chance, profit ($), risk ($)** — a small payoff
+     picture, and one button.
+  3. **NO PROSE ON A CARD.** Not one sentence. Everything a card says, it says with a label and
+     a number. The explanation lives elsewhere and is not on the way.
+  4. **THE FIGURES ARE THE ANSWER TO THREE QUESTIONS AND NOTHING ELSE**: what do I get, what do
+     I risk, how likely is it. Anything that is not one of those three is not on the card.
+
+**THE DETAIL SCREEN — five numbers in one row, then the picture.**
+
+  5. **FIVE FIGURES ACROSS ONE ROW, LABEL ABOVE, VALUE BELOW**: what you pay or receive, the
+     maximum loss, the maximum profit, the chance, the break-even. One row, one glance.
+  6. **THE STRUCTURE IS STATED IN PLAIN WORDS** above them ("own the shares, sell the 790 call"),
+     not as a leg table.
+  7. **THE EXPIRY IS A STRIP OF DATES**, grouped by month, one tap — not a dropdown.
+  8. **THE STRIKE IS A RULER** with today's price marked on it and the chosen strike as a chip.
+  9. **THE PICTURE CARRIES THE BREAK-EVEN AS A LABELLED LINE**, and a slider moves the date from
+     today to expiry so the curve bends while you watch.
+  10. **THE VIEW TOGGLES ARE A ROW OF BUTTONS** — table or graph, dollars or per cent — not a
+      menu and not a setting.
+
+**WHAT THIS APP ALREADY HAS FOR EACH OF THOSE.** This is layout, not arithmetic:
+
+  - the four card figures: `rewardRisk()`, `chanceText()`, and `analyze()`'s maxProfit/maxLoss —
+    all three already on every Shortlist row, spread across a wide row instead of a card;
+  - the small payoff picture: `BandThumbnail` + `Gauge`, already on every candidate, already cut
+    from one `payoffBands()` result;
+  - the five detail figures: the Build screen's stats, already computed at the price that will
+    be sent (§4l);
+  - the break-even line: `payoffBands().breakevens`, already drawn;
+  - the expiry strip: `buildableExpiries()` already returns exactly the boards that may be
+    offered, with the refused ones named (P9);
+  - the direction control: `SENT` / the sentiment buttons, already on the Shortlist.
+
+**SO THE WORK IS: MOVE THE CONTROLS UP, TURN THE ROWS INTO CARDS, AND CUT THE PROSE OFF THE
+CARDS.** Plus the two genuinely new things — the return-against-probability slider (§2) and the
+reward/risk RANGE across bid, mid and the price that fills (§1).
+
+**AND THE MEASURE IS HIS, NOT THE COUNTER'S.** P9 measured a 43% word cut and the owner's
+verdict was *"non me ne frega niente, basta si capisca il tutto, sia intuitivo e siano evidenti
+takeaway senza perdere sostanza."* `src/wordcount.mjs` stays — it is what stops a paragraph
+coming back — but it is a GUARD, not a goal, and no session may report it as the result. The
+result is whether he can read a card without reading a sentence.
+
 ### 4. WHAT THIS MUST NOT TOUCH
 
   - **THE QUALITY FLOORS AND THE GATE ARE UNCHANGED.** `minRewardRisk` (0.25) stays a
@@ -1013,9 +1074,30 @@ specifica."*
     house EV against market EV, minus the round trip — that is P2, and the two
     sections' heading should then read off P2's number rather than a second one.
     **ASK HIM RATHER THAN CHOOSING.**
-  - **NOBODY HAS SEEN ANY P9 SCREEN ON A PHONE YET**, which is still the top item on
-    the NOT VERIFIED list. If the preview reading changes what he wants here, this
-    section is the thing to rewrite, not the code.
+  - **THE P9 PREVIEW WAS READ ON 22 SEPTEMBER AND IT CONFIRMED THE POSITION WORK**
+    (PRD §4v NOT VERIFIED lists what it settled). What it did NOT settle is whether the
+    folds fold the right things, which is this section's subject.
+
+### 6. AND ONE THING THE SAME READING FOUND, WHICH IS NOT P10'S
+
+**`closeGroup()` IN `pro.jsx` STILL SENDS A MARKET ORDER, AND THE OWNER HIT IT.** He tapped
+"Close the whole trade" on the broker panel for the XLE position and Alpaca refused it:
+**HTTP 422, code 42210000, "options market orders are only allowed during market hours"**. The
+app reported the refusal correctly and where the button is (`alpacaErrorText()`), so nothing is
+hidden — but the order should not have been a market order at all.
+
+§8c has said since PR #22 that **a closing order is a LIMIT, priced at the moment of the tap**,
+and `closeLimitPrice()` exists for exactly this; `approve.mjs` uses it. `closeGroup()` is the
+one close path that never got it, and its own comment says so — it was left because that path
+has no chain to price from, while `approve.mjs` fetches one. The consequence is now measured
+rather than reasoned about: **a market close is refused outright outside market hours**, where a
+limit would have been accepted and queued, exactly as his own SOYB limit sits "accepted" on the
+same screen.
+
+It is small, it is a real refusal the owner met, and it is NOT part of P10 — a session that
+takes P10 must not widen into it. Whoever takes it: fetch the chain the way `approve.mjs` does,
+price with `closeLimitPrice()`, and `limitAgainstBook()` stops SKIPPING on that path for the
+first time.
 
 ## P2 — Proposals ranked by edge, not by score
 

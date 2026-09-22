@@ -3072,10 +3072,36 @@ Restored, and the failure is recorded here rather than quietly fixed.
 
 - **NO ORDER CAN BE SENT FROM THIS SANDBOX. TENTH SESSION IN A ROW.** No broker keys, and the
   egress proxy refuses the CONNECT.
-- **NOT ONE OF THESE SCREENS HAS BEEN SEEN ON A PHONE.** Tenth in a row — and this one's whole
-  subject is what a screen looks like. Every fold, every summary line and every trimmed
-  paragraph has been read in code and in a passing build, and on no screen. **A fold is a
-  judgement about what somebody will tap**, and nobody has tapped one.
+- **THE SCREENS WERE READ, AND THE CLAIM THAT THEY WERE NOT WAS FALSE.** This entry said
+  *"not one of these screens has been seen on a phone, tenth session in a row"*. **The owner
+  corrected it on the day it shipped, and he is right**: he has sent PDF captures of the real
+  screens from PR #32 onward, and §4l, §4m, §4n, §4o, §4p, §4q and §4r are all written FROM
+  those readings — this file would be half its length without them. What was true is narrower
+  and must be written narrowly: the P9 screens were unread **at the moment this entry was
+  written**, because they had just been built. They were read the same day (below). A debt
+  stated wider than the evidence is the same fault as a figure stated wider than its
+  measurement, and this file exists to refuse that.
+- **WHAT THE 22 SEPTEMBER READING OF THE P9 PREVIEW CONFIRMED, LIVE.** From the owner's own
+  captures of `deploy-preview-35`:
+  - the attention line reads **"XLE Imported from Alpaca −$130 · 37 DTE · Thin: $4 to make
+    against $346 at risk"** — `remainingEdge()` and `remainingEdgeLabel()`, §4v.2, firing on
+    the real position;
+  - **−$130 is the BROKER's figure**, on the home alert and on the position card, where the
+    app's own mark used to print −$127 beside it — §4v.0b;
+  - **OF THE MAXIMUM reads "too small to be a share"**, not −3188% — `shareOfMaximum()`;
+  - the full sentence renders beside the figures: *"the rules would not open this trade today.
+    Nothing closes on this: the exit rules were chosen when you opened it and they are
+    frozen."*;
+  - `fillVsLimit()` refuses the comparison in words on the unstamped record, and
+    `orderReconciliation()` explains the 2-against-0 order count.
+  **The owner acted on it**: he sent a close on that position. That is §4v.2 doing the one job
+  it was built for.
+- **WHAT IS STILL UNREAD IS THE WORD CUT, NOT THE POSITION WORK.** Radar, Shortlist and Build
+  were captured; whether the FOLDS fold the right things — the judgement about what somebody
+  will tap — is what nobody has confirmed, and the owner's verdict on the 43% was *"non me ne
+  frega niente, basta si capisca il tutto"*. The cut was a measurable proxy for a goal he
+  states differently: clear, intuitive, obvious takeaways, without losing substance. **The
+  proxy is not the goal, and P10 is where the goal is answered.**
 - **`upgradeHolding()` HAS NEVER RUN AGAINST A REAL `/v2/positions` PAYLOAD.** It is tested
   against a record shaped exactly like J-0002 and a group shaped like the sync's own, both
   hand-built. Whether the live payload produces the group shape this assumes is unverified.
@@ -4049,8 +4075,9 @@ measures (measured on an untouched `main` at the start of this session, and it m
 PR #34 recorded). `npm run build` is clean. One new suite: `src/voice.test.js`.
 
 - **NO ORDER CAN BE SENT FROM THIS SANDBOX. TENTH SESSION IN A ROW.**
-- **NOT ONE OF THESE SCREENS HAS BEEN SEEN ON A PHONE**, and this session's whole subject is
-  what a screen looks like. Tenth in a row.
+- **THE "NOBODY HAS SEEN IT" CLAIM WAS FALSE AND IS CORRECTED IN §4v.** The owner has sent
+  PDF captures since PR #32 and read the P9 preview the day it shipped; what that reading
+  confirmed, and what it left open, is listed there.
 - **`upgradeHolding()` HAS NEVER RUN AGAINST A REAL `/v2/positions` PAYLOAD**, and neither has
   the broker-preferred P&L: both are tested against hand-built fixtures.
 - **THE 43% WORD CUT IS A RATIO BETWEEN TWO RUNS OF ONE HEURISTIC**, not a count of pixels, and
