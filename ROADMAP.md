@@ -868,9 +868,163 @@ WHAT P9 HANDS FORWARD (the full list is PRD NOT VERIFIED):
   - **THE ANTHROPIC USAGE LIMIT DISABLED EVERY AI FEATURE UNTIL 2026-10-01**, so report
     section 5 and both copilots were dead on the reading this session is built from.
 
-## P2 — Proposals ranked by edge, not by score
+## P10 — THE CONTROLS COME FIRST, AND THE LIST SPLITS
 
 ### >>> THIS IS THE NEXT SESSION'S TASK. <<<
+
+**ASKED FOR BY THE OWNER, 22 September 2026**, reading the P9 deploy preview. His
+words, verbatim:
+
+> *"Il reward/Risk è dinamico? Per me dovrebbe, così come lo deve essere il budget
+> dedicato all'operazione, oppure quanto vuoi guadagnare. E deve essere tab semplice
+> e visibile."*
+>
+> *"...con Range di raccomandazioni a seconda del bid/ask dei contratti e convenienza
+> dell'operazione. Tutti devono stare in radar, o prima di decide for me, dipende dalla
+> journey."*
+>
+> *"...l'app propone anche altro, magari visivamente sposta in una sezione quelle che
+> marchiano le richieste e subito sotto le altre. Del resto se il filtro è dinamico
+> devono poter entrare e uscire dalla sezione specifica."*
+
+### 0. WHAT IS ALREADY THERE, AND WHY IT DOES NOT ANSWER HIM
+
+Three quarters of this machinery exists. The next session must read this section
+before building anything, or it will build a second copy of what is already here.
+
+  - **THE REWARD/RISK IS ALREADY DYNAMIC ON BUILD.** `AE` is `analyze()` re-run at
+    `effectiveLimit()`'s net (PR #28, §4l), so MADE PER $1 RISKED moves with the
+    ticket's sliders, along with the maximum, the maximum loss and the breakeven.
+    The Shortlist row is at the MID deliberately — a candidate is a structure, not
+    yet a price.
+  - **BUDGET AND TARGET BOTH EXIST**, in `scaleStrategy()` in `pro.jsx`: `"budget"`
+    divides by the cost, `"target"` divides by the maximum profit and answers ✓/✗.
+    The toggle is on the Shortlist, labelled *"What I can spend"* / *"What I want to
+    make"*.
+  - **SO THE FAULT IS NOT THAT IT IS MISSING.** It is that (a) it is a 100px number
+    field buried among the direction buttons and the expiry dropdown, (b) it drives
+    only the contract count on a Shortlist ROW and dies crossing to Build, where
+    `contracts` is separate state that resets on every ticker and expiry change, and
+    (c) in target mode it can say ✗ without saying what to change.
+
+### 1. >>> THE REWARD/RISK DOES NOT MOVE WITH THE SIZE. READ THIS FIRST. <<<
+
+`analyze()` multiplies `maxProfit` and `maxLoss` by the SAME leg quantities, so the
+RATIO is invariant under size: $4 against $346 at one contract is $40 against $3,460
+at ten. **A budget cannot change a reward-to-risk.** What a budget changes is WHICH
+structures fit and HOW MANY of them you buy.
+
+Building "R/R as a function of the budget" would therefore produce a number that
+looks live and never moves, which is this repository's oldest failure mode wearing a
+new coat — §4l's "every figure was computed at a price the app said would not fill",
+one screen across.
+
+**WHAT DOES MOVE IT IS THE PRICE, AND THAT IS WHAT HE IS ACTUALLY ASKING FOR.** At
+the bid, at the mid and at the ask the same structure has three different
+reward-to-risks, because `maxLoss` IS the debit. So the honest form of his request —
+and the buildable one — is a **RANGE**:
+
+    R/R at the bid   ·   R/R at the mid   ·   R/R at the price that fills
+
+`comboBook()` already returns all three prices for the whole structure, and
+`openLimitPrice()` already decides which one is "the price that fills" (mid plus a
+quarter of the spread, never past the touch). **No new arithmetic is needed: this is
+`rewardRisk()` called three times on `analyze()` at three nets the app already
+computes.** That is the whole of "Range di raccomandazioni a seconda del bid/ask".
+
+**THE ONE HOME IS `rewardRiskRange()` IN `rules.js`**, beside `rewardRisk()`. It
+returns nulls under `MIN_NET_DOLLARS` exactly as `rewardRisk()` does — a range with
+an unreadable end is not a range — and it returns the three NETS beside the three
+ratios, so no screen can print a ratio without the price it belongs to.
+
+### 2. THE CONTROLS MOVE TO WHERE THE JOURNEY ASKS THE QUESTION
+
+His rule: *"Tutti devono stare in radar, o prima di decide for me, dipende dalla
+journey."* Both doors, the same three answers, asked BEFORE anything is proposed:
+
+  - **DESK JOURNEY → step 1, Radar.** A simple, visible panel at the top, not a
+    field among the sentiment buttons on step 2.
+  - **GUIDED JOURNEY → `FindOpportunities`, above "Decide for me".** That screen
+    already asks for the basket, the budget and the horizon; this is the same
+    question in the same place, and the button already refuses to run until they
+    are answered.
+
+**ONE STATE, ABOVE BOTH.** `optMode` / `optAmt` live in `App.jsx` today and the
+guided run has its own `wiz.risk`; those are two homes for one answer and the
+session must make them one. CLAUDE.md's standing rule applies — the Build screen's
+hardcoded 500 beside the wizard's derived 250 is the same fault. The default stays
+`limits.perTradeLimit`, derived, never typed.
+
+**AND THE SIZE TRAVELS ALL THREE STEPS** (his "pt. 1"): what the budget or the target
+decides is the contract count Shortlist shows, Build loads and the ticket sends. The
+gate already measures whatever `contracts` says, so nothing about the risk checks
+changes — only where the number comes from. `contracts` currently resets on a ticker
+or expiry change, which is correct for a hand-built trade and wrong for a budget the
+user set once: the reset must become "re-derive from the budget", never "forget it".
+
+### 3. THE LIST SPLITS, AND MEMBERSHIP IS LIVE
+
+His words: *"sposta in una sezione quelle che marchiano le richieste e subito sotto
+le altre... se il filtro è dinamico devono poter entrare e uscire dalla sezione
+specifica."*
+
+  - **TWO SECTIONS, ONE LIST.** Above: the candidates that MEET what he asked for —
+    inside the budget, or reaching the target, and clearing the reward-to-risk bar.
+    Immediately below, under its own heading: everything else the app found.
+  - **THE APP STILL PROPOSES THE OTHERS** — *"l'app propone anche altro"* — so the
+    second section is never hidden and never folded. This is not a filter that
+    removes; it is a filter that GROUPS. That distinction is the whole feature: the
+    quality floors REMOVE and say why (and they are untouched here); this one only
+    decides which heading a row sits under.
+  - **MEMBERSHIP IS RECOMPUTED AS THE CONTROLS MOVE**, so a row crosses between the
+    two sections while the budget slider is dragged. `candidateOf()` in `path.js`
+    already normalises a road, a Shortlist row and a wide-search hit into one shape;
+    the section is a derived property of that shape against the current answers, and
+    must NEVER be stored on the candidate — a stored membership is a stale one the
+    moment the control moves.
+  - **THE SECOND HEADING SAYS WHY**, in the register the rest of the app uses: not
+    "other", but what each row missed — over the budget, short of the target, under
+    the reward bar. A row in the second section with no reason is the "empty screen
+    with no sentence" fault, one list down.
+
+### 4. WHAT THIS MUST NOT TOUCH
+
+  - **THE QUALITY FLOORS AND THE GATE ARE UNCHANGED.** `minRewardRisk` (0.25) stays a
+    FIXED rule: it is the bar under which the app will not propose at all, and it is
+    not a slider. Grouping by "meets what you asked for" happens INSIDE what already
+    cleared the floors. A user-movable quality floor would be the app letting
+    somebody switch off the reason it can be trusted.
+  - **THE R/R RANGE IS DISPLAY, NOT A NEW REFUSAL.** Nothing new is blocked, nothing
+    new is filtered, and `rewardRisk()` keeps its single-value job for every existing
+    caller.
+  - `analyze()`, `comboBook()`, `openLimitPrice()`, `scaleStrategy()` and
+    `effectiveLimit()` all stay as they are. This session SPENDS them; it does not
+    rewrite them.
+
+### 5. WHAT THE NEXT SESSION SHOULD SETTLE BEFORE BUILDING
+
+  - **WHERE EXACTLY ON RADAR.** P9 cut that screen from 1,162 words to 378 and a new
+    always-visible panel spends some of that back. `src/wordcount.mjs` measures it:
+    take the reading before and after and put it in the PRD, the way P9 did. A
+    control that asks a question earns its words; a paragraph explaining the control
+    does not, and folds.
+  - **WHETHER "CONVENIENZA DELL'OPERAZIONE" IS THE R/R RANGE OR SOMETHING MORE.** The
+    owner's phrase is read here as the bid/ask range above. If he means the EDGE —
+    house EV against market EV, minus the round trip — that is P2, and the two
+    sections' heading should then read off P2's number rather than a second one.
+    **ASK HIM RATHER THAN CHOOSING.**
+  - **NOBODY HAS SEEN ANY P9 SCREEN ON A PHONE YET**, which is still the top item on
+    the NOT VERIFIED list. If the preview reading changes what he wants here, this
+    section is the thing to rewrite, not the code.
+
+## P2 — Proposals ranked by edge, not by score
+
+### >>> AFTER P10. <<< It was the next session's task until the owner read P9's
+### screens and asked for the controls to come first (P10 below). The two do not
+### conflict — P10 changes WHERE the user states what he wants and how the list
+### is grouped; P2 changes HOW candidates are ranked inside it — but P10 is the
+### one he asked for, and a ranking nobody can steer is the thing he is
+### complaining about.
 
 **READ ALPACA'S OWN GREEKS INSTEAD OF COMPUTING THEM.** PR #33 wrote this down as "the obvious
 next one" and it is still open: `netGreeks()` runs Black-Scholes at a hand-written per-ticker
