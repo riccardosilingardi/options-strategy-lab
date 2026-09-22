@@ -864,7 +864,12 @@ export function verdictNarrative({ basket = [], examined = [], excluded = [], ne
   const read = examined.map((e) => e.tk);
   const why = new Map((excluded || []).map((x) => [x.tk, x]));
   const dropped = basket.filter((tk) => !read.includes(tk));
-  const grouped = { signals: [], expensive: [], nodata: [] };
+  // A MARKET WITH NO BOARD THE GATE WOULD OPEN ON IS NOT A MARKET WE COULD NOT
+  // READ (P9, TASK 1). Its chains loaded and its prices were fine; every expiry
+  // it lists is inside the entry floor. Saying "no prices we could read" about
+  // it would be the missing-data sentence wearing a market verdict's words,
+  // which is the line this function exists to hold.
+  const grouped = { signals: [], expensive: [], nodata: [], noboard: [] };
   for (const tk of dropped) grouped[why.get(tk)?.reason || "nodata"].push(tk);
   const clauses = [];
   if (grouped.signals.length) {
@@ -880,6 +885,11 @@ export function verdictNarrative({ basket = [], examined = [], excluded = [], ne
   if (grouped.nodata.length) {
     clauses.push(`${list(grouped.nodata)} had no prices we could read, so ${grouped.nodata.length === 1 ? "it was" : "they were"} ` +
       `left out rather than guessed at`);
+  }
+  if (grouped.noboard.length) {
+    clauses.push(`${list(grouped.noboard)} ${grouped.noboard.length === 1 ? "lists no expiry" : "list no expiry"} far ` +
+      `enough out to open on — every board ${grouped.noboard.length === 1 ? "it carries is" : "they carry are"} inside ` +
+      `the entry floor, so anything built there would be refused at the send rather than here`);
   }
   out.push(
     `You asked about ${plural(basket.length, "market", "markets")} — ${list(basket)}. ` +

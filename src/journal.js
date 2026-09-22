@@ -1012,4 +1012,204 @@ export function searchJournal(entries = [], query = "") {
   return (entries || []).filter((e) => matchesRef(e, query)).sort(byRefDesc);
 }
 
-export default { refOf, seqOf, nextRef, appendTimeline, journalEntry, searchJournal };
+/* ------------------------------------------------------------------
+   A HOLDING WRITTEN BEFORE THE STAMP NEVER UPGRADED (P9, TASK 0a)
+
+   >>> READ ON THE OWNER'S PHONE, 22 Sep 2026. <<< XLE J-0002 is a
+   position Alpaca ITSELF lists under `/v2/positions`, and the app shows
+   it as "1 contract — assumed, not recorded", with one timeline entry,
+   no fill entry, no exit plan, and no `fillVsLimit()` sentence anywhere.
+
+   THE CAUSE IS A `continue`. `importAlpaca()` builds a signature per
+   broker group and skips any signature already in `store.positions`:
+
+       if (known.has(sigOf(g.und, g.exp, g.legs))) continue;
+
+   That is right about ADDING and wrong about everything else. PR #33
+   gave a holding `alpacaHeld`, `entrySource: "fill"`, the broker's own
+   measured size and two timeline entries — and every record written
+   BEFORE it matches the signature, so the upgrade can never reach it.
+   The one record the owner actually has is exactly such a record.
+
+   A MATCH IS NOT A REASON TO DO NOTHING. It is a reason to UPGRADE:
+   the sync is holding the broker's own legs and the broker's own
+   average entry prices, which is every input the missing fields need.
+
+   WHAT IT MAY WRITE, AND WHAT IT MAY NOT:
+
+     - `alpacaHeld` — `/v2/positions` returned it, so it IS a holding.
+       This is the field `positionStage()` reads, and it is the whole
+       difference between "owned" and an order that will never resolve.
+     - THE SIZE, MEASURED. The broker's legs carry the broker's own
+       quantities, so `reduceRatios()` — the one home for that
+       arithmetic — divides out the shape and leaves the count. A
+       measured size clears `contractsAssumed`; it does not "assume" a
+       1 the record happens to agree with.
+     - `entrySource: "fill"` and the net from `avg_entry_price`. The
+       broker filled it; the price is the broker's, read and not
+       re-derived.
+     - The `fill` and `plan` timeline entries, ONLY IF MISSING, and
+       through `appendTimeline()` so a sequence number is given the one
+       way it is ever given.
+
+     - >>> NO ORDER FIELD IS INVENTED. <<< No `alpacaStatus`, no
+       `alpacaLimit`, no `alpacaLimitSigned`, no time in force. §4r.1
+       decided this and §4s sharpened it: the broker named a HOLDING,
+       not an order, and the direction of a limit this app once sent is
+       at the broker, not in a positions payload. An unstamped limit
+       stays unstamped and `fillVsLimit()` goes on refusing to compare
+       it.
+
+   IT RETURNS THE SAME OBJECT WHEN NOTHING CHANGES, so React bails out
+   and a sync on a 60-second timer cannot loop — the same discipline
+   `resnapLegs()` uses in chain.js. Running it twice is running it once.
+------------------------------------------------------------------ */
+
+/**
+ * Bring a position record up to what the broker's own holdings say.
+ *
+ * @param pos    a `store.positions` record that matched a broker group
+ * @param group  `{ legs, net }` as `importAlpaca()` already builds it —
+ *               `legs` carry the broker's quantities, `net` is the sum of
+ *               `avg_entry_price` at those quantities.
+ * @param plan   the exit-plan sentence, passed in because the words are a
+ *               RULE and rules live in rules.js, never in this file.
+ * @returns the SAME object when there is nothing to add, otherwise a new one.
+ */
+export function upgradeHolding(pos, group = {}, { plan = null, now = Date.now() } = {}) {
+  if (!pos) return pos;
+  const legs = Array.isArray(group.legs) ? group.legs : null;
+  const net = group.net == null || group.net === "" ? null : Number(group.net);
+  let out = pos;
+  const touch = () => { if (out === pos) out = { ...pos }; return out; };
+
+  // 1) IT IS A HOLDING. The field `positionStage()` reads.
+  if (pos.alpacaHeld !== true) { touch().alpacaHeld = true; out.alpacaLive = true; }
+
+  // 2) THE SIZE, MEASURED FROM THE BROKER'S OWN LEG QUANTITIES.
+  //    `Number(null)` is 0 and 0 is finite, so the null goes out first: a group
+  //    with no legs tells us nothing about the size and must leave it alone.
+  if (legs && legs.length) {
+    const measured = Math.max(1, Math.round(reduceRatios(legs).factor) || 1);
+    const cur = Number(pos.contracts);
+    const hasCur = Number.isFinite(cur) && cur >= 1;
+    if (!hasCur || Math.round(cur) !== measured || pos.contractsAssumed) {
+      touch().contracts = measured;
+      // MEASURED IS NOT ASSUMED, even when the two agree on the number. The
+      // flag is about where the figure came from, not about its value.
+      out.contractsAssumed = false;
+    }
+  }
+
+  // 3) IT IS A FILL, AND IT CARRIES THE PRICE THE BROKER GAVE.
+  if (Number.isFinite(net)) {
+    if (pos.entrySource !== "fill") { touch().entrySource = "fill"; }
+    // The stored entry is per combination, like every other stored figure, and
+    // `group.net` already is one: `importAlpaca()` sums side x qty x price over
+    // the legs, and the legs carry the shape.
+    if (!Number.isFinite(Number(pos.entryNet))) touch().entryNet = net;
+  }
+
+  // 4) THE TWO ENTRIES A HOLDING SHOULD HAVE, AND NEITHER TWICE.
+  const has = (type) => (pos.timeline || []).some((e) => e && e.type === type);
+  const add = [];
+  if (!has("fill")) {
+    add.push({ t: now, type: "fill", text:
+      `Read from your Alpaca paper account as an OPEN POSITION${legs && legs.length ? ` — ${legs.length} legs` : ""}` +
+      `${Number.isFinite(net) ? `, at the broker's own average entry prices (${SIGNED_WORD(net)} a combination)` : ""}. ` +
+      `This is a fill, not an order: the broker lists only what the account holds. ` +
+      `This record predates the app storing any of that, so it was read back from the broker rather than invented here.` });
+  }
+  if (!has("plan") && plan) add.push({ t: now, type: "plan", text: plan });
+  if (add.length) {
+    const t = appendTimeline(out === pos ? pos : out, add);
+    touch().timeline = t.timeline;
+    out.seqNext = t.seqNext;
+  }
+  return out;
+}
+
+/* ------------------------------------------------------------------
+   ONE CLOSE CONTROL PER POSITION (P9, TASK 2)
+
+   There are two buttons on two screens for one act. The Positions card's
+   "Close" asks WHY, files a Journal entry with the reason, and is the only
+   one that keeps the record honest. The broker panel's "Close the whole
+   trade" sends a market order and files nothing — so which of the two the
+   owner happens to tap decides whether the trade has a history.
+
+   THEY ARE NOT MERGED INTO ONE CODE PATH, deliberately: the broker panel
+   can list a holding this app has no record of at all (an order sent before
+   the local store was cleared — `orderReconciliation()` already names that
+   case), and removing its button would strand that position with no way out
+   of this app. What is removed is the CHOICE where there is no choice to
+   make: when the group matches a record, the panel says so and points at
+   the one control that writes the reason down.
+------------------------------------------------------------------ */
+
+/**
+ * The position record a broker holding belongs to, or null.
+ *
+ * @param positions  `store.positions`
+ * @param ticker / expKey  read off the broker group's own OCC symbols.
+ */
+export function positionForHolding(positions = [], { ticker = null, expKey = null } = {}) {
+  if (!ticker || !expKey) return null;
+  // ONLY A POSITION THE APP CONSIDERS OPEN. Pointing the owner at a "Close"
+  // button on a record that is not in the Positions list would be a door with
+  // nothing behind it — the `passedOver` fault, one screen across.
+  return (positions || []).find((p) => p && p.ticker === ticker
+    && (p.expKey || "") === expKey && positionStage(p) === "owned") || null;
+}
+
+/* ------------------------------------------------------------------
+   A TEST IS NOT A TRADE (P9, TASK 3)
+
+   The owner opened three trades and closed them again within the
+   minute, by hand, at zero profit and loss, to see what the buttons
+   did. `journey` in App.jsx counted them: they moved him up a level
+   and spent his "patience" budget — the score that measures whether
+   he is opening too many trades in a week.
+
+   It is §4m's fault one tab across. `store.positions` is what the app
+   DECIDED, not what the user OWNS, and `store.journal` is what
+   HAPPENED — and a record opened and closed on the same day, by hand,
+   for nothing, did not happen in the sense the level is measuring.
+
+   >>> THEY ARE NOT DELETED. <<< The Journal is the record of what the
+   app did, and deleting a record to make a score look better is the
+   opposite of what it is for. They stay, they are marked, and the
+   score steps over them.
+
+   THREE CONDITIONS, ALL OF THEM: zero P&L (nothing was at stake), the
+   same calendar day (nothing had time to happen), and closed BY HAND
+   (a rule exit on the same day is a real trade that hit its take
+   profit, however unlikely). Any one of them alone is an ordinary
+   trade: a scratch, a day trade, a manual close.
+------------------------------------------------------------------ */
+
+/** Was this closed record a button-test rather than a trade? */
+export function isTestRecord(entry = {}) {
+  if (!entry) return false;
+  // `Number(null)` IS 0 AND 0 IS FINITE, for the tenth time in this
+  // repository: a record whose P&L was never read is UNKNOWN, and an
+  // unknown result is not a zero one.
+  const pnl = entry.pnl == null || entry.pnl === "" ? NaN : Number(entry.pnl);
+  if (!Number.isFinite(pnl) || Math.abs(pnl) >= 0.005) return false;
+  if (entry.ruleExit === true) return false;          // a rule ended it: a real trade
+  const opened = entry.openedAt ? new Date(entry.openedAt) : null;
+  const closed = entry.t ? new Date(entry.t) : null;
+  if (!opened || !closed || Number.isNaN(+opened) || Number.isNaN(+closed)) return false;
+  return opened.toDateString() === closed.toDateString();
+}
+
+/** What the Journal row says about one, so it is marked rather than hidden. */
+export const testRecordNote = () =>
+  `Opened and closed by hand the same day for nothing — read as a test of the buttons, so it is not counted ` +
+  `towards your level or your awareness score. It stays on the record: the Journal is what happened, not what ` +
+  `flatters the score.`;
+
+/** The closed records a level or a score may be computed from. */
+export const scoredJournal = (entries = []) => (entries || []).filter((e) => !isTestRecord(e));
+
+export default { refOf, seqOf, nextRef, appendTimeline, journalEntry, searchJournal, upgradeHolding, positionForHolding, isTestRecord };

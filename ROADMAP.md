@@ -759,9 +759,354 @@ WHAT PR #34 HANDS FORWARD (the full list is PRD NOT VERIFIED):
     broker key and no Anthropic key here.
   - **NOBODY HAS SEEN ANY OF IT ON A PHONE.** Ninth, and this one is a chart.
 
-## P2 — Proposals ranked by edge, not by score
+## P9 — ONE VOICE  (PR #35 — DONE)
+
+The SIXTH session since the first live reading, and the second whose subject is
+not an order fault. Evidence: the owner's live reading of 22 September 2026, sixteen
+screens. His words: **"ancora abbastanza confusione, troppe info, trade suggestion non
+chiari."** PRD §4v.
+
+SHIPPED (911 checks across 22 suites, up from 864 across 21; build clean. One new
+suite, `src/voice.test.js`).
+
+**TASK 0 — the two debts the live reading exposed, first, as the standing rule requires.**
+
+  - **A HOLDING WRITTEN BEFORE THE STAMP NEVER UPGRADED.** XLE J-0002 is a position
+    Alpaca ITSELF lists, and the app showed it as "1 contract — assumed, not recorded",
+    with one timeline entry, no fill entry, no exit plan and no `fillVsLimit()` sentence.
+    The cause is a `continue`: `importAlpaca()` skipped any signature already in the
+    store, so a record written before PR #33 could never be reached by the upgrade PR #33
+    wrote — and the one holding the owner has is exactly such a record. `upgradeHolding()`
+    in `journal.js` is the one home; the size is MEASURED from the broker's own leg
+    quantities; NO ORDER FIELD IS INVENTED and an unstamped limit stays unstamped; it
+    returns the SAME object when nothing changes, so the 60-second sync cannot loop.
+  - **ONE P&L PER POSITION, AND IT IS THE BROKER'S.** The Positions card printed -$127 in
+    the largest red figure on the screen, directly above the broker's own -$130 for the
+    same position: `posAlerts` preferred `unrealized_pl`, the CARD re-derived its own from
+    `netValue()`. `positionPnl()` in `rules.js` decides which source a figure came from and
+    carries the sentence when it is the app's own mark; `pnlOf()` is its one spelling in
+    App.jsx, and `riskGate.test.js` fails the build on a second one.
+
+**TASK 1 — the app never proposes a trade its own gate would block.**
+
+  - Radar and the multi-market search ran at "HORIZON ~21 DTE", every structure they
+    offered sat at 24 DTE, and Build then said **THIS ORDER WOULD NOT BE SENT** —
+    `ENTRY_DTE_ROOM`, three days of room against the thirty-day floor. **The app built a
+    menu out of trades its own gate refuses**, which is worse than an empty screen: an
+    empty screen with a sentence teaches the rule, a menu that dead-ends teaches that the
+    rules are arbitrary.
+  - The cause is THREE different expiry windows in three places, none of them the rule.
+    `buildableExpiries()` / `openableBoard()` in `rules.js`, built ON `entryRoom()`, is the
+    one home; the third generation site holds the guard INSIDE itself, the way
+    `buildPresets()` refuses a null board. **The override is not withdrawn** — a door you
+    may choose to walk through is not a corridor you are led down.
+  - The horizon slider reads its rule at both ends; the expiry dropdown renders a refused
+    board DISABLED and NAMED (`offFloorExpiryLabel()`); `expiryChoiceNote()` names the
+    SELECTED board, so the dropdown and the sentence under it cannot read 2026-10-16 and
+    "Building on 2026-11-20" again; the step-2 CTA under an empty shortlist asks for
+    another expiry, another market or nothing today.
+  - **A REFUSAL AND A REASSURANCE MAY NOT SHARE A CARD**: "none of them stops the order"
+    is suppressed while a violation stands.
+  - THE TEST: every candidate every generation site returns goes through `evaluateTrade()`
+    in a dry run and must come back with ZERO violations, against the real generation
+    sites — and the fixture proves the gate really does refuse 24 DTE, so the filter is
+    load-bearing rather than decorative.
+
+**TASK 2 — a position says one thing.**
+
+  - Read in ONE scroll on XLE: home *"all inside the plan. Nothing to do"*, desk *"TODAY ·
+    EVERYTHING IS ON PLAN"*, the row *"Losing: check the reason"*, the verdict *"→ HOLD"*,
+    and **"OF THE MAXIMUM −3188%"** — for a trade that can make **$4** and lose **$346**.
+  - `remainingEdge()` asks the ENTRY question of an OPEN position, in TWO readings because
+    they answer two questions: from the current mark ($131 to make against $219 to lose,
+    which passes and is the honest answer to that question) and the position's own ceiling
+    ($4 against $346, which is the fact all five lines were silent about). Either being
+    thin is an attention item. **IT IS NOT AN EXIT RULE**: the exit rules are frozen,
+    nothing auto-closes, `AUTOPILOT_VERDICTS` is untouched, `ruleExitOf()` does not know it
+    exists, and it is not in the gate — a test holds all of that.
+  - `attentionCount()` is the one home for the headline, so no screen may say "nothing to
+    do" while a row says "check this".
+  - "OF THE MAXIMUM" prints a percent only above `MIN_NET_DOLLARS`: −3188% is a true
+    division and a false sentence.
+  - ONE CLOSE CONTROL PER POSITION. The broker panel's button survives only for a holding
+    the app has no record of, which would otherwise have no way out of this app at all.
+  - Report section 2: a working order is **"sent, not filled"**, never "opened at", listed
+    apart while still counted in the exposure as `bookPositions()` already decides.
+
+**TASK 3 — each explanation once per screen.**
+
+  - The floor paragraph (162 words) rendered TWICE on the Radar and TWICE on the
+    Shortlist; the CONFLICT narrative across Build and its overlay; the currency note on
+    every card. `Fold` in `steps.jsx` and `filterFold()` in `rules.js`: a summary WITH ITS
+    COUNT always on screen, the full text one tap behind it. **FOLD, NEVER DELETE** — and
+    **a refusal is never folded**, which is the older rule and outranks this one.
+  - **MEASURED, NOT ASSERTED.** `src/wordcount.mjs` reads the source and counts words AT
+    REST — what is behind a fold, a sheet or a tooltip does not count, which is what makes
+    "fold, never delete" falsifiable. Radar 1,162 → 378, Shortlist 1,881 → 998, Build 963
+    → 908; **4,006 → 2,284, a 43.0% cut**, both sides measured by the same counter over a
+    whole-tree checkout of `main`. The table is in PRD §4v.
+  - The header loses "IV RANK · 6d collected" — a progress bar for a number that is not
+    yet a number — to the History overlay.
+  - `isTestRecord()`: three records opened and closed by hand within the minute at zero
+    P&L moved the owner up a level and spent his patience budget. MARKED, NEVER DELETED.
+  - Report section 6 is THIS PERIOD'S, and an analysis claiming it can route an order is
+    FLAGGED, not quoted — rule 5 in the app's own document.
+  - **THE TEST FAILS THE BUILD** if any sentence over 20 words renders twice on one
+    screen, and it proves it can SEE one. It found a real site on the first run, and
+    `order.test.jsx` caught an OVER-TRIM on the same day: "every order goes through the
+    risk gate first" is rule 5 beside a send button and nothing else in that component
+    said it. Restored.
+
+WHAT P9 HANDS FORWARD (the full list is PRD NOT VERIFIED):
+  - **NO ORDER CAN BE SENT FROM THIS SANDBOX. TENTH SESSION IN A ROW.**
+  - ~~**NOT ONE OF THESE SCREENS HAS BEEN SEEN ON A PHONE.**~~ **THAT WAS FALSE AND THE OWNER
+    SAID SO THE SAME DAY.** He has sent PDF captures since PR #32, and he read the P9 preview
+    within the hour: the attention line, the broker's P&L and "too small to be a share" are all
+    confirmed live, and he acted on the XLE warning by sending a close. PRD §4v NOT VERIFIED
+    carries what the reading settled and what it did not. What is genuinely unread is whether
+    the FOLDS fold the right things.
+  - **`upgradeHolding()` HAS NEVER RUN AGAINST A REAL `/v2/positions` PAYLOAD.**
+  - **THE WORD COUNT IS A HEURISTIC AND SAYS SO**, and it counts conditional branches in
+    full, so it is an upper bound applied identically to both sides.
+  - **WHETHER J-0003 FILLED IS UNKNOWN** — SOYB 28/30, debit $0.80 GTC.
+  - **THE ANTHROPIC USAGE LIMIT DISABLED EVERY AI FEATURE UNTIL 2026-10-01**, so report
+    section 5 and both copilots were dead on the reading this session is built from.
+
+## P10 — THE CONTROLS COME FIRST, AND THE LIST SPLITS
 
 ### >>> THIS IS THE NEXT SESSION'S TASK. <<<
+
+**ASKED FOR BY THE OWNER, 22 September 2026**, reading the P9 deploy preview. His
+words, verbatim:
+
+> *"Il reward/Risk è dinamico? Per me dovrebbe, così come lo deve essere il budget
+> dedicato all'operazione, oppure quanto vuoi guadagnare. E deve essere tab semplice
+> e visibile."*
+>
+> *"...con Range di raccomandazioni a seconda del bid/ask dei contratti e convenienza
+> dell'operazione. Tutti devono stare in radar, o prima di decide for me, dipende dalla
+> journey."*
+>
+> *"...l'app propone anche altro, magari visivamente sposta in una sezione quelle che
+> marchiano le richieste e subito sotto le altre. Del resto se il filtro è dinamico
+> devono poter entrare e uscire dalla sezione specifica."*
+
+### 0. WHAT IS ALREADY THERE, AND WHY IT DOES NOT ANSWER HIM
+
+Three quarters of this machinery exists. The next session must read this section
+before building anything, or it will build a second copy of what is already here.
+
+  - **THE REWARD/RISK IS ALREADY DYNAMIC ON BUILD.** `AE` is `analyze()` re-run at
+    `effectiveLimit()`'s net (PR #28, §4l), so MADE PER $1 RISKED moves with the
+    ticket's sliders, along with the maximum, the maximum loss and the breakeven.
+    The Shortlist row is at the MID deliberately — a candidate is a structure, not
+    yet a price.
+  - **BUDGET AND TARGET BOTH EXIST**, in `scaleStrategy()` in `pro.jsx`: `"budget"`
+    divides by the cost, `"target"` divides by the maximum profit and answers ✓/✗.
+    The toggle is on the Shortlist, labelled *"What I can spend"* / *"What I want to
+    make"*.
+  - **SO THE FAULT IS NOT THAT IT IS MISSING.** It is that (a) it is a 100px number
+    field buried among the direction buttons and the expiry dropdown, (b) it drives
+    only the contract count on a Shortlist ROW and dies crossing to Build, where
+    `contracts` is separate state that resets on every ticker and expiry change, and
+    (c) in target mode it can say ✗ without saying what to change.
+
+### 1. >>> THE REWARD/RISK DOES NOT MOVE WITH THE SIZE. READ THIS FIRST. <<<
+
+`analyze()` multiplies `maxProfit` and `maxLoss` by the SAME leg quantities, so the
+RATIO is invariant under size: $4 against $346 at one contract is $40 against $3,460
+at ten. **A budget cannot change a reward-to-risk.** What a budget changes is WHICH
+structures fit and HOW MANY of them you buy.
+
+Building "R/R as a function of the budget" would therefore produce a number that
+looks live and never moves, which is this repository's oldest failure mode wearing a
+new coat — §4l's "every figure was computed at a price the app said would not fill",
+one screen across.
+
+**WHAT DOES MOVE IT IS THE PRICE, AND THAT IS WHAT HE IS ACTUALLY ASKING FOR.** At
+the bid, at the mid and at the ask the same structure has three different
+reward-to-risks, because `maxLoss` IS the debit. So the honest form of his request —
+and the buildable one — is a **RANGE**:
+
+    R/R at the bid   ·   R/R at the mid   ·   R/R at the price that fills
+
+`comboBook()` already returns all three prices for the whole structure, and
+`openLimitPrice()` already decides which one is "the price that fills" (mid plus a
+quarter of the spread, never past the touch). **No new arithmetic is needed: this is
+`rewardRisk()` called three times on `analyze()` at three nets the app already
+computes.** That is the whole of "Range di raccomandazioni a seconda del bid/ask".
+
+**THE ONE HOME IS `rewardRiskRange()` IN `rules.js`**, beside `rewardRisk()`. It
+returns nulls under `MIN_NET_DOLLARS` exactly as `rewardRisk()` does — a range with
+an unreadable end is not a range — and it returns the three NETS beside the three
+ratios, so no screen can print a ratio without the price it belongs to.
+
+### 2. THE CONTROLS MOVE TO WHERE THE JOURNEY ASKS THE QUESTION
+
+His rule: *"Tutti devono stare in radar, o prima di decide for me, dipende dalla
+journey."* Both doors, the same three answers, asked BEFORE anything is proposed:
+
+  - **DESK JOURNEY → step 1, Radar.** A simple, visible panel at the top, not a
+    field among the sentiment buttons on step 2.
+  - **GUIDED JOURNEY → `FindOpportunities`, above "Decide for me".** That screen
+    already asks for the basket, the budget and the horizon; this is the same
+    question in the same place, and the button already refuses to run until they
+    are answered.
+
+**ONE STATE, ABOVE BOTH.** `optMode` / `optAmt` live in `App.jsx` today and the
+guided run has its own `wiz.risk`; those are two homes for one answer and the
+session must make them one. CLAUDE.md's standing rule applies — the Build screen's
+hardcoded 500 beside the wizard's derived 250 is the same fault. The default stays
+`limits.perTradeLimit`, derived, never typed.
+
+**AND THE SIZE TRAVELS ALL THREE STEPS** (his "pt. 1"): what the budget or the target
+decides is the contract count Shortlist shows, Build loads and the ticket sends. The
+gate already measures whatever `contracts` says, so nothing about the risk checks
+changes — only where the number comes from. `contracts` currently resets on a ticker
+or expiry change, which is correct for a hand-built trade and wrong for a budget the
+user set once: the reset must become "re-derive from the budget", never "forget it".
+
+### 3. THE LIST SPLITS, AND MEMBERSHIP IS LIVE
+
+His words: *"sposta in una sezione quelle che marchiano le richieste e subito sotto
+le altre... se il filtro è dinamico devono poter entrare e uscire dalla sezione
+specifica."*
+
+  - **TWO SECTIONS, ONE LIST.** Above: the candidates that MEET what he asked for —
+    inside the budget, or reaching the target, and clearing the reward-to-risk bar.
+    Immediately below, under its own heading: everything else the app found.
+  - **THE APP STILL PROPOSES THE OTHERS** — *"l'app propone anche altro"* — so the
+    second section is never hidden and never folded. This is not a filter that
+    removes; it is a filter that GROUPS. That distinction is the whole feature: the
+    quality floors REMOVE and say why (and they are untouched here); this one only
+    decides which heading a row sits under.
+  - **MEMBERSHIP IS RECOMPUTED AS THE CONTROLS MOVE**, so a row crosses between the
+    two sections while the budget slider is dragged. `candidateOf()` in `path.js`
+    already normalises a road, a Shortlist row and a wide-search hit into one shape;
+    the section is a derived property of that shape against the current answers, and
+    must NEVER be stored on the candidate — a stored membership is a stale one the
+    moment the control moves.
+  - **THE SECOND HEADING SAYS WHY**, in the register the rest of the app uses: not
+    "other", but what each row missed — over the budget, short of the target, under
+    the reward bar. A row in the second section with no reason is the "empty screen
+    with no sentence" fault, one list down.
+
+### 3-bis. THE SHAPE, READ OFF THE REFERENCE SCREENS THE OWNER SUPPLIED
+
+He sent two captures of a tool he finds clear and said *"vedi com'è chiaro?"*. What follows is
+what those screens DO, written as this app's requirements. **Nothing here is a brand, a name or
+a copy of anyone's design** — it is a list of properties, and every one of them is a decision
+this app has already half-made and then buried.
+
+**THE DISCOVERY SCREEN — controls first, then a grid of cards.**
+
+  1. **EVERY CONTROL IS ABOVE EVERY RESULT, IN ONE BLOCK.** Direction, target price, budget,
+     expiry, and one slider that trades **return against probability**. Five controls, one
+     block, nothing between them and the results.
+  2. **THE RESULT IS A GRID OF CARDS, AND EVERY CARD IS THE SAME CARD.** Name of the structure;
+     the legs in PLAIN WORDS on one line; then exactly FOUR figures, always the same four in
+     the same places — **return on risk (%), chance, profit ($), risk ($)** — a small payoff
+     picture, and one button.
+  3. **NO PROSE ON A CARD.** Not one sentence. Everything a card says, it says with a label and
+     a number. The explanation lives elsewhere and is not on the way.
+  4. **THE FIGURES ARE THE ANSWER TO THREE QUESTIONS AND NOTHING ELSE**: what do I get, what do
+     I risk, how likely is it. Anything that is not one of those three is not on the card.
+
+**THE DETAIL SCREEN — five numbers in one row, then the picture.**
+
+  5. **FIVE FIGURES ACROSS ONE ROW, LABEL ABOVE, VALUE BELOW**: what you pay or receive, the
+     maximum loss, the maximum profit, the chance, the break-even. One row, one glance.
+  6. **THE STRUCTURE IS STATED IN PLAIN WORDS** above them ("own the shares, sell the 790 call"),
+     not as a leg table.
+  7. **THE EXPIRY IS A STRIP OF DATES**, grouped by month, one tap — not a dropdown.
+  8. **THE STRIKE IS A RULER** with today's price marked on it and the chosen strike as a chip.
+  9. **THE PICTURE CARRIES THE BREAK-EVEN AS A LABELLED LINE**, and a slider moves the date from
+     today to expiry so the curve bends while you watch.
+  10. **THE VIEW TOGGLES ARE A ROW OF BUTTONS** — table or graph, dollars or per cent — not a
+      menu and not a setting.
+
+**WHAT THIS APP ALREADY HAS FOR EACH OF THOSE.** This is layout, not arithmetic:
+
+  - the four card figures: `rewardRisk()`, `chanceText()`, and `analyze()`'s maxProfit/maxLoss —
+    all three already on every Shortlist row, spread across a wide row instead of a card;
+  - the small payoff picture: `BandThumbnail` + `Gauge`, already on every candidate, already cut
+    from one `payoffBands()` result;
+  - the five detail figures: the Build screen's stats, already computed at the price that will
+    be sent (§4l);
+  - the break-even line: `payoffBands().breakevens`, already drawn;
+  - the expiry strip: `buildableExpiries()` already returns exactly the boards that may be
+    offered, with the refused ones named (P9);
+  - the direction control: `SENT` / the sentiment buttons, already on the Shortlist.
+
+**SO THE WORK IS: MOVE THE CONTROLS UP, TURN THE ROWS INTO CARDS, AND CUT THE PROSE OFF THE
+CARDS.** Plus the two genuinely new things — the return-against-probability slider (§2) and the
+reward/risk RANGE across bid, mid and the price that fills (§1).
+
+**AND THE MEASURE IS HIS, NOT THE COUNTER'S.** P9 measured a 43% word cut and the owner's
+verdict was *"non me ne frega niente, basta si capisca il tutto, sia intuitivo e siano evidenti
+takeaway senza perdere sostanza."* `src/wordcount.mjs` stays — it is what stops a paragraph
+coming back — but it is a GUARD, not a goal, and no session may report it as the result. The
+result is whether he can read a card without reading a sentence.
+
+### 4. WHAT THIS MUST NOT TOUCH
+
+  - **THE QUALITY FLOORS AND THE GATE ARE UNCHANGED.** `minRewardRisk` (0.25) stays a
+    FIXED rule: it is the bar under which the app will not propose at all, and it is
+    not a slider. Grouping by "meets what you asked for" happens INSIDE what already
+    cleared the floors. A user-movable quality floor would be the app letting
+    somebody switch off the reason it can be trusted.
+  - **THE R/R RANGE IS DISPLAY, NOT A NEW REFUSAL.** Nothing new is blocked, nothing
+    new is filtered, and `rewardRisk()` keeps its single-value job for every existing
+    caller.
+  - `analyze()`, `comboBook()`, `openLimitPrice()`, `scaleStrategy()` and
+    `effectiveLimit()` all stay as they are. This session SPENDS them; it does not
+    rewrite them.
+
+### 5. WHAT THE NEXT SESSION SHOULD SETTLE BEFORE BUILDING
+
+  - **WHERE EXACTLY ON RADAR.** P9 cut that screen from 1,162 words to 378 and a new
+    always-visible panel spends some of that back. `src/wordcount.mjs` measures it:
+    take the reading before and after and put it in the PRD, the way P9 did. A
+    control that asks a question earns its words; a paragraph explaining the control
+    does not, and folds.
+  - **WHETHER "CONVENIENZA DELL'OPERAZIONE" IS THE R/R RANGE OR SOMETHING MORE.** The
+    owner's phrase is read here as the bid/ask range above. If he means the EDGE —
+    house EV against market EV, minus the round trip — that is P2, and the two
+    sections' heading should then read off P2's number rather than a second one.
+    **ASK HIM RATHER THAN CHOOSING.**
+  - **THE P9 PREVIEW WAS READ ON 22 SEPTEMBER AND IT CONFIRMED THE POSITION WORK**
+    (PRD §4v NOT VERIFIED lists what it settled). What it did NOT settle is whether the
+    folds fold the right things, which is this section's subject.
+
+### 6. AND ONE THING THE SAME READING FOUND, WHICH IS NOT P10'S
+
+**`closeGroup()` IN `pro.jsx` STILL SENDS A MARKET ORDER, AND THE OWNER HIT IT.** He tapped
+"Close the whole trade" on the broker panel for the XLE position and Alpaca refused it:
+**HTTP 422, code 42210000, "options market orders are only allowed during market hours"**. The
+app reported the refusal correctly and where the button is (`alpacaErrorText()`), so nothing is
+hidden — but the order should not have been a market order at all.
+
+§8c has said since PR #22 that **a closing order is a LIMIT, priced at the moment of the tap**,
+and `closeLimitPrice()` exists for exactly this; `approve.mjs` uses it. `closeGroup()` is the
+one close path that never got it, and its own comment says so — it was left because that path
+has no chain to price from, while `approve.mjs` fetches one. The consequence is now measured
+rather than reasoned about: **a market close is refused outright outside market hours**, where a
+limit would have been accepted and queued, exactly as his own SOYB limit sits "accepted" on the
+same screen.
+
+It is small, it is a real refusal the owner met, and it is NOT part of P10 — a session that
+takes P10 must not widen into it. Whoever takes it: fetch the chain the way `approve.mjs` does,
+price with `closeLimitPrice()`, and `limitAgainstBook()` stops SKIPPING on that path for the
+first time.
+
+## P2 — Proposals ranked by edge, not by score
+
+### >>> AFTER P10. <<< It was the next session's task until the owner read P9's
+### screens and asked for the controls to come first (P10 below). The two do not
+### conflict — P10 changes WHERE the user states what he wants and how the list
+### is grouped; P2 changes HOW candidates are ranked inside it — but P10 is the
+### one he asked for, and a ranking nobody can steer is the thing he is
+### complaining about.
 
 **READ ALPACA'S OWN GREEKS INSTEAD OF COMPUTING THEM.** PR #33 wrote this down as "the obvious
 next one" and it is still open: `netGreeks()` runs Black-Scholes at a hand-written per-ticker

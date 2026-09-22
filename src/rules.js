@@ -1169,6 +1169,155 @@ export const qualityFloorSentence = (level = RECOMMENDED_LIQUIDITY) => {
     `Setting: ${l.label.toUpperCase()}${l.recommended ? " (the app's recommendation)" : ""}.`;
 };
 
+/* =====================================================================
+   EACH EXPLANATION ONCE PER SCREEN (P9, TASK 3)
+
+   >>> COUNTED ON THE OWNER'S SCREENS, 22 Sep 2026. <<< The floor
+   paragraph — `qualityFloorSentence()`, ONE HUNDRED AND SIXTY-TWO WORDS —
+   renders TWICE on the Radar and TWICE on the Shortlist. The four-factor
+   CONFLICT narrative is on Build and its overlay three times. *"Every
+   figure on this card is in US dollars"* is on every card.
+
+   His words, for the fourth time: *"si capisce poco dalla UI. Troppe info
+   da leggere, poco intuitivo."*
+
+   THE RULE, AND IT IS `warningsToPrint()`'S RULE MADE GENERAL: a long
+   generated explanation has ONE HOME PER SCREEN. Everywhere else prints a
+   ONE-LINE POINTER that names where the full text is.
+
+   >>> FOLD, NEVER DELETE. <<< Not one fact leaves the app. Every pointer
+   names the place the explanation kept, and that place is one tap away —
+   the same discipline as `unquotedLegPointer()`, which keeps the unquoted-
+   leg fact where the legs are NAMED and prints a pointer everywhere else.
+
+   >>> AND A REFUSAL IS NEVER FOLDED. <<< The rule that a gate violation
+   renders beside the button is older than this one and outranks it. What
+   folds is an EXPLANATION of a rule; what never folds is the app saying no.
+===================================================================== */
+
+/** Where each long explanation lives, so a pointer can name it. */
+export const VOICE_HOMES = {
+  floors: "under the liquidity filter on the Shortlist",
+  conflict: `in "Why this trade"`,
+  currency: "on the trade card",
+};
+
+/**
+ * The one line that stands in for a long explanation, with the count in it.
+ * Modelled on `conflictSummaryLine()`, which has done exactly this for the
+ * CONFLICT paragraph since PR #28.
+ */
+export const voicePointer = (id, { count = null, what = null } = {}) => {
+  const home = VOICE_HOMES[id];
+  const head = id === "floors"
+    ? (Number.isFinite(Number(count)) && count > 0
+      ? `${count} structure${count === 1 ? "" : "s"}${what ? ` on ${what}` : ""} did not clear the quality floors`
+      : `Everything here cleared the quality floors`)
+    : `There is more on this`;
+  return `${head} — explained once, ${home || "one tap away"}.`;
+};
+
+/**
+ * THE FLOOR IN ONE LINE, for every site that is not its home.
+ *
+ * It states WHICH floors ran and at what setting, and nothing else. The
+ * hundred and sixty words of reasoning — why a percentile rather than a fixed
+ * number, why the spread is a separate question, what a contract nobody trades
+ * is — stay in `qualityFloorSentence()`, at the one place on each screen that
+ * prints them.
+ */
+export const qualityFloorLine = (level = RECOMMENDED_LIQUIDITY) => {
+  const l = liquidityLevel(level?.id ?? level);
+  return l.id === "off"
+    ? `Liquidity floor OFF; spread and reward-to-risk still apply.`
+    : `Filtered at ${l.label.toUpperCase()}: open interest, bid/ask spread, combination spread, reward-to-risk.`;
+};
+
+/**
+ * WHY THINGS ARE NOT ON A LIST, IN ONE FOLDED PANEL.
+ *
+ * The Shortlist printed a separate paragraph for each of nine reasons —
+ * liquidity, per-leg spread, combination spread, reward, unpriceable,
+ * impossible, model disagreement, no ceiling, and the three "was skipped"
+ * cases — about six hundred and fifty words for a list of at most eight rows.
+ * Every one of those paragraphs is worth reading ONCE, by somebody who has
+ * asked. None of them is worth reading every time the screen renders.
+ *
+ * @returns {{ total, summary, reasons }} — `summary` is the one line always on
+ *          screen, `reasons` the short clause per reason for the fold. The
+ *          LONG note for each reason keeps its own function and is printed
+ *          inside the fold, so nothing is rewritten and nothing is lost.
+ */
+export function filterFold(tally = {}, { level = RECOMMENDED_LIQUIDITY, what = null } = {}) {
+  const t = tally || {};
+  const n = (k) => (Number.isFinite(Number(t[k])) ? Number(t[k]) : 0);
+  const rows = [
+    ["unpriceable", n("unpriceable"), `could not be priced at all`],
+    ["impossible", n("impossible"), `priced as unable to lose`],
+    ["model", n("model"), `more than ${RULES.modelDisagreementRatio}x from the model's price`],
+    ["liquidity", n("liquidity"), `too little open interest`],
+    ["spread", n("spread"), `a leg quoted too wide`],
+    ["comboSpread", n("comboSpread"), `the combination quoted too wide`],
+    ["reward", n("reward"), `pays too little for what it risks`],
+  ].filter((r) => r[1] > 0);
+  const total = rows.reduce((a, r) => a + r[1], 0);
+  const summary = total === 0
+    ? null
+    : `${total} structure${total === 1 ? "" : "s"}${what ? ` on ${what}` : ""} not shown: ` +
+      `${rows.map((r) => `${r[1]} ${r[2]}`).join(", ")}. ${qualityFloorLine(level)}`;
+  return { total, summary, reasons: rows.map(([id, count, clause]) => ({ id, count, clause })) };
+}
+
+/* =====================================================================
+   AN ANALYSIS THAT CLAIMS IT CAN TRADE IS FLAGGED, NOT QUOTED (P9, TASK 3)
+
+   Non-negotiable rule 5: nothing executes without an explicit human
+   confirmation. The weekly report quotes the copilot's own analyses back
+   at the owner as section 6 — and a model that writes *"I'll route this
+   order for you"* would have that sentence reprinted, in the app's own
+   document, over the app's own signature.
+
+   The app cannot stop a model writing it. What it can do is refuse to
+   present it as advice: the analysis is still filed, still listed, still
+   openable, and the report says what is wrong with it instead of
+   reproducing it. A quotation is an endorsement in a document nobody
+   else is going to annotate.
+
+   IT IS A RULE, SO IT LIVES HERE — beside `copilotRulesBlock()` and
+   `reportNarrativePrompt()`, for the same reason: a generated sentence
+   and the rule that judges one are the same kind of thing.
+===================================================================== */
+
+/** Phrases a model uses when it thinks it can act. Deliberately narrow:
+ *  it must claim AGENCY over an order, not merely mention one. */
+const OVERREACH = [
+  /\b(?:I|we)(?:'|’)?(?:ll|ve| will| have| can| am going to| shall)?\s+(?:go ahead and\s+)?(?:place|submit|send|route|execute|enter|fill|open|close|cancel)\b[^.]{0,40}\b(?:order|trade|position|spread)\b/i,
+  /\b(?:placing|submitting|sending|routing|executing)\s+(?:the|this|your|a)\s+(?:order|trade)\b/i,
+  /\bI(?:'|’)?(?:ve| have)\s+(?:placed|submitted|sent|routed|executed|opened|closed)\b/i,
+  /\bon your behalf\b[^.]{0,40}\b(?:order|trade|broker|alpaca)\b/i,
+  /\bI(?:'|’)?ll\s+(?:handle|take care of)\s+(?:the|this|your)\s+(?:execution|order|trade)\b/i,
+];
+
+/**
+ * Does this copilot answer claim it can route or place an order?
+ * @returns {{ flagged, phrase }} — `phrase` is what tripped it, so the
+ *          report can name the sentence rather than assert a verdict.
+ */
+export function copilotOverreach(text = "") {
+  const t = String(text || "");
+  for (const re of OVERREACH) {
+    const m = re.exec(t);
+    if (m) return { flagged: true, phrase: m[0].trim() };
+  }
+  return { flagged: false, phrase: null };
+}
+
+/** What the report prints INSTEAD of the analysis, when it is flagged. */
+export const copilotOverreachNote = (phrase) =>
+  `NOT QUOTED. This analysis claims the copilot can act on an order — "${String(phrase || "").slice(0, 120)}" — ` +
+  `which it cannot: nothing in this app executes without you tapping twice, and the copilot has no order path ` +
+  `at all. It is kept in the Journal so you can read it there; it is not reproduced here as advice.`;
+
 /** The one line that says which setting produced the list underneath it. */
 /* =====================================================================
    THE RADAR MUST NOT GET LONGER WHEN THE BASKET DOES.
@@ -1788,9 +1937,35 @@ export function expiryChoice(candidates = [], {
   return { chosen, passedOver, eligible, measured, reason };
 }
 
-/** Why the app is on this expiry, in one sentence, with the counts in it. */
-export const expiryChoiceNote = (choice, level = RECOMMENDED_LIQUIDITY) => {
+/** Why the app is on this expiry, in one sentence, with the counts in it.
+ *
+ * >>> IT NAMES THE BOARD THAT IS SELECTED, NOT THE ONE THE APP WOULD HAVE
+ * PICKED (P9, TASK 1). <<< Read on the owner's phone: the expiry dropdown said
+ * 2026-10-16 and this sentence, directly underneath it, said "Building on
+ * 2026-11-20". Both were true — the dropdown carried a board handed over by
+ * the wide search, and this described `choice.chosen` — and together they were
+ * a screen contradicting itself about which trade it was showing.
+ *
+ * @param selected  the expiry the screen is actually on. When it differs from
+ *        the app's own choice, the sentence says so and names both, because
+ *        the app's reasoning is still worth reading — it is just not a
+ *        description of what is on screen.
+ */
+export const expiryChoiceNote = (choice, level = RECOMMENDED_LIQUIDITY, { selected = null } = {}) => {
   const c = choice?.chosen;
+  if (selected && c && selected !== c.key) {
+    const s2 = (choice?.eligible || []).find((e) => e.key === selected)
+      || (choice?.passedOver && choice.passedOver.key === selected ? choice.passedOver : null);
+    const room = s2 ? entryRoom(s2.dte) : null;
+    return `Building on ${selected}${s2 ? ` (${s2.dte} days out)` : ""}, which you chose. Left to itself the ` +
+      `app would open on ${c.key} (${c.dte} days out)` +
+      (c.clears == null ? `.` : `, where ${c.clears} of its ${c.near} near-the-money contracts clear the ` +
+        `${liquidityLevel(level?.id ?? level).label.toUpperCase()} floor.`) +
+      (room && room.band !== "clear"
+        ? ` ${selected} is inside the ${RULES.minEntryDTE}-day entry floor, so an order built here is ` +
+          `refused at the send unless you write down why.`
+        : ``);
+  }
   if (!c) return `No expiry is far enough out to open on: the entry floor is ${RULES.minEntryDTE} days, ` +
     `so the exit rule at ${RULES.exitDTE} days has room to work.`;
   const l = liquidityLevel(level?.id ?? level);
@@ -2120,6 +2295,14 @@ export const noCeilingRankNote = (n) =>
   `${n === 1 ? "its" : "their"} expected value cannot be computed and ${n === 1 ? "it sits" : "they sit"} last ` +
   `rather than being scored against the others. That is not a verdict on the trade: an unlimited best case ` +
   `is a real thing to want. It is a refusal to rank a number the app does not have.`;
+
+/** The same fact in one line, for the summary of the fold it lives in.
+ *  P9 TASK 3: the paragraph above is an explanation of a RANKING, not a
+ *  refusal, so it folds — and the line that stays says the thing that changes
+ *  what the reader sees, which is WHERE those candidates are in the list. */
+export const noCeilingRankLine = (n) =>
+  `${n} candidate${n === 1 ? "" : "s"} here ${n === 1 ? "has" : "have"} no ceiling on the profit, so ` +
+  `${n === 1 ? "it sits" : "they sit"} last with a blank expected value.`;
 
 /* -------------------------------------------------------------------------
  * A MAXIMUM LOSS THAT IS A PROFIT.
@@ -3024,6 +3207,234 @@ export const chanceDrawFields = (mc) => ({
 export const watchAttentionLevel = (maxLoss) =>
   (Number.isFinite(maxLoss) ? RULES.watchAttentionShare * maxLoss : null);
 
+/* =====================================================================
+   ONE P&L PER POSITION — AND IT IS THE BROKER'S (P9, TASK 0b)
+
+   >>> READ ON THE OWNER'S PHONE, 22 Sep 2026. <<< The Positions screen
+   printed **-$127** in the largest red figure on the card, directly above
+   the broker's own panel printing **-$130** for the same XLE position.
+   Two numbers for one trade, three dollars apart, neither labelled.
+
+   THE CAUSE IS TWO HOMES. `posAlerts` in App.jsx already prefers Alpaca's
+   `unrealized_pl` when the position is live at the broker — and the
+   Positions CARD, rendering a few hundred lines further down, re-derived
+   its own from `netValue(legs, spot, ...) - entryNet`. So the home page and
+   the card read two different arithmetics of the same fact, and the louder
+   one was the app's own guess.
+
+   CLAUDE.md, in the owner's own words: **the broker's numbers are READ,
+   never re-derived.** `unrealized_pl` is on the first list — bid, ask, IV,
+   OCC, open interest, order status, fill price, positions, P&L — and the
+   app's mark is a MODEL of it. A model beside a measurement is not a second
+   opinion, it is a contradiction the reader has to arbitrate.
+
+   THE APP'S MARK SURVIVES ONLY WHERE THERE IS NO BROKER FIGURE — the app's
+   own paper book, a market the chain has not priced, a broker that has not
+   been asked — AND IT SAYS SO. The same discipline as `markProvenance()`:
+   a figure carries where it came from, or it is not printed.
+===================================================================== */
+
+export const BROKER_PNL = "broker";
+export const MODEL_PNL = "model";
+
+/**
+ * The one P&L of an open position, and where it came from.
+ *
+ * @param brokerPnl  Alpaca's `unrealized_pl`, summed over the legs of THIS
+ *                   position — already a total for every contract of it.
+ * @param modelPnl   the app's own mark, already multiplied by the size.
+ * @returns {{ pnl, source, live, sentence }}  `pnl` null when neither is
+ *          readable, and `sentence` null when the broker answered — a number
+ *          read off the account needs no apology.
+ */
+export function positionPnl({ brokerPnl = null, modelPnl = null, feed = "the option chain" } = {}) {
+  // `Number(null)` IS 0 AND 0 IS FINITE, for the eighth time in this
+  // repository: the nulls go out before the coercion, or a broker that said
+  // nothing becomes a broker reporting break-even.
+  const num = (x) => (x == null || x === "" ? NaN : Number(x));
+  const b = num(brokerPnl), m = num(modelPnl);
+  if (Number.isFinite(b)) {
+    return { pnl: b, source: BROKER_PNL, live: true, sentence: null };
+  }
+  if (Number.isFinite(m)) {
+    return { pnl: m, source: MODEL_PNL, live: false, sentence: modelPnlNote(feed) };
+  }
+  return { pnl: null, source: null, live: false, sentence: null };
+}
+
+/** What it means that this figure is the app's and not the account's. */
+export const modelPnlNote = (feed = "the option chain") =>
+  `This profit is the APP'S OWN MARK, not the broker's: it is what the legs are worth at ` +
+  `${feed}'s prices right now, and the account has not reported a figure for this position. ` +
+  `Your Alpaca account is the one that counts.`;
+
+/* =====================================================================
+   WHAT IS LEFT TO MAKE AGAINST WHAT IS LEFT TO LOSE (P9, TASK 2)
+
+   >>> READ ON THE OWNER'S PHONE, 22 Sep 2026, XLE, in one scroll. <<<
+
+       home      "all inside the plan. Nothing to do"
+       desk      "TODAY · EVERYTHING IS ON PLAN"
+       the row   "Losing: check the reason you opened it"
+       verdict   "-> HOLD"
+       stat      "OF THE MAXIMUM  -3188%"
+
+   For a trade that can make **$4** and can lose **$346**. Every one of
+   those five lines is true of something, and together they say nothing.
+
+   THE MISSING FACT IS NOT ON ANY OF THEM. A position is judged at entry on
+   what it pays against what it risks (`RULES.minRewardRisk`), and then
+   that question is never asked again — so a structure whose remaining
+   reward has collapsed to four dollars against three hundred and forty-six
+   of remaining risk is still "on plan", because the plan was written when
+   the numbers were different.
+
+   `remainingEdge()` asks the ENTRY question about an OPEN position: from
+   today's mark, what is left to make and what is left to lose. It is pure
+   subtraction on figures the screen is already holding — no new
+   arithmetic, no simulation, no model.
+
+   >>> AND IT IS NOT AN EXIT RULE. <<< The exit rules are chosen at
+   construction and FROZEN (50% of max profit, 21 DTE, the stop as a
+   warning). Nothing here closes anything, nothing here appears in
+   `AUTOPILOT_VERDICTS`, and `ruleExitOf()` is untouched — so this can
+   never be the reason a trade ends. It is a WARNING, exactly like the
+   stop, and for the same reason: it is the weakest-evidenced thing the app
+   can say, and the honest response to it is to look, not to act.
+===================================================================== */
+
+/**
+ * What a position has left to make, and left to lose, from where it is now.
+ *
+ * TWO READINGS, AND THE WORSE ONE DECIDES. They answer two different
+ * questions and the XLE position needs both:
+ *
+ *   `ratio`        reward / risk measured FROM THE CURRENT MARK — would the
+ *                  rules OPEN this structure today, at today's price? On XLE:
+ *                  $131 still to make against $219 still to lose, which is
+ *                  0.60 and passes. That is not a mistake; it is the honest
+ *                  answer to that question.
+ *   `ceilingRatio` maxProfit / |maxLoss| — was this trade EVER something the
+ *                  rules would offer? On XLE: **$4 against $346**, which is
+ *                  0.01, forty times under the floor, and it is the fact the
+ *                  five contradictory lines on that screen were all silent
+ *                  about. The §4q inversion turned a $75 credit into $4 and
+ *                  nothing has asked the entry question since.
+ *
+ * A position is an ATTENTION item when EITHER is under `RULES.minRewardRisk`,
+ * because either one being thin is a real answer and pooling them would
+ * explain neither — the same reasoning that keeps `priceability()`,
+ * `impossibleLoss()` and `modelSanity()` apart.
+ *
+ * @param maxProfit  maximum profit for the WHOLE position (per-combination
+ *                   figures scaled by the size before they get here — the
+ *                   boundary rule, unchanged). `null` for an unbounded payoff,
+ *                   which has no ceiling to take a ratio of.
+ * @param maxLoss    maximum loss, SIGNED and negative, whole position.
+ * @param pnl        the profit now, whole position, from `positionPnl()`.
+ */
+export function remainingEdge({ maxProfit = null, maxLoss = null, pnl = null } = {}) {
+  const num = (x) => (x == null || x === "" ? NaN : Number(x));
+  const P = num(maxProfit), L = num(maxLoss), now = num(pnl);
+  const none = { known: false, reward: null, risk: null, ratio: null, ceilingRatio: null,
+    maxProfit: null, maxLoss: null, thin: false, thinReason: null, sentence: null };
+  // `Number(null)` IS 0 AND 0 IS FINITE. An unbounded payoff has no ceiling to
+  // take a ratio of and a position with no readable mark has no "from here" —
+  // both are UNKNOWN, and unknown is never a thin edge (the rule
+  // `qualityFloor()` applies to an unknown open interest, one screen across).
+  if (!Number.isFinite(now) || !Number.isFinite(P) || !Number.isFinite(L)) return none;
+  const reward = Math.max(0, P - now);
+  const risk = Math.max(0, Math.abs(L) + now);
+  // NOTHING DIVIDES BY A COST UNDER THE MINIMUM — `rewardRisk()`'s rule, and
+  // the same one that makes "OF THE MAXIMUM" print words below.
+  const ratio = risk >= MIN_NET_DOLLARS ? reward / risk : null;
+  const ceilingRatio = Math.abs(L) >= MIN_NET_DOLLARS ? Math.max(0, P) / Math.abs(L) : null;
+  const ceilingThin = ceilingRatio != null && ceilingRatio < RULES.minRewardRisk;
+  const hereThin = ratio != null && ratio < RULES.minRewardRisk;
+  const thinReason = ceilingThin ? "ceiling" : hereThin ? "here" : null;
+  return {
+    known: true, reward, risk, ratio, ceilingRatio, maxProfit: P, maxLoss: L,
+    thin: !!thinReason, thinReason,
+    sentence: thinReason
+      ? remainingEdgeNote({ reward, risk, maxProfit: P, maxLoss: L, reason: thinReason })
+      : null,
+  };
+}
+
+/** The warning, with BOTH dollar figures in it, in the entry rule's own words. */
+export const remainingEdgeNote = ({ reward, risk, maxProfit, maxLoss, reason = "ceiling" } = {}) => {
+  const head = reason === "ceiling"
+    ? `The most this position can make is ${money(maxProfit)} and the most it can lose is ` +
+      `${money(Math.abs(maxLoss))}.`
+    : `From here this position has ${money(reward)} left to make and ${money(risk)} left to lose.`;
+  return `${head} That is under the ${pctText(RULES.minRewardRisk)} of what it risks that the app requires ` +
+    `before it will offer a trade at all — the rules would not open this trade today. Nothing closes on ` +
+    `this: the exit rules were chosen when you opened it and they are frozen. It is a reason to look at ` +
+    `it, the same way the stop is.`;
+};
+
+/** The one line a list row carries, short enough to sit beside a price. */
+export const remainingEdgeLabel = (e) =>
+  (e && e.thin
+    ? `Thin: ${money(e.thinReason === "here" ? e.reward : Math.max(0, e.maxProfit))} to make against ` +
+      `${money(e.thinReason === "here" ? e.risk : Math.abs(e.maxLoss))} at risk`
+    : null);
+
+/* =====================================================================
+   THE HEADLINE IS DERIVED FROM THE LIST, NOT WRITTEN BESIDE IT (P9, TASK 2)
+
+   Read in one scroll: the home page said *"all inside the plan. Nothing to
+   do."*, the desk said *"TODAY · EVERYTHING IS ON PLAN"*, and the row
+   between them said *"Losing: check the reason you opened it"*.
+
+   THE CAUSE IS ONE FILTER. Both headlines read a count of alerts at level
+   `action` — and a `watch` row is not `action`, so a position the app had
+   just told the reader to check could sit under a headline saying there was
+   nothing to check. §4m's rule, one tab across: a screen that argues with
+   itself is worse than one that says nothing, because the part that shouts
+   loudest wins and here that part was the reassurance.
+
+   `attentionCount()` is the one home. TWO counts, because they answer two
+   questions and one number could not: `decisions` is what a rule has fired
+   on and the badge is drawn from it; `looks` is everything that is not on
+   plan, and NO HEADLINE MAY SAY "nothing to do" WHILE IT IS ABOVE ZERO.
+===================================================================== */
+
+export function attentionCount(alerts = []) {
+  const list = Array.isArray(alerts) ? alerts : [];
+  const decisions = list.filter((a) => a && a.level === "action").length;
+  const looks = list.filter((a) => a && a.level && a.level !== "ok").length;
+  return { decisions, looks, quiet: looks === 0 };
+}
+
+/** THE SAME ACTION, SAID ONCE. The broker panel's close and the Positions
+ *  card's close are one act, and only the second one asks why and files the
+ *  reason. Where the two meet, this is what the broker panel says instead of
+ *  offering a second button. */
+export const sameCloseNote = (ref) =>
+  `This is ${ref || "a position"} on your Positions screen. Close it there: it is the same order, and ` +
+  `that button asks what ended the trade and files the answer with it. A close with no reason on the ` +
+  `record teaches nothing later.`;
+
+/* WHEN "OF THE MAXIMUM" IS A PERCENTAGE AND WHEN IT IS WORDS.
+   -$127 against a $4 maximum is -3188%, which is a true division and a false
+   sentence: a percentage of almost nothing is not a share of anything. The
+   rule is the one `rewardRisk()` already applies — nothing divides by a
+   figure under `MIN_NET_DOLLARS` — and below it the stat says what it means
+   instead of printing a number that reads as a bug. */
+export function shareOfMaximum(pnl, maxProfit) {
+  const num = (x) => (x == null || x === "" ? NaN : Number(x));
+  const now = num(pnl), P = num(maxProfit);
+  if (!Number.isFinite(now) || !Number.isFinite(P)) return { pct: null, text: "—" };
+  if (!(Math.abs(P) >= MIN_NET_DOLLARS)) {
+    return { pct: null, text: `too small to be a share`,
+      note: `The most this position can make is ${money(P)}, which is under the ${money(MIN_NET_DOLLARS)} ` +
+        `minimum this app will form a ratio against. A percentage of it would be a true division and a ` +
+        `false sentence.` };
+  }
+  return { pct: (now / P) * 100, text: `${((now / P) * 100).toFixed(0)}%` };
+}
+
 /** Why an estimated price is not something to act on, in one sentence. */
 export const modelPriceNote = (feed = "the option chain") =>
   `This position's value is ESTIMATED: at least one leg had no two-sided quote on ${feed}, so the ` +
@@ -3926,6 +4337,110 @@ export function entryRoom(dte, {
   const band = d <= exitDTE ? "inside-exit" : d < minEntryDTE ? "tight" : "clear";
   return { known: true, dte: d, room, target, band, blocking: band === "inside-exit" };
 }
+
+/* =====================================================================
+   THE APP NEVER PROPOSES A TRADE ITS OWN GATE WOULD BLOCK (P9, TASK 1)
+
+   >>> READ ON THE OWNER'S PHONE, 22 Sep 2026. <<< The Radar and the
+   multi-market search both ran at "HORIZON ~21 DTE" and every structure
+   they offered sat on 2026-10-16, twenty-four days out. Taking any of them
+   to Build produced, at the bottom of that screen:
+
+       THIS ORDER WOULD NOT BE SENT
+       ENTRY_DTE_ROOM — 3 days of room against the 30-day floor
+
+   The app built a menu out of trades its own gate refuses. That is worse
+   than an empty screen: an empty screen with a sentence teaches the rule,
+   and a menu that dead-ends teaches that the rules are arbitrary.
+
+   THE CAUSE IS THREE DIFFERENT WINDOWS IN THREE PLACES, none of them the
+   rule:
+
+       runMultiScan   dte >= dT - 20 && dte <= dT + 35   (at dT=21: 1..56)
+       runWizard      dte >= minEntryDTE && dte <= 130   (a bare 130)
+       the dropdown   every expiry the feed lists        (no filter at all)
+
+   `buildableExpiries()` is the one home, and it is built ON `entryRoom()`
+   so there is no second spelling of the floor anywhere. A board is
+   BUILDABLE when the gate would pass it WITHOUT AN OVERRIDE — band
+   "clear" — and inside `maxEntryDTE`.
+
+   >>> THE OVERRIDE IS NOT WITHDRAWN. <<< `entryRoom()`'s middle band still
+   unlocks with a typed reason, and `expiryChoice()`'s `passedOver` still
+   offers a nearer, busier board. What changes is that the app will not
+   OPEN a menu there by itself: a door you may choose to walk through is
+   not the same as a corridor you are led down.
+
+   THE HORIZON YIELDS, THE FLOOR NEVER DOES — the same fallback
+   `expiryChoice()` already carries, and for the same reason: the far edge
+   is a preference about which trade this app is for, and the near edge is
+   the gate's.
+===================================================================== */
+
+/** Would the gate open a position on a board this far out, with no override? */
+export const openableBoard = (dte) => entryRoom(dte).band === "clear";
+
+/**
+ * Which boards a generation site may build on.
+ *
+ * @param entries  `[{ key, dte, ... }]`, read off the chain. Anything else on
+ *                 each entry is carried through untouched, so a caller can
+ *                 hand in its own rows.
+ * @returns {{ buildable, blocked, horizonYielded }}
+ *   `blocked` carries each refused board with its `entryRoom()` band, so a
+ *   screen can NAME what it is not offering instead of silently shortening a
+ *   list — the rule `emptyExpiryNote()` and `offBoardStrikeLabel()` follow.
+ */
+export function buildableExpiries(entries = [], {
+  maxEntryDTE = RULES.maxEntryDTE,
+} = {}) {
+  const all = (Array.isArray(entries) ? entries : [])
+    // `Number(null)` IS 0 AND 0 IS FINITE: a board whose DTE has not been read
+    // is UNKNOWN, and an unknown board is not a board that settles today. The
+    // null goes out BEFORE the coercion, for the ninth time in this repository
+    // — coercing first would file every unread board under "inside the exit
+    // rule", which is a verdict the app has no evidence for.
+    .filter((e) => e && e.key != null && e.dte != null && e.dte !== "" && Number.isFinite(Number(e.dte)))
+    .map((e) => ({ ...e, dte: Number(e.dte), room: entryRoom(e.dte) }));
+  const open = all.filter((e) => e.room.band === "clear");
+  const inWindow = open.filter((e) => e.dte <= maxEntryDTE);
+  const buildable = inWindow.length ? inWindow : open;
+  const keep = new Set(buildable.map((e) => e.key));
+  return {
+    buildable,
+    blocked: all.filter((e) => !keep.has(e.key)),
+    horizonYielded: open.length > 0 && inWindow.length === 0,
+  };
+}
+
+/** What a board the floor refuses is CALLED in a dropdown, so it can be shown
+ *  and disabled rather than silently offered. The `offBoardStrikeLabel()`
+ *  pattern: a `<select>` whose value matches no option displays the first one,
+ *  and a list that quietly drops a row teaches nothing. */
+export const offFloorExpiryLabel = (key, dte) => {
+  const r = entryRoom(dte);
+  if (r.band === "clear") return `${key} · ${dte} DTE`;
+  return r.band === "inside-exit"
+    ? `${key} · ${dte} DTE — inside the ${RULES.exitDTE}-day exit, not offered`
+    : `${key} · ${dte} DTE — under the ${RULES.minEntryDTE}-day floor`;
+};
+
+/** Why the horizon control stops where it does, in ONE clause, from the rule. */
+export const horizonFloorNote = () =>
+  `from ${RULES.minEntryDTE} days, because the app will not build on a board the gate would refuse`;
+
+/**
+ * WHAT STEP 2 OFFERS WHEN THE FLOORS EMPTIED IT.
+ *
+ * "Go to Build — <structure>" carried whatever was left in the Build screen's
+ * legs, which after a refusal is the structure the screen has just said it
+ * will not offer. A button onto a trade the list above it removed is the same
+ * fault as the menu this section exists to close, one screen later.
+ */
+export const emptyShortlistCta = ({ expKey = null, ticker = null } = {}) =>
+  `Nothing on ${expKey || "this board"}${ticker ? ` for ${ticker}` : ""} survived the floors, so there is ` +
+  `nothing here to take apart. Try another expiry above, another market on step 1, or take the answer: ` +
+  `some days there is no trade worth making, and that is the app working rather than failing.`;
 
 /** The hard refusal: the position would open inside its own exit window. */
 export const entryInsideExitNote = (r) =>

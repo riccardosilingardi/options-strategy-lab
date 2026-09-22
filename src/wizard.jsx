@@ -269,8 +269,16 @@ const greeting = (d = new Date()) => {
   return h < 12 ? "Good morning." : h < 18 ? "Good afternoon." : "Good evening.";
 };
 
-/** One line. Generated from the numbers, never hand-written per case. */
-export function statusLine({ positions = [], attention = 0, marketReady = true }) {
+/** One line. Generated from the numbers, never hand-written per case.
+ *
+ * >>> "NOTHING TO DO" IS DERIVED FROM THE SAME LIST THE ROWS ARE (P9, TASK 2).
+ * <<< `attention` counts only the positions a RULE has fired on. A position at
+ * the `watch` level is not one of them, so this line said *"all inside the
+ * plan. Nothing to do."* directly above a row reading *"Losing: check the
+ * reason you opened it"*. `looks` is everything that is not on plan
+ * (`attentionCount()` in rules.js), and this line may not call the book quiet
+ * while it is above zero. */
+export function statusLine({ positions = [], attention = 0, looks = null, marketReady = true }) {
   if (!positions.length) {
     return marketReady
       ? "No open positions. Nothing to manage — today is for looking."
@@ -283,10 +291,18 @@ export function statusLine({ positions = [], attention = 0, marketReady = true }
       ? `1 of your ${n} ${plural} needs a decision today.`
       : `${attention} of your ${n} ${plural} need a decision today.`;
   }
+  // `looks` is optional so an older caller reads exactly as it did; when it is
+  // given it decides, because a row that says "check this" outranks a headline.
+  const look = Number(looks) || 0;
+  if (look > 0) {
+    return look === 1
+      ? `1 of your ${n} ${plural} is worth a look — the row below says why.`
+      : `${look} of your ${n} ${plural} are worth a look — the rows below say why.`;
+  }
   return `${n} ${plural} open, all inside the plan. Nothing to do.`;
 }
 
-export function WizardOpen({ positions = [], posAlerts = [], attention = 0, marketReady = true,
+export function WizardOpen({ positions = [], posAlerts = [], attention = 0, looks = null, marketReady = true,
   onPositions, onFind, onDesk, onSettings, barsFor }) {
   const hasPositions = positions.length > 0;
   return (
@@ -295,7 +311,7 @@ export function WizardOpen({ positions = [], posAlerts = [], attention = 0, mark
         <div>
           <h1 style={{ ...sans, fontSize: 27, fontWeight: 800, color: T.ink, margin: 0, lineHeight: 1.2 }}>{greeting()}</h1>
           <p style={{ ...sans, fontSize: 15.5, color: T.mut, lineHeight: 1.5, margin: "8px 0 0" }}>
-            {statusLine({ positions, attention, marketReady })}
+            {statusLine({ positions, attention, looks, marketReady })}
           </p>
         </div>
         <button onClick={onSettings} title="Settings"
@@ -306,8 +322,8 @@ export function WizardOpen({ positions = [], posAlerts = [], attention = 0, mark
 
       {/* With positions open, what needs attention IS the front page. */}
       {hasPositions && (
-        <Card style={{ marginTop: 18, borderColor: attention ? `${T.red}66` : T.line }}>
-          <Eyebrow>{attention ? "Needs attention today" : "Your positions"}</Eyebrow>
+        <Card style={{ marginTop: 18, borderColor: attention ? `${T.red}66` : (Number(looks) || 0) ? `${T.amber}66` : T.line }}>
+          <Eyebrow>{attention ? "Needs attention today" : (Number(looks) || 0) ? "Worth a look" : "Your positions"}</Eyebrow>
           <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
             {posAlerts.map(({ p, pnl, dteLeft, level, label, spotNow }) => {
               const c = level === "action" ? T.red : level === "watch" ? T.amber : T.green;
@@ -818,10 +834,11 @@ export function WizardCandidates({ candidates = [], answers = {}, narrative = []
           fusedNow={fusedFor ? fusedFor(c.ticker) : null}
           other={candidates.find((x) => x !== c) || null} />
       ))}
+      {/* A LEGEND, AND EVERY VISUAL IN THIS APP ALREADY CARRIES ITS OWN
+          `takeaway()` — one always-visible generated sentence (PRD §6). This
+          explained the colours a fourth time (P9, TASK 3). */}
       <div style={{ ...sans, fontSize: 12.5, color: T.dim, marginTop: 16, lineHeight: 1.5, textAlign: "center" }}>
-        Green is where the trade makes money at expiry, red is where it does not, and the line across them is
-        where the price has actually been. Every chart here is drawn from the same payoff calculation, so they
-        can be compared directly.
+        Green makes money at expiry, red does not, and the line across them is where the price has been.
       </div>
     </div>
   );
@@ -987,11 +1004,14 @@ export function ConfirmSteps({
         {/* WHAT IS BEING SENT IS THE SIZE ON SCREEN. This said "One contract of
             each" underneath a ticket whose quantity field could say seven —
             the app describing an order it was not about to send. */}
+        {/* THE SIZE, AND NOTHING ELSE (P9, TASK 3). "on a paper account" is
+            the header badge, and "nothing is sent until you tap below" is the
+            button four lines down saying so itself. What is left is the fact
+            only this line carries: every figure above is for all of them. */}
         <div style={{ ...sans, fontSize: 13, color: T.mut, marginTop: 8, lineHeight: 1.5 }}>
           {n === 1
-            ? "One combination, on a paper account. Nothing is sent until you tap below."
-            : `${n} combinations of the structure above, on a paper account — that is what each line already shows. ` +
-              `Everything this screen measures is for all ${n}. Nothing is sent until you tap below.`}
+            ? "One combination. Nothing is sent until you tap below."
+            : `${n} combinations — every figure above is for all ${n}.`}
         </div>
       </Card>
 
@@ -1006,11 +1026,18 @@ export function ConfirmSteps({
             <span style={{ ...sans, fontSize: 13.5, color: T.body, lineHeight: 1.5 }}>{w.message}</span>
           </div>
         ))}
+        {/* A REFUSAL AND A REASSURANCE MAY NOT SHARE A SHEET EITHER (P9, TASK 1).
+            `refused` renders directly below; "none of them stops the order"
+            over "The order was not sent" is the same contradiction the trade
+            card carried. The count and the pointer stay — only the clause that
+            argues with the refusal below it goes. */}
         {!showWarnings && (shown?.warnings || []).length > 0 && (
           <div style={{ ...sans, fontSize: 12.5, color: T.mut, marginTop: 12, lineHeight: 1.5 }}>
             {(shown.warnings || []).length} warning{(shown.warnings || []).length === 1 ? "" : "s"} apply to this
             trade. {(shown.warnings || []).length === 1 ? "It is" : "They are"} in the warnings panel on
-            the step this sheet closes back onto, written once — none of them stops the order.
+            the step this sheet closes back onto, written once{refused
+              ? " — the refusal below is what decides."
+              : " — none of them stops the order."}
           </div>
         )}
         {refused && (

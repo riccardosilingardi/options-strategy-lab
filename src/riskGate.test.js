@@ -4,7 +4,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import assert from "node:assert/strict";
 import { evaluateTrade, paperStatus, undefinedRiskLegs } from "./riskGate.js";
-import { positionSize, positionSizeNote, contractsOf, withPositionSize, bookPositions, positionStage } from "./journal.js";
+import { positionSize, positionSizeNote, contractsOf, withPositionSize, bookPositions, positionStage, positionForHolding } from "./journal.js";
 import { orderBody, mlegLimitPrice } from "./order.js";
 import { RULES, sizing, ruleBadge, qualityFloor, qualityFloorSentence, liquiditySkippedNote, NOTHING_TODAY,
   LIQUIDITY_LEVELS, RECOMMENDED_LIQUIDITY, LIQUIDITY_MEASUREMENT, liquidityMeasurementNote, liquidityThreshold, looseningWarning, liquiditySettingNote,
@@ -22,7 +22,10 @@ import { RULES, sizing, ruleBadge, qualityFloor, qualityFloorSentence, liquidity
   entryRoom, entryInsideExitNote, entryRoomWarning, entryRoomOverrideAsk, entryOverrideOk, entryOverrideNote,
   passedOverRecord, passedOverSummary, OPEN_LIMIT_SLIPPAGE, CLOSE_LIMIT_SLIPPAGE,
   chancePct, chanceText, chanceInTen, signedMoney,
-  sigmaProvenance, TABLE_SIGMA_SOURCE, MEASURED_SIGMA_SOURCE, FALLBACK_SIGMA_SOURCE } from "./rules.js";
+  sigmaProvenance, TABLE_SIGMA_SOURCE, MEASURED_SIGMA_SOURCE, FALLBACK_SIGMA_SOURCE,
+  positionPnl, modelPnlNote, BROKER_PNL, MODEL_PNL,
+  buildableExpiries, openableBoard, offFloorExpiryLabel, horizonFloorNote, emptyShortlistCta,
+  remainingEdge, remainingEdgeNote, remainingEdgeLabel, shareOfMaximum, attentionCount, sameCloseNote } from "./rules.js";
 import { netBS, SIGMA, exitSim } from "./engine.js";
 import { isStale, staleAmong, agePhrase, freshnessNote, BUDGETS } from "./freshness.js";
 
@@ -2925,6 +2928,211 @@ test("BUTTERFLIES — the count travels separately and has its own sentence", ()
   assert.ok(n.includes(String(RULES.exitDTE)), "the sentence names the rule it is about");
   assert.ok(/full desk/.test(n), "and says where they are still reachable");
   assert.ok(!/liquidity|spread|reward/.test(n), "it is not a quality floor and must not sound like one");
+});
+
+/* ================================================================
+   P9 TASK 0b — ONE P&L PER POSITION, AND IT IS THE BROKER'S
+
+   >>> READ ON THE OWNER'S PHONE, 22 Sep 2026. <<< The Positions card
+   printed -$127 in the largest red figure on the screen, directly
+   above the broker's own panel printing -$130 for the same XLE
+   position. `posAlerts` preferred `unrealized_pl`; the CARD a few
+   hundred lines below re-derived its own from `netValue()`.
+================================================================ */
+
+test("0b — THE BROKER'S FIGURE WINS, and it is read rather than recomputed", () => {
+  const r = positionPnl({ brokerPnl: -130, modelPnl: -127 });
+  assert.equal(r.pnl, -130, "the account's number, not the app's model of it");
+  assert.equal(r.source, BROKER_PNL);
+  assert.equal(r.live, true);
+  assert.equal(r.sentence, null, "a figure read off the account needs no apology");
+});
+
+test("0b — THE APP'S MARK SURVIVES WHERE THERE IS NO BROKER FIGURE, AND SAYS SO", () => {
+  const r = positionPnl({ brokerPnl: null, modelPnl: -127, feed: "CBOE" });
+  assert.equal(r.pnl, -127);
+  assert.equal(r.source, MODEL_PNL);
+  assert.equal(r.live, false);
+  assert.ok(r.sentence, "it may never be printed silently beside a broker's");
+  assert.ok(/APP'S OWN MARK/.test(r.sentence));
+  assert.ok(r.sentence.includes("CBOE"), "and it names the feed it priced from");
+});
+
+test("0b — AN UNASKED BROKER IS NOT A BROKER REPORTING ZERO", () => {
+  // `Number(null)` is 0 and 0 is finite, for the eighth time in this repo.
+  assert.equal(positionPnl({ brokerPnl: null, modelPnl: null }).pnl, null);
+  assert.equal(positionPnl({ brokerPnl: null, modelPnl: null }).source, null);
+  assert.equal(positionPnl({ brokerPnl: "", modelPnl: -5 }).source, MODEL_PNL);
+  // ...and a real 0 from the broker IS a reading.
+  assert.equal(positionPnl({ brokerPnl: 0, modelPnl: -127 }).pnl, 0);
+  assert.equal(positionPnl({ brokerPnl: 0, modelPnl: -127 }).source, BROKER_PNL);
+});
+
+test("0b — `App.jsx` SPELLS THE POSITION P&L ONCE, through `pnlOf()`", () => {
+  /* The same discipline `chanceCheckOf()` and `modelCheckOf()` hold. Two
+     spellings is exactly how one XLE position came to print two figures. */
+  const app = readFileSync(new URL("./App.jsx", import.meta.url), "utf8");
+  const derived = app.match(/netValue\([\s\S]{0,160}?-\s*p\.entryNet/g) || [];
+  assert.equal(derived.length, 1,
+    `the position mark is derived in ${derived.length} places; it belongs only inside pnlOf()`);
+  // Comments naming the field are prose; a READ of it is `x.unrealized_pl`.
+  assert.equal((app.match(/\.unrealized_pl/g) || []).length, 1,
+    "and the broker's own figure is READ in exactly one place, inside the same callback");
+  assert.ok(/const pnlOf = useCallback/.test(app), "and that place is `pnlOf`");
+});
+
+/* ================================================================
+   P9 TASK 1 — THE SOURCE SWEEPS (the arithmetic half is in
+   ceiling.test.jsx, against the real generation sites).
+================================================================ */
+
+test("TASK 1 — the horizon control cannot ask for a board the gate would refuse", () => {
+  const app = readFileSync(new URL("./App.jsx", import.meta.url), "utf8");
+  const slider = app.match(/<input type="range"[^>]*multi\.dteT[^>]*>/);
+  assert.ok(slider, "the horizon slider moved; point this at it again");
+  assert.ok(!/min=\{21\}/.test(slider[0]), "21 is RULES.exitDTE wearing a horizon's clothes");
+  assert.ok(/min=\{RULES\.minEntryDTE\}/.test(slider[0]), "both ends read their rule");
+  assert.ok(/max=\{RULES\.maxEntryDTE\}/.test(slider[0]));
+  // ...and the label says WHY, in one clause, from the rule.
+  assert.ok(horizonFloorNote().includes(String(RULES.minEntryDTE)));
+  assert.ok(/the gate would refuse/.test(horizonFloorNote()));
+});
+
+test("TASK 1 — every generation site reads the one home, none filters expiries by hand", () => {
+  // COMMENTS STRIPPED, because the comments beside these sites QUOTE the
+  // windows they replaced — which is the point of them, and would otherwise
+  // make the sweep fail on its own explanation.
+  const app = codeOf("App.jsx");
+  // The three windows this closed: `dT - 20` / `dT + 35`, a bare 130, and none.
+  assert.ok(!/dte >= dT - 20/.test(app), "the wide search's own window is gone");
+  assert.ok(!/\.dte <= 130/.test(app), "and the guided run's bare 130");
+  const uses = app.match(/buildableExpiries\(/g) || [];
+  assert.ok(uses.length >= 2, `the wide search and the guided run must both read it; found ${uses.length}`);
+  // ...and the third site holds the guard INSIDE itself, so a fourth caller
+  // added next year is covered without anybody coming back.
+  assert.ok(/if \(!openableBoard\(dte\)\)/.test(app));
+});
+
+test("TASK 1 — an empty shortlist offers an honest next step, not a button onto a refused trade", () => {
+  const cta = emptyShortlistCta({ expKey: "2026-10-16", ticker: "XLE" });
+  assert.ok(cta.includes("2026-10-16"));
+  assert.ok(/another expiry/.test(cta) && /another market/.test(cta));
+  assert.ok(!/Go to Build/.test(cta));
+  const app = readFileSync(new URL("./App.jsx", import.meta.url), "utf8");
+  assert.ok(/Nothing here to take apart/.test(app), "and the button says so rather than naming a structure");
+});
+
+/* ================================================================
+   P9 TASK 2 — A POSITION SAYS ONE THING
+
+   >>> READ ON THE OWNER'S PHONE, 22 Sep 2026, XLE, in one scroll. <<<
+       home      "all inside the plan. Nothing to do"
+       desk      "TODAY · EVERYTHING IS ON PLAN"
+       the row   "Losing: check the reason you opened it"
+       verdict   "-> HOLD"
+       stat      "OF THE MAXIMUM  -3188%"
+   For a trade that can make $4 and can lose $346.
+================================================================ */
+
+// XLE J-0002 as the owner's screen carries it: the §4q inversion turned a $75
+// credit into $4, and nothing has asked the entry question since.
+const XLE_EDGE = { maxProfit: 4, maxLoss: -346, pnl: -127 };
+
+test("TASK 2 — the entry question, asked of an open position, and BOTH readings", () => {
+  const e = remainingEdge(XLE_EDGE);
+  assert.equal(e.known, true);
+  // From the current mark: $131 still to make, $219 still to lose.
+  assert.equal(e.reward, 131);
+  assert.equal(e.risk, 219);
+  assert.ok(Math.abs(e.ratio - 131 / 219) < 1e-9);
+  // And the reading that damns it: $4 against $346, forty times under the floor.
+  assert.ok(Math.abs(e.ceilingRatio - 4 / 346) < 1e-9);
+  assert.equal(e.thin, true, "either one being thin is an attention item");
+  assert.equal(e.thinReason, "ceiling");
+});
+
+test("TASK 2 — the sentence names BOTH dollar figures and the rule", () => {
+  const e = remainingEdge(XLE_EDGE);
+  assert.ok(e.sentence.includes("$4"), "what it can make");
+  assert.ok(e.sentence.includes("$346"), "what it can lose");
+  assert.ok(/would not open this trade today/.test(e.sentence));
+  // >>> AND IT IS NOT AN EXIT RULE. <<<
+  assert.ok(/Nothing closes on this/.test(e.sentence));
+  assert.ok(/frozen/.test(e.sentence), "the exit rules were chosen at construction");
+  assert.ok(/the same way the stop is/.test(e.sentence), "a warning, like the stop");
+  assert.ok(remainingEdgeLabel(e).includes("$4") && remainingEdgeLabel(e).includes("$346"));
+});
+
+test("TASK 2 — a healthy position is not an attention item, so this is not a wall", () => {
+  const e = remainingEdge({ maxProfit: 320, maxLoss: -180, pnl: 10 });
+  assert.equal(e.thin, false);
+  assert.equal(e.sentence, null);
+  assert.equal(remainingEdgeLabel(e), null);
+});
+
+test("TASK 2 — UNKNOWN IS NOT A THIN EDGE: no ceiling and no mark both SKIP", () => {
+  // `Number(null)` is 0 and 0 is finite, for the ninth time in this repository.
+  assert.equal(remainingEdge({ maxProfit: null, maxLoss: -300, pnl: -10 }).known, false,
+    "an unbounded payoff has no ceiling to take a ratio of");
+  assert.equal(remainingEdge({ maxProfit: 300, maxLoss: -300, pnl: null }).known, false,
+    "and a position with no readable mark has no 'from here'");
+  assert.equal(remainingEdge({}).thin, false, "unknown is never thin");
+});
+
+test("TASK 2 — the exit rules are untouched: this adds no verdict and no rule exit", () => {
+  // The gate, the autopilot menu and `ruleExitOf()` must not know it exists.
+  const rules = codeOf("rules.js");
+  assert.ok(!/remainingEdge/.test(codeOf("riskGate.js")), "it is not in the gate");
+  const verdicts = rules.match(/AUTOPILOT_VERDICTS = \[([^\]]*)\]/);
+  assert.ok(verdicts && !/THIN|EDGE/.test(verdicts[1]), "and not on the autopilot's menu");
+  assert.equal(RULES.takeProfitPct, 0.5, "50% of max profit, unchanged");
+  assert.equal(RULES.stopLossPct, 0.5, "the stop, unchanged");
+  assert.equal(RULES.exitDTE, 21, "21 DTE, unchanged");
+});
+
+test("TASK 2 — \"OF THE MAXIMUM\" prints a percent only above MIN_NET_DOLLARS", () => {
+  // -$127 against a $4 maximum is -3188%: a true division and a false sentence.
+  const tiny = shareOfMaximum(-127, 4);
+  assert.equal(tiny.pct, null);
+  assert.ok(!/%/.test(tiny.text), `printed ${tiny.text}`);
+  assert.ok(tiny.note.includes(money(MIN_NET_DOLLARS)), "and says which rule stopped it");
+  // Above it, it is exactly the number it always was.
+  assert.equal(shareOfMaximum(160, 320).text, "50%");
+  assert.equal(shareOfMaximum(null, 320).text, "—");
+  assert.equal(shareOfMaximum(160, null).text, "—", "no ceiling is a dash, never 0%");
+});
+
+test("TASK 2 — no headline may say \"nothing to do\" while an attention item exists", () => {
+  const watching = [{ level: "watch" }, { level: "ok" }];
+  const a = attentionCount(watching);
+  assert.equal(a.decisions, 0, "no RULE has fired, so the badge stays quiet");
+  assert.equal(a.looks, 1, "but one row says to look at it");
+  assert.equal(a.quiet, false, "so the book is not quiet");
+  assert.equal(attentionCount([{ level: "ok" }]).quiet, true);
+  assert.equal(attentionCount([]).quiet, true);
+  // And the two screens that print the headline read this, not their own filter.
+  const app = codeOf("App.jsx");
+  assert.ok(/attentionCount\(posAlerts\)/.test(app));
+  assert.ok(!/posAlerts\.filter\(\(a\) => a\.level === "action"\)/.test(app),
+    "the hand-written filter that produced the contradiction is gone");
+});
+
+test("TASK 2 — ONE CLOSE CONTROL PER POSITION", () => {
+  const held = { id: 1, ref: "J-0002", ticker: "XLE", expKey: "2026-10-30", alpacaHeld: true, legs: [] };
+  const book = [held];
+  assert.equal(positionForHolding(book, { ticker: "XLE", expKey: "2026-10-30" }), held);
+  // A holding this app has NO record of keeps the broker panel's own button:
+  // removing it would strand a position with no way out of this app at all.
+  assert.equal(positionForHolding(book, { ticker: "GLD", expKey: "2026-10-30" }), null);
+  assert.equal(positionForHolding(book, { ticker: "XLE", expKey: null }), null);
+  // ...and only an OWNED record counts: pointing at a "Close" button on a row
+  // that is not in the Positions list is a door with nothing behind it.
+  const notTaken = { id: 2, ticker: "SOYB", expKey: "2026-11-20", alpacaId: "x", alpacaStatus: "canceled", legs: [] };
+  assert.equal(positionStage(notTaken), "not-taken");
+  assert.equal(positionForHolding([notTaken], { ticker: "SOYB", expKey: "2026-11-20" }), null);
+  const note = sameCloseNote("J-0002");
+  assert.ok(note.includes("J-0002") && /Positions screen/.test(note));
+  assert.ok(/asks what ended the trade/.test(note), "and says WHY it is the one to use");
 });
 
 /* ---------------- summary ---------------- */

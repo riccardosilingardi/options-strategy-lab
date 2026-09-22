@@ -812,6 +812,104 @@ is QUOTED, in comments, so the mirror can be checked), no dependency added, no k
   suite says so rather than implying a check that did not happen, holds the three enums the spec
   DOES carry, and runs Alpaca's own documented SPY straddle as a fixture.
 
+## THE APP NEVER PROPOSES A TRADE ITS OWN GATE WOULD BLOCK — `buildableExpiries()`
+
+PRD §4v.1. Read on the phone: Radar and the multi-market search ran at **HORIZON ~21 DTE**,
+every structure they offered sat at **24 DTE**, and Build then said **THIS ORDER WOULD NOT BE
+SENT** — `ENTRY_DTE_ROOM`, three days of room against the thirty-day floor. **A menu that
+dead-ends teaches that the rules are arbitrary**; an empty screen with a sentence teaches the
+rule.
+
+THREE DIFFERENT WINDOWS IN THREE PLACES, none of them the rule: `dT - 20`/`dT + 35` in the wide
+search (ONE to 56 DTE at the slider's old floor), a bare `130` in `runWizard`, and no filter at
+all on the expiry dropdown.
+
+- **`buildableExpiries()` / `openableBoard()` in `rules.js` ARE THE ONE HOME**, built ON
+  `entryRoom()` so the floor has no second spelling. Buildable means the gate would pass it
+  **WITHOUT AN OVERRIDE**. The horizon yields when nothing is inside it; the floor never does.
+- **THE THIRD GENERATION SITE HOLDS THE GUARD INSIDE ITSELF.** `shortlistWithFloors()` returns
+  nothing on an unbuildable board and says `offFloor` — the reason `buildPresets()` refuses a
+  null board in the function rather than at its call sites. **An empty list and "this board was
+  never one the app opens on" are different answers.**
+- **THE OVERRIDE IS NOT WITHDRAWN.** `entryRoom()`'s middle band still unlocks with a typed
+  reason and `passedOver` is still offerable. A door you may choose to walk through is not a
+  corridor you are led down.
+- **A `<select>` NEVER SILENTLY OFFERS A REFUSED BOARD** (`offFloorExpiryLabel()`, the
+  `strikeOptions()` pattern), and **`expiryChoiceNote()` NAMES THE SELECTED BOARD** — the
+  dropdown read 2026-10-16 over a sentence reading "Building on 2026-11-20".
+- **A REFUSAL AND A REASSURANCE MAY NOT SHARE A CARD**: "none of them stops the order" is
+  suppressed while a violation stands.
+- `ceiling.test.jsx` puts every candidate every generation site returns through
+  `evaluateTrade()` and requires **zero violations**; the fixture also proves the gate really
+  refuses 24 DTE, so the filter is load-bearing rather than decorative.
+
+## A POSITION SAYS ONE THING — `remainingEdge()`, `attentionCount()`, `positionPnl()`
+
+PRD §4v.0b, §4v.2. Read in ONE scroll on XLE: home *"all inside the plan. Nothing to do"*, the
+desk *"TODAY · EVERYTHING IS ON PLAN"*, the row *"Losing: check the reason"*, the verdict
+*"→ HOLD"*, and **"OF THE MAXIMUM −3188%"** — for a trade that can make **$4** and lose **$346**.
+
+- **ONE P&L PER POSITION, AND IT IS THE BROKER'S.** `positionPnl()` in `rules.js`, spelled once
+  in `App.jsx` as `pnlOf()`. The card printed −$127 over the broker's own −$130 because
+  `posAlerts` read `unrealized_pl` and the card re-derived `netValue() − entryNet`. **The app's
+  mark survives only where there is no broker figure, and says so.** `riskGate.test.js` fails
+  the build on a second spelling of either.
+- **`remainingEdge()` ASKS THE ENTRY QUESTION OF AN OPEN POSITION, IN TWO READINGS**: from the
+  current mark (would the rules OPEN this today) and the position's own ceiling (was it ever
+  something they would offer). $131-against-$219 passes and is the honest answer to the first;
+  **$4 against $346 is 0.01** and is the fact five lines were silent about. Either being thin is
+  an attention item and the sentence names both dollar figures.
+- **IT IS NOT AN EXIT RULE.** Exit rules are frozen at construction, nothing auto-closes,
+  `AUTOPILOT_VERDICTS` is untouched, `ruleExitOf()` does not know it exists and it is **not in
+  the gate**. A warning, exactly like the stop.
+- **`attentionCount()` IS THE ONE HOME FOR THE HEADLINE.** Both headlines counted only `action`,
+  so a `watch` row said "check this" under a headline saying there was nothing to check. No
+  headline may call the book quiet while `looks` is above zero.
+- **NOTHING DIVIDES BY A MAXIMUM UNDER `MIN_NET_DOLLARS`** (`shareOfMaximum()`): −3188% is a
+  true division and a false sentence.
+- **ONE CLOSE CONTROL PER POSITION** (`positionForHolding()` / `sameCloseNote()`). Only the
+  Positions card's close asks WHY and files the answer; the broker panel's button survives only
+  for a holding this app has no record of.
+- **A HOLDING WRITTEN BEFORE THE STAMP UPGRADES IN PLACE** (`upgradeHolding()` in `journal.js`).
+  `importAlpaca()`'s `continue` on a known signature meant a record written before PR #33 could
+  never reach PR #33's upgrade. The size is MEASURED from the broker's leg quantities, **no
+  order field is invented**, an unstamped limit stays unstamped, and it returns the SAME object
+  when nothing changes so the 60-second sync cannot loop.
+
+## EACH EXPLANATION ONCE PER SCREEN — `Fold`, `filterFold()`, `src/wordcount.mjs`
+
+PRD §4v.3. The floor paragraph — `qualityFloorSentence()`, **162 words** — rendered TWICE on the
+Radar and TWICE on the Shortlist. The owner, for the fourth time: *"troppe info da leggere"*.
+
+**THE RULE IS `warningsToPrint()`'S RULE MADE GENERAL**: a long generated explanation has ONE
+HOME PER SCREEN; everywhere else prints a one-line pointer naming where the full text is
+(`voicePointer()`, `qualityFloorLine()`, `VOICE_HOMES`).
+
+- **`Fold` LIVES IN `steps.jsx`** — chrome with no trade in it, and the one file `App.jsx`,
+  `pro.jsx` and `why.jsx` can all import without a cycle. The summary carries **the count**, so
+  nobody has to open it to learn whether it is worth opening.
+- **FOLD, NEVER DELETE.** Every fact stays one tap away. **AND A REFUSAL IS NEVER FOLDED** — the
+  rule that a gate violation renders beside the button is older than this one and outranks it.
+  What folds is an EXPLANATION of a rule; what never folds is the app saying no.
+- **`src/wordcount.mjs` MEASURES IT, AND IT COUNTS WORDS AT REST**: what is behind a fold, a
+  sheet or a tooltip does not count, which is what makes "fold, never delete" falsifiable. It
+  reads the SOURCE — the three step blocks expanded through the components they mount — and it
+  states its own coverage (`uncounted`). **4,006 → 2,284, a 43.0% cut**, both sides measured by
+  the same counter over a whole-tree checkout of `main`.
+- **`voice.test.js` FAILS THE BUILD** if any sentence over 20 words renders twice on one screen,
+  and proves it can SEE one. It caught `{x() && <div>{x()}</div>}`, which generates a sentence
+  twice to render it once. `order.test.jsx` caught the opposite fault the same day: an
+  over-trim that removed rule 5 from beside a send button.
+- **THE HEADER CARRIES NOTHING THAT ASKS NOTHING OF THE USER** — "IV RANK · 6d collected" is a
+  progress bar for a number that is not yet a number; it belongs in the History overlay.
+- **A TEST IS NOT A TRADE** (`isTestRecord()` / `scoredJournal()` in `journal.js`). All THREE
+  conditions — zero P&L, same calendar day, closed BY HAND — because each alone is an ordinary
+  trade. **MARKED, NEVER DELETED**: the Journal is what happened.
+- **A REPORT QUOTES THIS PERIOD, AND NEVER QUOTES A MODEL CLAIMING IT CAN TRADE**
+  (`copilotOverreach()` / `copilotOverreachNote()`). Rule 5 is that nothing executes without an
+  explicit human confirmation; reproducing a model saying otherwise over the app's own signature
+  is the app contradicting its own rule in its own report.
+
 ## THE INDICATORS HAVE ONE HOME — `src/indicators.js`
 
 PRD §4u. Pure functions over daily bars, **importing nothing**: SMA(20/50/200), EMA(9/21),
@@ -1316,6 +1414,11 @@ while the position is open.
   a record is a HOLDING read off `/v2/positions` rather than an order (and so `owned` with
   nothing to wait for), what the broker gave against what the app asked for, and why the app's
   order count and the broker's differ. All three are facts about the records.
+  **`upgradeHolding()`, `positionForHolding()` and `isTestRecord()` / `scoredJournal()` live
+  here too** — what a `/v2/positions` payload may write back onto an existing record, which
+  record a broker holding belongs to, and whether a closed record was a button-test rather
+  than a trade. All three are facts about the records, and `isTestRecord()` MARKS rather than
+  removes: a record deleted to make a score look better is the opposite of what this file is.
   **`closePos()` used to keep four fields** — ticker, pnl, ruleExit, riskOk — and drop the
   timeline, the thesis, both order ids and the reason. Never build a closed entry by hand.
 - `src/alpacaContract.js` — **the broker's own contract, mirrored from alpaca-py**, because
@@ -1327,6 +1430,13 @@ while the position is open.
   file it came from, and the two that are NOT alpaca-py's say so. It imports nothing;
   `order.js` imports it and builds every body through it. Never write a field name, an
   enum value or a leg-count limit anywhere else.
+- `src/wordcount.mjs` — **how many words a step renders, measured from the source.**
+  Pure, importing `rules.js`, `chain.js`, `journal.js` and `order.js` only, and no React:
+  a plain-node counter cannot import a `.jsx` file, which is why six generators are
+  NAMED in `uncounted` rather than silently scored zero. It counts **words at rest** —
+  a fold, a sheet and a tooltip are one tap away and do not count — and it states every
+  limit of its own heuristic. `scripts/measure-words.mjs` prints the table;
+  `src/voice.test.js` enforces the rule and holds the 40% target.
 - `src/indicators.js` — **the one home for every indicator**, pure, importing nothing:
   `PERIODS` with each period's reasoning, `sma()` / `ema()` / `bollinger()` / `rsi()` /
   `macd()` / `atr()` / `volumeRead()`, `crossings()`, `indicatorSet()` (the whole
@@ -1398,8 +1508,10 @@ while the position is open.
   the compare cap and the `store.saved` item a kept candidate becomes. Plain JS, no
   React, for the same reason `rules.js` and `handoff.js` are.
 - `src/steps.jsx` — `StepNav`, `StepForward`, `EvidenceBar`, `EvidenceOverlay`,
-  `DeskSheet`, `CompareTray`, `CandidateActions`. The navigation, and nothing
-  about a trade. `DeskSheet` is the Build screen's own sheet — its numbers and
+  `DeskSheet`, `CompareTray`, `CandidateActions`, **`Fold`**. The navigation, and nothing
+  about a trade. `Fold` is here for the same reason `DeskSheet` is — chrome with no
+  trade in it — and because it is the one place `App.jsx`, `pro.jsx` and `why.jsx` can
+  all import from without a cycle. `DeskSheet` is the Build screen's own sheet — its numbers and
   its order ticket — and it is here rather than in `App.jsx` because it is
   chrome with no trade in it, and because there is exactly ONE `EvidenceOverlay`
   mount point in `App.jsx` and a test holds it there.

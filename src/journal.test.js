@@ -24,7 +24,7 @@ import {
   byRefDesc, matchesRef, searchJournal, SEQ_SEP,
   positionSize, positionSizeNote, contractsOf, withPositionSize, ASSUMED_CONTRACTS,
   positionStage, isOwnedPosition, positionStageNote, wouldHaveDone,
-  isBrokerHolding, fillVsLimit, storedLimitOf, orderReconciliation, bookPositions,
+  isBrokerHolding, fillVsLimit, storedLimitOf, orderReconciliation, bookPositions, upgradeHolding,
 } from "./journal.js";
 import { RULES, ruleExitOf, stopWarningSentence,
   seasonalStampOf, seasonalStampNote, ESTIMATED_SEASONAL_SOURCE, MEASURED_SEASONAL_SOURCE } from "./rules.js";
@@ -1178,6 +1178,97 @@ test("RECONCILIATION — AN UNASKED BROKER IS NOT AN EMPTY ONE", () => {
   assert.equal(r.asked, false);
   assert.equal(r.theirs, null);
   assert.equal(r.sentence, null, "silence, not a claim that the broker holds nothing");
+});
+
+/* ================================================================
+   P9 TASK 0a — A HOLDING WRITTEN BEFORE THE STAMP NEVER UPGRADED
+
+   >>> READ ON THE OWNER'S PHONE, 22 Sep 2026. <<< XLE J-0002 is a
+   position Alpaca itself lists, shown as "1 contract — assumed, not
+   recorded", with one timeline entry, no fill entry, no exit plan and
+   no `fillVsLimit()` sentence anywhere on the row.
+
+   The cause is a `continue`: `importAlpaca()` skipped any signature
+   already in the store, so a record written before PR #33 could never
+   be reached by the upgrade PR #33 wrote. J-0002 is exactly such a
+   record, and it is the only holding this app has.
+================================================================ */
+
+// J-0002, shaped exactly as the owner's store holds it: no `alpacaHeld`, no
+// `entrySource`, NO `contracts` field at all, and one lonely timeline entry.
+const J0002_LEGACY = {
+  id: 2, ref: "J-0002", ticker: "XLE", name: "Imported from Alpaca",
+  expKey: "2026-10-30", expiry: "2026-10-30",
+  legs: [{ side: 1, qty: 1, type: "put", strike: 59 }, { side: -1, qty: 1, type: "put", strike: 62.5 }],
+  entryNet: -0.04, maxLoss: -346, maxProfit: 4,
+  alpacaId: "sync", alpacaLive: true, alpacaLimit: 0.75,
+  timeline: [{ t: 1, n: 1, seq: "J-0002·01", type: "note", text: "read from the account" }],
+};
+// What the broker's own /v2/positions gives the sync for that group: the legs
+// carry ALPACA'S quantities, and `net` is their average entry prices summed.
+const XLE_GROUP = {
+  und: "XLE", exp: "2026-10-30",
+  legs: [{ side: 1, qty: 3, type: "put", strike: 59 }, { side: -1, qty: 3, type: "put", strike: 62.5 }],
+  net: -0.04,
+};
+
+test("0a — THE LEGACY HOLDING IS UPGRADED IN PLACE, from the broker's own legs", () => {
+  const up = upgradeHolding(J0002_LEGACY, XLE_GROUP, { plan: "Exit plan starts now." });
+  assert.notEqual(up, J0002_LEGACY, "a record with something to add is a new object");
+  assert.equal(up.alpacaHeld, true, "the broker listed it, so it is a holding");
+  assert.equal(positionStage(up), "owned", "and it is OWNED, not an order waiting for ever");
+  assert.equal(up.entrySource, "fill", "it is a fill, and it says so");
+});
+
+test("0a — THE SIZE IS MEASURED FROM THE BROKER'S LEG QUANTITIES, never assumed", () => {
+  const up = upgradeHolding(J0002_LEGACY, XLE_GROUP, { plan: "p" });
+  const sz = positionSize(up);
+  assert.equal(sz.contracts, 3, "3x3 legs are three combinations, not one");
+  assert.equal(sz.assumed, false, "the broker measured it; nothing was guessed");
+  // The row that read "1 contract — assumed, not recorded" cannot read that now.
+  assert.ok(!/assumed, not recorded/.test(positionSizeNote(up)));
+});
+
+test("0a — THE FILL AND PLAN ENTRIES ARE ADDED, and the existing one is kept", () => {
+  const up = upgradeHolding(J0002_LEGACY, XLE_GROUP, { plan: "Exit plan starts now — close at 21 days." });
+  const types = up.timeline.map((e) => e.type);
+  assert.deepEqual(types, ["note", "fill", "plan"], "appended, never replacing what was there");
+  // Given the one way a sequence number is ever given.
+  assert.deepEqual(up.timeline.map((e) => e.n), [1, 2, 3]);
+  assert.equal(up.timeline[1].seq, "J-0002·02");
+  assert.ok(up.timeline[1].text.includes("a credit of $0.04"), "the broker's own fill price, signed");
+});
+
+test("0a — RUNNING IT TWICE IS RUNNING IT ONCE: no duplicate entries, no loop", () => {
+  const once = upgradeHolding(J0002_LEGACY, XLE_GROUP, { plan: "p" });
+  const twice = upgradeHolding(once, XLE_GROUP, { plan: "p" });
+  assert.equal(twice, once, "the SAME object back, so React bails out and the 60s sync cannot loop");
+  assert.equal(once.timeline.filter((e) => e.type === "fill").length, 1);
+  assert.equal(once.timeline.filter((e) => e.type === "plan").length, 1);
+});
+
+test("0a — NO ORDER FIELD IS INVENTED, and an unstamped limit stays unstamped", () => {
+  const up = upgradeHolding(J0002_LEGACY, XLE_GROUP, { plan: "p" });
+  assert.equal(up.alpacaStatus, undefined, "the broker named a holding, not an order");
+  assert.equal(up.alpacaLimitSigned, undefined, "the direction is at the broker, not in a positions payload");
+  // So §4s still holds: the comparison is refused rather than guessed.
+  const f = fillVsLimit({ limit: storedLimitOf(up).limit, fill: up.entryNet, contracts: 3,
+    limitSigned: storedLimitOf(up).signed });
+  assert.equal(f.known, false);
+  assert.equal(f.signUnknown, true);
+});
+
+test("0a — a group with no legs says nothing about the size, and a null is not a zero", () => {
+  const up = upgradeHolding({ ...J0002_LEGACY, contracts: 4, contractsAssumed: false },
+    { und: "XLE", exp: "2026-10-30", legs: [], net: null }, { plan: "p" });
+  assert.equal(positionSize(up).contracts, 4, "an empty group never overwrites a measured size");
+  assert.equal(up.entryNet, -0.04, "and a null net never overwrites a price");
+});
+
+test("0a — a record that already carries everything comes back UNCHANGED", () => {
+  const done = upgradeHolding(J0002_LEGACY, XLE_GROUP, { plan: "p" });
+  assert.equal(upgradeHolding(done, XLE_GROUP, { plan: "p" }), done);
+  assert.equal(upgradeHolding(null, XLE_GROUP), null);
 });
 
 /* ---------------- report ---------------- */

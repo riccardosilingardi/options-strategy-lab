@@ -26,7 +26,7 @@
 // page that does not scroll looked, on a phone, like a tap that did nothing.
 // A sheet fixed to the viewport cannot land below the fold.
 // ============================================================================
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { T, BADGE_SAFE } from "./theme.js";
 import { STEPS, stepIndex } from "./path.js";
@@ -250,8 +250,7 @@ export function CompareTray({ items = [], max = 3, onRemove, onClear, onCompare,
       </div>
       {items.length === 1 && (
         <div style={{ ...sans, fontSize: 12.5, color: T.mut, marginTop: 6, lineHeight: 1.5 }}>
-          Tick a second one and both payoffs are drawn on the same axis, over the same picture of where the
-          price could finish. One on its own has nothing to be compared with.
+          Tick a second one: one on its own has nothing to be compared with.
         </div>
       )}
       {note && (
@@ -281,6 +280,40 @@ export function CandidateActions({ ticked, onTick, saved, onSave, onBuild }) {
           Take to Build →
         </button>
       )}
+    </div>
+  );
+}
+
+/* ====================================================================
+   THE FOLD — one summary line on screen, the full text one tap behind it.
+
+   P9 TASK 3. `BuildWarnings` above has done exactly this for the gate's
+   warnings since PR #28; this is the same control for the OTHER long
+   explanations, so a screen can carry a fact without carrying a paragraph.
+
+   >>> FOLD, NEVER DELETE. <<< Everything inside is unchanged and unrewritten.
+   The summary is always visible and carries the COUNT, so nobody has to open
+   it to learn whether it is worth opening — which was the fault
+   `verdictNarrative()`'s fold already fixed on the wizard.
+
+   >>> AND A REFUSAL IS NEVER BEHIND A TAP. <<< This control is for an
+   EXPLANATION of a rule. The app saying no renders beside the button, under
+   the older rule that outranks this one.
+==================================================================== */
+export function Fold({ summary, label = "why", tone = T.mut, children, style }) {
+  const [open, setOpen] = useState(false);
+  if (!summary) return null;
+  return (
+    <div style={{ ...style }}>
+      <button onClick={() => setOpen((o) => !o)}
+        style={{ display: "flex", gap: 8, alignItems: "baseline", width: "100%", textAlign: "left",
+          background: "transparent", border: "none", padding: 0, cursor: "pointer", minHeight: 30 }}>
+        <span style={{ ...mono, fontSize: 10.5, color: tone, lineHeight: 1.6, flex: 1 }}>{summary}</span>
+        <span style={{ ...mono, fontSize: 10.5, color: T.blue, whiteSpace: "nowrap" }}>
+          {open ? "hide ▲" : `${label} ▼`}
+        </span>
+      </button>
+      {open && <div style={{ marginTop: 4 }}>{children}</div>}
     </div>
   );
 }
