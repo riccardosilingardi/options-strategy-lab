@@ -2965,6 +2965,25 @@ export const otherwiseHeading = (n) =>
   `ALSO FOUND, AND WHAT EACH ONE MISSED (${n})`;
 /** One row's reason, in the fewest words that still say which rule. */
 export const missReasonLine = (miss) => (miss && miss.short ? miss.short : "");
+/**
+ * THE NET AT THE PRICE THAT FILLS — one expression, for every card.
+ *
+ * `openLimitPrice()` on `comboBook()`: the mid plus a quarter of the spread in
+ * the direction that fills, never past the touch. It is the same number
+ * `legLimitSeed()` sums to on the Build screen's ticket, so a card and the
+ * ticket it opens agree by construction rather than by luck.
+ *
+ * NEITHER FUNCTION IS CHANGED — both are on this session's do-not-touch list.
+ * This only spells the pair once so five call sites cannot spell it four ways.
+ * No book means NO PRICE, never a price of zero.
+ */
+export function fillNet(legs, quotes) {
+  const book = comboBook(legs, quotes);
+  if (!book || !book.ok) return null;
+  const p = openLimitPrice({ netMid: book.mid, spread: book.spread });
+  return p ? p.net : null;
+}
+
 /** The section header that says which price every figure below is read at. */
 export const fillPriceHeading = () =>
   `Every figure below is read at the price that fills, not at the mid.`;

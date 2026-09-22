@@ -33,9 +33,11 @@ const upTo = (x) => (Number.isFinite(x) ? money(x) : NO_CEILING);
 import { BandThumbnail, Gauge, payoffBands, bandTakeaway, gaugeTakeaway, explainElement, UnifiedFigure, exitPlanSentence, exitPlanDetail, inTenPhrase, price } from "./visuals.jsx";
 import { DRIVERS, DRIVER_PRESETS, presetOf, normaliseWeights } from "./signals.js";
 import { WhyThisTrade } from "./why.jsx";
+import { Fold } from "./steps.jsx";
+import { legsLine } from "./path.js";
 // THE SAME CONTROLS BLOCK THE DESK JOURNEY GETS, writing to the same state.
 // Two doors, one question, asked before anything is proposed (P10 §2).
-import { RequestControls, SplitSections, MissLine } from "./card.jsx";
+import { RequestControls, SplitSections, MissLine, CandidateCard } from "./card.jsx";
 
 const mono = { fontFamily: "ui-monospace, Menlo, monospace" };
 const sans = { fontFamily: "ui-sans-serif, system-ui" };
@@ -687,93 +689,70 @@ export function roadHeadline(c) {
 
 /** One road. Every visual on it is tappable and explains itself. */
 function RoadCard({ c, other, onPick, i, bars = [], weatherData, newsItems, month, actions, fusedNow = null, misses = [] }) {
-  const [open, setOpen] = useState(null);
   const bands = payoffBands({ legs: c.legs, entryNet: c.entryNet, spot: c.spot });
-  const inTen = Math.max(0, Math.min(10, Math.round((c.pop || 0) * 10)));
+  /* >>> A ROAD IS THE SAME CARD AS EVERY OTHER CANDIDATE (P10 §3-bis). <<<
+     It used to be a card of its own: a headline sentence, a takeaway sentence,
+     four figures in its own labels, two footnotes, the whole evidence panel
+     open by default, and a trade-off paragraph — on the screen where two roads
+     are meant to be COMPARED at a glance. Four figures in four fixed places is
+     what makes two cards comparable; a paragraph is what makes them two essays.
+
+     >>> FOLD, NEVER DELETE. <<< Every sentence is one tap below, unchanged and
+     unrewritten, with the count in the summary so nobody has to open it to
+     find out whether it is worth opening. `WhyThisTrade` is in there too — a
+     road with no evidence under it is a recommendation, and PRD §5 says this
+     screen may not make one. What is NOT folded is the card itself and the
+     button, because a decision is not an explanation. */
   return (
     <Card style={{ marginTop: 12 }}>
-      <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
-        <span style={{ ...mono, fontSize: 10.5, color: T.dim, letterSpacing: "0.1em" }}>ROAD {i + 1}</span>
-        <span style={{ ...sans, fontSize: 17, fontWeight: 700, color: T.ink }}>{c.ticker} · {c.name}</span>
-        {c.driver != null && (
-          <span style={{ ...mono, fontSize: 10, color: T.violet, border: `1px solid ${T.violet}55`, borderRadius: 4, padding: "2px 7px" }}>
-            {c.driver}/100 ON YOUR WEIGHTS
+      <CandidateCard
+        name={`${c.ticker} \u00b7 ${c.name}`}
+        legs={`${legsLine(c.legs)} \u00b7 ${Math.round(c.dte)} days`}
+        misses={misses}
+        rr={c.rr} pop={c.pop} profit={c.maxProfit} risk={c.risk}
+        noCeiling={c.maxProfit == null}
+        bands={bands} bars={bars} ticker={c.ticker}
+        badge={
+          <span style={{ ...mono, fontSize: 10, color: T.dim, letterSpacing: "0.1em" }}>
+            ROAD {i + 1}{c.driver != null ? ` \u00b7 ${c.driver}/100` : ""}
           </span>
-        )}
-      </div>
+        }
+        style={{ background: "transparent", border: "none", padding: 0 }} />
 
-      {/* WHAT THIS ROAD MISSED, when it is under the second heading (P10 §3).
-          A row there with no reason is the "empty screen with no sentence"
-          fault, one list down. */}
-      <MissLine misses={misses} />
-
-      {/* What it gives and what it costs, first. */}
-      <div style={{ ...sans, fontSize: 16, fontWeight: 700, color: T.ink, marginTop: 8, lineHeight: 1.4 }}>
-        {roadHeadline(c)}
-      </div>
-
-      <div style={{ display: "flex", gap: 14, marginTop: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
-        <BandThumbnail bands={bands} width={300} height={92} bars={bars} spot={c.spot} onExplain={setOpen}
-          title={bandTakeaway(bands, { ticker: c.ticker })} />
-        <Gauge bands={bands} size={190} onExplain={setOpen} ticker={c.ticker} />
-      </div>
-      <div style={{ ...sans, fontSize: 13.5, color: T.body, lineHeight: 1.5, marginTop: 8 }}>
-        {bandTakeaway(bands, { ticker: c.ticker })}
-      </div>
-      {open && (
-        <div style={{ marginTop: 8, padding: "10px 12px", background: T.bg, border: `1px solid ${T.blue}55`, borderLeft: `3px solid ${T.blue}`, borderRadius: 8 }}>
-          <div style={{ ...sans, fontSize: 12.5, color: T.body, lineHeight: 1.5 }}>{explainElement(open, bands, { ticker: c.ticker })}</div>
-          <button onClick={() => setOpen(null)} style={{ ...mono, fontSize: 10, marginTop: 6, background: "transparent", border: "none", color: T.blue, cursor: "pointer", padding: 0 }}>close</button>
+      <Fold label="why" tone={T.violet} style={{ marginTop: 8 }}
+        summary={`Why this road, in words`}>
+        <div style={{ ...sans, fontSize: 15, fontWeight: 700, color: T.ink, marginTop: 8, lineHeight: 1.4 }}>
+          {roadHeadline(c)}
         </div>
-      )}
+        <div style={{ ...sans, fontSize: 13.5, color: T.body, lineHeight: 1.5, marginTop: 8 }}>
+          {bandTakeaway(bands, { ticker: c.ticker })}
+        </div>
+        {/* EVERY FIGURE ON THIS CARD IS ONE COMBINATION, AND IT HAS TO SAY SO. */}
+        <div style={{ ...mono, fontSize: 9.5, color: T.dim, marginTop: 7, lineHeight: 1.5 }}>
+          These are the figures for ONE combination. How many you buy is chosen on the next screen, and
+          everything here multiplies by it.
+        </div>
+        {/* WHICH TABLE "WORKS OUT" WAS DRIFTED ON. */}
+        <div style={{ ...mono, fontSize: 9.5, color: T.dim, marginTop: 5, lineHeight: 1.5 }}>
+          {seasonalStampNote(c, c.ticker)}
+        </div>
+      </Fold>
 
-      <div style={{ display: "flex", gap: 18, marginTop: 12, flexWrap: "wrap" }}>
-        {[["YOU RISK", money(c.risk), T.ink],
-          ["YOU CAN MAKE", upTo(c.maxProfit), T.green],
-          ["WORKS OUT", inTenPhrase(c.pop), inTen >= 6 ? T.green : inTen >= 4 ? T.blue : T.violet],
-          ["DAYS", `${Math.round(c.dte)}`, T.ink]].map(([k, v, col]) => (
-            <span key={k}>
-              <span style={{ ...mono, fontSize: 9.5, color: T.dim, display: "block" }}>{k}</span>
-              <span style={{ ...mono, fontSize: 15, fontWeight: 700, color: col }}>{v}</span>
-            </span>
-          ))}
-      </div>
-      {/* EVERY FIGURE ON THIS CARD IS ONE COMBINATION, AND IT HAS TO SAY SO.
-          A road is built to fit the budget at one contract — that is what the
-          "how much are you willing to lose" answer bounds — and the size is
-          chosen on Build, where the ticket, the gate and the position record
-          all read it. A per-contract number printed as if it were the trade's
-          is the same fault as an assumed size printed as a measured one. */}
-      <div style={{ ...mono, fontSize: 9.5, color: T.dim, marginTop: 7, lineHeight: 1.5 }}>
-        These are the figures for ONE combination. How many you buy is chosen on the next screen, and
-        everything here multiplies by it.
-      </div>
-      {/* WHICH TABLE "WORKS OUT" WAS DRIFTED ON. Two roads are ranked across the
-          whole basket, so these two cards can be in two markets — and a market
-          still on the hand-written seasonal estimate produces a frequency that
-          is an estimate's estimate. Comparing two roads without knowing that is
-          comparing a measurement with a guess and calling it a choice. */}
-      <div style={{ ...mono, fontSize: 9.5, color: T.dim, marginTop: 5, lineHeight: 1.5 }}>
-        {seasonalStampNote(c, c.ticker)}
-      </div>
-
-      {/* THE EVIDENCE. The same panel the desk shows, on the screen where the
-          decision is actually made. The four bars are open by default here:
-          behind a tap they were, in practice, not on the screen at all. */}
+      {/* >>> THESE TWO DO NOT FOLD, AND THAT IS PRD §5. <<< A road carries the
+          evidence panel and ONE generated sentence naming what it gives up;
+          without them it is a recommendation, and this app does not make one.
+          P9 also measured that behind a tap the four bars were, in practice,
+          not on the screen at all — so what folds above is the EXPLANATION,
+          and what stays is the evidence and the trade-off. */}
       <WhyThisTrade fused={fusedNow || c.fused} ticker={c.ticker} weatherData={weatherData} newsItems={newsItems}
         month={month} defaultDetail title="WHY THIS MARKET"
         note={`Tap Weather for the regions behind that bar, or News for the headlines behind that one.`} />
-
-      {/* The one sentence that makes this two roads rather than a ranking. */}
       <Pill tone={T.violet}>{tradeOffSentence(c, other)}</Pill>
 
-      {/* A road is a candidate like any other on the Shortlist step: it can be
-          put beside two others on one picture, or kept for later. The desk
-          passes these in; the guided screen on its own does not have them. */}
       {actions ? <div style={{ marginTop: 10 }}>{actions}</div> : null}
 
       <button onClick={() => onPick(c)}
-        style={{ ...sans, width: "100%", minHeight: 56, marginTop: 14, fontSize: 16, fontWeight: 700, borderRadius: 10,
+        style={{ ...sans, width: "100%", minHeight: 56, marginTop: 12, fontSize: 16, fontWeight: 700, borderRadius: 10,
           cursor: "pointer", background: T.amber, color: T.onAccent, border: "none" }}>
         Take this road
       </button>
@@ -835,10 +814,11 @@ export function WizardCandidates({ candidates = [], answers = {}, narrative = []
         {candidates.length === 2 ? "Two ways to do this." : `${candidates.length} ways to do this.`}
         {tickers.length > 1 ? ` In ${tickers.length} different markets.` : ""}
       </h1>
-      <p style={{ ...sans, fontSize: 15, color: T.mut, lineHeight: 1.55, margin: 0 }}>
-        Neither one is the right answer. Each buys something and pays for it somewhere else, and the
-        sentence under each chart says where.
-      </p>
+      {/* "Neither one is the right answer" pointed at "the sentence under each
+          chart", and there is no sentence under a card any more — it is one tap
+          inside each road's own "why". The heading above already says how many
+          ways there are, and `tradeOffSentence()` still says what each gives
+          up, where it has a referent. */}
 
       {/* What was actually examined, before anything is recommended. */}
       {narrative.length > 0 && (
@@ -876,12 +856,10 @@ export function WizardCandidates({ candidates = [], answers = {}, narrative = []
             renderItem={(c, misses, i) => road(c, candidates.indexOf(c), misses)} />
         );
       })()}
-      {/* A LEGEND, AND EVERY VISUAL IN THIS APP ALREADY CARRIES ITS OWN
-          `takeaway()` — one always-visible generated sentence (PRD §6). This
-          explained the colours a fourth time (P9, TASK 3). */}
-      <div style={{ ...sans, fontSize: 12.5, color: T.dim, marginTop: 16, lineHeight: 1.5, textAlign: "center" }}>
-        Green makes money at expiry, red does not, and the line across them is where the price has been.
-      </div>
+      {/* THE LEGEND IS GONE (P10 §3-bis). P9 cut it from four sites to one and
+          noted the rule: every visual in this app carries its own `takeaway()`.
+          On a screen of identical cards it explained the colours a fifth time,
+          under the two headings that already say what each section is. */}
     </div>
   );
 }

@@ -225,7 +225,68 @@ const chipStyle = (on) => ({
 export { CardFigure };
 
 /* ====================================================================
-   2) THE LIST, IN TWO SECTIONS (ROADMAP P10 §3)
+   2) THE ONE CANDIDATE CARD (ROADMAP P10 §3-bis, points 2-4)
+
+   The owner sent two captures of a tool he finds clear: "vedi com'e chiaro?".
+   Every result on that screen is THE SAME CARD — the name of the structure,
+   the legs in plain words on one line, then exactly FOUR figures always in
+   the same four places, a small payoff picture, and one button.
+
+   >>> NO PROSE ON A CARD. NOT ONE SENTENCE. <<< Everything a card says, it
+   says with a label and a number. `card.test.jsx` fails the build on a text
+   node over six words anywhere on one, except the name and the legs line.
+   The explanations and the warnings live on Build, and they are not on the
+   way to anything.
+
+   >>> THE FOUR FIGURES ANSWER THREE QUESTIONS AND NOTHING ELSE <<< — what do
+   I get, what do I risk, how likely is it: RETURN ON RISK, CHANCE, PROFIT,
+   RISK. Anything that is not one of those three is not on the card.
+
+   >>> AND EVERY ONE OF THEM IS READ AT THE PRICE THAT FILLS <<<
+   (`fillNet()` = `openLimitPrice()` on `comboBook()`), never at the mid. The
+   section header says so once. §4l is the whole argument: on UNG the same
+   structure is 2.6:1 at the mid and 1.1:1 at the price that trades, and the
+   mid is a price this app has proved nobody gives you.
+
+   IT COMPUTES NOTHING. Every figure is handed in, already worked out, by the
+   caller that owns `analyze()`. A component that derives a figure is a second
+   home for it.
+==================================================================== */
+export function CandidateCard({
+  name, legs = "", rr = null, pop = null, profit = null, risk = null,
+  noCeiling = false, bands = null, bars = [], ticker = null,
+  misses = [], actions = null, badge = null, style,
+}) {
+  return (
+    <div style={{ padding: "10px 12px", background: T.bg, border: `1px solid ${T.line}`,
+      borderRadius: 8, ...style }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+        <span style={{ ...sans, fontSize: 14, fontWeight: 700, color: T.ink }}>{name}</span>
+        {badge}
+      </div>
+      <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 3 }}>{legs}</div>
+      <MissLine misses={misses} />
+      {bands && (
+        <div style={{ display: "flex", gap: 10, marginTop: 7, flexWrap: "wrap", alignItems: "center" }}>
+          <BandThumbnail bands={bands} bars={bars} width={190} height={40}
+            title={bandTakeaway(bands, { ticker: ticker || "this market" })} />
+          <Gauge bands={bands} size={96} ticker={ticker || "this market"} />
+        </div>
+      )}
+      {/* FOUR FIGURES, ALWAYS THE SAME FOUR, ALWAYS IN THE SAME PLACES. */}
+      <div style={{ display: "flex", gap: 10, marginTop: 8, flexWrap: "wrap" }}>
+        <CardFigure k="RETURN ON RISK" v={rr == null ? "\u2014" : `${Math.round(rr * 100)}%`} c={T.amber} />
+        <CardFigure k="CHANCE" v={chanceText(pop)} c={pop >= 0.5 ? T.green : T.violet} />
+        <CardFigure k="PROFIT" v={noCeiling ? NO_CEILING : money(profit)} c={T.green} />
+        <CardFigure k="RISK" v={money(Math.abs(Number(risk)))} c={T.red} />
+      </div>
+      {actions && <div style={{ marginTop: 8 }}>{actions}</div>}
+    </div>
+  );
+}
+
+/* ====================================================================
+   3) THE LIST, IN TWO SECTIONS (ROADMAP P10 §3)
 
    Above: what MEETS what was asked for. Directly below, under its own
    heading, everything else that cleared the floors — never hidden, never

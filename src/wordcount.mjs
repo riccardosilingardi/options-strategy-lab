@@ -251,7 +251,15 @@ export function literalWords(block) {
   //    JSX text run and counting it twice would inflate both sides of the
   //    table by the same wrong amount.
   code = code.replace(/`[^`]*`|"[^"\n]{12,}"|'[^'\n]{12,}'/g, (lit) => {
-    total += proseWords(lit.slice(1, -1));
+    // >>> AN INTERPOLATION IS NOT A WORD. <<< `${r.tk}` and `${legsLine(legs)}`
+    // are CODE; what the reader sees is the text AROUND them, and the value
+    // itself is a figure rather than prose. Counting the expression made the
+    // table move when a component was given a template-literal prop — measured
+    // while the P10 cards were built, where a screen whose rows had LOST four
+    // stat blocks and a sentence scored 131 words higher. The value is dropped,
+    // not replaced by a word, for the same reason `copyOf()` scores a
+    // generator's OUTPUT rather than its call.
+    total += proseWords(lit.slice(1, -1).replace(/\$\{[^{}]*\}/g, " "));
     return " ";
   });
   // 2) What is left between tags: prose typed straight into the tree.

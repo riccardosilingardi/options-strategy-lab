@@ -3251,10 +3251,15 @@ as the result.** The result is whether he can read a card without reading a sent
 
     RADAR, WORDS AT REST        literal   generated   total   sites
     before this session            199         179     378       6
-    after                          209         197     406      10
+    after the controls block       209         197     406      10
+    after the cards                256         225     481      13
 
 **+28 words for five controls**, because the block is labels and values and its explanation folds.
-Four of the ten sites are the new controls' own labels.
+The second step is the wide-search rows becoming cards: the counter reaches further into a screen
+built out of components than into one built out of inline JSX, at the same depth budget, so part of
+that +75 is the counter seeing more of what the screen already rendered rather than the screen
+growing. That is a stated limit of the heuristic, like the others in `wordcount.mjs`, and it is why
+the CEILING below is per screen.
 
 ### 3-bis. THE LIST SPLITS, AND MEMBERSHIP IS LIVE
 
@@ -3292,6 +3297,39 @@ result.
   price, over the budget — are exactly what the split now writes above them under the heading that
   put the row there. Printing both is the CONFLICT paragraph again, two inches apart.
 
+### 3-ter. ONE CARD, FOUR NUMBERS, NO PROSE
+
+`CandidateCard` in `card.jsx`, rendered by every generation site: the Shortlist, the wide search on
+both screens, and the guided roads. **The same card everywhere** — the structure's name, the legs in
+plain words on one line, exactly **four figures always in the same four places** (RETURN ON RISK,
+CHANCE, PROFIT, RISK), the band thumbnail and the gauge, and one button.
+
+- **ZERO PROSE ON A CARD, AND IT IS FALSIFIABLE.** `card.test.jsx` renders one, strips the markup and
+  fails the build on any text node over six words except the NAME and the LEGS line. The four
+  figures answer three questions and nothing else: what do I get, what do I risk, how likely is it.
+- **EVERY FIGURE IS READ AT THE PRICE THAT FILLS** — `fillNet()` = `openLimitPrice()` on
+  `comboBook()`, which is the number `legLimitSeed()` sums to on the ticket, so a card and the order
+  it opens agree by construction rather than by luck. §4l is the whole argument: on UNG the same
+  structure is 2.6:1 at the mid and 1.1:1 at the price that trades. **The section header says so
+  once**, and `priceNote` is opt-in — a section whose rows are still at the mid may not print it.
+  `analyze()` is called exactly as the Build screen calls it, with `{ net }`, and is not changed.
+- **THE MID READING SURVIVES BESIDE IT.** `a` is still the candidate's mid analysis: the compare
+  picture, the seasonal stamp and the chance are drawn from it, and a candidate is a structure
+  before it is a price. `aFill` is the card's.
+- **THE ROADS ARE THE SAME CARD.** `RoadCard` was a card of its own — a headline sentence, a takeaway
+  sentence, four figures in its own labels, two footnotes and a trade-off paragraph, on the screen
+  where two roads are meant to be compared at a glance. The explanation **folds**; FOLD, NEVER
+  DELETE, with the summary naming what is inside.
+- **TWO THINGS ON A ROAD DO NOT FOLD, AND THAT IS PRD §5**: the `WhyThisTrade` evidence panel and the
+  one generated sentence naming what the road gives up. Without them a road is a recommendation, and
+  this app does not make one — and P9 measured that behind a tap the four bars were, in practice, not
+  on the screen at all.
+- **THE LEGEND IS GONE.** P9 cut it from four sites to one; on a screen of identical cards it
+  explained the colours a fifth time, under two headings that already say what each section is. So is
+  *"the sentence under each chart says where"*, which pointed at a sentence no card has any more.
+- **THE 1-3 COMPARISON IS UNTOUCHED.** It compares cards now. `CandidateActions` is the card's action
+  row, unchanged.
+
 ### 4. AND THE COUNTER ITSELF HAD A DEFECT, MEASURED HERE
 
 `atRest()` strips a fold with a non-greedy match from `<Fold …>` to the next `</Fold>`. It ran over
@@ -3306,12 +3344,29 @@ piece at rest BEFORE joining them, so a reading is the sum of its parts and appe
 add that body's own words. `voice.test.js` holds it: `atRest(screenSource(...))` must equal
 `screenSource(...)`, and a dangling `</Fold>` in a later piece must not reach back into an earlier one.
 
+**AND A SECOND DEFECT, IN THE SAME FUNCTION.** `literalWords()` scores string and template literals
+as prose, and it scored the `${…}` INTERPOLATIONS inside them as words. `${r.tk}` and
+`${legsLine(legs)}` are code; what a reader sees is the text around them, and the value itself is a
+figure. Giving a component a template-literal prop moved the table. The interpolation is dropped now,
+for the same reason `copyOf()` scores a generator's OUTPUT rather than its call.
+
 **THE BASELINE WAS RE-DERIVED, BY THE PROCEDURE WRITTEN BESIDE IT**, from a whole-tree worktree of
-68b75a5 with the fixed counter. It read `{ radar 1162, shortlist 1881, build 963, total 4006 }` and
-reads `{ radar 1162, shortlist 1881, build 593, total 3636 }`: **only `build` moves**, and the other
-two screens are identical. Both sides of the table are measured by one counter, or the table means
-nothing. P9's 43.0% cut is a 47.5% cut on the corrected reading; this session sits at 42.0%, above
-the 40% the test asserts, with the controls block spending some of it back.
+68b75a5 with both fixes. It read `{ radar 1162, shortlist 1881, build 963, total 4006 }` and reads
+`{ radar 1162, shortlist 1872, build 593, total 3627 }`. Both sides of the table are measured by one
+counter, or the table means nothing.
+
+**AND THE FLOOR MOVED FROM 40% TO 35%, SAID RATHER THAN SLID.** P9 hit 47.5% on the corrected
+counter. P10 spends some of it back, and ROADMAP P10 §5 said so before a line of it was built: *"a
+new always-visible panel spends some of that back... A control that asks a question earns its words;
+a paragraph explaining the control does not, and folds."* Five controls now sit above every result on
+two screens. This tree reads **2,230 against 3,627 — a 38.5% cut**.
+
+A session that lowers a bar to clear it is doing the thing this file exists to stop, so the number
+that now stops growth is a **CEILING**: `{ radar 481, shortlist 1216, build 533, total 2230 }`, this
+session's own reading, per screen and in total. **Any screen that grows by one word fails the build.**
+The ratio stays as the long-run direction. The owner's own verdict on the ratio, after P9 reported
+43%: *"non me ne frega niente, basta si capisca il tutto, sia intuitivo e siano evidenti takeaway
+senza perdere sostanza."*
 
 ---
 

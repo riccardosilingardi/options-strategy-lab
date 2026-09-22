@@ -39,7 +39,7 @@ import { RULES, sizing, ruleBadge, takeProfitLabel, stopLossLabel, perTradeCapLa
   chanceOf, chanceSourceNote, seasonalProvenance, seasonalStampNote, seasonalStampFields, chanceDrawFields,
   sigmaProvenance, isButterfly,
   requestOf, requestAmountLabel, requestAmountOwner, contractsSourceNote,
-  splitByRequest, meetsHeading, otherwiseHeading, missReasonLine, fillPriceHeading } from "./rules.js";
+  splitByRequest, meetsHeading, otherwiseHeading, missReasonLine, fillPriceHeading, fillNet } from "./rules.js";
 import { isStale, freshnessNote, staleAmong } from "./freshness.js";
 import { evaluateTrade, gateSummary } from "./riskGate.js";
 import { DEMO, DEMO_BANNER, DEMO_TOOLTIP, DEMO_SEED_TICKERS, demoPositions } from "./demo.js";
@@ -47,7 +47,7 @@ import { CapitalOnboarding, WizardOpen, FindOpportunities, WizardCandidates, Con
 // THE CONTROLS AND THE ONE CANDIDATE CARD (ROADMAP P10). Its own file: it is
 // nothing but a trade, so it may not live in `steps.jsx`, and `wizard.jsx`
 // renders the same card, so it may not live here.
-import { RequestControls, SplitSections, MissLine } from "./card.jsx";
+import { RequestControls, SplitSections, MissLine, CandidateCard } from "./card.jsx";
 import { buildHandOff, buildScreenState, BUILD_TAB } from "./handoff.js";
 import { orderBody, orderOutcome, alpacaErrorText, reduceRatios, limitWords, fillPriceOf } from "./order.js";
 // THE PERMANENT RECORD: the ref a position is given at open, the sequence on
@@ -433,6 +433,25 @@ function priceLeg(leg, S, dte, baseIV, q) {
 }
 /** The two-sided quotes behind an analysis, one per leg, for `priceability()`. */
 const quotesOf = (a) => (a?.legPx || []).map((l) => ({ bid: l.bid, ask: l.ask }));
+/**
+ * THE SAME STRUCTURE, RE-READ AT THE PRICE THAT FILLS (ROADMAP P10 §3-bis).
+ *
+ * A candidate's `analyze()` is at the MID, deliberately: a candidate is a
+ * structure and not yet a price. But a CARD carries four figures somebody
+ * decides on, and §4l is the whole argument for which price they are read at —
+ * on UNG the same structure is 2.6:1 at the mid and 1.1:1 at the price that
+ * trades, and the mid is a price this app has proved nobody gives you.
+ *
+ * `analyze()` is UNCHANGED and is called exactly as the Build screen calls it,
+ * with `{ net }`. No readable book means the mid stands and the caller says so
+ * — never a price of zero.
+ */
+const atFillPrice = (legs, a, { spot: sp, dte: d, iv: v, q: qq }) => {
+  if (!a) return a;
+  const net = fillNet(legs, quotesOf(a));
+  if (!Number.isFinite(net) || !sp) return a;
+  return analyze(legs, sp, d, v, qq, { net });
+};
 /**
  * THE CONTRACTS THE CHAIN ACTUALLY LISTED, one per leg, for
  * `contractListing()` in rules.js — null where it listed none.
@@ -2873,7 +2892,12 @@ export default function OptionsStrategyLab() {
           // it divided by the PREMIUM on a debit and by the RISK on a credit
           // with a `Math.max(, 1)` floor under it, which is the shape that
           // turned a $250 budget into 250 contracts of an unpriced butterfly.
-          const sc = scaleStrategy(a, request.mode, request.amt);
+          // THE CARD'S FIGURES ARE READ AT THE PRICE THAT FILLS (P10 §3-bis),
+          // and this is where the quote function for this board is in scope.
+          // `a` stays the MID reading: the compare picture and the stamp are
+          // drawn from it, and a candidate is a structure before it is a price.
+          const aFill = atFillPrice(pr.legs, a, { spot: sp, dte: d2, iv: getU(tk).iv, q: qq });
+          const sc = scaleStrategy(aFill, request.mode, request.amt);
           const n = sc && sc.ok ? sc.n : 0;
           /* >>> AND IT NO LONGER DROPS WHAT THE BUDGET WILL NOT BUY (P10 §3).
              <<< `if (n < 1) continue` removed a structure that had cleared
@@ -2882,7 +2906,7 @@ export default function OptionsStrategyLab() {
              "l'app propone anche altro". It is GROUPED now — the second
              section names it and says what it missed — and the floors are
              still the only thing that REMOVES. */
-          out.push({ tk, sent, name: pr.name, legs: pr.legs, expKey: ek, dte: d2, a, mc, pop, n, spot: sp,
+          out.push({ tk, sent, name: pr.name, legs: pr.legs, expKey: ek, dte: d2, a, aFill, mc, pop, n, spot: sp,
             // AND THE EXPECTED VALUE IS THE SIMULATION'S OWN MEAN, times the
             // size. It was `pop * a.maxProfit * n`: the best case weighted by
             // the chance, which is the expected value of nothing the app
@@ -4843,62 +4867,39 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                         cand: candidateOf({ name: r.name, legs: r.legs, a: r.a, pop: r.pop, dte: r.dte, expKey: r.expKey,
                           ...seasonalStampFields(r.mc), ...chanceDrawFields(r.mc) },
                         { ticker: r.tk, spot: r.spot, source: "wide search" }),
-                        size: scaleStrategy(r.a, request.mode, request.amt),
+                        // THE FOUR FIGURES ARE READ AT THE PRICE THAT FILLS,
+                        // worked out where this hit was generated — this row
+                        // has no quote function of its own at render time.
+                        bands: payoffBands({ legs: r.legs, entryNet: r.a.entry, spot: r.spot }),
+                        size: scaleStrategy(r.aFill || r.a, request.mode, request.amt),
                       }));
                       const byKey = new Map(built.map((x) => [x.cand.key, x]));
                       return (
                         <SplitSections
-                          items={built.map((x) => x.cand)} request={request} priceNote={false}
+                          items={built.map((x) => x.cand)} request={request} priceNote
                           sizeOf={(c) => (byKey.get(c.key) || {}).size || null}
                           renderItem={(c, misses) => {
                             const x = byKey.get(c.key);
                             if (!x) return null;
-                            const { r, i } = x;
+                            const { r, i, bands } = x;
+                            const af = r.aFill || r.a;
                             return (
-                      <div key={i} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "8px 10px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7 }}>
-                        <span style={{ ...mono, fontSize: 10, color: T.dim, width: 16 }}>#{i + 1}</span>
-                        {(() => {
-                          const bb = payoffBands({ legs: r.legs, entryNet: r.a.entry, spot: r.spot });
-                          return (
-                            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                              <BandThumbnail bands={bb} bars={barsCache[r.tk] || []} width={130} height={34}
-                                title={bandTakeaway(bb, { ticker: r.tk })} />
-                              <Gauge bands={bb} size={80} ticker={r.tk} />
-                            </div>
-                          );
-                        })()}
-                        <div style={{ flex: 1, minWidth: 140 }}>
-                          <div style={{ fontWeight: 700, color: T.ink, fontSize: 12.5 }}>{r.tk} · {r.name}</div>
-                          <div style={{ ...mono, fontSize: 10, color: T.dim }}>{r.expKey} · {r.dte} DTE · ×{r.n}</div>
-                          <MissLine misses={misses} />
-                        </div>
-                        {r.tag && <span title={r.tag.d} style={{ ...mono, fontSize: 8.5, color: r.tag.c, border: `1px solid ${r.tag.c}55`, borderRadius: 4, padding: "1px 6px", cursor: "help" }}>{r.tag.t}</span>}
-                        {r.fused && (
-                          <span title={r.fused.narrative}
-                            style={{ ...mono, fontSize: 8.5, color: r.conflict ? T.red : r.fused.agreement === "CONFLUENT" ? T.green : T.blue, border: `1px solid ${(r.conflict ? T.red : r.fused.agreement === "CONFLUENT" ? T.green : T.blue)}55`, borderRadius: 4, padding: "1px 6px", cursor: "help" }}>
-                            {r.fused.agreement} {r.fused.score > 0 ? "+" : ""}{r.fused.score}
-                          </span>
-                        )}
-                        <Stat k="CHANCE" v={chanceText(r.pop)} c={r.pop >= 0.5 ? T.green : T.violet} tip={chanceStamp(r.mc, r.tk)} />
-                        {/* AN EXPECTED VALUE NEEDS A BEST CASE. With no ceiling
-                            there is none, so nothing is printed here and the
-                            candidate sits last by construction (its rank is the
-                            -999 `evProfile()` returns) rather than being scored
-                            off the edge of a sampling grid. */}
-                        <Stat k="EV/$100" v={r.a.profitUnbounded ? "—" : `${r.ev100 >= 0 ? "+" : ""}$${r.ev100.toFixed(0)}`}
-                          c={r.a.profitUnbounded ? T.dim : r.ev100 >= 0 ? T.green : T.red}
-                          tip={r.a.profitUnbounded ? noCeilingNote(`${r.tk} ${r.name}`) : undefined} />
-                        <Stat k="RANK" v={r.a.profitUnbounded ? "last" : `${r.rank >= 0 ? "+" : ""}${r.rank.toFixed(0)}`} c={r.conflict ? T.red : T.amber} />
-                        <Stat k="MAX TOT" v={r.a.profitUnbounded ? NO_CEILING : fmt$(r.n * r.a.maxProfit)} c={T.green} />
-                        {/* A hit here hands the MARKET to step 2, where the
-                            structures on it are compared and kept. Radar
-                            answers "which market"; the Shortlist answers
-                            "which structure", and jumping from here straight
-                            to Build would skip the second question. */}
-                        <Btn small ghost={ticker !== r.tk} onClick={() => { switchTicker(r.tk); setSentiment(r.sent); setExpKey(r.expKey); goStep("shortlist"); }}>
-                          Look at {r.tk} →
-                        </Btn>
-                      </div>
+                              <CandidateCard key={`${r.tk}-${r.name}-${i}`}
+                                name={`${r.tk} \u00b7 ${r.name}`} legs={`${legsLine(r.legs)} \u00b7 ${r.expKey}`}
+                                misses={misses}
+                                rr={rewardRisk(af.maxProfit, af.maxLoss)} pop={r.pop}
+                                profit={af.maxProfit} risk={af.maxLoss} noCeiling={af.profitUnbounded}
+                                bands={bands} bars={barsCache[r.tk] || []} ticker={r.tk}
+                                badge={r.fused ? (
+                                  <span title={r.fused.narrative}
+                                    style={{ ...mono, fontSize: 8.5, color: r.conflict ? T.red : r.fused.agreement === "CONFLUENT" ? T.green : T.blue, border: `1px solid ${(r.conflict ? T.red : r.fused.agreement === "CONFLUENT" ? T.green : T.blue)}55`, borderRadius: 4, padding: "1px 6px", cursor: "help" }}>
+                                    {r.fused.agreement} {r.fused.score > 0 ? "+" : ""}{r.fused.score}
+                                  </span>) : null}
+                                actions={
+                                  <Btn small ghost={ticker !== r.tk} onClick={() => { switchTicker(r.tk); setSentiment(r.sent); setExpKey(r.expKey); goStep("shortlist"); }}>
+                                    Look at {r.tk} →
+                                  </Btn>
+                                } />
                             );
                           }} />
                       );
@@ -5153,86 +5154,39 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   // numbers a compare picture is drawn at are the two the
                   // chance was computed at, and they come off `mcRow` above.
                   { ticker, spot, source: "shortlist" });
-                  return { p, a, cand, bands, mcRow, pop, rr,
-                    size: scaleStrategy(a, request.mode, request.amt) };
+                  /* >>> EVERY FIGURE ON THE CARD IS READ AT THE PRICE THAT
+                     FILLS (P10 §3-bis). <<< `a` stays the MID reading — a
+                     candidate is a structure and not yet a price, and the
+                     compare picture and the stamp are drawn from it. `aFill`
+                     is the same `analyze()` at `openLimitPrice()`, which is
+                     the number the ticket seeds to, so the card and the order
+                     agree by construction rather than by luck. */
+                  const aFill = atFillPrice(p.legs, a, { spot, dte, iv, q });
+                  return { p, a, aFill, cand, bands, mcRow, pop,
+                    rr: rewardRisk(aFill.maxProfit, aFill.maxLoss),
+                    size: scaleStrategy(aFill, request.mode, request.amt) };
                 });
                 const byKey = new Map(built.map((x) => [x.cand.key, x]));
                 return (
                   <SplitSections
-                    items={built.map((x) => x.cand)} request={request}
+                    items={built.map((x) => x.cand)} request={request} priceNote
                     sizeOf={(c) => (byKey.get(c.key) || {}).size || null}
                     renderItem={(c, misses) => {
                       const x = byKey.get(c.key);
                       if (!x) return null;
-                      const { p, a, cand, bands, mcRow, pop, rr } = x;
+                      const { p, a, aFill, cand, bands, mcRow, pop, rr } = x;
                       return (
-                    <div key={p.name} style={{ padding: "10px 12px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-                        <div style={{ fontWeight: 700, color: T.ink, fontSize: 13.5 }}>
-                          {p.name}{" "}
-                          <span style={{ ...mono, fontSize: 9, color: a.realCount === p.legs.length ? T.green : T.amber }}>
-                            {a.realCount === p.legs.length ? "● live prices" : `◐ ${a.realCount}/${p.legs.length} live`}
-                          </span>
-                        </div>
-                      </div>
-                      <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 4 }}>
-                        {p.legs.map((l) => `${l.side > 0 ? "+" : "−"}${l.qty} ${l.strike}${l.type === "call" ? "C" : "P"}`).join(" / ")}
-                      </div>
-                      <MissLine misses={misses} />
-                      {/* The thumbnail says where the trade pays against where
-                          the market has been; the gauge says the same thing as
-                          one arc with the needle on today. Both are cut from
-                          the same bands, so they cannot disagree. */}
-                      <div style={{ display: "flex", gap: 12, marginTop: 6, flexWrap: "wrap", alignItems: "center" }}>
-                        <BandThumbnail bands={bands} bars={barsCache[ticker] || []} width={220} height={40}
-                          title={bandTakeaway(bands, { ticker })} />
-                        <Gauge bands={bands} size={128} ticker={ticker} />
-                      </div>
-                      <div style={{ display: "flex", gap: 14, marginTop: 8, flexWrap: "wrap" }}>
-                        <Stat k={a.entry >= 0 ? "YOU PAY" : "YOU RECEIVE"} v={fmt$(Math.abs(a.entry) * 100)} />
-                        <Stat k="MAX PROFIT" v={ceil$(a.maxProfit)} c={T.green}
-                          tip={a.profitUnbounded ? noCeilingNote(p.name) : undefined} />
-                        <Stat k="MAX LOSS" v={fmt$(a.maxLoss)} c={T.red} />
-                        <Stat k="R/R" v={rr ? rr.toFixed(2) : "—"} c={T.amber} />
-                        <Stat k="CHANCE" v={chanceText(pop)} c={pop >= 0.5 ? T.green : T.violet} tip={chanceStamp(mcRow, ticker)} />
-                        <Stat k="BREAKEVEN" v={a.breakevens.map((b) => b.toFixed(2)).join(" · ") || "—"} c={T.blue} />
-                      </div>
-                      {(() => {
-                        const sc = scaleStrategy(a, request.mode, request.amt);
-                        /* ONE FACT, ONE PLACE (P10 §3). These three cases —
-                           cannot be sized, no readable price, over the budget —
-                           are exactly the three `meetsRequest()` writes on the
-                           row's own `MissLine` above, under the heading that
-                           put it there. Printing them twice on one row is the
-                           CONFLICT paragraph again, two inches apart. */
-                        if (!sc || sc.unpriceable || !sc.ok) return null;
-                        return (
-                          <div style={{ display: "flex", gap: 14, marginTop: 8, flexWrap: "wrap", padding: "6px 8px", background: `${T.amber}0d`, borderRadius: 5 }}>
-                            <Stat k="HOW MANY" v={`×${sc.n}`} c={T.amber} />
-                            <Stat k={sc.isCredit ? "YOU RECEIVE" : "YOU PAY"} v={fmt$(sc.totPrem)} c={sc.isCredit ? T.green : T.ink} />
-                            <Stat k="MOST YOU CAN LOSE" v={fmt$(sc.totRisk)} c={T.red} />
-                            <Stat k="MOST YOU CAN MAKE" v={fmt$(sc.totProfit)} c={T.green} />
-                            {/* THE AVERAGE RESULT, NOT THE BEST CASE WEIGHTED BY
-                                A CHANCE. `sc.totProfit * pop` was the maximum
-                                profit multiplied by the probability of finishing
-                                anywhere in the green — two numbers that describe
-                                different events, multiplied together. The
-                                simulation's own mean already averages every
-                                outcome it walked. */}
-                            {mcRow && <Stat k="AVERAGE RESULT" v={signedMoney(mcRow.ev * sc.n)} c={mcRow.ev >= 0 ? T.green : T.red}
-                              tip={chanceSourceNote(mcRow, ticker)} />}
-                            <Stat k={request.mode === "target" ? "HITS THE TARGET" : "BUDGET USED"} v={request.mode === "target" ? (sc.totProfit >= request.amt ? "✓ yes" : "✗ no") : `${((sc.n * sc.unit / Math.max(1, request.amt)) * 100).toFixed(0)}%`} c={T.blue} />
-                            <div style={{ ...mono, fontSize: 9, color: T.dim, width: "100%" }}>Totals for ×{sc.n} · Build always shows one, so divide by {sc.n} to compare.</div>
-                          </div>
-                        );
-                      })()}
-                      <div style={{ marginTop: 8 }}>
-                        <CandidateActions
-                          ticked={inCompare(compare, cand)} onTick={() => tickCompare(cand)}
-                          saved={isSaved(cand)} onSave={() => saveCandidate(cand)}
-                          onBuild={() => applyPreset(p, a)} />
-                      </div>
-                    </div>
+                        <CandidateCard key={p.name}
+                          name={p.name} legs={legsLine(p.legs)} misses={misses}
+                          rr={rr} pop={pop} profit={aFill.maxProfit} risk={aFill.maxLoss}
+                          noCeiling={aFill.profitUnbounded}
+                          bands={bands} bars={barsCache[ticker] || []} ticker={ticker}
+                          actions={
+                            <CandidateActions
+                              ticked={inCompare(compare, cand)} onTick={() => tickCompare(cand)}
+                              saved={isSaved(cand)} onSave={() => saveCandidate(cand)}
+                              onBuild={() => applyPreset(p, a)} />
+                          } />
                       );
                     }} />
                 );
@@ -5270,46 +5224,36 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                 <Lbl>ALSO FOUND BY THE WIDE SEARCH ON {ticker}</Lbl>
                 {/* TWO SECTIONS HERE TOO (P10 §3). */}
                 {(() => {
-                  const built = (multi.res || []).filter((r) => r.tk === ticker).map((r, i) => {
-                    const cand = candidateOf({ name: r.name, legs: r.legs, a: r.a, pop: r.pop, dte: r.dte, expKey: r.expKey,
+                  const built = (multi.res || []).filter((r) => r.tk === ticker).map((r, i) => ({
+                    r, i,
+                    cand: candidateOf({ name: r.name, legs: r.legs, a: r.a, pop: r.pop, dte: r.dte, expKey: r.expKey,
                       ...seasonalStampFields(r.mc), ...chanceDrawFields(r.mc) },
-                    { ticker: r.tk, spot: r.spot, source: "wide search" });
-                    const bands = payoffBands({ legs: r.legs, entryNet: r.a.entry, spot: r.spot });
-                    return { r, i, cand, bands, size: scaleStrategy(r.a, request.mode, request.amt) };
-                  });
+                    { ticker: r.tk, spot: r.spot, source: "wide search" }),
+                    bands: payoffBands({ legs: r.legs, entryNet: r.a.entry, spot: r.spot }),
+                    size: scaleStrategy(r.aFill || r.a, request.mode, request.amt),
+                  }));
                   const byKey = new Map(built.map((x) => [x.cand.key, x]));
                   return (
                     <SplitSections
-                      items={built.map((x) => x.cand)} request={request} priceNote={false}
+                      items={built.map((x) => x.cand)} request={request} priceNote
                       sizeOf={(c) => (byKey.get(c.key) || {}).size || null}
                       renderItem={(c, misses) => {
                         const x = byKey.get(c.key);
                         if (!x) return null;
                         const { r, i, cand, bands } = x;
+                        const af = r.aFill || r.a;
                         return (
-                      <div key={`${r.name}-${i}`} style={{ padding: "10px 12px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7 }}>
-                        <div style={{ fontWeight: 700, color: T.ink, fontSize: 13 }}>{r.name}</div>
-                        <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 3 }}>{legsLine(r.legs)} · {r.expKey} · {r.dte} DTE</div>
-                        <MissLine misses={misses} />
-                        <div style={{ display: "flex", gap: 12, marginTop: 6, flexWrap: "wrap", alignItems: "center" }}>
-                          <BandThumbnail bands={bands} bars={barsCache[r.tk] || []} width={200} height={40} title={bandTakeaway(bands, { ticker: r.tk })} />
-                          <Gauge bands={bands} size={112} ticker={r.tk} />
-                        </div>
-                        <div style={{ display: "flex", gap: 14, marginTop: 8, flexWrap: "wrap" }}>
-                          <Stat k="CHANCE" v={chanceText(r.pop)} c={r.pop >= 0.5 ? T.green : T.violet} tip={chanceStamp(r.mc, r.tk)} />
-                          <Stat k="MAX PROFIT" v={ceil$(r.a.maxProfit)} c={T.green}
-                            tip={r.a.profitUnbounded ? noCeilingNote(r.name) : undefined} />
-                          <Stat k="MAX LOSS" v={fmt$(r.a.maxLoss)} c={T.red} />
-                          <Stat k="EV/$100" v={r.a.profitUnbounded ? "—" : `${r.ev100 >= 0 ? "+" : ""}$${r.ev100.toFixed(0)}`}
-                            c={r.a.profitUnbounded ? T.dim : r.ev100 >= 0 ? T.green : T.red} />
-                        </div>
-                        <div style={{ marginTop: 8 }}>
-                          <CandidateActions
-                            ticked={inCompare(compare, cand)} onTick={() => tickCompare(cand)}
-                            saved={isSaved(cand)} onSave={() => saveCandidate(cand)}
-                            onBuild={() => openOnBuild({ ticker: r.tk, expKey: r.expKey, legs: r.legs, name: r.name })} />
-                        </div>
-                      </div>
+                          <CandidateCard key={`${r.name}-${i}`}
+                            name={r.name} legs={`${legsLine(r.legs)} \u00b7 ${r.expKey}`} misses={misses}
+                            rr={rewardRisk(af.maxProfit, af.maxLoss)} pop={r.pop}
+                            profit={af.maxProfit} risk={af.maxLoss} noCeiling={af.profitUnbounded}
+                            bands={bands} bars={barsCache[r.tk] || []} ticker={r.tk}
+                            actions={
+                              <CandidateActions
+                                ticked={inCompare(compare, cand)} onTick={() => tickCompare(cand)}
+                                saved={isSaved(cand)} onSave={() => saveCandidate(cand)}
+                                onBuild={() => openOnBuild({ ticker: r.tk, expKey: r.expKey, legs: r.legs, name: r.name })} />
+                            } />
                         );
                       }} />
                   );
