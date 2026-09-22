@@ -17,6 +17,7 @@ import { N as nCDF, bs as bsPrice, smile as smileIV, payoff as payoffExp, SEASON
 import { parseOcc, buildOcc, snapStrike, resnapLegs, expiryStrikes, strikeOptions, fetchChain, hasOpenInterest, enrichOpenInterest, feedName, sourceNote, openInterestNote, oiProfile, expiryOpenInterest, nearMoneyOpenInterest, monotonicityBreaks, monotonicityNote, spotOf, spotAt } from "./chain.js";
 import { T, themeName, setTheme, BADGE_SAFE } from "./theme.js";
 import { RULES, sizing, ruleBadge, takeProfitLabel, stopLossLabel, perTradeCapLabel, RULE_PILLS, NOTHING_TODAY, money, pctText, capitalSourceNote, perTradeLimitPhrase, qualityFloor, qualityFloorSentence, liquiditySkippedNote,
+  positionPnl, BROKER_PNL,
   LIQUIDITY_LEVELS, RECOMMENDED_LIQUIDITY, LIQUIDITY_MEASUREMENT, liquidityMeasurementNote, liquidityLevel, liquidityThreshold, looseningWarning, liquiditySettingNote, isLoosened, ordinal,
   priceability, unpriceableNote, rewardRisk, MIN_NET_DOLLARS,
   payoffCeiling, NO_CEILING, noCeilingNote, noCeilingRankNote,
@@ -47,7 +48,7 @@ import { nextRef, refCounter, appendTimeline, stampTimeline, orderStatusRecheck,
   autopilotHorizonNote, autopilotVolNote,
   positionSize, positionSizeNote, contractsOf, withPositionSize, fillVsLimit, orderReconciliation,
   storedLimitOf,
-  positionStage, positionStageNote, bookPositions, wouldHaveDone, isBrokerHolding,
+  positionStage, positionStageNote, bookPositions, wouldHaveDone, isBrokerHolding, upgradeHolding,
   journalEntry, searchJournal, CLOSE_REASON_MIN, refNumber } from "./journal.js";
 import { FIRST_STEP, stepCarry, candidateOf, candidateKey, legsLine, toggleCompare, inCompare, MAX_COMPARE, savedFromCandidate, candidateFromSaved, savedAge } from "./path.js";
 import { StepNav, StepForward, EvidenceBar, EvidenceOverlay, DeskSheet, CompareTray, CandidateActions } from "./steps.jsx";
@@ -2935,6 +2936,35 @@ export default function OptionsStrategyLab() {
       .sort((a, b) => (b.at || 0) - (a.at || 0));
   }, [notTakenOrders, store.saved, chains]);
 
+  /* >>> ONE P&L PER POSITION, ONE SPELLING IN THIS FILE (P9, TASK 0b). <<<
+     `positionPnl()` in rules.js decides WHICH of the two sources a figure came
+     from and carries the sentence when it is the app's own mark; this is the
+     only place in App.jsx that assembles its two inputs, the same discipline
+     `chanceCheckOf()` and `modelCheckOf()` already hold. A second spelling here
+     is how the home page and the Positions card came to print -$127 and -$130
+     for one XLE position, three dollars apart, neither of them labelled.
+
+     THE BROKER'S FIGURE IS A TOTAL and so is the app's: `unrealized_pl` covers
+     every contract of the position, and the model side is multiplied by
+     `contracts` before it gets here. `maxProfit` and `maxLoss` are stored PER
+     COMBINATION and are scaled at the boundary, exactly as they were. */
+  const pnlOf = useCallback((p, { spot: sp, dteLeft, quote, contracts }) => {
+    let broker = null;
+    if (p.alpacaLive && alSync.positions.length) {
+      const match = alSync.positions.filter((x) => {
+        const o = parseOcc(x.symbol || "");
+        return o && o.und === p.ticker && o.exp === p.expKey && p.legs.some((l) => l.strike === o.strike && l.type === o.type);
+      });
+      // AN UNASKED BROKER IS NOT A BROKER REPORTING ZERO. No matching leg means
+      // no figure, never a 0 — `Number(null)` is 0 and 0 is finite.
+      if (match.length) broker = match.reduce((a, x) => a + (+x.unrealized_pl), 0);
+    }
+    const model = sp != null
+      ? (netValue(p.legs, sp, Math.max(1, dteLeft), getU(p.ticker).iv, quote) - p.entryNet) * 100 * contracts
+      : null;
+    return positionPnl({ brokerPnl: broker, modelPnl: model, feed: feedName(chains[p.ticker]) || "the option chain" });
+  }, [alSync, chains]);
+
   /* ONLY WHAT IS OWNED NEEDS A DECISION TODAY. This read every record, so the
      front page said "EVERYTHING IS ON PLAN" over three trades that had never
      been bought — and would equally have said "3 POSITIONS NEED A DECISION"
@@ -2953,15 +2983,14 @@ export default function OptionsStrategyLab() {
        scaled by the same number. */
     const size = positionSize(p);
     const n = size.contracts;
-    let pnl = null, live = false;
-    if (p.alpacaLive && alSync.positions.length) {
-      const match = alSync.positions.filter((x) => {
-        const o = parseOcc(x.symbol || "");
-        return o && o.und === p.ticker && o.exp === p.expKey && p.legs.some((l) => l.strike === o.strike && l.type === o.type);
-      });
-      if (match.length) { pnl = match.reduce((a, x) => a + (+x.unrealized_pl), 0); live = true; }
-    }
-    if (pnl == null) pnl = sp != null ? (netValue(p.legs, sp, Math.max(1, dteLeft), getU(p.ticker).iv, qp) - p.entryNet) * 100 * n : null;
+    /* ONE P&L PER POSITION, AND IT IS THE BROKER'S (P9, TASK 0b).
+       This memo already preferred `unrealized_pl`; the Positions CARD a few
+       hundred lines below re-derived its own mark and printed -$127 over the
+       broker's -$130 in the largest red figure on the screen. `positionPnl()`
+       in rules.js is the one home and `pnlOf()` below is its one spelling in
+       this file, so the two screens cannot read one position two ways. */
+    const pv = pnlOf(p, { spot: sp, dteLeft, quote: qp, contracts: n });
+    const pnl = pv.pnl, live = pv.source === BROKER_PNL;
     const tpHit = pnl != null && p.maxProfit > 0 && pnl >= RULES.takeProfitPct * p.maxProfit * n;
     const slHit = pnl != null && p.maxLoss < 0 && pnl <= RULES.stopLossPct * p.maxLoss * n;
     const dteExit = dteLeft <= RULES.exitDTE;
@@ -2976,8 +3005,8 @@ export default function OptionsStrategyLab() {
     const level = tpHit || slHit || dteExit || ap ? "action"
       : pnl != null && watchLevel != null && pnl < watchLevel * n ? "watch" : "ok";
     const label = tpHit ? `${takeProfitLabel()} reached — take the profit` : slHit ? `${stopLossLabel()} reached — a warning, not an order` : dteExit ? `${dteLeft} days left — close or roll` : ap ? "The autopilot has something waiting for your OK" : pnl == null ? "waiting for prices…" : level === "watch" ? "Losing: check the reason you opened it" : "On plan";
-    return { p, pnl, dteLeft, level, label, ap, live, spotNow: sp, tpHit, slHit, dteExit, contracts: n, sizeAssumed: size.assumed };
-  }), [ownedPositions, chains, alSync]);
+    return { p, pnl, pnlNote: pv.sentence, dteLeft, level, label, ap, live, spotNow: sp, tpHit, slHit, dteExit, contracts: n, sizeAssumed: size.assumed };
+  }), [ownedPositions, chains, alSync, pnlOf]);
 
   // Log eventi regola (TP/SL/DTE) fuori dal render: prima veniva chiamato logEvent
   // DENTRO il JSX del tab Paper (setState durante il render) => instabilità del tab.
@@ -3425,11 +3454,35 @@ export default function OptionsStrategyLab() {
         groups[key].legs.push({ side, type: o.type, strike: o.strike, qty });
         groups[key].net += side * qty * (+x.avg_entry_price);
       }
-      let added = 0;
+      let added = 0, upgraded = 0;
       setStore((st) => {
         const sigOf = (tk, exp, legs) => tk + exp + legs.map((l) => `${l.side}${l.type[0]}${l.strike}x${l.qty}`).sort().join("");
         const known = new Set(st.positions.map((p) => sigOf(p.ticker, p.expKey || "", p.legs)));
-        const next = [...st.positions];
+        /* >>> A MATCH IS NOT A REASON TO DO NOTHING (P9, TASK 0a). <<<
+           This loop used to `continue` on a signature already in the store,
+           which is right about ADDING and wrong about everything else: a
+           record written before PR #33 carries no `alpacaHeld`, no
+           `entrySource`, no measured size and no fill or plan entry, and the
+           `continue` meant the upgrade could never reach it. XLE J-0002 —
+           the one holding the owner actually has — read "1 contract —
+           assumed, not recorded" against a broker that was listing it.
+
+           `upgradeHolding()` in journal.js is the one home for what a
+           holdings payload is allowed to write back onto a record. It
+           returns the SAME object when there is nothing to add, so the
+           60-second sync cannot loop and running it twice is running it
+           once. The plan SENTENCE is passed in, because words that state a
+           rule live in rules.js and never in a record-shaped function. */
+        let next = st.positions.map((p) => {
+          const g0 = Object.values(groups).find((g) => sigOf(g.und, g.exp, g.legs) === sigOf(p.ticker, p.expKey || "", p.legs));
+          if (!g0) return p;
+          const exitOn0 = new Date(new Date(g0.exp).getTime() - RULES.exitDTE * 864e5).toISOString().slice(0, 10);
+          const up = upgradeHolding(p, g0, {
+            plan: `Exit plan starts from the broker's own fill — ${exitPlanSentence()} On this expiry the ` +
+              `${RULES.exitDTE}-day mark is ${exitOn0}.` });
+          if (up !== p) upgraded++;
+          return up;
+        });
         for (const g of Object.values(groups)) {
           // qualunque sottostante Alpaca è ora seguibile (getU fornisce statistiche di fallback)
           if (known.has(sigOf(g.und, g.exp, g.legs))) continue;
@@ -3493,12 +3546,16 @@ export default function OptionsStrategyLab() {
           });
           added++;
         }
-        if (!added) return st;
+        if (!added && !upgraded) return st;
         const ns = { ...st, positions: next };
         saveState(ns);
         return ns;
       });
-      if (!silent) setMsg(added ? `Imported ${added} position${added === 1 ? "" : "s"} from Alpaca.` : "Every Alpaca position is already linked.");
+      if (!silent) setMsg(added
+        ? `Imported ${added} position${added === 1 ? "" : "s"} from Alpaca.`
+        : upgraded
+          ? `${upgraded} position${upgraded === 1 ? " was" : "s were"} brought up to what Alpaca reports: the size is the broker's own leg quantities now, not an assumed one.`
+          : "Every Alpaca position is already linked.");
     } catch (e) { if (!silent) setMsg(`Could not import from Alpaca: ${e.message}`); }
   }, [chains, seasonal]);
 
@@ -5796,16 +5853,20 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   const s = c?.spot;
                   const dteLeft = Math.max(0, Math.round((new Date(p.expiry) - Date.now()) / 86400000));
                   const qp = makeQuote(c, p.expKey);
-                  const nowNet = s ? netValue(p.legs, s, dteLeft, getU(p.ticker).iv, qp) : null;
                   // EVERY FIGURE ON THIS ROW IS THE WHOLE POSITION'S. `entryNet`,
                   // `maxProfit` and `maxLoss` are stored per combination, so the
                   // size is what turns them into what this trade is actually
                   // doing — and until this session nothing knew what the size was.
                   const size = positionSize(p);
                   const n = size.contracts;
-                  const pnl = nowNet != null ? (nowNet - p.entryNet) * 100 * n : null;
-                  const tpHit = pnl != null && p.maxProfit > 0 && pnl >= RULES.takeProfitPct * p.maxProfit * n;
-                  const slHit = pnl != null && p.maxLoss < 0 && pnl <= RULES.stopLossPct * p.maxLoss * n;
+                  /* >>> THE SAME P&L THE HOME PAGE READ (P9, TASK 0b). <<< This
+                     row used to re-derive its own from `netValue()` and print
+                     -$127 directly above the broker's own -$130. `posAlerts`
+                     has already asked `pnlOf()`, so the row reads the answer
+                     rather than computing a second one. */
+                  const al0 = posAlerts.find((a) => a.p.id === p.id) || null;
+                  const pnl = al0 ? al0.pnl : null;
+                  const tpHit = !!al0 && al0.tpHit, slHit = !!al0 && al0.slHit;
                   const dteExit = dteLeft <= RULES.exitDTE;
                   const rec = tpHit ? { t: `→ TAKE THE PROFIT: ${takeProfitLabel()}`, c: T.green } : slHit ? { t: `→ WARNING: ${stopLossLabel()}`, c: T.red } : dteExit ? { t: `→ CLOSE OR ROLL: ${RULES.exitDTE} days left`, c: T.amber } : { t: "→ HOLD", c: T.mut };
                   return (
@@ -5907,13 +5968,23 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                           </div>
                         );
                       })()}
+                      {/* AND WHOSE NUMBER THE PROFIT IS. Null when the broker
+                          answered — a figure read off the account needs no
+                          apology, and printing one on every row would be the
+                          §4m fault in the other direction. */}
+                      {al0?.pnlNote && (
+                        <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 5, lineHeight: 1.55 }}>
+                          {al0.pnlNote}
+                        </div>
+                      )}
                       {/* PRD §6: the gauge is the primary visual on position detail.
                           It is drawn from payoff() like every other zone in the app. */}
                       <GaugeFigure legs={p.legs} entryNet={p.entryNet} spot={s ?? p.entrySpot}
                         ticker={p.ticker} size={230} style={{ marginTop: 10 }} />
                       <div style={{ display: "flex", gap: 14, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
                         <Stat k="ENTRY" v={fmt$(Math.abs(p.entryNet) * 100 * n)} tip={n > 1 ? `${n} × ${fmt$(Math.abs(p.entryNet) * 100)} a combination` : undefined} />
-                        <Stat k="PROFIT NOW" v={pnl != null ? fmt$(pnl) : "loading…"} c={pnl >= 0 ? T.green : T.red} />
+                        <Stat k="PROFIT NOW" v={pnl != null ? fmt$(pnl) : "loading…"} c={pnl >= 0 ? T.green : T.red}
+                          tip={al0?.pnlNote || undefined} />
                         <Stat k="OF THE MAXIMUM" v={pnl != null && p.maxProfit > 0 ? `${((pnl / (p.maxProfit * n)) * 100).toFixed(0)}%` : "—"} />
                         <Stat k="DTE" v={dteLeft} c={dteExit ? T.amber : T.ink} />
                         <span style={{ ...mono, fontSize: 11.5, fontWeight: 700, color: rec.c }}>{rec.t}</span>

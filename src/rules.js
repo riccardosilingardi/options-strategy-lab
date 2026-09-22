@@ -3024,6 +3024,67 @@ export const chanceDrawFields = (mc) => ({
 export const watchAttentionLevel = (maxLoss) =>
   (Number.isFinite(maxLoss) ? RULES.watchAttentionShare * maxLoss : null);
 
+/* =====================================================================
+   ONE P&L PER POSITION — AND IT IS THE BROKER'S (P9, TASK 0b)
+
+   >>> READ ON THE OWNER'S PHONE, 22 Sep 2026. <<< The Positions screen
+   printed **-$127** in the largest red figure on the card, directly above
+   the broker's own panel printing **-$130** for the same XLE position.
+   Two numbers for one trade, three dollars apart, neither labelled.
+
+   THE CAUSE IS TWO HOMES. `posAlerts` in App.jsx already prefers Alpaca's
+   `unrealized_pl` when the position is live at the broker — and the
+   Positions CARD, rendering a few hundred lines further down, re-derived
+   its own from `netValue(legs, spot, ...) - entryNet`. So the home page and
+   the card read two different arithmetics of the same fact, and the louder
+   one was the app's own guess.
+
+   CLAUDE.md, in the owner's own words: **the broker's numbers are READ,
+   never re-derived.** `unrealized_pl` is on the first list — bid, ask, IV,
+   OCC, open interest, order status, fill price, positions, P&L — and the
+   app's mark is a MODEL of it. A model beside a measurement is not a second
+   opinion, it is a contradiction the reader has to arbitrate.
+
+   THE APP'S MARK SURVIVES ONLY WHERE THERE IS NO BROKER FIGURE — the app's
+   own paper book, a market the chain has not priced, a broker that has not
+   been asked — AND IT SAYS SO. The same discipline as `markProvenance()`:
+   a figure carries where it came from, or it is not printed.
+===================================================================== */
+
+export const BROKER_PNL = "broker";
+export const MODEL_PNL = "model";
+
+/**
+ * The one P&L of an open position, and where it came from.
+ *
+ * @param brokerPnl  Alpaca's `unrealized_pl`, summed over the legs of THIS
+ *                   position — already a total for every contract of it.
+ * @param modelPnl   the app's own mark, already multiplied by the size.
+ * @returns {{ pnl, source, live, sentence }}  `pnl` null when neither is
+ *          readable, and `sentence` null when the broker answered — a number
+ *          read off the account needs no apology.
+ */
+export function positionPnl({ brokerPnl = null, modelPnl = null, feed = "the option chain" } = {}) {
+  // `Number(null)` IS 0 AND 0 IS FINITE, for the eighth time in this
+  // repository: the nulls go out before the coercion, or a broker that said
+  // nothing becomes a broker reporting break-even.
+  const num = (x) => (x == null || x === "" ? NaN : Number(x));
+  const b = num(brokerPnl), m = num(modelPnl);
+  if (Number.isFinite(b)) {
+    return { pnl: b, source: BROKER_PNL, live: true, sentence: null };
+  }
+  if (Number.isFinite(m)) {
+    return { pnl: m, source: MODEL_PNL, live: false, sentence: modelPnlNote(feed) };
+  }
+  return { pnl: null, source: null, live: false, sentence: null };
+}
+
+/** What it means that this figure is the app's and not the account's. */
+export const modelPnlNote = (feed = "the option chain") =>
+  `This profit is the APP'S OWN MARK, not the broker's: it is what the legs are worth at ` +
+  `${feed}'s prices right now, and the account has not reported a figure for this position. ` +
+  `Your Alpaca account is the one that counts.`;
+
 /** Why an estimated price is not something to act on, in one sentence. */
 export const modelPriceNote = (feed = "the option chain") =>
   `This position's value is ESTIMATED: at least one leg had no two-sided quote on ${feed}, so the ` +

@@ -22,7 +22,8 @@ import { RULES, sizing, ruleBadge, qualityFloor, qualityFloorSentence, liquidity
   entryRoom, entryInsideExitNote, entryRoomWarning, entryRoomOverrideAsk, entryOverrideOk, entryOverrideNote,
   passedOverRecord, passedOverSummary, OPEN_LIMIT_SLIPPAGE, CLOSE_LIMIT_SLIPPAGE,
   chancePct, chanceText, chanceInTen, signedMoney,
-  sigmaProvenance, TABLE_SIGMA_SOURCE, MEASURED_SIGMA_SOURCE, FALLBACK_SIGMA_SOURCE } from "./rules.js";
+  sigmaProvenance, TABLE_SIGMA_SOURCE, MEASURED_SIGMA_SOURCE, FALLBACK_SIGMA_SOURCE,
+  positionPnl, modelPnlNote, BROKER_PNL, MODEL_PNL } from "./rules.js";
 import { netBS, SIGMA, exitSim } from "./engine.js";
 import { isStale, staleAmong, agePhrase, freshnessNote, BUDGETS } from "./freshness.js";
 
@@ -2925,6 +2926,57 @@ test("BUTTERFLIES — the count travels separately and has its own sentence", ()
   assert.ok(n.includes(String(RULES.exitDTE)), "the sentence names the rule it is about");
   assert.ok(/full desk/.test(n), "and says where they are still reachable");
   assert.ok(!/liquidity|spread|reward/.test(n), "it is not a quality floor and must not sound like one");
+});
+
+/* ================================================================
+   P9 TASK 0b — ONE P&L PER POSITION, AND IT IS THE BROKER'S
+
+   >>> READ ON THE OWNER'S PHONE, 22 Sep 2026. <<< The Positions card
+   printed -$127 in the largest red figure on the screen, directly
+   above the broker's own panel printing -$130 for the same XLE
+   position. `posAlerts` preferred `unrealized_pl`; the CARD a few
+   hundred lines below re-derived its own from `netValue()`.
+================================================================ */
+
+test("0b — THE BROKER'S FIGURE WINS, and it is read rather than recomputed", () => {
+  const r = positionPnl({ brokerPnl: -130, modelPnl: -127 });
+  assert.equal(r.pnl, -130, "the account's number, not the app's model of it");
+  assert.equal(r.source, BROKER_PNL);
+  assert.equal(r.live, true);
+  assert.equal(r.sentence, null, "a figure read off the account needs no apology");
+});
+
+test("0b — THE APP'S MARK SURVIVES WHERE THERE IS NO BROKER FIGURE, AND SAYS SO", () => {
+  const r = positionPnl({ brokerPnl: null, modelPnl: -127, feed: "CBOE" });
+  assert.equal(r.pnl, -127);
+  assert.equal(r.source, MODEL_PNL);
+  assert.equal(r.live, false);
+  assert.ok(r.sentence, "it may never be printed silently beside a broker's");
+  assert.ok(/APP'S OWN MARK/.test(r.sentence));
+  assert.ok(r.sentence.includes("CBOE"), "and it names the feed it priced from");
+});
+
+test("0b — AN UNASKED BROKER IS NOT A BROKER REPORTING ZERO", () => {
+  // `Number(null)` is 0 and 0 is finite, for the eighth time in this repo.
+  assert.equal(positionPnl({ brokerPnl: null, modelPnl: null }).pnl, null);
+  assert.equal(positionPnl({ brokerPnl: null, modelPnl: null }).source, null);
+  assert.equal(positionPnl({ brokerPnl: "", modelPnl: -5 }).source, MODEL_PNL);
+  // ...and a real 0 from the broker IS a reading.
+  assert.equal(positionPnl({ brokerPnl: 0, modelPnl: -127 }).pnl, 0);
+  assert.equal(positionPnl({ brokerPnl: 0, modelPnl: -127 }).source, BROKER_PNL);
+});
+
+test("0b — `App.jsx` SPELLS THE POSITION P&L ONCE, through `pnlOf()`", () => {
+  /* The same discipline `chanceCheckOf()` and `modelCheckOf()` hold. Two
+     spellings is exactly how one XLE position came to print two figures. */
+  const app = readFileSync(new URL("./App.jsx", import.meta.url), "utf8");
+  const derived = app.match(/netValue\([\s\S]{0,160}?-\s*p\.entryNet/g) || [];
+  assert.equal(derived.length, 1,
+    `the position mark is derived in ${derived.length} places; it belongs only inside pnlOf()`);
+  // Comments naming the field are prose; a READ of it is `x.unrealized_pl`.
+  assert.equal((app.match(/\.unrealized_pl/g) || []).length, 1,
+    "and the broker's own figure is READ in exactly one place, inside the same callback");
+  assert.ok(/const pnlOf = useCallback/.test(app), "and that place is `pnlOf`");
 });
 
 /* ---------------- summary ---------------- */
