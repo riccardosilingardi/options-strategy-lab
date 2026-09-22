@@ -3863,6 +3863,30 @@ export const openLimitNote = (r) => {
     `all day. Nothing walks the price further by itself: if this does not fill, you change it.`;
 };
 
+/* >>> WHICH BOOK THIS VERDICT WAS JUDGED ON, AND IT IS NOT THE ONE THAT FILLS.
+   <<< PRD §4s-bis. READ ON THE OWNER'S ACCOUNT: J-0003, SOYB 28/30, a debit of
+   $0.80 good until cancelled, typed at the combination ASK the ticket was
+   showing — so the ticket said FILLS NOW. Several sessions later it is still
+   open and nothing has filled.
+
+   The quotes this app prices from are Alpaca's option snapshots, which the feed
+   itself calls INDICATIVE rather than OPRA (`chainAlpaca.mjs`, and `feedName()`
+   says so on every screen that names the source). An indicative ask is a
+   reading of the market, not a quote anybody is obliged to trade against, and a
+   combination ask is the arithmetic of four of them. "Fills now" is a statement
+   about the book the app can SEE, and it has never been a statement about the
+   book that fills.
+
+   THIS IS COPY, AND DELIBERATELY ONLY COPY. No threshold moves, no argument is
+   added, `limitPlacement()` keeps its signature and every caller is unchanged:
+   the arithmetic was never the fault. What was wrong is that the strongest
+   sentence on the ticket asserted a certainty it had no way to have. Whether
+   the indicative combination ask is SYSTEMATICALLY inside the real one on thin
+   chains is a measurement nobody has taken — it is on the PRD's NOT VERIFIED
+   list with J-0003 beside it. */
+export const INDICATIVE_CLAUSE =
+  "on the indicative feed — the book that fills can differ";
+
 /**
  * WHERE THE TYPED LIMIT FALLS BETWEEN THE BID AND THE ASK — and one plain
  * sentence about what that means for the order.
@@ -3917,7 +3941,7 @@ export function limitPlacement(limit, book, sign = null) {
   if (keener(L, fill)) {
     return { known: true, zone: "fills", label: "FILLS NOW",
       sentence: `At ${money(L * 100)} you are willing to ${pay} the whole of what the other side is offering ` +
-        `(${money(fill * 100)}), so this should fill as soon as the market is open.` +
+        `(${money(fill * 100)}) ${INDICATIVE_CLAUSE}, so this should fill as soon as the market is open.` +
         (away >= 0.005
           ? ` You are ${money(away * 100)} past it — anything beyond the touch is money you did not have to give up.`
           : ``) };

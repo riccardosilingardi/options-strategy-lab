@@ -38,6 +38,7 @@ import {
   rewardRisk, conflictSummaryLine, warningsToPrint, NOTHING_TODAY,
   tradeCard, TRADE_CARD_IDS, unlistedContractNote, unquotedLegNote, unquotedLegPointer,
   strikeSnapNote, offBoardStrikeLabel, checkedAgainstNote, NO_CEILING,
+  limitPlacement, INDICATIVE_CLAUSE,
 } from "./rules.js";
 import { analyze, shortlistWithFloors, TradeCard } from "./App.jsx";
 import { terminalDist, compareDistInputs, compareDistNote, ComparePayoffs } from "./visuals.jsx";
@@ -289,6 +290,35 @@ check("the verdict band is three states and names the distance", () => {
   // No book, no verdict — and it says so rather than guessing.
   eq(orderVerdict(0.18, comboBook(UNG_LEGS, [{ bid: 0.43, ask: 0.53 }, {}]), { sign: 1 }).known, false,
     "an unquoted leg has no placement");
+});
+
+check("FILLS NOW NAMES THE FEED IT WAS JUDGED ON — J-0003", () => {
+  /* J-0003: SOYB 28/30, a debit of $0.80 good until cancelled, typed at the
+     combination ASK the ticket was showing. The ticket said FILLS NOW. Several
+     sessions later it is still open and nothing has filled.
+
+     The book this app reads is Alpaca's INDICATIVE option snapshot, not OPRA,
+     and a combination ask is the arithmetic of four of them. This is WORDING:
+     no threshold moves, the three zones are the three zones, and every other
+     sentence is untouched. What changes is that the strongest claim on the
+     ticket stops asserting a certainty it has no way to have. */
+  const book = comboBook(UNG_LEGS, UNG_QUOTES);
+  const fills = limitPlacement(Math.abs(book.ask), book);
+  eq(fills.zone, "fills", "at the touch is still the fills-now zone");
+  has(fills.sentence, INDICATIVE_CLAUSE);
+  // ...and it is the FILLS branch that carries it. A price that is waiting or
+  // will not fill is not claiming anything the feed can be wrong about.
+  const waiting = limitPlacement(0.18, book);
+  eq(waiting.zone, "waiting", "0.18 is inside this spread");
+  if (waiting.sentence.includes(INDICATIVE_CLAUSE)) {
+    throw new Error("only the certainty needs the caveat");
+  }
+  // THE ARITHMETIC IS UNTOUCHED: the same three zones at the same prices.
+  eq(limitPlacement(0.30, book).zone, "fills");
+  eq(limitPlacement(0.14, book).zone, "unlikely", "the mid still does not fill");
+  eq(limitPlacement(0.02, book).zone, "no-fill");
+  // And the verdict band reads the placement, so it inherits the clause.
+  has(orderVerdict(Math.abs(book.ask), book, { sign: 1, tif: "gtc" }).sentence, INDICATIVE_CLAUSE);
 });
 
 check("A LEG WITH NO QUOTED SIZE IS SKIPPED, AND THE SCREEN SAYS WHICH", () => {

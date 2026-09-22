@@ -2665,6 +2665,44 @@ imports `engine.js` — so the sign is still decided in one place.
 
 ---
 
+## §4s-bis — "FILLS NOW" WAS SAID ABOUT AN ORDER THAT HAS NOT FILLED
+
+**READ ON THE OWNER'S ALPACA PAPER ACCOUNT, 22 September 2026.** J-0003 — SOYB 28/30, a debit of
+**$0.80**, good until cancelled, typed at the combination **ASK** the ticket was showing. The
+ticket's verdict band read **FILLS NOW**. Several sessions later the order is still open and
+nothing has filled.
+
+Nothing in the arithmetic is wrong. `limitPlacement()` placed $0.80 at or past the touch of the
+book it was given, which is the fills-now zone by definition, and `effectiveLimit()` agreed. The
+fault is one word narrower than that: **the book it was given is not the book that fills.**
+
+The quotes this app prices from are Alpaca's option snapshots, which the feed itself calls
+**indicative** rather than OPRA — `chainAlpaca.mjs` says so, `feedName()` / `sourceNote()` say so
+on every screen that names the source, and the header badge has read "Alpaca (indicative)" since
+PR #19. An indicative ask is a READING of the market, not a quote anybody is obliged to trade
+against, and a *combination* ask is the arithmetic of two to four of them summed on the side that
+trades. "Fills now" is a statement about the book the app can SEE. It has never been a statement
+about the book that fills, and it read as one.
+
+- **THIS IS COPY, AND DELIBERATELY ONLY COPY.** `INDICATIVE_CLAUSE` in `rules.js` is one clause —
+  *"on the indicative feed — the book that fills can differ"* — added to the **fills** branch of
+  `limitPlacement()` and to nothing else. No threshold moves. No argument is added.
+  `limitPlacement()` keeps its signature, `orderVerdict()` is built on it unchanged, and every
+  other sentence on the panel is the sentence it was.
+- **ONLY THE CERTAINTY GETS THE CAVEAT.** "You are waiting" and "this will not fill" claim nothing
+  the feed can be wrong about in the direction that costs somebody a day. The one sentence that
+  does is the one that carries it, which is `warningsToPrint()`'s discipline applied to a caveat.
+- **IT IS NOT A NEW REFUSAL AND NOT A NEW FLOOR.** The order was and remains perfectly sendable.
+  What changed is that the app no longer promises a fill on a feed that cannot promise one.
+
+**AND THE MEASUREMENT IT ASKS FOR IS NOT TAKEN.** Whether the indicative combination ask is
+*systematically* inside the real one on thin chains — and by how much — is unknown. It is on the
+NOT VERIFIED list, and it is the kind of question one filled order would start to answer and a
+week of them would settle. Until then the app says what it knows and names the feed it knows it
+from.
+
+---
+
 ## §4t — ORDERS SPEAK ALPACA'S OWN CONTRACT
 
 **There is no official JavaScript SDK for multi-leg option orders.** Every field name, every
@@ -4085,7 +4123,11 @@ PR #34 recorded). `npm run build` is clean. One new suite: `src/voice.test.js`.
 - **NOBODY HAS ASKED THE OWNER WHETHER THE FOLDS FOLD THE RIGHT THINGS.**
 - **`remainingEdge()`'S SECOND READING REUSES `RULES.minRewardRisk`**, which was chosen for
   ENTRY. Whether the bar for holding is the bar for opening is an untaken product decision.
-- **WHETHER J-0003 FILLED IS UNKNOWN** — SOYB 28/30, debit $0.80, GTC.
+- **J-0003 HAS NOT FILLED, AND THE QUESTION IT RAISES IS UNMEASURED** — SOYB 28/30, debit
+  $0.80, GTC, typed at the combination ask the ticket was showing, still open several sessions
+  later. The verdict said FILLS NOW because the indicative feed's ask said so. **Is the
+  indicative combination ask systematically INSIDE the real one on thin chains, and by how
+  much?** Nobody has read it. §4s-bis names the feed in the sentence; it does not answer this.
 - **THE ANTHROPIC USAGE LIMIT DISABLED EVERY AI FEATURE UNTIL 2026-10-01**, so report section 5
   and both copilots were dead on the reading this session is built from, and
   `copilotOverreach()` has never seen a real model answer.
