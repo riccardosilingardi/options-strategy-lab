@@ -4,6 +4,7 @@ import { T } from "./theme.js";
 import { RULES, ruleBadge, takeProfitLabel, scaleOutLabel, stopLossLabel, exitDTELabel, perTradeCapLabel, copilotRulesBlock, money, pctText, MIN_NET_DOLLARS,
   NO_CEILING, reportNarrativePrompt, chanceText, seasonalStampNote, MEASURED_SIGMA_SOURCE,
   comboBook, limitAgainstBook, notionalControlled, notionalNote,
+  closeMarket, closeLimitPrice, closeLimitNote, closeUnreadableNote,
   legBook, sizeSkippedNote, onTick, netFromLegs, limitCeilingNote, rewardRisk,
   contractListing, unlistedContractNote, unquotedLegNote, unquotedLegPointer, marketOrderNote,
   taCopilotPrompt, TA_QUESTIONS, TA_DISCLAIMER,
@@ -22,7 +23,7 @@ import { ARROW, REGIONS, regionSignals, tagImpacts, taRead } from "./signals.js"
 import { useNarrow, BandThumbnail, payoffBands, bandTakeaway } from "./visuals.jsx";
 import { DEMO, DEMO_TOOLTIP } from "./demo.js";
 import { reduceRatios, orderQty, mlegLimitPrice, limitWords, limitKind, signedLimitFor, orderBody, orderPreviewLines, orderOutcome, alpacaErrorText } from "./order.js";
-import { hasOpenInterest, sourceNote, openInterestNote } from "./chain.js";
+import { hasOpenInterest, sourceNote, openInterestNote, fetchChain } from "./chain.js";
 // "Why this trade" and the headline tags moved to src/why.jsx: the wizard's
 // decision screen needs them too, and a road with no evidence under it is a
 // recommendation. Re-exported here so nothing else has to change its import.
@@ -806,6 +807,25 @@ export function OrderTicket({
   );
 }
 
+/* ONE LEG, READ OFF THE BROKER'S OWN OCC SYMBOL.
+   `/v2/positions` gives a symbol and a quantity and nothing else — no strike
+   field, no type field, no quote. The strike and the type are INSIDE the
+   symbol, so reading them is reading the broker's number rather than deriving
+   one: `XLE261030P00082000` is a put at 82. The thousandths are the OCC
+   standard and `Number(null)` is 0 and 0 is finite, so a symbol this function
+   cannot parse comes back NULL and the caller refuses — never a leg with a
+   strike of zero, which would price against a contract nobody holds. */
+export const OCC_RE = /^([A-Z]{1,6})(\d{6})([CP])(\d{8})$/;
+export function holdingLeg(item) {
+  const m = OCC_RE.exec(String(item?.symbol || ""));
+  if (!m) return null;
+  const qty = Math.abs(Math.round(Number(item.qty)));
+  if (!Number.isFinite(qty) || qty < 1) return null;
+  const strike = Number(m[4]) / 1000;
+  if (!Number.isFinite(strike) || strike <= 0) return null;
+  return { side: Number(item.qty) > 0 ? 1 : -1, qty, type: m[3] === "C" ? "call" : "put", strike };
+}
+
 /* `positions` is passed in so the panel can tell a holding this app HAS a
    record for from one it does not. Without it the panel offered a second
    close button for every position on the Positions screen, and only one of
@@ -827,8 +847,30 @@ export function AlpacaDesk({ creds, setMsg, gate, positions = [] }) {
   };
   useEffect(() => { sync(); }, []); // eslint-disable-line
   const cancel = async (id) => { try { await alpacaReq(`/v2/orders/${id}`, "DELETE"); setMsg("Order cancelled."); sync(); } catch (e) { setMsg(`The cancellation did not go through: ${alpacaErrorText(e)}`); } };
-  // Chiusura strategia intera: 1) cancella ordini aperti sugli stessi contratti (evita "wash trade detected")
-  // 2) invia UN ordine complesso di chiusura (mleg) — mai gambe separate
+  // Chiusura strategia intera: 1) cancella ordini aperti sugli stessi contratti
+  // (evita "wash trade detected") 2) invia UN ordine complesso di chiusura
+  // (mleg) — mai gambe separate — 3) A LIMITE, PREZZATO AL MOMENTO DEL TAP.
+  /* >>> IT WAS A MARKET ORDER, AND THE OWNER HIT IT. <<< He tapped "Close the
+     whole trade" on XLE and Alpaca refused it outright: HTTP 422, code
+     42210000, "options market orders are only allowed during market hours".
+     The app reported the refusal correctly and where the button is, so nothing
+     was hidden — but the order should never have been a market order.
+
+     PRD §8c has said since PR #22 that a closing order is a LIMIT priced at the
+     moment of the tap, and `closeLimitPrice()` exists for exactly that;
+     `approve.mjs` has used it since. This was the one close path that never got
+     it, and its own comment said why: it had no chain to price from, while
+     `approve.mjs` fetches one. So this fetches one too, the same way — and the
+     consequence is now measured rather than reasoned about, because a market
+     close is refused outright outside market hours where a limit would have
+     been accepted and queued.
+
+     AND `limitAgainstBook()` STOPS SKIPPING HERE FOR THE FIRST TIME. It was
+     wired to this path with `book: null` and no `limit_price`, two of its four
+     unknowns at once, so it could only ever skip. It is handed a real body and
+     a real book now. It is NOT in the gate and must not be: refusing a CLOSE
+     because a feed is quiet leaves somebody in a position they asked to leave.
+     The refusal is here, beside the button, with its reason. */
   const closeGroup = async (grp) => {
     if (DEMO) { setMsg(DEMO_TOOLTIP); return; }   // order path 3 of six
     try {
@@ -845,31 +887,63 @@ export function AlpacaDesk({ creds, setMsg, gate, positions = [] }) {
         const oSyms = o.order_class === "mleg" ? (o.legs || []).map((l) => l.symbol) : [o.symbol];
         if (oSyms.some((sy) => syms.has(sy))) { try { await alpacaReq(`/v2/orders/${o.id}`, "DELETE"); } catch { /* già chiuso */ } }
       }
+      const items = grp.items.slice(0, 4);
+      /* THE LEGS, READ OFF THE BROKER'S OWN SYMBOLS. The strike and the type
+         are IN the OCC symbol the account holds, so nothing here is invented
+         and no contract is named that the account does not already own —
+         `buildOcc()` is not involved and must never be. A symbol this app
+         cannot parse is UNKNOWN, not a leg with a strike of zero. */
+      const legs = items.map((x) => holdingLeg(x));
+      if (legs.some((l) => !l)) {
+        setMsg(`The close was not sent: one of these contracts is held under a symbol this app cannot read, ` +
+          `so there is no strike to price it at. Close it from the broker's own screen.`);
+        return;
+      }
+      /* THE PRICE, WORKED OUT NOW, FROM A CHAIN FETCHED NOW — the same shape
+         `approve.mjs` uses at tap time. The broker's positions payload carries
+         no bid and no ask, so a chain is the only book there is. */
+      if (!grp.ticker || !grp.expKey) {
+        setMsg(`The close was not sent: this holding's market and expiry could not be read from its symbols, ` +
+          `so there is no chain to price it from. Close it from the broker's own screen.`);
+        return;
+      }
+      let chain = null;
+      try { chain = await fetchChain(grp.ticker); } catch { chain = null; }
+      const exp = chain?.byExp?.[grp.expKey] || null;
+      if (!exp) {
+        setMsg(`The close was not sent: the option chain for ${grp.ticker} ${grp.expKey} could not be read just ` +
+          `now, so there is no price to close at. Nothing has changed on the broker. A close is a limit order ` +
+          `priced from the live market — it is never sent at whatever the other side happens to be asking.`);
+        return;
+      }
+      const quotes = legs.map((l) => {
+        const side = l.type === "put" ? exp.puts : exp.calls;
+        const q2 = side?.[l.strike] ?? side?.[String(l.strike)] ?? null;
+        return q2 ? { bid: q2.bid, ask: q2.ask } : {};
+      });
+      const market = closeMarket(legs, quotes);
+      if (!market.ok) { setMsg(`The close was not sent. ${closeUnreadableNote(market.missing, legs)}`); return; }
+      const priced = closeLimitPrice({ netMid: market.netMid, spread: market.spread });
+      if (!priced) { setMsg(`The close was not sent: ${closeLimitNote(null)}`); return; }
       // A five-lot spread is five of a 1:1 combination, not one of a 5:5:
       // the same GCD rule that refused the opening order refuses the close,
       // and being unable to close what you opened is the worse half of it.
       // Same `orderBody` as the ticket — one implementation, five paths.
-      const items = grp.items.slice(0, 4);
+      // `priced.net` is SIGNED and must stay signed: `mlegLimitPrice()` flips
+      // it for the close intent, so a debit structure is sold for a credit.
       const body = orderBody({
-        legs: items.map((x) => ({ side: +x.qty > 0 ? 1 : -1, qty: Math.abs(+x.qty) })),
+        legs: legs.map((l) => ({ side: l.side, qty: l.qty })),
         occs: items.map((x) => x.symbol),
-        userQty: 1, type: "market", tif: "day", intent: "close",
+        userQty: 1, type: "limit", limit: priced.net, tif: "day", intent: "close",
       });
-      /* THE SAME CHECK AS THE LADDER'S, AND ON THIS PATH IT ALWAYS SKIPS —
-         deliberately, and it is wired anyway. This close is a MARKET order, so
-         the body carries no limit_price at all, and the broker's positions
-         payload carries no bid or ask, so there is no book either. Two of the
-         four unknowns at once. It is written here because the day this path
-         gains a limit (P2 owes it: a market close on a book quoting 145% of
-         the mid is the fault §4l named) the check is already in place, and
-         because a path with no guard reads as a path nobody thought about. */
       const lb = limitAgainstBook({
-        limitPrice: body.limit_price ?? null, book: null,
-        intent: "close", legCount: items.length,
+        limitPrice: body.limit_price ?? null, book: comboBook(legs, quotes),
+        intent: "close", legCount: legs.length,
       });
       if (lb.checked && !lb.ok) throw new Error(lb.sentence);
       const co = await alpacaReq("/v2/orders", "POST", body);
-      setMsg(`Closing ${grp.key} — sent as a single order. ${orderOutcome(co).headline}`);
+      const words = limitWords(body.limit_price) || "a price the app could not read";
+      setMsg(`Closing ${grp.key} — sent as a single order at ${words}. ${orderOutcome(co).headline}`);
       setTimeout(sync, 1500);
     } catch (e) { setMsg(`The close was not sent: ${alpacaErrorText(e)}`); }
   };
