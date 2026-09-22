@@ -2364,6 +2364,90 @@ export const copilotRulesBlock = () =>
   `and a position against it needs extra scrutiny.`;
 
 /* -------------------------------------------------------------------------
+ * THE TECHNICAL-ANALYSIS COPILOT, AS A PROMPT.
+ *
+ * A generated prompt is a generated sentence, so it lives here beside
+ * `copilotRulesBlock()` and `reportNarrativePrompt()` rather than inline in
+ * the panel that sends it. That is not tidiness: the report's prompt INVENTED
+ * A POSITION once, and the only reason that fault is testable today is that
+ * the sentence which caused it is in a file a test can read.
+ *
+ * >>> THE ONE RULE THIS PROMPT EXISTS FOR. <<< The model is handed
+ * `taContext()` from `indicators.js` and NOTHING ELSE — no price bars. A model
+ * given 400 daily closes will work out a moving average, and the number it
+ * works out will not be the number on the chart beside its answer. This
+ * repository has removed four separate second-implementations of one figure
+ * (the chance of profit, the seasonal drift, the realised volatility, open
+ * interest); it is not adding a fifth that nobody can even read afterwards.
+ *
+ * So the prompt says, in as many words, that every figure must be quoted from
+ * the context and that a figure not in the context may not be written down at
+ * all. `indicators.test.js` holds that sentence.
+ * ------------------------------------------------------------------------- */
+
+/** The one-tap questions under the chart. They are here rather than in the
+ *  component because each one is a QUESTION PUT TO THE MODEL, and the prompt
+ *  above and the questions below are one contract. */
+export const TA_QUESTIONS = Object.freeze([
+  { id: "trend", label: "What is the trend saying?",
+    ask: "What are the moving averages and the trend read saying about this market right now, and how sure can I be about it?" },
+  { id: "rsi", label: "Is RSI stretched?",
+    ask: "Is RSI stretched here, what does that actually mean, and what would it take for this reading to be the wrong thing to act on?" },
+  { id: "macd", label: "What does MACD confirm or deny?",
+    ask: "Does MACD confirm or contradict what the moving averages are saying, and which of the two should I weight more here?" },
+  { id: "trade", label: "How does this relate to my trade?",
+    ask: "Relate this chart to the trade loaded on the Build screen: where are my break-evens against where this market has been, and how far is that in ordinary days of movement?" },
+]);
+
+/** The line that has to appear once, and only once. */
+export const TA_DISCLAIMER =
+  "This is educational analysis on a paper-trading account, not financial advice.";
+
+/**
+ * THE SYSTEM PROMPT FOR THE CHART COPILOT.
+ * It is deliberately NOT the desk copilot's prompt: that one is about a
+ * structure and its greeks, this one is about a price history, and a prompt
+ * that tries to be both ends up recommending a trade from a chart.
+ */
+export const taCopilotPrompt = () =>
+  `You are explaining the technical analysis on one commodity ETF chart to someone who is learning ` +
+  `to trade options and is not a professional. ${TA_DISCLAIMER}
+
+` +
+
+  `THE NUMBERS ARE GIVEN TO YOU AND YOU MAY NOT PRODUCE ANY OTHERS. The context below was computed ` +
+  `by the app from the daily bars and is exactly what is drawn on the chart beside your answer. ` +
+  `You are NOT given the price bars, deliberately. Do not compute, estimate, infer or recall any ` +
+  `figure that is not in the context: every number you write must be quoted from it. If the reader ` +
+  `asks about something the context does not contain — another indicator, another timeframe, a ` +
+  `price level nobody has measured — say plainly that the app has not measured it, and say what it ` +
+  `HAS measured that comes closest. A field that is null is UNKNOWN and is never zero; an ` +
+  `indicator listed in indicators_not_available has not enough history to exist and you must say so ` +
+  `rather than describing it.
+
+` +
+
+  `WHAT AN ANSWER IS MADE OF, in this order, for each indicator you touch: what it MEASURES in one ` +
+  `plain clause, defined the first time you use the term; what it is SAYING right now, with the ` +
+  `figure from the context; and what would make that read WRONG — the specific thing you would ` +
+  `watch for. The third one is the part that matters and it is the part everybody skips.
+
+` +
+
+  `WHAT YOU MAY NOT DO. Do not recommend a trade, a strike or an expiry: this panel explains a ` +
+  `chart and the app has its own rules for what may be proposed, enforced in code. Do not present ` +
+  `a technical reading as a forecast — an indicator describes what HAS happened. Do not guarantee ` +
+  `an outcome. ${copilotRulesBlock()}
+
+` +
+
+  `HOW TO WRITE IT. Short paragraphs of plain English prose. No tables, no pipe characters, no ` +
+  `code fences, no bullet lists of numbers the screen is already showing. At most three short ` +
+  `sections, each headed with "## " and a plain title. Open with one sentence that answers the ` +
+  `question asked. Two hundred and fifty words is plenty. Write the disclaimer once, at the end, ` +
+  `and nowhere else.`;
+
+/* -------------------------------------------------------------------------
  * THE PERIODIC REPORT'S NARRATIVE SECTION, AS A PROMPT.
  *
  * It lives here rather than inline in the Journal tab for the reason every rule

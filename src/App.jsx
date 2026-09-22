@@ -8,7 +8,7 @@ import {
   FlaskConical, Briefcase, Plus, Plug, Send, ExternalLink, MessageSquare, FileText, Bell,
   SlidersHorizontal, ArrowLeft, Sun, Moon, AlertTriangle, WifiOff,
 } from "lucide-react";
-import { fetchAllNews, fetchWeather, ImpactTags, CopilotTab, ReportTab, OrderTicket, AlpacaDesk, scaleStrategy, buildContext, GuardianPanel, ChainMatrix, OptionPanel, UnifiedView, taSignals, confluence, WhyThisTrade, Markdown, alpacaReq } from "./pro.jsx";
+import { fetchAllNews, fetchWeather, ImpactTags, CopilotTab, TaCopilot, ReportTab, OrderTicket, AlpacaDesk, scaleStrategy, buildContext, GuardianPanel, ChainMatrix, OptionPanel, PriceChart, UnifiedView, taSignals, confluence, WhyThisTrade, Markdown, alpacaReq } from "./pro.jsx";
 import { BandThumbnail, payoffBands, bandTakeaway, GaugeFigure, Gauge, CompareFigure, exitPlanSentence,
   OpenInterestStrip, oiStripTakeaway, oiCutAt, oiGhostCut, explainOiStrip, useWidth } from "./visuals.jsx";
 import { fuseSignals, sentimentDirection, withSignalRank, compareCandidates, againstSignal, DRIVER_PRESETS, rankByDrivers, verdictNarrative } from "./signals.js";
@@ -1351,6 +1351,14 @@ export default function OptionsStrategyLab() {
   // inside it was destroyed on the next tap and an answer that landed while it
   // was shut never reached the screen at all.
   const [copilot, setCopilot] = useState({ msgs: [], busy: false, err: null, partial: "" });
+  /* AND SO DOES THE TECHNICAL COPILOT'S, for the same reason, and its BARS
+     with it. `PriceChart` fetches the daily history once per ticker and hands
+     it up here; the copilot under it reads the SAME bars rather than fetching
+     a second copy — one fetch, one history, one set of indicators, which is
+     the whole reason `indicators.js` exists. */
+  const [taChat, setTaChat] = useState({ msgs: [], busy: false, err: null, partial: "" });
+  const [taBars, setTaBars] = useState(null);
+  useEffect(() => { setTaBars(null); setTaChat({ msgs: [], busy: false, err: null, partial: "" }); }, [ticker]);
   const [optMode, setOptMode] = useState("budget");
   // NOT a hardcoded 500. The field starts at the per-trade limit the capital
   // model derives and only holds a number of its own once the user types one,
@@ -4086,7 +4094,32 @@ export default function OptionsStrategyLab() {
             )}
             {ev === "history" && spot && (
             <div style={{ marginTop: 12 }}>
+              {/* THE PRICE CHART, WHICH NOTHING HAS EVER RENDERED.
+                  `PriceChart` has been exported from pro.jsx since the desk
+                  was built and mounted by no screen in the app: the candles,
+                  the support and resistance lines, the break-evens and the leg
+                  lines were all code nobody could see. This is where price
+                  history belongs — the panel whose whole subject is what this
+                  market has done — and it carries the indicators now.
+                  The break-evens and the legs are the ones on the Build screen
+                  above, so the chart is about THIS trade, not about the
+                  ticker in the abstract. */}
               <Panel>
+                <PriceChart ticker={ticker} levels={lv}
+                  breakevens={legs.length && AE ? AE.breakevens : []}
+                  legLines={legs.map((l) => ({ price: l.strike, side: l.side,
+                    label: `${l.side > 0 ? "+" : "\u2212"}${l.qty} ${l.strike}${l.type === "call" ? "C" : "P"}` }))}
+                  onBars={setTaBars} />
+                {/* THE TECHNICAL COPILOT SITS DIRECTLY UNDER THE CHART IT IS
+                    ABOUT, and its conversation lives in App.jsx — an evidence
+                    panel owns no state, or an answer that lands while the
+                    sheet is shut never reaches the screen. */}
+                <TaCopilot ticker={ticker} bars={taBars} convo={taChat} setConvo={setTaChat}
+                  onAnalysis={logAnalysis}
+                  structure={legs.length && AE ? { name: stratName, expKey, dte,
+                    legs, breakevens: AE.breakevens, entry: AE.entry, maxLoss: AE.maxLoss, spot } : null} />
+              </Panel>
+              <Panel style={{ marginTop: 10 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
                   <Lbl>SEASONALITY · {seasonal[ticker] ? seas.src : seasProv.missing ? "NOT LOADED — NO READING AT ALL" : "ESTIMATE — LOAD THE REAL HISTORY"}</Lbl>
                   <Btn small ghost color={T.blue} onClick={loadSeasonal} disabled={busy === "av"}>

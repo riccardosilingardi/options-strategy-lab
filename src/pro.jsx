@@ -6,9 +6,14 @@ import { RULES, ruleBadge, takeProfitLabel, scaleOutLabel, stopLossLabel, exitDT
   comboBook, limitAgainstBook, notionalControlled, notionalNote,
   legBook, sizeSkippedNote, onTick, netFromLegs, limitCeilingNote, rewardRisk,
   contractListing, unlistedContractNote, unquotedLegNote, unquotedLegPointer, marketOrderNote,
+  taCopilotPrompt, TA_QUESTIONS, TA_DISCLAIMER,
   ivProvenance } from "./rules.js";
 import { contractsOf, positionSize, bookPositions, autopilotHorizonNote, autopilotVolNote } from "./journal.js";
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, LineStyle } from "lightweight-charts";
+// THE INDICATORS, FROM THEIR ONE HOME. Never compute a moving average, an
+// RSI or a MACD in this file: `signals.js` scores the same numbers, and two
+// implementations is two screens disagreeing about one market.
+import { indicatorSet, takeaway, taContext, LABELS, MEASURES, RSI_HIGH, RSI_LOW } from "./indicators.js";
 import { erf, netBS } from "./engine.js";
 import { ARROW, REGIONS, regionSignals, tagImpacts, taRead } from "./signals.js";
 import { useNarrow, BandThumbnail, payoffBands, bandTakeaway } from "./visuals.jsx";
@@ -908,6 +913,35 @@ export function AlpacaDesk({ creds, setMsg, gate }) {
 // Un solo posto per le regole, anche nei prompt: il testo qui sotto e' generato
 // da src/rules.js, quindi il modello non puo' citare un numero che il codice
 // non applica piu' (era il caso di "regola del 5%" e "exit 7 DTE").
+/* ====================================================================
+   THE DESK COPILOT'S PROMPT.
+
+   >>> ITS DECISION TREES RECOMMENDED WHAT THE APP REFUSES TO OFFER. <<<
+   ROADMAP P3's first item, open since the guided path was built. The trees
+   below used to read "strong bullish seasonal signal + uptrend -> bull call
+   spread (small capital) or LONG CALL (larger capital)" and "event ahead
+   with low IV -> long ATM STRADDLE/STRANGLE", and every one of those three
+   is a structure the app will not put in front of this user:
+
+     - a LONG CALL is a single-leg long option, which `runWizard` excludes
+       because time decay makes it a poor first trade;
+     - a STRADDLE and a STRANGLE are two single-leg longs bought together,
+       so they are the same exclusion twice, and a strangle's short spelling
+       is an uncovered leg, which non-negotiable rule 2 forbids outright;
+     - a LONG CALL also has NO CEILING, so `payoffCeiling()` gives it no
+       maximum profit, there is no take-profit rung, and it sorts last with a
+       blank expected value wherever it is ranked.
+
+   A copilot that recommends a structure the screen beside it will not build
+   is the app arguing with itself, and the part that argues in prose wins
+   with a reader who is learning. The trees are rewritten around what this
+   app actually offers: defined-risk verticals, iron condors, and NOTHING —
+   which is a real answer and the one the thesis is named after.
+
+   The chart copilot below does not inherit any of this: it has its own
+   prompt (`taCopilotPrompt()` in rules.js) and it may not propose a trade
+   at all.
+==================================================================== */
 const SYSTEM_PROMPT = `You are the copilot of an options trader working on commodity ETFs (SOYB, CORN, UNG, BOIL, WEAT, SPY) in PAPER TRADING.
 ${copilotRulesBlock()}
 These rules are enforced in code by src/riskGate.js before any order is sent. Never propose a trade that breaks them, and never present a rule number that differs from the ones above.
@@ -915,9 +949,11 @@ WHO YOU ARE WRITING FOR: someone who is learning, not a professional trader. Pla
 
 METHOD (follow in order): 1 Discovery (seasonal scanner + trend) → 2 Construction (real chain, strikes, Greeks, R/R, breakevens) → 3 Execution (only after explicit human confirmation, check buying power) → 4 Monitoring (P&L against the rules, % of max profit) → 5 Reporting.
 
-DECISION TREES: (A) strong bullish seasonal signal + uptrend → bull call spread (small capital) or long call (larger capital), moderate conviction → call calendar; (B) neutral/range market with low volatility → iron condor (never naked strangles: defined risk only); (C) event ahead with low IV → long ATM straddle/strangle; IV already high → sell premium with defined risk, or wait; directional bias → vertical spread.
+WHAT THIS APP WILL AND WILL NOT BUILD — read this before recommending anything. Every structure must have a KNOWN maximum loss and no uncovered short leg; that is enforced in code and an order breaking it does not leave. Beyond that, the guided path this user starts from also excludes single-leg LONG options (a long call or a long put on its own: time decay makes it a poor trade for someone learning, and an unbounded payoff has no maximum profit, so there is no take-profit level to exit at), STRADDLES and STRANGLES (two single-leg longs bought together — the same exclusion twice — and a short strangle is an uncovered leg, which is forbidden outright), and BUTTERFLIES (worth their maximum only AT the middle strike AT expiry, so the ${pctText(RULES.takeProfitPct)} take-profit is out of reach before the ${RULES.exitDTE}-day exit ends the trade). NEVER recommend one of those to this user. If the honest answer is one of them, say that the structure that fits is one this app does not offer, and say why.
 
-MANAGEMENT: scale in and out → start with 1 contract, add if it works, close half at ${pctText(RULES.takeProfitPct)} of max profit and the rest at ${pctText(RULES.scaleOutPct)}; roll near expiration with a calendar; if the underlying moves against you → re-examine the thesis: if it is invalidated, close, do not average down.
+DECISION TREES, over the structures that remain: (A) directional edge — a seasonal signal and a price trend agreeing → a DEBIT VERTICAL SPREAD in that direction (buy the nearer strike, sell the further one), which is the app's default and has both a known maximum loss and a reachable take-profit; (B) the same direction but the options are expensive against their own history (IV rank above ${RULES.expensiveIVRank}) → a CREDIT VERTICAL on the other side instead, so the expensive premium is being sold rather than bought, still with the long leg that defines the risk; (C) no directional edge and a quiet market → an IRON CONDOR, which is two credit verticals and is defined-risk on both sides; (D) the factors disagree, the chain cannot be priced, or nothing clears the quality floors → RECOMMEND NOTHING, and say which of those it was. "Nothing today" is a correct answer and this platform is built around being able to give it.
+
+MANAGEMENT: scale in and out → start with 1 contract, add if it works, close half at ${pctText(RULES.takeProfitPct)} of max profit and the rest at ${pctText(RULES.scaleOutPct)}; the ${RULES.exitDTE}-day exit ends the trade whatever it is doing; a loss of ${pctText(RULES.stopLossPct)} of max loss is a WARNING that asks you to look, never an automatic close; if the underlying moves against you → re-examine the thesis: if it is invalidated, close, do not average down.
 
 OUTPUT FORMAT — READ THIS TWICE, IT IS THE MOST IGNORED PART.
 The screen ALREADY shows the legs, the strikes, the greeks, the max profit, the max loss and the breakevens, right next to your answer. Do NOT repeat them as a specification. Refer to them ("the $22/$23 call spread above") and spend your words on what the numbers MEAN.
@@ -1122,9 +1158,14 @@ export function gatewayPageMessage(raw) {
  * is written instead of all at once at the end.
  *
  * @param onDelta called with the text SO FAR each time more of it arrives
+ * @param system  which prompt to send. The desk copilot's is the default;
+ *   the chart copilot passes `taCopilotPrompt()`. ONE STREAMING PATH, two
+ *   prompts — a second `askAI` would be a second place the `message_stop`
+ *   flush, the `max_tokens` check and the gateway-page sentence have to be
+ *   got right, and every one of those was a fault before it was a rule.
  * @returns the finished text
  */
-export async function askAI(_key, messages, contextStr, onDelta) {
+export async function askAI(_key, messages, contextStr, onDelta, system = SYSTEM_PROMPT) {
   const r = await fetch("/api/ai", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1132,7 +1173,7 @@ export async function askAI(_key, messages, contextStr, onDelta) {
       model: "claude-sonnet-4-6",
       max_tokens: 1200,
       stream: true,
-      system: SYSTEM_PROMPT + "\n\nLIVE CONTEXT (JSON):\n" + contextStr,
+      system: system + "\n\nLIVE CONTEXT (JSON):\n" + contextStr,
       messages,
     }),
   });
@@ -1283,6 +1324,145 @@ export function buildContext(ctx) {
  * @param convo    { msgs, busy, err } — owned by the caller
  * @param setConvo the caller's setter
  */
+/* ====================================================================
+   THE CHART COPILOT — a compact panel, directly under the chart it is about
+
+   Not the desk copilot with a different question in it. That one is about a
+   STRUCTURE — its legs, its greeks, its maximum loss — and this one is about
+   a PRICE HISTORY; a prompt that tries to be both ends up recommending a
+   trade from a chart, which is the one thing this panel must not do.
+
+   THREE RULES, AND EACH ONE IS A FAULT THIS REPOSITORY HAS ALREADY HAD:
+
+   1. THE MODEL NEVER RECEIVES RAW BARS. It is handed `taContext()` from
+      `indicators.js` and nothing else. A model given 400 closes works out a
+      moving average, and its answer would then disagree with the line drawn
+      six inches above it.
+   2. THE STATE LIVES ABOVE THE PANEL. An evidence panel owns no state: every
+      other chip in the strip unmounts this one, and an answer that landed
+      while it was shut would never reach the screen. `taChat` is App.jsx's.
+   3. A CUT-OFF ANSWER IS LABELLED CUT OFF, and is not filed in the Journal.
+      Half an analysis recorded as a whole one is the app lying about its own
+      work, and `askAI` already knows the difference between running out of
+      room and losing the connection.
+==================================================================== */
+
+export function TaCopilot({ ticker, bars, structure, convo, setConvo, onAnalysis }) {
+  const { msgs = [], busy = false, err = null, partial = "" } = convo || {};
+  const [input, setInput] = useState("");
+  const ready = Array.isArray(bars) && bars.length > 0;
+
+  const send = async (text, label) => {
+    if (!text.trim() || busy || !ready) return;
+    const next = [...msgs, { role: "user", content: text }];
+    setConvo({ msgs: next, busy: true, err: null, partial: "" });
+    setInput("");
+    try {
+      /* THE CONTEXT BUILDER IS THE ONLY SOURCE. It is called here, at the
+         moment of the send, off the same bars the chart drew — never from a
+         copy kept beside it, and never from anything this component computed
+         for itself. */
+      const ctx = taContext(bars, structure);
+      const reply = await askAI(
+        "server",
+        next.map((m) => ({ role: m.role, content: m.content })),
+        JSON.stringify({ ticker, ...ctx }, null, 1),
+        (sofar) => setConvo((c) => ({ ...c, partial: sofar })),
+        taCopilotPrompt());
+      setConvo({ msgs: [...next, { role: "assistant", content: reply }], busy: false, err: null, partial: "" });
+      // THE JOURNAL IS THE RECORD OF WHAT THE APP DID, and a chart reading is
+      // part of that record exactly as a desk analysis is.
+      if (onAnalysis) onAnalysis({ label: label || "Chart question", prompt: text, answer: reply, ticker: ticker || null });
+    } catch (e) {
+      const cut = e && e.partial;
+      setConvo({
+        msgs: cut ? [...next, { role: "assistant", content: cut, truncated: true, reason: e.reason || "cut" }] : next,
+        busy: false, err: String(e.message || e), partial: "",
+      });
+    }
+  };
+
+  return (
+    <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${T.line}` }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+        <Lbl><Sparkles size={11} style={{ verticalAlign: "-1px" }} /> ASK ABOUT THIS CHART</Lbl>
+        {msgs.length > 0 && (
+          <Btn small ghost onClick={() => setConvo({ msgs: [], busy: false, err: null, partial: "" })}>
+            <Trash2 size={11} /> Clear
+          </Btn>
+        )}
+      </div>
+      {!ready ? (
+        <div style={{ ...mono, fontSize: 11, color: T.mut, marginTop: 8, lineHeight: 1.6 }}>
+          The daily prices have not loaded, so there are no indicator readings to ask about. Nothing is
+          estimated in their place.
+        </div>
+      ) : (
+        <>
+          <div style={{ display: "flex", gap: 5, marginTop: 8, flexWrap: "wrap" }}>
+            {TA_QUESTIONS.map((q) => (
+              <Btn key={q.id} small ghost color={T.blue} disabled={busy} onClick={() => send(q.ask, q.label)}>{q.label}</Btn>
+            ))}
+          </div>
+          <div style={{ marginTop: 10, display: "grid", gap: 9 }}>
+            {msgs.length === 0 && !busy && (
+              <div style={{ ...mono, fontSize: 11, color: T.mut, lineHeight: 1.6 }}>
+                Pick one, or ask your own. The copilot is given the indicator readings drawn above —
+                the same numbers, never the raw prices — and the legs and break-evens of the trade on
+                the Build screen when there is one. It explains; it does not propose a trade.
+              </div>
+            )}
+            {msgs.map((m, i) => (
+              <div key={i} style={{ padding: m.role === "user" ? "8px 10px" : "10px 12px", borderRadius: 7,
+                background: m.role === "user" ? `${T.blue}14` : T.bg,
+                border: `1px solid ${m.role === "user" ? T.blue + "44" : T.line}` }}>
+                <div style={{ ...mono, fontSize: 9, letterSpacing: "0.1em", marginBottom: m.role === "user" ? 3 : 6,
+                  color: m.role === "user" ? T.blue : T.amber }}>
+                  {m.role === "user" ? "YOU ASKED"
+                    : m.truncated ? (m.reason === "max_tokens" ? "CHART COPILOT · RAN OUT OF ROOM" : "CHART COPILOT · CUT OFF")
+                      : "CHART COPILOT"}
+                </div>
+                {m.role === "user"
+                  ? <div style={{ fontSize: 12.5, color: T.body, lineHeight: 1.5 }}>{m.content}</div>
+                  : <>
+                    <Markdown text={m.content} />
+                    {m.truncated && (
+                      <div style={{ ...mono, fontSize: 10.5, color: T.amber, marginTop: 8, paddingTop: 8,
+                        borderTop: `1px solid ${T.amber}44`, lineHeight: 1.6 }}>
+                        {m.reason === "max_tokens"
+                          ? "This answer stops here because it reached the length limit, not because the copilot had finished. Ask for a shorter answer, or for one part of it."
+                          : "This answer stops here because the connection was cut, not because the copilot had finished. It is not filed in the Journal."}
+                      </div>
+                    )}
+                  </>}
+              </div>
+            ))}
+            {busy && (partial
+              ? <div style={{ padding: "10px 12px", borderRadius: 7, background: T.bg, border: `1px solid ${T.line}` }}>
+                <div style={{ ...mono, fontSize: 9, letterSpacing: "0.1em", color: T.amber, marginBottom: 6 }}>CHART COPILOT · WRITING</div>
+                <Markdown text={partial} />
+              </div>
+              : <div style={{ ...mono, fontSize: 11, color: T.mut }}>Reading the chart…</div>)}
+            {err && <div style={{ ...mono, fontSize: 11, color: T.red, lineHeight: 1.6 }}>{err}</div>}
+          </div>
+          <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
+            <input value={input} onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") send(input); }}
+              placeholder="Ask about the chart…"
+              style={{ flex: 1, minWidth: 0, ...mono, fontSize: 12, padding: "8px 10px", borderRadius: 6,
+                background: T.bg, border: `1px solid ${T.line}`, color: T.ink }} />
+            <Btn small color={T.blue} onClick={() => send(input)} disabled={busy || !input.trim()}>Ask</Btn>
+          </div>
+          <div style={{ ...mono, fontSize: 9.5, color: T.dim, marginTop: 8, lineHeight: 1.6 }}>
+            {TA_DISCLAIMER} The copilot may only quote figures the app measured: if it is asked about
+            something nobody has measured, it says so rather than producing a number.
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export function CopilotTab({ ctx, apiKey, convo, setConvo, onAnalysis }) {
   const { msgs = [], busy = false, err = null, partial = "" } = convo || {};
   const [input, setInput] = useState("");
@@ -2016,54 +2196,231 @@ export function GuardianPanel({ pos, spot, dteLeft, ivNow, vol, seasonalNow, pnl
    8) PRICE CHART — candele sottostante stile piattaforma pro
 ================================================================ */
 
-export function PriceChart({ ticker, levels, breakevens, entrySpot, legLines, height = 320 }) {
+/* ====================================================================
+   THE PRICE CHART, AND THE INDICATORS ON IT
+
+   >>> THIS COMPONENT WAS DEFINED AND RENDERED BY NOTHING. <<< It has been
+   in this file since the desk was built, exported, and mounted at no point
+   in the app — so the candles, the support and resistance lines, the
+   break-evens and the leg lines were all code nobody could see. It is
+   mounted in the History evidence panel now, which is where price history
+   belongs.
+
+   EVERY NUMBER ON IT COMES FROM `indicators.js` AND NOWHERE ELSE, for the
+   same reason `chanceOf()` is the only caller of `terminalMC`: the moment a
+   chart computes its own moving average there are two of them in the app,
+   and the four-factor score reads the other one.
+
+   PHONE FIRST, 390px. The overlays (the averages and the band) sit ON the
+   price pane, because they are prices. RSI and MACD are neither, so they get
+   their own small panes below — COLLAPSED by default, because a phone screen
+   that opens with three charts on it has taught nobody anything. The chip
+   row remembers what the viewer turned on, in `localStorage`, wrapped in
+   try/catch: that store can throw in a private window and the chart has to
+   render correctly without it.
+==================================================================== */
+
+/** What the chip row offers, in the order it draws them. `pane` decides
+ *  where the series goes; `on` is what a viewer who has never touched the
+ *  chips sees. */
+const CHART_INDICATORS = [
+  { id: "sma20", pane: "price", color: T.blue, on: true },
+  { id: "sma50", pane: "price", color: T.amber, on: true },
+  { id: "sma200", pane: "price", color: T.mut, on: false },
+  { id: "ema9", pane: "price", color: T.green, on: false },
+  { id: "ema21", pane: "price", color: T.red, on: false },
+  { id: "bollinger", pane: "price", color: T.dim, on: false },
+  { id: "rsi", pane: "rsi", color: T.blue, on: false },
+  { id: "macd", pane: "macd", color: T.blue, on: false },
+  { id: "atr", pane: "none", color: T.mut, on: true },
+  { id: "volumeAvg", pane: "none", color: T.mut, on: true },
+];
+const CHART_PREFS_KEY = "osl.chart.indicators.v1";
+
+/** REMEMBERED PER VIEWER, AND NEVER TRUSTED. `localStorage` throws in a
+ *  private window and comes back empty after a clear, so every read and
+ *  write is wrapped and the default is a complete answer on its own. */
+function loadChartPrefs() {
+  const base = Object.fromEntries(CHART_INDICATORS.map((c) => [c.id, c.on]));
+  try {
+    const raw = window.localStorage.getItem(CHART_PREFS_KEY);
+    if (!raw) return base;
+    const saved = JSON.parse(raw);
+    if (!saved || typeof saved !== "object") return base;
+    // Only keys this build knows: a chip removed next year must not resurrect.
+    for (const c of CHART_INDICATORS) if (typeof saved[c.id] === "boolean") base[c.id] = saved[c.id];
+    return base;
+  } catch { return base; }
+}
+function saveChartPrefs(prefs) {
+  try { window.localStorage.setItem(CHART_PREFS_KEY, JSON.stringify(prefs)); } catch { /* a private window */ }
+}
+
+/** A series as lightweight-charts wants it, with the nulls DROPPED rather
+ *  than sent as zeros. A gap in a line is the honest drawing of a gap. */
+const lineData = (times, xs) => {
+  const out = [];
+  for (let i = 0; i < xs.length; i++) if (xs[i] != null && times[i]) out.push({ time: times[i], value: xs[i] });
+  return out;
+};
+
+export function PriceChart({ ticker, levels, breakevens, entrySpot, legLines, height = 320, onBars = null }) {
   const ref = React.useRef(null);
+  const rsiRef = React.useRef(null);
+  const macdRef = React.useRef(null);
   const [meta, setMeta] = useState(null);
   const [err, setErr] = useState(null);
   const [range, setRange] = useState(180);
+  const [bars, setBars] = useState(null);
+  const [prefs, setPrefs] = useState(loadChartPrefs);
+  const [openPanes, setOpenPanes] = useState(false);
+  const [hover, setHover] = useState(null);
+  const narrow = useNarrow(560);
+
+  const toggle = (id) => setPrefs((p) => { const next = { ...p, [id]: !p[id] }; saveChartPrefs(next); return next; });
+
+  /* THE BARS ARE FETCHED ONCE PER TICKER AND RANGE. The indicators are
+     computed from them in a memo, so switching a chip on does not refetch
+     and cannot produce a second reading of the same market. */
   useEffect(() => {
-    let chart, dead = false;
+    let dead = false;
     (async () => {
       try {
-        setErr(null);
+        setErr(null); setBars(null);
         const r = await fetch(`/api/bars?sym=${encodeURIComponent(ticker)}`);
         const j = await r.json();
         if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
-        if (dead || !ref.current) return;
-        ref.current.innerHTML = "";
-        chart = createChart(ref.current, {
-          height,
-          layout: { background: { color: T.bg }, textColor: T.mut, fontFamily: "ui-monospace, Menlo, monospace", fontSize: 10 },
-          grid: { vertLines: { color: T.line }, horzLines: { color: T.line } },
-          rightPriceScale: { borderColor: T.line },
-          timeScale: { borderColor: T.line },
-          crosshair: { mode: 0 },
-        });
-        const bars = j.bars.slice(-range);
-        const candles = chart.addSeries(CandlestickSeries, {
-          upColor: T.green, downColor: T.red, borderUpColor: T.green, borderDownColor: T.red,
-          wickUpColor: T.green, wickDownColor: T.red,
-        });
-        candles.setData(bars);
-        const vol = chart.addSeries(HistogramSeries, { priceScaleId: "vol", color: T.dim, priceFormat: { type: "volume" } });
-        chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
-        vol.setData(bars.map((b) => ({ time: b.time, value: b.volume, color: `${b.close >= b.open ? T.green : T.red}44` })));
-        const line = (price, color, title) => candles.createPriceLine({ price, color, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title });
-        (legLines || []).forEach((lg) => {
-          candles.createPriceLine({ price: lg.price, color: lg.side > 0 ? T.green : T.red, lineWidth: 2, lineStyle: LineStyle.Solid, axisLabelVisible: true, title: lg.label });
-        });
-        (levels?.supports || []).forEach((p) => line(p, T.green, "support"));
-        (levels?.resistances || []).forEach((p) => line(p, T.red, "resistance"));
-        (breakevens || []).forEach((p) => line(p, T.blue, "break even"));
-        if (entrySpot) line(entrySpot, T.amber, "your entry");
-        chart.timeScale().fitContent();
-        setMeta({ n: bars.length, source: j.source, last: bars[bars.length - 1] });
-        const ro = new ResizeObserver(() => chart.applyOptions({ width: ref.current?.clientWidth || 600 }));
-        ro.observe(ref.current);
+        if (dead) return;
+        setBars(j.bars || []);
+        setMeta({ source: j.source, whole: (j.bars || []).length });
+        /* ONE FETCH, ONE HISTORY. The copilot under this chart is given the
+           SAME bars rather than asking `/api/bars` a second time: two fetches
+           are two histories the moment one of them is served from a cache the
+           other missed, and the whole point of `indicators.js` is that the
+           line on the chart and the number in the sentence are one reading. */
+        if (onBars) onBars(j.bars || []);
       } catch (e) { if (!dead) setErr(String(e.message || e)); }
     })();
-    return () => { dead = true; chart?.remove?.(); };
-  }, [ticker, range, JSON.stringify(levels), JSON.stringify(breakevens), JSON.stringify(legLines), entrySpot]); // eslint-disable-line
+    return () => { dead = true; };
+  }, [ticker]);
+
+  /* THE WHOLE HISTORY IS READ, AND ONLY THE TAIL IS DRAWN. A 200-day average
+     computed from the 180 bars on screen would be a 180-day average with the
+     wrong name on it — and at 90 days it would not exist at all while the
+     data to form it was sitting in the same reply. */
+  const set = React.useMemo(() => (bars ? indicatorSet(bars) : null), [bars]);
+  const shown = React.useMemo(() => (bars ? bars.slice(-range) : []), [bars, range]);
+  const firstShown = shown.length && bars ? bars.length - shown.length : 0;
+  const cut = React.useCallback((xs) => (xs || []).slice(firstShown), [firstShown]);
+
+  useEffect(() => {
+    if (!shown.length || !ref.current || !set) return;
+    const charts = [];
+    const times = cut(set.times);
+    const mk = (node, h, withTime) => {
+      const c = createChart(node, {
+        height: h,
+        layout: { background: { color: T.bg }, textColor: T.mut, fontFamily: "ui-monospace, Menlo, monospace", fontSize: 10 },
+        grid: { vertLines: { color: T.line }, horzLines: { color: T.line } },
+        rightPriceScale: { borderColor: T.line },
+        timeScale: { borderColor: T.line, visible: withTime },
+        crosshair: { mode: 0 },
+      });
+      charts.push(c);
+      return c;
+    };
+    ref.current.innerHTML = "";
+    const chart = mk(ref.current, height, !openPanes);
+    const candles = chart.addSeries(CandlestickSeries, {
+      upColor: T.green, downColor: T.red, borderUpColor: T.green, borderDownColor: T.red,
+      wickUpColor: T.green, wickDownColor: T.red,
+    });
+    candles.setData(shown);
+    const vol = chart.addSeries(HistogramSeries, { priceScaleId: "vol", color: T.dim, priceFormat: { type: "volume" } });
+    chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
+    vol.setData(shown.map((b) => ({ time: b.time, value: b.volume, color: `${b.close >= b.open ? T.green : T.red}44` })));
+
+    /* THE OVERLAYS — prices, so they belong on the price pane. A series whose
+       indicator is not ready is not added at all: the takeaway below the
+       chart already says how many bars are missing, and an empty line in a
+       legend reads as a bug. */
+    const overlay = (xs, color, style = LineStyle.Solid) =>
+      chart.addSeries(LineSeries, { color, lineWidth: 1, lineStyle: style, priceLineVisible: false, lastValueVisible: false })
+        .setData(lineData(times, cut(xs)));
+    if (prefs.sma20 && set.ready.sma20) overlay(set.series.sma20, T.blue);
+    if (prefs.sma50 && set.ready.sma50) overlay(set.series.sma50, T.amber);
+    if (prefs.sma200 && set.ready.sma200) overlay(set.series.sma200, T.mut);
+    if (prefs.ema9 && set.ready.ema9) overlay(set.series.ema9, T.green, LineStyle.Dotted);
+    if (prefs.ema21 && set.ready.ema21) overlay(set.series.ema21, T.red, LineStyle.Dotted);
+    if (prefs.bollinger && set.ready.bollinger) {
+      overlay(set.series.bbUpper, T.dim, LineStyle.Dashed);
+      overlay(set.series.bbLower, T.dim, LineStyle.Dashed);
+    }
+
+    // THE EXISTING LINES STAY. Support, resistance, break-even, entry, legs.
+    const line = (price, color, title) => candles.createPriceLine({ price, color, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title });
+    (legLines || []).forEach((lg) => {
+      candles.createPriceLine({ price: lg.price, color: lg.side > 0 ? T.green : T.red, lineWidth: 2, lineStyle: LineStyle.Solid, axisLabelVisible: true, title: lg.label });
+    });
+    (levels?.supports || []).forEach((p) => line(p, T.green, "support"));
+    (levels?.resistances || []).forEach((p) => line(p, T.red, "resistance"));
+    (breakevens || []).forEach((p) => line(p, T.blue, "break even"));
+    if (entrySpot) line(entrySpot, T.amber, "your entry");
+    chart.timeScale().fitContent();
+
+    /* RSI AND MACD ARE NOT PRICES, so they get their own panes rather than
+       being squeezed onto the price scale — where a 0-100 oscillator drawn
+       against a $20 stock is a flat line at the top of the screen. */
+    if (openPanes && prefs.rsi && set.ready.rsi && rsiRef.current) {
+      rsiRef.current.innerHTML = "";
+      const c = mk(rsiRef.current, narrow ? 84 : 100, false);
+      c.addSeries(LineSeries, { color: T.blue, lineWidth: 1, priceLineVisible: false })
+        .setData(lineData(times, cut(set.series.rsi)));
+      const band = c.addSeries(LineSeries, { color: "transparent", priceLineVisible: false, lastValueVisible: false });
+      band.setData(lineData(times, cut(set.series.rsi).map(() => RSI_HIGH)));
+      band.createPriceLine({ price: RSI_HIGH, color: T.red, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: String(RSI_HIGH) });
+      band.createPriceLine({ price: RSI_LOW, color: T.green, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: String(RSI_LOW) });
+      c.timeScale().fitContent();
+    }
+    if (openPanes && prefs.macd && set.ready.macd && macdRef.current) {
+      macdRef.current.innerHTML = "";
+      const c = mk(macdRef.current, narrow ? 84 : 100, true);
+      const h = c.addSeries(HistogramSeries, { priceFormat: { type: "price", precision: 3, minMove: 0.001 } });
+      h.setData(lineData(times, cut(set.series.macdHist)).map((d) => ({ ...d, color: d.value >= 0 ? `${T.green}88` : `${T.red}88` })));
+      c.addSeries(LineSeries, { color: T.blue, lineWidth: 1, priceLineVisible: false })
+        .setData(lineData(times, cut(set.series.macd)));
+      c.addSeries(LineSeries, { color: T.amber, lineWidth: 1, priceLineVisible: false })
+        .setData(lineData(times, cut(set.series.macdSignal)));
+      c.timeScale().fitContent();
+    }
+
+    /* THE CROSSHAIR READOUT. The value under the pointer, for every series
+       the viewer has switched on, read out of `indicatorSet()` by index —
+       never recomputed for the tooltip, which is how a tooltip comes to
+       disagree with the line it is pointing at. */
+    const byTime = new Map(times.map((t, i) => [t, i]));
+    chart.subscribeCrosshairMove((param) => {
+      const t = param && param.time;
+      const i = t != null ? byTime.get(t) : undefined;
+      if (i == null) { setHover(null); return; }
+      const j = firstShown + i;
+      setHover({ time: t, bar: shown[i] || null, i: j });
+    });
+
+    const ro = new ResizeObserver(() => {
+      const w = ref.current?.clientWidth || 600;
+      for (const c of charts) c.applyOptions({ width: w });
+    });
+    ro.observe(ref.current);
+    return () => { ro.disconnect(); for (const c of charts) c.remove?.(); };
+  }, [shown, set, range, openPanes, narrow, height, JSON.stringify(prefs),
+    JSON.stringify(levels), JSON.stringify(breakevens), JSON.stringify(legLines), entrySpot]); // eslint-disable-line
+
+  const last = shown.length ? shown[shown.length - 1] : null;
+  const panePrefs = prefs.rsi || prefs.macd;
+  const readAt = (xs) => (hover && xs && xs[hover.i] != null ? xs[hover.i] : null);
+  const fmt = (x, d = 2) => (x == null ? "—" : Number(x).toFixed(d));
+
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
@@ -2075,15 +2432,96 @@ export function PriceChart({ ticker, levels, breakevens, entrySpot, legLines, he
         </div>
       </div>
       {err && <div style={{ ...mono, fontSize: 11, color: T.red, marginTop: 6 }}>{err}</div>}
+
+      {/* THE CHIPS. One tap each, remembered per viewer. A chip whose
+          indicator cannot be formed from the history that loaded says so on
+          itself and cannot be switched on into an empty line. */}
+      {set && (
+        <div style={{ display: "flex", gap: 5, marginTop: 8, flexWrap: "wrap" }}>
+          {CHART_INDICATORS.filter((c) => c.pane !== "none").map((c) => {
+            const ok = set.ready[c.id];
+            const on = !!prefs[c.id] && ok;
+            return (
+              <button key={c.id} onClick={() => ok && toggle(c.id)} disabled={!ok}
+                title={ok ? MEASURES[c.id] : set.notes[c.id]}
+                style={{ ...mono, fontSize: 10, padding: "4px 8px", borderRadius: 999, cursor: ok ? "pointer" : "not-allowed",
+                  background: on ? `${c.color}22` : "transparent", color: !ok ? T.dim : on ? c.color : T.mut,
+                  border: `1px solid ${on ? `${c.color}88` : T.line}` }}>
+                {LABELS[c.id]}{ok ? "" : " · not enough history"}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       <div ref={ref} style={{ marginTop: 8, borderRadius: 6, overflow: "hidden" }} />
-      {meta?.last && <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 4 }}>Latest: {meta.last.time} · open {meta.last.open} high {meta.last.high} low {meta.last.low} close {meta.last.close} · the lines are where the market is positioned (green and red), your break-even (blue) and your entry (amber)</div>}
+
+      {/* THE TWO OSCILLATOR PANES, COLLAPSED BY DEFAULT. A phone that opens
+          with three charts on it has taught nobody anything. */}
+      {set && panePrefs && (
+        <button onClick={() => setOpenPanes((v) => !v)}
+          style={{ ...mono, fontSize: 10.5, marginTop: 6, background: "transparent", border: "none", color: T.blue, cursor: "pointer", padding: "4px 0" }}>
+          {openPanes ? "▾ Hide" : "▸ Show"} the {[prefs.rsi && set.ready.rsi ? "RSI" : null, prefs.macd && set.ready.macd ? "MACD" : null].filter(Boolean).join(" and ")} pane{prefs.rsi && prefs.macd ? "s" : ""}
+        </button>
+      )}
+      {openPanes && prefs.rsi && set?.ready.rsi && (
+        <div style={{ marginTop: 4 }}>
+          <div style={{ ...mono, fontSize: 9, color: T.dim }}>{LABELS.rsi}</div>
+          <div ref={rsiRef} style={{ borderRadius: 6, overflow: "hidden" }} />
+        </div>
+      )}
+      {openPanes && prefs.macd && set?.ready.macd && (
+        <div style={{ marginTop: 4 }}>
+          <div style={{ ...mono, fontSize: 9, color: T.dim }}>{LABELS.macd}</div>
+          <div ref={macdRef} style={{ borderRadius: 6, overflow: "hidden" }} />
+        </div>
+      )}
+
+      {/* THE CROSSHAIR READOUT — the values under the pointer, read out of
+          the same arrays the lines were drawn from. On a phone there is no
+          pointer, so it falls back to the last bar and says which it is. */}
+      {set && (last || hover) && (
+        <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6, lineHeight: 1.7 }}>
+          <b style={{ color: T.mut }}>{hover ? hover.time : last?.time}{hover ? "" : " · latest"}</b>
+          {" · "}close {fmt(hover ? hover.bar?.close : last?.close)}
+          {prefs.sma20 && set.ready.sma20 ? ` · ${LABELS.sma20} ${fmt(hover ? readAt(set.series.sma20) : set.last.sma20)}` : ""}
+          {prefs.sma50 && set.ready.sma50 ? ` · ${LABELS.sma50} ${fmt(hover ? readAt(set.series.sma50) : set.last.sma50)}` : ""}
+          {prefs.sma200 && set.ready.sma200 ? ` · ${LABELS.sma200} ${fmt(hover ? readAt(set.series.sma200) : set.last.sma200)}` : ""}
+          {prefs.ema9 && set.ready.ema9 ? ` · ${LABELS.ema9} ${fmt(hover ? readAt(set.series.ema9) : set.last.ema9)}` : ""}
+          {prefs.ema21 && set.ready.ema21 ? ` · ${LABELS.ema21} ${fmt(hover ? readAt(set.series.ema21) : set.last.ema21)}` : ""}
+          {prefs.bollinger && set.ready.bollinger ? ` · band ${fmt(hover ? readAt(set.series.bbLower) : set.last.bbLower)}–${fmt(hover ? readAt(set.series.bbUpper) : set.last.bbUpper)}` : ""}
+          {prefs.rsi && set.ready.rsi ? ` · RSI ${fmt(hover ? readAt(set.series.rsi) : set.last.rsi, 0)}` : ""}
+          {prefs.macd && set.ready.macd ? ` · MACD ${fmt(hover ? readAt(set.series.macd) : set.last.macd, 3)}` : ""}
+        </div>
+      )}
+
+      {/* ONE GENERATED SENTENCE PER INDICATOR — the visual contract. They are
+          written from the numbers above and never typed. */}
+      {set && (
+        <div style={{ marginTop: 8, display: "grid", gap: 5 }}>
+          {CHART_INDICATORS.filter((c) => c.pane === "none" || prefs[c.id]).map((c) => {
+            const t = takeaway(c.id, set);
+            if (!t) return null;
+            return (
+              <div key={c.id} style={{ fontSize: 12, color: set.ready[c.id] ? T.body : T.mut, lineHeight: 1.55 }}>
+                <span style={{ ...mono, fontSize: 9.5, color: T.dim, marginRight: 6 }}>{LABELS[c.id].toUpperCase()}</span>
+                {t}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {last && (
+        <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6, lineHeight: 1.6 }}>
+          The dashed lines are where the market is positioned (green and red), your break-even (blue) and your
+          entry (amber). The averages are computed from all {meta?.whole ?? "the"} bars this market loaded, not
+          only the {shown.length} drawn here — a 200-day average taken from 180 days on screen would be a
+          180-day average with the wrong name on it.
+        </div>
+      )}
     </div>
   );
 }
-
-/* ================================================================
-   9) CHAIN MATRIX — tabella chain completa cliccabile (stile pro)
-================================================================ */
 export function ChainMatrix({ chain, expKey, spot, legs, onCell }) {
   const [width, setWidth] = useState(0.12);
   if (!chain || !expKey || !chain.byExp[expKey] || !spot) return null;
