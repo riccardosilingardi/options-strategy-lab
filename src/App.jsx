@@ -2040,8 +2040,8 @@ export default function OptionsStrategyLab() {
     [legs, spot, dte, iv, q, ticker, expKey, seasonal, ticket.legPx, ticket.type]);
   const { A, bookQuotes, book, seedPx, legPrices, ticketNet, ticketDir, effective, AE } = BF;
   /* >>> HOW MANY COMBINATIONS THE BUDGET BUYS, AND IT IS ONE HOME (P10 §2).
-     <<< `scaleStrategy()` is untouched — it is the same function the Shortlist
-     calls and it is on the DO-NOT-TOUCH list — and it is read HERE at the price
+     <<< `scaleStrategy()` is the same function every Find card calls (its
+     unit is the maximum loss since PR #41) — and it is read HERE at the price
      the order will be sent at, which is the same price the Shortlist card
      prices its own figures at (`openLimitPrice()` on `comboBook()`, which is
      what `legLimitSeed()` sums to). So the count on the card and the count in

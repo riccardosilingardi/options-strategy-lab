@@ -1988,8 +1988,15 @@ export function scaleStrategy(a, mode, amt) {
   const prem = Math.abs(a.entry) * 100;          // premio per 1 combo ($, da chain reale)
   const isCredit = a.entry < 0;
   if (!Number.isFinite(risk) || risk <= 0 || !Number.isFinite(a.maxProfit) || a.maxProfit <= 0) return null;
-  // Budget = premio max da pagare (debit) oppure capitale a rischio (credit, dove il premio si incassa)
-  const unit = isCredit ? risk : prem;
+  /* THE BUDGET IS "THE MOST I WILL RISK", SO ONE COMBINATION COSTS ITS MAXIMUM
+     LOSS (PR #41, TASK 1). A debit was sized on its PREMIUM, which equals the
+     maximum loss only when the structure is symmetric. The owner's SLV put
+     butterfly, +1 58P / −2 55P / +1 51P, has wings 3 and 4 wide: $43 of
+     premium, $143 of maximum loss. "6 contracts for $258" against a $300
+     limit was 6 × $143 = $858 at risk. The unit is the larger of the two, so
+     neither the money paid nor the money that can be lost passes the amount
+     typed; on every symmetric structure the two are the same number. */
+  const unit = isCredit ? risk : Math.max(risk, prem);
   // NOTHING IS EVER DIVIDED BY A COST THE APP COULD NOT READ. `Math.max(prem, 1)`
   // used to stand in for a premium of zero, and on the BOIL butterfly that
   // turned a $250 budget into 250 contracts of a structure whose price was a

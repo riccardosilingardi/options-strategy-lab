@@ -19,7 +19,11 @@ import { listCardFigures, buildFigures } from "./App.jsx";
 import { CandidateCard } from "./card.jsx";
 import { exitPlanDetail } from "./visuals.jsx";
 import { reconcileFigures, figureSet, tradeCard, money, chanceText, seasonalProvenance,
-  RULES, fillNet, netFromLegs } from "./rules.js";
+  RULES, fillNet, netFromLegs, sizeLine, requestOf } from "./rules.js";
+import { shortlistWithFloors } from "./App.jsx";
+import { scaleStrategy } from "./pro.jsx";
+// Repo-relative: JSX tests are bundled to CJS (CLAUDE.md, "How to test").
+import { MODEL_BOARD, ungBoards } from "../scripts/crossing-fixtures.jsx";
 
 const ok = [], bad = [];
 const check = (n, f) => { try { f(); ok.push(n); console.log(`  ok   ${n}`); }
@@ -109,6 +113,87 @@ check("…and a price moved in the ticket is SAID, figure by figure, never 'same
   }
   has(r.line, "risk");
   eq(reconcileFigures(figureSet(list.aFill, list.pop), figureSet(list.aFill, list.pop)).same, true, "same is same");
+});
+
+/* ====================================================================
+   PR #41, TASK 1 — A CARD'S SIZE MATCHES ITS RISK.
+
+   The owner's live Find screen, SLV Bearish Put Butterfly +1 58P / −2 55P /
+   +1 51P, 2026-11-20: "RISK $143" per contract and "6 contracts for $258".
+   6 × $143 is $858 against a $300 limit. The wings are 3 and 4 wide, so the
+   worst case is the $43 premium PLUS the extra $1 of width: `scaleStrategy()`
+   divided the budget by the premium, and `sizeLine()` printed the premium
+   total. Both read the maximum loss now — the figure the card prints as RISK.
+==================================================================== */
+const SLV_LEGS = [
+  { side: 1, qty: 1, type: "put", strike: 58 },
+  { side: -1, qty: 2, type: "put", strike: 55 },
+  { side: 1, qty: 1, type: "put", strike: 51 },
+];
+// Quotes chosen so the fill lands on the owner's $0.43 (a synthetic board,
+// not a capture: the owner read the card, not the chain).
+const SLV_Q = {
+  58: { bid: 4.17, ask: 4.23, mid: 4.20, iv: 0.30, oi: 900, occ: "SLV261120P00058000" },
+  55: { bid: 2.39, ask: 2.42, mid: 2.405, iv: 0.30, oi: 900, occ: "SLV261120P00055000" },
+  51: { bid: 0.99, ask: 1.02, mid: 1.005, iv: 0.31, oi: 900, occ: "SLV261120P00051000" },
+};
+const slv = listCardFigures(SLV_LEGS, { spot: 55.4, dte: 58, iv: 0.30, q: (l) => SLV_Q[l.strike] || null,
+  ticker: "SLV", expKey: EXP, seasonal: null });
+
+check("THE SLV BUTTERFLY: $43 of premium is $143 at risk, and the card prints $143", () => {
+  eq(+Math.abs(slv.aFill.entry * 100).toFixed(2), 43, "the premium at the fill");
+  eq(Math.round(Math.abs(slv.aFill.maxLoss)), 143, "the worst case: premium + the $1 of extra wing");
+  const html = renderToStaticMarkup(<CandidateCard name="SLV · Bearish Put Butterfly" legs="+1 58P / −2 55P / +1 51P"
+    rr={slv.rr} pop={null} profit={slv.aFill.maxProfit} risk={slv.aFill.maxLoss} bands={slv.bands} ticker="SLV" />);
+  has(html, "$143");
+});
+
+check("…and $300 buys 2 of them for $286 — contracts × risk = the total, never 6 for $258", () => {
+  const req = requestOf({ amt: 300 }, {});
+  const size = scaleStrategy(slv.aFill, req.mode, req.amt);
+  eq(size.n, 2, "floor(300 / 143)");
+  const line = sizeLine(req, size);
+  eq(line, `2 contracts for ${money(2 * 143)}`, "the card's size line");
+  if (size.totRisk > req.amt) throw new Error(`${money(size.totRisk)} over the $300 typed`);
+  const html = renderToStaticMarkup(<CandidateCard name="SLV" legs="x" rr={slv.rr} pop={null}
+    profit={slv.aFill.maxProfit} risk={slv.aFill.maxLoss} size={line} />);
+  has(html, "2 contracts for $286");
+});
+
+/* EVERY STRUCTURE FAMILY THE FIXTURE BOARDS PRODUCE, EVERY SENTIMENT, FOUR
+   AMOUNTS: contracts × the card's RISK is the sized total, and the total never
+   passes what the owner typed. */
+check("EVERY FAMILY ON THE FIXTURES: contracts × card risk == the sized total, and total ≤ amount typed", () => {
+  const families = new Set();
+  let sized = 0;
+  const cards = [{ name: "Bearish Put Butterfly (SLV, asymmetric)", aFill: slv.aFill }];
+  for (const b of [MODEL_BOARD, ...ungBoards()]) {
+    for (const sent of ["verybear", "bear", "neutral", "bull", "verybull"]) {
+      const r = shortlistWithFloors(sent, b.S, b.step, b.strikes, b.dte, b.iv, b.q, { peers: b.peers });
+      for (const row of r.rows) cards.push({ name: row.p.name, aFill: row.aFill });
+    }
+  }
+  for (const c of cards) {
+    families.add(c.name);
+    const risk = Math.abs(c.aFill.maxLoss);
+    for (const amt of [100, 300, 500, 1000]) {
+      const req = requestOf({ amt }, {});
+      const size = scaleStrategy(c.aFill, req.mode, req.amt);
+      if (!size || !size.ok) continue;
+      sized++;
+      if (Math.abs(size.n * risk - size.totRisk) > 1e-6) throw new Error(`${c.name}: ${size.n} × ${risk} ≠ ${size.totRisk}`);
+      if (size.totRisk > amt + 1e-9) throw new Error(`${c.name}: ${money(size.totRisk)} at risk on ${money(amt)} typed`);
+      // A debit's premium is paid, so it cannot pass the amount either; a credit's is received.
+      if (!size.isCredit && Math.abs(c.aFill.entry) * 100 * size.n > amt + 1e-9) throw new Error(`${c.name}: premium over ${money(amt)}`);
+      // The two printed figures multiply, as printed.
+      eq(sizeLine(req, size), `${size.n} contract${size.n === 1 ? "" : "s"} for ${money(size.n * Math.round(risk))}`, c.name);
+    }
+  }
+  if (sized < 20) throw new Error(`only ${sized} sized cards: the sweep proves little`);
+  for (const f of ["Butterfly", "Spread"]) {
+    if (![...families].some((n) => n.includes(f))) throw new Error(`no ${f} on the fixtures: ${[...families].join(", ")}`);
+  }
+  console.log(`       ${cards.length} cards, ${sized} sized, families: ${[...families].join(", ")}`);
 });
 
 console.log(`\n${ok.length} passed, ${bad.length} failed\n`);

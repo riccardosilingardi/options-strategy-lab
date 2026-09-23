@@ -163,7 +163,7 @@ check("TARGET MODE RELABELS THE AMOUNTS AND CHANGES EVERY CARD (PR #40)", () => 
   const target = renderToStaticMarkup(<RequestControls only={["size"]} request={requestOf({ mode: "target", amt: 200 }, limits)} onChange={() => {}} limits={limits} onLimit={() => {}} />);
   has(target, "make $100");
   if (target.includes("risk $100")) throw new Error("the chips did not relabel");
-  const size = { ok: true, n: 14, totProfit: 1932, totPrem: 868, isCredit: false };
+  const size = { ok: true, n: 14, totProfit: 1932, totRisk: 868, isCredit: false };   // 14 × the card's $62 risk
   const card = renderToStaticMarkup(<CandidateCard name="X" legs="+1 28C" rr={1} pop={0.5} profit={138} risk={-62}
     size={sizeLine(requestOf({ mode: "target", amt: 1900 }, limits), size)} />);
   has(card, "14 contracts to reach $1,900");

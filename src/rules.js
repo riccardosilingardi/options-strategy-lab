@@ -1271,14 +1271,16 @@ export function candidateFlags({ legs = [], fused = null, ivRank = null } = {}) 
   return out;
 }
 
-/** How many contracts the request asks for, in five words or fewer. */
+/** How many contracts the request asks for, in five words or fewer.
+ *  THE TOTAL IS CONTRACTS × THE CARD'S RISK (PR #41, TASK 1): the dollars at
+ *  risk, never the premium, so the line and the RISK figure above it multiply. */
 export function sizeLine(request, size) {
   if (!request || !size || !size.ok) return null;
   const n = size.n;
   const c = `${n} contract${n === 1 ? "" : "s"}`;
   return request.mode === "target"
     ? `${c} to reach ${money(request.amt)}`
-    : `${c} for ${money(size.isCredit ? size.totRisk : size.totPrem)}`;
+    : `${c} for ${money(size.totRisk)}`;
 }
 
 /** The quick amounts beside the field, relabelled by what the field asks. */
@@ -3073,8 +3075,8 @@ export function meetsRequest(cand, request, size = null) {
     } else if (!size.ok) {
       const over = Number(size.unit) - amt;
       misses.push({ id: "budget", short: `over budget by ${money(over)}`,
-        text: `Over the budget by ${money(over)}: one of these ${size.isCredit ? "ties up" : "costs"} ` +
-          `${money(size.unit)} and you said ${money(amt)}.` });
+        text: `Over the budget by ${money(over)}: one of these puts ${money(size.unit)} at risk ` +
+          `and you said ${money(amt)}.` });
     } else if (request.mode === "target" && Number(size.totProfit) < amt) {
       const shortBy = amt - Number(size.totProfit);
       misses.push({ id: "target", short: `short of the target by ${money(shortBy)}`,
