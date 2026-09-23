@@ -15,17 +15,22 @@ non-expert trader who wants to learn discipline rather than be sold trades.
   USO, XLE, GDX. SPY exists only to price a hedge; it is never proposed.
 - **Broker.** An Alpaca paper account (US dollars). Option chains come from Alpaca's
   indicative feed first, CBOE delayed quotes as the fallback. The feed is named on screen.
-- **Three steps, one on screen at a time.**
-  1. **Radar** — every market read by four factors (seasonality, price trend, weather,
-     news) and filtered by the quality floors.
-  2. **Shortlist** — the candidate structures that survived, split into "meets your
-     request" and the rest, each row saying what it missed. Up to three compared side by side.
-  3. **Build** — one trade: chain, legs, a five-line trade card, the order ticket, and the
+- **Two steps, one on screen at a time.**
+  1. **Find** — one request block (markets, direction or "season decides", budget or target
+     with the per-trade limit editable inline, horizon, minimum chance) above one ranked list of
+     cards across the selected markets. Every control re-filters the list live; there is no
+     Search button. Each card carries one badge (agreement · score · confidence, tap for "Why
+     this market") and, where it applies, a flag: single option, butterfly, CONFLICT,
+     confidence under 40, options dear. A toggle hides flagged cards and says how many. The old
+     Shortlist is a one-market filter on this list; up to three cards compared side by side.
+     "Nothing today" appears only when zero candidates pass, with the count for every reason.
+  2. **Build** — one trade: chain, legs, a five-line trade card, the order ticket, and the
      confirm step with the risk gate's checks in plain English.
 - **Two other places.** Positions (what you own, orders still working, and trades you are
   watching) and the Journal (what happened, with a timeline per position and a weekly report).
-- **The guided door.** "Find opportunities" asks capital, budget and time, then offers two
-  roads — never one — or a screen that says "nothing today" and why.
+- **The guided door is removed** at the owner's request, 23 Sep 2026 (PR #40): "Find
+  opportunities" answered "Nothing today" while Radar listed seven structures on the same
+  data. Home's second door goes straight to Find.
 - **Autopilot.** A scheduled server job that reads open positions and proposes exits as
   one-tap approval links. It never executes by itself.
 - **Copilots.** An AI explanation of the loaded trade and of the chart. They explain; they
@@ -43,7 +48,7 @@ Every rule below is code, not a prompt. The numbers live in `src/rules.js` (`RUL
 1. **Paper only.** If paper mode cannot be verified (the `X-OSL-Paper-Endpoint` header from
    `alpaca.mjs`), the order is refused.
 2. **Defined risk.** No uncovered short leg; the maximum loss is always known before entry.
-   The guided flow also excludes single long options and butterflies; the full desk allows them.
+   Single long options and butterflies are offered, flagged on their card (PR #40).
 3. **No API key reaches the client.** Keys live only in Netlify environment variables.
 4. **Every order passes the risk gate** (`src/riskGate.js`) — all six order paths.
 5. **Nothing executes without an explicit human confirmation.** Every send is two taps, and
@@ -69,7 +74,8 @@ Every rule below is code, not a prompt. The numbers live in `src/rules.js` (`RUL
   leg spread (≤35% of mid), combination spread (≤100% of net), crossing cost (the combination
   spread in and out, ≤50% of the maximum profit at the price that fills) and reward-to-risk (≥0.25).
 - A contract the chain never listed is refused by the gate.
-- Every figure on a card is worked out at the price that will fill, not at the mid.
+- Every figure on a card, every floor and the ranking are worked out at the price that will fill
+  (`fillNet()`: `openLimitPrice()` on `comboBook()`, on the cent), and Build reads the same price.
 
 ### Exit — chosen once at entry, then frozen
 
@@ -137,9 +143,6 @@ can settle it; no test in this repository can.
 
 One line each. Detail for every item is in `docs/history/ROADMAP.md`.
 
-- **Radar request controls** — one control per question: the single-ticker expiry and the
-  multi-search horizon are two answers to one question on one screen; direction and "season
-  decides" likewise.
 - **P2 full** — rank proposals by edge at the price that fills, not by score.
 - **P7** — learn about fills from Alpaca's `trade_updates` stream server-side, instead of polling.
 - **P8** — more indicators and timeframes, only after the owner has used the current ones.

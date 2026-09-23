@@ -39,7 +39,7 @@ import * as C from "./chain.js";
 import * as J from "./journal.js";
 import * as O from "./order.js";
 
-export const SCREEN_IDS = ["radar", "shortlist", "build"];
+export const SCREEN_IDS = ["find", "build"];
 
 /* ---- the fixture every generator is scored on ----------------------------
    One board, one setting, one market. The numbers do not matter; the LENGTH
@@ -105,7 +105,6 @@ export const COPY = {
   entryRoomOverrideAsk: () => R.entryRoomOverrideAsk(ROOM),
   stopWarningSentence: () => R.stopWarningSentence(-127),
   offFloorExpiryLabel: () => (R.offFloorExpiryLabel ? R.offFloorExpiryLabel("2026-10-16", 24) : ""),
-  emptyShortlistCta: () => (R.emptyShortlistCta ? R.emptyShortlistCta({ expKey: "2026-11-20", ticker: "XLE" }) : ""),
   horizonFloorNote: () => (R.horizonFloorNote ? R.horizonFloorNote() : ""),
   remainingEdgeNote: () => (EDGE && EDGE.sentence ? EDGE.sentence : ""),
   modelPnlNote: () => (R.modelPnlNote ? R.modelPnlNote("Alpaca") : ""),

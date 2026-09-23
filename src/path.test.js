@@ -36,28 +36,28 @@ const LEGS = [
 
 /* ---------------- the path ---------------- */
 
-test("the path is three steps, macro to micro, and Build is the last one", () => {
-  assert.deepEqual(STEPS.map((s) => s.id), ["radar", "shortlist", "build"]);
-  assert.deepEqual(STEPS.map((s) => s.n), [1, 2, 3]);
-  assert.equal(FIRST_STEP, "radar");
+test("the path is two steps since PR #40: Find, then Build", () => {
+  assert.deepEqual(STEPS.map((s) => s.id), ["find", "build"]);
+  assert.deepEqual(STEPS.map((s) => s.n), [1, 2]);
+  assert.equal(FIRST_STEP, "find");
   assert.equal(LAST_STEP, BUILD_TAB);
 });
 
 test("moving forward and back stays inside the path", () => {
-  assert.equal(nextStepId("radar"), "shortlist");
+  assert.equal(nextStepId("find"), "build");
   assert.equal(nextStepId("build"), "build", "there is nothing after Build");
-  assert.equal(prevStepId("radar"), "radar", "there is nothing before the Radar");
+  assert.equal(prevStepId("find"), "find", "there is nothing before Find");
   assert.equal(stepIndex("nonsense"), -1);
-  assert.equal(stepOf("nonsense").id, "radar", "an unknown step falls back to the first");
+  assert.equal(stepOf("nonsense").id, "find", "an unknown step falls back to the first");
 });
 
 test("the nav says what each step is carrying", () => {
   const empty = stepCarry({});
-  assert.match(empty.shortlist, /pick a market first/);
+  assert.match(empty.find, /every market/);
   assert.match(empty.build, /nothing loaded/);
-  const carried = stepCarry({ ticker: "SOYB", trade: "SOYB · Bull Call Spread", compare: 2 });
-  assert.match(carried.shortlist, /SOYB/);
-  assert.match(carried.shortlist, /2 to compare/);
+  const carried = stepCarry({ ticker: "SOYB", trade: "SOYB · Bull Call Spread", compare: 2, markets: 3 });
+  assert.match(carried.find, /3 markets/);
+  assert.match(carried.find, /2 to compare/);
   assert.equal(carried.build, "SOYB · Bull Call Spread");
 });
 
@@ -170,13 +170,14 @@ test("a saved row says how old its prices are, rather than passing them off as l
 
 /* ---------------- the steps as they are wired in App.jsx ---------------- */
 
-test("one step is on screen at a time", () => {
-  for (const id of ["radar", "shortlist", "build"]) {
+test("one step is on screen at a time, and Radar and Shortlist are gone", () => {
+  for (const id of ["find", "build"]) {
     assert.ok(APP.includes(`step === "${id}"`), `nothing in App.jsx renders the ${id} step`);
   }
-  // and nothing renders Radar or the Shortlist as an evidence panel any more
-  assert.ok(!APP.includes('ev === "radar"'), "the Radar is still an evidence panel");
-  assert.ok(!APP.includes('ev === "shortlist"'), "the Shortlist is still an evidence panel");
+  for (const id of ["radar", "shortlist"]) {
+    assert.ok(!APP.includes(`step === "${id}"`), `App.jsx still renders the ${id} step`);
+    assert.ok(!APP.includes(`ev === "${id}"`), `${id} is still an evidence panel`);
+  }
 });
 
 test("evidence opens over the step, not under it", () => {
@@ -188,12 +189,15 @@ test("evidence opens over the step, not under it", () => {
   assert.equal(APP.split("<EvidenceOverlay").length - 1, 1, "there is more than one evidence sheet");
 });
 
-test("the guided run lands on the Radar rather than jumping to two roads", () => {
-  const run = APP.slice(APP.indexOf("const runWizard"), APP.indexOf("const pickRoad"));
-  assert.ok(run.includes('goStep("radar")'), "the guided run no longer lands on the path");
-  assert.ok(!run.includes('setWizStep("candidates")'), "the guided run still jumps to its own roads screen");
-  // the refusal is still its own screen, and still reached from the same place
-  assert.ok(run.includes('setWizStep("nothing")'), "the nothing-today screen is no longer reachable");
+test("THE GUIDED DOOR IS GONE, and nothing imports it (PR #40, TASK 1)", () => {
+  for (const name of ["runWizard", "pickRoad", "FindOpportunities", "WizardCandidates", "NothingToday", "wizStep"]) {
+    assert.ok(!APP.includes(name), `App.jsx still carries ${name}`);
+  }
+  const WIZ = readFileSync(new URL("./wizard.jsx", import.meta.url), "utf8");
+  for (const name of ["function FindOpportunities", "function WizardCandidates", "function NothingToday", "function RoadCard", "tradeOffSentence"]) {
+    assert.ok(!WIZ.includes(name), `wizard.jsx still defines ${name}`);
+  }
+  assert.ok(!WIZ.includes("Find opportunities"), "the guided door's title survives");
 });
 
 console.log(`\n${passed} passed, ${failures.length} failed\n`);

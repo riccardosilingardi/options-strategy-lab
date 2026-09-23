@@ -31,15 +31,16 @@ const eq = (a, b, what) => { if (a !== b) throw new Error(`${what}: ${JSON.strin
 
 /* ---------------- the numbered nav ---------------- */
 
-check("the three steps are numbered on screen", () => {
-  const h = renderToStaticMarkup(<StepNav step="radar" carry={stepCarry({})} />);
-  has(h, ">1<"); has(h, ">2<"); has(h, ">3<");
-  has(h, "Radar"); has(h, "Shortlist"); has(h, "Build");
+check("the two steps are numbered on screen", () => {
+  const h = renderToStaticMarkup(<StepNav step="find" carry={stepCarry({})} />);
+  has(h, ">1<"); has(h, ">2<");
+  has(h, "Find"); has(h, "Build");
+  if (h.includes("Radar") || h.includes("Shortlist")) throw new Error("a deleted step is still on the nav");
 });
 
 check("the nav says what each step is carrying", () => {
   const h = renderToStaticMarkup(
-    <StepNav step="shortlist" carry={stepCarry({ ticker: "SOYB", trade: "SOYB · Iron Condor", compare: 2 })} />);
+    <StepNav step="find" carry={stepCarry({ ticker: "SOYB", trade: "SOYB · Iron Condor", compare: 2, markets: 1 })} />);
   has(h, "SOYB");
   has(h, "2 to compare");
   has(h, "Iron Condor");

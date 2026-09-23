@@ -29,11 +29,16 @@
 // with two implementations.
 // ============================================================================
 
-/** The three steps, in order. `n` is what the user sees on screen. */
+/** The steps, in order. `n` is what the user sees on screen.
+ *
+ *  >>> TWO STEPS SINCE PR #40 (TASK 1). <<< Radar and Shortlist were two
+ *  lists of one question, and the guided door was a third: the owner saw
+ *  "Nothing today" there while Radar listed seven structures on the same data.
+ *  Find is one request block over one ranked list across the selected
+ *  markets; the Shortlist is a market filter on that list. */
 export const STEPS = [
-  { n: 1, id: "radar", label: "Radar", blurb: "which markets have something today" },
-  { n: 2, id: "shortlist", label: "Shortlist", blurb: "the structures that survived" },
-  { n: 3, id: "build", label: "Build", blurb: "one trade, taken apart" },
+  { n: 1, id: "find", label: "Find", blurb: "every market, one ranked list" },
+  { n: 2, id: "build", label: "Build", blurb: "one trade, taken apart" },
 ];
 
 export const FIRST_STEP = STEPS[0].id;
@@ -61,10 +66,9 @@ export const prevStepId = (id) => STEPS[Math.max(0, stepIndex(id) - 1)].id;
  *   compare — how many candidates are ticked for comparison
  * @returns {Record<string,string>} step id -> the line under its number
  */
-export function stepCarry({ ticker = null, trade = null, compare = 0 } = {}) {
+export function stepCarry({ ticker = null, trade = null, compare = 0, markets = null } = {}) {
   return {
-    radar: "every market",
-    shortlist: ticker ? (compare > 0 ? `${ticker} · ${compare} to compare` : ticker) : "pick a market first",
+    find: `${markets == null ? "every market" : `${markets} market${markets === 1 ? "" : "s"}`}${compare > 0 ? ` · ${compare} to compare` : ""}`,
     build: trade || (ticker ? `${ticker} · nothing loaded` : "nothing loaded"),
   };
 }

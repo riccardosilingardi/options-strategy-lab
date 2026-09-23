@@ -36,7 +36,7 @@ import { analyze, shortlistWithFloors, buildPresets, StrikeSelect, modelCheckOf,
 import { payoff, netBS, SEASONAL, SIGMA, seasonalDrift, exitSim } from "./engine.js";
 import { exitPathSim } from "./pro.jsx";
 import { sigmaProvenance, MEASURED_SIGMA_SOURCE, TABLE_SIGMA_SOURCE, FALLBACK_SIGMA_SOURCE } from "./rules.js";
-import { buildableExpiries, openableBoard, offFloorExpiryLabel, horizonFloorNote, emptyShortlistCta,
+import { buildableExpiries, openableBoard, offFloorExpiryLabel, horizonFloorNote,
   entryRoom, expiryChoice, expiryChoiceNote } from "./rules.js";
 import { evaluateTrade } from "./riskGate.js";
 

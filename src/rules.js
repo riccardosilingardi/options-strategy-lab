@@ -1338,6 +1338,66 @@ export function filterFold(tally = {}, { level = RECOMMENDED_LIQUIDITY, what = n
 }
 
 /* =====================================================================
+   THE FIND SCREEN (PR #40, TASK 1) — ONE LIST, AND NOTHING SILENTLY HIDDEN.
+
+   The guided door answered "Nothing today" while the Radar listed 7
+   structures on the same data: it dropped single options, CONFLICT markets
+   and confidence under 40 without a word, and needed two structures to say
+   anything. It is gone at the owner's request (23 Sep 2026). What it excluded
+   is a visible STATE on a card now — `candidateFlags()` — that a toggle can
+   hide, and "Nothing today" appears only when zero candidates pass, with the
+   count for every reason (`nothingTodayLine()`).
+===================================================================== */
+
+/** What the guided door used to drop in silence, as labels a card carries. */
+export function candidateFlags({ legs = [], fused = null, ivRank = null } = {}) {
+  const out = [];
+  if ((legs || []).length < 2) out.push({ id: "single", label: "single option" });
+  // A butterfly's maximum needs the market to finish ON the middle strike, so
+  // the 50% take profit is unreachable before the 21-day exit (ROADMAP P2).
+  if (isButterfly(legs)) out.push({ id: "butterfly", label: "butterfly: target unlikely" });
+  if (fused && fused.agreement === "CONFLICT") out.push({ id: "conflict", label: "CONFLICT" });
+  if (fused && known(fused.confidence) && Number(fused.confidence) < RULES.lowConfidence) {
+    out.push({ id: "confidence", label: `confidence under ${RULES.lowConfidence}` });
+  }
+  if (known(ivRank) && Number(ivRank) >= RULES.expensiveIVRank) {
+    out.push({ id: "expensive", label: `options dear, IV rank ${Math.round(Number(ivRank))}` });
+  }
+  return out;
+}
+
+/** How many contracts the request asks for, in five words or fewer. */
+export function sizeLine(request, size) {
+  if (!request || !size || !size.ok) return null;
+  const n = size.n;
+  const c = `${n} contract${n === 1 ? "" : "s"}`;
+  return request.mode === "target"
+    ? `${c} to reach ${money(request.amt)}`
+    : `${c} for ${money(size.isCredit ? size.totRisk : size.totPrem)}`;
+}
+
+/** The quick amounts beside the field, relabelled by what the field asks. */
+export function amountChips(request, perTradeLimit) {
+  const cap = Number(perTradeLimit);
+  if (!Number.isFinite(cap) || cap <= 0) return [];
+  const vals = [...new Set([0.25, 0.5, 1].map((f) => Math.max(25, Math.round((cap * f) / 25) * 25)))];
+  return vals.map((v) => ({ amt: v, label: `${request && request.mode === "target" ? "make" : "risk"} ${money(v)}` }));
+}
+
+/**
+ * "NOTHING TODAY" ONLY WHEN ZERO CANDIDATES PASS, and always with the count of
+ * every reason: the floors' own counts (`filterFold()`), the markets with no
+ * board the gate would open on, and the markets whose prices never came in.
+ */
+export function nothingTodayLine(tally = {}, { noBoard = [], noChain = [], level = RECOMMENDED_LIQUIDITY } = {}) {
+  const f = filterFold(tally, { level });
+  const parts = f.reasons.map((r) => `${r.count} ${r.clause}`);
+  if (noBoard.length) parts.push(`${noBoard.length} market${noBoard.length === 1 ? "" : "s"} with no expiry far enough out (${noBoard.join(", ")})`);
+  if (noChain.length) parts.push(`${noChain.length} market${noChain.length === 1 ? "" : "s"} with no prices yet (${noChain.join(", ")})`);
+  return `Nothing today. ${parts.length ? `Removed: ${parts.join("; ")}.` : "No market was selected."}`;
+}
+
+/* =====================================================================
    AN ANALYSIS THAT CLAIMS IT CAN TRADE IS FLAGGED, NOT QUOTED (P9, TASK 3)
 
    Non-negotiable rule 5: nothing executes without an explicit human
@@ -2968,7 +3028,10 @@ export function sizing(answers = {}) {
   const ov = answers.override || {};
   const reason = typeof ov.reason === "string" ? ov.reason.trim() : "";
   const wantsOverride = Number.isFinite(Number(ov.perTrade)) && Number(ov.perTrade) > 0;
-  const overrideAccepted = wantsOverride && reason.length >= RULES.minOverrideReasonChars;
+  // LOWERING THE LIMIT NEEDS NO REASON (PR #40, TASK 1): it only makes the gate
+  // stricter. Anything above the capped figure still needs the typed reason.
+  const overrideAccepted = wantsOverride
+    && (Number(ov.perTrade) <= cappedPerTrade || reason.length >= RULES.minOverrideReasonChars);
   const perTradeLimit = overrideAccepted ? Number(ov.perTrade) : cappedPerTrade;
 
   // A PILL EXPLAINS AN ANSWER. With the questions still open there is no answer
@@ -5172,19 +5235,6 @@ export const offFloorExpiryLabel = (key, dte) => {
 /** Why the horizon control stops where it does, in ONE clause, from the rule. */
 export const horizonFloorNote = () =>
   `from ${RULES.minEntryDTE} days, because the app will not build on a board the gate would refuse`;
-
-/**
- * WHAT STEP 2 OFFERS WHEN THE FLOORS EMPTIED IT.
- *
- * "Go to Build — <structure>" carried whatever was left in the Build screen's
- * legs, which after a refusal is the structure the screen has just said it
- * will not offer. A button onto a trade the list above it removed is the same
- * fault as the menu this section exists to close, one screen later.
- */
-export const emptyShortlistCta = ({ expKey = null, ticker = null } = {}) =>
-  `Nothing on ${expKey || "this board"}${ticker ? ` for ${ticker}` : ""} survived the floors, so there is ` +
-  `nothing here to take apart. Try another expiry above, another market on step 1, or take the answer: ` +
-  `some days there is no trade worth making, and that is the app working rather than failing.`;
 
 /** The hard refusal: the position would open inside its own exit window. */
 export const entryInsideExitNote = (r) =>

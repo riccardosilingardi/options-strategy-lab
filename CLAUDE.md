@@ -56,9 +56,9 @@ by writing down what you could not verify (PRD §4, at most ten items).
 - `src/freshness.js` — how old a number on screen may be.
 - `src/visuals.jsx` — every trade picture, all cut from `payoffBands()`.
 - `src/card.jsx` — the request controls and the one candidate card.
-- `src/wizard.jsx` — the app shell, the guided door and the confirm step.
+- `src/wizard.jsx` — Home (two doors: positions, Find), onboarding and the confirm step.
 - `src/steps.jsx` — navigation chrome: steps, sheets, folds.
-- `src/path.js`, `src/handoff.js` — the three-step path and how a trade reaches Build.
+- `src/path.js`, `src/handoff.js` — the two-step path (Find → Build) and how a trade reaches Build.
 - `src/why.jsx` — the "Why this trade" evidence panel.
 - `src/App.jsx`, `src/pro.jsx` — UI, the order ticket (`OrderTicket`), the desk, `QtyField`.
 - `src/theme.js` — the one theme; light is default.

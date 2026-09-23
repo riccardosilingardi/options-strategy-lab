@@ -6,33 +6,21 @@ The full history of every item shipped so far (P0–P10, P2-bis) is in `docs/his
 Every pull request updates this file: the session that ships an item marks it done and states
 what the next one inherits.
 
-## Done in this pull request — PR #39, no proposal when crossing costs too much
+## Done in this pull request — PR #40, one screen, one set of numbers
 
-Three debts from the owner's live test of PR #38 (23 Sep 2026) first, then the last v1 change.
-
-- **0a — the opening limit conceded the wrong way on credits.** `openLimitPrice()` read
-  `mid + dir × allowance`, which on a credit asks for MORE than the mid, on the side that never
-  fills (XLE 60/57: $75.75 suggested, $71 on the ticket's own sliders). It is `mid + allowance`
-  now, still never flipping the sign. `crossingCost()` and `openingMarkNote()` measured the gap
-  by magnitudes and now use the signed nets. Every credit card's max profit, max loss,
-  reward-to-risk, chance and budget count moves; no debit moves (`scripts/measure-crossing.mjs`).
-  `closeLimitPrice()` is unchanged and a test holds it.
-- **0b — a cancel is a request.** `cancelOutcome()` in `src/order.js` is the one home for the
-  sentences on both cancel buttons: a 2xx is "Cancel requested", a 422 "pending cancel" is a
-  cancel already waiting (completes at the 9:30 New York open), and an order is cancelled only
-  when Alpaca reports `canceled`. While a cancel is waiting there is no Cancel and no Re-price,
-  and the order still counts in exposure.
-- **0c — a position Alpaca does not hold is not valued.** `legsNotHeld()` in `src/closeOrder.js`
-  names the legs a SUCCESSFUL sync did not find (null when unknown). `positionAction()` has one
-  new input, `notHeld`: action null, "Not on Alpaca", P&L null. Filing such a record stores
-  P&L null, "not read from a fill". The Journal prints a figure closed with no broker order as
-  "the app's mark at close — not a fill" and `journalPnlTotal()` excludes it. J-0002 is
-  corrected on screen; stored data is not edited.
-- **PR #39 — the crossing floor.** `RULES.maxCrossingShareOfMaxProfit` 0.5 (chosen, not
-  measured): a candidate is not proposed when `comboBook().spread × 100 × contracts` is more
-  than half its maximum profit at the price that fills. A quality floor in `qualityFloor()`,
-  not in the gate. It has its own count and sentence in every "not shown" summary.
-  `scripts/measure-crossing.mjs` prints the table; `src/crossing.test.jsx` holds the done-when.
+- **Task 0 — one set of numbers** (PR #39's debt: "ranked and floored at the MID while cards
+  print at the price that fills"). `fillNet()` is `openLimitPrice()` on `comboBook()`, on the
+  cent, and `legLimitSeed()` lands the ticket's legs on exactly that price. Every card, the
+  reward floor (`minRewardRisk`), the ranking, the chance, the payoff picture and Build read it:
+  `listCardFigures()` and `buildFigures()` in App.jsx are the two paths and `figures.test.jsx`
+  holds them equal on a SOYB 28/30C candidate. Build's reconciliation line compares every
+  figure (price, risk, profit, chance, break-even), not entry alone. Every money figure says its
+  unit: per contract, or for N.
+- **Task 1 — one screen.** The guided door ("Find opportunities", its two roads and its
+  "Nothing today" screen) is removed at the owner's request, 23 Sep 2026. Radar and Shortlist
+  are one step, **Find**: one request block over one ranked list across the selected markets,
+  re-filtered live. What the guided door dropped in silence is a flag on the card. The path is
+  Find → Build.
 
 ## v1
 
@@ -64,9 +52,6 @@ owner's readings below.**
 
 One line each; see `PRD.md` §5 and `docs/history/ROADMAP.md` for detail.
 
-- **Radar request controls** — one control per question: the single-ticker expiry and the
-  multi-search horizon are two answers to one question on one screen; direction and 'season
-  decides' likewise.
 - **P2 full** — rank proposals by edge at the price that fills.
 - **P7** — fills pushed by Alpaca's stream, server-side.
 - **P8** — more indicators and timeframes, after the owner has used the current ones.

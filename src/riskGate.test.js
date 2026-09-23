@@ -24,11 +24,11 @@ import { RULES, sizing, ruleBadge, qualityFloor, qualityFloorSentence, liquidity
   chancePct, chanceText, chanceInTen, signedMoney,
   sigmaProvenance, TABLE_SIGMA_SOURCE, MEASURED_SIGMA_SOURCE, FALLBACK_SIGMA_SOURCE,
   positionPnl, modelPnlNote, BROKER_PNL, MODEL_PNL,
-  buildableExpiries, openableBoard, offFloorExpiryLabel, horizonFloorNote, emptyShortlistCta,
+  buildableExpiries, openableBoard, offFloorExpiryLabel, horizonFloorNote,
   remainingEdge, remainingEdgeNote, remainingEdgeLabel, shareOfMaximum, attentionCount, sameCloseNote,
   requestOf, requestAmountLabel, requestAmountOwner, contractsSourceNote, clampAskedChance,
   REQUEST_MODES, meetsRequest, splitByRequest, meetsHeading, otherwiseHeading,
-  targetPriceOf, chanceAskLabel } from "./rules.js";
+  targetPriceOf, chanceAskLabel, nothingTodayLine } from "./rules.js";
 import { netBS, SIGMA, exitSim } from "./engine.js";
 import { isStale, staleAmong, agePhrase, freshnessNote, BUDGETS } from "./freshness.js";
 
@@ -1466,8 +1466,10 @@ test("MODEL SANITY — ONE EXPRESSION, and the ticket does not run a second one"
   assert.equal((app.match(/modelSanity\(/g) || []).length, 1,
     "modelSanity is called in exactly one place in App.jsx: inside modelCheckOf");
   const uses = (app.match(/modelCheckOf\(/g) || []).length;
-  assert.ok(uses >= 4,
-    `all three generation sites and the ticket's memo read it (found ${uses})`);
+  // PR #40: one generation site now (`shortlistWithFloors()`, which Find calls
+  // per market) and the ticket's memo.
+  assert.ok(uses >= 2,
+    `the generation site and the ticket's memo read it (found ${uses})`);
   const pro = codeOf("pro.jsx");
   assert.equal((pro.match(/modelSanity\(/g) || []).length, 0,
     "the order ticket takes the verdict as a prop, it does not compute one");
@@ -2928,7 +2930,11 @@ test("OPEN INTEREST — the wizard and the wide search await the same chain the 
   const wrapped = app.match(/ensureOpenInterest\(tk, chains\[tk\] \|\| \(await refreshChain\(tk, true\)\)\)/g) || [];
   assert.equal(bare.length, wrapped.length,
     "every generation site that judges a liquidity floor must await the open interest, not the bare chain");
-  assert.ok(wrapped.length >= 2, "the guided run and the wide search are both sites");
+  // PR #40: the guided run and the wide search are gone. Find reads
+  // `chains[tk]` from state, which `ensureOpenInterest()` patches — the way
+  // the Shortlist always did — and its memo re-runs when the column lands.
+  assert.ok(/const findGen = useMemo/.test(app) && /const c = chains\[tk\];/.test(app),
+    "Find judges the chain in state, the one ensureOpenInterest() patches");
   // ...and the SCREEN still never waits: refreshChain fires it and moves on.
   assert.ok(/ensureOpenInterest\(tk, c\);/.test(app),
     "refreshChain must fire the enrichment without awaiting it");
@@ -2979,13 +2985,15 @@ test("BUTTERFLIES — the guided path does not offer one, and it is a SHAPE not 
   assert.equal(isButterfly(null), false);
 });
 
-test("BUTTERFLIES — excluded in runWizard only, and they stay on the full desk", () => {
+test("BUTTERFLIES — a FLAG on the card since PR #40, never a silent cut", () => {
   const app = codeOf("App.jsx");
-  // Exactly one exclusion, beside the single-leg one, in the guided pool.
-  assert.equal((app.match(/isButterfly\(/g) || []).length, 1,
-    "the guided run is the only place that refuses one");
-  assert.ok(/if \(isButterfly\(pr\.legs\)\) \{ floors\.butterfly\+\+; continue; \}/.test(app),
-    "and it is counted, so the narrative can say what it did");
+  // The guided run excluded them in silence; it is gone. `candidateFlags()`
+  // names one on its card, and the flag toggle is the only thing that hides it.
+  assert.equal((app.match(/isButterfly\(/g) || []).length, 0, "no screen drops one by itself");
+  assert.ok(/candidateFlags\(/.test(app), "Find flags what the guided door used to drop");
+  const rules = codeOf("rules.js");
+  assert.ok(/isButterfly\(legs\)/.test(rules.slice(rules.indexOf("export function candidateFlags"))),
+    "and the flag reads the shape from the one home");
   // `buildPresets()` still builds them: the desk is unchanged.
   const src = readFileSync(new URL("./App.jsx", import.meta.url), "utf8");
   for (const name of ["Bearish Put Butterfly", "Iron Butterfly", "Call Butterfly ATM", "Bullish Call Butterfly"]) {
@@ -3059,8 +3067,9 @@ test("0b — `App.jsx` SPELLS THE POSITION P&L ONCE, through `pnlOf()`", () => {
 ================================================================ */
 
 test("TASK 1 — the horizon control cannot ask for a board the gate would refuse", () => {
-  const app = readFileSync(new URL("./App.jsx", import.meta.url), "utf8");
-  const slider = app.match(/<input type="range"[^>]*multi\.dteT[^>]*>/);
+  // PR #40: the horizon is one control in Find's request block (card.jsx).
+  const card = readFileSync(new URL("./card.jsx", import.meta.url), "utf8");
+  const slider = card.match(/<input type="range" aria-label="horizon in days"[^>]*>/);
   assert.ok(slider, "the horizon slider moved; point this at it again");
   assert.ok(!/min=\{21\}/.test(slider[0]), "21 is RULES.exitDTE wearing a horizon's clothes");
   assert.ok(/min=\{RULES\.minEntryDTE\}/.test(slider[0]), "both ends read their rule");
@@ -3079,19 +3088,22 @@ test("TASK 1 — every generation site reads the one home, none filters expiries
   assert.ok(!/dte >= dT - 20/.test(app), "the wide search's own window is gone");
   assert.ok(!/\.dte <= 130/.test(app), "and the guided run's bare 130");
   const uses = app.match(/buildableExpiries\(/g) || [];
-  assert.ok(uses.length >= 2, `the wide search and the guided run must both read it; found ${uses.length}`);
+  assert.ok(uses.length >= 1, `Find, the one generation site, must read it; found ${uses.length}`);
   // ...and the third site holds the guard INSIDE itself, so a fourth caller
   // added next year is covered without anybody coming back.
   assert.ok(/if \(!openableBoard\(dte\)\)/.test(app));
 });
 
-test("TASK 1 — an empty shortlist offers an honest next step, not a button onto a refused trade", () => {
-  const cta = emptyShortlistCta({ expKey: "2026-10-16", ticker: "XLE" });
-  assert.ok(cta.includes("2026-10-16"));
-  assert.ok(/another expiry/.test(cta) && /another market/.test(cta));
-  assert.ok(!/Go to Build/.test(cta));
+test("TASK 1 — an empty Find list says why with counts, and offers no button onto a refused trade", () => {
+  // PR #40: "Nothing today" appears only when zero candidates pass, with the
+  // count for every reason, and the step forward stays disabled with nothing loaded.
+  const line = nothingTodayLine({ liquidity: 3, reward: 2 }, { noBoard: ["XLE"], noChain: ["UNG"] });
+  assert.ok(/^Nothing today\./.test(line));
+  assert.ok(line.includes("3 too little open interest") && line.includes("2 pays too little"));
+  assert.ok(line.includes("XLE") && line.includes("UNG"));
   const app = readFileSync(new URL("./App.jsx", import.meta.url), "utf8");
-  assert.ok(/Nothing here to take apart/.test(app), "and the button says so rather than naming a structure");
+  assert.ok(/findGen\.items\.length === 0 && \(/.test(app), "only when zero candidates pass");
+  assert.ok(/disabled=\{!legs\.length\}/.test(app), "and the button says so rather than naming a structure");
 });
 
 /* ================================================================
