@@ -15,7 +15,7 @@ import { BandThumbnail, payoffBands, bandTakeaway, GaugeFigure, Gauge, CompareFi
 import { fuseSignals, sentimentDirection, withSignalRank, compareCandidates, againstSignal } from "./signals.js";
 import { N as nCDF, bs as bsPrice, smile as smileIV, payoff as payoffExp, SEASONAL, SIGMA,
   parseAvJson, statsFromMatrix } from "./engine.js";
-import { parseOcc, buildOcc, snapStrike, resnapLegs, expiryStrikes, strikeOptions, fetchChain, hasOpenInterest, enrichOpenInterest, feedName, sourceNote, openInterestNote, oiProfile, expiryOpenInterest, nearMoneyOpenInterest, monotonicityBreaks, monotonicityNote, spotOf, spotAt } from "./chain.js";
+import { parseOcc, buildOcc, snapStrike, resnapLegs, expiryStrikes, strikeOptions, fetchChain, hasOpenInterest, enrichOpenInterest, feedName, sourceNote, openInterestNote, oiProfile, expiryOpenInterest, nearMoneyOpenInterest, monotonicityBreaks, monotonicityNote, invertedOnStrikes, spotOf, spotAt } from "./chain.js";
 import { T, themeName, setTheme, BADGE_SAFE } from "./theme.js";
 import { RULES, sizing, ruleBadge, takeProfitLabel, stopLossLabel, perTradeCapLabel, RULE_PILLS, money, pctText, capitalSourceNote, perTradeLimitPhrase, qualityFloor, qualityFloorSentence, liquiditySkippedNote,
   positionPnl, BROKER_PNL, remainingEdge, remainingEdgeLabel, shareOfMaximum, attentionCount,
@@ -41,7 +41,7 @@ import { RULES, sizing, ruleBadge, takeProfitLabel, stopLossLabel, perTradeCapLa
   requestOf, requestAmountLabel, requestAmountOwner, contractsSourceNote,
   splitByRequest, meetsHeading, otherwiseHeading, missReasonLine, fillPriceHeading, fillNet,
   rewardRiskRange, RR_POINTS, crossingCost, crossingCostNote, openingMarkNote,
-  figureSet, reconcileFigures, unitMoney, candidateFlags, sizeLine, nothingTodayLine, fetchFailWords, stopSigns } from "./rules.js";
+  figureSet, reconcileFigures, unitMoney, candidateFlags, sizeLine, boardLooksStale, staleBoardLine, nothingTodayLine, fetchFailWords, stopSigns } from "./rules.js";
 import { isStale, freshnessNote, staleAmong } from "./freshness.js";
 import { evaluateTrade, gateSummary } from "./riskGate.js";
 import { DEMO, DEMO_BANNER, DEMO_TOOLTIP, DEMO_SEED_TICKERS, demoPositions } from "./demo.js";
@@ -2114,10 +2114,12 @@ export default function OptionsStrategyLab() {
   // IS THIS BOARD'S OWN ARITHMETIC POSSIBLE? Not a floor and it filters nothing:
   // it is a statement about the whole expiry, and the honest response to a chain
   // that contradicts itself is to say so rather than to price off it silently.
-  const monoNote = useMemo(() => {
-    if (!chain || !expKey) return null;
-    return monotonicityNote(monotonicityBreaks(chain, expKey), expKey);
-  }, [chain, expKey]);
+  // PR #41, TASK 2: the note about the WHOLE expiry prints only when the board
+  // looks stale (`boardLooksStale()`); the stop sign reads this structure's own
+  // strikes (`invertedOnStrikes()`), as every Find card does.
+  const boardBreaks = useMemo(() => (chain && expKey ? monotonicityBreaks(chain, expKey) : null), [chain, expKey]);
+  const monoNote = useMemo(() => (boardLooksStale(boardBreaks) ? monotonicityNote(boardBreaks, expKey) : null), [boardBreaks, expKey]);
+  const legsInverted = useMemo(() => invertedOnStrikes(boardBreaks, legs).length > 0, [boardBreaks, legs]);
   const oiGrid = useMemo(() => oiGridFromChain(chain, spot), [chain, spot]);
   // A chain that is still being fetched is not a chain that failed. `busy` is
   // the ticker of the request in flight ("all" during a refresh-all), so the
@@ -3328,9 +3330,9 @@ export default function OptionsStrategyLab() {
   /* THE BUILD SCREEN'S STOP SIGNS (PR #40, TASK 2): facts already computed —
      the gate's warnings, the four factors, the board, the book, the size. */
   const buildSigns = useMemo(() => stopSigns({
-    fused: fused[ticker] || null, gateWarnings: guard?.warnings || [], feedBroken: !!monoNote,
+    fused: fused[ticker] || null, gateWarnings: guard?.warnings || [], feedBroken: legsInverted,
     noQuoteLegs: book.missing.length, contracts, askSize: touchSizeOf(legs, A),
-  }), [fused, ticker, guard, monoNote, book, contracts, legs, A]);
+  }), [fused, ticker, guard, legsInverted, book, contracts, legs, A]);
 
 
   /* ---- direzione del trade e scontro col segnale (PRD §7) ----
@@ -3476,9 +3478,12 @@ export default function OptionsStrategyLab() {
       const sent = find.dir === "season" ? (row ? row.sugg : "neutral") : find.dir;
       const qq = makeQuote(c, ek);
       const peers = expiryOpenInterest(c, ek);
-      // "feed unreliable on this expiry" is this board's own arithmetic failing.
-      const feedBroken = !!monotonicityNote(monotonicityBreaks(c, ek), ek);
-      boards[tk] = { expKey: ek, dte: d2, sent, peers, feed: feedName(c), feedBroken };
+      // THE BOARD'S OWN ARITHMETIC, READ ONCE (PR #41, TASK 2). A stale board
+      // is said once above the list (`staleBoardLine()`); a card is labelled
+      // only when a broken pair touches its own strikes (`invertedOnStrikes()`).
+      const breaks = monotonicityBreaks(c, ek);
+      const stale = boardLooksStale(breaks);
+      boards[tk] = { expKey: ek, dte: d2, sent, peers, feed: feedName(c), stale };
       const u = getU(tk);
       const r = shortlistWithFloors(sent, c.spot, u.step, strikes, d2, u.iv, qq, { peers, level: liqLevel });
       for (const k of Object.keys(tally)) tally[k] += r.tally[k] || 0;
@@ -3493,7 +3498,8 @@ export default function OptionsStrategyLab() {
         const cand = candidateOf({ name: p.name, legs: p.legs, a: aFill, pop: lf.pop, dte: d2, expKey: ek,
           ...seasonalStampFields(lf.mc), ...chanceDrawFields(lf.mc) }, { ticker: tk, spot: c.spot, source: "find" });
         items.push(withSignalRank({
-          key: cand.key, tk, name: p.name, legs: p.legs, expKey: ek, dte: d2, spot: c.spot, sent, lf, cand, feedBroken,
+          key: cand.key, tk, name: p.name, legs: p.legs, expKey: ek, dte: d2, spot: c.spot, sent, lf, cand,
+          feedBroken: invertedOnStrikes(breaks, p.legs).length > 0,
           noQuoteLegs: comboBook(p.legs, quotesOf(aFill)).missing.length,
           touchSize: touchSizeOf(p.legs, aFill),
           fused: f, flags: candidateFlags({ legs: p.legs, fused: f, ivRank: ivRankOf(tk) }),
@@ -3502,7 +3508,8 @@ export default function OptionsStrategyLab() {
       }
     }
     items.sort(compareCandidates);
-    return { items, tally, noBoard, loading, failed, oiSkipped, spreadSkipped, comboSpreadSkipped, boards };
+    const stale = Object.entries(boards).filter(([, b]) => b.stale).map(([tk, b]) => ({ tk, expKey: b.expKey }));
+    return { items, tally, noBoard, loading, failed, oiSkipped, spreadSkipped, comboSpreadSkipped, boards, stale };
   }, [find.markets, find.dir, find.horizon, chains, chainErr, scan, liqLevel, fused, seasonalFor, ivRankOf]); // eslint-disable-line
   /* THE LIST ON SCREEN: the one-market filter (what the Shortlist step was),
      and the flag toggle. Nothing is dropped without a count saying so. */
@@ -4109,6 +4116,13 @@ export default function OptionsStrategyLab() {
                 show flagged{flaggedHidden ? ` (${flaggedHidden} hidden)` : ""}
               </label>
             </div>
+
+            {/* A STALE BOARD IS SAID ONCE, HERE, ABOVE THE LIST (PR #41, TASK 2) —
+                never repeated per card. A card carries its own label only when
+                a broken pair touches its own strikes. */}
+            {findGen.stale.length > 0 && (
+              <div style={{ ...mono, fontSize: 11, color: T.amber, marginTop: 8, lineHeight: 1.5 }}>⚠ {staleBoardLine(findGen.stale)}</div>
+            )}
 
             {/* "NOTHING TODAY" ONLY WHEN ZERO CANDIDATES PASS, WITH THE COUNTS. */}
             {/* Prices still arriving are not a verdict: "Nothing today" waits

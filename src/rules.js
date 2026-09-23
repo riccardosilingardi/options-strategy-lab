@@ -490,6 +490,26 @@ export const RULES = {
   // real chain should sit near 1 and nothing here knows how near.
   modelDisagreementRatio: 4,
 
+  // --- staleBoardShare — WHEN AN EXPIRY'S OWN PRICES SAY THE WHOLE BOARD IS
+  // STALE (PR #41, TASK 2). FOR COPY ONLY: it filters nothing and blocks
+  // nothing. It decides one thing — whether Find says, ONCE above the list,
+  // "2026-11-20 looks stale on N markets".
+  //
+  // A pair of neighbouring strikes priced in an impossible order (a call dearer
+  // than the call one strike below it) is `monotonicityBreaks()` in chain.js.
+  // Before this, ONE such pair anywhere on an expiry put "feed unreliable on
+  // this expiry" on every card built on it: the owner's screen showed it on 12
+  // cards of 14, and on SOYB it fired on 2 inverted pairs out of 30. A card
+  // now carries the label only when a broken pair touches its own strikes
+  // (`invertedOnStrikes()`); the board is judged by the SHARE of its pairs.
+  //
+  // THE TWO READINGS IT SITS BETWEEN, and there are only two: BOIL 2026-10-09
+  // live, 5 of 25 pairs (20%) — last night's placeholders on strikes nobody
+  // traded, a board rightly called unreliable — and the owner's SOYB, 2 of 30
+  // (7%), which he read as noise. 0.15 is between them. CHOSEN, NOT MEASURED:
+  // PRD §4 item 8, until a week of boards is counted.
+  staleBoardShare: 0.15,
+
   // --- scratchPayoffShare — FOR COPY ONLY, AND FOR NOTHING ELSE.
   //
   // It filters no candidate, blocks no order and changes no arithmetic. It
@@ -1271,6 +1291,33 @@ export function candidateFlags({ legs = [], fused = null, ivRank = null } = {}) 
   return out;
 }
 
+/* =====================================================================
+   A STALE BOARD IS SAID ONCE, ABOVE THE LIST (PR #41, TASK 2).
+===================================================================== */
+
+/** Does this expiry's share of impossible pairs say the whole board is stale?
+ *  `m` is a `monotonicityBreaks()` result; an unchecked board is not stale. */
+export function boardLooksStale(m) {
+  return !!(m && m.checked && m.pairs > 0 && m.breaks / m.pairs >= RULES.staleBoardShare);
+}
+
+/**
+ * The one line above Find's list. `stale` is `[{ tk, expKey }]`, one row per
+ * market whose board looks stale; markets sharing an expiry are one clause.
+ * Null when there is nothing to say.
+ */
+export function staleBoardLine(stale = []) {
+  const byExp = new Map();
+  for (const x of stale || []) {
+    if (!x || !x.expKey) continue;
+    if (!byExp.has(x.expKey)) byExp.set(x.expKey, []);
+    byExp.get(x.expKey).push(x.tk);
+  }
+  if (!byExp.size) return null;
+  return [...byExp].map(([ek, tks]) =>
+    `${ek} looks stale on ${tks.length} market${tks.length === 1 ? "" : "s"} (${tks.join(", ")})`).join(" · ");
+}
+
 /** How many contracts the request asks for, in five words or fewer.
  *  THE TOTAL IS CONTRACTS × THE CARD'S RISK (PR #41, TASK 1): the dollars at
  *  risk, never the premium, so the line and the RISK figure above it multiply. */
@@ -1367,7 +1414,9 @@ export function stopSigns({ fused = null, gateWarnings = [], feedBroken = false,
     const f = GATE_WARNING_LABELS[w.code];
     add(`gate-${w.code}`, f ? f() : String(w.code || "risk gate warning").toLowerCase().replace(/_/g, " "));
   }
-  if (feedBroken) add("feed", "feed unreliable on this expiry");
+  // ONLY WHEN A BROKEN PAIR TOUCHES THIS STRUCTURE'S OWN STRIKES (PR #41):
+  // the caller passes `invertedOnStrikes().length > 0`, never the board's verdict.
+  if (feedBroken) add("feed", "inverted quotes on its strikes");
   const nq = Math.round(Number(noQuoteLegs) || 0);
   if (nq > 0) add("no-bid", nq === 1 ? "a leg has no bid" : `${nq} legs have no bid`);
   if (known(contracts) && known(askSize) && Number(contracts) > Number(askSize)) {
