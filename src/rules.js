@@ -490,6 +490,26 @@ export const RULES = {
   // real chain should sit near 1 and nothing here knows how near.
   modelDisagreementRatio: 4,
 
+  // --- staleBoardShare — WHEN AN EXPIRY'S OWN PRICES SAY THE WHOLE BOARD IS
+  // STALE (PR #41, TASK 2). FOR COPY ONLY: it filters nothing and blocks
+  // nothing. It decides one thing — whether Find says, ONCE above the list,
+  // "2026-11-20 looks stale on N markets".
+  //
+  // A pair of neighbouring strikes priced in an impossible order (a call dearer
+  // than the call one strike below it) is `monotonicityBreaks()` in chain.js.
+  // Before this, ONE such pair anywhere on an expiry put "feed unreliable on
+  // this expiry" on every card built on it: the owner's screen showed it on 12
+  // cards of 14, and on SOYB it fired on 2 inverted pairs out of 30. A card
+  // now carries the label only when a broken pair touches its own strikes
+  // (`invertedOnStrikes()`); the board is judged by the SHARE of its pairs.
+  //
+  // THE TWO READINGS IT SITS BETWEEN, and there are only two: BOIL 2026-10-09
+  // live, 5 of 25 pairs (20%) — last night's placeholders on strikes nobody
+  // traded, a board rightly called unreliable — and the owner's SOYB, 2 of 30
+  // (7%), which he read as noise. 0.15 is between them. CHOSEN, NOT MEASURED:
+  // PRD §4 item 8, until a week of boards is counted.
+  staleBoardShare: 0.15,
+
   // --- scratchPayoffShare — FOR COPY ONLY, AND FOR NOTHING ELSE.
   //
   // It filters no candidate, blocks no order and changes no arithmetic. It
@@ -1271,14 +1291,43 @@ export function candidateFlags({ legs = [], fused = null, ivRank = null } = {}) 
   return out;
 }
 
-/** How many contracts the request asks for, in five words or fewer. */
+/* =====================================================================
+   A STALE BOARD IS SAID ONCE, ABOVE THE LIST (PR #41, TASK 2).
+===================================================================== */
+
+/** Does this expiry's share of impossible pairs say the whole board is stale?
+ *  `m` is a `monotonicityBreaks()` result; an unchecked board is not stale. */
+export function boardLooksStale(m) {
+  return !!(m && m.checked && m.pairs > 0 && m.breaks / m.pairs >= RULES.staleBoardShare);
+}
+
+/**
+ * The one line above Find's list. `stale` is `[{ tk, expKey }]`, one row per
+ * market whose board looks stale; markets sharing an expiry are one clause.
+ * Null when there is nothing to say.
+ */
+export function staleBoardLine(stale = []) {
+  const byExp = new Map();
+  for (const x of stale || []) {
+    if (!x || !x.expKey) continue;
+    if (!byExp.has(x.expKey)) byExp.set(x.expKey, []);
+    byExp.get(x.expKey).push(x.tk);
+  }
+  if (!byExp.size) return null;
+  return [...byExp].map(([ek, tks]) =>
+    `${ek} looks stale on ${tks.length} market${tks.length === 1 ? "" : "s"} (${tks.join(", ")})`).join(" · ");
+}
+
+/** How many contracts the request asks for, in five words or fewer.
+ *  THE TOTAL IS CONTRACTS × THE CARD'S RISK (PR #41, TASK 1): the dollars at
+ *  risk, never the premium, so the line and the RISK figure above it multiply. */
 export function sizeLine(request, size) {
   if (!request || !size || !size.ok) return null;
   const n = size.n;
   const c = `${n} contract${n === 1 ? "" : "s"}`;
   return request.mode === "target"
     ? `${c} to reach ${money(request.amt)}`
-    : `${c} for ${money(size.isCredit ? size.totRisk : size.totPrem)}`;
+    : `${c} for ${money(size.totRisk)}`;
 }
 
 /** The quick amounts beside the field, relabelled by what the field asks. */
@@ -1365,7 +1414,9 @@ export function stopSigns({ fused = null, gateWarnings = [], feedBroken = false,
     const f = GATE_WARNING_LABELS[w.code];
     add(`gate-${w.code}`, f ? f() : String(w.code || "risk gate warning").toLowerCase().replace(/_/g, " "));
   }
-  if (feedBroken) add("feed", "feed unreliable on this expiry");
+  // ONLY WHEN A BROKEN PAIR TOUCHES THIS STRUCTURE'S OWN STRIKES (PR #41):
+  // the caller passes `invertedOnStrikes().length > 0`, never the board's verdict.
+  if (feedBroken) add("feed", "inverted quotes on its strikes");
   const nq = Math.round(Number(noQuoteLegs) || 0);
   if (nq > 0) add("no-bid", nq === 1 ? "a leg has no bid" : `${nq} legs have no bid`);
   if (known(contracts) && known(askSize) && Number(contracts) > Number(askSize)) {
@@ -2958,6 +3009,54 @@ export function sizing(answers = {}) {
 }
 
 /* =====================================================================
+   FREE SIZING — ONE FLAG IN PLACE OF DERIVED LIMITS (PR #41, TASK 4).
+
+   Owner decision, 23 Sep 2026: "capital ÷ concurrent positions is a guess I
+   cannot make; a limit must not preclude a signal." With the flag ON the
+   5%-a-trade cap (`bestPracticePerTradePct`) and the 25% exposure ceiling
+   (`totalExposurePct`) are NOT ENFORCED: no card is "over budget", the risk
+   gate neither refuses nor warns on size, and a trade is sized on the amount
+   the owner types as the most he will risk. The RULES values are unchanged;
+   the gate takes the flag as ONE input (`evaluateTrade({ sizingFree })`).
+
+   WHAT IT NEVER TOUCHES: paper only, defined risk, a real price, a listed
+   contract, `minEntryDTE` and the 21-day exit band, and every quality floor.
+
+   IT IS A SETTING, STORED LIKE THE OVERRIDE: `settings.sizingFree` is null
+   (OFF, the default) or `{ reason, at }` — turning it on costs a typed reason
+   of `minOverrideReasonChars`, stamped with the time. It is synced through
+   /api/state with the rest of the settings.
+===================================================================== */
+
+/** Is free sizing ON? Only with a typed reason long enough to count. */
+export function sizingFreeOn(flag) {
+  if (!flag || typeof flag !== "object") return false;
+  const reason = typeof flag.reason === "string" ? flag.reason.trim() : "";
+  return reason.length >= RULES.minOverrideReasonChars;
+}
+
+/**
+ * A `scaleStrategy()` result under free sizing. With the flag OFF it is handed
+ * back untouched. With it ON, a structure one contract of which is over the
+ * amount typed is not "over budget": it is sized at one contract, and its
+ * total is that contract's risk. An unpriceable structure stays unpriceable —
+ * a missing price is not a size question.
+ */
+export function sizedFree(size, free) {
+  if (!free || !size || size.ok || size.unpriceable) return size;
+  const risk = Number(size.risk), prem = Number(size.prem);
+  if (!Number.isFinite(risk) || risk <= 0) return size;
+  return { ...size, ok: true, n: 1, totRisk: risk, totPrem: prem, totProfit: null, free: true };
+}
+
+/** The one line above Send while free sizing is on — information, never a block.
+ *  `openRisk` is the gate's own `limits.openRisk`; `n` the positions it counted. */
+export function atRiskNowLine(openRisk, n) {
+  const k = Math.max(0, Math.round(Number(n) || 0));
+  return `at risk now: ${money(openRisk)} across ${k} position${k === 1 ? "" : "s"}`;
+}
+
+/* =====================================================================
    THE REQUEST — ONE STATE FOR "WHAT I WANT", ABOVE BOTH DOORS.
 
    ROADMAP P10 §2. The owner: *"il budget dedicato all'operazione, oppure
@@ -3073,8 +3172,8 @@ export function meetsRequest(cand, request, size = null) {
     } else if (!size.ok) {
       const over = Number(size.unit) - amt;
       misses.push({ id: "budget", short: `over budget by ${money(over)}`,
-        text: `Over the budget by ${money(over)}: one of these ${size.isCredit ? "ties up" : "costs"} ` +
-          `${money(size.unit)} and you said ${money(amt)}.` });
+        text: `Over the budget by ${money(over)}: one of these puts ${money(size.unit)} at risk ` +
+          `and you said ${money(amt)}.` });
     } else if (request.mode === "target" && Number(size.totProfit) < amt) {
       const shortBy = amt - Number(size.totProfit);
       misses.push({ id: "target", short: `short of the target by ${money(shortBy)}`,

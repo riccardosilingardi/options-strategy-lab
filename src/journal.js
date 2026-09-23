@@ -946,6 +946,9 @@ export function journalEntry({ pos = {}, pnl = null, pnlNote = null, reason = nu
     // record it is filed under.
     contracts: contractsOf(pos),
     contractsAssumed: positionSize(pos).assumed,
+    // WHICH SIZING THE POSITION WAS OPENED UNDER (PR #41, TASK 4): `true` only
+    // when the record says so; an older record, written before the flag, is false.
+    sizingFree: pos.sizingFree === true,
     pnl,
     // WHY THERE IS NO FIGURE, when there is none on purpose (`NOT_A_FILL`).
     pnlNote: pnlNote || null,

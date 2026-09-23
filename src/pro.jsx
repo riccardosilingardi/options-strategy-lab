@@ -9,7 +9,7 @@ import { RULES, ruleBadge, takeProfitLabel, scaleOutLabel, stopLossLabel, exitDT
   contractListing, unlistedContractNote, unquotedLegNote, unquotedLegPointer, marketOrderNote,
   taCopilotPrompt, TA_QUESTIONS, TA_DISCLAIMER,
   ivProvenance, sameCloseNote, copilotOverreach, copilotOverreachNote } from "./rules.js";
-import { contractsOf, positionSize, bookPositions, positionStage, autopilotHorizonNote, autopilotVolNote, positionForHolding } from "./journal.js";
+import { contractsOf, positionSize, bookPositions, positionStage, autopilotHorizonNote, autopilotVolNote, positionForHolding, journalPnlTotal, scoredJournal } from "./journal.js";
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, LineStyle } from "lightweight-charts";
 // The fold lives in steps.jsx — chrome with no trade in it, and the one file
 // both App.jsx and pro.jsx can import without a cycle.
@@ -1741,6 +1741,21 @@ export function CopilotTab({ ctx, apiKey, convo, setConvo, onAnalysis }) {
 /* ================================================================
    5) REPORT CENTER: routine schedulata + export + webhook
 ================================================================ */
+/* P&L SPLIT BY SIZING (PR #41, TASK 4). Every Journal entry carries
+   `sizingFree`; the report sums the counted P&L of each side apart with the one
+   sum (`journalPnlTotal()`), so a figure never read stays out of both. */
+export function pnlBySizing(entries = []) {
+  const scored = scoredJournal(entries || []);
+  return {
+    free: journalPnlTotal(scored.filter((e) => e && e.sizingFree === true)),
+    limits: journalPnlTotal(scored.filter((e) => e && e.sizingFree !== true)),
+  };
+}
+const sizingSide = (t) => (t.counted ? `${fmt$(t.total)} over ${t.counted} closed` : "nothing closed")
+  + (t.excluded ? ` (${t.excluded} with no fill figure left out)` : "");
+export const pnlBySizingLine = (split) =>
+  `**P&L by sizing:** free sizing ${sizingSide(split.free)} · within the limits ${sizingSide(split.limits)}`;
+
 export function buildReportMd(ctx, weatherSig, aiText) {
   const { store, scan, news, seasonalSrc } = ctx;
   const d = new Date().toLocaleString("en-GB");
@@ -1807,6 +1822,7 @@ export function buildReportMd(ctx, weatherSig, aiText) {
     L.push(`\n**Across everything:** ${fmt$(totRisk)} at risk · up to ${fmt$(totMaxP)} to be made` +
       (noCeil ? ` from the ${book.length - noCeil} with a ceiling, plus ${noCeil} with ${NO_CEILING} on the profit, which cannot be added to a total` : ""));
   }
+  L.push(`\n${pnlBySizingLine(pnlBySizing(store.journal))}`);
   L.push(`\n## 3 · Headlines that matter (cause → effect, politics included)`);
   (news || []).filter((n) => (n.impacts || []).length).slice(0, 8).forEach((n) => {
     L.push(`- ${n.title} ${n.geo ? "(policy)" : ""}\n  ${(n.impacts || []).map((im) => `**${im.tk} ${ARROW[im.dir]}** (${im.why})`).join(" · ")}`);
@@ -1988,8 +2004,15 @@ export function scaleStrategy(a, mode, amt) {
   const prem = Math.abs(a.entry) * 100;          // premio per 1 combo ($, da chain reale)
   const isCredit = a.entry < 0;
   if (!Number.isFinite(risk) || risk <= 0 || !Number.isFinite(a.maxProfit) || a.maxProfit <= 0) return null;
-  // Budget = premio max da pagare (debit) oppure capitale a rischio (credit, dove il premio si incassa)
-  const unit = isCredit ? risk : prem;
+  /* THE BUDGET IS "THE MOST I WILL RISK", SO ONE COMBINATION COSTS ITS MAXIMUM
+     LOSS (PR #41, TASK 1). A debit was sized on its PREMIUM, which equals the
+     maximum loss only when the structure is symmetric. The owner's SLV put
+     butterfly, +1 58P / −2 55P / +1 51P, has wings 3 and 4 wide: $43 of
+     premium, $143 of maximum loss. "6 contracts for $258" against a $300
+     limit was 6 × $143 = $858 at risk. The unit is the larger of the two, so
+     neither the money paid nor the money that can be lost passes the amount
+     typed; on every symmetric structure the two are the same number. */
+  const unit = isCredit ? risk : Math.max(risk, prem);
   // NOTHING IS EVER DIVIDED BY A COST THE APP COULD NOT READ. `Math.max(prem, 1)`
   // used to stand in for a premium of zero, and on the BOIL butterfly that
   // turned a $250 budget into 250 contracts of a structure whose price was a

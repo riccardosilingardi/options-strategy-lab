@@ -93,6 +93,8 @@ All in `RULES`, `src/rules.js`, unless noted.
 - Sizing: `bestPracticePerTradePct` 0.05, `totalExposurePct` 0.25, `suggestedTradingCapital`.
 - Price exists: `minNetPremium` 0.05 (`MIN_NET_DOLLARS` = $5 a contract).
 - Model sanity: `modelDisagreementRatio` 4.
+- Stale board (copy only): `staleBoardShare` 0.15 — the share of inverted strike pairs at
+  which Find says "<expiry> looks stale on N markets", once.
 - Floors: `liquidityPercentile` 0.40, `minOpenInterestAbsolute` 10, `minPeersForPercentile` 8,
   `maxSpreadShareOfMid` 0.35, `maxComboSpreadShareOfNet` 1.0, `maxCrossingShareOfMaxProfit` 0.5,
   `minRewardRisk` 0.25.
@@ -123,6 +125,9 @@ All in `RULES`, `src/rules.js`, unless noted.
 - Single-leg orders go to Alpaca as simple orders, not mleg.
 - Cancel conflicting open orders before sending an mleg close (wash-trade check).
 - Sending a close does not file the Journal; "Close and file it" is the step after the fill.
-- `settings.notifyWhenReady` must be in the `/api/state` sync payload.
+- `settings.notifyWhenReady` and `settings.sizingFree` must be in the `/api/state` sync payload.
+- Free sizing is ONE gate input (`evaluateTrade({ sizingFree })`): it drops the per-trade,
+  exposure and capital-not-set checks only. Never let it reach another check.
+- A card's size is `scaleStrategy()` on the maximum loss; `sizeLine()` prints contracts × risk.
 - A leg's `qty` is inside `analyze()`'s figures; `positionSize()` separates `contracts` from
   the broker's `brokerQty`. Never write `Number(p.contracts) || 1`.

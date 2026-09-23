@@ -38,7 +38,7 @@ export const oldOpenNet = (mid, spread, slippage = RULES.openLimitSlippage) => {
 const MODEL_C = { 90: 11.396, 95: 7.536, 100: 4.471, 105: 2.556, 110: 1.384, 115: 0.719 };
 const MODEL_P = { 90: 0.898, 95: 2.010, 100: 3.918, 105: 6.975, 110: 10.775, 115: 15.083 };
 const mark = (px) => ({ mid: px, bid: px - 0.05, ask: px + 0.05, iv: 0.3, oi: 500, vol: 10 });
-const MODEL_BOARD = {
+export const MODEL_BOARD = {
   id: "S100-model", ticker: "SPY", S: 100, step: 5, strikes: [90, 95, 100, 105, 110, 115], dte: 45, iv: 0.3,
   q: (leg) => { const px = (leg.type === "put" ? MODEL_P : MODEL_C)[leg.strike]; return px == null ? null : mark(px); },
   peers: null,
@@ -46,7 +46,7 @@ const MODEL_BOARD = {
 
 /* 2. The Alpaca-shaped UNG board (src/fixtures), every expiry the gate would
    open on, read with a fixed clock so the DTE is the same next month. */
-function ungBoards() {
+export function ungBoards() {
   const RAW = JSON.parse(readFileSync("src/fixtures/alpaca-chain-UNG.json", "utf8"));
   const S = RAW._capture?.underlying_last_trade ?? 13.24;
   const c = normaliseAlpacaChain("UNG", RAW, { spot: S, now: Date.parse("2026-09-02T12:00:00Z") });

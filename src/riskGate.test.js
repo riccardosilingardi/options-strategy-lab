@@ -28,7 +28,8 @@ import { RULES, sizing, ruleBadge, qualityFloor, qualityFloorSentence, liquidity
   remainingEdge, remainingEdgeNote, remainingEdgeLabel, shareOfMaximum, attentionCount, sameCloseNote,
   requestOf, requestAmountLabel, requestAmountOwner, contractsSourceNote, clampAskedChance,
   REQUEST_MODES, meetsRequest, splitByRequest, meetsHeading, otherwiseHeading,
-  targetPriceOf, chanceAskLabel, nothingTodayLine, fetchFailWords } from "./rules.js";
+  targetPriceOf, chanceAskLabel, nothingTodayLine, fetchFailWords,
+  sizingFreeOn, sizedFree, atRiskNowLine } from "./rules.js";
 import { netBS, SIGMA, exitSim } from "./engine.js";
 import { isStale, staleAmong, agePhrase, freshnessNote, BUDGETS } from "./freshness.js";
 
@@ -3364,6 +3365,100 @@ test("TARGET PRICE — the direction read as a number, and unknown stays unknown
   assert.equal(flat.price, 27.5);
   // ...and the slider's label carries the number it is asking for.
   assert.match(chanceAskLabel(requestOf({ minChance: 0.65 }, {})), /65%/);
+});
+
+/* ====================================================================
+   PR #41, TASK 4 — ONE "FREE SIZING" FLAG REPLACES DERIVED LIMITS
+   (owner decision, 23 Sep 2026). Flag OFF: every test above, unchanged.
+   Flag ON: no refusal and no warning on SIZE — and everything else stands.
+==================================================================== */
+const HUGE = trade({ maxLoss: -4000, contracts: 3 });            // $12,000 on $5,000 of capital
+const FULL_BOOK = { positions: [{ maxLoss: -900, contracts: 2 }], account: PAPER };   // $1,800 already open
+
+test("FREE SIZING OFF (the default, and missing): the size checks refuse exactly as before", () => {
+  for (const flag of [undefined, false, "yes", 1, null]) {
+    const r = evaluateTrade({ proposal: HUGE, portfolio: FULL_BOOK, capital: CAPITAL, signals: CONFLUENT, sizingFree: flag });
+    assert.ok(codes(r).includes("PER_TRADE_LIMIT"), `flag ${String(flag)}: per-trade enforced`);
+    assert.ok(codes(r).includes("TOTAL_EXPOSURE"), `flag ${String(flag)}: exposure enforced`);
+    assert.equal(r.limits.sizingFree, false);
+  }
+  const unanswered = evaluateTrade({ proposal: GOOD_TRADE, portfolio: EMPTY_BOOK, capital: {}, signals: CONFLUENT });
+  assert.ok(warnCodes(unanswered).includes("CAPITAL_NOT_SET"), "the suggested-figures warning still speaks");
+});
+
+test("FREE SIZING ON: never refuses and never warns on size — per trade, total, or capital unanswered", () => {
+  const r = evaluateTrade({ proposal: HUGE, portfolio: FULL_BOOK, capital: CAPITAL, signals: CONFLUENT, sizingFree: true });
+  assert.equal(r.pass, true, r.violations.map((v) => v.message).join(" | "));
+  assert.deepEqual(r.warnings, [], "no size warning either");
+  assert.equal(r.limits.sizingFree, true, "the gate says which way it measured");
+  assert.equal(r.limits.openRisk, 1800, "and still measures what is open — the at-risk line reads it");
+  assert.equal(r.limits.tradeRisk, 12000);
+  const unanswered = evaluateTrade({ proposal: HUGE, portfolio: EMPTY_BOOK, capital: {}, signals: CONFLUENT, sizingFree: true });
+  assert.equal(unanswered.pass, true);
+  assert.ok(!warnCodes(unanswered).includes("CAPITAL_NOT_SET"), "no sizing warning when sizing is free");
+});
+
+test("FREE SIZING ON STILL REFUSES an uncovered short leg, a non-paper account and entry inside 21 DTE", () => {
+  const naked = trade({ legs: [{ side: -1, qty: 1, type: "call", strike: 24 }] });
+  assert.ok(codes(evaluateTrade({ proposal: naked, portfolio: EMPTY_BOOK, capital: CAPITAL, sizingFree: true })).includes("UNDEFINED_RISK"));
+  const ratio = trade({ legs: [{ side: 1, qty: 1, type: "put", strike: 22 }, { side: -1, qty: 2, type: "put", strike: 20 }] });
+  assert.ok(codes(evaluateTrade({ proposal: ratio, portfolio: EMPTY_BOOK, capital: CAPITAL, sizingFree: true })).includes("UNDEFINED_RISK"));
+  const live = { positions: [], account: { account_number: "123456789" } };
+  assert.ok(codes(evaluateTrade({ proposal: GOOD_TRADE, portfolio: live, capital: CAPITAL, sizingFree: true })).includes("PAPER_MODE"));
+  assert.ok(codes(evaluateTrade({ proposal: GOOD_TRADE, portfolio: { positions: [] }, capital: CAPITAL, sizingFree: true })).includes("PAPER_MODE"),
+    "no account at all is still unverifiable");
+  for (const dte of [RULES.exitDTE, RULES.exitDTE - 5]) {
+    const r = evaluateTrade({ proposal: trade({ dte, entryOverride: "a long enough written reason to unlock the tight band" }),
+      portfolio: EMPTY_BOOK, capital: CAPITAL, sizingFree: true });
+    assert.ok(codes(r).includes("ENTRY_DTE"), `${dte} DTE is inside the exit window, free sizing or not`);
+  }
+  // ...and between 21 and 30 the typed reason is still required.
+  const tight = evaluateTrade({ proposal: trade({ dte: RULES.minEntryDTE - 3 }), portfolio: EMPTY_BOOK, capital: CAPITAL, sizingFree: true });
+  assert.ok(codes(tight).includes("ENTRY_DTE_ROOM"));
+  assert.ok(codes(evaluateTrade({ proposal: trade({ maxLoss: 50 }), portfolio: EMPTY_BOOK, capital: CAPITAL, sizingFree: true })).includes("IMPOSSIBLE_LOSS"));
+});
+
+test("FREE SIZING IS ONE INPUT: the gate reads it in three places and nowhere else, and RULES is unchanged", () => {
+  const src = readFileSync("src/riskGate.js", "utf8").replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+  assert.equal((src.match(/!free\b/g) || []).length, 3, "per-trade, total exposure, capital-not-set");
+  assert.equal(RULES.bestPracticePerTradePct, 0.05);
+  assert.equal(RULES.totalExposurePct, 0.25);
+  assert.equal(RULES.minEntryDTE, 30);
+  assert.equal(RULES.exitDTE, 21);
+});
+
+test("THE FLAG: OFF by default, ON only with a typed reason, and synced through /api/state", () => {
+  assert.equal(sizingFreeOn(null), false);
+  assert.equal(sizingFreeOn({}), false);
+  assert.equal(sizingFreeOn({ reason: "short" }), false, "a reason under minOverrideReasonChars does not count");
+  assert.equal(sizingFreeOn({ reason: "x".repeat(RULES.minOverrideReasonChars), at: 1 }), true);
+  const app = readFileSync("src/App.jsx", "utf8");
+  assert.match(app, /sizeOverride: null, sizingFree: null,/, "OFF in the empty store");
+  assert.match(app, /sizingFree: st\.settings\?\.sizingFree \?\? null/, "in the /api/state sync payload");
+  assert.match(app, /setSetting\("sizingFree", \{ reason: freeDraft\.trim\(\), at: Date\.now\(\) \}\)/, "stored with its time");
+  assert.match(app, /sizingFree: freeSizing,\n\s*\}\), \[store\.positions/, "the gate call reads it");
+  assert.match(app, /sizingFree: freeSizing,\n\s*openedAt/, "every opened position records it");
+});
+
+test("FREE SIZING ON: no card is over budget — it is sized on the amount typed, one contract at least", () => {
+  const over = { n: 0, ok: false, risk: 400, prem: 400, isCredit: false, unit: 400 };
+  assert.equal(sizedFree(over, false), over, "OFF: untouched");
+  const on = sizedFree(over, true);
+  assert.equal(on.ok, true); assert.equal(on.n, 1); assert.equal(on.totRisk, 400);
+  const req = requestOf({ amt: 300 }, {});
+  assert.equal(meetsRequest({ pop: 0.6 }, req, over).misses[0].id, "budget", "OFF: over budget");
+  assert.equal(meetsRequest({ pop: 0.6 }, req, on).meets, true, "ON: meets, so it keeps its place in the ranking");
+  const unpriced = { n: 0, ok: false, unpriceable: true, risk: 0, prem: 0 };
+  assert.equal(sizedFree(unpriced, true), unpriced, "a missing price is not a size question");
+  const fits = { n: 3, ok: true, totRisk: 270 };
+  assert.equal(sizedFree(fits, true), fits, "a size that fits is the size");
+  assert.equal(atRiskNowLine(1800, 2), "at risk now: $1,800 across 2 positions");
+  assert.equal(atRiskNowLine(0, 1), "at risk now: $0 across 1 position");
+});
+
+test("EVERY POSITION RECORDS sizingFree, AND THE JOURNAL KEEPS IT", () => {
+  const src = readFileSync("src/journal.js", "utf8");
+  assert.match(src, /sizingFree: pos\.sizingFree === true,/);
 });
 
 console.log(`\n${passed} passed, ${failures.length} failed\n`);

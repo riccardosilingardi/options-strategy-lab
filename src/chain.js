@@ -509,16 +509,19 @@ export function openInterestNote(chain) {
  * ------------------------------------------------------------------------- */
 
 /**
- * @returns {{ pairs, breaks, share, worst, checked }} for ONE expiry.
+ * @returns {{ pairs, breaks, share, worst, list, checked }} for ONE expiry.
  *   `pairs`  adjacent strike pairs that could be compared at all
  *   `breaks` how many of them are in the impossible order
  *   `worst`  the largest violation found, in dollars per share, with its strikes
+ *   `list`   EVERY broken pair `{ side, lower, upper, gap }` — so a card can ask
+ *            whether its OWN strikes are among them (PR #41, TASK 2)
  *   `checked` false when there was not enough of a board to look at
  */
 export function monotonicityBreaks(chain, expKey) {
   const e = chain?.byExp?.[expKey];
-  if (!e) return { pairs: 0, breaks: 0, share: 0, worst: null, checked: false };
+  if (!e) return { pairs: 0, breaks: 0, share: 0, worst: null, list: [], checked: false };
   let pairs = 0, breaks = 0, worst = null;
+  const list = [];
   const scan = (book, side) => {
     const ks = Object.keys(book || {}).map(Number).filter((k) => Number.isFinite(k)).sort((a, b) => a - b);
     for (let i = 0; i + 1 < ks.length; i++) {
@@ -530,13 +533,39 @@ export function monotonicityBreaks(chain, expKey) {
       const gap = side === "calls" ? Number(hi) - Number(lo) : Number(lo) - Number(hi);
       if (gap > 0) {
         breaks++;
+        list.push({ side, gap, lower: ks[i], upper: ks[i + 1] });
         if (!worst || gap > worst.gap) worst = { side, gap, lower: ks[i], upper: ks[i + 1] };
       }
     }
   };
   scan(e.calls, "calls");
   scan(e.puts, "puts");
-  return { pairs, breaks, share: pairs ? breaks / pairs : 0, worst, checked: pairs > 0 };
+  return { pairs, breaks, share: pairs ? breaks / pairs : 0, worst, list, checked: pairs > 0 };
+}
+
+/**
+ * THE BROKEN PAIRS THAT TOUCH ONE STRUCTURE (PR #41, TASK 2).
+ *
+ * The owner's Find screen said "feed unreliable on this expiry" on 12 cards of
+ * 14, and on SOYB it fired on 2 inverted pairs out of 30 — pairs nowhere near
+ * most of the structures it was printed on. A card speaks for its OWN legs: a
+ * pair counts against it only when it is on the same side (calls or puts) and
+ * one of its two strikes is a strike the structure trades. What the board as a
+ * whole looks like is said once, above the list (`staleBoardLine()` in
+ * rules.js), never repeated per card.
+ *
+ * @param m    a `monotonicityBreaks()` result
+ * @param legs the structure's legs `{ type, strike }`
+ * @returns the broken pairs that touch one of its legs; empty when none do
+ */
+export function invertedOnStrikes(m, legs = []) {
+  if (!m || !Array.isArray(m.list) || !m.list.length) return [];
+  const own = { calls: new Set(), puts: new Set() };
+  for (const l of legs || []) {
+    if (!l || !Number.isFinite(Number(l.strike))) continue;
+    own[l.type === "put" ? "puts" : "calls"].add(Number(l.strike));
+  }
+  return m.list.filter((b) => own[b.side] && (own[b.side].has(b.lower) || own[b.side].has(b.upper)));
 }
 
 /** What the screen says about an expiry whose own prices contradict each other. */
