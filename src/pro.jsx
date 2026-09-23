@@ -589,6 +589,47 @@ function ComboBookPanel({ legs, quotes, verdict, effective, type, qty, spot, tic
  * `model` is the `modelSanity()` verdict, computed once from `analyze()`'s own
  * marks — see `ComboBookPanel` above.
  */
+/* A QUANTITY FIELD THAT CAN BE EMPTIED ON A PHONE. The old inputs coerced
+   every keystroke with `Number(v) || 1`, so deleting the "1" wrote 1 straight
+   back and the field could not be retyped. The typed TEXT is kept as a string;
+   only a whole number inside [min, max] is handed up while typing, the range is
+   applied on blur and at send, and an empty or non-numeric field is reported
+   invalid — it never silently becomes 1. `readQty` is pure so it is testable. */
+export function readQty(text, min, max) {
+  const t = String(text ?? "").trim();
+  if (t === "") return { ok: false, value: null, inRange: false, clamped: null, note: `Enter a quantity (${min}–${max})` };
+  if (!/^\d+$/.test(t)) return { ok: false, value: null, inRange: false, clamped: null, note: `Whole numbers only (${min}–${max})` };
+  const n = Number(t);
+  const clamped = Math.max(min, Math.min(max, n));
+  return { ok: true, value: n, inRange: n === clamped, clamped, note: n === clamped ? null : `Quantity is ${min}–${max}` };
+}
+
+export function QtyField({ value, min, max, onValue, onValidity, style, ariaLabel }) {
+  const [text, setText] = useState(String(value ?? ""));
+  // A value changed from outside (the budget re-derived it, a preset loaded)
+  // replaces the text — unless the text already reads that number.
+  useEffect(() => {
+    const r = readQty(text, min, max);
+    if (!(r.ok && r.value === Number(value))) { setText(String(value ?? "")); if (onValidity) onValidity(true, null); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+  const change = (t) => {
+    setText(t);
+    const r = readQty(t, min, max);
+    if (r.ok && r.inRange && onValue) onValue(r.value);
+    if (onValidity) onValidity(r.ok && r.inRange, r.note);
+  };
+  const blur = () => {
+    const r = readQty(text, min, max);
+    if (!r.ok) { if (onValidity) onValidity(false, r.note); return; }
+    setText(String(r.clamped));
+    if (onValue) onValue(r.clamped);
+    if (onValidity) onValidity(true, null);
+  };
+  return <Inp type="text" inputMode="numeric" pattern="[0-9]*" aria-label={ariaLabel} value={text}
+    onChange={(e) => change(e.target.value)} onBlur={blur} style={style} />;
+}
+
 export function OrderTicket({
   /* `buildOcc` IS GONE FROM THIS SIGNATURE AND IT IS NOT AN OVERSIGHT. It was
      the fallback behind `quoteFn(l).occ`, and a formatter that turns a strike
@@ -611,9 +652,15 @@ export function OrderTicket({
      re-derived here: the figure beside the send has to be the figure the card
      printed, or the two are two answers to one question. */
   limits = null,
+  qtyBlock = null,
 }) {
-  const qtyNum = Math.max(1, Math.round(Number(qty) || 1));
-  const setQty = (v) => { if (onQty) onQty(Math.max(1, Math.min(20, Math.round(Number(v) || 1)))); };
+  // Clamped again here, at send: the field hands up only in-range numbers,
+  // but the prop can come from elsewhere (the budget derivation).
+  const qtyNum = Math.max(1, Math.min(20, Math.round(Number(qty) || 1)));
+  const [qtyErr, setQtyErr] = useState(null);
+  // `qtyBlock` is the parent's own quantity problem (a leg quantity left
+  // empty on the Build screen): it disables Send exactly like this field's.
+  const qtyProblem = qtyErr || qtyBlock;
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState(null);
@@ -658,6 +705,7 @@ export function OrderTicket({
   const sendQty = orderQty(qtyNum, shape.factor);
   const send = async () => {
     if (DEMO) { setMsg(DEMO_TOOLTIP); return; }   // order path 2 of six
+    if (qtyProblem) { setMsg(qtyProblem); return; }
     if (!confirm) { setConfirm(true); return; }
     setConfirm(false); setBusy(true); setOutcome(null);
     try {
@@ -750,7 +798,7 @@ export function OrderTicket({
       {/* 4 — ORDER TYPE, TIME IN FORCE AND SIZE. The time in force is an input
           to the verdict band below, not a dropdown with a paragraph under it. */}
       <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-        <div><div style={{ ...mono, fontSize: 9.5, color: T.dim }}>QTY</div><Inp type="number" min={1} max={20} value={qtyNum} onChange={(e) => setQty(e.target.value)} style={{ width: 56 }} />
+        <div><div style={{ ...mono, fontSize: 9.5, color: T.dim }}>QTY</div><QtyField value={qtyNum} min={1} max={20} ariaLabel="Quantity" onValue={(n) => { if (onQty) onQty(n); }} onValidity={(ok, note) => setQtyErr(ok ? null : note)} style={{ width: 56 }} />
           {/* WHOSE NUMBER THIS IS (P10 §2). The count is derived from the
               budget until somebody types one; a typed one wins and says so.
               One clause, from its one home in rules.js. */}
@@ -759,9 +807,9 @@ export function OrderTicket({
           <Sel value={cfg.type} onChange={(e) => onCfg({ type: e.target.value })}><option value="limit">Limit — set my price</option><option value="market">Market — take what is there</option></Sel></div>
         <div><div style={{ ...mono, fontSize: 9.5, color: T.dim }}>HOW LONG IT STANDS</div>
           <Sel value={cfg.tif} onChange={(e) => onCfg({ tif: e.target.value })}><option value="day">Today only</option><option value="gtc">Until I cancel</option></Sel></div>
-        <Btn color={confirm ? T.red : T.violet} onClick={send} disabled={busy || !preview.pass || DEMO}
+        <Btn color={confirm ? T.red : T.violet} onClick={send} disabled={busy || !preview.pass || DEMO || !!qtyProblem}
           title={DEMO ? DEMO_TOOLTIP : undefined}>
-          <Send size={12} /> {busy ? "Sending…" : DEMO ? DEMO_TOOLTIP : !preview.pass ? "BLOCKED BY THE RISK GATE" : confirm ? "TAP AGAIN TO CONFIRM" : "Send the order"}
+          <Send size={12} /> {busy ? "Sending…" : DEMO ? DEMO_TOOLTIP : qtyProblem ? qtyProblem : !preview.pass ? "BLOCKED BY THE RISK GATE" : confirm ? "TAP AGAIN TO CONFIRM" : "Send the order"}
         </Btn>
       </div>
 

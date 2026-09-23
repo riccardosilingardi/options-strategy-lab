@@ -8,7 +8,7 @@ import {
   FlaskConical, Briefcase, Plus, Plug, Send, ExternalLink, MessageSquare, FileText, Bell,
   SlidersHorizontal, ArrowLeft, Sun, Moon, AlertTriangle, WifiOff,
 } from "lucide-react";
-import { fetchAllNews, fetchWeather, ImpactTags, CopilotTab, TaCopilot, ReportTab, OrderTicket, AlpacaDesk, scaleStrategy, buildContext, GuardianPanel, ChainMatrix, OptionPanel, PriceChart, UnifiedView, taSignals, confluence, WhyThisTrade, Markdown, alpacaReq } from "./pro.jsx";
+import { fetchAllNews, fetchWeather, ImpactTags, CopilotTab, TaCopilot, ReportTab, OrderTicket, AlpacaDesk, scaleStrategy, buildContext, GuardianPanel, ChainMatrix, OptionPanel, PriceChart, QtyField, UnifiedView, taSignals, confluence, WhyThisTrade, Markdown, alpacaReq } from "./pro.jsx";
 import { BandThumbnail, payoffBands, bandTakeaway, GaugeFigure, Gauge, CompareFigure, exitPlanSentence,
   OpenInterestStrip, oiStripTakeaway, oiCutAt, oiGhostCut, explainOiStrip, useWidth } from "./visuals.jsx";
 import { fuseSignals, sentimentDirection, withSignalRank, compareCandidates, againstSignal, DRIVER_PRESETS, rankByDrivers, verdictNarrative } from "./signals.js";
@@ -2397,6 +2397,11 @@ export default function OptionsStrategyLab() {
     ref: a ? { name: p.name, entry: a.entry, maxProfit: a.maxProfit, maxLoss: a.maxLoss, expKey, t: Date.now() } : null,
   });
   const updLeg = (i, f, v) => setLegs((L) => L.map((l, j) => (j === i ? { ...l, [f]: v } : l)));
+  // A leg quantity left empty or invalid while typing: { [legIndex]: note }.
+  // It disables Send and the confirm button; it never becomes 1 by itself.
+  const [legQtyErr, setLegQtyErr] = useState({});
+  const legQtyMsg = Object.keys(legQtyErr).filter((k) => legQtyErr[k] && Number(k) < legs.length)
+    .map((k) => `Leg ${Number(k) + 1}: ${legQtyErr[k]}`)[0] || null;
   /* MOVING THE BOARD MOVES THE STRIKES WITH IT. `expStrikes` is memoised on
      the expiry that is still in state when this runs, so the target board's
      strikes are read straight off the chain here rather than waited for. */
@@ -5614,7 +5619,8 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                       </button>
                       <StrikeSelect strikes={expStrikes} value={l.strike} step={U.step}
                         onChange={(v) => updLeg(i, "strike", v)} />
-                      <Inp type="number" min={1} max={10} value={l.qty} onChange={(e) => updLeg(i, "qty", Math.max(1, +e.target.value))} style={{ width: 48 }} />
+                      <QtyField value={l.qty} min={1} max={10} ariaLabel={`Leg ${i + 1} quantity`} onValue={(n) => updLeg(i, "qty", n)}
+                        onValidity={(ok, note) => setLegQtyErr((m) => ({ ...m, [i]: ok ? null : note }))} style={{ width: 48 }} />
                       <span style={{ ...mono, fontSize: 11, color: lp.real ? T.green : T.mut, marginLeft: "auto" }}>
                         ${lp.px.toFixed(2)} {lp.real ? "●" : "◌"} <span style={{ color: T.dim }}>IV {(lp.iv * 100).toFixed(0)}%{lp.oi != null ? ` · OI ${lp.oi}` : ""}</span>
                       </span>
@@ -5960,6 +5966,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                      being moved, so the check has to be readable here too. */
                   limits={guard ? guard.limits : null}
                   spot={spot} entryOverride={roomReason}
+                  qtyBlock={legQtyMsg}
                 />
               )}
               {!alpaca && <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 8 }}>Connect Alpaca in Positions → Integrations to unlock the full order ticket: limit or market, time in force, quantity and cancellations.</div>}
@@ -5973,7 +5980,12 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                 outside this sheet changes the checks inside it: what is
                 confirmed is what is on screen. */}
             <div style={{ marginTop: 12 }}>
-              <ConfirmSteps
+              {legQtyMsg && (
+                <div style={{ ...mono, fontSize: 11, color: T.amber, marginBottom: 8, padding: "9px 11px", border: `1px solid ${T.amber}66`, borderRadius: 7 }}>
+                  {`${legQtyMsg}. Nothing can be opened until it is filled in.`}
+                </div>
+              )}
+              {!legQtyMsg && <ConfirmSteps
                 /* AT THE PRICE THAT WILL BE SENT (`AE`), like every other
                    figure on this screen and like the record that is written
                    when the button is tapped. The confirm step used to describe
@@ -5996,7 +6008,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                 showWarnings={false}
                 busy={busy === "order"}
                 onConfirm={() => openPaper()}
-              />
+              />}
               {/* AND THE LIST SAYS WHOSE ACCOUNT IT CHECKED. This sheet holds
                   two taps — the ticket, which sends, and the confirm step,
                   which records on the app's own book — and the checks above
