@@ -41,7 +41,7 @@ import { RULES, sizing, ruleBadge, takeProfitLabel, stopLossLabel, perTradeCapLa
   requestOf, requestAmountLabel, requestAmountOwner, contractsSourceNote,
   splitByRequest, meetsHeading, otherwiseHeading, missReasonLine, fillPriceHeading, fillNet,
   rewardRiskRange, RR_POINTS, crossingCost, crossingCostNote, openingMarkNote,
-  figureSet, reconcileFigures, unitMoney, candidateFlags, sizeLine, nothingTodayLine, stopSigns } from "./rules.js";
+  figureSet, reconcileFigures, unitMoney, candidateFlags, sizeLine, nothingTodayLine, fetchFailWords, stopSigns } from "./rules.js";
 import { isStale, freshnessNote, staleAmong } from "./freshness.js";
 import { evaluateTrade, gateSummary } from "./riskGate.js";
 import { DEMO, DEMO_BANNER, DEMO_TOOLTIP, DEMO_SEED_TICKERS, demoPositions } from "./demo.js";
@@ -1385,6 +1385,9 @@ export default function OptionsStrategyLab() {
   const [showSettings, setShowSettings] = useState(false);
   const [ticker, setTicker] = useState("SOYB");
   const [chains, setChains] = useState({});      // ticker -> normalised chain (Alpaca, or CBOE as the net)
+  // WHY A MARKET HAS NO CHAIN, when its fetch FAILED (PR #40): a failure is not
+  // "still loading", and neither is a market verdict. Cleared on the next success.
+  const [chainErr, setChainErr] = useState({});  // ticker -> error in a few words
   const [seasonal, setSeasonal] = useState({});  // ticker -> {monthlyMean, sigma, matrix, years, src, at} from Alpha Vantage
   // WHY a market is not in `seasonal`: loading, or a named failure. A fallback
   // that cannot say why it is in use is indistinguishable from a measurement.
@@ -1621,6 +1624,7 @@ export default function OptionsStrategyLab() {
     try {
       const c = await fetchChain(tk);
       setChains((m) => ({ ...m, [tk]: c }));
+      setChainErr((m) => (m[tk] ? { ...m, [tk]: null } : m));
       // Open interest is not in an Alpaca snapshot. It IS in the broker's own
       // contract list, on the host /api/alpaca already proxies — but the quotes
       // are the product and this is a nice-to-have, so it is fired here, AFTER
@@ -1649,6 +1653,7 @@ export default function OptionsStrategyLab() {
       if (!silent) setMsg(`${tk} loaded from ${c.source} — price $${c.spot?.toFixed(2)}, ${c.expirations.length} expiries.`);
       return c;
     } catch (e) {
+      setChainErr((m) => ({ ...m, [tk]: fetchFailWords(e) }));
       if (!silent) setMsg(`Could not load ${tk} option prices — ${e.message}`);
       return null;
     } finally { if (!silent) setBusy(null); }
@@ -3449,17 +3454,24 @@ export default function OptionsStrategyLab() {
   const findGen = useMemo(() => {
     const items = [];
     const tally = { unpriceable: 0, impossible: 0, model: 0, liquidity: 0, spread: 0, comboSpread: 0, crossing: 0, reward: 0 };
-    const noBoard = [], noChain = [], oiSkipped = [], spreadSkipped = [], comboSpreadSkipped = [];
+    // STILL LOADING and FAILED are two lists (PR #40): a failed fetch is not a
+    // market in flight, and neither is a market verdict.
+    const noBoard = [], loading = [], failed = [], oiSkipped = [], spreadSkipped = [], comboSpreadSkipped = [];
     const boards = {};
     for (const tk of find.markets) {
       const c = chains[tk];
-      if (!c?.spot) { noChain.push(tk); continue; }
+      if (!c?.spot) {
+        if (chainErr[tk]) failed.push({ tk, why: chainErr[tk] });
+        else if (c) failed.push({ tk, why: "no price in the reply" });
+        else loading.push(tk);
+        continue;
+      }
       const exps = buildableExpiries(c.expirations.map((e) => ({ key: e, dte: c.byExp[e].dte }))).buildable;
       if (!exps.length) { noBoard.push(tk); continue; }
       const ek = exps.reduce((b2, e) => (Math.abs(e.dte - find.horizon) < Math.abs(b2.dte - find.horizon) ? e : b2), exps[0]).key;
       const d2 = c.byExp[ek].dte;
       const strikes = expiryStrikes(c, ek);
-      if (!strikes) { noChain.push(tk); continue; }
+      if (!strikes) { failed.push({ tk, why: "board unreadable" }); continue; }
       const row = scan.find((r) => r.tk === tk);
       const sent = find.dir === "season" ? (row ? row.sugg : "neutral") : find.dir;
       const qq = makeQuote(c, ek);
@@ -3490,8 +3502,8 @@ export default function OptionsStrategyLab() {
       }
     }
     items.sort(compareCandidates);
-    return { items, tally, noBoard, noChain, oiSkipped, spreadSkipped, comboSpreadSkipped, boards };
-  }, [find.markets, find.dir, find.horizon, chains, scan, liqLevel, fused, seasonalFor, ivRankOf]); // eslint-disable-line
+    return { items, tally, noBoard, loading, failed, oiSkipped, spreadSkipped, comboSpreadSkipped, boards };
+  }, [find.markets, find.dir, find.horizon, chains, chainErr, scan, liqLevel, fused, seasonalFor, ivRankOf]); // eslint-disable-line
   /* THE LIST ON SCREEN: the one-market filter (what the Shortlist step was),
      and the flag toggle. Nothing is dropped without a count saying so. */
   const findShown = useMemo(() => findGen.items.filter((x) =>
@@ -3520,19 +3532,16 @@ export default function OptionsStrategyLab() {
      fetched once, in the background, when Find is on screen; open interest is
      patched in by `refreshChain()` as before. Nothing waits for a button. */
   const findAsked = useRef(new Set());
-  const [findReading, setFindReading] = useState(false);
   useEffect(() => {
     if (step !== "find" || view !== "desk") return;
     const todo = find.markets.filter((tk) => !findAsked.current.has(tk));
     if (!todo.length) return;
     (async () => {
-      setFindReading(true);
       for (const tk of todo) {
         findAsked.current.add(tk);
         loadBars(tk);
         if (!chains[tk]) await refreshChain(tk, true);
       }
-      setFindReading(false);
     })();
   }, [step, view, find.markets]); // eslint-disable-line
 
@@ -3661,7 +3670,12 @@ export default function OptionsStrategyLab() {
               style={{ ...mono, background: T.panel, color: T.ink, border: `1px solid ${T.line}`, borderRadius: 6, padding: "8px 10px", fontSize: 13 }}>
               {Object.keys(UNDERLYINGS).map((k) => <option key={k} value={k}>{k}</option>)}
             </select>
-            <Btn onClick={() => refreshChain(ticker)} disabled={busy !== null}>
+            {/* On Find, Refresh also retries every market whose prices FAILED —
+                the one control "Could not read N markets — press Refresh" names. */}
+            <Btn onClick={async () => {
+              await refreshChain(ticker);
+              if (step === "find" && view === "desk") for (const x of findGen.failed) if (x.tk !== ticker) await refreshChain(x.tk, true);
+            }} disabled={busy !== null}>
               <RefreshCw size={13} /> {busy === ticker ? "…" : "Refresh"}
             </Btn>
             <Btn small ghost onClick={() => setTheme(T.dark ? "light" : "dark")}>
@@ -4083,7 +4097,8 @@ export default function OptionsStrategyLab() {
               <Btn small ghost={!!find.market} onClick={() => setFind((f) => ({ ...f, market: null }))}>All {findGen.items.length}</Btn>
               {find.markets.map((tk) => {
                 const n = findGen.items.filter((x) => x.tk === tk).length;
-                const why = findGen.noChain.includes(tk) ? "loading" : findGen.noBoard.includes(tk) ? "no board" : String(n);
+                const why = findGen.failed.some((x) => x.tk === tk) ? "failed" : findGen.loading.includes(tk) ? "loading"
+                  : findGen.noBoard.includes(tk) ? "no board" : String(n);
                 return (
                   <Btn key={tk} small ghost={find.market !== tk} color={n ? T.amber : T.dim}
                     onClick={() => setFind((f) => ({ ...f, market: f.market === tk ? null : tk }))}>{tk} {why}</Btn>
@@ -4100,9 +4115,7 @@ export default function OptionsStrategyLab() {
                 until every selected market has been read. */}
             {findGen.items.length === 0 && (
               <div style={{ ...mono, fontSize: 11.5, color: T.mut, marginTop: 10, lineHeight: 1.6, padding: "9px 11px", border: `1px dashed ${T.line}`, borderRadius: 7 }}>
-                {findReading && findGen.noChain.length
-                  ? `Reading ${findGen.noChain.length} market${findGen.noChain.length === 1 ? "" : "s"}…`
-                  : nothingTodayLine(findGen.tally, { noBoard: findGen.noBoard, noChain: findGen.noChain, level: liqLevel })}
+                {nothingTodayLine(findGen.tally, { noBoard: findGen.noBoard, loading: findGen.loading, failed: findGen.failed, level: liqLevel })}
               </div>
             )}
 

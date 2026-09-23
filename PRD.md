@@ -113,8 +113,10 @@ can settle it; no test in this repository can.
 2. **OWNER CHECK — no opening order has filled at the intended price** since the sign fix, and
    no credit at the corrected limit (v1 a). PR #40 moves the suggested opening price by at most
    a cent a leg (`legLimitSeed()` now sums exactly to `fillNet()`): not yet seen filled.
-3. **OWNER CHECK — J-0003 has not filled.** Is the indicative combination ask systematically
-   inside the real one on thin chains? Its `pending_cancel` handling is tested on fixtures only.
+3. **OWNER CHECK — is the indicative combination ask inside the real one on thin chains?**
+   J-0003 (SOYB 28/30, a debit at the indicative ask) never filled; its cancel completed at the
+   23 Sep open and the owner saw it leave both Positions and Alpaca's Orders. So the cancel path
+   is settled, and the question it raised is not: no order has yet measured the gap.
 4. **OWNER CHECK — nobody has used Find on a real phone with live chains** (PR #40): the one
    ranked list across ten markets, the live re-filtering, the flags, the market filter, the
    stop signs and the Positions card's one action. Tested with renders, source sweeps and a

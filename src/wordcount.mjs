@@ -142,7 +142,8 @@ export const COPY = {
   setCompareNote: () => P.toggleCompare([{ key: "a", legs: [1] }, { key: "b", legs: [1] }, { key: "c", legs: [1] }],
     { key: "d", legs: [{ side: 1, qty: 1, strike: 1, type: "call" }], ticker: "X" }).note || "",
   setText: () => "",
-  nothingTodayLine: () => R.nothingTodayLine({ liquidity: 3, reward: 2 }, { noBoard: ["XLE"], noChain: ["UNG"] }),
+  // The longest of its answers: a failure named with its error, then the floors' counts.
+  nothingTodayLine: () => R.nothingTodayLine({ liquidity: 3, reward: 2 }, { noBoard: ["XLE"], failed: [{ tk: "UNG", why: "HTTP 502" }] }),
   sizeLine: () => R.sizeLine(REQUEST, { ok: true, n: 14, totPrem: 868, totRisk: 868, isCredit: false }) || "",
   newsLine: () => S.newsLine("CORN", [{ title: "Drought cuts US corn crop outlook in the Midwest", date: new Date().toISOString() }]).text,
   reconcileFigures: () => { const f = { entry: 0.62, maxLoss: -62, maxProfit: 138, breakevens: [28.62], pop: 0.48 }; return R.reconcileFigures(f, f).line; },

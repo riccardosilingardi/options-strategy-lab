@@ -28,7 +28,7 @@ import { RULES, sizing, ruleBadge, qualityFloor, qualityFloorSentence, liquidity
   remainingEdge, remainingEdgeNote, remainingEdgeLabel, shareOfMaximum, attentionCount, sameCloseNote,
   requestOf, requestAmountLabel, requestAmountOwner, contractsSourceNote, clampAskedChance,
   REQUEST_MODES, meetsRequest, splitByRequest, meetsHeading, otherwiseHeading,
-  targetPriceOf, chanceAskLabel, nothingTodayLine } from "./rules.js";
+  targetPriceOf, chanceAskLabel, nothingTodayLine, fetchFailWords } from "./rules.js";
 import { netBS, SIGMA, exitSim } from "./engine.js";
 import { isStale, staleAmong, agePhrase, freshnessNote, BUDGETS } from "./freshness.js";
 
@@ -2994,13 +2994,41 @@ test("TASK 1 — every generation site reads the one home, none filters expiries
   assert.ok(/if \(!openableBoard\(dte\)\)/.test(app));
 });
 
+test("A DATA FAILURE IS NOT A MARKET VERDICT (restored from main's screen-5 test, PR #40)", () => {
+  const TEN = ["CORN", "UNG", "SOYB", "BOIL", "WEAT", "GLD", "SLV", "USO", "XLE", "GDX"];
+  // Every market FAILED: no "Nothing today", the failure named, and the way out.
+  const allFailed = nothingTodayLine({}, { failed: TEN.map((tk) => ({ tk, why: "HTTP 502" })) });
+  assert.ok(!/Nothing today/.test(allFailed), `all failed must not read as a verdict: ${allFailed}`);
+  assert.ok(allFailed.includes("Could not read 10 markets") && allFailed.includes("press Refresh"));
+  assert.ok(allFailed.includes("CORN: HTTP 502"), "each failure carries its error");
+  // Some failed and some floored: both counts, the failure FIRST, and still no verdict.
+  const mixed = nothingTodayLine({ liquidity: 3 }, { failed: [{ tk: "UNG", why: "timeout" }], noBoard: ["XLE"] });
+  assert.ok(!/Nothing today/.test(mixed), mixed);
+  assert.ok(mixed.indexOf("Could not read 1 market") === 0, "the failure comes first");
+  assert.ok(mixed.indexOf("3 too little open interest") > mixed.indexOf("Could not read"), "then the floors' count");
+  assert.ok(mixed.includes("XLE"));
+  // Still loading: "Reading N markets…", never a verdict and never a failure.
+  const loading = nothingTodayLine({}, { loading: ["GLD", "SLV"], failed: [{ tk: "UNG", why: "timeout" }] });
+  assert.equal(loading, "Reading 2 markets…");
+  // Every market READ and nothing passed: only then "Nothing today".
+  assert.ok(/^Nothing today\./.test(nothingTodayLine({ reward: 1 }, {})));
+  // ...and the chip says which: a failed fetch is never "loading".
+  const app = readFileSync(new URL("./App.jsx", import.meta.url), "utf8");
+  assert.ok(/findGen\.failed\.some\(\(x\) => x\.tk === tk\) \? "failed" : findGen\.loading\.includes\(tk\) \? "loading"/.test(app),
+    "the market chip tells a failure from a load in flight");
+  assert.ok(/setChainErr\(\(m\) => \(\{ \.\.\.m, \[tk\]: fetchFailWords\(e\) \}\)\)/.test(app), "a failed fetch is recorded with its error");
+  assert.equal(fetchFailWords(new Error("HTTP 502 Bad Gateway from the proxy upstream")), "HTTP 502 Bad Gateway from");
+  assert.equal(fetchFailWords(null), "no reply");
+  assert.equal(fetchFailWords(new Error(`server: Unexpected token '<', "<!doctype html>`)), "server: Unexpected token");
+});
+
 test("TASK 1 — an empty Find list says why with counts, and offers no button onto a refused trade", () => {
   // PR #40: "Nothing today" appears only when zero candidates pass, with the
   // count for every reason, and the step forward stays disabled with nothing loaded.
-  const line = nothingTodayLine({ liquidity: 3, reward: 2 }, { noBoard: ["XLE"], noChain: ["UNG"] });
+  const line = nothingTodayLine({ liquidity: 3, reward: 2 }, { noBoard: ["XLE"] });
   assert.ok(/^Nothing today\./.test(line));
   assert.ok(line.includes("3 too little open interest") && line.includes("2 pays too little"));
-  assert.ok(line.includes("XLE") && line.includes("UNG"));
+  assert.ok(line.includes("XLE"));
   const app = readFileSync(new URL("./App.jsx", import.meta.url), "utf8");
   assert.ok(/findGen\.items\.length === 0 && \(/.test(app), "only when zero candidates pass");
   assert.ok(/disabled=\{!legs\.length\}/.test(app), "and the button says so rather than naming a structure");

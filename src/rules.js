@@ -1290,17 +1290,40 @@ export function amountChips(request, perTradeLimit) {
 }
 
 /**
- * "NOTHING TODAY" ONLY WHEN ZERO CANDIDATES PASS, and always with the count of
- * every reason: the floors' own counts (`filterFold()`), the markets with no
- * board the gate would open on, and the markets whose prices never came in.
+ * WHAT THE EMPTY LIST SAYS — AND A DATA FAILURE IS NOT A MARKET VERDICT.
+ *
+ * "Nothing today" is a verdict about markets the app READ. It appears only when
+ * every selected market was read and zero candidates passed, with the count for
+ * every reason. A market whose prices are still arriving is "Reading N
+ * markets…"; one whose fetch FAILED is named with its error and a way out, and
+ * comes first — main's "screen 5 does not pass a data failure off as a market
+ * verdict" rule, restored after the guided door's screen was deleted (PR #40).
+ *
+ * @param failed  [{ tk, why }] — the fetch failed, `why` in a few words
+ * @param loading [tk] — no answer yet
  */
-export function nothingTodayLine(tally = {}, { noBoard = [], noChain = [], level = RECOMMENDED_LIQUIDITY } = {}) {
+export function nothingTodayLine(tally = {}, { noBoard = [], loading = [], failed = [], level = RECOMMENDED_LIQUIDITY } = {}) {
+  const s = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+  if (loading.length) return `Reading ${s(loading.length, "market", "markets")}…`;
   const f = filterFold(tally, { level });
   const parts = f.reasons.map((r) => `${r.count} ${r.clause}`);
-  if (noBoard.length) parts.push(`${noBoard.length} market${noBoard.length === 1 ? "" : "s"} with no expiry far enough out (${noBoard.join(", ")})`);
-  if (noChain.length) parts.push(`${noChain.length} market${noChain.length === 1 ? "" : "s"} with no prices yet (${noChain.join(", ")})`);
+  if (noBoard.length) parts.push(`${s(noBoard.length, "market", "markets")} with no expiry far enough out (${noBoard.join(", ")})`);
+  const couldNot = failed.length
+    ? `Could not read ${s(failed.length, "market", "markets")} (${failed.map((x) => `${x.tk}: ${x.why}`).join("; ")}) — press Refresh.`
+    : null;
+  if (couldNot) return parts.length ? `${couldNot} Of the rest, removed: ${parts.join("; ")}.` : couldNot;
   return `Nothing today. ${parts.length ? `Removed: ${parts.join("; ")}.` : "No market was selected."}`;
 }
+
+/** An error, in a few words, for a market chip and the line above. */
+export const fetchFailWords = (err) => {
+  // Cut before any markup or quoted body: a proxy that answers with a web page
+  // puts "<!doctype" in the parse error, and that is not a reason anyone can read.
+  const t = String((err && err.message) || err || "").split(/[<"]/)[0]
+    .replace(/\s+/g, " ").replace(/[\s,:;'-]+$/, "").trim();
+  if (!t) return "no reply";
+  return t.split(" ").slice(0, 5).join(" ");
+};
 
 /* =====================================================================
    STOP SIGNS (PR #40, TASK 2) — AT MOST THREE SHORT LABELS, FIRST.
