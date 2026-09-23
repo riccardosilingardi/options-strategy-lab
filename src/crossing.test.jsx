@@ -12,7 +12,7 @@
 import { readFileSync } from "node:fs";
 import { fixtureCandidates, measured, removedAt } from "../scripts/crossing-fixtures.jsx";
 import { RULES, crossingFloor, crossingFloorReason, crossingNote, qualityFloor, filterFold,
-  liquiditySettingNote, emptyExpiryNote, nothingTodayLine, qualityFloorLine, comboSpreadSkippedNote } from "./rules.js";
+  liquiditySettingNote, nothingTodayLine, qualityFloorLine, comboSpreadSkippedNote } from "./rules.js";
 
 const ok = [], bad = [];
 const check = (name, fn) => { try { fn(); ok.push(name); } catch (e) { bad.push([name, e.message]); } };
@@ -116,7 +116,6 @@ check("every 'not shown' summary names the crossing count on its own", () => {
   has(fold.summary, "2 crossing costs over 50% of max profit");
   eq(fold.reasons.find((r) => r.id === "crossing").count, 2, "its own row");
   has(liquiditySettingNote("recommended", { kept: 3, crossing: 2 }), "2 removed for a crossing cost over 50% of max profit");
-  has(emptyExpiryNote("2026-10-16", { crossing: 2 }), "2 for a crossing cost over 50% of max profit");
   has(nothingTodayLine({ crossing: 2 }), "2 crossing costs over 50% of max profit");
   has(crossingNote(2, "UNG"), "more than 50% of the most each can make on UNG");
   has(qualityFloorLine("recommended"), "crossing cost");

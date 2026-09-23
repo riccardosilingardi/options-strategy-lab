@@ -23,7 +23,7 @@ import React, { useState, useEffect } from "react";
 import { T } from "./theme.js";
 // The fold lives in steps.jsx — chrome with no trade in it (P9, TASK 3).
 import { Fold } from "./steps.jsx";
-import { ARROW, regionSignals } from "./signals.js";
+import { ARROW, regionSignals, newsLine } from "./signals.js";
 import { useNarrow } from "./visuals.jsx";
 
 const mono = { fontFamily: "ui-monospace, Menlo, monospace" };
@@ -159,6 +159,7 @@ function NewsDrill({ ticker, newsItems = [] }) {
 export function WhyThisTrade({ fused, title = "WHY THIS TRADE", note, ticker, weatherData, newsItems, month, defaultDetail = false, style }) {
   const [detail, setDetail] = useState(defaultDetail);
   const [open, setOpen] = useState(null); // key of the factor whose explanation is open
+  const [newsOpen, setNewsOpen] = useState(false);
   const narrow = useNarrow();
   const ref = React.useRef(null);
 
@@ -193,6 +194,13 @@ export function WhyThisTrade({ fused, title = "WHY THIS TRADE", note, ticker, we
       </div>
 
       <div style={{ fontSize: 12.5, color: T.body, marginTop: 7, lineHeight: 1.5 }}>{fused.narrative}</div>
+      {/* NEWS, ONE LINE (PR #40, TASK 2): direction, how many headlines are
+          tagged, the newest one's title. Tap for the list. */}
+      <button onClick={() => setNewsOpen((o) => !o)}
+        style={{ ...mono, fontSize: 10.5, marginTop: 6, background: "transparent", color: T.body, border: "none", padding: "4px 0", cursor: "pointer", textAlign: "left", lineHeight: 1.5, minHeight: 32 }}>
+        {newsLine(ticker, newsItems).text} {newsOpen ? "▲" : "▼"}
+      </button>
+      {newsOpen && <NewsDrill ticker={ticker} newsItems={newsItems} />}
       {note && <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 5 }}>{note}</div>}
 
       {/* ---- behind a tap: the four components as direction + strength ---- */}

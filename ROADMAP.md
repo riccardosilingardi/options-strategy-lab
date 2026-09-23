@@ -21,6 +21,12 @@ what the next one inherits.
   are one step, **Find**: one request block over one ranked list across the selected markets,
   re-filtered live. What the guided door dropped in silence is a flag on the card. The path is
   Find → Build.
+- **Task 2 — say it once.** An order's state lives on its Positions row; the desk shows one line
+  of counts linking there (the working-orders strip, the TODAY list and the ticket's banner copy
+  are gone). Every card and Build carry a STOP SIGNS strip (at most three labels, from facts
+  already computed; `stopSigns()`), and the risk gate's warnings print there once. News is one
+  line per market. Words at rest (`node scripts/measure-words.mjs`): radar 481 + shortlist 1,216
+  → **Find 375** (ceiling 450); build 559 → **Build 376** (ceiling 400); no generator uncounted.
 
 ## v1
 
@@ -29,16 +35,16 @@ v1 is done when PRD §3 is true: (a) one opening order filled at the intended pr
 open position's action in five seconds. **No pull request remains: v1 now needs only the
 owner's readings below.**
 
-### What the next session inherits from #39
+### What the next session inherits from #40
 
-- Candidates are still ranked and floored at the MID for reward-to-risk (`minRewardRisk`),
-  while cards print reward-to-risk at the price that fills. On the fixtures no credit falls
-  under 0.25 at the fill after 0a, but the two readings can disagree. P2 full is the fix.
+- The PR #39 debt is closed: ranking and every floor, `minRewardRisk` included, read the fill.
 - A record Alpaca does not hold, filed inside the 21-day window, is still recorded as "closed
-  by the rules" (`closeDecision()` reads the exit window). Its P&L is null, so no sum is wrong,
-  but the discipline count is.
+  by the rules" (`closeDecision()` reads the exit window). Its P&L is null, but the discipline
+  count is wrong. (From #39, not touched here.)
 - After a 2xx cancel, the Positions card waits for `recheckOrders()` to read `canceled`; if
-  Alpaca never reports it, "Ask Alpaca again" is the only control left on that row.
+  Alpaca never reports it, "Ask Alpaca again" is the only control left. (From #39.)
+- Find recomputes the whole list when a chain refreshes; if the owner's phone lags (PRD §4.5),
+  split the chance out of the memo so only survivors of the current request are simulated.
 
 ### Owner readings needed for v1
 
@@ -47,6 +53,8 @@ owner's readings below.**
 - Close one position with the Positions card's close-at-limit (order path 3) and read the fill,
   sign included (v1 b). Then tap "Close and file it".
 - Open Positions and read each position's action in five seconds (v1 c).
+- Open Find on the phone with live chains and say whether the list and its stop signs read
+  in five seconds, and whether moving a slider lags.
 
 ## After v1
 

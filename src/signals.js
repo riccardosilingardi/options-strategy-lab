@@ -345,6 +345,22 @@ export function newsComponent(ticker, newsItems, now = Date.now()) {
   };
 }
 
+/**
+ * NEWS IN ONE LINE PER MARKET (PR #40, TASK 2): direction · how many tagged
+ * headlines · the newest one's title. The list is one tap behind it; no
+ * headline text is repeated in any prose around it.
+ * @returns {{ text, dir, tagged, newest }}
+ */
+export function newsLine(ticker, newsItems, now = Date.now()) {
+  const items = Array.isArray(newsItems) ? newsItems : [];
+  const tagged = items.filter((it) => (it.impacts?.length ? it.impacts : tagImpacts(it.title)).some((im) => im.tk === ticker));
+  if (!tagged.length) return { text: `News: no headline tags ${ticker}`, dir: 0, tagged: 0, newest: null };
+  const c = newsComponent(ticker, items, now);
+  const newest = tagged.slice().sort((a, b) => (new Date(b.date).getTime() || 0) - (new Date(a.date).getTime() || 0))[0];
+  const dir = c.dir > 0 ? "↑ up" : c.dir < 0 ? "↓ down" : "→ no direction";
+  return { text: `News ${dir} · ${tagged.length} tagged · newest: ${newest.title}`, dir: c.dir, tagged: tagged.length, newest };
+}
+
 /* ================================================================
    Technical: SMA / RSI read
 ================================================================ */

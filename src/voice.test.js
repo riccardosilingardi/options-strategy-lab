@@ -141,7 +141,11 @@ test("MEASURED: the three screens, and the table in the PRD is this number", () 
      The CEILING is the target the owner set, and it fails the build on one
      word more. Raising it is a session saying why, in the PRD. */
   const BEFORE = { radarPlusShortlist: 1697, build: 559 };
-  const CEILING = { find: 450, build: 559 };
+  const CEILING = { find: 450, build: 400 };
+  // …and nothing on either screen is left uncounted: the five generators the
+  // counter could not see (legsLine, compareDistNote, setCompareNote,
+  // tradeOffSentence, setText) are scored or gone (PR #40, TASK 2).
+  assert.deepEqual(m.uncounted, [], `uncounted: ${m.uncounted.join(", ")}`);
   for (const id of SCREEN_IDS) {
     assert.ok(m[id].total <= CEILING[id], `${id} grew: ${m[id].total} against ${CEILING[id]}`);
   }

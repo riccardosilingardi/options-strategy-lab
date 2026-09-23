@@ -33,7 +33,7 @@ import { RULES, sizing, ruleBadge, takeProfitLabel, stopLossLabel, perTradeCapLa
   expiryChoice, expiryChoiceNote,  checkedAgainstNote, wideSpreadNote, spreadSkippedNote,
   wideComboNote, comboSpreadSkippedNote, crossingNote, comboBook, effectiveLimit, limitCeilingNote, notionalControlled,
   orderVerdict, legBook, legLimitSeed, netFromLegs, onTick, sizeSkippedNote,
-  conflictSummaryLine, warningsToPrint,
+  conflictSummaryLine, warningsToPrint, unquotedLegNote,
   chancePct, chanceText, chanceInTen, signedMoney,
   ruleExitOf, stopWarningSentence, watchAttentionLevel, positionAction,
   chanceOf, chanceSourceNote, seasonalProvenance, seasonalStampNote, seasonalStampFields, chanceDrawFields,
@@ -41,7 +41,7 @@ import { RULES, sizing, ruleBadge, takeProfitLabel, stopLossLabel, perTradeCapLa
   requestOf, requestAmountLabel, requestAmountOwner, contractsSourceNote,
   splitByRequest, meetsHeading, otherwiseHeading, missReasonLine, fillPriceHeading, fillNet,
   rewardRiskRange, RR_POINTS, crossingCost, crossingCostNote, openingMarkNote,
-  figureSet, reconcileFigures, unitMoney, candidateFlags, sizeLine, nothingTodayLine } from "./rules.js";
+  figureSet, reconcileFigures, unitMoney, candidateFlags, sizeLine, nothingTodayLine, stopSigns } from "./rules.js";
 import { isStale, freshnessNote, staleAmong } from "./freshness.js";
 import { evaluateTrade, gateSummary } from "./riskGate.js";
 import { DEMO, DEMO_BANNER, DEMO_TOOLTIP, DEMO_SEED_TICKERS, demoPositions } from "./demo.js";
@@ -49,7 +49,7 @@ import { CapitalOnboarding, WizardOpen, ConfirmSteps, Card, Pill } from "./wizar
 // THE CONTROLS AND THE ONE CANDIDATE CARD (ROADMAP P10). Its own file: it is
 // nothing but a trade, so it may not live in `steps.jsx`, and `wizard.jsx`
 // renders the same card, so it may not live here.
-import { RequestControls, SplitSections, MissLine, CandidateCard, SignalBadge } from "./card.jsx";
+import { RequestControls, SplitSections, MissLine, CandidateCard, SignalBadge, StopSigns } from "./card.jsx";
 import { buildHandOff, buildScreenState, BUILD_TAB } from "./handoff.js";
 import { orderBody, orderOutcome, alpacaErrorText, reduceRatios, limitWords, fillPriceOf, cancelOutcome, cancelWaiting } from "./order.js";
 // THE PERMANENT RECORD: the ref a position is given at open, the sequence on
@@ -62,7 +62,7 @@ import { nextRef, refCounter, appendTimeline, stampTimeline, orderStatusRecheck,
   isTestRecord, testRecordNote, scoredJournal, journalPnl, NOT_A_FILL,
   journalEntry, searchJournal, CLOSE_REASON_MIN, refNumber } from "./journal.js";
 import { FIRST_STEP, stepCarry, candidateOf, candidateKey, legsLine, toggleCompare, inCompare, MAX_COMPARE, savedFromCandidate, candidateFromSaved, savedAge } from "./path.js";
-import { StepNav, StepForward, EvidenceBar, EvidenceOverlay, DeskSheet, CompareTray, CandidateActions, Fold } from "./steps.jsx";
+import { StepNav, StepForward, EvidenceBar, EvidenceOverlay, DeskSheet, CompareTray, CandidateActions, Fold, DeskCountLine } from "./steps.jsx";
 
 /* ============================== THEME ============================== */
 const mono = { fontFamily: "ui-monospace, Menlo, monospace" };
@@ -433,6 +433,13 @@ function priceLeg(leg, S, dte, baseIV, q) {
   const iv = smileIV(baseIV, S, leg.strike);
   return { px: bsPrice(S, leg.strike, dte / 365, iv, leg.type), iv, real: false };
 }
+/** The fewest contracts shown on the side that trades (ask on a leg bought, bid
+ *  on a leg sold), or null when no size is known. For the "size N > M" sign. */
+const touchSizeOf = (legs, a) => {
+  const xs = (a?.legPx || []).map((l, i) => (Math.sign(+(legs[i] && legs[i].side) || 1) > 0 ? l.askSize : l.bidSize))
+    .filter((x) => x != null && Number.isFinite(Number(x)));
+  return xs.length ? Math.min(...xs.map(Number)) : null;
+};
 /** The two-sided quotes behind an analysis, one per leg, for `priceability()`. */
 const quotesOf = (a) => (a?.legPx || []).map((l) => ({ bid: l.bid, ask: l.ask }));
 /**
@@ -1244,7 +1251,7 @@ const ago = (d) => { const m = Math.round((Date.now() - new Date(d)) / 60000); r
    LAID OUT FOR A 390px PHONE: one column, a 18px rail for the line number, no
    horizontal scroll, and every control at least 44px tall.
 ==================================================================== */
-export function TradeCard({ ticker, name, card, refusals = [], warnings = 0, onNumbers, onOrder, orderLabel, children }) {
+export function TradeCard({ ticker, name, card, refusals = [], onNumbers, onOrder, orderLabel, children }) {
   if (!card) return null;
   return (
     <div style={{ marginTop: 14, padding: "12px 13px", background: T.panel, border: `1px solid ${T.violet}66`, borderLeft: `3px solid ${T.violet}`, borderRadius: 9 }}>
@@ -1286,25 +1293,8 @@ export function TradeCard({ ticker, name, card, refusals = [], warnings = 0, onN
         <Btn ghost color={T.blue} onClick={onNumbers}>All the numbers →</Btn>
         <Btn color={T.violet} onClick={onOrder}>{orderLabel || "Price it and send →"}</Btn>
       </div>
-      {/* >>> A REFUSAL AND A REASSURANCE MAY NOT SHARE A CARD (P9, TASK 1). <<<
-          The owner read "THIS ORDER WOULD NOT BE SENT" and, four lines below
-          it, "none of them stops the order". Both clauses were true of
-          different things — the first of a VIOLATION, the second of the
-          WARNINGS — and together they are §4m's fault on the card P4-ter built
-          to end it: a screen arguing with itself, where the part that shouts
-          loudest wins. While a violation stands, the refusal above is the whole
-          verdict and this line is suppressed. It is not deleted: the warnings
-          keep their home in the panel the sentence points at. */}
-      {warnings > 0 && refusals.length === 0 && (
-        <div style={{ ...mono, fontSize: 10, color: T.amber, marginTop: 7, lineHeight: 1.6 }}>
-          {`${warnings} warning${warnings === 1 ? "" : "s"} apply to this trade. ${warnings === 1 ? "It is" : "They are"} in the warnings panel above, written once — none of them stops the order.`}
-        </div>
-      )}
-      {warnings > 0 && refusals.length > 0 && (
-        <div style={{ ...mono, fontSize: 10, color: T.amber, marginTop: 7, lineHeight: 1.6 }}>
-          {`${warnings} warning${warnings === 1 ? "" : "s"} also apply, in the warnings panel above. The refusal above is what decides: nothing is sent while it stands.`}
-        </div>
-      )}
+      {/* The warnings' two "written once" reminders are gone (PR #40, TASK 2):
+          the warnings print once, as the stop-signs strip above the figures. */}
       <div style={{ ...mono, fontSize: 9.5, color: T.dim, marginTop: 7, lineHeight: 1.6 }}>{card.currency}</div>
     </div>
   );
@@ -2193,6 +2183,7 @@ export default function OptionsStrategyLab() {
      that screen.
   ==================================================================== */
   const [orderBusy, setOrderBusy] = useState(null);
+  const quietTicketMsg = useCallback(() => {}, []);
 
   /* ====================================================================
      THREE LISTS, ONE FUNCTION — and DEAD IS NOT WORKING.
@@ -2562,8 +2553,10 @@ export default function OptionsStrategyLab() {
     // partly filled and working are three sentences, and only the first
     // starts the plan. With no broker order this is the app's own paper
     // book, where "opened" is the whole of the truth.
+    // THE ORDER'S STATE IS ON ITS ROW IN POSITIONS (PR #40, TASK 2); the sheet
+    // beside the button already said what the send did. One line pointing there.
     setMsg(r.outcome
-      ? `${r.outcome.headline} ${r.outcome.startsExitPlan ? exitPlanSentence() : r.outcome.detail}`
+      ? `${r.pos && r.pos.ref ? `${r.pos.ref} · ` : ""}Sent. Its state is on its row in Positions.`
       : `Position opened on the app's own paper book. ${exitPlanSentence()}`);
     // AN ORDER THAT IS STILL WORKING KEEPS THE SCREEN THAT EXPLAINS IT.
     // Jumping to Positions unmounts the ticket, and the ticket is where the
@@ -2780,8 +2773,9 @@ export default function OptionsStrategyLab() {
       return ns;
     });
     const filled = changes.filter((c) => c.r.outcome.filled).length;
-    setMsg(`${changes.length} order${changes.length === 1 ? "" : "s"} moved on since ${changes.length === 1 ? "it was" : "they were"} sent` +
-      `${filled ? `: ${filled} ${filled === 1 ? "has" : "have"} filled` : ""}. The timeline says what changed.`);
+    // The new state is on each order's row in Positions; the banner only points.
+    void filled;
+    setMsg(`${changes.length} order${changes.length === 1 ? "" : "s"} changed — see Positions.`);
   }, [store.positions]);
 
   // On arrival, and with the 60-second monitor. A position whose order has not
@@ -3326,6 +3320,12 @@ export default function OptionsStrategyLab() {
   /* Which band this expiry falls in, for the screen. The gate decides; this
      only decides what the screen has to ASK for. */
   const room = useMemo(() => entryRoom(dte), [dte]);
+  /* THE BUILD SCREEN'S STOP SIGNS (PR #40, TASK 2): facts already computed —
+     the gate's warnings, the four factors, the board, the book, the size. */
+  const buildSigns = useMemo(() => stopSigns({
+    fused: fused[ticker] || null, gateWarnings: guard?.warnings || [], feedBroken: !!monoNote,
+    noQuoteLegs: book.missing.length, contracts, askSize: touchSizeOf(legs, A),
+  }), [fused, ticker, guard, monoNote, book, contracts, legs, A]);
 
 
   /* ---- direzione del trade e scontro col segnale (PRD §7) ----
@@ -3464,7 +3464,9 @@ export default function OptionsStrategyLab() {
       const sent = find.dir === "season" ? (row ? row.sugg : "neutral") : find.dir;
       const qq = makeQuote(c, ek);
       const peers = expiryOpenInterest(c, ek);
-      boards[tk] = { expKey: ek, dte: d2, sent, peers, feed: feedName(c) };
+      // "feed unreliable on this expiry" is this board's own arithmetic failing.
+      const feedBroken = !!monotonicityNote(monotonicityBreaks(c, ek), ek);
+      boards[tk] = { expKey: ek, dte: d2, sent, peers, feed: feedName(c), feedBroken };
       const u = getU(tk);
       const r = shortlistWithFloors(sent, c.spot, u.step, strikes, d2, u.iv, qq, { peers, level: liqLevel });
       for (const k of Object.keys(tally)) tally[k] += r.tally[k] || 0;
@@ -3479,7 +3481,9 @@ export default function OptionsStrategyLab() {
         const cand = candidateOf({ name: p.name, legs: p.legs, a: aFill, pop: lf.pop, dte: d2, expKey: ek,
           ...seasonalStampFields(lf.mc), ...chanceDrawFields(lf.mc) }, { ticker: tk, spot: c.spot, source: "find" });
         items.push(withSignalRank({
-          key: cand.key, tk, name: p.name, legs: p.legs, expKey: ek, dte: d2, spot: c.spot, sent, lf, cand,
+          key: cand.key, tk, name: p.name, legs: p.legs, expKey: ek, dte: d2, spot: c.spot, sent, lf, cand, feedBroken,
+          noQuoteLegs: comboBook(p.legs, quotesOf(aFill)).missing.length,
+          touchSize: touchSizeOf(p.legs, aFill),
           fused: f, flags: candidateFlags({ legs: p.legs, fused: f, ivRank: ivRankOf(tk) }),
           ev100: prof ? prof.ev100 : -999, tag: prof ? prof.tag : null,
         }, f, sentimentDirection(sent)));
@@ -3715,65 +3719,20 @@ export default function OptionsStrategyLab() {
         {msg && <div style={{ ...mono, fontSize: 11.5, color: T.amber, border: `1px solid ${T.amber}44`, background: `${T.amber}10`, borderRadius: 6, padding: "7px 10px", marginTop: 10 }}>{msg}</div>}
 
         <TabBoundary k={`${tab}/${step}/${ev}`}>
-        {/* AND A WORKING ORDER IS SOMETHING THAT NEEDS A DECISION TODAY. It
-            is not a position, so it is not in `posAlerts`, and that is exactly
-            how it stayed invisible: the app's own list of what needs attention
-            only ever contained things that had already happened. */}
-        {workingOrders.length > 0 && (
-          <div style={{ marginTop: 12, padding: "10px 12px", background: T.panel, border: `1px solid ${T.amber}66`, borderRadius: 8 }}>
-            <div style={{ ...mono, fontSize: 10, letterSpacing: "0.15em", color: T.amber, display: "flex", alignItems: "center", gap: 6 }}>
-              <Bell size={11} /> {workingOrders.length} ORDER{workingOrders.length === 1 ? "" : "S"} WORKING AT THE BROKER · NOT FILLED
-            </div>
-            <div style={{ display: "grid", gap: 5, marginTop: 8 }}>
-              {workingOrders.map((p) => (
-                <button key={p.id} onClick={() => { setView("desk"); setTab("positions"); }}
-                  style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", background: "transparent", border: "none", cursor: "pointer", padding: 0, textAlign: "left" }}>
-                  <span style={{ width: 7, height: 7, borderRadius: 4, background: T.amber, flexShrink: 0 }} />
-                  <span style={{ ...mono, fontSize: 11.5, color: T.ink, fontWeight: 700 }}>{p.ref ? `${p.ref} ` : ""}{p.ticker} {p.name}</span>
-                  <span style={{ ...mono, fontSize: 10.5, color: T.mut }}>
-                    · sent, nothing bought{(() => { const sl = storedLimitOf(p);
-                      return sl.has ? (sl.signed ? ` · a ${sl.kind} limit of ${money(sl.magnitude * 100)}`
-                        : ` · a limit of ${money(sl.magnitude * 100)}, direction not recorded`) : ""; })()} →
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
+        {/* ONE STATUS PER OBJECT, ONE PLACE (PR #40, TASK 2). An order's state
+            lives on its row in Positions and a position's action on its card;
+            the desk used to print both lists again here, in a working-orders
+            strip and a "TODAY" list, beside the top banner and the order sheet.
+            It shows one line of counts now, and the line is the link. */}
+        <DeskCountLine working={workingOrders.length} decisions={nAttention} looks={attn.looks}
+          onOpen={() => { setTab("positions"); setShowSettings(false); setEv(null); }} />
 
-        {/* Alert Center: morning check */}
-        {posAlerts.length > 0 && (
-          <div style={{ marginTop: 12, padding: "10px 12px", background: T.panel, border: `1px solid ${nAttention ? T.red : T.line}55`, borderRadius: 8 }}>
-            <div style={{ ...mono, fontSize: 10, letterSpacing: "0.15em", color: nAttention ? T.red : T.amber, display: "flex", alignItems: "center", gap: 6 }}>
-              <Bell size={11} /> TODAY · {nAttention
-                ? `${nAttention} POSITION${nAttention === 1 ? "" : "S"} NEED A DECISION`
-                : attn.looks
-                  ? `${attn.looks} POSITION${attn.looks === 1 ? "" : "S"} TO LOOK AT`
-                  : "EVERYTHING IS ON PLAN"}
-            </div>
-            <div style={{ display: "grid", gap: 5, marginTop: 8 }}>
-              {posAlerts.map(({ p, pnl, dteLeft, level, label }) => {
-                const c2 = level === "action" ? T.red : level === "watch" ? T.amber : T.green;
-                return (
-                  <button key={p.id} onClick={() => setTab("positions")}
-                    style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", background: "transparent", border: "none", cursor: "pointer", padding: 0, textAlign: "left" }}>
-                    <span style={{ width: 7, height: 7, borderRadius: 4, background: c2, flexShrink: 0 }} />
-                    <span style={{ ...mono, fontSize: 11.5, color: T.ink, fontWeight: 700 }}>{p.ticker} {p.name}</span>
-                    <span style={{ ...mono, fontSize: 11, color: pnl >= 0 ? T.green : T.red }}>{pnl != null ? fmt$(pnl) : "…"}</span>
-                    <span style={{ ...mono, fontSize: 10.5, color: T.mut }}>· {dteLeft} DTE · {label} →</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* THE PATH: three numbered steps, one on screen at a time. The nav
+        {/* THE PATH: two numbered steps, one on screen at a time. The nav
             says what each step is carrying, because "back" has to be visibly
             free — the selection lives above these screens, so walking back and
             forward again cannot lose it. */}
         <StepNav step={tab === "build" && !showSettings ? step : null}
-          carry={stepCarry({ ticker, trade: legs.length ? `${ticker} · ${stratName}` : null, compare: compare.length })}
+          carry={stepCarry({ ticker, trade: legs.length ? `${ticker} · ${stratName}` : null, compare: compare.length, markets: find.markets.length })}
           onStep={goStep} />
 
         {/* The other two places. A place is somewhere you go and stay; the three
@@ -4155,10 +4114,12 @@ export default function OptionsStrategyLab() {
                 if (!x) return null;
                 const af = x.lf.aFill;
                 const size = scaleStrategy(af, request.mode, request.amt);
+                const signs = stopSigns({ fused: x.fused, flags: x.flags, feedBroken: x.feedBroken,
+                  noQuoteLegs: x.noQuoteLegs, contracts: size && size.ok ? size.n : null, askSize: x.touchSize });
                 return (
                   <CandidateCard key={x.key}
                     name={`${x.tk} · ${x.name}`} legs={`${legsLine(x.legs)} · ${x.expKey}`}
-                    misses={misses} flags={x.flags} size={sizeLine(request, size)}
+                    misses={misses} signs={signs} size={sizeLine(request, size)}
                     rr={x.lf.rr} pop={x.lf.pop} profit={af.maxProfit} risk={af.maxLoss} noCeiling={af.profitUnbounded}
                     bands={x.lf.bands} bars={barsCache[x.tk] || []} ticker={x.tk}
                     badge={<SignalBadge fused={x.fused} onClick={() => { setWhyTk(x.tk); setEv("why"); }} />}
@@ -4283,9 +4244,6 @@ export default function OptionsStrategyLab() {
             {/* `StepNav` already writes what each step carries under its own
                 number (`stepCarry` in path.js), so this repeated it a second
                 time four lines below it (P9, TASK 3). */}
-            <div style={{ ...sansUI, fontSize: 14, color: T.mut, lineHeight: 1.55, marginTop: 4 }}>
-              The chain, the greeks, the charts and the order.
-            </div>
             <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
               <Btn small ghost color={T.blue} onClick={() => goStep("find")}>← Back to Find</Btn>
               {compare.length > 0 && (
@@ -4335,14 +4293,11 @@ export default function OptionsStrategyLab() {
                   </span>
                 </div>
               )}
-              {/* WHY THIS EXPIRY, AND WHAT THE BOARD ITSELF SAYS — moved here
-                  from the Shortlist step, which is gone (PR #40, TASK 1). An
-                  impossible board stays OUT of the fold: it is a warning. */}
-              {chain && monoNote && (
-                <div style={{ ...mono, fontSize: 9.5, color: T.red, marginTop: 6, lineHeight: 1.55 }}>{monoNote}</div>
-              )}
+              {/* WHY THIS EXPIRY — moved here from the Shortlist step, which is
+                  gone (PR #40, TASK 1). An impossible board is a stop sign
+                  above the figures, with its sentence behind that strip's why. */}
               {chain && (
-                <Fold label="why this expiry" tone={T.dim} style={{ marginTop: 6 }}
+                <Fold label="why" tone={T.dim} style={{ marginTop: 6 }}
                   summary={`${expKey || "No expiry"} · ${chain.expirations.length} expiries listed`}>
                   <div style={{ ...mono, fontSize: 9.5, color: T.mut, marginTop: 4, lineHeight: 1.55 }}>
                     {expiryChoiceNote(expChoice, liqLevel, { selected: expKey })}
@@ -4374,17 +4329,12 @@ export default function OptionsStrategyLab() {
                   textarea that unlocks the ticket cannot be behind a tap. */}
               {(() => {
                 const fusedHere = fused[ticker] || null;
-                // THE NARRATIVE HAS ONE HOME — "Why this trade", just above.
-                // Everything here carries the count and points at it.
-                const gateWarnings = warningsToPrint(guard?.warnings || [], {
-                  narrative: fusedHere?.narrative || null,
-                  pointer: conflictSummaryLine(clash, fusedHere),
-                });
-                const count = (clash ? 1 : 0) + gateWarnings.length;
-                if (!count) return null;
-                const summary = clash
-                  ? conflictSummaryLine(clash, fusedHere)
-                  : `${gateWarnings.length} thing${gateWarnings.length === 1 ? "" : "s"} the risk gate wants you to have read before you send this.`;
+                // THE GATE'S WARNINGS ARE IN THE STOP-SIGNS STRIP NOW, ONCE
+                // (PR #40, TASK 2). This panel is only the written reason a
+                // trade against the factors needs, which cannot be a label.
+                if (!clash) return null;
+                const count = 1;
+                const summary = conflictSummaryLine(clash, fusedHere);
                 return (
                   <BuildWarnings summary={summary} count={count} forceOpen={!!clash && !reasonOk}>
                     {clash && (
@@ -4412,13 +4362,6 @@ export default function OptionsStrategyLab() {
                         </div>
                       </>
                     )}
-                    {gateWarnings.length > 0 && (
-                      <div style={{ display: "grid", gap: 6, marginTop: clash ? 10 : 0 }}>
-                        {gateWarnings.map((w) => (
-                          <div key={w.code} style={{ ...mono, fontSize: 10.5, color: T.amber, lineHeight: 1.6 }}>⚠ {w.message}</div>
-                        ))}
-                      </div>
-                    )}
                   </BuildWarnings>
                 );
               })()}
@@ -4430,23 +4373,23 @@ export default function OptionsStrategyLab() {
                   is UNCHANGED this session — what changed is that the board
                   `expiryChoice()` has been naming in `passedOver` can now
                   actually be taken, which is what makes that sentence honest. */}
-              {room.known && room.band === "inside-exit" && (
-                <div style={{ ...mono, fontSize: 11, color: T.red, marginTop: 12, lineHeight: 1.6, padding: "9px 11px", background: `${T.red}0f`, border: `1px solid ${T.red}66`, borderRadius: 7 }}>
-                  ✗ {entryInsideExitNote(room)}
-                </div>
-              )}
+              {/* Inside the exit window is a REFUSAL, and the gate's refusal
+                  (ENTRY_DTE, this same sentence) is on the trade card beside the
+                  button — never behind a tap. A second copy here is gone (PR #40). */}
               {room.known && room.band === "tight" && (
                 <div style={{ marginTop: 12, padding: "9px 11px", background: `${T.amber}0f`, border: `1px solid ${T.amber}66`, borderRadius: 7 }}>
                   <div style={{ ...mono, fontSize: 9.5, color: T.amber, fontWeight: 800, letterSpacing: 0.4 }}>
                     {room.room} DAYS OF ROOM · THE APP AIMS FOR {room.target}
                   </div>
-                  <div style={{ fontSize: 12.5, color: T.body, marginTop: 5, lineHeight: 1.55 }}>
-                    {entryRoomWarning(room)}
-                  </div>
+                  <Fold label="why" tone={T.amber} style={{ marginTop: 5 }} summary="A written reason unlocks it.">
+                    <div style={{ fontSize: 12.5, color: T.body, marginTop: 5, lineHeight: 1.55 }}>
+                      {entryRoomWarning(room)}
+                    </div>
+                  </Fold>
                   <textarea
                     value={roomReason}
                     onChange={(e) => setRoomReason(e.target.value)}
-                    placeholder="Why is this expiry worth taking with less room than the app aims for? The reason is stored with the position and appears in the Journal."
+                    placeholder="Why take this expiry with less room? Stored with the position."
                     rows={2}
                     style={{ ...mono, width: "100%", boxSizing: "border-box", marginTop: 9, background: T.bg, color: T.ink, border: `1px solid ${entryOverrideOk(roomReason) ? T.green : T.amber}`, borderRadius: 6, padding: "8px 9px", fontSize: 12, resize: "vertical" }}
                   />
@@ -4554,6 +4497,21 @@ export default function OptionsStrategyLab() {
                       {ticker} · {stratName}
                     </div>
                     <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 2 }}>{legsLine(legs)} · per contract</div>
+                    {/* STOP SIGNS, ABOVE THE NUMBERS (PR #40, TASK 2). The gate's
+                        warnings print here once, as labels; their sentences are
+                        behind this one "why". */}
+                    <StopSigns signs={buildSigns} style={{ marginTop: 8 }}>
+                      <Fold label="why" tone={T.red} style={{ marginTop: 4 }} summary="What each sign means">
+                        {warningsToPrint(guard?.warnings || [], {
+                          narrative: fused[ticker]?.narrative || null,
+                          pointer: conflictSummaryLine(clash, fused[ticker] || null),
+                        }).map((w) => (
+                          <div key={w.code} style={{ ...mono, fontSize: 10.5, color: T.amber, lineHeight: 1.6, marginTop: 4 }}>⚠ {w.message}</div>
+                        ))}
+                        {monoNote && <div style={{ ...mono, fontSize: 10.5, color: T.red, lineHeight: 1.6, marginTop: 4 }}>{monoNote}</div>}
+                        {book.missing.length > 0 && <div style={{ ...mono, fontSize: 10.5, color: T.red, lineHeight: 1.6, marginTop: 4 }}>{unquotedLegNote(book.missing.length)}</div>}
+                      </Fold>
+                    </StopSigns>
                     <div style={{ display: "flex", gap: 12, marginTop: 10, flexWrap: "wrap" }}>
                       {[[AE.entry >= 0 ? "YOU PAY" : "YOU RECEIVE", fmt$(Math.abs(AE.entry) * 100), T.ink],
                         ["MAX LOSS", fmt$(AE.maxLoss), T.red],
@@ -4571,7 +4529,7 @@ export default function OptionsStrategyLab() {
                       {crossingCostNote(cc)}
                     </div>
                     {/* THE BREAKDOWN AND THE RANGE FOLD, AS THE WHY. */}
-                    <Fold label="the price" tone={T.dim} style={{ marginTop: 8 }}
+                    <Fold label="why" tone={T.dim} style={{ marginTop: 8 }}
                       summary={`Where that price sits in the market, and the range behind it`}>
                       {cc.known ? (
                         <>
@@ -4622,7 +4580,6 @@ export default function OptionsStrategyLab() {
                 ticker={ticker} name={stratName}
                 card={buildCard}
                 refusals={buildRefusals}
-                warnings={(guard?.warnings || []).length}
                 onNumbers={() => setDeskSheet("numbers")}
                 onOrder={() => setDeskSheet("order")}
                 orderLabel={alpaca ? "Price it and send →" : "Open it on the app's own book →"}>
@@ -4800,12 +4757,17 @@ export default function OptionsStrategyLab() {
                   The order ticket unlocks as soon as you write why you are going against {clash.n} of {clash.total} factors. The trade is not forbidden — the written reason is required.
                 </div>
               )}
+              {/* ...AND ABOVE SEND, the same labels (PR #40, TASK 2). */}
+              <StopSigns signs={buildSigns} style={{ marginTop: 10 }} />
               {alpaca && reasonOk && (
                 <OrderTicket
                   onSent={(o) => openPaper(o)}
                   legs={legs} expKey={expKey} ticker={ticker}
                   quoteFn={q} estNet={AE.entry}
-                  setMsg={setMsg}
+                  /* THE SHEET PRINTS EVERY OUTCOME BESIDE THE BUTTON (its
+                     `OrderOutcome`), so the ticket's copy of it no longer goes
+                     to the top banner too (PR #40, TASK 2). pro.jsx unchanged. */
+                  setMsg={quietTicketMsg}
                   /* THE FIGURES THE TICKET PRINTS ARE THE ONES THE SCREEN ABOVE
                      PRINTS, at the price about to be sent (`AE`). They used to
                      be `A`'s — the mid — which is how the ticket came to say a

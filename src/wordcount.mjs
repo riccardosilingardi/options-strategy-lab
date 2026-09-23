@@ -38,6 +38,10 @@ import * as R from "./rules.js";
 import * as C from "./chain.js";
 import * as J from "./journal.js";
 import * as O from "./order.js";
+// PR #40: path.js and signals.js are plain JS too, so the generators they hold
+// are scored rather than named as uncounted.
+import * as P from "./path.js";
+import * as S from "./signals.js";
 
 export const SCREEN_IDS = ["find", "build"];
 
@@ -71,8 +75,6 @@ export const COPY = {
   perTradeCapLabel: () => R.perTradeCapLabel(),
   conflictSummaryLine: () => R.conflictSummaryLine({ n: 2, total: 4 }, { confidence: 56 }),
   expiryChoiceNote: () => R.expiryChoiceNote(CHOICE, LEVEL),
-  emptyExpiryNote: () => R.emptyExpiryNote("2026-11-20", TALLY, LEVEL),
-  unloadedBoardNote: () => R.unloadedBoardNote("XLE", "2026-11-20"),
   unpriceableNote: () => R.unpriceableNote(2, "XLE"),
   impossibleLossNote: () => R.impossibleLossNote(1, "XLE"),
   modelDisagreementNote: () => R.modelDisagreementNote(1, "XLE"),
@@ -89,7 +91,6 @@ export const COPY = {
   strikeSnapNote: () => R.strikeSnapNote([{ from: 27.5, to: 28 }], "2026-11-20"),
   marketOrderNote: () => R.marketOrderNote(null),
   checkedAgainstNote: () => R.checkedAgainstNote(true, "account number PA3XYZ01"),
-  radarQuietNote: () => R.radarQuietNote({ quiet: [{ tk: "CORN" }, { tk: "SOYB" }], searched: ["CORN"], unsearched: ["SOYB"] }) || "",
   butterflySkipNote: () => R.butterflySkipNote(),
   chanceSourceNote: () => R.chanceSourceNote({ runs: 8000, sigma: 0.3, pop: 0.55,
     seasonalSource: R.MEASURED_SEASONAL_SOURCE, seasonalYears: 11, seasonalAgeDays: 3 }, "XLE"),
@@ -130,6 +131,21 @@ export const COPY = {
   otherwiseHeading: () => (R.otherwiseHeading ? R.otherwiseHeading(3) : ""),
   fillPriceHeading: () => (R.fillPriceHeading ? R.fillPriceHeading() : ""),
   crossingCostNote: () => (R.crossingCostNote ? R.crossingCostNote({ known: true, fill: 0.24, mid: 0.2, cost: 0.04, bid: 0.14 }) : ""),
+  // PR #40, TASK 2: THE FIVE THAT WERE UNCOUNTED, and the new ones. Two of the
+  // five were never generators: `setCompareNote` is the state setter for the
+  // note `toggleCompare()` writes (scored as that note), and `setText` is a
+  // quantity field's input state — it puts the user's own digits on screen,
+  // not a sentence, so it scores zero BY NAME rather than by omission.
+  // `tradeOffSentence` was deleted with the guided door.
+  legsLine: () => P.legsLine([{ side: 1, qty: 1, strike: 28, type: "call" }, { side: -1, qty: 1, strike: 30, type: "call" }]),
+  compareDistNote: () => P.compareDistNote("drift") || "",
+  setCompareNote: () => P.toggleCompare([{ key: "a", legs: [1] }, { key: "b", legs: [1] }, { key: "c", legs: [1] }],
+    { key: "d", legs: [{ side: 1, qty: 1, strike: 1, type: "call" }], ticker: "X" }).note || "",
+  setText: () => "",
+  nothingTodayLine: () => R.nothingTodayLine({ liquidity: 3, reward: 2 }, { noBoard: ["XLE"], noChain: ["UNG"] }),
+  sizeLine: () => R.sizeLine(REQUEST, { ok: true, n: 14, totPrem: 868, totRisk: 868, isCredit: false }) || "",
+  newsLine: () => S.newsLine("CORN", [{ title: "Drought cuts US corn crop outlook in the Midwest", date: new Date().toISOString() }]).text,
+  reconcileFigures: () => { const f = { entry: 0.62, maxLoss: -62, maxProfit: 138, breakevens: [28.62], pop: 0.48 }; return R.reconcileFigures(f, f).line; },
 };
 
 export const words = (s) => String(s || "").trim().split(/\s+/).filter(Boolean).length;

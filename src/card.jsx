@@ -28,7 +28,7 @@ import { legsLine } from "./path.js";
 import { BandThumbnail, Gauge, bandTakeaway } from "./visuals.jsx";
 import { RULES, money, chancePct, chanceText, rewardRisk, NO_CEILING,
   requestAmountLabel, requestAmountOwner, chanceAskLabel, controlsFoldNote,
-  targetPriceOf, targetPriceNote, amountChips,
+  targetPriceOf, targetPriceNote, amountChips, stopSigns,
   splitByRequest, meetsHeading, otherwiseHeading, missReasonLine, fillPriceHeading } from "./rules.js";
 
 const mono = { fontFamily: "ui-monospace, Menlo, monospace" };
@@ -304,7 +304,7 @@ export { CardFigure };
 export function CandidateCard({
   name, legs = "", rr = null, pop = null, profit = null, risk = null,
   noCeiling = false, bands = null, bars = [], ticker = null,
-  misses = [], actions = null, badge = null, flags = [], size = null, style,
+  misses = [], actions = null, badge = null, flags = [], signs = null, size = null, style,
 }) {
   return (
     <div style={{ padding: "10px 12px", background: T.bg, border: `1px solid ${T.line}`,
@@ -314,15 +314,9 @@ export function CandidateCard({
         {badge}
       </div>
       <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 3 }}>{legs}</div>
-      {/* WHAT THE GUIDED DOOR USED TO DROP IN SILENCE, AS A STATE ON THE CARD
-          (PR #40, TASK 1). `candidateFlags()` in rules.js. */}
-      {flags.length > 0 && (
-        <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 4 }}>
-          {flags.map((f) => (
-            <span key={f.id} style={{ ...mono, fontSize: 9.5, color: T.red, border: `1px solid ${T.red}66`, borderRadius: 4, padding: "1px 6px" }}>{f.label}</span>
-          ))}
-        </div>
-      )}
+      {/* STOP SIGNS, ABOVE THE NUMBERS (PR #40, TASK 2): what the guided door
+          used to drop in silence, and the facts that decide, in three labels. */}
+      <StopSigns signs={signs || stopSigns({ flags })} />
       <MissLine misses={misses} />
       {bands && (
         <div style={{ display: "flex", gap: 10, marginTop: 7, flexWrap: "wrap", alignItems: "center" }}>
@@ -418,6 +412,25 @@ export function MissLine({ misses = [] }) {
   return (
     <div style={{ ...mono, fontSize: 10, color: T.amber, marginTop: 4 }}>
       {misses.map(missReasonLine).filter(Boolean).join(" \u00b7 ")}
+    </div>
+  );
+}
+
+/* THE STOP-SIGNS STRIP (PR #40, TASK 2). At most three short labels, from
+   `stopSigns()` in rules.js; "+N" says there are more, and on Build the full
+   sentences sit behind one "why" beside it. Nothing here decides anything. */
+export function StopSigns({ signs, children, style }) {
+  if (!signs || !signs.labels || !signs.labels.length) return null;
+  return (
+    <div style={{ marginTop: 6, ...style }}>
+      <div style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center" }}>
+        <span style={{ ...mono, fontSize: 8.5, letterSpacing: "0.08em", color: T.red, fontWeight: 800 }}>STOP SIGNS</span>
+        {signs.labels.map((f) => (
+          <span key={f.id} style={{ ...mono, fontSize: 9.5, color: T.red, border: `1px solid ${T.red}66`, borderRadius: 4, padding: "1px 6px" }}>{f.label}</span>
+        ))}
+        {signs.more > 0 && <span style={{ ...mono, fontSize: 9.5, color: T.red }}>+{signs.more}</span>}
+      </div>
+      {children}
     </div>
   );
 }

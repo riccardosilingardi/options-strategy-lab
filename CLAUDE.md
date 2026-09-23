@@ -35,7 +35,10 @@ by writing down what you could not verify (PRD §4, at most ten items).
 - A multi-leg limit price is signed: positive is a debit, negative a credit.
 - Never name a contract the chain did not list; `buildOcc()` formats, it is never a fallback.
 - A close is always a limit priced at the tap; never a market order.
-- An order that fails must fail where the button is.
+- An order that fails must fail where the button is. An order's state lives on its Positions row;
+  the desk shows counts only (`DeskCountLine`).
+- A card and Build read one price: `fillNet()`. `listCardFigures()` and `buildFigures()` are the
+  two paths and `figures.test.jsx` holds them equal.
 - No emoji or rare glyphs in UI strings; stay within `↑ ↓ → ✓ ✗ ⚠ ▲ ▼ ●`.
 - Plan first, then change surgically.
 

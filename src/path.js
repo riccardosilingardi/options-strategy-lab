@@ -246,3 +246,23 @@ export function savedAge(sv, now = Date.now()) {
   if (h < 24) return `saved ${Math.round(h)}h ago — the prices below are from then`;
   return `saved ${Math.round(h / 24)}d ago — the prices below are from then`;
 }
+
+/** What the picture says instead of drawing a curve it cannot stand behind. */
+export const compareDistNote = (why) => {
+  if (why === "markets") {
+    return `These are not all the same market and horizon, so there is no single distribution to draw ` +
+      `underneath them: one curve of where the price could finish would have to be two. The payoffs and the ` +
+      `breakevens are still on one axis, read as the move from each market\u2019s own price today.`;
+  }
+  if (why === "sigma" || why === "horizon") {
+    return `Where the price could finish is not drawn: ${why === "sigma" ? "the volatility" : "the horizon"} ` +
+      `these candidates were priced at did not travel with them. The payoffs and the breakevens are unaffected ` +
+      `\u2014 they are arithmetic on the legs, not a forecast.`;
+  }
+  if (why === "drift") {
+    return `Where the price could finish is not drawn: these candidates carry no seasonal drift, and a missing ` +
+      `drift is not a drift of zero. Drawing a market that goes nowhere under a chance worked out on the ` +
+      `season would be two readings of one trade. Candidates saved before this was recorded have none.`;
+  }
+  return null;
+};

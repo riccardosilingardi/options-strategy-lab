@@ -317,3 +317,27 @@ export function Fold({ summary, label = "why", tone = T.mut, children, style }) 
     </div>
   );
 }
+
+/* ====================================================================
+   THE DESK'S ONE LINE ABOUT ORDERS AND POSITIONS (PR #40, TASK 2)
+
+   One status per object, one place: an order's state is on its row in
+   Positions, a position's action on its card. The desk used to print both
+   lists a second time. It prints COUNTS now — never a ref, a status or a
+   price — and the whole line is the link to where they live.
+==================================================================== */
+export function DeskCountLine({ working = 0, decisions = 0, looks = 0, onOpen }) {
+  const parts = [];
+  if (working > 0) parts.push(`${working} order${working === 1 ? "" : "s"} working`);
+  if (decisions > 0) parts.push(`${decisions} position${decisions === 1 ? "" : "s"} need${decisions === 1 ? "s" : ""} a decision`);
+  else if (looks > 0) parts.push(`${looks} position${looks === 1 ? "" : "s"} to look at`);
+  if (!parts.length) return null;
+  const tone = decisions > 0 ? T.red : T.amber;
+  return (
+    <button onClick={onOpen}
+      style={{ ...mono, fontSize: 11.5, color: tone, marginTop: 12, minHeight: 44, width: "100%", textAlign: "left",
+        padding: "8px 12px", background: T.panel, border: `1px solid ${tone}66`, borderRadius: 8, cursor: "pointer" }}>
+      ● {parts.join(" · ")} — Positions →
+    </button>
+  );
+}

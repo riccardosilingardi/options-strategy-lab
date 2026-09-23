@@ -6,14 +6,14 @@ import assert from "node:assert/strict";
 import { evaluateTrade, paperStatus, undefinedRiskLegs } from "./riskGate.js";
 import { positionSize, positionSizeNote, contractsOf, withPositionSize, bookPositions, positionStage, positionForHolding } from "./journal.js";
 import { orderBody, mlegLimitPrice } from "./order.js";
-import { RULES, sizing, ruleBadge, qualityFloor, qualityFloorSentence, liquiditySkippedNote, NOTHING_TODAY,
+import { RULES, sizing, ruleBadge, qualityFloor, qualityFloorSentence, liquiditySkippedNote,
   LIQUIDITY_LEVELS, RECOMMENDED_LIQUIDITY, LIQUIDITY_MEASUREMENT, liquidityMeasurementNote, liquidityThreshold, looseningWarning, liquiditySettingNote,
-  priceability, rewardRisk, unpriceableNote, money, MIN_NET_DOLLARS,
+  priceability, rewardRisk, unpriceableNote, impossibleLossNote, money, MIN_NET_DOLLARS,
   contractListing, unlistedContractNote, legName, tradeCard, TRADE_CARD_IDS, cardCurrencyNote,
-  radarSplit, radarQuietNote, isButterfly, butterflySkipNote,
+  isButterfly, butterflySkipNote,
   unquotedLegNote, unquotedLegPointer, marketOrderNote, strikeSnapNote,
   spreadShare, spreadFloor, spreadFloorReason, wideSpreadNote, spreadSkippedNote,
-  expiryChoice, expiryChoiceNote, emptyExpiryNote, unloadedBoardNote, checkedAgainstNote, offBoardStrikeLabel,
+  expiryChoice, expiryChoiceNote, checkedAgainstNote, offBoardStrikeLabel,
   modelSanity, modelSanityReason, modelDisagreementNote,
   chanceOf, chanceSeedKey, seasonalProvenance, seasonalStampOf, seasonalSourceSentence,
   MEASURED_SEASONAL_SOURCE, ESTIMATED_SEASONAL_SOURCE, watchAttentionLevel,
@@ -472,12 +472,6 @@ test("the skip is stated, never silent", () => {
   assert.ok(liquiditySkippedNote("Alpaca").includes("Missing data is not evidence"));
 });
 
-test("a market emptied by the floors gets a sentence, not a blank screen", () => {
-  const t = NOTHING_TODAY.belowQualityFloor({ liquidity: 3, reward: 1, markets: ["CORN"] });
-  assert.ok(t.includes("CORN"));
-  assert.ok(t.includes("3"), "the counts are in the sentence");
-  assert.ok(t.includes(String(RULES.minOpenInterestAbsolute)) || t.includes("least-traded strikes"));
-});
 
 test("the floors are named numbers, and the copy quotes those numbers", () => {
   assert.equal(typeof RULES.liquidityPercentile, "number");
@@ -764,17 +758,9 @@ test("an unpriceable structure is left out WITH A SENTENCE, and never at $0", ()
   const note = unpriceableNote(3, "BOIL");
   assert.ok(note.includes("3") && note.includes("BOIL"));
   assert.ok(note.includes("not a maximum loss of zero"), "it says what a zero actually means");
-  const refusal = NOTHING_TODAY.unpriceable({ unpriceable: 3, markets: ["BOIL"] });
-  assert.ok(refusal.includes("BOIL") && refusal.includes("unpriced"));
-  assert.ok(!/-\$0/.test(refusal), "the refusal screen does not print -$0 either");
+  assert.ok(!/-\$0/.test(note), "and it does not print -$0 either");
 });
 
-test("a board emptied by unreadable prices is a different sentence from one emptied by the floors", () => {
-  const unpriced = NOTHING_TODAY.unpriceable({ unpriceable: 2, markets: ["BOIL"] });
-  const floored = NOTHING_TODAY.belowQualityFloor({ liquidity: 2, reward: 0, markets: ["BOIL"] });
-  assert.notEqual(unpriced, floored);
-  assert.ok(!unpriced.includes("budget"), "and neither of them is the budget answer");
-});
 
 /* ============================================================================
    TASK 0 — THE POSITIVE-MAX-LOSS TEST IS NOW IN THE RISK GATE.
@@ -1029,14 +1015,6 @@ test("a REAL zero is still a real zero", () => {
   assert.equal(c.chosen.key, "Y");
 });
 
-test("an empty list NAMES THE EXPIRY it emptied", () => {
-  // Radar said 4 cleared at 28 DTE while the Shortlist said none at 35 DTE.
-  // Both were true, and on screen it read as a contradiction.
-  const note = emptyExpiryNote("2026-10-09", { liquidity: 3, spread: 1, reward: 0 });
-  assert.ok(note.includes("2026-10-09"), "the expiry is in the sentence");
-  assert.ok(note.includes("3 for liquidity") && note.includes("1 for a bid/ask spread"));
-  assert.ok(note.includes("another expiry"), "and it says the verdict is about this board only");
-});
 
 test("with no expiry past the entry floor the answer is nothing, not a bad expiry", () => {
   const c = expiryChoice([{ key: "soon", dte: 9, clears: 40, near: 44 }]);
@@ -1241,16 +1219,8 @@ test("MODEL SANITY — its refusal is a finished sentence with its own count", (
   assert.match(note, /3 structures/);
   assert.match(note, /BOIL/);
   assert.match(note, new RegExp(`${RULES.modelDisagreementRatio}x`));
-  assert.match(NOTHING_TODAY.modelDisagreement({ modelDisagreement: 2, markets: ["BOIL"] }),
-    new RegExp(`${RULES.modelDisagreementRatio}x`));
-  // It is a DIFFERENT sentence from the other four refusals, not a rewording.
-  const others = [
-    NOTHING_TODAY.unpriceable({ unpriceable: 2, markets: ["BOIL"] }),
-    NOTHING_TODAY.impossibleLoss({ impossible: 2, markets: ["BOIL"] }),
-  ];
-  for (const o of others) {
-    assert.notEqual(o, NOTHING_TODAY.modelDisagreement({ modelDisagreement: 2, markets: ["BOIL"] }));
-  }
+  // It is a DIFFERENT sentence from the other refusals, not a rewording.
+  for (const o of [unpriceableNote(2, "BOIL"), impossibleLossNote(2, "BOIL")]) assert.notEqual(o, note);
 });
 
 /** The source of a file with its COMMENTS REMOVED, for structural tests that
@@ -2802,13 +2772,6 @@ test("checkedAgainstNote() names the account, and says which tap the checks belo
 /* ==========================================================================
    TASK 1 — the sentences that came with the preset fix.
    ========================================================================== */
-test("unloadedBoardNote() is NOT a market verdict", () => {
-  const n = unloadedBoardNote("SOYB", "2026-11-20");
-  assert.match(n, /have not loaded/);
-  assert.match(n, /not a verdict on the market/);
-  assert.equal(/NOTHING CLEARED/.test(n), false, "a board that has not loaded is not a board that emptied");
-  assert.match(unloadedBoardNote(null, null), /this market/);
-});
 
 test("offBoardStrikeLabel() is written once, and it names the strike", () => {
   assert.equal(offBoardStrikeLabel(27.5), "27.5 \u00b7 not on this board");
@@ -2833,73 +2796,10 @@ test("buildPresets() REFUSES A NULL BOARD, and the preset effect waits for one",
    THE RADAR MUST NOT GET LONGER WHEN THE BASKET DOES (ROADMAP P2-bis)
 ================================================================ */
 
-test("RADAR — a market with something keeps its row, everything else is one line", () => {
-  const rows = [
-    { tk: "GLD", n: 4 }, { tk: "SLV", n: 2 },
-    { tk: "CORN", n: 0, cut: true }, { tk: "SOYB", n: 0, cut: true },
-    { tk: "USO", n: 0 }, { tk: "XLE", n: 0 },
-  ];
-  const r = radarSplit(rows);
-  assert.deepEqual(r.shown.map((x) => x.tk), ["GLD", "SLV"]);
-  assert.deepEqual(r.quiet.map((x) => x.tk), ["CORN", "SOYB", "USO", "XLE"]);
-  // LOOKED AT AND EMPTY IS NOT NEVER LOOKED AT. A missing-data answer wearing a
-  // market verdict's words is the line this repository keeps everywhere else.
-  assert.deepEqual(r.empty, ["CORN", "SOYB"]);
-  assert.deepEqual(r.notSearched, ["USO", "XLE"]);
-  const note = radarQuietNote(r);
-  assert.ok(note.includes("4 markets"));
-  assert.ok(note.includes("looked at, nothing on the radar: CORN, SOYB"));
-  assert.ok(note.includes("not searched yet: USO, XLE"));
-  assert.equal(note.split(".").filter((x) => x.trim()).length, 1, "ONE line, not one per market");
-});
 
-test("RADAR — a market the guided run EXAMINED is never 'not searched yet'", () => {
-  /* >>> READ ON THE OWNER'S PHONE, 21 Sep 2026. <<< One screen, four lines
-     apart: "4 of them came through to the shortlist (BOIL, WEAT, XLE and USO)"
-     over "8 markets with nothing to show — not searched yet: BOIL, USO, …".
-     BOIL and USO cleared every floor and were simply not the two roads taken
-     forward; `marketFacts` only knew roads, wide-search hits and floor
-     casualties, so they fell through to "nobody has looked". */
-  const rows = [
-    { tk: "XLE", n: 1 }, { tk: "WEAT", n: 1 },
-    { tk: "BOIL", n: 0, searched: true }, { tk: "USO", n: 0, searched: true },
-    { tk: "GLD", n: 0 },
-  ];
-  const r = radarSplit(rows);
-  assert.deepEqual(r.notSearched, ["GLD"], "only the untouched market is unsearched");
-  assert.deepEqual(r.empty, ["BOIL", "USO"]);
-  const note = radarQuietNote(r);
-  assert.ok(!/not searched yet:[^·.]*BOIL/.test(note), "BOIL was looked at and the line may not deny it");
-  assert.ok(!/not searched yet:[^·.]*USO/.test(note), "USO was looked at and the line may not deny it");
-  assert.ok(note.includes("looked at, nothing on the radar: BOIL, USO"));
-  // AND THE WORDS DO NOT CLAIM A VERDICT THE LINE CANNOT SUPPORT. These two
-  // markets' structures DID clear the floors; "nothing cleared" would be false.
-  assert.ok(!note.includes("nothing cleared"));
-});
 
-test("RADAR — the floors emptying a market still counts as having looked", () => {
-  const r = radarSplit([{ tk: "GLD", n: 2 }, { tk: "SOYB", n: 0, cut: true }]);
-  assert.deepEqual(r.empty, ["SOYB"]);
-  assert.deepEqual(r.notSearched, []);
-});
 
-test("RADAR — a first run collapses too: ten identical rows is the wall this replaces", () => {
-  const rows = ["SOYB", "CORN", "UNG", "BOIL", "WEAT", "GLD", "SLV", "USO", "XLE", "GDX"]
-    .map((tk) => ({ tk, n: 0 }));
-  const r = radarSplit(rows);
-  assert.equal(r.shown.length, 0);
-  assert.equal(r.quiet.length, 10);
-  assert.ok(radarQuietNote(r).includes("10 markets"));
-  assert.ok(radarQuietNote(r).includes("GDX"), "every market is still named, so every one is one tap away");
-});
 
-test("RADAR — with every market producing something there is no extra line at all", () => {
-  const r = radarSplit([{ tk: "GLD", n: 3 }, { tk: "SLV", n: 1 }]);
-  assert.equal(r.quiet.length, 0);
-  assert.equal(radarQuietNote(r), null);
-  assert.equal(radarQuietNote(null), null);
-  assert.equal(radarQuietNote(radarSplit([])), null);
-});
 
 /* ================================================================
    TASK 3 — ONE CHAIN, ONE OPEN INTEREST, ONE VERDICT

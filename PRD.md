@@ -99,43 +99,39 @@ v1 is done when all three are true, each observed on the owner's real account an
 - **(c)** The owner **reads each open position's action in five seconds**: HOLD, CLOSE with its
   reason, or WARNING.
 
-(c) is built (ROADMAP PR #38); it is the owner's reading. PR #39, the last v1 change, is shipped:
-v1 now waits only on the owner's three readings.
+(c) is built (ROADMAP PR #38); it is the owner's reading. PR #40 (one screen, one set of numbers)
+changes what the owner reads, not what v1 needs: v1 waits only on the owner's three readings.
 
 ## 4. NOT VERIFIED
 
 At most ten items. **OWNER CHECK** means only a reading on the live market or the owner's phone
 can settle it; no test in this repository can.
 
-1. **OWNER CHECK — order path 3 has never been sent live, neither from the desk nor from the
-   Positions card's close-at-limit.** In particular whether the sign on the limit comes out the
-   way `mlegLimitPrice()` says, whether `groupForRecord()` finds the holding in a real
-   `/v2/positions` payload, and whether "close order working" clears when Alpaca reports the
-   fill. The opening sign was wrong for four pull requests and only a fill found it. This is v1 (b).
-2. **OWNER CHECK — J-0003 has not filled.** Is the indicative combination ask systematically
-   inside the real one on thin chains, and by how much? Its cancel is `pending_cancel`: whether
-   the card shows "a cancel is already waiting" and clears when Alpaca reports it canceled has
-   only been tested on fixtures (`cancelOutcome()`).
-3. **OWNER CHECK — no opening order has yet filled at the intended price** since the sign fix.
-   This is v1 (a). **And no credit order has filled at the corrected suggested limit** (PR #39,
-   0a: a credit used to be suggested above the mid, on the side that never fills).
-4. **OWNER CHECK — nobody has read the split list, the cards or the controls on a real screen,**
-   nor the Positions card's one action (HOLD / CLOSE / WARNING / NO QUOTE / NOT ON ALPACA). Whether it reads in
-   five seconds is the owner's answer to give (v1 c).
-5. **OWNER CHECK — the quantity fields have not been tried on a real phone.** They are tested
-   by driving the component's handlers, not by a touch keyboard.
-6. **OWNER CHECK — `upgradeHolding()` has never run against a real `/v2/positions` payload.**
-   Nor has the broker-preferred P&L, nor "Not on Alpaca" (`legsNotHeld()`, PR #39 0c): all are
-   tested on hand-built fixtures only.
-7. **Chosen, not measured:** `modelDisagreementRatio` 4, `maxComboSpreadShareOfNet` 1.0,
-   `maxCrossingShareOfMaxProfit` 0.5 (measured on fixtures only: `scripts/measure-crossing.mjs`),
-   `openLimitSlippage` and `closeLimitSlippage` 0.25, `watchAttentionShare` 0.35,
-   `autopilotConfidence` 70, `fallbackIV` and `fallbackSigma` 0.25, and the four chance-slider
-   constants (`chanceAskMin` 0.20, `chanceAskMax` 0.80, `chanceAskStep` 0.05,
-   `chanceAskDefault` 0.50).
-8. **The exit rules are inherited defaults, not backtested** on these ten markets.
-9. **OWNER CHECK — the liquidity floor was measured on one close (2026-09-01).** Re-run
-   `/api/liquidity` as the market moves.
+1. **OWNER CHECK — order path 3 has never been sent live,** neither from the desk nor from the
+   Positions card's close-at-limit: the sign on the limit, `groupForRecord()` on a real
+   `/v2/positions` payload, and "close order working" clearing on the fill. This is v1 (b).
+2. **OWNER CHECK — no opening order has filled at the intended price** since the sign fix, and
+   no credit at the corrected limit (v1 a). PR #40 moves the suggested opening price by at most
+   a cent a leg (`legLimitSeed()` now sums exactly to `fillNet()`): not yet seen filled.
+3. **OWNER CHECK — J-0003 has not filled.** Is the indicative combination ask systematically
+   inside the real one on thin chains? Its `pending_cancel` handling is tested on fixtures only.
+4. **OWNER CHECK — nobody has used Find on a real phone with live chains** (PR #40): the one
+   ranked list across ten markets, the live re-filtering, the flags, the market filter, the
+   stop signs and the Positions card's one action. Tested with renders, source sweeps and a
+   headless browser on SYNTHETIC chains only. Whether it reads in five seconds is v1 (c).
+5. **Find's cost on a phone is not measured.** The list is one memo over every selected market
+   (analyse, floors, an 8,000-run chance per survivor); on a laptop with synthetic chains it
+   settles in a few seconds after the chains land. A slow phone may lag while a slider moves.
+6. **OWNER CHECK — "size N > M on the ask" reads indicative sizes,** which Alpaca's snapshot
+   carries and which may not be the real depth. The quantity fields have not been tried on a
+   real phone keyboard either.
+7. **OWNER CHECK — `upgradeHolding()`, the broker-preferred P&L and "Not on Alpaca"** have only
+   run on hand-built fixtures, never on a real `/v2/positions` payload.
+8. **Chosen, not measured:** `modelDisagreementRatio` 4, `maxComboSpreadShareOfNet` 1.0,
+   `maxCrossingShareOfMaxProfit` 0.5, `openLimitSlippage` and `closeLimitSlippage` 0.25,
+   `watchAttentionShare` 0.35, `autopilotConfidence` 70, `fallbackIV`/`fallbackSigma` 0.25, the
+   four chance-slider constants, and the liquidity floor (measured on one close, 2026-09-01).
+9. **The exit rules are inherited defaults, not backtested** on these ten markets.
 10. **The AI features were disabled by an Anthropic usage limit until 2026-10-01.** Both
     copilots, report section 5 and `copilotOverreach()` have not seen a real answer since.
 
