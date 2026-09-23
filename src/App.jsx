@@ -41,7 +41,8 @@ import { RULES, sizing, ruleBadge, takeProfitLabel, stopLossLabel, perTradeCapLa
   sigmaProvenance, isButterfly,
   requestOf, requestAmountLabel, requestAmountOwner, contractsSourceNote,
   splitByRequest, meetsHeading, otherwiseHeading, missReasonLine, fillPriceHeading, fillNet,
-  rewardRiskRange, RR_POINTS, crossingCost, crossingCostNote, openingMarkNote } from "./rules.js";
+  rewardRiskRange, RR_POINTS, crossingCost, crossingCostNote, openingMarkNote,
+  figureSet, reconcileFigures, unitMoney } from "./rules.js";
 import { isStale, freshnessNote, staleAmong } from "./freshness.js";
 import { evaluateTrade, gateSummary } from "./riskGate.js";
 import { DEMO, DEMO_BANNER, DEMO_TOOLTIP, DEMO_SEED_TICKERS, demoPositions } from "./demo.js";
@@ -535,6 +536,65 @@ export const chanceCheckOf = (a, { ticker, legs, spot, dte, expKey = null, seaso
  */
 const chanceStamp = (mc, ticker = "this market") => (mc ? mc.seasonalNote : chanceSourceNote(null, ticker));
 
+/* =====================================================================
+   THE TWO PATHS A CANDIDATE'S FIGURES TAKE, AND THEY ARE ONE (PR #40, TASK 0).
+
+   `listCardFigures()` is what every card on the list prints; `buildFigures()`
+   is what the Build screen prints, the gate measures and the ticket sends.
+   Both read `analyze()` at `fillNet()` — `openLimitPrice()` on `comboBook()`,
+   on the cent — and `legLimitSeed()` lands the ticket's legs on exactly that
+   price, so with nothing typed in the ticket the two return the same figures,
+   the same break-even and the same seeded chance. `figures.test.jsx` holds it.
+===================================================================== */
+
+/** The figures one list card prints. `a`/`aFill` may be handed in when the
+ *  generation site already computed them; nothing is re-derived either way. */
+export function listCardFigures(legs, { spot, dte, iv, q, ticker, expKey = null, seasonal, a = null, aFill = null }) {
+  const mid = a || analyze(legs, spot, dte, iv, q);
+  const af = aFill || atFillPrice(legs, mid, { spot, dte, iv, q });
+  const mc = seasonal ? chanceCheckOf(af, { ticker, legs, spot, dte, expKey, seasonal }) : null;
+  const pop = mc ? mc.pop : null;
+  return { a: mid, aFill: af, mc, pop, bands: payoffBands({ legs, entryNet: af.entry, spot }),
+    rr: rewardRisk(af.maxProfit, af.maxLoss), figures: figureSet(af, pop) };
+}
+
+/** The Build screen's chain, from the legs to the price that will be sent. */
+export function buildFigures(legs, { spot, dte, iv, q, ticker = null, expKey = null, seasonal = null, legPx = null, type = "limit" }) {
+  const A = spot && legs.length ? analyze(legs, spot, dte, iv, q) : null;
+  /* THE PRICE THE ORDER WILL BE SENT AT IS BUILD-SCREEN STATE. Type, time in
+     force and ONE PRICE PER LEG live in App.jsx; `legPx` is null until the user
+     moves something, and the seed is derived (`legLimitSeed()` in rules.js):
+     a stored seed would go stale the moment the chain refreshed.
+     THE OCC TRAVELS WITH THE QUOTE, for the same reason the bid and the sizes
+     do: the ticket has to be able to see that the chain never listed a leg. */
+  const bookQuotes = A ? A.legPx.map((l) => ({ bid: l.bid, ask: l.ask, mid: l.px, bidSize: l.bidSize, askSize: l.askSize, occ: l.occ || null })) : [];
+  const book = comboBook(legs, bookQuotes);
+  const seedPx = legLimitSeed(legs, bookQuotes);
+  /* THE USER'S PRICES, OR THE SEED — never a mix. A `legPx` of the wrong
+     length belongs to a structure that is no longer on screen. */
+  const legPrices = Array.isArray(legPx) && legPx.length === legs.length ? legPx : seedPx;
+  /* THE NET IS DERIVED FROM THE LEGS, the direction the owner thinks in. */
+  const ticketNet = netFromLegs(legs, legPrices || []);
+  const ticketDir = book.ok ? (book.mid >= 0 ? 1 : -1) : (A && A.entry < 0 ? -1 : 1);
+  /* A LIMIT IS A CEILING, NOT A PRICE (`effectiveLimit` in rules.js): an order
+     at or past the touch fills AT the touch. A MARKET order takes the touch. */
+  let effective;
+  if (type === "market") {
+    effective = !book.ok
+      ? { known: false, dir: ticketDir, typed: null, touch: null, effective: null, net: null, capped: false, give: null }
+      : { known: true, dir: ticketDir, typed: null, touch: Math.abs(book.ask), effective: Math.abs(book.ask), net: ticketDir * Math.abs(book.ask), capped: true, give: 0 };
+  } else {
+    effective = effectiveLimit(ticketNet.net == null ? null : Math.abs(ticketNet.net), book, ticketDir);
+  }
+  /* >>> AND THIS IS THE ANALYSIS EVERY FIGURE ON THE SCREEN READS. <<< With no
+     readable price it falls back to `A`, and `entrySource` says so. */
+  const AE = !A ? null : !Number.isFinite(effective.net) ? A : analyze(legs, spot, dte, iv, q, { net: effective.net });
+  /* THE ONE CHANCE, AT THE PRICE THAT WILL BE SENT. */
+  const chance = AE && spot && legs.length && seasonal ? chanceCheckOf(AE, { ticker, legs, spot, dte, expKey, seasonal }) : null;
+  return { A, bookQuotes, book, seedPx, legPrices, ticketNet, ticketDir, effective, AE, chance,
+    figures: AE ? figureSet(AE, chance ? chance.pop : null) : null };
+}
+
 function netValue(legs, S, dte, baseIV, q) {
   return legs.reduce((a, l) => a + Math.sign(l.side) * l.qty * priceLeg(l, S, dte, baseIV, q).px, 0);
 }
@@ -702,13 +762,16 @@ export function shortlistWithFloors(sent, S, step, strikes, dte, baseIV, q, { pe
       // call spread passed the per-leg test on both legs and its combination
       // was 143% of its own mid wide (src/rules.js, `comboSpreadFloor`).
       quotes: quotesOf(a), legs: p.legs,
-      maxProfit: a.maxProfit, maxLoss: a.maxLoss, unboundedProfit: a.profitUnbounded,
+      // THE REWARD FLOOR READS THE PRICE THAT FILLS TOO (PR #40, TASK 0). It
+      // read the mid while the card printed the fill: "ranked and floored at
+      // the MID while cards print at the price that fills", PR #39's debt.
+      maxProfit: aFill.maxProfit, maxLoss: aFill.maxLoss, unboundedProfit: aFill.profitUnbounded,
       maxProfitAtFill: aFill ? aFill.maxProfit : null,
     });
     if (!qf.liquidity.checked) { oiSkipped = true; tally.skipped++; }
     if (!qf.spread.checked) tally.spreadSkipped++;
     if (!qf.comboSpread.checked) tally.comboSpreadSkipped++;
-    if (qf.pass) rows.push({ p, a, qf });
+    if (qf.pass) rows.push({ p, a, aFill, qf });
     else {
       // WHICH FLOOR DID THE WORK, in the order they are applied. Pooling them
       // would leave the screen unable to say whether the leg was untraded or
@@ -2031,67 +2094,19 @@ export default function OptionsStrategyLab() {
      answer to that question and it is still on screen. It is no longer the
      answer to "what will this trade do", because that depends on the price it
      will be done at: see `AE` below. */
-  const A = useMemo(() => (spot && legs.length ? analyze(legs, spot, dte, iv, q) : null), [legs, spot, dte, iv, q]);
-
-  /* ===================================================================
-     THE PRICE THE ORDER WILL BE SENT AT IS BUILD-SCREEN STATE.
-
-     It lived inside `OrderTicket` as `cfg`, exactly as the quantity did before
-     PR #23 — so the screen above the ticket had no idea what price it was
-     about to send, and every figure on it was worked out from the MID while
-     the ticket two thousand pixels below said a limit at the mid does not
-     fill. Type, time in force and ONE PRICE PER LEG live here now; the ticket
-     is a controlled input on them, like the quantity field beside it.
-
-     `legPx` is null until the user moves something, and the seed is derived
-     (`legLimitSeed()` in rules.js): a stored seed would go stale the moment
-     the chain refreshed, and a stale seed presented as the user's price is the
-     same fault as a suggested capital figure quoted back as his answer.
-  =================================================================== */
   const [ticket, setTicket] = useState({ type: "limit", tif: "day", legPx: null });
-  const bookQuotes = useMemo(
-    // THE OCC TRAVELS WITH THE QUOTE, for the same reason the bid and the
-    // sizes do: the ticket has to be able to see that the chain never listed a
-    // leg, and a mid can never show that. It is what the ticket hands the gate
-    // as `occs`, and what it names the contracts with when it sends.
-    () => (A ? A.legPx.map((l) => ({ bid: l.bid, ask: l.ask, mid: l.px, bidSize: l.bidSize, askSize: l.askSize, occ: l.occ || null })) : []),
-    [A]);
-  const book = useMemo(() => comboBook(legs, bookQuotes), [legs, bookQuotes]);
-  const seedPx = useMemo(() => legLimitSeed(legs, bookQuotes), [legs, bookQuotes]);
-  /* THE USER'S PRICES, OR THE SEED — never a mix. A `legPx` of the wrong
-     length belongs to a structure that is no longer on screen. */
-  const legPrices = useMemo(
-    () => (Array.isArray(ticket.legPx) && ticket.legPx.length === legs.length ? ticket.legPx : seedPx),
-    [ticket.legPx, seedPx, legs.length]);
-  /* THE NET IS DERIVED FROM THE LEGS, which is the reverse of the single net
-     field the ticket had, and is the direction the owner thinks in. */
-  const ticketNet = useMemo(() => netFromLegs(legs, legPrices || []), [legs, legPrices]);
-  const ticketDir = useMemo(
-    () => (book.ok ? (book.mid >= 0 ? 1 : -1) : (A && A.entry < 0 ? -1 : 1)),
-    [book, A]);
-  /* A LIMIT IS A CEILING, NOT A PRICE (src/rules.js, `effectiveLimit`). An
-     order at or past the touch fills AT the touch, so the price that decides
-     the trade is `min(limit, ask)` on a debit — never the number typed. A
-     MARKET order has no limit at all: it takes the touch, and that is what
-     every figure below is then worked out at. */
-  const effective = useMemo(() => {
-    if (ticket.type === "market") {
-      if (!book.ok) return { known: false, dir: ticketDir, typed: null, touch: null, effective: null, net: null, capped: false, give: null };
-      const touch = Math.abs(book.ask);
-      return { known: true, dir: ticketDir, typed: null, touch, effective: touch, net: ticketDir * touch, capped: true, give: 0 };
-    }
-    return effectiveLimit(ticketNet.net == null ? null : Math.abs(ticketNet.net), book, ticketDir);
-  }, [ticket.type, book, ticketNet, ticketDir]);
-  /* >>> AND THIS IS THE ANALYSIS EVERY FIGURE ON THE SCREEN READS. <<<
-     Same legs, same chain, same volatility — one different number, the entry
-     price, and on UNG it is the difference between 2.6:1 and 1.1:1. With no
-     readable price it falls back to `A`, which is the old behaviour and says
-     so rather than blanking the screen. */
-  const AE = useMemo(() => {
-    if (!A) return null;
-    if (!Number.isFinite(effective.net)) return A;
-    return analyze(legs, spot, dte, iv, q, { net: effective.net });
-  }, [A, effective.net, legs, spot, dte, iv, q]);
+  /* >>> THE BUILD SCREEN'S FIGURES, FROM ONE MODULE-LEVEL FUNCTION (PR #40). <<<
+     `buildFigures()` below the component is the chain that used to be ten
+     memos here — the mid analysis `A`, the book, the per-leg seed, the net the
+     ticket holds, the effective price and `AE` at it, and the one chance at
+     `AE`. It is module-level so `figures.test.jsx` runs THIS path against the
+     list card's path on one candidate, rather than a copy of it. Every comment
+     that stood beside those memos stands beside the function now. */
+  const BF = useMemo(
+    () => buildFigures(legs, { spot, dte, iv, q, ticker, expKey, seasonal: seasonalOf(seasonal, ticker),
+      legPx: ticket.legPx, type: ticket.type }),
+    [legs, spot, dte, iv, q, ticker, expKey, seasonal, ticket.legPx, ticket.type]);
+  const { A, bookQuotes, book, seedPx, legPrices, ticketNet, ticketDir, effective, AE } = BF;
   /* >>> HOW MANY COMBINATIONS THE BUDGET BUYS, AND IT IS ONE HOME (P10 §2).
      <<< `scaleStrategy()` is untouched — it is the same function the Shortlist
      calls and it is on the DO-NOT-TOUCH list — and it is read HERE at the price
@@ -2163,9 +2178,7 @@ export default function OptionsStrategyLab() {
      the fault this whole section exists to remove. The Shortlist row still
      prints its candidate at the MID, because a candidate is not yet a price;
      the Build screen says so where the two are side by side. */
-  const chance = useMemo(
-    () => (AE && spot && legs.length ? chanceFor(AE, { ticker, legs, spot, dte, expKey }) : null),
-    [AE, chanceFor, ticker, legs, spot, dte, expKey]);
+  const chance = BF.chance;
   // The Shortlist, already past the quality floors. Computed here rather than
   // inside the render so the filtered-out list and the rows come from one call.
   // Every known open-interest count on the expiry being shown: the peer set the
@@ -2418,9 +2431,14 @@ export default function OptionsStrategyLab() {
     setStore(st); await saveState(st);
     setMsg(`${c.ticker} ${c.name} kept. It is at the bottom of this step, and with your saved strategies on the Positions screen.`);
   };
-  const applyPreset = (p, a) => openOnBuild({
+  /* THE CARD'S OWN FIGURES TRAVEL TO BUILD, ALL OF THEM (PR #40, TASK 0).
+     This carried the MID's entry and nothing else, so Build compared its mid
+     with the card's mid and printed "Same numbers as the Shortlist" over a
+     risk of $68 against the card's $62. `reconcileFigures()` compares every
+     figure the card printed. */
+  const applyPreset = (p, af, pop = null) => openOnBuild({
     ticker, expKey, legs: p.legs, name: p.name,
-    ref: a ? { name: p.name, entry: a.entry, maxProfit: a.maxProfit, maxLoss: a.maxLoss, expKey, t: Date.now() } : null,
+    ref: af ? { name: p.name, expKey, t: Date.now(), card: figureSet(af, pop) } : null,
   });
   const updLeg = (i, f, v) => setLegs((L) => L.map((l, j) => (j === i ? { ...l, [f]: v } : l)));
   // A leg quantity left empty or invalid while typing: { [legIndex]: note }.
@@ -2946,7 +2964,7 @@ export default function OptionsStrategyLab() {
             openInterest: a.legPx.map((l) => l.oi), peerOpenInterest: peers, level: liqLevel,
             // ...and the LEGS, for the combination spread floor beside it.
             quotes: quotesOf(a), legs: pr.legs,
-            maxProfit: a.maxProfit, maxLoss: a.maxLoss, unboundedProfit: a.profitUnbounded,
+            maxProfit: aFill.maxProfit, maxLoss: aFill.maxLoss, unboundedProfit: aFill.profitUnbounded,
             maxProfitAtFill: aFill ? aFill.maxProfit : null,
           });
           if (!qf.liquidity.checked) cutFloors.oiSkipped.add(tk);
@@ -2964,9 +2982,8 @@ export default function OptionsStrategyLab() {
           // THE ONE CHANCE. This was `probProfit(a.curve, sp, ivA, d2) || 0` — a
           // closed form at a risk-neutral drift, and `|| 0` turning a chance
           // the app could not work out into a confident zero.
-          const mc = chanceFor(a, { ticker: tk, legs: pr.legs, spot: sp, dte: d2, expKey: ek });
+          const mc = chanceFor(aFill, { ticker: tk, legs: pr.legs, spot: sp, dte: d2, expKey: ek });
           const pop = mc ? mc.pop : null;
-          const unit = Math.abs(a.maxLoss);
           // THE SIZE HAS ONE HOME AND THIS WAS A SECOND ONE. A hand-rolled
           // division, in a file that already imports `scaleStrategy()` — and
           // it divided by the PREMIUM on a debit and by the RISK on a credit
@@ -2981,7 +2998,9 @@ export default function OptionsStrategyLab() {
              "l'app propone anche altro". It is GROUPED now — the second
              section names it and says what it missed — and the floors are
              still the only thing that REMOVES. */
-          out.push({ tk, sent, name: pr.name, legs: pr.legs, expKey: ek, dte: d2, a, aFill, mc, pop, n, spot: sp,
+          // `a` IS THE FILL READING NOW (PR #40): every card, picture and
+          // candidate below reads it, so none of them can print the mid.
+          out.push({ tk, sent, name: pr.name, legs: pr.legs, expKey: ek, dte: d2, a: aFill, aFill, mc, pop, n, spot: sp,
             // AND THE EXPECTED VALUE IS THE SIMULATION'S OWN MEAN, times the
             // size. It was `pop * a.maxProfit * n`: the best case weighted by
             // the chance, which is the expected value of nothing the app
@@ -2991,13 +3010,13 @@ export default function OptionsStrategyLab() {
             // The row is still shown — grouped, with its reason — so the
             // figure beside it has to describe ONE combination rather than
             // none of them.
-            ev: mc && !a.profitUnbounded ? mc.ev * Math.max(1, n) : null });
+            ev: mc && !aFill.profitUnbounded ? mc.ev * Math.max(1, n) : null });
         }
       }
       // Ranking: valore atteso CORRETTO dal segnale a 4 fattori, e i CONFLICT in
       // fondo comunque (PRD §7). Le funzioni pure stanno in src/signals.js.
       const ranked = out.map((o) => {
-        const pr = evProfile(o.mc, o.a.maxProfit, o.a.maxLoss);
+        const pr = evProfile(o.mc, o.aFill.maxProfit, o.aFill.maxLoss);
         return withSignalRank({ ...o, ev100: pr ? pr.ev100 : -999, tag: pr?.tag }, fz[o.tk], sentimentDirection(o.sent));
       }).sort(compareCandidates);
       setMulti((m) => ({ ...m, busy: false, res: ranked.slice(0, 8),
@@ -3447,9 +3466,10 @@ export default function OptionsStrategyLab() {
             }
             // THE ONE CHANCE, from the same expression the Shortlist, the
             // Radar, Build and the autopilot use.
-            const mc = chanceFor(a, { ticker: tk, legs: pr.legs, spot: sp, dte: d2, expKey: ek });
+            const aFill = atFillPrice(pr.legs, a, { spot: sp, dte: d2, iv: getU(tk).iv, q: qq });
+            const mc = chanceFor(aFill, { ticker: tk, legs: pr.legs, spot: sp, dte: d2, expKey: ek });
             const pop = mc ? mc.pop : null;
-            const unit = Math.abs(a.maxLoss);
+            const unit = Math.abs(aFill.maxLoss);
             if (unit > ans.risk) continue;   // it does not fit the budget: not a road
             // THE QUALITY FLOORS (src/rules.js). A structure that clears every
             // other rule can still be a price on a contract nobody trades, or a
@@ -3458,12 +3478,11 @@ export default function OptionsStrategyLab() {
             // emptied the board rather than shrugging at an empty page.
             // The crossing floor (PR #39) reads the best case at the price that
             // fills, from the same expression every card uses.
-            const aFill = atFillPrice(pr.legs, a, { spot: sp, dte: d2, iv: getU(tk).iv, q: qq });
             const qf = qualityFloor({
               openInterest: a.legPx.map((l) => l.oi), peerOpenInterest: peers, level: liqLevel,
               // ...and the LEGS, for the combination spread floor beside it.
               quotes: quotesOf(a), legs: pr.legs,
-              maxProfit: a.maxProfit, maxLoss: a.maxLoss, unboundedProfit: a.profitUnbounded,
+              maxProfit: aFill.maxProfit, maxLoss: aFill.maxLoss, unboundedProfit: aFill.profitUnbounded,
               maxProfitAtFill: aFill ? aFill.maxProfit : null,
             });
             if (!qf.liquidity.checked) floors.oiUnavailable.add(tk);
@@ -3478,10 +3497,10 @@ export default function OptionsStrategyLab() {
               floors.markets.add(tk);
               continue;
             }
-            const pr2 = evProfile(mc, a.maxProfit, a.maxLoss);
+            const pr2 = evProfile(mc, aFill.maxProfit, aFill.maxLoss);
             pool.push({
-              tk, sent, pr, a, mc, pop, unit, ek, spot: sp, dte: d2,
-              ev100: pr2 ? pr2.ev100 : -999, rr: rewardRisk(a.maxProfit, a.maxLoss),
+              tk, sent, pr, a: aFill, mc, pop, unit, ek, spot: sp, dte: d2,
+              ev100: pr2 ? pr2.ev100 : -999, rr: rewardRisk(aFill.maxProfit, aFill.maxLoss),
               risk: unit, fused: r.fused,
             });
           }
@@ -5232,33 +5251,19 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   It GROUPS; the floors above are what REMOVES. Membership is
                   derived on every render and never stored on a candidate. */}
               {(() => {
-                const built = shortlist.rows.map(({ p, a }) => {
-                  // `rewardRisk()` and never a division here: a ratio taken
-                  // against a max loss the app could not read printed
-                  // "6748644041614687.00" on BOIL. Below the minimum it is "—".
-                  const rr = rewardRisk(a.maxProfit, a.maxLoss);
-                  // THE ONE CHANCE. The row and the Build panel below it are
-                  // the same object for the same structure, seeded from it.
-                  const mcRow = chanceFor(a, { ticker, legs: p.legs, spot, dte, expKey });
-                  const pop = mcRow ? mcRow.pop : null;
-                  // One shape for everything that can be compared or kept
-                  // (src/path.js), so a road, a shortlist row and a
-                  // multi-market hit are the same kind of thing here.
-                  const bands = payoffBands({ legs: p.legs, entryNet: a.entry, spot });
-                  const cand = candidateOf({ name: p.name, legs: p.legs, a, pop, dte, expKey,
+                const built = shortlist.rows.map(({ p, a, aFill }) => {
+                  /* >>> ONE SET OF NUMBERS (PR #40, TASK 0). <<< Every figure
+                     on this card — the four, the chance, the picture and the
+                     candidate that is compared, kept or taken to Build — is
+                     read off `aFill`: `analyze()` at `fillNet()`, which is the
+                     price the ticket seeds to, to the cent. The chance and the
+                     picture used to be read at the MID beside risk and profit
+                     at the fill: 48% here, 46% on Build, two break-evens. */
+                  const lf = listCardFigures(p.legs, { spot, dte, iv, q, ticker, expKey, seasonal: seasonalFor(ticker), a, aFill });
+                  const mcRow = lf.mc, pop = lf.pop, bands = lf.bands;
+                  const cand = candidateOf({ name: p.name, legs: p.legs, a: aFill, pop, dte, expKey,
                     ...seasonalStampFields(mcRow), ...chanceDrawFields(mcRow) },
-                  // NO `sigma` FROM THE REALISED TABLE HERE ANY MORE. The two
-                  // numbers a compare picture is drawn at are the two the
-                  // chance was computed at, and they come off `mcRow` above.
                   { ticker, spot, source: "shortlist" });
-                  /* >>> EVERY FIGURE ON THE CARD IS READ AT THE PRICE THAT
-                     FILLS (P10 §3-bis). <<< `a` stays the MID reading — a
-                     candidate is a structure and not yet a price, and the
-                     compare picture and the stamp are drawn from it. `aFill`
-                     is the same `analyze()` at `openLimitPrice()`, which is
-                     the number the ticket seeds to, so the card and the order
-                     agree by construction rather than by luck. */
-                  const aFill = atFillPrice(p.legs, a, { spot, dte, iv, q });
                   return { p, a, aFill, cand, bands, mcRow, pop,
                     rr: rewardRisk(aFill.maxProfit, aFill.maxLoss),
                     size: scaleStrategy(aFill, request.mode, request.amt) };
@@ -5282,7 +5287,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                             <CandidateActions
                               ticked={inCompare(compare, cand)} onTick={() => tickCompare(cand)}
                               saved={isSaved(cand)} onSave={() => saveCandidate(cand)}
-                              onBuild={() => applyPreset(p, a)} />
+                              onBuild={() => applyPreset(p, aFill, pop)} />
                           } />
                       );
                     }} />
@@ -5734,17 +5739,14 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
               </div>
               {optLeg && <OptionPanel occ={optLeg.occ} label={optLeg.label} quote={optLeg.quote} onClose={() => setOptLeg(null)} />}
 
-              {/* Reconciliation with the Shortlist: same trade, numbers always explained */}
-              {optRef && optRef.name === stratName && optRef.expKey === expKey && (() => {
-                const d = (A.entry - optRef.entry) * 100;
-                if (Math.abs(d) < 1) return (
-                  <div style={{ ...mono, fontSize: 10, color: T.green, marginTop: 10 }}>✓ Same numbers as the Shortlist (same live quotes, one contract).</div>
-                );
-                return (
-                  <div style={{ ...mono, fontSize: 10, color: T.amber, marginTop: 10 }}>
-                    ⚠ The price moved {fmt$(Math.abs(d))} {d > 0 ? "against you" : "in your favour"} since the Shortlist was drawn: the quotes refreshed in between. This one is the current price.
-                  </div>
-                );
+              {/* THE CARD AGAINST BUILD, EVERY FIGURE (PR #40, TASK 0). It
+                  compared the mid's entry alone and printed "Same numbers as
+                  the Shortlist" over a risk of $68 against the card's $62. */}
+              {optRef && optRef.card && optRef.name === stratName && optRef.expKey === expKey && (() => {
+                const r = reconcileFigures(optRef.card, figureSet(AE, chance ? chance.pop : null));
+                return r ? (
+                  <div style={{ ...mono, fontSize: 10, color: r.same ? T.green : T.amber, marginTop: 10, lineHeight: 1.6 }}>{r.line}</div>
+                ) : null;
               })()}
               {/* ============ ONE PRICE, AND WHAT CROSSING COSTS (P10 §1).
                   ============ The owner's reading of the whole product: "is it
@@ -5774,7 +5776,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                     <div style={{ ...sansUI, fontSize: 15, fontWeight: 700, color: T.ink }}>
                       {ticker} · {stratName}
                     </div>
-                    <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 2 }}>{legsLine(legs)}</div>
+                    <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 2 }}>{legsLine(legs)} · per contract</div>
                     <div style={{ display: "flex", gap: 12, marginTop: 10, flexWrap: "wrap" }}>
                       {[[AE.entry >= 0 ? "YOU PAY" : "YOU RECEIVE", fmt$(Math.abs(AE.entry) * 100), T.ink],
                         ["MAX LOSS", fmt$(AE.maxLoss), T.red],
@@ -5860,7 +5862,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   The comment that follows is the one PR #28 wrote here. ---- */}
               <DeskSheet open={deskSheet === "numbers"} eyebrow="THE NUMBERS"
                 title={`${ticker} · ${stratName}`}
-                sub={`Every figure at the price that will be sent \u00b7 ${CARD_CURRENCY}`}
+                sub={`Every figure at the price that will be sent, per contract \u00b7 ${CARD_CURRENCY}`}
                 onClose={() => setDeskSheet(null)}>
               {/* >>> EVERY FIGURE HERE IS WORKED OUT AT THE PRICE THAT WILL BE
                   SENT, NOT AT THE MID. <<< Read on the owner's phone, UNG
@@ -5956,7 +5958,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                     ticker={ticker} dte={dte} spot={spot}
                     sigma={A.legPx.length ? A.legPx.reduce((x, y) => x + y.iv, 0) / A.legPx.length : iv}
                     driftM={seasNow}
-                    curve={A.curve} legs={legs} breakevens={A.breakevens}
+                    curve={AE.curve} legs={legs} breakevens={AE.breakevens}
                     onTa={(t2) => setTa((m) => ({ ...m, [ticker]: t2 }))}
                   />
                 </div>
@@ -5989,7 +5991,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
               <div style={{ height: 240, marginTop: 8 }}>
                 <ResponsiveContainer>
 
-                  <LineChart data={A.curve} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+                  <LineChart data={AE.curve} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
                     <CartesianGrid stroke={T.line} strokeDasharray="3 3" />
                     <XAxis dataKey="s" stroke={T.dim} tick={{ fontSize: 10, fontFamily: "monospace" }} />
                     <YAxis stroke={T.dim} tick={{ fontSize: 10, fontFamily: "monospace" }} width={52} />

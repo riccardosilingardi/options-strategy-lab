@@ -273,8 +273,10 @@ export function CandidateCard({
           <Gauge bands={bands} size={96} ticker={ticker || "this market"} />
         </div>
       )}
-      {/* FOUR FIGURES, ALWAYS THE SAME FOUR, ALWAYS IN THE SAME PLACES. */}
-      <div style={{ display: "flex", gap: 10, marginTop: 8, flexWrap: "wrap" }}>
+      {/* FOUR FIGURES, ALWAYS THE SAME FOUR, ALWAYS IN THE SAME PLACES —
+          and THEIR UNIT, said once above them (PR #40, TASK 0). */}
+      <div style={{ ...mono, fontSize: 8.5, letterSpacing: "0.08em", color: T.dim, marginTop: 8 }}>PER CONTRACT</div>
+      <div style={{ display: "flex", gap: 10, marginTop: 3, flexWrap: "wrap" }}>
         <CardFigure k="RETURN ON RISK" v={rr == null ? "\u2014" : `${Math.round(rr * 100)}%`} c={T.amber} />
         <CardFigure k="CHANCE" v={chanceText(pop)} c={pop >= 0.5 ? T.green : T.violet} />
         <CardFigure k="PROFIT" v={noCeiling ? NO_CEILING : money(profit)} c={T.green} />

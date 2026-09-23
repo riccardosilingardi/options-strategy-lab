@@ -1359,7 +1359,10 @@ export function CompareFigure({ items = [], height, width, style }) {
 export const exitPlanSentence = () =>
   `Close at ${pctText(RULES.takeProfitPct)} of max gain, or at ${RULES.exitDTE} days to expiration.`;
 
-export const exitPlanDetail = (maxProfit) => {
+export const exitPlanDetail = (maxProfit, contracts = 1) => {
+  // EVERY MONEY FIGURE SAYS ITS UNIT (PR #40, TASK 0): the confirm step said
+  // "$66 of profit" for one contract beside "$924 of $1,848" for fourteen.
+  const n = Math.max(1, Math.round(Number(contracts) || 1));
   const tail = `A loss of ${pctText(RULES.stopLossPct)} of the maximum raises a warning, never an ` +
     `automatic close. These are chosen now and not renegotiated while the position is open.`;
   // NO CEILING MEANS NO TARGET. Half of an unknown is not $0, and printing
@@ -1373,6 +1376,6 @@ export const exitPlanDetail = (maxProfit) => {
       `dollar figure the app can put here — the ${RULES.exitDTE}-day mark is the exit that still applies, and ` +
       `a profit target on this trade is yours to set. ${tail}`;
   }
-  return `That is ${money(RULES.takeProfitPct * Math.abs(maxProfit))} of profit, or the ${RULES.exitDTE}-day mark, ` +
+  return `That is ${money(RULES.takeProfitPct * Math.abs(maxProfit) * n)} of profit ${n > 1 ? `for ${n}` : "per contract"}, or the ${RULES.exitDTE}-day mark, ` +
     `whichever comes first. ${tail}`;
 };

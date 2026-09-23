@@ -3201,8 +3201,78 @@ export function fillNet(legs, quotes) {
   const book = comboBook(legs, quotes);
   if (!book || !book.ok) return null;
   const p = openLimitPrice({ netMid: book.mid, spread: book.spread });
-  return p ? p.net : null;
+  if (!p) return null;
+  /* >>> ON THE CENT, BECAUSE AN ORDER IS (PR #40, TASK 0). <<< The owner read
+     SOYB 28/30C at $62 on the card and $68 on Build: two readings of one trade.
+     The card read `openLimitPrice()` to four decimals while the ticket sends
+     whole cents, so the two could never be the same number. Rounded here, and
+     `legLimitSeed()` below lands its legs on exactly this figure, so the card,
+     the Build screen, the gate and the order read ONE price. Never flipped and
+     never zero: a cent in the same direction is the floor, as in
+     `openLimitPrice()`. */
+  const dir = Math.sign(p.net) || 1;
+  const cents = onTick(p.net);
+  return Math.sign(cents) === dir && Math.abs(cents) >= 0.01 ? cents : dir * 0.01;
 }
+
+/* =====================================================================
+   ONE SET OF NUMBERS (PR #40, TASK 0).
+
+   The owner's live screens, SOYB 28/30C 2026-11-20: the card said $62 risk /
+   $139 profit / 48%, Build said $68 / $132 / 46%, the card's break-even and the
+   chart's were 28.68 and 28.61, and Build printed "Same numbers as the
+   Shortlist" between them because it compared ONE figure — the mid's entry —
+   with the mid's entry.
+
+   `figureSet()` is the list of figures a card prints, read off one analysis
+   and one chance; `reconcileFigures()` compares EVERY one of them. Money is
+   PER CONTRACT on both sides and the line says so.
+===================================================================== */
+
+/** The figures a card prints, per contract, off one analysis and one chance. */
+export function figureSet(a, pop = null) {
+  if (!a) return null;
+  return {
+    entry: known(a.entry) ? Number(a.entry) : null,
+    maxLoss: known(a.maxLoss) ? Number(a.maxLoss) : null,
+    maxProfit: a.profitUnbounded || !known(a.maxProfit) ? null : Number(a.maxProfit),
+    profitUnbounded: !!a.profitUnbounded,
+    breakevens: (a.breakevens || []).filter(known).map(Number),
+    pop: known(pop) ? Number(pop) : null,
+  };
+}
+
+/** Each figure written the way the screen writes it, so "same" means same on screen. */
+const figureTexts = (f) => ({
+  price: f.entry == null ? "—" : `${money(Math.abs(f.entry) * 100)} ${f.entry < 0 ? "credit" : "debit"}`,
+  risk: f.maxLoss == null ? "—" : money(Math.abs(f.maxLoss)),
+  profit: f.profitUnbounded ? NO_CEILING : f.maxProfit == null ? "—" : money(f.maxProfit),
+  chance: chanceText(f.pop),
+  "break-even": f.breakevens.length ? f.breakevens.map((b) => b.toFixed(2)).join(" · ") : "—",
+});
+
+/**
+ * @returns {{ same, rows: {k, card, build, same}[], line }} — every printed
+ *   figure, the card's against Build's, and one line saying which moved.
+ */
+export function reconcileFigures(card, build) {
+  if (!card || !build) return null;
+  const c = figureTexts(card), b = figureTexts(build);
+  const rows = Object.keys(c).map((k) => ({ k, card: c[k], build: b[k], same: c[k] === b[k] }));
+  const moved = rows.filter((r) => !r.same);
+  const line = moved.length === 0
+    ? `✓ Same figures as the card, per contract: ${rows.map((r) => `${r.k} ${r.card}`).join(" · ")}.`
+    : `⚠ Moved since the card, per contract: ${moved.map((r) => `${r.k} ${r.card} → ${r.build}`).join(" · ")}. ` +
+      `The quotes refreshed or the price was changed in the ticket; these are the ones that will be sent.`;
+  return { same: moved.length === 0, rows, line };
+}
+
+/** A money figure with its unit, always: per contract, or for N. */
+export const unitMoney = (x, n = 1) => {
+  const k = Math.max(1, Math.round(Number(n) || 1));
+  if (!known(x)) return "—";
+  return k === 1 ? `${money(x)} per contract` : `${money(Number(x) * k)} for ${k}`;
+};
 
 /** The section header that says which price every figure below is read at. */
 export const fillPriceHeading = () =>
@@ -4857,7 +4927,7 @@ export function legLimitSeed(legs = [], quotes = [], { slippage = OPEN_LIMIT_SLI
   const ls = Array.isArray(legs) ? legs : [];
   if (!ls.length) return null;
   const slip = Math.max(0, Number(slippage) || 0);
-  return ls.map((l, i) => {
+  const seed = ls.map((l, i) => {
     const q = (quotes || [])[i] || {};
     const b = Number(q.bid), a = Number(q.ask);
     if (!Number.isFinite(b) || !Number.isFinite(a) || !(b > 0) || !(a > 0) || a < b) {
@@ -4870,6 +4940,27 @@ export function legLimitSeed(legs = [], quotes = [], { slippage = OPEN_LIMIT_SLI
     // Cent rounding can push a concession a hair past the touch; it never may.
     return Math.min(a, Math.max(b, p));
   });
+  /* >>> AND THE LEGS SUM TO THE CARD'S PRICE, TO THE CENT (PR #40, TASK 0). <<<
+     Rounding each leg separately left the sum up to a cent a leg away from
+     `fillNet()`, so the card and the ticket could print two prices for one
+     trade. The remainder goes onto the last one-lot leg that can take it
+     inside its own bid and ask; a leg that cannot is left alone, and then the
+     two agree within a tick, which is what they did before. Only when every
+     leg is two-sided: with an unquoted leg there is no combination price. */
+  const target = slip === OPEN_LIMIT_SLIPPAGE ? fillNet(ls, quotes) : null;
+  if (target == null || seed.some((x) => x == null)) return seed;
+  const sum = ls.reduce((acc, l, i) => acc + Math.sign(+(l && l.side) || 1) * (Math.abs(Math.round(+(l && l.qty) || 0)) || 1) * seed[i], 0);
+  const rest = onTick(target - sum);
+  if (!rest) return seed;
+  for (let i = ls.length - 1; i >= 0; i--) {
+    const qty = Math.abs(Math.round(+(ls[i] && ls[i].qty) || 0)) || 1;
+    if (qty !== 1) continue;
+    const side = Math.sign(+(ls[i] && ls[i].side) || 1);
+    const q = (quotes || [])[i] || {};
+    const next = onTick(seed[i] + side * rest);
+    if (next >= Number(q.bid) && next <= Number(q.ask)) { seed[i] = next; break; }
+  }
+  return seed;
 }
 
 /**
@@ -5278,8 +5369,7 @@ export function tradeCard({
     : "";
   const riskLine = risk == null
     ? `The worst case could not be computed, so there is nothing to measure against ${owned} per-trade limit. Nothing is sent.`
-    : `${money(risk)}${atPrice}, and that is the most this can lose — fixed the moment it opens, never a dollar more${
-      n > 1 ? ` (${n} combinations)` : ""}.${
+    : `${n > 1 ? `${money(risk)} for ${n}` : `${money(risk)} per contract`}${atPrice}, and that is the most this can lose — fixed the moment it opens, never a dollar more.${
       perTrade != null && cap ? ` That is ${pctText(risk / cap)} of capital, ${risk > perTrade ? "PAST" : "inside"} ${owned} ${money(perTrade)} per-trade limit.` : ""}${
       known(notional) ? ` It controls ${money(notional)} of ${ticker}: you can only lose the ${money(risk)}, and the position moves with all of it.` : ""}`;
 
@@ -5291,7 +5381,7 @@ export function tradeCard({
   const often = pop == null
     ? `Not known: without a live price, a horizon and a seasonal reading there is no simulation to quote, and a missing chance is not a confident zero.`
     : `${chanceInTen(pop)} — ${chanceText(pop)} of ${Number(chance.runs || 0).toLocaleString("en-US")} simulated runs finish in profit AT EXPIRY${
-      known(chance.ev) ? `, and the average of all of them is ${signedMoney(Number(chance.ev) * n)}` : ""}. ` +
+      known(chance.ev) ? `, and the average of all of them is ${signedMoney(Number(chance.ev) * n)} ${n > 1 ? `for ${n}` : "per contract"}` : ""}. ` +
       `That is where it ENDS. How it ends under your own exit rule is walked day by day, and the app only does ` +
       `that once the position is open.${chanceNote ? ` ${chanceNote}` : ""}`;
 
@@ -5299,7 +5389,7 @@ export function tradeCard({
      rather than an order, because that is what `RULES.stopLossEnforcement`
      says and what `autopilotVerdict()` does. */
   const exits = `${best != null
-    ? `At ${pctText(RULES.takeProfitPct)} of the best case — ${money(best * RULES.takeProfitPct)} of ${money(best)} — or at `
+    ? `At ${pctText(RULES.takeProfitPct)} of the best case — ${money(best * RULES.takeProfitPct)} of ${money(best)} ${n > 1 ? `for ${n}` : "per contract"} — or at `
     : `This structure has ${NO_CEILING}, so there is no take-profit figure to aim at. It exits at `}` +
     `${RULES.exitDTE} days to expiration${room != null ? `, ${room} day${room === 1 ? "" : "s"} from now` : ""}` +
     `${best != null ? ", whichever comes first" : ""}. Chosen now and frozen: the plan is not renegotiated while the ` +

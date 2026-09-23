@@ -1073,7 +1073,7 @@ export function ConfirmSteps({
           {exitPlanSentence()}
         </div>
         <div style={{ ...sans, fontSize: 13.5, color: T.mut, marginTop: 6, lineHeight: 1.5 }}>
-          {exitPlanDetail(c.maxProfit)}
+          {exitPlanDetail(c.maxProfit, contracts)}
         </div>
       </Card>
 

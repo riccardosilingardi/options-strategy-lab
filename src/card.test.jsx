@@ -14,7 +14,7 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { CandidateCard, SplitSections, RequestControls, MissLine } from "./card.jsx";
-import { requestOf, RULES, fillNet, comboBook, openLimitPrice, rewardRisk } from "./rules.js";
+import { requestOf, RULES, fillNet, comboBook, openLimitPrice, rewardRisk, onTick } from "./rules.js";
 import { payoffBands } from "./visuals.jsx";
 
 const ok = [], bad = [];
@@ -132,7 +132,7 @@ check("THE PRICE NOTE IS OPT-IN, because a mid-priced row may not claim otherwis
 check("THE PRICE THAT FILLS IS openLimitPrice() ON comboBook(), AND NOTHING ELSE", () => {
   const book = comboBook(LEGS, QUOTES);
   const expected = openLimitPrice({ netMid: book.mid, spread: book.spread }).net;
-  if (fillNet(LEGS, QUOTES) !== expected) throw new Error("fillNet() is a second arithmetic");
+  if (fillNet(LEGS, QUOTES) !== onTick(expected)) throw new Error("fillNet() is a second arithmetic");
   // NO BOOK IS NO PRICE, never a price of zero.
   if (fillNet(LEGS, [{ bid: 1.0, ask: 1.2 }, {}]) !== null) throw new Error("an unquoted leg produced a price");
 });

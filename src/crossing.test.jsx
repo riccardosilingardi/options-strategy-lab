@@ -64,11 +64,11 @@ check("THE FLOOR BITES on the fixtures, and what it removes is counted as crossi
   truthy(r.removedAlone <= r.removed, "a floor alone never removes more than the floor");
 });
 
-check("XLE 60/57 put credit: $9 of crossing against $71.25 of maximum profit, and it passes", () => {
+check("XLE 60/57 put credit: $9 of crossing against $71 of maximum profit (the $0.71 credit on the cent), and it passes", () => {
   const xle = ALL.find((c) => c.fixture.startsWith("XLE"));
   truthy(xle, "the owner's XLE reading is a fixture");
   near(xle.qf.crossing.cost, 9, 1e-9, "crossing cost");
-  near(xle.qf.crossing.maxProfit, 71.25, 0.01, "maximum profit at the price that fills (after 0a)");
+  near(xle.qf.crossing.maxProfit, 71, 0.01, "maximum profit at the price that fills, on the cent the ticket sends (PR #40)");
   eq(xle.qf.crossing.pass, true, "0.126 of it clears 0.5");
   eq(xle.shown, true, "and it is offered");
 });

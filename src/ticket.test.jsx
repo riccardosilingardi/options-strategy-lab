@@ -925,7 +925,8 @@ check("ON A CREDIT the leg-slider seeds and the combination suggestion agree to 
   const book = comboBook(legs, quotes);
   const sugg = openLimitPrice({ netMid: book.mid, spread: book.spread });
   near(seeded, sugg.net, 0.011, "the seed and the suggestion are the same price, sign included");
-  near(fillNet(legs, quotes), sugg.net, 1e-9, "and the card reads that same suggestion");
+  near(fillNet(legs, quotes), sugg.net, 0.0051, "and the card reads that same suggestion, on the cent");
+  near(fillNet(legs, quotes), seeded, 1e-9, "and the legs sum to it exactly");
   if (Math.sign(seeded) !== -1 || Math.sign(sugg.net) !== -1) throw new Error("a credit stays a credit");
 });
 

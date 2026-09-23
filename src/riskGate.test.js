@@ -1495,9 +1495,12 @@ test("ONE CHANCE — `chanceOf` is spelled once in App.jsx and nowhere in pro.js
   const app = codeOf("App.jsx");
   assert.equal((app.match(/chanceOf\(/g) || []).length, 1,
     "chanceOf is called in exactly one place in App.jsx: inside chanceCheckOf");
-  const uses = (app.match(/chanceFor\(/g) || []).length;
+  // PR #40: the list card and Build read it through `listCardFigures()` and
+  // `buildFigures()`, which call `chanceCheckOf` directly; `chanceFor` is the
+  // component's binding of the same expression. Both count.
+  const uses = (app.match(/\b(chanceFor|chanceCheckOf)\(/g) || []).length;
   assert.ok(uses >= 5,
-    `the Radar, the Shortlist, Build, the record and the Guardian all read it (found ${uses})`);
+    `the list, Build, the record and the Guardian all read it (found ${uses})`);
   const pro = codeOf("pro.jsx");
   assert.equal((pro.match(/chanceOf\(/g) || []).length, 0,
     "the Guardian takes the chance as a prop, it does not compute one");
