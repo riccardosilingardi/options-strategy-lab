@@ -66,7 +66,8 @@ Every rule below is code, not a prompt. The numbers live in `src/rules.js` (`RUL
 - A candidate must have a real price (every long leg bid above zero, net at least $0.05 a
   share), a worst case that is actually a loss, a price the model does not contradict by more
   than 4×, and must clear the quality floors: liquidity (open interest against its own expiry),
-  leg spread (≤35% of mid), combination spread (≤100% of net) and reward-to-risk (≥0.25).
+  leg spread (≤35% of mid), combination spread (≤100% of net), crossing cost (the combination
+  spread in and out, ≤50% of the maximum profit at the price that fills) and reward-to-risk (≥0.25).
 - A contract the chain never listed is refused by the gate.
 - Every figure on a card is worked out at the price that will fill, not at the mid.
 
@@ -92,7 +93,8 @@ v1 is done when all three are true, each observed on the owner's real account an
 - **(c)** The owner **reads each open position's action in five seconds**: HOLD, CLOSE with its
   reason, or WARNING.
 
-(c) is built (ROADMAP PR #38); it is the owner's reading. PR #39 is the last v1 change.
+(c) is built (ROADMAP PR #38); it is the owner's reading. PR #39, the last v1 change, is shipped:
+v1 now waits only on the owner's three readings.
 
 ## 4. NOT VERIFIED
 
@@ -105,17 +107,22 @@ can settle it; no test in this repository can.
    `/v2/positions` payload, and whether "close order working" clears when Alpaca reports the
    fill. The opening sign was wrong for four pull requests and only a fill found it. This is v1 (b).
 2. **OWNER CHECK — J-0003 has not filled.** Is the indicative combination ask systematically
-   inside the real one on thin chains, and by how much?
+   inside the real one on thin chains, and by how much? Its cancel is `pending_cancel`: whether
+   the card shows "a cancel is already waiting" and clears when Alpaca reports it canceled has
+   only been tested on fixtures (`cancelOutcome()`).
 3. **OWNER CHECK — no opening order has yet filled at the intended price** since the sign fix.
-   This is v1 (a).
+   This is v1 (a). **And no credit order has filled at the corrected suggested limit** (PR #39,
+   0a: a credit used to be suggested above the mid, on the side that never fills).
 4. **OWNER CHECK — nobody has read the split list, the cards or the controls on a real screen,**
-   nor the Positions card's one action (HOLD / CLOSE / WARNING / NO QUOTE). Whether it reads in
+   nor the Positions card's one action (HOLD / CLOSE / WARNING / NO QUOTE / NOT ON ALPACA). Whether it reads in
    five seconds is the owner's answer to give (v1 c).
 5. **OWNER CHECK — the quantity fields have not been tried on a real phone.** They are tested
    by driving the component's handlers, not by a touch keyboard.
 6. **OWNER CHECK — `upgradeHolding()` has never run against a real `/v2/positions` payload.**
-   Nor has the broker-preferred P&L; both are tested on hand-built fixtures.
+   Nor has the broker-preferred P&L, nor "Not on Alpaca" (`legsNotHeld()`, PR #39 0c): all are
+   tested on hand-built fixtures only.
 7. **Chosen, not measured:** `modelDisagreementRatio` 4, `maxComboSpreadShareOfNet` 1.0,
+   `maxCrossingShareOfMaxProfit` 0.5 (measured on fixtures only: `scripts/measure-crossing.mjs`),
    `openLimitSlippage` and `closeLimitSlippage` 0.25, `watchAttentionShare` 0.35,
    `autopilotConfidence` 70, `fallbackIV` and `fallbackSigma` 0.25, and the four chance-slider
    constants (`chanceAskMin` 0.20, `chanceAskMax` 0.80, `chanceAskStep` 0.05,
@@ -130,6 +137,9 @@ can settle it; no test in this repository can.
 
 One line each. Detail for every item is in `docs/history/ROADMAP.md`.
 
+- **Radar request controls** — one control per question: the single-ticker expiry and the
+  multi-search horizon are two answers to one question on one screen; direction and "season
+  decides" likewise.
 - **P2 full** — rank proposals by edge at the price that fills, not by score.
 - **P7** — learn about fills from Alpaca's `trade_updates` stream server-side, instead of polling.
 - **P8** — more indicators and timeframes, only after the owner has used the current ones.

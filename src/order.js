@@ -528,3 +528,68 @@ export function alpacaErrorText(e) {
   }
   return err.message || "The order was not sent, and the app could not read why.";
 }
+
+/* ------------------------------------------------------------------
+   4) A CANCEL IS A REQUEST, NOT AN OUTCOME
+
+   Read on the owner's account, 23 Sep 2026, at about 04:00 New York. He
+   tapped Cancel on J-0003. Alpaca accepted the request and put the order in
+   `pending_cancel`, which completes when the options session opens. The app
+   said "Order cancelled." — false — and the Cancel button stayed live. The
+   second tap came back HTTP 422, code 42210000, "order pending cancel", and
+   the app printed "The cancellation did not go through" over a cancel that
+   had gone through and was simply waiting.
+
+   THREE FACTS, THREE SENTENCES, ONE HOME. Both call sites (the desk's order
+   list and the Positions card) read this, and no other copy of these
+   sentences exists:
+     - a 2xx reply means Alpaca has the REQUEST. It is "Cancel requested".
+     - an order is CANCELLED only when Alpaca reports the status `canceled`.
+     - a 422 that says pending cancel is a STATE, not an error: a cancel is
+       already waiting, and it completes when the options session opens.
+   Until Alpaca reports `canceled` the order is still working and still counts
+   in exposure: `orderLifecycle()` reads `pending_cancel` as working, and
+   nothing here writes a status the broker did not report.
+------------------------------------------------------------------ */
+
+const PENDING_CANCEL_RE = /pending[ _]?cancel/i;
+
+/**
+ * What a cancel tap came to, or what state a cancel is in.
+ *
+ * @param ok     true when the DELETE came back 2xx
+ * @param error  the error `alpacaReq` threw, with `status` and `body`
+ * @param order  `{ status, cancelRequested }` — an Alpaca order, or a record's
+ *               `alpacaStatus` and the time a cancel was requested on it
+ * @returns {?{ kind, waiting, headline }} kind is "canceled" | "pending" |
+ *   "requested" | "failed"; `waiting` true means show no Cancel and no
+ *   Re-price. Null when there is no cancel to speak of.
+ */
+export function cancelOutcome({ ok = false, error = null, order = null } = {}) {
+  const status = String(order?.status ?? "").toLowerCase();
+  if (status === ORDER_STATUS.CANCELED || status === "cancelled") {
+    return { kind: "canceled", waiting: false,
+      headline: `Cancelled: Alpaca reports the order canceled. Nothing was bought and nothing is working.` };
+  }
+  const said = error ? `${alpacaBodySentence(error.body)} ${error.message || ""}` : "";
+  if (status === ORDER_STATUS.PENDING_CANCEL || (error && Number(error.status) === 422 && PENDING_CANCEL_RE.test(said))) {
+    return { kind: "pending", waiting: true,
+      headline: `A cancel is already waiting at Alpaca. It completes when the options session opens ` +
+        `(9:30 New York); until Alpaca reports it canceled, the order still counts in your exposure.` };
+  }
+  if (error) {
+    return { kind: "failed", waiting: false, headline: `The cancellation did not go through: ${alpacaErrorText(error)}` };
+  }
+  // A cancel requested on an order that has since FILLED or otherwise ended is
+  // not waiting for anything: the broker's status decides, not the request.
+  if (!ok && status && orderLifecycle({ status }) !== "working") return null;
+  if (ok || order?.cancelRequested) {
+    return { kind: "requested", waiting: true,
+      headline: `Cancel requested. Alpaca has the request; until it reports the order canceled, the order ` +
+        `still counts in your exposure.` };
+  }
+  return null;
+}
+
+/** True while a cancel is on its way: show the sentence, not Cancel or Re-price. */
+export const cancelWaiting = (order) => !!(cancelOutcome({ order })?.waiting);

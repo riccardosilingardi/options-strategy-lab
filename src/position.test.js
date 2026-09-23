@@ -6,8 +6,10 @@
 //   sendClose()       src/closeOrder.js — tap 2: sends exactly that, once
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { RULES, positionAction, remainingEdge, stopWarningHead, stopWarningSentence, sameCloseNote } from "./rules.js";
-import { prepareClose, sendClose, groupForRecord, holdingGroups, closeWorking, holdingLeg } from "./closeOrder.js";
+import { prepareClose, sendClose, groupForRecord, holdingGroups, closeWorking, holdingLeg, legsNotHeld } from "./closeOrder.js";
+import { journalEntry, journalPnl, countedPnl, journalPnlTotal, NOT_A_FILL, MARK_AT_CLOSE } from "./journal.js";
 import { DEMO_TOOLTIP } from "./demo.js";
 
 let passed = 0;
@@ -254,6 +256,98 @@ await test("a broker refusal comes back as the reason, and the close can be trie
   assert.equal(s.ok, false);
   assert.ok(/HTTP 422/.test(s.refusal), s.refusal);
   assert.equal(p.sent, false);
+});
+
+/* ---------------- 0c) NOT ON ALPACA ---------------- */
+
+// J-0002 as it was: XLE +1 59P / -1 62.5P, imported 21 Sep, held on the
+// record while a SUCCESSFUL sync of /v2/positions returned nothing at all.
+const J0002 = { id: 2, ref: "J-0002", ticker: "XLE", expKey: "2026-10-30", name: "Imported from Alpaca",
+  openedAt: "2026-09-21T14:00:00.000Z", alpacaHeld: true, alpacaLive: true, maxProfit: 101, maxLoss: -249,
+  legs: [{ side: 1, qty: 1, type: "put", strike: 59 }, { side: -1, qty: 1, type: "put", strike: 62.5 }], timeline: [] };
+const AFTER = Date.parse("2026-09-23T08:00:00Z");
+const J0002_HELD = [
+  { symbol: "XLE261030P00059000", qty: "1", unrealized_pl: "-20" },
+  { symbol: "XLE261030P00062500", qty: "-1", unrealized_pl: "-40" },
+];
+
+await test("NOT ON ALPACA — a successful sync holding none of the legs names both", () => {
+  const missing = legsNotHeld(J0002, { t: AFTER, positions: [] });
+  assert.deepEqual(missing, ["+1 59P", "-1 62.5P"]);
+});
+
+await test("NOT ON ALPACA — holding only SOME of the legs names the ones missing", () => {
+  assert.deepEqual(legsNotHeld(J0002, { t: AFTER, positions: [J0002_HELD[0]] }), ["-1 62.5P"]);
+  assert.deepEqual(legsNotHeld(J0002, { t: AFTER, positions: J0002_HELD }), [], "all held: nothing missing");
+  // The SIDE is part of the leg: a short 59P is not the long 59P on the record.
+  assert.deepEqual(legsNotHeld(J0002, { t: AFTER, positions: [{ symbol: "XLE261030P00059000", qty: "-1" }, J0002_HELD[1]] }), ["+1 59P"]);
+});
+
+await test("NOT ON ALPACA — UNKNOWN IS NOT 'NOTHING HELD': no sync, a failed one, or an old one change nothing", () => {
+  assert.equal(legsNotHeld(J0002, { t: 0, positions: [] }), null, "never synced (alSync.t is only set on success)");
+  assert.equal(legsNotHeld(J0002, null), null, "no sync state at all");
+  assert.equal(legsNotHeld(J0002, { t: Date.parse("2026-09-20T00:00:00Z"), positions: [] }), null,
+    "a sync from before the record was owned says nothing about it");
+  assert.equal(legsNotHeld({ ...J0002, alpacaHeld: false, alpacaLive: false }, { t: AFTER, positions: [] }), null,
+    "a record never tied to the broker (the app's own paper book) is not judged by it");
+  const fillLater = { ...J0002, alpacaHeld: false, alpacaLive: false, alpacaFilled: true,
+    timeline: [{ t: AFTER + 1000, type: "fill" }] };
+  assert.equal(legsNotHeld(fillLater, { t: AFTER, positions: [] }), null, "a sync older than the fill is not an answer");
+});
+
+await test("NOT ON ALPACA — positionAction(): action null with the reason; never HOLD, WARNING or CLOSE", () => {
+  const missing = legsNotHeld(J0002, { t: AFTER, positions: [] });
+  // Every state that would otherwise produce an action — including the 21-day
+  // exit, which is CLOSE even without a quote.
+  for (const st of [stateOf({ pnl: 60 }), stateOf({ pnl: -130 }), stateOf({ pnl: 10 }), stateOf({ pnl: null, dteLeft: 10 })]) {
+    const a = positionAction({ ...st, notHeld: missing });
+    assert.equal(a.action, null, "no action");
+    assert.equal(a.kind, "not-held");
+    assert.ok(/^Not on Alpaca: \+1 59P, -1 62\.5P are not in the account\./.test(a.line), a.line);
+  }
+  // null or [] changes nothing: the existing behaviour, exactly.
+  for (const notHeld of [null, []]) {
+    assert.equal(positionAction({ ...stateOf({ pnl: 60 }), notHeld }).action, "CLOSE");
+    assert.equal(positionAction({ ...stateOf({ pnl: 10 }), notHeld }).action, "HOLD");
+    assert.equal(positionAction({ ...stateOf({ pnl: null }), notHeld }).action, null);
+  }
+});
+
+await test("NOT ON ALPACA — filed with P&L null and 'not read from a fill'", () => {
+  const e = journalEntry({ pos: J0002, pnl: null, pnlNote: NOT_A_FILL, reason: { kind: "manual", text: "gone" } });
+  assert.equal(e.pnl, null);
+  assert.equal(e.pnlNote, "not read from a fill");
+  const jp = journalPnl(e);
+  assert.equal(jp.shown, null, "no figure is printed");
+  assert.equal(jp.note, "not read from a fill");
+  assert.equal(countedPnl(e), null, "and no sum counts it");
+});
+
+await test("JOURNAL — a figure filed with no broker closing order is the app's mark, and no sum counts it", () => {
+  // J-0002 as it is actually stored: -$133, "closing order · none". Not edited.
+  const stored = { ref: "J-0002", pnl: -133, closeOrderId: null };
+  const jp = journalPnl(stored);
+  assert.equal(jp.shown, -133, "the stored figure is still shown");
+  assert.equal(jp.note, MARK_AT_CLOSE);
+  assert.ok(/the app's mark at close — not a fill/.test(jp.note));
+  assert.equal(jp.counted, null);
+  const filled = { ref: "J-0009", pnl: 42, closeOrderId: "abc" };
+  assert.equal(countedPnl(filled), 42, "a close with a broker order counts");
+  const sum = journalPnlTotal([stored, filled, { pnl: null, pnlNote: NOT_A_FILL }]);
+  assert.equal(sum.total, 42, "only the broker-closed figure is summed");
+  assert.equal(sum.counted, 1);
+  assert.equal(sum.excluded, 2);
+  assert.equal(journalPnlTotal([stored]).total, null, "a sum of nothing counted is unknown, not zero");
+});
+
+await test("NOT ON ALPACA — WIRED: the card's action, the P&L, the filing and the Journal row read the helpers", () => {
+  const app = readFileSync(new URL("./App.jsx", import.meta.url), "utf8");
+  assert.ok(/const notHeld = legsNotHeld\(p, alSync\)/.test(app), "posAlerts asks legsNotHeld() with the sync state");
+  assert.ok(/positionAction\(\{[^}]*notHeld \}\)/.test(app), "and hands it to positionAction()");
+  assert.ok(/notHeld && notHeld\.length \? \{ pnl: null/.test(app), "the P&L is null, never the model mark");
+  assert.ok(/pnlNote: notOnAlpaca \? NOT_A_FILL : null/.test(app), "filing stores the note");
+  assert.ok(/journalPnl\(e\)/.test(app), "the Journal row reads journalPnl()");
+  assert.ok(/"NOT ON ALPACA"/.test(app), "and the card says it in large type");
 });
 
 /* ---------------- report ---------------- */

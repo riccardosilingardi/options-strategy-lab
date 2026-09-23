@@ -6,50 +6,56 @@ The full history of every item shipped so far (P0–P10, P2-bis) is in `docs/his
 Every pull request updates this file: the session that ships an item marks it done and states
 what the next one inherits.
 
-## Done in this pull request — PR #38, one action per open position
+## Done in this pull request — PR #39, no proposal when crossing costs too much
 
-- `positionAction()` in `src/rules.js` reads the existing rules (`ruleExitOf()`,
-  `stopWarningHead()`, `remainingEdge()`) and returns one action: **CLOSE** with its reason,
-  **WARNING** (stop crossed, or thin edge; never CLOSE), **HOLD**, or **NO QUOTE** (action
-  `null`, never HOLD). The 21-day exit is CLOSE even without a quote. No new rule number.
-- Each owned position's card shows that action first, in large type. Everything else it
-  showed is one tap away under "legs, profit, exits, details". The small "→ HOLD" line at the
-  end of the stat row is gone; the action replaces it.
-- Order path 3 moved from `pro.jsx` to `src/closeOrder.js` as `prepareClose()` (tap 1: the
-  order written out in full) and `sendClose()` (tap 2). The desk and the Positions card both
-  call it. Close-at-limit sits beside CLOSE; for HOLD and WARNING it is inside the fold, so a
-  close you choose yourself is still possible. After a send the card shows "close order
-  working" and the timeline says "close sent at <limit>". The Journal is not filed at send.
-- `sameCloseNote()` is now true: the Positions close is the same order as the desk's.
+Three debts from the owner's live test of PR #38 (23 Sep 2026) first, then the last v1 change.
+
+- **0a — the opening limit conceded the wrong way on credits.** `openLimitPrice()` read
+  `mid + dir × allowance`, which on a credit asks for MORE than the mid, on the side that never
+  fills (XLE 60/57: $75.75 suggested, $71 on the ticket's own sliders). It is `mid + allowance`
+  now, still never flipping the sign. `crossingCost()` and `openingMarkNote()` measured the gap
+  by magnitudes and now use the signed nets. Every credit card's max profit, max loss,
+  reward-to-risk, chance and budget count moves; no debit moves (`scripts/measure-crossing.mjs`).
+  `closeLimitPrice()` is unchanged and a test holds it.
+- **0b — a cancel is a request.** `cancelOutcome()` in `src/order.js` is the one home for the
+  sentences on both cancel buttons: a 2xx is "Cancel requested", a 422 "pending cancel" is a
+  cancel already waiting (completes at the 9:30 New York open), and an order is cancelled only
+  when Alpaca reports `canceled`. While a cancel is waiting there is no Cancel and no Re-price,
+  and the order still counts in exposure.
+- **0c — a position Alpaca does not hold is not valued.** `legsNotHeld()` in `src/closeOrder.js`
+  names the legs a SUCCESSFUL sync did not find (null when unknown). `positionAction()` has one
+  new input, `notHeld`: action null, "Not on Alpaca", P&L null. Filing such a record stores
+  P&L null, "not read from a fill". The Journal prints a figure closed with no broker order as
+  "the app's mark at close — not a fill" and `journalPnlTotal()` excludes it. J-0002 is
+  corrected on screen; stored data is not edited.
+- **PR #39 — the crossing floor.** `RULES.maxCrossingShareOfMaxProfit` 0.5 (chosen, not
+  measured): a candidate is not proposed when `comboBook().spread × 100 × contracts` is more
+  than half its maximum profit at the price that fills. A quality floor in `qualityFloor()`,
+  not in the gate. It has its own count and sentence in every "not shown" summary.
+  `scripts/measure-crossing.mjs` prints the table; `src/crossing.test.jsx` holds the done-when.
 
 ## v1
 
 v1 is done when PRD §3 is true: (a) one opening order filled at the intended price,
 (b) one closing order filled via order path 3 (`src/closeOrder.js`), (c) the owner reads each
-open position's action in five seconds. One pull request remains.
+open position's action in five seconds. **No pull request remains: v1 now needs only the
+owner's readings below.**
 
-### What PR #39 inherits from #38
+### What the next session inherits from #39
 
-- `positionAction()` is the one home for a position's action. #39 changes what is offered, not
-  what an open position shows; it should not touch it.
-- `level` and `label` in `posAlerts` still drive the headline and `attentionCount()`; the card
-  no longer reads `label`. Folding the two into one is possible later, not required for v1.
-- A close that fills is not filed automatically: the owner still taps "Close and file it".
-  Filing on fill needs the fill to be read (P7 or a re-check like `recheckOrders()`).
-
-### PR #39 — no proposal when crossing costs too much
-
-- A candidate is not proposed when crossing the combination spread costs more than a set share
-  of its maximum profit.
-- The share is one named constant in `RULES`, with its reasoning, marked chosen-not-measured.
-- It is a quality floor: it changes what is offered, never what may be sent (not in the gate).
-  It has its own count and its own sentence on every screen that says what was removed.
-- **Done when:** no card on Radar or Shortlist has a maximum profit smaller than the cost of
-  getting in and out.
+- Candidates are still ranked and floored at the MID for reward-to-risk (`minRewardRisk`),
+  while cards print reward-to-risk at the price that fills. On the fixtures no credit falls
+  under 0.25 at the fill after 0a, but the two readings can disagree. P2 full is the fix.
+- A record Alpaca does not hold, filed inside the 21-day window, is still recorded as "closed
+  by the rules" (`closeDecision()` reads the exit window). Its P&L is null, so no sum is wrong,
+  but the discipline count is.
+- After a 2xx cancel, the Positions card waits for `recheckOrders()` to read `canceled`; if
+  Alpaca never reports it, "Ask Alpaca again" is the only control left on that row.
 
 ### Owner readings needed for v1
 
-- Send one opening order and compare Alpaca's fill with the ticket's limit (v1 a).
+- Send one opening order and compare Alpaca's fill with the ticket's limit (v1 a). A credit
+  is the more useful one now: nothing has filled at the corrected suggested limit.
 - Close one position with the Positions card's close-at-limit (order path 3) and read the fill,
   sign included (v1 b). Then tap "Close and file it".
 - Open Positions and read each position's action in five seconds (v1 c).
@@ -58,6 +64,9 @@ open position's action in five seconds. One pull request remains.
 
 One line each; see `PRD.md` §5 and `docs/history/ROADMAP.md` for detail.
 
+- **Radar request controls** — one control per question: the single-ticker expiry and the
+  multi-search horizon are two answers to one question on one screen; direction and 'season
+  decides' likewise.
 - **P2 full** — rank proposals by edge at the price that fills.
 - **P7** — fills pushed by Alpaca's stream, server-side.
 - **P8** — more indicators and timeframes, after the owner has used the current ones.

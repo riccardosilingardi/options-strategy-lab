@@ -321,6 +321,33 @@ export const RULES = {
   // (no broker keys in the sandbox). Expect a real reading to bring it DOWN.
   maxComboSpreadShareOfNet: 1.0,
 
+  // --- AND WHAT THE ROUND TRIP COSTS AGAINST WHAT THE TRADE CAN MAKE. THE
+  // FIFTH FLOOR (ROADMAP PR #39).
+  //
+  // maxCrossingShareOfMaxProfit — the most the crossing cost may be, as a share
+  // of the maximum profit read at the price that fills. The crossing cost is
+  // `comboBook().spread × 100 × contracts`: in at one side of the combination's
+  // market and out at the other.
+  //
+  // WHY IT IS NOT `maxComboSpreadShareOfNet`. That one measures the spread
+  // against the NET — what the structure costs. This one measures it against
+  // the MAXIMUM PROFIT — what the structure can make. On a debit the two are
+  // roughly complements of the width; on a credit the net IS the maximum profit.
+  // A cheap debit spread with a wide book can clear the first and still spend
+  // most of what it can ever make on getting in and out.
+  //
+  // WHY 0.5. At 0.5 a round trip costs the whole take-profit target
+  // (`takeProfitPct` 0.5): a trade that reaches its target and is closed has
+  // paid, in spread, everything the target was worth. Past 0.5 the app would
+  // be proposing trades whose planned exit loses money on the day it works.
+  //
+  // CHOSEN, NOT MEASURED, and on the PRD's NOT VERIFIED list (§4 item 7).
+  // `scripts/measure-crossing.mjs` prints what it removes on the fixtures at
+  // 0.25, 0.5 and 0.75; the live chains have not been read. It is a QUALITY
+  // FLOOR: it changes what is offered and never what may be sent — it is not
+  // in `riskGate.js`.
+  maxCrossingShareOfMaxProfit: 0.5,
+
   // --- WHEN A POSITION ASKS TO BE LOOKED AT. The share of the maximum loss the
   // position has to be down before the Positions screen marks it "watch"
   // instead of "ok". It refuses nothing, sends nothing and closes nothing: it
@@ -884,6 +911,7 @@ export const NOTHING_TODAY = {
     if (t.liquidity > 0) parts.push(`${t.liquidity} because ${lab.liquidity}`);
     if (t.spread > 0) parts.push(`${t.spread} because ${lab.spread}`);
     if (t.comboSpread > 0) parts.push(`${t.comboSpread} because ${lab.comboSpread}`);
+    if (t.crossing > 0) parts.push(`${t.crossing} because ${lab.crossing}`);
     if (t.reward > 0) parts.push(`${t.reward} because ${lab.reward}`);
     if (t.unpriceable > 0) parts.push(`${t.unpriceable} because ${lab.unpriceable}`);
     if (t.impossible > 0) parts.push(`${t.impossible} because ${lab.impossible}`);
@@ -893,7 +921,7 @@ export const NOTHING_TODAY = {
     // floors and the sentence must not say they are: a structure whose price
     // could not be read never reached a floor, and one that could not lose was
     // refused before either floor looked at it.
-    const byFloor = (t.liquidity > 0 || t.spread > 0 || t.comboSpread > 0 || t.reward > 0);
+    const byFloor = (t.liquidity > 0 || t.spread > 0 || t.comboSpread > 0 || t.crossing > 0 || t.reward > 0);
     const lead = byFloor
       ? `was filtered out by the quality floors`
       : `was refused before the quality floors were even applied`;
@@ -1179,6 +1207,8 @@ export const qualityFloorLabels = (level = RECOMMENDED_LIQUIDITY) => {
       `so the mid it would be priced from is not a number either side quoted`,
     comboSpread: `the two sides of the WHOLE combination are more than ` +
       `${pctText(RULES.maxComboSpreadShareOfNet)} of its net apart, even though each leg on its own is fine`,
+    crossing: `crossing its market in and out costs more than ` +
+      `${pctText(RULES.maxCrossingShareOfMaxProfit)} of the most it can make`,
     reward: `it pays under ${money(RULES.minRewardRisk * 100)} for every ${money(100)} at risk`,
     unpriceable: `its price could not be read from the chain at all — a leg with no bid, or a net of about nothing`,
     impossible: `its worst case priced as a PROFIT, which is an arbitrage and therefore a mispriced leg`,
@@ -1198,7 +1228,8 @@ export const qualityFloorSentence = (level = RECOMMENDED_LIQUIDITY) => {
       `and another on a quiet one.`;
   return `${liq} Every leg here is also quoted within ${pctText(RULES.maxSpreadShareOfMid)} bid to ask, the ` +
     `WHOLE combination within ${pctText(RULES.maxComboSpreadShareOfNet)} of its own net — two leg spreads land ` +
-    `on one net, so a pair of ordinary legs can still be unaffordable — and ` +
+    `on one net, so a pair of ordinary legs can still be unaffordable — getting in and out costs at most ` +
+    `${pctText(RULES.maxCrossingShareOfMaxProfit)} of the most it can make, and ` +
     `everything here pays at least ${pctText(RULES.minRewardRisk)} of what it risks. Open interest is how many ` +
     `contracts are actually open and the spread is how far apart the two sides are today: a contract nobody ` +
     `trades is a quote and not a market, and a market that wide has no agreed price to be the middle of. ` +
@@ -1267,7 +1298,7 @@ export const qualityFloorLine = (level = RECOMMENDED_LIQUIDITY) => {
   const l = liquidityLevel(level?.id ?? level);
   return l.id === "off"
     ? `Liquidity floor OFF; spread and reward-to-risk still apply.`
-    : `Filtered at ${l.label.toUpperCase()}: open interest, bid/ask spread, combination spread, reward-to-risk.`;
+    : `Filtered at ${l.label.toUpperCase()}: open interest, bid/ask spread, combination spread, crossing cost, reward-to-risk.`;
 };
 
 /**
@@ -1295,6 +1326,7 @@ export function filterFold(tally = {}, { level = RECOMMENDED_LIQUIDITY, what = n
     ["liquidity", n("liquidity"), `too little open interest`],
     ["spread", n("spread"), `a leg quoted too wide`],
     ["comboSpread", n("comboSpread"), `the combination quoted too wide`],
+    ["crossing", n("crossing"), `crossing costs over ${pctText(RULES.maxCrossingShareOfMaxProfit)} of max profit`],
     ["reward", n("reward"), `pays too little for what it risks`],
   ].filter((r) => r[1] > 0);
   const total = rows.reduce((a, r) => a + r[1], 0);
@@ -1438,6 +1470,7 @@ export const liquiditySettingNote = (level, counts) => {
   if (c.liquidity > 0) bits.push(`${c.liquidity} removed for liquidity`);
   if (c.spread > 0) bits.push(`${c.spread} removed for a bid/ask spread over ${pctText(RULES.maxSpreadShareOfMid)} of the mid`);
   if (c.comboSpread > 0) bits.push(`${c.comboSpread} removed for a combination spread over ${pctText(RULES.maxComboSpreadShareOfNet)} of its net`);
+  if (c.crossing > 0) bits.push(`${c.crossing} removed for a crossing cost over ${pctText(RULES.maxCrossingShareOfMaxProfit)} of max profit`);
   if (c.reward > 0) bits.push(`${c.reward} removed for reward-to-risk`);
   if (c.skipped > 0) bits.push(`${c.skipped} not liquidity-checked (the feed reports no open interest)`);
   if (c.spreadSkipped > 0) bits.push(`${c.spreadSkipped} not spread-checked (the feed quoted only one side)`);
@@ -2083,6 +2116,7 @@ export const emptyExpiryNote = (expKey, tally, level = RECOMMENDED_LIQUIDITY) =>
   if (t.liquidity > 0) bits.push(`${t.liquidity} for liquidity`);
   if (t.spread > 0) bits.push(`${t.spread} for a bid/ask spread over ${pctText(RULES.maxSpreadShareOfMid)} of the mid`);
   if (t.comboSpread > 0) bits.push(`${t.comboSpread} for a COMBINATION spread over ${pctText(RULES.maxComboSpreadShareOfNet)} of its net`);
+  if (t.crossing > 0) bits.push(`${t.crossing} for a crossing cost over ${pctText(RULES.maxCrossingShareOfMaxProfit)} of max profit`);
   if (t.reward > 0) bits.push(`${t.reward} for reward-to-risk`);
   if (t.unpriceable > 0) bits.push(`${t.unpriceable} with no readable price`);
   if (t.impossible > 0) bits.push(`${t.impossible} unable to lose at any price`);
@@ -2253,9 +2287,77 @@ export const wideComboNote = (n, what) =>
 
 /** The one sentence shown when the combination spread floor could not be applied. */
 export const comboSpreadSkippedNote = (feed) =>
-  `The combination spread floor was SKIPPED${feed ? ` — ${feed} did not quote both sides of every leg` : ""}. ` +
+  `The combination spread and crossing-cost floors were SKIPPED${feed ? ` — ${feed} did not quote both sides of every leg` : ""}. ` +
   `Without a two-sided quote on every leg there is no combination market to measure, and a book we do not ` +
   `have is not a wide one.`;
+
+/* -------------------------------------------------------------------------
+ * WHAT GETTING IN AND OUT COSTS, AGAINST WHAT THE TRADE CAN MAKE (PR #39).
+ *
+ * The fifth floor. `comboSpreadFloor()` above asks whether the combination's
+ * market is wide against its NET; this asks whether it is wide against the
+ * MAXIMUM PROFIT, read at the price that fills. See
+ * `RULES.maxCrossingShareOfMaxProfit` for why 0.5.
+ *
+ * The crossing cost is `comboBook().spread × 100 × contracts`: one side of the
+ * combination's market going in, the other coming out. It is the same book the
+ * ticket prints, so the number this floor judges is the number on the screen.
+ *
+ * IT IS A QUALITY FLOOR, NOT THE GATE. It decides what is PROPOSED. It is not
+ * in `riskGate.js` and never blocks a send: a trade the user builds by hand is
+ * the user's to make, the same line the other four floors are drawn on.
+ *
+ * THREE UNKNOWNS, EACH SAID, NONE PASSED OR FAILED IN SILENCE:
+ *   - no two-sided book on every leg: there is no crossing to measure. It is
+ *     counted with the combination spread floor's skip, which is the same fact.
+ *   - no ceiling: a crossing cost against an unbounded profit is no share at
+ *     all, the same rule as the reward-to-risk floor.
+ *   - no maximum profit at the fill: the caller did not have one to give.
+ * ------------------------------------------------------------------------- */
+
+/**
+ * @param legs             [{ side, qty }] aligned with `quotes`
+ * @param quotes           one `{ bid, ask }` per leg
+ * @param maxProfitAtFill  dollars, the best case at the price that fills, for
+ *                         the same `contracts` (the caller's own `analyze()`)
+ * @param unboundedProfit  true when the payoff has no ceiling
+ * @param contracts        how many combinations both figures are for
+ * @returns {{ checked, pass, skipped, cost, maxProfit, share, floor }}
+ */
+export function crossingFloor({ legs = [], quotes = [], maxProfitAtFill = null, unboundedProfit = false,
+  contracts = 1, floor = RULES.maxCrossingShareOfMaxProfit } = {}) {
+  const skip = (skipped, cost = null) =>
+    ({ checked: false, pass: true, skipped, cost, maxProfit: null, share: null, floor });
+  const book = comboBook(legs, quotes);
+  if (!book.ok) return skip("no-book");
+  const n = Math.max(1, Math.round(Number(contracts) || 1));
+  const cost = Math.max(0, Number(book.spread)) * 100 * n;
+  if (unboundedProfit) return skip("unbounded", cost);
+  // `Number(null)` is 0 and 0 is finite: the null goes out before the coercion.
+  if (maxProfitAtFill == null || !Number.isFinite(Number(maxProfitAtFill))) return skip("no-profit", cost);
+  const mp = Number(maxProfitAtFill);
+  if (!(mp > 0)) {
+    // A best case that is not a profit cannot pay for any crossing at all.
+    return { checked: true, pass: false, skipped: null, cost, maxProfit: mp, share: null, floor };
+  }
+  const share = cost / mp;
+  // A HAIR OF SLACK, for the reason `limitPlacement()` carries one: the cost is
+  // a SUM of leg quotes, so a pair exactly at the share reads 0.5000000000000001.
+  return { checked: true, pass: share <= floor + 1e-9, skipped: null, cost, maxProfit: mp, share, floor };
+}
+
+/** The refusal sentence, with the live numbers in it. */
+export const crossingFloorReason = (r) =>
+  `Getting in at one side of this combination's market and out at the other costs ` +
+  `${money(r.cost)}, against a maximum profit of ${money(r.maxProfit)} at the price that fills — ` +
+  `${r.share == null ? "more than all of it" : pctText(r.share)}, over the ${pctText(r.floor)} ceiling. At that ` +
+  `share the round trip eats the take-profit target before the trade is right about anything.`;
+
+/** The one line a list prints in place of the structures this floor removed. */
+export const crossingNote = (n, what) =>
+  `${n} structure${n === 1 ? "" : "s"} ${n === 1 ? "was" : "were"} left out because crossing the combination's ` +
+  `market in and out costs more than ${pctText(RULES.maxCrossingShareOfMaxProfit)} of the most ` +
+  `${n === 1 ? "it" : "each"} can make${what ? ` on ${what}` : ""}.`;
 
 /* -------------------------------------------------------------------------
  * IS THERE A CEILING AT ALL? — THE PROPERTY OF THE LEGS, NOT OF A GRID.
@@ -2481,7 +2583,10 @@ export function crossingCost({ book } = {}) {
     known: true, fill: filled.net, mid: book.mid, bid: book.bid, ask: book.ask,
     // The concession, and nothing else: the mid is what it is worth, the fill
     // is what it takes, and the gap is what the market charges to be met.
-    cost: Math.abs(filled.net) - Math.abs(book.mid),
+    // SIGNED ARITHMETIC, NOT MAGNITUDES: on a credit the fill is a SMALLER
+    // magnitude than the mid, so `|fill| − |mid|` comes out negative there.
+    // `fill − mid` is the concession on both sides of zero.
+    cost: filled.net - book.mid,
   };
 }
 
@@ -2495,9 +2600,12 @@ export function crossingCost({ book } = {}) {
  */
 export const openingMarkNote = (r) => {
   if (!r || !r.known || r.bid == null) return null;
-  const drop = Math.abs(r.fill) - Math.abs(r.bid);
+  // SIGNED, for the same reason as `crossingCost()`: a credit received at the
+  // fill and bought back at the far side is down by `fill − bid` too, and the
+  // magnitudes read that as a gain.
+  const drop = r.fill - r.bid;
   return `It is worth ${money(Math.abs(r.bid) * 100)} the moment it opens — that is what the other side ` +
-    `would pay to take it back — so a position bought at ${money(Math.abs(r.fill) * 100)} starts ` +
+    `would pay to take it back — so a position opened at ${money(Math.abs(r.fill) * 100)} starts ` +
     `${money(drop * 100)} down. Nothing has gone wrong: that gap is the round trip, and it is why a wide ` +
     `market costs money before the trade is right or wrong about anything.`;
 };
@@ -2532,8 +2640,10 @@ export const openingMarkNote = (r) => {
  *                  failing it would be the floor rejecting a candidate for
  *                  paying too MUCH, and dropping it silently would hide the one
  *                  kind of trade whose upside the app cannot bound.
- * @returns {{ pass, liquidity, reward, reasons }} — `reasons` are finished
- *   English sentences with the numbers already in them.
+ *   maxProfitAtFill — dollars, the best case at the price that FILLS, for the
+ *                  crossing-cost floor (`crossingFloor()`). Null skips it.
+ * @returns {{ pass, liquidity, spread, comboSpread, crossing, reward, reasons }}
+ *   — `reasons` are finished English sentences with the numbers already in them.
  */
 /* ------------------------------------------------------------------
    WHAT THE GUIDED FLOW WILL NOT PROPOSE — and it is a SHAPE, not a name
@@ -2591,7 +2701,7 @@ export const butterflySkipNote = () =>
 
 export function qualityFloor({
   openInterest = [], peerOpenInterest = null, level = RECOMMENDED_LIQUIDITY,
-  quotes = [], legs = [], maxProfit, maxLoss, unboundedProfit = false,
+  quotes = [], legs = [], maxProfit, maxLoss, unboundedProfit = false, maxProfitAtFill = null,
 } = {}) {
   const risk = Math.abs(Number(maxLoss));
   const reward = Number(maxProfit);
@@ -2638,6 +2748,12 @@ export function qualityFloor({
   // separately from the per-leg half: they are different faults.
   const comboSpread = comboSpreadFloor(legs, quotes);
 
+  // AND WHAT THE ROUND TRIP COSTS AGAINST WHAT THE TRADE CAN MAKE (PR #39).
+  // Read against the maximum profit AT THE PRICE THAT FILLS, which the caller
+  // owns (`analyze()` at `fillNet()`); a caller that has none gets a skip, not
+  // a mid-priced stand-in.
+  const crossing = crossingFloor({ legs, quotes, maxProfitAtFill, unboundedProfit });
+
   const rewardCheck = unboundedProfit ? {
     checked: false, pass: true, rr: null, floor: RULES.minRewardRisk, unbounded: true,
   } : {
@@ -2664,6 +2780,7 @@ export function qualityFloor({
   }
   if (!spread.pass) reasons.push(spreadFloorReason(spread.widest, spread.floor));
   if (!comboSpread.pass) reasons.push(comboSpreadFloorReason(comboSpread.share, comboSpread.spread, comboSpread.mid, comboSpread.floor));
+  if (!crossing.pass) reasons.push(crossingFloorReason(crossing));
   if (!rewardCheck.pass) {
     reasons.push(rr == null
       ? `The best case cannot be measured against the worst, so there is no reward-to-risk to judge.`
@@ -2671,8 +2788,8 @@ export function qualityFloor({
         `floor: you would have to be right ${pctText(1 / (1 + rr), 0)} of the time just to break even.`);
   }
 
-  return { pass: liquidity.pass && spread.pass && comboSpread.pass && rewardCheck.pass,
-    liquidity, spread, comboSpread, reward: rewardCheck, reasons };
+  return { pass: liquidity.pass && spread.pass && comboSpread.pass && crossing.pass && rewardCheck.pass,
+    liquidity, spread, comboSpread, crossing, reward: rewardCheck, reasons };
 }
 
 /** The rules block injected into every model prompt. English, generated. */
@@ -3075,9 +3192,10 @@ export const missReasonLine = (miss) => (miss && miss.short ? miss.short : "");
  * `legLimitSeed()` sums to on the Build screen's ticket, so a card and the
  * ticket it opens agree by construction rather than by luck.
  *
- * NEITHER FUNCTION IS CHANGED — both are on this session's do-not-touch list.
  * This only spells the pair once so five call sites cannot spell it four ways.
- * No book means NO PRICE, never a price of zero.
+ * No book means NO PRICE, never a price of zero. `openLimitPrice()` itself was
+ * corrected in PR #39 (0a): on a credit it used to ask for MORE than the mid,
+ * so every credit card's figures move towards what the ticket's sliders say.
  */
 export function fillNet(legs, quotes) {
   const book = comboBook(legs, quotes);
@@ -3933,7 +4051,19 @@ export function ruleExitOf({ tpHit = false, dteExit = false, slHit = false, dteL
    not move the action. Their lines, and any lower-ranked line, go in `notes`.
 ===================================================================== */
 export function positionAction({ tpHit = false, dteExit = false, slHit = false, edge = null,
-  pnl = null, dteLeft = null, level = null, ap = null } = {}) {
+  pnl = null, dteLeft = null, level = null, ap = null, notHeld = null } = {}) {
+  /* >>> NOT ON ALPACA (0c, 23 Sep 2026). <<< J-0002 showed a WARNING and a
+     -$133 profit — the app's own mark — while a SUCCESSFUL sync of
+     /v2/positions returned nothing at all. A position the broker does not hold
+     has no action to take and no profit to read. `notHeld` is the list of legs
+     a successful sync did not find (`legsNotHeld()` in closeOrder.js); null
+     means UNKNOWN — no sync yet, or a failed one — and changes nothing here. */
+  if (Array.isArray(notHeld) && notHeld.length) {
+    return { action: null, rule: null, kind: "not-held",
+      line: `Not on Alpaca: ${notHeld.join(", ")} ${notHeld.length === 1 ? "is" : "are"} not in the account. ` +
+        `No action and no profit can be read.`,
+      notes: [] };
+  }
   const known = pnl != null && pnl !== "" && Number.isFinite(Number(pnl));
   const thin = !!(edge && edge.thin);
   const stop = !!slHit && known;
@@ -4319,6 +4449,14 @@ export function limitAgainstBook({ limitPrice = null, book = null, intent = "ope
  *   a debit  netMid +0.40, spread 0.20 → +0.45  you offer to pay 5c more
  *   a credit netMid −0.40, spread 0.20 → −0.35  you accept 5c less
  *
+ * >>> THIS COMMENT WAS RIGHT AND THE CODE WAS NOT. <<< It read
+ * `mid + dir * allowance`, which on a credit is −0.45: a credit of MORE than
+ * the mid, on the side that never fills. Read on the owner's XLE 2026-10-30
+ * quotes (23 Sep 2026): mid −0.735, spread 0.09, the book fills at −0.69, and
+ * the app suggested −0.7575 — "$76" on Build and on Shortlist while the
+ * ticket's own leg sliders summed to $71. Every credit card's max profit,
+ * reward-to-risk and chance was worked out at a price that would not fill.
+ *
  * `net` is SIGNED and is what the order takes; `limit` is the magnitude and is
  * what the ticket prints. See `closeLimitPrice()` above for why.
  *
@@ -4332,8 +4470,12 @@ export function openLimitPrice({ netMid, spread, slippage = OPEN_LIMIT_SLIPPAGE 
   const mid = +netMid;
   const allowance = Math.max(0, +spread) * Math.max(0, +slippage);
   const dir = Math.sign(mid) || 1;
-  const conceded = mid + dir * allowance;
-  const net = Math.abs(conceded) >= 0.01 ? +conceded.toFixed(4) : dir * 0.01;
+  const conceded = mid + allowance;
+  // FLOORED AT A CENT, AND NEVER FLIPPED ROUND — the same rule as the close.
+  // A −0.02 credit conceded by 0.10 would come out +0.08, i.e. an offer to PAY.
+  const net = Math.sign(conceded) === dir && Math.abs(conceded) >= 0.01
+    ? +conceded.toFixed(4)
+    : dir * 0.01;
   return { netMid: mid, spread: +spread, slippage: Math.max(0, +slippage), allowance, net, limit: Math.abs(net) };
 }
 
@@ -4702,6 +4844,8 @@ export const sizeSkippedNote = (n, feed) =>
  * on the combination: a long leg conceded up and a short leg conceded down
  * both raise the debit, so the net is the combo mid plus the same share of the
  * combo spread. One arithmetic seen two ways, not two arithmetics.
+ * (On a CREDIT this was false until PR #39 (0a): the seed was right and
+ * `openLimitPrice()` conceded the other way — $71 here, $75.75 there, on XLE.)
  *
  * A leg with no two-sided quote has nothing to concede from and is seeded at
  * whatever single number it has (its mid, if any) — never invented, and the

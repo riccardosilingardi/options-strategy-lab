@@ -924,7 +924,7 @@ export const lastCloseOrderId = (pos = {}) => {
  * and what happened to it — and the order ids IN FULL, never the eight-character
  * slice the screens print.
  */
-export function journalEntry({ pos = {}, pnl = null, reason = null, closeOrderId = null,
+export function journalEntry({ pos = {}, pnl = null, pnlNote = null, reason = null, closeOrderId = null,
   riskOk = null, t = Date.now() } = {}) {
   const r = reason || { kind: "manual", rule: null, text: null, written: null };
   return {
@@ -947,6 +947,8 @@ export function journalEntry({ pos = {}, pnl = null, reason = null, closeOrderId
     contracts: contractsOf(pos),
     contractsAssumed: positionSize(pos).assumed,
     pnl,
+    // WHY THERE IS NO FIGURE, when there is none on purpose (`NOT_A_FILL`).
+    pnlNote: pnlNote || null,
     riskOk,
     // "Closed by the rules" is the app's one measure of discipline, so it is
     // exactly as true as `ruleExitOf()` says and no truer.
@@ -961,6 +963,51 @@ export function journalEntry({ pos = {}, pnl = null, reason = null, closeOrderId
     openStatus: pos.alpacaStatus ?? null,
     openFilled: pos.alpacaFilled ?? null,
   };
+}
+
+/* ------------------------------------------------------------------
+   5b) A RESULT IS A FILL, OR IT IS NOT A RESULT (0c, 23 Sep 2026)
+
+   J-0002 was filed at -$133 with "closing order · none": a figure the app
+   worked out from its own model for a position Alpaca did not hold, stored as
+   the trade's result. The stored record is NOT edited — the Journal is what
+   happened — but it is READ for what it is:
+     - an entry filed with `pnlNote` (a record Alpaca did not hold) has no
+       figure at all, and says it was not read from a fill;
+     - an entry with a figure but no broker closing order prints it as the
+       app's mark at close, never as a result;
+     - neither is counted in any sum. `countedPnl()` is the gate every sum
+       goes through, and `journalPnlTotal()` is the sum.
+------------------------------------------------------------------ */
+
+/** What is stored when there is nothing a fill could have told us. */
+export const NOT_A_FILL = "not read from a fill";
+/** How a figure filed with no broker closing order is labelled. */
+export const MARK_AT_CLOSE = "the app's mark at close \u2014 not a fill";
+
+/** How a Journal entry's P&L reads: the figure, whether it counts, and why not. */
+export function journalPnl(entry = {}) {
+  const e = entry || {};
+  // `Number(null)` is 0 and 0 is finite: a figure never read is not a zero.
+  const v = e.pnl == null || e.pnl === "" ? NaN : Number(e.pnl);
+  if (e.pnlNote) return { shown: null, counted: null, note: String(e.pnlNote) };
+  if (!Number.isFinite(v)) return { shown: null, counted: null, note: null };
+  if (!e.closeOrderId) return { shown: v, counted: null, note: MARK_AT_CLOSE };
+  return { shown: v, counted: v, note: null };
+}
+
+/** The figure a sum may use, or null. */
+export const countedPnl = (entry) => journalPnl(entry).counted;
+
+/** The one sum over closed trades, and how many it left out and why. */
+export function journalPnlTotal(entries = []) {
+  let total = 0, counted = 0, excluded = 0;
+  for (const e of entries || []) {
+    const c = countedPnl(e);
+    if (c == null) { excluded++; continue; }
+    total += c; counted++;
+  }
+  return { total: counted ? total : null, counted, excluded };
 }
 
 /* ------------------------------------------------------------------

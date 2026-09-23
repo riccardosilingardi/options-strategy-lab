@@ -9,7 +9,7 @@ import {
   SlidersHorizontal, ArrowLeft, Sun, Moon, AlertTriangle, WifiOff,
 } from "lucide-react";
 import { fetchAllNews, fetchWeather, ImpactTags, CopilotTab, TaCopilot, ReportTab, OrderTicket, AlpacaDesk, scaleStrategy, buildContext, GuardianPanel, ChainMatrix, OptionPanel, PriceChart, QtyField, UnifiedView, taSignals, confluence, WhyThisTrade, Markdown, alpacaReq, CloseConfirm } from "./pro.jsx";
-import { prepareClose, sendClose, groupForRecord, closeWorking } from "./closeOrder.js";
+import { prepareClose, sendClose, groupForRecord, closeWorking, legsNotHeld } from "./closeOrder.js";
 import { BandThumbnail, payoffBands, bandTakeaway, GaugeFigure, Gauge, CompareFigure, exitPlanSentence,
   OpenInterestStrip, oiStripTakeaway, oiCutAt, oiGhostCut, explainOiStrip, useWidth } from "./visuals.jsx";
 import { fuseSignals, sentimentDirection, withSignalRank, compareCandidates, againstSignal, DRIVER_PRESETS, rankByDrivers, verdictNarrative } from "./signals.js";
@@ -31,7 +31,7 @@ import { RULES, sizing, ruleBadge, takeProfitLabel, stopLossLabel, perTradeCapLa
   entryRoom, entryRoomWarning, entryOverrideOk, entryOverrideNote, entryInsideExitNote,
   passedOverRecord, passedOverSummary,
   expiryChoice, expiryChoiceNote, emptyExpiryNote, unloadedBoardNote, checkedAgainstNote, wideSpreadNote, spreadSkippedNote,
-  wideComboNote, comboSpreadSkippedNote, comboBook, effectiveLimit, limitCeilingNote, notionalControlled,
+  wideComboNote, comboSpreadSkippedNote, crossingNote, comboBook, effectiveLimit, limitCeilingNote, notionalControlled,
   radarSplit, radarQuietNote,
   orderVerdict, legBook, legLimitSeed, netFromLegs, onTick, sizeSkippedNote,
   conflictSummaryLine, warningsToPrint,
@@ -51,7 +51,7 @@ import { CapitalOnboarding, WizardOpen, FindOpportunities, WizardCandidates, Con
 // renders the same card, so it may not live here.
 import { RequestControls, SplitSections, MissLine, CandidateCard } from "./card.jsx";
 import { buildHandOff, buildScreenState, BUILD_TAB } from "./handoff.js";
-import { orderBody, orderOutcome, alpacaErrorText, reduceRatios, limitWords, fillPriceOf } from "./order.js";
+import { orderBody, orderOutcome, alpacaErrorText, reduceRatios, limitWords, fillPriceOf, cancelOutcome, cancelWaiting } from "./order.js";
 // THE PERMANENT RECORD: the ref a position is given at open, the sequence on
 // every timeline entry, the close reason, and what survives into the Journal.
 import { nextRef, refCounter, appendTimeline, stampTimeline, orderStatusRecheck, closeDecision,
@@ -59,7 +59,7 @@ import { nextRef, refCounter, appendTimeline, stampTimeline, orderStatusRecheck,
   positionSize, positionSizeNote, contractsOf, withPositionSize, fillVsLimit, orderReconciliation,
   storedLimitOf,
   positionStage, positionStageNote, bookPositions, wouldHaveDone, isBrokerHolding, upgradeHolding,
-  isTestRecord, testRecordNote, scoredJournal,
+  isTestRecord, testRecordNote, scoredJournal, journalPnl, NOT_A_FILL,
   journalEntry, searchJournal, CLOSE_REASON_MIN, refNumber } from "./journal.js";
 import { FIRST_STEP, stepCarry, candidateOf, candidateKey, legsLine, toggleCompare, inCompare, MAX_COMPARE, savedFromCandidate, candidateFromSaved, savedAge } from "./path.js";
 import { StepNav, StepForward, EvidenceBar, EvidenceOverlay, DeskSheet, CompareTray, CandidateActions, Fold } from "./steps.jsx";
@@ -641,7 +641,7 @@ export function analyze(legs, S, dte, baseIV, q, opts = {}) {
 export function shortlistWithFloors(sent, S, step, strikes, dte, baseIV, q, { peers = null, level = RECOMMENDED_LIQUIDITY } = {}) {
   const rows = [], cut = [];
   let oiSkipped = false;
-  const tally = { liquidity: 0, spread: 0, comboSpread: 0, reward: 0, skipped: 0, spreadSkipped: 0,
+  const tally = { liquidity: 0, spread: 0, comboSpread: 0, crossing: 0, reward: 0, skipped: 0, spreadSkipped: 0,
     comboSpreadSkipped: 0, unpriceable: 0, impossible: 0, model: 0 };
   /* >>> THIS IS A GENERATION SITE, SO IT WILL NOT OFFER WHAT THE GATE REFUSES
      (P9, TASK 1). <<< The guard is IN the function and not at its call sites,
@@ -689,6 +689,9 @@ export function shortlistWithFloors(sent, S, step, strikes, dte, baseIV, q, { pe
       cut.push({ name: p.name, reasons: [ms.reason], why: "model" });
       continue;
     }
+    // THE CROSSING FLOOR READS THE MAXIMUM PROFIT AT THE PRICE THAT FILLS
+    // (PR #39), which is what the card will print — never the mid's.
+    const aFill = atFillPrice(p.legs, a, { spot: S, dte, iv: baseIV, q });
     // The two-sided quotes go in as well now: the SPREAD floor reads them, and
     // it is a different question from the headcount the liquidity floor asks.
     // A leg can have 300 contracts open and a market 145% of the mid wide.
@@ -700,19 +703,20 @@ export function shortlistWithFloors(sent, S, step, strikes, dte, baseIV, q, { pe
       // was 143% of its own mid wide (src/rules.js, `comboSpreadFloor`).
       quotes: quotesOf(a), legs: p.legs,
       maxProfit: a.maxProfit, maxLoss: a.maxLoss, unboundedProfit: a.profitUnbounded,
+      maxProfitAtFill: aFill ? aFill.maxProfit : null,
     });
     if (!qf.liquidity.checked) { oiSkipped = true; tally.skipped++; }
     if (!qf.spread.checked) tally.spreadSkipped++;
     if (!qf.comboSpread.checked) tally.comboSpreadSkipped++;
-    if (qf.pass) rows.push({ p, a });
+    if (qf.pass) rows.push({ p, a, qf });
     else {
       // WHICH FLOOR DID THE WORK, in the order they are applied. Pooling them
       // would leave the screen unable to say whether the leg was untraded or
       // simply unpriced, which are different faults with different answers.
       const why = !qf.liquidity.pass ? "liquidity" : !qf.spread.pass ? "spread"
-        : !qf.comboSpread.pass ? "comboSpread" : "reward";
+        : !qf.comboSpread.pass ? "comboSpread" : !qf.crossing.pass ? "crossing" : "reward";
       tally[why]++;
-      cut.push({ name: p.name, reasons: qf.reasons, why });
+      cut.push({ name: p.name, reasons: qf.reasons, why, qf, legs: p.legs, a });
     }
   }
   return { rows, cut, oiSkipped, tally: { ...tally, kept: rows.length } };
@@ -1003,9 +1007,10 @@ function LiquidityFilter({ levelId, onLevel, previews, threshold, ticker, expKey
             `${here.spread ? ` \u00b7 ${here.spread} removed because one leg's own market is too wide` : ""}` +
             // THE PAIR, NAMED SEPARATELY FROM THE LEG. It does not move with
             // this setting either, and the two are different faults.
-            `${here.comboSpread ? ` \u00b7 ${here.comboSpread} removed because the WHOLE combination is too wide, though each leg is fine` : ""}` +
-            `${here.reward ? ` \u00b7 ${here.reward} removed for paying too little per dollar at risk` : ""}` +
-            `${here.skipped ? ` \u00b7 ${here.skipped} not liquidity-checked at all \u2014 the open interest has not arrived, so those have not cleared this floor either` : ""}.`
+            `${here.comboSpread ? ` \u00b7 ${here.comboSpread} removed because the WHOLE combination is too wide` : ""}` +
+            `${here.crossing ? ` \u00b7 ${here.crossing} removed for crossing cost` : ""}` +
+            `${here.reward ? ` \u00b7 ${here.reward} removed for paying too little per dollar risked` : ""}` +
+            `${here.skipped ? ` \u00b7 ${here.skipped} not liquidity-checked \u2014 the open interest has not arrived, so none cleared it` : ""}.`
           : `Nothing is priced on ${ticker} yet, so there is nothing for this setting to filter.`}
       </div>
 
@@ -2313,37 +2318,54 @@ export default function OptionsStrategyLab() {
     () => orderReconciliation(workingOrders, alSync.t ? alSync.orders : null),
     [workingOrders, alSync]);
 
+  /* A CANCEL IS A REQUEST, NOT AN OUTCOME (`cancelOutcome()` in order.js).
+     J-0003, 23 Sep 2026, about 04:00 New York: Alpaca accepted the request and
+     put the order in `pending_cancel`, this printed "cancelled", and the second
+     tap's 422 "order pending cancel" read as a failure. The record's status is
+     NOT written here — only the broker says canceled, and until it does the
+     order is working and counts in exposure. `cancelRequestedAt` is what this
+     app did, and it keeps the buttons down until `recheckOrders()` reads the
+     broker's answer. */
   const cancelWorking = async (p) => {
-    if (DEMO) { setMsg(DEMO_TOOLTIP); return; }
+    if (DEMO) { setMsg(DEMO_TOOLTIP); return null; }
     setOrderBusy(p.id);
+    let res;
     try {
       await alpacaReq(`/v2/orders/${encodeURIComponent(p.alpacaId)}`, "DELETE");
+      res = cancelOutcome({ ok: true });
+    } catch (e) { res = cancelOutcome({ error: e }); }
+    if (res.waiting) {
       setStore((st) => {
         const positions = st.positions.map((x) => {
           if (x.id !== p.id) return x;
           const t = appendTimeline(x, [{
             t: Date.now(), type: "status", orderId: String(x.alpacaId),
-            text: `Alpaca order ${x.alpacaId} was CANCELLED from the Positions screen. Nothing was bought, ` +
-              `nothing is working, and this position is the app's own record of a trade that never opened.`,
+            text: `Cancel of Alpaca order ${x.alpacaId} asked for from the Positions screen. ${res.headline}`,
           }]);
-          return { ...x, alpacaStatus: "canceled", timeline: t.timeline, seqNext: t.seqNext };
+          return { ...x, cancelRequestedAt: Date.now(), timeline: t.timeline, seqNext: t.seqNext };
         });
         const ns = { ...st, positions }; saveState(ns); return ns;
       });
-      setMsg("The order was cancelled at the broker. The position row says so, and the timeline records it.");
-    } catch (e) { setMsg(`The cancellation did not go through: ${alpacaErrorText(e)}`); }
+    }
+    setMsg(res.headline);
     setOrderBusy(null);
+    if (res.kind === "requested") recheckOrders();
+    return res;
   };
 
-  /** Cancel what is working, then put the same trade back on Build to re-price. */
+  /** Ask for the cancel, then put the same trade back on Build to re-price. */
   const repriceWorking = async (p) => {
     if (DEMO) { setMsg(DEMO_TOOLTIP); return; }
-    await cancelWorking(p);
+    const res = await cancelWorking(p);
+    // Only a cancel Alpaca has just ACCEPTED goes on to Build. A failure says
+    // so where it happened, and a cancel that was already waiting is a state
+    // the card now shows instead of the buttons.
+    if (!res || res.kind !== "requested") return;
     openOnBuild({ ticker: p.ticker, expKey: p.expKey, legs: p.legs, name: p.name, contracts: contractsOf(p) });
-    setMsg(`The working order was cancelled and ${p.ref || p.ticker} is back on Build at ` +
-      `${contractsOf(p)} combination${contractsOf(p) === 1 ? "" : "s"} — the size it was sent at. The chain has been ` +
-      `re-read, so the suggested limit is worked out from the market as it is now — not as it was when the ` +
-      `first order went out. Send it again from the confirm step at the bottom.`);
+    setMsg(`Cancel requested for the working order, and ${p.ref || p.ticker} is back on Build at ` +
+      `${contractsOf(p)} combination${contractsOf(p) === 1 ? "" : "s"} — the size it was sent at. The old order ` +
+      `counts in your exposure until Alpaca reports it canceled. The chain has been re-read, so the suggested ` +
+      `limit is worked out from the market as it is now. Send it again from the confirm step at the bottom.`);
   };
 
   /* ---- moving along the path ----
@@ -2707,9 +2729,13 @@ export default function OptionsStrategyLab() {
     const al = posAlerts.find((a) => a.p.id === id) || null;
     const decision = closeDecision({ alert: al, written });
     if (!decision.reason.ok) return { ok: false, decision };
+    // A RECORD ALPACA DOES NOT HOLD IS FILED WITH NO FIGURE (0c). J-0002 was
+    // filed at the app's own -$133 mark; the P&L is null and says why.
+    const notOnAlpaca = !!(al && al.notHeld && al.notHeld.length);
     const entry = journalEntry({
       pos: p,
-      pnl: al?.pnl ?? null,
+      pnl: notOnAlpaca ? null : al?.pnl ?? null,
+      pnlNote: notOnAlpaca ? NOT_A_FILL : null,
       reason: decision.reason,
       // THE DISCIPLINE NUMBER IS ABOUT THE WHOLE TRADE. `maxLoss` is one
       // combination; a seven-lot position that broke the per-trade cap seven
@@ -2847,7 +2873,7 @@ export default function OptionsStrategyLab() {
     try {
       const out = [];
       // What the quality floors removed, so an empty or short result can say why.
-      const cutFloors = { n: 0, liquidity: 0, spread: 0, comboSpread: 0, reward: 0, unpriceable: 0, impossible: 0, model: 0,
+      const cutFloors = { n: 0, liquidity: 0, spread: 0, comboSpread: 0, crossing: 0, reward: 0, unpriceable: 0, impossible: 0, model: 0,
         markets: new Set(), oiSkipped: new Set(), spreadSkipped: new Set(), comboSpreadSkipped: new Set(),
         // A MARKET WITH NO BOARD THE GATE WOULD OPEN ON IS NOT A MARKET THE
         // FLOORS EMPTIED. Its own count, its own sentence — the same rule that
@@ -2908,12 +2934,20 @@ export default function OptionsStrategyLab() {
           if (!modelCheckOf(a, { legs: pr.legs, spot: sp, dte: d2, iv: getU(tk).iv }).pass) {
             cutFloors.model++; cutFloors.markets.add(tk); continue;
           }
+          // THE CARD'S FIGURES ARE READ AT THE PRICE THAT FILLS (P10 §3-bis),
+          // and this is where the quote function for this board is in scope.
+          // `a` stays the MID reading: the compare picture and the stamp are
+          // drawn from it, and a candidate is a structure before it is a price.
+          // It is worked out BEFORE the floors now, because the crossing floor
+          // (PR #39) reads the maximum profit at this price.
+          const aFill = atFillPrice(pr.legs, a, { spot: sp, dte: d2, iv: getU(tk).iv, q: qq });
           // Same floors as the Shortlist and the wizard, from the same function.
           const qf = qualityFloor({
             openInterest: a.legPx.map((l) => l.oi), peerOpenInterest: peers, level: liqLevel,
             // ...and the LEGS, for the combination spread floor beside it.
             quotes: quotesOf(a), legs: pr.legs,
             maxProfit: a.maxProfit, maxLoss: a.maxLoss, unboundedProfit: a.profitUnbounded,
+            maxProfitAtFill: aFill ? aFill.maxProfit : null,
           });
           if (!qf.liquidity.checked) cutFloors.oiSkipped.add(tk);
           if (!qf.spread.checked) cutFloors.spreadSkipped.add(tk);
@@ -2923,6 +2957,7 @@ export default function OptionsStrategyLab() {
             if (!qf.liquidity.pass) cutFloors.liquidity++;
             else if (!qf.spread.pass) cutFloors.spread++;
             else if (!qf.comboSpread.pass) cutFloors.comboSpread++;
+            else if (!qf.crossing.pass) cutFloors.crossing++;
             else cutFloors.reward++;
             continue;
           }
@@ -2937,11 +2972,6 @@ export default function OptionsStrategyLab() {
           // it divided by the PREMIUM on a debit and by the RISK on a credit
           // with a `Math.max(, 1)` floor under it, which is the shape that
           // turned a $250 budget into 250 contracts of an unpriced butterfly.
-          // THE CARD'S FIGURES ARE READ AT THE PRICE THAT FILLS (P10 §3-bis),
-          // and this is where the quote function for this board is in scope.
-          // `a` stays the MID reading: the compare picture and the stamp are
-          // drawn from it, and a candidate is a structure before it is a price.
-          const aFill = atFillPrice(pr.legs, a, { spot: sp, dte: d2, iv: getU(tk).iv, q: qq });
           const sc = scaleStrategy(aFill, request.mode, request.amt);
           const n = sc && sc.ok ? sc.n : 0;
           /* >>> AND IT NO LONGER DROPS WHAT THE BUDGET WILL NOT BUY (P10 §3).
@@ -2973,7 +3003,7 @@ export default function OptionsStrategyLab() {
       setMulti((m) => ({ ...m, busy: false, res: ranked.slice(0, 8),
         floors: {
           n: cutFloors.n, liquidity: cutFloors.liquidity, spread: cutFloors.spread,
-          comboSpread: cutFloors.comboSpread, reward: cutFloors.reward,
+          comboSpread: cutFloors.comboSpread, crossing: cutFloors.crossing, reward: cutFloors.reward,
           unpriceable: cutFloors.unpriceable, impossible: cutFloors.impossible, model: cutFloors.model,
           markets: [...cutFloors.markets], oiSkipped: [...cutFloors.oiSkipped],
           spreadSkipped: [...cutFloors.spreadSkipped], noBoard: [...cutFloors.noBoard],
@@ -3196,7 +3226,14 @@ export default function OptionsStrategyLab() {
        broker's -$130 in the largest red figure on the screen. `positionPnl()`
        in rules.js is the one home and `pnlOf()` below is its one spelling in
        this file, so the two screens cannot read one position two ways. */
-    const pv = pnlOf(p, { spot: sp, dteLeft, quote: qp, contracts: n });
+    /* >>> NOT ON ALPACA (0c). <<< A successful sync that does not hold every
+       leg of this record means there is nothing to value: the P&L is null,
+       never the app's own mark, and the action says why. `null` from
+       `legsNotHeld()` is UNKNOWN (no sync, or a failed one) and changes
+       nothing — unknown is not "nothing held". */
+    const notHeld = legsNotHeld(p, alSync);
+    const pv = notHeld && notHeld.length ? { pnl: null, source: null, sentence: null }
+      : pnlOf(p, { spot: sp, dteLeft, quote: qp, contracts: n });
     const pnl = pv.pnl, live = pv.source === BROKER_PNL;
     const tpHit = pnl != null && p.maxProfit > 0 && pnl >= RULES.takeProfitPct * p.maxProfit * n;
     const slHit = pnl != null && p.maxLoss < 0 && pnl <= RULES.stopLossPct * p.maxLoss * n;
@@ -3217,14 +3254,17 @@ export default function OptionsStrategyLab() {
        It is a WARNING and it is an ATTENTION item: nothing closes on it, the
        exit rules stay frozen, and `ruleExitOf()` does not know it exists. */
     const edge = remainingEdge({ maxProfit: p.maxProfit == null ? null : p.maxProfit * n, maxLoss: p.maxLoss * n, pnl });
-    const level = tpHit || slHit || dteExit || ap || edge.thin ? "action"
+    const notOnAlpaca = !!(notHeld && notHeld.length);
+    // NOT ON ALPACA is a LOOK, not a decision: no rule can fire on a position
+    // the broker does not hold, and no headline may call it on plan.
+    const level = notOnAlpaca ? "watch" : tpHit || slHit || dteExit || ap || edge.thin ? "action"
       : pnl != null && watchLevel != null && pnl < watchLevel * n ? "watch" : "ok";
-    const label = tpHit ? `${takeProfitLabel()} reached — take the profit` : slHit ? `${stopLossLabel()} reached — a warning, not an order` : dteExit ? `${dteLeft} days left — close or roll` : ap ? "The autopilot has something waiting for your OK" : edge.thin ? remainingEdgeLabel(edge) : pnl == null ? "waiting for prices…" : level === "watch" ? "Losing: check the reason you opened it" : "On plan";
+    const label = notOnAlpaca ? "Not on Alpaca — the record and the account disagree" : tpHit ? `${takeProfitLabel()} reached — take the profit` : slHit ? `${stopLossLabel()} reached — a warning, not an order` : dteExit ? `${dteLeft} days left — close or roll` : ap ? "The autopilot has something waiting for your OK" : edge.thin ? remainingEdgeLabel(edge) : pnl == null ? "waiting for prices…" : level === "watch" ? "Losing: check the reason you opened it" : "On plan";
     /* ONE ACTION (ROADMAP PR #38). `level` and `label` above stay exactly as
        they were: the headline and `attentionCount()` read them. The card
        reads this. */
-    const act = positionAction({ tpHit, dteExit, slHit, edge, pnl, dteLeft, level, ap });
-    return { p, pnl, pnlNote: pv.sentence, dteLeft, level, label, ap, live, spotNow: sp, tpHit, slHit, dteExit, edge, act, contracts: n, sizeAssumed: size.assumed };
+    const act = positionAction({ tpHit, dteExit, slHit, edge, pnl, dteLeft, level, ap, notHeld });
+    return { p, pnl, pnlNote: pv.sentence, dteLeft, level, label, ap, live, spotNow: sp, tpHit, slHit, dteExit, edge, act, contracts: n, sizeAssumed: size.assumed, notHeld };
   }), [ownedPositions, chains, alSync, pnlOf]);
 
   // Log eventi regola (TP/SL/DTE) fuori dal render: prima veniva chiamato logEvent
@@ -3233,7 +3273,7 @@ export default function OptionsStrategyLab() {
     for (const a of posAlerts) {
       if (a.tpHit) logEvent(a.p.id, "tp", `Reached ${takeProfitLabel()} (${fmt$(a.pnl)})`);
       if (a.slHit) logEvent(a.p.id, "sl", `Reached ${stopLossLabel()} (${fmt$(a.pnl)}) — a warning, nothing closes automatically`);
-      if (a.dteExit) logEvent(a.p.id, "dte", `Inside the ${RULES.exitDTE}-day exit window`);
+      if (a.dteExit && !(a.notHeld && a.notHeld.length)) logEvent(a.p.id, "dte", `Inside the ${RULES.exitDTE}-day exit window`);
     }
   }, [posAlerts, logEvent]);
   /* THE HEADLINE IS DERIVED FROM THE LIST (P9, TASK 2). `nAttention` counted
@@ -3329,7 +3369,7 @@ export default function OptionsStrategyLab() {
       // What the quality floors threw out, and where. Counted per reason so the
       // refusal can name the floor: "nothing on CORN clears the liquidity floor
       // today" is a useful answer, an empty screen is not.
-      const floors = { liquidity: 0, spread: 0, comboSpread: 0, reward: 0, unpriceable: 0, impossible: 0, model: 0,
+      const floors = { liquidity: 0, spread: 0, comboSpread: 0, crossing: 0, reward: 0, unpriceable: 0, impossible: 0, model: 0,
         // NOT A FLOOR, AND ITS COUNT TRAVELS SEPARATELY. A butterfly is not
         // refused for being a bad price — it is not offered here at all, and
         // pooling it with a floor's count would explain neither.
@@ -3416,11 +3456,15 @@ export default function OptionsStrategyLab() {
             // ticket that pays $15 for $86 at risk. Neither becomes a road, and
             // the tally below is what lets the refusal screen say WHICH floor
             // emptied the board rather than shrugging at an empty page.
+            // The crossing floor (PR #39) reads the best case at the price that
+            // fills, from the same expression every card uses.
+            const aFill = atFillPrice(pr.legs, a, { spot: sp, dte: d2, iv: getU(tk).iv, q: qq });
             const qf = qualityFloor({
               openInterest: a.legPx.map((l) => l.oi), peerOpenInterest: peers, level: liqLevel,
               // ...and the LEGS, for the combination spread floor beside it.
               quotes: quotesOf(a), legs: pr.legs,
               maxProfit: a.maxProfit, maxLoss: a.maxLoss, unboundedProfit: a.profitUnbounded,
+              maxProfitAtFill: aFill ? aFill.maxProfit : null,
             });
             if (!qf.liquidity.checked) floors.oiUnavailable.add(tk);
             if (!qf.spread.checked) floors.spreadUnavailable.add(tk);
@@ -3429,6 +3473,7 @@ export default function OptionsStrategyLab() {
               if (!qf.liquidity.pass) floors.liquidity++;
               else if (!qf.spread.pass) floors.spread++;
               else if (!qf.comboSpread.pass) floors.comboSpread++;
+              else if (!qf.crossing.pass) floors.crossing++;
               else floors.reward++;
               floors.markets.add(tk);
               continue;
@@ -3448,7 +3493,7 @@ export default function OptionsStrategyLab() {
       // emptied by the quality floors is a different sentence from a board
       // emptied by the budget, and the user is owed the one that is true.
       if (!pool.length) {
-        const cut = floors.liquidity + floors.spread + floors.comboSpread + floors.reward;
+        const cut = floors.liquidity + floors.spread + floors.comboSpread + floors.crossing + floors.reward;
         // AN UNREADABLE PRICE IS ITS OWN ANSWER. A board where nothing could be
         // priced is not a board emptied by the floors and is certainly not a
         // budget problem — saying either would blame the user, or the market,
@@ -3486,7 +3531,7 @@ export default function OptionsStrategyLab() {
             id: "quality-floor",
             text: NOTHING_TODAY.belowQualityFloor({
               liquidity: floors.liquidity, spread: floors.spread, comboSpread: floors.comboSpread,
-              reward: floors.reward,
+              crossing: floors.crossing, reward: floors.reward,
               unpriceable: floors.unpriceable, model: floors.model,
               impossible: floors.impossible, markets: [...floors.markets], level: liqLevel,
             }),
@@ -3580,7 +3625,7 @@ export default function OptionsStrategyLab() {
         basket, examined, excluded, newsItems: newsPool, weatherData: weather,
         month: NOW_MONTH, weights: ans.weights, chosen: roads,
         floors: { liquidity: floors.liquidity, spread: floors.spread, comboSpread: floors.comboSpread,
-          reward: floors.reward,
+          crossing: floors.crossing, reward: floors.reward,
           unpriceable: floors.unpriceable, impossible: floors.impossible,
           butterfly: floors.butterfly,
           markets: [...floors.markets], oiUnavailable: [...floors.oiUnavailable],
@@ -4856,6 +4901,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                           {f.model > 0 && <div style={{ ...mono, fontSize: 10.5, color: T.red, lineHeight: 1.6, marginTop: 6 }}>{modelDisagreementNote(f.model, what)}</div>}
                           {f.spread > 0 && <div style={{ ...mono, fontSize: 10.5, color: T.amber, lineHeight: 1.6, marginTop: 6 }}>{wideSpreadNote(f.spread, what)}</div>}
                           {f.comboSpread > 0 && <div style={{ ...mono, fontSize: 10.5, color: T.amber, lineHeight: 1.6, marginTop: 6 }}>{wideComboNote(f.comboSpread, what)}</div>}
+                          {f.crossing > 0 && <div style={{ ...mono, fontSize: 10.5, color: T.amber, lineHeight: 1.6, marginTop: 6 }}>{crossingNote(f.crossing, what)}</div>}
                           <div style={{ ...mono, fontSize: 10.5, color: T.dim, lineHeight: 1.6, marginTop: 8 }}>{qualityFloorSentence(f.level || liqLevel)}</div>
                         </Fold>
                       );
@@ -4886,7 +4932,8 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                         because it is the app warning rather than explaining. */}
                     <div style={{ ...mono, fontSize: 10, color: isLoosened(multi.floors?.level || liqLevel) ? T.red : T.dim, lineHeight: 1.6 }}>
                       {liquiditySettingNote(multi.floors?.level || liqLevel, {
-                        kept: multi.res.length, liquidity: multi.floors?.liquidity, reward: multi.floors?.reward,
+                        kept: multi.res.length, liquidity: multi.floors?.liquidity, crossing: multi.floors?.crossing,
+                        reward: multi.floors?.reward,
                         unpriceable: multi.floors?.unpriceable,
                       })}
                       {(multi.floors?.level || liqLevel).id !== liqLevel.id
@@ -5125,6 +5172,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                         the per-leg test on both legs and its combination was
                         143% of its own mid wide. */}
                     {t.comboSpread > 0 && <div style={{ ...mono, fontSize: 10.5, color: T.amber, lineHeight: 1.6, marginTop: 6 }}>{wideComboNote(t.comboSpread, what)}</div>}
+                    {t.crossing > 0 && <div style={{ ...mono, fontSize: 10.5, color: T.amber, lineHeight: 1.6, marginTop: 6 }}>{crossingNote(t.crossing, what)}</div>}
                     {/* MISSING DATA IS NOT ILLIQUIDITY, and a floor that was
                         never applied must not be reported as one that was. */}
                     {shortlist.oiSkipped && <div style={{ ...mono, fontSize: 10, color: T.dim, lineHeight: 1.6, marginTop: 6 }}>{liquiditySkippedNote(feedName(chain))}</div>}
@@ -6159,6 +6207,16 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                             the record, or re-price it and send it again.
                           </div>
                         )}
+                        {/* A CANCEL ON ITS WAY SHOWS ITS SENTENCE, AND NO CANCEL OR
+                            RE-PRICE: a second tap would only ask again. */}
+                        {cancelWaiting({ status: p.alpacaStatus, cancelRequested: p.cancelRequestedAt }) ? (
+                          <div style={{ display: "flex", gap: 6, marginTop: 9, flexWrap: "wrap", alignItems: "center" }}>
+                            <span style={{ ...mono, fontSize: 10.5, color: T.amber, lineHeight: 1.5 }}>
+                              {cancelOutcome({ order: { status: p.alpacaStatus, cancelRequested: p.cancelRequestedAt } }).headline}
+                            </span>
+                            <Btn small ghost disabled={DEMO} onClick={() => recheckOrders()}>Ask Alpaca again</Btn>
+                          </div>
+                        ) : (
                         <div style={{ display: "flex", gap: 6, marginTop: 9, flexWrap: "wrap", alignItems: "center" }}>
                           <Btn small ghost disabled={orderBusy === p.id || DEMO} onClick={() => repriceWorking(p)}
                             title={DEMO ? DEMO_TOOLTIP : undefined}>Re-price it →</Btn>
@@ -6169,6 +6227,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                             Re-pricing cancels this one and puts the trade back on Build at today's market.
                           </span>
                         </div>
+                        )}
                       </div>
                     );
                   })}
@@ -6235,7 +6294,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 6 }}>
                         <div style={{ flex: 1, minWidth: 180 }}>
                           <div style={{ ...mono, fontSize: 24, fontWeight: 800, color: actTone, letterSpacing: 0.5, lineHeight: 1.15 }}>
-                            {act.action || "NO QUOTE"}
+                            {act.action || (act.kind === "not-held" ? "NOT ON ALPACA" : "NO QUOTE")}
                           </div>
                           <div style={{ fontSize: 13, color: T.ink, marginTop: 3, lineHeight: 1.45 }}>{act.line}</div>
                         </div>
@@ -6761,7 +6820,17 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                         {e.ref && <span style={{ ...mono, fontSize: 11, fontWeight: 700, color: T.blue }}>{e.ref}</span>}
                         <span style={{ fontWeight: 700, color: T.ink, fontSize: 13 }}>{e.ticker} · {e.name}</span>
-                        <span style={{ ...mono, fontSize: 13, fontWeight: 700, color: e.pnl == null ? T.dim : e.pnl >= 0 ? T.green : T.red }}>{e.pnl == null ? "—" : fmt$(e.pnl)}</span>
+                        {/* A FIGURE THAT IS NOT A FILL IS LABELLED AND DIMMED, and
+                            no sum counts it (`journalPnl()` in journal.js). */}
+                        {(() => {
+                          const jp = journalPnl(e);
+                          return (
+                            <span style={{ ...mono, fontSize: 13, fontWeight: 700, color: jp.counted == null ? T.dim : jp.counted >= 0 ? T.green : T.red }}>
+                              {jp.shown == null ? "—" : fmt$(jp.shown)}
+                              {jp.note && <span style={{ fontSize: 10, fontWeight: 400 }}>{` ${jp.note}`}</span>}
+                            </span>
+                          );
+                        })()}
                         <span style={{ ...mono, fontSize: 10, color: e.ruleExit ? T.green : T.amber, border: `1px solid ${(e.ruleExit ? T.green : T.amber)}55`, borderRadius: 4, padding: "1px 6px" }}>
                           {e.ruleExit ? "closed by the rules" : "closed by hand"}
                         </span>

@@ -18,7 +18,7 @@ import { RULES, sizing, ruleBadge, qualityFloor, qualityFloorSentence, liquidity
   chanceOf, chanceSeedKey, seasonalProvenance, seasonalStampOf, seasonalSourceSentence,
   MEASURED_SEASONAL_SOURCE, ESTIMATED_SEASONAL_SOURCE, watchAttentionLevel,
   ivProvenance, CHAIN_IV_SOURCE, THESIS_IV_SOURCE, FALLBACK_IV_SOURCE,
-  comboBook, limitAgainstBook, openLimitPrice, openLimitNote, limitPlacement, notionalControlled, notionalNote,
+  comboBook, limitAgainstBook, openLimitPrice, closeLimitPrice, openLimitNote, limitPlacement, notionalControlled, notionalNote,
   entryRoom, entryInsideExitNote, entryRoomWarning, entryRoomOverrideAsk, entryOverrideOk, entryOverrideNote,
   passedOverRecord, passedOverSummary, OPEN_LIMIT_SLIPPAGE, CLOSE_LIMIT_SLIPPAGE,
   chancePct, chanceText, chanceInTen, signedMoney,
@@ -2216,12 +2216,76 @@ test("OPENING LIMIT — IT IS NOT THE BARE MID: it concedes a share of the sprea
   assert.ok(o.limit < Math.abs(b.ask), "a quarter of the spread is not the far side of it");
 });
 
-test("OPENING LIMIT — a CREDIT structure concedes downwards, and the arithmetic has no branch", () => {
+test("OPENING LIMIT — a CREDIT structure concedes towards zero: you accept less, not more", () => {
+  // THIS TEST USED TO ASSERT −0.45, which is the bug it was named after: a
+  // credit of MORE than the mid, on the side of the market that never fills.
+  // Its own message said "you accept less, not more"; −0.35 is less.
   const credit = openLimitPrice({ netMid: -0.40, spread: 0.20 });
-  assert.ok(Math.abs(credit.net + 0.45) < 1e-9, "you accept less, not more");
-  assert.equal(credit.limit, 0.45, "and the MAGNITUDE is what orderBody() sends");
+  assert.ok(Math.abs(credit.net + 0.35) < 1e-9, "you accept less, not more");
+  assert.equal(credit.limit, 0.35, "and the MAGNITUDE is what the ticket prints");
   const debit = openLimitPrice({ netMid: 0.40, spread: 0.20 });
-  assert.ok(Math.abs(debit.net - 0.45) < 1e-9);
+  assert.ok(Math.abs(debit.net - 0.45) < 1e-9, "a debit offers to pay more");
+});
+
+/* THE OWNER'S XLE 2026-10-30 QUOTES, 23 Sep 2026: SELL 60P 1.22/1.27, BUY 57P
+   0.49/0.53. The app suggested a credit of $75.75 — above the mid, on the side
+   that never fills — while the ticket's own sliders summed to $71. */
+const XLE_CREDIT_LEGS = [{ side: -1, qty: 1, strike: 60, type: "put" }, { side: 1, qty: 1, strike: 57, type: "put" }];
+const XLE_CREDIT_QUOTES = [{ bid: 1.22, ask: 1.27 }, { bid: 0.49, ask: 0.53 }];
+
+test("OPENING LIMIT — XLE credit put spread: suggested −0.7125, and it is a price that can fill", () => {
+  const b = comboBook(XLE_CREDIT_LEGS, XLE_CREDIT_QUOTES);
+  assert.ok(Math.abs(b.mid + 0.735) < 1e-9, "the mid is a credit of 0.735");
+  assert.ok(Math.abs(b.spread - 0.09) < 1e-9, "the combination is 9 cents wide");
+  assert.ok(Math.abs(b.ask + 0.69) < 1e-9, "the price that fills now is a credit of 0.69");
+  const o = openLimitPrice({ netMid: b.mid, spread: b.spread });
+  assert.ok(Math.abs(o.net + 0.7125) < 1e-9, `suggested net −0.7125 (receive $71.25), got ${o.net}`);
+  const place = limitPlacement(o.limit, b);
+  assert.equal(place.zone, "waiting", "between the mid and the side that fills");
+  assert.notEqual(place.zone, "no-fill");
+  assert.notEqual(place.zone, "unlikely");
+});
+
+test("OPENING LIMIT — PROPERTY: for any two-sided book the suggestion sits between the mid and the side that fills", () => {
+  // A deterministic walk over debits and credits, wide and narrow, one to four
+  // legs. The side that fills is `book.ask` — the structure as built, bought.
+  let seed = 7;
+  const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+  let credits = 0, debits = 0;
+  for (let i = 0; i < 2000; i++) {
+    const n = 1 + Math.floor(rnd() * 4);
+    const legs = [], quotes = [];
+    for (let k = 0; k < n; k++) {
+      const bid = Math.round((0.05 + rnd() * 5) * 100) / 100;
+      const ask = Math.round((bid + 0.01 + rnd() * 0.6) * 100) / 100;
+      legs.push({ side: rnd() < 0.5 ? 1 : -1, qty: 1 + Math.floor(rnd() * 2) });
+      quotes.push({ bid, ask });
+    }
+    const b = comboBook(legs, quotes);
+    if (!b.ok || Math.abs(b.mid) < 0.05) continue;
+    const o = openLimitPrice({ netMid: b.mid, spread: b.spread });
+    const lo = Math.min(b.mid, b.ask), hi = Math.max(b.mid, b.ask);
+    if (Math.sign(b.ask) !== Math.sign(b.mid)) {
+      // The far side is across zero: the sign floor holds instead.
+      assert.equal(Math.sign(o.net), Math.sign(b.mid), `case ${i}: a concession never flips the sign`);
+      continue;
+    }
+    assert.ok(o.net >= lo - 1e-9 && o.net <= hi + 1e-9,
+      `case ${i}: mid ${b.mid}, fills at ${b.ask}, suggested ${o.net}`);
+    assert.equal(Math.sign(o.net), Math.sign(b.mid), `case ${i}: the sign is the structure's`);
+    if (b.mid < 0) credits++; else debits++;
+  }
+  assert.ok(credits > 100 && debits > 100, `both directions exercised (${credits} credits, ${debits} debits)`);
+});
+
+test("CLOSE LIMIT — UNCHANGED: a held credit pays more than the mid to close, a held debit receives less", () => {
+  // closeLimitPrice() is on the do-not-touch list and was traced correct. This
+  // locks it: the opening fix above must never be "mirrored" into the close.
+  const heldCredit = closeLimitPrice({ netMid: -0.735, spread: 0.09 });
+  assert.ok(Math.abs(heldCredit.net + 0.7575) < 1e-9, "buying back a credit concedes past the mid");
+  const heldDebit = closeLimitPrice({ netMid: 0.40, spread: 0.20 });
+  assert.ok(Math.abs(heldDebit.net - 0.35) < 1e-9, "selling a debit concedes under the mid");
+  assert.ok(closeLimitPrice({ netMid: 0.02, spread: 0.40 }).net > 0, "and it never flips either");
 });
 
 test("OPENING LIMIT — a concession may never flip the sign round", () => {

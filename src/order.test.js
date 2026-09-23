@@ -12,7 +12,8 @@ import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { gcdAll, reduceRatios, orderQty, unitLimit, orderBody, orderPreviewLines,
   orderOutcome, orderWaitingPhrase, alpacaErrorText, alpacaBodySentence,
-  limitDirection, mlegLimitPrice, signedLimitFor, limitWords, limitKind, fillPriceOf } from "./order.js";
+  limitDirection, mlegLimitPrice, signedLimitFor, limitWords, limitKind, fillPriceOf,
+  cancelOutcome, cancelWaiting, orderIsWorking } from "./order.js";
 
 let passed = 0;
 const failures = [];
@@ -556,6 +557,68 @@ test("CLOSE — the one close path that had no book now hands limitAgainstBook a
   // ...and the price it sends is worked out from a chain fetched at the tap.
   assert.ok(/fetchChain\(/.test(pro), "the close prices from a chain read at the moment of the tap (PRD §8c)");
   assert.ok(/closeLimitPrice\(/.test(pro), "the closing limit comes from closeLimitPrice(), its one home");
+});
+
+/* ---------------- a cancel is a request, not an outcome (0b) ---------------- */
+
+test("CANCEL — a 2xx is 'Cancel requested', never 'cancelled'", () => {
+  const r = cancelOutcome({ ok: true });
+  assert.equal(r.kind, "requested");
+  assert.equal(r.waiting, true, "no Cancel and no Re-price while it is on its way");
+  assert.ok(/^Cancel requested\./.test(r.headline), r.headline);
+  assert.ok(!/cancelled|canceled\./i.test(r.headline.replace("reports the order canceled", "")),
+    "it never claims the order IS cancelled");
+  assert.ok(/exposure/.test(r.headline), "and it says the order still counts");
+});
+
+test("CANCEL — the J-0003 reply: a 422 'order pending cancel' is a STATE, not a failure", () => {
+  const e = new Error("Alpaca refused it — HTTP 422. code 42210000: order pending cancel");
+  e.status = 422; e.body = JSON.stringify({ code: 42210000, message: "order pending cancel" });
+  const r = cancelOutcome({ error: e });
+  assert.equal(r.kind, "pending");
+  assert.equal(r.waiting, true);
+  assert.ok(/already waiting at Alpaca/.test(r.headline), r.headline);
+  assert.ok(/9:30 New York/.test(r.headline), "it names when it completes");
+  assert.ok(!/did not go through/.test(r.headline), "and it is not read as a failure");
+});
+
+test("CANCEL — an order Alpaca reports pending_cancel shows the same sentence, and counts as working", () => {
+  const r = cancelOutcome({ order: { status: "pending_cancel" } });
+  assert.equal(r.kind, "pending");
+  assert.equal(cancelWaiting({ status: "pending_cancel" }), true, "no Cancel, no Re-price");
+  assert.equal(orderIsWorking({ status: "pending_cancel" }), true, "it stays in exposure until canceled");
+});
+
+test("CANCEL — cancelled ONLY when Alpaca reports 'canceled'", () => {
+  const r = cancelOutcome({ order: { status: "canceled", cancelRequested: 1 } });
+  assert.equal(r.kind, "canceled");
+  assert.equal(r.waiting, false);
+  assert.equal(orderIsWorking({ status: "canceled" }), false, "and only then does it leave exposure");
+  // A request on an order that has since filled is not waiting for anything.
+  assert.equal(cancelOutcome({ order: { status: "filled", cancelRequested: 1 } }), null);
+  // A request with the broker still saying `new` is still on its way.
+  assert.equal(cancelWaiting({ status: "new", cancelRequested: 1 }), true);
+  assert.equal(cancelWaiting({ status: "new" }), false, "no request, no waiting: Cancel is offered");
+});
+
+test("CANCEL — any other refusal is a failure, in Alpaca's own words", () => {
+  const e = new Error("x"); e.status = 403; e.body = JSON.stringify({ code: 40310000, message: "forbidden" });
+  const r = cancelOutcome({ error: e });
+  assert.equal(r.kind, "failed");
+  assert.equal(r.waiting, false, "the button stays, so it can be tried again");
+  assert.ok(/did not go through/.test(r.headline) && /forbidden/.test(r.headline), r.headline);
+});
+
+test("CANCEL — ONE HOME: both call sites read cancelOutcome(), and neither prints its own sentence", () => {
+  const app = readFileSync(new URL("./App.jsx", import.meta.url), "utf8");
+  const pro = readFileSync(new URL("./pro.jsx", import.meta.url), "utf8");
+  for (const [name, src] of [["App.jsx", app], ["pro.jsx", pro]]) {
+    assert.ok(/cancelOutcome\(/.test(src), `${name} reads cancelOutcome()`);
+    assert.ok(!/"Order cancelled\."/.test(src), `${name} no longer says "Order cancelled."`);
+    assert.ok(!/The cancellation did not go through/.test(src), `${name} has no copy of the failure sentence`);
+    assert.ok(!/was CANCELLED from the Positions screen/.test(src), `${name} never files a cancel the broker has not reported`);
+  }
+  assert.ok(!/alpacaStatus: "canceled"/.test(app), "the card never writes a status the broker did not report");
 });
 
 /* ---------------- report ---------------- */

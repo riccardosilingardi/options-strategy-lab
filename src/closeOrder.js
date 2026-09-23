@@ -68,6 +68,37 @@ export function groupForRecord(record, brokerPositions = []) {
 }
 
 /**
+ * WHICH OF A RECORD'S LEGS THE BROKER DOES NOT HOLD — or null when unknown.
+ *
+ * J-0002 (XLE +1 59P / -1 62.5P, imported 21 Sep) was valued at the app's own
+ * mark and filed at -$133 while a SUCCESSFUL sync of /v2/positions had returned
+ * nothing. An empty answer from a broker that was asked is a fact; no answer
+ * is not one. So this returns NULL — unknown, change nothing — when:
+ *   - there has been no successful sync (`alSync.t` is only set on success),
+ *   - the sync is older than the moment the record became owned, or
+ *   - the record was never tied to the broker (the app's own paper book).
+ * Otherwise it names each leg the broker does not hold: same underlying,
+ * expiry, type, strike and side. `[]` means every leg is there.
+ */
+export function legsNotHeld(record, alSync = null) {
+  if (!record || !Array.isArray(record.legs) || !record.legs.length) return null;
+  if (!alSync || !alSync.t || !Array.isArray(alSync.positions)) return null;
+  const atBroker = record.alpacaHeld === true || record.alpacaLive === true || record.alpacaFilled === true;
+  if (!atBroker) return null;
+  const fills = (record.timeline || []).filter((e) => e && e.type === "fill").map((e) => +e.t || 0);
+  const since = Math.max(Date.parse(record.openedAt) || 0, ...fills);
+  if (alSync.t < since) return null;
+  const held = alSync.positions.map((x) => {
+    const m = OCC_RE.exec(String(x?.symbol || ""));
+    const leg = holdingLeg(x);
+    return m && leg ? { ...leg, und: m[1], exp: `20${m[2].slice(0, 2)}-${m[2].slice(2, 4)}-${m[2].slice(4, 6)}` } : null;
+  }).filter(Boolean);
+  return record.legs.filter((l) => !held.some((h) => h.und === record.ticker && h.exp === record.expKey
+    && h.type === l.type && Math.abs(h.strike - Number(l.strike)) < 1e-6 && h.side === Math.sign(+l.side || 1)))
+    .map((l) => `${Math.sign(+l.side || 1) > 0 ? "+" : "-"}${Math.abs(+l.qty || 1)} ${l.strike}${l.type === "put" ? "P" : "C"}`);
+}
+
+/**
  * IS A CLOSE ALREADY WORKING FOR THIS RECORD? Only the broker can say.
  * Working while the broker still lists the close order as open — or while it
  * has not been asked since the order was sent. Once the order is gone from the

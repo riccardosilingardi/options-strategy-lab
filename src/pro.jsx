@@ -22,7 +22,7 @@ import { erf, netBS } from "./engine.js";
 import { ARROW, REGIONS, regionSignals, tagImpacts, taRead } from "./signals.js";
 import { useNarrow, BandThumbnail, payoffBands, bandTakeaway } from "./visuals.jsx";
 import { DEMO, DEMO_TOOLTIP } from "./demo.js";
-import { reduceRatios, orderQty, mlegLimitPrice, limitWords, limitKind, signedLimitFor, orderBody, orderPreviewLines, orderOutcome, alpacaErrorText } from "./order.js";
+import { reduceRatios, orderQty, mlegLimitPrice, limitWords, limitKind, signedLimitFor, orderBody, orderPreviewLines, orderOutcome, alpacaErrorText, cancelOutcome, cancelWaiting } from "./order.js";
 import { hasOpenInterest, sourceNote, openInterestNote, fetchChain } from "./chain.js";
 import { prepareClose, sendClose, holdingGroups } from "./closeOrder.js";
 // "Why this trade" and the headline tags moved to src/why.jsx: the wizard's
@@ -920,7 +920,19 @@ export function AlpacaDesk({ creds, setMsg, gate, positions = [] }) {
     setBusy(false);
   };
   useEffect(() => { sync(); }, []); // eslint-disable-line
-  const cancel = async (id) => { try { await alpacaReq(`/v2/orders/${id}`, "DELETE"); setMsg("Order cancelled."); sync(); } catch (e) { setMsg(`The cancellation did not go through: ${alpacaErrorText(e)}`); } };
+  /* A CANCEL IS A REQUEST (`cancelOutcome()` in order.js). A 2xx is "Cancel
+     requested", never "cancelled"; a 422 "pending cancel" is a cancel already
+     waiting, not a failure. `cancelAsked` keeps the button down between the
+     tap and the next sync, so a second tap cannot ask again. */
+  const [cancelAsked, setCancelAsked] = useState({});
+  const cancel = async (id) => {
+    let res;
+    try { await alpacaReq(`/v2/orders/${id}`, "DELETE"); res = cancelOutcome({ ok: true }); }
+    catch (e) { res = cancelOutcome({ error: e }); }
+    if (res.waiting) setCancelAsked((m) => ({ ...m, [id]: Date.now() }));
+    setMsg(res.headline);
+    if (res.kind !== "failed") sync();
+  };
   // Chiusura strategia intera: 1) cancella ordini aperti sugli stessi contratti
   // (evita "wash trade detected") 2) invia UN ordine complesso di chiusura
   // (mleg) — mai gambe separate — 3) A LIMITE, PREZZATO AL MOMENTO DEL TAP.
@@ -1025,7 +1037,11 @@ export function AlpacaDesk({ creds, setMsg, gate, positions = [] }) {
               <div style={{ ...mono, fontWeight: 700, color: T.ink, fontSize: 12 }}>{o.order_class === "mleg" ? `MULTILEG x${o.qty} (${(o.legs || []).length} legs)` : `${o.symbol} ${o.side} ${o.qty}`}</div>
               <div style={{ ...mono, fontSize: 10, color: T.dim }}>{o.type}{o.limit_price != null ? ` @ ${limitWords(o.limit_price) || o.limit_price}` : ""} · {o.time_in_force} · {o.status}</div>
             </div>
-            <Btn small ghost color={T.red} onClick={() => cancel(o.id)}><Trash2 size={11} /> Cancel</Btn>
+            {cancelWaiting({ status: o.status, cancelRequested: cancelAsked[o.id] })
+              ? <div style={{ ...mono, fontSize: 10.5, color: T.amber, lineHeight: 1.5, flexBasis: "100%" }}>
+                  {cancelOutcome({ order: { status: o.status, cancelRequested: cancelAsked[o.id] } }).headline}
+                </div>
+              : <Btn small ghost color={T.red} onClick={() => cancel(o.id)}><Trash2 size={11} /> Cancel</Btn>}
           </div>
         ))}
         {ords && ords.length === 0 && <div style={{ ...mono, fontSize: 11, color: T.mut }}>No orders waiting.</div>}
