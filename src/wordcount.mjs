@@ -186,7 +186,10 @@ export function stepBlock(src, id) {
       if (c === "{") depth++;
       else if (c === "}") { depth--; if (depth === 0) break; }
     }
-    if (i < src.length) { out.push(src.slice(open, i + 1)); from = i + 1; }
+    // A match whose enclosing braces close BEFORE the needle is not a JSX
+    // block (an expression like `const x = … step === "find"`): skip it, or
+    // `from` would step backwards and the loop would never end (PR #41).
+    if (i < src.length && i > at) { out.push(src.slice(open, i + 1)); from = i + 1; }
   }
   return out.join("\n");
 }

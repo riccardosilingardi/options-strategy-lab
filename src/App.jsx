@@ -3645,6 +3645,10 @@ export default function OptionsStrategyLab() {
     );
   }
 
+  /* Find is multi-market: the one-ticker header strip is not drawn on it.
+     Written `"find" === step` on purpose: `step === "<id>"` is how
+     src/wordcount.mjs finds a step's JSX block, and this is not one. */
+  const onFindStep = tab === "build" && !showSettings && "find" === step;
   return (
     <div style={{ minHeight: "100vh", background: T.bg, color: T.body, fontFamily: "ui-sans-serif, system-ui" }}>
       <DemoBanner />
@@ -3696,6 +3700,11 @@ export default function OptionsStrategyLab() {
           </div>
         </div>
 
+        {/* ONE TICKER'S STRIP, ONLY WHERE ONE TICKER IS LOADED (PR #41, TASK 3).
+            Find reads many markets at once, so a single market's price,
+            expiry and seasonality above its list described none of them. It
+            stays on Build and everywhere else one ticker is the subject. */}
+        {!onFindStep && (
         <div style={{ display: "flex", gap: 14, marginTop: 10, flexWrap: "wrap" }}>
           {/* The feed is named in ONE place (feedName in chain.js) and every label
               reads from it. This one used to say "(CBOE)" three centimetres under a
@@ -3736,6 +3745,7 @@ export default function OptionsStrategyLab() {
               tip="Where today's option prices sit against their own past year (0 = cheapest ever, 100 = dearest). High means selling premium pays better; low means buying options is good value." />
           )}
         </div>
+        )}
 
         {msg && <div style={{ ...mono, fontSize: 11.5, color: T.amber, border: `1px solid ${T.amber}44`, background: `${T.amber}10`, borderRadius: 6, padding: "7px 10px", marginTop: 10 }}>{msg}</div>}
 

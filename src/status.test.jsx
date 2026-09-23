@@ -171,6 +171,23 @@ check("ON THE FIXTURES: the label moves to the cards whose own strikes are inver
   eq(t.filter((r) => r.stale).length, 1, "and only that board");
 });
 
+/* PR #41, TASK 3 — FIND IS MULTI-MARKET: NO SINGLE-TICKER HEADER STRIP ON IT. */
+check("FIND HAS NO SINGLE-TICKER STRIP; BUILD KEEPS IT", () => {
+  has(code, 'const onFindStep = tab === "build" && !showSettings && "find" === step;');
+  const open = code.indexOf("{!onFindStep && (");
+  if (open < 0) throw new Error("the strip is not guarded");
+  // Every stat of the strip sits after the guard and before the guard closes.
+  const close = code.indexOf("TabBoundary", open);
+  for (const k of ["k={`PRICE NOW", 'k="EXPIRY"', "k={`SEASONALITY", 'k="SEASONAL SOURCE"', 'k="IV RANK"']) {
+    const at = code.indexOf(k);
+    if (at < open || at > close) throw new Error(`${k} is outside the guarded strip`);
+    eq(count(code, k), 1, `${k} is drawn once`);
+  }
+  // …and the Find block itself draws none of them.
+  const find = code.slice(code.indexOf('step === "find" && ('), code.indexOf('step === "build" && ('));
+  for (const w of ["SEASONAL SOURCE", "PRICE NOW", "SEASONALITY"]) hasNot(find, w);
+});
+
 console.log(`\n${ok.length} passed, ${bad.length} failed\n`);
 for (const [n, m] of bad) console.error(`FAILED: ${n}\n  ${m}`);
 if (bad.length) process.exit(1);
