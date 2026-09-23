@@ -91,7 +91,8 @@ All in `RULES`, `src/rules.js`, unless noted.
 - Price exists: `minNetPremium` 0.05 (`MIN_NET_DOLLARS` = $5 a contract).
 - Model sanity: `modelDisagreementRatio` 4.
 - Floors: `liquidityPercentile` 0.40, `minOpenInterestAbsolute` 10, `minPeersForPercentile` 8,
-  `maxSpreadShareOfMid` 0.35, `maxComboSpreadShareOfNet` 1.0, `minRewardRisk` 0.25.
+  `maxSpreadShareOfMid` 0.35, `maxComboSpreadShareOfNet` 1.0, `maxCrossingShareOfMaxProfit` 0.5,
+  `minRewardRisk` 0.25.
 - Limit pricing: `openLimitSlippage` 0.25, `closeLimitSlippage` 0.25.
 - Simulation: `mcRuns` 8000, `fallbackIV` 0.25, `fallbackSigma` 0.25.
 - Attention: `watchAttentionShare` 0.35, `autopilotConfidence` 70, `lowConfidence` 40.

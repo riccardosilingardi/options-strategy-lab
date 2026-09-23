@@ -34,7 +34,7 @@ import {
   RULES, comboBook, comboSpreadShare, comboSpreadFloor, comboSpreadFloorReason,
   wideComboNote, comboSpreadSkippedNote, spreadFloor, qualityFloor,
   effectiveLimit, limitCeilingNote, orderVerdict, ORDER_VERDICTS,
-  legBook, sizeSkippedNote, legLimitSeed, netFromLegs, onTick, openLimitPrice,
+  legBook, sizeSkippedNote, legLimitSeed, netFromLegs, onTick, openLimitPrice, fillNet,
   rewardRisk, conflictSummaryLine, warningsToPrint, NOTHING_TODAY,
   tradeCard, TRADE_CARD_IDS, unlistedContractNote, unquotedLegNote, unquotedLegPointer,
   strikeSnapNote, offBoardStrikeLabel, checkedAgainstNote, NO_CEILING,
@@ -910,6 +910,23 @@ check("the card, the gate and the ticket read ONE figure — at the seed and at 
     throw new Error("the fixture does not move the price, so it proves nothing");
   }
   hasNot(atSeed.riskLine, money(atAsk.gate.limits.tradeRisk));
+});
+
+check("ON A CREDIT the leg-slider seeds and the combination suggestion agree to the cent (XLE, 23 Sep 2026)", () => {
+  // SELL 60P 1.22/1.27, BUY 57P 0.49/0.53. The sliders seeded at 1.23 / 0.52 =
+  // a credit of $71 while `openLimitPrice()` said $75.75 — two screens, one
+  // object, two prices. They are one arithmetic seen two ways and must agree.
+  const legs = [{ side: -1, qty: 1, strike: 60, type: "put" }, { side: 1, qty: 1, strike: 57, type: "put" }];
+  const quotes = [{ bid: 1.22, ask: 1.27 }, { bid: 0.49, ask: 0.53 }];
+  const seed = legLimitSeed(legs, quotes);
+  eq(seed[0], 1.23, "the short leg is seeded a quarter of its spread under its mid");
+  eq(seed[1], 0.52, "the long leg a quarter over");
+  const seeded = netFromLegs(legs, seed).net;
+  const book = comboBook(legs, quotes);
+  const sugg = openLimitPrice({ netMid: book.mid, spread: book.spread });
+  near(seeded, sugg.net, 0.011, "the seed and the suggestion are the same price, sign included");
+  near(fillNet(legs, quotes), sugg.net, 1e-9, "and the card reads that same suggestion");
+  if (Math.sign(seeded) !== -1 || Math.sign(sugg.net) !== -1) throw new Error("a credit stays a credit");
 });
 
 check("the card NAMES the price its figure was worked out at, and which price it is", () => {

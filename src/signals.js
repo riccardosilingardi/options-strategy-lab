@@ -906,7 +906,8 @@ export function verdictNarrative({ basket = [], examined = [], excluded = [], ne
      was unavailable the skip is stated too: missing data is not illiquidity,
      and a floor that was never applied must not be reported as one that was. */
   if (floors) {
-    const cut = (floors.liquidity || 0) + (floors.spread || 0) + (floors.comboSpread || 0) + (floors.reward || 0);
+    const cut = (floors.liquidity || 0) + (floors.spread || 0) + (floors.comboSpread || 0) + (floors.crossing || 0) +
+      (floors.reward || 0);
     const bits = [];
     if (floors.liquidity > 0) {
       // The floor is relative to the chain being judged, so the sentence has to
@@ -937,6 +938,13 @@ export function verdictNarrative({ basket = [], examined = [], excluded = [], ne
         `than ${Math.round(RULES.maxComboSpreadShareOfNet * 100)}% of its own net apart, with every leg inside ` +
         `the per-leg ceiling — two leg spreads land on one net, and the round trip costs more than the trade ` +
         `is worth`);
+    }
+    // THE FIFTH FAULT (PR #39): the combination's spread measured against what
+    // the trade can MAKE rather than against what it costs.
+    if (floors.crossing > 0) {
+      bits.push(`${plural(floors.crossing, "structure", "structures")} would have spent more than ` +
+        `${Math.round(RULES.maxCrossingShareOfMaxProfit * 100)}% of the most ${floors.crossing === 1 ? "it" : "each"} ` +
+        `could make just crossing the market in and out`);
     }
     if (floors.reward > 0) {
       bits.push(`${plural(floors.reward, "structure", "structures")} paid less than ` +
