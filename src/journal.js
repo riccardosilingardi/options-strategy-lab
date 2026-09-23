@@ -1139,8 +1139,15 @@ export function upgradeHolding(pos, group = {}, { plan = null, now = Date.now() 
   // 2) THE SIZE, MEASURED FROM THE BROKER'S OWN LEG QUANTITIES.
   //    `Number(null)` is 0 and 0 is finite, so the null goes out first: a group
   //    with no legs tells us nothing about the size and must leave it alone.
+  //    >>> IN THE RECORD'S OWN UNITS (PR #42). <<< `contracts` multiplies the
+  //    record's legs, so the broker's count is divided by what ONE of the
+  //    record's structures already holds (`perCombination()`). GDX, 23 Sep
+  //    2026: the imported record's leg already said 9 puts, the sync wrote
+  //    `contracts: 9` on top of it, and the book counted 81 puts — $40,500 at
+  //    risk for a $4,500 position. The app's own J-0001 (one put × 9) was
+  //    right only because its leg said 1.
   if (legs && legs.length) {
-    const measured = Math.max(1, Math.round(reduceRatios(legs).factor) || 1);
+    const measured = Math.max(1, Math.round(reduceRatios(legs).factor / perCombination(pos)) || 1);
     const cur = Number(pos.contracts);
     const hasCur = Number.isFinite(cur) && cur >= 1;
     if (!hasCur || Math.round(cur) !== measured || pos.contractsAssumed) {
@@ -1177,6 +1184,59 @@ export function upgradeHolding(pos, group = {}, { plan = null, now = Date.now() 
     out.seqNext = t.seqNext;
   }
   return out;
+}
+
+/* ------------------------------------------------------------------
+   WHICH RECORD IS WHICH HOLDING — BY SHAPE, NOT BY QUANTITY (PR #42)
+
+   >>> READ ON THE OWNER'S PHONE, 23 Sep 2026. <<< One GDX 94P holding, nine
+   contracts, sent from the app as J-0001, and TWO cards on Positions: J-0001
+   and "J-0002 · Imported from Alpaca". The sync matched records to the
+   broker's holdings on a signature that spelled every leg's QUANTITY: the
+   app stores the structure as built (+1 put) and the size apart (9), the
+   broker lists +9, and "+1" is not "+9". So the holding looked unknown and
+   was imported a second time — while the broker panel, which matches on
+   ticker and expiry, said "This is J-0001" underneath.
+
+   A holding is matched on its SHAPE: ticker, expiry, and each leg's side,
+   type, strike and ratio after `reduceRatios()` divides the size out. The
+   size is then measured by `upgradeHolding()`, in the record's own units.
+------------------------------------------------------------------ */
+
+/** The size-free shape of a set of legs: side, type, strike and ratio. */
+export function holdingShape(ticker, expKey, legs = []) {
+  const { ratios } = reduceRatios(legs || []);
+  return `${ticker || ""}|${expKey || ""}|` + (legs || [])
+    .map((l, i) => `${Number(l.side) > 0 ? "+" : "-"}${ratios[i]}${String(l.type || "")[0]}${Number(l.strike)}`)
+    .sort().join(",");
+}
+
+/** Was this record written by the sync from the broker's holdings, rather
+ *  than by an order this app sent? */
+export const isImportedRecord = (pos) =>
+  !!(pos && ((pos.thesis && pos.thesis.imported === true) || pos.alpacaId === "sync"));
+
+/**
+ * A duplicate the old signature created: an IMPORTED record whose holding the
+ * app's own record of the order already describes (same shape). The app's
+ * record keeps its ref, its thesis, its timeline and its sizing; the import
+ * held nothing the broker cannot give again, so it goes.
+ *
+ * @param positions `store.positions`
+ * @returns {{ positions, dropped: string[] }} — `dropped` are the refs removed;
+ *   the SAME array back when there is nothing to remove.
+ */
+export function dropImportedTwins(positions = []) {
+  const list = Array.isArray(positions) ? positions : [];
+  const own = new Set(list.filter((p) => p && !isImportedRecord(p) && positionStage(p) === "owned")
+    .map((p) => holdingShape(p.ticker, p.expKey, p.legs)));
+  const dropped = [];
+  const kept = list.filter((p) => {
+    if (!isImportedRecord(p) || !own.has(holdingShape(p.ticker, p.expKey, p.legs))) return true;
+    dropped.push(p.ref || String(p.id));
+    return false;
+  });
+  return { positions: dropped.length ? kept : list, dropped };
 }
 
 /* ------------------------------------------------------------------

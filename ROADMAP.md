@@ -6,31 +6,25 @@ The full history of every item shipped so far (P0–P10, P2-bis) is in `docs/his
 Every pull request updates this file: the session that ships an item marks it done and states
 what the next one inherits.
 
-## Done in this pull request — PR #41, size, stop signs, one header, free sizing
+## Done in this pull request — PR #42, one holding, one record, one size
 
-- **Task 1 — a card's size matches its risk.** The owner's SLV Bearish Put Butterfly
-  (+1 58P / −2 55P / +1 51P, 2026-11-20) printed RISK $143 and "6 contracts for $258": the
-  budget was divided by the $43 premium, and on a butterfly with wings 3 and 4 wide the worst
-  case is $43 + $100. `scaleStrategy()` now divides by the maximum loss (the larger of loss
-  and premium on a debit) and `sizeLine()` prints contracts × risk: $300 buys 2 for $286.
-  `figures.test.jsx` holds the butterfly and a sweep of 14 structure families on the fixtures.
-- **Task 2 — a stop sign on almost every card is not a stop sign.** "Feed unreliable on this
-  expiry" fired on every card of an expiry with one inverted pair anywhere. A card now says
-  "inverted quotes on its strikes" only when a broken pair touches its own strikes
-  (`invertedOnStrikes()`); a board whose share of broken pairs reaches `staleBoardShare`
-  (0.15, chosen) is said once above the list — "2026-11-20 looks stale on N markets".
-  `node scripts/measure-inverted.mjs` prints inverted/pairs per fixture board: labelled cards
-  19 → 11 overall, 9 → 1 on the SOYB-shaped board (synthetic; the UNG fixture is clean).
-- **Task 3 — Find has no single-ticker header strip** (price, expiry, seasonality, seasonal
-  source, IV rank). Build keeps it.
-- **Task 4 — one "Free sizing" flag replaces derived limits** (owner decision, 23 Sep 2026).
-  Settings toggle, OFF by default, ON with one typed reason and its time. While ON the 5% and
-  25% limits are not enforced — no card is over budget, the gate neither refuses nor warns on
-  size — and "at risk now: $X across N positions" sits above Send. Paper only, defined risk,
-  `minEntryDTE` and every floor stay enforced; RULES values unchanged. Every position records
-  `sizingFree`; the weekly report splits P&L by it.
-- Words at rest: **Find 374** (PR #40: 375), **Build 376** (PR #40: 376). Two Find sentences
-  were shortened to make room for the stale-board line.
+Read on the owner's phone, 23 Sep 2026: 9 × GDX 94P 2026-10-30, sent from the app as J-0001.
+
+- **A duplicate record.** The Alpaca sync matched records to holdings on a signature that
+  spelled each leg's quantity: the app stores +1 put × 9 contracts, the broker lists +9, so the
+  holding looked new and was imported again as "J-0002 · Imported from Alpaca". Matching is by
+  shape now (`holdingShape()`: ticker, expiry, side, type, strike, ratio), and an imported
+  record whose holding the app's own record already describes is removed once
+  (`dropImportedTwins()`), with a message saying which ref went.
+- **A size counted twice.** `upgradeHolding()` wrote the broker's count (9) into `contracts`
+  on a record whose leg already said 9: 81 puts, $40,500 at risk for a $4,500 position, and
+  $45,000 counted against the $25,000 exposure ceiling. The count is divided by what one of the
+  record's structures holds (`perCombination()`); an inflated record is repaired.
+- **An empty browser overwrote the server.** The app opened from a link rather than its icon is
+  a different browser store: it started empty, re-imported GDX as a stranger, and its first save
+  replaced the server's book (which the autopilot reads). A browser with nothing saved now
+  starts from `/api/state` (`hydrateFromServer()`); the Journal is not on the server, so the
+  message says to open the installed app to see it. A local store, even an empty one, wins.
 
 ## v1
 
@@ -39,7 +33,7 @@ v1 is done when PRD §3 is true: (a) one opening order filled at the intended pr
 open position's action in five seconds. **No pull request remains: v1 now needs only the
 owner's readings below.**
 
-### What the next session inherits from #40 and #41
+### What the next session inherits from #40, #41 and #42
 
 - The PR #39 debt is closed: ranking and every floor, `minRewardRisk` included, read the fill.
 - A record Alpaca does not hold, filed inside the 21-day window, is still recorded as "closed
@@ -54,6 +48,10 @@ owner's readings below.**
 - The Journal's `riskOk` ("respected the per-trade cap") is still computed against the derived
   limit when free sizing is on; the weekly report's P&L split is the reading for free sizing.
 - A position opened before PR #41 has no `sizingFree` field and is filed as `false`.
+- Two browsers still write one server copy: whichever saves last wins. PR #42 only stops an
+  EMPTY browser from doing it. The Journal is not on `/api/state` at all.
+- J-0001's intended limit: the owner saw the fill ($5.00) but not yet the ticket's limit beside
+  it. That comparison is v1 (a).
 
 ### Owner readings needed for v1
 
@@ -64,6 +62,8 @@ owner's readings below.**
 - Open Positions and read each position's action in five seconds (v1 c).
 - Open Find on the phone with live chains and say whether the list and its stop signs read
   in five seconds, and whether moving a slider lags.
+- Open the installed app after PR #42: one GDX card (J-0001), a message naming J-0002 as
+  removed, and exposure $4,500. Then open the app from a link: J-0001 should load, not an import.
 - On the live 2026-11-20 board: how many cards now carry "inverted quotes on its strikes",
   and whether the "looks stale" line appears (PR #41).
 - Turn free sizing on in Settings (one reason), size a trade past the old limit, and read the

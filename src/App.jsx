@@ -58,7 +58,7 @@ import { nextRef, refCounter, appendTimeline, stampTimeline, orderStatusRecheck,
   autopilotHorizonNote, autopilotVolNote,
   positionSize, positionSizeNote, contractsOf, withPositionSize, fillVsLimit, orderReconciliation,
   storedLimitOf,
-  positionStage, positionStageNote, bookPositions, wouldHaveDone, isBrokerHolding, upgradeHolding,
+  positionStage, positionStageNote, bookPositions, holdingShape, dropImportedTwins, wouldHaveDone, isBrokerHolding, upgradeHolding,
   isTestRecord, testRecordNote, scoredJournal, journalPnl, NOT_A_FILL,
   journalEntry, searchJournal, CLOSE_REASON_MIN, refNumber } from "./journal.js";
 import { FIRST_STEP, stepCarry, candidateOf, candidateKey, legsLine, toggleCompare, inCompare, MAX_COMPARE, savedFromCandidate, candidateFromSaved, savedAge } from "./path.js";
@@ -887,6 +887,32 @@ async function loadState() {
 // `journalSeq` is the highest position ref this state has ever issued. It only
 // ever goes up: closing a position does not hand its number back (src/journal.js).
 const EMPTY = { journalSeq: 0, saved: [], positions: [], expiryLog: [], settings: { webhook: "", reportFreq: "weekly", reportLast: 0, reportLastMd: "", capital: null, concurrentTarget: null, savings: null, sizeOverride: null, sizingFree: null, mode: "pro", onboarded: false, notifyWhenReady: false }, seasonal: {}, journal: [], ivHist: {}, copilotLog: [] };
+/* A BROWSER WITH NO SAVED STATE STARTS FROM THE SERVER'S COPY (PR #42).
+
+   Read on the owner's phone, 23 Sep 2026: the app opened from a link rather
+   than its installed icon is a different browser store, so it started EMPTY.
+   The 60-second Alpaca sync then found the GDX holding, imported it as a
+   stranger with no ref and no thesis — and the first save POSTed that one
+   record to `/api/state`, overwriting the server's copy of the owner's book
+   (which the autopilot reads).
+
+   `/api/state` holds the positions and the synced settings (never the
+   Journal, which lives only in the browser that filed it). So when THIS
+   browser has nothing at all — `loadState()` returned null, not "an empty
+   book the owner emptied" — those are adopted before anything else runs.
+   A local store, even an empty one, always wins: it is the newer word. */
+export function hydrateFromServer(local, srv) {
+  if (local) return local;
+  const positions = srv && Array.isArray(srv.positions) ? srv.positions : [];
+  if (!positions.length) return null;
+  const s0 = (srv && srv.settings) || {};
+  const settings = {};
+  for (const k of ["webhook", "capital", "concurrentTarget", "savings", "sizeOverride", "sizingFree", "notifyWhenReady"]) {
+    if (s0[k] !== undefined) settings[k] = s0[k];
+  }
+  return { positions, settings, restoredFromServer: true };
+}
+
 async function saveState(st) {
   try { localStorage.setItem(SKEY, JSON.stringify(st)); } catch (e) { console.error(e); }
   // The server blob is ONE shared document, so a demo visitor writing to it
@@ -1736,7 +1762,8 @@ export default function OptionsStrategyLab() {
   useEffect(() => {
     (async () => {
       try {
-      const st = (await loadState()) || EMPTY;
+      const local = await loadState();
+      let st = local || EMPTY;
       // merge timeline Autopilot dal server (brief generati ad app chiusa).
       // Not in demo: that blob holds the owner's real paper book, and a public
       // visitor has no business reading it.
@@ -1744,6 +1771,14 @@ export default function OptionsStrategyLab() {
         const r = DEMO ? { ok: false } : await fetch("/api/state");
         if (r.ok) {
           const srv = await r.json();
+          // NOTHING SAVED IN THIS BROWSER: start from the server's book (PR #42).
+          const restored = hydrateFromServer(local, srv);
+          if (restored && restored !== local) {
+            st = { ...EMPTY, ...restored, settings: { ...EMPTY.settings, ...restored.settings, onboarded: true } };
+            setMsg(`This browser had nothing saved, so your ${restored.positions.length} open ` +
+              `position${restored.positions.length === 1 ? " was" : "s were"} loaded from the server. ` +
+              `The Journal is kept only in the browser that filed it: open the app from its installed icon to see it.`);
+          }
           for (const sp of srv.positions || []) {
             const lp = st.positions?.find((x) => x.id === sp.id);
             if (lp && sp.timeline) {
@@ -3129,9 +3164,12 @@ export default function OptionsStrategyLab() {
         groups[key].legs.push({ side, type: o.type, strike: o.strike, qty });
         groups[key].net += side * qty * (+x.avg_entry_price);
       }
-      let added = 0, upgraded = 0;
+      let added = 0, upgraded = 0, twins = [];
       setStore((st) => {
-        const sigOf = (tk, exp, legs) => tk + exp + legs.map((l) => `${l.side}${l.type[0]}${l.strike}x${l.qty}`).sort().join("");
+        /* BY SHAPE, NOT BY QUANTITY (PR #42): the app stores +1 put × 9
+           contracts, the broker lists +9 puts. `holdingShape()` divides the
+           size out of both; `upgradeHolding()` then measures it. */
+        const sigOf = (tk, exp, legs) => holdingShape(tk, exp, legs);
         const known = new Set(st.positions.map((p) => sigOf(p.ticker, p.expKey || "", p.legs)));
         /* >>> A MATCH IS NOT A REASON TO DO NOTHING (P9, TASK 0a). <<<
            This loop used to `continue` on a signature already in the store,
@@ -3221,7 +3259,11 @@ export default function OptionsStrategyLab() {
           });
           added++;
         }
-        if (!added && !upgraded) return st;
+        /* A DUPLICATE THE OLD SIGNATURE MADE GOES, ONCE (PR #42). The app's
+           own record of the order keeps its ref, thesis and timeline. */
+        const tw = dropImportedTwins(next);
+        next = tw.positions; twins = tw.dropped;
+        if (!added && !upgraded && !twins.length) return st;
         const ns = { ...st, positions: next };
         saveState(ns);
         return ns;
@@ -3231,6 +3273,9 @@ export default function OptionsStrategyLab() {
         : upgraded
           ? `${upgraded} position${upgraded === 1 ? " was" : "s were"} brought up to what Alpaca reports: the size is the broker's own leg quantities now, not an assumed one.`
           : "Every Alpaca position is already linked.");
+      // Said even on the silent 60-second sync: a record leaving the list is news.
+      if (twins.length) setMsg(`${twins.join(", ")} removed: ${twins.length === 1 ? "it was" : "they were"} a second ` +
+        `record of a holding the app already tracks, created by the old Alpaca sync.`);
     } catch (e) { if (!silent) setMsg(`Could not import from Alpaca: ${e.message}`); }
   }, [chains, seasonal, freeSizing]);
 
