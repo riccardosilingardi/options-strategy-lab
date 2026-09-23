@@ -3842,9 +3842,9 @@ export function attentionCount(alerts = []) {
  *  reason. Where the two meet, this is what the broker panel says instead of
  *  offering a second button. */
 export const sameCloseNote = (ref) =>
-  `This is ${ref || "a position"} on your Positions screen. Close it there: it is the same order, and ` +
-  `that button asks what ended the trade and files the answer with it. A close with no reason on the ` +
-  `record teaches nothing later.`;
+  `This is ${ref || "a position"} on your Positions screen. Close it there: its close-at-limit button ` +
+  `sends the same order this panel would, and after the fill that card asks what ended the trade and ` +
+  `files the answer with it. A close with no reason on the record teaches nothing later.`;
 
 /* WHEN "OF THE MAXIMUM" IS A PERCENTAGE AND WHEN IT IS WORDS.
    -$127 against a $4 maximum is -3188%, which is a true division and a false
@@ -3878,9 +3878,11 @@ export const modelPriceNote = (feed = "the option chain") =>
  * warning looks like. The first clause is the phrase the brief and the screen
  * both carry, so the two cannot drift apart.
  */
-export const stopWarningSentence = (pnl = null) =>
+export const stopWarningHead = (pnl = null) =>
   `Stop threshold crossed — not validated by backtest` +
-  `${pnl != null && Number.isFinite(+pnl) ? ` (${money(pnl)}, at or past ${pctText(RULES.stopLossPct)} of the maximum loss)` : ""}. ` +
+  `${pnl != null && Number.isFinite(+pnl) ? ` (${money(pnl)}, at or past ${pctText(RULES.stopLossPct)} of the maximum loss)` : ""}.`;
+export const stopWarningSentence = (pnl = null) =>
+  `${stopWarningHead(pnl)} ` +
   `Nothing closes on this and no order is offered for it. Closing here is your decision, and it is ` +
   `recorded as a manual close with the reason you write, never as a trade the rules ended.`;
 
@@ -3907,6 +3909,59 @@ export function ruleExitOf({ tpHit = false, dteExit = false, slHit = false, dteL
         `${dteLeft != null ? ` (${dteLeft} day${dteLeft === 1 ? "" : "s"} left)` : ""}.` };
   }
   return { ruleExit: false, rule: null, stopWarning: !!slHit, text: null };
+}
+
+/* =====================================================================
+   ONE ACTION PER OPEN POSITION (ROADMAP PR #38, PRD §3 c)
+
+   The owner has to read each open position's action in five seconds. The
+   Positions card used to print a stat row, a Guardian panel, a gauge and a
+   small "→ HOLD" at the end of the fourth line — the answer was there, and
+   it was the smallest thing on the card.
+
+   `positionAction()` reads the rules that already exist and returns ONE of:
+
+     CLOSE    a rule that ends the trade fired — `ruleExitOf()`, and only it.
+     WARNING  the stop was crossed (`stopWarningHead()`), or the edge left is
+              thin (`remainingEdge()`). A warning NEVER becomes CLOSE.
+     HOLD     nothing to do.
+     null     NO QUOTE: the profit is unknown and no time exit applies. Unknown
+              is not zero, so it is never HOLD by default. The 21-day exit
+              needs no price, so it still yields CLOSE without one.
+
+   The "watch" level and a pending autopilot verdict are not rules: they do
+   not move the action. Their lines, and any lower-ranked line, go in `notes`.
+===================================================================== */
+export function positionAction({ tpHit = false, dteExit = false, slHit = false, edge = null,
+  pnl = null, dteLeft = null, level = null, ap = null } = {}) {
+  const known = pnl != null && pnl !== "" && Number.isFinite(Number(pnl));
+  const thin = !!(edge && edge.thin);
+  const stop = !!slHit && known;
+  const notes = [];
+  const r = ruleExitOf({ tpHit: !!tpHit && known, dteExit: !!dteExit, slHit: stop, dteLeft });
+  let out;
+  if (r.ruleExit) {
+    out = { action: "CLOSE", rule: r.rule,
+      line: r.rule === "take-profit"
+        ? `Take profit reached: ${pctText(RULES.takeProfitPct)} of the maximum profit.`
+        : `${dteLeft != null ? `${dteLeft} day${dteLeft === 1 ? "" : "s"} to expiry` : "Inside the exit window"}: ` +
+          `the ${RULES.exitDTE}-day exit applies.` };
+    if (stop) notes.push(stopWarningHead(pnl));
+    if (thin) notes.push(remainingEdgeLabel(edge));
+  } else if (!known) {
+    out = { action: null, rule: null,
+      line: `No quote: no broker price for this position right now, so no action can be read. It is not HOLD.` };
+  } else if (stop) {
+    out = { action: "WARNING", rule: null, kind: "stop", line: stopWarningHead(pnl) };
+    if (thin) notes.push(remainingEdgeLabel(edge));
+  } else if (thin) {
+    out = { action: "WARNING", rule: null, kind: "edge", line: remainingEdgeLabel(edge) };
+  } else {
+    out = { action: "HOLD", rule: null, line: `Nothing to do today: the exit plan is running.` };
+  }
+  if (ap) notes.push(`The autopilot has something waiting for your OK. It does not change the action.`);
+  if (level === "watch" && out.action === "HOLD") notes.push(`Losing: check the reason you opened it.`);
+  return { ...out, notes };
 }
 
 /** The verdicts the model is allowed to return. STOP is deliberately absent. */

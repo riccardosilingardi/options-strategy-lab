@@ -6,29 +6,36 @@ The full history of every item shipped so far (P0–P10, P2-bis) is in `docs/his
 Every pull request updates this file: the session that ships an item marks it done and states
 what the next one inherits.
 
-## Done in this pull request
+## Done in this pull request — PR #38, one action per open position
 
-- The quantity fields (ticket 1–20, leg 1–10) can be emptied and retyped on a phone; an empty
-  or invalid field disables Send with a short message instead of becoming 1.
-- Documentation diet: the old PRD, CLAUDE.md and ROADMAP moved unchanged to `docs/history/`.
+- `positionAction()` in `src/rules.js` reads the existing rules (`ruleExitOf()`,
+  `stopWarningHead()`, `remainingEdge()`) and returns one action: **CLOSE** with its reason,
+  **WARNING** (stop crossed, or thin edge; never CLOSE), **HOLD**, or **NO QUOTE** (action
+  `null`, never HOLD). The 21-day exit is CLOSE even without a quote. No new rule number.
+- Each owned position's card shows that action first, in large type. Everything else it
+  showed is one tap away under "legs, profit, exits, details". The small "→ HOLD" line at the
+  end of the stat row is gone; the action replaces it.
+- Order path 3 moved from `pro.jsx` to `src/closeOrder.js` as `prepareClose()` (tap 1: the
+  order written out in full) and `sendClose()` (tap 2). The desk and the Positions card both
+  call it. Close-at-limit sits beside CLOSE; for HOLD and WARNING it is inside the fold, so a
+  close you choose yourself is still possible. After a send the card shows "close order
+  working" and the timeline says "close sent at <limit>". The Journal is not filed at send.
+- `sameCloseNote()` is now true: the Positions close is the same order as the desk's.
 
 ## v1
 
 v1 is done when PRD §3 is true: (a) one opening order filled at the intended price,
-(b) one closing order filled via `closeGroup()`, (c) the owner reads each open position's
-action in five seconds. Two pull requests remain.
+(b) one closing order filled via order path 3 (`src/closeOrder.js`), (c) the owner reads each
+open position's action in five seconds. One pull request remains.
 
-### PR #38 — one action per open position
+### What PR #39 inherits from #38
 
-- Each open position shows **ONE** action, never several:
-  - **HOLD** — nothing to do.
-  - **CLOSE** — with the reason (take profit reached, or 21 days to expiry).
-  - **WARNING** — the stop level crossed, or the remaining edge is thin. A warning never closes.
-- Next to CLOSE, a **close-at-limit** control that sends a limit priced at the tap
-  (`closeLimitPrice()`), through the gate and the two-tap confirm. Never a market order.
-- The action is derived from the existing rules (`ruleExitOf()`, `stopWarningSentence()`,
-  `remainingEdge()`); no new rule number.
-- **Done when:** the owner opens Positions and reads each position's action in five seconds.
+- `positionAction()` is the one home for a position's action. #39 changes what is offered, not
+  what an open position shows; it should not touch it.
+- `level` and `label` in `posAlerts` still drive the headline and `attentionCount()`; the card
+  no longer reads `label`. Folding the two into one is possible later, not required for v1.
+- A close that fills is not filed automatically: the owner still taps "Close and file it".
+  Filing on fill needs the fill to be read (P7 or a re-check like `recheckOrders()`).
 
 ### PR #39 — no proposal when crossing costs too much
 
@@ -43,7 +50,9 @@ action in five seconds. Two pull requests remain.
 ### Owner readings needed for v1
 
 - Send one opening order and compare Alpaca's fill with the ticket's limit (v1 a).
-- Close one position through the desk's close button (`closeGroup()`) and read the fill (v1 b).
+- Close one position with the Positions card's close-at-limit (order path 3) and read the fill,
+  sign included (v1 b). Then tap "Close and file it".
+- Open Positions and read each position's action in five seconds (v1 c).
 
 ## After v1
 

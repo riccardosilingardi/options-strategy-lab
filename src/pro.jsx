@@ -24,6 +24,7 @@ import { useNarrow, BandThumbnail, payoffBands, bandTakeaway } from "./visuals.j
 import { DEMO, DEMO_TOOLTIP } from "./demo.js";
 import { reduceRatios, orderQty, mlegLimitPrice, limitWords, limitKind, signedLimitFor, orderBody, orderPreviewLines, orderOutcome, alpacaErrorText } from "./order.js";
 import { hasOpenInterest, sourceNote, openInterestNote, fetchChain } from "./chain.js";
+import { prepareClose, sendClose, holdingGroups } from "./closeOrder.js";
 // "Why this trade" and the headline tags moved to src/why.jsx: the wizard's
 // decision screen needs them too, and a road with no evidence under it is a
 // recommendation. Re-exported here so nothing else has to change its import.
@@ -193,6 +194,41 @@ export async function alpacaReq(path, method = "GET", body = null) {
    dismissed. `setMsg` is still called: the banner is useful when the page is
    scrolled up, it just cannot be the only place the answer lives.
 ==================================================================== */
+/* THE CLOSE, WRITTEN OUT BEFORE IT IS SENT (order path 3, both screens).
+   Tap 1 produced `prep.prepared` — every leg, the signed limit in words and
+   how long it stands. Tap 2 is "Send the close" and it sends exactly that.
+   A refusal, from any step, prints here: beside the button it came from. */
+export function CloseConfirm({ prep, onSend, onCancel }) {
+  if (!prep) return null;
+  if (prep.busy && !prep.prepared) {
+    return <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 6 }}>Reading the market to price the close…</div>;
+  }
+  if (prep.refusal) {
+    return (
+      <div style={{ ...mono, fontSize: 10.5, color: T.red, marginTop: 6, lineHeight: 1.55 }}>
+        ✗ {prep.refusal}{" "}
+        <button onClick={onCancel} style={{ ...mono, fontSize: 10, color: T.dim, background: "transparent", border: `1px solid ${T.line}`, borderRadius: 5, padding: "2px 7px", cursor: "pointer" }}>Dismiss</button>
+      </div>
+    );
+  }
+  if (prep.sent) {
+    return <div style={{ ...mono, fontSize: 10.5, color: T.green, marginTop: 6, lineHeight: 1.55 }}>✓ {prep.sent}</div>;
+  }
+  if (!prep.prepared) return null;
+  return (
+    <div style={{ marginTop: 8, padding: "9px 11px", background: `${T.red}0a`, border: `1px solid ${T.red}55`, borderRadius: 7 }}>
+      <div style={{ ...mono, fontSize: 9.5, color: T.red, fontWeight: 700, letterSpacing: 0.4 }}>THIS IS THE CLOSE THAT WILL BE SENT</div>
+      {prep.prepared.lines.map((l, i) => (
+        <div key={i} style={{ ...mono, fontSize: 11, color: T.ink, marginTop: 4, lineHeight: 1.5 }}>{l}</div>
+      ))}
+      <div style={{ display: "flex", gap: 6, marginTop: 9, flexWrap: "wrap" }}>
+        <Btn small color={T.red} disabled={!!prep.busy} onClick={onSend}>{prep.busy ? "Sending…" : "Send the close"}</Btn>
+        <Btn small ghost disabled={!!prep.busy} onClick={onCancel}>Keep it open</Btn>
+      </div>
+    </div>
+  );
+}
+
 export function OrderOutcome({ outcome, onDismiss }) {
   if (!outcome) return null;
   const tone = outcome.tone || T.dim;
@@ -859,24 +895,10 @@ export function OrderTicket({
   );
 }
 
-/* ONE LEG, READ OFF THE BROKER'S OWN OCC SYMBOL.
-   `/v2/positions` gives a symbol and a quantity and nothing else — no strike
-   field, no type field, no quote. The strike and the type are INSIDE the
-   symbol, so reading them is reading the broker's number rather than deriving
-   one: `XLE261030P00082000` is a put at 82. The thousandths are the OCC
-   standard and `Number(null)` is 0 and 0 is finite, so a symbol this function
-   cannot parse comes back NULL and the caller refuses — never a leg with a
-   strike of zero, which would price against a contract nobody holds. */
-export const OCC_RE = /^([A-Z]{1,6})(\d{6})([CP])(\d{8})$/;
-export function holdingLeg(item) {
-  const m = OCC_RE.exec(String(item?.symbol || ""));
-  if (!m) return null;
-  const qty = Math.abs(Math.round(Number(item.qty)));
-  if (!Number.isFinite(qty) || qty < 1) return null;
-  const strike = Number(m[4]) / 1000;
-  if (!Number.isFinite(strike) || strike <= 0) return null;
-  return { side: Number(item.qty) > 0 ? 1 : -1, qty, type: m[3] === "C" ? "call" : "put", strike };
-}
+/* ONE LEG, READ OFF THE BROKER'S OWN OCC SYMBOL — and the close that uses it —
+   live in src/closeOrder.js now, so the Positions card reaches the same path.
+   Re-exported so nothing else has to change its import. */
+export { OCC_RE, holdingLeg } from "./closeOrder.js";
 
 /* `positions` is passed in so the panel can tell a holding this app HAS a
    record for from one it does not. Without it the panel offered a second
@@ -923,81 +945,24 @@ export function AlpacaDesk({ creds, setMsg, gate, positions = [] }) {
      a real book now. It is NOT in the gate and must not be: refusing a CLOSE
      because a feed is quiet leaves somebody in a position they asked to leave.
      The refusal is here, beside the button, with its reason. */
+  /* ORDER PATH 3 LIVES IN src/closeOrder.js NOW (ROADMAP PR #38), so the
+     Positions card sends the same order. Two taps, as every send: the first
+     prepares and writes the order out in full, the second sends exactly that.
+     Any refusal stays beside the button it came from. */
+  const [closePrep, setClosePrep] = useState(null);   // { key, busy, prepared, refusal, sent }
   const closeGroup = async (grp) => {
-    if (DEMO) { setMsg(DEMO_TOOLTIP); return; }   // order path 3 of six
-    try {
-      // Anche una chiusura e' un ordine: passa dal cancello (intent "close",
-      // quindi le regole d'ingresso non si applicano, quella paper si).
-      const g = runGate(gate, {
-        intent: "close", ticker: String(grp.key || "").split(" ")[0],
-        legs: grp.items.map((x) => ({ side: +x.qty > 0 ? 1 : -1, qty: Math.abs(+x.qty), type: /C\d{8}$/.test(x.symbol) ? "call" : "put" })),
-        maxLoss: grp.items.reduce((a, x) => a + Math.abs(+x.cost_basis || 0), 0), contracts: 1,
-      });
-      if (!g.pass) { setMsg(`Risk gate: the close was not sent. ${g.violations.map((v) => v.message).join(" ")}`); return; }
-      const syms = new Set(grp.items.map((x) => x.symbol));
-      for (const o of ords || []) {
-        const oSyms = o.order_class === "mleg" ? (o.legs || []).map((l) => l.symbol) : [o.symbol];
-        if (oSyms.some((sy) => syms.has(sy))) { try { await alpacaReq(`/v2/orders/${o.id}`, "DELETE"); } catch { /* già chiuso */ } }
-      }
-      const items = grp.items.slice(0, 4);
-      /* THE LEGS, READ OFF THE BROKER'S OWN SYMBOLS. The strike and the type
-         are IN the OCC symbol the account holds, so nothing here is invented
-         and no contract is named that the account does not already own —
-         `buildOcc()` is not involved and must never be. A symbol this app
-         cannot parse is UNKNOWN, not a leg with a strike of zero. */
-      const legs = items.map((x) => holdingLeg(x));
-      if (legs.some((l) => !l)) {
-        setMsg(`The close was not sent: one of these contracts is held under a symbol this app cannot read, ` +
-          `so there is no strike to price it at. Close it from the broker's own screen.`);
-        return;
-      }
-      /* THE PRICE, WORKED OUT NOW, FROM A CHAIN FETCHED NOW — the same shape
-         `approve.mjs` uses at tap time. The broker's positions payload carries
-         no bid and no ask, so a chain is the only book there is. */
-      if (!grp.ticker || !grp.expKey) {
-        setMsg(`The close was not sent: this holding's market and expiry could not be read from its symbols, ` +
-          `so there is no chain to price it from. Close it from the broker's own screen.`);
-        return;
-      }
-      let chain = null;
-      try { chain = await fetchChain(grp.ticker); } catch { chain = null; }
-      const exp = chain?.byExp?.[grp.expKey] || null;
-      if (!exp) {
-        setMsg(`The close was not sent: the option chain for ${grp.ticker} ${grp.expKey} could not be read just ` +
-          `now, so there is no price to close at. Nothing has changed on the broker. A close is a limit order ` +
-          `priced from the live market — it is never sent at whatever the other side happens to be asking.`);
-        return;
-      }
-      const quotes = legs.map((l) => {
-        const side = l.type === "put" ? exp.puts : exp.calls;
-        const q2 = side?.[l.strike] ?? side?.[String(l.strike)] ?? null;
-        return q2 ? { bid: q2.bid, ask: q2.ask } : {};
-      });
-      const market = closeMarket(legs, quotes);
-      if (!market.ok) { setMsg(`The close was not sent. ${closeUnreadableNote(market.missing, legs)}`); return; }
-      const priced = closeLimitPrice({ netMid: market.netMid, spread: market.spread });
-      if (!priced) { setMsg(`The close was not sent: ${closeLimitNote(null)}`); return; }
-      // A five-lot spread is five of a 1:1 combination, not one of a 5:5:
-      // the same GCD rule that refused the opening order refuses the close,
-      // and being unable to close what you opened is the worse half of it.
-      // Same `orderBody` as the ticket — one implementation, five paths.
-      // `priced.net` is SIGNED and must stay signed: `mlegLimitPrice()` flips
-      // it for the close intent, so a debit structure is sold for a credit.
-      const body = orderBody({
-        legs: legs.map((l) => ({ side: l.side, qty: l.qty })),
-        occs: items.map((x) => x.symbol),
-        userQty: 1, type: "limit", limit: priced.net, tif: "day", intent: "close",
-      });
-      const lb = limitAgainstBook({
-        limitPrice: body.limit_price ?? null, book: comboBook(legs, quotes),
-        intent: "close", legCount: legs.length,
-      });
-      if (lb.checked && !lb.ok) throw new Error(lb.sentence);
-      const co = await alpacaReq("/v2/orders", "POST", body);
-      const words = limitWords(body.limit_price) || "a price the app could not read";
-      setMsg(`Closing ${grp.key} — sent as a single order at ${words}. ${orderOutcome(co).headline}`);
-      setTimeout(sync, 1500);
-    } catch (e) { setMsg(`The close was not sent: ${alpacaErrorText(e)}`); }
+    if (DEMO) { setClosePrep({ key: grp.key, refusal: DEMO_TOOLTIP }); return; }
+    setClosePrep({ key: grp.key, busy: true });
+    const prepared = await prepareClose(grp, { gate: (pr) => runGate(gate, pr), openOrders: ords || [], fetchChain });
+    setClosePrep({ key: grp.key, prepared: prepared.ok ? prepared : null, refusal: prepared.ok ? null : prepared.refusal });
+  };
+  const sendGroupClose = async () => {
+    const cp = closePrep;
+    if (!cp || !cp.prepared) return;
+    setClosePrep({ ...cp, busy: true });
+    const r = await sendClose(cp.prepared, { request: alpacaReq, gate: (pr) => runGate(gate, pr) });
+    setClosePrep({ key: cp.key, prepared: null, refusal: r.ok ? null : r.refusal, sent: r.ok ? r.headline : null });
+    if (r.ok) { setMsg(r.headline); setTimeout(sync, 1500); }
   };
   return (
     <Panel style={{ marginTop: 10 }}>
@@ -1008,16 +973,7 @@ export function AlpacaDesk({ creds, setMsg, gate, positions = [] }) {
       <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6 }}>OPEN POSITIONS ({pos ? pos.length : "…"})</div>
       <div style={{ display: "grid", gap: 6, marginTop: 6 }}>
         {(() => {
-          const groups = {};
-          for (const x of pos || []) {
-            const m = (x.symbol || "").match(/^([A-Z]{1,6})(\d{6})([CP])(\d{8})$/);
-            const key = m ? `${m[1]} · 20${m[2].slice(0, 2)}-${m[2].slice(2, 4)}-${m[2].slice(4, 6)}` : x.symbol;
-            if (!groups[key]) groups[key] = { key, items: [], pl: 0,
-              ticker: m ? m[1] : null,
-              expKey: m ? `20${m[2].slice(0, 2)}-${m[2].slice(2, 4)}-${m[2].slice(4, 6)}` : null };
-            groups[key].items.push(x); groups[key].pl += +x.unrealized_pl;
-          }
-          return Object.values(groups).map((g) => (
+          return holdingGroups(pos || []).map((g) => (
             <div key={g.key} style={{ padding: "8px 10px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7 }}>
               <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
                 <div style={{ flex: 1, minWidth: 160 }}>
@@ -1040,10 +996,14 @@ export function AlpacaDesk({ creds, setMsg, gate, positions = [] }) {
                   const rec = positionForHolding(positions, { ticker: g.ticker, expKey: g.expKey });
                   return rec
                     ? null
-                    : <Btn small ghost color={T.red} onClick={() => closeGroup(g)} disabled={DEMO}
+                    : <Btn small ghost color={T.red} onClick={() => closeGroup(g)}
+                        disabled={DEMO || (closePrep?.key === g.key && (closePrep.busy || !!closePrep.prepared))}
                         title={DEMO ? DEMO_TOOLTIP : undefined}><XCircle size={11} /> Close the whole trade</Btn>;
                 })()}
               </div>
+              {closePrep && closePrep.key === g.key && (
+                <CloseConfirm prep={closePrep} onSend={sendGroupClose} onCancel={() => setClosePrep(null)} />
+              )}
               {(() => {
                 const rec = positionForHolding(positions, { ticker: g.ticker, expKey: g.expKey });
                 return rec ? (

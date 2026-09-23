@@ -8,7 +8,8 @@ import {
   FlaskConical, Briefcase, Plus, Plug, Send, ExternalLink, MessageSquare, FileText, Bell,
   SlidersHorizontal, ArrowLeft, Sun, Moon, AlertTriangle, WifiOff,
 } from "lucide-react";
-import { fetchAllNews, fetchWeather, ImpactTags, CopilotTab, TaCopilot, ReportTab, OrderTicket, AlpacaDesk, scaleStrategy, buildContext, GuardianPanel, ChainMatrix, OptionPanel, PriceChart, QtyField, UnifiedView, taSignals, confluence, WhyThisTrade, Markdown, alpacaReq } from "./pro.jsx";
+import { fetchAllNews, fetchWeather, ImpactTags, CopilotTab, TaCopilot, ReportTab, OrderTicket, AlpacaDesk, scaleStrategy, buildContext, GuardianPanel, ChainMatrix, OptionPanel, PriceChart, QtyField, UnifiedView, taSignals, confluence, WhyThisTrade, Markdown, alpacaReq, CloseConfirm } from "./pro.jsx";
+import { prepareClose, sendClose, groupForRecord, closeWorking } from "./closeOrder.js";
 import { BandThumbnail, payoffBands, bandTakeaway, GaugeFigure, Gauge, CompareFigure, exitPlanSentence,
   OpenInterestStrip, oiStripTakeaway, oiCutAt, oiGhostCut, explainOiStrip, useWidth } from "./visuals.jsx";
 import { fuseSignals, sentimentDirection, withSignalRank, compareCandidates, againstSignal, DRIVER_PRESETS, rankByDrivers, verdictNarrative } from "./signals.js";
@@ -35,7 +36,7 @@ import { RULES, sizing, ruleBadge, takeProfitLabel, stopLossLabel, perTradeCapLa
   orderVerdict, legBook, legLimitSeed, netFromLegs, onTick, sizeSkippedNote,
   conflictSummaryLine, warningsToPrint,
   chancePct, chanceText, chanceInTen, signedMoney,
-  ruleExitOf, stopWarningSentence, watchAttentionLevel,
+  ruleExitOf, stopWarningSentence, watchAttentionLevel, positionAction,
   chanceOf, chanceSourceNote, seasonalProvenance, seasonalStampNote, seasonalStampFields, chanceDrawFields,
   sigmaProvenance, isButterfly,
   requestOf, requestAmountLabel, requestAmountOwner, contractsSourceNote,
@@ -1449,6 +1450,9 @@ export default function OptionsStrategyLab() {
   const [autoMon, setAutoMon] = useState(true);
   // THE CLOSE ASKS WHY. `{ id, written, err }` while a close is being written.
   const [closing, setClosing] = useState(null);
+  // Order path 3 from the Positions card: { id, busy, prepared, refusal, sent }.
+  const [closeAt, setCloseAt] = useState(null);
+  const [openDetails, setOpenDetails] = useState({});
   // The Journal's search box. Sorted and searched by ref (src/journal.js).
   const [jq, setJq] = useState("");
   const [optLeg, setOptLeg] = useState(null); // {occ, label, quote}
@@ -2721,6 +2725,41 @@ export default function OptionsStrategyLab() {
     return { ok: true, decision, entry };
   };
 
+  /* ---- THE CLOSE THAT IS AN ORDER (ROADMAP PR #38) ----
+     `closePos()` above files the record; it sends nothing. This is the send:
+     order path 3, the same `prepareClose()` / `sendClose()` the desk calls,
+     reached from the Positions card. The broker holding is found by ticker
+     and expiry in `alSync.positions`. Tap 1 prepares and writes the order out;
+     tap 2 sends it. The Journal is NOT filed here — "Close and file it" stays
+     the manual step after the fill. */
+  const prepareCardClose = async (p) => {
+    if (DEMO) { setCloseAt({ id: p.id, refusal: DEMO_TOOLTIP }); return; }
+    setCloseAt({ id: p.id, busy: true });
+    const prepared = await prepareClose(groupForRecord(p, alSync.positions), {
+      gate, openOrders: alSync.orders || [], fetchChain, working: closeWorking(p, alSync) });
+    setCloseAt({ id: p.id, prepared: prepared.ok ? prepared : null, refusal: prepared.ok ? null : prepared.refusal });
+  };
+  const sendCardClose = async (p) => {
+    const cp = closeAt;
+    if (!cp || cp.id !== p.id || !cp.prepared) return;
+    setCloseAt({ ...cp, busy: true });
+    const r = await sendClose(cp.prepared, { request: alpacaReq, gate, working: closeWorking(p, alSync) });
+    if (!r.ok) { setCloseAt({ id: p.id, refusal: r.refusal }); return; }
+    setCloseAt({ id: p.id, sent: r.headline });
+    setMsg(r.headline);
+    setStore((st) => {
+      const positions = st.positions.map((x) => {
+        if (x.id !== p.id) return x;
+        const t = appendTimeline(x, { t: Date.now(), type: "close-sent", orderId: r.order?.id ? String(r.order.id) : null, text: `close sent at ${r.limitWords}` });
+        return { ...x, closeOrder: { id: r.order?.id || null, t: Date.now(), limit: r.order?.limit_price ?? null },
+          timeline: t.timeline, seqNext: t.seqNext };
+      });
+      const ns = { ...st, positions };
+      saveState(ns);
+      return ns;
+    });
+  };
+
   /* ---- RE-READING AN ORDER THAT HAD NOT FILLED ----
 
      The debt the last session wrote down, in its own words: "nothing re-reads
@@ -3181,7 +3220,11 @@ export default function OptionsStrategyLab() {
     const level = tpHit || slHit || dteExit || ap || edge.thin ? "action"
       : pnl != null && watchLevel != null && pnl < watchLevel * n ? "watch" : "ok";
     const label = tpHit ? `${takeProfitLabel()} reached — take the profit` : slHit ? `${stopLossLabel()} reached — a warning, not an order` : dteExit ? `${dteLeft} days left — close or roll` : ap ? "The autopilot has something waiting for your OK" : edge.thin ? remainingEdgeLabel(edge) : pnl == null ? "waiting for prices…" : level === "watch" ? "Losing: check the reason you opened it" : "On plan";
-    return { p, pnl, pnlNote: pv.sentence, dteLeft, level, label, ap, live, spotNow: sp, tpHit, slHit, dteExit, edge, contracts: n, sizeAssumed: size.assumed };
+    /* ONE ACTION (ROADMAP PR #38). `level` and `label` above stay exactly as
+       they were: the headline and `attentionCount()` read them. The card
+       reads this. */
+    const act = positionAction({ tpHit, dteExit, slHit, edge, pnl, dteLeft, level, ap });
+    return { p, pnl, pnlNote: pv.sentence, dteLeft, level, label, ap, live, spotNow: sp, tpHit, slHit, dteExit, edge, act, contracts: n, sizeAssumed: size.assumed };
   }), [ownedPositions, chains, alSync, pnlOf]);
 
   // Log eventi regola (TP/SL/DTE) fuori dal render: prima veniva chiamato logEvent
@@ -6172,10 +6215,39 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   const tpHit = !!al0 && al0.tpHit, slHit = !!al0 && al0.slHit;
                   const dteExit = dteLeft <= RULES.exitDTE;
                   const edge = al0 ? al0.edge : null;
-                  const rec = tpHit ? { t: `→ TAKE THE PROFIT: ${takeProfitLabel()}`, c: T.green } : slHit ? { t: `→ WARNING: ${stopLossLabel()}`, c: T.red } : dteExit ? { t: `→ CLOSE OR ROLL: ${RULES.exitDTE} days left`, c: T.amber } : edge && edge.thin ? { t: "→ LOOK AT THIS ONE", c: T.amber } : { t: "→ HOLD", c: T.mut };
+                  /* >>> ONE ACTION, FIRST, IN LARGE TYPE (ROADMAP PR #38). <<<
+                     `positionAction()` in rules.js decides it; this only draws
+                     it. Everything else this card showed is in the fold below,
+                     one tap away and still mounted (the Guardian logs on mount). */
+                  const act = al0?.act || positionAction({ pnl: null, dteExit, dteLeft });
+                  const actTone = act.action === "CLOSE" ? T.red : act.action === "WARNING" ? T.amber : act.action === "HOLD" ? T.green : T.dim;
+                  const working = closeWorking(p, alSync);
+                  const ca = closeAt && closeAt.id === p.id ? closeAt : null;
+                  const closeCtl = (
+                    <Btn small color={T.red} disabled={DEMO || working || !!(ca && (ca.busy || ca.prepared))}
+                      title={DEMO ? DEMO_TOOLTIP : undefined} onClick={() => prepareCardClose(p)}>
+                      {working ? "Close order working" : "Close at limit"}
+                    </Btn>
+                  );
+                  const detailsOpen = !!openDetails[p.id];
                   return (
                     <div key={p.id} style={{ padding: "10px 12px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 6 }}>
+                        <div style={{ flex: 1, minWidth: 180 }}>
+                          <div style={{ ...mono, fontSize: 24, fontWeight: 800, color: actTone, letterSpacing: 0.5, lineHeight: 1.15 }}>
+                            {act.action || "NO QUOTE"}
+                          </div>
+                          <div style={{ fontSize: 13, color: T.ink, marginTop: 3, lineHeight: 1.45 }}>{act.line}</div>
+                        </div>
+                        {act.action === "CLOSE" && closeCtl}
+                      </div>
+                      {working && (
+                        <div style={{ ...mono, fontSize: 10.5, color: T.amber, marginBottom: 6, lineHeight: 1.5 }}>
+                          Close order working at the broker. When it fills, use "Close and file it" to record why the trade ended.
+                        </div>
+                      )}
+                      {ca && <CloseConfirm prep={ca} onSend={() => sendCardClose(p)} onCancel={() => setCloseAt(null)} />}
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
                         <div style={{ fontWeight: 700, color: T.ink, fontSize: 13.5 }}>
                           {/* THE REF, ON SCREEN, FROM THE MOMENT IT IS OPENED. It is
                               how this trade is referred to for the rest of its life and
@@ -6186,46 +6258,9 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                         </div>
                         <div style={{ display: "flex", gap: 6 }}>
                           <Btn small ghost color={T.blue} onClick={() => openOnBuild({ ticker: p.ticker, expKey: p.expKey || null, legs: p.legs, name: p.name + " (monitor)" })}>Monitor ↗</Btn>
-                          <Btn small ghost color={T.red} onClick={() => setClosing({ id: p.id, written: "", err: null })}><Trash2 size={11} /> Close</Btn>
+                          <Btn small ghost color={T.red} onClick={() => setClosing({ id: p.id, written: "", err: null })}><Trash2 size={11} /> Close and file</Btn>
                         </div>
                       </div>
-                      <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 3 }}>
-                        {p.legs.map((l) => `${l.side > 0 ? "+" : "−"}${l.qty} ${l.strike}${l.type === "call" ? "C" : "P"}`).join(" / ")} · expires {p.expKey || new Date(p.expiry).toLocaleDateString("en-GB")} · opened {new Date(p.openedAt).toLocaleDateString("en-GB")}
-                      </div>
-                      {/* HOW BIG IT IS — AND WHETHER THAT IS KNOWN.
-                          An assumed 1 must never print as a measured 1: nothing
-                          wrote this field before this build, so a position saved
-                          earlier has no size and every figure on the row is read
-                          as one combination. `positionSizeNote()` says which. */}
-                      <div style={{ ...mono, fontSize: 10.5, color: size.assumed && size.perCombo === 1 ? T.amber : T.mut, marginTop: 3, lineHeight: 1.5 }}>
-                        {size.assumed && size.perCombo === 1 ? "⚠ " : "× "}{positionSizeNote(p)}
-                      </div>
-                      {/* THE ORDER BEHIND THIS ONE HAS NOT FILLED. This list is
-                          `ownedPositions` now, so the case should be impossible
-                          — but a record whose two broker fields contradict each
-                          other is exactly the kind of thing that put three
-                          phantom positions on this screen, and a guard that
-                          self-suppresses costs nothing. `positionStageNote()`
-                          returns null for anything genuinely owned, so the
-                          words have one home and cannot drift from Watching's. */}
-                      {positionStageNote(p) && (
-                        <div style={{ ...mono, fontSize: 10.5, color: T.amber, marginTop: 5, lineHeight: 1.6 }}>
-                          ⚠ {positionStageNote(p)}
-                        </div>
-                      )}
-                      {/* WHAT YOU ASKED FOR AGAINST WHAT YOU GOT — the comparison
-                          ROADMAP P0 has owed since PR #28 and could not make,
-                          because nothing had ever filled. It prints only on a
-                          position that really did fill, and a record with no
-                          limit of its own SAYS so rather than quoting the fill
-                          back as though it had been the target (journal.js). */}
-                      {(p.alpacaFillPrice != null || (isBrokerHolding(p) && p.entrySource === "fill")) && (
-                        <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 5, lineHeight: 1.6 }}>
-                          {fillVsLimit({ limit: p.alpacaLimit,
-                            fill: p.alpacaFillPrice != null ? p.alpacaFillPrice : p.entryNet,
-                            contracts: size.contracts, limitSigned: p.alpacaLimitSigned === true }).sentence}
-                        </div>
-                      )}
                       {/* CLOSING ASKS WHY, AND THE ANSWER IS KEPT.
                           A rule close names its rule and needs nothing typed. A close
                           with no rule behind it needs the same written reason as an
@@ -6272,6 +6307,57 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                           </div>
                         );
                       })()}
+                      <button onClick={() => setOpenDetails((o) => ({ ...o, [p.id]: !o[p.id] }))}
+                        style={{ ...mono, fontSize: 10.5, color: T.blue, background: "transparent", border: "none", padding: 0, marginTop: 6, cursor: "pointer", minHeight: 30 }}>
+                        {detailsOpen ? "hide details ▲" : "legs, profit, exits, details ▼"}
+                      </button>
+                      <div style={{ display: detailsOpen ? "block" : "none" }}>
+                      {act.notes.map((n, i) => (
+                        <div key={i} style={{ ...mono, fontSize: 10.5, color: T.amber, marginTop: 5, lineHeight: 1.55 }}>⚠ {n}</div>
+                      ))}
+                      {act.action !== "CLOSE" && (
+                        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 6 }}>
+                          {closeCtl}
+                          <span style={{ ...mono, fontSize: 10, color: T.dim }}>No rule says close. Closing is your choice, at a limit priced now.</span>
+                        </div>
+                      )}
+                      <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 3 }}>
+                        {p.legs.map((l) => `${l.side > 0 ? "+" : "−"}${l.qty} ${l.strike}${l.type === "call" ? "C" : "P"}`).join(" / ")} · expires {p.expKey || new Date(p.expiry).toLocaleDateString("en-GB")} · opened {new Date(p.openedAt).toLocaleDateString("en-GB")}
+                      </div>
+                      {/* HOW BIG IT IS — AND WHETHER THAT IS KNOWN.
+                          An assumed 1 must never print as a measured 1: nothing
+                          wrote this field before this build, so a position saved
+                          earlier has no size and every figure on the row is read
+                          as one combination. `positionSizeNote()` says which. */}
+                      <div style={{ ...mono, fontSize: 10.5, color: size.assumed && size.perCombo === 1 ? T.amber : T.mut, marginTop: 3, lineHeight: 1.5 }}>
+                        {size.assumed && size.perCombo === 1 ? "⚠ " : "× "}{positionSizeNote(p)}
+                      </div>
+                      {/* THE ORDER BEHIND THIS ONE HAS NOT FILLED. This list is
+                          `ownedPositions` now, so the case should be impossible
+                          — but a record whose two broker fields contradict each
+                          other is exactly the kind of thing that put three
+                          phantom positions on this screen, and a guard that
+                          self-suppresses costs nothing. `positionStageNote()`
+                          returns null for anything genuinely owned, so the
+                          words have one home and cannot drift from Watching's. */}
+                      {positionStageNote(p) && (
+                        <div style={{ ...mono, fontSize: 10.5, color: T.amber, marginTop: 5, lineHeight: 1.6 }}>
+                          ⚠ {positionStageNote(p)}
+                        </div>
+                      )}
+                      {/* WHAT YOU ASKED FOR AGAINST WHAT YOU GOT — the comparison
+                          ROADMAP P0 has owed since PR #28 and could not make,
+                          because nothing had ever filled. It prints only on a
+                          position that really did fill, and a record with no
+                          limit of its own SAYS so rather than quoting the fill
+                          back as though it had been the target (journal.js). */}
+                      {(p.alpacaFillPrice != null || (isBrokerHolding(p) && p.entrySource === "fill")) && (
+                        <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 5, lineHeight: 1.6 }}>
+                          {fillVsLimit({ limit: p.alpacaLimit,
+                            fill: p.alpacaFillPrice != null ? p.alpacaFillPrice : p.entryNet,
+                            contracts: size.contracts, limitSigned: p.alpacaLimitSigned === true }).sentence}
+                        </div>
+                      )}
                       {/* >>> THE ENTRY QUESTION, ASKED AGAIN (P9, TASK 2). <<<
                           A warning, never an exit rule: the exit rules were
                           chosen at construction and are frozen, and nothing
@@ -6309,7 +6395,6 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                         {(() => { const sh = shareOfMaximum(pnl, p.maxProfit == null ? null : p.maxProfit * n);
                           return <Stat k="OF THE MAXIMUM" v={sh.text} tip={sh.note || undefined} />; })()}
                         <Stat k="DTE" v={dteLeft} c={dteExit ? T.amber : T.ink} />
-                        <span style={{ ...mono, fontSize: 11.5, fontWeight: 700, color: rec.c }}>{rec.t}</span>
                       </div>
                       {(() => {
                         const ivNow = (() => {
@@ -6343,6 +6428,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                           />
                         );
                       })()}
+                      </div>
                     </div>
                   );
                 })}

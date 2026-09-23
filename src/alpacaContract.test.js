@@ -232,8 +232,8 @@ test("OUR BODIES — every shape the six order paths send validates", () => {
     ["open debit vertical, limit", { legs: V_CALL, occs: ["C22", "C24"], userQty: 1, type: "limit", limit: 0.24, tif: "day", intent: "open" }],
     // 2. pro.jsx OrderTicket — opening a credit, GTC, sized.
     ["open credit vertical, gtc, x5", { legs: V_PUT, occs: ["P625", "P590"], userQty: 5, type: "limit", limit: -0.75, tif: "gtc", intent: "open" }],
-    // 3. pro.jsx closeGroup — a whole strategy, market.
-    ["close vertical, market", { legs: V_CALL, occs: ["C22", "C24"], userQty: 1, type: "market", tif: "day", intent: "close" }],
+    // 3. closeOrder.js prepareClose — a whole strategy, a limit priced at the tap.
+    ["close vertical, limit day", { legs: V_CALL, occs: ["C22", "C24"], userQty: 1, type: "limit", limit: 0.31, tif: "day", intent: "close" }],
     // 4. pro.jsx placeExit — the exit ladder, a limit close.
     ["close vertical, limit gtc", { legs: V_CALL, occs: ["C22", "C24"], userQty: 3, type: "limit", limit: 0.37, tif: "gtc", intent: "close" }],
     // 5/6. autopilot.mjs → approve.mjs — a butterfly closed at a live limit.

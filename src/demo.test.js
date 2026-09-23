@@ -123,9 +123,12 @@ check("every order path checks the demo flag", () => {
   const pro = readFileSync(new URL("./pro.jsx", import.meta.url), "utf8");
   const app = readFileSync(new URL("./App.jsx", import.meta.url), "utf8");
   // paths 2, 3 and 4 live in pro.jsx; path 1 in App.jsx (CLAUDE.md, order paths)
-  for (const n of ["order path 2 of six", "order path 3 of six", "order path 4 of six"]) {
+  for (const n of ["order path 2 of six", "order path 4 of six"]) {
     if (!pro.includes(n)) throw new Error(`missing the demo guard on ${n}`);
   }
+  // path 3 moved to closeOrder.js in PR #38; the desk and the Positions card both call it
+  const close = readFileSync(new URL("./closeOrder.js", import.meta.url), "utf8");
+  if (!close.includes("order path 3 of six")) throw new Error("missing the demo guard on order path 3");
   if (!app.includes("Order path 1 of the six")) throw new Error("missing the demo guard on order path 1");
   // and the shared state blob is never written from a demo session
   if (!/if \(DEMO\) return;/.test(app)) throw new Error("a demo session can still write the shared state blob");
