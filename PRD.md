@@ -63,6 +63,17 @@ Every rule below is code, not a prompt. The numbers live in `src/rules.js` (`RUL
   orders still working at the broker, times their size.
 - An override needs a typed reason and is stored with the position.
 - Raising either cap is deliberately not on the roadmap.
+- **Free sizing** (owner decision, 23 Sep 2026, PR #41): "capital ÷ concurrent positions is a
+  guess I cannot make; a limit must not preclude a signal." One Settings toggle, **OFF by
+  default**; turning it ON asks one typed reason, stored with its time (`settings.sizingFree`,
+  synced via `/api/state`). While ON, the 5% and 25% limits are **not enforced**: no card is
+  over budget, the risk gate neither refuses nor warns on size (`evaluateTrade({ sizingFree })`,
+  its one new input), a trade is sized on the amount typed as "most I will risk", and one line
+  above Send says "at risk now: $X across N positions" (information, never a block). The RULES
+  values are unchanged. Paper only, defined risk, `minEntryDTE` and every quality floor stay
+  enforced regardless. Every position records `sizingFree: true|false` and the weekly report
+  splits P&L by it.
+- A card's size is contracts × its RISK (the maximum loss), never the premium (PR #41).
 
 ### Entry
 
@@ -121,18 +132,25 @@ can settle it; no test in this repository can.
    ranked list across ten markets, the live re-filtering, the flags, the market filter, the
    stop signs and the Positions card's one action. Tested with renders, source sweeps and a
    headless browser on SYNTHETIC chains only. Whether it reads in five seconds is v1 (c).
+   PR #41's per-card "inverted quotes on its strikes" and the one "looks stale" line were
+   measured on the UNG fixture (clean) and on synthetic 30-pair boards shaped like the owner's
+   SOYB (2 of 30) and the live BOIL reading (6 of 30): 19 labelled cards → 11, SOYB shape 9 → 1.
+   Not yet read on the owner's live 2026-11-20 board.
 5. **Find's cost on a phone is not measured.** The list is one memo over every selected market
    (analyse, floors, an 8,000-run chance per survivor); on a laptop with synthetic chains it
    settles in a few seconds after the chains land. A slow phone may lag while a slider moves.
-6. **OWNER CHECK — "size N > M on the ask" reads indicative sizes,** which Alpaca's snapshot
-   carries and which may not be the real depth. The quantity fields have not been tried on a
-   real phone keyboard either.
-7. **OWNER CHECK — `upgradeHolding()`, the broker-preferred P&L and "Not on Alpaca"** have only
-   run on hand-built fixtures, never on a real `/v2/positions` payload.
+6. **OWNER CHECK — broker payloads the app has only seen hand-built:** "size N > M on the ask"
+   reads indicative sizes (maybe not the real depth), and `upgradeHolding()`, the
+   broker-preferred P&L and "Not on Alpaca" have never run on a real `/v2/positions` payload.
+   The quantity fields have not been tried on a real phone keyboard.
+7. **OWNER CHECK — free sizing (PR #41) has not been used live:** the Settings toggle and its
+   reason, a card sized past the old limit, the "at risk now" line above Send, and the weekly
+   report's P&L split. Tested with gate tests, renders and source sweeps only.
 8. **Chosen, not measured:** `modelDisagreementRatio` 4, `maxComboSpreadShareOfNet` 1.0,
    `maxCrossingShareOfMaxProfit` 0.5, `openLimitSlippage` and `closeLimitSlippage` 0.25,
    `watchAttentionShare` 0.35, `autopilotConfidence` 70, `fallbackIV`/`fallbackSigma` 0.25, the
-   four chance-slider constants, and the liquidity floor (measured on one close, 2026-09-01).
+   four chance-slider constants, `staleBoardShare` 0.15 (PR #41: set between the BOIL 20% and
+   SOYB 7% readings, two boards only), and the liquidity floor (measured on one close, 2026-09-01).
 9. **The exit rules are inherited defaults, not backtested** on these ten markets.
 10. **The AI features were disabled by an Anthropic usage limit until 2026-10-01.** Both
     copilots, report section 5 and `copilotOverreach()` have not seen a real answer since.

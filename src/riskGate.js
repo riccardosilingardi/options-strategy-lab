@@ -4,7 +4,7 @@
 // React. That is what makes it testable, and what makes it a rule instead of
 // an opinion.
 //
-//   evaluateTrade({ proposal, portfolio, capital, signals })
+//   evaluateTrade({ proposal, portfolio, capital, signals, sizingFree })
 //     -> { pass, violations[], warnings[] }
 //
 // A violation is a HARD BLOCK: the order does not leave. A warning is shown
@@ -140,10 +140,19 @@ const V = (code, message) => ({ code, message });
  * @param {object}   arg.capital   the onboarding answers, PRD §3:
  *        { tradingCapital, concurrentTarget, savings, override }
  * @param {object}   arg.signals   fuseSignals() output: { agreement, confidence }
+ * @param {boolean}  arg.sizingFree THE OWNER'S "FREE SIZING" FLAG (PR #41, TASK 4;
+ *        owner decision, 23 Sep 2026). `true` — and only a literal `true` — turns
+ *        off the three SIZE checks: the per-trade limit (4), total exposure (5)
+ *        and the "capital not answered" warning. Nothing else reads it: paper
+ *        mode, defined risk, a real price, a listed contract, the limit's sign,
+ *        the arbitrage check and the entry-DTE bands are enforced exactly as
+ *        without it. Missing means false, so every caller that does not pass it
+ *        is gated as before.
  * @returns {{ pass: boolean, violations: object[], warnings: object[], limits: object }}
  */
-export function evaluateTrade({ proposal, portfolio, capital, signals } = {}) {
+export function evaluateTrade({ proposal, portfolio, capital, signals, sizingFree = false } = {}) {
   const violations = [];
+  const free = sizingFree === true;
   const warnings = [];
 
   const p = proposal || {};
@@ -317,7 +326,7 @@ export function evaluateTrade({ proposal, portfolio, capital, signals } = {}) {
 
   /* ---- 4. per-trade limit (the one the demo video shows) ---- */
   const tradeRisk = tradeRiskOf(p);
-  if (isOpen && isNum(p.maxLoss) && tradeRisk > limits.perTradeLimit) {
+  if (isOpen && !free && isNum(p.maxLoss) && tradeRisk > limits.perTradeLimit) {
     violations.push(V("PER_TRADE_LIMIT",
       `Max loss ${money(tradeRisk)} = ${pctText(tradeRisk / cap)} of capital ` +
       `(your limit: ${pctText(limits.perTradeLimit / cap)}, i.e. ${money(limits.perTradeLimit)}).`));
@@ -326,7 +335,7 @@ export function evaluateTrade({ proposal, portfolio, capital, signals } = {}) {
   /* ---- 5. total exposure ---- */
   const openRisk = openRiskOf(portfolio);
   const totalAfter = openRisk + (isOpen ? tradeRisk : 0);
-  if (isOpen && totalAfter > limits.totalLimit) {
+  if (isOpen && !free && totalAfter > limits.totalLimit) {
     violations.push(V("TOTAL_EXPOSURE",
       `Total exposure would be ${money(totalAfter)} = ${pctText(totalAfter / cap)} of capital ` +
       `(${money(openRisk)} already open + ${money(tradeRisk)} for this trade). ` +
@@ -371,7 +380,7 @@ export function evaluateTrade({ proposal, portfolio, capital, signals } = {}) {
   // questionnaire — but it must never let a suggested figure pass itself off as
   // the user's own limit. When the capital questions are unanswered the numbers
   // above come from the suggested starting point, and the gate says so out loud.
-  if (isOpen && !limits.answered) {
+  if (isOpen && !free && !limits.answered) {
     warnings.push(V("CAPITAL_NOT_SET", capitalSourceNote(limits)));
   }
   if (signals && signals.agreement === "CONFLICT") {
@@ -413,6 +422,7 @@ export function evaluateTrade({ proposal, portfolio, capital, signals } = {}) {
       openRisk,
       totalAfter,
       paper,
+      sizingFree: free,
     },
   };
 }

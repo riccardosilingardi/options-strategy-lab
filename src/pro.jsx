@@ -9,7 +9,7 @@ import { RULES, ruleBadge, takeProfitLabel, scaleOutLabel, stopLossLabel, exitDT
   contractListing, unlistedContractNote, unquotedLegNote, unquotedLegPointer, marketOrderNote,
   taCopilotPrompt, TA_QUESTIONS, TA_DISCLAIMER,
   ivProvenance, sameCloseNote, copilotOverreach, copilotOverreachNote } from "./rules.js";
-import { contractsOf, positionSize, bookPositions, positionStage, autopilotHorizonNote, autopilotVolNote, positionForHolding } from "./journal.js";
+import { contractsOf, positionSize, bookPositions, positionStage, autopilotHorizonNote, autopilotVolNote, positionForHolding, journalPnlTotal, scoredJournal } from "./journal.js";
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, LineStyle } from "lightweight-charts";
 // The fold lives in steps.jsx — chrome with no trade in it, and the one file
 // both App.jsx and pro.jsx can import without a cycle.
@@ -1741,6 +1741,21 @@ export function CopilotTab({ ctx, apiKey, convo, setConvo, onAnalysis }) {
 /* ================================================================
    5) REPORT CENTER: routine schedulata + export + webhook
 ================================================================ */
+/* P&L SPLIT BY SIZING (PR #41, TASK 4). Every Journal entry carries
+   `sizingFree`; the report sums the counted P&L of each side apart with the one
+   sum (`journalPnlTotal()`), so a figure never read stays out of both. */
+export function pnlBySizing(entries = []) {
+  const scored = scoredJournal(entries || []);
+  return {
+    free: journalPnlTotal(scored.filter((e) => e && e.sizingFree === true)),
+    limits: journalPnlTotal(scored.filter((e) => e && e.sizingFree !== true)),
+  };
+}
+const sizingSide = (t) => (t.counted ? `${fmt$(t.total)} over ${t.counted} closed` : "nothing closed")
+  + (t.excluded ? ` (${t.excluded} with no fill figure left out)` : "");
+export const pnlBySizingLine = (split) =>
+  `**P&L by sizing:** free sizing ${sizingSide(split.free)} · within the limits ${sizingSide(split.limits)}`;
+
 export function buildReportMd(ctx, weatherSig, aiText) {
   const { store, scan, news, seasonalSrc } = ctx;
   const d = new Date().toLocaleString("en-GB");
@@ -1807,6 +1822,7 @@ export function buildReportMd(ctx, weatherSig, aiText) {
     L.push(`\n**Across everything:** ${fmt$(totRisk)} at risk · up to ${fmt$(totMaxP)} to be made` +
       (noCeil ? ` from the ${book.length - noCeil} with a ceiling, plus ${noCeil} with ${NO_CEILING} on the profit, which cannot be added to a total` : ""));
   }
+  L.push(`\n${pnlBySizingLine(pnlBySizing(store.journal))}`);
   L.push(`\n## 3 · Headlines that matter (cause → effect, politics included)`);
   (news || []).filter((n) => (n.impacts || []).length).slice(0, 8).forEach((n) => {
     L.push(`- ${n.title} ${n.geo ? "(policy)" : ""}\n  ${(n.impacts || []).map((im) => `**${im.tk} ${ARROW[im.dir]}** (${im.why})`).join(" · ")}`);

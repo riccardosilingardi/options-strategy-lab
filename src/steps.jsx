@@ -250,7 +250,7 @@ export function CompareTray({ items = [], max = 3, onRemove, onClear, onCompare,
       </div>
       {items.length === 1 && (
         <div style={{ ...sans, fontSize: 12.5, color: T.mut, marginTop: 6, lineHeight: 1.5 }}>
-          Tick a second one: one on its own has nothing to be compared with.
+          Tick a second one to compare it with.
         </div>
       )}
       {note && (

@@ -76,6 +76,7 @@ export const COPY = {
   conflictSummaryLine: () => R.conflictSummaryLine({ n: 2, total: 4 }, { confidence: 56 }),
   expiryChoiceNote: () => R.expiryChoiceNote(CHOICE, LEVEL),
   staleBoardLine: () => R.staleBoardLine([{ tk: "SLV", expKey: "2026-11-20" }, { tk: "SOYB", expKey: "2026-11-20" }]),
+  atRiskNowLine: () => R.atRiskNowLine(1800, 2),
   unpriceableNote: () => R.unpriceableNote(2, "XLE"),
   impossibleLossNote: () => R.impossibleLossNote(1, "XLE"),
   modelDisagreementNote: () => R.modelDisagreementNote(1, "XLE"),

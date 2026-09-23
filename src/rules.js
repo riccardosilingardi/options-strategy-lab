@@ -3009,6 +3009,54 @@ export function sizing(answers = {}) {
 }
 
 /* =====================================================================
+   FREE SIZING — ONE FLAG IN PLACE OF DERIVED LIMITS (PR #41, TASK 4).
+
+   Owner decision, 23 Sep 2026: "capital ÷ concurrent positions is a guess I
+   cannot make; a limit must not preclude a signal." With the flag ON the
+   5%-a-trade cap (`bestPracticePerTradePct`) and the 25% exposure ceiling
+   (`totalExposurePct`) are NOT ENFORCED: no card is "over budget", the risk
+   gate neither refuses nor warns on size, and a trade is sized on the amount
+   the owner types as the most he will risk. The RULES values are unchanged;
+   the gate takes the flag as ONE input (`evaluateTrade({ sizingFree })`).
+
+   WHAT IT NEVER TOUCHES: paper only, defined risk, a real price, a listed
+   contract, `minEntryDTE` and the 21-day exit band, and every quality floor.
+
+   IT IS A SETTING, STORED LIKE THE OVERRIDE: `settings.sizingFree` is null
+   (OFF, the default) or `{ reason, at }` — turning it on costs a typed reason
+   of `minOverrideReasonChars`, stamped with the time. It is synced through
+   /api/state with the rest of the settings.
+===================================================================== */
+
+/** Is free sizing ON? Only with a typed reason long enough to count. */
+export function sizingFreeOn(flag) {
+  if (!flag || typeof flag !== "object") return false;
+  const reason = typeof flag.reason === "string" ? flag.reason.trim() : "";
+  return reason.length >= RULES.minOverrideReasonChars;
+}
+
+/**
+ * A `scaleStrategy()` result under free sizing. With the flag OFF it is handed
+ * back untouched. With it ON, a structure one contract of which is over the
+ * amount typed is not "over budget": it is sized at one contract, and its
+ * total is that contract's risk. An unpriceable structure stays unpriceable —
+ * a missing price is not a size question.
+ */
+export function sizedFree(size, free) {
+  if (!free || !size || size.ok || size.unpriceable) return size;
+  const risk = Number(size.risk), prem = Number(size.prem);
+  if (!Number.isFinite(risk) || risk <= 0) return size;
+  return { ...size, ok: true, n: 1, totRisk: risk, totPrem: prem, totProfit: null, free: true };
+}
+
+/** The one line above Send while free sizing is on — information, never a block.
+ *  `openRisk` is the gate's own `limits.openRisk`; `n` the positions it counted. */
+export function atRiskNowLine(openRisk, n) {
+  const k = Math.max(0, Math.round(Number(n) || 0));
+  return `at risk now: ${money(openRisk)} across ${k} position${k === 1 ? "" : "s"}`;
+}
+
+/* =====================================================================
    THE REQUEST — ONE STATE FOR "WHAT I WANT", ABOVE BOTH DOORS.
 
    ROADMAP P10 §2. The owner: *"il budget dedicato all'operazione, oppure

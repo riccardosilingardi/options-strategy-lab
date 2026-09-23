@@ -41,7 +41,7 @@ import { RULES, sizing, ruleBadge, takeProfitLabel, stopLossLabel, perTradeCapLa
   requestOf, requestAmountLabel, requestAmountOwner, contractsSourceNote,
   splitByRequest, meetsHeading, otherwiseHeading, missReasonLine, fillPriceHeading, fillNet,
   rewardRiskRange, RR_POINTS, crossingCost, crossingCostNote, openingMarkNote,
-  figureSet, reconcileFigures, unitMoney, candidateFlags, sizeLine, boardLooksStale, staleBoardLine, nothingTodayLine, fetchFailWords, stopSigns } from "./rules.js";
+  figureSet, reconcileFigures, unitMoney, candidateFlags, sizeLine, sizingFreeOn, sizedFree, atRiskNowLine, boardLooksStale, staleBoardLine, nothingTodayLine, fetchFailWords, stopSigns } from "./rules.js";
 import { isStale, freshnessNote, staleAmong } from "./freshness.js";
 import { evaluateTrade, gateSummary } from "./riskGate.js";
 import { DEMO, DEMO_BANNER, DEMO_TOOLTIP, DEMO_SEED_TICKERS, demoPositions } from "./demo.js";
@@ -886,7 +886,7 @@ async function loadState() {
 // "suggested" until he answers (PRD §3).
 // `journalSeq` is the highest position ref this state has ever issued. It only
 // ever goes up: closing a position does not hand its number back (src/journal.js).
-const EMPTY = { journalSeq: 0, saved: [], positions: [], expiryLog: [], settings: { webhook: "", reportFreq: "weekly", reportLast: 0, reportLastMd: "", capital: null, concurrentTarget: null, savings: null, sizeOverride: null, mode: "pro", onboarded: false, notifyWhenReady: false }, seasonal: {}, journal: [], ivHist: {}, copilotLog: [] };
+const EMPTY = { journalSeq: 0, saved: [], positions: [], expiryLog: [], settings: { webhook: "", reportFreq: "weekly", reportLast: 0, reportLastMd: "", capital: null, concurrentTarget: null, savings: null, sizeOverride: null, sizingFree: null, mode: "pro", onboarded: false, notifyWhenReady: false }, seasonal: {}, journal: [], ivHist: {}, copilotLog: [] };
 async function saveState(st) {
   try { localStorage.setItem(SKEY, JSON.stringify(st)); } catch (e) { console.error(e); }
   // The server blob is ONE shared document, so a demo visitor writing to it
@@ -894,7 +894,7 @@ async function saveState(st) {
   // is not theirs. Demo state stays in the visitor's own browser.
   if (DEMO) return;
   // sync server (abilita Autopilot ad app chiusa); fire-and-forget
-  try { fetch("/api/state", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ positions: st.positions, settings: { webhook: st.settings?.webhook, capital: st.settings?.capital, concurrentTarget: st.settings?.concurrentTarget, savings: st.settings?.savings, sizeOverride: st.settings?.sizeOverride, notifyWhenReady: !!st.settings?.notifyWhenReady } }) }); } catch { /* offline ok */ }
+  try { fetch("/api/state", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ positions: st.positions, settings: { webhook: st.settings?.webhook, capital: st.settings?.capital, concurrentTarget: st.settings?.concurrentTarget, savings: st.settings?.savings, sizeOverride: st.settings?.sizeOverride, sizingFree: st.settings?.sizingFree ?? null, notifyWhenReady: !!st.settings?.notifyWhenReady } }) }); } catch { /* offline ok */ }
 }
 
 /* ============================== UI ATOMS ============================== */
@@ -1417,6 +1417,11 @@ export default function OptionsStrategyLab() {
     override: store.settings.sizeOverride,
   }), [store.settings]);
   const limits = useMemo(() => sizing(capitalAnswers), [capitalAnswers]);
+  /* FREE SIZING (PR #41, TASK 4): one flag, read here once. ON, the gate drops
+     its three size checks and no card is over budget; see `sizingFreeOn()`. */
+  const freeSizing = sizingFreeOn(store.settings.sizingFree);
+  // The reason being typed before the flag goes ON; null when not asking.
+  const [freeDraft, setFreeDraft] = useState(null);
   const [busy, setBusy] = useState(null);
   const [msg, setMsg] = useState(null);
   const [bt, setBt] = useState(null);
@@ -2049,8 +2054,8 @@ export default function OptionsStrategyLab() {
      sliders the budget re-derives against the price they are now offering —
      which is the honest answer to "how many can I have", not a stale one. */
   const budgetSize = useMemo(
-    () => (AE ? scaleStrategy(AE, request.mode, request.amt) : null),
-    [AE, request.mode, request.amt]);
+    () => (AE ? sizedFree(scaleStrategy(AE, request.mode, request.amt), freeSizing) : null),
+    [AE, request.mode, request.amt, freeSizing]);
   /* A COUNT TYPED BY HAND WINS, AND THE SCREEN SAYS IT OVERRIDES THE BUDGET.
      The gate is unchanged: it measures whatever `contracts` says, whichever of
      the two produced it. */
@@ -2449,6 +2454,9 @@ export default function OptionsStrategyLab() {
       // the totals — the exposure ceiling, the stop threshold, the P&L on the
       // row — can be formed, and the app was forming them from an assumed 1.
       contracts: sized,
+      // WHICH SIZING IT WAS OPENED UNDER (PR #41, TASK 4): the weekly report
+      // splits P&L by it.
+      sizingFree: freeSizing,
       openedAt: new Date().toISOString(), expiry, maxProfit: analysis.maxProfit, maxLoss: analysis.maxLoss,
       realEntry: analysis.realCount === lg.length,
       alpacaId: alpacaOrder?.id || null,
@@ -3193,7 +3201,7 @@ export default function OptionsStrategyLab() {
             // Writing `alpacaStatus: "filled"` would be the app asserting an
             // order the broker never told it about — the same class of fault
             // as the sentinel this replaces.
-            entrySource: "fill", contracts: 1,
+            entrySource: "fill", contracts: 1, sizingFree: freeSizing,
             thesis: { imported: true, iv: getU(g.und).iv, seasonal: seasonalNowOf(seasonal, g.und), pop: null, spot: chains[g.und]?.spot ?? null, vega: 1 },
             timeline: [
               { t: Date.now(), type: "fill", text:
@@ -3224,7 +3232,7 @@ export default function OptionsStrategyLab() {
           ? `${upgraded} position${upgraded === 1 ? " was" : "s were"} brought up to what Alpaca reports: the size is the broker's own leg quantities now, not an assumed one.`
           : "Every Alpaca position is already linked.");
     } catch (e) { if (!silent) setMsg(`Could not import from Alpaca: ${e.message}`); }
-  }, [chains, seasonal]);
+  }, [chains, seasonal, freeSizing]);
 
   useEffect(() => {
     (async () => {
@@ -3298,7 +3306,8 @@ export default function OptionsStrategyLab() {
     portfolio: { positions: bookPositions(store.positions), account: account === undefined ? alpaca : account },
     capital: capitalAnswers,
     signals: fused[proposal?.ticker || ticker] || null,
-  }), [store.positions, alpaca, capitalAnswers, fused, ticker]);
+    sizingFree: freeSizing,
+  }), [store.positions, alpaca, capitalAnswers, fused, ticker, freeSizing]);
 
   const guard = useMemo(() => {
     if (!AE) return null;
@@ -4145,12 +4154,12 @@ export default function OptionsStrategyLab() {
 
             {findShown.length > 0 && <SplitSections
               items={findShown.map((x) => x.cand)} request={request} priceNote
-              sizeOf={(c) => { const x = findShown.find((y) => y.key === c.key); return x ? scaleStrategy(x.lf.aFill, request.mode, request.amt) : null; }}
+              sizeOf={(c) => { const x = findShown.find((y) => y.key === c.key); return x ? sizedFree(scaleStrategy(x.lf.aFill, request.mode, request.amt), freeSizing) : null; }}
               renderItem={(c, misses) => {
                 const x = findShown.find((y) => y.key === c.key);
                 if (!x) return null;
                 const af = x.lf.aFill;
-                const size = scaleStrategy(af, request.mode, request.amt);
+                const size = sizedFree(scaleStrategy(af, request.mode, request.amt), freeSizing);
                 const signs = stopSigns({ fused: x.fused, flags: x.flags, feedBroken: x.feedBroken,
                   noQuoteLegs: x.noQuoteLegs, contracts: size && size.ok ? size.n : null, askSize: x.touchSize });
                 return (
@@ -4246,7 +4255,7 @@ export default function OptionsStrategyLab() {
             <StepForward
               label={legs.length ? `Go to Build — ${ticker} · ${stratName} →` : "Pick one above to go to Build"}
               disabled={!legs.length}
-              disabledNote={`Use "Take to Build" on whichever card you want to look at properly — nothing is sent until the checks on that screen.`}
+              disabledNote={`Tap "Take to Build" on a card — nothing is sent before the checks there.`}
               sub={`${ticker} · ${stratName} is loaded on Build. Nothing is sent until the checks there.`}
               onClick={() => goStep("build")} />
           </div>
@@ -4796,6 +4805,11 @@ export default function OptionsStrategyLab() {
               )}
               {/* ...AND ABOVE SEND, the same labels (PR #40, TASK 2). */}
               <StopSigns signs={buildSigns} style={{ marginTop: 10 }} />
+              {/* FREE SIZING ON: what is at risk now, from the gate's own
+                  exposure figure — information, never a block (PR #41). */}
+              {freeSizing && guard && (
+                <div style={{ ...mono, fontSize: 11, color: T.mut, marginTop: 8 }}>{atRiskNowLine(guard.limits.openRisk, bookPositions(store.positions).length)}</div>
+              )}
               {alpaca && reasonOk && (
                 <OrderTicket
                   onSent={(o) => openPaper(o)}
@@ -5387,6 +5401,7 @@ export default function OptionsStrategyLab() {
                   and {money(limits.totalLimit)} across everything at once ({pctText(RULES.totalExposurePct)} of your capital).
                   {limits.overrideAccepted ? ` This is your own limit, not the suggested one — your reason: “${limits.overrideReason}”.` : ""}
                 </div>
+                {freeSizing && <div style={{ ...mono, fontSize: 10.5, color: T.amber, marginTop: 6 }}>Free sizing is on: these two limits are not applied.</div>}
                 {/* Only when answered: unanswered, the pill above the fields
                     already says it, and saying it twice reads as noise. */}
                 {limits.answered && <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6, lineHeight: 1.5 }}>{capitalSourceNote(limits)}</div>}
@@ -5414,6 +5429,49 @@ export default function OptionsStrategyLab() {
                       border: `1px solid ${limits.overrideAccepted ? T.green : T.amber}`, borderRadius: 8, padding: "10px 12px", resize: "vertical" }} />
                 )}
               </div>
+            </Card>
+
+            {/* FREE SIZING (PR #41, TASK 4; owner decision, 23 Sep 2026). OFF by
+                default. ON costs one typed reason, stored with its time like
+                the override above. It turns off the per-trade and exposure
+                limits only — never paper, defined risk, entry DTE or a floor. */}
+            <Card style={{ marginTop: 12 }}>
+              <Lbl>FREE SIZING</Lbl>
+              <label style={{ display: "flex", gap: 10, alignItems: "flex-start", marginTop: 10, cursor: "pointer" }}>
+                <input type="checkbox" checked={freeSizing || freeDraft != null}
+                  onChange={(e) => {
+                    if (e.target.checked) { setFreeDraft(""); return; }
+                    setFreeDraft(null); setSetting("sizingFree", null);
+                  }} style={{ marginTop: 3, width: 18, height: 18 }} />
+                <span style={{ fontSize: 13.5, color: T.body, lineHeight: 1.5 }}>
+                  Size each trade on the amount I type. The per-trade and total limits are not applied; paper only, defined risk, the entry days and every quality floor still are.
+                </span>
+              </label>
+              {freeSizing && (
+                <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 8, lineHeight: 1.5 }}>
+                  On since {new Date(store.settings.sizingFree.at).toLocaleString("en-GB")} — your reason: “{store.settings.sizingFree.reason.trim()}”
+                </div>
+              )}
+              {!freeSizing && freeDraft != null && (
+                <>
+                  <textarea rows={3} placeholder="Why size freely?"
+                    value={freeDraft} onChange={(e) => setFreeDraft(e.target.value)}
+                    style={{ width: "100%", boxSizing: "border-box", marginTop: 8, fontSize: 16, lineHeight: 1.45,
+                      fontFamily: "ui-sans-serif, system-ui", background: T.bg, color: T.ink,
+                      border: `1px solid ${T.amber}`, borderRadius: 8, padding: "10px 12px", resize: "vertical" }} />
+                  <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    <Btn small color={T.amber} disabled={!sizingFreeOn({ reason: freeDraft })}
+                      onClick={() => { setSetting("sizingFree", { reason: freeDraft.trim(), at: Date.now() }); setFreeDraft(null); }}>
+                      Turn on
+                    </Btn>
+                    {!sizingFreeOn({ reason: freeDraft }) && (
+                      <span style={{ ...mono, fontSize: 10.5, color: T.mut }}>
+                        {RULES.minOverrideReasonChars - freeDraft.trim().length} more characters
+                      </span>
+                    )}
+                  </div>
+                </>
+              )}
             </Card>
 
             <Card style={{ marginTop: 12 }}>

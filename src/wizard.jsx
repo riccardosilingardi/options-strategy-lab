@@ -387,7 +387,12 @@ export function gateChecklist(result, proposal = {}) {
         : `The worst case is a number you can read: ${money(L.tradeRisk)}. Every option sold is covered by ` +
           `one bought, so the loss cannot run past it.`,
     },
-    {
+    // FREE SIZING (PR #41, TASK 4): the gate did not measure these two, so
+    // the rows say so instead of quoting a limit nothing enforced.
+    L.sizingFree ? {
+      id: "per-trade", ok: true,
+      text: `${money(L.tradeRisk)} at risk. Free sizing is on: no per-trade limit is applied.`,
+    } : {
       id: "per-trade",
       ok: !blocked("PER_TRADE_LIMIT"),
       // "your limit" only when it IS his. With the capital questions still open
@@ -396,7 +401,11 @@ export function gateChecklist(result, proposal = {}) {
       text: `${money(L.tradeRisk)} at risk against ${limitOwner(L)} ${money(L.perTrade)} per-trade limit` +
         (cap ? ` — ${pctText(L.tradeRisk / cap)} of ${L.answered ? "your" : "an assumed"} ${money(cap)} of trading capital.` : "."),
     },
-    {
+    L.sizingFree ? {
+      id: "total", ok: true,
+      text: `${money(L.openRisk)} is already at risk in open positions; with this one ${money(L.totalAfter)}. ` +
+        `Free sizing is on: no ceiling is applied.`,
+    } : {
       id: "total",
       ok: !blocked("TOTAL_EXPOSURE"),
       text: `${money(L.openRisk)} is already at risk in open positions. With this one that becomes ` +
