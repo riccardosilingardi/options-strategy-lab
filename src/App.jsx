@@ -12,15 +12,15 @@ import { fetchAllNews, fetchWeather, ImpactTags, CopilotTab, TaCopilot, ReportTa
 import { prepareClose, sendClose, groupForRecord, closeWorking, legsNotHeld } from "./closeOrder.js";
 import { BandThumbnail, payoffBands, bandTakeaway, GaugeFigure, Gauge, CompareFigure, exitPlanSentence,
   OpenInterestStrip, oiStripTakeaway, oiCutAt, oiGhostCut, explainOiStrip, useWidth } from "./visuals.jsx";
-import { fuseSignals, sentimentDirection, withSignalRank, compareCandidates, againstSignal, DRIVER_PRESETS, rankByDrivers, verdictNarrative } from "./signals.js";
+import { fuseSignals, sentimentDirection, withSignalRank, compareCandidates, againstSignal } from "./signals.js";
 import { N as nCDF, bs as bsPrice, smile as smileIV, payoff as payoffExp, SEASONAL, SIGMA,
   parseAvJson, statsFromMatrix } from "./engine.js";
 import { parseOcc, buildOcc, snapStrike, resnapLegs, expiryStrikes, strikeOptions, fetchChain, hasOpenInterest, enrichOpenInterest, feedName, sourceNote, openInterestNote, oiProfile, expiryOpenInterest, nearMoneyOpenInterest, monotonicityBreaks, monotonicityNote, spotOf, spotAt } from "./chain.js";
 import { T, themeName, setTheme, BADGE_SAFE } from "./theme.js";
-import { RULES, sizing, ruleBadge, takeProfitLabel, stopLossLabel, perTradeCapLabel, RULE_PILLS, NOTHING_TODAY, money, pctText, capitalSourceNote, perTradeLimitPhrase, qualityFloor, qualityFloorSentence, liquiditySkippedNote,
+import { RULES, sizing, ruleBadge, takeProfitLabel, stopLossLabel, perTradeCapLabel, RULE_PILLS, money, pctText, capitalSourceNote, perTradeLimitPhrase, qualityFloor, qualityFloorSentence, liquiditySkippedNote,
   positionPnl, BROKER_PNL, remainingEdge, remainingEdgeLabel, shareOfMaximum, attentionCount,
   filterFold, qualityFloorLine, voicePointer, VOICE_HOMES, noCeilingRankLine,
-  buildableExpiries, openableBoard, offFloorExpiryLabel, horizonFloorNote, emptyShortlistCta,
+  buildableExpiries, openableBoard, offFloorExpiryLabel, horizonFloorNote,
   LIQUIDITY_LEVELS, RECOMMENDED_LIQUIDITY, LIQUIDITY_MEASUREMENT, liquidityMeasurementNote, liquidityLevel, liquidityThreshold, looseningWarning, liquiditySettingNote, isLoosened, ordinal,
   priceability, unpriceableNote, rewardRisk, MIN_NET_DOLLARS,
   payoffCeiling, NO_CEILING, noCeilingNote, noCeilingRankNote,
@@ -30,26 +30,26 @@ import { RULES, sizing, ruleBadge, takeProfitLabel, stopLossLabel, perTradeCapLa
   modelSanity, modelDisagreementNote,
   entryRoom, entryRoomWarning, entryOverrideOk, entryOverrideNote, entryInsideExitNote,
   passedOverRecord, passedOverSummary,
-  expiryChoice, expiryChoiceNote, emptyExpiryNote, unloadedBoardNote, checkedAgainstNote, wideSpreadNote, spreadSkippedNote,
+  expiryChoice, expiryChoiceNote,  checkedAgainstNote, wideSpreadNote, spreadSkippedNote,
   wideComboNote, comboSpreadSkippedNote, crossingNote, comboBook, effectiveLimit, limitCeilingNote, notionalControlled,
-  radarSplit, radarQuietNote,
   orderVerdict, legBook, legLimitSeed, netFromLegs, onTick, sizeSkippedNote,
-  conflictSummaryLine, warningsToPrint,
+  conflictSummaryLine, warningsToPrint, unquotedLegNote,
   chancePct, chanceText, chanceInTen, signedMoney,
   ruleExitOf, stopWarningSentence, watchAttentionLevel, positionAction,
   chanceOf, chanceSourceNote, seasonalProvenance, seasonalStampNote, seasonalStampFields, chanceDrawFields,
   sigmaProvenance, isButterfly,
   requestOf, requestAmountLabel, requestAmountOwner, contractsSourceNote,
   splitByRequest, meetsHeading, otherwiseHeading, missReasonLine, fillPriceHeading, fillNet,
-  rewardRiskRange, RR_POINTS, crossingCost, crossingCostNote, openingMarkNote } from "./rules.js";
+  rewardRiskRange, RR_POINTS, crossingCost, crossingCostNote, openingMarkNote,
+  figureSet, reconcileFigures, unitMoney, candidateFlags, sizeLine, nothingTodayLine, fetchFailWords, stopSigns } from "./rules.js";
 import { isStale, freshnessNote, staleAmong } from "./freshness.js";
 import { evaluateTrade, gateSummary } from "./riskGate.js";
 import { DEMO, DEMO_BANNER, DEMO_TOOLTIP, DEMO_SEED_TICKERS, demoPositions } from "./demo.js";
-import { CapitalOnboarding, WizardOpen, FindOpportunities, WizardCandidates, ConfirmSteps, NothingToday, Card, Pill } from "./wizard.jsx";
+import { CapitalOnboarding, WizardOpen, ConfirmSteps, Card, Pill } from "./wizard.jsx";
 // THE CONTROLS AND THE ONE CANDIDATE CARD (ROADMAP P10). Its own file: it is
 // nothing but a trade, so it may not live in `steps.jsx`, and `wizard.jsx`
 // renders the same card, so it may not live here.
-import { RequestControls, SplitSections, MissLine, CandidateCard } from "./card.jsx";
+import { RequestControls, SplitSections, MissLine, CandidateCard, SignalBadge, StopSigns } from "./card.jsx";
 import { buildHandOff, buildScreenState, BUILD_TAB } from "./handoff.js";
 import { orderBody, orderOutcome, alpacaErrorText, reduceRatios, limitWords, fillPriceOf, cancelOutcome, cancelWaiting } from "./order.js";
 // THE PERMANENT RECORD: the ref a position is given at open, the sequence on
@@ -62,7 +62,7 @@ import { nextRef, refCounter, appendTimeline, stampTimeline, orderStatusRecheck,
   isTestRecord, testRecordNote, scoredJournal, journalPnl, NOT_A_FILL,
   journalEntry, searchJournal, CLOSE_REASON_MIN, refNumber } from "./journal.js";
 import { FIRST_STEP, stepCarry, candidateOf, candidateKey, legsLine, toggleCompare, inCompare, MAX_COMPARE, savedFromCandidate, candidateFromSaved, savedAge } from "./path.js";
-import { StepNav, StepForward, EvidenceBar, EvidenceOverlay, DeskSheet, CompareTray, CandidateActions, Fold } from "./steps.jsx";
+import { StepNav, StepForward, EvidenceBar, EvidenceOverlay, DeskSheet, CompareTray, CandidateActions, Fold, DeskCountLine } from "./steps.jsx";
 
 /* ============================== THEME ============================== */
 const mono = { fontFamily: "ui-monospace, Menlo, monospace" };
@@ -433,6 +433,13 @@ function priceLeg(leg, S, dte, baseIV, q) {
   const iv = smileIV(baseIV, S, leg.strike);
   return { px: bsPrice(S, leg.strike, dte / 365, iv, leg.type), iv, real: false };
 }
+/** The fewest contracts shown on the side that trades (ask on a leg bought, bid
+ *  on a leg sold), or null when no size is known. For the "size N > M" sign. */
+const touchSizeOf = (legs, a) => {
+  const xs = (a?.legPx || []).map((l, i) => (Math.sign(+(legs[i] && legs[i].side) || 1) > 0 ? l.askSize : l.bidSize))
+    .filter((x) => x != null && Number.isFinite(Number(x)));
+  return xs.length ? Math.min(...xs.map(Number)) : null;
+};
 /** The two-sided quotes behind an analysis, one per leg, for `priceability()`. */
 const quotesOf = (a) => (a?.legPx || []).map((l) => ({ bid: l.bid, ask: l.ask }));
 /**
@@ -534,6 +541,65 @@ export const chanceCheckOf = (a, { ticker, legs, spot, dte, expKey = null, seaso
  * is none, never a blank.
  */
 const chanceStamp = (mc, ticker = "this market") => (mc ? mc.seasonalNote : chanceSourceNote(null, ticker));
+
+/* =====================================================================
+   THE TWO PATHS A CANDIDATE'S FIGURES TAKE, AND THEY ARE ONE (PR #40, TASK 0).
+
+   `listCardFigures()` is what every card on the list prints; `buildFigures()`
+   is what the Build screen prints, the gate measures and the ticket sends.
+   Both read `analyze()` at `fillNet()` — `openLimitPrice()` on `comboBook()`,
+   on the cent — and `legLimitSeed()` lands the ticket's legs on exactly that
+   price, so with nothing typed in the ticket the two return the same figures,
+   the same break-even and the same seeded chance. `figures.test.jsx` holds it.
+===================================================================== */
+
+/** The figures one list card prints. `a`/`aFill` may be handed in when the
+ *  generation site already computed them; nothing is re-derived either way. */
+export function listCardFigures(legs, { spot, dte, iv, q, ticker, expKey = null, seasonal, a = null, aFill = null }) {
+  const mid = a || analyze(legs, spot, dte, iv, q);
+  const af = aFill || atFillPrice(legs, mid, { spot, dte, iv, q });
+  const mc = seasonal ? chanceCheckOf(af, { ticker, legs, spot, dte, expKey, seasonal }) : null;
+  const pop = mc ? mc.pop : null;
+  return { a: mid, aFill: af, mc, pop, bands: payoffBands({ legs, entryNet: af.entry, spot }),
+    rr: rewardRisk(af.maxProfit, af.maxLoss), figures: figureSet(af, pop) };
+}
+
+/** The Build screen's chain, from the legs to the price that will be sent. */
+export function buildFigures(legs, { spot, dte, iv, q, ticker = null, expKey = null, seasonal = null, legPx = null, type = "limit" }) {
+  const A = spot && legs.length ? analyze(legs, spot, dte, iv, q) : null;
+  /* THE PRICE THE ORDER WILL BE SENT AT IS BUILD-SCREEN STATE. Type, time in
+     force and ONE PRICE PER LEG live in App.jsx; `legPx` is null until the user
+     moves something, and the seed is derived (`legLimitSeed()` in rules.js):
+     a stored seed would go stale the moment the chain refreshed.
+     THE OCC TRAVELS WITH THE QUOTE, for the same reason the bid and the sizes
+     do: the ticket has to be able to see that the chain never listed a leg. */
+  const bookQuotes = A ? A.legPx.map((l) => ({ bid: l.bid, ask: l.ask, mid: l.px, bidSize: l.bidSize, askSize: l.askSize, occ: l.occ || null })) : [];
+  const book = comboBook(legs, bookQuotes);
+  const seedPx = legLimitSeed(legs, bookQuotes);
+  /* THE USER'S PRICES, OR THE SEED — never a mix. A `legPx` of the wrong
+     length belongs to a structure that is no longer on screen. */
+  const legPrices = Array.isArray(legPx) && legPx.length === legs.length ? legPx : seedPx;
+  /* THE NET IS DERIVED FROM THE LEGS, the direction the owner thinks in. */
+  const ticketNet = netFromLegs(legs, legPrices || []);
+  const ticketDir = book.ok ? (book.mid >= 0 ? 1 : -1) : (A && A.entry < 0 ? -1 : 1);
+  /* A LIMIT IS A CEILING, NOT A PRICE (`effectiveLimit` in rules.js): an order
+     at or past the touch fills AT the touch. A MARKET order takes the touch. */
+  let effective;
+  if (type === "market") {
+    effective = !book.ok
+      ? { known: false, dir: ticketDir, typed: null, touch: null, effective: null, net: null, capped: false, give: null }
+      : { known: true, dir: ticketDir, typed: null, touch: Math.abs(book.ask), effective: Math.abs(book.ask), net: ticketDir * Math.abs(book.ask), capped: true, give: 0 };
+  } else {
+    effective = effectiveLimit(ticketNet.net == null ? null : Math.abs(ticketNet.net), book, ticketDir);
+  }
+  /* >>> AND THIS IS THE ANALYSIS EVERY FIGURE ON THE SCREEN READS. <<< With no
+     readable price it falls back to `A`, and `entrySource` says so. */
+  const AE = !A ? null : !Number.isFinite(effective.net) ? A : analyze(legs, spot, dte, iv, q, { net: effective.net });
+  /* THE ONE CHANCE, AT THE PRICE THAT WILL BE SENT. */
+  const chance = AE && spot && legs.length && seasonal ? chanceCheckOf(AE, { ticker, legs, spot, dte, expKey, seasonal }) : null;
+  return { A, bookQuotes, book, seedPx, legPrices, ticketNet, ticketDir, effective, AE, chance,
+    figures: AE ? figureSet(AE, chance ? chance.pop : null) : null };
+}
 
 function netValue(legs, S, dte, baseIV, q) {
   return legs.reduce((a, l) => a + Math.sign(l.side) * l.qty * priceLeg(l, S, dte, baseIV, q).px, 0);
@@ -702,13 +768,16 @@ export function shortlistWithFloors(sent, S, step, strikes, dte, baseIV, q, { pe
       // call spread passed the per-leg test on both legs and its combination
       // was 143% of its own mid wide (src/rules.js, `comboSpreadFloor`).
       quotes: quotesOf(a), legs: p.legs,
-      maxProfit: a.maxProfit, maxLoss: a.maxLoss, unboundedProfit: a.profitUnbounded,
+      // THE REWARD FLOOR READS THE PRICE THAT FILLS TOO (PR #40, TASK 0). It
+      // read the mid while the card printed the fill: "ranked and floored at
+      // the MID while cards print at the price that fills", PR #39's debt.
+      maxProfit: aFill.maxProfit, maxLoss: aFill.maxLoss, unboundedProfit: aFill.profitUnbounded,
       maxProfitAtFill: aFill ? aFill.maxProfit : null,
     });
     if (!qf.liquidity.checked) { oiSkipped = true; tally.skipped++; }
     if (!qf.spread.checked) tally.spreadSkipped++;
     if (!qf.comboSpread.checked) tally.comboSpreadSkipped++;
-    if (qf.pass) rows.push({ p, a, qf });
+    if (qf.pass) rows.push({ p, a, aFill, qf });
     else {
       // WHICH FLOOR DID THE WORK, in the order they are applied. Pooling them
       // would leave the screen unable to say whether the leg was untraded or
@@ -1182,7 +1251,7 @@ const ago = (d) => { const m = Math.round((Date.now() - new Date(d)) / 60000); r
    LAID OUT FOR A 390px PHONE: one column, a 18px rail for the line number, no
    horizontal scroll, and every control at least 44px tall.
 ==================================================================== */
-export function TradeCard({ ticker, name, card, refusals = [], warnings = 0, onNumbers, onOrder, orderLabel, children }) {
+export function TradeCard({ ticker, name, card, refusals = [], onNumbers, onOrder, orderLabel, children }) {
   if (!card) return null;
   return (
     <div style={{ marginTop: 14, padding: "12px 13px", background: T.panel, border: `1px solid ${T.violet}66`, borderLeft: `3px solid ${T.violet}`, borderRadius: 9 }}>
@@ -1224,25 +1293,8 @@ export function TradeCard({ ticker, name, card, refusals = [], warnings = 0, onN
         <Btn ghost color={T.blue} onClick={onNumbers}>All the numbers →</Btn>
         <Btn color={T.violet} onClick={onOrder}>{orderLabel || "Price it and send →"}</Btn>
       </div>
-      {/* >>> A REFUSAL AND A REASSURANCE MAY NOT SHARE A CARD (P9, TASK 1). <<<
-          The owner read "THIS ORDER WOULD NOT BE SENT" and, four lines below
-          it, "none of them stops the order". Both clauses were true of
-          different things — the first of a VIOLATION, the second of the
-          WARNINGS — and together they are §4m's fault on the card P4-ter built
-          to end it: a screen arguing with itself, where the part that shouts
-          loudest wins. While a violation stands, the refusal above is the whole
-          verdict and this line is suppressed. It is not deleted: the warnings
-          keep their home in the panel the sentence points at. */}
-      {warnings > 0 && refusals.length === 0 && (
-        <div style={{ ...mono, fontSize: 10, color: T.amber, marginTop: 7, lineHeight: 1.6 }}>
-          {`${warnings} warning${warnings === 1 ? "" : "s"} apply to this trade. ${warnings === 1 ? "It is" : "They are"} in the warnings panel above, written once — none of them stops the order.`}
-        </div>
-      )}
-      {warnings > 0 && refusals.length > 0 && (
-        <div style={{ ...mono, fontSize: 10, color: T.amber, marginTop: 7, lineHeight: 1.6 }}>
-          {`${warnings} warning${warnings === 1 ? "" : "s"} also apply, in the warnings panel above. The refusal above is what decides: nothing is sent while it stands.`}
-        </div>
-      )}
+      {/* The warnings' two "written once" reminders are gone (PR #40, TASK 2):
+          the warnings print once, as the stop-signs strip above the figures. */}
       <div style={{ ...mono, fontSize: 9.5, color: T.dim, marginTop: 7, lineHeight: 1.6 }}>{card.currency}</div>
     </div>
   );
@@ -1310,21 +1362,9 @@ class TabBoundary extends React.Component {
 }
 
 export default function OptionsStrategyLab() {
-  // PRD §5: the wizard IS the app. `view` is the shell — the tabs are one of
-  // its destinations, not the front door. `wizStep` is which wizard screen.
+  // PRD §5: `view` is the shell — the home page ("wizard") or the desk. The
+  // guided door behind it is gone (PR #40, TASK 1): Home goes straight to Find.
   const [view, setView] = useState("wizard");   // "wizard" | "desk"
-  // The desk is three places, not eleven: the Build screen where a trade is put
-  // together, the positions you hold and the journal of what happened. Everything
-  // that used to be a tab of its own is evidence for one of those three (see `ev`).
-  // open | questions | nothing. There is no "candidates" screen any more: the
-  // roads the guided run produced are step 2 of the desk's own path, shown
-  // beside every other candidate, so the guided door and the desk door walk
-  // the same three steps.
-  const [wizStep, setWizStep] = useState("open");
-  const [nothing, setNothing] = useState(null);   // [{ id, text }] — why not today
-  const [candidates, setCandidates] = useState([]); // screen 3: always two roads
-  const [verdict, setVerdict] = useState([]);       // screen 3: what was examined, in English
-  const [picked, setPicked] = useState(null);       // screen 4: the road taken
   // The gate's answer AFTER the tap on the Build screen's confirm step. A
   // refusal has to stay ON that screen with its reasons — a toast that scrolls
   // away is not an explanation.
@@ -1332,29 +1372,22 @@ export default function OptionsStrategyLab() {
   const [hydrated, setHydrated] = useState(false);
   const [tab, setTab] = useState("build");       // "build" | "positions" | "journal"
   /* ---- THE ONE NUMBERED PATH (src/path.js) ----
-     The desk's first place is not a screen any more, it is three of them, and
-     ONE is on screen at a time: 1 Radar (which markets have something today),
-     2 Shortlist (the structures that survived, compared and saved), 3 Build
-     (one trade taken apart). Radar and Shortlist used to be evidence panels
-     that APPENDED to the Build page, which is why the desk read as one long
-     page that only ever got longer. */
-  const [step, setStep] = useState(FIRST_STEP);   // "radar" | "shortlist" | "build"
+     Two steps since PR #40: 1 Find (one request block over one ranked list
+     across the selected markets), 2 Build (one trade taken apart). */
+  const [step, setStep] = useState(FIRST_STEP);   // "find" | "build"
   const [ev, setEv] = useState(null);           // which evidence sheet is open OVER the step
-  /* ---- comparing, on step 2 ----
-     Up to three candidates, ticked from any of the three places that produce
-     them (the guided roads, the per-market shortlist, the multi-market scan)
-     and normalised into one shape by `candidateOf` so there is one comparison,
-     not three. The list lives HERE and not inside the step, so walking forward
-     to Build and back does not lose it. */
+  /* ---- comparing, on Find ----
+     Up to three candidates, normalised into one shape by `candidateOf`. The
+     list lives HERE, so walking to Build and back does not lose it. */
   const [compare, setCompare] = useState([]);
   const [compareNote, setCompareNote] = useState(null);
   const [showCompare, setShowCompare] = useState(false);
-  // Did the candidates on screen come through the guided door? The roads and
-  // the verdict are shown on the path itself, so the path has to know.
-  const [guided, setGuided] = useState(null);   // { at, basket } | null
   const [showSettings, setShowSettings] = useState(false);
   const [ticker, setTicker] = useState("SOYB");
   const [chains, setChains] = useState({});      // ticker -> normalised chain (Alpaca, or CBOE as the net)
+  // WHY A MARKET HAS NO CHAIN, when its fetch FAILED (PR #40): a failure is not
+  // "still loading", and neither is a market verdict. Cleared on the next success.
+  const [chainErr, setChainErr] = useState({});  // ticker -> error in a few words
   const [seasonal, setSeasonal] = useState({});  // ticker -> {monthlyMean, sigma, matrix, years, src, at} from Alpha Vantage
   // WHY a market is not in `seasonal`: loading, or a named failure. A fallback
   // that cannot say why it is in use is indistinguishable from a measurement.
@@ -1476,45 +1509,20 @@ export default function OptionsStrategyLab() {
   const [ta, setTa] = useState({}); // per ticker
   const [replay, setReplay] = useState(null);
   const [nf, setNf] = useState({ tk: "ALL", kind: "all", q: "", days: 7 });
-  /* THE WIDE SEARCH OPENS ON THE MARKETS THAT HAVE SOMETHING TO FIND. It
-     started on SOYB, CORN and UNG, and the first two are the two chains this
-     app measured producing "0 of 2 shown" and a screen of refusal text. The
-     selection is the user's — every market in the basket is one tap away right
-     under it — but the default it offers should be a search with results in it
-     (ROADMAP P2-bis). */
-  const [multi, setMulti] = useState({ sel: ["GLD", "SLV", "USO"], busy: false, res: null, err: null, dteT: RULES.targetEntryDTE, senMode: "auto" });
+  /* ---- WHAT FIND IS ASKED (PR #40, TASK 1) ----
+     The markets it reads (all of the basket by default), the direction — one
+     for every market, or "season" to let each market's four factors decide —
+     the horizon in days, the one-market filter that replaced the Shortlist
+     step, and whether flagged cards are listed. Every one of them re-filters
+     the list live. */
+  const [find, setFind] = useState({ markets: [...BASKET], dir: "season", horizon: RULES.targetEntryDTE, market: null, flagged: true });
+  // Which market "Why this market" is open on: a card's badge sets it.
+  const [whyTk, setWhyTk] = useState(null);
   // THE LIQUIDITY FLOOR IS A SETTING, NOT AN ASSERTION. The app recommends and
   // the user decides; every list filtered by it says which setting produced it,
   // and loosening it carries a warning naming what comes back (src/rules.js).
   const [liqLevelId, setLiqLevelId] = useState(RECOMMENDED_LIQUIDITY.id);
-  // The guided run's narrative is folded to its first paragraph on arrival. It
-  // is the last thing PR #12 handed forward that was code rather than access.
-  const [verdictOpen, setVerdictOpen] = useState(false);
   const liqLevel = liquidityLevel(liqLevelId);
-  // FAULT A: risk and horizon start NULL and stay null until the user answers.
-  // The old defaults ($250, 45 days) were quoted back on the verdict screen as
-  // "the $250 you said you were willing to lose" to a user who had said nothing,
-  // which is the app putting words in their mouth. The basket and the weights
-  // DO have a starting position, because "all five markets, evenly weighted" is
-  // a visible state the user can see and change, not an invented answer.
-  const [wiz, setWiz] = useState({
-    basket: BASKET, horizon: null,
-    weights: { ...DRIVER_PRESETS.balanced }, priority: "balanced", busy: false, err: null,
-  });
-  /* >>> `risk` IS NOT IN `wiz` ANY MORE, AND THAT IS THE POINT (P10 §2). <<<
-     The guided run's budget and the desk's budget were two states holding one
-     answer. `want.amt` is the one home; this is the wizard's READING of it, and
-     it stays NULL until the user answers — `request.amt` carries the derived
-     suggestion for screens that must print something, and this carries the
-     ANSWER, which is what the wizard may quote back and what its button waits
-     for. `setWizAnswers()` splits a write to `risk` back to that one home. */
-  const wizAnswers = useMemo(
-    () => ({ ...wiz, risk: request.amtAnswered ? request.amt : null }), [wiz, request]);
-  const setWizAnswers = useCallback((next) => {
-    const { risk, ...rest } = next || {};
-    setWant((w) => (risk === w.amt ? w : { ...w, amt: risk == null ? null : risk }));
-    setWiz((w) => ({ ...w, ...rest }));
-  }, []);
   const [optRef, setOptRef] = useState(null); // price snapshot from the Shortlist, to reconcile against the Build screen
   const [weather, setWeather] = useState(null);  // regionId -> forecast 14g (fuseSignals)
   const [barsCache, setBarsCache] = useState({}); // ticker -> daily bars (fattore tecnico)
@@ -1616,6 +1624,7 @@ export default function OptionsStrategyLab() {
     try {
       const c = await fetchChain(tk);
       setChains((m) => ({ ...m, [tk]: c }));
+      setChainErr((m) => (m[tk] ? { ...m, [tk]: null } : m));
       // Open interest is not in an Alpaca snapshot. It IS in the broker's own
       // contract list, on the host /api/alpaca already proxies — but the quotes
       // are the product and this is a nice-to-have, so it is fired here, AFTER
@@ -1644,6 +1653,7 @@ export default function OptionsStrategyLab() {
       if (!silent) setMsg(`${tk} loaded from ${c.source} — price $${c.spot?.toFixed(2)}, ${c.expirations.length} expiries.`);
       return c;
     } catch (e) {
+      setChainErr((m) => ({ ...m, [tk]: fetchFailWords(e) }));
       if (!silent) setMsg(`Could not load ${tk} option prices — ${e.message}`);
       return null;
     } finally { if (!silent) setBusy(null); }
@@ -1839,21 +1849,6 @@ export default function OptionsStrategyLab() {
     }));
   }, [chain, liqLevel]);
   const expChoice = useMemo(() => expiryChoice(expiryOptions), [expiryOptions]);
-  /* >>> WHICH BOARDS A DROPDOWN MAY OFFER — ONE LIST, TWO SCREENS (P10 §2).
-     <<< The controls block on the Radar and the expiry dropdown on the
-     Shortlist are the same question, and a second spelling of "which boards may
-     be offered" is how the two come to disagree. `buildableExpiries()` decides
-     what the gate would pass WITHOUT an override; a refused board is still
-     RENDERED and NAMED, disabled — the `strikeOptions()` / `offFloorExpiryLabel()`
-     pattern, because a list that silently drops a row teaches nothing and a
-     `<select>` whose value matches no option displays the first one. The board
-     already selected is always offered, however it got there. */
-  const expiryMenu = useMemo(() => expiryOptions.map((e) => ({
-    key: e.key, dte: e.dte,
-    buildable: openableBoard(e.dte) || e.key === expKey,
-    label: offFloorExpiryLabel(e.key, e.dte),
-  })), [expiryOptions, expKey]);
-
   /* INSTRUMENTING THE ENTRY FLOOR SO IT CAN BE CALIBRATED FROM A READING
      (src/rules.js, `passedOverRecord`; ROADMAP P5).
 
@@ -2031,67 +2026,19 @@ export default function OptionsStrategyLab() {
      answer to that question and it is still on screen. It is no longer the
      answer to "what will this trade do", because that depends on the price it
      will be done at: see `AE` below. */
-  const A = useMemo(() => (spot && legs.length ? analyze(legs, spot, dte, iv, q) : null), [legs, spot, dte, iv, q]);
-
-  /* ===================================================================
-     THE PRICE THE ORDER WILL BE SENT AT IS BUILD-SCREEN STATE.
-
-     It lived inside `OrderTicket` as `cfg`, exactly as the quantity did before
-     PR #23 — so the screen above the ticket had no idea what price it was
-     about to send, and every figure on it was worked out from the MID while
-     the ticket two thousand pixels below said a limit at the mid does not
-     fill. Type, time in force and ONE PRICE PER LEG live here now; the ticket
-     is a controlled input on them, like the quantity field beside it.
-
-     `legPx` is null until the user moves something, and the seed is derived
-     (`legLimitSeed()` in rules.js): a stored seed would go stale the moment
-     the chain refreshed, and a stale seed presented as the user's price is the
-     same fault as a suggested capital figure quoted back as his answer.
-  =================================================================== */
   const [ticket, setTicket] = useState({ type: "limit", tif: "day", legPx: null });
-  const bookQuotes = useMemo(
-    // THE OCC TRAVELS WITH THE QUOTE, for the same reason the bid and the
-    // sizes do: the ticket has to be able to see that the chain never listed a
-    // leg, and a mid can never show that. It is what the ticket hands the gate
-    // as `occs`, and what it names the contracts with when it sends.
-    () => (A ? A.legPx.map((l) => ({ bid: l.bid, ask: l.ask, mid: l.px, bidSize: l.bidSize, askSize: l.askSize, occ: l.occ || null })) : []),
-    [A]);
-  const book = useMemo(() => comboBook(legs, bookQuotes), [legs, bookQuotes]);
-  const seedPx = useMemo(() => legLimitSeed(legs, bookQuotes), [legs, bookQuotes]);
-  /* THE USER'S PRICES, OR THE SEED — never a mix. A `legPx` of the wrong
-     length belongs to a structure that is no longer on screen. */
-  const legPrices = useMemo(
-    () => (Array.isArray(ticket.legPx) && ticket.legPx.length === legs.length ? ticket.legPx : seedPx),
-    [ticket.legPx, seedPx, legs.length]);
-  /* THE NET IS DERIVED FROM THE LEGS, which is the reverse of the single net
-     field the ticket had, and is the direction the owner thinks in. */
-  const ticketNet = useMemo(() => netFromLegs(legs, legPrices || []), [legs, legPrices]);
-  const ticketDir = useMemo(
-    () => (book.ok ? (book.mid >= 0 ? 1 : -1) : (A && A.entry < 0 ? -1 : 1)),
-    [book, A]);
-  /* A LIMIT IS A CEILING, NOT A PRICE (src/rules.js, `effectiveLimit`). An
-     order at or past the touch fills AT the touch, so the price that decides
-     the trade is `min(limit, ask)` on a debit — never the number typed. A
-     MARKET order has no limit at all: it takes the touch, and that is what
-     every figure below is then worked out at. */
-  const effective = useMemo(() => {
-    if (ticket.type === "market") {
-      if (!book.ok) return { known: false, dir: ticketDir, typed: null, touch: null, effective: null, net: null, capped: false, give: null };
-      const touch = Math.abs(book.ask);
-      return { known: true, dir: ticketDir, typed: null, touch, effective: touch, net: ticketDir * touch, capped: true, give: 0 };
-    }
-    return effectiveLimit(ticketNet.net == null ? null : Math.abs(ticketNet.net), book, ticketDir);
-  }, [ticket.type, book, ticketNet, ticketDir]);
-  /* >>> AND THIS IS THE ANALYSIS EVERY FIGURE ON THE SCREEN READS. <<<
-     Same legs, same chain, same volatility — one different number, the entry
-     price, and on UNG it is the difference between 2.6:1 and 1.1:1. With no
-     readable price it falls back to `A`, which is the old behaviour and says
-     so rather than blanking the screen. */
-  const AE = useMemo(() => {
-    if (!A) return null;
-    if (!Number.isFinite(effective.net)) return A;
-    return analyze(legs, spot, dte, iv, q, { net: effective.net });
-  }, [A, effective.net, legs, spot, dte, iv, q]);
+  /* >>> THE BUILD SCREEN'S FIGURES, FROM ONE MODULE-LEVEL FUNCTION (PR #40). <<<
+     `buildFigures()` below the component is the chain that used to be ten
+     memos here — the mid analysis `A`, the book, the per-leg seed, the net the
+     ticket holds, the effective price and `AE` at it, and the one chance at
+     `AE`. It is module-level so `figures.test.jsx` runs THIS path against the
+     list card's path on one candidate, rather than a copy of it. Every comment
+     that stood beside those memos stands beside the function now. */
+  const BF = useMemo(
+    () => buildFigures(legs, { spot, dte, iv, q, ticker, expKey, seasonal: seasonalOf(seasonal, ticker),
+      legPx: ticket.legPx, type: ticket.type }),
+    [legs, spot, dte, iv, q, ticker, expKey, seasonal, ticket.legPx, ticket.type]);
+  const { A, bookQuotes, book, seedPx, legPrices, ticketNet, ticketDir, effective, AE } = BF;
   /* >>> HOW MANY COMBINATIONS THE BUDGET BUYS, AND IT IS ONE HOME (P10 §2).
      <<< `scaleStrategy()` is untouched — it is the same function the Shortlist
      calls and it is on the DO-NOT-TOUCH list — and it is read HERE at the price
@@ -2163,40 +2110,7 @@ export default function OptionsStrategyLab() {
      the fault this whole section exists to remove. The Shortlist row still
      prints its candidate at the MID, because a candidate is not yet a price;
      the Build screen says so where the two are side by side. */
-  const chance = useMemo(
-    () => (AE && spot && legs.length ? chanceFor(AE, { ticker, legs, spot, dte, expKey }) : null),
-    [AE, chanceFor, ticker, legs, spot, dte, expKey]);
-  // The Shortlist, already past the quality floors. Computed here rather than
-  // inside the render so the filtered-out list and the rows come from one call.
-  // Every known open-interest count on the expiry being shown: the peer set the
-  // liquidity floor judges each leg against, so a strike is compared with its
-  // own neighbours rather than with a number chosen for another market.
-  const expiryOI = useMemo(() => (chain && expKey ? expiryOpenInterest(chain, expKey) : []), [chain, expKey]);
-  /* AND THE BOARD IS A PRECONDITION HERE TOO, NOT JUST A FILTER. Without it
-     `buildPresets()` returns nothing, and an empty Shortlist rendered through
-     `emptyExpiryNote()` would say NOTHING CLEARED ON <expiry> about a board
-     that has not loaded — a missing-data answer wearing a market verdict's
-     words. `board` carries which of the two this is. */
-  const shortlist = useMemo(
-    () => (spot && expStrikes
-      ? { board: "loaded", ...shortlistWithFloors(sentiment, spot, U.step, expStrikes, dte, iv, q, { peers: expiryOI, level: liqLevel }) }
-      : { board: null, rows: [], cut: [], oiSkipped: false, offFloor: null, tally: { kept: 0, liquidity: 0, reward: 0, skipped: 0 } }),
-    [sentiment, spot, U.step, expStrikes, dte, iv, q, expiryOI, liqLevel]);
-  // WHAT EVERY SETTING WOULD DO TO THIS LIST, so moving the control shows its
-  // own consequence instead of promising one. Four runs of a pure function over
-  // eight presets: cheap, and the only honest way to label the buttons.
-  const liqPreview = useMemo(() => {
-    // No board, no consequence to preview: four runs over an empty preset list
-    // would label every setting "0 survive" and blame the filter for it.
-    if (!spot || !expStrikes) return null;
-    const out = {};
-    for (const l of LIQUIDITY_LEVELS) {
-      const r = shortlistWithFloors(sentiment, spot, U.step, expStrikes, dte, iv, q, { peers: expiryOI, level: l });
-      out[l.id] = { ...r.tally, total: r.rows.length + r.cut.length };
-    }
-    return out;
-  }, [sentiment, spot, U.step, expStrikes, dte, iv, q, expiryOI]);
-  const liqThreshold = useMemo(() => liquidityThreshold(expiryOI, liqLevel), [expiryOI, liqLevel]);
+  const chance = BF.chance;
   // IS THIS BOARD'S OWN ARITHMETIC POSSIBLE? Not a floor and it filters nothing:
   // it is a statement about the whole expiry, and the honest response to a chain
   // that contradicts itself is to say so rather than to price off it silently.
@@ -2274,6 +2188,7 @@ export default function OptionsStrategyLab() {
      that screen.
   ==================================================================== */
   const [orderBusy, setOrderBusy] = useState(null);
+  const quietTicketMsg = useCallback(() => {}, []);
 
   /* ====================================================================
      THREE LISTS, ONE FUNCTION — and DEAD IS NOT WORKING.
@@ -2418,10 +2333,16 @@ export default function OptionsStrategyLab() {
     setStore(st); await saveState(st);
     setMsg(`${c.ticker} ${c.name} kept. It is at the bottom of this step, and with your saved strategies on the Positions screen.`);
   };
-  const applyPreset = (p, a) => openOnBuild({
-    ticker, expKey, legs: p.legs, name: p.name,
-    ref: a ? { name: p.name, entry: a.entry, maxProfit: a.maxProfit, maxLoss: a.maxLoss, expKey, t: Date.now() } : null,
-  });
+  /* A CARD ON FIND GOES TO BUILD WITH ITS OWN FIGURES, ALL OF THEM (PR #40).
+     The Shortlist carried the MID's entry and nothing else, so Build compared
+     its mid with the card's mid and printed "Same numbers as the Shortlist"
+     over a risk of $68 against the card's $62. `reconcileFigures()` on Build
+     compares every figure the card printed. */
+  const openFound = (x) => {
+    setSentiment(x.sent);
+    openOnBuild({ ticker: x.tk, expKey: x.expKey, legs: x.legs, name: x.name,
+      ref: { name: x.name, expKey: x.expKey, t: Date.now(), card: x.lf.figures } });
+  };
   const updLeg = (i, f, v) => setLegs((L) => L.map((l, j) => (j === i ? { ...l, [f]: v } : l)));
   // A leg quantity left empty or invalid while typing: { [legIndex]: note }.
   // It disables Send and the confirm button; it never becomes 1 by itself.
@@ -2630,15 +2551,17 @@ export default function OptionsStrategyLab() {
       alpacaOrder, clashInfo: clash, reason: against.reason, roomOverride: roomReason, contracts });
     setOpenResult(r.gate);
     if (!r.ok) { setMsg(`Risk gate: position not opened. ${r.gate.violations.map((v) => v.message).join(" ")}`); return; }
-    setAgainst({ reason: "" }); setRoomReason(""); setPicked(null); setOpenResult(null);
+    setAgainst({ reason: "" }); setRoomReason(""); setOpenResult(null);
     // "POSITION OPENED" IS NOT TRUE OF AN ACCEPTED ORDER. The live run came
     // back status "accepted", filled_qty 0 — queued outside market hours —
     // and the app announced a position and an exit plan over it. Filled,
     // partly filled and working are three sentences, and only the first
     // starts the plan. With no broker order this is the app's own paper
     // book, where "opened" is the whole of the truth.
+    // THE ORDER'S STATE IS ON ITS ROW IN POSITIONS (PR #40, TASK 2); the sheet
+    // beside the button already said what the send did. One line pointing there.
     setMsg(r.outcome
-      ? `${r.outcome.headline} ${r.outcome.startsExitPlan ? exitPlanSentence() : r.outcome.detail}`
+      ? `${r.pos && r.pos.ref ? `${r.pos.ref} · ` : ""}Sent. Its state is on its row in Positions.`
       : `Position opened on the app's own paper book. ${exitPlanSentence()}`);
     // AN ORDER THAT IS STILL WORKING KEEPS THE SCREEN THAT EXPLAINS IT.
     // Jumping to Positions unmounts the ticket, and the ticket is where the
@@ -2855,8 +2778,9 @@ export default function OptionsStrategyLab() {
       return ns;
     });
     const filled = changes.filter((c) => c.r.outcome.filled).length;
-    setMsg(`${changes.length} order${changes.length === 1 ? "" : "s"} moved on since ${changes.length === 1 ? "it was" : "they were"} sent` +
-      `${filled ? `: ${filled} ${filled === 1 ? "has" : "have"} filled` : ""}. The timeline says what changed.`);
+    // The new state is on each order's row in Positions; the banner only points.
+    void filled;
+    setMsg(`${changes.length} order${changes.length === 1 ? "" : "s"} changed — see Positions.`);
   }, [store.positions]);
 
   // On arrival, and with the 60-second monitor. A position whose order has not
@@ -2867,150 +2791,6 @@ export default function OptionsStrategyLab() {
     const id = setInterval(() => recheckOrders(), 60000);
     return () => clearInterval(id);
   }, [autoMon, recheckOrders]);
-
-  const runMultiScan = async () => {
-    setMulti((m) => ({ ...m, busy: true, err: null, res: null }));
-    try {
-      const out = [];
-      // What the quality floors removed, so an empty or short result can say why.
-      const cutFloors = { n: 0, liquidity: 0, spread: 0, comboSpread: 0, crossing: 0, reward: 0, unpriceable: 0, impossible: 0, model: 0,
-        markets: new Set(), oiSkipped: new Set(), spreadSkipped: new Set(), comboSpreadSkipped: new Set(),
-        // A MARKET WITH NO BOARD THE GATE WOULD OPEN ON IS NOT A MARKET THE
-        // FLOORS EMPTIED. Its own count, its own sentence — the same rule that
-        // keeps `unpriceable` apart from `liquidity`.
-        noBoard: new Set() };
-      // le barre servono al fattore tecnico: caricale prima di fondere i segnali
-      const barsMap = Object.fromEntries(await Promise.all(multi.sel.map(async (tk) => [tk, await loadBars(tk)])));
-      const fz = Object.fromEntries(multi.sel.map((tk) => [tk, fuseFor(tk, barsMap[tk] ?? barsCache[tk])]));
-      for (const tk of multi.sel) {
-        // THE SAME CHAIN THE SHORTLIST JUDGES, open interest included. Without
-        // this await the floor was SKIPPED on every market in a wide search
-        // while the Shortlist read the numbers off the very same board.
-        let c = await ensureOpenInterest(tk, chains[tk] || (await refreshChain(tk, true)));
-        if (!c?.spot) continue;
-        const sp = c.spot;
-        const dT = multi.dteT || RULES.targetEntryDTE;
-        /* >>> ONLY BOARDS THE GATE WOULD OPEN ON (P9, TASK 1). <<< This was
-           `dte >= dT - 20 && dte <= dT + 35`, which at the slider's old floor
-           of 21 meant ONE to fifty-six days: every hit this search produced on
-           22 September sat at 24 DTE and every one of them was refused by
-           `ENTRY_DTE_ROOM` the moment it reached Build. `buildableExpiries()`
-           in rules.js is the one home and it is built on `entryRoom()`, so the
-           search cannot disagree with the gate about the floor. The horizon is
-           a TIE-BREAK inside what is buildable, never a way past it. */
-        const ok2 = buildableExpiries(c.expirations.map((e) => ({ key: e, dte: c.byExp[e].dte }))).buildable;
-        const ek = ok2.length ? ok2.reduce((b2, e) => Math.abs(e.dte - dT) < Math.abs(b2.dte - dT) ? e : b2, ok2[0]).key : null;
-        if (!ek) { cutFloors.noBoard.add(tk); continue; }
-        const d2 = c.byExp[ek].dte;
-        const row = scan.find((r) => r.tk === tk);
-        const sent = multi.senMode === "fixed" ? sentiment : (row && row.sugg !== "neutral" ? row.sugg : "neutral");
-        // The board, from the one function that knows what a board carries.
-        // `ek` came out of `c.expirations`, so this is non-null by
-        // construction — the skip is the belt to that brace, and it is a skip
-        // rather than a grid because a market whose strikes cannot be read is
-        // a market this search has nothing to say about.
-        const strikes = expiryStrikes(c, ek);
-        if (!strikes) continue;
-        const qq = makeQuote(c, ek);
-        // The peer set for THIS expiry on THIS market: the floor is relative to
-        // the chain it is judging, so each market is measured against itself.
-        const peers = expiryOpenInterest(c, ek);
-        for (const pr of buildPresets(sent, sp, getU(tk).step, strikes)) {
-          const a = analyze(pr.legs, sp, d2, getU(tk).iv, qq);
-          // A MISSING CEILING IS NOT A MISSING CANDIDATE. This guard used to
-          // read `a.maxProfit <= 0`, and `null <= 0` is true in JavaScript, so
-          // making the best case honestly unknown would have made every long
-          // call disappear from the wide search without a word. Unbounded
-          // candidates stay in; they are ranked last below, with a sentence.
-          if (!a.profitUnbounded && (!Number.isFinite(a.maxProfit) || a.maxProfit <= 0)) continue;
-          if (!Number.isFinite(a.maxLoss)) continue;
-          // Unpriceable first, and by the same function as the other two
-          // generation sites: a hit with no readable price is not a hit.
-          const pz = priceability({ legs: pr.legs, quotes: quotesOf(a), net: a.entry, maxLoss: a.maxLoss });
-          if (!pz.priceable) { cutFloors.unpriceable++; cutFloors.markets.add(tk); continue; }
-          // ...and a worst case that is a profit, the same way (PR #14's debt).
-          if (impossibleLoss(a.maxLoss)) { cutFloors.impossible++; cutFloors.markets.add(tk); continue; }
-          // ...and a price the app's own model cannot account for, same function.
-          if (!modelCheckOf(a, { legs: pr.legs, spot: sp, dte: d2, iv: getU(tk).iv }).pass) {
-            cutFloors.model++; cutFloors.markets.add(tk); continue;
-          }
-          // THE CARD'S FIGURES ARE READ AT THE PRICE THAT FILLS (P10 §3-bis),
-          // and this is where the quote function for this board is in scope.
-          // `a` stays the MID reading: the compare picture and the stamp are
-          // drawn from it, and a candidate is a structure before it is a price.
-          // It is worked out BEFORE the floors now, because the crossing floor
-          // (PR #39) reads the maximum profit at this price.
-          const aFill = atFillPrice(pr.legs, a, { spot: sp, dte: d2, iv: getU(tk).iv, q: qq });
-          // Same floors as the Shortlist and the wizard, from the same function.
-          const qf = qualityFloor({
-            openInterest: a.legPx.map((l) => l.oi), peerOpenInterest: peers, level: liqLevel,
-            // ...and the LEGS, for the combination spread floor beside it.
-            quotes: quotesOf(a), legs: pr.legs,
-            maxProfit: a.maxProfit, maxLoss: a.maxLoss, unboundedProfit: a.profitUnbounded,
-            maxProfitAtFill: aFill ? aFill.maxProfit : null,
-          });
-          if (!qf.liquidity.checked) cutFloors.oiSkipped.add(tk);
-          if (!qf.spread.checked) cutFloors.spreadSkipped.add(tk);
-          if (!qf.comboSpread.checked) cutFloors.comboSpreadSkipped.add(tk);
-          if (!qf.pass) {
-            cutFloors.n++; cutFloors.markets.add(tk);
-            if (!qf.liquidity.pass) cutFloors.liquidity++;
-            else if (!qf.spread.pass) cutFloors.spread++;
-            else if (!qf.comboSpread.pass) cutFloors.comboSpread++;
-            else if (!qf.crossing.pass) cutFloors.crossing++;
-            else cutFloors.reward++;
-            continue;
-          }
-          // THE ONE CHANCE. This was `probProfit(a.curve, sp, ivA, d2) || 0` — a
-          // closed form at a risk-neutral drift, and `|| 0` turning a chance
-          // the app could not work out into a confident zero.
-          const mc = chanceFor(a, { ticker: tk, legs: pr.legs, spot: sp, dte: d2, expKey: ek });
-          const pop = mc ? mc.pop : null;
-          const unit = Math.abs(a.maxLoss);
-          // THE SIZE HAS ONE HOME AND THIS WAS A SECOND ONE. A hand-rolled
-          // division, in a file that already imports `scaleStrategy()` — and
-          // it divided by the PREMIUM on a debit and by the RISK on a credit
-          // with a `Math.max(, 1)` floor under it, which is the shape that
-          // turned a $250 budget into 250 contracts of an unpriced butterfly.
-          const sc = scaleStrategy(aFill, request.mode, request.amt);
-          const n = sc && sc.ok ? sc.n : 0;
-          /* >>> AND IT NO LONGER DROPS WHAT THE BUDGET WILL NOT BUY (P10 §3).
-             <<< `if (n < 1) continue` removed a structure that had cleared
-             every floor, in silence, because of an answer about the USER
-             rather than about the trade. The owner asked for the opposite:
-             "l'app propone anche altro". It is GROUPED now — the second
-             section names it and says what it missed — and the floors are
-             still the only thing that REMOVES. */
-          out.push({ tk, sent, name: pr.name, legs: pr.legs, expKey: ek, dte: d2, a, aFill, mc, pop, n, spot: sp,
-            // AND THE EXPECTED VALUE IS THE SIMULATION'S OWN MEAN, times the
-            // size. It was `pop * a.maxProfit * n`: the best case weighted by
-            // the chance, which is the expected value of nothing the app
-            // simulated — it ignores every outcome between zero and the
-            // maximum, and every outcome below zero.
-            // A SIZE OF ZERO IS "THE BUDGET BUYS NONE", NOT AN EV OF ZERO.
-            // The row is still shown — grouped, with its reason — so the
-            // figure beside it has to describe ONE combination rather than
-            // none of them.
-            ev: mc && !a.profitUnbounded ? mc.ev * Math.max(1, n) : null });
-        }
-      }
-      // Ranking: valore atteso CORRETTO dal segnale a 4 fattori, e i CONFLICT in
-      // fondo comunque (PRD §7). Le funzioni pure stanno in src/signals.js.
-      const ranked = out.map((o) => {
-        const pr = evProfile(o.mc, o.a.maxProfit, o.a.maxLoss);
-        return withSignalRank({ ...o, ev100: pr ? pr.ev100 : -999, tag: pr?.tag }, fz[o.tk], sentimentDirection(o.sent));
-      }).sort(compareCandidates);
-      setMulti((m) => ({ ...m, busy: false, res: ranked.slice(0, 8),
-        floors: {
-          n: cutFloors.n, liquidity: cutFloors.liquidity, spread: cutFloors.spread,
-          comboSpread: cutFloors.comboSpread, crossing: cutFloors.crossing, reward: cutFloors.reward,
-          unpriceable: cutFloors.unpriceable, impossible: cutFloors.impossible, model: cutFloors.model,
-          markets: [...cutFloors.markets], oiSkipped: [...cutFloors.oiSkipped],
-          spreadSkipped: [...cutFloors.spreadSkipped], noBoard: [...cutFloors.noBoard],
-          comboSpreadSkipped: [...cutFloors.comboSpreadSkipped], level: liqLevel,
-        } }));
-    } catch (e) { setMulti((m) => ({ ...m, busy: false, err: String(e.message || e) })); }
-  };
 
   const runReplay = (row) => {
     // row = [anno, r1..r12 in %]; rigioca la finestra stagionale mese per mese con le regole
@@ -3284,396 +3064,6 @@ export default function OptionsStrategyLab() {
   const attn = useMemo(() => attentionCount(posAlerts), [posAlerts]);
   const nAttention = attn.decisions;
 
-  /* ---- the wizard search (PRD §5, screens 2 → 3) ----
-     Two things can come out of here: two roads on screen 3, or the
-     "nothing today" screen. The refusal is a first-class outcome, so it is
-     computed here from the same numbers the rest of the app uses, and its
-     sentences come from src/rules.js — never typed into a component.
-
-     THE WHOLE BASKET, ON ONE SCALE. The old version picked the single
-     best-scoring ticker and then built both roads out of it, which meant the
-     two roads were always the same market wearing two structures — and a user
-     who ticked five commodities got one. Now every ticker in the basket that we
-     can actually read contributes candidates, they are ranked together on the
-     user's three weights, and road 2 is free to come from a different market
-     than road 1. That is the point of asking for a basket at all. */
-  const runWizard = async (overrides) => {
-    // THE BUDGET COMES FROM THE ONE HOME, not from a second copy on `wiz`.
-    const ans = { ...wizAnswers, ...(overrides || {}) };
-    setWiz((w) => ({ ...w, ...(overrides || {}), busy: true, err: null }));
-    setNothing(null);
-    const stop = (reasons) => { setNothing(reasons); setWizStep("nothing"); setWiz((w) => ({ ...w, busy: false })); };
-    try {
-      // 0) Nothing is assumed. If the questions were not answered we do not
-      // guess at them — we go back and ask (FindOpportunities blocks the button,
-      // this is the belt to that pair of braces).
-      const basket = (ans.basket || []).filter((tk) => UNDERLYINGS[tk]);
-      if (!basket.length || !(ans.risk > 0) || !(ans.horizon > 0)) {
-        setWiz((w) => ({ ...w, busy: false, err: "Answer all three before this can run: markets, what you are willing to lose, and how long to give it." }));
-        setWizStep("questions");
-        return;
-      }
-
-      // 1) Do we know anything at all? No weather, no news and no price history
-      // means the four factors are quiet by default, which is a data problem
-      // and not a verdict on the market. Say which it is.
-      const dataIn = !!weather || newsPool.length > 0 || Object.keys(barsCache).length > 0;
-      if (!dataIn) return stop([{ id: "no-data", text: NOTHING_TODAY.noData("weather, news and prices") }]);
-
-      // 2) Do the four factors agree anywhere IN THE BASKET? A CONFLICT ticker,
-      // or one under the confidence floor, is not a trade — it is a market we
-      // cannot read, and it drops out of the basket rather than out of the app.
-      // Why a market left the basket travels with it: the verdict narrative has
-      // to say "we looked and it did not qualify" or "we could not see it", and
-      // those are different sentences (CLAUDE.md, saying "nothing today").
-      const excluded = [];
-      const inBasket = scan.filter((r) => basket.includes(r.tk));
-      const usable = inBasket.filter((r) => {
-        const keep = !r.conflict && r.confidence >= RULES.lowConfidence;
-        if (!keep) excluded.push({ tk: r.tk, reason: "signals" });
-        return keep;
-      });
-      if (!usable.length) {
-        const closest = inBasket.slice().sort((a, b) => b.confidence - a.confidence)[0];
-        return stop([{ id: "signals", text: NOTHING_TODAY.signalsNotAligned(closest || null) }]);
-      }
-
-      // 3) Are the options themselves expensive versus their own history? A
-      // ticker priced rich drops out; if that empties the basket, we stand down
-      // and say which one came closest to being worth it.
-      const ivRankOf = (tk) => {
-        const h = (store.ivHist || {})[tk] || [];
-        if (h.length < 20) return null;
-        const cur = h[h.length - 1].iv;
-        return Math.round((h.filter((x) => x.iv <= cur).length / h.length) * 100);
-      };
-      const priced = [];
-      const tooRich = [];
-      for (const r of usable) {
-        const rank = ivRankOf(r.tk);
-        if (rank != null && rank >= RULES.expensiveIVRank) {
-          tooRich.push({ tk: r.tk, rank });
-          excluded.push({ tk: r.tk, reason: "expensive" });
-        } else priced.push(r);
-      }
-      if (!priced.length) {
-        const cheapest = tooRich.slice().sort((a, b) => a.rank - b.rank)[0];
-        return stop([{ id: "expensive", text: NOTHING_TODAY.optionsExpensive(cheapest.tk, cheapest.rank) }]);
-      }
-
-      // 4) Build candidates for EVERY readable ticker in the basket, and keep
-      // the four-factor read attached to each one: the decision screen shows the
-      // evidence next to the road, so the evidence has to travel with it.
-      const examined = [];
-      const pool = [];
-      // What the quality floors threw out, and where. Counted per reason so the
-      // refusal can name the floor: "nothing on CORN clears the liquidity floor
-      // today" is a useful answer, an empty screen is not.
-      const floors = { liquidity: 0, spread: 0, comboSpread: 0, crossing: 0, reward: 0, unpriceable: 0, impossible: 0, model: 0,
-        // NOT A FLOOR, AND ITS COUNT TRAVELS SEPARATELY. A butterfly is not
-        // refused for being a bad price — it is not offered here at all, and
-        // pooling it with a floor's count would explain neither.
-        butterfly: 0,
-        markets: new Set(), oiUnavailable: new Set(), spreadUnavailable: new Set(),
-        comboSpreadUnavailable: new Set() };
-      for (const r of priced) {
-        const tk = r.tk;
-        // ...and the guided run reads it too. Its number-one GDX road had legs
-        // at 3 and 4 contracts open on a board whose median near the money is
-        // 84, because the floor it passed had been told there was no column.
-        const c = await ensureOpenInterest(tk, chains[tk] || (await refreshChain(tk, true)));
-        if (!c?.spot) { excluded.push({ tk, reason: "nodata" }); continue; }
-        const sp = c.spot;
-        // THE SAME ONE HOME AS THE OTHER TWO GENERATION SITES (P9, TASK 1).
-        // This was `>= RULES.minEntryDTE && <= 130` — right about the floor and
-        // a bare 130 about the horizon, which is `RULES.maxEntryDTE` written
-        // out a second time and forty days wrong.
-        const exps = buildableExpiries(c.expirations.map((e) => ({ key: e, dte: c.byExp[e].dte }))).buildable;
-        if (!exps.length) { excluded.push({ tk, reason: "noboard" }); continue; }
-        const ek = exps.reduce((b2, e) => Math.abs(e.dte - ans.horizon) < Math.abs(b2.dte - ans.horizon) ? e : b2, exps[0]).key;
-        const d2 = c.byExp[ek].dte;
-        // The board, from `expiryStrikes()`. `ek` was reduced out of
-        // `c.expirations`, so a null here means the chain changed under the
-        // run; the market is excluded with the reason it already has for a
-        // market it could not read, never carried on with an invented grid.
-        const strikes = expiryStrikes(c, ek);
-        if (!strikes) { excluded.push({ tk, reason: "nodata" }); continue; }
-        const qq = makeQuote(c, ek);
-        const peers = expiryOpenInterest(c, ek);
-        examined.push({ tk, fused: r.fused, spot: sp, dte: d2 });
-        loadBars(tk);
-        // candidati da ENTRAMBE le famiglie: direzionale (sentiment scanner) + intervallo (neutral)
-        const fams = r.sugg === "neutral" ? ["neutral"] : [r.sugg, "neutral"];
-        for (const sent of fams) {
-          for (const pr of buildPresets(sent, sp, getU(tk).step, strikes)) {
-            // A single long option is not a first trade: it pays for time it
-            // usually does not get, and a beginner reads the loss as bad luck
-            // rather than as decay. They stay on the full desk; the guided flow
-            // never proposes one.
-            if (pr.legs.length < 2) continue;
-            // ...AND NEITHER IS A BUTTERFLY (ROADMAP P2, decided and until now
-            // not implemented). Its maximum needs the market to finish exactly
-            // on the middle strike on the last day, so the 50% take profit is
-            // unreachable before the 21-DTE exit and the rule the guided flow
-            // is teaching never fires. `isButterfly()` in rules.js reads the
-            // SHAPE — four presets spell one today and a fifth is one line
-            // away. The full desk still builds them.
-            if (isButterfly(pr.legs)) { floors.butterfly++; continue; }
-            const a = analyze(pr.legs, sp, d2, getU(tk).iv, qq);
-            // A road has to have a ceiling: the verdict compares two roads on
-            // what each pays, and a best case that is unknown cannot be one side
-            // of that comparison. Every multi-leg preset this flow builds is
-            // call-neutral, so this is a guard rather than a filter — but it is
-            // the honest guard now, not `maxProfit <= 0` reading a null as zero.
-            if (a.profitUnbounded || !Number.isFinite(a.maxProfit) || a.maxProfit <= 0) continue;
-            if (!Number.isFinite(a.maxLoss)) continue;
-            // UNPRICEABLE BEFORE ANYTHING ELSE (src/rules.js). A road whose
-            // price the app cannot read is not a cheap road: every number the
-            // verdict would put on it — what you risk, what it pays, how it
-            // ranks against the other road — divides by that price.
-            const pz = priceability({ legs: pr.legs, quotes: quotesOf(a), net: a.entry, maxLoss: a.maxLoss });
-            if (!pz.priceable) { floors.unpriceable++; floors.markets.add(tk); continue; }
-            // A WORST CASE THAT IS A PROFIT IS COUNTED AND NAMED, not skipped in
-            // silence. This flow already dropped `maxLoss >= 0` with the rest of
-            // the arithmetic guards above, which meant the one refusal the user
-            // most deserves to read never reached the screen (PR #14's debt).
-            if (impossibleLoss(a.maxLoss)) { floors.impossible++; floors.markets.add(tk); continue; }
-            // A PRICE THE MODEL DISBELIEVES IS NOT A ROAD. Every figure the
-            // verdict would put on it — what you risk, what it pays, how it
-            // ranks — is that price, and the maximum loss it would print would
-            // be wrong by the same factor it is wrong by (src/rules.js).
-            if (!modelCheckOf(a, { legs: pr.legs, spot: sp, dte: d2, iv: getU(tk).iv }).pass) {
-              floors.model++; floors.markets.add(tk); continue;
-            }
-            // THE ONE CHANCE, from the same expression the Shortlist, the
-            // Radar, Build and the autopilot use.
-            const mc = chanceFor(a, { ticker: tk, legs: pr.legs, spot: sp, dte: d2, expKey: ek });
-            const pop = mc ? mc.pop : null;
-            const unit = Math.abs(a.maxLoss);
-            if (unit > ans.risk) continue;   // it does not fit the budget: not a road
-            // THE QUALITY FLOORS (src/rules.js). A structure that clears every
-            // other rule can still be a price on a contract nobody trades, or a
-            // ticket that pays $15 for $86 at risk. Neither becomes a road, and
-            // the tally below is what lets the refusal screen say WHICH floor
-            // emptied the board rather than shrugging at an empty page.
-            // The crossing floor (PR #39) reads the best case at the price that
-            // fills, from the same expression every card uses.
-            const aFill = atFillPrice(pr.legs, a, { spot: sp, dte: d2, iv: getU(tk).iv, q: qq });
-            const qf = qualityFloor({
-              openInterest: a.legPx.map((l) => l.oi), peerOpenInterest: peers, level: liqLevel,
-              // ...and the LEGS, for the combination spread floor beside it.
-              quotes: quotesOf(a), legs: pr.legs,
-              maxProfit: a.maxProfit, maxLoss: a.maxLoss, unboundedProfit: a.profitUnbounded,
-              maxProfitAtFill: aFill ? aFill.maxProfit : null,
-            });
-            if (!qf.liquidity.checked) floors.oiUnavailable.add(tk);
-            if (!qf.spread.checked) floors.spreadUnavailable.add(tk);
-            if (!qf.comboSpread.checked) floors.comboSpreadUnavailable.add(tk);
-            if (!qf.pass) {
-              if (!qf.liquidity.pass) floors.liquidity++;
-              else if (!qf.spread.pass) floors.spread++;
-              else if (!qf.comboSpread.pass) floors.comboSpread++;
-              else if (!qf.crossing.pass) floors.crossing++;
-              else floors.reward++;
-              floors.markets.add(tk);
-              continue;
-            }
-            const pr2 = evProfile(mc, a.maxProfit, a.maxLoss);
-            pool.push({
-              tk, sent, pr, a, mc, pop, unit, ek, spot: sp, dte: d2,
-              ev100: pr2 ? pr2.ev100 : -999, rr: rewardRisk(a.maxProfit, a.maxLoss),
-              risk: unit, fused: r.fused,
-            });
-          }
-        }
-      }
-      if (!examined.length) return stop([{ id: "no-chain", text: NOTHING_TODAY.noData(basket.join(", ")) }]);
-
-      // 5) Nothing fits: a real answer, and WHICH real answer matters. A board
-      // emptied by the quality floors is a different sentence from a board
-      // emptied by the budget, and the user is owed the one that is true.
-      if (!pool.length) {
-        const cut = floors.liquidity + floors.spread + floors.comboSpread + floors.crossing + floors.reward;
-        // AN UNREADABLE PRICE IS ITS OWN ANSWER. A board where nothing could be
-        // priced is not a board emptied by the floors and is certainly not a
-        // budget problem — saying either would blame the user, or the market,
-        // for a chain the app could not read. Three refusals, three sentences.
-        if (floors.unpriceable > 0 && cut === 0 && floors.impossible === 0 && floors.model === 0) {
-          return stop([{
-            id: "unpriceable",
-            text: NOTHING_TODAY.unpriceable({ unpriceable: floors.unpriceable, markets: [...floors.markets] }),
-          }]);
-        }
-        // A BOARD THE APP PRICED AND THEN DISBELIEVED. Different from a board it
-        // could not price, and further still from one the floors emptied: here
-        // the quotes were read and what they produced — a trade that cannot lose
-        // — is impossible. Four refusals, four sentences.
-        if (floors.impossible > 0 && cut === 0 && floors.unpriceable === 0 && floors.model === 0) {
-          return stop([{
-            id: "impossible-loss",
-            text: NOTHING_TODAY.impossibleLoss({ impossible: floors.impossible, markets: [...floors.markets] }),
-          }]);
-        }
-        // A BOARD THE APP PRICED AND THEN DID NOT BELIEVE THE PRICE OF. The
-        // fifth sentence, and it is none of the other four: the chain quoted,
-        // the net cleared the minimum, the worst case is a perfectly possible
-        // loss — it is simply not this structure's loss. Saying "we could not
-        // price it" would be false, and saying "the floors emptied it" would
-        // credit a floor that never looked at it.
-        if (floors.model > 0 && cut === 0 && floors.unpriceable === 0 && floors.impossible === 0) {
-          return stop([{
-            id: "model-disagreement",
-            text: NOTHING_TODAY.modelDisagreement({ modelDisagreement: floors.model, markets: [...floors.markets] }),
-          }]);
-        }
-        if (cut > 0 || floors.impossible > 0 || floors.unpriceable > 0 || floors.model > 0) {
-          return stop([{
-            id: "quality-floor",
-            text: NOTHING_TODAY.belowQualityFloor({
-              liquidity: floors.liquidity, spread: floors.spread, comboSpread: floors.comboSpread,
-              crossing: floors.crossing, reward: floors.reward,
-              unpriceable: floors.unpriceable, model: floors.model,
-              impossible: floors.impossible, markets: [...floors.markets], level: liqLevel,
-            }),
-          }]);
-        }
-        return stop([{ id: "budget", text: NOTHING_TODAY.budgetTooSmall(ans.risk) }]);
-      }
-
-      // 6) The user's three weights decide the order, across the whole basket at
-      // once. Prefer the ones that are not expected to lose money: "win big"
-      // should hand over the best-priced long shot, not simply the longest one.
-      const worthIt = pool.filter((x) => x.ev100 >= 0);
-      const ranked = rankByDrivers(worthIt.length >= 2 ? worthIt : pool, ans.weights);
-      const first = ranked[0];
-
-      // The SECOND road is not the runner-up: it is the one that trades the
-      // hardest against the first (PRD §5). Picking the second-best would show
-      // the same idea twice and teach nothing about the price of the choice.
-      //
-      // It must also be a real alternative. A candidate that is worse on how
-      // often it works AND on what it pays AND on what it costs is not a road,
-      // it is a mistake with a chart next to it.
-      const rival = ranked.slice(1).filter((x) =>
-        x.pop > first.pop + 1e-9 || x.rr > first.rr + 1e-9 || x.risk < first.risk - 1e-9);
-      const spread = (f) => { const xs = ranked.map(f); const r = Math.max(...xs) - Math.min(...xs); return r > 0 ? r : 1; };
-      const dPop = spread((x) => x.pop), dRR = spread((x) => x.rr);
-      // A road from a DIFFERENT market is worth something on its own: two
-      // structures on one underlying share a fate, and comparing them teaches
-      // less than comparing two markets. It is a thumb on the scale, not a rule.
-      const contrast = (x) => Math.abs(x.pop - first.pop) / dPop + Math.abs(x.rr - first.rr) / dRR
-        + (x.tk !== first.tk ? 0.35 : 0);
-      const second = rival.slice().sort((a, b) => contrast(b) - contrast(a))[0];
-
-      // 7) One road is advice, not teaching. If everything else on the board is
-      // beaten by the first on every axis, the app says so rather than dressing
-      // a dominated structure up as a choice.
-      if (!second) return stop([{ id: "one-road", text: NOTHING_TODAY.onlyOneRoad(ans.risk) }]);
-
-      const toCandidate = (x, n) => ({
-        id: `${x.tk}-${x.pr.name}-${n}`,
-        ticker: x.tk, name: x.pr.name, legs: x.pr.legs.map((l) => ({ ...l })),
-        entryNet: x.a.entry, spot: x.spot, expKey: x.ek, dte: x.dte,
-        maxProfit: x.a.maxProfit, maxLoss: x.a.maxLoss, risk: x.risk, pop: x.pop,
-        // ONE COMBINATION, DELIBERATELY, AND THE CARD SAYS SO. A road is built
-        // to fit the budget answer at one contract (`unit > ans.risk` above is
-        // that test), so this genuinely is a per-contract figure and not a
-        // hardcoded quantity standing in for one nobody asked for. The size is
-        // chosen on Build, where the ticket, the gate and the position record
-        // all read the same number.
-        rr: x.rr, contracts: 1, a: x.a, fused: x.fused,
-        driver: x.driver, drivers: x.drivers,
-        // THE TWO NUMBERS THE PICTURE IS DRAWN AT ARE THE TWO THE CHANCE WAS
-        // WORKED OUT AT. This was `sigmaFor(x.tk).sigma` — the REALISED
-        // volatility — beside a `pop` computed at the chain's IMPLIED one, and
-        // with no drift travelling at all.
-        ...chanceDrawFields(x.mc),
-        /* A ROAD CARRIES THE SOURCE OF ITS OWN CHANCE. Two roads are ranked on
-           one scale across the whole basket, so road 1 and road 2 can be in
-           different markets — and two roads compared side by side can have their
-           "works out N times in 10" drifted on two different tables.
-
-           >>> IT TAKES THE PROVENANCE, NOT THE CHANCE. <<< Read on the owner's
-           phone, XLE 21 September 2026: the road card said *"Drifted on the
-           HAND-WRITTEN seasonal estimate for XLE… that table is wrong on eight
-           months of twelve"* while the header two blocks above read "SEASONAL
-           SOURCE · Alpha Vantage · 11y" and the Build screen for the same trade
-           said "Drifted on XLE's MEASURED seasonality: 11 years of monthly
-           prices, read today". **XLE has no hand-written table at all** — the
-           liquid tier deliberately carries none — so the card was naming a table
-           that does not exist.
-
-           The cause is that this was handed `x.mc`. A `chanceOf()` result
-           carries `seasonalSource` / `seasonalYears` / `seasonalAgeDays`;
-           `seasonalStampFields()` reads a PROVENANCE, whose fields are `source`
-           / `years` / `ageDays`. Every one came back `undefined`, the record
-           went out unstamped, and `seasonalStampOf()` reads an absent stamp as
-           the hand-written table — which is the right reading for a record
-           written before stamps existed and the wrong one for a road generated
-           three seconds ago. And when `chanceOf()` returns null, as it does for
-           a market with no seasonal reading at all, there was no object to read
-           at all. `seasonalFor()` is the same provenance `chanceFor()` drifted
-           this candidate on, so the stamp and the arithmetic cannot disagree. */
-        ...seasonalStampFields(seasonalFor(x.tk)),
-      });
-      const roads = [toCandidate(first, 1), toCandidate(second, 2)];
-
-      // 8) The copilot narrative: what was actually examined, in English, with
-      // the real counts. Generated in src/signals.js from the same data the
-      // score came from — never a template with the numbers dropped in.
-      setVerdict(verdictNarrative({
-        basket, examined, excluded, newsItems: newsPool, weatherData: weather,
-        month: NOW_MONTH, weights: ans.weights, chosen: roads,
-        floors: { liquidity: floors.liquidity, spread: floors.spread, comboSpread: floors.comboSpread,
-          crossing: floors.crossing, reward: floors.reward,
-          unpriceable: floors.unpriceable, impossible: floors.impossible,
-          butterfly: floors.butterfly,
-          markets: [...floors.markets], oiUnavailable: [...floors.oiUnavailable],
-          spreadUnavailable: [...floors.spreadUnavailable],
-          comboSpreadUnavailable: [...floors.comboSpreadUnavailable] },
-      }));
-
-      setTicker(first.tk); setExpKey(first.ek);
-      setWiz((w) => ({ ...w, busy: false }));
-      setCandidates(roads);
-      setPicked(null); setOpenResult(null);
-      /* THE GUIDED DOOR FEEDS THE SAME PATH (PRD §12).
-         It used to jump from the three questions straight to two roads, which
-         is the middle of the path with the macro view skipped: the user never
-         saw which markets were looked at, only the answer. It now lands on
-         step 1 with what was examined in front of it — the roads are on step 2
-         where every other candidate is, and the walk is the same one whether
-         the user came through the guided door or through the desk. */
-      /* AND WHICH BOARDS IT ACTUALLY READ. `examined` is every market whose
-         chain and expiry this run got as far as pricing; without it the Radar
-         reported "not searched yet" about markets the narrative four lines
-         above named as having come through. See `radarSplit()` in rules.js. */
-      setGuided({ at: Date.now(), basket, roads: roads.length, examined: examined.map((e) => e.tk) });
-      setCompare([]); setShowCompare(false); setCompareNote(null);
-      goStep("radar");
-    } catch (e) { setWiz((w) => ({ ...w, busy: false, err: String(e.message || e) })); }
-  };
-
-  /* ---- screen 3 → screen 4. Taking a road loads it on Build too, so
-     "open it on the Build screen and change it" is one tap away from the refusal. */
-  /* ---- taking a road LANDS ON BUILD (PRD §5).
-     It used to jump straight to a confirm page carrying a send button, so the
-     guided flow could reach an order without ever passing the screen where the
-     trade can be looked at. The road now loads onto Build and the confirm step
-     is the bottom of that screen: one route to an order, and it runs through
-     the place that shows the chain, the legs and the greeks. */
-  const pickRoad = (c) => {
-    setPicked(c); setOpenResult(null);
-    setView("desk");
-    // `openOnBuild` is the one hand-off: it carries the trade, closes the
-    // evidence sheet, loads the chain if it is missing, moves the path to
-    // step 3 and scrolls the trade into view.
-    openOnBuild({ ticker: c.ticker, expKey: c.expKey, legs: c.legs, name: c.name });
-    setStratName(c.name);
-  };
-
-
-
   const setNotify = async (on) => {
     const st = { ...store, settings: { ...store.settings, notifyWhenReady: on } };
     setStore(st); await saveState(st);
@@ -3935,6 +3325,12 @@ export default function OptionsStrategyLab() {
   /* Which band this expiry falls in, for the screen. The gate decides; this
      only decides what the screen has to ASK for. */
   const room = useMemo(() => entryRoom(dte), [dte]);
+  /* THE BUILD SCREEN'S STOP SIGNS (PR #40, TASK 2): facts already computed —
+     the gate's warnings, the four factors, the board, the book, the size. */
+  const buildSigns = useMemo(() => stopSigns({
+    fused: fused[ticker] || null, gateWarnings: guard?.warnings || [], feedBroken: !!monoNote,
+    noQuoteLegs: book.missing.length, contracts, askSize: touchSizeOf(legs, A),
+  }), [fused, ticker, guard, monoNote, book, contracts, legs, A]);
 
 
   /* ---- direzione del trade e scontro col segnale (PRD §7) ----
@@ -4030,66 +3426,133 @@ export default function OptionsStrategyLab() {
       fused: f, conflict: f?.agreement === "CONFLICT", agreement: f?.agreement, signalScore: f?.score ?? 0, confidence: f?.confidence ?? 0 };
   }).sort((a, b) => (a.conflict !== b.conflict ? (a.conflict ? 1 : -1) : b.score - a.score)), [chains, seasonal, fused, seasonalFor]);
 
-  /* ---- what the last search found in each market ----
-     The Radar's job is to say which markets have something and which do not,
-     and "do not" has to carry its reason: a row with nothing on it is the empty
-     screen this app is not allowed to show. Roads from the guided run and hits
-     from the multi-market search are counted together, because to the person
-     reading the row they are the same fact — something cleared the floors here. */
-  const marketFacts = useMemo(() => {
-    const m = {};
-    const touch = (tk) => (m[tk] = m[tk] || { n: 0, roads: 0, best: null, cut: false, oiSkipped: false, exps: new Set() });
-    // WHICH EXPIRY THE COUNT IS ABOUT. Radar said "4 cleared" at 28 DTE while
-    // the Shortlist said none at 35 DTE, and on screen that read as the app
-    // contradicting itself. Both were true; neither said which board it meant.
-    // A count with no expiry beside it is not a fact the user can act on.
-    for (const c of candidates) {
-      const f = touch(c.ticker); f.n++; f.roads++;
-      if (c.expKey) f.exps.add(c.expKey);
-      if (!f.best) f.best = { legs: c.legs, entryNet: c.entryNet, spot: c.spot };
+  /* ====================================================================
+     FIND — ONE REQUEST, ONE RANKED LIST ACROSS THE SELECTED MARKETS
+     (PR #40, TASK 1).
+
+     This REPLACES three generation sites: the Shortlist (one market, one
+     board), the wide search (several markets, behind a Search button) and the
+     guided run (the whole basket, and "two roads or nothing"). The owner saw
+     the guided door answer "Nothing today" while the Radar listed seven
+     structures on the same data, because the door dropped single options,
+     CONFLICT markets and confidence under 40 without a word.
+
+     One function now: every selected market whose chain is in, on its
+     buildable board nearest the horizon (`buildableExpiries()`, the gate's own
+     floor), in the direction asked for or the one its four factors suggest,
+     through `shortlistWithFloors()` — the same floors, at the price that fills
+     — and every survivor read by `listCardFigures()`, the one card path. What
+     the guided door dropped is a FLAG on the card now (`candidateFlags()`),
+     never a silent cut. It is a memo, so every control re-filters it live.
+  ==================================================================== */
+  const ivRankOf = useCallback((tk) => {
+    const h = (store.ivHist || {})[tk] || [];
+    if (h.length < 20) return null;
+    const cur = h[h.length - 1].iv;
+    return Math.round((h.filter((x) => x.iv <= cur).length / h.length) * 100);
+  }, [store.ivHist]);
+  const findGen = useMemo(() => {
+    const items = [];
+    const tally = { unpriceable: 0, impossible: 0, model: 0, liquidity: 0, spread: 0, comboSpread: 0, crossing: 0, reward: 0 };
+    // STILL LOADING and FAILED are two lists (PR #40): a failed fetch is not a
+    // market in flight, and neither is a market verdict.
+    const noBoard = [], loading = [], failed = [], oiSkipped = [], spreadSkipped = [], comboSpreadSkipped = [];
+    const boards = {};
+    for (const tk of find.markets) {
+      const c = chains[tk];
+      if (!c?.spot) {
+        if (chainErr[tk]) failed.push({ tk, why: chainErr[tk] });
+        else if (c) failed.push({ tk, why: "no price in the reply" });
+        else loading.push(tk);
+        continue;
+      }
+      const exps = buildableExpiries(c.expirations.map((e) => ({ key: e, dte: c.byExp[e].dte }))).buildable;
+      if (!exps.length) { noBoard.push(tk); continue; }
+      const ek = exps.reduce((b2, e) => (Math.abs(e.dte - find.horizon) < Math.abs(b2.dte - find.horizon) ? e : b2), exps[0]).key;
+      const d2 = c.byExp[ek].dte;
+      const strikes = expiryStrikes(c, ek);
+      if (!strikes) { failed.push({ tk, why: "board unreadable" }); continue; }
+      const row = scan.find((r) => r.tk === tk);
+      const sent = find.dir === "season" ? (row ? row.sugg : "neutral") : find.dir;
+      const qq = makeQuote(c, ek);
+      const peers = expiryOpenInterest(c, ek);
+      // "feed unreliable on this expiry" is this board's own arithmetic failing.
+      const feedBroken = !!monotonicityNote(monotonicityBreaks(c, ek), ek);
+      boards[tk] = { expKey: ek, dte: d2, sent, peers, feed: feedName(c), feedBroken };
+      const u = getU(tk);
+      const r = shortlistWithFloors(sent, c.spot, u.step, strikes, d2, u.iv, qq, { peers, level: liqLevel });
+      for (const k of Object.keys(tally)) tally[k] += r.tally[k] || 0;
+      if (r.oiSkipped) oiSkipped.push(tk);
+      if (r.tally.spreadSkipped) spreadSkipped.push(tk);
+      if (r.tally.comboSpreadSkipped) comboSpreadSkipped.push(tk);
+      for (const { p, a, aFill } of r.rows) {
+        const lf = listCardFigures(p.legs, { spot: c.spot, dte: d2, iv: u.iv, q: qq, ticker: tk, expKey: ek,
+          seasonal: seasonalFor(tk), a, aFill });
+        const f = fused[tk] || null;
+        const prof = evProfile(lf.mc, aFill.maxProfit, aFill.maxLoss);
+        const cand = candidateOf({ name: p.name, legs: p.legs, a: aFill, pop: lf.pop, dte: d2, expKey: ek,
+          ...seasonalStampFields(lf.mc), ...chanceDrawFields(lf.mc) }, { ticker: tk, spot: c.spot, source: "find" });
+        items.push(withSignalRank({
+          key: cand.key, tk, name: p.name, legs: p.legs, expKey: ek, dte: d2, spot: c.spot, sent, lf, cand, feedBroken,
+          noQuoteLegs: comboBook(p.legs, quotesOf(aFill)).missing.length,
+          touchSize: touchSizeOf(p.legs, aFill),
+          fused: f, flags: candidateFlags({ legs: p.legs, fused: f, ivRank: ivRankOf(tk) }),
+          ev100: prof ? prof.ev100 : -999, tag: prof ? prof.tag : null,
+        }, f, sentimentDirection(sent)));
+      }
     }
-    for (const r of (multi.res || [])) {
-      const f = touch(r.tk); f.n++;
-      if (r.expKey) f.exps.add(r.expKey);
-      if (!f.best) f.best = { legs: r.legs, entryNet: r.a.entry, spot: r.spot };
+    items.sort(compareCandidates);
+    return { items, tally, noBoard, loading, failed, oiSkipped, spreadSkipped, comboSpreadSkipped, boards };
+  }, [find.markets, find.dir, find.horizon, chains, chainErr, scan, liqLevel, fused, seasonalFor, ivRankOf]); // eslint-disable-line
+  /* THE LIST ON SCREEN: the one-market filter (what the Shortlist step was),
+     and the flag toggle. Nothing is dropped without a count saying so. */
+  const findShown = useMemo(() => findGen.items.filter((x) =>
+    (!find.market || x.tk === find.market) && (find.flagged || x.flags.length === 0)), [findGen, find.market, find.flagged]);
+  const flaggedHidden = find.flagged ? 0 : findGen.items.filter((x) => (!find.market || x.tk === find.market) && x.flags.length).length;
+  /* THE LIQUIDITY FLOOR'S OWN PANEL is about ONE board — its threshold and its
+     peers — so it reads the market in focus: the filter, or the top card's. */
+  const focusTk = find.market || (findGen.items[0] && findGen.items[0].tk) || find.markets[0] || ticker;
+  const focusBoard = findGen.boards[focusTk] || null;
+  const liqPreview = useMemo(() => {
+    const c = chains[focusTk];
+    if (!c?.spot || !focusBoard) return null;
+    const strikes = expiryStrikes(c, focusBoard.expKey);
+    if (!strikes) return null;
+    const u = getU(focusTk), qq = makeQuote(c, focusBoard.expKey);
+    const out = {};
+    for (const l of LIQUIDITY_LEVELS) {
+      const r = shortlistWithFloors(focusBoard.sent, c.spot, u.step, strikes, focusBoard.dte, u.iv, qq, { peers: focusBoard.peers, level: l });
+      out[l.id] = { ...r.tally, total: r.rows.length + r.cut.length };
     }
-    /* SEARCHED, EVEN WHEN IT PRODUCED NOTHING. Three things count as having
-       read a board: the guided run examined it, the wide search ran on it, or
-       the floors emptied it. Without this a market the guided run priced and
-       did not choose read as "not searched yet" on the same screen that named
-       it as examined (`radarSplit()` in rules.js). */
-    for (const tk of (guided?.examined || [])) touch(tk).searched = true;
-    if (multi.res) for (const tk of (multi.sel || [])) touch(tk).searched = true;
-    for (const tk of (multi.floors?.markets || [])) { touch(tk).cut = true; touch(tk).searched = true; }
-    for (const tk of (multi.floors?.oiSkipped || [])) touch(tk).oiSkipped = true;
-    for (const tk of (multi.floors?.spreadSkipped || [])) touch(tk).spreadSkipped = true;
-    for (const k of Object.keys(m)) m[k].expiries = [...m[k].exps].sort();
-    return m;
-  }, [candidates, multi.res, multi.sel, multi.floors, guided]);
+    return out;
+  }, [chains, focusTk, focusBoard]);
+  const liqThreshold = useMemo(() => liquidityThreshold(focusBoard ? focusBoard.peers : [], liqLevel), [focusBoard, liqLevel]);
+
+  /* FIND LOADS WHAT IT READS. Every selected market's chain and daily bars are
+     fetched once, in the background, when Find is on screen; open interest is
+     patched in by `refreshChain()` as before. Nothing waits for a button. */
+  const findAsked = useRef(new Set());
+  useEffect(() => {
+    if (step !== "find" || view !== "desk") return;
+    const todo = find.markets.filter((tk) => !findAsked.current.has(tk));
+    if (!todo.length) return;
+    (async () => {
+      for (const tk of todo) {
+        findAsked.current.add(tk);
+        loadBars(tk);
+        if (!chains[tk]) await refreshChain(tk, true);
+      }
+    })();
+  }, [step, view, find.markets]); // eslint-disable-line
 
   /* ============================== RENDER ============================== */
   // The old "Today" tab is gone: what needs attention today is the wizard's
   // front page now (PRD §5), so keeping a second copy behind a flag would just
   // be two screens that can disagree about the same positions.
   // THE PATH IS THE FIRST PLACE, and it is three steps rather than one page:
-  /* WHICH MARKETS GET A ROW, AND WHICH GET A NAME IN ONE LINE.
-     `radarSplit()` in rules.js decides; this only supplies the two facts it
-     reads. The basket is ten markets since the liquid tier, and a screen whose
-     content is ten paragraphs explaining why it is empty is not a screen. */
-  const radarRows = useMemo(
-    () => radarSplit(scan.filter((r) => BASKET.includes(r.tk))
-      .map((r) => ({ ...r, n: (marketFacts[r.tk] || {}).n || 0,
-        cut: !!(marketFacts[r.tk] || {}).cut, searched: !!(marketFacts[r.tk] || {}).searched }))),
-    [scan, marketFacts]);
-  const radarQuiet = useMemo(() => radarQuietNote(radarRows), [radarRows]);
-
-  // 1 Radar (every market), 2 Shortlist (the structures that survived), 3 Build
-  // (one trade taken apart). Positions and the Journal are the other two places.
-  // Settings sits behind the gear, not in the row.
-  //
-  // Radar and Shortlist used to be EVIDENCE panels appended to the Build page.
-  // They are steps now, because they are not evidence for a trade — they are
-  // how you arrive at one, and each of them is a decision of its own.
+  // 1 Find (every market, one ranked list), 2 Build (one trade taken apart).
+  // Positions, Watching and the Journal are the other places; Settings sits
+  // behind the gear, not in the row.
   /* WATCHING IS THE THIRD PLACE, AND IT EXISTS BECAUSE THE FIRST TWO WERE
      BEING ASKED TO HOLD SOMETHING THAT IS NEITHER. A trade you did not take
      is not a position and it is not history: it is a live observation, and
@@ -4119,7 +3582,7 @@ export default function OptionsStrategyLab() {
      Everything above is the app's brain. What follows decides which face it
      shows: setup on a first run, the wizard by default, the tabs on request. */
 
-  const goHome = () => { setView("wizard"); setWizStep("open"); setNothing(null); };
+  const goHome = () => { setView("wizard"); };
   /* Leaving the wizard for the desk lands on a STEP of the path — `goStep`
      above. `ev` is cleared every time: a sheet left open from a previous visit
      covers whatever the button promised to show. */
@@ -4160,38 +3623,17 @@ export default function OptionsStrategyLab() {
         {msg && (
           <div style={{ ...mono, fontSize: 12, color: T.amber, background: `${T.amber}12`, borderBottom: `1px solid ${T.amber}44`, padding: "10px 14px" }}>{msg}</div>
         )}
-        {wizStep === "open" && (
-          <WizardOpen
-            /* "N OPEN POSITIONS" MEANS OWNED. Working orders have their own
-               panel on this screen and trades nobody bought are under
-               Watching; counting all three here is how the front page came to
-               say "3 open positions" over a broker holding none. */
-            positions={ownedPositions} posAlerts={posAlerts} attention={nAttention} looks={attn.looks}
-            marketReady={marketReady} barsFor={(tk) => barsCache[tk] || []}
-            onPositions={() => { setView("desk"); setTab("positions"); }}
-            onFind={() => { setNothing(null); setWizStep("questions"); }}
-            onDesk={() => goStep("radar")}
-            onSettings={() => { setView("desk"); setShowSettings(true); }}
-          />
-        )}
-        {wizStep === "questions" && (
-          <FindOpportunities
-            answers={wizAnswers} setAnswers={setWizAnswers} limits={limits} busy={wiz.busy} err={wiz.err}
-            request={request} onRequest={(patch) => setWant((w) => ({ ...w, ...patch }))}
-            universe={BASKET.map((tk) => ({ tk, name: getU(tk).name }))}
-            onBack={goHome} onDecide={() => runWizard()}
-          />
-        )}
-        {wizStep === "nothing" && (
-          <NothingToday
-            reasons={nothing || []} notified={!!store.settings.notifyWhenReady}
-            hasPositions={bookPositions(store.positions).length > 0}
-            onNotify={() => setNotify(true)}
-            onBack={() => setWizStep("questions")}
-            onPositions={() => { setView("desk"); setTab("positions"); }}
-            onDesk={() => goStep("radar")}
-          />
-        )}
+        <WizardOpen
+          /* "N OPEN POSITIONS" MEANS OWNED. Working orders have their own
+             place in Positions and trades nobody bought are under Watching. */
+          positions={ownedPositions} posAlerts={posAlerts} attention={nAttention} looks={attn.looks}
+          marketReady={marketReady} barsFor={(tk) => barsCache[tk] || []}
+          onPositions={() => { setView("desk"); setTab("positions"); }}
+          /* THE HOME ENTRY GOES STRAIGHT TO FIND (PR #40, TASK 1). The guided
+             door's questions and its "Nothing today" screen are gone. */
+          onFind={() => goStep("find")}
+          onSettings={() => { setView("desk"); setShowSettings(true); }}
+        />
       </div>
     );
   }
@@ -4228,7 +3670,12 @@ export default function OptionsStrategyLab() {
               style={{ ...mono, background: T.panel, color: T.ink, border: `1px solid ${T.line}`, borderRadius: 6, padding: "8px 10px", fontSize: 13 }}>
               {Object.keys(UNDERLYINGS).map((k) => <option key={k} value={k}>{k}</option>)}
             </select>
-            <Btn onClick={() => refreshChain(ticker)} disabled={busy !== null}>
+            {/* On Find, Refresh also retries every market whose prices FAILED —
+                the one control "Could not read N markets — press Refresh" names. */}
+            <Btn onClick={async () => {
+              await refreshChain(ticker);
+              if (step === "find" && view === "desk") for (const x of findGen.failed) if (x.tk !== ticker) await refreshChain(x.tk, true);
+            }} disabled={busy !== null}>
               <RefreshCw size={13} /> {busy === ticker ? "…" : "Refresh"}
             </Btn>
             <Btn small ghost onClick={() => setTheme(T.dark ? "light" : "dark")}>
@@ -4286,65 +3733,20 @@ export default function OptionsStrategyLab() {
         {msg && <div style={{ ...mono, fontSize: 11.5, color: T.amber, border: `1px solid ${T.amber}44`, background: `${T.amber}10`, borderRadius: 6, padding: "7px 10px", marginTop: 10 }}>{msg}</div>}
 
         <TabBoundary k={`${tab}/${step}/${ev}`}>
-        {/* AND A WORKING ORDER IS SOMETHING THAT NEEDS A DECISION TODAY. It
-            is not a position, so it is not in `posAlerts`, and that is exactly
-            how it stayed invisible: the app's own list of what needs attention
-            only ever contained things that had already happened. */}
-        {workingOrders.length > 0 && (
-          <div style={{ marginTop: 12, padding: "10px 12px", background: T.panel, border: `1px solid ${T.amber}66`, borderRadius: 8 }}>
-            <div style={{ ...mono, fontSize: 10, letterSpacing: "0.15em", color: T.amber, display: "flex", alignItems: "center", gap: 6 }}>
-              <Bell size={11} /> {workingOrders.length} ORDER{workingOrders.length === 1 ? "" : "S"} WORKING AT THE BROKER · NOT FILLED
-            </div>
-            <div style={{ display: "grid", gap: 5, marginTop: 8 }}>
-              {workingOrders.map((p) => (
-                <button key={p.id} onClick={() => { setView("desk"); setTab("positions"); }}
-                  style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", background: "transparent", border: "none", cursor: "pointer", padding: 0, textAlign: "left" }}>
-                  <span style={{ width: 7, height: 7, borderRadius: 4, background: T.amber, flexShrink: 0 }} />
-                  <span style={{ ...mono, fontSize: 11.5, color: T.ink, fontWeight: 700 }}>{p.ref ? `${p.ref} ` : ""}{p.ticker} {p.name}</span>
-                  <span style={{ ...mono, fontSize: 10.5, color: T.mut }}>
-                    · sent, nothing bought{(() => { const sl = storedLimitOf(p);
-                      return sl.has ? (sl.signed ? ` · a ${sl.kind} limit of ${money(sl.magnitude * 100)}`
-                        : ` · a limit of ${money(sl.magnitude * 100)}, direction not recorded`) : ""; })()} →
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
+        {/* ONE STATUS PER OBJECT, ONE PLACE (PR #40, TASK 2). An order's state
+            lives on its row in Positions and a position's action on its card;
+            the desk used to print both lists again here, in a working-orders
+            strip and a "TODAY" list, beside the top banner and the order sheet.
+            It shows one line of counts now, and the line is the link. */}
+        <DeskCountLine working={workingOrders.length} decisions={nAttention} looks={attn.looks}
+          onOpen={() => { setTab("positions"); setShowSettings(false); setEv(null); }} />
 
-        {/* Alert Center: morning check */}
-        {posAlerts.length > 0 && (
-          <div style={{ marginTop: 12, padding: "10px 12px", background: T.panel, border: `1px solid ${nAttention ? T.red : T.line}55`, borderRadius: 8 }}>
-            <div style={{ ...mono, fontSize: 10, letterSpacing: "0.15em", color: nAttention ? T.red : T.amber, display: "flex", alignItems: "center", gap: 6 }}>
-              <Bell size={11} /> TODAY · {nAttention
-                ? `${nAttention} POSITION${nAttention === 1 ? "" : "S"} NEED A DECISION`
-                : attn.looks
-                  ? `${attn.looks} POSITION${attn.looks === 1 ? "" : "S"} TO LOOK AT`
-                  : "EVERYTHING IS ON PLAN"}
-            </div>
-            <div style={{ display: "grid", gap: 5, marginTop: 8 }}>
-              {posAlerts.map(({ p, pnl, dteLeft, level, label }) => {
-                const c2 = level === "action" ? T.red : level === "watch" ? T.amber : T.green;
-                return (
-                  <button key={p.id} onClick={() => setTab("positions")}
-                    style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", background: "transparent", border: "none", cursor: "pointer", padding: 0, textAlign: "left" }}>
-                    <span style={{ width: 7, height: 7, borderRadius: 4, background: c2, flexShrink: 0 }} />
-                    <span style={{ ...mono, fontSize: 11.5, color: T.ink, fontWeight: 700 }}>{p.ticker} {p.name}</span>
-                    <span style={{ ...mono, fontSize: 11, color: pnl >= 0 ? T.green : T.red }}>{pnl != null ? fmt$(pnl) : "…"}</span>
-                    <span style={{ ...mono, fontSize: 10.5, color: T.mut }}>· {dteLeft} DTE · {label} →</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* THE PATH: three numbered steps, one on screen at a time. The nav
+        {/* THE PATH: two numbered steps, one on screen at a time. The nav
             says what each step is carrying, because "back" has to be visibly
             free — the selection lives above these screens, so walking back and
             forward again cannot lose it. */}
         <StepNav step={tab === "build" && !showSettings ? step : null}
-          carry={stepCarry({ ticker, trade: legs.length ? `${ticker} · ${stratName}` : null, compare: compare.length })}
+          carry={stepCarry({ ticker, trade: legs.length ? `${ticker} · ${stratName}` : null, compare: compare.length, markets: find.markets.length })}
           onStep={goStep} />
 
         {/* The other two places. A place is somewhere you go and stay; the three
@@ -4373,7 +3775,7 @@ export default function OptionsStrategyLab() {
             chip itself: the copilot answering into a closed sheet was
             indistinguishable from the copilot doing nothing at all. */}
         {tab === "build" && !showSettings && (
-          <EvidenceBar items={EVIDENCE} open={ev} onOpen={setEv}
+          <EvidenceBar items={EVIDENCE} open={ev} onOpen={(id) => { setWhyTk(null); setEv(id); }}
             mark={{
               copilot: copilot.busy ? "thinking"
                 : (ev !== "copilot" && copilot.msgs.length > 0
@@ -4389,12 +3791,12 @@ export default function OptionsStrategyLab() {
           <EvidenceOverlay title={EV_META[ev]?.label || "Evidence"} sub={EV_META[ev]?.sub} onClose={() => setEv(null)}>
             {ev === "why" && (
               <WhyThisTrade
-                fused={fused[ticker]}
-                ticker={ticker} weatherData={weather} newsItems={newsPool} month={NOW_MONTH}
-                title={`WHY THIS MARKET · ${ticker}`} defaultDetail
-                note={fused[ticker]?.agreement === "CONFLICT"
+                fused={fused[whyTk || ticker]}
+                ticker={whyTk || ticker} weatherData={weather} newsItems={newsPool} month={NOW_MONTH}
+                title={`WHY THIS MARKET · ${whyTk || ticker}`} defaultDetail
+                note={fused[whyTk || ticker]?.agreement === "CONFLICT"
                   ? "Candidates on a CONFLICT market rank last wherever they appear, whatever their expected value."
-                  : "The Radar and the Shortlist both rank candidates on expected value adjusted by this read."}
+                  : "Find ranks candidates on expected value adjusted by this read."}
               />
             )}
             {ev === "levels" && (
@@ -4667,746 +4069,127 @@ export default function OptionsStrategyLab() {
           </EvidenceOverlay>
         )}
 
-        {/* ============ STEP 1 · RADAR — THE MACRO VIEW ============
-             Which markets have something worth looking at today, and which do
-             not and why. This was an evidence panel that appended to the Build
-             page; it is a step now, because "which market" is a decision and a
-             decision is not evidence for something else. */}
-        {tab === "build" && !showSettings && step === "radar" && (
+        {/* ============ STEP 1 · FIND — ONE REQUEST, ONE RANKED LIST (PR #40, TASK 1) ============
+             Radar, Shortlist and the guided door were three lists of one
+             question and could give three answers on the same data. This is
+             the one: the request block above, every candidate across the
+             selected markets below it, re-filtered live. The Shortlist is the
+             one-market filter; Compare (max 3) stays. */}
+        {tab === "build" && !showSettings && step === "find" && (
           <div style={{ marginTop: 12 }}>
             <div style={{ ...sansUI, fontSize: 19, fontWeight: 800, color: T.ink, marginTop: 4 }}>
-              Step 1 — where is there something today?
-            </div>
-            {/* ONE LINE HERE, THE FULL SENTENCE WHERE IT HAS A REFERENT.
-                `qualityFloorSentence()` was printed twice on this screen: once
-                at the top, describing a filter applied to content that is not
-                on screen yet, and again under the results where there is
-                something for it to be about. The second one is kept. */}
-            <div style={{ ...sansUI, fontSize: 14, color: T.mut, lineHeight: 1.55, marginTop: 4 }}>
-              Every market in the basket, read by the four factors, and — once you search — what each one
-              actually produced after the quality floors, at the {liqLevel.label.toUpperCase()} setting.
+              Step 1 — find a trade
             </div>
 
-            {/* THE CONTROLS COME FIRST (P10 §2). One block, above every
-                result, and the guided door renders what it does not already
-                ask: "dipende dalla journey". */}
-            <RequestControls
-              journey="desk" style={{ marginTop: 12 }}
+            <RequestControls style={{ marginTop: 10 }}
               request={request} onChange={(patch) => setWant((w) => ({ ...w, ...patch }))}
-              sentiments={SENTIMENTS} sentiment={sentiment} onSentiment={setSentiment}
-              ticker={ticker} spot={spot}
-              expiries={expiryMenu} expKey={expKey} onExpiry={setExpKey} />
+              sentiments={SENTIMENTS} direction={find.dir} onDirection={(d) => setFind((f) => ({ ...f, dir: d }))}
+              universe={BASKET} markets={find.markets} onMarkets={(m) => setFind((f) => ({ ...f, markets: m, market: m.includes(f.market) ? f.market : null }))}
+              horizon={find.horizon} onHorizon={(h) => setFind((f) => ({ ...f, horizon: h }))}
+              ticker={find.market} spot={find.market ? spotOf(chains[find.market]) : null}
+              limits={limits}
+              onLimit={(ov) => setSetting("sizeOverride", ov)} />
 
-            {/* What the guided run examined, in English. It used to sit on the
-                verdict screen above the two roads; it belongs here, where the
-                question is which market rather than which structure. */}
-            {guided && verdict.length > 0 && (
-              <Panel style={{ marginTop: 12 }}>
-                <Lbl>WHAT I LOOKED AT · FROM YOUR ANSWERS</Lbl>
-                {/* A FOLD IS NOT A DELETION. This narrative is the app saying
-                    what it actually examined, so none of it is for cutting —
-                    but on a 390px phone it is roughly two screens of text
-                    standing between the user and the markets underneath it, and
-                    a wall of prose at the top of a step reads as something to
-                    scroll past rather than something to read. The first
-                    paragraph stays; the rest opens on a tap that SAYS how much
-                    is behind it, so nobody has to guess whether it is worth it. */}
-                <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
-                  {(verdictOpen ? verdict : verdict.slice(0, 1)).map((para, i) => (
-                    <p key={i} style={{ ...sansUI, fontSize: 14, color: T.body, lineHeight: 1.6, margin: 0 }}>{para}</p>
-                  ))}
-                </div>
-                {verdict.length > 1 && (
-                  <button onClick={() => setVerdictOpen((v) => !v)}
-                    style={{
-                      ...mono, fontSize: 11, marginTop: 10, minHeight: 40, padding: "8px 12px", cursor: "pointer",
-                      background: "transparent", color: T.blue, border: `1px solid ${T.blue}`, borderRadius: 6,
-                      width: "100%", textAlign: "left", fontWeight: 700,
-                    }}>
-                    {verdictOpen
-                      ? "\u2191 Show less"
-                      : `\u2193 Read the rest \u2014 ${verdict.length - 1} more paragraph${verdict.length === 2 ? "" : "s"} on what was examined`}
-                  </button>
-                )}
-                <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 8 }}>
-                  {candidates.length} road{candidates.length === 1 ? "" : "s"} came out of it, and they are waiting on step 2.
-                </div>
-              </Panel>
+            {/* THE SHORTLIST IS A FILTER NOW: one market, or all of them. Each
+                chip carries its count, so a market with nothing is a number
+                rather than a missing row. */}
+            <div style={{ display: "flex", gap: 5, marginTop: 10, flexWrap: "wrap", alignItems: "center" }}>
+              <Btn small ghost={!!find.market} onClick={() => setFind((f) => ({ ...f, market: null }))}>All {findGen.items.length}</Btn>
+              {find.markets.map((tk) => {
+                const n = findGen.items.filter((x) => x.tk === tk).length;
+                const why = findGen.failed.some((x) => x.tk === tk) ? "failed" : findGen.loading.includes(tk) ? "loading"
+                  : findGen.noBoard.includes(tk) ? "no board" : String(n);
+                return (
+                  <Btn key={tk} small ghost={find.market !== tk} color={n ? T.amber : T.dim}
+                    onClick={() => setFind((f) => ({ ...f, market: f.market === tk ? null : tk }))}>{tk} {why}</Btn>
+                );
+              })}
+              <label style={{ ...mono, fontSize: 10.5, color: T.mut, display: "inline-flex", gap: 5, alignItems: "center", minHeight: 38, cursor: "pointer" }}>
+                <input type="checkbox" checked={find.flagged} onChange={(e) => setFind((f) => ({ ...f, flagged: e.target.checked }))} />
+                show flagged{flaggedHidden ? ` (${flaggedHidden} hidden)` : ""}
+              </label>
+            </div>
+
+            {/* "NOTHING TODAY" ONLY WHEN ZERO CANDIDATES PASS, WITH THE COUNTS. */}
+            {/* Prices still arriving are not a verdict: "Nothing today" waits
+                until every selected market has been read. */}
+            {findGen.items.length === 0 && (
+              <div style={{ ...mono, fontSize: 11.5, color: T.mut, marginTop: 10, lineHeight: 1.6, padding: "9px 11px", border: `1px dashed ${T.line}`, borderRadius: 7 }}>
+                {nothingTodayLine(findGen.tally, { noBoard: findGen.noBoard, loading: findGen.loading, failed: findGen.failed, level: liqLevel })}
+              </div>
             )}
 
-            <Panel style={{ marginTop: 12 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-                <Lbl>EVERY MARKET · 4-FACTOR SIGNAL · {MONTHS[NOW_MONTH].toUpperCase()}</Lbl>
-                <Btn small ghost onClick={async () => { setBusy("all"); for (const tk of BASKET) await refreshChain(tk, true); setBusy(null); setMsg("All markets refreshed."); }}>
-                  <RefreshCw size={11} /> Refresh all
-                </Btn>
-              </div>
-              <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
-                {/* THE BASKET, not every symbol in the table. SPY is there so
-                    the desk can price a hedge; the path does not go looking for
-                    it, and a row for it on the Radar reads as a sixth market to
-                    trade (CLAUDE.md, the basket). */}
-                {radarRows.shown.map((r, i) => {
-                  const sObj = SENTIMENTS.find((s) => s.id === r.sugg);
-                  const f = marketFacts[r.tk] || { n: 0 };
-                  const best = f.best || null;
-                  return (
-                    <div key={r.tk} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: T.bg, border: `1px solid ${ticker === r.tk ? T.amber : T.line}`, borderRadius: 7, flexWrap: "wrap" }}>
-                      <span style={{ ...mono, fontSize: 11, color: T.dim, width: 18 }}>#{i + 1}</span>
-                      {/* THE STRUCTURE, NOT THE UNDERLYING. The two visuals a
-                          list row gets are the payoff thumbnail and the gauge,
-                          and both are cut from ONE payoffBands() result so they
-                          cannot disagree about the same trade. The candles stay
-                          on Build, where there is room to read them. */}
-                      {best && (() => {
-                        const bb = payoffBands({ legs: best.legs, entryNet: best.entryNet, spot: best.spot });
-                        return (
-                          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                            <BandThumbnail bands={bb} bars={barsCache[r.tk] || []} width={110} height={40}
-                              title={bandTakeaway(bb, { ticker: r.tk })} />
-                            <Gauge bands={bb} size={86} ticker={r.tk} />
-                          </div>
-                        );
-                      })()}
-                      <div style={{ flex: 1, minWidth: 150 }}>
-                        <div style={{ fontWeight: 700, color: T.ink, fontSize: 14 }}>{r.tk} <span style={{ color: T.dim, fontWeight: 400, fontSize: 11 }}>{r.name}</span></div>
-                        <div style={{ ...mono, fontSize: 10.5, color: T.mut }}>
-                          {/* UNKNOWN IS NOT +0.0%/mo, AND "ESTIMATE" IS NOT
-                              THE ONLY ALTERNATIVE TO MEASURED. Five of the ten
-                              markets have no written row behind them at all. */}
-                          seasonal {r.seasonalScore == null ? "not loaded" : `${r.seasonalScore > 0 ? "+" : ""}${r.seasonalScore.toFixed(1)}%/mo`} {r.real ? `(${r.years}y history)` : r.seasonalScore == null ? "(no reading yet)" : "(hand-written estimate)"} · {r.spot ? `$${r.spot.toFixed(2)}` : "prices not loaded"}{ta[r.tk] ? ` · trend ${ta[r.tk].trend > 0 ? "↑" : ta[r.tk].trend < 0 ? "↓" : "→"} RSI ${ta[r.tk].rsi.toFixed(0)}` : ""}
-                        </div>
-                        {/* WHAT THE SEARCH FOUND HERE — and this row only
-                            exists BECAUSE it found something. The two empty
-                            cases, "nothing cleared" and "not searched yet",
-                            used to be printed here once per market and are now
-                            the one line under the list (`radarQuietNote()`).
-                            An empty market still never appears as a blank row;
-                            it appears as a name in that line. */}
-                        <div style={{ ...mono, fontSize: 10.5, color: T.green, marginTop: 2 }}>
-                          {`${f.n} structure${f.n === 1 ? "" : "s"} cleared the floors on ` +
-                            `${(f.expiries || []).length ? (f.expiries || []).join(" and ") : "the expiry searched"}` +
-                            `${f.roads ? ` · ${f.roads} of them a road from your answers` : ""}`}
-                          {f.oiSkipped ? " · open interest unknown on this feed, so that floor was skipped" : ""}
-                          {f.spreadSkipped ? " · only one side quoted on some legs, so the spread floor was skipped there" : ""}
-                        </div>
-                      </div>
-                      {r.fused && (() => {
-                        const c = r.conflict ? T.red : r.agreement === "CONFLUENT" ? T.green : T.blue;
-                        return (
-                          <span title={r.fused.narrative} style={{ ...mono, fontSize: 9.5, color: c, border: `1px solid ${c}66`, padding: "3px 8px", borderRadius: 5, cursor: "help" }}>
-                            {r.agreement} · {r.signalScore > 0 ? "+" : ""}{r.signalScore}/100 · conf {r.confidence}
-                          </span>
-                        );
-                      })()}
-                      <span style={{ ...mono, fontSize: 10, color: sObj.color, border: `1px solid ${sObj.color}66`, padding: "3px 8px", borderRadius: 5 }}>{sObj.icon} {sObj.label.toUpperCase()}</span>
-                      <Btn small ghost={ticker !== r.tk} onClick={() => { switchTicker(r.tk); setSentiment(r.sugg); goStep("shortlist"); }}>
-                        Look at {r.tk} →
-                      </Btn>
-                    </div>
-                  );
-                })}
-                {/* ============ AND EVERYTHING WITH NOTHING ON IT, IN ONE LINE.
-                    `radarSplit()` / `radarQuietNote()` in rules.js. This
-                    REPLACES the per-market sentence that used to sit inside
-                    every quiet row — "not searched yet — use the search below"
-                    ten times over — with one line carrying the same two facts
-                    and the same ten taps. Nothing is unreachable: each name is
-                    the button that opens that market. ============ */}
-                {radarQuiet && (
-                  <div style={{ padding: "9px 12px", background: T.bg, border: `1px dashed ${T.line}`, borderRadius: 7 }}>
-                    <div style={{ ...mono, fontSize: 10.5, color: T.dim, lineHeight: 1.6 }}>{radarQuiet}</div>
-                    <div style={{ display: "flex", gap: 5, marginTop: 7, flexWrap: "wrap" }}>
-                      {radarRows.quiet.map((r) => (
-                        <Btn key={r.tk} small ghost
-                          onClick={() => { switchTicker(r.tk); setSentiment(r.sugg); goStep("shortlist"); }}>
-                          {r.tk} →
-                        </Btn>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-              <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 10 }}>
-The order weighs the 4-factor signal (seasonality, price trend, weather, news): CONFLICT markets stay last regardless. Tap the badge for the full narrative, or open Why this market above for the four readings and what is behind them. Seasonality is loaded for the whole basket from real monthly prices; a market still showing an estimate says why on the Build screen, and History has a button to fetch it now.
-              </div>
-            </Panel>
-
-              <Panel style={{ marginTop: 12 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-                  <Lbl>SEARCH SEVERAL MARKETS AT ONCE · WHAT SURVIVES THE FLOORS</Lbl>
-                  <Btn small onClick={runMultiScan} disabled={multi.busy}><Radar size={11} /> {multi.busy ? "Searching…" : "Search the selected markets"}</Btn>
-                </div>
-                <div style={{ display: "flex", gap: 12, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
-                  <div style={{ display: "flex", gap: 4 }}>
-                    <Btn small ghost={multi.senMode !== "auto"} onClick={() => setMulti((m) => ({ ...m, senMode: "auto", res: null }))}>Season decides each market</Btn>
-                    <Btn small ghost={multi.senMode !== "fixed"} onClick={() => setMulti((m) => ({ ...m, senMode: "fixed", res: null }))}>My pick ({SENT.label}) everywhere</Btn>
-                  </div>
-                  {/* THE CONTROL CANNOT ASK FOR A BOARD THE GATE WOULD REFUSE
-                      (P9, TASK 1). `min` was 21 — `RULES.exitDTE` wearing a
-                      horizon's clothes — and every hit at that setting was
-                      blocked by `ENTRY_DTE_ROOM` when it reached Build. Both
-                      ends read their rule, and the label says why in one
-                      clause rather than leaving the reader to find out at the
-                      send button. */}
-                  <span style={{ ...mono, fontSize: 10, color: T.dim }}>HORIZON: ~{multi.dteT} DTE</span>
-                  <input type="range" min={RULES.minEntryDTE} max={RULES.maxEntryDTE} step={1} value={multi.dteT} onChange={(e) => setMulti((m) => ({ ...m, dteT: +e.target.value, res: null }))} style={{ width: 160, accentColor: T.amber }} />
-                  <span style={{ ...mono, fontSize: 9.5, color: T.dim }}>{horizonFloorNote()} — change it, then search again</span>
-                </div>
-                <div style={{ display: "flex", gap: 5, marginTop: 8, flexWrap: "wrap" }}>
-                  {BASKET.map((tk) => (
-                    <Btn key={tk} small ghost={!multi.sel.includes(tk)}
-                      onClick={() => setMulti((m) => ({ ...m, sel: m.sel.includes(tk) ? m.sel.filter((x) => x !== tk) : [...m.sel, tk] }))}>
-                      {tk}
-                    </Btn>
-                  ))}
-                </div>
-                {multi.err && <div style={{ ...mono, fontSize: 11, color: T.red, marginTop: 8 }}>{multi.err}</div>}
-                {multi.res && (
-                  <div style={{ display: "grid", gap: 6, marginTop: 10 }}>
-                    {/* >>> WHY THINGS ARE NOT ON THIS LIST, IN ONE FOLD
-                        (P9, TASK 3). <<< There were NINE paragraphs here, one
-                        per reason, and `qualityFloorSentence()` — a hundred
-                        and sixty-two words — was printed twice on the same
-                        panel. Every one of those paragraphs is worth reading
-                        ONCE, by somebody who has asked; none is worth reading
-                        every time the screen renders.
-
-                        FOLD, NEVER DELETE: `filterFold()` puts the counts and
-                        the setting on one always-visible line, and every long
-                        note is inside the fold, unchanged and unrewritten. The
-                        only thing removed is the SECOND copy of the floor
-                        paragraph, which is the rule this task is. */}
-                    {multi.res.length === 0 && !multi.floors?.n && !multi.floors?.unpriceable
-                      && !multi.floors?.impossible && !multi.floors?.model && (
-                      <div style={{ ...mono, fontSize: 11.5, color: T.mut, lineHeight: 1.6 }}>
-                        {multi.floors?.noBoard?.length
-                          ? `No expiry on ${multi.floors.noBoard.join(", ")} is far enough out to open on, so nothing was built there.`
-                          : "Nothing fits your budget on the markets you picked."}
-                      </div>
-                    )}
-                    {(() => {
-                      const what = (multi.floors?.markets || []).join(", ") || null;
-                      const f = multi.floors || {};
-                      const fold = filterFold(f, { level: f.level || liqLevel, what });
-                      if (!fold.total) return null;
-                      /* THE LONG NOTES ARE WRITTEN INSIDE THE FOLD, not built
-                         above it and passed in: a reader tapping "why" gets
-                         each rule in its own words, unchanged, and a reader
-                         who does not gets one line. */
-                      return (
-                        <Fold summary={fold.summary} label="why" tone={multi.res.length === 0 ? T.mut : T.amber}>
-                          {f.unpriceable > 0 && <div style={{ ...mono, fontSize: 10.5, color: T.amber, lineHeight: 1.6, marginTop: 6 }}>{unpriceableNote(f.unpriceable, what)}</div>}
-                          {f.impossible > 0 && <div style={{ ...mono, fontSize: 10.5, color: T.red, lineHeight: 1.6, marginTop: 6 }}>{impossibleLossNote(f.impossible, what)}</div>}
-                          {f.model > 0 && <div style={{ ...mono, fontSize: 10.5, color: T.red, lineHeight: 1.6, marginTop: 6 }}>{modelDisagreementNote(f.model, what)}</div>}
-                          {f.spread > 0 && <div style={{ ...mono, fontSize: 10.5, color: T.amber, lineHeight: 1.6, marginTop: 6 }}>{wideSpreadNote(f.spread, what)}</div>}
-                          {f.comboSpread > 0 && <div style={{ ...mono, fontSize: 10.5, color: T.amber, lineHeight: 1.6, marginTop: 6 }}>{wideComboNote(f.comboSpread, what)}</div>}
-                          {f.crossing > 0 && <div style={{ ...mono, fontSize: 10.5, color: T.amber, lineHeight: 1.6, marginTop: 6 }}>{crossingNote(f.crossing, what)}</div>}
-                          <div style={{ ...mono, fontSize: 10.5, color: T.dim, lineHeight: 1.6, marginTop: 8 }}>{qualityFloorSentence(f.level || liqLevel)}</div>
-                        </Fold>
-                      );
-                    })()}
-                    {/* WHAT COULD NOT BE SCORED. An unbounded profit has no
-                        expected value, so it sits last — said in words, because
-                        a candidate at the bottom of a list with a dash where its
-                        score should be looks broken rather than honest. */}
-                    {(multi.res || []).some((r) => r.a?.profitUnbounded) && (
-                      <Fold label="why last" tone={T.dim}
-                        summary={noCeilingRankLine((multi.res || []).filter((r) => r.a?.profitUnbounded).length)}>
-                        <div style={{ ...mono, fontSize: 10, color: T.dim, lineHeight: 1.6, marginTop: 6 }}>
-                          {noCeilingRankNote((multi.res || []).filter((r) => r.a?.profitUnbounded).length)}
-                        </div>
-                      </Fold>
-                    )}
-                    {multi.floors?.oiSkipped?.length > 0 && (
-                      <div style={{ ...mono, fontSize: 10, color: T.dim, lineHeight: 1.6 }}>
-                        {liquiditySkippedNote(`the feed for ${multi.floors.oiSkipped.join(", ")}`)}
-                      </div>
-                    )}
-                    {/* WHICH SETTING PRODUCED THIS SCAN. Not the setting in
-                        force now: the one the scan actually ran at, because a
-                        list produced at a different floor answers a different
-                        question, and saying otherwise would be the same lie by
-                        omission the filter exists to stop. A LOOSENED setting
-                        still shouts — `looseningWarning()` is not folded,
-                        because it is the app warning rather than explaining. */}
-                    <div style={{ ...mono, fontSize: 10, color: isLoosened(multi.floors?.level || liqLevel) ? T.red : T.dim, lineHeight: 1.6 }}>
-                      {liquiditySettingNote(multi.floors?.level || liqLevel, {
-                        kept: multi.res.length, liquidity: multi.floors?.liquidity, crossing: multi.floors?.crossing,
-                        reward: multi.floors?.reward,
-                        unpriceable: multi.floors?.unpriceable,
-                      })}
-                      {(multi.floors?.level || liqLevel).id !== liqLevel.id
-                        ? ` The setting has changed since this ran \u2014 search again to see it at ${liqLevel.label.toUpperCase()}.` : ""}
-                    </div>
-                    {/* ONE CALL, NOT TWO. `{x() && <div>{x()}</div>}` renders
-                        the sentence once and GENERATES it twice, which is the
-                        shape `voice.test.js` reads as two sites on one screen
-                        — and it is worth not writing anyway (P9, TASK 3). */}
-                    {(() => {
-                      const loose = looseningWarning(multi.floors?.level || liqLevel);
-                      return loose ? (
-                        <div style={{ ...sansUI, fontSize: 12, color: T.red, lineHeight: 1.5 }}>{loose}</div>
-                      ) : null;
-                    })()}
-                    {multi.res.some((r) => r.conflict) && (
-                      <div style={{ ...mono, fontSize: 10, color: T.red }}>
-                        Candidates marked CONFLICT sit at the bottom by construction: the four factors contradict each other on that underlying, and no expected value is worth a signal we cannot read.
-                      </div>
-                    )}
-                    {/* THE LIST SPLITS HERE TOO (P10 §3). The wide search used
-                        to DROP a hit the budget would not buy, in silence. It
-                        groups now: the floors are still what removes. */}
-                    {(() => {
-                      const built = multi.res.map((r, i) => ({
-                        r, i,
-                        cand: candidateOf({ name: r.name, legs: r.legs, a: r.a, pop: r.pop, dte: r.dte, expKey: r.expKey,
-                          ...seasonalStampFields(r.mc), ...chanceDrawFields(r.mc) },
-                        { ticker: r.tk, spot: r.spot, source: "wide search" }),
-                        // THE FOUR FIGURES ARE READ AT THE PRICE THAT FILLS,
-                        // worked out where this hit was generated — this row
-                        // has no quote function of its own at render time.
-                        bands: payoffBands({ legs: r.legs, entryNet: r.a.entry, spot: r.spot }),
-                        size: scaleStrategy(r.aFill || r.a, request.mode, request.amt),
-                      }));
-                      const byKey = new Map(built.map((x) => [x.cand.key, x]));
-                      return (
-                        <SplitSections
-                          items={built.map((x) => x.cand)} request={request} priceNote
-                          sizeOf={(c) => (byKey.get(c.key) || {}).size || null}
-                          renderItem={(c, misses) => {
-                            const x = byKey.get(c.key);
-                            if (!x) return null;
-                            const { r, i, bands } = x;
-                            const af = r.aFill || r.a;
-                            return (
-                              <CandidateCard key={`${r.tk}-${r.name}-${i}`}
-                                name={`${r.tk} \u00b7 ${r.name}`} legs={`${legsLine(r.legs)} \u00b7 ${r.expKey}`}
-                                misses={misses}
-                                rr={rewardRisk(af.maxProfit, af.maxLoss)} pop={r.pop}
-                                profit={af.maxProfit} risk={af.maxLoss} noCeiling={af.profitUnbounded}
-                                bands={bands} bars={barsCache[r.tk] || []} ticker={r.tk}
-                                badge={r.fused ? (
-                                  <span title={r.fused.narrative}
-                                    style={{ ...mono, fontSize: 8.5, color: r.conflict ? T.red : r.fused.agreement === "CONFLUENT" ? T.green : T.blue, border: `1px solid ${(r.conflict ? T.red : r.fused.agreement === "CONFLUENT" ? T.green : T.blue)}55`, borderRadius: 4, padding: "1px 6px", cursor: "help" }}>
-                                    {r.fused.agreement} {r.fused.score > 0 ? "+" : ""}{r.fused.score}
-                                  </span>) : null}
-                                actions={
-                                  <Btn small ghost={ticker !== r.tk} onClick={() => { switchTicker(r.tk); setSentiment(r.sent); setExpKey(r.expKey); goStep("shortlist"); }}>
-                                    Look at {r.tk} →
-                                  </Btn>
-                                } />
-                            );
-                          }} />
-                      );
-                    })()}
-                  </div>
-                )}
-              </Panel>
-
-            <StepForward
-              label={`See the shortlist for ${ticker} \u2192`}
-              sub={`Step 2 is every structure that clears the floors on ${ticker} today, where up to ${MAX_COMPARE} of them can be put side by side.`}
-              onClick={() => goStep("shortlist")} />
-          </div>
-        )}
-
-        {/* ============ STEP 2 · SHORTLIST — THE CANDIDATES THAT SURVIVED ============
-             What clears the quality floors on the market carried from step 1,
-             plus the roads the guided run produced. Up to three of them can be
-             put side by side, and any of them kept for later. */}
-        {tab === "build" && !showSettings && step === "shortlist" && !spot && (
-          <Panel style={{ marginTop: 12 }}>
-            <div style={{ ...mono, fontSize: 12, color: T.mut }}>
-              The shortlist is built out of real {ticker} contracts, and they have not loaded yet. Press Refresh
-              at the top of the screen, or go back to step 1 and pick a market whose prices are in.
-            </div>
-            <div style={{ marginTop: 10 }}><Btn small ghost onClick={() => goStep("radar")}>← Back to step 1</Btn></div>
-          </Panel>
-        )}
-
-        {tab === "build" && !showSettings && step === "shortlist" && spot && (
-          <div style={{ marginTop: 12 }}>
-            <div style={{ ...sansUI, fontSize: 19, fontWeight: 800, color: T.ink, marginTop: 4 }}>
-              Step 2 — which structure, on {ticker}?
-            </div>
-            {/* The tick, keep and take-to-Build controls are on every row and
-                say what they do; `CompareTray` says what a second tick gets
-                you, and only while one is ticked (P9, TASK 3). */}
-            <div style={{ ...sansUI, fontSize: 14, color: T.mut, lineHeight: 1.55, marginTop: 4 }}>
-              Everything below already clears the quality floors.
-            </div>
-
-            {/* THE ROADS FROM THE GUIDED RUN, on the step where candidates live.
-                This is the same verdict screen the guided flow used to jump to,
-                with its narrative moved to step 1: what was examined is a
-                question about markets, what to do about it is a question about
-                structures, and they are now on the steps that ask them. */}
-            {candidates.length > 0 && (
-              <div style={{ marginTop: 10, padding: "10px 12px", background: `${T.violet}0d`, border: `1px solid ${T.violet}44`, borderRadius: 8 }}>
-                <div style={{ ...mono, fontSize: 10, letterSpacing: "0.15em", color: T.violet }}>
-                  FROM YOUR ANSWERS · {candidates.length} ROAD{candidates.length === 1 ? "" : "S"}
-                </div>
-                <WizardCandidates
-                  candidates={candidates} answers={wizAnswers} narrative={[]}
-                  barsFor={(tk) => barsCache[tk] || []}
-                  weatherData={weather} newsItems={newsPool} month={NOW_MONTH}
-                  /* THE LIVE READING, so the road card, the Radar row and the
-                     Build screen cannot print three signal scores for one
-                     market on one day. */
-                  fusedFor={(tk) => fused[tk] || null}
-                  /* THE SAME SPLIT AS EVERY OTHER GENERATION SITE (P10 §3).
-                     A road is built to FIT the budget at one combination
-                     (`unit > ans.risk` in `runWizard`), so it normally sits
-                     above the line; the slider is what can move it. */
-                  request={request}
-                  sizeOf={(c) => (c && c.a ? scaleStrategy(c.a, request.mode, request.amt) : null)}
-                  onPick={pickRoad}
-                  onBack={() => { setView("wizard"); setWizStep("questions"); }}
-                  actionsFor={(c) => {
-                    const cand = candidateOf(c, { source: "road" });
-                    return (
+            {findShown.length > 0 && <SplitSections
+              items={findShown.map((x) => x.cand)} request={request} priceNote
+              sizeOf={(c) => { const x = findShown.find((y) => y.key === c.key); return x ? scaleStrategy(x.lf.aFill, request.mode, request.amt) : null; }}
+              renderItem={(c, misses) => {
+                const x = findShown.find((y) => y.key === c.key);
+                if (!x) return null;
+                const af = x.lf.aFill;
+                const size = scaleStrategy(af, request.mode, request.amt);
+                const signs = stopSigns({ fused: x.fused, flags: x.flags, feedBroken: x.feedBroken,
+                  noQuoteLegs: x.noQuoteLegs, contracts: size && size.ok ? size.n : null, askSize: x.touchSize });
+                return (
+                  <CandidateCard key={x.key}
+                    name={`${x.tk} · ${x.name}`} legs={`${legsLine(x.legs)} · ${x.expKey}`}
+                    misses={misses} signs={signs} size={sizeLine(request, size)}
+                    rr={x.lf.rr} pop={x.lf.pop} profit={af.maxProfit} risk={af.maxLoss} noCeiling={af.profitUnbounded}
+                    bands={x.lf.bands} bars={barsCache[x.tk] || []} ticker={x.tk}
+                    badge={<SignalBadge fused={x.fused} onClick={() => { setWhyTk(x.tk); setEv("why"); }} />}
+                    actions={
                       <CandidateActions
-                        ticked={inCompare(compare, cand)} onTick={() => tickCompare(cand)}
-                        saved={isSaved(cand)} onSave={() => saveCandidate(cand)} />
-                    );
-                  }}
-                />
-              </div>
-            )}
-
-            {/* THE CONTROLS COME FIRST HERE TOO (P10 §2). This panel WAS the
-                block, spread out, with a 100px number field buried in it. Same
-                component as the Radar's, same state, one spelling of each of
-                the five. Nothing cut: the implied target is TARGET PRICE, and
-                the two expiry sentences sit below, where they have a referent. */}
-            <RequestControls
-              journey="desk" style={{ marginTop: 12 }}
-              request={request} onChange={(patch) => setWant((w) => ({ ...w, ...patch }))}
-              sentiments={SENTIMENTS} sentiment={sentiment} onSentiment={setSentiment}
-              ticker={ticker} spot={spot}
-              expiries={expiryMenu} expKey={expKey} onExpiry={setExpKey} />
-            {chain && (
-              <div style={{ marginTop: 6 }}>
-                {chain.expirations.length <= 4 && (
-                  <div style={{ ...mono, fontSize: 9.5, color: T.dim, lineHeight: 1.55 }}>
-                    These are every expiry {feedName(chain) || "the feed"} lists for {ticker} — this ETF only has monthly ones, it is not a limit of the app.
-                  </div>
-                )}
-                {/* WHY THIS EXPIRY, AND WHAT WAS PASSED OVER. */}
-                <div style={{ ...mono, fontSize: 9.5, color: T.mut, marginTop: 4, lineHeight: 1.55 }}>
-                  {expiryChoiceNote(expChoice, liqLevel, { selected: expKey })}
-                </div>
-                {monoNote && (
-                  <div style={{ ...mono, fontSize: 9.5, color: T.red, marginTop: 4, lineHeight: 1.55 }}>
-                    {monoNote}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* The four readings are EVIDENCE, and evidence opens over the step
-                rather than lengthening it (PRD §12). The panel itself is
-                unchanged and still the only copy — it moved, it was not cut. */}
-            <button onClick={() => setEv("why")}
-              style={{
-                ...sansUI, width: "100%", textAlign: "left", marginTop: 10, padding: "10px 12px",
-                background: T.panel, border: `1px solid ${T.line}`, borderLeft: `3px solid ${T.blue}`,
-                borderRadius: 8, cursor: "pointer", minHeight: 52,
-              }}>
-              <span style={{ ...mono, fontSize: 10, letterSpacing: "0.15em", color: T.blue }}>WHY THIS MARKET · {ticker}</span>
-              <span style={{ display: "block", fontSize: 13.5, color: T.body, marginTop: 3, lineHeight: 1.5 }}>
-                {fused[ticker]
-                  ? `${fused[ticker].agreement} · ${fused[ticker].score > 0 ? "+" : ""}${fused[ticker].score}/100 with ${fused[ticker].confidence} confidence — open the four readings, the weather regions and the headlines behind them.`
-                  : "Open the four readings — seasonality, price trend, weather and news flow — and what is behind each one."}
-              </span>
-            </button>
-
-            {/* THE FLOOR IS THE USER'S SETTING. It sits directly above the list
-                it filters, because a filter written anywhere else is a filter
-                the reader has to be told about rather than one they can see. */}
-            <LiquidityFilter
-              levelId={liqLevelId} onLevel={setLiqLevelId} previews={liqPreview}
-              threshold={liqThreshold} ticker={ticker} expKey={expKey}
-              peers={expiryOI} feed={feedName(chain)} />
-
-            <Panel style={{ marginTop: 10 }}>
-              <Lbl>2 · {SENT.label.toUpperCase()} STRATEGIES — {ticker} · PRICED FROM THE LIVE CHAIN</Lbl>
-              {/* >>> ONE FOLD FOR EVERY REASON A STRUCTURE IS NOT ON THIS
-                  LIST (P9, TASK 3). <<< There were NINE separate paragraphs
-                  here — liquidity, per-leg spread, combination spread, reward,
-                  unpriceable, impossible, model disagreement, no ceiling and
-                  the three "was skipped" cases — about six hundred and fifty
-                  words explaining a list of at most eight rows, with
-                  `qualityFloorSentence()`'s hundred and sixty-two words
-                  printed TWICE on the same screen.
-
-                  FOLD, NEVER DELETE. `filterFold()` puts the counts and the
-                  setting on one line that is always visible; every long note
-                  is inside, unchanged and in its own words. The reader who
-                  wants the rule taps once; the reader who wants the list reads
-                  a list. The count is IN the summary, so nobody has to open it
-                  to find out whether it is worth opening. */}
-              {(() => {
-                const t = shortlist.tally || {};
-                const what = `${ticker}${expKey ? ` ${expKey}` : ""}`;
-                const fold = filterFold(t, { level: liqLevel, what });
-                const skipped = shortlist.oiSkipped || t.spreadSkipped > 0 || t.comboSpreadSkipped > 0;
-                if (!fold.total && !skipped) return null;
-                const summary = fold.summary
-                  || `Nothing was removed on ${what}. ${qualityFloorLine(liqLevel)}`;
-                return (
-                  <Fold summary={summary} label="why" tone={T.amber}
-                    style={{ marginTop: 8, padding: "8px 10px", background: `${T.amber}0f`, border: `1px solid ${T.amber}44`, borderRadius: 6 }}>
-                    {shortlist.cut.length > 0 && (
-                      <div style={{ ...mono, fontSize: 10.5, color: T.amber, lineHeight: 1.6, marginTop: 4 }}>
-                        {shortlist.cut.map((c) => <div key={c.name}>· {c.name} — {c.reasons[0]}</div>)}
-                      </div>
-                    )}
-                    {t.unpriceable > 0 && <div style={{ ...mono, fontSize: 10.5, color: T.red, lineHeight: 1.6, marginTop: 6 }}>{unpriceableNote(t.unpriceable, ticker)}</div>}
-                    {t.impossible > 0 && <div style={{ ...mono, fontSize: 10.5, color: T.red, lineHeight: 1.6, marginTop: 6 }}>{impossibleLossNote(t.impossible, ticker)}</div>}
-                    {t.model > 0 && <div style={{ ...mono, fontSize: 10.5, color: T.red, lineHeight: 1.6, marginTop: 6 }}>{modelDisagreementNote(t.model, ticker)}</div>}
-                    {t.spread > 0 && <div style={{ ...mono, fontSize: 10.5, color: T.amber, lineHeight: 1.6, marginTop: 6 }}>{wideSpreadNote(t.spread, what)}</div>}
-                    {/* AND THE PAIR, WHICH IS NOT THE LEGS. Its own count and
-                        its own sentence: UNG's 10.50/11.00 call spread passed
-                        the per-leg test on both legs and its combination was
-                        143% of its own mid wide. */}
-                    {t.comboSpread > 0 && <div style={{ ...mono, fontSize: 10.5, color: T.amber, lineHeight: 1.6, marginTop: 6 }}>{wideComboNote(t.comboSpread, what)}</div>}
-                    {t.crossing > 0 && <div style={{ ...mono, fontSize: 10.5, color: T.amber, lineHeight: 1.6, marginTop: 6 }}>{crossingNote(t.crossing, what)}</div>}
-                    {/* MISSING DATA IS NOT ILLIQUIDITY, and a floor that was
-                        never applied must not be reported as one that was. */}
-                    {shortlist.oiSkipped && <div style={{ ...mono, fontSize: 10, color: T.dim, lineHeight: 1.6, marginTop: 6 }}>{liquiditySkippedNote(feedName(chain))}</div>}
-                    {t.spreadSkipped > 0 && <div style={{ ...mono, fontSize: 10, color: T.dim, lineHeight: 1.6, marginTop: 6 }}>{spreadSkippedNote(feedName(chain))}</div>}
-                    {t.comboSpreadSkipped > 0 && <div style={{ ...mono, fontSize: 10, color: T.dim, lineHeight: 1.6, marginTop: 6 }}>{comboSpreadSkippedNote(feedName(chain))}</div>}
-                    {/* >>> THE FLOOR PARAGRAPH'S ONE HOME ON THIS SCREEN. <<<
-                        It was printed here AND in the budget footnote below,
-                        and again on the Radar twice. This is the home; every
-                        other site prints `qualityFloorLine()`. */}
-                    <div style={{ ...mono, fontSize: 10.5, color: T.dim, lineHeight: 1.6, marginTop: 8 }}>{qualityFloorSentence(liqLevel)}</div>
-                  </Fold>
+                        ticked={inCompare(compare, x.cand)} onTick={() => tickCompare(x.cand)}
+                        saved={isSaved(x.cand)} onSave={() => saveCandidate(x.cand)}
+                        onBuild={() => openFound(x)} />
+                    } />
                 );
-              })()}
-              {/* WHAT HAS NO CEILING. Kept, shown, and named — never scored. */}
-              {shortlist.rows.some(({ a }) => a.profitUnbounded) && (
-                <Fold label="why last" tone={T.dim} style={{ marginTop: 8 }}
-                  summary={noCeilingRankLine(shortlist.rows.filter(({ a }) => a.profitUnbounded).length)}>
+              }} />}
+
+            {/* EVERYTHING THAT EXPLAINS THE LIST, BEHIND ONE "why". Nothing in
+                it is cut: the floor counts and their own sentences, the
+                skipped floors, the setting and what loosening lets back in,
+                and the floor held against the chains it judges. */}
+            {(() => {
+              const t = findGen.tally;
+              const fold = filterFold(t, { level: liqLevel, what: find.market || null });
+              const what = find.market || find.markets.join(", ");
+              const unb = findGen.items.filter((x) => x.lf.aFill.profitUnbounded).length;
+              const loose = looseningWarning(liqLevel);
+              return (
+                <Fold label="why" tone={loose ? T.red : T.dim} style={{ marginTop: 10 }}
+                  summary={fold.summary || `${qualityFloorLine(liqLevel)} Nothing was removed.`}>
+                  {t.unpriceable > 0 && <div style={{ ...mono, fontSize: 10.5, color: T.amber, lineHeight: 1.6, marginTop: 6 }}>{unpriceableNote(t.unpriceable, what)}</div>}
+                  {t.impossible > 0 && <div style={{ ...mono, fontSize: 10.5, color: T.red, lineHeight: 1.6, marginTop: 6 }}>{impossibleLossNote(t.impossible, what)}</div>}
+                  {t.model > 0 && <div style={{ ...mono, fontSize: 10.5, color: T.red, lineHeight: 1.6, marginTop: 6 }}>{modelDisagreementNote(t.model, what)}</div>}
+                  {t.spread > 0 && <div style={{ ...mono, fontSize: 10.5, color: T.amber, lineHeight: 1.6, marginTop: 6 }}>{wideSpreadNote(t.spread, what)}</div>}
+                  {t.comboSpread > 0 && <div style={{ ...mono, fontSize: 10.5, color: T.amber, lineHeight: 1.6, marginTop: 6 }}>{wideComboNote(t.comboSpread, what)}</div>}
+                  {t.crossing > 0 && <div style={{ ...mono, fontSize: 10.5, color: T.amber, lineHeight: 1.6, marginTop: 6 }}>{crossingNote(t.crossing, what)}</div>}
+                  {findGen.oiSkipped.length > 0 && <div style={{ ...mono, fontSize: 10, color: T.dim, lineHeight: 1.6, marginTop: 6 }}>{liquiditySkippedNote(`the feed for ${findGen.oiSkipped.join(", ")}`)}</div>}
+                  {findGen.spreadSkipped.length > 0 && <div style={{ ...mono, fontSize: 10, color: T.dim, lineHeight: 1.6, marginTop: 6 }}>{spreadSkippedNote(`the feed for ${findGen.spreadSkipped.join(", ")}`)}</div>}
+                  {findGen.comboSpreadSkipped.length > 0 && <div style={{ ...mono, fontSize: 10, color: T.dim, lineHeight: 1.6, marginTop: 6 }}>{comboSpreadSkippedNote(`the feed for ${findGen.comboSpreadSkipped.join(", ")}`)}</div>}
+                  {findGen.noBoard.length > 0 && <div style={{ ...mono, fontSize: 10.5, color: T.mut, lineHeight: 1.6, marginTop: 6 }}>{`No expiry on ${findGen.noBoard.join(", ")} is far enough out to open on, so nothing was built there. ${horizonFloorNote()}.`}</div>}
+                  {unb > 0 && <div style={{ ...mono, fontSize: 10, color: T.dim, lineHeight: 1.6, marginTop: 6 }}>{noCeilingRankNote(unb)}</div>}
                   <div style={{ ...mono, fontSize: 10, color: T.dim, lineHeight: 1.6, marginTop: 6 }}>
-                    {noCeilingRankNote(shortlist.rows.filter(({ a }) => a.profitUnbounded).length)}
+                    Candidates marked CONFLICT sit at the bottom by construction: the four factors contradict each other on that underlying, and no expected value is worth a signal we cannot read.
                   </div>
-                </Fold>
-              )}
-              {/* AN EMPTY LIST NAMES THE EXPIRY IT EMPTIED, and a board that
-                  has not loaded is not a board that emptied. Three different
-                  answers, three different sentences — the line `wizard.test`
-                  holds on the refusal screen. NONE of these is folded: an
-                  empty screen with no sentence is the fault they exist for. */}
-              {shortlist.rows.length === 0 && shortlist.board === null && (
-                <div style={{ ...mono, fontSize: 11, color: T.amber, marginTop: 8, lineHeight: 1.6 }}>
-                  {unloadedBoardNote(ticker, expKey)}
-                </div>
-              )}
-              {/* >>> AND A BOARD THE GATE WOULD NOT OPEN ON IS A THIRD ANSWER
-                  (P9, TASK 1). <<< Not "nothing cleared" — nothing was built,
-                  because an order on this board is refused at the send. The
-                  headline is one line; the rule's own paragraph is behind the
-                  tap, because it is an EXPLANATION and this is a REFUSAL. */}
-              {shortlist.offFloor && (
-                <Fold label="the rule" tone={T.amber} style={{ marginTop: 8 }}
-                  summary={`Nothing is offered on ${expKey || "this board"}: it is ${shortlist.offFloor.dte} days out, and the app does not propose a trade its own checks would block. Pick a further expiry above.`}>
-                  <div style={{ ...mono, fontSize: 10.5, color: T.mut, lineHeight: 1.6, marginTop: 6 }}>
-                    {shortlist.offFloor.band === "inside-exit"
-                      ? entryInsideExitNote(shortlist.offFloor)
-                      : entryRoomWarning(shortlist.offFloor)}
+                  <div style={{ ...mono, fontSize: 10, color: isLoosened(liqLevel) ? T.red : T.dim, lineHeight: 1.6, marginTop: 6 }}>
+                    {liquiditySettingNote(liqLevel, { ...t, kept: findGen.items.length })}
                   </div>
+                  {loose && <div style={{ ...sansUI, fontSize: 12, color: T.red, lineHeight: 1.5, marginTop: 6 }}>{loose}</div>}
+                  <div style={{ ...mono, fontSize: 10.5, color: T.dim, lineHeight: 1.6, marginTop: 8 }}>{qualityFloorSentence(liqLevel)}</div>
+                  <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6, lineHeight: 1.6 }}>
+                    {`${limits.answered ? "Your" : "The suggested"} per-trade limit: ${money(limits.perTradeLimit)} (${perTradeCapLabel()}).`} Budget is the most you will pay, taken from live prices. For trades where you receive money up front, the limit becomes the capital tied up instead. Chance is the probability of ending in profit at expiry.
+                  </div>
+                  <LiquidityFilter
+                    levelId={liqLevelId} onLevel={setLiqLevelId} previews={liqPreview}
+                    threshold={liqThreshold} ticker={focusTk} expKey={focusBoard ? focusBoard.expKey : null}
+                    peers={focusBoard ? focusBoard.peers : []} feed={focusBoard ? focusBoard.feed : null} />
+                  <OpenInterestReadout chains={chains} floor={liqLevel.absolute} percentile={liqLevel.percentile} level={liqLevel} />
                 </Fold>
-              )}
-              {shortlist.rows.length === 0 && shortlist.board !== null && !shortlist.offFloor && (
-                <div style={{ ...mono, fontSize: 11, color: T.red, marginTop: 8, lineHeight: 1.6 }}>
-                  {emptyExpiryNote(expKey, shortlist.tally, liqLevel)}
-                </div>
-              )}
-              {/* ============ THE LIST SPLITS, AND MEMBERSHIP IS LIVE
-                  (ROADMAP P10 §3). ============ Above: what meets what was
-                  asked for. Below, never hidden and never folded: everything
-                  else that cleared the floors, each row saying what it missed.
-                  It GROUPS; the floors above are what REMOVES. Membership is
-                  derived on every render and never stored on a candidate. */}
-              {(() => {
-                const built = shortlist.rows.map(({ p, a }) => {
-                  // `rewardRisk()` and never a division here: a ratio taken
-                  // against a max loss the app could not read printed
-                  // "6748644041614687.00" on BOIL. Below the minimum it is "—".
-                  const rr = rewardRisk(a.maxProfit, a.maxLoss);
-                  // THE ONE CHANCE. The row and the Build panel below it are
-                  // the same object for the same structure, seeded from it.
-                  const mcRow = chanceFor(a, { ticker, legs: p.legs, spot, dte, expKey });
-                  const pop = mcRow ? mcRow.pop : null;
-                  // One shape for everything that can be compared or kept
-                  // (src/path.js), so a road, a shortlist row and a
-                  // multi-market hit are the same kind of thing here.
-                  const bands = payoffBands({ legs: p.legs, entryNet: a.entry, spot });
-                  const cand = candidateOf({ name: p.name, legs: p.legs, a, pop, dte, expKey,
-                    ...seasonalStampFields(mcRow), ...chanceDrawFields(mcRow) },
-                  // NO `sigma` FROM THE REALISED TABLE HERE ANY MORE. The two
-                  // numbers a compare picture is drawn at are the two the
-                  // chance was computed at, and they come off `mcRow` above.
-                  { ticker, spot, source: "shortlist" });
-                  /* >>> EVERY FIGURE ON THE CARD IS READ AT THE PRICE THAT
-                     FILLS (P10 §3-bis). <<< `a` stays the MID reading — a
-                     candidate is a structure and not yet a price, and the
-                     compare picture and the stamp are drawn from it. `aFill`
-                     is the same `analyze()` at `openLimitPrice()`, which is
-                     the number the ticket seeds to, so the card and the order
-                     agree by construction rather than by luck. */
-                  const aFill = atFillPrice(p.legs, a, { spot, dte, iv, q });
-                  return { p, a, aFill, cand, bands, mcRow, pop,
-                    rr: rewardRisk(aFill.maxProfit, aFill.maxLoss),
-                    size: scaleStrategy(aFill, request.mode, request.amt) };
-                });
-                const byKey = new Map(built.map((x) => [x.cand.key, x]));
-                return (
-                  <SplitSections
-                    items={built.map((x) => x.cand)} request={request} priceNote
-                    sizeOf={(c) => (byKey.get(c.key) || {}).size || null}
-                    renderItem={(c, misses) => {
-                      const x = byKey.get(c.key);
-                      if (!x) return null;
-                      const { p, a, aFill, cand, bands, mcRow, pop, rr } = x;
-                      return (
-                        <CandidateCard key={p.name}
-                          name={p.name} legs={legsLine(p.legs)} misses={misses}
-                          rr={rr} pop={pop} profit={aFill.maxProfit} risk={aFill.maxLoss}
-                          noCeiling={aFill.profitUnbounded}
-                          bands={bands} bars={barsCache[ticker] || []} ticker={ticker}
-                          actions={
-                            <CandidateActions
-                              ticked={inCompare(compare, cand)} onTick={() => tickCompare(cand)}
-                              saved={isSaved(cand)} onSave={() => saveCandidate(cand)}
-                              onBuild={() => applyPreset(p, a)} />
-                          } />
-                      );
-                    }} />
-                );
-              })()}
-              {/* WHICH SETTING PRODUCED THIS LIST. On the same screen as the
-                  list, in every state of it, including the empty one. */}
-              <div style={{ ...mono, fontSize: 10, color: isLoosened(liqLevel) ? T.red : T.dim, marginTop: 10, lineHeight: 1.6 }}>
-                {liquiditySettingNote(liqLevel, shortlist.tally)}
-              </div>
-              {/* >>> THE SECOND COPY OF THE FLOOR PARAGRAPH, AND IT IS GONE
-                  (P9, TASK 3). <<< A hundred and sixty-two words, printed here
-                  and again above the list on the same screen. The fold above
-                  is its ONE home; this prints `qualityFloorLine()`, which
-                  states which floors ran and at what setting and nothing else.
-                  The reasoning did not move far: it is one tap up the page.
-                  The three sentences about the budget and the chance are
-                  folded with it — they explain a column heading, and a column
-                  heading is not something to read every time. */}
-              <Fold label="what these columns mean" tone={T.dim} style={{ marginTop: 8 }}
-                summary={`${qualityFloorLine(liqLevel)} ${limits.answered ? "Your" : "The suggested"} per-trade limit: ${money(limits.perTradeLimit)} (${perTradeCapLabel()}).`}>
-                <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6, lineHeight: 1.6 }}>
-                  Budget is the most you will pay, taken from live {feedName(chain) || "market"} prices. For trades
-                  where you receive money up front, the limit becomes the capital tied up instead. Chance is the
-                  probability of ending in profit at expiry.
-                </div>
-              </Fold>
-            </Panel>
+              );
+            })()}
 
-            {/* WHAT THE WIDE SEARCH FOUND ON THIS MARKET. The multi-market
-                scan runs on step 1, where the question is which market; its
-                hits for the market you carried in belong here, where the
-                question is which structure. */}
-            {(multi.res || []).filter((r) => r.tk === ticker).length > 0 && (
-              <Panel style={{ marginTop: 10 }}>
-                <Lbl>ALSO FOUND BY THE WIDE SEARCH ON {ticker}</Lbl>
-                {/* TWO SECTIONS HERE TOO (P10 §3). */}
-                {(() => {
-                  const built = (multi.res || []).filter((r) => r.tk === ticker).map((r, i) => ({
-                    r, i,
-                    cand: candidateOf({ name: r.name, legs: r.legs, a: r.a, pop: r.pop, dte: r.dte, expKey: r.expKey,
-                      ...seasonalStampFields(r.mc), ...chanceDrawFields(r.mc) },
-                    { ticker: r.tk, spot: r.spot, source: "wide search" }),
-                    bands: payoffBands({ legs: r.legs, entryNet: r.a.entry, spot: r.spot }),
-                    size: scaleStrategy(r.aFill || r.a, request.mode, request.amt),
-                  }));
-                  const byKey = new Map(built.map((x) => [x.cand.key, x]));
-                  return (
-                    <SplitSections
-                      items={built.map((x) => x.cand)} request={request} priceNote
-                      sizeOf={(c) => (byKey.get(c.key) || {}).size || null}
-                      renderItem={(c, misses) => {
-                        const x = byKey.get(c.key);
-                        if (!x) return null;
-                        const { r, i, cand, bands } = x;
-                        const af = r.aFill || r.a;
-                        return (
-                          <CandidateCard key={`${r.name}-${i}`}
-                            name={r.name} legs={`${legsLine(r.legs)} \u00b7 ${r.expKey}`} misses={misses}
-                            rr={rewardRisk(af.maxProfit, af.maxLoss)} pop={r.pop}
-                            profit={af.maxProfit} risk={af.maxLoss} noCeiling={af.profitUnbounded}
-                            bands={bands} bars={barsCache[r.tk] || []} ticker={r.tk}
-                            actions={
-                              <CandidateActions
-                                ticked={inCompare(compare, cand)} onTick={() => tickCompare(cand)}
-                                saved={isSaved(cand)} onSave={() => saveCandidate(cand)}
-                                onBuild={() => openOnBuild({ ticker: r.tk, expKey: r.expKey, legs: r.legs, name: r.name })} />
-                            } />
-                        );
-                      }} />
-                  );
-                })()}
-              </Panel>
-            )}
-
-            {/* KEPT FOR LATER — the same `store.saved` array the Build screen
-                writes to, so there is one place saved things live. */}
-            {(store.saved || []).length > 0 && (
-              <Panel style={{ marginTop: 10 }}>
-                <Lbl>KEPT TO COME BACK TO ({store.saved.length})</Lbl>
-                <div style={{ display: "grid", gap: 6, marginTop: 10 }}>
-                  {[...store.saved].reverse().map((sv) => {
-                    const cand = candidateFromSaved(sv);
-                    return (
-                      <div key={sv.id} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "8px 10px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7 }}>
-                        {/* A kept row is a candidate too, so it gets the same
-                            pair. Without them it was a line of text: the one
-                            list where you cannot see what you kept. */}
-                        {cand && Number.isFinite(cand.spot) && (() => {
-                          const bb = payoffBands({ legs: sv.legs, entryNet: cand.entryNet ?? 0, spot: cand.spot });
-                          return (
-                            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                              <BandThumbnail bands={bb} bars={barsCache[sv.ticker] || []} width={110} height={34}
-                                title={bandTakeaway(bb, { ticker: sv.ticker })} />
-                              <Gauge bands={bb} size={80} ticker={sv.ticker} />
-                            </div>
-                          );
-                        })()}
-                        <div style={{ flex: 1, minWidth: 150 }}>
-                          <div style={{ fontWeight: 700, color: T.ink, fontSize: 12.5 }}>{sv.ticker} · {sv.name}</div>
-                          <div style={{ ...mono, fontSize: 10, color: T.dim }}>{legsLine(sv.legs)}{sv.expKey ? ` · ${sv.expKey}` : ""} · {savedAge(sv)}</div>
-                        </div>
-                        {cand && Number.isFinite(cand.spot) && (
-                          <button onClick={() => tickCompare(cand)}
-                            style={{ ...mono, fontSize: 10.5, minHeight: 36, padding: "6px 10px", borderRadius: 6, cursor: "pointer", background: inCompare(compare, cand) ? T.blue : "transparent", color: inCompare(compare, cand) ? T.onAccent : T.blue, border: `1px solid ${T.blue}` }}>
-                            {inCompare(compare, cand) ? "✓ comparing" : "Compare"}
-                          </button>
-                        )}
-                        <Btn small ghost onClick={() => openOnBuild({ ticker: sv.ticker, expKey: sv.expKey, legs: sv.legs, name: sv.name })}>Take to Build →</Btn>
-                        <Btn small ghost color={T.red} onClick={() => delSaved(sv.id)}><Trash2 size={11} /></Btn>
-                      </div>
-                    );
-                  })}
-                </div>
-                <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 8 }}>
-                  These are kept in this browser and travel with your saved strategies. The prices shown are the
-                  ones from when you kept them; taking one to Build re-prices it from the live chain.
-                </div>
-              </Panel>
-            )}
-
-            {/* COMPARING — up to three, one picture (PRD §6): the payoffs
-                overlaid on one axis with one shared distribution and every
-                breakeven marked. Ticking gathers them here. */}
+            {/* COMPARING — up to three, one picture (PRD §6). */}
             <CompareTray items={compare} max={MAX_COMPARE} note={compareNote}
               onRemove={(c) => tickCompare(c)}
               onClear={() => { setCompare([]); setShowCompare(false); setCompareNote(null); }}
@@ -5421,56 +4204,27 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   {compare.map((c, i) => (
                     <div key={c.key} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "8px 10px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7 }}>
                       <span style={{ width: 10, height: 10, borderRadius: 3, background: [T.blue, T.amber, T.violet][i], flexShrink: 0 }} />
-                      {Number.isFinite(c.spot) && (() => {
-                        const bb = payoffBands({ legs: c.legs, entryNet: c.entryNet ?? 0, spot: c.spot });
-                        return (
-                          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                            <BandThumbnail bands={bb} bars={barsCache[c.ticker] || []} width={100} height={32}
-                              title={bandTakeaway(bb, { ticker: c.ticker })} />
-                            <Gauge bands={bb} size={74} ticker={c.ticker} />
-                          </div>
-                        );
-                      })()}
                       <div style={{ flex: 1, minWidth: 140 }}>
                         <div style={{ fontWeight: 700, color: T.ink, fontSize: 12.5 }}>{c.ticker} · {c.name}</div>
-                        <div style={{ ...mono, fontSize: 10, color: T.dim }}>{legsLine(c.legs)}</div>
+                        <div style={{ ...mono, fontSize: 10, color: T.dim }}>{legsLine(c.legs)} · per contract</div>
                       </div>
                       <Stat k="RISK" v={fmt$(c.risk)} c={T.red} />
                       <Stat k="MAX PROFIT" v={ceil$(c.maxProfit)} c={T.green}
                         tip={c.maxProfit == null ? noCeilingNote(c.name) : undefined} />
                       <Stat k="CHANCE" v={chanceText(c.pop)} c={(c.pop || 0) >= 0.5 ? T.green : T.violet} tip={seasonalStampNote(c, c.ticker || "this market")} />
-                      <Btn small onClick={() => openOnBuild({ ticker: c.ticker, expKey: c.expKey, legs: c.legs, name: c.name })}>Take to Build →</Btn>
+                      <Btn small onClick={() => { const x = findGen.items.find((y) => y.key === c.key); if (x) openFound(x); else openOnBuild({ ticker: c.ticker, expKey: c.expKey, legs: c.legs, name: c.name }); }}>Take to Build →</Btn>
                     </div>
                   ))}
                 </div>
               </Panel>
             )}
 
-            {/* The floor, held up against the chains it is applied to. The
-                developer cannot fetch a live chain; the app can, so it reports.
-                See OpenInterestReadout above. */}
-            <OpenInterestReadout chains={chains} floor={liqLevel.absolute} percentile={liqLevel.percentile} level={liqLevel} />
-
-            {/* >>> A STRUCTURE THE FLOORS REMOVED IS NOT SOMETHING TO OFFER
-                (P9, TASK 1). <<< This carried whatever was in the Build
-                screen's legs, which after a refusal is the structure the list
-                above has just said it will not offer — so the honest button
-                and the honest sentence are the same one. Under an empty
-                shortlist it asks for another expiry, another market, or
-                nothing today. */}
-            {(() => {
-              const empty = shortlist.rows.length === 0;
-              return (
-                <StepForward
-                  label={empty ? "Nothing here to take apart" : legs.length ? `Go to Build \u2014 ${stratName} \u2192` : "Pick one above to go to Build"}
-                  disabled={empty || !legs.length}
-                  disabledNote={empty
-                    ? emptyShortlistCta({ expKey, ticker })
-                    : `Step 3 is one structure taken apart. Use "Take to Build" on whichever of these you want to look at properly \u2014 nothing is sent until the checks at the bottom of that screen.`}
-                  sub={`${stratName} is loaded on step 3. Nothing is sent until the checks at the bottom of that screen.`}
-                  onClick={() => goStep("build")} />
-              );
-            })()}
+            <StepForward
+              label={legs.length ? `Go to Build — ${ticker} · ${stratName} →` : "Pick one above to go to Build"}
+              disabled={!legs.length}
+              disabledNote={`Use "Take to Build" on whichever card you want to look at properly — nothing is sent until the checks on that screen.`}
+              sub={`${ticker} · ${stratName} is loaded on Build. Nothing is sent until the checks there.`}
+              onClick={() => goStep("build")} />
           </div>
         )}
 
@@ -5503,13 +4257,10 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
             {/* `StepNav` already writes what each step carries under its own
                 number (`stepCarry` in path.js), so this repeated it a second
                 time four lines below it (P9, TASK 3). */}
-            <div style={{ ...sansUI, fontSize: 14, color: T.mut, lineHeight: 1.55, marginTop: 4 }}>
-              The chain, the greeks, the charts and the order.
-            </div>
             <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
-              <Btn small ghost color={T.blue} onClick={() => goStep("shortlist")}>← Back to the shortlist</Btn>
+              <Btn small ghost color={T.blue} onClick={() => goStep("find")}>← Back to Find</Btn>
               {compare.length > 0 && (
-                <Btn small ghost color={T.blue} onClick={() => { setShowCompare(true); goStep("shortlist"); }}>
+                <Btn small ghost color={T.blue} onClick={() => { setShowCompare(true); goStep("find"); }}>
                   {compare.length} still ticked to compare
                 </Btn>
               )}
@@ -5517,23 +4268,6 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
           </div>
         )}
         {tab === "build" && !showSettings && step === "build" && <div ref={buildAnchor} style={{ scrollMarginTop: 12 }} />}
-        {/* Where the guided flow lands. Without this the trade simply appears on
-            Build and the user has no way to tell that the road they picked is
-            the thing in front of them. */}
-        {tab === "build" && !showSettings && step === "build" && picked && (
-          <div style={{ marginTop: 12, padding: "10px 12px", background: `${T.blue}0f`, border: `1px solid ${T.blue}55`, borderLeft: `3px solid ${T.blue}`, borderRadius: 8 }}>
-            <div style={{ ...mono, fontSize: 10, color: T.blue, letterSpacing: "0.1em" }}>THE ROAD YOU TOOK</div>
-            {/* "Nothing is sent until you do" is on the confirm step at the
-                bottom of this screen, where the send is (P9, TASK 3). */}
-            <div style={{ fontSize: 13.5, color: T.body, marginTop: 4, lineHeight: 1.55 }}>
-              {picked.ticker} · {picked.name} — loaded below. Change anything you want, then open it at the bottom.
-            </div>
-            <button onClick={() => { setPicked(null); setOpenResult(null); }}
-              style={{ ...mono, fontSize: 10.5, marginTop: 6, background: "transparent", border: "none", color: T.blue, cursor: "pointer", padding: "4px 0" }}>
-              dismiss
-            </button>
-          </div>
-        )}
         {tab === "build" && !showSettings && step === "build" && buildScreen === "builder" && (
           <div style={{ marginTop: 12 }}>
             <Panel>
@@ -5572,6 +4306,22 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   </span>
                 </div>
               )}
+              {/* WHY THIS EXPIRY — moved here from the Shortlist step, which is
+                  gone (PR #40, TASK 1). An impossible board is a stop sign
+                  above the figures, with its sentence behind that strip's why. */}
+              {chain && (
+                <Fold label="why" tone={T.dim} style={{ marginTop: 6 }}
+                  summary={`${expKey || "No expiry"} · ${chain.expirations.length} expiries listed`}>
+                  <div style={{ ...mono, fontSize: 9.5, color: T.mut, marginTop: 4, lineHeight: 1.55 }}>
+                    {expiryChoiceNote(expChoice, liqLevel, { selected: expKey })}
+                  </div>
+                  {chain.expirations.length <= 4 && (
+                    <div style={{ ...mono, fontSize: 9.5, color: T.dim, marginTop: 4, lineHeight: 1.55 }}>
+                      These are every expiry {feedName(chain) || "the feed"} lists for {ticker} — this ETF only has monthly ones, it is not a limit of the app.
+                    </div>
+                  )}
+                </Fold>
+              )}
 
               <WhyThisTrade
                 fused={fused[ticker]}
@@ -5592,17 +4342,12 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   textarea that unlocks the ticket cannot be behind a tap. */}
               {(() => {
                 const fusedHere = fused[ticker] || null;
-                // THE NARRATIVE HAS ONE HOME — "Why this trade", just above.
-                // Everything here carries the count and points at it.
-                const gateWarnings = warningsToPrint(guard?.warnings || [], {
-                  narrative: fusedHere?.narrative || null,
-                  pointer: conflictSummaryLine(clash, fusedHere),
-                });
-                const count = (clash ? 1 : 0) + gateWarnings.length;
-                if (!count) return null;
-                const summary = clash
-                  ? conflictSummaryLine(clash, fusedHere)
-                  : `${gateWarnings.length} thing${gateWarnings.length === 1 ? "" : "s"} the risk gate wants you to have read before you send this.`;
+                // THE GATE'S WARNINGS ARE IN THE STOP-SIGNS STRIP NOW, ONCE
+                // (PR #40, TASK 2). This panel is only the written reason a
+                // trade against the factors needs, which cannot be a label.
+                if (!clash) return null;
+                const count = 1;
+                const summary = conflictSummaryLine(clash, fusedHere);
                 return (
                   <BuildWarnings summary={summary} count={count} forceOpen={!!clash && !reasonOk}>
                     {clash && (
@@ -5630,13 +4375,6 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                         </div>
                       </>
                     )}
-                    {gateWarnings.length > 0 && (
-                      <div style={{ display: "grid", gap: 6, marginTop: clash ? 10 : 0 }}>
-                        {gateWarnings.map((w) => (
-                          <div key={w.code} style={{ ...mono, fontSize: 10.5, color: T.amber, lineHeight: 1.6 }}>⚠ {w.message}</div>
-                        ))}
-                      </div>
-                    )}
                   </BuildWarnings>
                 );
               })()}
@@ -5648,23 +4386,23 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   is UNCHANGED this session — what changed is that the board
                   `expiryChoice()` has been naming in `passedOver` can now
                   actually be taken, which is what makes that sentence honest. */}
-              {room.known && room.band === "inside-exit" && (
-                <div style={{ ...mono, fontSize: 11, color: T.red, marginTop: 12, lineHeight: 1.6, padding: "9px 11px", background: `${T.red}0f`, border: `1px solid ${T.red}66`, borderRadius: 7 }}>
-                  ✗ {entryInsideExitNote(room)}
-                </div>
-              )}
+              {/* Inside the exit window is a REFUSAL, and the gate's refusal
+                  (ENTRY_DTE, this same sentence) is on the trade card beside the
+                  button — never behind a tap. A second copy here is gone (PR #40). */}
               {room.known && room.band === "tight" && (
                 <div style={{ marginTop: 12, padding: "9px 11px", background: `${T.amber}0f`, border: `1px solid ${T.amber}66`, borderRadius: 7 }}>
                   <div style={{ ...mono, fontSize: 9.5, color: T.amber, fontWeight: 800, letterSpacing: 0.4 }}>
                     {room.room} DAYS OF ROOM · THE APP AIMS FOR {room.target}
                   </div>
-                  <div style={{ fontSize: 12.5, color: T.body, marginTop: 5, lineHeight: 1.55 }}>
-                    {entryRoomWarning(room)}
-                  </div>
+                  <Fold label="why" tone={T.amber} style={{ marginTop: 5 }} summary="A written reason unlocks it.">
+                    <div style={{ fontSize: 12.5, color: T.body, marginTop: 5, lineHeight: 1.55 }}>
+                      {entryRoomWarning(room)}
+                    </div>
+                  </Fold>
                   <textarea
                     value={roomReason}
                     onChange={(e) => setRoomReason(e.target.value)}
-                    placeholder="Why is this expiry worth taking with less room than the app aims for? The reason is stored with the position and appears in the Journal."
+                    placeholder="Why take this expiry with less room? Stored with the position."
                     rows={2}
                     style={{ ...mono, width: "100%", boxSizing: "border-box", marginTop: 9, background: T.bg, color: T.ink, border: `1px solid ${entryOverrideOk(roomReason) ? T.green : T.amber}`, borderRadius: 6, padding: "8px 9px", fontSize: 12, resize: "vertical" }}
                   />
@@ -5734,17 +4472,14 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
               </div>
               {optLeg && <OptionPanel occ={optLeg.occ} label={optLeg.label} quote={optLeg.quote} onClose={() => setOptLeg(null)} />}
 
-              {/* Reconciliation with the Shortlist: same trade, numbers always explained */}
-              {optRef && optRef.name === stratName && optRef.expKey === expKey && (() => {
-                const d = (A.entry - optRef.entry) * 100;
-                if (Math.abs(d) < 1) return (
-                  <div style={{ ...mono, fontSize: 10, color: T.green, marginTop: 10 }}>✓ Same numbers as the Shortlist (same live quotes, one contract).</div>
-                );
-                return (
-                  <div style={{ ...mono, fontSize: 10, color: T.amber, marginTop: 10 }}>
-                    ⚠ The price moved {fmt$(Math.abs(d))} {d > 0 ? "against you" : "in your favour"} since the Shortlist was drawn: the quotes refreshed in between. This one is the current price.
-                  </div>
-                );
+              {/* THE CARD AGAINST BUILD, EVERY FIGURE (PR #40, TASK 0). It
+                  compared the mid's entry alone and printed "Same numbers as
+                  the Shortlist" over a risk of $68 against the card's $62. */}
+              {optRef && optRef.card && optRef.name === stratName && optRef.expKey === expKey && (() => {
+                const r = reconcileFigures(optRef.card, figureSet(AE, chance ? chance.pop : null));
+                return r ? (
+                  <div style={{ ...mono, fontSize: 10, color: r.same ? T.green : T.amber, marginTop: 10, lineHeight: 1.6 }}>{r.line}</div>
+                ) : null;
               })()}
               {/* ============ ONE PRICE, AND WHAT CROSSING COSTS (P10 §1).
                   ============ The owner's reading of the whole product: "is it
@@ -5774,7 +4509,22 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                     <div style={{ ...sansUI, fontSize: 15, fontWeight: 700, color: T.ink }}>
                       {ticker} · {stratName}
                     </div>
-                    <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 2 }}>{legsLine(legs)}</div>
+                    <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 2 }}>{legsLine(legs)} · per contract</div>
+                    {/* STOP SIGNS, ABOVE THE NUMBERS (PR #40, TASK 2). The gate's
+                        warnings print here once, as labels; their sentences are
+                        behind this one "why". */}
+                    <StopSigns signs={buildSigns} style={{ marginTop: 8 }}>
+                      <Fold label="why" tone={T.red} style={{ marginTop: 4 }} summary="What each sign means">
+                        {warningsToPrint(guard?.warnings || [], {
+                          narrative: fused[ticker]?.narrative || null,
+                          pointer: conflictSummaryLine(clash, fused[ticker] || null),
+                        }).map((w) => (
+                          <div key={w.code} style={{ ...mono, fontSize: 10.5, color: T.amber, lineHeight: 1.6, marginTop: 4 }}>⚠ {w.message}</div>
+                        ))}
+                        {monoNote && <div style={{ ...mono, fontSize: 10.5, color: T.red, lineHeight: 1.6, marginTop: 4 }}>{monoNote}</div>}
+                        {book.missing.length > 0 && <div style={{ ...mono, fontSize: 10.5, color: T.red, lineHeight: 1.6, marginTop: 4 }}>{unquotedLegNote(book.missing.length)}</div>}
+                      </Fold>
+                    </StopSigns>
                     <div style={{ display: "flex", gap: 12, marginTop: 10, flexWrap: "wrap" }}>
                       {[[AE.entry >= 0 ? "YOU PAY" : "YOU RECEIVE", fmt$(Math.abs(AE.entry) * 100), T.ink],
                         ["MAX LOSS", fmt$(AE.maxLoss), T.red],
@@ -5792,7 +4542,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                       {crossingCostNote(cc)}
                     </div>
                     {/* THE BREAKDOWN AND THE RANGE FOLD, AS THE WHY. */}
-                    <Fold label="the price" tone={T.dim} style={{ marginTop: 8 }}
+                    <Fold label="why" tone={T.dim} style={{ marginTop: 8 }}
                       summary={`Where that price sits in the market, and the range behind it`}>
                       {cc.known ? (
                         <>
@@ -5843,7 +4593,6 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                 ticker={ticker} name={stratName}
                 card={buildCard}
                 refusals={buildRefusals}
-                warnings={(guard?.warnings || []).length}
                 onNumbers={() => setDeskSheet("numbers")}
                 onOrder={() => setDeskSheet("order")}
                 orderLabel={alpaca ? "Price it and send →" : "Open it on the app's own book →"}>
@@ -5860,7 +4609,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   The comment that follows is the one PR #28 wrote here. ---- */}
               <DeskSheet open={deskSheet === "numbers"} eyebrow="THE NUMBERS"
                 title={`${ticker} · ${stratName}`}
-                sub={`Every figure at the price that will be sent \u00b7 ${CARD_CURRENCY}`}
+                sub={`Every figure at the price that will be sent, per contract \u00b7 ${CARD_CURRENCY}`}
                 onClose={() => setDeskSheet(null)}>
               {/* >>> EVERY FIGURE HERE IS WORKED OUT AT THE PRICE THAT WILL BE
                   SENT, NOT AT THE MID. <<< Read on the owner's phone, UNG
@@ -5956,7 +4705,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                     ticker={ticker} dte={dte} spot={spot}
                     sigma={A.legPx.length ? A.legPx.reduce((x, y) => x + y.iv, 0) / A.legPx.length : iv}
                     driftM={seasNow}
-                    curve={A.curve} legs={legs} breakevens={A.breakevens}
+                    curve={AE.curve} legs={legs} breakevens={AE.breakevens}
                     onTa={(t2) => setTa((m) => ({ ...m, [ticker]: t2 }))}
                   />
                 </div>
@@ -5989,7 +4738,7 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
               <div style={{ height: 240, marginTop: 8 }}>
                 <ResponsiveContainer>
 
-                  <LineChart data={A.curve} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+                  <LineChart data={AE.curve} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
                     <CartesianGrid stroke={T.line} strokeDasharray="3 3" />
                     <XAxis dataKey="s" stroke={T.dim} tick={{ fontSize: 10, fontFamily: "monospace" }} />
                     <YAxis stroke={T.dim} tick={{ fontSize: 10, fontFamily: "monospace" }} width={52} />
@@ -6021,12 +4770,17 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                   The order ticket unlocks as soon as you write why you are going against {clash.n} of {clash.total} factors. The trade is not forbidden — the written reason is required.
                 </div>
               )}
+              {/* ...AND ABOVE SEND, the same labels (PR #40, TASK 2). */}
+              <StopSigns signs={buildSigns} style={{ marginTop: 10 }} />
               {alpaca && reasonOk && (
                 <OrderTicket
                   onSent={(o) => openPaper(o)}
                   legs={legs} expKey={expKey} ticker={ticker}
                   quoteFn={q} estNet={AE.entry}
-                  setMsg={setMsg}
+                  /* THE SHEET PRINTS EVERY OUTCOME BESIDE THE BUTTON (its
+                     `OrderOutcome`), so the ticket's copy of it no longer goes
+                     to the top banner too (PR #40, TASK 2). pro.jsx unchanged. */
+                  setMsg={quietTicketMsg}
                   /* THE FIGURES THE TICKET PRINTS ARE THE ONES THE SCREEN ABOVE
                      PRINTS, at the price about to be sent (`AE`). They used to
                      be `A`'s — the mid — which is how the ticket came to say a
@@ -7015,11 +5769,10 @@ The order weighs the 4-factor signal (seasonality, price trend, weather, news): 
                 below already say where to go. */}
             <div style={{ fontSize: 13.5, color: T.body, marginTop: 8, lineHeight: 1.55 }}>
               One trade, taken apart — its payoff, its odds, its risk checks. Nothing is on it yet: a trade
-              gets here from step 2.
+              gets here from Find.
             </div>
             <div style={{ display: "flex", gap: 6, marginTop: 12, flexWrap: "wrap" }}>
-              <Btn small onClick={() => goStep("radar")}><Radar size={11} /> 1 Radar</Btn>
-              <Btn small ghost onClick={() => goStep("shortlist")}><Layers size={11} /> 2 Shortlist</Btn>
+              <Btn small onClick={() => goStep("find")}><Radar size={11} /> 1 Find</Btn>
               <Btn small ghost color={T.blue} onClick={goHome}>← Home</Btn>
             </div>
           </Panel>

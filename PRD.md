@@ -15,17 +15,22 @@ non-expert trader who wants to learn discipline rather than be sold trades.
   USO, XLE, GDX. SPY exists only to price a hedge; it is never proposed.
 - **Broker.** An Alpaca paper account (US dollars). Option chains come from Alpaca's
   indicative feed first, CBOE delayed quotes as the fallback. The feed is named on screen.
-- **Three steps, one on screen at a time.**
-  1. **Radar** — every market read by four factors (seasonality, price trend, weather,
-     news) and filtered by the quality floors.
-  2. **Shortlist** — the candidate structures that survived, split into "meets your
-     request" and the rest, each row saying what it missed. Up to three compared side by side.
-  3. **Build** — one trade: chain, legs, a five-line trade card, the order ticket, and the
+- **Two steps, one on screen at a time.**
+  1. **Find** — one request block (markets, direction or "season decides", budget or target
+     with the per-trade limit editable inline, horizon, minimum chance) above one ranked list of
+     cards across the selected markets. Every control re-filters the list live; there is no
+     Search button. Each card carries one badge (agreement · score · confidence, tap for "Why
+     this market") and, where it applies, a flag: single option, butterfly, CONFLICT,
+     confidence under 40, options dear. A toggle hides flagged cards and says how many. The old
+     Shortlist is a one-market filter on this list; up to three cards compared side by side.
+     "Nothing today" appears only when zero candidates pass, with the count for every reason.
+  2. **Build** — one trade: chain, legs, a five-line trade card, the order ticket, and the
      confirm step with the risk gate's checks in plain English.
 - **Two other places.** Positions (what you own, orders still working, and trades you are
   watching) and the Journal (what happened, with a timeline per position and a weekly report).
-- **The guided door.** "Find opportunities" asks capital, budget and time, then offers two
-  roads — never one — or a screen that says "nothing today" and why.
+- **The guided door is removed** at the owner's request, 23 Sep 2026 (PR #40): "Find
+  opportunities" answered "Nothing today" while Radar listed seven structures on the same
+  data. Home's second door goes straight to Find.
 - **Autopilot.** A scheduled server job that reads open positions and proposes exits as
   one-tap approval links. It never executes by itself.
 - **Copilots.** An AI explanation of the loaded trade and of the chart. They explain; they
@@ -43,7 +48,7 @@ Every rule below is code, not a prompt. The numbers live in `src/rules.js` (`RUL
 1. **Paper only.** If paper mode cannot be verified (the `X-OSL-Paper-Endpoint` header from
    `alpaca.mjs`), the order is refused.
 2. **Defined risk.** No uncovered short leg; the maximum loss is always known before entry.
-   The guided flow also excludes single long options and butterflies; the full desk allows them.
+   Single long options and butterflies are offered, flagged on their card (PR #40).
 3. **No API key reaches the client.** Keys live only in Netlify environment variables.
 4. **Every order passes the risk gate** (`src/riskGate.js`) — all six order paths.
 5. **Nothing executes without an explicit human confirmation.** Every send is two taps, and
@@ -69,7 +74,8 @@ Every rule below is code, not a prompt. The numbers live in `src/rules.js` (`RUL
   leg spread (≤35% of mid), combination spread (≤100% of net), crossing cost (the combination
   spread in and out, ≤50% of the maximum profit at the price that fills) and reward-to-risk (≥0.25).
 - A contract the chain never listed is refused by the gate.
-- Every figure on a card is worked out at the price that will fill, not at the mid.
+- Every figure on a card, every floor and the ranking are worked out at the price that will fill
+  (`fillNet()`: `openLimitPrice()` on `comboBook()`, on the cent), and Build reads the same price.
 
 ### Exit — chosen once at entry, then frozen
 
@@ -93,43 +99,41 @@ v1 is done when all three are true, each observed on the owner's real account an
 - **(c)** The owner **reads each open position's action in five seconds**: HOLD, CLOSE with its
   reason, or WARNING.
 
-(c) is built (ROADMAP PR #38); it is the owner's reading. PR #39, the last v1 change, is shipped:
-v1 now waits only on the owner's three readings.
+(c) is built (ROADMAP PR #38); it is the owner's reading. PR #40 (one screen, one set of numbers)
+changes what the owner reads, not what v1 needs: v1 waits only on the owner's three readings.
 
 ## 4. NOT VERIFIED
 
 At most ten items. **OWNER CHECK** means only a reading on the live market or the owner's phone
 can settle it; no test in this repository can.
 
-1. **OWNER CHECK — order path 3 has never been sent live, neither from the desk nor from the
-   Positions card's close-at-limit.** In particular whether the sign on the limit comes out the
-   way `mlegLimitPrice()` says, whether `groupForRecord()` finds the holding in a real
-   `/v2/positions` payload, and whether "close order working" clears when Alpaca reports the
-   fill. The opening sign was wrong for four pull requests and only a fill found it. This is v1 (b).
-2. **OWNER CHECK — J-0003 has not filled.** Is the indicative combination ask systematically
-   inside the real one on thin chains, and by how much? Its cancel is `pending_cancel`: whether
-   the card shows "a cancel is already waiting" and clears when Alpaca reports it canceled has
-   only been tested on fixtures (`cancelOutcome()`).
-3. **OWNER CHECK — no opening order has yet filled at the intended price** since the sign fix.
-   This is v1 (a). **And no credit order has filled at the corrected suggested limit** (PR #39,
-   0a: a credit used to be suggested above the mid, on the side that never fills).
-4. **OWNER CHECK — nobody has read the split list, the cards or the controls on a real screen,**
-   nor the Positions card's one action (HOLD / CLOSE / WARNING / NO QUOTE / NOT ON ALPACA). Whether it reads in
-   five seconds is the owner's answer to give (v1 c).
-5. **OWNER CHECK — the quantity fields have not been tried on a real phone.** They are tested
-   by driving the component's handlers, not by a touch keyboard.
-6. **OWNER CHECK — `upgradeHolding()` has never run against a real `/v2/positions` payload.**
-   Nor has the broker-preferred P&L, nor "Not on Alpaca" (`legsNotHeld()`, PR #39 0c): all are
-   tested on hand-built fixtures only.
-7. **Chosen, not measured:** `modelDisagreementRatio` 4, `maxComboSpreadShareOfNet` 1.0,
-   `maxCrossingShareOfMaxProfit` 0.5 (measured on fixtures only: `scripts/measure-crossing.mjs`),
-   `openLimitSlippage` and `closeLimitSlippage` 0.25, `watchAttentionShare` 0.35,
-   `autopilotConfidence` 70, `fallbackIV` and `fallbackSigma` 0.25, and the four chance-slider
-   constants (`chanceAskMin` 0.20, `chanceAskMax` 0.80, `chanceAskStep` 0.05,
-   `chanceAskDefault` 0.50).
-8. **The exit rules are inherited defaults, not backtested** on these ten markets.
-9. **OWNER CHECK — the liquidity floor was measured on one close (2026-09-01).** Re-run
-   `/api/liquidity` as the market moves.
+1. **OWNER CHECK — order path 3 has never been sent live,** neither from the desk nor from the
+   Positions card's close-at-limit: the sign on the limit, `groupForRecord()` on a real
+   `/v2/positions` payload, and "close order working" clearing on the fill. This is v1 (b).
+2. **OWNER CHECK — no opening order has filled at the intended price** since the sign fix, and
+   no credit at the corrected limit (v1 a). PR #40 moves the suggested opening price by at most
+   a cent a leg (`legLimitSeed()` now sums exactly to `fillNet()`): not yet seen filled.
+3. **OWNER CHECK — is the indicative combination ask inside the real one on thin chains?**
+   J-0003 (SOYB 28/30, a debit at the indicative ask) never filled; its cancel completed at the
+   23 Sep open and the owner saw it leave both Positions and Alpaca's Orders. So the cancel path
+   is settled, and the question it raised is not: no order has yet measured the gap.
+4. **OWNER CHECK — nobody has used Find on a real phone with live chains** (PR #40): the one
+   ranked list across ten markets, the live re-filtering, the flags, the market filter, the
+   stop signs and the Positions card's one action. Tested with renders, source sweeps and a
+   headless browser on SYNTHETIC chains only. Whether it reads in five seconds is v1 (c).
+5. **Find's cost on a phone is not measured.** The list is one memo over every selected market
+   (analyse, floors, an 8,000-run chance per survivor); on a laptop with synthetic chains it
+   settles in a few seconds after the chains land. A slow phone may lag while a slider moves.
+6. **OWNER CHECK — "size N > M on the ask" reads indicative sizes,** which Alpaca's snapshot
+   carries and which may not be the real depth. The quantity fields have not been tried on a
+   real phone keyboard either.
+7. **OWNER CHECK — `upgradeHolding()`, the broker-preferred P&L and "Not on Alpaca"** have only
+   run on hand-built fixtures, never on a real `/v2/positions` payload.
+8. **Chosen, not measured:** `modelDisagreementRatio` 4, `maxComboSpreadShareOfNet` 1.0,
+   `maxCrossingShareOfMaxProfit` 0.5, `openLimitSlippage` and `closeLimitSlippage` 0.25,
+   `watchAttentionShare` 0.35, `autopilotConfidence` 70, `fallbackIV`/`fallbackSigma` 0.25, the
+   four chance-slider constants, and the liquidity floor (measured on one close, 2026-09-01).
+9. **The exit rules are inherited defaults, not backtested** on these ten markets.
 10. **The AI features were disabled by an Anthropic usage limit until 2026-10-01.** Both
     copilots, report section 5 and `copilotOverreach()` have not seen a real answer since.
 
@@ -137,9 +141,6 @@ can settle it; no test in this repository can.
 
 One line each. Detail for every item is in `docs/history/ROADMAP.md`.
 
-- **Radar request controls** — one control per question: the single-ticker expiry and the
-  multi-search horizon are two answers to one question on one screen; direction and "season
-  decides" likewise.
 - **P2 full** — rank proposals by edge at the price that fills, not by score.
 - **P7** — learn about fills from Alpaca's `trade_updates` stream server-side, instead of polling.
 - **P8** — more indicators and timeframes, only after the owner has used the current ones.

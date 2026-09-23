@@ -834,103 +834,8 @@ export const RULE_PILLS = {
     `Paper trading only. If the account cannot be verified as paper, the order is rejected.`,
 };
 
-/* ===================== "nothing today", PRD §5 =====================
-   The refusal screen gets the same care as every other. Its sentences are
-   generated from the same numbers that cause the refusal, so the screen can
-   never explain a threshold the code does not apply. */
-
-export const NOTHING_TODAY = {
-  signalsNotAligned: (best) =>
-    `The four factors do not agree on any market today` +
-    (best ? ` — the closest is ${best.tk}, and even there confidence is ${best.confidence} out of 100, ` +
-      `under the ${RULES.lowConfidence} we need.` : `.`) +
-    ` When the signals contradict each other we do not know enough, and a trade taken anyway is a guess with your money on it.`,
-  optionsExpensive: (ticker, rank) =>
-    `Options on ${ticker} are expensive right now: their implied volatility sits at ${rank} out of 100 versus ` +
-    `its own past year, above the ${RULES.expensiveIVRank} mark. Buying here means paying a rich price for the ` +
-    `same outcome, and the premium usually deflates faster than the idea pays off.`,
-  budgetTooSmall: (risk) =>
-    `Nothing fits inside ${money(risk)} of risk today. Every structure that matched your answers costs more than ` +
-    `that to put on, and stretching the budget past your per-trade limit is exactly the habit these rules exist to stop.`,
-  onlyOneRoad: (risk) =>
-    `Only one structure fits inside ${money(risk)} of risk today, and one answer is advice rather than teaching. ` +
-    `This app shows two roads with the trade-off between them or it shows none: with nothing to compare against, ` +
-    `you would be taking our word for it. Widen the budget or come back tomorrow.`,
-  noData: (what) =>
-    `Market data for ${what} did not load, so there is nothing to judge. This is a missing-data problem, not a ` +
-    `verdict on the market: try again in a minute.`,
-  // Not a verdict on the market either, and not the same sentence as a board
-  // emptied by the floors: every structure was built and then found to have no
-  // readable price. Saying "nothing fits your budget" here would blame the user
-  // for a chain the app could not read.
-  unpriceable: (tally) => {
-    const t = tally || {};
-    const markets = (t.markets || []).join(", ");
-    return `Every structure that fit your answers on ${markets || "the markets you picked"} came back without a ` +
-      `price we can stand behind: ${t.unpriceable || "each one"} had a leg nobody is bidding for, or netted out to ` +
-      `about ${money(0)} across its legs. That is not a free trade, it is an unpriced one — a maximum loss the app ` +
-      `cannot compute is not a maximum loss of zero, and this platform does not send an order whose worst case it ` +
-      `cannot print.`;
-  },
-  // A WORST CASE THAT IS A PROFIT IS ITS OWN ANSWER, and not the same one as an
-  // unreadable price: the price was read, and what it produced is impossible.
-  // Pooling the two would tell the user "we could not price it" about a board
-  // the app priced perfectly well and then disbelieved.
-  impossibleLoss: (tally) => {
-    const t = tally || {};
-    const markets = (t.markets || []).join(", ");
-    return `Every structure that fit your answers on ${markets || "the markets you picked"} came back unable ` +
-      `to lose: ${t.impossible || "each one"} priced with a worst case that is a PROFIT at every price at ` +
-      `expiry. That is a risk-free arbitrage, and there is not one on these chains — it means a leg was priced ` +
-      `off a quote nobody has traded against. This platform does not offer a trade on the strength of a number ` +
-      `that would have to be wrong for the trade to work.`;
-  },
-  // A PRICE THE MODEL DISBELIEVES IS A FIFTH ANSWER, and it is not any of the
-  // four above. The price was read, it cleared the absolute minimum, and the
-  // worst case it produced is a perfectly possible loss — it is simply not the
-  // loss this structure has. Folding it into "unpriceable" would say the app
-  // could not read the chain when it read it fine and disagreed with it.
-  modelDisagreement: (tally) => {
-    const t = tally || {};
-    const markets = (t.markets || []).join(", ");
-    return `Every structure that fit your answers on ${markets || "the markets you picked"} is priced by the ` +
-      `chain at something the app's own model cannot account for: ${t.modelDisagreement || "each one"} came ` +
-      `back more than ${RULES.modelDisagreementRatio}x away from its theoretical value, in one direction or ` +
-      `the other. A price like that clears the ${money(MIN_NET_DOLLARS)} minimum and is still a placeholder — ` +
-      `and the maximum loss on screen would have been wrong by the same factor. Nothing is offered on a number ` +
-      `the app would have to disbelieve to offer it.`;
-  },
-  // The quality floors emptied the board. This is a real answer — "nothing on
-  // CORN clears the liquidity floor today" is worth more than a screen of
-  // structures nobody trades — so it gets a sentence with the counts in it.
-  belowQualityFloor: (tally) => {
-    const t = tally || {};
-    const markets = (t.markets || []).join(", ");
-    const lab = qualityFloorLabels(t.level);
-    const parts = [];
-    if (t.liquidity > 0) parts.push(`${t.liquidity} because ${lab.liquidity}`);
-    if (t.spread > 0) parts.push(`${t.spread} because ${lab.spread}`);
-    if (t.comboSpread > 0) parts.push(`${t.comboSpread} because ${lab.comboSpread}`);
-    if (t.crossing > 0) parts.push(`${t.crossing} because ${lab.crossing}`);
-    if (t.reward > 0) parts.push(`${t.reward} because ${lab.reward}`);
-    if (t.unpriceable > 0) parts.push(`${t.unpriceable} because ${lab.unpriceable}`);
-    if (t.impossible > 0) parts.push(`${t.impossible} because ${lab.impossible}`);
-    if (t.model > 0) parts.push(`${t.model} because ${lab.model}`);
-    // WHICH RULE DID THE WORK. `unpriceable` and `impossible` are counted here
-    // so a mixed board can be explained in one screen, but they are NOT the
-    // floors and the sentence must not say they are: a structure whose price
-    // could not be read never reached a floor, and one that could not lose was
-    // refused before either floor looked at it.
-    const byFloor = (t.liquidity > 0 || t.spread > 0 || t.comboSpread > 0 || t.crossing > 0 || t.reward > 0);
-    const lead = byFloor
-      ? `was filtered out by the quality floors`
-      : `was refused before the quality floors were even applied`;
-    return `Every structure that fit your answers on ${markets || "the markets you picked"} ` +
-      `${lead}: ${parts.join(", and ")}. ` +
-      `Those floors are the difference between a price and a market. Nothing here today is the honest answer, ` +
-      `and it is a better one than a trade nobody else is willing to take the other side of.`;
-  },
-};
+/* NOTHING_TODAY — the guided door's refusal sentences — was deleted with the
+   door (PR #40, TASK 1). "Nothing today" is `nothingTodayLine()`, with counts. */
 
 /* --------------------------------------------------------------------
    THE WARNINGS, ONCE.
@@ -1338,6 +1243,140 @@ export function filterFold(tally = {}, { level = RECOMMENDED_LIQUIDITY, what = n
 }
 
 /* =====================================================================
+   THE FIND SCREEN (PR #40, TASK 1) — ONE LIST, AND NOTHING SILENTLY HIDDEN.
+
+   The guided door answered "Nothing today" while the Radar listed 7
+   structures on the same data: it dropped single options, CONFLICT markets
+   and confidence under 40 without a word, and needed two structures to say
+   anything. It is gone at the owner's request (23 Sep 2026). What it excluded
+   is a visible STATE on a card now — `candidateFlags()` — that a toggle can
+   hide, and "Nothing today" appears only when zero candidates pass, with the
+   count for every reason (`nothingTodayLine()`).
+===================================================================== */
+
+/** What the guided door used to drop in silence, as labels a card carries. */
+export function candidateFlags({ legs = [], fused = null, ivRank = null } = {}) {
+  const out = [];
+  if ((legs || []).length < 2) out.push({ id: "single", label: "single option" });
+  // A butterfly's maximum needs the market to finish ON the middle strike, so
+  // the 50% take profit is unreachable before the 21-day exit (ROADMAP P2).
+  if (isButterfly(legs)) out.push({ id: "butterfly", label: "butterfly: target unlikely" });
+  if (fused && fused.agreement === "CONFLICT") out.push({ id: "conflict", label: "CONFLICT" });
+  if (fused && known(fused.confidence) && Number(fused.confidence) < RULES.lowConfidence) {
+    out.push({ id: "confidence", label: `confidence under ${RULES.lowConfidence}` });
+  }
+  if (known(ivRank) && Number(ivRank) >= RULES.expensiveIVRank) {
+    out.push({ id: "expensive", label: `options dear, IV rank ${Math.round(Number(ivRank))}` });
+  }
+  return out;
+}
+
+/** How many contracts the request asks for, in five words or fewer. */
+export function sizeLine(request, size) {
+  if (!request || !size || !size.ok) return null;
+  const n = size.n;
+  const c = `${n} contract${n === 1 ? "" : "s"}`;
+  return request.mode === "target"
+    ? `${c} to reach ${money(request.amt)}`
+    : `${c} for ${money(size.isCredit ? size.totRisk : size.totPrem)}`;
+}
+
+/** The quick amounts beside the field, relabelled by what the field asks. */
+export function amountChips(request, perTradeLimit) {
+  const cap = Number(perTradeLimit);
+  if (!Number.isFinite(cap) || cap <= 0) return [];
+  const vals = [...new Set([0.25, 0.5, 1].map((f) => Math.max(25, Math.round((cap * f) / 25) * 25)))];
+  return vals.map((v) => ({ amt: v, label: `${request && request.mode === "target" ? "make" : "risk"} ${money(v)}` }));
+}
+
+/**
+ * WHAT THE EMPTY LIST SAYS — AND A DATA FAILURE IS NOT A MARKET VERDICT.
+ *
+ * "Nothing today" is a verdict about markets the app READ. It appears only when
+ * every selected market was read and zero candidates passed, with the count for
+ * every reason. A market whose prices are still arriving is "Reading N
+ * markets…"; one whose fetch FAILED is named with its error and a way out, and
+ * comes first — main's "screen 5 does not pass a data failure off as a market
+ * verdict" rule, restored after the guided door's screen was deleted (PR #40).
+ *
+ * @param failed  [{ tk, why }] — the fetch failed, `why` in a few words
+ * @param loading [tk] — no answer yet
+ */
+export function nothingTodayLine(tally = {}, { noBoard = [], loading = [], failed = [], level = RECOMMENDED_LIQUIDITY } = {}) {
+  const s = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+  if (loading.length) return `Reading ${s(loading.length, "market", "markets")}…`;
+  const f = filterFold(tally, { level });
+  const parts = f.reasons.map((r) => `${r.count} ${r.clause}`);
+  if (noBoard.length) parts.push(`${s(noBoard.length, "market", "markets")} with no expiry far enough out (${noBoard.join(", ")})`);
+  const couldNot = failed.length
+    ? `Could not read ${s(failed.length, "market", "markets")} (${failed.map((x) => `${x.tk}: ${x.why}`).join("; ")}) — press Refresh.`
+    : null;
+  if (couldNot) return parts.length ? `${couldNot} Of the rest, removed: ${parts.join("; ")}.` : couldNot;
+  return `Nothing today. ${parts.length ? `Removed: ${parts.join("; ")}.` : "No market was selected."}`;
+}
+
+/** An error, in a few words, for a market chip and the line above. */
+export const fetchFailWords = (err) => {
+  // Cut before any markup or quoted body: a proxy that answers with a web page
+  // puts "<!doctype" in the parse error, and that is not a reason anyone can read.
+  const t = String((err && err.message) || err || "").split(/[<"]/)[0]
+    .replace(/\s+/g, " ").replace(/[\s,:;'-]+$/, "").trim();
+  if (!t) return "no reply";
+  return t.split(" ").slice(0, 5).join(" ");
+};
+
+/* =====================================================================
+   STOP SIGNS (PR #40, TASK 2) — AT MOST THREE SHORT LABELS, FIRST.
+
+   The decisive facts were buried in paragraphs: a CONFLICT in a collapsed
+   panel, an unreliable board in a red line under the expiry, a size bigger
+   than the ask in the ticket's table, the gate's warnings in a fold plus two
+   "written once" reminders. This is a READING of facts the app already
+   computes — no new rule, no new refusal, nothing the gate does not already
+   say. The full sentence for each stays one tap away ("why").
+===================================================================== */
+
+/** The risk gate's warnings, by code, in a few words. The gate is unchanged. */
+export const GATE_WARNING_LABELS = {
+  ENTRY_DTE_ROOM: () => `under ${RULES.minEntryDTE} days of room`,
+  CAPITAL_NOT_SET: () => "capital not answered",
+  SIGNAL_CONFLICT: () => "CONFLICT",
+  LOW_CONFIDENCE: () => "low confidence",
+  STOP_LOSS_REACHED: () => "stop reached",
+};
+
+/**
+ * @returns {{ labels: {id,label}[], all: {id,label}[], more: number }} — the
+ *   first three in order of what decides, every one of them, and how many more.
+ */
+export function stopSigns({ fused = null, gateWarnings = [], feedBroken = false, noQuoteLegs = 0,
+  contracts = null, askSize = null, flags = [] } = {}) {
+  const all = [];
+  const add = (id, label) => { if (!all.some((x) => x.id === id)) all.push({ id, label }); };
+  const conf = fused && known(fused.confidence) ? Math.round(Number(fused.confidence)) : null;
+  const codes = new Set((gateWarnings || []).map((w) => w && w.code));
+  if ((fused && fused.agreement === "CONFLICT") || codes.has("SIGNAL_CONFLICT")) {
+    add("conflict", `CONFLICT${conf != null ? ` · confidence ${conf}` : ""}`);
+  } else if ((conf != null && conf < RULES.lowConfidence) || codes.has("LOW_CONFIDENCE")) {
+    add("confidence", `confidence ${conf != null ? conf : "low"}`);
+  }
+  for (const w of gateWarnings || []) {
+    if (!w || w.code === "SIGNAL_CONFLICT" || w.code === "LOW_CONFIDENCE") continue;
+    const f = GATE_WARNING_LABELS[w.code];
+    add(`gate-${w.code}`, f ? f() : String(w.code || "risk gate warning").toLowerCase().replace(/_/g, " "));
+  }
+  if (feedBroken) add("feed", "feed unreliable on this expiry");
+  const nq = Math.round(Number(noQuoteLegs) || 0);
+  if (nq > 0) add("no-bid", nq === 1 ? "a leg has no bid" : `${nq} legs have no bid`);
+  if (known(contracts) && known(askSize) && Number(contracts) > Number(askSize)) {
+    add("size", `size ${Math.round(Number(contracts))} > ${Math.round(Number(askSize))} on the ask`);
+  }
+  for (const f of flags || []) add(f.id, f.label);   // `add` keeps the first of an id
+  const labels = all.slice(0, 3);
+  return { labels, all, more: all.length - labels.length };
+}
+
+/* =====================================================================
    AN ANALYSIS THAT CLAIMS IT CAN TRADE IS FLAGGED, NOT QUOTED (P9, TASK 3)
 
    Non-negotiable rule 5: nothing executes without an explicit human
@@ -1388,79 +1427,7 @@ export const copilotOverreachNote = (phrase) =>
   `at all. It is kept in the Journal so you can read it there; it is not reproduced here as advice.`;
 
 /** The one line that says which setting produced the list underneath it. */
-/* =====================================================================
-   THE RADAR MUST NOT GET LONGER WHEN THE BASKET DOES.
-
-   Read on the owner's phone: SOYB and CORN produced "0 of 2 shown" and most of
-   the screen was a paragraph per market explaining why that market had nothing
-   on it. The basket went from five to ten with the liquid tier, and ten copies
-   of "not searched yet — use the search below" is not a radar, it is a wall.
-
-   A market with something on it keeps its full row. Every market with nothing
-   collapses into ONE line, which names them and says which of the two things
-   happened — nobody has looked, or somebody looked and nothing cleared. Those
-   are different facts and the line keeps them apart, exactly as
-   `unloadedBoardNote()` keeps "no board" apart from "nothing cleared on this
-   board". Every name in the line is still one tap from its market; nothing is
-   removed from the app, only from the page.
-
-   IT COLLAPSES EVEN WHEN EVERY MARKET IS QUIET. A first run has searched
-   nothing, so nothing has a full row — and a list of ten identical rows saying
-   "not searched yet" is exactly the screen this exists to stop. One line with
-   ten names in it is shorter and says the same thing once.
-===================================================================== */
-
-/**
- * >>> LOOKED AT IS NOT NOT-SEARCHED, AND THAT WAS ON THE OWNER'S PHONE. <<<
- * Read 21 September 2026, one screen, two sentences four lines apart:
- *
- *     "You asked about 10 markets … 4 of them came through to the shortlist
- *      (BOIL, WEAT, XLE and USO)."
- *     "8 markets with nothing to show — not searched yet: BOIL, USO, UNG, …"
- *
- * BOIL and USO are in both. The guided run priced their boards and their
- * candidates cleared every floor; they simply were not the two roads it took
- * forward. `marketFacts` only ever knew about roads, the wide search's hits and
- * the markets the floors emptied, so a market the guided run looked at and did
- * not choose fell through to "nobody has looked". Collapsing the quiet markets
- * into one line put those two sentences next to each other, which is how a
- * long-standing gap became a visible contradiction.
- *
- * @param rows  `[{ tk, n, cut, searched }]` — `n` structures on screen for it,
- *              `cut` true when the floors emptied it, `searched` true when
- *              anything in this session actually read its board. None of the
- *              three is a count this function makes.
- * @returns {{ shown: object[], quiet: object[], empty: string[], notSearched: string[] }}
- */
-export function radarSplit(rows = []) {
-  const rs = Array.isArray(rows) ? rows : [];
-  const shown = rs.filter((r) => Number(r?.n) > 0);
-  const quiet = rs.filter((r) => !(Number(r?.n) > 0));
-  return {
-    shown, quiet,
-    // LOOKED AT AND EMPTY is not NEVER LOOKED AT, and one word for both would
-    // make the app report a market verdict it never reached — or deny having
-    // read a board it named in the paragraph above.
-    empty: quiet.filter((r) => r?.cut || r?.searched).map((r) => r.tk),
-    notSearched: quiet.filter((r) => !(r?.cut || r?.searched)).map((r) => r.tk),
-  };
-}
-
-/** The one line, or null when every market has a row of its own. */
-export const radarQuietNote = (split) => {
-  const s = split || {};
-  const empty = s.empty || [], notSearched = s.notSearched || [];
-  const n = empty.length + notSearched.length;
-  if (!n) return null;
-  const bits = [];
-  // "NOTHING CLEARED" WOULD BE A VERDICT THIS LINE CANNOT SUPPORT. A market is
-  // in this group when the floors emptied it OR when its structures cleared and
-  // were not taken forward, and those are different facts with one thing in
-  // common: there is nothing on the Radar for it. The sentence claims only that.
-  if (empty.length) bits.push(`looked at, nothing on the radar: ${empty.join(", ")}`);
-  if (notSearched.length) bits.push(`not searched yet: ${notSearched.join(", ")}`);
-  return `${n} market${n === 1 ? "" : "s"} with nothing to show \u2014 ${bits.join(" \u00b7 ")}.`;
-};
+/* `radarSplit()` / `radarQuietNote()` were the Radar's; the Radar is gone (PR #40). */
 
 export const liquiditySettingNote = (level, counts) => {
   const l = liquidityLevel(level?.id ?? level);
@@ -2094,38 +2061,6 @@ export const checkedAgainstNote = (viaBroker, paperSource) => (viaBroker
   : `These checks were run against the app's own paper book. Nothing on this screen leaves the browser: no broker is ` +
     `connected, so there is no account to check and no order to send.`);
 
-/**
- * A BOARD THAT HAS NOT LOADED IS NOT A BOARD THAT EMPTIED.
- *
- * `emptyExpiryNote()` below is a VERDICT ON A MARKET — "nothing cleared on
- * this expiry" — and with no board loaded there is nothing for it to be a
- * verdict about. Printing it anyway is a missing-data answer dressed up as a
- * market one, which is the line `wizard.test.jsx` holds on the refusal screen
- * and the same line applies here.
- */
-export const unloadedBoardNote = (ticker, expKey) =>
-  `The strikes for ${ticker || "this market"}${expKey ? ` on ${expKey}` : ""} have not loaded, so nothing ` +
-  `has been judged yet. This is not a verdict on the market: no structure can be built before the board ` +
-  `says which strikes it carries, and a percentage of today's price rounded to a grid is a guess about ` +
-  `that — which is how this app once named a contract nobody had ever issued.`;
-
-export const emptyExpiryNote = (expKey, tally, level = RECOMMENDED_LIQUIDITY) => {
-  const t = tally || {};
-  const l = liquidityLevel(level?.id ?? level);
-  const bits = [];
-  if (t.liquidity > 0) bits.push(`${t.liquidity} for liquidity`);
-  if (t.spread > 0) bits.push(`${t.spread} for a bid/ask spread over ${pctText(RULES.maxSpreadShareOfMid)} of the mid`);
-  if (t.comboSpread > 0) bits.push(`${t.comboSpread} for a COMBINATION spread over ${pctText(RULES.maxComboSpreadShareOfNet)} of its net`);
-  if (t.crossing > 0) bits.push(`${t.crossing} for a crossing cost over ${pctText(RULES.maxCrossingShareOfMaxProfit)} of max profit`);
-  if (t.reward > 0) bits.push(`${t.reward} for reward-to-risk`);
-  if (t.unpriceable > 0) bits.push(`${t.unpriceable} with no readable price`);
-  if (t.impossible > 0) bits.push(`${t.impossible} unable to lose at any price`);
-  if (t.model > 0) bits.push(`${t.model} priced more than ${RULES.modelDisagreementRatio}x away from the model`);
-  return `NOTHING CLEARED ON ${expKey || "this expiry"}${bits.length ? ` — ${bits.join(", ")}` : ""}. ` +
-    `That is a verdict on ${expKey || "this expiry"} and on nothing else: another expiry on the same market ` +
-    `can be far busier, and the count on any other screen is about the expiry that screen names. ` +
-    `Setting: ${l.label.toUpperCase()}.`;
-};
 
 /* -------------------------------------------------------------------------
  * A WIDE MARKET IS NOT A PRICE — THE SPREAD FLOOR.
@@ -2968,7 +2903,10 @@ export function sizing(answers = {}) {
   const ov = answers.override || {};
   const reason = typeof ov.reason === "string" ? ov.reason.trim() : "";
   const wantsOverride = Number.isFinite(Number(ov.perTrade)) && Number(ov.perTrade) > 0;
-  const overrideAccepted = wantsOverride && reason.length >= RULES.minOverrideReasonChars;
+  // LOWERING THE LIMIT NEEDS NO REASON (PR #40, TASK 1): it only makes the gate
+  // stricter. Anything above the capped figure still needs the typed reason.
+  const overrideAccepted = wantsOverride
+    && (Number(ov.perTrade) <= cappedPerTrade || reason.length >= RULES.minOverrideReasonChars);
   const perTradeLimit = overrideAccepted ? Number(ov.perTrade) : cappedPerTrade;
 
   // A PILL EXPLAINS AN ANSWER. With the questions still open there is no answer
@@ -3201,8 +3139,78 @@ export function fillNet(legs, quotes) {
   const book = comboBook(legs, quotes);
   if (!book || !book.ok) return null;
   const p = openLimitPrice({ netMid: book.mid, spread: book.spread });
-  return p ? p.net : null;
+  if (!p) return null;
+  /* >>> ON THE CENT, BECAUSE AN ORDER IS (PR #40, TASK 0). <<< The owner read
+     SOYB 28/30C at $62 on the card and $68 on Build: two readings of one trade.
+     The card read `openLimitPrice()` to four decimals while the ticket sends
+     whole cents, so the two could never be the same number. Rounded here, and
+     `legLimitSeed()` below lands its legs on exactly this figure, so the card,
+     the Build screen, the gate and the order read ONE price. Never flipped and
+     never zero: a cent in the same direction is the floor, as in
+     `openLimitPrice()`. */
+  const dir = Math.sign(p.net) || 1;
+  const cents = onTick(p.net);
+  return Math.sign(cents) === dir && Math.abs(cents) >= 0.01 ? cents : dir * 0.01;
 }
+
+/* =====================================================================
+   ONE SET OF NUMBERS (PR #40, TASK 0).
+
+   The owner's live screens, SOYB 28/30C 2026-11-20: the card said $62 risk /
+   $139 profit / 48%, Build said $68 / $132 / 46%, the card's break-even and the
+   chart's were 28.68 and 28.61, and Build printed "Same numbers as the
+   Shortlist" between them because it compared ONE figure — the mid's entry —
+   with the mid's entry.
+
+   `figureSet()` is the list of figures a card prints, read off one analysis
+   and one chance; `reconcileFigures()` compares EVERY one of them. Money is
+   PER CONTRACT on both sides and the line says so.
+===================================================================== */
+
+/** The figures a card prints, per contract, off one analysis and one chance. */
+export function figureSet(a, pop = null) {
+  if (!a) return null;
+  return {
+    entry: known(a.entry) ? Number(a.entry) : null,
+    maxLoss: known(a.maxLoss) ? Number(a.maxLoss) : null,
+    maxProfit: a.profitUnbounded || !known(a.maxProfit) ? null : Number(a.maxProfit),
+    profitUnbounded: !!a.profitUnbounded,
+    breakevens: (a.breakevens || []).filter(known).map(Number),
+    pop: known(pop) ? Number(pop) : null,
+  };
+}
+
+/** Each figure written the way the screen writes it, so "same" means same on screen. */
+const figureTexts = (f) => ({
+  price: f.entry == null ? "—" : `${money(Math.abs(f.entry) * 100)} ${f.entry < 0 ? "credit" : "debit"}`,
+  risk: f.maxLoss == null ? "—" : money(Math.abs(f.maxLoss)),
+  profit: f.profitUnbounded ? NO_CEILING : f.maxProfit == null ? "—" : money(f.maxProfit),
+  chance: chanceText(f.pop),
+  "break-even": f.breakevens.length ? f.breakevens.map((b) => b.toFixed(2)).join(" · ") : "—",
+});
+
+/**
+ * @returns {{ same, rows: {k, card, build, same}[], line }} — every printed
+ *   figure, the card's against Build's, and one line saying which moved.
+ */
+export function reconcileFigures(card, build) {
+  if (!card || !build) return null;
+  const c = figureTexts(card), b = figureTexts(build);
+  const rows = Object.keys(c).map((k) => ({ k, card: c[k], build: b[k], same: c[k] === b[k] }));
+  const moved = rows.filter((r) => !r.same);
+  const line = moved.length === 0
+    ? `✓ Same figures as the card, per contract: ${rows.map((r) => `${r.k} ${r.card}`).join(" · ")}.`
+    : `⚠ Moved since the card, per contract: ${moved.map((r) => `${r.k} ${r.card} → ${r.build}`).join(" · ")}. ` +
+      `The quotes refreshed or the price was changed in the ticket; these are the ones that will be sent.`;
+  return { same: moved.length === 0, rows, line };
+}
+
+/** A money figure with its unit, always: per contract, or for N. */
+export const unitMoney = (x, n = 1) => {
+  const k = Math.max(1, Math.round(Number(n) || 1));
+  if (!known(x)) return "—";
+  return k === 1 ? `${money(x)} per contract` : `${money(Number(x) * k)} for ${k}`;
+};
 
 /** The section header that says which price every figure below is read at. */
 export const fillPriceHeading = () =>
@@ -4857,7 +4865,7 @@ export function legLimitSeed(legs = [], quotes = [], { slippage = OPEN_LIMIT_SLI
   const ls = Array.isArray(legs) ? legs : [];
   if (!ls.length) return null;
   const slip = Math.max(0, Number(slippage) || 0);
-  return ls.map((l, i) => {
+  const seed = ls.map((l, i) => {
     const q = (quotes || [])[i] || {};
     const b = Number(q.bid), a = Number(q.ask);
     if (!Number.isFinite(b) || !Number.isFinite(a) || !(b > 0) || !(a > 0) || a < b) {
@@ -4870,6 +4878,27 @@ export function legLimitSeed(legs = [], quotes = [], { slippage = OPEN_LIMIT_SLI
     // Cent rounding can push a concession a hair past the touch; it never may.
     return Math.min(a, Math.max(b, p));
   });
+  /* >>> AND THE LEGS SUM TO THE CARD'S PRICE, TO THE CENT (PR #40, TASK 0). <<<
+     Rounding each leg separately left the sum up to a cent a leg away from
+     `fillNet()`, so the card and the ticket could print two prices for one
+     trade. The remainder goes onto the last one-lot leg that can take it
+     inside its own bid and ask; a leg that cannot is left alone, and then the
+     two agree within a tick, which is what they did before. Only when every
+     leg is two-sided: with an unquoted leg there is no combination price. */
+  const target = slip === OPEN_LIMIT_SLIPPAGE ? fillNet(ls, quotes) : null;
+  if (target == null || seed.some((x) => x == null)) return seed;
+  const sum = ls.reduce((acc, l, i) => acc + Math.sign(+(l && l.side) || 1) * (Math.abs(Math.round(+(l && l.qty) || 0)) || 1) * seed[i], 0);
+  const rest = onTick(target - sum);
+  if (!rest) return seed;
+  for (let i = ls.length - 1; i >= 0; i--) {
+    const qty = Math.abs(Math.round(+(ls[i] && ls[i].qty) || 0)) || 1;
+    if (qty !== 1) continue;
+    const side = Math.sign(+(ls[i] && ls[i].side) || 1);
+    const q = (quotes || [])[i] || {};
+    const next = onTick(seed[i] + side * rest);
+    if (next >= Number(q.bid) && next <= Number(q.ask)) { seed[i] = next; break; }
+  }
+  return seed;
 }
 
 /**
@@ -5042,7 +5071,7 @@ export const openableBoard = (dte) => entryRoom(dte).band === "clear";
  * @returns {{ buildable, blocked, horizonYielded }}
  *   `blocked` carries each refused board with its `entryRoom()` band, so a
  *   screen can NAME what it is not offering instead of silently shortening a
- *   list — the rule `emptyExpiryNote()` and `offBoardStrikeLabel()` follow.
+ *   list — the rule `offBoardStrikeLabel()` follows.
  */
 export function buildableExpiries(entries = [], {
   maxEntryDTE = RULES.maxEntryDTE,
@@ -5081,19 +5110,6 @@ export const offFloorExpiryLabel = (key, dte) => {
 /** Why the horizon control stops where it does, in ONE clause, from the rule. */
 export const horizonFloorNote = () =>
   `from ${RULES.minEntryDTE} days, because the app will not build on a board the gate would refuse`;
-
-/**
- * WHAT STEP 2 OFFERS WHEN THE FLOORS EMPTIED IT.
- *
- * "Go to Build — <structure>" carried whatever was left in the Build screen's
- * legs, which after a refusal is the structure the screen has just said it
- * will not offer. A button onto a trade the list above it removed is the same
- * fault as the menu this section exists to close, one screen later.
- */
-export const emptyShortlistCta = ({ expKey = null, ticker = null } = {}) =>
-  `Nothing on ${expKey || "this board"}${ticker ? ` for ${ticker}` : ""} survived the floors, so there is ` +
-  `nothing here to take apart. Try another expiry above, another market on step 1, or take the answer: ` +
-  `some days there is no trade worth making, and that is the app working rather than failing.`;
 
 /** The hard refusal: the position would open inside its own exit window. */
 export const entryInsideExitNote = (r) =>
@@ -5278,8 +5294,7 @@ export function tradeCard({
     : "";
   const riskLine = risk == null
     ? `The worst case could not be computed, so there is nothing to measure against ${owned} per-trade limit. Nothing is sent.`
-    : `${money(risk)}${atPrice}, and that is the most this can lose — fixed the moment it opens, never a dollar more${
-      n > 1 ? ` (${n} combinations)` : ""}.${
+    : `${n > 1 ? `${money(risk)} for ${n}` : `${money(risk)} per contract`}${atPrice}, and that is the most this can lose — fixed the moment it opens, never a dollar more.${
       perTrade != null && cap ? ` That is ${pctText(risk / cap)} of capital, ${risk > perTrade ? "PAST" : "inside"} ${owned} ${money(perTrade)} per-trade limit.` : ""}${
       known(notional) ? ` It controls ${money(notional)} of ${ticker}: you can only lose the ${money(risk)}, and the position moves with all of it.` : ""}`;
 
@@ -5291,7 +5306,7 @@ export function tradeCard({
   const often = pop == null
     ? `Not known: without a live price, a horizon and a seasonal reading there is no simulation to quote, and a missing chance is not a confident zero.`
     : `${chanceInTen(pop)} — ${chanceText(pop)} of ${Number(chance.runs || 0).toLocaleString("en-US")} simulated runs finish in profit AT EXPIRY${
-      known(chance.ev) ? `, and the average of all of them is ${signedMoney(Number(chance.ev) * n)}` : ""}. ` +
+      known(chance.ev) ? `, and the average of all of them is ${signedMoney(Number(chance.ev) * n)} ${n > 1 ? `for ${n}` : "per contract"}` : ""}. ` +
       `That is where it ENDS. How it ends under your own exit rule is walked day by day, and the app only does ` +
       `that once the position is open.${chanceNote ? ` ${chanceNote}` : ""}`;
 
@@ -5299,7 +5314,7 @@ export function tradeCard({
      rather than an order, because that is what `RULES.stopLossEnforcement`
      says and what `autopilotVerdict()` does. */
   const exits = `${best != null
-    ? `At ${pctText(RULES.takeProfitPct)} of the best case — ${money(best * RULES.takeProfitPct)} of ${money(best)} — or at `
+    ? `At ${pctText(RULES.takeProfitPct)} of the best case — ${money(best * RULES.takeProfitPct)} of ${money(best)} ${n > 1 ? `for ${n}` : "per contract"} — or at `
     : `This structure has ${NO_CEILING}, so there is no take-profit figure to aim at. It exits at `}` +
     `${RULES.exitDTE} days to expiration${room != null ? `, ${room} day${room === 1 ? "" : "s"} from now` : ""}` +
     `${best != null ? ", whichever comes first" : ""}. Chosen now and frozen: the plan is not renegotiated while the ` +

@@ -6,14 +6,14 @@ import assert from "node:assert/strict";
 import { evaluateTrade, paperStatus, undefinedRiskLegs } from "./riskGate.js";
 import { positionSize, positionSizeNote, contractsOf, withPositionSize, bookPositions, positionStage, positionForHolding } from "./journal.js";
 import { orderBody, mlegLimitPrice } from "./order.js";
-import { RULES, sizing, ruleBadge, qualityFloor, qualityFloorSentence, liquiditySkippedNote, NOTHING_TODAY,
+import { RULES, sizing, ruleBadge, qualityFloor, qualityFloorSentence, liquiditySkippedNote,
   LIQUIDITY_LEVELS, RECOMMENDED_LIQUIDITY, LIQUIDITY_MEASUREMENT, liquidityMeasurementNote, liquidityThreshold, looseningWarning, liquiditySettingNote,
-  priceability, rewardRisk, unpriceableNote, money, MIN_NET_DOLLARS,
+  priceability, rewardRisk, unpriceableNote, impossibleLossNote, money, MIN_NET_DOLLARS,
   contractListing, unlistedContractNote, legName, tradeCard, TRADE_CARD_IDS, cardCurrencyNote,
-  radarSplit, radarQuietNote, isButterfly, butterflySkipNote,
+  isButterfly, butterflySkipNote,
   unquotedLegNote, unquotedLegPointer, marketOrderNote, strikeSnapNote,
   spreadShare, spreadFloor, spreadFloorReason, wideSpreadNote, spreadSkippedNote,
-  expiryChoice, expiryChoiceNote, emptyExpiryNote, unloadedBoardNote, checkedAgainstNote, offBoardStrikeLabel,
+  expiryChoice, expiryChoiceNote, checkedAgainstNote, offBoardStrikeLabel,
   modelSanity, modelSanityReason, modelDisagreementNote,
   chanceOf, chanceSeedKey, seasonalProvenance, seasonalStampOf, seasonalSourceSentence,
   MEASURED_SEASONAL_SOURCE, ESTIMATED_SEASONAL_SOURCE, watchAttentionLevel,
@@ -24,11 +24,11 @@ import { RULES, sizing, ruleBadge, qualityFloor, qualityFloorSentence, liquidity
   chancePct, chanceText, chanceInTen, signedMoney,
   sigmaProvenance, TABLE_SIGMA_SOURCE, MEASURED_SIGMA_SOURCE, FALLBACK_SIGMA_SOURCE,
   positionPnl, modelPnlNote, BROKER_PNL, MODEL_PNL,
-  buildableExpiries, openableBoard, offFloorExpiryLabel, horizonFloorNote, emptyShortlistCta,
+  buildableExpiries, openableBoard, offFloorExpiryLabel, horizonFloorNote,
   remainingEdge, remainingEdgeNote, remainingEdgeLabel, shareOfMaximum, attentionCount, sameCloseNote,
   requestOf, requestAmountLabel, requestAmountOwner, contractsSourceNote, clampAskedChance,
   REQUEST_MODES, meetsRequest, splitByRequest, meetsHeading, otherwiseHeading,
-  targetPriceOf, chanceAskLabel } from "./rules.js";
+  targetPriceOf, chanceAskLabel, nothingTodayLine, fetchFailWords } from "./rules.js";
 import { netBS, SIGMA, exitSim } from "./engine.js";
 import { isStale, staleAmong, agePhrase, freshnessNote, BUDGETS } from "./freshness.js";
 
@@ -472,12 +472,6 @@ test("the skip is stated, never silent", () => {
   assert.ok(liquiditySkippedNote("Alpaca").includes("Missing data is not evidence"));
 });
 
-test("a market emptied by the floors gets a sentence, not a blank screen", () => {
-  const t = NOTHING_TODAY.belowQualityFloor({ liquidity: 3, reward: 1, markets: ["CORN"] });
-  assert.ok(t.includes("CORN"));
-  assert.ok(t.includes("3"), "the counts are in the sentence");
-  assert.ok(t.includes(String(RULES.minOpenInterestAbsolute)) || t.includes("least-traded strikes"));
-});
 
 test("the floors are named numbers, and the copy quotes those numbers", () => {
   assert.equal(typeof RULES.liquidityPercentile, "number");
@@ -764,17 +758,9 @@ test("an unpriceable structure is left out WITH A SENTENCE, and never at $0", ()
   const note = unpriceableNote(3, "BOIL");
   assert.ok(note.includes("3") && note.includes("BOIL"));
   assert.ok(note.includes("not a maximum loss of zero"), "it says what a zero actually means");
-  const refusal = NOTHING_TODAY.unpriceable({ unpriceable: 3, markets: ["BOIL"] });
-  assert.ok(refusal.includes("BOIL") && refusal.includes("unpriced"));
-  assert.ok(!/-\$0/.test(refusal), "the refusal screen does not print -$0 either");
+  assert.ok(!/-\$0/.test(note), "and it does not print -$0 either");
 });
 
-test("a board emptied by unreadable prices is a different sentence from one emptied by the floors", () => {
-  const unpriced = NOTHING_TODAY.unpriceable({ unpriceable: 2, markets: ["BOIL"] });
-  const floored = NOTHING_TODAY.belowQualityFloor({ liquidity: 2, reward: 0, markets: ["BOIL"] });
-  assert.notEqual(unpriced, floored);
-  assert.ok(!unpriced.includes("budget"), "and neither of them is the budget answer");
-});
 
 /* ============================================================================
    TASK 0 — THE POSITIVE-MAX-LOSS TEST IS NOW IN THE RISK GATE.
@@ -1029,14 +1015,6 @@ test("a REAL zero is still a real zero", () => {
   assert.equal(c.chosen.key, "Y");
 });
 
-test("an empty list NAMES THE EXPIRY it emptied", () => {
-  // Radar said 4 cleared at 28 DTE while the Shortlist said none at 35 DTE.
-  // Both were true, and on screen it read as a contradiction.
-  const note = emptyExpiryNote("2026-10-09", { liquidity: 3, spread: 1, reward: 0 });
-  assert.ok(note.includes("2026-10-09"), "the expiry is in the sentence");
-  assert.ok(note.includes("3 for liquidity") && note.includes("1 for a bid/ask spread"));
-  assert.ok(note.includes("another expiry"), "and it says the verdict is about this board only");
-});
 
 test("with no expiry past the entry floor the answer is nothing, not a bad expiry", () => {
   const c = expiryChoice([{ key: "soon", dte: 9, clears: 40, near: 44 }]);
@@ -1241,16 +1219,8 @@ test("MODEL SANITY — its refusal is a finished sentence with its own count", (
   assert.match(note, /3 structures/);
   assert.match(note, /BOIL/);
   assert.match(note, new RegExp(`${RULES.modelDisagreementRatio}x`));
-  assert.match(NOTHING_TODAY.modelDisagreement({ modelDisagreement: 2, markets: ["BOIL"] }),
-    new RegExp(`${RULES.modelDisagreementRatio}x`));
-  // It is a DIFFERENT sentence from the other four refusals, not a rewording.
-  const others = [
-    NOTHING_TODAY.unpriceable({ unpriceable: 2, markets: ["BOIL"] }),
-    NOTHING_TODAY.impossibleLoss({ impossible: 2, markets: ["BOIL"] }),
-  ];
-  for (const o of others) {
-    assert.notEqual(o, NOTHING_TODAY.modelDisagreement({ modelDisagreement: 2, markets: ["BOIL"] }));
-  }
+  // It is a DIFFERENT sentence from the other refusals, not a rewording.
+  for (const o of [unpriceableNote(2, "BOIL"), impossibleLossNote(2, "BOIL")]) assert.notEqual(o, note);
 });
 
 /** The source of a file with its COMMENTS REMOVED, for structural tests that
@@ -1466,8 +1436,10 @@ test("MODEL SANITY — ONE EXPRESSION, and the ticket does not run a second one"
   assert.equal((app.match(/modelSanity\(/g) || []).length, 1,
     "modelSanity is called in exactly one place in App.jsx: inside modelCheckOf");
   const uses = (app.match(/modelCheckOf\(/g) || []).length;
-  assert.ok(uses >= 4,
-    `all three generation sites and the ticket's memo read it (found ${uses})`);
+  // PR #40: one generation site now (`shortlistWithFloors()`, which Find calls
+  // per market) and the ticket's memo.
+  assert.ok(uses >= 2,
+    `the generation site and the ticket's memo read it (found ${uses})`);
   const pro = codeOf("pro.jsx");
   assert.equal((pro.match(/modelSanity\(/g) || []).length, 0,
     "the order ticket takes the verdict as a prop, it does not compute one");
@@ -1495,9 +1467,12 @@ test("ONE CHANCE — `chanceOf` is spelled once in App.jsx and nowhere in pro.js
   const app = codeOf("App.jsx");
   assert.equal((app.match(/chanceOf\(/g) || []).length, 1,
     "chanceOf is called in exactly one place in App.jsx: inside chanceCheckOf");
-  const uses = (app.match(/chanceFor\(/g) || []).length;
+  // PR #40: the list card and Build read it through `listCardFigures()` and
+  // `buildFigures()`, which call `chanceCheckOf` directly; `chanceFor` is the
+  // component's binding of the same expression. Both count.
+  const uses = (app.match(/\b(chanceFor|chanceCheckOf)\(/g) || []).length;
   assert.ok(uses >= 5,
-    `the Radar, the Shortlist, Build, the record and the Guardian all read it (found ${uses})`);
+    `the list, Build, the record and the Guardian all read it (found ${uses})`);
   const pro = codeOf("pro.jsx");
   assert.equal((pro.match(/chanceOf\(/g) || []).length, 0,
     "the Guardian takes the chance as a prop, it does not compute one");
@@ -2797,13 +2772,6 @@ test("checkedAgainstNote() names the account, and says which tap the checks belo
 /* ==========================================================================
    TASK 1 — the sentences that came with the preset fix.
    ========================================================================== */
-test("unloadedBoardNote() is NOT a market verdict", () => {
-  const n = unloadedBoardNote("SOYB", "2026-11-20");
-  assert.match(n, /have not loaded/);
-  assert.match(n, /not a verdict on the market/);
-  assert.equal(/NOTHING CLEARED/.test(n), false, "a board that has not loaded is not a board that emptied");
-  assert.match(unloadedBoardNote(null, null), /this market/);
-});
 
 test("offBoardStrikeLabel() is written once, and it names the strike", () => {
   assert.equal(offBoardStrikeLabel(27.5), "27.5 \u00b7 not on this board");
@@ -2828,73 +2796,10 @@ test("buildPresets() REFUSES A NULL BOARD, and the preset effect waits for one",
    THE RADAR MUST NOT GET LONGER WHEN THE BASKET DOES (ROADMAP P2-bis)
 ================================================================ */
 
-test("RADAR — a market with something keeps its row, everything else is one line", () => {
-  const rows = [
-    { tk: "GLD", n: 4 }, { tk: "SLV", n: 2 },
-    { tk: "CORN", n: 0, cut: true }, { tk: "SOYB", n: 0, cut: true },
-    { tk: "USO", n: 0 }, { tk: "XLE", n: 0 },
-  ];
-  const r = radarSplit(rows);
-  assert.deepEqual(r.shown.map((x) => x.tk), ["GLD", "SLV"]);
-  assert.deepEqual(r.quiet.map((x) => x.tk), ["CORN", "SOYB", "USO", "XLE"]);
-  // LOOKED AT AND EMPTY IS NOT NEVER LOOKED AT. A missing-data answer wearing a
-  // market verdict's words is the line this repository keeps everywhere else.
-  assert.deepEqual(r.empty, ["CORN", "SOYB"]);
-  assert.deepEqual(r.notSearched, ["USO", "XLE"]);
-  const note = radarQuietNote(r);
-  assert.ok(note.includes("4 markets"));
-  assert.ok(note.includes("looked at, nothing on the radar: CORN, SOYB"));
-  assert.ok(note.includes("not searched yet: USO, XLE"));
-  assert.equal(note.split(".").filter((x) => x.trim()).length, 1, "ONE line, not one per market");
-});
 
-test("RADAR — a market the guided run EXAMINED is never 'not searched yet'", () => {
-  /* >>> READ ON THE OWNER'S PHONE, 21 Sep 2026. <<< One screen, four lines
-     apart: "4 of them came through to the shortlist (BOIL, WEAT, XLE and USO)"
-     over "8 markets with nothing to show — not searched yet: BOIL, USO, …".
-     BOIL and USO cleared every floor and were simply not the two roads taken
-     forward; `marketFacts` only knew roads, wide-search hits and floor
-     casualties, so they fell through to "nobody has looked". */
-  const rows = [
-    { tk: "XLE", n: 1 }, { tk: "WEAT", n: 1 },
-    { tk: "BOIL", n: 0, searched: true }, { tk: "USO", n: 0, searched: true },
-    { tk: "GLD", n: 0 },
-  ];
-  const r = radarSplit(rows);
-  assert.deepEqual(r.notSearched, ["GLD"], "only the untouched market is unsearched");
-  assert.deepEqual(r.empty, ["BOIL", "USO"]);
-  const note = radarQuietNote(r);
-  assert.ok(!/not searched yet:[^·.]*BOIL/.test(note), "BOIL was looked at and the line may not deny it");
-  assert.ok(!/not searched yet:[^·.]*USO/.test(note), "USO was looked at and the line may not deny it");
-  assert.ok(note.includes("looked at, nothing on the radar: BOIL, USO"));
-  // AND THE WORDS DO NOT CLAIM A VERDICT THE LINE CANNOT SUPPORT. These two
-  // markets' structures DID clear the floors; "nothing cleared" would be false.
-  assert.ok(!note.includes("nothing cleared"));
-});
 
-test("RADAR — the floors emptying a market still counts as having looked", () => {
-  const r = radarSplit([{ tk: "GLD", n: 2 }, { tk: "SOYB", n: 0, cut: true }]);
-  assert.deepEqual(r.empty, ["SOYB"]);
-  assert.deepEqual(r.notSearched, []);
-});
 
-test("RADAR — a first run collapses too: ten identical rows is the wall this replaces", () => {
-  const rows = ["SOYB", "CORN", "UNG", "BOIL", "WEAT", "GLD", "SLV", "USO", "XLE", "GDX"]
-    .map((tk) => ({ tk, n: 0 }));
-  const r = radarSplit(rows);
-  assert.equal(r.shown.length, 0);
-  assert.equal(r.quiet.length, 10);
-  assert.ok(radarQuietNote(r).includes("10 markets"));
-  assert.ok(radarQuietNote(r).includes("GDX"), "every market is still named, so every one is one tap away");
-});
 
-test("RADAR — with every market producing something there is no extra line at all", () => {
-  const r = radarSplit([{ tk: "GLD", n: 3 }, { tk: "SLV", n: 1 }]);
-  assert.equal(r.quiet.length, 0);
-  assert.equal(radarQuietNote(r), null);
-  assert.equal(radarQuietNote(null), null);
-  assert.equal(radarQuietNote(radarSplit([])), null);
-});
 
 /* ================================================================
    TASK 3 — ONE CHAIN, ONE OPEN INTEREST, ONE VERDICT
@@ -2925,7 +2830,11 @@ test("OPEN INTEREST — the wizard and the wide search await the same chain the 
   const wrapped = app.match(/ensureOpenInterest\(tk, chains\[tk\] \|\| \(await refreshChain\(tk, true\)\)\)/g) || [];
   assert.equal(bare.length, wrapped.length,
     "every generation site that judges a liquidity floor must await the open interest, not the bare chain");
-  assert.ok(wrapped.length >= 2, "the guided run and the wide search are both sites");
+  // PR #40: the guided run and the wide search are gone. Find reads
+  // `chains[tk]` from state, which `ensureOpenInterest()` patches — the way
+  // the Shortlist always did — and its memo re-runs when the column lands.
+  assert.ok(/const findGen = useMemo/.test(app) && /const c = chains\[tk\];/.test(app),
+    "Find judges the chain in state, the one ensureOpenInterest() patches");
   // ...and the SCREEN still never waits: refreshChain fires it and moves on.
   assert.ok(/ensureOpenInterest\(tk, c\);/.test(app),
     "refreshChain must fire the enrichment without awaiting it");
@@ -2976,13 +2885,15 @@ test("BUTTERFLIES — the guided path does not offer one, and it is a SHAPE not 
   assert.equal(isButterfly(null), false);
 });
 
-test("BUTTERFLIES — excluded in runWizard only, and they stay on the full desk", () => {
+test("BUTTERFLIES — a FLAG on the card since PR #40, never a silent cut", () => {
   const app = codeOf("App.jsx");
-  // Exactly one exclusion, beside the single-leg one, in the guided pool.
-  assert.equal((app.match(/isButterfly\(/g) || []).length, 1,
-    "the guided run is the only place that refuses one");
-  assert.ok(/if \(isButterfly\(pr\.legs\)\) \{ floors\.butterfly\+\+; continue; \}/.test(app),
-    "and it is counted, so the narrative can say what it did");
+  // The guided run excluded them in silence; it is gone. `candidateFlags()`
+  // names one on its card, and the flag toggle is the only thing that hides it.
+  assert.equal((app.match(/isButterfly\(/g) || []).length, 0, "no screen drops one by itself");
+  assert.ok(/candidateFlags\(/.test(app), "Find flags what the guided door used to drop");
+  const rules = codeOf("rules.js");
+  assert.ok(/isButterfly\(legs\)/.test(rules.slice(rules.indexOf("export function candidateFlags"))),
+    "and the flag reads the shape from the one home");
   // `buildPresets()` still builds them: the desk is unchanged.
   const src = readFileSync(new URL("./App.jsx", import.meta.url), "utf8");
   for (const name of ["Bearish Put Butterfly", "Iron Butterfly", "Call Butterfly ATM", "Bullish Call Butterfly"]) {
@@ -3056,8 +2967,9 @@ test("0b — `App.jsx` SPELLS THE POSITION P&L ONCE, through `pnlOf()`", () => {
 ================================================================ */
 
 test("TASK 1 — the horizon control cannot ask for a board the gate would refuse", () => {
-  const app = readFileSync(new URL("./App.jsx", import.meta.url), "utf8");
-  const slider = app.match(/<input type="range"[^>]*multi\.dteT[^>]*>/);
+  // PR #40: the horizon is one control in Find's request block (card.jsx).
+  const card = readFileSync(new URL("./card.jsx", import.meta.url), "utf8");
+  const slider = card.match(/<input type="range" aria-label="horizon in days"[^>]*>/);
   assert.ok(slider, "the horizon slider moved; point this at it again");
   assert.ok(!/min=\{21\}/.test(slider[0]), "21 is RULES.exitDTE wearing a horizon's clothes");
   assert.ok(/min=\{RULES\.minEntryDTE\}/.test(slider[0]), "both ends read their rule");
@@ -3076,19 +2988,50 @@ test("TASK 1 — every generation site reads the one home, none filters expiries
   assert.ok(!/dte >= dT - 20/.test(app), "the wide search's own window is gone");
   assert.ok(!/\.dte <= 130/.test(app), "and the guided run's bare 130");
   const uses = app.match(/buildableExpiries\(/g) || [];
-  assert.ok(uses.length >= 2, `the wide search and the guided run must both read it; found ${uses.length}`);
+  assert.ok(uses.length >= 1, `Find, the one generation site, must read it; found ${uses.length}`);
   // ...and the third site holds the guard INSIDE itself, so a fourth caller
   // added next year is covered without anybody coming back.
   assert.ok(/if \(!openableBoard\(dte\)\)/.test(app));
 });
 
-test("TASK 1 — an empty shortlist offers an honest next step, not a button onto a refused trade", () => {
-  const cta = emptyShortlistCta({ expKey: "2026-10-16", ticker: "XLE" });
-  assert.ok(cta.includes("2026-10-16"));
-  assert.ok(/another expiry/.test(cta) && /another market/.test(cta));
-  assert.ok(!/Go to Build/.test(cta));
+test("A DATA FAILURE IS NOT A MARKET VERDICT (restored from main's screen-5 test, PR #40)", () => {
+  const TEN = ["CORN", "UNG", "SOYB", "BOIL", "WEAT", "GLD", "SLV", "USO", "XLE", "GDX"];
+  // Every market FAILED: no "Nothing today", the failure named, and the way out.
+  const allFailed = nothingTodayLine({}, { failed: TEN.map((tk) => ({ tk, why: "HTTP 502" })) });
+  assert.ok(!/Nothing today/.test(allFailed), `all failed must not read as a verdict: ${allFailed}`);
+  assert.ok(allFailed.includes("Could not read 10 markets") && allFailed.includes("press Refresh"));
+  assert.ok(allFailed.includes("CORN: HTTP 502"), "each failure carries its error");
+  // Some failed and some floored: both counts, the failure FIRST, and still no verdict.
+  const mixed = nothingTodayLine({ liquidity: 3 }, { failed: [{ tk: "UNG", why: "timeout" }], noBoard: ["XLE"] });
+  assert.ok(!/Nothing today/.test(mixed), mixed);
+  assert.ok(mixed.indexOf("Could not read 1 market") === 0, "the failure comes first");
+  assert.ok(mixed.indexOf("3 too little open interest") > mixed.indexOf("Could not read"), "then the floors' count");
+  assert.ok(mixed.includes("XLE"));
+  // Still loading: "Reading N markets…", never a verdict and never a failure.
+  const loading = nothingTodayLine({}, { loading: ["GLD", "SLV"], failed: [{ tk: "UNG", why: "timeout" }] });
+  assert.equal(loading, "Reading 2 markets…");
+  // Every market READ and nothing passed: only then "Nothing today".
+  assert.ok(/^Nothing today\./.test(nothingTodayLine({ reward: 1 }, {})));
+  // ...and the chip says which: a failed fetch is never "loading".
   const app = readFileSync(new URL("./App.jsx", import.meta.url), "utf8");
-  assert.ok(/Nothing here to take apart/.test(app), "and the button says so rather than naming a structure");
+  assert.ok(/findGen\.failed\.some\(\(x\) => x\.tk === tk\) \? "failed" : findGen\.loading\.includes\(tk\) \? "loading"/.test(app),
+    "the market chip tells a failure from a load in flight");
+  assert.ok(/setChainErr\(\(m\) => \(\{ \.\.\.m, \[tk\]: fetchFailWords\(e\) \}\)\)/.test(app), "a failed fetch is recorded with its error");
+  assert.equal(fetchFailWords(new Error("HTTP 502 Bad Gateway from the proxy upstream")), "HTTP 502 Bad Gateway from");
+  assert.equal(fetchFailWords(null), "no reply");
+  assert.equal(fetchFailWords(new Error(`server: Unexpected token '<', "<!doctype html>`)), "server: Unexpected token");
+});
+
+test("TASK 1 — an empty Find list says why with counts, and offers no button onto a refused trade", () => {
+  // PR #40: "Nothing today" appears only when zero candidates pass, with the
+  // count for every reason, and the step forward stays disabled with nothing loaded.
+  const line = nothingTodayLine({ liquidity: 3, reward: 2 }, { noBoard: ["XLE"] });
+  assert.ok(/^Nothing today\./.test(line));
+  assert.ok(line.includes("3 too little open interest") && line.includes("2 pays too little"));
+  assert.ok(line.includes("XLE"));
+  const app = readFileSync(new URL("./App.jsx", import.meta.url), "utf8");
+  assert.ok(/findGen\.items\.length === 0 && \(/.test(app), "only when zero candidates pass");
+  assert.ok(/disabled=\{!legs\.length\}/.test(app), "and the button says so rather than naming a structure");
 });
 
 /* ================================================================

@@ -35,7 +35,7 @@ import {
   wideComboNote, comboSpreadSkippedNote, spreadFloor, qualityFloor,
   effectiveLimit, limitCeilingNote, orderVerdict, ORDER_VERDICTS,
   legBook, sizeSkippedNote, legLimitSeed, netFromLegs, onTick, openLimitPrice, fillNet,
-  rewardRisk, conflictSummaryLine, warningsToPrint, NOTHING_TODAY,
+  rewardRisk, conflictSummaryLine, warningsToPrint, nothingTodayLine,
   tradeCard, TRADE_CARD_IDS, unlistedContractNote, unquotedLegNote, unquotedLegPointer,
   strikeSnapNote, offBoardStrikeLabel, checkedAgainstNote, NO_CEILING,
   limitPlacement, INDICATIVE_CLAUSE,
@@ -163,11 +163,10 @@ check("the Shortlist refuses it at the REAL generation site, with its own tally"
   }
 });
 
-check("the refusal screen and the list line know about the pair as well", () => {
-  const screen = NOTHING_TODAY.belowQualityFloor({ comboSpread: 3, markets: ["UNG"], level: null });
-  has(screen, "3 because");
-  has(screen, "WHOLE combination");
-  has(screen, "filtered out by the quality floors");
+check("the Nothing-today line and the list line know about the pair as well", () => {
+  const screen = nothingTodayLine({ comboSpread: 3 });
+  has(screen, "Nothing today.");
+  has(screen, "3 the combination quoted too wide");
 });
 
 /* ==================================================================
@@ -925,7 +924,8 @@ check("ON A CREDIT the leg-slider seeds and the combination suggestion agree to 
   const book = comboBook(legs, quotes);
   const sugg = openLimitPrice({ netMid: book.mid, spread: book.spread });
   near(seeded, sugg.net, 0.011, "the seed and the suggestion are the same price, sign included");
-  near(fillNet(legs, quotes), sugg.net, 1e-9, "and the card reads that same suggestion");
+  near(fillNet(legs, quotes), sugg.net, 0.0051, "and the card reads that same suggestion, on the cent");
+  near(fillNet(legs, quotes), seeded, 1e-9, "and the legs sum to it exactly");
   if (Math.sign(seeded) !== -1 || Math.sign(sugg.net) !== -1) throw new Error("a credit stays a credit");
 });
 

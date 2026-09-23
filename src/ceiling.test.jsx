@@ -23,8 +23,8 @@
 // implementation of these decisions exists.
 // ============================================================================
 import {
-  payoffCeiling, profitUnbounded, impossibleLoss, impossibleLossNote, scratchLevel,
-  qualityFloor, rewardRisk, reportNarrativePrompt, NOTHING_TODAY, NO_CEILING, RULES,
+  payoffCeiling, profitUnbounded, impossibleLoss, impossibleLossNote, unpriceableNote, scratchLevel,
+  qualityFloor, rewardRisk, reportNarrativePrompt, NO_CEILING, RULES,
   modelSanity, modelDisagreementNote, MIN_NET_DOLLARS,
 } from "./rules.js";
 import { chanceOf, chanceSourceNote, seasonalProvenance, seasonalStampNote, seasonalStampFields,
@@ -36,7 +36,7 @@ import { analyze, shortlistWithFloors, buildPresets, StrikeSelect, modelCheckOf,
 import { payoff, netBS, SEASONAL, SIGMA, seasonalDrift, exitSim } from "./engine.js";
 import { exitPathSim } from "./pro.jsx";
 import { sigmaProvenance, MEASURED_SIGMA_SOURCE, TABLE_SIGMA_SOURCE, FALLBACK_SIGMA_SOURCE } from "./rules.js";
-import { buildableExpiries, openableBoard, offFloorExpiryLabel, horizonFloorNote, emptyShortlistCta,
+import { buildableExpiries, openableBoard, offFloorExpiryLabel, horizonFloorNote,
   entryRoom, expiryChoice, expiryChoiceNote } from "./rules.js";
 import { evaluateTrade } from "./riskGate.js";
 
@@ -180,11 +180,8 @@ check("the refusal is in the same register as UNPRICEABLE — a sentence and a c
   has(impossibleLossNote(1, "BOIL"), "1 structure was left out");
   has(impossibleLossNote(3, "BOIL"), "3 structures were left out");
   has(impossibleLossNote(2, "CORN"), "CORN");
-  const screen = NOTHING_TODAY.impossibleLoss({ impossible: 4, markets: ["UNG", "BOIL"] });
-  has(screen, "UNG, BOIL");
-  has(screen, "4");
   // ...and it is NOT the same sentence as the board the app could not price.
-  if (screen === NOTHING_TODAY.unpriceable({ unpriceable: 4, markets: ["UNG", "BOIL"] })) {
+  if (impossibleLossNote(4, "UNG") === unpriceableNote(4, "UNG")) {
     throw new Error("two different refusals must not share one sentence");
   }
 });
@@ -465,7 +462,7 @@ check("a chain the app cannot model is SKIPPED, never emptied", () => {
 check("the model refusal is in the same register as the other four — a sentence and a count", () => {
   oneSentenceish(modelDisagreementNote(1, "BOIL"));
   has(modelDisagreementNote(2, "BOIL"), "2 structures");
-  has(NOTHING_TODAY.modelDisagreement({ modelDisagreement: 1, markets: ["BOIL"] }), String(RULES.modelDisagreementRatio));
+  has(modelDisagreementNote(1, "BOIL"), String(RULES.modelDisagreementRatio));
 });
 
 /* ============================================================================

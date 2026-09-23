@@ -29,11 +29,16 @@
 // with two implementations.
 // ============================================================================
 
-/** The three steps, in order. `n` is what the user sees on screen. */
+/** The steps, in order. `n` is what the user sees on screen.
+ *
+ *  >>> TWO STEPS SINCE PR #40 (TASK 1). <<< Radar and Shortlist were two
+ *  lists of one question, and the guided door was a third: the owner saw
+ *  "Nothing today" there while Radar listed seven structures on the same data.
+ *  Find is one request block over one ranked list across the selected
+ *  markets; the Shortlist is a market filter on that list. */
 export const STEPS = [
-  { n: 1, id: "radar", label: "Radar", blurb: "which markets have something today" },
-  { n: 2, id: "shortlist", label: "Shortlist", blurb: "the structures that survived" },
-  { n: 3, id: "build", label: "Build", blurb: "one trade, taken apart" },
+  { n: 1, id: "find", label: "Find", blurb: "every market, one ranked list" },
+  { n: 2, id: "build", label: "Build", blurb: "one trade, taken apart" },
 ];
 
 export const FIRST_STEP = STEPS[0].id;
@@ -61,10 +66,9 @@ export const prevStepId = (id) => STEPS[Math.max(0, stepIndex(id) - 1)].id;
  *   compare — how many candidates are ticked for comparison
  * @returns {Record<string,string>} step id -> the line under its number
  */
-export function stepCarry({ ticker = null, trade = null, compare = 0 } = {}) {
+export function stepCarry({ ticker = null, trade = null, compare = 0, markets = null } = {}) {
   return {
-    radar: "every market",
-    shortlist: ticker ? (compare > 0 ? `${ticker} · ${compare} to compare` : ticker) : "pick a market first",
+    find: `${markets == null ? "every market" : `${markets} market${markets === 1 ? "" : "s"}`}${compare > 0 ? ` · ${compare} to compare` : ""}`,
     build: trade || (ticker ? `${ticker} · nothing loaded` : "nothing loaded"),
   };
 }
@@ -242,3 +246,23 @@ export function savedAge(sv, now = Date.now()) {
   if (h < 24) return `saved ${Math.round(h)}h ago — the prices below are from then`;
   return `saved ${Math.round(h / 24)}d ago — the prices below are from then`;
 }
+
+/** What the picture says instead of drawing a curve it cannot stand behind. */
+export const compareDistNote = (why) => {
+  if (why === "markets") {
+    return `These are not all the same market and horizon, so there is no single distribution to draw ` +
+      `underneath them: one curve of where the price could finish would have to be two. The payoffs and the ` +
+      `breakevens are still on one axis, read as the move from each market\u2019s own price today.`;
+  }
+  if (why === "sigma" || why === "horizon") {
+    return `Where the price could finish is not drawn: ${why === "sigma" ? "the volatility" : "the horizon"} ` +
+      `these candidates were priced at did not travel with them. The payoffs and the breakevens are unaffected ` +
+      `\u2014 they are arithmetic on the legs, not a forecast.`;
+  }
+  if (why === "drift") {
+    return `Where the price could finish is not drawn: these candidates carry no seasonal drift, and a missing ` +
+      `drift is not a drift of zero. Drawing a market that goes nowhere under a chance worked out on the ` +
+      `season would be two readings of one trade. Candidates saved before this was recorded have none.`;
+  }
+  return null;
+};

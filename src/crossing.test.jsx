@@ -12,8 +12,7 @@
 import { readFileSync } from "node:fs";
 import { fixtureCandidates, measured, removedAt } from "../scripts/crossing-fixtures.jsx";
 import { RULES, crossingFloor, crossingFloorReason, crossingNote, qualityFloor, filterFold,
-  liquiditySettingNote, emptyExpiryNote, NOTHING_TODAY, qualityFloorLine, comboSpreadSkippedNote } from "./rules.js";
-import { verdictNarrative } from "./signals.js";
+  liquiditySettingNote, nothingTodayLine, qualityFloorLine, comboSpreadSkippedNote } from "./rules.js";
 
 const ok = [], bad = [];
 const check = (name, fn) => { try { fn(); ok.push(name); } catch (e) { bad.push([name, e.message]); } };
@@ -64,11 +63,11 @@ check("THE FLOOR BITES on the fixtures, and what it removes is counted as crossi
   truthy(r.removedAlone <= r.removed, "a floor alone never removes more than the floor");
 });
 
-check("XLE 60/57 put credit: $9 of crossing against $71.25 of maximum profit, and it passes", () => {
+check("XLE 60/57 put credit: $9 of crossing against $71 of maximum profit (the $0.71 credit on the cent), and it passes", () => {
   const xle = ALL.find((c) => c.fixture.startsWith("XLE"));
   truthy(xle, "the owner's XLE reading is a fixture");
   near(xle.qf.crossing.cost, 9, 1e-9, "crossing cost");
-  near(xle.qf.crossing.maxProfit, 71.25, 0.01, "maximum profit at the price that fills (after 0a)");
+  near(xle.qf.crossing.maxProfit, 71, 0.01, "maximum profit at the price that fills, on the cent the ticket sends (PR #40)");
   eq(xle.qf.crossing.pass, true, "0.126 of it clears 0.5");
   eq(xle.shown, true, "and it is offered");
 });
@@ -117,18 +116,10 @@ check("every 'not shown' summary names the crossing count on its own", () => {
   has(fold.summary, "2 crossing costs over 50% of max profit");
   eq(fold.reasons.find((r) => r.id === "crossing").count, 2, "its own row");
   has(liquiditySettingNote("recommended", { kept: 3, crossing: 2 }), "2 removed for a crossing cost over 50% of max profit");
-  has(emptyExpiryNote("2026-10-16", { crossing: 2 }), "2 for a crossing cost over 50% of max profit");
-  has(NOTHING_TODAY.belowQualityFloor({ crossing: 2, markets: ["UNG"] }), "2 because crossing its market in and out");
-  has(NOTHING_TODAY.belowQualityFloor({ crossing: 2, markets: ["UNG"] }), "filtered out by the quality floors");
+  has(nothingTodayLine({ crossing: 2 }), "2 crossing costs over 50% of max profit");
   has(crossingNote(2, "UNG"), "more than 50% of the most each can make on UNG");
   has(qualityFloorLine("recommended"), "crossing cost");
   has(comboSpreadSkippedNote("Alpaca"), "crossing-cost");
-});
-
-check("the guided flow's refusal counts it too", () => {
-  const paras = verdictNarrative({ basket: ["UNG"], examined: [], floors: { crossing: 3, markets: ["UNG"] } });
-  has(paras.join(" "), "3 structures would have spent more than 50%");
-  has(paras.join(" "), "3 candidates on UNG were");
 });
 
 /* ---------------- 4. a quality floor, never the gate ---------------- */
@@ -140,8 +131,8 @@ check("IT IS NOT IN THE GATE: riskGate.js never reads the crossing share", () =>
 
 check("THE ONE HOME: the share is read from RULES at every generation site, never copied", () => {
   const app = readFileSync("src/App.jsx", "utf8");
-  eq((app.match(/maxProfitAtFill: aFill \? aFill\.maxProfit : null/g) || []).length, 3,
-    "Shortlist, multi-market search and the guided flow all hand qualityFloor() the fill-price profit");
+  eq((app.match(/maxProfitAtFill: aFill \? aFill\.maxProfit : null/g) || []).length, 1,
+    "the one generation site (shortlistWithFloors, which Find calls per market) hands qualityFloor() the fill-price profit");
   truthy(!/maxCrossingShareOfMaxProfit/.test(app), "App.jsx reads the floor through qualityFloor(), not the number");
 });
 

@@ -14,7 +14,7 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { CandidateCard, SplitSections, RequestControls, MissLine } from "./card.jsx";
-import { requestOf, RULES, fillNet, comboBook, openLimitPrice, rewardRisk } from "./rules.js";
+import { requestOf, RULES, fillNet, comboBook, openLimitPrice, rewardRisk, onTick, sizeLine, candidateFlags } from "./rules.js";
 import { payoffBands } from "./visuals.jsx";
 
 const ok = [], bad = [];
@@ -132,30 +132,53 @@ check("THE PRICE NOTE IS OPT-IN, because a mid-priced row may not claim otherwis
 check("THE PRICE THAT FILLS IS openLimitPrice() ON comboBook(), AND NOTHING ELSE", () => {
   const book = comboBook(LEGS, QUOTES);
   const expected = openLimitPrice({ netMid: book.mid, spread: book.spread }).net;
-  if (fillNet(LEGS, QUOTES) !== expected) throw new Error("fillNet() is a second arithmetic");
+  if (fillNet(LEGS, QUOTES) !== onTick(expected)) throw new Error("fillNet() is a second arithmetic");
   // NO BOOK IS NO PRICE, never a price of zero.
   if (fillNet(LEGS, [{ bid: 1.0, ask: 1.2 }, {}]) !== null) throw new Error("an unquoted leg produced a price");
 });
 
-check("THE CONTROLS BLOCK IS CONTROLS, AND ITS EXPLANATION FOLDS", () => {
+check("THE CONTROLS BLOCK IS ONE REQUEST, AND ITS EXPLANATION FOLDS (PR #40)", () => {
   const req = requestOf({ amt: 300 }, { perTradeLimit: 300 });
   const html = renderToStaticMarkup(
     <RequestControls request={req} onChange={() => {}}
       sentiments={[{ id: "bull", label: "Bull", color: "#0a0", icon: "↑", tgt: 0.04 }]}
-      sentiment="bull" ticker="SOYB" spot={27.5}
-      expiries={[{ key: "2026-11-20", dte: 59, buildable: true, label: "2026-11-20 (59d)" }]}
-      expKey="2026-11-20" onExpiry={() => {}} />);
-  for (const k of ["DIRECTION", "TARGET PRICE", "SIZE BY", "EXPIRY", "CHANCE OF PROFIT"]) has(html, k);
-  has(html, "$28.60");            // the direction read as a price
-  has(html, "2026-11-20");
-  // The long explanation is behind the fold, not on the screen.
+      direction="bull" ticker="SOYB" spot={27.5}
+      universe={["SOYB", "GLD"]} markets={["SOYB"]} onMarkets={() => {}}
+      horizon={45} onHorizon={() => {}} />);
+  for (const k of ["MARKETS · 1 OF 2", "DIRECTION", "Season decides", "TARGET PRICE", "SIZE BY", "HORIZON", "CHANCE OF PROFIT"]) has(html, k);
+  has(html, "$28.60");            // the direction read as a price, with one market and one direction
+  if (html.includes("Search")) throw new Error("there is no Search button: the list re-filters live");
   if (html.includes("They do NOT create a structure")) {
     throw new Error("the controls block explains itself in a paragraph; it must fold");
   }
-  // ...and every control is at least 38px tall, for a thumb at 390px.
   if (!html.includes("minHeight:38px") && !html.includes("min-height:38px")) {
     throw new Error("a control smaller than a thumb is not a control on a phone");
   }
+});
+
+check("TARGET MODE RELABELS THE AMOUNTS AND CHANGES EVERY CARD (PR #40)", () => {
+  const limits = { perTradeLimit: 400, cappedPerTrade: 400 };
+  const budget = renderToStaticMarkup(<RequestControls only={["size"]} request={requestOf({ amt: 200 }, limits)} onChange={() => {}} limits={limits} onLimit={() => {}} />);
+  has(budget, "risk $100"); has(budget, "per-trade limit $400");
+  const target = renderToStaticMarkup(<RequestControls only={["size"]} request={requestOf({ mode: "target", amt: 200 }, limits)} onChange={() => {}} limits={limits} onLimit={() => {}} />);
+  has(target, "make $100");
+  if (target.includes("risk $100")) throw new Error("the chips did not relabel");
+  const size = { ok: true, n: 14, totProfit: 1932, totPrem: 868, isCredit: false };
+  const card = renderToStaticMarkup(<CandidateCard name="X" legs="+1 28C" rr={1} pop={0.5} profit={138} risk={-62}
+    size={sizeLine(requestOf({ mode: "target", amt: 1900 }, limits), size)} />);
+  has(card, "14 contracts to reach $1,900");
+  const cardB = renderToStaticMarkup(<CandidateCard name="X" legs="+1 28C" rr={1} pop={0.5} profit={138} risk={-62}
+    size={sizeLine(requestOf({ amt: 900 }, limits), size)} />);
+  has(cardB, "14 contracts for $868");
+});
+
+check("WHAT THE GUIDED DOOR DROPPED IS A VISIBLE STATE ON THE CARD (PR #40)", () => {
+  const flags = candidateFlags({ legs: [{ side: 1, qty: 1, type: "call", strike: 28 }],
+    fused: { agreement: "CONFLICT", confidence: 21 } });
+  const ids = flags.map((f) => f.id);
+  for (const id of ["single", "conflict", "confidence"]) if (!ids.includes(id)) throw new Error(`${id} not flagged`);
+  const html = renderToStaticMarkup(<CandidateCard name="X" legs="+1 28C" rr={1} pop={0.5} profit={1} risk={-1} flags={flags} />);
+  has(html, "single option"); has(html, "CONFLICT"); has(html, `confidence under ${RULES.lowConfidence}`);
 });
 
 check("THE SLIDER READS ITS BAND AND ITS STEP FROM RULES", () => {
