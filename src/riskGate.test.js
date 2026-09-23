@@ -812,7 +812,7 @@ test("the ordinary debit spread — a NEGATIVE worst case — is untouched by it
 });
 
 test("THE SIGN TRAP: a CLOSING order carrying a positive magnitude is never sign-tested", () => {
-  // pro.jsx closeGroup() passes the cost basis, which is a positive magnitude.
+  // closeOrder.js prepareClose() passes the cost basis, which is a positive magnitude.
   // Reading that as an arbitrage would block every close on the desk.
   const r = evaluateTrade({
     proposal: { intent: "close", ticker: "BOIL", legs: BOIL_CREDIT_SPREAD, contracts: 1, maxLoss: 340 },
@@ -1380,10 +1380,12 @@ test("LIMIT vs BOOK — every CLOSE path refuses it beside its own button", () =
   /* It is NOT in the gate for a close, so each close path has to ask for
      itself. A path that never asks is a path where an inverted closing order
      leaves in silence — and closing has never been exercised at all. */
-  for (const f of ["pro.jsx"]) {
+  // placeExit() in pro.jsx; order path 3 (the desk's and the Positions card's
+  // close) in closeOrder.js, where closeGroup()'s body moved in PR #38.
+  for (const f of ["pro.jsx", "closeOrder.js"]) {
     const src = codeOf(f);
     const hits = (src.match(/limitAgainstBook\(/g) || []).length;
-    assert.ok(hits >= 2, `${f} calls limitAgainstBook() ${hits} times: placeExit() and closeGroup() both need it`);
+    assert.ok(hits >= 1, `${f} calls limitAgainstBook() ${hits} times: placeExit() and prepareClose() both need it`);
   }
   const approve = readFileSync(new URL("../netlify/functions/approve.mjs", import.meta.url), "utf8");
   assert.ok(/limitAgainstBook\(/.test(approve),

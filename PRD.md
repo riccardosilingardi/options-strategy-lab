@@ -87,27 +87,30 @@ v1 is done when all three are true, each observed on the owner's real account an
 
 - **(a)** One opening order **filled at the intended price** — the fill Alpaca reports matches
   the limit the ticket showed, sign included.
-- **(b)** One closing order **filled via `closeGroup()`** — the close path sent live, accepted
-  by Alpaca, and filled.
+- **(b)** One closing order **filled via order path 3** (`src/closeOrder.js`, from the Positions
+  card or the desk) — the close path sent live, accepted by Alpaca, and filled.
 - **(c)** The owner **reads each open position's action in five seconds**: HOLD, CLOSE with its
   reason, or WARNING.
 
-What still has to be built for (c) is ROADMAP PR #38 and PR #39.
+(c) is built (ROADMAP PR #38); it is the owner's reading. PR #39 is the last v1 change.
 
 ## 4. NOT VERIFIED
 
 At most ten items. **OWNER CHECK** means only a reading on the live market or the owner's phone
 can settle it; no test in this repository can.
 
-1. **OWNER CHECK — the closing order via `closeGroup()` has never been sent live.** In
-   particular whether the sign on the limit comes out the way `mlegLimitPrice()` says. The
-   opening sign was wrong for four pull requests and only a fill found it. This is v1 (b).
+1. **OWNER CHECK — order path 3 has never been sent live, neither from the desk nor from the
+   Positions card's close-at-limit.** In particular whether the sign on the limit comes out the
+   way `mlegLimitPrice()` says, whether `groupForRecord()` finds the holding in a real
+   `/v2/positions` payload, and whether "close order working" clears when Alpaca reports the
+   fill. The opening sign was wrong for four pull requests and only a fill found it. This is v1 (b).
 2. **OWNER CHECK — J-0003 has not filled.** Is the indicative combination ask systematically
    inside the real one on thin chains, and by how much?
 3. **OWNER CHECK — no opening order has yet filled at the intended price** since the sign fix.
    This is v1 (a).
-4. **OWNER CHECK — nobody has read the split list, the cards or the controls on a real screen.**
-   Whether a card reads without reading a sentence is the owner's answer to give.
+4. **OWNER CHECK — nobody has read the split list, the cards or the controls on a real screen,**
+   nor the Positions card's one action (HOLD / CLOSE / WARNING / NO QUOTE). Whether it reads in
+   five seconds is the owner's answer to give (v1 c).
 5. **OWNER CHECK — the quantity fields have not been tried on a real phone.** They are tested
    by driving the component's handlers, not by a touch keyboard.
 6. **OWNER CHECK — `upgradeHolding()` has never run against a real `/v2/positions` payload.**

@@ -512,7 +512,7 @@ test("NEVER AGAIN — no close path builds a MARKET order for an option leg", ()
      an order path DECIDING to take whatever the other side is asking on books
      this repository has measured at 145% of the mid. */
   const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
-  const FILES = ["src/pro.jsx", "src/App.jsx", "netlify/functions/approve.mjs", "netlify/functions/autopilot.mjs"];
+  const FILES = ["src/pro.jsx", "src/App.jsx", "src/closeOrder.js", "netlify/functions/approve.mjs", "netlify/functions/autopilot.mjs"];
   // An `orderBody({ ... })` call, read whole, then asked two questions.
   const closeMarketBody = (code) => {
     const out = [];
@@ -549,7 +549,8 @@ test("CLOSE — the one close path that had no book now hands limitAgainstBook a
      once, so it could only ever skip. It was written that way deliberately,
      against the day the path gained a limit. That day is this one. */
   const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
-  const pro = strip(readFileSync("src/pro.jsx", "utf8"));
+  // closeGroup()'s body moved to src/closeOrder.js in PR #38 (order path 3).
+  const pro = strip(readFileSync("src/closeOrder.js", "utf8"));
   assert.equal(/limitAgainstBook\(\{\s*limitPrice:\s*[^,]*,\s*book:\s*null/.test(pro), false,
     "a close path that hands limitAgainstBook() a null book is a guard that can only skip");
   // ...and the price it sends is worked out from a chain fetched at the tap.

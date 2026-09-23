@@ -45,6 +45,7 @@ by writing down what you could not verify (PRD §4, at most ten items).
   chance, limit pricing, and every generated rule sentence.
 - `src/riskGate.js` — `evaluateTrade()`, the gate every order path calls.
 - `src/order.js` — `orderBody()` (the one Alpaca body builder), signs, order outcomes.
+- `src/closeOrder.js` — order path 3: close a whole holding at a limit, in two taps.
 - `src/alpacaContract.js` — Alpaca's order contract mirrored from alpaca-py.
 - `src/journal.js` — the position record: refs, timelines, size, stage, book, fills.
 - `src/engine.js` — Black-Scholes, payoff, exit simulator, seeded Monte Carlo, seasonal parse.
@@ -75,8 +76,9 @@ by writing down what you could not verify (PRD §4, at most ten items).
 
 ## Order paths — six, all through the gate
 
-1. `App.jsx` `sendToAlpaca()` 2. `pro.jsx` `OrderTicket` send 3. `pro.jsx` `closeGroup()`
-4. `pro.jsx` `placeExit()` 5. `autopilot.mjs` 6. `approve.mjs`.
+1. `App.jsx` `sendToAlpaca()` 2. `pro.jsx` `OrderTicket` send 3. `src/closeOrder.js`
+`prepareClose()` then `sendClose()` — called by the desk's `closeGroup()` and by the Positions
+card's close-at-limit 4. `pro.jsx` `placeExit()` 5. `autopilot.mjs` 6. `approve.mjs`.
 Adding a seventh means adding a gate call.
 
 ## Where each constant lives
@@ -116,6 +118,7 @@ All in `RULES`, `src/rules.js`, unless noted.
 - Use `getU(ticker)`, never `UNDERLYINGS[ticker]`.
 - Single-leg orders go to Alpaca as simple orders, not mleg.
 - Cancel conflicting open orders before sending an mleg close (wash-trade check).
+- Sending a close does not file the Journal; "Close and file it" is the step after the fill.
 - `settings.notifyWhenReady` must be in the `/api/state` sync payload.
 - A leg's `qty` is inside `analyze()`'s figures; `positionSize()` separates `contracts` from
   the broker's `brokerQty`. Never write `Number(p.contracts) || 1`.
