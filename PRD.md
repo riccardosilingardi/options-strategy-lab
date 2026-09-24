@@ -166,6 +166,8 @@ can settle it; no test in this repository can.
 
 One line each. Detail for every item is in `docs/history/ROADMAP.md`.
 
+- **Journal on the server** — `journal` and `journalSeq` on `/api/state`, merged by ref. First
+  after v1: changing the sync of the only live record before its first live close is the wrong week.
 - **P2 full** — rank proposals by edge at the price that fills, not by score.
 - **P7** — learn about fills from Alpaca's `trade_updates` stream server-side, instead of polling.
 - **P8** — more indicators and timeframes, only after the owner has used the current ones.

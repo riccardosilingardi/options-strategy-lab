@@ -26,6 +26,7 @@ import {
   positionStage, isOwnedPosition, positionStageNote, wouldHaveDone,
   isBrokerHolding, fillVsLimit, storedLimitOf, orderReconciliation, bookPositions, upgradeHolding,
   holdingShape, isImportedRecord, dropImportedTwins, recordFillPrice,
+  countsAsRuleClose, closeKindWords, riskOkOf, riskOkWords, NOT_A_FILL,
 } from "./journal.js";
 import { RULES, ruleExitOf, stopWarningSentence,
   seasonalStampOf, seasonalStampNote, ESTIMATED_SEASONAL_SOURCE, MEASURED_SEASONAL_SOURCE } from "./rules.js";
@@ -1398,6 +1399,56 @@ test("J-0001 — AN IMPORTED RECORD STILL READS ITS OWN ENTRY AS THE BROKER'S; a
   assert.equal(recordFillPrice(GDX_J1), null);
   assert.equal(recordFillPrice({ alpacaFillPrice: "", brokerAvgNet: null }), null, "unknown is not zero");
   assert.equal(recordFillPrice({ alpacaFillPrice: -0.04 }), -0.04, "the order's own fill wins, signed");
+});
+
+/* ================================================================
+   PR #43, TASK 2 — THE TWO JOURNAL DEBTS.
+================================================================ */
+const TIME_EXIT = closeDecision({ alert: { dteExit: true, dteLeft: 19 } }).reason;
+
+test("TASK 2a — A RECORD ALPACA DID NOT HOLD, filed inside the 21-day window, is NOT a rule close", () => {
+  assert.equal(TIME_EXIT.kind, "rule", "the window fired: the reason is the time exit");
+  const e = journalEntry({ pos: GDX_J1, pnl: null, pnlNote: NOT_A_FILL, reason: TIME_EXIT, riskOk: true });
+  assert.equal(e.ruleExit, false, "nothing was closed, so no rule closed it");
+  assert.equal(countsAsRuleClose(e), false);
+  assert.equal(closeKindWords(e), "not a rule close — Alpaca did not hold it");
+  // An entry already filed with ruleExit: true is read the same way.
+  const old = { ...e, ruleExit: true };
+  assert.equal(countsAsRuleClose(old), false, "an entry filed before this fix is not counted either");
+  // A held record at the same moment is a rule close, as before.
+  const held = journalEntry({ pos: GDX_J1, pnl: 120, reason: TIME_EXIT, riskOk: true, closeOrderId: "c-1" });
+  assert.equal(held.ruleExit, true);
+  assert.equal(countsAsRuleClose(held), true);
+  assert.equal(closeKindWords(held), "closed by the rules");
+  assert.equal(closeKindWords({ ruleExit: false }), "closed by hand");
+});
+
+test("TASK 2b — UNDER FREE SIZING riskOk IS NULL and reads 'no limit applied', never a pass or a fail", () => {
+  const free = { ...GDX_J1, sizingFree: true };
+  for (const verdict of [true, false]) {
+    const e = journalEntry({ pos: free, pnl: 10, reason: TIME_EXIT, riskOk: verdict, closeOrderId: "c-1" });
+    assert.equal(e.riskOk, null, `a ${verdict} against a limit that was not applied is not stored`);
+    assert.equal(riskOkOf(e), null);
+    assert.equal(riskOkWords(e), "no limit applied");
+  }
+  // An entry filed before this fix with a verdict is read as none.
+  assert.equal(riskOkOf({ sizingFree: true, riskOk: false }), null);
+  assert.equal(riskOkWords({ sizingFree: true, riskOk: false }), "no limit applied");
+  // Within the limits, as before.
+  const within = journalEntry({ pos: GDX_J1, pnl: 10, reason: TIME_EXIT, riskOk: false, closeOrderId: "c-1" });
+  assert.equal(within.riskOk, false);
+  assert.equal(riskOkWords(within), "over the per-trade limit at the time");
+  assert.equal(riskOkWords({ riskOk: true }), "inside the per-trade limit");
+  assert.equal(riskOkOf({}), null, "unknown is not a pass");
+});
+
+test("TASK 2 — THE JOURNAL SCREEN AND THE LEVEL READ THE HELPERS (source)", () => {
+  const app = readFileSync("src/App.jsx", "utf8");
+  assert.match(app, /const ruled = j\.filter\(countsAsRuleClose\)\.length;/);
+  assert.match(app, /const judged = j\.filter\(\(x\) => riskOkOf\(x\) != null\);/);
+  assert.match(app, /\{closeKindWords\(e\)\}/);
+  assert.match(app, /\{riskOkWords\(e\)\}/);
+  assert.equal(/e\.ruleExit \?|x\.ruleExit\)|e\.riskOk \?|x\.riskOk\)/.test(app), false, "no raw read of either field");
 });
 
 test("PR #42 — THE SYNC MATCHES BY SHAPE AND DROPS THE TWIN (source)", () => {

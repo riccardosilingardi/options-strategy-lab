@@ -58,7 +58,7 @@ import { nextRef, refCounter, appendTimeline, stampTimeline, orderStatusRecheck,
   autopilotHorizonNote, autopilotVolNote,
   positionSize, positionSizeNote, contractsOf, withPositionSize, fillVsLimit, orderReconciliation,
   storedLimitOf,
-  positionStage, positionStageNote, bookPositions, holdingShape, dropImportedTwins, recordFillPrice, wouldHaveDone, isBrokerHolding, upgradeHolding,
+  positionStage, positionStageNote, bookPositions, holdingShape, dropImportedTwins, recordFillPrice, countsAsRuleClose, closeKindWords, riskOkOf, riskOkWords, wouldHaveDone, isBrokerHolding, upgradeHolding,
   isTestRecord, testRecordNote, scoredJournal, journalPnl, NOT_A_FILL,
   journalEntry, searchJournal, CLOSE_REASON_MIN, refNumber } from "./journal.js";
 import { FIRST_STEP, stepCarry, candidateOf, candidateKey, legsLine, toggleCompare, inCompare, MAX_COMPARE, savedFromCandidate, candidateFromSaved, savedAge } from "./path.js";
@@ -3300,9 +3300,12 @@ export default function OptionsStrategyLab() {
        they are NOT deleted, and the Journal row below says what they are. */
     const j = scoredJournal(store.journal || []);
     const closed = j.length;
-    const ruled = j.filter((x) => x.ruleExit).length;
+    // A record Alpaca did not hold is not a rule close, and a trade opened under
+    // free sizing had no per-trade limit to respect (journal.js, 5c).
+    const ruled = j.filter(countsAsRuleClose).length;
     const disciplina = closed ? ruled / closed : null;
-    const coerenza = closed ? j.filter((x) => x.riskOk).length / closed : null;
+    const judged = j.filter((x) => riskOkOf(x) != null);
+    const coerenza = judged.length ? judged.filter((x) => riskOkOf(x) === true).length / judged.length : null;
     // A TRADE NOBODY BOUGHT IS NOT A TRADE YOU OPENED. This counted every
     // record in `store.positions`, so three orders that came back with
     // nothing bought moved the owner up a level and spent his "patience"
@@ -5718,11 +5721,11 @@ export default function OptionsStrategyLab() {
                             </span>
                           );
                         })()}
-                        <span style={{ ...mono, fontSize: 10, color: e.ruleExit ? T.green : T.amber, border: `1px solid ${(e.ruleExit ? T.green : T.amber)}55`, borderRadius: 4, padding: "1px 6px" }}>
-                          {e.ruleExit ? "closed by the rules" : "closed by hand"}
+                        <span style={{ ...mono, fontSize: 10, color: countsAsRuleClose(e) ? T.green : T.amber, border: `1px solid ${(countsAsRuleClose(e) ? T.green : T.amber)}55`, borderRadius: 4, padding: "1px 6px" }}>
+                          {closeKindWords(e)}
                         </span>
-                        <span style={{ ...mono, fontSize: 10, color: e.riskOk ? T.dim : T.red }}>
-                          {e.riskOk ? "inside the per-trade limit" : "over the per-trade limit at the time"}
+                        <span style={{ ...mono, fontSize: 10, color: riskOkOf(e) === false ? T.red : T.dim }}>
+                          {riskOkWords(e)}
                         </span>
                         {/* MARKED, NEVER DELETED (P9, TASK 3). The Journal is
                             the record of what happened; a record removed to
@@ -5743,7 +5746,7 @@ export default function OptionsStrategyLab() {
 
                     <div style={{ ...mono, fontSize: 11, color: T.body, marginTop: 9, paddingTop: 8, borderTop: `1px solid ${T.line}`, lineHeight: 1.55 }}>
                       <span style={{ color: T.dim }}>WHY IT ENDED · </span>
-                      {e.closeReason?.text || (e.ruleExit ? "closed by the rules" : "no reason was recorded")}
+                      {e.closeReason?.text || (countsAsRuleClose(e) ? "closed by the rules" : "no reason was recorded")}
                       {e.closeReason?.kind === "rule" && e.closeReason.written
                         ? <span style={{ color: T.mut }}>{` — you also wrote: "${e.closeReason.written}"`}</span> : null}
                     </div>

@@ -952,10 +952,15 @@ export function journalEntry({ pos = {}, pnl = null, pnlNote = null, reason = nu
     pnl,
     // WHY THERE IS NO FIGURE, when there is none on purpose (`NOT_A_FILL`).
     pnlNote: pnlNote || null,
-    riskOk,
+    // JUDGED ONLY AGAINST A LIMIT THAT WAS APPLIED. Under free sizing (PR #41)
+    // the per-trade limit was not enforced, so "inside" or "over" it is a
+    // verdict on a rule nobody was held to: null, printed "no limit applied".
+    riskOk: pos.sizingFree === true ? null : riskOk,
     // "Closed by the rules" is the app's one measure of discipline, so it is
-    // exactly as true as `ruleExitOf()` says and no truer.
-    ruleExit: r.kind === "rule",
+    // exactly as true as `ruleExitOf()` says and no truer — and a record Alpaca
+    // did not hold (`NOT_A_FILL`) closed nothing: a rule firing on it inside
+    // the 21-day window is not a rule close.
+    ruleExit: r.kind === "rule" && pnlNote !== NOT_A_FILL,
     closeReason: { kind: r.kind, rule: r.rule || null, text: r.text || null, written: r.written || null },
     thesis: pos.thesis || null,
     timeline: pos.timeline || [],
@@ -987,6 +992,42 @@ export function journalEntry({ pos = {}, pnl = null, pnlNote = null, reason = nu
 export const NOT_A_FILL = "not read from a fill";
 /** How a figure filed with no broker closing order is labelled. */
 export const MARK_AT_CLOSE = "the app's mark at close \u2014 not a fill";
+
+/* ------------------------------------------------------------------
+   5c) THE TWO DISCIPLINE READINGS, READ BACK (PR #43, TASK 2)
+
+   Both were ROADMAP debts, and both are about entries ALREADY FILED, so they
+   are read here rather than only fixed at filing time:
+     - a record Alpaca did not hold, filed inside the 21-day window, was stored
+       `ruleExit: true`. It is not a rule close: nothing was closed.
+     - `riskOk` under free sizing was judged against a limit that was not
+       applied. It is null, and it reads "no limit applied" — never a pass or
+       a fail.
+------------------------------------------------------------------ */
+
+/** Does this Journal entry count as closed by the rules? */
+export const countsAsRuleClose = (entry) =>
+  !!(entry && entry.ruleExit === true && entry.pnlNote !== NOT_A_FILL);
+
+/** The badge on a Journal row: how it was closed, in words. */
+export function closeKindWords(entry = {}) {
+  if (entry && entry.pnlNote === NOT_A_FILL) return "not a rule close — Alpaca did not hold it";
+  return countsAsRuleClose(entry) ? "closed by the rules" : "closed by hand";
+}
+
+/** `riskOk` as it may be read: true, false, or null when no limit applied or none was recorded. */
+export function riskOkOf(entry = {}) {
+  if (!entry || entry.sizingFree === true) return null;
+  return entry.riskOk === true ? true : entry.riskOk === false ? false : null;
+}
+
+/** The per-trade reading on a Journal row, in words. */
+export function riskOkWords(entry = {}) {
+  if (entry && entry.sizingFree === true) return "no limit applied";
+  const ok = riskOkOf(entry);
+  return ok === true ? "inside the per-trade limit" : ok === false ? "over the per-trade limit at the time"
+    : "per-trade limit not recorded";
+}
 
 /** How a Journal entry's P&L reads: the figure, whether it counts, and why not. */
 export function journalPnl(entry = {}) {

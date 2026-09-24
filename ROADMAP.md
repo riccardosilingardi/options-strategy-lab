@@ -46,6 +46,15 @@ and "a debit of $4.68 (you pay it)". Three faults, fixed:
   main's), `closeLimitPrice()`, the gate calls on all six paths, `riskGate.js`,
   `alpacaContract.js`, every `RULES` value. `src/closeWords.test.js` is new.
 
+**Two Journal debts, `journal.js` and the Journal screen only.**
+
+- A record Alpaca did not hold, filed inside the 21-day window, was stored "closed by the
+  rules". `journalEntry()` no longer marks it a rule close, and `countsAsRuleClose()` reads
+  entries already filed the same way; its badge says "not a rule close — Alpaca did not hold it".
+- `riskOk` under free sizing was judged against a limit that was not applied. It is stored
+  null and reads "no limit applied" (`riskOkOf()`, `riskOkWords()`); the "inside the limit"
+  share counts only trades that had a limit.
+
 ## v1
 
 v1 is done when PRD §3 is true: (a) one opening order filled at the intended price,
@@ -53,23 +62,25 @@ v1 is done when PRD §3 is true: (a) one opening order filled at the intended pr
 open position's action in five seconds. **No pull request remains: v1 now needs only the
 owner's readings below.**
 
-### What the next session inherits from #40, #41 and #42
+### What the next session inherits from #40 to #43
 
 - The PR #39 debt is closed: ranking and every floor, `minRewardRisk` included, read the fill.
-- A record Alpaca does not hold, filed inside the 21-day window, is still recorded as "closed
-  by the rules" (`closeDecision()` reads the exit window). Its P&L is null, but the discipline
-  count is wrong. (From #39, not touched here.)
+- A record Alpaca does not hold is no longer counted as a rule close (#43), but the close
+  dialog still prints the time exit's sentence over it before it is filed.
 - After a 2xx cancel, the Positions card waits for `recheckOrders()` to read `canceled`; if
   Alpaca never reports it, "Ask Alpaca again" is the only control left. (From #39.)
 - Find recomputes the whole list when a chain refreshes; if the owner's phone lags (PRD §4.5),
   split the chance out of the memo so only survivors of the current request are simulated.
 - `staleBoardShare` 0.15 sits between two readings (BOIL 20%, SOYB 7%). Count inverted pairs
   on a week of live boards (`monotonicityBreaks()` on each Find board) before moving it.
-- The Journal's `riskOk` ("respected the per-trade cap") is still computed against the derived
-  limit when free sizing is on; the weekly report's P&L split is the reading for free sizing.
+- Under free sizing `riskOk` is null, "no limit applied" (#43); the weekly report's P&L split
+  is the reading for free sizing.
+- The close preview's words are tested on J-0001-shaped payloads only (#43). The first live
+  close of J-0001 is the reading: the confirm step, Alpaca's order, and the fill.
 - A position opened before PR #41 has no `sizingFree` field and is filed as `false`.
 - Two browsers still write one server copy: whichever saves last wins. PR #42 only stops an
-  EMPTY browser from doing it. The Journal is not on `/api/state` at all.
+  EMPTY browser from doing it. The Journal is not on `/api/state` at all — deferred, see the
+  first item after v1.
 - J-0001's intended limit: the owner saw the fill ($5.00) but not yet the ticket's limit beside
   it. After this PR's sync the card compares the limit with Alpaca's $5.00 (`brokerAvgNet`).
   J-0001's timeline may already hold a fill entry reading "$45.00 a combination" from PR #42's
@@ -95,6 +106,9 @@ owner's readings below.**
 
 One line each; see `PRD.md` §5 and `docs/history/ROADMAP.md` for detail.
 
+- **Journal on the server** — `journal` and `journalSeq` on `/api/state`, merged by ref, so a
+  second browser keeps the Journal. Deferred on purpose (24 Sep 2026): changing the sync of
+  the only live record before its first live close is the wrong week.
 - **P2 full** — rank proposals by edge at the price that fills.
 - **P7** — fills pushed by Alpaca's stream, server-side.
 - **P8** — more indicators and timeframes, after the owner has used the current ones.
