@@ -18,7 +18,7 @@
 // `orderBody()` is used exactly as it is, with `type: "limit"`.
 import { getStore } from "@netlify/blobs";
 import { evaluateTrade } from "../../src/riskGate.js";
-import { orderBody, orderOutcome, alpacaErrorText, limitWords } from "../../src/order.js";
+import { orderBody, orderOutcome, alpacaErrorText, orderLimitWords, orderTotalWords } from "../../src/order.js";
 import { closeMarket, closeLimitPrice, closeLimitNote, closeUnreadableNote,
   comboBook, limitAgainstBook } from "../../src/rules.js";
 import { appendTimeline, bookPositions } from "../../src/journal.js";
@@ -182,8 +182,11 @@ export default async (req) => {
           t: Date.now(), type: "order", orderId: out.id ? String(out.id) : null,
           orderStatus: res.status, orderFilled: res.filled, orderWorking: res.working,
           limit: order.limit_price,
-          text: `${a.label} approved and sent — Alpaca order ${out.id ? String(out.id) : "(no id)"} at a limit of ` +
-            `${limitWords(order.limit_price) || "a price the page could not read"} per combination. ${res.headline}`,
+          // THE WORDS COME FROM THE BODY SENT (order.js `orderMoney()`): a single
+          // put sold to close is a credit you receive, never "a debit (you pay it)".
+          text: `${a.label} approved and sent — Alpaca order ${out.id ? String(out.id) : "(no id)"}: ${order.qty} at ` +
+            `${orderLimitWords(order) || "a price the page could not read"} per combination` +
+            `${orderTotalWords(order) ? `, ${orderTotalWords(order)} in all` : ""}. ${res.headline}`,
         });
         pos.timeline = t.timeline; pos.seqNext = t.seqNext;
         await store.set("state", JSON.stringify(state));

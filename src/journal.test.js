@@ -25,7 +25,8 @@ import {
   positionSize, positionSizeNote, contractsOf, withPositionSize, ASSUMED_CONTRACTS,
   positionStage, isOwnedPosition, positionStageNote, wouldHaveDone,
   isBrokerHolding, fillVsLimit, storedLimitOf, orderReconciliation, bookPositions, upgradeHolding,
-  holdingShape, isImportedRecord, dropImportedTwins,
+  holdingShape, isImportedRecord, dropImportedTwins, recordFillPrice,
+  countsAsRuleClose, closeKindWords, riskOkOf, riskOkWords, NOT_A_FILL,
 } from "./journal.js";
 import { RULES, ruleExitOf, stopWarningSentence,
   seasonalStampOf, seasonalStampNote, ESTIMATED_SEASONAL_SOURCE, MEASURED_SEASONAL_SOURCE } from "./rules.js";
@@ -1206,11 +1207,13 @@ const J0002_LEGACY = {
   timeline: [{ t: 1, n: 1, seq: "J-0002·01", type: "note", text: "read from the account" }],
 };
 // What the broker's own /v2/positions gives the sync for that group: the legs
-// carry ALPACA'S quantities, and `net` is their average entry prices summed.
+// carry ALPACA'S quantities, and `net` is side x qty x avg_entry_price summed —
+// the WHOLE holding, as `importAlpaca()` computes it: 3 x (1.12 - 1.16) = -0.12.
+// (This fixture said -0.04, a per-combination figure the sync never produces.)
 const XLE_GROUP = {
   und: "XLE", exp: "2026-10-30",
   legs: [{ side: 1, qty: 3, type: "put", strike: 59 }, { side: -1, qty: 3, type: "put", strike: 62.5 }],
-  net: -0.04,
+  net: -0.12,
 };
 
 test("0a — THE LEGACY HOLDING IS UPGRADED IN PLACE, from the broker's own legs", () => {
@@ -1277,7 +1280,8 @@ test("0a — a record that already carries everything comes back UNCHANGED", () 
    The owner's phone, 23 Sep 2026: 9 × GDX 94P 2026-10-30 sent from the app
    as J-0001, and a second card "J-0002 · Imported from Alpaca" beside it.
 ================================================================ */
-const GDX_GROUP = { und: "GDX", exp: "2026-10-30", legs: [{ side: 1, type: "put", strike: 94, qty: 9 }], net: 5 };
+// `net` as `importAlpaca()` sums it: 9 puts x $5.00 average entry = 45, the whole holding.
+const GDX_GROUP = { und: "GDX", exp: "2026-10-30", legs: [{ side: 1, type: "put", strike: 94, qty: 9 }], net: 45 };
 // J-0001 as the app records an order it sent: the structure as built, and the size apart.
 const GDX_J1 = { id: 1, ref: "J-0001", ticker: "GDX", name: "Long Put ATM", expKey: "2026-10-30",
   legs: [{ side: 1, qty: 1, type: "put", strike: 94 }], entryNet: 5, maxLoss: -500, maxProfit: 8900,
@@ -1339,6 +1343,114 @@ test("PR #42 — THE IMPORTED TWIN GOES; THE APP'S OWN RECORD STAYS, with its re
   // An app record that never bought anything does not claim a holding.
   const dead = [{ ...GDX_J1, alpacaStatus: "canceled", alpacaFilled: false }, GDX_J2];
   assert.equal(dropImportedTwins(dead).positions, dead, "a cancelled order is not the holding");
+});
+
+/* ================================================================
+   24 Sep 2026 — J-0001 READ ON THE OWNER'S PHONE AFTER PR #42: one card,
+   9 x GDX 94P, filled $5.00. v1 (a) needs no new UI: the card already prints
+   `fillVsLimit()` on a filled record. These tests hold that it still can after
+   the sync (`upgradeHolding()`) and the twin removal (`dropImportedTwins()`).
+   The owner read the real one on 24 Sep: a debit of $5.02, filled at $5.00, on a
+   recheck. 5.00 and 5.10 below are fixtures; the second test is the at-send case,
+   which J-0001 was not.
+================================================================ */
+const J1_SENT = { ...GDX_J1, alpacaLimit: 5, alpacaLimitSigned: true, alpacaOrderType: "limit",
+  alpacaTif: "day", timeline: [{ t: 1, n: 1, type: "sent", text: "SENT" }, { t: 1, n: 2, type: "open", text: "o" }] };
+// What the Positions card passes to `fillVsLimit()` (App.jsx), in one place.
+const cardSentence = (p) => fillVsLimit({ limit: p.alpacaLimit, fill: recordFillPrice(p),
+  contracts: positionSize(p).contracts, limitSigned: p.alpacaLimitSigned === true }).sentence;
+
+test("J-0001 — THE LIMIT SURVIVES THE SYNC AND THE TWIN REMOVAL, and the card prints the comparison", () => {
+  // Filled on a recheck: the order's own fill price is on the record.
+  const j1 = { ...J1_SENT, alpacaFillPrice: 5 };
+  const up = upgradeHolding(j1, GDX_GROUP, { plan: "p" });
+  const r = dropImportedTwins([up, upgradeHolding(GDX_J2, GDX_GROUP, { plan: "p" })]);
+  assert.deepEqual(r.dropped, ["J-0002"]);
+  const kept = r.positions[0];
+  assert.equal(kept.ref, "J-0001");
+  assert.equal(kept.alpacaLimit, 5, "the limit the order carried");
+  assert.equal(kept.alpacaLimitSigned, true, "and the stamp that says it carries a sign");
+  assert.equal(cardSentence(kept),
+    "You offered a debit of $5.00 a combination and the broker filled it at a debit of $5.00. That is the price you asked for.");
+  assert.equal(cardSentence({ ...kept, alpacaLimit: 5.1 }),
+    "You offered a debit of $5.10 a combination and the broker filled it at a debit of $5.00. " +
+    "That is $90.00 BETTER than you asked for, across 9 combinations.", "a real comparison: 0.10 x 100 x 9");
+});
+
+test("J-0001 SHAPE — AN ORDER FILLED AT SEND IS COMPARED WITH THE BROKER'S FILL, never the app's own entry", () => {
+  // The fault: no `alpacaFillPrice` (only `recheckOrders()` wrote it), so the card
+  // read `entryNet` — the app's intended price — as the broker's fill.
+  const j1 = { ...J1_SENT, entryNet: 5.1 };
+  assert.equal(recordFillPrice(j1), null, "not synced yet: no broker figure, and the app's is not one");
+  const up = dropImportedTwins([upgradeHolding(j1, GDX_GROUP, { plan: "p" })]).positions[0];
+  assert.equal(up.brokerAvgNet, 5, "45 for nine puts is $5.00 for one — the broker's average entry");
+  assert.equal(up.entryNet, 5.1, "the app's own entry is kept, not overwritten");
+  assert.equal(recordFillPrice(up), 5);
+  assert.match(cardSentence({ ...up, alpacaLimit: 5.1 }), /filled it at a debit of \$5\.00\. That is \$90\.00 BETTER/);
+  // And the timeline's fill entry names $5.00 a combination, not the whole holding's $45.
+  const fill = up.timeline.find((e) => e.type === "fill");
+  assert.ok(fill.text.includes("a debit of $5.00 a combination"), fill.text);
+  // From now on a fill at send is stored with the order (App.jsx commitPosition).
+  assert.match(readFileSync("src/App.jsx", "utf8"),
+    /alpacaFillPrice: outcome && outcome\.filled \? outcome\.fillPrice \?\? null : null,/);
+  assert.match(readFileSync("src/App.jsx", "utf8"), /fillVsLimit\(\{ limit: p\.alpacaLimit, fill: recordFillPrice\(p\),/);
+});
+
+test("J-0001 — AN IMPORTED RECORD STILL READS ITS OWN ENTRY AS THE BROKER'S; an app record never does", () => {
+  assert.equal(recordFillPrice(GDX_J2), GDX_J2.entryNet, "the sync wrote it from the broker");
+  assert.equal(recordFillPrice(GDX_J1), null);
+  assert.equal(recordFillPrice({ alpacaFillPrice: "", brokerAvgNet: null }), null, "unknown is not zero");
+  assert.equal(recordFillPrice({ alpacaFillPrice: -0.04 }), -0.04, "the order's own fill wins, signed");
+});
+
+/* ================================================================
+   PR #43, TASK 2 — THE TWO JOURNAL DEBTS.
+================================================================ */
+const TIME_EXIT = closeDecision({ alert: { dteExit: true, dteLeft: 19 } }).reason;
+
+test("TASK 2a — A RECORD ALPACA DID NOT HOLD, filed inside the 21-day window, is NOT a rule close", () => {
+  assert.equal(TIME_EXIT.kind, "rule", "the window fired: the reason is the time exit");
+  const e = journalEntry({ pos: GDX_J1, pnl: null, pnlNote: NOT_A_FILL, reason: TIME_EXIT, riskOk: true });
+  assert.equal(e.ruleExit, false, "nothing was closed, so no rule closed it");
+  assert.equal(countsAsRuleClose(e), false);
+  assert.equal(closeKindWords(e), "not a rule close — Alpaca did not hold it");
+  // An entry already filed with ruleExit: true is read the same way.
+  const old = { ...e, ruleExit: true };
+  assert.equal(countsAsRuleClose(old), false, "an entry filed before this fix is not counted either");
+  // A held record at the same moment is a rule close, as before.
+  const held = journalEntry({ pos: GDX_J1, pnl: 120, reason: TIME_EXIT, riskOk: true, closeOrderId: "c-1" });
+  assert.equal(held.ruleExit, true);
+  assert.equal(countsAsRuleClose(held), true);
+  assert.equal(closeKindWords(held), "closed by the rules");
+  assert.equal(closeKindWords({ ruleExit: false }), "closed by hand");
+});
+
+test("TASK 2b — UNDER FREE SIZING riskOk IS NULL and reads 'no limit applied', never a pass or a fail", () => {
+  const free = { ...GDX_J1, sizingFree: true };
+  for (const verdict of [true, false]) {
+    const e = journalEntry({ pos: free, pnl: 10, reason: TIME_EXIT, riskOk: verdict, closeOrderId: "c-1" });
+    assert.equal(e.riskOk, null, `a ${verdict} against a limit that was not applied is not stored`);
+    assert.equal(riskOkOf(e), null);
+    assert.equal(riskOkWords(e), "no limit applied");
+  }
+  // An entry filed before this fix with a verdict is read as none.
+  assert.equal(riskOkOf({ sizingFree: true, riskOk: false }), null);
+  assert.equal(riskOkWords({ sizingFree: true, riskOk: false }), "no limit applied");
+  // Within the limits, as before.
+  const within = journalEntry({ pos: GDX_J1, pnl: 10, reason: TIME_EXIT, riskOk: false, closeOrderId: "c-1" });
+  assert.equal(within.riskOk, false);
+  assert.equal(riskOkWords(within), "over the per-trade limit at the time");
+  assert.equal(riskOkWords({ riskOk: true }), "inside the per-trade limit");
+  assert.equal(riskOkOf({}), null, "unknown is not a pass");
+});
+
+test("TASK 2 — THE JOURNAL SCREEN AND THE LEVEL READ THE HELPERS (source)", () => {
+  const app = readFileSync("src/App.jsx", "utf8");
+  assert.match(app, /const ruled = j\.filter\(countsAsRuleClose\)\.length;/);
+  assert.match(app, /const judged = j\.filter\(\(x\) => riskOkOf\(x\) != null\);/);
+  assert.match(app, /\{closeKindWords\(e\)\}/);
+  assert.match(app, /\{riskOkWords\(e\)\}/);
+  assert.equal(/e\.ruleExit \?|x\.ruleExit\)|e\.riskOk \?|x\.riskOk\)/.test(app), false, "no raw read of either field");
 });
 
 test("PR #42 — THE SYNC MATCHES BY SHAPE AND DROPS THE TWIN (source)", () => {

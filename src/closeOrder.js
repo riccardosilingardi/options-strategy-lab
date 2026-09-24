@@ -26,7 +26,8 @@
 ===================================================================== */
 import { comboBook, limitAgainstBook, closeMarket, closeLimitPrice, closeLimitNote,
   closeUnreadableNote } from "./rules.js";
-import { orderBody, limitWords, orderOutcome, orderPreviewLines, alpacaErrorText } from "./order.js";
+import { orderBody, orderLimitWords, orderTotalWords, orderOutcome, orderPreviewLines, reduceRatios,
+  alpacaErrorText } from "./order.js";
 import { DEMO, DEMO_TOOLTIP } from "./demo.js";
 
 /* ONE LEG, READ OFF THE BROKER'S OWN OCC SYMBOL.
@@ -122,7 +123,7 @@ const refuse = (refusal) => ({ ok: false, refusal, body: null, limitWords: null,
  * @param fetchChain  (ticker) => chain, read at the moment of the tap
  * @param demo        demo mode refuses (every order path is off in it)
  * @param working     a close for this holding is already working
- * @returns { ok, body, limitWords, lines, cancelIds, refusal, proposal, group }
+ * @returns { ok, body, limitWords, total, lines, cancelIds, refusal, proposal, group }
  */
 export async function prepareClose(group, { gate, openOrders = [], fetchChain, demo = DEMO, working = false } = {}) {
   if (demo) return refuse(DEMO_TOOLTIP);                     // order path 3 of six
@@ -192,13 +193,24 @@ export async function prepareClose(group, { gate, openOrders = [], fetchChain, d
     intent: "close", legCount: legs.length,
   });
   if (lb.checked && !lb.ok) return refuse(`The close was not sent: ${lb.sentence}`);
-  const words = limitWords(body.limit_price) || "a price the app could not read";
-  const lines = orderPreviewLines({ legs, ticker: group.ticker, expKey: group.expKey, qty: 1,
+  /* WHAT IS WRITTEN OUT IS WHAT GOES OUT (rule 5). Measured on main, 24 Sep
+     2026, on the owner's 9 x GDX 94P: the body sent 9 at 4.68 to SELL, and
+     this step printed "1 x", "1 combination", "$42.08 for one combination" and
+     "a debit of $4.68 (you pay it)". Three faults: the words read a simple
+     order's price as signed, and the preview got the broker's size inside each
+     leg with no factor. It now gets the SAME shape and factor `orderBody()`
+     divided out, so its lines say 9 and its price is `body.limit_price`; and
+     the words come from the body itself (`orderMoney()`, order.js 1c). */
+  const { ratios, factor } = reduceRatios(legs);
+  const words = orderLimitWords(body) || "a price the app could not read";
+  const total = orderTotalWords(body);
+  const lines = orderPreviewLines({ legs, ratios, factor, ticker: group.ticker, expKey: group.expKey, qty: 1,
     type: "limit", limit: priced.net, tif: "day", intent: "close" });
+  if (total) lines.push(`In all, ${total} at this limit (${body.qty} × $${Math.abs(+body.limit_price).toFixed(2)} × 100).`);
   if (cancelIds.length) {
     lines.push(`First cancels ${cancelIds.length} working order${cancelIds.length === 1 ? "" : "s"} on the same contracts.`);
   }
-  return { ok: true, refusal: null, body, limitWords: words, lines, cancelIds, proposal, group, sent: false };
+  return { ok: true, refusal: null, body, limitWords: words, total, lines, cancelIds, proposal, group, sent: false };
 }
 
 /**
@@ -207,7 +219,7 @@ export async function prepareClose(group, { gate, openOrders = [], fetchChain, d
  * @param prepared  what `prepareClose()` returned; sending it twice is refused
  * @param request   (path, method, body) => the broker's reply (pro.jsx `alpacaReq`)
  * @param gate      the risk gate, re-run at the send
- * @returns { ok, refusal, order, headline, limitWords }
+ * @returns { ok, refusal, order, headline, limitWords, total, qty }
  */
 export async function sendClose(prepared, { request, gate, demo = DEMO, working = false } = {}) {
   if (demo) return { ok: false, refusal: DEMO_TOOLTIP };
@@ -228,8 +240,10 @@ export async function sendClose(prepared, { request, gate, demo = DEMO, working 
   }
   try {
     const order = await request("/v2/orders", "POST", prepared.body);
-    return { ok: true, refusal: null, order, limitWords: prepared.limitWords,
-      headline: `Closing ${prepared.group?.key || "the position"} — sent as a single order at ${prepared.limitWords}. ` +
+    return { ok: true, refusal: null, order, limitWords: prepared.limitWords, total: prepared.total || null,
+      qty: prepared.body.qty,
+      headline: `Closing ${prepared.group?.key || "the position"} — sent as one order: ${prepared.body.qty} at ` +
+        `${prepared.limitWords} each${prepared.total ? `, ${prepared.total} in all` : ""}. ` +
         `${orderOutcome(order).headline}` };
   } catch (e) {
     prepared.sent = false;

@@ -51,14 +51,14 @@ import { CapitalOnboarding, WizardOpen, ConfirmSteps, Card, Pill } from "./wizar
 // renders the same card, so it may not live here.
 import { RequestControls, SplitSections, MissLine, CandidateCard, SignalBadge, StopSigns } from "./card.jsx";
 import { buildHandOff, buildScreenState, BUILD_TAB } from "./handoff.js";
-import { orderBody, orderOutcome, alpacaErrorText, reduceRatios, limitWords, fillPriceOf, cancelOutcome, cancelWaiting } from "./order.js";
+import { orderBody, orderOutcome, alpacaErrorText, reduceRatios, limitWords, orderLimitWords, fillPriceOf, cancelOutcome, cancelWaiting } from "./order.js";
 // THE PERMANENT RECORD: the ref a position is given at open, the sequence on
 // every timeline entry, the close reason, and what survives into the Journal.
 import { nextRef, refCounter, appendTimeline, stampTimeline, orderStatusRecheck, closeDecision,
   autopilotHorizonNote, autopilotVolNote,
   positionSize, positionSizeNote, contractsOf, withPositionSize, fillVsLimit, orderReconciliation,
   storedLimitOf,
-  positionStage, positionStageNote, bookPositions, holdingShape, dropImportedTwins, wouldHaveDone, isBrokerHolding, upgradeHolding,
+  positionStage, positionStageNote, bookPositions, holdingShape, dropImportedTwins, recordFillPrice, countsAsRuleClose, closeKindWords, riskOkOf, riskOkWords, wouldHaveDone, isBrokerHolding, upgradeHolding,
   isTestRecord, testRecordNote, scoredJournal, journalPnl, NOT_A_FILL,
   journalEntry, searchJournal, CLOSE_REASON_MIN, refNumber } from "./journal.js";
 import { FIRST_STEP, stepCarry, candidateOf, candidateKey, legsLine, toggleCompare, inCompare, MAX_COMPARE, savedFromCandidate, candidateFromSaved, savedAge } from "./path.js";
@@ -2512,6 +2512,10 @@ export default function OptionsStrategyLab() {
       // a fill that has not happened.
       alpacaStatus: outcome ? outcome.status : null,
       alpacaFilled: outcome ? outcome.filled : null,
+      // AN ORDER FILLED AT SEND KEEPS ITS FILL TOO. Only `recheckOrders()` wrote
+      // this, so a fill at send left the card comparing the limit with the app's
+      // own entry (found 24 Sep 2026 by the J-0001 test; journal.js `recordFillPrice`).
+      alpacaFillPrice: outcome && outcome.filled ? outcome.fillPrice ?? null : null,
       // WHAT THE ORDER ACTUALLY WAS, so the working-orders list can show its
       // price and how long it stands without asking the broker again.
       alpacaOrderType: alpacaOrder?.type ?? null,
@@ -2554,7 +2558,7 @@ export default function OptionsStrategyLab() {
           t: Date.now(), type: "sent", orderId: alpacaOrder.id ? String(alpacaOrder.id) : null,
           text: `SENT to Alpaca — order ${String(alpacaOrder.id || "(id unknown)")}, ` +
             `${String(alpacaOrder.type || "an order whose type Alpaca did not report")} ` +
-            `${limitWords(alpacaOrder.limit_price) ? `at ${limitWords(alpacaOrder.limit_price)} a share, a combination at a time, ` : ""}` +
+            `${orderLimitWords(alpacaOrder) ? `at ${orderLimitWords(alpacaOrder)} a share, a combination at a time, ` : ""}` +
             `${String(alpacaOrder.time_in_force || "").toLowerCase() === "gtc" ? "standing until cancelled" : "good for today's session only"}. ` +
             `${outcome.headline}`,
         }] : []),
@@ -2744,7 +2748,10 @@ export default function OptionsStrategyLab() {
     setStore((st) => {
       const positions = st.positions.map((x) => {
         if (x.id !== p.id) return x;
-        const t = appendTimeline(x, { t: Date.now(), type: "close-sent", orderId: r.order?.id ? String(r.order.id) : null, text: `close sent at ${r.limitWords}` });
+        // The words of the body that went out (order.js `orderMoney()`): 9 at a
+        // credit you receive, never "a debit of $4.68 (you pay it)".
+        const t = appendTimeline(x, { t: Date.now(), type: "close-sent", orderId: r.order?.id ? String(r.order.id) : null,
+          text: `close sent: ${r.qty} at ${r.limitWords} each${r.total ? `, ${r.total} in all` : ""}` });
         return { ...x, closeOrder: { id: r.order?.id || null, t: Date.now(), limit: r.order?.limit_price ?? null },
           timeline: t.timeline, seqNext: t.seqNext };
       });
@@ -3293,9 +3300,12 @@ export default function OptionsStrategyLab() {
        they are NOT deleted, and the Journal row below says what they are. */
     const j = scoredJournal(store.journal || []);
     const closed = j.length;
-    const ruled = j.filter((x) => x.ruleExit).length;
+    // A record Alpaca did not hold is not a rule close, and a trade opened under
+    // free sizing had no per-trade limit to respect (journal.js, 5c).
+    const ruled = j.filter(countsAsRuleClose).length;
     const disciplina = closed ? ruled / closed : null;
-    const coerenza = closed ? j.filter((x) => x.riskOk).length / closed : null;
+    const judged = j.filter((x) => riskOkOf(x) != null);
+    const coerenza = judged.length ? judged.filter((x) => riskOkOf(x) === true).length / judged.length : null;
     // A TRADE NOBODY BOUGHT IS NOT A TRADE YOU OPENED. This counted every
     // record in `store.positions`, so three orders that came back with
     // nothing bought moved the owner up a level and spent his "patience"
@@ -5249,8 +5259,7 @@ export default function OptionsStrategyLab() {
                           back as though it had been the target (journal.js). */}
                       {(p.alpacaFillPrice != null || (isBrokerHolding(p) && p.entrySource === "fill")) && (
                         <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 5, lineHeight: 1.6 }}>
-                          {fillVsLimit({ limit: p.alpacaLimit,
-                            fill: p.alpacaFillPrice != null ? p.alpacaFillPrice : p.entryNet,
+                          {fillVsLimit({ limit: p.alpacaLimit, fill: recordFillPrice(p),
                             contracts: size.contracts, limitSigned: p.alpacaLimitSigned === true }).sentence}
                         </div>
                       )}
@@ -5712,11 +5721,11 @@ export default function OptionsStrategyLab() {
                             </span>
                           );
                         })()}
-                        <span style={{ ...mono, fontSize: 10, color: e.ruleExit ? T.green : T.amber, border: `1px solid ${(e.ruleExit ? T.green : T.amber)}55`, borderRadius: 4, padding: "1px 6px" }}>
-                          {e.ruleExit ? "closed by the rules" : "closed by hand"}
+                        <span style={{ ...mono, fontSize: 10, color: countsAsRuleClose(e) ? T.green : T.amber, border: `1px solid ${(countsAsRuleClose(e) ? T.green : T.amber)}55`, borderRadius: 4, padding: "1px 6px" }}>
+                          {closeKindWords(e)}
                         </span>
-                        <span style={{ ...mono, fontSize: 10, color: e.riskOk ? T.dim : T.red }}>
-                          {e.riskOk ? "inside the per-trade limit" : "over the per-trade limit at the time"}
+                        <span style={{ ...mono, fontSize: 10, color: riskOkOf(e) === false ? T.red : T.dim }}>
+                          {riskOkWords(e)}
                         </span>
                         {/* MARKED, NEVER DELETED (P9, TASK 3). The Journal is
                             the record of what happened; a record removed to
@@ -5737,7 +5746,7 @@ export default function OptionsStrategyLab() {
 
                     <div style={{ ...mono, fontSize: 11, color: T.body, marginTop: 9, paddingTop: 8, borderTop: `1px solid ${T.line}`, lineHeight: 1.55 }}>
                       <span style={{ color: T.dim }}>WHY IT ENDED · </span>
-                      {e.closeReason?.text || (e.ruleExit ? "closed by the rules" : "no reason was recorded")}
+                      {e.closeReason?.text || (countsAsRuleClose(e) ? "closed by the rules" : "no reason was recorded")}
                       {e.closeReason?.kind === "rule" && e.closeReason.written
                         ? <span style={{ color: T.mut }}>{` — you also wrote: "${e.closeReason.written}"`}</span> : null}
                     </div>

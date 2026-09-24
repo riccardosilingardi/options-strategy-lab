@@ -952,10 +952,15 @@ export function journalEntry({ pos = {}, pnl = null, pnlNote = null, reason = nu
     pnl,
     // WHY THERE IS NO FIGURE, when there is none on purpose (`NOT_A_FILL`).
     pnlNote: pnlNote || null,
-    riskOk,
+    // JUDGED ONLY AGAINST A LIMIT THAT WAS APPLIED. Under free sizing (PR #41)
+    // the per-trade limit was not enforced, so "inside" or "over" it is a
+    // verdict on a rule nobody was held to: null, printed "no limit applied".
+    riskOk: pos.sizingFree === true ? null : riskOk,
     // "Closed by the rules" is the app's one measure of discipline, so it is
-    // exactly as true as `ruleExitOf()` says and no truer.
-    ruleExit: r.kind === "rule",
+    // exactly as true as `ruleExitOf()` says and no truer — and a record Alpaca
+    // did not hold (`NOT_A_FILL`) closed nothing: a rule firing on it inside
+    // the 21-day window is not a rule close.
+    ruleExit: r.kind === "rule" && pnlNote !== NOT_A_FILL,
     closeReason: { kind: r.kind, rule: r.rule || null, text: r.text || null, written: r.written || null },
     thesis: pos.thesis || null,
     timeline: pos.timeline || [],
@@ -987,6 +992,42 @@ export function journalEntry({ pos = {}, pnl = null, pnlNote = null, reason = nu
 export const NOT_A_FILL = "not read from a fill";
 /** How a figure filed with no broker closing order is labelled. */
 export const MARK_AT_CLOSE = "the app's mark at close \u2014 not a fill";
+
+/* ------------------------------------------------------------------
+   5c) THE TWO DISCIPLINE READINGS, READ BACK (PR #43, TASK 2)
+
+   Both were ROADMAP debts, and both are about entries ALREADY FILED, so they
+   are read here rather than only fixed at filing time:
+     - a record Alpaca did not hold, filed inside the 21-day window, was stored
+       `ruleExit: true`. It is not a rule close: nothing was closed.
+     - `riskOk` under free sizing was judged against a limit that was not
+       applied. It is null, and it reads "no limit applied" — never a pass or
+       a fail.
+------------------------------------------------------------------ */
+
+/** Does this Journal entry count as closed by the rules? */
+export const countsAsRuleClose = (entry) =>
+  !!(entry && entry.ruleExit === true && entry.pnlNote !== NOT_A_FILL);
+
+/** The badge on a Journal row: how it was closed, in words. */
+export function closeKindWords(entry = {}) {
+  if (entry && entry.pnlNote === NOT_A_FILL) return "not a rule close — Alpaca did not hold it";
+  return countsAsRuleClose(entry) ? "closed by the rules" : "closed by hand";
+}
+
+/** `riskOk` as it may be read: true, false, or null when no limit applied or none was recorded. */
+export function riskOkOf(entry = {}) {
+  if (!entry || entry.sizingFree === true) return null;
+  return entry.riskOk === true ? true : entry.riskOk === false ? false : null;
+}
+
+/** The per-trade reading on a Journal row, in words. */
+export function riskOkWords(entry = {}) {
+  if (entry && entry.sizingFree === true) return "no limit applied";
+  const ok = riskOkOf(entry);
+  return ok === true ? "inside the per-trade limit" : ok === false ? "over the per-trade limit at the time"
+    : "per-trade limit not recorded";
+}
 
 /** How a Journal entry's P&L reads: the figure, whether it counts, and why not. */
 export function journalPnl(entry = {}) {
@@ -1159,13 +1200,22 @@ export function upgradeHolding(pos, group = {}, { plan = null, now = Date.now() 
   }
 
   // 3) IT IS A FILL, AND IT CARRIES THE PRICE THE BROKER GAVE.
+  //    >>> `group.net` IS THE WHOLE HOLDING'S (24 Sep 2026). <<< `importAlpaca()`
+  //    sums side x qty x avg_entry_price over the BROKER's legs, so 9 GDX puts
+  //    at $5.00 is 45, not 5. It is divided by the holding's own GCD into the
+  //    price of ONE reduced combination — the unit an order's `limit_price` and
+  //    `filled_avg_price` are in — and then scaled to the record's own units.
+  const unitNet = Number.isFinite(net) && legs && legs.length
+    ? net / Math.max(1, reduceRatios(legs).factor) : null;
+  const recordNet = unitNet != null ? unitNet * perCombination(pos) : null;
   if (Number.isFinite(net)) {
     if (pos.entrySource !== "fill") { touch().entrySource = "fill"; }
-    // The stored entry is per combination, like every other stored figure, and
-    // `group.net` already is one: `importAlpaca()` sums side x qty x price over
-    // the legs, and the legs carry the shape.
-    if (!Number.isFinite(Number(pos.entryNet))) touch().entryNet = net;
+    if (!Number.isFinite(Number(pos.entryNet)) && recordNet != null) touch().entryNet = recordNet;
   }
+  // THE BROKER'S OWN AVERAGE ENTRY, per reduced combination: read, not derived.
+  // A holding field, not an order field — `recordFillPrice()` reads it when
+  // the record never stored the order's own fill (an order filled at send).
+  if (unitNet != null && Number(pos.brokerAvgNet) !== unitNet) touch().brokerAvgNet = unitNet;
 
   // 4) THE TWO ENTRIES A HOLDING SHOULD HAVE, AND NEITHER TWICE.
   const has = (type) => (pos.timeline || []).some((e) => e && e.type === type);
@@ -1173,7 +1223,7 @@ export function upgradeHolding(pos, group = {}, { plan = null, now = Date.now() 
   if (!has("fill")) {
     add.push({ t: now, type: "fill", text:
       `Read from your Alpaca paper account as an OPEN POSITION${legs && legs.length ? ` — ${legs.length} legs` : ""}` +
-      `${Number.isFinite(net) ? `, at the broker's own average entry prices (${SIGNED_WORD(net)} a combination)` : ""}. ` +
+      `${recordNet != null ? `, at the broker's own average entry prices (${SIGNED_WORD(recordNet)} a combination)` : ""}. ` +
       `This is a fill, not an order: the broker lists only what the account holds. ` +
       `This record predates the app storing any of that, so it was read back from the broker rather than invented here.` });
   }
@@ -1184,6 +1234,28 @@ export function upgradeHolding(pos, group = {}, { plan = null, now = Date.now() 
     out.seqNext = t.seqNext;
   }
   return out;
+}
+
+/**
+ * THE FILL A POSITION CARD HOLDS ITS LIMIT AGAINST — the broker's, or null.
+ *
+ * >>> Found by the J-0001 test, 24 Sep 2026 (J-0001 itself filled on a recheck
+ * and was not affected). <<< The card printed `fillVsLimit()` with the fill
+ * read as `alpacaFillPrice ?? entryNet`. An order that fills AT SEND never had
+ * `alpacaFillPrice` stored (only `recheckOrders()` wrote it), so the "fill" was
+ * the app's own `entryNet` — the price it intended — and the sentence could only
+ * ever say "That is the price you asked for". v1 (a) is that comparison.
+ * Order of trust: the order's own `filled_avg_price`; else the broker's average
+ * entry for the holding (`brokerAvgNet`, same unit); else, for an IMPORTED record
+ * only, `entryNet`, which the sync wrote from the broker. Never the app's figure.
+ */
+export function recordFillPrice(pos = {}) {
+  const num = (x) => (x == null || x === "" ? null : Number.isFinite(Number(x)) ? Number(x) : null);
+  const own = num(pos && pos.alpacaFillPrice);
+  if (own != null) return own;
+  const avg = num(pos && pos.brokerAvgNet);
+  if (avg != null) return avg;
+  return isImportedRecord(pos) ? num(pos.entryNet) : null;
 }
 
 /* ------------------------------------------------------------------
