@@ -1159,13 +1159,22 @@ export function upgradeHolding(pos, group = {}, { plan = null, now = Date.now() 
   }
 
   // 3) IT IS A FILL, AND IT CARRIES THE PRICE THE BROKER GAVE.
+  //    >>> `group.net` IS THE WHOLE HOLDING'S (24 Sep 2026). <<< `importAlpaca()`
+  //    sums side x qty x avg_entry_price over the BROKER's legs, so 9 GDX puts
+  //    at $5.00 is 45, not 5. It is divided by the holding's own GCD into the
+  //    price of ONE reduced combination — the unit an order's `limit_price` and
+  //    `filled_avg_price` are in — and then scaled to the record's own units.
+  const unitNet = Number.isFinite(net) && legs && legs.length
+    ? net / Math.max(1, reduceRatios(legs).factor) : null;
+  const recordNet = unitNet != null ? unitNet * perCombination(pos) : null;
   if (Number.isFinite(net)) {
     if (pos.entrySource !== "fill") { touch().entrySource = "fill"; }
-    // The stored entry is per combination, like every other stored figure, and
-    // `group.net` already is one: `importAlpaca()` sums side x qty x price over
-    // the legs, and the legs carry the shape.
-    if (!Number.isFinite(Number(pos.entryNet))) touch().entryNet = net;
+    if (!Number.isFinite(Number(pos.entryNet)) && recordNet != null) touch().entryNet = recordNet;
   }
+  // THE BROKER'S OWN AVERAGE ENTRY, per reduced combination: read, not derived.
+  // A holding field, not an order field — `recordFillPrice()` reads it when
+  // the record never stored the order's own fill (an order filled at send).
+  if (unitNet != null && Number(pos.brokerAvgNet) !== unitNet) touch().brokerAvgNet = unitNet;
 
   // 4) THE TWO ENTRIES A HOLDING SHOULD HAVE, AND NEITHER TWICE.
   const has = (type) => (pos.timeline || []).some((e) => e && e.type === type);
@@ -1173,7 +1182,7 @@ export function upgradeHolding(pos, group = {}, { plan = null, now = Date.now() 
   if (!has("fill")) {
     add.push({ t: now, type: "fill", text:
       `Read from your Alpaca paper account as an OPEN POSITION${legs && legs.length ? ` — ${legs.length} legs` : ""}` +
-      `${Number.isFinite(net) ? `, at the broker's own average entry prices (${SIGNED_WORD(net)} a combination)` : ""}. ` +
+      `${recordNet != null ? `, at the broker's own average entry prices (${SIGNED_WORD(recordNet)} a combination)` : ""}. ` +
       `This is a fill, not an order: the broker lists only what the account holds. ` +
       `This record predates the app storing any of that, so it was read back from the broker rather than invented here.` });
   }
@@ -1184,6 +1193,27 @@ export function upgradeHolding(pos, group = {}, { plan = null, now = Date.now() 
     out.seqNext = t.seqNext;
   }
   return out;
+}
+
+/**
+ * THE FILL A POSITION CARD HOLDS ITS LIMIT AGAINST — the broker's, or null.
+ *
+ * >>> J-0001, 24 Sep 2026. <<< The card printed `fillVsLimit()` with the fill
+ * read as `alpacaFillPrice ?? entryNet`. An order that fills AT SEND never had
+ * `alpacaFillPrice` stored (only `recheckOrders()` wrote it), so the "fill" was
+ * the app's own `entryNet` — the price it intended — and the sentence could only
+ * ever say "That is the price you asked for". v1 (a) is that comparison.
+ * Order of trust: the order's own `filled_avg_price`; else the broker's average
+ * entry for the holding (`brokerAvgNet`, same unit); else, for an IMPORTED record
+ * only, `entryNet`, which the sync wrote from the broker. Never the app's figure.
+ */
+export function recordFillPrice(pos = {}) {
+  const num = (x) => (x == null || x === "" ? null : Number.isFinite(Number(x)) ? Number(x) : null);
+  const own = num(pos && pos.alpacaFillPrice);
+  if (own != null) return own;
+  const avg = num(pos && pos.brokerAvgNet);
+  if (avg != null) return avg;
+  return isImportedRecord(pos) ? num(pos.entryNet) : null;
 }
 
 /* ------------------------------------------------------------------

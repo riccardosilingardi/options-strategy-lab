@@ -58,7 +58,7 @@ import { nextRef, refCounter, appendTimeline, stampTimeline, orderStatusRecheck,
   autopilotHorizonNote, autopilotVolNote,
   positionSize, positionSizeNote, contractsOf, withPositionSize, fillVsLimit, orderReconciliation,
   storedLimitOf,
-  positionStage, positionStageNote, bookPositions, holdingShape, dropImportedTwins, wouldHaveDone, isBrokerHolding, upgradeHolding,
+  positionStage, positionStageNote, bookPositions, holdingShape, dropImportedTwins, recordFillPrice, wouldHaveDone, isBrokerHolding, upgradeHolding,
   isTestRecord, testRecordNote, scoredJournal, journalPnl, NOT_A_FILL,
   journalEntry, searchJournal, CLOSE_REASON_MIN, refNumber } from "./journal.js";
 import { FIRST_STEP, stepCarry, candidateOf, candidateKey, legsLine, toggleCompare, inCompare, MAX_COMPARE, savedFromCandidate, candidateFromSaved, savedAge } from "./path.js";
@@ -2512,6 +2512,10 @@ export default function OptionsStrategyLab() {
       // a fill that has not happened.
       alpacaStatus: outcome ? outcome.status : null,
       alpacaFilled: outcome ? outcome.filled : null,
+      // AN ORDER FILLED AT SEND KEEPS ITS FILL TOO. Only `recheckOrders()` wrote
+      // this, so a fill at send left the card comparing the limit with the app's
+      // own entry (J-0001, 24 Sep 2026; journal.js `recordFillPrice`).
+      alpacaFillPrice: outcome && outcome.filled ? outcome.fillPrice ?? null : null,
       // WHAT THE ORDER ACTUALLY WAS, so the working-orders list can show its
       // price and how long it stands without asking the broker again.
       alpacaOrderType: alpacaOrder?.type ?? null,
@@ -5249,8 +5253,7 @@ export default function OptionsStrategyLab() {
                           back as though it had been the target (journal.js). */}
                       {(p.alpacaFillPrice != null || (isBrokerHolding(p) && p.entrySource === "fill")) && (
                         <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 5, lineHeight: 1.6 }}>
-                          {fillVsLimit({ limit: p.alpacaLimit,
-                            fill: p.alpacaFillPrice != null ? p.alpacaFillPrice : p.entryNet,
+                          {fillVsLimit({ limit: p.alpacaLimit, fill: recordFillPrice(p),
                             contracts: size.contracts, limitSigned: p.alpacaLimitSigned === true }).sentence}
                         </div>
                       )}

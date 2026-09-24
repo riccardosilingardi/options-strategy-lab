@@ -113,6 +113,10 @@ v1 is done when all three are true, each observed on the owner's real account an
 (c) is built (ROADMAP PR #38); it is the owner's reading. PR #40 (one screen, one set of numbers)
 changes what the owner reads, not what v1 needs: v1 waits only on the owner's three readings.
 
+**Readings so far (24 Sep 2026, owner's phone).** (c) is read for **HOLD only**: J-0001 (9 × GDX
+94P 2026-10-30) read HOLD and the owner found it readable. CLOSE and WARNING have not been seen
+live. (a) and (b) are not yet read.
+
 ## 4. NOT VERIFIED
 
 At most ten items. **OWNER CHECK** means only a reading on the live market or the owner's phone
@@ -121,9 +125,10 @@ can settle it; no test in this repository can.
 1. **OWNER CHECK — order path 3 has never been sent live,** neither from the desk nor from the
    Positions card's close-at-limit: the sign on the limit, `groupForRecord()` on a real
    `/v2/positions` payload, and "close order working" clearing on the fill. This is v1 (b).
-2. **OWNER CHECK — no opening order has filled at the intended price** since the sign fix, and
-   no credit at the corrected limit (v1 a). PR #40 moves the suggested opening price by at most
-   a cent a leg (`legLimitSeed()` now sums exactly to `fillNet()`): not yet seen filled.
+2. **OWNER CHECK — no opening order has been read against its limit** (v1 a). J-0001 filled at
+   $5.00; the ticket's limit beside it has not been read. PR #43 makes the card compare with
+   Alpaca's fill (it compared with the app's own entry on an order filled at send). No credit
+   has filled at the corrected limit; PR #40's cent-a-leg seed change is not yet seen filled.
 3. **OWNER CHECK — is the indicative combination ask inside the real one on thin chains?**
    J-0003 (SOYB 28/30, a debit at the indicative ask) never filled; its cancel completed at the
    23 Sep open and the owner saw it leave both Positions and Alpaca's Orders. So the cancel path
@@ -139,11 +144,10 @@ can settle it; no test in this repository can.
 5. **Find's cost on a phone is not measured.** The list is one memo over every selected market
    (analyse, floors, an 8,000-run chance per survivor); on a laptop with synthetic chains it
    settles in a few seconds after the chains land. A slow phone may lag while a slider moves.
-6. **OWNER CHECK — broker payloads:** the first real `/v2/positions` payload (9 × GDX 94P,
-   23 Sep 2026) was read and valued at Alpaca's own −$225, and exposed three faults fixed in
-   PR #42 (a duplicate import, a size counted 9 × 9, an empty browser overwriting the server's
-   book) — the fixes have not yet run on that payload. "Not on Alpaca" and "size N > M on the
-   ask" (indicative sizes) are still unread live.
+6. **OWNER CHECK — broker payloads:** the first real `/v2/positions` payload (9 × GDX 94P)
+   was read, and PR #42's three fixes were verified on it on the owner's phone, 24 Sep 2026,
+   from the icon and from a link: one card J-0001, filled $5.00, P&L −$225 equal to Alpaca's.
+   "Not on Alpaca" and "size N > M on the ask" (indicative sizes) are still unread live.
 7. **OWNER CHECK — free sizing (PR #41) has not been used live:** the Settings toggle and its
    reason, a card sized past the old limit, the "at risk now" line above Send, and the weekly
    report's P&L split. Tested with gate tests, renders and source sweeps only.
