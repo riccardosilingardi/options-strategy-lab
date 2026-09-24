@@ -51,7 +51,7 @@ import { CapitalOnboarding, WizardOpen, ConfirmSteps, Card, Pill } from "./wizar
 // renders the same card, so it may not live here.
 import { RequestControls, SplitSections, MissLine, CandidateCard, SignalBadge, StopSigns } from "./card.jsx";
 import { buildHandOff, buildScreenState, BUILD_TAB } from "./handoff.js";
-import { orderBody, orderOutcome, alpacaErrorText, reduceRatios, limitWords, fillPriceOf, cancelOutcome, cancelWaiting } from "./order.js";
+import { orderBody, orderOutcome, alpacaErrorText, reduceRatios, limitWords, orderLimitWords, fillPriceOf, cancelOutcome, cancelWaiting } from "./order.js";
 // THE PERMANENT RECORD: the ref a position is given at open, the sequence on
 // every timeline entry, the close reason, and what survives into the Journal.
 import { nextRef, refCounter, appendTimeline, stampTimeline, orderStatusRecheck, closeDecision,
@@ -2558,7 +2558,7 @@ export default function OptionsStrategyLab() {
           t: Date.now(), type: "sent", orderId: alpacaOrder.id ? String(alpacaOrder.id) : null,
           text: `SENT to Alpaca — order ${String(alpacaOrder.id || "(id unknown)")}, ` +
             `${String(alpacaOrder.type || "an order whose type Alpaca did not report")} ` +
-            `${limitWords(alpacaOrder.limit_price) ? `at ${limitWords(alpacaOrder.limit_price)} a share, a combination at a time, ` : ""}` +
+            `${orderLimitWords(alpacaOrder) ? `at ${orderLimitWords(alpacaOrder)} a share, a combination at a time, ` : ""}` +
             `${String(alpacaOrder.time_in_force || "").toLowerCase() === "gtc" ? "standing until cancelled" : "good for today's session only"}. ` +
             `${outcome.headline}`,
         }] : []),
@@ -2748,7 +2748,10 @@ export default function OptionsStrategyLab() {
     setStore((st) => {
       const positions = st.positions.map((x) => {
         if (x.id !== p.id) return x;
-        const t = appendTimeline(x, { t: Date.now(), type: "close-sent", orderId: r.order?.id ? String(r.order.id) : null, text: `close sent at ${r.limitWords}` });
+        // The words of the body that went out (order.js `orderMoney()`): 9 at a
+        // credit you receive, never "a debit of $4.68 (you pay it)".
+        const t = appendTimeline(x, { t: Date.now(), type: "close-sent", orderId: r.order?.id ? String(r.order.id) : null,
+          text: `close sent: ${r.qty} at ${r.limitWords} each${r.total ? `, ${r.total} in all` : ""}` });
         return { ...x, closeOrder: { id: r.order?.id || null, t: Date.now(), limit: r.order?.limit_price ?? null },
           timeline: t.timeline, seqNext: t.seqNext };
       });

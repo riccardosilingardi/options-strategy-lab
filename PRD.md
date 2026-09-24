@@ -125,6 +125,8 @@ can settle it; no test in this repository can.
 1. **OWNER CHECK — order path 3 has never been sent live,** neither from the desk nor from the
    Positions card's close-at-limit: the sign on the limit, `groupForRecord()` on a real
    `/v2/positions` payload, and "close order working" clearing on the fill. This is v1 (b).
+   PR #43 makes the confirm step describe the body sent (9 ×, a credit, the total); tested on
+   payloads shaped like J-0001's only, never on Alpaca. J-0001's time exit is 9 Oct 2026.
 2. **OWNER CHECK — no opening order has been read against its limit** (v1 a). J-0001 filled at
    $5.00; the ticket's limit beside it has not been read. PR #43 makes the card compare with
    Alpaca's fill (it compared with the app's own entry on an order filled at send). No credit

@@ -25,6 +25,27 @@ Owner's readings, 24 Sep 2026, recorded in PRD §3 and §4.6:
   record through `upgradeHolding()` and `dropImportedTwins()`: the limit, its sign stamp and the
   sentence survive.
 
+**Order path 3 wrote out a different order from the one it sent (rule 5, v1 b).** Measured on
+main on the owner's only holding (9 × GDX 94P, bid 4.60 / ask 4.90): the body was right (sell 9
+at 4.68) and the confirm step said "1 ×", "1 combination, a limit of $42.08 for one combination"
+and "a debit of $4.68 (you pay it)". Three faults, fixed:
+
+- **Direction.** `limitWords()` reads a signed price; a simple order's price is unsigned and its
+  side says the direction. `orderMoney()` / `orderLimitWords()` in `order.js` describe a limit
+  from the order itself (class, side, qty, price): a simple sell is a credit you receive, a
+  simple buy a debit you pay, an mleg keeps its signed rule. One home.
+- **Quantity and price.** `prepareClose()` now gives the preview the same shape and factor
+  `orderBody()` divided out: the lines say 9 × and 9 combinations, the price per combination is
+  `body.limit_price`, and one line gives the total ("you receive about $4,212").
+- **The same words** on order path 6 (`approve.mjs`: "9 at a credit of $4.68 (you receive it)
+  per combination, you receive about $4,212 in all" — the autopilot link will offer this close
+  on 9 Oct), in `orderOutcome()` (a sell is "sold"; a filled close says "Closed at the broker",
+  not "Position opened"), in the Journal's `close-sent` entry, in the desk's open-orders list
+  and in `placeExit()`'s message (order path 4 had the same fault).
+- **Not changed:** `orderBody()` output (a test holds the three bodies byte-identical to
+  main's), `closeLimitPrice()`, the gate calls on all six paths, `riskGate.js`,
+  `alpacaContract.js`, every `RULES` value. `src/closeWords.test.js` is new.
+
 ## v1
 
 v1 is done when PRD §3 is true: (a) one opening order filled at the intended price,
