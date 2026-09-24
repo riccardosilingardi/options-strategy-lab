@@ -2514,7 +2514,7 @@ export default function OptionsStrategyLab() {
       alpacaFilled: outcome ? outcome.filled : null,
       // AN ORDER FILLED AT SEND KEEPS ITS FILL TOO. Only `recheckOrders()` wrote
       // this, so a fill at send left the card comparing the limit with the app's
-      // own entry (J-0001, 24 Sep 2026; journal.js `recordFillPrice`).
+      // own entry (found 24 Sep 2026 by the J-0001 test; journal.js `recordFillPrice`).
       alpacaFillPrice: outcome && outcome.filled ? outcome.fillPrice ?? null : null,
       // WHAT THE ORDER ACTUALLY WAS, so the working-orders list can show its
       // price and how long it stands without asking the broker again.

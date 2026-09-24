@@ -1350,7 +1350,9 @@ test("PR #42 — THE IMPORTED TWIN GOES; THE APP'S OWN RECORD STAYS, with its re
    9 x GDX 94P, filled $5.00. v1 (a) needs no new UI: the card already prints
    `fillVsLimit()` on a filled record. These tests hold that it still can after
    the sync (`upgradeHolding()`) and the twin removal (`dropImportedTwins()`).
-   The limit the ticket showed is NOT known here: 5.00 below is a fixture.
+   The owner read the real one on 24 Sep: a debit of $5.02, filled at $5.00, on a
+   recheck. 5.00 and 5.10 below are fixtures; the second test is the at-send case,
+   which J-0001 was not.
 ================================================================ */
 const J1_SENT = { ...GDX_J1, alpacaLimit: 5, alpacaLimitSigned: true, alpacaOrderType: "limit",
   alpacaTif: "day", timeline: [{ t: 1, n: 1, type: "sent", text: "SENT" }, { t: 1, n: 2, type: "open", text: "o" }] };
@@ -1375,7 +1377,7 @@ test("J-0001 — THE LIMIT SURVIVES THE SYNC AND THE TWIN REMOVAL, and the card 
     "That is $90.00 BETTER than you asked for, across 9 combinations.", "a real comparison: 0.10 x 100 x 9");
 });
 
-test("J-0001 — AN ORDER FILLED AT SEND IS COMPARED WITH THE BROKER'S FILL, never the app's own entry", () => {
+test("J-0001 SHAPE — AN ORDER FILLED AT SEND IS COMPARED WITH THE BROKER'S FILL, never the app's own entry", () => {
   // The fault: no `alpacaFillPrice` (only `recheckOrders()` wrote it), so the card
   // read `entryNet` — the app's intended price — as the broker's fill.
   const j1 = { ...J1_SENT, entryNet: 5.1 };

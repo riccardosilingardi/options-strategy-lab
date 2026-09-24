@@ -1239,7 +1239,8 @@ export function upgradeHolding(pos, group = {}, { plan = null, now = Date.now() 
 /**
  * THE FILL A POSITION CARD HOLDS ITS LIMIT AGAINST — the broker's, or null.
  *
- * >>> J-0001, 24 Sep 2026. <<< The card printed `fillVsLimit()` with the fill
+ * >>> Found by the J-0001 test, 24 Sep 2026 (J-0001 itself filled on a recheck
+ * and was not affected). <<< The card printed `fillVsLimit()` with the fill
  * read as `alpacaFillPrice ?? entryNet`. An order that fills AT SEND never had
  * `alpacaFillPrice` stored (only `recheckOrders()` wrote it), so the "fill" was
  * the app's own `entryNet` — the price it intended — and the sentence could only
