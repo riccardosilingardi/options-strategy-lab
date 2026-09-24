@@ -139,10 +139,11 @@ can settle it; no test in this repository can.
 5. **Find's cost on a phone is not measured.** The list is one memo over every selected market
    (analyse, floors, an 8,000-run chance per survivor); on a laptop with synthetic chains it
    settles in a few seconds after the chains land. A slow phone may lag while a slider moves.
-6. **OWNER CHECK — broker payloads the app has only seen hand-built:** "size N > M on the ask"
-   reads indicative sizes (maybe not the real depth), and `upgradeHolding()`, the
-   broker-preferred P&L and "Not on Alpaca" have never run on a real `/v2/positions` payload.
-   The quantity fields have not been tried on a real phone keyboard.
+6. **OWNER CHECK — broker payloads:** the first real `/v2/positions` payload (9 × GDX 94P,
+   23 Sep 2026) was read and valued at Alpaca's own −$225, and exposed three faults fixed in
+   PR #42 (a duplicate import, a size counted 9 × 9, an empty browser overwriting the server's
+   book) — the fixes have not yet run on that payload. "Not on Alpaca" and "size N > M on the
+   ask" (indicative sizes) are still unread live.
 7. **OWNER CHECK — free sizing (PR #41) has not been used live:** the Settings toggle and its
    reason, a card sized past the old limit, the "at risk now" line above Send, and the weekly
    report's P&L split. Tested with gate tests, renders and source sweeps only.

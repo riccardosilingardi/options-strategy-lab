@@ -25,6 +25,7 @@ import {
   positionSize, positionSizeNote, contractsOf, withPositionSize, ASSUMED_CONTRACTS,
   positionStage, isOwnedPosition, positionStageNote, wouldHaveDone,
   isBrokerHolding, fillVsLimit, storedLimitOf, orderReconciliation, bookPositions, upgradeHolding,
+  holdingShape, isImportedRecord, dropImportedTwins,
 } from "./journal.js";
 import { RULES, ruleExitOf, stopWarningSentence,
   seasonalStampOf, seasonalStampNote, ESTIMATED_SEASONAL_SOURCE, MEASURED_SEASONAL_SOURCE } from "./rules.js";
@@ -1269,6 +1270,82 @@ test("0a — a record that already carries everything comes back UNCHANGED", () 
   const done = upgradeHolding(J0002_LEGACY, XLE_GROUP, { plan: "p" });
   assert.equal(upgradeHolding(done, XLE_GROUP, { plan: "p" }), done);
   assert.equal(upgradeHolding(null, XLE_GROUP), null);
+});
+
+/* ================================================================
+   PR #42 — ONE HOLDING, ONE RECORD, ONE SIZE.
+   The owner's phone, 23 Sep 2026: 9 × GDX 94P 2026-10-30 sent from the app
+   as J-0001, and a second card "J-0002 · Imported from Alpaca" beside it.
+================================================================ */
+const GDX_GROUP = { und: "GDX", exp: "2026-10-30", legs: [{ side: 1, type: "put", strike: 94, qty: 9 }], net: 5 };
+// J-0001 as the app records an order it sent: the structure as built, and the size apart.
+const GDX_J1 = { id: 1, ref: "J-0001", ticker: "GDX", name: "Long Put ATM", expKey: "2026-10-30",
+  legs: [{ side: 1, qty: 1, type: "put", strike: 94 }], entryNet: 5, maxLoss: -500, maxProfit: 8900,
+  contracts: 9, alpacaId: "ord-1", alpacaStatus: "filled", alpacaFilled: true,
+  thesis: { pop: 0.4 }, timeline: [{ t: 1, n: 1, type: "open", text: "sent" }] };
+// J-0002 as `importAlpaca()` wrote it: the broker's legs, and contracts 1.
+const GDX_J2 = { id: 2, ref: "J-0002", ticker: "GDX", name: "Imported from Alpaca", expKey: "2026-10-30",
+  legs: [{ side: 1, qty: 9, type: "put", strike: 94 }], entryNet: 5, maxLoss: -4500, maxProfit: 80100,
+  contracts: 1, alpacaId: null, alpacaHeld: true, entrySource: "fill", thesis: { imported: true },
+  timeline: [{ t: 1, n: 1, type: "fill", text: "read" }, { t: 1, n: 2, type: "plan", text: "p" }] };
+const risk = (ps) => bookPositions(ps).reduce((a, p) => a + Math.abs(p.maxLoss) * positionSize(p).contracts, 0);
+
+test("PR #42 — THE APP'S RECORD AND THE BROKER'S HOLDING HAVE ONE SHAPE: +1 × 9 is +9", () => {
+  const broker = holdingShape(GDX_GROUP.und, GDX_GROUP.exp, GDX_GROUP.legs);
+  assert.equal(holdingShape(GDX_J1.ticker, GDX_J1.expKey, GDX_J1.legs), broker, "J-0001 IS that holding");
+  assert.equal(holdingShape(GDX_J2.ticker, GDX_J2.expKey, GDX_J2.legs), broker, "and so was the import");
+  // Shape, not size — but a different strike, side, type, ratio or expiry is a different holding.
+  assert.notEqual(holdingShape("GDX", "2026-10-30", [{ side: 1, qty: 1, type: "put", strike: 95 }]), broker);
+  assert.notEqual(holdingShape("GDX", "2026-10-30", [{ side: -1, qty: 1, type: "put", strike: 94 }]), broker);
+  assert.notEqual(holdingShape("GDX", "2026-10-30", [{ side: 1, qty: 1, type: "call", strike: 94 }]), broker);
+  assert.notEqual(holdingShape("GDX", "2026-11-20", GDX_J1.legs), broker);
+  const fly = (q) => [{ side: 1, qty: q, type: "put", strike: 58 }, { side: -1, qty: 2 * q, type: "put", strike: 55 }, { side: 1, qty: q, type: "put", strike: 51 }];
+  assert.equal(holdingShape("SLV", "E", fly(1)), holdingShape("SLV", "E", fly(4)), "a 1/-2/1 is a 1/-2/1 at any size");
+  assert.notEqual(holdingShape("SLV", "E", fly(1)),
+    holdingShape("SLV", "E", [{ side: 1, qty: 1, type: "put", strike: 58 }, { side: -1, qty: 1, type: "put", strike: 55 }, { side: 1, qty: 1, type: "put", strike: 51 }]),
+    "and a 1/-1/1 is not one");
+});
+
+test("PR #42 — THE SIZE IS MEASURED IN THE RECORD'S OWN UNITS: 9 contracts of +1, or 1 of +9 — never 81", () => {
+  const j1 = upgradeHolding(GDX_J1, GDX_GROUP, { plan: "p" });
+  assert.equal(positionSize(j1).contracts, 9, "J-0001: one put, nine times");
+  assert.equal(positionSize(j1).brokerQty, 9);
+  const j2 = upgradeHolding(GDX_J2, GDX_GROUP, { plan: "p" });
+  assert.equal(positionSize(j2).contracts, 1, "the import: its leg already says nine");
+  assert.equal(positionSize(j2).brokerQty, 9, "nine puts, as Alpaca says — was 81");
+  assert.equal(Math.abs(j2.maxLoss) * positionSize(j2).contracts, 4500, "$4,500 at risk — was $40,500");
+  // A record the old sync already inflated is brought back down.
+  const inflated = { ...GDX_J2, contracts: 9, contractsAssumed: false };
+  assert.equal(positionSize(upgradeHolding(inflated, GDX_GROUP, { plan: "p" })).contracts, 1, "81 repaired to 9");
+  assert.equal(upgradeHolding(j1, GDX_GROUP, { plan: "p" }), j1, "and running it again changes nothing");
+});
+
+test("PR #42 — THE IMPORTED TWIN GOES; THE APP'S OWN RECORD STAYS, with its ref, thesis and timeline", () => {
+  assert.equal(isImportedRecord(GDX_J2), true);
+  assert.equal(isImportedRecord(GDX_J1), false);
+  assert.equal(isImportedRecord({ alpacaId: "sync" }), true, "the legacy spelling too");
+  const before = [GDX_J1, { ...GDX_J2, contracts: 9 }];
+  assert.equal(risk(before), 45000, "what the gate was counting: $4,500 + $40,500");
+  const r = dropImportedTwins(before);
+  assert.deepEqual(r.dropped, ["J-0002"]);
+  assert.equal(r.positions.length, 1);
+  assert.equal(r.positions[0], GDX_J1, "J-0001 untouched");
+  assert.equal(risk(r.positions), 4500, "the book is the holding");
+  // Nothing to drop: the SAME array back, so the 60-second sync cannot loop.
+  assert.equal(dropImportedTwins(r.positions).positions, r.positions);
+  // An import with no app record of its own is the only record of that holding: it stays.
+  const alone = [GDX_J2];
+  assert.equal(dropImportedTwins(alone).positions, alone);
+  // An app record that never bought anything does not claim a holding.
+  const dead = [{ ...GDX_J1, alpacaStatus: "canceled", alpacaFilled: false }, GDX_J2];
+  assert.equal(dropImportedTwins(dead).positions, dead, "a cancelled order is not the holding");
+});
+
+test("PR #42 — THE SYNC MATCHES BY SHAPE AND DROPS THE TWIN (source)", () => {
+  const app = readFileSync("src/App.jsx", "utf8");
+  assert.match(app, /const sigOf = \(tk, exp, legs\) => holdingShape\(tk, exp, legs\);/);
+  assert.equal(/x\$\{l\.qty\}/.test(app), false, "no signature spells a leg's quantity");
+  assert.match(app, /const tw = dropImportedTwins\(next\);/);
 });
 
 /* ---------------- report ---------------- */
