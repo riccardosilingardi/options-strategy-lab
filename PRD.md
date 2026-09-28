@@ -113,40 +113,39 @@ v1 is done when all three are true, each observed on the owner's real account an
 (c) is built (ROADMAP PR #38); it is the owner's reading. PR #40 (one screen, one set of numbers)
 changes what the owner reads, not what v1 needs: v1 waits only on the owner's three readings.
 
+**Readings so far (24 Sep 2026, owner's phone).**
+- **(a) VERIFIED.** J-0001 (9 × GDX 94P 2026-10-30): the ticket sent a debit of $5.02, Alpaca
+  filled at a debit of $5.00, and the Positions card reads "That is $18.00 BETTER than you
+  asked for, across 9 combinations". It filled on a recheck (pending_new → filled).
+- **(c) read for HOLD** on J-0001 and readable. CLOSE and WARNING are read at J-0001's close.
+- **(b) is the one reading left:** J-0001 closed with the card's "Close at limit" (order path
+  3) and filled; at the latest its time exit, 9 Oct 2026 (21 DTE). Until then the owner is
+  asked nothing else.
+
 ## 4. NOT VERIFIED
 
-At most ten items. **OWNER CHECK** means only a reading on the live market or the owner's phone
-can settle it; no test in this repository can.
+At most ten items. **OWNER CHECK** means only the owner's reading can settle it; there is exactly
+one, v1 (b). Everything marked **read when it happens** is recorded if the owner meets it in
+normal use, and is never asked for.
 
-1. **OWNER CHECK — order path 3 has never been sent live,** neither from the desk nor from the
-   Positions card's close-at-limit: the sign on the limit, `groupForRecord()` on a real
-   `/v2/positions` payload, and "close order working" clearing on the fill. This is v1 (b).
-2. **OWNER CHECK — no opening order has filled at the intended price** since the sign fix, and
-   no credit at the corrected limit (v1 a). PR #40 moves the suggested opening price by at most
-   a cent a leg (`legLimitSeed()` now sums exactly to `fillNet()`): not yet seen filled.
-3. **OWNER CHECK — is the indicative combination ask inside the real one on thin chains?**
-   J-0003 (SOYB 28/30, a debit at the indicative ask) never filled; its cancel completed at the
-   23 Sep open and the owner saw it leave both Positions and Alpaca's Orders. So the cancel path
-   is settled, and the question it raised is not: no order has yet measured the gap.
-4. **OWNER CHECK — nobody has used Find on a real phone with live chains** (PR #40): the one
-   ranked list across ten markets, the live re-filtering, the flags, the market filter, the
-   stop signs and the Positions card's one action. Tested with renders, source sweeps and a
-   headless browser on SYNTHETIC chains only. Whether it reads in five seconds is v1 (c).
-   PR #41's per-card "inverted quotes on its strikes" and the one "looks stale" line were
-   measured on the UNG fixture (clean) and on synthetic 30-pair boards shaped like the owner's
-   SOYB (2 of 30) and the live BOIL reading (6 of 30): 19 labelled cards → 11, SOYB shape 9 → 1.
-   Not yet read on the owner's live 2026-11-20 board.
+1. **OWNER CHECK — order path 3 has never been sent live** (v1 b): the confirm step's words
+   (PR #43: 9 ×, a credit, the total), `groupForRecord()` on the real payload, Alpaca's order,
+   the fill, and "close order working" clearing. Tested on J-0001-shaped payloads only. The
+   reading is J-0001's close, by 9 Oct 2026; CLOSE and WARNING (v1 c) are read with it.
+2. **Read when it happens — no credit has filled at the corrected limit.** v1 (a) is verified
+   on a debit (J-0001); PR #40's cent-a-leg seed change has not been seen on a credit.
+3. **Read when it happens — the indicative combination ask on thin chains.** J-0003 (SOYB
+   28/30) never filled at the indicative ask; no order has yet measured the gap.
+4. **Read when it happens — Find on a phone with live chains** (PR #40, #41): the ranked list,
+   live re-filtering, flags, stop signs, the per-card "inverted quotes" and the "looks stale"
+   line. Tested on the UNG fixture and synthetic boards only.
 5. **Find's cost on a phone is not measured.** The list is one memo over every selected market
    (analyse, floors, an 8,000-run chance per survivor); on a laptop with synthetic chains it
    settles in a few seconds after the chains land. A slow phone may lag while a slider moves.
-6. **OWNER CHECK — broker payloads:** the first real `/v2/positions` payload (9 × GDX 94P,
-   23 Sep 2026) was read and valued at Alpaca's own −$225, and exposed three faults fixed in
-   PR #42 (a duplicate import, a size counted 9 × 9, an empty browser overwriting the server's
-   book) — the fixes have not yet run on that payload. "Not on Alpaca" and "size N > M on the
-   ask" (indicative sizes) are still unread live.
-7. **OWNER CHECK — free sizing (PR #41) has not been used live:** the Settings toggle and its
-   reason, a card sized past the old limit, the "at risk now" line above Send, and the weekly
-   report's P&L split. Tested with gate tests, renders and source sweeps only.
+6. **Read when it happens — "Not on Alpaca" and "size N > M on the ask"** have not appeared
+   live. (PR #42's three fixes were verified on the phone on 24 Sep 2026 and are closed.)
+7. **Read when it happens — free sizing (PR #41) has not been used live.** Tested with gate
+   tests, renders and source sweeps only.
 8. **Chosen, not measured:** `modelDisagreementRatio` 4, `maxComboSpreadShareOfNet` 1.0,
    `maxCrossingShareOfMaxProfit` 0.5, `openLimitSlippage` and `closeLimitSlippage` 0.25,
    `watchAttentionShare` 0.35, `autopilotConfidence` 70, `fallbackIV`/`fallbackSigma` 0.25, the
@@ -160,6 +159,8 @@ can settle it; no test in this repository can.
 
 One line each. Detail for every item is in `docs/history/ROADMAP.md`.
 
+- **Journal on the server** — `journal` and `journalSeq` on `/api/state`, merged by ref. First
+  after v1: changing the sync of the only live record before its first live close is the wrong week.
 - **P2 full** — rank proposals by edge at the price that fills, not by score.
 - **P7** — learn about fills from Alpaca's `trade_updates` stream server-side, instead of polling.
 - **P8** — more indicators and timeframes, only after the owner has used the current ones.

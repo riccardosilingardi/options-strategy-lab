@@ -22,7 +22,7 @@ import { erf, netBS } from "./engine.js";
 import { ARROW, REGIONS, regionSignals, tagImpacts, taRead } from "./signals.js";
 import { useNarrow, BandThumbnail, payoffBands, bandTakeaway } from "./visuals.jsx";
 import { DEMO, DEMO_TOOLTIP } from "./demo.js";
-import { reduceRatios, orderQty, mlegLimitPrice, limitWords, limitKind, signedLimitFor, orderBody, orderPreviewLines, orderOutcome, alpacaErrorText, cancelOutcome, cancelWaiting } from "./order.js";
+import { reduceRatios, orderQty, mlegLimitPrice, limitWords, orderLimitWords, limitKind, signedLimitFor, orderBody, orderPreviewLines, orderOutcome, alpacaErrorText, cancelOutcome, cancelWaiting } from "./order.js";
 import { hasOpenInterest, sourceNote, openInterestNote, fetchChain } from "./chain.js";
 import { prepareClose, sendClose, holdingGroups } from "./closeOrder.js";
 // "Why this trade" and the headline tags moved to src/why.jsx: the wizard's
@@ -1035,7 +1035,7 @@ export function AlpacaDesk({ creds, setMsg, gate, positions = [] }) {
           <div key={o.id} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "8px 10px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7 }}>
             <div style={{ flex: 1, minWidth: 160 }}>
               <div style={{ ...mono, fontWeight: 700, color: T.ink, fontSize: 12 }}>{o.order_class === "mleg" ? `MULTILEG x${o.qty} (${(o.legs || []).length} legs)` : `${o.symbol} ${o.side} ${o.qty}`}</div>
-              <div style={{ ...mono, fontSize: 10, color: T.dim }}>{o.type}{o.limit_price != null ? ` @ ${limitWords(o.limit_price) || o.limit_price}` : ""} · {o.time_in_force} · {o.status}</div>
+              <div style={{ ...mono, fontSize: 10, color: T.dim }}>{o.type}{o.limit_price != null ? ` @ ${orderLimitWords(o) || o.limit_price}` : ""} · {o.time_in_force} · {o.status}</div>
             </div>
             {cancelWaiting({ status: o.status, cancelRequested: cancelAsked[o.id] })
               ? <div style={{ ...mono, fontSize: 10.5, color: T.amber, lineHeight: 1.5, flexBasis: "100%" }}>
@@ -2256,7 +2256,7 @@ export function GuardianPanel({ pos, spot, dteLeft, ivNow, vol, seasonalNow, pnl
       // structure is a debit and a debit when it is a credit, and the body
       // carries that sign now; printing its magnitude alone was how the same
       // mistake stayed invisible on the opening path for four pull requests.
-      const words = limitWords(body.limit_price) || "a price the app could not read";
+      const words = orderLimitWords(body) || "a price the app could not read";
       const per = +body.qty > 1 ? ` — sent as ${body.qty} × ${words}` : "";
       setMsg(`${label} exit order placed at ${words}${per}, standing until you cancel it (${o.id?.slice(0, 8)}…). ${res.headline}`);
       logEvent(pos.id, "ladder", `${label} exit order placed at ${words} — ${res.headline}`);

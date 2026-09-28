@@ -224,6 +224,76 @@ export function limitKind(limitPrice) {
   return n < 0 ? "credit" : "debit";
 }
 
+/* ------------------------------------------------------------------
+   1c) WHICH WAY THE MONEY GOES, READ OFF THE ORDER THAT GOES OUT
+
+   >>> MEASURED ON MAIN, 24 Sep 2026, on the owner's only holding. <<<
+   9 x GDX 94P. `prepareClose()` sent the right body — a SIMPLE order,
+   `side: "sell"`, `qty: "9"`, `limit_price: "4.68"` — and the confirm step
+   said "a debit of $4.68 (you pay it)". `limitWords()` reads a SIGNED price,
+   and a simple order's price is never signed: its `side` says which way the
+   money goes. A sell to close receives money; the words said it paid.
+
+   So a limit is described from the ORDER — its class, side and quantity —
+   and never from a bare price. A simple sell is a credit you receive, a
+   simple buy a debit you pay, and an mleg price keeps its signed rule
+   (1b above). Every sentence that names an order's limit or fill reads here.
+------------------------------------------------------------------ */
+
+const priceOf = (x) => (x == null || x === "" ? null : Number.isFinite(Number(x)) ? Number(x) : null);
+const isMleg = (order) => !!order && (order.order_class === ORDER_CLASS.MLEG
+  || (Array.isArray(order.legs) && order.legs.length > 1));
+
+/**
+ * @param order  an order body, or Alpaca's reply: { order_class, side, qty, legs, limit_price }
+ * @param price  the price to describe; the order's `limit_price` unless given
+ *               (`filled_avg_price` for a fill)
+ * @returns {{ kind, magnitude, words, verb, closing }}
+ *   kind "credit" | "debit" | null (no readable price);
+ *   verb "sold" | "bought" — what the order does, for "0 of 9 sold";
+ *   closing true for a sell to close, or an mleg whose every leg closes.
+ */
+export function orderMoney(order = {}, price = order ? order.limit_price : null) {
+  const o = order || {};
+  const mleg = isMleg(o);
+  const n = priceOf(price);
+  const magnitude = n == null ? null : +Math.abs(n).toFixed(2);
+  const side = String(o.side || "").toLowerCase();
+  let kind = null;
+  if (magnitude != null && magnitude !== 0) {
+    if (side === "sell" && !mleg) kind = "credit";
+    else if (side === "buy" && !mleg) kind = "debit";
+    // An mleg price is signed (1b). So is a bare price with no order around it
+    // (a reply that names neither class nor side): the signed rule is the only
+    // one it can be read by, and every simple order the app sends has a side.
+    else kind = n < 0 ? "credit" : "debit";
+  }
+  const words = kind === "credit" ? `a credit of $${magnitude.toFixed(2)} (you receive it)`
+    : kind === "debit" ? `a debit of $${magnitude.toFixed(2)} (you pay it)` : null;
+  const verb = !mleg && side ? (side === "sell" ? "sold" : "bought") : kind === "credit" ? "sold" : "bought";
+  const closing = mleg
+    ? (o.legs || []).length > 0 && (o.legs || []).every((l) => /_to_close$/.test(String(l && l.position_intent || "")))
+    : side === "sell";
+  return { kind, magnitude, words, verb, closing };
+}
+
+/** The limit (or `price`) of an order, in words — null when unreadable, never "$0". */
+export const orderLimitWords = (order, price) =>
+  orderMoney(order, price === undefined ? (order ? order.limit_price : null) : price).words;
+
+/**
+ * THE WHOLE ORDER IN DOLLARS: limit x 100 x qty. "you receive about $4,212".
+ * "About", because a limit is the worst price accepted, not the fill.
+ * @returns {?string} null when the price or the quantity cannot be read.
+ */
+export function orderTotalWords(order = {}) {
+  const m = orderMoney(order);
+  const q = priceOf(order && order.qty);
+  if (!m.kind || q == null || q <= 0) return null;
+  const dollars = Math.round(m.magnitude * 100 * q);
+  return `${m.kind === "credit" ? "you receive" : "you pay"} about $${dollars.toLocaleString("en-US")}`;
+}
+
 /**
  * THE BODY ALPACA IS SENT — one implementation, five order paths.
  *
@@ -302,9 +372,13 @@ export function orderPreviewLines({ legs = [], ratios, ticker = "", expKey = "",
   // THE PREVIEW SAYS WHICH WAY THE MONEY GOES. A tap that arms a confirmation
   // has to show what it armed, and "$0.75" does not distinguish paying 75
   // cents from receiving them — which is the whole of the XLE fault above.
+  // The price is the one `orderBody()` writes, described by `orderMoney()`:
+  // a single leg is a simple order whose side says the direction (1c).
   const words = legs.length > 1
-    ? limitWords(mlegLimitPrice(limit, factor, intent))
-    : (unitLimit(limit, factor) !== "0.00" ? `a limit of $${unitLimit(limit, factor)}` : null);
+    ? orderLimitWords({ order_class: ORDER_CLASS.MLEG }, mlegLimitPrice(limit, factor, intent))
+    : legs.length === 1
+      ? orderLimitWords({ side: (legs[0].side > 0) === (intent !== "close") ? "buy" : "sell" }, unitLimit(limit, factor))
+      : null;
   const price = type === "limit"
     ? `${words || "a limit the app could not read"} for one combination`
     : "at whatever the market is showing";
@@ -425,7 +499,7 @@ export const deadOrderNote = (n) =>
  *  back. `limitWords()` says which of the two it is, in words. */
 export function orderWaitingPhrase(order = {}) {
   const type = String(order.type || "").toLowerCase();
-  const words = order.limit_price != null ? limitWords(order.limit_price) : null;
+  const words = orderLimitWords(order);
   const priced = type === "limit" && words
     ? `at your limit of ${words}`
     : type === "market" ? "as a market order" : "as it was sent";
@@ -453,8 +527,13 @@ export function orderOutcome(order) {
   // NEGATIVE average fill price ("Avg. Fill Price −0.04" on the XLE order),
   // and `Math.abs()` here turned "you received four cents" into "you paid
   // four cents" on every screen that quotes a fill.
-  const avgWords = o.filled_avg_price != null ? limitWords(o.filled_avg_price) : null;
+  // AND A SIMPLE ORDER'S FILL IS UNSIGNED, like its limit: its side says which
+  // way the money went (1c). A sell is "sold", not "bought".
+  const money = orderMoney(o, o.filled_avg_price);
+  const avgWords = money.words;
   const at = avgWords ? ` at ${avgWords}` : "";
+  const verb = money.verb;
+  const closing = money.closing;
   // AND IT TRAVELS, SIGNED, SO THE CALLER NEVER RE-READS THE REPLY. What the
   // broker gave is the other half of the comparison ROADMAP P0 owes: the app
   // records `min(limit, ask)` and has never had a fill to hold it against.
@@ -468,6 +547,11 @@ export function orderOutcome(order) {
   }
   if (FILLED.includes(status)) {
     const n = got != null ? got : want;
+    if (closing) {
+      return { kind: "filled", filled: true, working: false, startsExitPlan: true, status, fillPrice,
+        headline: `Filled${at}: ${n != null ? `${n} combination${n === 1 ? "" : "s"}` : "the order"} ${verb}. Closed at the broker.`,
+        detail: `Nothing is left working on it${tail}.` };
+    }
     const what = n != null ? `${n} combination${n === 1 ? " is" : "s are"} yours` : "the order is yours";
     return { kind: "filled", filled: true, working: false, startsExitPlan: true, status, fillPrice,
       headline: `Filled${at}: ${what}. Position opened.`,
@@ -476,21 +560,24 @@ export function orderOutcome(order) {
   if (PARTIAL.includes(status)) {
     const rest = want != null && got != null ? Math.max(0, want - got) : null;
     return { kind: "partial", filled: false, working: true, startsExitPlan: false, status, fillPrice,
-      headline: `Partly filled${at}: ${got != null ? got : "some"} of ${want != null ? want : "the"} combinations are yours.`,
+      headline: `Partly filled${at}: ${got != null ? got : "some"} of ${want != null ? want : "the"} combinations ` +
+        `${closing ? verb : "are yours"}.`,
       detail: `${rest != null ? `The other ${rest} ${rest === 1 ? "is" : "are"} still working ` : "The rest is still working "}` +
-        `${orderWaitingPhrase(o)}. The exit plan applies to what has filled; the rest is not a position yet${tail}.` };
+        `${orderWaitingPhrase(o)}. ${closing ? "What has filled is closed; the rest is still open"
+          : "The exit plan applies to what has filled; the rest is not a position yet"}${tail}.` };
   }
   if (DEAD.includes(status)) {
     const why = o.reject_reason || o.rejected_reason || null;
     return { kind: "dead", filled: false, working: false, startsExitPlan: false, status, fillPrice,
-      headline: `Alpaca took the order and then ${status === "rejected" ? "rejected" : status.replace(/_/g, " ")} it: nothing was bought.`,
+      headline: `Alpaca took the order and then ${status === "rejected" ? "rejected" : status.replace(/_/g, " ")} it: nothing was ${verb}.`,
       detail: `${why ? `Alpaca's reason: ${why}. ` : ""}Nothing is open and nothing is working${tail}.` };
   }
   return { kind: "working", filled: false, working: true, startsExitPlan: false, status, fillPrice,
-    headline: `The order is working, not filled${want != null ? ` — 0 of ${want} combination${want === 1 ? "" : "s"} bought` : ""}.`,
+    headline: `The order is working, not filled${want != null ? ` — 0 of ${want} combination${want === 1 ? "" : "s"} ${verb}` : ""}.`,
     detail: `Alpaca has it (status "${status}") and it is waiting ${orderWaitingPhrase(o)}. ` +
       `An order sent outside market hours waits for the next session, and a limit at the middle of a wide market ` +
-      `can wait all day. Nothing has been bought yet, so the exit plan has not started${tail}.` };
+      `can wait all day. Nothing has been ${verb} yet, so ${closing ? "the position is still open"
+        : "the exit plan has not started"}${tail}.` };
 }
 
 /* ------------------------------------------------------------------
