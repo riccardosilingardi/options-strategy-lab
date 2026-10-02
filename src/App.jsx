@@ -61,9 +61,10 @@ import { nextRef, refCounter, appendTimeline, stampTimeline, orderStatusRecheck,
   storedLimitOf,
   positionStage, positionStageNote, bookPositions, holdingShape, dropImportedTwins, recordFillPrice, countsAsRuleClose, closeKindWords, riskOkOf, riskOkWords, wouldHaveDone, isBrokerHolding, upgradeHolding,
   isTestRecord, testRecordNote, scoredJournal, journalPnl, NOT_A_FILL,
-  journalEntry, searchJournal, CLOSE_REASON_MIN, refNumber } from "./journal.js";
+  journalEntry, searchJournal, CLOSE_REASON_MIN, refNumber, journeyLevel } from "./journal.js";
 import { FIRST_STEP, stepCarry, candidateOf, candidateKey, legsLine, toggleCompare, inCompare, MAX_COMPARE, savedFromCandidate, candidateFromSaved, savedAge } from "./path.js";
 import { PositionCard, PositionDetails } from "./positionCard.jsx";
+import { navOf, createNavHistory } from "./nav.js";
 import { exitProgress, entryVsNow, displayName, fileState, pnlShareOfRisk, pnlShareText, holdsStructure } from "./positionView.js";
 import { StepNav, StepForward, EvidenceBar, EvidenceOverlay, DeskSheet, CompareTray, CandidateActions, Fold, DeskCountLine } from "./steps.jsx";
 
@@ -1389,15 +1390,15 @@ function BuildWarnings({ summary, count, forceOpen = false, children }) {
   if (!count) return null;
   return (
     <div style={{ marginTop: 10, padding: "9px 11px", background: `${T.amber}0d`, border: `1px solid ${T.amber}66`, borderRadius: 8 }}>
-      <button onClick={() => setOpen((o) => !o)} disabled={forceOpen}
-        style={{ display: "flex", gap: 8, alignItems: "baseline", width: "100%", textAlign: "left",
+      <button onClick={() => setOpen((o) => !o)} disabled={forceOpen} aria-expanded={shown}
+        style={{ display: "flex", gap: 8, alignItems: "center", width: "100%", textAlign: "left", minHeight: 44,
           background: "transparent", border: "none", padding: 0, cursor: forceOpen ? "default" : "pointer" }}>
-        <span style={{ ...mono, fontSize: 10, fontWeight: 800, color: T.amber, letterSpacing: 0.4 }}>
+        <span style={{ ...mono, fontSize: 12, fontWeight: 800, color: T.amber, letterSpacing: 0.4 }}>
           ⚠ {count} WARNING{count === 1 ? "" : "S"}
         </span>
         <span style={{ fontSize: 12.5, color: T.body, lineHeight: 1.5 }}>{summary}</span>
         {!forceOpen && (
-          <span style={{ ...mono, fontSize: 10.5, color: T.blue, marginLeft: "auto", whiteSpace: "nowrap" }}>
+          <span style={{ ...mono, fontSize: 12, color: T.blue, marginLeft: "auto", whiteSpace: "nowrap" }}>
             {shown ? "hide ▲" : "read them ▼"}
           </span>
         )}
@@ -3481,11 +3482,9 @@ export default function OptionsStrategyLab() {
     const parts = [disciplina, coerenza, pazienza].filter((x) => x != null);
     const score = parts.length ? Math.round(parts.reduce((a, b) => a + b, 0) / parts.length * 100) : null;
     const opened = closed + opened0.length;
-    let level = 1, next = "Open your first paper trade";
-    if (opened >= 1) { level = 2; next = `Open ${Math.max(0, 3 - opened)} more to reach level 3`; }
-    if (opened >= 3) { level = 3; next = `Close ${Math.max(0, 5 - ruled)} trades by the rules to reach level 4`; }
-    if (ruled >= 5 && (disciplina ?? 0) >= 0.6) { level = 4; next = "Reach 10 closed trades with 80% discipline for level 5"; }
-    if (closed >= 10 && (disciplina ?? 0) >= 0.8) { level = 5; next = "You have the full set of habits. Ask the copilot whether you are ready for real money."; }
+    // THE LEVEL AND ITS "NEXT" ARE ONE FUNCTION (journal.js `journeyLevel`), and its "next" never asks the owner to
+    // open a trade (PR #44, TASK 6): "nothing today is a feature" and a nudge to open one say opposite things.
+    const { level, next } = journeyLevel({ opened, closed, ruled, disciplina });
     return { level, next, score, disciplina, coerenza, pazienza, closed, opened, ruled };
   }, [store.journal, store.positions, store.settings.capital]);
 
@@ -3772,6 +3771,44 @@ export default function OptionsStrategyLab() {
     });
     return () => cancelAnimationFrame(id);
   }, [step, findShown]);
+  /* ---- BACK WORKS (PR #44, TASK 3) ----
+     The app is one page whose screens are state, so the History API is made out of that state (src/nav.js): moving to
+     a different screen pushes an entry, popstate restores the one it hands back, and closing a sheet from its own
+     button steps back instead of leaving a screen behind. Home is the first entry and is never intercepted. After
+     each move, focus goes to the new view's heading (WCAG 2.4.3). */
+  const navNow = navOf({ view, tab, step, showSettings, ev, whyTk, detailsId, deskSheet });
+  const navNowRef = useRef(navNow); navNowRef.current = navNow;
+  const buildOriginRef = useRef(null); buildOriginRef.current = buildOrigin;
+  const navHist = useRef(null);
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.history) return undefined;
+    navHist.current = createNavHistory({
+      history: window.history,
+      addPopListener: (fn) => { window.addEventListener("popstate", fn); return () => window.removeEventListener("popstate", fn); },
+      get: () => navNowRef.current,
+      apply: (n) => {
+        const o = buildOriginRef.current;
+        // Back from a trade that came from a card lands on that card, the way the "Back to the list" link does.
+        if (n.tab === "build" && n.step === "find" && navNowRef.current.step === "build" && o && o.kind === "card") scrollToCard.current = o.key;
+        else if (typeof window.scrollTo === "function") window.scrollTo({ top: 0 });
+        setView(n.view); setTab(n.tab); setStep(n.step); setShowSettings(n.settings);
+        setEv(n.ev); setWhyTk(n.whyTk); setDetailsId(n.detailsId); setDeskSheet(n.sheet);
+      },
+    });
+    return () => { if (navHist.current) navHist.current.stop(); };
+  }, []); // eslint-disable-line
+  const navKey = JSON.stringify(navNow);
+  const navFirst = useRef(true);
+  useEffect(() => { if (navHist.current) navHist.current.sync(); }, [navKey]);
+  useEffect(() => {
+    if (navFirst.current) { navFirst.current = false; return undefined; }
+    if (typeof document === "undefined") return undefined;
+    const id = requestAnimationFrame(() => {
+      const el = document.querySelector('[role="dialog"] [data-view-heading]') || document.querySelector("[data-view-heading]");
+      if (el && typeof el.focus === "function") el.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [navKey]);
   const flaggedHidden = find.flagged ? 0 : findGen.items.filter((x) => (!find.market || x.tk === find.market) && x.flags.length).length;
   /* THE LIQUIDITY FLOOR'S OWN PANEL is about ONE board — its threshold and its
      peers — so it reads the market in focus: the filter, or the top card's. */
@@ -4353,9 +4390,9 @@ export default function OptionsStrategyLab() {
              one-market filter; Compare (max 3) stays. */}
         {tab === "build" && !showSettings && step === "find" && (
           <div style={{ marginTop: 12 }}>
-            <div style={{ ...sansUI, fontSize: 19, fontWeight: 800, color: T.ink, marginTop: 4 }}>
+            <h2 data-view-heading tabIndex={-1} style={{ ...sansUI, fontSize: 19, fontWeight: 800, color: T.ink, margin: "4px 0 0", outline: "none" }}>
               Step 1 — find a trade
-            </div>
+            </h2>
 
             <RequestControls style={{ marginTop: 10 }}
               request={request} onChange={(patch) => setWant((w) => ({ ...w, ...patch }))}
@@ -4653,7 +4690,7 @@ export default function OptionsStrategyLab() {
                         <div style={{ fontSize: 12.5, color: T.body, marginTop: 5, lineHeight: 1.5 }}>{clash.detail}.</div>
                         <div style={{ display: "grid", gap: 4, marginTop: 8 }}>
                           {clash.opposing.map((o) => (
-                            <div key={o.key} style={{ ...mono, fontSize: 10.5, color: T.mut }}>
+                            <div key={o.key} style={{ ...mono, fontSize: 12, color: T.mut }}>
                               <span style={{ color: T.red, fontWeight: 700 }}>✗ {o.label}</span> ({o.strength}/100) — {o.why}
                             </div>
                           ))}
@@ -4665,7 +4702,7 @@ export default function OptionsStrategyLab() {
                           rows={3}
                           style={{ ...mono, width: "100%", boxSizing: "border-box", marginTop: 9, background: T.bg, color: T.ink, border: `1px solid ${reasonOk ? T.green : T.amber}`, borderRadius: 6, padding: "8px 9px", fontSize: 12, resize: "vertical" }}
                         />
-                        <div style={{ ...mono, fontSize: 10, color: reasonOk ? T.green : T.dim, marginTop: 4 }}>
+                        <div style={{ ...mono, fontSize: 12, color: reasonOk ? T.green : T.dim, marginTop: 4 }}>
                           {reasonOk
                             ? "✓ Reason recorded: it will be saved with the position and shown again when you close it."
                             : `${Math.max(0, REASON_MIN - against.reason.trim().length)} more characters. Nothing here stops you taking this trade — you are only asked to write down why.`}
@@ -4690,7 +4727,7 @@ export default function OptionsStrategyLab() {
                   button — never behind a tap. A second copy here is gone (PR #40). */}
               {room.known && room.band === "tight" && (
                 <div style={{ marginTop: 12, padding: "9px 11px", background: `${T.amber}0f`, border: `1px solid ${T.amber}66`, borderRadius: 7 }}>
-                  <div style={{ ...mono, fontSize: 9.5, color: T.amber, fontWeight: 800, letterSpacing: 0.4 }}>
+                  <div style={{ ...mono, fontSize: 12, color: T.amber, fontWeight: 800, letterSpacing: 0.4 }}>
                     {room.room} DAYS OF ROOM · THE APP AIMS FOR {room.target}
                   </div>
                   <Fold label="why" tone={T.amber} style={{ marginTop: 5 }} summary="A written reason unlocks it.">
@@ -4705,7 +4742,7 @@ export default function OptionsStrategyLab() {
                     rows={2}
                     style={{ ...mono, width: "100%", boxSizing: "border-box", marginTop: 9, background: T.bg, color: T.ink, border: `1px solid ${entryOverrideOk(roomReason) ? T.green : T.amber}`, borderRadius: 6, padding: "8px 9px", fontSize: 12, resize: "vertical" }}
                   />
-                  <div style={{ ...mono, fontSize: 10, color: entryOverrideOk(roomReason) ? T.green : T.dim, marginTop: 4, lineHeight: 1.5 }}>
+                  <div style={{ ...mono, fontSize: 12, color: entryOverrideOk(roomReason) ? T.green : T.dim, marginTop: 4, lineHeight: 1.5 }}>
                     {entryOverrideOk(roomReason)
                       ? "✓ Reason recorded. The trade is unlocked and the warning stays — an override is not a dismissal."
                       : `${Math.max(0, RULES.minOverrideReasonChars - roomReason.trim().length)} more characters and this unlocks. Until then the risk gate holds it, and it says so below.`}
@@ -4728,7 +4765,7 @@ export default function OptionsStrategyLab() {
 
               {/* THE STRIKES FOLLOW THE BOARD, AND IT SAYS WHEN THEY MOVED. */}
               {snapNote && (
-                <div style={{ ...mono, fontSize: 10.5, color: T.blue, marginTop: 10, lineHeight: 1.6, padding: "8px 10px", background: `${T.blue}0d`, border: `1px solid ${T.blue}55`, borderRadius: 6 }}>
+                <div style={{ ...mono, fontSize: 12, color: T.blue, marginTop: 10, lineHeight: 1.6, padding: "8px 10px", background: `${T.blue}0d`, border: `1px solid ${T.blue}55`, borderRadius: 6 }}>
                   {snapNote}
                 </div>
               )}
@@ -4785,7 +4822,7 @@ export default function OptionsStrategyLab() {
               {optRef && optRef.card && optRef.name === stratName && optRef.expKey === expKey && (() => {
                 const r = reconcileFigures(optRef.card, figureSet(AE, chance ? chance.pop : null));
                 return r ? (
-                  <div style={{ ...mono, fontSize: 10, color: r.same ? T.green : T.amber, marginTop: 10, lineHeight: 1.6 }}>{r.line}</div>
+                  <div style={{ ...mono, fontSize: 12, color: r.same ? T.green : T.amber, marginTop: 10, lineHeight: 1.6 }}>{r.line}</div>
                 ) : null;
               })()}
           </>);
@@ -4819,7 +4856,7 @@ export default function OptionsStrategyLab() {
                     <div style={{ ...sansUI, fontSize: 15, fontWeight: 700, color: T.ink }}>
                       {ticker} · {stratName}
                     </div>
-                    <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 2 }}>{legsLine(legs)} · per contract</div>
+                    <div style={{ ...mono, fontSize: 12, color: T.mut, marginTop: 2 }}>{legsLine(legs)} · per contract</div>
                     {/* STOP SIGNS, ABOVE THE NUMBERS (PR #40, TASK 2). The gate's
                         warnings print here once, as labels; their sentences are
                         behind this one "why". */}
@@ -4829,10 +4866,10 @@ export default function OptionsStrategyLab() {
                           narrative: fused[ticker]?.narrative || null,
                           pointer: conflictSummaryLine(clash, fused[ticker] || null),
                         }).map((w) => (
-                          <div key={w.code} style={{ ...mono, fontSize: 10.5, color: T.amber, lineHeight: 1.6, marginTop: 4 }}>⚠ {w.message}</div>
+                          <div key={w.code} style={{ ...mono, fontSize: 12, color: T.amber, lineHeight: 1.6, marginTop: 4 }}>⚠ {w.message}</div>
                         ))}
-                        {monoNote && <div style={{ ...mono, fontSize: 10.5, color: T.red, lineHeight: 1.6, marginTop: 4 }}>{monoNote}</div>}
-                        {book.missing.length > 0 && <div style={{ ...mono, fontSize: 10.5, color: T.red, lineHeight: 1.6, marginTop: 4 }}>{unquotedLegNote(book.missing.length)}</div>}
+                        {monoNote && <div style={{ ...mono, fontSize: 12, color: T.red, lineHeight: 1.6, marginTop: 4 }}>{monoNote}</div>}
+                        {book.missing.length > 0 && <div style={{ ...mono, fontSize: 12, color: T.red, lineHeight: 1.6, marginTop: 4 }}>{unquotedLegNote(book.missing.length)}</div>}
                       </Fold>
                     </StopSigns>
                     <div style={{ display: "flex", gap: 12, marginTop: 10, flexWrap: "wrap" }}>
@@ -4843,7 +4880,7 @@ export default function OptionsStrategyLab() {
                         ["BREAK-EVEN", AE.breakevens.map((b) => b.toFixed(2)).join(" · ") || "—", T.blue],
                       ].map(([k, v, col]) => (
                         <div key={k} style={{ minWidth: 68 }}>
-                          <div style={{ ...mono, fontSize: 9, letterSpacing: "0.08em", color: T.dim }}>{k}</div>
+                          <div style={{ ...mono, fontSize: 12, letterSpacing: "0.08em", color: T.dim }}>{k}</div>
                           <div style={{ ...mono, fontSize: 15, fontWeight: 800, color: col }}>{v}</div>
                         </div>
                       ))}
@@ -4860,7 +4897,7 @@ export default function OptionsStrategyLab() {
                           <div style={{ display: "flex", gap: 14, marginTop: 8, flexWrap: "wrap" }}>
                             {[["BID", cc.bid], ["MID", cc.mid], ["ASK", cc.ask], ["SUGGESTED", cc.fill]].map(([k, v]) => (
                               <div key={k}>
-                                <div style={{ ...mono, fontSize: 9, color: T.dim }}>{k}</div>
+                                <div style={{ ...mono, fontSize: 12, color: T.dim }}>{k}</div>
                                 <div style={{ ...mono, fontSize: 13, fontWeight: 700, color: T.ink }}>{fmt$(Math.abs(v) * 100)}</div>
                               </div>
                             ))}
@@ -4873,7 +4910,7 @@ export default function OptionsStrategyLab() {
                             <div style={{ display: "flex", gap: 14, marginTop: 10, flexWrap: "wrap" }}>
                               {RR_POINTS.map((k) => (
                                 <div key={k}>
-                                  <div style={{ ...mono, fontSize: 9, color: T.dim }}>
+                                  <div style={{ ...mono, fontSize: 12, color: T.dim }}>
                                     {k === "fill" ? "R/R SUGGESTED" : `R/R AT THE ${k.toUpperCase()}`}
                                   </div>
                                   <div style={{ ...mono, fontSize: 13, fontWeight: 700, color: T.amber }}>
@@ -4884,7 +4921,7 @@ export default function OptionsStrategyLab() {
                             </div>
                           )}
                           {/* WHY A NEW POSITION STARTS NEGATIVE. */}
-                          <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 10, lineHeight: 1.6 }}>
+                          <div style={{ ...mono, fontSize: 12, color: T.mut, marginTop: 10, lineHeight: 1.6 }}>
                             {openingMarkNote(cc)}
                           </div>
                         </>
@@ -5262,6 +5299,7 @@ export default function OptionsStrategyLab() {
         {/* ============ PAPER + INTEGRAZIONI ============ */}
         {tab === "positions" && !showSettings && (
           <div style={{ marginTop: 12 }}>
+            <h2 data-view-heading tabIndex={-1} style={{ ...sansUI, fontSize: 18, fontWeight: 800, color: T.ink, margin: "0 0 8px", outline: "none" }}>Positions</h2>
             {/* WORKING ORDERS, FIRST ON THE SCREEN, BECAUSE THEY ARE NOT
                 POSITIONS YET. An order that never fills used to be visible
                 only on the full desk, so the one order this app has ever sent
@@ -5537,6 +5575,7 @@ export default function OptionsStrategyLab() {
         {/* ============ SETTINGS ============ */}
         {showSettings && (
           <div style={{ marginTop: 12, maxWidth: 620 }}>
+            <h2 data-view-heading tabIndex={-1} style={{ ...sansUI, fontSize: 18, fontWeight: 800, color: T.ink, margin: "0 0 8px", outline: "none" }}>Settings</h2>
             <Card>
               <Lbl>APPEARANCE</Lbl>
               <div style={{ fontSize: 13, color: T.mut, marginTop: 8, lineHeight: 1.5 }}>
@@ -5702,6 +5741,7 @@ export default function OptionsStrategyLab() {
         {/* ============ WATCHING ============ */}
         {tab === "watching" && !showSettings && (
           <div>
+            <h2 data-view-heading tabIndex={-1} style={{ ...sansUI, fontSize: 18, fontWeight: 800, color: T.ink, margin: "0 0 8px", outline: "none" }}>Watching</h2>
             <Panel style={{ marginTop: 10 }}>
               <Lbl>WATCHING ({watchRows.length}) · TRADES YOU DID NOT TAKE</Lbl>
               <div style={{ ...sansUI, fontSize: 13, color: T.body, lineHeight: 1.55, marginTop: 8 }}>
@@ -5810,6 +5850,7 @@ export default function OptionsStrategyLab() {
 
         {tab === "journal" && !showSettings && (
           <div style={{ marginTop: 12 }}>
+            <h2 data-view-heading tabIndex={-1} style={{ ...sansUI, fontSize: 18, fontWeight: 800, color: T.ink, margin: "0 0 8px", outline: "none" }}>Journal</h2>
             <Panel>
               <Lbl>THE RECORD · {(store.journal || []).length} CLOSED · {ownedPositions.length} OPEN</Lbl>
               <div style={{ display: "flex", gap: 18, marginTop: 10, flexWrap: "wrap" }}>
@@ -5819,7 +5860,7 @@ export default function OptionsStrategyLab() {
                 <Stat k="INSIDE THE LIMIT" v={journey.coerenza == null ? "—" : pctText(journey.coerenza)} c={T.blue} />
               </div>
               <div style={{ fontSize: 13, color: T.mut, marginTop: 10, lineHeight: 1.5 }}>
-                Next: {journey.next}. Discipline is the share of trades you closed because a rule said so rather than
+                Next: {journey.next} Discipline is the share of trades you closed because a rule said so rather than
                 because you felt like it — it is the only number here that predicts the others.
               </div>
             </Panel>
@@ -5967,26 +6008,31 @@ export default function OptionsStrategyLab() {
                 app is used. ROADMAP P5 is what reads it back. It is local: it
                 is calibration data about this user's markets, not a position. */}
             <Panel style={{ marginTop: 12 }}>
-              <Lbl>THE {RULES.minEntryDTE}-DAY ENTRY FLOOR · {(store.expiryLog || []).length} BOARD{(store.expiryLog || []).length === 1 ? "" : "S"} PASSED OVER</Lbl>
-              <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 6, lineHeight: 1.6 }}>
-                {passedOverSummary(store.expiryLog || [])}
-              </div>
-              {(store.expiryLog || []).length > 0 && (
-                <div style={{ display: "grid", gap: 5, marginTop: 9 }}>
-                  {(store.expiryLog || []).map((r, i) => (
-                    <div key={r.t + "-" + i} style={{ ...mono, fontSize: 10.5, color: T.body, lineHeight: 1.6, padding: "6px 9px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 6 }}>
-                      <span style={{ color: T.amber, fontWeight: 700 }}>{r.ticker}</span>
-                      {" "}built on {r.chosen.key} ({r.chosen.dte}d, {r.chosen.clears ?? "?"} of {r.chosen.near ?? "?"} clear)
-                      {" "}· passed over {r.passedOver.key} ({r.passedOver.dte}d, {r.passedOver.clears ?? "?"} of {r.passedOver.near ?? "?"} clear
-                      {r.busierFactor != null ? `, ${r.busierFactor.toFixed(1)}× busier` : ""})
-                      {" "}· <span style={{ color: r.offerable ? T.green : T.red }}>
-                        {r.offerable ? "could be taken with a written reason" : `at or inside the ${RULES.exitDTE}-day exit — not offerable`}
-                      </span>
-                      <span style={{ color: T.dim }}> · {ago(r.t)}</span>
-                    </div>
-                  ))}
+              {/* ONE FOLD, ONE LINE (PR #44, TASK 6). It is a record, not an error: the list is behind the fold, and
+                  "not offerable" is printed in a neutral tone — it is what the floor did, not something that went
+                  wrong. */}
+              <Fold label="log" tone={T.mut}
+                summary={`The ${RULES.minEntryDTE}-day entry floor passed over ${(store.expiryLog || []).length} board${(store.expiryLog || []).length === 1 ? "" : "s"}.`}>
+                <div style={{ ...mono, fontSize: 12, color: T.mut, marginTop: 6, lineHeight: 1.6 }}>
+                  {passedOverSummary(store.expiryLog || [])}
                 </div>
-              )}
+                {(store.expiryLog || []).length > 0 && (
+                  <div style={{ display: "grid", gap: 5, marginTop: 9 }}>
+                    {(store.expiryLog || []).map((r, i) => (
+                      <div key={r.t + "-" + i} style={{ ...mono, fontSize: 12, color: T.body, lineHeight: 1.6, padding: "6px 9px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 6 }}>
+                        <span style={{ color: T.amber, fontWeight: 700 }}>{r.ticker}</span>
+                        {" "}built on {r.chosen.key} ({r.chosen.dte}d, {r.chosen.clears ?? "?"} of {r.chosen.near ?? "?"} clear)
+                        {" "}· passed over {r.passedOver.key} ({r.passedOver.dte}d, {r.passedOver.clears ?? "?"} of {r.passedOver.near ?? "?"} clear
+                        {r.busierFactor != null ? `, ${r.busierFactor.toFixed(1)}× busier` : ""})
+                        {" "}· <span style={{ color: T.mut }}>
+                          {r.offerable ? "could be taken with a written reason" : `at or inside the ${RULES.exitDTE}-day exit — not offerable`}
+                        </span>
+                        <span style={{ color: T.dim }}> · {ago(r.t)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Fold>
             </Panel>
 
             {(store.copilotLog || []).length > 0 && (

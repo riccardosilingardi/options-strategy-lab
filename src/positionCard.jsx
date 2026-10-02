@@ -154,8 +154,7 @@ export function PositionDetails({
 }) {
   const bands = payoffBands({ legs: p.legs, entryNet: p.entryNet, spot: spotNow ?? p.entrySpot });
   return (
-    <EvidenceOverlay eyebrow="POSITION" title={`${p.ref ? `${p.ref} · ` : ""}${p.ticker} · ${title}`} onClose={onClose}>
-      <h2 data-view-heading tabIndex={-1} style={{ ...sans, fontSize: 16, fontWeight: 700, color: T.ink, margin: "0 0 6px", outline: "none" }}>Details</h2>
+    <EvidenceOverlay eyebrow="DETAILS" title={`${p.ref ? `${p.ref} · ` : ""}${p.ticker} · ${title}`} onClose={onClose}>
       {stageNote && <div style={{ ...sans, fontSize: 13, color: T.amber, lineHeight: 1.5, marginBottom: 8 }}>⚠ {stageNote}</div>}
       <Row k="LEGS">{legsText}</Row>
       <Row k="EXPIRES">{expiresText}</Row>

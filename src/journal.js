@@ -255,6 +255,29 @@ export function closeReason({ rule = null, ruleText = "", written = "" } = {}) {
   return { ok: true, kind: "manual", rule: null, text, written: text, need: 0, message: null };
 }
 
+/* ------------------------------------------------------------------
+   THE JOURNEY'S LEVEL, AND WHAT IT SAYS IS NEXT (PR #44, TASK 6)
+
+   "Next: Open 1 more to reach level 3" sat on the Journal beside the product's own sentence that "nothing today is a
+   feature". A level that rewards opening trades, and a line that asks for one, contradict the rule the app exists to
+   teach. The levels are unchanged; what "next" says is not: it mentions closing by the rules and writing reasons, and
+   it never asks for a trade to be opened. `journeyLevel()` is the one home, so a test can hold that for every level.
+------------------------------------------------------------------ */
+export function journeyLevel({ opened = 0, closed = 0, ruled = 0, disciplina = null } = {}) {
+  let level = 1;
+  let next = "Nothing is asked of you today. When a trade of yours ends, close it by its rule and write why.";
+  if (opened >= 1) { level = 2; next = "Close each trade by its rule, and write why when you choose to close it yourself."; }
+  if (opened >= 3) {
+    const need = Math.max(0, 5 - ruled);
+    level = 3;
+    next = need > 0 ? `Close ${need} more trade${need === 1 ? "" : "s"} by the rules to reach level 4.`
+      : "Keep closing by the rules until 60% of your closes are rule closes, for level 4.";
+  }
+  if (ruled >= 5 && (disciplina ?? 0) >= 0.6) { level = 4; next = "Reach 10 closed trades with 80% discipline for level 5."; }
+  if (closed >= 10 && (disciplina ?? 0) >= 0.8) { level = 5; next = "You have the full set of habits. Ask the copilot whether you are ready for real money."; }
+  return { level, next };
+}
+
 /** What the filing dialog says over a record Alpaca does not hold. One home, beside `closeDecision()`. */
 export const notHeldCloseWords = (notHeld = []) =>
   `Alpaca does not hold ${notHeld.length === 1 ? "this leg" : "these legs"} (${notHeld.join(", ")}), so no rule ended this ` +

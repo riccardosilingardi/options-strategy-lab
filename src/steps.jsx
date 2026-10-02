@@ -164,7 +164,7 @@ export function EvidenceOverlay({ title, sub, onClose, children, eyebrow = "EVID
               labelling the order ticket "EVIDENCE" would name the wrong thing
               on the one screen where the word has to be exact. */}
           <div style={{ ...mono, fontSize: 10, letterSpacing: "0.15em", color: T.amber }}>{eyebrow}</div>
-          <div style={{ ...sans, fontSize: 16, fontWeight: 700, color: T.ink, overflow: "hidden", textOverflow: "ellipsis" }}>{title}</div>
+          <h2 data-view-heading tabIndex={-1} style={{ ...sans, fontSize: 16, fontWeight: 700, color: T.ink, overflow: "hidden", textOverflow: "ellipsis", margin: 0, outline: "none" }}>{title}</h2>
           {sub && <div style={{ ...mono, fontSize: 10.5, color: T.dim }}>{sub}</div>}
         </div>
         <button onClick={onClose}
