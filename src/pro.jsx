@@ -8,7 +8,7 @@ import { RULES, ruleBadge, takeProfitLabel, takeProfitTarget, scaleOutLabel, sto
   legBook, sizeSkippedNote, onTick, netFromLegs, limitCeilingNote, rewardRisk,
   contractListing, unlistedContractNote, unquotedLegNote, unquotedLegPointer, marketOrderNote,
   taCopilotPrompt, TA_QUESTIONS, TA_DISCLAIMER,
-  ivProvenance, sameCloseNote, copilotOverreach, copilotOverreachNote } from "./rules.js";
+  ivProvenance, onCardLine, noRecordNote, copilotOverreach, copilotOverreachNote } from "./rules.js";
 import { contractsOf, positionSize, bookPositions, positionStage, autopilotHorizonNote, autopilotVolNote, positionForHolding, journalPnlTotal, scoredJournal } from "./journal.js";
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, LineStyle } from "lightweight-charts";
 // The fold lives in steps.jsx — chrome with no trade in it, and the one file
@@ -20,7 +20,7 @@ import { Fold } from "./steps.jsx";
 import { indicatorSet, takeaway, taContext, LABELS, MEASURES, RSI_HIGH, RSI_LOW } from "./indicators.js";
 import { erf, netBS } from "./engine.js";
 import { ARROW, REGIONS, regionSignals, tagImpacts, taRead } from "./signals.js";
-import { useNarrow, BandThumbnail, payoffBands, bandTakeaway } from "./visuals.jsx";
+import { useNarrow, BandThumbnail, payoffBands, bandTakeaway, pnl$ } from "./visuals.jsx";
 import { DEMO, DEMO_TOOLTIP } from "./demo.js";
 import { reduceRatios, orderQty, mlegLimitPrice, limitWords, orderLimitWords, limitKind, signedLimitFor, orderBody, orderPreviewLines, orderOutcome, alpacaErrorText, cancelOutcome, cancelWaiting } from "./order.js";
 import { hasOpenInterest, sourceNote, openInterestNote, fetchChain } from "./chain.js";
@@ -44,9 +44,9 @@ const fmt$ = (x) => {
 const dollarsOrNull = (x) => (Number.isFinite(x) ? +Number(x).toFixed(0) : null);
 // Same contract as the Btn in App.jsx (the two copies are the design-system sweep's first job, ROADMAP):
 // 44px tall whatever the size, `small` only narrows padding and font, ghost border at full colour.
-const Btn = ({ children, onClick, color = T.amber, ghost, disabled, small, title, ...rest }) => (
+export const Btn = ({ children, onClick, color = T.amber, ghost, disabled, small, title, style, ...rest }) => (
   <button onClick={onClick} disabled={disabled} title={title} {...rest}
-    style={{ ...mono, fontSize: small ? 12 : 13, padding: small ? "6px 12px" : "8px 14px", minHeight: 44, borderRadius: 6, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.5 : 1, background: ghost ? "transparent" : color, color: ghost ? color : T.onAccent, border: ghost ? `1px solid ${color}` : "none", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6 }}>{children}</button>
+    style={{ ...mono, fontSize: small ? 12 : 13, padding: small ? "6px 12px" : "8px 14px", minHeight: 44, borderRadius: 6, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.5 : 1, background: ghost ? "transparent" : color, color: ghost ? color : T.onAccent, border: ghost ? `1px solid ${color}` : "none", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, ...style }}>{children}</button>
 );
 const Panel = ({ children, style }) => <div style={{ background: T.panel, border: `1px solid ${T.line}`, borderRadius: 8, padding: 14, ...style }}>{children}</div>;
 const Lbl = ({ children }) => <div style={{ ...mono, fontSize: 10, letterSpacing: "0.15em", color: T.amber }}>{children}</div>;
@@ -996,7 +996,10 @@ export function AlpacaDesk({ creds, setMsg, gate, positions = [] }) {
                     <div key={x.symbol} style={{ ...mono, fontSize: 10, color: T.dim }}>{+x.qty > 0 ? "+" : ""}{x.qty} {x.symbol.slice(-9)} · avg ${(+x.avg_entry_price).toFixed(2)} → ${(+x.current_price).toFixed(2)}</div>
                   ))}
                 </div>
-                <Stat k="PROFIT NOW" v={fmt$(g.pl)} c={g.pl >= 0 ? T.green : T.red} />
+                {/* The profit of a holding with a record is on its Positions card; the line below says so. */}
+                {!positionForHolding(positions, { ticker: g.ticker, expKey: g.expKey }) && (
+                  <Stat k="PROFIT NOW" v={fmt$(g.pl)} c={g.pl >= 0 ? T.green : T.red} />
+                )}
                 {/* >>> ONE CLOSE CONTROL PER POSITION (P9, TASK 2). <<< Two
                     buttons on two screens for one act, and only the Positions
                     card's asks WHY and files the answer. Where this panel is
@@ -1021,10 +1024,14 @@ export function AlpacaDesk({ creds, setMsg, gate, positions = [] }) {
               {(() => {
                 const rec = positionForHolding(positions, { ticker: g.ticker, expKey: g.expKey });
                 return rec ? (
-                  <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 5, lineHeight: 1.55 }}>
-                    {sameCloseNote(rec.ref)}
+                  <div style={{ ...mono, fontSize: 12, color: T.green, marginTop: 5, lineHeight: 1.55 }}>
+                    {onCardLine(rec.ref, pnl$(g.pl))}
                   </div>
-                ) : null;
+                ) : (
+                  <div style={{ ...mono, fontSize: 12, color: T.dim, marginTop: 5, lineHeight: 1.55 }}>
+                    {noRecordNote()}
+                  </div>
+                );
               })()}
             </div>
           ));

@@ -1356,7 +1356,7 @@ test("PR #42 — THE IMPORTED TWIN GOES; THE APP'S OWN RECORD STAYS, with its re
 ================================================================ */
 const J1_SENT = { ...GDX_J1, alpacaLimit: 5, alpacaLimitSigned: true, alpacaOrderType: "limit",
   alpacaTif: "day", timeline: [{ t: 1, n: 1, type: "sent", text: "SENT" }, { t: 1, n: 2, type: "open", text: "o" }] };
-// What the Positions card passes to `fillVsLimit()` (App.jsx), in one place.
+// What the Details sheet passes to `fillVsLimit()` (App.jsx), in one place.
 const cardSentence = (p) => fillVsLimit({ limit: p.alpacaLimit, fill: recordFillPrice(p),
   contracts: positionSize(p).contracts, limitSigned: p.alpacaLimitSigned === true }).sentence;
 
@@ -1393,7 +1393,7 @@ test("J-0001 SHAPE — AN ORDER FILLED AT SEND IS COMPARED WITH THE BROKER'S FIL
   // From now on a fill at send is stored with the order (App.jsx commitPosition).
   assert.match(readFileSync("src/App.jsx", "utf8"),
     /alpacaFillPrice: outcome && outcome\.filled \? outcome\.fillPrice \?\? null : null,/);
-  assert.match(readFileSync("src/App.jsx", "utf8"), /fillVsLimit\(\{ limit: p\.alpacaLimit, fill: recordFillPrice\(p\),/);
+  assert.match(readFileSync("src/App.jsx", "utf8"), /fillVsLimit\(\{ limit: dp\.alpacaLimit, fill: recordFillPrice\(dp\),/);
 });
 
 test("J-0001 — AN IMPORTED RECORD STILL READS ITS OWN ENTRY AS THE BROKER'S; an app record never does", () => {

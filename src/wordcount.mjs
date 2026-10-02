@@ -43,7 +43,10 @@ import * as O from "./order.js";
 import * as P from "./path.js";
 import * as S from "./signals.js";
 
-export const SCREEN_IDS = ["find", "build"];
+// "positions" is the Positions place (PR #44, TASK 1): it is a TAB, not a step of the path, so its block is found by
+// `tab === "positions"`. It is measured by the same counter as the two steps, from the same source.
+export const SCREEN_IDS = ["find", "build", "positions"];
+const GUARD = { positions: 'tab === "positions"' };
 
 /* ---- the fixture every generator is scored on ----------------------------
    One board, one setting, one market. The numbers do not matter; the LENGTH
@@ -111,13 +114,15 @@ export const COPY = {
   horizonFloorNote: () => (R.horizonFloorNote ? R.horizonFloorNote() : ""),
   remainingEdgeNote: () => (EDGE && EDGE.sentence ? EDGE.sentence : ""),
   modelPnlNote: () => (R.modelPnlNote ? R.modelPnlNote("Alpaca") : ""),
-  sameCloseNote: () => (R.sameCloseNote ? R.sameCloseNote("J-0002") : ""),
+  onCardLine: () => R.onCardLine("J-0001", "+$2,925"),
+  noRecordNote: () => R.noRecordNote(),
   unlistedContractNote: () => R.unlistedContractNote([{ i: 0, name: "XLE 59 put" }], 2),
   openInterestNote: () => C.openInterestNote({ at: "2026-09-19" }),
   sourceNote: () => C.sourceNote({ source: "alpaca", updated: Date.now() }),
   autopilotHorizonNote: () => J.autopilotHorizonNote({}) || "",
   autopilotVolNote: () => J.autopilotVolNote({}) || "",
   positionSizeNote: () => J.positionSizeNote({ legs: [] }),
+  positionStageNote: () => J.positionStageNote({ alpacaId: "x", alpacaFilled: false, alpacaStatus: "accepted" }) || "",
   alpacaErrorText: () => O.alpacaErrorText(new Error("422")),
   pctText: () => R.pctText(0.35),
   chanceText: () => R.chanceText(0.55),
@@ -148,6 +153,8 @@ export const COPY = {
   nothingTodayLine: () => R.nothingTodayLine({ liquidity: 3, reward: 2 }, { noBoard: ["XLE"], failed: [{ tk: "UNG", why: "HTTP 502" }] }),
   sizeLine: () => R.sizeLine(REQUEST, { ok: true, n: 14, totPrem: 868, totRisk: 868, isCredit: false }) || "",
   newsLine: () => S.newsLine("CORN", [{ title: "Drought cuts US corn crop outlook in the Midwest", date: new Date().toISOString() }]).text,
+  // PR #44, TASK 4: the badge's own words while a market is being read. (Its aria-label sentence is not on screen.)
+  readingLine: () => S.readingLine({ waiting: ["news"] }),
   reconcileFigures: () => { const f = { entry: 0.62, maxLoss: -62, maxProfit: 138, breakevens: [28.62], pop: 0.48 }; return R.reconcileFigures(f, f).line; },
 };
 
@@ -171,7 +178,7 @@ export const sentencesOf = (s) => String(s || "")
  * the no-market-data state, the empty state and the anchor).
  */
 export function stepBlock(src, id) {
-  const needle = `step === "${id}"`;
+  const needle = GUARD[id] || `step === "${id}"`;
   const out = [];
   let from = 0;
   for (;;) {

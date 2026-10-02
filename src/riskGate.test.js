@@ -25,7 +25,7 @@ import { RULES, sizing, ruleBadge, qualityFloor, qualityFloorSentence, liquidity
   sigmaProvenance, TABLE_SIGMA_SOURCE, MEASURED_SIGMA_SOURCE, FALLBACK_SIGMA_SOURCE,
   positionPnl, modelPnlNote, BROKER_PNL, MODEL_PNL,
   buildableExpiries, openableBoard, offFloorExpiryLabel, horizonFloorNote,
-  remainingEdge, remainingEdgeNote, remainingEdgeLabel, shareOfMaximum, attentionCount, sameCloseNote,
+  remainingEdge, remainingEdgeNote, remainingEdgeLabel, shareOfMaximum, attentionCount, onCardLine,
   requestOf, requestAmountLabel, requestAmountOwner, contractsSourceNote, clampAskedChance,
   REQUEST_MODES, meetsRequest, splitByRequest, meetsHeading, otherwiseHeading,
   targetPriceOf, chanceAskLabel, nothingTodayLine, fetchFailWords,
@@ -3143,9 +3143,8 @@ test("TASK 2 — ONE CLOSE CONTROL PER POSITION", () => {
   const notTaken = { id: 2, ticker: "SOYB", expKey: "2026-11-20", alpacaId: "x", alpacaStatus: "canceled", legs: [] };
   assert.equal(positionStage(notTaken), "not-taken");
   assert.equal(positionForHolding([notTaken], { ticker: "SOYB", expKey: "2026-11-20" }), null);
-  const note = sameCloseNote("J-0002");
-  assert.ok(note.includes("J-0002") && /Positions screen/.test(note));
-  assert.ok(/asks what ended the trade/.test(note), "and says WHY it is the one to use");
+  const note = onCardLine("J-0002", "-$133");
+  assert.ok(note.includes("J-0002") && /Positions card/.test(note));
 });
 
 /* ---------------- summary ---------------- */

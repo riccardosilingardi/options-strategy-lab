@@ -300,7 +300,7 @@ export function CandidateActions({ ticked, onTick, saved, onSave, onBuild }) {
    EXPLANATION of a rule. The app saying no renders beside the button, under
    the older rule that outranks this one.
 ==================================================================== */
-export function Fold({ summary, label = "why", tone = T.mut, children, style }) {
+export function Fold({ summary, label = "why", tone = T.mut, children, style, keepMounted = false }) {
   const [open, setOpen] = useState(false);
   // aria-expanded says whether it is open, aria-controls says what it opens (WCAG 4.1.2), and the
   // button is 44px tall (2.5.5). The region exists only while open, which aria-expanded="false" allows.
@@ -316,7 +316,10 @@ export function Fold({ summary, label = "why", tone = T.mut, children, style }) 
           {open ? "hide ▲" : `${label} ▼`}
         </span>
       </button>
-      {open && <div id={regionId} style={{ marginTop: 4 }}>{children}</div>}
+      {/* `keepMounted` is for a panel whose own effects must run even while it is closed (the Guardian logs a weakened
+          reason on mount): the region stays in the tree and is `hidden`. */}
+      {keepMounted ? <div id={regionId} hidden={!open} style={{ marginTop: 4 }}>{children}</div>
+        : open && <div id={regionId} style={{ marginTop: 4 }}>{children}</div>}
     </div>
   );
 }

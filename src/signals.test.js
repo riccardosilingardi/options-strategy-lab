@@ -4,7 +4,8 @@
 import assert from "node:assert/strict";
 import { fuseSignals, weatherComponent, newsComponent, ageDecay, regionSignals,
   sentimentDirection, signalAdjustment, rankScore, compareCandidates, withSignalRank, againstSignal,
-  weatherApplies, weatherNaReason, factorsOf, tagImpacts, seasonalComponent, REGIONS } from "./signals.js";
+  weatherApplies, weatherNaReason, factorsOf, tagImpacts, seasonalComponent, REGIONS,
+  readingState, readingLine, unreadInputsAria, signalSnapshot, compareSignals } from "./signals.js";
 
 /* ---------------- tiny harness ---------------- */
 let passed = 0;
@@ -421,6 +422,94 @@ test("a headline about gold does not quietly tag a grain, and vice versa", () =>
   assert.ok(!gold.includes("CORN") && !gold.includes("WEAT"));
   const grain = tagImpacts("Heatwave and drought stress the corn belt").map((x) => x.tk);
   assert.ok(!grain.includes("GLD") && !grain.includes("USO"));
+});
+
+/* ---------------- PR #44, TASK 4: reading, snapshot, reconcile ---------------- */
+
+const GDX_NEWS = [{ title: "Central bank gold buying hits a record", date: daysAgo(1) },
+  { title: "Gold slides as the dollar surges and real yields jump", date: daysAgo(1) },
+  { title: "Gold price falls on a stronger dollar", date: daysAgo(2) }];
+const fuseGdx = (newsItems) => fuseSignals({ ticker: "GDX", month: JULY, weatherData: null, newsItems,
+  bars: bars("up"), seasonalMean: 1.4, now: NOW });
+
+test("READING — a market is reading until every input it has has landed or failed", () => {
+  const all = { seasonal: "ready", technical: "ready", weather: "ready", news: "ready" };
+  assert.equal(readingState({ ticker: "CORN", inputs: all }).reading, false);
+  const r = readingState({ ticker: "CORN", inputs: { ...all, news: "loading" } });
+  assert.equal(r.reading, true);
+  assert.deepEqual(r.waiting, ["news"]);
+  assert.equal(readingLine(r), "reading news…");
+  // An input nobody reported is not "landed": unknown never lets a score out early.
+  assert.equal(readingState({ ticker: "CORN", inputs: { seasonal: "ready" } }).reading, true);
+});
+
+test("READING — a failure is named, is not a wait, and the other factors still score", () => {
+  const r = readingState({ ticker: "CORN", inputs: { seasonal: "ready", technical: "failed", weather: "ready", news: "ready" } });
+  assert.equal(r.reading, false);
+  assert.equal(r.failed.length, 1);
+  assert.equal(r.failed[0].name, "price history");
+  assert.match(unreadInputsAria(r.failed), /Price history could not be read/);
+  assert.equal(unreadInputsAria([]), null);
+});
+
+test("READING — a factor the market does not have is never waited for", () => {
+  // GDX has no weather factor (factorsOf), so loading weather cannot hold its badge.
+  assert.equal(factorsOf("GDX").keys.includes("weather"), false);
+  const r = readingState({ ticker: "GDX", inputs: { seasonal: "ready", technical: "ready", news: "ready", weather: "loading" } });
+  assert.equal(r.reading, false);
+});
+
+test("SNAPSHOT — no score is held while an input is on the way", () => {
+  const reading = readingState({ ticker: "GDX", inputs: { seasonal: "ready", technical: "ready", news: "loading" } });
+  const snap = signalSnapshot(fuseGdx([]), { reading });
+  assert.equal(snap.ready, false);
+  assert.equal(snap.score, null);
+  assert.deepEqual(snap.waiting, ["news"]);
+});
+
+test("SAME INPUTS, IDENTICAL FACTORS — the card and Build read one result", () => {
+  const settled = { seasonal: "ready", technical: "ready", news: "ready" };
+  const card = signalSnapshot(fuseGdx(GDX_NEWS), { reading: readingState({ ticker: "GDX", inputs: settled }), seasonalSource: "measured" });
+  const build = signalSnapshot(fuseGdx([...GDX_NEWS]), { reading: readingState({ ticker: "GDX", inputs: settled }), seasonalSource: "measured" });
+  assert.equal(card.ready, true);
+  assert.deepEqual(card.factors, build.factors);
+  assert.equal(card.score, build.score);
+  assert.equal(card.agreement, build.agreement);
+  assert.equal(card.confidence, build.confidence);
+  const cmp = compareSignals(card, build, { ticker: "GDX" });
+  assert.equal(cmp.same, true);
+  assert.match(cmp.line, /^✓ Same four factors as the card/);
+});
+
+test("RECONCILE — news that was missing on the card says what moved and why, in one line", () => {
+  const thenFused = fuseGdx([]);
+  const nowFused = fuseGdx(GDX_NEWS);
+  assert.notDeepEqual(thenFused.components.news, nowFused.components.news, "the fixture must actually move the news factor");
+  const was = signalSnapshot(thenFused, { reading: readingState({ ticker: "GDX", inputs: { seasonal: "ready", technical: "ready", news: "failed" } }), seasonalSource: "measured" });
+  const is = signalSnapshot(nowFused, { reading: readingState({ ticker: "GDX", inputs: { seasonal: "ready", technical: "ready", news: "ready" } }), seasonalSource: "measured" });
+  const cmp = compareSignals(was, is, { ticker: "GDX" });
+  assert.equal(cmp.same, false);
+  assert.ok(!cmp.line.includes("\n"), "one line");
+  assert.match(cmp.line, /^⚠ News for GDX loaded: news /);
+  if (thenFused.agreement !== nowFused.agreement) assert.match(cmp.line, new RegExp(`${thenFused.agreement} → ${nowFused.agreement}`));
+});
+
+test("RECONCILE — a card taken while the market was still reading says so, never 'same'", () => {
+  const reading = readingState({ ticker: "GDX", inputs: { seasonal: "ready", technical: "ready", news: "loading" } });
+  const was = signalSnapshot(null, { reading });
+  const is = signalSnapshot(fuseGdx(GDX_NEWS), { reading: readingState({ ticker: "GDX", inputs: { seasonal: "ready", technical: "ready", news: "ready" } }) });
+  const cmp = compareSignals(was, is, { ticker: "GDX" });
+  assert.equal(cmp.same, false);
+  assert.equal(cmp.pending, true);
+  assert.match(cmp.line, /still loading on the card \(news\)/);
+  assert.equal(compareSignals(was, signalSnapshot(null, { reading }), { ticker: "GDX" }), null, "nothing to compare with an unready result");
+});
+
+test("RECONCILE — a changed seasonal source is part of the line", () => {
+  const f = fuseGdx(GDX_NEWS);
+  const r = readingState({ ticker: "GDX", inputs: { seasonal: "ready", technical: "ready", news: "ready" } });
+  const a = signalSnapshot(f, { reading: r, seasonalSource: "table" }), b = signalSnapshot(f, { reading: r, seasonalSource: "measured" });
+  assert.match(compareSignals(a, b, { ticker: "GDX" }).line, /seasonal source table → measured/);
 });
 
 /* ---------------- summary ---------------- */

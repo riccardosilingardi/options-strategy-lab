@@ -1406,9 +1406,12 @@ export const GATE_WARNING_LABELS = {
  *   first three in order of what decides, every one of them, and how many more.
  */
 export function stopSigns({ fused = null, gateWarnings = [], feedBroken = false, noQuoteLegs = 0,
-  contracts = null, askSize = null, flags = [] } = {}) {
+  contracts = null, askSize = null, flags = [], holds = false } = {}) {
   const all = [];
   const add = (id, label) => { if (!all.some((x) => x.id === id)) all.push({ id, label }); };
+  // AN OPEN POSITION ALREADY HAS THESE LEGS (PR #44, TASK 2): a label, never a refusal — owning one and
+  // opening a second is the user's call, and the gate does not know about it. First, because it decides.
+  if (holds) add("holds", "You already hold this");
   const conf = fused && known(fused.confidence) ? Math.round(Number(fused.confidence)) : null;
   const codes = new Set((gateWarnings || []).map((w) => w && w.code));
   if ((fused && fused.agreement === "CONFLICT") || codes.has("SIGNAL_CONFLICT")) {
@@ -4070,14 +4073,16 @@ export function attentionCount(alerts = []) {
   return { decisions, looks, quiet: looks === 0 };
 }
 
-/** THE SAME ACTION, SAID ONCE. The broker panel's close and the Positions
- *  card's close are one act, and only the second one asks why and files the
- *  reason. Where the two meet, this is what the broker panel says instead of
- *  offering a second button. */
-export const sameCloseNote = (ref) =>
-  `This is ${ref || "a position"} on your Positions screen. Close it there: its close-at-limit button ` +
-  `sends the same order this panel would, and after the fill that card asks what ended the trade and ` +
-  `files the answer with it. A close with no reason on the record teaches nothing later.`;
+/** ONE LINE for a holding at the broker that the app has a record of (PR #44, TASK 1): the profit, and where to act on
+ *  it. It replaces a paragraph the broker panel repeated for every holding, telling the reader to use a button the
+ *  card then hid inside a fold. The paragraph is gone: the card now shows that button. */
+export const onCardLine = (ref, pnlText) => `✓ ${ref || "a position"} · ${pnlText} · on your Positions card`;
+
+/** What the broker panel says about a holding the app has NO record of: it has no card, so this panel keeps its own
+ *  close button, and nothing is filed in the Journal. */
+export const noRecordNote = () =>
+  `The app has no record of this holding, so it has no Positions card. This button closes it at a limit priced ` +
+  `now, and nothing is filed in the Journal.`;
 
 /* WHEN "OF THE MAXIMUM" IS A PERCENTAGE AND WHEN IT IS WORDS.
    -$127 against a $4 maximum is -3188%, which is a true division and a false
@@ -4164,6 +4169,16 @@ export const takeProfitBasisWords = (basis = "max-profit") =>
 /** Where a profit stands against its target, as a share (0 to 1+), or null when either is unknown. */
 export const takeProfitProgress = (pnl, target) =>
   known(pnl) && target && known(target.dollars) && target.dollars > 0 ? Number(pnl) / target.dollars : null;
+
+/**
+ * WHERE THE STOP WARNING RAISES, IN DOLLARS FOR THE WHOLE POSITION (negative), or null when the maximum loss is
+ * unknown. A warning, never an order (`stopLossEnforcement`). One home: `posAlerts` and the Positions card both
+ * read it, so the level on the card is the level that raises the warning.
+ */
+export const stopWarningLevel = ({ maxLoss = null, contracts = 1 } = {}) =>
+  known(maxLoss) && Number(maxLoss) < 0
+    ? RULES.stopLossPct * Number(maxLoss) * Math.max(1, Math.round(Number(contracts) || 1))
+    : null;
 
 /**
  * WHICH RULE ENDED A TRADE — and the stop is not one of them.

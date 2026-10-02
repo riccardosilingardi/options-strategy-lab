@@ -255,16 +255,31 @@ export function closeReason({ rule = null, ruleText = "", written = "" } = {}) {
   return { ok: true, kind: "manual", rule: null, text, written: text, need: 0, message: null };
 }
 
-/** The close reason for a position, decided from the alerts on its row. */
+/** What the filing dialog says over a record Alpaca does not hold. One home, beside `closeDecision()`. */
+export const notHeldCloseWords = (notHeld = []) =>
+  `Alpaca does not hold ${notHeld.length === 1 ? "this leg" : "these legs"} (${notHeld.join(", ")}), so no rule ended this ` +
+  `trade here and no profit can be read. Write what happened: closed somewhere else, expired, or never filled.`;
+
+/**
+ * The close reason for a position, decided from the alerts on its row.
+ *
+ * >>> A RECORD ALPACA DOES NOT HOLD HAS NO RULE CLOSE (PR #44, TASK 0b). <<< The dialog printed the time exit's
+ * sentence over J-0002 before it was filed, though `journalEntry()` has refused to count it as a rule close since
+ * PR #43. A rule cannot end a trade the broker does not hold, so the rules are not consulted: the reason is the one
+ * the user writes, and the dialog says why (`notHeldCloseWords`).
+ */
 export function closeDecision({ alert = null, written = "" } = {}) {
-  const r = ruleExitOf({
-    tpHit: !!(alert && alert.tpHit),
-    dteExit: !!(alert && alert.dteExit),
-    slHit: !!(alert && alert.slHit),
-    dteLeft: alert ? alert.dteLeft : null,
-    tpBasis: (alert && alert.tpTarget && alert.tpTarget.basis) || "max-profit",
-  });
-  return { ...r, reason: closeReason({ rule: r.rule, ruleText: r.text, written }) };
+  const notHeld = alert && Array.isArray(alert.notHeld) && alert.notHeld.length ? alert.notHeld : null;
+  const r = notHeld
+    ? { ruleExit: false, rule: null, text: null, stopWarning: false }
+    : ruleExitOf({
+      tpHit: !!(alert && alert.tpHit),
+      dteExit: !!(alert && alert.dteExit),
+      slHit: !!(alert && alert.slHit),
+      dteLeft: alert ? alert.dteLeft : null,
+      tpBasis: (alert && alert.tpTarget && alert.tpTarget.basis) || "max-profit",
+    });
+  return { ...r, notHeld, reason: closeReason({ rule: r.rule, ruleText: r.text, written }) };
 }
 
 /* ------------------------------------------------------------------

@@ -702,3 +702,129 @@ export function againstSignal(fused, dir) {
    normaliseWeights, rankByDrivers) and its narrative (verdictNarrative) were
    deleted with the door itself in PR #40, TASK 1: Find ranks every candidate
    by `compareCandidates()` above, and says why a list is short in counts. */
+
+/* ================================================================
+   Reading, snapshot, reconcile — one card on Find and on Build (PR #44, TASK 4)
+
+   MEASURED. The owner reads "the 4 parameters change as soon as I open the
+   position". `fuseSignals()` reads `newsPool`, the union of every loaded news
+   feed, and Find loaded chains and bars but never news; seasonality landed
+   after the chains. So on Find, `newsComponent()` for GDX read "none of the N
+   headlines tag GDX" (neutral), and opening GDX on Build loaded its feed and
+   recomputed news, agreement, score and confidence — on other markets too.
+
+   Three pure functions, no React, so the claim can be tested:
+     readingState()           which inputs of a market have landed, failed or
+                              are still on the way. A market is "reading…" until
+                              none is on the way; a failure is named and that
+                              factor is scored as it always was (neutral).
+     signalSnapshot()         the fused result, small enough to ride beside
+                              `ref.card` in the hand-off and to be stored on the
+                              position at entry.
+     compareSignals()         the snapshot against the current result, in one
+                              line, in the pattern of `reconcileFigures()`.
+================================================================ */
+
+const INPUT_NAME = { seasonal: "seasonality", technical: "price history", weather: "weather", news: "news" };
+/** The input a factor is read from, in words. */
+export const inputName = (k) => INPUT_NAME[k] || k;
+const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+const nameList = (keys) => keys.map(inputName).join(" and ");
+
+/**
+ * WHICH INPUTS OF ONE MARKET'S READ ARE STILL ON THE WAY, AND WHICH FAILED.
+ *
+ * @param {string} ticker
+ * @param {object} inputs  factor key -> "ready" | "loading" | "failed" | { state, why }.
+ *                         A key nobody gave is read as "loading": unknown is not
+ *                         "landed", so a missing input never lets a score out early.
+ *                         A factor the market does not have (`factorsOf`) is never waited for.
+ * @returns {{ reading: boolean, waiting: string[], failed: {key, name, why}[] }}
+ */
+export function readingState({ ticker, inputs = {} } = {}) {
+  const { keys } = factorsOf(ticker);
+  const waiting = [], failed = [];
+  for (const k of keys) {
+    const s = inputs[k];
+    const state = s && typeof s === "object" ? s.state : s;
+    if (state === "ready") continue;
+    if (state === "failed") failed.push({ key: k, name: inputName(k), why: (s && s.why) || null });
+    else waiting.push(k);
+  }
+  return { reading: waiting.length > 0, waiting, failed };
+}
+
+/** The line a badge prints while a market is being read. */
+export const readingLine = (state) =>
+  state && state.waiting.length ? `reading ${nameList(state.waiting)}…` : "reading…";
+
+/** What a failed input costs, said once: the factor is scored as neutral and the rest as usual. */
+export const unreadInputsAria = (failed = []) =>
+  failed.length
+    ? `${cap(nameList(failed.map((f) => f.key)))} could not be read, so ${failed.length === 1 ? "that factor is" : "those factors are"} scored as neutral.`
+    : null;
+
+/**
+ * THE FUSED RESULT, SMALL.
+ *
+ * `ready` is false while any input is on the way: a snapshot taken then holds
+ * no score at all, because a number printed before its inputs landed is the
+ * number that moves. `failed` names the inputs that did not load.
+ */
+export function signalSnapshot(fused, { reading = null, seasonalSource = null, now = Date.now() } = {}) {
+  const waiting = reading ? reading.waiting.slice() : [];
+  const failed = reading ? reading.failed.map((f) => f.key) : [];
+  const base = { ticker: fused ? fused.ticker : null, t: now, waiting, failed };
+  if (!fused || waiting.length) {
+    return { ...base, ready: false, score: null, agreement: null, confidence: null, factors: null, seasonalSource: null };
+  }
+  const factors = {};
+  for (const k of fused.factors || Object.keys(fused.components)) {
+    const c = fused.components[k];
+    factors[k] = { dir: c.dir, strength: c.strength };
+  }
+  return { ...base, ready: true, month: fused.month, score: fused.score, agreement: fused.agreement,
+    confidence: fused.confidence, factors, seasonalSource };
+}
+
+/**
+ * THE SNAPSHOT AGAINST THE CURRENT RESULT. Null when there is nothing to compare;
+ * otherwise `{ same, changes, line }`. It says WHAT moved and WHY in one line:
+ *
+ *   ⚠ News for GDX loaded: news ↓, MIXED → CONFLICT, score +12 → -3.
+ *
+ * The "why" is an input that failed on the card and has landed since; with none
+ * of those it says the readings moved, which is all the arithmetic can tell.
+ */
+export function compareSignals(then, now, { ticker = null } = {}) {
+  if (!then || !now || !now.ready) return null;
+  const tk = ticker || now.ticker || "this market";
+  if (!then.ready) {
+    return { same: false, pending: true, changes: [],
+      line: `⚠ ${tk}'s signals were still loading on the card (${nameList(then.waiting)}). Read now: ` +
+        `${now.agreement} · ${signed(now.score, 0)} · conf ${now.confidence}.` };
+  }
+  const changes = [];
+  const keys = Array.from(new Set([...Object.keys(then.factors || {}), ...Object.keys(now.factors || {})]));
+  for (const k of keys) {
+    const a = (then.factors || {})[k], b = (now.factors || {})[k];
+    if (!a || !b) { if (a !== b) changes.push({ key: k, from: a || null, to: b || null }); continue; }
+    if (a.dir !== b.dir || a.strength !== b.strength) changes.push({ key: k, from: a, to: b });
+  }
+  const parts = changes.map((c) => (c.from && c.to && c.from.dir !== c.to.dir
+    ? `${inputName(c.key)} ${ARROW[c.to.dir]}`
+    : `${inputName(c.key)} ${c.from ? c.from.strength : "—"} → ${c.to ? c.to.strength : "—"}`));
+  if (then.agreement !== now.agreement) parts.push(`${then.agreement} → ${now.agreement}`);
+  if (then.score !== now.score) parts.push(`score ${signed(then.score, 0)} → ${signed(now.score, 0)}`);
+  if (then.confidence !== now.confidence) parts.push(`confidence ${then.confidence} → ${now.confidence}`);
+  if (then.seasonalSource !== now.seasonalSource) parts.push(`seasonal source ${then.seasonalSource || "none"} → ${now.seasonalSource || "none"}`);
+  if (!parts.length) {
+    return { same: true, pending: false, changes,
+      line: `✓ Same four factors as the card: ${now.agreement} · ${signed(now.score, 0)} · conf ${now.confidence}.` };
+  }
+  const loaded = (then.failed || []).filter((k) => !(now.failed || []).includes(k));
+  const why = loaded.length
+    ? `${cap(nameList(loaded))} for ${tk} loaded`
+    : `${cap(nameList(changes.map((c) => c.key)) || "the readings")} for ${tk} moved since the card`;
+  return { same: false, pending: false, changes, line: `⚠ ${why}: ${parts.join(", ")}.` };
+}

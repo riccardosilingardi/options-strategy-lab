@@ -7,7 +7,7 @@
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { RULES, positionAction, remainingEdge, stopWarningHead, stopWarningSentence, sameCloseNote } from "./rules.js";
+import { RULES, positionAction, remainingEdge, stopWarningHead, stopWarningSentence, onCardLine, noRecordNote } from "./rules.js";
 import { prepareClose, sendClose, groupForRecord, holdingGroups, closeWorking, holdingLeg, legsNotHeld } from "./closeOrder.js";
 import { journalEntry, journalPnl, countedPnl, journalPnlTotal, NOT_A_FILL, MARK_AT_CLOSE } from "./journal.js";
 import { DEMO_TOOLTIP } from "./demo.js";
@@ -131,9 +131,9 @@ await test("the watch level and a pending autopilot verdict do not move the acti
   assert.equal(warn.action, "WARNING", "the autopilot cannot turn a warning into a close");
 });
 
-await test("the broker panel's sentence names a close that is an order", () => {
-  const n = sameCloseNote("J-0007");
-  assert.ok(/close-at-limit/.test(n) && /same order/.test(n), n);
+await test("the broker panel says a holding that has a record is on its card, in ONE line", () => {
+  assert.equal(onCardLine("J-0007", "+$2,925"), "✓ J-0007 · +$2,925 · on your Positions card");
+  assert.ok(noRecordNote().split(/\s+/).length < 35, "and the paragraph is only for a holding with no record");
 });
 
 /* ---------------- 2) prepareClose — tap 1 ---------------- */

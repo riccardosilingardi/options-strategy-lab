@@ -532,7 +532,7 @@ export function simplifyCloses(hist = [], maxPts = 40) {
 /** How many points a line this wide can actually show. One point per ~7px. */
 export const thumbPoints = (width) => Math.max(6, Math.round(width / 7));
 
-export function BandThumbnail({ bands, width = 160, height = 44, spot = null, bars = [], onExplain, title }) {
+export function BandThumbnail({ bands, width = 160, height = 44, spot = null, entrySpot = null, bars = [], onExplain, title }) {
   const b = bands;
   if (!b || !b.bands.length) return null;
   const s0 = spot ?? b.spot;
@@ -540,8 +540,11 @@ export function BandThumbnail({ bands, width = 160, height = 44, spot = null, ba
 
   // The price axis has to hold the bands AND the history, or the line walks off
   // the top of the picture the moment the market moves outside the payoff range.
-  const lo = Math.min(b.lo, ...(hist.length ? [Math.min(...hist)] : []));
-  const hi = Math.max(b.hi, ...(hist.length ? [Math.max(...hist)] : []));
+  // `entrySpot` is where the market stood when the position was opened (PR #44, TASK 2): it is marked on the same
+  // axis as today's price, so the picture says how far the market has come, and the axis has to hold it too.
+  const ent = Number.isFinite(Number(entrySpot)) && entrySpot != null ? Number(entrySpot) : null;
+  const lo = Math.min(b.lo, ...(hist.length ? [Math.min(...hist)] : []), ...(ent != null ? [ent] : []));
+  const hi = Math.max(b.hi, ...(hist.length ? [Math.max(...hist)] : []), ...(ent != null ? [ent] : []));
   const Y = (s) => height - ((s - lo) / (hi - lo || 1)) * height;
 
   // The history occupies the left three quarters; today sits at the right edge,
@@ -574,6 +577,13 @@ export function BandThumbnail({ bands, width = 160, height = 44, spot = null, ba
           <line x1={0} x2={xToday} y1={Y(s0)} y2={Y(s0)} stroke={T.ink} strokeWidth={1.2}
             opacity={0.4} strokeDasharray="2 3" onClick={tap("history")} />
         )}
+      {ent != null && (
+        <g aria-label="where the market was when you opened it">
+          <line x1={0} x2={width} y1={Y(ent)} y2={Y(ent)} stroke={T.amber} strokeWidth={1.4} strokeDasharray="5 3" />
+          <text x={4} y={Math.max(11, Math.min(height - 3, Y(ent) - 3))} fill={T.amber} fontSize={12}
+            style={{ fontFamily: "ui-monospace, Menlo, monospace" }}>entry</text>
+        </g>
+      )}
       {s0 != null && (
         <g onClick={tap("needle")}>
           <line x1={xToday} x2={width} y1={Y(s0)} y2={Y(s0)} stroke={T.ink} strokeWidth={1.6} />

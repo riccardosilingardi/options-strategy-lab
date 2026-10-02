@@ -10,14 +10,15 @@ import {
 } from "lucide-react";
 import { fetchAllNews, fetchWeather, ImpactTags, CopilotTab, TaCopilot, ReportTab, OrderTicket, AlpacaDesk, scaleStrategy, buildContext, GuardianPanel, ChainMatrix, OptionPanel, PriceChart, QtyField, UnifiedView, taSignals, confluence, WhyThisTrade, Markdown, alpacaReq, CloseConfirm } from "./pro.jsx";
 import { prepareClose, sendClose, groupForRecord, closeWorking, legsNotHeld } from "./closeOrder.js";
-import { BandThumbnail, payoffBands, bandTakeaway, GaugeFigure, Gauge, CompareFigure, exitPlanSentence,
+import { BandThumbnail, payoffBands, bandTakeaway, GaugeFigure, Gauge, CompareFigure, exitPlanSentence, exitPlanDetail,
   OpenInterestStrip, oiStripTakeaway, oiCutAt, oiGhostCut, explainOiStrip, useWidth } from "./visuals.jsx";
-import { fuseSignals, sentimentDirection, withSignalRank, compareCandidates, againstSignal } from "./signals.js";
+import { fuseSignals, sentimentDirection, withSignalRank, compareCandidates, againstSignal,
+  readingState, signalSnapshot, compareSignals } from "./signals.js";
 import { N as nCDF, bs as bsPrice, smile as smileIV, payoff as payoffExp, SEASONAL, SIGMA,
   parseAvJson, statsFromMatrix } from "./engine.js";
 import { parseOcc, buildOcc, snapStrike, resnapLegs, expiryStrikes, strikeOptions, fetchChain, hasOpenInterest, enrichOpenInterest, feedName, sourceNote, openInterestNote, oiProfile, expiryOpenInterest, nearMoneyOpenInterest, monotonicityBreaks, monotonicityNote, invertedOnStrikes, spotOf, spotAt } from "./chain.js";
 import { T, themeName, setTheme, BADGE_SAFE } from "./theme.js";
-import { RULES, sizing, ruleBadge, takeProfitLabel, takeProfitTarget, takeProfitBasisWords, stopLossLabel, perTradeCapLabel, RULE_PILLS, money, pctText, capitalSourceNote, perTradeLimitPhrase, qualityFloor, qualityFloorSentence, liquiditySkippedNote,
+import { RULES, sizing, ruleBadge, takeProfitLabel, takeProfitTarget, takeProfitBasisWords, stopWarningLevel, stopLossLabel, perTradeCapLabel, RULE_PILLS, money, pctText, capitalSourceNote, perTradeLimitPhrase, qualityFloor, qualityFloorSentence, liquiditySkippedNote,
   positionPnl, BROKER_PNL, remainingEdge, remainingEdgeLabel, shareOfMaximum, attentionCount,
   filterFold, qualityFloorLine, voicePointer, VOICE_HOMES, noCeilingRankLine,
   buildableExpiries, openableBoard, offFloorExpiryLabel, horizonFloorNote,
@@ -55,13 +56,15 @@ import { orderBody, orderOutcome, alpacaErrorText, reduceRatios, limitWords, ord
 // THE PERMANENT RECORD: the ref a position is given at open, the sequence on
 // every timeline entry, the close reason, and what survives into the Journal.
 import { nextRef, refCounter, appendTimeline, stampTimeline, orderStatusRecheck, closeDecision,
-  autopilotHorizonNote, autopilotVolNote,
+  autopilotHorizonNote, autopilotVolNote, notHeldCloseWords,
   positionSize, positionSizeNote, contractsOf, withPositionSize, fillVsLimit, orderReconciliation,
   storedLimitOf,
   positionStage, positionStageNote, bookPositions, holdingShape, dropImportedTwins, recordFillPrice, countsAsRuleClose, closeKindWords, riskOkOf, riskOkWords, wouldHaveDone, isBrokerHolding, upgradeHolding,
   isTestRecord, testRecordNote, scoredJournal, journalPnl, NOT_A_FILL,
   journalEntry, searchJournal, CLOSE_REASON_MIN, refNumber } from "./journal.js";
 import { FIRST_STEP, stepCarry, candidateOf, candidateKey, legsLine, toggleCompare, inCompare, MAX_COMPARE, savedFromCandidate, candidateFromSaved, savedAge } from "./path.js";
+import { PositionCard, PositionDetails } from "./positionCard.jsx";
+import { exitProgress, entryVsNow, displayName, fileState, pnlShareOfRisk, pnlShareText, holdsStructure } from "./positionView.js";
 import { StepNav, StepForward, EvidenceBar, EvidenceOverlay, DeskSheet, CompareTray, CandidateActions, Fold, DeskCountLine } from "./steps.jsx";
 
 /* ============================== THEME ============================== */
@@ -160,6 +163,14 @@ const UNDERLYINGS = {
 const BASKET = Object.keys(UNDERLYINGS).filter((k) => UNDERLYINGS[k].commodity);
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const NOW_MONTH = new Date().getMonth();
+/* THE DIRECTION "SEASON DECIDES" SUGGESTS FOR A MARKET: its season and its four factors. A market whose factors
+   are still being read hands in no fused result (`fusedFind`), so the suggestion rests on the season alone until
+   they land. One function, because `scan` and Find's list both ask it. */
+const suggestionScore = (seasonalScore, f) => (seasonalScore ?? 0) * 1.5 + (f ? (f.score / 25) * (f.confidence / 100) : 0);
+const suggestionOf = (seasonalScore, f) => {
+  const score = suggestionScore(seasonalScore, f);
+  return score > 1.5 ? "verybull" : score > 0.5 ? "bull" : score < -1.5 ? "verybear" : score < -0.5 ? "bear" : "neutral";
+};
 /** The exit plan's sentence for a trade, with its take-profit target from `takeProfitTarget()`. */
 const planOf = (legs, { maxProfit = null, maxLoss = null, entry = null } = {}) =>
   exitPlanSentence(takeProfitTarget({ legs, maxProfit, maxLoss, entryNet: entry }));
@@ -600,7 +611,11 @@ export function buildFigures(legs, { spot, dte, iv, q, ticker = null, expKey = n
   const AE = !A ? null : !Number.isFinite(effective.net) ? A : analyze(legs, spot, dte, iv, q, { net: effective.net });
   /* THE ONE CHANCE, AT THE PRICE THAT WILL BE SENT. */
   const chance = AE && spot && legs.length && seasonal ? chanceCheckOf(AE, { ticker, legs, spot, dte, expKey, seasonal }) : null;
+  // `rr` and `bands` are what the ONE candidate card prints beside the figures (PR #44, TASK 4); they are worked
+  // out exactly as `listCardFigures()` works them out, from the same `AE`.
   return { A, bookQuotes, book, seedPx, legPrices, ticketNet, ticketDir, effective, AE, chance,
+    rr: AE ? rewardRisk(AE.maxProfit, AE.maxLoss) : null,
+    bands: AE && spot ? payoffBands({ legs, entryNet: AE.entry, spot }) : null,
     figures: AE ? figureSet(AE, chance ? chance.pop : null) : null };
 }
 
@@ -931,13 +946,14 @@ async function saveState(st) {
    and the font and never the height: a 22px "Close at limit" was the control the owner needed most.
    The ghost border is the full colour (1.4.11: a 40% border on white is not a visible edge). Any other
    prop (aria-label, aria-expanded, title) reaches the button. */
-const Btn = ({ children, onClick, color = T.amber, ghost, disabled, small, ...rest }) => (
+const Btn = ({ children, onClick, color = T.amber, ghost, disabled, small, style, ...rest }) => (
   <button onClick={onClick} disabled={disabled} {...rest}
     style={{
       ...mono, fontSize: small ? 12 : 13, padding: small ? "6px 12px" : "8px 14px", minHeight: 44, borderRadius: 6,
       cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.5 : 1,
       background: ghost ? "transparent" : color, color: ghost ? color : T.onAccent,
       border: ghost ? `1px solid ${color}` : "none", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6,
+      ...style,
     }}>{children}</button>
 );
 const Panel = ({ children, style }) => (
@@ -1284,33 +1300,47 @@ const ago = (d) => { const m = Math.round((Date.now() - new Date(d)) / 60000); r
    LAID OUT FOR A 390px PHONE: one column, a 18px rail for the line number, no
    horizontal scroll, and every control at least 44px tall.
 ==================================================================== */
-export function TradeCard({ ticker, name, card, refusals = [], onNumbers, onOrder, orderLabel, children }) {
+/* THE FIVE LINES, ON THEIR OWN: what the trade bets on, risks, how often it works, when it exits and what would
+   make it wrong. On a trade that arrived from a card they sit behind "Why this trade" (PR #44, TASK 4). */
+export function TradeLines({ card }) {
+  if (!card) return null;
+  return (
+    <div style={{ display: "grid", gap: 11, marginTop: 12 }}>
+      {card.lines.map((l, i) => (
+        <div key={l.id} style={{ display: "grid", gridTemplateColumns: "18px minmax(0, 1fr)", gap: 8, alignItems: "start" }}>
+          <div style={{ ...mono, fontSize: 12, fontWeight: 800, color: T.violet, lineHeight: 1.6 }}>{i + 1}</div>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ ...mono, fontSize: 12, letterSpacing: 0.4, color: T.dim, fontWeight: 700 }}>{l.label}</div>
+            <div style={{ ...sansUI, fontSize: 14, color: T.body, lineHeight: 1.55, marginTop: 2 }}>{l.text}</div>
+          </div>
+        </div>
+      ))}
+      <div style={{ ...mono, fontSize: 12, color: T.dim, lineHeight: 1.6 }}>{card.currency}</div>
+    </div>
+  );
+}
+
+/* `compact` is "size and send" on a trade that has its own card above: no name, no five lines (they are behind
+   "Why this trade"), and the refusals, the gate's pass line and the two buttons exactly as they were. */
+export function TradeCard({ ticker, name, card, refusals = [], onNumbers, onOrder, orderLabel, compact = false, children }) {
   if (!card) return null;
   return (
     <div style={{ marginTop: 14, padding: "12px 13px", background: T.panel, border: `1px solid ${T.violet}66`, borderLeft: `3px solid ${T.violet}`, borderRadius: 9 }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
-        <div style={{ ...mono, fontSize: 10, letterSpacing: "0.15em", color: T.violet }}>THE TRADE</div>
-        <div style={{ ...mono, fontSize: 9.5, color: T.dim }}>FIGURES IN {CARD_CURRENCY.toUpperCase()}</div>
+        <div style={{ ...mono, fontSize: 12, letterSpacing: "0.15em", color: T.violet }}>{compact ? "SIZE AND SEND" : "THE TRADE"}</div>
+        {!compact && <div style={{ ...mono, fontSize: 12, color: T.dim }}>FIGURES IN {CARD_CURRENCY.toUpperCase()}</div>}
       </div>
-      <div style={{ ...sansUI, fontSize: 17, fontWeight: 800, color: T.ink, marginTop: 3, lineHeight: 1.3 }}>
-        {ticker} · {name}
-      </div>
-      <div style={{ display: "grid", gap: 11, marginTop: 12 }}>
-        {card.lines.map((l, i) => (
-          <div key={l.id} style={{ display: "grid", gridTemplateColumns: "18px minmax(0, 1fr)", gap: 8, alignItems: "start" }}>
-            <div style={{ ...mono, fontSize: 11.5, fontWeight: 800, color: T.violet, lineHeight: 1.6 }}>{i + 1}</div>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ ...mono, fontSize: 9.5, letterSpacing: 0.4, color: T.dim, fontWeight: 700 }}>{l.label}</div>
-              <div style={{ ...sansUI, fontSize: 14, color: T.body, lineHeight: 1.55, marginTop: 2 }}>{l.text}</div>
-            </div>
-          </div>
-        ))}
-      </div>
+      {!compact && (
+        <div style={{ ...sansUI, fontSize: 17, fontWeight: 800, color: T.ink, marginTop: 3, lineHeight: 1.3 }}>
+          {ticker} · {name}
+        </div>
+      )}
+      {!compact && <TradeLines card={card} />}
 
       {/* THE REFUSALS, ON THE FIRST SCREEN, ALWAYS. */}
       {refusals.length > 0 && (
         <div style={{ marginTop: 12, padding: "9px 11px", background: `${T.red}12`, border: `1px solid ${T.red}88`, borderRadius: 7 }}>
-          <div style={{ ...mono, fontSize: 10.5, color: T.red, fontWeight: 800, letterSpacing: 0.4 }}>
+          <div style={{ ...mono, fontSize: 12, color: T.red, fontWeight: 800, letterSpacing: 0.4 }}>
             ✗ THIS ORDER WOULD NOT BE SENT
           </div>
           <div style={{ display: "grid", gap: 7, marginTop: 6 }}>
@@ -1328,7 +1358,7 @@ export function TradeCard({ ticker, name, card, refusals = [], onNumbers, onOrde
       </div>
       {/* The warnings' two "written once" reminders are gone (PR #40, TASK 2):
           the warnings print once, as the stop-signs strip above the figures. */}
-      <div style={{ ...mono, fontSize: 9.5, color: T.dim, marginTop: 7, lineHeight: 1.6 }}>{card.currency}</div>
+      {!compact && <div style={{ ...mono, fontSize: 12, color: T.dim, marginTop: 7, lineHeight: 1.6 }}>{card.currency}</div>}
     </div>
   );
 }
@@ -1528,7 +1558,8 @@ export default function OptionsStrategyLab() {
   const [closing, setClosing] = useState(null);
   // Order path 3 from the Positions card: { id, busy, prepared, refusal, sent }.
   const [closeAt, setCloseAt] = useState(null);
-  const [openDetails, setOpenDetails] = useState({});
+  // WHICH POSITION'S DETAILS SHEET IS OPEN (PR #44, TASK 2): one at a time, a sheet over the list.
+  const [detailsId, setDetailsId] = useState(null);
   // The Journal's search box. Sorted and searched by ref (src/journal.js).
   const [jq, setJq] = useState("");
   const [optLeg, setOptLeg] = useState(null); // {occ, label, quote}
@@ -1563,6 +1594,10 @@ export default function OptionsStrategyLab() {
   const liqLevel = liquidityLevel(liqLevelId);
   const [optRef, setOptRef] = useState(null); // price snapshot from the Shortlist, to reconcile against the Build screen
   const [weather, setWeather] = useState(null);  // regionId -> forecast 14g (fuseSignals)
+  // WHETHER EACH INPUT OF THE FOUR-FACTOR READ HAS LANDED (PR #44, TASK 4): a market is "reading…" until
+  // its inputs have arrived or failed, so a score never prints before it stops moving.
+  const [weatherState, setWeatherState] = useState("loading");   // "loading" | "ready" | "failed"
+  const [barsFail, setBarsFail] = useState({});                  // ticker -> true when its daily bars could not be read
   const [barsCache, setBarsCache] = useState({}); // ticker -> daily bars (fattore tecnico)
   const [against, setAgainst] = useState({ reason: "" }); // motivazione per un trade contro il segnale
   /* THE ENTRY-ROOM OVERRIDE (src/rules.js, `entryRoom`). The same written-reason
@@ -1995,7 +2030,7 @@ export default function OptionsStrategyLab() {
     return () => clearInterval(id);
   }, [autoMon, store.positions, refreshChain]);
 
-  const switchTicker = (tk) => { setTicker(tk); setExpKey(null); setLegs([]); setBt(null); setAgainst({ reason: "" }); if (!chains[tk]) refreshChain(tk); };
+  const switchTicker = (tk) => { setTicker(tk); setExpKey(null); setLegs([]); setBt(null); setBuildOrigin(null); setAgainst({ reason: "" }); if (!chains[tk]) refreshChain(tk); };
 
   /* ---- news ----
      PRD §7: le news devono caricarsi all'AVVIO per il ticker corrente, non
@@ -2017,7 +2052,7 @@ export default function OptionsStrategyLab() {
   useEffect(() => { if (!news[ticker]) loadNews(ticker, true); }, [ticker, news, loadNews]);
 
   /* ---- meteo: una volta all'avvio, serve al fattore weather di fuseSignals ---- */
-  useEffect(() => { (async () => { try { setWeather(await fetchWeather()); } catch { /* meteo opzionale */ } })(); }, []);
+  useEffect(() => { (async () => { try { setWeather(await fetchWeather()); setWeatherState("ready"); } catch { /* meteo opzionale */ setWeatherState("failed"); } })(); }, []);
 
   /* ---- barre giornaliere: servono al fattore tecnico (SMA/RSI, 60+ barre) ---- */
   // Restituisce le barre (dalla cache o dalla rete) così chi chiama può usarle
@@ -2031,6 +2066,7 @@ export default function OptionsStrategyLab() {
         const j = await r.json();
         if (r.ok && j.bars?.length) { setBarsCache((b) => ({ ...b, [tk]: j.bars })); return j.bars; }
       } catch { /* il fattore tecnico degrada a neutro da solo */ }
+      setBarsFail((m) => ({ ...m, [tk]: true }));   // said on the badge: "price history could not be read"
       return null;
     })();
     barsAsked.current[tk] = job;
@@ -2067,6 +2103,28 @@ export default function OptionsStrategyLab() {
     () => Object.fromEntries(Object.keys(UNDERLYINGS).map((tk) => [tk, fuseFor(tk)])),
     [fuseFor]
   );
+  /* ---- WHICH INPUTS HAVE LANDED, PER MARKET (PR #44, TASK 4) ----
+     Measured: Find loaded chains and bars and never news, and seasonality landed after the chains, so the four
+     factors, the agreement, the score and the confidence all moved the moment a market was opened on Build.
+     A market is "reading…" until its news, bars and seasonal have landed or failed (and weather, where it has
+     any). THE NEWS POOL IS ONE UNION OF EVERY LOADED FEED, so one market's headlines can tag another: news is
+     waited for on every market this screen reads, not only on the one being scored. A failure is named. */
+  const newsScope = useMemo(() => Array.from(new Set([...find.markets, ticker])), [find.markets, ticker]);
+  const readiness = useMemo(() => {
+    const settled = (tk) => { const n = news[tk]; return !!n && !n.loading && (!!n.at || !!n.err); };
+    const poolDone = newsScope.every(settled);
+    return Object.fromEntries(Object.keys(UNDERLYINGS).map((tk) => {
+      const sn = seasonalState[tk];
+      return [tk, readingState({ ticker: tk, inputs: {
+        news: !poolDone ? "loading" : news[tk]?.err ? { state: "failed", why: "the feed did not answer" } : news[tk] ? "ready" : "loading",
+        technical: barsCache[tk] ? "ready" : barsFail[tk] ? { state: "failed", why: "no daily prices came back" } : "loading",
+        seasonal: sn?.loading ? "loading" : seasonal[tk] ? "ready" : sn?.error ? { state: "failed", why: sn.error } : "loading",
+        weather: weatherState === "loading" ? "loading" : weatherState === "failed" ? { state: "failed", why: "the forecast did not answer" } : "ready",
+      } })];
+    }));
+  }, [news, newsScope, barsCache, barsFail, seasonal, seasonalState, weatherState]);
+  /** What Find reads: a market still being read has NO fused result, so no score, no flag and no rank effect. */
+  const fusedFind = useMemo(() => Object.fromEntries(Object.entries(fused).map(([tk, f]) => [tk, readiness[tk]?.reading ? null : f])), [fused, readiness]);
 
   /* ---- analisi ---- */
   /* `A` IS THE STRUCTURE AT THE MID — what it is WORTH. It is still the honest
@@ -2086,6 +2144,8 @@ export default function OptionsStrategyLab() {
       legPx: ticket.legPx, type: ticket.type }),
     [legs, spot, dte, iv, q, ticker, expKey, seasonal, ticket.legPx, ticket.type]);
   const { A, bookQuotes, book, seedPx, legPrices, ticketNet, ticketDir, effective, AE } = BF;
+  // WHERE THIS TRADE ARRIVED FROM: null when it was built here by hand, { kind: "card", key } from a Find card.
+  const [buildOrigin, setBuildOrigin] = useState(null);
   /* >>> HOW MANY COMBINATIONS THE BUDGET BUYS, AND IT IS ONE HOME (P10 §2).
      <<< `scaleStrategy()` is the same function every Find card calls (its
      unit is the maximum loss since PR #41) — and it is read HERE at the price
@@ -2185,7 +2245,7 @@ export default function OptionsStrategyLab() {
      (src/handoff.js) decides what changes; this applies it. Written inline at
      each button instead, a hand-off forgets one of the four things it has to
      do and the tap looks like it did nothing — see the comment there. */
-  const openOnBuild = ({ ticker: tk, expKey: ek = null, legs: lg, name, ref = null, contracts: n = null }) => {
+  const openOnBuild = ({ ticker: tk, expKey: ek = null, legs: lg, name, ref = null, contracts: n = null, origin = null }) => {
     const h = buildHandOff({ ticker: tk, expKey: ek, legs: lg, name, chains });
     setTicker(h.ticker); setExpKey(h.expKey); setLegs(h.legs); setStratName(h.name);
     setBt(null);
@@ -2206,6 +2266,8 @@ export default function OptionsStrategyLab() {
     // arrives as the typed override rather than as a number the budget derived.
     setContractsTyped(n == null ? null : Math.max(1, Math.round(Number(n) || 1)));
     setOptRef(ref);
+    // A TRADE THAT ARRIVED FROM A CARD SHOWS THAT CARD (PR #44, TASK 4) and a way back to its list (TASK 3).
+    setBuildOrigin(origin || (ref && ref.key ? { kind: "card", key: ref.key } : { kind: "load", key: null }));
     setEv(h.ev);          // close the evidence sheet: it covers the trade
     setTab(h.tab);
     // Step 3. A hand-off is what "forward" means on this path: the selection
@@ -2390,7 +2452,9 @@ export default function OptionsStrategyLab() {
   const openFound = (x) => {
     setSentiment(x.sent);
     openOnBuild({ ticker: x.tk, expKey: x.expKey, legs: x.legs, name: x.name,
-      ref: { name: x.name, expKey: x.expKey, t: Date.now(), card: x.lf.figures } });
+      // THE FUSED RESULT TRAVELS BESIDE THE FIGURES (PR #44, TASK 4), so Build can say what moved and why.
+      ref: { name: x.name, expKey: x.expKey, t: Date.now(), card: x.lf.figures, key: x.key,
+        signals: signalSnapshot(fused[x.tk] || null, { reading: readiness[x.tk], seasonalSource: seasonalFor(x.tk).source }) } });
   };
   const updLeg = (i, f, v) => setLegs((L) => L.map((l, j) => (j === i ? { ...l, [f]: v } : l)));
   // A leg quantity left empty or invalid while typing: { [legIndex]: note }.
@@ -2511,6 +2575,9 @@ export default function OptionsStrategyLab() {
       // hand-written table was the only one either side could reach.
       thesis: { pop: pop0, ...seasonalStampFields(mc0), iv: ivAvg0, seasonal: seasM, regime: seasM > 0.8 ? "strong up" : seasM < -0.8 ? "strong down" : "weak", spot: sp, breakevens: analysis.breakevens, delta: analysis.greeks.delta, vega: analysis.greeks.vega,
         signal: f ? { score: f.score, confidence: f.confidence, agreement: f.agreement, narrative: f.narrative } : null,
+        // THE FOUR FACTORS AS READ AT ENTRY (PR #44, TASK 4): each factor's direction and strength and the seasonal
+        // source, so Details and the Positions card can set "at entry" beside "now". Absent on an older record.
+        signals: signalSnapshot(f || null, { reading: readiness[tk], seasonalSource: seasonalFor(tk).source }),
         againstSignal: clashInfo ? { ...clashInfo, reason: (reason || "").trim(), at: Date.now() } : null },
       // WHAT THE BROKER ACTUALLY SAID, ON THE POSITION'S OWN RECORD. An
       // order can come back "accepted" with nothing bought (queued outside
@@ -3078,7 +3145,8 @@ export default function OptionsStrategyLab() {
        single long option, 50% of the maximum profit for the rest. Whole position, like `pnl`. */
     const tpTarget = takeProfitTarget({ legs: p.legs, maxProfit: p.maxProfit, maxLoss: p.maxLoss, entryNet: p.entryNet, contracts: n });
     const tpHit = pnl != null && tpTarget.dollars != null && tpTarget.dollars > 0 && pnl >= tpTarget.dollars;
-    const slHit = pnl != null && p.maxLoss < 0 && pnl <= RULES.stopLossPct * p.maxLoss * n;
+    const stopLevel = stopWarningLevel({ maxLoss: p.maxLoss, contracts: n });
+    const slHit = pnl != null && stopLevel != null && pnl <= stopLevel;
     const dteExit = dteLeft <= RULES.exitDTE;
     // verdetto autopilot recente non-HOLD in attesa
     const ap = (p.timeline || []).filter((e) => e.type === "autopilot" && Date.now() - e.t < 48 * 36e5 && !e.text.includes("HOLD")).slice(-1)[0];
@@ -3106,7 +3174,7 @@ export default function OptionsStrategyLab() {
        they were: the headline and `attentionCount()` read them. The card
        reads this. */
     const act = positionAction({ tpHit, dteExit, slHit, edge, pnl, dteLeft, level, ap, notHeld, tpBasis: tpTarget.basis || "max-profit" });
-    return { p, pnl, pnlNote: pv.sentence, dteLeft, level, label, ap, live, spotNow: sp, tpHit, tpTarget, slHit, dteExit, edge, act, contracts: n, sizeAssumed: size.assumed, notHeld };
+    return { p, pnl, pnlNote: pv.sentence, dteLeft, level, label, ap, live, spotNow: sp, tpHit, tpTarget, stopLevel, slHit, dteExit, edge, act, contracts: n, sizeAssumed: size.assumed, notHeld };
   }), [ownedPositions, chains, alSync, pnlOf]);
 
   // Log eventi regola (TP/SL/DTE) fuori dal render: prima veniva chiamato logEvent
@@ -3124,6 +3192,91 @@ export default function OptionsStrategyLab() {
      `attentionCount()` in rules.js is the one home: `decisions` draws the
      badge, and `looks` is what no headline may call quiet. */
   const attn = useMemo(() => attentionCount(posAlerts), [posAlerts]);
+
+  /* ---- EVERYTHING A POSITIONS CARD PRINTS, WORKED OUT ONCE (PR #44, TASKS 1 and 2) ----
+     The profit is `posAlerts`' own (the broker's when synced) — never a second derivation. The chance now is the one
+     chance (`chanceFor`) the Guardian already used; it is computed here once so the card, the entry-against-now table
+     and the Guardian read the same number. */
+  const positionModels = useMemo(() => Object.fromEntries(ownedPositions.map((p) => {
+    const c = chains[p.ticker];
+    const s = c?.spot ?? null;
+    const dteLeft = Math.max(0, Math.round((new Date(p.expiry) - Date.now()) / 86400000));
+    const qp = makeQuote(c, p.expKey);
+    const size = positionSize(p);
+    const n = size.contracts;
+    const al0 = posAlerts.find((a) => a.p.id === p.id) || null;
+    const pnl = al0 ? al0.pnl : null;
+    const dteExit = dteLeft <= RULES.exitDTE;
+    const act = al0?.act || positionAction({ pnl: null, dteExit, dteLeft });
+    const ivNow = (() => {
+      if (!c || !p.expKey || !c.byExp[p.expKey]) return p.thesis?.iv ?? getU(p.ticker).iv;
+      const ivs = p.legs.map((l) => qp(l)?.iv).filter(Boolean);
+      return ivs.length ? ivs.reduce((a, b) => a + b, 0) / ivs.length : (p.thesis?.iv ?? getU(p.ticker).iv);
+    })();
+    const seasNow = seasonalNowOf(seasonal, p.ticker);
+    // THE ONE CHANCE, ON A POSITION THAT IS ALREADY OPEN. The Guardian's TIS compares this with `thesis.pop`,
+    // recorded at entry — and until the one chance existed the two came from two different arithmetics.
+    const mcNow = s ? (() => {
+      const a2 = analyze(p.legs, s, Math.max(1, dteLeft), ivNow, qp);
+      return chanceFor(a2, { ticker: p.ticker, legs: p.legs, spot: s,
+        dte: Math.max(1, dteLeft), expKey: p.expKey || null, thesisIV: p.thesis?.iv ?? null });
+    })() : null;
+    const popNow = mcNow ? mcNow.pop : null;
+    const nowSignals = signalSnapshot(fused[p.ticker] || null,
+      { reading: readiness[p.ticker], seasonalSource: seasonalFor(p.ticker).source });
+    const tpTarget = al0 && al0.tpTarget ? al0.tpTarget : takeProfitTarget({ legs: p.legs, maxProfit: p.maxProfit,
+      maxLoss: p.maxLoss, entryNet: p.entryNet, contracts: n });
+    const share = pnlShareOfRisk(pnl, p, n);
+    const exitPlan = takeProfitTarget({ legs: p.legs, maxProfit: p.maxProfit, maxLoss: p.maxLoss, entryNet: p.entryNet });
+    return [p.id, {
+      c, s, qp, dteLeft, n, al0, pnl, act, ivNow, seasNow, mcNow, popNow, tpTarget, nowSignals,
+      name: displayName(p), working: closeWorking(p, alSync),
+      shareText: pnlShareText(share),
+      progress: exitProgress({ p, pnl, dteLeft, tpTarget, n }),
+      ev: entryVsNow({ p, n, pnl, popNow, nowSignals }),
+      unitNote: `${n} contract${n === 1 ? "" : "s"}, the whole position. Now is what is left from here.`,
+      fileKind: fileState(p, alSync),
+      planSentence: exitPlanSentence(exitPlan), planDetail: exitPlanDetail(exitPlan, n),
+    }];
+  })), [ownedPositions, chains, posAlerts, seasonal, fused, readiness, seasonalFor, alSync, chanceFor]); // eslint-disable-line
+
+  /* THE DETAILS SHEET (PR #44, TASK 2): the position, read-only. "Monitor" used to hand its legs to Build, which
+     re-priced it as a NEW trade at today's prices, re-sized it and left the ticket live — a Send there opened a second
+     identical position, and it showed neither the entry nor the position now. Built here, outside the Positions block,
+     because a sheet is one tap away and `src/wordcount.mjs` counts what is at rest. */
+  const detailsSheet = (() => {
+              const dp = detailsId != null ? ownedPositions.find((x) => x.id === detailsId) : null;
+              const dm = dp ? positionModels[dp.id] : null;
+              if (!dp || !dm) return null;
+              const fillPx = recordFillPrice(dp);
+              const legsTxt = `${dp.legs.map((l) => `${l.side > 0 ? "+" : "−"}${l.qty} ${l.strike}${l.type === "call" ? "C" : "P"}`).join(" / ")} · ${positionSizeNote(dp)}`;
+              return (
+                <PositionDetails p={dp} title={dm.name} onClose={() => setDetailsId(null)}
+                  legsText={legsTxt} expiresText={dp.expKey || new Date(dp.expiry).toLocaleDateString("en-GB")}
+                  openedText={new Date(dp.openedAt).toLocaleDateString("en-GB")}
+                  entryText={fillPx != null
+                    ? `${limitWords(fillPx) || fmt$(Math.abs(fillPx) * 100)} a combination, the broker's fill`
+                    : `${limitWords(dp.entryNet) || fmt$(Math.abs(dp.entryNet) * 100)} a combination, the app's own figure`}
+                  fillSentence={(dp.alpacaFillPrice != null || (isBrokerHolding(dp) && dp.entrySource === "fill"))
+                    ? fillVsLimit({ limit: dp.alpacaLimit, fill: recordFillPrice(dp), contracts: dm.n, limitSigned: dp.alpacaLimitSigned === true }).sentence
+                    : null}
+                  pnl={dm.pnl} shareText={dm.shareText} ev={dm.ev} unitNote={dm.unitNote}
+                  spotNow={dm.s} bars={barsCache[dp.ticker] || []}
+                  planSentence={dm.planSentence} planDetail={dm.planDetail}
+                  timeline={dp.timeline || []} stageNote={positionStageNote(dp)}
+                  edgeNote={dm.al0 && dm.al0.edge && dm.al0.edge.thin ? dm.al0.edge.sentence : null}
+                  pnlNote={dm.al0 ? dm.al0.pnlNote : null}
+                  fileKind={dm.fileKind}
+                  onFile={() => { setDetailsId(null); setClosing({ id: dp.id, written: "", err: null }); }}
+                  onAnalyse={() => {
+                    setDetailsId(null);
+                    openOnBuild({ ticker: dp.ticker, expKey: dp.expKey || null, legs: dp.legs, name: `${dm.name} (analysis)`,
+                      origin: { kind: "position", key: null,
+                        note: `This is a trade you already hold, priced again at today's market. A Send here would open a second position, not manage this one.` } });
+                  }} />
+              );
+            })();
+
   const nAttention = attn.decisions;
 
   const setNotify = async (on) => {
@@ -3406,7 +3559,27 @@ export default function OptionsStrategyLab() {
   const buildSigns = useMemo(() => stopSigns({
     fused: fused[ticker] || null, gateWarnings: guard?.warnings || [], feedBroken: legsInverted,
     noQuoteLegs: book.missing.length, contracts, askSize: touchSizeOf(legs, A),
-  }), [fused, ticker, guard, legsInverted, book, contracts, legs, A]);
+    // A LABEL, NEVER A REFUSAL (PR #44, TASK 2): an open position already has these legs. Owning one and opening a
+    // second is the user's call, and the gate does not know about it.
+    holds: !!holdsStructure(ownedPositions, { ticker, expKey, legs }),
+  }), [fused, ticker, guard, legsInverted, book, contracts, legs, A, ownedPositions, expKey]);
+  /* THE FOUR FACTORS AS BUILD READS THEM NOW, AGAINST THE ONES THE CARD CARRIED (PR #44, TASK 4). One line, in the
+     pattern of `reconcileFigures()`: what moved and why, or that nothing did. */
+  const buildSignals = useMemo(
+    () => signalSnapshot(fused[ticker] || null, { reading: readiness[ticker], seasonalSource: seasonalFor(ticker).source }),
+    [fused, ticker, readiness, seasonalFor]);
+  /* A TRADE THAT ARRIVED FROM A HAND-OFF, WITH LEGS, SHOWS THE ONE CARD (PR #44, TASK 4). Built from nothing here, it
+     is the builder as it was. */
+  const carded = !!buildOrigin && legs.length > 0;
+  const cardOrigin = carded && buildOrigin.kind === "card";
+  // BACK TO THE LIST (PR #44, TASK 3): Find still holds the same request, so it is a step back and a scroll to the card.
+  const scrollToCard = useRef(null);
+  const backToList = () => { scrollToCard.current = buildOrigin ? buildOrigin.key : null; goStep("find"); };
+  const buildSizeLine = contractsTyped != null
+    ? `${contracts} contract${contracts === 1 ? "" : "s"}, set by hand` : sizeLine(request, budgetSize);
+  const signalCmp = useMemo(
+    () => (optRef && optRef.signals && optRef.signals.ticker === ticker ? compareSignals(optRef.signals, buildSignals, { ticker }) : null),
+    [optRef, buildSignals, ticker]);
 
 
   /* ---- direzione del trade e scontro col segnale (PRD §7) ----
@@ -3485,8 +3658,8 @@ export default function OptionsStrategyLab() {
     // A SORT KEY CANNOT BE NULL, so an unknown season contributes nothing to
     // the ORDER of the list. That is not the same as printing a zero: the
     // number on screen is `seasonalScore`, which stays null and says so.
-    const score = (seasonalScore ?? 0) * 1.5 + (f ? (f.score / 25) * (f.confidence / 100) : 0);
-    const sugg = score > 1.5 ? "verybull" : score > 0.5 ? "bull" : score < -1.5 ? "verybear" : score < -0.5 ? "bear" : "neutral";
+    const score = suggestionScore(seasonalScore, f);
+    const sugg = suggestionOf(seasonalScore, f);
     return { tk, name: u.name, spot: c?.spot ?? null, seasonalScore, score, sugg, real: !!seasonal[tk],
       // ONE SERIES, ONE NUMBER OF YEARS. The header said "10y history" and the
       // panel beside it said "11y" about the same numbers: the ten-year cutoff
@@ -3549,7 +3722,7 @@ export default function OptionsStrategyLab() {
       const strikes = expiryStrikes(c, ek);
       if (!strikes) { failed.push({ tk, why: "board unreadable" }); continue; }
       const row = scan.find((r) => r.tk === tk);
-      const sent = find.dir === "season" ? (row ? row.sugg : "neutral") : find.dir;
+      const sent = find.dir === "season" ? (row ? suggestionOf(row.seasonalScore, fusedFind[tk]) : "neutral") : find.dir;
       const qq = makeQuote(c, ek);
       const peers = expiryOpenInterest(c, ek);
       // THE BOARD'S OWN ARITHMETIC, READ ONCE (PR #41, TASK 2). A stale board
@@ -3567,7 +3740,7 @@ export default function OptionsStrategyLab() {
       for (const { p, a, aFill } of r.rows) {
         const lf = listCardFigures(p.legs, { spot: c.spot, dte: d2, iv: u.iv, q: qq, ticker: tk, expKey: ek,
           seasonal: seasonalFor(tk), a, aFill });
-        const f = fused[tk] || null;
+        const f = fusedFind[tk] || null;
         const prof = evProfile(lf.mc, aFill.maxProfit, aFill.maxLoss);
         const cand = candidateOf({ name: p.name, legs: p.legs, a: aFill, pop: lf.pop, dte: d2, expKey: ek,
           ...seasonalStampFields(lf.mc), ...chanceDrawFields(lf.mc) }, { ticker: tk, spot: c.spot, source: "find" });
@@ -3584,11 +3757,21 @@ export default function OptionsStrategyLab() {
     items.sort(compareCandidates);
     const stale = Object.entries(boards).filter(([, b]) => b.stale).map(([tk, b]) => ({ tk, expKey: b.expKey }));
     return { items, tally, noBoard, loading, failed, oiSkipped, spreadSkipped, comboSpreadSkipped, boards, stale };
-  }, [find.markets, find.dir, find.horizon, chains, chainErr, scan, liqLevel, fused, seasonalFor, ivRankOf]); // eslint-disable-line
+  }, [find.markets, find.dir, find.horizon, chains, chainErr, scan, liqLevel, fusedFind, seasonalFor, ivRankOf]); // eslint-disable-line
   /* THE LIST ON SCREEN: the one-market filter (what the Shortlist step was),
      and the flag toggle. Nothing is dropped without a count saying so. */
   const findShown = useMemo(() => findGen.items.filter((x) =>
     (!find.market || x.tk === find.market) && (find.flagged || x.flags.length === 0)), [findGen, find.market, find.flagged]);
+  useEffect(() => {
+    if (step !== "find" || !scrollToCard.current) return;
+    const key = scrollToCard.current;
+    const id = requestAnimationFrame(() => {
+      const el = typeof document !== "undefined"
+        ? Array.from(document.querySelectorAll("[data-card-key]")).find((n) => n.getAttribute("data-card-key") === key) : null;
+      if (el) { el.scrollIntoView({ block: "center" }); scrollToCard.current = null; }
+    });
+    return () => cancelAnimationFrame(id);
+  }, [step, findShown]);
   const flaggedHidden = find.flagged ? 0 : findGen.items.filter((x) => (!find.market || x.tk === find.market) && x.flags.length).length;
   /* THE LIQUIDITY FLOOR'S OWN PANEL is about ONE board — its threshold and its
      peers — so it reads the market in focus: the filter, or the top card's. */
@@ -3621,6 +3804,8 @@ export default function OptionsStrategyLab() {
       for (const tk of todo) {
         findAsked.current.add(tk);
         loadBars(tk);
+        // NEWS TOO (PR #44, TASK 4): the four factors read the news pool, so Find loads it for every market it shows.
+        if (!news[tk]) loadNews(tk, true);
         if (!chains[tk]) await refreshChain(tk, true);
       }
     })();
@@ -4228,12 +4413,12 @@ export default function OptionsStrategyLab() {
                 const signs = stopSigns({ fused: x.fused, flags: x.flags, feedBroken: x.feedBroken,
                   noQuoteLegs: x.noQuoteLegs, contracts: size && size.ok ? size.n : null, askSize: x.touchSize });
                 return (
-                  <CandidateCard key={x.key}
+                  <CandidateCard key={x.key} cardKey={x.key}
                     name={`${x.tk} · ${x.name}`} legs={`${legsLine(x.legs)} · ${x.expKey}`}
                     misses={misses} signs={signs} size={sizeLine(request, size)}
                     rr={x.lf.rr} pop={x.lf.pop} profit={af.maxProfit} risk={af.maxLoss} noCeiling={af.profitUnbounded}
                     bands={x.lf.bands} bars={barsCache[x.tk] || []} ticker={x.tk}
-                    badge={<SignalBadge fused={x.fused} onClick={() => { setWhyTk(x.tk); setEv("why"); }} />}
+                    badge={<SignalBadge fused={x.fused} state={readiness[x.tk]} onClick={() => { setWhyTk(x.tk); setEv("why"); }} />}
                     actions={
                       <CandidateActions
                         ticked={inCompare(compare, x.cand)} onTick={() => tickCompare(x.cand)}
@@ -4349,14 +4534,19 @@ export default function OptionsStrategyLab() {
 
         {tab === "build" && !showSettings && step === "build" && (
           <div style={{ marginTop: 12 }}>
-            <div style={{ ...sansUI, fontSize: 19, fontWeight: 800, color: T.ink }}>
-              Step 3 — {legs.length ? `${ticker} · ${stratName}` : "one trade, taken apart"}
-            </div>
+            {/* THE BACK LINK IS FIRST ON A TRADE THAT ARRIVED FROM A CARD (PR #44, TASKS 3 and 4): it returns to
+                Find with the same request, scrolled to that card. */}
+            {cardOrigin && (
+              <Btn ghost color={T.blue} onClick={backToList} style={{ marginBottom: 8 }}>← Back to the list</Btn>
+            )}
+            <h2 data-view-heading tabIndex={-1} style={{ ...sansUI, fontSize: 19, fontWeight: 800, color: T.ink, margin: 0, outline: "none" }}>
+              {carded ? "Build" : `Step 3 — ${legs.length ? `${ticker} · ${stratName}` : "one trade, taken apart"}`}
+            </h2>
             {/* `StepNav` already writes what each step carries under its own
                 number (`stepCarry` in path.js), so this repeated it a second
                 time four lines below it (P9, TASK 3). */}
             <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
-              <Btn small ghost color={T.blue} onClick={() => goStep("find")}>← Back to Find</Btn>
+              {!cardOrigin && <Btn small ghost color={T.blue} onClick={() => goStep("find")}>← Back to Find</Btn>}
               {compare.length > 0 && (
                 <Btn small ghost color={T.blue} onClick={() => { setShowCompare(true); goStep("find"); }}>
                   {compare.length} still ticked to compare
@@ -4366,9 +4556,12 @@ export default function OptionsStrategyLab() {
           </div>
         )}
         {tab === "build" && !showSettings && step === "build" && <div ref={buildAnchor} style={{ scrollMarginTop: 12 }} />}
-        {tab === "build" && !showSettings && step === "build" && buildScreen === "builder" && (
-          <div style={{ marginTop: 12 }}>
-            <Panel>
+        {tab === "build" && !showSettings && step === "build" && buildScreen === "builder" && (() => {
+          /* THE BUILD SCREEN, IN PIECES (PR #44, TASK 4). The pieces are the ones this screen always had, unchanged.
+             What changed is how they are laid out: a trade that arrived from a card shows THAT card (the one
+             `CandidateCard` Find prints, fed by `buildFigures()`), then size and send, then three folds. A screen
+             with no trade behind it keeps the builder as it was. */
+          const pName = (<>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
                 <input value={stratName} onChange={(e) => setStratName(e.target.value)}
                   style={{ ...mono, background: "transparent", border: "none", borderBottom: `1px dashed ${T.field}`, color: T.ink, fontSize: 15, fontWeight: 700, outline: "none", minWidth: 200 }} />
@@ -4382,6 +4575,8 @@ export default function OptionsStrategyLab() {
                 </div>
               </div>
 
+          </>);
+          const pExpiry = (<>
               {chain && (
                 <div style={{ marginTop: 10, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
                   <span style={{ ...mono, fontSize: 10, color: T.dim }}>EXPIRY</span>
@@ -4421,6 +4616,8 @@ export default function OptionsStrategyLab() {
                 </Fold>
               )}
 
+          </>);
+          const pWhy = (<>
               <WhyThisTrade
                 fused={fused[ticker]}
                 ticker={ticker} weatherData={weather} newsItems={newsPool} month={NOW_MONTH}
@@ -4430,6 +4627,8 @@ export default function OptionsStrategyLab() {
                   : `This structure needs ${ticker} to go ${tradeDir > 0 ? "up" : "down"}.`}
               />
 
+          </>);
+          const pWarn = (<>
               {/* ---- ONE WARNINGS PANEL, COLLAPSED (PRD §4l, TASK 1.7) ----
                   The against-the-signal block (PRD §7) and the gate's own
                   warnings, in one place, with the number in the summary line.
@@ -4477,6 +4676,8 @@ export default function OptionsStrategyLab() {
                 );
               })()}
 
+          </>);
+          const pRoom = (<>
               {/* THE ENTRY FLOOR IS NOT A CLIFF ANY MORE (src/rules.js,
                   `entryRoom`). Three bands, and only the middle one has a door:
                   at or inside the 21-day exit rule there is no trade to have,
@@ -4512,6 +4713,8 @@ export default function OptionsStrategyLab() {
                 </div>
               )}
 
+          </>);
+          const pSnap = (<>
               {/* THE GATE VERDICT HAS MOVED ONTO THE TRADE CARD, BESIDE THE
                   BUTTON. It used to be printed here, above the chain and the
                   legs editor — hundreds of pixels from the control it governs —
@@ -4530,8 +4733,12 @@ export default function OptionsStrategyLab() {
                 </div>
               )}
 
+          </>);
+          const pChain = (<>
               <ChainMatrix chain={chain} expKey={expKey} spot={spot} legs={legs} onCell={onChainCell} />
 
+          </>);
+          const pLegs = (<>
               {/* Legs editor */}
               <div style={{ marginTop: 12, display: "grid", gap: 6 }}>
                 {legs.map((l, i) => {
@@ -4570,6 +4777,8 @@ export default function OptionsStrategyLab() {
               </div>
               {optLeg && <OptionPanel occ={optLeg.occ} label={optLeg.label} quote={optLeg.quote} onClose={() => setOptLeg(null)} />}
 
+          </>);
+          const pReconcile = (<>
               {/* THE CARD AGAINST BUILD, EVERY FIGURE (PR #40, TASK 0). It
                   compared the mid's entry alone and printed "Same numbers as
                   the Shortlist" over a risk of $68 against the card's $62. */}
@@ -4579,6 +4788,8 @@ export default function OptionsStrategyLab() {
                   <div style={{ ...mono, fontSize: 10, color: r.same ? T.green : T.amber, marginTop: 10, lineHeight: 1.6 }}>{r.line}</div>
                 ) : null;
               })()}
+          </>);
+          const pPrice = (compact) => (<>
               {/* ============ ONE PRICE, AND WHAT CROSSING COSTS (P10 §1).
                   ============ The owner's reading of the whole product: "is it
                   a good bet? yes — but how much do I pay for it?" Measured on
@@ -4604,6 +4815,7 @@ export default function OptionsStrategyLab() {
                 return (
                   <div style={{ marginTop: 12, padding: "12px 14px", background: T.panel,
                     border: `1px solid ${T.line}`, borderLeft: `3px solid ${T.blue}`, borderRadius: 8 }}>
+                    {!compact && (<>
                     <div style={{ ...sansUI, fontSize: 15, fontWeight: 700, color: T.ink }}>
                       {ticker} · {stratName}
                     </div>
@@ -4636,7 +4848,8 @@ export default function OptionsStrategyLab() {
                         </div>
                       ))}
                     </div>
-                    <div style={{ ...mono, fontSize: 11, color: T.blue, marginTop: 9, lineHeight: 1.5 }}>
+                    </>)}
+                    <div style={{ ...mono, fontSize: 12, color: T.blue, marginTop: compact ? 0 : 9, lineHeight: 1.5 }}>
                       {crossingCostNote(cc)}
                     </div>
                     {/* THE BREAKDOWN AND THE RANGE FOLD, AS THE WHY. */}
@@ -4681,13 +4894,15 @@ export default function OptionsStrategyLab() {
                 );
               })()}
 
+          </>);
+          const pDecision = (compact) => (<>
               {/* ============ THE DECISION, IN FIVE LINES (PRD §4n) ============
                   Everything this screen printed here is still here; it opens
                   behind a tap, in a sheet over the step, because a decision is
                   what this part of the screen is for and eleven blocks of
                   correct arithmetic are not a decision. The refusals never
                   move: they are on the card, beside the button. */}
-              <TradeCard
+              <TradeCard compact={compact}
                 ticker={ticker} name={stratName}
                 card={buildCard}
                 refusals={buildRefusals}
@@ -4701,6 +4916,8 @@ export default function OptionsStrategyLab() {
                 )}
               </TradeCard>
 
+          </>);
+          const pNumbers = (<>
               {/* ---- SHEET 1: ALL THE NUMBERS. Not one figure, tooltip or
                   sentence below is changed; the block simply opens over the
                   step instead of standing between the trade and the decision.
@@ -4803,6 +5020,8 @@ export default function OptionsStrategyLab() {
               )}
               </DeskSheet>
 
+          </>);
+          const pUnified = (<>
               <div style={{ marginTop: 14 }}>
                 <Lbl>PRICE HISTORY × WHERE IT COULD GO × WHERE YOU MAKE MONEY</Lbl>
                 <div style={{ marginTop: 8 }}>
@@ -4816,6 +5035,8 @@ export default function OptionsStrategyLab() {
                 </div>
               </div>
 
+          </>);
+          const pAgree = (<>
               {(() => {
                 const t2 = ta[ticker];
                 // NO SEASONAL READING, NO AGREEMENT PANEL. `confluence()`
@@ -4837,6 +5058,8 @@ export default function OptionsStrategyLab() {
                 );
               })()}
 
+          </>);
+          const pPL = (<>
               {/* Payoff classico: vista secondaria */}
               <div style={{ marginTop: 14 }}>
               <Lbl>PROFIT AND LOSS BY PRICE · AT EXPIRY, TODAY, AND HALFWAY</Lbl>
@@ -4860,6 +5083,8 @@ export default function OptionsStrategyLab() {
               </div>
               </div>
 
+          </>);
+          const pOrder = (<>
               {/* ---- SHEET 2: PRICE IT AND SEND. The ticket PR #28 designed
                   with the owner, and the confirm step, in one sheet over the
                   step — because they are one act. Nothing in either is changed.
@@ -4976,9 +5201,57 @@ export default function OptionsStrategyLab() {
               </div>
             </div>
               </DeskSheet>
-            </Panel>
-          </div>
-        )}
+          </>);
+          const reconcileLines = (
+            <>
+              {pReconcile}
+              {signalCmp && (
+                <div style={{ ...mono, fontSize: 12, color: signalCmp.same ? T.green : T.amber, marginTop: 8, lineHeight: 1.6 }}>{signalCmp.line}</div>
+              )}
+            </>
+          );
+          if (carded) {
+            return (
+              <div style={{ marginTop: 12 }}>
+                <CandidateCard
+                  name={`${ticker} · ${stratName}`} legs={`${legsLine(legs)} · ${expKey}`}
+                  cardKey={buildOrigin && buildOrigin.key}
+                  signs={buildSigns} size={buildSizeLine}
+                  rr={BF.rr} pop={chance ? chance.pop : null} profit={AE.maxProfit} risk={AE.maxLoss} noCeiling={AE.profitUnbounded}
+                  bands={BF.bands} bars={barsCache[ticker] || []} ticker={ticker}
+                  badge={<SignalBadge fused={fused[ticker] || null} state={readiness[ticker]} onClick={() => { setWhyTk(ticker); setEv("why"); }} />} />
+                {buildOrigin && buildOrigin.note && (
+                  <div style={{ ...sansUI, fontSize: 13, color: T.amber, marginTop: 8, lineHeight: 1.5 }}>{buildOrigin.note}</div>
+                )}
+                {reconcileLines}
+                {pSnap}
+                {pWarn}
+                {pRoom}
+                <div style={{ marginTop: 12 }}>{pPrice(true)}</div>
+                {pDecision(true)}
+                {pNumbers}
+                <Fold label="open" tone={T.ink} style={{ marginTop: 12 }} summary="Edit legs and expiry">
+                  {pName}{pExpiry}{pChain}{pLegs}
+                </Fold>
+                <Fold label="open" tone={T.ink} style={{ marginTop: 6 }} summary="Charts">
+                  {pUnified}{pAgree}{pPL}
+                </Fold>
+                <Fold label="open" tone={T.ink} style={{ marginTop: 6 }} summary="Why this trade">
+                  {pWhy}
+                  <TradeLines card={buildCard} />
+                </Fold>
+                {pOrder}
+              </div>
+            );
+          }
+          return (
+            <div style={{ marginTop: 12 }}>
+              <Panel>
+                {pName}{pExpiry}{pWhy}{pWarn}{pRoom}{pSnap}{pChain}{pLegs}{reconcileLines}{pPrice(false)}{pDecision(false)}{pNumbers}{pUnified}{pAgree}{pPL}{pOrder}
+              </Panel>
+            </div>
+          );
+        })()}
 
         {/* ============ 3D ============ */}
         {/* News and Weather are no longer tabs. They are the evidence behind the
@@ -5118,244 +5391,99 @@ export default function OptionsStrategyLab() {
               )}
               <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
                 {ownedPositions.map((p) => {
-                  const c = chains[p.ticker];
-                  const s = c?.spot;
-                  const dteLeft = Math.max(0, Math.round((new Date(p.expiry) - Date.now()) / 86400000));
-                  const qp = makeQuote(c, p.expKey);
-                  // EVERY FIGURE ON THIS ROW IS THE WHOLE POSITION'S. `entryNet`,
-                  // `maxProfit` and `maxLoss` are stored per combination, so the
-                  // size is what turns them into what this trade is actually
-                  // doing — and until this session nothing knew what the size was.
-                  const size = positionSize(p);
-                  const n = size.contracts;
-                  /* >>> THE SAME P&L THE HOME PAGE READ (P9, TASK 0b). <<< This
-                     row used to re-derive its own from `netValue()` and print
-                     -$127 directly above the broker's own -$130. `posAlerts`
-                     has already asked `pnlOf()`, so the row reads the answer
-                     rather than computing a second one. */
-                  const al0 = posAlerts.find((a) => a.p.id === p.id) || null;
-                  const pnl = al0 ? al0.pnl : null;
-                  const tpHit = !!al0 && al0.tpHit, slHit = !!al0 && al0.slHit;
-                  const dteExit = dteLeft <= RULES.exitDTE;
-                  const edge = al0 ? al0.edge : null;
-                  /* >>> ONE ACTION, FIRST, IN LARGE TYPE (ROADMAP PR #38). <<<
-                     `positionAction()` in rules.js decides it; this only draws
-                     it. Everything else this card showed is in the fold below,
-                     one tap away and still mounted (the Guardian logs on mount). */
-                  const act = al0?.act || positionAction({ pnl: null, dteExit, dteLeft });
-                  const actTone = act.action === "CLOSE" ? T.red : act.action === "WARNING" ? T.amber : act.action === "HOLD" ? T.green : T.dim;
-                  const working = closeWorking(p, alSync);
+                  /* THE CARD (PR #44, TASK 1): the action, the profit, three exits, the entry against now, and the
+                     buttons — `Close at limit` always among them. Everything it prints is in `positionModels`, worked
+                     out once from the figures `posAlerts` already read; this only lays it out. Order path 3 is the
+                     same `prepareCardClose` / `sendCardClose` / `CloseConfirm` it has been since PR #38. */
+                  const m = positionModels[p.id];
+                  if (!m) return null;
                   const ca = closeAt && closeAt.id === p.id ? closeAt : null;
-                  const closeCtl = (
-                    <Btn small color={T.red} disabled={DEMO || working || !!(ca && (ca.busy || ca.prepared))}
-                      title={DEMO ? DEMO_TOOLTIP : undefined} onClick={() => prepareCardClose(p)}>
-                      {working ? "Close order working" : "Close at limit"}
-                    </Btn>
-                  );
-                  const detailsOpen = !!openDetails[p.id];
                   return (
-                    <div key={p.id} style={{ padding: "10px 12px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 6 }}>
-                        <div style={{ flex: 1, minWidth: 180 }}>
-                          <div style={{ ...mono, fontSize: 24, fontWeight: 800, color: actTone, letterSpacing: 0.5, lineHeight: 1.15 }}>
-                            {act.action || (act.kind === "not-held" ? "NOT ON ALPACA" : "NO QUOTE")}
-                          </div>
-                          <div style={{ fontSize: 13, color: T.ink, marginTop: 3, lineHeight: 1.45 }}>{act.line}</div>
-                        </div>
-                        {act.action === "CLOSE" && closeCtl}
-                      </div>
-                      {working && (
-                        <div style={{ ...mono, fontSize: 10.5, color: T.amber, marginBottom: 6, lineHeight: 1.5 }}>
-                          Close order working at the broker. When it fills, use "Close and file it" to record why the trade ended.
+                    <PositionCard key={p.id} p={p} title={m.name}
+                      action={m.act.action || (m.act.kind === "not-held" ? "NOT ON ALPACA" : "NO QUOTE")}
+                      line={m.act.line} notes={m.act.notes} pnl={m.pnl} shareText={m.shareText}
+                      progress={m.progress} ev={m.ev} unitNote={m.unitNote}
+                      closeLabel={m.working ? "Close order working" : "Close at limit"}
+                      closeDisabled={m.working || !!(ca && (ca.busy || ca.prepared))}
+                      closeTitle={DEMO ? DEMO_TOOLTIP : undefined} demo={DEMO}
+                      onClose={() => prepareCardClose(p)} onDetails={() => setDetailsId(p.id)}
+                      fileKind={m.fileKind} onFile={() => setClosing({ id: p.id, written: "", err: null })}
+                      guardian={(
+                        <GuardianPanel
+                          pos={p} spot={m.s || p.entrySpot} dteLeft={m.dteLeft} ivNow={m.ivNow}
+                          vol={sigmaFor(p.ticker)}
+                          seasonalNow={m.seasNow} pnlNow={m.pnl} popNow={m.popNow} chanceNow={m.mcNow}
+                          seasonalNote={chanceStamp(m.mcNow, p.ticker)}
+                          thesisSeasonalNote={seasonalStampNote(p.thesis, p.ticker)}
+                          vegaSign={Math.sign(p.thesis?.vega ?? 1) || 1}
+                          alpaca={!!alpaca} quoteFn={m.qp}
+                          setMsg={setMsg} logEvent={logEvent} gate={gate}
+                        />
+                      )}>
+                      {m.working && (
+                        <div style={{ ...sansUI, fontSize: 12.5, color: T.amber, marginTop: 8, lineHeight: 1.5 }}>
+                          Close order working at the broker. When it fills, use "File in Journal" to record why the trade ended.
                         </div>
                       )}
                       {ca && <CloseConfirm prep={ca} onSend={() => sendCardClose(p)} onCancel={() => setCloseAt(null)} />}
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
-                        <div style={{ fontWeight: 700, color: T.ink, fontSize: 13.5 }}>
-                          {/* THE REF, ON SCREEN, FROM THE MOMENT IT IS OPENED. It is
-                              how this trade is referred to for the rest of its life and
-                              after it: the Journal entry keeps it when the position is
-                              gone, and every timeline entry is numbered from it. */}
-                          {p.ref && <span style={{ ...mono, fontSize: 10.5, color: T.dim, marginRight: 7 }}>{p.ref}</span>}
-                          {p.ticker} · {p.name}
-                        </div>
-                        <div style={{ display: "flex", gap: 6 }}>
-                          <Btn small ghost color={T.blue} onClick={() => openOnBuild({ ticker: p.ticker, expKey: p.expKey || null, legs: p.legs, name: p.name + " (monitor)" })}>Monitor ↗</Btn>
-                          <Btn small ghost color={T.red} onClick={() => setClosing({ id: p.id, written: "", err: null })}><Trash2 size={11} /> Close and file</Btn>
-                        </div>
-                      </div>
-                      {/* CLOSING ASKS WHY, AND THE ANSWER IS KEPT.
-                          A rule close names its rule and needs nothing typed. A close
-                          with no rule behind it needs the same written reason as an
-                          against-the-signal override — including a close taken on the
-                          stop WARNING, which is a decision and is recorded as one. */}
+                      {/* FILING ASKS WHY, AND THE ANSWER IS KEPT. A rule close names its rule and needs nothing typed.
+                          A filing with no rule behind it needs the same written reason as an against-the-signal
+                          override — including a close taken on the stop WARNING, which is a decision and is recorded
+                          as one. A record Alpaca does not hold has no rule close at all (PR #44, TASK 0b). Filing
+                          sends no order. */}
                       {closing && closing.id === p.id && (() => {
-                        const al = posAlerts.find((a) => a.p.id === p.id) || null;
-                        const d = closeDecision({ alert: al, written: closing.written });
+                        const d = closeDecision({ alert: m.al0, written: closing.written });
+                        const fieldId = `file-reason-${p.id}`;
                         return (
-                          <div style={{ marginTop: 8, padding: "10px 12px", background: T.bg, border: `1px solid ${T.red}55`, borderRadius: 7 }}>
-                            <Lbl>CLOSE {p.ref || p.ticker} — WHY?</Lbl>
-                            {d.ruleExit ? (
-                              <div style={{ ...mono, fontSize: 11, color: T.green, marginTop: 6, lineHeight: 1.5 }}>{d.text}</div>
+                          <div role="group" aria-labelledby={`${fieldId}-h`}
+                            style={{ marginTop: 10, padding: "10px 12px", background: T.bg, border: `1px solid ${T.red}`, borderRadius: 7 }}>
+                            <div id={`${fieldId}-h`} style={{ ...mono, fontSize: 12, letterSpacing: "0.04em", color: T.amber }}>FILE {p.ref || p.ticker} IN THE JOURNAL — WHY?</div>
+                            {d.notHeld ? (
+                              <div style={{ ...sansUI, fontSize: 13, color: T.amber, marginTop: 6, lineHeight: 1.5 }}>{notHeldCloseWords(d.notHeld)}</div>
+                            ) : d.ruleExit ? (
+                              <div style={{ ...sansUI, fontSize: 13, color: T.green, marginTop: 6, lineHeight: 1.5 }}>{d.text}</div>
                             ) : (
-                              <div style={{ ...mono, fontSize: 11, color: T.mut, marginTop: 6, lineHeight: 1.5 }}>
+                              <div style={{ ...sansUI, fontSize: 13, color: T.mut, marginTop: 6, lineHeight: 1.5 }}>
                                 No rule ended this trade, so this is a close you are choosing. Write why: it is stored
                                 with the trade and it is what the Journal can teach you something from later.
                               </div>
                             )}
                             {d.stopWarning && (
-                              <div style={{ ...mono, fontSize: 10.5, color: T.amber, marginTop: 6, lineHeight: 1.5 }}>
-                                {`⚠ ${stopWarningSentence(al?.pnl ?? null)}`}
+                              <div style={{ ...sansUI, fontSize: 12.5, color: T.amber, marginTop: 6, lineHeight: 1.5 }}>
+                                {`⚠ ${stopWarningSentence(m.al0?.pnl ?? null)}`}
                               </div>
                             )}
-                            <textarea
+                            <label htmlFor={fieldId} style={{ ...sansUI, display: "block", fontSize: 13, fontWeight: 700, color: T.ink, marginTop: 10 }}>
+                              {d.ruleExit ? "Anything you want on the record (optional)" : `Why are you filing this? At least ${CLOSE_REASON_MIN} characters.`}
+                            </label>
+                            <textarea id={fieldId}
                               value={closing.written} rows={2}
                               onChange={(e) => setClosing((c) => ({ ...c, written: e.target.value, err: null }))}
-                              placeholder={d.ruleExit ? "Anything you want on the record (optional)" : `Why are you closing this? At least ${CLOSE_REASON_MIN} characters.`}
-                              style={{ width: "100%", marginTop: 8, padding: "7px 9px", background: T.panel, color: T.ink,
-                                border: `1px solid ${T.field}`, borderRadius: 6, ...mono, fontSize: 11.5, boxSizing: "border-box", resize: "vertical" }} />
+                              style={{ width: "100%", marginTop: 4, padding: "8px 10px", background: T.panel, color: T.ink,
+                                border: `1px solid ${T.field}`, borderRadius: 6, ...sansUI, fontSize: 14, boxSizing: "border-box", resize: "vertical" }} />
                             {!d.ruleExit && !d.reason.ok && (
-                              <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 4 }}>{d.reason.message}</div>
+                              <div style={{ ...sansUI, fontSize: 12.5, color: T.mut, marginTop: 4 }}>{d.reason.message}</div>
                             )}
-                            {closing.err && <div style={{ ...mono, fontSize: 10.5, color: T.red, marginTop: 4 }}>{closing.err}</div>}
-                            <div style={{ display: "flex", gap: 6, marginTop: 9, flexWrap: "wrap" }}>
-                              <Btn small color={T.red} disabled={!d.reason.ok}
+                            {closing.err && <div style={{ ...sansUI, fontSize: 12.5, color: T.red, marginTop: 4 }}>{closing.err}</div>}
+                            <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                              <Btn color={T.amber} disabled={!d.reason.ok}
                                 onClick={async () => {
                                   const r = await closePos(p.id, { written: closing.written });
                                   if (r.ok) setClosing(null);
                                   else setClosing((c) => ({ ...c, err: r.decision.reason.message }));
-                                }}>Close and file it</Btn>
-                              <Btn small ghost onClick={() => setClosing(null)}>Keep it open</Btn>
+                                }}>File in Journal</Btn>
+                              <Btn ghost onClick={() => setClosing(null)}>Keep it open</Btn>
                             </div>
                           </div>
                         );
                       })()}
-                      <button onClick={() => setOpenDetails((o) => ({ ...o, [p.id]: !o[p.id] }))}
-                        style={{ ...mono, fontSize: 10.5, color: T.blue, background: "transparent", border: "none", padding: 0, marginTop: 6, cursor: "pointer", minHeight: 30 }}>
-                        {detailsOpen ? "hide details ▲" : "legs, profit, exits, details ▼"}
-                      </button>
-                      <div style={{ display: detailsOpen ? "block" : "none" }}>
-                      {act.notes.map((n, i) => (
-                        <div key={i} style={{ ...mono, fontSize: 10.5, color: T.amber, marginTop: 5, lineHeight: 1.55 }}>⚠ {n}</div>
-                      ))}
-                      {act.action !== "CLOSE" && (
-                        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 6 }}>
-                          {closeCtl}
-                          <span style={{ ...mono, fontSize: 10, color: T.dim }}>No rule says close. Closing is your choice, at a limit priced now.</span>
-                        </div>
-                      )}
-                      <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 3 }}>
-                        {p.legs.map((l) => `${l.side > 0 ? "+" : "−"}${l.qty} ${l.strike}${l.type === "call" ? "C" : "P"}`).join(" / ")} · expires {p.expKey || new Date(p.expiry).toLocaleDateString("en-GB")} · opened {new Date(p.openedAt).toLocaleDateString("en-GB")}
-                      </div>
-                      {/* HOW BIG IT IS — AND WHETHER THAT IS KNOWN.
-                          An assumed 1 must never print as a measured 1: nothing
-                          wrote this field before this build, so a position saved
-                          earlier has no size and every figure on the row is read
-                          as one combination. `positionSizeNote()` says which. */}
-                      <div style={{ ...mono, fontSize: 10.5, color: size.assumed && size.perCombo === 1 ? T.amber : T.mut, marginTop: 3, lineHeight: 1.5 }}>
-                        {size.assumed && size.perCombo === 1 ? "⚠ " : "× "}{positionSizeNote(p)}
-                      </div>
-                      {/* THE ORDER BEHIND THIS ONE HAS NOT FILLED. This list is
-                          `ownedPositions` now, so the case should be impossible
-                          — but a record whose two broker fields contradict each
-                          other is exactly the kind of thing that put three
-                          phantom positions on this screen, and a guard that
-                          self-suppresses costs nothing. `positionStageNote()`
-                          returns null for anything genuinely owned, so the
-                          words have one home and cannot drift from Watching's. */}
-                      {positionStageNote(p) && (
-                        <div style={{ ...mono, fontSize: 10.5, color: T.amber, marginTop: 5, lineHeight: 1.6 }}>
-                          ⚠ {positionStageNote(p)}
-                        </div>
-                      )}
-                      {/* WHAT YOU ASKED FOR AGAINST WHAT YOU GOT — the comparison
-                          ROADMAP P0 has owed since PR #28 and could not make,
-                          because nothing had ever filled. It prints only on a
-                          position that really did fill, and a record with no
-                          limit of its own SAYS so rather than quoting the fill
-                          back as though it had been the target (journal.js). */}
-                      {(p.alpacaFillPrice != null || (isBrokerHolding(p) && p.entrySource === "fill")) && (
-                        <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 5, lineHeight: 1.6 }}>
-                          {fillVsLimit({ limit: p.alpacaLimit, fill: recordFillPrice(p),
-                            contracts: size.contracts, limitSigned: p.alpacaLimitSigned === true }).sentence}
-                        </div>
-                      )}
-                      {/* >>> THE ENTRY QUESTION, ASKED AGAIN (P9, TASK 2). <<<
-                          A warning, never an exit rule: the exit rules were
-                          chosen at construction and are frozen, and nothing
-                          here closes anything. It renders where the figures
-                          are, because a refusal behind a tap is not a refusal. */}
-                      {edge && edge.thin && (
-                        <div style={{ ...mono, fontSize: 10.5, color: T.amber, marginTop: 7, lineHeight: 1.6, padding: "8px 10px", background: `${T.amber}0f`, border: `1px solid ${T.amber}44`, borderRadius: 6 }}>
-                          ⚠ {edge.sentence}
-                        </div>
-                      )}
-                      {/* AND WHOSE NUMBER THE PROFIT IS. Null when the broker
-                          answered — a figure read off the account needs no
-                          apology, and printing one on every row would be the
-                          §4m fault in the other direction. */}
-                      {al0?.pnlNote && (
-                        <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 5, lineHeight: 1.55 }}>
-                          {al0.pnlNote}
-                        </div>
-                      )}
-                      {/* PRD §6: the gauge is the primary visual on position detail.
-                          It is drawn from payoff() like every other zone in the app. */}
-                      <GaugeFigure legs={p.legs} entryNet={p.entryNet} spot={s ?? p.entrySpot}
-                        ticker={p.ticker} size={230} style={{ marginTop: 10 }} />
-                      <div style={{ display: "flex", gap: 14, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
-                        <Stat k="ENTRY" v={fmt$(Math.abs(p.entryNet) * 100 * n)} tip={n > 1 ? `${n} × ${fmt$(Math.abs(p.entryNet) * 100)} a combination` : undefined} />
-                        <Stat k="PROFIT NOW" v={pnl != null ? fmt$(pnl) : "loading…"} c={pnl >= 0 ? T.green : T.red}
-                          tip={al0?.pnlNote || undefined} />
-                        {/* A PERCENTAGE OF ALMOST NOTHING IS NOT A SHARE OF
-                            ANYTHING. -$127 against a $4 maximum printed
-                            "-3188%" — a true division and a false sentence.
-                            `shareOfMaximum()` applies the rule `rewardRisk()`
-                            already applies: nothing divides by a figure under
-                            MIN_NET_DOLLARS, and below it this says what it
-                            means in words. */}
-                        {(() => { const sh = shareOfMaximum(pnl, p.maxProfit == null ? null : p.maxProfit * n);
-                          return <Stat k="OF THE MAXIMUM" v={sh.text} tip={sh.note || undefined} />; })()}
-                        <Stat k="DTE" v={dteLeft} c={dteExit ? T.amber : T.ink} />
-                      </div>
-                      {(() => {
-                        const ivNow = (() => {
-                          if (!c || !p.expKey || !c.byExp[p.expKey]) return p.thesis?.iv ?? getU(p.ticker).iv;
-                          const ivs = p.legs.map((l) => qp(l)?.iv).filter(Boolean);
-                          return ivs.length ? ivs.reduce((a, b) => a + b, 0) / ivs.length : (p.thesis?.iv ?? getU(p.ticker).iv);
-                        })();
-                        const seasNow = seasonalNowOf(seasonal, p.ticker);
-                        // THE ONE CHANCE, ON A POSITION THAT IS ALREADY OPEN.
-                        // The Guardian's TIS compares this with `thesis.pop`,
-                        // recorded at entry — and until now the two came from
-                        // two different arithmetics, so the score measured the
-                        // gap between two formulas as much as the gap between
-                        // two days.
-                        const mcNow = s ? (() => {
-                          const a2 = analyze(p.legs, s, Math.max(1, dteLeft), ivNow, qp);
-                          return chanceFor(a2, { ticker: p.ticker, legs: p.legs, spot: s,
-                            dte: Math.max(1, dteLeft), expKey: p.expKey || null, thesisIV: p.thesis?.iv ?? null });
-                        })() : null;
-                        const popNow = mcNow ? mcNow.pop : null;
-                        return (
-                          <GuardianPanel
-                            pos={p} spot={s || p.entrySpot} dteLeft={dteLeft} ivNow={ivNow}
-                            vol={sigmaFor(p.ticker)}
-                            seasonalNow={seasNow} pnlNow={pnl} popNow={popNow} chanceNow={mcNow}
-                            seasonalNote={chanceStamp(mcNow, p.ticker)}
-                            thesisSeasonalNote={seasonalStampNote(p.thesis, p.ticker)}
-                            vegaSign={Math.sign(p.thesis?.vega ?? 1) || 1}
-                            alpaca={!!alpaca} quoteFn={qp}
-                            setMsg={setMsg} logEvent={logEvent} gate={gate}
-                          />
-                        );
-                      })()}
-                      </div>
-                    </div>
+                    </PositionCard>
                   );
                 })}
               </div>
             </Panel>
+
+            {detailsSheet}
 
             {alpaca && <AlpacaDesk setMsg={setMsg} gate={gate} positions={ownedPositions} />}
 
