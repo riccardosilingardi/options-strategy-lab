@@ -110,10 +110,10 @@ export function StepForward({ label, sub, onClick, disabled, disabledNote }) {
    EVIDENCE — the same chips at every step, opening over it
 ==================================================================== */
 
-export function EvidenceBar({ items = [], open, onOpen, mark = {} }) {
+export function EvidenceBar({ items = [], open, onOpen, mark = {}, heading = "EVIDENCE" }) {
   return (
     <div style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center", marginTop: 10 }}>
-      <span style={{ ...mono, fontSize: 10, letterSpacing: "0.15em", color: T.dim, marginRight: 4 }}>EVIDENCE</span>
+      <span style={{ ...mono, fontSize: 10, letterSpacing: "0.15em", color: T.dim, marginRight: 4, width: heading === "EVIDENCE" ? undefined : "100%" }}>{heading}</span>
       {items.map(({ id, label, I, sub }) => {
         const flag = mark[id] || null;         // "thinking" / "answer ready"
         const col = flag ? T.amber : open === id ? T.blue : T.mut;
@@ -206,11 +206,11 @@ export function DeskSheet({ open, eyebrow, title, sub, onClose, children }) {
 }
 
 /* THE COMPARE TRAY AND THE TICK/KEEP/BUILD ROW LIVE IN `card.jsx` NOW (PR #45): they are nothing but candidates, and
-   Find is the only screen that mounts them. Re-exported here so every importer keeps working until PR #46. */
+   Find is the only screen that mounts them. Re-exported here so every importer keeps working until PR #47. */
 export { CompareTray, CandidateActions } from "./card.jsx";
 
 /* THE FOLD LIVES IN `ui.jsx` NOW (PR #45) — one home for the atom, re-exported here so every screen that imports it
-   from this file keeps working until the sweep that moves them (ROADMAP PR #46). */
+   from this file keeps working until the sweep that moves them (ROADMAP PR #47). */
 export { Fold } from "./ui.jsx";
 
 /* ====================================================================

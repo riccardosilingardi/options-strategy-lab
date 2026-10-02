@@ -234,7 +234,7 @@ export { CardFigure };
 export function CandidateCard({
   name, legs = "", rr = null, pop = null, figures = null, sizeText = null,
   picture = null, misses = [], actions = null, badge = null, direction = null, flags = [], signs = null,
-  cardKey = null, style,
+  cardKey = null, more = null, style,
 }) {
   const f = figures || { n: null, risk: null, profit: null, unbounded: false, perRisk: null, perProfit: null };
   const sized = f.n != null;
@@ -261,12 +261,20 @@ export function CandidateCard({
         <CardFigure k={CARD_LABELS.rr} v={rr == null ? "—" : returnText(rr)} c={T.amber} />
       </div>
       {sizeText && <div style={{ ...mono, fontSize: FS.xs, fontWeight: FW.bold, lineHeight: LH.body, color: T.blue, marginTop: 6 }}>{sizeText}</div>}
-      {sized && (
-        <Fold summary="Per contract" label="figures" tone={T.dim} style={{ marginTop: 2 }}>
+      {(sized || more) && (
+        <Fold summary={sized ? "Per contract" : "More"} label={sized ? "figures" : "more"} tone={T.dim} style={{ marginTop: 2 }}>
+          {sized && (
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             <CardFigure k="RISK, ONE CONTRACT" v={f.perRisk == null ? "—" : money(f.perRisk)} c={T.red} />
             <CardFigure k="MAX PROFIT, ONE CONTRACT" v={f.unbounded ? NO_CEILING : f.perProfit == null ? "—" : money(f.perProfit)} c={T.green} />
           </div>
+          )}
+          {/* EVIDENCE HAS A SUBJECT (PR #46, TASK 2): this card's market, not Build's. */}
+          {more && (
+            <Btn small ghost color={T.blue} onClick={more.onOpen} style={{ marginTop: 6 }}>
+              More on {more.tk}: levels · history
+            </Btn>
+          )}
         </Fold>
       )}
       {actions && <div style={{ marginTop: 8 }}>{actions}</div>}

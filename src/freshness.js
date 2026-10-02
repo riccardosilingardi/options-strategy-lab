@@ -123,3 +123,21 @@ export function freshnessNote(kind, at, { what = null, now = Date.now() } = {}) 
  */
 export const staleAmong = (wanted = [], at = {}, now = Date.now()) =>
   (Array.isArray(wanted) ? wanted : []).filter((k) => isStale(k, at?.[k], now));
+
+/**
+ * FIND'S BAR: "N markets · prices Xm ago", the OLDEST of the selected markets' chains (PR #46, TASK 1).
+ * A market whose chain has not loaded is counted, never read as fresh.
+ * @param markets  the selected tickers
+ * @param chains   ticker -> chain ({ updated })
+ * @param ago      (date) => "12m ago" — the screen's one age formatter
+ */
+export function findFreshness(markets = [], chains = {}, ago = (d) => String(d)) {
+  const n = (markets || []).length;
+  const times = (markets || []).map((tk) => Date.parse(chains?.[tk]?.updated ?? "")).filter(Number.isFinite);
+  const missing = n - times.length;
+  const oldest = times.length ? Math.min(...times) : null;
+  const head = `${n} market${n === 1 ? "" : "s"}`;
+  const line = oldest == null ? `${head} · prices not loaded`
+    : `${head} · prices ${ago(oldest)}${missing ? ` · ${missing} not loaded` : ""}`;
+  return { n, oldest, missing, line };
+}

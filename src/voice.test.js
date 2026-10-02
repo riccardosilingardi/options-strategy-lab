@@ -145,7 +145,12 @@ test("MEASURED: the three screens, and the table in the PRD is this number", () 
      `ui.jsx` and `find.jsx` too): find 384 -> 309 words at rest (51 typed + 258 generated, 24 sites), build 264 -> 244.
      The two headings and their empty-state sentence became one counted line, and the paragraph under the old chance
      slider went with it. The ceilings are those numbers, so the next word fails the build. */
-  const CEILING = { find: 309, build: 244, positions: 304 };
+  const CEILING = { find: 309, build: 244, positions: 209 };
+  /* >>> PR #46: ONE ORDERS LIST. <<< The record-based "WORKING AT THE BROKER" panel (its paragraph about what a
+     working order is, the stale-DAY warning, the per-row sentences) left Positions; the one list lives in
+     `orders.jsx`, which the counter now reads. Measured: positions 304 -> 209 (4 typed + 205 generated, 14 sites).
+     The row's own words are built by `orderRowModel()` in orderRow.js, which the counter does not score — so 209
+     is a floor for that screen, written down as such in ROADMAP. */
   /* >>> POSITIONS IS A THIRD SCREEN SINCE PR #44 (TASK 1). <<< Measured by this counter on `main` (ae4b1e0), by the
      worktree procedure above: positions 422 words at rest (99 typed + 323 generated, 14 sites). The Positions card
      was rebuilt to say its action, its profit and its three exits first; the paragraph the Alpaca panel repeated
