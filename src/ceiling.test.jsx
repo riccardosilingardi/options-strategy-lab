@@ -593,7 +593,7 @@ check("P1 DONE WHEN — five screens, one position, ONE number", () => {
     const a = { entry: f.entry, legPx: f.legs.map(() => ({ iv: f.u.iv })) };
     const viaApp = chanceCheckOf(a, {
       ticker: f.tk, legs: f.legs, spot: f.u.spot, dte: FIXDTE, expKey: "2026-11-06",
-      seasonal: seasOf(f.tk),
+      seasonal: seasOf(f.tk), month: MONTH,
     });
     const viaServer = chanceAt(f);
     eq(viaApp.pop, viaServer.pop, `${f.tk} ${f.shape}: pop`);
@@ -611,10 +611,10 @@ check("P1 DONE WHEN — the chance travels with the trade, not with the screen",
   // The seed is the TRADE's, so the number is the same whenever the inputs are.
   const f = fixtures()[0];
   const fromShortlist = chanceCheckOf({ entry: f.entry, legPx: [{ iv: f.u.iv }, { iv: f.u.iv }] },
-    { ticker: f.tk, legs: f.legs, spot: f.u.spot, dte: FIXDTE, expKey: "2026-11-06", seasonal: seasOf(f.tk) });
+    { ticker: f.tk, legs: f.legs, spot: f.u.spot, dte: FIXDTE, expKey: "2026-11-06", seasonal: seasOf(f.tk), month: MONTH });
   const fromGuardian = chanceCheckOf({ entry: f.entry, legPx: [{ iv: f.u.iv }, { iv: f.u.iv }] },
     { ticker: f.tk, legs: [...f.legs], spot: f.u.spot, dte: FIXDTE, expKey: "2026-11-06",
-      seasonal: seasOf(f.tk), thesisIV: 0.9 });
+      seasonal: seasOf(f.tk), thesisIV: 0.9, month: MONTH });
   // `thesisIV` is only reached when the chain gives nothing, so it changes
   // nothing here — which is the property being held.
   eq(fromShortlist.pop, fromGuardian.pop, "a remembered volatility must not override a live one");
@@ -738,7 +738,7 @@ const cornAt = (seasonal) => {
   const f = CORN_SPREAD;
   const entry = netBS(f.legs, f.spot, f.dte, f.iv);
   return chanceCheckOf({ entry, legPx: f.legs.map(() => ({ iv: f.iv })) },
-    { ticker: f.tk, legs: f.legs, spot: f.spot, dte: f.dte, expKey: f.expKey, seasonal });
+    { ticker: f.tk, legs: f.legs, spot: f.spot, dte: f.dte, expKey: f.expKey, seasonal, month: MONTH });
 };
 
 check("SEASONAL PROVENANCE — a measured market and a fallback market say DIFFERENT things", () => {

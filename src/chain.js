@@ -223,22 +223,23 @@ export function parseCboeJson(sym, j, now = Date.now()) {
   return { spot, byExp, expirations, updated: new Date().toISOString(), source: SOURCE.cboeDirect };
 }
 
-async function fetchCboeDirect(sym, fetchImpl) {
+async function fetchCboeDirect(sym, fetchImpl, now) {
   const r = await fetchImpl(CBOE_URL(sym));
   if (!r.ok) throw new Error("CBOE " + r.status);
-  return parseCboeJson(sym, await r.json());
+  return parseCboeJson(sym, await r.json(), now);
 }
 
-export async function fetchCboeChain(sym, { fetchImpl = fetch } = {}) {
+// `now` is for tests only: a fixture's expiries are fixed dates, so a test must fix the clock too.
+export async function fetchCboeChain(sym, { fetchImpl = fetch, now = Date.now() } = {}) {
   // 1) dedicated server endpoint (handles symbol variants + browser headers)
   try {
     const r = await fetchImpl(`/api/chain?sym=${encodeURIComponent(sym)}`);
-    if (r.ok) { const c = parseCboeJson(sym, await r.json()); return { ...c, source: SOURCE.cboeServer }; }
+    if (r.ok) { const c = parseCboeJson(sym, await r.json(), now); return { ...c, source: SOURCE.cboeServer }; }
     const err = await r.json().catch(() => ({}));
     throw new Error((err.tried || [err.error]).join(" | "));
   } catch (eServer) {
     // 2) direct fetch (works in local dev)
-    try { return await fetchCboeDirect(sym, fetchImpl); }
+    try { return await fetchCboeDirect(sym, fetchImpl, now); }
     catch (eDirect) { throw new Error(`server: ${eServer.message} · diretta: ${eDirect.message}`); }
   }
 }
@@ -744,6 +745,7 @@ export async function fetchChain(sym, {
   fetchImpl = fetch,
   timeoutMs = ALPACA_TIMEOUT_MS,
   useAlpaca = true,
+  now = Date.now(),
 } = {}) {
   if (useAlpaca && !alpacaGivenUp()) {
     const ctl = typeof AbortController === "function" ? new AbortController() : null;
@@ -760,5 +762,5 @@ export async function fetchChain(sym, {
       clearTimeout(timer);
     }
   }
-  return fetchCboeChain(sym, { fetchImpl });
+  return fetchCboeChain(sym, { fetchImpl, now });
 }

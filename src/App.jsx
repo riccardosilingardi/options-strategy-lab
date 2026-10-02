@@ -519,10 +519,10 @@ export const structureIV = (a) => {
  * `riskGate.test.js` fails the build if this file spells `chanceOf` more than
  * once, exactly as it does for `modelSanity`.
  */
-export const chanceCheckOf = (a, { ticker, legs, spot, dte, expKey = null, seasonal, thesisIV = null }) =>
+export const chanceCheckOf = (a, { ticker, legs, spot, dte, expKey = null, seasonal, thesisIV = null, month = NOW_MONTH }) =>
   chanceOf({
     legs, entryNet: a?.entry, spot, dte, expKey, ticker, seasonal,
-    month: NOW_MONTH, iv: structureIV(a), thesisIV,
+    month, iv: structureIV(a), thesisIV,
   });
 
 /**
