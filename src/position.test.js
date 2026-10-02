@@ -343,7 +343,7 @@ await test("JOURNAL — a figure filed with no broker closing order is the app's
 await test("NOT ON ALPACA — WIRED: the card's action, the P&L, the filing and the Journal row read the helpers", () => {
   const app = readFileSync(new URL("./App.jsx", import.meta.url), "utf8");
   assert.ok(/const notHeld = legsNotHeld\(p, alSync\)/.test(app), "posAlerts asks legsNotHeld() with the sync state");
-  assert.ok(/positionAction\(\{[^}]*notHeld \}\)/.test(app), "and hands it to positionAction()");
+  assert.ok(/positionAction\(\{[^}]*notHeld[^}]*\}\)/.test(app), "and hands it to positionAction()");
   assert.ok(/notHeld && notHeld\.length \? \{ pnl: null/.test(app), "the P&L is null, never the model mark");
   assert.ok(/pnlNote: notOnAlpaca \? NOT_A_FILL : null/.test(app), "filing stores the note");
   assert.ok(/journalPnl\(e\)/.test(app), "the Journal row reads journalPnl()");

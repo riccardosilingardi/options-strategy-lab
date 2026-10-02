@@ -176,7 +176,7 @@ export function terminalMC(legs, entryNet, S, policy) {
  *     const sl = 0.5 * pos.maxLoss, days = Math.max(1, dteLeft - 7);
  *
  * and mark the survivors with `netBS(pos.legs, s, 7, iv)`. Four copies of three
- * rules that have a home in `src/rules.js`: `takeProfitPct` (0.5),
+ * rules that have a home in `src/rules.js`: `takeProfitPct` (0.5, now `takeProfitTarget()`),
  * `stopLossPct` (0.5) and `exitDTE` — which is **21**, and has been since it
  * was CHANGED FROM 7 (PRD §4). So the simulator walked the position to 7 days
  * and marked whatever survived at 7 days, while the app's own rule closes or
@@ -209,13 +209,18 @@ export function terminalMC(legs, entryNet, S, policy) {
  * authority. The shape is checked structurally — this file reads no `RULES`.
  *
  * @param vol     a `sigmaProvenance()` result: { sigma, source, ... }
- * @param policy  { exitDTE, takeProfitPct, stopLossPct } — from `RULES`.
+ * @param policy  { exitDTE, stopLossPct, takeProfit } — from `RULES`. `takeProfit` is the position's
+ *                take-profit TARGET in dollars for one combination, from `takeProfitTarget()` in
+ *                rules.js (50% of the maximum, or of the premium for a single long option), or
+ *                null when there is none. It is passed in as a number because this file imports
+ *                nothing; `undefined` is refused so a caller cannot forget it.
  */
 export function exitSim(pos, S, dteLeft, iv, vol, policy, n = 1500) {
-  const { exitDTE, takeProfitPct, stopLossPct } = policy || {};
-  if (![exitDTE, takeProfitPct, stopLossPct].every((x) => Number.isFinite(x))) {
+  const { exitDTE, stopLossPct, takeProfit } = policy || {};
+  if (![exitDTE, stopLossPct].every((x) => Number.isFinite(x)) || takeProfit === undefined
+    || (takeProfit !== null && !Number.isFinite(takeProfit))) {
     throw new TypeError(
-      "exitSim needs the exit policy from RULES: { exitDTE, takeProfitPct, stopLossPct }",
+      "exitSim needs the exit policy from RULES: { exitDTE, stopLossPct, takeProfit } (takeProfit may be null, never missing)",
     );
   }
   const { sigma, source: sigmaSource } = vol || {};
@@ -227,11 +232,10 @@ export function exitSim(pos, S, dteLeft, iv, vol, policy, n = 1500) {
       "exitSim needs a sigmaProvenance() result as `vol`, never a bare SIGMA lookup: see src/rules.js",
     );
   }
-  // `takeProfitPct * null` is 0 in JavaScript. A position with no ceiling on
-  // its profit has no take-profit level (src/rules.js, `payoffCeiling`), and
-  // without this guard every path that touched break-even would be counted as
-  // one — the simulator reporting a rule the app does not apply.
-  const tp = Number.isFinite(pos.maxProfit) ? takeProfitPct * pos.maxProfit : null;
+  // A null target is no take-profit level (src/rules.js, `takeProfitTarget`):
+  // without this every path that touched break-even would be counted as one —
+  // the simulator reporting a rule the app does not apply.
+  const tp = takeProfit;
   const sl = stopLossPct * pos.maxLoss;
   // The window is what is left BEFORE the exit rule ends the trade, so the
   // last day simulated is the day the rule acts.

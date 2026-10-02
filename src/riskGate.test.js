@@ -1635,7 +1635,7 @@ test("SHAPE — no call site hands a simulator a bare SIGMA lookup", () => {
 test("SHAPE — exitSim REFUSES a bare sigma at run time, not only in a sweep", () => {
   const pos = { legs: [{ side: 1, type: "call", strike: 20, qty: 1 },
     { side: -1, type: "call", strike: 22, qty: 1 }], entryNet: 0.6, maxProfit: 140, maxLoss: -60 };
-  const policy = { exitDTE: RULES.exitDTE, takeProfitPct: RULES.takeProfitPct, stopLossPct: RULES.stopLossPct };
+  const policy = { exitDTE: RULES.exitDTE, stopLossPct: RULES.stopLossPct, takeProfit: 70 };
   // `exitPathSim` lives in pro.jsx, which this plain-node suite cannot import;
   // the same assertion about it is in `ceiling.test.jsx`, which is bundled.
   assert.throws(() => exitSim(pos, 20, 45, 0.3, SIGMA.CORN, policy, 5), /sigmaProvenance/);

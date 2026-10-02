@@ -26,7 +26,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { payoff, N as normCdf } from "./engine.js";
 import { T } from "./theme.js";
 import { money, RULES, pctText, liquidityThreshold, RECOMMENDED_LIQUIDITY,
-  payoffCeiling, scratchLevel, NO_CEILING, chanceInTen } from "./rules.js";
+  payoffCeiling, scratchLevel, NO_CEILING, chanceInTen, takeProfitBasisWords } from "./rules.js";
 
 const mono = { fontFamily: "ui-monospace, Menlo, monospace" };
 const sans = { fontFamily: "ui-sans-serif, system-ui" };
@@ -1341,26 +1341,30 @@ export function CompareFigure({ items = [], height, width, style }) {
    frozen (PRD §4), so screen 4 states it rather than offering it — and the
    numbers come from src/rules.js like every other rule number.
 ==================================================================== */
-export const exitPlanSentence = () =>
-  `Close at ${pctText(RULES.takeProfitPct)} of max gain, or at ${RULES.exitDTE} days to expiration.`;
+export const exitPlanSentence = (target = null) =>
+  `Close at ${target && target.basis === "premium" ? takeProfitBasisWords("premium") : `${pctText(RULES.takeProfitPct)} of max gain`}, or at ${RULES.exitDTE} days to expiration.`;
 
-export const exitPlanDetail = (maxProfit, contracts = 1) => {
+/** @param target a `takeProfitTarget()` result for ONE combination (rules.js) — the one place the target is worked out. */
+export const exitPlanDetail = (target, contracts = 1) => {
   // EVERY MONEY FIGURE SAYS ITS UNIT (PR #40, TASK 0): the confirm step said
   // "$66 of profit" for one contract beside "$924 of $1,848" for fourteen.
   const n = Math.max(1, Math.round(Number(contracts) || 1));
   const tail = `A loss of ${pctText(RULES.stopLossPct)} of the maximum raises a warning, never an ` +
     `automatic close. These are chosen now and not renegotiated while the position is open.`;
-  // NO CEILING MEANS NO TARGET. Half of an unknown is not $0, and printing
-  // "that is $0 of profit" under a long call would turn the take-profit rule
-  // into an instruction to close at break-even. The rule stands, its number
-  // does not exist, and the DTE half of it still does.
-  // `Number(null)` is 0 and 0 IS finite, so the coercion has to go: the whole
-  // point is telling a missing maximum apart from a maximum of zero.
-  if (!Number.isFinite(maxProfit)) {
+  // NO CEILING AND NOT A SINGLE OPTION MEANS NO TARGET. Half of an unknown is
+  // not $0, and printing "that is $0 of profit" under a structure with no
+  // maximum would turn the take-profit rule into an instruction to close at
+  // break-even. The rule stands, its number does not exist, and the DTE half
+  // of it still does.
+  if (!target || !Number.isFinite(target.perCombo)) {
     return `There is ${NO_CEILING} on this one, so ${pctText(RULES.takeProfitPct)} of the maximum is not a ` +
       `dollar figure the app can put here — the ${RULES.exitDTE}-day mark is the exit that still applies, and ` +
       `a profit target on this trade is yours to set. ${tail}`;
   }
-  return `That is ${money(RULES.takeProfitPct * Math.abs(maxProfit) * n)} of profit ${n > 1 ? `for ${n}` : "per contract"}, or the ${RULES.exitDTE}-day mark, ` +
+  if (target.basis === "premium") {
+    return `That is ${money(target.perCombo * n)} of profit ${n > 1 ? `for ${n}` : "per contract"}, ${pctText(target.pct)} of the ${money(target.base * n)} you pay, ` +
+      `or the ${RULES.exitDTE}-day mark, whichever comes first. ${tail}`;
+  }
+  return `That is ${money(target.perCombo * n)} of profit ${n > 1 ? `for ${n}` : "per contract"}, or the ${RULES.exitDTE}-day mark, ` +
     `whichever comes first. ${tail}`;
 };

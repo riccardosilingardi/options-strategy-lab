@@ -4,7 +4,7 @@ import { getStore } from "@netlify/blobs";
 import { netBS, exitSim, SEASONAL, SIGMA, parseAvJson, statsFromMatrix } from "../../src/engine.js";
 import { RULES, ruleBadge, copilotRulesBlock, pctText,
   markProvenance, sigmaProvenance, ivProvenance, seasonalProvenance, chanceOf, chanceSourceNote,
-  autopilotVerdict, AUTOPILOT_VERDICTS, MODEL_PRICE } from "../../src/rules.js";
+  autopilotVerdict, AUTOPILOT_VERDICTS, MODEL_PRICE, takeProfitTarget, takeProfitBasisWords } from "../../src/rules.js";
 import { evaluateTrade } from "../../src/riskGate.js";
 // HOW MANY COMBINATIONS THE POSITION IS. A close proposed at one lot on a
 // seven-lot position leaves six open and calls it an exit — and the gate would
@@ -58,7 +58,7 @@ function markFromChain(data, pos) {
 // `exitSim` takes these as an argument and has no default for them, because a
 // default is how a stale copy survives: the version before this PR held 0.5,
 // 0.5 and 7 of its own, and walked to 7 DTE while the rule closes at 21.
-const EXIT_POLICY = { exitDTE: RULES.exitDTE, takeProfitPct: RULES.takeProfitPct, stopLossPct: RULES.stopLossPct };
+const EXIT_POLICY = { exitDTE: RULES.exitDTE, stopLossPct: RULES.stopLossPct };
 
 // WHAT THIS FUNCTION'S OWN FEED IS CALLED. `rules.js` never writes a feed's
 // name (CLAUDE.md) — it is handed one, and this is the site that knows it.
@@ -270,12 +270,17 @@ export default async () => {
     // AND THE VOLATILITY IS PASSED AS ITS PROVENANCE, not as a bare number:
     // `exitSim` returns the sigma and the source it actually walked on, so
     // nothing below asserts a reading the arithmetic did not use.
-    const sim = exitSim(pos, spot, dteLeft, iv, vol, EXIT_POLICY);
+    // THE TAKE-PROFIT TARGET IS ONE FUNCTION (`takeProfitTarget`, rules.js): 50% of the premium
+    // for a single long option, 50% of the maximum for the rest. `pnl` is one combination's,
+    // so the target is too. The simulator gets it as a number because engine.js imports nothing.
+    const tpTarget = takeProfitTarget({ legs: pos.legs, maxProfit: pos.maxProfit, maxLoss: pos.maxLoss, entryNet: pos.entryNet });
+    const sim = exitSim(pos, spot, dteLeft, iv, vol, { ...EXIT_POLICY, takeProfit: tpTarget.perCombo });
     const pctMax = pos.maxProfit > 0 ? (pnl / pos.maxProfit) * 100 : 0;
+    const tpReached = tpTarget.perCombo != null && pnl >= tpTarget.perCombo;
 
     // anti-rumore: nessun cambiamento materiale → riga singola
     const prev = briefsPrev[pos.id];
-    const material = !prev || Math.abs((prev.tis ?? 50) - tis) >= 10 || pctMax >= RULES.takeProfitPct * 100 || pnl <= RULES.stopLossPct * pos.maxLoss || dteLeft <= RULES.exitDTE || (prev.dteLeft ?? 99) > RULES.exitDTE;
+    const material = !prev || Math.abs((prev.tis ?? 50) - tis) >= 10 || tpReached || pnl <= RULES.stopLossPct * pos.maxLoss || dteLeft <= RULES.exitDTE || (prev.dteLeft ?? 99) > RULES.exitDTE;
 
     let verdict = "HOLD", rationale = "Nothing material has changed: HOLD confirmed.", evidence = [], invalidation = "";
     if (material && anthKey) {
@@ -285,7 +290,7 @@ export default async () => {
           // A TAKE-PROFIT TARGET NEEDS A MAXIMUM TO BE HALF OF. `0.5 * null` is
           // 0, which would hand the model "take profit at $0" for a position
           // with no ceiling; null says the target does not exist, which is true.
-          targets: { takeProfit: Number.isFinite(pos.maxProfit) ? +(RULES.takeProfitPct * pos.maxProfit).toFixed(0) : null, stopWarning: +(RULES.stopLossPct * pos.maxLoss).toFixed(0), exitDTE: RULES.exitDTE },
+          targets: { takeProfit: tpTarget.perCombo != null ? +tpTarget.perCombo.toFixed(0) : null, takeProfitBasis: takeProfitBasisWords(tpTarget.basis), stopWarning: +(RULES.stopLossPct * pos.maxLoss).toFixed(0), exitDTE: RULES.exitDTE },
           entryThesis: pos.thesis,
           // "model" WHENEVER THE NUMBER CAME FROM `netBS`, not merely when the
           // chain failed to load: a chain that loaded and was missing one leg
@@ -329,7 +334,7 @@ export default async () => {
             // would settle it is NOT BUILT. Offering it as a verdict made a
             // one-tap close out of a warning. The two verdicts below are the
             // two the app will act on, and `AUTOPILOT_VERDICTS` is the list.
-            system: `You are the autopilot of a PAPER options trader. ${copilotRulesBlock()} You receive OBJECTIVE DATA ONLY. Reply with VALID JSON ONLY: {"verdict":"${AUTOPILOT_VERDICTS.join("|")}","confidence":0-100,"rationale":"one sentence","evidence":["3-5 pieces of evidence, each with a number taken from the data"],"invalidation":"the spot or P&L level at which this verdict changes"}. Verdict CLOSE_ALL when pct_max_profit >= ${RULES.takeProfitPct * 100} or the simulator clearly favours taking the money; otherwise HOLD. There is no STOP verdict: a loss at or past ${pctText(RULES.stopLossPct)} of max loss is a WARNING the app raises by itself, never an action you propose, so say so in the rationale and still answer HOLD. When chainSource is "${MODEL_PRICE}" every figure you are given is an ESTIMATE worked out from a volatility model rather than read from the market: say so in the rationale and do not propose closing on it. Never quote a rule number other than the ones above.`,
+            system: `You are the autopilot of a PAPER options trader. ${copilotRulesBlock()} You receive OBJECTIVE DATA ONLY. Reply with VALID JSON ONLY: {"verdict":"${AUTOPILOT_VERDICTS.join("|")}","confidence":0-100,"rationale":"one sentence","evidence":["3-5 pieces of evidence, each with a number taken from the data"],"invalidation":"the spot or P&L level at which this verdict changes"}. Verdict CLOSE_ALL when today.pnl has reached targets.takeProfit (a share of the premium paid for a single long option, of the maximum profit for the rest; no target when it is null) or the simulator clearly favours taking the money; otherwise HOLD. There is no STOP verdict: a loss at or past ${pctText(RULES.stopLossPct)} of max loss is a WARNING the app raises by itself, never an action you propose, so say so in the rationale and still answer HOLD. When chainSource is "${MODEL_PRICE}" every figure you are given is an ESTIMATE worked out from a volatility model rather than read from the market: say so in the rationale and do not propose closing on it. Never quote a rule number other than the ones above.`,
             messages: [{ role: "user", content: JSON.stringify(facts) }],
           }),
         });
@@ -347,7 +352,7 @@ export default async () => {
     //     `verdict = "STOP"` and then build an approve link out of it;
     //   * a price that came from the model can produce a warning but never a
     //     proposal, whichever rule fired.
-    const dec = autopilotVerdict({ verdict, pctMax, pnl, maxLoss: pos.maxLoss, dteLeft, modelled: prov.modelled });
+    const dec = autopilotVerdict({ verdict, takeProfit: tpTarget, pnl, maxLoss: pos.maxLoss, dteLeft, modelled: prov.modelled });
     verdict = dec.verdict;
     if (dec.rationale) rationale = dec.rationale;
     const ruleWarnings = [...dec.warnings];

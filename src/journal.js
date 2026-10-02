@@ -262,6 +262,7 @@ export function closeDecision({ alert = null, written = "" } = {}) {
     dteExit: !!(alert && alert.dteExit),
     slHit: !!(alert && alert.slHit),
     dteLeft: alert ? alert.dteLeft : null,
+    tpBasis: (alert && alert.tpTarget && alert.tpTarget.basis) || "max-profit",
   });
   return { ...r, reason: closeReason({ rule: r.rule, ruleText: r.text, written }) };
 }

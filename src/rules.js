@@ -27,6 +27,10 @@ import { limitDirection } from "./order.js";
 export const RULES = {
   // --- exits, PRD §4. Chosen once per position at construction, then frozen.
   takeProfitPct: 0.5,          // take profit at 50% of max profit — KEEP
+  // A SINGLE LONG OPTION HAS NO MAXIMUM TO BE HALF OF (a long call has none at all, a long put's
+  // is the strike), so it takes profit at +50% of the premium paid. Owner decision, 2 Oct 2026
+  // (PRD §2); chosen, not measured. Spreads keep `takeProfitPct`. Read only through `takeProfitTarget()`.
+  singleTakeProfitPctOfPremium: 0.5,
   scaleOutPct: 0.75,           // scale the rest out at 75% — ladder convenience
   stopLossPct: 0.5,            // stop at 50% of max loss...
   stopLossEnforcement: "warn", // ...but WARNING ONLY: never auto-closes (PRD §4)
@@ -821,7 +825,8 @@ export const chanceSourceNote = (mc, ticker = "this market") => {
    Short labels the UI renders. Generated from RULES so changing a number
    changes every screen at once. Never hand-write these strings. */
 
-export const takeProfitLabel = () => `TP ${pctText(RULES.takeProfitPct)}`;
+export const takeProfitLabel = (basis = "max-profit") =>
+  `TP ${pctText(basis === "premium" ? RULES.singleTakeProfitPctOfPremium : RULES.takeProfitPct)}`;
 export const scaleOutLabel = () => `${pctText(RULES.scaleOutPct)}`;
 export const stopLossLabel = () => `SL ${pctText(RULES.stopLossPct)}`;
 export const exitDTELabel = () => `${RULES.exitDTE} DTE`;
@@ -838,9 +843,11 @@ export const perTradeCapText = (tradingCapital) =>
 
 /** One sentence for each exit rule, for tooltips and literacy pills (PRD §2). */
 export const RULE_PILLS = {
-  takeProfit: () =>
-    `Take the profit at ${pctText(RULES.takeProfitPct)} of the maximum. Closing at half the ` +
-    `maximum beats holding to expiration on a risk-adjusted basis.`,
+  takeProfit: (basis = "max-profit") => basis === "premium"
+    ? `Take the profit at ${takeProfitBasisWords("premium")}. A single option has no maximum to be half of, ` +
+      `so its target is a share of what it cost.`
+    : `Take the profit at ${pctText(RULES.takeProfitPct)} of the maximum. Closing at half the ` +
+      `maximum beats holding to expiration on a risk-adjusted basis.`,
   stopLoss: () =>
     `A loss of ${pctText(RULES.stopLossPct)} of the maximum raises a warning, not an order. ` +
     `The evidence for auto-closing here is the weakest of the four rules.`,
@@ -2411,8 +2418,9 @@ export const NO_CEILING = "no ceiling";
 /** The sentence under a figure that is missing because there is no ceiling. */
 export const noCeilingNote = (what = "This structure") =>
   `${what} has NO CEILING: the payoff keeps rising as the price rises, so the best case is not a number — ` +
-  `it is unknown. Anything computed from it (a reward-to-risk ratio, an expected value, the ` +
-  `${pctText(RULES.takeProfitPct)}-of-maximum target) is left blank rather than taken from the edge of a chart.`;
+  `it is unknown. Anything computed from it (a reward-to-risk ratio, an expected value, a share of the ` +
+  `maximum) is left blank rather than taken from the edge of a chart. A single option's take profit is a share ` +
+  `of the premium paid instead (${takeProfitBasisWords("premium")}).`;
 
 /** The line a ranked list prints beside a candidate whose value cannot be scored. */
 export const noCeilingRankNote = (n) =>
@@ -2781,7 +2789,7 @@ export function qualityFloor({
 /** The rules block injected into every model prompt. English, generated. */
 export const copilotRulesBlock = () =>
   `Trading rules, to be applied in EVERY analysis: defined risk only — no uncovered short legs, ` +
-  `and the maximum loss must always be a known number; take profit at ${pctText(RULES.takeProfitPct)} of max profit; ` +
+  `and the maximum loss must always be a known number; take profit at ${takeProfitBasisWords("max-profit")}, and on a single long option at ${takeProfitBasisWords("premium")}; ` +
   `a loss of ${pctText(RULES.stopLossPct)} of max loss is a WARNING, never an automatic close; ` +
   `exit at ${RULES.exitDTE} days to expiration; no single trade above ` +
   `${pctText(RULES.bestPracticePerTradePct)} of trading capital; total options exposure at or ` +
@@ -4111,6 +4119,52 @@ export const stopWarningSentence = (pnl = null) =>
   `Nothing closes on this and no order is offered for it. Closing here is your decision, and it is ` +
   `recorded as a manual close with the reason you write, never as a trade the rules ended.`;
 
+/* =====================================================================
+   THE TAKE-PROFIT TARGET, IN DOLLARS — ONE FUNCTION, EVERY SITE READS IT.
+
+   OWNER DECISION, 2 Oct 2026 (PRD §2). The rule was "50% of the maximum
+   profit", and a single long option has no maximum to be half of: J-0001
+   (9 × GDX 94P, paid $4,500) would have needed +$40,050 and could only read
+   HOLD until the time exit. So:
+
+     one leg, long  ->  basis "premium":     50% of the premium paid
+     anything else  ->  basis "max-profit":  50% of the maximum profit
+     no premium, no maximum -> basis null:   there is no target (never $0)
+
+   The premium is the broker's or the ticket's entry debit, never a figure
+   recomputed from a model. `perCombo` is dollars for ONE combination, the unit
+   `maxProfit` and `maxLoss` are stored in; `dollars` is the whole position
+   (`contracts` combinations) and is what a whole-position P&L is compared with.
+   `base` is what the percentage is a share of, per combination.
+===================================================================== */
+export function takeProfitTarget({ legs = null, maxProfit = null, maxLoss = null, entryNet = null, contracts = 1 } = {}) {
+  const n = Math.max(1, Math.round(Number(contracts) || 1));
+  const ls = Array.isArray(legs) ? legs : [];
+  const none = { basis: null, pct: null, base: null, perCombo: null, dollars: null };
+  if (ls.length === 1 && Number(ls[0].side) > 0) {
+    const premium = known(entryNet) && Number(entryNet) > 0 ? Number(entryNet) * 100
+      : known(maxLoss) && Number(maxLoss) < 0 ? Math.abs(Number(maxLoss)) : null;
+    if (premium == null) return { ...none, basis: "premium", pct: RULES.singleTakeProfitPctOfPremium };
+    const perCombo = RULES.singleTakeProfitPctOfPremium * premium;
+    return { basis: "premium", pct: RULES.singleTakeProfitPctOfPremium, base: premium, perCombo, dollars: perCombo * n };
+  }
+  if (known(maxProfit) && Number(maxProfit) > 0) {
+    const perCombo = RULES.takeProfitPct * Number(maxProfit);
+    return { basis: "max-profit", pct: RULES.takeProfitPct, base: Number(maxProfit), perCombo, dollars: perCombo * n };
+  }
+  return none;
+}
+
+/** The target's basis as a phrase: "50% of the premium paid" / "50% of the maximum profit". */
+export const takeProfitBasisWords = (basis = "max-profit") =>
+  basis === "premium"
+    ? `${pctText(RULES.singleTakeProfitPctOfPremium)} of the premium paid`
+    : `${pctText(RULES.takeProfitPct)} of the maximum profit`;
+
+/** Where a profit stands against its target, as a share (0 to 1+), or null when either is unknown. */
+export const takeProfitProgress = (pnl, target) =>
+  known(pnl) && target && known(target.dollars) && target.dollars > 0 ? Number(pnl) / target.dollars : null;
+
 /**
  * WHICH RULE ENDED A TRADE — and the stop is not one of them.
  *
@@ -4123,10 +4177,10 @@ export const stopWarningSentence = (pnl = null) =>
  *
  * @returns { ruleExit, rule, text, stopWarning }
  */
-export function ruleExitOf({ tpHit = false, dteExit = false, slHit = false, dteLeft = null } = {}) {
+export function ruleExitOf({ tpHit = false, dteExit = false, slHit = false, dteLeft = null, tpBasis = "max-profit" } = {}) {
   if (tpHit) {
     return { ruleExit: true, rule: "take-profit", stopWarning: !!slHit,
-      text: `Closed by the rules: ${pctText(RULES.takeProfitPct)} of the maximum profit was reached.` };
+      text: `Closed by the rules: ${takeProfitBasisWords(tpBasis)} was reached.` };
   }
   if (dteExit) {
     return { ruleExit: true, rule: "exit-dte", stopWarning: !!slHit,
@@ -4158,7 +4212,7 @@ export function ruleExitOf({ tpHit = false, dteExit = false, slHit = false, dteL
    not move the action. Their lines, and any lower-ranked line, go in `notes`.
 ===================================================================== */
 export function positionAction({ tpHit = false, dteExit = false, slHit = false, edge = null,
-  pnl = null, dteLeft = null, level = null, ap = null, notHeld = null } = {}) {
+  pnl = null, dteLeft = null, level = null, ap = null, notHeld = null, tpBasis = "max-profit" } = {}) {
   /* >>> NOT ON ALPACA (0c, 23 Sep 2026). <<< J-0002 showed a WARNING and a
      -$133 profit — the app's own mark — while a SUCCESSFUL sync of
      /v2/positions returned nothing at all. A position the broker does not hold
@@ -4175,12 +4229,12 @@ export function positionAction({ tpHit = false, dteExit = false, slHit = false, 
   const thin = !!(edge && edge.thin);
   const stop = !!slHit && known;
   const notes = [];
-  const r = ruleExitOf({ tpHit: !!tpHit && known, dteExit: !!dteExit, slHit: stop, dteLeft });
+  const r = ruleExitOf({ tpHit: !!tpHit && known, dteExit: !!dteExit, slHit: stop, dteLeft, tpBasis });
   let out;
   if (r.ruleExit) {
     out = { action: "CLOSE", rule: r.rule,
       line: r.rule === "take-profit"
-        ? `Take profit reached: ${pctText(RULES.takeProfitPct)} of the maximum profit.`
+        ? `Take profit reached: ${takeProfitBasisWords(tpBasis)}.`
         : `${dteLeft != null ? `${dteLeft} day${dteLeft === 1 ? "" : "s"} to expiry` : "Inside the exit window"}: ` +
           `the ${RULES.exitDTE}-day exit applies.` };
     if (stop) notes.push(stopWarningHead(pnl));
@@ -4208,14 +4262,14 @@ export const AUTOPILOT_VERDICTS = ["HOLD", "CLOSE_ALL"];
  * THE VERDICT, AND WHETHER IT MAY BECOME AN APPROVE LINK.
  *
  * @param verdict   what the model said, already normalised to upper case
- * @param pctMax    percent of the maximum profit reached (null when unbounded)
+ * @param takeProfit the position's `takeProfitTarget()` (per combination, in the unit `pnl` is in)
  * @param pnl       profit or loss in dollars, SIGNED
  * @param maxLoss   the position's maximum loss, SIGNED (negative)
  * @param dteLeft   days to expiration
  * @param modelled  true when the mark came from the model, not from quotes
  * @returns { verdict, rule, rationale, warnings, approvable }
  */
-export function autopilotVerdict({ verdict = "HOLD", pctMax = null, pnl = null,
+export function autopilotVerdict({ verdict = "HOLD", takeProfit = null, pnl = null,
   maxLoss = null, dteLeft = null, modelled = false } = {}) {
   const warnings = [];
   let v = String(verdict || "HOLD").toUpperCase();
@@ -4228,10 +4282,11 @@ export function autopilotVerdict({ verdict = "HOLD", pctMax = null, pnl = null,
   if (!AUTOPILOT_VERDICTS.includes(v)) v = "HOLD";
 
   // 1) take profit — a rule of action, and it keeps its link.
-  const tp = pctMax != null && Number.isFinite(+pctMax) && +pctMax >= RULES.takeProfitPct * 100;
+  const tp = takeProfit != null && known(takeProfit.dollars) && Number(takeProfit.dollars) > 0
+    && known(pnl) && Number(pnl) >= Number(takeProfit.dollars);
   if (tp) {
     v = "CLOSE_ALL"; rule = "take-profit";
-    rationale = `Rule: reached ${pctText(RULES.takeProfitPct)} of max profit.`;
+    rationale = `Rule: reached ${takeProfitBasisWords(takeProfit.basis)}.`;
   }
 
   // 2) the stop — NEVER a verdict, NEVER a link, ALWAYS a warning.
@@ -4252,7 +4307,7 @@ export function autopilotVerdict({ verdict = "HOLD", pctMax = null, pnl = null,
   // does not read as an instruction the app is refusing to act on.
   if (modelled && rule) {
     warnings.push(
-      `${rule === "take-profit" ? `The ${pctText(RULES.takeProfitPct)} take-profit level` : `The ${RULES.exitDTE}-day exit window`} ` +
+      `${rule === "take-profit" ? `The take-profit level (${takeProfitBasisWords(takeProfit.basis)})` : `The ${RULES.exitDTE}-day exit window`} ` +
       `has been reached on an ESTIMATED price, so this is a warning and not a proposal: no order is offered. ` +
       `Check the position against a live chain before doing anything.`);
     v = "HOLD";
@@ -5354,7 +5409,7 @@ export function tradeCard({
   maxLoss = null, maxProfit = null, breakevens = [], profitUnbounded = false,
   contracts = 1, chance = null, chanceNote = null, limits = null, notional = null,
   agreement = null, clashCount = 0, seasonalNote = null,
-  entry = null, entrySource = null,
+  entry = null, entrySource = null, takeProfit = null,
 } = {}) {
   const n = Math.max(1, Math.round(Number(contracts) || 1));
   const risk = known(maxLoss) ? Math.abs(Number(maxLoss)) * n : null;
@@ -5412,11 +5467,14 @@ export function tradeCard({
   /* 4 — WHEN IT EXITS. Chosen now, frozen now, and the stop named as a warning
      rather than an order, because that is what `RULES.stopLossEnforcement`
      says and what `autopilotVerdict()` does. */
-  const exits = `${best != null
-    ? `At ${pctText(RULES.takeProfitPct)} of the best case — ${money(best * RULES.takeProfitPct)} of ${money(best)} ${n > 1 ? `for ${n}` : "per contract"} — or at `
+  // No target handed in means the caller has no legs to read: a maximum is all there is to be half of.
+  const tp0 = takeProfit || takeProfitTarget({ maxProfit: profitUnbounded ? null : maxProfit });
+  const tpT = known(tp0.perCombo) ? tp0 : null;
+  const exits = `${tpT
+    ? `At ${pctText(tpT.pct)} of ${tpT.basis === "premium" ? "the premium paid" : "the best case"} — ${money(tpT.perCombo * n)} of ${money(tpT.base * n)} ${n > 1 ? `for ${n}` : "per contract"} — or at `
     : `This structure has ${NO_CEILING}, so there is no take-profit figure to aim at. It exits at `}` +
     `${RULES.exitDTE} days to expiration${room != null ? `, ${room} day${room === 1 ? "" : "s"} from now` : ""}` +
-    `${best != null ? ", whichever comes first" : ""}. Chosen now and frozen: the plan is not renegotiated while the ` +
+    `${tpT ? ", whichever comes first" : ""}. Chosen now and frozen: the plan is not renegotiated while the ` +
     `trade is open. The ${pctText(RULES.stopLossPct)} stop is a WARNING and never an automatic close — the evidence for ` +
     `closing on it has not been measured.`;
 

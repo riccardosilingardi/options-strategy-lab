@@ -17,7 +17,7 @@ import { N as nCDF, bs as bsPrice, smile as smileIV, payoff as payoffExp, SEASON
   parseAvJson, statsFromMatrix } from "./engine.js";
 import { parseOcc, buildOcc, snapStrike, resnapLegs, expiryStrikes, strikeOptions, fetchChain, hasOpenInterest, enrichOpenInterest, feedName, sourceNote, openInterestNote, oiProfile, expiryOpenInterest, nearMoneyOpenInterest, monotonicityBreaks, monotonicityNote, invertedOnStrikes, spotOf, spotAt } from "./chain.js";
 import { T, themeName, setTheme, BADGE_SAFE } from "./theme.js";
-import { RULES, sizing, ruleBadge, takeProfitLabel, stopLossLabel, perTradeCapLabel, RULE_PILLS, money, pctText, capitalSourceNote, perTradeLimitPhrase, qualityFloor, qualityFloorSentence, liquiditySkippedNote,
+import { RULES, sizing, ruleBadge, takeProfitLabel, takeProfitTarget, takeProfitBasisWords, stopLossLabel, perTradeCapLabel, RULE_PILLS, money, pctText, capitalSourceNote, perTradeLimitPhrase, qualityFloor, qualityFloorSentence, liquiditySkippedNote,
   positionPnl, BROKER_PNL, remainingEdge, remainingEdgeLabel, shareOfMaximum, attentionCount,
   filterFold, qualityFloorLine, voicePointer, VOICE_HOMES, noCeilingRankLine,
   buildableExpiries, openableBoard, offFloorExpiryLabel, horizonFloorNote,
@@ -160,6 +160,9 @@ const UNDERLYINGS = {
 const BASKET = Object.keys(UNDERLYINGS).filter((k) => UNDERLYINGS[k].commodity);
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const NOW_MONTH = new Date().getMonth();
+/** The exit plan's sentence for a trade, with its take-profit target from `takeProfitTarget()`. */
+const planOf = (legs, { maxProfit = null, maxLoss = null, entry = null } = {}) =>
+  exitPlanSentence(takeProfitTarget({ legs, maxProfit, maxLoss, entryNet: entry }));
 // Accesso SICURO alle statistiche del sottostante: qualunque ticker (anche importato
 // da Alpaca o salvato da versioni precedenti) ha sempre un fallback valido.
 // Questo elimina la causa n.1 delle "schermate nere" (crash su UNDERLYINGS[ticker] undefined).
@@ -2564,8 +2567,8 @@ export default function OptionsStrategyLab() {
         }] : []),
         { t: Date.now(), type: "open", text: `${working ? "Recorded" : "Opened"} with a ${pop0 != null ? (pop0 * 100).toFixed(0) + "%" : "n/a"} chance · volatility ${(ivAvg0 * 100).toFixed(0)}% · season ${seasM.toFixed(1)}%/mo${f ? ` · signal ${f.score > 0 ? "+" : ""}${f.score}/100 ${f.agreement}` : ""}` },
         { t: Date.now(), type: "plan", text: working
-          ? `Exit plan frozen at entry — ${exitPlanSentence()} It starts counting when the order fills; it has not filled yet.`
-          : `Exit plan frozen at entry — ${exitPlanSentence()}` },
+          ? `Exit plan frozen at entry — ${planOf(lg, analysis)} It starts counting when the order fills; it has not filled yet.`
+          : `Exit plan frozen at entry — ${planOf(lg, analysis)}` },
         ...(clashInfo ? [{ t: Date.now(), type: "against", text: `Against ${clashInfo.n} of ${clashInfo.total} factors. Reason: "${(reason || "").trim()}"` }] : []),
         // THE ENTRY-ROOM OVERRIDE AND ITS REASON GO TO THE JOURNAL. That is
         // the whole point of asking for one: a run of these is what ROADMAP P5
@@ -2611,7 +2614,7 @@ export default function OptionsStrategyLab() {
     // beside the button already said what the send did. One line pointing there.
     setMsg(r.outcome
       ? `${r.pos && r.pos.ref ? `${r.pos.ref} · ` : ""}Sent. Its state is on its row in Positions.`
-      : `Position opened on the app's own paper book. ${exitPlanSentence()}`);
+      : `Position opened on the app's own paper book. ${planOf(legs, AE)}`);
     // AN ORDER THAT IS STILL WORKING KEEPS THE SCREEN THAT EXPLAINS IT.
     // Jumping to Positions unmounts the ticket, and the ticket is where the
     // "working, not filled" answer and the price it is waiting at are written.
@@ -2814,7 +2817,7 @@ export default function OptionsStrategyLab() {
             ? { ...c.r.entry, type: "fill" }
             : c.r.entry,
           ...(c.r.outcome.startsExitPlan ? [{ t: Date.now(), type: "plan",
-            text: `The order has filled, so the exit plan starts now — ${exitPlanSentence()}` }] : []),
+            text: `The order has filled, so the exit plan starts now — ${planOf(p.legs, { maxProfit: p.maxProfit, maxLoss: p.maxLoss, entry: p.entryNet })}` }] : []),
         ];
         const t = appendTimeline(p, entries);
         // WHAT THE BROKER GAVE GOES ON THE RECORD, SIGNED. Until 21 Sep 2026
@@ -2860,7 +2863,7 @@ export default function OptionsStrategyLab() {
       // without this the replay would "take profit" at break-even on every path
       // and report a discipline the rule never asked for. The DTE exit below
       // still runs: that half of the plan does not need a maximum.
-      const tpLevel = Number.isFinite(A.maxProfit) ? RULES.takeProfitPct * A.maxProfit : null;
+      const tpLevel = takeProfitTarget({ legs, maxProfit: A.maxProfit, maxLoss: A.maxLoss, entryNet: A.entry }).perCombo;
       if (!closed && tpLevel != null && pnl >= tpLevel) { closed = { i, pnl: tpLevel, why: takeProfitLabel() }; note += ` → TAKE PROFIT: ${takeProfitLabel()} hit: you take the profit`; }
       else if (!closed && pnl <= RULES.stopLossPct * A.maxLoss) { closed = { i, pnl: RULES.stopLossPct * A.maxLoss, why: stopLossLabel() }; note += ` → STOP: ${stopLossLabel()}: a warning, think about closing`; }
       steps.push({ m: i, label: MONTHS[(NOW_MONTH + i) % 12], S: Sx, pnl, note });
@@ -3067,7 +3070,10 @@ export default function OptionsStrategyLab() {
     const pv = notHeld && notHeld.length ? { pnl: null, source: null, sentence: null }
       : pnlOf(p, { spot: sp, dteLeft, quote: qp, contracts: n });
     const pnl = pv.pnl, live = pv.source === BROKER_PNL;
-    const tpHit = pnl != null && p.maxProfit > 0 && pnl >= RULES.takeProfitPct * p.maxProfit * n;
+    /* THE TAKE-PROFIT TARGET IS `takeProfitTarget()` (rules.js): 50% of the premium paid for a
+       single long option, 50% of the maximum profit for the rest. Whole position, like `pnl`. */
+    const tpTarget = takeProfitTarget({ legs: p.legs, maxProfit: p.maxProfit, maxLoss: p.maxLoss, entryNet: p.entryNet, contracts: n });
+    const tpHit = pnl != null && tpTarget.dollars != null && tpTarget.dollars > 0 && pnl >= tpTarget.dollars;
     const slHit = pnl != null && p.maxLoss < 0 && pnl <= RULES.stopLossPct * p.maxLoss * n;
     const dteExit = dteLeft <= RULES.exitDTE;
     // verdetto autopilot recente non-HOLD in attesa
@@ -3091,19 +3097,19 @@ export default function OptionsStrategyLab() {
     // the broker does not hold, and no headline may call it on plan.
     const level = notOnAlpaca ? "watch" : tpHit || slHit || dteExit || ap || edge.thin ? "action"
       : pnl != null && watchLevel != null && pnl < watchLevel * n ? "watch" : "ok";
-    const label = notOnAlpaca ? "Not on Alpaca — the record and the account disagree" : tpHit ? `${takeProfitLabel()} reached — take the profit` : slHit ? `${stopLossLabel()} reached — a warning, not an order` : dteExit ? `${dteLeft} days left — close or roll` : ap ? "The autopilot has something waiting for your OK" : edge.thin ? remainingEdgeLabel(edge) : pnl == null ? "waiting for prices…" : level === "watch" ? "Losing: check the reason you opened it" : "On plan";
+    const label = notOnAlpaca ? "Not on Alpaca — the record and the account disagree" : tpHit ? `${takeProfitLabel(tpTarget.basis)} reached — take the profit` : slHit ? `${stopLossLabel()} reached — a warning, not an order` : dteExit ? `${dteLeft} days left — close or roll` : ap ? "The autopilot has something waiting for your OK" : edge.thin ? remainingEdgeLabel(edge) : pnl == null ? "waiting for prices…" : level === "watch" ? "Losing: check the reason you opened it" : "On plan";
     /* ONE ACTION (ROADMAP PR #38). `level` and `label` above stay exactly as
        they were: the headline and `attentionCount()` read them. The card
        reads this. */
-    const act = positionAction({ tpHit, dteExit, slHit, edge, pnl, dteLeft, level, ap, notHeld });
-    return { p, pnl, pnlNote: pv.sentence, dteLeft, level, label, ap, live, spotNow: sp, tpHit, slHit, dteExit, edge, act, contracts: n, sizeAssumed: size.assumed, notHeld };
+    const act = positionAction({ tpHit, dteExit, slHit, edge, pnl, dteLeft, level, ap, notHeld, tpBasis: tpTarget.basis || "max-profit" });
+    return { p, pnl, pnlNote: pv.sentence, dteLeft, level, label, ap, live, spotNow: sp, tpHit, tpTarget, slHit, dteExit, edge, act, contracts: n, sizeAssumed: size.assumed, notHeld };
   }), [ownedPositions, chains, alSync, pnlOf]);
 
   // Log eventi regola (TP/SL/DTE) fuori dal render: prima veniva chiamato logEvent
   // DENTRO il JSX del tab Paper (setState durante il render) => instabilità del tab.
   useEffect(() => {
     for (const a of posAlerts) {
-      if (a.tpHit) logEvent(a.p.id, "tp", `Reached ${takeProfitLabel()} (${fmt$(a.pnl)})`);
+      if (a.tpHit) logEvent(a.p.id, "tp", `Reached ${takeProfitLabel(a.tpTarget.basis)} (${fmt$(a.pnl)})`);
       if (a.slHit) logEvent(a.p.id, "sl", `Reached ${stopLossLabel()} (${fmt$(a.pnl)}) — a warning, nothing closes automatically`);
       if (a.dteExit && !(a.notHeld && a.notHeld.length)) logEvent(a.p.id, "dte", `Inside the ${RULES.exitDTE}-day exit window`);
     }
@@ -3198,7 +3204,7 @@ export default function OptionsStrategyLab() {
           if (!g0) return p;
           const exitOn0 = new Date(new Date(g0.exp).getTime() - RULES.exitDTE * 864e5).toISOString().slice(0, 10);
           const up = upgradeHolding(p, g0, {
-            plan: `Exit plan starts from the broker's own fill — ${exitPlanSentence()} On this expiry the ` +
+            plan: `Exit plan starts from the broker's own fill — ${planOf(g0.legs, { maxProfit: p.maxProfit, maxLoss: p.maxLoss, entry: g0.net })} On this expiry the ` +
               `${RULES.exitDTE}-day mark is ${exitOn0}.` });
           if (up !== p) upgraded++;
           return up;
@@ -3260,7 +3266,7 @@ export default function OptionsStrategyLab() {
               // rather than quoting the fill back as if it were the target.
               { t: Date.now(), type: "note", text: fillVsLimit({ limit: null, fill: g.net, contracts: 1 }).sentence },
               { t: Date.now(), type: "plan", text:
-                `Exit plan starts now — ${exitPlanSentence()} On this expiry the ${RULES.exitDTE}-day mark ` +
+                `Exit plan starts now — ${planOf(g.legs, { maxProfit: mp, maxLoss: ml, entry: g.net })} On this expiry the ${RULES.exitDTE}-day mark ` +
                 `is ${exitOn}.` },
             ],
           });
@@ -4727,10 +4733,17 @@ export default function OptionsStrategyLab() {
                   c={T.violet}
                   tip={AE.profitUnbounded ? noCeilingNote(stratName || "This structure")
                     : "The best case divided by the worst, at the price that will be sent. At the mid it would read better than this and you cannot trade at the mid."} />
-                <Stat k={takeProfitLabel()} v={AE.profitUnbounded ? "—" : fmt$(AE.maxProfit * RULES.takeProfitPct)} c={T.green}
-                  tip={AE.profitUnbounded
-                    ? `${RULE_PILLS.takeProfit()} ${noCeilingNote(stratName || "This structure")}`
-                    : RULE_PILLS.takeProfit()} />
+                {(() => {
+                  // ONE FUNCTION WORKS THE TARGET OUT (`takeProfitTarget`, rules.js): a share of the premium
+                  // for a single long option, a share of the maximum for the rest, "—" when there is neither.
+                  const tpB = takeProfitTarget({ legs, maxProfit: AE.maxProfit, maxLoss: AE.maxLoss, entryNet: AE.entry });
+                  return (
+                    <Stat k={takeProfitLabel(tpB.basis)} v={tpB.perCombo == null ? "—" : fmt$(tpB.perCombo)} c={T.green}
+                      tip={tpB.perCombo == null && AE.profitUnbounded
+                        ? `${RULE_PILLS.takeProfit()} ${noCeilingNote(stratName || "This structure")}`
+                        : RULE_PILLS.takeProfit(tpB.basis || "max-profit")} />
+                  );
+                })()}
                 <Stat k={stopLossLabel()} v={fmt$(AE.maxLoss * RULES.stopLossPct)} c={T.red} tip={RULE_PILLS.stopLoss()} />
               </div>
               {/* ONE SENTENCE SAYING WHICH PRICE THE BLOCK ABOVE IS AT, because

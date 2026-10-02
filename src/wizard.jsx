@@ -23,7 +23,7 @@
 import React, { useState } from "react";
 import { Compass, Briefcase, ArrowLeft, SlidersHorizontal, ShieldCheck, ShieldAlert, AlertTriangle } from "lucide-react";
 import { T, BADGE_SAFE, BADGE_BTN_GAP } from "./theme.js";
-import { RULES, sizing, money, pctText, ruleBadge, limitOwner, NO_CEILING } from "./rules.js";
+import { RULES, sizing, money, pctText, ruleBadge, limitOwner, NO_CEILING, takeProfitTarget } from "./rules.js";
 import { BandThumbnail, payoffBands, UnifiedFigure, exitPlanSentence, exitPlanDetail, price } from "./visuals.jsx";
 
 const mono = { fontFamily: "ui-monospace, Menlo, monospace" };
@@ -571,10 +571,10 @@ export function ConfirmSteps({
       <Card style={{ marginTop: 12 }}>
         <Eyebrow>The exit plan — decided now, not later</Eyebrow>
         <div style={{ ...sans, fontSize: 16, fontWeight: 700, color: T.ink, marginTop: 8, lineHeight: 1.4 }}>
-          {exitPlanSentence()}
+          {exitPlanSentence(takeProfitTarget({ legs: c.legs, maxProfit: c.maxProfit, maxLoss: c.maxLoss, entryNet: c.entryNet }))}
         </div>
         <div style={{ ...sans, fontSize: 13.5, color: T.mut, marginTop: 6, lineHeight: 1.5 }}>
-          {exitPlanDetail(c.maxProfit, contracts)}
+          {exitPlanDetail(takeProfitTarget({ legs: c.legs, maxProfit: c.maxProfit, maxLoss: c.maxLoss, entryNet: c.entryNet }), contracts)}
         </div>
       </Card>
 

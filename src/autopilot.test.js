@@ -147,14 +147,14 @@ test("the brief says the figures are estimates, above the figures", () => {
 ================================================================ */
 
 test("TAKE PROFIT ON A REAL PRICE: CLOSE_ALL, and it may be approved", () => {
-  const d = autopilotVerdict({ pctMax: 62, pnl: 25, maxLoss: -210, dteLeft: 40, modelled: false });
+  const d = autopilotVerdict({ takeProfit: { dollars: 20, basis: "max-profit" }, pnl: 25, maxLoss: -210, dteLeft: 40, modelled: false });
   assert.equal(d.verdict, "CLOSE_ALL");
   assert.equal(d.rule, "take-profit");
   assert.equal(d.approvable, true);
 });
 
 test("TAKE PROFIT ON A MODEL PRICE: A WARNING, AND NO LINK", () => {
-  const d = autopilotVerdict({ pctMax: 62, pnl: 25, maxLoss: -210, dteLeft: 40, modelled: true });
+  const d = autopilotVerdict({ takeProfit: { dollars: 20, basis: "max-profit" }, pnl: 25, maxLoss: -210, dteLeft: 40, modelled: true });
   assert.equal(d.approvable, false, "nothing may be approved on a price nobody quoted");
   assert.equal(d.verdict, "HOLD");
   assert.ok(d.warnings.some((w) => /ESTIMATED/.test(w)), "the trigger is reported as a warning");
@@ -163,21 +163,21 @@ test("TAKE PROFIT ON A MODEL PRICE: A WARNING, AND NO LINK", () => {
 });
 
 test("EXIT DTE ON A REAL PRICE: CLOSE_ALL, and it may be approved", () => {
-  const d = autopilotVerdict({ pctMax: 10, pnl: 5, maxLoss: -210, dteLeft: RULES.exitDTE, modelled: false });
+  const d = autopilotVerdict({ pnl: 5, maxLoss: -210, dteLeft: RULES.exitDTE, modelled: false });
   assert.equal(d.verdict, "CLOSE_ALL");
   assert.equal(d.rule, "exit-dte");
   assert.equal(d.approvable, true);
 });
 
 test("EXIT DTE ON A MODEL PRICE: A WARNING, AND NO LINK", () => {
-  const d = autopilotVerdict({ pctMax: 10, pnl: 5, maxLoss: -210, dteLeft: 12, modelled: true });
+  const d = autopilotVerdict({ pnl: 5, maxLoss: -210, dteLeft: 12, modelled: true });
   assert.equal(d.verdict, "HOLD");
   assert.equal(d.approvable, false);
   assert.ok(d.warnings.some((w) => new RegExp(`${RULES.exitDTE}-day`).test(w)));
 });
 
 test("a model price does not invent a warning when no rule fired", () => {
-  const d = autopilotVerdict({ pctMax: 10, pnl: 5, maxLoss: -210, dteLeft: 40, modelled: true });
+  const d = autopilotVerdict({ pnl: 5, maxLoss: -210, dteLeft: 40, modelled: true });
   assert.equal(d.verdict, "HOLD");
   assert.equal(d.warnings.length, 0);
 });
@@ -193,7 +193,7 @@ test("the approve link is gated on approvable, not merely on the verdict", () =>
 test("THE STOP CROSSING PRODUCES HOLD AND A WARNING — never STOP, never a link", () => {
   // -110 on a -210 maximum loss: past 50% of max loss, which is where the old
   // code set `verdict = "STOP"` and then built an approve link.
-  const d = autopilotVerdict({ pctMax: -20, pnl: -110, maxLoss: -210, dteLeft: 40, modelled: false });
+  const d = autopilotVerdict({ pnl: -110, maxLoss: -210, dteLeft: 40, modelled: false });
   assert.equal(d.verdict, "HOLD");
   assert.equal(d.approvable, false);
   assert.equal(d.rule, null);
@@ -218,19 +218,25 @@ test("one cent short of it does not", () => {
 });
 
 test("A STOP THE MODEL RETURNS ANYWAY IS TURNED BACK INTO HOLD", () => {
-  const d = autopilotVerdict({ verdict: "STOP", pctMax: -20, pnl: -50, maxLoss: -210, dteLeft: 40 });
+  const d = autopilotVerdict({ verdict: "STOP", pnl: -50, maxLoss: -210, dteLeft: 40 });
   assert.equal(d.verdict, "HOLD");
   assert.equal(d.approvable, false);
 });
 
-test("THE STOP NEVER OVERRIDES A TAKE PROFIT — it used to, and both are impossible together anyway", () => {
+test("THE STOP AND A TAKE PROFIT CANNOT BOTH FIRE — the target is a profit, the stop a loss", () => {
   // The old code applied the stop AFTER the take-profit, unconditionally, so a
-  // stop crossing replaced a CLOSE_ALL with a STOP and its link.
-  const d = autopilotVerdict({ pctMax: 62, pnl: -110, maxLoss: -210, dteLeft: 40 });
-  assert.equal(d.verdict, "CLOSE_ALL");
-  assert.equal(d.rule, "take-profit");
-  assert.equal(d.approvable, true);
-  assert.equal(d.warnings.length, 1, "and the crossing is still reported");
+  // stop crossing replaced a CLOSE_ALL with a STOP and its link. The old test fed
+  // it a "62% of the maximum" beside a -$110 loss; the target is compared with the
+  // profit itself now (`takeProfitTarget()`), so the contradiction cannot be built.
+  const d = autopilotVerdict({ takeProfit: { dollars: 20, basis: "max-profit" }, pnl: -110, maxLoss: -210, dteLeft: 40 });
+  assert.equal(d.verdict, "HOLD");
+  assert.equal(d.rule, null);
+  assert.equal(d.approvable, false);
+  assert.equal(d.warnings.length, 1, "the crossing is reported, and it is only a warning");
+  // And at a profit the target decides and no stop is reported.
+  const g = autopilotVerdict({ takeProfit: { dollars: 20, basis: "max-profit" }, pnl: 25, maxLoss: -210, dteLeft: 40 });
+  assert.equal(g.verdict, "CLOSE_ALL");
+  assert.equal(g.warnings.length, 0);
 });
 
 test("THE MODEL IS NOT OFFERED STOP AS A VERDICT", () => {
@@ -467,10 +473,10 @@ test("a record that fails to write never undoes an order that went", () => {
 
 test("THE SIMULATOR IS RUN AT THE EXIT RULE, AND THE POLICY COMES FROM ITS HOME", () => {
   // `exitSim` held its own copies (0.5, 0.5 and 7) and `RULES.exitDTE` is 21.
-  assert.ok(/const EXIT_POLICY = \{ exitDTE: RULES\.exitDTE, takeProfitPct: RULES\.takeProfitPct, stopLossPct: RULES\.stopLossPct \}/
+  assert.ok(/const EXIT_POLICY = \{ exitDTE: RULES\.exitDTE, stopLossPct: RULES\.stopLossPct \}/
     .test(AUTOPILOT_CODE), "the policy is read from RULES, in one place");
-  assert.ok(/exitSim\(pos, spot, dteLeft, iv, vol, EXIT_POLICY\)/.test(AUTOPILOT_CODE),
-    "and handed to the simulator, which has no default for it");
+  assert.ok(/exitSim\(pos, spot, dteLeft, iv, vol, \{ \.\.\.EXIT_POLICY, takeProfit: tpTarget\.perCombo \}\)/.test(AUTOPILOT_CODE),
+    "and handed to the simulator, which has no default for it, with the position's own take-profit target");
 });
 
 test("THE FIELD NAMES CLAIM THE HORIZON THE BLOCK WAS COMPUTED AT", () => {
@@ -484,7 +490,7 @@ test("THE FIELD NAMES CLAIM THE HORIZON THE BLOCK WAS COMPUTED AT", () => {
   // And the number in `simulated_to_dte` is the rule, not a second opinion:
   // `exitSim` returns the `exitDTE` it was RUN with, and it was run with RULES'.
   assert.equal(exitSim({ legs: [{ side: 1, type: "call", strike: 20, qty: 1 }], entryNet: 0.5, maxProfit: 100, maxLoss: -50 },
-    20, 45, 0.3, sigmaProvenance(null, 0.2, "TEST"), { exitDTE: RULES.exitDTE, takeProfitPct: RULES.takeProfitPct, stopLossPct: RULES.stopLossPct }, 5).exitDTE,
+    20, 45, 0.3, sigmaProvenance(null, 0.2, "TEST"), { exitDTE: RULES.exitDTE, stopLossPct: RULES.stopLossPct, takeProfit: 50 }, 5).exitDTE,
   RULES.exitDTE);
 });
 
