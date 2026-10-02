@@ -197,7 +197,8 @@ test("BUILD FROM A CARD: the back link is the first thing, and it returns to tha
   assert.ok(at > 0);
   assert.ok(app.lastIndexOf("{cardOrigin && (", at) > app.lastIndexOf("<div style={{ marginTop: 12 }}>", at) - 400, "it sits at the top of the Build block");
   assert.match(app, /scrollToCard\.current = buildOrigin \? buildOrigin\.key : null; goStep\("find"\)/);
-  assert.match(app, /cardKey=\{x\.key\}/, "every Find card carries its key");
+  // PR #45: the Find step is `find.jsx` now, and every card it prints carries its key.
+  assert.match(readFileSync("src/find.jsx", "utf8"), /cardKey=\{x\.key\}/, "every Find card carries its key");
   assert.match(readFileSync("src/card.jsx", "utf8"), /data-card-key=\{cardKey \|\| undefined\}/);
 });
 

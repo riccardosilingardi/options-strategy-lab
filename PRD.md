@@ -16,14 +16,29 @@ non-expert trader who wants to learn discipline rather than be sold trades.
 - **Broker.** An Alpaca paper account (US dollars). Option chains come from Alpaca's
   indicative feed first, CBOE delayed quotes as the fallback. The feed is named on screen.
 - **Two steps, one on screen at a time.**
-  1. **Find** — one request block (markets, direction or "season decides", budget or target
-     with the per-trade limit editable inline, horizon, minimum chance) above one ranked list of
-     cards across the selected markets. Every control re-filters the list live; there is no
-     Search button. Each card carries one badge (agreement · score · confidence, tap for "Why
-     this market") and, where it applies, a flag: single option, butterfly, CONFLICT,
-     confidence under 40, options dear. A toggle hides flagged cards and says how many. The old
-     Shortlist is a one-market filter on this list; up to three cards compared side by side.
-     "Nothing today" appears only when zero candidates pass, with the count for every reason.
+  1. **Find** — one request block above one ranked list of cards across the selected markets:
+     markets, direction or "season decides", size by spend or by target, and four sliders in
+     one style (PR #45) — *most I will risk* (its top is the per-trade limit, editable inline;
+     the trading capital under free sizing; "profit I am aiming for" in target mode), *chance at
+     least*, *return on risk at least* (it can only tighten the reward floor, never loosen it)
+     and *horizon*. Tap a slider's value to type an exact number; each slider shows a small
+     histogram of the candidates with the threshold marked, and how many pass. Every control
+     re-filters the list live; there is no Search button, and a slider never re-runs a
+     simulation. **A card that misses what you asked is hidden behind a count**: "N match what
+     you asked · show M that miss", tapping it shows them, each with the reason it missed. With
+     nothing matching, the line says which control binds and the nearest value that lets one in
+     ("Lower chance to 54% → 1 match: XLE"), read off the cards' own figures. Under "season
+     decides" a card says which direction its market's season chose ("↑ bull · season").
+     Each card carries one badge (agreement · score · confidence, tap for "Why this market"),
+     a flag where it applies (single option, butterfly, CONFLICT, confidence under 40, options
+     dear), the gauge beside the unified picture (tap opens the full figure), and **four figures
+     for the size the budget buys**: YOU RISK (contracts × the risk), MAX PROFIT (contracts ×
+     the maximum profit, or "no ceiling"), CHANCE, RETURN ON RISK, with one line under them,
+     "25 contracts × $193 at risk each"; the per-contract figures are behind the card's fold.
+     Build's top card is the same component on the same numbers. A toggle hides flagged cards and
+     says how many. The old Shortlist is a one-market filter on this list; up to three cards
+     compared side by side. "Nothing today" appears only when zero candidates pass, with the
+     count for every reason.
   2. **Build** — one trade: chain, legs, a five-line trade card, the order ticket, and the
      confirm step with the risk gate's checks in plain English.
 - **Two other places.** Positions (what you own, orders still working, and trades you are
@@ -78,6 +93,13 @@ Every rule below is code, not a prompt. The numbers live in `src/rules.js` (`RUL
   enforced regardless. Every position records `sizingFree: true|false` and the weekly report
   splits P&L by it.
 - A card's size is contracts × its RISK (the maximum loss), never the premium (PR #41).
+- **The amount never passes the per-trade limit** (PR #45). With free sizing OFF, the amount typed
+  as "most I will risk" is capped at `floor(perTradeLimit)` everywhere it sizes a card, and in
+  "profit I am aiming for" mode no count puts more than the limit at risk. Measured before: a
+  budget of $5,150 against a $5,000 limit sized 27 of 28 fixture cards above the limit, and the
+  gate refused every one of them on Build. Raising the limit is the existing per-trade limit edit
+  (typed reason). A structure with no ceiling is now sized on its risk alone (it can be sized
+  against a budget, never against a profit target).
 
 ### Entry
 
@@ -151,15 +173,18 @@ normal use, and is never asked for.
    on a debit (J-0001); PR #40's cent-a-leg seed change has not been seen on a credit.
 3. **Read when it happens — the indicative combination ask on thin chains.** J-0003 (SOYB
    28/30) never filled at the indicative ask; no order has yet measured the gap.
-4. **Read when it happens — every screen on a phone with live data:** Find (PR #40, #41) and
-   PR #44's Positions card, Details, Back button, "reading…" badge and Build-from-a-card.
-   Tested on fixtures, and PR #44's screens also in a headless Chromium at 390px with stubbed
-   data. **No screen reader was run:** labels, headings, focus and `aria-expanded` are checked
-   in markup and in the browser's DOM, not by hearing them.
-5. **Find's cost on a phone is not measured.** One memo over every selected market (analyse,
-   floors, an 8,000-run chance per survivor) and, since PR #44, ten news feeds loaded alongside
-   chains and bars. A slow phone may lag, and a feed that never answers keeps a badge on
-   "reading…" until it fails.
+4. **Read when it happens — every screen on a phone with live data:** Find (PR #40, #41, #45: the
+   four sliders, the hidden-misses line, the sized card, the picture row, the grid) and PR #44's
+   Positions card, Details, Back button, "reading…" badge and Build-from-a-card. Tested on
+   fixtures, and PR #44's and #45's screens also in a headless Chromium (390px and 2000px) with
+   stubbed chains. **No screen reader was run:** labels, headings, focus, `aria-expanded` and
+   `aria-valuetext` are checked in markup and in the browser's DOM, not by hearing them.
+5. **Find's cost on a phone is not measured.** Generation is one memo over every selected market
+   (analyse, floors, an 8,000-run chance per survivor: 203 ms for the 31 fixture cards on a
+   desktop CPU) and, since PR #44, ten news feeds loaded alongside chains and bars. A slider move
+   is not in that memo: it sizes and filters the finished list (0.1 ms for 31 cards, within two
+   frames in Chromium on a desktop). A slow phone may still lag on generation, and a feed that
+   never answers keeps a badge on "reading…" until it fails.
 6. **Read when it happens — "Not on Alpaca" and "size N > M on the ask"** have not appeared
    live. (PR #42's three fixes were verified on the phone on 24 Sep 2026 and are closed.)
 7. **Read when it happens — free sizing (PR #41) has not been used live.** Tested with gate
@@ -168,8 +193,10 @@ normal use, and is never asked for.
    `modelDisagreementRatio` 4, `maxComboSpreadShareOfNet` 1.0, `maxCrossingShareOfMaxProfit`
    0.5, `openLimitSlippage` and `closeLimitSlippage` 0.25, `watchAttentionShare` 0.35,
    `autopilotConfidence` 70, `fallbackIV`/`fallbackSigma` 0.25, the four chance-slider
-   constants, `staleBoardShare` 0.15 (two boards only), and the liquidity floor (one close,
-   2026-09-01).
+   constants, the return slider's `rewardAskMax` 3 and `rewardAskStep` 0.05 and the amount
+   slider's `amountAskStep` 25 (PR #45), `staleBoardShare` 0.15 (two boards only), and the
+   liquidity floor (one close, 2026-09-01). **The default "chance at least 50%" is a RULES value
+   nobody has read against live boards: on the 31 fixture cards it matches 5 and hides 26.**
 9. **The exit rules are inherited defaults, not backtested** on these ten markets; the single
    option's +50% of the premium is the owner's choice and has no measurement behind it at all.
 10. **Read when it happens — the AI features.** The Anthropic usage limit that disabled both

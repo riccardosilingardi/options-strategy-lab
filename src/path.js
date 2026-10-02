@@ -133,6 +133,9 @@ export function candidateOf(raw, extra = {}) {
     expKey: raw.expKey ?? extra.expKey ?? null,
     dte: num(raw.dte, extra.dte),
     maxProfit, maxLoss, risk,
+    // No ceiling is a FACT about a structure (a long call), not a gap in what is known: it has no ratio and the
+    // return filter must not call it unknown (PR #45). Absent on a candidate saved before this: not unbounded.
+    profitUnbounded: raw.profitUnbounded != null ? !!raw.profitUnbounded : !!(a && a.profitUnbounded),
     pop: num(raw.pop, extra.pop),
     // Never defaulted: an unstamped candidate stays unstamped, which is what
     // `seasonalStampOf()` reads as the hand-written estimate.

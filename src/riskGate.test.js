@@ -27,7 +27,8 @@ import { RULES, sizing, ruleBadge, qualityFloor, qualityFloorSentence, liquidity
   buildableExpiries, openableBoard, offFloorExpiryLabel, horizonFloorNote,
   remainingEdge, remainingEdgeNote, remainingEdgeLabel, shareOfMaximum, attentionCount, onCardLine,
   requestOf, requestAmountLabel, requestAmountOwner, contractsSourceNote, clampAskedChance,
-  REQUEST_MODES, meetsRequest, splitByRequest, meetsHeading, otherwiseHeading,
+  REQUEST_MODES, meetsRequest, splitByRequest, matchHeading, missToggle, resultsLine, nearestRelaxation, controlReadings,
+  sizedFigures, sizeLine, sizedHeading, CARD_LABELS, directionTag, clampAskedReward, returnText, rewardAskLabel,
   targetPriceOf, chanceAskLabel, nothingTodayLine, fetchFailWords,
   sizingFreeOn, sizedFree, atRiskNowLine } from "./rules.js";
 import { netBS, SIGMA, exitSim } from "./engine.js";
@@ -2970,7 +2971,8 @@ test("0b — `App.jsx` SPELLS THE POSITION P&L ONCE, through `pnlOf()`", () => {
 test("TASK 1 — the horizon control cannot ask for a board the gate would refuse", () => {
   // PR #40: the horizon is one control in Find's request block (card.jsx).
   const card = readFileSync(new URL("./card.jsx", import.meta.url), "utf8");
-  const slider = card.match(/<input type="range" aria-label="horizon in days"[^>]*>/);
+  // PR #45: it is a `RangeField` now, and both of its ends still read their rule.
+  const slider = card.match(/<RangeField label="Horizon"[\s\S]*?\/>/);
   assert.ok(slider, "the horizon slider moved; point this at it again");
   assert.ok(!/min=\{21\}/.test(slider[0]), "21 is RULES.exitDTE wearing a horizon's clothes");
   assert.ok(/min=\{RULES\.minEntryDTE\}/.test(slider[0]), "both ends read their rule");
@@ -3015,7 +3017,8 @@ test("A DATA FAILURE IS NOT A MARKET VERDICT (restored from main's screen-5 test
   assert.ok(/^Nothing today\./.test(nothingTodayLine({ reward: 1 }, {})));
   // ...and the chip says which: a failed fetch is never "loading".
   const app = readFileSync(new URL("./App.jsx", import.meta.url), "utf8");
-  assert.ok(/findGen\.failed\.some\(\(x\) => x\.tk === tk\) \? "failed" : findGen\.loading\.includes\(tk\) \? "loading"/.test(app),
+  const find = readFileSync(new URL("./find.jsx", import.meta.url), "utf8");   // PR #45: the Find step lives here now
+  assert.ok(/findGen\.failed\.some\(\(x\) => x\.tk === tk\) \? "failed" : findGen\.loading\.includes\(tk\) \? "loading"/.test(find),
     "the market chip tells a failure from a load in flight");
   assert.ok(/setChainErr\(\(m\) => \(\{ \.\.\.m, \[tk\]: fetchFailWords\(e\) \}\)\)/.test(app), "a failed fetch is recorded with its error");
   assert.equal(fetchFailWords(new Error("HTTP 502 Bad Gateway from the proxy upstream")), "HTTP 502 Bad Gateway from");
@@ -3031,8 +3034,11 @@ test("TASK 1 — an empty Find list says why with counts, and offers no button o
   assert.ok(line.includes("3 too little open interest") && line.includes("2 pays too little"));
   assert.ok(line.includes("XLE"));
   const app = readFileSync(new URL("./App.jsx", import.meta.url), "utf8");
-  assert.ok(/findGen\.items\.length === 0 && \(/.test(app), "only when zero candidates pass");
-  assert.ok(/disabled=\{!legs\.length\}/.test(app), "and the button says so rather than naming a structure");
+  const find = readFileSync(new URL("./find.jsx", import.meta.url), "utf8");   // PR #45: the Find step lives here now
+  assert.ok(/findGen\.items\.length === 0 && \(/.test(find), "only when zero candidates pass");
+  assert.ok(/disabled=\{forward\.disabled\}/.test(find),
+    "and the button says so rather than naming a structure");
+  assert.ok(/disabled: !legs\.length/.test(app), "the step forward is disabled with nothing loaded");
 });
 
 /* ================================================================
@@ -3161,9 +3167,9 @@ test("REQUEST — the amount is DERIVED from the per-trade limit, never typed", 
   assert.equal(r.answered, false);
   assert.match(requestAmountOwner(r), /suggested/,
     "until it is answered, every screen calls it a suggestion");
-  // ...and once it IS answered it is the user's, and it is what is read.
-  const typed = requestOf({ amt: 400 }, limits);
-  assert.equal(typed.amt, 400);
+  // ...and once it IS answered it is the user's, and it is what is read — up to the per-trade limit (PR #45).
+  const typed = requestOf({ amt: 200 }, limits);
+  assert.equal(typed.amt, 200);
   assert.equal(typed.amtAnswered, true);
   assert.equal(requestAmountOwner(typed), "your answer");
 });
@@ -3183,8 +3189,8 @@ test("REQUEST — Number(null) is 0 and 0 is finite, for the seventh time", () =
 test("REQUEST — the mode is one of two, and the label follows it", () => {
   assert.deepEqual(REQUEST_MODES, ["budget", "target"]);
   assert.equal(requestOf({ mode: "nonsense" }, {}).mode, "budget", "an unknown mode is the default");
-  assert.match(requestAmountLabel("budget"), /RISK/);
-  assert.match(requestAmountLabel("target"), /PROFIT/);
+  assert.match(requestAmountLabel("budget"), /risk/i);
+  assert.match(requestAmountLabel("target"), /profit/i);
 });
 
 test("REQUEST — the slider's band and step live in RULES, and it is clamped", () => {
@@ -3240,8 +3246,8 @@ test("ONE HOME — App.jsx keeps no second copy of the budget or the size", () =
      later. */
   assert.equal(/setContracts\(1\)/.test(app), false,
     "a ticker change RE-DERIVES the size from the budget; it does not forget it");
-  assert.ok(/scaleStrategy\(AE, request\.mode, request\.amt\)/.test(app),
-    "Build sizes from the one home, at the price the order will be sent at");
+  assert.ok(/scaleStrategy\(AE, request\.mode, request\.amt, request\.riskCap\)/.test(app),
+    "Build sizes from the one home, at the price the order will be sent at, under the per-trade cap");
   /* AND THE WIDE SEARCH STOPPED ROLLING ITS OWN. `Math.floor(amt / Math.max(1,
      ...))` is the shape that turned a $250 budget into 250 contracts. */
   assert.equal(/Math\.floor\(\s*optAmt/.test(app), false);
@@ -3312,12 +3318,14 @@ test("SPLIT — the target mode misses by the shortfall, in dollars", () => {
   assert.match(sp.others[0].misses[0].short, /short of the target by \$640/);
 });
 
-test("SPLIT — the headings carry the counts, so neither needs a sentence", () => {
-  const req = requestOf({ amt: 300 }, {});
-  assert.match(meetsHeading(req, 3), /\(3\)/);
-  assert.match(otherwiseHeading(5), /\(5\)/);
-  assert.ok(meetsHeading(req, 3).split(/\s+/).length <= 8, "a heading is not a paragraph");
-  assert.ok(otherwiseHeading(5).split(/\s+/).length <= 10);
+test("SPLIT — the results line carries both counts, so it needs no sentence (PR #45)", () => {
+  assert.equal(resultsLine(4, 27), "4 match what you asked · show 27 that miss");
+  assert.equal(resultsLine(4, 27, true), "4 match what you asked · hide the 27 that miss");
+  assert.equal(resultsLine(1, 1), "1 matches what you asked · show 1 that misses", "a count agrees with its verb");
+  assert.equal(resultsLine(31, 0), "31 match what you asked", "with nothing hidden there is nothing to show");
+  assert.equal(matchHeading(0), "0 match what you asked");
+  assert.match(missToggle(3, false), /show 3 that miss/);
+  assert.ok(resultsLine(4, 27).split(/\s+/).length <= 12, "a line is not a paragraph");
 });
 
 test("SPLIT — membership is NEVER stored on a candidate", () => {
@@ -3363,7 +3371,7 @@ test("TARGET PRICE — the direction read as a number, and unknown stays unknown
   assert.equal(flat.known, true);
   assert.equal(flat.price, 27.5);
   // ...and the slider's label carries the number it is asking for.
-  assert.match(chanceAskLabel(requestOf({ minChance: 0.65 }, {})), /65%/);
+  assert.match(chanceAskLabel(requestOf({ minChance: 0.65 }, {})), /chance/i);
 });
 
 /* ====================================================================

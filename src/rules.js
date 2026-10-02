@@ -407,6 +407,15 @@ export const RULES = {
   // wizard draws between the basket (a visible default) and the budget (an
   // answer that must never be invented).
   chanceAskDefault: 0.50,
+  // THE "RETURN ON RISK, AT LEAST" SLIDER'S OWN BOUNDS (PR #45). Its minimum is `minRewardRisk`, not a new
+  // number: the slider can only TIGHTEN the reward floor, never loosen it, and the floor itself does not move.
+  // Chosen, not measured (PRD §4): on the 31 fixture cards the return runs from 0.27 to 6.6, and above 3 the
+  // slider would be grouping nothing the list needs grouped.
+  rewardAskMax: 3,
+  // rewardAskStep — five points, as the chance slider's step is: a finer one would move cards on a rounding.
+  rewardAskStep: 0.05,
+  // amountAskStep — the amount slider's step in dollars, and its smallest value: the old box said min 25, step 25.
+  amountAskStep: 25,
 
   // minNetPremium — THE PRICE HAS TO EXIST BEFORE ANY OTHER RULE CAN BE
   // APPLIED TO IT. In dollars per share, the unit an option is quoted in:
@@ -1325,24 +1334,51 @@ export function staleBoardLine(stale = []) {
     `${ek} looks stale on ${tks.length} market${tks.length === 1 ? "" : "s"} (${tks.join(", ")})`).join(" · ");
 }
 
-/** How many contracts the request asks for, in five words or fewer.
- *  THE TOTAL IS CONTRACTS × THE CARD'S RISK (PR #41, TASK 1): the dollars at
- *  risk, never the premium, so the line and the RISK figure above it multiply. */
-export function sizeLine(request, size) {
-  if (!request || !size || !size.ok) return null;
-  const n = size.n;
-  const c = `${n} contract${n === 1 ? "" : "s"}`;
-  return request.mode === "target"
-    ? `${c} to reach ${money(request.amt)}`
-    : `${c} for ${money(size.totRisk)}`;
+/**
+ * THE LINE UNDER A CARD'S FOUR FIGURES: "25 contracts × $193 at risk each" (PR #45, TASK 3).
+ *
+ * The four figures above it are for THIS many contracts, so the line says how many and what each one puts at risk,
+ * and the two multiply as printed: YOU RISK is contracts × this. It is the RISK figure (the maximum loss), never the
+ * premium (PR #41). `size` is a `scaleStrategy()` result (`risk` is one contract's maximum loss) and `n` overrides
+ * its count when the owner has typed one on Build.
+ */
+export function sizeLine(size, { n = null, byHand = false } = {}) {
+  if (!size || (!size.ok && n == null)) return null;
+  const k = n != null ? Math.max(1, Math.round(Number(n) || 1)) : size.n;
+  const risk = Number(size.risk);
+  if (!Number.isFinite(risk)) return null;
+  const line = `${k} contract${k === 1 ? "" : "s"} × ${money(risk)} at risk each`;
+  return byHand ? `${line} · set by hand` : line;
 }
 
-/** The quick amounts beside the field, relabelled by what the field asks. */
-export function amountChips(request, perTradeLimit) {
-  const cap = Number(perTradeLimit);
-  if (!Number.isFinite(cap) || cap <= 0) return [];
-  const vals = [...new Set([0.25, 0.5, 1].map((f) => Math.max(25, Math.round((cap * f) / 25) * 25)))];
-  return vals.map((v) => ({ amt: v, label: `${request && request.mode === "target" ? "make" : "risk"} ${money(v)}` }));
+/** What a card's four figures are read for: the size the budget buys, or one contract when there is none. */
+export const sizedHeading = (n) => (n == null ? "PER CONTRACT" : `FOR ${n} CONTRACT${n === 1 ? "" : "S"}`);
+
+/** The four figures' labels, in the order the card prints them. One home: the card and its test read this. */
+export const CARD_LABELS = Object.freeze({ risk: "YOU RISK", profit: "MAX PROFIT", chance: "CHANCE", rr: "RETURN ON RISK" });
+
+/**
+ * THE FIGURES A CARD PRINTS, FOR THE SIZE THE BUDGET BUYS — ONE FUNCTION FOR FIND AND FOR BUILD (PR #45, TASK 3).
+ *
+ * `a` is the analysis at the price that fills (`aFill` on a list card, `AE` on Build: the same numbers, held equal
+ * by `figures.test.jsx`) and `n` is the contract count, or null when nothing sized it. With a count the money is
+ * the whole position's: `risk` is n × the maximum loss and `profit` is n × the maximum profit, or null (printed as
+ * "no ceiling") when there is none. With no count they are one contract's, and `n` is null so the heading says
+ * "PER CONTRACT". It computes nothing the broker owns: those are combination properties.
+ */
+export function sizedFigures(a, n = null) {
+  if (!a) return null;
+  // `Number(null)` is 0 and 0 is finite: the nulls go out BEFORE the coercion, or an unreadable risk prints as $0.
+  const perRisk = a.maxLoss != null && Number.isFinite(Number(a.maxLoss)) ? Math.abs(Number(a.maxLoss)) : null;
+  const unbounded = !!a.profitUnbounded;
+  const perProfit = unbounded || a.maxProfit == null || !Number.isFinite(Number(a.maxProfit)) ? null : Number(a.maxProfit);
+  const k = n != null && Number.isFinite(Number(n)) && Number(n) >= 1 ? Math.round(Number(n)) : null;
+  const mult = k == null ? 1 : k;
+  return {
+    n: k, perRisk, perProfit, unbounded,
+    risk: perRisk == null ? null : perRisk * mult,
+    profit: perProfit == null ? null : perProfit * mult,
+  };
 }
 
 /**
@@ -3103,16 +3139,25 @@ export const REQUEST_MODES = ["budget", "target"];
 
 /** What the amount field is asking for, in the words the screen uses. */
 export const requestAmountLabel = (mode) =>
-  (mode === "target" ? "PROFIT I AM AIMING FOR ($)" : "MOST I WILL RISK ($)");
+  (mode === "target" ? "Profit I am aiming for" : "Most I will risk");
 
 /**
  * The user's request, read from the one state that holds it.
  *
- * @param want   { mode, amt, minChance } — every field NULL until answered
- * @param limits the `sizing()` result, for the derived default
- * @returns {{ mode, amt, amtAnswered, minChance, chanceAnswered, answered }}
+ * @param want   { mode, amt, minChance, minReturn } — every field NULL until answered
+ * @param limits the `sizing()` result, for the derived default and the cap
+ * @param opts   { sizingFree } — the ONE input that lifts the cap (PRD §2, free sizing)
+ * @returns {{ mode, amt, amtAnswered, amtCapped, amtMax, riskCap, minChance, chanceAnswered,
+ *             minReturn, returnAsk, returnAnswered, answered }}
+ *
+ * >>> THE AMOUNT IS CAPPED AT THE PER-TRADE LIMIT (PR #45, TASK 0). <<< Measured on the owner's screen: a budget
+ * typed at $5,150 against a limit of $5,000 sized 27 of 28 cards above $5,000 (XLE: 26 × $193 = $5,018), and the
+ * gate refuses every one of them on Build (PER_TRADE_LIMIT). A card offered a trade it could not send. With free
+ * sizing OFF the amount never passes `limits.perTradeLimit`, and `riskCap` is how every sizing site learns it;
+ * raising it is the existing per-trade limit edit (typed reason), which moves `limits.perTradeLimit` itself. With
+ * free sizing ON there is no cap, as before, and the slider's top is the trading capital.
  */
-export function requestOf(want = {}, limits = {}) {
+export function requestOf(want = {}, limits = {}, { sizingFree = false } = {}) {
   const mode = REQUEST_MODES.includes(want.mode) ? want.mode : REQUEST_MODES[0];
   const typed = Number(want.amt);
   const amtAnswered = Number.isFinite(typed) && typed > 0;
@@ -3120,12 +3165,28 @@ export function requestOf(want = {}, limits = {}) {
   // repository. The nulls go out before the coercion, and a derived default is
   // never reported as an answer.
   const derived = Number(limits.perTradeLimit);
-  const amt = amtAnswered ? Math.round(typed)
-    : (Number.isFinite(derived) && derived > 0 ? Math.round(derived) : null);
+  const haveLimit = limits.perTradeLimit != null && Number.isFinite(derived) && derived > 0;
+  // `floor`, never `round`: a limit of $5,000.40 rounded UP would let one contract's worth of rounding past it.
+  const riskCap = !sizingFree && haveLimit ? Math.floor(derived) : null;
+  const cap = mode === "budget" && riskCap != null ? riskCap : Infinity;
+  const wanted = amtAnswered ? Math.round(typed)
+    : (haveLimit ? Math.round(derived) : null);
+  const amt = wanted == null ? null : Math.min(wanted, cap);
+  const cT = Number(limits.tradingCapital);
+  const amtMax = sizingFree
+    ? (limits.tradingCapital != null && Number.isFinite(cT) && cT > 0 ? Math.floor(cT) : null)
+    : riskCap;
   const raw = want.minChance;
   const chanceAnswered = raw != null && raw !== "" && Number.isFinite(Number(raw));
   const minChance = clampAskedChance(chanceAnswered ? Number(raw) : null);
-  return { mode, amt, amtAnswered, minChance, chanceAnswered, answered: amtAnswered };
+  const rawR = want.minReturn;
+  const returnAnswered = rawR != null && rawR !== "" && typeof rawR !== "boolean" && Number.isFinite(Number(rawR));
+  const minReturn = clampAskedReward(returnAnswered ? Number(rawR) : null);
+  // `returnAsk` is what the FILTER reads: null until the slider is moved above the reward floor, so the filter never
+  // names the floor and cannot be mistaken for it. `minReturn` is what the slider shows.
+  const returnAsk = minReturn > RULES.minRewardRisk + 1e-9 ? minReturn : null;
+  return { mode, amt, amtAnswered, amtCapped: amtAnswered && amt != null && Math.round(typed) > amt, amtMax, riskCap,
+    minChance, chanceAnswered, minReturn, returnAsk, returnAnswered, answered: amtAnswered };
 }
 
 /* =====================================================================
@@ -3155,39 +3216,48 @@ export function requestOf(want = {}, limits = {}) {
 ===================================================================== */
 
 /**
- * @param cand    a `candidateOf()` shape: `{ pop, maxProfit, maxLoss, … }`
+ * @param cand    a `candidateOf()` shape: `{ pop, rr, maxProfit, maxLoss, profitUnbounded, … }`
  * @param request a `requestOf()` result
  * @param size    the `scaleStrategy()` result for this candidate, or null.
  *                IT IS HANDED IN RATHER THAN DERIVED: how many combinations a
  *                budget buys has one home and this file is not it, and
  *                re-deriving the unit here would be the `Math.max(prem, 1)`
  *                fault wearing a second coat.
- * @returns {{ meets, misses: [{id,text,short}] }}
+ * @returns {{ meets, misses: [{id,text,short,control,need}] }}
+ *
+ * EVERY MISS NAMES THE CONTROL IT BELONGS TO (`control`) AND THE VALUE THAT CONTROL WOULD HAVE TO TAKE FOR THIS
+ * ONE TO GET IN (`need`, the candidate's own figure), which is what `nearestRelaxation()` reads: "Lower chance to
+ * 54%" is this candidate's own chance, not a guess.
  */
 export function meetsRequest(cand, request, size = null) {
   const misses = [];
-  if (!cand || !request) return { meets: false, misses: [{ id: "unknown", short: "not readable", text: "This candidate could not be read against your answers." }] };
+  if (!cand || !request) return { meets: false, misses: [{ id: "unknown", control: null, need: null, short: "not readable", text: "This candidate could not be read against your answers." }] };
   const amt = Number(request.amt);
   const haveAmt = Number.isFinite(amt) && amt > 0;
 
   /* ---- THE MONEY HALF ---- */
   if (haveAmt) {
+    // The most one trade may put at risk: the budget in budget mode, and the per-trade cap in target mode, where
+    // the amount is a PROFIT and not a risk (PR #45). Under free sizing there is no cap and nothing to say.
+    const ceiling = request.mode === "budget" ? amt : (Number.isFinite(Number(request.riskCap)) ? Number(request.riskCap) : null);
     if (!size) {
-      misses.push({ id: "unsized", short: "cannot be sized",
+      misses.push({ id: "unsized", control: "size", need: null, short: "cannot be sized",
         text: `It cannot be sized against ${request.mode === "target" ? "a target" : "a budget"}: it has no ` +
           `readable cost or no maximum profit to divide by.` });
     } else if (size.unpriceable) {
-      misses.push({ id: "unpriceable", short: "no readable price",
+      misses.push({ id: "unpriceable", control: "size", need: null, short: "no readable price",
         text: `One side of this prices at under ${money(MIN_NET_DOLLARS)}, so there is no cost to divide your ` +
           `${request.mode === "target" ? "target" : "budget"} by.` });
     } else if (!size.ok) {
-      const over = Number(size.unit) - amt;
-      misses.push({ id: "budget", short: `over budget by ${money(over)}`,
+      const over = Number(size.unit) - (ceiling == null ? amt : ceiling);
+      misses.push({ id: "budget", control: "size", need: Math.ceil(Number(size.unit)),
+        short: `over budget by ${money(over)}`,
         text: `Over the budget by ${money(over)}: one of these puts ${money(size.unit)} at risk ` +
-          `and you said ${money(amt)}.` });
+          `and you said ${money(ceiling == null ? amt : ceiling)}.` });
     } else if (request.mode === "target" && Number(size.totProfit) < amt) {
       const shortBy = amt - Number(size.totProfit);
-      misses.push({ id: "target", short: `short of the target by ${money(shortBy)}`,
+      misses.push({ id: "target", control: "size", need: Math.floor(Number(size.totProfit)),
+        short: `short of the target by ${money(shortBy)}`,
         text: `Short of the target by ${money(shortBy)}: the most this can make is ${money(size.totProfit)} and ` +
           `you asked for ${money(amt)}.` });
     }
@@ -3199,21 +3269,41 @@ export function meetsRequest(cand, request, size = null) {
   if (!Number.isFinite(asked)) {
     // No bar asked for: nothing to miss.
   } else if (cand.pop == null || !Number.isFinite(pop)) {
-    misses.push({ id: "chance-unknown", short: "chance not known",
+    misses.push({ id: "chance-unknown", control: "chance", need: null, short: "chance not known",
       text: `Its chance of profit could not be worked out, so it cannot be held against the ${chanceText(asked)} ` +
         `you asked for. Unknown is not a low number.` });
   } else if (pop < asked - 1e-9) {
-    misses.push({ id: "chance", short: `chance ${chanceText(pop)} under the ${chanceText(asked)} asked`,
+    misses.push({ id: "chance", control: "chance", need: pop, short: `chance ${chanceText(pop)} under the ${chanceText(asked)} asked`,
       text: `Its chance is ${chanceText(pop)}, under the ${chanceText(asked)} you asked for.` });
+  }
+
+  /* ---- THE RETURN HALF (PR #45). It only TIGHTENS the reward floor: `minReturn` starts AT `minRewardRisk`, every
+     candidate in the list has already cleared that floor, and nothing here calls it. A structure with no ceiling
+     has no ratio to read and passes: it is the one case where "no maximum" is a fact and not a gap. An unreadable
+     ratio on anything else is unknown, and unknown is not a pass. ---- */
+  const askedR = Number(request.returnAsk);
+  if (request.returnAsk != null && Number.isFinite(askedR) && !cand.profitUnbounded) {
+    const rr = Number(cand.rr);
+    if (cand.rr == null || !Number.isFinite(rr)) {
+      misses.push({ id: "return-unknown", control: "return", need: null, short: "return on risk not known",
+        text: `Its return on risk could not be worked out, so it cannot be held against the ${returnText(askedR)} you asked for.` });
+    } else if (rr < askedR - 1e-9) {
+      misses.push({ id: "return", control: "return", need: rr, short: `return ${returnText(rr)} under the ${returnText(askedR)} asked`,
+        text: `Its return on risk is ${returnText(rr)}, under the ${returnText(askedR)} you asked for.` });
+    }
   }
   return { meets: misses.length === 0, misses };
 }
+
+/** A return on risk the way the card writes it: a whole percent of what is at risk. */
+export const returnText = (rr) => (rr == null || !Number.isFinite(Number(rr)) ? "—" : `${Math.round(Number(rr) * 100)}%`);
 
 /**
  * The same list, in two sections. `sizeOf` is the caller's `scaleStrategy()`.
  *
  * NOTHING IS DROPPED: `meets.length + others.length` is always the input
- * length, and every entry in `others` carries at least one reason.
+ * length, and every entry in `others` carries at least one reason. The caller
+ * HIDES `others` behind a count (`resultsLine()`); this never removes one.
  */
 export function splitByRequest(cands = [], request, sizeOf = () => null) {
   const meets = [], others = [];
@@ -3225,13 +3315,155 @@ export function splitByRequest(cands = [], request, sizeOf = () => null) {
   return { meets, others, total: meets.length + others.length };
 }
 
-/** The two headings. They carry the counts, so neither needs a sentence. */
-export const meetsHeading = (request, n) =>
-  `MEETS WHAT YOU ASKED FOR (${n})`;
-export const otherwiseHeading = (n) =>
-  `ALSO FOUND, AND WHAT EACH ONE MISSED (${n})`;
+/* =====================================================================
+   THE RESULTS LINE AND WHAT TO MOVE WHEN IT SAYS NONE (PR #45, TASK 1).
+
+   The owner read "the filters do not filter": at a minimum chance of 60%, 4 of the 31 fixture cards met it and all
+   31 stayed on screen under two headings. A card that misses the request is HIDDEN now, behind a count that is
+   the line itself, and tapping it opens them with their reasons. Nothing is dropped without a count.
+===================================================================== */
+
+const plural = (n, one, many) => (n === 1 ? one : many);
+
+/** "4 match what you asked", with a count that agrees with its verb. */
+export const matchHeading = (n) => `${n} ${plural(n, "matches", "match")} what you asked`;
+
+/** The toggle half: "show 27 that miss" / "hide the 27 that miss". */
+export const missToggle = (m, open) =>
+  (open ? `hide the ${m} that ${plural(m, "misses", "miss")}` : `show ${m} that ${plural(m, "misses", "miss")}`);
+
+/** The whole line, which is the button: "4 match what you asked · show 27 that miss". */
+export const resultsLine = (n, m, open = false) =>
+  (m > 0 ? `${matchHeading(n)} · ${missToggle(m, open)}` : matchHeading(n));
+
 /** One row's reason, in the fewest words that still say which rule. */
 export const missReasonLine = (miss) => (miss && miss.short ? miss.short : "");
+
+/** The control names a miss can carry, in the words the sliders use. */
+const CONTROL_WORDS = { chance: "chance", return: "return on risk", size: "size" };
+
+/**
+ * HOW MANY CANDIDATES EACH CONTROL LETS THROUGH, ON ITS OWN, AND THE VALUES IT WAS HELD AGAINST.
+ *
+ * A slider's "N pass" and its histogram are read from the candidates' own figures: the chance and the return are
+ * the card's, and the size's is what one contract puts at risk (budget) or what the sized trade can make (target).
+ * `pass` counts a candidate against ONE control; a candidate with an unreadable figure on it is neither a pass nor
+ * a value on the histogram. Nothing here is a second home for the rule: it reads `meetsRequest()`.
+ *
+ * @returns {{ total, chance: {pass, values}, return: {pass, values}, size: {pass, values}, all }}
+ */
+export function controlReadings(cands = [], request, sizeOf = () => null) {
+  const out = { total: (cands || []).length, chance: { pass: 0, values: [] }, return: { pass: 0, values: [] },
+    size: { pass: 0, values: [] }, all: 0 };
+  for (const c of cands || []) {
+    const size = sizeOf(c);
+    const r = meetsRequest(c, request, size);
+    const missed = new Set(r.misses.map((m) => m.control));
+    if (r.meets) out.all++;
+    for (const k of ["chance", "return", "size"]) if (!missed.has(k)) out[k].pass++;
+    if (c && c.pop != null && Number.isFinite(Number(c.pop))) out.chance.values.push(Number(c.pop));
+    if (c && !c.profitUnbounded && c.rr != null && Number.isFinite(Number(c.rr))) out.return.values.push(Number(c.rr));
+    if (size && !size.unpriceable && Number.isFinite(Number(size.unit)) && request && request.mode === "budget") out.size.values.push(Number(size.unit));
+    if (size && size.ok && request && request.mode === "target" && Number.isFinite(Number(size.totProfit))) out.size.values.push(Number(size.totProfit));
+  }
+  return out;
+}
+
+/**
+ * ZERO MATCHES: WHICH CONTROL BINDS, AND THE NEAREST VALUE THAT LETS SOMETHING IN.
+ *
+ * Read off the candidates that missed, from the number each one's miss carries (`need`): a candidate gets in on
+ * ONE control's move only when that control is the only thing it missed. For each such control the value is the
+ * closest one a candidate needs, rounded the safe way (down for a minimum, up for a cost) so the value shown does
+ * let it in, and the nearest control is the one that moves least against its own slider. Never a guess: if no
+ * single control lets anything in, it says how many miss on each instead.
+ *
+ * @returns {null | { control, value, matches: string[], text }} — null when there is nothing to say (the list is
+ *   empty, or something already matches)
+ */
+export function nearestRelaxation(cands = [], request, sizeOf = () => null) {
+  const rows = [];
+  for (const c of cands || []) {
+    const r = meetsRequest(c, request, sizeOf(c));
+    if (r.meets) return null;
+    rows.push({ c, misses: r.misses });
+  }
+  if (!rows.length) return null;
+  const names = (xs) => {
+    const t = [...new Set(xs.map((x) => x.c.ticker || x.c.tk).filter(Boolean))];
+    return t.length > 3 ? [...t.slice(0, 3), `+${t.length - 3}`] : t;
+  };
+  const options = [];
+  const only = (control) => rows.filter((r) => r.misses.length && r.misses.every((m) => m.control === control && m.need != null));
+  const noun = (n) => `${n} ${plural(n, "match", "matches")}`;
+
+  const ch = only("chance");
+  if (ch.length) {
+    const asked = Number(request.minChance);
+    const value = Math.floor(Math.max(...ch.map((r) => r.misses[0].need)) * 100 + 1e-9) / 100;
+    if (value >= RULES.chanceAskMin - 1e-9 && value < asked) {
+      const let_in = ch.filter((r) => r.misses[0].need >= value - 1e-9);
+      options.push({ control: "chance", value, matches: names(let_in), n: let_in.length,
+        dist: (asked - value) / (RULES.chanceAskMax - RULES.chanceAskMin), lead: `Lower chance to ${chanceText(value)}` });
+    }
+  }
+  const rt = only("return");
+  if (rt.length) {
+    const asked = Number(request.returnAsk);
+    const value = Math.floor(Math.max(...rt.map((r) => r.misses[0].need)) * 100 + 1e-9) / 100;
+    if (value >= RULES.minRewardRisk - 1e-9 && value < asked) {
+      const let_in = rt.filter((r) => r.misses[0].need >= value - 1e-9);
+      options.push({ control: "return", value, matches: names(let_in), n: let_in.length,
+        dist: (asked - value) / (RULES.rewardAskMax - RULES.minRewardRisk), lead: `Lower return on risk to ${returnText(value)}` });
+    }
+  }
+  const sz = only("size");
+  if (sz.length) {
+    const amt = Number(request.amt);
+    if (request.mode === "target") {
+      const value = Math.max(...sz.map((r) => r.misses[0].need));
+      if (value > 0 && value < amt) {
+        const let_in = sz.filter((r) => r.misses[0].need >= value);
+        options.push({ control: "size", value, matches: names(let_in), n: let_in.length, dist: (amt - value) / amt,
+          lead: `Lower the profit I am aiming for to ${money(value)}` });
+      }
+    } else {
+      const value = Math.min(...sz.map((r) => r.misses[0].need));
+      if (value > amt) {
+        const let_in = sz.filter((r) => r.misses[0].need <= value);
+        const cap = Number(request.riskCap);
+        const past = Number.isFinite(cap) && value > cap;
+        const top = Number(request.amtMax);
+        if (past || !Number.isFinite(top) || value <= top) {
+          options.push({ control: "size", value, matches: names(let_in), n: let_in.length, dist: (value - amt) / amt,
+            lead: past ? `Raise the per-trade limit to ${money(value)}` : `Raise most I will risk to ${money(value)}` });
+        }
+      }
+    }
+  }
+  if (options.length) {
+    options.sort((a, b) => a.dist - b.dist);
+    const o = options[0];
+    return { control: o.control, value: o.value, matches: o.matches,
+      text: `${o.lead} → ${noun(o.n)}: ${o.matches.join(", ")}` };
+  }
+  // No single control lets one in: say how many miss on each, from the same misses.
+  const tally = {};
+  for (const r of rows) for (const k of new Set(r.misses.map((m) => m.control).filter(Boolean))) tally[k] = (tally[k] || 0) + 1;
+  const parts = Object.entries(tally).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${n} on ${CONTROL_WORDS[k] || k}`);
+  return { control: null, value: null, matches: [],
+    text: `No single control lets one in: ${rows.length} ${plural(rows.length, "misses", "miss")}, ${parts.join(", ")}` };
+}
+
+/**
+ * THE DIRECTION A MARKET'S SEASON CHOSE, ON ITS CARD ("↑ bull · season").
+ * `sentiments` is the app's list of `{ id, label, icon }`; the arrows are the ones the app already uses.
+ */
+export const directionTag = (sentId, sentiments = []) => {
+  const s = (sentiments || []).find((x) => x.id === sentId);
+  return s ? `${s.icon} ${String(s.label).toLowerCase()} · season` : null;
+};
+
 /**
  * THE NET AT THE PRICE THAT FILLS — one expression, for every card.
  *
@@ -3367,9 +3599,9 @@ export const targetPriceNote = (t, ticker) =>
     : `There is no price loaded for this market, so the direction cannot be read as a target. A missing price is ` +
       `unknown, never a target of zero.`);
 
-/** The slider's own label, with the number it is asking for in it. */
-export const chanceAskLabel = (request) =>
-  `CHANCE OF PROFIT, AT LEAST ${chanceText(request && request.minChance)}`;
+/** The sliders' own labels. The number sits beside the label, in the slider's value, not inside the words. */
+export const chanceAskLabel = () => "Chance at least";
+export const rewardAskLabel = () => "Return on risk at least";
 
 /**
  * WHAT THE FIVE CONTROLS DO — AND WHAT THEY CANNOT DO.
@@ -3378,15 +3610,17 @@ export const chanceAskLabel = (request) =>
  * paragraph explaining the control does not (ROADMAP P10 §5).
  */
 export const controlsFoldNote = (request) =>
-  `These decide which candidates are listed under "meets what you asked for" and how many combinations the ` +
-  `budget buys. They do NOT create a structure and they do NOT relax a single check: the quality floors still ` +
-  `remove what they remove and still say why, and ${money(MIN_NET_DOLLARS)} is still the least a price may be ` +
-  `before anything is judged at all. The chance is the one this app computes everywhere — ` +
-  `${RULES.mcRuns.toLocaleString("en-GB")} simulated paths, seeded from the trade, so the figure on a card and ` +
-  `the figure on the Build screen are the same number. Asking for a higher chance moves lower-paying trades to ` +
-  `the top and better-paying ones below the line; it does not make either of them safer. The one thing this ` +
-  `slider will never touch is the reward floor of ${RULES.minRewardRisk}: under that the app does not propose at ` +
-  `all, and a floor a user can switch off is not a floor.` +
+  `These decide which candidates count as matching what you asked, and how many combinations the budget buys. ` +
+  `A candidate that misses is hidden behind a count, never dropped: tap the count and it comes back with the ` +
+  `reason it missed. The controls do NOT create a structure and they do NOT relax a single check: the quality ` +
+  `floors still remove what they remove and still say why, and ${money(MIN_NET_DOLLARS)} is still the least a ` +
+  `price may be before anything is judged at all. The size never puts more at risk than the per-trade limit ` +
+  `(unless free sizing is on); raising the limit is the "edit" beside it, and asks for a reason. The chance is ` +
+  `the one this app computes everywhere — ${RULES.mcRuns.toLocaleString("en-GB")} simulated paths, seeded from ` +
+  `the trade, so the figure on a card and the figure on the Build screen are the same number. Asking for a ` +
+  `higher chance or a higher return only narrows the list; it does not make a trade safer. Return on risk can ` +
+  `only tighten the reward floor of ${pctText(RULES.minRewardRisk)}, never loosen it: under that the app does ` +
+  `not propose at all, and a floor a user can switch off is not a floor.` +
   (request && !request.amtAnswered
     ? ` The amount above is the suggested per-trade limit, derived from your capital answers — not a figure you gave.`
     : ``);
@@ -3421,6 +3655,28 @@ export const clampAskedChance = (x) => {
   if (!Number.isFinite(v)) return RULES.chanceAskDefault;
   return Math.min(RULES.chanceAskMax, Math.max(RULES.chanceAskMin, v));
 };
+
+/**
+ * The return-on-risk slider never leaves the band between the reward floor and its own top, and NEVER goes under
+ * the floor: it can only tighten `minRewardRisk`. No answer is the floor itself, which asks for nothing extra.
+ * (`Number(null)` is 0 and 0 is finite — a missing answer is not a request for the lowest return.)
+ */
+export const clampAskedReward = (x) => {
+  if (x == null || x === "" || typeof x === "boolean") return RULES.minRewardRisk;
+  const v = Number(x);
+  if (!Number.isFinite(v)) return RULES.minRewardRisk;
+  return Math.min(RULES.rewardAskMax, Math.max(RULES.minRewardRisk, v));
+};
+
+/**
+ * THE NOTE UNDER THE AMOUNT SLIDER (PR #45): that it was held at the per-trade limit when more was typed, and
+ * otherwise whose figure it is. Under free sizing there is no limit and the slider says so.
+ */
+export const amountNote = (request) =>
+  (request && request.amtCapped && request.riskCap != null
+    ? `held at the per-trade limit of ${money(request.riskCap)}`
+    : requestAmountOwner(request));
+export const freeAmountNote = () => "no limit applied · free sizing";
 
 /**
  * WHOSE FIGURE THE AMOUNT IS — one clause, the `capitalSourceNote()` pattern.

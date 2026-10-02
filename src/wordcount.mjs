@@ -126,16 +126,20 @@ export const COPY = {
   alpacaErrorText: () => O.alpacaErrorText(new Error("422")),
   pctText: () => R.pctText(0.35),
   chanceText: () => R.chanceText(0.55),
+  returnText: () => R.returnText(1.25),
   // ROADMAP P10 — the controls block and the card.
   chanceAskLabel: () => (R.chanceAskLabel ? R.chanceAskLabel(REQUEST) : ""),
+  rewardAskLabel: () => (R.rewardAskLabel ? R.rewardAskLabel() : ""),
   controlsFoldNote: () => (R.controlsFoldNote ? R.controlsFoldNote(REQUEST) : ""),
   targetPriceNote: () => (R.targetPriceNote ? R.targetPriceNote(R.targetPriceOf(27.5, { tgt: 0.04 }), "SOYB") : ""),
   requestAmountLabel: () => (R.requestAmountLabel ? R.requestAmountLabel("budget") : ""),
   requestAmountOwner: () => (R.requestAmountOwner ? R.requestAmountOwner(REQUEST) : ""),
+  amountNote: () => R.amountNote(R.requestOf({ amt: 9000 }, LIMITS)),
+  freeAmountNote: () => R.freeAmountNote(),
   contractsSourceNote: () => (R.contractsSourceNote ? R.contractsSourceNote({ contracts: 3, typed: false, request: REQUEST }) : ""),
   missReasonLine: () => (R.missReasonLine ? R.missReasonLine({ id: "budget", text: "over the budget by $40" }) : ""),
-  meetsHeading: () => (R.meetsHeading ? R.meetsHeading(REQUEST, 2) : ""),
-  otherwiseHeading: () => (R.otherwiseHeading ? R.otherwiseHeading(3) : ""),
+  // PR #45: the results line replaces the two headings; its longest answer is the one with a count to show.
+  resultsLine: () => R.resultsLine(4, 27, false),
   fillPriceHeading: () => (R.fillPriceHeading ? R.fillPriceHeading() : ""),
   crossingCostNote: () => (R.crossingCostNote ? R.crossingCostNote({ known: true, fill: 0.24, mid: 0.2, cost: 0.04, bid: 0.14 }) : ""),
   // PR #40, TASK 2: THE FIVE THAT WERE UNCOUNTED, and the new ones. Two of the
@@ -151,7 +155,7 @@ export const COPY = {
   setText: () => "",
   // The longest of its answers: a failure named with its error, then the floors' counts.
   nothingTodayLine: () => R.nothingTodayLine({ liquidity: 3, reward: 2 }, { noBoard: ["XLE"], failed: [{ tk: "UNG", why: "HTTP 502" }] }),
-  sizeLine: () => R.sizeLine(REQUEST, { ok: true, n: 14, totPrem: 868, totRisk: 868, isCredit: false }) || "",
+  sizeLine: () => R.sizeLine({ ok: true, n: 25, risk: 193, totRisk: 4825, isCredit: false }) || "",
   newsLine: () => S.newsLine("CORN", [{ title: "Drought cuts US corn crop outlook in the Midwest", date: new Date().toISOString() }]).text,
   // PR #44, TASK 4: the badge's own words while a market is being read. (Its aria-label sentence is not on screen.)
   readingLine: () => S.readingLine({ waiting: ["news"] }),
@@ -229,6 +233,20 @@ export function atRest(src) {
   }
   // Tooltips: `tip={...}` and `title={...}` are tap-to-open, not on screen.
   out = out.replace(/\b(tip|title)=\{(?:[^{}]|\{[^{}]*\})*\}/g, " ");
+  // A NODE HANDED TO A STEP TO PUT INSIDE ITS OWN FOLD (PR #45). `find.jsx` cannot import the components that live in
+  // App.jsx, so App passes them as `foldedNode={<…/>}` and the step renders them inside its "why" fold. The counter
+  // sees the tags in the caller's text, outside any `<Fold>`, and would score a tap-away panel as words at rest; the
+  // prop's whole value is stripped, by brace matching, because the JSX inside nests deeper than a regex can follow.
+  for (;;) {
+    const at = out.indexOf("foldedNode={");
+    if (at < 0) break;
+    let depth = 0, i = at + "foldedNode=".length;
+    for (; i < out.length; i++) {
+      if (out[i] === "{") depth++;
+      else if (out[i] === "}") { depth--; if (depth === 0) { i++; break; } }
+    }
+    out = out.slice(0, at) + " " + out.slice(i);
+  }
   return out;
 }
 
@@ -339,7 +357,9 @@ export const COMPONENT_DEPTH = 3;
 // the candidate card are mounted BY the step blocks, so their words are words
 // the reader scrolls past — and a counter that could not see a new component
 // would report a screen shrinking on the day it grew.
-const UI_FILES = ["App.jsx", "pro.jsx", "steps.jsx", "why.jsx", "visuals.jsx", "wizard.jsx", "card.jsx"];
+// `ui.jsx` and `find.jsx` since PR #45: the atoms and the Find step moved out of App.jsx, and a counter that could not
+// see them would report Find shrinking to nothing on the day it was rewritten.
+const UI_FILES = ["App.jsx", "pro.jsx", "steps.jsx", "why.jsx", "visuals.jsx", "wizard.jsx", "card.jsx", "ui.jsx", "find.jsx"];
 
 const sourcesOnce = (() => {
   let cache = null;

@@ -2008,11 +2008,25 @@ export function ReportTab({ ctx, apiKey, setSetting }) {
 /* ================================================================
    6) OPTIMIZER: scaling per obiettivo di ricavo o budget di premio
 ================================================================ */
-export function scaleStrategy(a, mode, amt) {
+/**
+ * HOW MANY COMBINATIONS A BUDGET BUYS — THE ONE HOME OF THE SIZE.
+ *
+ * `riskCap` is `request.riskCap` (PR #45, TASK 0): the per-trade limit, or null under free sizing. No count ever
+ * puts more than the cap at risk — the gate refuses a trade past `perTradeLimit`, so a card sized past it is a card
+ * that offers a trade it cannot send. In budget mode the amount is already under the cap and this changes nothing;
+ * in target mode the amount is a PROFIT, the count that reaches it may need more risk than the cap allows, and then
+ * the count is the biggest that fits (the card then says it is short of the target, which is true).
+ *
+ * A STRUCTURE WITH NO CEILING CAN BE SIZED ON ITS RISK ALONE and cannot be sized against a profit target: there is
+ * no maximum to divide by. It used to be refused outright, which is why every long call read "cannot be sized".
+ */
+export function scaleStrategy(a, mode, amt, riskCap = null) {
   const risk = Math.abs(a.maxLoss);              // capitale a rischio per 1 combo ($)
   const prem = Math.abs(a.entry) * 100;          // premio per 1 combo ($, da chain reale)
   const isCredit = a.entry < 0;
-  if (!Number.isFinite(risk) || risk <= 0 || !Number.isFinite(a.maxProfit) || a.maxProfit <= 0) return null;
+  const unbounded = !!a.profitUnbounded || !Number.isFinite(a.maxProfit);
+  if (!Number.isFinite(risk) || risk <= 0) return null;
+  if (unbounded ? mode === "target" : a.maxProfit <= 0) return null;
   /* THE BUDGET IS "THE MOST I WILL RISK", SO ONE COMBINATION COSTS ITS MAXIMUM
      LOSS (PR #41, TASK 1). A debit was sized on its PREMIUM, which equals the
      maximum loss only when the structure is symmetric. The owner's SLV put
@@ -2034,8 +2048,10 @@ export function scaleStrategy(a, mode, amt) {
   let n;
   if (mode === "budget") n = Math.floor(amt / unit);
   else n = Math.ceil(amt / a.maxProfit);
+  const cap = Number(riskCap);
+  if (riskCap != null && Number.isFinite(cap) && cap > 0) n = Math.min(n, Math.floor(cap / unit));
   if (!Number.isFinite(n) || n < 1) return { n: 0, ok: false, risk, prem, isCredit, unit };
-  return { n, ok: true, isCredit, totProfit: n * a.maxProfit, totRisk: n * risk, totPrem: n * prem, prem, risk, unit };
+  return { n, ok: true, isCredit, unbounded, totProfit: unbounded ? null : n * a.maxProfit, totRisk: n * risk, totPrem: n * prem, prem, risk, unit };
 }
 /* `probProfit(curve, S, sigma, dte)` LIVED HERE AND IS DELETED.
 

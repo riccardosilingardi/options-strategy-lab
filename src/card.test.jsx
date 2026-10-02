@@ -13,8 +13,10 @@
 // ============================================================================
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { CandidateCard, SplitSections, RequestControls, MissLine } from "./card.jsx";
-import { requestOf, RULES, fillNet, comboBook, openLimitPrice, rewardRisk, onTick, sizeLine, candidateFlags } from "./rules.js";
+import { CandidateCard, MatchList, RequestControls, MissLine, CardGrid } from "./card.jsx";
+import { readFileSync } from "node:fs";
+import { requestOf, RULES, fillNet, comboBook, openLimitPrice, rewardRisk, onTick, sizeLine, candidateFlags,
+  sizedFigures, directionTag, controlReadings } from "./rules.js";
 import { payoffBands } from "./visuals.jsx";
 
 const ok = [], bad = [];
@@ -39,11 +41,17 @@ function textNodes(html) {
 }
 const wordsIn = (s) => s.split(/\s+/).filter(Boolean).length;
 
+/* A figure set as the list prints it: the analysis shape `sizedFigures()` reads, and a contract count. */
+const A80 = { maxLoss: -80, maxProfit: 120, profitUnbounded: false };
+const PIC = { bands: BANDS, legs: LEGS, entryNet: 0.8, spot: 28.6, bars: [], dte: 45, sigma: 0.3, driftAnnual: 0.02, ticker: "SOYB" };
+
 check("ZERO PROSE — no text node on a card runs past six words", () => {
   const html = renderToStaticMarkup(
-    <CandidateCard name="Bull Call Spread" legs="+1 28C / −1 30C"
-      rr={1.5} pop={0.62} profit={120} risk={-80} bands={BANDS} ticker="SOYB" />);
-  const EXEMPT = new Set(["Bull Call Spread", "+1 28C / −1 30C"]);
+    <CandidateCard name="Bull Call Spread" legs="+1 28C / −1 30C" direction="↑ bull · season"
+      rr={1.5} pop={0.62} figures={sizedFigures(A80, 3)} sizeText={sizeLine({ ok: true, n: 3, risk: 80 })} picture={PIC} />);
+  // The size line is the third long thing: "3 contracts × $80 at risk each" is the owner's own line, and it is a
+  // product written out — labels and numbers, not a sentence (PR #45).
+  const EXEMPT = new Set(["Bull Call Spread", "+1 28C / −1 30C", "3 contracts × $80 at risk each"]);
   for (const t of textNodes(html)) {
     if (EXEMPT.has(t)) continue;
     if (wordsIn(t) > 6) {
@@ -52,27 +60,40 @@ check("ZERO PROSE — no text node on a card runs past six words", () => {
   }
 });
 
-check("FOUR FIGURES, ALWAYS THE SAME FOUR, ALWAYS IN THE SAME ORDER", () => {
+check("FOUR FIGURES, ALWAYS THE SAME FOUR, ALWAYS IN THE SAME ORDER, FOR THE SIZE THE BUDGET BUYS", () => {
   const html = renderToStaticMarkup(
     <CandidateCard name="Bull Call Spread" legs="+1 28C" rr={1.5} pop={0.62}
-      profit={120} risk={-80} bands={BANDS} ticker="SOYB" />);
-  // The labels are matched as WHOLE text nodes: "RISK" is a substring of
-  // "RETURN ON RISK", and a test that cannot tell them apart cannot see the
-  // order it claims to be checking.
-  for (const k of [">RETURN ON RISK<", ">CHANCE<", ">PROFIT<", ">RISK<"]) has(html, k);
+      figures={sizedFigures(A80, 3)} sizeText={sizeLine({ ok: true, n: 3, risk: 80 })} picture={PIC} />);
+  // The labels are matched as WHOLE text nodes: "RISK" is a substring of "RETURN ON RISK" and "YOU RISK".
+  const ORDER = [">YOU RISK<", ">MAX PROFIT<", ">CHANCE<", ">RETURN ON RISK<"];
+  for (const k of ORDER) has(html, k);
   // ...in that order, because a figure that moves places is a figure nobody can compare.
-  const at = [">RETURN ON RISK<", ">CHANCE<", ">PROFIT<", ">RISK<"].map((k) => html.indexOf(k));
+  const at = ORDER.map((k) => html.indexOf(k));
   for (let i = 1; i < at.length; i++) {
     if (!(at[i] > at[i - 1])) throw new Error("the four figures are not in their fixed order");
   }
-  // and the values themselves
-  has(html, "150%"); has(html, "62%"); has(html, "$120"); has(html, "$80");
+  // THE VALUES ARE THE WHOLE POSITION'S: 3 × $80 at risk, 3 × $120 at most, and the ratio does not move with size.
+  has(html, "$240"); has(html, "$360"); has(html, "62%"); has(html, "150%");
+  // THE UNIT IS SAID ONCE ABOVE THEM, AND THE ARITHMETIC UNDER THEM.
+  has(html, "FOR 3 CONTRACTS");
+  has(html, "3 contracts × $80 at risk each");
+  // THE PER-CONTRACT FIGURES ARE BEHIND THE FOLD: its summary is on the card, its children are not until it is tapped.
+  has(html, "Per contract");
+  if (html.includes("RISK, ONE CONTRACT")) throw new Error("the per-contract figures are on the card, not behind its fold");
 });
 
-check("the name and the legs are the only long things, and they are on it", () => {
+check("A CARD WITH NO SIZE SAYS PER CONTRACT, AND HAS NO FOLD TO SAY IT AGAIN", () => {
   const html = renderToStaticMarkup(
-    <CandidateCard name="Bullish Call Butterfly" legs="+1 21C / −2 22.5C / +1 24C"
-      rr={2} pop={0.3} profit={200} risk={-100} bands={BANDS} ticker="BOIL" />);
+    <CandidateCard name="Bull Call Spread" legs="+1 28C" rr={1.5} pop={0.62} figures={sizedFigures(A80, null)} />);
+  has(html, "PER CONTRACT"); has(html, "$80"); has(html, "$120");
+  if (html.includes("FOR ")) throw new Error("a card with no size claims one");
+  if (html.includes("aria-expanded")) throw new Error("there is nothing per-contract to fold away");
+});
+
+check("THE NAME AND THE LEGS ARE THE ONLY LONG THINGS, AND THEY ARE ON IT", () => {
+  const html = renderToStaticMarkup(
+    <CandidateCard name="Bullish Call Butterfly" legs="+1 21C / −2 22.5C / +1 24C" rr={2} pop={0.3}
+      figures={sizedFigures({ maxLoss: -100, maxProfit: 200 }, 1)} />);
   has(html, "Bullish Call Butterfly");
   has(html, "22.5C");
 });
@@ -80,53 +101,101 @@ check("the name and the legs are the only long things, and they are on it", () =
 check("UNKNOWN IS A DASH, NEVER A CONFIDENT ZERO", () => {
   const html = renderToStaticMarkup(
     <CandidateCard name="Long Call" legs="+1 28C" rr={null} pop={null}
-      profit={null} risk={-80} noCeiling bands={BANDS} ticker="SOYB" />);
+      figures={sizedFigures({ maxLoss: -80, maxProfit: null, profitUnbounded: true }, 2)} />);
   // A missing reward-to-risk and a missing chance both print a dash.
   if (html.includes(">0%<")) throw new Error("a missing chance printed as 0%");
   has(html, "—");
-  // ...and no ceiling is said in words, from its one home.
+  // ...and no ceiling is said in words, from its one home — and NOT multiplied: n × "no ceiling" is not a number.
   has(html, "no ceiling");
+  has(html, "$160");
+  const none = renderToStaticMarkup(<CandidateCard name="X" legs="x" rr={null} pop={null} figures={sizedFigures({ maxLoss: null, maxProfit: null }, 2)} />);
+  if (none.includes(">$0<")) throw new Error("an unreadable risk printed as $0");
 });
 
-check("A ROW IN THE SECOND SECTION CARRIES ITS REASON, AND IT IS ONE LINE", () => {
+check("THE PICTURE ROW IS THE GAUGE BESIDE THE UNIFIED PICTURE, AND THE BAND THUMBNAIL IS GONE (PR #45, TASK 4)", () => {
+  const html = renderToStaticMarkup(
+    <CandidateCard name="Bull Call Spread" legs="+1 28C / −1 30C" rr={1.5} pop={0.62} figures={sizedFigures(A80, 3)} picture={PIC} />);
+  if ((html.match(/<svg/g) || []).length < 2) throw new Error("the gauge and the unified picture are two drawings");
+  has(html, "Open the full picture for SOYB");
+  has(html, 'aria-expanded="false"');
+  const src = readFileSync("src/card.jsx", "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  if (/BandThumbnail/.test(src)) throw new Error("the card still draws the band thumbnail: the unified picture contains it");
+  // A card with nothing to draw (no bands) draws nothing rather than an empty frame.
+  const bare = renderToStaticMarkup(<CandidateCard name="X" legs="x" rr={1} pop={0.5} figures={sizedFigures(A80, 1)} picture={{ ...PIC, bands: null }} />);
+  if (bare.includes("Open the full picture")) throw new Error("an empty picture frame");
+});
+
+check("A MARKET'S SEASON IS NAMED ON ITS CARD, ONLY WHEN THE SEASON CHOSE (PR #45, TASK 1)", () => {
+  const SENT = [{ id: "bull", label: "Bull", icon: "↑" }, { id: "verybear", label: "Very Bear", icon: "↓↓" }];
+  if (directionTag("bull", SENT) !== "↑ bull · season") throw new Error(directionTag("bull", SENT));
+  if (directionTag("verybear", SENT) !== "↓↓ very bear · season") throw new Error(directionTag("verybear", SENT));
+  if (directionTag("sideways", SENT) !== null) throw new Error("an unknown direction was named");
+  has(renderToStaticMarkup(<CandidateCard name="X" legs="x" rr={1} pop={0.5} figures={sizedFigures(A80, 1)} direction="↑ bull · season" />), "↑ bull · season");
+  if (renderToStaticMarkup(<CandidateCard name="X" legs="x" rr={1} pop={0.5} figures={sizedFigures(A80, 1)} />).includes("season")) {
+    throw new Error("a card the owner chose the direction for says the season did");
+  }
+});
+
+check("A ROW AMONG THE MISSES CARRIES ITS REASON, AND IT IS ONE LINE", () => {
   const html = renderToStaticMarkup(
     <MissLine misses={[{ id: "budget", short: "over budget by $40", text: "long form" }]} />);
   has(html, "over budget by $40");
   if (html.includes("long form")) throw new Error("the card prints the phrase, not the paragraph");
 });
 
-check("THE SECTIONS SPLIT, AND THE SECOND ONE IS NEVER FOLDED AWAY", () => {
-  const rows = [
-    { key: "a", name: "A", pop: 0.7, maxProfit: 120, maxLoss: -80, entryNet: 0.8 },
-    { key: "b", name: "B", pop: 0.2, maxProfit: 300, maxLoss: -80, entryNet: 0.8 },
-  ];
+/* ---- THE LIST: it HIDES what misses, behind a count that is the line itself (PR #45, TASK 1) ---- */
+const ROWS = [
+  { key: "a", name: "A", ticker: "AAA", pop: 0.7, rr: 1.5, maxProfit: 120, maxLoss: -80, entryNet: 0.8 },
+  { key: "b", name: "B", ticker: "BBB", pop: 0.2, rr: 1.5, maxProfit: 300, maxLoss: -80, entryNet: 0.8 },
+];
+const sizer = () => ({ ok: true, n: 1, unit: 80, risk: 80, isCredit: false, totProfit: 120 });
+const renderRow = (c, misses) => (
+  <CandidateCard key={c.key} name={c.name} legs="+1 28C" misses={misses} rr={c.rr} pop={c.pop} figures={sizedFigures(A80, 1)} />);
+
+check("THE LIST SHOWS WHAT MATCHES, AND THE REST IS A COUNT — NOT A SECOND SECTION", () => {
   const req = requestOf({ amt: 500, minChance: 0.5 }, {});
-  const html = renderToStaticMarkup(
-    <SplitSections items={rows} request={req}
-      sizeOf={() => ({ ok: true, n: 1, unit: 80, isCredit: false, totProfit: 120 })}
-      renderItem={(c, misses) => (
-        <CandidateCard key={c.key} name={c.name} legs="+1 28C" misses={misses}
-          rr={1} pop={c.pop} profit={c.maxProfit} risk={c.maxLoss} bands={BANDS} ticker="X" />
-      )} />);
-  has(html, "MEETS WHAT YOU ASKED FOR (1)");
-  has(html, "ALSO FOUND, AND WHAT EACH ONE MISSED (1)");
-  // BOTH rows are on the page: this groups, it does not remove.
+  const html = renderToStaticMarkup(<MatchList items={ROWS} request={req} sizeOf={sizer} renderItem={renderRow} />);
+  has(html, "1 matches what you asked · show 1 that misses");
+  has(html, ">A<");
+  if (html.includes(">B<")) throw new Error("a card that misses the request is on screen");
+  if (html.includes("chance 20% under the 50% asked")) throw new Error("a hidden card's reason is on screen");
+  if (html.includes("MEETS WHAT YOU ASKED FOR") || html.includes("ALSO FOUND")) throw new Error("the old headings are back");
+});
+
+check("…AND TAPPING THE COUNT BRINGS THEM BACK WITH THEIR REASONS: NOTHING IS DROPPED", () => {
+  const req = requestOf({ amt: 500, minChance: 0.5 }, {});
+  const html = renderToStaticMarkup(<MatchList items={ROWS} request={req} sizeOf={sizer} renderItem={renderRow} defaultOpen />);
+  has(html, "1 matches what you asked · hide the 1 that misses");
   has(html, ">A<"); has(html, ">B<");
   has(html, "chance 20% under the 50% asked");
-  // ...and the second section is not inside a fold's button.
-  if (/<button[^>]*>[\s\S]{0,200}ALSO FOUND/.test(html)) {
-    throw new Error("the second section is behind a tap; it must never be");
-  }
+  has(html, 'aria-expanded="true"');
+});
+
+check("EVERYTHING MATCHING MEANS NOTHING TO SHOW, SO THE LINE IS NOT A BUTTON", () => {
+  const req = requestOf({ amt: 500, minChance: 0.2 }, {});
+  const html = renderToStaticMarkup(<MatchList items={ROWS} request={req} sizeOf={sizer} renderItem={renderRow} />);
+  has(html, "2 match what you asked");
+  if (html.includes("show ")) throw new Error("a toggle with nothing behind it");
+});
+
+check("ZERO MATCHES NAMES THE CONTROL THAT BINDS AND THE NEAREST VALUE THAT LETS ONE IN", () => {
+  const req = requestOf({ amt: 500, minChance: 0.8 }, {});
+  const html = renderToStaticMarkup(<MatchList items={ROWS} request={req} sizeOf={sizer} renderItem={renderRow} />);
+  has(html, "0 match what you asked · show 2 that miss");
+  has(html, "Lower chance to 70% → 1 match: AAA");
 });
 
 check("THE PRICE NOTE IS OPT-IN, because a mid-priced row may not claim otherwise", () => {
   const req = requestOf({ amt: 500 }, {});
-  const off = renderToStaticMarkup(
-    <SplitSections items={[]} request={req} renderItem={() => null} />);
-  if (off.includes("price that fills")) throw new Error("a section claimed a price nobody asked it to read");
-  const on = renderToStaticMarkup(
-    <SplitSections items={[]} request={req} priceNote renderItem={() => null} />);
+  const off = renderToStaticMarkup(<MatchList items={[]} request={req} renderItem={() => null} />);
+  if (off.includes("price that fills")) throw new Error("a list claimed a price nobody asked it to read");
+  const on = renderToStaticMarkup(<MatchList items={[]} request={req} priceNote renderItem={() => null} />);
   has(on, "price that fills");
+});
+
+check("CARDS LIE IN A GRID: ONE COLUMN ON A PHONE, AS MANY ~340px COLUMNS AS A DESKTOP HOLDS (PR #45, TASK 4)", () => {
+  const html = renderToStaticMarkup(<CardGrid><i /></CardGrid>);
+  has(html, "repeat(auto-fill, minmax(min(100%, 340px), 1fr))");
 });
 
 check("THE PRICE THAT FILLS IS openLimitPrice() ON comboBook(), AND NOTHING ELSE", () => {
@@ -137,39 +206,87 @@ check("THE PRICE THAT FILLS IS openLimitPrice() ON comboBook(), AND NOTHING ELSE
   if (fillNet(LEGS, [{ bid: 1.0, ask: 1.2 }, {}]) !== null) throw new Error("an unquoted leg produced a price");
 });
 
-check("THE CONTROLS BLOCK IS ONE REQUEST, AND ITS EXPLANATION FOLDS (PR #40)", () => {
-  const req = requestOf({ amt: 300 }, { perTradeLimit: 300 });
+/* ---- THE CONTROLS: one style, a slider each (PR #45, TASK 2) ---- */
+const LIMITS = { perTradeLimit: 400, cappedPerTrade: 400, tradingCapital: 8000, answered: true };
+const SENTS = [{ id: "bull", label: "Bull", color: "#0a0", icon: "↑", tgt: 0.04 }];
+
+check("THE CONTROLS BLOCK IS ONE REQUEST, AND ITS EXPLANATION FOLDS", () => {
+  const req = requestOf({ amt: 300 }, LIMITS);
   const html = renderToStaticMarkup(
-    <RequestControls request={req} onChange={() => {}}
-      sentiments={[{ id: "bull", label: "Bull", color: "#0a0", icon: "↑", tgt: 0.04 }]}
-      direction="bull" ticker="SOYB" spot={27.5}
+    <RequestControls request={req} onChange={() => {}} limits={LIMITS} onLimit={() => {}}
+      sentiments={SENTS} direction="bull" ticker="SOYB" spot={27.5}
       universe={["SOYB", "GLD"]} markets={["SOYB"]} onMarkets={() => {}}
       horizon={45} onHorizon={() => {}} />);
-  for (const k of ["MARKETS · 1 OF 2", "DIRECTION", "Season decides", "TARGET PRICE", "SIZE BY", "HORIZON", "CHANCE OF PROFIT"]) has(html, k);
+  for (const k of ["MARKETS · 1 OF 2", "DIRECTION", "Season decides", "TARGET PRICE", "SIZE BY",
+    "Most I will risk", "Chance at least", "Return on risk at least", "Horizon"]) has(html, k);
   has(html, "$28.60");            // the direction read as a price, with one market and one direction
   if (html.includes("Search")) throw new Error("there is no Search button: the list re-filters live");
   if (html.includes("They do NOT create a structure")) {
     throw new Error("the controls block explains itself in a paragraph; it must fold");
   }
-  if (!html.includes("minHeight:38px") && !html.includes("min-height:38px")) {
-    throw new Error("a control smaller than a thumb is not a control on a phone");
-  }
 });
 
-check("TARGET MODE RELABELS THE AMOUNTS AND CHANGES EVERY CARD (PR #40)", () => {
-  const limits = { perTradeLimit: 400, cappedPerTrade: 400 };
-  const budget = renderToStaticMarkup(<RequestControls only={["size"]} request={requestOf({ amt: 200 }, limits)} onChange={() => {}} limits={limits} onLimit={() => {}} />);
-  has(budget, "risk $100"); has(budget, "per-trade limit $400");
-  const target = renderToStaticMarkup(<RequestControls only={["size"]} request={requestOf({ mode: "target", amt: 200 }, limits)} onChange={() => {}} limits={limits} onLimit={() => {}} />);
-  has(target, "make $100");
-  if (target.includes("risk $100")) throw new Error("the chips did not relabel");
-  const size = { ok: true, n: 14, totProfit: 1932, totRisk: 868, isCredit: false };   // 14 × the card's $62 risk
-  const card = renderToStaticMarkup(<CandidateCard name="X" legs="+1 28C" rr={1} pop={0.5} profit={138} risk={-62}
-    size={sizeLine(requestOf({ mode: "target", amt: 1900 }, limits), size)} />);
-  has(card, "14 contracts to reach $1,900");
-  const cardB = renderToStaticMarkup(<CandidateCard name="X" legs="+1 28C" rr={1} pop={0.5} profit={138} risk={-62}
-    size={sizeLine(requestOf({ amt: 900 }, limits), size)} />);
-  has(cardB, "14 contracts for $868");
+check("ONE STYLE: FOUR SLIDERS, NO NUMBER BOX AND NO RISK CHIPS, EACH 44px AND SAYING ITS VALUE", () => {
+  const req = requestOf({ amt: 300 }, LIMITS);
+  const html = renderToStaticMarkup(<RequestControls request={req} onChange={() => {}} limits={LIMITS} onLimit={() => {}} />);
+  const sliders = html.match(/<input[^>]*type="range"[^>]*>/g) || [];
+  if (sliders.length !== 4) throw new Error(`${sliders.length} sliders: amount, chance, return, horizon`);
+  for (const sl of sliders) {
+    if (!/aria-valuetext="[^"]+"/.test(sl)) throw new Error(`no aria-valuetext on ${sl}`);
+    if (!/height:44px/.test(sl)) throw new Error("a slider smaller than a thumb");
+  }
+  if (/<input[^>]*type="number"/.test(html)) throw new Error("the amount is still a number box");
+  if (/risk \$|make \$/.test(html)) throw new Error("the quick-amount chips are back");
+  // SIZE BY stays as two chips.
+  has(html, "What I can spend"); has(html, "What I want to make");
+});
+
+check("THE AMOUNT SLIDER'S TOP IS THE PER-TRADE LIMIT, WITH 'limit $X · edit' BESIDE IT", () => {
+  const req = requestOf({ amt: 300 }, LIMITS);
+  const html = renderToStaticMarkup(<RequestControls only={["size"]} request={req} onChange={() => {}} limits={LIMITS} onLimit={() => {}} />);
+  has(html, 'max="400"'); has(html, `min="${RULES.amountAskStep}"`); has(html, `step="${RULES.amountAskStep}"`);
+  has(html, "limit"); has(html, "$400"); has(html, ">edit<");
+  // A typed amount past the limit is held at it, and the screen says so.
+  const over = requestOf({ amt: 9000 }, LIMITS);
+  const h2 = renderToStaticMarkup(<RequestControls only={["size"]} request={over} onChange={() => {}} limits={LIMITS} onLimit={() => {}} />);
+  has(h2, "held at the per-trade limit of $400");
+  has(h2, 'value="400"');
+  // UNDER FREE SIZING THE TOP IS THE TRADING CAPITAL AND NO LIMIT IS APPLIED.
+  const free = requestOf({ amt: 9000 }, LIMITS, { sizingFree: true });
+  const h3 = renderToStaticMarkup(<RequestControls only={["size"]} request={free} onChange={() => {}} limits={LIMITS} onLimit={() => {}} />);
+  has(h3, 'max="8000"'); has(h3, "no limit applied");
+  if (h3.includes(">edit<")) throw new Error("free sizing has no limit to edit");
+});
+
+check("TARGET MODE RELABELS THE AMOUNT (PR #40)", () => {
+  const budget = renderToStaticMarkup(<RequestControls only={["size"]} request={requestOf({ amt: 200 }, LIMITS)} onChange={() => {}} limits={LIMITS} onLimit={() => {}} />);
+  has(budget, "Most I will risk");
+  const target = renderToStaticMarkup(<RequestControls only={["size"]} request={requestOf({ mode: "target", amt: 200 }, LIMITS)} onChange={() => {}} limits={LIMITS} onLimit={() => {}} />);
+  has(target, "Profit I am aiming for");
+  if (target.includes("Most I will risk")) throw new Error("the label did not change");
+});
+
+check("EACH SLIDER READS ITS BAND AND ITS STEP FROM RULES; THE RETURN ONE NEVER GOES UNDER THE REWARD FLOOR", () => {
+  const html = renderToStaticMarkup(
+    <RequestControls only={["chance", "return"]} request={requestOf({ minChance: 0.6, minReturn: 1 }, {})} onChange={() => {}} />);
+  has(html, `min="${RULES.chanceAskMin}"`); has(html, `max="${RULES.chanceAskMax}"`); has(html, `step="${RULES.chanceAskStep}"`);
+  has(html, `min="${RULES.minRewardRisk}"`); has(html, `max="${RULES.rewardAskMax}"`); has(html, `step="${RULES.rewardAskStep}"`);
+  has(html, "60%"); has(html, "100%");
+  // Asking for nothing extra sits AT the floor, never under it.
+  const floor = requestOf({}, {});
+  if (floor.minReturn !== RULES.minRewardRisk) throw new Error("the default return is not the floor");
+  if (requestOf({ minReturn: 0.01 }, {}).minReturn !== RULES.minRewardRisk) throw new Error("the slider can loosen the floor");
+  if (requestOf({ minReturn: 99 }, {}).minReturn !== RULES.rewardAskMax) throw new Error("the slider passes its top");
+});
+
+check("EACH SLIDER SHOWS A HISTOGRAM OF THE CANDIDATES AND HOW MANY PASS (PR #45, TASK 2)", () => {
+  const req = requestOf({ amt: 500, minChance: 0.5 }, {});
+  const readings = controlReadings(ROWS, req, sizer);
+  const html = renderToStaticMarkup(<RequestControls only={["chance"]} request={req} onChange={() => {}} readings={readings} />);
+  has(html, "1</span> pass");
+  if (!html.includes('aria-hidden="true"')) throw new Error("no histogram drawn");
+  const bare = renderToStaticMarkup(<RequestControls only={["chance"]} request={req} onChange={() => {}} />);
+  if (bare.includes(" pass")) throw new Error("a count with nothing to count");
 });
 
 check("WHAT THE GUIDED DOOR DROPPED IS A VISIBLE STATE ON THE CARD (PR #40)", () => {
@@ -177,19 +294,8 @@ check("WHAT THE GUIDED DOOR DROPPED IS A VISIBLE STATE ON THE CARD (PR #40)", ()
     fused: { agreement: "CONFLICT", confidence: 21 } });
   const ids = flags.map((f) => f.id);
   for (const id of ["single", "conflict", "confidence"]) if (!ids.includes(id)) throw new Error(`${id} not flagged`);
-  const html = renderToStaticMarkup(<CandidateCard name="X" legs="+1 28C" rr={1} pop={0.5} profit={1} risk={-1} flags={flags} />);
+  const html = renderToStaticMarkup(<CandidateCard name="X" legs="+1 28C" rr={1} pop={0.5} figures={sizedFigures(A80, 1)} flags={flags} />);
   has(html, "single option"); has(html, "CONFLICT"); has(html, `confidence under ${RULES.lowConfidence}`);
-});
-
-check("THE SLIDER READS ITS BAND AND ITS STEP FROM RULES", () => {
-  const req = requestOf({ minChance: 0.6 }, {});
-  const html = renderToStaticMarkup(
-    <RequestControls only={["chance"]} request={req} onChange={() => {}} />);
-  has(html, `min="${RULES.chanceAskMin}"`);
-  has(html, `max="${RULES.chanceAskMax}"`);
-  has(html, `step="${RULES.chanceAskStep}"`);
-  has(html, "60%");
-  has(html, "pays more"); has(html, "works more often");
 });
 
 console.log(`\n${ok.length} passed, ${bad.length} failed\n`);

@@ -26,9 +26,9 @@
 // page that does not scroll looked, on a phone, like a tap that did nothing.
 // A sheet fixed to the viewport cannot land below the fold.
 // ============================================================================
-import React, { useEffect, useId, useState } from "react";
+import React, { useEffect } from "react";
 import { X } from "lucide-react";
-import { T, BADGE_SAFE } from "./theme.js";
+import { T, TYPE, BADGE_SAFE } from "./theme.js";
 import { STEPS, stepIndex } from "./path.js";
 
 const mono = { fontFamily: "ui-monospace, Menlo, monospace" };
@@ -91,14 +91,14 @@ export function StepForward({ label, sub, onClick, disabled, disabledNote }) {
     <div style={{ marginTop: 14 }}>
       <button onClick={onClick} disabled={disabled}
         style={{
-          ...sans, width: "100%", minHeight: 54, fontSize: 16, fontWeight: 700, borderRadius: 10,
+          ...sans, width: "100%", minHeight: 54, fontSize: TYPE.size.md, fontWeight: TYPE.weight.bold, borderRadius: 10,
           cursor: disabled ? "not-allowed" : "pointer", border: "none",
           background: disabled ? T.line : T.amber, color: disabled ? T.mut : T.onAccent,
         }}>
         {label}
       </button>
       {(disabled ? disabledNote : sub) && (
-        <div style={{ ...sans, fontSize: 12.5, color: T.mut, lineHeight: 1.5, marginTop: 6, textAlign: "center" }}>
+        <div style={{ ...sans, fontSize: TYPE.size.sm, color: T.mut, lineHeight: TYPE.line.body, marginTop: 6, textAlign: "center" }}>
           {disabled ? disabledNote : sub}
         </div>
       )}
@@ -205,124 +205,13 @@ export function DeskSheet({ open, eyebrow, title, sub, onClose, children }) {
   return <EvidenceOverlay eyebrow={eyebrow} title={title} sub={sub} onClose={onClose}>{children}</EvidenceOverlay>;
 }
 
-/* ====================================================================
-   COMPARE — what is ticked, and the way out of it
-==================================================================== */
+/* THE COMPARE TRAY AND THE TICK/KEEP/BUILD ROW LIVE IN `card.jsx` NOW (PR #45): they are nothing but candidates, and
+   Find is the only screen that mounts them. Re-exported here so every importer keeps working until PR #46. */
+export { CompareTray, CandidateActions } from "./card.jsx";
 
-export function CompareTray({ items = [], max = 3, onRemove, onClear, onCompare, showing, note }) {
-  if (!items.length && !note) return null;
-  return (
-    <div style={{
-      marginTop: 12, padding: "10px 12px", background: T.panel,
-      border: `1px solid ${T.blue}55`, borderLeft: `3px solid ${T.blue}`, borderRadius: 8,
-    }}>
-      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-        <span style={{ ...mono, fontSize: 10, letterSpacing: "0.15em", color: T.blue }}>
-          COMPARING {items.length} OF {max}
-        </span>
-        {items.map((c) => (
-          <button key={c.key} onClick={() => onRemove && onRemove(c)}
-            title="Take this one out of the comparison"
-            style={{
-              ...mono, fontSize: 10.5, padding: "5px 9px", minHeight: 34, borderRadius: 14, cursor: "pointer",
-              background: T.bg, color: T.ink, border: `1px solid ${T.line}`,
-            }}>
-            {c.ticker} {c.name} ✕
-          </button>
-        ))}
-        <span style={{ flex: 1 }} />
-        {items.length >= 2 && (
-          <button onClick={onCompare}
-            style={{
-              ...sans, fontSize: 13.5, fontWeight: 700, minHeight: 40, padding: "8px 14px", borderRadius: 8,
-              background: showing ? "transparent" : T.blue, color: showing ? T.blue : T.onAccent,
-              border: `1.5px solid ${T.blue}`, cursor: "pointer",
-            }}>
-            {showing ? "Hide the comparison" : "Compare them"}
-          </button>
-        )}
-        {items.length > 0 && (
-          <button onClick={onClear}
-            style={{ ...mono, fontSize: 10.5, minHeight: 40, padding: "8px 10px", background: "transparent", border: "none", color: T.mut, cursor: "pointer" }}>
-            clear
-          </button>
-        )}
-      </div>
-      {items.length === 1 && (
-        <div style={{ ...sans, fontSize: 12.5, color: T.mut, marginTop: 6, lineHeight: 1.5 }}>
-          Tick a second one to compare it with.
-        </div>
-      )}
-      {note && (
-        <div style={{ ...sans, fontSize: 12.5, color: T.amber, marginTop: 6, lineHeight: 1.5 }}>{note}</div>
-      )}
-    </div>
-  );
-}
-
-/** The two small controls every candidate row carries: tick, and keep. */
-export function CandidateActions({ ticked, onTick, saved, onSave, onBuild }) {
-  const btn = (on, color) => ({
-    ...mono, fontSize: 10.5, padding: "7px 10px", minHeight: 38, borderRadius: 6, cursor: "pointer",
-    background: on ? color : "transparent", color: on ? T.onAccent : color,
-    border: `1px solid ${color}`, whiteSpace: "nowrap",
-  });
-  return (
-    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-      <button onClick={onTick} style={btn(ticked, T.blue)}>
-        {ticked ? "✓ comparing" : "Compare"}
-      </button>
-      <button onClick={onSave} disabled={saved} style={{ ...btn(saved, T.violet), cursor: saved ? "default" : "pointer" }}>
-        {saved ? "✓ saved" : "Save for later"}
-      </button>
-      {onBuild && (
-        <button onClick={onBuild} style={{ ...btn(false, T.amber), fontWeight: 700 }}>
-          Take to Build →
-        </button>
-      )}
-    </div>
-  );
-}
-
-/* ====================================================================
-   THE FOLD — one summary line on screen, the full text one tap behind it.
-
-   P9 TASK 3. `BuildWarnings` above has done exactly this for the gate's
-   warnings since PR #28; this is the same control for the OTHER long
-   explanations, so a screen can carry a fact without carrying a paragraph.
-
-   >>> FOLD, NEVER DELETE. <<< Everything inside is unchanged and unrewritten.
-   The summary is always visible and carries the COUNT, so nobody has to open
-   it to learn whether it is worth opening — which was the fault
-   `verdictNarrative()`'s fold already fixed on the wizard.
-
-   >>> AND A REFUSAL IS NEVER BEHIND A TAP. <<< This control is for an
-   EXPLANATION of a rule. The app saying no renders beside the button, under
-   the older rule that outranks this one.
-==================================================================== */
-export function Fold({ summary, label = "why", tone = T.mut, children, style, keepMounted = false }) {
-  const [open, setOpen] = useState(false);
-  // aria-expanded says whether it is open, aria-controls says what it opens (WCAG 4.1.2), and the
-  // button is 44px tall (2.5.5). The region exists only while open, which aria-expanded="false" allows.
-  const regionId = useId();
-  if (!summary) return null;
-  return (
-    <div style={{ ...style }}>
-      <button onClick={() => setOpen((o) => !o)} aria-expanded={open} aria-controls={regionId}
-        style={{ display: "flex", gap: 8, alignItems: "center", width: "100%", textAlign: "left",
-          background: "transparent", border: "none", padding: 0, cursor: "pointer", minHeight: 44 }}>
-        <span style={{ ...mono, fontSize: 12, color: tone, lineHeight: 1.6, flex: 1 }}>{summary}</span>
-        <span style={{ ...mono, fontSize: 12, color: T.blue, whiteSpace: "nowrap" }}>
-          {open ? "hide ▲" : `${label} ▼`}
-        </span>
-      </button>
-      {/* `keepMounted` is for a panel whose own effects must run even while it is closed (the Guardian logs a weakened
-          reason on mount): the region stays in the tree and is `hidden`. */}
-      {keepMounted ? <div id={regionId} hidden={!open} style={{ marginTop: 4 }}>{children}</div>
-        : open && <div id={regionId} style={{ marginTop: 4 }}>{children}</div>}
-    </div>
-  );
-}
+/* THE FOLD LIVES IN `ui.jsx` NOW (PR #45) — one home for the atom, re-exported here so every screen that imports it
+   from this file keeps working until the sweep that moves them (ROADMAP PR #46). */
+export { Fold } from "./ui.jsx";
 
 /* ====================================================================
    THE DESK'S ONE LINE ABOUT ORDERS AND POSITIONS (PR #40, TASK 2)

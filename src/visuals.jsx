@@ -804,11 +804,14 @@ export function gaugeArcs(b) {
   }));
 }
 
-export function Gauge({ bands, size = 260, onExplain, ticker = "this market" }) {
+export function Gauge({ bands, size = 260, onExplain, ticker = "this market", labelSize = null }) {
   const b = bands;
   if (!b || !b.bands.length) return null;
   const W = size, R = size * 0.42, cx = W / 2, cy = size * 0.56, thick = size * 0.13;
-  const H = cy + size * 0.105;
+  // `labelSize` is for a gauge drawn small (a card's 104px one): the ends' labels are 4.5% of the size by default,
+  // which is 4.7px there, so the caller names a readable size and the frame grows to hold it (PR #45).
+  const lab = labelSize || size * 0.045;
+  const H = cy + Math.max(size * 0.105, size * 0.085 + lab * 0.4);
   const tap = (el) => (onExplain ? () => onExplain(el) : undefined);
   const s0 = b.spot;
   const inRange = s0 != null && s0 >= b.lo && s0 <= b.hi;
@@ -836,8 +839,8 @@ export function Gauge({ bands, size = 260, onExplain, ticker = "this market" }) 
         </g>
       )}
       {/* The ends of the price range, anchored inwards so they cannot clip. */}
-      <text x={cx - R - thick / 2} y={cy + size * 0.085} textAnchor="start" fill={T.dim} fontSize={size * 0.045} fontFamily="ui-monospace, Menlo, monospace">{price(b.lo)}</text>
-      <text x={cx + R + thick / 2} y={cy + size * 0.085} textAnchor="end" fill={T.dim} fontSize={size * 0.045} fontFamily="ui-monospace, Menlo, monospace">{price(b.hi)}</text>
+      <text x={cx - R - thick / 2} y={cy + size * 0.085} textAnchor="start" fill={T.dim} fontSize={lab} fontFamily="ui-monospace, Menlo, monospace">{price(b.lo)}</text>
+      <text x={cx + R + thick / 2} y={cy + size * 0.085} textAnchor="end" fill={T.dim} fontSize={lab} fontFamily="ui-monospace, Menlo, monospace">{price(b.hi)}</text>
     </svg>
   );
 }
@@ -926,6 +929,11 @@ export function UnifiedPosition({
   // horizon the app aims at, and that has a home (it was a bare 45 here).
   legs = [], entryNet = 0, spot, bars = [], dte = RULES.targetEntryDTE, sigma = 0.3, driftAnnual,
   ticker = "this market", height = 380, width: fixedWidth, onExplain,
+  // The axis labels' size: 9.5px by default, and a card that draws this small names a readable one (PR #45).
+  labelSize = 9.5,
+  // The width drawn at until the first measurement lands. 900 is a screen's; a card names its own, so a narrow slot
+  // never flashes the wide level of detail for a frame (PR #45).
+  fallbackWidth = 900,
 }) {
   /* THE DRIFT HAS NO DEFAULT FOR THE SENTENCE AND A ZERO FOR THE DRAWING, and
      the two are deliberately not the same thing. A picture has to be drawn at
@@ -936,7 +944,7 @@ export function UnifiedPosition({
      an assumption nobody made. That default zero was the fourth of the four
      drifts this app used to call "the chance". */
   const drawDrift = Number.isFinite(driftAnnual) ? driftAnnual : 0;
-  const [ref, measured] = useWidth(900);
+  const [ref, measured] = useWidth(fallbackWidth);
   const W = fixedWidth || measured;
   const b = payoffBands({ legs, entryNet, spot });
   const L = unifiedLayout(W);
@@ -1002,7 +1010,7 @@ export function UnifiedPosition({
           return (
             <g key={i}>
               <line x1={L.xHist} x2={L.xPayEnd} y1={Y(v)} y2={Y(v)} stroke={T.line} strokeWidth={0.6} />
-              <text x={L.xPayEnd + 5} y={Y(v) + 3} fill={T.dim} fontSize={9.5} fontFamily="ui-monospace, Menlo, monospace">{v.toFixed(2)}</text>
+              <text x={L.xPayEnd + 5} y={Y(v) + 3} fill={T.dim} fontSize={labelSize} fontFamily="ui-monospace, Menlo, monospace">{v.toFixed(2)}</text>
             </g>
           );
         })}
