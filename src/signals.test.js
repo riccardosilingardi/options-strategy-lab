@@ -5,7 +5,9 @@ import assert from "node:assert/strict";
 import { fuseSignals, weatherComponent, newsComponent, ageDecay, regionSignals,
   sentimentDirection, signalAdjustment, rankScore, compareCandidates, withSignalRank, againstSignal,
   weatherApplies, weatherNaReason, factorsOf, tagImpacts, seasonalComponent, REGIONS,
-  readingState, readingLine, unreadInputsAria, signalSnapshot, compareSignals } from "./signals.js";
+  readingState, readingLine, unreadInputsAria, signalSnapshot, compareSignals,
+  verdictLine, scoreWorking, confidenceWorking, BASE_WEIGHTS, REINFORCE, CONFLICT_DAMPING, CONFIDENCE_BANDS } from "./signals.js";
+import { readFileSync } from "node:fs";
 
 /* ---------------- tiny harness ---------------- */
 let passed = 0;
@@ -513,6 +515,77 @@ test("RECONCILE — a changed seasonal source is part of the line", () => {
 });
 
 /* ---------------- summary ---------------- */
+
+/* ---------------- PR #46, TASK 3: HOW THE SCORE AND THE CONFIDENCE ARE WORKED OUT ---------------- */
+
+test("THE CORN READING OF 2 OCT, WRITTEN OUT: 0.30×47 + 0.25×0 + 0.25×67 + 0.20×100 = 50.85 × 1.25 = 63.56 → +64; 75 + 0.15 × mean(47, 67, 100) = 85.7 → 86", () => {
+  const corn = { ticker: "CORN", factors: ["seasonal", "technical", "weather", "news"],
+    weights: { seasonal: 0.30, technical: 0.25, weather: 0.25, news: 0.20 }, excluded: [], reinforced: true,
+    agreement: "CONFLUENT", score: 64, confidence: 86,
+    components: { seasonal: { dir: 1, strength: 47 }, technical: { dir: 0, strength: 0 }, weather: { dir: 1, strength: 67 }, news: { dir: 1, strength: 100 } } };
+  const sw = scoreWorking(corn), cw = confidenceWorking(corn);
+  assert.ok(sw.sentence.includes("0.30×47 + 0.25×0 + 0.25×67 + 0.20×100 = 50.85 × 1.25"), sw.sentence);
+  assert.ok(sw.sentence.endsWith("= 63.56 → +64."), sw.sentence);
+  assert.equal(sw.result, 64);
+  assert.ok(cw.sentence.includes("75 + 0.15 × mean(47, 67, 100) = 85.7 → 86 (held between 75 and 95)"), cw.sentence);
+  assert.equal(cw.result, 86);
+  assert.equal(verdictLine(corn).text, "▲ the factors agree · 3 of 4 agree · score +64 · confidence 86");
+});
+
+test("THE WORKED SENTENCE ARRIVES AT fused.score AND fused.confidence — every fixture market, weather or not, every case", () => {
+  const TICKERS = ["CORN", "SOYB", "WEAT", "UNG", "BOIL", "GLD", "SLV", "USO", "XLE", "GDX"];
+  const SETS = [
+    { weatherData: HOT_DRY_JULY, newsItems: BULLISH_NEWS, bars: bars("up"), seasonalMean: 2.5 },
+    { weatherData: WET_JULY, newsItems: BEARISH_NEWS, bars: bars("down"), seasonalMean: -2 },
+    { weatherData: HOT_DRY_JULY, newsItems: BEARISH_NEWS, bars: bars("up"), seasonalMean: -1 },
+    { weatherData: WET_JULY, newsItems: [], bars: bars("flat"), seasonalMean: 0.3 },
+    { weatherData: null, newsItems: [], bars: null, seasonalMean: 0 },
+  ];
+  const seen = new Set();
+  let noWeather = 0;
+  for (const tk of TICKERS) for (const set of SETS) {
+    const f = fuseSignals({ ticker: tk, month: JULY, now: NOW, ...set });
+    const sw = scoreWorking(f), cw = confidenceWorking(f);
+    assert.equal(sw.result, f.score, `${tk} score: ${sw.sentence}`);
+    assert.equal(cw.result, f.confidence, `${tk} confidence: ${cw.sentence}`);
+    assert.ok(sw.sentence.endsWith(`→ ${f.score > 0 ? "+" : ""}${f.score}.`) || (f.score === 0 && sw.sentence.endsWith("→ 0.")), sw.sentence);
+    assert.ok(cw.sentence.includes(String(f.confidence)), cw.sentence);
+    seen.add(f.agreement + ":" + (f.agreement === "MIXED" ? Object.values(f.components).filter((c) => c.applies !== false && c.dir !== 0).length : ""));
+    if ((f.excluded || []).includes("weather")) {
+      noWeather++;
+      assert.ok(/does not apply here/.test(sw.sentence), "a market without weather says its share is spread over the rest");
+    }
+  }
+  assert.ok(noWeather > 0, "at least one fixture market has no weather factor");
+  assert.ok(seen.has("CONFLUENT:") && seen.has("CONFLICT:"), `cases covered: ${[...seen].join(", ")}`);
+});
+
+test("THE CONSTANTS ARE UNCHANGED IN VALUE — only their explanation is new", () => {
+  assert.deepEqual({ ...BASE_WEIGHTS }, { seasonal: 0.30, technical: 0.25, weather: 0.25, news: 0.20 });
+  assert.equal(REINFORCE, 1.25);
+  assert.equal(CONFLICT_DAMPING, 0.6);
+  assert.deepEqual(JSON.parse(JSON.stringify(CONFIDENCE_BANDS)), {
+    confluent: { base: 75, perStrength: 0.15, perExtra: 5, lo: 75, hi: 95 },
+    conflict: { base: 38, perSeverity: 0.25, lo: 8, hi: 39 },
+    two: { base: 50, perStrength: 0.2, lo: 45, hi: 70 },
+    one: { base: 45, perStrength: 0.12, lo: 45, hi: 58 },
+    none: { value: 20 },
+  });
+  // …and fuseSignals reads them, not a copy: no bare band literal survives in its body.
+  const src = readFileSync(new URL("./signals.js", import.meta.url), "utf8");
+  const body = src.slice(src.indexOf("export function fuseSignals"), src.indexOf("/* ================================================================\n   HOW THE SCORE"));
+  assert.equal(/Math\.round\(\s*\d/.test(body), false, "a confidence formula with a literal base is back in fuseSignals");
+});
+
+test("THE ⓘ OPENS ON TAP, NEVER A title ATTRIBUTE; the sheet says what it changes in Find and that the numbers are chosen", () => {
+  const why = readFileSync(new URL("./why.jsx", import.meta.url), "utf8");
+  const top = why.slice(why.indexOf("export function WhySheetTop"), why.indexOf("export function WhySheet("));
+  assert.ok(/onClick=\{onHow\}/.test(top) && /aria-expanded/.test(top), "the ⓘ is a button that toggles");
+  assert.equal(/title=/.test(top), false, "no title attribute on the ⓘ");
+  assert.ok(why.includes("WEIGHTS_CHOSEN_LINE") && why.includes("whyFindEffect()"));
+  assert.ok(why.includes('summary="The full reasoning"'), "the narrative is behind The full reasoning");
+});
+
 console.log(`\n${passed} passed, ${failures.length} failed\n`);
 if (failures.length) {
   for (const f of failures) console.error(`${f.name}:\n${f.e.stack}\n`);

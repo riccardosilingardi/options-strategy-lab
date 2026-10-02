@@ -5,7 +5,7 @@
 // defined in 8 files; 23 font sizes, two thirds of their uses under 12px; 402 mono spreads against 15 sans.
 // Every migrated screen (Find, the request controls, the card) imports its atoms from HERE and its sizes from
 // the type tokens in `theme.js`; `ui.test.jsx` fails the build on a `fontSize` literal or a local copy of an
-// atom in those files. Other screens keep theirs until the sweep that moves them (ROADMAP PR #46).
+// atom in those files. Other screens keep theirs until the sweep that moves them (ROADMAP PR #47).
 //
 // TWO RULES OF TYPE.
 //   MONO is for NUMBERS, TICKERS, LEGS and OCC SYMBOLS: things a reader compares column against column.

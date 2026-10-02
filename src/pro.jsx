@@ -24,6 +24,7 @@ import { useNarrow, BandThumbnail, payoffBands, bandTakeaway, pnl$ } from "./vis
 import { DEMO, DEMO_TOOLTIP } from "./demo.js";
 import { reduceRatios, orderQty, mlegLimitPrice, limitWords, orderLimitWords, limitKind, signedLimitFor, orderBody, orderPreviewLines, orderOutcome, alpacaErrorText, cancelOutcome, cancelWaiting } from "./order.js";
 import { hasOpenInterest, sourceNote, openInterestNote, fetchChain } from "./chain.js";
+import { CloseChoice } from "./orders.jsx";
 import { prepareClose, sendClose, holdingGroups } from "./closeOrder.js";
 // "Why this trade" and the headline tags moved to src/why.jsx: the wizard's
 // decision screen needs them too, and a road with no evidence under it is a
@@ -200,7 +201,7 @@ export async function alpacaReq(path, method = "GET", body = null) {
    Tap 1 produced `prep.prepared` — every leg, the signed limit in words and
    how long it stands. Tap 2 is "Send the close" and it sends exactly that.
    A refusal, from any step, prints here: beside the button it came from. */
-export function CloseConfirm({ prep, onSend, onCancel }) {
+export function CloseConfirm({ prep, onSend, onCancel, onChoose = null }) {
   if (!prep) return null;
   if (prep.busy && !prep.prepared) {
     return <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 6 }}>Reading the market to price the close…</div>;
@@ -220,6 +221,9 @@ export function CloseConfirm({ prep, onSend, onCancel }) {
   return (
     <div style={{ marginTop: 8, padding: "9px 11px", background: `${T.red}0a`, border: `1px solid ${T.red}55`, borderRadius: 7 }}>
       <div style={{ ...mono, fontSize: 9.5, color: T.red, fontWeight: 700, letterSpacing: 0.4 }}>THIS IS THE CLOSE THAT WILL BE SENT</div>
+      {/* THE PRICE IS CHOSEN HERE (PR #46): between the side that fills and the mid, starting at
+          `closeLimitPrice()`. A change prepares the close again, so the lines below are what goes out. */}
+      {onChoose && <CloseChoice prepared={prep.prepared} choice={prep.choice || null} onChoose={onChoose} />}
       {prep.prepared.lines.map((l, i) => (
         <div key={i} style={{ ...mono, fontSize: 11, color: T.ink, marginTop: 4, lineHeight: 1.5 }}>{l}</div>
       ))}
@@ -922,19 +926,6 @@ export function AlpacaDesk({ creds, setMsg, gate, positions = [] }) {
     setBusy(false);
   };
   useEffect(() => { sync(); }, []); // eslint-disable-line
-  /* A CANCEL IS A REQUEST (`cancelOutcome()` in order.js). A 2xx is "Cancel
-     requested", never "cancelled"; a 422 "pending cancel" is a cancel already
-     waiting, not a failure. `cancelAsked` keeps the button down between the
-     tap and the next sync, so a second tap cannot ask again. */
-  const [cancelAsked, setCancelAsked] = useState({});
-  const cancel = async (id) => {
-    let res;
-    try { await alpacaReq(`/v2/orders/${id}`, "DELETE"); res = cancelOutcome({ ok: true }); }
-    catch (e) { res = cancelOutcome({ error: e }); }
-    if (res.waiting) setCancelAsked((m) => ({ ...m, [id]: Date.now() }));
-    setMsg(res.headline);
-    if (res.kind !== "failed") sync();
-  };
   // Chiusura strategia intera: 1) cancella ordini aperti sugli stessi contratti
   // (evita "wash trade detected") 2) invia UN ordine complesso di chiusura
   // (mleg) — mai gambe separate — 3) A LIMITE, PREZZATO AL MOMENTO DEL TAP.
@@ -964,11 +955,12 @@ export function AlpacaDesk({ creds, setMsg, gate, positions = [] }) {
      prepares and writes the order out in full, the second sends exactly that.
      Any refusal stays beside the button it came from. */
   const [closePrep, setClosePrep] = useState(null);   // { key, busy, prepared, refusal, sent }
-  const closeGroup = async (grp) => {
+  const closeGroup = async (grp, choice = null, chain = null) => {
     if (DEMO) { setClosePrep({ key: grp.key, refusal: DEMO_TOOLTIP }); return; }
-    setClosePrep({ key: grp.key, busy: true });
-    const prepared = await prepareClose(grp, { gate: (pr) => runGate(gate, pr), openOrders: ords || [], fetchChain });
-    setClosePrep({ key: grp.key, prepared: prepared.ok ? prepared : null, refusal: prepared.ok ? null : prepared.refusal });
+    setClosePrep((cp) => ({ key: grp.key, busy: true, prepared: choice ? cp?.prepared : null, choice }));
+    const prepared = await prepareClose(grp, { gate: (pr) => runGate(gate, pr), openOrders: ords || [],
+      fetchChain: chain ? async () => chain : fetchChain, choice });
+    setClosePrep({ key: grp.key, grp, choice, prepared: prepared.ok ? prepared : null, refusal: prepared.ok ? null : prepared.refusal });
   };
   const sendGroupClose = async () => {
     const cp = closePrep;
@@ -1019,7 +1011,8 @@ export function AlpacaDesk({ creds, setMsg, gate, positions = [] }) {
                 })()}
               </div>
               {closePrep && closePrep.key === g.key && (
-                <CloseConfirm prep={closePrep} onSend={sendGroupClose} onCancel={() => setClosePrep(null)} />
+                <CloseConfirm prep={closePrep} onSend={sendGroupClose} onCancel={() => setClosePrep(null)}
+                  onChoose={(c) => closeGroup(g, c, closePrep.prepared?.chainUsed || null)} />
               )}
               {(() => {
                 const rec = positionForHolding(positions, { ticker: g.ticker, expKey: g.expKey });
@@ -1038,22 +1031,11 @@ export function AlpacaDesk({ creds, setMsg, gate, positions = [] }) {
         })()}
         {pos && pos.length === 0 && <div style={{ ...mono, fontSize: 11, color: T.mut }}>Nothing open on Alpaca.</div>}
       </div>
-      <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 10 }}>ORDERS WAITING ({ords ? ords.length : "…"})</div>
-      <div style={{ display: "grid", gap: 6, marginTop: 6 }}>
-        {(ords || []).map((o) => (
-          <div key={o.id} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "8px 10px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7 }}>
-            <div style={{ flex: 1, minWidth: 160 }}>
-              <div style={{ ...mono, fontWeight: 700, color: T.ink, fontSize: 12 }}>{o.order_class === "mleg" ? `MULTILEG x${o.qty} (${(o.legs || []).length} legs)` : `${o.symbol} ${o.side} ${o.qty}`}</div>
-              <div style={{ ...mono, fontSize: 10, color: T.dim }}>{o.type}{o.limit_price != null ? ` @ ${orderLimitWords(o) || o.limit_price}` : ""} · {o.time_in_force} · {o.status}</div>
-            </div>
-            {cancelWaiting({ status: o.status, cancelRequested: cancelAsked[o.id] })
-              ? <div style={{ ...mono, fontSize: 10.5, color: T.amber, lineHeight: 1.5, flexBasis: "100%" }}>
-                  {cancelOutcome({ order: { status: o.status, cancelRequested: cancelAsked[o.id] } }).headline}
-                </div>
-              : <Btn small ghost color={T.red} onClick={() => cancel(o.id)}><Trash2 size={11} /> Cancel</Btn>}
-          </div>
-        ))}
-        {ords && ords.length === 0 && <div style={{ ...mono, fontSize: 11, color: T.mut }}>No orders waiting.</div>}
+      {/* ONE ORDERS LIST (PR #46): every working order is a row in "Orders waiting" at the top of Positions,
+          with Modify, Cancel and Details. This panel counts them and points there. */}
+      <div style={{ ...mono, fontSize: 11, color: T.dim, marginTop: 10 }}>
+        {ords == null ? "Orders waiting: not read yet." : ords.length === 0 ? "No orders waiting."
+          : `${ords.length} order${ords.length === 1 ? "" : "s"} waiting — see "Orders waiting" at the top of Positions.`}
       </div>
     </Panel>
   );

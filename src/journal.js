@@ -693,8 +693,8 @@ export function orderReconciliation(working = [], brokerOrders = null) {
     sentence: `Your Alpaca account is holding ${brokerOrders.length} waiting order` +
       `${brokerOrders.length === 1 ? "" : "s"} and this app has a record of ${mine.length}. ` +
       `${n === 1 ? "One of them" : `${n} of them`} was not sent from this browser, or was sent before the ` +
-      `app's local record was cleared (${ids}…). It is a real order and it can still fill: the broker's own ` +
-      `panel below is the authority on it. This app can only cancel or re-price the orders it has records of.`,
+      `app's local record was cleared (${ids}…). It is a real order and it can still fill. Its row below is read ` +
+      `from Alpaca and can be modified or cancelled like any other; with no record here, its fill is not filed in the Journal.`,
   };
 }
 

@@ -10,6 +10,9 @@ import {
 } from "lucide-react";
 import { fetchAllNews, fetchWeather, ImpactTags, CopilotTab, TaCopilot, ReportTab, OrderTicket, AlpacaDesk, scaleStrategy, buildContext, GuardianPanel, ChainMatrix, OptionPanel, PriceChart, QtyField, UnifiedView, taSignals, confluence, WhyThisTrade, Markdown, alpacaReq, CloseConfirm } from "./pro.jsx";
 import { prepareClose, sendClose, groupForRecord, closeWorking, legsNotHeld } from "./closeOrder.js";
+import { OrdersPanel, OrderRow } from "./orders.jsx";
+import { WhySheet } from "./why.jsx";
+import { orderLegs as orderLegsOf, orderHoldingKey, ordersForRecord, orderIntent } from "./orderRow.js";
 import { BandThumbnail, payoffBands, bandTakeaway, GaugeFigure, Gauge, CompareFigure, exitPlanSentence, exitPlanDetail,
   OpenInterestStrip, oiStripTakeaway, oiCutAt, oiGhostCut, explainOiStrip, useWidth } from "./visuals.jsx";
 import { fuseSignals, sentimentDirection, withSignalRank, compareCandidates, againstSignal,
@@ -42,7 +45,7 @@ import { RULES, sizing, ruleBadge, takeProfitLabel, takeProfitTarget, takeProfit
   requestOf, contractsSourceNote, fillNet,
   rewardRiskRange, RR_POINTS, crossingCost, crossingCostNote, openingMarkNote,
   figureSet, reconcileFigures, unitMoney, candidateFlags, sizeLine, sizedFigures, sizingFreeOn, sizedFree, atRiskNowLine, boardLooksStale, fetchFailWords, stopSigns } from "./rules.js";
-import { isStale, freshnessNote, staleAmong } from "./freshness.js";
+import { isStale, freshnessNote, staleAmong , findFreshness } from "./freshness.js";
 import { evaluateTrade, gateSummary } from "./riskGate.js";
 import { DEMO, DEMO_BANNER, DEMO_TOOLTIP, DEMO_SEED_TICKERS, demoPositions } from "./demo.js";
 import { CapitalOnboarding, WizardOpen, ConfirmSteps, Card, Pill } from "./wizard.jsx";
@@ -2003,26 +2006,30 @@ export default function OptionsStrategyLab() {
   }, [expStrikes]); // eslint-disable-line
 
   /* ---- sync continuo col conto Alpaca: ordini pendenti + fill → posizioni guidate ---- */
+  /* ONE READ OF THE BROKER (PR #46): the 60-second sync and the orders list's "after an action" re-read call the
+     same function, so the list never shows an order the sync has already seen gone. */
+  const syncStop = useRef(false);
+  const importRef = useRef(null);            // `importAlpaca` is defined further down; read it at call time
+  const syncBroker = useCallback(async () => {
+    try {
+      const [po, oo] = await Promise.all([
+        alpacaGet("/v2/positions"),
+        alpacaGet("/v2/orders?status=open&limit=30&nested=true"),
+      ]);
+      if (syncStop.current) return;
+      setAlSync((prev) => {
+        // fill rilevato: c'è una posizione nuova o un ordine sparito → importa
+        if (po.length > prev.positions.length || (prev.orders.length > oo.length && po.length)) importRef.current?.(true);
+        return { orders: oo, positions: po, t: Date.now() };
+      });
+    } catch { /* offline/market closed */ }
+  }, []);
   useEffect(() => {
     if (!alpaca) return;
-    let stop = false;
-    const tick = async () => {
-      try {
-        const [po, oo] = await Promise.all([
-          alpacaGet("/v2/positions"),
-          alpacaGet("/v2/orders?status=open&limit=30&nested=true"),
-        ]);
-        if (stop) return;
-        setAlSync((prev) => {
-          // fill rilevato: c'è una posizione nuova o un ordine sparito → importa
-          if (po.length > prev.positions.length || (prev.orders.length > oo.length && po.length)) importAlpaca(true);
-          return { orders: oo, positions: po, t: Date.now() };
-        });
-      } catch { /* offline/market closed */ }
-    };
-    tick();
-    const id = setInterval(tick, 60000);
-    return () => { stop = true; clearInterval(id); };
+    syncStop.current = false;
+    syncBroker();
+    const id = setInterval(syncBroker, 60000);
+    return () => { syncStop.current = true; clearInterval(id); };
   }, [alpaca]); // eslint-disable-line
 
   /* ---- monitoraggio automatico posizioni: refresh chain ogni 60s ---- */
@@ -2809,24 +2816,20 @@ export default function OptionsStrategyLab() {
      and expiry in `alSync.positions`. Tap 1 prepares and writes the order out;
      tap 2 sends it. The Journal is NOT filed here — "Close and file it" stays
      the manual step after the fill. */
-  const prepareCardClose = async (p) => {
+  const prepareCardClose = async (p, choice = null, chain = null) => {
     if (DEMO) { setCloseAt({ id: p.id, refusal: DEMO_TOOLTIP }); return; }
-    setCloseAt({ id: p.id, busy: true });
+    setCloseAt((cp) => ({ id: p.id, busy: true, prepared: choice && cp?.id === p.id ? cp.prepared : null, choice }));
+    // A CHANGE OF PRICE RE-PREPARES ON THE CHAIN TAP 1 READ (PR #46): the bounds the field shows are that chain's.
     const prepared = await prepareClose(groupForRecord(p, alSync.positions), {
-      gate, openOrders: alSync.orders || [], fetchChain, working: closeWorking(p, alSync) });
-    setCloseAt({ id: p.id, prepared: prepared.ok ? prepared : null, refusal: prepared.ok ? null : prepared.refusal });
+      gate, openOrders: alSync.orders || [], fetchChain: chain ? async () => chain : fetchChain,
+      working: closeWorking(p, alSync), choice });
+    setCloseAt({ id: p.id, choice, prepared: prepared.ok ? prepared : null, refusal: prepared.ok ? null : prepared.refusal });
   };
-  const sendCardClose = async (p) => {
-    const cp = closeAt;
-    if (!cp || cp.id !== p.id || !cp.prepared) return;
-    setCloseAt({ ...cp, busy: true });
-    const r = await sendClose(cp.prepared, { request: alpacaReq, gate, working: closeWorking(p, alSync) });
-    if (!r.ok) { setCloseAt({ id: p.id, refusal: r.refusal }); return; }
-    setCloseAt({ id: p.id, sent: r.headline });
-    setMsg(r.headline);
+  /** The record of a close that went out: the order's id and a timeline line. One writer for every close path. */
+  const noteCloseSent = (match, r) => {
     setStore((st) => {
       const positions = st.positions.map((x) => {
-        if (x.id !== p.id) return x;
+        if (!match(x)) return x;
         // The words of the body that went out (order.js `orderMoney()`): 9 at a
         // credit you receive, never "a debit of $4.68 (you pay it)".
         const t = appendTimeline(x, { t: Date.now(), type: "close-sent", orderId: r.order?.id ? String(r.order.id) : null,
@@ -2838,6 +2841,60 @@ export default function OptionsStrategyLab() {
       saveState(ns);
       return ns;
     });
+  };
+  const sendCardClose = async (p) => {
+    const cp = closeAt;
+    if (!cp || cp.id !== p.id || !cp.prepared) return;
+    setCloseAt({ ...cp, busy: true });
+    const r = await sendClose(cp.prepared, { request: alpacaReq, gate, working: closeWorking(p, alSync) });
+    if (!r.ok) { setCloseAt({ id: p.id, refusal: r.refusal }); return; }
+    setCloseAt({ id: p.id, sent: r.headline });
+    setMsg(r.headline);
+    noteCloseSent((x) => x.id === p.id, r);
+  };
+
+  /* ---- THE ONE ORDERS LIST (PR #46, TASK 0) ----
+     What the rows in "Orders waiting" (and the row inline on a card whose close is working) are handed. Every
+     send inside goes through `gate`: Modify of one leg is order path 7, of several legs a cancel, Alpaca's
+     "canceled", then path 3 (a close) or Build's ticket, path 2 (an open). */
+  const recordForOrder = (o) => store.positions.find((p) => o && (p.alpacaId === o.id || p.closeOrder?.id === o.id)) || null;
+  const orderCtx = {
+    positions: alSync.positions, orders: alSync.orders, chainFor: (tk) => chains[tk] || null, fetchChain,
+    // `gate` is defined further down this component; read it at the send, not at render (a TDZ otherwise).
+    gate: (proposal) => gate(proposal), request: alpacaReq, demo: DEMO, recordFor: recordForOrder,
+    onChanged: () => { setTimeout(() => { syncBroker(); recheckOrders(); }, 1200); },
+    // A REPLACE GIVES THE ORDER A NEW ID and the old one reads "replaced": the record follows the new id, or
+    // `recheckOrders()` would keep asking about an order that is no longer the one working.
+    onReplaced: (old, fresh, plan) => {
+      if (!fresh?.id) return;
+      setStore((st) => {
+        const positions = st.positions.map((x) => {
+          const open = x.alpacaId === old.id, close = x.closeOrder?.id === old.id;
+          if (!open && !close) return x;
+          const t = appendTimeline(x, { t: Date.now(), type: "status", orderId: String(fresh.id),
+            text: `Order modified at Alpaca (replaced in place): ${plan.qty} at ${orderLimitWords({ ...old, limit_price: plan.patch.limit_price }) || "a price the app could not read"}, ` +
+              `${plan.tif.toUpperCase()}. Old order ${old.id} → new order ${fresh.id}.` });
+          return { ...x, ...(open ? { alpacaId: fresh.id, alpacaTif: fresh.time_in_force ?? plan.tif,
+            ...(fresh.limit_price != null && Number.isFinite(+fresh.limit_price) ? { alpacaLimit: +fresh.limit_price } : {}) } : {}),
+            ...(close ? { closeOrder: { ...x.closeOrder, id: fresh.id, t: Date.now(), limit: fresh.limit_price ?? null } } : {}),
+            timeline: t.timeline, seqNext: t.seqNext };
+        });
+        const ns = { ...st, positions }; saveState(ns); return ns;
+      });
+    },
+    onCloseSent: (key, r) => noteCloseSent((x) => positionStage(x) === "owned" && x.ticker === key.ticker && x.expKey === key.expKey, r),
+    onOpenBuild: (o, plan, rec) => {
+      const legs = rec?.legs || (orderLegsOf(o) || []).map((l) => ({ side: l.side, qty: l.ratio, type: l.type, strike: l.strike }));
+      const key = orderHoldingKey(o);
+      openOnBuild({ ticker: key?.ticker || ticker, expKey: key?.expKey || null, legs, name: rec?.name || stratName,
+        contracts: plan.qty });
+    },
+    cancelOne: async (o, rec) => {
+      if (rec && rec.alpacaId === o.id && positionStage(rec) === "working") return cancelWorking(rec);
+      if (DEMO) return { kind: "failed", headline: DEMO_TOOLTIP };
+      try { await alpacaReq(`/v2/orders/${encodeURIComponent(o.id)}`, "DELETE"); return cancelOutcome({ ok: true }); }
+      catch (e) { return cancelOutcome({ error: e }); }
+    },
   };
 
   /* ---- RE-READING AN ORDER THAT HAD NOT FILLED ----
@@ -3453,6 +3510,7 @@ export default function OptionsStrategyLab() {
         `record of a holding the app already tracks, created by the old Alpaca sync.`);
     } catch (e) { if (!silent) setMsg(`Could not import from Alpaca: ${e.message}`); }
   }, [chains, seasonal, freeSizing]);
+  importRef.current = importAlpaca;
 
   useEffect(() => {
     (async () => {
@@ -3770,7 +3828,8 @@ export default function OptionsStrategyLab() {
   const findShown = useMemo(() => findGen.items.filter((x) =>
     (!find.market || x.tk === find.market) && (find.flagged || x.flags.length === 0)), [findGen, find.market, find.flagged]);
   useEffect(() => {
-    if (step !== "find" || !scrollToCard.current) return;
+    // BACK RETURNS TO THE CARD (PR #46, TASK 2): a sheet opened from a card scrolls back to it when it closes.
+    if (step !== "find" || ev || !scrollToCard.current) return;
     const key = scrollToCard.current;
     const id = requestAnimationFrame(() => {
       const el = typeof document !== "undefined"
@@ -3778,7 +3837,7 @@ export default function OptionsStrategyLab() {
       if (el) { el.scrollIntoView({ block: "center" }); scrollToCard.current = null; }
     });
     return () => cancelAnimationFrame(id);
-  }, [step, findShown]);
+  }, [step, findShown, ev]);
   /* ---- BACK WORKS (PR #44, TASK 3) ----
      The app is one page whose screens are state, so the History API is made out of that state (src/nav.js): moving to
      a different screen pushes an entry, popstate restores the one it hands back, and closing a sheet from its own
@@ -3880,13 +3939,56 @@ export default function OptionsStrategyLab() {
   // What is left IS evidence: it answers a question about the step in front of
   // you, at any step, and it opens OVER that step (src/steps.jsx) rather than
   // making the page longer.
+  /* WHERE A MARKET IS POSITIONED — one drawing, for Build's market (Levels) and for a card's (More on <TK>). */
+  const levelsView = (cX, gX, sX, lX) => (
+              <>
+                <Lbl>WHERE THE MARKET IS POSITIONED (OPEN INTEREST)</Lbl>
+                {!gX && <div style={{ ...mono, fontSize: 12, color: T.mut, padding: 30, textAlign: "center" }}>
+                  {!cX ? "Press Refresh at the top to load the prices first."
+                    : !hasOpenInterest(cX) ? `Open interest is not part of the ${cX.source} feed. It is fetched separately from the broker\u2019s contract list, and that has not come back \u2014 so this panel has nothing to draw yet.`
+                      : "Not enough strikes near today's price to draw this."}
+                </div>}
+                {gX && (
+                  <div style={{ height: 190, marginTop: 10 }}>
+                    <ResponsiveContainer>
+                      <BarChart data={gX.strikes.map((k, j) => ({ k, put: -gX.oiPutTot[j], call: gX.oiCallTot[j] }))} margin={{ top: 4, right: 4, bottom: 0, left: 0 }} stackOffset="sign">
+                        <XAxis dataKey="k" stroke={T.dim} tick={{ fontSize: 9, fontFamily: "monospace" }} />
+                        <YAxis stroke={T.dim} tick={{ fontSize: 9, fontFamily: "monospace" }} width={44} tickFormatter={(v) => Math.abs(v)} />
+                        <Tooltip contentStyle={{ background: T.panel, border: `1px solid ${T.line}`, fontFamily: "monospace", fontSize: 11 }} formatter={(v, n2) => [Math.abs(v), n2 === "put" ? "put contracts" : "call contracts"]} />
+                        <ReferenceLine y={0} stroke={T.mut} />
+                        {sX && <ReferenceLine x={gX.strikes.reduce((b2, k) => Math.abs(k - sX) < Math.abs(b2 - sX) ? k : b2, gX.strikes[0])} stroke={T.amber} strokeDasharray="4 3" />}
+                        <Bar dataKey="put" fill={`${T.green}bb`} stackId="a" />
+                        <Bar dataKey="call" fill={`${T.red}bb`} stackId="a" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+                {gX && <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 2 }}>Green bars below zero are where put buyers cluster — prices tend to hold there. Red bars above are where call buyers cluster — prices tend to stall there. The amber line is today's price.</div>}
+                {lX && (
+                  <div style={{ display: "flex", gap: 20, marginTop: 10, flexWrap: "wrap" }}>
+                    <div>
+                      <div style={{ ...mono, fontSize: 10, color: T.green }}>PRICES THAT TEND TO HOLD</div>
+                      <div style={{ ...mono, fontSize: 14, fontWeight: 700, color: T.ink }}>{lX.supports.map((x) => `$${x}`).join(" · ") || "—"}</div>
+                    </div>
+                    <div>
+                      <div style={{ ...mono, fontSize: 10, color: T.red }}>PRICES THAT TEND TO STALL</div>
+                      <div style={{ ...mono, fontSize: 14, fontWeight: 700, color: T.ink }}>{lX.resistances.map((x) => `$${x}`).join(" · ") || "—"}</div>
+                    </div>
+                  </div>
+                )}
+                <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 8 }}>
+                  {openInterestNote(cX)} Added up across the first six expiries within 120 days. A big wall is a price the market has an interest in defending — useful when picking strikes and exits.
+                </div>
+              </>
+  );
   const EVIDENCE = [
     { id: "why", label: "Why this market", I: Radar, sub: "seasonality, price trend, weather, news" },
     { id: "levels", label: "Market levels", I: Box, sub: "where the open interest sits" },
     { id: "history", label: "History", I: FlaskConical, sub: "what happened in past years" },
     { id: "copilot", label: "Copilot", I: MessageSquare, sub: "ask about this trade" },
   ];
-  const EV_META = Object.fromEntries(EVIDENCE.map((e) => [e.id, e]));
+  const EV_META = Object.fromEntries([...EVIDENCE,
+    { id: "more", label: `More on ${whyTk || ticker}`, sub: "the market, not this trade: levels, price and season" }].map((e) => [e.id, e]));
   const SENT = SENTIMENTS.find((s) => s.id === sentiment);
 
   /* ---------- the shell (PRD §5) ----------
@@ -3953,6 +4055,8 @@ export default function OptionsStrategyLab() {
      Written `"find" === step` on purpose: `step === "<id>"` is how
      src/wordcount.mjs finds a step's JSX block, and this is not one. */
   const onFindStep = tab === "build" && !showSettings && "find" === step;
+  /* FIND'S BAR READS THE SELECTION, NOT ONE MARKET (PR #46, TASK 1): "N markets · prices Xm ago", the OLDEST. */
+  const findFresh = findFreshness(find.markets, chains, ago);
   return (
     <div style={{ minHeight: "100vh", background: T.bg, color: T.body, fontFamily: "ui-sans-serif, system-ui" }}>
       <DemoBanner />
@@ -3975,31 +4079,36 @@ export default function OptionsStrategyLab() {
               <span style={{ ...mono, fontSize: 10, color: T.green, border: `1px solid ${T.green}55`, background: `${T.green}12`, padding: "3px 8px", borderRadius: 5, display: "inline-flex", gap: 5, alignItems: "center" }}>
                 <ShieldCheck size={12} /> PAPER · {ruleBadge()}
               </span>
+              {onFindStep ? (
+                <span style={{ ...mono, fontSize: 10, color: findFresh.oldest ? T.blue : T.dim, border: `1px solid ${findFresh.oldest ? T.blue : T.dim}44`, padding: "3px 8px", borderRadius: 5 }}>
+                  {findFresh.line}
+                </span>
+              ) : (
               <span style={{ ...mono, fontSize: 10, color: chain ? T.blue : T.dim, border: `1px solid ${chain ? T.blue : T.dim}44`, padding: "3px 8px", borderRadius: 5 }}>
                 {chain ? `${chain.source} · updated ${ago(chain.updated)}` : "prices not loaded"}
               </span>
+              )}
             </div>
           </div>
           <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-            <select value={ticker} onChange={(e) => switchTicker(e.target.value)}
-              style={{ ...mono, background: T.panel, color: T.ink, border: `1px solid ${T.field}`, borderRadius: 6, padding: "8px 10px", fontSize: 13 }}>
-              {Object.keys(UNDERLYINGS).map((k) => <option key={k} value={k}>{k}</option>)}
-            </select>
-            {/* On Find, Refresh also retries every market whose prices FAILED —
-                the one control "Could not read N markets — press Refresh" names. */}
+            {/* NO TICKER SELECT UP HERE (PR #46, TASK 1). On Find it changed nothing in the list — it only picked
+                Build's market — so Find refreshes every selected market at once and Build carries its own
+                selector beside the trade. */}
             <Btn onClick={async () => {
+              if (onFindStep) {
+                // One Refresh for every selected market, quietly: no single-chain message on Find.
+                setBusy("find");
+                try { for (const tk of find.markets) await refreshChain(tk, true); } finally { setBusy(null); }
+                return;
+              }
               await refreshChain(ticker);
-              if (step === "find" && view === "desk") for (const x of findGen.failed) if (x.tk !== ticker) await refreshChain(x.tk, true);
-            }} disabled={busy !== null}>
-              <RefreshCw size={13} /> {busy === ticker ? "…" : "Refresh"}
+            }} disabled={busy !== null} aria-label={onFindStep ? `Refresh prices for ${find.markets.length} markets` : `Refresh ${ticker} prices`}>
+              <RefreshCw size={13} /> {busy === ticker || busy === "find" ? "…" : "Refresh"}
             </Btn>
-            <Btn small ghost onClick={() => setTheme(T.dark ? "light" : "dark")}>
-              {T.dark ? <Sun size={13} /> : <Moon size={13} />} {T.dark ? "Light" : "Dark"}
-            </Btn>
-            {/* Settings is not a place you trade from, so it is not one of the
-                three: it sits behind this gear, exactly as it does on screen 1. */}
-            <Btn small ghost={!showSettings} color={T.blue} onClick={() => setShowSettings((v) => !v)}>
-              <SlidersHorizontal size={13} /> Settings
+            {/* Theme lives in Settings now, behind this one gear: Settings is not a place you trade from. */}
+            <Btn small ghost={!showSettings} color={T.blue} aria-label="Settings" aria-pressed={showSettings}
+              onClick={() => setShowSettings((v) => !v)}>
+              <SlidersHorizontal size={15} />
             </Btn>
           </div>
         </div>
@@ -4095,8 +4204,12 @@ export default function OptionsStrategyLab() {
             something, or holding something you have not read, says so on the
             chip itself: the copilot answering into a closed sheet was
             indistinguishable from the copilot doing nothing at all. */}
-        {tab === "build" && !showSettings && (
+        {/* EVIDENCE HAS A SUBJECT (PR #46, TASK 2). On Find there is no bar: a card's badge opens Why for its
+            market and its fold opens "More on <TK>". On Build the bar is about THIS trade, and the Copilot lives
+            only here. */}
+        {tab === "build" && !showSettings && step === "build" && (
           <EvidenceBar items={EVIDENCE} open={ev} onOpen={(id) => { setWhyTk(null); setEv(id); }}
+            heading={`About this trade · ${ticker}${legs.length ? ` ${stratName}` : ""}`}
             mark={{
               copilot: copilot.busy ? "thinking"
                 : (ev !== "copilot" && copilot.msgs.length > 0
@@ -4109,9 +4222,10 @@ export default function OptionsStrategyLab() {
             to the viewport it can never land below the fold, which is what made
             History and the Copilot look like broken buttons on a phone. */}
         {tab === "build" && !showSettings && ev && (
-          <EvidenceOverlay title={EV_META[ev]?.label || "Evidence"} sub={EV_META[ev]?.sub} onClose={() => setEv(null)}>
+          <EvidenceOverlay title={ev === "why" ? `${whyTk || ticker} this month` : EV_META[ev]?.label || "Evidence"}
+            sub={ev === "why" ? "the market, not this trade" : EV_META[ev]?.sub} onClose={() => setEv(null)}>
             {ev === "why" && (
-              <WhyThisTrade
+              <WhySheet
                 fused={fused[whyTk || ticker]}
                 ticker={whyTk || ticker} weatherData={weather} newsItems={newsPool} month={NOW_MONTH}
                 title={`WHY THIS MARKET · ${whyTk || ticker}`} defaultDetail
@@ -4120,47 +4234,31 @@ export default function OptionsStrategyLab() {
                   : "Find ranks candidates on expected value adjusted by this read."}
               />
             )}
-            {ev === "levels" && (
-              <>
-                <Lbl>WHERE THE MARKET IS POSITIONED (OPEN INTEREST)</Lbl>
-                {!oiGrid && <div style={{ ...mono, fontSize: 12, color: T.mut, padding: 30, textAlign: "center" }}>
-                  {!chain ? "Press Refresh at the top to load the prices first."
-                    : !hasOpenInterest(chain) ? `Open interest is not part of the ${chain.source} feed. It is fetched separately from the broker\u2019s contract list, and that has not come back \u2014 so this panel has nothing to draw yet.`
-                      : "Not enough strikes near today's price to draw this."}
-                </div>}
-                {oiGrid && (
-                  <div style={{ height: 190, marginTop: 10 }}>
-                    <ResponsiveContainer>
-                      <BarChart data={oiGrid.strikes.map((k, j) => ({ k, put: -oiGrid.oiPutTot[j], call: oiGrid.oiCallTot[j] }))} margin={{ top: 4, right: 4, bottom: 0, left: 0 }} stackOffset="sign">
-                        <XAxis dataKey="k" stroke={T.dim} tick={{ fontSize: 9, fontFamily: "monospace" }} />
-                        <YAxis stroke={T.dim} tick={{ fontSize: 9, fontFamily: "monospace" }} width={44} tickFormatter={(v) => Math.abs(v)} />
-                        <Tooltip contentStyle={{ background: T.panel, border: `1px solid ${T.line}`, fontFamily: "monospace", fontSize: 11 }} formatter={(v, n2) => [Math.abs(v), n2 === "put" ? "put contracts" : "call contracts"]} />
-                        <ReferenceLine y={0} stroke={T.mut} />
-                        {spot && <ReferenceLine x={oiGrid.strikes.reduce((b2, k) => Math.abs(k - spot) < Math.abs(b2 - spot) ? k : b2, oiGrid.strikes[0])} stroke={T.amber} strokeDasharray="4 3" />}
-                        <Bar dataKey="put" fill={`${T.green}bb`} stackId="a" />
-                        <Bar dataKey="call" fill={`${T.red}bb`} stackId="a" />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                )}
-                {oiGrid && <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 2 }}>Green bars below zero are where put buyers cluster — prices tend to hold there. Red bars above are where call buyers cluster — prices tend to stall there. The amber line is today's price.</div>}
-                {lv && (
-                  <div style={{ display: "flex", gap: 20, marginTop: 10, flexWrap: "wrap" }}>
-                    <div>
-                      <div style={{ ...mono, fontSize: 10, color: T.green }}>PRICES THAT TEND TO HOLD</div>
-                      <div style={{ ...mono, fontSize: 14, fontWeight: 700, color: T.ink }}>{lv.supports.map((x) => `$${x}`).join(" · ") || "—"}</div>
+            {ev === "levels" && levelsView(chain, oiGrid, spot, lv)}
+            {/* MORE ON A CARD'S MARKET (PR #46, TASK 2): its own chain, price and season — never Build's trade. */}
+            {ev === "more" && (() => {
+              const tk = whyTk || ticker;
+              const cX = chains[tk] || null;
+              const sX = spotOf(cX);
+              const gX = oiGridFromChain(cX, sX);
+              const mm = (seasonal[tk] || null)?.monthlyMean || getU(tk).monthlyMean || null;
+              return (
+                <>
+                  {levelsView(cX, gX, sX, levelsFromGrid(gX, sX))}
+                  <Panel style={{ marginTop: 12 }}>
+                    <PriceChart ticker={tk} levels={levelsFromGrid(gX, sX)} breakevens={[]} legLines={[]} />
+                  </Panel>
+                  <Panel style={{ marginTop: 10 }}>
+                    <Lbl>SEASONALITY · {tk}</Lbl>
+                    <div style={{ fontSize: 12.5, color: T.body, marginTop: 8, lineHeight: 1.55 }}>
+                      {Array.isArray(mm)
+                        ? `${tk}'s best month historically is ${MONTHS[mm.indexOf(Math.max(...mm))]} (${Math.max(...mm) > 0 ? "+" : ""}${Math.max(...mm).toFixed(1)}% a month on average), its worst is ${MONTHS[mm.indexOf(Math.min(...mm))]} (${Math.min(...mm).toFixed(1)}%); ${MONTHS[NOW_MONTH]} averages ${mm[NOW_MONTH] > 0 ? "+" : ""}${mm[NOW_MONTH].toFixed(1)}%.`
+                        : seasonalFor(tk).note}
                     </div>
-                    <div>
-                      <div style={{ ...mono, fontSize: 10, color: T.red }}>PRICES THAT TEND TO STALL</div>
-                      <div style={{ ...mono, fontSize: 14, fontWeight: 700, color: T.ink }}>{lv.resistances.map((x) => `$${x}`).join(" · ") || "—"}</div>
-                    </div>
-                  </div>
-                )}
-                <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 8 }}>
-                  {openInterestNote(chain)} Added up across the first six expiries within 120 days. A big wall is a price the market has an interest in defending — useful when picking strikes and exits.
-                </div>
-              </>
-            )}
+                  </Panel>
+                </>
+              );
+            })()}
             {ev === "history" && !spot && (
               <div style={{ ...mono, fontSize: 12, color: T.mut }}>
                 The seasonality chart, the 8,000-run simulation and the year-by-year replay are all drawn from {ticker}{"\u2019"}s own prices, and they have not loaded yet. Press Refresh at the top of the screen.
@@ -4403,7 +4501,8 @@ export default function OptionsStrategyLab() {
             spot={find.market ? spotOf(chains[find.market]) : null}
             limits={limits} onLimit={(ov) => setSetting("sizeOverride", ov)} freeSizing={freeSizing}
             findGen={findGen} findShown={findShown} flaggedHidden={flaggedHidden} barsCache={barsCache}
-            badgeOf={(x) => <SignalBadge fused={x.fused} state={readiness[x.tk]} onClick={() => { setWhyTk(x.tk); setEv("why"); }} />}
+            badgeOf={(x) => <SignalBadge fused={x.fused} state={readiness[x.tk]} onClick={() => { scrollToCard.current = x.key; setWhyTk(x.tk); setEv("why"); }} />}
+            onMore={(x) => { scrollToCard.current = x.key; setWhyTk(x.tk); setEv("more"); }}
             actionsOf={(x) => (
               <CandidateActions
                 ticked={inCompare(compare, x.cand)} onTick={() => tickCompare(x.cand)}
@@ -4484,6 +4583,15 @@ export default function OptionsStrategyLab() {
              with no trade behind it keeps the builder as it was. */
           const pName = (<>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+                {/* THE MARKET SITS WITH THE TRADE (PR #46, TASK 1). It was the header's select on every screen,
+                    where on Find it changed nothing in the list; on Build it is this trade's market. */}
+                <label style={{ ...sansUI, fontSize: 12, fontWeight: 700, color: T.dim, display: "inline-flex", gap: 6, alignItems: "center" }}>
+                  Market
+                  <select aria-label="Market for this trade" value={ticker} onChange={(e) => switchTicker(e.target.value)}
+                    style={{ ...mono, background: T.panel, color: T.ink, border: `1px solid ${T.field}`, borderRadius: 6, padding: "8px 10px", fontSize: 13, minHeight: 44 }}>
+                    {Object.keys(UNDERLYINGS).map((k) => <option key={k} value={k}>{k}</option>)}
+                  </select>
+                </label>
                 <input value={stratName} onChange={(e) => setStratName(e.target.value)}
                   style={{ ...mono, background: "transparent", border: "none", borderBottom: `1px dashed ${T.field}`, color: T.ink, fontSize: 15, fontWeight: 700, outline: "none", minWidth: 200 }} />
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -5186,112 +5294,17 @@ export default function OptionsStrategyLab() {
         {tab === "positions" && !showSettings && (
           <div style={{ marginTop: 12 }}>
             <h2 data-view-heading tabIndex={-1} style={{ ...sansUI, fontSize: 18, fontWeight: 800, color: T.ink, margin: "0 0 8px", outline: "none" }}>Positions</h2>
-            {/* WORKING ORDERS, FIRST ON THE SCREEN, BECAUSE THEY ARE NOT
-                POSITIONS YET. An order that never fills used to be visible
-                only on the full desk, so the one order this app has ever sent
-                sat at "new" with a filled quantity of 0.00 and nothing in the
-                main flow ever mentioned it again. It sits ABOVE the positions
-                because "this has not happened yet" has to be read before
-                "here is what you own", not after. */}
-            {/* THE PANEL OPENS FOR A GAP TOO, NOT ONLY FOR THE APP'S OWN ROWS.
-                With zero records and one order at the broker this said nothing
-                at all, which is the silence PR #32 handed forward. */}
-            {(workingOrders.length > 0 || orderGap.sentence) && (
+            {/* ONE ORDERS LIST, FIRST ON THE SCREEN (PR #46, TASK 0). Orders are not positions yet, so they are
+                read before "here is what you own". One row per order READ FROM ALPACA, with Modify, Cancel and
+                Details; it replaces the "WORKING AT THE BROKER" panel (the app's own records) and the Alpaca
+                panel's "ORDERS WAITING". The panel also opens for a GAP: a record Alpaca does not list (PR #32). */}
+            {alpaca && <OrdersPanel orders={alSync.t ? alSync.orders : null} ctx={orderCtx} gap={orderGap.sentence} />}
+            {!alpaca && workingOrders.length > 0 && (
               <Panel style={{ border: `1px solid ${T.amber}66`, marginBottom: 10 }}>
-                <Lbl>WORKING AT THE BROKER ({workingOrders.length}) · SENT, NOT FILLED</Lbl>
-                {workingOrders.length > 0 && (
-                <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 6, lineHeight: 1.6 }}>
-                  {workingOrders.length === 1 ? "This order has" : "These orders have"} left the app and
-                  {workingOrders.length === 1 ? " has" : " have"} not bought anything. Nothing here is a position,
-                  no exit plan has started, and the risk on {workingOrders.length === 1 ? "it" : "them"} is not
-                  open risk. A limit at the middle of a wide market can wait all day; a DAY order that is still
-                  here at the close is gone.
-                </div>
-                )}
-                {orderGap.sentence && (
-                  <div style={{ ...mono, fontSize: 10.5, color: T.amber, marginTop: 8, lineHeight: 1.6 }}>
-                    {orderGap.sentence}
-                  </div>
-                )}
-                <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
-                  {workingOrders.map((p) => {
-                    const sentAt = p.alpacaSentAt || p.id || null;
-                    const mins = sentAt ? Math.max(0, Math.round((Date.now() - sentAt) / 60000)) : null;
-                    const age = mins == null ? "age unknown"
-                      : mins < 60 ? `${mins} minute${mins === 1 ? "" : "s"} old`
-                      : mins < 1440 ? `${Math.round(mins / 60)} hour${Math.round(mins / 60) === 1 ? "" : "s"} old`
-                      : `${Math.round(mins / 1440)} day${Math.round(mins / 1440) === 1 ? "" : "s"} old`;
-                    const tif = String(p.alpacaTif || "").toLowerCase();
-                    const stands = tif === "gtc" ? "stands until you cancel it"
-                      : tif === "day" ? "dies at the close of the session it was sent in"
-                      : "time in force not recorded";
-                    // A DAY order older than a session is almost certainly gone
-                    // already, and saying so is the whole point of this panel.
-                    const stale = tif === "day" && mins != null && mins > 8 * 60;
-                    return (
-                      <div key={p.id} style={{ padding: "10px 12px", background: T.bg, border: `1px solid ${stale ? T.red : T.amber}55`, borderRadius: 7 }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", alignItems: "baseline" }}>
-                          <div style={{ fontWeight: 700, color: T.ink, fontSize: 13 }}>
-                            {p.ref ? `${p.ref} · ` : ""}{p.ticker} {p.name}
-                          </div>
-                          <div style={{ ...mono, fontSize: 10.5, color: stale ? T.red : T.amber, fontWeight: 700 }}>
-                            {String(p.alpacaStatus || "working").toUpperCase().replace(/_/g, " ")} · {age}
-                          </div>
-                        </div>
-                        <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 5, lineHeight: 1.6 }}>
-                          {/* HOW MANY COMBINATIONS ARE WAITING, IN THE BROKER'S
-                              OWN UNITS — `contracts x GCD(legs)`, which is the
-                              number in Alpaca's reply and on the timeline entry.
-                              This row printed the structure count and read as a
-                              contradiction beside a timeline saying "0 of 10". */}
-                          {`${positionSize(p).brokerQty} combination${positionSize(p).brokerQty === 1 ? "" : "s"}. `}
-                          {/* WHICH WAY THE MONEY GOES, AND "?" IS NOT A FIELD.
-                              This row printed `money(alpacaLimit * 100)` over a
-                              magnitude, so a credit spread and a debit spread of
-                              the same size read identically — and a missing order
-                              type rendered as a literal question mark, which is
-                              failure class 1: a field nobody recorded, drawn as
-                              if it were a value. */}
-                          {p.alpacaOrderType === "limit" && storedLimitOf(p).has
-                            ? (storedLimitOf(p).signed
-                              ? `A ${storedLimitOf(p).kind} limit of ${money(storedLimitOf(p).magnitude * 100)} a combination, which ${stands}.`
-                              : `${storedLimitOf(p).note} It ${stands}.`)
-                            : p.alpacaOrderType
-                              ? `A ${p.alpacaOrderType} order, which ${stands}.`
-                              : `An order whose type was not recorded, which ${stands}.`}
-                          {" "}Order <span style={{ wordBreak: "break-all" }}>{p.alpacaId}</span>.
-                        </div>
-                        {stale && (
-                          <div style={{ ...mono, fontSize: 10.5, color: T.red, marginTop: 5, lineHeight: 1.6 }}>
-                            ⚠ This is a DAY order and it is {age}. It has almost certainly expired unfilled at the
-                            close of its session without a word from anybody. Nothing was bought. Cancel it to tidy
-                            the record, or re-price it and send it again.
-                          </div>
-                        )}
-                        {/* A CANCEL ON ITS WAY SHOWS ITS SENTENCE, AND NO CANCEL OR
-                            RE-PRICE: a second tap would only ask again. */}
-                        {cancelWaiting({ status: p.alpacaStatus, cancelRequested: p.cancelRequestedAt }) ? (
-                          <div style={{ display: "flex", gap: 6, marginTop: 9, flexWrap: "wrap", alignItems: "center" }}>
-                            <span style={{ ...mono, fontSize: 10.5, color: T.amber, lineHeight: 1.5 }}>
-                              {cancelOutcome({ order: { status: p.alpacaStatus, cancelRequested: p.cancelRequestedAt } }).headline}
-                            </span>
-                            <Btn small ghost disabled={DEMO} onClick={() => recheckOrders()}>Ask Alpaca again</Btn>
-                          </div>
-                        ) : (
-                        <div style={{ display: "flex", gap: 6, marginTop: 9, flexWrap: "wrap", alignItems: "center" }}>
-                          <Btn small ghost disabled={orderBusy === p.id || DEMO} onClick={() => repriceWorking(p)}
-                            title={DEMO ? DEMO_TOOLTIP : undefined}>Re-price it →</Btn>
-                          <Btn small color={T.red} disabled={orderBusy === p.id || DEMO} onClick={() => cancelWorking(p)}
-                            title={DEMO ? DEMO_TOOLTIP : undefined}>{orderBusy === p.id ? "Working…" : "Cancel it"}</Btn>
-                          <Btn small ghost disabled={DEMO} onClick={() => recheckOrders()}>Ask Alpaca again</Btn>
-                          <span style={{ ...mono, fontSize: 10, color: T.dim }}>
-                            Re-pricing cancels this one and puts the trade back on Build at today's market.
-                          </span>
-                        </div>
-                        )}
-                      </div>
-                    );
-                  })}
+                <div style={{ ...sansUI, fontSize: 13, color: T.amber, lineHeight: 1.5 }}>
+                  {workingOrders.length} order{workingOrders.length === 1 ? " was" : "s were"} sent and {workingOrders.length === 1 ? "has" : "have"} not
+                  filled ({workingOrders.map((p) => p.ref || p.ticker).join(", ")}). The broker is not connected, so the orders cannot be
+                  read, modified or cancelled from here.
                 </div>
               </Panel>
             )}
@@ -5344,12 +5357,20 @@ export default function OptionsStrategyLab() {
                           setMsg={setMsg} logEvent={logEvent} gate={gate}
                         />
                       )}>
-                      {m.working && (
-                        <div style={{ ...sansUI, fontSize: 12.5, color: T.amber, marginTop: 8, lineHeight: 1.5 }}>
-                          Close order working at the broker. When it fills, use "File in Journal" to record why the trade ended.
-                        </div>
-                      )}
-                      {ca && <CloseConfirm prep={ca} onSend={() => sendCardClose(p)} onCancel={() => setCloseAt(null)} />}
+                      {/* THE SAME ROW AS "Orders waiting" (PR #46): a working close is modified or cancelled here too. */}
+                      {m.working && (() => {
+                        const rows = ordersForRecord(p, alSync.orders).filter((o) => orderIntent(o) === "close");
+                        return (
+                          <>
+                            {rows.map((o) => <OrderRow key={o.id} order={o} ctx={orderCtx} inline />)}
+                            <div style={{ ...sansUI, fontSize: 12.5, color: T.amber, marginTop: 8, lineHeight: 1.5 }}>
+                              {rows.length ? "" : "Close order working at the broker. "}When it fills, use "File in Journal" to record why the trade ended.
+                            </div>
+                          </>
+                        );
+                      })()}
+                      {ca && <CloseConfirm prep={ca} onSend={() => sendCardClose(p)} onCancel={() => setCloseAt(null)}
+                        onChoose={(c) => prepareCardClose(p, c, ca.prepared?.chainUsed || null)} />}
                       {/* FILING ASKS WHY, AND THE ANSWER IS KEPT. A rule close names its rule and needs nothing typed.
                           A filing with no rule behind it needs the same written reason as an against-the-signal
                           override — including a close taken on the stop WARNING, which is a decision and is recorded
@@ -5445,7 +5466,7 @@ export default function OptionsStrategyLab() {
               </div>
               <div style={{ marginTop: 14 }}>
                 <div style={{ ...mono, fontSize: 11, color: T.ink, fontWeight: 700 }}>Your capital and limits</div>
-                <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 6 }}>Behind the Settings button at the top of this page, next to the theme.</div>
+                <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 6 }}>Behind the Settings gear at the top of this page.</div>
               </div>
               <div style={{ marginTop: 14 }}>
                 <div style={{ ...mono, fontSize: 11, color: T.ink, fontWeight: 700 }}>Report webhook (optional)</div>
@@ -5925,7 +5946,7 @@ export default function OptionsStrategyLab() {
               <Panel style={{ marginTop: 12 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
                   <Lbl>COPILOT ANALYSES · {store.copilotLog.length} FILED</Lbl>
-                  <Btn small ghost onClick={() => { setEv("copilot"); setTab("build"); }}>Run another →</Btn>
+                  <Btn small ghost onClick={() => { setTab("build"); setStep("build"); setEv("copilot"); }}>Run another →</Btn>
                 </div>
                 <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6, lineHeight: 1.6 }}>
                   Every analysis you run from the Copilot panel on Build is filed here with the question that produced

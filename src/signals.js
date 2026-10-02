@@ -425,7 +425,7 @@ export function seasonalComponent(ticker, month, seasonalMean) {
 /* THE FOUR WEIGHTS AS WRITTEN. `factorsOf()` above renormalises them over the
    factors that apply to a given market, so this is the shape of the scale and
    never the scale a particular market is scored on. Unchanged in value. */
-const BASE_WEIGHTS = { seasonal: 0.30, technical: 0.25, weather: 0.25, news: 0.20 };
+export const BASE_WEIGHTS = Object.freeze({ seasonal: 0.30, technical: 0.25, weather: 0.25, news: 0.20 });
 // The gate's warning floor, imported rather than written down again: a
 // narrative must only ever quote a threshold the code actually applies.
 const LOW_CONFIDENCE = RULES.lowConfidence;
@@ -435,8 +435,22 @@ const LOW_CONFIDENCE = RULES.lowConfidence;
 // for rule literals at all. Both are fixed by the constant, not by the sweep.
 const AUTOPILOT_CONFIDENCE = RULES.autopilotConfidence;
 const LABEL = { seasonal: "seasonality", technical: "the price trend", weather: "weather", news: "news flow" };
-const REINFORCE = 1.25; // weather and geopolitical news agreeing on the same ticker
-const CONFLICT_DAMPING = 0.6;
+export const REINFORCE = 1.25; // weather and geopolitical news agreeing on the same ticker
+export const CONFLICT_DAMPING = 0.6;
+/* THE CONFIDENCE BANDS — one home (PR #46, TASK 3). They were literals inside `fuseSignals()`; they moved here
+   UNCHANGED IN VALUE so the Why sheet's "How these are worked out" is generated from the numbers the engine uses,
+   and cannot describe a formula the code does not run. Chosen, not measured on past trades (PRD §4.8).
+     confluent  base + perStrength × mean(agreeing strengths) + perExtra × (active − 3), held in [lo, hi]
+     conflict   base − perSeverity × min(mean up, mean down), held in [lo, hi]
+     two / one  base + perStrength × mean(agreeing strengths), held in [lo, hi]
+     none       a flat value: nothing is pushing */
+export const CONFIDENCE_BANDS = Object.freeze({
+  confluent: Object.freeze({ base: 75, perStrength: 0.15, perExtra: 5, lo: 75, hi: 95 }),
+  conflict: Object.freeze({ base: 38, perSeverity: 0.25, lo: 8, hi: 39 }),
+  two: Object.freeze({ base: 50, perStrength: 0.2, lo: 45, hi: 70 }),
+  one: Object.freeze({ base: 45, perStrength: 0.12, lo: 45, hi: 58 }),
+  none: Object.freeze({ value: 20 }),
+});
 
 const dirWord = (d) => (d > 0 ? "higher" : d < 0 ? "lower" : "sideways");
 const scoreTxt = (x) => (x === 0 ? "0" : signed(x, 0));
@@ -496,19 +510,24 @@ export function fuseSignals({ ticker, month, weatherData, newsItems, bars, seaso
   const meanStrength = agreeing.length ? avg(agreeing.map((k) => components[k].strength)) : 0;
 
   let confidence;
+  const B = CONFIDENCE_BANDS;
   if (agreement === "CONFLUENT") {
-    confidence = clamp(Math.round(75 + 0.15 * meanStrength + (nActive - 3) * 5), 75, 95);
+    const b = B.confluent;
+    confidence = clamp(Math.round(b.base + b.perStrength * meanStrength + (nActive - 3) * b.perExtra), b.lo, b.hi);
   } else if (agreement === "CONFLICT") {
     // The more evenly matched and the stronger the opposition, the less we know.
+    const b = B.conflict;
     const severity = Math.min(avg(up.map((k) => components[k].strength)), avg(down.map((k) => components[k].strength)));
-    confidence = clamp(Math.round(38 - 0.25 * severity), 8, 39);
+    confidence = clamp(Math.round(b.base - b.perSeverity * severity), b.lo, b.hi);
   } else if (nActive === 2) {
-    confidence = clamp(Math.round(50 + 0.2 * meanStrength), 45, 70);
+    const b = B.two;
+    confidence = clamp(Math.round(b.base + b.perStrength * meanStrength), b.lo, b.hi);
   } else if (nActive === 1) {
-    confidence = clamp(Math.round(45 + 0.12 * meanStrength), 45, 58);
+    const b = B.one;
+    confidence = clamp(Math.round(b.base + b.perStrength * meanStrength), b.lo, b.hi);
   } else {
     // Nothing is pushing: this is the "nothing today" case, not a 45-70 read.
-    confidence = 20;
+    confidence = B.none.value;
   }
 
   const narrative = buildNarrative({ ticker, month: m, components, agreement, score, confidence, up, down, quiet, reinforced, keys, factorNote });
@@ -519,6 +538,92 @@ export function fuseSignals({ ticker, month, weatherData, newsItems, bars, seaso
     // fixed sentence under the bars; on a market with no weather that sentence
     // would have been describing a scale nothing was measured against.
     factors: keys, weights, excluded, factorNote };
+}
+
+/* ================================================================
+   HOW THE SCORE AND THE CONFIDENCE ARE WORKED OUT (PR #46, TASK 3)
+
+   The Why sheet's ⓘ. Every number in these sentences is read off the fused
+   result (this market's own renormalised weights and readings) and the
+   constants above, and the arithmetic is redone here from them, so the
+   sentence's result is checkable against `fused.score` and
+   `fused.confidence` (signals.test.js does it for every fixture market).
+================================================================ */
+const num2 = (x) => String(+(+x).toFixed(2));
+const num3 = (x) => (Math.abs(+x * 100 - Math.round(+x * 100)) < 1e-9 ? (+x).toFixed(2) : String(+(+x).toFixed(3)));
+const AGREE_WORDS = { CONFLUENT: "the factors agree", MIXED: "the factors partly agree", CONFLICT: "the factors contradict each other" };
+
+/** "▲ the factors agree · 3 of 4 agree · score +64 · confidence 86" — the verdict, one line. */
+export function verdictLine(fused) {
+  if (!fused) return null;
+  const keys = fused.factors || Object.keys(BASE_WEIGHTS);
+  const up = keys.filter((k) => fused.components?.[k]?.dir > 0).length;
+  const down = keys.filter((k) => fused.components?.[k]?.dir < 0).length;
+  const arrow = fused.agreement === "CONFLICT" ? "●" : fused.score > 0 ? "▲" : fused.score < 0 ? "▼" : "●";
+  const n = Math.max(up, down);
+  const counted = fused.agreement === "CONFLICT" ? `${up} up, ${down} down of ${keys.length}`
+    : fused.agreement === "CONFLUENT" ? `${n} of ${keys.length} agree` : `${n} of ${keys.length} pushing`;
+  return { arrow, words: AGREE_WORDS[fused.agreement] || AGREE_WORDS.MIXED,
+    numbers: `${counted} · score ${scoreTxt(fused.score)} · confidence ${fused.confidence}`,
+    text: `${arrow} ${AGREE_WORDS[fused.agreement] || AGREE_WORDS.MIXED} · ${counted} · score ${scoreTxt(fused.score)} · confidence ${fused.confidence}` };
+}
+
+/**
+ * THE SCORE, WRITTEN OUT WITH THIS MARKET'S NUMBERS.
+ * "0.30×47 + 0.25×0 + 0.25×67 + 0.20×100 = 50.85 × 1.25 = 63.56 → +64"
+ * @returns {{ sentence, result, raw }} `result` is what the sentence arrives at.
+ */
+export function scoreWorking(fused) {
+  if (!fused) return null;
+  const keys = fused.factors || Object.keys(BASE_WEIGHTS);
+  const terms = keys.map((k) => ({ k, w: fused.weights[k], v: fused.components[k].dir * fused.components[k].strength }));
+  let raw = terms.reduce((a, t) => a + t.w * t.v, 0);
+  const steps = [`${terms.map((t) => `${num3(t.w)}×${t.v}`).join(" + ")} = ${num2(raw)}`];
+  if (fused.reinforced) { raw *= REINFORCE; steps.push(`× ${REINFORCE} (weather and geopolitical news agree) = ${num2(raw)}`); }
+  if (fused.agreement === "CONFLICT") { raw *= CONFLICT_DAMPING; steps.push(`× ${CONFLICT_DAMPING} (a conflict) = ${num2(raw)}`); }
+  const result = clamp(Math.round(raw), -100, 100);
+  const labels = terms.map((t) => `${LABEL[t.k]} ${num3(t.w)}`).join(", ");
+  return { raw, result,
+    sentence: `Score = each factor's weight × its direction × its strength, added up. ${fused.ticker}'s weights: ${labels}` +
+      `${(fused.excluded || []).length ? ` (${fused.excluded.map((k) => LABEL[k]).join(", ")} does not apply here, so its share is spread over the rest)` : ""}. ` +
+      `${steps.join(" ")} → ${scoreTxt(result)}.` };
+}
+
+/**
+ * THE CONFIDENCE: the case that applied, its formula with this market's numbers, and its band.
+ * "Confluent: 75 + 0.15 × mean(47, 67, 100) = 85.7 → 86 (held between 75 and 95)"
+ */
+export function confidenceWorking(fused) {
+  if (!fused) return null;
+  const keys = fused.factors || Object.keys(BASE_WEIGHTS);
+  const st = (ks) => ks.map((k) => fused.components[k].strength);
+  const up = keys.filter((k) => fused.components[k].dir > 0), down = keys.filter((k) => fused.components[k].dir < 0);
+  const n = up.length + down.length;
+  const agreeing = up.length ? up : down;
+  const mean = agreeing.length ? avg(st(agreeing)) : 0;
+  const B = CONFIDENCE_BANDS;
+  let v, f, band, name;
+  if (fused.agreement === "CONFLUENT") {
+    const b = B.confluent; name = "Confluent (three or more factors point the same way)";
+    v = b.base + b.perStrength * mean + (n - 3) * b.perExtra;
+    f = `${b.base} + ${b.perStrength} × mean(${st(agreeing).join(", ")})${n > 3 ? ` + ${b.perExtra} × ${n - 3} more than three` : ""}`;
+    band = b;
+  } else if (fused.agreement === "CONFLICT") {
+    const b = B.conflict; name = "Conflict (factors point both ways)";
+    const mu = avg(st(up)), md = avg(st(down)); const sev = Math.min(mu, md);
+    v = b.base - b.perSeverity * sev;
+    f = `${b.base} − ${b.perSeverity} × min(mean up ${num2(mu)}, mean down ${num2(md)})`;
+    band = b;
+  } else if (n === 2 || n === 1) {
+    const b = n === 2 ? B.two : B.one; name = `Mixed (${n} factor${n === 1 ? "" : "s"} pushing, the rest quiet)`;
+    v = b.base + b.perStrength * mean;
+    f = `${b.base} + ${b.perStrength} × mean(${st(agreeing).join(", ")})`;
+    band = b;
+  } else {
+    return { result: B.none.value, sentence: `Nothing is pushing, so confidence is set at ${B.none.value}: the "nothing today" case.` };
+  }
+  const result = clamp(Math.round(v), band.lo, band.hi);
+  return { result, sentence: `${name}: ${f} = ${num2(v)} → ${result} (held between ${band.lo} and ${band.hi}).` };
 }
 
 function buildNarrative({ ticker, month, components, agreement, score, confidence, up, down, quiet, reinforced, keys, factorNote }) {

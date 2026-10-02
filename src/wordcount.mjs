@@ -156,6 +156,9 @@ export const COPY = {
   // The longest of its answers: a failure named with its error, then the floors' counts.
   nothingTodayLine: () => R.nothingTodayLine({ liquidity: 3, reward: 2 }, { noBoard: ["XLE"], failed: [{ tk: "UNG", why: "HTTP 502" }] }),
   sizeLine: () => R.sizeLine({ ok: true, n: 25, risk: 193, totRisk: 4825, isCredit: false }) || "",
+  // PR #46: the Why sheet's verdict line, scored on the CORN reading the owner was given (2 Oct 2026).
+  verdictLine: () => S.verdictLine({ ticker: "CORN", factors: ["seasonal", "technical", "weather", "news"], agreement: "CONFLUENT",
+    score: 64, confidence: 86, components: { seasonal: { dir: 1 }, technical: { dir: 0 }, weather: { dir: 1 }, news: { dir: 1 } } }).text,
   newsLine: () => S.newsLine("CORN", [{ title: "Drought cuts US corn crop outlook in the Midwest", date: new Date().toISOString() }]).text,
   // PR #44, TASK 4: the badge's own words while a market is being read. (Its aria-label sentence is not on screen.)
   readingLine: () => S.readingLine({ waiting: ["news"] }),
@@ -359,7 +362,7 @@ export const COMPONENT_DEPTH = 3;
 // would report a screen shrinking on the day it grew.
 // `ui.jsx` and `find.jsx` since PR #45: the atoms and the Find step moved out of App.jsx, and a counter that could not
 // see them would report Find shrinking to nothing on the day it was rewritten.
-const UI_FILES = ["App.jsx", "pro.jsx", "steps.jsx", "why.jsx", "visuals.jsx", "wizard.jsx", "card.jsx", "ui.jsx", "find.jsx"];
+const UI_FILES = ["App.jsx", "pro.jsx", "steps.jsx", "why.jsx", "visuals.jsx", "wizard.jsx", "card.jsx", "ui.jsx", "find.jsx", "orders.jsx"];
 
 const sourcesOnce = (() => {
   let cache = null;

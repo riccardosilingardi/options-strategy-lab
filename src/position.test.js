@@ -46,6 +46,7 @@ const fakeBroker = () => {
   const calls = [];
   const request = async (path, method = "GET", body = null) => {
     calls.push({ path, method, body });
+    if (method === "GET" && /^\/v2\/orders\//.test(path)) return { status: "canceled" };   // Alpaca reports the cancel done
     return method === "POST" ? { id: "close-1", status: "accepted", qty: "1", filled_qty: "0", limit_price: body?.limit_price } : {};
   };
   return { calls, request };
@@ -203,10 +204,33 @@ await test("sendClose() cancels the conflicts, then POSTs exactly what tap 1 wro
   const p = await prepareClose(groupForRecord(RECORD, HOLDING), { gate: PASS, openOrders: open, fetchChain: async () => CHAIN, demo: false });
   const s = await sendClose(p, { request: b.request, gate: PASS, demo: false });
   assert.equal(s.ok, true, s.refusal);
-  assert.deepEqual(b.calls.map((c) => `${c.method} ${c.path}`), ["DELETE /v2/orders/tp-ladder", "POST /v2/orders"]);
-  assert.deepEqual(b.calls[1].body, p.body);
-  assert.equal(b.calls[1].body.type, "limit");
+  // PR #46: the close waits for Alpaca to REPORT the old order canceled before it POSTs.
+  assert.deepEqual(b.calls.map((c) => `${c.method} ${c.path}`),
+    ["DELETE /v2/orders/tp-ladder", "GET /v2/orders/tp-ladder", "POST /v2/orders"]);
+  assert.deepEqual(b.calls[2].body, p.body);
+  assert.equal(b.calls[2].body.type, "limit");
   assert.equal(s.limitWords, p.limitWords);
+});
+
+await test("a cancel still pending sends NO close: never two working orders on one holding (PR #46)", async () => {
+  const calls = [];
+  const pending = async (path, method = "GET", body = null) => {
+    calls.push({ path, method, body });
+    if (method === "GET") return { status: "pending_cancel" };
+    return method === "POST" ? { id: "x", status: "accepted" } : {};
+  };
+  const open = [{ id: "tp-ladder", order_class: "mleg", legs: [{ symbol: "XLE261030C00095000" }] }];
+  const p = await prepareClose(groupForRecord(RECORD, HOLDING), { gate: PASS, openOrders: open, fetchChain: async () => CHAIN, demo: false });
+  const s = await sendClose(p, { request: pending, gate: PASS, demo: false, waitOpts: { tries: 3, sleep: async () => {} } });
+  assert.equal(s.ok, false);
+  assert.match(s.refusal, /not reported the old order canceled/);
+  assert.equal(calls.filter((c) => c.method === "POST").length, 0, "nothing new was sent");
+  assert.equal(p.sent, false, "and the close can be sent again once it reads canceled");
+  // ...and a fill that beats the cancel stops it too.
+  const filledFirst = async (path, method = "GET") => (method === "GET" ? { status: "filled" } : {});
+  const p2 = await prepareClose(groupForRecord(RECORD, HOLDING), { gate: PASS, openOrders: open, fetchChain: async () => CHAIN, demo: false });
+  const s2 = await sendClose(p2, { request: filledFirst, gate: PASS, demo: false, waitOpts: { tries: 1 } });
+  assert.equal(s2.ok, false); assert.match(s2.refusal, /filled before the cancel/);
 });
 
 await test("a second send while a close is working is refused", async () => {

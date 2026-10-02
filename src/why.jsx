@@ -23,7 +23,8 @@ import React, { useState, useEffect } from "react";
 import { T } from "./theme.js";
 // The fold lives in steps.jsx — chrome with no trade in it (P9, TASK 3).
 import { Fold } from "./steps.jsx";
-import { ARROW, regionSignals, newsLine } from "./signals.js";
+import { ARROW, regionSignals, newsLine, verdictLine, scoreWorking, confidenceWorking } from "./signals.js";
+import { whyFindEffect, WEIGHTS_CHOSEN_LINE } from "./rules.js";
 import { useNarrow } from "./visuals.jsx";
 
 const mono = { fontFamily: "ui-monospace, Menlo, monospace" };
@@ -156,6 +157,75 @@ function NewsDrill({ ticker, newsItems = [] }) {
  *   the road is on the page at all.
  * @param style  the caller places the panel; it does not place itself.
  */
+/* ================================================================
+   THE WHY SHEET'S TOP (PR #46, TASK 3): one verdict line, an ⓘ beside the score and beside the confidence that
+   opens "How these are worked out" ON TAP (never a title attribute), and one sentence on what this changes in Find.
+   The long narrative goes behind "The full reasoning".
+================================================================ */
+export function HowWorkedOut({ fused }) {
+  const sw = scoreWorking(fused), cw = confidenceWorking(fused);
+  if (!sw || !cw) return null;
+  return (
+    <div id="how-worked-out" role="region" aria-label="How these are worked out"
+      style={{ marginTop: 8, padding: "9px 11px", background: T.panel, border: `1px solid ${T.blue}66`, borderRadius: 8 }}>
+      <div style={{ fontSize: 13, fontWeight: 700, color: T.ink }}>How these are worked out</div>
+      <div style={{ fontSize: 13, color: T.body, marginTop: 6, lineHeight: 1.5 }}><b>Score.</b> {sw.sentence}</div>
+      <div style={{ fontSize: 13, color: T.body, marginTop: 6, lineHeight: 1.5 }}><b>Confidence.</b> {cw.sentence}</div>
+      <div style={{ fontSize: 12, color: T.mut, marginTop: 6, lineHeight: 1.5 }}>{WEIGHTS_CHOSEN_LINE}</div>
+    </div>
+  );
+}
+
+export function WhySheetTop({ fused, how, onHow }) {
+  const v = verdictLine(fused);
+  if (!v) return null;
+  const col = fused.agreement === "CONFLICT" ? T.red : fused.score > 0 ? T.green : fused.score < 0 ? T.red : T.mut;
+  const info = (label) => (
+    <button onClick={onHow} aria-expanded={!!how} aria-controls="how-worked-out" aria-label={`How the ${label} is worked out`}
+      style={{ ...mono, fontSize: 14, color: T.blue, background: "transparent", border: "none", cursor: "pointer", minWidth: 44, minHeight: 44, padding: 0 }}>ⓘ</button>
+  );
+  const [counted, scorePart, confPart] = v.numbers.split(" · ");
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+        <span style={{ ...mono, fontSize: 18, fontWeight: 800, color: col }}>{v.arrow}</span>
+        <span style={{ fontSize: 15, fontWeight: 700, color: T.ink }}>{v.words}</span>
+      </div>
+      <div style={{ ...mono, fontSize: 13, color: T.body, display: "flex", alignItems: "center", flexWrap: "wrap", gap: 2 }}>
+        <span>{counted} · {scorePart}</span>{info("score")}<span>· {confPart}</span>{info("confidence")}
+      </div>
+      {how && <HowWorkedOut fused={fused} />}
+      <div style={{ fontSize: 13, color: T.body, marginTop: 8, lineHeight: 1.5 }}>{whyFindEffect()}</div>
+    </div>
+  );
+}
+
+/**
+ * THE WHY SHEET (PR #46, TASK 3) — "<TK> this month", the market and not this trade. The verdict line with its
+ * two ⓘ, the one sentence on what it changes in Find, the news line, and the long narrative behind "The full
+ * reasoning" (the `WhyThisTrade` panel, unchanged, the autopilot sentence inside it).
+ */
+export function WhySheet({ fused, title, note, ticker, weatherData, newsItems, month, defaultDetail = false, style }) {
+  const [how, setHow] = useState(false);
+  const [newsOpen, setNewsOpen] = useState(false);
+  if (!fused) return null;
+  return (
+      <div style={{ marginTop: 4, ...(style || {}) }}>
+        <WhySheetTop fused={fused} how={how} onHow={() => setHow((h) => !h)} />
+        <button onClick={() => setNewsOpen((o) => !o)}
+          style={{ ...mono, fontSize: 12, marginTop: 6, background: "transparent", color: T.body, border: "none", padding: "4px 0", cursor: "pointer", textAlign: "left", lineHeight: 1.5, minHeight: 44 }}>
+          {newsLine(ticker, newsItems).text} {newsOpen ? "▲" : "▼"}
+        </button>
+        {newsOpen && <NewsDrill ticker={ticker} newsItems={newsItems} />}
+        {/* THE LONG NARRATIVE, behind one tap. The autopilot sentence is inside it. */}
+        <Fold summary="The full reasoning" label="why" tone={T.blue} style={{ marginTop: 8 }}>
+          <WhyThisTrade fused={fused} title={title} note={note} ticker={ticker} weatherData={weatherData}
+            newsItems={newsItems} month={month} defaultDetail={defaultDetail} style={{ marginTop: 0 }} />
+        </Fold>
+      </div>
+  );
+}
+
 export function WhyThisTrade({ fused, title = "WHY THIS TRADE", note, ticker, weatherData, newsItems, month, defaultDetail = false, style }) {
   const [detail, setDetail] = useState(defaultDetail);
   const [open, setOpen] = useState(null); // key of the factor whose explanation is open

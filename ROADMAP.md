@@ -6,58 +6,80 @@ The full history of every item shipped so far (P0–P10, P2-bis) is in `docs/his
 Every pull request updates this file: the session that ships an item marks it done and states
 what the next one inherits.
 
-## Done in this pull request — PR #45, Find filters, sizes the card, and has one control style
+## Done in this pull request — PR #46, orders where they live, and evidence with a subject
 
-**Debt first (Task 0).** A budget typed at $5,150 against a $5,000 per-trade limit sized 27 of 28 cards above the
-limit, and the gate refuses every one on Build (PER_TRADE_LIMIT): a card offered a trade it could not send.
-`requestOf(want, limits, { sizingFree })` now holds the amount at `floor(perTradeLimit)` and hands every sizing
-site `request.riskCap`; `scaleStrategy(a, mode, amt, riskCap)` never returns a count that puts more than the cap at
-risk, in "profit I am aiming for" mode too. Free sizing ON is unchanged (no cap; the slider's top is the capital).
-Raising the limit is the existing per-trade limit edit with its typed reason. A structure with no ceiling (a long
-call) is sized on its risk alone now; it used to read "cannot be sized" in every list. Held by `find.test.jsx`.
+**Orders (Task 0).** Measured: J-0001's close went out as a sell at a credit of $8.23 and sat "0 of 9 sold" while
+Alpaca marked the put at $7.90; Cancel existed in two places and nothing could modify an order. Now:
+- **One orders list**, "Orders waiting (N)" at the top of Positions (`src/orders.jsx`), one row per order read from
+  Alpaca (`orderRowModel()` in `src/orderRow.js`): what it is, limit, TIF, filled X of Y, sent time, the structure's
+  bid / mid / ask from the chain, Alpaca's mark (`current_price`, read), and one line when the limit is past the mark
+  on the side that does not fill. Modify, Cancel (confirm, the DELETE, `cancelOutcome()`), Details (Alpaca's status
+  history), "Cancel all" with a confirm. The card whose close is working shows the same row inline. The old
+  "WORKING AT THE BROKER" panel and the Alpaca panel's "ORDERS WAITING" are gone; the desk shows counts only.
+- **Modify.** alpaca-py 0.44.0 `replace_order_by_id()` is `PATCH /orders/{id}` with qty, time_in_force, limit_price;
+  Alpaca's docs list replace for options orders and answer a replace on an mleg order with 403 "replace mleg order is
+  disabled" (read through search results: docs.alpaca.markets is blocked from the sandbox). So one leg → **order path
+  7** (`sendModify()`, gate first, then PATCH; the record follows the new order id); several legs → cancel, wait for
+  Alpaca's "canceled" (`waitForCanceled()`), then path 3 (close) or Build's ticket, path 2 (open).
+- **Never two working orders.** `sendClose()` now waits for each conflicting order to read canceled before it POSTs;
+  a pending cancel or a fill that beats it sends nothing.
+- **The close's price.** The card's close confirm (and the desk's) has the same `PriceField`: between the side that
+  fills and the mid, starting at `closeLimitPrice()`, with quantity and DAY/GTC. Without a choice the body is
+  byte-identical to main (`orders.test.js` pins two bodies produced by main's own code).
+- **Proxy allowlist** (`routeAllowed()` in `alpaca.mjs`): GET on the read paths used, POST /v2/orders, PATCH and
+  DELETE /v2/orders/{id}, DELETE /v2/orders. `DELETE /v2/positions`, exercise and everything else → 405 with a sentence.
+- Excluded on purpose, reasons in PRD §2: market close, liquidate all, exercise.
 
-**The controls filter (Task 1).** A card that misses the request is hidden: "N match what you asked · show M that
-miss", and tapping it shows them with their `missReasonLine()`. With nothing matching it names the control that binds
-and the nearest value that lets one in, from the cards' own figures (`nearestRelaxation()`). Under "season decides"
-every card says which direction its market's season chose. `meetsHeading()` and `otherwiseHeading()` are retired;
-the new words are `matchHeading()`, `missToggle()`, `resultsLine()` in `rules.js`. Generation stays in `findGen`'s
-memo, which does not read the request: a slider move sizes and filters the finished list.
+**Find's header (Task 1).** No ticker select; Refresh reloads every selected market quietly; the bar reads "N markets
+· prices Xm ago" (the oldest, `findFreshness()`). Theme is in Settings behind one gear. Build's market selector sits
+beside the trade.
 
-**One control style (Task 2).** `RangeField` (label, value you can tap to type, slider, ends, a histogram of the
-candidates with the threshold marked, "N pass") for *most I will risk*, *chance at least*, *return on risk at least*
-(new; its floor is `minRewardRisk`, so it can only tighten) and *horizon*. The number box and the risk chips are gone.
-44px targets, `aria-valuetext` on every slider. New RULES: `rewardAskMax` 3, `rewardAskStep` 0.05, `amountAskStep` 25.
+**Evidence has a subject (Task 2).** No EvidenceBar on Find. A card's badge opens Why for its market, its fold opens
+"More on <TK>: levels · history" (that market's open interest, price chart and season), and closing scrolls back to the
+card. Build's bar: "About this trade · <TK> <structure>"; the Copilot lives only there.
 
-**The card shows your size (Task 3).** YOU RISK, MAX PROFIT, CHANCE, RETURN ON RISK for the size the budget buys, one
-line "25 contracts × $193 at risk each", per-contract figures in a fold. `sizedFigures()` and `sizeLine()` are the one
-function each; Find reads them at `aFill`, Build at `AE`, and `figures.test.jsx` holds the sized totals equal.
+**The Why sheet (Task 3).** "<TK> this month / the market, not this trade"; one verdict line; an ⓘ (tap, never a
+title) writing out the score (this market's renormalised weights × direction × strength, ×REINFORCE, ×CONFLICT_DAMPING)
+and the confidence (the case, its formula, its band) from the constants themselves — `scoreWorking()`,
+`confidenceWorking()`; the confidence literals moved into `CONFIDENCE_BANDS`, values unchanged. One sentence on what it
+changes in Find (`whyFindEffect()` in rules.js, each clause checked against `suggestionOf()`, `rankScore()` /
+`signalAdjustment()`, `compareCandidates()` and `seasonalDrift()`). The narrative is behind "The full reasoning".
+Tested: the worked result equals `fused.score` and `fused.confidence` on 50 fixture readings (ten markets, metals without
+weather included); CORN's 2 Oct reading reproduces +64 / 86.
 
-**The picture beside the gauge (Task 4).** The card's picture row is the gauge plus the compact unified picture; a tap
-opens the full `UnifiedFigure` in place. The band thumbnail left the card. Cards sit in a grid (columns of about
-340px) and the Find column stops at 1,280px.
+**Words at rest:** find 309, build 244 (unchanged), positions 304 → 209 (the counter now reads `orders.jsx`; the row's
+own words come from `orderRow.js`, which it does not score, so 209 is a floor).
 
-**Design-system foundation (Task 5).** `src/ui.jsx` (Btn, Panel, Label, Stat, Fold, Chip, RangeField, Note, inputs and
-the two font stacks), type tokens in `theme.js` (sizes 12, 13, 15, 18, 24; two weights; two line heights). Find moved
-to `src/find.jsx`. `ui.test.jsx` fails the build on a `fontSize` literal or a local atom copy in `ui.jsx`, `card.jsx`
-or `find.jsx`. Words at rest: **find 384 → 309, build 264 → 244**.
+**Not changed:** `orderBody()`, `riskGate.js`, `alpacaContract.js`, every `RULES` value, the `/api/state` payload, Find's
+controls and card, the signal constants' values.
 
-**Not changed:** `orderBody()`, `closeOrder.js`, `closeLimitPrice()`, `riskGate.js`, `alpacaContract.js`, the six gate
-calls, every `RULES` value, the `/api/state` payload. No order path was touched, so J-0001's close (v1 b) may happen
-while this is open.
+### What the next session inherits from #46
+
+- **v1 (b) is still J-0001's close, and now also the first live Modify.** Read from the production address: the orders
+  row (limit beside the mark), Modify → price → send → fill → "File in Journal". A `PATCH` on an options order and GTC
+  on one have never been observed.
+- After a replace the record follows the new order id (`onReplaced`); a record whose order was replaced from Alpaca's
+  own screen still points at the old id, which reads "replaced" and stays "working" in `orderLifecycle()`.
+- Modify of a multi-leg OPENING order lands on Build at today's market; the chosen price is written in the message,
+  not pre-filled into the ticket.
+- "More on <TK>" draws open interest, the price chart and the season for the card's market; the year-by-year replay and
+  the simulation stay Build's (they are about the trade).
 
 ### What the next session inherits from #45
 
-- **PR #46 = the design-system sweep of the remaining screens plus ONE bottom navigation bar (mockup first), and red
+- **PR #47 (was #46) = the design-system sweep of the remaining screens plus ONE bottom navigation bar (mockup first), and red
   reserved for errors.** Still on their own copies and sizes: `App.jsx` (Btn, Panel, Lbl, Stat, `mono`, `sansUI`),
   `pro.jsx`, `positionCard.jsx`, `wizard.jsx`, `why.jsx`, `visuals.jsx` (its drawings keep their own sizes; the card
-  names a 12px axis label through `labelSize`), `steps.jsx` (`StepNav`, `EvidenceBar`, `DeskCountLine`).
+  names a 12px axis label through `labelSize`), `steps.jsx` (`StepNav`, `EvidenceBar`, `DeskCountLine`). (`orders.jsx` is already on the atoms and tokens.)
   `positionView.js` keeps `FIGURE_LABELS` = RETURN ON RISK, CHANCE, PROFIT, RISK, which no longer equals the Find
   card's four labels (YOU RISK, MAX PROFIT, CHANCE, RETURN ON RISK); move Positions' "at entry vs now" onto
   `CARD_LABELS` in that sweep. Red is still used for sentences that are not errors (a sell side, a stop sign).
 - **The default chance of 50% hides most of the list on fixtures (5 of 31).** It is a RULES value and was not touched;
   read the live distribution (`scripts/measure-find.mjs` prints the fixture one) before moving `chanceAskDefault`.
-- **The owner asked, with J-0001's closing screen attached, for every order type Alpaca offers and for what a close
-  really costs in bid/ask spread.** NOT DONE: it is an order-path change and v1 (b) is being read on that path. The
+- **DONE IN PART BY #46:** the close's bid / mid / ask and Alpaca's mark are on the order row, and the close's price is
+  chosen between the side that fills and the mid. Order types stay limit only. Original note: **The owner asked, with
+  J-0001's closing screen attached, for every order type Alpaca offers and for what a close
+  really costs in bid/ask spread.** NOT DONE then: it is an order-path change and v1 (b) is being read on that path. The
   screens show a close at a credit of $8.23 working ("0 of 9 combinations sold") while the broker's row marks the
   put at $7.90 (the limit is above the broker's mark). After v1 (b): (a) show the close's effective cost beside the
   limit (the structure's bid, mid and ask and what crossing costs, as `crossingCostNote()` already does on open);
@@ -110,8 +132,13 @@ production address_: the Journal lives in that browser only.**
 
 One line each; see `PRD.md` §5 and `docs/history/ROADMAP.md` for detail.
 
-- **FIRST: PR #46, the design-system sweep of the remaining screens, one bottom navigation bar (mockup first) and red
-  reserved for errors.** PR #45 built `ui.jsx` and the type tokens and migrated Find, the controls and the card; this
+- **FIRST: PR #47 = one market registry** — one row per market (category, factors, newsQ, seasonal row) replacing
+  `UNDERLYINGS`' scattered fields, `basket.js` and `weatherApplies()`; Find's markets grouped by category (Grains,
+  Energy, Metals) with all/none per category and category result filters; **one bottom navigation bar** (mockup
+  first); **the design-system sweep of the remaining screens**; **red only for errors**. Not started.
+- **PR #48 = basket expansion** — a measured admission rule (`liquidity.mjs` run on candidate chains) and Find's cost
+  on a phone (PRD §4.5). Not started.
+- **The sweep, in detail (part of PR #47):** PR #45 built `ui.jsx` and the type tokens and migrated Find, the controls and the card; this
   moves the rest. One set of atoms and one type scale, measured on 2 Oct 2026, before #45: **23 font sizes** (67% of uses below 12px), **402 mono spreads against 15 sans**, **57
   padding values**, **13 radii**, **Btn ×2, Panel ×2, Lbl ×3, Stat ×3 copies**, and the mono stack defined in
   **8 files**. PR #44 raised the floor only on the atoms it had to touch (Btn, Fold, the field border, the

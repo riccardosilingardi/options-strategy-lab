@@ -45,10 +45,15 @@ check("THE DESK LINE IS COUNTS ONLY — no ref, no status, no price, and it link
 check("RENDERING THE DESK: an order's status is written in exactly one place — its Positions row", () => {
   // The rows that print an order's state: exactly one `workingOrders.map(`,
   // and it sits inside the Positions tab.
-  eq(count(code, "workingOrders.map("), 1, "one list of working orders");
+  // PR #46: ONE ORDERS LIST, read from Alpaca — `<OrdersPanel` — and it sits inside the Positions tab. The
+  // record-based "WORKING AT THE BROKER" panel and the Alpaca panel's "ORDERS WAITING" list are gone.
+  eq(count(code, "<OrdersPanel"), 1, "one list of working orders");
   const positions = code.slice(code.indexOf('tab === "positions" && !showSettings'));
-  if (!positions.includes("workingOrders.map(")) throw new Error("the one list is not in Positions");
-  eq(count(code, "WORKING AT THE BROKER"), 1, "one heading");
+  if (!positions.includes("<OrdersPanel")) throw new Error("the one list is not in Positions");
+  hasNot(code, "WORKING AT THE BROKER (");
+  const pro = readFileSync("src/pro.jsx", "utf8");
+  hasNot(pro, "ORDERS WAITING (");
+  eq(count(readFileSync("src/orders.jsx", "utf8"), "Orders waiting ("), 1, "one heading");
   hasNot(code, "ORDERS WORKING AT THE BROKER");  // the desk strip
   hasNot(code, "EVERYTHING IS ON PLAN");          // the desk's TODAY list
   has(code, "<DeskCountLine");

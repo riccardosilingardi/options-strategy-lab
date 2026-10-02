@@ -40,7 +40,7 @@ const NO_BARS = [];
 export function FindStep({
   request, onRequest, sentiments, universe, find, setFind, spot,
   limits, onLimit, freeSizing,
-  findGen, findShown, flaggedHidden, barsCache, badgeOf, actionsOf,
+  findGen, findShown, flaggedHidden, barsCache, badgeOf, actionsOf, onMore = null,
   liqLevel, foldedNode,
   compare, showCompare, compareNote, onTickCompare, onClearCompare, onToggleCompare, onTakeToBuild,
   forward,
@@ -75,7 +75,8 @@ export function FindStep({
         rr={x.lf.rr} pop={x.lf.pop}
         picture={x.lf.bands ? { bands: x.lf.bands, legs: x.legs, entryNet: af.entry, spot: x.spot, bars: barsCache[x.tk] || NO_BARS,
           dte: x.dte, sigma: mc ? mc.sigma : undefined, driftAnnual: mc ? mc.driftAnnual : undefined, ticker: x.tk } : null}
-        badge={badgeOf(x)} actions={actionsOf(x)} />
+        badge={badgeOf(x)} actions={actionsOf(x)}
+        more={onMore ? { tk: x.tk, onOpen: () => onMore(x) } : null} />
     );
   };
 

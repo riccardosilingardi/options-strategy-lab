@@ -6,7 +6,7 @@
 //
 // The migrated files — `ui.jsx`, `card.jsx`, `find.jsx` — read their atoms from `ui.jsx` and their sizes from the
 // type tokens. This fails the build on a `fontSize` literal or a local copy of an atom in any of them, so a later
-// session cannot quietly paste a Btn back. Other screens keep their copies until PR #46; they are NOT swept here.
+// session cannot quietly paste a Btn back. Other screens keep their copies until PR #47; they are NOT swept here.
 // ============================================================================
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -119,7 +119,7 @@ check("A RANGE THAT HAS NO WIDTH SAYS SO INSTEAD OF DRAWING A SLIDER THAT CANNOT
 /* ====================================================================
    THE SWEEP: NO fontSize LITERAL AND NO LOCAL ATOM COPY IN A MIGRATED FILE
 ==================================================================== */
-const MIGRATED = ["src/ui.jsx", "src/card.jsx", "src/find.jsx"];
+const MIGRATED = ["src/ui.jsx", "src/card.jsx", "src/find.jsx", "src/orders.jsx"];
 const stripped = (f) => readFileSync(f, "utf8").replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
 const ATOMS = ["Btn", "Panel", "Lbl", "Label", "Stat", "Chip", "Fold", "RangeField", "Note", "NumberInput", "TextArea", "CheckField"];
 
@@ -162,7 +162,7 @@ check("THE CARD AND FIND IMPORT THEIR ATOMS FROM ui.jsx", () => {
   has(steps, 'export { Fold } from "./ui.jsx"');
 });
 
-check("OTHER SCREENS ARE NOT PRETENDED TO BE MIGRATED: their copies are still theirs (PR #46)", () => {
+check("OTHER SCREENS ARE NOT PRETENDED TO BE MIGRATED: their copies are still theirs (PR #47)", () => {
   // This is a statement of scope, held so a later reader does not mistake the sweep for the whole app.
   for (const f of ["src/App.jsx", "src/pro.jsx", "src/positionCard.jsx"]) {
     if (MIGRATED.includes(f)) throw new Error(`${f} is swept but not migrated`);

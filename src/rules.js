@@ -5777,3 +5777,20 @@ export function tradeCard({
 export const TRADE_CARD_IDS = ["bet", "risk", "often", "exits", "wrong"];
 
 export default RULES;
+
+/* =====================================================================
+   THE WHY SHEET'S TWO FIXED SENTENCES (PR #46, TASK 3) — one home each.
+
+   WHAT THE SCORE CHANGES IN FIND, checked clause by clause against the code on 2 Oct 2026:
+   - "Season decides" picks the direction built on a market from its season plus score × confidence
+     (`suggestionOf()` / `suggestionScore()` in App.jsx);
+   - a market's cards move up or down by `signalAdjustment()` inside `rankScore()`, and a CONFLICT market's
+     cards sort last (`compareCandidates()`, signals.js);
+   - price, risk and chance are worked out from the option prices and the season's drift (`seasonalDrift()`),
+     never from this score.
+===================================================================== */
+export const whyFindEffect = () =>
+  `What this changes in Find: with "Season decides" it helps pick the direction built on this market, and it moves ` +
+  `this market's cards up or down the list (a CONFLICT market's cards go last). Price, risk and chance come from the ` +
+  `option prices and the season, not from this score.`;
+export const WEIGHTS_CHOSEN_LINE = "These weights and bands are chosen, not measured on past trades.";

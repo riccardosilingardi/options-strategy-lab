@@ -29,6 +29,7 @@ import { comboBook, limitAgainstBook, closeMarket, closeLimitPrice, closeLimitNo
 import { orderBody, orderLimitWords, orderTotalWords, orderOutcome, orderPreviewLines, reduceRatios,
   alpacaErrorText } from "./order.js";
 import { DEMO, DEMO_TOOLTIP } from "./demo.js";
+import { OCC_RE, heldToLimit, limitToHeld, limitBounds, withinBounds, waitForCanceled } from "./orderRow.js";
 
 /* ONE LEG, READ OFF THE BROKER'S OWN OCC SYMBOL.
    `/v2/positions` gives a symbol and a quantity and nothing else — no strike
@@ -38,7 +39,7 @@ import { DEMO, DEMO_TOOLTIP } from "./demo.js";
    standard and `Number(null)` is 0 and 0 is finite, so a symbol this function
    cannot parse comes back NULL and the caller refuses — never a leg with a
    strike of zero, which would price against a contract nobody holds. */
-export const OCC_RE = /^([A-Z]{1,6})(\d{6})([CP])(\d{8})$/;
+export { OCC_RE };
 export function holdingLeg(item) {
   const m = OCC_RE.exec(String(item?.symbol || ""));
   if (!m) return null;
@@ -123,9 +124,14 @@ const refuse = (refusal) => ({ ok: false, refusal, body: null, limitWords: null,
  * @param fetchChain  (ticker) => chain, read at the moment of the tap
  * @param demo        demo mode refuses (every order path is off in it)
  * @param working     a close for this holding is already working
- * @returns { ok, body, limitWords, total, lines, cancelIds, refusal, proposal, group }
+ * @param choice      optional { limit, qty, tif } from the confirm's price field (PR #46). `limit` is in the
+ *                    ORDER'S price space (what `limit_price` will carry), and must sit between the side that
+ *                    fills and the mid; `qty` is combinations, 1 to the whole holding. Left out, the body is
+ *                    exactly what it was before PR #46: `closeLimitPrice()`, the whole holding, DAY.
+ * @returns { ok, body, limitWords, total, lines, cancelIds, refusal, proposal, group, bounds, held }
  */
-export async function prepareClose(group, { gate, openOrders = [], fetchChain, demo = DEMO, working = false } = {}) {
+export async function prepareClose(group, { gate, openOrders = [], fetchChain, demo = DEMO, working = false,
+  choice = null } = {}) {
   if (demo) return refuse(DEMO_TOOLTIP);                     // order path 3 of six
   if (working) return refuse(`A close order for this position is already working at the broker. ` +
     `Cancel it there, or wait for it, before sending another.`);
@@ -180,13 +186,40 @@ export async function prepareClose(group, { gate, openOrders = [], fetchChain, d
   if (!market.ok) return refuse(`The close was not sent. ${closeUnreadableNote(market.missing, legs)}`);
   const priced = closeLimitPrice({ netMid: market.netMid, spread: market.spread });
   if (!priced) return refuse(`The close was not sent: ${closeLimitNote(null)}`);
+  /* THE RANGE A PRICE MAY BE CHOSEN FROM (PR #46): per combination, between the
+     side that fills (the bid, to sell) and the mid, in the order's own price
+     space. Computed from the same quotes the default price is. */
+  const held = reduceRatios(legs);
+  const shape = { mleg: legs.length > 1, close: true, sign: legs[0].side };
+  const unitBook = comboBook(legs.map((l, i) => ({ ...l, qty: held.ratios[i] })), quotes);
+  const bounds = limitBounds(shape, unitBook);
+  let sendLegs = legs, sendNet = priced.net, tif = "day";
+  if (choice) {
+    const n = choice.qty == null ? held.factor : Math.round(Number(choice.qty));
+    if (!Number.isFinite(n) || n < 1 || n > held.factor) {
+      return refuse(`The close was not sent: the quantity must be between 1 and ${held.factor} — the combinations you hold.`);
+    }
+    tif = choice.tif == null ? "day" : String(choice.tif).toLowerCase();
+    if (tif !== "day" && tif !== "gtc") return refuse(`The close was not sent: time in force is DAY or GTC, nothing else.`);
+    if (choice.limit != null) {
+      if (!withinBounds(choice.limit, bounds)) {
+        return refuse(`The close was not sent: a price of $${Math.abs(+choice.limit).toFixed(2)} is outside the ` +
+          `range this close may use — between the side that fills and the mid, ${bounds
+            ? `$${Math.abs(bounds.fill).toFixed(2)} to $${Math.abs(bounds.mid).toFixed(2)}` : "which cannot be read now"}.`);
+      }
+      sendNet = limitToHeld(shape, +(+choice.limit).toFixed(2)) * n;
+    } else {
+      sendNet = priced.net / held.factor * n;
+    }
+    sendLegs = legs.map((l, i) => ({ ...l, qty: held.ratios[i] * n }));
+  }
   // `priced.net` is SIGNED and must stay signed: `mlegLimitPrice()` flips it
   // for the close intent, so a debit structure is sold for a credit. The same
   // GCD rule that shaped the opening order shapes the close.
   const body = orderBody({
-    legs: legs.map((l) => ({ side: l.side, qty: l.qty })),
+    legs: sendLegs.map((l) => ({ side: l.side, qty: l.qty })),
     occs: items.map((x) => x.symbol),
-    userQty: 1, type: "limit", limit: priced.net, tif: "day", intent: "close",
+    userQty: 1, type: "limit", limit: sendNet, tif, intent: "close",
   });
   const lb = limitAgainstBook({
     limitPrice: body.limit_price ?? null, book: comboBook(legs, quotes),
@@ -201,16 +234,19 @@ export async function prepareClose(group, { gate, openOrders = [], fetchChain, d
      leg with no factor. It now gets the SAME shape and factor `orderBody()`
      divided out, so its lines say 9 and its price is `body.limit_price`; and
      the words come from the body itself (`orderMoney()`, order.js 1c). */
-  const { ratios, factor } = reduceRatios(legs);
+  const { ratios, factor } = reduceRatios(sendLegs);
   const words = orderLimitWords(body) || "a price the app could not read";
   const total = orderTotalWords(body);
-  const lines = orderPreviewLines({ legs, ratios, factor, ticker: group.ticker, expKey: group.expKey, qty: 1,
-    type: "limit", limit: priced.net, tif: "day", intent: "close" });
+  const lines = orderPreviewLines({ legs: sendLegs, ratios, factor, ticker: group.ticker, expKey: group.expKey, qty: 1,
+    type: "limit", limit: sendNet, tif, intent: "close" });
   if (total) lines.push(`In all, ${total} at this limit (${body.qty} × $${Math.abs(+body.limit_price).toFixed(2)} × 100).`);
   if (cancelIds.length) {
     lines.push(`First cancels ${cancelIds.length} working order${cancelIds.length === 1 ? "" : "s"} on the same contracts.`);
   }
-  return { ok: true, refusal: null, body, limitWords: words, total, lines, cancelIds, proposal, group, sent: false };
+  return { ok: true, refusal: null, body, limitWords: words, total, lines, cancelIds, proposal, group, sent: false,
+    bounds, heldQty: held.factor, defaultLimit: choice ? null : Number(body.limit_price),
+    book: unitBook.ok ? { bid: heldToLimit(shape, unitBook.bid), mid: heldToLimit(shape, unitBook.mid),
+      ask: heldToLimit(shape, unitBook.ask) } : null, choice, chainUsed: chain };
 }
 
 /**
@@ -221,7 +257,7 @@ export async function prepareClose(group, { gate, openOrders = [], fetchChain, d
  * @param gate      the risk gate, re-run at the send
  * @returns { ok, refusal, order, headline, limitWords, total, qty }
  */
-export async function sendClose(prepared, { request, gate, demo = DEMO, working = false } = {}) {
+export async function sendClose(prepared, { request, gate, demo = DEMO, working = false, waitOpts = null } = {}) {
   if (demo) return { ok: false, refusal: DEMO_TOOLTIP };
   if (!prepared || !prepared.ok || !prepared.body) {
     return { ok: false, refusal: prepared?.refusal || "The close was not sent: there is no prepared order to send." };
@@ -234,9 +270,15 @@ export async function sendClose(prepared, { request, gate, demo = DEMO, working 
   if (!g.pass) return { ok: false, refusal: `Risk gate: the close was not sent. ${g.violations.map((v) => v.message).join(" ")}` };
   if (typeof request !== "function") return { ok: false, refusal: "The close was not sent: no broker connection." };
   prepared.sent = true;
-  // THE WASH-TRADE CHECK: working orders on the same contracts go first.
+  // THE WASH-TRADE CHECK: working orders on the same contracts go first —
+  // and the close waits until Alpaca reports each one ended (PR #46): a cancel
+  // still pending plus this close would be two working orders on one holding.
   for (const id of prepared.cancelIds || []) {
-    try { await request(`/v2/orders/${id}`, "DELETE"); } catch { /* already gone */ }
+    try { await request(`/v2/orders/${id}`, "DELETE"); } catch { /* already gone: the read below says so */ }
+  }
+  for (const id of prepared.cancelIds || []) {
+    const w = await waitForCanceled(id, request, waitOpts || undefined);
+    if (!w.ok) { prepared.sent = false; return { ok: false, refusal: `The close was not sent. ${w.sentence}` }; }
   }
   try {
     const order = await request("/v2/orders", "POST", prepared.body);

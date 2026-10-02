@@ -447,7 +447,15 @@ test("NEVER AGAIN — no mleg limit may be wrapped in Math.abs()", () => {
      sign is not recorded. */
   assert.equal(/limitKind\(\s*p\.alpacaLimit/.test(app), false,
     "App.jsx must read a stored limit through storedLimitOf(), which knows whether the sign was kept");
-  assert.ok(/storedLimitOf\(/.test(app), "App.jsx names the direction of every stored limit it prints");
+  // PR #46: the working-orders panel that printed STORED limits is gone; the one orders list prints Alpaca's own
+  // limit through `orderLimitWords()` (orders.jsx / orderRow.js). A stored limit, if App.jsx prints one again,
+  // goes through storedLimitOf().
+  const printsStored = app.replace(/\/\*[\s\S]*?\*\//g, " ").split("\n")
+    .filter((l) => !/fillVsLimit\(/.test(l))                // that one carries `limitSigned` with it
+    .some((l) => /\.alpacaLimit\b(?!Signed)/.test(l));
+  assert.ok(!printsStored || /storedLimitOf\(/.test(app), "App.jsx names the direction of every stored limit it prints");
+  assert.ok(/orderLimitWords\(/.test(readFileSync(new URL("./orderRow.js", import.meta.url), "utf8")),
+    "the orders list reads the broker's limit in words");
   assert.equal(/p\.alpacaLimit\s*\)\s*\*\s*100/.test(app), false,
     "a stored limit is scaled through storedLimitOf().magnitude, not read raw");
 });
@@ -612,7 +620,10 @@ test("CANCEL — any other refusal is a failure, in Alpaca's own words", () => {
 test("CANCEL — ONE HOME: both call sites read cancelOutcome(), and neither prints its own sentence", () => {
   const app = readFileSync(new URL("./App.jsx", import.meta.url), "utf8");
   const pro = readFileSync(new URL("./pro.jsx", import.meta.url), "utf8");
-  for (const [name, src] of [["App.jsx", app], ["pro.jsx", pro]]) {
+  // PR #46: the desk's cancel moved into the one orders list (orders.jsx); pro.jsx no longer cancels.
+  const orders = readFileSync(new URL("./orders.jsx", import.meta.url), "utf8");
+  assert.ok(!/"DELETE"/.test(pro), "pro.jsx sends no cancel of its own any more");
+  for (const [name, src] of [["App.jsx", app], ["orders.jsx", orders]]) {
     assert.ok(/cancelOutcome\(/.test(src), `${name} reads cancelOutcome()`);
     assert.ok(!/"Order cancelled\."/.test(src), `${name} no longer says "Order cancelled."`);
     assert.ok(!/The cancellation did not go through/.test(src), `${name} has no copy of the failure sentence`);
