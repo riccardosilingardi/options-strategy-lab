@@ -55,7 +55,10 @@ by writing down what you could not verify (PRD §4, at most ten items).
   chance, limit pricing, and every generated rule sentence.
 - `src/riskGate.js` — `evaluateTrade()`, the gate every order path calls.
 - `src/order.js` — `orderBody()` (the one Alpaca body builder), signs, order outcomes.
-- `src/closeOrder.js` — order path 3: close a whole holding at a limit, in two taps.
+- `src/closeOrder.js` — order path 3: close a holding at a limit, in two taps (a chosen price,
+  quantity and TIF since PR #46; without one, the body is byte-identical to before).
+- `src/orderRow.js` — what one order row says: book, Alpaca's mark, the price range, status history,
+  `waitForCanceled()`. `src/modifyOrder.js` — Modify (path 7) and Cancel all.
 - `src/alpacaContract.js` — Alpaca's order contract mirrored from alpaca-py.
 - `src/journal.js` — the position record: refs, timelines, size, stage, book, fills.
 - `src/positionView.js`, `src/positionCard.jsx` — what a Positions card and its Details sheet say
@@ -93,12 +96,21 @@ by writing down what you could not verify (PRD §4, at most ten items).
 - `netlify/edge-functions/gate.js`, `ai.js` — password gate, then the streaming Anthropic proxy.
 - `public/sw.js` — service worker; caches the app shell only, never a price.
 
-## Order paths — six, all through the gate
+## Order paths — seven, all through the gate
 
 1. `App.jsx` `sendToAlpaca()` 2. `pro.jsx` `OrderTicket` send 3. `src/closeOrder.js`
-`prepareClose()` then `sendClose()` — called by the desk's `closeGroup()` and by the Positions
-card's close-at-limit 4. `pro.jsx` `placeExit()` 5. `autopilot.mjs` 6. `approve.mjs`.
-Adding a seventh means adding a gate call.
+`prepareClose()` then `sendClose()` — called by the desk's `closeGroup()`, by the Positions
+card's close-at-limit and by Modify of a multi-leg close 4. `pro.jsx` `placeExit()`
+5. `autopilot.mjs` 6. `approve.mjs` 7. `src/modifyOrder.js` `sendModify()` — Modify of a
+single-leg order: the gate, then `PATCH /v2/orders/{id}` (PR #46). Alpaca refuses a replace on
+a multi-leg order, so Modify of one is cancel → wait for "canceled" (`waitForCanceled()`) → a
+new order through path 3 (close) or path 2 (open, on Build's ticket). Never two working orders
+for one holding. Adding an eighth means adding a gate call.
+
+The proxy `netlify/functions/alpaca.mjs` passes only an allowlist (`routeAllowed()`): GET on the
+read paths the app uses, POST `/v2/orders`, PATCH `/v2/orders/{id}`, DELETE `/v2/orders/{id}` and
+`/v2/orders`. Everything else, `DELETE /v2/positions` included, is 405 with a sentence. A new
+call to Alpaca from the client needs its route added there and in `orders.test.js`.
 
 ## Where each constant lives
 
