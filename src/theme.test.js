@@ -29,12 +29,28 @@ ok("panels are pure white", L.panel === "#ffffff", L.panel);
 ok("the page sits on a very light neutral, distinct from the panels",
   L.bg !== L.panel && luminance(L.bg) > 0.85, `${L.bg} luminance ${luminance(L.bg).toFixed(3)}`);
 
-// Every colour that ever carries text, on both surfaces it is drawn on.
-for (const key of ["mut", "dim", "ink", "body", "amber", "green", "red", "blue", "violet", "greenDeep", "redDeep"]) {
-  for (const [surface, bg] of [["white panels", L.panel], ["the page", L.bg]]) {
-    const r = contrast(L[key], bg);
-    ok(`${key} on ${surface} clears 4.5:1`, r >= 4.5, `${L[key]} → ${r.toFixed(2)}:1`);
+// Every colour that ever carries text, on both surfaces it is drawn on, in BOTH palettes (WCAG 1.4.3).
+// The build fails when one drops. `greenDeep` / `redDeep` are fills (sentiment chips), not text tokens.
+const TEXT_TOKENS = ["ink", "body", "mut", "dim", "amber", "green", "red", "blue", "violet"];
+const FIELD_MIN = 3;   // WCAG 1.4.11: a field's border against what it sits on
+const table = [];
+for (const [name, P] of [["light", PALETTES.light], ["dark", PALETTES.dark]]) {
+  for (const key of TEXT_TOKENS) {
+    for (const [surface, bg] of [["panel", P.panel], ["bg", P.bg]]) {
+      const r = contrast(P[key], bg);
+      table.push([name, key, P[key], surface, r]);
+      ok(`${name} ${key} on ${surface} clears 4.5:1`, r >= 4.5, `${P[key]} → ${r.toFixed(2)}:1`);
+    }
   }
+  for (const [surface, bg] of [["panel", P.panel], ["bg", P.bg]]) {
+    const r = contrast(P.field, bg);
+    table.push([name, "field (border)", P.field, surface, r]);
+    ok(`${name} field border on ${surface} clears ${FIELD_MIN}:1`, r >= FIELD_MIN, `${P.field} → ${r.toFixed(2)}:1`);
+  }
+}
+if (process.env.THEME_TABLE) {
+  console.log("\npalette | token | colour | on | contrast");
+  for (const [n, k, c, sfc, r] of table) console.log(`${n} | ${k} | ${c} | ${sfc} | ${r.toFixed(2)}`);
 }
 
 // Accents double as button backgrounds. Contrast is symmetric, so a colour that
@@ -48,10 +64,6 @@ for (const key of ["amber", "green", "red", "blue", "violet"]) {
 
 const D = PALETTES.dark;
 ok("dark stays reachable and keeps its own dark text-on-accent", D.onAccent === "#14181d", D.onAccent);
-for (const key of ["mut", "ink", "body", "amber", "green", "red", "blue", "violet"]) {
-  const r = contrast(D[key], D.panel);
-  ok(`dark ${key} on its panel clears 4.5:1`, r >= 4.5, `${D[key]} → ${r.toFixed(2)}:1`);
-}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

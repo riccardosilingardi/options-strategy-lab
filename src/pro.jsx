@@ -42,9 +42,11 @@ const fmt$ = (x) => {
 };
 /** A dollar figure for a model or a document, or null when there is not one. */
 const dollarsOrNull = (x) => (Number.isFinite(x) ? +Number(x).toFixed(0) : null);
-const Btn = ({ children, onClick, color = T.amber, ghost, disabled, small, title }) => (
-  <button onClick={onClick} disabled={disabled} title={title}
-    style={{ ...mono, fontSize: small ? 11 : 12, padding: small ? "4px 8px" : "8px 12px", borderRadius: 6, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.5 : 1, background: ghost ? "transparent" : color, color: ghost ? color : T.onAccent, border: ghost ? `1px solid ${color}66` : "none", display: "inline-flex", alignItems: "center", gap: 6 }}>{children}</button>
+// Same contract as the Btn in App.jsx (the two copies are the design-system sweep's first job, ROADMAP):
+// 44px tall whatever the size, `small` only narrows padding and font, ghost border at full colour.
+const Btn = ({ children, onClick, color = T.amber, ghost, disabled, small, title, ...rest }) => (
+  <button onClick={onClick} disabled={disabled} title={title} {...rest}
+    style={{ ...mono, fontSize: small ? 12 : 13, padding: small ? "6px 12px" : "8px 14px", minHeight: 44, borderRadius: 6, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.5 : 1, background: ghost ? "transparent" : color, color: ghost ? color : T.onAccent, border: ghost ? `1px solid ${color}` : "none", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6 }}>{children}</button>
 );
 const Panel = ({ children, style }) => <div style={{ background: T.panel, border: `1px solid ${T.line}`, borderRadius: 8, padding: 14, ...style }}>{children}</div>;
 const Lbl = ({ children }) => <div style={{ ...mono, fontSize: 10, letterSpacing: "0.15em", color: T.amber }}>{children}</div>;
@@ -54,8 +56,8 @@ const Stat = ({ k, v, c, tip }) => (
     <div style={{ ...mono, fontSize: 14, fontWeight: 700, color: c || T.ink }}>{v}</div>
   </div>
 );
-const Inp = (props) => <input {...props} style={{ ...mono, background: T.bg, color: T.ink, border: `1px solid ${T.line}`, borderRadius: 5, padding: "6px 8px", fontSize: 12, ...(props.style || {}) }} />;
-const Sel = (props) => <select {...props} style={{ ...mono, background: T.bg, color: T.ink, border: `1px solid ${T.line}`, borderRadius: 5, padding: "6px 8px", fontSize: 12, ...(props.style || {}) }} />;
+const Inp = (props) => <input {...props} style={{ ...mono, background: T.bg, color: T.ink, border: `1px solid ${T.field}`, borderRadius: 5, padding: "6px 8px", fontSize: 12, ...(props.style || {}) }} />;
+const Sel = (props) => <select {...props} style={{ ...mono, background: T.bg, color: T.ink, border: `1px solid ${T.field}`, borderRadius: 5, padding: "6px 8px", fontSize: 12, ...(props.style || {}) }} />;
 
 async function proxied(url) {
   const r = await fetch(`/api/proxy?url=${encodeURIComponent(url)}`);
@@ -1593,7 +1595,7 @@ export function TaCopilot({ ticker, bars, structure, convo, setConvo, onAnalysis
               onKeyDown={(e) => { if (e.key === "Enter") send(input); }}
               placeholder="Ask about the chart…"
               style={{ flex: 1, minWidth: 0, ...mono, fontSize: 12, padding: "8px 10px", borderRadius: 6,
-                background: T.bg, border: `1px solid ${T.line}`, color: T.ink }} />
+                background: T.bg, border: `1px solid ${T.field}`, color: T.ink }} />
             <Btn small color={T.blue} onClick={() => send(input)} disabled={busy || !input.trim()}>Ask</Btn>
           </div>
           <div style={{ ...mono, fontSize: 9.5, color: T.dim, marginTop: 8, lineHeight: 1.6 }}>

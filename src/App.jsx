@@ -370,7 +370,7 @@ export function StrikeSelect({ strikes, value, step, onChange }) {
   return (
     <select value={value} onChange={(e) => onChange(+e.target.value)}
       title={off ? offBoardStrikeLabel(off.k) : undefined}
-      style={{ ...mono, background: T.panel, color: off ? T.red : T.ink, border: `1px solid ${off ? T.red : T.line}`, borderRadius: 5, padding: "5px 6px", fontSize: 12, width: off ? 150 : 90 }}>
+      style={{ ...mono, background: T.panel, color: off ? T.red : T.ink, border: `1px solid ${off ? T.red : T.field}`, borderRadius: 5, padding: "5px 6px", fontSize: 12, width: off ? 150 : 90 }}>
       {opts.map((o) => (
         <option key={o.k} value={o.k} disabled={!o.listed}>
           {o.listed ? o.k : offBoardStrikeLabel(o.k)}
@@ -927,13 +927,17 @@ async function saveState(st) {
 }
 
 /* ============================== UI ATOMS ============================== */
-const Btn = ({ children, onClick, color = T.amber, ghost, disabled, small }) => (
-  <button onClick={onClick} disabled={disabled}
+/* EVERY BUTTON IS AT LEAST 44px TALL (WCAG 2.5.5; 2.2's own floor is 24). `small` narrows the padding
+   and the font and never the height: a 22px "Close at limit" was the control the owner needed most.
+   The ghost border is the full colour (1.4.11: a 40% border on white is not a visible edge). Any other
+   prop (aria-label, aria-expanded, title) reaches the button. */
+const Btn = ({ children, onClick, color = T.amber, ghost, disabled, small, ...rest }) => (
+  <button onClick={onClick} disabled={disabled} {...rest}
     style={{
-      ...mono, fontSize: small ? 11 : 12, padding: small ? "4px 8px" : "8px 12px", borderRadius: 6,
+      ...mono, fontSize: small ? 12 : 13, padding: small ? "6px 12px" : "8px 14px", minHeight: 44, borderRadius: 6,
       cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.5 : 1,
       background: ghost ? "transparent" : color, color: ghost ? color : T.onAccent,
-      border: ghost ? `1px solid ${color}66` : "none", display: "inline-flex", alignItems: "center", gap: 6,
+      border: ghost ? `1px solid ${color}` : "none", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6,
     }}>{children}</button>
 );
 const Panel = ({ children, style }) => (
@@ -1238,7 +1242,7 @@ const Stat = ({ k, v, c, tip }) => (
   </div>
 );
 const Inp = (props) => (
-  <input {...props} style={{ ...mono, background: T.bg, color: T.ink, border: `1px solid ${T.line}`, borderRadius: 5, padding: "6px 8px", fontSize: 12, ...(props.style || {}) }} />
+  <input {...props} style={{ ...mono, background: T.bg, color: T.ink, border: `1px solid ${T.field}`, borderRadius: 5, padding: "6px 8px", fontSize: 12, ...(props.style || {}) }} />
 );
 // "-$0" is not a smaller number than "$0": it is a figure the app could not
 // read, wearing a minus sign. Round first, then decide the sign — same rule as
@@ -3748,7 +3752,7 @@ export default function OptionsStrategyLab() {
           </div>
           <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
             <select value={ticker} onChange={(e) => switchTicker(e.target.value)}
-              style={{ ...mono, background: T.panel, color: T.ink, border: `1px solid ${T.line}`, borderRadius: 6, padding: "8px 10px", fontSize: 13 }}>
+              style={{ ...mono, background: T.panel, color: T.ink, border: `1px solid ${T.field}`, borderRadius: 6, padding: "8px 10px", fontSize: 13 }}>
               {Object.keys(UNDERLYINGS).map((k) => <option key={k} value={k}>{k}</option>)}
             </select>
             {/* On Find, Refresh also retries every market whose prices FAILED —
@@ -4367,7 +4371,7 @@ export default function OptionsStrategyLab() {
             <Panel>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
                 <input value={stratName} onChange={(e) => setStratName(e.target.value)}
-                  style={{ ...mono, background: "transparent", border: "none", borderBottom: `1px dashed ${T.line}`, color: T.ink, fontSize: 15, fontWeight: 700, outline: "none", minWidth: 200 }} />
+                  style={{ ...mono, background: "transparent", border: "none", borderBottom: `1px dashed ${T.field}`, color: T.ink, fontSize: 15, fontWeight: 700, outline: "none", minWidth: 200 }} />
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                   <Btn small ghost color={T.blue} onClick={saveStrategy}><Save size={12} /> Save</Btn>
                   {/* One route to an order from this screen: the confirm step at
@@ -4390,7 +4394,7 @@ export default function OptionsStrategyLab() {
                       this for a preset; a hand-off and this dropdown skipped
                       it. What moved is said out loud (`strikeSnapNote`). */}
                   <select value={expKey || ""} onChange={(e) => { setExpKey(e.target.value); setBt(null); resnapTo(e.target.value); }}
-                    style={{ ...mono, background: T.bg, color: T.ink, border: `1px solid ${T.line}`, borderRadius: 5, padding: "5px 8px", fontSize: 12 }}>
+                    style={{ ...mono, background: T.bg, color: T.ink, border: `1px solid ${T.field}`, borderRadius: 5, padding: "5px 8px", fontSize: 12 }}>
                     {chain.expirations.map((e) => (
                       <option key={e} value={e}>{e} · {chain.byExp[e].dte} DTE</option>
                     ))}
@@ -5209,7 +5213,7 @@ export default function OptionsStrategyLab() {
                               onChange={(e) => setClosing((c) => ({ ...c, written: e.target.value, err: null }))}
                               placeholder={d.ruleExit ? "Anything you want on the record (optional)" : `Why are you closing this? At least ${CLOSE_REASON_MIN} characters.`}
                               style={{ width: "100%", marginTop: 8, padding: "7px 9px", background: T.panel, color: T.ink,
-                                border: `1px solid ${T.line}`, borderRadius: 6, ...mono, fontSize: 11.5, boxSizing: "border-box", resize: "vertical" }} />
+                                border: `1px solid ${T.field}`, borderRadius: 6, ...mono, fontSize: 11.5, boxSizing: "border-box", resize: "vertical" }} />
                             {!d.ruleExit && !d.reason.ok && (
                               <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 4 }}>{d.reason.message}</div>
                             )}
@@ -5705,7 +5709,7 @@ export default function OptionsStrategyLab() {
                   <input value={jq} onChange={(e) => setJq(e.target.value)}
                     placeholder="find by ref — J-0003, 3, or a ticker"
                     style={{ ...mono, fontSize: 11, padding: "5px 8px", background: T.bg, color: T.ink,
-                      border: `1px solid ${T.line}`, borderRadius: 6, minWidth: 210 }} />
+                      border: `1px solid ${T.field}`, borderRadius: 6, minWidth: 210 }} />
                 )}
               </div>
               {!(store.journal || []).length && (

@@ -162,7 +162,7 @@ export function RequestControls({
               aria-label={requestAmountLabel(request.mode)}
               value={request.amt == null ? "" : request.amt}
               onChange={(e) => onChange({ amt: e.target.value === "" ? null : Math.max(0, +e.target.value) })}
-              style={{ ...mono, width: 96, background: T.bg, color: T.ink, border: `1px solid ${T.line}`,
+              style={{ ...mono, width: 96, background: T.bg, color: T.ink, border: `1px solid ${T.field}`,
                 borderRadius: 6, padding: "9px 10px", fontSize: 14, minHeight: 38 }} />
             {chips.map((c) => (
               <Chip key={c.amt} on={request.amt === c.amt} onClick={() => onChange({ amt: c.amt })}>{c.label}</Chip>
@@ -241,7 +241,7 @@ export function PerTradeLimit({ limits, onLimit }) {
         <div style={{ display: "grid", gap: 4 }}>
           <input type="number" min={1} step={25} aria-label="per-trade limit" value={edit.v}
             onChange={(e) => setEdit({ ...edit, v: e.target.value })}
-            style={{ ...mono, width: 96, background: T.bg, color: T.ink, border: `1px solid ${T.line}`, borderRadius: 6, padding: "8px 9px", fontSize: 13, minHeight: 38 }} />
+            style={{ ...mono, width: 96, background: T.bg, color: T.ink, border: `1px solid ${T.field}`, borderRadius: 6, padding: "8px 9px", fontSize: 13, minHeight: 38 }} />
           {needsReason && (
             <textarea rows={2} aria-label="reason for raising the per-trade limit" value={edit.reason}
               placeholder={`Above ${money(cap)}: why? (${RULES.minOverrideReasonChars}+ characters, stored)`}

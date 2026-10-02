@@ -69,7 +69,7 @@ const Chip = ({ children, on, onClick, color = T.amber }) => (
 );
 
 const NumberField = ({ value, onChange, prefix, min = 0, step = 1, width = 150, placeholder }) => (
-  <label style={{ display: "inline-flex", alignItems: "center", gap: 6, background: T.bg, border: `1px solid ${T.line}`, borderRadius: 10, padding: "0 12px", minHeight: TAP, width }}>
+  <label style={{ display: "inline-flex", alignItems: "center", gap: 6, background: T.bg, border: `1px solid ${T.field}`, borderRadius: 10, padding: "0 12px", minHeight: TAP, width }}>
     {prefix && <span style={{ ...mono, fontSize: 15, color: T.mut }}>{prefix}</span>}
     <input type="number" inputMode="numeric" min={min} step={step} value={value} placeholder={placeholder}
       onChange={(e) => onChange(e.target.value)}
@@ -220,7 +220,7 @@ export function CapitalOnboarding({ initial = {}, onDone }) {
             <textarea value={ovReason} onChange={(e) => setOvReason(e.target.value)} rows={3}
               placeholder="Why this limit and not the suggested one?"
               style={{ ...sans, width: "100%", boxSizing: "border-box", marginTop: 10, fontSize: 16, lineHeight: 1.45,
-                background: T.bg, color: T.ink, border: `1px solid ${reasonShort ? T.amber : T.line}`, borderRadius: 10, padding: "12px 13px", resize: "vertical" }} />
+                background: T.bg, color: T.ink, border: `1px solid ${reasonShort ? T.amber : T.field}`, borderRadius: 10, padding: "12px 13px", resize: "vertical" }} />
             <div style={{ ...sans, fontSize: 12.5, color: reasonShort ? T.amber : T.mut, marginTop: 6 }}>
               {reasonShort
                 ? `${RULES.minOverrideReasonChars - ovReason.trim().length} more characters and the override is accepted.`
