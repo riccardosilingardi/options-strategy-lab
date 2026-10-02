@@ -179,7 +179,10 @@ export function entryVsNow({ p, n = 1, pnl = null, popNow = null, nowSignals = n
     const nowF = nowSignals && nowSignals.ready && nowSignals.factors ? nowSignals.factors[k] : null;
     const thenF = hasEntrySignals ? then.factors[k] : null;
     const na = (nowSignals && nowSignals.ready && !nowF) && (!hasEntrySignals || !thenF);
-    return { k, label: FACTOR_LABELS[k], entry: na ? "n/a" : factorText(thenF), now: na ? "n/a" : factorText(nowF) };
+    // AN INPUT THAT FAILED TO LOAD IS "NOT READ", NOT A NEUTRAL ZERO: its factor is scored as neutral so the other
+    // three still count, but a card must not print that neutral as something the market said.
+    const cell = (f, snap) => (snap && Array.isArray(snap.failed) && snap.failed.includes(k) ? "not read" : factorText(f));
+    return { k, label: FACTOR_LABELS[k], entry: na ? "n/a" : cell(thenF, hasEntrySignals ? then : null), now: na ? "n/a" : cell(nowF, nowSignals) };
   });
   return { figures, factors, hasEntrySignals, unbounded };
 }

@@ -28,6 +28,10 @@ non-expert trader who wants to learn discipline rather than be sold trades.
      confirm step with the risk gate's checks in plain English.
 - **Two other places.** Positions (what you own, orders still working, and trades you are
   watching) and the Journal (what happened, with a timeline per position and a weekly report).
+  A Positions card says its action first, then the profit (dollars and share of the risk), how
+  far each of the three exits is, and the entry beside now; "Close at limit" is always on it and
+  "Details" opens the position read-only (PR #44). The browser's Back button steps back through
+  Home, Find, Build, the places and the open sheets; Back on Home leaves the app, as before.
 - **The guided door is removed** at the owner's request, 23 Sep 2026 (PR #40): "Find
   opportunities" answered "Nothing today" while Radar listed seven structures on the same
   data. Home's second door goes straight to Find.
@@ -92,9 +96,17 @@ Every rule below is code, not a prompt. The numbers live in `src/rules.js` (`RUL
 
 | Rule | Value | Status |
 |---|---|---|
-| Take profit | 50% of max profit | Closes the trade |
+| Take profit | 50% of max profit; **a single long option: 50% of the premium paid** | Closes the trade |
 | Time exit | 21 days to expiry | Closes the trade |
 | Stop | 50% of max loss | **Warning only.** Never an automatic close, never an approve link |
+
+**Owner decision, 2 Oct 2026 (amends "frozen at entry" for single options).** A single long option
+has no maximum to be half of: J-0001 (9 × GDX 94P, paid $4,500, now +$2,925 = +65%) needed
++$40,050 under the old rule and could only read HOLD until the time exit. So a single long option
+(one leg, long) takes profit at +50% of the premium paid (`singleTakeProfitPctOfPremium`,
+`takeProfitTarget()` in `rules.js`, the one function every site reads); spreads keep 50% of
+their maximum. It applies to open positions too, J-0001 included: its target is read from the
+premium, not frozen at a figure written at entry. Chosen, not measured (§4).
 
 A close is always a **limit** order priced at the moment of the tap; never a market order.
 An open position is never blocked from closing by the gate.
@@ -119,8 +131,10 @@ changes what the owner reads, not what v1 needs: v1 waits only on the owner's th
   asked for, across 9 combinations". It filled on a recheck (pending_new → filled).
 - **(c) read for HOLD** on J-0001 and readable. CLOSE and WARNING are read at J-0001's close.
 - **(b) is the one reading left:** J-0001 closed with the card's "Close at limit" (order path
-  3) and filled; at the latest its time exit, 9 Oct 2026 (21 DTE). Until then the owner is
-  asked nothing else.
+  3) and filled. Since PR #44 J-0001 reads CLOSE now ("Take profit reached: 50% of the premium
+  paid"); at the latest its time exit, 9 Oct 2026 (21 DTE). It must be closed **and filed from
+  the production address**, because the Journal lives in that browser only. Until then the owner
+  is asked nothing else.
 
 ## 4. NOT VERIFIED
 
@@ -130,30 +144,37 @@ normal use, and is never asked for.
 
 1. **OWNER CHECK — order path 3 has never been sent live** (v1 b): the confirm step's words
    (PR #43: 9 ×, a credit, the total), `groupForRecord()` on the real payload, Alpaca's order,
-   the fill, and "close order working" clearing. Tested on J-0001-shaped payloads only. The
-   reading is J-0001's close, by 9 Oct 2026; CLOSE and WARNING (v1 c) are read with it.
+   the fill, and "close order working" clearing. Tested on J-0001-shaped payloads only. J-0001
+   reads CLOSE since PR #44; close it with "Close at limit", then "File in Journal", from the
+   production address (the Journal is that browser's only).
 2. **Read when it happens — no credit has filled at the corrected limit.** v1 (a) is verified
    on a debit (J-0001); PR #40's cent-a-leg seed change has not been seen on a credit.
 3. **Read when it happens — the indicative combination ask on thin chains.** J-0003 (SOYB
    28/30) never filled at the indicative ask; no order has yet measured the gap.
-4. **Read when it happens — Find on a phone with live chains** (PR #40, #41): the ranked list,
-   live re-filtering, flags, stop signs, the per-card "inverted quotes" and the "looks stale"
-   line. Tested on the UNG fixture and synthetic boards only.
-5. **Find's cost on a phone is not measured.** The list is one memo over every selected market
-   (analyse, floors, an 8,000-run chance per survivor); on a laptop with synthetic chains it
-   settles in a few seconds after the chains land. A slow phone may lag while a slider moves.
+4. **Read when it happens — every screen on a phone with live data:** Find (PR #40, #41) and
+   PR #44's Positions card, Details, Back button, "reading…" badge and Build-from-a-card.
+   Tested on fixtures, and PR #44's screens also in a headless Chromium at 390px with stubbed
+   data. **No screen reader was run:** labels, headings, focus and `aria-expanded` are checked
+   in markup and in the browser's DOM, not by hearing them.
+5. **Find's cost on a phone is not measured.** One memo over every selected market (analyse,
+   floors, an 8,000-run chance per survivor) and, since PR #44, ten news feeds loaded alongside
+   chains and bars. A slow phone may lag, and a feed that never answers keeps a badge on
+   "reading…" until it fails.
 6. **Read when it happens — "Not on Alpaca" and "size N > M on the ask"** have not appeared
    live. (PR #42's three fixes were verified on the phone on 24 Sep 2026 and are closed.)
 7. **Read when it happens — free sizing (PR #41) has not been used live.** Tested with gate
    tests, renders and source sweeps only.
-8. **Chosen, not measured:** `modelDisagreementRatio` 4, `maxComboSpreadShareOfNet` 1.0,
-   `maxCrossingShareOfMaxProfit` 0.5, `openLimitSlippage` and `closeLimitSlippage` 0.25,
-   `watchAttentionShare` 0.35, `autopilotConfidence` 70, `fallbackIV`/`fallbackSigma` 0.25, the
-   four chance-slider constants, `staleBoardShare` 0.15 (PR #41: set between the BOIL 20% and
-   SOYB 7% readings, two boards only), and the liquidity floor (measured on one close, 2026-09-01).
-9. **The exit rules are inherited defaults, not backtested** on these ten markets.
-10. **The AI features were disabled by an Anthropic usage limit until 2026-10-01.** Both
-    copilots, report section 5 and `copilotOverreach()` have not seen a real answer since.
+8. **Chosen, not measured:** `singleTakeProfitPctOfPremium` 0.5 (owner decision, 2 Oct 2026),
+   `modelDisagreementRatio` 4, `maxComboSpreadShareOfNet` 1.0, `maxCrossingShareOfMaxProfit`
+   0.5, `openLimitSlippage` and `closeLimitSlippage` 0.25, `watchAttentionShare` 0.35,
+   `autopilotConfidence` 70, `fallbackIV`/`fallbackSigma` 0.25, the four chance-slider
+   constants, `staleBoardShare` 0.15 (two boards only), and the liquidity floor (one close,
+   2026-09-01).
+9. **The exit rules are inherited defaults, not backtested** on these ten markets; the single
+   option's +50% of the premium is the owner's choice and has no measurement behind it at all.
+10. **Read when it happens — the AI features.** The Anthropic usage limit that disabled both
+    copilots, report section 5 and `copilotOverreach()` ended 2026-10-01; none has seen a real
+    answer since, and none is asked of the owner.
 
 ## 5. After v1
 

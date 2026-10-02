@@ -114,6 +114,14 @@ test("AT ENTRY VS NOW — the four factors, entry beside now, from the snapshot 
   assert.equal(factorText(null), "—");
 });
 
+test("A FACTOR WHOSE INPUT FAILED IS 'not read', never a neutral the market did not say", () => {
+  const now = { ready: true, failed: ["news"], factors: { seasonal: { dir: 1, strength: 50 }, technical: { dir: 0, strength: 0 }, news: { dir: 0, strength: 0 } } };
+  const f = Object.fromEntries(entryVsNow({ p: J1, n: 9, pnl: 0, nowSignals: now }).factors.map((x) => [x.k, x]));
+  assert.equal(f.news.now, "not read");
+  assert.equal(f.seasonal.now, "↑ 50");
+  assert.equal(f.technical.now, "→ 0", "a price trend that really is flat still says so");
+});
+
 test("A STRUCTURE WITH NO CEILING HAS NO MAXIMUM: an imported long call prints the words, not a grid edge", () => {
   const call = { ...J1, legs: [{ side: 1, type: "call", strike: 20, qty: 1 }], maxProfit: 777, maxLoss: -100 };
   const ev = entryVsNow({ p: call, n: 1, pnl: 40, popNow: null });

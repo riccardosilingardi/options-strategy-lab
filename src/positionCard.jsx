@@ -34,11 +34,12 @@ const sans = { fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, sans-ser
 const toneOf = (action) => (action === "CLOSE" ? T.red : action === "WARNING" ? T.amber : action === "HOLD" ? T.green : T.dim);
 
 /** One exit: its words and a bar. The bar is a picture of the words, never the only place a fact is. */
-export function ProgressLine({ line, tone = T.blue }) {
-  const color = line.state === "reached" ? T.red : line.state === "none" || line.state === "unknown" ? T.dim : tone;
+export function ProgressLine({ line, tone = T.blue, reachedTone = T.red }) {
+  // Reaching a take profit is good news and reaching the time exit or the stop is not: the caller names the colour.
+  const color = line.state === "reached" ? reachedTone : line.state === "none" || line.state === "unknown" ? T.dim : tone;
   return (
     <div style={{ marginTop: 8 }}>
-      <div style={{ ...mono, fontSize: 13, color: line.state === "reached" ? T.red : T.ink, lineHeight: 1.4 }}>{line.text}</div>
+      <div style={{ ...mono, fontSize: 13, color: line.state === "reached" ? reachedTone : T.ink, lineHeight: 1.4 }}>{line.text}</div>
       <div aria-hidden="true" style={{ height: 6, background: T.line, borderRadius: 3, marginTop: 4, overflow: "hidden" }}>
         <div style={{ width: `${Math.round((line.frac || 0) * 100)}%`, height: 6, background: color }} />
       </div>
@@ -113,7 +114,7 @@ export function PositionCard({
         <div key={i} style={{ ...sans, fontSize: 12.5, color: T.amber, marginTop: 4, lineHeight: 1.5 }}>⚠ {n}</div>
       ))}
       <ProgressLine line={progress.time} />
-      <ProgressLine line={progress.takeProfit} tone={T.green} />
+      <ProgressLine line={progress.takeProfit} tone={T.green} reachedTone={T.green} />
       <ProgressLine line={progress.stop} tone={T.amber} />
       <EntryVsNow ev={ev} unitNote={unitNote} />
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 12 }}>
