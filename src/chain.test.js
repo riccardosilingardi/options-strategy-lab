@@ -228,7 +228,7 @@ const fakeFetch = (alpaca) => async (url, init) => {
 
 check("when Alpaca throws, the user still gets a chain and it says CBOE", async () => {
   resetChainSource();
-  const c = await fetchChain("UNG", { fetchImpl: fakeFetch(() => { throw new Error("boom"); }) });
+  const c = await fetchChain("UNG", { now: NOW, fetchImpl: fakeFetch(() => { throw new Error("boom"); }) });
   eq(c.source, SOURCE.cboeServer, "source");
   truthy(c.spot > 0 && c.expirations.length === 1, "a usable chain");
   eq(c.byExp["2026-10-16"].calls[13].mid, 0.45, "priced from CBOE");
@@ -236,10 +236,10 @@ check("when Alpaca throws, the user still gets a chain and it says CBOE", async 
 
 check("an Alpaca 502, and an Alpaca 200 with nothing in it, both fall back", async () => {
   resetChainSource();
-  const a = await fetchChain("UNG", { fetchImpl: fakeFetch(() => ({ ok: false, status: 502, json: async () => ({ error: "upstream 403" }) })) });
+  const a = await fetchChain("UNG", { now: NOW, fetchImpl: fakeFetch(() => ({ ok: false, status: 502, json: async () => ({ error: "upstream 403" }) })) });
   eq(a.source, SOURCE.cboeServer, "on a 502");
   resetChainSource();
-  const b = await fetchChain("UNG", { fetchImpl: fakeFetch(() => ({ ok: true, json: async () => ({ spot: null, expirations: [], byExp: {} }) })) });
+  const b = await fetchChain("UNG", { now: NOW, fetchImpl: fakeFetch(() => ({ ok: true, json: async () => ({ spot: null, expirations: [], byExp: {} }) })) });
   eq(b.source, SOURCE.cboeServer, "on an empty 200");
 });
 
@@ -249,7 +249,7 @@ check("a hanging broker costs the timeout, not the screen", async () => {
     init?.signal?.addEventListener("abort", () => reject(new Error("aborted")));
   });
   const t0 = Date.now();
-  const c = await fetchChain("UNG", { fetchImpl: fakeFetch(hang), timeoutMs: 60 });
+  const c = await fetchChain("UNG", { now: NOW, fetchImpl: fakeFetch(hang), timeoutMs: 60 });
   const spent = Date.now() - t0;
   eq(c.source, SOURCE.cboeServer, "source");
   truthy(spent < 2000, `waited ${spent}ms on a hung broker`);
@@ -259,21 +259,21 @@ check("Alpaca wins when it answers, and one bad call does not blacklist it", asy
   resetChainSource();
   const alpacaChain = { spot: 13.24, expirations: ["2026-10-16"], byExp: { "2026-10-16": { dte: 44, calls: {}, puts: {} } }, updated: new Date().toISOString(), source: SOURCE.alpacaIndicative };
   const good = () => ({ ok: true, json: async () => alpacaChain });
-  eq((await fetchChain("UNG", { fetchImpl: fakeFetch(good) })).source, SOURCE.alpacaIndicative, "primary source");
+  eq((await fetchChain("UNG", { now: NOW, fetchImpl: fakeFetch(good) })).source, SOURCE.alpacaIndicative, "primary source");
   // one failure, then a success: the session must not have given up
-  await fetchChain("UNG", { fetchImpl: fakeFetch(() => { throw new Error("blip"); }) });
-  eq((await fetchChain("UNG", { fetchImpl: fakeFetch(good) })).source, SOURCE.alpacaIndicative, "back on Alpaca after one blip");
+  await fetchChain("UNG", { now: NOW, fetchImpl: fakeFetch(() => { throw new Error("blip"); }) });
+  eq((await fetchChain("UNG", { now: NOW, fetchImpl: fakeFetch(good) })).source, SOURCE.alpacaIndicative, "back on Alpaca after one blip");
 });
 
 check("after two failures in a row the session stops paying the timeout", async () => {
   resetChainSource();
   let asked = 0;
   const dead = () => { asked++; throw new Error("down"); };
-  for (let i = 0; i < 4; i++) await fetchChain("UNG", { fetchImpl: fakeFetch(dead) });
+  for (let i = 0; i < 4; i++) await fetchChain("UNG", { now: NOW, fetchImpl: fakeFetch(dead) });
   eq(asked, 2, "attempts made before giving up");
   // and a user-initiated retry lets it back in
   resetChainSource();
-  await fetchChain("UNG", { fetchImpl: fakeFetch(dead) });
+  await fetchChain("UNG", { now: NOW, fetchImpl: fakeFetch(dead) });
   eq(asked, 3, "attempts after the reset");
 });
 

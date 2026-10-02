@@ -1356,7 +1356,7 @@ test("PR #42 — THE IMPORTED TWIN GOES; THE APP'S OWN RECORD STAYS, with its re
 ================================================================ */
 const J1_SENT = { ...GDX_J1, alpacaLimit: 5, alpacaLimitSigned: true, alpacaOrderType: "limit",
   alpacaTif: "day", timeline: [{ t: 1, n: 1, type: "sent", text: "SENT" }, { t: 1, n: 2, type: "open", text: "o" }] };
-// What the Positions card passes to `fillVsLimit()` (App.jsx), in one place.
+// What the Details sheet passes to `fillVsLimit()` (App.jsx), in one place.
 const cardSentence = (p) => fillVsLimit({ limit: p.alpacaLimit, fill: recordFillPrice(p),
   contracts: positionSize(p).contracts, limitSigned: p.alpacaLimitSigned === true }).sentence;
 
@@ -1393,7 +1393,7 @@ test("J-0001 SHAPE — AN ORDER FILLED AT SEND IS COMPARED WITH THE BROKER'S FIL
   // From now on a fill at send is stored with the order (App.jsx commitPosition).
   assert.match(readFileSync("src/App.jsx", "utf8"),
     /alpacaFillPrice: outcome && outcome\.filled \? outcome\.fillPrice \?\? null : null,/);
-  assert.match(readFileSync("src/App.jsx", "utf8"), /fillVsLimit\(\{ limit: p\.alpacaLimit, fill: recordFillPrice\(p\),/);
+  assert.match(readFileSync("src/App.jsx", "utf8"), /fillVsLimit\(\{ limit: dp\.alpacaLimit, fill: recordFillPrice\(dp\),/);
 });
 
 test("J-0001 — AN IMPORTED RECORD STILL READS ITS OWN ENTRY AS THE BROKER'S; an app record never does", () => {
@@ -1458,6 +1458,50 @@ test("PR #42 — THE SYNC MATCHES BY SHAPE AND DROPS THE TWIN (source)", () => {
   assert.match(app, /const sigOf = \(tk, exp, legs\) => holdingShape\(tk, exp, legs\);/);
   assert.equal(/x\$\{l\.qty\}/.test(app), false, "no signature spells a leg's quantity");
   assert.match(app, /const tw = dropImportedTwins\(next\);/);
+});
+
+/* ====================================================================
+   PR #44, TASK 6 — THE JOURNAL STOPS NUDGING
+   "Next: Open 1 more to reach level 3" contradicted "nothing today is a feature".
+==================================================================== */
+import { journeyLevel } from "./journal.js";
+
+test("TASK 6 — the journey never asks the owner to open a trade, at any level", () => {
+  const seen = new Set();
+  for (let opened = 0; opened <= 12; opened++) {
+    for (let closed = 0; closed <= opened; closed++) {
+      for (const ruled of [0, 2, 5, 8, 10]) {
+        for (const disciplina of [null, 0.3, 0.7, 0.9]) {
+          const j = journeyLevel({ opened, closed, ruled: Math.min(ruled, closed), disciplina });
+          seen.add(j.level);
+          assert.doesNotMatch(j.next, /\bopen\b/i, `level ${j.level}: ${j.next}`);
+        }
+      }
+    }
+  }
+  assert.deepEqual([...seen].sort(), [1, 2, 3, 4, 5], "every level is still reachable");
+  // What the owner was told before, and must not be told now.
+  assert.doesNotMatch(journeyLevel({ opened: 1 }).next, /Open \d more to reach level 3/);
+  assert.doesNotMatch(journeyLevel({ opened: 0 }).next, /Open your first paper trade/);
+});
+
+test("TASK 6 — 'next' mentions only closing by the rules and writing reasons", () => {
+  assert.match(journeyLevel({ opened: 0 }).next, /close it by its rule and write why/);
+  assert.match(journeyLevel({ opened: 1 }).next, /by its rule, and write why/);
+  assert.match(journeyLevel({ opened: 3, ruled: 2 }).next, /Close 3 more trades by the rules to reach level 4/);
+  assert.match(journeyLevel({ opened: 3, ruled: 5, disciplina: 0.5 }).next, /Keep closing by the rules/);
+});
+
+test("TASK 6 — the 30-day entry floor log is behind ONE fold with a one-line summary, and 'not offerable' is not red", () => {
+  const app = readFileSync("src/App.jsx", "utf8");
+  const at = app.indexOf("The ${RULES.minEntryDTE}-day entry floor passed over");
+  assert.ok(at > 0, "the one-line summary exists");
+  const block = app.slice(app.lastIndexOf("<Panel", at), app.indexOf("</Panel>", at));
+  assert.match(block, /<Fold label="log"/);
+  assert.equal((block.match(/<Fold\b/g) || []).length, 1, "ONE fold");
+  const notOff = block.slice(block.lastIndexOf("not offerable") - 400, block.lastIndexOf("not offerable"));
+  assert.doesNotMatch(notOff, /T\.red/, "a record, not an error: no red");
+  assert.match(notOff, /color: T\.mut/);
 });
 
 /* ---------------- report ---------------- */

@@ -19,7 +19,7 @@ import { listCardFigures, buildFigures } from "./App.jsx";
 import { CandidateCard } from "./card.jsx";
 import { exitPlanDetail } from "./visuals.jsx";
 import { reconcileFigures, figureSet, tradeCard, money, chanceText, seasonalProvenance,
-  RULES, fillNet, netFromLegs, sizeLine, requestOf } from "./rules.js";
+  RULES, fillNet, netFromLegs, sizeLine, requestOf, takeProfitTarget } from "./rules.js";
 import { shortlistWithFloors } from "./App.jsx";
 import { scaleStrategy } from "./pro.jsx";
 // Repo-relative: JSX tests are bundled to CJS (CLAUDE.md, "How to test").
@@ -84,13 +84,13 @@ check("THE EXIT PLAN: one figure, and it says its unit — per contract, or for 
     breakevens: build.AE.breakevens, contracts: 1, chance: build.chance, dte: DTE });
   const exits1 = card1.lines.find((l) => l.id === "exits").text;
   has(exits1, `${half} of ${money(list.aFill.maxProfit)} per contract`);
-  has(exitPlanDetail(list.aFill.maxProfit, 1), `${half} of profit per contract`);
+  has(exitPlanDetail(takeProfitTarget({ maxProfit: list.aFill.maxProfit }), 1), `${half} of profit per contract`);
   // Fourteen: both say "for 14" and both print the same total.
   const card14 = tradeCard({ ticker: TICKER, maxLoss: build.AE.maxLoss, maxProfit: build.AE.maxProfit,
     breakevens: build.AE.breakevens, contracts: 14, chance: build.chance, dte: DTE });
   const half14 = money(RULES.takeProfitPct * build.AE.maxProfit * 14);
   has(card14.lines.find((l) => l.id === "exits").text, `${half14} of ${money(build.AE.maxProfit * 14)} for 14`);
-  has(exitPlanDetail(build.AE.maxProfit, 14), `${half14} of profit for 14`);
+  has(exitPlanDetail(takeProfitTarget({ maxProfit: build.AE.maxProfit }), 14), `${half14} of profit for 14`);
   has(card14.lines.find((l) => l.id === "risk").text, `${money(Math.abs(build.AE.maxLoss) * 14)} for 14`);
 });
 

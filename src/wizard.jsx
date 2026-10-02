@@ -23,7 +23,8 @@
 import React, { useState } from "react";
 import { Compass, Briefcase, ArrowLeft, SlidersHorizontal, ShieldCheck, ShieldAlert, AlertTriangle } from "lucide-react";
 import { T, BADGE_SAFE, BADGE_BTN_GAP } from "./theme.js";
-import { RULES, sizing, money, pctText, ruleBadge, limitOwner, NO_CEILING } from "./rules.js";
+import { RULES, sizing, money, pctText, ruleBadge, limitOwner, NO_CEILING, takeProfitTarget } from "./rules.js";
+import { displayName } from "./positionView.js";
 import { BandThumbnail, payoffBands, UnifiedFigure, exitPlanSentence, exitPlanDetail, price } from "./visuals.jsx";
 
 const mono = { fontFamily: "ui-monospace, Menlo, monospace" };
@@ -69,7 +70,7 @@ const Chip = ({ children, on, onClick, color = T.amber }) => (
 );
 
 const NumberField = ({ value, onChange, prefix, min = 0, step = 1, width = 150, placeholder }) => (
-  <label style={{ display: "inline-flex", alignItems: "center", gap: 6, background: T.bg, border: `1px solid ${T.line}`, borderRadius: 10, padding: "0 12px", minHeight: TAP, width }}>
+  <label style={{ display: "inline-flex", alignItems: "center", gap: 6, background: T.bg, border: `1px solid ${T.field}`, borderRadius: 10, padding: "0 12px", minHeight: TAP, width }}>
     {prefix && <span style={{ ...mono, fontSize: 15, color: T.mut }}>{prefix}</span>}
     <input type="number" inputMode="numeric" min={min} step={step} value={value} placeholder={placeholder}
       onChange={(e) => onChange(e.target.value)}
@@ -220,7 +221,7 @@ export function CapitalOnboarding({ initial = {}, onDone }) {
             <textarea value={ovReason} onChange={(e) => setOvReason(e.target.value)} rows={3}
               placeholder="Why this limit and not the suggested one?"
               style={{ ...sans, width: "100%", boxSizing: "border-box", marginTop: 10, fontSize: 16, lineHeight: 1.45,
-                background: T.bg, color: T.ink, border: `1px solid ${reasonShort ? T.amber : T.line}`, borderRadius: 10, padding: "12px 13px", resize: "vertical" }} />
+                background: T.bg, color: T.ink, border: `1px solid ${reasonShort ? T.amber : T.field}`, borderRadius: 10, padding: "12px 13px", resize: "vertical" }} />
             <div style={{ ...sans, fontSize: 12.5, color: reasonShort ? T.amber : T.mut, marginTop: 6 }}>
               {reasonShort
                 ? `${RULES.minOverrideReasonChars - ovReason.trim().length} more characters and the override is accepted.`
@@ -295,7 +296,7 @@ export function WizardOpen({ positions = [], posAlerts = [], attention = 0, look
     <div style={{ ...sans, maxWidth: 620, margin: "0 auto", padding: `22px 16px ${BADGE_SAFE}px` }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
         <div>
-          <h1 style={{ ...sans, fontSize: 27, fontWeight: 800, color: T.ink, margin: 0, lineHeight: 1.2 }}>{greeting()}</h1>
+          <h1 data-view-heading tabIndex={-1} style={{ ...sans, fontSize: 27, fontWeight: 800, color: T.ink, margin: 0, lineHeight: 1.2, outline: "none" }}>{greeting()}</h1>
           <p style={{ ...sans, fontSize: 15.5, color: T.mut, lineHeight: 1.5, margin: "8px 0 0" }}>
             {statusLine({ positions, attention, looks, marketReady })}
           </p>
@@ -324,7 +325,7 @@ export function WizardOpen({ positions = [], posAlerts = [], attention = 0, look
                       bars={barsFor ? barsFor(p.ticker) : []} width={80} height={34} />
                   )}
                   <span style={{ flex: 1, minWidth: 0 }}>
-                    <span style={{ display: "block", fontSize: 15, fontWeight: 700, color: T.ink }}>{p.ticker} · {p.name}</span>
+                    <span style={{ display: "block", fontSize: 15, fontWeight: 700, color: T.ink }}>{p.ticker} · {displayName(p)}</span>
                     <span style={{ display: "block", fontSize: 13, color: T.mut, marginTop: 2 }}>{label} · {dteLeft} days left</span>
                   </span>
                   <span style={{ ...mono, fontSize: 15, fontWeight: 700, color: pnl == null ? T.dim : pnl >= 0 ? T.green : T.red, flexShrink: 0 }}>
@@ -571,10 +572,10 @@ export function ConfirmSteps({
       <Card style={{ marginTop: 12 }}>
         <Eyebrow>The exit plan — decided now, not later</Eyebrow>
         <div style={{ ...sans, fontSize: 16, fontWeight: 700, color: T.ink, marginTop: 8, lineHeight: 1.4 }}>
-          {exitPlanSentence()}
+          {exitPlanSentence(takeProfitTarget({ legs: c.legs, maxProfit: c.maxProfit, maxLoss: c.maxLoss, entryNet: c.entryNet }))}
         </div>
         <div style={{ ...sans, fontSize: 13.5, color: T.mut, marginTop: 6, lineHeight: 1.5 }}>
-          {exitPlanDetail(c.maxProfit, contracts)}
+          {exitPlanDetail(takeProfitTarget({ legs: c.legs, maxProfit: c.maxProfit, maxLoss: c.maxLoss, entryNet: c.entryNet }), contracts)}
         </div>
       </Card>
 

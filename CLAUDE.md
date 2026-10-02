@@ -37,6 +37,7 @@ by writing down what you could not verify (PRD §4, at most ten items).
 - A close is always a limit priced at the tap; never a market order.
 - An order that fails must fail where the button is. An order's state lives on its Positions row;
   the desk shows counts only (`DeskCountLine`).
+- A take-profit target is `takeProfitTarget()` in `rules.js`, never `takeProfitPct * maxProfit` at a site.
 - A card and Build read one price: `fillNet()`. `listCardFigures()` and `buildFigures()` are the
   two paths and `figures.test.jsx` holds them equal.
 - No emoji or rare glyphs in UI strings; stay within `↑ ↓ → ✓ ✗ ⚠ ▲ ▼ ●`.
@@ -51,6 +52,11 @@ by writing down what you could not verify (PRD §4, at most ten items).
 - `src/closeOrder.js` — order path 3: close a whole holding at a limit, in two taps.
 - `src/alpacaContract.js` — Alpaca's order contract mirrored from alpaca-py.
 - `src/journal.js` — the position record: refs, timelines, size, stage, book, fills.
+- `src/positionView.js`, `src/positionCard.jsx` — what a Positions card and its Details sheet say
+  (action, profit, three exits, entry against now). They compute nothing new: the profit is
+  `posAlerts`', the target `takeProfitTarget()`, the stop level `stopWarningLevel()`.
+- `src/nav.js` — Back: the screen state as history entries (push on a move, step back when a sheet
+  is closed from its own button, Home is never intercepted).
 - `src/engine.js` — Black-Scholes, payoff, exit simulator, seeded Monte Carlo, seasonal parse.
   Imports nothing; shared by client and Netlify functions.
 - `src/chain.js` — where the option chain comes from, strikes, open interest, feed names.
@@ -88,7 +94,8 @@ Adding a seventh means adding a gate call.
 
 All in `RULES`, `src/rules.js`, unless noted.
 
-- Exits: `takeProfitPct` 0.5, `stopLossPct` 0.5 (warning only), `exitDTE` 21, `scaleOutPct` 0.75.
+- Exits: `takeProfitPct` 0.5, `singleTakeProfitPctOfPremium` 0.5 (a single long option; read only through
+  `takeProfitTarget()`), `stopLossPct` 0.5 (warning only), `exitDTE` 21, `scaleOutPct` 0.75.
 - Entry: `minEntryDTE` 30, `targetEntryDTE` 45, `maxEntryDTE` 90.
 - Sizing: `bestPracticePerTradePct` 0.05, `totalExposurePct` 0.25, `suggestedTradingCapital`.
 - Price exists: `minNetPremium` 0.05 (`MIN_NET_DOLLARS` = $5 a contract).

@@ -26,7 +26,7 @@
 // page that does not scroll looked, on a phone, like a tap that did nothing.
 // A sheet fixed to the viewport cannot land below the fold.
 // ============================================================================
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useId, useState } from "react";
 import { X } from "lucide-react";
 import { T, BADGE_SAFE } from "./theme.js";
 import { STEPS, stepIndex } from "./path.js";
@@ -164,7 +164,7 @@ export function EvidenceOverlay({ title, sub, onClose, children, eyebrow = "EVID
               labelling the order ticket "EVIDENCE" would name the wrong thing
               on the one screen where the word has to be exact. */}
           <div style={{ ...mono, fontSize: 10, letterSpacing: "0.15em", color: T.amber }}>{eyebrow}</div>
-          <div style={{ ...sans, fontSize: 16, fontWeight: 700, color: T.ink, overflow: "hidden", textOverflow: "ellipsis" }}>{title}</div>
+          <h2 data-view-heading tabIndex={-1} style={{ ...sans, fontSize: 16, fontWeight: 700, color: T.ink, overflow: "hidden", textOverflow: "ellipsis", margin: 0, outline: "none" }}>{title}</h2>
           {sub && <div style={{ ...mono, fontSize: 10.5, color: T.dim }}>{sub}</div>}
         </div>
         <button onClick={onClose}
@@ -300,20 +300,26 @@ export function CandidateActions({ ticked, onTick, saved, onSave, onBuild }) {
    EXPLANATION of a rule. The app saying no renders beside the button, under
    the older rule that outranks this one.
 ==================================================================== */
-export function Fold({ summary, label = "why", tone = T.mut, children, style }) {
+export function Fold({ summary, label = "why", tone = T.mut, children, style, keepMounted = false }) {
   const [open, setOpen] = useState(false);
+  // aria-expanded says whether it is open, aria-controls says what it opens (WCAG 4.1.2), and the
+  // button is 44px tall (2.5.5). The region exists only while open, which aria-expanded="false" allows.
+  const regionId = useId();
   if (!summary) return null;
   return (
     <div style={{ ...style }}>
-      <button onClick={() => setOpen((o) => !o)}
-        style={{ display: "flex", gap: 8, alignItems: "baseline", width: "100%", textAlign: "left",
-          background: "transparent", border: "none", padding: 0, cursor: "pointer", minHeight: 30 }}>
-        <span style={{ ...mono, fontSize: 10.5, color: tone, lineHeight: 1.6, flex: 1 }}>{summary}</span>
-        <span style={{ ...mono, fontSize: 10.5, color: T.blue, whiteSpace: "nowrap" }}>
+      <button onClick={() => setOpen((o) => !o)} aria-expanded={open} aria-controls={regionId}
+        style={{ display: "flex", gap: 8, alignItems: "center", width: "100%", textAlign: "left",
+          background: "transparent", border: "none", padding: 0, cursor: "pointer", minHeight: 44 }}>
+        <span style={{ ...mono, fontSize: 12, color: tone, lineHeight: 1.6, flex: 1 }}>{summary}</span>
+        <span style={{ ...mono, fontSize: 12, color: T.blue, whiteSpace: "nowrap" }}>
           {open ? "hide ▲" : `${label} ▼`}
         </span>
       </button>
-      {open && <div style={{ marginTop: 4 }}>{children}</div>}
+      {/* `keepMounted` is for a panel whose own effects must run even while it is closed (the Guardian logs a weakened
+          reason on mount): the region stays in the tree and is `hidden`. */}
+      {keepMounted ? <div id={regionId} hidden={!open} style={{ marginTop: 4 }}>{children}</div>
+        : open && <div id={regionId} style={{ marginTop: 4 }}>{children}</div>}
     </div>
   );
 }

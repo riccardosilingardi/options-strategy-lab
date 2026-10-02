@@ -141,7 +141,14 @@ test("MEASURED: the three screens, and the table in the PRD is this number", () 
      The CEILING is the target the owner set, and it fails the build on one
      word more. Raising it is a session saying why, in the PRD. */
   const BEFORE = { radarPlusShortlist: 1697, build: 559 };
-  const CEILING = { find: 450, build: 400 };
+  const CEILING = { find: 450, build: 400, positions: 304 };
+  /* >>> POSITIONS IS A THIRD SCREEN SINCE PR #44 (TASK 1). <<< Measured by this counter on `main` (ae4b1e0), by the
+     worktree procedure above: positions 422 words at rest (99 typed + 323 generated, 14 sites). The Positions card
+     was rebuilt to say its action, its profit and its three exits first; the paragraph the Alpaca panel repeated
+     for every holding is one line for a holding that has a record, and the Details sheet is built outside the block
+     (it is one tap away). Rebuilt: positions 304 words at rest (99 typed + 205 generated, 12 sites). The ceiling is
+     that 304 and the test asserts it is below 422; both fail the build on one word more. */
+  const POSITIONS_BEFORE = 422;
   // …and nothing on either screen is left uncounted: the five generators the
   // counter could not see (legsLine, compareDistNote, setCompareNote,
   // tradeOffSentence, setText) are scored or gone (PR #40, TASK 2).
@@ -150,6 +157,7 @@ test("MEASURED: the three screens, and the table in the PRD is this number", () 
     assert.ok(m[id].total <= CEILING[id], `${id} grew: ${m[id].total} against ${CEILING[id]}`);
   }
   assert.ok(m.find.total < BEFORE.radarPlusShortlist, "Find reads less than Radar and Shortlist did");
+  assert.ok(m.positions.total < POSITIONS_BEFORE, `Positions reads less than it did: ${m.positions.total} against ${POSITIONS_BEFORE}`);
 });
 
 test("…and a screen's reading is the SUM OF ITS PARTS, not the order it was joined in", () => {

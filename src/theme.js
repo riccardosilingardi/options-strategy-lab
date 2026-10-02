@@ -7,16 +7,19 @@
 //
 // Palette chiara: pannelli bianchi puri su una pagina neutra molto chiara.
 // Ogni accento è scelto per stare sopra 4.5:1 sia sul bianco sia sulla pagina.
+// `line` è per i divisori, che sono decorazione. `field` è il bordo di ogni
+// campo (input, select, textarea): WCAG 1.4.11 chiede 3:1 contro lo sfondo e
+// contro il pannello, e `line` ne fa 1.34:1 (chiaro) e 1.23:1 (scuro).
 // Il contrasto è simmetrico, quindi lo stesso colore regge sia come testo sul
 // bianco sia come sfondo di un bottone con testo bianco.
 const DARKT = {
-  bg: "#14181d", panel: "#1a1f26", line: "#2a2f36", ink: "#f5f0e6",
-  mut: "#8b95a1", dim: "#6b7280", amber: "#e8b545", green: "#7fb85c",
+  bg: "#14181d", panel: "#1a1f26", line: "#2a2f36", field: "#6b7685", ink: "#f5f0e6",
+  mut: "#8b95a1", dim: "#7d8794", amber: "#e8b545", green: "#7fb85c",
   red: "#d66a5a", blue: "#5aa7d6", violet: "#a78bda", body: "#c9d1d9",
   greenDeep: "#4a9e3f", redDeep: "#c0392b", onAccent: "#14181d", dark: true,
 };
 const LIGHTT = {
-  bg: "#f5f6f7", panel: "#ffffff", line: "#dcdfe3", ink: "#1c2128",
+  bg: "#f5f6f7", panel: "#ffffff", line: "#dcdfe3", field: "#7a8491", ink: "#1c2128",
   mut: "#5a6472", dim: "#616b78", amber: "#8a6300", green: "#2f6f45",
   red: "#b23a2b", blue: "#1f6391", violet: "#5d47a8", body: "#2a3038",
   greenDeep: "#20603a", redDeep: "#8f2d20", onAccent: "#ffffff", dark: false,

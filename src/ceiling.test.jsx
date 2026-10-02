@@ -35,7 +35,7 @@ import { payoffBands, payingBands, bandsAbove, scratchSplit, unifiedTakeaway, ex
 import { analyze, shortlistWithFloors, buildPresets, StrikeSelect, modelCheckOf, chanceCheckOf, structureIV } from "./App.jsx";
 import { payoff, netBS, SEASONAL, SIGMA, seasonalDrift, exitSim } from "./engine.js";
 import { exitPathSim } from "./pro.jsx";
-import { sigmaProvenance, MEASURED_SIGMA_SOURCE, TABLE_SIGMA_SOURCE, FALLBACK_SIGMA_SOURCE } from "./rules.js";
+import { takeProfitTarget, sigmaProvenance, MEASURED_SIGMA_SOURCE, TABLE_SIGMA_SOURCE, FALLBACK_SIGMA_SOURCE } from "./rules.js";
 import { buildableExpiries, openableBoard, offFloorExpiryLabel, horizonFloorNote,
   entryRoom, expiryChoice, expiryChoiceNote } from "./rules.js";
 import { evaluateTrade } from "./riskGate.js";
@@ -146,10 +146,10 @@ check("the words for having no ceiling are written once and never a dash", () =>
 });
 
 check("half of an unknown maximum is not $0 of profit", () => {
-  has(exitPlanDetail(null), NO_CEILING);
-  hasNot(exitPlanDetail(null), "$0 of profit");
-  has(exitPlanDetail(null), `${RULES.exitDTE}-day`);   // the half of the plan that survives
-  has(exitPlanDetail(400), "$200 of profit");
+  has(exitPlanDetail(takeProfitTarget({})), NO_CEILING);
+  hasNot(exitPlanDetail(takeProfitTarget({})), "$0 of profit");
+  has(exitPlanDetail(takeProfitTarget({})), `${RULES.exitDTE}-day`);   // the half of the plan that survives
+  has(exitPlanDetail(takeProfitTarget({ maxProfit: 400 })), "$200 of profit");
 });
 
 check("a candidate with no ceiling is not ranked as the one that pays least", () => {
@@ -593,7 +593,7 @@ check("P1 DONE WHEN — five screens, one position, ONE number", () => {
     const a = { entry: f.entry, legPx: f.legs.map(() => ({ iv: f.u.iv })) };
     const viaApp = chanceCheckOf(a, {
       ticker: f.tk, legs: f.legs, spot: f.u.spot, dte: FIXDTE, expKey: "2026-11-06",
-      seasonal: seasOf(f.tk),
+      seasonal: seasOf(f.tk), month: MONTH,
     });
     const viaServer = chanceAt(f);
     eq(viaApp.pop, viaServer.pop, `${f.tk} ${f.shape}: pop`);
@@ -611,10 +611,10 @@ check("P1 DONE WHEN — the chance travels with the trade, not with the screen",
   // The seed is the TRADE's, so the number is the same whenever the inputs are.
   const f = fixtures()[0];
   const fromShortlist = chanceCheckOf({ entry: f.entry, legPx: [{ iv: f.u.iv }, { iv: f.u.iv }] },
-    { ticker: f.tk, legs: f.legs, spot: f.u.spot, dte: FIXDTE, expKey: "2026-11-06", seasonal: seasOf(f.tk) });
+    { ticker: f.tk, legs: f.legs, spot: f.u.spot, dte: FIXDTE, expKey: "2026-11-06", seasonal: seasOf(f.tk), month: MONTH });
   const fromGuardian = chanceCheckOf({ entry: f.entry, legPx: [{ iv: f.u.iv }, { iv: f.u.iv }] },
     { ticker: f.tk, legs: [...f.legs], spot: f.u.spot, dte: FIXDTE, expKey: "2026-11-06",
-      seasonal: seasOf(f.tk), thesisIV: 0.9 });
+      seasonal: seasOf(f.tk), thesisIV: 0.9, month: MONTH });
   // `thesisIV` is only reached when the chain gives nothing, so it changes
   // nothing here — which is the property being held.
   eq(fromShortlist.pop, fromGuardian.pop, "a remembered volatility must not override a live one");
@@ -738,7 +738,7 @@ const cornAt = (seasonal) => {
   const f = CORN_SPREAD;
   const entry = netBS(f.legs, f.spot, f.dte, f.iv);
   return chanceCheckOf({ entry, legPx: f.legs.map(() => ({ iv: f.iv })) },
-    { ticker: f.tk, legs: f.legs, spot: f.spot, dte: f.dte, expKey: f.expKey, seasonal });
+    { ticker: f.tk, legs: f.legs, spot: f.spot, dte: f.dte, expKey: f.expKey, seasonal, month: MONTH });
 };
 
 check("SEASONAL PROVENANCE — a measured market and a fallback market say DIFFERENT things", () => {
@@ -904,7 +904,9 @@ const SIMPOS = {
 };
 SIMPOS.maxProfit = (2 - SIMPOS.entryNet) * 100;
 SIMPOS.maxLoss = -SIMPOS.entryNet * 100;
-const SIMPOLICY = { exitDTE: RULES.exitDTE, takeProfitPct: RULES.takeProfitPct, stopLossPct: RULES.stopLossPct };
+const policyOf = (pos) => ({ exitDTE: RULES.exitDTE, stopLossPct: RULES.stopLossPct,
+  takeProfit: takeProfitTarget({ legs: pos.legs, maxProfit: pos.maxProfit, maxLoss: pos.maxLoss, entryNet: pos.entryNet }).perCombo });
+const SIMPOLICY = policyOf(SIMPOS);
 
 check("§4k DONE WHEN — the Guardian and the brief land on the SAME simulator inputs", () => {
   const vol = sigmaProvenance({ sigma: 0.37, years: 11, at: Date.now() }, SIGMA.CORN, "CORN");
@@ -980,11 +982,11 @@ check("§4k — the SENSITIVITY the PRD records is reproducible from this repo",
     const legs = [{ side: 1, type: "call", strike: S, qty: 1 }, { side: -1, type: "call", strike: S * 1.1, qty: 1 }];
     const entryNet = netBS(legs, S, 45, 0.3);
     const pos = { ticker: tk, legs, entryNet, maxProfit: (S * 0.1 - entryNet) * 100, maxLoss: -entryNet * 100 };
-    const base = seeded(SEED, () => exitSim(pos, S, 45, 0.3, sigmaProvenance(null, SIGMA[tk], tk), SIMPOLICY, N));
+    const base = seeded(SEED, () => exitSim(pos, S, 45, 0.3, sigmaProvenance(null, SIGMA[tk], tk), policyOf(pos), N));
     const half = seeded(SEED, () => exitSim(pos, S, 45, 0.3,
-      sigmaProvenance({ sigma: SIGMA[tk] * 0.5, years: 11, at: Date.now() }, SIGMA[tk], tk), SIMPOLICY, N));
+      sigmaProvenance({ sigma: SIGMA[tk] * 0.5, years: 11, at: Date.now() }, SIGMA[tk], tk), policyOf(pos), N));
     const twice = seeded(SEED, () => exitSim(pos, S, 45, 0.3,
-      sigmaProvenance({ sigma: SIGMA[tk] * 2, years: 11, at: Date.now() }, SIGMA[tk], tk), SIMPOLICY, N));
+      sigmaProvenance({ sigma: SIGMA[tk] * 2, years: 11, at: Date.now() }, SIGMA[tk], tk), policyOf(pos), N));
     eq(base.sigma, SIGMA[tk], `${tk}: the table's own row`);
     eq(half.sigma, SIGMA[tk] * 0.5, `${tk}: half of it`);
     eq(twice.sigma, SIGMA[tk] * 2, `${tk}: twice it`);

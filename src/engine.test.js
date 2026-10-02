@@ -24,7 +24,7 @@ import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { exitSim, netBS, SIGMA, terminalMC, seedFrom, rng, seasonalDrift, SEASONAL,
   parseAvJson, statsFromMatrix } from "./engine.js";
-import { RULES, sigmaProvenance, MEASURED_SIGMA_SOURCE, TABLE_SIGMA_SOURCE, FALLBACK_SIGMA_SOURCE } from "./rules.js";
+import { RULES, takeProfitTarget, sigmaProvenance, MEASURED_SIGMA_SOURCE, TABLE_SIGMA_SOURCE, FALLBACK_SIGMA_SOURCE } from "./rules.js";
 import { avMonthlyBody, AV_REFUSALS } from "./avFixture.js";
 
 let passed = 0;
@@ -39,9 +39,12 @@ const codeOf = (name) => readFileSync(new URL(`./${name}`, import.meta.url), "ut
   .replace(/(^|[^:])\/\/[^\n]*/g, "$1");
 
 /** The policy the app actually applies, read from its home. */
-const POLICY = { exitDTE: RULES.exitDTE, takeProfitPct: RULES.takeProfitPct, stopLossPct: RULES.stopLossPct };
+const POLICY = { exitDTE: RULES.exitDTE, stopLossPct: RULES.stopLossPct };
 /** And the one the simulator used to apply by itself. */
-const OLD_POLICY = { exitDTE: 7, takeProfitPct: 0.5, stopLossPct: 0.5 };
+const OLD_POLICY = { exitDTE: 7, stopLossPct: 0.5 };
+/** The take-profit target is the caller's too (rules.js `takeProfitTarget()`), per position. */
+const withTP = (policy, pos) => ("takeProfit" in policy ? policy : { ...policy, takeProfit: takeProfitTarget({ legs: pos.legs,
+  maxProfit: pos.maxProfit, maxLoss: pos.maxLoss, entryNet: pos.entryNet }).perCombo });
 
 /* ---------- the fixtures ----------------------------------------------------
    Three positions, priced from the app's own model so nothing here depends on
@@ -85,7 +88,7 @@ function seeded(seed, fn) {
   try { return fn(); } finally { Math.random = real; }
 }
 const run = (f, policy, seed = 20260919) =>
-  seeded(seed, () => exitSim(f.pos, f.spot, f.dteLeft, f.iv, f.vol, policy, 1500));
+  seeded(seed, () => exitSim(f.pos, f.spot, f.dteLeft, f.iv, f.vol, withTP(policy, f.pos), 1500));
 
 /* ---------- the policy is the caller's, and there is no default ---------- */
 
@@ -95,10 +98,10 @@ test("EXIT POLICY — exitSim REFUSES to run without one, rather than inventing 
   assert.throws(() => exitSim(f.pos, f.spot, f.dteLeft, f.iv, f.vol), /exit policy/i);
   assert.throws(() => exitSim(f.pos, f.spot, f.dteLeft, f.iv, f.vol, {}), /exit policy/i);
   assert.throws(() => exitSim(f.pos, f.spot, f.dteLeft, f.iv, f.vol,
-    { exitDTE: RULES.exitDTE, takeProfitPct: RULES.takeProfitPct }), /exit policy/i);
+    POLICY), /exit policy/i);   // a policy with no take-profit target at all (null is allowed, missing is not)
   // ...and a null exit DTE is not "no exit rule", it is an unreadable one.
   assert.throws(() => exitSim(f.pos, f.spot, f.dteLeft, f.iv, f.vol,
-    { ...POLICY, exitDTE: null }), /exit policy/i);
+    { ...withTP(POLICY, f.pos), exitDTE: null }), /exit policy/i);
 });
 
 test("EXIT POLICY — engine.js holds no exit rule of its own", () => {
@@ -118,14 +121,14 @@ test("HORIZON — at an exit DTE of 21 nothing is evaluated at 7", () => {
   const f = FIXTURES[0];
   const STILL = { sigma: 0, source: TABLE_SIGMA_SOURCE };
   const still = { ...f, vol: STILL };
-  const at21 = exitSim(still.pos, still.spot, still.dteLeft, still.iv, STILL, POLICY, 20);
+  const at21 = exitSim(still.pos, still.spot, still.dteLeft, still.iv, STILL, withTP(POLICY, still.pos), 20);
   const expected21 = (netBS(f.pos.legs, f.spot, RULES.exitDTE, f.iv) - f.pos.entryNet) * 100;
   const expected7 = (netBS(f.pos.legs, f.spot, 7, f.iv) - f.pos.entryNet) * 100;
   assert.ok(Math.abs(at21.ev - expected21) < 1e-9, `marked at ${RULES.exitDTE} DTE, got ${at21.ev}`);
   assert.ok(Math.abs(at21.ev - expected7) > 1, "and NOT at 7 — that is the fault, and the two differ");
   // The same call under the old policy lands on the other number, which is
   // what the autopilot has been reporting for four pull requests.
-  const at7 = exitSim(still.pos, still.spot, still.dteLeft, still.iv, STILL, OLD_POLICY, 20);
+  const at7 = exitSim(still.pos, still.spot, still.dteLeft, still.iv, STILL, withTP(OLD_POLICY, still.pos), 20);
   assert.ok(Math.abs(at7.ev - expected7) < 1e-9, `the old policy marked at 7 DTE, got ${at7.ev}`);
 });
 
@@ -136,15 +139,18 @@ test("HORIZON — the window is what is left BEFORE the rule acts, and it is rep
   assert.equal(s.exitDTE, RULES.exitDTE, "and the result says which day it stopped at");
   // A position already inside the exit window still simulates one day rather
   // than zero — `Math.max(1, ...)` — and says so.
-  const inside = exitSim(f.pos, f.spot, RULES.exitDTE - 5, f.iv, f.vol, POLICY, 50);
+  const inside = exitSim(f.pos, f.spot, RULES.exitDTE - 5, f.iv, f.vol, withTP(POLICY, f.pos), 50);
   assert.equal(inside.horizon, 1);
 });
 
 test("HORIZON — no take-profit branch exists when the profit has no ceiling", () => {
-  // `takeProfitPct * null` is 0, which would count every path that touched
+  // A null target (`takeProfitTarget()` on a long call's payoff) must not count every path that touched
   // break-even as a take-profit exit (PRD §4c).
+  // The fixture is a single long call, which since the owner's decision of 2 Oct 2026 HAS a target
+  // (50% of its premium). A target that does not exist is the explicit null, which is what a
+  // multi-leg structure with no maximum gets from `takeProfitTarget()`.
   const f = FIXTURES[2];
-  const s = run(f, POLICY);
+  const s = run(f, { ...POLICY, takeProfit: null });
   assert.equal(s.pTP, 0, "no path can take profit at a target that does not exist");
   assert.equal(s.medDays, null, "and there is no median number of days to reach it");
   assert.ok(s.pSL + s.pTimePos > 0, "the loss side is untouched: rule 2 still holds");
@@ -172,7 +178,10 @@ const MOVE = [
 test("BEFORE AND AFTER — every simulator output moves, and by how much is written down", () => {
   for (const [name, before, after] of MOVE) {
     const f = FIXTURES.find((x) => x.name === name);
-    const a = run(f, OLD_POLICY), b = run(f, POLICY);
+    // The no-ceiling long call is compared WITHOUT a target on both sides: this table is about the
+    // horizon change, and its take-profit now exists (takeProfit.test.js holds that).
+    const noTarget = f.pos.maxProfit == null ? { takeProfit: null } : {};
+    const a = run(f, { ...OLD_POLICY, ...noTarget }), b = run(f, { ...POLICY, ...noTarget });
     // The counts are n/1500, so the tolerance is a handful of paths: enough to
     // survive a last-bit difference in Math.exp on another machine, far too
     // little to hide a change of policy.
@@ -374,11 +383,11 @@ test("VOLATILITY — exitSim REFUSES a bare sigma, the way it refuses a bare pol
   // A number cannot say where it came from. That is the whole fault.
   for (const bare of [0.22, "0.22", null, undefined, {}, { sigma: 0.22 }, { source: "table" },
     { sigma: "0.22", source: "table" }, { sigma: 0.22, source: "" }, { sigma: NaN, source: "table" }]) {
-    assert.throws(() => exitSim(f.pos, f.spot, f.dteLeft, f.iv, bare, POLICY, 5),
+    assert.throws(() => exitSim(f.pos, f.spot, f.dteLeft, f.iv, bare, withTP(POLICY, f.pos), 5),
       /sigmaProvenance/, `${JSON.stringify(bare)} is not a provenance`);
   }
   // ...and a real one runs.
-  assert.ok(exitSim(f.pos, f.spot, f.dteLeft, f.iv, f.vol, POLICY, 5).ev !== undefined);
+  assert.ok(exitSim(f.pos, f.spot, f.dteLeft, f.iv, f.vol, withTP(POLICY, f.pos), 5).ev !== undefined);
 });
 
 test("VOLATILITY — the simulator REPORTS the volatility it walked on, and its source", () => {

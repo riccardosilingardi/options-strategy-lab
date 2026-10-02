@@ -25,6 +25,7 @@ import React from "react";
 import { T } from "./theme.js";
 import { Fold } from "./steps.jsx";
 import { legsLine } from "./path.js";
+import { readingLine, unreadInputsAria, inputName } from "./signals.js";
 import { BandThumbnail, Gauge, bandTakeaway } from "./visuals.jsx";
 import { RULES, money, chancePct, chanceText, rewardRisk, NO_CEILING,
   requestAmountLabel, requestAmountOwner, chanceAskLabel, controlsFoldNote,
@@ -44,7 +45,7 @@ const sans = { fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, sans-ser
    frame's copy and reported a screen growing by 174 words it does not render. */
 const CardFigure = ({ k, v, c, w = 0 }) => (
   <div style={{ minWidth: w || 62, flex: w ? `0 0 ${w}px` : "1 1 62px" }}>
-    <div style={{ ...mono, fontSize: 9, letterSpacing: "0.08em", color: T.dim }}>{k}</div>
+    <div style={{ ...mono, fontSize: 12, letterSpacing: "0.04em", color: T.dim }}>{k}</div>
     <div style={{ ...mono, fontSize: 15, fontWeight: 800, color: c || T.ink, lineHeight: 1.25 }}>{v}</div>
   </div>
 );
@@ -162,7 +163,7 @@ export function RequestControls({
               aria-label={requestAmountLabel(request.mode)}
               value={request.amt == null ? "" : request.amt}
               onChange={(e) => onChange({ amt: e.target.value === "" ? null : Math.max(0, +e.target.value) })}
-              style={{ ...mono, width: 96, background: T.bg, color: T.ink, border: `1px solid ${T.line}`,
+              style={{ ...mono, width: 96, background: T.bg, color: T.ink, border: `1px solid ${T.field}`,
                 borderRadius: 6, padding: "9px 10px", fontSize: 14, minHeight: 38 }} />
             {chips.map((c) => (
               <Chip key={c.amt} on={request.amt === c.amt} onClick={() => onChange({ amt: c.amt })}>{c.label}</Chip>
@@ -241,7 +242,7 @@ export function PerTradeLimit({ limits, onLimit }) {
         <div style={{ display: "grid", gap: 4 }}>
           <input type="number" min={1} step={25} aria-label="per-trade limit" value={edit.v}
             onChange={(e) => setEdit({ ...edit, v: e.target.value })}
-            style={{ ...mono, width: 96, background: T.bg, color: T.ink, border: `1px solid ${T.line}`, borderRadius: 6, padding: "8px 9px", fontSize: 13, minHeight: 38 }} />
+            style={{ ...mono, width: 96, background: T.bg, color: T.ink, border: `1px solid ${T.field}`, borderRadius: 6, padding: "8px 9px", fontSize: 13, minHeight: 38 }} />
           {needsReason && (
             <textarea rows={2} aria-label="reason for raising the per-trade limit" value={edit.reason}
               placeholder={`Above ${money(cap)}: why? (${RULES.minOverrideReasonChars}+ characters, stored)`}
@@ -304,16 +305,17 @@ export { CardFigure };
 export function CandidateCard({
   name, legs = "", rr = null, pop = null, profit = null, risk = null,
   noCeiling = false, bands = null, bars = [], ticker = null,
-  misses = [], actions = null, badge = null, flags = [], signs = null, size = null, style,
+  misses = [], actions = null, badge = null, flags = [], signs = null, size = null, cardKey = null, style,
 }) {
   return (
-    <div style={{ padding: "10px 12px", background: T.bg, border: `1px solid ${T.line}`,
+    // `data-card-key` is how "Back to the list" finds this card again (PR #44, TASK 3).
+    <div data-card-key={cardKey || undefined} style={{ padding: "10px 12px", background: T.bg, border: `1px solid ${T.line}`,
       borderRadius: 8, ...style }}>
       <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
         <span style={{ ...sans, fontSize: 14, fontWeight: 700, color: T.ink }}>{name}</span>
         {badge}
       </div>
-      <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 3 }}>{legs}</div>
+      <div style={{ ...mono, fontSize: 12, color: T.mut, marginTop: 3 }}>{legs}</div>
       {/* STOP SIGNS, ABOVE THE NUMBERS (PR #40, TASK 2): what the guided door
           used to drop in silence, and the facts that decide, in three labels. */}
       <StopSigns signs={signs || stopSigns({ flags })} />
@@ -327,7 +329,7 @@ export function CandidateCard({
       )}
       {/* FOUR FIGURES, ALWAYS THE SAME FOUR, ALWAYS IN THE SAME PLACES —
           and THEIR UNIT, said once above them (PR #40, TASK 0). */}
-      <div style={{ ...mono, fontSize: 8.5, letterSpacing: "0.08em", color: T.dim, marginTop: 8 }}>PER CONTRACT</div>
+      <div style={{ ...mono, fontSize: 12, letterSpacing: "0.04em", color: T.dim, marginTop: 8 }}>PER CONTRACT</div>
       <div style={{ display: "flex", gap: 10, marginTop: 3, flexWrap: "wrap" }}>
         <CardFigure k="RETURN ON RISK" v={rr == null ? "\u2014" : `${Math.round(rr * 100)}%`} c={T.amber} />
         <CardFigure k="CHANCE" v={chanceText(pop)} c={pop >= 0.5 ? T.green : T.violet} />
@@ -335,7 +337,7 @@ export function CandidateCard({
         <CardFigure k="RISK" v={money(Math.abs(Number(risk)))} c={T.red} />
       </div>
       {/* TARGET MODE VISIBLY CHANGES EVERY CARD (PR #40, TASK 1). */}
-      {size && <div style={{ ...mono, fontSize: 11, fontWeight: 700, color: T.blue, marginTop: 6 }}>{size}</div>}
+      {size && <div style={{ ...mono, fontSize: 12, fontWeight: 700, color: T.blue, marginTop: 6 }}>{size}</div>}
       {actions && <div style={{ marginTop: 8 }}>{actions}</div>}
     </div>
   );
@@ -345,14 +347,26 @@ export function CandidateCard({
    four readings behind it (seasonality, trend, weather, news) open in "Why
    this market" for that market. It replaces the separate four-factor list,
    which read as a second verdict beside the structures (PR #40, TASK 1). */
-export function SignalBadge({ fused, onClick }) {
+export function SignalBadge({ fused, state = null, onClick }) {
+  /* READING. A market whose news, bars or seasonal series are still on the way shows no score at all (PR #44,
+     TASK 4): a number printed before its inputs landed is the number that moves when the card is opened. */
+  if (state && state.reading) {
+    return (
+      <span role="status" style={{ ...mono, fontSize: 12, color: T.dim, border: `1px dashed ${T.field}`, borderRadius: 5, padding: "4px 8px" }}>
+        {readingLine(state)}
+      </span>
+    );
+  }
   if (!fused) return null;
   const c = fused.agreement === "CONFLICT" ? T.red : fused.agreement === "CONFLUENT" ? T.green : T.blue;
+  // A FAILED INPUT IS NAMED ON THE BADGE; the factor is scored as neutral and the rest as usual.
+  const failed = state && state.failed ? state.failed : [];
   return (
-    <button onClick={onClick} aria-label="why this market"
-      style={{ ...mono, fontSize: 9.5, color: c, border: `1px solid ${c}66`, borderRadius: 5, padding: "4px 8px",
-        background: "transparent", cursor: "pointer", minHeight: 28 }}>
+    <button onClick={onClick} aria-label={`why this market${unreadInputsAria(failed) ? `. ${unreadInputsAria(failed)}` : ""}`}
+      style={{ ...mono, fontSize: 12, color: c, border: `1px solid ${c}`, borderRadius: 5, padding: "4px 8px",
+        background: "transparent", cursor: "pointer", minHeight: 44 }}>
       {fused.agreement} · {fused.score > 0 ? "+" : ""}{fused.score} · conf {fused.confidence}
+      {failed.length > 0 && <span style={{ color: T.amber }}> · {failed.map((f) => inputName(f.key)).join(", ")} not read</span>}
     </button>
   );
 }
@@ -410,7 +424,7 @@ export function SplitSections({ items = [], request, sizeOf = () => null, render
 export function MissLine({ misses = [] }) {
   if (!misses.length) return null;
   return (
-    <div style={{ ...mono, fontSize: 10, color: T.amber, marginTop: 4 }}>
+    <div style={{ ...mono, fontSize: 12, color: T.amber, marginTop: 4 }}>
       {misses.map(missReasonLine).filter(Boolean).join(" \u00b7 ")}
     </div>
   );
@@ -424,11 +438,11 @@ export function StopSigns({ signs, children, style }) {
   return (
     <div style={{ marginTop: 6, ...style }}>
       <div style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center" }}>
-        <span style={{ ...mono, fontSize: 8.5, letterSpacing: "0.08em", color: T.red, fontWeight: 800 }}>STOP SIGNS</span>
+        <span style={{ ...mono, fontSize: 12, letterSpacing: "0.04em", color: T.red, fontWeight: 800 }}>STOP SIGNS</span>
         {signs.labels.map((f) => (
-          <span key={f.id} style={{ ...mono, fontSize: 9.5, color: T.red, border: `1px solid ${T.red}66`, borderRadius: 4, padding: "1px 6px" }}>{f.label}</span>
+          <span key={f.id} style={{ ...mono, fontSize: 12, color: T.red, border: `1px solid ${T.red}`, borderRadius: 4, padding: "1px 6px" }}>{f.label}</span>
         ))}
-        {signs.more > 0 && <span style={{ ...mono, fontSize: 9.5, color: T.red }}>+{signs.more}</span>}
+        {signs.more > 0 && <span style={{ ...mono, fontSize: 12, color: T.red }}>+{signs.more}</span>}
       </div>
       {children}
     </div>

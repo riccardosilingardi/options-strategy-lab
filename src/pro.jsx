@@ -1,14 +1,14 @@
 import React, { useState, useEffect } from "react";
 import { RefreshCw, Send, Trash2, Download, Sparkles, FileText, XCircle } from "lucide-react";
 import { T } from "./theme.js";
-import { RULES, ruleBadge, takeProfitLabel, scaleOutLabel, stopLossLabel, exitDTELabel, perTradeCapLabel, copilotRulesBlock, money, pctText, MIN_NET_DOLLARS,
+import { RULES, ruleBadge, takeProfitLabel, takeProfitTarget, scaleOutLabel, stopLossLabel, exitDTELabel, perTradeCapLabel, copilotRulesBlock, money, pctText, MIN_NET_DOLLARS,
   NO_CEILING, reportNarrativePrompt, chanceText, seasonalStampNote, MEASURED_SIGMA_SOURCE,
   comboBook, limitAgainstBook, notionalControlled, notionalNote,
   closeMarket, closeLimitPrice, closeLimitNote, closeUnreadableNote,
   legBook, sizeSkippedNote, onTick, netFromLegs, limitCeilingNote, rewardRisk,
   contractListing, unlistedContractNote, unquotedLegNote, unquotedLegPointer, marketOrderNote,
   taCopilotPrompt, TA_QUESTIONS, TA_DISCLAIMER,
-  ivProvenance, sameCloseNote, copilotOverreach, copilotOverreachNote } from "./rules.js";
+  ivProvenance, onCardLine, noRecordNote, copilotOverreach, copilotOverreachNote } from "./rules.js";
 import { contractsOf, positionSize, bookPositions, positionStage, autopilotHorizonNote, autopilotVolNote, positionForHolding, journalPnlTotal, scoredJournal } from "./journal.js";
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, LineStyle } from "lightweight-charts";
 // The fold lives in steps.jsx — chrome with no trade in it, and the one file
@@ -20,7 +20,7 @@ import { Fold } from "./steps.jsx";
 import { indicatorSet, takeaway, taContext, LABELS, MEASURES, RSI_HIGH, RSI_LOW } from "./indicators.js";
 import { erf, netBS } from "./engine.js";
 import { ARROW, REGIONS, regionSignals, tagImpacts, taRead } from "./signals.js";
-import { useNarrow, BandThumbnail, payoffBands, bandTakeaway } from "./visuals.jsx";
+import { useNarrow, BandThumbnail, payoffBands, bandTakeaway, pnl$ } from "./visuals.jsx";
 import { DEMO, DEMO_TOOLTIP } from "./demo.js";
 import { reduceRatios, orderQty, mlegLimitPrice, limitWords, orderLimitWords, limitKind, signedLimitFor, orderBody, orderPreviewLines, orderOutcome, alpacaErrorText, cancelOutcome, cancelWaiting } from "./order.js";
 import { hasOpenInterest, sourceNote, openInterestNote, fetchChain } from "./chain.js";
@@ -42,9 +42,11 @@ const fmt$ = (x) => {
 };
 /** A dollar figure for a model or a document, or null when there is not one. */
 const dollarsOrNull = (x) => (Number.isFinite(x) ? +Number(x).toFixed(0) : null);
-const Btn = ({ children, onClick, color = T.amber, ghost, disabled, small, title }) => (
-  <button onClick={onClick} disabled={disabled} title={title}
-    style={{ ...mono, fontSize: small ? 11 : 12, padding: small ? "4px 8px" : "8px 12px", borderRadius: 6, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.5 : 1, background: ghost ? "transparent" : color, color: ghost ? color : T.onAccent, border: ghost ? `1px solid ${color}66` : "none", display: "inline-flex", alignItems: "center", gap: 6 }}>{children}</button>
+// Same contract as the Btn in App.jsx (the two copies are the design-system sweep's first job, ROADMAP):
+// 44px tall whatever the size, `small` only narrows padding and font, ghost border at full colour.
+export const Btn = ({ children, onClick, color = T.amber, ghost, disabled, small, title, style, ...rest }) => (
+  <button onClick={onClick} disabled={disabled} title={title} {...rest}
+    style={{ ...mono, fontSize: small ? 12 : 13, padding: small ? "6px 12px" : "8px 14px", minHeight: 44, borderRadius: 6, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.5 : 1, background: ghost ? "transparent" : color, color: ghost ? color : T.onAccent, border: ghost ? `1px solid ${color}` : "none", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, ...style }}>{children}</button>
 );
 const Panel = ({ children, style }) => <div style={{ background: T.panel, border: `1px solid ${T.line}`, borderRadius: 8, padding: 14, ...style }}>{children}</div>;
 const Lbl = ({ children }) => <div style={{ ...mono, fontSize: 10, letterSpacing: "0.15em", color: T.amber }}>{children}</div>;
@@ -54,8 +56,8 @@ const Stat = ({ k, v, c, tip }) => (
     <div style={{ ...mono, fontSize: 14, fontWeight: 700, color: c || T.ink }}>{v}</div>
   </div>
 );
-const Inp = (props) => <input {...props} style={{ ...mono, background: T.bg, color: T.ink, border: `1px solid ${T.line}`, borderRadius: 5, padding: "6px 8px", fontSize: 12, ...(props.style || {}) }} />;
-const Sel = (props) => <select {...props} style={{ ...mono, background: T.bg, color: T.ink, border: `1px solid ${T.line}`, borderRadius: 5, padding: "6px 8px", fontSize: 12, ...(props.style || {}) }} />;
+const Inp = (props) => <input {...props} style={{ ...mono, background: T.bg, color: T.ink, border: `1px solid ${T.field}`, borderRadius: 5, padding: "6px 8px", fontSize: 12, ...(props.style || {}) }} />;
+const Sel = (props) => <select {...props} style={{ ...mono, background: T.bg, color: T.ink, border: `1px solid ${T.field}`, borderRadius: 5, padding: "6px 8px", fontSize: 12, ...(props.style || {}) }} />;
 
 async function proxied(url) {
   const r = await fetch(`/api/proxy?url=${encodeURIComponent(url)}`);
@@ -994,7 +996,10 @@ export function AlpacaDesk({ creds, setMsg, gate, positions = [] }) {
                     <div key={x.symbol} style={{ ...mono, fontSize: 10, color: T.dim }}>{+x.qty > 0 ? "+" : ""}{x.qty} {x.symbol.slice(-9)} · avg ${(+x.avg_entry_price).toFixed(2)} → ${(+x.current_price).toFixed(2)}</div>
                   ))}
                 </div>
-                <Stat k="PROFIT NOW" v={fmt$(g.pl)} c={g.pl >= 0 ? T.green : T.red} />
+                {/* The profit of a holding with a record is on its Positions card; the line below says so. */}
+                {!positionForHolding(positions, { ticker: g.ticker, expKey: g.expKey }) && (
+                  <Stat k="PROFIT NOW" v={fmt$(g.pl)} c={g.pl >= 0 ? T.green : T.red} />
+                )}
                 {/* >>> ONE CLOSE CONTROL PER POSITION (P9, TASK 2). <<< Two
                     buttons on two screens for one act, and only the Positions
                     card's asks WHY and files the answer. Where this panel is
@@ -1019,10 +1024,14 @@ export function AlpacaDesk({ creds, setMsg, gate, positions = [] }) {
               {(() => {
                 const rec = positionForHolding(positions, { ticker: g.ticker, expKey: g.expKey });
                 return rec ? (
-                  <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 5, lineHeight: 1.55 }}>
-                    {sameCloseNote(rec.ref)}
+                  <div style={{ ...mono, fontSize: 12, color: T.green, marginTop: 5, lineHeight: 1.55 }}>
+                    {onCardLine(rec.ref, pnl$(g.pl))}
                   </div>
-                ) : null;
+                ) : (
+                  <div style={{ ...mono, fontSize: 12, color: T.dim, marginTop: 5, lineHeight: 1.55 }}>
+                    {noRecordNote()}
+                  </div>
+                );
               })()}
             </div>
           ));
@@ -1092,7 +1101,7 @@ WHO YOU ARE WRITING FOR: someone who is learning, not a professional trader. Pla
 
 METHOD (follow in order): 1 Discovery (seasonal scanner + trend) → 2 Construction (real chain, strikes, Greeks, R/R, breakevens) → 3 Execution (only after explicit human confirmation, check buying power) → 4 Monitoring (P&L against the rules, % of max profit) → 5 Reporting.
 
-WHAT THIS APP WILL AND WILL NOT BUILD — read this before recommending anything. Every structure must have a KNOWN maximum loss and no uncovered short leg; that is enforced in code and an order breaking it does not leave. Beyond that, the guided path this user starts from also excludes single-leg LONG options (a long call or a long put on its own: time decay makes it a poor trade for someone learning, and an unbounded payoff has no maximum profit, so there is no take-profit level to exit at), STRADDLES and STRANGLES (two single-leg longs bought together — the same exclusion twice — and a short strangle is an uncovered leg, which is forbidden outright), and BUTTERFLIES (worth their maximum only AT the middle strike AT expiry, so the ${pctText(RULES.takeProfitPct)} take-profit is out of reach before the ${RULES.exitDTE}-day exit ends the trade). NEVER recommend one of those to this user. If the honest answer is one of them, say that the structure that fits is one this app does not offer, and say why.
+WHAT THIS APP WILL AND WILL NOT BUILD — read this before recommending anything. Every structure must have a KNOWN maximum loss and no uncovered short leg; that is enforced in code and an order breaking it does not leave. Beyond that, the guided path this user starts from also excludes single-leg LONG options (a long call or a long put on its own: time decay makes it a poor trade for someone learning, and an unbounded payoff has no maximum profit, so such a trade takes profit at ${pctText(RULES.singleTakeProfitPctOfPremium)} of the premium paid instead), STRADDLES and STRANGLES (two single-leg longs bought together — the same exclusion twice — and a short strangle is an uncovered leg, which is forbidden outright), and BUTTERFLIES (worth their maximum only AT the middle strike AT expiry, so the ${pctText(RULES.takeProfitPct)} take-profit is out of reach before the ${RULES.exitDTE}-day exit ends the trade). NEVER recommend one of those to this user. If the honest answer is one of them, say that the structure that fits is one this app does not offer, and say why.
 
 DECISION TREES, over the structures that remain: (A) directional edge — a seasonal signal and a price trend agreeing → a DEBIT VERTICAL SPREAD in that direction (buy the nearer strike, sell the further one), which is the app's default and has both a known maximum loss and a reachable take-profit; (B) the same direction but the options are expensive against their own history (IV rank above ${RULES.expensiveIVRank}) → a CREDIT VERTICAL on the other side instead, so the expensive premium is being sold rather than bought, still with the long leg that defines the risk; (C) no directional edge and a quiet market → an IRON CONDOR, which is two credit verticals and is defined-risk on both sides; (D) the factors disagree, the chain cannot be priced, or nothing clears the quality floors → RECOMMEND NOTHING, and say which of those it was. "Nothing today" is a correct answer and this platform is built around being able to give it.
 
@@ -1593,7 +1602,7 @@ export function TaCopilot({ ticker, bars, structure, convo, setConvo, onAnalysis
               onKeyDown={(e) => { if (e.key === "Enter") send(input); }}
               placeholder="Ask about the chart…"
               style={{ flex: 1, minWidth: 0, ...mono, fontSize: 12, padding: "8px 10px", borderRadius: 6,
-                background: T.bg, border: `1px solid ${T.line}`, color: T.ink }} />
+                background: T.bg, border: `1px solid ${T.field}`, color: T.ink }} />
             <Btn small color={T.blue} onClick={() => send(input)} disabled={busy || !input.trim()}>Ask</Btn>
           </div>
           <div style={{ ...mono, fontSize: 9.5, color: T.dim, marginTop: 8, lineHeight: 1.6 }}>
@@ -2107,10 +2116,10 @@ export function exitPathSim(pos, S, dteLeft, iv, vol, nSim = 2000) {
       "exitPathSim needs a sigmaProvenance() result as `vol`, never a bare SIGMA lookup: see src/rules.js",
     );
   }
-  // `RULES.takeProfitPct * null` is 0: without this the simulator would count
+  // A null target is no take-profit level: without this the simulator would count
   // every path that ever touched break-even as a take-profit exit, and report a
-  // rule the app never applied.
-  const tp = Number.isFinite(maxProfit) ? RULES.takeProfitPct * maxProfit : null;
+  // rule the app never applied. `takeProfitTarget()` (rules.js) is the one home.
+  const tp = takeProfitTarget({ legs, maxProfit, maxLoss, entryNet }).perCombo;
   const sl = RULES.stopLossPct * maxLoss;
   const days = Math.max(1, dteLeft - RULES.exitDTE);
   const dt = 1 / 365, sq = sigma * Math.sqrt(dt);
@@ -2263,7 +2272,10 @@ export function GuardianPanel({ pos, spot, dteLeft, ivNow, vol, seasonalNow, pnl
     } catch (e) { setMsg(`The ${label} exit order failed: ${alpacaErrorText(e)}`); }
     setLadderBusy(null);
   };
-  const pct = pos.maxProfit > 0 && pnlNow != null ? Math.max(-100, Math.min(130, (pnlNow / (pos.maxProfit * size)) * 100)) : null;
+  // THE TARGET AND WHAT IT IS A SHARE OF, from the one function (`takeProfitTarget`, rules.js):
+  // the premium paid for a single long option, the maximum profit for the rest.
+  const tpT = takeProfitTarget({ legs: pos.legs, maxProfit: pos.maxProfit, maxLoss: pos.maxLoss, entryNet: pos.entryNet, contracts: size });
+  const pct = tpT.base != null && tpT.base > 0 && pnlNow != null ? Math.max(-100, Math.min(130, (pnlNow / (tpT.base * size)) * 100)) : null;
   return (
     <div style={{ marginTop: 8, padding: "10px 12px", background: `${T.bg}`, border: `1px solid ${tisColor}44`, borderRadius: 7 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
@@ -2298,13 +2310,13 @@ export function GuardianPanel({ pos, spot, dteLeft, ivNow, vol, seasonalNow, pnl
       )}
       {pct != null && (
         <div style={{ marginTop: 8 }}>
-          <div style={{ ...mono, fontSize: 9, color: T.dim }}>PROGRESS TOWARDS THE MAXIMUM · {takeProfitLabel()} · rest out at {scaleOutLabel()}</div>
+          <div style={{ ...mono, fontSize: 9, color: T.dim }}>{tpT.basis === "premium" ? "PROGRESS AGAINST THE PREMIUM PAID" : "PROGRESS TOWARDS THE MAXIMUM"} · {takeProfitLabel(tpT.basis)}{tpT.basis === "premium" ? "" : ` · rest out at ${scaleOutLabel()}`}</div>
           <div style={{ position: "relative", height: 10, background: T.line, borderRadius: 5, marginTop: 3 }}>
-            <div style={{ position: "absolute", left: `${(RULES.takeProfitPct * 100 + 100) / 230 * 100}%`, width: 1, top: -2, bottom: -2, background: T.amber }} title={takeProfitLabel()} />
-            <div style={{ position: "absolute", left: `${(RULES.scaleOutPct * 100 + 100) / 230 * 100}%`, width: 1, top: -2, bottom: -2, background: T.green }} title={scaleOutLabel()} />
+            <div style={{ position: "absolute", left: `${(tpT.pct * 100 + 100) / 230 * 100}%`, width: 1, top: -2, bottom: -2, background: T.amber }} title={takeProfitLabel(tpT.basis)} />
+            {tpT.basis !== "premium" && <div style={{ position: "absolute", left: `${(RULES.scaleOutPct * 100 + 100) / 230 * 100}%`, width: 1, top: -2, bottom: -2, background: T.green }} title={scaleOutLabel()} />}
             <div style={{ width: `${Math.max(0, (pct + 100) / 230 * 100)}%`, height: 10, borderRadius: 5, background: pnlNow >= 0 ? `${T.green}bb` : `${T.red}bb` }} />
           </div>
-          <div style={{ ...mono, fontSize: 10, color: pnlNow >= 0 ? T.green : T.red, marginTop: 2 }}>{pct.toFixed(0)}% of the maximum ({fmt$(pnlNow)})</div>
+          <div style={{ ...mono, fontSize: 10, color: pnlNow >= 0 ? T.green : T.red, marginTop: 2 }}>{pct.toFixed(0)}% of the {tpT.basis === "premium" ? "premium paid" : "maximum"} ({fmt$(pnlNow)})</div>
         </div>
       )}
       <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap", alignItems: "center" }}>
@@ -2314,9 +2326,11 @@ export function GuardianPanel({ pos, spot, dteLeft, ivNow, vol, seasonalNow, pnl
               With no ceiling they priced at $0 and would have sent an order to
               close the position for nothing. The stop rung stays: the maximum
               LOSS is always known, which is non-negotiable rule 2. */}
-          {Number.isFinite(pos.maxProfit) ? (<>
-            <Btn small ghost color={T.green} title={DEMO ? DEMO_TOOLTIP : undefined} onClick={() => placeExit(takeProfitLabel(), RULES.takeProfitPct * pos.maxProfit)} disabled={!!ladderBusy || DEMO}>GTC {takeProfitLabel()} @ {ladderRungPrice(pos.entryNet, RULES.takeProfitPct * pos.maxProfit)}</Btn>
-            <Btn small ghost color={T.green} title={DEMO ? DEMO_TOOLTIP : undefined} onClick={() => placeExit(`TP ${scaleOutLabel()}`, RULES.scaleOutPct * pos.maxProfit)} disabled={!!ladderBusy || DEMO}>GTC TP {scaleOutLabel()} @ {ladderRungPrice(pos.entryNet, RULES.scaleOutPct * pos.maxProfit)}</Btn>
+          {tpT.perCombo != null ? (<>
+            <Btn small ghost color={T.green} title={DEMO ? DEMO_TOOLTIP : undefined} onClick={() => placeExit(takeProfitLabel(tpT.basis), tpT.perCombo)} disabled={!!ladderBusy || DEMO}>GTC {takeProfitLabel(tpT.basis)} @ {ladderRungPrice(pos.entryNet, tpT.perCombo)}</Btn>
+            {tpT.basis !== "premium" && Number.isFinite(pos.maxProfit) && (
+              <Btn small ghost color={T.green} title={DEMO ? DEMO_TOOLTIP : undefined} onClick={() => placeExit(`TP ${scaleOutLabel()}`, RULES.scaleOutPct * pos.maxProfit)} disabled={!!ladderBusy || DEMO}>GTC TP {scaleOutLabel()} @ {ladderRungPrice(pos.entryNet, RULES.scaleOutPct * pos.maxProfit)}</Btn>
+            )}
           </>) : (
             <span style={{ ...mono, fontSize: 10, color: T.dim }}>
               {`No profit rung: this position has ${NO_CEILING}, so ${pctText(RULES.takeProfitPct)} of the maximum is not a price. The ${RULES.exitDTE}-day exit still applies.`}
