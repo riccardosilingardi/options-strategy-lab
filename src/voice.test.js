@@ -141,7 +141,11 @@ test("MEASURED: the three screens, and the table in the PRD is this number", () 
      The CEILING is the target the owner set, and it fails the build on one
      word more. Raising it is a session saying why, in the PRD. */
   const BEFORE = { radarPlusShortlist: 1697, build: 559 };
-  const CEILING = { find: 450, build: 400, positions: 304 };
+  /* >>> PR #45 MOVED FIND TO `find.jsx` AND MADE IT ONE CONTROL STYLE. <<< Measured by this counter (which now reads
+     `ui.jsx` and `find.jsx` too): find 384 -> 309 words at rest (51 typed + 258 generated, 24 sites), build 264 -> 244.
+     The two headings and their empty-state sentence became one counted line, and the paragraph under the old chance
+     slider went with it. The ceilings are those numbers, so the next word fails the build. */
+  const CEILING = { find: 309, build: 244, positions: 304 };
   /* >>> POSITIONS IS A THIRD SCREEN SINCE PR #44 (TASK 1). <<< Measured by this counter on `main` (ae4b1e0), by the
      worktree procedure above: positions 422 words at rest (99 typed + 323 generated, 14 sites). The Positions card
      was rebuilt to say its action, its profit and its three exits first; the paragraph the Alpaca panel repeated

@@ -39,10 +39,9 @@ import { RULES, sizing, ruleBadge, takeProfitLabel, takeProfitTarget, takeProfit
   ruleExitOf, stopWarningSentence, watchAttentionLevel, positionAction,
   chanceOf, chanceSourceNote, seasonalProvenance, seasonalStampNote, seasonalStampFields, chanceDrawFields,
   sigmaProvenance, isButterfly,
-  requestOf, requestAmountLabel, requestAmountOwner, contractsSourceNote,
-  splitByRequest, meetsHeading, otherwiseHeading, missReasonLine, fillPriceHeading, fillNet,
+  requestOf, contractsSourceNote, fillNet,
   rewardRiskRange, RR_POINTS, crossingCost, crossingCostNote, openingMarkNote,
-  figureSet, reconcileFigures, unitMoney, candidateFlags, sizeLine, sizingFreeOn, sizedFree, atRiskNowLine, boardLooksStale, staleBoardLine, nothingTodayLine, fetchFailWords, stopSigns } from "./rules.js";
+  figureSet, reconcileFigures, unitMoney, candidateFlags, sizeLine, sizedFigures, sizingFreeOn, sizedFree, atRiskNowLine, boardLooksStale, fetchFailWords, stopSigns } from "./rules.js";
 import { isStale, freshnessNote, staleAmong } from "./freshness.js";
 import { evaluateTrade, gateSummary } from "./riskGate.js";
 import { DEMO, DEMO_BANNER, DEMO_TOOLTIP, DEMO_SEED_TICKERS, demoPositions } from "./demo.js";
@@ -50,7 +49,9 @@ import { CapitalOnboarding, WizardOpen, ConfirmSteps, Card, Pill } from "./wizar
 // THE CONTROLS AND THE ONE CANDIDATE CARD (ROADMAP P10). Its own file: it is
 // nothing but a trade, so it may not live in `steps.jsx`, and `wizard.jsx`
 // renders the same card, so it may not live here.
-import { RequestControls, SplitSections, MissLine, CandidateCard, SignalBadge, StopSigns } from "./card.jsx";
+import { CandidateCard, CandidateActions, SignalBadge, StopSigns } from "./card.jsx";
+// STEP 1, FIND: its own file since PR #45, built on `ui.jsx` and the type tokens.
+import { FindStep } from "./find.jsx";
 import { buildHandOff, buildScreenState, BUILD_TAB } from "./handoff.js";
 import { orderBody, orderOutcome, alpacaErrorText, reduceRatios, limitWords, orderLimitWords, fillPriceOf, cancelOutcome, cancelWaiting } from "./order.js";
 // THE PERMANENT RECORD: the ref a position is given at open, the sequence on
@@ -66,11 +67,13 @@ import { FIRST_STEP, stepCarry, candidateOf, candidateKey, legsLine, toggleCompa
 import { PositionCard, PositionDetails } from "./positionCard.jsx";
 import { navOf, createNavHistory } from "./nav.js";
 import { exitProgress, entryVsNow, displayName, fileState, pnlShareOfRisk, pnlShareText, holdsStructure } from "./positionView.js";
-import { StepNav, StepForward, EvidenceBar, EvidenceOverlay, DeskSheet, CompareTray, CandidateActions, Fold, DeskCountLine } from "./steps.jsx";
+import { StepNav, EvidenceBar, EvidenceOverlay, DeskSheet, Fold, DeskCountLine } from "./steps.jsx";
 
 /* ============================== THEME ============================== */
 const mono = { fontFamily: "ui-monospace, Menlo, monospace" };
 const sansUI = { fontFamily: "ui-sans-serif, system-ui" };
+/** One empty bar list, so a market with no history yet hands the memoised card picture the same array every render. */
+const NO_BARS = [];
 
 /* ============================== MATH: Black-Scholes (Greeks only — shared engine covers price/payoff) ============================== */
 const nPDF = (x) => Math.exp(-0.5 * x * x) / Math.sqrt(2 * Math.PI);
@@ -1552,8 +1555,9 @@ export default function OptionsStrategyLab() {
      falls back to `limits.perTradeLimit`, DERIVED and never typed, and
      `request.amtAnswered` is how every screen knows to call it a suggestion
      rather than quoting a figure the user never chose back at them. */
-  const [want, setWant] = useState({ mode: "budget", amt: null, minChance: null });
-  const request = useMemo(() => requestOf(want, limits), [want, limits]);
+  const [want, setWant] = useState({ mode: "budget", amt: null, minChance: null, minReturn: null });
+  // THE AMOUNT NEVER PASSES THE PER-TRADE LIMIT unless free sizing is on (PR #45, TASK 0): `requestOf()` reads the flag.
+  const request = useMemo(() => requestOf(want, limits, { sizingFree: freeSizing }), [want, limits, freeSizing]);
   const [autoMon, setAutoMon] = useState(true);
   // THE CLOSE ASKS WHY. `{ id, written, err }` while a close is being written.
   const [closing, setClosing] = useState(null);
@@ -2157,8 +2161,8 @@ export default function OptionsStrategyLab() {
      sliders the budget re-derives against the price they are now offering —
      which is the honest answer to "how many can I have", not a stale one. */
   const budgetSize = useMemo(
-    () => (AE ? sizedFree(scaleStrategy(AE, request.mode, request.amt), freeSizing) : null),
-    [AE, request.mode, request.amt, freeSizing]);
+    () => (AE ? sizedFree(scaleStrategy(AE, request.mode, request.amt, request.riskCap), freeSizing) : null),
+    [AE, request.mode, request.amt, request.riskCap, freeSizing]);
   /* A COUNT TYPED BY HAND WINS, AND THE SCREEN SAYS IT OVERRIDES THE BUDGET.
      The gate is unchanged: it measures whatever `contracts` says, whichever of
      the two produced it. */
@@ -3574,8 +3578,12 @@ export default function OptionsStrategyLab() {
   // BACK TO THE LIST (PR #44, TASK 3): Find still holds the same request, so it is a step back and a scroll to the card.
   const scrollToCard = useRef(null);
   const backToList = () => { scrollToCard.current = buildOrigin ? buildOrigin.key : null; goStep("find"); };
-  const buildSizeLine = contractsTyped != null
-    ? `${contracts} contract${contracts === 1 ? "" : "s"}, set by hand` : sizeLine(request, budgetSize);
+  /* THE SIZE LINE AND THE FOUR SIZED FIGURES ARE THE LIST CARD'S (PR #45, TASK 3): `sizedFigures()` and `sizeLine()` are
+     the one function each, read here at the price the order will be sent at (`AE`) and in Find at `aFill` — the same
+     analysis, held equal by `figures.test.jsx`. A count typed by hand wins and says so. */
+  const buildSizeLine = AE && budgetSize
+    ? sizeLine(budgetSize, { n: contracts, byHand: contractsTyped != null })
+    : (AE && contractsTyped != null ? `${contracts} contract${contracts === 1 ? "" : "s"}, set by hand` : null);
   const signalCmp = useMemo(
     () => (optRef && optRef.signals && optRef.signals.ticker === ticker ? compareSignals(optRef.signals, buildSignals, { ticker }) : null),
     [optRef, buildSignals, ticker]);
@@ -4389,163 +4397,39 @@ export default function OptionsStrategyLab() {
              selected markets below it, re-filtered live. The Shortlist is the
              one-market filter; Compare (max 3) stays. */}
         {tab === "build" && !showSettings && step === "find" && (
-          <div style={{ marginTop: 12 }}>
-            <h2 data-view-heading tabIndex={-1} style={{ ...sansUI, fontSize: 19, fontWeight: 800, color: T.ink, margin: "4px 0 0", outline: "none" }}>
-              Step 1 — find a trade
-            </h2>
-
-            <RequestControls style={{ marginTop: 10 }}
-              request={request} onChange={(patch) => setWant((w) => ({ ...w, ...patch }))}
-              sentiments={SENTIMENTS} direction={find.dir} onDirection={(d) => setFind((f) => ({ ...f, dir: d }))}
-              universe={BASKET} markets={find.markets} onMarkets={(m) => setFind((f) => ({ ...f, markets: m, market: m.includes(f.market) ? f.market : null }))}
-              horizon={find.horizon} onHorizon={(h) => setFind((f) => ({ ...f, horizon: h }))}
-              ticker={find.market} spot={find.market ? spotOf(chains[find.market]) : null}
-              limits={limits}
-              onLimit={(ov) => setSetting("sizeOverride", ov)} />
-
-            {/* THE SHORTLIST IS A FILTER NOW: one market, or all of them. Each
-                chip carries its count, so a market with nothing is a number
-                rather than a missing row. */}
-            <div style={{ display: "flex", gap: 5, marginTop: 10, flexWrap: "wrap", alignItems: "center" }}>
-              <Btn small ghost={!!find.market} onClick={() => setFind((f) => ({ ...f, market: null }))}>All {findGen.items.length}</Btn>
-              {find.markets.map((tk) => {
-                const n = findGen.items.filter((x) => x.tk === tk).length;
-                const why = findGen.failed.some((x) => x.tk === tk) ? "failed" : findGen.loading.includes(tk) ? "loading"
-                  : findGen.noBoard.includes(tk) ? "no board" : String(n);
-                return (
-                  <Btn key={tk} small ghost={find.market !== tk} color={n ? T.amber : T.dim}
-                    onClick={() => setFind((f) => ({ ...f, market: f.market === tk ? null : tk }))}>{tk} {why}</Btn>
-                );
-              })}
-              <label style={{ ...mono, fontSize: 10.5, color: T.mut, display: "inline-flex", gap: 5, alignItems: "center", minHeight: 38, cursor: "pointer" }}>
-                <input type="checkbox" checked={find.flagged} onChange={(e) => setFind((f) => ({ ...f, flagged: e.target.checked }))} />
-                show flagged{flaggedHidden ? ` (${flaggedHidden} hidden)` : ""}
-              </label>
-            </div>
-
-            {/* A STALE BOARD IS SAID ONCE, HERE, ABOVE THE LIST (PR #41, TASK 2) —
-                never repeated per card. A card carries its own label only when
-                a broken pair touches its own strikes. */}
-            {findGen.stale.length > 0 && (
-              <div style={{ ...mono, fontSize: 11, color: T.amber, marginTop: 8, lineHeight: 1.5 }}>⚠ {staleBoardLine(findGen.stale)}</div>
+          <FindStep
+            request={request} onRequest={(patch) => setWant((w) => ({ ...w, ...patch }))}
+            sentiments={SENTIMENTS} universe={BASKET} find={find} setFind={setFind}
+            spot={find.market ? spotOf(chains[find.market]) : null}
+            limits={limits} onLimit={(ov) => setSetting("sizeOverride", ov)} freeSizing={freeSizing}
+            findGen={findGen} findShown={findShown} flaggedHidden={flaggedHidden} barsCache={barsCache}
+            badgeOf={(x) => <SignalBadge fused={x.fused} state={readiness[x.tk]} onClick={() => { setWhyTk(x.tk); setEv("why"); }} />}
+            actionsOf={(x) => (
+              <CandidateActions
+                ticked={inCompare(compare, x.cand)} onTick={() => tickCompare(x.cand)}
+                saved={isSaved(x.cand)} onSave={() => saveCandidate(x.cand)}
+                onBuild={() => openFound(x)} />
             )}
-
-            {/* "NOTHING TODAY" ONLY WHEN ZERO CANDIDATES PASS, WITH THE COUNTS. */}
-            {/* Prices still arriving are not a verdict: "Nothing today" waits
-                until every selected market has been read. */}
-            {findGen.items.length === 0 && (
-              <div style={{ ...mono, fontSize: 11.5, color: T.mut, marginTop: 10, lineHeight: 1.6, padding: "9px 11px", border: `1px dashed ${T.line}`, borderRadius: 7 }}>
-                {nothingTodayLine(findGen.tally, { noBoard: findGen.noBoard, loading: findGen.loading, failed: findGen.failed, level: liqLevel })}
-              </div>
-            )}
-
-            {findShown.length > 0 && <SplitSections
-              items={findShown.map((x) => x.cand)} request={request} priceNote
-              sizeOf={(c) => { const x = findShown.find((y) => y.key === c.key); return x ? sizedFree(scaleStrategy(x.lf.aFill, request.mode, request.amt), freeSizing) : null; }}
-              renderItem={(c, misses) => {
-                const x = findShown.find((y) => y.key === c.key);
-                if (!x) return null;
-                const af = x.lf.aFill;
-                const size = sizedFree(scaleStrategy(af, request.mode, request.amt), freeSizing);
-                const signs = stopSigns({ fused: x.fused, flags: x.flags, feedBroken: x.feedBroken,
-                  noQuoteLegs: x.noQuoteLegs, contracts: size && size.ok ? size.n : null, askSize: x.touchSize });
-                return (
-                  <CandidateCard key={x.key} cardKey={x.key}
-                    name={`${x.tk} · ${x.name}`} legs={`${legsLine(x.legs)} · ${x.expKey}`}
-                    misses={misses} signs={signs} size={sizeLine(request, size)}
-                    rr={x.lf.rr} pop={x.lf.pop} profit={af.maxProfit} risk={af.maxLoss} noCeiling={af.profitUnbounded}
-                    bands={x.lf.bands} bars={barsCache[x.tk] || []} ticker={x.tk}
-                    badge={<SignalBadge fused={x.fused} state={readiness[x.tk]} onClick={() => { setWhyTk(x.tk); setEv("why"); }} />}
-                    actions={
-                      <CandidateActions
-                        ticked={inCompare(compare, x.cand)} onTick={() => tickCompare(x.cand)}
-                        saved={isSaved(x.cand)} onSave={() => saveCandidate(x.cand)}
-                        onBuild={() => openFound(x)} />
-                    } />
-                );
-              }} />}
-
-            {/* EVERYTHING THAT EXPLAINS THE LIST, BEHIND ONE "why". Nothing in
-                it is cut: the floor counts and their own sentences, the
-                skipped floors, the setting and what loosening lets back in,
-                and the floor held against the chains it judges. */}
-            {(() => {
-              const t = findGen.tally;
-              const fold = filterFold(t, { level: liqLevel, what: find.market || null });
-              const what = find.market || find.markets.join(", ");
-              const unb = findGen.items.filter((x) => x.lf.aFill.profitUnbounded).length;
-              const loose = looseningWarning(liqLevel);
-              return (
-                <Fold label="why" tone={loose ? T.red : T.dim} style={{ marginTop: 10 }}
-                  summary={fold.summary || `${qualityFloorLine(liqLevel)} Nothing was removed.`}>
-                  {t.unpriceable > 0 && <div style={{ ...mono, fontSize: 10.5, color: T.amber, lineHeight: 1.6, marginTop: 6 }}>{unpriceableNote(t.unpriceable, what)}</div>}
-                  {t.impossible > 0 && <div style={{ ...mono, fontSize: 10.5, color: T.red, lineHeight: 1.6, marginTop: 6 }}>{impossibleLossNote(t.impossible, what)}</div>}
-                  {t.model > 0 && <div style={{ ...mono, fontSize: 10.5, color: T.red, lineHeight: 1.6, marginTop: 6 }}>{modelDisagreementNote(t.model, what)}</div>}
-                  {t.spread > 0 && <div style={{ ...mono, fontSize: 10.5, color: T.amber, lineHeight: 1.6, marginTop: 6 }}>{wideSpreadNote(t.spread, what)}</div>}
-                  {t.comboSpread > 0 && <div style={{ ...mono, fontSize: 10.5, color: T.amber, lineHeight: 1.6, marginTop: 6 }}>{wideComboNote(t.comboSpread, what)}</div>}
-                  {t.crossing > 0 && <div style={{ ...mono, fontSize: 10.5, color: T.amber, lineHeight: 1.6, marginTop: 6 }}>{crossingNote(t.crossing, what)}</div>}
-                  {findGen.oiSkipped.length > 0 && <div style={{ ...mono, fontSize: 10, color: T.dim, lineHeight: 1.6, marginTop: 6 }}>{liquiditySkippedNote(`the feed for ${findGen.oiSkipped.join(", ")}`)}</div>}
-                  {findGen.spreadSkipped.length > 0 && <div style={{ ...mono, fontSize: 10, color: T.dim, lineHeight: 1.6, marginTop: 6 }}>{spreadSkippedNote(`the feed for ${findGen.spreadSkipped.join(", ")}`)}</div>}
-                  {findGen.comboSpreadSkipped.length > 0 && <div style={{ ...mono, fontSize: 10, color: T.dim, lineHeight: 1.6, marginTop: 6 }}>{comboSpreadSkippedNote(`the feed for ${findGen.comboSpreadSkipped.join(", ")}`)}</div>}
-                  {findGen.noBoard.length > 0 && <div style={{ ...mono, fontSize: 10.5, color: T.mut, lineHeight: 1.6, marginTop: 6 }}>{`No expiry on ${findGen.noBoard.join(", ")} is far enough out to open on, so nothing was built there. ${horizonFloorNote()}.`}</div>}
-                  {unb > 0 && <div style={{ ...mono, fontSize: 10, color: T.dim, lineHeight: 1.6, marginTop: 6 }}>{noCeilingRankNote(unb)}</div>}
-                  <div style={{ ...mono, fontSize: 10, color: T.dim, lineHeight: 1.6, marginTop: 6 }}>
-                    Candidates marked CONFLICT sit at the bottom by construction: the four factors contradict each other on that underlying, and no expected value is worth a signal we cannot read.
-                  </div>
-                  <div style={{ ...mono, fontSize: 10, color: isLoosened(liqLevel) ? T.red : T.dim, lineHeight: 1.6, marginTop: 6 }}>
-                    {liquiditySettingNote(liqLevel, { ...t, kept: findGen.items.length })}
-                  </div>
-                  {loose && <div style={{ ...sansUI, fontSize: 12, color: T.red, lineHeight: 1.5, marginTop: 6 }}>{loose}</div>}
-                  <div style={{ ...mono, fontSize: 10.5, color: T.dim, lineHeight: 1.6, marginTop: 8 }}>{qualityFloorSentence(liqLevel)}</div>
-                  <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6, lineHeight: 1.6 }}>
-                    {`${limits.answered ? "Your" : "The suggested"} per-trade limit: ${money(limits.perTradeLimit)} (${perTradeCapLabel()}).`} Budget is the most you will pay, taken from live prices. For trades where you receive money up front, the limit becomes the capital tied up instead. Chance is the probability of ending in profit at expiry.
-                  </div>
-                  <LiquidityFilter
-                    levelId={liqLevelId} onLevel={setLiqLevelId} previews={liqPreview}
-                    threshold={liqThreshold} ticker={focusTk} expKey={focusBoard ? focusBoard.expKey : null}
-                    peers={focusBoard ? focusBoard.peers : []} feed={focusBoard ? focusBoard.feed : null} />
-                  <OpenInterestReadout chains={chains} floor={liqLevel.absolute} percentile={liqLevel.percentile} level={liqLevel} />
-                </Fold>
-              );
-            })()}
-
-            {/* COMPARING — up to three, one picture (PRD §6). */}
-            <CompareTray items={compare} max={MAX_COMPARE} note={compareNote}
-              onRemove={(c) => tickCompare(c)}
-              onClear={() => { setCompare([]); setShowCompare(false); setCompareNote(null); }}
-              onCompare={() => setShowCompare((v) => !v)} showing={showCompare} />
-            {showCompare && compare.length >= 2 && (
-              <Panel style={{ marginTop: 10 }}>
-                <Lbl>{compare.length} SIDE BY SIDE · SAME AXIS, SAME PICTURE</Lbl>
-                <div style={{ marginTop: 10 }}>
-                  <CompareFigure items={compare} height={300} />
-                </div>
-                <div style={{ display: "grid", gap: 6, marginTop: 12 }}>
-                  {compare.map((c, i) => (
-                    <div key={c.key} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "8px 10px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7 }}>
-                      <span style={{ width: 10, height: 10, borderRadius: 3, background: [T.blue, T.amber, T.violet][i], flexShrink: 0 }} />
-                      <div style={{ flex: 1, minWidth: 140 }}>
-                        <div style={{ fontWeight: 700, color: T.ink, fontSize: 12.5 }}>{c.ticker} · {c.name}</div>
-                        <div style={{ ...mono, fontSize: 10, color: T.dim }}>{legsLine(c.legs)} · per contract</div>
-                      </div>
-                      <Stat k="RISK" v={fmt$(c.risk)} c={T.red} />
-                      <Stat k="MAX PROFIT" v={ceil$(c.maxProfit)} c={T.green}
-                        tip={c.maxProfit == null ? noCeilingNote(c.name) : undefined} />
-                      <Stat k="CHANCE" v={chanceText(c.pop)} c={(c.pop || 0) >= 0.5 ? T.green : T.violet} tip={seasonalStampNote(c, c.ticker || "this market")} />
-                      <Btn small onClick={() => { const x = findGen.items.find((y) => y.key === c.key); if (x) openFound(x); else openOnBuild({ ticker: c.ticker, expKey: c.expKey, legs: c.legs, name: c.name }); }}>Take to Build →</Btn>
-                    </div>
-                  ))}
-                </div>
-              </Panel>
-            )}
-
-            <StepForward
-              label={legs.length ? `Go to Build — ${ticker} · ${stratName} →` : "Pick one above to go to Build"}
-              disabled={!legs.length}
-              disabledNote={`Tap "Take to Build" on a card — nothing is sent before the checks there.`}
-              sub={`${ticker} · ${stratName} is loaded on Build. Nothing is sent until the checks there.`}
-              onClick={() => goStep("build")} />
-          </div>
+            liqLevel={liqLevel}
+            foldedNode={<>
+              <LiquidityFilter
+                levelId={liqLevelId} onLevel={setLiqLevelId} previews={liqPreview}
+                threshold={liqThreshold} ticker={focusTk} expKey={focusBoard ? focusBoard.expKey : null}
+                peers={focusBoard ? focusBoard.peers : []} feed={focusBoard ? focusBoard.feed : null} />
+              <OpenInterestReadout chains={chains} floor={liqLevel.absolute} percentile={liqLevel.percentile} level={liqLevel} />
+            </>}
+            compare={compare} showCompare={showCompare} compareNote={compareNote}
+            onTickCompare={(c) => tickCompare(c)}
+            onClearCompare={() => { setCompare([]); setShowCompare(false); setCompareNote(null); }}
+            onToggleCompare={() => setShowCompare((v) => !v)}
+            onTakeToBuild={(c) => { const x = findGen.items.find((y) => y.key === c.key); if (x) openFound(x); else openOnBuild({ ticker: c.ticker, expKey: c.expKey, legs: c.legs, name: c.name }); }}
+            forward={{
+              label: legs.length ? `Go to Build — ${ticker} · ${stratName} →` : "Pick one above to go to Build",
+              disabled: !legs.length,
+              disabledNote: `Tap "Take to Build" on a card — nothing is sent before the checks there.`,
+              sub: `${ticker} · ${stratName} is loaded on Build. Nothing is sent until the checks there.`,
+              onClick: () => goStep("build"),
+            }} />
         )}
 
         {/* ============ BUILDER ============ */}
@@ -5253,9 +5137,11 @@ export default function OptionsStrategyLab() {
                 <CandidateCard
                   name={`${ticker} · ${stratName}`} legs={`${legsLine(legs)} · ${expKey}`}
                   cardKey={buildOrigin && buildOrigin.key}
-                  signs={buildSigns} size={buildSizeLine}
-                  rr={BF.rr} pop={chance ? chance.pop : null} profit={AE.maxProfit} risk={AE.maxLoss} noCeiling={AE.profitUnbounded}
-                  bands={BF.bands} bars={barsCache[ticker] || []} ticker={ticker}
+                  signs={buildSigns} sizeText={buildSizeLine}
+                  figures={sizedFigures(AE, contracts)}
+                  rr={BF.rr} pop={chance ? chance.pop : null}
+                  picture={BF.bands ? { bands: BF.bands, legs, entryNet: AE.entry, spot, bars: barsCache[ticker] || NO_BARS,
+                    dte, sigma: chance ? chance.sigma : undefined, driftAnnual: chance ? chance.driftAnnual : undefined, ticker } : null}
                   badge={<SignalBadge fused={fused[ticker] || null} state={readiness[ticker]} onClick={() => { setWhyTk(ticker); setEv("why"); }} />} />
                 {buildOrigin && buildOrigin.note && (
                   <div style={{ ...sansUI, fontSize: 13, color: T.amber, marginTop: 8, lineHeight: 1.5 }}>{buildOrigin.note}</div>

@@ -37,6 +37,21 @@ export const setTheme = (name) => {
   if (typeof location !== "undefined") location.reload();
 };
 
+/* ---------------------------------------------------------------------------
+   THE TYPE TOKENS (PR #45, TASK 5).
+
+   Measured on 2 Oct 2026 before this: 23 font sizes in the app, two thirds of the uses under 12px, 402 mono spreads
+   against 15 sans. A screen built on tokens uses FIVE sizes, TWO weights and TWO line heights, and nothing under
+   12px (WCAG 1.4.4 asks the text to survive a zoom; a 9px label does not). The migrated files (ui.jsx, card.jsx,
+   find.jsx) read these and never a number: `ui.test.jsx` fails the build on a `fontSize` literal in them.
+   Other screens keep their own sizes until the sweep that moves them (ROADMAP PR #46).
+--------------------------------------------------------------------------- */
+export const TYPE = Object.freeze({
+  size: Object.freeze({ xs: 12, sm: 13, md: 15, lg: 18, xl: 24 }),
+  weight: Object.freeze({ regular: 400, bold: 700 }),
+  line: Object.freeze({ tight: 1.3, body: 1.5 }),
+});
+
 /** Both palettes, so the contrast test can check them without a browser. */
 export const PALETTES = { light: LIGHTT, dark: DARKT };
 

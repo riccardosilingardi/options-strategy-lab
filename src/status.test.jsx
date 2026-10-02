@@ -14,7 +14,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
 import { DeskCountLine } from "./steps.jsx";
 import { StopSigns, CandidateCard } from "./card.jsx";
-import { stopSigns, GATE_WARNING_LABELS, RULES, boardLooksStale, staleBoardLine } from "./rules.js";
+import { stopSigns, GATE_WARNING_LABELS, RULES, boardLooksStale, staleBoardLine, sizedFigures } from "./rules.js";
 import { monotonicityBreaks, invertedOnStrikes } from "./chain.js";
 import { invertedTable } from "../scripts/inverted-fixtures.jsx";
 import { newsLine } from "./signals.js";
@@ -89,9 +89,9 @@ check("…labels only: no refusal, no new rule — the gate and RULES are untouc
 });
 
 check("THE STRIP IS ABOVE THE NUMBERS on every card", () => {
-  const h = renderToStaticMarkup(<CandidateCard name="X" legs="+1 28C" rr={1} pop={0.5} profit={1} risk={-1}
+  const h = renderToStaticMarkup(<CandidateCard name="X" legs="+1 28C" rr={1} pop={0.5} figures={sizedFigures({ maxLoss: -1, maxProfit: 1 }, 1)}
     signs={stopSigns({ fused: { agreement: "CONFLICT", confidence: 21 } })} />);
-  if (!(h.indexOf("STOP SIGNS") < h.indexOf("RETURN ON RISK"))) throw new Error("the signs must come before the figures");
+  if (!(h.indexOf("STOP SIGNS") < h.indexOf("YOU RISK"))) throw new Error("the signs must come before the figures");
   // ...and on Build, above the five figures and above Send.
   const b = code.slice(code.indexOf("{legsLine(legs)} · per contract"));
   if (!(b.indexOf("<StopSigns signs={buildSigns}") < b.indexOf("YOU PAY"))) throw new Error("Build: signs before figures");
@@ -150,7 +150,8 @@ check("THE BOARD IS JUDGED BY ITS SHARE, AT RULES.staleBoardShare, AND SAID ONCE
   eq(staleBoardLine([{ tk: "SLV", expKey: E }, { tk: "SOYB", expKey: E }]), `${E} looks stale on 2 markets (SLV, SOYB)`);
   eq(staleBoardLine([]), null, "nothing stale, nothing said");
   // ONCE: one site in App.jsx, and the card label is not the board's verdict.
-  eq(count(code, "staleBoardLine("), 1, "one line above the list");
+  // PR #45: the Find step lives in find.jsx, and the line is still said once there.
+  eq(count(readFileSync("src/find.jsx", "utf8"), "staleBoardLine("), 1, "one line above the list");
   if (/feedBroken:\s*(x\.)?feedBroken\b[^\n]*stale/.test(code)) throw new Error("a card reads the board's verdict");
   has(code, "feedBroken: invertedOnStrikes(breaks, p.legs).length > 0");
   has(code, "feedBroken: legsInverted");

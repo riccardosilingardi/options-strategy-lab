@@ -19,7 +19,7 @@ import { listCardFigures, buildFigures } from "./App.jsx";
 import { CandidateCard } from "./card.jsx";
 import { exitPlanDetail } from "./visuals.jsx";
 import { reconcileFigures, figureSet, tradeCard, money, chanceText, seasonalProvenance,
-  RULES, fillNet, netFromLegs, sizeLine, requestOf, takeProfitTarget } from "./rules.js";
+  RULES, fillNet, netFromLegs, sizeLine, sizedFigures, sizedFree, requestOf, takeProfitTarget } from "./rules.js";
 import { shortlistWithFloors } from "./App.jsx";
 import { scaleStrategy } from "./pro.jsx";
 // Repo-relative: JSX tests are bundled to CJS (CLAUDE.md, "How to test").
@@ -97,7 +97,7 @@ check("THE EXIT PLAN: one figure, and it says its unit — per contract, or for 
 check("THE RENDERED CARD prints the same risk, profit and chance, and says per contract", () => {
   const html = renderToStaticMarkup(
     <CandidateCard name="Bull Call Spread" legs="+1 28C / −1 30C" rr={list.rr} pop={list.pop}
-      profit={list.aFill.maxProfit} risk={list.aFill.maxLoss} bands={list.bands} ticker={TICKER} />);
+      figures={sizedFigures(list.aFill, null)} />);
   has(html, money(Math.abs(build.AE.maxLoss)));
   has(html, money(build.AE.maxProfit));
   has(html, chanceText(build.chance.pop));
@@ -144,20 +144,21 @@ check("THE SLV BUTTERFLY: $43 of premium is $143 at risk, and the card prints $1
   eq(+Math.abs(slv.aFill.entry * 100).toFixed(2), 43, "the premium at the fill");
   eq(Math.round(Math.abs(slv.aFill.maxLoss)), 143, "the worst case: premium + the $1 of extra wing");
   const html = renderToStaticMarkup(<CandidateCard name="SLV · Bearish Put Butterfly" legs="+1 58P / −2 55P / +1 51P"
-    rr={slv.rr} pop={null} profit={slv.aFill.maxProfit} risk={slv.aFill.maxLoss} bands={slv.bands} ticker="SLV" />);
+    rr={slv.rr} pop={null} figures={sizedFigures(slv.aFill, null)} />);
   has(html, "$143");
 });
 
 check("…and $300 buys 2 of them for $286 — contracts × risk = the total, never 6 for $258", () => {
   const req = requestOf({ amt: 300 }, {});
-  const size = scaleStrategy(slv.aFill, req.mode, req.amt);
+  const size = scaleStrategy(slv.aFill, req.mode, req.amt, req.riskCap);
   eq(size.n, 2, "floor(300 / 143)");
-  const line = sizeLine(req, size);
-  eq(line, `2 contracts for ${money(2 * 143)}`, "the card's size line");
+  const line = sizeLine(size);
+  eq(line, "2 contracts × $143 at risk each", "the card's size line");
   if (size.totRisk > req.amt) throw new Error(`${money(size.totRisk)} over the $300 typed`);
+  // PR #45: the four figures are the WHOLE position's, so YOU RISK is the $286 and the line says how.
   const html = renderToStaticMarkup(<CandidateCard name="SLV" legs="x" rr={slv.rr} pop={null}
-    profit={slv.aFill.maxProfit} risk={slv.aFill.maxLoss} size={line} />);
-  has(html, "2 contracts for $286");
+    figures={sizedFigures(slv.aFill, size.n)} sizeText={line} />);
+  has(html, "FOR 2 CONTRACTS"); has(html, "$286"); has(html, "2 contracts × $143 at risk each");
 });
 
 /* EVERY STRUCTURE FAMILY THE FIXTURE BOARDS PRODUCE, EVERY SENTIMENT, FOUR
@@ -178,7 +179,7 @@ check("EVERY FAMILY ON THE FIXTURES: contracts × card risk == the sized total, 
     const risk = Math.abs(c.aFill.maxLoss);
     for (const amt of [100, 300, 500, 1000]) {
       const req = requestOf({ amt }, {});
-      const size = scaleStrategy(c.aFill, req.mode, req.amt);
+      const size = scaleStrategy(c.aFill, req.mode, req.amt, req.riskCap);
       if (!size || !size.ok) continue;
       sized++;
       if (Math.abs(size.n * risk - size.totRisk) > 1e-6) throw new Error(`${c.name}: ${size.n} × ${risk} ≠ ${size.totRisk}`);
@@ -186,7 +187,9 @@ check("EVERY FAMILY ON THE FIXTURES: contracts × card risk == the sized total, 
       // A debit's premium is paid, so it cannot pass the amount either; a credit's is received.
       if (!size.isCredit && Math.abs(c.aFill.entry) * 100 * size.n > amt + 1e-9) throw new Error(`${c.name}: premium over ${money(amt)}`);
       // The two printed figures multiply, as printed.
-      eq(sizeLine(req, size), `${size.n} contract${size.n === 1 ? "" : "s"} for ${money(size.n * Math.round(risk))}`, c.name);
+      eq(sizeLine(size), `${size.n} contract${size.n === 1 ? "" : "s"} × ${money(Math.round(risk))} at risk each`, c.name);
+      // ...and the card's YOU RISK is that product, from the one function Find and Build both call.
+      eq(sizedFigures(c.aFill, size.n).risk, size.totRisk, `${c.name}: YOU RISK is contracts × risk`);
     }
   }
   if (sized < 20) throw new Error(`only ${sized} sized cards: the sweep proves little`);
@@ -194,6 +197,38 @@ check("EVERY FAMILY ON THE FIXTURES: contracts × card risk == the sized total, 
     if (![...families].some((n) => n.includes(f))) throw new Error(`no ${f} on the fixtures: ${[...families].join(", ")}`);
   }
   console.log(`       ${cards.length} cards, ${sized} sized, families: ${[...families].join(", ")}`);
+});
+
+/* ====================================================================
+   PR #45, TASK 3 — THE CARD SHOWS YOUR SIZE, AND FIND AND BUILD SHOW THE SAME SIZE.
+
+   `listCardFigures()` and `buildFigures()` are the two paths one candidate's FIGURES take; the SIZED totals are one
+   function over each (`sizedFigures()` on `aFill` and on `AE`) and the count one function over each
+   (`scaleStrategy()`). They are held equal here, on the same candidate, for budget mode and target mode, and the
+   rendered card is the same card from either path.
+==================================================================== */
+check("SIZED TOTALS ARE EQUAL ON BOTH PATHS: the same count, the same YOU RISK, the same MAX PROFIT, the same card", () => {
+  for (const [mode, amt] of [["budget", 500], ["budget", 5000], ["target", 400]]) {
+    const req = requestOf({ mode, amt }, { perTradeLimit: 5000 });
+    const sl = sizedFree(scaleStrategy(list.aFill, req.mode, req.amt, req.riskCap), false);
+    const sb = sizedFree(scaleStrategy(build.AE, req.mode, req.amt, req.riskCap), false);
+    eq(sl.n, sb.n, `${mode} ${amt}: the count`);
+    const fl = sizedFigures(list.aFill, sl.ok ? sl.n : null), fb = sizedFigures(build.AE, sb.ok ? sb.n : null);
+    eq(fl.risk, fb.risk, `${mode} ${amt}: YOU RISK`);
+    eq(fl.profit, fb.profit, `${mode} ${amt}: MAX PROFIT`);
+    eq(sl.ok ? sizeLine(sl) : null, sb.ok ? sizeLine(sb) : null, `${mode} ${amt}: the line under the figures`);
+    const card = (f, size) => renderToStaticMarkup(<CandidateCard name="SOYB" legs="x" rr={list.rr} pop={list.pop}
+      figures={f} sizeText={size.ok ? sizeLine(size) : null} />);
+    eq(card(fl, sl), card(fb, sb), `${mode} ${amt}: the rendered card`);
+    if (sl.ok) eq(fl.risk, sl.n * Math.abs(list.aFill.maxLoss), `${mode} ${amt}: YOU RISK is contracts × risk`);
+  }
+});
+
+check("A TYPED COUNT ON BUILD SIZES THE SAME FIGURES: the line says it is by hand, the product still multiplies", () => {
+  const size = scaleStrategy(build.AE, "budget", 500, 5000);
+  const line = sizeLine(size, { n: 7, byHand: true });
+  has(line, "7 contracts ×"); has(line, "set by hand");
+  eq(sizedFigures(build.AE, 7).risk, 7 * Math.abs(build.AE.maxLoss), "YOU RISK follows the typed count");
 });
 
 console.log(`\n${ok.length} passed, ${bad.length} failed\n`);

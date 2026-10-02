@@ -39,7 +39,13 @@ by writing down what you could not verify (PRD §4, at most ten items).
   the desk shows counts only (`DeskCountLine`).
 - A take-profit target is `takeProfitTarget()` in `rules.js`, never `takeProfitPct * maxProfit` at a site.
 - A card and Build read one price: `fillNet()`. `listCardFigures()` and `buildFigures()` are the
-  two paths and `figures.test.jsx` holds them equal.
+  two paths and `figures.test.jsx` holds them equal; the card's four figures are for the size the
+  budget buys, from `sizedFigures()` and `sizeLine()`, read at `aFill` (Find) and `AE` (Build), held
+  equal by the same test.
+- A candidate that misses the request is hidden behind a count, never dropped (`resultsLine()`); a
+  slider filters `findGen`'s output and never re-simulates (`find.test.jsx` checks the memo's deps).
+- Atoms and sizes: `src/ui.jsx` and the type tokens in `theme.js`. `ui.jsx`, `card.jsx` and `find.jsx`
+  use no `fontSize` literal and define no atom; `ui.test.jsx` fails the build otherwise.
 - No emoji or rare glyphs in UI strings; stay within `↑ ↓ → ✓ ✗ ⚠ ▲ ▼ ●`.
 - Plan first, then change surgically.
 
@@ -64,7 +70,11 @@ by writing down what you could not verify (PRD §4, at most ten items).
 - `src/indicators.js` — every technical indicator, and the chart copilot's context.
 - `src/freshness.js` — how old a number on screen may be.
 - `src/visuals.jsx` — every trade picture, all cut from `payoffBands()`.
-- `src/card.jsx` — the request controls and the one candidate card.
+- `src/card.jsx` — the request controls, the one candidate card (with its picture row), the list that
+  hides misses behind a count, the compare tray and the card's actions.
+- `src/ui.jsx` — Btn, Panel, Label, Stat, Fold, Chip, Note, inputs, `RangeField`, the mono/sans stacks.
+  The type tokens (`TYPE`) are in `src/theme.js`. Mono only for numbers, tickers, legs, OCC symbols.
+- `src/find.jsx` — Step 1, Find: heading, controls, market chips, the list, the "why" fold, Compare.
 - `src/wizard.jsx` — Home (two doors: positions, Find), onboarding and the confirm step.
 - `src/steps.jsx` — navigation chrome: steps, sheets, folds.
 - `src/path.js`, `src/handoff.js` — the two-step path (Find → Build) and how a trade reaches Build.
@@ -109,7 +119,8 @@ All in `RULES`, `src/rules.js`, unless noted.
 - Simulation: `mcRuns` 8000, `fallbackIV` 0.25, `fallbackSigma` 0.25.
 - Attention: `watchAttentionShare` 0.35, `autopilotConfidence` 70, `lowConfidence` 40.
 - Chance slider: `chanceAskMin` 0.20, `chanceAskMax` 0.80, `chanceAskStep` 0.05,
-  `chanceAskDefault` 0.50.
+  `chanceAskDefault` 0.50. Return-on-risk slider: floor `minRewardRisk`, `rewardAskMax` 3,
+  `rewardAskStep` 0.05 (it can only tighten the floor). Amount slider: `amountAskStep` 25.
 - Quantity fields: ticket 1–20 (`OrderTicket`), leg 1–10 (Build legs editor), via `QtyField`.
 - Indicator periods: `PERIODS` in `src/indicators.js` (deliberately not in `RULES`).
 - Theme colours: `src/theme.js`. Liquidity measurement table: `LIQUIDITY_MEASUREMENT` in rules.
@@ -122,6 +133,8 @@ All in `RULES`, `src/rules.js`, unless noted.
 - A new JSX test file must be added to `FILES` in `scripts/test-jsx.mjs`. JSX tests are
   bundled to CJS, so read source files by repo-relative path, not `import.meta.url`.
 - `node scripts/measure-words.mjs` prints the per-screen word counts.
+- `node scripts/measure-find.mjs` prints what each Find control passes on the 31 fixture cards and what
+  one slider move costs (`scripts/find-fixtures.jsx` builds the cards).
 - No order can be sent from the sandbox (no broker keys); live behaviour is an OWNER CHECK.
 
 ## Known traps
@@ -136,5 +149,7 @@ All in `RULES`, `src/rules.js`, unless noted.
 - Free sizing is ONE gate input (`evaluateTrade({ sizingFree })`): it drops the per-trade,
   exposure and capital-not-set checks only. Never let it reach another check.
 - A card's size is `scaleStrategy()` on the maximum loss; `sizeLine()` prints contracts × risk.
+- The amount never passes the per-trade limit with free sizing off: `requestOf(want, limits, { sizingFree })`
+  returns `riskCap`, and every `scaleStrategy(a, mode, amt, request.riskCap)` call passes it.
 - A leg's `qty` is inside `analyze()`'s figures; `positionSize()` separates `contracts` from
   the broker's `brokerQty`. Never write `Number(p.contracts) || 1`.
