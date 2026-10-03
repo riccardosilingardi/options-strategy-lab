@@ -6,7 +6,72 @@ The full history of every item shipped so far (P0–P10, P2-bis) is in `docs/his
 Every pull request updates this file: the session that ships an item marks it done and states
 what the next one inherits.
 
-## Done in this pull request — PR #48, one market registry, measured season, Signals decide, Order by, the sweep
+## Done in this pull request — PR #49, one sorted list, the future and the past on every card, the sweep finished
+
+Planned first (the new standing rule, CLAUDE.md); the owner answered the plan's eight questions on 3 Oct 2026.
+
+**Task 0 — the standing rule, debts and defects.**
+- **0a** CLAUDE.md's standing rule: plan before you execute, ask on every ambiguity, the plan opens the PR.
+- **0b** The season reads ALL the history Alpha Vantage returns (`parseAvJson()` no longer cuts at ten years; the
+  realised volatility from the same series lengthens with it). Measured on avFixture (`node scripts/measure-season.mjs`;
+  the live series is not reachable from the sandbox): a 195-month series (CORN's real length) carries 16–17 years per
+  month instead of 9–10; months that count, markets with no season built in, 12 → 9 false positives in 132 tests;
+  CORN-shaped June −6.0% ± 1.4% (10 yrs) → −4.0% ± 1.3% (16 yrs), counts both ways; the built-in +1.03% September
+  counts in neither.
+- **0c** Every ⓘ shows its label ("How the numbers fit ⓘ") and opens a readable box (FS.sm, full width); `iconOnly`
+  only in a figure tile (the account strip's cells, the card's FUTURE and PAST tiles). The 8 sites: How the numbers fit
+  (card.jsx; also the Why sheet), the account strip (iconOnly), Positions' "Hold", the price field's "This price", "An
+  order sent outside this app", "The limit against Alpaca's mark", the close confirm's "The order in full", "A holding
+  with no record". The owner chose visible labels everywhere: the close confirm's budget 30 → 35 and Modify's 38 → 40,
+  exactly the labels' words.
+- **0d** "1 card matches what you asked" / "9 cards match what you asked".
+- **0e** The gauge's end labels never overlap: a card's 104px gauge drops the cents when the two would collide and
+  stacks them if they still do (`gaugeEndLabels()`); checked at 390px in a headless Chromium.
+
+**Task 1 — one sorted list.** `MatchList` is one list in the chosen order; a miss stays in place, quieter (`T.mut`,
+held at 4.5:1), its reason at the top; "Hide cards that miss" (off) gives the old view; the line reads "N cards match
+what you asked · M shown as misses" (or "· M hidden"). The tile the list is sorted by is ringed with "sorted by" on
+every card; under "Future avg + signal" the card says "sorted by −3.6 + signal +27.5 = 23.9 per $100" at rest.
+
+**Task 2 — no chance minimum by default.** `RULES.chanceAskDefault` is none; the slider's leftmost position (20%)
+reads "any" and filters nothing (the owner's choice over adding a position).
+
+**Task 3 — the future and the past on every card.** `histBacktest()` moved to engine.js (row for row the same,
+engine.test.js) and runs per card in `findGen`; FUTURE (MONTE CARLO) and PAST YRS (BACKTEST) tiles on Find and on
+Build's top card (figures.test.jsx holds them equal); "Past yrs" order (win rate, then average per $100); "Only a
+positive future avg"; "How the numbers fit" in the owner's words, every number held to its function; Build's backtest
+average is "PAST YRS AVG" and reads the price that fills (`AE`), as the tile does. The names live in rules.js
+(`CARD_LABELS`, `FIND_ORDERS`, moved from signals.js, which re-exports them).
+
+**Task 4 — the sweep.** pro.jsx and App.jsx are on ui.jsx's atoms and the type tokens (one commit each, every test
+unchanged but the sweep test); the card's CONFLICT badge is amber. Counts (`node scripts/measure-sweep.mjs`):
+
+| File | fontSize literals (under 12px) | mono / sans | atom copies |
+|---|---|---|---|
+| pro.jsx | 117 (93) → 0 | 101 / 0 → 102 / 0 | Btn, Panel, Lbl, Stat, mono → none |
+| App.jsx | 224 (110) → 0 | 152 / 26 → 148 / 31 | Btn, Panel, Lbl, Stat, mono, sansUI → none |
+
+**Words** (`node scripts/measure-words.mjs`): find 315 → 344 (0d +1, "any" +1, the two tiles +17, the at-rest sum +10),
+build 250 → 267 (the two tiles); rendered on J-0001: Positions 113/120, one order 32/35, close confirm 35/35, Modify
+40/40.
+
+**Not changed:** `orderBody()`, closeOrder.js, modifyOrder.js's send paths, `closeLimitPrice()`, riskGate.js rules,
+alpacaContract.js, the seven gate calls, every `RULES` value but `chanceAskDefault`, the `/api/state` payload (the two
+list toggles are screen state), `seasonalSignal()`'s rule. J-0001's working close is not touched.
+
+### What the next session inherits from #49
+
+- **J-0001 is still v1 (b)**: its close was working at Alpaca (GTC, $7.62). Nothing here cancels, resends or re-prices it.
+- **The live season and every live PAST YRS tile are unread**: the whole series is read since 0b, so which months
+  count can move on the owner's phone; the sandbox cannot call Alpha Vantage.
+- **The replay wraps a window past December to the same row's January** (moved unchanged from App.jsx): a November
+  start held 75 days reads Nov, Dec and that year's Jan, not the next one's. Fix it in `histBacktest()` and Build's
+  `runReplay()` together, after v1.
+- **The sweep left the type rule, not the tokens**: sentences still in mono — App.jsx 148 mono / 31 sans spreads,
+  pro.jsx 102 / 0 — and two files named in `ui.test.jsx`: visuals.jsx's drawings and main.jsx's crash screen (6 literals).
+- Build's backtest panel still runs behind its button; the top card's PAST tile runs on its own.
+
+## Done in PR #48 — one market registry, measured season, Signals decide, Order by, the sweep
 
 **Task 0 — the debts #47 left.**
 - **0a** A record whose order was replaced from Alpaca's own screen now follows it: `adoptReplacement()` in journal.js
@@ -81,13 +146,8 @@ alpacaContract.js, the seven gate calls, every `RULES` value but the two new one
 - **J-0001 is still v1 (b)**: its close was working at Alpaca (GTC, $7.62). Nothing here cancels, resends or re-prices it.
 - **The season is not read until each market's Alpha Vantage series loads**, so on a cold start every chance says
   "prices only" and the season is out of the score. The live series has never been seen by `seasonalSignal()`.
-- **`parseAvJson()` keeps ten years**, so a month carries about 10 years, not the 16 the brief's arithmetic assumed:
-  CORN's October error is ≈ ±2.0%, not ±1.6%. Whether to read the whole 195-month series is an owner decision (it moves
-  which months count).
-- **The sweep remains for App.jsx and pro.jsx** (they host order paths 1, 2 and 4): App.jsx 224 fontSize literals (110
-  under 12px), 152 mono / 26 sans spreads, 32 paddings, 7 radii, its own Btn, Panel, Lbl, Stat, mono, sansUI; pro.jsx 117
-  literals (93 under 12px), 101 mono / 0 sans, 20 paddings, 7 radii, its own Btn, Panel, Lbl, Stat, mono. Card.jsx's
-  CONFLICT badge is still red.
+- DONE IN #49 (0b): `parseAvJson()` reads the whole series (it kept ten years).
+- DONE IN #49 (Task 4): the sweep of App.jsx and pro.jsx (tokens and atoms); card.jsx's CONFLICT badge is amber.
 - Under "Signals decide" Find builds two families per directional market; on a phone this is the cost to read (PR #49).
 
 ### What the next session inherits from #47
@@ -181,11 +241,17 @@ One line each; see `PRD.md` §5 and `docs/history/ROADMAP.md` for detail.
 
 - **DONE: PR #48** — the market registry, Find by category, the measured season, Signals decide, Order by, and the
   sweep of steps.jsx, why.jsx, positionCard.jsx, wizard.jsx.
-- **FIRST: PR #49 = basket expansion with a measured admission rule** — run `liquidity.mjs` on candidate chains and admit
-  a market only when its open interest clears the floor and Alpha Vantage holds at least N years of its monthly history
-  (N to be set from what `seasonalSignal()` needs); a market enters as one `markets.js` row. Measure Find's cost on a
-  phone (PRD §4.5): generation is now two families per directional market. Not started.
-- **The sweep of App.jsx and pro.jsx** (counts above, under #48's inherits). Not started.
+- **DONE: PR #49** — one sorted list, no chance minimum by default, FUTURE (MONTE CARLO) and PAST YRS (BACKTEST) on
+  every card, the whole Alpha Vantage history, visible ⓘ labels, and the sweep of App.jsx and pro.jsx.
+- **FIRST: PR #50 = basket expansion with a measured admission rule.** The owner pastes `/api/liquidity` for the
+  candidate tickers; a market is admitted when its open interest clears the liquidity floor AND Alpha Vantage holds at
+  least **N = 14 years** of its monthly history. N is set from what `seasonalSignal()` needs: a month counts at |mean| ≥
+  2 × sd / √n, so for a move as large as CORN's measured June (−3.46% on a ≈ 6.4% monthly volatility) to be able to
+  count, n ≥ (2 × 6.4 / 3.46)² ≈ 13.7 → 14 years; with fewer, only moves larger than any the owner has measured can
+  count, and the PAST YRS tile replays fewer than 14 rows. A market enters as one `markets.js` row. Measure Find's cost on
+  a phone (PRD §4.5). Not started.
+- **What the sweep left** (under #49's inherits): sentences in mono in App.jsx and pro.jsx; visuals.jsx's drawings;
+  main.jsx's crash screen.
 - **Journal on the server** — `journal` and `journalSeq` on `/api/state`, merged by ref, so a
   second browser keeps the Journal. Deferred on purpose (24 Sep 2026): changing the sync of
   the only live record before its first live close is the wrong week.

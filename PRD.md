@@ -24,25 +24,36 @@ non-expert trader who wants to learn discipline rather than be sold trades.
      least*, *return on risk at least* (it can only tighten the reward floor, never loosen it) and *horizon*. Tap a
      slider's value to type an exact number; each slider shows a small histogram of the candidates with the threshold
      marked, and how many pass. Every control re-filters the list live; there is no Search button, and a slider never
-     re-runs a simulation. **A card that misses what you asked is hidden behind a count**: "N match what you asked ·
-     show M that miss", tapping it shows them, each with the reason it missed. With nothing matching, the line says
-     which control binds and the nearest value that lets one in, read off the cards' own figures.
+     re-runs a simulation. **The chance slider asks for nothing by default** (PR #49): its leftmost position reads
+     "any". **One sorted list (PR #49).** Every card is in the chosen order; a card that misses what you asked stays
+     in its place, quieter, with the reason it missed at the top. The line reads "N cards match what you asked · M
+     shown as misses"; "Hide cards that miss" (off by default) hides them ("· M hidden"). With nothing matching, the
+     line says which control binds and the nearest value that lets one in, read off the cards' own figures.
      **Signals decide (PR #48).** A market's direction comes from its four signals once: s = score × confidence / 100,
      Bull at s ≥ 12.5, Bear at s ≤ −12.5, Neutral between, CONFLICT always Neutral, never "Very". It shows its
      suggested family plus the Neutral family; each card says "↑ bull · signals" or "→ neutral". While a market's
      signals are being read it shows its Neutral cards and the badge reads "reading…"; when they land, one line says
      "CORN: signals in, Bull cards added".
      **The results filter** reads "All N · Grains n · Energy n · Metals n"; a category opens its tickers' counts.
-     **Order by**: Expected value (default) · Expected value + signal · Chance · Return on risk (synced). Only
-     "Expected value + signal" adds the signal adjustment, and only then do CONFLICT markets sort last. A card's fold
-     says why it sits where it does ("expected value −12.0 per $100 + signal +27.5 = 15.5"). An ⓘ "How the numbers fit"
-     says, from the constants, what the chance and the score each measure and where they meet.
+     **Order by** (names PR #49): Future avg (default) · Future avg + signal · Chance · Return on risk · Past yrs
+     (synced). It sorts the whole list. The tile the list is sorted by is ringed and says "sorted by" on every card.
+     Only "Future avg + signal" adds the signal adjustment (then CONFLICT markets sort last), and then the card says its
+     sum at rest: "sorted by −3.6 + signal +27.5 = 23.9 per $100". "Past yrs" sorts by the replay's win rate, then
+     its average per $100 at risk. "Only a positive future avg" (off by default) hides the rest and says how many.
+     **"How the numbers fit ⓘ"** (every ⓘ shows its label since PR #49) says, from the constants: Future (Monte Carlo)
+     = 8,000 invented futures to expiry, a simulation, not history; Past yrs (backtest) = this trade replayed on the
+     ETF's real past, one row per year; + signal = score ÷ 2 × confidence ÷ 100 (a neutral card: (40 − |score|) ÷ 2 ×
+     confidence ÷ 100); the filter is the sliders and toggles only; "Signals decide" and the autopilot's thresholds.
      Each card carries one badge ("CORN ↑ +64 · conf 86", tap for "Why this market"), a flag where it applies (single
      option, butterfly, CONFLICT, confidence under 40, options dear), the gauge beside the unified picture (tap opens
-     the full figure), and **four figures for the size the budget buys**: YOU RISK (contracts × the risk), MAX PROFIT
-     (contracts × the maximum profit, or "no ceiling"), CHANCE, RETURN ON RISK, with one line under them, "25 contracts
-     × $193 at risk each", and what the chance is made of ("chance: prices + season" or "prices only"). Build's top
-     card is the same component on the same numbers. A toggle hides flagged cards and says how many. Up to three cards
+     the full figure), and **six figures for the size the budget buys**: YOU RISK (contracts × the risk), MAX PROFIT
+     (contracts × the maximum profit, or "no ceiling"), CHANCE, RETURN ON RISK, **FUTURE (MONTE CARLO)** (the
+     simulation's average at the fill price for this size, then "per $100 at risk", then "to <expiry>"; "— · no
+     ceiling" for a structure with no maximum, which sorts last) and **PAST YRS (BACKTEST)** ("won 9 of 14 · avg
+     +$310" for this size, "not read" until the series loads; its ⓘ says it settles at expiry, does not replay the
+     exit rules and steps in whole months), with one line under them, "25 contracts × $193 at risk each", and what the
+     chance is made of ("chance: prices + season" or "prices only"). Build's top card is the same component on the
+     same numbers, and Build's backtest names its average "PAST YRS AVG". A toggle hides flagged cards and says how many. Up to three cards
      compared side by side. "Nothing today" appears only when zero candidates pass, with the count for every reason.
   2. **Build** — one trade: chain, legs, a five-line trade card, the order ticket, and the
      confirm step with the risk gate's checks in plain English.
@@ -133,13 +144,20 @@ Every rule below is code, not a prompt. The numbers live in `src/rules.js` (`RUL
 ### The season — measured only (PR #48)
 
 - The season is read from each market's measured Alpha Vantage monthly history (`/api/av`, seven-day cache) and nothing
-  else; the hand-written table is retired. Until it has loaded, the season is **not read**: the factor is left out of
+  else — **all of it** since PR #49 (owner decision, 3 Oct 2026; it was cut at ten years); the hand-written table is
+  retired. Until it has loaded, the season is **not read**: the factor is left out of
   the score with that reason, and the chance drifts at zero ("prices only").
 - A calendar month counts only when its mean is at least `RULES.seasonalSignalT` (2) standard errors from zero (its own
   standard deviation ÷ √years). The window is the months the trade is held for; months that do not count add no drift.
 - One function, `seasonalSignal()`, says what the season is for a window; the season factor, the chance, the position
   thesis and the autopilot all read it, so one market and one expiry give one season on every screen. The Why sheet
   prints each month: "Oct +1.2% ± 1.6% (16 yrs) · not a signal".
+
+### The request — asked, not assumed (PR #49)
+
+- **No chance minimum by default** (owner decision, 3 Oct 2026): `RULES.chanceAskDefault` is none; the chance
+  slider's leftmost position reads "any" and filters nothing. Measured at the old 50%: 1 of 9 live cards and 5 of the
+  31 fixture cards passed, so the list opened mostly hidden. The quality floors are unchanged and still remove.
 
 ### Entry
 
@@ -242,7 +260,9 @@ normal use, and is never asked for.
    `equity`, `buying_power`, `options_buying_power`) are read from alpaca-py 0.44.0's source, never from a reply; tested
    on stubs and in a headless Chromium against a stubbed broker only. Whether the owner's account sends
    `options_buying_power` is unknown.
-3. **Read when it happens — every new screen on a phone with live data:** PR #48's Find by category, "Signals decide",
+3. **Read when it happens — every new screen on a phone with live data:** PR #49's six tiles, the ringed "sorted by"
+   tile, the one list with its misses in place, "Only a positive future avg", every ⓘ's label and the gauge's end
+   labels (checked on fixtures in a headless Chromium at 390px: no overlap, no sideways scroll); PR #48's Find by category, "Signals decide",
    Order by, "Why this place", the ⓘ "How the numbers fit" and the Why sheet's season row; PR #47's Positions | Orders, the account strip
    and its ⓘ, the bottom bar (it floats above the 80px Netlify badge strip, `BADGE_H`) and Find → Saved; and the earlier
    ones (Find's sliders and cards, the Why sheet, Details, Back). Tested on fixtures and in a headless Chromium (390px)
@@ -250,10 +270,12 @@ normal use, and is never asked for.
    in markup and in the browser's DOM, not by hearing them.
 4. **Read when it happens — no credit has filled at the corrected limit**, and the indicative combination ask on thin
    chains has not been measured by a fill (J-0003 never filled at it).
-5. **Find's cost on a phone is not measured, and the live season has never been read.** Generation is one memo (194–238
-   ms for the 31 fixture cards on a desktop CPU; under "Signals decide" a directional market builds two families, 110 →
-   122 ms on the fixture boards); a slider move is 0.1 ms. The sandbox cannot call Alpha Vantage: `seasonalSignal()` has
-   run on avFixture series only, and `parseAvJson()` keeps ten years, so a month carries ≈ 10 years, not 16.
+5. **Find's cost on a phone is not measured, and the live season has never been read.** Generation is one memo (139–259
+   ms for the 31 fixture cards on a desktop CPU; under "Signals decide" a directional market builds two families; the
+   PR #49 replay adds ≈ 1 ms); a slider move is 0.1 ms. The sandbox cannot call Alpha Vantage: `seasonalSignal()` and
+   `histBacktest()` have run on avFixture series only. Since PR #49 `parseAvJson()` keeps the whole series: on a
+   195-month fixture a month carries 16–17 years instead of 9–10; which live months count, and every live PAST YRS
+   tile, are unread.
 6. **Read when it happens — "Not on Alpaca", "size N > M on the ask", the "Not in the app" card and an order "sent
    outside this app"** have not appeared live (the sync auto-imports a new holding on its first read, so "Not in the
    app" shows mainly when that import has not run).
@@ -265,11 +287,15 @@ normal use, and is never asked for.
    and `closeLimitSlippage` 0.25, `watchAttentionShare` 0.35, `autopilotConfidence` 70, `fallbackIV`/`fallbackSigma` 0.25,
    the four chance-slider constants, `rewardAskMax` 3, `rewardAskStep` 0.05, `amountAskStep` 25, `staleBoardShare` 0.15,
    the liquidity floor, and the signal engine's constants (`BASE_WEIGHTS`, `REINFORCE` 1.25, `CONFLICT_DAMPING` 0.6,
-   `CONFIDENCE_BANDS`). **The default "chance at least 50%" matches 5 of the 31 fixture cards.** PR #47's word budgets
-   (row 35, confirm 30, Positions 120) are the owner's; Modify's 38 is PR #47's measurement. Find's and Build's word
+   `CONFIDENCE_BANDS`). **`chanceAskDefault` is none** (owner decision, 3 Oct 2026, PR #49); the old 50% matched 1 of 9
+   live cards and 5 of the 31 fixture cards. PR #47's word budgets (row 35, Positions 120) are the owner's; the close
+   confirm 30 → 35 and Modify 38 → 40 are the owner's PR #49 decision (the ⓘ labels' words, measured). Find's and Build's word
    ceilings moved 309 → 315 and 244 → 250 in PR #48: the badge's words are now counted (the real change is one word).
 9. **The exit rules are inherited defaults, not backtested** on these ten markets; the single option's +50% of the
-   premium is the owner's choice. The exact long-put maximum (PR #47, 0c) raises three Find fixture cards' return on
+   premium is the owner's choice. PAST YRS settles at expiry and does not replay them; a replay window that runs past
+   December wraps to the same row's January (inherited from App.jsx, moved unchanged, ROADMAP). On fixtures with no
+   season the future avg runs −41.3 → +9.5 per $100, median −4.3, 6 of 31 above zero (the brief measured −41.0 →
+   +8.2, −3.6, 4 of 31; the difference was not traced). The exact long-put maximum (PR #47, 0c) raises three Find fixture cards' return on
    risk 3.5–4.5×; how that moves their rank on live boards is not measured.
 10. **Read when it happens — the AI features** have not seen a real answer since the usage limit ended (2026-10-01).
 

@@ -51,15 +51,25 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
 - Red is for errors and refusals only. CLOSE, Send and the Positions badge use `T.action`; Cancel is the red outline.
 - A take-profit target is `takeProfitTarget()` in `rules.js`, never `takeProfitPct * maxProfit` at a site.
 - A card and Build read one price: `fillNet()`. `listCardFigures()` and `buildFigures()` are the
-  two paths and `figures.test.jsx` holds them equal; the card's four figures are for the size the
+  two paths and `figures.test.jsx` holds them equal; the card's figures are for the size the
   budget buys, from `sizedFigures()` and `sizeLine()`, read at `aFill` (Find) and `AE` (Build), held
-  equal by the same test.
-- A candidate that misses the request is hidden behind a count, never dropped (`resultsLine()`); a
-  slider filters `findGen`'s output and never re-simulates (`find.test.jsx` checks the memo's deps).
+  equal by the same test — and so are the two PR #49 tiles, `futureFigures()` and `pastFigures()`.
+- **The card's names are the owner's (3 Oct 2026) and live in rules.js only:** `CARD_LABELS` — YOU RISK, MAX PROFIT,
+  CHANCE, RETURN ON RISK, FUTURE (MONTE CARLO), PAST YRS (BACKTEST) — and `FIND_ORDERS` — Future avg · Future avg +
+  signal · Chance · Return on risk · Past yrs (each with the `tile` it rings); `PAST_AVG_LABEL` ("PAST YRS AVG") on
+  Build; the two toggles' words. Positions' "at entry vs now" reads the first four. No screen spells them itself.
+- **The historical replay has one home: `histBacktest()` in engine.js** (PR #49): the trade settled at expiry in the
+  same calendar window of every past year, whole months, the current year left out. Find runs it per card in
+  `findGen` (via `listCardFigures()`), Build in `buildFigures()` and its backtest panel; never copy it.
+- **One sorted list (PR #49).** A candidate that misses the request stays in its place in the chosen order, quieter
+  (`T.mut`), with its reason first; "Hide cards that miss" (off) hides it behind the count (`resultsLine()`). Never
+  dropped. A slider filters `findGen`'s output and never re-simulates (`find.test.jsx` checks the memo's deps).
 - Atoms and sizes: `src/ui.jsx` (now with `Info`, the ⓘ, and `Segments`) and the type tokens in `theme.js`. `ui.jsx`,
   `card.jsx`, `find.jsx`, `orders.jsx`, `positions.jsx`, `navBar.jsx`, and since PR #48 `steps.jsx`, `why.jsx`,
-  `positionCard.jsx` and `wizard.jsx` use no `fontSize` literal and define no atom; `ui.test.jsx` fails the build
-  otherwise. App.jsx and pro.jsx are not swept yet (ROADMAP). A longer explanation goes behind one ⓘ or fold, never deleted.
+  `positionCard.jsx` and `wizard.jsx`, and since PR #49 `pro.jsx` and `App.jsx`, use no `fontSize` literal and define
+  no atom; `ui.test.jsx` fails the build otherwise (only visuals.jsx's drawings and main.jsx's crash screen are left,
+  named in the test). A longer explanation goes behind one ⓘ or fold, never deleted. **An ⓘ shows its label**
+  ("How the numbers fit ⓘ"); `iconOnly` only inside a figure tile, where the tile's name is the label.
 - No emoji or rare glyphs in UI strings; stay within `↑ ↓ → ✓ ✗ ⚠ ▲ ▼ ●`.
 - **One registry for the markets: `src/markets.js`.** Adding a market is ONE row there (ticker, name, category, step,
   proposable, weather applies or why not, newsQ, the iv/sigma fallback references); BASKET, `getU()`, the categories
@@ -71,8 +81,8 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
   (`SEASON_NOT_READ`): the factor is excluded and the chance drifts at zero. There is no hand-written table; never add one.
 - **"Signals decide" is `signalDirection()`** (signals.js): score × confidence / 100 against `RULES.directionSignalMin`,
   CONFLICT Neutral, never "Very"; a market shows that family plus Neutral. **The list order is the owner's**
-  (`settings.findOrder`, `findOrderCompare()`); only "Expected value + signal" adds `signalAdjustment()`, and a card's
-  "Why this place" is `placeLine()` on the same figures.
+  (`settings.findOrder`, `findOrderCompare()`); only "Future avg + signal" adds `signalAdjustment()`, and then the
+  card says its sum at rest with `placeLine()` on the same figures. The tile the list is sorted by is ringed.
 - Plan first, then change surgically: the plan is the standing rule's ("Plan before you execute", above).
 
 ## Files that matter
@@ -98,17 +108,18 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
   `posAlerts`', the target `takeProfitTarget()`, the stop level `stopWarningLevel()`.
 - `src/nav.js` — Back: the screen state as history entries (push on a move, step back when a sheet
   is closed from its own button, Home is never intercepted).
-- `src/engine.js` — Black-Scholes, payoff, exit simulator, seeded Monte Carlo, seasonal parse (`statsFromMatrix()`
-  returns per-month years and standard errors; `seasonalSpan()`). `SEASONAL` is retired; `SIGMA` stays.
+- `src/engine.js` — Black-Scholes, payoff, exit simulator, seeded Monte Carlo, seasonal parse (`parseAvJson()` keeps
+  the whole series since PR #49; `statsFromMatrix()` returns per-month years and standard errors; `seasonalSpan()`),
+  the historical replay `histBacktest()` (PR #49). `SEASONAL` is retired; `SIGMA` stays.
   Imports nothing; shared by client and Netlify functions.
 - `src/chain.js` — where the option chain comes from, strikes, open interest, feed names.
-- `src/signals.js` — the four-factor confluence engine, `signalDirection()`, the Find order (`FIND_ORDERS`,
-  `findOrderCompare()`, `placeLine()`), `badgeText()` and `numbersFitLines()`.
+- `src/signals.js` — the four-factor confluence engine, `signalDirection()`, the Find order (`findOrderCompare()`,
+  `placeLine()`; it re-exports `FIND_ORDERS` from rules.js), `badgeText()` and `numbersFitLines()`.
 - `src/indicators.js` — every technical indicator, and the chart copilot's context.
 - `src/freshness.js` — how old a number on screen may be.
 - `src/visuals.jsx` — every trade picture, all cut from `payoffBands()`.
-- `src/card.jsx` — the request controls, the one candidate card (with its picture row), the list that
-  hides misses behind a count, the compare tray and the card's actions.
+- `src/card.jsx` — the request controls, the one candidate card (six tiles and its picture row), the one sorted list
+  (misses in place), the compare tray and the card's actions.
 - `src/ui.jsx` — Btn, Panel, Label, Stat, Fold, Chip, Note, inputs, `RangeField`, the mono/sans stacks.
   The type tokens (`TYPE`) are in `src/theme.js`. Mono only for numbers, tickers, legs, OCC symbols.
 - `src/find.jsx` — Step 1, Find: heading, controls, market chips, the list, the "why" fold, Compare.
@@ -168,7 +179,7 @@ All in `RULES`, `src/rules.js`, unless noted.
 - Simulation: `mcRuns` 8000, `fallbackIV` 0.25, `fallbackSigma` 0.25.
 - Attention: `watchAttentionShare` 0.35, `autopilotConfidence` 70, `lowConfidence` 40.
 - Chance slider: `chanceAskMin` 0.20, `chanceAskMax` 0.80, `chanceAskStep` 0.05,
-  `chanceAskDefault` 0.50. Return-on-risk slider: floor `minRewardRisk`, `rewardAskMax` 3,
+  `chanceAskDefault` none (null; the slider's leftmost position reads "any", PR #49). Return-on-risk slider: floor `minRewardRisk`, `rewardAskMax` 3,
   `rewardAskStep` 0.05 (it can only tighten the floor). Amount slider: `amountAskStep` 25.
 - Quantity fields: ticket 1–20 (`OrderTicket`), leg 1–10 (Build legs editor), via `QtyField`.
 - Indicator periods: `PERIODS` in `src/indicators.js` (deliberately not in `RULES`).
