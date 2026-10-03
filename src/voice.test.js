@@ -157,7 +157,9 @@ test("MEASURED: the three screens, and the table in the PRD is this number", () 
      a registered generator, "CORN ↑ +64 · conf 86" (6). The real change is one word, the ticker the owner asked
      for. Everything else PR #48 adds to these screens is behind a fold or an ⓘ ("Why this place", "How the numbers
      fit") or offset; measured: find 309 → 315, build 244 → 250. */
-  const CEILING = { find: 315, build: 250, positions: 217 };
+  /* >>> PR #49 (owner decisions, 3 Oct 2026): the words Find was asked to grow by, counted one by one. <<<
+     0d: the results line says its noun ("1 card matches what you asked"): +1. */
+  const CEILING = { find: 316, build: 250, positions: 217 };
   /* >>> PR #46: ONE ORDERS LIST. <<< The record-based "WORKING AT THE BROKER" panel (its paragraph about what a
      working order is, the stale-DAY warning, the per-row sentences) left Positions; the one list lives in
      `orders.jsx`, which the counter now reads. Measured: positions 304 -> 209 (4 typed + 205 generated, 14 sites).

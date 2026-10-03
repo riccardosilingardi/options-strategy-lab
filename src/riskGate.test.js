@@ -3329,11 +3329,11 @@ test("SPLIT — the target mode misses by the shortfall, in dollars", () => {
 });
 
 test("SPLIT — the results line carries both counts, so it needs no sentence (PR #45)", () => {
-  assert.equal(resultsLine(4, 27), "4 match what you asked · show 27 that miss");
-  assert.equal(resultsLine(4, 27, true), "4 match what you asked · hide the 27 that miss");
-  assert.equal(resultsLine(1, 1), "1 matches what you asked · show 1 that misses", "a count agrees with its verb");
-  assert.equal(resultsLine(31, 0), "31 match what you asked", "with nothing hidden there is nothing to show");
-  assert.equal(matchHeading(0), "0 match what you asked");
+  assert.equal(resultsLine(4, 27), "4 cards match what you asked · show 27 that miss");
+  assert.equal(resultsLine(4, 27, true), "4 cards match what you asked · hide the 27 that miss");
+  assert.equal(resultsLine(1, 1), "1 card matches what you asked · show 1 that misses", "a count agrees with its verb");
+  assert.equal(resultsLine(31, 0), "31 cards match what you asked", "with nothing hidden there is nothing to show");
+  assert.equal(matchHeading(0), "0 cards match what you asked");
   assert.match(missToggle(3, false), /show 3 that miss/);
   assert.ok(resultsLine(4, 27).split(/\s+/).length <= 12, "a line is not a paragraph");
 });

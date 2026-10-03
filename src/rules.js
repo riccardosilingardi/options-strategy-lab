@@ -3381,8 +3381,9 @@ export function splitByRequest(cands = [], request, sizeOf = () => null) {
 
 const plural = (n, one, many) => (n === 1 ? one : many);
 
-/** "4 match what you asked", with a count that agrees with its verb. */
-export const matchHeading = (n) => `${n} ${plural(n, "matches", "match")} what you asked`;
+/** "4 cards match what you asked" / "1 card matches what you asked" (PR #49, 0d: the noun is said, so "1 matches"
+ *  cannot read as a plural noun), with a count that agrees with its noun and its verb. */
+export const matchHeading = (n) => `${n} ${plural(n, "card matches", "cards match")} what you asked`;
 
 /** The toggle half: "show 27 that miss" / "hide the 27 that miss". */
 export const missToggle = (m, open) =>

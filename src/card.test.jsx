@@ -156,7 +156,7 @@ const renderRow = (c, misses) => (
 check("THE LIST SHOWS WHAT MATCHES, AND THE REST IS A COUNT — NOT A SECOND SECTION", () => {
   const req = requestOf({ amt: 500, minChance: 0.5 }, {});
   const html = renderToStaticMarkup(<MatchList items={ROWS} request={req} sizeOf={sizer} renderItem={renderRow} />);
-  has(html, "1 matches what you asked · show 1 that misses");
+  has(html, "1 card matches what you asked · show 1 that misses");
   has(html, ">A<");
   if (html.includes(">B<")) throw new Error("a card that misses the request is on screen");
   if (html.includes("chance 20% under the 50% asked")) throw new Error("a hidden card's reason is on screen");
@@ -166,7 +166,7 @@ check("THE LIST SHOWS WHAT MATCHES, AND THE REST IS A COUNT — NOT A SECOND SEC
 check("…AND TAPPING THE COUNT BRINGS THEM BACK WITH THEIR REASONS: NOTHING IS DROPPED", () => {
   const req = requestOf({ amt: 500, minChance: 0.5 }, {});
   const html = renderToStaticMarkup(<MatchList items={ROWS} request={req} sizeOf={sizer} renderItem={renderRow} defaultOpen />);
-  has(html, "1 matches what you asked · hide the 1 that misses");
+  has(html, "1 card matches what you asked · hide the 1 that misses");
   has(html, ">A<"); has(html, ">B<");
   has(html, "chance 20% under the 50% asked");
   has(html, 'aria-expanded="true"');
@@ -175,14 +175,14 @@ check("…AND TAPPING THE COUNT BRINGS THEM BACK WITH THEIR REASONS: NOTHING IS 
 check("EVERYTHING MATCHING MEANS NOTHING TO SHOW, SO THE LINE IS NOT A BUTTON", () => {
   const req = requestOf({ amt: 500, minChance: 0.2 }, {});
   const html = renderToStaticMarkup(<MatchList items={ROWS} request={req} sizeOf={sizer} renderItem={renderRow} />);
-  has(html, "2 match what you asked");
+  has(html, "2 cards match what you asked");
   if (html.includes("show ")) throw new Error("a toggle with nothing behind it");
 });
 
 check("ZERO MATCHES NAMES THE CONTROL THAT BINDS AND THE NEAREST VALUE THAT LETS ONE IN", () => {
   const req = requestOf({ amt: 500, minChance: 0.8 }, {});
   const html = renderToStaticMarkup(<MatchList items={ROWS} request={req} sizeOf={sizer} renderItem={renderRow} />);
-  has(html, "0 match what you asked · show 2 that miss");
+  has(html, "0 cards match what you asked · show 2 that miss");
   has(html, "Lower chance to 70% → 1 match: AAA");
 });
 
