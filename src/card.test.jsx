@@ -16,7 +16,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { CandidateCard, MatchList, RequestControls, MissLine, CardGrid, SignalBadge, badgeText, NumbersFit, MarketPicker, ResultsFilter } from "./card.jsx";
 import { readFileSync } from "node:fs";
 import { requestOf, RULES, fillNet, comboBook, openLimitPrice, rewardRisk, onTick, sizeLine, candidateFlags,
-  sizedFigures, directionTag, controlReadings } from "./rules.js";
+  sizedFigures, directionTag, controlReadings, futureFigures, pastFigures } from "./rules.js";
+import { T } from "./theme.js";
 import { payoffBands } from "./visuals.jsx";
 
 const ok = [], bad = [];
@@ -87,7 +88,8 @@ check("A CARD WITH NO SIZE SAYS PER CONTRACT, AND HAS NO FOLD TO SAY IT AGAIN", 
     <CandidateCard name="Bull Call Spread" legs="+1 28C" rr={1.5} pop={0.62} figures={sizedFigures(A80, null)} />);
   has(html, "PER CONTRACT"); has(html, "$80"); has(html, "$120");
   if (html.includes("FOR ")) throw new Error("a card with no size claims one");
-  if (html.includes("aria-expanded")) throw new Error("there is nothing per-contract to fold away");
+  // (The two ⓘ in the FUTURE and PAST tiles carry aria-expanded since PR #49; the fold is what must be absent.)
+  if (html.includes("figures ▼") || html.includes("more ▼")) throw new Error("there is nothing per-contract to fold away");
 });
 
 check("THE NAME AND THE LEGS ARE THE ONLY LONG THINGS, AND THEY ARE ON IT", () => {
@@ -144,46 +146,84 @@ check("A ROW AMONG THE MISSES CARRIES ITS REASON, AND IT IS ONE LINE", () => {
   if (html.includes("long form")) throw new Error("the card prints the phrase, not the paragraph");
 });
 
-/* ---- THE LIST: it HIDES what misses, behind a count that is the line itself (PR #45, TASK 1) ---- */
+/* ---- THE LIST (PR #49, TASK 1): ONE list in the caller's order; a miss stays in place, quieter, with its reason ---- */
 const ROWS = [
-  { key: "a", name: "A", ticker: "AAA", pop: 0.7, rr: 1.5, maxProfit: 120, maxLoss: -80, entryNet: 0.8 },
   { key: "b", name: "B", ticker: "BBB", pop: 0.2, rr: 1.5, maxProfit: 300, maxLoss: -80, entryNet: 0.8 },
+  { key: "a", name: "A", ticker: "AAA", pop: 0.7, rr: 1.5, maxProfit: 120, maxLoss: -80, entryNet: 0.8 },
 ];
 const sizer = () => ({ ok: true, n: 1, unit: 80, risk: 80, isCredit: false, totProfit: 120 });
 const renderRow = (c, misses) => (
   <CandidateCard key={c.key} name={c.name} legs="+1 28C" misses={misses} rr={c.rr} pop={c.pop} figures={sizedFigures(A80, 1)} />);
 
-check("THE LIST SHOWS WHAT MATCHES, AND THE REST IS A COUNT — NOT A SECOND SECTION", () => {
+check("ONE LIST: a card that misses stays IN PLACE, in the order given, quieter, with its reason at the top", () => {
   const req = requestOf({ amt: 500, minChance: 0.5 }, {});
-  const html = renderToStaticMarkup(<MatchList items={ROWS} request={req} sizeOf={sizer} renderItem={renderRow} />);
-  has(html, "1 card matches what you asked · show 1 that misses");
-  has(html, ">A<");
-  if (html.includes(">B<")) throw new Error("a card that misses the request is on screen");
-  if (html.includes("chance 20% under the 50% asked")) throw new Error("a hidden card's reason is on screen");
-  if (html.includes("MEETS WHAT YOU ASKED FOR") || html.includes("ALSO FOUND")) throw new Error("the old headings are back");
-});
-
-check("…AND TAPPING THE COUNT BRINGS THEM BACK WITH THEIR REASONS: NOTHING IS DROPPED", () => {
-  const req = requestOf({ amt: 500, minChance: 0.5 }, {});
-  const html = renderToStaticMarkup(<MatchList items={ROWS} request={req} sizeOf={sizer} renderItem={renderRow} defaultOpen />);
-  has(html, "1 card matches what you asked · hide the 1 that misses");
+  const html = renderToStaticMarkup(<MatchList items={ROWS} request={req} sizeOf={sizer} renderItem={renderRow} onHideMisses={() => {}} />);
+  has(html, "1 card matches what you asked · 1 shown as a miss");
   has(html, ">A<"); has(html, ">B<");
+  if (!(html.indexOf(">B<") < html.indexOf(">A<"))) throw new Error("the miss was moved below the match: the order is the caller's");
   has(html, "chance 20% under the 50% asked");
-  has(html, 'aria-expanded="true"');
+  // The reason is the first thing on B's card, and B is marked a miss and drawn in the muted tone.
+  const b = html.slice(html.lastIndexOf("<article", html.indexOf('aria-label="B"')), html.lastIndexOf("<article", html.indexOf('aria-label="A"')));
+  has(b, 'data-miss="true"');
+  if (!(b.indexOf("chance 20% under") < b.indexOf(">B<"))) throw new Error("the reason is not at the top of the card");
+  has(b, `color:${T.mut}`);
+  if (html.includes("show 1 that") || html.includes("hide the")) throw new Error("the old count-button is back");
+  has(html, "Hide cards that miss");
 });
 
-check("EVERYTHING MATCHING MEANS NOTHING TO SHOW, SO THE LINE IS NOT A BUTTON", () => {
-  const req = requestOf({ amt: 500, minChance: 0.2 }, {});
-  const html = renderToStaticMarkup(<MatchList items={ROWS} request={req} sizeOf={sizer} renderItem={renderRow} />);
+check("…'HIDE CARDS THAT MISS' GIVES THE OLD VIEW, AND THE LINE SAYS HOW MANY ARE HIDDEN", () => {
+  const req = requestOf({ amt: 500, minChance: 0.5 }, {});
+  const html = renderToStaticMarkup(<MatchList items={ROWS} request={req} sizeOf={sizer} renderItem={renderRow} hideMisses onHideMisses={() => {}} />);
+  has(html, "1 card matches what you asked · 1 hidden");
+  has(html, ">A<");
+  if (html.includes(">B<")) throw new Error("a hidden miss is on screen");
+});
+
+check("EVERYTHING MATCHING: the line is the count alone, and there is no toggle to hide nothing", () => {
+  const req = requestOf({ amt: 500 }, {});
+  const html = renderToStaticMarkup(<MatchList items={ROWS} request={req} sizeOf={sizer} renderItem={renderRow} onHideMisses={() => {}} />);
   has(html, "2 cards match what you asked");
-  if (html.includes("show ")) throw new Error("a toggle with nothing behind it");
+  if (html.includes("Hide cards that miss")) throw new Error("a toggle with nothing behind it");
 });
 
 check("ZERO MATCHES NAMES THE CONTROL THAT BINDS AND THE NEAREST VALUE THAT LETS ONE IN", () => {
   const req = requestOf({ amt: 500, minChance: 0.8 }, {});
   const html = renderToStaticMarkup(<MatchList items={ROWS} request={req} sizeOf={sizer} renderItem={renderRow} />);
-  has(html, "0 cards match what you asked · show 2 that miss");
+  has(html, "0 cards match what you asked · 2 shown as misses");
   has(html, "Lower chance to 70% → 1 match: AAA");
+});
+
+check("SIX TILES IN A FIXED ORDER (PR #49): the four, then FUTURE (MONTE CARLO) and PAST YRS (BACKTEST)", () => {
+  const future = futureFigures({ ev: -2.88 }, A80, 3, "2026-10-30");
+  const bt = { wins: 9, n: 14, winRate: 9 / 14, avg: 103.4, span: 2, month: 9, excludedYear: 2026 };
+  const html = renderToStaticMarkup(
+    <CandidateCard name="Bull Call Spread" legs="+1 28C" rr={1.5} pop={0.62} figures={sizedFigures(A80, 3)}
+      future={future} past={pastFigures(bt, A80, 3)} ticker="CORN" />);
+  const ORDER = [">YOU RISK<", ">MAX PROFIT<", ">CHANCE<", ">RETURN ON RISK<", ">FUTURE (MONTE CARLO)<", ">PAST YRS (BACKTEST)<"];
+  const at = ORDER.map((k) => html.indexOf(k));
+  if (at.some((x) => x < 0)) throw new Error(`a tile is missing: ${ORDER.filter((k, i) => at[i] < 0)}`);
+  for (let i = 1; i < at.length; i++) if (!(at[i] > at[i - 1])) throw new Error("the six tiles are not in their fixed order");
+  // FUTURE: the value for the size (3 × −$2.88 = −$9), then per $100 at risk (−2.88 / 80 × 100 = −3.6), then to the expiry.
+  has(html, "-$9"); has(html, "−3.6 per $100 at risk"); has(html, "to 30 Oct 2026");
+  // PAST: won 9 of 14 · avg for the size (3 × $103.4 = +$310).
+  has(html, "won 9 of 14 · avg +$310");
+  // Each new tile has its ⓘ, icon only: the tile's name is the label.
+  has(html, 'aria-label="About future (monte carlo)"'); has(html, 'aria-label="About past yrs (backtest)"');
+  const none = renderToStaticMarkup(<CandidateCard name="X" legs="x" rr={1} pop={0.5} figures={sizedFigures(A80, 1)} />);
+  has(none, "not read");
+});
+
+check("THE ORDER IS VISIBLE AT REST: the sorted-by tile is ringed and labelled, and '+ signal' says its sum", () => {
+  const html = renderToStaticMarkup(
+    <CandidateCard name="X" legs="x" rr={1.5} pop={0.62} figures={sizedFigures(A80, 1)} sortedBy="chance" />);
+  const ringed = [...html.matchAll(/data-tile="([^"]+)" data-sorted="true"/g)].map((m) => m[1]);
+  if (ringed.join() !== "CHANCE") throw new Error(`ringed: ${ringed}`);
+  has(html, ">sorted by<"); has(html, `outline:2px solid ${T.blue}`);
+  const sig = renderToStaticMarkup(
+    <CandidateCard name="X" legs="x" rr={1.5} pop={0.62} figures={sizedFigures(A80, 1)} sortedBy="future"
+      placeAtRest="sorted by −3.6 + signal +27.5 = 23.9 per $100" />);
+  has(sig, "sorted by −3.6 + signal +27.5 = 23.9 per $100");
+  if (sig.includes("Why this place")) throw new Error("the place line is still in the fold");
 });
 
 check("THE PRICE NOTE IS OPT-IN, because a mid-priced row may not claim otherwise", () => {

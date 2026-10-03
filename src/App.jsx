@@ -17,7 +17,7 @@ import { BandThumbnail, payoffBands, bandTakeaway, GaugeFigure, Gauge, CompareFi
   OpenInterestStrip, oiStripTakeaway, oiCutAt, oiGhostCut, explainOiStrip, useWidth } from "./visuals.jsx";
 import { fuseSignals, sentimentDirection, signalDirection, signalFamilies, findOrderOf, findOrderCompare, withSignalRank, compareCandidates, againstSignal,
   readingState, signalSnapshot, compareSignals } from "./signals.js";
-import { N as nCDF, bs as bsPrice, smile as smileIV, payoff as payoffExp, SIGMA,
+import { N as nCDF, bs as bsPrice, smile as smileIV, payoff as payoffExp, SIGMA, histBacktest,
   parseAvJson, statsFromMatrix } from "./engine.js";
 import { parseOcc, buildOcc, snapStrike, resnapLegs, expiryStrikes, strikeOptions, fetchChain, hasOpenInterest, enrichOpenInterest, feedName, sourceNote, openInterestNote, oiProfile, expiryOpenInterest, nearMoneyOpenInterest, monotonicityBreaks, monotonicityNote, invertedOnStrikes, spotOf, spotAt } from "./chain.js";
 import { T, themeName, setTheme, BADGE_SAFE } from "./theme.js";
@@ -44,7 +44,8 @@ import { RULES, sizing, ruleBadge, takeProfitLabel, takeProfitTarget, takeProfit
   sigmaProvenance, isButterfly,
   requestOf, contractsSourceNote, fillNet,
   rewardRiskRange, RR_POINTS, crossingCost, crossingCostNote, openingMarkNote,
-  figureSet, reconcileFigures, unitMoney, candidateFlags, sizeLine, sizedFigures, sizingFreeOn, sizedFree, atRiskNowLine, boardLooksStale, fetchFailWords, stopSigns } from "./rules.js";
+  figureSet, reconcileFigures, unitMoney, candidateFlags, sizeLine, sizedFigures, sizingFreeOn, sizedFree, atRiskNowLine, boardLooksStale, fetchFailWords, stopSigns,
+  futurePer100, futureFigures, pastFigures, futureIsPositive, PAST_AVG_LABEL } from "./rules.js";
 import { isStale, freshnessNote, staleAmong , findFreshness } from "./freshness.js";
 import { evaluateTrade, gateSummary } from "./riskGate.js";
 import { DEMO, DEMO_BANNER, DEMO_TOOLTIP, DEMO_SEED_TICKERS, demoPositions } from "./demo.js";
@@ -504,17 +505,22 @@ const chanceStamp = (mc, ticker = "this market") => (mc ? mc.seasonalNote : chan
 
 /** The figures one list card prints. `a`/`aFill` may be handed in when the
  *  generation site already computed them; nothing is re-derived either way. */
-export function listCardFigures(legs, { spot, dte, iv, q, ticker, expKey = null, seasonal, a = null, aFill = null }) {
+export function listCardFigures(legs, { spot, dte, iv, q, ticker, expKey = null, seasonal, a = null, aFill = null, matrix = null, month = NOW_MONTH }) {
   const mid = a || analyze(legs, spot, dte, iv, q);
   const af = aFill || atFillPrice(legs, mid, { spot, dte, iv, q });
   const mc = seasonal ? chanceCheckOf(af, { ticker, legs, spot, dte, expKey, seasonal }) : null;
   const pop = mc ? mc.pop : null;
+  /* THE FUTURE AND THE PAST (PR #49, TASK 3): the Monte Carlo average per $100 at risk, and the historical replay on
+     the market's measured monthly matrix — settled at expiry, the same window each past year. No simulation: one
+     pass over the matrix. Null until the series loads ("not read"). */
+  const bt = matrix ? histBacktest(legs, spot, dte, af.entry, matrix, { month }) : null;
   return { a: mid, aFill: af, mc, pop, bands: payoffBands({ legs, entryNet: af.entry, spot }),
-    rr: rewardRisk(af.maxProfit, af.maxLoss), figures: figureSet(af, pop) };
+    rr: rewardRisk(af.maxProfit, af.maxLoss), figures: figureSet(af, pop),
+    future: futureFigures(mc, af, null, expKey), bt, past: pastFigures(bt, af) };
 }
 
 /** The Build screen's chain, from the legs to the price that will be sent. */
-export function buildFigures(legs, { spot, dte, iv, q, ticker = null, expKey = null, seasonal = null, legPx = null, type = "limit" }) {
+export function buildFigures(legs, { spot, dte, iv, q, ticker = null, expKey = null, seasonal = null, legPx = null, type = "limit", matrix = null, month = NOW_MONTH }) {
   const A = spot && legs.length ? analyze(legs, spot, dte, iv, q) : null;
   /* THE PRICE THE ORDER WILL BE SENT AT IS BUILD-SCREEN STATE. Type, time in
      force and ONE PRICE PER LEG live in App.jsx; `legPx` is null until the user
@@ -548,10 +554,13 @@ export function buildFigures(legs, { spot, dte, iv, q, ticker = null, expKey = n
   const chance = AE && spot && legs.length && seasonal ? chanceCheckOf(AE, { ticker, legs, spot, dte, expKey, seasonal }) : null;
   // `rr` and `bands` are what the ONE candidate card prints beside the figures (PR #44, TASK 4); they are worked
   // out exactly as `listCardFigures()` works them out, from the same `AE`.
+  // The future and the past, as `listCardFigures()` works them out, at the same `AE` (PR #49; figures.test.jsx).
+  const bt = AE && matrix && spot ? histBacktest(legs, spot, dte, AE.entry, matrix, { month }) : null;
   return { A, bookQuotes, book, seedPx, legPrices, ticketNet, ticketDir, effective, AE, chance,
     rr: AE ? rewardRisk(AE.maxProfit, AE.maxLoss) : null,
     bands: AE && spot ? payoffBands({ legs, entryNet: AE.entry, spot }) : null,
-    figures: AE ? figureSet(AE, chance ? chance.pop : null) : null };
+    figures: AE ? figureSet(AE, chance ? chance.pop : null) : null,
+    future: AE ? futureFigures(chance, AE, null, expKey) : null, bt, past: AE ? pastFigures(bt, AE) : null };
 }
 
 function netValue(legs, S, dte, baseIV, q) {
@@ -765,35 +774,8 @@ export function shortlistWithFloors(sent, S, step, strikes, dte, baseIV, q, { pe
    panel is the number on the Shortlist row, the Radar row, the Guardian and the
    autopilot's brief — by construction rather than by coincidence.
 ============================================================================== */
-// Backtest su rendimenti storici reali: applica il payoff alla finestra stagionale di ogni anno passato
-function histBacktest(legs, S, dte, entry, matrix) {
-  if (!matrix || !matrix.length) return null;
-  const span = Math.max(1, Math.round(dte / 30));
-  const out = [];
-  // THE CURRENT YEAR HAS NOT FINISHED ITS OWN WINDOW. A trade opened in
-  // September and held for two months has no November yet, so this year's row
-  // is a partial window sitting in a list of complete ones — and it is counted
-  // in the win rate as if it were finished. It is excluded, and the screen says
-  // so rather than quietly showing one row fewer than the years on the chart.
-  const thisYear = new Date().getFullYear();
-  for (const row of matrix) {
-    const [y, ...ms] = row;
-    if (+y === thisYear) continue;
-    let cum = 1, ok = true;
-    for (let i = 0; i < span; i++) {
-      const r = ms[(NOW_MONTH + i) % 12];
-      if (r == null || Number.isNaN(r)) { ok = false; break; }
-      cum *= 1 + r / 100;
-    }
-    if (!ok) continue;
-    const ST = S * cum;
-    out.push({ year: String(y), ret: (cum - 1) * 100, pnl: (payoffExp(legs, ST) - entry) * 100 });
-  }
-  if (!out.length) return null;
-  const wins = out.filter((o) => o.pnl > 0).length;
-  return { rows: out, winRate: wins / out.length, avg: out.reduce((a, b) => a + b.pnl, 0) / out.length,
-    excludedYear: matrix.some((r) => +r[0] === thisYear) ? thisYear : null };
-}
+// THE HISTORICAL REPLAY (`histBacktest()`) lives in engine.js since PR #49: Find's PAST YRS tile and Build's backtest
+// are one function on one matrix.
 
 /* ============================== 3D DATA da chain reale ============================== */
 function oiGridFromChain(chain, S) {
@@ -1536,7 +1518,9 @@ export default function OptionsStrategyLab() {
      the horizon in days, the one-market filter that replaced the Shortlist
      step, and whether flagged cards are listed. Every one of them re-filters
      the list live. */
-  const [find, setFind] = useState({ markets: [...BASKET], dir: "signals", horizon: RULES.targetEntryDTE, market: null, cat: null, flagged: true });
+  // `hideMisses` and `positiveOnly` (PR #49): the two list toggles, off by default; screen state, not synced.
+  const [find, setFind] = useState({ markets: [...BASKET], dir: "signals", horizon: RULES.targetEntryDTE, market: null, cat: null, flagged: true,
+    hideMisses: false, positiveOnly: false });
   // Which market "Why this market" is open on: a card's badge sets it.
   const [whyTk, setWhyTk] = useState(null);
   // THE DAYS THE WHY SHEET READS ITS MARKET AT (PR #48): the card's board when opened from a card, else the market's.
@@ -2136,7 +2120,7 @@ export default function OptionsStrategyLab() {
      that stood beside those memos stands beside the function now. */
   const BF = useMemo(
     () => buildFigures(legs, { spot, dte, iv, q, ticker, expKey, seasonal: seasonalOf(seasonal, ticker),
-      legPx: ticket.legPx, type: ticket.type }),
+      legPx: ticket.legPx, type: ticket.type, matrix: seasonal[ticker]?.matrix || null }),
     [legs, spot, dte, iv, q, ticker, expKey, seasonal, ticket.legPx, ticket.type]);
   const { A, bookQuotes, book, seedPx, legPrices, ticketNet, ticketDir, effective, AE } = BF;
   // WHERE THIS TRADE ARRIVED FROM: null when it was built here by hand, { kind: "card", key } from a Find card.
@@ -3005,7 +2989,8 @@ export default function OptionsStrategyLab() {
   // produces the chance is a memo (`chance` above) because every screen in the
   // app is already showing its answer; a button over it would suggest the panel
   // and the stat were two separate readings, which is the fault this PR closes.
-  const runMC = () => { setBt(histBacktest(legs, spot, dte, A.entry, seas.matrix)); };
+  // At the price that fills (`AE`, PR #49): the same entry the top card's PAST YRS tile replays, so the two agree.
+  const runMC = () => { setBt(histBacktest(legs, spot, dte, (AE || A).entry, seas.matrix, { month: NOW_MONTH })); };
 
   /* ---- Alpaca ---- */
   const setSetting = async (k, v) => { const st = { ...store, settings: { ...store.settings, [k]: v } }; setStore(st); await saveState(st); };
@@ -3384,7 +3369,8 @@ export default function OptionsStrategyLab() {
     const rr = rewardRisk(maxProfit, maxLoss);
     if (rr == null) return null;
     const ev = mc.ev;
-    const ev100 = (ev / risk) * 100;
+    // The one home for this figure is `futurePer100()` in rules.js (PR #49): the FUTURE tile prints it.
+    const ev100 = futurePer100(mc, { maxProfit, maxLoss });
     // ONE ROUNDING, from rules.js: the phrase is derived from the same whole
     // percent every CHANCE on screen prints, so a card cannot say "75%" beside
     // "8 times in 10" about two different roundings of one number.
@@ -3828,7 +3814,7 @@ export default function OptionsStrategyLab() {
         if (r.tally.comboSpreadSkipped && !comboSpreadSkipped.includes(tk)) comboSpreadSkipped.push(tk);
         for (const { p, a, aFill } of r.rows) {
           const lf = listCardFigures(p.legs, { spot: c.spot, dte: d2, iv: u.iv, q: qq, ticker: tk, expKey: ek,
-            seasonal: seasonalFor(tk), a, aFill });
+            seasonal: seasonalFor(tk), a, aFill, matrix: seasonal[tk]?.matrix || null });
           const f = fHere || null;
           const prof = evProfile(lf.mc, aFill.maxProfit, aFill.maxLoss);
           const cand = candidateOf({ name: p.name, legs: p.legs, a: aFill, pop: lf.pop, dte: d2, expKey: ek,
@@ -3843,7 +3829,9 @@ export default function OptionsStrategyLab() {
             noQuoteLegs: comboBook(p.legs, quotesOf(aFill)).missing.length,
             touchSize: touchSizeOf(p.legs, aFill),
             fused: f, flags: candidateFlags({ legs: p.legs, fused: f, ivRank: ivRankOf(tk) }),
-            ev100: prof ? prof.ev100 : -999, tag: prof ? prof.tag : null,
+            ev100: prof && prof.ev100 != null ? prof.ev100 : -999, tag: prof ? prof.tag : null,
+            // THE PAST, PER CONTRACT (PR #49): what "Past yrs" sorts on; the tile sizes it at render.
+            past: lf.past,
           }, f, sentimentDirection(fam)));
         }
       }
@@ -3851,7 +3839,7 @@ export default function OptionsStrategyLab() {
     // NOT SORTED HERE: the order is the owner's (`findShown`, PR #48).
     const stale = Object.entries(boards).filter(([, b]) => b.stale).map(([tk, b]) => ({ tk, expKey: b.expKey }));
     return { items, tally, noBoard, loading, failed, oiSkipped, spreadSkipped, comboSpreadSkipped, boards, stale };
-  }, [find.markets, find.dir, find.horizon, chains, chainErr, liqLevel, fuseFind, seasonalFor, ivRankOf]); // eslint-disable-line
+  }, [find.markets, find.dir, find.horizon, chains, chainErr, liqLevel, fuseFind, seasonalFor, seasonal, ivRankOf]); // eslint-disable-line
   /* "CORN: signals in, Bull cards added" (PR #48, TASK 3). A market shows its Neutral cards while its signals are being
      read; when they land and suggest a direction, its directional family appears, and this says so once. */
   const [signalsIn, setSignalsIn] = useState({});
@@ -3878,8 +3866,11 @@ export default function OptionsStrategyLab() {
   const setFindOrder = useCallback((id) => setStore((st) => {
     const ns = { ...st, settings: { ...st.settings, findOrder: findOrderOf(id).id } }; saveState(ns); return ns;
   }), []);
+  // "ONLY A POSITIVE FUTURE AVG" (PR #49): the card's future avg per $100 at risk above zero; unknown is not above.
+  const futurePositive = (x) => futureIsPositive(x.ev100);
   const findShown = useMemo(() => findGen.items.filter((x) =>
-    inFindFilter(x) && (find.flagged || x.flags.length === 0)).sort(findOrderCompare(findOrder)), [findGen, inFindFilter, find.flagged, findOrder]);
+    inFindFilter(x) && (find.flagged || x.flags.length === 0) && (!find.positiveOnly || futurePositive(x))).sort(findOrderCompare(findOrder)),
+  [findGen, inFindFilter, find.flagged, find.positiveOnly, findOrder]);
   useEffect(() => {
     // BACK RETURNS TO THE CARD (PR #46, TASK 2): a sheet opened from a card scrolls back to it when it closes.
     if (step !== "find" || ev || !scrollToCard.current) return;
@@ -3939,6 +3930,8 @@ export default function OptionsStrategyLab() {
     return () => cancelAnimationFrame(id);
   }, [posSeg, focusOrder, alSync]);
   const flaggedHidden = find.flagged ? 0 : findGen.items.filter((x) => inFindFilter(x) && x.flags.length).length;
+  const positiveHidden = !find.positiveOnly ? 0
+    : findGen.items.filter((x) => inFindFilter(x) && (find.flagged || x.flags.length === 0) && !futurePositive(x)).length;
   /* THE LIQUIDITY FLOOR'S OWN PANEL is about ONE board — its threshold and its
      peers — so it reads the market in focus: the filter, or the top card's. */
   const focusTk = find.market || ((findShown[0] || findGen.items[0]) || {}).tk || find.markets[0] || ticker;
@@ -4253,8 +4246,8 @@ export default function OptionsStrategyLab() {
                 ticker={whyTk || ticker} weatherData={weather} newsItems={newsPool} month={NOW_MONTH}
                 title={`WHY THIS MARKET · ${whyTk || ticker}`} defaultDetail
                 note={fused[whyTk || ticker]?.agreement === "CONFLICT"
-                  ? "Candidates on a CONFLICT market rank last wherever they appear, whatever their expected value."
-                  : "Find ranks candidates on expected value adjusted by this read."}
+                  ? `Under "${findOrderOf("evSignal").label}", candidates on a CONFLICT market sort last, whatever their future avg.`
+                  : `Only "${findOrderOf("evSignal").label}" adds this read to a card's place in Find.`}
               />
             )}
             {ev === "levels" && levelsView(chain, oiGrid, spot, lv)}
@@ -4431,7 +4424,7 @@ export default function OptionsStrategyLab() {
                         <Lbl>WHAT ACTUALLY HAPPENED · {MONTHS[NOW_MONTH]} → +{Math.max(1, Math.round(dte / 30))} MONTHS, EVERY YEAR</Lbl>
                         <div style={{ display: "flex", gap: 16, marginTop: 8, flexWrap: "wrap" }}>
                           <Stat k="YEARS IT WORKED" v={`${(bt.winRate * 100).toFixed(0)}%`} c={bt.winRate >= 0.5 ? T.green : T.red} />
-                          <Stat k="AVERAGE RESULT" v={fmt$(bt.avg)} c={bt.avg >= 0 ? T.green : T.red} />
+                          <Stat k={PAST_AVG_LABEL} v={fmt$(bt.avg)} c={bt.avg >= 0 ? T.green : T.red} />
                           <Stat k="YEARS TESTED" v={bt.rows.length} />
                         </div>
                         <div style={{ display: "flex", gap: 4, marginTop: 8, flexWrap: "wrap" }}>
@@ -4532,7 +4525,7 @@ export default function OptionsStrategyLab() {
             sentiments={SENTIMENTS} universe={BASKET} find={find} setFind={setFind}
             spot={find.market ? spotOf(chains[find.market]) : null}
             limits={limits} onLimit={(ov) => setSetting("sizeOverride", ov)} freeSizing={freeSizing}
-            findGen={findGen} findShown={findShown} signalLines={Object.values(signalsIn)} findOrder={findOrder} onFindOrder={setFindOrder} flaggedHidden={flaggedHidden} barsCache={barsCache}
+            findGen={findGen} findShown={findShown} signalLines={Object.values(signalsIn)} findOrder={findOrder} onFindOrder={setFindOrder} flaggedHidden={flaggedHidden} positiveHidden={positiveHidden} barsCache={barsCache}
             badgeOf={(x) => <SignalBadge fused={x.fused} state={readiness[x.tk]} onClick={() => { scrollToCard.current = x.key; setWhyTk(x.tk); setWhyDte(x.dte); setEv("why"); }} />}
             onMore={(x) => { scrollToCard.current = x.key; setWhyTk(x.tk); setEv("more"); }}
             actionsOf={(x) => (
@@ -5282,6 +5275,7 @@ export default function OptionsStrategyLab() {
                   signs={buildSigns} sizeText={buildSizeLine}
                   figures={sizedFigures(AE, contracts)}
                   rr={BF.rr} pop={chance ? chance.pop : null} basis={chance ? chanceBasisLabel(chance) : null}
+                  future={futureFigures(chance, AE, contracts, expKey)} past={pastFigures(BF.bt, AE, contracts)} ticker={ticker}
                   picture={BF.bands ? { bands: BF.bands, legs, entryNet: AE.entry, spot, bars: barsCache[ticker] || NO_BARS,
                     dte, sigma: chance ? chance.sigma : undefined, driftAnnual: chance ? chance.driftAnnual : undefined, ticker } : null}
                   badge={<SignalBadge fused={fused[ticker] || null} state={readiness[ticker]} onClick={() => { setWhyTk(ticker); setWhyDte(null); setEv("why"); }} />} />

@@ -23,15 +23,16 @@
 // ============================================================================
 import React from "react";
 import { T, TYPE } from "./theme.js";
-import { mono, sans, Btn, Chip, Panel, Label, Stat, Note, Fold, NumberInput, TextArea, RangeField, Info } from "./ui.jsx";
-import { readingLine, unreadInputsAria, inputName, numbersFitLines, badgeText, placeLine } from "./signals.js";
+import { mono, sans, Btn, Chip, Panel, Label, Stat, Note, Fold, NumberInput, TextArea, RangeField, Info, CheckField } from "./ui.jsx";
+import { readingLine, unreadInputsAria, inputName, numbersFitLines, badgeText } from "./signals.js";
 export { badgeText };
 import { MARKET_CATEGORIES } from "./markets.js";
 import { Gauge, UnifiedPosition, UnifiedFigure } from "./visuals.jsx";
 import { RULES, money, chanceText, returnText, NO_CEILING,
   requestAmountLabel, amountNote, freeAmountNote, chanceAskLabel, chanceAskText, rewardAskLabel, controlsFoldNote,
   targetPriceOf, stopSigns, sizedHeading, CARD_LABELS,
-  splitByRequest, resultsLine, missReasonLine, nearestRelaxation, fillPriceHeading } from "./rules.js";
+  meetsRequest, resultsLine, missReasonLine, nearestRelaxation, fillPriceHeading,
+  futureTile, pastTileText, futureInfo, pastInfo, HIDE_MISSES_TOGGLE } from "./rules.js";
 
 const FS = TYPE.size, FW = TYPE.weight, LH = TYPE.line;
 
@@ -40,7 +41,22 @@ const FS = TYPE.size, FW = TYPE.weight, LH = TYPE.line;
    >>> NAMED `CardFigure`, NOT `Figure`. <<< `visuals.jsx` already exports a `Figure` — the tap-to-explain frame — and
    two components with one name in a tree this size is how a reader, a grep and `src/wordcount.mjs` all resolve to
    the wrong one. */
-const CardFigure = ({ k, v, c }) => <Stat k={k} v={v} c={c} style={{ flex: "1 1 72px", minWidth: 72 }} />;
+const CardFigure = ({ k, v, c, lines = null, info = null, sorted = false, muted = false, wide = false, words = false }) => (
+  /* A TILE (PR #49): its name, its value, up to two short lines under it, a ⓘ in the name where it has one
+     (`iconOnly`: the tile's name is the label), and — on the tile the list is sorted by — an accent ring and
+     "sorted by" above the name, so the order is visible at rest (TASK 1). A miss is quieter: `T.mut`, which the
+     theme test holds at 4.5:1 on both surfaces. */
+  <div data-tile={k} data-sorted={sorted ? "true" : undefined}
+    style={{ flex: wide ? "1 1 148px" : "1 1 72px", minWidth: wide ? 148 : 72, borderRadius: 6,
+      ...(sorted ? { outline: `2px solid ${T.blue}`, outlineOffset: 3 } : null) }}>
+    {sorted && <div style={{ ...sans, fontSize: FS.xs, fontWeight: FW.bold, lineHeight: LH.tight, color: T.blue }}>sorted by</div>}
+    <div style={{ ...sans, fontSize: FS.xs, letterSpacing: "0.04em", lineHeight: LH.tight, color: T.dim, display: "flex", alignItems: "center", flexWrap: "wrap" }}>
+      {k}{info}
+    </div>
+    <div style={{ ...(words ? sans : mono), fontSize: FS.md, fontWeight: FW.bold, lineHeight: LH.tight, color: muted ? T.mut : (c || T.ink) }}>{v}</div>
+    {lines && lines.map((l) => <div key={l} style={{ ...sans, fontSize: FS.xs, lineHeight: LH.tight, color: T.dim, marginTop: 2 }}>{l}</div>)}
+  </div>
+);
 
 /* ====================================================================
    1) THE CONTROLS, ABOVE EVERY RESULT — ONE REQUEST BLOCK
@@ -289,42 +305,54 @@ export { CardFigure };
 ==================================================================== */
 export function CandidateCard({
   name, legs = "", rr = null, pop = null, basis = null, figures = null, sizeText = null,
-  picture = null, misses = [], actions = null, badge = null, direction = null, flags = [], signs = null, place = null,
+  picture = null, misses = [], actions = null, badge = null, direction = null, flags = [], signs = null,
+  future = null, past = null, ticker = null, sortedBy = null, placeAtRest = null,
   cardKey = null, more = null, style,
 }) {
   const f = figures || { n: null, risk: null, profit: null, unbounded: false, perRisk: null, perProfit: null };
   const sized = f.n != null;
+  // A CARD THAT MISSES WHAT YOU ASKED STAYS IN ITS PLACE, QUIETER (PR #49, TASK 1): its reason first, its name and
+  // figures in `T.mut` (4.5:1 on both surfaces, the theme test's floor), never removed.
+  const muted = misses.length > 0;
+  const ft = futureTile(future);
+  const tile = (id) => ({ sorted: sortedBy === id, muted });
   return (
     // `data-card-key` is how "Back to the list" finds this card again (PR #44, TASK 3).
-    <article data-card-key={cardKey || undefined} aria-label={name}
-      style={{ padding: "12px 14px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 8, minWidth: 0, ...style }}>
+    <article data-card-key={cardKey || undefined} data-miss={muted ? "true" : undefined} aria-label={name}
+      style={{ padding: "12px 14px", background: T.bg, borderWidth: 1, borderStyle: muted ? "dashed" : "solid", borderColor: T.line, borderRadius: 8, minWidth: 0, ...style }}>
+      <MissLine misses={misses} />
       <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
-        <span style={{ ...sans, fontSize: FS.md, fontWeight: FW.bold, lineHeight: LH.tight, color: T.ink }}>{name}</span>
+        <span style={{ ...sans, fontSize: FS.md, fontWeight: FW.bold, lineHeight: LH.tight, color: muted ? T.mut : T.ink }}>{name}</span>
         {badge}
       </div>
       <div style={{ ...mono, fontSize: FS.xs, lineHeight: LH.body, color: T.mut, marginTop: 2 }}>{legs}</div>
-      {direction && <div style={{ ...sans, fontSize: FS.xs, lineHeight: LH.body, color: T.blue, marginTop: 2 }}>{direction}</div>}
+      {direction && <div style={{ ...sans, fontSize: FS.xs, lineHeight: LH.body, color: muted ? T.mut : T.blue, marginTop: 2 }}>{direction}</div>}
       {/* STOP SIGNS, ABOVE THE NUMBERS: what the guided door used to drop in silence, and the facts that decide. */}
       <StopSigns signs={signs || stopSigns({ flags })} />
-      <MissLine misses={misses} />
       {picture && <CardPicture {...picture} />}
-      {/* FOUR FIGURES, ALWAYS THE SAME FOUR, ALWAYS IN THE SAME PLACES — and THEIR UNIT, said once above them. */}
+      {/* SIX FIGURES, ALWAYS IN THE SAME PLACES (PR #49: the future and the past join the four) — and THEIR UNIT,
+          said once above them. The one the list is sorted by is ringed and says "sorted by". */}
       <Note color={T.dim} style={{ marginTop: 8, letterSpacing: "0.04em" }}>{sizedHeading(f.n)}</Note>
-      <div style={{ display: "flex", gap: 10, marginTop: 2, flexWrap: "wrap" }}>
-        <CardFigure k={CARD_LABELS.risk} v={f.risk == null ? "—" : money(f.risk)} c={T.red} />
-        <CardFigure k={CARD_LABELS.profit} v={f.unbounded ? NO_CEILING : f.profit == null ? "—" : money(f.profit)} c={T.green} />
-        <CardFigure k={CARD_LABELS.chance} v={chanceText(pop)} c={pop >= 0.5 ? T.green : T.violet} />
-        <CardFigure k={CARD_LABELS.rr} v={rr == null ? "—" : returnText(rr)} c={T.amber} />
+      <div style={{ display: "flex", gap: "12px 10px", marginTop: 4, flexWrap: "wrap" }}>
+        <CardFigure k={CARD_LABELS.risk} v={f.risk == null ? "—" : money(f.risk)} c={T.red} {...tile("risk")} />
+        <CardFigure k={CARD_LABELS.profit} v={f.unbounded ? NO_CEILING : f.profit == null ? "—" : money(f.profit)} c={T.green} {...tile("profit")} />
+        <CardFigure k={CARD_LABELS.chance} v={chanceText(pop)} c={pop >= 0.5 ? T.green : T.violet} {...tile("chance")} />
+        <CardFigure k={CARD_LABELS.rr} v={rr == null ? "—" : returnText(rr)} c={T.amber} {...tile("rr")} />
+        <CardFigure k={CARD_LABELS.future} wide v={ft.value} lines={ft.lines}
+          c={future && future.avg != null ? (future.avg >= 0 ? T.green : T.violet) : T.dim}
+          info={<Info iconOnly label={CARD_LABELS.future.toLowerCase()}>{futureInfo()}</Info>} {...tile("future")} />
+        <CardFigure k={CARD_LABELS.past} wide words v={pastTileText(past)}
+          c={past ? (past.avg >= 0 ? T.green : T.violet) : T.dim}
+          info={<Info iconOnly label={CARD_LABELS.past.toLowerCase()}>{pastInfo(past, ticker || "the ETF")}</Info>} {...tile("past")} />
       </div>
+      {/* "FUTURE AVG + SIGNAL" SAYS ITS SUM AT REST (PR #49, TASK 1): `placeLine()`, out of the fold. */}
+      {placeAtRest && <div data-place style={{ ...mono, fontSize: FS.xs, fontWeight: FW.bold, lineHeight: LH.body, color: muted ? T.mut : T.blue, marginTop: 6 }}>{placeAtRest}</div>}
       {/* WHAT THE CHANCE IS MADE OF (PR #48): "prices + season" when a month in the window beat its noise, else
           "prices only". `chanceBasisLabel()` in rules.js; Find and Build pass the same one. */}
       {basis && <Note color={T.dim} style={{ marginTop: 2 }}>chance: {basis}</Note>}
       {sizeText && <div style={{ ...mono, fontSize: FS.xs, fontWeight: FW.bold, lineHeight: LH.body, color: T.blue, marginTop: 6 }}>{sizeText}</div>}
-      {(sized || more || place) && (
+      {(sized || more) && (
         <Fold summary={sized ? "Per contract" : "More"} label={sized ? "figures" : "more"} tone={T.dim} style={{ marginTop: 2 }}>
-          {/* WHY THIS PLACE (PR #48, TASK 4): the figure the chosen order sorted on, from `placeLine()`. */}
-          {/* `place` is { item, order }: the line is written here, inside the fold, so it is not on screen at rest. */}
-          {place && <Note style={{ marginBottom: 4 }}>Why this place: <span style={mono}>{typeof place === "string" ? place : placeLine(place.item, place.order)}</span></Note>}
           {sized && (
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             <CardFigure k="RISK, ONE CONTRACT" v={f.perRisk == null ? "—" : money(f.perRisk)} c={T.red} />
@@ -418,48 +446,43 @@ export function NumbersFit({ order }) {
 }
 
 /* ====================================================================
-   3) THE LIST: WHAT MATCHES, AND A COUNT FOR WHAT DOES NOT (PR #45, TASK 1)
+   3) THE LIST: ONE LIST, SORTED, AND WHAT MISSES STAYS IN PLACE (PR #45, TASK 1; ONE LIST SINCE PR #49, TASK 1)
 
-   The owner: "the filters do not filter". At a minimum chance of 60%, 4 of the 31 fixture cards met it and all 31
-   stayed on screen under two headings; the budget changed nobody's membership. A card that misses the request is
-   HIDDEN now, and the line above the list is the count AND the way back: "4 match what you asked · show 27 that
-   miss". Tapping it shows them, each with the reason it missed. Nothing is dropped without a count.
+   PR #45: "the filters do not filter" — a card that missed the request was HIDDEN behind a count. PR #49, measured
+   live: the list sorted inside two groups, matches first; with 1 match of 9 the top card never changed whichever
+   order was chosen, and the rest re-sorted only once "the 8 that miss" was opened. The owner read it as "order by
+   does not work". So: ONE list, in the chosen order across every card (the caller sorts it); a card that misses
+   stays where the order puts it, quieter, with its reason at the top; "Hide cards that miss" (off by default) gives
+   the old view. The line reads "N cards match what you asked · M shown as misses" (or "· M hidden").
 
-   >>> IT HIDES. IT DOES NOT REMOVE. <<< The quality floors remove, and say which floor did it; they are untouched.
-   Membership is DERIVED on every render from `splitByRequest()` and is never stored on a candidate — a stored
-   membership is a stale one the moment a slider moves, and these controls are meant to be dragged.
+   >>> IT NEVER REMOVES. <<< The quality floors remove, and say which floor did it; they are untouched. Membership is
+   DERIVED on every render from `meetsRequest()` and is never stored on a candidate — a stored membership is a stale
+   one the moment a slider moves, and these controls are meant to be dragged.
 
    With NOTHING matching, the line says which control binds and the nearest value that lets something in, read off
    the candidates' own figures (`nearestRelaxation()`).
 ==================================================================== */
-export function MatchList({ items = [], request, sizeOf = () => null, renderItem, defaultOpen = false,
+export function MatchList({ items = [], request, sizeOf = () => null, renderItem, hideMisses = false, onHideMisses = null,
   /* THE PRICE NOTE IS OPT-IN AND MUST STAY THAT WAY. It says every figure below is read at the price that fills, and
      a section whose rows are still priced at the MID may not print it: a label asserting a price the arithmetic did
      not use is the fault §4l is named after. */
   priceNote = false, aside = null, style }) {
-  const [open, setOpen] = React.useState(defaultOpen);
-  const sp = React.useMemo(() => splitByRequest(items, request, sizeOf), [items, request, sizeOf]);
-  const n = sp.meets.length, m = sp.others.length;
+  const rows = React.useMemo(() => items.map((c) => ({ cand: c, misses: meetsRequest(c, request, sizeOf(c)).misses })),
+    [items, request, sizeOf]);
+  const n = rows.filter((r) => !r.misses.length).length, m = rows.length - n;
   const relax = React.useMemo(() => (n === 0 && m > 0 ? nearestRelaxation(items, request, sizeOf) : null), [n, m, items, request, sizeOf]);
-  const line = resultsLine(n, m, open && m > 0);
+  const line = resultsLine(n, m, hideMisses);
+  const shown = hideMisses ? rows.filter((r) => !r.misses.length) : rows;
   return (
     <div style={style}>
-      {m > 0 ? (
-        <button onClick={() => setOpen((o) => !o)} aria-expanded={open && m > 0} aria-live="polite"
-          style={{ ...sans, fontSize: FS.sm, fontWeight: FW.bold, color: T.ink, background: "transparent", border: "none",
-            padding: 0, minHeight: 44, textAlign: "left", cursor: "pointer", width: "100%" }}>
-          {line} <span style={{ color: T.blue }}>{open ? "▲" : "▼"}</span>
-        </button>
-      ) : (
-        <div aria-live="polite" style={{ ...sans, fontSize: FS.sm, fontWeight: FW.bold, color: T.ink, minHeight: 44, display: "flex", alignItems: "center" }}>{line}</div>
+      <div aria-live="polite" style={{ ...sans, fontSize: FS.sm, fontWeight: FW.bold, color: T.ink, minHeight: 44, display: "flex", alignItems: "center" }}>{line}</div>
+      {onHideMisses && m > 0 && (
+        <CheckField checked={hideMisses} onChange={(e) => onHideMisses(e.target.checked)}>{HIDE_MISSES_TOGGLE}</CheckField>
       )}
       {aside}
       {priceNote && <Note color={T.dim}>{fillPriceHeading()}</Note>}
       {relax && <Note color={T.amber} style={{ marginTop: 2 }} role="status">{relax.text}</Note>}
-      <CardGrid style={{ marginTop: 8 }}>{sp.meets.map((x, i) => renderItem(x.cand, [], i))}</CardGrid>
-      {open && m > 0 && (
-        <CardGrid style={{ marginTop: 12 }}>{sp.others.map((o, i) => renderItem(o.cand, o.misses, i))}</CardGrid>
-      )}
+      <CardGrid style={{ marginTop: 8 }}>{shown.map((r, i) => renderItem(r.cand, r.misses, i))}</CardGrid>
     </div>
   );
 }

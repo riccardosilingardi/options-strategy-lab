@@ -345,3 +345,54 @@ export function statsFromMatrix(matrix) {
   const varr = all.reduce((a, b) => a + (b - mean) ** 2, 0) / Math.max(1, all.length - 1);
   return { monthlyMean, monthN, monthSE, sigma: Math.sqrt(varr * 12), years: matrix.length };
 }
+
+/* ============================================================================
+   THE HISTORICAL REPLAY — ONE HOME (PR #49, TASK 3; moved from App.jsx, where Build alone could reach it).
+
+   This trade replayed on the ETF's REAL monthly moves: for every past year, the same calendar window — from
+   `month`, `span` whole months (`round(dte / 30)`, at least one) — compounds that year's monthly returns into a
+   price at expiry, and the trade is SETTLED AT EXPIRY there. It does NOT replay the exit rules (take profit, the
+   21-day time exit): it answers "had I held to expiry". Steps are whole months, so a 45-day trade replays two.
+
+   THE CURRENT YEAR HAS NOT FINISHED ITS OWN WINDOW. A trade opened in September and held for two months has no
+   November yet, so this year's row would be a partial window in a list of complete ones, counted in the win rate as
+   if it were finished. It is excluded, and the result says so (`excludedYear`) rather than quietly showing one row
+   fewer than the years on the chart. A year with a missing month in the window is skipped (unknown is not zero).
+   KNOWN, NOT FIXED HERE: a window that runs past December wraps to the same row's January — three real monthly
+   moves, but not contiguous ones. Moved as it was (ROADMAP, after #49).
+
+   Find runs it on every card (one pass over ~16 rows, no simulation) and Build on its trade, from the same matrix
+   `parseAvJson()` returns, so the PAST YRS tile and Build's backtest are one number.
+
+   @param legs    the structure (qty included)
+   @param S       today's price of the ETF
+   @param dte     days to expiry
+   @param entry   the net per share at the price that fills (positive debit, negative credit)
+   @param matrix  `parseAvJson().matrix`: [year, Jan%, …, Dec%] rows
+   @param opts    { month, year } — the calendar month the window starts in and the current year (default: today)
+   @returns null without a matrix or a complete window; else { rows: [{year, ret, pnl}], wins, n, winRate, avg,
+            span, month, excludedYear } — `pnl` and `avg` per contract, in dollars
+============================================================================ */
+export function histBacktest(legs, S, dte, entry, matrix, { month = new Date().getMonth(), year = new Date().getFullYear() } = {}) {
+  if (!matrix || !matrix.length || !legs || !legs.length || !Number.isFinite(Number(S)) || !Number.isFinite(Number(entry))) return null;
+  const span = Math.max(1, Math.round(dte / 30));
+  const out = [];
+  for (const row of matrix) {
+    const [y, ...ms] = row;
+    if (+y === year) continue;
+    let cum = 1, ok = true;
+    for (let i = 0; i < span; i++) {
+      // AS IT WAS IN App.jsx: a window past December wraps to the SAME row's January (ROADMAP: not this PR's fix).
+      const r = ms[(month + i) % 12];
+      if (r == null || Number.isNaN(r)) { ok = false; break; }
+      cum *= 1 + r / 100;
+    }
+    if (!ok) continue;
+    const ST = S * cum;
+    out.push({ year: String(y), ret: (cum - 1) * 100, pnl: (payoff(legs, ST) - entry) * 100 });
+  }
+  if (!out.length) return null;
+  const wins = out.filter((o) => o.pnl > 0).length;
+  return { rows: out, wins, n: out.length, winRate: wins / out.length, avg: out.reduce((a, b) => a + b.pnl, 0) / out.length,
+    span, month, excludedYear: matrix.some((r) => +r[0] === year) ? year : null };
+}

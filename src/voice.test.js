@@ -159,8 +159,15 @@ test("MEASURED: the three screens, and the table in the PRD is this number", () 
      fit") or offset; measured: find 309 → 315, build 244 → 250. */
   /* >>> PR #49 (owner decisions, 3 Oct 2026): the words Find was asked to grow by, counted one by one. <<<
      0d: the results line says its noun ("1 card matches what you asked"): +1.
-     Task 2: the chance slider's leftmost value reads "any" (`chanceAskText()`, now a counted generator): +1. */
-  const CEILING = { find: 317, build: 250, positions: 217 };
+     Task 2: the chance slider's leftmost value reads "any" (`chanceAskText()`, now a counted generator): +1.
+     Task 3: the two tiles the owner asked for, on Find's card and on Build's top card (the same component):
+     FUTURE (MONTE CARLO) "-$9 −3.6 per $100 at risk to 30 Oct 2026" (`futureTile()`, 10) and PAST YRS (BACKTEST)
+     "won 9 of 14 · avg +$310" (`pastTileText()`, 7): find +17, build +17. Their names are `CARD_LABELS`, read as
+     expressions, which this counter does not score (nor the four it already had).
+     Task 1: under "Future avg + signal" the card says its sum at rest, "sorted by −12.0 + signal +27.5 = 15.5 per
+     $100" (`placeLine()`, out of the fold): find +10, an upper bound — the other four orders print no line.
+     Measured: find 317 → 344, build 250 → 267. */
+  const CEILING = { find: 344, build: 267, positions: 217 };
   /* >>> PR #46: ONE ORDERS LIST. <<< The record-based "WORKING AT THE BROKER" panel (its paragraph about what a
      working order is, the stale-DAY warning, the per-row sentences) left Positions; the one list lives in
      `orders.jsx`, which the counter now reads. Measured: positions 304 -> 209 (4 typed + 205 generated, 14 sites).

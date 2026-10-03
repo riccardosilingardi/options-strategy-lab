@@ -172,6 +172,9 @@ export const COPY = {
   pctText: () => R.pctText(0.35),
   chanceText: () => R.chanceText(0.55),
   chanceAskText: () => R.chanceAskText(null),
+  // PR #49, TASK 3: the two new tiles, on a fixture of the owner's example ("won 9 of 14 · avg +$310").
+  pastTileText: () => R.pastTileText({ wins: 9, n: 14, avg: 310 }),
+  futureTile: () => { const t = R.futureTile({ avg: -9, per100: -3.6, expiry: "2026-10-30" }); return [t.value, ...t.lines].join(" "); },
   returnText: () => R.returnText(1.25),
   // ROADMAP P10 — the controls block and the card.
   chanceAskLabel: () => (R.chanceAskLabel ? R.chanceAskLabel(REQUEST) : ""),

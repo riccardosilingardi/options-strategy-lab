@@ -17,7 +17,8 @@ import { buildPresets } from "./App.jsx";
 import { scaleStrategy } from "./pro.jsx";
 import { MatchList, CandidateCard } from "./card.jsx";
 import { RULES, requestOf, sizing, sizedFree, sizedFigures, sizeLine, controlReadings, splitByRequest,
-  nearestRelaxation, resultsLine } from "./rules.js";
+  nearestRelaxation, resultsLine, futureFigures, futureIsPositive, FIND_ORDERS } from "./rules.js";
+import { findOrderCompare } from "./signals.js";
 import { findCards, DIRECTIONS } from "../scripts/find-fixtures.jsx";
 
 const ok = [], bad = [];
@@ -122,27 +123,62 @@ check("EVERY CARD THE LIST SIZES FITS THE GATE'S PER-TRADE CHECK: n × maxLoss �
 const LIMITS = { perTradeLimit: 5000, tradingCapital: 100000 };
 const renderRow = (c, misses) => {
   const x = byKey.get(c.key);
-  return <CandidateCard key={x.key} name={`${x.tk} · ${x.name}`} legs="x" misses={misses} rr={x.lf.rr} pop={x.lf.pop}
+  return <CandidateCard key={x.key} cardKey={x.key} name={`${x.tk} · ${x.name}`} legs="x" misses={misses} rr={x.lf.rr} pop={x.lf.pop}
     figures={sizedFigures(x.lf.aFill, null)} />;
 };
 const render = (req, extra = {}) => renderToStaticMarkup(
   <MatchList items={cands} request={req} sizeOf={sizesFor(req)} renderItem={renderRow} {...extra} />);
 const articles = (h) => (h.match(/<article/g) || []).length;
+const keysOf = (h) => [...h.matchAll(/data-card-key="([^"]+)"/g)].map((m) => m[1]);
 
-check("AT 'CHANCE AT LEAST 60%' ONLY THE CARDS THAT MEET ARE ON SCREEN, AND THE REST ARE A COUNT", () => {
+check("ONE LIST (PR #49): AT 'CHANCE AT LEAST 60%' EVERY CARD IS ON SCREEN, THE MISSES IN PLACE WITH THEIR REASONS", () => {
   const req = requestOf({ minChance: 0.6 }, LIMITS);
   const sp = splitByRequest(cands, req, sizesFor(req));
   const n = sp.meets.length, m = sp.others.length;
   eq(n + m, 31, "nothing is dropped: the two are the whole list");
   if (!(n > 0 && m > 0)) throw new Error(`the fixture has to split at 60% (${n}/${m})`);
-  const closed = render(req);
-  eq(articles(closed), n, "only the matching cards are on screen");
-  has(closed, resultsLine(n, m, false));
-  const open = render(req, { defaultOpen: true });
-  eq(articles(open), 31, "tapping the count shows every one");
-  has(open, resultsLine(n, m, true));
-  // ...each of the revealed ones with its reason.
-  for (const o of sp.others) has(open, o.misses[0].short);
+  const all = render(req);
+  eq(articles(all), 31, "every card is on screen, misses included");
+  has(all, resultsLine(n, m, false));
+  eq((all.match(/data-miss="true"/g) || []).length, m, "each miss is marked as one");
+  for (const o of sp.others) has(all, o.misses[0].short);
+  // The list keeps the order it was given: a miss is not moved below the matches.
+  eq(keysOf(all).join("|"), cands.map((c) => c.key).join("|"), "the order on screen is the caller's order");
+  const hidden = render(req, { hideMisses: true });
+  eq(articles(hidden), n, "'Hide cards that miss' gives the old view");
+  has(hidden, resultsLine(n, m, true));
+});
+
+check("SWITCHING 'ORDER BY' REORDERS THE WHOLE LIST — misses included — and the top card changes", () => {
+  const req = requestOf({ minChance: 0.6 }, LIMITS);
+  const tops = new Set();
+  for (const o of FIND_ORDERS) {
+    const sorted = [...cards].sort(findOrderCompare(o.id));
+    const html = renderToStaticMarkup(<MatchList items={sorted.map((c) => c.cand)} request={req} sizeOf={sizesFor(req)} renderItem={renderRow} />);
+    eq(keysOf(html).join("|"), sorted.map((c) => c.key).join("|"), `${o.label}: the screen is the sorted list`);
+    tops.add(sorted[0].key);
+  }
+  if (tops.size < 3) throw new Error(`the five orders put only ${tops.size} different cards on top`);
+});
+
+check("THE FUTURE AND THE PAST ON THE FIXTURES (PR #49): the tile's figure is the one 'Future avg' sorts on", () => {
+  const ev = cards.map((c) => c.ev100).filter((v) => v > -999).sort((a, b) => a - b);
+  const med = ev[Math.floor(ev.length / 2)];
+  const pos = cards.filter((c) => futureIsPositive(c.ev100)).length;
+  console.log(`       future avg per $100: ${ev[0].toFixed(1)} → ${ev[ev.length - 1].toFixed(1)}, median ${med.toFixed(1)}, ${pos} of ${cards.length} above zero`);
+  for (const c of cards) {
+    const ff = futureFigures(c.lf.mc, c.lf.aFill, null, c.expKey);
+    if (c.ev100 > -999) eq(+ff.per100.toFixed(9), +c.ev100.toFixed(9), `${c.name}: tile and sort read one figure`);
+    else eq(ff.per100, null, `${c.name}: no figure, sorts last`);
+  }
+  // The past is read on every fixture card from the one matrix, and "Past yrs" sorts on win rate first.
+  const withPast = cards.filter((c) => c.past);
+  eq(withPast.length, cards.length, "every card has its replay");
+  const byPast = [...cards].sort(findOrderCompare("past"));
+  for (let i = 1; i < byPast.length; i++) if (byPast[i].past.winRate > byPast[i - 1].past.winRate + 1e-12) throw new Error("not sorted by win rate");
+  // "Only a positive future avg" hides exactly the cards at or under zero, and an unknown one.
+  eq(futureIsPositive(-999), false, "unknown is not above zero"); eq(futureIsPositive(0), false, "zero is not above zero");
+  eq(futureIsPositive(0.1), true, "above zero");
 });
 
 check("THE CHANCE CONTROL FILTERS: moving it from 20% to 80% takes the matching count monotonically down", () => {
