@@ -58,7 +58,7 @@ const row = (label, req) => {
   const r = controlReadings(cands, req, (c) => sizes.get(c.key) || null);
   const sp = splitByRequest(cands, req, (c) => sizes.get(c.key) || null);
   console.log("  " + pad(label, 44) + " chance " + String(r.chance.pass).padStart(2) + " · return " + String(r.return.pass).padStart(2) +
-    " · size " + String(r.size.pass).padStart(2) + "  →  " + String(sp.meets.length).padStart(2) + " match, " + sp.others.length + " hidden");
+    " · size " + String(r.size.pass).padStart(2) + "  →  " + String(sp.meets.length).padStart(2) + " match, " + sp.others.length + " shown as misses (PR #49: one list)");
   return { r, sp, sizes };
 };
 console.log("\\nWHAT EACH CONTROL PASSES (of " + cards.length + ")");
