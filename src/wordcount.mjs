@@ -209,6 +209,9 @@ export const COPY = {
   closeSummaryLine: () => OR.closeSummaryLine({ symbol: "GDX261030P00094000", qty: "9", side: "sell", limit_price: "7.77", time_in_force: "day" }),
   marketClockLine: () => CL.marketClockLine({ is_open: false, next_open: "2026-10-05T09:30:00-04:00" }, { timeZone: "Europe/Rome", queued: true }),
   workingCloseText: () => OR.workingCloseText("$7.62 credit · GTC · 0 of 9"),
+  // PR #48: the badge (on CORN's reading) and the card's "Why this place" line (its longest form).
+  badgeText: () => S.badgeText({ ticker: "CORN", score: 64, confidence: 86, agreement: "CONFLUENT" }),
+  placeLine: () => S.placeLine({ ev100: -12, sent: "bull", fused: { score: 64, confidence: 86, agreement: "CONFLUENT" }, lf: {} }, "evSignal"),
 };
 
 export const words = (s) => String(s || "").trim().split(/\s+/).filter(Boolean).length;

@@ -13,7 +13,7 @@
 // ============================================================================
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { CandidateCard, MatchList, RequestControls, MissLine, CardGrid } from "./card.jsx";
+import { CandidateCard, MatchList, RequestControls, MissLine, CardGrid, SignalBadge, badgeText, NumbersFit, MarketPicker, ResultsFilter } from "./card.jsx";
 import { readFileSync } from "node:fs";
 import { requestOf, RULES, fillNet, comboBook, openLimitPrice, rewardRisk, onTick, sizeLine, candidateFlags,
   sizedFigures, directionTag, controlReadings } from "./rules.js";
@@ -297,6 +297,36 @@ check("WHAT THE GUIDED DOOR DROPPED IS A VISIBLE STATE ON THE CARD (PR #40)", ()
   for (const id of ["single", "conflict", "confidence"]) if (!ids.includes(id)) throw new Error(`${id} not flagged`);
   const html = renderToStaticMarkup(<CandidateCard name="X" legs="+1 28C" rr={1} pop={0.5} figures={sizedFigures(A80, 1)} flags={flags} />);
   has(html, "single option"); has(html, "CONFLICT"); has(html, `confidence under ${RULES.lowConfidence}`);
+});
+
+check("THE BADGE READS '<TK> ↑ +64 · conf 86'; reading reads '<TK> reading…' (PR #48)", () => {
+  const corn = { ticker: "CORN", score: 64, confidence: 86, agreement: "CONFLUENT" };
+  if (badgeText(corn) !== "CORN ↑ +64 · conf 86") throw new Error(badgeText(corn));
+  if (badgeText({ ...corn, score: -20, agreement: "MIXED" }) !== "CORN ↓ -20 · conf 86") throw new Error("down");
+  if (badgeText({ ...corn, agreement: "CONFLICT" }) !== "CORN ● +64 · conf 86") throw new Error("conflict");
+  has(renderToStaticMarkup(<SignalBadge fused={corn} />), "CORN ↑ +64 · conf 86");
+  has(renderToStaticMarkup(<SignalBadge fused={null} ticker="XLE" state={{ reading: true, waiting: ["news"], failed: [] }} />), "XLE reading…");
+});
+
+check("WHY THIS PLACE sits in the card's fold, and the ⓘ 'How the numbers fit' is one tap (PR #48)", () => {
+  const html = renderToStaticMarkup(<CandidateCard name="X" legs="x" rr={1} pop={0.5} figures={sizedFigures(A80, 2)} place="expected value −12.0 per $100 + signal +27.5 = 15.5" />);
+  if (html.includes("Why this place")) throw new Error("a closed fold printed its line");
+  has(html, "figures ▼");
+  const info = renderToStaticMarkup(<NumbersFit order="ev" />);
+  has(info, 'aria-label="About how the numbers fit"'); has(info, 'aria-expanded="false"');
+  has(renderToStaticMarkup(<CandidateCard name="X" legs="x" rr={1} pop={0.5} basis="prices only" figures={sizedFigures(A80, 2)} />), "chance: prices only");
+});
+
+check("FIND BY CATEGORY: groups with 'N of M · all / none', and 'All N · Grains n · Energy n · Metals n' (PR #48)", () => {
+  const html = renderToStaticMarkup(<MarketPicker universe={["CORN", "SOYB", "WEAT", "UNG", "GLD"]} markets={["CORN", "UNG"]} onMarkets={() => {}} />);
+  has(html, "MARKETS · 2 OF 5"); has(html, "Grains"); has(html, "1 of 3 ·"); has(html, ">all<"); has(html, ">none<");
+  has(html, "Energy"); has(html, "Metals"); has(html, "0 of 1 ·");
+  const counts = [{ id: "Grains", n: 3, tickers: [{ tk: "CORN", n: 3 }, { tk: "SOYB", n: 0 }] }, { id: "Energy", n: 2, tickers: [{ tk: "UNG", n: 2 }] }];
+  const rf = renderToStaticMarkup(<ResultsFilter counts={counts} total={5} cat={null} />);
+  has(rf, "All 5"); has(rf, "Grains 3"); has(rf, "Energy 2");
+  if (rf.includes("CORN")) throw new Error("a closed category showed its tickers");
+  const open = renderToStaticMarkup(<ResultsFilter counts={counts} total={5} cat="Grains" statusOf={(tk) => (tk === "SOYB" ? "loading" : null)} />);
+  has(open, "CORN</span> 3"); has(open, "SOYB</span> loading");
 });
 
 console.log(`\n${ok.length} passed, ${bad.length} failed\n`);

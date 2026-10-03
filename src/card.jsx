@@ -23,8 +23,9 @@
 // ============================================================================
 import React from "react";
 import { T, TYPE } from "./theme.js";
-import { mono, sans, Btn, Chip, Panel, Label, Stat, Note, Fold, NumberInput, TextArea, RangeField } from "./ui.jsx";
-import { readingLine, unreadInputsAria, inputName } from "./signals.js";
+import { mono, sans, Btn, Chip, Panel, Label, Stat, Note, Fold, NumberInput, TextArea, RangeField, Info } from "./ui.jsx";
+import { readingLine, unreadInputsAria, inputName, numbersFitLines, badgeText, placeLine } from "./signals.js";
+export { badgeText };
 import { MARKET_CATEGORIES } from "./markets.js";
 import { Gauge, UnifiedPosition, UnifiedFigure } from "./visuals.jsx";
 import { RULES, money, chanceText, returnText, NO_CEILING,
@@ -286,7 +287,7 @@ export { CardFigure };
 ==================================================================== */
 export function CandidateCard({
   name, legs = "", rr = null, pop = null, basis = null, figures = null, sizeText = null,
-  picture = null, misses = [], actions = null, badge = null, direction = null, flags = [], signs = null,
+  picture = null, misses = [], actions = null, badge = null, direction = null, flags = [], signs = null, place = null,
   cardKey = null, more = null, style,
 }) {
   const f = figures || { n: null, risk: null, profit: null, unbounded: false, perRisk: null, perProfit: null };
@@ -317,8 +318,11 @@ export function CandidateCard({
           "prices only". `chanceBasisLabel()` in rules.js; Find and Build pass the same one. */}
       {basis && <Note color={T.dim} style={{ marginTop: 2 }}>chance: {basis}</Note>}
       {sizeText && <div style={{ ...mono, fontSize: FS.xs, fontWeight: FW.bold, lineHeight: LH.body, color: T.blue, marginTop: 6 }}>{sizeText}</div>}
-      {(sized || more) && (
+      {(sized || more || place) && (
         <Fold summary={sized ? "Per contract" : "More"} label={sized ? "figures" : "more"} tone={T.dim} style={{ marginTop: 2 }}>
+          {/* WHY THIS PLACE (PR #48, TASK 4): the figure the chosen order sorted on, from `placeLine()`. */}
+          {/* `place` is { item, order }: the line is written here, inside the fold, so it is not on screen at rest. */}
+          {place && <Note style={{ marginBottom: 4 }}>Why this place: <span style={mono}>{typeof place === "string" ? place : placeLine(place.item, place.order)}</span></Note>}
           {sized && (
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             <CardFigure k="RISK, ONE CONTRACT" v={f.perRisk == null ? "—" : money(f.perRisk)} c={T.red} />
@@ -374,13 +378,15 @@ export const CardPicture = React.memo(function CardPicture({ bands, legs, entryN
 /* ONE BADGE PER CARD: agreement · score · confidence. It is a button: the four readings behind it (seasonality,
    trend, weather, news) open in "Why this market" for that market. It replaces the separate four-factor list, which
    read as a second verdict beside the structures (PR #40, TASK 1). */
-export function SignalBadge({ fused, state = null, onClick }) {
+export function SignalBadge({ fused, state = null, ticker = null, onClick }) {
+  const tk = ticker || (fused && fused.ticker) || "";
   /* READING. A market whose news, bars or seasonal series are still on the way shows no score at all (PR #44,
-     TASK 4): a number printed before its inputs landed is the number that moves when the card is opened. */
+     TASK 4): a number printed before its inputs landed is the number that moves when the card is opened. Under
+     "Signals decide" it shows its Neutral cards meanwhile (PR #48). */
   if (state && state.reading) {
     return (
-      <span role="status" style={{ ...sans, fontSize: FS.xs, color: T.dim, border: `1px dashed ${T.field}`, borderRadius: 5, padding: "4px 8px" }}>
-        {readingLine(state)}
+      <span role="status" aria-label={readingLine(state)} style={{ ...sans, fontSize: FS.xs, color: T.dim, border: `1px dashed ${T.field}`, borderRadius: 5, padding: "4px 8px" }}>
+        {tk ? `${tk} ` : ""}reading…
       </span>
     );
   }
@@ -388,13 +394,24 @@ export function SignalBadge({ fused, state = null, onClick }) {
   const c = fused.agreement === "CONFLICT" ? T.red : fused.agreement === "CONFLUENT" ? T.green : T.blue;
   // A FAILED INPUT IS NAMED ON THE BADGE; the factor is scored as neutral and the rest as usual.
   const failed = state && state.failed ? state.failed : [];
+  // "<TK> ↑ +64 · conf 86" (PR #48, TASK 4): the market, the score's direction and sign, the confidence.
   return (
     <button onClick={onClick} aria-label={`why this market${unreadInputsAria(failed) ? `. ${unreadInputsAria(failed)}` : ""}`}
       style={{ ...sans, fontSize: FS.xs, color: c, border: `1px solid ${c}`, borderRadius: 5, padding: "4px 8px",
         background: "transparent", cursor: "pointer", minHeight: 44 }}>
-      {fused.agreement} · {fused.score > 0 ? "+" : ""}{fused.score} · conf {fused.confidence}
+      {badgeText(fused, tk)}
       {failed.length > 0 && <span style={{ color: T.amber }}> · {failed.map((f) => inputName(f.key)).join(", ")} not read</span>}
     </button>
+  );
+}
+
+/* "HOW THE NUMBERS FIT" (PR #48, TASK 4): one ⓘ, beside the results line and on the Why sheet, written from the
+   constants by `numbersFitLines()` (signals.js). */
+export function NumbersFit({ order }) {
+  return (
+    <Info label="how the numbers fit">
+      {numbersFitLines(order).map((l) => <span key={l.k} style={{ display: "block", marginTop: 2 }}>{l.text}</span>)}
+    </Info>
   );
 }
 
@@ -417,7 +434,7 @@ export function MatchList({ items = [], request, sizeOf = () => null, renderItem
   /* THE PRICE NOTE IS OPT-IN AND MUST STAY THAT WAY. It says every figure below is read at the price that fills, and
      a section whose rows are still priced at the MID may not print it: a label asserting a price the arithmetic did
      not use is the fault §4l is named after. */
-  priceNote = false, style }) {
+  priceNote = false, aside = null, style }) {
   const [open, setOpen] = React.useState(defaultOpen);
   const sp = React.useMemo(() => splitByRequest(items, request, sizeOf), [items, request, sizeOf]);
   const n = sp.meets.length, m = sp.others.length;
@@ -434,6 +451,7 @@ export function MatchList({ items = [], request, sizeOf = () => null, renderItem
       ) : (
         <div aria-live="polite" style={{ ...sans, fontSize: FS.sm, fontWeight: FW.bold, color: T.ink, minHeight: 44, display: "flex", alignItems: "center" }}>{line}</div>
       )}
+      {aside}
       {priceNote && <Note color={T.dim}>{fillPriceHeading()}</Note>}
       {relax && <Note color={T.amber} style={{ marginTop: 2 }} role="status">{relax.text}</Note>}
       <CardGrid style={{ marginTop: 8 }}>{sp.meets.map((x, i) => renderItem(x.cand, [], i))}</CardGrid>

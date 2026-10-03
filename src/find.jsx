@@ -20,8 +20,9 @@
 // ============================================================================
 import React, { useCallback, useMemo } from "react";
 import { T, TYPE } from "./theme.js";
-import { mono, sans, Btn, Panel, Label, Stat, Note, Fold, CheckField } from "./ui.jsx";
-import { RequestControls, MatchList, CandidateCard, CompareTray, ResultsFilter } from "./card.jsx";
+import { mono, sans, Btn, Chip, Panel, Label, Stat, Note, Fold, CheckField } from "./ui.jsx";
+import { FIND_ORDERS, DEFAULT_FIND_ORDER } from "./signals.js";
+import { RequestControls, MatchList, CandidateCard, CompareTray, ResultsFilter, NumbersFit } from "./card.jsx";
 import { categoryCounts } from "./markets.js";
 import { StepForward } from "./steps.jsx";
 import { CompareFigure } from "./visuals.jsx";
@@ -41,7 +42,7 @@ const NO_BARS = [];
 export function FindStep({
   request, onRequest, sentiments, universe, find, setFind, spot,
   limits, onLimit, freeSizing,
-  findGen, findShown, signalLines = [], flaggedHidden, barsCache, badgeOf, actionsOf, onMore = null,
+  findGen, findShown, signalLines = [], findOrder = DEFAULT_FIND_ORDER, onFindOrder = null, flaggedHidden, barsCache, badgeOf, actionsOf, onMore = null,
   liqLevel, foldedNode,
   compare, showCompare, compareNote, onTickCompare, onClearCompare, onToggleCompare, onTakeToBuild,
   forward,
@@ -76,6 +77,7 @@ export function FindStep({
         rr={x.lf.rr} pop={x.lf.pop} basis={mc ? chanceBasisLabel(mc) : null}
         picture={x.lf.bands ? { bands: x.lf.bands, legs: x.legs, entryNet: af.entry, spot: x.spot, bars: barsCache[x.tk] || NO_BARS,
           dte: x.dte, sigma: mc ? mc.sigma : undefined, driftAnnual: mc ? mc.driftAnnual : undefined, ticker: x.tk } : null}
+        place={{ item: x, order: findOrder }}
         badge={badgeOf(x)} actions={actionsOf(x)}
         more={onMore ? { tk: x.tk, onOpen: () => onMore(x) } : null} />
     );
@@ -111,6 +113,13 @@ export function FindStep({
           : findGen.noBoard.includes(tk) ? "no board" : null)}
         onCat={(c) => setFind((f) => ({ ...f, cat: c, market: null }))}
         onMarket={(tk) => setFind((f) => ({ ...f, market: tk }))} />
+      {/* ORDER BY (PR #48, TASK 4): Expected value (default) · Expected value + signal · Chance · Return on risk. */}
+      <div role="group" aria-label="Order by" style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
+        <Note color={T.dim}>ORDER BY</Note>
+        {FIND_ORDERS.map((o) => (
+          <Chip key={o.id} on={findOrder === o.id} color={T.blue} onClick={() => onFindOrder && onFindOrder(o.id)}>{o.label}</Chip>
+        ))}
+      </div>
       <div style={{ display: "flex", gap: 6, marginTop: 4, flexWrap: "wrap", alignItems: "center" }}>
         <CheckField checked={find.flagged} onChange={(e) => setFind((f) => ({ ...f, flagged: e.target.checked }))}>
           show flagged{flaggedHidden ? ` (${flaggedHidden} hidden)` : ""}
@@ -135,7 +144,8 @@ export function FindStep({
       )}
 
       {findShown.length > 0 && (
-        <MatchList items={cands} request={request} sizeOf={sizeOf} priceNote renderItem={renderItem} style={{ marginTop: 6 }} />
+        <MatchList items={cands} request={request} sizeOf={sizeOf} priceNote renderItem={renderItem} style={{ marginTop: 6 }}
+          aside={<NumbersFit order={findOrder} />} />
       )}
 
       {/* EVERYTHING THAT EXPLAINS THE LIST, BEHIND ONE "why". Nothing in it is cut: the floor counts and their own
@@ -154,9 +164,8 @@ export function FindStep({
         {findGen.comboSpreadSkipped.length > 0 && <Note color={T.dim} style={{ marginTop: 6 }}>{comboSpreadSkippedNote(`the feed for ${findGen.comboSpreadSkipped.join(", ")}`)}</Note>}
         {findGen.noBoard.length > 0 && <Note style={{ marginTop: 6 }}>{`No expiry on ${findGen.noBoard.join(", ")} is far enough out to open on, so nothing was built there. ${horizonFloorNote()}.`}</Note>}
         {unb > 0 && <Note color={T.dim} style={{ marginTop: 6 }}>{noCeilingRankNote(unb)}</Note>}
-        <Note color={T.dim} style={{ marginTop: 6 }}>
-          Candidates marked CONFLICT sit at the bottom by construction: the four factors contradict each other on that underlying, and no expected value is worth a signal we cannot read.
-        </Note>
+        {/* CONFLICT IS LAST ONLY UNDER "EXPECTED VALUE + SIGNAL" (PR #48): the sentence that said "always" was wrong. */}
+        <Note color={T.dim} style={{ marginTop: 6 }}>Under Expected value + signal, CONFLICT markets sort last.</Note>
         <Note color={isLoosened(liqLevel) ? T.red : T.dim} style={{ marginTop: 6 }}>
           {liquiditySettingNote(liqLevel, { ...t, kept: findGen.items.length })}
         </Note>

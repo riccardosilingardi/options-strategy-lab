@@ -26,6 +26,7 @@ import { Fold } from "./steps.jsx";
 import { ARROW, regionSignals, newsLine, verdictLine, scoreWorking, confidenceWorking } from "./signals.js";
 import { whyFindEffect, WEIGHTS_CHOSEN_LINE, seasonRowLines, chanceBasisLabel } from "./rules.js";
 import { useNarrow } from "./visuals.jsx";
+import { NumbersFit } from "./card.jsx";
 
 const mono = { fontFamily: "ui-monospace, Menlo, monospace" };
 const Lbl = ({ children }) => <div style={{ ...mono, fontSize: 10, letterSpacing: "0.15em", color: T.amber }}>{children}</div>;
@@ -223,7 +224,7 @@ export function SeasonRow({ season }) {
  * two ⓘ, the one sentence on what it changes in Find, the news line, and the long narrative behind "The full
  * reasoning" (the `WhyThisTrade` panel, unchanged, the autopilot sentence inside it).
  */
-export function WhySheet({ fused, title, note, ticker, weatherData, newsItems, month, defaultDetail = false, style }) {
+export function WhySheet({ fused, title, note, ticker, weatherData, newsItems, month, defaultDetail = false, order = "ev", style }) {
   const [how, setHow] = useState(false);
   const [newsOpen, setNewsOpen] = useState(false);
   if (!fused) return null;
@@ -231,6 +232,7 @@ export function WhySheet({ fused, title, note, ticker, weatherData, newsItems, m
       <div style={{ marginTop: 4, ...(style || {}) }}>
         <WhySheetTop fused={fused} how={how} onHow={() => setHow((h) => !h)} />
         <SeasonRow season={fused.season || null} />
+        <div style={{ fontSize: 13, color: T.body, marginTop: 4 }}>How the numbers fit <NumbersFit order={order} /></div>
         <button onClick={() => setNewsOpen((o) => !o)}
           style={{ ...mono, fontSize: 12, marginTop: 6, background: "transparent", color: T.body, border: "none", padding: "4px 0", cursor: "pointer", textAlign: "left", lineHeight: 1.5, minHeight: 44 }}>
           {newsLine(ticker, newsItems).text} {newsOpen ? "▲" : "▼"}

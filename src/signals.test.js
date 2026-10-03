@@ -7,7 +7,8 @@ import { fuseSignals, weatherComponent, newsComponent, ageDecay, regionSignals,
   sentimentDirection, signalAdjustment, rankScore, compareCandidates, withSignalRank, againstSignal,
   weatherApplies, weatherNaReason, factorsOf, tagImpacts, seasonalComponent, REGIONS,
   readingState, readingLine, unreadInputsAria, signalSnapshot, compareSignals,
-  verdictLine, scoreWorking, confidenceWorking, signalDirection, signalFamilies, BASE_WEIGHTS, REINFORCE, CONFLICT_DAMPING, CONFIDENCE_BANDS } from "./signals.js";
+  verdictLine, scoreWorking, confidenceWorking, signalDirection, signalFamilies,
+  FIND_ORDERS, DEFAULT_FIND_ORDER, findOrderOf, findOrderKey, findOrderCompare, placeLine, placeSignal, numbersFitLines, BASE_WEIGHTS, REINFORCE, CONFLICT_DAMPING, CONFIDENCE_BANDS } from "./signals.js";
 import { readFileSync } from "node:fs";
 import { seasonalSignal, RULES } from "./rules.js";
 /* A MEASURED SEASON FOR A FIXTURE (PR #48): every month at `x`%, 16 years, a standard error of 0.4% — so a month
@@ -646,6 +647,57 @@ test("SIGNALS DECIDE (PR #48): s = score × confidence / 100 against directionSi
   const app = readFileSync("src/App.jsx", "utf8").replace(/\/\*[\s\S]*?\*\//g, " ");
   assert.equal(/const suggestion(Score|Of)\s*=/.test(app), false, "suggestionScore / suggestionOf retired");
   assert.ok(/signalFamilies\(sd\)/.test(app), "Find builds the suggested family plus Neutral");
+});
+
+test("ORDER BY (PR #48): four orders; only 'Expected value + signal' adds the signal and puts CONFLICT last", () => {
+  assert.deepEqual(FIND_ORDERS.map((o) => o.label), ["Expected value", "Expected value + signal", "Chance", "Return on risk"]);
+  assert.equal(DEFAULT_FIND_ORDER, "ev");
+  const corn = { score: 64, confidence: 86, agreement: "CONFLUENT" };
+  const war = { score: 30, confidence: 30, agreement: "CONFLICT" };
+  const A = { key: "a", ev100: -12, sent: "bull", fused: corn, lf: { pop: 0.42, rr: 1.2 } };
+  const B = { key: "b", ev100: 5, sent: "neutral", fused: null, lf: { pop: 0.61, rr: 0.4 } };
+  const C = { key: "c", ev100: 20, sent: "bull", fused: war, lf: { pop: 0.5, rr: 0.9 } };
+  const D = { key: "d", ev100: -999, sent: "bull", fused: null, lf: { pop: null, rr: null } };
+  const order = (o) => [A, B, C, D].sort(findOrderCompare(o)).map((x) => x.key).join("");
+  assert.equal(order("ev"), "cbad", "expected value alone; CONFLICT is not last; unknown last");
+  assert.equal(order("evSignal"), "abdc", "−12 + 27.5 = 15.5 beats 5; CONFLICT last");
+  assert.equal(order("chance"), "bcad");
+  assert.equal(order("rr"), "acbd");
+  // WHY THIS PLACE is built from the same figures the sort read.
+  assert.equal(placeSignal(A), signalAdjustment(corn, 1));
+  assert.equal(+placeSignal(A).toFixed(2), 27.52);
+  assert.equal(placeLine(A, "evSignal"), "expected value −12.0 per $100 + signal +27.5 = 15.5");
+  assert.equal(+(findOrderKey(A, "evSignal")).toFixed(1), 15.5, "the line's result is the sort key");
+  assert.equal(placeLine(A, "ev"), "expected value −12.0 per $100");
+  assert.equal(placeLine(A, "chance"), "chance 42%");
+  assert.equal(placeLine(A, "rr"), "return on risk 120%");
+  assert.match(placeLine(C, "evSignal"), /CONFLICT: last$/);
+  assert.equal(placeLine(D, "ev"), "expected value not known · last");
+  assert.equal(findOrderOf("nonsense").id, "ev", "an unknown setting reads as the default");
+});
+
+test("HOW THE NUMBERS FIT (PR #48): every number printed is the constant it describes", () => {
+  const lines = numbersFitLines("evSignal");
+  const all = lines.map((l) => l.text).join(" ");
+  assert.deepEqual(lines.map((l) => l.k), ["chance", "score", "shared", "meet"]);
+  assert.ok(all.includes(`${RULES.mcRuns.toLocaleString("en-US")} simulated runs`));
+  assert.ok(all.includes(`${RULES.seasonalSignalT}× their own noise`));
+  assert.ok(all.includes(`score × confidence / 100 with ${RULES.directionSignalMin}`));
+  assert.ok(all.includes(`at least ${RULES.autopilotConfidence}`));
+  assert.ok(all.includes("(Expected value + signal)"));
+  assert.ok(all.includes("seasonalSignal()"));
+  // …and the numbers are the ones the functions use: directionSignalMin is signalDirection's threshold,
+  const min = RULES.directionSignalMin;
+  assert.equal(signalDirection({ score: min * 2, confidence: 50, agreement: "MIXED" }).dir, "bull");
+  assert.equal(signalDirection({ score: min * 2 - 1, confidence: 50, agreement: "MIXED" }).dir, "neutral");
+  // seasonalSignalT is seasonalSignal's,
+  const st = { monthlyMean: Array(12).fill(RULES.seasonalSignalT), monthN: Array(12).fill(9), monthSE: Array(12).fill(1) };
+  assert.equal(seasonalSignal(st, 0, 30).counts, true);
+  assert.equal(seasonalSignal({ ...st, monthlyMean: Array(12).fill(RULES.seasonalSignalT - 0.01) }, 0, 30).counts, false);
+  // and no number in the text is anything else.
+  const nums = all.match(/\d[\d,.]*/g).map((x) => x.replace(/,/g, "").replace(/\.$/, ""));
+  const allowed = new Set([String(RULES.mcRuns), String(RULES.seasonalSignalT), String(RULES.directionSignalMin), String(RULES.autopilotConfidence), "100"]);
+  for (const n of nums) assert.ok(allowed.has(n), `an unexplained number in the text: ${n}`);
 });
 
 console.log(`\n${passed} passed, ${failures.length} failed\n`);

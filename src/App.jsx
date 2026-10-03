@@ -15,7 +15,7 @@ import { WhySheet } from "./why.jsx";
 import { orderLegs as orderLegsOf, orderHoldingKey, ordersForRecord, orderIntent, rowLines, workingCloseText } from "./orderRow.js";
 import { BandThumbnail, payoffBands, bandTakeaway, GaugeFigure, Gauge, CompareFigure, exitPlanSentence, exitPlanDetail,
   OpenInterestStrip, oiStripTakeaway, oiCutAt, oiGhostCut, explainOiStrip, useWidth } from "./visuals.jsx";
-import { fuseSignals, sentimentDirection, signalDirection, signalFamilies, withSignalRank, compareCandidates, againstSignal,
+import { fuseSignals, sentimentDirection, signalDirection, signalFamilies, findOrderOf, findOrderCompare, withSignalRank, compareCandidates, againstSignal,
   readingState, signalSnapshot, compareSignals } from "./signals.js";
 import { N as nCDF, bs as bsPrice, smile as smileIV, payoff as payoffExp, SIGMA,
   parseAvJson, statsFromMatrix } from "./engine.js";
@@ -845,7 +845,7 @@ async function loadState() {
 // "suggested" until he answers (PRD §3).
 // `journalSeq` is the highest position ref this state has ever issued. It only
 // ever goes up: closing a position does not hand its number back (src/journal.js).
-const EMPTY = { journalSeq: 0, saved: [], positions: [], expiryLog: [], settings: { webhook: "", reportFreq: "weekly", reportLast: 0, reportLastMd: "", capital: null, concurrentTarget: null, savings: null, sizeOverride: null, sizingFree: null, mode: "pro", onboarded: false, notifyWhenReady: false }, seasonal: {}, journal: [], ivHist: {}, copilotLog: [] };
+const EMPTY = { journalSeq: 0, saved: [], positions: [], expiryLog: [], settings: { webhook: "", reportFreq: "weekly", reportLast: 0, reportLastMd: "", capital: null, concurrentTarget: null, savings: null, sizeOverride: null, sizingFree: null, mode: "pro", onboarded: false, notifyWhenReady: false, findOrder: "ev" }, seasonal: {}, journal: [], ivHist: {}, copilotLog: [] };
 /* A BROWSER WITH NO SAVED STATE STARTS FROM THE SERVER'S COPY (PR #42).
 
    Read on the owner's phone, 23 Sep 2026: the app opened from a link rather
@@ -866,7 +866,7 @@ export function hydrateFromServer(local, srv) {
   if (!positions.length) return null;
   const s0 = (srv && srv.settings) || {};
   const settings = {};
-  for (const k of ["webhook", "capital", "concurrentTarget", "savings", "sizeOverride", "sizingFree", "notifyWhenReady"]) {
+  for (const k of ["webhook", "capital", "concurrentTarget", "savings", "sizeOverride", "sizingFree", "notifyWhenReady", "findOrder"]) {
     if (s0[k] !== undefined) settings[k] = s0[k];
   }
   return { positions, settings, restoredFromServer: true };
@@ -879,7 +879,7 @@ async function saveState(st) {
   // is not theirs. Demo state stays in the visitor's own browser.
   if (DEMO) return;
   // sync server (abilita Autopilot ad app chiusa); fire-and-forget
-  try { fetch("/api/state", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ positions: st.positions, settings: { webhook: st.settings?.webhook, capital: st.settings?.capital, concurrentTarget: st.settings?.concurrentTarget, savings: st.settings?.savings, sizeOverride: st.settings?.sizeOverride, sizingFree: st.settings?.sizingFree ?? null, notifyWhenReady: !!st.settings?.notifyWhenReady } }) }); } catch { /* offline ok */ }
+  try { fetch("/api/state", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ positions: st.positions, settings: { webhook: st.settings?.webhook, capital: st.settings?.capital, concurrentTarget: st.settings?.concurrentTarget, savings: st.settings?.savings, sizeOverride: st.settings?.sizeOverride, sizingFree: st.settings?.sizingFree ?? null, notifyWhenReady: !!st.settings?.notifyWhenReady, findOrder: st.settings?.findOrder || "ev" } }) }); } catch { /* offline ok */ }
 }
 
 /* ============================== UI ATOMS ============================== */
@@ -3849,7 +3849,7 @@ export default function OptionsStrategyLab() {
         }
       }
     }
-    items.sort(compareCandidates);
+    // NOT SORTED HERE: the order is the owner's (`findShown`, PR #48).
     const stale = Object.entries(boards).filter(([, b]) => b.stale).map(([tk, b]) => ({ tk, expKey: b.expKey }));
     return { items, tally, noBoard, loading, failed, oiSkipped, spreadSkipped, comboSpreadSkipped, boards, stale };
   }, [find.markets, find.dir, find.horizon, chains, chainErr, liqLevel, fuseFind, seasonalFor, ivRankOf]); // eslint-disable-line
@@ -3873,8 +3873,14 @@ export default function OptionsStrategyLab() {
   // ONE FILTER: a market, or a category of the registry (PR #48, TASK 1).
   const inFindFilter = useCallback((x) => (!find.market || x.tk === find.market) && (!find.cat || categoryOf(x.tk) === find.cat),
     [find.market, find.cat]);
+  /* "ORDER BY" (PR #48, TASK 4): the owner's choice, synced as `settings.findOrder`. Sorting is here, outside the
+     generation memo: changing the order re-sorts the cards and never re-simulates one. */
+  const findOrder = findOrderOf(store.settings?.findOrder).id;
+  const setFindOrder = useCallback((id) => setStore((st) => {
+    const ns = { ...st, settings: { ...st.settings, findOrder: findOrderOf(id).id } }; saveState(ns); return ns;
+  }), []);
   const findShown = useMemo(() => findGen.items.filter((x) =>
-    inFindFilter(x) && (find.flagged || x.flags.length === 0)), [findGen, inFindFilter, find.flagged]);
+    inFindFilter(x) && (find.flagged || x.flags.length === 0)).sort(findOrderCompare(findOrder)), [findGen, inFindFilter, find.flagged, findOrder]);
   useEffect(() => {
     // BACK RETURNS TO THE CARD (PR #46, TASK 2): a sheet opened from a card scrolls back to it when it closes.
     if (step !== "find" || ev || !scrollToCard.current) return;
@@ -3936,7 +3942,7 @@ export default function OptionsStrategyLab() {
   const flaggedHidden = find.flagged ? 0 : findGen.items.filter((x) => inFindFilter(x) && x.flags.length).length;
   /* THE LIQUIDITY FLOOR'S OWN PANEL is about ONE board — its threshold and its
      peers — so it reads the market in focus: the filter, or the top card's. */
-  const focusTk = find.market || ((findGen.items.find(inFindFilter) || findGen.items[0]) || {}).tk || find.markets[0] || ticker;
+  const focusTk = find.market || ((findShown[0] || findGen.items[0]) || {}).tk || find.markets[0] || ticker;
   const focusBoard = findGen.boards[focusTk] || null;
   const liqPreview = useMemo(() => {
     const c = chains[focusTk];
@@ -4244,7 +4250,7 @@ export default function OptionsStrategyLab() {
             sub={ev === "why" ? "the market, not this trade" : EV_META[ev]?.sub} onClose={() => setEv(null)}>
             {ev === "why" && (
               <WhySheet
-                fused={fuseAt(whyTk || ticker, whyDte ?? marketDte(whyTk || ticker))}
+                fused={fuseAt(whyTk || ticker, whyDte ?? marketDte(whyTk || ticker))} order={findOrder}
                 ticker={whyTk || ticker} weatherData={weather} newsItems={newsPool} month={NOW_MONTH}
                 title={`WHY THIS MARKET · ${whyTk || ticker}`} defaultDetail
                 note={fused[whyTk || ticker]?.agreement === "CONFLICT"
@@ -4527,7 +4533,7 @@ export default function OptionsStrategyLab() {
             sentiments={SENTIMENTS} universe={BASKET} find={find} setFind={setFind}
             spot={find.market ? spotOf(chains[find.market]) : null}
             limits={limits} onLimit={(ov) => setSetting("sizeOverride", ov)} freeSizing={freeSizing}
-            findGen={findGen} findShown={findShown} signalLines={Object.values(signalsIn)} flaggedHidden={flaggedHidden} barsCache={barsCache}
+            findGen={findGen} findShown={findShown} signalLines={Object.values(signalsIn)} findOrder={findOrder} onFindOrder={setFindOrder} flaggedHidden={flaggedHidden} barsCache={barsCache}
             badgeOf={(x) => <SignalBadge fused={x.fused} state={readiness[x.tk]} onClick={() => { scrollToCard.current = x.key; setWhyTk(x.tk); setWhyDte(x.dte); setEv("why"); }} />}
             onMore={(x) => { scrollToCard.current = x.key; setWhyTk(x.tk); setEv("more"); }}
             actionsOf={(x) => (

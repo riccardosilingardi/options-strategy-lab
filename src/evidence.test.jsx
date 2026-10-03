@@ -53,7 +53,9 @@ check("TASK 3 — the sheet: '<TK> this month', the market not this trade; one v
   const h = renderToStaticMarkup(<WhySheet fused={f} ticker="GLD" newsItems={[]} month={6} />);
   has(h, `score ${f.score > 0 ? "+" : ""}${f.score}`);
   has(h, `confidence ${f.confidence}`);
-  if ((h.match(/ⓘ/g) || []).length !== 2) throw new Error("two ⓘ, beside score and confidence");
+  // Two ⓘ beside score and confidence, and since PR #48 a third: "How the numbers fit".
+  if ((h.match(/ⓘ/g) || []).length !== 3) throw new Error("three ⓘ: score, confidence, how the numbers fit");
+  if (!h.includes('aria-label="About how the numbers fit"')) throw new Error("the numbers-fit ⓘ");
   has(h, 'aria-expanded="false"');
   has(h, "What this changes in Find");
   has(h, "The full reasoning");

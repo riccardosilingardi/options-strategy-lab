@@ -779,6 +779,87 @@ export function rankScore(ev100, fused, dir) {
   return (Number.isFinite(ev100) ? ev100 : -999) + signalAdjustment(fused, dir);
 }
 
+/* ================================================================
+   "ORDER BY" (PR #48, TASK 4; owner decisions, 3 Oct 2026)
+
+   MEASURED. The list order was ev100 + signalAdjustment(): fixture ev100's middle half spans −26.4 → +11.2, while
+   CORN at +64 / conf 86 adds ±27.5 (the most is ±47.5) — the signal could outweigh the trade, and no card said so.
+   Now the owner chooses. Only "Expected value + signal" adds `signalAdjustment()`, and only then is CONFLICT last.
+   One function sorts (`findOrderCompare()`) and the card's "Why this place" line (`placeLine()`) is built from the
+   same figures, so a card cannot say a reason the sort did not use.
+================================================================ */
+export const FIND_ORDERS = Object.freeze([
+  Object.freeze({ id: "ev", label: "Expected value" }),
+  Object.freeze({ id: "evSignal", label: "Expected value + signal" }),
+  Object.freeze({ id: "chance", label: "Chance" }),
+  Object.freeze({ id: "rr", label: "Return on risk" }),
+]);
+export const DEFAULT_FIND_ORDER = "ev";
+export const findOrderOf = (id) => FIND_ORDERS.find((o) => o.id === id) || FIND_ORDERS[0];
+
+const ev100Of = (x) => (x && Number.isFinite(x.ev100) && x.ev100 > -999 ? x.ev100 : null);
+/** The signal's share of a card's place, in EV points: `signalAdjustment()` for the direction the card needs. */
+export const placeSignal = (x) => signalAdjustment(x && x.fused, sentimentDirection(x && x.sent));
+
+/** The one figure a card sorts on under `order`; null sorts last. */
+export function findOrderKey(x, order = DEFAULT_FIND_ORDER) {
+  const ev = ev100Of(x);
+  switch (findOrderOf(order).id) {
+    case "evSignal": return ev == null ? null : ev + placeSignal(x);
+    case "chance": return x && x.lf && Number.isFinite(x.lf.pop) ? x.lf.pop : null;
+    case "rr": return x && x.lf && Number.isFinite(x.lf.rr) ? x.lf.rr : null;
+    default: return ev;
+  }
+}
+
+/** The comparator. Highest first, unknown last; CONFLICT last only under "Expected value + signal". */
+export const findOrderCompare = (order = DEFAULT_FIND_ORDER) => (a, b) => {
+  if (findOrderOf(order).id === "evSignal") {
+    const ca = a?.fused?.agreement === "CONFLICT", cb = b?.fused?.agreement === "CONFLICT";
+    if (ca !== cb) return ca ? 1 : -1;
+  }
+  const ka = findOrderKey(a, order), kb = findOrderKey(b, order);
+  if (ka == null || kb == null) return ka == null ? (kb == null ? 0 : 1) : -1;
+  return kb - ka;
+};
+
+const sgn1 = (v) => `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(1)}`;
+/** "Why this place": "expected value −12.0 per $100 + signal +27.5 = 15.5", or the sort figure alone. */
+export function placeLine(x, order = DEFAULT_FIND_ORDER) {
+  const id = findOrderOf(order).id;
+  const ev = ev100Of(x);
+  if (id === "chance") return x?.lf && Number.isFinite(x.lf.pop) ? `chance ${Math.round(x.lf.pop * 100)}%` : "chance not known · last";
+  if (id === "rr") return x?.lf && Number.isFinite(x.lf.rr) ? `return on risk ${Math.round(x.lf.rr * 100)}%` : "no ceiling · last";
+  if (ev == null) return "expected value not known · last";
+  const evPart = `expected value ${sgn1(ev)} per $100`;
+  if (id !== "evSignal") return evPart;
+  const sig = placeSignal(x);
+  const conflict = x?.fused?.agreement === "CONFLICT" ? " · CONFLICT: last" : "";
+  return `${evPart} + signal ${sgn1(sig)} = ${(ev + sig).toFixed(1)}${conflict}`;
+}
+
+/** "CORN ↑ +64 · conf 86" — the card's badge (PR #48, TASK 4). A CONFLICT reads "●", a zero score "●". */
+export const badgeText = (fused, tk = fused && fused.ticker) => {
+  if (!fused) return null;
+  const arrow = fused.agreement === "CONFLICT" ? "●" : fused.score > 0 ? "↑" : fused.score < 0 ? "↓" : "●";
+  return `${tk ? `${tk} ` : ""}${arrow} ${fused.score > 0 ? "+" : ""}${fused.score} · conf ${fused.confidence}`;
+};
+
+/**
+ * "HOW THE NUMBERS FIT" (PR #48, TASK 4) — the ⓘ beside the results line and on the Why sheet. Generated from the
+ * constants, so it cannot describe a rule the code does not run (signals.test.js holds each number to its function).
+ * @returns {{ k, text }[]}
+ */
+export function numbersFitLines(order = DEFAULT_FIND_ORDER) {
+  return [
+    { k: "chance", text: `Chance is about one trade: the option prices and their implied volatility, plus the season's months that beat ${RULES.seasonalSignalT}× their own noise, over ${RULES.mcRuns.toLocaleString("en-US")} simulated runs.` },
+    { k: "score", text: "Score and confidence are about one market: four factors — seasonality, price trend, weather, news — weighted and checked for agreement." },
+    { k: "shared", text: "They share one thing: the same season (seasonalSignal()) for the same market and the same days held." },
+    { k: "meet", text: `Where they meet: the filter reads the chance only; "Signals decide" compares score × confidence / 100 with ${RULES.directionSignalMin}; ` +
+      `the order is the one you chose (${findOrderOf(order).label}); the autopilot needs confidence of at least ${RULES.autopilotConfidence}.` },
+  ];
+}
+
 /**
  * Comparator for candidates carrying `{ conflict, rank }`. CONFLICT last, then
  * best adjusted rank first.
