@@ -18,7 +18,8 @@
 //
 // Plain JS, no React imports: the tests import it too.
 // ============================================================================
-import { netBS, payoff, SEASONAL } from "./engine.js";
+import { netBS, payoff } from "./engine.js";
+import { getU as registryU, BASKET } from "./markets.js";
 
 /** The one sentence on every disabled control. Written once, here. */
 export const DEMO_TOOLTIP = "Demo mode: read only";
@@ -90,8 +91,11 @@ export const DEMO = detectDemo();
    fine but the reason for opening it has gone.
 ==================================================================== */
 
+/* THE THREE EXAMPLES' MARKETS. One per example, and the seed list is derived from them (PR #48, TASK 1): it used to
+   be typed out beside them. Each is a registry market (`markets.test.js` holds it). */
+const DEMO_MARKETS = Object.freeze({ winner: "CORN", loser: "UNG", broken: "WEAT" });
 /** The chains the three examples need before they can be priced. */
-export const DEMO_SEED_TICKERS = ["CORN", "UNG", "SOYB", "WEAT"];
+export const DEMO_SEED_TICKERS = Object.freeze(Object.values(DEMO_MARKETS).filter((tk) => BASKET.includes(tk)));
 
 const snap = (x, step) => Math.round(x / step) * step;
 const pct = (x) => `${x > 0 ? "+" : ""}${x.toFixed(1)}%`;
@@ -111,44 +115,16 @@ function extremes(legs, entryNet, S) {
 }
 
 /**
- * Which market's seasonal reading has most turned against a position opened in
- * `entryMonth` and still held in `month`.
- *
- * Position 3 is "the thesis broke", and that has to be TRUE rather than
- * asserted: the Thesis Integrity Score reads seasonality off the same table
- * used here, so if the copy claims the season has gone and the table says it
- * has strengthened, the demo is caught lying by its own screen.
- *
- * A sign flip is the clearest break; a reading that has faded to under half its
- * old size is a real one too. Some pairs of months offer neither — between
- * December and January every one of these markets is more bearish, not less —
- * so `broke` says which case we are in, and the copy only claims what happened.
- */
-function brokenThesisTicker(tickers, month, entryMonth) {
-  let best = null;
-  for (const tk of tickers) {
-    const row = SEASONAL[tk];
-    if (!row) continue;
-    const then = row[entryMonth], now = row[month];
-    const flipped = Math.sign(then) !== Math.sign(now);
-    const faded = !flipped && Math.abs(now) < Math.abs(then) * 0.5;
-    const rank = (flipped ? 200 : faded ? 100 : 0) + Math.abs(then - now);
-    if (!best || rank > best.rank) best = { tk, rank, then, now, broke: flipped || faded };
-  }
-  return best;
-}
-
-/**
  * @param {object} arg
  *   spots      — { ticker: live price }. A ticker with no price is skipped:
  *                a demo position priced off a made-up spot would teach the
  *                wrong lesson the moment the real chain loaded.
- *   underlying — (tk) => ({ iv, step }), i.e. App.jsx's getU
+ *   underlying — (tk) => ({ iv, step }): the registry's getU (src/markets.js) unless a test hands one in
  *   now        — clock, injectable for the tests
  * @returns positions in exactly the shape commitPosition() produces.
  */
 export function demoPositions({ spots = {}, underlying, now = Date.now() } = {}) {
-  const U = typeof underlying === "function" ? underlying : () => ({ iv: 0.3, step: 0.5 });
+  const U = typeof underlying === "function" ? underlying : registryU;
   const month = new Date(now).getMonth();
   const out = [];
 
@@ -178,10 +154,9 @@ export function demoPositions({ spots = {}, underlying, now = Date.now() } = {})
       maxProfit, maxLoss,
       realEntry: false, alpacaId: null,
       thesis: {
-        // NULL, NOT ZERO. A market with no row in `SEASONAL` has no seasonal
-        // reading; a 0 here prints as "season 0.0%/mo" in the Journal, which is
-        // a measurement nobody made.
-        pop: null, iv: u.iv, seasonal: SEASONAL[tk] ? SEASONAL[tk][entryMonth] : null,
+        // NULL, NOT ZERO. The season is measured only (PR #48): a demo position carries no seasonal reading, and a 0
+        // here would print as "season 0.0%/mo" in the Journal, which is a measurement nobody made.
+        pop: null, iv: u.iv, seasonal: null,
         regime: "demo", spot: entrySpot, breakevens: [],
         delta: 0, vega: 1, ...(thesisOver || {}),
       },
@@ -196,10 +171,10 @@ export function demoPositions({ spots = {}, underlying, now = Date.now() } = {})
   // 1) Working, and close to the take-profit rule. The price has run past the
   //    short strike, so the spread is nearly at its maximum and the rule that
   //    matters is "take it".
-  if (spots.CORN > 0) {
+  if (spots[DEMO_MARKETS.winner] > 0) {
     build({
-      tk: "CORN", name: "Bull Call Spread", entryDaysAgo: 35, dteAtEntry: 60,
-      entrySpot: spots.CORN / 1.07,
+      tk: DEMO_MARKETS.winner, name: "Bull Call Spread", entryDaysAgo: 35, dteAtEntry: 60,
+      entrySpot: spots[DEMO_MARKETS.winner] / 1.07,
       rel: [[1, "call", 0], [-1, "call", 0.05]],
       thesisOver: { pop: 0.46, delta: 0.3 },
       note: "The price has run past the short strike, so most of the profit this trade can make is already made. This is what the take-profit rule is for: the last part of the maximum is the slowest and the most fragile.",
@@ -208,10 +183,10 @@ export function demoPositions({ spots = {}, underlying, now = Date.now() } = {})
 
   // 2) Wrong, and close to the stop. The stop is a WARNING (PRD §4): the demo
   //    shows an alert on a losing position that nothing closes automatically.
-  if (spots.UNG > 0) {
+  if (spots[DEMO_MARKETS.loser] > 0) {
     build({
-      tk: "UNG", name: "Bear Put Spread", entryDaysAgo: 30, dteAtEntry: 55,
-      entrySpot: spots.UNG / 1.09,
+      tk: DEMO_MARKETS.loser, name: "Bear Put Spread", entryDaysAgo: 30, dteAtEntry: 55,
+      entrySpot: spots[DEMO_MARKETS.loser] / 1.09,
       rel: [[1, "put", 0], [-1, "put", -0.05]],
       thesisOver: { pop: 0.48, delta: -0.28 },
       note: "The price went the other way. The stop is a warning here, not an order: nothing closes by itself, and the decision — take the loss or give it the days it has left — is still yours.",
@@ -222,27 +197,18 @@ export function demoPositions({ spots = {}, underlying, now = Date.now() } = {})
   //    is fine, and the reason you opened it has gone. Nothing on the front
   //    page will shout: the Thesis Integrity Score is where this shows up.
   //
-  //    The break has to be real on more than one axis, because the calendar
-  //    does not always oblige — between some pairs of months none of these
-  //    markets flips its seasonal sign. So the condor also carries a thesis
-  //    recorded in a CALMER market than today's: it is short volatility, the
-  //    nerves have risen since, and that hurts it whatever the price does.
-  const entryMonth = new Date(now - 32 * DAY).getMonth();
-  const broken = brokenThesisTicker(["SOYB", "CORN", "WEAT", "UNG"], month, entryMonth);
-  if (broken && spots[broken.tk] > 0) {
-    const tk = broken.tk;
+  //    The break is on the volatility axis, which is true on every date: the condor is short volatility and was
+  //    recorded in a CALMER market than today's. (It used to pick the market whose hand-written season had turned
+  //    most; the season is measured only since PR #48, and a demo makes no seasonal claim it cannot read.)
+  const tk = DEMO_MARKETS.broken;
+  if (spots[tk] > 0) {
     build({
       tk, name: "Iron Condor", entryDaysAgo: 32, dteAtEntry: 60,
       entrySpot: spots[tk],
       rel: [[1, "put", -0.10], [-1, "put", -0.05], [-1, "call", 0.05], [1, "call", 0.10]],
       // Short volatility (vega negative): it wants the market to calm down.
       thesisOver: { pop: 0.82, iv: U(tk).iv * 0.8, vega: -1, delta: 0 },
-      note: `The price is still inside the range, so the P&L looks fine. What has gone is the reason. ` +
-        (broken.broke
-          ? `${tk} averaged ${pct(broken.then)}/month in the month this was opened and ${pct(broken.now)}/month ` +
-            `in the one we are in, so the season it was betting on is no longer the season we are in. It was also `
-          : `The seasonal case is still standing — ${tk} averaged ${pct(broken.then)}/month at entry and ` +
-            `${pct(broken.now)}/month now — but it was `) +
+      note: `The price is still inside the range, so the P&L looks fine. What has gone is the reason. It was ` +
         `opened in a calmer market than today's, and this structure is short volatility: rising nerves cost it ` +
         `money even while the price behaves. A position whose thesis has expired is not the same trade you took, ` +
         `whatever the P&L says — open it and read the Thesis Integrity Score.`,

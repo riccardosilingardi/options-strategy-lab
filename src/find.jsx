@@ -21,7 +21,8 @@
 import React, { useCallback, useMemo } from "react";
 import { T, TYPE } from "./theme.js";
 import { mono, sans, Btn, Panel, Label, Stat, Note, Fold, CheckField } from "./ui.jsx";
-import { RequestControls, MatchList, CandidateCard, CompareTray } from "./card.jsx";
+import { RequestControls, MatchList, CandidateCard, CompareTray, ResultsFilter } from "./card.jsx";
+import { categoryCounts } from "./markets.js";
 import { StepForward } from "./steps.jsx";
 import { CompareFigure } from "./visuals.jsx";
 import { scaleStrategy } from "./pro.jsx";
@@ -102,21 +103,15 @@ export function FindStep({
         ticker={find.market} spot={spot}
         limits={limits} onLimit={onLimit} />
 
-      {/* THE SHORTLIST IS A FILTER NOW: one market, or all of them. Each chip carries its count, so a market with
-          nothing is a number rather than a missing row. */}
-      <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap", alignItems: "center" }}>
-        <Btn small ghost={!!find.market} onClick={() => setFind((f) => ({ ...f, market: null }))}>All {findGen.items.length}</Btn>
-        {find.markets.map((tk) => {
-          const n = findGen.items.filter((x) => x.tk === tk).length;
-          const why = findGen.failed.some((x) => x.tk === tk) ? "failed" : findGen.loading.includes(tk) ? "loading"
-            : findGen.noBoard.includes(tk) ? "no board" : String(n);
-          return (
-            <Btn key={tk} small ghost={find.market !== tk} color={n ? T.amber : T.dim}
-              onClick={() => setFind((f) => ({ ...f, market: f.market === tk ? null : tk }))}>
-              <span style={mono}>{tk}</span> {why}
-            </Btn>
-          );
-        })}
+      {/* THE RESULTS FILTER, BY CATEGORY (PR #48): "All N · Grains n · Energy n · Metals n"; a category opens its
+          tickers' counts, and a ticker is the one-market filter the Shortlist was. */}
+      <ResultsFilter counts={categoryCounts(findGen.items, find.markets)} total={findGen.items.length}
+        cat={find.cat || null} market={find.market}
+        statusOf={(tk) => (findGen.failed.some((x) => x.tk === tk) ? "failed" : findGen.loading.includes(tk) ? "loading"
+          : findGen.noBoard.includes(tk) ? "no board" : null)}
+        onCat={(c) => setFind((f) => ({ ...f, cat: c, market: null }))}
+        onMarket={(tk) => setFind((f) => ({ ...f, market: tk }))} />
+      <div style={{ display: "flex", gap: 6, marginTop: 4, flexWrap: "wrap", alignItems: "center" }}>
         <CheckField checked={find.flagged} onChange={(e) => setFind((f) => ({ ...f, flagged: e.target.checked }))}>
           show flagged{flaggedHidden ? ` (${flaggedHidden} hidden)` : ""}
         </CheckField>

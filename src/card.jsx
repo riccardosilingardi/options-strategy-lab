@@ -25,6 +25,7 @@ import React from "react";
 import { T, TYPE } from "./theme.js";
 import { mono, sans, Btn, Chip, Panel, Label, Stat, Note, Fold, NumberInput, TextArea, RangeField } from "./ui.jsx";
 import { readingLine, unreadInputsAria, inputName } from "./signals.js";
+import { MARKET_CATEGORIES } from "./markets.js";
 import { Gauge, UnifiedPosition, UnifiedFigure } from "./visuals.jsx";
 import { RULES, money, chanceText, returnText, NO_CEILING,
   requestAmountLabel, amountNote, freeAmountNote, chanceAskLabel, rewardAskLabel, controlsFoldNote,
@@ -47,7 +48,7 @@ const CardFigure = ({ k, v, c }) => <Stat k={k} v={v} c={c} style={{ flex: "1 1 
    list LIVE. There is no "Search" button: a control that only acts after another tap is a control whose effect the
    reader cannot see.
 
-     MARKETS    which of the basket to read, all by default.
+     MARKETS    which of the basket to read, all by default, grouped by the registry's categories (PR #48).
      DIRECTION  one for every market, or "Season decides" per market.
      SIZE BY    what I can spend, or what I want to make — two chips. The amount is a slider (PR #45): its top is the
                 per-trade limit, or the trading capital under free sizing, and the limit is editable beside it.
@@ -84,17 +85,7 @@ export function RequestControls({
       <Label>WHAT DO YOU WANT?</Label>
 
       {shows("markets") && universe.length > 0 && (
-        <div style={{ marginTop: 8 }}>
-          <Note color={T.dim}>{`MARKETS · ${markets.length} OF ${universe.length}`}</Note>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            {universe.map((tk) => (
-              <Chip key={tk} on={markets.includes(tk)} color={T.blue} label={tk} monoText
-                onClick={() => onMarkets && onMarkets(markets.includes(tk) ? markets.filter((x) => x !== tk) : [...markets, tk])}>
-                {tk}
-              </Chip>
-            ))}
-          </div>
-        </div>
+        <MarketPicker universe={universe} markets={markets} onMarkets={onMarkets} />
       )}
 
       {shows("direction") && (
@@ -168,6 +159,68 @@ export function RequestControls({
         <Note style={{ marginTop: 6 }}>{controlsFoldNote(request)}</Note>
       </Fold>
     </Panel>
+  );
+}
+
+/* THE MARKETS, BY CATEGORY (PR #48, TASK 1). One row per category of the registry (src/markets.js): its name, how
+   many of its markets are selected ("2 of 3"), "all" and "none", then its tickers. The groups come from the
+   registry, so a new market appears in its group with no change here. */
+export function MarketPicker({ universe = [], markets = [], onMarkets }) {
+  const groups = MARKET_CATEGORIES.map((c) => ({ id: c.id, tickers: c.tickers.filter((tk) => universe.includes(tk)) }))
+    .filter((c) => c.tickers.length);
+  const set = (m) => onMarkets && onMarkets(universe.filter((tk) => m.includes(tk)));
+  return (
+    <div style={{ marginTop: 8 }}>
+      <Note color={T.dim}>{`MARKETS · ${markets.length} OF ${universe.length}`}</Note>
+      {groups.map((g) => {
+        const on = g.tickers.filter((tk) => markets.includes(tk)).length;
+        return (
+          <div key={g.id} role="group" aria-label={`${g.id} markets`} style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 4 }}>
+            <span style={{ ...sans, fontSize: FS.xs, fontWeight: FW.bold, color: T.ink, minWidth: 56 }}>{g.id}</span>
+            <span style={{ ...sans, fontSize: FS.xs, color: T.dim }}>{on} of {g.tickers.length} ·</span>
+            <Btn small ghost color={T.blue} aria-label={`all ${g.id}`} disabled={on === g.tickers.length}
+              onClick={() => set([...markets, ...g.tickers])}>all</Btn>
+            <Btn small ghost color={T.blue} aria-label={`no ${g.id}`} disabled={on === 0}
+              onClick={() => set(markets.filter((tk) => !g.tickers.includes(tk)))}>none</Btn>
+            {g.tickers.map((tk) => (
+              <Chip key={tk} on={markets.includes(tk)} color={T.blue} label={tk} monoText
+                onClick={() => set(markets.includes(tk) ? markets.filter((x) => x !== tk) : [...markets, tk])}>
+                {tk}
+              </Chip>
+            ))}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* THE RESULTS FILTER, BY CATEGORY (PR #48, TASK 1): "All N · Grains n · Energy n · Metals n". Tapping a category
+   filters the list to it and opens its tickers' counts; tapping a ticker filters to that one market (what the
+   Shortlist was). A market still loading, failed or with no board says so instead of a count. */
+export function ResultsFilter({ counts = [], total = 0, cat = null, market = null, statusOf = () => null, onCat, onMarket }) {
+  const open = counts.find((c) => c.id === cat) || null;
+  return (
+    <div style={{ marginTop: 10 }}>
+      <div role="group" aria-label="filter the results" style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+        <Chip on={!cat && !market} onClick={() => onCat && onCat(null)}>All {total}</Chip>
+        {counts.map((c) => (
+          <Chip key={c.id} on={cat === c.id} onClick={() => onCat && onCat(cat === c.id ? null : c.id)}>
+            {c.id} {c.n}
+          </Chip>
+        ))}
+      </div>
+      {open && (
+        <div role="group" aria-label={`${open.id} markets`} style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 6 }}>
+          {open.tickers.map((t) => (
+            <Btn key={t.tk} small ghost={market !== t.tk} color={t.n ? T.amber : T.dim}
+              onClick={() => onMarket && onMarket(market === t.tk ? null : t.tk)}>
+              <span style={mono}>{t.tk}</span> {statusOf(t.tk) || String(t.n)}
+            </Btn>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

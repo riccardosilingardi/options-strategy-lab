@@ -77,6 +77,7 @@ import { BottomBar, placeOf, NAV_BAR_H } from "./navBar.jsx";
 import { AccountStrip, PositionsBar, WorkingCloseLine } from "./positions.jsx";
 import { Segments as USegments, Note, CheckField } from "./ui.jsx";
 import { marketClockLine } from "./clock.js";
+import { BASKET, TICKERS, getU, categoryOf } from "./markets.js";
 
 /* ============================== THEME ============================== */
 const mono = { fontFamily: "ui-monospace, Menlo, monospace" };
@@ -100,80 +101,11 @@ function bsGreeks(S, K, Tyr, iv, type) {
   return { delta, gamma, theta, vega };
 }
 
-/* ============================== UNDERLYINGS (fallback stats) ============================== */
-const UNDERLYINGS = {
-  SOYB: { commodity: true, name: "Soybeans", iv: 0.20, sigma: SIGMA.SOYB, step: 0.5,
-    monthlyMean: SEASONAL.SOYB,
-    newsQ: "soybean futures prices" },
-  CORN: { commodity: true, name: "Corn", iv: 0.24, sigma: SIGMA.CORN, step: 0.5,
-    monthlyMean: SEASONAL.CORN,
-    newsQ: "corn futures USDA crop" },
-  UNG: { commodity: true, name: "US Natural Gas", iv: 0.45, sigma: SIGMA.UNG, step: 0.5,
-    monthlyMean: SEASONAL.UNG,
-    newsQ: "natural gas prices storage EIA" },
-  BOIL: { commodity: true, name: "2x Natural Gas", iv: 0.85, sigma: SIGMA.BOIL, step: 1,
-    monthlyMean: SEASONAL.BOIL,
-    newsQ: "natural gas prices forecast" },
-  WEAT: { commodity: true, name: "Wheat", iv: 0.26, sigma: SIGMA.WEAT, step: 0.25,
-    monthlyMean: SEASONAL.WEAT,
-    newsQ: "wheat futures prices" },
-
-  /* ============ THE LIQUID COMMODITY TIER (ROADMAP P2-bis) ============
-     Read on the owner's phone: SOYB and CORN produced "0 of 2 shown" and a wall
-     of refusal text. The grain chains are too thin for the floors this app
-     measured on live data, so most of what is on screen is an explanation of
-     why there is nothing on screen. These five are real commodities — the
-     seasonal engine still applies — with option books an order of magnitude
-     deeper, and calibrating P2's edge on them is worth far more than
-     calibrating it on CORN.
-
-     >>> NOT ONE NUMBER IS INVENTED FOR THEM. <<< Three things every row above
-     carries are deliberately absent here:
-
-       - `monthlyMean`. There is no `SEASONAL` row and there will not be one.
-         Seasonality is UNKNOWN for these markets until Alpha Vantage's real
-         monthly history loads, `seasonalProvenance()` reports `missing`, and
-         every screen prints a dash and the sentence rather than a zero. A
-         hand-written row would be a fifth estimate on a table this repository
-         has already measured as wrong on eight months of twelve.
-       - `sigma`. No `SIGMA` row either, so `sigmaProvenance()` falls to
-         `RULES.fallbackSigma` and says on screen that the number was CHOSEN,
-         not measured — until the same Alpha Vantage read supplies the measured
-         realised volatility it has always returned beside the means.
-       - a per-market `iv`. `RULES.fallbackIV` is the one home for "the implied
-         volatility the options are priced at when nothing else is known", and
-         `ivProvenance()` already says so wherever it is used. Writing 0.15 for
-         GLD out of memory would be exactly the estimate-as-a-reading this
-         codebase keeps refusing; the live chain quotes its own IV per contract
-         and that is what every figure is worked out at the moment it loads.
-
-     `step` IS A FALLBACK AND ONLY A FALLBACK. Strikes are a property of the
-     board (`expiryStrikes()` in chain.js), `buildPresets()` refuses to build
-     without one (PR #31), and `snapStrike()`'s grid is unreachable from it.
-     These are the conventional listing increments, kept so a dropdown has
-     something to offer before the chain lands, not so a trade can be built on
-     them. ======================================================== */
-  GLD: { commodity: true, name: "Gold", iv: RULES.fallbackIV, step: 1,
-    newsQ: "gold price fed real yields dollar" },
-  SLV: { commodity: true, name: "Silver", iv: RULES.fallbackIV, step: 0.5,
-    newsQ: "silver price industrial demand dollar" },
-  USO: { commodity: true, name: "Crude Oil", iv: RULES.fallbackIV, step: 1,
-    newsQ: "crude oil price OPEC EIA inventories" },
-  XLE: { commodity: true, name: "Energy Sector", iv: RULES.fallbackIV, step: 1,
-    newsQ: "energy sector oil majors outlook" },
-  GDX: { commodity: true, name: "Gold Miners", iv: RULES.fallbackIV, step: 1,
-    newsQ: "gold miners production costs outlook" },
-
-  SPY: { name: "S&P 500 ETF", iv: 0.13, sigma: SIGMA.SPY, step: 5,
-    monthlyMean: SEASONAL.SPY,
-    newsQ: "S&P 500 stock market outlook" },
-};
-// The BASKET is the five commodity ETFs this app is about, derived from the
-// table above rather than typed out a second time: SPY is here so the desk can
-// price a hedge, it is not something the guided flow goes looking for.
-// `src/basket.js` carries the same five for the Netlify function that cannot
-// import this file, and `src/chain.test.js` fails the build if the two drift.
-const BASKET = Object.keys(UNDERLYINGS).filter((k) => UNDERLYINGS[k].commodity);
+/* ============================== THE MARKETS: ONE REGISTRY (PR #48, TASK 1) ==============================
+   `UNDERLYINGS` lived here (name, step, iv, sigma, news query, the commodity flag) and `src/basket.js` carried the
+   same ten again for the Netlify functions. One row per market now lives in `src/markets.js`, plain JS, and
+   everything — BASKET, getU(), the categories Find groups by, whether weather applies — derives from it. getU() is
+   still the SAFE accessor: any ticker (an Alpaca import, an old record) gets a fallback row, never undefined. */
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const NOW_MONTH = new Date().getMonth();
 /* THE DIRECTION "SEASON DECIDES" SUGGESTS FOR A MARKET: its season and its four factors. A market whose factors
@@ -187,12 +119,6 @@ const suggestionOf = (seasonalScore, f) => {
 /** The exit plan's sentence for a trade, with its take-profit target from `takeProfitTarget()`. */
 const planOf = (legs, { maxProfit = null, maxLoss = null, entry = null } = {}) =>
   exitPlanSentence(takeProfitTarget({ legs, maxProfit, maxLoss, entryNet: entry }));
-// Accesso SICURO alle statistiche del sottostante: qualunque ticker (anche importato
-// da Alpaca o salvato da versioni precedenti) ha sempre un fallback valido.
-// Questo elimina la causa n.1 delle "schermate nere" (crash su UNDERLYINGS[ticker] undefined).
-const FALLBACK_U = (tk) => ({ name: tk, iv: 0.30, sigma: 0.30, step: 0.5, monthlyMean: Array(12).fill(0), newsQ: `${tk} price outlook`, fallback: true });
-const getU = (tk) => UNDERLYINGS[tk] || FALLBACK_U(tk || "?");
-
 /* WHICH SEASONAL MEANS ARE IN FORCE FOR A MARKET — ONE EXPRESSION.
    `seasonalProvenance()` in rules.js is the home; this binds it to the loaded
    Alpha Vantage state and the table row behind it (which the liquid tier does
@@ -200,7 +126,7 @@ const getU = (tk) => UNDERLYINGS[tk] || FALLBACK_U(tk || "?");
    print `monthlyMean[NOW_MONTH]` off a row that is not there — `undefined[8]`
    throws, and the guard people reach for instead is `|| 0`, which prints a
    market as having no seasonal edge when nobody has measured one. */
-const seasonalOf = (state, tk) => seasonalProvenance((state || {})[tk] || null, getU(tk).monthlyMean, tk);
+const seasonalOf = (state, tk) => seasonalProvenance((state || {})[tk] || null, SEASONAL[tk] || null, tk);
 /** This month's seasonal mean, or null. Never a zero nobody measured. */
 const seasonalNowOf = (state, tk) => {
   const mm = seasonalOf(state, tk).monthlyMean;
@@ -1614,7 +1540,7 @@ export default function OptionsStrategyLab() {
      the horizon in days, the one-market filter that replaced the Shortlist
      step, and whether flagged cards are listed. Every one of them re-filters
      the list live. */
-  const [find, setFind] = useState({ markets: [...BASKET], dir: "season", horizon: RULES.targetEntryDTE, market: null, flagged: true });
+  const [find, setFind] = useState({ markets: [...BASKET], dir: "season", horizon: RULES.targetEntryDTE, market: null, cat: null, flagged: true });
   // Which market "Why this market" is open on: a card's badge sets it.
   const [whyTk, setWhyTk] = useState(null);
   // THE LIQUIDITY FLOOR IS A SETTING, NOT AN ASSERTION. The app recommends and
@@ -1658,7 +1584,7 @@ export default function OptionsStrategyLab() {
      at all, so a market whose Alpha Vantage history has not loaded has UNKNOWN
      seasonality rather than an estimate — every reader of `seas.monthlyMean`
      below checks before it indexes. */
-  const seas = seasonal[ticker] || { monthlyMean: U.monthlyMean || null, matrix: null, years: null, src: null };
+  const seas = seasonal[ticker] || { monthlyMean: seasonalOf(seasonal, ticker).monthlyMean, matrix: null, years: null, src: null };
   const seasProv = seasonalOf(seasonal, ticker);
   const seasNow = seasonalNowOf(seasonal, ticker);
   const iv = U.iv;
@@ -2150,7 +2076,7 @@ export default function OptionsStrategyLab() {
   }), [weather, newsPool, barsCache, seasonal]);
 
   const fused = useMemo(
-    () => Object.fromEntries(Object.keys(UNDERLYINGS).map((tk) => [tk, fuseFor(tk)])),
+    () => Object.fromEntries(TICKERS.map((tk) => [tk, fuseFor(tk)])),
     [fuseFor]
   );
   /* ---- WHICH INPUTS HAVE LANDED, PER MARKET (PR #44, TASK 4) ----
@@ -2163,7 +2089,7 @@ export default function OptionsStrategyLab() {
   const readiness = useMemo(() => {
     const settled = (tk) => { const n = news[tk]; return !!n && !n.loading && (!!n.at || !!n.err); };
     const poolDone = newsScope.every(settled);
-    return Object.fromEntries(Object.keys(UNDERLYINGS).map((tk) => {
+    return Object.fromEntries(TICKERS.map((tk) => {
       const sn = seasonalState[tk];
       return [tk, readingState({ ticker: tk, inputs: {
         news: !poolDone ? "loading" : news[tk]?.err ? { state: "failed", why: "the feed did not answer" } : news[tk] ? "ready" : "loading",
@@ -3785,7 +3711,7 @@ export default function OptionsStrategyLab() {
      Un ticker in CONFLICT finisce ULTIMO comunque: quando i fattori si
      contraddicono non sappiamo abbastanza, e nessun rendimento atteso può
      farci cambiare idea. */
-  const scan = useMemo(() => Object.entries(UNDERLYINGS).map(([tk, u]) => {
+  const scan = useMemo(() => TICKERS.map((tk) => [tk, getU(tk)]).map(([tk, u]) => {
     // NULL WHERE NOBODY HAS MEASURED IT. The liquid tier has no hand-written
     // row, so this is null until Alpha Vantage lands — and the ROW below prints
     // a sentence rather than "+0.0%/mo", which is a claim about a market.
@@ -3899,8 +3825,11 @@ export default function OptionsStrategyLab() {
   }, [find.markets, find.dir, find.horizon, chains, chainErr, scan, liqLevel, fusedFind, seasonalFor, ivRankOf]); // eslint-disable-line
   /* THE LIST ON SCREEN: the one-market filter (what the Shortlist step was),
      and the flag toggle. Nothing is dropped without a count saying so. */
+  // ONE FILTER: a market, or a category of the registry (PR #48, TASK 1).
+  const inFindFilter = useCallback((x) => (!find.market || x.tk === find.market) && (!find.cat || categoryOf(x.tk) === find.cat),
+    [find.market, find.cat]);
   const findShown = useMemo(() => findGen.items.filter((x) =>
-    (!find.market || x.tk === find.market) && (find.flagged || x.flags.length === 0)), [findGen, find.market, find.flagged]);
+    inFindFilter(x) && (find.flagged || x.flags.length === 0)), [findGen, inFindFilter, find.flagged]);
   useEffect(() => {
     // BACK RETURNS TO THE CARD (PR #46, TASK 2): a sheet opened from a card scrolls back to it when it closes.
     if (step !== "find" || ev || !scrollToCard.current) return;
@@ -3959,10 +3888,10 @@ export default function OptionsStrategyLab() {
     });
     return () => cancelAnimationFrame(id);
   }, [posSeg, focusOrder, alSync]);
-  const flaggedHidden = find.flagged ? 0 : findGen.items.filter((x) => (!find.market || x.tk === find.market) && x.flags.length).length;
+  const flaggedHidden = find.flagged ? 0 : findGen.items.filter((x) => inFindFilter(x) && x.flags.length).length;
   /* THE LIQUIDITY FLOOR'S OWN PANEL is about ONE board — its threshold and its
      peers — so it reads the market in focus: the filter, or the top card's. */
-  const focusTk = find.market || (findGen.items[0] && findGen.items[0].tk) || find.markets[0] || ticker;
+  const focusTk = find.market || ((findGen.items.find(inFindFilter) || findGen.items[0]) || {}).tk || find.markets[0] || ticker;
   const focusBoard = findGen.boards[focusTk] || null;
   const liqPreview = useMemo(() => {
     const c = chains[focusTk];
@@ -4289,7 +4218,7 @@ export default function OptionsStrategyLab() {
               const cX = chains[tk] || null;
               const sX = spotOf(cX);
               const gX = oiGridFromChain(cX, sX);
-              const mm = (seasonal[tk] || null)?.monthlyMean || getU(tk).monthlyMean || null;
+              const mm = (seasonal[tk] || null)?.monthlyMean || SEASONAL[tk] || null;
               return (
                 <>
                   {levelsView(cX, gX, sX, levelsFromGrid(gX, sX))}
@@ -4646,7 +4575,7 @@ export default function OptionsStrategyLab() {
                   Market
                   <select aria-label="Market for this trade" value={ticker} onChange={(e) => switchTicker(e.target.value)}
                     style={{ ...mono, background: T.panel, color: T.ink, border: `1px solid ${T.field}`, borderRadius: 6, padding: "8px 10px", fontSize: 13, minHeight: 44 }}>
-                    {Object.keys(UNDERLYINGS).map((k) => <option key={k} value={k}>{k}</option>)}
+                    {TICKERS.map((k) => <option key={k} value={k}>{k}</option>)}
                   </select>
                 </label>
                 <input value={stratName} onChange={(e) => setStratName(e.target.value)}

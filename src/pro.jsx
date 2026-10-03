@@ -1,3 +1,4 @@
+import { BASKET } from "./markets.js";
 import React, { useState, useEffect } from "react";
 import { RefreshCw, Send, Trash2, Download, Sparkles, FileText, XCircle } from "lucide-react";
 import { T } from "./theme.js";
@@ -1013,7 +1014,8 @@ export function UnrecordedCard({ group: g, gate, orders = [], onImport, setMsg, 
    prompt (`taCopilotPrompt()` in rules.js) and it may not propose a trade
    at all.
 ==================================================================== */
-const SYSTEM_PROMPT = `You are the copilot of an options trader working on commodity ETFs (SOYB, CORN, UNG, BOIL, WEAT, SPY) in PAPER TRADING.
+// THE MARKETS ARE THE REGISTRY'S (PR #48, TASK 1): this list was typed out and had stopped at five.
+const SYSTEM_PROMPT = `You are the copilot of an options trader working on commodity ETFs (${BASKET.join(", ")}; SPY only as a hedge) in PAPER TRADING.
 ${copilotRulesBlock()}
 These rules are enforced in code by src/riskGate.js before any order is sent. Never propose a trade that breaks them, and never present a rule number that differs from the ones above.
 WHO YOU ARE WRITING FOR: someone who is learning, not a professional trader. Plain English sentences. Define any term the first time you use it, in the same sentence — "open interest (how many contracts are actually open)". Never guarantee an outcome: this is educational analysis on a paper account, not financial advice. Always state the risk and what would make the idea wrong.

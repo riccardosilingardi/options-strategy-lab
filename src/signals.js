@@ -18,6 +18,7 @@
 import { SEASONAL } from "./engine.js";
 import { RULES, liquidityLevel, butterflySkipNote } from "./rules.js";
 import { trendRead } from "./indicators.js";
+import { weatherAppliesTo, weatherReasonFor } from "./markets.js";
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
@@ -179,23 +180,15 @@ export function weatherComponent(ticker, weatherData, month) {
    answers to one question waiting to disagree.
 ================================================================ */
 
-/** True when some region in the table declares that it drives this market. */
-export const weatherApplies = (ticker) => REGIONS.some((r) => r.affects.includes(ticker));
+/* WHETHER WEATHER APPLIES, AND WHY NOT, LIVE IN THE MARKET REGISTRY (PR #48, TASK 1): `weather` on a market's row
+   in src/markets.js. `REGIONS` above still says WHICH region drives WHICH market; `signals.test.js` holds the two
+   equal (a market whose row says weather applies has a region, and one whose row says it does not has none). */
 
-/* WHY NOT, IN ONE LINE EACH. These are sentences, not thresholds: nothing here
-   decides anything, `weatherApplies()` above does. Written per market because
-   "no region drives it" is true and useless — the reader wants to know whether
-   that is a gap in the table or a fact about the asset. */
-const WEATHER_NA = {
-  GLD: "Weather does not apply to gold: an ounce is not grown, not stored in degree-days and not consumed by a cold winter. What moves it — real yields, the dollar, central-bank buying — reaches this app through the news factor.",
-  SLV: "Weather does not apply to silver. Its industrial half moves with manufacturing demand and its monetary half with real yields, and neither is a forecast; both reach this app through the news factor.",
-  GDX: "Weather does not apply to gold miners. They are equities whose earnings track the gold price, so the same reasoning as GLD holds one step removed.",
-  USO: "Weather is not read for crude here. A Gulf hurricane really can shut production in, but this app's regions are crop stress and heating or cooling demand, and neither of those is what moves a barrel — storm supply risk reaches crude through the news rules instead.",
-  XLE: "Weather is not read for energy equities here, for the same reason as crude: this app's regions measure crop stress and degree-days, and an integrated oil company's earnings are not a function of either.",
-};
+/** True when the market's registry row says the weather factor applies. */
+export const weatherApplies = (ticker) => weatherAppliesTo(ticker);
 
 /** The sentence a screen prints where the weather bar would have been. */
-export const weatherNaReason = (ticker) => WEATHER_NA[ticker]
+export const weatherNaReason = (ticker) => weatherReasonFor(ticker)
   || `No region in this app's table drives ${ticker}, so there is no weather reading for it — and no reading is not a reading of zero.`;
 
 /**

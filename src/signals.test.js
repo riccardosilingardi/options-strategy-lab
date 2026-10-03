@@ -2,6 +2,7 @@
 // Plain Node, no test framework: `npm test` runs this file directly.
 
 import assert from "node:assert/strict";
+import { TICKERS } from "./markets.js";
 import { fuseSignals, weatherComponent, newsComponent, ageDecay, regionSignals,
   sentimentDirection, signalAdjustment, rankScore, compareCandidates, withSignalRank, againstSignal,
   weatherApplies, weatherNaReason, factorsOf, tagImpacts, seasonalComponent, REGIONS,
@@ -324,7 +325,7 @@ test("regionSignals returns one row per region with data, same direction as the 
    and a missing seasonal row is UNKNOWN rather than a quiet zero.
 ================================================================ */
 
-test("weather applicability is DERIVED from the region table, never a second list", () => {
+test("weather applicability is the REGISTRY's (PR #48), and the region table agrees with it", () => {
   for (const tk of ["CORN", "SOYB", "WEAT", "UNG", "BOIL"]) {
     assert.equal(weatherApplies(tk), true, `${tk} has regions in the table`);
     assert.ok(REGIONS.some((r) => r.affects.includes(tk)));
@@ -332,6 +333,12 @@ test("weather applicability is DERIVED from the region table, never a second lis
   for (const tk of ["GLD", "SLV", "GDX", "USO", "XLE"]) {
     assert.equal(weatherApplies(tk), false, `${tk} has no region driving it`);
   }
+  // THE TWO SAY THE SAME THING FOR EVERY MARKET: a row that says weather applies has a region, one that says it
+  // does not has none, and no region drives a market the registry does not know.
+  for (const tk of TICKERS) {
+    assert.equal(weatherApplies(tk), REGIONS.some((r) => r.affects.includes(tk)), `${tk}: registry and regions agree`);
+  }
+  for (const r of REGIONS) for (const tk of r.affects) assert.ok(TICKERS.includes(tk), `${r.id} drives ${tk}, a known market`);
 });
 
 const sum4 = (w) => Object.values(w).reduce((a, b) => a + b, 0);
