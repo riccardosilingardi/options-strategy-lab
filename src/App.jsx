@@ -8,11 +8,11 @@ import {
   FlaskConical, Briefcase, Plus, Plug, Send, ExternalLink, MessageSquare, FileText, Bell,
   SlidersHorizontal, ArrowLeft, Sun, Moon, AlertTriangle, WifiOff,
 } from "lucide-react";
-import { fetchAllNews, fetchWeather, ImpactTags, CopilotTab, TaCopilot, ReportTab, OrderTicket, AlpacaDesk, scaleStrategy, buildContext, GuardianPanel, ChainMatrix, OptionPanel, PriceChart, QtyField, UnifiedView, taSignals, confluence, WhyThisTrade, Markdown, alpacaReq, CloseConfirm } from "./pro.jsx";
-import { prepareClose, sendClose, groupForRecord, closeWorking, legsNotHeld } from "./closeOrder.js";
-import { OrdersPanel, OrderRow } from "./orders.jsx";
+import { fetchAllNews, fetchWeather, ImpactTags, CopilotTab, TaCopilot, ReportTab, OrderTicket, UnrecordedCard, scaleStrategy, buildContext, GuardianPanel, ChainMatrix, OptionPanel, PriceChart, QtyField, UnifiedView, taSignals, confluence, WhyThisTrade, Markdown, alpacaReq, CloseConfirm } from "./pro.jsx";
+import { prepareClose, sendClose, groupForRecord, closeWorking, legsNotHeld, holdingGroups } from "./closeOrder.js";
+import { OrdersPanel } from "./orders.jsx";
 import { WhySheet } from "./why.jsx";
-import { orderLegs as orderLegsOf, orderHoldingKey, ordersForRecord, orderIntent } from "./orderRow.js";
+import { orderLegs as orderLegsOf, orderHoldingKey, ordersForRecord, orderIntent, rowLines, workingCloseText } from "./orderRow.js";
 import { BandThumbnail, payoffBands, bandTakeaway, GaugeFigure, Gauge, CompareFigure, exitPlanSentence, exitPlanDetail,
   OpenInterestStrip, oiStripTakeaway, oiCutAt, oiGhostCut, explainOiStrip, useWidth } from "./visuals.jsx";
 import { fuseSignals, sentimentDirection, withSignalRank, compareCandidates, againstSignal,
@@ -27,7 +27,7 @@ import { RULES, sizing, ruleBadge, takeProfitLabel, takeProfitTarget, takeProfit
   buildableExpiries, openableBoard, offFloorExpiryLabel, horizonFloorNote,
   LIQUIDITY_LEVELS, RECOMMENDED_LIQUIDITY, LIQUIDITY_MEASUREMENT, liquidityMeasurementNote, liquidityLevel, liquidityThreshold, looseningWarning, liquiditySettingNote, isLoosened, ordinal,
   priceability, unpriceableNote, rewardRisk, MIN_NET_DOLLARS,
-  payoffCeiling, NO_CEILING, noCeilingNote, noCeilingRankNote,
+  payoffCeiling, payoffAtZero, exactExtremes, NO_CEILING, noCeilingNote, noCeilingRankNote,
   impossibleLoss, impossibleLossNote,
   contractListing, unlistedContractNote, unlistedContractListNote, strikeSnapNote, offBoardStrikeLabel,
   tradeCard, cardCurrencyNote, CARD_CURRENCY, limitOwner,
@@ -61,16 +61,21 @@ import { orderBody, orderOutcome, alpacaErrorText, reduceRatios, limitWords, ord
 // every timeline entry, the close reason, and what survives into the Journal.
 import { nextRef, refCounter, appendTimeline, stampTimeline, orderStatusRecheck, closeDecision,
   autopilotHorizonNote, autopilotVolNote, notHeldCloseWords,
-  positionSize, positionSizeNote, contractsOf, withPositionSize, fillVsLimit, orderReconciliation,
+  positionSize, positionSizeNote, contractsOf, withPositionSize, fillVsLimit, orderReconciliation, recordForOrder, outsideTag,
   storedLimitOf,
-  positionStage, positionStageNote, bookPositions, holdingShape, dropImportedTwins, recordFillPrice, countsAsRuleClose, closeKindWords, riskOkOf, riskOkWords, wouldHaveDone, isBrokerHolding, upgradeHolding,
+  positionStage, positionStageNote, bookPositions, holdingShape, dropImportedTwins, recordFillPrice, countsAsRuleClose, closeKindWords, riskOkOf, riskOkWords, wouldHaveDone, isBrokerHolding, upgradeHolding, positionForHolding,
   isTestRecord, testRecordNote, scoredJournal, journalPnl, NOT_A_FILL,
   journalEntry, searchJournal, CLOSE_REASON_MIN, refNumber, journeyLevel } from "./journal.js";
 import { FIRST_STEP, stepCarry, candidateOf, candidateKey, legsLine, toggleCompare, inCompare, MAX_COMPARE, savedFromCandidate, candidateFromSaved, savedAge } from "./path.js";
 import { PositionCard, PositionDetails } from "./positionCard.jsx";
 import { navOf, createNavHistory } from "./nav.js";
-import { exitProgress, entryVsNow, displayName, fileState, pnlShareOfRisk, pnlShareText, holdsStructure } from "./positionView.js";
-import { StepNav, EvidenceBar, EvidenceOverlay, DeskSheet, Fold, DeskCountLine } from "./steps.jsx";
+import { exitProgress, entryVsNow, displayName, fileState, pnlShareOfRisk, pnlShareText, holdsStructure,
+  sizeWords, withExactMaxProfit, maxProfitCorrection, maxProfitCorrectionNote } from "./positionView.js";
+import { EvidenceBar, EvidenceOverlay, DeskSheet, Fold, DeskCountLine } from "./steps.jsx";
+import { BottomBar, placeOf, NAV_BAR_H } from "./navBar.jsx";
+import { AccountStrip, PositionsBar, WorkingCloseLine } from "./positions.jsx";
+import { Segments as USegments, Note, CheckField } from "./ui.jsx";
+import { marketClockLine } from "./clock.js";
 
 /* ============================== THEME ============================== */
 const mono = { fontFamily: "ui-monospace, Menlo, monospace" };
@@ -709,6 +714,12 @@ export function analyze(legs, S, dte, baseIV, q, opts = {}) {
   // maximum loss is always known, and the only way this grid understates a loss
   // is an uncovered short call — which the risk gate refuses by name
   // (UNDEFINED_RISK) before any order can be built on it.
+  // THE PRICE OF ZERO IS PART OF THE EXTREMES (PR #47, TASK 0c). The grid above stops at 70% of spot, so a long
+  // put's best case was the payoff there ($2,600 on +1 94P at spot 90, net 5.00) instead of at zero ($8,900). The
+  // payoff is straight lines between strikes, so below the lowest strike it only needs this one more point; the
+  // curve, the breakevens and every other figure are untouched.
+  const atZero = payoffAtZero(legs, entry);
+  if (atZero != null) { if (atZero > maxP) maxP = atZero; if (atZero < maxL) maxL = atZero; }
   const ceiling = payoffCeiling(legs);
   return {
     entry, entryMid, entrySource: usesOverride ? "limit" : "mid", curve,
@@ -1583,6 +1594,14 @@ export default function OptionsStrategyLab() {
      nothing. One at a time: null | "numbers" | "order". */
   const [deskSheet, setDeskSheet] = useState(null);
   const [alSync, setAlSync] = useState({ orders: [], positions: [], t: 0 });
+  /* PR #47: the account and the market clock, read at each sync (TASK 2, TASK 0d). Kept apart from `alpaca` (the
+     connection), whose identity re-arms the sync: writing the account there would make the sync re-run itself. */
+  const [account, setAccount] = useState(null);
+  const [clock, setClock] = useState(null);
+  /* Positions | Orders (TASK 1), and the order "Manage order" opened. */
+  const [posSeg, setPosSeg] = useState("positions");
+  const [focusOrder, setFocusOrder] = useState(null);
+  const [syncBusy, setSyncBusy] = useState(false);
   const [ta, setTa] = useState({}); // per ticker
   const [replay, setReplay] = useState(null);
   const [nf, setNf] = useState({ tk: "ALL", kind: "all", q: "", days: 7 });
@@ -2012,11 +2031,16 @@ export default function OptionsStrategyLab() {
   const importRef = useRef(null);            // `importAlpaca` is defined further down; read it at call time
   const syncBroker = useCallback(async () => {
     try {
-      const [po, oo] = await Promise.all([
+      const [po, oo, acc, clk] = await Promise.all([
         alpacaGet("/v2/positions"),
         alpacaGet("/v2/orders?status=open&limit=30&nested=true"),
+        // The account and the clock are read with the same sync; a failure of either leaves its last reading.
+        alpacaGet("/v2/account").catch(() => null),
+        alpacaGet("/v2/clock").catch(() => null),
       ]);
       if (syncStop.current) return;
+      if (acc && acc.account_number) setAccount(acc);
+      if (clk && typeof clk.is_open === "boolean") setClock(clk);
       setAlSync((prev) => {
         // fill rilevato: c'è una posizione nuova o un ordine sparito → importa
         if (po.length > prev.positions.length || (prev.orders.length > oo.length && po.length)) importRef.current?.(true);
@@ -2339,8 +2363,9 @@ export default function OptionsStrategyLab() {
     out.working.sort(newest); out.notTaken.sort(newest);
     return out;
   }, [store.positions]);
-  /** What the user actually holds. The only list that is a book. */
-  const ownedPositions = byStage.owned;
+  /** What the user actually holds. The only list that is a book. A best case a price grid cut off is read exactly
+   *  (`withExactMaxProfit()`, PR #47 TASK 0c); the stored record keeps its figure and its timeline says so once. */
+  const ownedPositions = useMemo(() => byStage.owned.map(withExactMaxProfit), [byStage]);
   /** Sent, still at the broker, nothing bought yet. */
   const workingOrders = byStage.working;
   /** Sent and finished with nothing bought — no trade here, and there never was. */
@@ -2353,8 +2378,13 @@ export default function OptionsStrategyLab() {
      `alSync.orders` is what the broker last reported; null until it has been
      asked, and an unasked broker is not an empty one. */
   const orderGap = useMemo(
-    () => orderReconciliation(workingOrders, alSync.t ? alSync.orders : null),
-    [workingOrders, alSync]);
+    () => orderReconciliation(store.positions, alSync.t ? alSync.orders : null),
+    [store.positions, alSync]);
+
+  /* A HOLDING ALPACA LISTS AND THE APP HAS NO RECORD OF (PR #47, TASK 1): its own "Not in the app" card. Counted in
+     holdings, never as legs (TASK 0e: "OPEN POSITIONS (3)" counted Alpaca's legs over 2 holdings). */
+  const unrecorded = useMemo(() => (alSync.t ? holdingGroups(alSync.positions || [])
+    .filter((g) => !positionForHolding(byStage.owned, { ticker: g.ticker, expKey: g.expKey })) : []), [alSync, byStage]);
 
   /* A CANCEL IS A REQUEST, NOT AN OUTCOME (`cancelOutcome()` in order.js).
      J-0003, 23 Sep 2026, about 04:00 New York: Alpaca accepted the request and
@@ -2857,11 +2887,15 @@ export default function OptionsStrategyLab() {
      What the rows in "Orders waiting" (and the row inline on a card whose close is working) are handed. Every
      send inside goes through `gate`: Modify of one leg is order path 7, of several legs a cancel, Alpaca's
      "canceled", then path 3 (a close) or Build's ticket, path 2 (an open). */
-  const recordForOrder = (o) => store.positions.find((p) => o && (p.alpacaId === o.id || p.closeOrder?.id === o.id)) || null;
+  // ONE ANSWER TO "IS THIS ORDER MINE" (PR #47, TASK 0a): `recordForOrder()` in journal.js, which the reconciliation reads too.
+  const recordFor = (o) => recordForOrder(store.positions, o);
   const orderCtx = {
     positions: alSync.positions, orders: alSync.orders, chainFor: (tk) => chains[tk] || null, fetchChain,
     // `gate` is defined further down this component; read it at the send, not at render (a TDZ otherwise).
-    gate: (proposal) => gate(proposal), request: alpacaReq, demo: DEMO, recordFor: recordForOrder,
+    gate: (proposal) => gate(proposal), request: alpacaReq, demo: DEMO, recordFor,
+    // PR #47: the clock line on every row, the reconciliation sentence behind the "sent outside this app" ⓘ, and
+    // the row "Manage order" opened.
+    clock, gap: orderGap.sentence, focusId: focusOrder,
     onChanged: () => { setTimeout(() => { syncBroker(); recheckOrders(); }, 1200); },
     // A REPLACE GIVES THE ORDER A NEW ID and the old one reads "replaced": the record follows the new id, or
     // `recheckOrders()` would keep asking about an order that is no longer the one working.
@@ -3236,7 +3270,9 @@ export default function OptionsStrategyLab() {
        they were: the headline and `attentionCount()` read them. The card
        reads this. */
     const act = positionAction({ tpHit, dteExit, slHit, edge, pnl, dteLeft, level, ap, notHeld, tpBasis: tpTarget.basis || "max-profit" });
-    return { p, pnl, pnlNote: pv.sentence, dteLeft, level, label, ap, live, spotNow: sp, tpHit, tpTarget, stopLevel, slHit, dteExit, edge, act, contracts: n, sizeAssumed: size.assumed, notHeld };
+    return { p, pnl, pnlNote: pv.sentence, dteLeft, level, label, ap, live, spotNow: sp, tpHit, tpTarget, stopLevel, slHit, dteExit, edge, act, contracts: n, sizeAssumed: size.assumed, notHeld,
+      // A close already sent is an order working, not a decision still to take (PR #47, TASK 0f).
+      closeWorking: closeWorking(p, alSync) };
   }), [ownedPositions, chains, alSync, pnlOf]);
 
   // Log eventi regola (TP/SL/DTE) fuori dal render: prima veniva chiamato logEvent
@@ -3248,6 +3284,21 @@ export default function OptionsStrategyLab() {
       if (a.dteExit && !(a.notHeld && a.notHeld.length)) logEvent(a.p.id, "dte", `Inside the ${RULES.exitDTE}-day exit window`);
     }
   }, [posAlerts, logEvent]);
+  /* "CORRECTED", ONCE, IN THE TIMELINE (PR #47, TASK 0c). A record whose stored best case a price grid cut off keeps
+     its figure; the card reads the exact one, and this writes one line saying so, stamped so it is never written
+     again. Written from an effect, never from a render. */
+  useEffect(() => {
+    const todo = store.positions.filter((p) => positionStage(p) === "owned" && !p.maxProfitNoted && maxProfitCorrection(p));
+    if (!todo.length) return;
+    setStore((st) => {
+      const positions = st.positions.map((x) => {
+        if (!todo.some((t) => t.id === x.id) || x.maxProfitNoted) return x;
+        const t = appendTimeline(x, { t: Date.now(), type: "note", text: maxProfitCorrectionNote(maxProfitCorrection(x), x) });
+        return { ...x, maxProfitNoted: true, timeline: t.timeline, seqNext: t.seqNext };
+      });
+      const ns = { ...st, positions }; saveState(ns); return ns;
+    });
+  }, [store.positions]); // eslint-disable-line
   /* THE HEADLINE IS DERIVED FROM THE LIST (P9, TASK 2). `nAttention` counted
      only `action`, so a `watch` row printed "Losing: check the reason you
      opened it" under a headline reading "EVERYTHING IS ON PLAN".
@@ -3296,7 +3347,8 @@ export default function OptionsStrategyLab() {
       shareText: pnlShareText(share),
       progress: exitProgress({ p, pnl, dteLeft, tpTarget, n }),
       ev: entryVsNow({ p, n, pnl, popNow, nowSignals }),
-      unitNote: `${n} contract${n === 1 ? "" : "s"}, the whole position. Now is what is left from here.`,
+      // WHAT ALPACA HOLDS, PER LEG (PR #47, TASK 0b): "9 puts", never `contracts` alone.
+      unitNote: `${sizeWords(p)}, the whole position. Now is what is left from here.`,
       fileKind: fileState(p, alSync),
       planSentence: exitPlanSentence(exitPlan), planDetail: exitPlanDetail(exitPlan, n),
     }];
@@ -3311,7 +3363,7 @@ export default function OptionsStrategyLab() {
               const dm = dp ? positionModels[dp.id] : null;
               if (!dp || !dm) return null;
               const fillPx = recordFillPrice(dp);
-              const legsTxt = `${dp.legs.map((l) => `${l.side > 0 ? "+" : "−"}${l.qty} ${l.strike}${l.type === "call" ? "C" : "P"}`).join(" / ")} · ${positionSizeNote(dp)}`;
+              const legsTxt = `${dp.legs.map((l) => `${l.side > 0 ? "+" : "−"}${l.qty} ${l.strike}${l.type === "call" ? "C" : "P"}`).join(" / ")} · ${sizeWords(dp)} at Alpaca${positionSize(dp).assumed ? ` · ${positionSizeNote(dp)}` : ""}`;
               return (
                 <PositionDetails p={dp} title={dm.name} onClose={() => setDetailsId(null)}
                   legsText={legsTxt} expiresText={dp.expKey || new Date(dp.expiry).toLocaleDateString("en-GB")}
@@ -3438,6 +3490,10 @@ export default function OptionsStrategyLab() {
             const pnl = (payoffExp(g.legs, lo2 + (i / 200) * (hi2 - lo2)) - g.net) * 100;
             mp = Math.max(mp, pnl); ml = Math.min(ml, pnl);
           }
+          // THE EXACT EXTREMES (PR #47, TASK 0c): this grid started at half the lowest strike, which is where
+          // J-0001's $37,800 came from (true $80,100). A structure with no ceiling keeps the grid's edge, as before.
+          const exact = exactExtremes(g.legs, g.net);
+          if (exact) { if (exact.maxProfit != null) mp = exact.maxProfit; ml = exact.maxLoss; }
           const dte0 = Math.round((new Date(g.exp) - Date.now()) / 864e5);
           /* >>> THE FILL THE APP COULD NOT SEE (PRD §4r). <<< This record used
              to carry `alpacaId: "sync"` — a sentinel, not an order id — and no
@@ -3588,6 +3644,9 @@ export default function OptionsStrategyLab() {
     sizingFree: freeSizing,
   }), [store.positions, alpaca, capitalAnswers, fused, ticker, freeSizing]);
 
+  /* AT RISK ON THE ACCOUNT STRIP (PR #47, TASK 2) IS THE GATE'S OWN ARITHMETIC: `limits.openRisk` of `limits.total`,
+     from `evaluateTrade()` with no trade in it. Never a second sum. */
+  const exposure = useMemo(() => gate({ intent: "close", legs: [] }, bookFor(!!alpaca))?.limits || null, [gate, bookFor, alpaca]);
   const guard = useMemo(() => {
     if (!AE) return null;
     // AT THE QUANTITY THAT WILL ACTUALLY BE SENT. This read `contracts: 1`
@@ -3843,7 +3902,7 @@ export default function OptionsStrategyLab() {
      a different screen pushes an entry, popstate restores the one it hands back, and closing a sheet from its own
      button steps back instead of leaving a screen behind. Home is the first entry and is never intercepted. After
      each move, focus goes to the new view's heading (WCAG 2.4.3). */
-  const navNow = navOf({ view, tab, step, showSettings, ev, whyTk, detailsId, deskSheet });
+  const navNow = navOf({ view, tab, step, showSettings, ev, whyTk, detailsId, deskSheet, posSeg });
   const navNowRef = useRef(navNow); navNowRef.current = navNow;
   const buildOriginRef = useRef(null); buildOriginRef.current = buildOrigin;
   const navHist = useRef(null);
@@ -3859,7 +3918,7 @@ export default function OptionsStrategyLab() {
         if (n.tab === "build" && n.step === "find" && navNowRef.current.step === "build" && o && o.kind === "card") scrollToCard.current = o.key;
         else if (typeof window.scrollTo === "function") window.scrollTo({ top: 0 });
         setView(n.view); setTab(n.tab); setStep(n.step); setShowSettings(n.settings);
-        setEv(n.ev); setWhyTk(n.whyTk); setDetailsId(n.detailsId); setDeskSheet(n.sheet);
+        setEv(n.ev); setWhyTk(n.whyTk); setDetailsId(n.detailsId); setDeskSheet(n.sheet); setPosSeg(n.seg || "positions");
       },
     });
     return () => { if (navHist.current) navHist.current.stop(); };
@@ -3876,6 +3935,15 @@ export default function OptionsStrategyLab() {
     });
     return () => cancelAnimationFrame(id);
   }, [navKey]);
+  /* "MANAGE ORDER" OPENS THAT ROW (PR #47, TASK 1): Orders, scrolled to the row, focus on it. */
+  useEffect(() => {
+    if (posSeg !== "orders" || !focusOrder || typeof document === "undefined") return undefined;
+    const id = requestAnimationFrame(() => {
+      const el = document.getElementById(`order-${focusOrder}`);
+      if (el) { el.scrollIntoView?.({ block: "center" }); el.focus?.({ preventScroll: true }); }
+    });
+    return () => cancelAnimationFrame(id);
+  }, [posSeg, focusOrder, alSync]);
   const flaggedHidden = find.flagged ? 0 : findGen.items.filter((x) => (!find.market || x.tk === find.market) && x.flags.length).length;
   /* THE LIQUIDITY FLOOR'S OWN PANEL is about ONE board — its threshold and its
      peers — so it reads the market in focus: the filter, or the top card's. */
@@ -3923,19 +3991,10 @@ export default function OptionsStrategyLab() {
   // 1 Find (every market, one ranked list), 2 Build (one trade taken apart).
   // Positions, Watching and the Journal are the other places; Settings sits
   // behind the gear, not in the row.
-  /* WATCHING IS THE THIRD PLACE, AND IT EXISTS BECAUSE THE FIRST TWO WERE
-     BEING ASKED TO HOLD SOMETHING THAT IS NEITHER. A trade you did not take
-     is not a position and it is not history: it is a live observation, and
-     the owner asked for it in those words — "magari voglio vedere come
-     sarebbe andata, ma non deve stare nella stessa schermata delle posizioni
-     e ordini." Putting it inside the Journal would have been the compromise
-     that gets undone in two months, because the Journal is the record of what
-     HAPPENED and this is a question about what is happening now. */
-  const OTHER_PLACES = [
-    { id: "positions", label: "Positions", I: Briefcase },
-    { id: "watching", label: "Watching", I: Layers },
-    { id: "journal", label: "Journal", I: FileText },
-  ];
+  /* WATCHING IS "SAVED", INSIDE FIND (PR #47, TASK 4). It was a third place because a trade you did not take is
+     neither a position nor history — the owner: "magari voglio vedere come sarebbe andata, ma non deve stare nella
+     stessa schermata delle posizioni e ordini." It is still its own screen (`tab === "watching"`), reached from Find's
+     "Results | Saved" switch, and the bottom bar reads it as Find. Its rows are unchanged. */
   // What is left IS evidence: it answers a question about the step in front of
   // you, at any step, and it opens OVER that step (src/steps.jsx) rather than
   // making the page longer.
@@ -4039,7 +4098,7 @@ export default function OptionsStrategyLab() {
         <WizardOpen
           /* "N OPEN POSITIONS" MEANS OWNED. Working orders have their own
              place in Positions and trades nobody bought are under Watching. */
-          positions={ownedPositions} posAlerts={posAlerts} attention={nAttention} looks={attn.looks}
+          positions={ownedPositions} posAlerts={posAlerts} attention={nAttention} looks={attn.looks} closing={attn.closesWorking}
           marketReady={marketReady} barsFor={(tk) => barsCache[tk] || []}
           onPositions={() => { setView("desk"); setTab("positions"); }}
           /* THE HOME ENTRY GOES STRAIGHT TO FIND (PR #40, TASK 1). The guided
@@ -4064,7 +4123,7 @@ export default function OptionsStrategyLab() {
       {/* The bottom padding is the strip reserved for the injected Netlify
              badge (see BADGE_SAFE in theme.js): it is fixed to the viewport and
              was covering whatever happened to be at the bottom right. */}
-        <div style={{ maxWidth: 1720, margin: "0 auto", padding: `18px 14px ${BADGE_SAFE}px` }}>
+        <div style={{ maxWidth: 1720, margin: "0 auto", padding: `18px 14px ${BADGE_SAFE + NAV_BAR_H}px` }}>
 
         {/* Header */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
@@ -4168,37 +4227,11 @@ export default function OptionsStrategyLab() {
             the desk used to print both lists again here, in a working-orders
             strip and a "TODAY" list, beside the top banner and the order sheet.
             It shows one line of counts now, and the line is the link. */}
-        <DeskCountLine working={workingOrders.length} decisions={nAttention} looks={attn.looks}
+        <DeskCountLine working={workingOrders.length} decisions={nAttention} looks={attn.looks} closing={attn.closesWorking}
           onOpen={() => { setTab("positions"); setShowSettings(false); setEv(null); }} />
 
-        {/* THE PATH: two numbered steps, one on screen at a time. The nav
-            says what each step is carrying, because "back" has to be visibly
-            free — the selection lives above these screens, so walking back and
-            forward again cannot lose it. */}
-        <StepNav step={tab === "build" && !showSettings ? step : null}
-          carry={stepCarry({ ticker, trade: legs.length ? `${ticker} · ${stratName}` : null, compare: compare.length, markets: find.markets.length })}
-          onStep={goStep} />
-
-        {/* The other two places. A place is somewhere you go and stay; the three
-            steps above are one place walked through in order. */}
-        <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
-          {OTHER_PLACES.map(({ id, label, I }) => {
-            const on = tab === id && !showSettings;
-            return (
-              <button key={id} onClick={() => { setTab(id); setShowSettings(false); setEv(null); }}
-                style={{
-                  ...sansUI, fontSize: 14, fontWeight: on ? 700 : 500, minHeight: 46,
-                  padding: "8px 16px", borderRadius: 8, whiteSpace: "nowrap", cursor: "pointer",
-                  background: on ? T.amber : "transparent", color: on ? T.onAccent : T.ink,
-                  border: `1.5px solid ${on ? T.amber : T.line}`, display: "inline-flex", gap: 6, alignItems: "center",
-                }}>
-                <I size={14} /> {label}{id === "positions" && nAttention > 0 && (
-                  <span style={{ ...mono, fontSize: 9, background: T.red, color: T.onAccent, borderRadius: 8, padding: "0 5px", fontWeight: 800 }}>{nAttention}</span>
-                )}
-              </button>
-            );
-          })}
-        </div>
+        {/* ONE BOTTOM BAR (PR #47, TASK 4) replaces the numbered path (`StepNav`) and the places row: Find · Build ·
+            Positions · Journal, at the bottom of the screen. It is drawn at the end of this page. */}
 
         {/* THE EVIDENCE, at every step, opening OVER it. A chip that is doing
             something, or holding something you have not read, says so on the
@@ -4494,6 +4527,15 @@ export default function OptionsStrategyLab() {
              the one: the request block above, every candidate across the
              selected markets below it, re-filtered live. The Shortlist is the
              one-market filter; Compare (max 3) stays. */}
+        {/* RESULTS | SAVED (PR #47, TASK 4): the old Watching place, inside Find. Written `"find" === step` so the word
+            counter does not take this switch for Find's own block. */}
+        {((tab === "build" && "find" === step) || tab === "watching") && !showSettings && (
+          <div style={{ marginTop: 12 }}>
+            <USegments label="Find: results or saved trades" value={tab === "watching" ? "saved" : "results"}
+              onChange={(v) => { if (v === "saved") { setTab("watching"); setShowSettings(false); setEv(null); } else goStep("find"); }}
+              items={[{ id: "results", label: "Results" }, { id: "saved", label: "Saved", count: watchRows.length }]} />
+          </div>
+        )}
         {tab === "build" && !showSettings && step === "find" && (
           <FindStep
             request={request} onRequest={(patch) => setWant((w) => ({ ...w, ...patch }))}
@@ -5178,7 +5220,7 @@ export default function OptionsStrategyLab() {
                   qtyBlock={legQtyMsg}
                 />
               )}
-              {!alpaca && <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 8 }}>Connect Alpaca in Positions → Integrations to unlock the full order ticket: limit or market, time in force, quantity and cancellations.</div>}
+              {!alpaca && <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 8 }}>Connect Alpaca in Settings → Connections to unlock the full order ticket: limit or market, time in force, quantity and cancellations.</div>}
 
             {/* THE CONFIRM STEP, BESIDE THE TICKET IT CONFIRMS.
                 It used to be a wizard screen of its own that "Take this road"
@@ -5225,6 +5267,8 @@ export default function OptionsStrategyLab() {
                   They used to be run against `LOCAL_BOOK` whatever was
                   connected, so the paper row read "local simulation, no broker
                   involved" directly above a button that reaches Alpaca. */}
+              {/* THE MARKET CLOCK (PR #47, TASK 0d): an order sent now waits for the open, and the confirm says so. */}
+              {marketClockLine(clock, { queued: true }) && <Note style={{ marginTop: 8 }}>{marketClockLine(clock, { queued: true })}</Note>}
               <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 10, lineHeight: 1.6 }}>
                 {checkedAgainstNote(!!alpaca, guard?.limits?.paper?.why)}
               </div>
@@ -5290,43 +5334,32 @@ export default function OptionsStrategyLab() {
             their anomalies, tapping the news bar opens the headlines with their
             tags. Evidence belongs next to the claim it supports. */}
 
-        {/* ============ PAPER + INTEGRAZIONI ============ */}
+        {/* ============ POSITIONS | ORDERS (PR #47, TASKS 1 and 2) ============
+            The account strip, then two segments. The same order no longer prints twice: the list that sat at the top
+            of Positions and the row inline on the card are gone; a card whose close is working says one line and
+            opens its row in Orders. The Alpaca panel is dissolved — a holding with a record is its card, one with
+            none is a "Not in the app" card, an order with none is a row tagged "sent outside this app" — and its
+            Sync is the refresh icon on the bar. Integrations moved to Settings → Connections. */}
         {tab === "positions" && !showSettings && (
           <div style={{ marginTop: 12 }}>
             <h2 data-view-heading tabIndex={-1} style={{ ...sansUI, fontSize: 18, fontWeight: 800, color: T.ink, margin: "0 0 8px", outline: "none" }}>Positions</h2>
-            {/* ONE ORDERS LIST, FIRST ON THE SCREEN (PR #46, TASK 0). Orders are not positions yet, so they are
-                read before "here is what you own". One row per order READ FROM ALPACA, with Modify, Cancel and
-                Details; it replaces the "WORKING AT THE BROKER" panel (the app's own records) and the Alpaca
-                panel's "ORDERS WAITING". The panel also opens for a GAP: a record Alpaca does not list (PR #32). */}
-            {alpaca && <OrdersPanel orders={alSync.t ? alSync.orders : null} ctx={orderCtx} gap={orderGap.sentence} />}
-            {!alpaca && workingOrders.length > 0 && (
-              <Panel style={{ border: `1px solid ${T.amber}66`, marginBottom: 10 }}>
-                <div style={{ ...sansUI, fontSize: 13, color: T.amber, lineHeight: 1.5 }}>
-                  {workingOrders.length} order{workingOrders.length === 1 ? " was" : "s were"} sent and {workingOrders.length === 1 ? "has" : "have"} not
-                  filled ({workingOrders.map((p) => p.ref || p.ticker).join(", ")}). The broker is not connected, so the orders cannot be
-                  read, modified or cancelled from here.
-                </div>
-              </Panel>
-            )}
-            <Panel>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-                <Lbl>YOUR POSITIONS ({ownedPositions.length}) · VALUED LIVE</Lbl>
-                <label style={{ ...mono, fontSize: 10.5, color: autoMon ? T.green : T.dim, display: "flex", gap: 5, alignItems: "center", cursor: "pointer" }}>
-                  <input type="checkbox" checked={autoMon} onChange={(e) => setAutoMon(e.target.checked)} /> refresh every 60s
-                </label>
-              </div>
-              {ownedPositions.length === 0 && (
-                <div style={{ ...mono, fontSize: 12, color: T.mut, marginTop: 8, lineHeight: 1.6 }}>
-                  {/* A POSITION IS SOMETHING THE BROKER FILLED. An order that was
-                      sent and is still waiting, or that came back cancelled, is
-                      not a position however much the app wanted it to be — and
-                      this list said otherwise for three trades at once. */}
-                  Nothing is open. {workingOrders.length > 0 || notTakenOrders.length > 0
-                    ? `You have ${workingOrders.length > 0 ? `${workingOrders.length} order${workingOrders.length === 1 ? "" : "s"} still working at the broker` : ""}${workingOrders.length > 0 && notTakenOrders.length > 0 ? " and " : ""}${notTakenOrders.length > 0 ? `${notTakenOrders.length} that ended with nothing bought — ${notTakenOrders.length === 1 ? "it is" : "they are"} under Watching` : ""}. A position appears here only when Alpaca has actually filled the order.`
-                    : `Build a trade, then confirm it at the bottom of the Build screen.`}
-                </div>
+            <AccountStrip account={account || alpaca} risk={exposure} capital={exposure ? exposure.tradingCapital : null} />
+            <PositionsBar seg={posSeg} onSeg={(v) => { setPosSeg(v); if (v !== "orders") setFocusOrder(null); }}
+              holdings={ownedPositions.length + unrecorded.length} orders={alpaca && alSync.t ? alSync.orders.length : null}
+              busy={syncBusy} onRefresh={async () => { setSyncBusy(true); try { await syncBroker(); recheckOrders(); } finally { setSyncBusy(false); } }} />
+            {posSeg === "positions" && (
+            <div style={{ marginTop: 10 }}>
+              {!alpaca && workingOrders.length > 0 && (
+                <Note color={T.amber} style={{ marginBottom: 8 }}>
+                  {workingOrders.length} order{workingOrders.length === 1 ? " was" : "s were"} sent and not filled ({workingOrders.map((p) => p.ref || p.ticker).join(", ")}). Alpaca is not connected, so they cannot be read here.
+                </Note>
               )}
-              <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
+              {ownedPositions.length === 0 && unrecorded.length === 0 && (
+                <Note>
+                  Nothing is open.{workingOrders.length > 0 ? " Your orders are under Orders." : ""}{notTakenOrders.length > 0 ? " Orders that ended with nothing bought are under Find → Saved." : ""}
+                </Note>
+              )}
+              <div style={{ display: "grid", gap: 8 }}>
                 {ownedPositions.map((p) => {
                   /* THE CARD (PR #44, TASK 1): the action, the profit, three exits, the entry against now, and the
                      buttons — `Close at limit` always among them. Everything it prints is in `positionModels`, worked
@@ -5340,8 +5373,9 @@ export default function OptionsStrategyLab() {
                       action={m.act.action || (m.act.kind === "not-held" ? "NOT ON ALPACA" : "NO QUOTE")}
                       line={m.act.line} notes={m.act.notes} pnl={m.pnl} shareText={m.shareText}
                       progress={m.progress} ev={m.ev} unitNote={m.unitNote}
-                      closeLabel={m.working ? "Close order working" : "Close at limit"}
-                      closeDisabled={m.working || !!(ca && (ca.busy || ca.prepared))}
+                      /* A CLOSE WORKING HAS NO SECOND CLOSE BUTTON (PR #47, TASK 1): one line and "Manage order". */
+                      closeLabel={m.working ? null : "Close at limit"}
+                      closeDisabled={!!(ca && (ca.busy || ca.prepared))}
                       closeTitle={DEMO ? DEMO_TOOLTIP : undefined} demo={DEMO}
                       onClose={() => prepareCardClose(p)} onDetails={() => setDetailsId(p.id)}
                       fileKind={m.fileKind} onFile={() => setClosing({ id: p.id, written: "", err: null })}
@@ -5357,19 +5391,17 @@ export default function OptionsStrategyLab() {
                           setMsg={setMsg} logEvent={logEvent} gate={gate}
                         />
                       )}>
-                      {/* THE SAME ROW AS "Orders waiting" (PR #46): a working close is modified or cancelled here too. */}
+                      {/* THE ORDER PRINTS ONCE (PR #47, TASK 1): its row lives in Orders; the card says one line and opens it. */}
                       {m.working && (() => {
                         const rows = ordersForRecord(p, alSync.orders).filter((o) => orderIntent(o) === "close");
+                        const o = rows.find((x) => x.id === p.closeOrder?.id) || rows[0] || null;
                         return (
-                          <>
-                            {rows.map((o) => <OrderRow key={o.id} order={o} ctx={orderCtx} inline />)}
-                            <div style={{ ...sansUI, fontSize: 12.5, color: T.amber, marginTop: 8, lineHeight: 1.5 }}>
-                              {rows.length ? "" : "Close order working at the broker. "}When it fills, use "File in Journal" to record why the trade ended.
-                            </div>
-                          </>
+                          <WorkingCloseLine line={workingCloseText(o ? rowLines(o).terms : null)}
+                            clockLine={marketClockLine(clock)}
+                            onManage={() => { setPosSeg("orders"); setFocusOrder(o ? o.id : null); }} />
                         );
                       })()}
-                      {ca && <CloseConfirm prep={ca} onSend={() => sendCardClose(p)} onCancel={() => setCloseAt(null)}
+                      {ca && <CloseConfirm prep={ca} clock={clock} onSend={() => sendCardClose(p)} onCancel={() => setCloseAt(null)}
                         onChoose={(c) => prepareCardClose(p, c, ca.prepared?.chainUsed || null)} />}
                       {/* FILING ASKS WHY, AND THE ANSWER IS KEPT. A rule close names its rule and needs nothing typed.
                           A filing with no rule behind it needs the same written reason as an against-the-signal
@@ -5425,57 +5457,23 @@ export default function OptionsStrategyLab() {
                     </PositionCard>
                   );
                 })}
+                {/* A HOLDING WITH NO RECORD (PR #47): "Not in the app · Import". */}
+                {unrecorded.map((g) => (
+                  <UnrecordedCard key={g.key} group={g} gate={gate} orders={alSync.orders} clock={clock}
+                    setMsg={setMsg} onImport={() => importAlpaca(false)} onSent={() => setTimeout(syncBroker, 1500)} />
+                ))}
               </div>
-            </Panel>
+              <CheckField checked={autoMon} onChange={(e) => setAutoMon(e.target.checked)} style={{ marginTop: 8 }}>refresh prices every 60s</CheckField>
+            </div>
+            )}
+            {posSeg === "orders" && (
+            <div style={{ marginTop: 10 }}>
+              {alpaca ? <OrdersPanel orders={alSync.t ? alSync.orders : null} ctx={orderCtx} />
+                : <Note>Alpaca is not connected: Settings → Connections.</Note>}
+            </div>
+            )}
 
             {detailsSheet}
-
-            {alpaca && <AlpacaDesk setMsg={setMsg} gate={gate} positions={ownedPositions} />}
-
-            {/* SAVED STRATEGIES USED TO SIT HERE, under the broker panel and
-                above Integrations — a list of trades you have NOT taken, on the
-                screen whose whole job is the trades you have. It is the first
-                row of the Watching tab now. */}
-
-            <Panel style={{ marginTop: 10 }}>
-              <Lbl><Plug size={11} style={{ verticalAlign: "-1px" }} /> INTEGRATIONS</Lbl>
-              <div style={{ marginTop: 10 }}>
-                <div style={{ ...mono, fontSize: 11, color: T.ink, fontWeight: 700 }}>Alpha Vantage — free 10-year price history</div>
-                <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 6 }}>The key lives in the server environment (ALPHAVANTAGE_KEY). It powers the real seasonality and the year-by-year history under History.</div>
-              </div>
-              <div style={{ marginTop: 14 }}>
-                <div style={{ ...mono, fontSize: 11, color: T.ink, fontWeight: 700 }}>Alpaca paper trading</div>
-                <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap", alignItems: "center" }}>
-                  <Btn small onClick={testAlpaca} disabled={busy === "alpaca"}>Check the connection</Btn>
-                  <span style={{ ...mono, fontSize: 10.5, color: T.dim }}>keys live in the server environment (ALPACA_KEY / ALPACA_SECRET)</span>
-                </div>
-                {alpaca && (
-                  <div style={{ display: "flex", gap: 14, marginTop: 8, flexWrap: "wrap" }}>
-                    <Stat k="EQUITY" v={`$${(+alpaca.equity).toLocaleString()}`} c={T.green} />
-                    <Stat k="BUYING POWER" v={`$${(+alpaca.buying_power).toLocaleString()}`} />
-                    <Stat k="STATUS" v={alpaca.status} c={T.blue} />
-                  </div>
-                )}
-                <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6 }}>
-                  Only paper-api.alpaca.markets is ever contacted, and the app checks that it was: no real money can be reached from here. Every order asks you twice before it is sent.
-                </div>
-              </div>
-              <div style={{ marginTop: 14 }}>
-                <div style={{ ...mono, fontSize: 11, color: T.ink, fontWeight: 700 }}>Anthropic API — copilot and reports</div>
-                <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 6 }}>The key lives in the server environment (ANTHROPIC_KEY), so nothing needs typing into the site.</div>
-              </div>
-              <div style={{ marginTop: 14 }}>
-                <div style={{ ...mono, fontSize: 11, color: T.ink, fontWeight: 700 }}>Your capital and limits</div>
-                <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 6 }}>Behind the Settings gear at the top of this page.</div>
-              </div>
-              <div style={{ marginTop: 14 }}>
-                <div style={{ ...mono, fontSize: 11, color: T.ink, fontWeight: 700 }}>Report webhook (optional)</div>
-                <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
-                  <Inp placeholder="https://hooks.zapier.com/…" value={store.settings.webhook} onChange={(e) => setSetting("webhook", e.target.value)} style={{ flex: 1, minWidth: 200 }} />
-                </div>
-                <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 4 }}>The report in the Journal can post itself to Zapier or Make, which can forward it by email or messaging.</div>
-              </div>
-            </Panel>
           </div>
         )}
 
@@ -5619,6 +5617,43 @@ export default function OptionsStrategyLab() {
               )}
             </Card>
 
+            {/* CONNECTIONS (PR #47, TASK 2): the Integrations panel, moved here from Positions unchanged in substance.
+                Settings is where the app is set up; Positions is where you act. */}
+            <Card style={{ marginTop: 12 }}>
+              <Lbl><Plug size={11} style={{ verticalAlign: "-1px" }} /> CONNECTIONS</Lbl>
+              <div style={{ marginTop: 10 }}>
+                <div style={{ ...mono, fontSize: 11, color: T.ink, fontWeight: 700 }}>Alpaca paper trading</div>
+                <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap", alignItems: "center" }}>
+                  <Btn small onClick={testAlpaca} disabled={busy === "alpaca"}>Check the connection</Btn>
+                  <span style={{ ...mono, fontSize: 10.5, color: T.dim }}>keys live in the server environment (ALPACA_KEY / ALPACA_SECRET)</span>
+                </div>
+                {alpaca && (
+                  <div style={{ display: "flex", gap: 14, marginTop: 8, flexWrap: "wrap" }}>
+                    <Stat k="STATUS" v={alpaca.status} c={T.blue} />
+                    <Stat k="ACCOUNT" v={alpaca.account_number || "—"} />
+                  </div>
+                )}
+                <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6 }}>
+                  Only paper-api.alpaca.markets is ever contacted, and the app checks that it was: no real money can be reached from here. Every order asks you twice before it is sent. Equity and buying power are on Positions.
+                </div>
+              </div>
+              <div style={{ marginTop: 14 }}>
+                <div style={{ ...mono, fontSize: 11, color: T.ink, fontWeight: 700 }}>Alpha Vantage — free 10-year price history</div>
+                <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 6 }}>The key lives in the server environment (ALPHAVANTAGE_KEY). It powers the real seasonality and the year-by-year history under History.</div>
+              </div>
+              <div style={{ marginTop: 14 }}>
+                <div style={{ ...mono, fontSize: 11, color: T.ink, fontWeight: 700 }}>Anthropic API — copilot and reports</div>
+                <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 6 }}>The key lives in the server environment (ANTHROPIC_KEY), so nothing needs typing into the site.</div>
+              </div>
+              <div style={{ marginTop: 14 }}>
+                <div style={{ ...mono, fontSize: 11, color: T.ink, fontWeight: 700 }}>Report webhook (optional)</div>
+                <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
+                  <Inp placeholder="https://hooks.zapier.com/…" value={store.settings.webhook} onChange={(e) => setSetting("webhook", e.target.value)} style={{ flex: 1, minWidth: 200 }} />
+                </div>
+                <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 4 }}>The report in the Journal can post itself to Zapier or Make, which can forward it by email or messaging.</div>
+              </div>
+            </Card>
+
             <Card style={{ marginTop: 12 }}>
               <Lbl>WHEN THERE IS NOTHING TO DO</Lbl>
               <label style={{ display: "flex", gap: 10, alignItems: "flex-start", marginTop: 10, cursor: "pointer" }}>
@@ -5648,9 +5683,9 @@ export default function OptionsStrategyLab() {
         {/* ============ WATCHING ============ */}
         {tab === "watching" && !showSettings && (
           <div>
-            <h2 data-view-heading tabIndex={-1} style={{ ...sansUI, fontSize: 18, fontWeight: 800, color: T.ink, margin: "0 0 8px", outline: "none" }}>Watching</h2>
+            <h2 data-view-heading tabIndex={-1} style={{ ...sansUI, fontSize: 18, fontWeight: 800, color: T.ink, margin: "12px 0 8px", outline: "none" }}>Saved</h2>
             <Panel style={{ marginTop: 10 }}>
-              <Lbl>WATCHING ({watchRows.length}) · TRADES YOU DID NOT TAKE</Lbl>
+              <Lbl>SAVED ({watchRows.length}) · TRADES YOU DID NOT TAKE</Lbl>
               <div style={{ ...sansUI, fontSize: 13, color: T.body, lineHeight: 1.55, marginTop: 8 }}>
                 Nothing here is a position and nothing here is money. These are structures you saved, and orders
                 that were sent and came back with nothing bought — kept so you can see what they would have done.
@@ -6023,6 +6058,13 @@ export default function OptionsStrategyLab() {
           Paper trading only · {sourceNote(chain)} · {perTradeLimitPhrase(limits)} · Total exposure ≤{money(limits.totalLimit)} ({pctText(RULES.totalExposurePct)}) · Educational software, not financial advice
         </div>
       </div>
+      {/* ONE BOTTOM BAR (PR #47, TASK 4). The badge on Positions is decisions + closes working. */}
+      <BottomBar current={placeOf({ tab, step, showSettings })} badge={nAttention + attn.closesWorking}
+        onGo={(id) => {
+          if (id === "find" || id === "build") { goStep(id); return; }
+          setTab(id); setShowSettings(false); setEv(null);
+          window.scrollTo?.({ top: 0 });
+        }} />
     </div>
   );
 }

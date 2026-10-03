@@ -146,9 +146,12 @@ check("three positions, and every chain they need is loaded first", () => {
 });
 
 check("a position with no live price is skipped, never invented", () => {
-  const none = demoPositions({ spots: {}, underlying });
+  // A FIXED CLOCK (PR #47). The third demo position picks its market from the month it was opened in; from
+  // 3 Oct 2026 that is CORN, so one CORN price built two positions and this test failed on the calendar, not the code.
+  const now = Date.parse("2026-10-02T12:00:00Z");
+  const none = demoPositions({ spots: {}, underlying, now });
   if (none.length) throw new Error("positions were built with no prices to build them from");
-  const one = demoPositions({ spots: { CORN: 19.4 }, underlying });
+  const one = demoPositions({ spots: { CORN: 19.4 }, underlying, now });
   if (one.length !== 1) throw new Error(`${one.length} positions from one price`);
 });
 

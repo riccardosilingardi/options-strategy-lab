@@ -10,6 +10,8 @@ import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { RULES, takeProfitTarget, positionAction, stopWarningLevel, stopSigns, onCardLine } from "./rules.js";
 import { closeDecision, notHeldCloseWords } from "./journal.js";
+import { sizeWords, unitWords, maxProfitCorrection, withExactMaxProfit, maxProfitCorrectionNote } from "./positionView.js";
+import { exactExtremes, payoffAtZero } from "./rules.js";
 import { structureName, displayName, exitDateOf, exitProgress, entryVsNow, fileState, pnlShareOfRisk,
   pnlShareText, signedMoney$, holdsStructure, shortDate, factorText } from "./positionView.js";
 
@@ -184,6 +186,49 @@ test("ONE HOME — the card's stop level is the level that raises the warning", 
   assert.match(app, /stopWarningLevel\(\{ maxLoss: p\.maxLoss, contracts: n \}\)/);
   assert.equal(/RULES\.stopLossPct \* p\.maxLoss/.test(app), false, "posAlerts no longer spells the level itself");
   assert.equal(RULES.stopLossPct, 0.5);
+});
+
+
+/* ---- PR #47, TASK 0b and 0c ---- */
+const J1_IMPORT = { ref: "J-0001", ticker: "GDX", expKey: "2026-10-30", legs: [{ side: 1, type: "put", strike: 94, qty: 9 }],
+  entryNet: 45, contracts: 1, maxProfit: 37800, maxLoss: -4500 };
+const J1_TICKET = { ...J1_IMPORT, legs: [{ side: 1, type: "put", strike: 94, qty: 1 }], entryNet: 5, contracts: 9, maxProfit: 4200, maxLoss: -500 };
+const J2 = { ref: "J-0002", ticker: "XLE", legs: [{ side: 1, type: "call", strike: 90, qty: 5 }, { side: -1, type: "call", strike: 95, qty: 5 }],
+  contracts: 5, entryNet: 10, maxProfit: 1500, maxLoss: -1000 };
+
+test("0b — THE SIZE SENTENCE IS WHAT ALPACA HOLDS, PER LEG: 9 puts, 25 call spreads", () => {
+  assert.equal(sizeWords(J1_IMPORT), "9 puts", "the import shape: contracts 1, nine in the leg");
+  assert.equal(sizeWords(J1_TICKET), "9 puts", "the ticket shape: one in the leg, nine contracts");
+  assert.equal(sizeWords(J2), "25 call spreads", "+25 / -25 at Alpaca, was '5 contracts'");
+  assert.equal(unitWords([{ type: "put", side: 1 }, { type: "put", side: -1 }, { type: "call", side: -1 }, { type: "call", side: 1 }]), "iron condor");
+  assert.equal(sizeWords({ legs: [{ side: 1, type: "call", strike: 1, qty: 1 }], contracts: 1 }), "1 call");
+});
+
+test("0c — the payoff at zero is part of the extremes: +1 94P at 5.00 makes $8,900, not $2,600", () => {
+  assert.equal(payoffAtZero([{ side: 1, type: "put", strike: 94, qty: 1 }], 5), 8900);
+  const ex = exactExtremes([{ side: 1, type: "put", strike: 94, qty: 1 }], 5);
+  assert.equal(ex.maxProfit, 8900); assert.equal(ex.maxLoss, -500);
+  // A put spread's best case is flat below its lower strike: nothing moves.
+  const bear = exactExtremes([{ side: 1, type: "put", strike: 94, qty: 1 }, { side: -1, type: "put", strike: 90, qty: 1 }], 1.5);
+  assert.equal(bear.maxProfit, 250); assert.equal(bear.maxLoss, -150);
+  // A long call has no ceiling.
+  assert.equal(exactExtremes([{ side: 1, type: "call", strike: 94, qty: 1 }], 2).maxProfit, null);
+});
+
+test("0c — J-0001's stored $37,800 is corrected on the card to $80,100 (1,780% of the risk), once", () => {
+  const c = maxProfitCorrection(J1_IMPORT);
+  assert.deepEqual(c, { from: 37800, to: 80100 });
+  const ev = entryVsNow({ p: withExactMaxProfit(J1_IMPORT), n: 1, pnl: 2925 });
+  assert.equal(ev.figures.find((f) => f.k === "PROFIT").entry, "$80,100");
+  assert.equal(ev.figures.find((f) => f.k === "RETURN ON RISK").entry, "1780%");
+  assert.equal(J1_IMPORT.maxProfit, 37800, "the stored record keeps its figure");
+  assert.ok(/\$37,800 → \$80,100/.test(maxProfitCorrectionNote(c, J1_IMPORT)));
+  // The ticket shape: 9 × $8,900 as well.
+  assert.ok(/\$80,100/.test(maxProfitCorrectionNote(maxProfitCorrection(J1_TICKET), J1_TICKET)));
+  // A figure that was not cut off stands.
+  assert.equal(maxProfitCorrection(J2), null);
+  assert.equal(withExactMaxProfit(J2), J2);
+  assert.equal(maxProfitCorrection({ ...J1_IMPORT, entryNet: null }), null, "no entry, no correction");
 });
 
 console.log(`\npositionView: ${passed} passed, ${failures.length} failed`);

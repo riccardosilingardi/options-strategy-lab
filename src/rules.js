@@ -14,7 +14,7 @@
 // price off the chain against `netBS()` — the SAME function and the SAME smile
 // every other screen in this app prices with, which is the point: a second
 // implementation of the model would make the check a comparison of two guesses.
-import { netBS, bs, smile, terminalMC, seasonalDrift, seedFrom } from "./engine.js";
+import { netBS, bs, smile, terminalMC, seasonalDrift, seedFrom, payoff } from "./engine.js";
 // WHICH WAY THE MONEY MOVES ON AN ORDER, read from its one home. `order.js`
 // imports nothing, so this is leaf-ward exactly as the `engine.js` import above
 // it is, and it is here for the same reason: `limitAgainstBook()` below has to
@@ -2445,6 +2445,44 @@ export function payoffCeiling(legs = []) {
   return { above: callQty <= 0, below: callQty >= 0, callQty, putQty };
 }
 
+/* =====================================================================
+   THE PAYOFF AT A PRICE OF ZERO IS PART OF THE EXTREMES (PR #47, TASK 0c).
+
+   Measured: `analyze([+1 94P], spot 90, net 5.00)` printed a maximum profit of
+   $2,600 a put — the payoff at the bottom of its price grid (70% of spot) — while
+   the true maximum, the put's value if the price went to zero, is
+   (94 − 5) × 100 = $8,900. J-0001's record (9 puts) read PROFIT $37,800 at entry
+   against a true $80,100. An expiry payoff is straight lines between strikes, so its
+   extremes are at a strike or at an end: S = 0 on the put side, and on the call side
+   either flat (no net long call) or no ceiling at all (`payoffCeiling()`).
+
+   `payoffAtZero()` is the one number `analyze()` adds to the grid's extremes.
+   `exactExtremes()` reads every kink, for a stored record that has only legs and an
+   entry (an imported holding, or a record written before this fix).
+===================================================================== */
+
+/** P&L at expiry, dollars per combination (leg quantities included), if the price went to zero. */
+export function payoffAtZero(legs = [], entry = 0) {
+  const e = Number(entry);
+  if (!Array.isArray(legs) || !legs.length || !Number.isFinite(e)) return null;
+  return (payoff(legs, 0) - e) * 100;
+}
+
+/**
+ * The exact best and worst case at expiry, per combination, in dollars.
+ * @returns {?{ maxProfit: ?number, maxLoss: number }} maxProfit null when there is no ceiling.
+ */
+export function exactExtremes(legs = [], entry = 0) {
+  const e = Number(entry);
+  if (!Array.isArray(legs) || !legs.length || !Number.isFinite(e)) return null;
+  const ks = legs.map((l) => Number(l && l.strike)).filter((k) => Number.isFinite(k) && k > 0);
+  if (ks.length !== legs.length) return null;
+  const top = Math.max(...ks);
+  const pts = [0, ...ks, top * 2];
+  const vals = pts.map((S) => (payoff(legs, S) - e) * 100);
+  return { maxProfit: payoffCeiling(legs).above ? Math.max(...vals) : null, maxLoss: Math.min(...vals) };
+}
+
 /** Is this structure's best case unknown? The one question every screen asks. */
 export const profitUnbounded = (legs) => !payoffCeiling(legs).above;
 
@@ -4324,21 +4362,28 @@ export const remainingEdgeLabel = (e) =>
 
 export function attentionCount(alerts = []) {
   const list = Array.isArray(alerts) ? alerts : [];
-  const decisions = list.filter((a) => a && a.level === "action").length;
-  const looks = list.filter((a) => a && a.level && a.level !== "ok").length;
-  return { decisions, looks, quiet: looks === 0 };
+  /* A CLOSE ALREADY WORKING IS NOT A DECISION STILL TO TAKE (PR #47, TASK 0f). J-0001 read CLOSE, the close was
+     sent, and the front page went on saying "1 position needs a decision". The decision was taken: what is left is
+     an order at Alpaca, counted on its own as `closesWorking`. */
+  const working = list.filter((a) => a && a.closeWorking);
+  const live = list.filter((a) => a && !a.closeWorking);
+  const decisions = live.filter((a) => a.level === "action").length;
+  const looks = live.filter((a) => a.level && a.level !== "ok").length;
+  return { decisions, looks, closesWorking: working.length, quiet: looks === 0 && working.length === 0 };
 }
 
 /** ONE LINE for a holding at the broker that the app has a record of (PR #44, TASK 1): the profit, and where to act on
  *  it. It replaces a paragraph the broker panel repeated for every holding, telling the reader to use a button the
  *  card then hid inside a fold. The paragraph is gone: the card now shows that button. */
+/* PR #47: no longer rendered — the Alpaca panel is dissolved and a holding with a record IS its card. Kept for the
+   tests that pin its words until the next sweep removes both. */
 export const onCardLine = (ref, pnlText) => `✓ ${ref || "a position"} · ${pnlText} · on your Positions card`;
 
 /** What the broker panel says about a holding the app has NO record of: it has no card, so this panel keeps its own
  *  close button, and nothing is filed in the Journal. */
 export const noRecordNote = () =>
-  `The app has no record of this holding, so it has no Positions card. This button closes it at a limit priced ` +
-  `now, and nothing is filed in the Journal.`;
+  `No record of this holding here. Import makes it a card with an exit plan; Close at limit closes it at a ` +
+  `limit priced now, and nothing is filed in the Journal.`;
 
 /* WHEN "OF THE MAXIMUM" IS A PERCENTAGE AND WHEN IT IS WORDS.
    -$127 against a $4 maximum is -3188%, which is a true division and a false

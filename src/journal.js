@@ -670,33 +670,53 @@ export function fillVsLimit({ limit = null, fill = null, contracts = 1, limitSig
 ------------------------------------------------------------------ */
 
 /**
- * @param working  the app's own working-order records (`positionStage` === "working")
+ * IS THIS ORDER MINE? — ONE FUNCTION DECIDES (PR #47, TASK 0a).
+ *
+ * Measured on the owner's phone, 2 Oct 2026, 22:08: J-0001's own close (`closeOrder.id`, kept current after a
+ * replace by `onReplaced`) was reported "not sent from this browser" by `orderReconciliation()`, which counted
+ * only OPENING records — while the same order's row read "J-0001 · Close", because the row asked a second question
+ * that also looked at `closeOrder.id`. Two answers to one question. This is the one answer: a record owns an order
+ * when the order is its opening order or its close.
+ */
+export function recordForOrder(records = [], order = null) {
+  const id = order && order.id != null ? String(order.id) : "";
+  if (!id) return null;
+  return (Array.isArray(records) ? records : []).find((p) => p
+    && (String(p.alpacaId || "") === id || String(p.closeOrder?.id || "") === id)) || null;
+}
+
+/**
+ * @param records  the app's records (every one: an opening order and a close both count, through `recordForOrder()`)
  * @param brokerOrders  what `GET /v2/orders?status=open` returned, or null if not asked
  * @returns {{ asked, mine, theirs, unknownToApp, sentence }}
- *   `unknownToApp` are the broker's order ids this app holds no record of.
- *   `sentence` is null when the two agree, or when the broker has not been asked.
+ *   `mine` is how many of the broker's orders this app has a record of; `unknownToApp` are the ones it has none of.
+ *   `sentence` is null when every order is known, or when the broker has not been asked.
  */
-export function orderReconciliation(working = [], brokerOrders = null) {
-  const mine = (Array.isArray(working) ? working : []).filter(Boolean);
+export function orderReconciliation(records = [], brokerOrders = null) {
+  const list = (Array.isArray(records) ? records : []).filter(Boolean);
   if (!Array.isArray(brokerOrders)) {
-    return { asked: false, mine: mine.length, theirs: null, unknownToApp: [], sentence: null };
+    return { asked: false, mine: list.filter((p) => p.alpacaId).length, theirs: null, unknownToApp: [], sentence: null };
   }
-  const known = new Set(mine.map((p) => String(p.alpacaId || "")).filter(Boolean));
-  const unknownToApp = brokerOrders.filter((o) => o && o.id && !known.has(String(o.id)));
+  const real = brokerOrders.filter((o) => o && o.id);
+  const unknownToApp = real.filter((o) => !recordForOrder(list, o));
+  const mine = real.length - unknownToApp.length;
   if (!unknownToApp.length) {
-    return { asked: true, mine: mine.length, theirs: brokerOrders.length, unknownToApp: [], sentence: null };
+    return { asked: true, mine, theirs: brokerOrders.length, unknownToApp: [], sentence: null };
   }
   const n = unknownToApp.length;
   const ids = unknownToApp.map((o) => String(o.id).slice(0, 8)).join(", ");
   return {
-    asked: true, mine: mine.length, theirs: brokerOrders.length, unknownToApp,
+    asked: true, mine, theirs: brokerOrders.length, unknownToApp,
     sentence: `Your Alpaca account is holding ${brokerOrders.length} waiting order` +
-      `${brokerOrders.length === 1 ? "" : "s"} and this app has a record of ${mine.length}. ` +
+      `${brokerOrders.length === 1 ? "" : "s"} and this app has a record of ${mine}. ` +
       `${n === 1 ? "One of them" : `${n} of them`} was not sent from this browser, or was sent before the ` +
-      `app's local record was cleared (${ids}…). It is a real order and it can still fill. Its row below is read ` +
+      `app's local record was cleared (${ids}…). It is a real order and it can still fill. Its row is read ` +
       `from Alpaca and can be modified or cancelled like any other; with no record here, its fill is not filed in the Journal.`,
   };
 }
+
+/** The tag an order with no record carries on its row (TASK 1): the long sentence above is behind its ⓘ. */
+export const outsideTag = () => "sent outside this app";
 
 /**
  * One sentence saying what a record is, for the screen that renders it.

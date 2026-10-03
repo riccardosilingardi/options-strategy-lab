@@ -83,6 +83,51 @@ export const Note = ({ children, color = T.mut, style, ...rest }) => (
   <div {...rest} style={{ ...sans, fontSize: FS.xs, lineHeight: LH.body, color, ...style }}>{children}</div>
 );
 
+/* ====================================================================
+   THE ⓘ — ONE OR TWO SENTENCES, ONE TAP AWAY (PR #47, TASK 3).
+
+   A tap opens it and a tap closes it: a `title` never opens on a phone. The button is 44px tall (2.5.5), says what
+   it explains (aria-label) and whether it is open (aria-expanded). The text is rendered only while open, so it is
+   not "words at rest" and the counter in `wordcount.mjs` does not score it — FOLD, NEVER DELETE: every fact that
+   left a screen for a ⓘ is still one tap away.
+==================================================================== */
+export function Info({ label, children, style }) {
+  const [open, setOpen] = useState(false);
+  const id = useId();
+  if (!children) return null;
+  return (
+    <span style={{ display: "inline", ...style }}>
+      <button onClick={() => setOpen((o) => !o)} aria-label={`About ${label}`} aria-expanded={open} aria-controls={id}
+        style={{ ...sans, fontSize: FS.sm, color: T.blue, background: "transparent", border: "none", cursor: "pointer",
+          minHeight: TAP, minWidth: TAP, padding: 0, verticalAlign: "middle" }}>ⓘ</button>
+      {open && (
+        <span id={id} role="note" style={{ ...sans, display: "block", fontSize: FS.xs, lineHeight: LH.body, color: T.body,
+          background: T.bg, border: `1px solid ${T.line}`, borderRadius: 6, padding: "8px 10px", margin: "2px 0 6px" }}>
+          {children}
+        </span>
+      )}
+    </span>
+  );
+}
+
+/** A two- to four-way switch for a screen's segments: one row of 44px buttons, `aria-pressed` on the one shown. */
+export function Segments({ items = [], value, onChange, label }) {
+  return (
+    <div role="group" aria-label={label} style={{ display: "inline-flex", border: `1px solid ${T.field}`, borderRadius: 8, overflow: "hidden" }}>
+      {items.map((it) => {
+        const on = it.id === value;
+        return (
+          <button key={it.id} onClick={() => onChange && onChange(it.id)} aria-pressed={on}
+            style={{ ...sans, fontSize: FS.sm, fontWeight: FW.bold, minHeight: TAP, padding: "8px 16px", cursor: "pointer",
+              border: "none", background: on ? T.ink : "transparent", color: on ? T.bg : T.ink }}>
+            {it.label}{it.count != null ? <span style={{ ...mono, marginLeft: 6 }}>{it.count}</span> : null}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 /** A number field. Numbers, so mono; the border is the field token (1.4.11). */
 export const NumberInput = ({ style, ...rest }) => (
   <input type="number" {...rest}

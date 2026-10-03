@@ -17,12 +17,15 @@ const DARKT = {
   mut: "#8b95a1", dim: "#7d8794", amber: "#e8b545", green: "#7fb85c",
   red: "#d66a5a", blue: "#5aa7d6", violet: "#a78bda", body: "#c9d1d9",
   greenDeep: "#4a9e3f", redDeep: "#c0392b", onAccent: "#14181d", dark: true,
+  // PR #47: the ACTION tone — CLOSE and a Send. Red is for errors and refusals only.
+  action: "#5aa7d6",
 };
 const LIGHTT = {
   bg: "#f5f6f7", panel: "#ffffff", line: "#dcdfe3", field: "#7a8491", ink: "#1c2128",
   mut: "#5a6472", dim: "#616b78", amber: "#8a6300", green: "#2f6f45",
   red: "#b23a2b", blue: "#1f6391", violet: "#5d47a8", body: "#2a3038",
   greenDeep: "#20603a", redDeep: "#8f2d20", onAccent: "#ffffff", dark: false,
+  action: "#1f6391",
 };
 
 /** Il tema scelto dall'utente. Il chiaro è il default: si sceglie il buio. */

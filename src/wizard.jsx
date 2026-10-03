@@ -265,7 +265,7 @@ const greeting = (d = new Date()) => {
  * reason you opened it"*. `looks` is everything that is not on plan
  * (`attentionCount()` in rules.js), and this line may not call the book quiet
  * while it is above zero. */
-export function statusLine({ positions = [], attention = 0, looks = null, marketReady = true }) {
+export function statusLine({ positions = [], attention = 0, looks = null, marketReady = true, closing = 0 }) {
   if (!positions.length) {
     return marketReady
       ? "No open positions. Nothing to manage — today is for looking."
@@ -273,23 +273,27 @@ export function statusLine({ positions = [], attention = 0, looks = null, market
   }
   const n = positions.length;
   const plural = n === 1 ? "position" : "positions";
+  // A CLOSE ALREADY SENT IS NOT A DECISION (PR #47, TASK 0f): it is counted as what it is, an order working.
+  const c = Number(closing) || 0;
+  const working = c > 0 ? ` ${c} close${c === 1 ? "" : "s"} working.` : "";
   if (attention > 0) {
-    return attention === 1
+    return (attention === 1
       ? `1 of your ${n} ${plural} needs a decision today.`
-      : `${attention} of your ${n} ${plural} need a decision today.`;
+      : `${attention} of your ${n} ${plural} need a decision today.`) + working;
   }
   // `looks` is optional so an older caller reads exactly as it did; when it is
   // given it decides, because a row that says "check this" outranks a headline.
   const look = Number(looks) || 0;
   if (look > 0) {
-    return look === 1
+    return (look === 1
       ? `1 of your ${n} ${plural} is worth a look — the row below says why.`
-      : `${look} of your ${n} ${plural} are worth a look — the rows below say why.`;
+      : `${look} of your ${n} ${plural} are worth a look — the rows below say why.`) + working;
   }
+  if (c > 0) return `${n} ${plural} open.${working} Alpaca has the order; nothing to decide.`;
   return `${n} ${plural} open, all inside the plan. Nothing to do.`;
 }
 
-export function WizardOpen({ positions = [], posAlerts = [], attention = 0, looks = null, marketReady = true,
+export function WizardOpen({ positions = [], posAlerts = [], attention = 0, looks = null, marketReady = true, closing = 0,
   onPositions, onFind, onSettings, barsFor }) {
   const hasPositions = positions.length > 0;
   return (
@@ -298,7 +302,7 @@ export function WizardOpen({ positions = [], posAlerts = [], attention = 0, look
         <div>
           <h1 data-view-heading tabIndex={-1} style={{ ...sans, fontSize: 27, fontWeight: 800, color: T.ink, margin: 0, lineHeight: 1.2, outline: "none" }}>{greeting()}</h1>
           <p style={{ ...sans, fontSize: 15.5, color: T.mut, lineHeight: 1.5, margin: "8px 0 0" }}>
-            {statusLine({ positions, attention, looks, marketReady })}
+            {statusLine({ positions, attention, looks, marketReady, closing })}
           </p>
         </div>
         <button onClick={onSettings} title="Settings"

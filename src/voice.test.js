@@ -30,6 +30,8 @@ import {
 import { qualityFloorSentence, qualityFloorLine, voicePointer, filterFold, VOICE_HOMES,
   RECOMMENDED_LIQUIDITY, copilotOverreach, copilotOverreachNote } from "./rules.js";
 import { isTestRecord, testRecordNote, scoredJournal } from "./journal.js";
+import { SURFACE_IDS, SURFACE_BUDGET, SURFACE_BEFORE, renderedWords } from "./wordcount.mjs";
+import { measureSurfaces } from "../scripts/surfaces.mjs";
 
 let passed = 0; const failures = [];
 const test = (name, fn) => {
@@ -145,7 +147,12 @@ test("MEASURED: the three screens, and the table in the PRD is this number", () 
      `ui.jsx` and `find.jsx` too): find 384 -> 309 words at rest (51 typed + 258 generated, 24 sites), build 264 -> 244.
      The two headings and their empty-state sentence became one counted line, and the paragraph under the old chance
      slider went with it. The ceilings are those numbers, so the next word fails the build. */
-  const CEILING = { find: 309, build: 244, positions: 209 };
+  /* >>> PR #47: "positions" IS THE POSITIONS SEGMENT (`posSeg === "positions"`), and the counter now reads
+     `positions.jsx`, `positionCard.jsx` and `navBar.jsx` — the card's own file was never read before, so the old 209
+     did not include a word of the card. Measured: 217 (110 typed + 107 generated, 5 sites), an upper bound that
+     counts the filing dialog and the close confirm, which appear only after a tap. The owner's ≤ 120 is held on the
+     RENDERED segment below. */
+  const CEILING = { find: 309, build: 244, positions: 217 };
   /* >>> PR #46: ONE ORDERS LIST. <<< The record-based "WORKING AT THE BROKER" panel (its paragraph about what a
      working order is, the stale-DAY warning, the per-row sentences) left Positions; the one list lives in
      `orders.jsx`, which the counter now reads. Measured: positions 304 -> 209 (4 typed + 205 generated, 14 sites).
@@ -167,6 +174,31 @@ test("MEASURED: the three screens, and the table in the PRD is this number", () 
   }
   assert.ok(m.find.total < BEFORE.radarPlusShortlist, "Find reads less than Radar and Shortlist did");
   assert.ok(m.positions.total < POSITIONS_BEFORE, `Positions reads less than it did: ${m.positions.total} against ${POSITIONS_BEFORE}`);
+});
+
+/* ================================================================
+   2b. PR #47, TASK 3 — FOUR SURFACES, RENDERED ON J-0001, AT REST
+================================================================ */
+const SURF = await measureSurfaces();
+test("MEASURED: Positions ≤ 120, one order row ≤ 35, the close confirm ≤ 30, Modify at its measured value", () => {
+  /* Measured on main (e38261f) with the same fixtures and this same counter: one row 44, the orders panel with the
+     false "not sent from this browser" warning 136, the close confirm 79, the orders panel + J-0001's and J-0002's
+     cards 371. On the owner's phone, 2 Oct 2026: 78, 171, 51. After: see SURFACE_BUDGET. */
+  for (const id of SURFACE_IDS) {
+    assert.ok(Number.isFinite(SURF[id]) && SURF[id] > 0, `${id} measured`);
+    assert.ok(SURF[id] <= SURFACE_BUDGET[id], `${id}: ${SURF[id]} words at rest against ${SURFACE_BUDGET[id]}`);
+  }
+  assert.ok(SURF.orders < SURFACE_BEFORE.orders && SURF.confirm < SURFACE_BEFORE.confirm);
+});
+
+test("…and the rendered counter counts what is on screen: a closed ⓘ and a hidden panel are not read", () => {
+  assert.equal(renderedWords("<div>Sell 9 GDX <button>ⓘ</button></div>"), 3, "the ⓘ glyph is not a word");
+  assert.equal(renderedWords('<div>a b<div hidden="">x y <div>z</div> w</div> c</div>'), 3);
+  assert.equal(renderedWords("<p>Market closed · opens Mon 15:30 your time</p>"), 7, "a separator is not a word");
+});
+
+test("…and the counter can SEE a budget broken (it is a check, not a wall)", () => {
+  assert.ok(renderedWords(`<p>${"word ".repeat(36)}</p>`) > SURFACE_BUDGET.orders);
 });
 
 test("…and a screen's reading is the SUM OF ITS PARTS, not the order it was joined in", () => {

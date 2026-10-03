@@ -22,6 +22,7 @@
 // ============================================================================
 import React from "react";
 import { T } from "./theme.js";
+import { Info } from "./ui.jsx";
 import { Btn } from "./pro.jsx";
 import { Fold, EvidenceOverlay } from "./steps.jsx";
 import { BandThumbnail } from "./visuals.jsx";
@@ -31,11 +32,13 @@ import { signedMoney$ } from "./positionView.js";
 const mono = { fontFamily: "ui-monospace, Menlo, monospace" };
 const sans = { fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, sans-serif" };
 
-const toneOf = (action) => (action === "CLOSE" ? T.red : action === "WARNING" ? T.amber : action === "HOLD" ? T.green : T.dim);
+// RED IS FOR ERRORS AND REFUSALS (PR #47, TASK 3): CLOSE is an action, so it takes the action tone.
+const toneOf = (action) => (action === "CLOSE" ? T.action : action === "WARNING" ? T.amber : action === "HOLD" ? T.green : T.dim);
 
 /** One exit: its words and a bar. The bar is a picture of the words, never the only place a fact is. */
-export function ProgressLine({ line, tone = T.blue, reachedTone = T.red }) {
+export function ProgressLine({ line, tone = T.blue, reachedTone = T.amber }) {
   // Reaching a take profit is good news and reaching the time exit or the stop is not: the caller names the colour.
+  // Not reached-red (PR #47): a reached exit is a warning to act on, not an error.
   const color = line.state === "reached" ? reachedTone : line.state === "none" || line.state === "unknown" ? T.dim : tone;
   return (
     <div style={{ marginTop: 8 }}>
@@ -96,7 +99,11 @@ export function PositionCard({
     <article aria-label={`${p.ref || p.ticker} ${title}`} data-position={p.id}
       style={{ padding: "12px 14px", background: T.bg, border: `1px solid ${T.field}`, borderRadius: 8 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: "2px 12px" }}>
-        <div style={{ ...mono, fontSize: 24, fontWeight: 800, color: tone, letterSpacing: 0.5, lineHeight: 1.15 }}>{action || "NO ACTION"}</div>
+        <div style={{ ...mono, fontSize: 24, fontWeight: 800, color: tone, letterSpacing: 0.5, lineHeight: 1.15 }}>
+          {action || "NO ACTION"}
+          {/* HOLD SAYS IT ALL AT REST (PR #47, TASK 3): its "nothing to do" sentence is one tap away. */}
+          {action === "HOLD" && line ? <Info label="hold">{line}</Info> : null}
+        </div>
         <h3 style={{ ...sans, fontSize: 14, fontWeight: 700, color: T.ink, margin: 0 }}>
           {p.ref && <span style={{ ...mono, fontSize: 12, color: T.dim, fontWeight: 400, marginRight: 6 }}>{p.ref}</span>}
           <span style={mono}>{p.ticker}</span> · {title}
@@ -109,29 +116,32 @@ export function PositionCard({
         </span>
         <span style={{ ...mono, fontSize: 13, color: T.mut }}>{shareText || (pnlKnown ? "" : "no price right now")}</span>
       </div>
-      <div style={{ ...sans, fontSize: 14, color: T.ink, lineHeight: 1.45, marginTop: 4 }}>{line}</div>
+      {action !== "HOLD" && <div style={{ ...sans, fontSize: 14, color: T.ink, lineHeight: 1.45, marginTop: 4 }}>{line}</div>}
       {notes.map((n, i) => (
         <div key={i} style={{ ...sans, fontSize: 12.5, color: T.amber, marginTop: 4, lineHeight: 1.5 }}>⚠ {n}</div>
       ))}
       <ProgressLine line={progress.time} />
       <ProgressLine line={progress.takeProfit} tone={T.green} reachedTone={T.green} />
       <ProgressLine line={progress.stop} tone={T.amber} />
-      <EntryVsNow ev={ev} unitNote={unitNote} />
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 12 }}>
-        <Btn color={closePrimary ? T.red : T.ink} ghost={!closePrimary} disabled={demo || closeDisabled} title={closeTitle} onClick={onClose}>
-          {closeLabel}
-        </Btn>
+        {/* NO SECOND CLOSE WHILE ONE IS WORKING (PR #47, TASK 1): the caller passes no label, and the card shows
+            the working close's line and "Manage order" instead of a disabled button. */}
+        {closeLabel && (
+          <Btn color={closePrimary ? T.action : T.ink} ghost={!closePrimary} disabled={demo || closeDisabled} title={closeTitle} onClick={onClose}>
+            {closeLabel}
+          </Btn>
+        )}
         <Btn ghost color={T.blue} onClick={onDetails} aria-haspopup="dialog">Details</Btn>
         {(fileKind === "gone" || fileKind === "book") && (
           <Btn ghost={fileKind !== "gone"} color={fileKind === "gone" ? T.amber : T.ink} onClick={onFile}>File in Journal</Btn>
         )}
       </div>
       {children}
-      {guardian && (
-        <Fold label="open" tone={T.ink} keepMounted style={{ marginTop: 8 }} summary="Is the reason still good? Exit orders and simulator">
-          {guardian}
-        </Fold>
-      )}
+      {/* ONE FOLD (PR #47, TASK 3): the entry set beside now (also on Details) and the reason check / exit orders. */}
+      <Fold label="open" tone={T.ink} keepMounted style={{ marginTop: 8 }} summary="Entry vs now · exit orders">
+        <EntryVsNow ev={ev} unitNote={unitNote} />
+        {guardian}
+      </Fold>
     </article>
   );
 }

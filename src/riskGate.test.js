@@ -1397,7 +1397,9 @@ test("DEAD IS NOT WORKING — the filter that outlived three cancelled orders", 
   // ONLY WHAT IS OWNED IS A POSITION. The Positions screen and the attention
   // alert both read the owned list — the alert said "EVERYTHING IS ON PLAN"
   // over three trades that had never been bought.
-  assert.ok(/YOUR POSITIONS \(\{ownedPositions\.length\}\)/.test(app),
+  // PR #47: the count is on the Positions segment — owned records plus holdings Alpaca lists with no record, never
+  // every record and never Alpaca's legs (TASK 0e).
+  assert.ok(/holdings=\{ownedPositions\.length \+ unrecorded\.length\}/.test(app),
     "the Positions count is the owned count, not every record");
   assert.ok(/const posAlerts = useMemo\(\(\) => ownedPositions\.map/.test(app),
     "and nothing that was never bought asks for a decision today");
@@ -1407,7 +1409,8 @@ test("WATCHING IS A PLACE OF ITS OWN, and its figures are not money", () => {
   // The owner's words: "magari voglio vedere come sarebbe andata, ma non deve
   // stare nella stessa schermata delle posizioni e ordini."
   const app = codeOf("App.jsx");
-  assert.ok(/id: "watching"/.test(app), "a fourth place beside Positions and the Journal");
+  // PR #47, TASK 4: no longer a place on the bar — "Saved", inside Find — and still a screen of its own.
+  assert.ok(/id: "saved", label: "Saved"/.test(app), "Saved, beside Find's results");
   assert.ok(/tab === "watching"/.test(app), "and a screen behind it");
   assert.ok(/wouldHaveDone\(/.test(app), "the theoretical figure comes from journal.js, with its sentence");
 

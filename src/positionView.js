@@ -18,9 +18,9 @@
 // ============================================================================
 
 import { RULES, money, chanceText, rewardRisk, remainingEdge, payoffCeiling, NO_CEILING,
-  takeProfitProgress, takeProfitBasisWords, stopWarningLevel, known } from "./rules.js";
+  takeProfitProgress, takeProfitBasisWords, stopWarningLevel, known, exactExtremes } from "./rules.js";
 import { legsNotHeld } from "./closeOrder.js";
-import { holdingShape } from "./journal.js";
+import { holdingShape, positionSize } from "./journal.js";
 
 const MONTHS_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const DAY = 86400000;
@@ -242,4 +242,64 @@ export function holdsStructure(positions = [], { ticker, expKey, legs } = {}) {
   const shape = holdingShape(ticker, expKey, legs);
   return (positions || []).find((p) => p && p.ticker === ticker && Array.isArray(p.legs)
     && holdingShape(p.ticker, p.expKey || String(p.expiry || "").slice(0, 10), p.legs) === shape) || null;
+}
+
+/* ------------------------------------------------------------------
+   THE SIZE SENTENCE STATES WHAT ALPACA HOLDS, PER LEG (PR #47, TASK 0b)
+
+   Measured 2 Oct 2026: J-0001's card read "1 contract, the whole position" over 9 puts at Alpaca, and J-0002's
+   "5 contracts" over +25 / −25, while the figures on the same cards multiplied by 9 and 25. `contracts` is the
+   multiplier of a record's per-combination figures — on an imported record the size already sits in the leg
+   quantities and `contracts` is 1 — so it is never the number a sentence states. `brokerQty` from
+   `positionSize()` is: what each leg holds at Alpaca.
+------------------------------------------------------------------ */
+
+/** The unit one "combination" of these legs is, in words: "put", "call spread", "iron condor", or "combination". */
+export function unitWords(legs = []) {
+  const ls = Array.isArray(legs) ? legs.filter(Boolean) : [];
+  if (ls.length === 1) return ls[0].type === "call" ? "call" : "put";
+  if (ls.length === 2 && ls[0].type === ls[1].type && Math.sign(Number(ls[0].side)) !== Math.sign(Number(ls[1].side))) {
+    return `${ls[0].type === "call" ? "call" : "put"} spread`;
+  }
+  const calls = ls.filter((l) => l.type === "call").length, puts = ls.length - calls;
+  if (ls.length === 4 && calls === 2 && puts === 2) return "iron condor";
+  return "combination";
+}
+
+/** "9 puts", "25 call spreads" — never `contracts` alone. */
+export function sizeWords(p = {}) {
+  const { brokerQty } = positionSize(p);
+  const unit = unitWords(p && p.legs);
+  return `${brokerQty} ${unit}${brokerQty === 1 ? "" : "s"}`;
+}
+
+/* ------------------------------------------------------------------
+   A STORED MAXIMUM PROFIT CUT OFF BY A PRICE GRID (PR #47, TASK 0c)
+
+   Records already stored keep their figures. The card recomputes the best case from the legs and the entry
+   (`exactExtremes()`), and the timeline says "corrected" once. Only a figure that was CUT OFF moves: the exact
+   best case above the stored one by more than half a dollar.
+------------------------------------------------------------------ */
+
+/** @returns {?{ from, to }} per combination, or null when the stored figure stands. */
+export function maxProfitCorrection(p = {}) {
+  if (!p || !known(p.maxProfit) || !Array.isArray(p.legs) || !known(p.entryNet)) return null;
+  const ex = exactExtremes(p.legs, Number(p.entryNet));
+  if (!ex || ex.maxProfit == null) return null;
+  return ex.maxProfit > Number(p.maxProfit) + 0.5 ? { from: Number(p.maxProfit), to: ex.maxProfit } : null;
+}
+
+/** The record as the card reads it: the corrected best case in place of a cut-off one. The stored record is untouched. */
+export function withExactMaxProfit(p) {
+  const c = maxProfitCorrection(p);
+  return c ? { ...p, maxProfit: c.to, maxProfitStored: c.from } : p;
+}
+
+/** The one timeline line, whole position. */
+export function maxProfitCorrectionNote(c, p = {}) {
+  if (!c) return null;
+  const n = positionSize(p).contracts;
+  return `Maximum profit corrected: ${money(c.from * n)} → ${money(c.to * n)} for the whole position. The old figure ` +
+    `stopped at the edge of a price grid; this one is the payoff if the price went to zero, worked out from the legs ` +
+    `and the entry. The stored figure is kept.`;
 }

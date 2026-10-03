@@ -25,6 +25,10 @@ import { DEMO, DEMO_TOOLTIP } from "./demo.js";
 import { reduceRatios, orderQty, mlegLimitPrice, limitWords, orderLimitWords, limitKind, signedLimitFor, orderBody, orderPreviewLines, orderOutcome, alpacaErrorText, cancelOutcome, cancelWaiting } from "./order.js";
 import { hasOpenInterest, sourceNote, openInterestNote, fetchChain } from "./chain.js";
 import { CloseChoice } from "./orders.jsx";
+import { Btn as UBtn, Note as UNote, Info, mono as uMono } from "./ui.jsx";
+import { TYPE } from "./theme.js";
+import { closeSummaryLine } from "./orderRow.js";
+import { marketClockLine } from "./clock.js";
 import { prepareClose, sendClose, holdingGroups } from "./closeOrder.js";
 // "Why this trade" and the headline tags moved to src/why.jsx: the wizard's
 // decision screen needs them too, and a road with no evidence under it is a
@@ -201,35 +205,51 @@ export async function alpacaReq(path, method = "GET", body = null) {
    Tap 1 produced `prep.prepared` — every leg, the signed limit in words and
    how long it stands. Tap 2 is "Send the close" and it sends exactly that.
    A refusal, from any step, prints here: beside the button it came from. */
-export function CloseConfirm({ prep, onSend, onCancel, onChoose = null }) {
+/** The close written out in full, line by line — behind the confirm's ⓘ (PR #47, TASK 3). */
+export function CloseLines({ lines = [] }) {
+  return <>{lines.map((l, i) => <span key={i} style={{ ...uMono, display: "block", marginTop: i ? 4 : 0 }}>{l}</span>)}</>;
+}
+
+/**
+ * THE CLOSE CONFIRM, AT REST (PR #47, TASK 3). Measured before: 51 words — "THIS IS THE CLOSE THAT WILL BE SENT … 9
+ * combinations, a credit of $7.77 (you receive it) for one combination, good for today only. In all, you receive
+ * about $6,993 at this limit (9 × $7.77 × 100)." Now: one line read off the body that will be sent
+ * (`closeSummaryLine()`), the price slider, the market clock when it is closed, then Send / Keep it open. The order
+ * written out in full (`prepared.lines`, unchanged) is behind the ⓘ. Two taps, as ever: this is the second.
+ */
+export function CloseConfirm({ prep, onSend, onCancel, onChoose = null, clock = null }) {
+  const FS = TYPE.size, FW = TYPE.weight, LH = TYPE.line;
   if (!prep) return null;
   if (prep.busy && !prep.prepared) {
-    return <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 6 }}>Reading the market to price the close…</div>;
+    return <UNote style={{ marginTop: 6 }}>Reading the market to price the close…</UNote>;
   }
   if (prep.refusal) {
     return (
-      <div style={{ ...mono, fontSize: 10.5, color: T.red, marginTop: 6, lineHeight: 1.55 }}>
-        ✗ {prep.refusal}{" "}
-        <button onClick={onCancel} style={{ ...mono, fontSize: 10, color: T.dim, background: "transparent", border: `1px solid ${T.line}`, borderRadius: 5, padding: "2px 7px", cursor: "pointer" }}>Dismiss</button>
+      <div style={{ marginTop: 6 }}>
+        <UNote color={T.red}>✗ {prep.refusal}</UNote>
+        <UBtn small ghost color={T.ink} onClick={onCancel} style={{ marginTop: 4 }}>Dismiss</UBtn>
       </div>
     );
   }
   if (prep.sent) {
-    return <div style={{ ...mono, fontSize: 10.5, color: T.green, marginTop: 6, lineHeight: 1.55 }}>✓ {prep.sent}</div>;
+    return <UNote color={T.green} style={{ marginTop: 6 }}>✓ {prep.sent}</UNote>;
   }
   if (!prep.prepared) return null;
+  const summary = closeSummaryLine(prep.prepared.body);
+  const clockLine = marketClockLine(clock, { queued: true });
   return (
-    <div style={{ marginTop: 8, padding: "9px 11px", background: `${T.red}0a`, border: `1px solid ${T.red}55`, borderRadius: 7 }}>
-      <div style={{ ...mono, fontSize: 9.5, color: T.red, fontWeight: 700, letterSpacing: 0.4 }}>THIS IS THE CLOSE THAT WILL BE SENT</div>
+    <div data-close-confirm style={{ marginTop: 8, padding: "9px 11px", background: T.bg, border: `1px solid ${T.action}`, borderRadius: 8 }}>
+      <div style={{ ...uMono, fontSize: FS.sm, fontWeight: FW.bold, color: T.ink, lineHeight: LH.body }}>
+        {summary || "The close, written out"}
+        <Info label="the order in full"><CloseLines lines={prep.prepared.lines} /></Info>
+      </div>
       {/* THE PRICE IS CHOSEN HERE (PR #46): between the side that fills and the mid, starting at
-          `closeLimitPrice()`. A change prepares the close again, so the lines below are what goes out. */}
+          `closeLimitPrice()`. A change prepares the close again, so the line above is what goes out. */}
       {onChoose && <CloseChoice prepared={prep.prepared} choice={prep.choice || null} onChoose={onChoose} />}
-      {prep.prepared.lines.map((l, i) => (
-        <div key={i} style={{ ...mono, fontSize: 11, color: T.ink, marginTop: 4, lineHeight: 1.5 }}>{l}</div>
-      ))}
+      {clockLine && <UNote style={{ marginTop: 6 }}>{clockLine}</UNote>}
       <div style={{ display: "flex", gap: 6, marginTop: 9, flexWrap: "wrap" }}>
-        <Btn small color={T.red} disabled={!!prep.busy} onClick={onSend}>{prep.busy ? "Sending…" : "Send the close"}</Btn>
-        <Btn small ghost disabled={!!prep.busy} onClick={onCancel}>Keep it open</Btn>
+        <UBtn small color={T.action} disabled={!!prep.busy} onClick={onSend}>{prep.busy ? "Sending…" : "Send"}</UBtn>
+        <UBtn small ghost color={T.ink} disabled={!!prep.busy} onClick={onCancel}>Keep it open</UBtn>
       </div>
     </div>
   );
@@ -906,59 +926,22 @@ export function OrderTicket({
    Re-exported so nothing else has to change its import. */
 export { OCC_RE, holdingLeg } from "./closeOrder.js";
 
-/* `positions` is passed in so the panel can tell a holding this app HAS a
-   record for from one it does not. Without it the panel offered a second
-   close button for every position on the Positions screen, and only one of
-   the two writes down why the trade ended (P9, TASK 2). */
-export function AlpacaDesk({ creds, setMsg, gate, positions = [] }) {
-  const [pos, setPos] = useState(null);
-  const [ords, setOrds] = useState(null);
-  const [busy, setBusy] = useState(false);
-  const sync = async () => {
-    setBusy(true);
-    try {
-      const [p, o] = await Promise.all([
-        alpacaReq("/v2/positions"),
-        alpacaReq("/v2/orders?status=open&limit=30&nested=true"),
-      ]);
-      setPos(p); setOrds(o);
-    } catch (e) { setMsg(`Could not sync with Alpaca: ${alpacaErrorText(e)}`); }
-    setBusy(false);
-  };
-  useEffect(() => { sync(); }, []); // eslint-disable-line
-  // Chiusura strategia intera: 1) cancella ordini aperti sugli stessi contratti
-  // (evita "wash trade detected") 2) invia UN ordine complesso di chiusura
-  // (mleg) — mai gambe separate — 3) A LIMITE, PREZZATO AL MOMENTO DEL TAP.
-  /* >>> IT WAS A MARKET ORDER, AND THE OWNER HIT IT. <<< He tapped "Close the
-     whole trade" on XLE and Alpaca refused it outright: HTTP 422, code
-     42210000, "options market orders are only allowed during market hours".
-     The app reported the refusal correctly and where the button is, so nothing
-     was hidden — but the order should never have been a market order.
+/* ====================================================================
+   A HOLDING WITH NO RECORD: "Not in the app · Import" (PR #47, TASK 1).
 
-     PRD §8c has said since PR #22 that a closing order is a LIMIT priced at the
-     moment of the tap, and `closeLimitPrice()` exists for exactly that;
-     `approve.mjs` has used it since. This was the one close path that never got
-     it, and its own comment said why: it had no chain to price from, while
-     `approve.mjs` fetches one. So this fetches one too, the same way — and the
-     consequence is now measured rather than reasoned about, because a market
-     close is refused outright outside market hours where a limit would have
-     been accepted and queued.
-
-     AND `limitAgainstBook()` STOPS SKIPPING HERE FOR THE FIRST TIME. It was
-     wired to this path with `book: null` and no `limit_price`, two of its four
-     unknowns at once, so it could only ever skip. It is handed a real body and
-     a real book now. It is NOT in the gate and must not be: refusing a CLOSE
-     because a feed is quiet leaves somebody in a position they asked to leave.
-     The refusal is here, beside the button, with its reason. */
-  /* ORDER PATH 3 LIVES IN src/closeOrder.js NOW (ROADMAP PR #38), so the
-     Positions card sends the same order. Two taps, as every send: the first
-     prepares and writes the order out in full, the second sends exactly that.
-     Any refusal stays beside the button it came from. */
+   The Alpaca panel ("ON YOUR ALPACA PAPER ACCOUNT") is dissolved. A holding the app HAS a record of is already its
+   Positions card; this card is for one it has none of — sent from Alpaca's own screen, or before the local record
+   was cleared. Import makes it a record (`importAlpaca()`, journal.js `upgradeHolding()`), and then it is a card like
+   any other. Until then it keeps the one way out of the app it always had: the close at a limit priced at the tap,
+   order path 3 (`prepareClose()` → `sendClose()`), moved here unchanged from the panel's `closeGroup()`.
+==================================================================== */
+export function UnrecordedCard({ group: g, gate, orders = [], onImport, setMsg, onSent, clock = null }) {
+  const FS = TYPE.size, FW = TYPE.weight;
   const [closePrep, setClosePrep] = useState(null);   // { key, busy, prepared, refusal, sent }
   const closeGroup = async (grp, choice = null, chain = null) => {
     if (DEMO) { setClosePrep({ key: grp.key, refusal: DEMO_TOOLTIP }); return; }
     setClosePrep((cp) => ({ key: grp.key, busy: true, prepared: choice ? cp?.prepared : null, choice }));
-    const prepared = await prepareClose(grp, { gate: (pr) => runGate(gate, pr), openOrders: ords || [],
+    const prepared = await prepareClose(grp, { gate: (pr) => runGate(gate, pr), openOrders: orders || [],
       fetchChain: chain ? async () => chain : fetchChain, choice });
     setClosePrep({ key: grp.key, grp, choice, prepared: prepared.ok ? prepared : null, refusal: prepared.ok ? null : prepared.refusal });
   };
@@ -968,76 +951,30 @@ export function AlpacaDesk({ creds, setMsg, gate, positions = [] }) {
     setClosePrep({ ...cp, busy: true });
     const r = await sendClose(cp.prepared, { request: alpacaReq, gate: (pr) => runGate(gate, pr) });
     setClosePrep({ key: cp.key, prepared: null, refusal: r.ok ? null : r.refusal, sent: r.ok ? r.headline : null });
-    if (r.ok) { setMsg(r.headline); setTimeout(sync, 1500); }
+    if (r.ok) { if (setMsg) setMsg(r.headline); if (onSent) onSent(); }
   };
   return (
-    <Panel style={{ marginTop: 10 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-        <Lbl>ON YOUR ALPACA PAPER ACCOUNT</Lbl>
-        <Btn small ghost onClick={sync} disabled={busy}><RefreshCw size={11} /> Sync</Btn>
+    <article data-unrecorded={g.key} aria-label={`${g.key} not in the app`}
+      style={{ padding: "12px 14px", background: T.bg, border: `1px dashed ${T.field}`, borderRadius: 8 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", alignItems: "baseline" }}>
+        <div style={{ ...uMono, fontSize: FS.md, fontWeight: FW.bold, color: T.ink }}>{g.key}</div>
+        <div style={{ ...uMono, fontSize: FS.md, fontWeight: FW.bold, color: g.pl >= 0 ? T.green : T.red }}>{pnl$(g.pl)}</div>
       </div>
-      <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6 }}>OPEN POSITIONS ({pos ? pos.length : "…"})</div>
-      <div style={{ display: "grid", gap: 6, marginTop: 6 }}>
-        {(() => {
-          return holdingGroups(pos || []).map((g) => (
-            <div key={g.key} style={{ padding: "8px 10px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7 }}>
-              <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                <div style={{ flex: 1, minWidth: 160 }}>
-                  <div style={{ ...mono, fontWeight: 700, color: T.ink, fontSize: 12.5 }}>{g.key} · {g.items.length} leg{g.items.length === 1 ? "" : "s"}</div>
-                  {g.items.map((x) => (
-                    <div key={x.symbol} style={{ ...mono, fontSize: 10, color: T.dim }}>{+x.qty > 0 ? "+" : ""}{x.qty} {x.symbol.slice(-9)} · avg ${(+x.avg_entry_price).toFixed(2)} → ${(+x.current_price).toFixed(2)}</div>
-                  ))}
-                </div>
-                {/* The profit of a holding with a record is on its Positions card; the line below says so. */}
-                {!positionForHolding(positions, { ticker: g.ticker, expKey: g.expKey }) && (
-                  <Stat k="PROFIT NOW" v={fmt$(g.pl)} c={g.pl >= 0 ? T.green : T.red} />
-                )}
-                {/* >>> ONE CLOSE CONTROL PER POSITION (P9, TASK 2). <<< Two
-                    buttons on two screens for one act, and only the Positions
-                    card's asks WHY and files the answer. Where this panel is
-                    looking at a holding the app has a record for, it says so
-                    and points there rather than offering a second door. The
-                    button survives for the case that is genuinely its own: a
-                    holding with no record here, which `orderReconciliation()`
-                    already names and which would otherwise have no way out of
-                    this app at all. */}
-                {(() => {
-                  const rec = positionForHolding(positions, { ticker: g.ticker, expKey: g.expKey });
-                  return rec
-                    ? null
-                    : <Btn small ghost color={T.red} onClick={() => closeGroup(g)}
-                        disabled={DEMO || (closePrep?.key === g.key && (closePrep.busy || !!closePrep.prepared))}
-                        title={DEMO ? DEMO_TOOLTIP : undefined}><XCircle size={11} /> Close the whole trade</Btn>;
-                })()}
-              </div>
-              {closePrep && closePrep.key === g.key && (
-                <CloseConfirm prep={closePrep} onSend={sendGroupClose} onCancel={() => setClosePrep(null)}
-                  onChoose={(c) => closeGroup(g, c, closePrep.prepared?.chainUsed || null)} />
-              )}
-              {(() => {
-                const rec = positionForHolding(positions, { ticker: g.ticker, expKey: g.expKey });
-                return rec ? (
-                  <div style={{ ...mono, fontSize: 12, color: T.green, marginTop: 5, lineHeight: 1.55 }}>
-                    {onCardLine(rec.ref, pnl$(g.pl))}
-                  </div>
-                ) : (
-                  <div style={{ ...mono, fontSize: 12, color: T.dim, marginTop: 5, lineHeight: 1.55 }}>
-                    {noRecordNote()}
-                  </div>
-                );
-              })()}
-            </div>
-          ));
-        })()}
-        {pos && pos.length === 0 && <div style={{ ...mono, fontSize: 11, color: T.mut }}>Nothing open on Alpaca.</div>}
+      <UNote>Not in the app<Info label="a holding with no record">{noRecordNote()}</Info></UNote>
+      {g.items.map((x) => (
+        <div key={x.symbol} style={{ ...uMono, fontSize: FS.xs, color: T.mut }}>{+x.qty > 0 ? "+" : ""}{x.qty} {x.symbol.slice(-9)} · {(+x.avg_entry_price).toFixed(2)} → {(+x.current_price).toFixed(2)}</div>
+      ))}
+      <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+        <UBtn small color={T.action} onClick={onImport}>Import</UBtn>
+        <UBtn small ghost color={T.ink} onClick={() => closeGroup(g)}
+          disabled={DEMO || (closePrep?.key === g.key && (closePrep.busy || !!closePrep.prepared))}
+          title={DEMO ? DEMO_TOOLTIP : undefined}>Close at limit</UBtn>
       </div>
-      {/* ONE ORDERS LIST (PR #46): every working order is a row in "Orders waiting" at the top of Positions,
-          with Modify, Cancel and Details. This panel counts them and points there. */}
-      <div style={{ ...mono, fontSize: 11, color: T.dim, marginTop: 10 }}>
-        {ords == null ? "Orders waiting: not read yet." : ords.length === 0 ? "No orders waiting."
-          : `${ords.length} order${ords.length === 1 ? "" : "s"} waiting — see "Orders waiting" at the top of Positions.`}
-      </div>
-    </Panel>
+      {closePrep && closePrep.key === g.key && (
+        <CloseConfirm prep={closePrep} onSend={sendGroupClose} onCancel={() => setClosePrep(null)} clock={clock}
+          onChoose={(c) => closeGroup(g, c, closePrep.prepared?.chainUsed || null)} />
+      )}
+    </article>
   );
 }
 
