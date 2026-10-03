@@ -358,8 +358,10 @@ export function statsFromMatrix(matrix) {
    November yet, so this year's row would be a partial window in a list of complete ones, counted in the win rate as
    if it were finished. It is excluded, and the result says so (`excludedYear`) rather than quietly showing one row
    fewer than the years on the chart. A year with a missing month in the window is skipped (unknown is not zero).
-   KNOWN, NOT FIXED HERE: a window that runs past December wraps to the same row's January — three real monthly
-   moves, but not contiguous ones. Moved as it was (ROADMAP, after #49).
+   A WINDOW PAST DECEMBER READS THE NEXT YEAR'S ROW (PR #50, TASK 0a). It wrapped to the SAME row's January — three
+   real monthly moves, not contiguous ones (PRD §4 item 9). A November start held three months now reads that year's
+   November and December and the FOLLOWING year's January, found by year (not by position in the matrix). A year whose
+   window needs a row that is not there (the last one) is dropped from the replay, never padded.
 
    Find runs it on every card (one pass over ~16 rows, no simulation) and Build on its trade, from the same matrix
    `parseAvJson()` returns, so the PAST YRS tile and Build's backtest are one number.
@@ -373,17 +375,26 @@ export function statsFromMatrix(matrix) {
    @returns null without a matrix or a complete window; else { rows: [{year, ret, pnl}], wins, n, winRate, avg,
             span, month, excludedYear } — `pnl` and `avg` per contract, in dollars
 ============================================================================ */
+/** One month's return (%) in a window that may run past December: month index `m` counted from January of `y`
+ *  (12 is the next year's January), read from that year's own row. Null when the row or the month is missing. */
+export function monthReturn(byYear, y, m) {
+  const row = byYear.get(y + Math.floor(m / 12));
+  if (!row) return null;
+  const r = row[(m % 12) + 1];
+  return r == null ? null : r;
+}
+
 export function histBacktest(legs, S, dte, entry, matrix, { month = new Date().getMonth(), year = new Date().getFullYear() } = {}) {
   if (!matrix || !matrix.length || !legs || !legs.length || !Number.isFinite(Number(S)) || !Number.isFinite(Number(entry))) return null;
   const span = Math.max(1, Math.round(dte / 30));
   const out = [];
+  const byYear = new Map(matrix.map((row) => [+row[0], row]));
   for (const row of matrix) {
-    const [y, ...ms] = row;
+    const [y] = row;
     if (+y === year) continue;
     let cum = 1, ok = true;
     for (let i = 0; i < span; i++) {
-      // AS IT WAS IN App.jsx: a window past December wraps to the SAME row's January (ROADMAP: not this PR's fix).
-      const r = ms[(month + i) % 12];
+      const r = monthReturn(byYear, +y, month + i);
       if (r == null || Number.isNaN(r)) { ok = false; break; }
       cum *= 1 + r / 100;
     }
