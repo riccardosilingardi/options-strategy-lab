@@ -685,6 +685,66 @@ export function recordForOrder(records = [], order = null) {
     && (String(p.alpacaId || "") === id || String(p.closeOrder?.id || "") === id)) || null;
 }
 
+/* ------------------------------------------------------------------
+   A REPLACE MADE ON ALPACA'S OWN SCREEN (PR #48, TASK 0a).
+
+   After Modify in this app the record follows the new order id (`onReplaced`). A replace made from Alpaca's own
+   screen gave the record nothing to follow: it kept pointing at the old id, which Alpaca reports as "replaced" with
+   `replaced_by` naming the new one — and `orderLifecycle()` reads "replaced" as still working, so the record waited
+   on an order that no longer exists. Alpaca links the pair both ways (alpaca-py 0.44.0 `Order.replaced_by` on the old
+   order, `Order.replaces` on the new one), so either side is enough to follow.
+
+   ONE UPDATE, TWO CALLERS: `onReplaced` (Modify in the app) and the sync / recheck (a replace outside it) both call
+   `adoptReplacement()`, so the record changes the same way whichever screen made the replace.
+------------------------------------------------------------------ */
+
+/**
+ * The record after it adopts the new order id. Null when the record owns neither the old id as its opening order
+ * nor as its close, or when there is no new id.
+ * @param record  the position record
+ * @param oldId   the id the record points at now
+ * @param fresh   the new order as Alpaca returns it: `{ id, limit_price?, time_in_force? }` (only `id` is required)
+ * @param text    the timeline sentence, written once, with the adoption
+ */
+export function adoptReplacement(record, oldId, fresh, { text, now = Date.now() } = {}) {
+  const old = oldId == null ? "" : String(oldId);
+  const nid = fresh && fresh.id != null ? String(fresh.id) : "";
+  if (!record || !old || !nid || old === nid) return null;
+  const open = String(record.alpacaId || "") === old;
+  const close = String(record.closeOrder?.id || "") === old;
+  if (!open && !close) return null;
+  const limit = fresh.limit_price != null && Number.isFinite(+fresh.limit_price) ? +fresh.limit_price : null;
+  const t = appendTimeline(record, { t: now, type: "status", orderId: nid,
+    text: text || `Order replaced at Alpaca outside this app: old order ${old} → new order ${nid}. This record follows the new one.` });
+  return {
+    ...record,
+    ...(open ? { alpacaId: nid, ...(fresh.time_in_force ? { alpacaTif: fresh.time_in_force } : {}),
+      ...(limit != null ? { alpacaLimit: limit } : {}) } : {}),
+    ...(close ? { closeOrder: { ...record.closeOrder, id: nid, t: now, limit: fresh.limit_price ?? record.closeOrder?.limit ?? null } } : {}),
+    timeline: t.timeline, seqNext: t.seqNext,
+  };
+}
+
+/**
+ * Which records point at an order that a working order now `replaces`: `[{ recordId, oldId, fresh }]`.
+ * Read off the open-order list the sync already fetches, so following a replace costs no extra call.
+ */
+export function replacementsIn(records = [], brokerOrders = []) {
+  const out = [];
+  for (const o of Array.isArray(brokerOrders) ? brokerOrders : []) {
+    if (!o || o.id == null || o.replaces == null) continue;
+    const rec = recordForOrder(records, { id: o.replaces });
+    if (rec && !recordForOrder([rec], o)) out.push({ recordId: rec.id, oldId: String(o.replaces), fresh: o });
+  }
+  return out;
+}
+
+/** The new id an order read as "replaced" points at, or null. */
+export const replacedBy = (order) => {
+  const st = String(order?.status || "").toLowerCase();
+  return st === "replaced" && order?.replaced_by != null && String(order.replaced_by) ? String(order.replaced_by) : null;
+};
+
 /**
  * @param records  the app's records (every one: an opening order and a close both count, through `recordForOrder()`)
  * @param brokerOrders  what `GET /v2/orders?status=open` returned, or null if not asked

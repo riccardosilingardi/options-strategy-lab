@@ -16,6 +16,7 @@
 import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import {
+  adoptReplacement, replacementsIn, replacedBy,
   refOf, refNumber, seqOf, highestSeq, refCounter, nextRef,
   appendTimeline, stampTimeline, orderStatusRecheck,
   simHorizonOf, autopilotHorizonNote, simVolOf, autopilotVolNote,
@@ -1195,6 +1196,43 @@ test("RECONCILIATION — J-0001'S OWN CLOSE, REPLACED, IS MINE (PR #47, 0a)", ()
   assert.ok(r2.sentence.includes("zzzz9999"));
   assert.equal(recordForOrder([j1], null), null);
   assert.equal(recordForOrder([j1], {}), null, "no id, no owner");
+});
+
+test("A CLOSE REPLACED ON ALPACA'S OWN SCREEN — the record adopts the new id, once (PR #48, 0a)", () => {
+  // J-0001-shaped: its close works at Alpaca (GTC, $7.62). Someone replaces it from Alpaca's screen: the old order reads
+  // "replaced" with `replaced_by`, the new one `replaces` the old id. Before: the record kept "close-2", which
+  // `orderLifecycle()` reads as working, and the new order was "sent outside this app".
+  const j1 = { id: 11, ref: "J-0001", ticker: "GDX", expKey: "2026-10-30", alpacaId: "open-1", alpacaFilled: true,
+    alpacaStatus: "filled", closeOrder: { id: "close-2", t: 1, limit: "7.62" }, timeline: [], seqNext: 1 };
+  const oldOrder = { id: "close-2", status: "replaced", replaced_by: "close-3" };
+  assert.equal(orderLifecycle({ status: oldOrder.status }), "working", "the fault: a replaced order reads working");
+  assert.equal(replacedBy(oldOrder), "close-3");
+  assert.equal(replacedBy({ id: "x", status: "new" }), null);
+  const fresh = { id: "close-3", replaces: "close-2", symbol: "GDX261030P00094000", side: "sell", qty: "9",
+    time_in_force: "gtc", limit_price: "7.70" };
+  // From the open-order list the sync already reads:
+  const moved = replacementsIn([j1], [fresh]);
+  assert.deepEqual(moved.map((m) => [m.recordId, m.oldId, m.fresh.id]), [[11, "close-2", "close-3"]]);
+  const after = adoptReplacement(j1, moved[0].oldId, moved[0].fresh, { now: 5 });
+  assert.equal(after.closeOrder.id, "close-3");
+  assert.equal(after.closeOrder.limit, "7.70");
+  assert.equal(after.alpacaId, "open-1", "the opening order is untouched");
+  assert.equal(after.timeline.length, 1);
+  assert.match(after.timeline[0].text, /replaced at Alpaca outside this app: old order close-2 → new order close-3/);
+  // ONCE: the next sync finds the record already on the new id, so nothing is adopted again.
+  assert.deepEqual(replacementsIn([after], [fresh]), []);
+  assert.equal(adoptReplacement(after, "close-2", fresh), null);
+  // …and the new order is J-0001's now, so it is not "sent outside this app".
+  assert.equal(recordForOrder([after], fresh), after);
+  assert.equal(orderReconciliation([after], [fresh]).unknownToApp.length, 0);
+  // An opening order replaced outside the app follows the same way.
+  const w = { id: 12, alpacaId: "o-1", timeline: [], seqNext: 1 };
+  const w2 = adoptReplacement(w, "o-1", { id: "o-2", time_in_force: "day", limit_price: "1.25" });
+  assert.equal(w2.alpacaId, "o-2"); assert.equal(w2.alpacaLimit, 1.25); assert.equal(w2.alpacaTif, "day");
+  // In-app Modify (`onReplaced`) and the sync call the same function.
+  const app = readFileSync("src/App.jsx", "utf8");
+  assert.ok((app.match(/adoptReplacement\(/g) || []).length >= 3, "onReplaced, the sync and the recheck");
+  assert.match(app, /replacementsIn\(storeRef\.current\.positions, oo\)/);
 });
 
 test("RECONCILIATION — AN UNASKED BROKER IS NOT AN EMPTY ONE", () => {

@@ -65,7 +65,8 @@ import { nextRef, refCounter, appendTimeline, stampTimeline, orderStatusRecheck,
   storedLimitOf,
   positionStage, positionStageNote, bookPositions, holdingShape, dropImportedTwins, recordFillPrice, countsAsRuleClose, closeKindWords, riskOkOf, riskOkWords, wouldHaveDone, isBrokerHolding, upgradeHolding, positionForHolding,
   isTestRecord, testRecordNote, scoredJournal, journalPnl, NOT_A_FILL,
-  journalEntry, searchJournal, CLOSE_REASON_MIN, refNumber, journeyLevel } from "./journal.js";
+  journalEntry, searchJournal, CLOSE_REASON_MIN, refNumber, journeyLevel,
+  adoptReplacement, replacementsIn, replacedBy } from "./journal.js";
 import { FIRST_STEP, stepCarry, candidateOf, candidateKey, legsLine, toggleCompare, inCompare, MAX_COMPARE, savedFromCandidate, candidateFromSaved, savedAge } from "./path.js";
 import { PositionCard, PositionDetails } from "./positionCard.jsx";
 import { navOf, createNavHistory } from "./nav.js";
@@ -1485,6 +1486,8 @@ export default function OptionsStrategyLab() {
   const [legs, setLegs] = useState([]);
   const [stratName, setStratName] = useState("Bull Call Spread");
   const [store, setStore] = useState(EMPTY);
+  // The sync reads the records through a ref: its callback is created once (PR #48, TASK 0a).
+  const storeRef = useRef(store); storeRef.current = store;
   /* ---- THE CAPITAL MODEL, PRD §3. ONE HOME, READ EVERYWHERE. ----
      Declared here, above everything that reads it, because everything does:
      the risk gate, the wizard's budget question, the Build screen's risk field,
@@ -2041,6 +2044,17 @@ export default function OptionsStrategyLab() {
       if (syncStop.current) return;
       if (acc && acc.account_number) setAccount(acc);
       if (clk && typeof clk.is_open === "boolean") setClock(clk);
+      // A REPLACE MADE ON ALPACA'S OWN SCREEN (PR #48, TASK 0a): a working order that `replaces` a record's id.
+      const moved = replacementsIn(storeRef.current.positions, oo);
+      if (moved.length) {
+        setStore((st) => {
+          const positions = st.positions.map((x) => {
+            const m = moved.find((y) => y.recordId === x.id);
+            return m ? (adoptReplacement(x, m.oldId, m.fresh) || x) : x;
+          });
+          const ns = { ...st, positions }; saveState(ns); return ns;
+        });
+      }
       setAlSync((prev) => {
         // fill rilevato: c'è una posizione nuova o un ordine sparito → importa
         if (po.length > prev.positions.length || (prev.orders.length > oo.length && po.length)) importRef.current?.(true);
@@ -2901,18 +2915,11 @@ export default function OptionsStrategyLab() {
     // `recheckOrders()` would keep asking about an order that is no longer the one working.
     onReplaced: (old, fresh, plan) => {
       if (!fresh?.id) return;
+      // THE SAME UPDATE A REPLACE MADE ON ALPACA'S OWN SCREEN GETS (`adoptReplacement()`, PR #48 TASK 0a).
       setStore((st) => {
-        const positions = st.positions.map((x) => {
-          const open = x.alpacaId === old.id, close = x.closeOrder?.id === old.id;
-          if (!open && !close) return x;
-          const t = appendTimeline(x, { t: Date.now(), type: "status", orderId: String(fresh.id),
-            text: `Order modified at Alpaca (replaced in place): ${plan.qty} at ${orderLimitWords({ ...old, limit_price: plan.patch.limit_price }) || "a price the app could not read"}, ` +
-              `${plan.tif.toUpperCase()}. Old order ${old.id} → new order ${fresh.id}.` });
-          return { ...x, ...(open ? { alpacaId: fresh.id, alpacaTif: fresh.time_in_force ?? plan.tif,
-            ...(fresh.limit_price != null && Number.isFinite(+fresh.limit_price) ? { alpacaLimit: +fresh.limit_price } : {}) } : {}),
-            ...(close ? { closeOrder: { ...x.closeOrder, id: fresh.id, t: Date.now(), limit: fresh.limit_price ?? null } } : {}),
-            timeline: t.timeline, seqNext: t.seqNext };
-        });
+        const positions = st.positions.map((x) => adoptReplacement(x, old.id, fresh, {
+          text: `Order modified at Alpaca (replaced in place): ${plan.qty} at ${orderLimitWords({ ...old, limit_price: plan.patch.limit_price }) || "a price the app could not read"}, ` +
+            `${plan.tif.toUpperCase()}. Old order ${old.id} → new order ${fresh.id}.` }) || x);
         const ns = { ...st, positions }; saveState(ns); return ns;
       });
     },
@@ -2964,6 +2971,13 @@ export default function OptionsStrategyLab() {
     for (const p of todo) {
       try {
         const o = await alpacaReq(`/v2/orders/${encodeURIComponent(p.alpacaId)}`);
+        // REPLACED OUTSIDE THE APP (PR #48, TASK 0a): follow `replaced_by` instead of waiting on a dead id.
+        const nid = replacedBy(o);
+        if (nid) {
+          const fresh = await alpacaReq(`/v2/orders/${encodeURIComponent(nid)}`).catch(() => ({ id: nid }));
+          changes.push({ id: p.id, adopt: { oldId: p.alpacaId, fresh: fresh && fresh.id ? fresh : { id: nid } } });
+          continue;
+        }
         const r = orderStatusRecheck(p, o);
         if (r.changed) changes.push({ id: p.id, r });
       } catch { /* the broker is not reachable: the warning stays, nothing is written */ }
@@ -2974,6 +2988,7 @@ export default function OptionsStrategyLab() {
       const positions = st.positions.map((p) => {
         const c = changes.find((x) => x.id === p.id);
         if (!c) return p;
+        if (c.adopt) return adoptReplacement(p, c.adopt.oldId, c.adopt.fresh) || p;
         // A fill that happens after the fact starts the exit plan, and says so:
         // the plan entry written at open said it had not started yet.
         // FILLED IS ITS OWN EVENT, WITH ITS OWN TYPE. `sent` was written when
@@ -2999,7 +3014,7 @@ export default function OptionsStrategyLab() {
       saveState(ns);
       return ns;
     });
-    const filled = changes.filter((c) => c.r.outcome.filled).length;
+    const filled = changes.filter((c) => c.r && c.r.outcome.filled).length;
     // The new state is on each order's row in Positions; the banner only points.
     void filled;
     setMsg(`${changes.length} order${changes.length === 1 ? "" : "s"} changed — see Positions.`);

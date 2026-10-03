@@ -59,7 +59,7 @@ check("three exit lines: time, take profit, stop warning", () => {
 
 check("AT ENTRY VS NOW: the Find card's four labels in its order, then the four factors", () => {
   const h = cardFor();
-  const order = ["RETURN ON RISK", "CHANCE", "PROFIT", "RISK", "SEASONALITY", "PRICE TREND", "WEATHER", "NEWS"];
+  const order = ["YOU RISK", "MAX PROFIT", "CHANCE", "RETURN ON RISK", "SEASONALITY", "PRICE TREND", "WEATHER", "NEWS"];
   let last = -1;
   for (const k of order) {
     const at = h.indexOf(`>${k}</th>`);

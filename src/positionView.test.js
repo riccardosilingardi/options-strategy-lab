@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import { RULES, takeProfitTarget, positionAction, stopWarningLevel, stopSigns, onCardLine } from "./rules.js";
 import { closeDecision, notHeldCloseWords } from "./journal.js";
 import { sizeWords, unitWords, maxProfitCorrection, withExactMaxProfit, maxProfitCorrectionNote } from "./positionView.js";
-import { exactExtremes, payoffAtZero } from "./rules.js";
+import { exactExtremes, payoffAtZero, CARD_LABELS } from "./rules.js";
 import { structureName, displayName, exitDateOf, exitProgress, entryVsNow, fileState, pnlShareOfRisk,
   pnlShareText, signedMoney$, holdsStructure, shortDate, factorText } from "./positionView.js";
 
@@ -88,16 +88,18 @@ test("EXITS — unknown is a dash, never a zero, and no target is said, not show
 
 test("AT ENTRY VS NOW — the Find card's four labels, in its order; an unknown cell is a dash", () => {
   const ev = entryVsNow({ p: J1, n: 9, pnl: 2925, popNow: 0.62, nowSignals: null });
-  assert.deepEqual(ev.figures.map((f) => f.k), ["RETURN ON RISK", "CHANCE", "PROFIT", "RISK"]);
+  // ONE HOME (PR #48, 0b): the Find card's labels, in the card's order.
+  assert.deepEqual(ev.figures.map((f) => f.k), [CARD_LABELS.risk, CARD_LABELS.profit, CARD_LABELS.chance, CARD_LABELS.rr]);
+  assert.deepEqual(ev.figures.map((f) => f.k), ["YOU RISK", "MAX PROFIT", "CHANCE", "RETURN ON RISK"]);
   const by = Object.fromEntries(ev.figures.map((f) => [f.k, f]));
   assert.equal(by["RETURN ON RISK"].entry, "1780%");
   assert.equal(by["CHANCE"].entry, "—", "an imported holding has no entry chance");
   assert.equal(by["CHANCE"].now, "62%");
-  assert.equal(by["PROFIT"].entry, "$80,100");
-  assert.equal(by["RISK"].entry, "$4,500");
+  assert.equal(by["MAX PROFIT"].entry, "$80,100");
+  assert.equal(by["YOU RISK"].entry, "$4,500");
   // From here: what is left to make and to lose.
-  assert.equal(by["PROFIT"].now, "$77,175");
-  assert.equal(by["RISK"].now, "$7,425", "what the position is worth now is what it could still lose");
+  assert.equal(by["MAX PROFIT"].now, "$77,175");
+  assert.equal(by["YOU RISK"].now, "$7,425", "what the position is worth now is what it could still lose");
   assert.deepEqual(ev.factors.map((f) => f.label), ["SEASONALITY", "PRICE TREND", "WEATHER", "NEWS"]);
   assert.ok(ev.factors.every((f) => f.entry === "—" && f.now === "—"), "no factors recorded and none read: dashes");
 });
@@ -128,7 +130,7 @@ test("A STRUCTURE WITH NO CEILING HAS NO MAXIMUM: an imported long call prints t
   const call = { ...J1, legs: [{ side: 1, type: "call", strike: 20, qty: 1 }], maxProfit: 777, maxLoss: -100 };
   const ev = entryVsNow({ p: call, n: 1, pnl: 40, popNow: null });
   const by = Object.fromEntries(ev.figures.map((f) => [f.k, f]));
-  assert.match(by["PROFIT"].entry, /no ceiling/i);
+  assert.match(by["MAX PROFIT"].entry, /no ceiling/i);
   assert.equal(by["RETURN ON RISK"].entry, "—");
 });
 
@@ -219,7 +221,7 @@ test("0c — J-0001's stored $37,800 is corrected on the card to $80,100 (1,780%
   const c = maxProfitCorrection(J1_IMPORT);
   assert.deepEqual(c, { from: 37800, to: 80100 });
   const ev = entryVsNow({ p: withExactMaxProfit(J1_IMPORT), n: 1, pnl: 2925 });
-  assert.equal(ev.figures.find((f) => f.k === "PROFIT").entry, "$80,100");
+  assert.equal(ev.figures.find((f) => f.k === "MAX PROFIT").entry, "$80,100");
   assert.equal(ev.figures.find((f) => f.k === "RETURN ON RISK").entry, "1780%");
   assert.equal(J1_IMPORT.maxProfit, 37800, "the stored record keeps its figure");
   assert.ok(/\$37,800 → \$80,100/.test(maxProfitCorrectionNote(c, J1_IMPORT)));
