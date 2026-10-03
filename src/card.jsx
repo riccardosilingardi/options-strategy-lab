@@ -421,7 +421,8 @@ export function SignalBadge({ fused, state = null, ticker = null, onClick }) {
     );
   }
   if (!fused) return null;
-  const c = fused.agreement === "CONFLICT" ? T.red : fused.agreement === "CONFLUENT" ? T.green : T.blue;
+  // CONFLICT is amber, not red (PR #49, TASK 4): red is for errors and refusals only, and a disagreement is neither.
+  const c = fused.agreement === "CONFLICT" ? T.amber : fused.agreement === "CONFLUENT" ? T.green : T.blue;
   // A FAILED INPUT IS NAMED ON THE BADGE; the factor is scored as neutral and the rest as usual.
   const failed = state && state.failed ? state.failed : [];
   // "<TK> ↑ +64 · conf 86" (PR #48, TASK 4): the market, the score's direction and sign, the confidence.
