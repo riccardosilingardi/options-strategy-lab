@@ -151,7 +151,7 @@ check("A RANGE THAT HAS NO WIDTH SAYS SO INSTEAD OF DRAWING A SLIDER THAT CANNOT
 const MIGRATED = ["src/ui.jsx", "src/card.jsx", "src/find.jsx", "src/orders.jsx", "src/positions.jsx", "src/navBar.jsx",
   "src/steps.jsx", "src/why.jsx", "src/positionCard.jsx", "src/wizard.jsx",
   // PR #49, TASK 4: the sweep reaches the files that host order paths 1, 2 and 4.
-  "src/pro.jsx"];
+  "src/pro.jsx", "src/App.jsx"];
 const stripped = (f) => readFileSync(f, "utf8").replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
 const ATOMS = ["Btn", "Panel", "Lbl", "Label", "Stat", "Chip", "Fold", "RangeField", "Note", "NumberInput", "TextArea", "CheckField", "Info", "Segments"];
 
@@ -194,10 +194,11 @@ check("THE CARD AND FIND IMPORT THEIR ATOMS FROM ui.jsx", () => {
   has(steps, 'export { Fold } from "./ui.jsx"');
 });
 
-check("OTHER SCREENS ARE NOT PRETENDED TO BE MIGRATED: their copies are still theirs (PR #48: see ROADMAP)", () => {
-  // This is a statement of scope, held so a later reader does not mistake the sweep for the whole app.
-  for (const f of ["src/App.jsx"]) {
-    if (MIGRATED.includes(f)) throw new Error(`${f} is swept but not migrated`);
+check("EVERY SCREEN FILE IS SWEPT (PR #49) — but two, named here so nobody mistakes them for done", () => {
+  // visuals.jsx: its SVG drawings keep their own sizes (PR #48); main.jsx: the crash screen, outside the app's tree.
+  const LEFT = ["src/visuals.jsx", "src/main.jsx"];
+  for (const f of readdirSync("src").filter((x) => /\.jsx$/.test(x) && !/\.test\./.test(x)).map((x) => `src/${x}`)) {
+    if (!MIGRATED.includes(f) && !LEFT.includes(f)) throw new Error(`${f} is neither swept nor named as left`);
   }
 });
 
