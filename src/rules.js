@@ -4463,12 +4463,7 @@ export function attentionCount(alerts = []) {
   return { decisions, looks, closesWorking: working.length, quiet: looks === 0 && working.length === 0 };
 }
 
-/** ONE LINE for a holding at the broker that the app has a record of (PR #44, TASK 1): the profit, and where to act on
- *  it. It replaces a paragraph the broker panel repeated for every holding, telling the reader to use a button the
- *  card then hid inside a fold. The paragraph is gone: the card now shows that button. */
-/* PR #47: no longer rendered — the Alpaca panel is dissolved and a holding with a record IS its card. Kept for the
-   tests that pin its words until the next sweep removes both. */
-export const onCardLine = (ref, pnlText) => `✓ ${ref || "a position"} · ${pnlText} · on your Positions card`;
+/* `onCardLine()` (a holding's one line in the dissolved Alpaca panel) was removed in PR #48: nothing rendered it. */
 
 /** What the broker panel says about a holding the app has NO record of: it has no card, so this panel keeps its own
  *  close button, and nothing is filed in the Journal. */

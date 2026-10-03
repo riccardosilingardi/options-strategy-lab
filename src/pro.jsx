@@ -9,7 +9,7 @@ import { RULES, ruleBadge, takeProfitLabel, takeProfitTarget, scaleOutLabel, sto
   legBook, sizeSkippedNote, onTick, netFromLegs, limitCeilingNote, rewardRisk,
   contractListing, unlistedContractNote, unquotedLegNote, unquotedLegPointer, marketOrderNote,
   taCopilotPrompt, TA_QUESTIONS, TA_DISCLAIMER,
-  ivProvenance, onCardLine, noRecordNote, copilotOverreach, copilotOverreachNote } from "./rules.js";
+  ivProvenance, noRecordNote, copilotOverreach, copilotOverreachNote } from "./rules.js";
 import { contractsOf, positionSize, bookPositions, positionStage, autopilotHorizonNote, autopilotVolNote, positionForHolding, journalPnlTotal, scoredJournal } from "./journal.js";
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, LineStyle } from "lightweight-charts";
 // The fold lives in steps.jsx — chrome with no trade in it, and the one file

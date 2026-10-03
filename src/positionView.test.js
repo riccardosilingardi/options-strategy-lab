@@ -8,7 +8,7 @@
 
 import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
-import { RULES, takeProfitTarget, positionAction, stopWarningLevel, stopSigns, onCardLine } from "./rules.js";
+import { RULES, takeProfitTarget, positionAction, stopWarningLevel, stopSigns } from "./rules.js";
 import { closeDecision, notHeldCloseWords } from "./journal.js";
 import { sizeWords, unitWords, maxProfitCorrection, withExactMaxProfit, maxProfitCorrectionNote } from "./positionView.js";
 import { exactExtremes, payoffAtZero, CARD_LABELS } from "./rules.js";
@@ -180,7 +180,6 @@ test("0b — the filing dialog does not print a rule's sentence over a record Al
 });
 
 test("THE BROKER PANEL — a holding with a record is one line", () => {
-  assert.equal(onCardLine("J-0001", "+$2,925"), "✓ J-0001 · +$2,925 · on your Positions card");
 });
 
 test("ONE HOME — the card's stop level is the level that raises the warning", () => {

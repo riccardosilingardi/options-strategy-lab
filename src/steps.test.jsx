@@ -14,9 +14,10 @@
 //    markets;
 //  · the price line in a thumbnail is reduced to what the width can show, so it
 //    is a shape at 80px rather than a scribble.
+import { readFileSync } from "node:fs";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { StepNav, StepForward, EvidenceBar, EvidenceOverlay, CompareTray, CandidateActions } from "./steps.jsx";
+import { StepForward, EvidenceBar, EvidenceOverlay, CompareTray, CandidateActions } from "./steps.jsx";
 import {
   ComparePayoffs, CompareFigure, compareTakeaway, explainCompareElement, sharesOneMarket,
   simplifyCloses, thumbPoints, terminalDist, BandThumbnail, payoffBands, COMPARE_COLORS,
@@ -31,26 +32,9 @@ const eq = (a, b, what) => { if (a !== b) throw new Error(`${what}: ${JSON.strin
 
 /* ---------------- the numbered nav ---------------- */
 
-check("the two steps are numbered on screen", () => {
-  const h = renderToStaticMarkup(<StepNav step="find" carry={stepCarry({})} />);
-  has(h, ">1<"); has(h, ">2<");
-  has(h, "Find"); has(h, "Build");
-  if (h.includes("Radar") || h.includes("Shortlist")) throw new Error("a deleted step is still on the nav");
-});
-
-check("the nav says what each step is carrying", () => {
-  const h = renderToStaticMarkup(
-    <StepNav step="find" carry={stepCarry({ ticker: "SOYB", trade: "SOYB · Iron Condor", compare: 2, markets: 1 })} />);
-  has(h, "SOYB");
-  has(h, "2 to compare");
-  has(h, "Iron Condor");
-});
-
-check("a step already walked is marked done, not hidden", () => {
-  const h = renderToStaticMarkup(<StepNav step="build" carry={stepCarry({ ticker: "CORN" })} />);
-  // step 1 and 2 are behind us: they show a tick and stay tappable
-  has(h, "✓");
-  has(h, "aria-current=\"step\"");
+check("StepNav IS GONE (PR #48): the bottom bar is the one navigation", () => {
+  const src = readFileSync("src/steps.jsx", "utf8").replace(/\/\*[\s\S]*?\*\//g, " ");
+  if (/function StepNav/.test(src)) throw new Error("StepNav is still defined");
 });
 
 check("the forward button names the step it leads to, and says why it cannot", () => {
@@ -65,11 +49,12 @@ check("the forward button names the step it leads to, and says why it cannot", (
 
 /* ---------------- the evidence sheet ---------------- */
 
-check("the evidence bar says evidence opens over the step", () => {
+check("the evidence bar carries its heading and its buttons, and no leftover chip text (PR #48)", () => {
   const h = renderToStaticMarkup(
-    <EvidenceBar items={[{ id: "why", label: "Why this market", sub: "the four readings" }]} open={null} />);
-  has(h, "Why this market");
-  has(h, "never adds to the bottom of this page");
+    <EvidenceBar heading="About this trade · CORN" items={[{ id: "why", label: "Why this market", sub: "the four readings" }]} open={null} />);
+  has(h, "About this trade · CORN"); has(h, "Why this market");
+  hasNot(h, "never adds to the bottom of this page");
+  hasNot(h, ">EVIDENCE<");
 });
 
 check("a chip that is thinking or holding an answer says so on the chip", () => {

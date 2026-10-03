@@ -25,7 +25,7 @@ import { RULES, sizing, ruleBadge, qualityFloor, qualityFloorSentence, liquidity
   sigmaProvenance, TABLE_SIGMA_SOURCE, MEASURED_SIGMA_SOURCE, FALLBACK_SIGMA_SOURCE,
   positionPnl, modelPnlNote, BROKER_PNL, MODEL_PNL,
   buildableExpiries, openableBoard, offFloorExpiryLabel, horizonFloorNote,
-  remainingEdge, remainingEdgeNote, remainingEdgeLabel, shareOfMaximum, attentionCount, onCardLine,
+  remainingEdge, remainingEdgeNote, remainingEdgeLabel, shareOfMaximum, attentionCount,
   requestOf, requestAmountLabel, requestAmountOwner, contractsSourceNote, clampAskedChance,
   REQUEST_MODES, meetsRequest, splitByRequest, matchHeading, missToggle, resultsLine, nearestRelaxation, controlReadings,
   sizedFigures, sizeLine, sizedHeading, CARD_LABELS, directionTag, clampAskedReward, returnText, rewardAskLabel,
@@ -3159,8 +3159,8 @@ test("TASK 2 — ONE CLOSE CONTROL PER POSITION", () => {
   const notTaken = { id: 2, ticker: "SOYB", expKey: "2026-11-20", alpacaId: "x", alpacaStatus: "canceled", legs: [] };
   assert.equal(positionStage(notTaken), "not-taken");
   assert.equal(positionForHolding([notTaken], { ticker: "SOYB", expKey: "2026-11-20" }), null);
-  const note = onCardLine("J-0002", "-$133");
-  assert.ok(note.includes("J-0002") && /Positions card/.test(note));
+  // `onCardLine()` was removed in PR #48: the dissolved panel was its only reader.
+  assert.equal(/export const onCardLine/.test(readFileSync(new URL("./rules.js", import.meta.url), "utf8")), false);
 });
 
 /* ---------------- summary ---------------- */
