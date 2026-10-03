@@ -122,7 +122,7 @@ check("A RANGE THAT HAS NO WIDTH SAYS SO INSTEAD OF DRAWING A SLIDER THAT CANNOT
 // PR #47: the Positions segment's new files and the bottom bar are built on the atoms and tokens from day one.
 // PR #48: the sweep of the remaining screens adds each file as it is migrated, one commit per file.
 const MIGRATED = ["src/ui.jsx", "src/card.jsx", "src/find.jsx", "src/orders.jsx", "src/positions.jsx", "src/navBar.jsx",
-  "src/steps.jsx", "src/why.jsx", "src/positionCard.jsx"];
+  "src/steps.jsx", "src/why.jsx", "src/positionCard.jsx", "src/wizard.jsx"];
 const stripped = (f) => readFileSync(f, "utf8").replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
 const ATOMS = ["Btn", "Panel", "Lbl", "Label", "Stat", "Chip", "Fold", "RangeField", "Note", "NumberInput", "TextArea", "CheckField", "Info", "Segments"];
 
