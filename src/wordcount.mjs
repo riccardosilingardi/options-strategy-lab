@@ -65,7 +65,10 @@ const GUARD = { positions: 'posSeg === "positions"' };
 export const SURFACE_IDS = ["positions", "orders", "confirm", "modify"];
 /** Measured BEFORE this PR (owner's phone, 2 Oct 2026, and main's markup on the same fixtures). */
 export const SURFACE_BEFORE = { orders: 78, confirm: 51 };
-export const SURFACE_BUDGET = { positions: 120, orders: 35, confirm: 30, modify: 38 };
+/* PR #49, TASK 0c (owner decision, 3 Oct 2026): every ⓘ shows its label, and the two budgets it pushed over were raised
+   by exactly the labels' words, measured — the close confirm 29 → 35 ("The order in full ⓘ", "This price ⓘ") and
+   Modify 38 → 40 ("This price ⓘ"). Positions moved 112 → 113 ("Hold ⓘ") inside its 120. */
+export const SURFACE_BUDGET = { positions: 120, orders: 35, confirm: 35, modify: 40 };
 
 /** Words in rendered markup: the text between tags, entities decoded, a token counted when it holds a letter or a digit. */
 export function renderedWords(html) {
@@ -168,6 +171,10 @@ export const COPY = {
   alpacaErrorText: () => O.alpacaErrorText(new Error("422")),
   pctText: () => R.pctText(0.35),
   chanceText: () => R.chanceText(0.55),
+  chanceAskText: () => R.chanceAskText(null),
+  // PR #49, TASK 3: the two new tiles, on a fixture of the owner's example ("won 9 of 14 · avg +$310").
+  pastTileText: () => R.pastTileText({ wins: 9, n: 14, avg: 310 }),
+  futureTile: () => { const t = R.futureTile({ avg: -9, per100: -3.6, expiry: "2026-10-30" }); return [t.value, ...t.lines].join(" "); },
   returnText: () => R.returnText(1.25),
   // ROADMAP P10 — the controls block and the card.
   chanceAskLabel: () => (R.chanceAskLabel ? R.chanceAskLabel(REQUEST) : ""),

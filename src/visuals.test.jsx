@@ -14,7 +14,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import {
   payoffBands, profitBands, gaugeArcs, unifiedLayout, UNIFIED_DETAIL_WIDTH,
   bandTakeaway, gaugeTakeaway, unifiedTakeaway, explainElement, chanceInProfit,
-  BandThumbnail, Gauge, UnifiedPosition, exitPlanSentence, inTenPhrase,
+  BandThumbnail, Gauge, gaugeEndLabels, UnifiedPosition, exitPlanSentence, inTenPhrase,
   OpenInterestStrip, oiBarHeights, oiCutAt, oiStripTakeaway, explainOiStrip,
   oiGhostCut, isEmptyStrike, OI_EMPTY_BAR,
 } from "./visuals.jsx";
@@ -273,6 +273,21 @@ check("the visuals render at all, and describe themselves for a screen reader", 
     <UnifiedPosition legs={bullCall} entryNet={2} spot={SPOT} width={900} dte={45} sigma={0.25} ticker="CORN"
       bars={[{ open: 98, high: 101, low: 97, close: 100 }, { open: 100, high: 102, low: 99, close: 100 }]} />);
   has(u, "<svg");
+});
+
+check("PR #49 0e — the gauge's end labels never overlap: a card's 104px gauge drops the cents, and stacks if it must", () => {
+  // The owner's phone: "$103.18$191.62". At 104px and a 12px label the two full labels are wider than the arc.
+  const card = gaugeEndLabels(103.18, 191.62, { size: 104, lab: 12 });
+  if (card.left !== "$103" || card.right !== "$192" || card.stacked) throw new Error(JSON.stringify(card));
+  if (card.widths[0] + card.widths[1] + card.gap > card.span) throw new Error("whole-dollar labels still overlap");
+  const wide = gaugeEndLabels(103.18, 191.62, { size: 260, lab: 260 * 0.045 });
+  if (wide.mode !== "full" || wide.left !== "$103.18") throw new Error("a full-size gauge keeps the cents");
+  const tight = gaugeEndLabels(10312.5, 19162.4, { size: 104, lab: 14 });
+  if (!tight.stacked) throw new Error("labels that cannot fit side by side are stacked");
+  const b = payoffBands({ legs: bullCall, entryNet: 2, spot: SPOT });
+  const g = renderToStaticMarkup(<Gauge bands={b} size={104} labelSize={12} ticker="CORN" />);
+  const texts = [...g.matchAll(/<text[^>]*>([^<]*)<\/text>/g)].map((m) => m[1]);
+  if (texts.some((t) => /\.\d\d$/.test(t))) throw new Error(`a card gauge printed cents: ${texts}`);
 });
 
 check("the exit plan sentence comes from the rules, not from a component", () => {

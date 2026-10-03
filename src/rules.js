@@ -413,12 +413,12 @@ export const RULES = {
   // one-point step would move rows between the two sections on sampling noise,
   // which is a control that appears to do something it did not do.
   chanceAskStep: 0.05,
-  // chanceAskDefault — the middle of the band, and the point where "more often
-  // than not" becomes true. It is a STARTING POSITION the user can see and
-  // change, which is why it may have one at all: the same distinction the
-  // wizard draws between the basket (a visible default) and the budget (an
-  // answer that must never be invented).
-  chanceAskDefault: 0.50,
+  // chanceAskDefault — NONE (owner decision, 3 Oct 2026, PR #49 TASK 2). It was 0.50, the middle of the band:
+  // measured, 1 of 9 live cards and 5 of the 31 fixture cards passed it, so the list opened mostly hidden. Now no
+  // chance is asked until the slider is moved: its leftmost position, `chanceAskMin`, reads "any" and filters
+  // nothing (`clampAskedChance()`), and "no minimum" is held as null, never as 0 — `Number(null)` is 0 and 0 is a
+  // bar every card clears, which would say a minimum was asked.
+  chanceAskDefault: null,
   // THE "RETURN ON RISK, AT LEAST" SLIDER'S OWN BOUNDS (PR #45). Its minimum is `minRewardRisk`, not a new
   // number: the slider can only TIGHTEN the reward floor, never loosen it, and the floor itself does not move.
   // Chosen, not measured (PRD §4): on the 31 fixture cards the return runs from 0.27 to 6.6, and above 3 the
@@ -1372,8 +1372,99 @@ export function sizeLine(size, { n = null, byHand = false } = {}) {
 /** What a card's four figures are read for: the size the budget buys, or one contract when there is none. */
 export const sizedHeading = (n) => (n == null ? "PER CONTRACT" : `FOR ${n} CONTRACT${n === 1 ? "" : "S"}`);
 
-/** The four figures' labels, in the order the card prints them. One home: the card and its test read this. */
-export const CARD_LABELS = Object.freeze({ risk: "YOU RISK", profit: "MAX PROFIT", chance: "CHANCE", rr: "RETURN ON RISK" });
+/** The card's figures' labels, in the order the card prints them. One home: the card, Positions' "at entry vs now"
+ *  (the first four) and their tests read this. PR #49 (owner's names, 3 Oct 2026): the Monte Carlo average is
+ *  "FUTURE (MONTE CARLO)" and the historical replay "PAST YRS (BACKTEST)". */
+export const CARD_LABELS = Object.freeze({ risk: "YOU RISK", profit: "MAX PROFIT", chance: "CHANCE", rr: "RETURN ON RISK",
+  future: "FUTURE (MONTE CARLO)", past: "PAST YRS (BACKTEST)" });
+/** Build's backtest panel names its average with the same words (PR #49): "PAST YRS AVG". */
+export const PAST_AVG_LABEL = "PAST YRS AVG";
+
+/* =====================================================================
+   "ORDER BY" — THE FIVE ORDERS AND THEIR NAMES (PR #48, TASK 4; names and "Past yrs" PR #49, owner decision 3 Oct).
+   The labels live here, with the card's (one home for the words); `signals.js` sorts by them and re-exports them.
+   `tile` is the card figure the list is sorted by, which the card rings and labels "sorted by" (PR #49, TASK 1).
+   The ids are what `settings.findOrder` stores, unchanged since PR #48.
+===================================================================== */
+export const FIND_ORDERS = Object.freeze([
+  Object.freeze({ id: "ev", label: "Future avg", tile: "future" }),
+  Object.freeze({ id: "evSignal", label: "Future avg + signal", tile: "future" }),
+  Object.freeze({ id: "chance", label: "Chance", tile: "chance" }),
+  Object.freeze({ id: "rr", label: "Return on risk", tile: "rr" }),
+  Object.freeze({ id: "past", label: "Past yrs", tile: "past" }),
+]);
+export const DEFAULT_FIND_ORDER = "ev";
+/** The two toggles above the list (PR #49): what they say is here, with the rest of the list's words. */
+export const POSITIVE_FUTURE_TOGGLE = "Only a positive future avg";
+export const HIDE_MISSES_TOGGLE = "Hide cards that miss";
+
+const MON3 = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+/** "2026-10-30" → "30 Oct 2026"; null for anything that is not a date. */
+export const expiryWords = (iso) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ""));
+  if (!m || +m[2] < 1 || +m[2] > 12) return null;
+  return `${+m[3]} ${MON3[+m[2] - 1]} ${m[1]}`;
+};
+const sgnOne = (v) => `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(1)}`;
+
+/**
+ * THE MONTE CARLO AVERAGE PER $100 AT RISK — the figure "Future avg" sorts on and the FUTURE tile prints (PR #49).
+ * `mc.ev` is the mean of the seeded simulation, per contract, at the price that fills; ÷ the risk × 100. Null when
+ * there is no simulation, no readable risk, or NO CEILING: a structure with no maximum profit is not ranked on it
+ * (PRD §4c, unchanged), so it sorts last and its tile says so.
+ */
+export function futurePer100(mc, a) {
+  if (!mc || !known(mc.ev) || !a || !known(a.maxLoss) || Number(a.maxLoss) >= 0) return null;
+  if (a.profitUnbounded || rewardRisk(a.maxProfit, a.maxLoss) == null) return null;
+  return (Number(mc.ev) / Math.abs(Number(a.maxLoss))) * 100;
+}
+
+/** "Only a positive future avg" (PR #49): a card passes when its future avg per $100 at risk is above zero. Unknown
+ *  (no simulation, or no ceiling: findGen's −999) is not above zero, so it is hidden with the rest and counted. */
+export const futureIsPositive = (ev100) => ev100 != null && Number.isFinite(Number(ev100)) && Number(ev100) > -999 && Number(ev100) > 0;
+
+/** The FUTURE tile's numbers for the size the budget buys: { avg ($, n × mc.ev), per100, expiry, unbounded }. */
+export function futureFigures(mc, a, n = null, expKey = null) {
+  const k = n != null && Number.isFinite(Number(n)) && Number(n) >= 1 ? Math.round(Number(n)) : 1;
+  const per100 = futurePer100(mc, a);
+  const unbounded = !!(a && a.profitUnbounded);
+  return { avg: per100 == null || !mc ? null : Number(mc.ev) * k, per100, expiry: expKey, unbounded };
+}
+
+/** What the FUTURE tile prints: the value, then "−3.6 per $100 at risk", then "to 30 Oct 2026". */
+export function futureTile(ff) {
+  const to = ff && expiryWords(ff.expiry) ? `to ${expiryWords(ff.expiry)}` : null;
+  if (!ff || ff.per100 == null) return { value: "—", lines: [ff && ff.unbounded ? "no ceiling" : "not known", to].filter(Boolean) };
+  return { value: signedMoney(ff.avg), lines: [`${sgnOne(ff.per100)} per $100 at risk`, to].filter(Boolean) };
+}
+
+/** The PAST tile's numbers for the size: { wins, n, avg ($, size × the replay's per-contract mean), per100 } or null. */
+export function pastFigures(bt, a = null, n = null) {
+  if (!bt || !Number.isFinite(bt.n) || bt.n < 1) return null;
+  const k = n != null && Number.isFinite(Number(n)) && Number(n) >= 1 ? Math.round(Number(n)) : 1;
+  const risk = a && known(a.maxLoss) && Number(a.maxLoss) < 0 ? Math.abs(Number(a.maxLoss)) : null;
+  return { wins: bt.wins, n: bt.n, winRate: bt.winRate, avg: bt.avg * k, per100: risk ? (bt.avg / risk) * 100 : null,
+    span: bt.span, month: bt.month, excludedYear: bt.excludedYear };
+}
+
+/** "won 9 of 14 · avg +$310", or "not read" until the market's monthly series has loaded. */
+export const pastTileText = (pf) => (pf ? `won ${pf.wins} of ${pf.n} · avg ${signedMoney(pf.avg)}` : "not read");
+
+/** The FUTURE tile's ⓘ. */
+export const futureInfo = () =>
+  `The average result of ${RULES.mcRuns.toLocaleString("en-US")} simulated futures to expiry, at the price that ` +
+  `fills, for this size: invented from the option prices and the season's months that beat their noise. A ` +
+  `simulation, not history. Per $100 at risk is the figure "Future avg" sorts on.`;
+
+/** The PAST tile's ⓘ: it settles at expiry, does not replay the exit rules, and steps in whole months. */
+export const pastInfo = (pf, ticker = "the ETF") =>
+  (pf
+    ? `This trade replayed on ${ticker}'s real monthly moves, one row per past year: the same ${pf.span}-month ` +
+      `window from ${MON3[pf.month] || "this month"}, settled at expiry. It does not replay the exit rules (take ` +
+      `profit, the ${RULES.exitDTE}-day exit) and it steps in whole months.` +
+      (pf.excludedYear ? ` ${pf.excludedYear} is left out: its window has not finished.` : "")
+    : `Not read: ${ticker}'s monthly price history has not loaded, so there is no past to replay this trade on. ` +
+      `When it loads, this is the trade settled at expiry in the same calendar window of every past year.`);
 
 /**
  * THE FIGURES A CARD PRINTS, FOR THE SIZE THE BUDGET BUYS — ONE FUNCTION FOR FIND AND FOR BUILD (PR #45, TASK 3).
@@ -3321,7 +3412,8 @@ export function meetsRequest(cand, request, size = null) {
 
   /* ---- THE CHANCE HALF. UNKNOWN IS NOT A PASS AND NOT A ZERO. ---- */
   const pop = Number(cand.pop);
-  const asked = Number(request.minChance);
+  // "Any" (PR #49) is null, and null is no bar — tested before `Number()`, which would make it a bar of 0.
+  const asked = request.minChance == null ? NaN : Number(request.minChance);
   if (!Number.isFinite(asked)) {
     // No bar asked for: nothing to miss.
   } else if (cand.pop == null || !Number.isFinite(pop)) {
@@ -3381,16 +3473,16 @@ export function splitByRequest(cands = [], request, sizeOf = () => null) {
 
 const plural = (n, one, many) => (n === 1 ? one : many);
 
-/** "4 match what you asked", with a count that agrees with its verb. */
-export const matchHeading = (n) => `${n} ${plural(n, "matches", "match")} what you asked`;
+/** "4 cards match what you asked" / "1 card matches what you asked" (PR #49, 0d: the noun is said, so "1 matches"
+ *  cannot read as a plural noun), with a count that agrees with its noun and its verb. */
+export const matchHeading = (n) => `${n} ${plural(n, "card matches", "cards match")} what you asked`;
 
-/** The toggle half: "show 27 that miss" / "hide the 27 that miss". */
-export const missToggle = (m, open) =>
-  (open ? `hide the ${m} that ${plural(m, "misses", "miss")}` : `show ${m} that ${plural(m, "misses", "miss")}`);
+/** The misses half (PR #49, TASK 1): "27 shown as misses" in the one list, or "27 hidden" under "Hide cards that miss". */
+export const missToggle = (m, hidden = false) => (hidden ? `${m} hidden` : `${m} shown as ${plural(m, "a miss", "misses")}`);
 
-/** The whole line, which is the button: "4 match what you asked · show 27 that miss". */
-export const resultsLine = (n, m, open = false) =>
-  (m > 0 ? `${matchHeading(n)} · ${missToggle(m, open)}` : matchHeading(n));
+/** The whole line: "4 cards match what you asked · 27 shown as misses" (or "· 27 hidden"). */
+export const resultsLine = (n, m, hidden = false) =>
+  (m > 0 ? `${matchHeading(n)} · ${missToggle(m, hidden)}` : matchHeading(n));
 
 /** One row's reason, in the fewest words that still say which rule. */
 export const missReasonLine = (miss) => (miss && miss.short ? miss.short : "");
@@ -3454,13 +3546,16 @@ export function nearestRelaxation(cands = [], request, sizeOf = () => null) {
   const noun = (n) => `${n} ${plural(n, "match", "matches")}`;
 
   const ch = only("chance");
-  if (ch.length) {
+  if (ch.length && request.minChance != null) {
     const asked = Number(request.minChance);
-    const value = Math.floor(Math.max(...ch.map((r) => r.misses[0].need)) * 100 + 1e-9) / 100;
-    if (value >= RULES.chanceAskMin - 1e-9 && value < asked) {
-      const let_in = ch.filter((r) => r.misses[0].need >= value - 1e-9);
+    const need = Math.floor(Math.max(...ch.map((r) => r.misses[0].need)) * 100 + 1e-9) / 100;
+    // At or under the slider's leftmost position the move is to "any" (PR #49), which lets every chance in.
+    const value = need <= RULES.chanceAskMin + 1e-9 ? RULES.chanceAskMin : need;
+    if (value < asked) {
+      const let_in = ch.filter((r) => r.misses[0].need >= value - 1e-9 || value <= RULES.chanceAskMin + 1e-9);
       options.push({ control: "chance", value, matches: names(let_in), n: let_in.length,
-        dist: (asked - value) / (RULES.chanceAskMax - RULES.chanceAskMin), lead: `Lower chance to ${chanceText(value)}` });
+        dist: (asked - value) / (RULES.chanceAskMax - RULES.chanceAskMin),
+        lead: value <= RULES.chanceAskMin + 1e-9 ? "Set chance to any" : `Lower chance to ${chanceText(value)}` });
     }
   }
   const rt = only("return");
@@ -3701,7 +3796,8 @@ export const contractsSourceNote = ({ contracts, typed, request, fits = true } =
 };
 
 /**
- * The slider never leaves the band its two constants describe.
+ * The slider never leaves the band its two constants describe — and its LEFTMOST POSITION IS "ANY" (PR #49, TASK 2):
+ * at or under `chanceAskMin` no chance is asked, and the answer is null. The default is "none" (null) too.
  *
  * `Number(null)` IS 0 AND 0 IS FINITE — the trap this repository has written
  * down six times. A missing answer is not a request for the lowest chance in
@@ -3711,8 +3807,12 @@ export const clampAskedChance = (x) => {
   if (x == null || x === "" || typeof x === "boolean") return RULES.chanceAskDefault;
   const v = Number(x);
   if (!Number.isFinite(v)) return RULES.chanceAskDefault;
-  return Math.min(RULES.chanceAskMax, Math.max(RULES.chanceAskMin, v));
+  if (v <= RULES.chanceAskMin + 1e-9) return null;
+  return Math.min(RULES.chanceAskMax, v);
 };
+
+/** The chance slider's value in words: "any" at its leftmost position (no minimum), else the whole percent. */
+export const chanceAskText = (v) => (v == null || !Number.isFinite(Number(v)) || Number(v) <= RULES.chanceAskMin + 1e-9 ? "any" : chanceText(v));
 
 /**
  * The return-on-risk slider never leaves the band between the reward floor and its own top, and NEVER goes under

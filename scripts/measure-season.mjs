@@ -36,7 +36,45 @@ for (const tk of [...BASKET, "SPY"]) {
 series["CORN (shaped)"] = statsFromMatrix(parseAvJson(avMonthlyBody({ months: 132, endYear: 2026, endMonth: 8, seed: 48,
   vol: SIGMA.CORN / Math.sqrt(12), monthDrift: CORN_SHAPED_MONTH_DRIFT })).matrix);
 
-console.log("\\nMONTHS THAT COUNT (|mean| >= " + RULES.seasonalSignalT + " x its standard error), avFixture series, ~10 years each");
+/* PR #49, TASK 0b — ALL THE HISTORY. "Before" is the ten-year cut parseAvJson() used to make (today − 10 years),
+   reproduced here on the body; "after" is the whole body. Two lengths: the 132-month fixture used above, and
+   195 months, the length of CORN's real Alpha Vantage series. */
+const cut10 = (body) => {
+  const c = new Date(); c.setFullYear(c.getFullYear() - 10);
+  const ts = body["Monthly Adjusted Time Series"];
+  return { ...body, "Monthly Adjusted Time Series": Object.fromEntries(Object.entries(ts).filter(([d]) => new Date(d) >= c)) };
+};
+const countsOf = (st, tk) => {
+  const prov = seasonalProvenance({ ...st }, tk);
+  return Array.from({ length: 12 }, (_, m) => seasonalSignal(prov, m, 30)).filter((s) => s.counts).map((s) => s.months[0].label);
+};
+const LBL = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+for (const months of [132, 195]) {
+  console.log("\\nPR #49 0b — BEFORE (ten-year cut) / AFTER (all " + months + " months), avFixture series");
+  let sb = 0, sa = 0;
+  let s2 = 100;
+  for (const tk of [...BASKET, "SPY", "CORN (shaped)"]) {
+    const shaped = tk.includes("shaped");
+    const vol = shaped ? SIGMA.CORN / Math.sqrt(12) : (getU(tk).sigma || RULES.fallbackSigma) / Math.sqrt(12);
+    const body = avMonthlyBody({ months, endYear: 2026, endMonth: 8, seed: shaped ? 48 : s2++, vol, monthDrift: shaped ? CORN_SHAPED_MONTH_DRIFT : null });
+    const b = statsFromMatrix(parseAvJson(cut10(body)).matrix), a = statsFromMatrix(parseAvJson(body).matrix);
+    const cb = countsOf(b, tk), ca = countsOf(a, tk);
+    if (!shaped) { sb += cb.length; sa += ca.length; }
+    console.log("  " + tk.padEnd(15) + "years per month " + Math.min(...b.monthN) + "–" + Math.max(...b.monthN) + " → " +
+      Math.min(...a.monthN) + "–" + Math.max(...a.monthN) + " · months that count " + cb.length + " → " + ca.length +
+      (ca.length ? " (" + ca.join(", ") + ")" : ""));
+    if (shaped) {
+      for (let m = 0; m < 12; m++) {
+        const fb = seasonalSignal(seasonalProvenance({ ...b }, "CORN"), m, 30).months[0];
+        const fa = seasonalSignal(seasonalProvenance({ ...a }, "CORN"), m, 30).months[0];
+        console.log("      " + LBL[m] + "  before: " + fb.line.padEnd(44) + " after: " + fa.line);
+      }
+    }
+  }
+  console.log("  → markets with NO season built in: " + sb + " → " + sa + " month-tests count (of " + (12 * (BASKET.length + 1)) + "; every one a false positive)");
+}
+
+console.log("\\nMONTHS THAT COUNT (|mean| >= " + RULES.seasonalSignalT + " x its standard error), avFixture series, 132 months each (11 calendar rows since PR #49)");
 let zero = 0, n = 0;
 for (const [tk, st] of Object.entries(series)) {
   const prov = seasonalProvenance({ ...st }, tk);

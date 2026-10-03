@@ -3204,14 +3204,21 @@ test("REQUEST — the mode is one of two, and the label follows it", () => {
 });
 
 test("REQUEST — the slider's band and step live in RULES, and it is clamped", () => {
-  for (const k of ["chanceAskMin", "chanceAskMax", "chanceAskStep", "chanceAskDefault"]) {
+  for (const k of ["chanceAskMin", "chanceAskMax", "chanceAskStep"]) {
     assert.equal(typeof RULES[k], "number", `${k} has a home in RULES`);
   }
-  assert.ok(RULES.chanceAskMin < RULES.chanceAskDefault && RULES.chanceAskDefault < RULES.chanceAskMax,
-    "the default is inside the band it is the default of");
+  // PR #49, TASK 2 (owner decision, 3 Oct 2026): the default is "none" — no minimum — and it is null, never a zero.
+  assert.ok("chanceAskDefault" in RULES, "the default has a home in RULES");
+  assert.equal(RULES.chanceAskDefault, null, "no chance is asked until the slider is moved");
   assert.equal(clampAskedChance(0.99), RULES.chanceAskMax);
-  assert.equal(clampAskedChance(0.01), RULES.chanceAskMin);
+  assert.equal(clampAskedChance(0.01), null, "under the band is the leftmost position: any");
+  assert.equal(clampAskedChance(RULES.chanceAskMin), null, "the leftmost position reads 'any' and asks for nothing");
+  assert.equal(clampAskedChance(RULES.chanceAskMin + RULES.chanceAskStep), RULES.chanceAskMin + RULES.chanceAskStep);
   assert.equal(clampAskedChance(null), RULES.chanceAskDefault, "unknown is the default, never a zero");
+  assert.equal(requestOf({}, {}).minChance, null, "no answer: no chance asked");
+  const anyReq = requestOf({ minChance: RULES.chanceAskMin }, {});
+  assert.equal(meetsRequest({ pop: 0.01, rr: 1, maxLoss: -100, maxProfit: 100 }, anyReq).meets, true, "'any' lets a 1% chance in");
+  assert.equal(meetsRequest({ pop: null, rr: 1, maxLoss: -100, maxProfit: 100 }, anyReq).meets, true, "and asks nothing of an unknown one");
   assert.equal(requestOf({ minChance: 2 }, {}).minChance, RULES.chanceAskMax);
   assert.equal(requestOf({}, {}).chanceAnswered, false);
   // THE STEP IS COARSER THAN THE SIMULATION'S OWN ERROR. At `mcRuns` the
@@ -3328,13 +3335,13 @@ test("SPLIT — the target mode misses by the shortfall, in dollars", () => {
   assert.match(sp.others[0].misses[0].short, /short of the target by \$640/);
 });
 
-test("SPLIT — the results line carries both counts, so it needs no sentence (PR #45)", () => {
-  assert.equal(resultsLine(4, 27), "4 match what you asked · show 27 that miss");
-  assert.equal(resultsLine(4, 27, true), "4 match what you asked · hide the 27 that miss");
-  assert.equal(resultsLine(1, 1), "1 matches what you asked · show 1 that misses", "a count agrees with its verb");
-  assert.equal(resultsLine(31, 0), "31 match what you asked", "with nothing hidden there is nothing to show");
-  assert.equal(matchHeading(0), "0 match what you asked");
-  assert.match(missToggle(3, false), /show 3 that miss/);
+test("SPLIT — the results line carries both counts, so it needs no sentence (PR #45; one list since PR #49)", () => {
+  assert.equal(resultsLine(4, 27), "4 cards match what you asked · 27 shown as misses");
+  assert.equal(resultsLine(4, 27, true), "4 cards match what you asked · 27 hidden", "under 'Hide cards that miss'");
+  assert.equal(resultsLine(1, 1), "1 card matches what you asked · 1 shown as a miss", "a count agrees with its noun and its verb");
+  assert.equal(resultsLine(31, 0), "31 cards match what you asked", "with nothing missing there is nothing to count");
+  assert.equal(matchHeading(0), "0 cards match what you asked");
+  assert.equal(missToggle(3), "3 shown as misses");
   assert.ok(resultsLine(4, 27).split(/\s+/).length <= 12, "a line is not a paragraph");
 });
 

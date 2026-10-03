@@ -21,7 +21,7 @@
 import React, { useCallback, useMemo } from "react";
 import { T, TYPE } from "./theme.js";
 import { mono, sans, Btn, Chip, Panel, Label, Stat, Note, Fold, CheckField } from "./ui.jsx";
-import { FIND_ORDERS, DEFAULT_FIND_ORDER } from "./signals.js";
+import { FIND_ORDERS, DEFAULT_FIND_ORDER, findOrderOf, placeLine } from "./signals.js";
 import { RequestControls, MatchList, CandidateCard, CompareTray, ResultsFilter, NumbersFit } from "./card.jsx";
 import { categoryCounts } from "./markets.js";
 import { StepForward } from "./steps.jsx";
@@ -33,6 +33,7 @@ import { money, chanceText, NO_CEILING, noCeilingNote, noCeilingRankNote, season
   unpriceableNote, impossibleLossNote, modelDisagreementNote, wideSpreadNote, wideComboNote, crossingNote,
   liquiditySkippedNote, spreadSkippedNote, comboSpreadSkippedNote, horizonFloorNote, perTradeCapLabel,
   nothingTodayLine, staleBoardLine, stopSigns, sizedFree, sizedFigures, sizeLine, controlReadings, directionTag, chanceBasisLabel,
+  futureFigures, pastFigures, POSITIVE_FUTURE_TOGGLE,
 } from "./rules.js";
 
 const FS = TYPE.size, FW = TYPE.weight, LH = TYPE.line;
@@ -42,7 +43,7 @@ const NO_BARS = [];
 export function FindStep({
   request, onRequest, sentiments, universe, find, setFind, spot,
   limits, onLimit, freeSizing,
-  findGen, findShown, signalLines = [], findOrder = DEFAULT_FIND_ORDER, onFindOrder = null, flaggedHidden, barsCache, badgeOf, actionsOf, onMore = null,
+  findGen, findShown, signalLines = [], findOrder = DEFAULT_FIND_ORDER, onFindOrder = null, flaggedHidden, positiveHidden = 0, barsCache, badgeOf, actionsOf, onMore = null,
   liqLevel, foldedNode,
   compare, showCompare, compareNote, onTickCompare, onClearCompare, onToggleCompare, onTakeToBuild,
   forward,
@@ -59,6 +60,8 @@ export function FindStep({
   const sizeOf = useCallback((c) => sizes.get(c.key) || null, [sizes]);
   const readings = useMemo(() => controlReadings(cands, request, sizeOf), [cands, request, sizeOf]);
 
+  // THE TILE THE LIST IS SORTED BY (PR #49, TASK 1): ringed on every card, so the order is visible at rest.
+  const sortedBy = findOrderOf(findOrder).tile;
   const renderItem = (c, misses) => {
     const x = byKey.get(c.key);
     if (!x) return null;
@@ -77,7 +80,8 @@ export function FindStep({
         rr={x.lf.rr} pop={x.lf.pop} basis={mc ? chanceBasisLabel(mc) : null}
         picture={x.lf.bands ? { bands: x.lf.bands, legs: x.legs, entryNet: af.entry, spot: x.spot, bars: barsCache[x.tk] || NO_BARS,
           dte: x.dte, sigma: mc ? mc.sigma : undefined, driftAnnual: mc ? mc.driftAnnual : undefined, ticker: x.tk } : null}
-        place={{ item: x, order: findOrder }}
+        future={futureFigures(mc, af, n, x.expKey)} past={pastFigures(x.lf.bt, af, n)} ticker={x.tk}
+        sortedBy={sortedBy} placeAtRest={findOrderOf(findOrder).id === "evSignal" ? placeLine(x, findOrder) : null}
         badge={badgeOf(x)} actions={actionsOf(x)}
         more={onMore ? { tk: x.tk, onOpen: () => onMore(x) } : null} />
     );
@@ -113,7 +117,8 @@ export function FindStep({
           : findGen.noBoard.includes(tk) ? "no board" : null)}
         onCat={(c) => setFind((f) => ({ ...f, cat: c, market: null }))}
         onMarket={(tk) => setFind((f) => ({ ...f, market: tk }))} />
-      {/* ORDER BY (PR #48, TASK 4): Expected value (default) · Expected value + signal · Chance · Return on risk. */}
+      {/* ORDER BY (PR #48, TASK 4; names PR #49): Future avg (default) · Future avg + signal · Chance · Return on risk ·
+          Past yrs. It sorts the WHOLE list (PR #49, TASK 1), misses included. */}
       <div role="group" aria-label="Order by" style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
         <Note color={T.dim}>ORDER BY</Note>
         {FIND_ORDERS.map((o) => (
@@ -123,6 +128,10 @@ export function FindStep({
       <div style={{ display: "flex", gap: 6, marginTop: 4, flexWrap: "wrap", alignItems: "center" }}>
         <CheckField checked={find.flagged} onChange={(e) => setFind((f) => ({ ...f, flagged: e.target.checked }))}>
           show flagged{flaggedHidden ? ` (${flaggedHidden} hidden)` : ""}
+        </CheckField>
+        {/* PR #49, TASK 3: off by default; on, it hides every card whose future avg is not above zero, and says how many. */}
+        <CheckField checked={!!find.positiveOnly} onChange={(e) => setFind((f) => ({ ...f, positiveOnly: e.target.checked }))}>
+          {POSITIVE_FUTURE_TOGGLE}{positiveHidden ? ` (${positiveHidden} hidden)` : ""}
         </CheckField>
       </div>
 
@@ -145,6 +154,7 @@ export function FindStep({
 
       {findShown.length > 0 && (
         <MatchList items={cands} request={request} sizeOf={sizeOf} priceNote renderItem={renderItem} style={{ marginTop: 6 }}
+          hideMisses={!!find.hideMisses} onHideMisses={(v) => setFind((f) => ({ ...f, hideMisses: v }))}
           aside={<NumbersFit order={findOrder} />} />
       )}
 
@@ -164,8 +174,8 @@ export function FindStep({
         {findGen.comboSpreadSkipped.length > 0 && <Note color={T.dim} style={{ marginTop: 6 }}>{comboSpreadSkippedNote(`the feed for ${findGen.comboSpreadSkipped.join(", ")}`)}</Note>}
         {findGen.noBoard.length > 0 && <Note style={{ marginTop: 6 }}>{`No expiry on ${findGen.noBoard.join(", ")} is far enough out to open on, so nothing was built there. ${horizonFloorNote()}.`}</Note>}
         {unb > 0 && <Note color={T.dim} style={{ marginTop: 6 }}>{noCeilingRankNote(unb)}</Note>}
-        {/* CONFLICT IS LAST ONLY UNDER "EXPECTED VALUE + SIGNAL" (PR #48): the sentence that said "always" was wrong. */}
-        <Note color={T.dim} style={{ marginTop: 6 }}>Under Expected value + signal, CONFLICT markets sort last.</Note>
+        {/* CONFLICT IS LAST ONLY UNDER "FUTURE AVG + SIGNAL" (PR #48): the sentence that said "always" was wrong. */}
+        <Note color={T.dim} style={{ marginTop: 6 }}>Under {findOrderOf("evSignal").label}, CONFLICT markets sort last.</Note>
         <Note color={isLoosened(liqLevel) ? T.red : T.dim} style={{ marginTop: 6 }}>
           {liquiditySettingNote(liqLevel, { ...t, kept: findGen.items.length })}
         </Note>

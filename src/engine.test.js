@@ -23,7 +23,7 @@
 import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { exitSim, netBS, SIGMA, terminalMC, seedFrom, rng, seasonalDrift, seasonalSpan,
-  parseAvJson, statsFromMatrix } from "./engine.js";
+  parseAvJson, statsFromMatrix, histBacktest, payoff } from "./engine.js";
 import { RULES, takeProfitTarget, sigmaProvenance, MEASURED_SIGMA_SOURCE, TABLE_SIGMA_SOURCE, FALLBACK_SIGMA_SOURCE } from "./rules.js";
 import { avMonthlyBody, AV_REFUSALS, CORN_SHAPED_MONTH_DRIFT, CORN_MONTHLY_VOL } from "./avFixture.js";
 
@@ -465,17 +465,59 @@ test("AV PARSE — a real-shaped body becomes a year-by-month matrix of RETURNS"
   assert.ok(from >= dates[0], "and it reports the first date inside the window");
 });
 
-test("AV PARSE — the TEN-YEAR cutoff is applied, and it lands mid-year", () => {
-  // The cutoff is ten years back from TODAY, so it falls inside a calendar
-  // year: the matrix carries ELEVEN calendar rows of which the first and the
-  // last are partial. That is why `years` is the ROW COUNT and not "10".
+test("AV PARSE — ALL THE HISTORY IS KEPT (PR #49, 0b): no ten-year cutoff", () => {
+  // Owner decision, 3 Oct 2026: use every month Alpha Vantage returns. Twenty years of body is twenty years of
+  // matrix (21 calendar rows, the first and last partial), and every month carries about twenty years.
   const body = avMonthlyBody({ months: 240, endYear: 2026, endMonth: 8, seed: 3 });
-  const { matrix } = parseAvJson(body);
-  const cutoff = new Date(); cutoff.setFullYear(cutoff.getFullYear() - 10);
-  const oldest = Math.min(...matrix.map((r) => r[0]));
-  assert.ok(oldest >= cutoff.getFullYear(), "twenty years of body, ten years of matrix");
-  assert.ok(matrix.length <= 11, `eleven calendar rows at most, got ${matrix.length}`);
-  assert.ok(matrix.length >= 10, "and not fewer, on a series that covers the whole window");
+  const { matrix, from } = parseAvJson(body);
+  const dates = Object.keys(body["Monthly Adjusted Time Series"]).sort();
+  assert.equal(from, dates[0], "the series starts at the body's first date");
+  assert.equal(Math.min(...matrix.map((r) => r[0])), +dates[0].slice(0, 4), "the oldest row is the body's oldest year");
+  assert.equal(matrix.length, 21, `twenty years of body, twenty-one calendar rows, got ${matrix.length}`);
+  const cells = matrix.reduce((n, r) => n + r.slice(1).filter((c) => c != null).length, 0);
+  assert.equal(cells, dates.length - 1, "every month but the first (it has no previous close) is a return");
+  const st = statsFromMatrix(matrix);
+  assert.ok(st.monthN.every((n) => n >= 19 && n <= 20), `every month carries ~20 years: ${st.monthN.join(",")}`);
+});
+
+test("THE HISTORICAL REPLAY HAS ONE HOME (PR #49, TASK 3): engine.js's histBacktest() is App.jsx's, row for row", () => {
+  // The function as it stood in App.jsx before the move, with its two clock reads made explicit (NOW_MONTH, the year).
+  const before = (legs, S, dte, entry, matrix, NOW_MONTH, thisYear) => {
+    if (!matrix || !matrix.length) return null;
+    const span = Math.max(1, Math.round(dte / 30));
+    const out = [];
+    for (const row of matrix) {
+      const [y, ...ms] = row;
+      if (+y === thisYear) continue;
+      let cum = 1, ok = true;
+      for (let i = 0; i < span; i++) {
+        const r = ms[(NOW_MONTH + i) % 12];
+        if (r == null || Number.isNaN(r)) { ok = false; break; }
+        cum *= 1 + r / 100;
+      }
+      if (!ok) continue;
+      out.push({ year: String(y), ret: (cum - 1) * 100, pnl: (payoff(legs, S * cum) - entry) * 100 });
+    }
+    if (!out.length) return null;
+    const wins = out.filter((o) => o.pnl > 0).length;
+    return { rows: out, winRate: wins / out.length, avg: out.reduce((a, b) => a + b.pnl, 0) / out.length,
+      excludedYear: matrix.some((r) => +r[0] === thisYear) ? thisYear : null };
+  };
+  const { matrix } = parseAvJson(avMonthlyBody({ months: 195, endYear: 2026, endMonth: 8, seed: 48, monthDrift: CORN_SHAPED_MONTH_DRIFT }));
+  const legs = [{ type: "call", side: 1, qty: 1, strike: 20 }, { type: "call", side: -1, qty: 1, strike: 22 }];
+  for (const [month, dte] of [[9, 45], [5, 30], [10, 75], [0, 90]]) {
+    const a = histBacktest(legs, 20.5, dte, 0.9, matrix, { month, year: 2026 });
+    const b = before(legs, 20.5, dte, 0.9, matrix, month, 2026);
+    assert.deepEqual(a.rows, b.rows, `month ${month}, ${dte} days: the same rows`);
+    assert.equal(a.winRate, b.winRate); assert.equal(a.avg, b.avg); assert.equal(a.excludedYear, 2026, "this year is left out, out loud");
+    assert.equal(a.n, a.rows.length); assert.equal(a.wins, a.rows.filter((r) => r.pnl > 0).length);
+    assert.equal(a.span, Math.max(1, Math.round(dte / 30)), "whole months");
+  }
+  // All the history (0b): a 195-month series replays ~16 past years, not ten.
+  assert.ok(histBacktest(legs, 20.5, 45, 0.9, matrix, { month: 9, year: 2026 }).n >= 15);
+  assert.equal(histBacktest(legs, 20.5, 45, 0.9, null), null, "no series: not read, never an empty win rate");
+  const app = readFileSync("src/App.jsx", "utf8").replace(/\/\*[\s\S]*?\*\//g, " ");
+  assert.equal(/function histBacktest\s*\(/.test(app), false, "App.jsx keeps no copy");
 });
 
 test("AV PARSE — the first and last rows are PARTIAL, and that is not an error", () => {

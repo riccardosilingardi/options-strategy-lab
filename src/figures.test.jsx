@@ -48,7 +48,9 @@ const q = (leg) => QUOTES[leg.strike] || null;
 const SEASONAL = seasonalProvenance(
   { monthlyMean: [0.5, 0.2, -0.1, 0.4, 0.8, 1.1, -0.6, -1.2, 0.3, 0.9, 0.6, 0.1], monthN: Array(12).fill(11),
     monthSE: Array(12).fill(0.3), years: 11, src: "Alpha Vantage", at: Date.now() }, TICKER);
-const OPTS = { spot: SPOT, dte: DTE, iv: IV, q, ticker: TICKER, expKey: EXP, seasonal: SEASONAL };
+// THE PAST (PR #49): one fixture monthly matrix, read by both paths.
+const MATRIX = Array.from({ length: 15 }, (_, i) => [2011 + i, ...Array.from({ length: 12 }, (_, m) => ((i * 7 + m * 3) % 11) - 5)]);
+const OPTS = { spot: SPOT, dte: DTE, iv: IV, q, ticker: TICKER, expKey: EXP, seasonal: SEASONAL, matrix: MATRIX, month: 9 };
 
 const list = listCardFigures(LEGS, OPTS);
 const build = buildFigures(LEGS, OPTS);   // nothing typed in the ticket
@@ -63,6 +65,15 @@ check("THE PRICE: card and Build read fillNet(), to the cent, and the ticket's l
   eq(+list.aFill.entry.toFixed(4), +fill.toFixed(4), "the card");
   eq(+build.AE.entry.toFixed(4), +fill.toFixed(4), "Build");
   eq(+netFromLegs(LEGS, build.seedPx).net.toFixed(4), +fill.toFixed(4), "the ticket's seeded legs");
+});
+
+check("THE FUTURE AND THE PAST (PR #49): the two new tiles read one figure on the list card and on Build", () => {
+  eq(list.future.per100, build.future.per100, "future avg per $100 at risk");
+  eq(list.future.avg, build.future.avg, "future avg, one contract");
+  if (!Number.isFinite(list.future.per100)) throw new Error("the fixture has no future avg: it proves nothing");
+  eq(JSON.stringify(list.past), JSON.stringify(build.past), "the replay");
+  if (!list.past || list.past.n < 10) throw new Error("the fixture has no replay: it proves nothing");
+  eq(JSON.stringify(list.bt.rows), JSON.stringify(build.bt.rows), "row for row");
 });
 
 check("RISK, PROFIT, CHANCE, BREAK-EVEN: every figure identical on the list card and on Build", () => {

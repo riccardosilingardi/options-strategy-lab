@@ -806,6 +806,24 @@ export function gaugeArcs(b) {
   }));
 }
 
+/* THE GAUGE'S TWO END LABELS, AND WHERE THEY GO (PR #49, TASK 0e). The owner's phone, 3 Oct 2026: on a card's 104px
+   gauge at a 12px label the two ends ran together, "$103.18$191.62". Mono glyphs are ~0.6 of the font size wide (0.62 is used), so
+   the widths are known before drawing: if the two labels and a gap do not fit the arc's width, the cents go
+   ("$103", "$192"); if they still do not fit, the right one drops one line below the left. Never overlapping. */
+export function gaugeEndLabels(lo, hi, { size, lab }) {
+  const span = size * 0.42 * 2 + size * 0.13;           // the arc's outer width: 2R + the stroke
+  const w = (t) => t.length * lab * 0.62;
+  const gap = lab;                                       // at least one character apart
+  const fits = (a, b2) => w(a) + w(b2) + gap <= span;
+  let left = price(lo), right = price(hi), mode = "full";
+  if (!fits(left, right)) {
+    const whole = (x) => (Number.isFinite(Number(x)) ? `$${Math.round(Number(x))}` : "n/a");
+    left = whole(lo); right = whole(hi); mode = "whole";
+    if (!fits(left, right)) mode = "stacked";
+  }
+  return { left, right, stacked: mode === "stacked", mode, widths: [w(left), w(right)], span, gap };
+}
+
 export function Gauge({ bands, size = 260, onExplain, ticker = "this market", labelSize = null }) {
   const b = bands;
   if (!b || !b.bands.length) return null;
@@ -813,7 +831,8 @@ export function Gauge({ bands, size = 260, onExplain, ticker = "this market", la
   // `labelSize` is for a gauge drawn small (a card's 104px one): the ends' labels are 4.5% of the size by default,
   // which is 4.7px there, so the caller names a readable size and the frame grows to hold it (PR #45).
   const lab = labelSize || size * 0.045;
-  const H = cy + Math.max(size * 0.105, size * 0.085 + lab * 0.4);
+  const ends = gaugeEndLabels(b.lo, b.hi, { size, lab });
+  const H = cy + Math.max(size * 0.105, size * 0.085 + lab * 0.4) + (ends.stacked ? lab * 1.2 : 0);
   const tap = (el) => (onExplain ? () => onExplain(el) : undefined);
   const s0 = b.spot;
   const inRange = s0 != null && s0 >= b.lo && s0 <= b.hi;
@@ -841,8 +860,8 @@ export function Gauge({ bands, size = 260, onExplain, ticker = "this market", la
         </g>
       )}
       {/* The ends of the price range, anchored inwards so they cannot clip. */}
-      <text x={cx - R - thick / 2} y={cy + size * 0.085} textAnchor="start" fill={T.dim} fontSize={lab} fontFamily="ui-monospace, Menlo, monospace">{price(b.lo)}</text>
-      <text x={cx + R + thick / 2} y={cy + size * 0.085} textAnchor="end" fill={T.dim} fontSize={lab} fontFamily="ui-monospace, Menlo, monospace">{price(b.hi)}</text>
+      <text x={cx - R - thick / 2} y={cy + size * 0.085} textAnchor="start" fill={T.dim} fontSize={lab} fontFamily="ui-monospace, Menlo, monospace">{ends.left}</text>
+      <text x={cx + R + thick / 2} y={cy + size * 0.085 + (ends.stacked ? lab * 1.2 : 0)} textAnchor="end" fill={T.dim} fontSize={lab} fontFamily="ui-monospace, Menlo, monospace">{ends.right}</text>
     </svg>
   );
 }

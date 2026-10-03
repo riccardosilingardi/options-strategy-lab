@@ -12,7 +12,8 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
 import { TYPE } from "./theme.js";
-import { RangeField, Btn, Chip, Fold, histogram, clampTo, TAP, mono, sans } from "./ui.jsx";
+import { RangeField, Btn, Chip, Fold, Info, histogram, clampTo, TAP, mono, sans } from "./ui.jsx";
+import { readdirSync } from "node:fs";
 
 const ok = [], bad = [];
 const check = (n, f) => { try { f(); ok.push(n); console.log(`  ok   ${n}`); }
@@ -53,6 +54,32 @@ check("THE FOLD HIDES ITS CHILDREN AND SAYS SO TO A SCREEN READER", () => {
   has(html, 'aria-expanded="false"'); has(html, "figures ▼");
   if (html.includes("HIDDEN")) throw new Error("a closed fold printed its children");
   eq(renderToStaticMarkup(<Fold summary="">x</Fold>), "", "no summary, no fold");
+});
+
+check("THE ⓘ SHOWS ITS LABEL (PR #49, 0c): \"How the numbers fit ⓘ\", and the box it opens is not on screen at rest", () => {
+  const html = renderToStaticMarkup(<Info label="how the numbers fit">THE WORDS</Info>);
+  has(html, "How the numbers fit"); has(html, "ⓘ"); has(html, 'aria-label="About how the numbers fit"');
+  has(html, 'aria-expanded="false"'); has(html, "min-height:44px");
+  if (html.includes("THE WORDS")) throw new Error("a closed ⓘ printed its words");
+  const icon = renderToStaticMarkup(<Info iconOnly label="equity">x</Info>);
+  if (/Equity/.test(icon.replace(/aria-label="[^"]*"/, ""))) throw new Error("iconOnly printed its label");
+  eq(renderToStaticMarkup(<Info label="x">{null}</Info>), "", "nothing to say, no ⓘ");
+});
+
+check("…AND `iconOnly` IS USED ONLY INSIDE A FIGURE TILE: the account strip's cells and the card's tiles", () => {
+  const allowed = new Set(["positions.jsx", "card.jsx", "ui.jsx"]);
+  for (const f of readdirSync("src")) {
+    if (!/\.jsx?$/.test(f) || /\.test\./.test(f)) continue;
+    if (/\biconOnly\b/.test(readFileSync(`src/${f}`, "utf8")) && !allowed.has(f)) throw new Error(`${f} uses iconOnly outside a tile`);
+  }
+  // In those two files it sits in the tile itself: the strip's `cell` and the card's `CardFigure`.
+  if (!/const cell = [\s\S]{0,400}<Info iconOnly/.test(readFileSync("src/positions.jsx", "utf8"))) throw new Error("positions.jsx: iconOnly outside the cell");
+  const card = readFileSync("src/card.jsx", "utf8");
+  for (const m of card.matchAll(/iconOnly/g)) {
+    const before = card.slice(0, m.index);
+    if (before.lastIndexOf("const CardFigure") < before.lastIndexOf("\nexport function") && before.lastIndexOf("const CardFigure") < before.lastIndexOf("\nfunction "))
+      throw new Error("card.jsx: iconOnly outside CardFigure");
+  }
 });
 
 /* ====================================================================
@@ -122,7 +149,9 @@ check("A RANGE THAT HAS NO WIDTH SAYS SO INSTEAD OF DRAWING A SLIDER THAT CANNOT
 // PR #47: the Positions segment's new files and the bottom bar are built on the atoms and tokens from day one.
 // PR #48: the sweep of the remaining screens adds each file as it is migrated, one commit per file.
 const MIGRATED = ["src/ui.jsx", "src/card.jsx", "src/find.jsx", "src/orders.jsx", "src/positions.jsx", "src/navBar.jsx",
-  "src/steps.jsx", "src/why.jsx", "src/positionCard.jsx", "src/wizard.jsx"];
+  "src/steps.jsx", "src/why.jsx", "src/positionCard.jsx", "src/wizard.jsx",
+  // PR #49, TASK 4: the sweep reaches the files that host order paths 1, 2 and 4.
+  "src/pro.jsx", "src/App.jsx"];
 const stripped = (f) => readFileSync(f, "utf8").replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
 const ATOMS = ["Btn", "Panel", "Lbl", "Label", "Stat", "Chip", "Fold", "RangeField", "Note", "NumberInput", "TextArea", "CheckField", "Info", "Segments"];
 
@@ -165,10 +194,11 @@ check("THE CARD AND FIND IMPORT THEIR ATOMS FROM ui.jsx", () => {
   has(steps, 'export { Fold } from "./ui.jsx"');
 });
 
-check("OTHER SCREENS ARE NOT PRETENDED TO BE MIGRATED: their copies are still theirs (PR #48: see ROADMAP)", () => {
-  // This is a statement of scope, held so a later reader does not mistake the sweep for the whole app.
-  for (const f of ["src/App.jsx", "src/pro.jsx"]) {
-    if (MIGRATED.includes(f)) throw new Error(`${f} is swept but not migrated`);
+check("EVERY SCREEN FILE IS SWEPT (PR #49) — but two, named here so nobody mistakes them for done", () => {
+  // visuals.jsx: its SVG drawings keep their own sizes (PR #48); main.jsx: the crash screen, outside the app's tree.
+  const LEFT = ["src/visuals.jsx", "src/main.jsx"];
+  for (const f of readdirSync("src").filter((x) => /\.jsx$/.test(x) && !/\.test\./.test(x)).map((x) => `src/${x}`)) {
+    if (!MIGRATED.includes(f) && !LEFT.includes(f)) throw new Error(`${f} is neither swept nor named as left`);
   }
 });
 

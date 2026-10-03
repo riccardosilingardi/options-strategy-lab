@@ -229,7 +229,7 @@ export function WhySheet({ fused, title, note, ticker, weatherData, newsItems, m
       <div style={{ marginTop: 4, ...(style || {}) }}>
         <WhySheetTop fused={fused} how={how} onHow={() => setHow((h) => !h)} />
         <SeasonRow season={fused.season || null} />
-        <div style={{ fontSize: FS.sm, color: T.body, marginTop: 4 }}>How the numbers fit <NumbersFit order={order} /></div>
+        <div style={{ marginTop: 4 }}><NumbersFit order={order} /></div>
         <button onClick={() => setNewsOpen((o) => !o)}
           style={{ ...sans, fontSize: FS.xs, marginTop: 6, background: "transparent", color: T.body, border: "none", padding: "4px 0", cursor: "pointer", textAlign: "left", lineHeight: LH.body, minHeight: 44 }}>
           {newsLine(ticker, newsItems).text} {newsOpen ? "▲" : "▼"}
