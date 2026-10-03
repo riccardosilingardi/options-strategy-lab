@@ -17,7 +17,7 @@ import { BandThumbnail, payoffBands, bandTakeaway, GaugeFigure, Gauge, CompareFi
   OpenInterestStrip, oiStripTakeaway, oiCutAt, oiGhostCut, explainOiStrip, useWidth } from "./visuals.jsx";
 import { fuseSignals, sentimentDirection, signalDirection, signalFamilies, findOrderOf, findOrderCompare, withSignalRank, compareCandidates, againstSignal,
   readingState, signalSnapshot, compareSignals } from "./signals.js";
-import { N as nCDF, bs as bsPrice, smile as smileIV, payoff as payoffExp, SIGMA, histBacktest,
+import { N as nCDF, bs as bsPrice, smile as smileIV, payoff as payoffExp, SIGMA, histBacktest, monthReturn,
   parseAvJson, statsFromMatrix } from "./engine.js";
 import { parseOcc, buildOcc, snapStrike, resnapLegs, expiryStrikes, strikeOptions, fetchChain, hasOpenInterest, enrichOpenInterest, feedName, sourceNote, openInterestNote, oiProfile, expiryOpenInterest, nearMoneyOpenInterest, monotonicityBreaks, monotonicityNote, invertedOnStrikes, spotOf, spotAt } from "./chain.js";
 import { T, TYPE, themeName, setTheme, BADGE_SAFE } from "./theme.js";
@@ -2943,8 +2943,10 @@ export default function OptionsStrategyLab() {
     const span = Math.max(1, Math.round(dte / 30));
     const steps = [{ m: 0, label: "open", S: spot, pnl: 0, note: "you open the trade" }];
     let Sx = spot, closed = null;
+    // PAST DECEMBER, THE NEXT YEAR'S ROW (PR #50, TASK 0a) — the same month reading as `histBacktest()`.
+    const byYear = new Map((seas.matrix || [row]).map((x) => [+x[0], x]));
     for (let i = 1; i <= span; i++) {
-      const r = row[((NOW_MONTH + i - 1) % 12) + 1];
+      const r = monthReturn(byYear, +row[0], NOW_MONTH + i - 1);
       if (r == null) break;
       Sx = Sx * (1 + r / 100);
       const rem = Math.max(1, dte - i * 30);
