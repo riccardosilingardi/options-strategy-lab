@@ -152,7 +152,12 @@ test("MEASURED: the three screens, and the table in the PRD is this number", () 
      did not include a word of the card. Measured: 217 (110 typed + 107 generated, 5 sites), an upper bound that
      counts the filing dialog and the close confirm, which appear only after a tap. The owner's ≤ 120 is held on the
      RENDERED segment below. */
-  const CEILING = { find: 309, build: 244, positions: 217 };
+  /* >>> PR #48: +6 ON FIND AND ON BUILD, AND IT IS THE COUNTER SEEING, NOT THE SCREEN GROWING. <<< The badge printed
+     "CONFLUENT · +64 · conf 86" as JSX expressions the counter could not score (0 words); it is now `badgeText()`,
+     a registered generator, "CORN ↑ +64 · conf 86" (6). The real change is one word, the ticker the owner asked
+     for. Everything else PR #48 adds to these screens is behind a fold or an ⓘ ("Why this place", "How the numbers
+     fit") or offset; measured: find 309 → 315, build 244 → 250. */
+  const CEILING = { find: 315, build: 250, positions: 217 };
   /* >>> PR #46: ONE ORDERS LIST. <<< The record-based "WORKING AT THE BROKER" panel (its paragraph about what a
      working order is, the stale-DAY warning, the per-row sentences) left Positions; the one list lives in
      `orders.jsx`, which the counter now reads. Measured: positions 304 -> 209 (4 typed + 205 generated, 14 sites).

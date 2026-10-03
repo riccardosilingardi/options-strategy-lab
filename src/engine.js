@@ -94,15 +94,18 @@ export function rng(seed) {
  * `montecarlo()` in App.jsx used, moved here so the client and the server
  * cannot derive it two ways.
  *
- * @param monthlyMean  twelve monthly means in PERCENT, as `SEASONAL` holds them
+ * @param monthlyMean  twelve monthly means in PERCENT, as `statsFromMatrix()` returns them
  * @param month        the month the trade opens in, 0-11
  * @param dte          days to expiry
  * @returns the annualised drift as a fraction, or null when unreadable
  */
+/** How many calendar months a window of `dte` days spans — the ONE span the drift and `seasonalSignal()` read. */
+export const seasonalSpan = (dte) => Math.max(1, Math.round(dte / 30));
+
 export function seasonalDrift(monthlyMean, month, dte) {
   if (!Array.isArray(monthlyMean) || monthlyMean.length !== 12) return null;
   if (!Number.isFinite(month) || !Number.isFinite(dte) || dte <= 0) return null;
-  const span = Math.max(1, Math.round(dte / 30));
+  const span = seasonalSpan(dte);
   let mu = 0;
   for (let i = 0; i < span; i++) {
     const v = monthlyMean[(((month + i) % 12) + 12) % 12];
@@ -258,19 +261,19 @@ export function exitSim(pos, S, dteLeft, iv, vol, policy, n = 1500) {
   return { pTP: nTP / n, pSL: nSL / n, pTimePos: nPos / n, ev: sum / n, medDays: tds.length ? tds[(tds.length / 2) | 0] : null, horizon: days, exitDTE, sigma, sigmaSource };
 }
 
-export const SEASONAL = {
-  SOYB: [-0.5, -0.3, 0.2, 0.4, 0.5, 1.2, 1.8, 1.1, -0.6, -0.8, -0.4, -0.2], CORN: [-0.6, -0.4, 0.1, 0.3, 0.9, 1.5, 1.3, -0.9, -1.1, -0.5, -0.3, -0.2],
-  UNG: [2.1, 1.4, -1.8, -2.5, -1.2, -0.4, 0.3, 0.5, 0.8, 1.6, 2.4, 2.2], BOIL: [4.0, 2.6, -3.8, -5.2, -2.6, -1.0, 0.4, 0.8, 1.4, 3.0, 4.6, 4.2],
-  WEAT: [-0.3, 0.1, 0.8, 1.1, 0.9, -0.4, -0.8, -0.6, -0.4, -0.2, 0.0, -0.1], SPY: [0.9, 0.2, 0.8, 1.2, 0.6, 0.5, 1.3, 0.1, -0.7, 0.8, 1.6, 1.1],
-};
+/* `SEASONAL` — THE HAND-WRITTEN MONTHLY TABLE — IS RETIRED (PR #48, TASK 2; owner decision, 3 Oct 2026).
+   Measured against 195 months of Alpha Vantage data for CORN it had the wrong sign on 8 of 12 months (June +1.5
+   against a measured -3.46). The measured series (TIME_SERIES_MONTHLY_ADJUSTED via /api/av) is the only source now,
+   and until it has loaded for a market the season is "not read" (`seasonalProvenance()` / `seasonalSignal()` in
+   rules.js). `SIGMA` below stays: it is the volatility fallback and is out of this change. */
 
 export const SIGMA = { SOYB: 0.19, CORN: 0.22, UNG: 0.48, BOIL: 0.95, WEAT: 0.25, SPY: 0.16 };
 
 /* ============================================================================
    THE MEASURED SEASONAL SERIES — ONE PARSE, READ BY THE CLIENT AND THE SERVER.
 
-   `SEASONAL` above is hand-written and wrong on eight months of twelve for
-   CORN. The measured means that replace it arrive as an Alpha Vantage
+   The hand-written table that used to sit above was wrong on eight months of
+   twelve for CORN and is retired (PR #48). The measured means arrive as an Alpha Vantage
    `TIME_SERIES_MONTHLY_ADJUSTED` body, through `/api/av`, and the SAME body is
    what `netlify/functions/av.mjs` caches in the blob store. Two consumers read
    it: the client, which puts the means on screen and drifts every chance on
@@ -314,18 +317,30 @@ export function parseAvJson(j) {
 }
 
 /**
- * The matrix → twelve monthly means in PERCENT (the units `SEASONAL` is in and
- * `seasonalDrift()` expects), the annualised realised sigma of the same series,
- * and how many rows produced them.
+ * The matrix → twelve monthly means in PERCENT (the units `seasonalDrift()` expects), the annualised realised sigma
+ * of the same series, and how many rows produced them.
+ *
+ * AND, PER CALENDAR MONTH (PR #48, TASK 2): how many years carry that month (`monthN`) and the standard error of its
+ * mean (`monthSE`, in percent): that month's own sample standard deviation ÷ √n. A month with fewer than two years
+ * has no standard deviation, so its error is null — and `seasonalSignal()` never counts it. Noise is the point: on
+ * CORN a monthly volatility of ≈ 6.4% makes the mean of 16 Octobers uncertain by ≈ ±1.6%.
  */
 export function statsFromMatrix(matrix) {
   const all = [];
+  const monthN = Array(12).fill(0);
+  const monthSE = Array(12).fill(null);
   const monthlyMean = Array.from({ length: 12 }, (_, m) => {
     const xs = matrix.map((row) => row[m + 1]).filter((x) => x != null && !Number.isNaN(x));
     xs.forEach((x) => all.push(x / 100));
-    return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0;
+    monthN[m] = xs.length;
+    const mu = xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0;
+    if (xs.length >= 2) {
+      const sd = Math.sqrt(xs.reduce((a, b) => a + (b - mu) ** 2, 0) / (xs.length - 1));
+      monthSE[m] = sd / Math.sqrt(xs.length);
+    }
+    return mu;
   });
   const mean = all.reduce((a, b) => a + b, 0) / Math.max(1, all.length);
   const varr = all.reduce((a, b) => a + (b - mean) ** 2, 0) / Math.max(1, all.length - 1);
-  return { monthlyMean, sigma: Math.sqrt(varr * 12), years: matrix.length };
+  return { monthlyMean, monthN, monthSE, sigma: Math.sqrt(varr * 12), years: matrix.length };
 }

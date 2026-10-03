@@ -21,16 +21,16 @@
 // are decoration and carry no meaning that the text beside them does not.
 // ============================================================================
 import React from "react";
-import { T } from "./theme.js";
-import { Info } from "./ui.jsx";
-import { Btn } from "./pro.jsx";
+import { T, TYPE } from "./theme.js";
+import { Info, Btn, mono, sans } from "./ui.jsx";
 import { Fold, EvidenceOverlay } from "./steps.jsx";
 import { BandThumbnail } from "./visuals.jsx";
 import { payoffBands } from "./visuals.jsx";
 import { signedMoney$ } from "./positionView.js";
 
-const mono = { fontFamily: "ui-monospace, Menlo, monospace" };
-const sans = { fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, sans-serif" };
+// PR #48 SWEEP: the stacks, Btn and sizes are ui.jsx's and the type tokens. Mono only for numbers and the record's
+// ref; labels, headings and sentences are sans. RED IS FOR ERRORS: a loss is violet, not an error.
+const FS = TYPE.size, FW = TYPE.weight, LH = TYPE.line;
 
 // RED IS FOR ERRORS AND REFUSALS (PR #47, TASK 3): CLOSE is an action, so it takes the action tone.
 const toneOf = (action) => (action === "CLOSE" ? T.action : action === "WARNING" ? T.amber : action === "HOLD" ? T.green : T.dim);
@@ -42,7 +42,7 @@ export function ProgressLine({ line, tone = T.blue, reachedTone = T.amber }) {
   const color = line.state === "reached" ? reachedTone : line.state === "none" || line.state === "unknown" ? T.dim : tone;
   return (
     <div style={{ marginTop: 8 }}>
-      <div style={{ ...mono, fontSize: 13, color: line.state === "reached" ? reachedTone : T.ink, lineHeight: 1.4 }}>{line.text}</div>
+      <div style={{ ...sans, fontSize: FS.sm, color: line.state === "reached" ? reachedTone : T.ink, lineHeight: LH.body }}>{line.text}</div>
       <div aria-hidden="true" style={{ height: 6, background: T.line, borderRadius: 3, marginTop: 4, overflow: "hidden" }}>
         <div style={{ width: `${Math.round((line.frac || 0) * 100)}%`, height: 6, background: color }} />
       </div>
@@ -57,13 +57,13 @@ export function ProgressLine({ line, tone = T.blue, reachedTone = T.amber }) {
  */
 export function EntryVsNow({ ev, unitNote = null }) {
   if (!ev) return null;
-  const th = { ...mono, fontSize: 12, color: T.dim, fontWeight: 400, textAlign: "right", padding: "2px 0 4px 10px" };
-  const td = (c = T.ink) => ({ ...mono, fontSize: 14, fontWeight: 700, color: c, textAlign: "right", padding: "3px 0 3px 10px" });
-  const lab = { ...mono, fontSize: 12, color: T.dim, textAlign: "left", padding: "3px 0", fontWeight: 400 };
+  const th = { ...sans, fontSize: FS.xs, color: T.dim, fontWeight: FW.regular, textAlign: "right", padding: "2px 0 4px 10px" };
+  const td = (c = T.ink) => ({ ...mono, fontSize: FS.md, fontWeight: FW.bold, color: c, textAlign: "right", padding: "3px 0 3px 10px" });
+  const lab = { ...sans, fontSize: FS.xs, color: T.dim, textAlign: "left", padding: "3px 0", fontWeight: FW.regular };
   return (
     <div style={{ marginTop: 12 }}>
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
-        <caption style={{ ...mono, fontSize: 12, letterSpacing: "0.04em", color: T.amber, textAlign: "left", paddingBottom: 4 }}>AT ENTRY VS NOW</caption>
+        <caption style={{ ...sans, fontSize: FS.xs, letterSpacing: "0.04em", color: T.amber, textAlign: "left", paddingBottom: 4 }}>AT ENTRY VS NOW</caption>
         <thead>
           <tr><th scope="col" style={{ ...th, textAlign: "left" }}><span style={{ position: "absolute", left: -9999 }}>Figure</span></th>
             <th scope="col" style={th}>AT ENTRY</th><th scope="col" style={th}>NOW</th></tr>
@@ -77,7 +77,7 @@ export function EntryVsNow({ ev, unitNote = null }) {
           ))}
         </tbody>
       </table>
-      {unitNote && <div style={{ ...sans, fontSize: 12, color: T.mut, lineHeight: 1.5, marginTop: 4 }}>{unitNote}</div>}
+      {unitNote && <div style={{ ...sans, fontSize: FS.xs, color: T.mut, lineHeight: LH.body, marginTop: 4 }}>{unitNote}</div>}
     </div>
   );
 }
@@ -99,26 +99,26 @@ export function PositionCard({
     <article aria-label={`${p.ref || p.ticker} ${title}`} data-position={p.id}
       style={{ padding: "12px 14px", background: T.bg, border: `1px solid ${T.field}`, borderRadius: 8 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: "2px 12px" }}>
-        <div style={{ ...mono, fontSize: 24, fontWeight: 800, color: tone, letterSpacing: 0.5, lineHeight: 1.15 }}>
+        <div style={{ ...sans, fontSize: FS.xl, fontWeight: FW.bold, color: tone, letterSpacing: 0.5, lineHeight: 1.15 }}>
           {action || "NO ACTION"}
           {/* HOLD SAYS IT ALL AT REST (PR #47, TASK 3): its "nothing to do" sentence is one tap away. */}
           {action === "HOLD" && line ? <Info label="hold">{line}</Info> : null}
         </div>
-        <h3 style={{ ...sans, fontSize: 14, fontWeight: 700, color: T.ink, margin: 0 }}>
-          {p.ref && <span style={{ ...mono, fontSize: 12, color: T.dim, fontWeight: 400, marginRight: 6 }}>{p.ref}</span>}
+        <h3 style={{ ...sans, fontSize: FS.md, fontWeight: FW.bold, color: T.ink, margin: 0 }}>
+          {p.ref && <span style={{ ...mono, fontSize: FS.xs, color: T.dim, fontWeight: FW.regular, marginRight: 6 }}>{p.ref}</span>}
           <span style={mono}>{p.ticker}</span> · {title}
         </h3>
       </div>
       <div style={{ display: "flex", alignItems: "baseline", flexWrap: "wrap", gap: "0 10px", marginTop: 4 }}>
         <span aria-label={pnlKnown ? `profit now ${signedMoney$(pnl)}` : "profit now not known"}
-          style={{ ...mono, fontSize: 26, fontWeight: 800, color: !pnlKnown ? T.dim : Number(pnl) >= 0 ? T.green : T.red }}>
+          style={{ ...mono, fontSize: FS.xl, fontWeight: FW.bold, color: !pnlKnown ? T.dim : Number(pnl) >= 0 ? T.green : T.violet }}>
           {signedMoney$(pnl)}
         </span>
-        <span style={{ ...mono, fontSize: 13, color: T.mut }}>{shareText || (pnlKnown ? "" : "no price right now")}</span>
+        <span style={{ ...mono, fontSize: FS.sm, color: T.mut }}>{shareText || (pnlKnown ? "" : "no price right now")}</span>
       </div>
-      {action !== "HOLD" && <div style={{ ...sans, fontSize: 14, color: T.ink, lineHeight: 1.45, marginTop: 4 }}>{line}</div>}
+      {action !== "HOLD" && <div style={{ ...sans, fontSize: FS.md, color: T.ink, lineHeight: LH.body, marginTop: 4 }}>{line}</div>}
       {notes.map((n, i) => (
-        <div key={i} style={{ ...sans, fontSize: 12.5, color: T.amber, marginTop: 4, lineHeight: 1.5 }}>⚠ {n}</div>
+        <div key={i} style={{ ...sans, fontSize: FS.sm, color: T.amber, marginTop: 4, lineHeight: LH.body }}>⚠ {n}</div>
       ))}
       <ProgressLine line={progress.time} />
       <ProgressLine line={progress.takeProfit} tone={T.green} reachedTone={T.green} />
@@ -148,8 +148,8 @@ export function PositionCard({
 
 const Row = ({ k, children }) => (
   <div style={{ display: "flex", gap: 10, flexWrap: "wrap", padding: "6px 0", borderBottom: `1px solid ${T.line}` }}>
-    <div style={{ ...mono, fontSize: 12, color: T.dim, width: 110, flexShrink: 0 }}>{k}</div>
-    <div style={{ flex: 1, minWidth: 150, ...mono, fontSize: 13, color: T.ink, lineHeight: 1.5 }}>{children}</div>
+    <div style={{ ...sans, fontSize: FS.xs, color: T.dim, width: 110, flexShrink: 0 }}>{k}</div>
+    <div style={{ flex: 1, minWidth: 150, ...mono, fontSize: FS.sm, color: T.ink, lineHeight: LH.body }}>{children}</div>
   </div>
 );
 
@@ -166,39 +166,39 @@ export function PositionDetails({
   const bands = payoffBands({ legs: p.legs, entryNet: p.entryNet, spot: spotNow ?? p.entrySpot });
   return (
     <EvidenceOverlay eyebrow="DETAILS" title={`${p.ref ? `${p.ref} · ` : ""}${p.ticker} · ${title}`} onClose={onClose}>
-      {stageNote && <div style={{ ...sans, fontSize: 13, color: T.amber, lineHeight: 1.5, marginBottom: 8 }}>⚠ {stageNote}</div>}
+      {stageNote && <div style={{ ...sans, fontSize: FS.sm, color: T.amber, lineHeight: LH.body, marginBottom: 8 }}>⚠ {stageNote}</div>}
       <Row k="LEGS">{legsText}</Row>
       <Row k="EXPIRES">{expiresText}</Row>
       <Row k="OPENED">{openedText}</Row>
       <Row k="ENTRY PRICE">{entryText}</Row>
-      {fillSentence && <div style={{ ...sans, fontSize: 13, color: T.mut, lineHeight: 1.5, marginTop: 6 }}>{fillSentence}</div>}
+      {fillSentence && <div style={{ ...sans, fontSize: FS.sm, color: T.mut, lineHeight: LH.body, marginTop: 6 }}>{fillSentence}</div>}
       <Row k="PROFIT NOW">
-        <span style={{ fontWeight: 800, color: pnl == null ? T.dim : Number(pnl) >= 0 ? T.green : T.red }}>{signedMoney$(pnl)}</span>
+        <span style={{ fontWeight: FW.bold, color: pnl == null ? T.dim : Number(pnl) >= 0 ? T.green : T.violet }}>{signedMoney$(pnl)}</span>
         {shareText ? ` · ${shareText}` : ""}
       </Row>
-      {pnlNote && <div style={{ ...sans, fontSize: 12.5, color: T.dim, lineHeight: 1.5, marginTop: 4 }}>{pnlNote}</div>}
-      {edgeNote && <div style={{ ...sans, fontSize: 12.5, color: T.amber, lineHeight: 1.5, marginTop: 4 }}>⚠ {edgeNote}</div>}
+      {pnlNote && <div style={{ ...sans, fontSize: FS.sm, color: T.dim, lineHeight: LH.body, marginTop: 4 }}>{pnlNote}</div>}
+      {edgeNote && <div style={{ ...sans, fontSize: FS.sm, color: T.amber, lineHeight: LH.body, marginTop: 4 }}>⚠ {edgeNote}</div>}
       <EntryVsNow ev={ev} unitNote={unitNote} />
       <div style={{ marginTop: 14 }}>
-        <div style={{ ...mono, fontSize: 12, letterSpacing: "0.04em", color: T.amber }}>WHERE IT MAKES AND LOSES MONEY</div>
+        <div style={{ ...sans, fontSize: FS.xs, letterSpacing: "0.04em", color: T.amber }}>WHERE IT MAKES AND LOSES MONEY</div>
         <div style={{ marginTop: 6 }}>
           <BandThumbnail bands={bands} bars={bars} spot={spotNow ?? undefined} entrySpot={p.entrySpot ?? null} width={320} height={120}
             title={`Payoff zones. The price now ${spotNow != null ? `$${Number(spotNow).toFixed(2)}` : "is not known"}${p.entrySpot != null ? `, at entry $${Number(p.entrySpot).toFixed(2)}` : ""}.`} />
         </div>
-        <div style={{ ...mono, fontSize: 12, color: T.mut, marginTop: 4 }}>
+        <div style={{ ...mono, fontSize: FS.xs, color: T.mut, marginTop: 4 }}>
           now {spotNow != null ? `$${Number(spotNow).toFixed(2)}` : "—"} · at entry {p.entrySpot != null ? `$${Number(p.entrySpot).toFixed(2)}` : "—"}
         </div>
       </div>
       <div style={{ marginTop: 14 }}>
-        <div style={{ ...mono, fontSize: 12, letterSpacing: "0.04em", color: T.amber }}>THE EXIT PLAN</div>
-        <div style={{ ...sans, fontSize: 14, fontWeight: 700, color: T.ink, lineHeight: 1.45, marginTop: 4 }}>{planSentence}</div>
-        <div style={{ ...sans, fontSize: 13, color: T.mut, lineHeight: 1.5, marginTop: 4 }}>{planDetail}</div>
+        <div style={{ ...sans, fontSize: FS.xs, letterSpacing: "0.04em", color: T.amber }}>THE EXIT PLAN</div>
+        <div style={{ ...sans, fontSize: FS.md, fontWeight: FW.bold, color: T.ink, lineHeight: LH.body, marginTop: 4 }}>{planSentence}</div>
+        <div style={{ ...sans, fontSize: FS.sm, color: T.mut, lineHeight: LH.body, marginTop: 4 }}>{planDetail}</div>
       </div>
       {timeline.length > 0 && (
         <div style={{ marginTop: 14 }}>
-          <div style={{ ...mono, fontSize: 12, letterSpacing: "0.04em", color: T.amber }}>TIMELINE · {timeline.length}</div>
+          <div style={{ ...sans, fontSize: FS.xs, letterSpacing: "0.04em", color: T.amber }}>TIMELINE · {timeline.length}</div>
           {timeline.map((x, i) => (
-            <div key={x.seq || i} style={{ ...mono, fontSize: 12, color: T.mut, lineHeight: 1.5, marginTop: 4 }}>
+            <div key={x.seq || i} style={{ ...sans, fontSize: FS.xs, color: T.mut, lineHeight: LH.body, marginTop: 4 }}>
               <span style={{ color: T.blue }}>{x.seq || `${p.ref || ""}·??`}</span>
               <span style={{ color: T.dim }}>{` ${new Date(x.t).toLocaleDateString("en-GB")} · `}</span>
               {x.text}
@@ -208,12 +208,12 @@ export function PositionDetails({
       )}
       <div style={{ marginTop: 18, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 4 }}>
         <button onClick={onAnalyse}
-          style={{ ...sans, fontSize: 14, color: T.blue, background: "transparent", border: "none", padding: "10px 0", minHeight: 44,
+          style={{ ...sans, fontSize: FS.md, color: T.blue, background: "transparent", border: "none", padding: "10px 0", minHeight: 44,
             cursor: "pointer", textDecoration: "underline" }}>Analyse as a new trade</button>
-        <div style={{ ...sans, fontSize: 12.5, color: T.mut }}>Build prices it at today's market. A Send there would open a second position.</div>
+        <div style={{ ...sans, fontSize: FS.sm, color: T.mut }}>Build prices it at today's market. A Send there would open a second position.</div>
         {fileKind === "unknown" && (
           <button onClick={onFile}
-            style={{ ...sans, fontSize: 13, color: T.mut, background: "transparent", border: "none", padding: "10px 0", minHeight: 44,
+            style={{ ...sans, fontSize: FS.sm, color: T.mut, background: "transparent", border: "none", padding: "10px 0", minHeight: 44,
               cursor: "pointer", textDecoration: "underline" }}>Closed it elsewhere? File it</button>
         )}
       </div>

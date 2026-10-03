@@ -13,7 +13,7 @@
 // ============================================================================
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { CandidateCard, MatchList, RequestControls, MissLine, CardGrid } from "./card.jsx";
+import { CandidateCard, MatchList, RequestControls, MissLine, CardGrid, SignalBadge, badgeText, NumbersFit, MarketPicker, ResultsFilter } from "./card.jsx";
 import { readFileSync } from "node:fs";
 import { requestOf, RULES, fillNet, comboBook, openLimitPrice, rewardRisk, onTick, sizeLine, candidateFlags,
   sizedFigures, directionTag, controlReadings } from "./rules.js";
@@ -47,7 +47,7 @@ const PIC = { bands: BANDS, legs: LEGS, entryNet: 0.8, spot: 28.6, bars: [], dte
 
 check("ZERO PROSE — no text node on a card runs past six words", () => {
   const html = renderToStaticMarkup(
-    <CandidateCard name="Bull Call Spread" legs="+1 28C / −1 30C" direction="↑ bull · season"
+    <CandidateCard name="Bull Call Spread" legs="+1 28C / −1 30C" direction="↑ bull · signals"
       rr={1.5} pop={0.62} figures={sizedFigures(A80, 3)} sizeText={sizeLine({ ok: true, n: 3, risk: 80 })} picture={PIC} />);
   // The size line is the third long thing: "3 contracts × $80 at risk each" is the owner's own line, and it is a
   // product written out — labels and numbers, not a sentence (PR #45).
@@ -125,14 +125,15 @@ check("THE PICTURE ROW IS THE GAUGE BESIDE THE UNIFIED PICTURE, AND THE BAND THU
   if (bare.includes("Open the full picture")) throw new Error("an empty picture frame");
 });
 
-check("A MARKET'S SEASON IS NAMED ON ITS CARD, ONLY WHEN THE SEASON CHOSE (PR #45, TASK 1)", () => {
-  const SENT = [{ id: "bull", label: "Bull", icon: "↑" }, { id: "verybear", label: "Very Bear", icon: "↓↓" }];
-  if (directionTag("bull", SENT) !== "↑ bull · season") throw new Error(directionTag("bull", SENT));
-  if (directionTag("verybear", SENT) !== "↓↓ very bear · season") throw new Error(directionTag("verybear", SENT));
+check("A CARD SAYS WHICH FAMILY IT CAME FROM UNDER 'SIGNALS DECIDE' (PR #48, TASK 3)", () => {
+  const SENT = [{ id: "bull", label: "Bull", icon: "↑" }, { id: "bear", label: "Bear", icon: "↓" }, { id: "neutral", label: "Neutral", icon: "→" }];
+  if (directionTag("bull", SENT) !== "↑ bull · signals") throw new Error(directionTag("bull", SENT));
+  if (directionTag("bear", SENT) !== "↓ bear · signals") throw new Error(directionTag("bear", SENT));
+  if (directionTag("neutral", SENT) !== "→ neutral") throw new Error(directionTag("neutral", SENT));
   if (directionTag("sideways", SENT) !== null) throw new Error("an unknown direction was named");
-  has(renderToStaticMarkup(<CandidateCard name="X" legs="x" rr={1} pop={0.5} figures={sizedFigures(A80, 1)} direction="↑ bull · season" />), "↑ bull · season");
-  if (renderToStaticMarkup(<CandidateCard name="X" legs="x" rr={1} pop={0.5} figures={sizedFigures(A80, 1)} />).includes("season")) {
-    throw new Error("a card the owner chose the direction for says the season did");
+  has(renderToStaticMarkup(<CandidateCard name="X" legs="x" rr={1} pop={0.5} figures={sizedFigures(A80, 1)} direction="↑ bull · signals" />), "↑ bull · signals");
+  if (renderToStaticMarkup(<CandidateCard name="X" legs="x" rr={1} pop={0.5} figures={sizedFigures(A80, 1)} />).includes("signals")) {
+    throw new Error("a card the owner chose the direction for says the signals did");
   }
 });
 
@@ -217,7 +218,7 @@ check("THE CONTROLS BLOCK IS ONE REQUEST, AND ITS EXPLANATION FOLDS", () => {
       sentiments={SENTS} direction="bull" ticker="SOYB" spot={27.5}
       universe={["SOYB", "GLD"]} markets={["SOYB"]} onMarkets={() => {}}
       horizon={45} onHorizon={() => {}} />);
-  for (const k of ["MARKETS · 1 OF 2", "DIRECTION", "Season decides", "TARGET PRICE", "SIZE BY",
+  for (const k of ["MARKETS · 1 OF 2", "DIRECTION", "Signals decide", "TARGET PRICE", "SIZE BY",
     "Most I will risk", "Chance at least", "Return on risk at least", "Horizon"]) has(html, k);
   has(html, "$28.60");            // the direction read as a price, with one market and one direction
   if (html.includes("Search")) throw new Error("there is no Search button: the list re-filters live");
@@ -296,6 +297,36 @@ check("WHAT THE GUIDED DOOR DROPPED IS A VISIBLE STATE ON THE CARD (PR #40)", ()
   for (const id of ["single", "conflict", "confidence"]) if (!ids.includes(id)) throw new Error(`${id} not flagged`);
   const html = renderToStaticMarkup(<CandidateCard name="X" legs="+1 28C" rr={1} pop={0.5} figures={sizedFigures(A80, 1)} flags={flags} />);
   has(html, "single option"); has(html, "CONFLICT"); has(html, `confidence under ${RULES.lowConfidence}`);
+});
+
+check("THE BADGE READS '<TK> ↑ +64 · conf 86'; reading reads '<TK> reading…' (PR #48)", () => {
+  const corn = { ticker: "CORN", score: 64, confidence: 86, agreement: "CONFLUENT" };
+  if (badgeText(corn) !== "CORN ↑ +64 · conf 86") throw new Error(badgeText(corn));
+  if (badgeText({ ...corn, score: -20, agreement: "MIXED" }) !== "CORN ↓ -20 · conf 86") throw new Error("down");
+  if (badgeText({ ...corn, agreement: "CONFLICT" }) !== "CORN ● +64 · conf 86") throw new Error("conflict");
+  has(renderToStaticMarkup(<SignalBadge fused={corn} />), "CORN ↑ +64 · conf 86");
+  has(renderToStaticMarkup(<SignalBadge fused={null} ticker="XLE" state={{ reading: true, waiting: ["news"], failed: [] }} />), "XLE reading…");
+});
+
+check("WHY THIS PLACE sits in the card's fold, and the ⓘ 'How the numbers fit' is one tap (PR #48)", () => {
+  const html = renderToStaticMarkup(<CandidateCard name="X" legs="x" rr={1} pop={0.5} figures={sizedFigures(A80, 2)} place="expected value −12.0 per $100 + signal +27.5 = 15.5" />);
+  if (html.includes("Why this place")) throw new Error("a closed fold printed its line");
+  has(html, "figures ▼");
+  const info = renderToStaticMarkup(<NumbersFit order="ev" />);
+  has(info, 'aria-label="About how the numbers fit"'); has(info, 'aria-expanded="false"');
+  has(renderToStaticMarkup(<CandidateCard name="X" legs="x" rr={1} pop={0.5} basis="prices only" figures={sizedFigures(A80, 2)} />), "chance: prices only");
+});
+
+check("FIND BY CATEGORY: groups with 'N of M · all / none', and 'All N · Grains n · Energy n · Metals n' (PR #48)", () => {
+  const html = renderToStaticMarkup(<MarketPicker universe={["CORN", "SOYB", "WEAT", "UNG", "GLD"]} markets={["CORN", "UNG"]} onMarkets={() => {}} />);
+  has(html, "MARKETS · 2 OF 5"); has(html, "Grains"); has(html, "1 of 3 ·"); has(html, ">all<"); has(html, ">none<");
+  has(html, "Energy"); has(html, "Metals"); has(html, "0 of 1 ·");
+  const counts = [{ id: "Grains", n: 3, tickers: [{ tk: "CORN", n: 3 }, { tk: "SOYB", n: 0 }] }, { id: "Energy", n: 2, tickers: [{ tk: "UNG", n: 2 }] }];
+  const rf = renderToStaticMarkup(<ResultsFilter counts={counts} total={5} cat={null} />);
+  has(rf, "All 5"); has(rf, "Grains 3"); has(rf, "Energy 2");
+  if (rf.includes("CORN")) throw new Error("a closed category showed its tickers");
+  const open = renderToStaticMarkup(<ResultsFilter counts={counts} total={5} cat="Grains" statusOf={(tk) => (tk === "SOYB" ? "loading" : null)} />);
+  has(open, "CORN</span> 3"); has(open, "SOYB</span> loading");
 });
 
 console.log(`\n${ok.length} passed, ${bad.length} failed\n`);

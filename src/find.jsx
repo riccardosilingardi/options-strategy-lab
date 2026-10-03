@@ -20,8 +20,10 @@
 // ============================================================================
 import React, { useCallback, useMemo } from "react";
 import { T, TYPE } from "./theme.js";
-import { mono, sans, Btn, Panel, Label, Stat, Note, Fold, CheckField } from "./ui.jsx";
-import { RequestControls, MatchList, CandidateCard, CompareTray } from "./card.jsx";
+import { mono, sans, Btn, Chip, Panel, Label, Stat, Note, Fold, CheckField } from "./ui.jsx";
+import { FIND_ORDERS, DEFAULT_FIND_ORDER } from "./signals.js";
+import { RequestControls, MatchList, CandidateCard, CompareTray, ResultsFilter, NumbersFit } from "./card.jsx";
+import { categoryCounts } from "./markets.js";
 import { StepForward } from "./steps.jsx";
 import { CompareFigure } from "./visuals.jsx";
 import { scaleStrategy } from "./pro.jsx";
@@ -30,7 +32,7 @@ import { money, chanceText, NO_CEILING, noCeilingNote, noCeilingRankNote, season
   filterFold, qualityFloorLine, qualityFloorSentence, liquiditySettingNote, looseningWarning, isLoosened,
   unpriceableNote, impossibleLossNote, modelDisagreementNote, wideSpreadNote, wideComboNote, crossingNote,
   liquiditySkippedNote, spreadSkippedNote, comboSpreadSkippedNote, horizonFloorNote, perTradeCapLabel,
-  nothingTodayLine, staleBoardLine, stopSigns, sizedFree, sizedFigures, sizeLine, controlReadings, directionTag,
+  nothingTodayLine, staleBoardLine, stopSigns, sizedFree, sizedFigures, sizeLine, controlReadings, directionTag, chanceBasisLabel,
 } from "./rules.js";
 
 const FS = TYPE.size, FW = TYPE.weight, LH = TYPE.line;
@@ -40,7 +42,7 @@ const NO_BARS = [];
 export function FindStep({
   request, onRequest, sentiments, universe, find, setFind, spot,
   limits, onLimit, freeSizing,
-  findGen, findShown, flaggedHidden, barsCache, badgeOf, actionsOf, onMore = null,
+  findGen, findShown, signalLines = [], findOrder = DEFAULT_FIND_ORDER, onFindOrder = null, flaggedHidden, barsCache, badgeOf, actionsOf, onMore = null,
   liqLevel, foldedNode,
   compare, showCompare, compareNote, onTickCompare, onClearCompare, onToggleCompare, onTakeToBuild,
   forward,
@@ -69,12 +71,13 @@ export function FindStep({
     return (
       <CandidateCard key={x.key} cardKey={x.key}
         name={`${x.tk} · ${x.name}`} legs={`${legsLine(x.legs)} · ${x.expKey}`}
-        direction={find.dir === "season" ? directionTag(x.sent, sentiments) : null}
+        direction={find.dir === "signals" ? directionTag(x.sent, sentiments) : null}
         misses={misses} signs={signs}
         figures={sizedFigures(af, n)} sizeText={size && size.ok ? sizeLine(size) : null}
-        rr={x.lf.rr} pop={x.lf.pop}
+        rr={x.lf.rr} pop={x.lf.pop} basis={mc ? chanceBasisLabel(mc) : null}
         picture={x.lf.bands ? { bands: x.lf.bands, legs: x.legs, entryNet: af.entry, spot: x.spot, bars: barsCache[x.tk] || NO_BARS,
           dte: x.dte, sigma: mc ? mc.sigma : undefined, driftAnnual: mc ? mc.driftAnnual : undefined, ticker: x.tk } : null}
+        place={{ item: x, order: findOrder }}
         badge={badgeOf(x)} actions={actionsOf(x)}
         more={onMore ? { tk: x.tk, onOpen: () => onMore(x) } : null} />
     );
@@ -102,25 +105,29 @@ export function FindStep({
         ticker={find.market} spot={spot}
         limits={limits} onLimit={onLimit} />
 
-      {/* THE SHORTLIST IS A FILTER NOW: one market, or all of them. Each chip carries its count, so a market with
-          nothing is a number rather than a missing row. */}
-      <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap", alignItems: "center" }}>
-        <Btn small ghost={!!find.market} onClick={() => setFind((f) => ({ ...f, market: null }))}>All {findGen.items.length}</Btn>
-        {find.markets.map((tk) => {
-          const n = findGen.items.filter((x) => x.tk === tk).length;
-          const why = findGen.failed.some((x) => x.tk === tk) ? "failed" : findGen.loading.includes(tk) ? "loading"
-            : findGen.noBoard.includes(tk) ? "no board" : String(n);
-          return (
-            <Btn key={tk} small ghost={find.market !== tk} color={n ? T.amber : T.dim}
-              onClick={() => setFind((f) => ({ ...f, market: f.market === tk ? null : tk }))}>
-              <span style={mono}>{tk}</span> {why}
-            </Btn>
-          );
-        })}
+      {/* THE RESULTS FILTER, BY CATEGORY (PR #48): "All N · Grains n · Energy n · Metals n"; a category opens its
+          tickers' counts, and a ticker is the one-market filter the Shortlist was. */}
+      <ResultsFilter counts={categoryCounts(findGen.items, find.markets)} total={findGen.items.length}
+        cat={find.cat || null} market={find.market}
+        statusOf={(tk) => (findGen.failed.some((x) => x.tk === tk) ? "failed" : findGen.loading.includes(tk) ? "loading"
+          : findGen.noBoard.includes(tk) ? "no board" : null)}
+        onCat={(c) => setFind((f) => ({ ...f, cat: c, market: null }))}
+        onMarket={(tk) => setFind((f) => ({ ...f, market: tk }))} />
+      {/* ORDER BY (PR #48, TASK 4): Expected value (default) · Expected value + signal · Chance · Return on risk. */}
+      <div role="group" aria-label="Order by" style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
+        <Note color={T.dim}>ORDER BY</Note>
+        {FIND_ORDERS.map((o) => (
+          <Chip key={o.id} on={findOrder === o.id} color={T.blue} onClick={() => onFindOrder && onFindOrder(o.id)}>{o.label}</Chip>
+        ))}
+      </div>
+      <div style={{ display: "flex", gap: 6, marginTop: 4, flexWrap: "wrap", alignItems: "center" }}>
         <CheckField checked={find.flagged} onChange={(e) => setFind((f) => ({ ...f, flagged: e.target.checked }))}>
           show flagged{flaggedHidden ? ` (${flaggedHidden} hidden)` : ""}
         </CheckField>
       </div>
+
+      {/* SIGNALS THAT LANDED AND ADDED A FAMILY, one line each (PR #48, TASK 3). */}
+      {signalLines.length > 0 && <Note color={T.blue} role="status" style={{ marginTop: 8 }}>{signalLines.join(" · ")}</Note>}
 
       {/* A STALE BOARD IS SAID ONCE, HERE, ABOVE THE LIST (PR #41, TASK 2) — never repeated per card. A card carries
           its own label only when a broken pair touches its own strikes. */}
@@ -137,7 +144,8 @@ export function FindStep({
       )}
 
       {findShown.length > 0 && (
-        <MatchList items={cands} request={request} sizeOf={sizeOf} priceNote renderItem={renderItem} style={{ marginTop: 6 }} />
+        <MatchList items={cands} request={request} sizeOf={sizeOf} priceNote renderItem={renderItem} style={{ marginTop: 6 }}
+          aside={<NumbersFit order={findOrder} />} />
       )}
 
       {/* EVERYTHING THAT EXPLAINS THE LIST, BEHIND ONE "why". Nothing in it is cut: the floor counts and their own
@@ -156,9 +164,8 @@ export function FindStep({
         {findGen.comboSpreadSkipped.length > 0 && <Note color={T.dim} style={{ marginTop: 6 }}>{comboSpreadSkippedNote(`the feed for ${findGen.comboSpreadSkipped.join(", ")}`)}</Note>}
         {findGen.noBoard.length > 0 && <Note style={{ marginTop: 6 }}>{`No expiry on ${findGen.noBoard.join(", ")} is far enough out to open on, so nothing was built there. ${horizonFloorNote()}.`}</Note>}
         {unb > 0 && <Note color={T.dim} style={{ marginTop: 6 }}>{noCeilingRankNote(unb)}</Note>}
-        <Note color={T.dim} style={{ marginTop: 6 }}>
-          Candidates marked CONFLICT sit at the bottom by construction: the four factors contradict each other on that underlying, and no expected value is worth a signal we cannot read.
-        </Note>
+        {/* CONFLICT IS LAST ONLY UNDER "EXPECTED VALUE + SIGNAL" (PR #48): the sentence that said "always" was wrong. */}
+        <Note color={T.dim} style={{ marginTop: 6 }}>Under Expected value + signal, CONFLICT markets sort last.</Note>
         <Note color={isLoosened(liqLevel) ? T.red : T.dim} style={{ marginTop: 6 }}>
           {liquiditySettingNote(liqLevel, { ...t, kept: findGen.items.length })}
         </Note>

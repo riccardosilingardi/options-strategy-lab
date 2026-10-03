@@ -6,66 +6,89 @@ The full history of every item shipped so far (P0–P10, P2-bis) is in `docs/his
 Every pull request updates this file: the session that ships an item marks it done and states
 what the next one inherits.
 
-## Done in this pull request — PR #47, Positions | Orders, the account strip, one bottom bar
+## Done in this pull request — PR #48, one market registry, measured season, Signals decide, Order by, the sweep
 
-**Task 0 — debts measured on the owner's phone (2 Oct, 22:08).**
-- **0a** One answer to "is this order mine": `recordForOrder()` in journal.js (opening order or close, `closeOrder.id`
-  kept current by `onReplaced`). `orderReconciliation()` uses it, so J-0001's replaced close is no longer "not sent from
-  this browser". Tested on a J-0001-shaped record whose close was replaced.
-- **0b** The size sentence states what Alpaca holds, per leg: `sizeWords()` from `positionSize().brokerQty` — "9 puts",
-  "25 call spreads" (was "1 contract" and "5 contracts").
-- **0c** `analyze()` adds the payoff at S = 0 to its extremes (`payoffAtZero()`); `exactExtremes()` reads every kink.
-  `+1 94P` at 5.00, spot 90: $2,600 → $8,900. Stored records keep their figures; the card reads `withExactMaxProfit()`
-  and the timeline says "Maximum profit corrected" once (`maxProfitNoted`). J-0001: PROFIT at entry $37,800 → $80,100,
-  RETURN ON RISK 840% → 1,780%. The importer's own grid (where $37,800 came from) reads `exactExtremes()` too.
-  What else moves: on the 31 Find fixtures only the 3 "Long Put ATM" cards (SPY $2,606 → $9,606; UNG $299 → $1,226 and
-  $252 → $1,179) — their return on risk, their size in "profit I am aiming for" mode and their rank where it reads the
-  reward floor or the crossing floor; the other 28 are identical. `figures.test.jsx` holds ten families to the exact extremes.
-- **0d** `GET /v2/clock` (proxy allowlist) read at each sync; `marketClockLine()` in `src/clock.js`: "Market closed ·
-  opens Mon 15:30 your time" on every order row, the card's working-close line, the close confirm, Modify and Build's
-  confirm ("· queued" where an order is being sent).
-- **0e** Positions counts holdings (records + Alpaca holdings with no record), never Alpaca's legs.
-- **0f** A position whose close is working leaves "need a decision" and counts as "1 close working" (`attentionCount()`
-  → `closesWorking`), on Home, the desk line and the bar's badge.
-- Fixed first (standing rule): `demo.test.js` failed from 3 Oct on the calendar (the condor's market became CORN); the
-  test's clock is pinned, the function is unchanged.
+**Task 0 — the debts #47 left.**
+- **0a** A record whose order was replaced from Alpaca's own screen now follows it: `adoptReplacement()` in journal.js
+  is the one update (Modify's `onReplaced` calls it too). The sync reads it off the open-order list (`replaces`, no
+  extra call); the recheck follows `replaced_by`. The timeline says so once. Tested on a J-0001-shaped close.
+- **0b** Positions' "at entry vs now" reads `CARD_LABELS` in the card's order (YOU RISK, MAX PROFIT, CHANCE, RETURN ON
+  RISK); `FIGURE_LABELS` is gone and `positionView.test.js` holds the two equal.
 
-**Task 1 — Positions | Orders.** The orders list at the top of Positions and the row inline on the card are gone; the
-order prints once, in Orders (`OrdersPanel` in orders.jsx), with Modify / Cancel / History and "Cancel all" at the bottom.
-A card whose close is working shows "Close working at $7.62 · 0 of 9 · <clock line>" and "Manage order" (opens and
-focuses that row); its disabled close button is gone. History is in the owner's time ("2 Oct 22:08:06"), the id last.
-The Alpaca panel is dissolved: a holding with a record is its card; one with none is "Not in the app · Import"
-(`UnrecordedCard`, which keeps the panel's close at a limit, order path 3, unchanged); an order with none is tagged
-"sent outside this app" (the reconciliation sentence behind its ⓘ). Sync is the refresh icon on the segment bar.
+**Task 1 — one market registry.** `src/markets.js` (plain JS): one row per market — ticker, name, category, step,
+proposable, weather (applies, or why not), newsQ, the iv/sigma fallback references. `BASKET`, `getU()`, the weather rule
+in `factorsOf()`, `basket.js`, the demo's seed list and the copilot's market list derive from it. Categories: Grains
+(CORN, SOYB, WEAT), Energy (UNG, BOIL, USO, XLE), Metals (GLD, SLV, GDX). Find's markets control is grouped ("2 of 3 ·
+all / none"); the results filter reads "All N · Grains n · Energy n · Metals n" and a category opens its tickers'
+counts. `markets.test.js` adds a dummy row through `buildRegistry()` and checks every derivation sees it and the UI
+never does.
 
-**Task 2 — the account strip.** EQUITY, OPTIONS BUYING POWER (or BUYING POWER when Alpaca sends no options figure,
-and the label says which — alpaca-py 0.44.0 `TradeAccount.options_buying_power`, read from its source), AT RISK "$X of
-$Y" from the gate's own `limits.openRisk` / `limits.total` ("no limit applied" under free sizing). Each has a ⓘ
-(sourced in a code comment) and says the limits come from the capital set in Settings, not from equity. Integrations
-moved to Settings → Connections.
+**Task 2 — the season, measured only.** `SEASONAL` is retired. `statsFromMatrix()` returns per month the years and the
+standard error. `seasonalSignal(stats, month, dte)` in rules.js is the one home: a month counts at |mean| ≥
+`RULES.seasonalSignalT` (2) × its standard error; the window mean averages the counted months over the whole span.
+Readers: the season factor (direction and strength from the counted mean, today's ×40 formula; the ±0.8% band is
+gone), the chance's drift (counted mean × 12 / 100), the position thesis, `autopilot.mjs`, the desk's confluence line.
+Fused results are keyed by (market, days held): Find on each board, Build on the trade, Positions on days left
+(`season.test.jsx` holds one answer per market and expiry). Before the series loads the season is "not read": the factor
+is excluded with that reason and the chance drifts at zero, labelled "prices only". The Why sheet has a season row
+("Jun −3.5% ± 1.6% (16 yrs) · counts"); every card says "chance: prices + season" or "chance: prices only".
+Measured on avFixture series (`node scripts/measure-season.mjs`; the live series is not reachable from the sandbox):
+markets with no season built in had 0–2 months of 12 count (8 false positives in 132 tests, ≈ 6%, about what a 2-σ rule
+gives on ~10 years); the season factor is zero for 8 of 11 markets for October's 45-day window; drifting the 31 fixture
+cards on the counted months instead of every month's mean moves their chance by a median 3.3 points (largest 7.5).
 
-**Task 3 — less text, measured** (rendered on J-0001 fixtures, `scripts/surfaces.jsx`, budgets in voice.test.js):
+**Task 3 — Signals decide.** `signalDirection()` in signals.js: s = score × confidence / 100; Bull at s ≥
+`RULES.directionSignalMin` (12.5), Bear at s ≤ −12.5, CONFLICT always Neutral, never "Very". A market shows its
+suggested family plus the Neutral family (Neutral only while reading or when the suggestion is Neutral); each card is
+tagged "↑ bull · signals" or "→ neutral"; when signals land: "CORN: signals in, Bull cards added". `suggestionScore()` /
+`suggestionOf()` are retired. Measured (`node scripts/measure-signals.mjs`, fixtures): CORN 2 Oct was 4.00 → Very Bull
+(the season 45% of it), now s = 55.0 → Bull + Neutral; 31 of 50 market × reading pairs change family; a directional
+fixture board shows 4–5 cards where it showed 2–3; generation on the fixture boards 110 → 122 ms.
 
-| Surface | Before (main, same fixtures) | Before (owner's phone) | After | Budget |
-|---|---|---|---|---|
-| One order row | 44 | 78 | 32 | 35 |
-| Orders (panel with the false warning → segment) | 136 | 171 | 34 | — |
-| Close confirm (with the price slider) | 79 | 51 | 29 | 30 |
-| Modify, open before Review | not measured | — | 38 | 38 |
-| Positions (orders list + J-0001 + J-0002 → segment with strip) | 371 | — | 112 | 120 |
+**Task 4 — Order by, and how the numbers fit.** "Order by": Expected value (default) · Expected value + signal · Chance ·
+Return on risk, synced as `settings.findOrder` (the one payload change). Only "Expected value + signal" adds
+`signalAdjustment()`, and only then is CONFLICT last. The card's fold says "Why this place: expected value −12.0 per
+$100 + signal +27.5 = 15.5" (`placeLine()`, the same figures `findOrderCompare()` sorts on). The badge reads "CORN ↑ +64
+· conf 86". An ⓘ "How the numbers fit" beside the results line and on the Why sheet, written from the constants
+(`numbersFitLines()`; signals.test.js holds every number to its function). **P2 (rank by edge at the price that fills)
+is done as "Expected value", now the default.**
 
-Source counter (`node scripts/measure-words.mjs`): find 309, build 244 unchanged; positions is now the Positions
-segment's block and reads `positionCard.jsx` for the first time: 217 (an upper bound counting post-tap dialogs). New
-atoms: `Info` (ⓘ, tap) and `Segments` in ui.jsx; `positions.jsx` and `navBar.jsx` are swept by `ui.test.jsx`. Red is
-for errors: CLOSE, Send and the badge take the new `T.action` tone, Cancel the danger outline, a reached exit amber.
+**Task 5 — the sweep, as far as a file boundary.** Removed `StepNav`, `onCardLine()` and EvidenceBar's leftover chip
+text. Migrated one commit each, tests unchanged except the sweep test: `steps.jsx`, `why.jsx`, `positionCard.jsx`,
+`wizard.jsx` (now in `ui.test.jsx`'s sweep), and `visuals.jsx`'s HTML text (its SVG drawings keep their sizes, so it is
+not in the sweep list). Red for errors only on those files: a down reading and a loss are violet, a CONFLICT and a low
+confidence amber, CLOSE `T.action`. Counts (`node scripts/measure-sweep.mjs`), before → after:
 
-**Task 4 — one bottom bar** (`src/navBar.jsx`): Find · Build · Positions (badge: decisions + closes working) · Journal,
-replacing `StepNav` and the places row. Watching is "Saved" inside Find (Results | Saved; its rows unchanged). Home stays
-the start screen. The bar sits above the badge strip (`BADGE_H`) and `env(safe-area-inset-bottom)`, 50px targets,
-`aria-current="page"`; nav.js history carries the segment (`seg`), so Back steps from Orders to Positions.
+| File | fontSize literals (under 12px) | mono / sans | atom copies |
+|---|---|---|---|
+| steps.jsx | 12 (8) → 0 | 8 / 6 → 0 / 10 | mono → none |
+| why.jsx | 45 (25) → 0 | 33 / 0 → 4 / 26 | Lbl, Stat, mono → none |
+| positionCard.jsx | 29 (0) → 0 | 16 / 13 → 6 / 23 | mono → none |
+| wizard.jsx | 44 (4) → 0 | 8 / 37 → 4 / 39 | Chip, mono → none |
+| visuals.jsx (HTML text) | 4 (1) → 0 | — | mono → none |
 
-**Not changed:** `orderBody()`, closeOrder.js's send path, `closeLimitPrice()`, modifyOrder.js's send paths, riskGate.js
-rules, alpacaContract.js, the seven gate calls, every `RULES` value, the `/api/state` payload, Find's controls and card.
+**Words** (`node scripts/measure-words.mjs`): find 309 → 315 and build 244 → 250 — the badge's words were JSX the counter
+could not see and are now a scored generator (the real change is one word, the ticker); ceilings moved by exactly that,
+with the reason in voice.test.js. Rendered on J-0001: Positions 112/120, one order 32/35, close confirm 29/30, Modify
+38/38 — PR #47's budgets untouched.
+
+**Not changed:** `orderBody()`, closeOrder.js, modifyOrder.js's send paths, `closeLimitPrice()`, riskGate.js rules,
+alpacaContract.js, the seven gate calls, every `RULES` value but the two new ones, `SIGMA`, the payload beyond
+`settings.findOrder`. J-0001's working close is not touched.
+
+### What the next session inherits from #48
+
+- **J-0001 is still v1 (b)**: its close was working at Alpaca (GTC, $7.62). Nothing here cancels, resends or re-prices it.
+- **The season is not read until each market's Alpha Vantage series loads**, so on a cold start every chance says
+  "prices only" and the season is out of the score. The live series has never been seen by `seasonalSignal()`.
+- **`parseAvJson()` keeps ten years**, so a month carries about 10 years, not the 16 the brief's arithmetic assumed:
+  CORN's October error is ≈ ±2.0%, not ±1.6%. Whether to read the whole 195-month series is an owner decision (it moves
+  which months count).
+- **The sweep remains for App.jsx and pro.jsx** (they host order paths 1, 2 and 4): App.jsx 224 fontSize literals (110
+  under 12px), 152 mono / 26 sans spreads, 32 paddings, 7 radii, its own Btn, Panel, Lbl, Stat, mono, sansUI; pro.jsx 117
+  literals (93 under 12px), 101 mono / 0 sans, 20 paddings, 7 radii, its own Btn, Panel, Lbl, Stat, mono. Card.jsx's
+  CONFLICT badge is still red.
+- Under "Signals decide" Find builds two families per directional market; on a phone this is the cost to read (PR #49).
 
 ### What the next session inherits from #47
 
@@ -75,15 +98,14 @@ rules, alpacaContract.js, the seven gate calls, every `RULES` value, the `/api/s
 - The sync still auto-imports a new Alpaca holding on its first read, so "Not in the app" shows mainly when that import
   has not run (or failed).
 - The bar floats above the 80px Netlify badge strip; if the badge is gone from production, `BADGE_H` can drop.
-- `StepNav`, `onCardLine()` and `EvidenceBar`'s chips remain in code (tests pin them); the sweep removes them.
+- DONE IN #48: `StepNav`, `onCardLine()` and `EvidenceBar`'s leftover chips are removed.
 
 ### What the next session inherits from #46
 
 - **v1 (b) is still J-0001's close, and now also the first live Modify.** Read from the production address: the orders
   row (limit beside the mark), Modify → price → send → fill → "File in Journal". A `PATCH` on an options order and GTC
   on one have never been observed.
-- After a replace the record follows the new order id (`onReplaced`); a record whose order was replaced from Alpaca's
-  own screen still points at the old id, which reads "replaced" and stays "working" in `orderLifecycle()`.
+- DONE IN #48 (0a): a record whose order was replaced from Alpaca's own screen adopts the new id.
 - Modify of a multi-leg OPENING order lands on Build at today's market; the chosen price is written in the message,
   not pre-filled into the ticket.
 - "More on <TK>" draws open interest, the price chart and the season for the card's market; the year-by-year replay and
@@ -157,21 +179,16 @@ production address_: the Journal lives in that browser only.**
 
 One line each; see `PRD.md` §5 and `docs/history/ROADMAP.md` for detail.
 
-- **FIRST: PR #48 = one market registry** — one row per market (category, factors, newsQ, seasonal row) replacing
-  `UNDERLYINGS`' scattered fields, `basket.js` and `weatherApplies()`; Find grouped by category (Grains, Energy,
-  Metals) with all/none per category and category result filters; **the design-system sweep of the remaining screens**
-  (App.jsx, pro.jsx, positionCard.jsx, wizard.jsx, why.jsx, steps.jsx onto ui.jsx and the type tokens; remove `StepNav`,
-  `onCardLine()`; move Positions' "at entry vs now" labels onto `CARD_LABELS`). Not started.
-- **PR #49 = basket expansion** — a measured admission rule (`liquidity.mjs` run on candidate chains) and Find's cost on
-  a phone (PRD §4.5). Not started.
-- **The sweep, in detail (part of PR #48):** measured on 2 Oct 2026, before #45: **23 font sizes** (67% of uses below
-  12px), **402 mono spreads against 15 sans**, **57 padding values**, **13 radii**, **Btn ×2, Panel ×2, Lbl ×3, Stat ×3
-  copies**, and the mono stack defined in **8 files**. PR #45 built `ui.jsx` and migrated Find; PR #47 added `Info`,
-  `Segments`, `positions.jsx`, `navBar.jsx` and the order row/confirm on tokens. The rest is #48's.
+- **DONE: PR #48** — the market registry, Find by category, the measured season, Signals decide, Order by, and the
+  sweep of steps.jsx, why.jsx, positionCard.jsx, wizard.jsx.
+- **FIRST: PR #49 = basket expansion with a measured admission rule** — run `liquidity.mjs` on candidate chains and admit
+  a market only when its open interest clears the floor and Alpha Vantage holds at least N years of its monthly history
+  (N to be set from what `seasonalSignal()` needs); a market enters as one `markets.js` row. Measure Find's cost on a
+  phone (PRD §4.5): generation is now two families per directional market. Not started.
+- **The sweep of App.jsx and pro.jsx** (counts above, under #48's inherits). Not started.
 - **Journal on the server** — `journal` and `journalSeq` on `/api/state`, merged by ref, so a
   second browser keeps the Journal. Deferred on purpose (24 Sep 2026): changing the sync of
   the only live record before its first live close is the wrong week.
-- **P2 full** — rank proposals by edge at the price that fills.
 - **P7** — fills pushed by Alpaca's stream, server-side.
 - **P8** — more indicators and timeframes, after the owner has used the current ones.
 - **P10-bis** — expiry strip, strike ruler, break-even line with date slider, view toggles.

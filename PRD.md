@@ -11,34 +11,39 @@ The full history — every incident, measurement and decision behind the rules b
 A paper-trading app for multi-leg options strategies on ten commodity ETFs, for a
 non-expert trader who wants to learn discipline rather than be sold trades.
 
-- **Markets.** Grain and gas tier: CORN, UNG, SOYB, BOIL, WEAT. Liquid tier: GLD, SLV,
-  USO, XLE, GDX. SPY exists only to price a hedge; it is never proposed.
+- **Markets.** One registry, `src/markets.js` (PR #48), in three categories: Grains (CORN, SOYB, WEAT), Energy (UNG,
+  BOIL, USO, XLE), Metals (GLD, SLV, GDX). SPY exists only to price a hedge; it is never proposed. Adding a market is
+  one row there.
 - **Broker.** An Alpaca paper account (US dollars). Option chains come from Alpaca's
   indicative feed first, CBOE delayed quotes as the fallback. The feed is named on screen.
 - **Two steps, one on screen at a time.**
   1. **Find** — one request block above one ranked list of cards across the selected markets:
-     markets, direction or "season decides", size by spend or by target, and four sliders in
-     one style (PR #45) — *most I will risk* (its top is the per-trade limit, editable inline;
-     the trading capital under free sizing; "profit I am aiming for" in target mode), *chance at
-     least*, *return on risk at least* (it can only tighten the reward floor, never loosen it)
-     and *horizon*. Tap a slider's value to type an exact number; each slider shows a small
-     histogram of the candidates with the threshold marked, and how many pass. Every control
-     re-filters the list live; there is no Search button, and a slider never re-runs a
-     simulation. **A card that misses what you asked is hidden behind a count**: "N match what
-     you asked · show M that miss", tapping it shows them, each with the reason it missed. With
-     nothing matching, the line says which control binds and the nearest value that lets one in
-     ("Lower chance to 54% → 1 match: XLE"), read off the cards' own figures. Under "season
-     decides" a card says which direction its market's season chose ("↑ bull · season").
-     Each card carries one badge (agreement · score · confidence, tap for "Why this market"),
-     a flag where it applies (single option, butterfly, CONFLICT, confidence under 40, options
-     dear), the gauge beside the unified picture (tap opens the full figure), and **four figures
-     for the size the budget buys**: YOU RISK (contracts × the risk), MAX PROFIT (contracts ×
-     the maximum profit, or "no ceiling"), CHANCE, RETURN ON RISK, with one line under them,
-     "25 contracts × $193 at risk each"; the per-contract figures are behind the card's fold.
-     Build's top card is the same component on the same numbers. A toggle hides flagged cards and
-     says how many. The old Shortlist is a one-market filter on this list; up to three cards
-     compared side by side. "Nothing today" appears only when zero candidates pass, with the
-     count for every reason.
+     markets, grouped by category ("Grains 2 of 3 · all / none", PR #48), direction or **"Signals decide"**, size by
+     spend or by target, and four sliders in one style (PR #45) — *most I will risk* (its top is the per-trade limit,
+     editable inline; the trading capital under free sizing; "profit I am aiming for" in target mode), *chance at
+     least*, *return on risk at least* (it can only tighten the reward floor, never loosen it) and *horizon*. Tap a
+     slider's value to type an exact number; each slider shows a small histogram of the candidates with the threshold
+     marked, and how many pass. Every control re-filters the list live; there is no Search button, and a slider never
+     re-runs a simulation. **A card that misses what you asked is hidden behind a count**: "N match what you asked ·
+     show M that miss", tapping it shows them, each with the reason it missed. With nothing matching, the line says
+     which control binds and the nearest value that lets one in, read off the cards' own figures.
+     **Signals decide (PR #48).** A market's direction comes from its four signals once: s = score × confidence / 100,
+     Bull at s ≥ 12.5, Bear at s ≤ −12.5, Neutral between, CONFLICT always Neutral, never "Very". It shows its
+     suggested family plus the Neutral family; each card says "↑ bull · signals" or "→ neutral". While a market's
+     signals are being read it shows its Neutral cards and the badge reads "reading…"; when they land, one line says
+     "CORN: signals in, Bull cards added".
+     **The results filter** reads "All N · Grains n · Energy n · Metals n"; a category opens its tickers' counts.
+     **Order by**: Expected value (default) · Expected value + signal · Chance · Return on risk (synced). Only
+     "Expected value + signal" adds the signal adjustment, and only then do CONFLICT markets sort last. A card's fold
+     says why it sits where it does ("expected value −12.0 per $100 + signal +27.5 = 15.5"). An ⓘ "How the numbers fit"
+     says, from the constants, what the chance and the score each measure and where they meet.
+     Each card carries one badge ("CORN ↑ +64 · conf 86", tap for "Why this market"), a flag where it applies (single
+     option, butterfly, CONFLICT, confidence under 40, options dear), the gauge beside the unified picture (tap opens
+     the full figure), and **four figures for the size the budget buys**: YOU RISK (contracts × the risk), MAX PROFIT
+     (contracts × the maximum profit, or "no ceiling"), CHANCE, RETURN ON RISK, with one line under them, "25 contracts
+     × $193 at risk each", and what the chance is made of ("chance: prices + season" or "prices only"). Build's top
+     card is the same component on the same numbers. A toggle hides flagged cards and says how many. Up to three cards
+     compared side by side. "Nothing today" appears only when zero candidates pass, with the count for every reason.
   2. **Build** — one trade: chain, legs, a five-line trade card, the order ticket, and the
      confirm step with the risk gate's checks in plain English.
 - **Header (PR #46).** No market select at the top. On Find, Refresh reloads every selected market
@@ -124,6 +129,17 @@ Every rule below is code, not a prompt. The numbers live in `src/rules.js` (`RUL
   gate refused every one of them on Build. Raising the limit is the existing per-trade limit edit
   (typed reason). A structure with no ceiling is now sized on its risk alone (it can be sized
   against a budget, never against a profit target).
+
+### The season — measured only (PR #48)
+
+- The season is read from each market's measured Alpha Vantage monthly history (`/api/av`, seven-day cache) and nothing
+  else; the hand-written table is retired. Until it has loaded, the season is **not read**: the factor is left out of
+  the score with that reason, and the chance drifts at zero ("prices only").
+- A calendar month counts only when its mean is at least `RULES.seasonalSignalT` (2) standard errors from zero (its own
+  standard deviation ÷ √years). The window is the months the trade is held for; months that do not count add no drift.
+- One function, `seasonalSignal()`, says what the season is for a window; the season factor, the chance, the position
+  thesis and the autopilot all read it, so one market and one expiry give one season on every screen. The Why sheet
+  prints each month: "Oct +1.2% ± 1.6% (16 yrs) · not a signal".
 
 ### Entry
 
@@ -220,32 +236,38 @@ normal use, and is never asked for.
    at Alpaca (GTC, $7.62, 0 of 9) on 2 Oct 2026, 22:08; PR #47 neither cancels, resends nor re-prices it. To read from the
    production address: the card's "Close working" line, its row in Orders, the fill, and "File in Journal". Whether
    Alpaca accepts a `PATCH` on a single-leg option order is read from its documentation, not observed; a multi-leg
-   replace is taken as refused (403) from the same reading.
+   replace is taken as refused (403) from the same reading. A replace made on Alpaca's own screen is followed by
+   `replaces` / `replaced_by` (PR #48), fields read from alpaca-py's source and tested on stubs only.
 2. **Read when it happens — the live `/v2/clock` and `/v2/account` replies.** Their fields (`is_open`, `next_open`;
    `equity`, `buying_power`, `options_buying_power`) are read from alpaca-py 0.44.0's source, never from a reply; tested
    on stubs and in a headless Chromium against a stubbed broker only. Whether the owner's account sends
    `options_buying_power` is unknown.
-3. **Read when it happens — every new screen on a phone with live data:** PR #47's Positions | Orders, the account strip
+3. **Read when it happens — every new screen on a phone with live data:** PR #48's Find by category, "Signals decide",
+   Order by, "Why this place", the ⓘ "How the numbers fit" and the Why sheet's season row; PR #47's Positions | Orders, the account strip
    and its ⓘ, the bottom bar (it floats above the 80px Netlify badge strip, `BADGE_H`) and Find → Saved; and the earlier
    ones (Find's sliders and cards, the Why sheet, Details, Back). Tested on fixtures and in a headless Chromium (390px)
    with a stubbed broker. **No screen reader was run:** labels, `aria-current`, `aria-expanded` and focus are checked
    in markup and in the browser's DOM, not by hearing them.
 4. **Read when it happens — no credit has filled at the corrected limit**, and the indicative combination ask on thin
    chains has not been measured by a fill (J-0003 never filled at it).
-5. **Find's cost on a phone is not measured.** Generation is one memo (203–253 ms for the 31 fixture cards on a desktop
-   CPU); a slider move is 0.1 ms. A slow phone may lag on generation.
+5. **Find's cost on a phone is not measured, and the live season has never been read.** Generation is one memo (194–238
+   ms for the 31 fixture cards on a desktop CPU; under "Signals decide" a directional market builds two families, 110 →
+   122 ms on the fixture boards); a slider move is 0.1 ms. The sandbox cannot call Alpha Vantage: `seasonalSignal()` has
+   run on avFixture series only, and `parseAvJson()` keeps ten years, so a month carries ≈ 10 years, not 16.
 6. **Read when it happens — "Not on Alpaca", "size N > M on the ask", the "Not in the app" card and an order "sent
    outside this app"** have not appeared live (the sync auto-imports a new holding on its first read, so "Not in the
    app" shows mainly when that import has not run).
 7. **Read when it happens — free sizing (PR #41) has not been used live**; its "no limit applied" on the strip is tested
    on fixtures only.
-8. **Chosen, not measured:** `singleTakeProfitPctOfPremium` 0.5 (owner decision, 2 Oct 2026),
+8. **Chosen, not measured:** `seasonalSignalT` 2 and `directionSignalMin` 12.5 (owner decisions, 3 Oct 2026, PR #48),
+   `singleTakeProfitPctOfPremium` 0.5 (owner decision, 2 Oct 2026),
    `modelDisagreementRatio` 4, `maxComboSpreadShareOfNet` 1.0, `maxCrossingShareOfMaxProfit` 0.5, `openLimitSlippage`
    and `closeLimitSlippage` 0.25, `watchAttentionShare` 0.35, `autopilotConfidence` 70, `fallbackIV`/`fallbackSigma` 0.25,
    the four chance-slider constants, `rewardAskMax` 3, `rewardAskStep` 0.05, `amountAskStep` 25, `staleBoardShare` 0.15,
    the liquidity floor, and the signal engine's constants (`BASE_WEIGHTS`, `REINFORCE` 1.25, `CONFLICT_DAMPING` 0.6,
    `CONFIDENCE_BANDS`). **The default "chance at least 50%" matches 5 of the 31 fixture cards.** PR #47's word budgets
-   (row 35, confirm 30, Positions 120) are the owner's; Modify's 38 is this PR's measurement.
+   (row 35, confirm 30, Positions 120) are the owner's; Modify's 38 is PR #47's measurement. Find's and Build's word
+   ceilings moved 309 → 315 and 244 → 250 in PR #48: the badge's words are now counted (the real change is one word).
 9. **The exit rules are inherited defaults, not backtested** on these ten markets; the single option's +50% of the
    premium is the owner's choice. The exact long-put maximum (PR #47, 0c) raises three Find fixture cards' return on
    risk 3.5–4.5×; how that moves their rank on live boards is not measured.
@@ -257,7 +279,6 @@ One line each. Detail for every item is in `docs/history/ROADMAP.md`.
 
 - **Journal on the server** — `journal` and `journalSeq` on `/api/state`, merged by ref. First
   after v1: changing the sync of the only live record before its first live close is the wrong week.
-- **P2 full** — rank proposals by edge at the price that fills, not by score.
 - **P7** — learn about fills from Alpaca's `trade_updates` stream server-side, instead of polling.
 - **P8** — more indicators and timeframes, only after the owner has used the current ones.
 - **P10-bis** — expiry strip, strike ruler, break-even line with a date slider, view toggles.

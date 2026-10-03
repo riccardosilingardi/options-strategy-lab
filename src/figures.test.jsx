@@ -46,8 +46,8 @@ const QUOTES = {
 };
 const q = (leg) => QUOTES[leg.strike] || null;
 const SEASONAL = seasonalProvenance(
-  { monthlyMean: [0.5, 0.2, -0.1, 0.4, 0.8, 1.1, -0.6, -1.2, 0.3, 0.9, 0.6, 0.1], years: 11, src: "Alpha Vantage", at: Date.now() },
-  null, TICKER);
+  { monthlyMean: [0.5, 0.2, -0.1, 0.4, 0.8, 1.1, -0.6, -1.2, 0.3, 0.9, 0.6, 0.1], monthN: Array(12).fill(11),
+    monthSE: Array(12).fill(0.3), years: 11, src: "Alpha Vantage", at: Date.now() }, TICKER);
 const OPTS = { spot: SPOT, dte: DTE, iv: IV, q, ticker: TICKER, expKey: EXP, seasonal: SEASONAL };
 
 const list = listCardFigures(LEGS, OPTS);

@@ -51,15 +51,29 @@ by writing down what you could not verify (PRD §4, at most ten items).
 - A candidate that misses the request is hidden behind a count, never dropped (`resultsLine()`); a
   slider filters `findGen`'s output and never re-simulates (`find.test.jsx` checks the memo's deps).
 - Atoms and sizes: `src/ui.jsx` (now with `Info`, the ⓘ, and `Segments`) and the type tokens in `theme.js`. `ui.jsx`,
-  `card.jsx`, `find.jsx`, `orders.jsx`, `positions.jsx` and `navBar.jsx` use no `fontSize` literal and define no atom;
-  `ui.test.jsx` fails the build otherwise. A longer explanation goes behind one ⓘ or fold, never deleted.
+  `card.jsx`, `find.jsx`, `orders.jsx`, `positions.jsx`, `navBar.jsx`, and since PR #48 `steps.jsx`, `why.jsx`,
+  `positionCard.jsx` and `wizard.jsx` use no `fontSize` literal and define no atom; `ui.test.jsx` fails the build
+  otherwise. App.jsx and pro.jsx are not swept yet (ROADMAP). A longer explanation goes behind one ⓘ or fold, never deleted.
 - No emoji or rare glyphs in UI strings; stay within `↑ ↓ → ✓ ✗ ⚠ ▲ ▼ ●`.
+- **One registry for the markets: `src/markets.js`.** Adding a market is ONE row there (ticker, name, category, step,
+  proposable, weather applies or why not, newsQ, the iv/sigma fallback references); BASKET, `getU()`, the categories
+  Find groups by, the weather rule, `basket.js`, the demo and the copilot list derive from it. `markets.test.js` proves
+  it with a dummy row. Never type a ticker list anywhere else.
+- **The season is measured only, and `seasonalSignal(stats, month, dte)` in rules.js is its one home.** A month counts at
+  |mean| ≥ `RULES.seasonalSignalT` × its standard error; the season factor, the chance's drift, the position thesis and
+  the autopilot all read it, keyed by (market, days held) — `fuseAt(tk, dte)` in App.jsx. Not loaded is "not read"
+  (`SEASON_NOT_READ`): the factor is excluded and the chance drifts at zero. There is no hand-written table; never add one.
+- **"Signals decide" is `signalDirection()`** (signals.js): score × confidence / 100 against `RULES.directionSignalMin`,
+  CONFLICT Neutral, never "Very"; a market shows that family plus Neutral. **The list order is the owner's**
+  (`settings.findOrder`, `findOrderCompare()`); only "Expected value + signal" adds `signalAdjustment()`, and a card's
+  "Why this place" is `placeLine()` on the same figures.
 - Plan first, then change surgically.
 
 ## Files that matter
 
 - `src/rules.js` — the single source of the trading rules: `RULES`, sizing, floors, exits,
-  chance, limit pricing, and every generated rule sentence.
+  chance, limit pricing, `seasonalSignal()`, and every generated rule sentence.
+- `src/markets.js` — the market registry (PR #48): one row per market, the categories, `getU()`, `BASKET`.
 - `src/riskGate.js` — `evaluateTrade()`, the gate every order path calls.
 - `src/order.js` — `orderBody()` (the one Alpaca body builder), signs, order outcomes.
 - `src/closeOrder.js` — order path 3: close a holding at a limit, in two taps (a chosen price,
@@ -78,10 +92,12 @@ by writing down what you could not verify (PRD §4, at most ten items).
   `posAlerts`', the target `takeProfitTarget()`, the stop level `stopWarningLevel()`.
 - `src/nav.js` — Back: the screen state as history entries (push on a move, step back when a sheet
   is closed from its own button, Home is never intercepted).
-- `src/engine.js` — Black-Scholes, payoff, exit simulator, seeded Monte Carlo, seasonal parse.
+- `src/engine.js` — Black-Scholes, payoff, exit simulator, seeded Monte Carlo, seasonal parse (`statsFromMatrix()`
+  returns per-month years and standard errors; `seasonalSpan()`). `SEASONAL` is retired; `SIGMA` stays.
   Imports nothing; shared by client and Netlify functions.
 - `src/chain.js` — where the option chain comes from, strikes, open interest, feed names.
-- `src/signals.js` — the four-factor confluence engine and the guided-flow drivers.
+- `src/signals.js` — the four-factor confluence engine, `signalDirection()`, the Find order (`FIND_ORDERS`,
+  `findOrderCompare()`, `placeLine()`), `badgeText()` and `numbersFitLines()`.
 - `src/indicators.js` — every technical indicator, and the chart copilot's context.
 - `src/freshness.js` — how old a number on screen may be.
 - `src/visuals.jsx` — every trade picture, all cut from `payoffBands()`.
@@ -91,13 +107,13 @@ by writing down what you could not verify (PRD §4, at most ten items).
   The type tokens (`TYPE`) are in `src/theme.js`. Mono only for numbers, tickers, legs, OCC symbols.
 - `src/find.jsx` — Step 1, Find: heading, controls, market chips, the list, the "why" fold, Compare.
 - `src/wizard.jsx` — Home (two doors: positions, Find), onboarding and the confirm step.
-- `src/steps.jsx` — navigation chrome: sheets, folds, `DeskCountLine` (`StepNav` is no longer mounted since PR #47).
+- `src/steps.jsx` — navigation chrome: sheets, folds, `DeskCountLine` (`StepNav` removed in PR #48).
 - `src/path.js`, `src/handoff.js` — the two-step path (Find → Build) and how a trade reaches Build.
 - `src/why.jsx` — the "Why this trade" evidence panel.
 - `src/App.jsx`, `src/pro.jsx` — UI, the order ticket (`OrderTicket`), the desk, `QtyField`.
 - `src/theme.js` — the one theme; light is default.
 - `src/demo.js` — public demo mode; every order path is disabled in it.
-- `src/basket.js` — the ten markets for Netlify functions; held equal to `App.jsx` by a test.
+- `src/basket.js` — re-exports `markets.js`'s `BASKET` for the Netlify functions.
 - `src/wordcount.mjs` — counts words each step renders (source), and `SURFACE_IDS` / `renderedWords()` for the four
   rendered surfaces (positions, orders, confirm, modify; `scripts/surfaces.jsx`); `voice.test.js` enforces both.
 - `netlify/functions/alpaca.mjs` — the only proxy to the paper trading host.
@@ -135,6 +151,8 @@ All in `RULES`, `src/rules.js`, unless noted.
 - Sizing: `bestPracticePerTradePct` 0.05, `totalExposurePct` 0.25, `suggestedTradingCapital`.
 - Price exists: `minNetPremium` 0.05 (`MIN_NET_DOLLARS` = $5 a contract).
 - Model sanity: `modelDisagreementRatio` 4.
+- Season: `seasonalSignalT` 2 (a month counts at 2 standard errors; read only through `seasonalSignal()`).
+- Direction: `directionSignalMin` 12.5 ("Signals decide"; read only through `signalDirection()`).
 - Stale board (copy only): `staleBoardShare` 0.15 — the share of inverted strike pairs at
   which Find says "<expiry> looks stale on N markets", once.
 - Floors: `liquidityPercentile` 0.40, `minOpenInterestAbsolute` 10, `minPeersForPercentile` 8,
@@ -160,6 +178,8 @@ All in `RULES`, `src/rules.js`, unless noted.
 - `node scripts/measure-words.mjs` prints the per-screen word counts and the four rendered surfaces on J-0001.
 - `node scripts/measure-find.mjs` prints what each Find control passes on the 31 fixture cards and what
   one slider move costs (`scripts/find-fixtures.jsx` builds the cards).
+- `node scripts/measure-season.mjs` (months that count, on avFixture series), `node scripts/measure-signals.mjs`
+  ("Signals decide" against the retired rule), `node scripts/measure-sweep.mjs` (design-system counts per file).
 - No order can be sent from the sandbox (no broker keys); live behaviour is an OWNER CHECK.
 
 ## Known traps
@@ -174,7 +194,7 @@ All in `RULES`, `src/rules.js`, unless noted.
   working, never as a decision.
 - The account and the clock are their own state (`account`, `clock`), set by the sync; never write them into `alpaca`,
   whose identity re-arms the sync.
-- `settings.notifyWhenReady` and `settings.sizingFree` must be in the `/api/state` sync payload.
+- `settings.notifyWhenReady`, `settings.sizingFree` and `settings.findOrder` must be in the `/api/state` sync payload.
 - Free sizing is ONE gate input (`evaluateTrade({ sizingFree })`): it drops the per-trade,
   exposure and capital-not-set checks only. Never let it reach another check.
 - A card's size is `scaleStrategy()` on the maximum loss; `sizeLine()` prints contracts × risk.

@@ -15,9 +15,9 @@ import { WhySheet } from "./why.jsx";
 import { orderLegs as orderLegsOf, orderHoldingKey, ordersForRecord, orderIntent, rowLines, workingCloseText } from "./orderRow.js";
 import { BandThumbnail, payoffBands, bandTakeaway, GaugeFigure, Gauge, CompareFigure, exitPlanSentence, exitPlanDetail,
   OpenInterestStrip, oiStripTakeaway, oiCutAt, oiGhostCut, explainOiStrip, useWidth } from "./visuals.jsx";
-import { fuseSignals, sentimentDirection, withSignalRank, compareCandidates, againstSignal,
+import { fuseSignals, sentimentDirection, signalDirection, signalFamilies, findOrderOf, findOrderCompare, withSignalRank, compareCandidates, againstSignal,
   readingState, signalSnapshot, compareSignals } from "./signals.js";
-import { N as nCDF, bs as bsPrice, smile as smileIV, payoff as payoffExp, SEASONAL, SIGMA,
+import { N as nCDF, bs as bsPrice, smile as smileIV, payoff as payoffExp, SIGMA,
   parseAvJson, statsFromMatrix } from "./engine.js";
 import { parseOcc, buildOcc, snapStrike, resnapLegs, expiryStrikes, strikeOptions, fetchChain, hasOpenInterest, enrichOpenInterest, feedName, sourceNote, openInterestNote, oiProfile, expiryOpenInterest, nearMoneyOpenInterest, monotonicityBreaks, monotonicityNote, invertedOnStrikes, spotOf, spotAt } from "./chain.js";
 import { T, themeName, setTheme, BADGE_SAFE } from "./theme.js";
@@ -40,7 +40,7 @@ import { RULES, sizing, ruleBadge, takeProfitLabel, takeProfitTarget, takeProfit
   conflictSummaryLine, warningsToPrint, unquotedLegNote,
   chancePct, chanceText, chanceInTen, signedMoney,
   ruleExitOf, stopWarningSentence, watchAttentionLevel, positionAction,
-  chanceOf, chanceSourceNote, seasonalProvenance, seasonalStampNote, seasonalStampFields, chanceDrawFields,
+  chanceOf, chanceSourceNote, seasonalProvenance, seasonalSignal, seasonRowLines, chanceBasisLabel, SEASON_NOT_READ, seasonalStampNote, seasonalStampFields, chanceDrawFields,
   sigmaProvenance, isButterfly,
   requestOf, contractsSourceNote, fillNet,
   rewardRiskRange, RR_POINTS, crossingCost, crossingCostNote, openingMarkNote,
@@ -65,7 +65,8 @@ import { nextRef, refCounter, appendTimeline, stampTimeline, orderStatusRecheck,
   storedLimitOf,
   positionStage, positionStageNote, bookPositions, holdingShape, dropImportedTwins, recordFillPrice, countsAsRuleClose, closeKindWords, riskOkOf, riskOkWords, wouldHaveDone, isBrokerHolding, upgradeHolding, positionForHolding,
   isTestRecord, testRecordNote, scoredJournal, journalPnl, NOT_A_FILL,
-  journalEntry, searchJournal, CLOSE_REASON_MIN, refNumber, journeyLevel } from "./journal.js";
+  journalEntry, searchJournal, CLOSE_REASON_MIN, refNumber, journeyLevel,
+  adoptReplacement, replacementsIn, replacedBy } from "./journal.js";
 import { FIRST_STEP, stepCarry, candidateOf, candidateKey, legsLine, toggleCompare, inCompare, MAX_COMPARE, savedFromCandidate, candidateFromSaved, savedAge } from "./path.js";
 import { PositionCard, PositionDetails } from "./positionCard.jsx";
 import { navOf, createNavHistory } from "./nav.js";
@@ -76,6 +77,7 @@ import { BottomBar, placeOf, NAV_BAR_H } from "./navBar.jsx";
 import { AccountStrip, PositionsBar, WorkingCloseLine } from "./positions.jsx";
 import { Segments as USegments, Note, CheckField } from "./ui.jsx";
 import { marketClockLine } from "./clock.js";
+import { BASKET, TICKERS, getU, categoryOf } from "./markets.js";
 
 /* ============================== THEME ============================== */
 const mono = { fontFamily: "ui-monospace, Menlo, monospace" };
@@ -99,99 +101,19 @@ function bsGreeks(S, K, Tyr, iv, type) {
   return { delta, gamma, theta, vega };
 }
 
-/* ============================== UNDERLYINGS (fallback stats) ============================== */
-const UNDERLYINGS = {
-  SOYB: { commodity: true, name: "Soybeans", iv: 0.20, sigma: SIGMA.SOYB, step: 0.5,
-    monthlyMean: SEASONAL.SOYB,
-    newsQ: "soybean futures prices" },
-  CORN: { commodity: true, name: "Corn", iv: 0.24, sigma: SIGMA.CORN, step: 0.5,
-    monthlyMean: SEASONAL.CORN,
-    newsQ: "corn futures USDA crop" },
-  UNG: { commodity: true, name: "US Natural Gas", iv: 0.45, sigma: SIGMA.UNG, step: 0.5,
-    monthlyMean: SEASONAL.UNG,
-    newsQ: "natural gas prices storage EIA" },
-  BOIL: { commodity: true, name: "2x Natural Gas", iv: 0.85, sigma: SIGMA.BOIL, step: 1,
-    monthlyMean: SEASONAL.BOIL,
-    newsQ: "natural gas prices forecast" },
-  WEAT: { commodity: true, name: "Wheat", iv: 0.26, sigma: SIGMA.WEAT, step: 0.25,
-    monthlyMean: SEASONAL.WEAT,
-    newsQ: "wheat futures prices" },
-
-  /* ============ THE LIQUID COMMODITY TIER (ROADMAP P2-bis) ============
-     Read on the owner's phone: SOYB and CORN produced "0 of 2 shown" and a wall
-     of refusal text. The grain chains are too thin for the floors this app
-     measured on live data, so most of what is on screen is an explanation of
-     why there is nothing on screen. These five are real commodities — the
-     seasonal engine still applies — with option books an order of magnitude
-     deeper, and calibrating P2's edge on them is worth far more than
-     calibrating it on CORN.
-
-     >>> NOT ONE NUMBER IS INVENTED FOR THEM. <<< Three things every row above
-     carries are deliberately absent here:
-
-       - `monthlyMean`. There is no `SEASONAL` row and there will not be one.
-         Seasonality is UNKNOWN for these markets until Alpha Vantage's real
-         monthly history loads, `seasonalProvenance()` reports `missing`, and
-         every screen prints a dash and the sentence rather than a zero. A
-         hand-written row would be a fifth estimate on a table this repository
-         has already measured as wrong on eight months of twelve.
-       - `sigma`. No `SIGMA` row either, so `sigmaProvenance()` falls to
-         `RULES.fallbackSigma` and says on screen that the number was CHOSEN,
-         not measured — until the same Alpha Vantage read supplies the measured
-         realised volatility it has always returned beside the means.
-       - a per-market `iv`. `RULES.fallbackIV` is the one home for "the implied
-         volatility the options are priced at when nothing else is known", and
-         `ivProvenance()` already says so wherever it is used. Writing 0.15 for
-         GLD out of memory would be exactly the estimate-as-a-reading this
-         codebase keeps refusing; the live chain quotes its own IV per contract
-         and that is what every figure is worked out at the moment it loads.
-
-     `step` IS A FALLBACK AND ONLY A FALLBACK. Strikes are a property of the
-     board (`expiryStrikes()` in chain.js), `buildPresets()` refuses to build
-     without one (PR #31), and `snapStrike()`'s grid is unreachable from it.
-     These are the conventional listing increments, kept so a dropdown has
-     something to offer before the chain lands, not so a trade can be built on
-     them. ======================================================== */
-  GLD: { commodity: true, name: "Gold", iv: RULES.fallbackIV, step: 1,
-    newsQ: "gold price fed real yields dollar" },
-  SLV: { commodity: true, name: "Silver", iv: RULES.fallbackIV, step: 0.5,
-    newsQ: "silver price industrial demand dollar" },
-  USO: { commodity: true, name: "Crude Oil", iv: RULES.fallbackIV, step: 1,
-    newsQ: "crude oil price OPEC EIA inventories" },
-  XLE: { commodity: true, name: "Energy Sector", iv: RULES.fallbackIV, step: 1,
-    newsQ: "energy sector oil majors outlook" },
-  GDX: { commodity: true, name: "Gold Miners", iv: RULES.fallbackIV, step: 1,
-    newsQ: "gold miners production costs outlook" },
-
-  SPY: { name: "S&P 500 ETF", iv: 0.13, sigma: SIGMA.SPY, step: 5,
-    monthlyMean: SEASONAL.SPY,
-    newsQ: "S&P 500 stock market outlook" },
-};
-// The BASKET is the five commodity ETFs this app is about, derived from the
-// table above rather than typed out a second time: SPY is here so the desk can
-// price a hedge, it is not something the guided flow goes looking for.
-// `src/basket.js` carries the same five for the Netlify function that cannot
-// import this file, and `src/chain.test.js` fails the build if the two drift.
-const BASKET = Object.keys(UNDERLYINGS).filter((k) => UNDERLYINGS[k].commodity);
+/* ============================== THE MARKETS: ONE REGISTRY (PR #48, TASK 1) ==============================
+   `UNDERLYINGS` lived here (name, step, iv, sigma, news query, the commodity flag) and `src/basket.js` carried the
+   same ten again for the Netlify functions. One row per market now lives in `src/markets.js`, plain JS, and
+   everything — BASKET, getU(), the categories Find groups by, whether weather applies — derives from it. getU() is
+   still the SAFE accessor: any ticker (an Alpaca import, an old record) gets a fallback row, never undefined. */
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const NOW_MONTH = new Date().getMonth();
-/* THE DIRECTION "SEASON DECIDES" SUGGESTS FOR A MARKET: its season and its four factors. A market whose factors
-   are still being read hands in no fused result (`fusedFind`), so the suggestion rests on the season alone until
-   they land. One function, because `scan` and Find's list both ask it. */
-const suggestionScore = (seasonalScore, f) => (seasonalScore ?? 0) * 1.5 + (f ? (f.score / 25) * (f.confidence / 100) : 0);
-const suggestionOf = (seasonalScore, f) => {
-  const score = suggestionScore(seasonalScore, f);
-  return score > 1.5 ? "verybull" : score > 0.5 ? "bull" : score < -1.5 ? "verybear" : score < -0.5 ? "bear" : "neutral";
-};
+/* THE DIRECTION A MARKET'S SIGNALS SUGGEST is `signalDirection()` in signals.js (PR #48, TASK 3): score ×
+   confidence / 100 against RULES.directionSignalMin, CONFLICT always Neutral. `suggestionScore()` / `suggestionOf()`
+   (season × 1.5 + score / 25 × confidence) are retired: they counted the season twice. */
 /** The exit plan's sentence for a trade, with its take-profit target from `takeProfitTarget()`. */
 const planOf = (legs, { maxProfit = null, maxLoss = null, entry = null } = {}) =>
   exitPlanSentence(takeProfitTarget({ legs, maxProfit, maxLoss, entryNet: entry }));
-// Accesso SICURO alle statistiche del sottostante: qualunque ticker (anche importato
-// da Alpaca o salvato da versioni precedenti) ha sempre un fallback valido.
-// Questo elimina la causa n.1 delle "schermate nere" (crash su UNDERLYINGS[ticker] undefined).
-const FALLBACK_U = (tk) => ({ name: tk, iv: 0.30, sigma: 0.30, step: 0.5, monthlyMean: Array(12).fill(0), newsQ: `${tk} price outlook`, fallback: true });
-const getU = (tk) => UNDERLYINGS[tk] || FALLBACK_U(tk || "?");
-
 /* WHICH SEASONAL MEANS ARE IN FORCE FOR A MARKET — ONE EXPRESSION.
    `seasonalProvenance()` in rules.js is the home; this binds it to the loaded
    Alpha Vantage state and the table row behind it (which the liquid tier does
@@ -199,11 +121,21 @@ const getU = (tk) => UNDERLYINGS[tk] || FALLBACK_U(tk || "?");
    print `monthlyMean[NOW_MONTH]` off a row that is not there — `undefined[8]`
    throws, and the guard people reach for instead is `|| 0`, which prints a
    market as having no seasonal edge when nobody has measured one. */
-const seasonalOf = (state, tk) => seasonalProvenance((state || {})[tk] || null, getU(tk).monthlyMean, tk);
-/** This month's seasonal mean, or null. Never a zero nobody measured. */
-const seasonalNowOf = (state, tk) => {
-  const mm = seasonalOf(state, tk).monthlyMean;
-  return Array.isArray(mm) && Number.isFinite(mm[NOW_MONTH]) ? mm[NOW_MONTH] : null;
+const seasonalOf = (state, tk) => seasonalProvenance((state || {})[tk] || null, tk);
+/* WHAT THE SEASON SAYS FOR A MARKET OVER A WINDOW (PR #48, TASK 2): `seasonalSignal()` in rules.js, the one home —
+   the months from this one across the days held, and only those that beat their own noise. Find reads it on each
+   market's board, Build on the trade's days, Positions on the days left. */
+export const seasonOf = (state, tk, dte) => seasonalSignal(seasonalOf(state, tk), NOW_MONTH, dte);
+/** The counted window mean (%/month), or null when the season is not read. Never a zero nobody measured. */
+const seasonalNowOf = (state, tk, dte) => { const sg = seasonOf(state, tk, dte); return sg.read ? sg.mean : null; };
+/* THE BOARD A MARKET IS READ ON IN FIND: its buildable expiry nearest the horizon (`buildableExpiries()`, the gate's
+   own floor). One function, because Find's list and the season's window (PR #48) both ask it. */
+export const findBoardOf = (c, horizon) => {
+  if (!c?.spot || !Array.isArray(c.expirations)) return null;
+  const exps = buildableExpiries(c.expirations.map((e) => ({ key: e, dte: c.byExp[e].dte }))).buildable;
+  if (!exps.length) return null;
+  const e = exps.reduce((b2, x) => (Math.abs(x.dte - horizon) < Math.abs(b2.dte - horizon) ? x : b2), exps[0]);
+  return { expKey: e.key, dte: e.dte };
 };
 
 /* ============================== OPTION CHAIN: ALPACA FIRST, CBOE AS THE NET ==============================
@@ -255,27 +187,18 @@ async function fetchHistory(sym) {
   };
 }
 
-/* ---- WHY A MARKET IS STILL ON THE HAND-WRITTEN TABLE ----
-   `SEASONAL` in engine.js is hand-written and carries the heaviest of the four
-   weights. Measured against 195 months of real data for CORN it has the WRONG
-   SIGN on eight months of twelve — June reads +1.5 against a real ten-year mean
-   of -3.46, September -1.1 against a real +1.03 — so the Radar has been calling
-   CORN bearish in a month that is historically positive. It survives ONLY as a
-   fallback now, and a fallback that will not say why it is in use is
-   indistinguishable from a measurement. "Estimate" is not a reason. */
+/* ---- WHY A MARKET'S SEASON IS NOT READ ----
+   The hand-written table is retired (PR #48): until the measured history loads the season is "not read", and a
+   screen says why — "the call failed" and "nobody asked yet" are reasons; "estimate" never was. */
 const seasonalFallbackNote = (state) => {
   const st = state || {};
   if (st.loading) return "the real history is loading";
   if (st.error) return `the price history did not load — ${st.error}`;
   return "the real price history has not been requested yet";
 };
-/* WHAT IS IN FORCE, AND IT IS NOT ALWAYS AN ESTIMATE. The liquid tier carries
-   no hand-written row, so "hand-written estimate: …" would be naming a table
-   that does not exist for that market. `prov.missing` is the third case and it
-   is the one this app has to be able to say out loud. */
-const seasonalSourceLine = (entry, state, prov) => entry
+const seasonalSourceLine = (entry, state) => entry
   ? `${entry.src}${entry.upstreamError ? ` — Alpha Vantage refused the refresh (${entry.upstreamError}), so this is the last good answer` : ""}`
-  : `${prov && prov.missing ? "no seasonal reading at all" : "hand-written estimate"}: ${seasonalFallbackNote(state)}`;
+  : `${SEASON_NOT_READ}: ${seasonalFallbackNote(state)}`;
 
 /* ============================== ALPACA PAPER (via proxy serverless /api/alpaca) ============================== */
 async function alpacaGet(path) {
@@ -922,7 +845,7 @@ async function loadState() {
 // "suggested" until he answers (PRD §3).
 // `journalSeq` is the highest position ref this state has ever issued. It only
 // ever goes up: closing a position does not hand its number back (src/journal.js).
-const EMPTY = { journalSeq: 0, saved: [], positions: [], expiryLog: [], settings: { webhook: "", reportFreq: "weekly", reportLast: 0, reportLastMd: "", capital: null, concurrentTarget: null, savings: null, sizeOverride: null, sizingFree: null, mode: "pro", onboarded: false, notifyWhenReady: false }, seasonal: {}, journal: [], ivHist: {}, copilotLog: [] };
+const EMPTY = { journalSeq: 0, saved: [], positions: [], expiryLog: [], settings: { webhook: "", reportFreq: "weekly", reportLast: 0, reportLastMd: "", capital: null, concurrentTarget: null, savings: null, sizeOverride: null, sizingFree: null, mode: "pro", onboarded: false, notifyWhenReady: false, findOrder: "ev" }, seasonal: {}, journal: [], ivHist: {}, copilotLog: [] };
 /* A BROWSER WITH NO SAVED STATE STARTS FROM THE SERVER'S COPY (PR #42).
 
    Read on the owner's phone, 23 Sep 2026: the app opened from a link rather
@@ -943,7 +866,7 @@ export function hydrateFromServer(local, srv) {
   if (!positions.length) return null;
   const s0 = (srv && srv.settings) || {};
   const settings = {};
-  for (const k of ["webhook", "capital", "concurrentTarget", "savings", "sizeOverride", "sizingFree", "notifyWhenReady"]) {
+  for (const k of ["webhook", "capital", "concurrentTarget", "savings", "sizeOverride", "sizingFree", "notifyWhenReady", "findOrder"]) {
     if (s0[k] !== undefined) settings[k] = s0[k];
   }
   return { positions, settings, restoredFromServer: true };
@@ -956,7 +879,7 @@ async function saveState(st) {
   // is not theirs. Demo state stays in the visitor's own browser.
   if (DEMO) return;
   // sync server (abilita Autopilot ad app chiusa); fire-and-forget
-  try { fetch("/api/state", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ positions: st.positions, settings: { webhook: st.settings?.webhook, capital: st.settings?.capital, concurrentTarget: st.settings?.concurrentTarget, savings: st.settings?.savings, sizeOverride: st.settings?.sizeOverride, sizingFree: st.settings?.sizingFree ?? null, notifyWhenReady: !!st.settings?.notifyWhenReady } }) }); } catch { /* offline ok */ }
+  try { fetch("/api/state", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ positions: st.positions, settings: { webhook: st.settings?.webhook, capital: st.settings?.capital, concurrentTarget: st.settings?.concurrentTarget, savings: st.settings?.savings, sizeOverride: st.settings?.sizeOverride, sizingFree: st.settings?.sizingFree ?? null, notifyWhenReady: !!st.settings?.notifyWhenReady, findOrder: st.settings?.findOrder || "ev" } }) }); } catch { /* offline ok */ }
 }
 
 /* ============================== UI ATOMS ============================== */
@@ -1485,6 +1408,8 @@ export default function OptionsStrategyLab() {
   const [legs, setLegs] = useState([]);
   const [stratName, setStratName] = useState("Bull Call Spread");
   const [store, setStore] = useState(EMPTY);
+  // The sync reads the records through a ref: its callback is created once (PR #48, TASK 0a).
+  const storeRef = useRef(store); storeRef.current = store;
   /* ---- THE CAPITAL MODEL, PRD §3. ONE HOME, READ EVERYWHERE. ----
      Declared here, above everything that reads it, because everything does:
      the risk gate, the wizard's budget question, the Build screen's risk field,
@@ -1607,13 +1532,15 @@ export default function OptionsStrategyLab() {
   const [nf, setNf] = useState({ tk: "ALL", kind: "all", q: "", days: 7 });
   /* ---- WHAT FIND IS ASKED (PR #40, TASK 1) ----
      The markets it reads (all of the basket by default), the direction — one
-     for every market, or "season" to let each market's four factors decide —
+     for every market, or "signals" to let each market's four factors decide (PR #48) —
      the horizon in days, the one-market filter that replaced the Shortlist
      step, and whether flagged cards are listed. Every one of them re-filters
      the list live. */
-  const [find, setFind] = useState({ markets: [...BASKET], dir: "season", horizon: RULES.targetEntryDTE, market: null, flagged: true });
+  const [find, setFind] = useState({ markets: [...BASKET], dir: "signals", horizon: RULES.targetEntryDTE, market: null, cat: null, flagged: true });
   // Which market "Why this market" is open on: a card's badge sets it.
   const [whyTk, setWhyTk] = useState(null);
+  // THE DAYS THE WHY SHEET READS ITS MARKET AT (PR #48): the card's board when opened from a card, else the market's.
+  const [whyDte, setWhyDte] = useState(null);
   // THE LIQUIDITY FLOOR IS A SETTING, NOT AN ASSERTION. The app recommends and
   // the user decides; every list filtered by it says which setting produced it,
   // and loosening it carries a warning naming what comes back (src/rules.js).
@@ -1655,11 +1582,13 @@ export default function OptionsStrategyLab() {
      at all, so a market whose Alpha Vantage history has not loaded has UNKNOWN
      seasonality rather than an estimate — every reader of `seas.monthlyMean`
      below checks before it indexes. */
-  const seas = seasonal[ticker] || { monthlyMean: U.monthlyMean || null, matrix: null, years: null, src: null };
+  const seas = seasonal[ticker] || { monthlyMean: null, matrix: null, years: null, src: null };
   const seasProv = seasonalOf(seasonal, ticker);
-  const seasNow = seasonalNowOf(seasonal, ticker);
   const iv = U.iv;
   const dte = expKey && chain?.byExp[expKey] ? chain.byExp[expKey].dte : dteManual;
+  /* THE SEASON FOR THIS TRADE'S DAYS (PR #48): `seasonalSignal()` over the window, the counted months only. */
+  const seasSig = seasonOf(seasonal, ticker, dte);
+  const seasNow = seasSig.read ? seasSig.mean : null;
   /* ONE IMPLEMENTATION OF "WHICH STRIKES DOES THIS BOARD CARRY". This was a
      second copy of `expiryStrikes()` in chain.js, written out again here and
      twice more below in the wide search and the guided run — four answers to
@@ -1776,7 +1705,7 @@ export default function OptionsStrategyLab() {
     setSeasonal(s2);
     setStore((st0) => {
       const st = { ...st0, seasonal: Object.fromEntries(Object.entries(s2).map(([k, v]) => [k,
-        { monthlyMean: v.monthlyMean, sigma: v.sigma, matrix: v.matrix, years: v.years, from: v.from,
+        { monthlyMean: v.monthlyMean, monthN: v.monthN, monthSE: v.monthSE, sigma: v.sigma, matrix: v.matrix, years: v.years, from: v.from,
           src: v.src, provenance: v.provenance, at: v.at, cached: v.cached, upstreamError: v.upstreamError }])) };
       saveState(st);
       return st;
@@ -1900,7 +1829,13 @@ export default function OptionsStrategyLab() {
       setHydrated(true);
       // The ref is what the sequential loaders accumulate into; restoring only
       // the state would make the first fetch overwrite everything saved.
-      if (st.seasonal) { seasonalRef.current = st.seasonal; setSeasonal(st.seasonal); }
+      // A READING STORED BEFORE PR #48 HAS NO PER-MONTH YEARS OR ERRORS: they are worked out again from its own
+      // matrix (`statsFromMatrix()`), never assumed, so no month counts on a reading that cannot say its noise.
+      if (st.seasonal) {
+        const restored = Object.fromEntries(Object.entries(st.seasonal).map(([k, v]) => [k,
+          v && Array.isArray(v.matrix) && !Array.isArray(v.monthSE) ? { ...v, ...statsFromMatrix(v.matrix), at: v.at } : v]));
+        seasonalRef.current = restored; setSeasonal(restored);
+      }
       const seedTickers = DEMO ? DEMO_SEED_TICKERS : [];
       const tickers = [...new Set([(st.positions || []).map((p) => p.ticker), "SOYB", ...seedTickers].flat())];
       setBusy("auto"); setMsg("Loading live option chains…");
@@ -2041,6 +1976,17 @@ export default function OptionsStrategyLab() {
       if (syncStop.current) return;
       if (acc && acc.account_number) setAccount(acc);
       if (clk && typeof clk.is_open === "boolean") setClock(clk);
+      // A REPLACE MADE ON ALPACA'S OWN SCREEN (PR #48, TASK 0a): a working order that `replaces` a record's id.
+      const moved = replacementsIn(storeRef.current.positions, oo);
+      if (moved.length) {
+        setStore((st) => {
+          const positions = st.positions.map((x) => {
+            const m = moved.find((y) => y.recordId === x.id);
+            return m ? (adoptReplacement(x, m.oldId, m.fresh) || x) : x;
+          });
+          const ns = { ...st, positions }; saveState(ns); return ns;
+        });
+      }
       setAlSync((prev) => {
         // fill rilevato: c'è una posizione nuova o un ordine sparito → importa
         if (po.length > prev.positions.length || (prev.orders.length > oo.length && po.length)) importRef.current?.(true);
@@ -2125,19 +2071,30 @@ export default function OptionsStrategyLab() {
     return Object.values(news).flatMap((n) => n?.items || []).filter((i) => i?.title && !seen.has(i.title) && seen.add(i.title));
   }, [news]);
 
-  const fuseFor = useCallback((tk, barsOverride) => fuseSignals({
-    ticker: tk, month: NOW_MONTH,
-    weatherData: weather, newsItems: newsPool,
-    bars: barsOverride !== undefined ? barsOverride : barsCache[tk],
-    // NULL, NEVER A ZERO NOBODY MEASURED. `seasonalComponent()` reads a null
-    // as "no seasonal history for this market" and says so on the bar; a 0
-    // would read as a market measured to have no seasonal edge.
-    seasonalMean: seasonalNowOf(seasonal, tk),
-  }), [weather, newsPool, barsCache, seasonal]);
-
+  /* ---- ONE FUSED RESULT PER (MARKET, DAYS HELD) — PR #48, TASK 2 ----
+     The season is read over a window (`seasonalSignal()`), so the four-factor result depends on how long the trade is
+     held. `fuseAt(tk, dte)` is the one door, memoised per key until an input changes: Find passes each market's board,
+     Build the trade's days, Positions the days left — the same market and expiry give the same season everywhere. */
+  const fuseAt = useMemo(() => {
+    const cache = new Map();
+    return (tk, d) => {
+      const days = Number.isFinite(d) && d > 0 ? Math.round(d) : RULES.targetEntryDTE;
+      const key = `${tk}|${days}`;
+      if (!cache.has(key)) {
+        cache.set(key, fuseSignals({ ticker: tk, month: NOW_MONTH, weatherData: weather, newsItems: newsPool,
+          bars: barsCache[tk],
+          // NOT READ IS NULL, NEVER A ZERO NOBODY MEASURED: the season factor is then left out of the score.
+          season: seasonal[tk] ? seasonOf(seasonal, tk, days) : null }));
+      }
+      return cache.get(key);
+    };
+  }, [weather, newsPool, barsCache, seasonal]);
+  /** The days a market is read at by default: Build's trade for Build's market, otherwise its Find board. */
+  const marketDte = useCallback((tk) => (tk === ticker && dte > 0 ? dte
+    : (findBoardOf(chains[tk], find.horizon) || {}).dte || RULES.targetEntryDTE), [ticker, dte, chains, find.horizon]);
   const fused = useMemo(
-    () => Object.fromEntries(Object.keys(UNDERLYINGS).map((tk) => [tk, fuseFor(tk)])),
-    [fuseFor]
+    () => Object.fromEntries(TICKERS.map((tk) => [tk, fuseAt(tk, marketDte(tk))])),
+    [fuseAt, marketDte]
   );
   /* ---- WHICH INPUTS HAVE LANDED, PER MARKET (PR #44, TASK 4) ----
      Measured: Find loaded chains and bars and never news, and seasonality landed after the chains, so the four
@@ -2149,7 +2106,7 @@ export default function OptionsStrategyLab() {
   const readiness = useMemo(() => {
     const settled = (tk) => { const n = news[tk]; return !!n && !n.loading && (!!n.at || !!n.err); };
     const poolDone = newsScope.every(settled);
-    return Object.fromEntries(Object.keys(UNDERLYINGS).map((tk) => {
+    return Object.fromEntries(TICKERS.map((tk) => {
       const sn = seasonalState[tk];
       return [tk, readingState({ ticker: tk, inputs: {
         news: !poolDone ? "loading" : news[tk]?.err ? { state: "failed", why: "the feed did not answer" } : news[tk] ? "ready" : "loading",
@@ -2161,6 +2118,8 @@ export default function OptionsStrategyLab() {
   }, [news, newsScope, barsCache, barsFail, seasonal, seasonalState, weatherState]);
   /** What Find reads: a market still being read has NO fused result, so no score, no flag and no rank effect. */
   const fusedFind = useMemo(() => Object.fromEntries(Object.entries(fused).map(([tk, f]) => [tk, readiness[tk]?.reading ? null : f])), [fused, readiness]);
+  /** Find's read of one market on its board's days: null while that market is still being read. */
+  const fuseFind = useCallback((tk, d) => (readiness[tk]?.reading ? null : fuseAt(tk, d)), [readiness, fuseAt]);
 
   /* ---- analisi ---- */
   /* `A` IS THE STRUCTURE AT THE MID — what it is WORTH. It is still the honest
@@ -2579,7 +2538,8 @@ export default function OptionsStrategyLab() {
     // the app's own book and "opened" is simply true.
     const outcome = alpacaOrder ? orderOutcome(alpacaOrder) : null;
     const working = !!(outcome && !outcome.filled);
-    const seasM = seasonalNowOf(seasonal, tk);
+    // THE THESIS'S SEASON IS THE WINDOW THIS TRADE IS HELD FOR (PR #48): the counted mean, or null when not read.
+    const seasM = seasonalNowOf(seasonal, tk, d);
     const expiry = ek ? new Date(ek).toISOString() : new Date(Date.now() + d * 86400000).toISOString();
     const ivAvg0 = structureIV(analysis);
     // THE CHANCE THIS POSITION IS OPENED ON, from the one expression. The TIS
@@ -2615,7 +2575,7 @@ export default function OptionsStrategyLab() {
       // The absence of these three fields on an older record is the marker, the
       // way `contractsAssumed` marks a size that was assumed: at that point the
       // hand-written table was the only one either side could reach.
-      thesis: { pop: pop0, ...seasonalStampFields(mc0), iv: ivAvg0, seasonal: seasM, regime: seasM > 0.8 ? "strong up" : seasM < -0.8 ? "strong down" : "weak", spot: sp, breakevens: analysis.breakevens, delta: analysis.greeks.delta, vega: analysis.greeks.vega,
+      thesis: { pop: pop0, ...seasonalStampFields(mc0), iv: ivAvg0, seasonal: seasM, regime: seasM > 0 ? "strong up" : seasM < 0 ? "strong down" : "weak", spot: sp, breakevens: analysis.breakevens, delta: analysis.greeks.delta, vega: analysis.greeks.vega,
         signal: f ? { score: f.score, confidence: f.confidence, agreement: f.agreement, narrative: f.narrative } : null,
         // THE FOUR FACTORS AS READ AT ENTRY (PR #44, TASK 4): each factor's direction and strength and the seasonal
         // source, so Details and the Positions card can set "at entry" beside "now". Absent on an older record.
@@ -2678,7 +2638,7 @@ export default function OptionsStrategyLab() {
             `${String(alpacaOrder.time_in_force || "").toLowerCase() === "gtc" ? "standing until cancelled" : "good for today's session only"}. ` +
             `${outcome.headline}`,
         }] : []),
-        { t: Date.now(), type: "open", text: `${working ? "Recorded" : "Opened"} with a ${pop0 != null ? (pop0 * 100).toFixed(0) + "%" : "n/a"} chance · volatility ${(ivAvg0 * 100).toFixed(0)}% · season ${seasM.toFixed(1)}%/mo${f ? ` · signal ${f.score > 0 ? "+" : ""}${f.score}/100 ${f.agreement}` : ""}` },
+        { t: Date.now(), type: "open", text: `${working ? "Recorded" : "Opened"} with a ${pop0 != null ? (pop0 * 100).toFixed(0) + "%" : "n/a"} chance · volatility ${(ivAvg0 * 100).toFixed(0)}% · season ${seasM != null ? `${seasM.toFixed(1)}%/mo` : "not read"}${f ? ` · signal ${f.score > 0 ? "+" : ""}${f.score}/100 ${f.agreement}` : ""}` },
         { t: Date.now(), type: "plan", text: working
           ? `Exit plan frozen at entry — ${planOf(lg, analysis)} It starts counting when the order fills; it has not filled yet.`
           : `Exit plan frozen at entry — ${planOf(lg, analysis)}` },
@@ -2901,18 +2861,11 @@ export default function OptionsStrategyLab() {
     // `recheckOrders()` would keep asking about an order that is no longer the one working.
     onReplaced: (old, fresh, plan) => {
       if (!fresh?.id) return;
+      // THE SAME UPDATE A REPLACE MADE ON ALPACA'S OWN SCREEN GETS (`adoptReplacement()`, PR #48 TASK 0a).
       setStore((st) => {
-        const positions = st.positions.map((x) => {
-          const open = x.alpacaId === old.id, close = x.closeOrder?.id === old.id;
-          if (!open && !close) return x;
-          const t = appendTimeline(x, { t: Date.now(), type: "status", orderId: String(fresh.id),
-            text: `Order modified at Alpaca (replaced in place): ${plan.qty} at ${orderLimitWords({ ...old, limit_price: plan.patch.limit_price }) || "a price the app could not read"}, ` +
-              `${plan.tif.toUpperCase()}. Old order ${old.id} → new order ${fresh.id}.` });
-          return { ...x, ...(open ? { alpacaId: fresh.id, alpacaTif: fresh.time_in_force ?? plan.tif,
-            ...(fresh.limit_price != null && Number.isFinite(+fresh.limit_price) ? { alpacaLimit: +fresh.limit_price } : {}) } : {}),
-            ...(close ? { closeOrder: { ...x.closeOrder, id: fresh.id, t: Date.now(), limit: fresh.limit_price ?? null } } : {}),
-            timeline: t.timeline, seqNext: t.seqNext };
-        });
+        const positions = st.positions.map((x) => adoptReplacement(x, old.id, fresh, {
+          text: `Order modified at Alpaca (replaced in place): ${plan.qty} at ${orderLimitWords({ ...old, limit_price: plan.patch.limit_price }) || "a price the app could not read"}, ` +
+            `${plan.tif.toUpperCase()}. Old order ${old.id} → new order ${fresh.id}.` }) || x);
         const ns = { ...st, positions }; saveState(ns); return ns;
       });
     },
@@ -2964,6 +2917,13 @@ export default function OptionsStrategyLab() {
     for (const p of todo) {
       try {
         const o = await alpacaReq(`/v2/orders/${encodeURIComponent(p.alpacaId)}`);
+        // REPLACED OUTSIDE THE APP (PR #48, TASK 0a): follow `replaced_by` instead of waiting on a dead id.
+        const nid = replacedBy(o);
+        if (nid) {
+          const fresh = await alpacaReq(`/v2/orders/${encodeURIComponent(nid)}`).catch(() => ({ id: nid }));
+          changes.push({ id: p.id, adopt: { oldId: p.alpacaId, fresh: fresh && fresh.id ? fresh : { id: nid } } });
+          continue;
+        }
         const r = orderStatusRecheck(p, o);
         if (r.changed) changes.push({ id: p.id, r });
       } catch { /* the broker is not reachable: the warning stays, nothing is written */ }
@@ -2974,6 +2934,7 @@ export default function OptionsStrategyLab() {
       const positions = st.positions.map((p) => {
         const c = changes.find((x) => x.id === p.id);
         if (!c) return p;
+        if (c.adopt) return adoptReplacement(p, c.adopt.oldId, c.adopt.fresh) || p;
         // A fill that happens after the fact starts the exit plan, and says so:
         // the plan entry written at open said it had not started yet.
         // FILLED IS ITS OWN EVENT, WITH ITS OWN TYPE. `sent` was written when
@@ -2999,7 +2960,7 @@ export default function OptionsStrategyLab() {
       saveState(ns);
       return ns;
     });
-    const filled = changes.filter((c) => c.r.outcome.filled).length;
+    const filled = changes.filter((c) => c.r && c.r.outcome.filled).length;
     // The new state is on each order's row in Positions; the banner only points.
     void filled;
     setMsg(`${changes.length} order${changes.length === 1 ? "" : "s"} changed — see Positions.`);
@@ -3326,7 +3287,8 @@ export default function OptionsStrategyLab() {
       const ivs = p.legs.map((l) => qp(l)?.iv).filter(Boolean);
       return ivs.length ? ivs.reduce((a, b) => a + b, 0) / ivs.length : (p.thesis?.iv ?? getU(p.ticker).iv);
     })();
-    const seasNow = seasonalNowOf(seasonal, p.ticker);
+    // THE SEASON ON THE DAYS LEFT (PR #48): the same `seasonalSignal()` Find and Build read, over this window.
+    const seasNow = seasonalNowOf(seasonal, p.ticker, Math.max(1, dteLeft));
     // THE ONE CHANCE, ON A POSITION THAT IS ALREADY OPEN. The Guardian's TIS compares this with `thesis.pop`,
     // recorded at entry — and until the one chance existed the two came from two different arithmetics.
     const mcNow = s ? (() => {
@@ -3335,7 +3297,7 @@ export default function OptionsStrategyLab() {
         dte: Math.max(1, dteLeft), expKey: p.expKey || null, thesisIV: p.thesis?.iv ?? null });
     })() : null;
     const popNow = mcNow ? mcNow.pop : null;
-    const nowSignals = signalSnapshot(fused[p.ticker] || null,
+    const nowSignals = signalSnapshot(fuseAt(p.ticker, Math.max(1, dteLeft)) || null,
       { reading: readiness[p.ticker], seasonalSource: seasonalFor(p.ticker).source });
     const tpTarget = al0 && al0.tpTarget ? al0.tpTarget : takeProfitTarget({ legs: p.legs, maxProfit: p.maxProfit,
       maxLoss: p.maxLoss, entryNet: p.entryNet, contracts: n });
@@ -3352,7 +3314,7 @@ export default function OptionsStrategyLab() {
       fileKind: fileState(p, alSync),
       planSentence: exitPlanSentence(exitPlan), planDetail: exitPlanDetail(exitPlan, n),
     }];
-  })), [ownedPositions, chains, posAlerts, seasonal, fused, readiness, seasonalFor, alSync, chanceFor]); // eslint-disable-line
+  })), [ownedPositions, chains, posAlerts, seasonal, fuseAt, readiness, seasonalFor, alSync, chanceFor]); // eslint-disable-line
 
   /* THE DETAILS SHEET (PR #44, TASK 2): the position, read-only. "Monitor" used to hand its legs to Build, which
      re-priced it as a NEW trade at today's prices, re-sized it and left the ticket live — a Send there opened a second
@@ -3528,7 +3490,7 @@ export default function OptionsStrategyLab() {
             // order the broker never told it about — the same class of fault
             // as the sentinel this replaces.
             entrySource: "fill", contracts: 1, sizingFree: freeSizing,
-            thesis: { imported: true, iv: getU(g.und).iv, seasonal: seasonalNowOf(seasonal, g.und), pop: null, spot: chains[g.und]?.spot ?? null, vega: 1 },
+            thesis: { imported: true, iv: getU(g.und).iv, seasonal: seasonalNowOf(seasonal, g.und, g.expKey && chains[g.und]?.byExp?.[g.expKey] ? chains[g.und].byExp[g.expKey].dte : RULES.targetEntryDTE), pop: null, spot: chains[g.und]?.spot ?? null, vega: 1 },
             timeline: [
               { t: Date.now(), type: "fill", text:
                 `Read from your Alpaca paper account as an OPEN POSITION — ${g.legs.length} legs, ` +
@@ -3770,20 +3732,17 @@ export default function OptionsStrategyLab() {
      Un ticker in CONFLICT finisce ULTIMO comunque: quando i fattori si
      contraddicono non sappiamo abbastanza, e nessun rendimento atteso può
      farci cambiare idea. */
-  const scan = useMemo(() => Object.entries(UNDERLYINGS).map(([tk, u]) => {
+  const scan = useMemo(() => TICKERS.map((tk) => [tk, getU(tk)]).map(([tk, u]) => {
     // NULL WHERE NOBODY HAS MEASURED IT. The liquid tier has no hand-written
     // row, so this is null until Alpha Vantage lands — and the ROW below prints
     // a sentence rather than "+0.0%/mo", which is a claim about a market.
-    const seasonalScore = seasonalNowOf(seasonal, tk);
+    const seasonalScore = seasonalNowOf(seasonal, tk, marketDte(tk));
     const c = chains[tk];
     const f = fused[tk];
-    // fuseSignals vive in -100..+100, la stagionalità in %/mese: /25 le riporta
-    // sulla stessa scala prima di sommarle.
-    // A SORT KEY CANNOT BE NULL, so an unknown season contributes nothing to
-    // the ORDER of the list. That is not the same as printing a zero: the
-    // number on screen is `seasonalScore`, which stays null and says so.
-    const score = suggestionScore(seasonalScore, f);
-    const sugg = suggestionOf(seasonalScore, f);
+    // THE SIGNALS' DIRECTION, ONCE (PR #48): a market still being read suggests Neutral and sorts at 0.
+    const sd = signalDirection(fusedFind[tk] || null);
+    const score = sd ? sd.s : 0;
+    const sugg = sd ? sd.dir : "neutral";
     return { tk, name: u.name, spot: c?.spot ?? null, seasonalScore, score, sugg, real: !!seasonal[tk],
       // ONE SERIES, ONE NUMBER OF YEARS. The header said "10y history" and the
       // panel beside it said "11y" about the same numbers: the ten-year cutoff
@@ -3797,7 +3756,7 @@ export default function OptionsStrategyLab() {
       // as a chance with nothing saying which table drifted it.
       ...seasonalStampFields(seasonalFor(tk)),
       fused: f, conflict: f?.agreement === "CONFLICT", agreement: f?.agreement, signalScore: f?.score ?? 0, confidence: f?.confidence ?? 0 };
-  }).sort((a, b) => (a.conflict !== b.conflict ? (a.conflict ? 1 : -1) : b.score - a.score)), [chains, seasonal, fused, seasonalFor]);
+  }).sort((a, b) => (a.conflict !== b.conflict ? (a.conflict ? 1 : -1) : b.score - a.score)), [chains, seasonal, fused, fusedFind, seasonalFor, marketDte]);
 
   /* ====================================================================
      FIND — ONE REQUEST, ONE RANKED LIST ACROSS THE SELECTED MARKETS
@@ -3839,14 +3798,19 @@ export default function OptionsStrategyLab() {
         else loading.push(tk);
         continue;
       }
-      const exps = buildableExpiries(c.expirations.map((e) => ({ key: e, dte: c.byExp[e].dte }))).buildable;
-      if (!exps.length) { noBoard.push(tk); continue; }
-      const ek = exps.reduce((b2, e) => (Math.abs(e.dte - find.horizon) < Math.abs(b2.dte - find.horizon) ? e : b2), exps[0]).key;
+      const board = findBoardOf(c, find.horizon);
+      if (!board) { noBoard.push(tk); continue; }
+      const ek = board.expKey;
       const d2 = c.byExp[ek].dte;
+      // THE SIGNALS FOR THIS MARKET ON THIS BOARD'S DAYS (PR #48): keyed by (market, dte), the same as Build's.
+      const fHere = fuseFind(tk, d2);
       const strikes = expiryStrikes(c, ek);
       if (!strikes) { failed.push({ tk, why: "board unreadable" }); continue; }
-      const row = scan.find((r) => r.tk === tk);
-      const sent = find.dir === "season" ? (row ? suggestionOf(row.seasonalScore, fusedFind[tk]) : "neutral") : find.dir;
+      /* "SIGNALS DECIDE" (PR #48, TASK 3): the suggested family PLUS the Neutral one, each card tagged with the
+         family it came from; a market still being read shows its Neutral cards only. A fixed direction is as before. */
+      const sd = find.dir === "signals" ? signalDirection(fHere) : null;
+      const fams = find.dir === "signals" ? signalFamilies(sd) : [find.dir];
+      const sent = fams[0];
       const qq = makeQuote(c, ek);
       const peers = expiryOpenInterest(c, ek);
       // THE BOARD'S OWN ARITHMETIC, READ ONCE (PR #41, TASK 2). A stale board
@@ -3854,38 +3818,69 @@ export default function OptionsStrategyLab() {
       // only when a broken pair touches its own strikes (`invertedOnStrikes()`).
       const breaks = monotonicityBreaks(c, ek);
       const stale = boardLooksStale(breaks);
-      boards[tk] = { expKey: ek, dte: d2, sent, peers, feed: feedName(c), stale };
+      boards[tk] = { expKey: ek, dte: d2, sent, fams, signal: sd, reading: !fHere, peers, feed: feedName(c), stale };
       const u = getU(tk);
-      const r = shortlistWithFloors(sent, c.spot, u.step, strikes, d2, u.iv, qq, { peers, level: liqLevel });
-      for (const k of Object.keys(tally)) tally[k] += r.tally[k] || 0;
-      if (r.oiSkipped) oiSkipped.push(tk);
-      if (r.tally.spreadSkipped) spreadSkipped.push(tk);
-      if (r.tally.comboSpreadSkipped) comboSpreadSkipped.push(tk);
-      for (const { p, a, aFill } of r.rows) {
-        const lf = listCardFigures(p.legs, { spot: c.spot, dte: d2, iv: u.iv, q: qq, ticker: tk, expKey: ek,
-          seasonal: seasonalFor(tk), a, aFill });
-        const f = fusedFind[tk] || null;
-        const prof = evProfile(lf.mc, aFill.maxProfit, aFill.maxLoss);
-        const cand = candidateOf({ name: p.name, legs: p.legs, a: aFill, pop: lf.pop, dte: d2, expKey: ek,
-          ...seasonalStampFields(lf.mc), ...chanceDrawFields(lf.mc) }, { ticker: tk, spot: c.spot, source: "find" });
-        items.push(withSignalRank({
-          key: cand.key, tk, name: p.name, legs: p.legs, expKey: ek, dte: d2, spot: c.spot, sent, lf, cand,
-          feedBroken: invertedOnStrikes(breaks, p.legs).length > 0,
-          noQuoteLegs: comboBook(p.legs, quotesOf(aFill)).missing.length,
-          touchSize: touchSizeOf(p.legs, aFill),
-          fused: f, flags: candidateFlags({ legs: p.legs, fused: f, ivRank: ivRankOf(tk) }),
-          ev100: prof ? prof.ev100 : -999, tag: prof ? prof.tag : null,
-        }, f, sentimentDirection(sent)));
+      const seen = new Set();
+      for (const fam of fams) {
+        const r = shortlistWithFloors(fam, c.spot, u.step, strikes, d2, u.iv, qq, { peers, level: liqLevel });
+        for (const k of Object.keys(tally)) tally[k] += r.tally[k] || 0;
+        if (r.oiSkipped && !oiSkipped.includes(tk)) oiSkipped.push(tk);
+        if (r.tally.spreadSkipped && !spreadSkipped.includes(tk)) spreadSkipped.push(tk);
+        if (r.tally.comboSpreadSkipped && !comboSpreadSkipped.includes(tk)) comboSpreadSkipped.push(tk);
+        for (const { p, a, aFill } of r.rows) {
+          const lf = listCardFigures(p.legs, { spot: c.spot, dte: d2, iv: u.iv, q: qq, ticker: tk, expKey: ek,
+            seasonal: seasonalFor(tk), a, aFill });
+          const f = fHere || null;
+          const prof = evProfile(lf.mc, aFill.maxProfit, aFill.maxLoss);
+          const cand = candidateOf({ name: p.name, legs: p.legs, a: aFill, pop: lf.pop, dte: d2, expKey: ek,
+            ...seasonalStampFields(lf.mc), ...chanceDrawFields(lf.mc) }, { ticker: tk, spot: c.spot, source: "find" });
+          if (seen.has(cand.key)) continue;
+          seen.add(cand.key);
+          items.push(withSignalRank({
+            key: cand.key, tk, name: p.name, legs: p.legs, expKey: ek, dte: d2, spot: c.spot, sent: fam, lf, cand,
+            // "with the signal" or "neutral" (Signals decide); null under a fixed direction.
+            family: find.dir === "signals" ? (fam === "neutral" ? "neutral" : "signal") : null,
+            feedBroken: invertedOnStrikes(breaks, p.legs).length > 0,
+            noQuoteLegs: comboBook(p.legs, quotesOf(aFill)).missing.length,
+            touchSize: touchSizeOf(p.legs, aFill),
+            fused: f, flags: candidateFlags({ legs: p.legs, fused: f, ivRank: ivRankOf(tk) }),
+            ev100: prof ? prof.ev100 : -999, tag: prof ? prof.tag : null,
+          }, f, sentimentDirection(fam)));
+        }
       }
     }
-    items.sort(compareCandidates);
+    // NOT SORTED HERE: the order is the owner's (`findShown`, PR #48).
     const stale = Object.entries(boards).filter(([, b]) => b.stale).map(([tk, b]) => ({ tk, expKey: b.expKey }));
     return { items, tally, noBoard, loading, failed, oiSkipped, spreadSkipped, comboSpreadSkipped, boards, stale };
-  }, [find.markets, find.dir, find.horizon, chains, chainErr, scan, liqLevel, fusedFind, seasonalFor, ivRankOf]); // eslint-disable-line
+  }, [find.markets, find.dir, find.horizon, chains, chainErr, liqLevel, fuseFind, seasonalFor, ivRankOf]); // eslint-disable-line
+  /* "CORN: signals in, Bull cards added" (PR #48, TASK 3). A market shows its Neutral cards while its signals are being
+     read; when they land and suggest a direction, its directional family appears, and this says so once. */
+  const [signalsIn, setSignalsIn] = useState({});
+  const wasReading = useRef({});
+  useEffect(() => {
+    if (find.dir !== "signals") { wasReading.current = {}; setSignalsIn({}); return; }
+    const add = {};
+    for (const [tk, b] of Object.entries(findGen.boards)) {
+      if (wasReading.current[tk] && !b.reading && b.signal && b.signal.dir !== "neutral") {
+        add[tk] = `${tk}: signals in, ${(SENTIMENTS.find((x) => x.id === b.signal.dir) || {}).label || b.signal.dir} cards added`;
+      }
+      wasReading.current[tk] = b.reading;
+    }
+    if (Object.keys(add).length) setSignalsIn((m) => ({ ...m, ...add }));
+  }, [findGen, find.dir]);
   /* THE LIST ON SCREEN: the one-market filter (what the Shortlist step was),
      and the flag toggle. Nothing is dropped without a count saying so. */
+  // ONE FILTER: a market, or a category of the registry (PR #48, TASK 1).
+  const inFindFilter = useCallback((x) => (!find.market || x.tk === find.market) && (!find.cat || categoryOf(x.tk) === find.cat),
+    [find.market, find.cat]);
+  /* "ORDER BY" (PR #48, TASK 4): the owner's choice, synced as `settings.findOrder`. Sorting is here, outside the
+     generation memo: changing the order re-sorts the cards and never re-simulates one. */
+  const findOrder = findOrderOf(store.settings?.findOrder).id;
+  const setFindOrder = useCallback((id) => setStore((st) => {
+    const ns = { ...st, settings: { ...st.settings, findOrder: findOrderOf(id).id } }; saveState(ns); return ns;
+  }), []);
   const findShown = useMemo(() => findGen.items.filter((x) =>
-    (!find.market || x.tk === find.market) && (find.flagged || x.flags.length === 0)), [findGen, find.market, find.flagged]);
+    inFindFilter(x) && (find.flagged || x.flags.length === 0)).sort(findOrderCompare(findOrder)), [findGen, inFindFilter, find.flagged, findOrder]);
   useEffect(() => {
     // BACK RETURNS TO THE CARD (PR #46, TASK 2): a sheet opened from a card scrolls back to it when it closes.
     if (step !== "find" || ev || !scrollToCard.current) return;
@@ -3944,10 +3939,10 @@ export default function OptionsStrategyLab() {
     });
     return () => cancelAnimationFrame(id);
   }, [posSeg, focusOrder, alSync]);
-  const flaggedHidden = find.flagged ? 0 : findGen.items.filter((x) => (!find.market || x.tk === find.market) && x.flags.length).length;
+  const flaggedHidden = find.flagged ? 0 : findGen.items.filter((x) => inFindFilter(x) && x.flags.length).length;
   /* THE LIQUIDITY FLOOR'S OWN PANEL is about ONE board — its threshold and its
      peers — so it reads the market in focus: the filter, or the top card's. */
-  const focusTk = find.market || (findGen.items[0] && findGen.items[0].tk) || find.markets[0] || ticker;
+  const focusTk = find.market || ((findShown[0] || findGen.items[0]) || {}).tk || find.markets[0] || ticker;
   const focusBoard = findGen.boards[focusTk] || null;
   const liqPreview = useMemo(() => {
     const c = chains[focusTk];
@@ -4189,19 +4184,15 @@ export default function OptionsStrategyLab() {
             c={spot && isStale("chain", spotAge) ? T.amber : undefined}
             tip={freshnessNote("chain", spotAge, { what: "this price" })} />
           <Stat k="EXPIRY" v={expKey ? `${expKey} · ${dte} DTE` : `${dte} DTE (model)`} c={T.blue} />
-          {/* A DASH, NOT A ZERO. `seasNow` is null for a market whose monthly
-              history has not loaded and has no written row behind it, and
-              "+0.0%" there would be the app claiming it measured no edge. */}
-          <Stat k={`SEASONALITY ${MONTHS[NOW_MONTH].toUpperCase()}`}
-            v={seasNow == null ? "—" : `${seasNow > 0 ? "+" : ""}${seasNow.toFixed(1)}%`}
-            c={seasNow == null ? T.dim : seasNow > 0 ? T.green : T.red}
-            tip={seasNow == null ? seasProv.note : undefined} />
-          {/* A MARKET ON THE FALLBACK SAYS WHY. `SEASONAL` in engine.js is
-              hand-written and wrong on eight months of twelve for CORN, and it
-              carries the heaviest of the four weights. "Estimate" is not a
-              reason; "the call failed" and "nobody asked yet" are. */}
-          <Stat k="SEASONAL SOURCE" v={seasonal[ticker] ? seas.src : "hand-written estimate"}
-            c={seasonal[ticker] ? (seasonalState[ticker]?.error ? T.amber : T.green) : T.amber}
+          {/* A DASH, NOT A ZERO. `seasNow` is null until the market's monthly history has loaded ("season not read").
+              Since PR #48 it is the window's COUNTED mean (`seasonalSignal()`), for this trade's days. */}
+          <Stat k={`SEASONALITY · ${dte} DAYS`}
+            v={seasNow == null ? "—" : `${seasNow > 0 ? "+" : ""}${seasNow.toFixed(1)}%/mo`}
+            c={seasNow == null || seasNow === 0 ? T.dim : seasNow > 0 ? T.green : T.red}
+            tip={seasNow == null ? seasProv.note : `${seasSig.note} ${seasonRowLines(seasSig).join("; ")}`} />
+          {/* WHERE IT CAME FROM, OR WHY THERE IS NOTHING: "the call failed" and "nobody asked yet" are reasons. */}
+          <Stat k="SEASONAL SOURCE" v={seasonal[ticker] ? seas.src : "not read"}
+            c={seasonal[ticker] ? (seasonalState[ticker]?.error ? T.amber : T.green) : T.dim}
             tip={`${seasonalSourceLine(seasonal[ticker], seasonalState[ticker], seasProv)} · ${freshnessNote("seasonal", seasonal[ticker]?.at)}`} />
           {/* >>> THE HEADER CARRIES NOTHING THAT ASKS NOTHING OF THE USER
               (P9, TASK 3). <<< "IV RANK · 6d collected" is a PROGRESS BAR for
@@ -4259,7 +4250,7 @@ export default function OptionsStrategyLab() {
             sub={ev === "why" ? "the market, not this trade" : EV_META[ev]?.sub} onClose={() => setEv(null)}>
             {ev === "why" && (
               <WhySheet
-                fused={fused[whyTk || ticker]}
+                fused={fuseAt(whyTk || ticker, whyDte ?? marketDte(whyTk || ticker))} order={findOrder}
                 ticker={whyTk || ticker} weatherData={weather} newsItems={newsPool} month={NOW_MONTH}
                 title={`WHY THIS MARKET · ${whyTk || ticker}`} defaultDetail
                 note={fused[whyTk || ticker]?.agreement === "CONFLICT"
@@ -4274,7 +4265,7 @@ export default function OptionsStrategyLab() {
               const cX = chains[tk] || null;
               const sX = spotOf(cX);
               const gX = oiGridFromChain(cX, sX);
-              const mm = (seasonal[tk] || null)?.monthlyMean || getU(tk).monthlyMean || null;
+              const mm = (seasonal[tk] || null)?.monthlyMean || null;
               return (
                 <>
                   {levelsView(cX, gX, sX, levelsFromGrid(gX, sX))}
@@ -4339,7 +4330,7 @@ export default function OptionsStrategyLab() {
               </Panel>
               <Panel style={{ marginTop: 10 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-                  <Lbl>SEASONALITY · {seasonal[ticker] ? seas.src : seasProv.missing ? "NOT LOADED — NO READING AT ALL" : "ESTIMATE — LOAD THE REAL HISTORY"}</Lbl>
+                  <Lbl>SEASONALITY · {seasonal[ticker] ? seas.src : "NOT READ — LOAD THE REAL HISTORY"}</Lbl>
                   <Btn small ghost color={T.blue} onClick={loadSeasonal} disabled={busy === "av"}>
                     <RefreshCw size={11} /> Refresh real seasonality
                   </Btn>
@@ -4360,7 +4351,7 @@ export default function OptionsStrategyLab() {
                   const rank = [...mm].sort((a, b) => b - a).indexOf(cur) + 1;
                   return (
                     <div style={{ fontSize: 12.5, color: T.body, marginTop: 8, padding: "8px 10px", background: `${T.amber}0a`, borderRadius: 6 }}>
-                      <b style={{ color: T.ink }}>In plain words:</b> {ticker}'s best month historically is <b style={{ color: T.green }}>{MONTHS[bi]}</b> ({mm[bi] > 0 ? "+" : ""}{mm[bi].toFixed(1)}% a month on average), its worst is <b style={{ color: T.red }}>{MONTHS[wi]}</b> ({mm[wi].toFixed(1)}%). {MONTHS[NOW_MONTH]} (the amber bar) ranks {rank} of 12: {cur > 0.8 ? "the season is behind you — a directional trade makes sense." : cur < -0.8 ? "the season is against you — favour downside or non-directional trades." : "no clear push this month — a range trade suits it better."}
+                      <b style={{ color: T.ink }}>In plain words:</b> {ticker}'s best month historically is <b style={{ color: T.green }}>{MONTHS[bi]}</b> ({mm[bi] > 0 ? "+" : ""}{mm[bi].toFixed(1)}% a month on average), its worst is <b style={{ color: T.red }}>{MONTHS[wi]}</b> ({mm[wi].toFixed(1)}%). {MONTHS[NOW_MONTH]} (the amber bar) ranks {rank} of 12: {/* THE VERDICT IS `seasonalSignal()`'s, over this trade's days (PR #48): the ±0.8% band is gone. */}{seasNow > 0 ? "over this trade's window the season leans up, beyond its own noise." : seasNow < 0 ? "over this trade's window the season leans down, beyond its own noise." : "no month in this trade's window beats its own noise — the season adds nothing here."}
                     </div>
                   );
                 })()}
@@ -4542,8 +4533,8 @@ export default function OptionsStrategyLab() {
             sentiments={SENTIMENTS} universe={BASKET} find={find} setFind={setFind}
             spot={find.market ? spotOf(chains[find.market]) : null}
             limits={limits} onLimit={(ov) => setSetting("sizeOverride", ov)} freeSizing={freeSizing}
-            findGen={findGen} findShown={findShown} flaggedHidden={flaggedHidden} barsCache={barsCache}
-            badgeOf={(x) => <SignalBadge fused={x.fused} state={readiness[x.tk]} onClick={() => { scrollToCard.current = x.key; setWhyTk(x.tk); setEv("why"); }} />}
+            findGen={findGen} findShown={findShown} signalLines={Object.values(signalsIn)} findOrder={findOrder} onFindOrder={setFindOrder} flaggedHidden={flaggedHidden} barsCache={barsCache}
+            badgeOf={(x) => <SignalBadge fused={x.fused} state={readiness[x.tk]} onClick={() => { scrollToCard.current = x.key; setWhyTk(x.tk); setWhyDte(x.dte); setEv("why"); }} />}
             onMore={(x) => { scrollToCard.current = x.key; setWhyTk(x.tk); setEv("more"); }}
             actionsOf={(x) => (
               <CandidateActions
@@ -4631,7 +4622,7 @@ export default function OptionsStrategyLab() {
                   Market
                   <select aria-label="Market for this trade" value={ticker} onChange={(e) => switchTicker(e.target.value)}
                     style={{ ...mono, background: T.panel, color: T.ink, border: `1px solid ${T.field}`, borderRadius: 6, padding: "8px 10px", fontSize: 13, minHeight: 44 }}>
-                    {Object.keys(UNDERLYINGS).map((k) => <option key={k} value={k}>{k}</option>)}
+                    {TICKERS.map((k) => <option key={k} value={k}>{k}</option>)}
                   </select>
                 </label>
                 <input value={stratName} onChange={(e) => setStratName(e.target.value)}
@@ -5291,10 +5282,10 @@ export default function OptionsStrategyLab() {
                   cardKey={buildOrigin && buildOrigin.key}
                   signs={buildSigns} sizeText={buildSizeLine}
                   figures={sizedFigures(AE, contracts)}
-                  rr={BF.rr} pop={chance ? chance.pop : null}
+                  rr={BF.rr} pop={chance ? chance.pop : null} basis={chance ? chanceBasisLabel(chance) : null}
                   picture={BF.bands ? { bands: BF.bands, legs, entryNet: AE.entry, spot, bars: barsCache[ticker] || NO_BARS,
                     dte, sigma: chance ? chance.sigma : undefined, driftAnnual: chance ? chance.driftAnnual : undefined, ticker } : null}
-                  badge={<SignalBadge fused={fused[ticker] || null} state={readiness[ticker]} onClick={() => { setWhyTk(ticker); setEv("why"); }} />} />
+                  badge={<SignalBadge fused={fused[ticker] || null} state={readiness[ticker]} onClick={() => { setWhyTk(ticker); setWhyDte(null); setEv("why"); }} />} />
                 {buildOrigin && buildOrigin.note && (
                   <div style={{ ...sansUI, fontSize: 13, color: T.amber, marginTop: 8, lineHeight: 1.5 }}>{buildOrigin.note}</div>
                 )}

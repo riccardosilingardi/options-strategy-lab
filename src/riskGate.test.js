@@ -16,7 +16,7 @@ import { RULES, sizing, ruleBadge, qualityFloor, qualityFloorSentence, liquidity
   expiryChoice, expiryChoiceNote, checkedAgainstNote, offBoardStrikeLabel,
   modelSanity, modelSanityReason, modelDisagreementNote,
   chanceOf, chanceSeedKey, seasonalProvenance, seasonalStampOf, seasonalSourceSentence,
-  MEASURED_SEASONAL_SOURCE, ESTIMATED_SEASONAL_SOURCE, watchAttentionLevel,
+  MEASURED_SEASONAL_SOURCE, ESTIMATED_SEASONAL_SOURCE, NO_SEASONAL_SOURCE, seasonalStampNote, chanceBasisLabel, watchAttentionLevel,
   ivProvenance, CHAIN_IV_SOURCE, THESIS_IV_SOURCE, FALLBACK_IV_SOURCE,
   comboBook, limitAgainstBook, openLimitPrice, closeLimitPrice, openLimitNote, limitPlacement, notionalControlled, notionalNote,
   entryRoom, entryInsideExitNote, entryRoomWarning, entryRoomOverrideAsk, entryOverrideOk, entryOverrideNote,
@@ -25,7 +25,7 @@ import { RULES, sizing, ruleBadge, qualityFloor, qualityFloorSentence, liquidity
   sigmaProvenance, TABLE_SIGMA_SOURCE, MEASURED_SIGMA_SOURCE, FALLBACK_SIGMA_SOURCE,
   positionPnl, modelPnlNote, BROKER_PNL, MODEL_PNL,
   buildableExpiries, openableBoard, offFloorExpiryLabel, horizonFloorNote,
-  remainingEdge, remainingEdgeNote, remainingEdgeLabel, shareOfMaximum, attentionCount, onCardLine,
+  remainingEdge, remainingEdgeNote, remainingEdgeLabel, shareOfMaximum, attentionCount,
   requestOf, requestAmountLabel, requestAmountOwner, contractsSourceNote, clampAskedChance,
   REQUEST_MODES, meetsRequest, splitByRequest, matchHeading, missToggle, resultsLine, nearestRelaxation, controlReadings,
   sizedFigures, sizeLine, sizedHeading, CARD_LABELS, directionTag, clampAskedReward, returnText, rewardAskLabel,
@@ -1514,18 +1514,22 @@ test("ONE CHANCE — one run count, so ranking and printing cannot disagree", ()
 test("ONE CHANCE — unknown is not a number, at every missing input", () => {
   const legs = [{ side: 1, type: "call", strike: 20, qty: 1 }, { side: -1, type: "call", strike: 21, qty: 1 }];
   const ok = { legs, entryNet: 0.4, spot: 20, iv: 0.85, dte: 45,
-    seasonal: seasonalProvenance({ monthlyMean: Array(12).fill(1), years: 11, at: Date.now() }, null, "BOIL"),
+    seasonal: seasonalProvenance({ monthlyMean: Array(12).fill(1), years: 11, at: Date.now() }, "BOIL"),
     month: 8, ticker: "BOIL", expKey: "2026-11-06" };
   assert.ok(chanceOf(ok).pop > 0, "the fixture itself has to work");
   for (const missing of [{ spot: null }, { spot: 0 }, { dte: null }, { dte: 0 },
-    { entryNet: null }, { legs: [] }, { legs: null }, { month: null },
-    // NO TABLE AT ALL IS NOT A DRIFT OF ZERO. `seasonalProvenance(null, null)`
-    // is `missing`, and a missing reading is a dash on screen, never a
-    // confident claim that the market goes nowhere.
-    { seasonal: seasonalProvenance(null, null, "BOIL") }]) {
+    { entryNet: null }, { legs: [] }, { legs: null }]) {
     assert.equal(chanceOf({ ...ok, ...missing }), null,
       `a missing ${Object.keys(missing)[0]} must be null, never a confident 0%`);
   }
+  // A SEASON NOT READ IS THE ONE INPUT THAT IS NOT NULL (owner decision, PR #48): the chance is worked out from the
+  // prices alone, drifting at zero, and says so ("prices only") — never a drift nobody measured.
+  const notRead = chanceOf({ ...ok, seasonal: seasonalProvenance(null, "BOIL") });
+  assert.ok(notRead && notRead.pop > 0, "a chance, not a null");
+  assert.equal(notRead.driftAnnual, 0);
+  assert.equal(notRead.seasonRead, false);
+  assert.equal(chanceBasisLabel(notRead), "prices only");
+  assert.match(notRead.seasonalNote, /season not read: no drift/);
   // A MISSING IMPLIED VOLATILITY IS THE ONE THAT IS NOT NULL, and deliberately:
   // `ivProvenance()` has a named fallback for it and says so on screen, exactly
   // as `sigmaProvenance()` does for the simulator's volatility.
@@ -1557,7 +1561,9 @@ test("ONE SEASONAL SOURCE — no call site may drift a chance without provenance
       `chanceOf must refuse ${JSON.stringify(wrong)} as a drift`);
   }
   // ...and the legitimate shape does not throw.
-  assert.ok(chanceOf({ ...base, seasonal: seasonalProvenance(null, Array(12).fill(1), "CORN") }).pop > 0);
+  assert.ok(chanceOf({ ...base, seasonal: seasonalProvenance({ monthlyMean: Array(12).fill(1), years: 11 }, "CORN") }).pop > 0);
+  // …and the hand-written fallback row is refused outright: it is retired (PR #48).
+  assert.throws(() => seasonalProvenance(null, Array(12).fill(1), "CORN"), /retired/);
 
   // 2) NO CALL SITE HANDS A SEASONAL ROW WHERE THE PROVENANCE GOES. Read off
   //    the CALL rather than off the file, because `monthlyMean:` is legitimate
@@ -1675,20 +1681,21 @@ test("SHAPE — the realised fallback and the implied one are still two constant
   assert.deepEqual(SIGMA, { SOYB: 0.19, CORN: 0.22, UNG: 0.48, BOIL: 0.95, WEAT: 0.25, SPY: 0.16 });
 });
 
-test("ONE SEASONAL SOURCE — measured and hand-written print DIFFERENT sentences", () => {
-  // The whole point. Two markets, two tables, two numbers of the same name: if
-  // the sentence beside them is the same string, nothing on screen distinguishes
-  // a measurement from a guess.
+test("ONE SEASONAL SOURCE — measured and not read print DIFFERENT sentences; an old record keeps its stamp", () => {
+  // Since PR #48 a live reading is measured or not read; the hand-written estimate survives only on records stamped
+  // before then, and still reads as what it was.
   const row = Array(12).fill(1);
-  const meas = seasonalProvenance({ monthlyMean: row, years: 11, at: Date.now() - 3 * 86400000 }, row, "CORN");
-  const hand = seasonalProvenance(null, row, "CORN");
+  const meas = seasonalProvenance({ monthlyMean: row, years: 11, at: Date.now() - 3 * 86400000 }, "CORN");
+  const none = seasonalProvenance(null, "CORN");
   assert.equal(meas.source, MEASURED_SEASONAL_SOURCE);
-  assert.equal(hand.source, ESTIMATED_SEASONAL_SOURCE);
-  assert.notEqual(meas.note, hand.note, "one sentence for two sources is no sentence at all");
+  assert.equal(none.source, NO_SEASONAL_SOURCE);
+  assert.equal(none.missing, true);
+  assert.notEqual(meas.note, none.note, "one sentence for two sources is no sentence at all");
   assert.ok(/MEASURED/.test(meas.note) && /11 years/.test(meas.note) && /3 days ago/.test(meas.note), meas.note);
-  assert.ok(/HAND-WRITTEN/.test(hand.note), hand.note);
+  assert.ok(/season not read: no drift/.test(none.note), none.note);
+  assert.ok(/HAND-WRITTEN/.test(seasonalStampNote({ seasonalSource: ESTIMATED_SEASONAL_SOURCE }, "CORN")));
   // AGE IS NEVER INVENTED. A reading with no timestamp does not read as today's.
-  const undated = seasonalProvenance({ monthlyMean: row, years: 11 }, row, "CORN");
+  const undated = seasonalProvenance({ monthlyMean: row, years: 11 }, "CORN");
   assert.equal(undated.ageDays, null);
   assert.equal(/read today/.test(undated.note), false, undated.note);
 
@@ -3152,8 +3159,8 @@ test("TASK 2 — ONE CLOSE CONTROL PER POSITION", () => {
   const notTaken = { id: 2, ticker: "SOYB", expKey: "2026-11-20", alpacaId: "x", alpacaStatus: "canceled", legs: [] };
   assert.equal(positionStage(notTaken), "not-taken");
   assert.equal(positionForHolding([notTaken], { ticker: "SOYB", expKey: "2026-11-20" }), null);
-  const note = onCardLine("J-0002", "-$133");
-  assert.ok(note.includes("J-0002") && /Positions card/.test(note));
+  // `onCardLine()` was removed in PR #48: the dissolved panel was its only reader.
+  assert.equal(/export const onCardLine/.test(readFileSync(new URL("./rules.js", import.meta.url), "utf8")), false);
 });
 
 /* ---------------- summary ---------------- */

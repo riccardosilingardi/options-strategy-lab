@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { distribution, summarise } from "../netlify/functions/liquidity.mjs";
 import { BASKET } from "./basket.js";
+import { MARKET_ROWS } from "./markets.js";
 import { RULES } from "./rules.js";
 
 let pass = 0, fail = 0;
@@ -90,45 +91,26 @@ test("no spot means no near-the-money split, and the rest still reads", () => {
 
 /* ---- the basket, which must not drift ---- */
 
-test("src/basket.js and the commodity flags in App.jsx are the same markets", () => {
-  // A serverless function cannot import App.jsx, so the list exists twice. This
-  // is what stops the copy from quietly rotting: the derivation in App.jsx
-  // stays the source, and the build fails the moment the two disagree.
-  const app = readFileSync(new URL("./App.jsx", import.meta.url), "utf8");
-  const table = app.slice(app.indexOf("const UNDERLYINGS = {"), app.indexOf("const BASKET ="));
-  const flagged = [...table.matchAll(/^\s{2}([A-Z]{2,5}):\s*\{\s*commodity:\s*true/gm)].map((m) => m[1]);
-  assert.ok(flagged.length > 0, "the commodity flags are still readable in App.jsx");
-  assert.deepEqual([...flagged].sort(), [...BASKET].sort(),
-    "src/basket.js has drifted from the commodity: true flags in App.jsx");
-  // AND THE LIQUID TIER IS REALLY IN IT (ROADMAP P2-bis). A sync test that only
-  // checks two lists agree is happy when both are wrong together.
-  for (const tk of ["GLD", "SLV", "USO", "XLE", "GDX"]) {
-    assert.ok(BASKET.includes(tk), `${tk} is in the basket`);
-  }
+test("src/basket.js IS the registry's basket (PR #48): one home, no copy to drift", () => {
+  assert.deepEqual([...BASKET], MARKET_ROWS.filter((r) => r.proposable).map((r) => r.ticker));
+  for (const tk of ["GLD", "SLV", "USO", "XLE", "GDX"]) assert.ok(BASKET.includes(tk), `${tk} is in the basket`);
   assert.equal(BASKET.length, 10);
-  assert.ok(!BASKET.includes("SPY"), "SPY is in the table to price a hedge, not to be traded");
+  assert.ok(!BASKET.includes("SPY"), "SPY is in the registry to price a hedge, not to be traded");
+  const app = readFileSync(new URL("./App.jsx", import.meta.url), "utf8");
+  assert.ok(!app.includes("const UNDERLYINGS = {"), "App.jsx no longer carries its own market table");
 });
 
-test("NOT ONE SEASONAL, SIGMA OR IV NUMBER IS INVENTED FOR THE LIQUID TIER", () => {
-  // Failure classes 1 and 5: a value nobody measured must never print as one
-  // somebody did. `SEASONAL` and `SIGMA` in engine.js carry the original five
-  // and SPY; a row added for GLD would be a hand-written estimate driving 30%
-  // of that market's score and every probability the app prints for it.
+test("NOT ONE SIGMA OR IV NUMBER IS INVENTED FOR THE LIQUID TIER", () => {
+  // Failure classes 1 and 5: a value nobody measured must never print as one somebody did.
   const eng = readFileSync(new URL("./engine.js", import.meta.url), "utf8");
-  const seasonalBlock = eng.slice(eng.indexOf("export const SEASONAL = {"), eng.indexOf("export const SIGMA"));
   const sigmaLine = eng.slice(eng.indexOf("export const SIGMA"), eng.indexOf("\n", eng.indexOf("export const SIGMA")));
-  const app = readFileSync(new URL("./App.jsx", import.meta.url), "utf8");
-  const table = app.slice(app.indexOf("const UNDERLYINGS = {"), app.indexOf("const BASKET ="));
   for (const tk of ["GLD", "SLV", "USO", "XLE", "GDX"]) {
-    assert.ok(!seasonalBlock.includes(`${tk}:`), `${tk} must have no hand-written SEASONAL row`);
     assert.ok(!sigmaLine.includes(`${tk}:`), `${tk} must have no hand-written SIGMA row`);
-    const row = table.slice(table.indexOf(`  ${tk}: {`), table.indexOf("newsQ", table.indexOf(`  ${tk}: {`)));
-    assert.ok(row.length > 0, `${tk} is in the underlyings table`);
-    assert.ok(!/monthlyMean/.test(row), `${tk} must carry no monthlyMean`);
-    assert.ok(!/sigma:/.test(row), `${tk} must carry no sigma`);
-    // The implied volatility is the NAMED fallback with provenance, never a
-    // per-market guess typed out of memory.
-    assert.ok(/iv: RULES\.fallbackIV/.test(row), `${tk}'s IV must be RULES.fallbackIV`);
+    const row = MARKET_ROWS.find((r) => r.ticker === tk);
+    assert.equal(row.sigma, null, `${tk} carries no sigma`);
+    // The implied volatility is the NAMED fallback with provenance, never a per-market guess.
+    assert.equal(row.iv, RULES.fallbackIV, `${tk}'s IV must be RULES.fallbackIV`);
+    assert.ok(!("monthlyMean" in row), `${tk} carries no seasonal row`);
   }
 });
 

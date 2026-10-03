@@ -15,9 +15,9 @@
 // threshold out of this file into a component — two copies drift apart, and
 // then two screens disagree about the same trade.
 
-import { SEASONAL } from "./engine.js";
-import { RULES, liquidityLevel, butterflySkipNote } from "./rules.js";
+import { RULES, liquidityLevel, butterflySkipNote, SEASON_NOT_READ } from "./rules.js";
 import { trendRead } from "./indicators.js";
+import { weatherAppliesTo, weatherReasonFor } from "./markets.js";
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
@@ -27,6 +27,7 @@ export const ARROW = { 1: "↑", "-1": "↓", 0: "≈" };
 const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
 const sum = (a) => a.reduce((x, y) => x + y, 0);
 const avg = (a) => (a.length ? sum(a) / a.length : 0);
+const capFirst = (t) => t.charAt(0).toUpperCase() + t.slice(1);
 const signed = (x, digits = 1) => `${x >= 0 ? "+" : ""}${x.toFixed(digits)}`;
 
 /* ================================================================
@@ -179,23 +180,15 @@ export function weatherComponent(ticker, weatherData, month) {
    answers to one question waiting to disagree.
 ================================================================ */
 
-/** True when some region in the table declares that it drives this market. */
-export const weatherApplies = (ticker) => REGIONS.some((r) => r.affects.includes(ticker));
+/* WHETHER WEATHER APPLIES, AND WHY NOT, LIVE IN THE MARKET REGISTRY (PR #48, TASK 1): `weather` on a market's row
+   in src/markets.js. `REGIONS` above still says WHICH region drives WHICH market; `signals.test.js` holds the two
+   equal (a market whose row says weather applies has a region, and one whose row says it does not has none). */
 
-/* WHY NOT, IN ONE LINE EACH. These are sentences, not thresholds: nothing here
-   decides anything, `weatherApplies()` above does. Written per market because
-   "no region drives it" is true and useless — the reader wants to know whether
-   that is a gap in the table or a fact about the asset. */
-const WEATHER_NA = {
-  GLD: "Weather does not apply to gold: an ounce is not grown, not stored in degree-days and not consumed by a cold winter. What moves it — real yields, the dollar, central-bank buying — reaches this app through the news factor.",
-  SLV: "Weather does not apply to silver. Its industrial half moves with manufacturing demand and its monetary half with real yields, and neither is a forecast; both reach this app through the news factor.",
-  GDX: "Weather does not apply to gold miners. They are equities whose earnings track the gold price, so the same reasoning as GLD holds one step removed.",
-  USO: "Weather is not read for crude here. A Gulf hurricane really can shut production in, but this app's regions are crop stress and heating or cooling demand, and neither of those is what moves a barrel — storm supply risk reaches crude through the news rules instead.",
-  XLE: "Weather is not read for energy equities here, for the same reason as crude: this app's regions measure crop stress and degree-days, and an integrated oil company's earnings are not a function of either.",
-};
+/** True when the market's registry row says the weather factor applies. */
+export const weatherApplies = (ticker) => weatherAppliesTo(ticker);
 
 /** The sentence a screen prints where the weather bar would have been. */
-export const weatherNaReason = (ticker) => WEATHER_NA[ticker]
+export const weatherNaReason = (ticker) => weatherReasonFor(ticker)
   || `No region in this app's table drives ${ticker}, so there is no weather reading for it — and no reading is not a reading of zero.`;
 
 /**
@@ -204,14 +197,18 @@ export const weatherNaReason = (ticker) => WEATHER_NA[ticker]
  *   `weights` always sums to 1 across `keys`, so dropping a factor redistributes
  *   its share in proportion rather than leaving a quarter of the scale unused.
  */
-export function factorsOf(ticker) {
-  const applies = { seasonal: true, technical: true, weather: weatherApplies(ticker), news: true };
+export function factorsOf(ticker, { seasonRead = true } = {}) {
+  // A SEASON NOT READ IS EXCLUDED, LIKE WEATHER ON A METAL (PR #48, TASK 2): until the market's measured history has
+  // loaded there is no season to score — the old hand-written table stood in, and was wrong on 8 months of 12.
+  const applies = { seasonal: !!seasonRead, technical: true, weather: weatherApplies(ticker), news: true };
   const keys = Object.keys(BASE_WEIGHTS).filter((k) => applies[k]);
   const total = sum(keys.map((k) => BASE_WEIGHTS[k]));
   const weights = Object.fromEntries(keys.map((k) => [k, BASE_WEIGHTS[k] / total]));
   const excluded = Object.keys(BASE_WEIGHTS).filter((k) => !applies[k]);
-  return { keys, weights, excluded,
-    note: excluded.includes("weather") ? weatherNaReason(ticker) : null };
+  const notes = [];
+  if (excluded.includes("seasonal")) notes.push(`${capFirst(SEASON_NOT_READ)} for ${ticker}: its monthly price history has not loaded, so the season is out of the score.`);
+  if (excluded.includes("weather")) notes.push(weatherNaReason(ticker));
+  return { keys, weights, excluded, note: notes.length ? notes.join(" ") : null };
 }
 
 /* ================================================================
@@ -402,20 +399,24 @@ export function technicalComponent(bars) {
    Seasonal
 ================================================================ */
 
-/** seasonalMean is a %/month figure; an array of 12 is indexed by month. */
-export function seasonalComponent(ticker, month, seasonalMean) {
-  let mean = seasonalMean;
-  if (Array.isArray(mean)) mean = mean[month];
-  if (mean == null || !Number.isFinite(mean)) mean = SEASONAL[ticker]?.[month];
-  if (mean == null || !Number.isFinite(mean)) {
-    return { dir: 0, strength: 0, why: `no seasonal history for ${ticker}`, mean: null };
+/**
+ * THE SEASON FACTOR, FROM `seasonalSignal()` (PR #48, TASK 2). The ±0.8% band is gone: the direction and the
+ * strength come from the window mean of the months that beat their own noise, with today's strength formula
+ * (|mean| × 40, held in 0-100; no direction under 10). With no month counting, it is quiet; with the season not
+ * read, the factor does not apply (`factorsOf()` leaves it out of the weights).
+ *
+ * @param signal  a `seasonalSignal()` result for this market's window, or null when the season is not read
+ */
+export function seasonalComponent(ticker, month, signal) {
+  if (!signal || !signal.read) {
+    return { dir: 0, strength: 0, applies: false, why: `${SEASON_NOT_READ}: ${ticker}'s monthly price history has not loaded`, mean: null, months: [] };
   }
-  const dir = mean > 0.8 ? 1 : mean < -0.8 ? -1 : 0;
+  const mean = signal.mean;
   const strength = clamp(Math.round(Math.abs(mean) * 40), 0, 100);
-  const why = dir === 0
-    ? `${MONTHS[month]} has averaged ${signed(mean)}% for ${ticker}, inside the +/-0.8% band that counts as no seasonal edge`
-    : `${MONTHS[month]} has averaged ${signed(mean)}% for ${ticker} historically, a ${dir > 0 ? "bullish" : "bearish"} month`;
-  return { dir: strength >= 10 ? dir : 0, strength, why, mean };
+  const dir = signal.counts && strength >= 10 ? Math.sign(mean) : 0;
+  const lines = signal.months.map((x) => x.line).join("; ");
+  // ONE SENTENCE (the narrative counts sentences): the verdict, then the window's months in brackets.
+  return { dir, strength, why: `${signal.note.replace(/\.$/, "")} (${lines})`, mean, months: signal.months };
 }
 
 /* ================================================================
@@ -463,14 +464,16 @@ const verb = (n, singular, plural) => (n === 1 ? singular : plural);
  * @param {object}  [input.weatherData]  { regionId: { tmax[], tmin[], prec[], dates[] } }
  * @param {Array}   [input.newsItems]    [{ title, date, geo, impacts? }]
  * @param {Array}   [input.bars]         daily bars [{ close, ... }], 60+ needed
- * @param {number|number[]} [input.seasonalMean] %/month, or 12 monthly means
+ * @param {object}  [input.season]       `seasonalSignal()` for this market's window (PR #48): the fused result is
+ *                                       therefore one per (market, days held). Null = the season is not read.
  * @param {number}  [input.now]          epoch ms, injectable for tests
  */
-export function fuseSignals({ ticker, month, weatherData, newsItems, bars, seasonalMean, now = Date.now() } = {}) {
+export function fuseSignals({ ticker, month, weatherData, newsItems, bars, season = null, now = Date.now() } = {}) {
   const m = Number.isInteger(month) ? month : new Date(now).getMonth();
+  const seasonRead = !!(season && season.read);
 
   const components = {
-    seasonal: seasonalComponent(ticker, m, seasonalMean),
+    seasonal: seasonalComponent(ticker, m, season),
     technical: technicalComponent(bars),
     weather: weatherComponent(ticker, weatherData, m),
     news: newsComponent(ticker, newsItems, now),
@@ -481,7 +484,7 @@ export function fuseSignals({ ticker, month, weatherData, newsItems, bars, seaso
   // them. Everything below counts `keys` and never the four: a factor that does
   // not apply is not in the sum, not in the agreement count and not in the
   // confidence denominator.
-  const { keys, weights, excluded, note: factorNote } = factorsOf(ticker);
+  const { keys, weights, excluded, note: factorNote } = factorsOf(ticker, { seasonRead });
   for (const k of excluded) components[k].applies = false;
   const up = keys.filter((k) => components[k].dir > 0);
   const down = keys.filter((k) => components[k].dir < 0);
@@ -537,7 +540,9 @@ export function fuseSignals({ ticker, month, weatherData, newsItems, bars, seaso
     // printed "seasonality 30%, price trend 25%, weather 25%, news 20%" as a
     // fixed sentence under the bars; on a market with no weather that sentence
     // would have been describing a scale nothing was measured against.
-    factors: keys, weights, excluded, factorNote };
+    factors: keys, weights, excluded, factorNote,
+    // THE WINDOW THE SEASON WAS READ OVER travels with the result (PR #48): `seasonalSignal()`'s own answer.
+    season: season || null };
 }
 
 /* ================================================================
@@ -722,6 +727,35 @@ export function regionSignals(weatherData, month = new Date().getMonth()) {
    expected value is allowed to argue us out of that.
 ================================================================ */
 
+/* ================================================================
+   "SIGNALS DECIDE" (PR #48, TASK 3; owner decisions, 3 Oct 2026)
+
+   MEASURED. The old suggestion was season × 1.5 + score / 25 × confidence (thresholds ±0.5 / ±1.5): CORN in October
+   scored 3.96 → Very Bull, with the season ≈ 60% of it — counted twice, since it is also 30% of the score. A season
+   alone at +0.34%/month gave Bull, and "Very" switched the family to long options and butterflies.
+
+   NOW the direction comes from the four signals ONCE: s = score × confidence / 100; Bull at s ≥
+   RULES.directionSignalMin, Bear at s ≤ −RULES.directionSignalMin, Neutral between; CONFLICT is always Neutral; never
+   "Very" (that stays a manual direction). A market then shows its suggested family PLUS the Neutral one.
+================================================================ */
+
+/**
+ * @returns {{ dir: "bull"|"bear"|"neutral", s: number|null, why: string }} or null while the market is being read
+ *   (no fused result): a market still reading shows its Neutral cards only.
+ */
+export function signalDirection(fused) {
+  if (!fused) return null;
+  const min = RULES.directionSignalMin;
+  const s = (fused.score * fused.confidence) / 100;
+  if (fused.agreement === "CONFLICT") return { dir: "neutral", s, why: "CONFLICT is always Neutral" };
+  const dir = s >= min ? "bull" : s <= -min ? "bear" : "neutral";
+  return { dir, s, why: `score ${scoreTxt(fused.score)} × confidence ${fused.confidence} / 100 = ${num2(s)} ` +
+    `${dir === "bull" ? "≥ " : dir === "bear" ? "≤ −" : "inside ±"}${min}` };
+}
+
+/** The families a market shows under "Signals decide": its suggestion and Neutral, or Neutral alone. */
+export const signalFamilies = (sd) => (sd && sd.dir !== "neutral" ? [sd.dir, "neutral"] : ["neutral"]);
+
 /** The direction a sentiment preset needs in order to pay: +1, -1 or 0. */
 export function sentimentDirection(sent) {
   if (sent === "bull" || sent === "verybull") return 1;
@@ -743,6 +777,87 @@ export function signalAdjustment(fused, dir) {
 /** EV per $100 at risk, adjusted by the signal read. */
 export function rankScore(ev100, fused, dir) {
   return (Number.isFinite(ev100) ? ev100 : -999) + signalAdjustment(fused, dir);
+}
+
+/* ================================================================
+   "ORDER BY" (PR #48, TASK 4; owner decisions, 3 Oct 2026)
+
+   MEASURED. The list order was ev100 + signalAdjustment(): fixture ev100's middle half spans −26.4 → +11.2, while
+   CORN at +64 / conf 86 adds ±27.5 (the most is ±47.5) — the signal could outweigh the trade, and no card said so.
+   Now the owner chooses. Only "Expected value + signal" adds `signalAdjustment()`, and only then is CONFLICT last.
+   One function sorts (`findOrderCompare()`) and the card's "Why this place" line (`placeLine()`) is built from the
+   same figures, so a card cannot say a reason the sort did not use.
+================================================================ */
+export const FIND_ORDERS = Object.freeze([
+  Object.freeze({ id: "ev", label: "Expected value" }),
+  Object.freeze({ id: "evSignal", label: "Expected value + signal" }),
+  Object.freeze({ id: "chance", label: "Chance" }),
+  Object.freeze({ id: "rr", label: "Return on risk" }),
+]);
+export const DEFAULT_FIND_ORDER = "ev";
+export const findOrderOf = (id) => FIND_ORDERS.find((o) => o.id === id) || FIND_ORDERS[0];
+
+const ev100Of = (x) => (x && Number.isFinite(x.ev100) && x.ev100 > -999 ? x.ev100 : null);
+/** The signal's share of a card's place, in EV points: `signalAdjustment()` for the direction the card needs. */
+export const placeSignal = (x) => signalAdjustment(x && x.fused, sentimentDirection(x && x.sent));
+
+/** The one figure a card sorts on under `order`; null sorts last. */
+export function findOrderKey(x, order = DEFAULT_FIND_ORDER) {
+  const ev = ev100Of(x);
+  switch (findOrderOf(order).id) {
+    case "evSignal": return ev == null ? null : ev + placeSignal(x);
+    case "chance": return x && x.lf && Number.isFinite(x.lf.pop) ? x.lf.pop : null;
+    case "rr": return x && x.lf && Number.isFinite(x.lf.rr) ? x.lf.rr : null;
+    default: return ev;
+  }
+}
+
+/** The comparator. Highest first, unknown last; CONFLICT last only under "Expected value + signal". */
+export const findOrderCompare = (order = DEFAULT_FIND_ORDER) => (a, b) => {
+  if (findOrderOf(order).id === "evSignal") {
+    const ca = a?.fused?.agreement === "CONFLICT", cb = b?.fused?.agreement === "CONFLICT";
+    if (ca !== cb) return ca ? 1 : -1;
+  }
+  const ka = findOrderKey(a, order), kb = findOrderKey(b, order);
+  if (ka == null || kb == null) return ka == null ? (kb == null ? 0 : 1) : -1;
+  return kb - ka;
+};
+
+const sgn1 = (v) => `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(1)}`;
+/** "Why this place": "expected value −12.0 per $100 + signal +27.5 = 15.5", or the sort figure alone. */
+export function placeLine(x, order = DEFAULT_FIND_ORDER) {
+  const id = findOrderOf(order).id;
+  const ev = ev100Of(x);
+  if (id === "chance") return x?.lf && Number.isFinite(x.lf.pop) ? `chance ${Math.round(x.lf.pop * 100)}%` : "chance not known · last";
+  if (id === "rr") return x?.lf && Number.isFinite(x.lf.rr) ? `return on risk ${Math.round(x.lf.rr * 100)}%` : "no ceiling · last";
+  if (ev == null) return "expected value not known · last";
+  const evPart = `expected value ${sgn1(ev)} per $100`;
+  if (id !== "evSignal") return evPart;
+  const sig = placeSignal(x);
+  const conflict = x?.fused?.agreement === "CONFLICT" ? " · CONFLICT: last" : "";
+  return `${evPart} + signal ${sgn1(sig)} = ${(ev + sig).toFixed(1)}${conflict}`;
+}
+
+/** "CORN ↑ +64 · conf 86" — the card's badge (PR #48, TASK 4). A CONFLICT reads "●", a zero score "●". */
+export const badgeText = (fused, tk = fused && fused.ticker) => {
+  if (!fused) return null;
+  const arrow = fused.agreement === "CONFLICT" ? "●" : fused.score > 0 ? "↑" : fused.score < 0 ? "↓" : "●";
+  return `${tk ? `${tk} ` : ""}${arrow} ${fused.score > 0 ? "+" : ""}${fused.score} · conf ${fused.confidence}`;
+};
+
+/**
+ * "HOW THE NUMBERS FIT" (PR #48, TASK 4) — the ⓘ beside the results line and on the Why sheet. Generated from the
+ * constants, so it cannot describe a rule the code does not run (signals.test.js holds each number to its function).
+ * @returns {{ k, text }[]}
+ */
+export function numbersFitLines(order = DEFAULT_FIND_ORDER) {
+  return [
+    { k: "chance", text: `Chance is about one trade: the option prices and their implied volatility, plus the season's months that beat ${RULES.seasonalSignalT}× their own noise, over ${RULES.mcRuns.toLocaleString("en-US")} simulated runs.` },
+    { k: "score", text: "Score and confidence are about one market: four factors — seasonality, price trend, weather, news — weighted and checked for agreement." },
+    { k: "shared", text: "They share one thing: the same season (seasonalSignal()) for the same market and the same days held." },
+    { k: "meet", text: `Where they meet: the filter reads the chance only; "Signals decide" compares score × confidence / 100 with ${RULES.directionSignalMin}; ` +
+      `the order is the one you chose (${findOrderOf(order).label}); the autopilot needs confidence of at least ${RULES.autopilotConfidence}.` },
+  ];
 }
 
 /**

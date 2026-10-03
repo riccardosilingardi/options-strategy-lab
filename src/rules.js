@@ -14,7 +14,7 @@
 // price off the chain against `netBS()` — the SAME function and the SAME smile
 // every other screen in this app prices with, which is the point: a second
 // implementation of the model would make the check a comparison of two guesses.
-import { netBS, bs, smile, terminalMC, seasonalDrift, seedFrom, payoff } from "./engine.js";
+import { netBS, bs, smile, terminalMC, seasonalDrift, seasonalSpan, seedFrom, payoff } from "./engine.js";
 // WHICH WAY THE MONEY MOVES ON AN ORDER, read from its one home. `order.js`
 // imports nothing, so this is leaf-ward exactly as the `engine.js` import above
 // it is, and it is here for the same reason: `limitAgainstBook()` below has to
@@ -111,6 +111,18 @@ export const RULES = {
   // MEASURED, and `ivProvenance()` below says which of the two produced the
   // number a screen or a brief is showing.
   fallbackIV: 0.25,
+
+  // --- WHEN A SEASONAL MONTH COUNTS (PR #48, TASK 2; owner decision, 3 Oct 2026). A calendar month's measured mean
+  // counts only when |mean| ≥ this many standard errors of that mean (its own standard deviation ÷ √years). On CORN,
+  // October's +1.2% is 0.7× its ±1.6% and does not count; June's -3.46% is 2.2× and does. CHOSEN, NOT MEASURED
+  // (PRD §4.8). Read only through `seasonalSignal()`.
+  seasonalSignalT: 2,
+
+  // --- WHEN "SIGNALS DECIDE" PICKS A DIRECTION (PR #48, TASK 3; owner decision, 3 Oct 2026). s = score ×
+  // confidence / 100; Bull at s ≥ this, Bear at s ≤ −this, Neutral between, and CONFLICT always Neutral. 12.5 is the
+  // old suggestion's signal-only threshold (score / 25 × confidence / 100 > 0.5). CHOSEN, NOT MEASURED (PRD §4.8).
+  // Read only through `signalDirection()`.
+  directionSignalMin: 12.5,
 
   // --- HOW MANY RUNS THE ONE CHANCE IS MADE OF.
   //
@@ -743,8 +755,10 @@ export const chanceInTen = (p) => {
      brief. An unseeded Monte Carlo would hand each of them a different answer
      for one object, which is the fault this file exists to prevent, engineered
      in on purpose.
-   * UNKNOWN IS NOT A NUMBER. No spot, no horizon, no volatility or no seasonal
-     table and the answer is `null`, which every screen prints as a dash.
+   * UNKNOWN IS NOT A NUMBER. No spot, no horizon or no volatility and the
+     answer is `null`, which every screen prints as a dash. A season that has
+     not loaded is the one exception (PR #48): the chance is worked out from the
+     prices alone, drifting at zero, and says "prices only".
      `Number(null)` is 0 and 0 is finite — a missing chance must never arrive as
      a confident 0%.
 ========================================================================= */
@@ -782,8 +796,9 @@ export const chanceSeedKey = ({ ticker = "?", expKey = "?", legs = [], spot = 0,
  * @param thesisIV    an implied volatility the position remembered, if any
  * @returns the `terminalMC` result plus `{ ivSource, ivNote, seedKey }` and the
  *          seasonal stamp (`seasonalSource`, `seasonalMeasured`, `seasonalYears`,
- *          `seasonalAgeDays`, `seasonalNote`), or null when there is nothing to
- *          simulate — including when there is no seasonal reading at all.
+ *          `seasonalAgeDays`, `seasonalNote`) and what the season did (`seasonCounts`,
+ *          `seasonRead`, `seasonMean`, `seasonMonths`), or null when there is nothing to
+ *          simulate. A season not read drifts at zero (PR #48); it is not a null.
  */
 export function chanceOf({ legs, entryNet, spot, iv, dte, seasonal, month,
   ticker = "this market", expKey = null, thesisIV = null } = {}) {
@@ -795,10 +810,11 @@ export function chanceOf({ legs, entryNet, spot, iv, dte, seasonal, month,
   }
   if (!Array.isArray(legs) || !legs.length) return null;
   if (!Number.isFinite(entryNet) || !(spot > 0) || !(dte > 0)) return null;
-  // NO SILENT SUBSTITUTION. No table at all means no chance — not a drift of
-  // zero, which would be a confident claim that the market goes nowhere.
-  if (seasonal.missing) return null;
-  const driftAnnual = seasonalDrift(seasonal.monthlyMean, month, dte);
+  // THE SEASON, FROM ITS ONE HOME (PR #48): only the months that beat their own noise drift the chance. A season
+  // that has not loaded is "not read" and drifts at ZERO — a chance from the prices alone, labelled as such — never
+  // a null (PR #48: the owner asked for a chance in that case) and never a drift nobody measured.
+  const sig = seasonalSignal(seasonal, month, dte);
+  const driftAnnual = (sig.mean * 12) / 100;
   if (!Number.isFinite(driftAnnual)) return null;
   const vol = ivProvenance(iv, thesisIV, ticker);
   const seedKey = chanceSeedKey({ ticker, expKey, legs, spot, dte });
@@ -807,7 +823,9 @@ export function chanceOf({ legs, entryNet, spot, iv, dte, seasonal, month,
   });
   return { ...mc, ivSource: vol.source, ivNote: vol.fromFallback ? vol.note : null, seedKey,
     seasonalSource: seasonal.source, seasonalMeasured: seasonal.measured,
-    seasonalYears: seasonal.years, seasonalAgeDays: seasonal.ageDays, seasonalNote: seasonal.note };
+    seasonalYears: seasonal.years, seasonalAgeDays: seasonal.ageDays, seasonalNote: seasonal.note,
+    // WHAT THE SEASON DID TO THIS CHANCE: whether any month counted ("prices + season" / "prices only") and the window.
+    seasonCounts: sig.counts, seasonRead: sig.read, seasonMean: sig.mean, seasonMonths: sig.months.map((x) => x.line) };
 }
 
 /**
@@ -822,7 +840,7 @@ export function chanceOf({ legs, entryNet, spot, iv, dte, seasonal, month,
  * cannot drift from what the Radar says about the same market.
  */
 export const chanceSourceNote = (mc, ticker = "this market") => {
-  if (!mc) return "There is no chance to show: something this calculation needs — a price, a horizon or a seasonal reading — is missing.";
+  if (!mc) return "There is no chance to show: something this calculation needs — a price or a horizon — is missing.";
   return `Out of ${mc.runs.toLocaleString("en-US")} simulated runs, priced at ${pctText(mc.sigma)} implied volatility ` +
     `and drifting at ${pctText(mc.driftAnnual)} a year over the window this trade is held for, not a ` +
     `market-neutral assumption. ` +
@@ -3494,12 +3512,14 @@ export function nearestRelaxation(cands = [], request, sizeOf = () => null) {
 }
 
 /**
- * THE DIRECTION A MARKET'S SEASON CHOSE, ON ITS CARD ("↑ bull · season").
- * `sentiments` is the app's list of `{ id, label, icon }`; the arrows are the ones the app already uses.
+ * THE FAMILY A CARD CAME FROM UNDER "SIGNALS DECIDE" (PR #48, TASK 3): "↑ bull · signals" for a card in the
+ * direction the market's signals chose ("with the signal"), "→ neutral" for one from the Neutral family that every
+ * market also shows. Null for an unknown direction.
  */
 export const directionTag = (sentId, sentiments = []) => {
-  const s = (sentiments || []).find((x) => x.id === sentId);
-  return s ? `${s.icon} ${String(s.label).toLowerCase()} · season` : null;
+  const s = sentiments.find((x) => x.id === sentId);
+  if (!s) return null;
+  return sentId === "neutral" ? `${s.icon} neutral` : `${s.icon} ${String(s.label).toLowerCase()} · signals`;
 };
 
 /**
@@ -4024,51 +4044,52 @@ export const fallbackIVNote = (ticker = "this market", iv = FALLBACK_IV, source 
 /** Twelve monthly means worked out from real monthly prices. */
 export const MEASURED_SEASONAL_SOURCE = "measured history";
 
-/** ...the hand-written row in engine.js, which is an estimate and says so. */
+/** ...the hand-written row engine.js carried until PR #48. No live reading can be this any more; a record written
+ *  before then may still be stamped with it, and `seasonalStampOf()` reads that stamp as what it was. */
 export const ESTIMATED_SEASONAL_SOURCE = "hand-written estimate";
 
-/** ...and no reading at all, which is not a drift of zero. */
+/** ...and no reading yet: the season is "not read", which is not a drift of zero measured. */
 export const NO_SEASONAL_SOURCE = "none";
+
+/** The words for a season that has not loaded (PR #48): the factor is excluded and the chance drifts at zero. */
+export const SEASON_NOT_READ = "season not read: no drift";
 
 /** Twelve finite numbers, or it is not a seasonal row. */
 const seasonalRowOk = (m) => Array.isArray(m) && m.length === 12 && m.every((x) => Number.isFinite(x));
 
 /**
- * ONE SENTENCE NAMING WHICH TABLE DRIFTED A CHANCE AND HOW OLD IT IS.
+ * ONE SENTENCE NAMING WHAT DRIFTED A CHANCE AND HOW OLD IT IS.
  * Every screen that prints a chance prints this beside it, and the autopilot's
  * brief carries the same string, so a number cannot travel without its source.
  */
 export const seasonalSourceSentence = ({ measured = false, missing = false, ticker = "this market",
   years = null, ageDays = null } = {}) => {
-  if (missing) {
-    return `There is no seasonal reading for ${ticker} at all — neither measured prices nor a written estimate — ` +
-      `so no chance is worked out for it. A drift of zero would be a claim that ${ticker} goes nowhere, ` +
-      `which is a different thing from not knowing.`;
-  }
   if (measured) {
-    return `Drifted on ${ticker}'s MEASURED seasonality: ` +
+    return `Drifted on ${ticker}'s MEASURED seasonality, the months that beat their own noise only: ` +
       `${Number.isFinite(years) ? `${years} years of` : "its own"} monthly prices, ${readingAgePhrase(ageDays)}.`;
   }
-  return `Drifted on the HAND-WRITTEN seasonal estimate for ${ticker}, not on measured prices. ` +
-    `That table is wrong on eight months of twelve where it has been checked, so this chance is an ` +
-    `estimate's estimate until ${ticker}'s real price history loads.`;
+  if (missing) {
+    return `${ticker}'s ${SEASON_NOT_READ} — its monthly price history has not loaded, so the chance assumes no ` +
+      `seasonal lean (prices only) and the season is left out of the score.`;
+  }
+  return `Drifted on the HAND-WRITTEN seasonal estimate for ${ticker}, not on measured prices — a record written ` +
+    `before PR #48, when that table still existed. It was wrong on eight months of twelve where it was checked.`;
 };
 
 /**
- * WHICH SEASONAL MEANS ARE IN FORCE, DECIDED ONCE.
+ * WHICH SEASONAL READING IS IN FORCE, DECIDED ONCE (since PR #48: the measured one, or none).
  *
- * @param measured  the loaded Alpha Vantage reading for this market, or null:
- *                  `{ monthlyMean, years, at }` — `at` is when it was read, in
- *                  epoch ms, and is what the age in the sentence comes from.
- * @param fallback  the hand-written row for this market (`SEASONAL[tk]`), or null
+ * @param measured  the loaded Alpha Vantage reading for this market, or null: `{ monthlyMean, monthN, monthSE,
+ *                  years, at }` (a `statsFromMatrix()` result plus `at`, when it was read, in epoch ms)
  * @param ticker    what the sentence names
- * @returns { monthlyMean, measured, missing, source, years, ageDays, ticker, note }
+ * @returns { monthlyMean, monthN, monthSE, measured, missing, source, years, ageDays, ticker, note }
+ *          `missing` is true until the series has loaded: the season is NOT READ.
  */
-export function seasonalProvenance(measured, fallback, ticker = "this market") {
+export function seasonalProvenance(measured, ticker = "this market") {
+  if (typeof ticker !== "string") {
+    throw new Error("seasonalProvenance(measured, ticker): the hand-written fallback row is retired (PR #48)");
+  }
   const meas = measured && seasonalRowOk(measured.monthlyMean) ? measured : null;
-  const fall = seasonalRowOk(fallback) ? fallback : null;
-  const monthlyMean = meas ? meas.monthlyMean : fall;
-  const missing = !monthlyMean;
   // `Number.isFinite` on both, because `Number(null)` is 0 and 0 is finite: a
   // missing year count must not print as "0 years of monthly prices" and a
   // missing timestamp must not read as "read today".
@@ -4076,15 +4097,85 @@ export function seasonalProvenance(measured, fallback, ticker = "this market") {
   const ageDays = meas && Number.isFinite(meas.at)
     ? Math.max(0, Math.floor((Date.now() - meas.at) / 86400000)) : null;
   const out = {
-    monthlyMean: monthlyMean || null,
+    monthlyMean: meas ? meas.monthlyMean : null,
+    monthN: meas && Array.isArray(meas.monthN) ? meas.monthN : null,
+    monthSE: meas && Array.isArray(meas.monthSE) ? meas.monthSE : null,
     measured: !!meas,
-    missing,
-    source: meas ? MEASURED_SEASONAL_SOURCE : fall ? ESTIMATED_SEASONAL_SOURCE : NO_SEASONAL_SOURCE,
+    missing: !meas,
+    source: meas ? MEASURED_SEASONAL_SOURCE : NO_SEASONAL_SOURCE,
     years, ageDays, ticker,
   };
   out.note = seasonalSourceSentence(out);
   return out;
 }
+
+/* =====================================================================
+   WHAT THE SEASON SAYS FOR A WINDOW — THE ONE HOME (PR #48, TASK 2; owner decisions, 3 Oct 2026)
+
+   MEASURED. The season factor used a fixed ±0.8% band for every market, and the chance drifted on every month's
+   full mean. But a monthly mean is a noisy number: CORN's monthly volatility is ≈ 6.4% (SIGMA 0.22 / √12), so the
+   mean of 16 Octobers is uncertain by ≈ ±1.6%. The measured October (≈ +1.2%) is 0.7× its uncertainty — noise —
+   while June (−3.46%) is 2.2×.
+
+   THE RULE. The window is `seasonalDrift()`'s span (`seasonalSpan(dte)` months from `month`). A month COUNTS only
+   when |mean| ≥ RULES.seasonalSignalT × its standard error. The window mean is the counted months' means averaged
+   over the WHOLE span — a month that is not a signal contributes no drift, it does not stretch the ones that count
+   (a two-month window with one counted month at −3.46% leans −1.73% a month). With none counting it is 0.
+
+   EVERY READER OF THE SEASON READS THIS: the season factor (`seasonalComponent()`), the chance's drift
+   (`chanceOf()`, mean × 12 / 100), the position thesis, and `autopilot.mjs`. Same market, same month, same days →
+   the same answer on every screen.
+===================================================================== */
+const MONTH3 = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/**
+ * @param stats  a `seasonalProvenance()` result (or anything with `monthlyMean`, `monthN`, `monthSE`)
+ * @param month  the month the window starts in, 0-11
+ * @param dte    days the trade is held for (to expiry): the window is `seasonalSpan(dte)` months
+ * @returns { read, mean, counts, months, used, dropped, span, t, source, note }
+ *   `mean` is in PERCENT a month (0 when nothing counts or nothing is read); `months` lists every month in the window
+ *   as { m, label, mean, se, n, counts, line }; `used` / `dropped` split them.
+ */
+export function seasonalSignal(stats, month, dte) {
+  const t = RULES.seasonalSignalT;
+  const read = !!(stats && seasonalRowOk(stats.monthlyMean));
+  const m0 = Number.isInteger(month) ? ((month % 12) + 12) % 12 : null;
+  if (!read || m0 == null || !(dte > 0)) {
+    return { read: false, mean: 0, counts: false, months: [], used: [], dropped: [], span: dte > 0 ? seasonalSpan(dte) : 0, t,
+      source: NO_SEASONAL_SOURCE, note: SEASON_NOT_READ };
+  }
+  const span = seasonalSpan(dte);
+  const months = [];
+  for (let i = 0; i < span; i++) {
+    const m = (m0 + i) % 12;
+    const mean = stats.monthlyMean[m];
+    const se = Array.isArray(stats.monthSE) && Number.isFinite(stats.monthSE[m]) ? stats.monthSE[m] : null;
+    const n = Array.isArray(stats.monthN) && Number.isFinite(stats.monthN[m]) ? stats.monthN[m] : null;
+    const counts = se != null && se > 0 && Math.abs(mean) >= t * se;
+    months.push({ m, label: MONTH3[m], mean, se, n, counts, line: seasonMonthLine({ label: MONTH3[m], mean, se, n, counts }) });
+  }
+  const used = months.filter((x) => x.counts), dropped = months.filter((x) => !x.counts);
+  const mean = used.reduce((a, x) => a + x.mean, 0) / span;
+  return { read: true, mean, counts: used.length > 0, months, used, dropped, span, t,
+    source: stats.source || MEASURED_SEASONAL_SOURCE,
+    note: used.length
+      ? `${used.length} of ${span} month${span === 1 ? "" : "s"} in the window beat${used.length === 1 ? "s" : ""} ${t}× ` +
+        `${used.length === 1 ? "its" : "their"} own noise: the season leans ${signedPct(mean)} a month.`
+      : `No month in the window beats ${t}× its own noise, so the season adds nothing.` };
+}
+
+const signedPct = (x) => `${x >= 0 ? "+" : "−"}${Math.abs(x).toFixed(1)}%`;
+
+/** "Oct +1.2% ± 1.6% (16 yrs) · not a signal" — one month of the window, on the Why sheet's season row. */
+export const seasonMonthLine = ({ label, mean, se, n, counts }) =>
+  `${label} ${signedPct(mean)} ± ${se == null ? "—" : `${se.toFixed(1)}%`}` +
+  `${Number.isFinite(n) ? ` (${n} yrs)` : ""} · ${counts ? "counts" : "not a signal"}`;
+
+/** What a chance was worked out from: "prices + season" when a month counted, "prices only" otherwise. */
+export const chanceBasisLabel = (mc) => (mc && mc.seasonCounts ? "prices + season" : "prices only");
+
+/** The Why sheet's season row: the window's months, or "season not read: no drift". */
+export const seasonRowLines = (sig) => (sig && sig.read ? sig.months.map((x) => x.line) : [SEASON_NOT_READ]);
 
 /**
  * THE STAMP ON A STORED RECORD, AND WHAT ITS ABSENCE MEANS.
@@ -4372,12 +4463,7 @@ export function attentionCount(alerts = []) {
   return { decisions, looks, closesWorking: working.length, quiet: looks === 0 && working.length === 0 };
 }
 
-/** ONE LINE for a holding at the broker that the app has a record of (PR #44, TASK 1): the profit, and where to act on
- *  it. It replaces a paragraph the broker panel repeated for every holding, telling the reader to use a button the
- *  card then hid inside a fold. The paragraph is gone: the card now shows that button. */
-/* PR #47: no longer rendered — the Alpaca panel is dissolved and a holding with a record IS its card. Kept for the
-   tests that pin its words until the next sweep removes both. */
-export const onCardLine = (ref, pnlText) => `✓ ${ref || "a position"} · ${pnlText} · on your Positions card`;
+/* `onCardLine()` (a holding's one line in the dissolved Alpaca panel) was removed in PR #48: nothing rendered it. */
 
 /** What the broker panel says about a holding the app has NO record of: it has no card, so this panel keeps its own
  *  close button, and nothing is filed in the Journal. */
@@ -5827,15 +5913,15 @@ export default RULES;
    THE WHY SHEET'S TWO FIXED SENTENCES (PR #46, TASK 3) — one home each.
 
    WHAT THE SCORE CHANGES IN FIND, checked clause by clause against the code on 2 Oct 2026:
-   - "Season decides" picks the direction built on a market from its season plus score × confidence
-     (`suggestionOf()` / `suggestionScore()` in App.jsx);
-   - a market's cards move up or down by `signalAdjustment()` inside `rankScore()`, and a CONFLICT market's
-     cards sort last (`compareCandidates()`, signals.js);
+   - "Signals decide" picks the direction built on a market from score × confidence against
+     RULES.directionSignalMin (`signalDirection()` in signals.js, PR #48), always beside the Neutral family;
+   - only under the order "Expected value + signal" do a market's cards move by `signalAdjustment()`, and only
+     then does a CONFLICT market's cards sort last (`findOrderCompare()`, PR #48);
    - price, risk and chance are worked out from the option prices and the season's drift (`seasonalDrift()`),
      never from this score.
 ===================================================================== */
 export const whyFindEffect = () =>
-  `What this changes in Find: with "Season decides" it helps pick the direction built on this market, and it moves ` +
-  `this market's cards up or down the list (a CONFLICT market's cards go last). Price, risk and chance come from the ` +
-  `option prices and the season, not from this score.`;
+  `What this changes in Find: with "Signals decide" it picks the direction built on this market (beside the Neutral ` +
+  `cards), and under "Expected value + signal" it moves this market's cards up or down the list (a CONFLICT market's ` +
+  `cards go last). Price, risk and chance come from the option prices and the season, not from this score.`;
 export const WEIGHTS_CHOSEN_LINE = "These weights and bands are chosen, not measured on past trades.";

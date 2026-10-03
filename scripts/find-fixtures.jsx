@@ -16,7 +16,7 @@ import { seasonalProvenance, seasonalStampFields, chanceDrawFields } from "../sr
 import { MODEL_BOARD, ungBoards } from "./crossing-fixtures.jsx";
 
 export const DIRECTIONS = ["verybear", "bear", "neutral", "bull", "verybull"];
-const FLAT = seasonalProvenance(null, Array(12).fill(0), "fixture");
+const FLAT = seasonalProvenance(null, "fixture");   // the season not read: the chance drifts at zero (PR #48)
 
 /** Every card the five directions produce on the fixture boards, as Find's rows. */
 export function findCards() {

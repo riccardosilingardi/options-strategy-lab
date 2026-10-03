@@ -1,9 +1,9 @@
 // AUTOPILOT — Netlify Scheduled Function (giorni feriali 11:00 UTC ≈ 13:00 CET, pre-apertura USA)
 // Ciclo: posizioni → dati oggettivi (chain CBOE, stagionalità) → TIS + Exit Simulator → brief Claude → approve link → webhook
 import { getStore } from "@netlify/blobs";
-import { netBS, exitSim, SEASONAL, SIGMA, parseAvJson, statsFromMatrix } from "../../src/engine.js";
+import { netBS, exitSim, SIGMA, parseAvJson, statsFromMatrix } from "../../src/engine.js";
 import { RULES, ruleBadge, copilotRulesBlock, pctText,
-  markProvenance, sigmaProvenance, ivProvenance, seasonalProvenance, chanceOf, chanceSourceNote,
+  markProvenance, sigmaProvenance, ivProvenance, seasonalProvenance, seasonalSignal, chanceOf, chanceSourceNote,
   autopilotVerdict, AUTOPILOT_VERDICTS, MODEL_PRICE, takeProfitTarget, takeProfitBasisWords } from "../../src/rules.js";
 import { evaluateTrade } from "../../src/riskGate.js";
 // HOW MANY COMBINATIONS THE POSITION IS. A close proposed at one lot on a
@@ -80,8 +80,8 @@ const CHAIN_FEED = "CBOE delayed";
    a seven-day TTL, so this reads WHAT THE CLIENT'S LOADS HAVE ALREADY PUT
    THERE. Three rules hold it:
 
-     - IT NEVER CALLS ALPHA VANTAGE. A miss is a miss: the market falls back to
-       the hand-written row and the brief SAYS it did.
+     - IT NEVER CALLS ALPHA VANTAGE. A miss is a miss: the season is "not read"
+       (the hand-written table is retired, PR #48) and the brief SAYS so.
      - A STALE ENTRY IS SERVED AS IS, with no TTL test. Month-old measured
        seasonality beats a table with the wrong sign on eight months of twelve,
        and the age travels with it into the sentence the brief prints.
@@ -135,7 +135,7 @@ export async function measuredSeasonal(store, sym) {
       // volatility of zero, and neither is a reading: twelve zeros is a drift
       // of zero and a sigma of zero is a share that never moves. Both would be
       // confident claims standing in for an empty body.
-      if (st.years > 0) out = { monthlyMean: st.monthlyMean, sigma: st.sigma, years: st.years, at: blob.at ?? null };
+      if (st.years > 0) out = { monthlyMean: st.monthlyMean, monthN: st.monthN, monthSE: st.monthSE, sigma: st.sigma, years: st.years, at: blob.at ?? null };
     }
   } catch { out = null; }   // a missing, unreadable or refusal body is simply a miss
   seasonalCache.set(sym, out);
@@ -148,7 +148,9 @@ function computeTIS(pos, cur) {
   pts += th.pop && cur.pop ? Math.round(Math.max(0, Math.min(1.2, cur.pop / th.pop)) / 1.2 * 40) : 20;
   // UNKNOWN IS NOT DISAGREEMENT. `Math.sign(null)` is 0, so a market with no
   // seasonal reading at all would score as having flipped against the thesis.
-  const same = th.seasonal == null || cur.seasonalNow == null || Math.sign(th.seasonal) === Math.sign(cur.seasonalNow);
+  // A SEASON THAT IS NOT A SIGNAL (0: no month beats its noise, PR #48) has not flipped: it has no sign to flip to.
+  const same = th.seasonal == null || cur.seasonalNow == null || th.seasonal === 0 || cur.seasonalNow === 0
+    || Math.sign(th.seasonal) === Math.sign(cur.seasonalNow);
   pts += same ? 16 : 4;
   // THE SAME FALLBACK, FROM THE SAME HOME. Both sides of this difference used
   // to spell a bare 0.25; when neither the chain nor the thesis has an implied
@@ -223,19 +225,12 @@ export default async () => {
     // questions about the same measured prices, so they are decided from the
     // same object rather than read twice.
     const measured = await measuredSeasonal(store, pos.ticker);
-    /* >>> ANOTHER MARKET'S TABLE IS NOT THIS MARKET'S FALLBACK. <<< This read
-       `SEASONAL[pos.ticker] || SEASONAL.SPY`, which for any market without a
-       hand-written row — every one of the liquid tier — would have drifted the
-       chance in a brief written overnight on the S&P 500's seasonality and
-       called it the position's own. `seasonalProvenance()` already has a name
-       for having no row: `missing`, which produces no chance and one sentence
-       saying why. That is the honest third option, and it has been in place
-       since PR #26; this line was the one caller reaching past it. */
-    const seas = seasonalProvenance(measured, SEASONAL[pos.ticker] || null, pos.ticker);
-    // UNKNOWN IS NOT A NUMBER, HERE TOO: with no table at all there is no
-    // seasonal reading to score the thesis against, and `computeTIS` treats a
-    // null the way it already treats a missing entry thesis.
-    const seasonalNow = seas.missing ? null : seas.monthlyMean[month];
+    // MEASURED ONLY (PR #48, TASK 2): the hand-written table is retired, so a miss is "not read".
+    const seas = seasonalProvenance(measured, pos.ticker);
+    // THE SEASON THE SCREENS READ FOR THE SAME POSITION: `seasonalSignal()` over the days left, the months that beat
+    // their own noise only. Null when not read: `computeTIS` treats it as it treats a missing entry thesis.
+    const seasonSig = seasonalSignal(seas, month, Math.max(1, dteLeft));
+    const seasonalNow = seasonSig.read ? seasonSig.mean : null;
     // THE ONE CHANCE, AND THE BRIEF READS THE SAME ENGINE THE SCREENS DO.
     // This was `probProfit()` in engine.js: a closed form at a RISK-NEUTRAL
     // drift of 0.045, while the Build screen drifted its own Monte Carlo on
@@ -295,7 +290,7 @@ export default async () => {
           // "model" WHENEVER THE NUMBER CAME FROM `netBS`, not merely when the
           // chain failed to load: a chain that loaded and was missing one leg
           // produced a modelled net and was reported as market data.
-          today: { chainSource: prov.source, priceIsEstimated: prov.modelled, spot: +spot.toFixed(2), pnl: +pnl.toFixed(0), pct_max_profit: +pctMax.toFixed(0), popNow: pop == null ? null : +(pop * 100).toFixed(0), ivNow: +(iv * 100).toFixed(0), ivSource: ivUsed.source, tis, seasonalThisMonth: seasonalNow,
+          today: { chainSource: prov.source, priceIsEstimated: prov.modelled, spot: +spot.toFixed(2), pnl: +pnl.toFixed(0), pct_max_profit: +pctMax.toFixed(0), popNow: pop == null ? null : +(pop * 100).toFixed(0), ivNow: +(iv * 100).toFixed(0), ivSource: ivUsed.source, tis, seasonalWindow: seasonalNow, seasonalWindowMonths: seasonSig.months.map((x) => x.line),
             // WHAT `popNow` IS AN ANSWER ABOUT. It used to be a closed form at
             // a risk-neutral drift and the field said nothing about that; the
             // model was free to describe it as the market's own odds. It is a

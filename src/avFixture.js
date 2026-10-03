@@ -49,10 +49,13 @@ const lastDay = (y, m) => new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
  * @param drift     a per-month log drift, so a caller can build a series
  *                  whose statistics it knows the sign of
  * @param vol       a per-month log standard deviation, likewise
+ * @param monthDrift  twelve per-CALENDAR-MONTH log drifts added to `drift` (PR #48), so a test can build a series
+ *                    with a season it knows — e.g. June at −3.46%, the CORN reading the owner measured. Still a
+ *                    SENSITIVITY, never a measurement of a ticker.
  * @returns the body `/api/av` passes through, ready for `parseAvJson()`
  */
 export function avMonthlyBody({ months = 132, endYear = 2026, endMonth = 8,
-  seed = 1, drift = 0, vol = 0.06 } = {}) {
+  seed = 1, drift = 0, vol = 0.06, monthDrift = null } = {}) {
   const next = gen(seed);
   const series = {};
   let price = 20;
@@ -64,7 +67,7 @@ export function avMonthlyBody({ months = 132, endYear = 2026, endMonth = 8,
     while (u === 0) u = next();
     while (v === 0) v = next();
     const z = Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
-    price *= Math.exp(drift + vol * z);
+    price *= Math.exp(drift + (Array.isArray(monthDrift) ? monthDrift[m] || 0 : 0) + vol * z);
     const day = String(lastDay(y, m)).padStart(2, "0");
     // EVERY VALUE IS A STRING, as Alpha Vantage sends them. `parseFloat` on
     // the client is not a formality: a fixture with numbers in it would let a
@@ -97,6 +100,12 @@ export function avMonthlyBody({ months = 132, endYear = 2026, endMonth = 8,
  * `av.mjs` names all three; `parseAvJson()` has to throw on all three or a
  * refusal becomes a seasonal table.
  */
+/* A CORN-SHAPED SEASON FOR TESTS (PR #48): the owner's measured CORN means where the brief names them (June −3.46%,
+   September +1.03%, October +1.2%), zero elsewhere, as log drifts. A SENSITIVITY, not CORN. */
+export const CORN_SHAPED_MONTH_DRIFT = Object.freeze([0, 0, 0, 0, 0, Math.log(1 - 0.0346), 0, 0, Math.log(1.0103), Math.log(1.012), 0, 0]);
+/** CORN's monthly volatility as the brief computes it: SIGMA 0.22 / √12 ≈ 6.4%. */
+export const CORN_MONTHLY_VOL = 0.22 / Math.sqrt(12);
+
 export const AV_REFUSALS = {
   Note: { Note: "Thank you for using Alpha Vantage! Our standard API call frequency is 25 requests per day." },
   Information: { Information: "The demo API key is for demo purposes only. Please claim your free API key." },

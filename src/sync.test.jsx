@@ -27,6 +27,17 @@ check("NOTHING SAVED HERE: the server's positions and synced settings are adopte
   eq(r.restoredFromServer, true, "and it says where it came from");
 });
 
+check("settings.findOrder IS IN THE SYNC PAYLOAD (PR #48, the one payload change allowed)", () => {
+  const r = hydrateFromServer(null, { positions: [J1], settings: { findOrder: "chance" } });
+  eq(r.settings.findOrder, "chance", "adopted from the server");
+  const app = readFileSync("src/App.jsx", "utf8");
+  const post = app.slice(app.indexOf('fetch("/api/state", { method: "POST"'), app.indexOf("catch { /* offline ok */ }", app.indexOf('fetch("/api/state", { method: "POST"')));
+  if (!post.includes('findOrder: st.settings?.findOrder || "ev"')) throw new Error("findOrder is not posted");
+  // …and nothing else new: the payload's keys are the eight it had plus findOrder.
+  const keys = [...post.matchAll(/(\w+): (?:st\.|!!st\.)/g)].map((m) => m[1]);
+  eq(JSON.stringify(keys), JSON.stringify(["positions", "webhook", "capital", "concurrentTarget", "savings", "sizeOverride", "sizingFree", "notifyWhenReady", "findOrder"]), "payload keys");
+});
+
 check("A LOCAL STORE ALWAYS WINS — even an empty one, which is the owner's own newer word", () => {
   const local = { positions: [], settings: {} };
   eq(hydrateFromServer(local, SRV), local, "an emptied book stays empty");

@@ -5,6 +5,8 @@ import { readFileSync } from "node:fs";
 import { WhySheet } from "./why.jsx";
 import { EvidenceBar } from "./steps.jsx";
 import { findFreshness } from "./freshness.js";
+import { seasonalSignal as seasonalSignalE } from "./rules.js";
+const seasonAt = (x, dte = 30) => seasonalSignalE({ monthlyMean: Array(12).fill(x), monthN: Array(12).fill(16), monthSE: Array(12).fill(0.4) }, 6, dte);
 import { fuseSignals } from "./signals.js";
 
 const ok = [], bad = [];
@@ -38,7 +40,7 @@ check("TASK 2 — no EvidenceBar on Find; Build's bar is headed 'About this trad
   const h = renderToStaticMarkup(<EvidenceBar items={[{ id: "why", label: "Why this market" }]} heading="About this trade · CORN Bull Call Spread" />);
   has(h, "About this trade · CORN Bull Call Spread");
   // A card's badge and its fold open evidence for THE CARD's market, and remember the card for Back.
-  has(app, "onClick={() => { scrollToCard.current = x.key; setWhyTk(x.tk); setEv(\"why\"); }}");
+  has(app, "onClick={() => { scrollToCard.current = x.key; setWhyTk(x.tk); setWhyDte(x.dte); setEv(\"why\"); }}");
   has(app, "onMore={(x) => { scrollToCard.current = x.key; setWhyTk(x.tk); setEv(\"more\"); }}");
   has(readFileSync("src/card.jsx", "utf8"), "More on {more.tk}: levels · history");
   has(app, 'if (step !== "find" || ev || !scrollToCard.current) return;');
@@ -47,11 +49,13 @@ check("TASK 2 — no EvidenceBar on Find; Build's bar is headed 'About this trad
 check("TASK 3 — the sheet: '<TK> this month', the market not this trade; one verdict line, two ⓘ, one sentence, the narrative folded", () => {
   has(app, 'title={ev === "why" ? `${whyTk || ticker} this month`');
   has(app, 'sub={ev === "why" ? "the market, not this trade"');
-  const f = fuseSignals({ ticker: "GLD", month: 6, now: Date.UTC(2025, 6, 15), seasonalMean: 2, newsItems: [], bars: null });
+  const f = fuseSignals({ ticker: "GLD", month: 6, now: Date.UTC(2025, 6, 15), season: seasonAt(2), newsItems: [], bars: null });
   const h = renderToStaticMarkup(<WhySheet fused={f} ticker="GLD" newsItems={[]} month={6} />);
   has(h, `score ${f.score > 0 ? "+" : ""}${f.score}`);
   has(h, `confidence ${f.confidence}`);
-  if ((h.match(/ⓘ/g) || []).length !== 2) throw new Error("two ⓘ, beside score and confidence");
+  // Two ⓘ beside score and confidence, and since PR #48 a third: "How the numbers fit".
+  if ((h.match(/ⓘ/g) || []).length !== 3) throw new Error("three ⓘ: score, confidence, how the numbers fit");
+  if (!h.includes('aria-label="About how the numbers fit"')) throw new Error("the numbers-fit ⓘ");
   has(h, 'aria-expanded="false"');
   has(h, "What this changes in Find");
   has(h, "The full reasoning");

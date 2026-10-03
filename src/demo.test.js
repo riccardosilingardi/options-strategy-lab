@@ -12,7 +12,8 @@
 //    "near take profit" in a comment teaches nothing.
 import { readFileSync } from "node:fs";
 import { demoPositions, DEMO_TOOLTIP, DEMO_BANNER, DEMO_SEED_TICKERS } from "./demo.js";
-import { netBS, SEASONAL } from "./engine.js";
+import { netBS } from "./engine.js";
+import { BASKET } from "./markets.js";
 import { RULES } from "./rules.js";
 
 const ok = [], bad = [];
@@ -215,29 +216,23 @@ check("one position has a broken thesis while the price still looks fine", () =>
   if (!(p.thesis.pop > 0.75)) throw new Error(`entry chance of ${p.thesis.pop} leaves no room to degrade`);
 });
 
-check("the copy never claims a seasonal break that did not happen", () => {
-  // The Thesis Integrity Score reads seasonality off the same table this does,
-  // so a note claiming the season has gone when the table says it has
-  // strengthened is the demo being caught lying by its own screen. Between some
-  // pairs of months none of these markets weakens — December into January every
-  // one of them is MORE bearish — and the copy has to survive those months too.
-  const U2 = { CORN: { iv: 0.24, step: 0.5 }, UNG: { iv: 0.45, step: 0.5 }, SOYB: { iv: 0.2, step: 0.5 }, WEAT: { iv: 0.26, step: 0.25 } };
-  const und = (tk) => U2[tk] || { iv: 0.3, step: 0.5 };
+check("the copy makes no seasonal claim: the season is measured only (PR #48)", () => {
   for (let day = 1; day <= 365; day += 5) {
     const now = new Date(2026, 0, day).getTime();
-    const c = demoPositions({ spots: SPOTS, underlying: und, now }).find((x) => x.name === "Iron Condor");
+    const ps = demoPositions({ spots: SPOTS, now });
+    const c = ps.find((x) => x.name === "Iron Condor");
     if (!c) throw new Error(`no third example on ${new Date(now).toDateString()}`);
-    const then = c.thesis.seasonal;
-    const nowSeasonal = SEASONAL[c.ticker][new Date(now).getMonth()];
-    const broke = Math.sign(then) !== Math.sign(nowSeasonal) || Math.abs(nowSeasonal) < Math.abs(then) * 0.5;
-    const note = c.timeline.map((e) => e.text).join(" ");
-    if (note.includes("no longer the season we are in") && !broke) {
-      throw new Error(`${new Date(now).toDateString()}: claims a seasonal break, but ${then} became ${nowSeasonal}`);
-    }
-    if (!broke && !note.includes("seasonal case is still standing")) {
-      throw new Error(`${new Date(now).toDateString()}: the note does not say which half of the thesis broke`);
+    for (const p of ps) {
+      if (p.thesis.seasonal !== null) throw new Error(`${p.ticker} carries a seasonal reading nobody measured`);
+      const note = p.timeline.map((e) => e.text).join(" ");
+      if (/averaged|season/i.test(note)) throw new Error(`${p.ticker}: the note claims a season`);
     }
   }
+});
+
+check("the seed list is the examples' markets, each a registry market (PR #48)", () => {
+  for (const tk of DEMO_SEED_TICKERS) if (!BASKET.includes(tk)) throw new Error(`${tk} is not in the registry`);
+  if (DEMO_SEED_TICKERS.length !== 3) throw new Error(`three examples, three markets: ${DEMO_SEED_TICKERS.join(", ")}`);
 });
 
 check("the timelines say what each example is there to teach", () => {

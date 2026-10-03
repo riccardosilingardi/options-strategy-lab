@@ -22,24 +22,22 @@
 // ============================================================================
 import React, { useState } from "react";
 import { Compass, Briefcase, ArrowLeft, SlidersHorizontal, ShieldCheck, ShieldAlert, AlertTriangle } from "lucide-react";
-import { T, BADGE_SAFE, BADGE_BTN_GAP } from "./theme.js";
+import { T, TYPE, BADGE_SAFE, BADGE_BTN_GAP } from "./theme.js";
+import { mono, sans, Chip, Label, Panel, TAP } from "./ui.jsx";
 import { RULES, sizing, money, pctText, ruleBadge, limitOwner, NO_CEILING, takeProfitTarget } from "./rules.js";
 import { displayName } from "./positionView.js";
 import { BandThumbnail, payoffBands, UnifiedFigure, exitPlanSentence, exitPlanDetail, price } from "./visuals.jsx";
 
-const mono = { fontFamily: "ui-monospace, Menlo, monospace" };
-const sans = { fontFamily: "ui-sans-serif, system-ui" };
-const TAP = 52; // minimum tap target, in px — a thumb, not a mouse pointer
+// PR #48 SWEEP: the stacks, Chip, Label, Panel and the tap target are ui.jsx's, the sizes are the type tokens. Mono
+// only for numbers and legs (an amount typed, a P&L, the legs being sent). RED IS FOR ERRORS AND REFUSALS: a
+// position to CLOSE is `T.action`, a loss violet; the gate's refusal stays red.
+const FS = TYPE.size, FW = TYPE.weight, LH = TYPE.line;
+const EYEBROW = { textTransform: "uppercase" };
 
 /* ============================== atoms ============================== */
 
-export const Card = ({ children, style }) => (
-  <div style={{ background: T.panel, border: `1px solid ${T.line}`, borderRadius: 12, padding: 18, ...style }}>{children}</div>
-);
-
-const Eyebrow = ({ children }) => (
-  <div style={{ ...mono, fontSize: 10, letterSpacing: "0.15em", color: T.amber, textTransform: "uppercase" }}>{children}</div>
-);
+/** The wizard's card is the Panel atom with the wizard's roomier padding. */
+export const Card = ({ children, style }) => <Panel style={{ padding: 18, ...style }}>{children}</Panel>;
 
 /** A full-width choice. Big enough for a thumb, legible without a title. */
 const BigChoice = ({ icon: I, title, sub, onClick, color = T.amber, primary }) => (
@@ -52,36 +50,25 @@ const BigChoice = ({ icon: I, title, sub, onClick, color = T.amber, primary }) =
     }}>
     <I size={22} style={{ flexShrink: 0, color: primary ? T.onAccent : color }} />
     <span style={{ minWidth: 0 }}>
-      <span style={{ display: "block", fontSize: 16, fontWeight: 700 }}>{title}</span>
-      <span style={{ display: "block", fontSize: 12.5, marginTop: 2, color: primary ? T.onAccent : T.mut, opacity: primary ? 0.9 : 1 }}>{sub}</span>
+      <span style={{ display: "block", fontSize: FS.md, fontWeight: FW.bold }}>{title}</span>
+      <span style={{ display: "block", fontSize: FS.sm, marginTop: 2, color: primary ? T.onAccent : T.mut, opacity: primary ? 0.9 : 1 }}>{sub}</span>
     </span>
   </button>
 );
 
-/** One option out of a small set. Wraps on a phone, sits in a row on a desk. */
-const Chip = ({ children, on, onClick, color = T.amber }) => (
-  <button onClick={onClick}
-    style={{
-      ...sans, fontSize: 14, fontWeight: on ? 700 : 500, minHeight: TAP, padding: "10px 16px",
-      borderRadius: 10, cursor: "pointer", flex: "1 1 auto", minWidth: 92,
-      background: on ? color : "transparent", color: on ? T.onAccent : T.ink,
-      border: `1.5px solid ${on ? color : T.line}`,
-    }}>{children}</button>
-);
-
 const NumberField = ({ value, onChange, prefix, min = 0, step = 1, width = 150, placeholder }) => (
   <label style={{ display: "inline-flex", alignItems: "center", gap: 6, background: T.bg, border: `1px solid ${T.field}`, borderRadius: 10, padding: "0 12px", minHeight: TAP, width }}>
-    {prefix && <span style={{ ...mono, fontSize: 15, color: T.mut }}>{prefix}</span>}
+    {prefix && <span style={{ ...mono, fontSize: FS.md, color: T.mut }}>{prefix}</span>}
     <input type="number" inputMode="numeric" min={min} step={step} value={value} placeholder={placeholder}
       onChange={(e) => onChange(e.target.value)}
-      style={{ ...mono, fontSize: 16, background: "transparent", color: T.ink, border: "none", outline: "none", width: "100%", minWidth: 0 }} />
+      style={{ ...mono, fontSize: FS.md, background: "transparent", color: T.ink, border: "none", outline: "none", width: "100%", minWidth: 0 }} />
   </label>
 );
 
 /** A literacy pill (PRD §2). Always rendered BEFORE the choice it talks about. */
 export const Pill = ({ children, tone = T.amber }) => (
   <div style={{
-    ...sans, fontSize: 13, lineHeight: 1.5, color: T.body, marginTop: 10,
+    ...sans, fontSize: FS.sm, lineHeight: LH.body, color: T.body, marginTop: 10,
     padding: "11px 13px", background: `${tone}0f`, border: `1px solid ${tone}55`,
     borderRadius: 10, borderLeft: `3px solid ${tone}`,
   }}>{children}</div>
@@ -89,8 +76,8 @@ export const Pill = ({ children, tone = T.amber }) => (
 
 const Question = ({ n, of, title, children }) => (
   <div style={{ marginTop: 22 }}>
-    <div style={{ ...mono, fontSize: 10.5, color: T.dim, letterSpacing: "0.1em" }}>QUESTION {n} OF {of}</div>
-    <div style={{ ...sans, fontSize: 17, fontWeight: 700, color: T.ink, marginTop: 4, lineHeight: 1.35 }}>{title}</div>
+    <div style={{ ...sans, fontSize: FS.xs, color: T.dim, letterSpacing: "0.1em" }}>QUESTION {n} OF {of}</div>
+    <div style={{ ...sans, fontSize: FS.lg, fontWeight: FW.bold, color: T.ink, marginTop: 4, lineHeight: LH.tight }}>{title}</div>
     {children}
   </div>
 );
@@ -131,18 +118,18 @@ export function CapitalOnboarding({ initial = {}, onDone }) {
 
   return (
     <div style={{ ...sans, maxWidth: 620, margin: "0 auto", padding: `24px 16px ${BADGE_SAFE}px` }}>
-      <Eyebrow>Setting up · paper trading only</Eyebrow>
-      <h1 style={{ ...sans, fontSize: 27, fontWeight: 800, color: T.ink, margin: "8px 0 6px", lineHeight: 1.2 }}>
+      <Label style={EYEBROW}>Setting up · paper trading only</Label>
+      <h1 style={{ ...sans, fontSize: FS.xl, fontWeight: FW.bold, color: T.ink, margin: "8px 0 6px", lineHeight: LH.tight }}>
         First, how much are we working with?
       </h1>
-      <p style={{ ...sans, fontSize: 15, color: T.mut, lineHeight: 1.55, margin: 0 }}>
+      <p style={{ ...sans, fontSize: FS.md, color: T.mut, lineHeight: LH.body, margin: 0 }}>
         Every limit in this app is worked out from these answers, not handed to you. No money moves:
         trades are simulated on a paper account.
       </p>
 
       <Card style={{ marginTop: 20 }}>
         <Question n={1} of={3} title="How much money is set aside for trading?">
-          <div style={{ ...sans, fontSize: 13.5, color: T.mut, marginTop: 6, lineHeight: 1.5 }}>
+          <div style={{ ...sans, fontSize: FS.sm, color: T.mut, marginTop: 6, lineHeight: LH.body }}>
             Not your savings — just the part you have decided to trade with.
           </div>
           <div style={{ marginTop: 10 }}>
@@ -151,31 +138,31 @@ export function CapitalOnboarding({ initial = {}, onDone }) {
           </div>
           {capital === "" && (
             <button onClick={() => setCapital(RULES.suggestedTradingCapital)}
-              style={{ ...sans, fontSize: 13.5, minHeight: TAP, marginTop: 6, padding: "8px 4px", background: "transparent", border: "none", color: T.blue, cursor: "pointer", textAlign: "left" }}>
+              style={{ ...sans, fontSize: FS.sm, minHeight: TAP, marginTop: 6, padding: "8px 4px", background: "transparent", border: "none", color: T.blue, cursor: "pointer", textAlign: "left" }}>
               No idea? Start from {money(RULES.suggestedTradingCapital)} — you can change it any time.
             </button>
           )}
         </Question>
 
         <Question n={2} of={3} title="How many trades do you expect to have open at the same time?">
-          <div style={{ ...sans, fontSize: 13.5, color: T.mut, marginTop: 6, lineHeight: 1.5 }}>
+          <div style={{ ...sans, fontSize: FS.sm, color: T.mut, marginTop: 6, lineHeight: LH.body }}>
             This is what splits your capital into a per-trade limit.
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
             {[1, 2, 3, 4, 6].map((n) => (
-              <Chip key={n} on={+concurrent === n} onClick={() => setConcurrent(n)}>{n}</Chip>
+              <Chip key={n} on={+concurrent === n} onClick={() => setConcurrent(n)} style={{ flex: "1 1 auto", minWidth: 92 }}>{n}</Chip>
             ))}
           </div>
         </Question>
 
         <Question n={3} of={3} title="Total savings — optional, and you can skip it.">
-          <div style={{ ...sans, fontSize: 13.5, color: T.mut, marginTop: 6, lineHeight: 1.5 }}>
+          <div style={{ ...sans, fontSize: FS.sm, color: T.mut, marginTop: 6, lineHeight: LH.body }}>
             Only used to tell you if the trading pot is a large slice of everything you have. It is never sent anywhere.
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center", flexWrap: "wrap" }}>
             <NumberField value={savings} onChange={setSavings} prefix="$" min={0} step={1000} />
             {savings !== "" && (
-              <button onClick={() => setSavings("")} style={{ ...sans, fontSize: 14, minHeight: TAP, padding: "0 12px", background: "transparent", border: "none", color: T.blue, cursor: "pointer" }}>Skip this</button>
+              <button onClick={() => setSavings("")} style={{ ...sans, fontSize: FS.md, minHeight: TAP, padding: "0 12px", background: "transparent", border: "none", color: T.blue, cursor: "pointer" }}>Skip this</button>
             )}
           </div>
         </Question>
@@ -184,18 +171,18 @@ export function CapitalOnboarding({ initial = {}, onDone }) {
         {limits.pills.map((p) => <Pill key={p.id}>{p.text}</Pill>)}
 
         <div style={{ marginTop: 18, padding: "14px 16px", background: T.bg, borderRadius: 10, border: `1px solid ${limits.answered ? T.line : T.blue}` }}>
-          <div style={{ ...mono, fontSize: 10.5, color: limits.answered ? T.dim : T.blue, letterSpacing: "0.1em" }}>
+          <div style={{ ...sans, fontSize: FS.xs, color: limits.answered ? T.dim : T.blue, letterSpacing: "0.1em" }}>
             {limits.answered ? "YOUR LIMITS" : "WHAT THE ANSWERS WOULD GIVE YOU"}
           </div>
-          <div style={{ ...sans, fontSize: 16, color: T.ink, fontWeight: 700, marginTop: 6 }}>
+          <div style={{ ...sans, fontSize: FS.md, color: T.ink, fontWeight: FW.bold, marginTop: 6 }}>
             {money(limits.perTradeLimit)} at risk per trade
           </div>
-          <div style={{ ...sans, fontSize: 13.5, color: T.mut, marginTop: 4, lineHeight: 1.5 }}>
+          <div style={{ ...sans, fontSize: FS.sm, color: T.mut, marginTop: 4, lineHeight: LH.body }}>
             and no more than {money(limits.totalLimit)} at risk across everything at once
             ({pctText(RULES.totalExposurePct)} of your capital). The app will refuse an order that breaks either one.
           </div>
           {!limits.answered && (
-            <div style={{ ...sans, fontSize: 12.5, color: T.blue, marginTop: 6, lineHeight: 1.5 }}>
+            <div style={{ ...sans, fontSize: FS.sm, color: T.blue, marginTop: 6, lineHeight: LH.body }}>
               Worked from an example, because both questions above are still open. Answer them and these become yours.
             </div>
           )}
@@ -204,7 +191,7 @@ export function CapitalOnboarding({ initial = {}, onDone }) {
         {/* An override is allowed, but it costs a written reason (PRD §3). */}
         {!wantOverride ? (
           <button onClick={() => { setWantOverride(true); setOvAmount(Math.round(limits.suggestedPerTrade)); }}
-            style={{ ...sans, fontSize: 14, minHeight: TAP, marginTop: 10, padding: "8px 4px", background: "transparent", border: "none", color: T.blue, cursor: "pointer" }}>
+            style={{ ...sans, fontSize: FS.md, minHeight: TAP, marginTop: 10, padding: "8px 4px", background: "transparent", border: "none", color: T.blue, cursor: "pointer" }}>
             I want a different per-trade limit
           </button>
         ) : (
@@ -216,13 +203,13 @@ export function CapitalOnboarding({ initial = {}, onDone }) {
             <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap", alignItems: "center" }}>
               <NumberField value={ovAmount} onChange={setOvAmount} prefix="$" min={1} step={50} width={140} />
               <button onClick={() => { setWantOverride(false); setOvAmount(""); setOvReason(""); }}
-                style={{ ...sans, fontSize: 14, minHeight: TAP, padding: "0 12px", background: "transparent", border: "none", color: T.blue, cursor: "pointer" }}>Cancel</button>
+                style={{ ...sans, fontSize: FS.md, minHeight: TAP, padding: "0 12px", background: "transparent", border: "none", color: T.blue, cursor: "pointer" }}>Cancel</button>
             </div>
             <textarea value={ovReason} onChange={(e) => setOvReason(e.target.value)} rows={3}
               placeholder="Why this limit and not the suggested one?"
-              style={{ ...sans, width: "100%", boxSizing: "border-box", marginTop: 10, fontSize: 16, lineHeight: 1.45,
+              style={{ ...sans, width: "100%", boxSizing: "border-box", marginTop: 10, fontSize: FS.md, lineHeight: LH.body,
                 background: T.bg, color: T.ink, border: `1px solid ${reasonShort ? T.amber : T.field}`, borderRadius: 10, padding: "12px 13px", resize: "vertical" }} />
-            <div style={{ ...sans, fontSize: 12.5, color: reasonShort ? T.amber : T.mut, marginTop: 6 }}>
+            <div style={{ ...sans, fontSize: FS.sm, color: reasonShort ? T.amber : T.mut, marginTop: 6 }}>
               {reasonShort
                 ? `${RULES.minOverrideReasonChars - ovReason.trim().length} more characters and the override is accepted.`
                 : `At least ${RULES.minOverrideReasonChars} characters.`}
@@ -231,12 +218,12 @@ export function CapitalOnboarding({ initial = {}, onDone }) {
         )}
 
         <button onClick={() => onDone(answers)} disabled={!ready}
-          style={{ ...sans, width: "100%", minHeight: 56, marginTop: 20, marginBottom: BADGE_BTN_GAP, fontSize: 16, fontWeight: 700, borderRadius: 10,
+          style={{ ...sans, width: "100%", minHeight: 56, marginTop: 20, marginBottom: BADGE_BTN_GAP, fontSize: FS.md, fontWeight: FW.bold, borderRadius: 10,
             cursor: ready ? "pointer" : "not-allowed", opacity: ready ? 1 : 0.5,
             background: T.amber, color: T.onAccent, border: "none" }}>
           {ready ? "Start" : !(+capital > 0) ? "Still needed: how much you are trading with" : "Still needed: how many positions at once"}
         </button>
-        <div style={{ ...sans, fontSize: 12, color: T.dim, marginTop: 12, textAlign: "center", lineHeight: 1.5 }}>
+        <div style={{ ...sans, fontSize: FS.xs, color: T.dim, marginTop: 12, textAlign: "center", lineHeight: LH.body }}>
           You can change all of this later in Settings. Educational software on a paper account, not financial advice.
         </div>
       </Card>
@@ -300,8 +287,8 @@ export function WizardOpen({ positions = [], posAlerts = [], attention = 0, look
     <div style={{ ...sans, maxWidth: 620, margin: "0 auto", padding: `22px 16px ${BADGE_SAFE}px` }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
         <div>
-          <h1 data-view-heading tabIndex={-1} style={{ ...sans, fontSize: 27, fontWeight: 800, color: T.ink, margin: 0, lineHeight: 1.2, outline: "none" }}>{greeting()}</h1>
-          <p style={{ ...sans, fontSize: 15.5, color: T.mut, lineHeight: 1.5, margin: "8px 0 0" }}>
+          <h1 data-view-heading tabIndex={-1} style={{ ...sans, fontSize: FS.xl, fontWeight: FW.bold, color: T.ink, margin: 0, lineHeight: LH.tight, outline: "none" }}>{greeting()}</h1>
+          <p style={{ ...sans, fontSize: FS.md, color: T.mut, lineHeight: LH.body, margin: "8px 0 0" }}>
             {statusLine({ positions, attention, looks, marketReady, closing })}
           </p>
         </div>
@@ -313,11 +300,11 @@ export function WizardOpen({ positions = [], posAlerts = [], attention = 0, look
 
       {/* With positions open, what needs attention IS the front page. */}
       {hasPositions && (
-        <Card style={{ marginTop: 18, borderColor: attention ? `${T.red}66` : (Number(looks) || 0) ? `${T.amber}66` : T.line }}>
-          <Eyebrow>{attention ? "Needs attention today" : (Number(looks) || 0) ? "Worth a look" : "Your positions"}</Eyebrow>
+        <Card style={{ marginTop: 18, borderColor: attention ? `${T.action}66` : (Number(looks) || 0) ? `${T.amber}66` : T.line }}>
+          <Label style={EYEBROW}>{attention ? "Needs attention today" : (Number(looks) || 0) ? "Worth a look" : "Your positions"}</Label>
           <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
             {posAlerts.map(({ p, pnl, dteLeft, level, label, spotNow }) => {
-              const c = level === "action" ? T.red : level === "watch" ? T.amber : T.green;
+              const c = level === "action" ? T.action : level === "watch" ? T.amber : T.green;
               return (
                 <button key={p.id} onClick={onPositions}
                   style={{ ...sans, display: "flex", gap: 12, alignItems: "center", width: "100%", textAlign: "left",
@@ -329,10 +316,10 @@ export function WizardOpen({ positions = [], posAlerts = [], attention = 0, look
                       bars={barsFor ? barsFor(p.ticker) : []} width={80} height={34} />
                   )}
                   <span style={{ flex: 1, minWidth: 0 }}>
-                    <span style={{ display: "block", fontSize: 15, fontWeight: 700, color: T.ink }}>{p.ticker} · {displayName(p)}</span>
-                    <span style={{ display: "block", fontSize: 13, color: T.mut, marginTop: 2 }}>{label} · {dteLeft} days left</span>
+                    <span style={{ display: "block", fontSize: FS.md, fontWeight: FW.bold, color: T.ink }}>{p.ticker} · {displayName(p)}</span>
+                    <span style={{ display: "block", fontSize: FS.sm, color: T.mut, marginTop: 2 }}>{label} · {dteLeft} days left</span>
                   </span>
-                  <span style={{ ...mono, fontSize: 15, fontWeight: 700, color: pnl == null ? T.dim : pnl >= 0 ? T.green : T.red, flexShrink: 0 }}>
+                  <span style={{ ...mono, fontSize: FS.md, fontWeight: FW.bold, color: pnl == null ? T.dim : pnl >= 0 ? T.green : T.violet, flexShrink: 0 }}>
                     {pnl == null ? "…" : `${pnl < 0 ? "-" : "+"}$${Math.abs(pnl).toFixed(0)}`}
                   </span>
                 </button>
@@ -355,7 +342,7 @@ export function WizardOpen({ positions = [], posAlerts = [], attention = 0, look
       </div>
 
       <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10, marginTop: 20, flexWrap: "wrap" }}>
-        <span style={{ ...mono, fontSize: 10.5, color: T.dim }}>PAPER · {ruleBadge()}</span>
+        <span style={{ ...sans, fontSize: FS.xs, color: T.dim }}>PAPER · {ruleBadge()}</span>
       </div>
     </div>
   );
@@ -440,7 +427,7 @@ const CheckRow = ({ ok, text }) => (
     {ok
       ? <ShieldCheck size={17} style={{ color: T.green, flexShrink: 0, marginTop: 1 }} />
       : <ShieldAlert size={17} style={{ color: T.red, flexShrink: 0, marginTop: 1 }} />}
-    <span style={{ ...sans, fontSize: 13.5, color: ok ? T.body : T.ink, lineHeight: 1.5 }}>{text}</span>
+    <span style={{ ...sans, fontSize: FS.sm, color: ok ? T.body : T.ink, lineHeight: LH.body }}>{text}</span>
   </div>
 );
 
@@ -499,11 +486,11 @@ export function ConfirmSteps({
     <div>
       {heading && (
         <>
-          <Eyebrow>Confirm</Eyebrow>
-          <h1 style={{ ...sans, fontSize: 25, fontWeight: 800, color: T.ink, margin: "6px 0 4px", lineHeight: 1.25 }}>
+          <Label style={EYEBROW}>Confirm</Label>
+          <h1 style={{ ...sans, fontSize: FS.xl, fontWeight: FW.bold, color: T.ink, margin: "6px 0 4px", lineHeight: LH.tight }}>
             {c.ticker} · {c.name}
           </h1>
-          <p style={{ ...sans, fontSize: 15, color: T.mut, lineHeight: 1.55, margin: 0 }}>
+          <p style={{ ...sans, fontSize: FS.md, color: T.mut, lineHeight: LH.body, margin: 0 }}>
             {c.legs.length} legs, expiring {c.expKey || `in ${Math.round(c.dte)} days`}. Risking {money(totalRisk)}
             {Number.isFinite(c.maxProfit) ? ` to make up to ${money(c.maxProfit * n)}.` : `, with ${NO_CEILING} on what it can make.`}
           </p>
@@ -511,7 +498,7 @@ export function ConfirmSteps({
       )}
 
       {showFigure && <Card style={{ marginTop: 14 }}>
-        <Eyebrow>What this looks like</Eyebrow>
+        <Label style={EYEBROW}>What this looks like</Label>
         <div style={{ marginTop: 10 }}>
           <UnifiedFigure legs={c.legs} entryNet={c.entryNet} spot={c.spot} bars={bars}
             dte={c.dte} sigma={sigma} driftAnnual={driftAnnual} ticker={c.ticker} height={340} />
@@ -519,8 +506,8 @@ export function ConfirmSteps({
       </Card>}
 
       <Card style={{ marginTop: 12 }}>
-        <Eyebrow>What is being sent</Eyebrow>
-        <div style={{ ...mono, fontSize: 13, color: T.ink, marginTop: 8, lineHeight: 1.7 }}>
+        <Label style={EYEBROW}>What is being sent</Label>
+        <div style={{ ...mono, fontSize: FS.sm, color: T.ink, marginTop: 8, lineHeight: 1.7 }}>
           {c.legs.map((l, i) => (
             <div key={i}>
               {l.side > 0 ? "BUY" : "SELL"} {l.qty * n} × {c.ticker} {price(l.strike)} {l.type === "call" ? "call" : "put"}
@@ -534,7 +521,7 @@ export function ConfirmSteps({
             the header badge, and "nothing is sent until you tap below" is the
             button four lines down saying so itself. What is left is the fact
             only this line carries: every figure above is for all of them. */}
-        <div style={{ ...sans, fontSize: 13, color: T.mut, marginTop: 8, lineHeight: 1.5 }}>
+        <div style={{ ...sans, fontSize: FS.sm, color: T.mut, marginTop: 8, lineHeight: LH.body }}>
           {n === 1
             ? "One combination. Nothing is sent until you tap below."
             : `${n} combinations — every figure above is for all ${n}.`}
@@ -542,14 +529,14 @@ export function ConfirmSteps({
       </Card>
 
       <Card style={{ marginTop: 12 }}>
-        <Eyebrow>{refused ? "The gate refused this" : "The checks that run when you tap"}</Eyebrow>
+        <Label style={EYEBROW}>{refused ? "The gate refused this" : "The checks that run when you tap"}</Label>
         <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
           {rows.map((r) => <CheckRow key={r.id} ok={r.ok} text={r.text} />)}
         </div>
         {showWarnings && (shown?.warnings || []).map((w, i) => (
           <div key={i} style={{ display: "flex", gap: 10, alignItems: "flex-start", marginTop: 12 }}>
             <AlertTriangle size={17} style={{ color: T.amber, flexShrink: 0, marginTop: 1 }} />
-            <span style={{ ...sans, fontSize: 13.5, color: T.body, lineHeight: 1.5 }}>{w.message}</span>
+            <span style={{ ...sans, fontSize: FS.sm, color: T.body, lineHeight: LH.body }}>{w.message}</span>
           </div>
         ))}
         {/* A REFUSAL AND A REASSURANCE MAY NOT SHARE A SHEET EITHER (P9, TASK 1).
@@ -558,7 +545,7 @@ export function ConfirmSteps({
             card carried. The count and the pointer stay — only the clause that
             argues with the refusal below it goes. */}
         {!showWarnings && (shown?.warnings || []).length > 0 && (
-          <div style={{ ...sans, fontSize: 12.5, color: T.mut, marginTop: 12, lineHeight: 1.5 }}>
+          <div style={{ ...sans, fontSize: FS.sm, color: T.mut, marginTop: 12, lineHeight: LH.body }}>
             {(shown.warnings || []).length} warning{(shown.warnings || []).length === 1 ? "" : "s"} apply to this
             trade. {(shown.warnings || []).length === 1 ? "It is" : "They are"} in the warnings panel on
             the step this sheet closes back onto, written once{refused
@@ -574,17 +561,17 @@ export function ConfirmSteps({
       </Card>
 
       <Card style={{ marginTop: 12 }}>
-        <Eyebrow>The exit plan — decided now, not later</Eyebrow>
-        <div style={{ ...sans, fontSize: 16, fontWeight: 700, color: T.ink, marginTop: 8, lineHeight: 1.4 }}>
+        <Label style={EYEBROW}>The exit plan — decided now, not later</Label>
+        <div style={{ ...sans, fontSize: FS.md, fontWeight: FW.bold, color: T.ink, marginTop: 8, lineHeight: LH.body }}>
           {exitPlanSentence(takeProfitTarget({ legs: c.legs, maxProfit: c.maxProfit, maxLoss: c.maxLoss, entryNet: c.entryNet }))}
         </div>
-        <div style={{ ...sans, fontSize: 13.5, color: T.mut, marginTop: 6, lineHeight: 1.5 }}>
+        <div style={{ ...sans, fontSize: FS.sm, color: T.mut, marginTop: 6, lineHeight: LH.body }}>
           {exitPlanDetail(takeProfitTarget({ legs: c.legs, maxProfit: c.maxProfit, maxLoss: c.maxLoss, entryNet: c.entryNet }), contracts)}
         </div>
       </Card>
 
       <button onClick={onConfirm} disabled={busy || refused}
-        style={{ ...sans, width: "100%", minHeight: 58, marginTop: 18, marginBottom: BADGE_BTN_GAP, fontSize: 16.5, fontWeight: 700, borderRadius: 10,
+        style={{ ...sans, width: "100%", minHeight: 58, marginTop: 18, marginBottom: BADGE_BTN_GAP, fontSize: FS.md, fontWeight: FW.bold, borderRadius: 10,
           cursor: busy ? "wait" : refused ? "not-allowed" : "pointer", opacity: busy ? 0.6 : refused ? 0.45 : 1,
           background: T.amber, color: T.onAccent, border: "none" }}>
         {busy ? "Checking…" : refused ? "Blocked by the risk gate" : `Open this on paper · ${money(totalRisk)} at risk${n > 1 ? ` (${n} × ${money(c.risk)})` : ""}`}
@@ -592,12 +579,12 @@ export function ConfirmSteps({
 
       {refused && onDesk && (
         <button onClick={onDesk}
-          style={{ ...sans, fontSize: 14, minHeight: TAP, marginTop: 8, padding: "8px 4px", background: "transparent", border: "none", color: T.blue, cursor: "pointer", textAlign: "left", width: "100%" }}>
+          style={{ ...sans, fontSize: FS.md, minHeight: TAP, marginTop: 8, padding: "8px 4px", background: "transparent", border: "none", color: T.blue, cursor: "pointer", textAlign: "left", width: "100%" }}>
           Change the trade above and try again →
         </button>
       )}
 
-      <div style={{ ...sans, fontSize: 12, color: T.dim, marginTop: 14, textAlign: "center", lineHeight: 1.5 }}>
+      <div style={{ ...sans, fontSize: FS.xs, color: T.dim, marginTop: 14, textAlign: "center", lineHeight: LH.body }}>
         Paper trading only. Educational software, not financial advice.
       </div>
     </div>

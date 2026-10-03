@@ -18,7 +18,7 @@
 // ============================================================================
 
 import { RULES, money, chanceText, rewardRisk, remainingEdge, payoffCeiling, NO_CEILING,
-  takeProfitProgress, takeProfitBasisWords, stopWarningLevel, known, exactExtremes } from "./rules.js";
+  takeProfitProgress, takeProfitBasisWords, stopWarningLevel, known, exactExtremes, CARD_LABELS } from "./rules.js";
 import { legsNotHeld } from "./closeOrder.js";
 import { holdingShape, positionSize } from "./journal.js";
 
@@ -135,7 +135,10 @@ export function exitProgress({ p, pnl = null, dteLeft = null, tpTarget = null, n
    AT ENTRY VERSUS NOW — the Find card's four figures, in its order, and the four factors
 ------------------------------------------------------------------ */
 
-export const FIGURE_LABELS = ["RETURN ON RISK", "CHANCE", "PROFIT", "RISK"];
+/* ONE HOME FOR THE FOUR LABELS (PR #48, TASK 0b): the Find card's `CARD_LABELS` in rules.js, in the card's order —
+   YOU RISK, MAX PROFIT, CHANCE, RETURN ON RISK. This file kept its own list (RETURN ON RISK, CHANCE, PROFIT, RISK),
+   which stopped equal to the card's in PR #45; `positionView.test.js` now holds the order to `CARD_LABELS`. */
+const FIGURE_ORDER = ["risk", "profit", "chance", "rr"];
 export const FACTOR_LABELS = { seasonal: "SEASONALITY", technical: "PRICE TREND", weather: "WEATHER", news: "NEWS" };
 const DASH = "—";
 
@@ -164,14 +167,14 @@ export function entryVsNow({ p, n = 1, pnl = null, popNow = null, nowSignals = n
   const edge = remainingEdge({ maxProfit: maxProfit == null ? null : maxProfit * size,
     maxLoss: maxLoss == null ? null : maxLoss * size, pnl });
   const pct = (r) => (r == null ? DASH : `${Math.round(r * 100)}%`);
-  const figures = [
-    { k: FIGURE_LABELS[0], entry: pct(rrEntry), now: edge.known ? pct(edge.ratio) : DASH },
-    { k: FIGURE_LABELS[1], entry: chanceText(p && p.thesis ? p.thesis.pop : null), now: chanceText(popNow) },
-    { k: FIGURE_LABELS[2], entry: unbounded ? NO_CEILING : maxProfit == null ? DASH : money(maxProfit * size),
+  const cells = {
+    risk: { entry: maxLoss == null ? DASH : money(Math.abs(maxLoss) * size), now: edge.known ? money(edge.risk) : DASH },
+    profit: { entry: unbounded ? NO_CEILING : maxProfit == null ? DASH : money(maxProfit * size),
       now: unbounded ? NO_CEILING : edge.known ? money(edge.reward) : DASH },
-    { k: FIGURE_LABELS[3], entry: maxLoss == null ? DASH : money(Math.abs(maxLoss) * size),
-      now: edge.known ? money(edge.risk) : DASH },
-  ];
+    chance: { entry: chanceText(p && p.thesis ? p.thesis.pop : null), now: chanceText(popNow) },
+    rr: { entry: pct(rrEntry), now: edge.known ? pct(edge.ratio) : DASH },
+  };
+  const figures = FIGURE_ORDER.map((id) => ({ id, k: CARD_LABELS[id], ...cells[id] }));
   const then = p && p.thesis ? p.thesis.signals : null;
   const hasEntrySignals = !!(then && then.ready && then.factors);
   const keys = ["seasonal", "technical", "weather", "news"];

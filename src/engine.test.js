@@ -22,10 +22,10 @@
 
 import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
-import { exitSim, netBS, SIGMA, terminalMC, seedFrom, rng, seasonalDrift, SEASONAL,
+import { exitSim, netBS, SIGMA, terminalMC, seedFrom, rng, seasonalDrift, seasonalSpan,
   parseAvJson, statsFromMatrix } from "./engine.js";
 import { RULES, takeProfitTarget, sigmaProvenance, MEASURED_SIGMA_SOURCE, TABLE_SIGMA_SOURCE, FALLBACK_SIGMA_SOURCE } from "./rules.js";
-import { avMonthlyBody, AV_REFUSALS } from "./avFixture.js";
+import { avMonthlyBody, AV_REFUSALS, CORN_SHAPED_MONTH_DRIFT, CORN_MONTHLY_VOL } from "./avFixture.js";
 
 let passed = 0;
 const failures = [];
@@ -344,16 +344,16 @@ test("seasonalDrift is the app's own thesis, annualised over the window held", (
   assert.equal(seasonalDrift(mm, 8, 0), null);
 });
 
-test("the REAL seasonal tables produce the drifts the PRD's table was built on", () => {
-  // September, 45 days: the grain markets read negative and the gas markets
-  // positive, which is why every CHANCE moved DOWN on CORN, SOYB and WEAT and
-  // UP on UNG and BOIL when the drift changed. PRD §4h carries the table.
-  const at = (tk) => +(seasonalDrift(SEASONAL[tk], 8, 45) * 100).toFixed(1);
-  assert.equal(at("CORN"), -9.6);
-  assert.equal(at("SOYB"), -8.4);
-  assert.equal(at("WEAT"), -3.6);
-  assert.equal(at("UNG"), 14.4);
-  assert.equal(at("BOIL"), 26.4);
+test("THE HAND-WRITTEN TABLE IS RETIRED; a measured (avFixture) series drifts the window it spans (PR #48)", () => {
+  assert.ok(!/export const SEASONAL\b/.test(codeOf("engine.js")), "SEASONAL is gone from engine.js");
+  // An avFixture-derived series with June at −3.46%: statsFromMatrix reads it back, and seasonalDrift averages the
+  // months the window spans — one span, `seasonalSpan()`, which seasonalSignal() reads too.
+  const st = statsFromMatrix(parseAvJson(avMonthlyBody({ months: 240, endYear: 2026, endMonth: 8, seed: 21,
+    vol: 0.001, monthDrift: CORN_SHAPED_MONTH_DRIFT })).matrix);
+  assert.ok(Math.abs(st.monthlyMean[5] - -3.46) < 0.1, `June ${st.monthlyMean[5]}`);
+  assert.equal(seasonalSpan(45), 2); assert.equal(seasonalSpan(10), 1); assert.equal(seasonalSpan(90), 3);
+  const d = seasonalDrift(st.monthlyMean, 5, 30);
+  assert.ok(Math.abs(d - (st.monthlyMean[5] / 100) * 12) < 1e-12, "one month: that month's mean × 12");
 });
 
 test("THE CLOSED FORMS ARE GONE FROM THE ENGINE", () => {
@@ -528,7 +528,7 @@ test("AV STATS — twelve means in PERCENT, an annualised sigma, and no month in
   const st = statsFromMatrix(matrix);
   assert.equal(st.monthlyMean.length, 12);
   st.monthlyMean.forEach((m, i) => assert.ok(Number.isFinite(m), `month ${i} is a number`));
-  // The units are the ones `SEASONAL` is in and `seasonalDrift()` expects.
+  // The units are the ones `seasonalDrift()` expects.
   // A 1% monthly log drift is about +1%/month in these units, not 0.01.
   const avg = st.monthlyMean.reduce((a, b) => a + b, 0) / 12;
   assert.ok(avg > 0.3 && avg < 3, `means are percentages, got an average of ${avg}`);
@@ -553,6 +553,25 @@ test("AV STATS — an EMPTY matrix is not twelve zeros and not a share that neve
   assert.equal(st.years, 0, "and zero rows is what says so");
   assert.deepEqual(st.monthlyMean, Array(12).fill(0));
   assert.equal(st.sigma, 0);
+});
+
+test("AV STATS — per month: the years that carry it and the standard error of its mean (PR #48)", () => {
+  // CORN-shaped: a monthly volatility of ≈ 6.4% over ~10 years → each month's mean uncertain by ≈ 6.4 / √n %.
+  const { matrix } = parseAvJson(avMonthlyBody({ months: 132, endYear: 2026, endMonth: 8, seed: 31,
+    vol: CORN_MONTHLY_VOL, monthDrift: CORN_SHAPED_MONTH_DRIFT }));
+  const st = statsFromMatrix(matrix);
+  assert.equal(st.monthN.length, 12); assert.equal(st.monthSE.length, 12);
+  for (let m = 0; m < 12; m++) {
+    const xs = matrix.map((r) => r[m + 1]).filter((x) => x != null);
+    assert.equal(st.monthN[m], xs.length, `month ${m}: n`);
+    const mu = xs.reduce((a, b) => a + b, 0) / xs.length;
+    const sd = Math.sqrt(xs.reduce((a, b) => a + (b - mu) ** 2, 0) / (xs.length - 1));
+    assert.ok(Math.abs(st.monthSE[m] - sd / Math.sqrt(xs.length)) < 1e-12, `month ${m}: sd / √n exactly`);
+    assert.ok(st.monthSE[m] > 1 && st.monthSE[m] < 3.5, `month ${m}: a CORN-like ±${st.monthSE[m].toFixed(2)}%`);
+  }
+  // A month carried by one year has no standard deviation: its error is null, never zero.
+  const one = statsFromMatrix([[2026, 1.5, null, null, null, null, null, null, null, null, null, null, null]]);
+  assert.equal(one.monthN[0], 1); assert.equal(one.monthSE[0], null); assert.equal(one.monthSE[1], null);
 });
 
 console.log(`\n${passed} passed, ${failures.length} failed`);

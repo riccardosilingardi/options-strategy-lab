@@ -2,12 +2,20 @@
 // Plain Node, no test framework: `npm test` runs this file directly.
 
 import assert from "node:assert/strict";
+import { TICKERS } from "./markets.js";
 import { fuseSignals, weatherComponent, newsComponent, ageDecay, regionSignals,
   sentimentDirection, signalAdjustment, rankScore, compareCandidates, withSignalRank, againstSignal,
   weatherApplies, weatherNaReason, factorsOf, tagImpacts, seasonalComponent, REGIONS,
   readingState, readingLine, unreadInputsAria, signalSnapshot, compareSignals,
-  verdictLine, scoreWorking, confidenceWorking, BASE_WEIGHTS, REINFORCE, CONFLICT_DAMPING, CONFIDENCE_BANDS } from "./signals.js";
+  verdictLine, scoreWorking, confidenceWorking, signalDirection, signalFamilies,
+  FIND_ORDERS, DEFAULT_FIND_ORDER, findOrderOf, findOrderKey, findOrderCompare, placeLine, placeSignal, numbersFitLines, BASE_WEIGHTS, REINFORCE, CONFLICT_DAMPING, CONFIDENCE_BANDS } from "./signals.js";
 import { readFileSync } from "node:fs";
+import { seasonalSignal, RULES } from "./rules.js";
+/* A MEASURED SEASON FOR A FIXTURE (PR #48): every month at `x`%, 16 years, a standard error of 0.4% — so a month
+   counts when |x| ≥ 0.8 (RULES.seasonalSignalT = 2 × 0.4), the same line the retired ±0.8% band drew. */
+const seasonAt = (x, dte = 30) => seasonalSignal({ monthlyMean: Array(12).fill(x), monthN: Array(12).fill(16),
+  monthSE: Array(12).fill(0.4) }, 6, dte);
+
 
 /* ---------------- tiny harness ---------------- */
 let passed = 0;
@@ -59,7 +67,9 @@ const sentences = (n) => n.split(/\.\s+/).filter(Boolean);
 function narrativeIsUsable(r) {
   assert.match(r.narrative, /\d/, "narrative must contain numbers");
   const s = sentences(r.narrative);
-  assert.ok(s.length >= 3 && s.length <= 4, `narrative must be 3-4 sentences, got ${s.length}`);
+  // A factor that does not apply adds its one sentence (PR #48: a season not read is such a factor).
+  const most = 4 + ((r.excluded || []).length ? 1 : 0);
+  assert.ok(s.length >= 3 && s.length <= most, `narrative must be 3-${most} sentences, got ${s.length}`);
   assert.ok(!/signals are positive/i.test(r.narrative), "narrative must not be a content-free summary");
   assert.ok(r.narrative.includes(String(r.confidence)), "narrative must state the confidence figure");
 }
@@ -70,7 +80,7 @@ console.log("\nsrc/signals.js — 4-factor confluence\n");
 test("all four factors bullish -> CONFLUENT, confidence 75-95, positive score", () => {
   const r = fuseSignals({
     ticker: "CORN", month: JULY, now: NOW,
-    weatherData: HOT_DRY_JULY, newsItems: BULLISH_NEWS, bars: bars("up"), seasonalMean: 1.3,
+    weatherData: HOT_DRY_JULY, newsItems: BULLISH_NEWS, bars: bars("up"), season: seasonAt(1.3),
   });
   assert.equal(r.agreement, "CONFLUENT");
   assert.ok(r.confidence >= 75 && r.confidence <= 95, `confidence ${r.confidence} outside 75-95`);
@@ -87,7 +97,7 @@ test("all four factors bullish -> CONFLUENT, confidence 75-95, positive score", 
 test("all four factors bearish -> CONFLUENT, confidence 75-95, negative score", () => {
   const r = fuseSignals({
     ticker: "CORN", month: SEPTEMBER, now: NOW,
-    weatherData: WET_SEPTEMBER, newsItems: BEARISH_NEWS, bars: bars("down"), seasonalMean: -1.1,
+    weatherData: WET_SEPTEMBER, newsItems: BEARISH_NEWS, bars: bars("down"), season: seasonAt(-1.1),
   });
   assert.equal(r.agreement, "CONFLUENT");
   assert.ok(r.confidence >= 75 && r.confidence <= 95, `confidence ${r.confidence} outside 75-95`);
@@ -102,7 +112,7 @@ test("all four factors bearish -> CONFLUENT, confidence 75-95, negative score", 
 test("weather against seasonality -> CONFLICT, confidence under 40, both named", () => {
   const r = fuseSignals({
     ticker: "CORN", month: JULY, now: NOW,
-    weatherData: WET_JULY, newsItems: [], bars: bars("flat"), seasonalMean: 1.3,
+    weatherData: WET_JULY, newsItems: [], bars: bars("flat"), season: seasonAt(1.3),
   });
   assert.equal(r.agreement, "CONFLICT");
   assert.ok(r.confidence < 40, `confidence ${r.confidence} must be under 40 on a conflict`);
@@ -119,7 +129,7 @@ test("weather against seasonality -> CONFLICT, confidence under 40, both named",
 test("news only -> MIXED, confidence 45-70, other three neutral", () => {
   const r = fuseSignals({
     ticker: "CORN", month: JULY, now: NOW,
-    weatherData: null, newsItems: BULLISH_NEWS, bars: bars("flat"), seasonalMean: 0,
+    weatherData: null, newsItems: BULLISH_NEWS, bars: bars("flat"), season: seasonAt(0),
   });
   assert.equal(r.agreement, "MIXED");
   assert.ok(r.confidence >= 45 && r.confidence <= 70, `confidence ${r.confidence} outside 45-70`);
@@ -136,7 +146,7 @@ test("news only -> MIXED, confidence 45-70, other three neutral", () => {
 test("weather only -> MIXED, confidence 45-70, three concurring regions", () => {
   const r = fuseSignals({
     ticker: "CORN", month: JULY, now: NOW,
-    weatherData: HOT_DRY_JULY, newsItems: [], bars: bars("flat"), seasonalMean: 0,
+    weatherData: HOT_DRY_JULY, newsItems: [], bars: bars("flat"), season: seasonAt(0),
   });
   assert.equal(r.agreement, "MIXED");
   assert.ok(r.confidence >= 45 && r.confidence <= 70, `confidence ${r.confidence} outside 45-70`);
@@ -151,7 +161,7 @@ test("weather only -> MIXED, confidence 45-70, three concurring regions", () => 
 test("nothing pushing -> score 0, confidence well under 40, 'nothing today' narrative", () => {
   const r = fuseSignals({
     ticker: "CORN", month: JULY, now: NOW,
-    weatherData: null, newsItems: [], bars: bars("flat"), seasonalMean: 0.2,
+    weatherData: null, newsItems: [], bars: bars("flat"), season: seasonAt(0.2),
   });
   assert.equal(r.score, 0);
   assert.ok(r.confidence < 40, `confidence ${r.confidence} must be low when no factor is active`);
@@ -193,7 +203,7 @@ test("a geopolitical headline weighs more than a market one of the same age", ()
 
 /* ---------------- 10. reinforcement multiplier ---------------- */
 test("weather + geopolitical news on the same ticker multiplies the score", () => {
-  const common = { ticker: "CORN", month: JULY, now: NOW, weatherData: HOT_DRY_JULY, bars: bars("flat"), seasonalMean: 0 };
+  const common = { ticker: "CORN", month: JULY, now: NOW, weatherData: HOT_DRY_JULY, bars: bars("flat"), season: seasonAt(0) };
   const withGeo = fuseSignals({ ...common, newsItems: [{ title: "Black Sea grain corridor halted by Russia", date: daysAgo(0) }] });
   const withMarket = fuseSignals({ ...common, newsItems: [{ title: "Ethanol plant expansion lifts biofuel demand", date: daysAgo(0) }] });
   assert.equal(withGeo.reinforced, true);
@@ -204,8 +214,8 @@ test("weather + geopolitical news on the same ticker multiplies the score", () =
 /* ---------------- 11. bounds ---------------- */
 test("score stays within -100..100 and confidence within 0..100", () => {
   const cases = [
-    { ticker: "CORN", month: JULY, now: NOW, weatherData: HOT_DRY_JULY, newsItems: [...BULLISH_NEWS, ...BULLISH_NEWS], bars: bars("up"), seasonalMean: 12 },
-    { ticker: "CORN", month: SEPTEMBER, now: NOW, weatherData: WET_SEPTEMBER, newsItems: BEARISH_NEWS, bars: bars("down"), seasonalMean: -12 },
+    { ticker: "CORN", month: JULY, now: NOW, weatherData: HOT_DRY_JULY, newsItems: [...BULLISH_NEWS, ...BULLISH_NEWS], bars: bars("up"), season: seasonAt(12) },
+    { ticker: "CORN", month: SEPTEMBER, now: NOW, weatherData: WET_SEPTEMBER, newsItems: BEARISH_NEWS, bars: bars("down"), season: seasonAt(-12) },
     { ticker: "UNG", month: JULY, now: NOW },
   ];
   for (const c of cases) {
@@ -219,19 +229,19 @@ test("score stays within -100..100 and confidence within 0..100", () => {
 
 /* ---------------- 12. missing inputs ---------------- */
 test("missing bars, weather and news degrade to neutral instead of throwing", () => {
-  const r = fuseSignals({ ticker: "UNG", month: 0, now: NOW });
+  const r = fuseSignals({ ticker: "UNG", month: 0, now: NOW, season: seasonAt(2.1) });
   assert.equal(r.components.technical.dir, 0);
   assert.equal(r.components.weather.dir, 0);
   assert.equal(r.components.news.dir, 0);
-  // UNG has a strong January seasonal in engine.js, so seasonality alone speaks.
+  // A measured season that beats its noise, so seasonality alone speaks.
   assert.equal(r.components.seasonal.dir, 1);
   assert.equal(r.agreement, "MIXED");
   narrativeIsUsable(r);
 });
 
 /* ---------------- 13. ranking: CONFLICT last, signal weighed ---------------- */
-const bullish = fuseSignals({ ticker: "CORN", month: JULY, now: NOW, weatherData: HOT_DRY_JULY, newsItems: BULLISH_NEWS, bars: bars("up"), seasonalMean: 2.5 });
-const conflicted = fuseSignals({ ticker: "CORN", month: JULY, now: NOW, weatherData: HOT_DRY_JULY, bars: bars("down"), seasonalMean: -2.5 });
+const bullish = fuseSignals({ ticker: "CORN", month: JULY, now: NOW, weatherData: HOT_DRY_JULY, newsItems: BULLISH_NEWS, bars: bars("up"), season: seasonAt(2.5) });
+const conflicted = fuseSignals({ ticker: "CORN", month: JULY, now: NOW, weatherData: HOT_DRY_JULY, bars: bars("down"), season: seasonAt(-2.5) });
 
 test("the fixtures used for ranking really are CONFLUENT and CONFLICT", () => {
   assert.equal(bullish.agreement, "CONFLUENT");
@@ -324,7 +334,7 @@ test("regionSignals returns one row per region with data, same direction as the 
    and a missing seasonal row is UNKNOWN rather than a quiet zero.
 ================================================================ */
 
-test("weather applicability is DERIVED from the region table, never a second list", () => {
+test("weather applicability is the REGISTRY's (PR #48), and the region table agrees with it", () => {
   for (const tk of ["CORN", "SOYB", "WEAT", "UNG", "BOIL"]) {
     assert.equal(weatherApplies(tk), true, `${tk} has regions in the table`);
     assert.ok(REGIONS.some((r) => r.affects.includes(tk)));
@@ -332,6 +342,12 @@ test("weather applicability is DERIVED from the region table, never a second lis
   for (const tk of ["GLD", "SLV", "GDX", "USO", "XLE"]) {
     assert.equal(weatherApplies(tk), false, `${tk} has no region driving it`);
   }
+  // THE TWO SAY THE SAME THING FOR EVERY MARKET: a row that says weather applies has a region, one that says it
+  // does not has none, and no region drives a market the registry does not know.
+  for (const tk of TICKERS) {
+    assert.equal(weatherApplies(tk), REGIONS.some((r) => r.affects.includes(tk)), `${tk}: registry and regions agree`);
+  }
+  for (const r of REGIONS) for (const tk of r.affects) assert.ok(TICKERS.includes(tk), `${r.id} drives ${tk}, a known market`);
 });
 
 const sum4 = (w) => Object.values(w).reduce((a, b) => a + b, 0);
@@ -371,7 +387,7 @@ test("weather on a metal is n/a, not a reading of zero", () => {
 
 test("the excluded factor is out of the AGREEMENT count and the confidence, not scored 0", () => {
   const newsItems = [{ title: "Fed signals a rate cut as real yields fall", date: daysAgo(0) }];
-  const gld = fuseSignals({ ticker: "GLD", month: JULY, weatherData: null, newsItems, bars: bars("up"), seasonalMean: 2.0, now: NOW });
+  const gld = fuseSignals({ ticker: "GLD", month: JULY, weatherData: null, newsItems, bars: bars("up"), season: seasonAt(2.0), now: NOW });
   assert.deepEqual(gld.factors, ["seasonal", "technical", "news"]);
   assert.equal(gld.components.weather.applies, false);
   // Three of three agreeing is CONFLUENT; the fourth slot is not a quiet factor
@@ -382,19 +398,44 @@ test("the excluded factor is out of the AGREEMENT count and the confidence, not 
 
   // THE PROOF THAT IT IS THE EXCLUSION DOING THE WORK: the same readings on a
   // market that HAS weather, with none loaded, cannot reach CONFLUENT.
-  const corn = fuseSignals({ ticker: "CORN", month: JULY, weatherData: null, newsItems: [{ title: "Beneficial rains improve the crop", date: daysAgo(0) }], bars: bars("up"), seasonalMean: 2.0, now: NOW });
+  const corn = fuseSignals({ ticker: "CORN", month: JULY, weatherData: null, newsItems: [{ title: "Beneficial rains improve the crop", date: daysAgo(0) }], bars: bars("up"), season: seasonAt(2.0), now: NOW });
   assert.equal(corn.components.weather.applies, true);
   assert.equal(corn.components.weather.strength, 0);
 });
 
-test("a market with no seasonal row at all reads UNKNOWN, never 0%/mo", () => {
+test("A SEASON NOT READ IS EXCLUDED WITH ITS REASON, never 0%/mo (PR #48)", () => {
   const c = seasonalComponent("GLD", JULY, null);
   assert.equal(c.mean, null, "null, not zero");
   assert.equal(c.strength, 0);
-  assert.ok(/no seasonal history/.test(c.why));
-  // And it is NOT excluded: seasonality applies to gold, it simply has not been
-  // read yet, and not knowing something that matters is real uncertainty.
+  assert.equal(c.applies, false);
+  assert.match(c.why, /season not read: no drift/);
+  // Excluded like weather on a metal: out of the weights, the agreement count and the confidence, with the reason.
+  const f = factorsOf("GLD", { seasonRead: false });
+  assert.ok(!f.keys.includes("seasonal"));
+  assert.match(f.note, /Season not read: no drift for GLD/);
+  const r = fuseSignals({ ticker: "CORN", month: JULY, now: NOW, weatherData: HOT_DRY_JULY, newsItems: [], bars: bars("up") });
+  assert.ok(r.excluded.includes("seasonal"));
+  assert.equal(+Object.values(r.weights).reduce((a, b) => a + b, 0).toFixed(6), 1, "the rest still sum to one");
+  // …and once read, it is back in, whether or not any month counts.
   assert.ok(factorsOf("GLD").keys.includes("seasonal"));
+  const quiet = fuseSignals({ ticker: "CORN", month: JULY, now: NOW, season: seasonAt(0.3) });
+  assert.ok(quiet.factors.includes("seasonal"));
+  assert.equal(quiet.components.seasonal.dir, 0, "0.3% is under 2 × 0.4%: not a signal");
+});
+
+test("THE SEASON FACTOR: direction and strength from the COUNTED window mean, today's strength formula (PR #48)", () => {
+  // June counts (2.2× its noise), July does not: a 2-month window leans −3.46 / 2 = −1.73% a month.
+  const stats = { monthlyMean: Array(12).fill(0), monthN: Array(12).fill(16), monthSE: Array(12).fill(1.6) };
+  stats.monthlyMean[5] = -3.46; stats.monthlyMean[6] = 1.2;
+  const sig = seasonalSignal(stats, 5, 60);
+  assert.equal(sig.span, 2);
+  assert.deepEqual(sig.used.map((x) => x.label), ["Jun"]);
+  assert.deepEqual(sig.dropped.map((x) => x.label), ["Jul"]);
+  assert.equal(+sig.mean.toFixed(2), -1.73);
+  const c = seasonalComponent("CORN", 5, sig);
+  assert.equal(c.dir, -1);
+  assert.equal(c.strength, Math.round(1.73 * 40));
+  assert.match(c.why, /Jun −3\.5% ± 1\.6% \(16 yrs\) · counts; Jul \+1\.2% ± 1\.6% \(16 yrs\) · not a signal/);
 });
 
 test("the new news rules tag the new markets, each with its one-line why", () => {
@@ -432,7 +473,7 @@ const GDX_NEWS = [{ title: "Central bank gold buying hits a record", date: daysA
   { title: "Gold slides as the dollar surges and real yields jump", date: daysAgo(1) },
   { title: "Gold price falls on a stronger dollar", date: daysAgo(2) }];
 const fuseGdx = (newsItems) => fuseSignals({ ticker: "GDX", month: JULY, weatherData: null, newsItems,
-  bars: bars("up"), seasonalMean: 1.4, now: NOW });
+  bars: bars("up"), season: seasonAt(1.4), now: NOW });
 
 test("READING — a market is reading until every input it has has landed or failed", () => {
   const all = { seasonal: "ready", technical: "ready", weather: "ready", news: "ready" };
@@ -535,11 +576,11 @@ test("THE CORN READING OF 2 OCT, WRITTEN OUT: 0.30×47 + 0.25×0 + 0.25×67 + 0.
 test("THE WORKED SENTENCE ARRIVES AT fused.score AND fused.confidence — every fixture market, weather or not, every case", () => {
   const TICKERS = ["CORN", "SOYB", "WEAT", "UNG", "BOIL", "GLD", "SLV", "USO", "XLE", "GDX"];
   const SETS = [
-    { weatherData: HOT_DRY_JULY, newsItems: BULLISH_NEWS, bars: bars("up"), seasonalMean: 2.5 },
-    { weatherData: WET_JULY, newsItems: BEARISH_NEWS, bars: bars("down"), seasonalMean: -2 },
-    { weatherData: HOT_DRY_JULY, newsItems: BEARISH_NEWS, bars: bars("up"), seasonalMean: -1 },
-    { weatherData: WET_JULY, newsItems: [], bars: bars("flat"), seasonalMean: 0.3 },
-    { weatherData: null, newsItems: [], bars: null, seasonalMean: 0 },
+    { weatherData: HOT_DRY_JULY, newsItems: BULLISH_NEWS, bars: bars("up"), season: seasonAt(2.5) },
+    { weatherData: WET_JULY, newsItems: BEARISH_NEWS, bars: bars("down"), season: seasonAt(-2) },
+    { weatherData: HOT_DRY_JULY, newsItems: BEARISH_NEWS, bars: bars("up"), season: seasonAt(-1) },
+    { weatherData: WET_JULY, newsItems: [], bars: bars("flat"), season: seasonAt(0.3) },
+    { weatherData: null, newsItems: [], bars: null, season: seasonAt(0) },
   ];
   const seen = new Set();
   let noWeather = 0;
@@ -584,6 +625,79 @@ test("THE ⓘ OPENS ON TAP, NEVER A title ATTRIBUTE; the sheet says what it chan
   assert.equal(/title=/.test(top), false, "no title attribute on the ⓘ");
   assert.ok(why.includes("WEIGHTS_CHOSEN_LINE") && why.includes("whyFindEffect()"));
   assert.ok(why.includes('summary="The full reasoning"'), "the narrative is behind The full reasoning");
+});
+
+test("SIGNALS DECIDE (PR #48): s = score × confidence / 100 against directionSignalMin; CONFLICT Neutral; never Very", () => {
+  assert.equal(RULES.directionSignalMin, 12.5, "chosen, not measured (PRD §4.8)");
+  const at = (score, confidence, agreement = "MIXED") => signalDirection({ score, confidence, agreement });
+  assert.equal(at(64, 86, "CONFLUENT").dir, "bull");
+  assert.equal(+at(64, 86, "CONFLUENT").s.toFixed(2), 55.04);
+  assert.equal(at(25, 50).dir, "bull");
+  assert.equal(at(24, 50).dir, "neutral");
+  assert.equal(at(-25, 50).dir, "bear");
+  assert.equal(at(-24, 50).dir, "neutral");
+  assert.equal(at(10, 45).dir, "neutral");
+  assert.equal(at(90, 95, "CONFLICT").dir, "neutral", "CONFLICT is Neutral whatever the arithmetic");
+  assert.equal(at(100, 100, "CONFLUENT").dir, "bull", "never Very");
+  assert.equal(signalDirection(null), null, "reading: no direction");
+  assert.deepEqual(signalFamilies(null), ["neutral"]);
+  assert.deepEqual(signalFamilies(at(64, 86)), ["bull", "neutral"]);
+  assert.deepEqual(signalFamilies(at(-64, 86)), ["bear", "neutral"]);
+  assert.deepEqual(signalFamilies(at(5, 40)), ["neutral"]);
+  const app = readFileSync("src/App.jsx", "utf8").replace(/\/\*[\s\S]*?\*\//g, " ");
+  assert.equal(/const suggestion(Score|Of)\s*=/.test(app), false, "suggestionScore / suggestionOf retired");
+  assert.ok(/signalFamilies\(sd\)/.test(app), "Find builds the suggested family plus Neutral");
+});
+
+test("ORDER BY (PR #48): four orders; only 'Expected value + signal' adds the signal and puts CONFLICT last", () => {
+  assert.deepEqual(FIND_ORDERS.map((o) => o.label), ["Expected value", "Expected value + signal", "Chance", "Return on risk"]);
+  assert.equal(DEFAULT_FIND_ORDER, "ev");
+  const corn = { score: 64, confidence: 86, agreement: "CONFLUENT" };
+  const war = { score: 30, confidence: 30, agreement: "CONFLICT" };
+  const A = { key: "a", ev100: -12, sent: "bull", fused: corn, lf: { pop: 0.42, rr: 1.2 } };
+  const B = { key: "b", ev100: 5, sent: "neutral", fused: null, lf: { pop: 0.61, rr: 0.4 } };
+  const C = { key: "c", ev100: 20, sent: "bull", fused: war, lf: { pop: 0.5, rr: 0.9 } };
+  const D = { key: "d", ev100: -999, sent: "bull", fused: null, lf: { pop: null, rr: null } };
+  const order = (o) => [A, B, C, D].sort(findOrderCompare(o)).map((x) => x.key).join("");
+  assert.equal(order("ev"), "cbad", "expected value alone; CONFLICT is not last; unknown last");
+  assert.equal(order("evSignal"), "abdc", "−12 + 27.5 = 15.5 beats 5; CONFLICT last");
+  assert.equal(order("chance"), "bcad");
+  assert.equal(order("rr"), "acbd");
+  // WHY THIS PLACE is built from the same figures the sort read.
+  assert.equal(placeSignal(A), signalAdjustment(corn, 1));
+  assert.equal(+placeSignal(A).toFixed(2), 27.52);
+  assert.equal(placeLine(A, "evSignal"), "expected value −12.0 per $100 + signal +27.5 = 15.5");
+  assert.equal(+(findOrderKey(A, "evSignal")).toFixed(1), 15.5, "the line's result is the sort key");
+  assert.equal(placeLine(A, "ev"), "expected value −12.0 per $100");
+  assert.equal(placeLine(A, "chance"), "chance 42%");
+  assert.equal(placeLine(A, "rr"), "return on risk 120%");
+  assert.match(placeLine(C, "evSignal"), /CONFLICT: last$/);
+  assert.equal(placeLine(D, "ev"), "expected value not known · last");
+  assert.equal(findOrderOf("nonsense").id, "ev", "an unknown setting reads as the default");
+});
+
+test("HOW THE NUMBERS FIT (PR #48): every number printed is the constant it describes", () => {
+  const lines = numbersFitLines("evSignal");
+  const all = lines.map((l) => l.text).join(" ");
+  assert.deepEqual(lines.map((l) => l.k), ["chance", "score", "shared", "meet"]);
+  assert.ok(all.includes(`${RULES.mcRuns.toLocaleString("en-US")} simulated runs`));
+  assert.ok(all.includes(`${RULES.seasonalSignalT}× their own noise`));
+  assert.ok(all.includes(`score × confidence / 100 with ${RULES.directionSignalMin}`));
+  assert.ok(all.includes(`at least ${RULES.autopilotConfidence}`));
+  assert.ok(all.includes("(Expected value + signal)"));
+  assert.ok(all.includes("seasonalSignal()"));
+  // …and the numbers are the ones the functions use: directionSignalMin is signalDirection's threshold,
+  const min = RULES.directionSignalMin;
+  assert.equal(signalDirection({ score: min * 2, confidence: 50, agreement: "MIXED" }).dir, "bull");
+  assert.equal(signalDirection({ score: min * 2 - 1, confidence: 50, agreement: "MIXED" }).dir, "neutral");
+  // seasonalSignalT is seasonalSignal's,
+  const st = { monthlyMean: Array(12).fill(RULES.seasonalSignalT), monthN: Array(12).fill(9), monthSE: Array(12).fill(1) };
+  assert.equal(seasonalSignal(st, 0, 30).counts, true);
+  assert.equal(seasonalSignal({ ...st, monthlyMean: Array(12).fill(RULES.seasonalSignalT - 0.01) }, 0, 30).counts, false);
+  // and no number in the text is anything else.
+  const nums = all.match(/\d[\d,.]*/g).map((x) => x.replace(/,/g, "").replace(/\.$/, ""));
+  const allowed = new Set([String(RULES.mcRuns), String(RULES.seasonalSignalT), String(RULES.directionSignalMin), String(RULES.autopilotConfidence), "100"]);
+  for (const n of nums) assert.ok(allowed.has(n), `an unexplained number in the text: ${n}`);
 });
 
 console.log(`\n${passed} passed, ${failures.length} failed\n`);

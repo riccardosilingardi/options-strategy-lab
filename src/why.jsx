@@ -20,21 +20,19 @@
 // file decides anything: it renders what fuseSignals() already worked out.
 // ============================================================================
 import React, { useState, useEffect } from "react";
-import { T } from "./theme.js";
+import { T, TYPE } from "./theme.js";
+import { mono, sans, Label, Stat } from "./ui.jsx";
 // The fold lives in steps.jsx — chrome with no trade in it (P9, TASK 3).
 import { Fold } from "./steps.jsx";
 import { ARROW, regionSignals, newsLine, verdictLine, scoreWorking, confidenceWorking } from "./signals.js";
-import { whyFindEffect, WEIGHTS_CHOSEN_LINE } from "./rules.js";
+import { whyFindEffect, WEIGHTS_CHOSEN_LINE, seasonRowLines, chanceBasisLabel } from "./rules.js";
 import { useNarrow } from "./visuals.jsx";
+import { NumbersFit } from "./card.jsx";
 
-const mono = { fontFamily: "ui-monospace, Menlo, monospace" };
-const Lbl = ({ children }) => <div style={{ ...mono, fontSize: 10, letterSpacing: "0.15em", color: T.amber }}>{children}</div>;
-const Stat = ({ k, v, c }) => (
-  <div>
-    <div style={{ ...mono, fontSize: 9.5, color: T.dim }}>{k}</div>
-    <div style={{ ...mono, fontSize: 14, fontWeight: 700, color: c || T.ink }}>{v}</div>
-  </div>
-);
+// PR #48 SWEEP: Label, Stat and the stacks are ui.jsx's, the sizes are the type tokens. Mono only where the text is
+// numbers or tickers (the verdict's figures, the season months, a factor's strength, a region's markets). RED IS FOR
+// ERRORS AND REFUSALS: a down reading is violet, a CONFLICT and a low confidence amber (warnings, not errors).
+const FS = TYPE.size, FW = TYPE.weight, LH = TYPE.line;
 
 /* ================================================================
    The tags under a headline: which tickers it moves, and which way.
@@ -43,13 +41,13 @@ const Stat = ({ k, v, c }) => (
 ================================================================ */
 export const ImpactTags = ({ item }) => (
   <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 5 }}>
-    {item.geo && <span style={{ ...mono, fontSize: 9, color: T.violet, border: `1px solid ${T.violet}55`, padding: "2px 6px", borderRadius: 4 }}>GEO/GOV</span>}
-    {item.analysis && <span style={{ ...mono, fontSize: 9, color: T.blue, border: `1px solid ${T.blue}55`, padding: "2px 6px", borderRadius: 4 }}>ANALYSIS</span>}
-    {(item.impacts || []).length === 0 && <span style={{ ...mono, fontSize: 9, color: T.dim, border: `1px solid ${T.line}`, padding: "2px 6px", borderRadius: 4 }}>general market</span>}
+    {item.geo && <span style={{ ...sans, fontSize: FS.xs, color: T.violet, border: `1px solid ${T.violet}55`, padding: "2px 6px", borderRadius: 4 }}>GEO/GOV</span>}
+    {item.analysis && <span style={{ ...sans, fontSize: FS.xs, color: T.blue, border: `1px solid ${T.blue}55`, padding: "2px 6px", borderRadius: 4 }}>ANALYSIS</span>}
+    {(item.impacts || []).length === 0 && <span style={{ ...sans, fontSize: FS.xs, color: T.dim, border: `1px solid ${T.line}`, padding: "2px 6px", borderRadius: 4 }}>general market</span>}
     {(item.impacts || []).map((im) => {
-      const c = im.dir > 0 ? T.green : im.dir < 0 ? T.red : T.mut;
+      const c = im.dir > 0 ? T.green : im.dir < 0 ? T.violet : T.mut;
       return (
-        <span key={im.tk} title={im.why} style={{ ...mono, fontSize: 9, color: c, border: `1px solid ${c}55`, padding: "2px 6px", borderRadius: 4, cursor: "help" }}>
+        <span key={im.tk} title={im.why} style={{ ...sans, fontSize: FS.xs, color: c, border: `1px solid ${c}55`, padding: "2px 6px", borderRadius: 4, cursor: "help" }}>
           {im.tk} {ARROW[im.dir]} · {im.why}
         </span>
       );
@@ -64,7 +62,7 @@ export const ImpactTags = ({ item }) => (
 const AGREEMENT_STYLE = {
   CONFLUENT: { c: T.green, label: "CONFLUENT", meaning: "three or more factors point the same way" },
   MIXED: { c: T.blue, label: "MIXED", meaning: "some factors push, the rest stay quiet" },
-  CONFLICT: { c: T.red, label: "CONFLICT", meaning: "the factors contradict each other" },
+  CONFLICT: { c: T.amber, label: "CONFLICT", meaning: "the factors contradict each other" },
 };
 const FACTOR_LABEL = { seasonal: "Seasonality", technical: "Price trend", weather: "Weather", news: "News flow" };
 const FACTOR_ORDER = ["seasonal", "technical", "weather", "news"];
@@ -95,20 +93,20 @@ export { useNarrow };
 
 function WeatherDrill({ ticker, weatherData, month }) {
   const rows = regionSignals(weatherData, month).filter((r) => !ticker || r.tks.includes(ticker));
-  if (!weatherData) return <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 6 }}>The forecast has not loaded yet.</div>;
-  if (!rows.length) return <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 6 }}>No region watched for {ticker} has a usable forecast right now.</div>;
+  if (!weatherData) return <div style={{ ...sans, fontSize: FS.xs, color: T.dim, marginTop: 6 }}>The forecast has not loaded yet.</div>;
+  if (!rows.length) return <div style={{ ...sans, fontSize: FS.xs, color: T.dim, marginTop: 6 }}>No region watched for {ticker} has a usable forecast right now.</div>;
   return (
     <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
       {rows.map((r, i) => {
-        const c = r.numDir > 0 ? T.green : r.numDir < 0 ? T.red : T.mut;
+        const c = r.numDir > 0 ? T.green : r.numDir < 0 ? T.violet : T.mut;
         return (
           <div key={i} style={{ padding: "7px 9px", background: T.bg, border: `1px solid ${c}44`, borderRadius: 6 }}>
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <span style={{ ...mono, fontSize: 12, fontWeight: 800, color: c }}>{r.dir}</span>
-              <span style={{ ...mono, fontSize: 11, color: T.ink }}>{r.region}</span>
-              <span style={{ ...mono, fontSize: 9.5, color: T.dim }}>{r.tks.join(" · ")} · {r.strength}</span>
+              <span style={{ ...sans, fontSize: FS.xs, fontWeight: FW.bold, color: c }}>{r.dir}</span>
+              <span style={{ ...sans, fontSize: FS.xs, color: T.ink }}>{r.region}</span>
+              <span style={{ ...mono, fontSize: FS.xs, color: T.dim }}>{r.tks.join(" · ")} · {r.strength}</span>
             </div>
-            <div style={{ fontSize: 12, color: T.body, marginTop: 3, lineHeight: 1.45 }}>{r.why}</div>
+            <div style={{ fontSize: FS.xs, color: T.body, marginTop: 3, lineHeight: LH.body }}>{r.why}</div>
           </div>
         );
       })}
@@ -116,7 +114,7 @@ function WeatherDrill({ ticker, weatherData, month }) {
           reading once, by somebody who has asked how the strength was got. */}
       <Fold label="how these are read" tone={T.dim} style={{ marginTop: 2 }}
         summary={`Each region is read against its OWN monthly norm, never a fixed temperature.`}>
-        <div style={{ ...mono, fontSize: 9.5, color: T.dim, marginTop: 5, lineHeight: 1.6 }}>
+        <div style={{ ...sans, fontSize: FS.xs, color: T.dim, marginTop: 5, lineHeight: LH.body }}>
           +30°C is ordinary in Dallas in July and extreme in Odessa in April.
         </div>
       </Fold>
@@ -126,22 +124,22 @@ function WeatherDrill({ ticker, weatherData, month }) {
 
 function NewsDrill({ ticker, newsItems = [] }) {
   const rows = newsItems.filter((n) => (n.impacts || []).some((im) => !ticker || im.tk === ticker)).slice(0, 8);
-  if (!newsItems.length) return <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 6 }}>No headlines have loaded yet.</div>;
-  if (!rows.length) return <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 6 }}>None of the {newsItems.length} headlines loaded is tagged as moving {ticker}.</div>;
+  if (!newsItems.length) return <div style={{ ...sans, fontSize: FS.xs, color: T.dim, marginTop: 6 }}>No headlines have loaded yet.</div>;
+  if (!rows.length) return <div style={{ ...sans, fontSize: FS.xs, color: T.dim, marginTop: 6 }}>None of the {newsItems.length} headlines loaded is tagged as moving {ticker}.</div>;
   return (
     <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
       {rows.map((n, i) => (
         <a key={i} href={n.link} target="_blank" rel="noreferrer"
           style={{ textDecoration: "none", display: "block", padding: "7px 9px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 6 }}>
-          <div style={{ color: T.ink, fontSize: 12.5, fontWeight: 600, lineHeight: 1.4 }}>{n.title}</div>
-          <div style={{ ...mono, fontSize: 9.5, color: T.dim, marginTop: 2 }}>{n.src}{n.geo ? " · government or geopolitics, so it weighs more" : ""}</div>
+          <div style={{ color: T.ink, fontSize: FS.sm, fontWeight: FW.bold, lineHeight: LH.body }}>{n.title}</div>
+          <div style={{ ...sans, fontSize: FS.xs, color: T.dim, marginTop: 2 }}>{n.src}{n.geo ? " · government or geopolitics, so it weighs more" : ""}</div>
           <ImpactTags item={n} />
         </a>
       ))}
       {/* Same rule, under the headlines (P9, TASK 3). */}
       <Fold label="how these are weighted" tone={T.dim} style={{ marginTop: 2 }}
         summary={`A headline five days old counts half.`}>
-        <div style={{ ...mono, fontSize: 9.5, color: T.dim, marginTop: 5, lineHeight: 1.6 }}>
+        <div style={{ ...sans, fontSize: FS.xs, color: T.dim, marginTop: 5, lineHeight: LH.body }}>
           Government and geopolitical items weigh more than market chatter because they move supply, not the
           session.
         </div>
@@ -168,10 +166,10 @@ export function HowWorkedOut({ fused }) {
   return (
     <div id="how-worked-out" role="region" aria-label="How these are worked out"
       style={{ marginTop: 8, padding: "9px 11px", background: T.panel, border: `1px solid ${T.blue}66`, borderRadius: 8 }}>
-      <div style={{ fontSize: 13, fontWeight: 700, color: T.ink }}>How these are worked out</div>
-      <div style={{ fontSize: 13, color: T.body, marginTop: 6, lineHeight: 1.5 }}><b>Score.</b> {sw.sentence}</div>
-      <div style={{ fontSize: 13, color: T.body, marginTop: 6, lineHeight: 1.5 }}><b>Confidence.</b> {cw.sentence}</div>
-      <div style={{ fontSize: 12, color: T.mut, marginTop: 6, lineHeight: 1.5 }}>{WEIGHTS_CHOSEN_LINE}</div>
+      <div style={{ fontSize: FS.sm, fontWeight: FW.bold, color: T.ink }}>How these are worked out</div>
+      <div style={{ fontSize: FS.sm, color: T.body, marginTop: 6, lineHeight: LH.body }}><b>Score.</b> {sw.sentence}</div>
+      <div style={{ fontSize: FS.sm, color: T.body, marginTop: 6, lineHeight: LH.body }}><b>Confidence.</b> {cw.sentence}</div>
+      <div style={{ fontSize: FS.xs, color: T.mut, marginTop: 6, lineHeight: LH.body }}>{WEIGHTS_CHOSEN_LINE}</div>
     </div>
   );
 }
@@ -179,23 +177,41 @@ export function HowWorkedOut({ fused }) {
 export function WhySheetTop({ fused, how, onHow }) {
   const v = verdictLine(fused);
   if (!v) return null;
-  const col = fused.agreement === "CONFLICT" ? T.red : fused.score > 0 ? T.green : fused.score < 0 ? T.red : T.mut;
+  const col = fused.agreement === "CONFLICT" ? T.amber : fused.score > 0 ? T.green : fused.score < 0 ? T.violet : T.mut;
   const info = (label) => (
     <button onClick={onHow} aria-expanded={!!how} aria-controls="how-worked-out" aria-label={`How the ${label} is worked out`}
-      style={{ ...mono, fontSize: 14, color: T.blue, background: "transparent", border: "none", cursor: "pointer", minWidth: 44, minHeight: 44, padding: 0 }}>ⓘ</button>
+      style={{ ...sans, fontSize: FS.md, color: T.blue, background: "transparent", border: "none", cursor: "pointer", minWidth: 44, minHeight: 44, padding: 0 }}>ⓘ</button>
   );
   const [counted, scorePart, confPart] = v.numbers.split(" · ");
   return (
     <div>
       <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
-        <span style={{ ...mono, fontSize: 18, fontWeight: 800, color: col }}>{v.arrow}</span>
-        <span style={{ fontSize: 15, fontWeight: 700, color: T.ink }}>{v.words}</span>
+        <span style={{ ...sans, fontSize: FS.lg, fontWeight: FW.bold, color: col }}>{v.arrow}</span>
+        <span style={{ fontSize: FS.md, fontWeight: FW.bold, color: T.ink }}>{v.words}</span>
       </div>
-      <div style={{ ...mono, fontSize: 13, color: T.body, display: "flex", alignItems: "center", flexWrap: "wrap", gap: 2 }}>
+      <div style={{ ...mono, fontSize: FS.sm, color: T.body, display: "flex", alignItems: "center", flexWrap: "wrap", gap: 2 }}>
         <span>{counted} · {scorePart}</span>{info("score")}<span>· {confPart}</span>{info("confidence")}
       </div>
       {how && <HowWorkedOut fused={fused} />}
-      <div style={{ fontSize: 13, color: T.body, marginTop: 8, lineHeight: 1.5 }}>{whyFindEffect()}</div>
+      <div style={{ fontSize: FS.sm, color: T.body, marginTop: 8, lineHeight: LH.body }}>{whyFindEffect()}</div>
+    </div>
+  );
+}
+
+/* ================================================================
+   THE SEASON ROW (PR #48, TASK 2): the months in the window this market is read over, each with its measured mean,
+   its own uncertainty and how many years carry it — "Oct +1.2% ± 1.6% (16 yrs) · not a signal" or "· counts" — and
+   what the chance is made of. Every line comes from `seasonalSignal()` (rules.js), the one home for the season.
+================================================================ */
+export function SeasonRow({ season }) {
+  const lines = seasonRowLines(season);
+  return (
+    <div role="group" aria-label="Season" style={{ marginTop: 8, padding: "8px 10px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 8 }}>
+      <div style={{ fontSize: FS.sm, fontWeight: FW.bold, color: T.ink }}>
+        Season{season && season.span ? ` · ${season.span} month${season.span === 1 ? "" : "s"} held` : ""}
+        <span style={{ fontWeight: FW.regular, color: T.mut }}> · chance: {chanceBasisLabel({ seasonCounts: !!(season && season.counts) })}</span>
+      </div>
+      {lines.map((l) => <div key={l} style={{ ...mono, fontSize: FS.sm, color: T.body, marginTop: 3 }}>{l}</div>)}
     </div>
   );
 }
@@ -205,15 +221,17 @@ export function WhySheetTop({ fused, how, onHow }) {
  * two ⓘ, the one sentence on what it changes in Find, the news line, and the long narrative behind "The full
  * reasoning" (the `WhyThisTrade` panel, unchanged, the autopilot sentence inside it).
  */
-export function WhySheet({ fused, title, note, ticker, weatherData, newsItems, month, defaultDetail = false, style }) {
+export function WhySheet({ fused, title, note, ticker, weatherData, newsItems, month, defaultDetail = false, order = "ev", style }) {
   const [how, setHow] = useState(false);
   const [newsOpen, setNewsOpen] = useState(false);
   if (!fused) return null;
   return (
       <div style={{ marginTop: 4, ...(style || {}) }}>
         <WhySheetTop fused={fused} how={how} onHow={() => setHow((h) => !h)} />
+        <SeasonRow season={fused.season || null} />
+        <div style={{ fontSize: FS.sm, color: T.body, marginTop: 4 }}>How the numbers fit <NumbersFit order={order} /></div>
         <button onClick={() => setNewsOpen((o) => !o)}
-          style={{ ...mono, fontSize: 12, marginTop: 6, background: "transparent", color: T.body, border: "none", padding: "4px 0", cursor: "pointer", textAlign: "left", lineHeight: 1.5, minHeight: 44 }}>
+          style={{ ...sans, fontSize: FS.xs, marginTop: 6, background: "transparent", color: T.body, border: "none", padding: "4px 0", cursor: "pointer", textAlign: "left", lineHeight: LH.body, minHeight: 44 }}>
           {newsLine(ticker, newsItems).text} {newsOpen ? "▲" : "▼"}
         </button>
         {newsOpen && <NewsDrill ticker={ticker} newsItems={newsItems} />}
@@ -246,32 +264,32 @@ export function WhyThisTrade({ fused, title = "WHY THIS TRADE", note, ticker, we
 
   if (!fused) return null;
   const st = AGREEMENT_STYLE[fused.agreement] || AGREEMENT_STYLE.MIXED;
-  const scoreCol = fused.score > 0 ? T.green : fused.score < 0 ? T.red : T.mut;
+  const scoreCol = fused.score > 0 ? T.green : fused.score < 0 ? T.violet : T.mut;
 
   return (
     <div ref={ref} style={{ marginTop: 10, padding: "11px 13px", background: `${st.c}0d`, border: `1px solid ${st.c}55`, borderRadius: 8, ...(style || {}) }}>
       {/* ---- always visible: verdict, the two numbers, the narrative ---- */}
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-        <Lbl>{title}</Lbl>
-        <span style={{ ...mono, fontSize: 10, fontWeight: 800, color: T.onAccent, background: st.c, borderRadius: 4, padding: "2px 7px", letterSpacing: "0.08em" }}>
+        <Label>{title}</Label>
+        <span style={{ ...sans, fontSize: FS.xs, fontWeight: FW.bold, color: T.onAccent, background: st.c, borderRadius: 4, padding: "2px 7px", letterSpacing: "0.08em" }}>
           {st.label}
         </span>
-        <span style={{ ...mono, fontSize: 11, color: T.mut }}>{st.meaning}</span>
+        <span style={{ ...sans, fontSize: FS.xs, color: T.mut }}>{st.meaning}</span>
         <span style={{ marginLeft: "auto", display: "flex", gap: 12 }}>
           <Stat k="SIGNAL SCORE" v={`${fused.score > 0 ? "+" : ""}${fused.score} / 100`} c={scoreCol} />
-          <Stat k="CONFIDENCE" v={`${fused.confidence} / 100`} c={fused.confidence >= 70 ? T.green : fused.confidence < 40 ? T.red : T.amber} />
+          <Stat k="CONFIDENCE" v={`${fused.confidence} / 100`} c={fused.confidence >= 70 ? T.green : fused.confidence < 40 ? T.amber : T.blue} />
         </span>
       </div>
 
-      <div style={{ fontSize: 12.5, color: T.body, marginTop: 7, lineHeight: 1.5 }}>{fused.narrative}</div>
+      <div style={{ fontSize: FS.sm, color: T.body, marginTop: 7, lineHeight: LH.body }}>{fused.narrative}</div>
       {/* NEWS, ONE LINE (PR #40, TASK 2): direction, how many headlines are
           tagged, the newest one's title. Tap for the list. */}
       <button onClick={() => setNewsOpen((o) => !o)}
-        style={{ ...mono, fontSize: 10.5, marginTop: 6, background: "transparent", color: T.body, border: "none", padding: "4px 0", cursor: "pointer", textAlign: "left", lineHeight: 1.5, minHeight: 32 }}>
+        style={{ ...sans, fontSize: FS.xs, marginTop: 6, background: "transparent", color: T.body, border: "none", padding: "4px 0", cursor: "pointer", textAlign: "left", lineHeight: LH.body, minHeight: 32 }}>
         {newsLine(ticker, newsItems).text} {newsOpen ? "▲" : "▼"}
       </button>
       {newsOpen && <NewsDrill ticker={ticker} newsItems={newsItems} />}
-      {note && <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 5 }}>{note}</div>}
+      {note && <div style={{ ...sans, fontSize: FS.xs, color: T.dim, marginTop: 5 }}>{note}</div>}
 
       {/* ---- behind a tap: the four components as direction + strength ---- */}
       {/* THE TOGGLE NAMES WHAT IT OPENS. "show detail" is a door with no sign
@@ -279,7 +297,7 @@ export function WhyThisTrade({ fused, title = "WHY THIS TRADE", note, ticker, we
           reason this panel exists. The label is built from FACTOR_ORDER and
           FACTOR_LABEL, so it cannot drift from the bars it reveals. */}
       <button onClick={() => { setDetail((d) => !d); setOpen(null); }}
-        style={{ ...mono, fontSize: 10.5, marginTop: 8, background: "transparent", color: T.blue, border: `1px solid ${T.blue}55`, borderRadius: 5, padding: "4px 9px", cursor: "pointer", textAlign: "left", lineHeight: 1.5 }}>
+        style={{ ...sans, fontSize: FS.xs, marginTop: 8, background: "transparent", color: T.blue, border: `1px solid ${T.blue}55`, borderRadius: 5, padding: "4px 9px", cursor: "pointer", textAlign: "left", lineHeight: LH.body }}>
         {detail ? "Hide the four readings ▲" : `Show the four readings: ${FACTOR_LIST} ▼`}
       </button>
 
@@ -293,7 +311,7 @@ export function WhyThisTrade({ fused, title = "WHY THIS TRADE", note, ticker, we
             // found nothing, where the truth is that the question does not
             // arise — and it was not in the score either.
             const na = cp.applies === false;
-            const col = na ? T.dim : cp.dir > 0 ? T.green : cp.dir < 0 ? T.red : T.mut;
+            const col = na ? T.dim : cp.dir > 0 ? T.green : cp.dir < 0 ? T.violet : T.mut;
             const isOpen = open === k;
             // Weather and News carry their own evidence with them: the same tap
             // that explains the bar shows what the bar is made of.
@@ -307,9 +325,9 @@ export function WhyThisTrade({ fused, title = "WHY THIS TRADE", note, ticker, we
                   : { position: "absolute", top: "100%", left: 0, right: 0, marginTop: 4, zIndex: 20, boxShadow: `0 6px 18px rgba(0,0,0,${T.dark ? 0.45 : 0.14})` }),
                 background: T.panel, border: `1px solid ${col}66`, borderRadius: 6, padding: "8px 10px",
               }}>
-                <div style={{ fontSize: 12, color: T.body, lineHeight: 1.5 }}>{cp.why}</div>
+                <div style={{ fontSize: FS.xs, color: T.body, lineHeight: LH.body }}>{cp.why}</div>
                 {drill}
-                <div style={{ ...mono, fontSize: 9.5, color: T.dim, marginTop: 4 }}>tap anywhere outside to close</div>
+                <div style={{ ...sans, fontSize: FS.xs, color: T.dim, marginTop: 4 }}>tap anywhere outside to close</div>
               </div>
             );
             return (
@@ -317,13 +335,13 @@ export function WhyThisTrade({ fused, title = "WHY THIS TRADE", note, ticker, we
                 <button onClick={() => setOpen(isOpen ? null : k)}
                   style={{ width: "100%", textAlign: "left", background: isOpen ? `${col}14` : T.bg, border: `1px solid ${isOpen ? col : T.line}`, borderRadius: 6, padding: "7px 9px", cursor: "pointer" }}>
                   <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                    <span style={{ ...mono, fontSize: 13, fontWeight: 800, color: col, width: 14 }}>{na ? "–" : ARROW[cp.dir]}</span>
-                    <span style={{ ...mono, fontSize: 11, color: na ? T.dim : T.ink, minWidth: 96 }}>{FACTOR_LABEL[k]}</span>
+                    <span style={{ ...sans, fontSize: FS.sm, fontWeight: FW.bold, color: col, width: 14 }}>{na ? "–" : ARROW[cp.dir]}</span>
+                    <span style={{ ...sans, fontSize: FS.xs, color: na ? T.dim : T.ink, minWidth: 96 }}>{FACTOR_LABEL[k]}</span>
                     <span style={{ flex: 1, minWidth: 90, height: 7, background: T.line, borderRadius: 4, overflow: "hidden" }}>
                       {!na && <span style={{ display: "block", width: `${cp.strength}%`, height: "100%", background: col, borderRadius: 4 }} />}
                     </span>
-                    <span style={{ ...mono, fontSize: 10.5, color: T.dim, width: 52, textAlign: "right" }}>{na ? "n/a" : `${cp.strength}/100`}</span>
-                    <span style={{ ...mono, fontSize: 10, color: T.blue }}>{isOpen ? "▲" : na ? "why not?" : k === "weather" ? "regions?" : k === "news" ? "headlines?" : "why?"}</span>
+                    <span style={{ ...mono, fontSize: FS.xs, color: T.dim, width: 52, textAlign: "right" }}>{na ? "n/a" : `${cp.strength}/100`}</span>
+                    <span style={{ ...sans, fontSize: FS.xs, color: T.blue }}>{isOpen ? "▲" : na ? "why not?" : k === "weather" ? "regions?" : k === "news" ? "headlines?" : "why?"}</span>
                   </div>
                 </button>
                 {isOpen && explanation}
@@ -336,7 +354,7 @@ export function WhyThisTrade({ fused, title = "WHY THIS TRADE", note, ticker, we
               one for a metal, where weather does not apply and the other three
               are renormalised over it. It is generated from `fused.weights`
               now, so it cannot describe a scale nothing was measured against. */}
-          <div style={{ ...mono, fontSize: 9.5, color: T.dim }}>
+          <div style={{ ...sans, fontSize: FS.xs, color: T.dim }}>
             Direction is the arrow, strength is the bar (0-100). The score above is {weightList(fused)}.
           </div>
         </div>

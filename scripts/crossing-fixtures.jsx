@@ -70,7 +70,7 @@ const HAND = [
     quotes: [{ bid: 0.34, ask: 0.70 }, { bid: 0.10, ask: 0.30 }] },
 ];
 
-const FLAT = seasonalProvenance(null, Array(12).fill(0), "fixture");
+const FLAT = seasonalProvenance(null, "fixture");   // the season not read: the chance drifts at zero (PR #48)
 
 /** The figures one candidate carries, at the old fill, the new fill and the mid. */
 function figures({ legs, S, dte, iv, q, a }) {

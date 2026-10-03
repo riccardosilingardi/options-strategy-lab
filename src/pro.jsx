@@ -1,3 +1,4 @@
+import { BASKET } from "./markets.js";
 import React, { useState, useEffect } from "react";
 import { RefreshCw, Send, Trash2, Download, Sparkles, FileText, XCircle } from "lucide-react";
 import { T } from "./theme.js";
@@ -8,7 +9,7 @@ import { RULES, ruleBadge, takeProfitLabel, takeProfitTarget, scaleOutLabel, sto
   legBook, sizeSkippedNote, onTick, netFromLegs, limitCeilingNote, rewardRisk,
   contractListing, unlistedContractNote, unquotedLegNote, unquotedLegPointer, marketOrderNote,
   taCopilotPrompt, TA_QUESTIONS, TA_DISCLAIMER,
-  ivProvenance, onCardLine, noRecordNote, copilotOverreach, copilotOverreachNote } from "./rules.js";
+  ivProvenance, noRecordNote, copilotOverreach, copilotOverreachNote } from "./rules.js";
 import { contractsOf, positionSize, bookPositions, positionStage, autopilotHorizonNote, autopilotVolNote, positionForHolding, journalPnlTotal, scoredJournal } from "./journal.js";
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, LineStyle } from "lightweight-charts";
 // The fold lives in steps.jsx — chrome with no trade in it, and the one file
@@ -1013,7 +1014,8 @@ export function UnrecordedCard({ group: g, gate, orders = [], onImport, setMsg, 
    prompt (`taCopilotPrompt()` in rules.js) and it may not propose a trade
    at all.
 ==================================================================== */
-const SYSTEM_PROMPT = `You are the copilot of an options trader working on commodity ETFs (SOYB, CORN, UNG, BOIL, WEAT, SPY) in PAPER TRADING.
+// THE MARKETS ARE THE REGISTRY'S (PR #48, TASK 1): this list was typed out and had stopped at five.
+const SYSTEM_PROMPT = `You are the copilot of an options trader working on commodity ETFs (${BASKET.join(", ")}; SPY only as a hedge) in PAPER TRADING.
 ${copilotRulesBlock()}
 These rules are enforced in code by src/riskGate.js before any order is sent. Never propose a trade that breaks them, and never present a rule number that differs from the ones above.
 WHO YOU ARE WRITING FOR: someone who is learning, not a professional trader. Plain English sentences. Define any term the first time you use it, in the same sentence — "open interest (how many contracts are actually open)". Never guarantee an outcome: this is educational analysis on a paper account, not financial advice. Always state the risk and what would make the idea wrong.
@@ -2009,7 +2011,8 @@ export function computeTIS(pos, cur) {
   // 2) Stagionalità (20)
   let seaPts = 10;
   if (th.seasonal != null && cur.seasonalNow != null) {
-    const same = Math.sign(th.seasonal) === Math.sign(cur.seasonalNow) || th.seasonal === 0;
+    // A season that is not a signal now (0, PR #48) has not flipped: it has no sign to flip to.
+    const same = Math.sign(th.seasonal) === Math.sign(cur.seasonalNow) || th.seasonal === 0 || cur.seasonalNow === 0;
     seaPts = same ? (Math.abs(cur.seasonalNow) >= Math.abs(th.seasonal) * 0.5 ? 20 : 12) : 4;
   }
   comp.push({ k: "Season", pts: seaPts, max: 20, note: `${th.seasonal?.toFixed?.(1) ?? "?"}%/mo when you opened it → ${cur.seasonalNow?.toFixed?.(1) ?? "?"}%/mo now` });
@@ -2817,7 +2820,9 @@ export function taSignals(bars) {
 }
 export function confluence(seasonalM, ta) {
   if (!ta) return null;
-  const seaDir = seasonalM > 0.8 ? 1 : seasonalM < -0.8 ? -1 : 0;
+  // THE SEASON'S DIRECTION IS `seasonalSignal()`'s (PR #48): `seasonalM` is the window's counted mean, 0 when no
+  // month beats its noise. The fixed ±0.8% band that stood here is gone.
+  const seaDir = Math.sign(Number.isFinite(seasonalM) ? seasonalM : 0);
   let verdict, c, advice;
   if (seaDir !== 0 && ta.trend === seaDir) { verdict = "BOTH AGREE"; c = T.green; advice = `The season points ${seaDir > 0 ? "up" : "down"} and the price is already moving that way. A ${seaDir > 0 ? "bullish" : "bearish"} spread makes sense, at your full per-trade limit.`; }
   else if (seaDir !== 0 && ta.trend === -seaDir) { verdict = "THEY DISAGREE"; c = T.amber; advice = `The season points ${seaDir > 0 ? "up" : "down"} but the price is moving the other way. Trade smaller, wait for the price to turn, or pick a trade that does not need a direction.`; }

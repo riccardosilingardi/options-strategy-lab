@@ -29,61 +29,13 @@
 import React, { useEffect } from "react";
 import { X } from "lucide-react";
 import { T, TYPE, BADGE_SAFE } from "./theme.js";
-import { STEPS, stepIndex } from "./path.js";
 
-const mono = { fontFamily: "ui-monospace, Menlo, monospace" };
-const sans = { fontFamily: "ui-sans-serif, system-ui" };
+// PR #48 SWEEP: the stacks and sizes come from ui.jsx and the type tokens. Every text here is a label or a sentence —
+// no number, ticker, leg or OCC symbol — so none of it is mono.
+import { sans } from "./ui.jsx";
+const FS = TYPE.size, FW = TYPE.weight, LH = TYPE.line;
 
-/* ====================================================================
-   THE NUMBERED PATH
-==================================================================== */
-
-/**
- * @param {object} a
- *   step   — the step on screen
- *   carry  — step id -> the line under its number (`stepCarry` in path.js)
- *   onStep — go to a step. Every step stays reachable: moving BACK must not
- *            lose the selection, and a step you cannot tap is not navigation.
- */
-export function StepNav({ step, carry = {}, onStep }) {
-  const here = stepIndex(step);
-  return (
-    <nav aria-label="The three steps" style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 14 }}>
-      {STEPS.map((s, i) => {
-        const on = s.id === step;
-        const done = i < here;
-        const col = on ? T.amber : done ? T.green : T.line;
-        return (
-          <button key={s.id} onClick={() => onStep && onStep(s.id)}
-            aria-current={on ? "step" : undefined}
-            style={{
-              ...sans, flex: "1 1 108px", minWidth: 108, minHeight: 56, textAlign: "left",
-              padding: "8px 12px", borderRadius: 10, cursor: "pointer",
-              background: on ? T.amber : "transparent", color: on ? T.onAccent : T.ink,
-              border: `1.5px solid ${col}`,
-            }}>
-            <span style={{ display: "flex", alignItems: "center", gap: 7 }}>
-              <span style={{
-                ...mono, fontSize: 11, fontWeight: 800, width: 20, height: 20, borderRadius: 10,
-                display: "inline-flex", alignItems: "center", justifyContent: "center",
-                background: on ? T.onAccent : done ? T.green : T.line,
-                color: on ? T.amber : done ? T.onAccent : T.mut,
-              }}>{done ? "✓" : s.n}</span>
-              <span style={{ fontSize: 14, fontWeight: on ? 800 : 600 }}>{s.label}</span>
-            </span>
-            <span style={{
-              ...mono, display: "block", fontSize: 9.5, marginTop: 3, letterSpacing: "0.04em",
-              color: on ? T.onAccent : T.dim, opacity: on ? 0.9 : 1,
-              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-            }}>
-              {carry[s.id] || s.blurb}
-            </span>
-          </button>
-        );
-      })}
-    </nav>
-  );
-}
+/* `StepNav` (the numbered path) was removed in PR #48: the bottom bar (navBar.jsx) replaced it in PR #47. */
 
 /** The forward button at the bottom of a step: one road out, named. */
 export function StepForward({ label, sub, onClick, disabled, disabledNote }) {
@@ -91,14 +43,14 @@ export function StepForward({ label, sub, onClick, disabled, disabledNote }) {
     <div style={{ marginTop: 14 }}>
       <button onClick={onClick} disabled={disabled}
         style={{
-          ...sans, width: "100%", minHeight: 54, fontSize: TYPE.size.md, fontWeight: TYPE.weight.bold, borderRadius: 10,
+          ...sans, width: "100%", minHeight: 54, fontSize: FS.md, fontWeight: FW.bold, borderRadius: 10,
           cursor: disabled ? "not-allowed" : "pointer", border: "none",
           background: disabled ? T.line : T.amber, color: disabled ? T.mut : T.onAccent,
         }}>
         {label}
       </button>
       {(disabled ? disabledNote : sub) && (
-        <div style={{ ...sans, fontSize: TYPE.size.sm, color: T.mut, lineHeight: TYPE.line.body, marginTop: 6, textAlign: "center" }}>
+        <div style={{ ...sans, fontSize: FS.sm, color: T.mut, lineHeight: LH.body, marginTop: 6, textAlign: "center" }}>
           {disabled ? disabledNote : sub}
         </div>
       )}
@@ -107,20 +59,21 @@ export function StepForward({ label, sub, onClick, disabled, disabledNote }) {
 }
 
 /* ====================================================================
-   EVIDENCE — the same chips at every step, opening over it
+   EVIDENCE — Build's bar about THIS trade (PR #46), opening over the step. PR #48 removed the leftover of the old
+   every-step chips: the default "EVIDENCE" heading (Find has had no bar since PR #46) and the line explaining it.
 ==================================================================== */
 
-export function EvidenceBar({ items = [], open, onOpen, mark = {}, heading = "EVIDENCE" }) {
+export function EvidenceBar({ items = [], open, onOpen, mark = {}, heading }) {
   return (
     <div style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center", marginTop: 10 }}>
-      <span style={{ ...mono, fontSize: 10, letterSpacing: "0.15em", color: T.dim, marginRight: 4, width: heading === "EVIDENCE" ? undefined : "100%" }}>{heading}</span>
+      <span style={{ ...sans, fontSize: FS.xs, letterSpacing: "0.15em", color: T.dim, marginRight: 4, width: "100%" }}>{heading}</span>
       {items.map(({ id, label, I, sub }) => {
         const flag = mark[id] || null;         // "thinking" / "answer ready"
         const col = flag ? T.amber : open === id ? T.blue : T.mut;
         return (
           <button key={id} onClick={() => onOpen && onOpen(open === id ? null : id)} title={sub}
             style={{
-              ...mono, fontSize: 11, padding: "8px 10px", minHeight: 40, borderRadius: 6,
+              ...sans, fontSize: FS.xs, padding: "8px 10px", minHeight: 40, borderRadius: 6,
               whiteSpace: "nowrap", cursor: "pointer",
               background: flag ? `${T.amber}18` : open === id ? `${T.blue}18` : "transparent", color: col,
               border: `1px solid ${flag ? T.amber : open === id ? T.blue : T.line}`,
@@ -130,9 +83,6 @@ export function EvidenceBar({ items = [], open, onOpen, mark = {}, heading = "EV
           </button>
         );
       })}
-      <span style={{ ...mono, fontSize: 9.5, color: T.dim, width: "100%", marginTop: 2 }}>
-        Evidence opens over the step and closes back onto it — it never adds to the bottom of this page.
-      </span>
     </div>
   );
 }
@@ -163,13 +113,13 @@ export function EvidenceOverlay({ title, sub, onClose, children, eyebrow = "EVID
               numbers and its own order ticket in this sheet (PRD §4n), and
               labelling the order ticket "EVIDENCE" would name the wrong thing
               on the one screen where the word has to be exact. */}
-          <div style={{ ...mono, fontSize: 10, letterSpacing: "0.15em", color: T.amber }}>{eyebrow}</div>
-          <h2 data-view-heading tabIndex={-1} style={{ ...sans, fontSize: 16, fontWeight: 700, color: T.ink, overflow: "hidden", textOverflow: "ellipsis", margin: 0, outline: "none" }}>{title}</h2>
-          {sub && <div style={{ ...mono, fontSize: 10.5, color: T.dim }}>{sub}</div>}
+          <div style={{ ...sans, fontSize: FS.xs, letterSpacing: "0.15em", color: T.amber }}>{eyebrow}</div>
+          <h2 data-view-heading tabIndex={-1} style={{ ...sans, fontSize: FS.md, fontWeight: FW.bold, color: T.ink, overflow: "hidden", textOverflow: "ellipsis", margin: 0, outline: "none" }}>{title}</h2>
+          {sub && <div style={{ ...sans, fontSize: FS.xs, color: T.dim }}>{sub}</div>}
         </div>
         <button onClick={onClose}
           style={{
-            ...sans, fontSize: 14, fontWeight: 700, minHeight: 44, padding: "8px 14px", borderRadius: 8,
+            ...sans, fontSize: FS.md, fontWeight: FW.bold, minHeight: 44, padding: "8px 14px", borderRadius: 8,
             background: T.amber, color: T.onAccent, border: "none", cursor: "pointer",
             display: "inline-flex", alignItems: "center", gap: 6, flexShrink: 0,
           }}>
@@ -177,7 +127,7 @@ export function EvidenceOverlay({ title, sub, onClose, children, eyebrow = "EVID
         </button>
       </div>
       <div style={{ maxWidth: 1100, margin: "0 auto", padding: `14px 14px ${BADGE_SAFE}px` }}>{children}</div>
-      <div style={{ ...sans, fontSize: 12.5, color: T.dim, textAlign: "center", paddingBottom: 20 }}>
+      <div style={{ ...sans, fontSize: FS.sm, color: T.dim, textAlign: "center", paddingBottom: 20 }}>
         Closing this puts you back on the step you were reading.
       </div>
     </div>
@@ -233,7 +183,7 @@ export function DeskCountLine({ working = 0, decisions = 0, looks = 0, closing =
   const tone = decisions > 0 ? T.action : T.amber;
   return (
     <button onClick={onOpen}
-      style={{ ...mono, fontSize: 11.5, color: tone, marginTop: 12, minHeight: 44, width: "100%", textAlign: "left",
+      style={{ ...sans, fontSize: FS.xs, color: tone, marginTop: 12, minHeight: 44, width: "100%", textAlign: "left",
         padding: "8px 12px", background: T.panel, border: `1px solid ${tone}66`, borderRadius: 8, cursor: "pointer" }}>
       ● {parts.join(" · ")} — Positions →
     </button>
