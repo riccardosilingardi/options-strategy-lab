@@ -224,6 +224,13 @@ check("screen 1 leads with what needs attention once positions exist", () => {
   if (h.indexOf("Needs attention today") > h.indexOf("Find a trade")) throw new Error("attention must lead the page");
 });
 
+check("0f — a close already working is counted as one, never as a decision (PR #47)", () => {
+  const l = statusLine({ positions: [1, 2], attention: 0, looks: 0, closing: 1 });
+  if (!/1 close working/.test(l) || /decision today/.test(l)) throw new Error(l);
+  const both = statusLine({ positions: [1, 2], attention: 1, looks: 1, closing: 1 });
+  if (!/1 of your 2 positions needs a decision today\. 1 close working\./.test(both)) throw new Error(both);
+});
+
 check("statusLine is generated, not hand-written per case", () => {
   const a = statusLine({ positions: [], attention: 0 });
   const b = statusLine({ positions: [1, 2, 3], attention: 2 });

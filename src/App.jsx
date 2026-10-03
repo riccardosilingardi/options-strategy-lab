@@ -27,7 +27,7 @@ import { RULES, sizing, ruleBadge, takeProfitLabel, takeProfitTarget, takeProfit
   buildableExpiries, openableBoard, offFloorExpiryLabel, horizonFloorNote,
   LIQUIDITY_LEVELS, RECOMMENDED_LIQUIDITY, LIQUIDITY_MEASUREMENT, liquidityMeasurementNote, liquidityLevel, liquidityThreshold, looseningWarning, liquiditySettingNote, isLoosened, ordinal,
   priceability, unpriceableNote, rewardRisk, MIN_NET_DOLLARS,
-  payoffCeiling, NO_CEILING, noCeilingNote, noCeilingRankNote,
+  payoffCeiling, payoffAtZero, exactExtremes, NO_CEILING, noCeilingNote, noCeilingRankNote,
   impossibleLoss, impossibleLossNote,
   contractListing, unlistedContractNote, unlistedContractListNote, strikeSnapNote, offBoardStrikeLabel,
   tradeCard, cardCurrencyNote, CARD_CURRENCY, limitOwner,
@@ -61,7 +61,7 @@ import { orderBody, orderOutcome, alpacaErrorText, reduceRatios, limitWords, ord
 // every timeline entry, the close reason, and what survives into the Journal.
 import { nextRef, refCounter, appendTimeline, stampTimeline, orderStatusRecheck, closeDecision,
   autopilotHorizonNote, autopilotVolNote, notHeldCloseWords,
-  positionSize, positionSizeNote, contractsOf, withPositionSize, fillVsLimit, orderReconciliation,
+  positionSize, positionSizeNote, contractsOf, withPositionSize, fillVsLimit, orderReconciliation, recordForOrder, outsideTag,
   storedLimitOf,
   positionStage, positionStageNote, bookPositions, holdingShape, dropImportedTwins, recordFillPrice, countsAsRuleClose, closeKindWords, riskOkOf, riskOkWords, wouldHaveDone, isBrokerHolding, upgradeHolding,
   isTestRecord, testRecordNote, scoredJournal, journalPnl, NOT_A_FILL,
@@ -69,7 +69,8 @@ import { nextRef, refCounter, appendTimeline, stampTimeline, orderStatusRecheck,
 import { FIRST_STEP, stepCarry, candidateOf, candidateKey, legsLine, toggleCompare, inCompare, MAX_COMPARE, savedFromCandidate, candidateFromSaved, savedAge } from "./path.js";
 import { PositionCard, PositionDetails } from "./positionCard.jsx";
 import { navOf, createNavHistory } from "./nav.js";
-import { exitProgress, entryVsNow, displayName, fileState, pnlShareOfRisk, pnlShareText, holdsStructure } from "./positionView.js";
+import { exitProgress, entryVsNow, displayName, fileState, pnlShareOfRisk, pnlShareText, holdsStructure,
+  sizeWords, withExactMaxProfit, maxProfitCorrection, maxProfitCorrectionNote } from "./positionView.js";
 import { StepNav, EvidenceBar, EvidenceOverlay, DeskSheet, Fold, DeskCountLine } from "./steps.jsx";
 
 /* ============================== THEME ============================== */
@@ -709,6 +710,12 @@ export function analyze(legs, S, dte, baseIV, q, opts = {}) {
   // maximum loss is always known, and the only way this grid understates a loss
   // is an uncovered short call — which the risk gate refuses by name
   // (UNDEFINED_RISK) before any order can be built on it.
+  // THE PRICE OF ZERO IS PART OF THE EXTREMES (PR #47, TASK 0c). The grid above stops at 70% of spot, so a long
+  // put's best case was the payoff there ($2,600 on +1 94P at spot 90, net 5.00) instead of at zero ($8,900). The
+  // payoff is straight lines between strikes, so below the lowest strike it only needs this one more point; the
+  // curve, the breakevens and every other figure are untouched.
+  const atZero = payoffAtZero(legs, entry);
+  if (atZero != null) { if (atZero > maxP) maxP = atZero; if (atZero < maxL) maxL = atZero; }
   const ceiling = payoffCeiling(legs);
   return {
     entry, entryMid, entrySource: usesOverride ? "limit" : "mid", curve,
@@ -2339,8 +2346,9 @@ export default function OptionsStrategyLab() {
     out.working.sort(newest); out.notTaken.sort(newest);
     return out;
   }, [store.positions]);
-  /** What the user actually holds. The only list that is a book. */
-  const ownedPositions = byStage.owned;
+  /** What the user actually holds. The only list that is a book. A best case a price grid cut off is read exactly
+   *  (`withExactMaxProfit()`, PR #47 TASK 0c); the stored record keeps its figure and its timeline says so once. */
+  const ownedPositions = useMemo(() => byStage.owned.map(withExactMaxProfit), [byStage]);
   /** Sent, still at the broker, nothing bought yet. */
   const workingOrders = byStage.working;
   /** Sent and finished with nothing bought — no trade here, and there never was. */
@@ -2353,8 +2361,8 @@ export default function OptionsStrategyLab() {
      `alSync.orders` is what the broker last reported; null until it has been
      asked, and an unasked broker is not an empty one. */
   const orderGap = useMemo(
-    () => orderReconciliation(workingOrders, alSync.t ? alSync.orders : null),
-    [workingOrders, alSync]);
+    () => orderReconciliation(store.positions, alSync.t ? alSync.orders : null),
+    [store.positions, alSync]);
 
   /* A CANCEL IS A REQUEST, NOT AN OUTCOME (`cancelOutcome()` in order.js).
      J-0003, 23 Sep 2026, about 04:00 New York: Alpaca accepted the request and
@@ -2857,11 +2865,12 @@ export default function OptionsStrategyLab() {
      What the rows in "Orders waiting" (and the row inline on a card whose close is working) are handed. Every
      send inside goes through `gate`: Modify of one leg is order path 7, of several legs a cancel, Alpaca's
      "canceled", then path 3 (a close) or Build's ticket, path 2 (an open). */
-  const recordForOrder = (o) => store.positions.find((p) => o && (p.alpacaId === o.id || p.closeOrder?.id === o.id)) || null;
+  // ONE ANSWER TO "IS THIS ORDER MINE" (PR #47, TASK 0a): `recordForOrder()` in journal.js, which the reconciliation reads too.
+  const recordFor = (o) => recordForOrder(store.positions, o);
   const orderCtx = {
     positions: alSync.positions, orders: alSync.orders, chainFor: (tk) => chains[tk] || null, fetchChain,
     // `gate` is defined further down this component; read it at the send, not at render (a TDZ otherwise).
-    gate: (proposal) => gate(proposal), request: alpacaReq, demo: DEMO, recordFor: recordForOrder,
+    gate: (proposal) => gate(proposal), request: alpacaReq, demo: DEMO, recordFor,
     onChanged: () => { setTimeout(() => { syncBroker(); recheckOrders(); }, 1200); },
     // A REPLACE GIVES THE ORDER A NEW ID and the old one reads "replaced": the record follows the new id, or
     // `recheckOrders()` would keep asking about an order that is no longer the one working.
@@ -3236,7 +3245,9 @@ export default function OptionsStrategyLab() {
        they were: the headline and `attentionCount()` read them. The card
        reads this. */
     const act = positionAction({ tpHit, dteExit, slHit, edge, pnl, dteLeft, level, ap, notHeld, tpBasis: tpTarget.basis || "max-profit" });
-    return { p, pnl, pnlNote: pv.sentence, dteLeft, level, label, ap, live, spotNow: sp, tpHit, tpTarget, stopLevel, slHit, dteExit, edge, act, contracts: n, sizeAssumed: size.assumed, notHeld };
+    return { p, pnl, pnlNote: pv.sentence, dteLeft, level, label, ap, live, spotNow: sp, tpHit, tpTarget, stopLevel, slHit, dteExit, edge, act, contracts: n, sizeAssumed: size.assumed, notHeld,
+      // A close already sent is an order working, not a decision still to take (PR #47, TASK 0f).
+      closeWorking: closeWorking(p, alSync) };
   }), [ownedPositions, chains, alSync, pnlOf]);
 
   // Log eventi regola (TP/SL/DTE) fuori dal render: prima veniva chiamato logEvent
@@ -3248,6 +3259,21 @@ export default function OptionsStrategyLab() {
       if (a.dteExit && !(a.notHeld && a.notHeld.length)) logEvent(a.p.id, "dte", `Inside the ${RULES.exitDTE}-day exit window`);
     }
   }, [posAlerts, logEvent]);
+  /* "CORRECTED", ONCE, IN THE TIMELINE (PR #47, TASK 0c). A record whose stored best case a price grid cut off keeps
+     its figure; the card reads the exact one, and this writes one line saying so, stamped so it is never written
+     again. Written from an effect, never from a render. */
+  useEffect(() => {
+    const todo = store.positions.filter((p) => positionStage(p) === "owned" && !p.maxProfitNoted && maxProfitCorrection(p));
+    if (!todo.length) return;
+    setStore((st) => {
+      const positions = st.positions.map((x) => {
+        if (!todo.some((t) => t.id === x.id) || x.maxProfitNoted) return x;
+        const t = appendTimeline(x, { t: Date.now(), type: "note", text: maxProfitCorrectionNote(maxProfitCorrection(x), x) });
+        return { ...x, maxProfitNoted: true, timeline: t.timeline, seqNext: t.seqNext };
+      });
+      const ns = { ...st, positions }; saveState(ns); return ns;
+    });
+  }, [store.positions]); // eslint-disable-line
   /* THE HEADLINE IS DERIVED FROM THE LIST (P9, TASK 2). `nAttention` counted
      only `action`, so a `watch` row printed "Losing: check the reason you
      opened it" under a headline reading "EVERYTHING IS ON PLAN".
@@ -3296,7 +3322,8 @@ export default function OptionsStrategyLab() {
       shareText: pnlShareText(share),
       progress: exitProgress({ p, pnl, dteLeft, tpTarget, n }),
       ev: entryVsNow({ p, n, pnl, popNow, nowSignals }),
-      unitNote: `${n} contract${n === 1 ? "" : "s"}, the whole position. Now is what is left from here.`,
+      // WHAT ALPACA HOLDS, PER LEG (PR #47, TASK 0b): "9 puts", never `contracts` alone.
+      unitNote: `${sizeWords(p)}, the whole position. Now is what is left from here.`,
       fileKind: fileState(p, alSync),
       planSentence: exitPlanSentence(exitPlan), planDetail: exitPlanDetail(exitPlan, n),
     }];
@@ -3311,7 +3338,7 @@ export default function OptionsStrategyLab() {
               const dm = dp ? positionModels[dp.id] : null;
               if (!dp || !dm) return null;
               const fillPx = recordFillPrice(dp);
-              const legsTxt = `${dp.legs.map((l) => `${l.side > 0 ? "+" : "−"}${l.qty} ${l.strike}${l.type === "call" ? "C" : "P"}`).join(" / ")} · ${positionSizeNote(dp)}`;
+              const legsTxt = `${dp.legs.map((l) => `${l.side > 0 ? "+" : "−"}${l.qty} ${l.strike}${l.type === "call" ? "C" : "P"}`).join(" / ")} · ${sizeWords(dp)} at Alpaca${positionSize(dp).assumed ? ` · ${positionSizeNote(dp)}` : ""}`;
               return (
                 <PositionDetails p={dp} title={dm.name} onClose={() => setDetailsId(null)}
                   legsText={legsTxt} expiresText={dp.expKey || new Date(dp.expiry).toLocaleDateString("en-GB")}
@@ -3438,6 +3465,10 @@ export default function OptionsStrategyLab() {
             const pnl = (payoffExp(g.legs, lo2 + (i / 200) * (hi2 - lo2)) - g.net) * 100;
             mp = Math.max(mp, pnl); ml = Math.min(ml, pnl);
           }
+          // THE EXACT EXTREMES (PR #47, TASK 0c): this grid started at half the lowest strike, which is where
+          // J-0001's $37,800 came from (true $80,100). A structure with no ceiling keeps the grid's edge, as before.
+          const exact = exactExtremes(g.legs, g.net);
+          if (exact) { if (exact.maxProfit != null) mp = exact.maxProfit; ml = exact.maxLoss; }
           const dte0 = Math.round((new Date(g.exp) - Date.now()) / 864e5);
           /* >>> THE FILL THE APP COULD NOT SEE (PRD §4r). <<< This record used
              to carry `alpacaId: "sync"` — a sentinel, not an order id — and no

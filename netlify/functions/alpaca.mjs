@@ -14,8 +14,8 @@ export const PAPER_HOST = "paper-api.alpaca.markets";
    is exactly what this app refuses (a close is a limit priced at the tap).
    So the proxy names what the app uses and refuses the rest with a sentence:
 
-     GET    the read paths the app uses (account, positions, orders, one
-            order, the option contract list for open interest)
+     GET    the read paths the app uses (account, clock, positions, orders,
+            one order, the option contract list for open interest)
      POST   /v2/orders                     every new order (paths 1-6)
      PATCH  /v2/orders/{id}                Modify of a single-leg order (path 7)
      DELETE /v2/orders/{id}, /v2/orders    cancel one, cancel all
@@ -27,6 +27,8 @@ export const PAPER_HOST = "paper-api.alpaca.markets";
 const ORDER_ID = "[A-Za-z0-9-]{1,64}";
 const ROUTES = [
   { method: "GET", re: /^\/v2\/account$/ },
+  // PR #47, TASK 0d: whether the market is open, and when it opens next.
+  { method: "GET", re: /^\/v2\/clock$/ },
   { method: "GET", re: /^\/v2\/positions$/ },
   { method: "GET", re: /^\/v2\/orders(\?[A-Za-z0-9_=&%.-]*)?$/ },
   { method: "GET", re: new RegExp(`^/v2/orders/${ORDER_ID}$`) },

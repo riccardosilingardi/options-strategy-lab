@@ -20,7 +20,8 @@ import { CandidateCard } from "./card.jsx";
 import { exitPlanDetail } from "./visuals.jsx";
 import { reconcileFigures, figureSet, tradeCard, money, chanceText, seasonalProvenance,
   RULES, fillNet, netFromLegs, sizeLine, sizedFigures, sizedFree, requestOf, takeProfitTarget } from "./rules.js";
-import { shortlistWithFloors } from "./App.jsx";
+import { shortlistWithFloors, analyze } from "./App.jsx";
+import { exactExtremes } from "./rules.js";
 import { scaleStrategy } from "./pro.jsx";
 // Repo-relative: JSX tests are bundled to CJS (CLAUDE.md, "How to test").
 import { MODEL_BOARD, ungBoards } from "../scripts/crossing-fixtures.jsx";
@@ -229,6 +230,35 @@ check("A TYPED COUNT ON BUILD SIZES THE SAME FIGURES: the line says it is by han
   const line = sizeLine(size, { n: 7, byHand: true });
   has(line, "7 contracts ×"); has(line, "set by hand");
   eq(sizedFigures(build.AE, 7).risk, 7 * Math.abs(build.AE.maxLoss), "YOU RISK follows the typed count");
+});
+
+
+/* ---- PR #47, TASK 0c: EVERY FAMILY'S BEST AND WORST CASE IS EXACT ----
+   `analyze()` read its extremes off a grid from 70% to 130% of spot, so a long put's best case was the payoff at
+   70% of spot. The payoff at zero is part of the extremes now. Each family below is priced by `analyze()` and held
+   to `exactExtremes()` (every strike, zero, and past the top strike), to the cent. */
+check("0c — analyze() equals the exact extremes for every family, a long put included", () => {
+  const S = 90, put = (side, k, qty = 1) => ({ side, qty, type: "put", strike: k }), call = (side, k, qty = 1) => ({ side, qty, type: "call", strike: k });
+  const fams = {
+    "long put ATM": [put(1, 90)], "long put far OTM": [put(1, 60)], "J-0001 94P": [put(1, 94)],
+    "bear put": [put(1, 92), put(-1, 86)], "bull put (credit)": [put(-1, 88), put(1, 84)],
+    "bull call": [call(1, 90), call(-1, 95)], "bear call (credit)": [call(-1, 92), call(1, 96)],
+    "iron condor": [put(1, 80), put(-1, 85), call(-1, 95), call(1, 100)],
+    "put butterfly": [put(1, 95), put(-1, 90, 2), put(1, 85)],
+    "nine puts in one leg": [put(1, 94, 9)],
+  };
+  for (const [name, legs] of Object.entries(fams)) {
+    const a = analyze(legs, S, 45, 0.3, null, { net: name === "J-0001 94P" ? 5 : undefined });
+    const ex = exactExtremes(legs, a.entry);
+    if (ex.maxProfit != null) {
+      // the butterfly peaks between grid points, so it is held to a grid step; every other family is exact
+      const tol = name === "put butterfly" ? 0.0025 * S * 2 * 100 : 0.01;
+      if (Math.abs(a.maxProfit - ex.maxProfit) > tol) throw new Error(`${name}: best case ${a.maxProfit} vs ${ex.maxProfit}`);
+    }
+    if (Math.abs(a.maxLoss - ex.maxLoss) > 0.01) throw new Error(`${name}: worst case ${a.maxLoss} vs ${ex.maxLoss}`);
+  }
+  eq(Math.round(analyze([put(1, 94)], 90, 45, 0.3, null, { net: 5 }).maxProfit), 8900, "+1 94P at 5.00, spot 90 — was 2600");
+  eq(analyze([call(1, 90)], 90, 45, 0.3, null).maxProfit, null, "a long call still has no ceiling");
 });
 
 console.log(`\n${ok.length} passed, ${bad.length} failed\n`);

@@ -24,7 +24,7 @@ import {
   byRefDesc, matchesRef, searchJournal, SEQ_SEP,
   positionSize, positionSizeNote, contractsOf, withPositionSize, ASSUMED_CONTRACTS,
   positionStage, isOwnedPosition, positionStageNote, wouldHaveDone,
-  isBrokerHolding, fillVsLimit, storedLimitOf, orderReconciliation, bookPositions, upgradeHolding,
+  isBrokerHolding, fillVsLimit, storedLimitOf, orderReconciliation, recordForOrder, bookPositions, upgradeHolding,
   holdingShape, isImportedRecord, dropImportedTwins, recordFillPrice,
   countsAsRuleClose, closeKindWords, riskOkOf, riskOkWords, NOT_A_FILL,
 } from "./journal.js";
@@ -1172,6 +1172,29 @@ test("RECONCILIATION — when the two agree there is no line at all", () => {
   const r = orderReconciliation(mine, [{ id: "a" }, { id: "b" }]);
   assert.equal(r.sentence, null);
   assert.equal(r.unknownToApp.length, 0);
+});
+
+test("RECONCILIATION — J-0001'S OWN CLOSE, REPLACED, IS MINE (PR #47, 0a)", () => {
+  // Measured 2 Oct 2026, 22:08: the close was replaced from the orders row; `onReplaced` moved `closeOrder.id` to
+  // the new order, and the reconciliation counted opening ids only — so it called J-0001's close "not sent from
+  // this browser" while the row above it read "J-0001 · Close".
+  const j1 = { ref: "J-0001", ticker: "GDX", expKey: "2026-10-30", alpacaId: "open-1", alpacaFilled: true,
+    alpacaStatus: "filled", closeOrder: { id: "close-2", t: 1, limit: "7.62" } };
+  const broker = [{ id: "close-2", symbol: "GDX261030P00094000", side: "sell", qty: "9", time_in_force: "gtc" }];
+  const r = orderReconciliation([j1], broker);
+  assert.equal(r.unknownToApp.length, 0, "the replaced close is J-0001's");
+  assert.equal(r.sentence, null, "no false 'not sent from this browser'");
+  assert.equal(r.mine, 1);
+  // ...and the row's question has the same answer, from the same function.
+  assert.equal(recordForOrder([j1], broker[0]), j1);
+  // The OLD close id is no longer J-0001's: a replaced order is a different order.
+  assert.equal(recordForOrder([j1], { id: "close-1" }), null);
+  // An order nobody here sent is still named.
+  const r2 = orderReconciliation([j1], [...broker, { id: "zzzz9999-x" }]);
+  assert.equal(r2.unknownToApp.length, 1);
+  assert.ok(r2.sentence.includes("zzzz9999"));
+  assert.equal(recordForOrder([j1], null), null);
+  assert.equal(recordForOrder([j1], {}), null, "no id, no owner");
 });
 
 test("RECONCILIATION — AN UNASKED BROKER IS NOT AN EMPTY ONE", () => {
