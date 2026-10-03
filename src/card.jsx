@@ -49,7 +49,7 @@ const CardFigure = ({ k, v, c }) => <Stat k={k} v={v} c={c} style={{ flex: "1 1 
    reader cannot see.
 
      MARKETS    which of the basket to read, all by default, grouped by the registry's categories (PR #48).
-     DIRECTION  one for every market, or "Season decides" per market.
+     DIRECTION  one for every market, or "Signals decide" per market (PR #48): its signals' family plus Neutral.
      SIZE BY    what I can spend, or what I want to make — two chips. The amount is a slider (PR #45): its top is the
                 per-trade limit, or the trading capital under free sizing, and the limit is editable beside it.
      CHANCE     a minimum chance of profit.
@@ -64,7 +64,7 @@ export function RequestControls({
   // Which controls this mount renders; null is all of them.
   only = null,
   request, onChange,
-  sentiments = [], direction = "season", onDirection,
+  sentiments = [], direction = "signals", onDirection,
   universe = [], markets = [], onMarkets,
   horizon = RULES.targetEntryDTE, onHorizon,
   ticker = null, spot = null,
@@ -92,8 +92,8 @@ export function RequestControls({
         <div style={{ marginTop: 8 }}>
           <Note color={T.dim}>DIRECTION</Note>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            <Chip on={direction === "season"} label="Season decides" onClick={() => onDirection && onDirection("season")}>
-              Season decides
+            <Chip on={direction === "signals"} label="Signals decide" onClick={() => onDirection && onDirection("signals")}>
+              Signals decide
             </Chip>
             {sentiments.map((s) => (
               <Chip key={s.id} on={direction === s.id} color={s.color} label={s.label}

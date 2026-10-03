@@ -15,7 +15,7 @@ import { WhySheet } from "./why.jsx";
 import { orderLegs as orderLegsOf, orderHoldingKey, ordersForRecord, orderIntent, rowLines, workingCloseText } from "./orderRow.js";
 import { BandThumbnail, payoffBands, bandTakeaway, GaugeFigure, Gauge, CompareFigure, exitPlanSentence, exitPlanDetail,
   OpenInterestStrip, oiStripTakeaway, oiCutAt, oiGhostCut, explainOiStrip, useWidth } from "./visuals.jsx";
-import { fuseSignals, sentimentDirection, withSignalRank, compareCandidates, againstSignal,
+import { fuseSignals, sentimentDirection, signalDirection, signalFamilies, withSignalRank, compareCandidates, againstSignal,
   readingState, signalSnapshot, compareSignals } from "./signals.js";
 import { N as nCDF, bs as bsPrice, smile as smileIV, payoff as payoffExp, SIGMA,
   parseAvJson, statsFromMatrix } from "./engine.js";
@@ -108,14 +108,9 @@ function bsGreeks(S, K, Tyr, iv, type) {
    still the SAFE accessor: any ticker (an Alpaca import, an old record) gets a fallback row, never undefined. */
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const NOW_MONTH = new Date().getMonth();
-/* THE DIRECTION "SEASON DECIDES" SUGGESTS FOR A MARKET: its season and its four factors. A market whose factors
-   are still being read hands in no fused result (`fusedFind`), so the suggestion rests on the season alone until
-   they land. One function, because `scan` and Find's list both ask it. */
-const suggestionScore = (seasonalScore, f) => (seasonalScore ?? 0) * 1.5 + (f ? (f.score / 25) * (f.confidence / 100) : 0);
-const suggestionOf = (seasonalScore, f) => {
-  const score = suggestionScore(seasonalScore, f);
-  return score > 1.5 ? "verybull" : score > 0.5 ? "bull" : score < -1.5 ? "verybear" : score < -0.5 ? "bear" : "neutral";
-};
+/* THE DIRECTION A MARKET'S SIGNALS SUGGEST is `signalDirection()` in signals.js (PR #48, TASK 3): score ×
+   confidence / 100 against RULES.directionSignalMin, CONFLICT always Neutral. `suggestionScore()` / `suggestionOf()`
+   (season × 1.5 + score / 25 × confidence) are retired: they counted the season twice. */
 /** The exit plan's sentence for a trade, with its take-profit target from `takeProfitTarget()`. */
 const planOf = (legs, { maxProfit = null, maxLoss = null, entry = null } = {}) =>
   exitPlanSentence(takeProfitTarget({ legs, maxProfit, maxLoss, entryNet: entry }));
@@ -1537,11 +1532,11 @@ export default function OptionsStrategyLab() {
   const [nf, setNf] = useState({ tk: "ALL", kind: "all", q: "", days: 7 });
   /* ---- WHAT FIND IS ASKED (PR #40, TASK 1) ----
      The markets it reads (all of the basket by default), the direction — one
-     for every market, or "season" to let each market's four factors decide —
+     for every market, or "signals" to let each market's four factors decide (PR #48) —
      the horizon in days, the one-market filter that replaced the Shortlist
      step, and whether flagged cards are listed. Every one of them re-filters
      the list live. */
-  const [find, setFind] = useState({ markets: [...BASKET], dir: "season", horizon: RULES.targetEntryDTE, market: null, cat: null, flagged: true });
+  const [find, setFind] = useState({ markets: [...BASKET], dir: "signals", horizon: RULES.targetEntryDTE, market: null, cat: null, flagged: true });
   // Which market "Why this market" is open on: a card's badge sets it.
   const [whyTk, setWhyTk] = useState(null);
   // THE DAYS THE WHY SHEET READS ITS MARKET AT (PR #48): the card's board when opened from a card, else the market's.
@@ -3744,13 +3739,10 @@ export default function OptionsStrategyLab() {
     const seasonalScore = seasonalNowOf(seasonal, tk, marketDte(tk));
     const c = chains[tk];
     const f = fused[tk];
-    // fuseSignals vive in -100..+100, la stagionalità in %/mese: /25 le riporta
-    // sulla stessa scala prima di sommarle.
-    // A SORT KEY CANNOT BE NULL, so an unknown season contributes nothing to
-    // the ORDER of the list. That is not the same as printing a zero: the
-    // number on screen is `seasonalScore`, which stays null and says so.
-    const score = suggestionScore(seasonalScore, f);
-    const sugg = suggestionOf(seasonalScore, f);
+    // THE SIGNALS' DIRECTION, ONCE (PR #48): a market still being read suggests Neutral and sorts at 0.
+    const sd = signalDirection(fusedFind[tk] || null);
+    const score = sd ? sd.s : 0;
+    const sugg = sd ? sd.dir : "neutral";
     return { tk, name: u.name, spot: c?.spot ?? null, seasonalScore, score, sugg, real: !!seasonal[tk],
       // ONE SERIES, ONE NUMBER OF YEARS. The header said "10y history" and the
       // panel beside it said "11y" about the same numbers: the ten-year cutoff
@@ -3764,7 +3756,7 @@ export default function OptionsStrategyLab() {
       // as a chance with nothing saying which table drifted it.
       ...seasonalStampFields(seasonalFor(tk)),
       fused: f, conflict: f?.agreement === "CONFLICT", agreement: f?.agreement, signalScore: f?.score ?? 0, confidence: f?.confidence ?? 0 };
-  }).sort((a, b) => (a.conflict !== b.conflict ? (a.conflict ? 1 : -1) : b.score - a.score)), [chains, seasonal, fused, seasonalFor, marketDte]);
+  }).sort((a, b) => (a.conflict !== b.conflict ? (a.conflict ? 1 : -1) : b.score - a.score)), [chains, seasonal, fused, fusedFind, seasonalFor, marketDte]);
 
   /* ====================================================================
      FIND — ONE REQUEST, ONE RANKED LIST ACROSS THE SELECTED MARKETS
@@ -3814,8 +3806,11 @@ export default function OptionsStrategyLab() {
       const fHere = fuseFind(tk, d2);
       const strikes = expiryStrikes(c, ek);
       if (!strikes) { failed.push({ tk, why: "board unreadable" }); continue; }
-      const row = scan.find((r) => r.tk === tk);
-      const sent = find.dir === "season" ? (row ? suggestionOf(seasonalNowOf(seasonal, tk, d2), fHere) : "neutral") : find.dir;
+      /* "SIGNALS DECIDE" (PR #48, TASK 3): the suggested family PLUS the Neutral one, each card tagged with the
+         family it came from; a market still being read shows its Neutral cards only. A fixed direction is as before. */
+      const sd = find.dir === "signals" ? signalDirection(fHere) : null;
+      const fams = find.dir === "signals" ? signalFamilies(sd) : [find.dir];
+      const sent = fams[0];
       const qq = makeQuote(c, ek);
       const peers = expiryOpenInterest(c, ek);
       // THE BOARD'S OWN ARITHMETIC, READ ONCE (PR #41, TASK 2). A stale board
@@ -3823,34 +3818,56 @@ export default function OptionsStrategyLab() {
       // only when a broken pair touches its own strikes (`invertedOnStrikes()`).
       const breaks = monotonicityBreaks(c, ek);
       const stale = boardLooksStale(breaks);
-      boards[tk] = { expKey: ek, dte: d2, sent, peers, feed: feedName(c), stale };
+      boards[tk] = { expKey: ek, dte: d2, sent, fams, signal: sd, reading: !fHere, peers, feed: feedName(c), stale };
       const u = getU(tk);
-      const r = shortlistWithFloors(sent, c.spot, u.step, strikes, d2, u.iv, qq, { peers, level: liqLevel });
-      for (const k of Object.keys(tally)) tally[k] += r.tally[k] || 0;
-      if (r.oiSkipped) oiSkipped.push(tk);
-      if (r.tally.spreadSkipped) spreadSkipped.push(tk);
-      if (r.tally.comboSpreadSkipped) comboSpreadSkipped.push(tk);
-      for (const { p, a, aFill } of r.rows) {
-        const lf = listCardFigures(p.legs, { spot: c.spot, dte: d2, iv: u.iv, q: qq, ticker: tk, expKey: ek,
-          seasonal: seasonalFor(tk), a, aFill });
-        const f = fHere || null;
-        const prof = evProfile(lf.mc, aFill.maxProfit, aFill.maxLoss);
-        const cand = candidateOf({ name: p.name, legs: p.legs, a: aFill, pop: lf.pop, dte: d2, expKey: ek,
-          ...seasonalStampFields(lf.mc), ...chanceDrawFields(lf.mc) }, { ticker: tk, spot: c.spot, source: "find" });
-        items.push(withSignalRank({
-          key: cand.key, tk, name: p.name, legs: p.legs, expKey: ek, dte: d2, spot: c.spot, sent, lf, cand,
-          feedBroken: invertedOnStrikes(breaks, p.legs).length > 0,
-          noQuoteLegs: comboBook(p.legs, quotesOf(aFill)).missing.length,
-          touchSize: touchSizeOf(p.legs, aFill),
-          fused: f, flags: candidateFlags({ legs: p.legs, fused: f, ivRank: ivRankOf(tk) }),
-          ev100: prof ? prof.ev100 : -999, tag: prof ? prof.tag : null,
-        }, f, sentimentDirection(sent)));
+      const seen = new Set();
+      for (const fam of fams) {
+        const r = shortlistWithFloors(fam, c.spot, u.step, strikes, d2, u.iv, qq, { peers, level: liqLevel });
+        for (const k of Object.keys(tally)) tally[k] += r.tally[k] || 0;
+        if (r.oiSkipped && !oiSkipped.includes(tk)) oiSkipped.push(tk);
+        if (r.tally.spreadSkipped && !spreadSkipped.includes(tk)) spreadSkipped.push(tk);
+        if (r.tally.comboSpreadSkipped && !comboSpreadSkipped.includes(tk)) comboSpreadSkipped.push(tk);
+        for (const { p, a, aFill } of r.rows) {
+          const lf = listCardFigures(p.legs, { spot: c.spot, dte: d2, iv: u.iv, q: qq, ticker: tk, expKey: ek,
+            seasonal: seasonalFor(tk), a, aFill });
+          const f = fHere || null;
+          const prof = evProfile(lf.mc, aFill.maxProfit, aFill.maxLoss);
+          const cand = candidateOf({ name: p.name, legs: p.legs, a: aFill, pop: lf.pop, dte: d2, expKey: ek,
+            ...seasonalStampFields(lf.mc), ...chanceDrawFields(lf.mc) }, { ticker: tk, spot: c.spot, source: "find" });
+          if (seen.has(cand.key)) continue;
+          seen.add(cand.key);
+          items.push(withSignalRank({
+            key: cand.key, tk, name: p.name, legs: p.legs, expKey: ek, dte: d2, spot: c.spot, sent: fam, lf, cand,
+            // "with the signal" or "neutral" (Signals decide); null under a fixed direction.
+            family: find.dir === "signals" ? (fam === "neutral" ? "neutral" : "signal") : null,
+            feedBroken: invertedOnStrikes(breaks, p.legs).length > 0,
+            noQuoteLegs: comboBook(p.legs, quotesOf(aFill)).missing.length,
+            touchSize: touchSizeOf(p.legs, aFill),
+            fused: f, flags: candidateFlags({ legs: p.legs, fused: f, ivRank: ivRankOf(tk) }),
+            ev100: prof ? prof.ev100 : -999, tag: prof ? prof.tag : null,
+          }, f, sentimentDirection(fam)));
+        }
       }
     }
     items.sort(compareCandidates);
     const stale = Object.entries(boards).filter(([, b]) => b.stale).map(([tk, b]) => ({ tk, expKey: b.expKey }));
     return { items, tally, noBoard, loading, failed, oiSkipped, spreadSkipped, comboSpreadSkipped, boards, stale };
-  }, [find.markets, find.dir, find.horizon, chains, chainErr, scan, liqLevel, fuseFind, seasonal, seasonalFor, ivRankOf]); // eslint-disable-line
+  }, [find.markets, find.dir, find.horizon, chains, chainErr, liqLevel, fuseFind, seasonalFor, ivRankOf]); // eslint-disable-line
+  /* "CORN: signals in, Bull cards added" (PR #48, TASK 3). A market shows its Neutral cards while its signals are being
+     read; when they land and suggest a direction, its directional family appears, and this says so once. */
+  const [signalsIn, setSignalsIn] = useState({});
+  const wasReading = useRef({});
+  useEffect(() => {
+    if (find.dir !== "signals") { wasReading.current = {}; setSignalsIn({}); return; }
+    const add = {};
+    for (const [tk, b] of Object.entries(findGen.boards)) {
+      if (wasReading.current[tk] && !b.reading && b.signal && b.signal.dir !== "neutral") {
+        add[tk] = `${tk}: signals in, ${(SENTIMENTS.find((x) => x.id === b.signal.dir) || {}).label || b.signal.dir} cards added`;
+      }
+      wasReading.current[tk] = b.reading;
+    }
+    if (Object.keys(add).length) setSignalsIn((m) => ({ ...m, ...add }));
+  }, [findGen, find.dir]);
   /* THE LIST ON SCREEN: the one-market filter (what the Shortlist step was),
      and the flag toggle. Nothing is dropped without a count saying so. */
   // ONE FILTER: a market, or a category of the registry (PR #48, TASK 1).
@@ -4510,7 +4527,7 @@ export default function OptionsStrategyLab() {
             sentiments={SENTIMENTS} universe={BASKET} find={find} setFind={setFind}
             spot={find.market ? spotOf(chains[find.market]) : null}
             limits={limits} onLimit={(ov) => setSetting("sizeOverride", ov)} freeSizing={freeSizing}
-            findGen={findGen} findShown={findShown} flaggedHidden={flaggedHidden} barsCache={barsCache}
+            findGen={findGen} findShown={findShown} signalLines={Object.values(signalsIn)} flaggedHidden={flaggedHidden} barsCache={barsCache}
             badgeOf={(x) => <SignalBadge fused={x.fused} state={readiness[x.tk]} onClick={() => { scrollToCard.current = x.key; setWhyTk(x.tk); setWhyDte(x.dte); setEv("why"); }} />}
             onMore={(x) => { scrollToCard.current = x.key; setWhyTk(x.tk); setEv("more"); }}
             actionsOf={(x) => (

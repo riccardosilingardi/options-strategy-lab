@@ -727,6 +727,35 @@ export function regionSignals(weatherData, month = new Date().getMonth()) {
    expected value is allowed to argue us out of that.
 ================================================================ */
 
+/* ================================================================
+   "SIGNALS DECIDE" (PR #48, TASK 3; owner decisions, 3 Oct 2026)
+
+   MEASURED. The old suggestion was season × 1.5 + score / 25 × confidence (thresholds ±0.5 / ±1.5): CORN in October
+   scored 3.96 → Very Bull, with the season ≈ 60% of it — counted twice, since it is also 30% of the score. A season
+   alone at +0.34%/month gave Bull, and "Very" switched the family to long options and butterflies.
+
+   NOW the direction comes from the four signals ONCE: s = score × confidence / 100; Bull at s ≥
+   RULES.directionSignalMin, Bear at s ≤ −RULES.directionSignalMin, Neutral between; CONFLICT is always Neutral; never
+   "Very" (that stays a manual direction). A market then shows its suggested family PLUS the Neutral one.
+================================================================ */
+
+/**
+ * @returns {{ dir: "bull"|"bear"|"neutral", s: number|null, why: string }} or null while the market is being read
+ *   (no fused result): a market still reading shows its Neutral cards only.
+ */
+export function signalDirection(fused) {
+  if (!fused) return null;
+  const min = RULES.directionSignalMin;
+  const s = (fused.score * fused.confidence) / 100;
+  if (fused.agreement === "CONFLICT") return { dir: "neutral", s, why: "CONFLICT is always Neutral" };
+  const dir = s >= min ? "bull" : s <= -min ? "bear" : "neutral";
+  return { dir, s, why: `score ${scoreTxt(fused.score)} × confidence ${fused.confidence} / 100 = ${num2(s)} ` +
+    `${dir === "bull" ? "≥ " : dir === "bear" ? "≤ −" : "inside ±"}${min}` };
+}
+
+/** The families a market shows under "Signals decide": its suggestion and Neutral, or Neutral alone. */
+export const signalFamilies = (sd) => (sd && sd.dir !== "neutral" ? [sd.dir, "neutral"] : ["neutral"]);
+
 /** The direction a sentiment preset needs in order to pay: +1, -1 or 0. */
 export function sentimentDirection(sent) {
   if (sent === "bull" || sent === "verybull") return 1;

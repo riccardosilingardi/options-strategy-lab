@@ -7,9 +7,9 @@ import { fuseSignals, weatherComponent, newsComponent, ageDecay, regionSignals,
   sentimentDirection, signalAdjustment, rankScore, compareCandidates, withSignalRank, againstSignal,
   weatherApplies, weatherNaReason, factorsOf, tagImpacts, seasonalComponent, REGIONS,
   readingState, readingLine, unreadInputsAria, signalSnapshot, compareSignals,
-  verdictLine, scoreWorking, confidenceWorking, BASE_WEIGHTS, REINFORCE, CONFLICT_DAMPING, CONFIDENCE_BANDS } from "./signals.js";
+  verdictLine, scoreWorking, confidenceWorking, signalDirection, signalFamilies, BASE_WEIGHTS, REINFORCE, CONFLICT_DAMPING, CONFIDENCE_BANDS } from "./signals.js";
 import { readFileSync } from "node:fs";
-import { seasonalSignal } from "./rules.js";
+import { seasonalSignal, RULES } from "./rules.js";
 /* A MEASURED SEASON FOR A FIXTURE (PR #48): every month at `x`%, 16 years, a standard error of 0.4% — so a month
    counts when |x| ≥ 0.8 (RULES.seasonalSignalT = 2 × 0.4), the same line the retired ±0.8% band drew. */
 const seasonAt = (x, dte = 30) => seasonalSignal({ monthlyMean: Array(12).fill(x), monthN: Array(12).fill(16),
@@ -624,6 +624,28 @@ test("THE ⓘ OPENS ON TAP, NEVER A title ATTRIBUTE; the sheet says what it chan
   assert.equal(/title=/.test(top), false, "no title attribute on the ⓘ");
   assert.ok(why.includes("WEIGHTS_CHOSEN_LINE") && why.includes("whyFindEffect()"));
   assert.ok(why.includes('summary="The full reasoning"'), "the narrative is behind The full reasoning");
+});
+
+test("SIGNALS DECIDE (PR #48): s = score × confidence / 100 against directionSignalMin; CONFLICT Neutral; never Very", () => {
+  assert.equal(RULES.directionSignalMin, 12.5, "chosen, not measured (PRD §4.8)");
+  const at = (score, confidence, agreement = "MIXED") => signalDirection({ score, confidence, agreement });
+  assert.equal(at(64, 86, "CONFLUENT").dir, "bull");
+  assert.equal(+at(64, 86, "CONFLUENT").s.toFixed(2), 55.04);
+  assert.equal(at(25, 50).dir, "bull");
+  assert.equal(at(24, 50).dir, "neutral");
+  assert.equal(at(-25, 50).dir, "bear");
+  assert.equal(at(-24, 50).dir, "neutral");
+  assert.equal(at(10, 45).dir, "neutral");
+  assert.equal(at(90, 95, "CONFLICT").dir, "neutral", "CONFLICT is Neutral whatever the arithmetic");
+  assert.equal(at(100, 100, "CONFLUENT").dir, "bull", "never Very");
+  assert.equal(signalDirection(null), null, "reading: no direction");
+  assert.deepEqual(signalFamilies(null), ["neutral"]);
+  assert.deepEqual(signalFamilies(at(64, 86)), ["bull", "neutral"]);
+  assert.deepEqual(signalFamilies(at(-64, 86)), ["bear", "neutral"]);
+  assert.deepEqual(signalFamilies(at(5, 40)), ["neutral"]);
+  const app = readFileSync("src/App.jsx", "utf8").replace(/\/\*[\s\S]*?\*\//g, " ");
+  assert.equal(/const suggestion(Score|Of)\s*=/.test(app), false, "suggestionScore / suggestionOf retired");
+  assert.ok(/signalFamilies\(sd\)/.test(app), "Find builds the suggested family plus Neutral");
 });
 
 console.log(`\n${passed} passed, ${failures.length} failed\n`);

@@ -47,7 +47,7 @@ const PIC = { bands: BANDS, legs: LEGS, entryNet: 0.8, spot: 28.6, bars: [], dte
 
 check("ZERO PROSE — no text node on a card runs past six words", () => {
   const html = renderToStaticMarkup(
-    <CandidateCard name="Bull Call Spread" legs="+1 28C / −1 30C" direction="↑ bull · season"
+    <CandidateCard name="Bull Call Spread" legs="+1 28C / −1 30C" direction="↑ bull · signals"
       rr={1.5} pop={0.62} figures={sizedFigures(A80, 3)} sizeText={sizeLine({ ok: true, n: 3, risk: 80 })} picture={PIC} />);
   // The size line is the third long thing: "3 contracts × $80 at risk each" is the owner's own line, and it is a
   // product written out — labels and numbers, not a sentence (PR #45).
@@ -125,14 +125,15 @@ check("THE PICTURE ROW IS THE GAUGE BESIDE THE UNIFIED PICTURE, AND THE BAND THU
   if (bare.includes("Open the full picture")) throw new Error("an empty picture frame");
 });
 
-check("A MARKET'S SEASON IS NAMED ON ITS CARD, ONLY WHEN THE SEASON CHOSE (PR #45, TASK 1)", () => {
-  const SENT = [{ id: "bull", label: "Bull", icon: "↑" }, { id: "verybear", label: "Very Bear", icon: "↓↓" }];
-  if (directionTag("bull", SENT) !== "↑ bull · season") throw new Error(directionTag("bull", SENT));
-  if (directionTag("verybear", SENT) !== "↓↓ very bear · season") throw new Error(directionTag("verybear", SENT));
+check("A CARD SAYS WHICH FAMILY IT CAME FROM UNDER 'SIGNALS DECIDE' (PR #48, TASK 3)", () => {
+  const SENT = [{ id: "bull", label: "Bull", icon: "↑" }, { id: "bear", label: "Bear", icon: "↓" }, { id: "neutral", label: "Neutral", icon: "→" }];
+  if (directionTag("bull", SENT) !== "↑ bull · signals") throw new Error(directionTag("bull", SENT));
+  if (directionTag("bear", SENT) !== "↓ bear · signals") throw new Error(directionTag("bear", SENT));
+  if (directionTag("neutral", SENT) !== "→ neutral") throw new Error(directionTag("neutral", SENT));
   if (directionTag("sideways", SENT) !== null) throw new Error("an unknown direction was named");
-  has(renderToStaticMarkup(<CandidateCard name="X" legs="x" rr={1} pop={0.5} figures={sizedFigures(A80, 1)} direction="↑ bull · season" />), "↑ bull · season");
-  if (renderToStaticMarkup(<CandidateCard name="X" legs="x" rr={1} pop={0.5} figures={sizedFigures(A80, 1)} />).includes("season")) {
-    throw new Error("a card the owner chose the direction for says the season did");
+  has(renderToStaticMarkup(<CandidateCard name="X" legs="x" rr={1} pop={0.5} figures={sizedFigures(A80, 1)} direction="↑ bull · signals" />), "↑ bull · signals");
+  if (renderToStaticMarkup(<CandidateCard name="X" legs="x" rr={1} pop={0.5} figures={sizedFigures(A80, 1)} />).includes("signals")) {
+    throw new Error("a card the owner chose the direction for says the signals did");
   }
 });
 
@@ -217,7 +218,7 @@ check("THE CONTROLS BLOCK IS ONE REQUEST, AND ITS EXPLANATION FOLDS", () => {
       sentiments={SENTS} direction="bull" ticker="SOYB" spot={27.5}
       universe={["SOYB", "GLD"]} markets={["SOYB"]} onMarkets={() => {}}
       horizon={45} onHorizon={() => {}} />);
-  for (const k of ["MARKETS · 1 OF 2", "DIRECTION", "Season decides", "TARGET PRICE", "SIZE BY",
+  for (const k of ["MARKETS · 1 OF 2", "DIRECTION", "Signals decide", "TARGET PRICE", "SIZE BY",
     "Most I will risk", "Chance at least", "Return on risk at least", "Horizon"]) has(html, k);
   has(html, "$28.60");            // the direction read as a price, with one market and one direction
   if (html.includes("Search")) throw new Error("there is no Search button: the list re-filters live");

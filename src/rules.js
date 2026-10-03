@@ -3512,12 +3512,14 @@ export function nearestRelaxation(cands = [], request, sizeOf = () => null) {
 }
 
 /**
- * THE DIRECTION A MARKET'S SEASON CHOSE, ON ITS CARD ("↑ bull · season").
- * `sentiments` is the app's list of `{ id, label, icon }`; the arrows are the ones the app already uses.
+ * THE FAMILY A CARD CAME FROM UNDER "SIGNALS DECIDE" (PR #48, TASK 3): "↑ bull · signals" for a card in the
+ * direction the market's signals chose ("with the signal"), "→ neutral" for one from the Neutral family that every
+ * market also shows. Null for an unknown direction.
  */
 export const directionTag = (sentId, sentiments = []) => {
-  const s = (sentiments || []).find((x) => x.id === sentId);
-  return s ? `${s.icon} ${String(s.label).toLowerCase()} · season` : null;
+  const s = sentiments.find((x) => x.id === sentId);
+  if (!s) return null;
+  return sentId === "neutral" ? `${s.icon} neutral` : `${s.icon} ${String(s.label).toLowerCase()} · signals`;
 };
 
 /**
@@ -5916,15 +5918,15 @@ export default RULES;
    THE WHY SHEET'S TWO FIXED SENTENCES (PR #46, TASK 3) — one home each.
 
    WHAT THE SCORE CHANGES IN FIND, checked clause by clause against the code on 2 Oct 2026:
-   - "Season decides" picks the direction built on a market from its season plus score × confidence
-     (`suggestionOf()` / `suggestionScore()` in App.jsx);
-   - a market's cards move up or down by `signalAdjustment()` inside `rankScore()`, and a CONFLICT market's
-     cards sort last (`compareCandidates()`, signals.js);
+   - "Signals decide" picks the direction built on a market from score × confidence against
+     RULES.directionSignalMin (`signalDirection()` in signals.js, PR #48), always beside the Neutral family;
+   - only under the order "Expected value + signal" do a market's cards move by `signalAdjustment()`, and only
+     then does a CONFLICT market's cards sort last (`findOrderCompare()`, PR #48);
    - price, risk and chance are worked out from the option prices and the season's drift (`seasonalDrift()`),
      never from this score.
 ===================================================================== */
 export const whyFindEffect = () =>
-  `What this changes in Find: with "Season decides" it helps pick the direction built on this market, and it moves ` +
-  `this market's cards up or down the list (a CONFLICT market's cards go last). Price, risk and chance come from the ` +
-  `option prices and the season, not from this score.`;
+  `What this changes in Find: with "Signals decide" it picks the direction built on this market (beside the Neutral ` +
+  `cards), and under "Expected value + signal" it moves this market's cards up or down the list (a CONFLICT market's ` +
+  `cards go last). Price, risk and chance come from the option prices and the season, not from this score.`;
 export const WEIGHTS_CHOSEN_LINE = "These weights and bands are chosen, not measured on past trades.";

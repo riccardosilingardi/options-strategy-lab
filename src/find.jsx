@@ -41,7 +41,7 @@ const NO_BARS = [];
 export function FindStep({
   request, onRequest, sentiments, universe, find, setFind, spot,
   limits, onLimit, freeSizing,
-  findGen, findShown, flaggedHidden, barsCache, badgeOf, actionsOf, onMore = null,
+  findGen, findShown, signalLines = [], flaggedHidden, barsCache, badgeOf, actionsOf, onMore = null,
   liqLevel, foldedNode,
   compare, showCompare, compareNote, onTickCompare, onClearCompare, onToggleCompare, onTakeToBuild,
   forward,
@@ -70,7 +70,7 @@ export function FindStep({
     return (
       <CandidateCard key={x.key} cardKey={x.key}
         name={`${x.tk} · ${x.name}`} legs={`${legsLine(x.legs)} · ${x.expKey}`}
-        direction={find.dir === "season" ? directionTag(x.sent, sentiments) : null}
+        direction={find.dir === "signals" ? directionTag(x.sent, sentiments) : null}
         misses={misses} signs={signs}
         figures={sizedFigures(af, n)} sizeText={size && size.ok ? sizeLine(size) : null}
         rr={x.lf.rr} pop={x.lf.pop} basis={mc ? chanceBasisLabel(mc) : null}
@@ -116,6 +116,9 @@ export function FindStep({
           show flagged{flaggedHidden ? ` (${flaggedHidden} hidden)` : ""}
         </CheckField>
       </div>
+
+      {/* SIGNALS THAT LANDED AND ADDED A FAMILY, one line each (PR #48, TASK 3). */}
+      {signalLines.length > 0 && <Note color={T.blue} role="status" style={{ marginTop: 8 }}>{signalLines.join(" · ")}</Note>}
 
       {/* A STALE BOARD IS SAID ONCE, HERE, ABOVE THE LIST (PR #41, TASK 2) — never repeated per card. A card carries
           its own label only when a broken pair touches its own strikes. */}
