@@ -12,7 +12,8 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
 import { TYPE } from "./theme.js";
-import { RangeField, Btn, Chip, Fold, histogram, clampTo, TAP, mono, sans } from "./ui.jsx";
+import { RangeField, Btn, Chip, Fold, Info, histogram, clampTo, TAP, mono, sans } from "./ui.jsx";
+import { readdirSync } from "node:fs";
 
 const ok = [], bad = [];
 const check = (n, f) => { try { f(); ok.push(n); console.log(`  ok   ${n}`); }
@@ -53,6 +54,32 @@ check("THE FOLD HIDES ITS CHILDREN AND SAYS SO TO A SCREEN READER", () => {
   has(html, 'aria-expanded="false"'); has(html, "figures ▼");
   if (html.includes("HIDDEN")) throw new Error("a closed fold printed its children");
   eq(renderToStaticMarkup(<Fold summary="">x</Fold>), "", "no summary, no fold");
+});
+
+check("THE ⓘ SHOWS ITS LABEL (PR #49, 0c): \"How the numbers fit ⓘ\", and the box it opens is not on screen at rest", () => {
+  const html = renderToStaticMarkup(<Info label="how the numbers fit">THE WORDS</Info>);
+  has(html, "How the numbers fit"); has(html, "ⓘ"); has(html, 'aria-label="About how the numbers fit"');
+  has(html, 'aria-expanded="false"'); has(html, "min-height:44px");
+  if (html.includes("THE WORDS")) throw new Error("a closed ⓘ printed its words");
+  const icon = renderToStaticMarkup(<Info iconOnly label="equity">x</Info>);
+  if (/Equity/.test(icon.replace(/aria-label="[^"]*"/, ""))) throw new Error("iconOnly printed its label");
+  eq(renderToStaticMarkup(<Info label="x">{null}</Info>), "", "nothing to say, no ⓘ");
+});
+
+check("…AND `iconOnly` IS USED ONLY INSIDE A FIGURE TILE: the account strip's cells and the card's tiles", () => {
+  const allowed = new Set(["positions.jsx", "card.jsx", "ui.jsx"]);
+  for (const f of readdirSync("src")) {
+    if (!/\.jsx?$/.test(f) || /\.test\./.test(f)) continue;
+    if (/\biconOnly\b/.test(readFileSync(`src/${f}`, "utf8")) && !allowed.has(f)) throw new Error(`${f} uses iconOnly outside a tile`);
+  }
+  // In those two files it sits in the tile itself: the strip's `cell` and the card's `CardFigure`.
+  if (!/const cell = [\s\S]{0,400}<Info iconOnly/.test(readFileSync("src/positions.jsx", "utf8"))) throw new Error("positions.jsx: iconOnly outside the cell");
+  const card = readFileSync("src/card.jsx", "utf8");
+  for (const m of card.matchAll(/iconOnly/g)) {
+    const before = card.slice(0, m.index);
+    if (before.lastIndexOf("const CardFigure") < before.lastIndexOf("\nexport function") && before.lastIndexOf("const CardFigure") < before.lastIndexOf("\nfunction "))
+      throw new Error("card.jsx: iconOnly outside CardFigure");
+  }
 });
 
 /* ====================================================================

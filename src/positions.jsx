@@ -49,7 +49,7 @@ export function AccountStrip({ account = null, risk = null, capital = null }) {
   const cell = (k, v, info, extra = null) => (
     <div style={{ minWidth: 0, display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
       <div style={{ ...sans, fontSize: FS.xs, color: T.dim, letterSpacing: "0.04em", display: "flex", alignItems: "center", flexWrap: "wrap" }}>
-        {k}<Info label={k.toLowerCase()}>{info}</Info>
+        {k}<Info iconOnly label={k.toLowerCase()}>{info}</Info>
       </div>
       <div style={{ ...mono, fontSize: FS.md, fontWeight: FW.bold, color: T.ink, lineHeight: LH.tight }}>{v}</div>
       {extra}

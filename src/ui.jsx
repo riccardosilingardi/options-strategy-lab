@@ -90,19 +90,29 @@ export const Note = ({ children, color = T.mut, style, ...rest }) => (
    it explains (aria-label) and whether it is open (aria-expanded). The text is rendered only while open, so it is
    not "words at rest" and the counter in `wordcount.mjs` does not score it — FOLD, NEVER DELETE: every fact that
    left a screen for a ⓘ is still one tap away.
+
+   ITS LABEL IS ON SCREEN (PR #49, TASK 0c). The owner, 3 Oct 2026: "the ⓘ is invisible" — a lone glyph under the
+   results line read as nothing to tap. It reads "How the numbers fit ⓘ" now, and what it opens is a readable box
+   (FS.sm, the full width of its line). `iconOnly` prints the glyph alone and is allowed ONLY inside a figure tile,
+   where the tile's own name is the label (`ui.test.jsx` holds the sites).
 ==================================================================== */
-export function Info({ label, children, style }) {
+const firstUpper = (s) => (s ? String(s).charAt(0).toUpperCase() + String(s).slice(1) : "");
+export function Info({ label, children, style, iconOnly = false }) {
   const [open, setOpen] = useState(false);
   const id = useId();
   if (!children) return null;
   return (
     <span style={{ display: "inline", ...style }}>
       <button onClick={() => setOpen((o) => !o)} aria-label={`About ${label}`} aria-expanded={open} aria-controls={id}
-        style={{ ...sans, fontSize: FS.sm, color: T.blue, background: "transparent", border: "none", cursor: "pointer",
-          minHeight: TAP, minWidth: TAP, padding: 0, verticalAlign: "middle" }}>ⓘ</button>
+        style={{ ...sans, fontSize: iconOnly ? FS.sm : FS.xs, fontWeight: FW.regular, color: T.blue, background: "transparent",
+          border: "none", cursor: "pointer", minHeight: TAP, minWidth: TAP, padding: iconOnly ? 0 : "0 4px",
+          verticalAlign: "middle", textAlign: "left", letterSpacing: 0 }}>
+        {iconOnly ? "ⓘ" : <>{firstUpper(label)} <span style={{ fontSize: FS.sm }}>ⓘ</span></>}
+      </button>
       {open && (
-        <span id={id} role="note" style={{ ...sans, display: "block", fontSize: FS.xs, lineHeight: LH.body, color: T.body,
-          background: T.bg, border: `1px solid ${T.line}`, borderRadius: 6, padding: "8px 10px", margin: "2px 0 6px" }}>
+        <span id={id} role="note" style={{ ...sans, display: "block", width: "100%", boxSizing: "border-box", fontSize: FS.sm,
+          fontWeight: FW.regular, letterSpacing: 0, lineHeight: LH.body, color: T.body, background: T.bg,
+          border: `1px solid ${T.line}`, borderRadius: 6, padding: "10px 12px", margin: "2px 0 6px", textAlign: "left" }}>
           {children}
         </span>
       )}

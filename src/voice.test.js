@@ -185,7 +185,7 @@ test("MEASURED: the three screens, and the table in the PRD is this number", () 
    2b. PR #47, TASK 3 — FOUR SURFACES, RENDERED ON J-0001, AT REST
 ================================================================ */
 const SURF = await measureSurfaces();
-test("MEASURED: Positions ≤ 120, one order row ≤ 35, the close confirm ≤ 30, Modify at its measured value", () => {
+test("MEASURED: Positions ≤ 120, one order row ≤ 35, the close confirm ≤ 35 and Modify ≤ 40 (PR #49: the ⓘ labels)", () => {
   /* Measured on main (e38261f) with the same fixtures and this same counter: one row 44, the orders panel with the
      false "not sent from this browser" warning 136, the close confirm 79, the orders panel + J-0001's and J-0002's
      cards 371. On the owner's phone, 2 Oct 2026: 78, 171, 51. After: see SURFACE_BUDGET. */
