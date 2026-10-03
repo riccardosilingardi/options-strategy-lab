@@ -175,10 +175,10 @@ async function fetchHistory(sym) {
     : meta.source === "cache-stale" ? "Alpha Vantage (cached, upstream unavailable)"
     : "Alpha Vantage";
   // ONE SERIES, ONE NUMBER OF YEARS. The header said "10y history" while the
-  // panel beside it said "11y" about the same numbers: the ten-year cutoff in
-  // `parseAvJson` lands mid-year, so the matrix carries eleven CALENDAR YEARS
-  // of which the first and last are partial. `st.years` is the count of rows
-  // and it is the only figure any screen may print.
+  // panel beside it said "11y" about the same numbers. `parseAvJson` keeps the
+  // whole series since PR #49 (no ten-year cutoff); its first and last calendar
+  // rows may be partial. `st.years` is the count of rows and it is the only
+  // figure any screen may print.
   return {
     ...st, matrix: h.matrix, from: h.from,
     src: `${provenance} · ${st.years}y`,
@@ -3745,10 +3745,9 @@ export default function OptionsStrategyLab() {
     const sugg = sd ? sd.dir : "neutral";
     return { tk, name: u.name, spot: c?.spot ?? null, seasonalScore, score, sugg, real: !!seasonal[tk],
       // ONE SERIES, ONE NUMBER OF YEARS. The header said "10y history" and the
-      // panel beside it said "11y" about the same numbers: the ten-year cutoff
-      // lands mid-year, so the matrix holds eleven calendar years of which the
-      // first and last are partial. `years` is the row count and the only
-      // figure any screen prints.
+      // panel beside it said "11y" about the same numbers. The whole series is
+      // read since PR #49; its first and last calendar rows may be partial.
+      // `years` is the row count and the only figure any screen prints.
       years: seasonal[tk]?.years ?? null, hasChain: !!c,
       // AND THE STAMP TRAVELS WITH THE ROW, because the weekly report is built
       // from `scan` and is read away from the screen: "seasonal +1.5%/mo" in a
@@ -4497,7 +4496,7 @@ export default function OptionsStrategyLab() {
                     </div>
                   </>
                 ) : (
-                  <div style={{ ...mono, fontSize: 12, color: T.mut, marginTop: 10 }}>Press "Run it" for the odds, the spread of outcomes, and what happened in each of the last ten years.</div>
+                  <div style={{ ...mono, fontSize: 12, color: T.mut, marginTop: 10 }}>Press "Run it" for the odds, the spread of outcomes, and what happened in each past year.</div>
                 )}
               </Panel>
             </div>

@@ -290,9 +290,11 @@ export const SIGMA = { SOYB: 0.19, CORN: 0.22, UNG: 0.48, BOIL: 0.95, WEAT: 0.25
 /**
  * An Alpha Vantage monthly body → a year-by-month matrix of percentage returns.
  *
- * The ten-year cutoff lands MID-YEAR, so the matrix carries eleven CALENDAR
- * rows of which the first and last are partial. `statsFromMatrix().years` is
- * the row count and is the only figure any screen may print about it.
+ * ALL THE HISTORY ALPHA VANTAGE RETURNS (PR #49, TASK 0b; owner decision, 3 Oct 2026). It used to keep the last
+ * ten years only, cut at today − 10 years, so a month carried about ten years (CORN's October ±2.0% instead of
+ * ±1.6%). Every month of the series is read now; the first and last calendar rows may be partial, and
+ * `statsFromMatrix()` counts each month's own years (`monthN`). `years` is the row count and is the only figure
+ * any screen may print about the whole series.
  *
  * @throws when the body is a refusal rather than a series — Alpha Vantage
  *         answers a quota refusal with HTTP 200 and a "Note" body, so the
@@ -304,8 +306,7 @@ export function parseAvJson(j) {
   const rows = Object.entries(ts)
     .map(([date, v]) => ({ date, close: parseFloat(v["5. adjusted close"]) }))
     .sort((a, b) => a.date.localeCompare(b.date));
-  const cutoff = new Date(); cutoff.setFullYear(cutoff.getFullYear() - 10);
-  const recent = rows.filter((r2) => new Date(r2.date) >= cutoff);
+  const recent = rows;
   const byYM = {};
   for (let i = 1; i < recent.length; i++) {
     const d = new Date(recent[i].date);
