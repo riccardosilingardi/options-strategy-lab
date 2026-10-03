@@ -20,13 +20,14 @@
 //      the app, exactly as before.
 // ============================================================================
 
-export const NAV_FIELDS = ["view", "tab", "step", "settings", "ev", "whyTk", "detailsId", "sheet"];
+// `seg` is Positions | Orders (PR #47, TASK 1): a segment is a screen, so Back steps from Orders to Positions.
+export const NAV_FIELDS = ["view", "tab", "step", "settings", "ev", "whyTk", "detailsId", "sheet", "seg"];
 
 /** The one object a history entry carries. Anything not in NAV_FIELDS is not navigation. */
 export const navOf = ({ view = "wizard", tab = "build", step = "find", showSettings = false, ev = null, whyTk = null,
-  detailsId = null, deskSheet = null } = {}) => ({
+  detailsId = null, deskSheet = null, posSeg = "positions" } = {}) => ({
   view, tab, step, settings: !!showSettings, ev: ev ?? null, whyTk: whyTk ?? null,
-  detailsId: detailsId ?? null, sheet: deskSheet ?? null,
+  detailsId: detailsId ?? null, sheet: deskSheet ?? null, seg: posSeg === "orders" ? "orders" : "positions",
 });
 
 export const sameNav = (a, b) => !!a && !!b && NAV_FIELDS.every((k) => a[k] === b[k]);

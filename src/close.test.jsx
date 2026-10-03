@@ -3,7 +3,7 @@
 // tap 1 (`prepareClose()`) and tap 2 (`sendClose()`).
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { CloseConfirm } from "./pro.jsx";
+import { CloseConfirm, CloseLines } from "./pro.jsx";
 import { prepareClose, groupForRecord } from "./closeOrder.js";
 
 const ok = [], bad = [];
@@ -24,24 +24,27 @@ await check("tap 1 shows the order in full: every leg, the signed limit and how 
     { gate: PASS, fetchChain: async () => CHAIN, demo: false });
   if (!prepared.ok) throw new Error(prepared.refusal);
   const h = renderToStaticMarkup(<CloseConfirm prep={{ key: "x", prepared }} onSend={() => {}} onCancel={() => {}} />);
-  has(h, "SELL to close");
-  has(h, "BUY to close");
-  has(h, "credit");
-  has(h, "good for today only");
-  has(h, "Send the close");
+  // PR #47: one line at rest, read off the body; the order in full is one tap away, behind the ⓘ.
+  has(h, "Close "); has(h, "credit each"); has(h, "today"); has(h, "you receive ≈");
+  has(h, "About the order in full");
+  has(h, ">Send<");
   hasnt(h, "market");
+  const full = renderToStaticMarkup(<CloseLines lines={prepared.lines} />);
+  has(full, "SELL to close");
+  has(full, "BUY to close");
+  has(full, "good for today only");
 });
 
 await check("a refusal prints beside the button, and there is nothing to send", async () => {
   const h = renderToStaticMarkup(<CloseConfirm prep={{ key: "x", refusal: "The close was not sent: no chain." }} onSend={() => {}} onCancel={() => {}} />);
   has(h, "The close was not sent: no chain.");
-  hasnt(h, "Send the close");
+  hasnt(h, ">Send<");
 });
 
 await check("after the send it says what was sent", async () => {
   const h = renderToStaticMarkup(<CloseConfirm prep={{ key: "x", sent: "Closing XLE — sent as a single order." }} onSend={() => {}} onCancel={() => {}} />);
   has(h, "sent as a single order");
-  hasnt(h, "Send the close");
+  hasnt(h, ">Send<");
 });
 
 for (const n of ok) console.log(`  ok   ${n}`);

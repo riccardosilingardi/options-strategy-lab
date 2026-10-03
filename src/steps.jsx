@@ -221,13 +221,16 @@ export { Fold } from "./ui.jsx";
    lists a second time. It prints COUNTS now — never a ref, a status or a
    price — and the whole line is the link to where they live.
 ==================================================================== */
-export function DeskCountLine({ working = 0, decisions = 0, looks = 0, onOpen }) {
+export function DeskCountLine({ working = 0, decisions = 0, looks = 0, closing = 0, onOpen }) {
   const parts = [];
   if (working > 0) parts.push(`${working} order${working === 1 ? "" : "s"} working`);
+  // A close already sent is not a decision still to take (PR #47, TASK 0f).
+  if (closing > 0) parts.push(`${closing} close${closing === 1 ? "" : "s"} working`);
   if (decisions > 0) parts.push(`${decisions} position${decisions === 1 ? "" : "s"} need${decisions === 1 ? "s" : ""} a decision`);
   else if (looks > 0) parts.push(`${looks} position${looks === 1 ? "" : "s"} to look at`);
   if (!parts.length) return null;
-  const tone = decisions > 0 ? T.red : T.amber;
+  // Red is for errors and refusals (PR #47): a decision to take is the action tone.
+  const tone = decisions > 0 ? T.action : T.amber;
   return (
     <button onClick={onOpen}
       style={{ ...mono, fontSize: 11.5, color: tone, marginTop: 12, minHeight: 44, width: "100%", textAlign: "left",

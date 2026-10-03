@@ -15,9 +15,9 @@ test("2 Oct 22:08 in Milan: 'Market closed · opens Mon 15:30 your time'", () =>
   assert.equal(marketClockLine(FRI_NIGHT, { timeZone: "America/New_York" }), "Market closed · opens Mon 09:30 your time");
 });
 
-test("a close stays sendable, and the line says Alpaca holds it", () => {
+test("a close stays sendable, and the line says Alpaca queues it", () => {
   assert.equal(marketClockLine(FRI_NIGHT, { timeZone: "Europe/Rome", queued: true }),
-    "Market closed · opens Mon 15:30 your time · Alpaca holds the order until then");
+    "Market closed · opens Mon 15:30 your time · queued");
 });
 
 test("open market: no line. Unread clock: no line — unknown is not closed", () => {

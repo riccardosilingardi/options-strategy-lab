@@ -1,5 +1,10 @@
 // ============================================================================
-// src/orders.jsx — ONE ORDERS LIST, AT THE TOP OF POSITIONS (PR #46, TASK 0).
+// src/orders.jsx — THE ORDERS SEGMENT OF POSITIONS (PR #47, TASK 1; built as one list in PR #46, TASK 0).
+//
+// PR #47: the same order no longer prints twice. The list at the top of Positions and the row inline on the card
+// are gone; Positions | Orders are two segments, and this is the Orders one. A card whose close is working shows one
+// line and "Manage order", which opens that row here. A row at rest is three short lines (≤ 35 words, measured by
+// `scripts/surfaces.mjs` and held by voice.test.js); the sentences that left it are behind a ⓘ or in History.
 //
 // Orders used to be listed in three places: the Alpaca panel's "ORDERS WAITING", the Positions panel
 // "WORKING AT THE BROKER" and a disabled "Close order working" button on the position card. None could change
@@ -16,8 +21,9 @@
 // ============================================================================
 import React, { useMemo, useState } from "react";
 import { T, TYPE } from "./theme.js";
-import { Btn, Chip, Panel, Label, Note, NumberInput, RangeField, mono, sans } from "./ui.jsx";
-import { orderRowModel, orderHoldingKey, clampLimit, heldToLimit } from "./orderRow.js";
+import { Btn, Chip, Panel, Label, Note, NumberInput, RangeField, Info, mono, sans } from "./ui.jsx";
+import { orderRowModel, orderHoldingKey, clampLimit, heldToLimit, rowLines } from "./orderRow.js";
+import { localStamp, marketClockLine } from "./clock.js";
 import { modifyPlan, sendModify, cancelAll } from "./modifyOrder.js";
 import { prepareClose, sendClose, groupForRecord } from "./closeOrder.js";
 import { cancelOutcome, cancelWaiting } from "./order.js";
@@ -43,7 +49,7 @@ export function sentWords(iso, now = Date.now()) {
  * THE PRICE FIELD — one RangeField between the side that fills and the mid. The close confirm and Modify use
  * this one control. `bounds` is `limitBounds()`; values are in the order's own price space.
  */
-export function PriceField({ bounds, value, onChange, mleg = false, label = "Limit price" }) {
+export function PriceField({ bounds, value, onChange, mleg = false, label = "Price" }) {
   if (!bounds) return <Note color={T.amber}>No range to choose from: the chain for this expiry is not loaded.</Note>;
   return (
     <RangeField label={label} value={value} onChange={(v) => onChange(clampLimit(v, bounds))}
@@ -51,17 +57,15 @@ export function PriceField({ bounds, value, onChange, mleg = false, label = "Lim
       format={(v) => priceWords(v, mleg)} toInput={(v) => Math.abs(v).toFixed(2)}
       parse={(t) => { const n = Number(String(t).replace(/[^0-9.]/g, "")); return Number.isFinite(n) ? (bounds.lo < 0 ? -n : n) : null; }}
       valueText={(v) => priceWords(v, mleg)}
-      minCaption={bounds.lo === bounds.fill ? `fills ${usd(bounds.fill)}` : `mid ${usd(bounds.mid)}`}
-      maxCaption={bounds.hi === bounds.fill ? `fills ${usd(bounds.fill)}` : `mid ${usd(bounds.mid)}`}
-      note="Between the side that fills now and the middle of the market." />
+      minCaption="" maxCaption=""
+      aside={<Info label="this price">Between {usd(bounds.fill)}, the side that fills now, and {usd(bounds.mid)}, the middle of the market.</Info>} />
   );
 }
 
 /** The two TIF chips. */
 const TifField = ({ value, onChange }) => (
   <div role="group" aria-label="Time in force" style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-    <span style={{ ...sans, fontSize: FS.xs, fontWeight: FW.bold, color: T.dim }}>Time in force</span>
-    <Chip on={value === "day"} onClick={() => onChange("day")} label="Day">Day</Chip>
+    <Chip on={value === "day"} onClick={() => onChange("day")} label="Today only">Today</Chip>
     <Chip on={value === "gtc"} onClick={() => onChange("gtc")} label="Good till cancelled">GTC</Chip>
   </div>
 );
@@ -82,13 +86,15 @@ export function defaultModifyPrice(order, model) {
  * @param ctx  { positions, orders, chainFor, fetchChain, gate, request, onChanged, onReplaced, onCloseSent,
  *               onOpenBuild, cancelOne, recordFor, demo }
  */
-export function OrderRow({ order, ctx, inline = false }) {
+export function OrderRow({ order, ctx, inline = false, initialMode = null }) {
   const [chainLocal, setChainLocal] = useState(null);
   const key = orderHoldingKey(order);
   const chain = chainLocal || (key && ctx.chainFor ? ctx.chainFor(key.ticker) : null);
   const model = useMemo(() => orderRowModel(order, { chain, positions: ctx.positions || [] }), [order, chain, ctx.positions]);
-  const [mode, setMode] = useState(null);                 // null | "modify" | "cancel" | "details"
-  const [edit, setEdit] = useState(null);                 // { limit, qty, tif }
+  // `initialMode` opens a panel on first render: the word counter measures Modify open (scripts/surfaces.jsx).
+  const [mode, setMode] = useState(initialMode);          // null | "modify" | "cancel" | "details"
+  const [edit, setEdit] = useState(() => (initialMode === "modify"
+    ? { limit: defaultModifyPrice(order, model), qty: Number(order.qty) || 1, tif: model.tif === "gtc" ? "gtc" : "day" } : null));
   const [plan, setPlan] = useState(null);
   const [busy, setBusy] = useState(false);
   const [said, setSaid] = useState(null);                 // { ok, text }
@@ -157,45 +163,57 @@ export function OrderRow({ order, ctx, inline = false }) {
   };
   const waiting = cancelWaiting({ status: order.status, cancelRequested: cancelAsked || rec?.cancelRequestedAt });
 
+  const L = rowLines(order, model);
+  const outside = ctx.recordFor ? !rec : false;
+  // The row's order is already at Alpaca: the line says when the market opens. Modify sends, so its panel says queued.
+  const clockLine = marketClockLine(ctx.clock);
+  const focused = ctx.focusId === order.id;
+
   return (
-    <div data-order-row={order.id} style={{ padding: "10px 12px", background: T.bg, border: `1px solid ${T.amber}66`, borderRadius: 8, marginTop: inline ? 8 : 0 }}>
+    <div data-order-row={order.id} id={`order-${order.id}`} tabIndex={focused ? -1 : undefined}
+      style={{ padding: "10px 12px", background: T.bg, border: `${focused ? 2 : 1}px solid ${focused ? T.blue : T.line}`, borderRadius: 8, marginTop: inline ? 8 : 0 }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", alignItems: "baseline" }}>
         <div style={{ ...sans, fontSize: FS.sm, fontWeight: FW.bold, color: T.ink }}>
-          {rec?.ref ? `${rec.ref} · ` : ""}{model.what}
+          {rec?.ref ? <span style={mono}>{rec.ref} · </span> : null}<span style={mono}>{L.title}</span>
         </div>
-        <div style={{ ...mono, fontSize: FS.xs, fontWeight: FW.bold, color: T.amber }}>{(model.status || "working").toUpperCase().replace(/_/g, " ")}</div>
+        <div style={{ ...mono, fontSize: FS.xs, fontWeight: FW.bold, color: T.dim }}>{(model.status || "working").replace(/_/g, " ")}</div>
       </div>
-      <div style={{ ...sans, fontSize: FS.xs, color: T.body, marginTop: 4, lineHeight: LH.body }}>
-        {model.limitWords ? `Limit ${model.limitWords}` : `A ${model.type || "market"} order`} · {model.tifWords} · {model.filledLine} · {sentWords(model.sentAt)}
+      {outside && (
+        <div style={{ ...sans, fontSize: FS.xs, color: T.mut, marginTop: 2 }}>
+          sent outside this app{ctx.gap ? <Info label="an order sent outside this app">{ctx.gap}</Info> : null}
+        </div>
+      )}
+      <div style={{ ...mono, fontSize: FS.xs, color: T.body, marginTop: 4, lineHeight: LH.body }}>{L.terms}</div>
+      <div style={{ ...mono, fontSize: FS.xs, color: model.pastMark ? T.amber : T.mut, lineHeight: LH.body }}>
+        {L.book}{model.pastMark ? <> ⚠<Info label="the limit against Alpaca's mark">{model.pastMark}</Info></> : null}
       </div>
-      <div style={{ ...mono, fontSize: FS.xs, color: T.mut, marginTop: 4, lineHeight: LH.body }}>
-        Market now: {model.bookLine} · {model.markLine}
-      </div>
-      {model.pastMark && <Note color={T.amber} style={{ marginTop: 4 }}>⚠ {model.pastMark}</Note>}
+      {clockLine && <Note style={{ marginTop: 2 }}>{clockLine}</Note>}
 
       {waiting ? (
         <Note color={T.amber} style={{ marginTop: 8 }}>{cancelOutcome({ order: { status: order.status, cancelRequested: cancelAsked || rec?.cancelRequestedAt } })?.headline}</Note>
       ) : (
         <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
-          <Btn small ghost disabled={demo || busy} title={demo ? DEMO_TOOLTIP : undefined}
+          <Btn small ghost color={T.ink} disabled={demo || busy} title={demo ? DEMO_TOOLTIP : undefined}
             aria-expanded={mode === "modify"} onClick={() => (mode === "modify" ? setMode(null) : openModify())}>Modify</Btn>
+          {/* CANCEL IS NOT AN ERROR (PR #47, TASK 3): the danger OUTLINE, never a red fill. */}
           <Btn small ghost color={T.red} disabled={demo || busy} title={demo ? DEMO_TOOLTIP : undefined}
             aria-expanded={mode === "cancel"} onClick={() => { setSaid(null); setMode(mode === "cancel" ? null : "cancel"); }}>Cancel</Btn>
           <Btn small ghost color={T.ink} aria-expanded={mode === "details"}
-            onClick={() => setMode(mode === "details" ? null : "details")}>Details</Btn>
+            onClick={() => setMode(mode === "details" ? null : "details")}>History</Btn>
         </div>
       )}
 
       {mode === "modify" && edit && (
-        <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
+        <div data-modify={order.id} style={{ marginTop: 10, display: "grid", gap: 10 }}>
           {!model.book.ok && (
-            <Note color={T.amber}>{busy ? "Reading the chain…" : "The chain for this expiry is not loaded."}{" "}
+            <Note color={T.amber}>{busy ? "Reading the chain…" : "Chain not loaded."}{" "}
               {!busy && <Btn small ghost onClick={loadChain}>Read it now</Btn>}</Note>
           )}
           <PriceField bounds={model.bounds} value={edit.limit} mleg={mleg} onChange={(v) => { setPlan(null); setEdit({ ...edit, limit: v }); }} />
           <label style={{ ...sans, fontSize: FS.xs, fontWeight: FW.bold, color: T.dim, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            Quantity{model.intent === "close" && heldQty ? ` (you hold ${heldQty})` : ""}
+            Qty
             <NumberInput min={1} max={model.intent === "close" && heldQty ? heldQty : 20} step={1} value={edit.qty}
+              aria-label={`Quantity${model.intent === "close" && heldQty ? `, you hold ${heldQty}` : ""}`}
               onChange={(e) => { setPlan(null); setEdit({ ...edit, qty: e.target.value === "" ? "" : Math.round(Number(e.target.value)) }); }}
               style={{ width: 90 }} />
           </label>
@@ -203,12 +221,13 @@ export function OrderRow({ order, ctx, inline = false }) {
           {!plan && <div><Btn small onClick={review} disabled={edit.limit == null}>Review</Btn></div>}
           {plan && !plan.ok && <Note color={T.red}>✗ {plan.refusal}</Note>}
           {plan && plan.ok && (
-            <div style={{ padding: "9px 11px", border: `1px solid ${T.amber}`, borderRadius: 8 }}>
-              <Label>THIS IS THE CHANGE THAT WILL BE SENT</Label>
+            <div style={{ padding: "9px 11px", border: `1px solid ${T.field}`, borderRadius: 8 }}>
+              <Label color={T.ink}>THIS IS THE CHANGE THAT WILL BE SENT</Label>
               {plan.lines.map((l, i) => <Note key={i} color={T.ink} style={{ marginTop: 4 }}>{l}</Note>)}
+              {marketClockLine(ctx.clock, { queued: true }) && <Note style={{ marginTop: 4 }}>{marketClockLine(ctx.clock, { queued: true })}</Note>}
               <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
-                <Btn small disabled={busy} onClick={send}>{busy ? "Sending…" : "Send"}</Btn>
-                <Btn small ghost disabled={busy} onClick={() => setPlan(null)}>Change it</Btn>
+                <Btn small color={T.action} disabled={busy} onClick={send}>{busy ? "Sending…" : "Send"}</Btn>
+                <Btn small ghost color={T.ink} disabled={busy} onClick={() => setPlan(null)}>Change it</Btn>
               </div>
             </div>
           )}
@@ -216,23 +235,24 @@ export function OrderRow({ order, ctx, inline = false }) {
       )}
 
       {mode === "cancel" && (
-        <div style={{ marginTop: 10, padding: "9px 11px", border: `1px solid ${T.red}`, borderRadius: 8 }}>
+        <div style={{ marginTop: 10, padding: "9px 11px", border: `1px solid ${T.field}`, borderRadius: 8 }}>
           <Note color={T.ink}>Cancel this order? Alpaca takes the request; it is cancelled only when Alpaca reports it so.</Note>
           <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
-            <Btn small color={T.red} disabled={busy} onClick={doCancel}>{busy ? "Asking…" : "Yes, cancel it"}</Btn>
-            <Btn small ghost disabled={busy} onClick={() => setMode(null)}>Keep it</Btn>
+            <Btn small ghost color={T.red} disabled={busy} onClick={doCancel}>{busy ? "Asking…" : "Yes, cancel it"}</Btn>
+            <Btn small ghost color={T.ink} disabled={busy} onClick={() => setMode(null)}>Keep it</Btn>
           </div>
         </div>
       )}
 
       {mode === "details" && (
         <div style={{ marginTop: 10 }}>
-          <Label color={T.dim}>ALPACA'S STATUS HISTORY</Label>
+          <Label color={T.dim}>ALPACA'S STATUS HISTORY · YOUR TIME</Label>
           {model.history.map((h, i) => (
             <div key={i} style={{ ...mono, fontSize: FS.xs, color: T.body, marginTop: 3, lineHeight: LH.body, wordBreak: "break-word" }}>
-              {h.t ? `${h.t} · ` : ""}{h.label}
+              {h.t ? `${localStamp(h.t)} · ` : ""}{h.label}
             </div>
           ))}
+          {/* THE ORDER ID GOES LAST (PR #47): it is what you quote to Alpaca, not what you read first. */}
           <div style={{ ...mono, fontSize: FS.xs, color: T.dim, marginTop: 3, wordBreak: "break-all" }}>order {order.id}</div>
         </div>
       )}
@@ -243,15 +263,16 @@ export function OrderRow({ order, ctx, inline = false }) {
 }
 
 /**
- * THE LIST. `orders` is Alpaca's open orders (null until asked: an unasked broker is not an empty one).
- * `gap` is `orderReconciliation()`'s sentence for records the broker does not list.
+ * THE ORDERS SEGMENT. `orders` is Alpaca's open orders (null until asked: an unasked broker is not an empty one).
+ * One row per order; an order with no record carries "sent outside this app" (`recordForOrder()` decides, PR #47
+ * 0a), and `ctx.gap` — `orderReconciliation()`'s sentence — is behind that tag's ⓘ. "Cancel all" sits at the
+ * bottom, with its confirm.
  */
-export function OrdersPanel({ orders, ctx, gap = null }) {
+export function OrdersPanel({ orders, ctx }) {
   const [confirmAll, setConfirmAll] = useState(false);
   const [allSaid, setAllSaid] = useState(null);
   const [busy, setBusy] = useState(false);
   const n = orders ? orders.length : null;
-  if (n === 0 && !gap) return null;
   const demo = ctx.demo ?? DEMO;
   const doAll = async () => {
     setBusy(true);
@@ -259,32 +280,29 @@ export function OrdersPanel({ orders, ctx, gap = null }) {
     setBusy(false); setConfirmAll(false); setAllSaid(r);
     if (ctx.onChanged) ctx.onChanged();
   };
+  if (n == null) return <Note>Orders not read from Alpaca yet.</Note>;
   return (
-    <Panel accent={T.amber} style={{ marginBottom: 10 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-        <h3 style={{ ...sans, fontSize: FS.md, fontWeight: FW.bold, color: T.ink, margin: 0 }}>
-          Orders waiting ({n == null ? "not read yet" : n})
-        </h3>
-        {n > 1 && !confirmAll && (
-          <Btn small ghost color={T.red} disabled={demo} title={demo ? DEMO_TOOLTIP : undefined} onClick={() => setConfirmAll(true)}>Cancel all</Btn>
-        )}
+    <div data-orders-segment>
+      {n === 0 && <Note>No orders working at Alpaca.</Note>}
+      <div style={{ display: "grid", gap: 8 }}>
+        {orders.map((o) => <OrderRow key={o.id} order={o} ctx={ctx} />)}
       </div>
-      <Note style={{ marginTop: 4 }}>Sent, not filled: nothing here is a position yet. Each row is read from Alpaca.</Note>
+      {n > 0 && !confirmAll && (
+        <div style={{ marginTop: 12 }}>
+          <Btn small ghost color={T.red} disabled={demo} title={demo ? DEMO_TOOLTIP : undefined} onClick={() => setConfirmAll(true)}>Cancel all</Btn>
+        </div>
+      )}
       {confirmAll && (
-        <div style={{ marginTop: 8, padding: "9px 11px", border: `1px solid ${T.red}`, borderRadius: 8 }}>
-          <Note color={T.ink}>Cancel all {n} working orders? Positions you hold stay open; only the orders are cancelled.</Note>
+        <div style={{ marginTop: 12, padding: "9px 11px", border: `1px solid ${T.field}`, borderRadius: 8 }}>
+          <Note color={T.ink}>Cancel all {n} working order{n === 1 ? "" : "s"}? Positions you hold stay open; only the orders are cancelled.</Note>
           <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
-            <Btn small color={T.red} disabled={busy} onClick={doAll}>{busy ? "Asking…" : "Yes, cancel all"}</Btn>
-            <Btn small ghost disabled={busy} onClick={() => setConfirmAll(false)}>Keep them</Btn>
+            <Btn small ghost color={T.red} disabled={busy} onClick={doAll}>{busy ? "Asking…" : "Yes, cancel all"}</Btn>
+            <Btn small ghost color={T.ink} disabled={busy} onClick={() => setConfirmAll(false)}>Keep them</Btn>
           </div>
         </div>
       )}
       {allSaid && <Note color={allSaid.ok ? T.green : T.red} style={{ marginTop: 6 }}>{allSaid.headline}</Note>}
-      {gap && <Note color={T.amber} style={{ marginTop: 6 }}>{gap}</Note>}
-      <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
-        {(orders || []).map((o) => <OrderRow key={o.id} order={o} ctx={ctx} />)}
-      </div>
-    </Panel>
+    </div>
   );
 }
 
@@ -300,17 +318,16 @@ export function CloseChoice({ prepared, choice, onChoose }) {
   const mleg = (prepared.body?.order_class || "") === "mleg";
   return (
     <div style={{ display: "grid", gap: 10, marginTop: 8 }}>
-      <PriceField bounds={prepared.bounds} value={c.limit} mleg={mleg} label="Close at"
+      <PriceField bounds={prepared.bounds} value={c.limit} mleg={mleg} label="Price"
         onChange={(v) => onChoose({ ...c, limit: v })} />
       <label style={{ ...sans, fontSize: FS.xs, fontWeight: FW.bold, color: T.dim, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-        Quantity (you hold {prepared.heldQty})
-        <NumberInput min={1} max={prepared.heldQty} step={1} value={c.qty}
+        <NumberInput min={1} max={prepared.heldQty} step={1} value={c.qty} aria-label={`Quantity, you hold ${prepared.heldQty}`}
           onChange={(e) => { const q = Math.round(Number(e.target.value)); if (q >= 1 && q <= prepared.heldQty) onChoose({ ...c, qty: q }); }}
           style={{ width: 90 }} />
       </label>
       <TifField value={c.tif} onChange={(t) => onChoose({ ...c, tif: t })} />
       {prepared.defaultLimit != null && c.limit !== prepared.defaultLimit && (
-        <Note>The app's own price was {priceWords(prepared.defaultLimit, mleg)}.</Note>
+        <Note>App's price: <span style={mono}>{priceWords(prepared.defaultLimit, mleg)}</span></Note>
       )}
     </div>
   );

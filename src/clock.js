@@ -42,11 +42,12 @@ export function localShort(iso, { timeZone } = {}) {
  * THE ONE LINE. Null when the market is open, and null when the clock was never read: an unread clock is not a
  * closed market (unknown is not zero).
  * @param clock  Alpaca's `/v2/clock` reply, or null
- * @param queued true where an order can be sent now and waits for the open (a close, Modify): the line says so
+ * @param queued true where an order can be sent now and waits for the open (a close, Modify): the line says Alpaca
+ *               queues it ("queued"). A row already at Alpaca does not need saying so.
  */
 export function marketClockLine(clock, { timeZone, queued = false } = {}) {
   if (!clock || typeof clock !== "object" || clock.is_open !== false) return null;
   const p = partsOf(Date.parse(clock.next_open || ""), timeZone);
   const when = p ? `opens ${WEEKDAY[p.wd]} ${p.hh}:${p.mm} your time` : "next open not reported";
-  return `Market closed · ${when}${queued ? " · Alpaca holds the order until then" : ""}`;
+  return `Market closed · ${when}${queued ? " · queued" : ""}`;
 }

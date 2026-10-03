@@ -182,7 +182,7 @@ test("WIRING — App.jsx makes its screens out of this module, and every view ha
   const app = readFileSync("src/App.jsx", "utf8");
   assert.match(app, /createNavHistory\(\{/);
   assert.match(app, /window\.addEventListener\("popstate"/);
-  assert.match(app, /navOf\(\{ view, tab, step, showSettings, ev, whyTk, detailsId, deskSheet \}\)/);
+  assert.match(app, /navOf\(\{ view, tab, step, showSettings, ev, whyTk, detailsId, deskSheet, posSeg \}\)/);
   const headings = (app.match(/data-view-heading/g) || []).length;
   assert.ok(headings >= 6, `Find, Build, Positions, Watching, Journal and Settings each carry one (found ${headings})`);
   assert.match(readFileSync("src/wizard.jsx", "utf8"), /<h1 data-view-heading tabIndex=\{-1\}/, "Home too");

@@ -72,15 +72,22 @@ check("AT ENTRY VS NOW: the Find card's four labels in its order, then the four 
   has(h, "<th scope=\"row\"", "the table has row headers a screen reader can read");
 });
 
-check("CLOSE AT LIMIT IS ALWAYS THERE: primary and red on CLOSE, secondary and not red on HOLD", () => {
+check("CLOSE AT LIMIT IS THERE: primary in the ACTION tone on CLOSE (red is for errors, PR #47), secondary on HOLD", () => {
   const closeH = cardFor();
   const holdH = cardFor({ pnl: 100, act: { action: "HOLD", line: "Nothing to do today: the exit plan is running.", notes: [] } });
   for (const h of [closeH, holdH]) has(h, "Close at limit");
   const btn = (h) => h.slice(h.lastIndexOf("<button", h.indexOf("Close at limit")), h.indexOf("Close at limit"));
-  has(btn(closeH), `background:${T.red}`, "CLOSE: filled red, the primary button");
+  has(btn(closeH), `background:${T.action}`, "CLOSE: filled in the action tone, the primary button");
+  hasNot(btn(closeH), `background:${T.red}`, "CLOSE is not an error");
   hasNot(btn(holdH), `background:${T.red}`, "HOLD: not red");
   has(btn(holdH), "background:transparent", "HOLD: a secondary (ghost) button");
   hasNot(btn(holdH), `color:${T.red}`, "HOLD: not red text either");
+});
+
+check("A CLOSE WORKING: no close button at all — the card shows one line and Manage order instead (PR #47)", () => {
+  const h = cardFor({ props: { closeLabel: null } });
+  hasNot(h, "Close at limit"); hasNot(h, "Close order working");
+  has(h, "Details");
 });
 
 check("FILE IN JOURNAL: only when the holding is gone (or never at a broker); no trash icon, no 'Close and file'", () => {

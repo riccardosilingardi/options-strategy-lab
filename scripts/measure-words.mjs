@@ -20,7 +20,8 @@
 //   node scripts/measure-words.mjs [path-to-App.jsx]
 // ============================================================================
 import { readFileSync } from "node:fs";
-import { measureScreens, SCREEN_IDS } from "../src/wordcount.mjs";
+import { measureScreens, SCREEN_IDS, SURFACE_IDS, SURFACE_BUDGET } from "../src/wordcount.mjs";
+import { measureSurfaces } from "./surfaces.mjs";
 
 const path = process.argv[2] || new URL("../src/App.jsx", import.meta.url).pathname;
 const src = readFileSync(path, "utf8");
@@ -33,4 +34,11 @@ for (const id of SCREEN_IDS) {
 }
 console.log(`  ${"TOTAL".padEnd(11)}${String(r.total.literal).padStart(7)}${String(r.total.generated).padStart(11)}${String(r.total.total).padStart(8)}${String(r.total.sites).padStart(8)}`);
 if (r.uncounted.length) console.log(`\n  uncounted generators (scored 0): ${r.uncounted.join(", ")}`);
+console.log("");
+
+// PR #47, TASK 3: the four surfaces, rendered on J-0001 at rest (scripts/surfaces.jsx).
+const surf = await measureSurfaces();
+console.log("  RENDERED ON J-0001, AT REST    WORDS   BUDGET");
+for (const id of SURFACE_IDS) console.log(`  ${id.padEnd(30)}${String(surf[id]).padStart(6)}${String(SURFACE_BUDGET[id]).padStart(9)}`);
+console.log(`  ${"orders segment (one order)".padEnd(30)}${String(surf.ordersSegment).padStart(6)}`);
 console.log("");

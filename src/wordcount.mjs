@@ -42,11 +42,53 @@ import * as O from "./order.js";
 // are scored rather than named as uncounted.
 import * as P from "./path.js";
 import * as S from "./signals.js";
+// PR #47: the order row's words and the market clock are plain JS too.
+import * as OR from "./orderRow.js";
+import * as CL from "./clock.js";
 
 // "positions" is the Positions place (PR #44, TASK 1): it is a TAB, not a step of the path, so its block is found by
 // `tab === "positions"`. It is measured by the same counter as the two steps, from the same source.
+// PR #47: Positions has two segments; "positions" is the Positions SEGMENT's block (`posSeg === "positions"`), and the
+// Orders segment, the close confirm and Modify are measured RENDERED, on J-0001's fixtures (`SURFACE_IDS` below).
 export const SCREEN_IDS = ["find", "build", "positions"];
-const GUARD = { positions: 'tab === "positions"' };
+const GUARD = { positions: 'posSeg === "positions"' };
+
+/* ---- PR #47, TASK 3: FOUR SURFACES, MEASURED AS RENDERED ----------------------------------------------------
+   A row's words are built in `orderRow.js` (`rowLines()`), which the source counter above cannot score, and a
+   confirm's words are read off the order body. So these four are measured the way the owner meets them: rendered
+   at rest on J-0001-shaped fixtures (`scripts/surfaces.jsx`), every text node counted, a ⓘ closed. The budgets are
+   the owner's (OrderRow ≤ 35, close confirm ≤ 30, Positions segment ≤ 120) and, for Modify, the measured value.
+     positions  the Positions segment: account strip, segment bar, J-0001's card (close working), J-0002's card
+     orders     ONE order row (J-0001's close), at rest
+     confirm    the close confirm on J-0001, with its price slider
+     modify     J-0001's row with Modify open, before Review */
+export const SURFACE_IDS = ["positions", "orders", "confirm", "modify"];
+/** Measured BEFORE this PR (owner's phone, 2 Oct 2026, and main's markup on the same fixtures). */
+export const SURFACE_BEFORE = { orders: 78, confirm: 51 };
+export const SURFACE_BUDGET = { positions: 120, orders: 35, confirm: 30, modify: 38 };
+
+/** Words in rendered markup: the text between tags, entities decoded, a token counted when it holds a letter or a digit. */
+export function renderedWords(html) {
+  // A `hidden` subtree is mounted but not on screen (a closed fold that keeps its panel mounted): it is not read.
+  let h = String(html || "");
+  for (;;) {
+    const m = /<([a-z][a-z0-9]*)\b[^>]*\shidden=""[^>]*>/i.exec(h);
+    if (!m) break;
+    const tag = m[1].toLowerCase();
+    const re = new RegExp(`<\\/?${tag}\\b[^>]*>`, "gi");
+    re.lastIndex = m.index + m[0].length;
+    let depth = 1, end = h.length, t;
+    while ((t = re.exec(h))) {
+      if (t[0][1] === "/") { depth--; if (depth === 0) { end = t.index + t[0].length; break; } }
+      else if (!t[0].endsWith("/>")) depth++;
+    }
+    h = h.slice(0, m.index) + " " + h.slice(end);
+  }
+  const text = h.replace(/<[^>]*>/g, " ")
+    .replace(/&#x27;|&#39;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+    .replace(/&[a-z#0-9]+;/gi, " ");
+  return text.split(/\s+/).filter((t) => /[A-Za-z0-9]/.test(t)).length;
+}
 
 /* ---- the fixture every generator is scored on ----------------------------
    One board, one setting, one market. The numbers do not matter; the LENGTH
@@ -163,6 +205,10 @@ export const COPY = {
   // PR #44, TASK 4: the badge's own words while a market is being read. (Its aria-label sentence is not on screen.)
   readingLine: () => S.readingLine({ waiting: ["news"] }),
   reconcileFigures: () => { const f = { entry: 0.62, maxLoss: -62, maxProfit: 138, breakevens: [28.62], pop: 0.48 }; return R.reconcileFigures(f, f).line; },
+  // PR #47: the Positions segment's generators, scored on J-0001.
+  closeSummaryLine: () => OR.closeSummaryLine({ symbol: "GDX261030P00094000", qty: "9", side: "sell", limit_price: "7.77", time_in_force: "day" }),
+  marketClockLine: () => CL.marketClockLine({ is_open: false, next_open: "2026-10-05T09:30:00-04:00" }, { timeZone: "Europe/Rome", queued: true }),
+  workingCloseText: () => OR.workingCloseText("$7.62 credit · GTC · 0 of 9"),
 };
 
 export const words = (s) => String(s || "").trim().split(/\s+/).filter(Boolean).length;
@@ -223,7 +269,8 @@ export function stepBlock(src, id) {
    scored the same as a paragraph would make the rule unfalsifiable, and a
    deletion that scored the same as a fold would make it uncheckable. The same
    stripping is applied to both sides of every comparison. */
-const FOLDED = ["Fold", "BuildWarnings", "DeskSheet", "EvidenceOverlay"];
+// `Info` (PR #47): the ⓘ renders its text only while tapped open.
+const FOLDED = ["Fold", "BuildWarnings", "DeskSheet", "EvidenceOverlay", "Info"];
 
 export function atRest(src) {
   let out = src;
@@ -240,10 +287,11 @@ export function atRest(src) {
   // App.jsx, so App passes them as `foldedNode={<…/>}` and the step renders them inside its "why" fold. The counter
   // sees the tags in the caller's text, outside any `<Fold>`, and would score a tap-away panel as words at rest; the
   // prop's whole value is stripped, by brace matching, because the JSX inside nests deeper than a regex can follow.
+  // PR #47: `guardian={…}` is the same case — the Positions card renders it inside its own closed fold.
   for (;;) {
-    const at = out.indexOf("foldedNode={");
+    const at = Math.max(out.indexOf("foldedNode={"), out.indexOf("guardian={"));
     if (at < 0) break;
-    let depth = 0, i = at + "foldedNode=".length;
+    let depth = 0, i = at + out.slice(at).indexOf("=");
     for (; i < out.length; i++) {
       if (out[i] === "{") depth++;
       else if (out[i] === "}") { depth--; if (depth === 0) { i++; break; } }
@@ -362,7 +410,10 @@ export const COMPONENT_DEPTH = 3;
 // would report a screen shrinking on the day it grew.
 // `ui.jsx` and `find.jsx` since PR #45: the atoms and the Find step moved out of App.jsx, and a counter that could not
 // see them would report Find shrinking to nothing on the day it was rewritten.
-const UI_FILES = ["App.jsx", "pro.jsx", "steps.jsx", "why.jsx", "visuals.jsx", "wizard.jsx", "card.jsx", "ui.jsx", "find.jsx", "orders.jsx"];
+const UI_FILES = ["App.jsx", "pro.jsx", "steps.jsx", "why.jsx", "visuals.jsx", "wizard.jsx", "card.jsx", "ui.jsx", "find.jsx", "orders.jsx",
+  // PR #47: the Positions segment's own files. `positionCard.jsx` was never read before, so the card's words were not
+  // in the old 209; they are now, which makes the number larger AND honest.
+  "positions.jsx", "positionCard.jsx", "navBar.jsx"];
 
 const sourcesOnce = (() => {
   let cache = null;

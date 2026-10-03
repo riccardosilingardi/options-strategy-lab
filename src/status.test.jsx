@@ -53,7 +53,10 @@ check("RENDERING THE DESK: an order's status is written in exactly one place —
   hasNot(code, "WORKING AT THE BROKER (");
   const pro = readFileSync("src/pro.jsx", "utf8");
   hasNot(pro, "ORDERS WAITING (");
-  eq(count(readFileSync("src/orders.jsx", "utf8"), "Orders waiting ("), 1, "one heading");
+  // PR #47: the list is the Orders SEGMENT of Positions (`posSeg === "orders"`), and the card no longer prints the row.
+  const ordersSeg = code.slice(code.indexOf('posSeg === "orders"'));
+  if (!ordersSeg.includes("<OrdersPanel")) throw new Error("the one list is not the Orders segment");
+  hasNot(code, "<OrderRow ");
   hasNot(code, "ORDERS WORKING AT THE BROKER");  // the desk strip
   hasNot(code, "EVERYTHING IS ON PLAN");          // the desk's TODAY list
   has(code, "<DeskCountLine");

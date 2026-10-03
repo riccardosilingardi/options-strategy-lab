@@ -27,6 +27,7 @@
 ===================================================================== */
 import { comboBook } from "./rules.js";
 import { orderLimitWords, orderMoney, orderLifecycle } from "./order.js";
+import { localShort } from "./clock.js";
 
 /* THE OCC SYMBOL'S SHAPE — one home. closeOrder.js re-exports it. */
 export const OCC_RE = /^([A-Z]{1,6})(\d{6})([CP])(\d{8})$/;
@@ -289,4 +290,86 @@ export async function waitForCanceled(id, request, { tries = 6, delayMs = 1500, 
     `${status ? ` (it reads "${status.replace(/_/g, " ")}")` : ""}, so nothing new was sent — two working orders on one ` +
     `holding is what this step exists to prevent. A cancel asked outside the session completes at 9:30 New York; ` +
     `send again once the old order reads canceled.` };
+}
+
+/* =====================================================================
+   THE ROW AT REST, IN FEWER WORDS (PR #47, TASK 3).
+
+   Measured before: one row 78 words — "Limit a credit of $8.23 (you receive it) · today's session only · filled 0 of 9
+   · sent …", "Market now: bid … (a debit structure) · Alpaca's mark …", and a 30-word sentence when the limit was
+   past the mark. At rest a row is now three short lines; every sentence that left it is one tap away (the ⓘ beside
+   the mark holds `pastMarkLine()`, History holds the times and the id).
+===================================================================== */
+const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const dShort = (iso) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || "")); return m ? `${Number(m[3])} ${MON[Number(m[2]) - 1]}` : ""; };
+const n2 = (x) => Math.abs(+x).toFixed(2);
+
+/** "GDX 94P", or "XLE 90/95C" for two legs of one type, else "GDX 3 legs". */
+export function legsName(legs) {
+  if (!legs || !legs.length) return "an order";
+  const und = legs[0].und;
+  const tp = (l) => (l.type === "put" ? "P" : "C");
+  if (legs.length === 1) return `${und} ${legs[0].strike}${tp(legs[0])}`;
+  if (legs.length === 2 && legs[0].type === legs[1].type) {
+    const ks = legs.map((l) => l.strike).sort((a, b) => a - b);
+    return `${und} ${ks[0]}/${ks[1]}${tp(legs[0])}`;
+  }
+  return `${und} ${legs.length} legs`;
+}
+
+/**
+ * The row's three lines.
+ *   title  "Close 9 GDX 94P 30 Oct"
+ *   terms  "$7.62 credit · GTC · 0 of 9"
+ *   book   "bid 7.80 · mid 7.95 · ask 8.10 · mark 7.90" (the structure, per combination, in the order's own terms)
+ */
+export function rowLines(order = {}, model = null) {
+  const m = model || orderRowModel(order);
+  const legs = m.legs;
+  const qty = num(order.qty);
+  const title = `${m.intent === "close" ? "Close" : "Open"} ${qty != null ? `${qty} ` : ""}${legsName(legs)}` +
+    `${legs ? ` ${dShort(legs[0].expKey)}` : ""}`;
+  const money = orderMoney(order);
+  const price = m.limit != null && money.kind ? `$${n2(money.magnitude)} ${money.kind}`
+    : m.limit != null ? `$${n2(m.limit)}` : `${m.type || "market"} order`;
+  const tif = m.tif === "gtc" ? "GTC" : m.tif === "day" ? "today" : (m.tif || "TIF not reported");
+  const terms = `${price} · ${tif} · ${num(order.filled_qty) ?? 0} of ${qty != null ? qty : "?"}`;
+  const b = m.book;
+  const bk = b && b.ok
+    ? `bid ${n2(heldToLimit(order, b.bid))} · mid ${n2(heldToLimit(order, b.mid))} · ask ${n2(heldToLimit(order, b.ask))}`
+    : b && b.reason === "chain" ? "chain not loaded" : "no two-sided quote";
+  const book = `${bk}${m.mark ? ` · mark ${n2(m.mark.held)}` : ""}`;
+  return { title, terms, book, sent: m.sentAt ? localShort(m.sentAt) : null };
+}
+
+/**
+ * THE CLOSE CONFIRM IN ONE LINE (TASK 3), read off the body that will be sent — never a second price.
+ *   one leg   "Sell 9 GDX 94P (30 Oct) at $7.77 each · today · you receive ≈ $6,993"
+ *   several   "Close 25 XLE 90/95C (6 Nov) at $3.10 credit each · GTC · you receive ≈ $7,750"
+ * Null when the body cannot be read (the full lines are still there, behind the ⓘ).
+ */
+export function closeSummaryLine(body = null) {
+  if (!body) return null;
+  const mleg = String(body.order_class || "").toLowerCase() === "mleg";
+  const q = num(body.qty), L = num(body.limit_price);
+  if (q == null || L == null) return null;
+  const syms = mleg ? (body.legs || []).map((l) => l.symbol) : [body.symbol];
+  const legs = syms.map((x) => { const p = parseOcc(x); return p ? { ...p } : null; });
+  if (!legs.length || !legs.every(Boolean)) return null;
+  const money = orderMoney(body);
+  const tif = String(body.time_in_force || "").toLowerCase() === "gtc" ? "until cancelled" : "today";
+  const total = Math.round(Math.abs(L) * 100 * q).toLocaleString("en-US");
+  const verb = mleg ? "Close" : String(body.side).toLowerCase() === "sell" ? "Sell" : "Buy";
+  const each = mleg ? `$${n2(L)} ${money.kind || ""}`.trim() : `$${n2(L)}`;
+  return `${verb} ${q} ${legsName(legs)} (${dShort(legs[0].expKey)}) at ${each} each · ${tif} · ` +
+    `${money.kind === "credit" ? "you receive" : "you pay"} ≈ $${total}`;
+}
+
+/** The card's one line while its close works (PR #47, TASK 1), from the row's terms: "Close working at $7.62 · 0 of 9".
+ *  A plain line when Alpaca's row is not read yet. */
+export function workingCloseText(rowTerms = null) {
+  if (!rowTerms) return "Close working at Alpaca";
+  const parts = String(rowTerms).split(" · ");
+  const price = (parts[0] || "").replace(/ (credit|debit)$/, "");
+  return `Close working at ${price}${parts[2] ? ` · ${parts[2]}` : ""}`;
 }
