@@ -31,7 +31,7 @@ import { money, chanceText, NO_CEILING, noCeilingNote, noCeilingRankNote, season
   filterFold, qualityFloorLine, qualityFloorSentence, liquiditySettingNote, looseningWarning, isLoosened,
   unpriceableNote, impossibleLossNote, modelDisagreementNote, wideSpreadNote, wideComboNote, crossingNote,
   liquiditySkippedNote, spreadSkippedNote, comboSpreadSkippedNote, horizonFloorNote, perTradeCapLabel,
-  nothingTodayLine, staleBoardLine, stopSigns, sizedFree, sizedFigures, sizeLine, controlReadings, directionTag,
+  nothingTodayLine, staleBoardLine, stopSigns, sizedFree, sizedFigures, sizeLine, controlReadings, directionTag, chanceBasisLabel,
 } from "./rules.js";
 
 const FS = TYPE.size, FW = TYPE.weight, LH = TYPE.line;
@@ -73,7 +73,7 @@ export function FindStep({
         direction={find.dir === "season" ? directionTag(x.sent, sentiments) : null}
         misses={misses} signs={signs}
         figures={sizedFigures(af, n)} sizeText={size && size.ok ? sizeLine(size) : null}
-        rr={x.lf.rr} pop={x.lf.pop}
+        rr={x.lf.rr} pop={x.lf.pop} basis={mc ? chanceBasisLabel(mc) : null}
         picture={x.lf.bands ? { bands: x.lf.bands, legs: x.legs, entryNet: af.entry, spot: x.spot, bars: barsCache[x.tk] || NO_BARS,
           dte: x.dte, sigma: mc ? mc.sigma : undefined, driftAnnual: mc ? mc.driftAnnual : undefined, ticker: x.tk } : null}
         badge={badgeOf(x)} actions={actionsOf(x)}

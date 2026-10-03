@@ -2011,7 +2011,8 @@ export function computeTIS(pos, cur) {
   // 2) Stagionalità (20)
   let seaPts = 10;
   if (th.seasonal != null && cur.seasonalNow != null) {
-    const same = Math.sign(th.seasonal) === Math.sign(cur.seasonalNow) || th.seasonal === 0;
+    // A season that is not a signal now (0, PR #48) has not flipped: it has no sign to flip to.
+    const same = Math.sign(th.seasonal) === Math.sign(cur.seasonalNow) || th.seasonal === 0 || cur.seasonalNow === 0;
     seaPts = same ? (Math.abs(cur.seasonalNow) >= Math.abs(th.seasonal) * 0.5 ? 20 : 12) : 4;
   }
   comp.push({ k: "Season", pts: seaPts, max: 20, note: `${th.seasonal?.toFixed?.(1) ?? "?"}%/mo when you opened it → ${cur.seasonalNow?.toFixed?.(1) ?? "?"}%/mo now` });
@@ -2819,7 +2820,9 @@ export function taSignals(bars) {
 }
 export function confluence(seasonalM, ta) {
   if (!ta) return null;
-  const seaDir = seasonalM > 0.8 ? 1 : seasonalM < -0.8 ? -1 : 0;
+  // THE SEASON'S DIRECTION IS `seasonalSignal()`'s (PR #48): `seasonalM` is the window's counted mean, 0 when no
+  // month beats its noise. The fixed ±0.8% band that stood here is gone.
+  const seaDir = Math.sign(Number.isFinite(seasonalM) ? seasonalM : 0);
   let verdict, c, advice;
   if (seaDir !== 0 && ta.trend === seaDir) { verdict = "BOTH AGREE"; c = T.green; advice = `The season points ${seaDir > 0 ? "up" : "down"} and the price is already moving that way. A ${seaDir > 0 ? "bullish" : "bearish"} spread makes sense, at your full per-trade limit.`; }
   else if (seaDir !== 0 && ta.trend === -seaDir) { verdict = "THEY DISAGREE"; c = T.amber; advice = `The season points ${seaDir > 0 ? "up" : "down"} but the price is moving the other way. Trade smaller, wait for the price to turn, or pick a trade that does not need a direction.`; }

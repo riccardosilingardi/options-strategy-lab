@@ -41,7 +41,6 @@ import { sigmaProvenance, FALLBACK_SIGMA, FALLBACK_SIGMA_SOURCE, TABLE_SIGMA_SOU
 import { measuredSeasonal, resetSeasonalCache } from "../netlify/functions/autopilot.mjs";
 import { avMonthlyBody, AV_REFUSALS } from "./avFixture.js";
 import { chanceOf, chanceSourceNote, seasonalProvenance } from "./rules.js";
-import { SEASONAL } from "./engine.js";
 
 let passed = 0;
 const failures = [];
@@ -590,8 +589,12 @@ test("the autopilot computes the chance through chanceOf, not a closed form", ()
     "the drift is a seasonalProvenance() result, not a bare table");
   assert.ok(/const measured = await measuredSeasonal\(store, pos\.ticker\);/.test(AUTOPILOT),
     "read ONCE per position, into one object");
-  assert.ok(/seasonalProvenance\(measured, SEASONAL\[pos\.ticker\]/.test(AUTOPILOT),
-    "and the measured means come first, with the hand-written row behind them");
+  assert.ok(/seasonalProvenance\(measured, pos\.ticker\)/.test(AUTOPILOT),
+    "measured only: the hand-written row is retired (PR #48)");
+  assert.equal(/SEASONAL/.test(AUTOPILOT.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/[^\n]*/g, "$1")), false,
+    "no hand-written table is imported");
+  // THE SAME SEASON THE SCREENS READ: seasonalSignal() over the days left (PR #48).
+  assert.ok(/seasonalSignal\(seas, month, Math\.max\(1, dteLeft\)\)/.test(AUTOPILOT));
 });
 
 test("the brief reads the cached seasonal means and never spends the quota", () => {
@@ -623,13 +626,12 @@ test("the brief says what its probability is an answer about", () => {
   const note = chanceSourceNote(chanceOf({
     legs: [{ side: 1, type: "call", strike: 20, qty: 1 }, { side: -1, type: "call", strike: 21, qty: 1 }],
     entryNet: 0.4, spot: 20, iv: 0.85, dte: 45,
-    seasonal: seasonalProvenance(null, SEASONAL.BOIL, "BOIL"), month: 8, ticker: "BOIL", expKey: "2026-11-06",
+    seasonal: seasonalProvenance(null, "BOIL"), month: 8, ticker: "BOIL", expKey: "2026-11-06",
   }), "BOIL");
   assert.ok(note.includes("seasonal"), note);
   assert.ok(note.includes("BOIL"), note);
-  // ON THE FALLBACK IT SAYS SO. The sentence used to call the hand-written row
-  // "BOIL's own seasonal reading" whatever had produced it.
-  assert.ok(note.includes("HAND-WRITTEN"), note);
+  // NOT READ, IT SAYS SO (PR #48): the chance drifts at zero and the sentence names it.
+  assert.ok(note.includes("season not read: no drift"), note);
 });
 
 test("a chance the autopilot could not work out is null, never a confident 0%", () => {
@@ -701,7 +703,7 @@ atest("MEASURED READ — a hit produces measured means AND the measured volatili
 
   // ONE READING, TWO PROVENANCES — the same object feeds both, because the
   // means and the volatility are two questions about one set of prices.
-  const seas = seasonalProvenance(out, SEASONAL.CORN, "CORN");
+  const seas = seasonalProvenance(out, "CORN");
   const vol = sigmaProvenance(out, SIGMA.CORN, "CORN");
   assert.equal(seas.measured, true);
   assert.equal(vol.measured, true);
@@ -712,7 +714,7 @@ atest("MEASURED READ — a hit produces measured means AND the measured volatili
   assert.ok(/4 days ago/.test(vol.note), vol.note);
 });
 
-atest("MEASURED READ — a MISS falls back to the hand-written row, and says so", async () => {
+atest("MEASURED READ — a MISS is 'not read' (the hand-written row is retired), and says so", async () => {
   resetSeasonalCache();
   const store = fakeStore({});
   const out = await measuredSeasonal(store, "WEAT");
@@ -721,8 +723,10 @@ atest("MEASURED READ — a MISS falls back to the hand-written row, and says so"
   assert.equal(vol.source, TABLE_SIGMA_SOURCE);
   assert.equal(vol.sigma, SIGMA.WEAT);
   assert.ok(/written down, not measured/.test(vol.note));
-  const seas = seasonalProvenance(out, SEASONAL.WEAT, "WEAT");
+  const seas = seasonalProvenance(out, "WEAT");
   assert.equal(seas.measured, false);
+  assert.equal(seas.missing, true);
+  assert.match(seas.note, /season not read: no drift/);
 });
 
 atest("MEASURED READ — an UNREADABLE body is a miss, not a table", async () => {
@@ -757,11 +761,11 @@ atest("MEASURED READ — a body with NO ROWS does not become twelve zeros", asyn
   assert.equal(out, null, "one row produces no returns at all, and no reading");
   // And the consequence, stated: the fallbacks take over and name themselves.
   assert.equal(sigmaProvenance(out, SIGMA.SOYB, "SOYB").source, TABLE_SIGMA_SOURCE);
-  assert.equal(seasonalProvenance(out, SEASONAL.SOYB, "SOYB").measured, false);
+  assert.equal(seasonalProvenance(out, "SOYB").measured, false);
   // A reading that IS all zeros but has rows is a different case and is NOT
   // refused: measured zeros are a measurement.
   const zeros = { monthlyMean: Array(12).fill(0), sigma: 0.2, years: 11, at: Date.now() };
-  assert.equal(seasonalProvenance(zeros, SEASONAL.SOYB, "SOYB").measured, true);
+  assert.equal(seasonalProvenance(zeros, "SOYB").measured, true);
 });
 
 atest("MEASURED READ — memoised per TICKER, and cleared per RUN", async () => {

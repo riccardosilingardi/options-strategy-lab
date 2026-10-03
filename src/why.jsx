@@ -24,7 +24,7 @@ import { T } from "./theme.js";
 // The fold lives in steps.jsx — chrome with no trade in it (P9, TASK 3).
 import { Fold } from "./steps.jsx";
 import { ARROW, regionSignals, newsLine, verdictLine, scoreWorking, confidenceWorking } from "./signals.js";
-import { whyFindEffect, WEIGHTS_CHOSEN_LINE } from "./rules.js";
+import { whyFindEffect, WEIGHTS_CHOSEN_LINE, seasonRowLines, chanceBasisLabel } from "./rules.js";
 import { useNarrow } from "./visuals.jsx";
 
 const mono = { fontFamily: "ui-monospace, Menlo, monospace" };
@@ -200,6 +200,24 @@ export function WhySheetTop({ fused, how, onHow }) {
   );
 }
 
+/* ================================================================
+   THE SEASON ROW (PR #48, TASK 2): the months in the window this market is read over, each with its measured mean,
+   its own uncertainty and how many years carry it — "Oct +1.2% ± 1.6% (16 yrs) · not a signal" or "· counts" — and
+   what the chance is made of. Every line comes from `seasonalSignal()` (rules.js), the one home for the season.
+================================================================ */
+export function SeasonRow({ season }) {
+  const lines = seasonRowLines(season);
+  return (
+    <div role="group" aria-label="Season" style={{ marginTop: 8, padding: "8px 10px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 8 }}>
+      <div style={{ fontSize: 13, fontWeight: 700, color: T.ink }}>
+        Season{season && season.span ? ` · ${season.span} month${season.span === 1 ? "" : "s"} held` : ""}
+        <span style={{ fontWeight: 400, color: T.mut }}> · chance: {chanceBasisLabel({ seasonCounts: !!(season && season.counts) })}</span>
+      </div>
+      {lines.map((l) => <div key={l} style={{ ...mono, fontSize: 13, color: T.body, marginTop: 3 }}>{l}</div>)}
+    </div>
+  );
+}
+
 /**
  * THE WHY SHEET (PR #46, TASK 3) — "<TK> this month", the market and not this trade. The verdict line with its
  * two ⓘ, the one sentence on what it changes in Find, the news line, and the long narrative behind "The full
@@ -212,6 +230,7 @@ export function WhySheet({ fused, title, note, ticker, weatherData, newsItems, m
   return (
       <div style={{ marginTop: 4, ...(style || {}) }}>
         <WhySheetTop fused={fused} how={how} onHow={() => setHow((h) => !h)} />
+        <SeasonRow season={fused.season || null} />
         <button onClick={() => setNewsOpen((o) => !o)}
           style={{ ...mono, fontSize: 12, marginTop: 6, background: "transparent", color: T.body, border: "none", padding: "4px 0", cursor: "pointer", textAlign: "left", lineHeight: 1.5, minHeight: 44 }}>
           {newsLine(ticker, newsItems).text} {newsOpen ? "▲" : "▼"}

@@ -285,7 +285,7 @@ export { CardFigure };
    IT COMPUTES NOTHING. `figures` is a `sizedFigures()` result; `picture` is what the two drawings need.
 ==================================================================== */
 export function CandidateCard({
-  name, legs = "", rr = null, pop = null, figures = null, sizeText = null,
+  name, legs = "", rr = null, pop = null, basis = null, figures = null, sizeText = null,
   picture = null, misses = [], actions = null, badge = null, direction = null, flags = [], signs = null,
   cardKey = null, more = null, style,
 }) {
@@ -313,6 +313,9 @@ export function CandidateCard({
         <CardFigure k={CARD_LABELS.chance} v={chanceText(pop)} c={pop >= 0.5 ? T.green : T.violet} />
         <CardFigure k={CARD_LABELS.rr} v={rr == null ? "—" : returnText(rr)} c={T.amber} />
       </div>
+      {/* WHAT THE CHANCE IS MADE OF (PR #48): "prices + season" when a month in the window beat its noise, else
+          "prices only". `chanceBasisLabel()` in rules.js; Find and Build pass the same one. */}
+      {basis && <Note color={T.dim} style={{ marginTop: 2 }}>chance: {basis}</Note>}
       {sizeText && <div style={{ ...mono, fontSize: FS.xs, fontWeight: FW.bold, lineHeight: LH.body, color: T.blue, marginTop: 6 }}>{sizeText}</div>}
       {(sized || more) && (
         <Fold summary={sized ? "Per contract" : "More"} label={sized ? "figures" : "more"} tone={T.dim} style={{ marginTop: 2 }}>

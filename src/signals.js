@@ -15,8 +15,7 @@
 // threshold out of this file into a component — two copies drift apart, and
 // then two screens disagree about the same trade.
 
-import { SEASONAL } from "./engine.js";
-import { RULES, liquidityLevel, butterflySkipNote } from "./rules.js";
+import { RULES, liquidityLevel, butterflySkipNote, SEASON_NOT_READ } from "./rules.js";
 import { trendRead } from "./indicators.js";
 import { weatherAppliesTo, weatherReasonFor } from "./markets.js";
 
@@ -28,6 +27,7 @@ export const ARROW = { 1: "↑", "-1": "↓", 0: "≈" };
 const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
 const sum = (a) => a.reduce((x, y) => x + y, 0);
 const avg = (a) => (a.length ? sum(a) / a.length : 0);
+const capFirst = (t) => t.charAt(0).toUpperCase() + t.slice(1);
 const signed = (x, digits = 1) => `${x >= 0 ? "+" : ""}${x.toFixed(digits)}`;
 
 /* ================================================================
@@ -197,14 +197,18 @@ export const weatherNaReason = (ticker) => weatherReasonFor(ticker)
  *   `weights` always sums to 1 across `keys`, so dropping a factor redistributes
  *   its share in proportion rather than leaving a quarter of the scale unused.
  */
-export function factorsOf(ticker) {
-  const applies = { seasonal: true, technical: true, weather: weatherApplies(ticker), news: true };
+export function factorsOf(ticker, { seasonRead = true } = {}) {
+  // A SEASON NOT READ IS EXCLUDED, LIKE WEATHER ON A METAL (PR #48, TASK 2): until the market's measured history has
+  // loaded there is no season to score — the old hand-written table stood in, and was wrong on 8 months of 12.
+  const applies = { seasonal: !!seasonRead, technical: true, weather: weatherApplies(ticker), news: true };
   const keys = Object.keys(BASE_WEIGHTS).filter((k) => applies[k]);
   const total = sum(keys.map((k) => BASE_WEIGHTS[k]));
   const weights = Object.fromEntries(keys.map((k) => [k, BASE_WEIGHTS[k] / total]));
   const excluded = Object.keys(BASE_WEIGHTS).filter((k) => !applies[k]);
-  return { keys, weights, excluded,
-    note: excluded.includes("weather") ? weatherNaReason(ticker) : null };
+  const notes = [];
+  if (excluded.includes("seasonal")) notes.push(`${capFirst(SEASON_NOT_READ)} for ${ticker}: its monthly price history has not loaded, so the season is out of the score.`);
+  if (excluded.includes("weather")) notes.push(weatherNaReason(ticker));
+  return { keys, weights, excluded, note: notes.length ? notes.join(" ") : null };
 }
 
 /* ================================================================
@@ -395,20 +399,24 @@ export function technicalComponent(bars) {
    Seasonal
 ================================================================ */
 
-/** seasonalMean is a %/month figure; an array of 12 is indexed by month. */
-export function seasonalComponent(ticker, month, seasonalMean) {
-  let mean = seasonalMean;
-  if (Array.isArray(mean)) mean = mean[month];
-  if (mean == null || !Number.isFinite(mean)) mean = SEASONAL[ticker]?.[month];
-  if (mean == null || !Number.isFinite(mean)) {
-    return { dir: 0, strength: 0, why: `no seasonal history for ${ticker}`, mean: null };
+/**
+ * THE SEASON FACTOR, FROM `seasonalSignal()` (PR #48, TASK 2). The ±0.8% band is gone: the direction and the
+ * strength come from the window mean of the months that beat their own noise, with today's strength formula
+ * (|mean| × 40, held in 0-100; no direction under 10). With no month counting, it is quiet; with the season not
+ * read, the factor does not apply (`factorsOf()` leaves it out of the weights).
+ *
+ * @param signal  a `seasonalSignal()` result for this market's window, or null when the season is not read
+ */
+export function seasonalComponent(ticker, month, signal) {
+  if (!signal || !signal.read) {
+    return { dir: 0, strength: 0, applies: false, why: `${SEASON_NOT_READ}: ${ticker}'s monthly price history has not loaded`, mean: null, months: [] };
   }
-  const dir = mean > 0.8 ? 1 : mean < -0.8 ? -1 : 0;
+  const mean = signal.mean;
   const strength = clamp(Math.round(Math.abs(mean) * 40), 0, 100);
-  const why = dir === 0
-    ? `${MONTHS[month]} has averaged ${signed(mean)}% for ${ticker}, inside the +/-0.8% band that counts as no seasonal edge`
-    : `${MONTHS[month]} has averaged ${signed(mean)}% for ${ticker} historically, a ${dir > 0 ? "bullish" : "bearish"} month`;
-  return { dir: strength >= 10 ? dir : 0, strength, why, mean };
+  const dir = signal.counts && strength >= 10 ? Math.sign(mean) : 0;
+  const lines = signal.months.map((x) => x.line).join("; ");
+  // ONE SENTENCE (the narrative counts sentences): the verdict, then the window's months in brackets.
+  return { dir, strength, why: `${signal.note.replace(/\.$/, "")} (${lines})`, mean, months: signal.months };
 }
 
 /* ================================================================
@@ -456,14 +464,16 @@ const verb = (n, singular, plural) => (n === 1 ? singular : plural);
  * @param {object}  [input.weatherData]  { regionId: { tmax[], tmin[], prec[], dates[] } }
  * @param {Array}   [input.newsItems]    [{ title, date, geo, impacts? }]
  * @param {Array}   [input.bars]         daily bars [{ close, ... }], 60+ needed
- * @param {number|number[]} [input.seasonalMean] %/month, or 12 monthly means
+ * @param {object}  [input.season]       `seasonalSignal()` for this market's window (PR #48): the fused result is
+ *                                       therefore one per (market, days held). Null = the season is not read.
  * @param {number}  [input.now]          epoch ms, injectable for tests
  */
-export function fuseSignals({ ticker, month, weatherData, newsItems, bars, seasonalMean, now = Date.now() } = {}) {
+export function fuseSignals({ ticker, month, weatherData, newsItems, bars, season = null, now = Date.now() } = {}) {
   const m = Number.isInteger(month) ? month : new Date(now).getMonth();
+  const seasonRead = !!(season && season.read);
 
   const components = {
-    seasonal: seasonalComponent(ticker, m, seasonalMean),
+    seasonal: seasonalComponent(ticker, m, season),
     technical: technicalComponent(bars),
     weather: weatherComponent(ticker, weatherData, m),
     news: newsComponent(ticker, newsItems, now),
@@ -474,7 +484,7 @@ export function fuseSignals({ ticker, month, weatherData, newsItems, bars, seaso
   // them. Everything below counts `keys` and never the four: a factor that does
   // not apply is not in the sum, not in the agreement count and not in the
   // confidence denominator.
-  const { keys, weights, excluded, note: factorNote } = factorsOf(ticker);
+  const { keys, weights, excluded, note: factorNote } = factorsOf(ticker, { seasonRead });
   for (const k of excluded) components[k].applies = false;
   const up = keys.filter((k) => components[k].dir > 0);
   const down = keys.filter((k) => components[k].dir < 0);
@@ -530,7 +540,9 @@ export function fuseSignals({ ticker, month, weatherData, newsItems, bars, seaso
     // printed "seasonality 30%, price trend 25%, weather 25%, news 20%" as a
     // fixed sentence under the bars; on a market with no weather that sentence
     // would have been describing a scale nothing was measured against.
-    factors: keys, weights, excluded, factorNote };
+    factors: keys, weights, excluded, factorNote,
+    // THE WINDOW THE SEASON WAS READ OVER travels with the result (PR #48): `seasonalSignal()`'s own answer.
+    season: season || null };
 }
 
 /* ================================================================
