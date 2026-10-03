@@ -26,7 +26,7 @@ import { DEMO, DEMO_TOOLTIP } from "./demo.js";
 import { reduceRatios, orderQty, mlegLimitPrice, limitWords, orderLimitWords, limitKind, signedLimitFor, orderBody, orderPreviewLines, orderOutcome, alpacaErrorText, cancelOutcome, cancelWaiting } from "./order.js";
 import { hasOpenInterest, sourceNote, openInterestNote, fetchChain } from "./chain.js";
 import { CloseChoice } from "./orders.jsx";
-import { Btn as UBtn, Note as UNote, Info, mono as uMono } from "./ui.jsx";
+import { Btn, Note, Info, Panel, Label, Stat, mono, MONO_STACK } from "./ui.jsx";
 import { TYPE } from "./theme.js";
 import { closeSummaryLine } from "./orderRow.js";
 import { marketClockLine } from "./clock.js";
@@ -38,7 +38,11 @@ export { ImpactTags, WhyThisTrade } from "./why.jsx";
 export { useNarrow };
 
 /* ============ theme (condiviso) ============ */
-const mono = { fontFamily: "ui-monospace, Menlo, monospace" };
+/* PR #49, TASK 4 — THE SWEEP. This file's own Btn, Panel, Lbl, Stat and mono stack are gone: it reads the atoms from
+   ui.jsx and its sizes from the type tokens (`ui.test.jsx` holds it). `Btn` is re-exported for anything that imported
+   it from here. No behaviour moved: the order paths (2 OrderTicket, 4 placeExit) and orderBody() are untouched. */
+const FS = TYPE.size, FW = TYPE.weight, LH = TYPE.line;
+export { Btn };
 // Never "-$0": a figure that rounds to zero is one the app could not read,
 // and a minus sign in front of it invents a direction it does not have.
 const fmt$ = (x) => {
@@ -48,22 +52,8 @@ const fmt$ = (x) => {
 };
 /** A dollar figure for a model or a document, or null when there is not one. */
 const dollarsOrNull = (x) => (Number.isFinite(x) ? +Number(x).toFixed(0) : null);
-// Same contract as the Btn in App.jsx (the two copies are the design-system sweep's first job, ROADMAP):
-// 44px tall whatever the size, `small` only narrows padding and font, ghost border at full colour.
-export const Btn = ({ children, onClick, color = T.amber, ghost, disabled, small, title, style, ...rest }) => (
-  <button onClick={onClick} disabled={disabled} title={title} {...rest}
-    style={{ ...mono, fontSize: small ? 12 : 13, padding: small ? "6px 12px" : "8px 14px", minHeight: 44, borderRadius: 6, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.5 : 1, background: ghost ? "transparent" : color, color: ghost ? color : T.onAccent, border: ghost ? `1px solid ${color}` : "none", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, ...style }}>{children}</button>
-);
-const Panel = ({ children, style }) => <div style={{ background: T.panel, border: `1px solid ${T.line}`, borderRadius: 8, padding: 14, ...style }}>{children}</div>;
-const Lbl = ({ children }) => <div style={{ ...mono, fontSize: 10, letterSpacing: "0.15em", color: T.amber }}>{children}</div>;
-const Stat = ({ k, v, c, tip }) => (
-  <div>
-    <div style={{ ...mono, fontSize: 9.5, color: T.dim }}>{k}{tip && <span title={tip} style={{ cursor: "help", color: T.blue, marginLeft: 3 }}>ⓘ</span>}</div>
-    <div style={{ ...mono, fontSize: 14, fontWeight: 700, color: c || T.ink }}>{v}</div>
-  </div>
-);
-const Inp = (props) => <input {...props} style={{ ...mono, background: T.bg, color: T.ink, border: `1px solid ${T.field}`, borderRadius: 5, padding: "6px 8px", fontSize: 12, ...(props.style || {}) }} />;
-const Sel = (props) => <select {...props} style={{ ...mono, background: T.bg, color: T.ink, border: `1px solid ${T.field}`, borderRadius: 5, padding: "6px 8px", fontSize: 12, ...(props.style || {}) }} />;
+const Inp = (props) => <input {...props} style={{ ...mono, background: T.bg, color: T.ink, border: `1px solid ${T.field}`, borderRadius: 5, padding: "6px 8px", fontSize: FS.xs, ...(props.style || {}) }} />;
+const Sel = (props) => <select {...props} style={{ ...mono, background: T.bg, color: T.ink, border: `1px solid ${T.field}`, borderRadius: 5, padding: "6px 8px", fontSize: FS.xs, ...(props.style || {}) }} />;
 
 async function proxied(url) {
   const r = await fetch(`/api/proxy?url=${encodeURIComponent(url)}`);
@@ -208,7 +198,7 @@ export async function alpacaReq(path, method = "GET", body = null) {
    A refusal, from any step, prints here: beside the button it came from. */
 /** The close written out in full, line by line — behind the confirm's ⓘ (PR #47, TASK 3). */
 export function CloseLines({ lines = [] }) {
-  return <>{lines.map((l, i) => <span key={i} style={{ ...uMono, display: "block", marginTop: i ? 4 : 0 }}>{l}</span>)}</>;
+  return <>{lines.map((l, i) => <span key={i} style={{ ...mono, display: "block", marginTop: i ? 4 : 0 }}>{l}</span>)}</>;
 }
 
 /**
@@ -219,38 +209,37 @@ export function CloseLines({ lines = [] }) {
  * written out in full (`prepared.lines`, unchanged) is behind the ⓘ. Two taps, as ever: this is the second.
  */
 export function CloseConfirm({ prep, onSend, onCancel, onChoose = null, clock = null }) {
-  const FS = TYPE.size, FW = TYPE.weight, LH = TYPE.line;
   if (!prep) return null;
   if (prep.busy && !prep.prepared) {
-    return <UNote style={{ marginTop: 6 }}>Reading the market to price the close…</UNote>;
+    return <Note style={{ marginTop: 6 }}>Reading the market to price the close…</Note>;
   }
   if (prep.refusal) {
     return (
       <div style={{ marginTop: 6 }}>
-        <UNote color={T.red}>✗ {prep.refusal}</UNote>
-        <UBtn small ghost color={T.ink} onClick={onCancel} style={{ marginTop: 4 }}>Dismiss</UBtn>
+        <Note color={T.red}>✗ {prep.refusal}</Note>
+        <Btn small ghost color={T.ink} onClick={onCancel} style={{ marginTop: 4 }}>Dismiss</Btn>
       </div>
     );
   }
   if (prep.sent) {
-    return <UNote color={T.green} style={{ marginTop: 6 }}>✓ {prep.sent}</UNote>;
+    return <Note color={T.green} style={{ marginTop: 6 }}>✓ {prep.sent}</Note>;
   }
   if (!prep.prepared) return null;
   const summary = closeSummaryLine(prep.prepared.body);
   const clockLine = marketClockLine(clock, { queued: true });
   return (
     <div data-close-confirm style={{ marginTop: 8, padding: "9px 11px", background: T.bg, border: `1px solid ${T.action}`, borderRadius: 8 }}>
-      <div style={{ ...uMono, fontSize: FS.sm, fontWeight: FW.bold, color: T.ink, lineHeight: LH.body }}>
+      <div style={{ ...mono, fontSize: FS.sm, fontWeight: FW.bold, color: T.ink, lineHeight: LH.body }}>
         {summary || "The close, written out"}
         <Info label="the order in full"><CloseLines lines={prep.prepared.lines} /></Info>
       </div>
       {/* THE PRICE IS CHOSEN HERE (PR #46): between the side that fills and the mid, starting at
           `closeLimitPrice()`. A change prepares the close again, so the line above is what goes out. */}
       {onChoose && <CloseChoice prepared={prep.prepared} choice={prep.choice || null} onChoose={onChoose} />}
-      {clockLine && <UNote style={{ marginTop: 6 }}>{clockLine}</UNote>}
+      {clockLine && <Note style={{ marginTop: 6 }}>{clockLine}</Note>}
       <div style={{ display: "flex", gap: 6, marginTop: 9, flexWrap: "wrap" }}>
-        <UBtn small color={T.action} disabled={!!prep.busy} onClick={onSend}>{prep.busy ? "Sending…" : "Send"}</UBtn>
-        <UBtn small ghost color={T.ink} disabled={!!prep.busy} onClick={onCancel}>Keep it open</UBtn>
+        <Btn small color={T.action} disabled={!!prep.busy} onClick={onSend}>{prep.busy ? "Sending…" : "Send"}</Btn>
+        <Btn small ghost color={T.ink} disabled={!!prep.busy} onClick={onCancel}>Keep it open</Btn>
       </div>
     </div>
   );
@@ -262,16 +251,16 @@ export function OrderOutcome({ outcome, onDismiss }) {
   return (
     <div style={{ marginTop: 9, padding: "9px 11px", background: `${tone}0f`, border: `1px solid ${tone}66`, borderRadius: 7 }}>
       <div style={{ display: "flex", gap: 8, alignItems: "flex-start", justifyContent: "space-between" }}>
-        <div style={{ ...mono, fontSize: 9.5, color: tone, fontWeight: 700, letterSpacing: 0.4 }}>{outcome.label}</div>
-        <button onClick={onDismiss} style={{ ...mono, fontSize: 10, color: T.dim, background: "transparent", border: `1px solid ${T.line}`, borderRadius: 5, padding: "2px 7px", cursor: "pointer", minHeight: 24 }}>Dismiss</button>
+        <div style={{ ...mono, fontSize: FS.xs, color: tone, fontWeight: 700, letterSpacing: 0.4 }}>{outcome.label}</div>
+        <button onClick={onDismiss} style={{ ...mono, fontSize: FS.xs, color: T.dim, background: "transparent", border: `1px solid ${T.line}`, borderRadius: 5, padding: "2px 7px", cursor: "pointer", minHeight: 24 }}>Dismiss</button>
       </div>
-      <div style={{ fontSize: 13, color: T.ink, marginTop: 5, lineHeight: 1.5, fontWeight: 600 }}>{outcome.headline}</div>
-      {outcome.detail && <div style={{ fontSize: 12.5, color: T.body, marginTop: 4, lineHeight: 1.5 }}>{outcome.detail}</div>}
+      <div style={{ fontSize: FS.sm, color: T.ink, marginTop: 5, lineHeight: 1.5, fontWeight: 600 }}>{outcome.headline}</div>
+      {outcome.detail && <div style={{ fontSize: FS.sm, color: T.body, marginTop: 4, lineHeight: 1.5 }}>{outcome.detail}</div>}
       {/* ALPACA'S OWN WORDS, WHOLE. A rejection is a diagnosis and it is
           written in the body of the reply; a wrapped, scrollable box is
           what it takes to show one on a phone without breaking the page. */}
       {outcome.body && (
-        <pre style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 7, marginBottom: 0, padding: "7px 8px", background: T.bg,
+        <pre style={{ ...mono, fontSize: FS.xs, color: T.mut, marginTop: 7, marginBottom: 0, padding: "7px 8px", background: T.bg,
           border: `1px solid ${T.line}`, borderRadius: 5, maxHeight: 160, overflow: "auto", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{outcome.body}</pre>
       )}
     </div>
@@ -282,13 +271,13 @@ export function OrderOutcome({ outcome, onDismiss }) {
 export function OrderPending({ lines = [], onCancel }) {
   return (
     <div style={{ marginTop: 9, padding: "9px 11px", background: `${T.amber}0f`, border: `1px solid ${T.amber}66`, borderRadius: 7 }}>
-      <div style={{ ...mono, fontSize: 9.5, color: T.amber, fontWeight: 700, letterSpacing: 0.4 }}>NOT SENT YET · THIS IS WHAT THE SECOND TAP SENDS</div>
-      <div style={{ ...mono, fontSize: 12, color: T.ink, marginTop: 6, lineHeight: 1.7 }}>
+      <div style={{ ...mono, fontSize: FS.xs, color: T.amber, fontWeight: 700, letterSpacing: 0.4 }}>NOT SENT YET · THIS IS WHAT THE SECOND TAP SENDS</div>
+      <div style={{ ...mono, fontSize: FS.xs, color: T.ink, marginTop: 6, lineHeight: 1.7 }}>
         {lines.map((line, i) => <div key={i}>{line}</div>)}
       </div>
       <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
         <Btn small ghost onClick={onCancel}>Cancel — send nothing</Btn>
-        <span style={{ ...mono, fontSize: 10.5, color: T.dim }}>or tap the button above again to send it</span>
+        <span style={{ ...mono, fontSize: FS.xs, color: T.dim }}>or tap the button above again to send it</span>
       </div>
     </div>
   );
@@ -348,12 +337,12 @@ function LegMarketTable({ legs, quotes, ticker, expKey, feed }) {
   // `contractListing`), and it is what the broker refused on 20 September.
   const unlisted = contractListing({ legs, occs: (quotes || []).map((x) => (x && x.occ) || null) }).missing;
   const Head = ({ children, right }) => (
-    <div style={{ ...mono, fontSize: 9, color: T.dim, letterSpacing: 0.4, textAlign: right ? "right" : "left" }}>{children}</div>
+    <div style={{ ...mono, fontSize: FS.xs, color: T.dim, letterSpacing: 0.4, textAlign: right ? "right" : "left" }}>{children}</div>
   );
-  const cell = (on) => ({ ...mono, fontSize: 12, fontWeight: on ? 800 : 500, color: on ? T.ink : T.dim, textAlign: "right" });
+  const cell = (on) => ({ ...mono, fontSize: FS.xs, fontWeight: on ? 800 : 500, color: on ? T.ink : T.dim, textAlign: "right" });
   return (
     <div style={{ marginTop: 10, padding: "9px 11px", background: T.panel, border: `1px solid ${T.line}`, borderRadius: 7 }}>
-      <div style={{ ...mono, fontSize: 9.5, color: T.dim, letterSpacing: 0.4, fontWeight: 700 }}>
+      <div style={{ ...mono, fontSize: FS.xs, color: T.dim, letterSpacing: 0.4, fontWeight: 700 }}>
         THE MARKET, LEG BY LEG{expKey ? ` · ${ticker} ${expKey}` : ""}
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr 0.7fr 1fr 0.7fr", gap: "4px 8px", marginTop: 7, alignItems: "center" }}>
@@ -362,13 +351,13 @@ function LegMarketTable({ legs, quotes, ticker, expKey, feed }) {
           const buying = r.side > 0;
           return (
             <React.Fragment key={r.i}>
-              <div style={{ ...mono, fontSize: 11.5, color: buying ? T.green : T.red, fontWeight: 700 }}>
+              <div style={{ ...mono, fontSize: FS.xs, color: buying ? T.green : T.red, fontWeight: 700 }}>
                 {buying ? "BUY" : "SELL"} {r.qty > 1 ? `${r.qty}× ` : ""}{r.strike}{r.type === "call" ? "C" : "P"}
               </div>
               <div style={cell(r.trades === "bid")}>{r.bid != null ? r.bid.toFixed(2) : "—"}</div>
-              <div style={{ ...cell(r.trades === "bid"), fontSize: 10.5, fontWeight: 500 }}>{r.bidSize != null ? r.bidSize : "?"}</div>
+              <div style={{ ...cell(r.trades === "bid"), fontSize: FS.xs, fontWeight: 500 }}>{r.bidSize != null ? r.bidSize : "?"}</div>
               <div style={cell(r.trades === "ask")}>{r.ask != null ? r.ask.toFixed(2) : "—"}</div>
-              <div style={{ ...cell(r.trades === "ask"), fontSize: 10.5, fontWeight: 500 }}>{r.askSize != null ? r.askSize : "?"}</div>
+              <div style={{ ...cell(r.trades === "ask"), fontSize: FS.xs, fontWeight: 500 }}>{r.askSize != null ? r.askSize : "?"}</div>
             </React.Fragment>
           );
         })}
@@ -377,7 +366,7 @@ function LegMarketTable({ legs, quotes, ticker, expKey, feed }) {
           the table above it is what the reader is here for (P9, TASK 3). */}
       <Fold label="which side trades" tone={T.dim} style={{ marginTop: 7 }}
         summary={`In full contrast: the side that trades when you send this.`}>
-        <div style={{ ...mono, fontSize: 9.5, color: T.dim, marginTop: 6, lineHeight: 1.6 }}>
+        <div style={{ ...mono, fontSize: FS.xs, color: T.dim, marginTop: 6, lineHeight: 1.6 }}>
           To buy the structure you lift the ask on every leg you are buying and hit the bid on every leg you
           are selling — the other two are the reverse trade, which is nobody{"’"}s side of this one.
         </div>
@@ -385,7 +374,7 @@ function LegMarketTable({ legs, quotes, ticker, expKey, feed }) {
       {/* A MISSING SIZE IS UNKNOWN, NEVER ZERO. A "?" and a sentence, rather
           than a blank that reads as a market with nobody in it. */}
       {lb.missingSizes > 0 && (
-        <div style={{ ...mono, fontSize: 9.5, color: T.amber, marginTop: 5, lineHeight: 1.6 }}>
+        <div style={{ ...mono, fontSize: FS.xs, color: T.amber, marginTop: 5, lineHeight: 1.6 }}>
           {sizeSkippedNote(lb.missingSizes, feed)}
         </div>
       )}
@@ -395,7 +384,7 @@ function LegMarketTable({ legs, quotes, ticker, expKey, feed }) {
           times. It keeps its home HERE, where the legs are named, and the
           combination panel prints `unquotedLegPointer()` instead. */}
       {lb.unquoted > 0 && (
-        <div style={{ ...mono, fontSize: 9.5, color: T.amber, marginTop: 5, lineHeight: 1.6 }}>
+        <div style={{ ...mono, fontSize: FS.xs, color: T.amber, marginTop: 5, lineHeight: 1.6 }}>
           {unquotedLegNote(lb.unquoted)}
         </div>
       )}
@@ -404,7 +393,7 @@ function LegMarketTable({ legs, quotes, ticker, expKey, feed }) {
           contract does not exist. The order cannot be sent either way, and
           only one of the two can be fixed by waiting. */}
       {unlisted.length > 0 && (
-        <div style={{ ...mono, fontSize: 9.5, color: T.red, marginTop: 5, lineHeight: 1.6 }}>
+        <div style={{ ...mono, fontSize: FS.xs, color: T.red, marginTop: 5, lineHeight: 1.6 }}>
           ✗ {unlistedContractNote(unlisted, lb.rows.length)}
         </div>
       )}
@@ -433,13 +422,13 @@ function LegPriceSliders({ legs, quotes, prices, onPrice }) {
         return (
           <div key={r.i}>
             <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
-              <span style={{ ...mono, fontSize: 11, fontWeight: 700, color: r.side > 0 ? T.green : T.red }}>
+              <span style={{ ...mono, fontSize: FS.xs, fontWeight: 700, color: r.side > 0 ? T.green : T.red }}>
                 {r.side > 0 ? "BUY" : "SELL"} {r.qty > 1 ? `${r.qty}× ` : ""}{r.strike}{r.type === "call" ? "C" : "P"}
               </span>
-              <span style={{ ...mono, fontSize: 10, color: T.dim }}>
+              <span style={{ ...mono, fontSize: FS.xs, color: T.dim }}>
                 bid {r.bid != null ? r.bid.toFixed(2) : "—"} · mid {r.mid != null ? r.mid.toFixed(2) : "—"} · ask {r.ask != null ? r.ask.toFixed(2) : "—"}
               </span>
-              <span style={{ ...mono, fontSize: 13, fontWeight: 800, color: T.ink, marginLeft: "auto" }}>
+              <span style={{ ...mono, fontSize: FS.sm, fontWeight: 800, color: T.ink, marginLeft: "auto" }}>
                 {has ? `$${px.toFixed(2)}` : "—"}
               </span>
             </div>
@@ -449,7 +438,7 @@ function LegPriceSliders({ legs, quotes, prices, onPrice }) {
                 onChange={(e) => onPrice(r.i, onTick(e.target.value))}
                 style={{ width: "100%", marginTop: 4, accentColor: r.side > 0 ? T.green : T.red }} />
             ) : (
-              <div style={{ ...mono, fontSize: 10, color: T.amber, marginTop: 3, lineHeight: 1.6 }}>
+              <div style={{ ...mono, fontSize: FS.xs, color: T.amber, marginTop: 3, lineHeight: 1.6 }}>
                 No two-sided quote on this leg, so there is no range to move inside. Its price is what the feed
                 gave, and the app is not inventing one either side of it.
               </div>
@@ -501,14 +490,14 @@ function ComboBookPanel({ legs, quotes, verdict, effective, type, qty, spot, tic
   const rr = rewardRisk(maxProfit, maxLoss);
   const Cell = ({ k, v, c, note }) => (
     <div style={{ minWidth: 92 }}>
-      <div style={{ ...mono, fontSize: 9, color: T.dim, letterSpacing: 0.4 }}>{k}</div>
-      <div style={{ ...mono, fontSize: 14, fontWeight: 800, color: c || T.ink, marginTop: 2 }}>{v}</div>
-      {note && <div style={{ ...mono, fontSize: 9, color: T.dim, marginTop: 1 }}>{note}</div>}
+      <div style={{ ...mono, fontSize: FS.xs, color: T.dim, letterSpacing: 0.4 }}>{k}</div>
+      <div style={{ ...mono, fontSize: FS.md, fontWeight: 800, color: c || T.ink, marginTop: 2 }}>{v}</div>
+      {note && <div style={{ ...mono, fontSize: FS.xs, color: T.dim, marginTop: 1 }}>{note}</div>}
     </div>
   );
   return (
     <div style={{ marginTop: 10, padding: "9px 11px", background: T.panel, border: `1px solid ${T.line}`, borderRadius: 7 }}>
-      <div style={{ ...mono, fontSize: 9.5, color: T.dim, letterSpacing: 0.4, fontWeight: 700 }}>
+      <div style={{ ...mono, fontSize: FS.xs, color: T.dim, letterSpacing: 0.4, fontWeight: 700 }}>
         THE MARKET ON THE WHOLE STRUCTURE{book.ok ? "" : " — NOT QUOTED ON BOTH SIDES"}
       </div>
       {book.ok ? (
@@ -535,25 +524,25 @@ function ComboBookPanel({ legs, quotes, verdict, effective, type, qty, spot, tic
               order, and that is the half the owner said unlocked it. <<< */}
           {verdict && verdict.known && (
             <div style={{ marginTop: 8, padding: "8px 10px", background: `${tone}12`, border: `1.5px solid ${tone}`, borderRadius: 6 }}>
-              <div style={{ ...mono, fontSize: 11, color: tone, fontWeight: 800, letterSpacing: 0.4 }}>{verdict.label}</div>
-              <div style={{ fontSize: 12.5, color: T.body, marginTop: 4, lineHeight: 1.5 }}>{verdict.sentence}</div>
+              <div style={{ ...mono, fontSize: FS.xs, color: tone, fontWeight: 800, letterSpacing: 0.4 }}>{verdict.label}</div>
+              <div style={{ fontSize: FS.sm, color: T.body, marginTop: 4, lineHeight: 1.5 }}>{verdict.sentence}</div>
               {verdict.tifSentence && (
-                <div style={{ fontSize: 12.5, color: T.body, marginTop: 5, lineHeight: 1.5 }}>{verdict.tifSentence}</div>
+                <div style={{ fontSize: FS.sm, color: T.body, marginTop: 5, lineHeight: 1.5 }}>{verdict.tifSentence}</div>
               )}
             </div>
           )}
           {verdict && !verdict.known && (
-            <div style={{ ...mono, fontSize: 10.5, color: T.dim, marginTop: 7, lineHeight: 1.5 }}>{verdict.sentence}</div>
+            <div style={{ ...mono, fontSize: FS.xs, color: T.dim, marginTop: 7, lineHeight: 1.5 }}>{verdict.sentence}</div>
           )}
           {/* A LIMIT IS A CEILING, NOT A PRICE — and nothing said so. */}
           {ceiling && (
-            <div style={{ fontSize: 12.5, color: T.body, marginTop: 7, lineHeight: 1.55, padding: "7px 9px", background: `${T.blue}0f`, border: `1px solid ${T.blue}55`, borderRadius: 6 }}>
+            <div style={{ fontSize: FS.sm, color: T.body, marginTop: 7, lineHeight: 1.55, padding: "7px 9px", background: `${T.blue}0f`, border: `1px solid ${T.blue}55`, borderRadius: 6 }}>
               {ceiling}
             </div>
           )}
         </>
       ) : (
-        <div style={{ ...mono, fontSize: 10.5, color: T.amber, marginTop: 6, lineHeight: 1.6 }}>
+        <div style={{ ...mono, fontSize: FS.xs, color: T.amber, marginTop: 6, lineHeight: 1.6 }}>
           {/* A POINTER, NOT A SECOND COPY. The full sentence belongs to the leg
               table above, where the legs are named — the same rule
               `warningsToPrint()` applies to the CONFLICT paragraph. */}
@@ -602,7 +591,7 @@ function ComboBookPanel({ legs, quotes, verdict, effective, type, qty, spot, tic
           c={ms.checked && !ms.pass ? T.red : T.mut} note={ms.checked ? "same maths as every other screen" : "not enough to price it"} />
       </div>
       {ms.checked && !ms.pass && (
-        <div style={{ ...mono, fontSize: 10.5, color: T.red, marginTop: 8, lineHeight: 1.6, padding: "7px 9px", background: `${T.red}0f`, border: `1px solid ${T.red}55`, borderRadius: 6 }}>
+        <div style={{ ...mono, fontSize: FS.xs, color: T.red, marginTop: 8, lineHeight: 1.6, padding: "7px 9px", background: `${T.red}0f`, border: `1px solid ${T.red}55`, borderRadius: 6 }}>
           ⚠ {ms.reason} The app will not PROPOSE a structure priced like this. On the desk it is yours to
           send, and this is what you are accepting.
         </div>
@@ -613,12 +602,12 @@ function ComboBookPanel({ legs, quotes, verdict, effective, type, qty, spot, tic
           the sliders, the net, the verdict band — is bypassed the moment it is
           chosen, and nothing said so. `marketOrderNote()` in rules.js. */}
       {type === "market" && (
-        <div style={{ fontSize: 12.5, color: T.body, marginTop: 8, lineHeight: 1.55, padding: "7px 9px", background: `${T.amber}12`, border: `1px solid ${T.amber}88`, borderRadius: 6 }}>
+        <div style={{ fontSize: FS.sm, color: T.body, marginTop: 8, lineHeight: 1.55, padding: "7px 9px", background: `${T.amber}12`, border: `1px solid ${T.amber}88`, borderRadius: 6 }}>
           ⚠ {marketOrderNote(book)}
         </div>
       )}
       {notional != null && (
-        <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 7, lineHeight: 1.6 }}>
+        <div style={{ ...mono, fontSize: FS.xs, color: T.dim, marginTop: 7, lineHeight: 1.6 }}>
           {notionalNote(notional, risk, ticker)}
         </div>
       )}
@@ -822,7 +811,7 @@ export function OrderTicket({
     && seed.some((v, i) => Math.abs(Number(v) - Number(legPrices[i])) > 0.0049);
   return (
     <div style={{ marginTop: 12, padding: "10px 12px", background: T.bg, border: `1px solid ${T.violet}44`, borderRadius: 7 }}>
-      <Lbl>SEND THE ORDER · ALPACA PAPER ACCOUNT</Lbl>
+      <Label>SEND THE ORDER · ALPACA PAPER ACCOUNT</Label>
 
       {/* 1 — THE MARKET, READ-ONLY, FIRST. */}
       <LegMarketTable legs={legs} quotes={quotes} ticker={ticker} expKey={expKey} feed={feed} />
@@ -830,7 +819,7 @@ export function OrderTicket({
       {/* 2 — ONE SLIDER PER LEG. */}
       {cfg.type === "limit" && (
         <>
-          <div style={{ ...mono, fontSize: 9.5, color: T.dim, letterSpacing: 0.4, fontWeight: 700, marginTop: 12 }}>
+          <div style={{ ...mono, fontSize: FS.xs, color: T.dim, letterSpacing: 0.4, fontWeight: 700, marginTop: 12 }}>
             YOUR PRICE, LEG BY LEG · ONE-CENT STEPS
           </div>
           <LegPriceSliders legs={legs} quotes={quotes} prices={legPrices} onPrice={setLeg} />
@@ -841,17 +830,17 @@ export function OrderTicket({
       {cfg.type === "limit" && (
         <div style={{ marginTop: 10, display: "flex", gap: 12, alignItems: "baseline", flexWrap: "wrap" }}>
           <div>
-            <div style={{ ...mono, fontSize: 9, color: T.dim, letterSpacing: 0.4 }}>
+            <div style={{ ...mono, fontSize: FS.xs, color: T.dim, letterSpacing: 0.4 }}>
               {Number.isFinite(net) && net < 0 ? "YOUR LIMIT · YOU RECEIVE" : "YOUR LIMIT · YOU PAY"}
             </div>
-            <div style={{ ...mono, fontSize: 26, fontWeight: 800, color: T.ink, lineHeight: 1.1 }}>
+            <div style={{ ...mono, fontSize: FS.xl, fontWeight: 800, color: T.ink, lineHeight: 1.1 }}>
               {limit == null ? "—" : money(limit * 100)}
             </div>
           </div>
-          <div style={{ ...mono, fontSize: 12, color: T.mut }}>{arith.line || "price every leg and the net appears here"}</div>
+          <div style={{ ...mono, fontSize: FS.xs, color: T.mut }}>{arith.line || "price every leg and the net appears here"}</div>
           {seedDiffers && onReseed && (
             <button onClick={onReseed}
-              style={{ ...mono, fontSize: 9.5, color: T.blue, background: "transparent", border: "none", padding: 0, cursor: "pointer", textDecoration: "underline", marginLeft: "auto" }}>
+              style={{ ...mono, fontSize: FS.xs, color: T.blue, background: "transparent", border: "none", padding: 0, cursor: "pointer", textDecoration: "underline", marginLeft: "auto" }}>
               back to the suggested prices
             </button>
           )}
@@ -861,14 +850,14 @@ export function OrderTicket({
       {/* 4 — ORDER TYPE, TIME IN FORCE AND SIZE. The time in force is an input
           to the verdict band below, not a dropdown with a paragraph under it. */}
       <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-        <div><div style={{ ...mono, fontSize: 9.5, color: T.dim }}>QTY</div><QtyField value={qtyNum} min={1} max={20} ariaLabel="Quantity" onValue={(n) => { if (onQty) onQty(n); }} onValidity={(ok, note) => setQtyErr(ok ? null : note)} style={{ width: 56 }} />
+        <div><div style={{ ...mono, fontSize: FS.xs, color: T.dim }}>QTY</div><QtyField value={qtyNum} min={1} max={20} ariaLabel="Quantity" onValue={(n) => { if (onQty) onQty(n); }} onValidity={(ok, note) => setQtyErr(ok ? null : note)} style={{ width: 56 }} />
           {/* WHOSE NUMBER THIS IS (P10 §2). The count is derived from the
               budget until somebody types one; a typed one wins and says so.
               One clause, from its one home in rules.js. */}
-          {qtyNote && <div style={{ ...mono, fontSize: 9, color: T.dim, marginTop: 3, maxWidth: 190 }}>{qtyNote}</div>}</div>
-        <div><div style={{ ...mono, fontSize: 9.5, color: T.dim }}>ORDER TYPE</div>
+          {qtyNote && <div style={{ ...mono, fontSize: FS.xs, color: T.dim, marginTop: 3, maxWidth: 190 }}>{qtyNote}</div>}</div>
+        <div><div style={{ ...mono, fontSize: FS.xs, color: T.dim }}>ORDER TYPE</div>
           <Sel value={cfg.type} onChange={(e) => onCfg({ type: e.target.value })}><option value="limit">Limit — set my price</option><option value="market">Market — take what is there</option></Sel></div>
-        <div><div style={{ ...mono, fontSize: 9.5, color: T.dim }}>HOW LONG IT STANDS</div>
+        <div><div style={{ ...mono, fontSize: FS.xs, color: T.dim }}>HOW LONG IT STANDS</div>
           <Sel value={cfg.tif} onChange={(e) => onCfg({ tif: e.target.value })}><option value="day">Today only</option><option value="gtc">Until I cancel</option></Sel></div>
         <Btn color={confirm ? T.red : T.violet} onClick={send} disabled={busy || !preview.pass || DEMO || !!qtyProblem}
           title={DEMO ? DEMO_TOOLTIP : undefined}>
@@ -889,7 +878,7 @@ export function OrderTicket({
           the quantity. Silence here is what made "x5" look like a fifth of
           the trade the user was reading. */}
       {shape.factor > 1 && (
-        <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 7 }}>
+        <div style={{ ...mono, fontSize: FS.xs, color: T.mut, marginTop: 7 }}>
           {`This structure is ${shape.factor} × (${shape.ratios.join(":")}). Alpaca is sent ${sendQty} combination${sendQty === 1 ? "" : "s"}${cfg.type === "limit" && limit != null ? ` at ${limitWords(mlegLimitPrice(signedLimit, shape.factor, "open")) || "a price the app could not read"} each` : ""} — the same trade, written the way the broker requires.`}
         </div>
       )}
@@ -907,7 +896,7 @@ export function OrderTicket({
       {!preview.pass && (
         <div style={{ display: "grid", gap: 3, marginTop: 7 }}>
           {preview.violations.map((v) => (
-            <div key={v.code} style={{ ...mono, fontSize: 10.5, color: T.red }}>✗ {v.message}</div>
+            <div key={v.code} style={{ ...mono, fontSize: FS.xs, color: T.red }}>✗ {v.message}</div>
           ))}
         </div>
       )}
@@ -917,7 +906,7 @@ export function OrderTicket({
           a send button — which is exactly the kind of sentence that never
           folds. Trimming it was over-reading the rule, and `order.test.jsx`
           said so. */}
-      <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6 }}>The price is for the whole combination, not one leg. Every order asks you twice, and every order goes through the risk gate first.</div>
+      <div style={{ ...mono, fontSize: FS.xs, color: T.dim, marginTop: 6 }}>The price is for the whole combination, not one leg. Every order asks you twice, and every order goes through the risk gate first.</div>
     </div>
   );
 }
@@ -937,7 +926,6 @@ export { OCC_RE, holdingLeg } from "./closeOrder.js";
    order path 3 (`prepareClose()` → `sendClose()`), moved here unchanged from the panel's `closeGroup()`.
 ==================================================================== */
 export function UnrecordedCard({ group: g, gate, orders = [], onImport, setMsg, onSent, clock = null }) {
-  const FS = TYPE.size, FW = TYPE.weight;
   const [closePrep, setClosePrep] = useState(null);   // { key, busy, prepared, refusal, sent }
   const closeGroup = async (grp, choice = null, chain = null) => {
     if (DEMO) { setClosePrep({ key: grp.key, refusal: DEMO_TOOLTIP }); return; }
@@ -958,18 +946,18 @@ export function UnrecordedCard({ group: g, gate, orders = [], onImport, setMsg, 
     <article data-unrecorded={g.key} aria-label={`${g.key} not in the app`}
       style={{ padding: "12px 14px", background: T.bg, border: `1px dashed ${T.field}`, borderRadius: 8 }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", alignItems: "baseline" }}>
-        <div style={{ ...uMono, fontSize: FS.md, fontWeight: FW.bold, color: T.ink }}>{g.key}</div>
-        <div style={{ ...uMono, fontSize: FS.md, fontWeight: FW.bold, color: g.pl >= 0 ? T.green : T.red }}>{pnl$(g.pl)}</div>
+        <div style={{ ...mono, fontSize: FS.md, fontWeight: FW.bold, color: T.ink }}>{g.key}</div>
+        <div style={{ ...mono, fontSize: FS.md, fontWeight: FW.bold, color: g.pl >= 0 ? T.green : T.red }}>{pnl$(g.pl)}</div>
       </div>
-      <UNote>Not in the app<Info label="a holding with no record">{noRecordNote()}</Info></UNote>
+      <Note>Not in the app<Info label="a holding with no record">{noRecordNote()}</Info></Note>
       {g.items.map((x) => (
-        <div key={x.symbol} style={{ ...uMono, fontSize: FS.xs, color: T.mut }}>{+x.qty > 0 ? "+" : ""}{x.qty} {x.symbol.slice(-9)} · {(+x.avg_entry_price).toFixed(2)} → {(+x.current_price).toFixed(2)}</div>
+        <div key={x.symbol} style={{ ...mono, fontSize: FS.xs, color: T.mut }}>{+x.qty > 0 ? "+" : ""}{x.qty} {x.symbol.slice(-9)} · {(+x.avg_entry_price).toFixed(2)} → {(+x.current_price).toFixed(2)}</div>
       ))}
       <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
-        <UBtn small color={T.action} onClick={onImport}>Import</UBtn>
-        <UBtn small ghost color={T.ink} onClick={() => closeGroup(g)}
+        <Btn small color={T.action} onClick={onImport}>Import</Btn>
+        <Btn small ghost color={T.ink} onClick={() => closeGroup(g)}
           disabled={DEMO || (closePrep?.key === g.key && (closePrep.busy || !!closePrep.prepared))}
-          title={DEMO ? DEMO_TOOLTIP : undefined}>Close at limit</UBtn>
+          title={DEMO ? DEMO_TOOLTIP : undefined}>Close at limit</Btn>
       </div>
       {closePrep && closePrep.key === g.key && (
         <CloseConfirm prep={closePrep} onSend={sendGroupClose} onCancel={() => setClosePrep(null)} clock={clock}
@@ -1103,7 +1091,7 @@ export function Markdown({ text, style }) {
       flush();
       const lvl = head[1].length;
       blocks.push(<div key={`hd${blocks.length}`} style={{
-        ...(lvl <= 2 ? { ...mono, fontSize: 10.5, letterSpacing: "0.12em", color: T.amber, textTransform: "uppercase" } : { fontSize: 13.5, fontWeight: 700, color: T.ink }),
+        ...(lvl <= 2 ? { ...mono, fontSize: FS.xs, letterSpacing: "0.12em", color: T.amber, textTransform: "uppercase" } : { fontSize: FS.sm, fontWeight: 700, color: T.ink }),
         margin: blocks.length ? "14px 0 6px" : "0 0 6px",
       }}>{inlineMd(head[2].replace(/^\d+[.)]\s*/, ""), `hd${blocks.length}`)}</div>);
       continue;
@@ -1119,9 +1107,9 @@ export function Markdown({ text, style }) {
       i--;
       blocks.push(
         <div key={`t${blocks.length}`} style={{ overflowX: "auto", margin: "0 0 10px" }}>
-          <table style={{ borderCollapse: "collapse", fontSize: 12.5, minWidth: "100%" }}>
+          <table style={{ borderCollapse: "collapse", fontSize: FS.sm, minWidth: "100%" }}>
             <thead><tr>{header.map((h, j) => (
-              <th key={j} style={{ ...mono, fontSize: 10, letterSpacing: "0.08em", color: T.dim, textAlign: "left", padding: "5px 9px", borderBottom: `1px solid ${T.line}`, whiteSpace: "nowrap" }}>{h}</th>
+              <th key={j} style={{ ...mono, fontSize: FS.xs, letterSpacing: "0.08em", color: T.dim, textAlign: "left", padding: "5px 9px", borderBottom: `1px solid ${T.line}`, whiteSpace: "nowrap" }}>{h}</th>
             ))}</tr></thead>
             <tbody>{rows.map((r, j) => (
               <tr key={j}>{r.map((c, k) => (
@@ -1147,7 +1135,7 @@ export function Markdown({ text, style }) {
     para.push(t);
   }
   flush();
-  return <div style={{ fontSize: 13, color: T.body, ...style }}>{blocks}</div>;
+  return <div style={{ fontSize: FS.sm, color: T.body, ...style }}>{blocks}</div>;
 }
 
 export const SKILLS = [
@@ -1458,7 +1446,7 @@ export function TaCopilot({ ticker, bars, structure, convo, setConvo, onAnalysis
   return (
     <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${T.line}` }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-        <Lbl><Sparkles size={11} style={{ verticalAlign: "-1px" }} /> ASK ABOUT THIS CHART</Lbl>
+        <Label><Sparkles size={11} style={{ verticalAlign: "-1px" }} /> ASK ABOUT THIS CHART</Label>
         {msgs.length > 0 && (
           <Btn small ghost onClick={() => setConvo({ msgs: [], busy: false, err: null, partial: "" })}>
             <Trash2 size={11} /> Clear
@@ -1466,7 +1454,7 @@ export function TaCopilot({ ticker, bars, structure, convo, setConvo, onAnalysis
         )}
       </div>
       {!ready ? (
-        <div style={{ ...mono, fontSize: 11, color: T.mut, marginTop: 8, lineHeight: 1.6 }}>
+        <div style={{ ...mono, fontSize: FS.xs, color: T.mut, marginTop: 8, lineHeight: 1.6 }}>
           The daily prices have not loaded, so there are no indicator readings to ask about. Nothing is
           estimated in their place.
         </div>
@@ -1479,7 +1467,7 @@ export function TaCopilot({ ticker, bars, structure, convo, setConvo, onAnalysis
           </div>
           <div style={{ marginTop: 10, display: "grid", gap: 9 }}>
             {msgs.length === 0 && !busy && (
-              <div style={{ ...mono, fontSize: 11, color: T.mut, lineHeight: 1.6 }}>
+              <div style={{ ...mono, fontSize: FS.xs, color: T.mut, lineHeight: 1.6 }}>
                 Pick one, or ask your own. The copilot is given the indicator readings drawn above —
                 the same numbers, never the raw prices — and the legs and break-evens of the trade on
                 the Build screen when there is one. It explains; it does not propose a trade.
@@ -1489,18 +1477,18 @@ export function TaCopilot({ ticker, bars, structure, convo, setConvo, onAnalysis
               <div key={i} style={{ padding: m.role === "user" ? "8px 10px" : "10px 12px", borderRadius: 7,
                 background: m.role === "user" ? `${T.blue}14` : T.bg,
                 border: `1px solid ${m.role === "user" ? T.blue + "44" : T.line}` }}>
-                <div style={{ ...mono, fontSize: 9, letterSpacing: "0.1em", marginBottom: m.role === "user" ? 3 : 6,
+                <div style={{ ...mono, fontSize: FS.xs, letterSpacing: "0.1em", marginBottom: m.role === "user" ? 3 : 6,
                   color: m.role === "user" ? T.blue : T.amber }}>
                   {m.role === "user" ? "YOU ASKED"
                     : m.truncated ? (m.reason === "max_tokens" ? "CHART COPILOT · RAN OUT OF ROOM" : "CHART COPILOT · CUT OFF")
                       : "CHART COPILOT"}
                 </div>
                 {m.role === "user"
-                  ? <div style={{ fontSize: 12.5, color: T.body, lineHeight: 1.5 }}>{m.content}</div>
+                  ? <div style={{ fontSize: FS.sm, color: T.body, lineHeight: 1.5 }}>{m.content}</div>
                   : <>
                     <Markdown text={m.content} />
                     {m.truncated && (
-                      <div style={{ ...mono, fontSize: 10.5, color: T.amber, marginTop: 8, paddingTop: 8,
+                      <div style={{ ...mono, fontSize: FS.xs, color: T.amber, marginTop: 8, paddingTop: 8,
                         borderTop: `1px solid ${T.amber}44`, lineHeight: 1.6 }}>
                         {m.reason === "max_tokens"
                           ? "This answer stops here because it reached the length limit, not because the copilot had finished. Ask for a shorter answer, or for one part of it."
@@ -1512,21 +1500,21 @@ export function TaCopilot({ ticker, bars, structure, convo, setConvo, onAnalysis
             ))}
             {busy && (partial
               ? <div style={{ padding: "10px 12px", borderRadius: 7, background: T.bg, border: `1px solid ${T.line}` }}>
-                <div style={{ ...mono, fontSize: 9, letterSpacing: "0.1em", color: T.amber, marginBottom: 6 }}>CHART COPILOT · WRITING</div>
+                <div style={{ ...mono, fontSize: FS.xs, letterSpacing: "0.1em", color: T.amber, marginBottom: 6 }}>CHART COPILOT · WRITING</div>
                 <Markdown text={partial} />
               </div>
-              : <div style={{ ...mono, fontSize: 11, color: T.mut }}>Reading the chart…</div>)}
-            {err && <div style={{ ...mono, fontSize: 11, color: T.red, lineHeight: 1.6 }}>{err}</div>}
+              : <div style={{ ...mono, fontSize: FS.xs, color: T.mut }}>Reading the chart…</div>)}
+            {err && <div style={{ ...mono, fontSize: FS.xs, color: T.red, lineHeight: 1.6 }}>{err}</div>}
           </div>
           <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
             <input value={input} onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") send(input); }}
               placeholder="Ask about the chart…"
-              style={{ flex: 1, minWidth: 0, ...mono, fontSize: 12, padding: "8px 10px", borderRadius: 6,
+              style={{ flex: 1, minWidth: 0, ...mono, fontSize: FS.xs, padding: "8px 10px", borderRadius: 6,
                 background: T.bg, border: `1px solid ${T.field}`, color: T.ink }} />
             <Btn small color={T.blue} onClick={() => send(input)} disabled={busy || !input.trim()}>Ask</Btn>
           </div>
-          <div style={{ ...mono, fontSize: 9.5, color: T.dim, marginTop: 8, lineHeight: 1.6 }}>
+          <div style={{ ...mono, fontSize: FS.xs, color: T.dim, marginTop: 8, lineHeight: 1.6 }}>
             {TA_DISCLAIMER} The copilot may only quote figures the app measured: if it is asked about
             something nobody has measured, it says so rather than producing a number.
           </div>
@@ -1593,7 +1581,7 @@ export function CopilotTab({ ctx, apiKey, convo, setConvo, onAnalysis }) {
     w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Copilot analysis</title><style>
       body{font-family:Georgia,serif;color:#1c2128;max-width:760px;margin:24px auto;padding:0 16px;line-height:1.6}
       h1{font-size:20px;border-bottom:2px solid #b07d18;padding-bottom:6px}
-      h2{font-size:13px;color:#555;font-family:ui-monospace,monospace;margin:22px 0 6px}
+      h2{font-size:13px;color:#555;font-family:${MONO_STACK};margin:22px 0 6px}
       h3{font-size:12px;color:#b07d18;letter-spacing:.06em;text-transform:uppercase;margin:14px 0 4px}
       .a{font-size:13.5px} li{font-size:13px}
       @media print{.noprint{display:none}}</style></head><body>
@@ -1608,7 +1596,7 @@ export function CopilotTab({ ctx, apiKey, convo, setConvo, onAnalysis }) {
     <div style={{ marginTop: 12 }}>
       <Panel>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-          <Lbl><Sparkles size={11} style={{ verticalAlign: "-1px" }} /> AI COPILOT · IT ALREADY KNOWS YOUR POSITIONS</Lbl>
+          <Label><Sparkles size={11} style={{ verticalAlign: "-1px" }} /> AI COPILOT · IT ALREADY KNOWS YOUR POSITIONS</Label>
           {msgs.length > 0 && (
             <div style={{ display: "flex", gap: 6 }}>
               <Btn small ghost color={T.blue} onClick={printConvo}><FileText size={11} /> Print</Btn>
@@ -1623,16 +1611,16 @@ export function CopilotTab({ ctx, apiKey, convo, setConvo, onAnalysis }) {
             box on a desktop turned every answer into a peephole. It grows with
             the answer; the page scrolls, as pages do. */}
         <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-          {msgs.length === 0 && !busy && <div style={{ ...mono, fontSize: 11.5, color: T.mut }}>Pick one above or just ask. The copilot already knows your open positions, the trade on the Build screen, the Radar, the tagged news and your own risk rules.</div>}
+          {msgs.length === 0 && !busy && <div style={{ ...mono, fontSize: FS.xs, color: T.mut }}>Pick one above or just ask. The copilot already knows your open positions, the trade on the Build screen, the Radar, the tagged news and your own risk rules.</div>}
           {msgs.map((m, i) => (
             <div key={i} style={{ padding: m.role === "user" ? "9px 11px" : "11px 13px", borderRadius: 7, background: m.role === "user" ? `${T.blue}14` : T.bg, border: `1px solid ${m.role === "user" ? T.blue + "44" : T.line}` }}>
-              <div style={{ ...mono, fontSize: 9, letterSpacing: "0.1em", color: m.role === "user" ? T.blue : T.amber, marginBottom: m.role === "user" ? 3 : 7 }}>{m.role === "user" ? "YOU ASKED" : m.truncated ? (m.reason === "max_tokens" ? "COPILOT · RAN OUT OF ROOM" : "COPILOT · CUT OFF") : "COPILOT"}</div>
+              <div style={{ ...mono, fontSize: FS.xs, letterSpacing: "0.1em", color: m.role === "user" ? T.blue : T.amber, marginBottom: m.role === "user" ? 3 : 7 }}>{m.role === "user" ? "YOU ASKED" : m.truncated ? (m.reason === "max_tokens" ? "COPILOT · RAN OUT OF ROOM" : "COPILOT · CUT OFF") : "COPILOT"}</div>
               {m.role === "user"
-                ? <div style={{ fontSize: 12.5, color: T.body, lineHeight: 1.5 }}>{m.content}</div>
+                ? <div style={{ fontSize: FS.sm, color: T.body, lineHeight: 1.5 }}>{m.content}</div>
                 : <>
                   <Markdown text={m.content} />
                   {m.truncated && (
-                    <div style={{ ...mono, fontSize: 10.5, color: T.amber, marginTop: 8, paddingTop: 8, borderTop: `1px solid ${T.amber}44`, lineHeight: 1.6 }}>
+                    <div style={{ ...mono, fontSize: FS.xs, color: T.amber, marginTop: 8, paddingTop: 8, borderTop: `1px solid ${T.amber}44`, lineHeight: 1.6 }}>
                       This answer stops here because the connection was cut, not because the copilot had finished.
                     </div>
                   )}
@@ -1643,23 +1631,23 @@ export function CopilotTab({ ctx, apiKey, convo, setConvo, onAnalysis }) {
             partial
               ? (
                 <div style={{ padding: "11px 13px", borderRadius: 7, background: T.bg, border: `1px solid ${T.line}` }}>
-                  <div style={{ ...mono, fontSize: 9, letterSpacing: "0.1em", color: T.amber, marginBottom: 7 }}>COPILOT · WRITING</div>
+                  <div style={{ ...mono, fontSize: FS.xs, letterSpacing: "0.1em", color: T.amber, marginBottom: 7 }}>COPILOT · WRITING</div>
                   <Markdown text={partial} />
                 </div>
               )
               : (
-                <div style={{ ...mono, fontSize: 11, color: T.amber }}>
+                <div style={{ ...mono, fontSize: FS.xs, color: T.amber }}>
                   Thinking… you can close this panel: the answer waits here, it is not lost.
                 </div>
               )
           )}
         </div>
-        {err && <div style={{ ...mono, fontSize: 11, color: T.red, marginTop: 8 }}>{err}</div>}
+        {err && <div style={{ ...mono, fontSize: FS.xs, color: T.red, marginTop: 8 }}>{err}</div>}
         <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
           <Inp value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send(input)} placeholder="Ask a question… (Enter to send)" style={{ flex: 1 }} />
           <Btn onClick={() => send(input)} disabled={busy}><Send size={13} /></Btn>
         </div>
-        <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6, lineHeight: 1.6 }}>
+        <div style={{ ...mono, fontSize: FS.xs, color: T.dim, marginTop: 6, lineHeight: 1.6 }}>
           Every analysis you run here is filed in the Journal with its question, so the Journal and this panel tell the
           same story about the same day. Educational analysis on a paper account, not financial advice.
         </div>
@@ -1885,7 +1873,7 @@ export function ReportTab({ ctx, apiKey, setSetting }) {
     <div style={{ marginTop: 12 }}>
       <Panel>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-          <Lbl><FileText size={11} style={{ verticalAlign: "-1px" }} /> REPORTS · {cfg.freq === "daily" ? "DAILY" : "WEEKLY"} {isDue ? "· ⚠ DUE NOW" : "· ✓ UP TO DATE"}</Lbl>
+          <Label><FileText size={11} style={{ verticalAlign: "-1px" }} /> REPORTS · {cfg.freq === "daily" ? "DAILY" : "WEEKLY"} {isDue ? "· ⚠ DUE NOW" : "· ✓ UP TO DATE"}</Label>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             <Sel value={cfg.freq} onChange={(e) => setSetting("reportFreq", e.target.value)}>
               <option value="daily">Every day</option><option value="weekly">Every week</option>
@@ -1894,32 +1882,32 @@ export function ReportTab({ ctx, apiKey, setSetting }) {
           </div>
         </div>
         <div style={{ display: "flex", gap: 12, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <label style={{ ...mono, fontSize: 11, color: T.mut, display: "flex", gap: 6, alignItems: "center" }}>
+          <label style={{ ...mono, fontSize: FS.xs, color: T.mut, display: "flex", gap: 6, alignItems: "center" }}>
             <input type="checkbox" checked={useAI} onChange={(e) => setUseAI(e.target.checked)} /> include the copilot's read
           </label>
-          <span style={{ ...mono, fontSize: 10, color: T.dim }}>last one: {cfg.last ? new Date(cfg.last).toLocaleString("en-GB") : "never"}</span>
+          <span style={{ ...mono, fontSize: FS.xs, color: T.dim }}>last one: {cfg.last ? new Date(cfg.last).toLocaleString("en-GB") : "never"}</span>
         </div>
         {autoRan && (
-          <div style={{ ...mono, fontSize: 10.5, color: T.blue, marginTop: 8, padding: "7px 9px", background: `${T.blue}0f`, border: `1px solid ${T.blue}44`, borderRadius: 6, lineHeight: 1.6 }}>
+          <div style={{ ...mono, fontSize: FS.xs, color: T.blue, marginTop: 8, padding: "7px 9px", background: `${T.blue}0f`, border: `1px solid ${T.blue}44`, borderRadius: 6, lineHeight: 1.6 }}>
             This report wrote ITSELF just now, because the {cfg.freq === "daily" ? "daily" : "weekly"} one was due and
             you opened the Journal. Nothing was sent anywhere{useAI ? ", and section 5 is the copilot's read — the same model as the Copilot panel, asked a different question" : ""}. Press "Write it now" to redo it.
           </div>
         )}
-        <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6 }}>
+        <div style={{ ...mono, fontSize: FS.xs, color: T.dim, marginTop: 6 }}>
           Each report covers: scanner opportunities, your positions against the rules, tagged headlines, weather effects, and optionally the copilot's read. It rewrites itself when you reopen the app and one is due.
         </div>
       </Panel>
       {md && (
         <Panel style={{ marginTop: 10 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-            <Lbl>PREVIEW</Lbl>
+            <Label>PREVIEW</Label>
             <div style={{ display: "flex", gap: 6 }}>
               <Btn small ghost onClick={download}><Download size={11} /> .md</Btn>
               <Btn small color={T.amber} onClick={() => exportPdf(ctx, md)}><FileText size={11} /> Export PDF</Btn>
               {store.settings.webhook && <Btn small ghost color={T.violet} onClick={toWebhook}><Send size={11} /> Send to webhook</Btn>}
             </div>
           </div>
-          <pre style={{ ...mono, fontSize: 11.5, color: T.body, whiteSpace: "pre-wrap", marginTop: 10, maxHeight: 460, overflowY: "auto" }}>{md}</pre>
+          <pre style={{ ...mono, fontSize: FS.xs, color: T.body, whiteSpace: "pre-wrap", marginTop: 10, maxHeight: 460, overflowY: "auto" }}>{md}</pre>
         </Panel>
       )}
     </div>
@@ -2218,17 +2206,17 @@ export function GuardianPanel({ pos, spot, dteLeft, ivNow, vol, seasonalNow, pnl
     <div style={{ marginTop: 8, padding: "10px 12px", background: `${T.bg}`, border: `1px solid ${tisColor}44`, borderRadius: 7 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
         <div>
-          <div style={{ ...mono, fontSize: 9, color: T.dim }}>IS THE REASON STILL GOOD?</div>
-          <div style={{ ...mono, fontSize: 22, fontWeight: 800, color: tisColor }}>{tis}<span style={{ fontSize: 11, color: T.dim }}>/100</span></div>
+          <div style={{ ...mono, fontSize: FS.xs, color: T.dim }}>IS THE REASON STILL GOOD?</div>
+          <div style={{ ...mono, fontSize: FS.xl, fontWeight: 800, color: tisColor }}>{tis}<span style={{ fontSize: FS.xs, color: T.dim }}>/100</span></div>
         </div>
         <div style={{ flex: 1, minWidth: 200 }}>
           {comp.map((c) => (
             <div key={c.k} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
-              <span style={{ ...mono, fontSize: 9, color: T.mut, width: 130 }}>{c.k}</span>
+              <span style={{ ...mono, fontSize: FS.xs, color: T.mut, width: 130 }}>{c.k}</span>
               <div style={{ flex: 1, height: 4, background: T.line, borderRadius: 2 }}>
                 <div style={{ width: `${(c.pts / c.max) * 100}%`, height: 4, background: c.pts / c.max >= 0.7 ? T.green : c.pts / c.max >= 0.4 ? T.amber : T.red, borderRadius: 2 }} />
               </div>
-              <span title={c.note} style={{ ...mono, fontSize: 9, color: T.dim, cursor: "help" }}>{c.pts}/{c.max}</span>
+              <span title={c.note} style={{ ...mono, fontSize: FS.xs, color: T.dim, cursor: "help" }}>{c.pts}/{c.max}</span>
             </div>
           ))}
         </div>
@@ -2241,20 +2229,20 @@ export function GuardianPanel({ pos, spot, dteLeft, ivNow, vol, seasonalNow, pnl
           scoring it. `chanceNow` is passed in and never recomputed here — this
           file is handed the answer (see the note above `computeTIS`). */}
       {(nowSeasonalNote || thesisSeasonalNote) && (
-        <div style={{ ...mono, fontSize: 9, color: T.dim, marginTop: 8, lineHeight: 1.6 }}>
+        <div style={{ ...mono, fontSize: FS.xs, color: T.dim, marginTop: 8, lineHeight: 1.6 }}>
           {nowSeasonalNote ? <div>NOW · {nowSeasonalNote}</div> : null}
           {thesisSeasonalNote ? <div>AT ENTRY · {thesisSeasonalNote}</div> : null}
         </div>
       )}
       {pct != null && (
         <div style={{ marginTop: 8 }}>
-          <div style={{ ...mono, fontSize: 9, color: T.dim }}>{tpT.basis === "premium" ? "PROGRESS AGAINST THE PREMIUM PAID" : "PROGRESS TOWARDS THE MAXIMUM"} · {takeProfitLabel(tpT.basis)}{tpT.basis === "premium" ? "" : ` · rest out at ${scaleOutLabel()}`}</div>
+          <div style={{ ...mono, fontSize: FS.xs, color: T.dim }}>{tpT.basis === "premium" ? "PROGRESS AGAINST THE PREMIUM PAID" : "PROGRESS TOWARDS THE MAXIMUM"} · {takeProfitLabel(tpT.basis)}{tpT.basis === "premium" ? "" : ` · rest out at ${scaleOutLabel()}`}</div>
           <div style={{ position: "relative", height: 10, background: T.line, borderRadius: 5, marginTop: 3 }}>
             <div style={{ position: "absolute", left: `${(tpT.pct * 100 + 100) / 230 * 100}%`, width: 1, top: -2, bottom: -2, background: T.amber }} title={takeProfitLabel(tpT.basis)} />
             {tpT.basis !== "premium" && <div style={{ position: "absolute", left: `${(RULES.scaleOutPct * 100 + 100) / 230 * 100}%`, width: 1, top: -2, bottom: -2, background: T.green }} title={scaleOutLabel()} />}
             <div style={{ width: `${Math.max(0, (pct + 100) / 230 * 100)}%`, height: 10, borderRadius: 5, background: pnlNow >= 0 ? `${T.green}bb` : `${T.red}bb` }} />
           </div>
-          <div style={{ ...mono, fontSize: 10, color: pnlNow >= 0 ? T.green : T.red, marginTop: 2 }}>{pct.toFixed(0)}% of the {tpT.basis === "premium" ? "premium paid" : "maximum"} ({fmt$(pnlNow)})</div>
+          <div style={{ ...mono, fontSize: FS.xs, color: pnlNow >= 0 ? T.green : T.red, marginTop: 2 }}>{pct.toFixed(0)}% of the {tpT.basis === "premium" ? "premium paid" : "maximum"} ({fmt$(pnlNow)})</div>
         </div>
       )}
       <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap", alignItems: "center" }}>
@@ -2270,7 +2258,7 @@ export function GuardianPanel({ pos, spot, dteLeft, ivNow, vol, seasonalNow, pnl
               <Btn small ghost color={T.green} title={DEMO ? DEMO_TOOLTIP : undefined} onClick={() => placeExit(`TP ${scaleOutLabel()}`, RULES.scaleOutPct * pos.maxProfit)} disabled={!!ladderBusy || DEMO}>GTC TP {scaleOutLabel()} @ {ladderRungPrice(pos.entryNet, RULES.scaleOutPct * pos.maxProfit)}</Btn>
             )}
           </>) : (
-            <span style={{ ...mono, fontSize: 10, color: T.dim }}>
+            <span style={{ ...mono, fontSize: FS.xs, color: T.dim }}>
               {`No profit rung: this position has ${NO_CEILING}, so ${pctText(RULES.takeProfitPct)} of the maximum is not a price. The ${RULES.exitDTE}-day exit still applies.`}
             </span>
           )}
@@ -2294,7 +2282,7 @@ export function GuardianPanel({ pos, spot, dteLeft, ivNow, vol, seasonalNow, pnl
           describe one position two ways. It is amber only when nobody measured
           the number: a measured reading is a statement, not a warning. */}
       {sim && sim.volNote && (
-        <div style={{ ...mono, fontSize: 9.5, color: sim.sigmaSource === MEASURED_SIGMA_SOURCE ? T.dim : T.amber, marginTop: 6, lineHeight: 1.6 }}>
+        <div style={{ ...mono, fontSize: FS.xs, color: sim.sigmaSource === MEASURED_SIGMA_SOURCE ? T.dim : T.amber, marginTop: 6, lineHeight: 1.6 }}>
           {sim.sigmaSource === MEASURED_SIGMA_SOURCE ? "" : "⚠ "}{sim.volNote}
         </div>
       )}
@@ -2319,24 +2307,24 @@ export function GuardianPanel({ pos, spot, dteLeft, ivNow, vol, seasonalNow, pnl
           const notes = [autopilotHorizonNote(e), autopilotVolNote(e)].filter(Boolean);
           return (
             <div style={{ marginTop: 2 }}>
-              <div style={{ ...mono, fontSize: 10, color: T.mut, lineHeight: 1.5 }}>
+              <div style={{ ...mono, fontSize: FS.xs, color: T.mut, lineHeight: 1.5 }}>
                 {e.seq ? <span style={{ color: T.blue }}>{e.seq} </span> : null}
                 <span style={{ color: T.dim }}>{new Date(e.t).toLocaleDateString("en-GB")}</span> · {e.text}
               </div>
               {notes.map((n) => (
-                <div key={n} style={{ ...mono, fontSize: 9.5, color: T.amber, lineHeight: 1.5 }}>⚠ {n}</div>
+                <div key={n} style={{ ...mono, fontSize: FS.xs, color: T.amber, lineHeight: 1.5 }}>⚠ {n}</div>
               ))}
             </div>
           );
         };
         return (
           <div style={{ marginTop: 10 }}>
-            <div style={{ ...mono, fontSize: 9, color: T.dim }}>
+            <div style={{ ...mono, fontSize: FS.xs, color: T.dim }}>
               TIMELINE{pos.ref ? ` · ${pos.ref}` : ""} · {tl.length} ENTR{tl.length === 1 ? "Y" : "IES"}
             </div>
             {earlier.length > 0 && (
               <details style={{ marginTop: 2 }}>
-                <summary style={{ ...mono, fontSize: 10, color: T.blue, cursor: "pointer" }}>
+                <summary style={{ ...mono, fontSize: FS.xs, color: T.blue, cursor: "pointer" }}>
                   {`Show the earlier ${earlier.length} ${earlier.length === 1 ? "entry" : "entries"}`}
                 </summary>
                 {earlier.map((e, i) => <Line key={e.seq || `e${i}`} e={e} />)}
@@ -2478,7 +2466,7 @@ export function PriceChart({ ticker, levels, breakevens, entrySpot, legLines, he
     const mk = (node, h, withTime) => {
       const c = createChart(node, {
         height: h,
-        layout: { background: { color: T.bg }, textColor: T.mut, fontFamily: "ui-monospace, Menlo, monospace", fontSize: 10 },
+        layout: { background: { color: T.bg }, textColor: T.mut, fontFamily: MONO_STACK, fontSize: FS.xs },
         grid: { vertLines: { color: T.line }, horzLines: { color: T.line } },
         rightPriceScale: { borderColor: T.line },
         timeScale: { borderColor: T.line, visible: withTime },
@@ -2582,14 +2570,14 @@ export function PriceChart({ ticker, levels, breakevens, entrySpot, legLines, he
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
-        <Lbl>{ticker} · DAILY PRICES {meta ? `· ${meta.source} (delayed)` : ""}</Lbl>
+        <Label>{ticker} · DAILY PRICES {meta ? `· ${meta.source} (delayed)` : ""}</Label>
         <div style={{ display: "flex", gap: 4 }}>
           {[90, 180, 365].map((d) => (
             <Btn key={d} small ghost={range !== d} onClick={() => setRange(d)}>{d === 90 ? "3M" : d === 180 ? "6M" : "1Y"}</Btn>
           ))}
         </div>
       </div>
-      {err && <div style={{ ...mono, fontSize: 11, color: T.red, marginTop: 6 }}>{err}</div>}
+      {err && <div style={{ ...mono, fontSize: FS.xs, color: T.red, marginTop: 6 }}>{err}</div>}
 
       {/* THE CHIPS. One tap each, remembered per viewer. A chip whose
           indicator cannot be formed from the history that loaded says so on
@@ -2602,7 +2590,7 @@ export function PriceChart({ ticker, levels, breakevens, entrySpot, legLines, he
             return (
               <button key={c.id} onClick={() => ok && toggle(c.id)} disabled={!ok}
                 title={ok ? MEASURES[c.id] : set.notes[c.id]}
-                style={{ ...mono, fontSize: 10, padding: "4px 8px", borderRadius: 999, cursor: ok ? "pointer" : "not-allowed",
+                style={{ ...mono, fontSize: FS.xs, padding: "4px 8px", borderRadius: 999, cursor: ok ? "pointer" : "not-allowed",
                   background: on ? `${c.color}22` : "transparent", color: !ok ? T.dim : on ? c.color : T.mut,
                   border: `1px solid ${on ? `${c.color}88` : T.line}` }}>
                 {LABELS[c.id]}{ok ? "" : " · not enough history"}
@@ -2618,19 +2606,19 @@ export function PriceChart({ ticker, levels, breakevens, entrySpot, legLines, he
           with three charts on it has taught nobody anything. */}
       {set && panePrefs && (
         <button onClick={() => setOpenPanes((v) => !v)}
-          style={{ ...mono, fontSize: 10.5, marginTop: 6, background: "transparent", border: "none", color: T.blue, cursor: "pointer", padding: "4px 0" }}>
+          style={{ ...mono, fontSize: FS.xs, marginTop: 6, background: "transparent", border: "none", color: T.blue, cursor: "pointer", padding: "4px 0" }}>
           {openPanes ? "▾ Hide" : "▸ Show"} the {[prefs.rsi && set.ready.rsi ? "RSI" : null, prefs.macd && set.ready.macd ? "MACD" : null].filter(Boolean).join(" and ")} pane{prefs.rsi && prefs.macd ? "s" : ""}
         </button>
       )}
       {openPanes && prefs.rsi && set?.ready.rsi && (
         <div style={{ marginTop: 4 }}>
-          <div style={{ ...mono, fontSize: 9, color: T.dim }}>{LABELS.rsi}</div>
+          <div style={{ ...mono, fontSize: FS.xs, color: T.dim }}>{LABELS.rsi}</div>
           <div ref={rsiRef} style={{ borderRadius: 6, overflow: "hidden" }} />
         </div>
       )}
       {openPanes && prefs.macd && set?.ready.macd && (
         <div style={{ marginTop: 4 }}>
-          <div style={{ ...mono, fontSize: 9, color: T.dim }}>{LABELS.macd}</div>
+          <div style={{ ...mono, fontSize: FS.xs, color: T.dim }}>{LABELS.macd}</div>
           <div ref={macdRef} style={{ borderRadius: 6, overflow: "hidden" }} />
         </div>
       )}
@@ -2639,7 +2627,7 @@ export function PriceChart({ ticker, levels, breakevens, entrySpot, legLines, he
           the same arrays the lines were drawn from. On a phone there is no
           pointer, so it falls back to the last bar and says which it is. */}
       {set && (last || hover) && (
-        <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6, lineHeight: 1.7 }}>
+        <div style={{ ...mono, fontSize: FS.xs, color: T.dim, marginTop: 6, lineHeight: 1.7 }}>
           <b style={{ color: T.mut }}>{hover ? hover.time : last?.time}{hover ? "" : " · latest"}</b>
           {" · "}close {fmt(hover ? hover.bar?.close : last?.close)}
           {prefs.sma20 && set.ready.sma20 ? ` · ${LABELS.sma20} ${fmt(hover ? readAt(set.series.sma20) : set.last.sma20)}` : ""}
@@ -2661,8 +2649,8 @@ export function PriceChart({ ticker, levels, breakevens, entrySpot, legLines, he
             const t = takeaway(c.id, set);
             if (!t) return null;
             return (
-              <div key={c.id} style={{ fontSize: 12, color: set.ready[c.id] ? T.body : T.mut, lineHeight: 1.55 }}>
-                <span style={{ ...mono, fontSize: 9.5, color: T.dim, marginRight: 6 }}>{LABELS[c.id].toUpperCase()}</span>
+              <div key={c.id} style={{ fontSize: FS.xs, color: set.ready[c.id] ? T.body : T.mut, lineHeight: 1.55 }}>
+                <span style={{ ...mono, fontSize: FS.xs, color: T.dim, marginRight: 6 }}>{LABELS[c.id].toUpperCase()}</span>
                 {t}
               </div>
             );
@@ -2670,7 +2658,7 @@ export function PriceChart({ ticker, levels, breakevens, entrySpot, legLines, he
         </div>
       )}
       {last && (
-        <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6, lineHeight: 1.6 }}>
+        <div style={{ ...mono, fontSize: FS.xs, color: T.dim, marginTop: 6, lineHeight: 1.6 }}>
           The dashed lines are where the market is positioned (green and red), your break-even (blue) and your
           entry (amber). The averages are computed from all {meta?.whole ?? "the"} bars this market loaded, not
           only the {shown.length} drawn here — a 200-day average taken from 180 days on screen would be a
@@ -2700,19 +2688,19 @@ export function ChainMatrix({ chain, expKey, spot, legs, onCell }) {
       <td key={t + k} onClick={() => onCell(k, t)}
         style={{ padding: "4px 6px", cursor: "pointer", background: bgc, borderBottom: `1px solid ${T.line}`, textAlign: t === "call" ? "right" : "left", opacity: q ? 1 : 0.35, borderLeft: t === "put" ? `1px solid ${T.line}` : "none", borderRight: t === "call" ? `1px solid ${T.line}` : "none", boxShadow: itm ? `inset 0 0 0 100px ${T.blue}0a` : "none" }}>
         {q ? (
-          <span style={{ ...mono, fontSize: 10.5 }}>
+          <span style={{ ...mono, fontSize: FS.xs }}>
             <b style={{ color: lg ? (lg.side > 0 ? T.green : T.red) : T.ink }}>{q.mid != null ? q.mid.toFixed(2) : "—"}</b>
             <span style={{ color: T.dim }}> · {q.iv ? (q.iv * 100).toFixed(0) + "%" : "—"}{oi ? ` · OI ${q.oi ?? "—"}` : ""}</span>
             {lg && <b style={{ color: lg.side > 0 ? T.green : T.red }}> {lg.side > 0 ? "＋BUY" : "−SELL"}{lg.qty > 1 ? "×" + lg.qty : ""}</b>}
           </span>
-        ) : <span style={{ ...mono, fontSize: 10, color: T.dim }}>—</span>}
+        ) : <span style={{ ...mono, fontSize: FS.xs, color: T.dim }}>—</span>}
       </td>
     );
   };
   return (
     <div style={{ marginTop: 12 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
-        <Lbl>{expKey} · TAP A PRICE: ONCE TO BUY · TWICE TO SELL · A THIRD TIME TO REMOVE</Lbl>
+        <Label>{expKey} · TAP A PRICE: ONCE TO BUY · TWICE TO SELL · A THIRD TIME TO REMOVE</Label>
         <div style={{ display: "flex", gap: 4 }}>
           {[[0.06, "±6%"], [0.12, "±12%"], [0.25, "±25%"]].map(([v, l]) => (
             <Btn key={l} small ghost={width !== v} onClick={() => setWidth(v)}>{l}</Btn>
@@ -2722,7 +2710,7 @@ export function ChainMatrix({ chain, expKey, spot, legs, onCell }) {
       <div style={{ overflowX: "auto", marginTop: 8, border: `1px solid ${T.line}`, borderRadius: 7 }}>
         <table style={{ width: "100%", borderCollapse: "collapse", background: T.bg }}>
           <thead>
-            <tr style={{ ...mono, fontSize: 9, color: T.dim }}>
+            <tr style={{ ...mono, fontSize: FS.xs, color: T.dim }}>
               <th style={{ padding: "5px 6px", textAlign: "right" }}>CALL · mid · IV{oi ? " · OI" : ""}</th>
               <th style={{ padding: "5px 6px", textAlign: "center" }}>STRIKE</th>
               <th style={{ padding: "5px 6px", textAlign: "left" }}>PUT · mid · IV{oi ? " · OI" : ""}</th>
@@ -2732,7 +2720,7 @@ export function ChainMatrix({ chain, expKey, spot, legs, onCell }) {
             {ks.map((k) => (
               <tr key={k} style={{ background: Math.abs(k - spot) === Math.min(...ks.map((x) => Math.abs(x - spot))) ? `${T.amber}12` : "transparent" }}>
                 {cell(k, "call")}
-                <td style={{ ...mono, fontSize: 11.5, fontWeight: 800, color: T.ink, textAlign: "center", padding: "4px 8px", borderBottom: `1px solid ${T.line}` }}>{k}</td>
+                <td style={{ ...mono, fontSize: FS.xs, fontWeight: 800, color: T.ink, textAlign: "center", padding: "4px 8px", borderBottom: `1px solid ${T.line}` }}>{k}</td>
                 {cell(k, "put")}
               </tr>
             ))}
@@ -2742,7 +2730,7 @@ export function ChainMatrix({ chain, expKey, spot, legs, onCell }) {
       {/* This was written as JSX text containing `\u2019` and `${spot.toFixed(2)}`,
           neither of which JSX interpolates: the escape and the expression were
           both printed on screen, literally. It is one expression now. */}
-      <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 4 }}>
+      <div style={{ ...mono, fontSize: FS.xs, color: T.dim, marginTop: 4 }}>
         {`The highlighted row is the strike nearest today\u2019s price ($${spot.toFixed(2)}). A blue tint means the option already has value. ${sourceNote(chain)}.${oi ? ` ${openInterestNote(chain)}` : ""}`}
       </div>
     </div>
@@ -2768,7 +2756,7 @@ export function OptionPanel({ occ, label, quote, onClose }) {
         ref.current.innerHTML = "";
         chart = createChart(ref.current, {
           height: 190,
-          layout: { background: { color: T.bg }, textColor: T.mut, fontFamily: "ui-monospace, Menlo, monospace", fontSize: 10 },
+          layout: { background: { color: T.bg }, textColor: T.mut, fontFamily: MONO_STACK, fontSize: FS.xs },
           grid: { vertLines: { color: T.line + "55" }, horzLines: { color: T.line + "55" } },
           rightPriceScale: { borderColor: T.line }, timeScale: { borderColor: T.line },
         });
@@ -2783,21 +2771,21 @@ export function OptionPanel({ occ, label, quote, onClose }) {
   return (
     <div style={{ marginTop: 10, padding: "10px 12px", background: T.bg, border: `1px solid ${T.violet}44`, borderRadius: 7 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
-        <Lbl>THIS CONTRACT OVER TIME · {label} {src ? `· ${src}` : ""}</Lbl>
+        <Label>THIS CONTRACT OVER TIME · {label} {src ? `· ${src}` : ""}</Label>
         <Btn small ghost onClick={onClose}>✕ close</Btn>
       </div>
       {quote && (
-        <div style={{ ...mono, fontSize: 10.5, color: T.mut, marginTop: 4 }}>
+        <div style={{ ...mono, fontSize: FS.xs, color: T.mut, marginTop: 4 }}>
           now: {quote.mid?.toFixed(2) ?? "—"} · volatility {quote.iv ? (quote.iv * 100).toFixed(0) + "%" : "—"}{quote.oi != null ? ` · ${quote.oi} contracts open at the last close` : ""}{quote.vol != null ? ` · ${quote.vol} traded today` : ""}
         </div>
       )}
-      {err && <div style={{ ...mono, fontSize: 11, color: T.red, marginTop: 6 }}>{err}</div>}
+      {err && <div style={{ ...mono, fontSize: FS.xs, color: T.red, marginTop: 6 }}>{err}</div>}
       <div ref={ref} style={{ marginTop: 8 }} />
       {/* A CAPTION, NOT A DECISION (P9, TASK 3). It explains what the chart
           above is FOR, which is worth reading once. */}
       <Fold label="what this shows" tone={T.dim} style={{ marginTop: 4 }}
         summary={`Whether you are buying near the top of its price range, or after it has deflated.`}>
-        <div style={{ ...mono, fontSize: 10, color: T.dim, marginTop: 6, lineHeight: 1.6 }}>
+        <div style={{ ...mono, fontSize: FS.xs, color: T.dim, marginTop: 6, lineHeight: 1.6 }}>
           Something the payoff chart cannot show you: the payoff is about where the price finishes, and this is
           about what you are paying for the option today against what it has cost over the past year.
         </div>
@@ -2883,8 +2871,8 @@ export function UnifiedView({ ticker, dte, sigma, driftM, curve, legs, breakeven
   // Rendered through the SAME wrapper as the chart, so the width is measured
   // from the moment the component mounts rather than whenever data arrives.
   const shell = (inner) => <div ref={wrapRef} style={{ maxWidth: "100%" }}>{inner}</div>;
-  if (err) return shell(<div style={{ ...mono, fontSize: 11, color: T.red }}>Chart unavailable: {err}</div>);
-  if (!bars || !spot || !curve?.length) return shell(<div style={{ ...mono, fontSize: 11, color: T.mut }}>Loading the chart…</div>);
+  if (err) return shell(<div style={{ ...mono, fontSize: FS.xs, color: T.red }}>Chart unavailable: {err}</div>);
+  if (!bars || !spot || !curve?.length) return shell(<div style={{ ...mono, fontSize: FS.xs, color: T.mut }}>Loading the chart…</div>);
 
   const H = 440, padL = 6, padR = 60, padT = 10, padB = 26;
   // THE PAYOFF, BESIDE THE PRICE CHART, ON THE SAME PRICE AXIS (PRD §6).
@@ -2977,7 +2965,7 @@ export function UnifiedView({ ticker, dte, sigma, driftM, curve, legs, breakeven
           const v = yMin + (i / gTicks) * (yMax - yMin);
           return (<g key={i}>
             <line x1={x0} x2={xRight} y1={Y(v)} y2={Y(v)} stroke={T.line} strokeWidth={0.6} />
-            <text x={xRight + 6} y={Y(v) + 3} fill={T.dim} fontSize={9.5} fontFamily="monospace">{v.toFixed(2)}</text>
+            <text x={xRight + 6} y={Y(v) + 3} fill={T.dim} fontSize={FS.xs} fontFamily="monospace">{v.toFixed(2)}</text>
           </g>);
         })}
         {/* zone strategia (proiezione): verde = profitto a scadenza */}
@@ -2999,20 +2987,20 @@ export function UnifiedView({ ticker, dte, sigma, driftM, curve, legs, breakeven
         })}
         {/* separatore OGGI */}
         <line x1={xToday} x2={xToday} y1={padT} y2={H - padB} stroke={T.amber} strokeWidth={1} strokeDasharray="3 3" />
-        <text x={xToday + 4} y={padT + 10} fill={T.amber} fontSize={9.5} fontFamily="monospace">TODAY ${spot.toFixed(2)}</text>
-        <text x={xEnd - 4} y={padT + 10} fill={T.dim} fontSize={9.5} fontFamily="monospace" textAnchor="end">EXPIRY · {dte} DAYS</text>
+        <text x={xToday + 4} y={padT + 10} fill={T.amber} fontSize={FS.xs} fontFamily="monospace">TODAY ${spot.toFixed(2)}</text>
+        <text x={xEnd - 4} y={padT + 10} fill={T.dim} fontSize={FS.xs} fontFamily="monospace" textAnchor="end">EXPIRY · {dte} DAYS</text>
         {/* strike delle gambe + breakeven */}
         {legs.map((l, i) => (<g key={"lg" + i}>
           <line x1={xToday} x2={xEnd} y1={Y(l.strike)} y2={Y(l.strike)} stroke={l.side > 0 ? T.green : T.red} strokeWidth={1.4} />
-          <text x={xToday + 4} y={Y(l.strike) - 3} fill={l.side > 0 ? T.green : T.red} fontSize={9.5} fontFamily="monospace" fontWeight="700">{l.side > 0 ? "+" : "−"}{l.qty} {l.strike}{l.type === "call" ? "C" : "P"}</text>
+          <text x={xToday + 4} y={Y(l.strike) - 3} fill={l.side > 0 ? T.green : T.red} fontSize={FS.xs} fontFamily="monospace" fontWeight="700">{l.side > 0 ? "+" : "−"}{l.qty} {l.strike}{l.type === "call" ? "C" : "P"}</text>
         </g>))}
         {(breakevens || []).map((b, i) => (<g key={"be" + i}>
           <line x1={x0} x2={xRight} y1={Y(b)} y2={Y(b)} stroke={T.blue} strokeWidth={1.1} strokeDasharray="6 4" />
-          <text x={x0 + 4} y={Y(b) - 3} fill={T.blue} fontSize={9.5} fontFamily="monospace">BE {b.toFixed(2)}</text>
+          <text x={x0 + 4} y={Y(b) - 3} fill={T.blue} fontSize={FS.xs} fontFamily="monospace">BE {b.toFixed(2)}</text>
         </g>))}
         {/* etichette date */}
-        <text x={x0} y={H - 8} fill={T.dim} fontSize={9} fontFamily="monospace">{bars[0]?.time}</text>
-        <text x={xToday} y={H - 8} fill={T.dim} fontSize={9} fontFamily="monospace" textAnchor="middle">{bars[bars.length - 1]?.time}</text>
+        <text x={x0} y={H - 8} fill={T.dim} fontSize={FS.xs} fontFamily="monospace">{bars[0]?.time}</text>
+        <text x={xToday} y={H - 8} fill={T.dim} fontSize={FS.xs} fontFamily="monospace" textAnchor="middle">{bars[bars.length - 1]?.time}</text>
         {/* ---- THE PAYOFF, BESIDE THE PRICE, ON THE SAME AXIS ---- */}
         {showPay && (
           <g>
@@ -3022,11 +3010,11 @@ export function UnifiedView({ ticker, dte, sigma, driftM, curve, legs, breakeven
             <rect x={payX0} y={padT} width={Math.max(0, payZero - payX0)} height={H - padT - padB} fill={T.red} opacity={0.05} />
             <line x1={payZero} x2={payZero} y1={padT} y2={H - padB} stroke={T.mut} strokeWidth={0.9} />
             <path d={payPath} fill="none" stroke={T.amber} strokeWidth={2} />
-            <text x={payX0 + payW / 2} y={padT + 10} fill={T.dim} fontSize={9} fontFamily="monospace" textAnchor="middle">
+            <text x={payX0 + payW / 2} y={padT + 10} fill={T.dim} fontSize={FS.xs} fontFamily="monospace" textAnchor="middle">
               AT EXPIRY
             </text>
-            <text x={payZero - 3} y={H - padB - 4} fill={T.red} fontSize={8.5} fontFamily="monospace" textAnchor="end">lose</text>
-            <text x={payZero + 3} y={H - padB - 4} fill={T.green} fontSize={8.5} fontFamily="monospace">make</text>
+            <text x={payZero - 3} y={H - padB - 4} fill={T.red} fontSize={FS.xs} fontFamily="monospace" textAnchor="end">lose</text>
+            <text x={payZero + 3} y={H - padB - 4} fill={T.green} fontSize={FS.xs} fontFamily="monospace">make</text>
             {/* today's price, read straight across into the payoff */}
             <line x1={x0} x2={xRight} y1={Y(spot)} y2={Y(spot)} stroke={T.amber} strokeWidth={0.9} strokeDasharray="2 3" opacity={0.75} />
           </g>
@@ -3035,10 +3023,10 @@ export function UnifiedView({ ticker, dte, sigma, driftM, curve, legs, breakeven
       </div>
       <div style={{ display: "flex", gap: 14, marginTop: 6, flexWrap: "wrap", alignItems: "center" }}>
         {[["■", T.green + "44", "where you make money at expiry"], ["■", T.violet + "55", "where the price could go (pale 5–95%, solid 25–75%)"], ["┅", T.violet, "the middle path"], ["—", T.blue, "break even"], ["—", T.green, "option you bought"], ["—", T.red, "option you sold"]].map(([g, c, l]) => (
-          <span key={l} style={{ ...mono, fontSize: 9.5, color: T.mut }}><span style={{ color: c, fontWeight: 800 }}>{g}</span> {l}</span>
+          <span key={l} style={{ ...mono, fontSize: FS.xs, color: T.mut }}><span style={{ color: c, fontWeight: 800 }}>{g}</span> {l}</span>
         ))}
       </div>
-      <div style={{ marginTop: 8, padding: "8px 11px", background: `${T.blue}0d`, border: `1px solid ${T.blue}33`, borderRadius: 7, fontSize: 12.5, color: T.body }}>
+      <div style={{ marginTop: 8, padding: "8px 11px", background: `${T.blue}0d`, border: `1px solid ${T.blue}33`, borderRadius: 7, fontSize: FS.sm, color: T.body }}>
         <b style={{ color: T.ink }}>How to read it:</b> the purple cone is where the price can realistically get to by expiry; the green bands are where this trade makes money. They overlap about <b style={{ color: pIn >= 0.5 ? T.green : T.violet }}>{chanceText(pIn)}</b> of the time — which is the same number as the CHANCE shown above, worked out the same way.
       </div>
     </div>
