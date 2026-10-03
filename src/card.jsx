@@ -29,7 +29,7 @@ export { badgeText };
 import { MARKET_CATEGORIES } from "./markets.js";
 import { Gauge, UnifiedPosition, UnifiedFigure } from "./visuals.jsx";
 import { RULES, money, chanceText, returnText, NO_CEILING,
-  requestAmountLabel, amountNote, freeAmountNote, chanceAskLabel, rewardAskLabel, controlsFoldNote,
+  requestAmountLabel, amountNote, freeAmountNote, chanceAskLabel, chanceAskText, rewardAskLabel, controlsFoldNote,
   targetPriceOf, stopSigns, sizedHeading, CARD_LABELS,
   splitByRequest, resultsLine, missReasonLine, nearestRelaxation, fillPriceHeading } from "./rules.js";
 
@@ -53,7 +53,7 @@ const CardFigure = ({ k, v, c }) => <Stat k={k} v={v} c={c} style={{ flex: "1 1 
      DIRECTION  one for every market, or "Signals decide" per market (PR #48): its signals' family plus Neutral.
      SIZE BY    what I can spend, or what I want to make — two chips. The amount is a slider (PR #45): its top is the
                 per-trade limit, or the trading capital under free sizing, and the limit is editable beside it.
-     CHANCE     a minimum chance of profit.
+     CHANCE     a minimum chance of profit; its leftmost position is "any", the default (PR #49).
      RETURN     a minimum return on risk. It can only TIGHTEN the reward floor (`minRewardRisk`), never loosen it,
                 and the floor itself is not here and never will be.
      HORIZON    days to expiry; each market is built on its buildable board nearest this.
@@ -132,10 +132,12 @@ export function RequestControls({
             note={amountNote(request)} />
         )}
         {shows("chance") && (
+          /* THE LEFTMOST POSITION IS "ANY" (PR #49, TASK 2): no minimum, the default. `requestOf()` reads it as null. */
           <RangeField label={chanceAskLabel()} color={T.violet}
-            value={request.minChance} onChange={(v) => onChange({ minChance: v })}
+            value={request.minChance == null ? RULES.chanceAskMin : request.minChance} onChange={(v) => onChange({ minChance: v })}
             min={RULES.chanceAskMin} max={RULES.chanceAskMax} step={RULES.chanceAskStep}
-            format={(v) => chanceText(v)} parse={(t) => Number(t) / 100} toInput={(v) => String(Math.round(v * 100))}
+            format={(v) => chanceAskText(v)} parse={(t) => (/^\s*any\s*$/i.test(String(t)) ? RULES.chanceAskMin : Number(t) / 100)}
+            toInput={(v) => (chanceAskText(v) === "any" ? "any" : String(Math.round(v * 100)))}
             values={readings ? readings.chance.values : null} pass={readings ? readings.chance.pass : null} />
         )}
         {shows("return") && (

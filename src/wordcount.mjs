@@ -171,6 +171,7 @@ export const COPY = {
   alpacaErrorText: () => O.alpacaErrorText(new Error("422")),
   pctText: () => R.pctText(0.35),
   chanceText: () => R.chanceText(0.55),
+  chanceAskText: () => R.chanceAskText(null),
   returnText: () => R.returnText(1.25),
   // ROADMAP P10 — the controls block and the card.
   chanceAskLabel: () => (R.chanceAskLabel ? R.chanceAskLabel(REQUEST) : ""),

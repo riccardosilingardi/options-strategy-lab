@@ -3204,14 +3204,21 @@ test("REQUEST — the mode is one of two, and the label follows it", () => {
 });
 
 test("REQUEST — the slider's band and step live in RULES, and it is clamped", () => {
-  for (const k of ["chanceAskMin", "chanceAskMax", "chanceAskStep", "chanceAskDefault"]) {
+  for (const k of ["chanceAskMin", "chanceAskMax", "chanceAskStep"]) {
     assert.equal(typeof RULES[k], "number", `${k} has a home in RULES`);
   }
-  assert.ok(RULES.chanceAskMin < RULES.chanceAskDefault && RULES.chanceAskDefault < RULES.chanceAskMax,
-    "the default is inside the band it is the default of");
+  // PR #49, TASK 2 (owner decision, 3 Oct 2026): the default is "none" — no minimum — and it is null, never a zero.
+  assert.ok("chanceAskDefault" in RULES, "the default has a home in RULES");
+  assert.equal(RULES.chanceAskDefault, null, "no chance is asked until the slider is moved");
   assert.equal(clampAskedChance(0.99), RULES.chanceAskMax);
-  assert.equal(clampAskedChance(0.01), RULES.chanceAskMin);
+  assert.equal(clampAskedChance(0.01), null, "under the band is the leftmost position: any");
+  assert.equal(clampAskedChance(RULES.chanceAskMin), null, "the leftmost position reads 'any' and asks for nothing");
+  assert.equal(clampAskedChance(RULES.chanceAskMin + RULES.chanceAskStep), RULES.chanceAskMin + RULES.chanceAskStep);
   assert.equal(clampAskedChance(null), RULES.chanceAskDefault, "unknown is the default, never a zero");
+  assert.equal(requestOf({}, {}).minChance, null, "no answer: no chance asked");
+  const anyReq = requestOf({ minChance: RULES.chanceAskMin }, {});
+  assert.equal(meetsRequest({ pop: 0.01, rr: 1, maxLoss: -100, maxProfit: 100 }, anyReq).meets, true, "'any' lets a 1% chance in");
+  assert.equal(meetsRequest({ pop: null, rr: 1, maxLoss: -100, maxProfit: 100 }, anyReq).meets, true, "and asks nothing of an unknown one");
   assert.equal(requestOf({ minChance: 2 }, {}).minChance, RULES.chanceAskMax);
   assert.equal(requestOf({}, {}).chanceAnswered, false);
   // THE STEP IS COARSER THAN THE SIMULATION'S OWN ERROR. At `mcRuns` the

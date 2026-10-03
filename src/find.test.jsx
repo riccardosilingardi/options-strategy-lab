@@ -161,8 +161,9 @@ check("THE CHANCE CONTROL FILTERS: moving it from 20% to 80% takes the matching 
 check("THE RETURN CONTROL FILTERS, AND CAN ONLY TIGHTEN THE REWARD FLOOR", () => {
   const base = requestOf({ minChance: 0.2 }, LIMITS);
   const all = splitByRequest(cands, base, sizesFor(base)).meets.length;
-  // 20% is the chance slider's own bottom; a card under it (one on the fixtures) never meets, whatever the return.
-  eq(all, cards.filter((c) => c.lf.pop >= RULES.chanceAskMin).length, "at the reward floor the return control removes nothing");
+  // 20% is the chance slider's own bottom, which reads "any" since PR #49: the card under it (one on the fixtures)
+  // meets too, and at the reward floor the return control removes nothing.
+  eq(all, cards.length, "at 'any' and the reward floor nothing is removed");
   const tight = requestOf({ minChance: 0.2, minReturn: 1.5 }, LIMITS);
   const sp = splitByRequest(cands, tight, sizesFor(tight));
   if (!(sp.meets.length < 31 && sp.meets.length > 0)) throw new Error(`150% splits nothing: ${sp.meets.length}`);
