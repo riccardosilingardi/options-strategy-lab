@@ -24,12 +24,14 @@
 // ============================================================================
 import React, { useState, useEffect, useRef } from "react";
 import { payoff, N as normCdf } from "./engine.js";
-import { T } from "./theme.js";
+import { T, TYPE } from "./theme.js";
+import { mono, sans } from "./ui.jsx";
 import { money, RULES, pctText, liquidityThreshold, RECOMMENDED_LIQUIDITY,
   payoffCeiling, scratchLevel, NO_CEILING, chanceInTen, takeProfitBasisWords } from "./rules.js";
 
-const mono = { fontFamily: "ui-monospace, Menlo, monospace" };
-const sans = { fontFamily: "ui-sans-serif, system-ui" };
+// PR #48 SWEEP: the stacks come from ui.jsx; the HTML text around a drawing takes the type tokens. The drawings
+// themselves (SVG text) keep their own sizes, the card's axis label at the 12px token (`labelSize`).
+const FS = TYPE.size, LH = TYPE.line;
 
 /** `$4.55` — a price, always two decimals, never confused with a P&L. */
 export const price = (x) => (Number.isFinite(Number(x)) ? `$${Number(x).toFixed(2)}` : "n/a");
@@ -454,15 +456,15 @@ export function Figure({ takeaway, explanation, onClose, children, style }) {
     <div ref={ref} style={{ ...sans, ...style }}>
       {children}
       {takeaway && (
-        <div style={{ ...sans, fontSize: 13.5, lineHeight: 1.5, color: T.body, marginTop: 8 }}>{takeaway}</div>
+        <div style={{ ...sans, fontSize: FS.sm, lineHeight: LH.body, color: T.body, marginTop: 8 }}>{takeaway}</div>
       )}
       {explanation && (
         <div style={{
           marginTop: 8, padding: "10px 12px", background: T.panel,
           border: `1px solid ${T.blue}55`, borderRadius: 8, borderLeft: `3px solid ${T.blue}`,
         }}>
-          <div style={{ ...sans, fontSize: 13, color: T.body, lineHeight: 1.5 }}>{explanation}</div>
-          <button onClick={onClose} style={{ ...mono, fontSize: 10, marginTop: 6, background: "transparent", border: "none", color: T.blue, cursor: "pointer", padding: 0 }}>
+          <div style={{ ...sans, fontSize: FS.sm, color: T.body, lineHeight: LH.body }}>{explanation}</div>
+          <button onClick={onClose} style={{ ...sans, fontSize: FS.xs, marginTop: 6, background: "transparent", border: "none", color: T.blue, cursor: "pointer", padding: 0 }}>
             tap anywhere outside to close
           </button>
         </div>
@@ -1346,7 +1348,7 @@ export function CompareFigure({ items = [], height, width, style }) {
       explanation={open ? explainCompareElement(open, shown) : null} onClose={() => setOpen(null)}>
       <ComparePayoffs items={shown} height={height} width={width} onExplain={setOpen} />
       {shown.length > 1 && !compareDistInputs(shown).ok && (
-        <div style={{ ...sans, fontSize: 12.5, color: T.mut, lineHeight: 1.5, marginTop: 6 }}>
+        <div style={{ ...sans, fontSize: FS.xs, color: T.mut, lineHeight: LH.body, marginTop: 6 }}>
           {compareDistNote(compareDistInputs(shown).why)}
         </div>
       )}
