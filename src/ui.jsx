@@ -106,6 +106,8 @@ export function Info({ label, children, style, iconOnly = false }) {
       <button onClick={() => setOpen((o) => !o)} aria-label={`About ${label}`} aria-expanded={open} aria-controls={id}
         style={{ ...sans, fontSize: iconOnly ? FS.sm : FS.xs, fontWeight: FW.regular, color: T.blue, background: "transparent",
           border: "none", cursor: "pointer", minHeight: TAP, minWidth: TAP, padding: iconOnly ? 0 : "0 4px",
+          // In a tile the 44px target overlaps its own margins, so it does not push the tile's name onto a second row.
+          ...(iconOnly ? { margin: "-14px -10px -14px -6px" } : null),
           verticalAlign: "middle", textAlign: "left", letterSpacing: 0 }}>
         {iconOnly ? "ⓘ" : <>{firstUpper(label)} <span style={{ fontSize: FS.sm }}>ⓘ</span></>}
       </button>
