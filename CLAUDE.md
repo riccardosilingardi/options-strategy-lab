@@ -13,6 +13,12 @@ terms on first use. Product language (UI copy, names, generated text) is English
 Start each session by fixing what the previous session flagged as broken or unverified. End it
 by writing down what you could not verify (PRD §4, at most ten items).
 
+Plan before you execute. Before changing any file, write the plan: tasks in order, files touched, tests
+added or changed, what is not touched, risks, and every point where the prompt is ambiguous or disagrees
+with the code. If there is such a point, stop and ask the owner before executing. The plan opens the PR
+description; each task then reads 'Done as planned' or 'Changed from the plan, and why'. (Owner rule,
+3 Oct 2026.)
+
 ## Non-negotiable rules
 
 1. Paper trading only. If paper mode cannot be verified, reject the order.
@@ -67,7 +73,7 @@ by writing down what you could not verify (PRD §4, at most ten items).
   CONFLICT Neutral, never "Very"; a market shows that family plus Neutral. **The list order is the owner's**
   (`settings.findOrder`, `findOrderCompare()`); only "Expected value + signal" adds `signalAdjustment()`, and a card's
   "Why this place" is `placeLine()` on the same figures.
-- Plan first, then change surgically.
+- Plan first, then change surgically: the plan is the standing rule's ("Plan before you execute", above).
 
 ## Files that matter
 
