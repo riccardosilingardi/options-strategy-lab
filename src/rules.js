@@ -1387,16 +1387,239 @@ export const PAST_AVG_LABEL = "PAST YRS AVG";
    The ids are what `settings.findOrder` stores, unchanged since PR #48.
 ===================================================================== */
 export const FIND_ORDERS = Object.freeze([
-  Object.freeze({ id: "ev", label: "Future avg", tile: "future" }),
-  Object.freeze({ id: "evSignal", label: "Future avg + signal", tile: "future" }),
-  Object.freeze({ id: "chance", label: "Chance", tile: "chance" }),
-  Object.freeze({ id: "rr", label: "Return on risk", tile: "rr" }),
-  Object.freeze({ id: "past", label: "Past yrs", tile: "past" }),
+  // `note` (redesign PR 1): what the Order sheet says under each name.
+  Object.freeze({ id: "ev", label: "Future avg", tile: "future", note: "the simulation's average result per $100 at risk" }),
+  Object.freeze({ id: "evSignal", label: "Future avg + signal", tile: "future", note: "the same average, plus what the market's signals add" }),
+  Object.freeze({ id: "chance", label: "Chance", tile: "chance", note: "the chance of ending in profit at expiry" }),
+  Object.freeze({ id: "rr", label: "Return on risk", tile: "rr", note: "the most it can make for each dollar at risk" }),
+  Object.freeze({ id: "past", label: "Past yrs", tile: "past", note: "how often the past years won, then their average per $100" }),
 ]);
 export const DEFAULT_FIND_ORDER = "ev";
 /** The two toggles above the list (PR #49): what they say is here, with the rest of the list's words. */
 export const POSITIVE_FUTURE_TOGGLE = "Only a positive future avg";
 export const HIDE_MISSES_TOGGLE = "Hide cards that miss";
+
+/* =====================================================================
+   THE PLACEHOLDER (redesign PR 1, owner's rule, 4 Oct 2026): no function shown in the mockups is dropped. One that
+   has no source yet is a PLACEHOLDER — a dashed box that says "Not connected yet", what it will show, what it needs
+   and which PR fills it. Never a made-up number, never silently left out. `Placeholder` in ui.jsx takes an id and
+   nothing else; its words are here. An id leaves this list only when its function is built; PRD §4 lists every one.
+   `placeholder.test.jsx`: every `<Placeholder id>` in the source names an id here, every id is used, and no entry's
+   words carry a figure ($, %, a number with a unit), so a placeholder can never pass for a reading.
+   A feed's own limit (Alpaca sends no open interest) or a state the app already handles (IV rank collecting its 20
+   days) is NOT a placeholder: it is said in words where the number would be.
+===================================================================== */
+export const PLACEHOLDER_HEAD = "Not connected yet";
+export const PLACEHOLDERS = Object.freeze([
+  Object.freeze({ id: "events-calendar", screen: "market",
+    shows: "the next report or central-bank meeting before the expiry shown, and every one before it",
+    needs: "the publishers' calendars for the next year, copied into src/events.js with their sources",
+    pr: "the session that adds the next year's dates" }),
+]);
+export const placeholderOf = (id) => PLACEHOLDERS.find((p) => p.id === id) || null;
+
+/* =====================================================================
+   FIND, VERSION B, AND THE MARKET PAGE — EVERY WORD (redesign PR 1, owner's mockups of 4 Oct 2026).
+   Beside CARD_LABELS and FIND_ORDERS: the chips, the sheets, the summary line, the rows, the states, Saved, and the
+   market page's header, tabs, groups and chain. No screen spells any of them.
+===================================================================== */
+export const FIND_HEADING = "Find";
+export const CATEGORY_ALL = "All";
+/** The chip row, in order. `sheet: false` is the one toggled in place. */
+export const FIND_CHIPS = Object.freeze([
+  Object.freeze({ id: "order", label: "Order", sheet: true }),
+  Object.freeze({ id: "budget", label: "Budget", sheet: true }),
+  Object.freeze({ id: "chance", label: "Chance", sheet: true }),
+  Object.freeze({ id: "return", label: "Return", sheet: true }),
+  Object.freeze({ id: "horizon", label: "Horizon", sheet: true }),
+  Object.freeze({ id: "direction", label: "Direction", sheet: true }),
+  Object.freeze({ id: "positive", label: "Avg > 0", sheet: false }),
+  Object.freeze({ id: "liquidity", label: "Liquidity", sheet: true }),
+]);
+/** The sheet each chip opens: its title. */
+export const FIND_SHEET_TITLES = Object.freeze({ order: "Order the list by", budget: "Budget", chance: "Chance of profit",
+  return: "Return on risk", horizon: "Horizon", direction: "Direction", liquidity: "Liquidity" });
+export const SIGNALS_DECIDE = "Signals decide";
+export const SHOW_FLAGGED_TOGGLE = "Show flagged cards";
+
+/**
+ * WHAT A CHIP SAYS, AND WHETHER IT IS OFF ITS DEFAULT (then it is drawn filled). `st` is the screen's state:
+ * { order, request, horizon, dir, dirLabel, positiveOnly, flagged, liqId, liqLabel, liqDefault }.
+ */
+export function chipText(id, st = {}) {
+  const r = st.request || {};
+  switch (id) {
+    case "order": return `⇅ ${(FIND_ORDERS.find((o) => o.id === st.order) || FIND_ORDERS[0]).label}`;
+    case "budget": return `${r.mode === "target" ? "Target" : "Budget"} ${r.amt == null ? "not set" : money(r.amt)}`;
+    case "chance": return `Chance ${r.minChance == null ? "any" : chanceText(r.minChance)}`;
+    case "return": return `Return ${returnText(r.minReturn == null ? RULES.minRewardRisk : r.minReturn)}`;
+    case "horizon": return `Horizon ${Math.round(Number(st.horizon) || RULES.targetEntryDTE)}d`;
+    case "direction": return st.dir === "signals" || !st.dir ? SIGNALS_DECIDE : `Direction ${st.dirLabel || st.dir}`;
+    case "positive": return "Avg > 0";
+    case "liquidity": return `Liquidity ${st.liqLabel || ""}`.trim();
+    default: return "";
+  }
+}
+export function chipOffDefault(id, st = {}) {
+  const r = st.request || {};
+  switch (id) {
+    case "order": return !!st.order && st.order !== DEFAULT_FIND_ORDER;
+    case "budget": return r.mode === "target" || !!r.amtAnswered;
+    case "chance": return r.minChance != null;
+    case "return": return r.returnAsk != null;
+    case "horizon": return Math.round(Number(st.horizon)) !== RULES.targetEntryDTE;
+    case "direction": return !!st.dir && st.dir !== "signals";
+    case "positive": return !!st.positiveOnly;
+    case "liquidity": return !!st.liqId && st.liqId !== st.liqDefault;
+    default: return false;
+  }
+}
+/** The Order sheet also holds the flag toggle (owner, 4 Oct 2026): hiding flagged cards is off its default too. */
+export const anyChipOff = (st = {}) => FIND_CHIPS.some((c) => chipOffDefault(c.id, st)) || st.flagged === false;
+/** The live button that ends every sheet: "Show 4 of 10". */
+export const showRowsCta = (n, m) => `Show ${n} of ${m}`;
+export const HIDE_ROWS = "Hide them";
+export const SHOW_ROWS = "Show them";
+export const RESET_FILTERS = "Reset";
+
+/** The column head: "Market" … "Future avg · risk". */
+export const COLUMN_MARKET = "Market";
+export const columnHeadText = (order) => `${(FIND_ORDERS.find((o) => o.id === order) || FIND_ORDERS[0]).label} · risk`;
+export const rowRiskText = (risk) => (risk == null ? "risk —" : `risk ${money(risk)}`);
+/** A market's direction on its row and its page: from `signalDirection()`, never "Very". */
+export const DIRECTION_TAGS = Object.freeze({ bull: "▲ Bull", bear: "▼ Bear", neutral: "≈ Neutral" });
+export const rowSubtitleText = (name, expKey) => `${name} · ${expiryWords(expKey) || expKey || "no expiry"}`;
+/** A market still being read (redesign PR 1): its chain, its season, or waiting on the rest. */
+export const ROW_READING = Object.freeze({ chain: "Reading the chain…", season: "Reading the season…", waiting: "Waiting…" });
+export const findReadingLine = (total, done) =>
+  `Reading ${total} market${total === 1 ? "" : "s"} · ${done} done · the order settles when all are in`;
+/** A market that failed or has no board, on its row: the reason in place of the figures. */
+export const rowFailedText = (why) => `Not read: ${why}`;
+export const ROW_NO_BOARD = `No expiry far enough out to open on`;
+
+/**
+ * THE STALE BANNER (redesign PR 1): Find's freshness line, when the prices are past their budget. `closeDay` is the
+ * day of the numbers shown ("Fri 2 Oct"), `failedAt` the time a refresh did not answer ("14:05"), or null.
+ */
+export function staleBannerLine({ closeDay = null, failedAt = null } = {}) {
+  const head = `Stale${closeDay ? ` · ${closeDay} close` : ""}.`;
+  const fail = failedAt ? ` The feed didn't answer at ${failedAt}.` : "";
+  const what = closeDay ? ` These are ${closeDay}'s closing numbers; prices may have moved.` : " Prices may have moved.";
+  return `${head}${fail}${what}`;
+}
+export const RETRY = "Retry";
+
+/** "Nothing fits" (redesign PR 1). The control that binds, in the chips' words. */
+const BINDS = { size: "your budget", target: "your target", chance: "your chance", return: "your return on risk" };
+export const nothingFitsLine = (control) => `Nothing fits ${BINDS[control] || "your filters"}.`;
+export const allMissLine = (n, cheap) =>
+  `All ${n} market${n === 1 ? "" : "s"} miss.` +
+  (cheap ? ` Cheapest here: ${cheap.tk} ${cheap.name}, ${money(cheap.risk)} risk.` : "");
+export const overLimitNote = (limit) => `That is more than your ${money(limit)} per-trade limit, so a budget cannot reach it.`;
+export const showMissesCta = (n) => `Show the ${n} that miss`;
+
+/** Saved (redesign PR 1): "When saved" beside "Now", for three figures. */
+export const SAVED_COLUMNS = Object.freeze({ when: "When saved", now: "Now" });
+export const SAVED_ROWS = Object.freeze({ chance: CARD_LABELS.chance, future: "FUTURE AVG", risk: CARD_LABELS.risk });
+export const NOT_RECORDED = "not recorded";
+export const NOT_ON_CHAIN = "not on today's chain";
+export const savedEmptyText = () => "Nothing saved. Tap ☆ on a row to watch it here.";
+export const SAVED_REMOVE = "Remove";
+export const BUILD_CTA = "Build ›";
+export const WOULD_HAVE_DONE = "What it would have done";
+/** A future avg per $100 at risk, as Saved prints it. */
+export const per100Text = (x) => (x == null || !Number.isFinite(Number(x)) ? "—" : `${Number(x) >= 0 ? "+" : "−"}${Math.abs(Number(x)).toFixed(1)} per $100`);
+
+/** The market page (redesign PR 1). */
+export const MARKET_TABS = Object.freeze([
+  Object.freeze({ id: "overview", label: "Overview" }),
+  Object.freeze({ id: "strategies", label: "Strategies" }),
+  Object.freeze({ id: "chain", label: "Chain" }),
+]);
+export const DEFAULT_MARKET_TAB = "strategies";
+export const BACK_TO_FIND = "‹ Find";
+export const MARKETS_SHEET_TITLE = "Markets";
+export const SAVE_FIRST_CARD = "Save this market's first card";
+/** "+0.12 (+0.7%) since the last close", or null when there is no previous close to read. */
+export const dayChangeText = (ch) => (!ch ? null
+  : `${ch.change >= 0 ? "+" : "−"}${Math.abs(ch.change).toFixed(2)} (${ch.pct >= 0 ? "+" : "−"}${Math.abs(ch.pct * 100).toFixed(1)}%) since the ${ch.prevDay} close`);
+export const ivText = (iv) => (iv == null ? "IV not quoted" : `IV ${(iv * 100).toFixed(1)}%`);
+export const ivRankText = (rank, days, need = 20) =>
+  (rank == null ? `IV rank: collecting, ${days} of ${need} days` : `IV rank ${rank}`);
+export const expectedMoveText = (mv, expKey) =>
+  (mv == null ? null : `Expected move to ${expiryWords(expKey) || expKey}: ±$${mv.toFixed(2)}`);
+export const NEWS_NOT_READ = "News not read: the feed did not answer.";
+export const newsHeadlineText = (title, source, ago) => `${title}${source ? ` · ${source}` : ""}${ago ? ` · ${ago}` : ""}`;
+
+/** The two groups on Strategies. `kind`: "signals" (what the signals suggest), "yours" (the user's direction), "neutral". */
+export function groupHeadText(dir, kind) {
+  const tag = (DIRECTION_TAGS[dir] || DIRECTION_TAGS.neutral).toUpperCase();
+  if (kind === "neutral") return `${tag} · ALWAYS LISTED`;
+  return `${tag} · ${kind === "yours" ? "YOUR DIRECTION" : "WHAT THE SIGNALS SUGGEST"}`;
+}
+/** The line above the groups: what the signals say, with the arithmetic; the order; the expiry the cards are on. */
+export function strategiesLine({ sd = null, fixedLabel = null, order, expKey = null, dte = null } = {}) {
+  const sig = fixedLabel ? `Direction: ${fixedLabel}, your choice`
+    : sd && Number.isFinite(sd.s) && sd.fused
+      ? `Signals: ${sd.fused.score >= 0 ? "+" : "−"}${Math.abs(sd.fused.score)} × ${sd.fused.confidence} ÷ 100 = ${sd.s.toFixed(1)} → ${(DIRECTION_TAGS[sd.dir] || "").replace(/^\S+ /, "")}`
+      : "Signals: still being read";
+  const ord = `sorted by ${(FIND_ORDERS.find((o) => o.id === order) || FIND_ORDERS[0]).label}`;
+  const on = expKey ? `built on ${expiryWords(expKey) || expKey}${Number.isFinite(dte) ? ` (${Math.round(dte)} days)` : ""}` : null;
+  return [sig, ord, on].filter(Boolean).join(" · ");
+}
+/** The stance line (`signalStance()` in signals.js counts; this says it). */
+export function stanceText(st) {
+  if (!st) return null;
+  if (st.kind === "neutral") return "direction-neutral: the signals neither back it nor go against it";
+  if (st.kind === "quiet") return `the signals are too weak to back or oppose it (score under ${st.floor})`;
+  if (st.kind === "against") return `against the signals, ${st.n} of ${st.total}`;
+  return `with the signals, ${st.n} of ${st.total} · ${st.against ? `${st.against} against` : "none against"}`;
+}
+/**
+ * FUTURE AND PAST DISAGREE (redesign PR 1): the simulation's average and the replay's average have opposite signs.
+ * Both must be read and non-zero; anything unknown is not a disagreement.
+ */
+export function futurePastDisagree(future, past) {
+  const f = future && future.per100 != null && Number.isFinite(Number(future.per100)) ? Number(future.per100) : null;
+  const p = past && past.avg != null && Number.isFinite(Number(past.avg)) ? Number(past.avg) : null;
+  if (f == null || p == null || f === 0 || p === 0 || Math.sign(f) === Math.sign(p)) return null;
+  return `Future and past disagree: the past years would have ${p < 0 ? "lost" : "won"} on this one.`;
+}
+export const OPEN_IN_CHAIN = "Open in chain";
+export const MARKET_READ_HEAD = "THE MARKET'S READ";
+export const HOW_WORKED_OUT_LINK = "How score and confidence are worked out ›";
+export const MARKET_READ_END = "How each trade stands against it is in Build, under Why this trade.";
+export const howConnectLabel = (tk) => `How ${tk}'s numbers connect`;
+export const HOW_CONNECT_STEPS = Object.freeze(["Score", "Confidence", "Direction", "Strategy", "Chance and future avg"]);
+
+/** The Chain tab. */
+export const CHAIN_MODES = Object.freeze([
+  Object.freeze({ id: "price", label: "Bid · Ask" }),
+  Object.freeze({ id: "greeks", label: "Delta · IV" }),
+  Object.freeze({ id: "oi", label: "OI · Vol" }),
+]);
+export const noOpenInterestText = (feed) => `OI · Vol: ${feed || "this feed"} does not send open interest`;
+export const underEntryText = () => `under ${RULES.minEntryDTE}d`;
+export const THIN = "thin";
+export const spotLineText = (spot, state) => `${Number(spot).toFixed(2)}${state ? ` ${state}` : ""}`;
+const NUM_WORDS = ["Zero", "One", "Two", "Three", "Four", "Five", "Six"];
+export const legsMaxText = (max) => `${NUM_WORDS[max] || max} legs at most. Clear one to add another.`;
+export const TRAY_LABELS = Object.freeze({ debit: "Debit", credit: "Credit", maxProfit: "Max profit", maxLoss: "Max loss",
+  chance: "Chance", noCap: "No cap", clear: "Clear" });
+export const uncoveredText = () => "Build is blocked: a short leg is not covered, and the gate refuses an uncovered short leg. Add the leg that covers it.";
+export const trayEmptyText = () => "Tap an ask to buy one, a bid to sell one. Tap it again to remove it.";
+/** The event line (redesign PR 1, TASK 4): "WASDE · Fri 9 Oct, 18:00 your time · in 5 days · before 20 Nov". */
+export function eventLineText({ name, when, days, beforeDay = null, holiday = false }) {
+  const inDays = days <= 0 ? "today" : days === 1 ? "tomorrow" : `in ${days} days`;
+  return [name, `${when} your time`, inDays, beforeDay ? `before ${beforeDay}` : null, holiday ? HOLIDAY_WEEK_NOTE : null]
+    .filter(Boolean).join(" · ");
+}
+export const HOLIDAY_WEEK_NOTE = "holiday week: the publisher may move it";
+/** Behind the event line's ⓘ: the publisher's own time, and where the date was copied from. */
+export const eventInfoText = (ev, etDayWords) =>
+  `${ev.etTime} ET on ${etDayWords}${ev.holiday ? ` (${ev.holiday} week)` : ""}. ${ev.source ? `Copied from ${ev.source}` : "From this market's own chain"}.`;
+export const eventsBeforeLabel = (day) => `Everything before ${day}`;
+export const chainEventText = (allBefore) => (allBefore ? "before every expiry above" : "after some expiries above");
 
 const MON3 = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 /** "2026-10-30" → "30 Oct 2026"; null for anything that is not a date. */
@@ -3480,9 +3703,13 @@ export const matchHeading = (n) => `${n} ${plural(n, "card matches", "cards matc
 /** The misses half (PR #49, TASK 1): "27 shown as misses" in the one list, or "27 hidden" under "Hide cards that miss". */
 export const missToggle = (m, hidden = false) => (hidden ? `${m} hidden` : `${m} shown as ${plural(m, "a miss", "misses")}`);
 
-/** The whole line: "4 cards match what you asked · 27 shown as misses" (or "· 27 hidden"). */
-export const resultsLine = (n, m, hidden = false) =>
-  (m > 0 ? `${matchHeading(n)} · ${missToggle(m, hidden)}` : matchHeading(n));
+/** The whole line: "4 cards match what you asked · 27 shown as misses" (or "· 27 hidden").
+ *  Redesign PR 1: Find's rows read the same line in their own unit — `{ unit: "rows" }` gives "4 of 10 fit · 6
+ *  dimmed" (or "· 6 hidden"); `n` fit, `m` miss, as for the cards. */
+export const resultsLine = (n, m, hidden = false, { unit = "cards" } = {}) =>
+  (unit === "rows"
+    ? `${n} of ${n + m} fit${m > 0 ? ` · ${m} ${hidden ? "hidden" : "dimmed"}` : ""}`
+    : (m > 0 ? `${matchHeading(n)} · ${missToggle(m, hidden)}` : matchHeading(n)));
 
 /** One row's reason, in the fewest words that still say which rule. */
 export const missReasonLine = (miss) => (miss && miss.short ? miss.short : "");
@@ -3518,18 +3745,12 @@ export function controlReadings(cands = [], request, sizeOf = () => null) {
 }
 
 /**
- * ZERO MATCHES: WHICH CONTROL BINDS, AND THE NEAREST VALUE THAT LETS SOMETHING IN.
- *
- * Read off the candidates that missed, from the number each one's miss carries (`need`): a candidate gets in on
- * ONE control's move only when that control is the only thing it missed. For each such control the value is the
- * closest one a candidate needs, rounded the safe way (down for a minimum, up for a cost) so the value shown does
- * let it in, and the nearest control is the one that moves least against its own slider. Never a guess: if no
- * single control lets anything in, it says how many miss on each instead.
- *
- * @returns {null | { control, value, matches: string[], text }} — null when there is nothing to say (the list is
- *   empty, or something already matches)
+ * EVERY ONE-CONTROL MOVE THAT LETS A CANDIDATE IN, NEAREST FIRST — what `nearestRelaxation()` and the "Nothing fits"
+ * fix (`nothingFits()`, redesign PR 1) both read, so the move is worked out once. Null when the list is empty or
+ * something already matches. Each option: { control, value, matches, n, dist, lead, past } — `past` is true when the
+ * value lies beyond the per-trade limit (the fix never offers that).
  */
-export function nearestRelaxation(cands = [], request, sizeOf = () => null) {
+export function relaxOptions(cands = [], request, sizeOf = () => null) {
   const rows = [];
   for (const c of cands || []) {
     const r = meetsRequest(c, request, sizeOf(c));
@@ -3543,7 +3764,6 @@ export function nearestRelaxation(cands = [], request, sizeOf = () => null) {
   };
   const options = [];
   const only = (control) => rows.filter((r) => r.misses.length && r.misses.every((m) => m.control === control && m.need != null));
-  const noun = (n) => `${n} ${plural(n, "match", "matches")}`;
 
   const ch = only("chance");
   if (ch.length && request.minChance != null) {
@@ -3586,17 +3806,36 @@ export function nearestRelaxation(cands = [], request, sizeOf = () => null) {
         const past = Number.isFinite(cap) && value > cap;
         const top = Number(request.amtMax);
         if (past || !Number.isFinite(top) || value <= top) {
-          options.push({ control: "size", value, matches: names(let_in), n: let_in.length, dist: (value - amt) / amt,
+          options.push({ control: "size", value, matches: names(let_in), n: let_in.length, dist: (value - amt) / amt, past,
             lead: past ? `Raise the per-trade limit to ${money(value)}` : `Raise most I will risk to ${money(value)}` });
         }
       }
     }
   }
+  options.sort((a, b) => a.dist - b.dist);
+  return { rows, options };
+}
+
+/**
+ * ZERO MATCHES: WHICH CONTROL BINDS, AND THE NEAREST VALUE THAT LETS SOMETHING IN.
+ *
+ * Read off the candidates that missed, from the number each one's miss carries (`need`): a candidate gets in on
+ * ONE control's move only when that control is the only thing it missed. For each such control the value is the
+ * closest one a candidate needs, rounded the safe way (down for a minimum, up for a cost) so the value shown does
+ * let it in, and the nearest control is the one that moves least against its own slider. Never a guess: if no
+ * single control lets anything in, it says how many miss on each instead.
+ *
+ * @returns {null | { control, value, matches: string[], text }} — null when there is nothing to say (the list is
+ *   empty, or something already matches)
+ */
+export function nearestRelaxation(cands = [], request, sizeOf = () => null) {
+  const ro = relaxOptions(cands, request, sizeOf);
+  if (!ro) return null;
+  const { rows, options } = ro;
   if (options.length) {
-    options.sort((a, b) => a.dist - b.dist);
     const o = options[0];
     return { control: o.control, value: o.value, matches: o.matches,
-      text: `${o.lead} → ${noun(o.n)}: ${o.matches.join(", ")}` };
+      text: `${o.lead} → ${o.n} ${plural(o.n, "match", "matches")}: ${o.matches.join(", ")}` };
   }
   // No single control lets one in: say how many miss on each, from the same misses.
   const tally = {};
@@ -3605,6 +3844,49 @@ export function nearestRelaxation(cands = [], request, sizeOf = () => null) {
   return { control: null, value: null, matches: [],
     text: `No single control lets one in: ${rows.length} ${plural(rows.length, "misses", "miss")}, ${parts.join(", ")}` };
 }
+
+/**
+ * "NOTHING FITS" (redesign PR 1): which filter binds, the cheapest card here, and ONE fix — the smallest change to
+ * one chip that lets a card in, read from `relaxOptions()` (the same move `nearestRelaxation()` names). The fix never
+ * goes past a limit: a budget move beyond the per-trade limit is dropped, and the line says the cheapest card is over
+ * the limit instead. With no single-chip move left, the fix is "Reset filters".
+ *
+ * @param cands   the candidates (`candidateOf()` shapes, with `tk`/`ticker` and `name`)
+ * @returns null when something fits or the list is empty; otherwise
+ *   { control, cheapest: {tk, name, risk}|null, fix: {label, control, patch}|null, reset: bool, overLimit: number|null }
+ */
+export function nothingFits(cands = [], request, sizeOf = () => null) {
+  const ro = relaxOptions(cands, request, sizeOf);
+  if (!ro) return null;
+  const { rows, options } = ro;
+  // The filter that binds: the control most candidates missed on.
+  const tally = {};
+  for (const r of rows) for (const k of new Set(r.misses.map((m) => m.control).filter(Boolean))) tally[k] = (tally[k] || 0) + 1;
+  const top = Object.entries(tally).sort((a, b) => b[1] - a[1])[0];
+  const control = top ? (top[0] === "size" && request.mode === "target" ? "target" : top[0]) : null;
+  // The cheapest card here: the least one contract puts at risk, from the size the caller worked out.
+  let cheapest = null;
+  for (const r of rows) {
+    const size = sizeOf(r.c);
+    const risk = size && !size.unpriceable && Number.isFinite(Number(size.unit)) ? Number(size.unit)
+      : (Number.isFinite(Number(r.c.risk)) ? Number(r.c.risk) : null);
+    if (risk == null) continue;
+    if (!cheapest || risk < cheapest.risk) cheapest = { tk: r.c.ticker || r.c.tk, name: r.c.name, risk: Math.ceil(risk) };
+  }
+  const cap = Number(request.riskCap);
+  const overLimit = cheapest && request.mode !== "target" && Number.isFinite(cap) && cheapest.risk > cap ? cap : null;
+  const usable = options.filter((o) => !o.past);
+  const o = usable[0] || null;
+  const fix = !o ? null
+    : o.control === "size"
+      ? { control: "size", label: `Set ${request.mode === "target" ? "target" : "budget"} to ${money(o.value)}`, patch: { amt: o.value } }
+      : o.control === "chance"
+        ? { control: "chance", label: o.value <= RULES.chanceAskMin + 1e-9 ? "Set chance to any" : `Set chance to ${chanceText(o.value)}`,
+          patch: { minChance: o.value <= RULES.chanceAskMin + 1e-9 ? null : o.value } }
+        : { control: "return", label: `Set return to ${returnText(o.value)}`, patch: { minReturn: o.value } };
+  return { control, cheapest, fix, reset: !fix, overLimit };
+}
+export const RESET_ALL_FILTERS = "Reset filters";
 
 /**
  * THE FAMILY A CARD CAME FROM UNDER "SIGNALS DECIDE" (PR #48, TASK 3): "↑ bull · signals" for a card in the

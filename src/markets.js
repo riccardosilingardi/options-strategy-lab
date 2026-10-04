@@ -23,6 +23,9 @@
 import { SIGMA } from "./engine.js";
 import { RULES } from "./rules.js";
 
+/** The calendars a row's `events` key may name (src/events.js holds their dates; events.test.js holds the two equal). */
+export const EVENT_CALENDARS = Object.freeze(["grains", "natgas", "petroleum", "fomc"]);
+
 /** Find's groups, in the order they are drawn. A market with no category (SPY) is never offered. */
 export const CATEGORIES = Object.freeze(["Grains", "Energy", "Metals"]);
 
@@ -41,32 +44,34 @@ const NO_WEATHER = {
    is built on: strikes are the board's, `expiryStrikes()`), proposable (false: priced as a hedge, never offered),
    weather (does the factor apply, and the sentence when it does not), newsQ (the news query), iv (the implied
    volatility used before a chain quotes one: a reference, `RULES.fallbackIV` for every market nobody measured) and
-   sigma (the realised-volatility fallback from `SIGMA`, or null: `sigmaProvenance()` then says the fallback was chosen).
+   sigma (the realised-volatility fallback from `SIGMA`, or null: `sigmaProvenance()` then says the fallback was chosen)
+   and events (redesign PR 1: which calendar in src/events.js the market reads — "grains", "natgas", "petroleum",
+   "fomc" — or null for none).
    NOT ONE NUMBER IS INVENTED FOR THE LIQUID TIER (ROADMAP P2-bis): no sigma, and the named iv fallback. */
 export const MARKET_ROWS = Object.freeze([
   { ticker: "CORN", name: "Corn", category: "Grains", step: 0.5, proposable: true,
-    weather: { applies: true }, newsQ: "corn futures USDA crop", iv: 0.24, sigma: SIGMA.CORN },
+    weather: { applies: true }, newsQ: "corn futures USDA crop", iv: 0.24, sigma: SIGMA.CORN, events: "grains" },
   { ticker: "SOYB", name: "Soybeans", category: "Grains", step: 0.5, proposable: true,
-    weather: { applies: true }, newsQ: "soybean futures prices", iv: 0.20, sigma: SIGMA.SOYB },
+    weather: { applies: true }, newsQ: "soybean futures prices", iv: 0.20, sigma: SIGMA.SOYB, events: "grains" },
   { ticker: "WEAT", name: "Wheat", category: "Grains", step: 0.25, proposable: true,
-    weather: { applies: true }, newsQ: "wheat futures prices", iv: 0.26, sigma: SIGMA.WEAT },
+    weather: { applies: true }, newsQ: "wheat futures prices", iv: 0.26, sigma: SIGMA.WEAT, events: "grains" },
   { ticker: "UNG", name: "US Natural Gas", category: "Energy", step: 0.5, proposable: true,
-    weather: { applies: true }, newsQ: "natural gas prices storage EIA", iv: 0.45, sigma: SIGMA.UNG },
+    weather: { applies: true }, newsQ: "natural gas prices storage EIA", iv: 0.45, sigma: SIGMA.UNG, events: "natgas" },
   { ticker: "BOIL", name: "2x Natural Gas", category: "Energy", step: 1, proposable: true,
-    weather: { applies: true }, newsQ: "natural gas prices forecast", iv: 0.85, sigma: SIGMA.BOIL },
+    weather: { applies: true }, newsQ: "natural gas prices forecast", iv: 0.85, sigma: SIGMA.BOIL, events: "natgas" },
   { ticker: "USO", name: "Crude Oil", category: "Energy", step: 1, proposable: true,
-    weather: { applies: false, reason: NO_WEATHER.USO }, newsQ: "crude oil price OPEC EIA inventories", iv: RULES.fallbackIV, sigma: null },
+    weather: { applies: false, reason: NO_WEATHER.USO }, newsQ: "crude oil price OPEC EIA inventories", iv: RULES.fallbackIV, sigma: null, events: "petroleum" },
   { ticker: "XLE", name: "Energy Sector", category: "Energy", step: 1, proposable: true,
-    weather: { applies: false, reason: NO_WEATHER.XLE }, newsQ: "energy sector oil majors outlook", iv: RULES.fallbackIV, sigma: null },
+    weather: { applies: false, reason: NO_WEATHER.XLE }, newsQ: "energy sector oil majors outlook", iv: RULES.fallbackIV, sigma: null, events: "petroleum" },
   { ticker: "GLD", name: "Gold", category: "Metals", step: 1, proposable: true,
-    weather: { applies: false, reason: NO_WEATHER.GLD }, newsQ: "gold price fed real yields dollar", iv: RULES.fallbackIV, sigma: null },
+    weather: { applies: false, reason: NO_WEATHER.GLD }, newsQ: "gold price fed real yields dollar", iv: RULES.fallbackIV, sigma: null, events: "fomc" },
   { ticker: "SLV", name: "Silver", category: "Metals", step: 0.5, proposable: true,
-    weather: { applies: false, reason: NO_WEATHER.SLV }, newsQ: "silver price industrial demand dollar", iv: RULES.fallbackIV, sigma: null },
+    weather: { applies: false, reason: NO_WEATHER.SLV }, newsQ: "silver price industrial demand dollar", iv: RULES.fallbackIV, sigma: null, events: "fomc" },
   { ticker: "GDX", name: "Gold Miners", category: "Metals", step: 1, proposable: true,
-    weather: { applies: false, reason: NO_WEATHER.GDX }, newsQ: "gold miners production costs outlook", iv: RULES.fallbackIV, sigma: null },
+    weather: { applies: false, reason: NO_WEATHER.GDX }, newsQ: "gold miners production costs outlook", iv: RULES.fallbackIV, sigma: null, events: "fomc" },
   // SPY: priced as a hedge on the desk, never proposed, in no category.
   { ticker: "SPY", name: "S&P 500 ETF", category: null, step: 5, proposable: false,
-    weather: { applies: false, reason: NO_WEATHER.SPY }, newsQ: "S&P 500 stock market outlook", iv: 0.13, sigma: SIGMA.SPY },
+    weather: { applies: false, reason: NO_WEATHER.SPY }, newsQ: "S&P 500 stock market outlook", iv: 0.13, sigma: SIGMA.SPY, events: null },
 ]);
 
 const finite = (x) => typeof x === "number" && Number.isFinite(x);
@@ -85,6 +90,7 @@ export function checkRow(r) {
   if (typeof r.newsQ !== "string" || !r.newsQ) throw new Error(`${where}: no news query`);
   if (!(finite(r.iv) && r.iv > 0)) throw new Error(`${where}: iv must be a positive number (RULES.fallbackIV when nobody measured one)`);
   if (r.sigma !== null && !(finite(r.sigma) && r.sigma > 0)) throw new Error(`${where}: sigma is a positive number or null`);
+  if (r.events != null && !EVENT_CALENDARS.includes(r.events)) throw new Error(`${where}: events is one of ${EVENT_CALENDARS.join(", ")} or null`);
   return r;
 }
 
@@ -105,7 +111,7 @@ export function buildRegistry(rows) {
     const r = byTicker[tk];
     if (r) return { ...r, fallback: false };
     return { ticker: tk || "?", name: tk || "?", category: null, step: 0.5, proposable: false,
-      weather: { applies: false, reason: null }, newsQ: `${tk || "?"} price outlook`, iv: 0.30, sigma: 0.30, fallback: true };
+      weather: { applies: false, reason: null }, newsQ: `${tk || "?"} price outlook`, iv: 0.30, sigma: 0.30, events: null, fallback: true };
   };
   return {
     rows: Object.freeze(list), byTicker, basket, categories, getU,

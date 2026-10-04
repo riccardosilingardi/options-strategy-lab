@@ -22,7 +22,7 @@ import {
   feedName, sourceNote, openInterestPath, applyOpenInterest, fetchOpenInterest,
   hasOpenInterest, oiProfile,
   spotOf, spotAt, nearMoneyOpenInterest, monotonicityBreaks, monotonicityNote,
-  snapStrike, expiryStrikes, resnapLegs, strikeOptions,
+  snapStrike, expiryStrikes, resnapLegs, strikeOptions, atmIv,
 } from "./chain.js";
 
 const ok = [], bad = [];
@@ -507,6 +507,20 @@ check("resnapLegs leaves an unloaded board alone rather than snapping to a grid"
   const r = resnapLegs(legs, null);
   eq(r.moved.length, 0);
   eq(r.legs, legs, "the same array, so React bails out of the update");
+});
+
+// REDESIGN PR 1: the at-the-money IV the IV-rank recorder records and the market page prints — one function.
+check("ATM IV — the first expiry 25–70 days out, the call nearest the spot, its IV; missing is null, never zero", () => {
+  const ch = { spot: 18.42, expirations: ["2026-10-16", "2026-11-20", "2026-12-18"], byExp: {
+    "2026-10-16": { dte: 12, calls: { 18: { iv: 0.5 } } },
+    "2026-11-20": { dte: 47, calls: { 17: { iv: 0.30 }, 18.5: { iv: 0.242 }, 20: { iv: 0.22 } } },
+    "2026-12-18": { dte: 75, calls: { 18.5: { iv: 0.26 } } } } };
+  const a = atmIv(ch);
+  eq(a.expKey, "2026-11-20", "the board"); eq(a.strike, 18.5, "the strike nearest 18.42"); eq(a.iv, 0.242, "its IV");
+  eq(atmIv({ ...ch, byExp: { ...ch.byExp, "2026-11-20": { dte: 47, calls: { 18.5: { iv: null } } } } }), null, "no IV quoted");
+  eq(atmIv(null), null, "no chain"); eq(atmIv({ ...ch, spot: null }), null, "no spot");
+  // No board in the window: the first listed, as the recorder always did.
+  eq(atmIv({ spot: 18.42, expirations: ["2026-10-16"], byExp: { "2026-10-16": { dte: 12, calls: { 18: { iv: 0.5 } } } } }).iv, 0.5, "fallback board");
 });
 
 await run();

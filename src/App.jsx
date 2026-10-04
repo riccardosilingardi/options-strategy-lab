@@ -19,7 +19,7 @@ import { fuseSignals, sentimentDirection, signalDirection, signalFamilies, findO
   readingState, signalSnapshot, compareSignals } from "./signals.js";
 import { N as nCDF, bs as bsPrice, smile as smileIV, payoff as payoffExp, SIGMA, histBacktest,
   parseAvJson, statsFromMatrix } from "./engine.js";
-import { parseOcc, buildOcc, snapStrike, resnapLegs, expiryStrikes, strikeOptions, fetchChain, hasOpenInterest, enrichOpenInterest, feedName, sourceNote, openInterestNote, oiProfile, expiryOpenInterest, nearMoneyOpenInterest, monotonicityBreaks, monotonicityNote, invertedOnStrikes, spotOf, spotAt } from "./chain.js";
+import { parseOcc, buildOcc, snapStrike, resnapLegs, expiryStrikes, strikeOptions, fetchChain, hasOpenInterest, enrichOpenInterest, feedName, sourceNote, openInterestNote, oiProfile, expiryOpenInterest, nearMoneyOpenInterest, monotonicityBreaks, monotonicityNote, invertedOnStrikes, spotOf, spotAt, atmIv } from "./chain.js";
 import { T, TYPE, themeName, setTheme, BADGE_SAFE } from "./theme.js";
 import { RULES, sizing, ruleBadge, takeProfitLabel, takeProfitTarget, takeProfitBasisWords, stopWarningLevel, stopLossLabel, perTradeCapLabel, RULE_PILLS, money, pctText, capitalSourceNote, perTradeLimitPhrase, qualityFloor, qualityFloorSentence, liquiditySkippedNote,
   positionPnl, BROKER_PNL, remainingEdge, remainingEdgeLabel, shareOfMaximum, attentionCount,
@@ -1629,12 +1629,11 @@ export default function OptionsStrategyLab() {
       ensureOpenInterest(tk, c);
       // snapshot IV ATM giornaliero → costruisce lo storico per l'IV Rank
       try {
-        const ek2 = c.expirations.find((e) => c.byExp[e].dte >= 25 && c.byExp[e].dte <= 70) || c.expirations[0];
-        if (ek2 && c.spot) {
-          const cs = Object.keys(c.byExp[ek2].calls).map(Number);
-          const kA = cs.reduce((b2, k) => Math.abs(k - c.spot) < Math.abs(b2 - c.spot) ? k : b2, cs[0]);
-          const ivA = c.byExp[ek2].calls[kA]?.iv;
-          if (ivA) setStore((st) => {
+        // ONE READING (redesign PR 1): `atmIv()` in chain.js, the same function the market page's header prints.
+        const atm = atmIv(c);
+        if (atm) {
+          const ivA = atm.iv;
+          setStore((st) => {
             const d = new Date().toISOString().slice(0, 10);
             const h = (st.ivHist?.[tk] || []).filter((x) => x.d !== d);
             const ns = { ...st, ivHist: { ...(st.ivHist || {}), [tk]: [...h, { d, iv: ivA }].slice(-250) } };

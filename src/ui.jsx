@@ -17,6 +17,7 @@
 // ============================================================================
 import React, { useEffect, useId, useRef, useState } from "react";
 import { T, TYPE } from "./theme.js";
+import { PLACEHOLDER_HEAD, placeholderOf } from "./rules.js";
 
 const FS = TYPE.size, FW = TYPE.weight, LH = TYPE.line;
 
@@ -309,6 +310,27 @@ export function RangeField({
         <span>{usable ? (maxCaption != null ? maxCaption : format(max)) : ""}</span>
       </div>
       {note && usable && <Note style={{ marginTop: 2 }}>{note}</Note>}
+    </div>
+  );
+}
+
+/* ====================================================================
+   THE PLACEHOLDER (redesign PR 1, TASK 1) — a function with no source yet. A dashed box in `T.mut`: "Not connected
+   yet", what it will show, what it needs, and which PR fills it. It takes an id and NOTHING ELSE: its words are
+   `PLACEHOLDERS` in rules.js, so a screen cannot give one a number. An unknown id renders nothing (the test fails
+   the build on one first).
+==================================================================== */
+export function Placeholder({ id }) {
+  const p = placeholderOf(id);
+  if (!p) return null;
+  return (
+    <div role="note" data-placeholder={p.id}
+      style={{ ...sans, fontSize: FS.xs, lineHeight: LH.body, color: T.mut, border: `1px dashed ${T.mut}`, borderRadius: 8,
+        padding: "8px 12px", marginTop: 8 }}>
+      <div style={{ fontWeight: FW.bold }}>{PLACEHOLDER_HEAD}</div>
+      <div>Will show {p.shows}.</div>
+      <div>Needs {p.needs}.</div>
+      <div>Comes with {p.pr}.</div>
     </div>
   );
 }
