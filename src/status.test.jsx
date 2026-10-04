@@ -183,7 +183,10 @@ check("ON THE FIXTURES: the label moves to the cards whose own strikes are inver
 /* PR #41, TASK 3 — FIND IS MULTI-MARKET: NO SINGLE-TICKER HEADER STRIP ON IT. */
 check("FIND HAS NO SINGLE-TICKER STRIP; BUILD KEEPS IT", () => {
   has(code, 'const onFindStep = tab === "build" && !showSettings && "find" === step;');
-  const open = code.indexOf("{!onFindStep && (");
+  // Redesign PR 1: the market page is one ticker too, but it prints its own header for its own market (market.jsx), so
+  // Build's strip is guarded off it as well.
+  has(code, 'const onMarketStep = tab === "build" && !showSettings && "market" === step;');
+  const open = code.indexOf("{!onFindStep && !onMarketStep && (");
   if (open < 0) throw new Error("the strip is not guarded");
   // Every stat of the strip sits after the guard and before the guard closes.
   const close = code.indexOf("TabBoundary", open);

@@ -334,3 +334,38 @@ export function Placeholder({ id }) {
     </div>
   );
 }
+
+/* ====================================================================
+   THE BOTTOM SHEET (redesign PR 1, TASK 2) — one control, over the screen, from the bottom. Find's chips each open
+   one holding the EXISTING control, behaviour unchanged; the market page's ticker opens one. It scrolls inside
+   itself, a tap on the backdrop or "Close" closes it, Escape closes it, and its `footer` (Find: "Show N of M") sits
+   at the bottom. It is a dialog (aria-modal) with its title as its name. Whether it is open is the CALLER's state,
+   which is navigation (`deskSheet`, nav.js), so Back closes it. What it holds is one tap away: the word counter
+   (wordcount.mjs) does not score it at rest.
+==================================================================== */
+export function Sheet({ open, title, onClose, footer = null, children }) {
+  useEffect(() => {
+    if (!open || typeof document === "undefined") return undefined;
+    const esc = (e) => { if (e.key === "Escape" && onClose) onClose(); };
+    document.addEventListener("keydown", esc);
+    return () => document.removeEventListener("keydown", esc);
+  }, [open, onClose]);
+  if (!open) return null;
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 90, display: "flex", flexDirection: "column", justifyContent: "flex-end" }}>
+      <div aria-hidden="true" onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.45)" }} />
+      <div role="dialog" aria-modal="true" aria-label={title}
+        style={{ position: "relative", background: T.panel, borderTop: `1px solid ${T.field}`, borderRadius: "14px 14px 0 0",
+          maxHeight: "82vh", display: "flex", flexDirection: "column", width: "100%", maxWidth: 640, margin: "0 auto",
+          paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "8px 16px",
+          borderBottom: `1px solid ${T.line}` }}>
+          <h2 data-view-heading tabIndex={-1} style={{ ...sans, fontSize: FS.md, fontWeight: FW.bold, color: T.ink, margin: 0, outline: "none" }}>{title}</h2>
+          <Btn small ghost color={T.blue} onClick={onClose}>Close</Btn>
+        </div>
+        <div style={{ overflowY: "auto", padding: "12px 16px", overscrollBehavior: "contain" }}>{children}</div>
+        {footer && <div style={{ padding: "8px 16px 12px", borderTop: `1px solid ${T.line}` }}>{footer}</div>}
+      </div>
+    </div>
+  );
+}

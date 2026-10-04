@@ -182,7 +182,8 @@ test("WIRING — App.jsx makes its screens out of this module, and every view ha
   const app = readFileSync("src/App.jsx", "utf8");
   assert.match(app, /createNavHistory\(\{/);
   assert.match(app, /window\.addEventListener\("popstate"/);
-  assert.match(app, /navOf\(\{ view, tab, step, showSettings, ev, whyTk, detailsId, deskSheet, posSeg \}\)/);
+  // Redesign PR 1: the market page's ticker and tab ride along (`mktTk`, `mktTab`).
+  assert.match(app, /navOf\(\{ view, tab, step, showSettings, ev, whyTk, detailsId, deskSheet, posSeg,\s*mktTk: tab === "build" && step === "market" \? mkt\.tk : null, mktTab: mkt\.tab \}\)/);
   const headings = (app.match(/data-view-heading/g) || []).length;
   assert.ok(headings >= 6, `Find, Build, Positions, Watching, Journal and Settings each carry one (found ${headings})`);
   assert.match(readFileSync("src/wizard.jsx", "utf8"), /<h1 data-view-heading tabIndex=\{-1\}/, "Home too");
@@ -196,10 +197,33 @@ test("BUILD FROM A CARD: the back link is the first thing, and it returns to tha
   const at = app.indexOf("← Back to the list");
   assert.ok(at > 0);
   assert.ok(app.lastIndexOf("{cardOrigin && (", at) > app.lastIndexOf("<div style={{ marginTop: 12 }}>", at) - 400, "it sits at the top of the Build block");
-  assert.match(app, /scrollToCard\.current = buildOrigin \? buildOrigin\.key : null; goStep\("find"\)/);
-  // PR #45: the Find step is `find.jsx` now, and every card it prints carries its key.
-  assert.match(readFileSync("src/find.jsx", "utf8"), /cardKey=\{x\.key\}/, "every Find card carries its key");
+  // Redesign PR 1: the cards live on their market's page, so the link returns there, to that card.
+  assert.match(app, /scrollToCard\.current = buildOrigin \? buildOrigin\.key : null; goMarket\(/);
+  assert.match(app, /if \(\(step !== "find" && step !== "market"\) \|\| ev \|\| !scrollToCard\.current\) return;/, "the market page scrolls back to it");
+  assert.match(readFileSync("src/market.jsx", "utf8"), /cardKey=\{x\.key\}/, "every market card carries its key");
   assert.match(readFileSync("src/card.jsx", "utf8"), /data-card-key=\{cardKey \|\| undefined\}/);
+});
+
+test("THE MARKET PAGE (redesign PR 1): Back goes Build → the market page, same ticker and tab → Find; a tab is a screen", () => {
+  const a = app();
+  a.go(navOf({ view: "desk", tab: "build", step: "find" }));
+  a.go({ step: "market", mkt: "CORN", mtab: "strategies" });
+  a.go({ mtab: "chain" });                      // a tab is a screen: it pushes
+  a.go({ step: "build" });                      // Build ›, from the chain's tray
+  assert.equal(a.nav.step, "build");
+  a.back();
+  assert.equal(a.nav.step, "market"); assert.equal(a.nav.mkt, "CORN"); assert.equal(a.nav.mtab, "chain");
+  a.back();
+  assert.equal(a.nav.step, "market"); assert.equal(a.nav.mtab, "strategies");
+  a.back();
+  assert.equal(a.nav.step, "find");
+  // navOf carries them, and no market means no tab.
+  assert.deepEqual([navOf({ mktTk: "GLD" }).mkt, navOf({ mktTk: "GLD" }).mtab], ["GLD", "strategies"]);
+  assert.equal(navOf({}).mtab, null);
+  // A chip's sheet on Find is a sheet: closing it from its own button is a back.
+  const screen = navOf({ view: "desk", tab: "build", step: "find" });
+  const open = navOf({ view: "desk", tab: "build", step: "find", deskSheet: "find:budget" });
+  assert.equal(planNav([screen, open], 1, screen).type, "back");
 });
 
 console.log(`\nnav: ${passed} passed, ${failures.length} failed`);

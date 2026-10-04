@@ -56,6 +56,7 @@ import { CapitalOnboarding, WizardOpen, ConfirmSteps, Card, Pill } from "./wizar
 import { CandidateCard, CandidateActions, SignalBadge, StopSigns } from "./card.jsx";
 // STEP 1, FIND: its own file since PR #45, built on `ui.jsx` and the type tokens.
 import { FindStep } from "./find.jsx";
+import { MarketPage } from "./market.jsx";
 import { buildHandOff, buildScreenState, BUILD_TAB } from "./handoff.js";
 import { orderBody, orderOutcome, alpacaErrorText, reduceRatios, limitWords, orderLimitWords, fillPriceOf, cancelOutcome, cancelWaiting } from "./order.js";
 // THE PERMANENT RECORD: the ref a position is given at open, the sequence on
@@ -72,7 +73,9 @@ import { FIRST_STEP, stepCarry, candidateOf, candidateKey, legsLine, toggleCompa
 import { PositionCard, PositionDetails } from "./positionCard.jsx";
 import { navOf, createNavHistory } from "./nav.js";
 import { exitProgress, entryVsNow, displayName, fileState, pnlShareOfRisk, pnlShareText, holdsStructure,
-  sizeWords, withExactMaxProfit, maxProfitCorrection, maxProfitCorrectionNote } from "./positionView.js";
+  sizeWords, withExactMaxProfit, maxProfitCorrection, maxProfitCorrectionNote, exitDateOf } from "./positionView.js";
+import { FIND_HEADING, DEFAULT_FIND_ORDER, SAVED_COLUMNS, SAVED_ROWS, NOT_RECORDED, NOT_ON_CHAIN, savedEmptyText, SAVED_REMOVE,
+  BUILD_CTA, WOULD_HAVE_DONE, per100Text } from "./rules.js";
 import { EvidenceBar, EvidenceOverlay, DeskSheet, Fold, DeskCountLine } from "./steps.jsx";
 import { BottomBar, placeOf, NAV_BAR_H } from "./navBar.jsx";
 import { AccountStrip, PositionsBar, WorkingCloseLine } from "./positions.jsx";
@@ -1339,7 +1342,10 @@ export default function OptionsStrategyLab() {
   /* ---- THE ONE NUMBERED PATH (src/path.js) ----
      Two steps since PR #40: 1 Find (one request block over one ranked list
      across the selected markets), 2 Build (one trade taken apart). */
-  const [step, setStep] = useState(FIRST_STEP);   // "find" | "build"
+  const [step, setStep] = useState(FIRST_STEP);   // "find" | "market" | "build"
+  /* THE MARKET PAGE'S OWN STATE (redesign PR 1): its ticker and its tab. Opening CORN's page does NOT replace the
+     trade loaded on Build (`ticker`, `legs`): that changes only when the user takes a trade there. */
+  const [mkt, setMkt] = useState({ tk: null, tab: "strategies" });
   const [ev, setEv] = useState(null);           // which evidence sheet is open OVER the step
   /* ---- comparing, on Find ----
      Up to three candidates, normalised into one shape by `candidateOf`. The
@@ -1353,6 +1359,8 @@ export default function OptionsStrategyLab() {
   // WHY A MARKET HAS NO CHAIN, when its fetch FAILED (PR #40): a failure is not
   // "still loading", and neither is a market verdict. Cleared on the next success.
   const [chainErr, setChainErr] = useState({});  // ticker -> error in a few words
+  // When a refresh last failed (redesign PR 1): Find's stale banner says "The feed didn't answer at <time>".
+  const [chainErrAt, setChainErrAt] = useState(null);
   const [seasonal, setSeasonal] = useState({});  // ticker -> {monthlyMean, sigma, matrix, years, src, at} from Alpha Vantage
   // WHY a market is not in `seasonal`: loading, or a named failure. A fallback
   // that cannot say why it is in use is indistinguishable from a measurement.
@@ -1645,6 +1653,7 @@ export default function OptionsStrategyLab() {
       return c;
     } catch (e) {
       setChainErr((m) => ({ ...m, [tk]: fetchFailWords(e) }));
+      setChainErrAt(Date.now());
       if (!silent) setMsg(`Could not load ${tk} option prices — ${e.message}`);
       return null;
     } finally { if (!silent) setBusy(null); }
@@ -2362,10 +2371,12 @@ export default function OptionsStrategyLab() {
      must not lose what was selected, so the selection lives in this component
      and the step is only which part of it is being shown. */
   const goStep = (id) => {
-    setView("desk"); setTab(BUILD_TAB); setStep(id); setEv(null); setShowSettings(false);
+    setView("desk"); setTab(BUILD_TAB); setStep(id); setEv(null); setShowSettings(false); setDeskSheet(null);
     window.scrollTo?.({ top: 0 });
     refreshExpired();
   };
+  /** Open a market's page (redesign PR 1): from a Find row on Strategies; a tab is kept when the ticker changes. */
+  const goMarket = (tk, tab = "strategies") => { setMkt({ tk, tab }); goStep("market"); };
 
   /* ---- WHAT IS OUT OF DATE, AND NOTHING ELSE ----
      Every source has its own budget (src/freshness.js) and they are wildly
@@ -3098,6 +3109,24 @@ export default function OptionsStrategyLab() {
       .map((r) => ({ ...r, would: wouldHaveDone({ entryNet: r.entryNet, nowNet: r.nowNet, contracts: r.contracts }) }))
       .sort((a, b) => (b.at || 0) - (a.at || 0));
   }, [notTakenOrders, store.saved, chains]);
+  /* SAVED: "WHEN SAVED" BESIDE "NOW" (redesign PR 1). Now is priced at every read on today's chain through
+     `listCardFigures()`, the function every card reads: its chance, its future avg per $100 at risk and its risk for
+     one contract. An expiry today's chain does not list is "not on today's chain"; nothing is guessed. */
+  const savedNow = useMemo(() => {
+    const out = {};
+    for (const sv of store.saved || []) {
+      const c = chains[sv.ticker];
+      const e = c && sv.expKey ? c.byExp?.[sv.expKey] : null;
+      if (!c || !c.spot || !e || !(sv.legs || []).length) { out[sv.id] = null; continue; }
+      try {
+        const lf = listCardFigures(sv.legs, { spot: c.spot, dte: e.dte, iv: getU(sv.ticker).iv, q: makeQuote(c, sv.expKey),
+          ticker: sv.ticker, expKey: sv.expKey, seasonal: seasonalFor(sv.ticker), matrix: seasonal[sv.ticker]?.matrix || null });
+        out[sv.id] = { pop: lf.pop, per100: lf.future ? lf.future.per100 : null,
+          risk: lf.aFill && lf.aFill.maxLoss != null ? Math.abs(lf.aFill.maxLoss) : null };
+      } catch { out[sv.id] = null; }
+    }
+    return out;
+  }, [store.saved, chains, seasonal, seasonalFor]); // eslint-disable-line
 
   /* >>> ONE P&L PER POSITION, ONE SPELLING IN THIS FILE (P9, TASK 0b). <<<
      `positionPnl()` in rules.js decides WHICH of the two sources a figure came
@@ -3620,7 +3649,8 @@ export default function OptionsStrategyLab() {
   const cardOrigin = carded && buildOrigin.kind === "card";
   // BACK TO THE LIST (PR #44, TASK 3): Find still holds the same request, so it is a step back and a scroll to the card.
   const scrollToCard = useRef(null);
-  const backToList = () => { scrollToCard.current = buildOrigin ? buildOrigin.key : null; goStep("find"); };
+  // BACK TO THE CARD (redesign PR 1): a card lives on its market's page now, so the link returns there, to that card.
+  const backToList = () => { scrollToCard.current = buildOrigin ? buildOrigin.key : null; goMarket(String(buildOrigin && buildOrigin.key || "").split("|")[0] || mkt.tk, "strategies"); };
   /* THE SIZE LINE AND THE FOUR SIZED FIGURES ARE THE LIST CARD'S (PR #45, TASK 3): `sizedFigures()` and `sizeLine()` are
      the one function each, read here at the price the order will be sent at (`AE`) and in Find at `aFill` — the same
      analysis, held equal by `figures.test.jsx`. A count typed by hand wins and says so. */
@@ -3795,7 +3825,7 @@ export default function OptionsStrategyLab() {
             seasonal: seasonalFor(tk), a, aFill, matrix: seasonal[tk]?.matrix || null });
           const f = fHere || null;
           const prof = evProfile(lf.mc, aFill.maxProfit, aFill.maxLoss);
-          const cand = candidateOf({ name: p.name, legs: p.legs, a: aFill, pop: lf.pop, dte: d2, expKey: ek,
+          const cand = candidateOf({ name: p.name, legs: p.legs, a: aFill, pop: lf.pop, dte: d2, expKey: ek, futureAvg: lf.future ? lf.future.per100 : null,
             ...seasonalStampFields(lf.mc), ...chanceDrawFields(lf.mc) }, { ticker: tk, spot: c.spot, source: "find" });
           if (seen.has(cand.key)) continue;
           seen.add(cand.key);
@@ -3846,12 +3876,16 @@ export default function OptionsStrategyLab() {
   }), []);
   // "ONLY A POSITIVE FUTURE AVG" (PR #49): the card's future avg per $100 at risk above zero; unknown is not above.
   const futurePositive = (x) => futureIsPositive(x.ev100);
-  const findShown = useMemo(() => findGen.items.filter((x) =>
-    inFindFilter(x) && (find.flagged || x.flags.length === 0) && (!find.positiveOnly || futurePositive(x))).sort(findOrderCompare(findOrder)),
-  [findGen, inFindFilter, find.flagged, find.positiveOnly, findOrder]);
+  /* THE ONE SORTED LIST (redesign PR 1): `findSorted` is every card past the flag and "Avg > 0" toggles, in the owner's
+     order; Find's rows read it through the category tab (`findShown`), the market page through its ticker. Neither
+     re-ranks nor re-simulates. */
+  const findSorted = useMemo(() => findGen.items.filter((x) =>
+    (find.flagged || x.flags.length === 0) && (!find.positiveOnly || futurePositive(x))).sort(findOrderCompare(findOrder)),
+  [findGen, find.flagged, find.positiveOnly, findOrder]);
+  const findShown = useMemo(() => findSorted.filter(inFindFilter), [findSorted, inFindFilter]);
   useEffect(() => {
     // BACK RETURNS TO THE CARD (PR #46, TASK 2): a sheet opened from a card scrolls back to it when it closes.
-    if (step !== "find" || ev || !scrollToCard.current) return;
+    if ((step !== "find" && step !== "market") || ev || !scrollToCard.current) return;
     const key = scrollToCard.current;
     const id = requestAnimationFrame(() => {
       const el = typeof document !== "undefined"
@@ -3865,7 +3899,8 @@ export default function OptionsStrategyLab() {
      a different screen pushes an entry, popstate restores the one it hands back, and closing a sheet from its own
      button steps back instead of leaving a screen behind. Home is the first entry and is never intercepted. After
      each move, focus goes to the new view's heading (WCAG 2.4.3). */
-  const navNow = navOf({ view, tab, step, showSettings, ev, whyTk, detailsId, deskSheet, posSeg });
+  const navNow = navOf({ view, tab, step, showSettings, ev, whyTk, detailsId, deskSheet, posSeg,
+    mktTk: tab === "build" && step === "market" ? mkt.tk : null, mktTab: mkt.tab });
   const navNowRef = useRef(navNow); navNowRef.current = navNow;
   const buildOriginRef = useRef(null); buildOriginRef.current = buildOrigin;
   const navHist = useRef(null);
@@ -3878,10 +3913,11 @@ export default function OptionsStrategyLab() {
       apply: (n) => {
         const o = buildOriginRef.current;
         // Back from a trade that came from a card lands on that card, the way the "Back to the list" link does.
-        if (n.tab === "build" && n.step === "find" && navNowRef.current.step === "build" && o && o.kind === "card") scrollToCard.current = o.key;
+        if (n.tab === "build" && (n.step === "find" || n.step === "market") && navNowRef.current.step === "build" && o && o.kind === "card") scrollToCard.current = o.key;
         else if (typeof window.scrollTo === "function") window.scrollTo({ top: 0 });
         setView(n.view); setTab(n.tab); setStep(n.step); setShowSettings(n.settings);
         setEv(n.ev); setWhyTk(n.whyTk); setDetailsId(n.detailsId); setDeskSheet(n.sheet); setPosSeg(n.seg || "positions");
+        if (n.mkt) setMkt({ tk: n.mkt, tab: n.mtab || "strategies" });
       },
     });
     return () => { if (navHist.current) navHist.current.stop(); };
@@ -4079,8 +4115,39 @@ export default function OptionsStrategyLab() {
      Written `"find" === step` on purpose: `step === "<id>"` is how
      src/wordcount.mjs finds a step's JSX block, and this is not one. */
   const onFindStep = tab === "build" && !showSettings && "find" === step;
+  // The market page (redesign PR 1) is one ticker, but it prints its own header for its own market.
+  const onMarketStep = tab === "build" && !showSettings && "market" === step;
   /* FIND'S BAR READS THE SELECTION, NOT ONE MARKET (PR #46, TASK 1): "N markets · prices Xm ago", the OLDEST. */
   const findFresh = findFreshness(find.markets, chains, ago);
+  /* REDESIGN PR 1 — what Find's new screen reads from here. */
+  // One Refresh for every market Find reads (the header's button, and the stale banner's Retry).
+  const refreshFind = async () => {
+    setBusy("find");
+    try { for (const tk of find.markets) await refreshChain(tk, true); } finally { setBusy(null); }
+  };
+  // STALE: the oldest price past its budget (freshness.js), the day those numbers are from, a refresh that failed.
+  const findStale = {
+    stale: !!findFresh.oldest && isStale("chain", findFresh.oldest),
+    closeDay: findFresh.oldest ? new Date(findFresh.oldest).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" }) : null,
+    failedAt: chainErrAt && findFresh.oldest && chainErrAt > findFresh.oldest
+      ? new Date(chainErrAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) : null,
+    onRetry: refreshFind,
+  };
+  // RESET: every chip back to its default (the request, the horizon, the direction, the toggles, the order, liquidity).
+  const resetFind = () => {
+    setWant({ mode: "budget", amt: null, minChance: null, minReturn: null });
+    setFind((f) => ({ ...f, horizon: RULES.targetEntryDTE, dir: "signals", positiveOnly: false, flagged: true, hideMisses: false }));
+    setFindOrder(DEFAULT_FIND_ORDER);
+    setLiqLevelId(RECOMMENDED_LIQUIDITY.id);
+  };
+  // COMPARE, on Find and on the market page (the ticks are on the market page's cards).
+  const compareBlock = {
+    compare, showCompare, compareNote,
+    onTickCompare: (c) => tickCompare(c),
+    onClearCompare: () => { setCompare([]); setShowCompare(false); setCompareNote(null); },
+    onToggleCompare: () => setShowCompare((v) => !v),
+    onTakeToBuild: (c) => { const x = findGen.items.find((y) => y.key === c.key); if (x) openFound(x); else openOnBuild({ ticker: c.ticker, expKey: c.expKey, legs: c.legs, name: c.name }); },
+  };
   return (
     <div style={{ minHeight: "100vh", background: T.bg, color: T.body, ...sans }}>
       <DemoBanner />
@@ -4125,7 +4192,8 @@ export default function OptionsStrategyLab() {
                 try { for (const tk of find.markets) await refreshChain(tk, true); } finally { setBusy(null); }
                 return;
               }
-              await refreshChain(ticker);
+              // On the market page, its own market (redesign PR 1); on Build, Build's.
+              await refreshChain(onMarketStep ? mkt.tk : ticker);
             }} disabled={busy !== null} aria-label={onFindStep ? `Refresh prices for ${find.markets.length} markets` : `Refresh ${ticker} prices`}>
               <RefreshCw size={13} /> {busy === ticker || busy === "find" ? "…" : "Refresh"}
             </Btn>
@@ -4141,7 +4209,7 @@ export default function OptionsStrategyLab() {
             Find reads many markets at once, so a single market's price,
             expiry and seasonality above its list described none of them. It
             stays on Build and everywhere else one ticker is the subject. */}
-        {!onFindStep && (
+        {!onFindStep && !onMarketStep && (
         <div style={{ display: "flex", gap: 14, marginTop: 10, flexWrap: "wrap" }}>
           {/* The feed is named in ONE place (feedName in chain.js) and every label
               reads from it. This one used to say "(CBOE)" three centimetres under a
@@ -4488,31 +4556,28 @@ export default function OptionsStrategyLab() {
              the one: the request block above, every candidate across the
              selected markets below it, re-filtered live. The Shortlist is the
              one-market filter; Compare (max 3) stays. */}
-        {/* RESULTS | SAVED (PR #47, TASK 4): the old Watching place, inside Find. Written `"find" === step` so the word
-            counter does not take this switch for Find's own block. */}
+        {/* "FIND", THEN RESULTS | SAVED (PR #47, TASK 4; heading redesign PR 1): the old Watching place, inside Find.
+            Written `"find" === step` so the word counter does not take this switch for Find's own block. The gear for
+            Settings is in the header above. */}
         {((tab === "build" && "find" === step) || tab === "watching") && !showSettings && (
           <div style={{ marginTop: 12 }}>
+            <h2 data-view-heading tabIndex={-1} style={{ ...sans, fontSize: FS.lg, fontWeight: FW.bold, color: T.ink, margin: "0 0 8px", outline: "none" }}>{FIND_HEADING}</h2>
             <USegments label="Find: results or saved trades" value={tab === "watching" ? "saved" : "results"}
-              onChange={(v) => { if (v === "saved") { setTab("watching"); setShowSettings(false); setEv(null); } else goStep("find"); }}
+              onChange={(v) => { if (v === "saved") { setTab("watching"); setShowSettings(false); setEv(null); setDeskSheet(null); } else goStep("find"); }}
               items={[{ id: "results", label: "Results" }, { id: "saved", label: "Saved", count: watchRows.length }]} />
           </div>
         )}
         {tab === "build" && !showSettings && step === "find" && (
           <FindStep
             request={request} onRequest={(patch) => setWant((w) => ({ ...w, ...patch }))}
-            sentiments={SENTIMENTS} universe={BASKET} find={find} setFind={setFind}
-            spot={find.market ? spotOf(chains[find.market]) : null}
+            sentiments={SENTIMENTS} find={find} setFind={setFind}
             limits={limits} onLimit={(ov) => setSetting("sizeOverride", ov)} freeSizing={freeSizing}
             findGen={findGen} findShown={findShown} signalLines={Object.values(signalsIn)} findOrder={findOrder} onFindOrder={setFindOrder} flaggedHidden={flaggedHidden} positiveHidden={positiveHidden} barsCache={barsCache}
-            badgeOf={(x) => <SignalBadge fused={x.fused} state={readiness[x.tk]} onClick={() => { scrollToCard.current = x.key; setWhyTk(x.tk); setWhyDte(x.dte); setEv("why"); }} />}
-            onMore={(x) => { scrollToCard.current = x.key; setWhyTk(x.tk); setEv("more"); }}
-            actionsOf={(x) => (
-              <CandidateActions
-                ticked={inCompare(compare, x.cand)} onTick={() => tickCompare(x.cand)}
-                saved={isSaved(x.cand)} onSave={() => saveCandidate(x.cand)}
-                onBuild={() => openFound(x)} />
-            )}
-            liqLevel={liqLevel}
+            readiness={readiness} liqLevel={liqLevel}
+            liqState={{ id: liqLevelId, label: liqLevel.label, defaultId: RECOMMENDED_LIQUIDITY.id }}
+            sheet={deskSheet} onSheet={setDeskSheet} onReset={resetFind}
+            isSaved={isSaved} onSave={(x) => saveCandidate(x.cand)} onOpenMarket={(tk) => goMarket(tk, "strategies")}
+            freshness={findStale}
             foldedNode={<>
               <LiquidityFilter
                 levelId={liqLevelId} onLevel={setLiqLevelId} previews={liqPreview}
@@ -4520,18 +4585,36 @@ export default function OptionsStrategyLab() {
                 peers={focusBoard ? focusBoard.peers : []} feed={focusBoard ? focusBoard.feed : null} />
               <OpenInterestReadout chains={chains} floor={liqLevel.absolute} percentile={liqLevel.percentile} level={liqLevel} />
             </>}
-            compare={compare} showCompare={showCompare} compareNote={compareNote}
-            onTickCompare={(c) => tickCompare(c)}
-            onClearCompare={() => { setCompare([]); setShowCompare(false); setCompareNote(null); }}
-            onToggleCompare={() => setShowCompare((v) => !v)}
-            onTakeToBuild={(c) => { const x = findGen.items.find((y) => y.key === c.key); if (x) openFound(x); else openOnBuild({ ticker: c.ticker, expKey: c.expKey, legs: c.legs, name: c.name }); }}
-            forward={{
-              label: legs.length ? `Go to Build — ${ticker} · ${stratName} →` : "Pick one above to go to Build",
-              disabled: !legs.length,
-              disabledNote: `Tap "Take to Build" on a card — nothing is sent before the checks there.`,
-              sub: `${ticker} · ${stratName} is loaded on Build. Nothing is sent until the checks there.`,
-              onClick: () => goStep("build"),
-            }} />
+            {...compareBlock} />
+        )}
+
+        {/* ============ STEP 2 · THE MARKET PAGE (redesign PR 1, TASK 3) ============
+            One market: Overview · Strategies · Chain. Its cards are Find's one sorted list filtered to its ticker. */}
+        {tab === "build" && !showSettings && step === "market" && mkt.tk && (
+          <MarketPage
+            tk={mkt.tk} tab={mkt.tab} onTab={(t) => setMkt((m) => ({ ...m, tab: t }))} onBack={() => goStep("find")}
+            onTicker={(tk) => setMkt((m) => ({ ...m, tk }))}
+            chain={chains[mkt.tk] || null} freshLine={findFreshness([mkt.tk], chains, ago).line} bars={barsCache[mkt.tk] || []}
+            clock={clock} clockLine={marketClockLine(clock)}
+            ivRank={ivRankOf(mkt.tk)} ivDays={((store.ivHist || {})[mkt.tk] || []).length}
+            board={findGen.boards[mkt.tk] || null}
+            fused={findGen.boards[mkt.tk] ? fuseFind(mkt.tk, findGen.boards[mkt.tk].dte) : null}
+            readingState={readiness[mkt.tk] || null}
+            items={findSorted.filter((x) => x.tk === mkt.tk)} allItems={findSorted} boards={findGen.boards}
+            request={request} freeSizing={freeSizing} findDir={find.dir} sentiments={SENTIMENTS} findOrder={findOrder}
+            newsItems={newsPool} newsState={news[mkt.tk] || null} ago={ago}
+            exits={store.positions.filter((p) => p.ticker === mkt.tk && exitDateOf(p)).map((p) => ({ date: exitDateOf(p), label: `${RULES.exitDTE}-day exit · ${p.ref || p.ticker}` }))}
+            isSaved={isSaved} onSave={(x) => saveCandidate(x.cand)} inCompare={(c) => inCompare(compare, c)} onTickCompare={(c) => tickCompare(c)}
+            onBuild={(x) => openFound(x)}
+            onBuildLegs={({ ticker: tk, expKey: ek, legs: lg, name }) => openOnBuild({ ticker: tk, expKey: ek, legs: lg, name })}
+            cardFigures={listCardFigures} quoteOf={makeQuote} seasonal={seasonalFor(mkt.tk)} matrix={seasonal[mkt.tk]?.matrix || null}
+            liqFloor={liqLevel.absolute}
+            badgeOf={(x) => <SignalBadge fused={x.fused} state={readiness[x.tk]} onClick={() => { scrollToCard.current = x.key; setWhyTk(x.tk); setWhyDte(x.dte); setEv("why"); }} />}
+            onMore={(x) => { scrollToCard.current = x.key; setWhyTk(x.tk); setEv("more"); }}
+            whyProps={{ weatherData: weather, newsItems: newsPool, month: NOW_MONTH, order: findOrder }}
+            onAnalysis={logAnalysis}
+            sheet={deskSheet} onSheet={setDeskSheet}
+            compareProps={compareBlock} />
         )}
 
         {/* ============ BUILDER ============ */}
@@ -5642,38 +5725,41 @@ export default function OptionsStrategyLab() {
         {/* ============ JOURNAL — the third place ============
             What actually happened, and what it says about the habits. The
             report lives here too: it is a written record, not a workspace. */}
-        {/* ============ WATCHING ============ */}
+        {/* ============ SAVED (inside Find since PR #47; redesign PR 1) ============
+            Saved trades show "When saved" beside "Now" for Chance, Future avg and You risk, with Remove and Build ›.
+            Orders that were sent and never filled stay here with their tag (owner, 4 Oct 2026). On every row, what it
+            would have done is behind one fold: nothing is cut. */}
         {tab === "watching" && !showSettings && (
           <div>
-            <h2 data-view-heading tabIndex={-1} style={{ ...sans, fontSize: FS.lg, fontWeight: 800, color: T.ink, margin: "12px 0 8px", outline: "none" }}>Saved</h2>
             <Panel style={{ marginTop: 10 }}>
               <Label>SAVED ({watchRows.length}) · TRADES YOU DID NOT TAKE</Label>
-              <div style={{ ...sans, fontSize: FS.sm, color: T.body, lineHeight: 1.55, marginTop: 8 }}>
-                Nothing here is a position and nothing here is money. These are structures you saved, and orders
-                that were sent and came back with nothing bought — kept so you can see what they would have done.
-                No exit plan runs on them, none of them counts towards your exposure, and none of the figures
-                below is a profit or a loss.
-              </div>
-              {watchRows.length === 0 && (
-                <div style={{ ...mono, fontSize: FS.xs, color: T.mut, marginTop: 10, lineHeight: 1.6 }}>
-                  Nothing is being watched. Save a structure from the Shortlist to follow it without taking it —
-                  and an order that ends without filling arrives here by itself.
+              <Fold summary="Nothing here is a position and nothing here is money." label="why" tone={T.dim} style={{ marginTop: 4 }}>
+                <div style={{ ...sans, fontSize: FS.sm, color: T.body, lineHeight: 1.55 }}>
+                  These are structures you saved, and orders that were sent and came back with nothing bought — kept so you
+                  can see what they would have done. No exit plan runs on them, none of them counts towards your exposure,
+                  and none of the figures below is a profit or a loss.
                 </div>
+              </Fold>
+              {watchRows.length === 0 && (
+                <div style={{ ...sans, fontSize: FS.sm, color: T.mut, marginTop: 10, lineHeight: 1.6 }}>{savedEmptyText()}</div>
               )}
               <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
                 {watchRows.map((r) => {
                   const w = r.would;
                   const bands = r.spot ? payoffBands({ legs: r.legs, entryNet: r.entryNet, spot: r.spot }) : null;
+                  const sv = r.kind === "saved" ? r.saved : null;
+                  const now = sv ? savedNow[sv.id] : null;
+                  const whenRisk = sv && sv.maxLoss != null && Number.isFinite(Number(sv.maxLoss)) ? Math.abs(Number(sv.maxLoss)) : null;
                   return (
                     <div key={r.key} style={{ padding: "10px 12px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 8 }}>
                       <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
-                        <span style={{ color: T.ink, fontWeight: 700, fontSize: FS.sm }}>
-                          {r.ref ? `${r.ref} ` : ""}{r.ticker} · {r.name}
+                        <span style={{ ...sans, color: T.ink, fontWeight: 700, fontSize: FS.sm }}>
+                          {r.ref ? <span style={mono}>{`${r.ref} `}</span> : ""}<span style={mono}>{r.ticker}</span> · {r.name}
                         </span>
                         {/* WHICH OF THE TWO IT IS, on the row, because "I chose
                             not to" and "I tried and missed" are different facts
                             about the same picture. */}
-                        <span style={{ ...mono, fontSize: FS.xs, fontWeight: 800, letterSpacing: 0.4, padding: "2px 6px", borderRadius: 4,
+                        <span style={{ ...sans, fontSize: FS.xs, fontWeight: 800, letterSpacing: 0.4, padding: "2px 6px", borderRadius: 4,
                           background: r.kind === "saved" ? `${T.blue}22` : `${T.amber}22`, color: r.kind === "saved" ? T.blue : T.amber }}>
                           {r.kind === "saved" ? "SAVED, NEVER SENT" : `SENT · ${String(r.status || "finished").toUpperCase().replace(/_/g, " ")}`}
                         </span>
@@ -5683,6 +5769,28 @@ export default function OptionsStrategyLab() {
                         {legsLine(r.legs)}{r.expKey ? ` · ${r.expKey}` : ""}
                       </div>
 
+                      {/* WHEN SAVED · NOW (redesign PR 1): three figures, one contract. A figure not saved with the item
+                          reads "not recorded"; an expiry today's chain does not list reads "not on today's chain". */}
+                      {sv && (
+                        <div role="table" aria-label="When saved and now" style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 1fr", gap: "2px 8px", marginTop: 8 }}>
+                          <span />
+                          <span style={{ ...sans, fontSize: FS.xs, color: T.dim, fontWeight: 700 }}>{SAVED_COLUMNS.when}</span>
+                          <span style={{ ...sans, fontSize: FS.xs, color: T.dim, fontWeight: 700 }}>{SAVED_COLUMNS.now}</span>
+                          {[
+                            [SAVED_ROWS.chance, sv.pop == null ? NOT_RECORDED : chanceText(sv.pop), now ? chanceText(now.pop) : NOT_ON_CHAIN],
+                            [SAVED_ROWS.future, sv.futureAvg == null ? NOT_RECORDED : per100Text(sv.futureAvg), now ? per100Text(now.per100) : NOT_ON_CHAIN],
+                            [SAVED_ROWS.risk, whenRisk == null ? NOT_RECORDED : money(whenRisk), now ? (now.risk == null ? "—" : money(now.risk)) : NOT_ON_CHAIN],
+                          ].map(([k, a, b]) => (
+                            <React.Fragment key={k}>
+                              <span style={{ ...sans, fontSize: FS.xs, color: T.dim }}>{k}</span>
+                              <span style={{ ...(/^[a-z]/.test(a) ? sans : mono), fontSize: FS.xs, color: T.mut }}>{a}</span>
+                              <span style={{ ...(/^[a-z]/.test(b) ? sans : mono), fontSize: FS.xs, color: T.ink, fontWeight: 700 }}>{b}</span>
+                            </React.Fragment>
+                          ))}
+                        </div>
+                      )}
+
+                      <Fold summary={WOULD_HAVE_DONE} label="show" tone={T.dim} style={{ marginTop: 6 }}>
                       {bands && (
                         <div style={{ display: "flex", gap: 12, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
                           <BandThumbnail bands={bands} bars={barsCache[r.ticker] || []} width={200} height={40}
@@ -5734,15 +5842,16 @@ export default function OptionsStrategyLab() {
                         </div>
                       </div>
 
+                      </Fold>
+
                       <div style={{ display: "flex", gap: 6, marginTop: 9, flexWrap: "wrap" }}>
-                        <Btn small ghost onClick={() => openOnBuild({ ticker: r.ticker, expKey: r.expKey || null, legs: r.legs, name: r.name })}>
-                          Open it on Build →
+                        <Btn small color={T.action} onClick={() => openOnBuild({ ticker: r.ticker, expKey: r.expKey || null, legs: r.legs, name: r.name })}>
+                          {BUILD_CTA}
                         </Btn>
-                        <button
-                          onClick={() => (r.kind === "saved" ? delSaved(r.saved.id) : dropWatched(r.pos.id))}
-                          style={{ ...mono, fontSize: FS.xs, background: "transparent", border: `1px solid ${T.line}`, color: T.dim, borderRadius: 6, padding: "6px 10px", cursor: "pointer", minHeight: 36 }}>
-                          <Trash2 size={12} style={{ verticalAlign: "-2px" }} /> Stop watching
-                        </button>
+                        <Btn small ghost color={T.dim}
+                          onClick={() => (r.kind === "saved" ? delSaved(r.saved.id) : dropWatched(r.pos.id))}>
+                          <Trash2 size={12} aria-hidden="true" /> {SAVED_REMOVE}
+                        </Btn>
                       </div>
                     </div>
                   );

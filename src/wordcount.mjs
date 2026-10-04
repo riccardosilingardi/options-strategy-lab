@@ -50,7 +50,8 @@ import * as CL from "./clock.js";
 // `tab === "positions"`. It is measured by the same counter as the two steps, from the same source.
 // PR #47: Positions has two segments; "positions" is the Positions SEGMENT's block (`posSeg === "positions"`), and the
 // Orders segment, the close confirm and Modify are measured RENDERED, on J-0001's fixtures (`SURFACE_IDS` below).
-export const SCREEN_IDS = ["find", "build", "positions"];
+// Redesign PR 1: "market" is the market page, the step between Find and Build (`step === "market"`).
+export const SCREEN_IDS = ["find", "market", "build", "positions"];
 const GUARD = { positions: 'posSeg === "positions"' };
 
 /* ---- PR #47, TASK 3: FOUR SURFACES, MEASURED AS RENDERED ----------------------------------------------------
@@ -219,6 +220,45 @@ export const COPY = {
   // PR #48: the badge (on CORN's reading) and the card's "Why this place" line (its longest form).
   badgeText: () => S.badgeText({ ticker: "CORN", score: 64, confidence: 86, agreement: "CONFLUENT" }),
   placeLine: () => S.placeLine({ ev100: -12, sent: "bull", fused: { score: 64, confidence: 86, agreement: "CONFLUENT" }, lf: {} }, "evSignal"),
+  // REDESIGN PR 1 — Find, version B. The chip row is scored as all eight chips at rest (one call site renders them).
+  chipText: () => R.FIND_CHIPS.map((c) => R.chipText(c.id, { order: "ev", request: REQUEST, horizon: 45, dir: "signals", liqLabel: "Recommended" })).join(" "),
+  showRowsCta: () => R.showRowsCta(4, 10),
+  rowsResultsLine: () => R.rowsResultsLine(4, 6, false),
+  columnHeadText: () => R.columnHeadText("ev"),
+  rowRiskText: () => R.rowRiskText(193),
+  rowSubtitleText: () => R.rowSubtitleText("Bull Put Spread", "2026-11-20"),
+  rowFailedText: () => R.rowFailedText("HTTP 502 Bad Gateway from"),
+  findReadingLine: () => R.findReadingLine(10, 3),
+  staleBannerLine: () => R.staleBannerLine({ closeDay: "Fri 2 Oct", failedAt: "14:05" }),
+  nothingFitsLine: () => R.nothingFitsLine("size"),
+  allMissLine: () => R.allMissLine(10, { tk: "CORN", name: "Bull Put Spread", risk: 75 }),
+  overLimitNote: () => R.overLimitNote(250),
+  showMissesCta: () => R.showMissesCta(10),
+  // …and the market page (its header, Strategies, the Chain tab and its tray), on CORN at 18.42.
+  dayChangeText: () => R.dayChangeText({ change: 0.12, pct: 0.0066, prevDay: "Fri 2 Oct" }),
+  ivText: () => R.ivText(0.242),
+  ivRankText: () => R.ivRankText(null, 7),
+  expectedMoveText: () => R.expectedMoveText(1.6, "2026-11-20"),
+  newsHeadlineText: () => R.newsHeadlineText("Drought hits corn belt, corn prices jump", "AgWeb", "3h ago"),
+  groupHeadText: () => R.groupHeadText("bull", "signals"),
+  strategiesLine: () => R.strategiesLine({ sd: { dir: "bull", s: 38.6, fused: { score: 46, confidence: 84 } }, order: "ev", expKey: "2026-11-20", dte: 47 }),
+  stanceText: () => R.stanceText({ kind: "with", n: 3, total: 4, against: 0 }),
+  eventLineText: () => R.eventLineText({ name: "WASDE", when: "Fri 9 Oct, 18:00", days: 5, beforeDay: "20 Nov" }),
+  chainEventText: () => R.chainEventText(true),
+  noOpenInterestText: () => R.noOpenInterestText("Alpaca (indicative)"),
+  underEntryText: () => R.underEntryText(),
+  spotLineText: () => R.spotLineText(18.42, "close"),
+  legsMaxText: () => R.legsMaxText(4),
+  uncoveredText: () => R.uncoveredText(),
+  trayEmptyText: () => R.trayEmptyText(),
+  chainNotLoadedText: () => R.chainNotLoadedText("CORN"),
+  marketReadingText: () => R.marketReadingText("CORN"),
+  noCardsText: () => R.noCardsText("CORN", true),
+  savedEmptyText: () => R.savedEmptyText(),
+  dayWords: () => "",
+  // The chart library's own method (lightweight-charts), reached through PriceChart on the market page: it draws a
+  // line, it puts no sentence on screen, so it scores zero BY NAME (as `setText` does).
+  createPriceLine: () => "",
 };
 
 export const words = (s) => String(s || "").trim().split(/\s+/).filter(Boolean).length;
@@ -280,7 +320,8 @@ export function stepBlock(src, id) {
    deletion that scored the same as a fold would make it uncheckable. The same
    stripping is applied to both sides of every comparison. */
 // `Info` (PR #47): the ⓘ renders its text only while tapped open.
-const FOLDED = ["Fold", "BuildWarnings", "DeskSheet", "EvidenceOverlay", "Info"];
+// `Sheet` (redesign PR 1): Find's chip sheets and the market page's ticker sheet open on a tap, like a DeskSheet.
+const FOLDED = ["Fold", "BuildWarnings", "DeskSheet", "EvidenceOverlay", "Info", "Sheet"];
 
 export function atRest(src) {
   let out = src;
@@ -423,7 +464,9 @@ export const COMPONENT_DEPTH = 3;
 const UI_FILES = ["App.jsx", "pro.jsx", "steps.jsx", "why.jsx", "visuals.jsx", "wizard.jsx", "card.jsx", "ui.jsx", "find.jsx", "orders.jsx",
   // PR #47: the Positions segment's own files. `positionCard.jsx` was never read before, so the card's words were not
   // in the old 209; they are now, which makes the number larger AND honest.
-  "positions.jsx", "positionCard.jsx", "navBar.jsx"];
+  "positions.jsx", "positionCard.jsx", "navBar.jsx",
+  // Redesign PR 1: the market page.
+  "market.jsx"];
 
 const sourcesOnce = (() => {
   let cache = null;

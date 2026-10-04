@@ -43,7 +43,8 @@ check("TASK 2 — no EvidenceBar on Find; Build's bar is headed 'About this trad
   has(app, "onClick={() => { scrollToCard.current = x.key; setWhyTk(x.tk); setWhyDte(x.dte); setEv(\"why\"); }}");
   has(app, "onMore={(x) => { scrollToCard.current = x.key; setWhyTk(x.tk); setEv(\"more\"); }}");
   has(readFileSync("src/card.jsx", "utf8"), "More on {more.tk}: levels · history");
-  has(app, 'if (step !== "find" || ev || !scrollToCard.current) return;');
+  // Redesign PR 1: the cards live on the market page too, and closing a sheet there scrolls back to the card the same way.
+  has(app, 'if ((step !== "find" && step !== "market") || ev || !scrollToCard.current) return;');
 });
 
 check("TASK 3 — the sheet: '<TK> this month', the market not this trade; one verdict line, two ⓘ, one sentence, the narrative folded", () => {

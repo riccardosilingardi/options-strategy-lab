@@ -34,11 +34,17 @@
  *  >>> TWO STEPS SINCE PR #40 (TASK 1). <<< Radar and Shortlist were two
  *  lists of one question, and the guided door was a third: the owner saw
  *  "Nothing today" there while Radar listed seven structures on the same data.
- *  Find is one request block over one ranked list across the selected
- *  markets; the Shortlist is a market filter on that list. */
+ *
+ *  >>> THREE STEPS SINCE THE OWNER'S REDESIGN, 4 OCT 2026 (redesign PR 1). <<<
+ *  Find → the market page → Build. PR #40's point stands: Find is still ONE
+ *  sorted list (findGen, sorted by the owner's order), shown one row per
+ *  market; the market page is a FILTERED VIEW of that same list for one
+ *  ticker (its cards, in the same order), not a second list, and nothing on
+ *  it re-ranks or re-simulates. */
 export const STEPS = [
-  { n: 1, id: "find", label: "Find", blurb: "every market, one ranked list" },
-  { n: 2, id: "build", label: "Build", blurb: "one trade, taken apart" },
+  { n: 1, id: "find", label: "Find", blurb: "every market, one row each" },
+  { n: 2, id: "market", label: "Market", blurb: "one market: overview, strategies, chain" },
+  { n: 3, id: "build", label: "Build", blurb: "one trade, taken apart" },
 ];
 
 export const FIRST_STEP = STEPS[0].id;
@@ -66,9 +72,10 @@ export const prevStepId = (id) => STEPS[Math.max(0, stepIndex(id) - 1)].id;
  *   compare — how many candidates are ticked for comparison
  * @returns {Record<string,string>} step id -> the line under its number
  */
-export function stepCarry({ ticker = null, trade = null, compare = 0, markets = null } = {}) {
+export function stepCarry({ ticker = null, trade = null, compare = 0, markets = null, market = null } = {}) {
   return {
     find: `${markets == null ? "every market" : `${markets} market${markets === 1 ? "" : "s"}`}${compare > 0 ? ` · ${compare} to compare` : ""}`,
+    market: market || "no market open",
     build: trade || (ticker ? `${ticker} · nothing loaded` : "nothing loaded"),
   };
 }
@@ -137,6 +144,8 @@ export function candidateOf(raw, extra = {}) {
     // return filter must not call it unknown (PR #45). Absent on a candidate saved before this: not unbounded.
     profitUnbounded: raw.profitUnbounded != null ? !!raw.profitUnbounded : !!(a && a.profitUnbounded),
     pop: num(raw.pop, extra.pop),
+    // The future avg per $100 at risk (redesign PR 1): what `savedFromCandidate()` keeps. Absent is null.
+    futureAvg: num(raw.futureAvg, extra.futureAvg),
     // Never defaulted: an unstamped candidate stays unstamped, which is what
     // `seasonalStampOf()` reads as the hand-written estimate.
     seasonalSource: raw.seasonalSource ?? extra.seasonalSource ?? null,
@@ -222,6 +231,9 @@ export function savedFromCandidate(c, now = Date.now()) {
     maxProfit: c.maxProfit ?? null,
     maxLoss: c.maxLoss ?? null,
     pop: c.pop ?? null,
+    // THE FUTURE AVG PER $100 AT RISK WHEN SAVED (redesign PR 1, owner decision 4 Oct 2026): the one new field, so
+    // Saved can show "When saved" beside "Now". An item saved before has none, and reads "not recorded".
+    futureAvg: Number.isFinite(c.futureAvg) ? c.futureAvg : null,
     // ...and the stamp is saved with it, for the same reason the price is.
     seasonalSource: c.seasonalSource ?? null,
     seasonalYears: c.seasonalYears ?? null,

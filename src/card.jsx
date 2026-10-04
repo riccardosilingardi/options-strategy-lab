@@ -26,7 +26,6 @@ import { T, TYPE } from "./theme.js";
 import { mono, sans, Btn, Chip, Panel, Label, Stat, Note, Fold, NumberInput, TextArea, RangeField, Info, CheckField } from "./ui.jsx";
 import { readingLine, unreadInputsAria, inputName, numbersFitLines, badgeText } from "./signals.js";
 export { badgeText };
-import { MARKET_CATEGORIES } from "./markets.js";
 import { Gauge, UnifiedPosition, UnifiedFigure } from "./visuals.jsx";
 import { RULES, money, chanceText, returnText, NO_CEILING,
   requestAmountLabel, amountNote, freeAmountNote, chanceAskLabel, chanceAskText, rewardAskLabel, controlsFoldNote,
@@ -65,7 +64,6 @@ const CardFigure = ({ k, v, c, lines = null, info = null, sorted = false, muted 
    list LIVE. There is no "Search" button: a control that only acts after another tap is a control whose effect the
    reader cannot see.
 
-     MARKETS    which of the basket to read, all by default, grouped by the registry's categories (PR #48).
      DIRECTION  one for every market, or "Signals decide" per market (PR #48): its signals' family plus Neutral.
      SIZE BY    what I can spend, or what I want to make — two chips. The amount is a slider (PR #45): its top is the
                 per-trade limit, or the trading capital under free sizing, and the limit is editable beside it.
@@ -82,12 +80,15 @@ export function RequestControls({
   only = null,
   request, onChange,
   sentiments = [], direction = "signals", onDirection,
-  universe = [], markets = [], onMarkets,
+  // (`universe`, `markets`, `onMarkets`: the markets picker left in redesign PR 1; Find reads the whole basket.)
   horizon = RULES.targetEntryDTE, onHorizon,
   ticker = null, spot = null,
   limits = null, onLimit,
   // `controlReadings()` over the candidates on screen: each slider's histogram and its "N pass". Null draws neither.
   readings = null,
+  // Redesign PR 1: inside one of Find's sheets the control stands alone — no panel, no "WHAT DO YOU WANT?" heading
+  // (the sheet's title says it). Every control below is unchanged.
+  bare = false,
   style,
 }) {
   const fixed = sentiments.find((s) => s.id === direction) || null;
@@ -97,13 +98,10 @@ export function RequestControls({
   const amtMax = request.amtMax;
   const amtMin = amtMax != null ? Math.min(RULES.amountAskStep, amtMax) : null;
   const budget = request.mode === "budget";
+  const Wrap = bare ? BareBlock : Panel;
   return (
-    <Panel accent={T.amber} style={style}>
-      <Label>WHAT DO YOU WANT?</Label>
-
-      {shows("markets") && universe.length > 0 && (
-        <MarketPicker universe={universe} markets={markets} onMarkets={onMarkets} />
-      )}
+    <Wrap accent={T.amber} style={style}>
+      {!bare && <Label>WHAT DO YOU WANT?</Label>}
 
       {shows("direction") && (
         <div style={{ marginTop: 8 }}>
@@ -177,71 +175,15 @@ export function RequestControls({
       <Fold summary="What these do — and what they cannot do" label="why" tone={T.dim} style={{ marginTop: 8 }}>
         <Note style={{ marginTop: 6 }}>{controlsFoldNote(request)}</Note>
       </Fold>
-    </Panel>
+    </Wrap>
   );
 }
+/** No panel around the controls when a sheet already frames them. */
+const BareBlock = ({ children, style }) => <div style={style}>{children}</div>;
 
-/* THE MARKETS, BY CATEGORY (PR #48, TASK 1). One row per category of the registry (src/markets.js): its name, how
-   many of its markets are selected ("2 of 3"), "all" and "none", then its tickers. The groups come from the
-   registry, so a new market appears in its group with no change here. */
-export function MarketPicker({ universe = [], markets = [], onMarkets }) {
-  const groups = MARKET_CATEGORIES.map((c) => ({ id: c.id, tickers: c.tickers.filter((tk) => universe.includes(tk)) }))
-    .filter((c) => c.tickers.length);
-  const set = (m) => onMarkets && onMarkets(universe.filter((tk) => m.includes(tk)));
-  return (
-    <div style={{ marginTop: 8 }}>
-      <Note color={T.dim}>{`MARKETS · ${markets.length} OF ${universe.length}`}</Note>
-      {groups.map((g) => {
-        const on = g.tickers.filter((tk) => markets.includes(tk)).length;
-        return (
-          <div key={g.id} role="group" aria-label={`${g.id} markets`} style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 4 }}>
-            <span style={{ ...sans, fontSize: FS.xs, fontWeight: FW.bold, color: T.ink, minWidth: 56 }}>{g.id}</span>
-            <span style={{ ...sans, fontSize: FS.xs, color: T.dim }}>{on} of {g.tickers.length} ·</span>
-            <Btn small ghost color={T.blue} aria-label={`all ${g.id}`} disabled={on === g.tickers.length}
-              onClick={() => set([...markets, ...g.tickers])}>all</Btn>
-            <Btn small ghost color={T.blue} aria-label={`no ${g.id}`} disabled={on === 0}
-              onClick={() => set(markets.filter((tk) => !g.tickers.includes(tk)))}>none</Btn>
-            {g.tickers.map((tk) => (
-              <Chip key={tk} on={markets.includes(tk)} color={T.blue} label={tk} monoText
-                onClick={() => set(markets.includes(tk) ? markets.filter((x) => x !== tk) : [...markets, tk])}>
-                {tk}
-              </Chip>
-            ))}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-/* THE RESULTS FILTER, BY CATEGORY (PR #48, TASK 1): "All N · Grains n · Energy n · Metals n". Tapping a category
-   filters the list to it and opens its tickers' counts; tapping a ticker filters to that one market (what the
-   Shortlist was). A market still loading, failed or with no board says so instead of a count. */
-export function ResultsFilter({ counts = [], total = 0, cat = null, market = null, statusOf = () => null, onCat, onMarket }) {
-  const open = counts.find((c) => c.id === cat) || null;
-  return (
-    <div style={{ marginTop: 10 }}>
-      <div role="group" aria-label="filter the results" style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-        <Chip on={!cat && !market} onClick={() => onCat && onCat(null)}>All {total}</Chip>
-        {counts.map((c) => (
-          <Chip key={c.id} on={cat === c.id} onClick={() => onCat && onCat(cat === c.id ? null : c.id)}>
-            {c.id} {c.n}
-          </Chip>
-        ))}
-      </div>
-      {open && (
-        <div role="group" aria-label={`${open.id} markets`} style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 6 }}>
-          {open.tickers.map((t) => (
-            <Btn key={t.tk} small ghost={market !== t.tk} color={t.n ? T.amber : T.dim}
-              onClick={() => onMarket && onMarket(market === t.tk ? null : t.tk)}>
-              <span style={mono}>{t.tk}</span> {statusOf(t.tk) || String(t.n)}
-            </Btn>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
+/* THE MARKETS PICKER AND THE RESULTS FILTER ARE GONE (redesign PR 1). Find reads the whole basket (today's default)
+   and its category tabs — "All · Grains · Energy · Metals", counted from markets.js — only filter what is shown, so
+   findGen does not re-run on a tab; a market's own page (market.jsx) is what the one-market filter was. */
 
 /* THE PER-TRADE LIMIT, EDITABLE WHERE THE BUDGET IS. Lowering it is one number. Raising it past the capped figure —
    5% of capital unless the capital answers make it lower — asks for the typed reason, and the value goes through

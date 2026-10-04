@@ -74,7 +74,7 @@ test("NOTHING FITS — THE FIX NEVER PASSES A LIMIT: the cheapest over the per-t
   assert.equal(nf.fix, null, "no budget move past $60");
   assert.equal(nf.reset, true);
   assert.equal(nf.overLimit, 60);
-  assert.equal(overLimitNote(nf.overLimit), "That is more than your $60 per-trade limit, so a budget cannot reach it.");
+  assert.equal(overLimitNote(nf.overLimit), "It is over your $60 per-trade limit.");
   assert.equal(RESET_ALL_FILTERS, "Reset filters");
 });
 

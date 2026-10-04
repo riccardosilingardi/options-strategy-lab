@@ -1,6 +1,7 @@
 // Tests for the risk gate (src/riskGate.js) and the rule config (src/rules.js).
 // Plain Node, no test framework: `npm test` runs this file directly.
 
+import { rowStateOf } from "./rows.js";
 import { readFileSync, readdirSync } from "node:fs";
 import assert from "node:assert/strict";
 import { evaluateTrade, paperStatus, undefinedRiskLegs } from "./riskGate.js";
@@ -3027,9 +3028,11 @@ test("A DATA FAILURE IS NOT A MARKET VERDICT (restored from main's screen-5 test
   assert.ok(/^Nothing today\./.test(nothingTodayLine({ reward: 1 }, {})));
   // ...and the chip says which: a failed fetch is never "loading".
   const app = readFileSync(new URL("./App.jsx", import.meta.url), "utf8");
-  const find = readFileSync(new URL("./find.jsx", import.meta.url), "utf8");   // PR #45: the Find step lives here now
-  assert.ok(/findGen\.failed\.some\(\(x\) => x\.tk === tk\) \? "failed" : findGen\.loading\.includes\(tk\) \? "loading"/.test(find),
-    "the market chip tells a failure from a load in flight");
+  // Redesign PR 1: the market chip became a row (rows.js `rowStateOf()`), and it still tells a failure from a load in
+  // flight — read from the function itself rather than from the old chip's source.
+  assert.deepEqual(rowStateOf("UNG", { loading: ["UNG"], failed: [] }), { state: "chain" }, "a load in flight");
+  assert.deepEqual(rowStateOf("UNG", { loading: [], failed: [{ tk: "UNG", why: "HTTP 502" }] }), { state: "failed", why: "HTTP 502" },
+    "the market row tells a failure from a load in flight");
   assert.ok(/setChainErr\(\(m\) => \(\{ \.\.\.m, \[tk\]: fetchFailWords\(e\) \}\)\)/.test(app), "a failed fetch is recorded with its error");
   assert.equal(fetchFailWords(new Error("HTTP 502 Bad Gateway from the proxy upstream")), "HTTP 502 Bad Gateway from");
   assert.equal(fetchFailWords(null), "no reply");
@@ -3046,9 +3049,11 @@ test("TASK 1 — an empty Find list says why with counts, and offers no button o
   const app = readFileSync(new URL("./App.jsx", import.meta.url), "utf8");
   const find = readFileSync(new URL("./find.jsx", import.meta.url), "utf8");   // PR #45: the Find step lives here now
   assert.ok(/findGen\.items\.length === 0 && \(/.test(find), "only when zero candidates pass");
-  assert.ok(/disabled=\{forward\.disabled\}/.test(find),
-    "and the button says so rather than naming a structure");
-  assert.ok(/disabled: !legs\.length/.test(app), "the step forward is disabled with nothing loaded");
+  // Redesign PR 1: Find has no step-forward button at all (the owner's Find is tabs, chips, a line and rows), so it
+  // offers no button onto a trade; a card's "Build ›" is on its market's page, and the bottom bar's Build is the way to
+  // the trade already loaded.
+  assert.ok(!/<StepForward/.test(find), "Find draws no button onto a trade");
+  assert.ok(/onBuild=\{\(x\) => openFound\(x\)\}/.test(app), "a card reaches Build through openFound, from the market page");
 });
 
 /* ================================================================

@@ -21,13 +21,16 @@
 // ============================================================================
 
 // `seg` is Positions | Orders (PR #47, TASK 1): a segment is a screen, so Back steps from Orders to Positions.
-export const NAV_FIELDS = ["view", "tab", "step", "settings", "ev", "whyTk", "detailsId", "sheet", "seg"];
+// `mkt` and `mtab` (redesign PR 1): the market page's ticker and its tab (Overview · Strategies · Chain). A tab is a
+// screen, like a segment, so Back goes Build → the market page (same ticker, same tab) → Find.
+export const NAV_FIELDS = ["view", "tab", "step", "settings", "ev", "whyTk", "detailsId", "sheet", "seg", "mkt", "mtab"];
 
 /** The one object a history entry carries. Anything not in NAV_FIELDS is not navigation. */
 export const navOf = ({ view = "wizard", tab = "build", step = "find", showSettings = false, ev = null, whyTk = null,
-  detailsId = null, deskSheet = null, posSeg = "positions" } = {}) => ({
+  detailsId = null, deskSheet = null, posSeg = "positions", mktTk = null, mktTab = null } = {}) => ({
   view, tab, step, settings: !!showSettings, ev: ev ?? null, whyTk: whyTk ?? null,
   detailsId: detailsId ?? null, sheet: deskSheet ?? null, seg: posSeg === "orders" ? "orders" : "positions",
+  mkt: mktTk ?? null, mtab: mktTk ? (mktTab || "strategies") : null,
 });
 
 export const sameNav = (a, b) => !!a && !!b && NAV_FIELDS.every((k) => a[k] === b[k]);

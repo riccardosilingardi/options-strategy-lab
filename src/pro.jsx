@@ -2657,7 +2657,9 @@ export function PriceChart({ ticker, levels, breakevens, entrySpot, legLines, he
           })}
         </div>
       )}
-      {last && (
+      {/* Only when the chart carries a trade's lines (redesign PR 1): the market page draws this chart with none, and a
+          sentence about break-even and entry lines that are not there would describe a different picture. */}
+      {last && ((breakevens && breakevens.length) || entrySpot || (legLines && legLines.length) || levels) && (
         <div style={{ ...mono, fontSize: FS.xs, color: T.dim, marginTop: 6, lineHeight: 1.6 }}>
           The dashed lines are where the market is positioned (green and red), your break-even (blue) and your
           entry (amber). The averages are computed from all {meta?.whole ?? "the"} bars this market loaded, not

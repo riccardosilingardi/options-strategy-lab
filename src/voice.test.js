@@ -167,7 +167,18 @@ test("MEASURED: the three screens, and the table in the PRD is this number", () 
      Task 1: under "Future avg + signal" the card says its sum at rest, "sorted by −12.0 + signal +27.5 = 15.5 per
      $100" (`placeLine()`, out of the fold): find +10, an upper bound — the other four orders print no line.
      Measured: find 317 → 344, build 250 → 267. */
-  const CEILING = { find: 344, build: 267, positions: 217 };
+  /* >>> REDESIGN PR 1 (owner's mockups, 4 Oct 2026): FIND IS ONE ROW PER MARKET, AND THE MARKET PAGE IS A SCREEN. <<<
+     Find 344 → 332, measured by this counter: the request block, the long list of cards, the "why" fold and the "Go to
+     Build" button left Find (the controls moved into the chips' sheets, which the counter reads as one tap away —
+     `Sheet` joined FOLDED; the cards moved to the market page; Build is on the bottom bar). What came in, counted:
+     the eight chips (`chipText()`, 16), the summary line (`rowsResultsLine()`, 6), the column head (3), one row
+     (`rowSubtitleText()` 6, `rowRiskText()` 2), the states — reading (12), stale (22), nothing fits (`nothingFitsLine`
+     4, `allMissLine` 12, `overLimitNote` 7, `showMissesCta` 5), a market not read (7) — and every sheet's
+     "Show N of M" (4). An upper bound: the states never all show at once. The ceiling is that 332: Find did not grow.
+     "market" is new: 566 (245 typed + 321 generated), an upper bound that counts all three tabs (one is on screen),
+     the chart's and the copilot's own words (PriceChart, TaCopilot, unchanged), the Why sheet's content and the
+     chain's tray. Its ceiling is that 566, so the next word fails the build. */
+  const CEILING = { find: 332, market: 566, build: 267, positions: 217 };
   /* >>> PR #46: ONE ORDERS LIST. <<< The record-based "WORKING AT THE BROKER" panel (its paragraph about what a
      working order is, the stale-DAY warning, the per-row sentences) left Positions; the one list lives in
      `orders.jsx`, which the counter now reads. Measured: positions 304 -> 209 (4 typed + 205 generated, 14 sites).

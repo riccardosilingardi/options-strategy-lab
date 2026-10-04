@@ -1515,7 +1515,7 @@ export const nothingFitsLine = (control) => `Nothing fits ${BINDS[control] || "y
 export const allMissLine = (n, cheap) =>
   `All ${n} market${n === 1 ? "" : "s"} miss.` +
   (cheap ? ` Cheapest here: ${cheap.tk} ${cheap.name}, ${money(cheap.risk)} risk.` : "");
-export const overLimitNote = (limit) => `That is more than your ${money(limit)} per-trade limit, so a budget cannot reach it.`;
+export const overLimitNote = (limit) => `It is over your ${money(limit)} per-trade limit.`;
 export const showMissesCta = (n) => `Show the ${n} that miss`;
 
 /** Saved (redesign PR 1): "When saved" beside "Now", for three figures. */
@@ -1585,6 +1585,7 @@ export function futurePastDisagree(future, past) {
   if (f == null || p == null || f === 0 || p === 0 || Math.sign(f) === Math.sign(p)) return null;
   return `Future and past disagree: the past years would have ${p < 0 ? "lost" : "won"} on this one.`;
 }
+export const COMPARE_TICK = Object.freeze({ off: "Compare", on: "✓ comparing" });
 export const OPEN_IN_CHAIN = "Open in chain";
 export const MARKET_READ_HEAD = "THE MARKET'S READ";
 export const HOW_WORKED_OUT_LINK = "How score and confidence are worked out ›";
@@ -1600,6 +1601,22 @@ export const CHAIN_MODES = Object.freeze([
 ]);
 export const noOpenInterestText = (feed) => `OI · Vol: ${feed || "this feed"} does not send open interest`;
 export const underEntryText = () => `under ${RULES.minEntryDTE}d`;
+export const CHAIN_HEAD = Object.freeze({ call: "Call", put: "Put", strike: "Strike",
+  price: ["Bid", "Ask"], greeks: ["Delta", "IV"], oi: ["OI", "Vol"] });
+export const chainNotLoadedText = (tk) => `${tk}: the chain has not loaded.`;
+export const marketReadingText = (tk) => `${tk}: reading…`;
+export const noCardsText = (tk, neutral) => `No ${neutral ? "neutral " : ""}card on ${tk} cleared the floors.`;
+/** What a screen reader hears on the new screens (redesign PR 1): the same one home for the words. */
+export const ARIA = Object.freeze({
+  categories: "Categories", filters: "Filters", markets: "Markets", expiries: "Expiries", chainShows: "What the chain shows",
+  saveTrade: (saved, tk, name) => `${saved ? "Saved" : "Save"}: ${tk} ${name}`,
+  openMarket: (tk) => `Open ${tk}`,
+  marketTabs: (tk) => `${tk}: overview, strategies or chain`,
+  pickMarket: (tk) => `${tk}: pick another market`,
+  chainTable: (tk, ek) => `${tk} chain, ${ek}`,
+  chainCell: (side, k, type) => `${side > 0 ? "Buy" : "Sell"} 1 ${k} ${type} at the ${side > 0 ? "ask" : "bid"}`,
+  expiryChip: (ek, dte, under) => (under ? `${ek}: ${underEntryText()}, cannot be built from` : `${ek}, ${dte} days`),
+});
 export const THIN = "thin";
 export const spotLineText = (spot, state) => `${Number(spot).toFixed(2)}${state ? ` ${state}` : ""}`;
 const NUM_WORDS = ["Zero", "One", "Two", "Three", "Four", "Five", "Six"];
@@ -3710,6 +3727,9 @@ export const resultsLine = (n, m, hidden = false, { unit = "cards" } = {}) =>
   (unit === "rows"
     ? `${n} of ${n + m} fit${m > 0 ? ` · ${m} ${hidden ? "hidden" : "dimmed"}` : ""}`
     : (m > 0 ? `${matchHeading(n)} · ${missToggle(m, hidden)}` : matchHeading(n)));
+
+/** Find's rows (redesign PR 1): `resultsLine()` in its rows unit — "4 of 10 fit · 6 dimmed". */
+export const rowsResultsLine = (n, m, hidden = false) => resultsLine(n, m, hidden, { unit: "rows" });
 
 /** One row's reason, in the fewest words that still say which rule. */
 export const missReasonLine = (miss) => (miss && miss.short ? miss.short : "");
