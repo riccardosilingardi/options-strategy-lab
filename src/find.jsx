@@ -81,7 +81,9 @@ export function FindStep({
   const readings = useMemo(() => controlReadings(cands, request, sizeOf), [cands, request, sizeOf]);
 
   const rows = useMemo(() => marketRows(inItems, request, sizeOf), [inItems, request, sizeOf]);
-  const { n, m } = rowCounts(rows);
+  // n rows fit, m miss ("4 of 10 fit · 6 dimmed"): `rowCounts()` gives how many fit and how many rows there are.
+  const { n, m: rowsN } = rowCounts(rows);
+  const m = rowsN - n;
   const shown = find.hideMisses ? rows.filter((r) => r.fits) : rows;
   const nf = useMemo(() => (rows.length && n === 0 ? nothingFits(cands, request, sizeOf) : null), [rows.length, n, cands, request, sizeOf]);
 

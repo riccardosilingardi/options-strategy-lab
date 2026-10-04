@@ -23,6 +23,9 @@ import { reconcileFigures, figureSet, tradeCard, money, chanceText, seasonalProv
 import { shortlistWithFloors, analyze } from "./App.jsx";
 import { exactExtremes } from "./rules.js";
 import { scaleStrategy } from "./pro.jsx";
+import { rowFigure } from "./rows.js";
+import { StrategyCard } from "./market.jsx";
+import { FIND_ORDERS, CARD_LABELS } from "./rules.js";
 // Repo-relative: JSX tests are bundled to CJS (CLAUDE.md, "How to test").
 import { MODEL_BOARD, ungBoards } from "../scripts/crossing-fixtures.jsx";
 
@@ -270,6 +273,33 @@ check("0c — analyze() equals the exact extremes for every family, a long put i
   }
   eq(Math.round(analyze([put(1, 94)], 90, 45, 0.3, null, { net: 5 }).maxProfit), 8900, "+1 94P at 5.00, spot 90 — was 2600");
   eq(analyze([call(1, 90)], 90, 45, 0.3, null).maxProfit, null, "a long call still has no ceiling");
+});
+
+/* REDESIGN PR 1: FIND'S ROW PRINTS ITS CARD'S TILE. A row on Find shows the figure the list is sorted by and "risk $N";
+   they come from `rowFigure()` (rows.js), and must be what the card on the market page prints for the same candidate,
+   for the same size, under every one of the five orders. */
+check("A ROW'S FIGURE IS THE CARD'S TILE, UNDER ALL FIVE ORDERS — and its risk is the card's YOU RISK", () => {
+  const x = { key: "SOYB|2026-11-20|+1C28,-1C30", tk: TICKER, name: "Bull Call Spread", legs: LEGS, expKey: EXP, dte: DTE, spot: SPOT,
+    sent: "bull", family: "signal", lf: list, flags: [], fused: null, feedBroken: false, noQuoteLegs: 0, touchSize: null,
+    cand: { key: "SOYB|2026-11-20|+1C28,-1C30", pop: list.pop, rr: list.rr } };
+  const size = sizedFree(scaleStrategy(list.aFill, "budget", 300, 300), false);
+  const tileOf = (html, label) => {
+    const at = html.indexOf(`data-tile="${label}"`);
+    if (at < 0) throw new Error(`no ${label} tile`);
+    const end = html.indexOf("data-tile=", at + 10);
+    return html.slice(at, end < 0 ? undefined : end);
+  };
+  for (const o of FIND_ORDERS) {
+    const fig = rowFigure(x, size, o.id);
+    eq(fig.tile, o.tile, `${o.id}: the tile the order rings`);
+    const html = renderToStaticMarkup(<StrategyCard x={x} size={size} misses={[]} bars={[]} sortedBy={o.tile} findOrder={o.id}
+      saved={false} ticked={false} onSave={() => {}} onTick={() => {}} onBuild={() => {}} onChain={() => {}} badge={null} />);
+    const tile = tileOf(html, CARD_LABELS[o.tile]);
+    const esc = fig.value.replace(/&/g, "&amp;");
+    if (!tile.includes(`>${esc}<`)) throw new Error(`${o.id}: the row prints "${fig.value}", the card's tile does not: ${tile.slice(0, 300)}`);
+    has(tile, 'data-sorted="true"');
+    has(tileOf(html, CARD_LABELS.risk), `>${money(fig.risk)}<`);
+  }
 });
 
 console.log(`\n${ok.length} passed, ${bad.length} failed\n`);
