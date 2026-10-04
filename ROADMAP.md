@@ -6,7 +6,64 @@ The full history of every item shipped so far (P0–P10, P2-bis) is in `docs/his
 Every pull request updates this file: the session that ships an item marks it done and states
 what the next one inherits.
 
-## Done in this pull request — PR #49, one sorted list, the future and the past on every card, the sweep finished
+## Done in this pull request — Redesign PR 1 of 3 (owner, 4 Oct 2026): Find version B, the market page, the event calendar, dark by default
+
+The owner approved the mockups and answered the open questions on 4 Oct 2026. The owner's rule for the redesign: no
+function shown in the mockups is dropped — each is wired (already in the app), built (derivable from data the app has)
+or a placeholder (no source yet: never a made-up number, never silently left out). Planned first; the plan's four
+questions were answered the same day (the calendar sources, Saved's unfilled orders, where "Show flagged" and the "why"
+fold go, the glyphs).
+
+- **Task 0.** J-0001's working close is not touched (Positions, closeOrder.js and the Journal are not in this PR;
+  close.test.jsx, positions.test.jsx and positionCard.test.jsx pass unedited). Every sentence this PR writes is sans;
+  App.jsx 148 mono / 31 sans → 146 / 37. The replay's Dec→Jan wrap stays deferred; the live season and PAST YRS tiles
+  stay owner-observed.
+- **Task 1 — the placeholder.** `Placeholder` in ui.jsx (takes an id, nothing else) and `PLACEHOLDERS` in rules.js
+  ({ id, screen, shows, needs, pr }); placeholder.test.jsx holds every use to the list, every id to a use, and no figure
+  in any entry's words. Shipped: `events-calendar` (after 31 Dec 2026).
+- **Task 2 — Find, version B.** Category tabs (the registry's counts), one row of eight chips with a sheet each holding
+  the existing control, the summary line through `resultsLine()` (`rowsResultsLine()`), the column head with "How <TK>'s
+  numbers connect", one row per market from `marketRows()` (src/rows.js) over the one sorted list; reading, stale,
+  nothing-fits (`nothingFits()` on `relaxOptions()`, the move `nearestRelaxation()` already named) and Saved (When saved
+  / Now; one new field, `futureAvg`, written by `savedFromCandidate()`). MarketPicker, ResultsFilter, the request block,
+  Find's card list and its "Go to Build" button are gone (Build is on the bottom bar).
+- **Task 3 — the market page.** STEPS find → market → build; nav.js carries the market's ticker and tab; header
+  (`dayChange()`, `expectedMove()`, `atmIv()` moved out of the IV-rank recorder, `latestNews()`), Overview, Strategies
+  (`signalStance()` beside `againstSignal()`, `futurePastDisagree()`), Chain (src/market.jsx; the tray through
+  `listCardFigures()` and `buildHandOff()`; `MLEG_MAX_LEGS` read, not changed). The Chain tab shipped complete.
+- **Task 4 — the event calendar.** src/events.js (to 31 Dec 2026, a source URL beside each block), an `events` key on
+  each markets.js row, federal holidays worked out from their rules; the line in the user's own time.
+- **Task 5 — dark is the default.** `themeName()`, the first paint (index.html) and the install manifest; a stored
+  "light" stays light.
+
+**Measured.** Words (`node scripts/measure-words.mjs`): find 344 → 332, build 267 → 267, positions 207 → 207, market (new)
+566 — an upper bound over three tabs; J-0001 surfaces 113/120, 32/35, 35/35, 40/40 unchanged. Find draws (`node
+scripts/measure-find.mjs`, fixtures): 31 cards and 62 pictures → 2 rows and 2 thumbnails (one per market), 0 cards.
+
+**Not changed:** riskGate.js, closeOrder.js, modifyOrder.js, `orderBody()`, the seven gate calls, alpacaContract.js, every
+RULES value, `histBacktest()`, `seasonalSignal()`, the rules in `fuseSignals()` and `signalDirection()`, the Netlify
+functions, Positions, Orders, the Journal, Settings beyond the theme line, Build's screen and ticket, the desk. The
+/api/state payload is unchanged: saved trades live in the browser's store, so `futureAvg` is a field on that local item.
+
+### The redesign, three PRs (owner, 4 Oct 2026)
+
+- **PR 1 (this one)** — Find version B, the market page (Overview · Strategies · Chain), the event calendar, dark default.
+- **PR 2** — Build, the review sheet, Why this trade, and the copilot inside Build.
+- **PR 3** — Positions, Orders, the Journal and Settings.
+
+### What the next session inherits from redesign PR 1
+
+- **J-0001 is still v1 (b)**: its close was working at Alpaca (GTC, $7.62). Nothing here cancels, resends or re-prices it.
+- **The event dates must be read against the publishers' pages** (CME's list of USDA's 2026 schedule, EIA's two
+  schedules, the Fed's calendar); see the PR for how they reached `src/events.js`. After 31 Dec 2026 the line is the
+  placeholder until the 2027 dates are copied in.
+- The market page and Find's rows have run on fixtures in a headless Chromium only; the Chain tab has not met the live
+  Alpaca feed (no open interest) or the CBOE fallback.
+- The word counter expands a component mounted inside a closed fold or sheet (it discovers components in the raw
+  source); fixing it lowers main's own counts (find 344 → 333, build 267 → 251, positions 207 → 194, measured), so it
+  was left for a session that re-derives every ceiling.
+
+## Done in PR #49 — one sorted list, the future and the past on every card, the sweep finished
 
 Planned first (the new standing rule, CLAUDE.md); the owner answered the plan's eight questions on 3 Oct 2026.
 
@@ -243,6 +300,9 @@ One line each; see `PRD.md` §5 and `docs/history/ROADMAP.md` for detail.
   sweep of steps.jsx, why.jsx, positionCard.jsx, wizard.jsx.
 - **DONE: PR #49** — one sorted list, no chance minimum by default, FUTURE (MONTE CARLO) and PAST YRS (BACKTEST) on
   every card, the whole Alpha Vantage history, visible ⓘ labels, and the sweep of App.jsx and pro.jsx.
+- **DONE: redesign PR 1** — Find version B, the market page, the event calendar, dark by default.
+- **NEXT: redesign PR 2** (Build, the review sheet, Why this trade, the copilot inside Build), then **PR 3** (Positions,
+  Orders, the Journal, Settings).
 - **FIRST: PR #50 = basket expansion with a measured admission rule.** The owner pastes `/api/liquidity` for the
   candidate tickers; a market is admitted when its open interest clears the liquidity floor AND Alpha Vantage holds at
   least **N = 14 years** of its monthly history. N is set from what `seasonalSignal()` needs: a month counts at |mean| ≥

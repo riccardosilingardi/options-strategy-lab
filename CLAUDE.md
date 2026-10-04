@@ -62,15 +62,16 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
   same calendar window of every past year, whole months, the current year left out. Find runs it per card in
   `findGen` (via `listCardFigures()`), Build in `buildFigures()` and its backtest panel; never copy it.
 - **One sorted list (PR #49).** A candidate that misses the request stays in its place in the chosen order, quieter
-  (`T.mut`), with its reason first; "Hide cards that miss" (off) hides it behind the count (`resultsLine()`). Never
+  (`T.mut`), with its reason first; "Hide cards that miss" (off) hides it behind the count (`resultsLine()`; on Find's rows `rowsResultsLine()`, "Hide them"). Never
   dropped. A slider filters `findGen`'s output and never re-simulates (`find.test.jsx` checks the memo's deps).
 - Atoms and sizes: `src/ui.jsx` (now with `Info`, the ⓘ, and `Segments`) and the type tokens in `theme.js`. `ui.jsx`,
   `card.jsx`, `find.jsx`, `orders.jsx`, `positions.jsx`, `navBar.jsx`, and since PR #48 `steps.jsx`, `why.jsx`,
-  `positionCard.jsx` and `wizard.jsx`, and since PR #49 `pro.jsx` and `App.jsx`, use no `fontSize` literal and define
-  no atom; `ui.test.jsx` fails the build otherwise (only visuals.jsx's drawings and main.jsx's crash screen are left,
+  `positionCard.jsx` and `wizard.jsx`, since PR #49 `pro.jsx` and `App.jsx`, and since redesign PR 1 `market.jsx`
+  (atoms now include `Sheet` and `Placeholder`), use no `fontSize` literal and define no atom; `ui.test.jsx` fails the build otherwise (only visuals.jsx's drawings and main.jsx's crash screen are left,
   named in the test). A longer explanation goes behind one ⓘ or fold, never deleted. **An ⓘ shows its label**
   ("How the numbers fit ⓘ"); `iconOnly` only inside a figure tile, where the tile's name is the label.
-- No emoji or rare glyphs in UI strings; stay within `↑ ↓ → ✓ ✗ ⚠ ▲ ▼ ●`.
+- No emoji or rare glyphs in UI strings; stay within `↑ ↓ → ✓ ✗ ⚠ ▲ ▼ ●` and, since redesign PR 1 (owner's mockups,
+  4 Oct 2026), `☆ ★ ⇅ ≈ ‹ ›`.
 - **One registry for the markets: `src/markets.js`.** Adding a market is ONE row there (ticker, name, category, step,
   proposable, weather applies or why not, newsQ, the iv/sigma fallback references); BASKET, `getU()`, the categories
   Find groups by, the weather rule, `basket.js`, the demo and the copilot list derive from it. `markets.test.js` proves
@@ -83,6 +84,23 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
   CONFLICT Neutral, never "Very"; a market shows that family plus Neutral. **The list order is the owner's**
   (`settings.findOrder`, `findOrderCompare()`); only "Future avg + signal" adds `signalAdjustment()`, and then the
   card says its sum at rest with `placeLine()` on the same figures. The tile the list is sorted by is ringed.
+- **Three steps since redesign PR 1 (owner, 4 Oct 2026): Find → the market page → Build** (`STEPS`, path.js). Find is one
+  row per market from ONE function, `marketRows()` in `src/rows.js`, over `findShown` (the one sorted list): a row's card
+  is the market's first card that fits, else its first card as a miss in its place; a row's figure is `rowFigure()`, the
+  card's tile (figures.test.jsx). The market page (`src/market.jsx`) is a filtered view of the same list for one ticker
+  (`findSorted`), never a second list; its ticker and tab are nav.js fields (`mkt`, `mtab`), and opening it does not
+  replace the trade loaded on Build. Every chip on Find opens a `Sheet` (ui.jsx) holding the existing control.
+- **Where a card stands against its market's signals is `signalStance()`** (signals.js, beside `againstSignal()`, one
+  counting: the factors the market HAS, the `AGAINST_MIN_SCORE` noise floor); its words are `stanceText()` in rules.js.
+- **A function with no source yet is a `<Placeholder id>`** (ui.jsx), its words `PLACEHOLDERS` in rules.js; never a
+  made-up number, never left out. An id leaves the list only when its function is built (PRD §4 lists them). A feed's own
+  limit or a state the app already handles is said in words, not a placeholder.
+- **The event calendar is `src/events.js`**, copied from the publishers' calendars with the source beside each block; the
+  table ends `EVENT_TABLE_END` (31 Dec 2026), after which the line is the placeholder `events-calendar`. Which market reads
+  which calendar is the `events` key on its markets.js row. Never type a date from memory.
+- **The Chain tab's tray prices legs through `listCardFigures()`** (handed in from App.jsx) and reaches Build only through
+  `buildHandOff()` (`openOnBuild`); at most `MLEG_MAX_LEGS` legs (read, never changed); Build › is blocked when
+  `undefinedRiskLegs()` finds an uncovered short. Nothing is sent from the market page.
 - Plan first, then change surgically: the plan is the standing rule's ("Plan before you execute", above).
 
 ## Files that matter
@@ -118,20 +136,26 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
 - `src/indicators.js` — every technical indicator, and the chart copilot's context.
 - `src/freshness.js` — how old a number on screen may be.
 - `src/visuals.jsx` — every trade picture, all cut from `payoffBands()`.
-- `src/card.jsx` — the request controls, the one candidate card (six tiles and its picture row), the one sorted list
-  (misses in place), the compare tray and the card's actions.
+- `src/card.jsx` — the request controls (shown in Find's sheets, `bare`), the one candidate card (six tiles and its
+  picture row), the one sorted list (misses in place), the compare tray and the card's actions.
 - `src/ui.jsx` — Btn, Panel, Label, Stat, Fold, Chip, Note, inputs, `RangeField`, the mono/sans stacks.
   The type tokens (`TYPE`) are in `src/theme.js`. Mono only for numbers, tickers, legs, OCC symbols.
-- `src/find.jsx` — Step 1, Find: heading, controls, market chips, the list, the "why" fold, Compare.
+- `src/find.jsx` — Step 1, Find (version B, redesign PR 1): category tabs, the chip row and its sheets, the summary line,
+  one row per market (`MarketRow`), the states, Compare (`ComparePanel`).
+- `src/rows.js` — `marketRows()`, `rowFigure()`, `rowStateOf()`: Find's rows over the one sorted list (plain JS).
+- `src/market.jsx` — Step 2, the market page: header, Overview, Strategies (`StrategyCard`), Chain (`ChainTab`, the tray).
+- `src/marketView.js` — `dayChange()`, `expectedMove()`, `latestNews()`, `toggleChainLeg()` (plain JS).
+- `src/events.js` — the event calendar to 31 Dec 2026; `nextEvent()`, `eventsFor()`, the holiday weeks.
 - `src/wizard.jsx` — Home (two doors: positions, Find), onboarding and the confirm step.
 - `src/steps.jsx` — navigation chrome: sheets, folds, `DeskCountLine` (`StepNav` removed in PR #48).
-- `src/path.js`, `src/handoff.js` — the two-step path (Find → Build) and how a trade reaches Build.
+- `src/path.js`, `src/handoff.js` — the three-step path (Find → market → Build) and how a trade reaches Build.
 - `src/why.jsx` — the "Why this trade" evidence panel.
 - `src/App.jsx`, `src/pro.jsx` — UI, the order ticket (`OrderTicket`), the desk, `QtyField`.
 - `src/theme.js` — the one theme; dark is the default since redesign PR 1 (owner, 4 Oct 2026); a stored "light" stays light.
 - `src/demo.js` — public demo mode; every order path is disabled in it.
 - `src/basket.js` — re-exports `markets.js`'s `BASKET` for the Netlify functions.
-- `src/wordcount.mjs` — counts words each step renders (source), and `SURFACE_IDS` / `renderedWords()` for the four
+- `src/wordcount.mjs` — counts words each step renders (source; "market" is a screen since redesign PR 1, and a `Sheet`
+  is one tap away), and `SURFACE_IDS` / `renderedWords()` for the four
   rendered surfaces (positions, orders, confirm, modify; `scripts/surfaces.jsx`); `voice.test.js` enforces both.
 - `netlify/functions/alpaca.mjs` — the only proxy to the paper trading host.
 - `netlify/functions/chainAlpaca.mjs` — option market data; separate from `alpaca.mjs` on purpose.
