@@ -10,7 +10,7 @@
 import { readFileSync } from "node:fs";
 
 const FILES = ["App.jsx", "pro.jsx", "positionCard.jsx", "wizard.jsx", "why.jsx", "steps.jsx", "visuals.jsx",
-  "card.jsx", "find.jsx", "ui.jsx", "orders.jsx", "positions.jsx", "navBar.jsx"];
+  "card.jsx", "find.jsx", "ui.jsx", "orders.jsx", "positions.jsx", "navBar.jsx", "market.jsx"];
 const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:"'`])\/\/[^\n]*/g, "$1");
 
 export function sweepCounts(src) {

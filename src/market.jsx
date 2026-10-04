@@ -161,13 +161,13 @@ function MarketHeader({ tk, u, spot, freshLine, bars, clockLine, atm, ivRank, iv
       </div>
       <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
         <span style={{ ...mono, fontSize: FS.lg, fontWeight: FW.bold, color: T.ink }}>{spot == null ? "—" : `$${spot.toFixed(2)}`}</span>
-        {ch && <span style={{ ...mono, fontSize: FS.sm, color: ch.change >= 0 ? T.green : T.violet }}>{dayChangeText(ch)}</span>}
+        {ch && <span style={{ ...sans, fontSize: FS.sm, color: ch.change >= 0 ? T.green : T.violet }}>{dayChangeText(ch)}</span>}
       </div>
       {freshLine && <Note color={T.dim}>{freshLine}</Note>}
       {clockLine && <Note color={T.dim}>{clockLine}</Note>}
-      <div style={{ ...mono, fontSize: FS.xs, color: T.body, marginTop: 2, display: "flex", gap: 10, flexWrap: "wrap" }}>
+      <div style={{ ...sans, fontSize: FS.xs, color: T.body, marginTop: 2, display: "flex", gap: 10, flexWrap: "wrap" }}>
         <span>{ivText(atm ? atm.iv : null)}</span>
-        <span style={sans}>{ivRankText(ivRank, ivDays)}</span>
+        <span>{ivRankText(ivRank, ivDays)}</span>
         {mv != null && <span>{expectedMoveText(mv, board.expKey)}</span>}
       </div>
       <div style={{ ...sans, fontSize: FS.xs, color: T.mut, marginTop: 2 }}>
