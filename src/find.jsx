@@ -298,7 +298,7 @@ export function MarketRow({ row, sd = null, fig, bars = NO_BARS, saved = false, 
   const dir = sd ? sd.dir : null;
   return (
     <div role="listitem" data-row={row.tk} data-miss={muted ? "true" : undefined} aria-current={current ? "true" : undefined}
-      style={{ display: "flex", alignItems: "stretch", gap: 4, background: T.bg, borderRadius: 8,
+      style={{ display: "flex", alignItems: "stretch", gap: 4, background: T.bg, borderRadius: 8, minWidth: 0, maxWidth: "100%", boxSizing: "border-box",
         border: `${current ? 2 : 1}px ${muted ? "dashed" : "solid"} ${current ? T.blue : T.line}` }}>
       <button onClick={onSave} aria-pressed={saved} aria-label={ARIA.saveTrade(saved, x.tk, x.name)}
         style={{ ...sans, fontSize: FS.md, minWidth: TAP, minHeight: TAP, background: "transparent", border: "none",

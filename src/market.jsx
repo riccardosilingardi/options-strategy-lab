@@ -92,7 +92,7 @@ export function MarketPage({
         ivRank={ivRank} ivDays={ivDays} board={board} sd={board ? board.signal : null} now={now}
         news={latestNews(tk, newsItems, newsState)} ago={ago} first={first} saved={first ? isSaved(first.cand) : false}
         onSave={() => first && onSave(first)} onTickerSheet={() => onSheet("market:tickers")}
-        eventNode={<EventLine tk={tk} expKey={board ? board.expKey : null} now={now} timeZone={timeZone} exits={exits}
+        eventNode={tab === "chain" ? null : <EventLine tk={tk} expKey={board ? board.expKey : null} now={now} timeZone={timeZone} exits={exits}
           expiries={chain ? chain.expirations : []} />} />
 
       <div style={{ marginTop: 10 }}>
@@ -192,7 +192,7 @@ function EventLine({ tk, expKey, now, timeZone, exits = [], expiries = [], chain
   const allBefore = chainExpiries ? chainExpiries.filter((e) => e >= ev.etDate).length === chainExpiries.length : null;
   return (
     <div style={{ marginTop: 4 }}>
-      <Fold summary={allBefore == null ? line : `${line} · ${chainEventText(allBefore)}`} label={eventsBeforeLabel(beforeDay || "the table's end").toLowerCase()} tone={T.blue}>
+      <Fold summary={allBefore == null ? line : `${line} · ${chainEventText(allBefore)}`} label={eventsBeforeLabel(beforeDay || "the table's end")} tone={T.blue}>
         <div role="list" style={{ display: "grid", gap: 2 }}>
           {all.map((e) => (
             <div role="listitem" key={`${e.id}-${e.at}`} style={{ ...sans, fontSize: FS.xs, color: T.body, lineHeight: LH.body }}>
@@ -421,7 +421,7 @@ function ChainTray({ tk, chain, ek, legs, note, cardFigures, quoteOf, seasonal, 
   const af = lf ? lf.aFill : null;
   const entry = af && Number.isFinite(af.entry) ? af.entry : null;
   return (
-    <div data-chain-tray style={{ position: "sticky", bottom: 0, marginTop: 10, padding: "10px 12px", background: T.panel,
+    <div data-chain-tray style={{ marginTop: 10, padding: "10px 12px", background: T.panel,
       border: `1px solid ${T.field}`, borderRadius: 10 }}>
       {!legs.length && <Note>{trayEmptyText()}</Note>}
       {legs.length > 0 && (

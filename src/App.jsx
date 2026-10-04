@@ -4170,7 +4170,11 @@ export default function OptionsStrategyLab() {
               <span style={{ ...mono, fontSize: FS.xs, color: T.green, border: `1px solid ${T.green}55`, background: `${T.green}12`, padding: "3px 8px", borderRadius: 5, display: "inline-flex", gap: 5, alignItems: "center" }}>
                 <ShieldCheck size={12} /> PAPER · {ruleBadge()}
               </span>
-              {onFindStep ? (
+              {onMarketStep ? (
+                <span style={{ ...mono, fontSize: FS.xs, color: T.blue, border: `1px solid ${T.blue}44`, padding: "3px 8px", borderRadius: 5 }}>
+                  {findFreshness([mkt.tk], chains, ago).line}
+                </span>
+              ) : onFindStep ? (
                 <span style={{ ...mono, fontSize: FS.xs, color: findFresh.oldest ? T.blue : T.dim, border: `1px solid ${findFresh.oldest ? T.blue : T.dim}44`, padding: "3px 8px", borderRadius: 5 }}>
                   {findFresh.line}
                 </span>
