@@ -5447,7 +5447,7 @@ export default function OptionsStrategyLab() {
             <Card>
               <Label>APPEARANCE</Label>
               <div style={{ fontSize: FS.sm, color: T.mut, marginTop: 8, lineHeight: 1.5 }}>
-                Light is the default. Dark is here whenever you want it — the app reloads to apply the change.
+                Dark is the default. Light is here whenever you want it — the app reloads to apply the change.
               </div>
               <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
                 {[["light", "Light", Sun], ["dark", "Dark", Moon]].map(([id, label, I]) => {

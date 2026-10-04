@@ -1,8 +1,8 @@
 // Contrast is not a matter of taste: small grey text on a white panel either
-// clears WCAG AA or it does not. This locks the light palette to 4.5:1 against
+// clears WCAG AA or it does not. This locks both palettes to 4.5:1 against
 // both surfaces it is ever drawn on, so "muted" can never quietly become
 // "unreadable" in a later tweak.
-import { PALETTES } from "./theme.js";
+import { PALETTES, themeName, THEME_KEY } from "./theme.js";
 
 let pass = 0, fail = 0;
 const ok = (name, cond, detail) => {
@@ -22,7 +22,18 @@ export const contrast = (a, b) => {
   return (hi + 0.05) / (lo + 0.05);
 };
 
-console.log("\nTHEME — the light palette is the default, so it has to be readable\n");
+console.log("\nTHEME — dark is the default (owner, 4 Oct 2026); both palettes have to be readable\n");
+
+/* THE DEFAULT IS DARK: a stored "light" stays light, everything else is dark. */
+const withStore = (v) => {
+  globalThis.localStorage = { getItem: (k) => (k === THEME_KEY ? v : null) };
+  try { return themeName(); } finally { delete globalThis.localStorage; }
+};
+ok("no theme stored → dark", withStore(null) === "dark", withStore(null));
+ok("a stored \"light\" stays light", withStore("light") === "light", withStore("light"));
+ok("a stored \"dark\" is dark", withStore("dark") === "dark");
+ok("anything else stored → dark", withStore("sepia") === "dark");
+ok("no storage at all (a locked-down browser) → dark", themeName() === "dark", themeName());
 
 const L = PALETTES.light;
 ok("panels are pure white", L.panel === "#ffffff", L.panel);

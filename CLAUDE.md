@@ -128,7 +128,7 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
 - `src/path.js`, `src/handoff.js` — the two-step path (Find → Build) and how a trade reaches Build.
 - `src/why.jsx` — the "Why this trade" evidence panel.
 - `src/App.jsx`, `src/pro.jsx` — UI, the order ticket (`OrderTicket`), the desk, `QtyField`.
-- `src/theme.js` — the one theme; light is default.
+- `src/theme.js` — the one theme; dark is the default since redesign PR 1 (owner, 4 Oct 2026); a stored "light" stays light.
 - `src/demo.js` — public demo mode; every order path is disabled in it.
 - `src/basket.js` — re-exports `markets.js`'s `BASKET` for the Netlify functions.
 - `src/wordcount.mjs` — counts words each step renders (source), and `SURFACE_IDS` / `renderedWords()` for the four

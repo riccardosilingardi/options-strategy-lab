@@ -28,11 +28,12 @@ const LIGHTT = {
   action: "#1f6391",
 };
 
-/** Il tema scelto dall'utente. Il chiaro è il default: si sceglie il buio. */
+/** The theme the user chose. DARK IS THE DEFAULT (owner, 4 Oct 2026, redesign PR 1): light is chosen, and a stored
+ *  "light" stays light. No storage, an unreadable one or anything else stored reads as dark. */
 export const THEME_KEY = "osl-theme";
 export const themeName = () => {
-  try { return localStorage.getItem(THEME_KEY) === "dark" ? "dark" : "light"; }
-  catch { return "light"; }
+  try { return localStorage.getItem(THEME_KEY) === "light" ? "light" : "dark"; }
+  catch { return "dark"; }
 };
 /** Cambia tema e ricarica: T è una costante di modulo, letta a import time. */
 export const setTheme = (name) => {
