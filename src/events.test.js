@@ -7,18 +7,33 @@
 // line is the placeholder.
 // ============================================================================
 import assert from "node:assert/strict";
-import { CALENDARS, CALENDAR_KEYS, EVENT_TABLE_END, eventsFor, nextEvent, daysUntil, localWhen, etDay, etInstant,
-  federalHolidays, holidayWeekOf, calendarsOf } from "./events.js";
+import { CALENDARS, CALENDAR_KEYS, EVENT_TABLE_END, eventsFor as eventsForShipped, nextEvent as nextEventShipped, daysUntil,
+  localWhen, etDay, etInstant, federalHolidays, holidayWeekOf, calendarsOf, WEEKDAYS } from "./events.js";
 import { EVENT_CALENDARS, MARKET_ROWS, BASKET } from "./markets.js";
 import { eventLineText, HOLIDAY_WEEK_NOTE, PLACEHOLDERS } from "./rules.js";
 
 let passed = 0; const failures = [];
 const test = (name, fn) => { try { fn(); passed++; console.log(`  ok   ${name}`); } catch (e) { failures.push({ name, e }); console.log(`  FAIL ${name} — ${e.message}`); } };
 
+/* >>> TEST DATA, NOT A CALENDAR (owner decision, 4 Oct 2026). <<< The shipped table carries no dates: the publishers'
+   pages could not be read from the session that built it, so the app shows the placeholder. The logic is held on this
+   table instead — the dates the owner's prompt named for its test cases — and nothing in the app reads it. */
+const TEST_TABLE = {
+  grains: [
+    { id: "wasde", name: "WASDE", major: true, time: "12:00", dates: ["2026-10-09", "2026-11-10", "2026-12-10"], source: CALENDARS.grains[0].source },
+    { id: "cropProgress", name: "Crop Progress", major: false, time: "16:00", weekly: { weekday: WEEKDAYS.mon, through: "2026-11-30" }, source: CALENDARS.grains[1].source },
+  ],
+  natgas: [{ id: "eiaStorage", name: "EIA storage", major: false, time: "10:30", weekly: { weekday: WEEKDAYS.thu, through: EVENT_TABLE_END }, source: CALENDARS.natgas[0].source }],
+  petroleum: [{ id: "eiaPetroleum", name: "EIA petroleum", major: false, time: "10:30", weekly: { weekday: WEEKDAYS.wed, through: EVENT_TABLE_END }, source: CALENDARS.petroleum[0].source }],
+  fomc: [{ id: "fomc", name: "FOMC statement", major: true, time: "14:00", dates: ["2026-10-28", "2026-12-09"], source: CALENDARS.fomc[0].source }],
+};
+const eventsFor = (tk, o = {}) => eventsForShipped(tk, { ...o, calendars: TEST_TABLE });
+const nextEvent = (tk, o = {}) => nextEventShipped(tk, { ...o, calendars: TEST_TABLE });
+
 // 4 Oct 2026, 09:00 in Milan (07:00 UTC): a Sunday.
 const NOW = Date.UTC(2026, 9, 4, 7, 0);
 const MILAN = "Europe/Rome";
-console.log("\nTHE EVENT CALENDAR — at 4 Oct 2026\n");
+console.log("\nTHE EVENT CALENDAR — at 4 Oct 2026, on a test-only table (the shipped one has no dates)\n");
 
 test("CORN, expiry 20 Nov → the next MAJOR event is WASDE, Fri 9 Oct 12:00 ET, in 5 days", () => {
   const n = nextEvent("CORN", { now: NOW, expKey: "2026-11-20" });
@@ -87,7 +102,7 @@ test("WHICH MARKET GETS WHICH CALENDAR IS ITS ROW'S `events` KEY; every key has 
   assert.deepEqual([...EVENT_CALENDARS].sort(), [...CALENDAR_KEYS].sort());
   for (const r of MARKET_ROWS) if (r.events) assert.ok(CALENDARS[r.events], `${r.ticker}: ${r.events} has no table`);
   for (const tk of BASKET) assert.ok(calendarsOf(tk).length, `${tk} reads no calendar`);
-  assert.equal(nextEvent("SPY", { now: NOW }), null, "SPY reads none");
+  assert.equal(nextEventShipped("SPY", { now: NOW }), null, "SPY reads none");
 });
 
 test("EVERY BLOCK NAMES ITS SOURCE, AND THE TABLE ENDS ON 31 DEC 2026", () => {
@@ -96,6 +111,14 @@ test("EVERY BLOCK NAMES ITS SOURCE, AND THE TABLE ENDS ON 31 DEC 2026", () => {
     assert.match(b.source, /^https:\/\//, `${k}.${b.id} has no source`);
     for (const d of b.dates || []) assert.ok(d <= EVENT_TABLE_END, `${b.id} ${d} is past the table`);
   }
+});
+
+test("THE SHIPPED TABLE CARRIES NO DATE (owner, 4 Oct 2026): every market's line is the placeholder until the pages are read", () => {
+  for (const blocks of Object.values(CALENDARS)) for (const b of blocks) {
+    assert.ok(!(b.dates && b.dates.length) && !b.weekly && !b.time, `${b.id} carries a date, a weekday or a time nobody copied from its page`);
+  }
+  for (const tk of BASKET) assert.deepEqual(nextEventShipped(tk, { now: NOW, expKey: "2026-11-20" }), { placeholder: "events-calendar" }, tk);
+  assert.equal(eventsForShipped("CORN", { now: NOW }).length, 0);
 });
 
 test("EXPIRIES AND 21-DAY EXITS JOIN THE LIST, read only", () => {

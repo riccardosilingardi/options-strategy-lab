@@ -3,8 +3,8 @@
 //
 // NEWS IS NOT A CALENDAR. A headline carries the date it was published, not the date of the next report, so the dates
 // below come from the publishers' own calendars, each block beside its source URL. They are COPIED, never typed from
-// memory, and the table runs to EVENT_TABLE_END. After that date the event line is the placeholder "events-calendar"
-// (rules.js `PLACEHOLDERS`), which needs the next year's dates.
+// memory, and the table runs to EVENT_TABLE_END. Until they are copied in — and after that date — the event line is the
+// placeholder "events-calendar" (rules.js `PLACEHOLDERS`). It ships without dates: see THE TABLE below.
 //
 // WHICH MARKET GETS WHICH CALENDAR is the `events` key on its row in markets.js, never a list in this file.
 //
@@ -27,35 +27,37 @@ const WD = Object.freeze(Object.fromEntries(["sun", "mon", "tue", "wed", "thu", 
 export const EVENT_TABLE_END = "2026-12-31";
 
 /*
- * THE TABLE. A block is either a list of dates (`dates`) or a weekly cadence (`weekly`: weekday 0 = Sunday … 6, from
- * the table's first day to `through`). `major` marks the reports the line leads with (WASDE, FOMC).
+ * THE TABLE SHIPS WITHOUT DATES (owner decision, 4 Oct 2026). The publishers' pages could not be read from the session
+ * that built this file (the sandbox's network refused cmegroup.com, eia.gov, ir.eia.gov and federalreserve.gov), and the
+ * rule is that a date is copied from its source or not written at all. So each block names its report and its source,
+ * and carries no dates, no weekly day and no time: the event line is the placeholder "events-calendar" until a session
+ * that can read those pages copies them in. A block, once filled, is either a list of dates (`dates`) or a weekly
+ * cadence (`weekly`: weekday from `WD`, from today to `through`), with the publisher's Eastern Time (`time`); `major`
+ * marks the reports the line leads with (WASDE, FOMC). The logic below is tested on a test-only table
+ * (events.test.js).
  */
 export const CALENDARS = Object.freeze({
   grains: Object.freeze([
-    Object.freeze({ id: "wasde", name: "WASDE", major: true, time: "12:00",
-      dates: Object.freeze(["2026-10-09", "2026-11-10", "2026-12-10"]),
+    Object.freeze({ id: "wasde", name: "WASDE", major: true, time: null, dates: Object.freeze([]),
       source: "https://www.cmegroup.com/articles/2026/understanding-major-usda-reports-in-2026.html" }),
-    Object.freeze({ id: "cropProgress", name: "Crop Progress", major: false, time: "16:00",
-      weekly: Object.freeze({ weekday: WD.mon, through: "2026-11-30" }),
+    Object.freeze({ id: "cropProgress", name: "Crop Progress", major: false, time: null, weekly: null,
       source: "https://www.cmegroup.com/articles/2026/understanding-major-usda-reports-in-2026.html" }),
   ]),
   natgas: Object.freeze([
-    Object.freeze({ id: "eiaStorage", name: "EIA storage", major: false, time: "10:30",
-      weekly: Object.freeze({ weekday: WD.thu, through: EVENT_TABLE_END }),
+    Object.freeze({ id: "eiaStorage", name: "EIA storage", major: false, time: null, weekly: null,
       source: "https://ir.eia.gov/ngs/ngs.html" }),
   ]),
   petroleum: Object.freeze([
-    Object.freeze({ id: "eiaPetroleum", name: "EIA petroleum", major: false, time: "10:30",
-      weekly: Object.freeze({ weekday: WD.wed, through: EVENT_TABLE_END }),
+    Object.freeze({ id: "eiaPetroleum", name: "EIA petroleum", major: false, time: null, weekly: null,
       source: "https://www.eia.gov/petroleum/supply/weekly/schedule.php" }),
   ]),
   fomc: Object.freeze([
-    // The meetings are 27–28 Oct and 8–9 Dec 2026; the statement is on the second day at 14:00 ET.
-    Object.freeze({ id: "fomc", name: "FOMC statement", major: true, time: "14:00",
-      dates: Object.freeze(["2026-10-28", "2026-12-09"]),
+    Object.freeze({ id: "fomc", name: "FOMC statement", major: true, time: null, dates: Object.freeze([]),
       source: "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm" }),
   ]),
 });
+/** Weekdays by name, for a weekly block once its day is copied in. */
+export const WEEKDAYS = WD;
 export const CALENDAR_KEYS = Object.freeze(Object.keys(CALENDARS));
 
 /* ---- DATES, WITHOUT A DATE LIBRARY ---- */
@@ -124,12 +126,13 @@ export const calendarsOf = (tk) => {
  * The calendars from its row, plus its option `expiries` (from the chain) and the time-exit `exits` (RULES.exitDTE) of any open position
  * in it ([{ date, label }], read only). Each: { id, name, at (ms), etDate, etTime, major, weekly, holiday, source }.
  */
-export function eventsFor(tk, { now = Date.now(), untilIso = EVENT_TABLE_END, expiries = [], exits = [] } = {}) {
+export function eventsFor(tk, { now = Date.now(), untilIso = EVENT_TABLE_END, expiries = [], exits = [], calendars = CALENDARS } = {}) {
   const today = dateIn(now);
   const end = untilIso < EVENT_TABLE_END ? untilIso : EVENT_TABLE_END;
   const out = [];
   for (const key of calendarsOf(tk)) {
-    for (const b of CALENDARS[key] || []) {
+    for (const b of calendars[key] || []) {
+      if (!b.time || (!(b.dates && b.dates.length) && !b.weekly)) continue;   // a block with nothing copied in yet
       const days = b.dates ? [...b.dates]
         : (() => {
           const xs = [];
@@ -166,10 +169,13 @@ export function eventsFor(tk, { now = Date.now(), untilIso = EVENT_TABLE_END, ex
  * weekly one. Past the table's end it is the placeholder.
  * @returns {{ placeholder: "events-calendar" } | { ev, before: [...] } | null}
  */
-export function nextEvent(tk, { now = Date.now(), expKey = null } = {}) {
-  if (dateIn(now) > EVENT_TABLE_END) return { placeholder: "events-calendar" };
-  if (!calendarsOf(tk).length) return null;
-  const before = eventsFor(tk, { now, untilIso: expKey || EVENT_TABLE_END }).filter((e) => !expKey || e.etDate < expKey);
+export function nextEvent(tk, { now = Date.now(), expKey = null, calendars = CALENDARS } = {}) {
+  const keys = calendarsOf(tk);
+  if (!keys.length) return null;
+  // Past the table's end, or no date copied in for this market yet: the placeholder, never a guessed date.
+  const filled = keys.some((k) => (calendars[k] || []).some((b) => b.time && ((b.dates && b.dates.length) || b.weekly)));
+  if (dateIn(now) > EVENT_TABLE_END || !filled) return { placeholder: "events-calendar" };
+  const before = eventsFor(tk, { now, untilIso: expKey || EVENT_TABLE_END, calendars }).filter((e) => !expKey || e.etDate < expKey);
   const ev = before.find((e) => e.major) || before.find((e) => e.weekly) || null;
   return ev ? { ev, before } : null;
 }

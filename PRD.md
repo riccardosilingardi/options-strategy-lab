@@ -50,11 +50,14 @@ non-expert trader who wants to learn discipline rather than be sold trades.
      interest), "thin" under the liquidity floor; tap an ask to buy one, a bid to sell one (four legs at most); the tray
      names the structure and prices Debit or Credit, Max profit, Max loss and Chance through `listCardFigures()`; Build ›
      is blocked on an uncovered short leg and goes through `buildHandOff()`. Nothing is sent from this page.
-  - **The event calendar** (`src/events.js`, to 31 Dec 2026): WASDE and Crop Progress for the grains, EIA storage for
-    UNG and BOIL, EIA petroleum for USO and XLE, FOMC for the metals, plus each market's expiries and its positions'
-    21-day exits. The line names the next major event before the expiry shown, else the next weekly report, in the
-    user's own time ("WASDE · Fri 9 Oct, 18:00 your time · in 5 days · before 20 Nov"); a weekly report in a federal
-    holiday week says the publisher may move it; after the table's end it is a placeholder.
+  - **The event calendar** (`src/events.js`): WASDE and Crop Progress for the grains, EIA storage for UNG and BOIL, EIA
+    petroleum for USO and XLE, FOMC for the metals, plus each market's expiries and its positions' 21-day exits; which
+    market reads which is a key on its markets.js row. The line will name the next major event before the expiry shown,
+    else the next weekly report, in the user's own time ("WASDE · Fri 9 Oct, 18:00 your time · in 5 days · before 20
+    Nov"); a weekly report in a federal holiday week says the publisher may move it. **It ships without dates (owner
+    decision, 4 Oct 2026):** the publishers' pages could not be read from the session that built it, so the line is the
+    placeholder `events-calendar` until a session that can read them copies the dates in. The logic is tested on a
+    test-only table.
   - **Placeholders** (owner's rule, 4 Oct 2026): a function with no source yet is a dashed "Not connected yet" box saying
     what it will show, what it needs and which PR fills it (`PLACEHOLDERS` in rules.js), never a made-up number.
   **The controls and the card, as PR #45–#49 built them** — now inside Find's sheets and on the market page; only the
@@ -321,12 +324,13 @@ normal use, and is never asked for.
    this app", and free sizing (PR #41)** have not appeared or been used live (the sync auto-imports a new holding on its
    first read, so "Not in the app" shows mainly when that import has not run); free sizing's "no limit applied" is
    tested on fixtures only.
-7. **The event dates (redesign PR 1) and the placeholders.** `src/events.js` runs to 31 Dec 2026; its dates have not
-   been read against the publishers' pages on the day they fall (and see the PR for how they were sourced), and a
-   weekly report in a holiday week only says the publisher may move it. **Placeholders shipped** (`PLACEHOLDERS` in
-   rules.js; an id leaves this list only when its function is built):
-   - `events-calendar` — the market page's event line after 31 Dec 2026. Needs the publishers' calendars for 2027,
-     copied into `src/events.js` with their sources.
+7. **The event calendar has no dates yet, and the placeholders.** `src/events.js` ships its reports, their sources and its
+   logic, but no date: the four publishers' pages (CME's list of USDA's 2026 schedule, EIA's storage page and petroleum
+   schedule, the Fed's calendar) were refused by the sandbox's network, and the owner chose a placeholder over unread
+   dates (4 Oct 2026). The line's logic is tested on a test-only table, never on a publisher's page. **Placeholders
+   shipped** (`PLACEHOLDERS` in rules.js; an id leaves this list only when its function is built):
+   - `events-calendar` — the market page's event line. Needs the publishers' own calendars read on their pages and copied
+     into `src/events.js` with their sources (to 31 Dec 2026, then each next year's).
 8. **Chosen, not measured:** `seasonalSignalT` 2 and `directionSignalMin` 12.5 (owner decisions, 3 Oct 2026, PR #48),
    `singleTakeProfitPctOfPremium` 0.5 (owner decision, 2 Oct 2026),
    `modelDisagreementRatio` 4, `maxComboSpreadShareOfNet` 1.0, `maxCrossingShareOfMaxProfit` 0.5, `openLimitSlippage`

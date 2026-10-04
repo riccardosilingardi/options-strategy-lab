@@ -20,7 +20,7 @@ fold go, the glyphs).
   stay owner-observed.
 - **Task 1 — the placeholder.** `Placeholder` in ui.jsx (takes an id, nothing else) and `PLACEHOLDERS` in rules.js
   ({ id, screen, shows, needs, pr }); placeholder.test.jsx holds every use to the list, every id to a use, and no figure
-  in any entry's words. Shipped: `events-calendar` (after 31 Dec 2026).
+  in any entry's words. Shipped: `events-calendar` (the event line, until the publishers' dates are read and copied in).
 - **Task 2 — Find, version B.** Category tabs (the registry's counts), one row of eight chips with a sheet each holding
   the existing control, the summary line through `resultsLine()` (`rowsResultsLine()`), the column head with "How <TK>'s
   numbers connect", one row per market from `marketRows()` (src/rows.js) over the one sorted list; reading, stale,
@@ -31,8 +31,11 @@ fold go, the glyphs).
   (`dayChange()`, `expectedMove()`, `atmIv()` moved out of the IV-rank recorder, `latestNews()`), Overview, Strategies
   (`signalStance()` beside `againstSignal()`, `futurePastDisagree()`), Chain (src/market.jsx; the tray through
   `listCardFigures()` and `buildHandOff()`; `MLEG_MAX_LEGS` read, not changed). The Chain tab shipped complete.
-- **Task 4 — the event calendar.** src/events.js (to 31 Dec 2026, a source URL beside each block), an `events` key on
-  each markets.js row, federal holidays worked out from their rules; the line in the user's own time.
+- **Task 4 — the event calendar, shipped as a placeholder (owner decision, 4 Oct 2026).** src/events.js holds the reports,
+  a source URL beside each block, the logic (next major event before the expiry, else the next weekly report, in the
+  user's own time; federal holidays worked out from their rules) and an `events` key on each markets.js row — but no
+  date: the sandbox's network refused all four publishers' pages, and the owner chose the placeholder over dates nobody
+  read. The logic is tested on a test-only table (the prompt's cases: WASDE 9 Oct, EIA storage 8 Oct, FOMC 28 Oct).
 - **Task 5 — dark is the default.** `themeName()`, the first paint (index.html) and the install manifest; a stored
   "light" stays light.
 
@@ -54,9 +57,10 @@ functions, Positions, Orders, the Journal, Settings beyond the theme line, Build
 ### What the next session inherits from redesign PR 1
 
 - **J-0001 is still v1 (b)**: its close was working at Alpaca (GTC, $7.62). Nothing here cancels, resends or re-prices it.
-- **The event dates must be read against the publishers' pages** (CME's list of USDA's 2026 schedule, EIA's two
-  schedules, the Fed's calendar); see the PR for how they reached `src/events.js`. After 31 Dec 2026 the line is the
-  placeholder until the 2027 dates are copied in.
+- **The event calendar needs its dates**: read CME's list of USDA's 2026 schedule, EIA's storage page and petroleum
+  schedule, and the Fed's calendar on their own pages, copy the dates (with any holiday moves) into `src/events.js`, and
+  the `events-calendar` placeholder leaves the line. The sandbox could not reach them; a session whose network allows
+  those four hosts can.
 - The market page and Find's rows have run on fixtures in a headless Chromium only; the Chain tab has not met the live
   Alpaca feed (no open interest) or the CBOE fallback.
 - The word counter expands a component mounted inside a closed fold or sheet (it discovers components in the raw

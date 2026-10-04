@@ -96,8 +96,10 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
   made-up number, never left out. An id leaves the list only when its function is built (PRD §4 lists them). A feed's own
   limit or a state the app already handles is said in words, not a placeholder.
 - **The event calendar is `src/events.js`**, copied from the publishers' calendars with the source beside each block; the
-  table ends `EVENT_TABLE_END` (31 Dec 2026), after which the line is the placeholder `events-calendar`. Which market reads
-  which calendar is the `events` key on its markets.js row. Never type a date from memory.
+  table ends `EVENT_TABLE_END` (31 Dec 2026). **It ships without dates** (owner, 4 Oct 2026: the pages could not be read):
+  until they are copied in, and after the end, the line is the placeholder `events-calendar`. Which market reads which
+  calendar is the `events` key on its markets.js row. Never type a date from memory; the logic is tested on a test-only
+  table in events.test.js.
 - **The Chain tab's tray prices legs through `listCardFigures()`** (handed in from App.jsx) and reaches Build only through
   `buildHandOff()` (`openOnBuild`); at most `MLEG_MAX_LEGS` legs (read, never changed); Build › is blocked when
   `undefinedRiskLegs()` finds an uncovered short. Nothing is sent from the market page.

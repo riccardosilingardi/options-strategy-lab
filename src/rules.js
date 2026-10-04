@@ -1413,8 +1413,8 @@ export const PLACEHOLDER_HEAD = "Not connected yet";
 export const PLACEHOLDERS = Object.freeze([
   Object.freeze({ id: "events-calendar", screen: "market",
     shows: "the next report or central-bank meeting before the expiry shown, and every one before it",
-    needs: "the publishers' calendars for the next year, copied into src/events.js with their sources",
-    pr: "the session that adds the next year's dates" }),
+    needs: "the publishers' own calendars read on their pages and copied into src/events.js with their sources",
+    pr: "the session that can read those pages" }),
 ]);
 export const placeholderOf = (id) => PLACEHOLDERS.find((p) => p.id === id) || null;
 
