@@ -26,13 +26,13 @@
     <meta name="apple-mobile-web-app-title" content="OSL" />
     <!-- `default` keeps the status bar legible over the light page; the script
          below switches it with the theme, as it does the first paint. -->
-    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <!-- Kept in step with theme.js's palettes by src/pwa.test.js, the same way
          the manifest's colours are: one home for a colour, checked by a test. -->
-    <meta name="theme-color" content="#f5f6f7" />
+    <meta name="theme-color" content="#14181d" />
 
     <style>
-      body{margin:0;background:#f5f6f7}
+      body{margin:0;background:#14181d}
       /* Standalone on a phone means there is no browser chrome to keep content
          out of the notch and off the home indicator. Every screen already pads
          itself horizontally; these add whatever the device says it needs on
@@ -43,20 +43,21 @@
         padding-top:env(safe-area-inset-top);
       }
     </style>
-    <!-- The first paint happens before React runs. Light is the default, so
-         only a stored dark choice needs applying here to avoid a white flash.
+    <!-- The first paint happens before React runs. Dark is the default (owner,
+         4 Oct 2026), so only a stored light choice needs applying here to avoid
+         a dark flash on a light screen.
          The browser UI colour is part of that paint on an installed app: the
          status bar is the top of the page when there is no address bar, and a
          light bar over a dark page is the same flash one strip further up. -->
     <script>
       try {
-        if (localStorage.getItem("osl-theme") === "dark") {
-          document.documentElement.style.background = "#14181d";
+        if (localStorage.getItem("osl-theme") === "light") {
+          document.documentElement.style.background = "#f5f6f7";
           var tc = document.querySelector('meta[name="theme-color"]');
-          if (tc) tc.setAttribute("content", "#14181d");
+          if (tc) tc.setAttribute("content", "#f5f6f7");
           var sb = document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
-          if (sb) sb.setAttribute("content", "black-translucent");
-          document.addEventListener("DOMContentLoaded", function () { document.body.style.background = "#14181d"; });
+          if (sb) sb.setAttribute("content", "default");
+          document.addEventListener("DOMContentLoaded", function () { document.body.style.background = "#f5f6f7"; });
         }
       } catch (e) { /* private mode */ }
     </script>

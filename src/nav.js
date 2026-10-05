@@ -16,18 +16,22 @@
 //   1. Closing a sheet from the sheet's own button is a BACK, not a new entry:
 //      the entry under it is the screen it covered, so the app steps back to
 //      it. Otherwise "Close" would leave a screen behind that Back re-opens.
-//   2. Home is the first entry and is never intercepted: Back on Home leaves
-//      the app, exactly as before.
+//   2. The first entry is never intercepted: Back on it leaves the app. Since
+//      redesign PR 1 round 2 (owner, 5 Oct 2026) the first entry is FIND — the
+//      app opens on it, Home is no longer a screen — so Back on Find leaves.
 // ============================================================================
 
 // `seg` is Positions | Orders (PR #47, TASK 1): a segment is a screen, so Back steps from Orders to Positions.
-export const NAV_FIELDS = ["view", "tab", "step", "settings", "ev", "whyTk", "detailsId", "sheet", "seg"];
+// `mkt` and `mtab` (redesign PR 1): the market page's ticker and its tab (Overview · Strategies · Chain). A tab is a
+// screen, like a segment, so Back goes Build → the market page (same ticker, same tab) → Find.
+export const NAV_FIELDS = ["view", "tab", "step", "settings", "ev", "whyTk", "detailsId", "sheet", "seg", "mkt", "mtab"];
 
 /** The one object a history entry carries. Anything not in NAV_FIELDS is not navigation. */
-export const navOf = ({ view = "wizard", tab = "build", step = "find", showSettings = false, ev = null, whyTk = null,
-  detailsId = null, deskSheet = null, posSeg = "positions" } = {}) => ({
+export const navOf = ({ view = "desk", tab = "build", step = "find", showSettings = false, ev = null, whyTk = null,
+  detailsId = null, deskSheet = null, posSeg = "positions", mktTk = null, mktTab = null } = {}) => ({
   view, tab, step, settings: !!showSettings, ev: ev ?? null, whyTk: whyTk ?? null,
   detailsId: detailsId ?? null, sheet: deskSheet ?? null, seg: posSeg === "orders" ? "orders" : "positions",
+  mkt: mktTk ?? null, mtab: mktTk ? (mktTab || "strategies") : null,
 });
 
 export const sameNav = (a, b) => !!a && !!b && NAV_FIELDS.every((k) => a[k] === b[k]);

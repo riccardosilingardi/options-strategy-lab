@@ -23,6 +23,9 @@ import { reconcileFigures, figureSet, tradeCard, money, chanceText, seasonalProv
 import { shortlistWithFloors, analyze } from "./App.jsx";
 import { exactExtremes } from "./rules.js";
 import { scaleStrategy } from "./pro.jsx";
+import { rowFigure } from "./rows.js";
+import { StrategyCard } from "./market.jsx";
+import { FIND_ORDERS, CARD_LABELS, futureFigures, pastFigures, futureTile, pastTileText } from "./rules.js";
 // Repo-relative: JSX tests are bundled to CJS (CLAUDE.md, "How to test").
 import { MODEL_BOARD, ungBoards } from "../scripts/crossing-fixtures.jsx";
 
@@ -270,6 +273,64 @@ check("0c — analyze() equals the exact extremes for every family, a long put i
   }
   eq(Math.round(analyze([put(1, 94)], 90, 45, 0.3, null, { net: 5 }).maxProfit), 8900, "+1 94P at 5.00, spot 90 — was 2600");
   eq(analyze([call(1, 90)], 90, 45, 0.3, null).maxProfit, null, "a long call still has no ceiling");
+});
+
+/* REDESIGN PR 1: FIND'S ROW PRINTS ITS CARD'S TILE. A row on Find shows the figure the list is sorted by and "risk $N";
+   they come from `rowFigure()` (rows.js), and must be what the card on the market page prints for the same candidate,
+   for the same size, under every one of the five orders. */
+check("A ROW'S FIGURE IS THE CARD'S TILE, UNDER ALL FIVE ORDERS — and its risk is the card's YOU RISK", () => {
+  const x = { key: "SOYB|2026-11-20|+1C28,-1C30", tk: TICKER, name: "Bull Call Spread", legs: LEGS, expKey: EXP, dte: DTE, spot: SPOT,
+    sent: "bull", family: "signal", lf: list, flags: [], fused: null, feedBroken: false, noQuoteLegs: 0, touchSize: null,
+    cand: { key: "SOYB|2026-11-20|+1C28,-1C30", pop: list.pop, rr: list.rr } };
+  const size = sizedFree(scaleStrategy(list.aFill, "budget", 300, 300), false);
+  const tileOf = (html, label) => {
+    const at = html.indexOf(`data-tile="${label}"`);
+    if (at < 0) throw new Error(`no ${label} tile`);
+    const end = html.indexOf("data-tile=", at + 10);
+    return html.slice(at, end < 0 ? undefined : end);
+  };
+  for (const o of FIND_ORDERS) {
+    const fig = rowFigure(x, size, o.id);
+    eq(fig.tile, o.tile, `${o.id}: the tile the order rings`);
+    const html = renderToStaticMarkup(<StrategyCard x={x} size={size} misses={[]} bars={[]} sortedBy={o.tile} findOrder={o.id}
+      saved={false} ticked={false} onSave={() => {}} onTick={() => {}} onBuild={() => {}} onChain={() => {}} badge={null} />);
+    const tile = tileOf(html, CARD_LABELS[o.tile]);
+    const esc = fig.value.replace(/&/g, "&amp;");
+    if (!tile.includes(`>${esc}<`)) throw new Error(`${o.id}: the row prints "${fig.value}", the card's tile does not: ${tile.slice(0, 300)}`);
+    has(tile, 'data-sorted="true"');
+    has(tileOf(html, CARD_LABELS.risk), `>${money(fig.risk)}<`);
+  }
+});
+
+check("ROUND 2: THE COMPACT CARD AND THE FULL CARD PRINT THE SAME SIX FIGURES, from listCardFigures()", () => {
+  const x = { key: "SOYB|2026-11-20|+1C28,-1C30", tk: TICKER, name: "Bull Call Spread", legs: LEGS, expKey: EXP, dte: DTE, spot: SPOT,
+    sent: "bull", family: "signal", lf: list, flags: [], fused: null, feedBroken: false, noQuoteLegs: 0, touchSize: null,
+    cand: { key: "SOYB|2026-11-20|+1C28,-1C30", pop: list.pop, rr: list.rr } };
+  const size = sizedFree(scaleStrategy(list.aFill, "budget", 300, 300), false);
+  // The compact card, at rest (Details closed: the full card is not in the markup).
+  const compact = renderToStaticMarkup(<StrategyCard x={x} size={size} misses={[]} bars={[]} sortedBy="future" findOrder="ev"
+    saved={false} ticked={false} onSave={() => {}} onTick={() => {}} onBuild={() => {}} onChain={() => {}} badge={null} />);
+  if (!compact.includes("data-compact")) throw new Error("the market page's card is not the compact layout");
+  // The full card, on the same figures — what Details opens, and what Build's top card is.
+  const n = size.ok ? size.n : null;
+  const full = renderToStaticMarkup(<CandidateCard name="x" legs="x" figures={sizedFigures(list.aFill, n)} rr={list.rr} pop={list.pop}
+    future={futureFigures(list.mc, list.aFill, n, EXP)} past={pastFigures(list.bt, list.aFill, n)} ticker={TICKER} />);
+  const valueOf = (html, label) => {
+    const at = html.indexOf(`data-tile="${label}"`);
+    if (at < 0) throw new Error(`no ${label}`);
+    const end = html.indexOf("data-tile=", at + 10);
+    const chunk = html.slice(html.indexOf(">", at) + 1, end < 0 ? undefined : end).replace(/<[^>]*$/, "").replace(/<[^>]+>/g, "|");
+    return chunk.split("|").map((t) => t.trim()).filter(Boolean);
+  };
+  for (const k of ["risk", "profit", "chance", "rr"]) {
+    const ts = valueOf(compact, CARD_LABELS[k]);
+    const v = ts[ts.indexOf(CARD_LABELS[k]) + 1];                 // the value printed under the label
+    if (!valueOf(full, CARD_LABELS[k]).includes(v)) throw new Error(`${k}: compact ${v}, full ${valueOf(full, CARD_LABELS[k]).join(" ")}`);
+  }
+  const fut = futureTile(futureFigures(list.mc, list.aFill, n, EXP)).value;
+  if (!valueOf(compact, CARD_LABELS.future).includes(fut) || !valueOf(full, CARD_LABELS.future).includes(fut)) throw new Error(`future ${fut}`);
+  const past = pastTileText(pastFigures(list.bt, list.aFill, n)).replace(/&/g, "&amp;");
+  if (!valueOf(compact, CARD_LABELS.past).includes(past) || !valueOf(full, CARD_LABELS.past).includes(past)) throw new Error(`past ${past}`);
 });
 
 console.log(`\n${ok.length} passed, ${bad.length} failed\n`);

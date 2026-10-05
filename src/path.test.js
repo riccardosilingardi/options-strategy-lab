@@ -36,15 +36,30 @@ const LEGS = [
 
 /* ---------------- the path ---------------- */
 
-test("the path is two steps since PR #40: Find, then Build", () => {
-  assert.deepEqual(STEPS.map((s) => s.id), ["find", "build"]);
-  assert.deepEqual(STEPS.map((s) => s.n), [1, 2]);
+// Two steps since PR #40; three since the owner's redesign of 4 Oct 2026 (redesign PR 1): the market page sits between
+// Find and Build. Find is still ONE sorted list (PR #40's point); the market page is a filtered view of it.
+test("the path is three steps since the redesign (4 Oct 2026): Find, the market page, then Build", () => {
+  assert.deepEqual(STEPS.map((s) => s.id), ["find", "market", "build"]);
+  assert.deepEqual(STEPS.map((s) => s.n), [1, 2, 3]);
   assert.equal(FIRST_STEP, "find");
   assert.equal(LAST_STEP, BUILD_TAB);
 });
 
+test("SAVED KEEPS ONE NEW FIELD, futureAvg (redesign PR 1): written at save time; an older item has none", () => {
+  const c = candidateOf({ name: "Bull Put Spread", legs: [{ type: "put", strike: 18, side: -1, qty: 1 }, { type: "put", strike: 17, side: 1, qty: 1 }],
+    pop: 0.62, futureAvg: -3.6, expKey: "2026-11-20", dte: 47 }, { ticker: "CORN", source: "find" });
+  assert.equal(c.futureAvg, -3.6);
+  const sv = savedFromCandidate(c, Date.UTC(2026, 9, 4));
+  assert.equal(sv.futureAvg, -3.6);
+  // An item saved before this PR: the absence is the marker ("not recorded"), never a zero.
+  assert.equal(savedFromCandidate(candidateOf({ name: "X", legs: c.legs }, { ticker: "CORN" })).futureAvg, null);
+  assert.equal(candidateFromSaved({ ...sv, futureAvg: undefined }).futureAvg, null);
+});
+
 test("moving forward and back stays inside the path", () => {
-  assert.equal(nextStepId("find"), "build");
+  assert.equal(nextStepId("find"), "market");
+  assert.equal(nextStepId("market"), "build");
+  assert.equal(prevStepId("build"), "market");
   assert.equal(nextStepId("build"), "build", "there is nothing after Build");
   assert.equal(prevStepId("find"), "find", "there is nothing before Find");
   assert.equal(stepIndex("nonsense"), -1);

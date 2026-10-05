@@ -4,13 +4,13 @@
 import assert from "node:assert/strict";
 import { TICKERS } from "./markets.js";
 import { fuseSignals, weatherComponent, newsComponent, ageDecay, regionSignals,
-  sentimentDirection, signalAdjustment, rankScore, compareCandidates, withSignalRank, againstSignal,
+  sentimentDirection, signalAdjustment, rankScore, compareCandidates, withSignalRank, againstSignal, signalStance,
   weatherApplies, weatherNaReason, factorsOf, tagImpacts, seasonalComponent, REGIONS,
   readingState, readingLine, unreadInputsAria, signalSnapshot, compareSignals,
   verdictLine, scoreWorking, confidenceWorking, signalDirection, signalFamilies,
   FIND_ORDERS, DEFAULT_FIND_ORDER, findOrderOf, findOrderKey, findOrderCompare, placeLine, placeSignal, numbersFitLines, NEUTRAL_QUIET, SIGNAL_DIVISOR, BASE_WEIGHTS, REINFORCE, CONFLICT_DAMPING, CONFIDENCE_BANDS } from "./signals.js";
 import { readFileSync } from "node:fs";
-import { seasonalSignal, RULES } from "./rules.js";
+import { seasonalSignal, RULES, stanceText } from "./rules.js";
 /* A MEASURED SEASON FOR A FIXTURE (PR #48): every month at `x`%, 16 years, a standard error of 0.4% — so a month
    counts when |x| ≥ 0.8 (RULES.seasonalSignalT = 2 × 0.4), the same line the retired ±0.8% band drew. */
 const seasonAt = (x, dte = 30) => seasonalSignal({ monthlyMean: Array(12).fill(x), monthN: Array(12).fill(16),
@@ -313,6 +313,51 @@ test("a score inside the noise floor is nothing to go against", () => {
   assert.ok(Math.abs(quiet.score) < 10, `fixture must be quiet, scored ${quiet.score}`);
   assert.equal(againstSignal(quiet, 1), null);
   assert.equal(againstSignal(quiet, -1), null);
+});
+
+/* ---------------- 14b. where a card stands (redesign PR 1): signalStance(), on againstSignal()'s counting ---------------- */
+test("SIGNAL STANCE — with the signals: the factors that agree of the ones this market has, and how many go against", () => {
+  const w = signalStance(bullish, 1);
+  assert.equal(w.kind, "with");
+  assert.equal(w.total, 4);
+  const agree = bullish.factors.filter((k) => bullish.components[k].dir === 1).length;
+  const opp = bullish.factors.filter((k) => bullish.components[k].dir === -1).length;
+  assert.equal(w.n, agree);
+  assert.equal(w.against, opp);
+  assert.equal(stanceText(w), `with the signals, ${agree} of 4 · ${opp ? `${opp} against` : "none against"}`);
+});
+
+test("SIGNAL STANCE — against the signals: the same count againstSignal() asks about", () => {
+  const a = signalStance(bullish, -1);
+  assert.equal(a.kind, "against");
+  assert.equal(a.n, againstSignal(bullish, -1).n);
+  assert.equal(a.total, againstSignal(bullish, -1).total);
+  assert.equal(stanceText(a), `against the signals, ${a.n} of 4`);
+});
+
+test("SIGNAL STANCE — a direction-neutral card neither backs nor fights the signals", () => {
+  assert.equal(stanceText(signalStance(bullish, 0)), "direction-neutral: the signals neither back it nor go against it");
+  assert.equal(signalStance(null, 1), null, "a market still being read has no stance");
+});
+
+test("SIGNAL STANCE — a market with no weather counts 3, not 4", () => {
+  const gld = { score: 40, confidence: 80, agreement: "MIXED", factors: ["seasonal", "technical", "news"],
+    components: { seasonal: { dir: 1, strength: 30 }, technical: { dir: 1, strength: 50 }, news: { dir: -1, strength: 20 },
+      weather: { dir: 0, strength: 0 } } };
+  assert.equal(stanceText(signalStance(gld, 1)), "with the signals, 2 of 3 · 1 against");
+  assert.equal(stanceText(signalStance(gld, -1)), "against the signals, 2 of 3");
+});
+
+test("SIGNAL STANCE — inside AGAINST_MIN_SCORE (10) the score is noise: neither with nor against", () => {
+  const quiet = fuseSignals({ ticker: "UNG", month: 5, now: NOW });
+  assert.ok(Math.abs(quiet.score) < 10);
+  for (const d of [1, -1]) {
+    const q = signalStance(quiet, d);
+    assert.equal(q.kind, "quiet");
+    assert.equal(stanceText(q), "the signals are too weak to back or oppose it (score under 10)");
+  }
+  const edge = { score: 10, confidence: 50, factors: ["technical"], components: { technical: { dir: 1, strength: 40 } } };
+  assert.equal(signalStance(edge, 1).kind, "with", "at the floor itself the score counts, as againstSignal() reads it");
 });
 
 /* ---------------- 15. the UI adapter reads the same numbers ---------------- */

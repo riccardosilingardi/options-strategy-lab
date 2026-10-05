@@ -23,6 +23,7 @@ const ENTRY = `
 import { findCards } from "./scripts/find-fixtures.jsx";
 import { scaleStrategy } from "./src/pro.jsx";
 import { RULES, requestOf, sizing, sizedFree, controlReadings, splitByRequest, nearestRelaxation } from "./src/rules.js";
+import { marketRows } from "./src/rows.js";
 
 const t0 = performance.now();
 const cards = findCards();
@@ -90,6 +91,16 @@ for (let i = 0; i < N; i++) move(i);
 const per = (performance.now() - t1) / N;
 console.log("\\nONE SLIDER MOVE on " + cards.length + " cards (size each, read every control, split, nearest relaxation): " + per.toFixed(3) + " ms");
 console.log("GENERATING THE LIST (analyse, floors, 8,000-run chance per card): " + genMs.toFixed(0) + " ms — a move never repeats it\\n");
+/* REDESIGN PR 1: WHAT FIND DRAWS NOW. Before: every card, each with its gauge and its unified picture (two drawings).
+   After: one row per market, each with one 72×40 thumbnail; the cards are on each market's own page. */
+{
+  const req = requestOf({}, sizing({ tradingCapital: 5000 * 20, concurrentTarget: 1 }));
+  const byKey = new Map(cards.map((x) => [x.key, x]));
+  const rows = marketRows(cards, req, (c) => sizedFree(scaleStrategy(byKey.get(c.key).lf.aFill, req.mode, req.amt, req.riskCap), false));
+  console.log("WHAT FIND RENDERS (redesign PR 1), on the " + cards.length + " fixture cards over " + new Set(cards.map((x) => x.tk)).size + " markets");
+  console.log("  before: " + cards.length + " cards, " + cards.length * 2 + " pictures (a gauge and the unified picture on each)");
+  console.log("  after:  " + rows.length + " rows (one per market), " + rows.length + " pictures (one 72×40 thumbnail each), 0 cards — the cards are on the market page\\n");
+}
 `;
 
 const dir = mkdtempSync(join(tmpdir(), "osl-measure-find-"));

@@ -6,8 +6,8 @@
 //
 // Screens in this file:
 //   · CapitalOnboarding — first run, PRD §3. Capital, positions at once, savings.
-//   · WizardOpen        — Home. Greeting, one line of status, TWO doors: my
-//                         positions, and Find (App.jsx's first step).
+//   · (WizardOpen, Home, is gone since redesign PR 1 round 2 — owner, 5 Oct 2026: the app opens on Find. Its
+//     status sentence, `statusLine()`, is now the Positions badge's spoken name on the bottom bar.)
 //   · ConfirmSteps      — the confirm step on Build: what is being sent, the
 //                         checks, the exit plan.
 //
@@ -21,12 +21,11 @@
 // stacks in one column and widens on a desk.
 // ============================================================================
 import React, { useState } from "react";
-import { Compass, Briefcase, ArrowLeft, SlidersHorizontal, ShieldCheck, ShieldAlert, AlertTriangle } from "lucide-react";
+import { ShieldCheck, ShieldAlert, AlertTriangle } from "lucide-react";
 import { T, TYPE, BADGE_SAFE, BADGE_BTN_GAP } from "./theme.js";
 import { mono, sans, Chip, Label, Panel, TAP } from "./ui.jsx";
-import { RULES, sizing, money, pctText, ruleBadge, limitOwner, NO_CEILING, takeProfitTarget } from "./rules.js";
-import { displayName } from "./positionView.js";
-import { BandThumbnail, payoffBands, UnifiedFigure, exitPlanSentence, exitPlanDetail, price } from "./visuals.jsx";
+import { RULES, sizing, money, pctText, limitOwner, NO_CEILING, takeProfitTarget } from "./rules.js";
+import { UnifiedFigure, exitPlanSentence, exitPlanDetail, price } from "./visuals.jsx";
 
 // PR #48 SWEEP: the stacks, Chip, Label, Panel and the tap target are ui.jsx's, the sizes are the type tokens. Mono
 // only for numbers and legs (an amount typed, a P&L, the legs being sent). RED IS FOR ERRORS AND REFUSALS: a
@@ -38,23 +37,6 @@ const EYEBROW = { textTransform: "uppercase" };
 
 /** The wizard's card is the Panel atom with the wizard's roomier padding. */
 export const Card = ({ children, style }) => <Panel style={{ padding: 18, ...style }}>{children}</Panel>;
-
-/** A full-width choice. Big enough for a thumb, legible without a title. */
-const BigChoice = ({ icon: I, title, sub, onClick, color = T.amber, primary }) => (
-  <button onClick={onClick}
-    style={{
-      ...sans, display: "flex", alignItems: "center", gap: 14, width: "100%", textAlign: "left",
-      minHeight: 72, padding: "14px 16px", borderRadius: 10, cursor: "pointer",
-      background: primary ? color : T.panel, color: primary ? T.onAccent : T.ink,
-      border: `1.5px solid ${primary ? color : T.line}`,
-    }}>
-    <I size={22} style={{ flexShrink: 0, color: primary ? T.onAccent : color }} />
-    <span style={{ minWidth: 0 }}>
-      <span style={{ display: "block", fontSize: FS.md, fontWeight: FW.bold }}>{title}</span>
-      <span style={{ display: "block", fontSize: FS.sm, marginTop: 2, color: primary ? T.onAccent : T.mut, opacity: primary ? 0.9 : 1 }}>{sub}</span>
-    </span>
-  </button>
-);
 
 const NumberField = ({ value, onChange, prefix, min = 0, step = 1, width = 150, placeholder }) => (
   <label style={{ display: "inline-flex", alignItems: "center", gap: 6, background: T.bg, border: `1px solid ${T.field}`, borderRadius: 10, padding: "0 12px", minHeight: TAP, width }}>
@@ -232,16 +214,9 @@ export function CapitalOnboarding({ initial = {}, onDone }) {
 }
 
 /* ====================================================================
-   SCREEN 1 — OPEN
-   Greeting, one line of status, three choices. Once positions exist the
-   front page leads with what needs attention today, and the three
-   choices stay right underneath: the wizard is one tap away, always.
+   THE POSITIONS SENTENCE — Home's status line, kept (round 2): the bottom bar's Positions badge reads it aloud, so
+   what Home said is still said where its count now is.
 ==================================================================== */
-
-const greeting = (d = new Date()) => {
-  const h = d.getHours();
-  return h < 12 ? "Good morning." : h < 18 ? "Good afternoon." : "Good evening.";
-};
 
 /** One line. Generated from the numbers, never hand-written per case.
  *
@@ -278,74 +253,6 @@ export function statusLine({ positions = [], attention = 0, looks = null, market
   }
   if (c > 0) return `${n} ${plural} open.${working} Alpaca has the order; nothing to decide.`;
   return `${n} ${plural} open, all inside the plan. Nothing to do.`;
-}
-
-export function WizardOpen({ positions = [], posAlerts = [], attention = 0, looks = null, marketReady = true, closing = 0,
-  onPositions, onFind, onSettings, barsFor }) {
-  const hasPositions = positions.length > 0;
-  return (
-    <div style={{ ...sans, maxWidth: 620, margin: "0 auto", padding: `22px 16px ${BADGE_SAFE}px` }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
-        <div>
-          <h1 data-view-heading tabIndex={-1} style={{ ...sans, fontSize: FS.xl, fontWeight: FW.bold, color: T.ink, margin: 0, lineHeight: LH.tight, outline: "none" }}>{greeting()}</h1>
-          <p style={{ ...sans, fontSize: FS.md, color: T.mut, lineHeight: LH.body, margin: "8px 0 0" }}>
-            {statusLine({ positions, attention, looks, marketReady, closing })}
-          </p>
-        </div>
-        <button onClick={onSettings} title="Settings"
-          style={{ ...sans, minHeight: TAP, minWidth: TAP, borderRadius: 10, background: "transparent", border: `1px solid ${T.line}`, color: T.mut, cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-          <SlidersHorizontal size={18} />
-        </button>
-      </div>
-
-      {/* With positions open, what needs attention IS the front page. */}
-      {hasPositions && (
-        <Card style={{ marginTop: 18, borderColor: attention ? `${T.action}66` : (Number(looks) || 0) ? `${T.amber}66` : T.line }}>
-          <Label style={EYEBROW}>{attention ? "Needs attention today" : (Number(looks) || 0) ? "Worth a look" : "Your positions"}</Label>
-          <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
-            {posAlerts.map(({ p, pnl, dteLeft, level, label, spotNow }) => {
-              const c = level === "action" ? T.action : level === "watch" ? T.amber : T.green;
-              return (
-                <button key={p.id} onClick={onPositions}
-                  style={{ ...sans, display: "flex", gap: 12, alignItems: "center", width: "100%", textAlign: "left",
-                    minHeight: 64, padding: "12px 13px", background: T.bg, border: `1px solid ${c}44`, borderRadius: 10, cursor: "pointer" }}>
-                  <span style={{ width: 10, height: 10, borderRadius: 5, background: c, flexShrink: 0 }} />
-                  {/* The band thumbnail is the list visual everywhere (PRD §6). */}
-                  {p.legs && (
-                    <BandThumbnail bands={payoffBands({ legs: p.legs, entryNet: p.entryNet, spot: spotNow ?? p.entrySpot })}
-                      bars={barsFor ? barsFor(p.ticker) : []} width={80} height={34} />
-                  )}
-                  <span style={{ flex: 1, minWidth: 0 }}>
-                    <span style={{ display: "block", fontSize: FS.md, fontWeight: FW.bold, color: T.ink }}>{p.ticker} · {displayName(p)}</span>
-                    <span style={{ display: "block", fontSize: FS.sm, color: T.mut, marginTop: 2 }}>{label} · {dteLeft} days left</span>
-                  </span>
-                  <span style={{ ...mono, fontSize: FS.md, fontWeight: FW.bold, color: pnl == null ? T.dim : pnl >= 0 ? T.green : T.violet, flexShrink: 0 }}>
-                    {pnl == null ? "…" : `${pnl < 0 ? "-" : "+"}$${Math.abs(pnl).toFixed(0)}`}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </Card>
-      )}
-
-      {/* TWO doors. "Find a trade" goes straight to the Find step: the guided
-          door's questions, its two roads and its "Nothing today" screen are
-          gone at the owner's request (PR #40, TASK 1, 23 Sep 2026). */}
-      <div style={{ display: "grid", gap: 10, marginTop: 18 }}>
-        <BigChoice icon={Briefcase} color={T.blue} onClick={onPositions}
-          title="My positions"
-          sub={hasPositions ? `${positions.length} open · profit target, stop and exit day for each` : "Nothing open yet"} />
-        <BigChoice icon={Compass} color={T.amber} primary onClick={onFind}
-          title="Find a trade"
-          sub="Every market, one ranked list" />
-      </div>
-
-      <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10, marginTop: 20, flexWrap: "wrap" }}>
-        <span style={{ ...sans, fontSize: FS.xs, color: T.dim }}>PAPER · {ruleBadge()}</span>
-      </div>
-    </div>
-  );
 }
 
 /* ====================================================================

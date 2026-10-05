@@ -6,7 +6,7 @@ import {
 import {
   RefreshCw, ShieldCheck, Save, Trash2, Layers, Radar, Box,
   FlaskConical, Briefcase, Plus, Plug, Send, ExternalLink, MessageSquare, FileText, Bell,
-  SlidersHorizontal, ArrowLeft, Sun, Moon, AlertTriangle, WifiOff,
+  SlidersHorizontal, Sun, Moon, AlertTriangle, WifiOff,
 } from "lucide-react";
 import { fetchAllNews, fetchWeather, ImpactTags, CopilotTab, TaCopilot, ReportTab, OrderTicket, UnrecordedCard, scaleStrategy, buildContext, GuardianPanel, ChainMatrix, OptionPanel, PriceChart, QtyField, UnifiedView, taSignals, confluence, WhyThisTrade, Markdown, alpacaReq, CloseConfirm } from "./pro.jsx";
 import { prepareClose, sendClose, groupForRecord, closeWorking, legsNotHeld, holdingGroups } from "./closeOrder.js";
@@ -19,7 +19,7 @@ import { fuseSignals, sentimentDirection, signalDirection, signalFamilies, findO
   readingState, signalSnapshot, compareSignals } from "./signals.js";
 import { N as nCDF, bs as bsPrice, smile as smileIV, payoff as payoffExp, SIGMA, histBacktest, monthReturn,
   parseAvJson, statsFromMatrix } from "./engine.js";
-import { parseOcc, buildOcc, snapStrike, resnapLegs, expiryStrikes, strikeOptions, fetchChain, hasOpenInterest, enrichOpenInterest, feedName, sourceNote, openInterestNote, oiProfile, expiryOpenInterest, nearMoneyOpenInterest, monotonicityBreaks, monotonicityNote, invertedOnStrikes, spotOf, spotAt } from "./chain.js";
+import { parseOcc, buildOcc, snapStrike, resnapLegs, expiryStrikes, strikeOptions, fetchChain, hasOpenInterest, enrichOpenInterest, feedName, sourceNote, openInterestNote, oiProfile, expiryOpenInterest, nearMoneyOpenInterest, monotonicityBreaks, monotonicityNote, invertedOnStrikes, spotOf, spotAt, atmIv } from "./chain.js";
 import { T, TYPE, themeName, setTheme, BADGE_SAFE } from "./theme.js";
 import { RULES, sizing, ruleBadge, takeProfitLabel, takeProfitTarget, takeProfitBasisWords, stopWarningLevel, stopLossLabel, perTradeCapLabel, RULE_PILLS, money, pctText, capitalSourceNote, perTradeLimitPhrase, qualityFloor, qualityFloorSentence, liquiditySkippedNote,
   positionPnl, BROKER_PNL, remainingEdge, remainingEdgeLabel, shareOfMaximum, attentionCount,
@@ -49,13 +49,15 @@ import { RULES, sizing, ruleBadge, takeProfitLabel, takeProfitTarget, takeProfit
 import { isStale, freshnessNote, staleAmong , findFreshness } from "./freshness.js";
 import { evaluateTrade, gateSummary } from "./riskGate.js";
 import { DEMO, DEMO_BANNER, DEMO_TOOLTIP, DEMO_SEED_TICKERS, demoPositions } from "./demo.js";
-import { CapitalOnboarding, WizardOpen, ConfirmSteps, Card, Pill } from "./wizard.jsx";
+import { CapitalOnboarding, ConfirmSteps, Card, Pill, statusLine } from "./wizard.jsx";
 // THE CONTROLS AND THE ONE CANDIDATE CARD (ROADMAP P10). Its own file: it is
 // nothing but a trade, so it may not live in `steps.jsx`, and `wizard.jsx`
 // renders the same card, so it may not live here.
 import { CandidateCard, CandidateActions, SignalBadge, StopSigns } from "./card.jsx";
 // STEP 1, FIND: its own file since PR #45, built on `ui.jsx` and the type tokens.
-import { FindStep } from "./find.jsx";
+import { FindStep, FindHeader } from "./find.jsx";
+import { SavedList } from "./saved.jsx";
+import { MarketPage } from "./market.jsx";
 import { buildHandOff, buildScreenState, BUILD_TAB } from "./handoff.js";
 import { orderBody, orderOutcome, alpacaErrorText, reduceRatios, limitWords, orderLimitWords, fillPriceOf, cancelOutcome, cancelWaiting } from "./order.js";
 // THE PERMANENT RECORD: the ref a position is given at open, the sequence on
@@ -72,11 +74,12 @@ import { FIRST_STEP, stepCarry, candidateOf, candidateKey, legsLine, toggleCompa
 import { PositionCard, PositionDetails } from "./positionCard.jsx";
 import { navOf, createNavHistory } from "./nav.js";
 import { exitProgress, entryVsNow, displayName, fileState, pnlShareOfRisk, pnlShareText, holdsStructure,
-  sizeWords, withExactMaxProfit, maxProfitCorrection, maxProfitCorrectionNote } from "./positionView.js";
+  sizeWords, withExactMaxProfit, maxProfitCorrection, maxProfitCorrectionNote, exitDateOf } from "./positionView.js";
+import { findStatusText, DEFAULT_FIND_ORDER, BUILD_CTA } from "./rules.js";
 import { EvidenceBar, EvidenceOverlay, DeskSheet, Fold, DeskCountLine } from "./steps.jsx";
-import { BottomBar, placeOf, NAV_BAR_H } from "./navBar.jsx";
+import { BottomBar, placeOf, NAV_BAR_H, FIND_LIST_END } from "./navBar.jsx";
 import { AccountStrip, PositionsBar, WorkingCloseLine } from "./positions.jsx";
-import { Segments as USegments, Note, CheckField, Btn, Panel, Label, Stat, mono, sans } from "./ui.jsx";
+import { Note, CheckField, Btn, Panel, Label, Stat, mono, sans } from "./ui.jsx";
 import { marketClockLine } from "./clock.js";
 import { BASKET, TICKERS, getU, categoryOf } from "./markets.js";
 
@@ -1327,9 +1330,10 @@ class TabBoundary extends React.Component {
 }
 
 export default function OptionsStrategyLab() {
-  // PRD §5: `view` is the shell — the home page ("wizard") or the desk. The
-  // guided door behind it is gone (PR #40, TASK 1): Home goes straight to Find.
-  const [view, setView] = useState("wizard");   // "wizard" | "desk"
+  // PRD §5: `view` is the shell. Since redesign PR 1 round 2 (owner, 5 Oct 2026) THE APP OPENS ON FIND: Home is no
+  // longer a screen, so the desk is the only view (its positions are the bottom bar's Positions badge, Settings the
+  // gear in Find's header). The field stays in nav.js's entries.
+  const [view, setView] = useState("desk");     // "desk"
   // The gate's answer AFTER the tap on the Build screen's confirm step. A
   // refusal has to stay ON that screen with its reasons — a toast that scrolls
   // away is not an explanation.
@@ -1339,7 +1343,10 @@ export default function OptionsStrategyLab() {
   /* ---- THE ONE NUMBERED PATH (src/path.js) ----
      Two steps since PR #40: 1 Find (one request block over one ranked list
      across the selected markets), 2 Build (one trade taken apart). */
-  const [step, setStep] = useState(FIRST_STEP);   // "find" | "build"
+  const [step, setStep] = useState(FIRST_STEP);   // "find" | "market" | "build"
+  /* THE MARKET PAGE'S OWN STATE (redesign PR 1): its ticker and its tab. Opening CORN's page does NOT replace the
+     trade loaded on Build (`ticker`, `legs`): that changes only when the user takes a trade there. */
+  const [mkt, setMkt] = useState({ tk: null, tab: "strategies" });
   const [ev, setEv] = useState(null);           // which evidence sheet is open OVER the step
   /* ---- comparing, on Find ----
      Up to three candidates, normalised into one shape by `candidateOf`. The
@@ -1353,6 +1360,8 @@ export default function OptionsStrategyLab() {
   // WHY A MARKET HAS NO CHAIN, when its fetch FAILED (PR #40): a failure is not
   // "still loading", and neither is a market verdict. Cleared on the next success.
   const [chainErr, setChainErr] = useState({});  // ticker -> error in a few words
+  // When a refresh last failed (redesign PR 1): Find's stale banner says "The feed didn't answer at <time>".
+  const [chainErrAt, setChainErrAt] = useState(null);
   const [seasonal, setSeasonal] = useState({});  // ticker -> {monthlyMean, sigma, matrix, years, src, at} from Alpha Vantage
   // WHY a market is not in `seasonal`: loading, or a named failure. A fallback
   // that cannot say why it is in use is indistinguishable from a measurement.
@@ -1629,12 +1638,11 @@ export default function OptionsStrategyLab() {
       ensureOpenInterest(tk, c);
       // snapshot IV ATM giornaliero → costruisce lo storico per l'IV Rank
       try {
-        const ek2 = c.expirations.find((e) => c.byExp[e].dte >= 25 && c.byExp[e].dte <= 70) || c.expirations[0];
-        if (ek2 && c.spot) {
-          const cs = Object.keys(c.byExp[ek2].calls).map(Number);
-          const kA = cs.reduce((b2, k) => Math.abs(k - c.spot) < Math.abs(b2 - c.spot) ? k : b2, cs[0]);
-          const ivA = c.byExp[ek2].calls[kA]?.iv;
-          if (ivA) setStore((st) => {
+        // ONE READING (redesign PR 1): `atmIv()` in chain.js, the same function the market page's header prints.
+        const atm = atmIv(c);
+        if (atm) {
+          const ivA = atm.iv;
+          setStore((st) => {
             const d = new Date().toISOString().slice(0, 10);
             const h = (st.ivHist?.[tk] || []).filter((x) => x.d !== d);
             const ns = { ...st, ivHist: { ...(st.ivHist || {}), [tk]: [...h, { d, iv: ivA }].slice(-250) } };
@@ -1646,6 +1654,7 @@ export default function OptionsStrategyLab() {
       return c;
     } catch (e) {
       setChainErr((m) => ({ ...m, [tk]: fetchFailWords(e) }));
+      setChainErrAt(Date.now());
       if (!silent) setMsg(`Could not load ${tk} option prices — ${e.message}`);
       return null;
     } finally { if (!silent) setBusy(null); }
@@ -2363,10 +2372,12 @@ export default function OptionsStrategyLab() {
      must not lose what was selected, so the selection lives in this component
      and the step is only which part of it is being shown. */
   const goStep = (id) => {
-    setView("desk"); setTab(BUILD_TAB); setStep(id); setEv(null); setShowSettings(false);
+    setView("desk"); setTab(BUILD_TAB); setStep(id); setEv(null); setShowSettings(false); setDeskSheet(null);
     window.scrollTo?.({ top: 0 });
     refreshExpired();
   };
+  /** Open a market's page (redesign PR 1): from a Find row on Strategies; a tab is kept when the ticker changes. */
+  const goMarket = (tk, tab = "strategies") => { setMkt({ tk, tab }); goStep("market"); };
 
   /* ---- WHAT IS OUT OF DATE, AND NOTHING ELSE ----
      Every source has its own budget (src/freshness.js) and they are wildly
@@ -3101,6 +3112,24 @@ export default function OptionsStrategyLab() {
       .map((r) => ({ ...r, would: wouldHaveDone({ entryNet: r.entryNet, nowNet: r.nowNet, contracts: r.contracts }) }))
       .sort((a, b) => (b.at || 0) - (a.at || 0));
   }, [notTakenOrders, store.saved, chains]);
+  /* SAVED: "WHEN SAVED" BESIDE "NOW" (redesign PR 1). Now is priced at every read on today's chain through
+     `listCardFigures()`, the function every card reads: its chance, its future avg per $100 at risk and its risk for
+     one contract. An expiry today's chain does not list is "not on today's chain"; nothing is guessed. */
+  const savedNow = useMemo(() => {
+    const out = {};
+    for (const sv of store.saved || []) {
+      const c = chains[sv.ticker];
+      const e = c && sv.expKey ? c.byExp?.[sv.expKey] : null;
+      if (!c || !c.spot || !e || !(sv.legs || []).length) { out[sv.id] = null; continue; }
+      try {
+        const lf = listCardFigures(sv.legs, { spot: c.spot, dte: e.dte, iv: getU(sv.ticker).iv, q: makeQuote(c, sv.expKey),
+          ticker: sv.ticker, expKey: sv.expKey, seasonal: seasonalFor(sv.ticker), matrix: seasonal[sv.ticker]?.matrix || null });
+        out[sv.id] = { pop: lf.pop, per100: lf.future ? lf.future.per100 : null,
+          risk: lf.aFill && lf.aFill.maxLoss != null ? Math.abs(lf.aFill.maxLoss) : null };
+      } catch { out[sv.id] = null; }
+    }
+    return out;
+  }, [store.saved, chains, seasonal, seasonalFor]); // eslint-disable-line
 
   /* >>> ONE P&L PER POSITION, ONE SPELLING IN THIS FILE (P9, TASK 0b). <<<
      `positionPnl()` in rules.js decides WHICH of the two sources a figure came
@@ -3623,7 +3652,8 @@ export default function OptionsStrategyLab() {
   const cardOrigin = carded && buildOrigin.kind === "card";
   // BACK TO THE LIST (PR #44, TASK 3): Find still holds the same request, so it is a step back and a scroll to the card.
   const scrollToCard = useRef(null);
-  const backToList = () => { scrollToCard.current = buildOrigin ? buildOrigin.key : null; goStep("find"); };
+  // BACK TO THE CARD (redesign PR 1): a card lives on its market's page now, so the link returns there, to that card.
+  const backToList = () => { scrollToCard.current = buildOrigin ? buildOrigin.key : null; goMarket(String(buildOrigin && buildOrigin.key || "").split("|")[0] || mkt.tk, "strategies"); };
   /* THE SIZE LINE AND THE FOUR SIZED FIGURES ARE THE LIST CARD'S (PR #45, TASK 3): `sizedFigures()` and `sizeLine()` are
      the one function each, read here at the price the order will be sent at (`AE`) and in Find at `aFill` — the same
      analysis, held equal by `figures.test.jsx`. A count typed by hand wins and says so. */
@@ -3798,7 +3828,7 @@ export default function OptionsStrategyLab() {
             seasonal: seasonalFor(tk), a, aFill, matrix: seasonal[tk]?.matrix || null });
           const f = fHere || null;
           const prof = evProfile(lf.mc, aFill.maxProfit, aFill.maxLoss);
-          const cand = candidateOf({ name: p.name, legs: p.legs, a: aFill, pop: lf.pop, dte: d2, expKey: ek,
+          const cand = candidateOf({ name: p.name, legs: p.legs, a: aFill, pop: lf.pop, dte: d2, expKey: ek, futureAvg: lf.future ? lf.future.per100 : null,
             ...seasonalStampFields(lf.mc), ...chanceDrawFields(lf.mc) }, { ticker: tk, spot: c.spot, source: "find" });
           if (seen.has(cand.key)) continue;
           seen.add(cand.key);
@@ -3849,12 +3879,16 @@ export default function OptionsStrategyLab() {
   }), []);
   // "ONLY A POSITIVE FUTURE AVG" (PR #49): the card's future avg per $100 at risk above zero; unknown is not above.
   const futurePositive = (x) => futureIsPositive(x.ev100);
-  const findShown = useMemo(() => findGen.items.filter((x) =>
-    inFindFilter(x) && (find.flagged || x.flags.length === 0) && (!find.positiveOnly || futurePositive(x))).sort(findOrderCompare(findOrder)),
-  [findGen, inFindFilter, find.flagged, find.positiveOnly, findOrder]);
+  /* THE ONE SORTED LIST (redesign PR 1): `findSorted` is every card past the flag and "Avg > 0" toggles, in the owner's
+     order; Find's rows read it through the category tab (`findShown`), the market page through its ticker. Neither
+     re-ranks nor re-simulates. */
+  const findSorted = useMemo(() => findGen.items.filter((x) =>
+    (find.flagged || x.flags.length === 0) && (!find.positiveOnly || futurePositive(x))).sort(findOrderCompare(findOrder)),
+  [findGen, find.flagged, find.positiveOnly, findOrder]);
+  const findShown = useMemo(() => findSorted.filter(inFindFilter), [findSorted, inFindFilter]);
   useEffect(() => {
     // BACK RETURNS TO THE CARD (PR #46, TASK 2): a sheet opened from a card scrolls back to it when it closes.
-    if (step !== "find" || ev || !scrollToCard.current) return;
+    if ((step !== "find" && step !== "market") || ev || !scrollToCard.current) return;
     const key = scrollToCard.current;
     const id = requestAnimationFrame(() => {
       const el = typeof document !== "undefined"
@@ -3866,9 +3900,10 @@ export default function OptionsStrategyLab() {
   /* ---- BACK WORKS (PR #44, TASK 3) ----
      The app is one page whose screens are state, so the History API is made out of that state (src/nav.js): moving to
      a different screen pushes an entry, popstate restores the one it hands back, and closing a sheet from its own
-     button steps back instead of leaving a screen behind. Home is the first entry and is never intercepted. After
+     button steps back instead of leaving a screen behind. Find is the first entry (round 2) and is never intercepted. After
      each move, focus goes to the new view's heading (WCAG 2.4.3). */
-  const navNow = navOf({ view, tab, step, showSettings, ev, whyTk, detailsId, deskSheet, posSeg });
+  const navNow = navOf({ view, tab, step, showSettings, ev, whyTk, detailsId, deskSheet, posSeg,
+    mktTk: tab === "build" && step === "market" ? mkt.tk : null, mktTab: mkt.tab });
   const navNowRef = useRef(navNow); navNowRef.current = navNow;
   const buildOriginRef = useRef(null); buildOriginRef.current = buildOrigin;
   const navHist = useRef(null);
@@ -3881,10 +3916,11 @@ export default function OptionsStrategyLab() {
       apply: (n) => {
         const o = buildOriginRef.current;
         // Back from a trade that came from a card lands on that card, the way the "Back to the list" link does.
-        if (n.tab === "build" && n.step === "find" && navNowRef.current.step === "build" && o && o.kind === "card") scrollToCard.current = o.key;
+        if (n.tab === "build" && (n.step === "find" || n.step === "market") && navNowRef.current.step === "build" && o && o.kind === "card") scrollToCard.current = o.key;
         else if (typeof window.scrollTo === "function") window.scrollTo({ top: 0 });
         setView(n.view); setTab(n.tab); setStep(n.step); setShowSettings(n.settings);
         setEv(n.ev); setWhyTk(n.whyTk); setDetailsId(n.detailsId); setDeskSheet(n.sheet); setPosSeg(n.seg || "positions");
+        if (n.mkt) setMkt({ tk: n.mkt, tab: n.mtab || "strategies" });
       },
     });
     return () => { if (navHist.current) navHist.current.stop(); };
@@ -4022,11 +4058,7 @@ export default function OptionsStrategyLab() {
      Everything above is the app's brain. What follows decides which face it
      shows: setup on a first run, the wizard by default, the tabs on request. */
 
-  const goHome = () => { setView("wizard"); };
-  /* Leaving the wizard for the desk lands on a STEP of the path — `goStep`
-     above. `ev` is cleared every time: a sheet left open from a previous visit
-     covers whatever the button promised to show. */
-  const marketReady = !!spot || Object.keys(chains).length > 0;
+  /* THE FIRST SCREEN IS FIND (round 2): a first run answers the two questions, then lands on Find. */
 
   if (!hydrated) {
     return (
@@ -4048,31 +4080,8 @@ export default function OptionsStrategyLab() {
               capital: a.tradingCapital, concurrentTarget: a.concurrentTarget, savings: a.savings,
               sizeOverride: a.override && a.override.reason && a.override.reason.trim().length >= RULES.minOverrideReasonChars ? a.override : null,
               onboarded: true } };
-            setStore(st); await saveState(st); goHome();
+            setStore(st); await saveState(st); goStep("find");
           }}
-        />
-      </div>
-    );
-  }
-
-  if (view === "wizard") {
-    return (
-      <div style={{ minHeight: "100vh", background: T.bg, color: T.body }}>
-        <DemoBanner />
-        <OfflineBanner />
-        {msg && (
-          <div style={{ ...mono, fontSize: FS.xs, color: T.amber, background: `${T.amber}12`, borderBottom: `1px solid ${T.amber}44`, padding: "10px 14px" }}>{msg}</div>
-        )}
-        <WizardOpen
-          /* "N OPEN POSITIONS" MEANS OWNED. Working orders have their own
-             place in Positions and trades nobody bought are under Watching. */
-          positions={ownedPositions} posAlerts={posAlerts} attention={nAttention} looks={attn.looks} closing={attn.closesWorking}
-          marketReady={marketReady} barsFor={(tk) => barsCache[tk] || []}
-          onPositions={() => { setView("desk"); setTab("positions"); }}
-          /* THE HOME ENTRY GOES STRAIGHT TO FIND (PR #40, TASK 1). The guided
-             door's questions and its "Nothing today" screen are gone. */
-          onFind={() => goStep("find")}
-          onSettings={() => { setView("desk"); setShowSettings(true); }}
         />
       </div>
     );
@@ -4082,8 +4091,45 @@ export default function OptionsStrategyLab() {
      Written `"find" === step` on purpose: `step === "<id>"` is how
      src/wordcount.mjs finds a step's JSX block, and this is not one. */
   const onFindStep = tab === "build" && !showSettings && "find" === step;
+  // The market page (redesign PR 1) is one ticker, but it prints its own header for its own market.
+  const onMarketStep = tab === "build" && !showSettings && "market" === step;
+  /* ROUND 2 (owner, 5 Oct 2026): FIND, SAVED AND A MARKET'S PAGE DRAW NO DESK HEADER. Find has its own (FindHeader: "Find",
+     ↻, the gear, the status line, Results | Saved), the market page its own; the desk header stays on Build, Positions,
+     the Journal and Settings (PR 2 and PR 3). The desk's count line is the Positions badge here. */
+  const chromeless = onFindStep || onMarketStep || (tab === "watching" && !showSettings);
+  /* FIND'S STATUS LINE: "<freshness> · <feed> · Paper". The feed is the feeds the selected markets came from. */
+  const findFeeds = Array.from(new Set(find.markets.map((tk) => feedName(chains[tk])).filter(Boolean))).join(" / ");
   /* FIND'S BAR READS THE SELECTION, NOT ONE MARKET (PR #46, TASK 1): "N markets · prices Xm ago", the OLDEST. */
   const findFresh = findFreshness(find.markets, chains, ago);
+  /* REDESIGN PR 1 — what Find's new screen reads from here. */
+  // One Refresh for every market Find reads (the header's button, and the stale banner's Retry).
+  const refreshFind = async () => {
+    setBusy("find");
+    try { for (const tk of find.markets) await refreshChain(tk, true); } finally { setBusy(null); }
+  };
+  // STALE: the oldest price past its budget (freshness.js), the day those numbers are from, a refresh that failed.
+  const findStale = {
+    stale: !!findFresh.oldest && isStale("chain", findFresh.oldest),
+    closeDay: findFresh.oldest ? new Date(findFresh.oldest).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" }) : null,
+    failedAt: chainErrAt && findFresh.oldest && chainErrAt > findFresh.oldest
+      ? new Date(chainErrAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) : null,
+    onRetry: refreshFind,
+  };
+  // RESET: every chip back to its default (the request, the horizon, the direction, the toggles, the order, liquidity).
+  const resetFind = () => {
+    setWant({ mode: "budget", amt: null, minChance: null, minReturn: null });
+    setFind((f) => ({ ...f, horizon: RULES.targetEntryDTE, dir: "signals", positiveOnly: false, flagged: true, hideMisses: false }));
+    setFindOrder(DEFAULT_FIND_ORDER);
+    setLiqLevelId(RECOMMENDED_LIQUIDITY.id);
+  };
+  // COMPARE, on Find and on the market page (the ticks are on the market page's cards).
+  const compareBlock = {
+    compare, showCompare, compareNote,
+    onTickCompare: (c) => tickCompare(c),
+    onClearCompare: () => { setCompare([]); setShowCompare(false); setCompareNote(null); },
+    onToggleCompare: () => setShowCompare((v) => !v),
+    onTakeToBuild: (c) => { const x = findGen.items.find((y) => y.key === c.key); if (x) openFound(x); else openOnBuild({ ticker: c.ticker, expKey: c.expKey, legs: c.legs, name: c.name }); },
+  };
   return (
     <div style={{ minHeight: "100vh", background: T.bg, color: T.body, ...sans }}>
       <DemoBanner />
@@ -4091,22 +4137,26 @@ export default function OptionsStrategyLab() {
       {/* The bottom padding is the strip reserved for the injected Netlify
              badge (see BADGE_SAFE in theme.js): it is fixed to the viewport and
              was covering whatever happened to be at the bottom right. */}
-        <div style={{ maxWidth: 1720, margin: "0 auto", padding: `18px 14px ${BADGE_SAFE + NAV_BAR_H}px` }}>
+        {/* On Find, Saved and the market page the screen runs edge to edge and the list ends 88px above the bottom (the
+            mockups' figure, owner 5 Oct 2026); elsewhere the old padding and the badge strip. */}
+        <div style={{ maxWidth: 1720, margin: "0 auto", padding: chromeless ? `0 0 ${FIND_LIST_END}px` : `18px 14px ${BADGE_SAFE + NAV_BAR_H}px` }}>
 
         {/* Header */}
+        {/* (Not on Find, Saved or a market's page since round 2: they draw their own.) */}
+        {!chromeless && (
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
           <div>
-            <button onClick={goHome}
-              style={{ ...mono, fontSize: FS.xs, minHeight: 44, padding: "6px 0", background: "transparent", border: "none", color: T.blue, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>
-              <ArrowLeft size={14} /> Home
-            </button>
             <Label>OPTIONS STRATEGY LAB v2 · LIVE DATA</Label>
             <h1 style={{ fontSize: FS.xl, fontWeight: 800, color: T.ink, margin: "4px 0 6px" }}>Commodity Options Desk</h1>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
               <span style={{ ...mono, fontSize: FS.xs, color: T.green, border: `1px solid ${T.green}55`, background: `${T.green}12`, padding: "3px 8px", borderRadius: 5, display: "inline-flex", gap: 5, alignItems: "center" }}>
                 <ShieldCheck size={12} /> PAPER · {ruleBadge()}
               </span>
-              {onFindStep ? (
+              {onMarketStep ? (
+                <span style={{ ...mono, fontSize: FS.xs, color: T.blue, border: `1px solid ${T.blue}44`, padding: "3px 8px", borderRadius: 5 }}>
+                  {findFreshness([mkt.tk], chains, ago).line}
+                </span>
+              ) : onFindStep ? (
                 <span style={{ ...mono, fontSize: FS.xs, color: findFresh.oldest ? T.blue : T.dim, border: `1px solid ${findFresh.oldest ? T.blue : T.dim}44`, padding: "3px 8px", borderRadius: 5 }}>
                   {findFresh.line}
                 </span>
@@ -4128,7 +4178,8 @@ export default function OptionsStrategyLab() {
                 try { for (const tk of find.markets) await refreshChain(tk, true); } finally { setBusy(null); }
                 return;
               }
-              await refreshChain(ticker);
+              // On the market page, its own market (redesign PR 1); on Build, Build's.
+              await refreshChain(onMarketStep ? mkt.tk : ticker);
             }} disabled={busy !== null} aria-label={onFindStep ? `Refresh prices for ${find.markets.length} markets` : `Refresh ${ticker} prices`}>
               <RefreshCw size={13} /> {busy === ticker || busy === "find" ? "…" : "Refresh"}
             </Btn>
@@ -4140,11 +4191,13 @@ export default function OptionsStrategyLab() {
           </div>
         </div>
 
+        )}
+
         {/* ONE TICKER'S STRIP, ONLY WHERE ONE TICKER IS LOADED (PR #41, TASK 3).
             Find reads many markets at once, so a single market's price,
             expiry and seasonality above its list described none of them. It
             stays on Build and everywhere else one ticker is the subject. */}
-        {!onFindStep && (
+        {!onFindStep && !onMarketStep && (
         <div style={{ display: "flex", gap: 14, marginTop: 10, flexWrap: "wrap" }}>
           {/* The feed is named in ONE place (feedName in chain.js) and every label
               reads from it. This one used to say "(CBOE)" three centimetres under a
@@ -4183,7 +4236,7 @@ export default function OptionsStrategyLab() {
         </div>
         )}
 
-        {msg && <div style={{ ...mono, fontSize: FS.xs, color: T.amber, border: `1px solid ${T.amber}44`, background: `${T.amber}10`, borderRadius: 6, padding: "7px 10px", marginTop: 10 }}>{msg}</div>}
+        {msg && <div style={{ ...mono, fontSize: FS.xs, color: T.amber, border: `1px solid ${T.amber}44`, background: `${T.amber}10`, borderRadius: 6, padding: "7px 10px", margin: chromeless ? "8px 16px 0" : "10px 0 0" }}>{msg}</div>}
 
         <TabBoundary k={`${tab}/${step}/${ev}`}>
         {/* ONE STATUS PER OBJECT, ONE PLACE (PR #40, TASK 2). An order's state
@@ -4191,8 +4244,8 @@ export default function OptionsStrategyLab() {
             the desk used to print both lists again here, in a working-orders
             strip and a "TODAY" list, beside the top banner and the order sheet.
             It shows one line of counts now, and the line is the link. */}
-        <DeskCountLine working={workingOrders.length} decisions={nAttention} looks={attn.looks} closing={attn.closesWorking}
-          onOpen={() => { setTab("positions"); setShowSettings(false); setEv(null); }} />
+        {!chromeless && <DeskCountLine working={workingOrders.length} decisions={nAttention} looks={attn.looks} closing={attn.closesWorking}
+          onOpen={() => { setTab("positions"); setShowSettings(false); setEv(null); }} />}
 
         {/* ONE BOTTOM BAR (PR #47, TASK 4) replaces the numbered path (`StepNav`) and the places row: Find · Build ·
             Positions · Journal, at the bottom of the screen. It is drawn at the end of this page. */}
@@ -4491,31 +4544,26 @@ export default function OptionsStrategyLab() {
              the one: the request block above, every candidate across the
              selected markets below it, re-filtered live. The Shortlist is the
              one-market filter; Compare (max 3) stays. */}
-        {/* RESULTS | SAVED (PR #47, TASK 4): the old Watching place, inside Find. Written `"find" === step` so the word
-            counter does not take this switch for Find's own block. */}
+        {/* "FIND", THEN RESULTS | SAVED (PR #47, TASK 4; heading redesign PR 1): the old Watching place, inside Find.
+            Written `"find" === step` so the word counter does not take this switch for Find's own block. The gear for
+            Settings is in the header above. */}
         {((tab === "build" && "find" === step) || tab === "watching") && !showSettings && (
-          <div style={{ marginTop: 12 }}>
-            <USegments label="Find: results or saved trades" value={tab === "watching" ? "saved" : "results"}
-              onChange={(v) => { if (v === "saved") { setTab("watching"); setShowSettings(false); setEv(null); } else goStep("find"); }}
-              items={[{ id: "results", label: "Results" }, { id: "saved", label: "Saved", count: watchRows.length }]} />
-          </div>
+          <FindHeader seg={tab === "watching" ? "saved" : "results"} savedN={watchRows.length} nMarkets={find.markets.length}
+            onSeg={(v) => { if (v === "saved") { setTab("watching"); setShowSettings(false); setEv(null); setDeskSheet(null); } else goStep("find"); }}
+            busy={busy !== null} onRefresh={refreshFind} onSettings={() => setShowSettings(true)} settingsOn={showSettings}
+            status={findStatusText(findFresh.line, findFeeds)} stale={findStale} />
         )}
         {tab === "build" && !showSettings && step === "find" && (
           <FindStep
             request={request} onRequest={(patch) => setWant((w) => ({ ...w, ...patch }))}
-            sentiments={SENTIMENTS} universe={BASKET} find={find} setFind={setFind}
-            spot={find.market ? spotOf(chains[find.market]) : null}
+            sentiments={SENTIMENTS} find={find} setFind={setFind}
             limits={limits} onLimit={(ov) => setSetting("sizeOverride", ov)} freeSizing={freeSizing}
             findGen={findGen} findShown={findShown} signalLines={Object.values(signalsIn)} findOrder={findOrder} onFindOrder={setFindOrder} flaggedHidden={flaggedHidden} positiveHidden={positiveHidden} barsCache={barsCache}
-            badgeOf={(x) => <SignalBadge fused={x.fused} state={readiness[x.tk]} onClick={() => { scrollToCard.current = x.key; setWhyTk(x.tk); setWhyDte(x.dte); setEv("why"); }} />}
-            onMore={(x) => { scrollToCard.current = x.key; setWhyTk(x.tk); setEv("more"); }}
-            actionsOf={(x) => (
-              <CandidateActions
-                ticked={inCompare(compare, x.cand)} onTick={() => tickCompare(x.cand)}
-                saved={isSaved(x.cand)} onSave={() => saveCandidate(x.cand)}
-                onBuild={() => openFound(x)} />
-            )}
-            liqLevel={liqLevel}
+            readiness={readiness} liqLevel={liqLevel}
+            liqState={{ id: liqLevelId, label: liqLevel.label, defaultId: RECOMMENDED_LIQUIDITY.id }}
+            sheet={deskSheet} onSheet={setDeskSheet} onReset={resetFind}
+            isSaved={isSaved} onSave={(x) => saveCandidate(x.cand)} onOpenMarket={(tk) => goMarket(tk, "strategies")}
+            freshness={findStale}
             foldedNode={<>
               <LiquidityFilter
                 levelId={liqLevelId} onLevel={setLiqLevelId} previews={liqPreview}
@@ -4523,18 +4571,37 @@ export default function OptionsStrategyLab() {
                 peers={focusBoard ? focusBoard.peers : []} feed={focusBoard ? focusBoard.feed : null} />
               <OpenInterestReadout chains={chains} floor={liqLevel.absolute} percentile={liqLevel.percentile} level={liqLevel} />
             </>}
-            compare={compare} showCompare={showCompare} compareNote={compareNote}
-            onTickCompare={(c) => tickCompare(c)}
-            onClearCompare={() => { setCompare([]); setShowCompare(false); setCompareNote(null); }}
-            onToggleCompare={() => setShowCompare((v) => !v)}
-            onTakeToBuild={(c) => { const x = findGen.items.find((y) => y.key === c.key); if (x) openFound(x); else openOnBuild({ ticker: c.ticker, expKey: c.expKey, legs: c.legs, name: c.name }); }}
-            forward={{
-              label: legs.length ? `Go to Build — ${ticker} · ${stratName} →` : "Pick one above to go to Build",
-              disabled: !legs.length,
-              disabledNote: `Tap "Take to Build" on a card — nothing is sent before the checks there.`,
-              sub: `${ticker} · ${stratName} is loaded on Build. Nothing is sent until the checks there.`,
-              onClick: () => goStep("build"),
-            }} />
+            {...compareBlock} />
+        )}
+
+        {/* ============ STEP 2 · THE MARKET PAGE (redesign PR 1, TASK 3) ============
+            One market: Overview · Strategies · Chain. Its cards are Find's one sorted list filtered to its ticker. */}
+        {tab === "build" && !showSettings && step === "market" && mkt.tk && (
+          <MarketPage
+            tk={mkt.tk} tab={mkt.tab} onTab={(t) => setMkt((m) => ({ ...m, tab: t }))} onBack={() => goStep("find")}
+            onRefresh={() => refreshChain(mkt.tk)} busy={busy !== null}
+            onTicker={(tk) => setMkt((m) => ({ ...m, tk }))}
+            chain={chains[mkt.tk] || null} freshLine={findFreshness([mkt.tk], chains, ago).line} bars={barsCache[mkt.tk] || []}
+            clock={clock} clockLine={marketClockLine(clock)}
+            ivRank={ivRankOf(mkt.tk)} ivDays={((store.ivHist || {})[mkt.tk] || []).length}
+            board={findGen.boards[mkt.tk] || null}
+            fused={findGen.boards[mkt.tk] ? fuseFind(mkt.tk, findGen.boards[mkt.tk].dte) : null}
+            readingState={readiness[mkt.tk] || null}
+            items={findSorted.filter((x) => x.tk === mkt.tk)} allItems={findSorted} boards={findGen.boards}
+            request={request} freeSizing={freeSizing} findDir={find.dir} sentiments={SENTIMENTS} findOrder={findOrder}
+            newsItems={newsPool} newsState={news[mkt.tk] || null} ago={ago}
+            exits={store.positions.filter((p) => p.ticker === mkt.tk && exitDateOf(p)).map((p) => ({ date: exitDateOf(p), label: `${RULES.exitDTE}-day exit · ${p.ref || p.ticker}` }))}
+            isSaved={isSaved} onSave={(x) => saveCandidate(x.cand)} inCompare={(c) => inCompare(compare, c)} onTickCompare={(c) => tickCompare(c)}
+            onBuild={(x) => openFound(x)}
+            onBuildLegs={({ ticker: tk, expKey: ek, legs: lg, name }) => openOnBuild({ ticker: tk, expKey: ek, legs: lg, name })}
+            cardFigures={listCardFigures} quoteOf={makeQuote} seasonal={seasonalFor(mkt.tk)} matrix={seasonal[mkt.tk]?.matrix || null}
+            liqFloor={liqLevel.absolute}
+            badgeOf={(x) => <SignalBadge fused={x.fused} state={readiness[x.tk]} onClick={() => { scrollToCard.current = x.key; setWhyTk(x.tk); setWhyDte(x.dte); setEv("why"); }} />}
+            onMore={(x) => { scrollToCard.current = x.key; setWhyTk(x.tk); setEv("more"); }}
+            whyProps={{ weatherData: weather, newsItems: newsPool, month: NOW_MONTH, order: findOrder }}
+            onAnalysis={logAnalysis}
+            sheet={deskSheet} onSheet={setDeskSheet}
+            compareProps={compareBlock} />
         )}
 
         {/* ============ BUILDER ============ */}
@@ -5449,7 +5516,7 @@ export default function OptionsStrategyLab() {
             <Card>
               <Label>APPEARANCE</Label>
               <div style={{ fontSize: FS.sm, color: T.mut, marginTop: 8, lineHeight: 1.5 }}>
-                Light is the default. Dark is here whenever you want it — the app reloads to apply the change.
+                Dark is the default. Light is here whenever you want it — the app reloads to apply the change.
               </div>
               <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
                 {[["light", "Light", Sun], ["dark", "Dark", Moon]].map(([id, label, I]) => {
@@ -5645,114 +5712,14 @@ export default function OptionsStrategyLab() {
         {/* ============ JOURNAL — the third place ============
             What actually happened, and what it says about the habits. The
             report lives here too: it is a written record, not a workspace. */}
-        {/* ============ WATCHING ============ */}
+        {/* ============ SAVED (inside Find since PR #47; redesign PR 1) ============
+            Saved trades show "When saved" beside "Now" for Chance, Future avg and You risk, with Remove and Build ›.
+            Orders that were sent and never filled stay here with their tag (owner, 4 Oct 2026). On every row, what it
+            would have done is behind one fold: nothing is cut. */}
         {tab === "watching" && !showSettings && (
-          <div>
-            <h2 data-view-heading tabIndex={-1} style={{ ...sans, fontSize: FS.lg, fontWeight: 800, color: T.ink, margin: "12px 0 8px", outline: "none" }}>Saved</h2>
-            <Panel style={{ marginTop: 10 }}>
-              <Label>SAVED ({watchRows.length}) · TRADES YOU DID NOT TAKE</Label>
-              <div style={{ ...sans, fontSize: FS.sm, color: T.body, lineHeight: 1.55, marginTop: 8 }}>
-                Nothing here is a position and nothing here is money. These are structures you saved, and orders
-                that were sent and came back with nothing bought — kept so you can see what they would have done.
-                No exit plan runs on them, none of them counts towards your exposure, and none of the figures
-                below is a profit or a loss.
-              </div>
-              {watchRows.length === 0 && (
-                <div style={{ ...mono, fontSize: FS.xs, color: T.mut, marginTop: 10, lineHeight: 1.6 }}>
-                  Nothing is being watched. Save a structure from the Shortlist to follow it without taking it —
-                  and an order that ends without filling arrives here by itself.
-                </div>
-              )}
-              <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
-                {watchRows.map((r) => {
-                  const w = r.would;
-                  const bands = r.spot ? payoffBands({ legs: r.legs, entryNet: r.entryNet, spot: r.spot }) : null;
-                  return (
-                    <div key={r.key} style={{ padding: "10px 12px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 8 }}>
-                      <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
-                        <span style={{ color: T.ink, fontWeight: 700, fontSize: FS.sm }}>
-                          {r.ref ? `${r.ref} ` : ""}{r.ticker} · {r.name}
-                        </span>
-                        {/* WHICH OF THE TWO IT IS, on the row, because "I chose
-                            not to" and "I tried and missed" are different facts
-                            about the same picture. */}
-                        <span style={{ ...mono, fontSize: FS.xs, fontWeight: 800, letterSpacing: 0.4, padding: "2px 6px", borderRadius: 4,
-                          background: r.kind === "saved" ? `${T.blue}22` : `${T.amber}22`, color: r.kind === "saved" ? T.blue : T.amber }}>
-                          {r.kind === "saved" ? "SAVED, NEVER SENT" : `SENT · ${String(r.status || "finished").toUpperCase().replace(/_/g, " ")}`}
-                        </span>
-                        <span style={{ ...mono, fontSize: FS.xs, color: T.dim, marginLeft: "auto" }}>{r.at ? ago(r.at) : ""}</span>
-                      </div>
-                      <div style={{ ...mono, fontSize: FS.xs, color: T.mut, marginTop: 3 }}>
-                        {legsLine(r.legs)}{r.expKey ? ` · ${r.expKey}` : ""}
-                      </div>
-
-                      {bands && (
-                        <div style={{ display: "flex", gap: 12, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
-                          <BandThumbnail bands={bands} bars={barsCache[r.ticker] || []} width={200} height={40}
-                            title={bandTakeaway(bands, { ticker: r.ticker })} />
-                          <Gauge bands={bands} size={96} ticker={r.ticker} />
-                        </div>
-                      )}
-
-                      {/* THE THEORETICAL FIGURE, AND IT MAY NEVER LOOK LIKE A REAL
-                          ONE. Muted, never red or green, with the sentence beside
-                          it — `wouldHaveDone()` returns the two together so one
-                          cannot be rendered without the other. Printing -$80 in
-                          the same red the Positions screen uses is exactly the
-                          fault this whole tab exists to undo. */}
-                      <div style={{ marginTop: 9, padding: "8px 10px", background: T.panel, border: `1px solid ${T.line}`, borderRadius: 6 }}>
-                        <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "baseline" }}>
-                          <div>
-                            <div style={{ ...mono, fontSize: FS.xs, color: T.dim, letterSpacing: 0.4 }}>WOULD HAVE OPENED AT</div>
-                            <div style={{ ...mono, fontSize: FS.sm, fontWeight: 800, color: T.mut }}>
-                              {Number.isFinite(Number(r.entryNet)) ? fmt$(Math.abs(Number(r.entryNet)) * 100 * r.contracts) : "—"}
-                            </div>
-                          </div>
-                          <div>
-                            <div style={{ ...mono, fontSize: FS.xs, color: T.dim, letterSpacing: 0.4 }}>WORTH TODAY</div>
-                            <div style={{ ...mono, fontSize: FS.sm, fontWeight: 800, color: T.mut }}>
-                              {r.nowNet != null ? fmt$(Math.abs(r.nowNet) * 100 * r.contracts) : "—"}
-                            </div>
-                          </div>
-                          <div>
-                            <div style={{ ...mono, fontSize: FS.xs, color: T.dim, letterSpacing: 0.4 }}>DIFFERENCE</div>
-                            <div style={{ ...mono, fontSize: FS.sm, fontWeight: 800, color: T.mut }}>
-                              {w ? `${w.pnl >= 0 ? "+" : "−"}${fmt$(Math.abs(w.pnl))}` : "—"}
-                            </div>
-                          </div>
-                        </div>
-                        <div style={{ ...sans, fontSize: FS.sm, color: T.body, marginTop: 6, lineHeight: 1.5 }}>
-                          {w ? w.sentence
-                            : `Today's price for this structure cannot be read, so there is nothing to compare the ` +
-                              `opening price with. That is a missing number, not a flat result.`}
-                        </div>
-                        {/* AND WHICH PRICE IT STARTED FROM. A row begun at the mid
-                            flatters itself for ever, and every row saved before
-                            PR #28 was begun at the mid. */}
-                        <div style={{ ...mono, fontSize: FS.xs, color: T.dim, marginTop: 5, lineHeight: 1.6 }}>
-                          {r.entrySource === "limit"
-                            ? `Opened at the price that would really have been paid, not the mid.`
-                            : `This one starts from the MID — the middle of the market, which is not a price anybody ` +
-                              `has to give you. Read it as the friendliest version of what would have happened.`}
-                        </div>
-                      </div>
-
-                      <div style={{ display: "flex", gap: 6, marginTop: 9, flexWrap: "wrap" }}>
-                        <Btn small ghost onClick={() => openOnBuild({ ticker: r.ticker, expKey: r.expKey || null, legs: r.legs, name: r.name })}>
-                          Open it on Build →
-                        </Btn>
-                        <button
-                          onClick={() => (r.kind === "saved" ? delSaved(r.saved.id) : dropWatched(r.pos.id))}
-                          style={{ ...mono, fontSize: FS.xs, background: "transparent", border: `1px solid ${T.line}`, color: T.dim, borderRadius: 6, padding: "6px 10px", cursor: "pointer", minHeight: 36 }}>
-                          <Trash2 size={12} style={{ verticalAlign: "-2px" }} /> Stop watching
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </Panel>
-          </div>
+          <SavedList rows={watchRows} savedNow={savedNow} barsCache={barsCache} ago={ago} fmtMoney={fmt$}
+            onBuild={(r) => openOnBuild({ ticker: r.ticker, expKey: r.expKey || null, legs: r.legs, name: r.name })}
+            onRemove={(r) => (r.kind === "saved" ? delSaved(r.saved.id) : dropWatched(r.pos.id))} />
         )}
 
         {tab === "journal" && !showSettings && (
@@ -6007,7 +5974,6 @@ export default function OptionsStrategyLab() {
             </div>
             <div style={{ display: "flex", gap: 6, marginTop: 12, flexWrap: "wrap" }}>
               <Btn small onClick={() => goStep("find")}><Radar size={11} /> 1 Find</Btn>
-              <Btn small ghost color={T.blue} onClick={goHome}>← Home</Btn>
             </div>
           </Panel>
         )}
@@ -6025,6 +5991,7 @@ export default function OptionsStrategyLab() {
       </div>
       {/* ONE BOTTOM BAR (PR #47, TASK 4). The badge on Positions is decisions + closes working. */}
       <BottomBar current={placeOf({ tab, step, showSettings })} badge={nAttention + attn.closesWorking}
+        badgeLabel={statusLine({ positions: ownedPositions, attention: nAttention, looks: attn.looks, closing: attn.closesWorking })}
         onGo={(id) => {
           if (id === "find" || id === "build") { goStep(id); return; }
           setTab(id); setShowSettings(false); setEv(null);

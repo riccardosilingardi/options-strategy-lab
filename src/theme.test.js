@@ -1,8 +1,8 @@
 // Contrast is not a matter of taste: small grey text on a white panel either
-// clears WCAG AA or it does not. This locks the light palette to 4.5:1 against
+// clears WCAG AA or it does not. This locks both palettes to 4.5:1 against
 // both surfaces it is ever drawn on, so "muted" can never quietly become
 // "unreadable" in a later tweak.
-import { PALETTES } from "./theme.js";
+import { PALETTES, themeName, THEME_KEY } from "./theme.js";
 
 let pass = 0, fail = 0;
 const ok = (name, cond, detail) => {
@@ -22,7 +22,18 @@ export const contrast = (a, b) => {
   return (hi + 0.05) / (lo + 0.05);
 };
 
-console.log("\nTHEME — the light palette is the default, so it has to be readable\n");
+console.log("\nTHEME — dark is the default (owner, 4 Oct 2026); both palettes have to be readable\n");
+
+/* THE DEFAULT IS DARK: a stored "light" stays light, everything else is dark. */
+const withStore = (v) => {
+  globalThis.localStorage = { getItem: (k) => (k === THEME_KEY ? v : null) };
+  try { return themeName(); } finally { delete globalThis.localStorage; }
+};
+ok("no theme stored → dark", withStore(null) === "dark", withStore(null));
+ok("a stored \"light\" stays light", withStore("light") === "light", withStore("light"));
+ok("a stored \"dark\" is dark", withStore("dark") === "dark");
+ok("anything else stored → dark", withStore("sepia") === "dark");
+ok("no storage at all (a locked-down browser) → dark", themeName() === "dark", themeName());
 
 const L = PALETTES.light;
 ok("panels are pure white", L.panel === "#ffffff", L.panel);
@@ -61,6 +72,19 @@ for (const key of ["amber", "green", "red", "blue", "violet"]) {
   const r = contrast(L[key], L.onAccent);
   ok(`white text on a filled ${key} button clears 4.5:1`, r >= 4.5, `${r.toFixed(2)}:1`);
 }
+
+// ROUND 2: `raise` (a selected or in-the-money cell) carries text, so it is a surface too; `scrim` is behind a sheet.
+for (const [name, P] of [["light", PALETTES.light], ["dark", PALETTES.dark]]) {
+  ok(`${name} has raise and scrim`, /^#[0-9a-f]{6}$/.test(P.raise) && /^rgba\(/.test(P.scrim), `${P.raise} ${P.scrim}`);
+  for (const key of ["ink", "body", "mut", "amber"]) {
+    const r = contrast(P[key], P.raise);
+    ok(`${name} ${key} on raise clears 4.5:1`, r >= 4.5, `${r.toFixed(2)}:1`);
+  }
+  ok(`${name} field border on raise clears 3:1`, contrast(P.field, P.raise) >= FIELD_MIN);
+  ok(`${name} raise is distinct from the panel and the page`, P.raise !== P.panel && P.raise !== P.bg);
+}
+ok("the two palettes carry exactly the mockups' values", PALETTES.dark.raise === "#222831" && PALETTES.light.raise === "#eceff2"
+  && PALETTES.dark.scrim === "rgba(6,8,10,0.66)" && PALETTES.light.scrim === "rgba(20,24,29,0.45)");
 
 const D = PALETTES.dark;
 ok("dark stays reachable and keeps its own dark text-on-accent", D.onAccent === "#14181d", D.onAccent);

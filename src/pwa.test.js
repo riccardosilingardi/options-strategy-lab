@@ -196,18 +196,18 @@ test("it says what the app is called, and launches standalone from /", () => {
 
 test("ITS COLOURS ARE THE THEME'S, not a second opinion about them", () => {
   // Static JSON cannot import theme.js, so this is the thing that stops the
-  // splash screen drifting away from the page it opens on. Light is the
-  // default (CLAUDE.md), so the light palette is the one an install shows.
-  assert.equal(M.background_color, PALETTES.light.bg);
-  assert.equal(M.theme_color, PALETTES.light.bg);
+  // splash screen drifting away from the page it opens on.
+  // DARK IS THE DEFAULT (owner, 4 Oct 2026): the manifest paints the dark palette's page.
+  assert.equal(M.background_color, PALETTES.dark.bg);
+  assert.equal(M.theme_color, PALETTES.dark.bg);
 });
 
-test("index.html's theme-color agrees with the manifest, and its dark one with the dark palette", () => {
+test("index.html's theme-color agrees with the manifest, and its light one with the light palette", () => {
   const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
   const meta = /<meta\s+name="theme-color"\s+content="([^"]+)"/.exec(html);
   assert.ok(meta, "index.html has no theme-color");
   assert.equal(meta[1], M.theme_color);
-  assert.ok(html.includes(`"${PALETTES.dark.bg}"`), "the stored-dark first paint no longer uses the dark palette's background");
+  assert.ok(html.includes(`"${PALETTES.light.bg}"`), "the stored-light first paint no longer uses the light palette's background");
 });
 
 test("every icon the manifest names is a PNG that exists and is not empty", () => {

@@ -764,3 +764,21 @@ export async function fetchChain(sym, {
   }
   return fetchCboeChain(sym, { fetchImpl, now });
 }
+
+/**
+ * THE AT-THE-MONEY IMPLIED VOLATILITY, ONE READING (redesign PR 1; moved out of App.jsx's IV-rank recorder).
+ * The first expiry between 25 and 70 days out (else the first listed), and on it the call nearest the spot; its IV
+ * as the broker quotes it. The daily IV-rank history records this, and the market page's header prints it, so the
+ * number recorded and the number shown are one. Null when the chain, the spot or that IV is missing — never zero.
+ * @returns {null | { iv, expKey, strike }}
+ */
+export function atmIv(chain) {
+  if (!chain || !chain.spot || !Array.isArray(chain.expirations) || !chain.byExp) return null;
+  const ek = chain.expirations.find((e) => chain.byExp[e] && chain.byExp[e].dte >= 25 && chain.byExp[e].dte <= 70) || chain.expirations[0];
+  if (!ek || !chain.byExp[ek] || !chain.byExp[ek].calls) return null;
+  const cs = Object.keys(chain.byExp[ek].calls).map(Number);
+  if (!cs.length) return null;
+  const k = cs.reduce((b, x) => (Math.abs(x - chain.spot) < Math.abs(b - chain.spot) ? x : b), cs[0]);
+  const iv = chain.byExp[ek].calls[k]?.iv;
+  return iv ? { iv, expKey: ek, strike: k } : null;
+}

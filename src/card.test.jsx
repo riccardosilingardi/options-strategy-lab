@@ -13,7 +13,8 @@
 // ============================================================================
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { CandidateCard, MatchList, RequestControls, MissLine, CardGrid, SignalBadge, badgeText, NumbersFit, MarketPicker, ResultsFilter } from "./card.jsx";
+import { CandidateCard, MatchList, RequestControls, MissLine, CardGrid, SignalBadge, badgeText, NumbersFit } from "./card.jsx";
+import * as CARD from "./card.jsx";
 import { readFileSync } from "node:fs";
 import { requestOf, RULES, fillNet, comboBook, openLimitPrice, rewardRisk, onTick, sizeLine, candidateFlags,
   sizedFigures, directionTag, controlReadings, futureFigures, pastFigures } from "./rules.js";
@@ -256,9 +257,9 @@ check("THE CONTROLS BLOCK IS ONE REQUEST, AND ITS EXPLANATION FOLDS", () => {
   const html = renderToStaticMarkup(
     <RequestControls request={req} onChange={() => {}} limits={LIMITS} onLimit={() => {}}
       sentiments={SENTS} direction="bull" ticker="SOYB" spot={27.5}
-      universe={["SOYB", "GLD"]} markets={["SOYB"]} onMarkets={() => {}}
       horizon={45} onHorizon={() => {}} />);
-  for (const k of ["MARKETS · 1 OF 2", "DIRECTION", "Signals decide", "TARGET PRICE", "SIZE BY",
+  // Redesign PR 1: no markets picker here any more (Find reads the whole basket; its category tabs only filter).
+  for (const k of ["DIRECTION", "Signals decide", "TARGET PRICE", "SIZE BY",
     "Most I will risk", "Chance at least", "Return on risk at least", "Horizon"]) has(html, k);
   has(html, "$28.60");            // the direction read as a price, with one market and one direction
   if (html.includes("Search")) throw new Error("there is no Search button: the list re-filters live");
@@ -357,16 +358,13 @@ check("WHY THIS PLACE sits in the card's fold, and the ⓘ 'How the numbers fit'
   has(renderToStaticMarkup(<CandidateCard name="X" legs="x" rr={1} pop={0.5} basis="prices only" figures={sizedFigures(A80, 2)} />), "chance: prices only");
 });
 
-check("FIND BY CATEGORY: groups with 'N of M · all / none', and 'All N · Grains n · Energy n · Metals n' (PR #48)", () => {
-  const html = renderToStaticMarkup(<MarketPicker universe={["CORN", "SOYB", "WEAT", "UNG", "GLD"]} markets={["CORN", "UNG"]} onMarkets={() => {}} />);
-  has(html, "MARKETS · 2 OF 5"); has(html, "Grains"); has(html, "1 of 3 ·"); has(html, ">all<"); has(html, ">none<");
-  has(html, "Energy"); has(html, "Metals"); has(html, "0 of 1 ·");
-  const counts = [{ id: "Grains", n: 3, tickers: [{ tk: "CORN", n: 3 }, { tk: "SOYB", n: 0 }] }, { id: "Energy", n: 2, tickers: [{ tk: "UNG", n: 2 }] }];
-  const rf = renderToStaticMarkup(<ResultsFilter counts={counts} total={5} cat={null} />);
-  has(rf, "All 5"); has(rf, "Grains 3"); has(rf, "Energy 2");
-  if (rf.includes("CORN")) throw new Error("a closed category showed its tickers");
-  const open = renderToStaticMarkup(<ResultsFilter counts={counts} total={5} cat="Grains" statusOf={(tk) => (tk === "SOYB" ? "loading" : null)} />);
-  has(open, "CORN</span> 3"); has(open, "SOYB</span> loading");
+/* REDESIGN PR 1: the markets picker and the results filter left Find. Find reads the whole basket and its category tabs
+   ("All 10 · Grains 3 · Energy 4 · Metals 3", counted from markets.js) only filter what is shown — findB.test.jsx
+   renders them. This holds that the two are gone, so nothing mounts a second filter. */
+check("THE MARKETS PICKER AND THE RESULTS FILTER ARE GONE (redesign PR 1): the category tabs replace them", () => {
+  if (CARD.MarketPicker || CARD.ResultsFilter) throw new Error("card.jsx still exports the picker or the filter");
+  const html = renderToStaticMarkup(<RequestControls request={requestOf({}, LIMITS)} onChange={() => {}} limits={LIMITS} onLimit={() => {}} />);
+  if (html.includes("MARKETS ·")) throw new Error("the request controls still draw the markets picker");
 });
 
 console.log(`\n${ok.length} passed, ${bad.length} failed\n`);

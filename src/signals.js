@@ -908,16 +908,25 @@ const AGAINST_MIN_SCORE = 10;
  * is not, otherwise the numbers the prompt must state. Never blocks: the caller
  * asks for a written reason and stores it with the position.
  */
-export function againstSignal(fused, dir) {
-  if (!fused || !dir) return null;
-  if (Math.abs(fused.score) < AGAINST_MIN_SCORE) return null;
-  if (Math.sign(fused.score) === dir) return null;
-
+/**
+ * THE COUNTING `againstSignal()` AND `signalStance()` SHARE: the factors this market HAS, which of them read the
+ * trade's way and which against it. One home, so "3 of 4" means the same thing on Build's question and on a card.
+ */
+function factorCount(fused, dir) {
   // THE FACTORS THIS MARKET HAS, not the four in the abstract. "3 of 4 factors
   // disagree" on a market with no weather counts a factor nobody read.
   const keys = fused.factors || Object.keys(BASE_WEIGHTS);
   const opposing = keys.filter((k) => fused.components[k].dir === -dir && fused.components[k].dir !== 0);
   const supporting = keys.filter((k) => fused.components[k].dir === dir);
+  return { keys, opposing, supporting };
+}
+
+export function againstSignal(fused, dir) {
+  if (!fused || !dir) return null;
+  if (Math.abs(fused.score) < AGAINST_MIN_SCORE) return null;
+  if (Math.sign(fused.score) === dir) return null;
+
+  const { keys, opposing, supporting } = factorCount(fused, dir);
   return {
     dir,
     n: opposing.length,
@@ -934,6 +943,24 @@ export function againstSignal(fused, dir) {
   };
 }
 
+
+/**
+ * WHERE A CARD STANDS AGAINST ITS MARKET'S SIGNALS (redesign PR 1), beside `againstSignal()` and on its counting.
+ *   dir 0 (a range structure)                          → { kind: "neutral" }
+ *   |score| under AGAINST_MIN_SCORE (the noise floor)   → { kind: "quiet", floor }
+ *   the score points the trade's way                    → { kind: "with", n: factors that agree, total, against }
+ *   the score points the other way                      → { kind: "against", n: factors that oppose, total }
+ * `total` is the factors this market HAS: a market with no weather counts 3, not 4. Null while it is being read.
+ * The words are `stanceText()` in rules.js.
+ */
+export function signalStance(fused, dir) {
+  if (!fused) return null;
+  if (!dir) return { kind: "neutral" };
+  if (Math.abs(fused.score) < AGAINST_MIN_SCORE) return { kind: "quiet", floor: AGAINST_MIN_SCORE };
+  const { keys, opposing, supporting } = factorCount(fused, dir);
+  if (Math.sign(fused.score) === dir) return { kind: "with", n: supporting.length, total: keys.length, against: opposing.length };
+  return { kind: "against", n: opposing.length, total: keys.length };
+}
 
 /* The guided door's three drivers (DRIVERS, DRIVER_PRESETS, presetOf,
    normaliseWeights, rankByDrivers) and its narrative (verdictNarrative) were

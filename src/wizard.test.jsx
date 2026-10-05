@@ -1,6 +1,8 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { CapitalOnboarding, WizardOpen, ConfirmSteps, statusLine, gateChecklist } from "./wizard.jsx";
+import { readFileSync } from "node:fs";
+import { CapitalOnboarding, ConfirmSteps, statusLine, gateChecklist } from "./wizard.jsx";
+import { BottomBar } from "./navBar.jsx";
 import { evaluateTrade } from "./riskGate.js";
 import { WhyThisTrade } from "./why.jsx";
 import { Markdown, sseDeltas, gatewayPageMessage } from "./pro.jsx";
@@ -203,25 +205,21 @@ check("both answers given makes the same figures his", () => {
   if (h.includes("Still needed")) throw new Error("both questions are answered; nothing is missing");
 });
 
-check("screen 1 offers TWO doors, and 'decide for me' is not one of them", () => {
-  const h = renderToStaticMarkup(<WizardOpen positions={[]} posAlerts={[]} attention={0} />);
-  has(h, "My positions"); has(h, "Find a trade");
-  has(h, "Nothing to manage");
-  // Three doors was the wrong structure: a door that skips the questions can
-  // only skip them by inventing the answers.
-  if (h.includes("Decide for me")) throw new Error("the third door is still on screen 1");
+check("ROUND 2 (owner, 5 Oct 2026): THE APP OPENS ON FIND — Home is no longer a screen, a first run still asks the two questions first", () => {
+  const app = readFileSync("src/App.jsx", "utf8");
+  if (/WizardOpen/.test(app)) throw new Error("App.jsx still draws Home");
+  if (!/const \[view, setView\] = useState\("desk"\);/.test(app)) throw new Error("the app does not start on the desk");
+  if (!/const \[step, setStep\] = useState\(FIRST_STEP\);/.test(app)) throw new Error("the first step is not Find");
+  if (!/setStore\(st\); await saveState\(st\); goStep\("find"\);/.test(app)) throw new Error("onboarding does not land on Find");
+  if (/← Home|> Home</.test(app)) throw new Error("a Home link is left");
 });
 
-check("screen 1 leads with what needs attention once positions exist", () => {
-  const pos = [{ id: 1, ticker: "CORN", name: "Bull Call Spread" }];
-  const alerts = [{ p: pos[0], pnl: -42, dteLeft: 30, level: "action", label: "21 days left — close or roll" }];
-  const h = renderToStaticMarkup(<WizardOpen positions={pos} posAlerts={alerts} attention={1} />);
-  has(h, "Needs attention today");
-  has(h, "CORN");
-  has(h, "-$42");
-  // the wizard is still one tap away
-  has(h, "Find a trade");
-  if (h.indexOf("Needs attention today") > h.indexOf("Find a trade")) throw new Error("attention must lead the page");
+check("ROUND 2: WHAT HOME SAID MOVES TO THE POSITIONS BADGE — its spoken name is statusLine()", () => {
+  const app = readFileSync("src/App.jsx", "utf8");
+  if (!/badgeLabel=\{statusLine\(\{ positions: ownedPositions, attention: nAttention, looks: attn\.looks, closing: attn\.closesWorking \}\)\}/.test(app)) throw new Error("the badge does not read statusLine()");
+  const h = renderToStaticMarkup(<BottomBar current="find" badge={1} badgeLabel={statusLine({ positions: [1, 2], attention: 1 })} />);
+  has(h, "Positions: 1 of your 2 positions needs a decision today.");
+  has(renderToStaticMarkup(<BottomBar current="find" badge={0} />), 'aria-label="Positions"');
 });
 
 check("0f — a close already working is counted as one, never as a decision (PR #47)", () => {
@@ -354,13 +352,6 @@ check("on Build the confirm step drops the chart and the heading it would duplic
   has(h, "The checks that run when you tap");
   has(h, "decided now, not later");
   has(h, "Open this on paper");
-});
-
-check("THE GUIDED DOOR IS GONE: Home's second door goes straight to Find (PR #40)", () => {
-  const h = renderToStaticMarkup(<WizardOpen positions={[]} posAlerts={[]} attention={0} />);
-  hasNot(h, "Find opportunities");
-  hasNot(h, "Nothing today");
-  hasNot(h, "Open the full desk");
 });
 
 console.log(ok.map((n) => "  ok   " + n).join("\n"));

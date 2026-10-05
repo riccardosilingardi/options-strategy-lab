@@ -1,6 +1,7 @@
 // Tests for the risk gate (src/riskGate.js) and the rule config (src/rules.js).
 // Plain Node, no test framework: `npm test` runs this file directly.
 
+import { rowStateOf } from "./rows.js";
 import { readFileSync, readdirSync } from "node:fs";
 import assert from "node:assert/strict";
 import { evaluateTrade, paperStatus, undefinedRiskLegs } from "./riskGate.js";
@@ -1410,7 +1411,8 @@ test("WATCHING IS A PLACE OF ITS OWN, and its figures are not money", () => {
   // stare nella stessa schermata delle posizioni e ordini."
   const app = codeOf("App.jsx");
   // PR #47, TASK 4: no longer a place on the bar — "Saved", inside Find — and still a screen of its own.
-  assert.ok(/id: "saved", label: "Saved"/.test(app), "Saved, beside Find's results");
+  // Round 2: Find's header (find.jsx) holds Results | Saved, and Saved's rows live in saved.jsx (moved out of App.jsx).
+  assert.ok(/id: "saved", label: "Saved"/.test(codeOf("find.jsx")), "Saved, beside Find's results");
   assert.ok(/tab === "watching"/.test(app), "and a screen behind it");
   assert.ok(/wouldHaveDone\(/.test(app), "the theoretical figure comes from journal.js, with its sentence");
 
@@ -1423,7 +1425,8 @@ test("WATCHING IS A PLACE OF ITS OWN, and its figures are not money", () => {
   // A THEORETICAL P&L MAY NEVER BE PAINTED LIKE A REAL ONE. Printing it in
   // the red the Positions cards use would rebuild, one tab across, the exact
   // fault this session removed.
-  const watchTab = app.slice(app.indexOf('{tab === "watching"'), app.indexOf('{tab === "journal"'));
+  assert.ok(/<SavedList /.test(app.slice(app.indexOf('{tab === "watching" && !showSettings'), app.indexOf('{tab === "journal"'))), "the screen mounts SavedList");
+  const watchTab = codeOf("saved.jsx");
   assert.ok(watchTab.length > 500, "the Watching screen is really in there");
   assert.equal(/WOULD HAVE OPENED AT[\s\S]{0,400}c=\{T\.red\}/.test(watchTab), false,
     "no red on a figure that is not a loss");
@@ -3027,9 +3030,11 @@ test("A DATA FAILURE IS NOT A MARKET VERDICT (restored from main's screen-5 test
   assert.ok(/^Nothing today\./.test(nothingTodayLine({ reward: 1 }, {})));
   // ...and the chip says which: a failed fetch is never "loading".
   const app = readFileSync(new URL("./App.jsx", import.meta.url), "utf8");
-  const find = readFileSync(new URL("./find.jsx", import.meta.url), "utf8");   // PR #45: the Find step lives here now
-  assert.ok(/findGen\.failed\.some\(\(x\) => x\.tk === tk\) \? "failed" : findGen\.loading\.includes\(tk\) \? "loading"/.test(find),
-    "the market chip tells a failure from a load in flight");
+  // Redesign PR 1: the market chip became a row (rows.js `rowStateOf()`), and it still tells a failure from a load in
+  // flight — read from the function itself rather than from the old chip's source.
+  assert.deepEqual(rowStateOf("UNG", { loading: ["UNG"], failed: [] }), { state: "chain" }, "a load in flight");
+  assert.deepEqual(rowStateOf("UNG", { loading: [], failed: [{ tk: "UNG", why: "HTTP 502" }] }), { state: "failed", why: "HTTP 502" },
+    "the market row tells a failure from a load in flight");
   assert.ok(/setChainErr\(\(m\) => \(\{ \.\.\.m, \[tk\]: fetchFailWords\(e\) \}\)\)/.test(app), "a failed fetch is recorded with its error");
   assert.equal(fetchFailWords(new Error("HTTP 502 Bad Gateway from the proxy upstream")), "HTTP 502 Bad Gateway from");
   assert.equal(fetchFailWords(null), "no reply");
@@ -3046,9 +3051,11 @@ test("TASK 1 — an empty Find list says why with counts, and offers no button o
   const app = readFileSync(new URL("./App.jsx", import.meta.url), "utf8");
   const find = readFileSync(new URL("./find.jsx", import.meta.url), "utf8");   // PR #45: the Find step lives here now
   assert.ok(/findGen\.items\.length === 0 && \(/.test(find), "only when zero candidates pass");
-  assert.ok(/disabled=\{forward\.disabled\}/.test(find),
-    "and the button says so rather than naming a structure");
-  assert.ok(/disabled: !legs\.length/.test(app), "the step forward is disabled with nothing loaded");
+  // Redesign PR 1: Find has no step-forward button at all (the owner's Find is tabs, chips, a line and rows), so it
+  // offers no button onto a trade; a card's "Build ›" is on its market's page, and the bottom bar's Build is the way to
+  // the trade already loaded.
+  assert.ok(!/<StepForward/.test(find), "Find draws no button onto a trade");
+  assert.ok(/onBuild=\{\(x\) => openFound\(x\)\}/.test(app), "a card reaches Build through openFound, from the market page");
 });
 
 /* ================================================================
