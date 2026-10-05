@@ -186,7 +186,8 @@ test("WIRING — App.jsx makes its screens out of this module, and every view ha
   assert.match(app, /navOf\(\{ view, tab, step, showSettings, ev, whyTk, detailsId, deskSheet, posSeg,\s*mktTk: tab === "build" && step === "market" \? mkt\.tk : null, mktTab: mkt\.tab \}\)/);
   const headings = (app.match(/data-view-heading/g) || []).length;
   assert.ok(headings >= 6, `Find, Build, Positions, Watching, Journal and Settings each carry one (found ${headings})`);
-  assert.match(readFileSync("src/wizard.jsx", "utf8"), /<h1 data-view-heading tabIndex=\{-1\}/, "Home too");
+  // Round 2: Home is gone (the app opens on Find); Find's own heading is in find.jsx's header.
+  assert.doesNotMatch(readFileSync("src/wizard.jsx", "utf8"), /function WizardOpen/, "Home is no longer a screen");
   assert.match(readFileSync("src/steps.jsx", "utf8"), /<h2 data-view-heading tabIndex=\{-1\}/, "and every sheet");
   assert.match(app, /requestAnimationFrame\(\(\) => \{\s*const el = document\.querySelector\('\[role="dialog"\] \[data-view-heading\]'\)/,
     "focus goes to the sheet's heading when one is open, else the view's");
@@ -224,6 +225,26 @@ test("THE MARKET PAGE (redesign PR 1): Back goes Build → the market page, same
   const screen = navOf({ view: "desk", tab: "build", step: "find" });
   const open = navOf({ view: "desk", tab: "build", step: "find", deskSheet: "find:budget" });
   assert.equal(planNav([screen, open], 1, screen).type, "back");
+});
+
+test("THE APP OPENS ON FIND (round 2, owner 5 Oct 2026): Find is the first entry, and Back on Find leaves the app", () => {
+  const b = fakeBrowser();
+  let nav = navOf({});                           // the screen the app starts on
+  assert.deepEqual([nav.view, nav.tab, nav.step], ["desk", "build", "find"]);
+  const hist = createNavHistory({ history: b.history, addPopListener: b.addPopListener, get: () => nav, apply: (n) => { nav = { ...n }; } });
+  const go = (patch) => { nav = { ...nav, ...patch }; return hist.sync(); };
+  go({ step: "market", mkt: "CORN", mtab: "strategies" });
+  go({ tab: "positions", step: "find", mkt: null, mtab: null });
+  assert.equal(b.userBack(), true); hist.sync();
+  assert.equal(nav.step, "market");
+  assert.equal(b.userBack(), true); hist.sync();
+  assert.deepEqual([nav.view, nav.tab, nav.step], ["desk", "build", "find"]);
+  assert.equal(b.userBack(), false, "Back on Find leaves the app: nothing was pushed under it");
+  // A chip's sheet on Find is still a sheet over it: Back closes it and stays on Find.
+  go({ sheet: "find:budget" });
+  assert.equal(b.userBack(), true); hist.sync();
+  assert.equal(nav.sheet, null); assert.equal(nav.step, "find");
+  assert.match(readFileSync("src/App.jsx", "utf8"), /const \[view, setView\] = useState\("desk"\);/, "App.jsx starts on the desk, on Find");
 });
 
 console.log(`\nnav: ${passed} passed, ${failures.length} failed`);

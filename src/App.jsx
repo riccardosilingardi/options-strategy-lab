@@ -6,7 +6,7 @@ import {
 import {
   RefreshCw, ShieldCheck, Save, Trash2, Layers, Radar, Box,
   FlaskConical, Briefcase, Plus, Plug, Send, ExternalLink, MessageSquare, FileText, Bell,
-  SlidersHorizontal, ArrowLeft, Sun, Moon, AlertTriangle, WifiOff,
+  SlidersHorizontal, Sun, Moon, AlertTriangle, WifiOff,
 } from "lucide-react";
 import { fetchAllNews, fetchWeather, ImpactTags, CopilotTab, TaCopilot, ReportTab, OrderTicket, UnrecordedCard, scaleStrategy, buildContext, GuardianPanel, ChainMatrix, OptionPanel, PriceChart, QtyField, UnifiedView, taSignals, confluence, WhyThisTrade, Markdown, alpacaReq, CloseConfirm } from "./pro.jsx";
 import { prepareClose, sendClose, groupForRecord, closeWorking, legsNotHeld, holdingGroups } from "./closeOrder.js";
@@ -49,7 +49,7 @@ import { RULES, sizing, ruleBadge, takeProfitLabel, takeProfitTarget, takeProfit
 import { isStale, freshnessNote, staleAmong , findFreshness } from "./freshness.js";
 import { evaluateTrade, gateSummary } from "./riskGate.js";
 import { DEMO, DEMO_BANNER, DEMO_TOOLTIP, DEMO_SEED_TICKERS, demoPositions } from "./demo.js";
-import { CapitalOnboarding, WizardOpen, ConfirmSteps, Card, Pill } from "./wizard.jsx";
+import { CapitalOnboarding, ConfirmSteps, Card, Pill, statusLine } from "./wizard.jsx";
 // THE CONTROLS AND THE ONE CANDIDATE CARD (ROADMAP P10). Its own file: it is
 // nothing but a trade, so it may not live in `steps.jsx`, and `wizard.jsx`
 // renders the same card, so it may not live here.
@@ -1330,9 +1330,10 @@ class TabBoundary extends React.Component {
 }
 
 export default function OptionsStrategyLab() {
-  // PRD §5: `view` is the shell — the home page ("wizard") or the desk. The
-  // guided door behind it is gone (PR #40, TASK 1): Home goes straight to Find.
-  const [view, setView] = useState("wizard");   // "wizard" | "desk"
+  // PRD §5: `view` is the shell. Since redesign PR 1 round 2 (owner, 5 Oct 2026) THE APP OPENS ON FIND: Home is no
+  // longer a screen, so the desk is the only view (its positions are the bottom bar's Positions badge, Settings the
+  // gear in Find's header). The field stays in nav.js's entries.
+  const [view, setView] = useState("desk");     // "desk"
   // The gate's answer AFTER the tap on the Build screen's confirm step. A
   // refusal has to stay ON that screen with its reasons — a toast that scrolls
   // away is not an explanation.
@@ -3897,7 +3898,7 @@ export default function OptionsStrategyLab() {
   /* ---- BACK WORKS (PR #44, TASK 3) ----
      The app is one page whose screens are state, so the History API is made out of that state (src/nav.js): moving to
      a different screen pushes an entry, popstate restores the one it hands back, and closing a sheet from its own
-     button steps back instead of leaving a screen behind. Home is the first entry and is never intercepted. After
+     button steps back instead of leaving a screen behind. Find is the first entry (round 2) and is never intercepted. After
      each move, focus goes to the new view's heading (WCAG 2.4.3). */
   const navNow = navOf({ view, tab, step, showSettings, ev, whyTk, detailsId, deskSheet, posSeg,
     mktTk: tab === "build" && step === "market" ? mkt.tk : null, mktTab: mkt.tab });
@@ -4055,11 +4056,7 @@ export default function OptionsStrategyLab() {
      Everything above is the app's brain. What follows decides which face it
      shows: setup on a first run, the wizard by default, the tabs on request. */
 
-  const goHome = () => { setView("wizard"); };
-  /* Leaving the wizard for the desk lands on a STEP of the path — `goStep`
-     above. `ev` is cleared every time: a sheet left open from a previous visit
-     covers whatever the button promised to show. */
-  const marketReady = !!spot || Object.keys(chains).length > 0;
+  /* THE FIRST SCREEN IS FIND (round 2): a first run answers the two questions, then lands on Find. */
 
   if (!hydrated) {
     return (
@@ -4081,31 +4078,8 @@ export default function OptionsStrategyLab() {
               capital: a.tradingCapital, concurrentTarget: a.concurrentTarget, savings: a.savings,
               sizeOverride: a.override && a.override.reason && a.override.reason.trim().length >= RULES.minOverrideReasonChars ? a.override : null,
               onboarded: true } };
-            setStore(st); await saveState(st); goHome();
+            setStore(st); await saveState(st); goStep("find");
           }}
-        />
-      </div>
-    );
-  }
-
-  if (view === "wizard") {
-    return (
-      <div style={{ minHeight: "100vh", background: T.bg, color: T.body }}>
-        <DemoBanner />
-        <OfflineBanner />
-        {msg && (
-          <div style={{ ...mono, fontSize: FS.xs, color: T.amber, background: `${T.amber}12`, borderBottom: `1px solid ${T.amber}44`, padding: "10px 14px" }}>{msg}</div>
-        )}
-        <WizardOpen
-          /* "N OPEN POSITIONS" MEANS OWNED. Working orders have their own
-             place in Positions and trades nobody bought are under Watching. */
-          positions={ownedPositions} posAlerts={posAlerts} attention={nAttention} looks={attn.looks} closing={attn.closesWorking}
-          marketReady={marketReady} barsFor={(tk) => barsCache[tk] || []}
-          onPositions={() => { setView("desk"); setTab("positions"); }}
-          /* THE HOME ENTRY GOES STRAIGHT TO FIND (PR #40, TASK 1). The guided
-             door's questions and its "Nothing today" screen are gone. */
-          onFind={() => goStep("find")}
-          onSettings={() => { setView("desk"); setShowSettings(true); }}
         />
       </div>
     );
@@ -4160,10 +4134,6 @@ export default function OptionsStrategyLab() {
         {/* Header */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
           <div>
-            <button onClick={goHome}
-              style={{ ...mono, fontSize: FS.xs, minHeight: 44, padding: "6px 0", background: "transparent", border: "none", color: T.blue, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>
-              <ArrowLeft size={14} /> Home
-            </button>
             <Label>OPTIONS STRATEGY LAB v2 · LIVE DATA</Label>
             <h1 style={{ fontSize: FS.xl, fontWeight: 800, color: T.ink, margin: "4px 0 6px" }}>Commodity Options Desk</h1>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -6117,7 +6087,6 @@ export default function OptionsStrategyLab() {
             </div>
             <div style={{ display: "flex", gap: 6, marginTop: 12, flexWrap: "wrap" }}>
               <Btn small onClick={() => goStep("find")}><Radar size={11} /> 1 Find</Btn>
-              <Btn small ghost color={T.blue} onClick={goHome}>← Home</Btn>
             </div>
           </Panel>
         )}
@@ -6135,6 +6104,7 @@ export default function OptionsStrategyLab() {
       </div>
       {/* ONE BOTTOM BAR (PR #47, TASK 4). The badge on Positions is decisions + closes working. */}
       <BottomBar current={placeOf({ tab, step, showSettings })} badge={nAttention + attn.closesWorking}
+        badgeLabel={statusLine({ positions: ownedPositions, attention: nAttention, looks: attn.looks, closing: attn.closesWorking })}
         onGo={(id) => {
           if (id === "find" || id === "build") { goStep(id); return; }
           setTab(id); setShowSettings(false); setEv(null);
