@@ -22,7 +22,8 @@
 // ============================================================================
 import React from "react";
 import { T, TYPE } from "./theme.js";
-import { Info, Btn, mono, sans } from "./ui.jsx";
+import { Info, Btn, Note, mono, sans } from "./ui.jsx";
+import { PREVIEW, PREVIEW_READ_ONLY } from "./deploy.js";
 import { Fold, EvidenceOverlay } from "./steps.jsx";
 import { BandThumbnail } from "./visuals.jsx";
 import { payoffBands } from "./visuals.jsx";
@@ -127,15 +128,18 @@ export function PositionCard({
         {/* NO SECOND CLOSE WHILE ONE IS WORKING (PR #47, TASK 1): the caller passes no label, and the card shows
             the working close's line and "Manage order" instead of a disabled button. */}
         {closeLabel && (
-          <Btn color={closePrimary ? T.action : T.ink} ghost={!closePrimary} disabled={demo || closeDisabled} title={closeTitle} onClick={onClose}>
+          <Btn color={closePrimary ? T.action : T.ink} ghost={!closePrimary} disabled={demo || PREVIEW || closeDisabled} title={PREVIEW ? PREVIEW_READ_ONLY : closeTitle} onClick={onClose}>
             {closeLabel}
           </Btn>
         )}
         <Btn ghost color={T.blue} onClick={onDetails} aria-haspopup="dialog">Details</Btn>
         {(fileKind === "gone" || fileKind === "book") && (
-          <Btn ghost={fileKind !== "gone"} color={fileKind === "gone" ? T.amber : T.ink} onClick={onFile}>File in Journal</Btn>
+          <Btn ghost={fileKind !== "gone"} color={fileKind === "gone" ? T.amber : T.ink} onClick={onFile}
+            disabled={PREVIEW} title={PREVIEW ? PREVIEW_READ_ONLY : undefined}>File in Journal</Btn>
         )}
       </div>
+      {/* A DEPLOY PREVIEW IS READ-ONLY (redesign PR 2, TASK 0a): Close and File in Journal say why they are down. */}
+      {PREVIEW && (closeLabel || fileKind === "gone" || fileKind === "book") && <Note color={T.amber} style={{ marginTop: 4 }}>{PREVIEW_READ_ONLY}</Note>}
       {children}
       {/* ONE FOLD (PR #47, TASK 3): the entry set beside now (also on Details) and the reason check / exit orders. */}
       <Fold label="open" tone={T.ink} keepMounted style={{ marginTop: 8 }} summary="Entry vs now · exit orders">
@@ -212,7 +216,7 @@ export function PositionDetails({
             cursor: "pointer", textDecoration: "underline" }}>Analyse as a new trade</button>
         <div style={{ ...sans, fontSize: FS.sm, color: T.mut }}>Build prices it at today's market. A Send there would open a second position.</div>
         {fileKind === "unknown" && (
-          <button onClick={onFile}
+          <button onClick={onFile} disabled={PREVIEW} title={PREVIEW ? PREVIEW_READ_ONLY : undefined}
             style={{ ...sans, fontSize: FS.sm, color: T.mut, background: "transparent", border: "none", padding: "10px 0", minHeight: 44,
               cursor: "pointer", textDecoration: "underline" }}>Closed it elsewhere? File it</button>
         )}

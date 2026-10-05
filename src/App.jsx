@@ -49,6 +49,7 @@ import { RULES, sizing, ruleBadge, takeProfitLabel, takeProfitTarget, takeProfit
 import { isStale, freshnessNote, staleAmong , findFreshness } from "./freshness.js";
 import { evaluateTrade, gateSummary } from "./riskGate.js";
 import { DEMO, DEMO_BANNER, DEMO_TOOLTIP, DEMO_SEED_TICKERS, demoPositions } from "./demo.js";
+import { PREVIEW, PREVIEW_BANNER, PREVIEW_READ_ONLY } from "./deploy.js";
 import { CapitalOnboarding, ConfirmSteps, Card, Pill, statusLine } from "./wizard.jsx";
 // THE CONTROLS AND THE ONE CANDIDATE CARD (ROADMAP P10). Its own file: it is
 // nothing but a trade, so it may not live in `steps.jsx`, and `wizard.jsx`
@@ -864,7 +865,10 @@ async function saveState(st) {
   // The server blob is ONE shared document, so a demo visitor writing to it
   // would overwrite the owner's positions and feed the autopilot a book that
   // is not theirs. Demo state stays in the visitor's own browser.
-  if (DEMO) return;
+  if (DEMO || PREVIEW) return;
+  // A PREVIEW NEVER SAVES TO THE SERVER EITHER (redesign PR 2, TASK 0a): that same shared document is production's
+  // book, and deploy-preview-51 overwrote it. The server refuses a preview's POST on its own (state.mjs); this only
+  // spares a request that would be refused.
   // sync server (abilita Autopilot ad app chiusa); fire-and-forget
   try { fetch("/api/state", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ positions: st.positions, settings: { webhook: st.settings?.webhook, capital: st.settings?.capital, concurrentTarget: st.settings?.concurrentTarget, savings: st.settings?.savings, sizeOverride: st.settings?.sizeOverride, sizingFree: st.settings?.sizingFree ?? null, notifyWhenReady: !!st.settings?.notifyWhenReady, findOrder: st.settings?.findOrder || "ev" } }) }); } catch { /* offline ok */ }
 }
@@ -876,6 +880,14 @@ const DemoBanner = () => (DEMO ? (
   <div style={{ ...mono, fontSize: FS.xs, color: T.blue, background: `${T.blue}12`, borderBottom: `1px solid ${T.blue}44`,
     padding: "9px 14px", display: "flex", gap: 8, alignItems: "center", justifyContent: "center", flexWrap: "wrap", textAlign: "center" }}>
     <ShieldCheck size={13} style={{ flexShrink: 0 }} /> {DEMO_BANNER}
+  </div>
+) : null);
+/* THE PREVIEW BANNER (redesign PR 2, TASK 0a): a deploy preview is read-only — nothing it does is saved to the server
+   or sent to Alpaca, and every control that would is disabled with the same reason (src/deploy.js). On every screen. */
+const PreviewBanner = () => (PREVIEW ? (
+  <div role="status" style={{ ...sans, fontSize: FS.sm, fontWeight: 700, color: T.amber, background: `${T.amber}14`,
+    borderBottom: `1px solid ${T.amber}55`, padding: "10px 16px", textAlign: "center", lineHeight: 1.4 }}>
+    {PREVIEW_BANNER}
   </div>
 ) : null);
 /* THE OFFLINE BANNER — the counterpart to the service worker's one rule.
@@ -2327,6 +2339,7 @@ export default function OptionsStrategyLab() {
      broker's answer. */
   const cancelWorking = async (p) => {
     if (DEMO) { setMsg(DEMO_TOOLTIP); return null; }
+    if (PREVIEW) { setMsg(PREVIEW_READ_ONLY); return null; }   // a deploy preview cancels nothing (TASK 0a)
     setOrderBusy(p.id);
     let res;
     try {
@@ -2355,6 +2368,7 @@ export default function OptionsStrategyLab() {
   /** Ask for the cancel, then put the same trade back on Build to re-price. */
   const repriceWorking = async (p) => {
     if (DEMO) { setMsg(DEMO_TOOLTIP); return; }
+    if (PREVIEW) { setMsg(PREVIEW_READ_ONLY); return; }
     const res = await cancelWorking(p);
     // Only a cancel Alpaca has just ACCEPTED goes on to Build. A failure says
     // so where it happened, and a cancel that was already waiting is a state
@@ -2635,6 +2649,8 @@ export default function OptionsStrategyLab() {
   };
 
   const openPaper = async (alpacaOrder) => {
+    // A DEPLOY PREVIEW OPENS NOTHING, NOT EVEN ON THE APP'S OWN BOOK (redesign PR 2, TASK 0a).
+    if (PREVIEW) { setMsg(PREVIEW_READ_ONLY); return; }
     // Non blocchiamo il trade: chiediamo la motivazione scritta e la salviamo
     // con la posizione (PRD §2, pattern override).
     if (clash && against.reason.trim().length < REASON_MIN) {
@@ -2746,6 +2762,8 @@ export default function OptionsStrategyLab() {
      about the difference. `ruleExitOf()` says which rules actually end a trade:
      the take-profit and the exit window, and nothing else. */
   const closePos = async (id, { written = "" } = {}) => {
+    // A DEPLOY PREVIEW FILES NOTHING (redesign PR 2, TASK 0a): its Journal is that address's own, never production's.
+    if (PREVIEW) return { ok: false, decision: { reason: { message: PREVIEW_READ_ONLY } } };
     const p = store.positions.find((x) => x.id === id);
     if (!p) return { ok: true };
     const al = posAlerts.find((a) => a.p.id === id) || null;
@@ -2782,6 +2800,7 @@ export default function OptionsStrategyLab() {
      the manual step after the fill. */
   const prepareCardClose = async (p, choice = null, chain = null) => {
     if (DEMO) { setCloseAt({ id: p.id, refusal: DEMO_TOOLTIP }); return; }
+    if (PREVIEW) { setCloseAt({ id: p.id, refusal: PREVIEW_READ_ONLY }); return; }   // a deploy preview sends nothing
     setCloseAt((cp) => ({ id: p.id, busy: true, prepared: choice && cp?.id === p.id ? cp.prepared : null, choice }));
     // A CHANGE OF PRICE RE-PREPARES ON THE CHAIN TAP 1 READ (PR #46): the bounds the field shows are that chain's.
     const prepared = await prepareClose(groupForRecord(p, alSync.positions), {
@@ -2826,7 +2845,7 @@ export default function OptionsStrategyLab() {
   const orderCtx = {
     positions: alSync.positions, orders: alSync.orders, chainFor: (tk) => chains[tk] || null, fetchChain,
     // `gate` is defined further down this component; read it at the send, not at render (a TDZ otherwise).
-    gate: (proposal) => gate(proposal), request: alpacaReq, demo: DEMO, recordFor,
+    gate: (proposal) => gate(proposal), request: alpacaReq, demo: DEMO, readOnly: PREVIEW, recordFor,
     // PR #47: the clock line on every row, the reconciliation sentence behind the "sent outside this app" ⓘ, and
     // the row "Manage order" opened.
     clock, gap: orderGap.sentence, focusId: focusOrder,
@@ -2853,6 +2872,7 @@ export default function OptionsStrategyLab() {
     cancelOne: async (o, rec) => {
       if (rec && rec.alpacaId === o.id && positionStage(rec) === "working") return cancelWorking(rec);
       if (DEMO) return { kind: "failed", headline: DEMO_TOOLTIP };
+      if (PREVIEW) return { kind: "failed", headline: PREVIEW_READ_ONLY };
       try { await alpacaReq(`/v2/orders/${encodeURIComponent(o.id)}`, "DELETE"); return cancelOutcome({ ok: true }); }
       catch (e) { return cancelOutcome({ error: e }); }
     },
@@ -3003,6 +3023,7 @@ export default function OptionsStrategyLab() {
     // the check lives next to the send, not only on the button, so a path that
     // ever gets called some other way still cannot reach Alpaca.
     if (DEMO) { setMsg(DEMO_TOOLTIP); return; }
+    if (PREVIEW) { setMsg(PREVIEW_READ_ONLY); return; }   // and neither can a deploy preview (TASK 0a)
     if (!confirmSend) { setConfirmSend(true); return; }
     setConfirmSend(false); setBusy("order");
     try {
@@ -4071,6 +4092,7 @@ export default function OptionsStrategyLab() {
   if (!store.settings.onboarded) {
     return (
       <div style={{ minHeight: "100vh", background: T.bg, color: T.body }}>
+        <PreviewBanner />
         <DemoBanner />
         <OfflineBanner />
         <CapitalOnboarding
@@ -4132,6 +4154,7 @@ export default function OptionsStrategyLab() {
   };
   return (
     <div style={{ minHeight: "100vh", background: T.bg, color: T.body, ...sans }}>
+      <PreviewBanner />
       <DemoBanner />
       <OfflineBanner />
       {/* The bottom padding is the strip reserved for the injected Netlify
@@ -5410,7 +5433,7 @@ export default function OptionsStrategyLab() {
                       closeDisabled={!!(ca && (ca.busy || ca.prepared))}
                       closeTitle={DEMO ? DEMO_TOOLTIP : undefined} demo={DEMO}
                       onClose={() => prepareCardClose(p)} onDetails={() => setDetailsId(p.id)}
-                      fileKind={m.fileKind} onFile={() => setClosing({ id: p.id, written: "", err: null })}
+                      fileKind={m.fileKind} onFile={() => { if (PREVIEW) { setMsg(PREVIEW_READ_ONLY); return; } setClosing({ id: p.id, written: "", err: null }); }}
                       guardian={(
                         <GuardianPanel
                           pos={p} spot={m.s || p.entrySpot} dteLeft={m.dteLeft} ivNow={m.ivNow}

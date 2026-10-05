@@ -45,6 +45,10 @@
 // so `parseAvJson()` on the client keeps working exactly as it did.
 // ============================================================================
 import { getStore } from "@netlify/blobs";
+import { deployWrites } from "../../src/deploy.js";
+
+/* The blob store, behind one name a test can replace (redesign PR 2, TASK 0a). Production reads the real one. */
+export const deps = { getStore };
 
 /** Monthly data changes once a month. A week is well inside that and well
  *  outside the 25-a-day quota: ten markets refresh at most ten times a week,
@@ -61,7 +65,7 @@ const seriesOf = (j) => (j && typeof j === "object") ? j["Monthly Adjusted Time 
 const refusalOf = (j) => (j && typeof j === "object")
   ? (j["Note"] || j["Information"] || j["Error Message"] || null) : null;
 
-export default async (req) => {
+export default async (req, context) => {
   const sym = (() => {
     try { return (new URL(req.url).searchParams.get("sym") || "").toUpperCase().replace(/[^A-Z]/g, ""); }
     catch { return ""; }
@@ -72,7 +76,7 @@ export default async (req) => {
   // configured must never stop the endpoint working, so every touch of it is
   // wrapped and a failure simply means no cache today.
   let store = null;
-  try { store = getStore("autopilot"); } catch { /* no blob store: go straight upstream */ }
+  try { store = deps.getStore("autopilot"); } catch { /* no blob store: go straight upstream */ }
   const key = `av/${sym}.json`;
   let cached = null;
   try { cached = store ? await store.get(key, { type: "json" }) : null; } catch { /* treat as a miss */ }
@@ -102,7 +106,11 @@ export default async (req) => {
     const body = await r.json();
     if (r.ok && seriesOf(body)) {
       const at = Date.now();
-      try { await store?.set(key, JSON.stringify({ at, body })); } catch { /* the answer still goes out */ }
+      /* A PREVIEW READS THE CACHE AND NEVER WRITES IT (redesign PR 2, TASK 0a; owner, 5 Oct 2026): the store is
+         site-wide, so only the published production deploy saves into it. The answer still goes out. See src/deploy.js. */
+      if (deployWrites(context).ok) {
+        try { await store?.set(key, JSON.stringify({ at, body })); } catch { /* the answer still goes out */ }
+      }
       return stamp(body, "live", at);
     }
     // A refusal, a rate limit or an unknown symbol. Serve what we have rather

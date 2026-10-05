@@ -49,4 +49,11 @@ const stampServiceWorker = () => ({
   },
 });
 
-export default defineConfig({ plugins: [react(), stampServiceWorker()] });
+/* THE DEPLOY CONTEXT, STAMPED INTO THE CLIENT (redesign PR 2, TASK 0a). Netlify sets CONTEXT during every build
+   ("production", "deploy-preview", "branch-deploy", …); a build without it — a local `npm run dev` — is "unknown", and
+   unknown is not production. src/deploy.js reads it: anything but production draws the read-only banner and disables
+   every write. The server refuses on its own whatever the client thinks. */
+export default defineConfig({
+  plugins: [react(), stampServiceWorker()],
+  define: { __OSL_DEPLOY_CONTEXT__: JSON.stringify(process.env.CONTEXT || "unknown") },
+});

@@ -23,6 +23,7 @@ import { erf, netBS } from "./engine.js";
 import { ARROW, REGIONS, regionSignals, tagImpacts, taRead } from "./signals.js";
 import { useNarrow, BandThumbnail, payoffBands, bandTakeaway, pnl$ } from "./visuals.jsx";
 import { DEMO, DEMO_TOOLTIP } from "./demo.js";
+import { PREVIEW, PREVIEW_READ_ONLY } from "./deploy.js";
 import { reduceRatios, orderQty, mlegLimitPrice, limitWords, orderLimitWords, limitKind, signedLimitFor, orderBody, orderPreviewLines, orderOutcome, alpacaErrorText, cancelOutcome, cancelWaiting } from "./order.js";
 import { hasOpenInterest, sourceNote, openInterestNote, fetchChain } from "./chain.js";
 import { CloseChoice } from "./orders.jsx";
@@ -757,6 +758,7 @@ export function OrderTicket({
   const sendQty = orderQty(qtyNum, shape.factor);
   const send = async () => {
     if (DEMO) { setMsg(DEMO_TOOLTIP); return; }   // order path 2 of six
+    if (PREVIEW) { setMsg(PREVIEW_READ_ONLY); return; }   // a deploy preview sends nothing (TASK 0a)
     if (qtyProblem) { setMsg(qtyProblem); return; }
     if (!confirm) { setConfirm(true); return; }
     setConfirm(false); setBusy(true); setOutcome(null);
@@ -859,9 +861,9 @@ export function OrderTicket({
           <Sel value={cfg.type} onChange={(e) => onCfg({ type: e.target.value })}><option value="limit">Limit — set my price</option><option value="market">Market — take what is there</option></Sel></div>
         <div><div style={{ ...mono, fontSize: FS.xs, color: T.dim }}>HOW LONG IT STANDS</div>
           <Sel value={cfg.tif} onChange={(e) => onCfg({ tif: e.target.value })}><option value="day">Today only</option><option value="gtc">Until I cancel</option></Sel></div>
-        <Btn color={confirm ? T.red : T.violet} onClick={send} disabled={busy || !preview.pass || DEMO || !!qtyProblem}
-          title={DEMO ? DEMO_TOOLTIP : undefined}>
-          <Send size={12} /> {busy ? "Sending…" : DEMO ? DEMO_TOOLTIP : qtyProblem ? qtyProblem : !preview.pass ? "BLOCKED BY THE RISK GATE" : confirm ? "TAP AGAIN TO CONFIRM" : "Send the order"}
+        <Btn color={confirm ? T.red : T.violet} onClick={send} disabled={busy || !preview.pass || DEMO || PREVIEW || !!qtyProblem}
+          title={DEMO ? DEMO_TOOLTIP : PREVIEW ? PREVIEW_READ_ONLY : undefined}>
+          <Send size={12} /> {busy ? "Sending…" : DEMO ? DEMO_TOOLTIP : PREVIEW ? "Read-only preview" : qtyProblem ? qtyProblem : !preview.pass ? "BLOCKED BY THE RISK GATE" : confirm ? "TAP AGAIN TO CONFIRM" : "Send the order"}
         </Btn>
       </div>
 
@@ -892,6 +894,7 @@ export function OrderTicket({
             qty: qtyNum, type: cfg.type, limit: signedLimit, tif: cfg.tif, intent: "open" })}
           onCancel={() => setConfirm(false)} />
       )}
+      {PREVIEW && <Note color={T.amber} style={{ marginTop: 4 }}>{PREVIEW_READ_ONLY}</Note>}
       <OrderOutcome outcome={outcome} onDismiss={() => setOutcome(null)} />
       {!preview.pass && (
         <div style={{ display: "grid", gap: 3, marginTop: 7 }}>
@@ -929,6 +932,7 @@ export function UnrecordedCard({ group: g, gate, orders = [], onImport, setMsg, 
   const [closePrep, setClosePrep] = useState(null);   // { key, busy, prepared, refusal, sent }
   const closeGroup = async (grp, choice = null, chain = null) => {
     if (DEMO) { setClosePrep({ key: grp.key, refusal: DEMO_TOOLTIP }); return; }
+    if (PREVIEW) { setClosePrep({ key: grp.key, refusal: PREVIEW_READ_ONLY }); return; }
     setClosePrep((cp) => ({ key: grp.key, busy: true, prepared: choice ? cp?.prepared : null, choice }));
     const prepared = await prepareClose(grp, { gate: (pr) => runGate(gate, pr), openOrders: orders || [],
       fetchChain: chain ? async () => chain : fetchChain, choice });
@@ -956,9 +960,10 @@ export function UnrecordedCard({ group: g, gate, orders = [], onImport, setMsg, 
       <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
         <Btn small color={T.action} onClick={onImport}>Import</Btn>
         <Btn small ghost color={T.ink} onClick={() => closeGroup(g)}
-          disabled={DEMO || (closePrep?.key === g.key && (closePrep.busy || !!closePrep.prepared))}
-          title={DEMO ? DEMO_TOOLTIP : undefined}>Close at limit</Btn>
+          disabled={DEMO || PREVIEW || (closePrep?.key === g.key && (closePrep.busy || !!closePrep.prepared))}
+          title={DEMO ? DEMO_TOOLTIP : PREVIEW ? PREVIEW_READ_ONLY : undefined}>Close at limit</Btn>
       </div>
+      {PREVIEW && <Note color={T.amber} style={{ marginTop: 4 }}>{PREVIEW_READ_ONLY}</Note>}
       {closePrep && closePrep.key === g.key && (
         <CloseConfirm prep={closePrep} onSend={sendGroupClose} onCancel={() => setClosePrep(null)} clock={clock}
           onChoose={(c) => closeGroup(g, c, closePrep.prepared?.chainUsed || null)} />
@@ -2146,6 +2151,7 @@ export function GuardianPanel({ pos, spot, dteLeft, ivNow, vol, seasonalNow, pnl
   };
   const placeExit = async (label, targetPnl) => {
     if (DEMO) { setMsg(DEMO_TOOLTIP); return; }   // order path 4 of six
+    if (PREVIEW) { setMsg(PREVIEW_READ_ONLY); return; }   // a deploy preview sends nothing (TASK 0a)
     setLadderBusy(label);
     try {
       // Ogni gradino della scala e' un ordine su Alpaca: passa dal cancello.
@@ -2261,18 +2267,19 @@ export function GuardianPanel({ pos, spot, dteLeft, ivNow, vol, seasonalNow, pnl
               close the position for nothing. The stop rung stays: the maximum
               LOSS is always known, which is non-negotiable rule 2. */}
           {tpT.perCombo != null ? (<>
-            <Btn small ghost color={T.green} title={DEMO ? DEMO_TOOLTIP : undefined} onClick={() => placeExit(takeProfitLabel(tpT.basis), tpT.perCombo)} disabled={!!ladderBusy || DEMO}>GTC {takeProfitLabel(tpT.basis)} @ {ladderRungPrice(pos.entryNet, tpT.perCombo)}</Btn>
+            <Btn small ghost color={T.green} title={DEMO ? DEMO_TOOLTIP : undefined} onClick={() => placeExit(takeProfitLabel(tpT.basis), tpT.perCombo)} disabled={!!ladderBusy || DEMO || PREVIEW}>GTC {takeProfitLabel(tpT.basis)} @ {ladderRungPrice(pos.entryNet, tpT.perCombo)}</Btn>
             {tpT.basis !== "premium" && Number.isFinite(pos.maxProfit) && (
-              <Btn small ghost color={T.green} title={DEMO ? DEMO_TOOLTIP : undefined} onClick={() => placeExit(`TP ${scaleOutLabel()}`, RULES.scaleOutPct * pos.maxProfit)} disabled={!!ladderBusy || DEMO}>GTC TP {scaleOutLabel()} @ {ladderRungPrice(pos.entryNet, RULES.scaleOutPct * pos.maxProfit)}</Btn>
+              <Btn small ghost color={T.green} title={DEMO ? DEMO_TOOLTIP : undefined} onClick={() => placeExit(`TP ${scaleOutLabel()}`, RULES.scaleOutPct * pos.maxProfit)} disabled={!!ladderBusy || DEMO || PREVIEW}>GTC TP {scaleOutLabel()} @ {ladderRungPrice(pos.entryNet, RULES.scaleOutPct * pos.maxProfit)}</Btn>
             )}
           </>) : (
             <span style={{ ...mono, fontSize: FS.xs, color: T.dim }}>
               {`No profit rung: this position has ${NO_CEILING}, so ${pctText(RULES.takeProfitPct)} of the maximum is not a price. The ${RULES.exitDTE}-day exit still applies.`}
             </span>
           )}
-          <Btn small ghost color={T.red} title={DEMO ? DEMO_TOOLTIP : undefined} onClick={() => placeExit(stopLossLabel(), RULES.stopLossPct * pos.maxLoss)} disabled={!!ladderBusy || DEMO}>{stopLossLabel()} @ {ladderRungPrice(pos.entryNet, RULES.stopLossPct * pos.maxLoss)}</Btn>
+          <Btn small ghost color={T.red} title={DEMO ? DEMO_TOOLTIP : undefined} onClick={() => placeExit(stopLossLabel(), RULES.stopLossPct * pos.maxLoss)} disabled={!!ladderBusy || DEMO || PREVIEW}>{stopLossLabel()} @ {ladderRungPrice(pos.entryNet, RULES.stopLossPct * pos.maxLoss)}</Btn>
         </>)}
       </div>
+      {alpaca && PREVIEW && <Note color={T.amber} style={{ marginTop: 4 }}>{PREVIEW_READ_ONLY}</Note>}
       {sim && (
         <div style={{ display: "flex", gap: 14, marginTop: 10, flexWrap: "wrap", padding: "8px 10px", background: `${T.blue}0d`, borderRadius: 6 }}>
           <Stat k={`HITS ${takeProfitLabel()} FIRST`} v={`${(sim.pTP * 100).toFixed(0)}%`} c={T.green} />

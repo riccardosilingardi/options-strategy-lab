@@ -29,6 +29,7 @@ import { prepareClose, sendClose, groupForRecord } from "./closeOrder.js";
 import { cancelOutcome, cancelWaiting } from "./order.js";
 import { closeLimitPrice, openLimitPrice } from "./rules.js";
 import { DEMO, DEMO_TOOLTIP } from "./demo.js";
+import { PREVIEW, PREVIEW_READ_ONLY } from "./deploy.js";
 
 const FS = TYPE.size, FW = TYPE.weight, LH = TYPE.line;
 const usd = (x) => (x == null || !Number.isFinite(+x) ? "—" : `$${Math.abs(+x).toFixed(2)}`);
@@ -100,6 +101,8 @@ export function OrderRow({ order, ctx, inline = false, initialMode = null }) {
   const [said, setSaid] = useState(null);                 // { ok, text }
   const [cancelAsked, setCancelAsked] = useState(null);
   const demo = ctx.demo ?? DEMO;
+  // A DEPLOY PREVIEW IS READ-ONLY (redesign PR 2, TASK 0a): Modify and Cancel are disabled with the reason.
+  const readOnly = ctx.readOnly ?? PREVIEW;
   const rec = ctx.recordFor ? ctx.recordFor(order) : null;
   const mleg = !model.single;
   const heldQty = model.intent === "close" && key
@@ -193,15 +196,16 @@ export function OrderRow({ order, ctx, inline = false, initialMode = null }) {
         <Note color={T.amber} style={{ marginTop: 8 }}>{cancelOutcome({ order: { status: order.status, cancelRequested: cancelAsked || rec?.cancelRequestedAt } })?.headline}</Note>
       ) : (
         <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
-          <Btn small ghost color={T.ink} disabled={demo || busy} title={demo ? DEMO_TOOLTIP : undefined}
+          <Btn small ghost color={T.ink} disabled={demo || readOnly || busy} title={demo ? DEMO_TOOLTIP : readOnly ? PREVIEW_READ_ONLY : undefined}
             aria-expanded={mode === "modify"} onClick={() => (mode === "modify" ? setMode(null) : openModify())}>Modify</Btn>
           {/* CANCEL IS NOT AN ERROR (PR #47, TASK 3): the danger OUTLINE, never a red fill. */}
-          <Btn small ghost color={T.red} disabled={demo || busy} title={demo ? DEMO_TOOLTIP : undefined}
+          <Btn small ghost color={T.red} disabled={demo || readOnly || busy} title={demo ? DEMO_TOOLTIP : readOnly ? PREVIEW_READ_ONLY : undefined}
             aria-expanded={mode === "cancel"} onClick={() => { setSaid(null); setMode(mode === "cancel" ? null : "cancel"); }}>Cancel</Btn>
           <Btn small ghost color={T.ink} aria-expanded={mode === "details"}
             onClick={() => setMode(mode === "details" ? null : "details")}>History</Btn>
         </div>
       )}
+      {!waiting && readOnly && <Note color={T.amber} style={{ marginTop: 4 }}>{PREVIEW_READ_ONLY}</Note>}
 
       {mode === "modify" && edit && (
         <div data-modify={order.id} style={{ marginTop: 10, display: "grid", gap: 10 }}>
@@ -274,6 +278,7 @@ export function OrdersPanel({ orders, ctx }) {
   const [busy, setBusy] = useState(false);
   const n = orders ? orders.length : null;
   const demo = ctx.demo ?? DEMO;
+  const readOnly = ctx.readOnly ?? PREVIEW;
   const doAll = async () => {
     setBusy(true);
     const r = await cancelAll({ request: ctx.request, demo });
@@ -289,7 +294,8 @@ export function OrdersPanel({ orders, ctx }) {
       </div>
       {n > 0 && !confirmAll && (
         <div style={{ marginTop: 12 }}>
-          <Btn small ghost color={T.red} disabled={demo} title={demo ? DEMO_TOOLTIP : undefined} onClick={() => setConfirmAll(true)}>Cancel all</Btn>
+          <Btn small ghost color={T.red} disabled={demo || readOnly} title={demo ? DEMO_TOOLTIP : readOnly ? PREVIEW_READ_ONLY : undefined} onClick={() => setConfirmAll(true)}>Cancel all</Btn>
+          {readOnly && <Note color={T.amber} style={{ marginTop: 4 }}>{PREVIEW_READ_ONLY}</Note>}
         </div>
       )}
       {confirmAll && (

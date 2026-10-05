@@ -26,6 +26,7 @@ import { T, TYPE, BADGE_SAFE, BADGE_BTN_GAP } from "./theme.js";
 import { mono, sans, Chip, Label, Panel, TAP } from "./ui.jsx";
 import { RULES, sizing, money, pctText, limitOwner, NO_CEILING, takeProfitTarget } from "./rules.js";
 import { UnifiedFigure, exitPlanSentence, exitPlanDetail, price } from "./visuals.jsx";
+import { PREVIEW, PREVIEW_READ_ONLY } from "./deploy.js";
 
 // PR #48 SWEEP: the stacks, Chip, Label, Panel and the tap target are ui.jsx's, the sizes are the type tokens. Mono
 // only for numbers and legs (an amount typed, a P&L, the legs being sent). RED IS FOR ERRORS AND REFUSALS: a
@@ -477,12 +478,16 @@ export function ConfirmSteps({
         </div>
       </Card>
 
-      <button onClick={onConfirm} disabled={busy || refused}
+      <button onClick={onConfirm} disabled={busy || refused || PREVIEW} title={PREVIEW ? PREVIEW_READ_ONLY : undefined}
         style={{ ...sans, width: "100%", minHeight: 58, marginTop: 18, marginBottom: BADGE_BTN_GAP, fontSize: FS.md, fontWeight: FW.bold, borderRadius: 10,
           cursor: busy ? "wait" : refused ? "not-allowed" : "pointer", opacity: busy ? 0.6 : refused ? 0.45 : 1,
           background: T.amber, color: T.onAccent, border: "none" }}>
-        {busy ? "Checking…" : refused ? "Blocked by the risk gate" : `Open this on paper · ${money(totalRisk)} at risk${n > 1 ? ` (${n} × ${money(c.risk)})` : ""}`}
+        {busy ? "Checking…" : PREVIEW ? "Read-only preview" : refused ? "Blocked by the risk gate" : `Open this on paper · ${money(totalRisk)} at risk${n > 1 ? ` (${n} × ${money(c.risk)})` : ""}`}
       </button>
+      {/* A DEPLOY PREVIEW IS READ-ONLY (redesign PR 2, TASK 0a): nothing is opened, not even on the app's own book. */}
+      {PREVIEW && (
+        <div style={{ ...sans, fontSize: FS.sm, color: T.amber, marginTop: 4, lineHeight: LH.body }}>{PREVIEW_READ_ONLY}</div>
+      )}
 
       {refused && onDesk && (
         <button onClick={onDesk}
