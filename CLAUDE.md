@@ -28,6 +28,14 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
    optional WEBHOOK_URL and ANTHROPIC_WORKSPACE_ID.
 4. No order reaches Alpaca without passing `src/riskGate.js`.
 5. Nothing executes without an explicit human confirmation.
+6. **Deploy previews are read-only** (redesign PR 2, TASK 0a; deploy-preview-51 overwrote production's book on 5 Oct
+   2026). Every Netlify function that writes or sends asks `deployWrites(context)` (src/deploy.js) first and answers 403
+   "Preview deploys are read-only: nothing is saved or sent from here." unless the deploy is production AND published;
+   an unreadable context is refused. Guarded: state.mjs's POST, alpaca.mjs's POST/PATCH/DELETE, approve.mjs,
+   autopilot.mjs, av.mjs's cache write. Reads are never asked. The client reads its build stamp
+   (`__OSL_DEPLOY_CONTEXT__`, vite.config.js, from Netlify's CONTEXT): anything but "production" draws the banner and
+   disables Send, Close, Modify, Cancel and File in Journal with the sentence. A new writer needs the check and a case
+   in `deploy.test.js`. Old previews keep the code they were built with: the guard protects deploys built after it.
 
 ## Working principles
 
@@ -59,7 +67,9 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
   signal · Chance · Return on risk · Past yrs (each with the `tile` it rings); `PAST_AVG_LABEL` ("PAST YRS AVG") on
   Build; the two toggles' words. Positions' "at entry vs now" reads the first four. No screen spells them itself.
 - **The historical replay has one home: `histBacktest()` in engine.js** (PR #49): the trade settled at expiry in the
-  same calendar window of every past year, whole months, the current year left out. Find runs it per card in
+  same calendar window of every past year, whole months, the current year left out; a window past December reads the
+  next year's row, and the last year (whose next row does not exist yet) is dropped, not padded (PR #50; `runReplay()`
+  on Build reads the same way). Find runs it per card in
   `findGen` (via `listCardFigures()`), Build in `buildFigures()` and its backtest panel; never copy it.
 - **One sorted list (PR #49).** A candidate that misses the request stays in its place in the chosen order, quieter
   (`T.mut`), with its reason first; "Hide cards that miss" (off) hides it behind the count (`resultsLine()`; on Find's rows `rowsResultsLine()`, "Hide them"). Never
@@ -169,6 +179,7 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
 - `src/App.jsx`, `src/pro.jsx` — UI, the order ticket (`OrderTicket`), the desk, `QtyField`.
 - `src/theme.js` — the one theme; dark is the default since redesign PR 1 (owner, 4 Oct 2026); a stored "light" stays light.
 - `src/demo.js` — public demo mode; every order path is disabled in it.
+- `src/deploy.js` — deploy previews are read-only: `deployWrites()` for the functions, `PREVIEW` for the client.
 - `src/basket.js` — re-exports `markets.js`'s `BASKET` for the Netlify functions.
 - `src/wordcount.mjs` — counts words each step renders (source; "market" is a screen since redesign PR 1, and a `Sheet`
   is one tap away), and `SURFACE_IDS` / `renderedWords()` for the four
@@ -196,7 +207,8 @@ for one holding. Adding an eighth means adding a gate call.
 The proxy `netlify/functions/alpaca.mjs` passes only an allowlist (`routeAllowed()`): GET on the
 read paths the app uses (account, clock, positions, orders, contracts), POST `/v2/orders`, PATCH `/v2/orders/{id}`, DELETE `/v2/orders/{id}` and
 `/v2/orders`. Everything else, `DELETE /v2/positions` included, is 405 with a sentence. A new
-call to Alpaca from the client needs its route added there and in `orders.test.js`.
+call to Alpaca from the client needs its route added there and in `orders.test.js`. Every route but a GET answers 403
+off the published production deploy (`deployWrites()`, rule 6).
 
 ## Where each constant lives
 
@@ -230,7 +242,9 @@ All in `RULES`, `src/rules.js`, unless noted.
 - `npm ci` once, then `npm test` — every plain-JS suite plus the JSX suites listed in
   `scripts/test-jsx.mjs` (bundled with esbuild, run in node; no DOM library).
 - `npm run build` — must be clean.
-- A new JSX test file must be added to `FILES` in `scripts/test-jsx.mjs`. JSX tests are
+- A new JSX test file must be added to `FILES` in `scripts/test-jsx.mjs`. A file that must render as a deploy preview goes in
+  `PREVIEW_FILES` too (bundled with `__OSL_DEPLOY_CONTEXT__` = "deploy-preview"); every other file is unstamped, i.e. not a
+  preview. JSX tests are
   bundled to CJS, so read source files by repo-relative path, not `import.meta.url`.
 - `node scripts/measure-words.mjs` prints the per-screen word counts and the four rendered surfaces on J-0001.
 - `node scripts/shoot-screens.mjs [dir]` photographs Find, a sheet, Saved and the market page's tabs at 390×844 in the

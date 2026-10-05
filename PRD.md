@@ -151,6 +151,12 @@ non-expert trader who wants to learn discipline rather than be sold trades.
   one-tap approval links. It never executes by itself.
 - **Copilots.** An AI explanation of the loaded trade and of the chart. They explain; they
   never propose or place a trade.
+- **Deploy previews are read-only** (redesign PR 2, TASK 0a, after deploy-preview-51 overwrote production's book on
+  5 Oct 2026). A preview reads everything production reads, but every Netlify function that writes or sends (the state
+  save, every order, Modify and cancel, the one-tap approval, the autopilot's run, the Alpha Vantage cache write) answers
+  403 "Preview deploys are read-only: nothing is saved or sent from here." unless the deploy is the published production
+  one; a context it cannot read is refused. On a preview the app shows "Preview · read-only: nothing here is saved or
+  sent" on every screen and disables Send, Close, Modify, Cancel and File in Journal with that sentence under each.
 - **Installable** as a PWA. Offline it says "Offline — no live data" and shows no prices.
 
 The app must be able to say "nothing today". That is a feature, not an error.
@@ -279,6 +285,10 @@ Anything else is 405 with a sentence.
 
 ## 3. v1 — DONE WHEN
 
+**v1 IS REACHED (owner's report, 5 Oct 2026):** J-0001's close filled 9 of 9 at $7.65 through order path 3, and the owner
+filed it in the Journal from the production address. One owner check is left (§4 #1): the Journal entry shows the
+$7.65 fill.
+
 v1 is done when all three are true, each observed on the owner's real account and phone:
 
 - **(a)** One opening order **filled at the intended price** — the fill Alpaca reports matches
@@ -299,18 +309,19 @@ changes what the owner reads, not what v1 needs: v1 waits only on the owner's th
 - **(b) FILLED, read from the owner's Alpaca screenshot of 5 Oct 2026:** J-0001's close (GDX261030P00094000, sell 9,
   limit $7.62, the order sent by the card's "Close at limit", order path 3) filled 9 of 9 at an average $7.65 on
   5 Oct 2026, 3:30 PM — $0.03 a share better than the limit, $27 across the 9 contracts. The earlier $8.23 limit reads
-  canceled. **One step is left: "File in Journal" from the production address** (the Journal lives in that browser only),
-  which the owner reads there; this session cannot see it.
+  canceled. **Filed in the Journal from the production address** (owner's report, 5 Oct 2026). (A "File in Journal" tapped
+  the same day on deploy-preview-51 went into that preview's own Journal and cost production's server copy the GDX
+  position; that is why previews are read-only since redesign PR 2.)
 
 ## 4. NOT VERIFIED
 
 At most ten items. **OWNER CHECK** means only the owner's reading can settle it; there is exactly
-one, v1 (b). Everything marked **read when it happens** is recorded if the owner meets it in
+one, J-0001's Journal entry. Everything marked **read when it happens** is recorded if the owner meets it in
 normal use, and is never asked for.
 
-1. **OWNER CHECK — J-0001 filed in the Journal, and no Modify has run live** (v1 b). The close FILLED (9 of 9 at $7.65,
-   5 Oct 2026, from the owner's Alpaca screenshot); what is left is "File in Journal" from the production address and the
-   card reading the fill there — this session cannot see that browser. Whether Alpaca accepts a `PATCH` on a single-leg
+1. **OWNER CHECK — the Journal entry for J-0001 shows the $7.65 fill** (v1 is reached on the owner's report of 5 Oct
+   2026: filled 9 of 9 at $7.65, filed from the production address; this session cannot see that browser). **No Modify
+   has run live:** whether Alpaca accepts a `PATCH` on a single-leg
    option order is read from its documentation, not observed; a multi-leg replace is taken as refused (403) from the same
    reading. `replaces` / `replaced_by` (PR #48) are read from alpaca-py's source and tested on stubs only.
 2. **Read when it happens — the live `/v2/clock` and `/v2/account` replies.** Their fields (`is_open`, `next_open`;
@@ -326,18 +337,25 @@ normal use, and is never asked for.
    badge strip exists the bar sits higher, and the last row may sit under it. **The Chain tab has not met the live Alpaca
    feed (no open interest) nor the CBOE fallback**: "thin", the OI mode and the tray's figures are read on fixtures only.
    The expected move and the day change have not been held against a live quote. **No screen reader was run.**
-4. **Read when it happens — no credit has filled at the corrected limit**, and the indicative combination ask on thin
-   chains has not been measured by a fill (J-0003 never filled at it).
+4. **Read when it happens — no credit has filled at the corrected limit** (the indicative combination ask on thin chains
+   has not been measured by a fill; J-0003 never filled at it), **and "Not on Alpaca", "size N > M on the ask", the "Not
+   in the app" card, an order "sent outside this app", and free sizing (PR #41)** have not appeared or been used live (the sync auto-imports a new holding on its
+   first read, so "Not in the app" shows mainly when that import has not run); free sizing's "no limit applied" is
+   tested on fixtures only.
 5. **Find's cost on a phone is not measured, and the live season has never been read.** Generation is one memo (139–259
    ms for the 31 fixture cards on a desktop CPU; under "Signals decide" a directional market builds two families; the
    PR #49 replay adds ≈ 1 ms); a slider move is 0.1 ms. The sandbox cannot call Alpha Vantage: `seasonalSignal()` and
    `histBacktest()` have run on avFixture series only. Since PR #49 `parseAvJson()` keeps the whole series: on a
    195-month fixture a month carries 16–17 years instead of 9–10; which live months count, and every live PAST YRS
    tile, are unread.
-6. **Read when it happens — "Not on Alpaca", "size N > M on the ask", the "Not in the app" card, an order "sent outside
-   this app", and free sizing (PR #41)** have not appeared or been used live (the sync auto-imports a new holding on its
-   first read, so "Not in the app" shows mainly when that import has not run); free sizing's "no limit applied" is
-   tested on fixtures only.
+6. **Not verified on the real deploy — the read-only preview guard (redesign PR 2, TASK 0a).** The deploy context is
+    read from `context.deploy` as Netlify's own type definitions (`@netlify/types` 3.2.0) describe it; this sandbox
+    could not open docs.netlify.com, and no function has run on a real preview or on production with the check. Stubbed
+    in tests only (preview, branch, unpublished production, no context → 403 and nothing upstream; production → as
+    before). **Whether previews hold the production Alpaca keys is not read** (netlify.toml scopes nothing per context;
+    the Netlify connector listed no site): the owner reads it in Site configuration → Environment variables. **Previews
+    built before this PR keep their unguarded functions** (deploy-preview-51 included); regenerating the Alpaca paper
+    keys after this merges leaves them with dead keys, and their writes to the shared store cannot be revoked.
 7. **The event dates have not been held against the publishers' pages on the days they fall, and the placeholders.**
    The table was read on the pages on 4–5 Oct 2026 by the owner's assistant (this sandbox could not reach them) and copied
    in; whether WASDE, the EIA reports and the FOMC decision land on those days, and EIA storage's holiday weeks, is read
@@ -359,8 +377,10 @@ normal use, and is never asked for.
    confirm 30 → 35 and Modify 38 → 40 are the owner's PR #49 decision (the ⓘ labels' words, measured). Find's and Build's word
    ceilings moved 309 → 315 and 244 → 250 in PR #48: the badge's words are now counted (the real change is one word).
 9. **The exit rules are inherited defaults, not backtested** on these ten markets; the single option's +50% of the
-   premium is the owner's choice. PAST YRS settles at expiry and does not replay them; a replay window that runs past
-   December wraps to the same row's January (inherited from App.jsx, moved unchanged, ROADMAP). On fixtures with no
+   premium is the owner's choice. PAST YRS settles at expiry and does not replay them. **Since PR #50 a replay window
+   that runs past December reads the next year's row and the last year is dropped, not padded** (it used to wrap to the
+   same row's January): the PAST YRS tiles on windows that cross December (a November or December entry held 45+ days)
+   changed with #50 and are owner-observed — no live tile has been read. On fixtures with no
    season the future avg runs −41.3 → +9.5 per $100, median −4.3, 6 of 31 above zero (the brief measured −41.0 →
    +8.2, −3.6, 4 of 31; the difference was not traced). The exact long-put maximum (PR #47, 0c) raises three Find fixture cards' return on
    risk 3.5–4.5×; how that moves their rank on live boards is not measured.
