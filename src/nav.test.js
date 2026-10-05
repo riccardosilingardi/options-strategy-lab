@@ -184,7 +184,8 @@ test("WIRING — App.jsx makes its screens out of this module, and every view ha
   assert.match(app, /window\.addEventListener\("popstate"/);
   // Redesign PR 1: the market page's ticker and tab ride along (`mktTk`, `mktTab`).
   assert.match(app, /navOf\(\{ view, tab, step, showSettings, ev, whyTk, detailsId, deskSheet, posSeg,\s*mktTk: tab === "build" && step === "market" \? mkt\.tk : null, mktTab: mkt\.tab \}\)/);
-  const headings = (app.match(/data-view-heading/g) || []).length;
+  // Redesign PR 2: Build's heading is in build.jsx (its title, and each of its three states).
+  const headings = (app.match(/data-view-heading/g) || []).length + (readFileSync("src/build.jsx", "utf8").match(/data-view-heading/g) || []).length;
   assert.ok(headings >= 6, `Find, Build, Positions, Watching, Journal and Settings each carry one (found ${headings})`);
   // Round 2: Home is gone (the app opens on Find); Find's own heading is in find.jsx's header.
   assert.doesNotMatch(readFileSync("src/wizard.jsx", "utf8"), /function WizardOpen/, "Home is no longer a screen");
@@ -195,9 +196,12 @@ test("WIRING — App.jsx makes its screens out of this module, and every view ha
 
 test("BUILD FROM A CARD: the back link is the first thing, and it returns to that card", () => {
   const app = readFileSync("src/App.jsx", "utf8");
-  const at = app.indexOf("← Back to the list");
-  assert.ok(at > 0);
-  assert.ok(app.lastIndexOf("{cardOrigin && (", at) > app.lastIndexOf("<div style={{ marginTop: 12 }}>", at) - 400, "it sits at the top of the Build block");
+  // Redesign PR 2: the back link is Build's header row ("‹ UNG", build.jsx), drawn first; from a card it calls
+  // `backToList()`, which returns to that card on its market's page.
+  const build = readFileSync("src/build.jsx", "utf8");
+  const screen = build.slice(build.indexOf("export function BuildScreen("));
+  assert.ok(screen.indexOf("<BuildHeader") > 0 && screen.indexOf("<BuildHeader") < screen.indexOf("<BuildTitle"), "the back link is the first thing");
+  assert.match(app, /if \(buildOrigin && buildOrigin\.kind === "card"\) backToList\(\); else goMarket\(backTk, "strategies"\);/);
   // Redesign PR 1: the cards live on their market's page, so the link returns there, to that card.
   assert.match(app, /scrollToCard\.current = buildOrigin \? buildOrigin\.key : null; goMarket\(/);
   assert.match(app, /if \(\(step !== "find" && step !== "market"\) \|\| ev \|\| !scrollToCard\.current\) return;/, "the market page scrolls back to it");

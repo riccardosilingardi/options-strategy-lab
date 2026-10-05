@@ -154,6 +154,8 @@ const MIGRATED = ["src/ui.jsx", "src/card.jsx", "src/find.jsx", "src/orders.jsx"
   "src/pro.jsx", "src/App.jsx",
   // Redesign PR 1: the market page is written on the atoms and tokens from its first line.
   "src/market.jsx",
+  // Redesign PR 2: Build is written on the atoms and tokens from its first line.
+  "src/build.jsx",
   // Round 2: Saved's rows, moved out of App.jsx.
   "src/saved.jsx"];
 const stripped = (f) => readFileSync(f, "utf8").replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/[^\n]*/g, "$1");

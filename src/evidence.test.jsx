@@ -34,9 +34,13 @@ check("TASK 1 — the bar reads 'N markets · prices Xm ago', the OLDEST, and an
   has(app, "One Refresh for every selected market, quietly");
 });
 
-check("TASK 2 — no EvidenceBar on Find; Build's bar is headed 'About this trade · <TK> <structure>'", () => {
-  has(app, 'tab === "build" && !showSettings && step === "build" && (\n          <EvidenceBar');
-  has(app, "heading={`About this trade · ${ticker}");
+check("TASK 2 — no EvidenceBar on Find; and none on Build since redesign PR 2: 'The market's read ›' opens the market page", () => {
+  // Redesign PR 2 (TASK 5): Build's bar is gone. "Why this market" is the market page's Overview, reached from Build's
+  // "Why this trade" by "The market's read ›"; Market levels and History are in "More on this trade ▾".
+  if (app.includes("<EvidenceBar items={EVIDENCE}")) throw new Error("Build still draws the evidence bar");
+  has(app, 'onMarketRead: () => goMarket(ticker, "overview"), readLabel: MARKET_READ_LINK');
+  has(app, '<Section label="Market levels">{levelsView(chain, oiGrid, spot, lv)}</Section>');
+  has(app, "{historyNode}");
   const h = renderToStaticMarkup(<EvidenceBar items={[{ id: "why", label: "Why this market" }]} heading="About this trade · CORN Bull Call Spread" />);
   has(h, "About this trade · CORN Bull Call Spread");
   // A card's badge and its fold open evidence for THE CARD's market, and remember the card for Back.

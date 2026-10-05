@@ -25,6 +25,7 @@ import { exactExtremes } from "./rules.js";
 import { scaleStrategy } from "./pro.jsx";
 import { rowFigure } from "./rows.js";
 import { StrategyCard } from "./market.jsx";
+import { NumbersSection } from "./build.jsx";
 import { FIND_ORDERS, CARD_LABELS, futureFigures, pastFigures, futureTile, pastTileText } from "./rules.js";
 // Repo-relative: JSX tests are bundled to CJS (CLAUDE.md, "How to test").
 import { MODEL_BOARD, ungBoards } from "../scripts/crossing-fixtures.jsx";
@@ -331,6 +332,21 @@ check("ROUND 2: THE COMPACT CARD AND THE FULL CARD PRINT THE SAME SIX FIGURES, f
   if (!valueOf(compact, CARD_LABELS.future).includes(fut) || !valueOf(full, CARD_LABELS.future).includes(fut)) throw new Error(`future ${fut}`);
   const past = pastTileText(pastFigures(list.bt, list.aFill, n)).replace(/&/g, "&amp;");
   if (!valueOf(compact, CARD_LABELS.past).includes(past) || !valueOf(full, CARD_LABELS.past).includes(past)) throw new Error(`past ${past}`);
+});
+
+check("REDESIGN PR 2: BUILD'S NUMBERS SECTION PRINTS THE CARD'S FIGURES — max profit, max loss, chance, future avg, past yrs", () => {
+  const n = 3;
+  // Build reads `buildFigures()` at `AE`; the card reads `listCardFigures()` at `aFill` — the same analysis (held above).
+  const html = renderToStaticMarkup(<NumbersSection figures={sizedFigures(build.AE, n)} rr={build.rr} pop={build.chance ? build.chance.pop : null}
+    breakevens={build.AE.breakevens} future={futureFigures(build.chance, build.AE, n, EXP)} past={pastFigures(build.bt, build.AE, n)} delta="x" theta="y" />);
+  const card = sizedFigures(list.aFill, n);
+  const has = (x, what) => { if (!html.includes(x)) throw new Error(`${what}: ${x} not on Build`); };
+  has(money(card.profit), "max profit"); has(money(card.risk), "max loss");
+  has(chanceText(list.pop), "chance");
+  has(futureTile(futureFigures(list.mc, list.aFill, n, EXP)).value, "future avg");
+  const pf = pastFigures(list.bt, list.aFill, n);
+  if (pf) has(`${pf.wins} of ${pf.n}`, "past yrs");
+  has(list.rr.toFixed(2), "return on risk");
 });
 
 console.log(`\n${ok.length} passed, ${bad.length} failed\n`);

@@ -264,6 +264,28 @@ export const COPY = {
   // The chart library's own method (lightweight-charts), reached through PriceChart on the market page: it draws a
   // line, it puts no sentence on screen, so it scores zero BY NAME (as `setText` does).
   createPriceLine: () => "",
+  // Redesign PR 2: Build's own generators, on a CORN 17/18 put credit spread for $0.25 (the mockup's trade).
+  tradeTakeaway: () => {
+    const samples = [];
+    for (let i = 0; i <= 240; i++) { const x = 12.6 + (i / 240) * 10.8; samples.push({ s: x, pnl: x >= 18 ? 25 : x <= 17 ? -75 : 25 - (18 - x) * 100 }); }
+    return R.tradeTakeaway({ samples, lo: 12.6, hi: 23.4, maxProfit: 25, maxLoss: -75, breakevens: [17.75], bands: [], unbounded: false },
+      { ticker: "CORN", expKey: "2026-11-20", n: 1, credit: true, legs: [{ strike: 18 }, { strike: 17 }] });
+  },
+  buildSubLine: () => R.buildSubLine({ ticker: "CORN", expKey: "2026-11-20", dte: 47, n: 1 }),
+  deltaSharesText: () => R.deltaSharesText(0.35, 1),
+  thetaDayText: () => R.thetaDayText(3, 1),
+  reasonRuleText: () => R.reasonRuleText(10, null),
+  orderBookLine: () => R.orderBookLine({ mid: 0.25, natural: 0.15 }),
+  capLabel: () => R.capLabel({ perTrade: 500, tradingCapital: 10000 }),
+  exitsPill: () => R.exitsPill("CORN"),
+  sendLabel: () => R.sendLabel({ net: -0.25, n: 1 }),
+  timeExitDay: () => R.timeExitDay("2026-11-20"),
+  expiryShort: () => R.expiryShort("2026-11-20"),
+  oiCheckText: () => R.oiCheckText(10),
+  reviewLimitLine: () => R.reviewLimitLine({ net: -0.25, tif: "day", n: 1 }),
+  sentOrderLine: () => R.sentOrderLine({ net: -0.25, tif: "day", filled: 0, qty: 1 }),
+  sentFiledText: () => R.sentFiledText("J-0004", false),
+  reviewLegWords: () => R.reviewLegWords({ side: -1, qty: 1, strike: 18, type: "put" }, 1).join(" "),
 };
 
 export const words = (s) => String(s || "").trim().split(/\s+/).filter(Boolean).length;
@@ -326,7 +348,8 @@ export function stepBlock(src, id) {
    stripping is applied to both sides of every comparison. */
 // `Info` (PR #47): the ⓘ renders its text only while tapped open.
 // `Sheet` (redesign PR 1): Find's chip sheets and the market page's ticker sheet open on a tap, like a DeskSheet.
-const FOLDED = ["Fold", "BuildWarnings", "DeskSheet", "EvidenceOverlay", "Info", "Sheet"];
+// `Reveal` (redesign PR 2): Build's "Why this trade" and "More on this trade ▾" render their children only while open.
+const FOLDED = ["Fold", "BuildWarnings", "DeskSheet", "EvidenceOverlay", "Info", "Sheet", "Reveal"];
 
 export function atRest(src) {
   let out = src;
@@ -471,8 +494,8 @@ const UI_FILES = ["App.jsx", "pro.jsx", "steps.jsx", "why.jsx", "visuals.jsx", "
   // PR #47: the Positions segment's own files. `positionCard.jsx` was never read before, so the card's words were not
   // in the old 209; they are now, which makes the number larger AND honest.
   "positions.jsx", "positionCard.jsx", "navBar.jsx",
-  // Redesign PR 1: the market page.
-  "market.jsx"];
+  // Redesign PR 1: the market page. Redesign PR 2: Build's own file.
+  "market.jsx", "build.jsx"];
 
 const sourcesOnce = (() => {
   let cache = null;
