@@ -11,6 +11,7 @@ import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { readFileSync } from "node:fs";
 import { T } from "../src/theme.js";
+import { sans } from "../src/ui.jsx";
 import { FindHeader, FindStep } from "../src/find.jsx";
 import { SavedList } from "../src/saved.jsx";
 import { MarketPage } from "../src/market.jsx";
@@ -19,7 +20,7 @@ import { listCardFigures } from "../src/App.jsx";
 import { normaliseAlpacaChain } from "../src/chain.js";
 import { findCards } from "./find-fixtures.jsx";
 import { findOrderCompare } from "../src/signals.js";
-import { requestOf, RULES, findStatusText } from "../src/rules.js";
+import { requestOf, RULES, findStatusText, seasonalProvenance } from "../src/rules.js";
 import { wouldHaveDone } from "../src/journal.js";
 
 const SENTS = [{ id: "verybear", label: "Very Bear", icon: "↓↓" }, { id: "bear", label: "Bear", icon: "↓" },
@@ -55,13 +56,13 @@ const BARS = (() => {
   return out.map((b) => ({ ...b, open: b.open * k, high: b.high * k, low: b.low * k, close: b.close * k }));
 })();
 window.fetch = async (url) => {
-  if (String(url).startsWith("/api/bars")) return new Response(JSON.stringify({ bars: BARS }), { status: 200, headers: { "content-type": "application/json" } });
+  if (String(url).startsWith("/api/bars")) return new Response(JSON.stringify({ bars: BARS, source: "fixture" }), { status: 200, headers: { "content-type": "application/json" } });
   return new Response("{}", { status: 503 });
 };
 
 const screen = (location.hash || "#find").slice(1);
 const Shell = ({ children, place = "find" }) => (
-  <div style={{ minHeight: "100vh", background: T.bg, color: T.body }}>
+  <div style={{ minHeight: "100vh", background: T.bg, color: T.body, ...sans }}>
     <div style={{ maxWidth: 1720, margin: "0 auto", padding: `0 0 ${FIND_LIST_END}px` }}>{children}</div>
     <BottomBar current={place} badge={1} badgeLabel="1 of your 1 position needs a decision today." />
   </div>
@@ -105,7 +106,7 @@ function Market({ tab: tab0 }) {
         items={UNG} allItems={SORTED} boards={GEN.boards} request={requestOf({}, LIMITS)} findDir="signals" sentiments={SENTS}
         findOrder="ev" newsItems={[{ title: "Natural gas storage build beats estimates as mild weather lingers", date: "2026-10-03T14:00:00Z", src: "Reuters", link: "https://example.com" }]}
         newsState={{ items: [] }} now={NOW} timeZone="Europe/Rome" ago={() => "17h ago"}
-        cardFigures={listCardFigures} quoteOf={QUOTE} liqFloor={10} sheet={sheet} onSheet={setSheet}
+        cardFigures={listCardFigures} quoteOf={QUOTE} seasonal={seasonalProvenance(null, "fixture")} liqFloor={10} sheet={sheet} onSheet={setSheet}
         compareProps={{ compare: [], onTickCompare: () => {}, onClearCompare: () => {}, onToggleCompare: () => {}, onTakeToBuild: () => {} }}
         initialTray={screen === "chain" ? { expKey: UNG[0].expKey, legs: twoLegs(), note: null } : null} />
     </Shell>
@@ -124,6 +125,7 @@ const VIEWS = {
   saved: () => <FindScreen seg="saved" />,
   strategies: () => <Market tab="strategies" />,
   overview: () => <Market tab="overview" />,
+  "overview-copilot": () => <Market tab="overview" />,
   chain: () => <Market tab="chain" />,
 };
 document.body.style.margin = "0";

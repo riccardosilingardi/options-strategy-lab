@@ -161,16 +161,18 @@ const page = (over = {}) => renderToStaticMarkup(
     findOrder="ev" newsItems={[]} newsState={over.news || { err: "timeout" }} now={over.now || NOW} timeZone="Europe/Rome"
     cardFigures={listCardFigures} quoteOf={QUOTE} liqFloor={10} compareProps={{ compare: [] }} />);
 
-check("THE HEADER: ticker, name · category, price, the day change, the clock, IV, 'IV rank: collecting', the expected move, ☆", () => {
+check("THE HEADER (round 2's look): back arrow, the switcher (icon, ticker ▾, name · category), ↻, ☆; price, day change, status; IV, IV rank 'collecting', move", () => {
   const h = page();
-  has(h, "UNG ▼"); has(h, "US Natural Gas · Energy"); has(h, "$13.24");
-  has(h, "since the Fri 2 Oct close");
+  has(h, 'aria-label="Back to Find"'); hasNot(h, ">‹ Find<");
+  has(h, ">UNG</span>"); has(h, ">▾</span>"); has(h, "US Natural Gas · Energy"); has(h, "$13.24");
+  has(h, "since the Fri 2 Oct close");                     // the day change's spoken sentence (dayChangeText)
   has(h, "Market closed · opens Mon 15:30 your time");
-  has(h, "IV rank: collecting, 7 of 20 days");
-  has(h, "Expected move to ");
+  has(h, ">IV rank<"); has(h, "collecting 7 of 20"); has(h, "IV rank: collecting, 7 of 20 days");
+  has(h, ">Move to ");
   has(h, 'aria-label="Save this market&#x27;s first card"');
   has(h, NEWS_NOT_READ);
-  has(h, ">‹ Find<");
+  // The three tabs are underlined tabs, not a segmented control.
+  has(h, "border-bottom:3px solid");
 });
 
 check("THE EVENT LINE (round 2, dates read 5 Oct 2026): UNG at 4 Oct names EIA storage Thu 8 Oct in the user's time; the placeholder only after the table's end", () => {
@@ -186,10 +188,15 @@ check("STRATEGIES: the signals' family first, then Neutral 'always listed'; the 
   const h = page();
   has(h, "▲ BULL · WHAT THE SIGNALS SUGGEST"); has(h, "≈ NEUTRAL · ALWAYS LISTED");
   if (h.indexOf("WHAT THE SIGNALS SUGGEST") > h.indexOf("ALWAYS LISTED")) throw new Error("Neutral came first");
+  // Round 2: the whole line is the block's spoken name; on screen the arithmetic is set in mono, the rest beneath.
   has(h, "Signals: +46 × 84 ÷ 100 = 38.6 → Bull · sorted by Future avg · built on");
+  has(h, "Neutral cards are always listed. Order: Future avg.");
+  has(h, ">The market&#x27;s read ›<");
   if (!/with the signals, \d of 4|against the signals, \d of 4|direction-neutral/.test(h)) throw new Error("no stance line");
-  for (const a of [">Compare<", ">Open in chain<", ">Build ›<"]) has(h, a);
+  for (const a of ['aria-label="Compare"', ">Open in chain<", ">Build ›<", ">Details ▾<"]) has(h, a);
+  // Every card is the COMPACT card at rest; the full card waits behind Details.
   if (count(h, "data-card-key") !== UNG.length) throw new Error("not every UNG card is on its page");
+  if (count(h, "data-compact") !== UNG.length) throw new Error("not every card is compact");
   // A fixed direction: one group, the user's, and it says so.
   const fixed = page({ dir: "bear" });
   has(fixed, "YOUR DIRECTION"); hasNot(fixed, "WHAT THE SIGNALS SUGGEST");
@@ -200,7 +207,7 @@ check("CHAIN: expiries with days left, under 30d dashed and not buildable; OI ·
   const h = renderToStaticMarkup(<ChainTab tk="UNG" chain={CHAIN} clock={{ is_open: false }} tray={{ expKey: UNG[0].expKey, legs, note: null }}
     setTray={() => {}} cardFigures={listCardFigures} quoteOf={QUOTE} iv={0.48} liqFloor={10} onBuildLegs={() => {}} />);
   has(h, "Call Bid"); has(h, "Strike"); has(h, "Put Ask");
-  has(h, "close</div>");                                  // the spot line: "13.24 close"
+  has(h, "13.24 close</span>");                           // the spot line: "13.24 close"
   const under = CHAIN.expirations.find((e) => CHAIN.byExp[e].dte < RULES.minEntryDTE);
   if (under) { has(h, "under 30d"); has(h, "cannot be built from"); }
   has(h, "data-chain-tray"); has(h, ">Build ›<"); has(h, ">Clear<");

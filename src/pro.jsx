@@ -26,7 +26,7 @@ import { DEMO, DEMO_TOOLTIP } from "./demo.js";
 import { reduceRatios, orderQty, mlegLimitPrice, limitWords, orderLimitWords, limitKind, signedLimitFor, orderBody, orderPreviewLines, orderOutcome, alpacaErrorText, cancelOutcome, cancelWaiting } from "./order.js";
 import { hasOpenInterest, sourceNote, openInterestNote, fetchChain } from "./chain.js";
 import { CloseChoice } from "./orders.jsx";
-import { Btn, Note, Info, Panel, Label, Stat, mono, MONO_STACK } from "./ui.jsx";
+import { Btn, Note, Info, Panel, Label, Stat, mono, sans, MONO_STACK, TAP } from "./ui.jsx";
 import { TYPE } from "./theme.js";
 import { closeSummaryLine } from "./orderRow.js";
 import { marketClockLine } from "./clock.js";
@@ -1408,7 +1408,10 @@ export function buildContext(ctx) {
       room and losing the connection.
 ==================================================================== */
 
-export function TaCopilot({ ticker, bars, structure, convo, setConvo, onAnalysis }) {
+export function TaCopilot({ ticker, bars, structure, convo, setConvo, onAnalysis, look = null }) {
+  // ROUND 2: on the market page (`look="market"`) the questions are 44px bordered buttons and the one asked last has a
+  // blue border (the mockup). Build's copilot keeps its look (PR 2).
+  const [askedId, setAskedId] = useState(null);
   const { msgs = [], busy = false, err = null, partial = "" } = convo || {};
   const [input, setInput] = useState("");
   const ready = Array.isArray(bars) && bars.length > 0;
@@ -1461,9 +1464,14 @@ export function TaCopilot({ ticker, bars, structure, convo, setConvo, onAnalysis
       ) : (
         <>
           <div style={{ display: "flex", gap: 5, marginTop: 8, flexWrap: "wrap" }}>
-            {TA_QUESTIONS.map((q) => (
+            {TA_QUESTIONS.map((q) => (look === "market" ? (
+              <button key={q.id} disabled={busy} onClick={() => { setAskedId(q.id); send(q.ask, q.label); }} aria-pressed={askedId === q.id}
+                style={{ ...sans, minHeight: TAP, padding: "8px 12px", borderRadius: 10, fontSize: FS.sm, textAlign: "left", lineHeight: LH.tight,
+                  background: "transparent", color: T.ink, cursor: busy ? "not-allowed" : "pointer", opacity: busy ? 0.5 : 1,
+                  border: `1px solid ${askedId === q.id ? T.blue : T.field}` }}>{q.label}</button>
+            ) : (
               <Btn key={q.id} small ghost color={T.blue} disabled={busy} onClick={() => send(q.ask, q.label)}>{q.label}</Btn>
-            ))}
+            )))}
           </div>
           <div style={{ marginTop: 10, display: "grid", gap: 9 }}>
             {msgs.length === 0 && !busy && (

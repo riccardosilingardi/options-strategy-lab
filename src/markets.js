@@ -28,6 +28,9 @@ export const EVENT_CALENDARS = Object.freeze(["grains", "natgas", "petroleum", "
 
 /** Find's groups, in the order they are drawn. A market with no category (SPY) is never offered. */
 export const CATEGORIES = Object.freeze(["Grains", "Energy", "Metals"]);
+/** Each category's icon on the market page (round 2): a lucide-react icon NAME, so this file stays plain JS (the
+ *  Netlify functions import it); market.jsx maps the name to the icon. */
+export const CATEGORY_ICONS = Object.freeze({ Grains: "Wheat", Energy: "Flame", Metals: "Gem" });
 
 /* WHY WEATHER DOES NOT APPLY — sentences, not thresholds. They used to be `WEATHER_NA` in signals.js. */
 const NO_WEATHER = {

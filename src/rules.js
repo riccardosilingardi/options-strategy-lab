@@ -1377,6 +1377,43 @@ export const sizedHeading = (n) => (n == null ? "PER CONTRACT" : `FOR ${n} CONTR
  *  "FUTURE (MONTE CARLO)" and the historical replay "PAST YRS (BACKTEST)". */
 export const CARD_LABELS = Object.freeze({ risk: "YOU RISK", profit: "MAX PROFIT", chance: "CHANCE", rr: "RETURN ON RISK",
   future: "FUTURE (MONTE CARLO)", past: "PAST YRS (BACKTEST)" });
+/** What each of the card's four figures means, one tap behind its label on the compact card (round 2). */
+export const FIGURE_DEFINITIONS = Object.freeze({
+  risk: "The most this trade can lose, for the size your budget buys.",
+  profit: "The most it can make by expiry, for that size; \"no ceiling\" when there is none.",
+  chance: "The chance it ends in profit at expiry, from the simulated futures.",
+  rr: "The maximum profit divided by the risk.",
+});
+/** The market page's header labels (round 2), each with its definition one tap away. */
+export const HEADER_DEFINITIONS = Object.freeze({
+  iv: "Implied volatility of the at-the-money option: how much movement the option prices carry, per year.",
+  ivRank: "Where today's IV sits against its own past year: 0 the cheapest, 100 the dearest. It needs 20 days collected.",
+  move: "One standard deviation to the expiry shown: price × IV × √(days ÷ 365). About two times in three the price ends inside it.",
+});
+/** "collecting 7 of 20", or the rank — the header's short IV rank value (round 2; `ivRankText()` is the sentence). */
+export const ivRankShort = (rank, days, need = 20) => (rank == null ? `collecting ${days} of ${need}` : String(rank));
+/** "▲ +0.21  +1.15%" — the day change's figures (the sentence `dayChangeText()` is its spoken name). */
+export const dayChangeShort = (ch) => (!ch ? null
+  : `${ch.change >= 0 ? "▲" : "▼"} ${ch.change >= 0 ? "+" : "−"}${Math.abs(ch.change).toFixed(2)}  ${ch.pct >= 0 ? "+" : "−"}${Math.abs(ch.pct * 100).toFixed(2)}%`);
+export const moveLabel = (expKey) => `Move to ${(expiryWords(expKey) || expKey || "").replace(/ \d{4}$/, "")}`;
+/**
+ * WHAT THE TRADE NEEDS AT EXPIRY (round 2, the compact card's first line under the figures): read off the payoff's own
+ * profit zone (`payoffBands()`), a combination property. One profit zone only; anything else says nothing.
+ * "Needs UNG below 12.85 at expiry", "above", "between 12.40 and 14.10".
+ */
+export function needsText(b, tk) {
+  if (!b || !Array.isArray(b.bands)) return null;
+  const up = b.bands.filter((z) => z.sign > 0);
+  if (up.length !== 1) return null;
+  const z = up[0];
+  const f = (v) => Number(v).toFixed(2);
+  const atLo = z.lo <= b.lo + 1e-9, atHi = z.hi >= b.hi - 1e-9;
+  if (atLo && atHi) return null;
+  if (atLo) return `Needs ${tk} below ${f(z.hi)} at expiry`;
+  if (atHi) return `Needs ${tk} above ${f(z.lo)} at expiry`;
+  return `Needs ${tk} between ${f(z.lo)} and ${f(z.hi)} at expiry`;
+}
+export const DETAILS_FOLD = "Details";
 /** Build's backtest panel names its average with the same words (PR #49): "PAST YRS AVG". */
 export const PAST_AVG_LABEL = "PAST YRS AVG";
 
@@ -1563,16 +1600,32 @@ export function groupHeadText(dir, kind) {
   if (kind === "neutral") return `${tag} · ALWAYS LISTED`;
   return `${tag} · ${kind === "yours" ? "YOUR DIRECTION" : "WHAT THE SIGNALS SUGGEST"}`;
 }
+/** What the signals say (round 2 splits it so the arithmetic can be set in mono): { lead, math, result }. */
+export function signalsParts({ sd = null, fixedLabel = null } = {}) {
+  if (fixedLabel) return { lead: `Direction: ${fixedLabel}, your choice`, math: null, result: null };
+  if (sd && Number.isFinite(sd.s) && sd.fused) {
+    return { lead: "Signals:", math: `${sd.fused.score >= 0 ? "+" : "−"}${Math.abs(sd.fused.score)} × ${sd.fused.confidence} ÷ 100 = ${sd.s.toFixed(1)}`,
+      result: `→ ${(DIRECTION_TAGS[sd.dir] || "").replace(/^\S+ /, "")}` };
+  }
+  return { lead: "Signals: still being read", math: null, result: null };
+}
 /** The line above the groups: what the signals say, with the arithmetic; the order; the expiry the cards are on. */
 export function strategiesLine({ sd = null, fixedLabel = null, order, expKey = null, dte = null } = {}) {
-  const sig = fixedLabel ? `Direction: ${fixedLabel}, your choice`
-    : sd && Number.isFinite(sd.s) && sd.fused
-      ? `Signals: ${sd.fused.score >= 0 ? "+" : "−"}${Math.abs(sd.fused.score)} × ${sd.fused.confidence} ÷ 100 = ${sd.s.toFixed(1)} → ${(DIRECTION_TAGS[sd.dir] || "").replace(/^\S+ /, "")}`
-      : "Signals: still being read";
+  const p = signalsParts({ sd, fixedLabel });
+  const sig = [p.lead, p.math, p.result].filter(Boolean).join(" ");
   const ord = `sorted by ${(FIND_ORDERS.find((o) => o.id === order) || FIND_ORDERS[0]).label}`;
   const on = expKey ? `built on ${expiryWords(expKey) || expKey}${Number.isFinite(dte) ? ` (${Math.round(dte)} days)` : ""}` : null;
   return [sig, ord, on].filter(Boolean).join(" · ");
 }
+/** Strategies' second line (round 2): "Neutral cards are always listed. Order: Future avg. Expiry 20 Nov · 40d." */
+export function strategiesNote({ order, expKey = null, dte = null, fixed = false } = {}) {
+  const ord = `Order: ${(FIND_ORDERS.find((o) => o.id === order) || FIND_ORDERS[0]).label}.`;
+  const exp = expKey ? `Expiry ${(expiryWords(expKey) || expKey).replace(/ \d{4}$/, "")}${Number.isFinite(dte) ? ` · ${Math.round(dte)}d` : ""}.` : null;
+  return [fixed ? null : "Neutral cards are always listed.", ord, exp].filter(Boolean).join(" ");
+}
+export const MARKET_READ_LINK = "The market's read ›";
+export const BACK_TO_FIND_ARIA = "Back to Find";
+export const refreshMarketAria = (tk) => `Refresh ${tk} prices`;
 /** The stance line (`signalStance()` in signals.js counts; this says it). */
 export function stanceText(st) {
   if (!st) return null;
@@ -1634,8 +1687,10 @@ export const trayEmptyText = () => "Tap an ask to buy one, a bid to sell one. Ta
 /** The event line (redesign PR 1, TASK 4): "WASDE · Fri 9 Oct, 18:00 your time · in 5 days · before 20 Nov".
  *  Round 2: `dateOnly` (the publisher gives the day, not the hour: "FOMC · decision Wed 28 Oct · in 24 days") and
  *  `publisher` (the holiday note names who may move it); without them the line reads exactly as before. */
+/** "today", "tomorrow", "in 5 days". */
+export const inDaysText = (days) => (days <= 0 ? "today" : days === 1 ? "tomorrow" : `in ${days} days`);
 export function eventLineText({ name, when, days, beforeDay = null, holiday = false, dateOnly = false, publisher = null }) {
-  const inDays = days <= 0 ? "today" : days === 1 ? "tomorrow" : `in ${days} days`;
+  const inDays = inDaysText(days);
   return [name, dateOnly ? when : `${when} your time`, inDays, beforeDay ? `before ${beforeDay}` : null,
     holiday ? holidayWeekNote(publisher) : null].filter(Boolean).join(" · ");
 }

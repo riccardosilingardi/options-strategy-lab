@@ -245,6 +245,11 @@ export const COPY = {
   stanceText: () => R.stanceText({ kind: "with", n: 3, total: 4, against: 0 }),
   eventLineText: () => R.eventLineText({ name: "WASDE", when: "Fri 9 Oct, 18:00", days: 5, beforeDay: "20 Nov" }),
   chainEventText: () => R.chainEventText(true),
+  // Round 2: the event box's parts, the compact card's "needs" line, Strategies' second line.
+  holidayWeekNote: () => R.holidayWeekNote("EIA"),
+  inDaysText: () => R.inDaysText(5),
+  needsText: () => R.needsText({ lo: 10, hi: 20, bands: [{ lo: 10, hi: 13.73, sign: -1 }, { lo: 13.73, hi: 20, sign: 1 }] }, "UNG"),
+  strategiesNote: () => R.strategiesNote({ order: "ev", expKey: "2026-11-20", dte: 47 }),
   noOpenInterestText: () => R.noOpenInterestText("Alpaca (indicative)"),
   underEntryText: () => R.underEntryText(),
   spotLineText: () => R.spotLineText(18.42, "close"),
@@ -339,8 +344,9 @@ export function atRest(src) {
   // sees the tags in the caller's text, outside any `<Fold>`, and would score a tap-away panel as words at rest; the
   // prop's whole value is stripped, by brace matching, because the JSX inside nests deeper than a regex can follow.
   // PR #47: `guardian={…}` is the same case — the Positions card renders it inside its own closed fold.
+  // Round 2: `details={…}` too — the compact card renders it only behind its "Details ▾".
   for (;;) {
-    const at = Math.max(out.indexOf("foldedNode={"), out.indexOf("guardian={"));
+    const at = Math.max(out.indexOf("foldedNode={"), out.indexOf("guardian={"), out.indexOf("details={<"));
     if (at < 0) break;
     let depth = 0, i = at + out.slice(at).indexOf("=");
     for (; i < out.length; i++) {

@@ -178,7 +178,15 @@ test("MEASURED: the three screens, and the table in the PRD is this number", () 
      "market" is new: 566 (245 typed + 321 generated), an upper bound that counts all three tabs (one is on screen),
      the chart's and the copilot's own words (PriceChart, TaCopilot, unchanged), the Why sheet's content and the
      chain's tray. Its ceiling is that 566, so the next word fails the build. */
-  const CEILING = { find: 332, market: 566, build: 267, positions: 217 };
+  /* >>> ROUND 2 (owner's mockups, 5 Oct 2026): THE LOOK, NO NEW FUNCTION. <<< Measured by this counter: find 332 → 327
+     (the desk's count line and Saved's heading left Find's screen; Find's header moved into find.jsx). market 566 → 587:
+     the event box says its parts ("in 5 days" `inDaysText()` 3, the holiday note `holidayWeekNote()` 5), the compact
+     card says what the trade needs (`needsText()` 7) and Strategies its second line (`strategiesNote()` 10); the expected
+     move's sentence became a label and a figure. build 267 → 286, and Build's screen did not change: the counter expands
+     `CandidateCard` in full, so the compact layout's four figure sites (`chanceText`, `returnText`, `futureTile`,
+     `pastTileText`, 19 words) are scored on Build too — the documented upper bound (every branch counted), which the
+     ROADMAP's counter fix will lower. The ceilings are those numbers, so the next word fails the build. */
+  const CEILING = { find: 332, market: 587, build: 286, positions: 217 };
   /* >>> PR #46: ONE ORDERS LIST. <<< The record-based "WORKING AT THE BROKER" panel (its paragraph about what a
      working order is, the stale-DAY warning, the per-row sentences) left Positions; the one list lives in
      `orders.jsx`, which the counter now reads. Measured: positions 304 -> 209 (4 typed + 205 generated, 14 sites).

@@ -31,7 +31,8 @@ import { RULES, money, chanceText, returnText, NO_CEILING,
   requestAmountLabel, amountNote, freeAmountNote, chanceAskLabel, chanceAskText, rewardAskLabel, controlsFoldNote,
   targetPriceOf, stopSigns, sizedHeading, CARD_LABELS,
   meetsRequest, resultsLine, missReasonLine, nearestRelaxation, fillPriceHeading,
-  futureTile, pastTileText, futureInfo, pastInfo, HIDE_MISSES_TOGGLE } from "./rules.js";
+  futureTile, pastTileText, futureInfo, pastInfo, HIDE_MISSES_TOGGLE,
+  FIGURE_DEFINITIONS, DETAILS_FOLD } from "./rules.js";
 
 const FS = TYPE.size, FW = TYPE.weight, LH = TYPE.line;
 
@@ -255,7 +256,15 @@ export function CandidateCard({
   picture = null, misses = [], actions = null, badge = null, direction = null, flags = [], signs = null,
   future = null, past = null, ticker = null, sortedBy = null, placeAtRest = null,
   cardKey = null, more = null, style,
+  // ROUND 2 (owner's mockup "Market · Strategies"): the COMPACT layout of this same card, on the market page. It prints
+  // the same six figures (figures.test.jsx) and moves everything else behind "Details ▾" (`details`), never deleted.
+  compact = false, needs = null, stanceKind = null, disagree = null, details = null, thumb = null,
 }) {
+  if (compact) {
+    return <CompactCard name={name} legs={legs} rr={rr} pop={pop} figures={figures} picture={picture} misses={misses}
+      actions={actions} signs={signs || stopSigns({ flags })} future={future} past={past} sortedBy={sortedBy} placeAtRest={placeAtRest}
+      cardKey={cardKey} needs={needs} stance={direction} stanceKind={stanceKind} disagree={disagree} details={details} thumb={thumb} style={style} />;
+  }
   const f = figures || { n: null, risk: null, profit: null, unbounded: false, perRisk: null, perProfit: null };
   const sized = f.n != null;
   // A CARD THAT MISSES WHAT YOU ASKED STAYS IN ITS PLACE, QUIETER (PR #49, TASK 1): its reason first, its name and
@@ -315,6 +324,92 @@ export function CandidateCard({
         </Fold>
       )}
       {actions && <div style={{ marginTop: 8 }}>{actions}</div>}
+    </article>
+  );
+}
+
+/* ====================================================================
+   THE COMPACT CARD (round 2, owner's mockup "Market · Strategies", ≤ 280px at 390px wide). The same card: the name and
+   the legs with the 72×40 picture; the four figures in one row (each label opens its definition); what the trade needs
+   and where it stands against the signals; one mono line for the future and the past; the disagree sentence; the
+   actions; and "Details ▾" with the full card as it was — gauge, picture row, sizing, per $100, the chance's make-up,
+   the per-contract figures. Stop signs and the "Future avg + signal" sum stay at rest (CLAUDE.md).
+==================================================================== */
+const STANCE_COLOR = { with: T.green, against: T.amber, neutral: T.mut, quiet: T.mut };
+function CompactCard({ name, legs, rr, pop, figures, picture, misses, actions, signs, future, past, sortedBy, placeAtRest, cardKey,
+  needs, stance, stanceKind, disagree, details, thumb, style }) {
+  const [def, setDef] = React.useState(null);
+  const [more, setMore] = React.useState(false);
+  const moreId = React.useId();
+  const f = figures || { risk: null, profit: null, unbounded: false };
+  const muted = misses.length > 0;
+  const ft = futureTile(future);
+  const ring = (id) => (sortedBy === id ? { outline: `2px solid ${T.blue}`, outlineOffset: 2, borderRadius: 6 } : null);
+  const cells = [
+    ["risk", CARD_LABELS.risk, f.risk == null ? "—" : money(f.risk)],
+    ["profit", CARD_LABELS.profit, f.unbounded ? NO_CEILING : f.profit == null ? "—" : money(f.profit)],
+    ["chance", CARD_LABELS.chance, chanceText(pop)],
+    ["rr", CARD_LABELS.rr, rr == null ? "—" : returnText(rr)],
+  ];
+  return (
+    <article data-card-key={cardKey || undefined} data-miss={muted ? "true" : undefined} data-compact aria-label={name}
+      style={{ background: T.panel, border: `1px ${muted ? "dashed" : "solid"} ${T.line}`, borderRadius: 12, padding: "12px 14px",
+        display: "flex", flexDirection: "column", gap: 10, minWidth: 0, ...style }}>
+      {muted && <div style={{ marginTop: -4 }}><MissLine misses={misses} /></div>}
+      <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ ...sans, fontSize: FS.md, fontWeight: FW.bold, lineHeight: LH.tight, color: muted ? T.mut : T.ink }}>{name}</div>
+          <div style={{ ...mono, fontSize: FS.xs, lineHeight: LH.body, color: T.mut, marginTop: 2, overflowWrap: "anywhere" }}>{legs}</div>
+        </div>
+        {/* The 72×40 picture is handed in (`thumb`): the full card's picture row is the gauge and the unified picture. */}
+        {thumb && <span aria-hidden="true" style={{ flex: "0 0 72px", width: 72, height: 40, borderRadius: 4, overflow: "hidden", opacity: muted ? 0.35 : 1 }}>
+          {thumb}
+        </span>}
+      </div>
+      <StopSigns signs={signs} style={{ marginTop: 0 }} />
+      <div>
+        {/* Four columns sized to their names, spread across the card: equal quarters would fold RETURN ON RISK onto two lines at 390px. */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, auto)", justifyContent: "space-between", gap: 6 }}>
+          {cells.map(([id, k, v]) => (
+            <div key={id} data-tile={k} data-sorted={sortedBy === id ? "true" : undefined} style={{ minWidth: 0, ...ring(id) }}>
+              <button onClick={() => setDef((d) => (d === id ? null : id))} aria-expanded={def === id}
+                style={{ ...sans, display: "block", width: "100%", textAlign: "left", padding: 0, background: "transparent", border: "none",
+                  cursor: "pointer", fontSize: FS.xs, lineHeight: LH.tight, color: T.mut, minHeight: 18, whiteSpace: "nowrap" }}>
+                <span style={{ textDecoration: "underline dotted", textUnderlineOffset: 3 }}>{k}</span>
+              </button>
+              <div style={{ ...mono, fontSize: FS.md, fontWeight: FW.bold, lineHeight: LH.tight, color: muted ? T.dim : T.ink,
+                fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{v}</div>
+            </div>
+          ))}
+        </div>
+        {def && <div role="note" style={{ ...sans, fontSize: FS.xs, lineHeight: LH.body, color: T.body, marginTop: 6 }}>{FIGURE_DEFINITIONS[def]}</div>}
+      </div>
+      {(needs || stance) && (
+        <div style={{ ...sans, fontSize: FS.xs, lineHeight: LH.tight, color: muted ? T.mut : (STANCE_COLOR[stanceKind] || T.mut) }}>
+          {[needs, stance].filter(Boolean).join(" · ")}
+        </div>
+      )}
+      <div style={{ ...mono, fontSize: FS.xs, lineHeight: LH.body, color: T.mut, display: "flex", flexWrap: "wrap", columnGap: 6 }}>
+        {/* The two figures are the FUTURE and PAST tiles' own values (`futureTile()`, `pastTileText()`), so a row, this line
+            and the full card print one figure (figures.test.jsx). */}
+        <span data-tile={CARD_LABELS.future} data-sorted={sortedBy === "future" ? "true" : undefined} style={{ whiteSpace: "nowrap", ...ring("future") }}>
+          FUTURE avg <b style={{ color: muted ? T.dim : T.ink }}>{ft.value}</b></span>
+        <span aria-hidden="true">·</span>
+        <span data-tile={CARD_LABELS.past} data-sorted={sortedBy === "past" ? "true" : undefined} style={{ whiteSpace: "nowrap", ...ring("past") }}>
+          PAST YRS <b style={{ color: muted ? T.dim : T.ink }}>{pastTileText(past)}</b></span>
+      </div>
+      {placeAtRest && <div data-place style={{ ...mono, fontSize: FS.xs, fontWeight: FW.bold, lineHeight: LH.body, color: muted ? T.mut : T.blue }}>{placeAtRest}</div>}
+      {disagree && <div style={{ ...sans, fontSize: FS.xs, lineHeight: LH.tight, color: T.amber }}>{disagree}</div>}
+      {actions}
+      {details && (
+        <div style={{ marginTop: -6 }}>
+          <button onClick={() => setMore((o) => !o)} aria-expanded={more} aria-controls={moreId}
+            style={{ ...sans, fontSize: FS.xs, color: T.mut, background: "transparent", border: "none", padding: 0, minHeight: 32, cursor: "pointer" }}>
+            {DETAILS_FOLD} {more ? "▴" : "▾"}
+          </button>
+          {more && <div id={moreId}>{details}</div>}
+        </div>
+      )}
     </article>
   );
 }

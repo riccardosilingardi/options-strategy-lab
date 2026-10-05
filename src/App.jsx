@@ -4577,6 +4577,7 @@ export default function OptionsStrategyLab() {
         {tab === "build" && !showSettings && step === "market" && mkt.tk && (
           <MarketPage
             tk={mkt.tk} tab={mkt.tab} onTab={(t) => setMkt((m) => ({ ...m, tab: t }))} onBack={() => goStep("find")}
+            onRefresh={() => refreshChain(mkt.tk)} busy={busy !== null}
             onTicker={(tk) => setMkt((m) => ({ ...m, tk }))}
             chain={chains[mkt.tk] || null} freshLine={findFreshness([mkt.tk], chains, ago).line} bars={barsCache[mkt.tk] || []}
             clock={clock} clockLine={marketClockLine(clock)}

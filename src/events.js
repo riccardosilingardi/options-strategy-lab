@@ -50,11 +50,11 @@ export const CALENDARS = Object.freeze({
   ]),
   natgas: Object.freeze([
     // The 2026 holiday changes could not be read on this page: a holiday week carries the note.
-    Object.freeze({ id: "eiaStorage", name: "EIA storage", what: "gas storage report", publisher: "EIA", major: false, time: "10:30",
+    Object.freeze({ id: "eiaStorage", name: "EIA storage", what: "report", publisher: "EIA", major: false, time: "10:30",
       weekly: Object.freeze({ weekday: WD.thu, through: EVENT_TABLE_END }), source: "https://ir.eia.gov/ngs/ngs.html", read: READ }),
   ]),
   petroleum: Object.freeze([
-    Object.freeze({ id: "eiaPetroleum", name: "EIA petroleum", what: "oil inventories report", publisher: "EIA", major: false, time: "10:30",
+    Object.freeze({ id: "eiaPetroleum", name: "EIA petroleum", what: "report", publisher: "EIA", major: false, time: "10:30",
       weekly: Object.freeze({ weekday: WD.wed, through: EVENT_TABLE_END }), holidaysRead: true,
       moves: Object.freeze([
         Object.freeze({ from: "2026-10-14", to: "2026-10-15", time: "12:00", why: "Columbus Day" }),

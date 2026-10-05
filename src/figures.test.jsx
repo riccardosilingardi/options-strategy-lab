@@ -25,7 +25,7 @@ import { exactExtremes } from "./rules.js";
 import { scaleStrategy } from "./pro.jsx";
 import { rowFigure } from "./rows.js";
 import { StrategyCard } from "./market.jsx";
-import { FIND_ORDERS, CARD_LABELS } from "./rules.js";
+import { FIND_ORDERS, CARD_LABELS, futureFigures, pastFigures, futureTile, pastTileText } from "./rules.js";
 // Repo-relative: JSX tests are bundled to CJS (CLAUDE.md, "How to test").
 import { MODEL_BOARD, ungBoards } from "../scripts/crossing-fixtures.jsx";
 
@@ -300,6 +300,37 @@ check("A ROW'S FIGURE IS THE CARD'S TILE, UNDER ALL FIVE ORDERS — and its risk
     has(tile, 'data-sorted="true"');
     has(tileOf(html, CARD_LABELS.risk), `>${money(fig.risk)}<`);
   }
+});
+
+check("ROUND 2: THE COMPACT CARD AND THE FULL CARD PRINT THE SAME SIX FIGURES, from listCardFigures()", () => {
+  const x = { key: "SOYB|2026-11-20|+1C28,-1C30", tk: TICKER, name: "Bull Call Spread", legs: LEGS, expKey: EXP, dte: DTE, spot: SPOT,
+    sent: "bull", family: "signal", lf: list, flags: [], fused: null, feedBroken: false, noQuoteLegs: 0, touchSize: null,
+    cand: { key: "SOYB|2026-11-20|+1C28,-1C30", pop: list.pop, rr: list.rr } };
+  const size = sizedFree(scaleStrategy(list.aFill, "budget", 300, 300), false);
+  // The compact card, at rest (Details closed: the full card is not in the markup).
+  const compact = renderToStaticMarkup(<StrategyCard x={x} size={size} misses={[]} bars={[]} sortedBy="future" findOrder="ev"
+    saved={false} ticked={false} onSave={() => {}} onTick={() => {}} onBuild={() => {}} onChain={() => {}} badge={null} />);
+  if (!compact.includes("data-compact")) throw new Error("the market page's card is not the compact layout");
+  // The full card, on the same figures — what Details opens, and what Build's top card is.
+  const n = size.ok ? size.n : null;
+  const full = renderToStaticMarkup(<CandidateCard name="x" legs="x" figures={sizedFigures(list.aFill, n)} rr={list.rr} pop={list.pop}
+    future={futureFigures(list.mc, list.aFill, n, EXP)} past={pastFigures(list.bt, list.aFill, n)} ticker={TICKER} />);
+  const valueOf = (html, label) => {
+    const at = html.indexOf(`data-tile="${label}"`);
+    if (at < 0) throw new Error(`no ${label}`);
+    const end = html.indexOf("data-tile=", at + 10);
+    const chunk = html.slice(html.indexOf(">", at) + 1, end < 0 ? undefined : end).replace(/<[^>]*$/, "").replace(/<[^>]+>/g, "|");
+    return chunk.split("|").map((t) => t.trim()).filter(Boolean);
+  };
+  for (const k of ["risk", "profit", "chance", "rr"]) {
+    const ts = valueOf(compact, CARD_LABELS[k]);
+    const v = ts[ts.indexOf(CARD_LABELS[k]) + 1];                 // the value printed under the label
+    if (!valueOf(full, CARD_LABELS[k]).includes(v)) throw new Error(`${k}: compact ${v}, full ${valueOf(full, CARD_LABELS[k]).join(" ")}`);
+  }
+  const fut = futureTile(futureFigures(list.mc, list.aFill, n, EXP)).value;
+  if (!valueOf(compact, CARD_LABELS.future).includes(fut) || !valueOf(full, CARD_LABELS.future).includes(fut)) throw new Error(`future ${fut}`);
+  const past = pastTileText(pastFigures(list.bt, list.aFill, n)).replace(/&/g, "&amp;");
+  if (!valueOf(compact, CARD_LABELS.past).includes(past) || !valueOf(full, CARD_LABELS.past).includes(past)) throw new Error(`past ${past}`);
 });
 
 console.log(`\n${ok.length} passed, ${bad.length} failed\n`);

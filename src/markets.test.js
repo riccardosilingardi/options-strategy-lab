@@ -8,7 +8,7 @@
 // ============================================================================
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { MARKET_ROWS, MARKETS, BASKET, TICKERS, getU, CATEGORIES, MARKET_CATEGORIES, buildRegistry, checkRow,
+import { MARKET_ROWS, MARKETS, BASKET, TICKERS, getU, CATEGORIES, MARKET_CATEGORIES, buildRegistry, checkRow, CATEGORY_ICONS,
   categoryCounts, categorySelection, categoryOf } from "./markets.js";
 import { BASKET as BASKET_FN } from "./basket.js";
 import { factorsOf, weatherApplies } from "./signals.js";
@@ -106,6 +106,13 @@ test("NO OTHER FILE KEEPS A COPY OF THE MARKETS", () => {
   assert.ok(!/SOYB, CORN, UNG, BOIL, WEAT/.test(read("src/pro.jsx")), "the copilot's list is the registry's");
   for (const tk of DEMO_SEED_TICKERS) assert.ok(BASKET.includes(tk), `demo market ${tk} is a registry market`);
   assert.equal(MARKETS.rows.length, MARKET_ROWS.length);
+});
+
+test("ROUND 2: EVERY CATEGORY HAS ITS ICON (a lucide-react name, so this file stays plain JS), and market.jsx maps every one", () => {
+  assert.deepEqual(Object.keys(CATEGORY_ICONS).sort(), [...CATEGORIES].sort());
+  const mk = readFileSync("src/market.jsx", "utf8");
+  for (const name of Object.values(CATEGORY_ICONS)) assert.match(mk, new RegExp(`\\b${name}\\b`), `${name} is not mapped in market.jsx`);
+  assert.doesNotMatch(readFileSync("src/markets.js", "utf8"), /from "lucide-react"/);
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);
