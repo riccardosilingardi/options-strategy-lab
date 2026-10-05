@@ -900,8 +900,9 @@ export function withSignalRank(candidate, fused, dir) {
    Going against the signal — PRD §7 / §2 override pattern
 ================================================================ */
 
-// Below this the score is noise and there is nothing to go against.
-const AGAINST_MIN_SCORE = 10;
+// Below this the score is noise and there is nothing to go against. Exported (redesign PR 2) so Build's sentence on
+// when Send asks why reads the rule rather than a copy of it.
+export const AGAINST_MIN_SCORE = 10;
 
 /**
  * Is a trade needing direction `dir` fighting the engine? Returns null when it
@@ -960,6 +961,22 @@ export function signalStance(fused, dir) {
   const { keys, opposing, supporting } = factorCount(fused, dir);
   if (Math.sign(fused.score) === dir) return { kind: "with", n: supporting.length, total: keys.length, against: opposing.length };
   return { kind: "against", n: opposing.length, total: keys.length };
+}
+
+/**
+ * EACH FACTOR, AND WHERE IT STANDS ON THIS TRADE (redesign PR 2, "Why this trade" open): the factors this market HAS,
+ * in their order, each with its own direction and strength and — on `factorCount()`'s counting, the same as the stance
+ * line's — "supports", "against" or "quiet" (no direction, or a direction-neutral trade). Null while being read.
+ */
+export function factorStands(fused, dir) {
+  if (!fused || !fused.components) return null;
+  const keys = fused.factors || Object.keys(BASE_WEIGHTS);
+  const { opposing, supporting } = dir ? factorCount(fused, dir) : { opposing: [], supporting: [] };
+  return keys.map((k) => {
+    const c = fused.components[k] || {};
+    return { key: k, dir: c.dir || 0, strength: Number.isFinite(c.strength) ? c.strength : null,
+      stand: supporting.includes(k) ? "supports" : opposing.includes(k) ? "against" : "quiet" };
+  });
 }
 
 /* The guided door's three drivers (DRIVERS, DRIVER_PRESETS, presetOf,
