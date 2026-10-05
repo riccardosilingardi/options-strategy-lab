@@ -1,6 +1,7 @@
 // AUTOPILOT — Netlify Scheduled Function (giorni feriali 11:00 UTC ≈ 13:00 CET, pre-apertura USA)
 // Ciclo: posizioni → dati oggettivi (chain CBOE, stagionalità) → TIS + Exit Simulator → brief Claude → approve link → webhook
 import { getStore } from "@netlify/blobs";
+import { deployWrites, PREVIEW_READ_ONLY } from "../../src/deploy.js";
 import { netBS, exitSim, SIGMA, parseAvJson, statsFromMatrix } from "../../src/engine.js";
 import { RULES, ruleBadge, copilotRulesBlock, pctText,
   markProvenance, sigmaProvenance, ivProvenance, seasonalProvenance, seasonalSignal, chanceOf, chanceSourceNote,
@@ -163,9 +164,16 @@ function computeTIS(pos, cur) {
   return pts;
 }
 
+/* The blob store, behind one name a test can replace (redesign PR 2, TASK 0a). Production reads the real one. */
+export const deps = { getStore };
+
 /* ---------- ciclo ---------- */
-export default async () => {
-  const store = getStore("autopilot");
+export default async (req, context) => {
+  /* PREVIEWS ARE READ-ONLY (TASK 0a). This run writes the state, the approvals and the briefs, calls the AI and posts
+     to the webhook. Netlify runs a scheduled function only on the published deploy; this says so in code too, and a
+     context that cannot be read stops it before anything is read or written. See src/deploy.js. */
+  if (!deployWrites(context).ok) return new Response(PREVIEW_READ_ONLY, { status: 403 });
+  const store = deps.getStore("autopilot");
   resetSeasonalCache();
   const state = JSON.parse((await store.get("state")) || "{}");
   const approvals = JSON.parse((await store.get("approvals")) || "{}");

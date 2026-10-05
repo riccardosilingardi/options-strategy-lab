@@ -186,10 +186,13 @@ check("FIND HAS NO SINGLE-TICKER STRIP; BUILD KEEPS IT", () => {
   // Redesign PR 1: the market page is one ticker too, but it prints its own header for its own market (market.jsx), so
   // Build's strip is guarded off it as well.
   has(code, 'const onMarketStep = tab === "build" && !showSettings && "market" === step;');
-  const open = code.indexOf("{!onFindStep && !onMarketStep && (");
-  if (open < 0) throw new Error("the strip is not guarded");
-  // Every stat of the strip sits after the guard and before the guard closes.
-  const close = code.indexOf("TabBoundary", open);
+  // Redesign PR 2: Build draws no desk header, so the strip is guarded off Build too and is ONE piece (`tickerStrip`), drawn
+  // in the header and in Build's "More on this trade ▾".
+  if (code.indexOf("{!onFindStep && !onMarketStep && !onBuildStep && tickerStrip}") < 0) throw new Error("the strip is not guarded");
+  if (code.indexOf("{tickerStrip}") < 0) throw new Error("Build's More draws the same strip");
+  // Every stat of the strip sits inside the one piece.
+  const open = code.indexOf("const tickerStrip = (");
+  const close = code.indexOf("\n  );", open);
   for (const k of ["k={`PRICE NOW", 'k="EXPIRY"', "k={`SEASONALITY", 'k="SEASONAL SOURCE"', 'k="IV RANK"']) {
     const at = code.indexOf(k);
     if (at < open || at > close) throw new Error(`${k} is outside the guarded strip`);

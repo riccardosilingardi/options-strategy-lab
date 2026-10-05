@@ -64,7 +64,7 @@ const AGREEMENT_STYLE = {
   MIXED: { c: T.blue, label: "MIXED", meaning: "some factors push, the rest stay quiet" },
   CONFLICT: { c: T.amber, label: "CONFLICT", meaning: "the factors contradict each other" },
 };
-const FACTOR_LABEL = { seasonal: "Seasonality", technical: "Price trend", weather: "Weather", news: "News flow" };
+export const FACTOR_LABEL = { seasonal: "Seasonality", technical: "Price trend", weather: "Weather", news: "News flow" };
 const FACTOR_ORDER = ["seasonal", "technical", "weather", "news"];
 /** The weights this market was actually scored on, in words. */
 const weightList = (fused) => {

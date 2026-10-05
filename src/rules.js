@@ -1418,6 +1418,165 @@ export const DETAILS_FOLD = "Details";
 export const PAST_AVG_LABEL = "PAST YRS AVG";
 
 /* =====================================================================
+   BUILD, ON THE OWNER'S MOCKUP "3 · Build" (redesign PR 2). Every sentence the new Build screen generates, here. They
+   read figures Build already has (`AE`, `payoffBands()`, the gate's limits, `takeProfitTarget()`); none computes a
+   trade property of its own.
+===================================================================== */
+/** "20 Nov" — an expiry without its year, the way Build's title and legs head say it. */
+export const expiryShort = (iso) => (expiryWords(iso) || "").replace(/ \d{4}$/, "") || null;
+/** Build's title line: "CORN · 20 Nov · 47 days · ×1". */
+export const buildSubLine = ({ ticker, expKey = null, dte = null, n = 1 } = {}) =>
+  [ticker, expiryShort(expKey), known(dte) ? `${Math.round(Number(dte))} days` : null, `×${Math.max(1, Math.round(Number(n) || 1))}`]
+    .filter(Boolean).join(" · ");
+
+/**
+ * WHAT THIS TRADE DOES, IN ONE SENTENCE (redesign PR 2, TASK 2) — the one generator, read off the expiry payoff
+ * `payoffBands()` already cut (a combination property), for the size shown:
+ *   "Keeps up to $25 if CORN closes above $18.00 on 20 Nov; loses up to $75 below $17.00. Breakeven $17.75."
+ * "Keeps" for a credit, "Makes" for a debit. A flat best or worst region is named by its edges, snapped to the leg
+ * strike it sits on; a structure with no ceiling says so. Null when the payoff was not read.
+ */
+export function tradeTakeaway(b, { ticker = "the price", expKey = null, n = 1, credit = false, legs = [] } = {}) {
+  if (!b || !Array.isArray(b.samples) || b.samples.length < 2) return null;
+  const k = Math.max(1, Math.round(Number(n) || 1));
+  const step = Math.abs(b.samples[1].s - b.samples[0].s);
+  const strikes = (legs || []).map((l) => Number(l.strike)).filter(Number.isFinite);
+  const snap = (v) => { const near = strikes.find((x) => Math.abs(x - v) <= step * 1.01); return near != null ? near : v; };
+  const px = (v) => `$${snap(v).toFixed(2)}`;
+  // The flat regions, as contiguous runs of samples (an iron condor loses at BOTH ends: two runs).
+  const region = (pred) => {
+    const runs = [];
+    let cur = null;
+    for (const q of b.samples) {
+      if (pred(q)) { if (!cur) { cur = { lo: q.s, hi: q.s }; runs.push(cur); } else cur.hi = q.s; }
+      else cur = null;
+    }
+    return runs.length ? runs : null;
+  };
+  const one = (r) => {
+    const atLo = r.lo <= b.lo + step / 2, atHi = r.hi >= b.hi - step / 2;
+    if (atLo && atHi) return null;
+    if (atLo) return `below ${px(r.hi)}`;
+    if (atHi) return `above ${px(r.lo)}`;
+    if (Math.abs(snap(r.hi) - snap(r.lo)) < 1e-9) return `at ${px(r.lo)}`;
+    return `between ${px(r.lo)} and ${px(r.hi)}`;
+  };
+  const words = (runs) => {
+    if (!runs) return null;
+    const parts = runs.map(one);
+    return parts.some((x) => x == null) ? null : parts.join(" or ");
+  };
+  const day = expiryShort(expKey);
+  const on = day ? ` on ${day}` : " at expiry";
+  const tol = 0.5;
+  let head;
+  if (b.unbounded || b.maxProfit == null) {
+    const up = (b.bands || []).filter((z) => z.sign > 0);
+    const top = up.find((z) => z.hi >= b.hi - step / 2) || up[up.length - 1] || null;
+    head = top ? `Has no ceiling on what it makes the further ${ticker} closes above ${px(top.lo)}${on}` : null;
+  } else if (b.maxProfit > 0) {
+    const where = words(region((q) => q.pnl >= b.maxProfit - tol));
+    head = `${credit ? "Keeps" : "Makes"} up to ${money(b.maxProfit * k)}${where ? ` if ${ticker} closes ${where}` : ""}${on}`;
+  } else {
+    head = `Makes nothing at any price${on}`;
+  }
+  const lossWhere = Number.isFinite(b.maxLoss) && b.maxLoss < 0 ? words(region((q) => q.pnl <= b.maxLoss + tol)) : null;
+  const loss = Number.isFinite(b.maxLoss) && b.maxLoss < 0 ? `loses up to ${money(Math.abs(b.maxLoss) * k)}${lossWhere ? ` ${lossWhere}` : ""}` : null;
+  const be = (b.breakevens || []).map((v) => `$${Number(v).toFixed(2)}`);
+  const beText = be.length === 1 ? ` Breakeven ${be[0]}.` : be.length > 1 ? ` Breakevens ${be.slice(0, -1).join(", ")} and ${be[be.length - 1]}.` : "";
+  return `${[head, loss].filter(Boolean).join("; ")}.${beText}`;
+}
+
+/** Delta as the shares the position moves like, for the size shown: "+35 sh". Theta as dollars a day: "−$3/day". */
+export const deltaSharesText = (delta, n = 1) => (known(delta)
+  ? `${Number(delta) >= 0 ? "+" : "−"}${Math.abs(Math.round(Number(delta) * 100 * Math.max(1, Math.round(Number(n) || 1))))} sh` : "—");
+export const thetaDayText = (theta, n = 1) => (known(theta) ? `${signedMoney(Number(theta) * Math.max(1, Math.round(Number(n) || 1)))}/day` : "—");
+/** The Numbers section's definitions, one tap behind each label (the compact card's, plus the two Build adds). */
+export const BUILD_DEFINITIONS = Object.freeze({
+  profit: "The most this trade can make by expiry, for the size shown; \"no ceiling\" when there is none.",
+  loss: "The most this trade can lose, for the size shown. It is fixed the moment it opens.",
+  breakeven: "The price at expiry where the trade neither makes nor loses money, at the price that will be sent.",
+  rr: "The maximum profit divided by the maximum loss.",
+  delta: "How many shares of the ETF the position moves like today: + gains when the price rises, − when it falls.",
+  theta: "What one day passing makes (+) or costs (−) the position if the price stays put.",
+});
+
+/**
+ * WHEN SEND ASKS WHY (redesign PR 2, TASK 2) — the app's real rule, not the mockup's "2 or more against": a written
+ * reason is asked whenever the market's score points against the trade by at least `floor` (`AGAINST_MIN_SCORE` in
+ * signals.js), however many factors oppose. `clash` is `againstSignal()`'s answer for this trade.
+ */
+export const reasonRuleText = (floor, clash = null) => (clash
+  ? `This trade goes against the market's score (${clash.n} of ${clash.total} factors oppose it): Send asks you to write why first.`
+  : `Send asks for a written reason only when the market's score points against the trade by ${floor} or more.`);
+
+/** The order line under the two steppers: "Mid 0.25 · natural 0.15 · tick 0.01". The tick is the app's one price rule
+ *  (`onTick()`: a cent); no feed sends a contract's tick size. */
+export const ORDER_TICK = 0.01;
+export const orderBookLine = ({ mid = null, natural = null } = {}) =>
+  `Mid ${known(mid) ? Math.abs(Number(mid)).toFixed(2) : "—"} · natural ${known(natural) ? Math.abs(Number(natural)).toFixed(2) : "—"} · tick ${ORDER_TICK.toFixed(2)}`;
+
+/** The cap checkbox's words: "Enforce the 5% cap per trade ($500)". The share is the limit's own over the capital. */
+export const capLabel = (limits = null) => {
+  const per = limits && known(limits.perTrade) ? Number(limits.perTrade) : null;
+  const cap = limits && known(limits.tradingCapital) && Number(limits.tradingCapital) > 0 ? Number(limits.tradingCapital) : null;
+  if (per == null) return "Enforce the per-trade cap";
+  return `Enforce the ${cap ? `${pctText(per / cap, 0)} ` : ""}cap per trade (${money(per)})`;
+};
+
+/** The exit plan's three rows (redesign PR 2): what each rule is, in words, from RULES. */
+export const EXIT_ROWS = Object.freeze({
+  takeProfit: (basis = "max-profit") => `at ${basis === "premium" ? takeProfitBasisWords("premium") : `${pctText(RULES.takeProfitPct)} of max profit`}`,
+  time: () => `${RULES.exitDTE} days before expiry`,
+  stop: () => `alert at ${pctText(RULES.stopLossPct)} of max loss, no order`,
+});
+export const EXITS_FOOTER = "Exits go in as limit orders.";
+/** The markets whose exit rules have been backtested. None yet (PRD §4 #9): every market shows the pill. */
+export const EXITS_BACKTESTED = Object.freeze([]);
+export const exitsPill = (tk) => (EXITS_BACKTESTED.includes(tk) ? null : `defaults · not backtested on ${tk}`);
+/** The time exit's date: the expiry less `RULES.exitDTE` days, "30 Oct". */
+export const timeExitDay = (expKey) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(expKey || ""));
+  if (!m) return null;
+  const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]) - RULES.exitDTE * 86400000);
+  return `${d.getUTCDate()} ${MON3[d.getUTCMonth()]}`;
+};
+
+/** Send's label: "Send limit order · credit $25". */
+export const sendLabel = ({ type = "limit", net = null, n = 1 } = {}) => {
+  const k = Math.max(1, Math.round(Number(n) || 1));
+  const kind = type === "market" ? "market" : "limit";
+  if (type === "market" || !known(net)) return `Send ${kind} order`;
+  return `Send ${kind} order · ${Number(net) < 0 ? "credit" : "debit"} ${money(Math.abs(Number(net)) * 100 * k)}`;
+};
+export const SEND_FOOTER = (tif = "day") => `Paper account · Alpaca · ${tif === "gtc" ? "good until cancelled" : "day order"}`;
+
+/** The review sheet's leg line: "Sell to open 1 × 18 put". */
+export const reviewLegWords = (l, n = 1) =>
+  [`${l.side > 0 ? "Buy" : "Sell"} to open`, `${Math.abs(Number(l.qty) || 1) * Math.max(1, Math.round(Number(n) || 1))} × ${l.strike} ${l.type === "call" ? "call" : "put"}`];
+/** "Limit $0.25 credit · day · ×1". */
+export const reviewLimitLine = ({ type = "limit", net = null, tif = "day", n = 1 } = {}) =>
+  `${type === "market" || !known(net) ? "Market" : `Limit $${Math.abs(Number(net)).toFixed(2)} ${Number(net) < 0 ? "credit" : "debit"}`} · ${tif === "gtc" ? "GTC" : "day"} · ×${Math.max(1, Math.round(Number(n) || 1))}`;
+/** The open-interest row: Find's liquidity floor, never the gate's (the gate has no open-interest rule). */
+export const oiCheckText = (floor) => `Open interest above the chain's floor (${floor}, Find's liquidity floor)`;
+/** The review sheet's checks, in words; their values and their ✓ / ✗ are `gateChecklist()`'s (wizard.jsx). */
+export const REVIEW_CHECKS = Object.freeze({
+  loss: "Most it can lose",
+  cap: (free) => (free ? "Per-trade cap: free sizing, not applied" : "Inside the per-trade cap"),
+  open: "Open risk after this",
+  legs: "No uncovered legs",
+  days: () => `At least ${RULES.minEntryDTE} days to expiry`,
+  paper: "Paper account confirmed",
+});
+export const REVIEW_SUB = (viaBroker) => (viaBroker ? "Paper account · Alpaca · second of two taps" : "The app's own paper book · second of two taps");
+/** After Alpaca accepts it: "0.25 credit · day · filled 0 of 1". */
+export const sentOrderLine = ({ net = null, tif = "day", filled = 0, qty = 1 } = {}) =>
+  `${known(net) ? `${Math.abs(Number(net)).toFixed(2)} ${Number(net) < 0 ? "credit" : "debit"}` : "market"} · ${tif === "gtc" ? "GTC" : "day"} · filled ${Number(filled) || 0} of ${Number(qty) || 1}`;
+/** "J-0004 is filed in the Journal, with the reason you wrote; its state is on its row in Orders." */
+export const sentFiledText = (ref, withReason = false) =>
+  `${ref ? `${ref} is filed in the Journal` : "The trade is filed in the Journal"}${withReason ? ", with the reason you wrote" : ""}; its state is on its row in Orders.`;
+
+/* =====================================================================
    "ORDER BY" — THE FIVE ORDERS AND THEIR NAMES (PR #48, TASK 4; names and "Past yrs" PR #49, owner decision 3 Oct).
    The labels live here, with the card's (one home for the words); `signals.js` sorts by them and re-exports them.
    `tile` is the card figure the list is sorted by, which the card rings and labels "sorted by" (PR #49, TASK 1).
@@ -1675,6 +1834,7 @@ export const ARIA = Object.freeze({
   chainTable: (tk, ek) => `${tk} chain, ${ek}`,
   chainCell: (side, k, type) => `${side > 0 ? "Buy" : "Sell"} 1 ${k} ${type} at the ${side > 0 ? "ask" : "bid"}`,
   expiryChip: (ek, dte, under) => (under ? `${ek}: ${underEntryText()}, cannot be built from` : `${ek}, ${dte} days`),
+  buildBack: (to) => `Back to ${to}`,
 });
 export const THIN = "thin";
 export const spotLineText = (spot, state) => `${Number(spot).toFixed(2)}${state ? ` ${state}` : ""}`;
@@ -6366,11 +6526,11 @@ export function tradeCard({
     ids: TRADE_CARD_IDS,
     currency: cardCurrencyNote(),
     lines: [
-      { id: "bet", label: "YOU ARE BETTING", text: bet },
-      { id: "risk", label: "YOU RISK", text: riskLine },
-      { id: "often", label: "HOW OFTEN IT WORKS", text: often },
-      { id: "exits", label: "WHEN IT EXITS", text: exits },
-      { id: "wrong", label: "WHAT WOULD MAKE IT WRONG", text: wrong },
+      { id: "bet", label: "BETS ON", text: bet },
+      { id: "risk", label: "RISKS", text: riskLine },
+      { id: "often", label: "WORKS", text: often },
+      { id: "exits", label: "EXITS", text: exits },
+      { id: "wrong", label: "WRONG IF", text: wrong },
     ],
   };
 }

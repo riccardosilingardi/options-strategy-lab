@@ -186,7 +186,21 @@ test("MEASURED: the three screens, and the table in the PRD is this number", () 
      `CandidateCard` in full, so the compact layout's four figure sites (`chanceText`, `returnText`, `futureTile`,
      `pastTileText`, 19 words) are scored on Build too — the documented upper bound (every branch counted), which the
      ROADMAP's counter fix will lower. The ceilings are those numbers, so the next word fails the build. */
-  const CEILING = { find: 332, market: 587, build: 286, positions: 217 };
+  /* >>> REDESIGN PR 2 (owner's mockup "3 · Build", 5 Oct 2026): BUILD IS REBUILT. <<< Measured by this counter: build
+     286 → 428 (293 typed + 135 generated, 22 sites). What LEFT the screen at rest: the trade card's five lines (now
+     behind "Why this trade"), the card (in "More on this trade ▾", with the compact layout's 19 counted words, the
+     badge 6, the news line 17, the reading line 2), the price block's crossing sentence 13, the warnings panel's summary
+     20, the open-interest and source notes 13, the card-vs-Build lines 23. What the mockup ADDS, site by site: the one
+     sentence `tradeTakeaway()` 20; the title line `buildSubLine()` 9 (×3: Build, loading, no quotes); the stance line
+     `stanceText()` 9; the rule for when Send asks why `reasonRuleText()` 19; `orderBookLine()` 8, `capLabel()` 7,
+     `exitsPill()` 6, `sendLabel()` 6, the two greeks 3, the time exit's day 2, the legs' expiry 4; the FUTURE and PAST
+     boxes (`futureTile()` 10, `chanceText()` 1); typed: the section titles and labels (Build 18, What it does 8, Why 4,
+     Legs 4, Order 19, the figure labels 5, More 8), the copilot section 61 (its heading, the field, the footer the prompt
+     asks for, and its states: writing, thinking, cut off, filed), the chart's 22 (its range buttons and its states), the
+     entry-room warning 46 and Send's held reason 10 (each only when it applies), and the three states (loading 23, empty
+     31, no quotes 24) — an upper bound: the states never show together. The review sheet is one tap away (a Sheet,
+     assembled outside the block) and "More on this trade ▾" is folded (`Reveal`). The ceiling is that 428. */
+  const CEILING = { find: 332, market: 587, build: 428, positions: 217 };
   /* >>> PR #46: ONE ORDERS LIST. <<< The record-based "WORKING AT THE BROKER" panel (its paragraph about what a
      working order is, the stale-DAY warning, the per-row sentences) left Positions; the one list lives in
      `orders.jsx`, which the counter now reads. Measured: positions 304 -> 209 (4 typed + 205 generated, 14 sites).

@@ -6,7 +6,93 @@ The full history of every item shipped so far (P0–P10, P2-bis) is in `docs/his
 Every pull request updates this file: the session that ships an item marks it done and states
 what the next one inherits.
 
-## Done in this pull request, round 2 (owner, 5 Oct 2026) — the look, the dates, the app opens on Find
+## Done in this pull request — redesign PR 2, part B (owner, 5 Oct 2026): Build, the review sheet, Why this trade, the copilot
+
+Planned first (with part A); the owner took every recommendation: the five lines are the trade card's with the mockup's
+labels, the tick is the app's cent, the review sheet carries an open-interest row read off Find's floor, "no quotes" is
+`buildScreenState()`'s "no-market-data", the local-book confirm only without Alpaca, the copilot's other questions in
+"More on this trade ▾".
+
+- **Task 1 — the inventory** (in the PR): every piece of today's Build has a place; what the mockup has no place for is in
+  "More on this trade ▾" in today's form. Nothing deleted.
+- **Task 2 — Build's look** (`src/build.jsx`, on ui.jsx's atoms): header row, title, What this trade does
+  (`tradeTakeaway()`, rules.js, and `UnifiedView` brought to the mockup: 60 sessions, a blue 68/95% fan, the ending bars,
+  the payoff at the edge, the labelled breakeven, today's dot, no 560px floor), The numbers (the card's figures,
+  figures.test.jsx), Why this trade (`factorStands()` beside `signalStance()`; `reasonRuleText()` from
+  `AGAINST_MIN_SCORE`), the copilot (`useCopilot()`, three new SKILLS that never propose), Legs with Edit in chain (the
+  market page's tray), the Order inline, the Exit plan, Send. No desk header and no evidence bar on Build.
+- **Task 3 — the review sheet**: Send opens it; the second tap is `useTicketSend().fire()` — the ticket's send moved
+  unchanged into one hook in pro.jsx (order path 2), which `OrderTicket` also calls (`noSend` in More).
+- **Task 4 — the three states**, `buildScreenState()` unchanged.
+- **Task 5 — the evidence list**: "The market's read ›" opens the market page's Overview; levels and History in More.
+- **Task 6 — photographed** through the whole app on fixtures (`node scripts/shoot-build.mjs`, docs/screens/redesign-pr2/).
+
+**Measured.** Tests 1,342 → 1,359, 0 failed. Build 1,363.03 → 1,390.35 kB (production stamp), the usual chunk warning.
+Words: find 327, market 587 (unchanged), build 286 → 428 (named site by site in voice.test.js), positions 207; J-0001's
+surfaces 113/120, 32/35, 35/35, 40/40. Build at rest 2,592px at 390×844 (the Iron Condor fixture), nothing sideways.
+
+**Not changed:** riskGate.js, closeOrder.js, modifyOrder.js, `orderBody()`, the gate calls, alpacaContract.js, every RULES
+value, `histBacktest()`, `seasonalSignal()`, `fuseSignals()`'s and `signalDirection()`'s rules, the /api/state payload, the
+event dates, Find and the market page beyond Edit in chain (`initialTray`) and the chain tray's origin, Positions / Orders /
+Journal / Settings.
+
+### What PR 3 inherits from part B
+
+- **The one-market strip** (price now, expiry, season, source, IV rank) is one piece (`tickerStrip`) drawn in the desk
+  header and in Build's More; it still colours a falling season and a dear IV rank red — PR 3 decides with the header.
+- **The copilot's proposals** (owner to decide): "Opportunity radar" asks for two trades, the system prompt's decision
+  trees recommend structures, "Pre-trade analysis" asks for a GO/NO-GO and a size. Build's three new questions never do.
+- **Build's empty state is rare**: a board that loads with nothing on Build puts a default trade there (`buildPresets()`),
+  so "Nothing on Build yet" shows only on a board with no strikes or after every leg is removed.
+- **Loading is Build's own request** (`buildScreenState()`): Find's background reads are not "loading", so tapping Build
+  before a market answers shows "No quotes" with Retry until Build itself asks.
+- `BuildWarnings`, `TradeCard` and `ConfirmSteps` are no longer mounted on Build (their content is in the Why section,
+  the review sheet and More); they stay for their tests and for PR 3 to decide.
+- The word counter's upper bound still counts states that never show together (Build's three).
+
+## Done in redesign PR 2, part A (owner, 5 Oct 2026): deploy previews are read-only
+
+Planned first; the owner took every recommendation (5 Oct 2026): two PRs — this safety fix first and alone, then Build;
+the Alpha Vantage cache is not written from a preview; "production" means production AND published; and the rest of the
+plan's questions, which belong to the Build PR.
+
+- **0a — previews are read-only.** Measured on 5 Oct 2026: "File in Journal" tapped on deploy-preview-51 filed into that
+  preview's own Journal while production's server copy lost the GDX position — every function shares one site-wide blob
+  store. `src/deploy.js` holds the one check, `deployWrites(context)` (Netlify's `context.deploy`, from `@netlify/types`
+  3.2.0; the doc pages are cited beside it, their anchors unverified from this sandbox): state.mjs's POST, alpaca.mjs's
+  POST / PATCH / DELETE, approve.mjs, autopilot.mjs and av.mjs's cache write answer 403 "Preview deploys are read-only:
+  nothing is saved or sent from here." unless the deploy is production and published; an unreadable context is refused.
+  Reads are untouched. The client reads the build's stamp (`__OSL_DEPLOY_CONTEXT__` from Netlify's CONTEXT, vite.config.js):
+  off production a banner on every screen, no save to the server, and Send, Close, Modify, Cancel, Cancel all, File in
+  Journal and the exit rungs disabled with the sentence. deploy.test.js (17) drives every writer with a preview, a branch,
+  an unpublished production, no context, and production, with a recording store and network; preview.test.jsx (6)
+  renders the disabled controls. demo.test.js's source pattern was widened to `if (DEMO || PREVIEW) return;` (test-only).
+- **0b — PR #50's docs.** The replay's December wrap is done (below and CLAUDE.md); PRD §4 #9 says the PAST YRS tiles on
+  windows that cross December changed with #50 and are owner-observed.
+- **0c — v1 is reached** on the owner's report (5 Oct 2026: filled 9 of 9 at $7.65, filed from production). One owner check
+  is left: the Journal entry shows the $7.65 fill (PRD §4 #1).
+- **0d — Build's words 267 → 286 (sites 21 → 25) in PR #51.** The four sites are `chanceText`, `pastTileText`,
+  `futureTile` and `returnText`, one each — all from card.jsx's compact layout, which Build mounts and never draws. No
+  site came into Build's own code; nothing was removed. The counter fix below is still the cure.
+
+**Measured.** Tests 1,319 → 1,342, 0 failed. Build 1,362.51 → 1,363.03 kB (stamped production), the usual chunk warning.
+Words unchanged: find 327, market 587, build 286, positions 207; J-0001 surfaces 113/120, 32/35, 35/35, 40/40.
+
+**Not changed:** riskGate.js, closeOrder.js, modifyOrder.js, `orderBody()`, the seven gate calls (unchanged: the
+client's send functions gain a preview check beside the demo's, the server's writers one at their top), alpacaContract.js, every RULES value, the /api/state payload, every screen's look
+beyond the banner and the disabled controls' sentence.
+
+### What the next session inherits from part A
+
+- **Old previews keep their unguarded functions** (deploy-preview-51 included). After this merges, regenerate the Alpaca
+  paper keys and set them in Netlify (then redeploy production): the old previews are left holding dead keys. Their
+  writes to the shared store cannot be revoked — do not open old preview links.
+- Whether previews hold the production keys is unread (Site configuration → Environment variables → each key's deploy
+  contexts). The guard does not depend on it.
+- The guard has run on stubs only; the context read live, on a preview and on production, is an owner reading.
+- DONE IN PART B: Build, the review sheet, Why this trade, the copilot inside Build.
+
+## Done in round 2 of redesign PR 1 (owner, 5 Oct 2026) — the look, the dates, the app opens on Find
 
 The deploy preview did not look like the mockups (measured on 9cb2359 at 390×844: the old Home first, a 230px desk header
 over Find, filled pills, boxed rows, a 590px card and a 10,816px Strategies page). Round 2 is the look, written to the
@@ -165,9 +251,8 @@ list toggles are screen state), `seasonalSignal()`'s rule. J-0001's working clos
 - **J-0001 is still v1 (b)**: its close was working at Alpaca (GTC, $7.62). Nothing here cancels, resends or re-prices it.
 - **The live season and every live PAST YRS tile are unread**: the whole series is read since 0b, so which months
   count can move on the owner's phone; the sandbox cannot call Alpha Vantage.
-- **The replay wraps a window past December to the same row's January** (moved unchanged from App.jsx): a November
-  start held 75 days reads Nov, Dec and that year's Jan, not the next one's. Fix it in `histBacktest()` and Build's
-  `runReplay()` together, after v1.
+- DONE IN PR #50: **the replay read a window past December from the same row's January.** It now reads the next year's
+  row in `histBacktest()` and Build's `runReplay()`, and drops the last year rather than padding it.
 - **The sweep left the type rule, not the tokens**: sentences still in mono — App.jsx 148 mono / 31 sans spreads,
   pro.jsx 102 / 0 — and two files named in `ui.test.jsx`: visuals.jsx's drawings and main.jsx's crash screen (6 literals).
 - Build's backtest panel still runs behind its button; the top card's PAST tile runs on its own.
@@ -299,6 +384,9 @@ alpacaContract.js, the seven gate calls, every `RULES` value but the two new one
 
 ## v1
 
+**v1 IS REACHED (owner's report, 5 Oct 2026):** J-0001's close filled 9 of 9 at $7.65 and was filed in the Journal from
+the production address. One owner check is left: the Journal entry shows the $7.65 fill (PRD §4 #1).
+
 v1 is done when PRD §3 is true: (a) one opening order filled at the intended price,
 (b) one closing order filled via order path 3 (`src/closeOrder.js`), (c) the owner reads each
 open position's action in five seconds. **(a) is verified and (c) is read for HOLD. J-0001's close FILLED on 5 Oct 2026
@@ -329,7 +417,7 @@ v1 (b) now waits only on "File in Journal" _from the production address_: the Jo
 ### The one owner reading left for v1
 
 - DONE (owner's Alpaca screenshot, 5 Oct 2026): J-0001 closed with "Close at limit" (order path 3) and filled, 9 of 9 at
-  $7.65. Left: tap "File in Journal" on its Positions card **from the production address**. That completes v1 (b).
+  $7.65; filed in the Journal from the production address (owner's report, 5 Oct 2026). Left: read the entry's $7.65.
 - **Nothing else is asked of the owner until then.** Every other item in PRD §4 is read when
   it happens in normal use, never requested.
 
@@ -343,9 +431,10 @@ One line each; see `PRD.md` §5 and `docs/history/ROADMAP.md` for detail.
   every card, the whole Alpha Vantage history, visible ⓘ labels, and the sweep of App.jsx and pro.jsx.
 - **DONE: redesign PR 1** — Find version B, the market page, the event calendar, dark by default; round 2: the mockups'
   look, the event dates, the app opens on Find.
-- **NEXT: redesign PR 2** (Build, the review sheet, Why this trade, the copilot inside Build), then **PR 3** (Positions,
-  Orders, the Journal, Settings).
-- **FIRST: PR #50 = basket expansion with a measured admission rule.** The owner pastes `/api/liquidity` for the
+- **DONE: PR #50** — the replay reads the next year's row past December; `scripts/sanity.mjs` (read-only live reads).
+- **DONE: redesign PR 2** — part A, deploy previews are read-only; part B, Build, the review sheet, Why this trade, the
+  copilot inside Build. **NEXT: PR 3** (Positions, Orders, the Journal, Settings).
+- **Basket expansion with a measured admission rule** (planned as #50, not started; #50 shipped the wrap instead). The owner pastes `/api/liquidity` for the
   candidate tickers; a market is admitted when its open interest clears the liquidity floor AND Alpha Vantage holds at
   least **N = 14 years** of its monthly history. N is set from what `seasonalSignal()` needs: a month counts at |mean| ≥
   2 × sd / √n, so for a move as large as CORN's measured June (−3.46% on a ≈ 6.4% monthly volatility) to be able to

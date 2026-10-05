@@ -132,7 +132,8 @@ check("every order path checks the demo flag", () => {
   if (!close.includes("order path 3 of six")) throw new Error("missing the demo guard on order path 3");
   if (!app.includes("Order path 1 of the six")) throw new Error("missing the demo guard on order path 1");
   // and the shared state blob is never written from a demo session
-  if (!/if \(DEMO\) return;/.test(app)) throw new Error("a demo session can still write the shared state blob");
+  // (Redesign PR 2, TASK 0a: the same line now also stops a deploy preview — `if (DEMO || PREVIEW) return;`.)
+  if (!/if \(DEMO( \|\| PREVIEW)?\) return;/.test(app)) throw new Error("a demo session can still write the shared state blob");
 });
 
 /* ---------------- the three example positions ---------------- */

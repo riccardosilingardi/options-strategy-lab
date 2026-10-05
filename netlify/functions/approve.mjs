@@ -17,6 +17,7 @@
 // and the price is worked out HERE, at tap time, from a chain fetched now.
 // `orderBody()` is used exactly as it is, with `type: "limit"`.
 import { getStore } from "@netlify/blobs";
+import { deployWrites, PREVIEW_READ_ONLY } from "../../src/deploy.js";
 import { evaluateTrade } from "../../src/riskGate.js";
 import { orderBody, orderOutcome, alpacaErrorText, orderLimitWords, orderTotalWords } from "../../src/order.js";
 import { closeMarket, closeLimitPrice, closeLimitNote, closeUnreadableNote,
@@ -29,13 +30,13 @@ import { parseCboeJson, CBOE_URL } from "../../src/chain.js";
 const PAPER_HOST = "paper-api.alpaca.markets";
 const PAPER_ACCOUNT = { paperVerified: true, paperSource: `this endpoint posts only to ${PAPER_HOST}` };
 const esc = (x) => String(x == null ? "" : x).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-const page = (title, body, ok) => new Response(
+const page = (title, body, ok, status = 200) => new Response(
   `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title>
 <style>body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#14181d;font-family:ui-monospace,monospace;color:#f5f0e6;padding:20px;box-sizing:border-box}
 div{background:#1a1f26;border:1px solid ${ok ? "#7fb85c" : "#d66a5a"};border-radius:10px;padding:28px;max-width:380px}
 h1{font-size:15px;color:${ok ? "#7fb85c" : "#d66a5a"};margin:0 0 10px}p{font-size:12px;color:#8b95a1;line-height:1.5;word-break:break-word}</style></head>
 <body><div><h1>${title}</h1><p>${body}</p></div></body></html>`,
-  { headers: { "content-type": "text/html; charset=utf-8" } });
+  { status, headers: { "content-type": "text/html; charset=utf-8" } });
 
 // Il feed della chain, con gli header che CBOE si aspetta da un browser.
 const HDRS = { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36", "Referer": "https://www.cboe.com/", "Origin": "https://www.cboe.com" };
@@ -64,11 +65,18 @@ function legQuotes(chain, expKey, legs) {
   });
 }
 
-export default async (req) => {
+/* The blob store, behind one name a test can replace (redesign PR 2, TASK 0a). Production reads the real one. */
+export const deps = { getStore };
+
+export default async (req, context) => {
   try {
+    /* PREVIEWS ARE READ-ONLY (TASK 0a). This page sends an order (path 6) and writes the approval and the position's
+       timeline into the site-wide store, so it runs only on the published production deploy. A preview, or a deploy
+       whose context cannot be read, gets this page and nothing is read, sent or written. See src/deploy.js. */
+    if (!deployWrites(context).ok) return page("Read-only preview", PREVIEW_READ_ONLY, false, 403);
     const url = new URL(req.url);
     const id = url.searchParams.get("id");
-    const store = getStore("autopilot");
+    const store = deps.getStore("autopilot");
     const raw = await store.get("approvals");
     const approvals = raw ? JSON.parse(raw) : {};
     const a = approvals[id];

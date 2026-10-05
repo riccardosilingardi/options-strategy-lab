@@ -23,10 +23,11 @@ import { erf, netBS } from "./engine.js";
 import { ARROW, REGIONS, regionSignals, tagImpacts, taRead } from "./signals.js";
 import { useNarrow, BandThumbnail, payoffBands, bandTakeaway, pnl$ } from "./visuals.jsx";
 import { DEMO, DEMO_TOOLTIP } from "./demo.js";
+import { PREVIEW, PREVIEW_READ_ONLY } from "./deploy.js";
 import { reduceRatios, orderQty, mlegLimitPrice, limitWords, orderLimitWords, limitKind, signedLimitFor, orderBody, orderPreviewLines, orderOutcome, alpacaErrorText, cancelOutcome, cancelWaiting } from "./order.js";
 import { hasOpenInterest, sourceNote, openInterestNote, fetchChain } from "./chain.js";
 import { CloseChoice } from "./orders.jsx";
-import { Btn, Note, Info, Panel, Label, Stat, mono, sans, MONO_STACK, TAP } from "./ui.jsx";
+import { Btn, Note, Info, Panel, Label, Stat, Reveal, mono, sans, MONO_STACK, TAP } from "./ui.jsx";
 import { TYPE } from "./theme.js";
 import { closeSummaryLine } from "./orderRow.js";
 import { marketClockLine } from "./clock.js";
@@ -682,30 +683,15 @@ export function QtyField({ value, min, max, onValue, onValidity, style, ariaLabe
     onChange={(e) => change(e.target.value)} onBlur={blur} style={style} />;
 }
 
-export function OrderTicket({
-  /* `buildOcc` IS GONE FROM THIS SIGNATURE AND IT IS NOT AN OVERSIGHT. It was
-     the fallback behind `quoteFn(l).occ`, and a formatter that turns a strike
-     the app chose into a symbol cannot know whether anybody issued it: on SOYB
-     2026-11-20 it produced SOYB261120C00027500, which the broker refused by
-     name before the order reached the market. The CHAIN is the only thing that
-     knows which contracts exist, and it travels on `quotes[i].occ`. */
-  creds, legs, expKey, ticker, quoteFn, estNet, setMsg, onSent, gate, dte,
-  maxLoss, maxProfit, spot, entryOverride, qty = 1, onQty, qtyNote = null, model = null, feed = null,
-  /* The price, from the screen above. `net` is signed per share.
-
-     `cfg` HAS A DISPLAY DEFAULT AND IT IS NOT A SECOND HOME. The real one is
-     `ticket` in App.jsx; this only keeps a ticket rendered without it from
-     blanking the screen, and such a ticket cannot send anything — with no
-     `legPrices` the net is null and the limit branch of `send()` refuses it by
-     name, the same way `runGate(undefined, …)` fails closed. */
-  cfg = { type: "limit", tif: "day" }, onCfg, quotes = [], legPrices = [], net = null,
-  verdict = null, effective = null, seed = null, onReseed,
-  /* THE GATE'S OWN LIMITS, from the one gate call on the Build screen. Never
-     re-derived here: the figure beside the send has to be the figure the card
-     printed, or the two are two answers to one question. */
-  limits = null,
-  qtyBlock = null,
-}) {
+/**
+ * ORDER PATH 2, AS ONE HOOK (redesign PR 2, TASK 3). The ticket's send, moved here UNCHANGED so the review sheet on
+ * Build and `OrderTicket` run the same lines: the same `runGate(gate, evidence)`, the same `contractListing()` check,
+ * the same `orderBody()` and the same `alpacaReq("/v2/orders", "POST", …)`. `send()` is the ticket's two taps (the first
+ * arms, the second fires); `fire()` is the second tap alone, for a sheet whose opening WAS the first tap and which
+ * writes the order out in full before it (rule 5).
+ */
+export function useTicketSend({ legs, expKey, ticker, quotes = [], net = null, estNet, gate, dte, maxLoss, maxProfit,
+  entryOverride, qty = 1, cfg = { type: "limit", tif: "day" }, legPrices = [], setMsg = () => {}, onSent, qtyBlock = null }) {
   // Clamped again here, at send: the field hands up only in-range numbers,
   // but the prop can come from elsewhere (the budget derivation).
   const qtyNum = Math.max(1, Math.min(20, Math.round(Number(qty) || 1)));
@@ -729,12 +715,6 @@ export function OrderTicket({
   const limit = Number.isFinite(net) ? Math.abs(net) : null;
   const limitStr = limit == null ? "" : limit.toFixed(2);
   const signedLimit = Number.isFinite(net) ? net.toFixed(2) : "";
-  const setLeg = (i, px) => {
-    if (!onCfg) return;
-    const next = (legPrices || []).slice();
-    next[i] = px;
-    onCfg({ legPx: next });
-  };
   // Il cancello gira PRIMA di costruire l'ordine: quello che si vede nel
   // pannello e' esattamente quello che decide se l'ordine parte.
   /* >>> THE EVIDENCE THE SCREEN ABOVE ALREADY HAS. <<< These two calls used to
@@ -755,10 +735,11 @@ export function OrderTicket({
   // butterfly has a GCD of 1 and comes through untouched. See src/order.js.
   const shape = reduceRatios(legs);
   const sendQty = orderQty(qtyNum, shape.factor);
-  const send = async () => {
+  const send = async ({ armed = false } = {}) => {
     if (DEMO) { setMsg(DEMO_TOOLTIP); return; }   // order path 2 of six
+    if (PREVIEW) { setMsg(PREVIEW_READ_ONLY); return; }   // a deploy preview sends nothing (TASK 0a)
     if (qtyProblem) { setMsg(qtyProblem); return; }
-    if (!confirm) { setConfirm(true); return; }
+    if (!confirm && !armed) { setConfirm(true); return; }
     setConfirm(false); setBusy(true); setOutcome(null);
     try {
       const g = runGate(gate, evidence);
@@ -807,11 +788,53 @@ export function OrderTicket({
     }
     setBusy(false);
   };
+  const fire = () => send({ armed: true });
+  return { qtyNum, qtyErr, setQtyErr, qtyProblem, confirm, setConfirm, busy, outcome, setOutcome, arith, limit, limitStr,
+    signedLimit, occs, evidence, preview, shape, sendQty, send, fire };
+}
+
+export function OrderTicket({
+  /* `buildOcc` IS GONE FROM THIS SIGNATURE AND IT IS NOT AN OVERSIGHT. It was
+     the fallback behind `quoteFn(l).occ`, and a formatter that turns a strike
+     the app chose into a symbol cannot know whether anybody issued it: on SOYB
+     2026-11-20 it produced SOYB261120C00027500, which the broker refused by
+     name before the order reached the market. The CHAIN is the only thing that
+     knows which contracts exist, and it travels on `quotes[i].occ`. */
+  creds, legs, expKey, ticker, quoteFn, estNet, setMsg, onSent, gate, dte,
+  maxLoss, maxProfit, spot, entryOverride, qty = 1, onQty, qtyNote = null, model = null, feed = null,
+  /* The price, from the screen above. `net` is signed per share.
+
+     `cfg` HAS A DISPLAY DEFAULT AND IT IS NOT A SECOND HOME. The real one is
+     `ticket` in App.jsx; this only keeps a ticket rendered without it from
+     blanking the screen, and such a ticket cannot send anything — with no
+     `legPrices` the net is null and the limit branch of `send()` refuses it by
+     name, the same way `runGate(undefined, …)` fails closed. */
+  cfg = { type: "limit", tif: "day" }, onCfg, quotes = [], legPrices = [], net = null,
+  verdict = null, effective = null, seed = null, onReseed,
+  /* THE GATE'S OWN LIMITS, from the one gate call on the Build screen. Never
+     re-derived here: the figure beside the send has to be the figure the card
+     printed, or the two are two answers to one question. */
+  limits = null,
+  qtyBlock = null,
+  /* REDESIGN PR 2: on Build the order goes out from the review sheet (the same `useTicketSend()`); the ticket is shown
+     in "More on this trade ▾" for its leg-by-leg prices, order type and time in force, with no Send of its own — one
+     route to an order from a screen. */
+  noSend = false,
+}) {
+  const { qtyNum, setQtyErr, qtyProblem, confirm, setConfirm, busy, outcome, setOutcome, arith, limit, signedLimit,
+    preview, shape, sendQty, send } = useTicketSend({ legs, expKey, ticker, quotes, net, estNet, gate, dte, maxLoss,
+    maxProfit, entryOverride, qty, cfg, legPrices, setMsg, onSent, qtyBlock });
+  const setLeg = (i, px) => {
+    if (!onCfg) return;
+    const next = (legPrices || []).slice();
+    next[i] = px;
+    onCfg({ legPx: next });
+  };
   const seedDiffers = Array.isArray(seed) && seed.length === (legPrices || []).length
     && seed.some((v, i) => Math.abs(Number(v) - Number(legPrices[i])) > 0.0049);
   return (
     <div style={{ marginTop: 12, padding: "10px 12px", background: T.bg, border: `1px solid ${T.violet}44`, borderRadius: 7 }}>
-      <Label>SEND THE ORDER · ALPACA PAPER ACCOUNT</Label>
+      <Label>{noSend ? "THE ORDER IN DETAIL · LEG BY LEG" : "SEND THE ORDER · ALPACA PAPER ACCOUNT"}</Label>
 
       {/* 1 — THE MARKET, READ-ONLY, FIRST. */}
       <LegMarketTable legs={legs} quotes={quotes} ticker={ticker} expKey={expKey} feed={feed} />
@@ -859,10 +882,10 @@ export function OrderTicket({
           <Sel value={cfg.type} onChange={(e) => onCfg({ type: e.target.value })}><option value="limit">Limit — set my price</option><option value="market">Market — take what is there</option></Sel></div>
         <div><div style={{ ...mono, fontSize: FS.xs, color: T.dim }}>HOW LONG IT STANDS</div>
           <Sel value={cfg.tif} onChange={(e) => onCfg({ tif: e.target.value })}><option value="day">Today only</option><option value="gtc">Until I cancel</option></Sel></div>
-        <Btn color={confirm ? T.red : T.violet} onClick={send} disabled={busy || !preview.pass || DEMO || !!qtyProblem}
-          title={DEMO ? DEMO_TOOLTIP : undefined}>
-          <Send size={12} /> {busy ? "Sending…" : DEMO ? DEMO_TOOLTIP : qtyProblem ? qtyProblem : !preview.pass ? "BLOCKED BY THE RISK GATE" : confirm ? "TAP AGAIN TO CONFIRM" : "Send the order"}
-        </Btn>
+        {!noSend && <Btn color={confirm ? T.red : T.violet} onClick={() => send()} disabled={busy || !preview.pass || DEMO || PREVIEW || !!qtyProblem}
+          title={DEMO ? DEMO_TOOLTIP : PREVIEW ? PREVIEW_READ_ONLY : undefined}>
+          <Send size={12} /> {busy ? "Sending…" : DEMO ? DEMO_TOOLTIP : PREVIEW ? "Read-only preview" : qtyProblem ? qtyProblem : !preview.pass ? "BLOCKED BY THE RISK GATE" : confirm ? "TAP AGAIN TO CONFIRM" : "Send the order"}
+        </Btn>}
       </div>
 
       {/* 5 and 6 — THE BOOK, THE VERDICT BAND, THE CEILING SENTENCE, THE FOUR
@@ -892,6 +915,7 @@ export function OrderTicket({
             qty: qtyNum, type: cfg.type, limit: signedLimit, tif: cfg.tif, intent: "open" })}
           onCancel={() => setConfirm(false)} />
       )}
+      {PREVIEW && <Note color={T.amber} style={{ marginTop: 4 }}>{PREVIEW_READ_ONLY}</Note>}
       <OrderOutcome outcome={outcome} onDismiss={() => setOutcome(null)} />
       {!preview.pass && (
         <div style={{ display: "grid", gap: 3, marginTop: 7 }}>
@@ -929,6 +953,7 @@ export function UnrecordedCard({ group: g, gate, orders = [], onImport, setMsg, 
   const [closePrep, setClosePrep] = useState(null);   // { key, busy, prepared, refusal, sent }
   const closeGroup = async (grp, choice = null, chain = null) => {
     if (DEMO) { setClosePrep({ key: grp.key, refusal: DEMO_TOOLTIP }); return; }
+    if (PREVIEW) { setClosePrep({ key: grp.key, refusal: PREVIEW_READ_ONLY }); return; }
     setClosePrep((cp) => ({ key: grp.key, busy: true, prepared: choice ? cp?.prepared : null, choice }));
     const prepared = await prepareClose(grp, { gate: (pr) => runGate(gate, pr), openOrders: orders || [],
       fetchChain: chain ? async () => chain : fetchChain, choice });
@@ -956,9 +981,10 @@ export function UnrecordedCard({ group: g, gate, orders = [], onImport, setMsg, 
       <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
         <Btn small color={T.action} onClick={onImport}>Import</Btn>
         <Btn small ghost color={T.ink} onClick={() => closeGroup(g)}
-          disabled={DEMO || (closePrep?.key === g.key && (closePrep.busy || !!closePrep.prepared))}
-          title={DEMO ? DEMO_TOOLTIP : undefined}>Close at limit</Btn>
+          disabled={DEMO || PREVIEW || (closePrep?.key === g.key && (closePrep.busy || !!closePrep.prepared))}
+          title={DEMO ? DEMO_TOOLTIP : PREVIEW ? PREVIEW_READ_ONLY : undefined}>Close at limit</Btn>
       </div>
+      {PREVIEW && <Note color={T.amber} style={{ marginTop: 4 }}>{PREVIEW_READ_ONLY}</Note>}
       {closePrep && closePrep.key === g.key && (
         <CloseConfirm prep={closePrep} onSend={sendGroupClose} onCancel={() => setClosePrep(null)} clock={clock}
           onChoose={(c) => closeGroup(g, c, closePrep.prepared?.chainUsed || null)} />
@@ -1138,12 +1164,21 @@ export function Markdown({ text, style }) {
   return <div style={{ fontSize: FS.sm, color: T.body, ...style }}>{blocks}</div>;
 }
 
+/** The opening every Build question carries (redesign PR 2): the copilot explains; it never proposes or places a trade. */
+export const COPILOT_EXPLAIN_ONLY = "You explain; you never propose a trade, a structure, a size or an order, and you never tell me to buy, sell or close.";
 export const SKILLS = [
   { id: "pretrade", label: "Pre-trade analysis", prompt: `Run the pre-trade analysis of the current strategy: structure, Greeks, risk/reward, breakevens against support and resistance, seasonal alignment and news. Finish with a GO/NO-GO checklist and a position size within the per-trade limit (${perTradeCapLabel()}).` },
   { id: "positions", label: "Position review", prompt: `Review the open positions against the rules (${ruleBadge()}): for each one give → HOLD / CLOSE / ROLL with the reasoning and the levels to watch. Remember the ${stopLossLabel()} rule is a warning, never an automatic close.` },
   { id: "news", label: "News impact", prompt: "Analyse the tagged news in context: which items affect my positions and the underlyings on the radar? Separate noise from signal, with cause→effect and a time horizon." },
   { id: "radar", label: "Opportunity radar", prompt: `From the seasonal scanner and the weather signals, propose the 2 best opportunities of this week with a suggested structure (relative strikes, ~${RULES.targetEntryDTE} DTE), the thesis, the risk and the entry trigger. Nothing below ${RULES.minEntryDTE} DTE at entry: the risk gate refuses it.` },
+  /* REDESIGN PR 2 (owner's mockup "3 · Build"): three questions about the LOADED trade. Each one tells the model it
+     explains and never proposes a trade (PRD §1: copilots explain; they never propose or place one). */
+  { id: "wrong", label: "What would make it wrong?", prompt: `${COPILOT_EXPLAIN_ONLY} About the current strategy only: what would make it wrong? Name the price levels, the dates (the expiry and the ${RULES.exitDTE}-day exit) and the events before expiry that would turn it against me, and which of the four factors (seasonality, the price trend, weather, news) would have to change. Explain what each would mean for this trade.` },
+  { id: "compare", label: "Compare with the other cards", prompt: `${COPILOT_EXPLAIN_ONLY} Compare the current strategy with the other cards the app lists for the same market (otherCards in the context): what each one bets on, where its risk and its chance differ, and what the trade-off between them is. Do not rank them and do not say which to take: explain the differences.` },
+  { id: "newsmove", label: "News that could move it", prompt: `${COPILOT_EXPLAIN_ONLY} From the tagged news in the context, which items could move the current strategy's market before its expiry, in which direction, and why? Separate noise from signal, with cause and effect and a time horizon, and say what each would do to this trade.` },
 ];
+/** The four questions Build's copilot shows (owner's mockup), in order; the rest of SKILLS stay where they were. */
+export const BUILD_SKILL_IDS = Object.freeze(["pretrade", "wrong", "compare", "newsmove"]);
 /**
  * Pull the text deltas out of one or more SSE frames.
  *
@@ -1328,7 +1363,7 @@ export async function askAI(_key, messages, contextStr, onDelta, system = SYSTEM
   return (j.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
 }
 export function buildContext(ctx) {
-  const { store, scan, news, ticker, legs, expKey, A, spot, seasonalSrc } = ctx;
+  const { store, scan, news, ticker, legs, expKey, A, spot, seasonalSrc, otherCards = null } = ctx;
   return JSON.stringify({
     date: new Date().toISOString().slice(0, 10),
     currentTicker: ticker,
@@ -1364,6 +1399,9 @@ export function buildContext(ctx) {
     taggedNews: (news || []).slice(0, 10).map((n) => ({ title: n.title, geo: !!n.geo,
       impacts: (n.impacts || []).map((im) => ({ tk: im.tk, dir: ARROW[im.dir], why: im.why })) })),
     seasonalitySource: seasonalSrc,
+    // THE OTHER CARDS FOR THIS MARKET (redesign PR 2, "Compare with the other cards"): Find's own figures, read, never
+    // recomputed. Null when the caller did not hand any.
+    otherCards: Array.isArray(otherCards) ? otherCards : null,
   });
 }
 /**
@@ -1532,7 +1570,12 @@ export function TaCopilot({ ticker, bars, structure, convo, setConvo, onAnalysis
   );
 }
 
-export function CopilotTab({ ctx, apiKey, convo, setConvo, onAnalysis }) {
+/**
+ * THE COPILOT'S ONE SEND (redesign PR 2): Build's copilot section and `CopilotTab` call this, so a question asked in
+ * either streams the same way, keeps a cut-off answer marked as cut off, and is filed in the Journal (`onAnalysis`).
+ * Moved here from `CopilotTab` unchanged.
+ */
+export function useCopilot({ ctx, apiKey, convo, setConvo, onAnalysis }) {
   const { msgs = [], busy = false, err = null, partial = "" } = convo || {};
   const [input, setInput] = useState("");
   const send = async (text, label) => {
@@ -1600,6 +1643,11 @@ export function CopilotTab({ ctx, apiKey, convo, setConvo, onAnalysis }) {
       </body></html>`);
     w.document.close();
   };
+  return { msgs, busy, err, partial, input, setInput, send, printConvo };
+}
+
+export function CopilotTab({ ctx, apiKey, convo, setConvo, onAnalysis, skills = SKILLS }) {
+  const { msgs, busy, err, partial, input, setInput, send, printConvo } = useCopilot({ ctx, apiKey, convo, setConvo, onAnalysis });
   return (
     <div style={{ marginTop: 12 }}>
       <Panel>
@@ -1613,7 +1661,7 @@ export function CopilotTab({ ctx, apiKey, convo, setConvo, onAnalysis }) {
           )}
         </div>
         <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
-          {SKILLS.map((sk) => <Btn key={sk.id} small ghost color={T.blue} onClick={() => send(sk.prompt, sk.label)} disabled={busy}>{sk.label}</Btn>)}
+          {skills.map((sk) => <Btn key={sk.id} small ghost color={T.blue} onClick={() => send(sk.prompt, sk.label)} disabled={busy}>{sk.label}</Btn>)}
         </div>
         {/* No fixed-height window. An analysis is meant to be READ, and a 420px
             box on a desktop turned every answer into a peephole. It grows with
@@ -2146,6 +2194,7 @@ export function GuardianPanel({ pos, spot, dteLeft, ivNow, vol, seasonalNow, pnl
   };
   const placeExit = async (label, targetPnl) => {
     if (DEMO) { setMsg(DEMO_TOOLTIP); return; }   // order path 4 of six
+    if (PREVIEW) { setMsg(PREVIEW_READ_ONLY); return; }   // a deploy preview sends nothing (TASK 0a)
     setLadderBusy(label);
     try {
       // Ogni gradino della scala e' un ordine su Alpaca: passa dal cancello.
@@ -2261,18 +2310,19 @@ export function GuardianPanel({ pos, spot, dteLeft, ivNow, vol, seasonalNow, pnl
               close the position for nothing. The stop rung stays: the maximum
               LOSS is always known, which is non-negotiable rule 2. */}
           {tpT.perCombo != null ? (<>
-            <Btn small ghost color={T.green} title={DEMO ? DEMO_TOOLTIP : undefined} onClick={() => placeExit(takeProfitLabel(tpT.basis), tpT.perCombo)} disabled={!!ladderBusy || DEMO}>GTC {takeProfitLabel(tpT.basis)} @ {ladderRungPrice(pos.entryNet, tpT.perCombo)}</Btn>
+            <Btn small ghost color={T.green} title={DEMO ? DEMO_TOOLTIP : undefined} onClick={() => placeExit(takeProfitLabel(tpT.basis), tpT.perCombo)} disabled={!!ladderBusy || DEMO || PREVIEW}>GTC {takeProfitLabel(tpT.basis)} @ {ladderRungPrice(pos.entryNet, tpT.perCombo)}</Btn>
             {tpT.basis !== "premium" && Number.isFinite(pos.maxProfit) && (
-              <Btn small ghost color={T.green} title={DEMO ? DEMO_TOOLTIP : undefined} onClick={() => placeExit(`TP ${scaleOutLabel()}`, RULES.scaleOutPct * pos.maxProfit)} disabled={!!ladderBusy || DEMO}>GTC TP {scaleOutLabel()} @ {ladderRungPrice(pos.entryNet, RULES.scaleOutPct * pos.maxProfit)}</Btn>
+              <Btn small ghost color={T.green} title={DEMO ? DEMO_TOOLTIP : undefined} onClick={() => placeExit(`TP ${scaleOutLabel()}`, RULES.scaleOutPct * pos.maxProfit)} disabled={!!ladderBusy || DEMO || PREVIEW}>GTC TP {scaleOutLabel()} @ {ladderRungPrice(pos.entryNet, RULES.scaleOutPct * pos.maxProfit)}</Btn>
             )}
           </>) : (
             <span style={{ ...mono, fontSize: FS.xs, color: T.dim }}>
               {`No profit rung: this position has ${NO_CEILING}, so ${pctText(RULES.takeProfitPct)} of the maximum is not a price. The ${RULES.exitDTE}-day exit still applies.`}
             </span>
           )}
-          <Btn small ghost color={T.red} title={DEMO ? DEMO_TOOLTIP : undefined} onClick={() => placeExit(stopLossLabel(), RULES.stopLossPct * pos.maxLoss)} disabled={!!ladderBusy || DEMO}>{stopLossLabel()} @ {ladderRungPrice(pos.entryNet, RULES.stopLossPct * pos.maxLoss)}</Btn>
+          <Btn small ghost color={T.red} title={DEMO ? DEMO_TOOLTIP : undefined} onClick={() => placeExit(stopLossLabel(), RULES.stopLossPct * pos.maxLoss)} disabled={!!ladderBusy || DEMO || PREVIEW}>{stopLossLabel()} @ {ladderRungPrice(pos.entryNet, RULES.stopLossPct * pos.maxLoss)}</Btn>
         </>)}
       </div>
+      {alpaca && PREVIEW && <Note color={T.amber} style={{ marginTop: 4 }}>{PREVIEW_READ_ONLY}</Note>}
       {sim && (
         <div style={{ display: "flex", gap: 14, marginTop: 10, flexWrap: "wrap", padding: "8px 10px", background: `${T.blue}0d`, borderRadius: 6 }}>
           <Stat k={`HITS ${takeProfitLabel()} FIRST`} v={`${(sim.pTP * 100).toFixed(0)}%`} c={T.green} />
@@ -2830,31 +2880,34 @@ export function confluence(seasonalM, ta) {
   return { verdict, c, advice, warn };
 }
 
+/* ====================================================================
+   PRICE HISTORY × WHERE IT COULD GO × WHERE YOU MAKE MONEY — Build's one chart, on the owner's mockup "3 · Build"
+   (redesign PR 2, TASK 2). One price axis on the right, shared by every panel, left to right:
+     · the last 60 sessions of the price (a longer history one tap away: 1Y, 5Y);
+     · a BLUE FAN from today to expiry — the inner band holds 68 of 100 simulated paths, the outer 95 — on the same
+       lognormal the chance is drawn on (the chain's IV, the season's counted drift);
+     · BARS OF WHERE IT ENDS at expiry, green where the trade pays;
+     · THE PAYOFF at the right edge, at expiry, rotated onto the same axis;
+     · the BREAKEVEN as a dashed line with its label, today's price as a DOT, each leg's strike as a thin line.
+   It used to have a 560px floor (the page scrolled sideways inside it on a phone), a violet 50 / 90% cone and no
+   ending bars; the payoff strip appeared only above 820px. It now draws at the card's full width at any size.
+   "How to read ⓘ" opens one paragraph. Only Build mounts it.
+==================================================================== */
+const FAN_Z = Object.freeze({ lo95: -1.96, lo68: -0.9945, mid: 0, hi68: 0.9945, hi95: 1.96 });
+export const UNIFIED_SESSIONS = 60;
 export function UnifiedView({ ticker, dte, sigma, driftM, curve, legs, breakevens, spot, onTa }) {
   const [bars, setBars] = useState(null);
   const [allBars, setAllBars] = useState(null);
-  const [range, setRange] = useState(180);
+  const [range, setRange] = useState(UNIFIED_SESSIONS);
   const [err, setErr] = useState(null);
+  const [how, setHow] = useState(false);
   const wrapRef = React.useRef(null);
-  // This chart has a floor of 560px: below it the candles, the cone and the
-  // rotated payoff stop being readable at all. On a 390px phone that floor used
-  // to make the WHOLE PAGE scroll sideways — every other screen shifted with it
-  // and nothing lined up. The width stays; what changes is that the overflow is
-  // the CHART's, inside its own scroller, so the page never moves (CLAUDE.md:
-  // this app is demoed on a phone).
-  const MIN_W = 560;
-  const [W, setW] = useState(MIN_W);
+  const [W, setW] = useState(340);
   useEffect(() => {
-    // The observer must attach to a node that EXISTS ON MOUNT. The loading and
-    // error states used to return before the wrapper was rendered, so `wrapRef`
-    // was null when this ran, nothing was ever observed, and W kept its initial
-    // value for the life of the component. That was invisible while the initial
-    // value happened to be 1100 — about right on a desktop — and became a chart
-    // frozen at 560px in a 1382px column the moment the initial value changed.
-    // The wrapper is now always rendered and the states live inside it.
+    // The observer attaches to a node that exists on mount (the states render inside the same wrapper).
     const el = wrapRef.current;
-    if (!el) return;
-    const measure = () => setW(Math.max(MIN_W, el.clientWidth || MIN_W));
+    if (!el || typeof ResizeObserver === "undefined") return undefined;
+    const measure = () => setW(Math.max(240, el.clientWidth || 340));
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     measure();
@@ -2875,170 +2928,130 @@ export function UnifiedView({ ticker, dte, sigma, driftM, curve, legs, breakeven
   }, [ticker, range > 400]); // eslint-disable-line
   useEffect(() => {
     if (!allBars) return;
-    const n = range <= 180 ? 90 : range <= 400 ? 250 : allBars.length;
+    const n = range <= UNIFIED_SESSIONS ? UNIFIED_SESSIONS : range <= 400 ? 250 : allBars.length;
     setBars(allBars.slice(-n));
   }, [allBars, range]);
-  // Rendered through the SAME wrapper as the chart, so the width is measured
-  // from the moment the component mounts rather than whenever data arrives.
   const shell = (inner) => <div ref={wrapRef} style={{ maxWidth: "100%" }}>{inner}</div>;
-  if (err) return shell(<div style={{ ...mono, fontSize: FS.xs, color: T.red }}>Chart unavailable: {err}</div>);
-  if (!bars || !spot || !curve?.length) return shell(<div style={{ ...mono, fontSize: FS.xs, color: T.mut }}>Loading the chart…</div>);
+  if (err) return shell(<div style={{ ...sans, fontSize: FS.sm, color: T.mut }}>The price history is not loaded: {err}</div>);
+  if (!bars || !bars.length || !spot || !curve?.length) return shell(<div style={{ ...sans, fontSize: FS.sm, color: T.mut }}>Loading the chart…</div>);
 
-  const H = 440, padL = 6, padR = 60, padT = 10, padB = 26;
-  // THE PAYOFF, BESIDE THE PRICE CHART, ON THE SAME PRICE AXIS (PRD §6).
-  // Price is the vertical axis here, so the multi-leg payoff belongs rotated
-  // 90° in a strip on the right: at any height you read the price on the axis
-  // and, straight across, what the trade is worth there. It was a separate
-  // chart further down the page with its own axis, which meant comparing "where
-  // the price could go" with "where this makes money" was a memory exercise.
-  // ADAPTIVE: the strip needs real room to be worth anything, so it appears
-  // only when there is some, and on a phone the full-width payoff chart below
-  // carries it instead.
-  const PAY_MIN_W = 820;
-  const showPay = W >= PAY_MIN_W;
-  const payGap = showPay ? 10 : 0;
-  const payW = showPay ? Math.max(120, Math.min(210, (W - padL - padR) * 0.19)) : 0;
-  const plotW = W - padL - padR - payW - payGap;
-  const shareH = range > 400 ? 0.72 : 0.58;
-  const histW = plotW * shareH;
-  const projW = plotW * (1 - shareH);
-  const x0 = padL, xToday = padL + histW, xEnd = padL + histW + projW;
-  const payX0 = xEnd + payGap;
-  const xRight = showPay ? payX0 + payW : xEnd;
+  const H = 240, padL = 2, padR = 40, padT = 8, padB = 20;
+  const inner = W - padL - padR;
+  // Left to right: history 44%, the fan 26%, where it ends 12%, the payoff 18%.
+  const xHist0 = padL, xToday = padL + inner * 0.44, xFanEnd = xToday + inner * 0.26;
+  const xDist0 = xFanEnd + 2, xDistEnd = xFanEnd + inner * 0.12;
+  const xPay0 = xDistEnd + 4, xPayEnd = padL + inner;
 
-  // cono lognormale: drift stagionale + IV reale
+  // The fan: the lognormal from today, drifted on the season's counted mean, at the chain's IV.
   const mu = Math.log(1 + (driftM || 0) / 100) * 12;
-  const qz = { p5: -1.645, p25: -0.674, p50: 0, p75: 0.674, p95: 1.645 };
   const days = Math.max(1, dte);
-  const cone = [];
+  const fan = [];
   for (let i = 0; i <= 24; i++) {
     const t = (i / 24) * (days / 365);
-    const o = { x: xToday + (i / 24) * projW };
-    for (const [k, z] of Object.entries(qz)) o[k] = spot * Math.exp((mu - 0.5 * sigma * sigma) * t + sigma * Math.sqrt(t) * z);
-    cone.push(o);
+    const o = { x: xToday + (i / 24) * (xFanEnd - xToday) };
+    for (const [k, z] of Object.entries(FAN_Z)) o[k] = spot * Math.exp((mu - 0.5 * sigma * sigma) * t + sigma * Math.sqrt(t) * z);
+    fan.push(o);
   }
-  // dominio Y
   const ys = [
     ...bars.map((b) => b.low), ...bars.map((b) => b.high),
-    ...cone.map((c) => c.p5), ...cone.map((c) => c.p95),
-    ...legs.map((l) => l.strike), ...(breakevens || []),
-  ];
+    ...fan.map((c) => c.lo95), ...fan.map((c) => c.hi95),
+    ...legs.map((l) => l.strike), ...(breakevens || []), spot,
+  ].filter((v) => Number.isFinite(v) && v > 0);
   const yMin = Math.min(...ys) * 0.985, yMax = Math.max(...ys) * 1.015;
   const Y = (v) => padT + (1 - (v - yMin) / (yMax - yMin)) * (H - padT - padB);
-  const XH = (i) => x0 + (i / (bars.length - 1)) * histW;
+  const XH = (i) => xHist0 + (bars.length > 1 ? i / (bars.length - 1) : 0) * (xToday - xHist0);
 
-  // zone profitto/perdita a scadenza (fasce orizzontali, solo lato proiezione)
-  const zones = [];
-  let zs = null;
-  for (let i = 0; i < curve.length; i++) {
-    const pos = curve[i].exp > 0;
-    if (pos && zs == null) zs = curve[i].s;
-    if ((!pos || i === curve.length - 1) && zs != null) { zones.push([zs, curve[i].s]); zs = null; }
-  }
-  // coerenza: P(prezzo a scadenza dentro zona verde) con lo stesso modello del cono
+  // Where it pays at expiry, read off `curve` (the same payoff every figure on Build reads).
+  const payAt = (px) => {
+    let best = curve[0];
+    for (const c of curve) if (Math.abs(c.s - px) < Math.abs(best.s - px)) best = c;
+    return best.exp;
+  };
+  // Where it ends: the same lognormal at expiry, in bins along the price axis.
   const erf2 = (x) => { const sg = x < 0 ? -1 : 1; x = Math.abs(x); const t2 = 1 / (1 + 0.3275911 * x); return sg * (1 - (((((1.061405429 * t2 - 1.453152027) * t2) + 1.421413741) * t2 - 0.284496736) * t2 + 0.254829592) * t2 * Math.exp(-x * x)); };
   const Tyr = days / 365, sq = sigma * Math.sqrt(Tyr), muT = Math.log(spot) + (mu - 0.5 * sigma * sigma) * Tyr;
-  const cdf = (x) => 0.5 * (1 + erf2((Math.log(x) - muT) / (sq * Math.SQRT2)));
-  const pIn = zones.reduce((a, [lo, hi]) => a + Math.max(0, cdf(Math.min(hi, yMax * 2)) - cdf(Math.max(lo, 0.01))), 0);
+  const cdf = (x) => (x <= 0 ? 0 : 0.5 * (1 + erf2((Math.log(x) - muT) / (sq * Math.SQRT2))));
+  const NB = 28;
+  const dist = Array.from({ length: NB }, (_, i) => {
+    const lo = yMin + (i / NB) * (yMax - yMin), hi = yMin + ((i + 1) / NB) * (yMax - yMin);
+    return { lo, hi, p: Math.max(0, cdf(hi) - cdf(lo)), pays: payAt((lo + hi) / 2) > 0 };
+  });
+  const peak = Math.max(...dist.map((d) => d.p), 1e-9);
+  const pIn = dist.reduce((a, d) => a + (d.pays ? d.p : 0), 0);
 
-  /* ---- the payoff, rotated onto the shared price axis ----
-     Same `curve` the zones above are cut from, so the strip and the green bands
-     can never disagree: one is the other read sideways. Only the visible price
-     range is drawn — a payoff that runs off the top of the axis would invite a
-     comparison with a price the chart is not showing. */
-  const payPts = showPay
-    ? curve.filter((c) => c.s >= yMin && c.s <= yMax).map((c) => ({ y: Y(c.s), v: c.exp }))
-    : [];
-  const payMax = payPts.length ? Math.max(...payPts.map((p2) => Math.abs(p2.v)), 1) : 1;
-  // Zero sits a third in from the left, so a credit spread's small win still has
-  // somewhere to be drawn and the loss side is not squeezed to nothing.
-  const payZero = payX0 + payW * 0.34;
-  const PX = (v) => payZero + (v / payMax) * (v >= 0 ? payX0 + payW - 9 - payZero : payZero - payX0 - 9);
-  const payPath = payPts.map((p2, i) => `${(i ? "L" : "M")}${PX(p2.v).toFixed(1)},${p2.y.toFixed(1)}`).join("");
+  // The payoff at the right edge: zero a third in, profit to the right, loss to the left.
+  const payPts = curve.filter((c) => c.s >= yMin && c.s <= yMax).map((c) => ({ y: Y(c.s), v: c.exp }));
+  const payMax = payPts.length ? Math.max(...payPts.map((q) => Math.abs(q.v)), 1) : 1;
+  const payZero = xPay0 + (xPayEnd - xPay0) * 0.34;
+  const PX = (v) => payZero + (v / payMax) * (v >= 0 ? xPayEnd - 3 - payZero : payZero - xPay0 - 3);
+  const payPath = payPts.map((q, i) => `${(i ? "L" : "M")}${PX(q.v).toFixed(1)},${q.y.toFixed(1)}`).join("");
+  const band = (a, b) => fan.map((c) => `${c.x.toFixed(1)},${Y(c[a]).toFixed(1)}`).join(" ") + " " + [...fan].reverse().map((c) => `${c.x.toFixed(1)},${Y(c[b]).toFixed(1)}`).join(" ");
+  const ticks = 4;
+  const closes = bars.map((b, i) => `${(i ? "L" : "M")}${XH(i).toFixed(1)},${Y(b.close).toFixed(1)}`).join("");
+  const sessions = range <= UNIFIED_SESSIONS ? `${bars.length} sessions` : range <= 400 ? "1 year" : "5 years";
 
-  const poly = (ks) => cone.map((c) => `${c.x.toFixed(1)},${Y(c[ks[0]]).toFixed(1)}`).join(" ") + " " + [...cone].reverse().map((c) => `${c.x.toFixed(1)},${Y(c[ks[1]]).toFixed(1)}`).join(" ");
-  const gTicks = 5;
-
-  // The observer measures the OUTER box; the scroller is the inner one, so the
-  // measured width is the space actually available rather than the chart's own.
   return (
-    <div ref={wrapRef} style={{ maxWidth: "100%" }}>
-      <div style={{ display: "flex", gap: 4, marginBottom: 6, justifyContent: "flex-end" }}>
-        {[[180, "6M"], [365, "1Y"], [1825, "5Y"]].map(([v, l]) => (
-          <Btn key={l} small ghost={range !== v} onClick={() => setRange(v)}>{l}</Btn>
-        ))}
-      </div>
-      <div style={{ overflowX: "auto", overflowY: "hidden", maxWidth: "100%", WebkitOverflowScrolling: "touch" }}>
-      <svg width={W} height={H} style={{ display: "block", background: T.bg, borderRadius: 8, border: `1px solid ${T.line}` }}>
-        {/* griglia + asse prezzi */}
-        {Array.from({ length: gTicks + 1 }, (_, i) => {
-          const v = yMin + (i / gTicks) * (yMax - yMin);
+    <div ref={wrapRef} data-unified style={{ maxWidth: "100%" }}>
+      <svg width={W} height={H} role="img" aria-label={`${ticker}: price history, where it could go by expiry and where this trade makes money`}
+        style={{ display: "block", maxWidth: "100%" }}>
+        {Array.from({ length: ticks + 1 }, (_, i) => {
+          const v = yMin + (i / ticks) * (yMax - yMin);
           return (<g key={i}>
-            <line x1={x0} x2={xRight} y1={Y(v)} y2={Y(v)} stroke={T.line} strokeWidth={0.6} />
-            <text x={xRight + 6} y={Y(v) + 3} fill={T.dim} fontSize={FS.xs} fontFamily="monospace">{v.toFixed(2)}</text>
+            <line x1={xHist0} x2={xPayEnd} y1={Y(v)} y2={Y(v)} stroke={T.line} strokeWidth={0.6} />
+            <text x={xPayEnd + 4} y={Y(v) + 4} fill={T.dim} fontSize={FS.xs} fontFamily={MONO_STACK}>{v.toFixed(2)}</text>
           </g>);
         })}
-        {/* zone strategia (proiezione): verde = profitto a scadenza */}
-        <rect x={xToday} y={padT} width={projW} height={H - padT - padB} fill={T.red} opacity={0.055} />
-        {zones.map(([lo, hi], i) => (
-          <rect key={i} x={xToday} y={Y(hi)} width={projW} height={Math.max(0, Y(lo) - Y(hi))} fill={T.green} opacity={0.16} />
+        {/* the fan, blue: 95% pale, 68% darker, the middle path dashed */}
+        <polygon points={band("hi95", "lo95")} fill={T.blue} opacity={0.14} />
+        <polygon points={band("hi68", "lo68")} fill={T.blue} opacity={0.26} />
+        <polyline points={fan.map((c) => `${c.x.toFixed(1)},${Y(c.mid).toFixed(1)}`).join(" ")} fill="none" stroke={T.blue} strokeWidth={1} strokeDasharray="3 3" />
+        {/* the price history */}
+        <path d={closes} fill="none" stroke={T.ink} strokeWidth={1.3} />
+        {/* where it ends, green where it pays */}
+        {dist.map((d, i) => (
+          <rect key={i} x={xDist0} y={Y(d.hi) + 0.5} height={Math.max(0.5, Y(d.lo) - Y(d.hi) - 1)}
+            width={Math.max(0, (d.p / peak) * (xDistEnd - xDist0))} fill={d.pays ? T.green : T.field} opacity={d.pays ? 0.85 : 0.7} />
         ))}
-        {/* cono probabilità */}
-        <polygon points={poly(["p95", "p5"])} fill={T.violet} opacity={0.10} />
-        <polygon points={poly(["p75", "p25"])} fill={T.violet} opacity={0.16} />
-        <polyline points={cone.map((c) => `${c.x.toFixed(1)},${Y(c.p50).toFixed(1)}`).join(" ")} fill="none" stroke={T.violet} strokeWidth={1.3} strokeDasharray="4 3" />
-        {/* candele storiche */}
-        {bars.map((b, i) => {
-          const x = XH(i), up = b.close >= b.open, cw = Math.max(1.4, histW / bars.length * 0.55);
-          return (<g key={i}>
-            <line x1={x} x2={x} y1={Y(b.high)} y2={Y(b.low)} stroke={up ? T.green : T.red} strokeWidth={0.8} />
-            <rect x={x - cw / 2} y={Y(Math.max(b.open, b.close))} width={cw} height={Math.max(1, Math.abs(Y(b.open) - Y(b.close)))} fill={up ? T.green : T.red} />
-          </g>);
-        })}
-        {/* separatore OGGI */}
-        <line x1={xToday} x2={xToday} y1={padT} y2={H - padB} stroke={T.amber} strokeWidth={1} strokeDasharray="3 3" />
-        <text x={xToday + 4} y={padT + 10} fill={T.amber} fontSize={FS.xs} fontFamily="monospace">TODAY ${spot.toFixed(2)}</text>
-        <text x={xEnd - 4} y={padT + 10} fill={T.dim} fontSize={FS.xs} fontFamily="monospace" textAnchor="end">EXPIRY · {dte} DAYS</text>
-        {/* strike delle gambe + breakeven */}
-        {legs.map((l, i) => (<g key={"lg" + i}>
-          <line x1={xToday} x2={xEnd} y1={Y(l.strike)} y2={Y(l.strike)} stroke={l.side > 0 ? T.green : T.red} strokeWidth={1.4} />
-          <text x={xToday + 4} y={Y(l.strike) - 3} fill={l.side > 0 ? T.green : T.red} fontSize={FS.xs} fontFamily="monospace" fontWeight="700">{l.side > 0 ? "+" : "−"}{l.qty} {l.strike}{l.type === "call" ? "C" : "P"}</text>
+        {/* each leg's strike, thin */}
+        {legs.map((l, i) => (
+          <line key={"lg" + i} x1={xToday} x2={xPayEnd} y1={Y(l.strike)} y2={Y(l.strike)} stroke={T.mut} strokeWidth={0.7} opacity={0.6} />
+        ))}
+        {/* the payoff at expiry, at the right edge */}
+        <line x1={payZero} x2={payZero} y1={padT} y2={H - padB} stroke={T.field} strokeWidth={0.9} />
+        <path d={payPath} fill="none" stroke={T.amber} strokeWidth={2} />
+        {/* the breakeven, dashed, with its label */}
+        {(breakevens || []).filter((b) => b >= yMin && b <= yMax).map((b, i) => (<g key={"be" + i}>
+          <line x1={xHist0} x2={xPayEnd} y1={Y(b)} y2={Y(b)} stroke={T.blue} strokeWidth={1.1} strokeDasharray="6 4" />
+          <text x={xHist0 + 2} y={Y(b) - 4} fill={T.blue} fontSize={FS.xs} fontFamily={MONO_STACK}>BE {b.toFixed(2)}</text>
         </g>))}
-        {(breakevens || []).map((b, i) => (<g key={"be" + i}>
-          <line x1={x0} x2={xRight} y1={Y(b)} y2={Y(b)} stroke={T.blue} strokeWidth={1.1} strokeDasharray="6 4" />
-          <text x={x0 + 4} y={Y(b) - 3} fill={T.blue} fontSize={FS.xs} fontFamily="monospace">BE {b.toFixed(2)}</text>
-        </g>))}
-        {/* etichette date */}
-        <text x={x0} y={H - 8} fill={T.dim} fontSize={FS.xs} fontFamily="monospace">{bars[0]?.time}</text>
-        <text x={xToday} y={H - 8} fill={T.dim} fontSize={FS.xs} fontFamily="monospace" textAnchor="middle">{bars[bars.length - 1]?.time}</text>
-        {/* ---- THE PAYOFF, BESIDE THE PRICE, ON THE SAME AXIS ---- */}
-        {showPay && (
-          <g>
-            <rect x={payX0} y={padT} width={payW} height={H - padT - padB} fill={T.panel} opacity={0.5} />
-            {/* the profit side and the loss side, tinted like the bands opposite */}
-            <rect x={payZero} y={padT} width={Math.max(0, payX0 + payW - payZero)} height={H - padT - padB} fill={T.green} opacity={0.05} />
-            <rect x={payX0} y={padT} width={Math.max(0, payZero - payX0)} height={H - padT - padB} fill={T.red} opacity={0.05} />
-            <line x1={payZero} x2={payZero} y1={padT} y2={H - padB} stroke={T.mut} strokeWidth={0.9} />
-            <path d={payPath} fill="none" stroke={T.amber} strokeWidth={2} />
-            <text x={payX0 + payW / 2} y={padT + 10} fill={T.dim} fontSize={FS.xs} fontFamily="monospace" textAnchor="middle">
-              AT EXPIRY
-            </text>
-            <text x={payZero - 3} y={H - padB - 4} fill={T.red} fontSize={FS.xs} fontFamily="monospace" textAnchor="end">lose</text>
-            <text x={payZero + 3} y={H - padB - 4} fill={T.green} fontSize={FS.xs} fontFamily="monospace">make</text>
-            {/* today's price, read straight across into the payoff */}
-            <line x1={x0} x2={xRight} y1={Y(spot)} y2={Y(spot)} stroke={T.amber} strokeWidth={0.9} strokeDasharray="2 3" opacity={0.75} />
-          </g>
-        )}
+        {/* today's price, a dot */}
+        <circle cx={xToday} cy={Y(spot)} r={4} fill={T.amber} stroke={T.bg} strokeWidth={1.5} />
+        <text x={xHist0} y={H - 5} fill={T.dim} fontSize={FS.xs} fontFamily={MONO_STACK}>{sessions}</text>
+        <text x={xFanEnd} y={H - 5} fill={T.dim} fontSize={FS.xs} fontFamily={MONO_STACK} textAnchor="end">{days}d</text>
+        <text x={xPayEnd} y={H - 5} fill={T.dim} fontSize={FS.xs} fontFamily={MONO_STACK} textAnchor="end">P&amp;L</text>
       </svg>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+        <button onClick={() => setHow((v) => !v)} aria-expanded={how}
+          style={{ ...sans, fontSize: FS.sm, color: T.blue, background: "transparent", border: "none", padding: 0, minHeight: TAP, cursor: "pointer" }}>
+          How to read <span aria-hidden="true">ⓘ</span>
+        </button>
+        <div role="group" aria-label="How much history" style={{ display: "flex", gap: 2 }}>
+          {[[UNIFIED_SESSIONS, "60d"], [365, "1Y"], [1825, "5Y"]].map(([v, l]) => (
+            <button key={l} onClick={() => setRange(v)} aria-pressed={range === v}
+              style={{ ...mono, fontSize: FS.xs, minHeight: TAP, minWidth: TAP, padding: "0 6px", borderRadius: 8, cursor: "pointer",
+                background: range === v ? T.raise : "transparent", color: range === v ? T.ink : T.mut, border: "none" }}>{l}</button>
+          ))}
+        </div>
       </div>
-      <div style={{ display: "flex", gap: 14, marginTop: 6, flexWrap: "wrap", alignItems: "center" }}>
-        {[["■", T.green + "44", "where you make money at expiry"], ["■", T.violet + "55", "where the price could go (pale 5–95%, solid 25–75%)"], ["┅", T.violet, "the middle path"], ["—", T.blue, "break even"], ["—", T.green, "option you bought"], ["—", T.red, "option you sold"]].map(([g, c, l]) => (
-          <span key={l} style={{ ...mono, fontSize: FS.xs, color: T.mut }}><span style={{ color: c, fontWeight: 800 }}>{g}</span> {l}</span>
-        ))}
-      </div>
-      <div style={{ marginTop: 8, padding: "8px 11px", background: `${T.blue}0d`, border: `1px solid ${T.blue}33`, borderRadius: 7, fontSize: FS.sm, color: T.body }}>
-        <b style={{ color: T.ink }}>How to read it:</b> the purple cone is where the price can realistically get to by expiry; the green bands are where this trade makes money. They overlap about <b style={{ color: pIn >= 0.5 ? T.green : T.violet }}>{chanceText(pIn)}</b> of the time — which is the same number as the CHANCE shown above, worked out the same way.
-      </div>
+      <Reveal open={how}>
+        <p role="note" style={{ ...sans, fontSize: FS.sm, color: T.body, lineHeight: LH.body, margin: "0 0 4px" }}>
+          On the left, {ticker}'s price over the last {sessions}. From today's dot, the blue fan is where the price could
+          be by expiry: the darker band holds 68 of every 100 simulated paths, the paler one 95. The bars beside it are
+          where it ends, green where this trade pays. At the right edge, what the trade makes or loses at expiry at each
+          price, read straight across the same price axis. The dashed blue line is the breakeven. The fan ends on green
+          about {chanceText(pIn)} of the time.
+        </p>
+      </Reveal>
     </div>
   );
 }

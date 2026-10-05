@@ -7,14 +7,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
-const FILES = ["src/visuals.test.jsx", "src/wizard.test.jsx", "src/steps.test.jsx", "src/ceiling.test.jsx", "src/order.test.jsx", "src/ticket.test.jsx", "src/card.test.jsx", "src/qty.test.jsx", "src/close.test.jsx", "src/crossing.test.jsx", "src/figures.test.jsx", "src/status.test.jsx", "src/sizing.test.jsx", "src/sync.test.jsx", "src/positionCard.test.jsx", "src/find.test.jsx", "src/ui.test.jsx", "src/orders.test.jsx", "src/evidence.test.jsx", "src/positions.test.jsx", "src/season.test.jsx", "src/placeholder.test.jsx", "src/findB.test.jsx"];
+const FILES = ["src/visuals.test.jsx", "src/wizard.test.jsx", "src/steps.test.jsx", "src/ceiling.test.jsx", "src/order.test.jsx", "src/ticket.test.jsx", "src/card.test.jsx", "src/qty.test.jsx", "src/close.test.jsx", "src/crossing.test.jsx", "src/figures.test.jsx", "src/status.test.jsx", "src/sizing.test.jsx", "src/sync.test.jsx", "src/positionCard.test.jsx", "src/find.test.jsx", "src/ui.test.jsx", "src/orders.test.jsx", "src/evidence.test.jsx", "src/positions.test.jsx", "src/season.test.jsx", "src/placeholder.test.jsx", "src/findB.test.jsx", "src/preview.test.jsx", "src/build.test.jsx"];
+/* Bundled as a Netlify deploy-preview build would be (vite.config.js stamps CONTEXT): redesign PR 2, TASK 0a. Every other
+   file is unstamped, which src/deploy.js reads as "not a deployed build", so nothing in it is read-only. */
+const PREVIEW_FILES = new Set(["src/preview.test.jsx"]);
 const dir = mkdtempSync(join(tmpdir(), "osl-jsx-test-"));
 let failed = 0;
 try {
   for (const file of FILES) {
     const out = join(dir, file.replace(/[/.]/g, "_") + ".cjs");
     // CJS: react-dom/server reaches for node built-ins through require().
-    await build({ entryPoints: [file], bundle: true, platform: "node", format: "cjs", outfile: out, logLevel: "error" });
+    await build({ entryPoints: [file], bundle: true, platform: "node", format: "cjs", outfile: out, logLevel: "error",
+      define: PREVIEW_FILES.has(file) ? { __OSL_DEPLOY_CONTEXT__: '"deploy-preview"' } : {} });
     const r = spawnSync(process.execPath, [out], { stdio: "inherit" });
     if (r.status !== 0) failed = 1;
   }

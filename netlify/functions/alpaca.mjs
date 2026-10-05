@@ -1,4 +1,5 @@
 // Proxy Alpaca: SOLO paper trading (Netlify Functions 2.0)
+import { deployWrites, readOnlyResponse } from "../../src/deploy.js";
 const BASE = "https://paper-api.alpaca.markets"; // hardcoded: mai live
 // L'host paper viaggia in un header di risposta: e' cosi' che il client puo'
 // VERIFICARE (non presumere) di stare parlando col conto paper. src/riskGate.js
@@ -58,7 +59,7 @@ export function routeAllowed(method, path) {
   };
 }
 
-export default async (req) => {
+export default async (req, context) => {
   try {
     const path = new URL(req.url).searchParams.get("path") || "/v2/account";
     const allowed = routeAllowed(req.method, path);
@@ -66,6 +67,11 @@ export default async (req) => {
       return Response.json({ error: allowed.sentence }, {
         status: allowed.status, headers: allowed.status === 405 ? { Allow: "GET, POST, PATCH, DELETE" } : {} });
     }
+    /* PREVIEWS ARE READ-ONLY (redesign PR 2, TASK 0a). Every route that is not a GET sends: a new order (paths 1-6),
+       a replace (path 7), a cancel, cancel all. Those leave only from the published production deploy; a preview — or a
+       deploy whose context cannot be read — answers 403 before a key is read or a byte reaches Alpaca. The reads the
+       app uses (account, clock, positions, orders, contracts) still pass. See src/deploy.js for the Netlify doc pages. */
+    if (String(req.method || "GET").toUpperCase() !== "GET" && !deployWrites(context).ok) return readOnlyResponse();
     const key = Netlify.env.get("ALPACA_KEY");
     const secret = Netlify.env.get("ALPACA_SECRET");
     if (!key || !secret) return Response.json({ error: "server non configurato: imposta ALPACA_KEY/ALPACA_SECRET nelle env Netlify" }, { status: 503 });

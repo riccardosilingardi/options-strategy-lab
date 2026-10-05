@@ -16,7 +16,7 @@ import { orderLegs as orderLegsOf, orderHoldingKey, ordersForRecord, orderIntent
 import { BandThumbnail, payoffBands, bandTakeaway, GaugeFigure, Gauge, CompareFigure, exitPlanSentence, exitPlanDetail,
   OpenInterestStrip, oiStripTakeaway, oiCutAt, oiGhostCut, explainOiStrip, useWidth } from "./visuals.jsx";
 import { fuseSignals, sentimentDirection, signalDirection, signalFamilies, findOrderOf, findOrderCompare, withSignalRank, compareCandidates, againstSignal,
-  readingState, signalSnapshot, compareSignals } from "./signals.js";
+  readingState, signalSnapshot, compareSignals, signalStance, factorStands, AGAINST_MIN_SCORE } from "./signals.js";
 import { N as nCDF, bs as bsPrice, smile as smileIV, payoff as payoffExp, SIGMA, histBacktest, monthReturn,
   parseAvJson, statsFromMatrix } from "./engine.js";
 import { parseOcc, buildOcc, snapStrike, resnapLegs, expiryStrikes, strikeOptions, fetchChain, hasOpenInterest, enrichOpenInterest, feedName, sourceNote, openInterestNote, oiProfile, expiryOpenInterest, nearMoneyOpenInterest, monotonicityBreaks, monotonicityNote, invertedOnStrikes, spotOf, spotAt, atmIv } from "./chain.js";
@@ -49,6 +49,7 @@ import { RULES, sizing, ruleBadge, takeProfitLabel, takeProfitTarget, takeProfit
 import { isStale, freshnessNote, staleAmong , findFreshness } from "./freshness.js";
 import { evaluateTrade, gateSummary } from "./riskGate.js";
 import { DEMO, DEMO_BANNER, DEMO_TOOLTIP, DEMO_SEED_TICKERS, demoPositions } from "./demo.js";
+import { PREVIEW, PREVIEW_BANNER, PREVIEW_READ_ONLY } from "./deploy.js";
 import { CapitalOnboarding, ConfirmSteps, Card, Pill, statusLine } from "./wizard.jsx";
 // THE CONTROLS AND THE ONE CANDIDATE CARD (ROADMAP P10). Its own file: it is
 // nothing but a trade, so it may not live in `steps.jsx`, and `wizard.jsx`
@@ -76,10 +77,17 @@ import { navOf, createNavHistory } from "./nav.js";
 import { exitProgress, entryVsNow, displayName, fileState, pnlShareOfRisk, pnlShareText, holdsStructure,
   sizeWords, withExactMaxProfit, maxProfitCorrection, maxProfitCorrectionNote, exitDateOf } from "./positionView.js";
 import { findStatusText, DEFAULT_FIND_ORDER, BUILD_CTA } from "./rules.js";
+// REDESIGN PR 2: Build on the owner's mockup — its words (rules.js) and its screen (build.jsx).
+import { tradeTakeaway, buildSubLine, expiryShort, deltaSharesText, thetaDayText, reasonRuleText, orderBookLine, capLabel,
+  EXIT_ROWS, EXITS_FOOTER, exitsPill, timeExitDay, sendLabel, SEND_FOOTER, reviewLegWords, reviewLimitLine, oiCheckText,
+  REVIEW_CHECKS, REVIEW_SUB, sentOrderLine, sentFiledText, ORDER_TICK, stanceText, MARKET_READ_LINK } from "./rules.js";
+import { BuildScreen, BuildLoading, BuildNoQuotes, BuildEmpty, Section } from "./build.jsx";
+import { gateChecklist } from "./wizard.jsx";
+import { undefinedRiskLegs } from "./riskGate.js";
 import { EvidenceBar, EvidenceOverlay, DeskSheet, Fold, DeskCountLine } from "./steps.jsx";
 import { BottomBar, placeOf, NAV_BAR_H, FIND_LIST_END } from "./navBar.jsx";
 import { AccountStrip, PositionsBar, WorkingCloseLine } from "./positions.jsx";
-import { Note, CheckField, Btn, Panel, Label, Stat, mono, sans } from "./ui.jsx";
+import { Note, CheckField, Btn, Panel, Label, Stat, Reveal, mono, sans } from "./ui.jsx";
 import { marketClockLine } from "./clock.js";
 import { BASKET, TICKERS, getU, categoryOf } from "./markets.js";
 
@@ -864,7 +872,10 @@ async function saveState(st) {
   // The server blob is ONE shared document, so a demo visitor writing to it
   // would overwrite the owner's positions and feed the autopilot a book that
   // is not theirs. Demo state stays in the visitor's own browser.
-  if (DEMO) return;
+  if (DEMO || PREVIEW) return;
+  // A PREVIEW NEVER SAVES TO THE SERVER EITHER (redesign PR 2, TASK 0a): that same shared document is production's
+  // book, and deploy-preview-51 overwrote it. The server refuses a preview's POST on its own (state.mjs); this only
+  // spares a request that would be refused.
   // sync server (abilita Autopilot ad app chiusa); fire-and-forget
   try { fetch("/api/state", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ positions: st.positions, settings: { webhook: st.settings?.webhook, capital: st.settings?.capital, concurrentTarget: st.settings?.concurrentTarget, savings: st.settings?.savings, sizeOverride: st.settings?.sizeOverride, sizingFree: st.settings?.sizingFree ?? null, notifyWhenReady: !!st.settings?.notifyWhenReady, findOrder: st.settings?.findOrder || "ev" } }) }); } catch { /* offline ok */ }
 }
@@ -876,6 +887,14 @@ const DemoBanner = () => (DEMO ? (
   <div style={{ ...mono, fontSize: FS.xs, color: T.blue, background: `${T.blue}12`, borderBottom: `1px solid ${T.blue}44`,
     padding: "9px 14px", display: "flex", gap: 8, alignItems: "center", justifyContent: "center", flexWrap: "wrap", textAlign: "center" }}>
     <ShieldCheck size={13} style={{ flexShrink: 0 }} /> {DEMO_BANNER}
+  </div>
+) : null);
+/* THE PREVIEW BANNER (redesign PR 2, TASK 0a): a deploy preview is read-only — nothing it does is saved to the server
+   or sent to Alpaca, and every control that would is disabled with the same reason (src/deploy.js). On every screen. */
+const PreviewBanner = () => (PREVIEW ? (
+  <div role="status" style={{ ...sans, fontSize: FS.sm, fontWeight: 700, color: T.amber, background: `${T.amber}14`,
+    borderBottom: `1px solid ${T.amber}55`, padding: "10px 16px", textAlign: "center", lineHeight: 1.4 }}>
+    {PREVIEW_BANNER}
   </div>
 ) : null);
 /* THE OFFLINE BANNER — the counterpart to the service worker's one rule.
@@ -1347,6 +1366,8 @@ export default function OptionsStrategyLab() {
   /* THE MARKET PAGE'S OWN STATE (redesign PR 1): its ticker and its tab. Opening CORN's page does NOT replace the
      trade loaded on Build (`ticker`, `legs`): that changes only when the user takes a trade there. */
   const [mkt, setMkt] = useState({ tk: null, tab: "strategies" });
+  // "EDIT IN CHAIN ›" ON BUILD (redesign PR 2): the legs it hands the market page's Chain tray, read once when the page opens.
+  const [mktTray, setMktTray] = useState(null);
   const [ev, setEv] = useState(null);           // which evidence sheet is open OVER the step
   /* ---- comparing, on Find ----
      Up to three candidates, normalised into one shape by `candidateOf`. The
@@ -2327,6 +2348,7 @@ export default function OptionsStrategyLab() {
      broker's answer. */
   const cancelWorking = async (p) => {
     if (DEMO) { setMsg(DEMO_TOOLTIP); return null; }
+    if (PREVIEW) { setMsg(PREVIEW_READ_ONLY); return null; }   // a deploy preview cancels nothing (TASK 0a)
     setOrderBusy(p.id);
     let res;
     try {
@@ -2355,6 +2377,7 @@ export default function OptionsStrategyLab() {
   /** Ask for the cancel, then put the same trade back on Build to re-price. */
   const repriceWorking = async (p) => {
     if (DEMO) { setMsg(DEMO_TOOLTIP); return; }
+    if (PREVIEW) { setMsg(PREVIEW_READ_ONLY); return; }
     const res = await cancelWorking(p);
     // Only a cancel Alpaca has just ACCEPTED goes on to Build. A failure says
     // so where it happened, and a cancel that was already waiting is a state
@@ -2377,7 +2400,7 @@ export default function OptionsStrategyLab() {
     refreshExpired();
   };
   /** Open a market's page (redesign PR 1): from a Find row on Strategies; a tab is kept when the ticker changes. */
-  const goMarket = (tk, tab = "strategies") => { setMkt({ tk, tab }); goStep("market"); };
+  const goMarket = (tk, tab = "strategies") => { setMktTray(null); setMkt({ tk, tab }); goStep("market"); };
 
   /* ---- WHAT IS OUT OF DATE, AND NOTHING ELSE ----
      Every source has its own budget (src/freshness.js) and they are wildly
@@ -2635,6 +2658,8 @@ export default function OptionsStrategyLab() {
   };
 
   const openPaper = async (alpacaOrder) => {
+    // A DEPLOY PREVIEW OPENS NOTHING, NOT EVEN ON THE APP'S OWN BOOK (redesign PR 2, TASK 0a).
+    if (PREVIEW) { setMsg(PREVIEW_READ_ONLY); return; }
     // Non blocchiamo il trade: chiediamo la motivazione scritta e la salviamo
     // con la posizione (PRD §2, pattern override).
     if (clash && against.reason.trim().length < REASON_MIN) {
@@ -2746,6 +2771,8 @@ export default function OptionsStrategyLab() {
      about the difference. `ruleExitOf()` says which rules actually end a trade:
      the take-profit and the exit window, and nothing else. */
   const closePos = async (id, { written = "" } = {}) => {
+    // A DEPLOY PREVIEW FILES NOTHING (redesign PR 2, TASK 0a): its Journal is that address's own, never production's.
+    if (PREVIEW) return { ok: false, decision: { reason: { message: PREVIEW_READ_ONLY } } };
     const p = store.positions.find((x) => x.id === id);
     if (!p) return { ok: true };
     const al = posAlerts.find((a) => a.p.id === id) || null;
@@ -2782,6 +2809,7 @@ export default function OptionsStrategyLab() {
      the manual step after the fill. */
   const prepareCardClose = async (p, choice = null, chain = null) => {
     if (DEMO) { setCloseAt({ id: p.id, refusal: DEMO_TOOLTIP }); return; }
+    if (PREVIEW) { setCloseAt({ id: p.id, refusal: PREVIEW_READ_ONLY }); return; }   // a deploy preview sends nothing
     setCloseAt((cp) => ({ id: p.id, busy: true, prepared: choice && cp?.id === p.id ? cp.prepared : null, choice }));
     // A CHANGE OF PRICE RE-PREPARES ON THE CHAIN TAP 1 READ (PR #46): the bounds the field shows are that chain's.
     const prepared = await prepareClose(groupForRecord(p, alSync.positions), {
@@ -2826,7 +2854,7 @@ export default function OptionsStrategyLab() {
   const orderCtx = {
     positions: alSync.positions, orders: alSync.orders, chainFor: (tk) => chains[tk] || null, fetchChain,
     // `gate` is defined further down this component; read it at the send, not at render (a TDZ otherwise).
-    gate: (proposal) => gate(proposal), request: alpacaReq, demo: DEMO, recordFor,
+    gate: (proposal) => gate(proposal), request: alpacaReq, demo: DEMO, readOnly: PREVIEW, recordFor,
     // PR #47: the clock line on every row, the reconciliation sentence behind the "sent outside this app" ⓘ, and
     // the row "Manage order" opened.
     clock, gap: orderGap.sentence, focusId: focusOrder,
@@ -2853,6 +2881,7 @@ export default function OptionsStrategyLab() {
     cancelOne: async (o, rec) => {
       if (rec && rec.alpacaId === o.id && positionStage(rec) === "working") return cancelWorking(rec);
       if (DEMO) return { kind: "failed", headline: DEMO_TOOLTIP };
+      if (PREVIEW) return { kind: "failed", headline: PREVIEW_READ_ONLY };
       try { await alpacaReq(`/v2/orders/${encodeURIComponent(o.id)}`, "DELETE"); return cancelOutcome({ ok: true }); }
       catch (e) { return cancelOutcome({ error: e }); }
     },
@@ -3003,6 +3032,7 @@ export default function OptionsStrategyLab() {
     // the check lives next to the send, not only on the button, so a path that
     // ever gets called some other way still cannot reach Alpaca.
     if (DEMO) { setMsg(DEMO_TOOLTIP); return; }
+    if (PREVIEW) { setMsg(PREVIEW_READ_ONLY); return; }   // and neither can a deploy preview (TASK 0a)
     if (!confirmSend) { setConfirmSend(true); return; }
     setConfirmSend(false); setBusy("order");
     try {
@@ -4044,277 +4074,105 @@ export default function OptionsStrategyLab() {
                 </div>
               </>
   );
-  const EVIDENCE = [
-    { id: "why", label: "Why this market", I: Radar, sub: "seasonality, price trend, weather, news" },
-    { id: "levels", label: "Market levels", I: Box, sub: "where the open interest sits" },
-    { id: "history", label: "History", I: FlaskConical, sub: "what happened in past years" },
-    { id: "copilot", label: "Copilot", I: MessageSquare, sub: "ask about this trade" },
-  ];
-  const EV_META = Object.fromEntries([...EVIDENCE,
-    { id: "more", label: `More on ${whyTk || ticker}`, sub: "the market, not this trade: levels, price and season" }].map((e) => [e.id, e]));
-  const SENT = SENTIMENTS.find((s) => s.id === sentiment);
-
-  /* ---------- the shell (PRD §5) ----------
-     Everything above is the app's brain. What follows decides which face it
-     shows: setup on a first run, the wizard by default, the tabs on request. */
-
-  /* THE FIRST SCREEN IS FIND (round 2): a first run answers the two questions, then lands on Find. */
-
-  if (!hydrated) {
-    return (
-      <div style={{ minHeight: "100vh", background: T.bg, color: T.mut, display: "flex", alignItems: "center", justifyContent: "center", ...sans, fontSize: FS.md }}>
-        Loading your desk…
-      </div>
-    );
-  }
-
-  if (!store.settings.onboarded) {
-    return (
-      <div style={{ minHeight: "100vh", background: T.bg, color: T.body }}>
-        <DemoBanner />
-        <OfflineBanner />
-        <CapitalOnboarding
-          initial={{ capital: store.settings.capital, concurrentTarget: store.settings.concurrentTarget, savings: store.settings.savings }}
-          onDone={async (a) => {
-            const st = { ...store, settings: { ...store.settings,
-              capital: a.tradingCapital, concurrentTarget: a.concurrentTarget, savings: a.savings,
-              sizeOverride: a.override && a.override.reason && a.override.reason.trim().length >= RULES.minOverrideReasonChars ? a.override : null,
-              onboarded: true } };
-            setStore(st); await saveState(st); goStep("find");
-          }}
-        />
-      </div>
-    );
-  }
-
-  /* Find is multi-market: the one-ticker header strip is not drawn on it.
-     Written `"find" === step` on purpose: `step === "<id>"` is how
-     src/wordcount.mjs finds a step's JSX block, and this is not one. */
-  const onFindStep = tab === "build" && !showSettings && "find" === step;
-  // The market page (redesign PR 1) is one ticker, but it prints its own header for its own market.
-  const onMarketStep = tab === "build" && !showSettings && "market" === step;
-  /* ROUND 2 (owner, 5 Oct 2026): FIND, SAVED AND A MARKET'S PAGE DRAW NO DESK HEADER. Find has its own (FindHeader: "Find",
-     ↻, the gear, the status line, Results | Saved), the market page its own; the desk header stays on Build, Positions,
-     the Journal and Settings (PR 2 and PR 3). The desk's count line is the Positions badge here. */
-  const chromeless = onFindStep || onMarketStep || (tab === "watching" && !showSettings);
-  /* FIND'S STATUS LINE: "<freshness> · <feed> · Paper". The feed is the feeds the selected markets came from. */
-  const findFeeds = Array.from(new Set(find.markets.map((tk) => feedName(chains[tk])).filter(Boolean))).join(" / ");
-  /* FIND'S BAR READS THE SELECTION, NOT ONE MARKET (PR #46, TASK 1): "N markets · prices Xm ago", the OLDEST. */
-  const findFresh = findFreshness(find.markets, chains, ago);
-  /* REDESIGN PR 1 — what Find's new screen reads from here. */
-  // One Refresh for every market Find reads (the header's button, and the stale banner's Retry).
-  const refreshFind = async () => {
-    setBusy("find");
-    try { for (const tk of find.markets) await refreshChain(tk, true); } finally { setBusy(null); }
-  };
-  // STALE: the oldest price past its budget (freshness.js), the day those numbers are from, a refresh that failed.
-  const findStale = {
-    stale: !!findFresh.oldest && isStale("chain", findFresh.oldest),
-    closeDay: findFresh.oldest ? new Date(findFresh.oldest).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" }) : null,
-    failedAt: chainErrAt && findFresh.oldest && chainErrAt > findFresh.oldest
-      ? new Date(chainErrAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) : null,
-    onRetry: refreshFind,
-  };
-  // RESET: every chip back to its default (the request, the horizon, the direction, the toggles, the order, liquidity).
-  const resetFind = () => {
-    setWant({ mode: "budget", amt: null, minChance: null, minReturn: null });
-    setFind((f) => ({ ...f, horizon: RULES.targetEntryDTE, dir: "signals", positiveOnly: false, flagged: true, hideMisses: false }));
-    setFindOrder(DEFAULT_FIND_ORDER);
-    setLiqLevelId(RECOMMENDED_LIQUIDITY.id);
-  };
-  // COMPARE, on Find and on the market page (the ticks are on the market page's cards).
-  const compareBlock = {
-    compare, showCompare, compareNote,
-    onTickCompare: (c) => tickCompare(c),
-    onClearCompare: () => { setCompare([]); setShowCompare(false); setCompareNote(null); },
-    onToggleCompare: () => setShowCompare((v) => !v),
-    onTakeToBuild: (c) => { const x = findGen.items.find((y) => y.key === c.key); if (x) openFound(x); else openOnBuild({ ticker: c.ticker, expKey: c.expKey, legs: c.legs, name: c.name }); },
-  };
-  return (
-    <div style={{ minHeight: "100vh", background: T.bg, color: T.body, ...sans }}>
-      <DemoBanner />
-      <OfflineBanner />
-      {/* The bottom padding is the strip reserved for the injected Netlify
-             badge (see BADGE_SAFE in theme.js): it is fixed to the viewport and
-             was covering whatever happened to be at the bottom right. */}
-        {/* On Find, Saved and the market page the screen runs edge to edge and the list ends 88px above the bottom (the
-            mockups' figure, owner 5 Oct 2026); elsewhere the old padding and the badge strip. */}
-        <div style={{ maxWidth: 1720, margin: "0 auto", padding: chromeless ? `0 0 ${FIND_LIST_END}px` : `18px 14px ${BADGE_SAFE + NAV_BAR_H}px` }}>
-
-        {/* Header */}
-        {/* (Not on Find, Saved or a market's page since round 2: they draw their own.) */}
-        {!chromeless && (
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
-          <div>
-            <Label>OPTIONS STRATEGY LAB v2 · LIVE DATA</Label>
-            <h1 style={{ fontSize: FS.xl, fontWeight: 800, color: T.ink, margin: "4px 0 6px" }}>Commodity Options Desk</h1>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              <span style={{ ...mono, fontSize: FS.xs, color: T.green, border: `1px solid ${T.green}55`, background: `${T.green}12`, padding: "3px 8px", borderRadius: 5, display: "inline-flex", gap: 5, alignItems: "center" }}>
-                <ShieldCheck size={12} /> PAPER · {ruleBadge()}
-              </span>
-              {onMarketStep ? (
-                <span style={{ ...mono, fontSize: FS.xs, color: T.blue, border: `1px solid ${T.blue}44`, padding: "3px 8px", borderRadius: 5 }}>
-                  {findFreshness([mkt.tk], chains, ago).line}
-                </span>
-              ) : onFindStep ? (
-                <span style={{ ...mono, fontSize: FS.xs, color: findFresh.oldest ? T.blue : T.dim, border: `1px solid ${findFresh.oldest ? T.blue : T.dim}44`, padding: "3px 8px", borderRadius: 5 }}>
-                  {findFresh.line}
-                </span>
-              ) : (
-              <span style={{ ...mono, fontSize: FS.xs, color: chain ? T.blue : T.dim, border: `1px solid ${chain ? T.blue : T.dim}44`, padding: "3px 8px", borderRadius: 5 }}>
-                {chain ? `${chain.source} · updated ${ago(chain.updated)}` : "prices not loaded"}
-              </span>
-              )}
-            </div>
-          </div>
-          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-            {/* NO TICKER SELECT UP HERE (PR #46, TASK 1). On Find it changed nothing in the list — it only picked
-                Build's market — so Find refreshes every selected market at once and Build carries its own
-                selector beside the trade. */}
-            <Btn onClick={async () => {
-              if (onFindStep) {
-                // One Refresh for every selected market, quietly: no single-chain message on Find.
-                setBusy("find");
-                try { for (const tk of find.markets) await refreshChain(tk, true); } finally { setBusy(null); }
-                return;
-              }
-              // On the market page, its own market (redesign PR 1); on Build, Build's.
-              await refreshChain(onMarketStep ? mkt.tk : ticker);
-            }} disabled={busy !== null} aria-label={onFindStep ? `Refresh prices for ${find.markets.length} markets` : `Refresh ${ticker} prices`}>
-              <RefreshCw size={13} /> {busy === ticker || busy === "find" ? "…" : "Refresh"}
-            </Btn>
-            {/* Theme lives in Settings now, behind this one gear: Settings is not a place you trade from. */}
-            <Btn small ghost={!showSettings} color={T.blue} aria-label="Settings" aria-pressed={showSettings}
-              onClick={() => setShowSettings((v) => !v)}>
-              <SlidersHorizontal size={15} />
-            </Btn>
-          </div>
+  /* BUILD'S REVIEW SHEET, ASSEMBLED HERE (redesign PR 2, TASK 3) — outside the Build step's block because everything
+     in it is behind the first tap (a Sheet), and the word counter reads the block as words at rest. The checks are
+     `gateChecklist()`'s (the gate, read only), the legs' OCC symbols the chain's, the open-interest row Find's floor. */
+  const reviewSheetOf = ({ net, L, sendBlock }) => {
+    const reviewBlock = sendBlock || (!reasonOk ? "Write why you are going against the signals first." : null);
+    const rows = guard ? gateChecklist(guard, { dte }) : [];
+    const rowOk = (id) => { const r = rows.find((x) => x.id === id); return r ? r.ok : null; };
+    const ois = AE.legPx.map((lp) => (lp && lp.oi != null && Number.isFinite(Number(lp.oi)) ? Number(lp.oi) : null));
+    const oiKnown = ois.length > 0 && ois.every((x) => x != null);
+    const oiMin = oiKnown ? Math.min(...ois) : null;
+    const uncovered = undefinedRiskLegs(legs);
+    const reasonNode = clash ? (
+      <div style={{ display: "grid", gap: 6 }}>
+        <div style={{ ...sans, fontSize: FS.sm, fontWeight: 700, color: T.amber }}>{clash.question}</div>
+        <div style={{ ...sans, fontSize: FS.sm, color: T.body, lineHeight: 1.5 }}>{clash.detail}.</div>
+        <textarea value={against.reason} onChange={(e) => setAgainst({ reason: e.target.value })} rows={3}
+          aria-label="Why take this trade against the signals"
+          placeholder="Why are you taking this trade anyway? It is stored with the position and you read it again when you close."
+          style={{ ...sans, width: "100%", boxSizing: "border-box", fontSize: FS.sm, color: T.ink, background: T.bg,
+            border: `1px solid ${reasonOk ? T.green : T.amber}`, borderRadius: 10, padding: "8px 10px", resize: "vertical" }} />
+        <div style={{ ...sans, fontSize: FS.xs, color: reasonOk ? T.green : T.mut }}>
+          {reasonOk ? "✓ Reason recorded: it is saved with the position." : `${Math.max(0, REASON_MIN - against.reason.trim().length)} more characters.`}
         </div>
-
+      </div>
+    ) : null;
+    return {
+      open: deskSheet === "review", onClose: () => setDeskSheet(null), sub: REVIEW_SUB(!!alpaca), viaBroker: !!alpaca,
+      legs: legs.map((l, i) => ({ words: reviewLegWords(l, contracts), occ: bookQuotes[i] && bookQuotes[i].occ ? bookQuotes[i].occ : null })),
+      limitLine: reviewLimitLine({ type: ticket.type, net, tif: ticket.tif, n: contracts }),
+      checks: !L ? [] : [
+        { id: "loss", ok: rowOk("defined"), text: REVIEW_CHECKS.loss, value: money(L.tradeRisk) },
+        { id: "cap", ok: rowOk("per-trade"), text: REVIEW_CHECKS.cap(L.sizingFree), value: L.sizingFree ? money(L.tradeRisk) : `${money(L.tradeRisk)} of ${money(L.perTrade)}` },
+        { id: "open", ok: rowOk("total"), text: REVIEW_CHECKS.open, value: L.sizingFree ? money(L.totalAfter) : `${money(L.totalAfter)} of ${money(L.total)}` },
+        { id: "legs", ok: uncovered.length === 0 && rowOk("defined") !== false, text: REVIEW_CHECKS.legs, value: uncovered.length ? `${uncovered.length} uncovered` : "none" },
+        { id: "days", ok: rowOk("entry-dte"), text: REVIEW_CHECKS.days(), value: `${Math.round(dte)} days` },
+        { id: "oi", ok: oiKnown ? oiMin >= liqLevel.absolute : null, text: oiCheckText(liqLevel.absolute), value: oiKnown ? `${oiMin}` : "not read" },
+        { id: "paper", ok: rowOk("paper"), text: REVIEW_CHECKS.paper, value: "paper" },
+      ],
+      checksFull: <>{rows.map((x) => <span key={x.id} style={{ display: "block", marginBottom: 4 }}>{x.ok ? "✓" : "✗"} {x.text}</span>)}{checkedAgainstNote(!!alpaca, guard?.limits?.paper?.why)}</>,
+      clockLine: marketClockLine(clock, { queued: true }), waitLine: marketClockLine(clock, { queued: true }),
+      reason: reasonNode, canSend: !reviewBlock, blocked: reviewBlock,
+      secondLabel: alpaca ? "Send to Alpaca" : "Open on the app's own book", onLocal: () => { setDeskSheet(null); openPaper(); },
+      sentLine: (o) => sentOrderLine({ net, tif: ticket.tif, filled: o && o.filled_qty, qty: o && o.qty }),
+      filedLine: (o) => { const rec = o ? recordFor(o) : null; return sentFiledText(rec ? rec.ref : null, !!(rec && rec.thesis && rec.thesis.override)); },
+      onJournal: () => { setDeskSheet(null); setTab("journal"); },
+      onOrders: () => { setDeskSheet(null); setTab("positions"); setPosSeg("orders"); },
+    };
+  };
+  /* ONE TICKER'S STRIP (PR #41, TASK 3): price now, expiry, the season, its source, IV rank. Drawn in the desk header
+     where one ticker is the subject (not on Find, the market page or Build) and, since redesign PR 2, under "Market now"
+     in Build's "More on this trade ▾". One piece, two places. */
+  const tickerStrip = (
+      <div style={{ display: "flex", gap: 14, marginTop: 10, flexWrap: "wrap" }}>
+        {/* The feed is named in ONE place (feedName in chain.js) and every label
+            reads from it. This one used to say "(CBOE)" three centimetres under a
+            badge that said "Alpaca (indicative)": a screen contradicting itself
+            about where its own numbers came from. */}
+        {/* AND HOW OLD IT IS. A stale number is acceptable; a stale number
+            pretending to be live is not — "NOW" is a claim, and it has to be
+            one the screen can back up (src/freshness.js). */}
+        <Stat k={`PRICE NOW${feedName(chain) ? ` (${feedName(chain).toUpperCase()})` : ""}`} v={spot ? `$${spot.toFixed(2)}` : "—"}
+          c={spot && isStale("chain", spotAge) ? T.amber : undefined}
+          tip={freshnessNote("chain", spotAge, { what: "this price" })} />
+        <Stat k="EXPIRY" v={expKey ? `${expKey} · ${dte} DTE` : `${dte} DTE (model)`} c={T.blue} />
+        {/* A DASH, NOT A ZERO. `seasNow` is null until the market's monthly history has loaded ("season not read").
+            Since PR #48 it is the window's COUNTED mean (`seasonalSignal()`), for this trade's days. */}
+        <Stat k={`SEASONALITY · ${dte} DAYS`}
+          v={seasNow == null ? "—" : `${seasNow > 0 ? "+" : ""}${seasNow.toFixed(1)}%/mo`}
+          c={seasNow == null || seasNow === 0 ? T.dim : seasNow > 0 ? T.green : T.red}
+          tip={seasNow == null ? seasProv.note : `${seasSig.note} ${seasonRowLines(seasSig).join("; ")}`} />
+        {/* WHERE IT CAME FROM, OR WHY THERE IS NOTHING: "the call failed" and "nobody asked yet" are reasons. */}
+        <Stat k="SEASONAL SOURCE" v={seasonal[ticker] ? seas.src : "not read"}
+          c={seasonal[ticker] ? (seasonalState[ticker]?.error ? T.amber : T.green) : T.dim}
+          tip={`${seasonalSourceLine(seasonal[ticker], seasonalState[ticker], seasProv)} · ${freshnessNote("seasonal", seasonal[ticker]?.at)}`} />
+        {/* >>> THE HEADER CARRIES NOTHING THAT ASKS NOTHING OF THE USER
+            (P9, TASK 3). <<< "IV RANK · 6d collected" is a PROGRESS BAR for
+            a number that is not yet a number: there is no decision in it, no
+            action behind it, and it sat in the row the reader scans first on
+            every screen. The rank itself still earns its place — it is what
+            `RULES.expensiveIVRank` refuses a trade on — so it stays when it
+            EXISTS, and the collection counter moved to the History overlay,
+            which is where the history is. */}
+        {ivRank?.rank != null && (
+          <Stat k="IV RANK" v={`${ivRank.rank}`}
+            c={ivRank.rank >= RULES.expensiveIVRank ? T.red : ivRank.rank <= 40 ? T.green : T.mut}
+            tip="Where today's option prices sit against their own past year (0 = cheapest ever, 100 = dearest). High means selling premium pays better; low means buying options is good value." />
         )}
-
-        {/* ONE TICKER'S STRIP, ONLY WHERE ONE TICKER IS LOADED (PR #41, TASK 3).
-            Find reads many markets at once, so a single market's price,
-            expiry and seasonality above its list described none of them. It
-            stays on Build and everywhere else one ticker is the subject. */}
-        {!onFindStep && !onMarketStep && (
-        <div style={{ display: "flex", gap: 14, marginTop: 10, flexWrap: "wrap" }}>
-          {/* The feed is named in ONE place (feedName in chain.js) and every label
-              reads from it. This one used to say "(CBOE)" three centimetres under a
-              badge that said "Alpaca (indicative)": a screen contradicting itself
-              about where its own numbers came from. */}
-          {/* AND HOW OLD IT IS. A stale number is acceptable; a stale number
-              pretending to be live is not — "NOW" is a claim, and it has to be
-              one the screen can back up (src/freshness.js). */}
-          <Stat k={`PRICE NOW${feedName(chain) ? ` (${feedName(chain).toUpperCase()})` : ""}`} v={spot ? `$${spot.toFixed(2)}` : "—"}
-            c={spot && isStale("chain", spotAge) ? T.amber : undefined}
-            tip={freshnessNote("chain", spotAge, { what: "this price" })} />
-          <Stat k="EXPIRY" v={expKey ? `${expKey} · ${dte} DTE` : `${dte} DTE (model)`} c={T.blue} />
-          {/* A DASH, NOT A ZERO. `seasNow` is null until the market's monthly history has loaded ("season not read").
-              Since PR #48 it is the window's COUNTED mean (`seasonalSignal()`), for this trade's days. */}
-          <Stat k={`SEASONALITY · ${dte} DAYS`}
-            v={seasNow == null ? "—" : `${seasNow > 0 ? "+" : ""}${seasNow.toFixed(1)}%/mo`}
-            c={seasNow == null || seasNow === 0 ? T.dim : seasNow > 0 ? T.green : T.red}
-            tip={seasNow == null ? seasProv.note : `${seasSig.note} ${seasonRowLines(seasSig).join("; ")}`} />
-          {/* WHERE IT CAME FROM, OR WHY THERE IS NOTHING: "the call failed" and "nobody asked yet" are reasons. */}
-          <Stat k="SEASONAL SOURCE" v={seasonal[ticker] ? seas.src : "not read"}
-            c={seasonal[ticker] ? (seasonalState[ticker]?.error ? T.amber : T.green) : T.dim}
-            tip={`${seasonalSourceLine(seasonal[ticker], seasonalState[ticker], seasProv)} · ${freshnessNote("seasonal", seasonal[ticker]?.at)}`} />
-          {/* >>> THE HEADER CARRIES NOTHING THAT ASKS NOTHING OF THE USER
-              (P9, TASK 3). <<< "IV RANK · 6d collected" is a PROGRESS BAR for
-              a number that is not yet a number: there is no decision in it, no
-              action behind it, and it sat in the row the reader scans first on
-              every screen. The rank itself still earns its place — it is what
-              `RULES.expensiveIVRank` refuses a trade on — so it stays when it
-              EXISTS, and the collection counter moved to the History overlay,
-              which is where the history is. */}
-          {ivRank?.rank != null && (
-            <Stat k="IV RANK" v={`${ivRank.rank}`}
-              c={ivRank.rank >= RULES.expensiveIVRank ? T.red : ivRank.rank <= 40 ? T.green : T.mut}
-              tip="Where today's option prices sit against their own past year (0 = cheapest ever, 100 = dearest). High means selling premium pays better; low means buying options is good value." />
-          )}
-        </div>
-        )}
-
-        {msg && <div style={{ ...mono, fontSize: FS.xs, color: T.amber, border: `1px solid ${T.amber}44`, background: `${T.amber}10`, borderRadius: 6, padding: "7px 10px", margin: chromeless ? "8px 16px 0" : "10px 0 0" }}>{msg}</div>}
-
-        <TabBoundary k={`${tab}/${step}/${ev}`}>
-        {/* ONE STATUS PER OBJECT, ONE PLACE (PR #40, TASK 2). An order's state
-            lives on its row in Positions and a position's action on its card;
-            the desk used to print both lists again here, in a working-orders
-            strip and a "TODAY" list, beside the top banner and the order sheet.
-            It shows one line of counts now, and the line is the link. */}
-        {!chromeless && <DeskCountLine working={workingOrders.length} decisions={nAttention} looks={attn.looks} closing={attn.closesWorking}
-          onOpen={() => { setTab("positions"); setShowSettings(false); setEv(null); }} />}
-
-        {/* ONE BOTTOM BAR (PR #47, TASK 4) replaces the numbered path (`StepNav`) and the places row: Find · Build ·
-            Positions · Journal, at the bottom of the screen. It is drawn at the end of this page. */}
-
-        {/* THE EVIDENCE, at every step, opening OVER it. A chip that is doing
-            something, or holding something you have not read, says so on the
-            chip itself: the copilot answering into a closed sheet was
-            indistinguishable from the copilot doing nothing at all. */}
-        {/* EVIDENCE HAS A SUBJECT (PR #46, TASK 2). On Find there is no bar: a card's badge opens Why for its
-            market and its fold opens "More on <TK>". On Build the bar is about THIS trade, and the Copilot lives
-            only here. */}
-        {tab === "build" && !showSettings && step === "build" && (
-          <EvidenceBar items={EVIDENCE} open={ev} onOpen={(id) => { setWhyTk(null); setEv(id); }}
-            heading={`About this trade · ${ticker}${legs.length ? ` ${stratName}` : ""}`}
-            mark={{
-              copilot: copilot.busy ? "thinking"
-                : (ev !== "copilot" && copilot.msgs.length > 0
-                  && copilot.msgs[copilot.msgs.length - 1].role === "assistant") ? "answer ready" : null,
-            }} />
-        )}
-
-        {/* The sheet itself. Every panel below renders inside it, so opening one
-            covers the step instead of lengthening it — and because it is fixed
-            to the viewport it can never land below the fold, which is what made
-            History and the Copilot look like broken buttons on a phone. */}
-        {tab === "build" && !showSettings && ev && (
-          <EvidenceOverlay title={ev === "why" ? `${whyTk || ticker} this month` : EV_META[ev]?.label || "Evidence"}
-            sub={ev === "why" ? "the market, not this trade" : EV_META[ev]?.sub} onClose={() => setEv(null)}>
-            {ev === "why" && (
-              <WhySheet
-                fused={fuseAt(whyTk || ticker, whyDte ?? marketDte(whyTk || ticker))} order={findOrder}
-                ticker={whyTk || ticker} weatherData={weather} newsItems={newsPool} month={NOW_MONTH}
-                title={`WHY THIS MARKET · ${whyTk || ticker}`} defaultDetail
-                note={fused[whyTk || ticker]?.agreement === "CONFLICT"
-                  ? `Under "${findOrderOf("evSignal").label}", candidates on a CONFLICT market sort last, whatever their future avg.`
-                  : `Only "${findOrderOf("evSignal").label}" adds this read to a card's place in Find.`}
-              />
-            )}
-            {ev === "levels" && levelsView(chain, oiGrid, spot, lv)}
-            {/* MORE ON A CARD'S MARKET (PR #46, TASK 2): its own chain, price and season — never Build's trade. */}
-            {ev === "more" && (() => {
-              const tk = whyTk || ticker;
-              const cX = chains[tk] || null;
-              const sX = spotOf(cX);
-              const gX = oiGridFromChain(cX, sX);
-              const mm = (seasonal[tk] || null)?.monthlyMean || null;
-              return (
-                <>
-                  {levelsView(cX, gX, sX, levelsFromGrid(gX, sX))}
-                  <Panel style={{ marginTop: 12 }}>
-                    <PriceChart ticker={tk} levels={levelsFromGrid(gX, sX)} breakevens={[]} legLines={[]} />
-                  </Panel>
-                  <Panel style={{ marginTop: 10 }}>
-                    <Label>SEASONALITY · {tk}</Label>
-                    <div style={{ fontSize: FS.sm, color: T.body, marginTop: 8, lineHeight: 1.55 }}>
-                      {Array.isArray(mm)
-                        ? `${tk}'s best month historically is ${MONTHS[mm.indexOf(Math.max(...mm))]} (${Math.max(...mm) > 0 ? "+" : ""}${Math.max(...mm).toFixed(1)}% a month on average), its worst is ${MONTHS[mm.indexOf(Math.min(...mm))]} (${Math.min(...mm).toFixed(1)}%); ${MONTHS[NOW_MONTH]} averages ${mm[NOW_MONTH] > 0 ? "+" : ""}${mm[NOW_MONTH].toFixed(1)}%.`
-                        : seasonalFor(tk).note}
-                    </div>
-                  </Panel>
-                </>
-              );
-            })()}
-            {ev === "history" && !spot && (
+      </div>
+  );
+  /* HISTORY (redesign PR 2): what the evidence bar's "History" opened — the IV-rank counter, the price chart and its
+     copilot, the season, "Two questions", the simulation behind the chance and the year-by-year replay behind its button —
+     now shown in "More on this trade ▾" on Build, unchanged. */
+  const historyNode = (<>
+            {!spot && (
               <div style={{ ...mono, fontSize: FS.xs, color: T.mut }}>
                 The seasonality chart, the 8,000-run simulation and the year-by-year replay are all drawn from {ticker}{"\u2019"}s own prices, and they have not loaded yet. Press Refresh at the top of the screen.
               </div>
             )}
-            {ev === "history" && spot && (
+            {spot && (
             <div style={{ marginTop: 12 }}>
               {/* >>> WHERE THE IV-RANK COUNTER WENT (P9, TASK 3). <<< It was
                   in the header stat row — "IV RANK · 6d collected" — which is
@@ -4528,6 +4386,234 @@ export default function OptionsStrategyLab() {
               </Panel>
             </div>
             )}
+  </>);
+  const EVIDENCE = [
+    { id: "why", label: "Why this market", I: Radar, sub: "seasonality, price trend, weather, news" },
+    { id: "levels", label: "Market levels", I: Box, sub: "where the open interest sits" },
+    { id: "history", label: "History", I: FlaskConical, sub: "what happened in past years" },
+    { id: "copilot", label: "Copilot", I: MessageSquare, sub: "ask about this trade" },
+  ];
+  const EV_META = Object.fromEntries([...EVIDENCE,
+    { id: "more", label: `More on ${whyTk || ticker}`, sub: "the market, not this trade: levels, price and season" }].map((e) => [e.id, e]));
+  const SENT = SENTIMENTS.find((s) => s.id === sentiment);
+
+  /* ---------- the shell (PRD §5) ----------
+     Everything above is the app's brain. What follows decides which face it
+     shows: setup on a first run, the wizard by default, the tabs on request. */
+
+  /* THE FIRST SCREEN IS FIND (round 2): a first run answers the two questions, then lands on Find. */
+
+  if (!hydrated) {
+    return (
+      <div style={{ minHeight: "100vh", background: T.bg, color: T.mut, display: "flex", alignItems: "center", justifyContent: "center", ...sans, fontSize: FS.md }}>
+        Loading your desk…
+      </div>
+    );
+  }
+
+  if (!store.settings.onboarded) {
+    return (
+      <div style={{ minHeight: "100vh", background: T.bg, color: T.body }}>
+        <PreviewBanner />
+        <DemoBanner />
+        <OfflineBanner />
+        <CapitalOnboarding
+          initial={{ capital: store.settings.capital, concurrentTarget: store.settings.concurrentTarget, savings: store.settings.savings }}
+          onDone={async (a) => {
+            const st = { ...store, settings: { ...store.settings,
+              capital: a.tradingCapital, concurrentTarget: a.concurrentTarget, savings: a.savings,
+              sizeOverride: a.override && a.override.reason && a.override.reason.trim().length >= RULES.minOverrideReasonChars ? a.override : null,
+              onboarded: true } };
+            setStore(st); await saveState(st); goStep("find");
+          }}
+        />
+      </div>
+    );
+  }
+
+  /* Find is multi-market: the one-ticker header strip is not drawn on it.
+     Written `"find" === step` on purpose: `step === "<id>"` is how
+     src/wordcount.mjs finds a step's JSX block, and this is not one. */
+  const onFindStep = tab === "build" && !showSettings && "find" === step;
+  // The market page (redesign PR 1) is one ticker, but it prints its own header for its own market.
+  const onMarketStep = tab === "build" && !showSettings && "market" === step;
+  /* ROUND 2 (owner, 5 Oct 2026): FIND, SAVED AND A MARKET'S PAGE DRAW NO DESK HEADER. Find has its own (FindHeader: "Find",
+     ↻, the gear, the status line, Results | Saved), the market page its own; the desk header stays on Build, Positions,
+     the Journal and Settings (PR 2 and PR 3). The desk's count line is the Positions badge here. */
+  // REDESIGN PR 2: Build draws no desk header either — its own header row (‹ back · Paper) is the mockup's.
+  const onBuildStep = tab === "build" && !showSettings && "build" === step;
+  const chromeless = onFindStep || onMarketStep || onBuildStep || (tab === "watching" && !showSettings);
+  /* FIND'S STATUS LINE: "<freshness> · <feed> · Paper". The feed is the feeds the selected markets came from. */
+  const findFeeds = Array.from(new Set(find.markets.map((tk) => feedName(chains[tk])).filter(Boolean))).join(" / ");
+  /* FIND'S BAR READS THE SELECTION, NOT ONE MARKET (PR #46, TASK 1): "N markets · prices Xm ago", the OLDEST. */
+  const findFresh = findFreshness(find.markets, chains, ago);
+  /* REDESIGN PR 1 — what Find's new screen reads from here. */
+  // One Refresh for every market Find reads (the header's button, and the stale banner's Retry).
+  const refreshFind = async () => {
+    setBusy("find");
+    try { for (const tk of find.markets) await refreshChain(tk, true); } finally { setBusy(null); }
+  };
+  // STALE: the oldest price past its budget (freshness.js), the day those numbers are from, a refresh that failed.
+  const findStale = {
+    stale: !!findFresh.oldest && isStale("chain", findFresh.oldest),
+    closeDay: findFresh.oldest ? new Date(findFresh.oldest).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" }) : null,
+    failedAt: chainErrAt && findFresh.oldest && chainErrAt > findFresh.oldest
+      ? new Date(chainErrAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) : null,
+    onRetry: refreshFind,
+  };
+  // RESET: every chip back to its default (the request, the horizon, the direction, the toggles, the order, liquidity).
+  const resetFind = () => {
+    setWant({ mode: "budget", amt: null, minChance: null, minReturn: null });
+    setFind((f) => ({ ...f, horizon: RULES.targetEntryDTE, dir: "signals", positiveOnly: false, flagged: true, hideMisses: false }));
+    setFindOrder(DEFAULT_FIND_ORDER);
+    setLiqLevelId(RECOMMENDED_LIQUIDITY.id);
+  };
+  // COMPARE, on Find and on the market page (the ticks are on the market page's cards).
+  const compareBlock = {
+    compare, showCompare, compareNote,
+    onTickCompare: (c) => tickCompare(c),
+    onClearCompare: () => { setCompare([]); setShowCompare(false); setCompareNote(null); },
+    onToggleCompare: () => setShowCompare((v) => !v),
+    onTakeToBuild: (c) => { const x = findGen.items.find((y) => y.key === c.key); if (x) openFound(x); else openOnBuild({ ticker: c.ticker, expKey: c.expKey, legs: c.legs, name: c.name }); },
+  };
+  return (
+    <div style={{ minHeight: "100vh", background: T.bg, color: T.body, ...sans }}>
+      <PreviewBanner />
+      <DemoBanner />
+      <OfflineBanner />
+      {/* The bottom padding is the strip reserved for the injected Netlify
+             badge (see BADGE_SAFE in theme.js): it is fixed to the viewport and
+             was covering whatever happened to be at the bottom right. */}
+        {/* On Find, Saved and the market page the screen runs edge to edge and the list ends 88px above the bottom (the
+            mockups' figure, owner 5 Oct 2026); elsewhere the old padding and the badge strip. */}
+        <div style={{ maxWidth: 1720, margin: "0 auto", padding: chromeless ? `0 0 ${FIND_LIST_END}px` : `18px 14px ${BADGE_SAFE + NAV_BAR_H}px` }}>
+
+        {/* Header */}
+        {/* (Not on Find, Saved or a market's page since round 2: they draw their own.) */}
+        {!chromeless && (
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
+          <div>
+            <Label>OPTIONS STRATEGY LAB v2 · LIVE DATA</Label>
+            <h1 style={{ fontSize: FS.xl, fontWeight: 800, color: T.ink, margin: "4px 0 6px" }}>Commodity Options Desk</h1>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              <span style={{ ...mono, fontSize: FS.xs, color: T.green, border: `1px solid ${T.green}55`, background: `${T.green}12`, padding: "3px 8px", borderRadius: 5, display: "inline-flex", gap: 5, alignItems: "center" }}>
+                <ShieldCheck size={12} /> PAPER · {ruleBadge()}
+              </span>
+              {onMarketStep ? (
+                <span style={{ ...mono, fontSize: FS.xs, color: T.blue, border: `1px solid ${T.blue}44`, padding: "3px 8px", borderRadius: 5 }}>
+                  {findFreshness([mkt.tk], chains, ago).line}
+                </span>
+              ) : onFindStep ? (
+                <span style={{ ...mono, fontSize: FS.xs, color: findFresh.oldest ? T.blue : T.dim, border: `1px solid ${findFresh.oldest ? T.blue : T.dim}44`, padding: "3px 8px", borderRadius: 5 }}>
+                  {findFresh.line}
+                </span>
+              ) : (
+              <span style={{ ...mono, fontSize: FS.xs, color: chain ? T.blue : T.dim, border: `1px solid ${chain ? T.blue : T.dim}44`, padding: "3px 8px", borderRadius: 5 }}>
+                {chain ? `${chain.source} · updated ${ago(chain.updated)}` : "prices not loaded"}
+              </span>
+              )}
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            {/* NO TICKER SELECT UP HERE (PR #46, TASK 1). On Find it changed nothing in the list — it only picked
+                Build's market — so Find refreshes every selected market at once and Build carries its own
+                selector beside the trade. */}
+            <Btn onClick={async () => {
+              if (onFindStep) {
+                // One Refresh for every selected market, quietly: no single-chain message on Find.
+                setBusy("find");
+                try { for (const tk of find.markets) await refreshChain(tk, true); } finally { setBusy(null); }
+                return;
+              }
+              // On the market page, its own market (redesign PR 1); on Build, Build's.
+              await refreshChain(onMarketStep ? mkt.tk : ticker);
+            }} disabled={busy !== null} aria-label={onFindStep ? `Refresh prices for ${find.markets.length} markets` : `Refresh ${ticker} prices`}>
+              <RefreshCw size={13} /> {busy === ticker || busy === "find" ? "…" : "Refresh"}
+            </Btn>
+            {/* Theme lives in Settings now, behind this one gear: Settings is not a place you trade from. */}
+            <Btn small ghost={!showSettings} color={T.blue} aria-label="Settings" aria-pressed={showSettings}
+              onClick={() => setShowSettings((v) => !v)}>
+              <SlidersHorizontal size={15} />
+            </Btn>
+          </div>
+        </div>
+
+        )}
+
+        {/* ONE TICKER'S STRIP, ONLY WHERE ONE TICKER IS LOADED (PR #41, TASK 3).
+            Find reads many markets at once, so a single market's price,
+            expiry and seasonality above its list described none of them. It
+            stays on Build and everywhere else one ticker is the subject. */}
+        {/* (Not on Build since redesign PR 2: the strip is in "More on this trade ▾", under "Market now".) */}
+        {!onFindStep && !onMarketStep && !onBuildStep && tickerStrip}
+
+        {msg && <div style={{ ...mono, fontSize: FS.xs, color: T.amber, border: `1px solid ${T.amber}44`, background: `${T.amber}10`, borderRadius: 6, padding: "7px 10px", margin: chromeless ? "8px 16px 0" : "10px 0 0" }}>{msg}</div>}
+
+        <TabBoundary k={`${tab}/${step}/${ev}`}>
+        {/* ONE STATUS PER OBJECT, ONE PLACE (PR #40, TASK 2). An order's state
+            lives on its row in Positions and a position's action on its card;
+            the desk used to print both lists again here, in a working-orders
+            strip and a "TODAY" list, beside the top banner and the order sheet.
+            It shows one line of counts now, and the line is the link. */}
+        {!chromeless && <DeskCountLine working={workingOrders.length} decisions={nAttention} looks={attn.looks} closing={attn.closesWorking}
+          onOpen={() => { setTab("positions"); setShowSettings(false); setEv(null); }} />}
+
+        {/* ONE BOTTOM BAR (PR #47, TASK 4) replaces the numbered path (`StepNav`) and the places row: Find · Build ·
+            Positions · Journal, at the bottom of the screen. It is drawn at the end of this page. */}
+
+        {/* THE EVIDENCE, at every step, opening OVER it. A chip that is doing
+            something, or holding something you have not read, says so on the
+            chip itself: the copilot answering into a closed sheet was
+            indistinguishable from the copilot doing nothing at all. */}
+        {/* EVIDENCE HAS A SUBJECT (PR #46, TASK 2). On Find there is no bar: a card's badge opens Why for its
+            market and its fold opens "More on <TK>". On Build the bar is about THIS trade, and the Copilot lives
+            only here. */}
+        {/* NO EVIDENCE BAR ON BUILD (redesign PR 2, TASK 5): "Why this market" is the market page's Overview ("The market's
+            read ›" in Why this trade), Market levels and History are in "More on this trade ▾", the Copilot is a section. */}
+
+        {/* The sheet itself. Every panel below renders inside it, so opening one
+            covers the step instead of lengthening it — and because it is fixed
+            to the viewport it can never land below the fold, which is what made
+            History and the Copilot look like broken buttons on a phone. */}
+        {tab === "build" && !showSettings && ev && (
+          <EvidenceOverlay title={ev === "why" ? `${whyTk || ticker} this month` : EV_META[ev]?.label || "Evidence"}
+            sub={ev === "why" ? "the market, not this trade" : EV_META[ev]?.sub} onClose={() => setEv(null)}>
+            {ev === "why" && (
+              <WhySheet
+                fused={fuseAt(whyTk || ticker, whyDte ?? marketDte(whyTk || ticker))} order={findOrder}
+                ticker={whyTk || ticker} weatherData={weather} newsItems={newsPool} month={NOW_MONTH}
+                title={`WHY THIS MARKET · ${whyTk || ticker}`} defaultDetail
+                note={fused[whyTk || ticker]?.agreement === "CONFLICT"
+                  ? `Under "${findOrderOf("evSignal").label}", candidates on a CONFLICT market sort last, whatever their future avg.`
+                  : `Only "${findOrderOf("evSignal").label}" adds this read to a card's place in Find.`}
+              />
+            )}
+            {ev === "levels" && levelsView(chain, oiGrid, spot, lv)}
+            {/* MORE ON A CARD'S MARKET (PR #46, TASK 2): its own chain, price and season — never Build's trade. */}
+            {ev === "more" && (() => {
+              const tk = whyTk || ticker;
+              const cX = chains[tk] || null;
+              const sX = spotOf(cX);
+              const gX = oiGridFromChain(cX, sX);
+              const mm = (seasonal[tk] || null)?.monthlyMean || null;
+              return (
+                <>
+                  {levelsView(cX, gX, sX, levelsFromGrid(gX, sX))}
+                  <Panel style={{ marginTop: 12 }}>
+                    <PriceChart ticker={tk} levels={levelsFromGrid(gX, sX)} breakevens={[]} legLines={[]} />
+                  </Panel>
+                  <Panel style={{ marginTop: 10 }}>
+                    <Label>SEASONALITY · {tk}</Label>
+                    <div style={{ fontSize: FS.sm, color: T.body, marginTop: 8, lineHeight: 1.55 }}>
+                      {Array.isArray(mm)
+                        ? `${tk}'s best month historically is ${MONTHS[mm.indexOf(Math.max(...mm))]} (${Math.max(...mm) > 0 ? "+" : ""}${Math.max(...mm).toFixed(1)}% a month on average), its worst is ${MONTHS[mm.indexOf(Math.min(...mm))]} (${Math.min(...mm).toFixed(1)}%); ${MONTHS[NOW_MONTH]} averages ${mm[NOW_MONTH] > 0 ? "+" : ""}${mm[NOW_MONTH].toFixed(1)}%.`
+                        : seasonalFor(tk).note}
+                    </div>
+                  </Panel>
+                </>
+              );
+            })()}
+            {ev === "history" && historyNode}
             {ev === "copilot" && (
               <CopilotTab
                 apiKey={"server"}
@@ -4593,7 +4679,8 @@ export default function OptionsStrategyLab() {
             exits={store.positions.filter((p) => p.ticker === mkt.tk && exitDateOf(p)).map((p) => ({ date: exitDateOf(p), label: `${RULES.exitDTE}-day exit · ${p.ref || p.ticker}` }))}
             isSaved={isSaved} onSave={(x) => saveCandidate(x.cand)} inCompare={(c) => inCompare(compare, c)} onTickCompare={(c) => tickCompare(c)}
             onBuild={(x) => openFound(x)}
-            onBuildLegs={({ ticker: tk, expKey: ek, legs: lg, name }) => openOnBuild({ ticker: tk, expKey: ek, legs: lg, name })}
+            onBuildLegs={({ ticker: tk, expKey: ek, legs: lg, name }) => openOnBuild({ ticker: tk, expKey: ek, legs: lg, name, origin: { kind: "chain", tk, key: null } })}
+            initialTray={mktTray}
             cardFigures={listCardFigures} quoteOf={makeQuote} seasonal={seasonalFor(mkt.tk)} matrix={seasonal[mkt.tk]?.matrix || null}
             liqFloor={liqLevel.absolute}
             badgeOf={(x) => <SignalBadge fused={x.fused} state={readiness[x.tk]} onClick={() => { scrollToCard.current = x.key; setWhyTk(x.tk); setWhyDte(x.dte); setEv("why"); }} />}
@@ -4625,36 +4712,15 @@ export default function OptionsStrategyLab() {
             fold, and opening one covers the step instead of lengthening it. */}
 
 
-        {tab === "build" && !showSettings && step === "build" && (
-          <div style={{ marginTop: 12 }}>
-            {/* THE BACK LINK IS FIRST ON A TRADE THAT ARRIVED FROM A CARD (PR #44, TASKS 3 and 4): it returns to
-                Find with the same request, scrolled to that card. */}
-            {cardOrigin && (
-              <Btn ghost color={T.blue} onClick={backToList} style={{ marginBottom: 8 }}>← Back to the list</Btn>
-            )}
-            <h2 data-view-heading tabIndex={-1} style={{ ...sans, fontSize: FS.lg, fontWeight: 800, color: T.ink, margin: 0, outline: "none" }}>
-              {carded ? "Build" : `Step 3 — ${legs.length ? `${ticker} · ${stratName}` : "one trade, taken apart"}`}
-            </h2>
-            {/* `StepNav` already writes what each step carries under its own
-                number (`stepCarry` in path.js), so this repeated it a second
-                time four lines below it (P9, TASK 3). */}
-            <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
-              {!cardOrigin && <Btn small ghost color={T.blue} onClick={() => goStep("find")}>← Back to Find</Btn>}
-              {compare.length > 0 && (
-                <Btn small ghost color={T.blue} onClick={() => { setShowCompare(true); goStep("find"); }}>
-                  {compare.length} still ticked to compare
-                </Btn>
-              )}
-            </div>
-          </div>
-        )}
+        {/* THE HEADING, THE BACK LINK AND "N STILL TICKED TO COMPARE" are Build's own header row now (build.jsx), the
+            compare link in "More on this trade ▾" (redesign PR 2). */}
         {tab === "build" && !showSettings && step === "build" && <div ref={buildAnchor} style={{ scrollMarginTop: 12 }} />}
         {tab === "build" && !showSettings && step === "build" && buildScreen === "builder" && (() => {
           /* THE BUILD SCREEN, IN PIECES (PR #44, TASK 4). The pieces are the ones this screen always had, unchanged.
              What changed is how they are laid out: a trade that arrived from a card shows THAT card (the one
              `CandidateCard` Find prints, fed by `buildFigures()`), then size and send, then three folds. A screen
              with no trade behind it keeps the builder as it was. */
-          const pName = (<>
+          const pName = (<Reveal open>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
                 {/* THE MARKET SITS WITH THE TRADE (PR #46, TASK 1). It was the header's select on every screen,
                     where on Find it changed nothing in the list; on Build it is this trade's market. */}
@@ -4677,8 +4743,8 @@ export default function OptionsStrategyLab() {
                 </div>
               </div>
 
-          </>);
-          const pExpiry = (<>
+          </Reveal>);
+          const pExpiry = (<Reveal open>
               {chain && (
                 <div style={{ marginTop: 10, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
                   <span style={{ ...mono, fontSize: FS.xs, color: T.dim }}>EXPIRY</span>
@@ -4718,8 +4784,8 @@ export default function OptionsStrategyLab() {
                 </Fold>
               )}
 
-          </>);
-          const pWhy = (<>
+          </Reveal>);
+          const pWhy = (<Reveal open>
               <WhyThisTrade
                 fused={fused[ticker]}
                 ticker={ticker} weatherData={weather} newsItems={newsPool} month={NOW_MONTH}
@@ -4729,56 +4795,7 @@ export default function OptionsStrategyLab() {
                   : `This structure needs ${ticker} to go ${tradeDir > 0 ? "up" : "down"}.`}
               />
 
-          </>);
-          const pWarn = (<>
-              {/* ---- ONE WARNINGS PANEL, COLLAPSED (PRD §4l, TASK 1.7) ----
-                  The against-the-signal block (PRD §7) and the gate's own
-                  warnings, in one place, with the number in the summary line.
-                  It does not close and does not block the trade: it asks for
-                  the written reason, which is saved in the position's thesis.
-
-                  It opens by itself while a reason is still required, because a
-                  textarea that unlocks the ticket cannot be behind a tap. */}
-              {(() => {
-                const fusedHere = fused[ticker] || null;
-                // THE GATE'S WARNINGS ARE IN THE STOP-SIGNS STRIP NOW, ONCE
-                // (PR #40, TASK 2). This panel is only the written reason a
-                // trade against the factors needs, which cannot be a label.
-                if (!clash) return null;
-                const count = 1;
-                const summary = conflictSummaryLine(clash, fusedHere);
-                return (
-                  <BuildWarnings summary={summary} count={count} forceOpen={!!clash && !reasonOk}>
-                    {clash && (
-                      <>
-                        <div style={{ ...mono, fontSize: FS.sm, fontWeight: 800, color: T.amber }}>{clash.question}</div>
-                        <div style={{ fontSize: FS.sm, color: T.body, marginTop: 5, lineHeight: 1.5 }}>{clash.detail}.</div>
-                        <div style={{ display: "grid", gap: 4, marginTop: 8 }}>
-                          {clash.opposing.map((o) => (
-                            <div key={o.key} style={{ ...mono, fontSize: FS.xs, color: T.mut }}>
-                              <span style={{ color: T.red, fontWeight: 700 }}>✗ {o.label}</span> ({o.strength}/100) — {o.why}
-                            </div>
-                          ))}
-                        </div>
-                        <textarea
-                          value={against.reason}
-                          onChange={(e) => setAgainst({ reason: e.target.value })}
-                          placeholder="Why are you taking this trade anyway? Write the reason — it is stored with the position and you will read it again when you close."
-                          rows={3}
-                          style={{ ...mono, width: "100%", boxSizing: "border-box", marginTop: 9, background: T.bg, color: T.ink, border: `1px solid ${reasonOk ? T.green : T.amber}`, borderRadius: 6, padding: "8px 9px", fontSize: FS.xs, resize: "vertical" }}
-                        />
-                        <div style={{ ...mono, fontSize: FS.xs, color: reasonOk ? T.green : T.dim, marginTop: 4 }}>
-                          {reasonOk
-                            ? "✓ Reason recorded: it will be saved with the position and shown again when you close it."
-                            : `${Math.max(0, REASON_MIN - against.reason.trim().length)} more characters. Nothing here stops you taking this trade — you are only asked to write down why.`}
-                        </div>
-                      </>
-                    )}
-                  </BuildWarnings>
-                );
-              })()}
-
-          </>);
+          </Reveal>);
           const pRoom = (<>
               {/* THE ENTRY FLOOR IS NOT A CLIFF ANY MORE (src/rules.js,
                   `entryRoom`). Three bands, and only the middle one has a door:
@@ -4816,31 +4833,11 @@ export default function OptionsStrategyLab() {
               )}
 
           </>);
-          const pSnap = (<>
-              {/* THE GATE VERDICT HAS MOVED ONTO THE TRADE CARD, BESIDE THE
-                  BUTTON. It used to be printed here, above the chain and the
-                  legs editor — hundreds of pixels from the control it governs —
-                  and the gate's WARNINGS were printed here raw as well, while
-                  the collapsed warnings panel above was already printing the
-                  same list through `warningsToPrint()`. That is the CONFLICT
-                  paragraph fault again, one panel further down the same screen.
-                  One fact, one place: the refusals sit on the card, the
-                  warnings in the warnings panel, and neither is anywhere else.
-                  A refusal is never behind a tap (PRD §4n). */}
-
-              {/* THE STRIKES FOLLOW THE BOARD, AND IT SAYS WHEN THEY MOVED. */}
-              {snapNote && (
-                <div style={{ ...mono, fontSize: FS.xs, color: T.blue, marginTop: 10, lineHeight: 1.6, padding: "8px 10px", background: `${T.blue}0d`, border: `1px solid ${T.blue}55`, borderRadius: 6 }}>
-                  {snapNote}
-                </div>
-              )}
-
-          </>);
-          const pChain = (<>
+          const pChain = (<Reveal open>
               <ChainMatrix chain={chain} expKey={expKey} spot={spot} legs={legs} onCell={onChainCell} />
 
-          </>);
-          const pLegs = (<>
+          </Reveal>);
+          const pLegs = (<Reveal open>
               {/* Legs editor */}
               <div style={{ marginTop: 12, display: "grid", gap: 6 }}>
                 {legs.map((l, i) => {
@@ -4879,8 +4876,8 @@ export default function OptionsStrategyLab() {
               </div>
               {optLeg && <OptionPanel occ={optLeg.occ} label={optLeg.label} quote={optLeg.quote} onClose={() => setOptLeg(null)} />}
 
-          </>);
-          const pReconcile = (<>
+          </Reveal>);
+          const pReconcile = (<Reveal open>
               {/* THE CARD AGAINST BUILD, EVERY FIGURE (PR #40, TASK 0). It
                   compared the mid's entry alone and printed "Same numbers as
                   the Shortlist" over a risk of $68 against the card's $62. */}
@@ -4890,8 +4887,8 @@ export default function OptionsStrategyLab() {
                   <div style={{ ...mono, fontSize: FS.xs, color: r.same ? T.green : T.amber, marginTop: 10, lineHeight: 1.6 }}>{r.line}</div>
                 ) : null;
               })()}
-          </>);
-          const pPrice = (compact) => (<>
+          </Reveal>);
+          const pPrice = (compact) => (<Reveal open>
               {/* ============ ONE PRICE, AND WHAT CROSSING COSTS (P10 §1).
                   ============ The owner's reading of the whole product: "is it
                   a good bet? yes — but how much do I pay for it?" Measured on
@@ -4996,38 +4993,14 @@ export default function OptionsStrategyLab() {
                 );
               })()}
 
-          </>);
-          const pDecision = (compact) => (<>
-              {/* ============ THE DECISION, IN FIVE LINES (PRD §4n) ============
-                  Everything this screen printed here is still here; it opens
-                  behind a tap, in a sheet over the step, because a decision is
-                  what this part of the screen is for and eleven blocks of
-                  correct arithmetic are not a decision. The refusals never
-                  move: they are on the card, beside the button. */}
-              <TradeCard compact={compact}
-                ticker={ticker} name={stratName}
-                card={buildCard}
-                refusals={buildRefusals}
-                onNumbers={() => setDeskSheet("numbers")}
-                onOrder={() => setDeskSheet("order")}
-                orderLabel={alpaca ? "Price it and send →" : "Open it on the app's own book →"}>
-                {guard && guard.pass && (
-                  <div style={{ ...mono, fontSize: FS.xs, color: T.green, marginTop: 10, lineHeight: 1.6 }}>
-                    ✓ Inside {limitOwner(guard.limits)} rules: risking {money(guard.limits.tradeRisk)} of {money(guard.limits.perTrade)} allowed · total {money(guard.limits.totalAfter)} of {money(guard.limits.total)}
-                  </div>
-                )}
-              </TradeCard>
-
-          </>);
-          const pNumbers = (<>
+          </Reveal>);
+          const pNumbers = (<Reveal open>
               {/* ---- SHEET 1: ALL THE NUMBERS. Not one figure, tooltip or
                   sentence below is changed; the block simply opens over the
                   step instead of standing between the trade and the decision.
                   The comment that follows is the one PR #28 wrote here. ---- */}
-              <DeskSheet open={deskSheet === "numbers"} eyebrow="THE NUMBERS"
-                title={`${ticker} · ${stratName}`}
-                sub={`Every figure at the price that will be sent, per contract \u00b7 ${CARD_CURRENCY}`}
-                onClose={() => setDeskSheet(null)}>
+              <Panel>
+                <Label>ALL THE NUMBERS · PER CONTRACT, AT THE PRICE THAT WILL BE SENT · {CARD_CURRENCY}</Label>
               {/* >>> EVERY FIGURE HERE IS WORKED OUT AT THE PRICE THAT WILL BE
                   SENT, NOT AT THE MID. <<< Read on the owner's phone, UNG
                   2026-09-20: this block said YOU PAY $14 · MOST YOU CAN MAKE
@@ -5120,13 +5093,13 @@ export default function OptionsStrategyLab() {
                   what the feed gives, not what this would cost: the risk gate refuses the order.
                 </div>
               )}
-              </DeskSheet>
+              </Panel>
 
-          </>);
+          </Reveal>);
           const pUnified = (<>
-              <div style={{ marginTop: 14 }}>
-                <Label>PRICE HISTORY × WHERE IT COULD GO × WHERE YOU MAKE MONEY</Label>
-                <div style={{ marginTop: 8 }}>
+              {/* The chart's name is its aria-label now: "What this trade does" is the section's title (redesign PR 2). */}
+              <div>
+                <div>
                   <UnifiedView
                     ticker={ticker} dte={dte} spot={spot}
                     sigma={A.legPx.length ? A.legPx.reduce((x, y) => x + y.iv, 0) / A.legPx.length : iv}
@@ -5138,7 +5111,7 @@ export default function OptionsStrategyLab() {
               </div>
 
           </>);
-          const pAgree = (<>
+          const pAgree = (<Reveal open>
               {(() => {
                 const t2 = ta[ticker];
                 // NO SEASONAL READING, NO AGREEMENT PANEL. `confluence()`
@@ -5160,8 +5133,8 @@ export default function OptionsStrategyLab() {
                 );
               })()}
 
-          </>);
-          const pPL = (<>
+          </Reveal>);
+          const pPL = (<Reveal open>
               {/* Payoff classico: vista secondaria */}
               <div style={{ marginTop: 14 }}>
               <Label>PROFIT AND LOSS BY PRICE · AT EXPIRY, TODAY, AND HALFWAY</Label>
@@ -5185,178 +5158,153 @@ export default function OptionsStrategyLab() {
               </div>
               </div>
 
-          </>);
-          const pOrder = (<>
-              {/* ---- SHEET 2: PRICE IT AND SEND. The ticket PR #28 designed
-                  with the owner, and the confirm step, in one sheet over the
-                  step — because they are one act. Nothing in either is changed.
-                  The confirm step USED TO SIT BELOW THIS PANEL, at the very
-                  bottom of the longest screen in the app; it is beside the
-                  ticket now, which is where the decision is made. ---- */}
-              <DeskSheet open={deskSheet === "order"} eyebrow="THE ORDER"
-                title={`${ticker} · ${stratName}`}
-                sub={alpaca ? `Alpaca paper account \u00b7 nothing is sent until you confirm` : `The app's own paper book \u00b7 no broker involved`}
-                onClose={() => setDeskSheet(null)}>
-              {alpaca && !reasonOk && (
-                <div style={{ ...mono, fontSize: FS.xs, color: T.amber, marginTop: 10, padding: "9px 11px", border: `1px solid ${T.amber}66`, borderRadius: 7 }}>
-                  The order ticket unlocks as soon as you write why you are going against {clash.n} of {clash.total} factors. The trade is not forbidden — the written reason is required.
-                </div>
-              )}
-              {/* ...AND ABOVE SEND, the same labels (PR #40, TASK 2). */}
-              <StopSigns signs={buildSigns} style={{ marginTop: 10 }} />
-              {/* FREE SIZING ON: what is at risk now, from the gate's own
-                  exposure figure — information, never a block (PR #41). */}
-              {freeSizing && guard && (
-                <div style={{ ...mono, fontSize: FS.xs, color: T.mut, marginTop: 8 }}>{atRiskNowLine(guard.limits.openRisk, bookPositions(store.positions).length)}</div>
-              )}
-              {alpaca && reasonOk && (
-                <OrderTicket
-                  onSent={(o) => openPaper(o)}
-                  legs={legs} expKey={expKey} ticker={ticker}
-                  quoteFn={q} estNet={AE.entry}
-                  /* THE SHEET PRINTS EVERY OUTCOME BESIDE THE BUTTON (its
-                     `OrderOutcome`), so the ticket's copy of it no longer goes
-                     to the top banner too (PR #40, TASK 2). pro.jsx unchanged. */
-                  setMsg={quietTicketMsg}
-                  /* THE FIGURES THE TICKET PRINTS ARE THE ONES THE SCREEN ABOVE
-                     PRINTS, at the price about to be sent (`AE`). They used to
-                     be `A`'s — the mid — which is how the ticket came to say a
-                     limit at the mid does not fill under a maximum loss worked
-                     out at exactly that mid. */
-                  gate={gate} dte={dte} maxLoss={AE.maxLoss} maxProfit={AE.maxProfit}
-                  /* THE SIZE IS THE SCREEN'S, NOT THE TICKET'S. It used to be
-                     `cfg.qty` inside the ticket, which is why the gate above and
-                     the position written below both ran at a hardcoded 1. */
-                  qty={contracts} onQty={setContracts}
-                  qtyNote={contractsSourceNote({ contracts, typed: contractsTyped != null, request, fits: !!(budgetSize && budgetSize.ok) })}
-                  /* AND NEITHER IS THE PRICE, for the same reason and one
-                     session later. Type, time in force and one price per leg
-                     are Build-screen state; the verdict and the effective price
-                     are worked out once, above, and handed down. */
-                  cfg={ticket} onCfg={(patch) => setTicket((t) => ({ ...t, ...patch }))}
-                  quotes={bookQuotes} legPrices={legPrices || []} net={ticketNet.net}
-                  verdict={ticketVerdict} effective={effective}
-                  seed={seedPx} onReseed={() => setTicket((t) => ({ ...t, legPx: null }))}
-                  feed={feedName(chain)}
-                  /* AND THE MODEL VERDICT IS COMPUTED ONCE, not per render of
-                     the ticket, and from `analyze()`'s own marks — the same
-                     expression the Shortlist judges this structure with. */
-                  model={modelCheck}
-                  /* AND THE LIMIT THE SEND IS MEASURED AGAINST, from the one
-                     gate call above — the same `guard.limits` the trade card
-                     prints. The card is behind this sheet while the sliders are
-                     being moved, so the check has to be readable here too. */
-                  limits={guard ? guard.limits : null}
-                  spot={spot} entryOverride={roomReason}
-                  qtyBlock={legQtyMsg}
-                />
-              )}
-              {!alpaca && <div style={{ ...mono, fontSize: FS.xs, color: T.dim, marginTop: 8 }}>Connect Alpaca in Settings → Connections to unlock the full order ticket: limit or market, time in force, quantity and cancellations.</div>}
-
-            {/* THE CONFIRM STEP, BESIDE THE TICKET IT CONFIRMS.
-                It used to be a wizard screen of its own that "Take this road"
-                jumped to, which let the guided flow reach an order without ever
-                passing the chain, the legs or the greeks. Then it was the last
-                thing on the longest screen in the app, a full scroll below the
-                ticket. It reads the LIVE Build state, so a strike changed
-                outside this sheet changes the checks inside it: what is
-                confirmed is what is on screen. */}
-            <div style={{ marginTop: 12 }}>
-              {legQtyMsg && (
-                <div style={{ ...mono, fontSize: FS.xs, color: T.amber, marginBottom: 8, padding: "9px 11px", border: `1px solid ${T.amber}66`, borderRadius: 7 }}>
-                  {`${legQtyMsg}. Nothing can be opened until it is filled in.`}
-                </div>
-              )}
-              {!legQtyMsg && <ConfirmSteps
-                /* AT THE PRICE THAT WILL BE SENT (`AE`), like every other
-                   figure on this screen and like the record that is written
-                   when the button is tapped. The confirm step used to describe
-                   a trade at the mid over a ticket about to send a different
-                   price. */
-                candidate={{
-                  ticker, name: stratName, legs, expKey, dte,
-                  risk: Math.abs(AE.maxLoss), maxProfit: AE.maxProfit, entryNet: AE.entry, spot,
-                }}
-                preview={guard} result={openResult}
-                contracts={contracts}
-                // THE SAME VOLATILITY AND THE SAME DRIFT THE CHANCE ON THIS
-                // SCREEN WAS COMPUTED AT, so the figure and the number can
-                // never be two readings of one trade.
-                sigma={chance?.sigma} driftAnnual={chance?.driftAnnual}
-                heading={false} showFigure={false}
-                /* THE WARNINGS ARE IN THE ONE PANEL ABOVE. Printing them here
-                   as well is how the same 400-character CONFLICT paragraph
-                   came to be on one screen four times. */
-                showWarnings={false}
-                busy={busy === "order"}
-                onConfirm={() => openPaper()}
-              />}
-              {/* AND THE LIST SAYS WHOSE ACCOUNT IT CHECKED. This sheet holds
-                  two taps — the ticket, which sends, and the confirm step,
-                  which records on the app's own book — and the checks above
-                  are the SEND'S, run against the same account the send uses.
-                  They used to be run against `LOCAL_BOOK` whatever was
-                  connected, so the paper row read "local simulation, no broker
-                  involved" directly above a button that reaches Alpaca. */}
-              {/* THE MARKET CLOCK (PR #47, TASK 0d): an order sent now waits for the open, and the confirm says so. */}
-              {marketClockLine(clock, { queued: true }) && <Note style={{ marginTop: 8 }}>{marketClockLine(clock, { queued: true })}</Note>}
-              <div style={{ ...mono, fontSize: FS.xs, color: T.dim, marginTop: 10, lineHeight: 1.6 }}>
-                {checkedAgainstNote(!!alpaca, guard?.limits?.paper?.why)}
-              </div>
-            </div>
-              </DeskSheet>
-          </>);
+          </Reveal>);
+          // (Only in "More on this trade ▾" since redesign PR 2: the card is there.)
           const reconcileLines = (
-            <>
+            <Reveal open>
               {pReconcile}
               {signalCmp && (
                 <div style={{ ...mono, fontSize: FS.xs, color: signalCmp.same ? T.green : T.amber, marginTop: 8, lineHeight: 1.6 }}>{signalCmp.line}</div>
               )}
-            </>
+            </Reveal>
           );
-          if (carded) {
-            return (
-              <div style={{ marginTop: 12 }}>
-                <CandidateCard
-                  name={`${ticker} · ${stratName}`} legs={`${legsLine(legs)} · ${expKey}`}
-                  cardKey={buildOrigin && buildOrigin.key}
-                  signs={buildSigns} sizeText={buildSizeLine}
-                  figures={sizedFigures(AE, contracts)}
-                  rr={BF.rr} pop={chance ? chance.pop : null} basis={chance ? chanceBasisLabel(chance) : null}
-                  future={futureFigures(chance, AE, contracts, expKey)} past={pastFigures(BF.bt, AE, contracts)} ticker={ticker}
-                  picture={BF.bands ? { bands: BF.bands, legs, entryNet: AE.entry, spot, bars: barsCache[ticker] || NO_BARS,
-                    dte, sigma: chance ? chance.sigma : undefined, driftAnnual: chance ? chance.driftAnnual : undefined, ticker } : null}
-                  badge={<SignalBadge fused={fused[ticker] || null} state={readiness[ticker]} onClick={() => { setWhyTk(ticker); setWhyDte(null); setEv("why"); }} />} />
-                {buildOrigin && buildOrigin.note && (
-                  <div style={{ ...sans, fontSize: FS.sm, color: T.amber, marginTop: 8, lineHeight: 1.5 }}>{buildOrigin.note}</div>
-                )}
-                {reconcileLines}
-                {pSnap}
-                {pWarn}
-                {pRoom}
-                <div style={{ marginTop: 12 }}>{pPrice(true)}</div>
-                {pDecision(true)}
-                {pNumbers}
-                <Fold label="open" tone={T.ink} style={{ marginTop: 12 }} summary="Edit legs and expiry">
-                  {pName}{pExpiry}{pChain}{pLegs}
-                </Fold>
-                <Fold label="open" tone={T.ink} style={{ marginTop: 6 }} summary="Charts">
-                  {pUnified}{pAgree}{pPL}
-                </Fold>
-                <Fold label="open" tone={T.ink} style={{ marginTop: 6 }} summary="Why this trade">
-                  {pWhy}
-                  <TradeLines card={buildCard} />
-                </Fold>
-                {pOrder}
-              </div>
-            );
-          }
+          /* ============ BUILD ON THE OWNER'S MOCKUP "3 · Build" (redesign PR 2, TASKS 1–3) ============
+             One layout for every trade on Build (a card's, the chain tray's, or one built here). It READS: `AE` and
+             `BF` (buildFigures(), the card's figures, figures.test.jsx), `guard` (the gate, unchanged), `buildCard` (the
+             five lines), the factors (`factorStands()`), the payoff (`BF.bands`). Nothing is worked out twice. Everything
+             the mockup has no place for is in "More on this trade ▾" in today's form (`foldedNode`). */
+          const L = guard ? guard.limits : null;
+          const fusedHere = fused[ticker] || null;
+          const net = ticketNet.net;
+          const backTk = buildOrigin && buildOrigin.kind === "card" ? String(buildOrigin.key || "").split("|")[0] || ticker
+            : buildOrigin && buildOrigin.kind === "chain" ? buildOrigin.tk : null;
+          // THE LIMIT STEPPER MOVES THE FIRST LEG'S PRICE BY ONE TICK (the leg sliders in "More" stay consistent with it).
+          const stepLimit = (dir) => {
+            const cur = Array.isArray(legPrices) && legPrices.length === legs.length ? legPrices.slice() : null;
+            if (!cur || !legs.length || !Number.isFinite(Number(cur[0]))) return;
+            const s0 = Math.sign(+legs[0].side || 1), sNet = Number.isFinite(net) && net < 0 ? -1 : 1;
+            cur[0] = onTick(Math.max(0, Number(cur[0]) + dir * sNet * s0 * ORDER_TICK));
+            setTicket((t) => ({ ...t, legPx: cur }));
+          };
+          const sendBlock = PREVIEW ? PREVIEW_READ_ONLY : DEMO ? DEMO_TOOLTIP : legQtyMsg ? `${legQtyMsg}.`
+            : !guard ? "The risk gate has not run on this trade yet." : !guard.pass ? guard.violations.map((v) => v.message).join(" ") : null;
+          const tpB = takeProfitTarget({ legs, maxProfit: AE.maxProfit, maxLoss: AE.maxLoss, entryNet: AE.entry, contracts });
+          const stopAt = stopWarningLevel({ maxLoss: AE.maxLoss, contracts });
+          const v = {
+            back: backTk ? { label: backTk, onClick: () => { if (buildOrigin && buildOrigin.kind === "card") backToList(); else goMarket(backTk, "strategies"); } }
+              : { label: "Find", onClick: () => goStep("find") },
+            title: { name: stratName, sub: buildSubLine({ ticker, expKey, dte, n: contracts }),
+              signs: <StopSigns signs={buildSigns} style={{ marginTop: 8 }} />, note: buildOrigin && buildOrigin.note ? buildOrigin.note : null },
+            takeaway: tradeTakeaway(BF.bands, { ticker, expKey, n: contracts, credit: AE.entry < 0, legs }),
+            numbers: {
+              figures: sizedFigures(AE, contracts), rr: BF.rr, pop: chance ? chance.pop : null, breakevens: AE.breakevens,
+              future: futureFigures(chance, AE, contracts, expKey), past: pastFigures(BF.bt, AE, contracts),
+              delta: deltaSharesText(AE.greeks.delta, contracts), theta: thetaDayText(AE.greeks.theta, contracts),
+            },
+            why: { stance: stanceText(signalStance(fusedHere, tradeDir)), factors: factorStands(fusedHere, tradeDir),
+              reasonRule: reasonRuleText(AGAINST_MIN_SCORE, clash), lines: buildCard ? buildCard.lines : [],
+              onMarketRead: () => goMarket(ticker, "overview"), readLabel: MARKET_READ_LINK },
+            copilot: { apiKey: "server", convo: copilot, setConvo: setCopilot, onAnalysis: logAnalysis,
+              ctx: { store, scan, news: news[ticker]?.items || [], ticker, legs, expKey, A, spot, seasonalSrc: seas.src, setMsg,
+                otherCards: findSorted.filter((x) => x.tk === ticker && !(x.name === stratName && x.expKey === expKey)).slice(0, 6)
+                  .map((x) => ({ name: x.name, legs: legsLine(x.legs), expKey: x.expKey, figures: x.lf.figures, chance: x.lf.pop,
+                    futurePer100: x.lf.future ? x.lf.future.per100 : null })) } },
+            legs: { expLabel: expiryShort(expKey), snapNote,
+              onEditInChain: () => { goMarket(ticker, "chain"); setMktTray({ expKey, legs: legs.map((l) => ({ ...l })), note: null }); },
+              legs: legs.map((l, i) => {
+                const lp = AE.legPx[i] || {};
+                const g = Number.isFinite(lp.iv) ? bsGreeks(spot, l.strike, dte / 365, lp.iv, l.type) : null;
+                return { side: l.side, qty: l.qty, strike: l.strike, type: l.type, mid: lp.real ? lp.px : null,
+                  bid: lp.real && lp.bid != null ? lp.bid : null, ask: lp.real && lp.ask != null ? lp.ask : null, delta: g ? g.delta : null };
+              }) },
+            order: {
+              contracts, onContracts: (n) => setContracts(Math.max(1, Math.min(20, n))), qtyMin: 1, qtyMax: 20, qtyNote: buildSizeLine,
+              limitSide: Number.isFinite(net) && net < 0 ? "credit" : "debit", limit: Number.isFinite(net) ? Math.abs(net) : null, onStep: stepLimit,
+              bookLine: orderBookLine({ mid: book.ok ? book.mid : null, natural: book.ok ? book.ask : null }), verdict: ticketVerdict,
+              risk: { value: L ? money(L.tradeRisk) : "—", pct: L && L.tradingCapital ? `${pctText(L.tradeRisk / L.tradingCapital)} of capital` : null },
+              cap: {
+                checked: !freeSizing && freeDraft == null, label: capLabel(L),
+                over: guard ? ((guard.violations || []).find((x) => x.code === "PER_TRADE_LIMIT") || {}).message || null : null,
+                freeLine: freeSizing && guard ? atRiskNowLine(guard.limits.openRisk, bookPositions(store.positions).length) : null,
+                draft: freeSizing ? null : freeDraft, setDraft: setFreeDraft,
+                draftOk: sizingFreeOn({ reason: freeDraft || "" }),
+                draftLeft: `${Math.max(0, RULES.minOverrideReasonChars - String(freeDraft || "").trim().length)} more characters`,
+                onCheck: (on) => { if (on) { setFreeDraft(null); setSetting("sizingFree", null); } else setFreeDraft(""); },
+                onTurnOff: () => { setSetting("sizingFree", { reason: String(freeDraft || "").trim(), at: Date.now() }); setFreeDraft(null); },
+                onCancelDraft: () => setFreeDraft(null),
+              },
+              openRisk: { value: L ? money(L.totalAfter) : "—", of: !L ? "" : freeSizing ? "no limit applied" : `of ${money(L.total)}` },
+              room: pRoom,
+            },
+            exit: { pill: exitsPill(ticker), footer: EXITS_FOOTER, rows: [
+              { label: "Take profit", sub: EXIT_ROWS.takeProfit(tpB.basis || "max-profit"), value: tpB.dollars == null ? "—" : money(tpB.dollars) },
+              { label: "Time exit", sub: EXIT_ROWS.time(), value: timeExitDay(expKey) || "—" },
+              { label: "Stop", sub: EXIT_ROWS.stop(), value: stopAt == null ? "—" : money(Math.abs(stopAt)) },
+            ] },
+            send: { label: sendLabel({ type: ticket.type, net, n: contracts }), disabled: !!sendBlock, reason: sendBlock,
+              footer: SEND_FOOTER(ticket.tif), onSend: () => setDeskSheet("review") },
+            review: reviewSheetOf({ net, L, sendBlock }),
+            ticket: { legs, expKey, ticker, quotes: bookQuotes, net, estNet: AE.entry, gate, dte, maxLoss: AE.maxLoss, maxProfit: AE.maxProfit,
+              entryOverride: roomReason, qty: contracts, cfg: ticket, legPrices: legPrices || [], setMsg: quietTicketMsg,
+              onSent: (o) => openPaper(o), qtyBlock: legQtyMsg },
+            chart: pUnified,
+          };
           return (
-            <div style={{ marginTop: 12 }}>
-              <Panel>
-                {pName}{pExpiry}{pWhy}{pWarn}{pRoom}{pSnap}{pChain}{pLegs}{reconcileLines}{pPrice(false)}{pDecision(false)}{pNumbers}{pUnified}{pAgree}{pPL}{pOrder}
-              </Panel>
-            </div>
+            <BuildScreen v={v} foldedNode={<>
+              <Section label="Market now">
+                <Label color={T.mut}>MARKET NOW · {ticker}</Label>
+                {tickerStrip}
+                <Note style={{ marginTop: 6 }}>{chain ? `${chain.source} · updated ${ago(chain.updated)}` : "prices not loaded"}</Note>
+                <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                  <Btn small ghost color={T.blue} onClick={() => refreshChain(ticker)} disabled={busy !== null}>{busy === ticker ? "…" : "Refresh prices"}</Btn>
+                  <Btn small ghost color={T.blue} onClick={() => setShowSettings(true)}>Settings</Btn>
+                  {compare.length > 0 && <Btn small ghost color={T.blue} onClick={() => { setShowCompare(true); goStep("find"); }}>{compare.length} still ticked to compare</Btn>}
+                </div>
+              </Section>
+              <Section label="The card, as Find shows it">
+                <Label color={T.mut}>THE CARD, AS FIND SHOWS IT</Label>
+                {reconcileLines}
+                <div style={{ marginTop: 8 }}>
+                  <CandidateCard
+                    name={`${ticker} · ${stratName}`} legs={`${legsLine(legs)} · ${expKey}`}
+                    cardKey={buildOrigin && buildOrigin.key}
+                    signs={buildSigns} sizeText={buildSizeLine}
+                    figures={sizedFigures(AE, contracts)}
+                    rr={BF.rr} pop={chance ? chance.pop : null} basis={chance ? chanceBasisLabel(chance) : null}
+                    future={futureFigures(chance, AE, contracts, expKey)} past={pastFigures(BF.bt, AE, contracts)} ticker={ticker}
+                    picture={BF.bands ? { bands: BF.bands, legs, entryNet: AE.entry, spot, bars: barsCache[ticker] || NO_BARS,
+                      dte, sigma: chance ? chance.sigma : undefined, driftAnnual: chance ? chance.driftAnnual : undefined, ticker } : null}
+                    badge={<SignalBadge fused={fusedHere} state={readiness[ticker]} onClick={() => goMarket(ticker, "overview")} />} />
+                </div>
+                <Fold label="why" tone={T.dim} style={{ marginTop: 6 }} summary="What each warning sign means">
+                  {warningsToPrint(guard?.warnings || [], { narrative: fusedHere?.narrative || null, pointer: conflictSummaryLine(clash, fusedHere) }).map((w) => (
+                    <div key={w.code} style={{ ...sans, fontSize: FS.xs, color: T.amber, lineHeight: 1.6, marginTop: 4 }}>⚠ {w.message}</div>
+                  ))}
+                  {monoNote && <div style={{ ...sans, fontSize: FS.xs, color: T.amber, lineHeight: 1.6, marginTop: 4 }}>{monoNote}</div>}
+                  {book.missing.length > 0 && <div style={{ ...sans, fontSize: FS.xs, color: T.amber, lineHeight: 1.6, marginTop: 4 }}>{unquotedLegNote(book.missing.length)}</div>}
+                </Fold>
+              </Section>
+              <Section label="Edit the legs and the expiry here">{pName}{pExpiry}{pChain}{pLegs}</Section>
+              <Section label="The price and what crossing costs">{pPrice(true)}</Section>
+              {alpaca && (
+                <OrderTicket noSend
+                  onSent={(o) => openPaper(o)} legs={legs} expKey={expKey} ticker={ticker} quoteFn={q} estNet={AE.entry} setMsg={quietTicketMsg}
+                  gate={gate} dte={dte} maxLoss={AE.maxLoss} maxProfit={AE.maxProfit} qty={contracts} onQty={setContracts}
+                  qtyNote={contractsSourceNote({ contracts, typed: contractsTyped != null, request, fits: !!(budgetSize && budgetSize.ok) })}
+                  cfg={ticket} onCfg={(patch) => setTicket((t) => ({ ...t, ...patch }))}
+                  quotes={bookQuotes} legPrices={legPrices || []} net={ticketNet.net} verdict={ticketVerdict} effective={effective}
+                  seed={seedPx} onReseed={() => setTicket((t) => ({ ...t, legPx: null }))} feed={feedName(chain)} model={modelCheck}
+                  limits={guard ? guard.limits : null} spot={spot} entryOverride={roomReason} qtyBlock={legQtyMsg} />
+              )}
+              {pNumbers}
+              <Section label="Charts">{pAgree}{pPL}</Section>
+              <Section label="Why this trade, every factor">{pWhy}</Section>
+              <Section label="Market levels">{levelsView(chain, oiGrid, spot, lv)}</Section>
+              <Section label="History">
+                <Label color={T.mut}>HISTORY · WHAT HAPPENED IN PAST YEARS</Label>
+                {historyNode}
+              </Section>
+            </>} />
           );
         })()}
 
@@ -5410,7 +5358,7 @@ export default function OptionsStrategyLab() {
                       closeDisabled={!!(ca && (ca.busy || ca.prepared))}
                       closeTitle={DEMO ? DEMO_TOOLTIP : undefined} demo={DEMO}
                       onClose={() => prepareCardClose(p)} onDetails={() => setDetailsId(p.id)}
-                      fileKind={m.fileKind} onFile={() => setClosing({ id: p.id, written: "", err: null })}
+                      fileKind={m.fileKind} onFile={() => { if (PREVIEW) { setMsg(PREVIEW_READ_ONLY); return; } setClosing({ id: p.id, written: "", err: null }); }}
                       guardian={(
                         <GuardianPanel
                           pos={p} spot={m.s || p.entrySpot} dteLeft={m.dteLeft} ivNow={m.ivNow}
@@ -5948,34 +5896,24 @@ export default function OptionsStrategyLab() {
 
         {/* The chain is on its way. Saying "no market data" here would blame
             the user for a request that has not come back yet. */}
+        {/* BUILD'S THREE STATES (redesign PR 2, TASK 4; owner's mockups "Build · loading", "no quotes", "empty").
+            `buildScreenState()` decides, unchanged: no price for the market and a request in flight is loading; no
+            price and none in flight is "no quotes" (its legs listed when a trade is loaded); a price and no trade is
+            empty. A trade whose legs are unquoted on a read chain stays on the builder, with dashes and Send held. */}
         {tab === "build" && !showSettings && step === "build" && buildScreen === "loading" && (
-          <Panel style={{ marginTop: 12 }}>
-            <div style={{ ...mono, fontSize: FS.xs, color: T.blue }}>Loading {ticker} option prices — the trade appears here as soon as they arrive.</div>
-          </Panel>
+          <BuildLoading back={{ label: "Find", onClick: () => goStep("find") }} title={legs.length ? stratName : ticker}
+            sub={buildSubLine({ ticker, expKey, dte, n: contracts })}
+            reading={`Reading ${ticker}'s chain${expKey ? ` for ${expiryShort(expKey)}` : ""}…`} />
         )}
-
         {tab === "build" && !showSettings && step === "build" && buildScreen === "no-market-data" && (
-          <Panel style={{ marginTop: 12 }}>
-            <div style={{ ...mono, fontSize: FS.xs, color: T.amber }}>Option prices for {ticker} have not loaded yet — press Refresh at the top.</div>
-          </Panel>
+          <BuildNoQuotes back={{ label: "Find", onClick: () => goStep("find") }} title={legs.length ? stratName : ticker}
+            sub={buildSubLine({ ticker, expKey, dte, n: contracts })}
+            sentence={`${ticker}'s option prices have not come back${legs.length ? `, so ${legs.length === 1 ? "this leg is" : "these legs are"} not priced` : ""}: nothing on this trade is worked out until a bid and an ask arrive.`}
+            legs={legs} onRetry={() => refreshChain(ticker)} onPickExpiry={() => goMarket(ticker, "chain")}
+            lastRead={`Last read: ${chainErrAt ? new Date(chainErrAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) : "not yet"} your time. The feed is indicative; a missing quote is shown as missing, never as zero.`} />
         )}
-
-        {/* An empty Build screen is a normal state, not a blank screen: say what
-            it is for and where the trades come from. */}
         {tab === "build" && !showSettings && step === "build" && buildScreen === "empty" && (
-          <Panel style={{ marginTop: 12 }}>
-            <Label>NOTHING TO BUILD YET</Label>
-            {/* TWO PARAGRAPHS SAYING ONE THING (P9, TASK 3): what step 3 is
-                for, and then that a trade gets here from step 2. The buttons
-                below already say where to go. */}
-            <div style={{ fontSize: FS.sm, color: T.body, marginTop: 8, lineHeight: 1.55 }}>
-              One trade, taken apart — its payoff, its odds, its risk checks. Nothing is on it yet: a trade
-              gets here from Find.
-            </div>
-            <div style={{ display: "flex", gap: 6, marginTop: 12, flexWrap: "wrap" }}>
-              <Btn small onClick={() => goStep("find")}><Radar size={11} /> 1 Find</Btn>
-            </div>
-          </Panel>
+          <BuildEmpty onFind={() => goStep("find")} onChain={() => goMarket(ticker, "chain")} />
         )}
 
         </TabBoundary>

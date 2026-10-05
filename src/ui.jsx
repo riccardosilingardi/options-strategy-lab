@@ -318,6 +318,14 @@ export function RangeField({
   );
 }
 
+/** A tap-away region (redesign PR 2): its children render only while `open`. The word counter (wordcount.mjs) scores a
+ *  `Reveal` as folded, so every use must really be behind a tap: Build's "Why this trade" and "More on this trade ▾",
+ *  the chart's "How to read ⓘ", and the pieces App.jsx hands to "More on this trade ▾" (`open` always true there: the
+ *  fold that hides them is More's own). */
+export function Reveal({ open = false, children }) {
+  return open ? <>{children}</> : null;
+}
+
 /* ====================================================================
    THE PLACEHOLDER (redesign PR 1, TASK 1) — a function with no source yet. A dashed box in `T.mut`: "Not connected
    yet", what it will show, what it needs, and which PR fills it. It takes an id and NOTHING ELSE: its words are
