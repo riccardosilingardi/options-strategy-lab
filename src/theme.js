@@ -19,6 +19,10 @@ const DARKT = {
   greenDeep: "#4a9e3f", redDeep: "#c0392b", onAccent: "#14181d", dark: true,
   // PR #47: the ACTION tone — CLOSE and a Send. Red is for errors and refusals only.
   action: "#5aa7d6",
+  // Redesign PR 1 round 2 (the mockups' two tokens): RAISE is a selected or in-the-money cell, a step above the panel;
+  // SCRIM is what sits behind a sheet. ink, body, mut and amber hold 4.5:1 on raise (theme.test.js); dim does not, so
+  // dim text never sits on it.
+  raise: "#222831", scrim: "rgba(6,8,10,0.66)",
 };
 const LIGHTT = {
   bg: "#f5f6f7", panel: "#ffffff", line: "#dcdfe3", field: "#7a8491", ink: "#1c2128",
@@ -26,6 +30,7 @@ const LIGHTT = {
   red: "#b23a2b", blue: "#1f6391", violet: "#5d47a8", body: "#2a3038",
   greenDeep: "#20603a", redDeep: "#8f2d20", onAccent: "#ffffff", dark: false,
   action: "#1f6391",
+  raise: "#eceff2", scrim: "rgba(20,24,29,0.45)",
 };
 
 /** The theme the user chose. DARK IS THE DEFAULT (owner, 4 Oct 2026, redesign PR 1): light is chosen, and a stored

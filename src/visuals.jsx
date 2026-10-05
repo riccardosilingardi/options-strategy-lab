@@ -534,7 +534,7 @@ export function simplifyCloses(hist = [], maxPts = 40) {
 /** How many points a line this wide can actually show. One point per ~7px. */
 export const thumbPoints = (width) => Math.max(6, Math.round(width / 7));
 
-export function BandThumbnail({ bands, width = 160, height = 44, spot = null, entrySpot = null, bars = [], onExplain, title }) {
+export function BandThumbnail({ bands, width = 160, height = 44, spot = null, entrySpot = null, bars = [], onExplain, title, lineWidth = 1.4 }) {
   const b = bands;
   if (!b || !b.bands.length) return null;
   const s0 = spot ?? b.spot;
@@ -573,7 +573,7 @@ export function BandThumbnail({ bands, width = 160, height = 44, spot = null, en
       ))}
       {/* the price line — the underlying's own path across the zones */}
       {path
-        ? <path d={path} fill="none" stroke={T.ink} strokeWidth={1.4} strokeLinejoin="round"
+        ? <path d={path} fill="none" stroke={T.ink} strokeWidth={lineWidth} strokeLinejoin="round"
             strokeLinecap="round" opacity={0.85} onClick={tap("history")} />
         : s0 != null && (
           <line x1={0} x2={xToday} y1={Y(s0)} y2={Y(s0)} stroke={T.ink} strokeWidth={1.2}

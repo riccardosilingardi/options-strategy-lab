@@ -153,11 +153,15 @@ const MIGRATED = ["src/ui.jsx", "src/card.jsx", "src/find.jsx", "src/orders.jsx"
   // PR #49, TASK 4: the sweep reaches the files that host order paths 1, 2 and 4.
   "src/pro.jsx", "src/App.jsx",
   // Redesign PR 1: the market page is written on the atoms and tokens from its first line.
-  "src/market.jsx"];
+  "src/market.jsx",
+  // Round 2: Saved's rows, moved out of App.jsx.
+  "src/saved.jsx"];
 const stripped = (f) => readFileSync(f, "utf8").replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
 const ATOMS = ["Btn", "Panel", "Lbl", "Label", "Stat", "Chip", "Fold", "RangeField", "Note", "NumberInput", "TextArea", "CheckField", "Info", "Segments",
   // Redesign PR 1: the bottom sheet and the placeholder are atoms too.
-  "Sheet", "Placeholder"];
+  "Sheet", "Placeholder",
+  // Round 2: the mockups' atoms.
+  "IconButton", "SegmentBar", "UnderTabs", "FilterChip", "TextBtn"];
 
 /** What a migrated file may not contain, as findings (so the sweep itself can be shown to fail). */
 function offences(src, { isHome }) {

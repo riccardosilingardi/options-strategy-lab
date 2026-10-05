@@ -1411,7 +1411,8 @@ test("WATCHING IS A PLACE OF ITS OWN, and its figures are not money", () => {
   // stare nella stessa schermata delle posizioni e ordini."
   const app = codeOf("App.jsx");
   // PR #47, TASK 4: no longer a place on the bar — "Saved", inside Find — and still a screen of its own.
-  assert.ok(/id: "saved", label: "Saved"/.test(app), "Saved, beside Find's results");
+  // Round 2: Find's header (find.jsx) holds Results | Saved, and Saved's rows live in saved.jsx (moved out of App.jsx).
+  assert.ok(/id: "saved", label: "Saved"/.test(codeOf("find.jsx")), "Saved, beside Find's results");
   assert.ok(/tab === "watching"/.test(app), "and a screen behind it");
   assert.ok(/wouldHaveDone\(/.test(app), "the theoretical figure comes from journal.js, with its sentence");
 
@@ -1424,7 +1425,8 @@ test("WATCHING IS A PLACE OF ITS OWN, and its figures are not money", () => {
   // A THEORETICAL P&L MAY NEVER BE PAINTED LIKE A REAL ONE. Printing it in
   // the red the Positions cards use would rebuild, one tab across, the exact
   // fault this session removed.
-  const watchTab = app.slice(app.indexOf('{tab === "watching"'), app.indexOf('{tab === "journal"'));
+  assert.ok(/<SavedList /.test(app.slice(app.indexOf('{tab === "watching" && !showSettings'), app.indexOf('{tab === "journal"'))), "the screen mounts SavedList");
+  const watchTab = codeOf("saved.jsx");
   assert.ok(watchTab.length > 500, "the Watching screen is really in there");
   assert.equal(/WOULD HAVE OPENED AT[\s\S]{0,400}c=\{T\.red\}/.test(watchTab), false,
     "no red on a figure that is not a loss");

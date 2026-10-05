@@ -55,7 +55,8 @@ import { CapitalOnboarding, ConfirmSteps, Card, Pill, statusLine } from "./wizar
 // renders the same card, so it may not live here.
 import { CandidateCard, CandidateActions, SignalBadge, StopSigns } from "./card.jsx";
 // STEP 1, FIND: its own file since PR #45, built on `ui.jsx` and the type tokens.
-import { FindStep } from "./find.jsx";
+import { FindStep, FindHeader } from "./find.jsx";
+import { SavedList } from "./saved.jsx";
 import { MarketPage } from "./market.jsx";
 import { buildHandOff, buildScreenState, BUILD_TAB } from "./handoff.js";
 import { orderBody, orderOutcome, alpacaErrorText, reduceRatios, limitWords, orderLimitWords, fillPriceOf, cancelOutcome, cancelWaiting } from "./order.js";
@@ -74,12 +75,11 @@ import { PositionCard, PositionDetails } from "./positionCard.jsx";
 import { navOf, createNavHistory } from "./nav.js";
 import { exitProgress, entryVsNow, displayName, fileState, pnlShareOfRisk, pnlShareText, holdsStructure,
   sizeWords, withExactMaxProfit, maxProfitCorrection, maxProfitCorrectionNote, exitDateOf } from "./positionView.js";
-import { FIND_HEADING, DEFAULT_FIND_ORDER, SAVED_COLUMNS, SAVED_ROWS, NOT_RECORDED, NOT_ON_CHAIN, savedEmptyText, SAVED_REMOVE,
-  BUILD_CTA, WOULD_HAVE_DONE, per100Text } from "./rules.js";
+import { findStatusText, DEFAULT_FIND_ORDER, BUILD_CTA } from "./rules.js";
 import { EvidenceBar, EvidenceOverlay, DeskSheet, Fold, DeskCountLine } from "./steps.jsx";
-import { BottomBar, placeOf, NAV_BAR_H } from "./navBar.jsx";
+import { BottomBar, placeOf, NAV_BAR_H, FIND_LIST_END } from "./navBar.jsx";
 import { AccountStrip, PositionsBar, WorkingCloseLine } from "./positions.jsx";
-import { Segments as USegments, Note, CheckField, Btn, Panel, Label, Stat, mono, sans } from "./ui.jsx";
+import { Note, CheckField, Btn, Panel, Label, Stat, mono, sans } from "./ui.jsx";
 import { marketClockLine } from "./clock.js";
 import { BASKET, TICKERS, getU, categoryOf } from "./markets.js";
 
@@ -4091,6 +4091,12 @@ export default function OptionsStrategyLab() {
   const onFindStep = tab === "build" && !showSettings && "find" === step;
   // The market page (redesign PR 1) is one ticker, but it prints its own header for its own market.
   const onMarketStep = tab === "build" && !showSettings && "market" === step;
+  /* ROUND 2 (owner, 5 Oct 2026): FIND, SAVED AND A MARKET'S PAGE DRAW NO DESK HEADER. Find has its own (FindHeader: "Find",
+     ↻, the gear, the status line, Results | Saved), the market page its own; the desk header stays on Build, Positions,
+     the Journal and Settings (PR 2 and PR 3). The desk's count line is the Positions badge here. */
+  const chromeless = onFindStep || onMarketStep || (tab === "watching" && !showSettings);
+  /* FIND'S STATUS LINE: "<freshness> · <feed> · Paper". The feed is the feeds the selected markets came from. */
+  const findFeeds = Array.from(new Set(find.markets.map((tk) => feedName(chains[tk])).filter(Boolean))).join(" / ");
   /* FIND'S BAR READS THE SELECTION, NOT ONE MARKET (PR #46, TASK 1): "N markets · prices Xm ago", the OLDEST. */
   const findFresh = findFreshness(find.markets, chains, ago);
   /* REDESIGN PR 1 — what Find's new screen reads from here. */
@@ -4129,9 +4135,13 @@ export default function OptionsStrategyLab() {
       {/* The bottom padding is the strip reserved for the injected Netlify
              badge (see BADGE_SAFE in theme.js): it is fixed to the viewport and
              was covering whatever happened to be at the bottom right. */}
-        <div style={{ maxWidth: 1720, margin: "0 auto", padding: `18px 14px ${BADGE_SAFE + NAV_BAR_H}px` }}>
+        {/* On Find, Saved and the market page the screen runs edge to edge and the list ends 88px above the bottom (the
+            mockups' figure, owner 5 Oct 2026); elsewhere the old padding and the badge strip. */}
+        <div style={{ maxWidth: 1720, margin: "0 auto", padding: chromeless ? `0 0 ${FIND_LIST_END}px` : `18px 14px ${BADGE_SAFE + NAV_BAR_H}px` }}>
 
         {/* Header */}
+        {/* (Not on Find, Saved or a market's page since round 2: they draw their own.) */}
+        {!chromeless && (
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
           <div>
             <Label>OPTIONS STRATEGY LAB v2 · LIVE DATA</Label>
@@ -4179,6 +4189,8 @@ export default function OptionsStrategyLab() {
           </div>
         </div>
 
+        )}
+
         {/* ONE TICKER'S STRIP, ONLY WHERE ONE TICKER IS LOADED (PR #41, TASK 3).
             Find reads many markets at once, so a single market's price,
             expiry and seasonality above its list described none of them. It
@@ -4222,7 +4234,7 @@ export default function OptionsStrategyLab() {
         </div>
         )}
 
-        {msg && <div style={{ ...mono, fontSize: FS.xs, color: T.amber, border: `1px solid ${T.amber}44`, background: `${T.amber}10`, borderRadius: 6, padding: "7px 10px", marginTop: 10 }}>{msg}</div>}
+        {msg && <div style={{ ...mono, fontSize: FS.xs, color: T.amber, border: `1px solid ${T.amber}44`, background: `${T.amber}10`, borderRadius: 6, padding: "7px 10px", margin: chromeless ? "8px 16px 0" : "10px 0 0" }}>{msg}</div>}
 
         <TabBoundary k={`${tab}/${step}/${ev}`}>
         {/* ONE STATUS PER OBJECT, ONE PLACE (PR #40, TASK 2). An order's state
@@ -4230,8 +4242,8 @@ export default function OptionsStrategyLab() {
             the desk used to print both lists again here, in a working-orders
             strip and a "TODAY" list, beside the top banner and the order sheet.
             It shows one line of counts now, and the line is the link. */}
-        <DeskCountLine working={workingOrders.length} decisions={nAttention} looks={attn.looks} closing={attn.closesWorking}
-          onOpen={() => { setTab("positions"); setShowSettings(false); setEv(null); }} />
+        {!chromeless && <DeskCountLine working={workingOrders.length} decisions={nAttention} looks={attn.looks} closing={attn.closesWorking}
+          onOpen={() => { setTab("positions"); setShowSettings(false); setEv(null); }} />}
 
         {/* ONE BOTTOM BAR (PR #47, TASK 4) replaces the numbered path (`StepNav`) and the places row: Find · Build ·
             Positions · Journal, at the bottom of the screen. It is drawn at the end of this page. */}
@@ -4534,12 +4546,10 @@ export default function OptionsStrategyLab() {
             Written `"find" === step` so the word counter does not take this switch for Find's own block. The gear for
             Settings is in the header above. */}
         {((tab === "build" && "find" === step) || tab === "watching") && !showSettings && (
-          <div style={{ marginTop: 12 }}>
-            <h2 data-view-heading tabIndex={-1} style={{ ...sans, fontSize: FS.lg, fontWeight: FW.bold, color: T.ink, margin: "0 0 8px", outline: "none" }}>{FIND_HEADING}</h2>
-            <USegments label="Find: results or saved trades" value={tab === "watching" ? "saved" : "results"}
-              onChange={(v) => { if (v === "saved") { setTab("watching"); setShowSettings(false); setEv(null); setDeskSheet(null); } else goStep("find"); }}
-              items={[{ id: "results", label: "Results" }, { id: "saved", label: "Saved", count: watchRows.length }]} />
-          </div>
+          <FindHeader seg={tab === "watching" ? "saved" : "results"} savedN={watchRows.length} nMarkets={find.markets.length}
+            onSeg={(v) => { if (v === "saved") { setTab("watching"); setShowSettings(false); setEv(null); setDeskSheet(null); } else goStep("find"); }}
+            busy={busy !== null} onRefresh={refreshFind} onSettings={() => setShowSettings(true)} settingsOn={showSettings}
+            status={findStatusText(findFresh.line, findFeeds)} stale={findStale} />
         )}
         {tab === "build" && !showSettings && step === "find" && (
           <FindStep
@@ -5704,135 +5714,9 @@ export default function OptionsStrategyLab() {
             Orders that were sent and never filled stay here with their tag (owner, 4 Oct 2026). On every row, what it
             would have done is behind one fold: nothing is cut. */}
         {tab === "watching" && !showSettings && (
-          <div>
-            <Panel style={{ marginTop: 10 }}>
-              <Label>SAVED ({watchRows.length}) · TRADES YOU DID NOT TAKE</Label>
-              <Fold summary="Nothing here is a position and nothing here is money." label="why" tone={T.dim} style={{ marginTop: 4 }}>
-                <div style={{ ...sans, fontSize: FS.sm, color: T.body, lineHeight: 1.55 }}>
-                  These are structures you saved, and orders that were sent and came back with nothing bought — kept so you
-                  can see what they would have done. No exit plan runs on them, none of them counts towards your exposure,
-                  and none of the figures below is a profit or a loss.
-                </div>
-              </Fold>
-              {watchRows.length === 0 && (
-                <div style={{ ...sans, fontSize: FS.sm, color: T.mut, marginTop: 10, lineHeight: 1.6 }}>{savedEmptyText()}</div>
-              )}
-              <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
-                {watchRows.map((r) => {
-                  const w = r.would;
-                  const bands = r.spot ? payoffBands({ legs: r.legs, entryNet: r.entryNet, spot: r.spot }) : null;
-                  const sv = r.kind === "saved" ? r.saved : null;
-                  const now = sv ? savedNow[sv.id] : null;
-                  const whenRisk = sv && sv.maxLoss != null && Number.isFinite(Number(sv.maxLoss)) ? Math.abs(Number(sv.maxLoss)) : null;
-                  return (
-                    <div key={r.key} style={{ padding: "10px 12px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 8 }}>
-                      <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
-                        <span style={{ ...sans, color: T.ink, fontWeight: 700, fontSize: FS.sm }}>
-                          {r.ref ? <span style={mono}>{`${r.ref} `}</span> : ""}<span style={mono}>{r.ticker}</span> · {r.name}
-                        </span>
-                        {/* WHICH OF THE TWO IT IS, on the row, because "I chose
-                            not to" and "I tried and missed" are different facts
-                            about the same picture. */}
-                        <span style={{ ...sans, fontSize: FS.xs, fontWeight: 800, letterSpacing: 0.4, padding: "2px 6px", borderRadius: 4,
-                          background: r.kind === "saved" ? `${T.blue}22` : `${T.amber}22`, color: r.kind === "saved" ? T.blue : T.amber }}>
-                          {r.kind === "saved" ? "SAVED, NEVER SENT" : `SENT · ${String(r.status || "finished").toUpperCase().replace(/_/g, " ")}`}
-                        </span>
-                        <span style={{ ...mono, fontSize: FS.xs, color: T.dim, marginLeft: "auto" }}>{r.at ? ago(r.at) : ""}</span>
-                      </div>
-                      <div style={{ ...mono, fontSize: FS.xs, color: T.mut, marginTop: 3 }}>
-                        {legsLine(r.legs)}{r.expKey ? ` · ${r.expKey}` : ""}
-                      </div>
-
-                      {/* WHEN SAVED · NOW (redesign PR 1): three figures, one contract. A figure not saved with the item
-                          reads "not recorded"; an expiry today's chain does not list reads "not on today's chain". */}
-                      {sv && (
-                        <div role="table" aria-label="When saved and now" style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 1fr", gap: "2px 8px", marginTop: 8 }}>
-                          <span />
-                          <span style={{ ...sans, fontSize: FS.xs, color: T.dim, fontWeight: 700 }}>{SAVED_COLUMNS.when}</span>
-                          <span style={{ ...sans, fontSize: FS.xs, color: T.dim, fontWeight: 700 }}>{SAVED_COLUMNS.now}</span>
-                          {[
-                            [SAVED_ROWS.chance, sv.pop == null ? NOT_RECORDED : chanceText(sv.pop), now ? chanceText(now.pop) : NOT_ON_CHAIN],
-                            [SAVED_ROWS.future, sv.futureAvg == null ? NOT_RECORDED : per100Text(sv.futureAvg), now ? per100Text(now.per100) : NOT_ON_CHAIN],
-                            [SAVED_ROWS.risk, whenRisk == null ? NOT_RECORDED : money(whenRisk), now ? (now.risk == null ? "—" : money(now.risk)) : NOT_ON_CHAIN],
-                          ].map(([k, a, b]) => (
-                            <React.Fragment key={k}>
-                              <span style={{ ...sans, fontSize: FS.xs, color: T.dim }}>{k}</span>
-                              <span style={{ ...(/^[a-z]/.test(a) ? sans : mono), fontSize: FS.xs, color: T.mut }}>{a}</span>
-                              <span style={{ ...(/^[a-z]/.test(b) ? sans : mono), fontSize: FS.xs, color: T.ink, fontWeight: 700 }}>{b}</span>
-                            </React.Fragment>
-                          ))}
-                        </div>
-                      )}
-
-                      <Fold summary={WOULD_HAVE_DONE} label="show" tone={T.dim} style={{ marginTop: 6 }}>
-                      {bands && (
-                        <div style={{ display: "flex", gap: 12, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
-                          <BandThumbnail bands={bands} bars={barsCache[r.ticker] || []} width={200} height={40}
-                            title={bandTakeaway(bands, { ticker: r.ticker })} />
-                          <Gauge bands={bands} size={96} ticker={r.ticker} />
-                        </div>
-                      )}
-
-                      {/* THE THEORETICAL FIGURE, AND IT MAY NEVER LOOK LIKE A REAL
-                          ONE. Muted, never red or green, with the sentence beside
-                          it — `wouldHaveDone()` returns the two together so one
-                          cannot be rendered without the other. Printing -$80 in
-                          the same red the Positions screen uses is exactly the
-                          fault this whole tab exists to undo. */}
-                      <div style={{ marginTop: 9, padding: "8px 10px", background: T.panel, border: `1px solid ${T.line}`, borderRadius: 6 }}>
-                        <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "baseline" }}>
-                          <div>
-                            <div style={{ ...mono, fontSize: FS.xs, color: T.dim, letterSpacing: 0.4 }}>WOULD HAVE OPENED AT</div>
-                            <div style={{ ...mono, fontSize: FS.sm, fontWeight: 800, color: T.mut }}>
-                              {Number.isFinite(Number(r.entryNet)) ? fmt$(Math.abs(Number(r.entryNet)) * 100 * r.contracts) : "—"}
-                            </div>
-                          </div>
-                          <div>
-                            <div style={{ ...mono, fontSize: FS.xs, color: T.dim, letterSpacing: 0.4 }}>WORTH TODAY</div>
-                            <div style={{ ...mono, fontSize: FS.sm, fontWeight: 800, color: T.mut }}>
-                              {r.nowNet != null ? fmt$(Math.abs(r.nowNet) * 100 * r.contracts) : "—"}
-                            </div>
-                          </div>
-                          <div>
-                            <div style={{ ...mono, fontSize: FS.xs, color: T.dim, letterSpacing: 0.4 }}>DIFFERENCE</div>
-                            <div style={{ ...mono, fontSize: FS.sm, fontWeight: 800, color: T.mut }}>
-                              {w ? `${w.pnl >= 0 ? "+" : "−"}${fmt$(Math.abs(w.pnl))}` : "—"}
-                            </div>
-                          </div>
-                        </div>
-                        <div style={{ ...sans, fontSize: FS.sm, color: T.body, marginTop: 6, lineHeight: 1.5 }}>
-                          {w ? w.sentence
-                            : `Today's price for this structure cannot be read, so there is nothing to compare the ` +
-                              `opening price with. That is a missing number, not a flat result.`}
-                        </div>
-                        {/* AND WHICH PRICE IT STARTED FROM. A row begun at the mid
-                            flatters itself for ever, and every row saved before
-                            PR #28 was begun at the mid. */}
-                        <div style={{ ...mono, fontSize: FS.xs, color: T.dim, marginTop: 5, lineHeight: 1.6 }}>
-                          {r.entrySource === "limit"
-                            ? `Opened at the price that would really have been paid, not the mid.`
-                            : `This one starts from the MID — the middle of the market, which is not a price anybody ` +
-                              `has to give you. Read it as the friendliest version of what would have happened.`}
-                        </div>
-                      </div>
-
-                      </Fold>
-
-                      <div style={{ display: "flex", gap: 6, marginTop: 9, flexWrap: "wrap" }}>
-                        <Btn small color={T.action} onClick={() => openOnBuild({ ticker: r.ticker, expKey: r.expKey || null, legs: r.legs, name: r.name })}>
-                          {BUILD_CTA}
-                        </Btn>
-                        <Btn small ghost color={T.dim}
-                          onClick={() => (r.kind === "saved" ? delSaved(r.saved.id) : dropWatched(r.pos.id))}>
-                          <Trash2 size={12} aria-hidden="true" /> {SAVED_REMOVE}
-                        </Btn>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </Panel>
-          </div>
+          <SavedList rows={watchRows} savedNow={savedNow} barsCache={barsCache} ago={ago} fmtMoney={fmt$}
+            onBuild={(r) => openOnBuild({ ticker: r.ticker, expKey: r.expKey || null, legs: r.legs, name: r.name })}
+            onRemove={(r) => (r.kind === "saved" ? delSaved(r.saved.id) : dropWatched(r.pos.id))} />
         )}
 
         {tab === "journal" && !showSettings && (

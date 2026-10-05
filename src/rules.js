@@ -1424,6 +1424,12 @@ export const placeholderOf = (id) => PLACEHOLDERS.find((p) => p.id === id) || nu
    market page's header, tabs, groups and chain. No screen spells any of them.
 ===================================================================== */
 export const FIND_HEADING = "Find";
+/** Find's status line (round 2): "<freshness> · <feed> · Paper" — Paper stays on Find: the app trades paper only. */
+export const PAPER_WORD = "Paper";
+export const findStatusText = (freshLine, feed) => [freshLine, feed, PAPER_WORD].filter(Boolean).join(" · ");
+export const refreshAria = (n) => `Refresh prices for ${n} market${n === 1 ? "" : "s"}`;
+export const SETTINGS_WORD = "Settings";
+export const FIND_SEGMENTS_ARIA = "Find: results or saved trades";
 export const CATEGORY_ALL = "All";
 /** The chip row, in order. `sheet: false` is the one toggled in place. */
 export const FIND_CHIPS = Object.freeze([

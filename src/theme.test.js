@@ -73,6 +73,19 @@ for (const key of ["amber", "green", "red", "blue", "violet"]) {
   ok(`white text on a filled ${key} button clears 4.5:1`, r >= 4.5, `${r.toFixed(2)}:1`);
 }
 
+// ROUND 2: `raise` (a selected or in-the-money cell) carries text, so it is a surface too; `scrim` is behind a sheet.
+for (const [name, P] of [["light", PALETTES.light], ["dark", PALETTES.dark]]) {
+  ok(`${name} has raise and scrim`, /^#[0-9a-f]{6}$/.test(P.raise) && /^rgba\(/.test(P.scrim), `${P.raise} ${P.scrim}`);
+  for (const key of ["ink", "body", "mut", "amber"]) {
+    const r = contrast(P[key], P.raise);
+    ok(`${name} ${key} on raise clears 4.5:1`, r >= 4.5, `${r.toFixed(2)}:1`);
+  }
+  ok(`${name} field border on raise clears 3:1`, contrast(P.field, P.raise) >= FIELD_MIN);
+  ok(`${name} raise is distinct from the panel and the page`, P.raise !== P.panel && P.raise !== P.bg);
+}
+ok("the two palettes carry exactly the mockups' values", PALETTES.dark.raise === "#222831" && PALETTES.light.raise === "#eceff2"
+  && PALETTES.dark.scrim === "rgba(6,8,10,0.66)" && PALETTES.light.scrim === "rgba(20,24,29,0.45)");
+
 const D = PALETTES.dark;
 ok("dark stays reachable and keeps its own dark text-on-accent", D.onAccent === "#14181d", D.onAccent);
 

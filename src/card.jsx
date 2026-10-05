@@ -23,7 +23,7 @@
 // ============================================================================
 import React from "react";
 import { T, TYPE } from "./theme.js";
-import { mono, sans, Btn, Chip, Panel, Label, Stat, Note, Fold, NumberInput, TextArea, RangeField, Info, CheckField } from "./ui.jsx";
+import { mono, sans, Btn, Chip, FilterChip, Panel, Label, Stat, Note, Fold, NumberInput, TextArea, RangeField, Info, CheckField } from "./ui.jsx";
 import { readingLine, unreadInputsAria, inputName, numbersFitLines, badgeText } from "./signals.js";
 export { badgeText };
 import { Gauge, UnifiedPosition, UnifiedFigure } from "./visuals.jsx";
@@ -99,6 +99,9 @@ export function RequestControls({
   const amtMin = amtMax != null ? Math.min(RULES.amountAskStep, amtMax) : null;
   const budget = request.mode === "budget";
   const Wrap = bare ? BareBlock : Panel;
+  // ROUND 2: in a sheet (`bare`) the choices are filter chips and the sliders are the mockup's amber 32px track.
+  const Pick = bare ? SheetPick : Chip;
+  const slider = bare ? { color: T.amber, trackHeight: 32 } : {};
   return (
     <Wrap accent={T.amber} style={style}>
       {!bare && <Label>WHAT DO YOU WANT?</Label>}
@@ -107,12 +110,12 @@ export function RequestControls({
         <div style={{ marginTop: 8 }}>
           <Note color={T.dim}>DIRECTION</Note>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            <Chip on={direction === "signals"} label="Signals decide" onClick={() => onDirection && onDirection("signals")}>
+            <Pick on={direction === "signals"} label="Signals decide" onClick={() => onDirection && onDirection("signals")}>
               Signals decide
-            </Chip>
+            </Pick>
             {sentiments.map((s) => (
-              <Chip key={s.id} on={direction === s.id} color={s.color} label={s.label}
-                onClick={() => onDirection && onDirection(s.id)}>{s.icon} {s.label}</Chip>
+              <Pick key={s.id} on={direction === s.id} color={s.color} label={s.label}
+                onClick={() => onDirection && onDirection(s.id)}>{s.icon} {s.label}</Pick>
             ))}
           </div>
         </div>
@@ -127,8 +130,8 @@ export function RequestControls({
         <div style={{ marginTop: 8 }}>
           <Note color={T.dim}>SIZE BY</Note>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            <Chip on={budget} onClick={() => onChange({ mode: "budget" })}>What I can spend</Chip>
-            <Chip on={!budget} onClick={() => onChange({ mode: "target" })}>What I want to make</Chip>
+            <Pick on={budget} onClick={() => onChange({ mode: "budget" })}>What I can spend</Pick>
+            <Pick on={!budget} onClick={() => onChange({ mode: "target" })}>What I want to make</Pick>
           </div>
         </div>
       )}
@@ -143,7 +146,7 @@ export function RequestControls({
             values={readings ? readings.size.values : null} passWhen={budget ? "below" : "above"}
             pass={readings ? readings.size.pass : null}
             aside={limits && !free && onLimit ? <PerTradeLimit limits={limits} onLimit={onLimit} /> : (free ? <Note>{freeAmountNote()}</Note> : null)}
-            note={amountNote(request)} />
+            note={amountNote(request)} {...slider} />
         )}
         {shows("chance") && (
           /* THE LEFTMOST POSITION IS "ANY" (PR #49, TASK 2): no minimum, the default. `requestOf()` reads it as null. */
@@ -152,21 +155,21 @@ export function RequestControls({
             min={RULES.chanceAskMin} max={RULES.chanceAskMax} step={RULES.chanceAskStep}
             format={(v) => chanceAskText(v)} parse={(t) => (/^\s*any\s*$/i.test(String(t)) ? RULES.chanceAskMin : Number(t) / 100)}
             toInput={(v) => (chanceAskText(v) === "any" ? "any" : String(Math.round(v * 100)))}
-            values={readings ? readings.chance.values : null} pass={readings ? readings.chance.pass : null} />
+            values={readings ? readings.chance.values : null} pass={readings ? readings.chance.pass : null} {...slider} />
         )}
         {shows("return") && (
           <RangeField label={rewardAskLabel()} color={T.blue}
             value={request.minReturn} onChange={(v) => onChange({ minReturn: v })}
             min={RULES.minRewardRisk} max={RULES.rewardAskMax} step={RULES.rewardAskStep}
             format={(v) => returnText(v)} parse={(t) => Number(t) / 100} toInput={(v) => String(Math.round(v * 100))}
-            values={readings ? readings.return.values : null} pass={readings ? readings.return.pass : null} />
+            values={readings ? readings.return.values : null} pass={readings ? readings.return.pass : null} {...slider} />
         )}
         {shows("horizon") && (
           <RangeField label="Horizon"
             value={horizon} onChange={(v) => onHorizon && onHorizon(Math.round(v))}
             min={RULES.minEntryDTE} max={RULES.maxEntryDTE} step={1}
             format={(v) => `${Math.round(v)} days`} parse={(t) => Number(t)} toInput={(v) => String(Math.round(v))}
-            valueText={`${horizon} days to expiry`} />
+            valueText={`${horizon} days to expiry`} {...slider} />
         )}
       </div>
 
@@ -178,6 +181,8 @@ export function RequestControls({
     </Wrap>
   );
 }
+/** A choice inside a sheet: the filter chip (round 2), filled with ink when chosen. */
+const SheetPick = ({ on, onClick, label, children }) => <FilterChip off={on} onClick={onClick} label={label}>{children}</FilterChip>;
 /** No panel around the controls when a sheet already frames them. */
 const BareBlock = ({ children, style }) => <div style={style}>{children}</div>;
 

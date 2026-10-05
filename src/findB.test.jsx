@@ -8,7 +8,7 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
-import { FindStep } from "./find.jsx";
+import { FindStep, FindHeader } from "./find.jsx";
 import { MarketPage, ChainTab } from "./market.jsx";
 import { listCardFigures } from "./App.jsx";
 import { normaliseAlpacaChain } from "./chain.js";
@@ -48,23 +48,28 @@ const find = (over = {}) => renderToStaticMarkup(
     onTakeToBuild={() => {}} />);
 
 check("CATEGORY TABS: 'All 10 · Grains 3 · Energy 4 · Metals 3' — the registry's own counts, never a typed list", () => {
-  const h = find();
-  has(h, `All <span style="font-family:ui-monospace, Menlo, monospace">${BASKET.length}</span>`);
-  for (const c of MARKET_CATEGORIES) has(h, `${c.id} <span style="font-family:ui-monospace, Menlo, monospace">${c.tickers.length}</span>`);
-  has(find({ find: { cat: "Energy" } }), 'aria-pressed="true"');
+  // Round 2: underlined tabs; the count is a mono span after the label (the markup pinned here changed with the look).
+  const tabs = (h) => h.slice(h.indexOf('aria-label="Categories"'), h.indexOf("data-chip-row")).replace(/<[^>]+>/g, "|");
+  const t = tabs(find());
+  has(t, `All|${BASKET.length}|`);
+  for (const c of MARKET_CATEGORIES) has(t, `${c.id}|${c.tickers.length}|`);
+  const energy = find({ find: { cat: "Energy" } });
+  has(energy.slice(energy.indexOf('aria-label="Categories"')), 'aria-pressed="true" style="font-family:system-ui, -apple-system, Segoe UI, Roboto, sans-serif;flex:0 0 auto;min-height:44px;padding:0 10px;background:transparent;border:none;border-bottom:3px solid');
 });
 
 check("ONE ROW OF CHIPS: eight, in order, each saying its value, each 44px, filled only when off its default", () => {
   const h = find();
   const bar = h.slice(h.indexOf("data-chip-row"), h.indexOf("</div>", h.indexOf("data-chip-row")));
   if (count(bar, "<button") !== FIND_CHIPS.length) throw new Error(`${count(bar, "<button")} chips`);
-  for (const t of ["⇅ Future avg", "Budget $500", "Chance any", "Return 25%", `Horizon ${RULES.targetEntryDTE}d`, "Signals decide", "Avg &gt; 0", "Liquidity Recommended"]) has(bar, t);
+  // Round 2: a chip's name and value are two spans (name in mut, value in mono); read as text, the words are the same.
+  const words = bar.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+  for (const t of ["⇅ Future avg", "Budget $500", "Chance any", "Return 25%", `Horizon ${RULES.targetEntryDTE}d`, "Signals decide", "Avg &gt; 0", "Liquidity Recommended"]) has(words, t);
   if (count(bar, "min-height:44px") !== FIND_CHIPS.length) throw new Error("a chip under 44px");
   if (count(bar, 'aria-pressed="true"') !== 0) throw new Error("a chip is filled at its default");
   hasNot(h, ">Reset<");
   const off = find({ want: { minChance: 0.6 } });
   const bar2 = off.slice(off.indexOf("data-chip-row"));
-  has(bar2, "Chance 60%"); has(off, ">Reset<");
+  has(bar2.replace(/<[^>]+>/g, " ").replace(/\s+/g, " "), "Chance 60%"); has(off, ">Reset<");
 });
 
 check("ONE ROW PER MARKET, IN THE ORDER OF ITS CARD: ticker (mono), subtitle, picture, the sorted-by figure and 'risk $N'", () => {
@@ -108,8 +113,10 @@ check("READING: a market still being read waits after the rows that are in, with
   if (h.indexOf('data-row="CORN"') < h.indexOf('data-row="UNG"')) throw new Error("a waiting row sits above a row that is in");
 });
 
-check("STALE: the freshness line as a banner, with Retry", () => {
-  const h = find({ freshness: { stale: true, closeDay: "Fri 2 Oct", failedAt: "14:05", onRetry: () => {} } });
+check("STALE: the freshness line as a banner, with Retry (round 2: in Find's own header, in place of the status line)", () => {
+  const h = renderToStaticMarkup(<FindHeader status="10 markets · prices 3m ago · Alpaca · Paper"
+    stale={{ stale: true, closeDay: "Fri 2 Oct", failedAt: "14:05", onRetry: () => {} }} />);
+  hasNot(h, "data-find-status");
   has(h, esc("Stale · Fri 2 Oct close. The feed didn't answer at 14:05. These are Fri 2 Oct's closing numbers; prices may have moved."));
   has(h, ">Retry<");
 });

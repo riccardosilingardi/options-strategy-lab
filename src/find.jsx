@@ -24,8 +24,9 @@
 // market): passing them is the price of not importing App.jsx back, which would be a cycle.
 // ============================================================================
 import React, { useCallback, useMemo } from "react";
+import { RefreshCw, Settings } from "lucide-react";
 import { T, TYPE } from "./theme.js";
-import { mono, sans, Btn, Chip, Panel, Label, Stat, Note, Fold, CheckField, Info, Sheet, TAP } from "./ui.jsx";
+import { mono, sans, Btn, Panel, Label, Stat, Note, Fold, CheckField, Sheet, IconButton, FilterChip, UnderTabs, TextBtn, SegmentBar, TAP } from "./ui.jsx";
 import { FIND_ORDERS, DEFAULT_FIND_ORDER, findOrderOf } from "./signals.js";
 import { RequestControls, CompareTray, NumbersFit } from "./card.jsx";
 import { HowWorkedOut } from "./why.jsx";
@@ -44,6 +45,7 @@ import { money, chanceText, NO_CEILING, noCeilingNote, noCeilingRankNote, season
   showRowsCta, HIDE_ROWS, SHOW_ROWS, RESET_FILTERS, COLUMN_MARKET, columnHeadText, rowRiskText, DIRECTION_TAGS,
   rowSubtitleText, ROW_READING, findReadingLine, rowFailedText, ROW_NO_BOARD, staleBannerLine, RETRY,
   SHOW_FLAGGED_TOGGLE, howConnectLabel, HOW_CONNECT_STEPS, CARD_LABELS, ARIA,
+  FIND_HEADING, refreshAria, SETTINGS_WORD, FIND_SEGMENTS_ARIA,
 } from "./rules.js";
 
 const FS = TYPE.size, FW = TYPE.weight, LH = TYPE.line;
@@ -51,6 +53,38 @@ const FS = TYPE.size, FW = TYPE.weight, LH = TYPE.line;
 const NO_BARS = [];
 /** A direction's colour: red is for errors only, so a bear reading is violet. */
 const DIR_COLOR = { bull: T.green, bear: T.violet, neutral: T.mut };
+
+/* FIND'S OWN HEADER (round 2, mockup "Find B"): "Find", ↻ and the gear; the status line (or the stale banner); Results |
+   Saved. Nothing else sits above Find's list — the desk header is not drawn on Find, Saved or a market's page. */
+export function FindHeader({ seg = "results", onSeg, savedN = 0, nMarkets = 0, busy = false, onRefresh, onSettings, settingsOn = false,
+  status = null, stale = null }) {
+  return (
+    <header data-find-header>
+      <div style={{ display: "flex", alignItems: "center", padding: "12px 8px 0 16px" }}>
+        <h1 data-view-heading tabIndex={-1} style={{ ...sans, flex: 1, fontSize: FS.xl, fontWeight: FW.bold, lineHeight: LH.tight, color: T.ink,
+          margin: 0, outline: "none" }}>{FIND_HEADING}</h1>
+        <IconButton label={refreshAria(nMarkets)} onClick={onRefresh} disabled={busy} aria-busy={busy || undefined}>
+          <RefreshCw size={20} strokeWidth={1.75} aria-hidden="true" />
+        </IconButton>
+        <IconButton label={SETTINGS_WORD} pressed={settingsOn} onClick={onSettings}>
+          <Settings size={20} strokeWidth={1.75} aria-hidden="true" />
+        </IconButton>
+      </div>
+      {stale && stale.stale ? (
+        /* STALE: the status line becomes round 1's banner, with Retry (the same Refresh). */
+        <div role="status" data-stale style={{ ...sans, fontSize: FS.xs, lineHeight: LH.body, color: T.ink, margin: "2px 16px 6px", padding: "6px 6px 6px 12px",
+          border: `1px solid ${T.amber}`, borderRadius: 10, display: "flex", gap: 8, alignItems: "center" }}>
+          <span style={{ flex: 1, minWidth: 0 }}>{staleBannerLine({ closeDay: stale.closeDay, failedAt: stale.failedAt })}</span>
+          <TextBtn color={T.amber} height={TAP} onClick={stale.onRetry} style={{ fontWeight: FW.bold }}>{RETRY}</TextBtn>
+        </div>
+      ) : (
+        <div data-find-status style={{ ...sans, fontSize: FS.xs, color: T.mut, padding: "0 16px 6px", lineHeight: LH.body }}>{status}</div>
+      )}
+      <SegmentBar label={FIND_SEGMENTS_ARIA} value={seg} onChange={onSeg} style={{ margin: "0 16px 6px" }}
+        items={[{ id: "results", label: "Results" }, { id: "saved", label: "Saved", count: savedN }]} />
+    </header>
+  );
+}
 
 export function FindStep({
   request, onRequest, sentiments, find, setFind, limits, onLimit, freeSizing,
@@ -92,7 +126,10 @@ export function FindStep({
     liqId: liqState && liqState.id, liqLabel: liqState && liqState.label, liqDefault: liqState && liqState.defaultId };
   const sheetId = sheet && String(sheet).startsWith("find:") ? String(sheet).slice(5) : null;
   const closeSheet = () => onSheet(null);
-  const footer = <Btn color={T.blue} onClick={closeSheet} style={{ width: "100%" }}>{showRowsCta(n, rows.length)}</Btn>;
+  /** A sheet's current value, beside its title (round 2): the chip's own value. */
+  const sheetValue = (id) => { const p = chipParts(id, chipText(id, st)); return p.value || p.name; };
+  // Every sheet ends with a live "Show N of M": full width, amber, 48px (the mockups).
+  const footer = <Btn color={T.amber} onClick={closeSheet} style={{ width: "100%", minHeight: 48, borderRadius: 10, fontSize: FS.md }}>{showRowsCta(n, rows.length)}</Btn>;
   const sharedControls = { request, onChange: onRequest, readings, sentiments, direction: find.dir,
     onDirection: (d) => setFind((f) => ({ ...f, dir: d })), horizon: find.horizon,
     onHorizon: (h) => setFind((f) => ({ ...f, horizon: h })), limits, onLimit, bare: true };
@@ -105,111 +142,83 @@ export function FindStep({
   const doneN = find.markets.length - find.markets.filter((tk) => stateOf(tk) && ["chain", "season", "waiting"].includes(stateOf(tk).state)).length;
   const reading = doneN < find.markets.length;
 
+  const pad = { padding: "0 16px" };
+  const catItems = [{ id: null, label: CATEGORY_ALL, count: BASKET.length },
+    ...MARKET_CATEGORIES.map((c) => ({ id: c.id, label: c.id, count: c.tickers.length }))];
   return (
-    <div style={{ marginTop: 8, maxWidth: 1280 }}>
-      {/* THE CATEGORY TABS — the registry's own counts (markets.js), never a typed list. They only filter what is shown. */}
-      <div role="group" aria-label={ARIA.categories} style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4 }}>
-        <Chip on={!find.cat} color={T.blue} onClick={() => setFind((f) => ({ ...f, cat: null }))}>
-          {CATEGORY_ALL} <span style={mono}>{BASKET.length}</span>
-        </Chip>
-        {MARKET_CATEGORIES.map((c) => (
-          <Chip key={c.id} on={find.cat === c.id} color={T.blue} onClick={() => setFind((f) => ({ ...f, cat: find.cat === c.id ? null : c.id }))}>
-            {c.id} <span style={mono}>{c.tickers.length}</span>
-          </Chip>
-        ))}
-      </div>
+    <div data-find style={{ maxWidth: 1280 }}>
+      {/* THE CATEGORY TABS, UNDERLINED (round 2) — the registry's own counts (markets.js). They only filter what is shown. */}
+      <UnderTabs label={ARIA.categories} value={find.cat || null} items={catItems}
+        onChange={(id) => setFind((f) => ({ ...f, cat: id }))} />
 
-      {/* ONE ROW OF CHIPS, scrolling sideways. Each says its value; one off its default is filled. */}
+      {/* ONE ROW OF CHIPS, scrolling sideways. Each says its value; one off its default is filled with ink. */}
       <div role="toolbar" aria-label={ARIA.filters} data-chip-row
-        style={{ display: "flex", gap: 6, overflowX: "auto", whiteSpace: "nowrap", marginTop: 8, paddingBottom: 4, WebkitOverflowScrolling: "touch" }}>
-        {FIND_CHIPS.map((c) => ({ c, txt: chipText(c.id, st) })).map(({ c, txt }) => (
-          <Chip key={c.id} on={chipOffDefault(c.id, st)} color={T.amber} style={{ flex: "0 0 auto" }}
-            label={c.sheet ? `${txt}: change` : POSITIVE_FUTURE_TOGGLE}
-            onClick={() => (c.sheet ? onSheet(`find:${c.id}`) : setFind((f) => ({ ...f, positiveOnly: !f.positiveOnly })))}>
-            {txt}{c.id === "positive" && positiveHidden ? <span style={mono}>{` · ${positiveHidden}`}</span> : null}
-          </Chip>
-        ))}
+        style={{ display: "flex", gap: 6, overflowX: "auto", whiteSpace: "nowrap", padding: "10px 16px 4px", WebkitOverflowScrolling: "touch" }}>
+        {FIND_CHIPS.map((c) => ({ c, txt: chipText(c.id, st) })).map(({ c, txt }) => {
+          const parts = chipParts(c.id, txt);
+          return (
+            <FilterChip key={c.id} off={chipOffDefault(c.id, st)} strong={c.id === "order"} name={parts.name} value={parts.value} valueMono={parts.mono}
+              label={c.sheet ? `${txt}: change` : POSITIVE_FUTURE_TOGGLE}
+              onClick={() => (c.sheet ? onSheet(`find:${c.id}`) : setFind((f) => ({ ...f, positiveOnly: !f.positiveOnly })))}>
+              {c.id === "positive" && positiveHidden ? <span style={mono}>{` · ${positiveHidden}`}</span> : null}
+            </FilterChip>
+          );
+        })}
       </div>
 
-      {/* THE SUMMARY LINE: "4 of 10 fit · 6 dimmed", Hide them / Show them, Reset. */}
-      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 4 }}>
-        <span aria-live="polite" style={{ ...sans, fontSize: FS.sm, fontWeight: FW.bold, color: T.ink }}>
-          {rowsResultsLine(n, m, !!find.hideMisses)}
+      {/* THE SUMMARY LINE: "4 of 10 fit · 6 dimmed" left; Hide them / Show them and Reset right. */}
+      <div style={{ display: "flex", gap: 6, alignItems: "center", justifyContent: "space-between", padding: "0 12px 2px 16px", minHeight: 36 }}>
+        <span aria-live="polite" style={{ ...sans, fontSize: FS.xs, color: T.mut }}>{rowsResultsLine(n, m, !!find.hideMisses)}</span>
+        <span style={{ display: "inline-flex", alignItems: "center" }}>
+          {m > 0 && <TextBtn onClick={() => setFind((f) => ({ ...f, hideMisses: !f.hideMisses }))}>{find.hideMisses ? SHOW_ROWS : HIDE_ROWS}</TextBtn>}
+          {anyChipOff(st) && <TextBtn onClick={onReset}>{RESET_FILTERS}</TextBtn>}
         </span>
-        {m > 0 && (
-          <Btn small ghost color={T.blue} onClick={() => setFind((f) => ({ ...f, hideMisses: !f.hideMisses }))}>
-            {find.hideMisses ? SHOW_ROWS : HIDE_ROWS}
-          </Btn>
-        )}
-        {anyChipOff(st) && <Btn small ghost color={T.dim} onClick={onReset}>{RESET_FILTERS}</Btn>}
       </div>
       {/* While markets are still being read and some rows are in (with none in, "Nothing today" below says it). */}
-      {reading && findGen.items.length > 0 && <Note color={T.dim} role="status">{findReadingLine(find.markets.length, doneN)}</Note>}
+      {reading && findGen.items.length > 0 && <Note color={T.dim} role="status" style={pad}>{findReadingLine(find.markets.length, doneN)}</Note>}
 
       {/* SIGNALS THAT LANDED AND ADDED A FAMILY, one line each (PR #48, TASK 3). */}
-      {signalLines.length > 0 && <Note color={T.blue} role="status" style={{ marginTop: 4 }}>{signalLines.join(" · ")}</Note>}
+      {signalLines.length > 0 && <Note color={T.blue} role="status" style={{ ...pad, marginTop: 4 }}>{signalLines.join(" · ")}</Note>}
 
-      {/* STALE: Find's freshness line as a banner, with Retry (the existing Refresh). */}
-      {freshness && freshness.stale && (
-        <div role="status" style={{ ...sans, fontSize: FS.sm, lineHeight: LH.body, color: T.ink, marginTop: 8, padding: "8px 12px",
-          border: `1px solid ${T.amber}`, borderRadius: 8, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <span style={{ flex: "1 1 220px" }}>{staleBannerLine({ closeDay: freshness.closeDay, failedAt: freshness.failedAt })}</span>
-          <Btn small color={T.amber} onClick={freshness.onRetry}>{RETRY}</Btn>
-        </div>
-      )}
-
-      {/* A STALE BOARD IS SAID ONCE, ABOVE THE ROWS (PR #41, TASK 2). */}
-      {findGen.stale.length > 0 && <Note color={T.amber} style={{ marginTop: 6 }}>⚠ {staleBoardLine(findGen.stale)}</Note>}
+      {/* A STALE BOARD IS SAID ONCE, ABOVE THE ROWS (PR #41, TASK 2). (A stale FEED is the header's banner, round 2.) */}
+      {findGen.stale.length > 0 && <Note color={T.amber} style={{ ...pad, marginTop: 6 }}>⚠ {staleBoardLine(findGen.stale)}</Note>}
 
       {/* "NOTHING TODAY" ONLY WHEN ZERO CANDIDATES PASS THE FLOORS, WITH THE COUNTS. */}
       {findGen.items.length === 0 && (
-        <div style={{ ...sans, fontSize: FS.sm, color: T.mut, marginTop: 10, lineHeight: LH.body, padding: "10px 12px", border: `1px dashed ${T.line}`, borderRadius: 8 }}>
+        <div style={{ ...sans, fontSize: FS.sm, color: T.mut, margin: "10px 16px", lineHeight: LH.body, padding: "10px 12px", border: `1px dashed ${T.line}`, borderRadius: 10 }}>
           {nothingTodayLine(findGen.tally, { noBoard: findGen.noBoard, loading: findGen.loading, failed: findGen.failed, level: liqLevel })}
         </div>
       )}
 
       {/* NOTHING FITS: the filter that binds, the cheapest card here, ONE fix that never passes a limit. */}
       {nf && (
-        <div role="status" style={{ ...sans, fontSize: FS.sm, lineHeight: LH.body, color: T.ink, marginTop: 10, padding: "10px 12px",
-          border: `1px solid ${T.line}`, borderRadius: 8 }}>
+        <div role="status" style={{ ...sans, fontSize: FS.sm, lineHeight: LH.body, color: T.ink, margin: "8px 16px", padding: "10px 12px",
+          border: `1px solid ${T.line}`, background: T.panel, borderRadius: 10 }}>
           <div style={{ fontWeight: FW.bold }}>{nothingFitsLine(nf.control)}</div>
-          <div>{allMissLine(rows.length, nf.cheapest)}</div>
+          <div style={{ color: T.mut }}>{allMissLine(rows.length, nf.cheapest)}</div>
           {nf.overLimit != null && <div style={{ color: T.amber }}>{overLimitNote(nf.overLimit)}</div>}
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
-            {nf.fix ? <Btn small color={T.blue} onClick={() => onRequest(nf.fix.patch)}>{nf.fix.label}</Btn>
-              : <Btn small color={T.blue} onClick={onReset}>{RESET_ALL_FILTERS}</Btn>}
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+            {nf.fix ? <Btn small color={T.amber} onClick={() => onRequest(nf.fix.patch)}>{nf.fix.label}</Btn>
+              : <Btn small color={T.amber} onClick={onReset}>{RESET_ALL_FILTERS}</Btn>}
             {find.hideMisses && <Btn small ghost color={T.blue} onClick={() => setFind((f) => ({ ...f, hideMisses: false }))}>{showMissesCta(m)}</Btn>}
           </div>
         </div>
       )}
 
-      {/* THE COLUMN HEAD, and the ⓘ "How <TK>'s numbers connect" for the top row's market. */}
+      {/* THE COLUMN HEAD, and the ⓘ "How <TK>'s numbers connect" for the top row's market (a sheet, round 2). */}
       {(shown.length > 0 || waiting.length > 0) && (
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginTop: 10,
-          ...sans, fontSize: FS.xs, fontWeight: FW.bold, letterSpacing: "0.04em", color: T.dim }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, minHeight: 36, padding: "0 8px 0 16px",
+          borderTop: `1px solid ${T.line}`, ...sans, fontSize: FS.xs, color: T.mut }}>
           <span>{COLUMN_MARKET}</span>
-          <span style={{ display: "inline-flex", alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+          <span style={{ display: "inline-flex", alignItems: "center" }}>
             {columnHeadText(findOrder)}
-            {/* "HOW <TK>'S NUMBERS CONNECT": five numbered steps, each number read from its own function — the score and
-                the confidence (HowWorkedOut), the direction (`signalDirection()`'s own arithmetic), the strategy (its
-                family and the size the budget buys), the chance and the future avg (the card's own figures) — then
-                "How the numbers fit". One tap away, written inside the ⓘ. */}
-            {top && <Info label={howConnectLabel(top.tk)}>
-              <span style={{ display: "block" }}>
-                <ol style={{ margin: 0, paddingLeft: 18 }}>
-                  {howConnectSteps(top.x, (findGen.boards[top.tk] || {}).signal || null, sizes.get(top.x.key) || null).map((t, i) => (
-                    <li key={HOW_CONNECT_STEPS[i]} style={{ marginTop: 4 }}><b>{HOW_CONNECT_STEPS[i]}.</b> {t}</li>
-                  ))}
-                </ol>
-                {top.x.fused && <HowWorkedOut fused={top.x.fused} />}
-                <span style={{ display: "block", marginTop: 6 }}><NumbersFit order={findOrder} /></span>
-              </span>
-            </Info>}
+            {top && <IconButton size={36} color={T.blue} label={howConnectLabel(top.tk)} aria-expanded={sheetId === "connect"}
+              onClick={() => onSheet("find:connect")} style={{ fontSize: FS.md }}>ⓘ</IconButton>}
           </span>
         </div>
       )}
 
-      <div role="list" aria-label={ARIA.markets} style={{ marginTop: 4, display: "grid", gap: 6 }}>
+      <div role="list" aria-label={ARIA.markets} data-find-list>
         {shown.map((r) => (
           <MarketRow key={r.tk} row={r} sd={(findGen.boards[r.tk] || {}).signal || null}
             fig={rowFigure(r.x, sizes.get(r.x.key) || null, findOrder)} bars={barsCache[r.tk] || NO_BARS}
@@ -218,39 +227,64 @@ export function FindStep({
         {waiting.map((w) => <WaitingRow key={w.tk} tk={w.tk} st={w.st} />)}
       </div>
 
+      {/* "HOW <TK>'S NUMBERS CONNECT": five numbered steps, each number read from its own function — the score and the
+          confidence (HowWorkedOut), the direction (`signalDirection()`'s own arithmetic), the strategy (its family and
+          the size the budget buys), the chance and the future avg (the card's own figures) — then "How the numbers fit".
+          A sheet since round 2 (the mockups); one tap away, so the word counter does not score it at rest. */}
+      <Sheet open={sheetId === "connect" && !!top} title={top ? howConnectLabel(top.tk) : ""} onClose={closeSheet}>
+        {top && (
+          <div style={{ ...sans, fontSize: FS.sm, lineHeight: LH.body, color: T.body }}>
+            <ol style={{ margin: 0, paddingLeft: 18 }}>
+              {howConnectSteps(top.x, (findGen.boards[top.tk] || {}).signal || null, sizes.get(top.x.key) || null).map((t, i) => (
+                <li key={HOW_CONNECT_STEPS[i]} style={{ marginTop: 4 }}><b>{HOW_CONNECT_STEPS[i]}.</b> {t}</li>
+              ))}
+            </ol>
+            {top.x.fused && <HowWorkedOut fused={top.x.fused} />}
+            <span style={{ display: "block", marginTop: 6 }}><NumbersFit order={findOrder} /></span>
+          </div>
+        )}
+      </Sheet>
+
       {/* ---- THE SHEETS, one at a time, from `deskSheet` (Back closes them). ---- */}
-      <Sheet open={sheetId === "order"} title={FIND_SHEET_TITLES.order} onClose={closeSheet} footer={footer}>
-        <div role="radiogroup" aria-label={FIND_SHEET_TITLES.order} style={{ display: "grid", gap: 6 }}>
-          {FIND_ORDERS.map((o) => (
-            <button key={o.id} role="radio" aria-checked={findOrder === o.id}
-              onClick={() => { if (onFindOrder) onFindOrder(o.id); closeSheet(); }}
-              style={{ ...sans, textAlign: "left", minHeight: TAP, padding: "8px 12px", borderRadius: 8, cursor: "pointer",
-                border: `1.5px solid ${findOrder === o.id ? T.blue : T.line}`, background: findOrder === o.id ? `${T.blue}22` : "transparent", color: T.ink }}>
-              <div style={{ fontSize: FS.sm, fontWeight: FW.bold }}>{o.label}</div>
-              <div style={{ fontSize: FS.xs, color: T.mut }}>{o.note}</div>
-            </button>
-          ))}
+      <Sheet open={sheetId === "order"} title={FIND_SHEET_TITLES.order} value={sheetValue("order")} onClose={closeSheet} footer={footer}>
+        <div role="radiogroup" aria-label={FIND_SHEET_TITLES.order}>
+          {FIND_ORDERS.map((o, i) => {
+            const on = findOrder === o.id;
+            return (
+              <button key={o.id} role="radio" aria-checked={on}
+                onClick={() => { if (onFindOrder) onFindOrder(o.id); closeSheet(); }}
+                style={{ ...sans, display: "flex", alignItems: "center", gap: 12, width: "100%", textAlign: "left", minHeight: 52, padding: "6px 0",
+                  cursor: "pointer", background: "transparent", border: "none", borderTop: i ? `1px solid ${T.line}` : "none", color: T.ink }}>
+                <span aria-hidden="true" style={{ width: 16, height: 16, boxSizing: "border-box", borderRadius: "50%", flexShrink: 0,
+                  border: on ? `5px solid ${T.amber}` : `2px solid ${T.field}` }} />
+                <span style={{ minWidth: 0 }}>
+                  <span style={{ display: "block", fontSize: FS.md, fontWeight: FW.bold, lineHeight: LH.tight }}>{o.label}</span>
+                  <span style={{ display: "block", fontSize: FS.xs, color: T.mut, lineHeight: LH.body }}>{o.note}</span>
+                </span>
+              </button>
+            );
+          })}
         </div>
         <CheckField checked={find.flagged} onChange={(e) => setFind((f) => ({ ...f, flagged: e.target.checked }))} style={{ marginTop: 8 }}>
           {SHOW_FLAGGED_TOGGLE}{flaggedHidden ? ` (${flaggedHidden} hidden)` : ""}
         </CheckField>
       </Sheet>
-      <Sheet open={sheetId === "budget"} title={FIND_SHEET_TITLES.budget} onClose={closeSheet} footer={footer}>
+      <Sheet open={sheetId === "budget"} title={FIND_SHEET_TITLES.budget} value={sheetValue("budget")} onClose={closeSheet} footer={footer}>
         <RequestControls only={["size"]} {...sharedControls} />
       </Sheet>
-      <Sheet open={sheetId === "chance"} title={FIND_SHEET_TITLES.chance} onClose={closeSheet} footer={footer}>
+      <Sheet open={sheetId === "chance"} title={FIND_SHEET_TITLES.chance} value={sheetValue("chance")} onClose={closeSheet} footer={footer}>
         <RequestControls only={["chance"]} {...sharedControls} />
       </Sheet>
-      <Sheet open={sheetId === "return"} title={FIND_SHEET_TITLES.return} onClose={closeSheet} footer={footer}>
+      <Sheet open={sheetId === "return"} title={FIND_SHEET_TITLES.return} value={sheetValue("return")} onClose={closeSheet} footer={footer}>
         <RequestControls only={["return"]} {...sharedControls} />
       </Sheet>
-      <Sheet open={sheetId === "horizon"} title={FIND_SHEET_TITLES.horizon} onClose={closeSheet} footer={footer}>
+      <Sheet open={sheetId === "horizon"} title={FIND_SHEET_TITLES.horizon} value={sheetValue("horizon")} onClose={closeSheet} footer={footer}>
         <RequestControls only={["horizon"]} {...sharedControls} />
       </Sheet>
-      <Sheet open={sheetId === "direction"} title={FIND_SHEET_TITLES.direction} onClose={closeSheet} footer={footer}>
+      <Sheet open={sheetId === "direction"} title={FIND_SHEET_TITLES.direction} value={sheetValue("direction")} onClose={closeSheet} footer={footer}>
         <RequestControls only={["direction"]} {...sharedControls} />
       </Sheet>
-      <Sheet open={sheetId === "liquidity"} title={FIND_SHEET_TITLES.liquidity} onClose={closeSheet} footer={footer}>
+      <Sheet open={sheetId === "liquidity"} title={FIND_SHEET_TITLES.liquidity} value={sheetValue("liquidity")} onClose={closeSheet} footer={footer}>
         {foldedNode}
         {/* EVERYTHING THAT EXPLAINS THE LIST, BEHIND ONE "why" (moved here from under the list, owner, 4 Oct 2026). */}
         <Fold label="why" tone={isLoosened(liqLevel) ? T.red : T.dim} style={{ marginTop: 10 }}
@@ -289,39 +323,54 @@ export function FindStep({
   );
 }
 
-/* ONE ROW: ☆ · the ticker and its direction · the subtitle (or the miss reason) · the 72×40 picture · the figure the
-   list is sorted by and "risk $N". The row (not the ☆) opens the market's page on Strategies. */
+/** A chip's words, split for the filter chip (round 2): a name in mut and a value in ink ("Budget $500" → Budget · $500;
+ *  "Chance any" → Chance · any). "⇅ Future avg", "Signals decide" and "Avg > 0" stay whole. Never new words: the text is
+ *  `chipText()`'s. `mono` says whether the value is a figure (then it is set in mono). */
+export function chipParts(id, txt) {
+  const t = String(txt || "");
+  const sp = t.indexOf(" ");
+  if (["order", "direction", "positive"].includes(id) || sp < 0) return { name: t, value: null, mono: false };
+  const value = t.slice(sp + 1);
+  return { name: t.slice(0, sp), value, mono: /\d/.test(value) };
+}
+
+/* ONE ROW (round 2, the mockup's flat list): ☆ · the ticker and its direction tag · the subtitle (or the miss reason) ·
+   the 72×40 picture · the figure the list is sorted by and "risk $N". The row (not the ☆) opens the market's page on
+   Strategies. A miss is dim, its tag's border the line colour, its picture at 0.35. */
+const ROW_CSS = `[data-row-button]:hover,[data-row-button]:active{background:${T.panel}}`;
 export function MarketRow({ row, sd = null, fig, bars = NO_BARS, saved = false, onSave, onOpen, current = false }) {
   const x = row.x;
   const muted = !row.fits;
-  const ink = muted ? T.mut : T.ink;
+  const ink = muted ? T.dim : T.ink;
   const dir = sd ? sd.dir : null;
   return (
     <div role="listitem" data-row={row.tk} data-miss={muted ? "true" : undefined} aria-current={current ? "true" : undefined}
-      style={{ display: "flex", alignItems: "stretch", gap: 4, background: T.bg, borderRadius: 8, minWidth: 0, maxWidth: "100%", boxSizing: "border-box",
-        border: `${current ? 2 : 1}px ${muted ? "dashed" : "solid"} ${current ? T.blue : T.line}` }}>
-      <button onClick={onSave} aria-pressed={saved} aria-label={ARIA.saveTrade(saved, x.tk, x.name)}
-        style={{ ...sans, fontSize: FS.md, minWidth: TAP, minHeight: TAP, background: "transparent", border: "none",
-          cursor: "pointer", color: saved ? T.amber : T.dim }}>{saved ? "★" : "☆"}</button>
-      <button onClick={onOpen} aria-label={ARIA.openMarket(x.tk)}
-        style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 8, background: "transparent", border: "none",
-          cursor: "pointer", padding: "6px 8px 6px 0", textAlign: "left", minHeight: TAP }}>
+      style={{ display: "flex", alignItems: "stretch", borderTop: `1px solid ${T.line}`, paddingLeft: 4, minWidth: 0, maxWidth: "100%",
+        boxSizing: "border-box", background: current ? T.panel : "transparent" }}>
+      <style>{ROW_CSS}</style>
+      <IconButton onClick={onSave} pressed={saved} label={ARIA.saveTrade(saved, x.tk, x.name)} color={saved ? T.amber : T.dim}
+        style={{ alignSelf: "center", fontSize: FS.lg }}>{saved ? "★" : "☆"}</IconButton>
+      <button onClick={onOpen} aria-label={ARIA.openMarket(x.tk)} data-row-button
+        style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 10, background: "transparent", border: "none",
+          cursor: "pointer", padding: "8px 16px 8px 4px", textAlign: "left", minHeight: 66, borderRadius: 0 }}>
         <span style={{ flex: "1 1 0", minWidth: 0 }}>
-          <span style={{ display: "flex", gap: 6, alignItems: "baseline", flexWrap: "wrap" }}>
-            <span style={{ ...mono, fontSize: FS.md, fontWeight: FW.bold, color: ink }}>{x.tk}</span>
-            {dir && <span style={{ ...sans, fontSize: FS.xs, fontWeight: FW.bold, color: muted ? T.mut : DIR_COLOR[dir] }}>{DIRECTION_TAGS[dir]}</span>}
+          <span style={{ display: "flex", gap: 6, alignItems: "center", minWidth: 0 }}>
+            <span style={{ ...mono, fontSize: FS.md, fontWeight: FW.bold, color: ink, lineHeight: LH.tight }}>{x.tk}</span>
+            {dir && <span style={{ ...sans, fontSize: FS.xs, lineHeight: "18px", padding: "0 6px", borderRadius: 6, whiteSpace: "nowrap",
+              border: `1px solid ${muted ? T.line : T.field}`, color: muted ? T.dim : DIR_COLOR[dir] }}>{DIRECTION_TAGS[dir]}</span>}
           </span>
-          <span style={{ ...sans, display: "block", fontSize: FS.xs, lineHeight: LH.tight, color: muted ? T.amber : T.mut,
+          <span style={{ ...sans, display: "block", fontSize: FS.xs, lineHeight: LH.body, color: T.mut, marginTop: 2,
             overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {muted ? row.misses.map(missReasonLine).filter(Boolean).join(" · ") : rowSubtitleText(x.name, x.expKey)}
           </span>
         </span>
-        <span aria-hidden="true" style={{ flex: "0 0 72px", width: 72, height: 40, opacity: muted ? 0.6 : 1 }}>
-          {x.lf.bands && <BandThumbnail bands={x.lf.bands} bars={bars} width={72} height={40} />}
+        <span aria-hidden="true" style={{ flex: "0 0 72px", width: 72, height: 40, opacity: muted ? 0.35 : 1, borderRadius: 4, overflow: "hidden" }}>
+          {x.lf.bands && <BandThumbnail bands={x.lf.bands} bars={bars} width={72} height={40} lineWidth={1.5} />}
         </span>
-        <span style={{ flex: "0 0 auto", textAlign: "right", minWidth: 76 }}>
-          <span data-row-figure={fig.tile} style={{ ...mono, display: "block", fontSize: FS.sm, fontWeight: FW.bold, color: ink }}>{fig.value}</span>
-          <span style={{ ...mono, display: "block", fontSize: FS.xs, color: T.mut }}>{rowRiskText(fig.risk)}</span>
+        <span style={{ flex: "0 0 auto", textAlign: "right", minWidth: 60 }}>
+          <span data-row-figure={fig.tile} style={{ ...mono, display: "block", fontSize: FS.md, fontWeight: FW.bold, color: ink,
+            fontVariantNumeric: "tabular-nums", lineHeight: LH.tight }}>{fig.value}</span>
+          <span style={{ ...mono, display: "block", fontSize: FS.xs, color: T.mut, fontVariantNumeric: "tabular-nums" }}>{rowRiskText(fig.risk)}</span>
         </span>
       </button>
     </div>
@@ -333,11 +382,10 @@ function WaitingRow({ tk, st }) {
   const words = st.state === "failed" ? rowFailedText(st.why) : st.state === "noBoard" ? ROW_NO_BOARD : ROW_READING[st.state];
   return (
     <div role="listitem" data-row={tk} data-waiting={st.state}
-      style={{ display: "flex", alignItems: "center", gap: 8, minHeight: TAP, padding: "6px 10px 6px 48px", borderRadius: 8,
-        border: `1px dashed ${T.line}` }}>
-      <span style={{ ...mono, fontSize: FS.md, fontWeight: FW.bold, color: T.mut }}>{tk}</span>
+      style={{ display: "flex", alignItems: "center", gap: 10, minHeight: 66, padding: "8px 16px 8px 52px", borderTop: `1px solid ${T.line}` }}>
+      <span style={{ ...mono, fontSize: FS.md, fontWeight: FW.bold, color: T.dim }}>{tk}</span>
       <span style={{ ...sans, flex: 1, fontSize: FS.xs, color: st.state === "failed" ? T.amber : T.mut }}>{words}</span>
-      <span style={{ ...mono, fontSize: FS.sm, color: T.mut }}>—</span>
+      <span style={{ ...mono, fontSize: FS.md, color: T.dim }}>—</span>
     </div>
   );
 }

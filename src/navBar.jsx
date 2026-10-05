@@ -20,6 +20,9 @@ import { sans, mono, TAP } from "./ui.jsx";
 const FS = TYPE.size, FW = TYPE.weight;
 /** The bar's own height in pixels; a page adds it to its bottom padding. */
 export const NAV_BAR_H = 60;
+/** Where Find's list (and Saved, and a market's page) ends: 88px above the bottom — the mockups' figure, chosen by the
+ *  owner on 5 Oct 2026 over the bar's real height above the badge strip (BADGE_H + NAV_BAR_H). */
+export const FIND_LIST_END = 88;
 
 export const NAV_PLACES = [
   { id: "find", label: "Find", I: Search },

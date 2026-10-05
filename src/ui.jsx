@@ -17,6 +17,7 @@
 // ============================================================================
 import React, { useEffect, useId, useRef, useState } from "react";
 import { T, TYPE } from "./theme.js";
+import { X } from "lucide-react";
 import { PLACEHOLDER_HEAD, placeholderOf } from "./rules.js";
 
 const FS = TYPE.size, FW = TYPE.weight, LH = TYPE.line;
@@ -237,6 +238,9 @@ export function RangeField({
   minCaption = null, maxCaption = null,
   values = null, passWhen = "above", pass = null, color = T.amber,
   aside = null, note = null, disabled = false,
+  // ROUND 2: a sheet's slider is the mockup's 32px track with its two ends in mono (owner, 5 Oct 2026: the mockup's
+  // numbers). Elsewhere it stays TAP tall.
+  trackHeight = TAP,
 }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState("");
@@ -298,16 +302,16 @@ export function RangeField({
           <input id={id} type="range" min={min} max={max} step={step} value={shown == null ? min : shown} disabled={disabled}
             aria-valuetext={valueText || (shown == null ? "not set" : format(shown))}
             onChange={(e) => onChange && onChange(Number(e.target.value))}
-            style={{ display: "block", width: "100%", height: TAP, margin: 0, accentColor: color, cursor: "pointer" }} />
+            style={{ display: "block", width: "100%", height: trackHeight, margin: 0, accentColor: color, cursor: "pointer" }} />
         </div>
       ) : (
         <Note style={{ marginTop: 6 }}>{note || "no range to move"}</Note>
       )}
 
       <div style={{ display: "flex", justifyContent: "space-between", gap: 8, ...sans, fontSize: FS.xs, color: T.dim }}>
-        <span>{usable ? (minCaption != null ? minCaption : format(min)) : ""}</span>
+        <span style={mono}>{usable ? (minCaption != null ? minCaption : format(min)) : ""}</span>
         {pass != null && <span style={{ color: T.mut }}><span style={mono}>{pass}</span> pass</span>}
-        <span>{usable ? (maxCaption != null ? maxCaption : format(max)) : ""}</span>
+        <span style={mono}>{usable ? (maxCaption != null ? maxCaption : format(max)) : ""}</span>
       </div>
       {note && usable && <Note style={{ marginTop: 2 }}>{note}</Note>}
     </div>
@@ -343,7 +347,7 @@ export function Placeholder({ id }) {
    which is navigation (`deskSheet`, nav.js), so Back closes it. What it holds is one tap away: the word counter
    (wordcount.mjs) does not score it at rest.
 ==================================================================== */
-export function Sheet({ open, title, onClose, footer = null, children }) {
+export function Sheet({ open, title, value = null, onClose, footer = null, children }) {
   useEffect(() => {
     if (!open || typeof document === "undefined") return undefined;
     const esc = (e) => { if (e.key === "Escape" && onClose) onClose(); };
@@ -351,21 +355,100 @@ export function Sheet({ open, title, onClose, footer = null, children }) {
     return () => document.removeEventListener("keydown", esc);
   }, [open, onClose]);
   if (!open) return null;
+  // ROUND 2 (the mockups' sheet): the scrim behind, the panel from the bottom with a grab handle, the title and the
+  // current value on one line, a 44px close for a keyboard or a screen reader (the scrim, Escape and Back close it too).
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 90, display: "flex", flexDirection: "column", justifyContent: "flex-end" }}>
-      <div aria-hidden="true" onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.45)" }} />
+      <div aria-hidden="true" data-scrim onClick={onClose} style={{ position: "absolute", inset: 0, background: T.scrim }} />
       <div role="dialog" aria-modal="true" aria-label={title}
-        style={{ position: "relative", background: T.panel, borderTop: `1px solid ${T.field}`, borderRadius: "14px 14px 0 0",
-          maxHeight: "82vh", display: "flex", flexDirection: "column", width: "100%", maxWidth: 640, margin: "0 auto",
-          paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "8px 16px",
-          borderBottom: `1px solid ${T.line}` }}>
-          <h2 data-view-heading tabIndex={-1} style={{ ...sans, fontSize: FS.md, fontWeight: FW.bold, color: T.ink, margin: 0, outline: "none" }}>{title}</h2>
-          <Btn small ghost color={T.blue} onClick={onClose}>Close</Btn>
+        style={{ position: "relative", background: T.panel, borderTop: `1px solid ${T.field}`, borderRadius: "18px 18px 0 0",
+          maxHeight: "86vh", display: "flex", flexDirection: "column", width: "100%", maxWidth: 640, margin: "0 auto", boxSizing: "border-box",
+          padding: "8px 16px calc(20px + env(safe-area-inset-bottom, 0px))", gap: 12 }}>
+        <div aria-hidden="true" style={{ width: 40, height: 4, borderRadius: 2, background: T.field, margin: "0 auto" }} />
+        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+          <h2 data-view-heading tabIndex={-1} style={{ ...sans, fontSize: FS.lg, fontWeight: FW.bold, lineHeight: LH.tight, color: T.ink, margin: 0, outline: "none" }}>{title}</h2>
+          {value != null && <span data-sheet-value style={{ ...mono, fontSize: FS.md, fontWeight: FW.bold, color: T.ink, fontVariantNumeric: "tabular-nums" }}>{value}</span>}
+          <span style={{ flex: 1 }} />
+          <IconButton label="Close" onClick={onClose} style={{ marginRight: -12 }}><X size={20} strokeWidth={1.75} aria-hidden="true" /></IconButton>
         </div>
-        <div style={{ overflowY: "auto", padding: "12px 16px", overscrollBehavior: "contain" }}>{children}</div>
-        {footer && <div style={{ padding: "8px 16px 12px", borderTop: `1px solid ${T.line}` }}>{footer}</div>}
+        <div style={{ overflowY: "auto", overscrollBehavior: "contain", minHeight: 0 }}>{children}</div>
+        {footer && <div>{footer}</div>}
       </div>
     </div>
   );
 }
+
+/* ====================================================================
+   ROUND 2 — THE MOCKUPS' ATOMS (owner, 5 Oct 2026). Find and the market page are drawn from these; nothing else is.
+==================================================================== */
+
+/** A 44×44 icon button (↻, the gear, ☆, back). `label` is what a screen reader hears; the icon is the caller's. */
+export const IconButton = ({ label, onClick, children, pressed, disabled = false, size = TAP, color = T.ink, style, ...rest }) => (
+  <button onClick={onClick} aria-label={label} aria-pressed={pressed} disabled={disabled} {...rest}
+    style={{ ...sans, width: size, height: size, minWidth: size, minHeight: size, padding: 0, background: "transparent", border: "none",
+      color, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.5 : 1, display: "inline-flex", alignItems: "center",
+      justifyContent: "center", flexShrink: 0, borderRadius: 10, fontSize: FS.md, lineHeight: 1, ...style }}>{children}</button>
+);
+
+/** One segmented control (Results | Saved; the chain's three modes): panel ground, the chosen segment in ink. */
+export function SegmentBar({ items = [], value, onChange, label, style }) {
+  return (
+    <div role="group" aria-label={label} style={{ display: "flex", padding: 3, gap: 2, background: T.panel, border: `1px solid ${T.line}`,
+      borderRadius: 10, boxSizing: "border-box", ...style }}>
+      {items.map((it) => {
+        const on = it.id === value;
+        return (
+          <button key={it.id} onClick={() => !it.disabled && onChange && onChange(it.id)} aria-pressed={on} disabled={!!it.disabled}
+            aria-label={it.aria || undefined}
+            style={{ ...sans, flex: 1, minWidth: 0, minHeight: TAP, borderRadius: 8, border: "none", cursor: it.disabled ? "not-allowed" : "pointer",
+              fontSize: FS.sm, fontWeight: on ? FW.bold : FW.regular, background: on ? T.ink : "transparent", color: on ? T.bg : it.disabled ? T.dim : T.mut,
+              display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "0 6px", lineHeight: LH.tight }}>
+            {it.label}{it.count != null ? <span style={{ ...mono, fontSize: FS.xs, fontVariantNumeric: "tabular-nums" }}>{it.count}</span> : null}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Underlined tabs (Find's categories, the market page's three tabs): the chosen one in ink, bold, with an amber rule. */
+export function UnderTabs({ items = [], value, onChange, label, style }) {
+  return (
+    <div role="group" aria-label={label} style={{ display: "flex", padding: "0 8px", borderBottom: `1px solid ${T.line}`, overflowX: "auto",
+      whiteSpace: "nowrap", ...style }}>
+      {items.map((it) => {
+        const on = it.id === value;
+        return (
+          <button key={String(it.id)} onClick={() => onChange && onChange(it.id)} aria-pressed={on}
+            style={{ ...sans, flex: "0 0 auto", minHeight: TAP, padding: "0 10px", background: "transparent", border: "none",
+              borderBottom: `3px solid ${on ? T.amber : "transparent"}`, cursor: "pointer", fontSize: FS.md, fontWeight: on ? FW.bold : FW.regular,
+              color: on ? T.ink : T.mut, display: "inline-flex", alignItems: "center", gap: 6, lineHeight: LH.tight }}>
+            {it.label}
+            {it.count != null && <span style={{ ...mono, fontSize: FS.xs, fontWeight: FW.regular, color: T.dim, fontVariantNumeric: "tabular-nums" }}>{it.count}</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** A filter chip: its name in mut, its value in mono ink. Off its default it is filled with ink. `strong` (⇅ Order) has
+ *  an ink border and bold text always. No amber: amber is the action colour. */
+export const FilterChip = ({ name = null, value = null, valueMono = true, off = false, strong = false, onClick, label, children, style }) => (
+  <button onClick={onClick} aria-label={label} aria-pressed={off}
+    style={{ ...sans, flex: "0 0 auto", minHeight: TAP, padding: "0 12px", borderRadius: 999, cursor: "pointer", fontSize: FS.sm,
+      fontWeight: off || strong ? FW.bold : FW.regular, lineHeight: LH.tight, whiteSpace: "nowrap",
+      border: `1px solid ${off || strong ? T.ink : T.field}`, background: off ? T.ink : "transparent", color: off ? T.bg : T.ink,
+      display: "inline-flex", alignItems: "center", gap: 5, ...style }}>
+    {name != null && <span style={{ color: off ? T.bg : strong ? T.ink : T.mut }}>{name}</span>}
+    {value != null && <span style={valueMono ? { ...mono, fontVariantNumeric: "tabular-nums" } : null}>{value}</span>}
+    {children}
+  </button>
+);
+
+/** A quiet text button (Hide them, Reset, The market's read ›): blue, 12px. `height` is the mockup's 36 by default. */
+export const TextBtn = ({ children, onClick, color = T.blue, height = 36, style, ...rest }) => (
+  <button onClick={onClick} {...rest}
+    style={{ ...sans, fontSize: FS.xs, fontWeight: FW.regular, color, background: "transparent", border: "none", padding: "0 6px",
+      minHeight: height, cursor: "pointer", lineHeight: LH.tight, ...style }}>{children}</button>
+);
