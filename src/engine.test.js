@@ -505,7 +505,8 @@ test("THE HISTORICAL REPLAY HAS ONE HOME (PR #49, TASK 3): engine.js's histBackt
   };
   const { matrix } = parseAvJson(avMonthlyBody({ months: 195, endYear: 2026, endMonth: 8, seed: 48, monthDrift: CORN_SHAPED_MONTH_DRIFT }));
   const legs = [{ type: "call", side: 1, qty: 1, strike: 20 }, { type: "call", side: -1, qty: 1, strike: 22 }];
-  for (const [month, dte] of [[9, 45], [5, 30], [10, 75], [0, 90]]) {
+  // Windows inside one calendar year are row for row the same; a window past December is PR #50's (test below).
+  for (const [month, dte] of [[9, 45], [5, 30], [9, 75], [0, 90]]) {
     const a = histBacktest(legs, 20.5, dte, 0.9, matrix, { month, year: 2026 });
     const b = before(legs, 20.5, dte, 0.9, matrix, month, 2026);
     assert.deepEqual(a.rows, b.rows, `month ${month}, ${dte} days: the same rows`);
@@ -518,6 +519,27 @@ test("THE HISTORICAL REPLAY HAS ONE HOME (PR #49, TASK 3): engine.js's histBackt
   assert.equal(histBacktest(legs, 20.5, 45, 0.9, null), null, "no series: not read, never an empty win rate");
   const app = readFileSync("src/App.jsx", "utf8").replace(/\/\*[\s\S]*?\*\//g, " ");
   assert.equal(/function histBacktest\s*\(/.test(app), false, "App.jsx keeps no copy");
+});
+
+test("A WINDOW PAST DECEMBER READS THE NEXT YEAR'S JANUARY (PR #50, TASK 0a); the last year is dropped, not padded", () => {
+  // A hand-made matrix: every month of year Y returns Y − 2000 tenths of a percent, so each month says which year it
+  // came from. Nov → Jan (75 days = 3 whole months, from November).
+  const yr = (y) => [y, ...Array.from({ length: 12 }, () => (y - 2000) / 10)];
+  const matrix = [yr(2020), yr(2021), yr(2022), yr(2023)];
+  const legs = [{ type: "call", side: 1, qty: 1, strike: 100 }];
+  const bt = histBacktest(legs, 100, 75, 1, matrix, { month: 10, year: 2026 });
+  const rets = Object.fromEntries(bt.rows.map((r) => [r.year, r.ret]));
+  const want = (a, b) => ((1 + a / 1000) * (1 + a / 1000) * (1 + b / 1000) - 1) * 100;
+  assert.ok(Math.abs(rets["2020"] - want(20, 21)) < 1e-9, "2020's Nov and Dec, then 2021's January");
+  assert.ok(Math.abs(rets["2022"] - want(22, 23)) < 1e-9, "2022's Nov and Dec, then 2023's January");
+  assert.equal(rets["2023"], undefined, "2023 has no following row: dropped, never padded with its own January");
+  assert.equal(bt.n, 3);
+  // Out of order rows are found by year, not by position.
+  const shuffled = histBacktest(legs, 100, 75, 1, [yr(2022), yr(2020), yr(2023), yr(2021)], { month: 10, year: 2026 });
+  assert.deepEqual(shuffled.rows.map((r) => r.year).sort(), ["2020", "2021", "2022"]);
+  // Inside one year nothing moves: Oct + Nov of the same row.
+  const inYear = histBacktest(legs, 100, 60, 1, matrix, { month: 9, year: 2026 });
+  assert.equal(inYear.n, 4);
 });
 
 test("AV PARSE — the first and last rows are PARTIAL, and that is not an error", () => {
