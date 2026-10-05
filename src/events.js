@@ -3,19 +3,19 @@
 //
 // NEWS IS NOT A CALENDAR. A headline carries the date it was published, not the date of the next report, so the dates
 // below come from the publishers' own calendars, each block beside its source URL. They are COPIED, never typed from
-// memory, and the table runs to EVENT_TABLE_END. Until they are copied in — and after that date — the event line is the
-// placeholder "events-calendar" (rules.js `PLACEHOLDERS`). It ships without dates: see THE TABLE below.
+// memory, and the table runs to EVENT_TABLE_END. After that date — and for a market with no calendar copied in — the
+// event line is the placeholder "events-calendar" (rules.js `PLACEHOLDERS`). The dates were read on 4–5 Oct 2026 (round 2).
 //
 // WHICH MARKET GETS WHICH CALENDAR is the `events` key on its row in markets.js, never a list in this file.
 //
-// HOLIDAY WEEKS. A weekly report in a week (Monday to Sunday) holding a US federal holiday carries "holiday week: the
-// publisher may move it", unless its block lists the moved date with a source. The holidays are WORKED OUT from their
+// HOLIDAY WEEKS. A weekly report in a week (Monday to Sunday) holding a US federal holiday carries "holiday week: <the
+// publisher> may move it", unless its block lists the moved date, or its page lists every holiday change (`holidaysRead`). The holidays are WORKED OUT from their
 // rules (the second Monday of October, 11 November, the fourth Thursday of November, 25 December), not typed.
 //
 // TIMES ARE THE PUBLISHERS' (Eastern Time) and the screen prints them in the user's own zone, like every other time in
 // the app; the ET time and the source sit behind the line's ⓘ.
 //
-// Plain JS: `events.test.js` reads it at 4 Oct 2026.
+// Plain JS: `events.test.js` reads THIS table at 4 Oct 2026 (round 2: no test-only table any more).
 // ============================================================================
 import { getU } from "./markets.js";
 import { RULES } from "./rules.js";
@@ -27,33 +27,46 @@ const WD = Object.freeze(Object.fromEntries(["sun", "mon", "tue", "wed", "thu", 
 export const EVENT_TABLE_END = "2026-12-31";
 
 /*
- * THE TABLE SHIPS WITHOUT DATES (owner decision, 4 Oct 2026). The publishers' pages could not be read from the session
- * that built this file (the sandbox's network refused cmegroup.com, eia.gov, ir.eia.gov and federalreserve.gov), and the
- * rule is that a date is copied from its source or not written at all. So each block names its report and its source,
- * and carries no dates, no weekly day and no time: the event line is the placeholder "events-calendar" until a session
- * that can read those pages copies them in. A block, once filled, is either a list of dates (`dates`) or a weekly
- * cadence (`weekly`: weekday from `WD`, from today to `through`), with the publisher's Eastern Time (`time`); `major`
- * marks the reports the line leads with (WASDE, FOMC). The logic below is tested on a test-only table
- * (events.test.js).
+ * THE TABLE — READ ON THE PUBLISHERS' PAGES ON 4–5 OCT 2026 (owner decision, 5 Oct 2026). The owner's assistant read each
+ * page; the dates below are copied from that reading, each block beside its source, `read` saying when. A block is a list
+ * of dates (`dates`) or a weekly cadence (`weekly`: weekday from `WD`, from today to `through`), with the publisher's
+ * Eastern Time (`time`). Three things a page can say, and nothing more:
+ *   - `time: null` with dates: the page gives the DAY, not the hour (the Fed's calendar). The line says the day and no
+ *     time; never an hour nobody read.
+ *   - `moves`: a weekly date the page lists as moved, to its new day and time (EIA petroleum's holiday schedule).
+ *   - `holidaysRead`: the page lists every holiday change, so a holiday week with no move listed is NOT flagged. Without
+ *     it, a weekly report in a federal-holiday week carries "holiday week: <publisher> may move it" (round 1's rule,
+ *     kept by the owner, 5 Oct 2026).
+ * `major` marks the reports the line leads with (WASDE, FOMC); `what` is the word after the name ("crop report").
  */
+const READ = "read 5 Oct 2026";
+const CME_USDA = "https://www.cmegroup.com/articles/2026/understanding-major-usda-reports-in-2026.html";
 export const CALENDARS = Object.freeze({
   grains: Object.freeze([
-    Object.freeze({ id: "wasde", name: "WASDE", major: true, time: null, dates: Object.freeze([]),
-      source: "https://www.cmegroup.com/articles/2026/understanding-major-usda-reports-in-2026.html" }),
-    Object.freeze({ id: "cropProgress", name: "Crop Progress", major: false, time: null, weekly: null,
-      source: "https://www.cmegroup.com/articles/2026/understanding-major-usda-reports-in-2026.html" }),
+    Object.freeze({ id: "wasde", name: "WASDE", what: "crop report", publisher: "USDA", major: true, time: "12:00",
+      dates: Object.freeze(["2026-10-09", "2026-11-10", "2026-12-10"]), source: CME_USDA, read: READ }),
+    Object.freeze({ id: "cropProgress", name: "Crop Progress", what: "crop report", publisher: "USDA", major: false, time: "16:00",
+      weekly: Object.freeze({ weekday: WD.mon, through: "2026-11-30" }), source: CME_USDA, read: READ }),
   ]),
   natgas: Object.freeze([
-    Object.freeze({ id: "eiaStorage", name: "EIA storage", major: false, time: null, weekly: null,
-      source: "https://ir.eia.gov/ngs/ngs.html" }),
+    // The 2026 holiday changes could not be read on this page: a holiday week carries the note.
+    Object.freeze({ id: "eiaStorage", name: "EIA storage", what: "gas storage report", publisher: "EIA", major: false, time: "10:30",
+      weekly: Object.freeze({ weekday: WD.thu, through: EVENT_TABLE_END }), source: "https://ir.eia.gov/ngs/ngs.html", read: READ }),
   ]),
   petroleum: Object.freeze([
-    Object.freeze({ id: "eiaPetroleum", name: "EIA petroleum", major: false, time: null, weekly: null,
-      source: "https://www.eia.gov/petroleum/supply/weekly/schedule.php" }),
+    Object.freeze({ id: "eiaPetroleum", name: "EIA petroleum", what: "oil inventories report", publisher: "EIA", major: false, time: "10:30",
+      weekly: Object.freeze({ weekday: WD.wed, through: EVENT_TABLE_END }), holidaysRead: true,
+      moves: Object.freeze([
+        Object.freeze({ from: "2026-10-14", to: "2026-10-15", time: "12:00", why: "Columbus Day" }),
+        Object.freeze({ from: "2026-11-11", to: "2026-11-12", time: "12:00", why: "Veterans Day" }),
+      ]),
+      source: "https://www.eia.gov/petroleum/supply/weekly/schedule.php", read: READ }),
   ]),
   fomc: Object.freeze([
-    Object.freeze({ id: "fomc", name: "FOMC statement", major: true, time: null, dates: Object.freeze([]),
-      source: "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm" }),
+    // Meetings 27–28 Oct and 8–9 Dec 2026; the decision is the second day. The page gives days, not the hour.
+    Object.freeze({ id: "fomc", name: "FOMC", what: "decision", publisher: "the Fed", major: true, time: null,
+      dates: Object.freeze(["2026-10-28", "2026-12-09"]), meetings: Object.freeze(["27–28 Oct", "8–9 Dec"]),
+      source: "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm", read: READ }),
   ]),
 });
 /** Weekdays by name, for a weekly block once its day is copied in. */
@@ -132,7 +145,8 @@ export function eventsFor(tk, { now = Date.now(), untilIso = EVENT_TABLE_END, ex
   const out = [];
   for (const key of calendarsOf(tk)) {
     for (const b of calendars[key] || []) {
-      if (!b.time || (!(b.dates && b.dates.length) && !b.weekly)) continue;   // a block with nothing copied in yet
+      if (!(b.dates && b.dates.length) && !b.weekly) continue;   // a block with nothing copied in yet
+      if (b.weekly && !b.time) continue;                          // a weekly cadence always has the publisher's time
       const days = b.dates ? [...b.dates]
         : (() => {
           const xs = [];
@@ -141,13 +155,19 @@ export function eventsFor(tk, { now = Date.now(), untilIso = EVENT_TABLE_END, ex
           for (; d <= through; d = addDays(d, 7)) xs.push(d);
           return xs;
         })();
-      for (const d of days) {
+      for (const d0 of days) {
+        // A date the page lists as moved goes to its new day and time, and is not a guess: no holiday note.
+        const mv = (b.moves || []).find((m) => m.from === d0) || null;
+        const d = mv ? mv.to : d0;
+        const time = mv ? mv.time : b.time;
         if (d > end) continue;
-        const at = etInstant(d, b.time);
-        if (at < now) continue;
-        const hol = b.weekly ? holidayWeekOf(d) : null;
-        out.push({ id: b.id, name: b.name, at, etDate: d, etTime: b.time, major: !!b.major, weekly: !!b.weekly,
-          holiday: hol ? hol.name : null, source: b.source });
+        // No time read (the Fed's calendar): the day counts until it is over in New York, and no hour is printed.
+        const at = time ? etInstant(d, time) : etInstant(d, "00:00");
+        if ((time ? at : etInstant(addDays(d, 1), "00:00")) < now) continue;
+        const hol = b.weekly && !mv && !b.holidaysRead ? holidayWeekOf(d) : null;
+        out.push({ id: b.id, name: b.name, what: b.what || null, publisher: b.publisher || null, at, etDate: d, etTime: time || null,
+          dateOnly: !time, major: !!b.major, weekly: !!b.weekly, moved: mv ? mv.why : null,
+          holiday: hol ? hol.name : null, source: b.source, read: b.read || null });
       }
     }
   }
@@ -173,7 +193,7 @@ export function nextEvent(tk, { now = Date.now(), expKey = null, calendars = CAL
   const keys = calendarsOf(tk);
   if (!keys.length) return null;
   // Past the table's end, or no date copied in for this market yet: the placeholder, never a guessed date.
-  const filled = keys.some((k) => (calendars[k] || []).some((b) => b.time && ((b.dates && b.dates.length) || b.weekly)));
+  const filled = keys.some((k) => (calendars[k] || []).some((b) => (b.dates && b.dates.length) || (b.weekly && b.time)));
   if (dateIn(now) > EVENT_TABLE_END || !filled) return { placeholder: "events-calendar" };
   const before = eventsFor(tk, { now, untilIso: expKey || EVENT_TABLE_END, calendars }).filter((e) => !expKey || e.etDate < expKey);
   const ev = before.find((e) => e.major) || before.find((e) => e.weekly) || null;

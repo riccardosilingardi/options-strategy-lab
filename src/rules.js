@@ -1413,8 +1413,8 @@ export const PLACEHOLDER_HEAD = "Not connected yet";
 export const PLACEHOLDERS = Object.freeze([
   Object.freeze({ id: "events-calendar", screen: "market",
     shows: "the next report or central-bank meeting before the expiry shown, and every one before it",
-    needs: "the publishers' own calendars read on their pages and copied into src/events.js with their sources",
-    pr: "the session that can read those pages" }),
+    needs: "the next year's calendars read on the publishers' own pages and copied into src/events.js with their sources",
+    pr: "the session that copies the next year's dates" }),
 ]);
 export const placeholderOf = (id) => PLACEHOLDERS.find((p) => p.id === id) || null;
 
@@ -1625,16 +1625,24 @@ export const TRAY_LABELS = Object.freeze({ debit: "Debit", credit: "Credit", max
   chance: "Chance", noCap: "No cap", clear: "Clear" });
 export const uncoveredText = () => "Build is blocked: a short leg is not covered, and the gate refuses an uncovered short leg. Add the leg that covers it.";
 export const trayEmptyText = () => "Tap an ask to buy one, a bid to sell one. Tap it again to remove it.";
-/** The event line (redesign PR 1, TASK 4): "WASDE · Fri 9 Oct, 18:00 your time · in 5 days · before 20 Nov". */
-export function eventLineText({ name, when, days, beforeDay = null, holiday = false }) {
+/** The event line (redesign PR 1, TASK 4): "WASDE · Fri 9 Oct, 18:00 your time · in 5 days · before 20 Nov".
+ *  Round 2: `dateOnly` (the publisher gives the day, not the hour: "FOMC · decision Wed 28 Oct · in 24 days") and
+ *  `publisher` (the holiday note names who may move it); without them the line reads exactly as before. */
+export function eventLineText({ name, when, days, beforeDay = null, holiday = false, dateOnly = false, publisher = null }) {
   const inDays = days <= 0 ? "today" : days === 1 ? "tomorrow" : `in ${days} days`;
-  return [name, `${when} your time`, inDays, beforeDay ? `before ${beforeDay}` : null, holiday ? HOLIDAY_WEEK_NOTE : null]
-    .filter(Boolean).join(" · ");
+  return [name, dateOnly ? when : `${when} your time`, inDays, beforeDay ? `before ${beforeDay}` : null,
+    holiday ? holidayWeekNote(publisher) : null].filter(Boolean).join(" · ");
 }
 export const HOLIDAY_WEEK_NOTE = "holiday week: the publisher may move it";
-/** Behind the event line's ⓘ: the publisher's own time, and where the date was copied from. */
+/** "holiday week: EIA may move it" — the publisher by name when the block names one. */
+export const holidayWeekNote = (publisher) => (publisher ? `holiday week: ${publisher} may move it` : HOLIDAY_WEEK_NOTE);
+/** The FOMC's day with no hour: "decision Wed 28 Oct". */
+export const dateOnlyWhen = (what, etDayWords) => `${what ? `${what} ` : ""}${etDayWords}`;
+/** Behind the event line's ⓘ: the publisher's own time (or that it gives none), and where the date was copied from. */
 export const eventInfoText = (ev, etDayWords) =>
-  `${ev.etTime} ET on ${etDayWords}${ev.holiday ? ` (${ev.holiday} week)` : ""}. ${ev.source ? `Copied from ${ev.source}` : "From this market's own chain"}.`;
+  `${ev.dateOnly ? `${etDayWords}: the page gives the day, not the hour` : `${ev.etTime} ET on ${etDayWords}`}` +
+  `${ev.moved ? ` (moved for ${ev.moved})` : ""}${ev.holiday ? ` (${ev.holiday} week)` : ""}. ` +
+  `${ev.source ? `Copied from ${ev.source}${ev.read ? `, ${ev.read}` : ""}` : "From this market's own chain"}.`;
 export const eventsBeforeLabel = (day) => `Everything before ${day}`;
 export const chainEventText = (allBefore) => (allBefore ? "before every expiry above" : "after some expiries above");
 

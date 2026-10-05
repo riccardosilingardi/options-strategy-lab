@@ -44,7 +44,7 @@ import { RULES, money, chanceText, expiryWords, sizedFree, sizedFigures, sizeLin
   ivRankText, expectedMoveText, NEWS_NOT_READ, newsHeadlineText, groupHeadText, strategiesLine, stanceText, futurePastDisagree,
   OPEN_IN_CHAIN, BUILD_CTA, COMPARE_TICK, MARKET_READ_HEAD, HOW_WORKED_OUT_LINK, MARKET_READ_END, CHAIN_MODES,
   noOpenInterestText, underEntryText, THIN, spotLineText, legsMaxText, TRAY_LABELS, uncoveredText, trayEmptyText,
-  chainEventText, eventLineText, eventInfoText, eventsBeforeLabel, DIRECTION_TAGS, CHAIN_HEAD, chainNotLoadedText,
+  chainEventText, eventLineText, eventInfoText, dateOnlyWhen, eventsBeforeLabel, DIRECTION_TAGS, CHAIN_HEAD, chainNotLoadedText,
   marketReadingText, noCardsText, ARIA,
 } from "./rules.js";
 
@@ -180,14 +180,16 @@ function MarketHeader({ tk, u, spot, freshLine, bars, clockLine, atm, ivRank, iv
 }
 
 /* ---------------------------------------------------------------- THE EVENT LINE (TASK 4) */
+/** When an event falls: in the user's time, or — when the publisher gives only the day — that ET day and no hour. */
+const whenOf = (ev, timeZone) => (ev.dateOnly ? dateOnlyWhen(ev.what, etDay(ev.etDate)) : localWhen(ev.at, timeZone));
 function EventLine({ tk, expKey, now, timeZone, exits = [], expiries = [], chainExpiries = null }) {
   const n = nextEvent(tk, { now, expKey });
   if (!n) return null;
   if (n.placeholder) return <Placeholder id="events-calendar" />;
   const ev = n.ev;
   const beforeDay = expKey ? (expiryWords(expKey) || expKey).replace(/ \d{4}$/, "") : null;
-  const line = eventLineText({ name: ev.name, when: localWhen(ev.at, timeZone), days: daysUntil(ev.at, now, timeZone),
-    beforeDay, holiday: !!ev.holiday });
+  const line = eventLineText({ name: ev.name, when: whenOf(ev, timeZone), days: daysUntil(ev.at, now, ev.dateOnly ? "America/New_York" : timeZone),
+    beforeDay, holiday: !!ev.holiday, dateOnly: ev.dateOnly, publisher: ev.publisher });
   const all = eventsFor(tk, { now, untilIso: expKey || undefined, expiries, exits }).filter((e) => !expKey || e.etDate < expKey);
   const allBefore = chainExpiries ? chainExpiries.filter((e) => e >= ev.etDate).length === chainExpiries.length : null;
   return (
@@ -196,7 +198,7 @@ function EventLine({ tk, expKey, now, timeZone, exits = [], expiries = [], chain
         <div role="list" style={{ display: "grid", gap: 2 }}>
           {all.map((e) => (
             <div role="listitem" key={`${e.id}-${e.at}`} style={{ ...sans, fontSize: FS.xs, color: T.body, lineHeight: LH.body }}>
-              {e.name} · {localWhen(e.at, timeZone)}
+              {e.name} · {whenOf(e, timeZone)}
               <Info label={`${e.name} ${etDay(e.etDate)}`}>{eventInfoText(e, etDay(e.etDate))}</Info>
             </div>
           ))}

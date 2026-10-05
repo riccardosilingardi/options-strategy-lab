@@ -166,14 +166,13 @@ check("THE HEADER: ticker, name · category, price, the day change, the clock, I
   has(h, ">‹ Find<");
 });
 
-check("THE EVENT LINE IS THE PLACEHOLDER (owner, 4 Oct 2026): the table ships no date until the publishers' pages are read", () => {
-  // The line's own logic (WASDE 9 Oct, EIA storage 8 Oct, FOMC 28 Oct, in the user's time) is held in events.test.js
-  // on a test-only table; the app shows "Not connected yet", never a date nobody copied from its page.
-  for (const now of [NOW, Date.parse("2027-01-02T12:00:00Z")]) {
-    const h = page({ now });
-    has(h, PLACEHOLDER_HEAD); has(h, 'data-placeholder="events-calendar"');
-    hasNot(h, "your time · in ");
-  }
+check("THE EVENT LINE (round 2, dates read 5 Oct 2026): UNG at 4 Oct names EIA storage Thu 8 Oct in the user's time; the placeholder only after the table's end", () => {
+  const h = page();
+  has(h, "EIA storage"); has(h, "Thu 8 Oct, 16:30"); has(h, "in 4 days");
+  hasNot(h, 'data-placeholder="events-calendar"');
+  const after = page({ now: Date.parse("2027-01-02T12:00:00Z") });
+  has(after, PLACEHOLDER_HEAD); has(after, 'data-placeholder="events-calendar"');
+  hasNot(after, "your time · in ");
 });
 
 check("STRATEGIES: the signals' family first, then Neutral 'always listed'; the arithmetic line; each card's stance and actions", () => {
