@@ -6,7 +6,51 @@ The full history of every item shipped so far (P0–P10, P2-bis) is in `docs/his
 Every pull request updates this file: the session that ships an item marks it done and states
 what the next one inherits.
 
-## Done in this pull request — redesign PR 2, part A (owner, 5 Oct 2026): deploy previews are read-only
+## Done in this pull request — redesign PR 2, part B (owner, 5 Oct 2026): Build, the review sheet, Why this trade, the copilot
+
+Planned first (with part A); the owner took every recommendation: the five lines are the trade card's with the mockup's
+labels, the tick is the app's cent, the review sheet carries an open-interest row read off Find's floor, "no quotes" is
+`buildScreenState()`'s "no-market-data", the local-book confirm only without Alpaca, the copilot's other questions in
+"More on this trade ▾".
+
+- **Task 1 — the inventory** (in the PR): every piece of today's Build has a place; what the mockup has no place for is in
+  "More on this trade ▾" in today's form. Nothing deleted.
+- **Task 2 — Build's look** (`src/build.jsx`, on ui.jsx's atoms): header row, title, What this trade does
+  (`tradeTakeaway()`, rules.js, and `UnifiedView` brought to the mockup: 60 sessions, a blue 68/95% fan, the ending bars,
+  the payoff at the edge, the labelled breakeven, today's dot, no 560px floor), The numbers (the card's figures,
+  figures.test.jsx), Why this trade (`factorStands()` beside `signalStance()`; `reasonRuleText()` from
+  `AGAINST_MIN_SCORE`), the copilot (`useCopilot()`, three new SKILLS that never propose), Legs with Edit in chain (the
+  market page's tray), the Order inline, the Exit plan, Send. No desk header and no evidence bar on Build.
+- **Task 3 — the review sheet**: Send opens it; the second tap is `useTicketSend().fire()` — the ticket's send moved
+  unchanged into one hook in pro.jsx (order path 2), which `OrderTicket` also calls (`noSend` in More).
+- **Task 4 — the three states**, `buildScreenState()` unchanged.
+- **Task 5 — the evidence list**: "The market's read ›" opens the market page's Overview; levels and History in More.
+- **Task 6 — photographed** through the whole app on fixtures (`node scripts/shoot-build.mjs`, docs/screens/redesign-pr2/).
+
+**Measured.** Tests 1,342 → 1,359, 0 failed. Build 1,363.03 → 1,390.35 kB (production stamp), the usual chunk warning.
+Words: find 327, market 587 (unchanged), build 286 → 428 (named site by site in voice.test.js), positions 207; J-0001's
+surfaces 113/120, 32/35, 35/35, 40/40. Build at rest 2,592px at 390×844 (the Iron Condor fixture), nothing sideways.
+
+**Not changed:** riskGate.js, closeOrder.js, modifyOrder.js, `orderBody()`, the gate calls, alpacaContract.js, every RULES
+value, `histBacktest()`, `seasonalSignal()`, `fuseSignals()`'s and `signalDirection()`'s rules, the /api/state payload, the
+event dates, Find and the market page beyond Edit in chain (`initialTray`) and the chain tray's origin, Positions / Orders /
+Journal / Settings.
+
+### What PR 3 inherits from part B
+
+- **The one-market strip** (price now, expiry, season, source, IV rank) is one piece (`tickerStrip`) drawn in the desk
+  header and in Build's More; it still colours a falling season and a dear IV rank red — PR 3 decides with the header.
+- **The copilot's proposals** (owner to decide): "Opportunity radar" asks for two trades, the system prompt's decision
+  trees recommend structures, "Pre-trade analysis" asks for a GO/NO-GO and a size. Build's three new questions never do.
+- **Build's empty state is rare**: a board that loads with nothing on Build puts a default trade there (`buildPresets()`),
+  so "Nothing on Build yet" shows only on a board with no strikes or after every leg is removed.
+- **Loading is Build's own request** (`buildScreenState()`): Find's background reads are not "loading", so tapping Build
+  before a market answers shows "No quotes" with Retry until Build itself asks.
+- `BuildWarnings`, `TradeCard` and `ConfirmSteps` are no longer mounted on Build (their content is in the Why section,
+  the review sheet and More); they stay for their tests and for PR 3 to decide.
+- The word counter's upper bound still counts states that never show together (Build's three).
+
+## Done in redesign PR 2, part A (owner, 5 Oct 2026): deploy previews are read-only
 
 Planned first; the owner took every recommendation (5 Oct 2026): two PRs — this safety fix first and alone, then Build;
 the Alpha Vantage cache is not written from a preview; "production" means production AND published; and the rest of the
@@ -46,7 +90,7 @@ beyond the banner and the disabled controls' sentence.
 - Whether previews hold the production keys is unread (Site configuration → Environment variables → each key's deploy
   contexts). The guard does not depend on it.
 - The guard has run on stubs only; the context read live, on a preview and on production, is an owner reading.
-- **NEXT: redesign PR 2, part B** — Build, the review sheet, Why this trade, the copilot inside Build (planned, answered).
+- DONE IN PART B: Build, the review sheet, Why this trade, the copilot inside Build.
 
 ## Done in round 2 of redesign PR 1 (owner, 5 Oct 2026) — the look, the dates, the app opens on Find
 
@@ -388,8 +432,8 @@ One line each; see `PRD.md` §5 and `docs/history/ROADMAP.md` for detail.
 - **DONE: redesign PR 1** — Find version B, the market page, the event calendar, dark by default; round 2: the mockups'
   look, the event dates, the app opens on Find.
 - **DONE: PR #50** — the replay reads the next year's row past December; `scripts/sanity.mjs` (read-only live reads).
-- **DONE: redesign PR 2, part A** — deploy previews are read-only. **NEXT: part B** (Build, the review sheet, Why this
-  trade, the copilot inside Build), then **PR 3** (Positions, Orders, the Journal, Settings).
+- **DONE: redesign PR 2** — part A, deploy previews are read-only; part B, Build, the review sheet, Why this trade, the
+  copilot inside Build. **NEXT: PR 3** (Positions, Orders, the Journal, Settings).
 - **Basket expansion with a measured admission rule** (planned as #50, not started; #50 shipped the wrap instead). The owner pastes `/api/liquidity` for the
   candidate tickers; a market is admitted when its open interest clears the liquidity floor AND Alpha Vantage holds at
   least **N = 14 years** of its monthly history. N is set from what `seasonalSignal()` needs: a month counts at |mean| ≥

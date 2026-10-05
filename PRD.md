@@ -20,8 +20,8 @@ non-expert trader who wants to learn discipline rather than be sold trades.
   on Find** (owner, 5 Oct 2026, round 2): Home is no longer a screen; a first run answers the two capital questions, then
   lands on Find; Back on Find leaves the app. What Home said moved where the mockups put it: positions to look at are the
   Positions badge on the bottom bar (its spoken name is Home's old sentence, `statusLine()`), Settings is the gear in Find's
-  header. Find and the market page draw no desk header (round 2); Build, Positions, the Journal and Settings keep it, without
-  "← Home", until PR 2 and PR 3.
+  header. Find and the market page draw no desk header (round 2), nor Build (redesign PR 2); Positions, the Journal and
+  Settings keep it, without "← Home", until PR 3.
   1. **Find — one row per market (version B).** Top to bottom: "Find" with ↻ (refresh every market) and the gear; the status
      line "<freshness> · <feed> · Paper" (the stale banner with Retry in its place when stale); Results | Saved; the
      underlined category tabs "All 10 ·
@@ -112,16 +112,44 @@ non-expert trader who wants to learn discipline rather than be sold trades.
      chance is made of ("chance: prices + season" or "prices only"). Build's top card is the same component on the
      same numbers, and Build's backtest names its average "PAST YRS AVG". A toggle hides flagged cards and says how many. Up to three cards
      compared side by side. "Nothing today" appears only when zero candidates pass, with the count for every reason.
-  3. **Build** — one trade: chain, legs, a five-line trade card, the order ticket, and the
-     confirm step with the risk gate's checks in plain English.
+  3. **Build — one trade, on the owner's mockup "3 · Build" (redesign PR 2).** No desk header. Top to bottom: "‹ CORN"
+     (back to the market page on Strategies; "‹ Find" when the trade did not come from a market) and a "Paper" pill; the
+     structure's name and "CORN · 20 Nov · 47 days · ×1", with the warning signs under it; **What this trade does** — one
+     sentence from one generator (`tradeTakeaway()`: "Keeps up to $25 if CORN closes above $18.00 on 20 Nov; loses up to
+     $75 below $17.00. Breakeven $17.75.") and the one chart: the last 60 sessions (1Y, 5Y a tap away), a blue fan to
+     expiry (inner 68%, outer 95%), the bars of where it ends (green where it pays), the payoff at the right edge, the
+     dashed labelled breakeven and today's price as a dot, at full width, with "How to read ⓘ"; **The numbers** — max
+     profit, max loss, breakeven, return on risk (each label opens its definition), FUTURE (MONTE CARLO) chance and avg,
+     PAST YRS (BACKTEST) in profit N of M and avg, delta in shares and theta a day — the card's own figures
+     (figures.test.jsx); **Why this trade**, folded: the stance line the market page's card prints; open, each factor
+     with its arrow, strength and "supports / against / quiet", the rule for when Send asks why in its real words (the
+     market's score against the trade by 10 or more, not "2 or more against"), "The market's read ›" (the market page's
+     Overview) and the five numbered lines (BETS ON, RISKS, WORKS, EXITS, WRONG IF); **Ask the copilot about this trade**
+     — Pre-trade analysis, What would make it wrong?, Compare with the other cards, News that could move it, or your own
+     question; every answer is filed in the Journal; **Legs** with "Edit in chain ›" (the market page's Chain tray; its
+     Build › comes back); **Order**, inline: Contracts and the limit as two steppers (the tick is the app's one price
+     rule, a cent), "Mid · natural · tick", where the limit sits, the risk and its share of capital, the cap as a
+     checkbox that writes the same free-sizing setting as Settings (turning it off asks the typed reason), and the open
+     risk after this; **Exit plan** — take profit, the 21-day exit with its date, the stop as an alert, with "defaults ·
+     not backtested on CORN"; **Send** ("Send limit order · credit $25"), held with its reason in words when the gate
+     refuses; then **More on this trade ▾**, everything else in today's form (the market now, the card, the editor and
+     the chain, the price and what crossing costs, the ticket's leg prices, order type and time in force with no Send of
+     its own, all the numbers, the charts, every factor, market levels, history and the replay behind its button, the
+     copilot's other questions). **Send opens the review sheet** — the order written out leg by leg with its OCC symbols,
+     "Limit $0.25 credit · day · ×1", the gate's checks one per row (✓ / ✗, "—" when not read), the market clock, the
+     against-the-signals reason when the rule asks it, Back and **Send to Alpaca** (the second tap: order path 2, the
+     same gate call, `orderBody()` and POST). Accepted, it says "✓ Sent. Alpaca accepted it.", the order, the Journal ref,
+     and Journal / See it in Orders. With Alpaca not connected the second tap opens on the app's own book. States:
+     loading (dashes, "never a zero"), no quotes (Retry, Pick another expiry), empty (Go to Find, Open a chain).
 - **Header (PR #46; round 2).** No market select at the top. On Find, ↻ in Find's own header reloads every selected market
-  and the status line reads "N markets · prices Xm ago · <feed> · Paper" (the oldest); on Build the market selector sits
-  beside the trade. Theme is in Settings, behind one gear; **dark is the default** since redesign PR 1 (a stored
+  and the status line reads "N markets · prices Xm ago · <feed> · Paper" (the oldest); on Build the market selector is in
+  "More on this trade ▾", in the editor (redesign PR 2). Theme is in Settings, behind one gear; **dark is the default** since redesign PR 1 (a stored
   "light" stays light).
 - **Evidence has a subject (PR #46).** Find has no evidence bar: a card's badge opens "<TK> this
   month" (the market, not this trade) and its fold opens "More on <TK>: levels · history" for that
-  market; closing returns to the card. Build's bar is headed "About this trade · <TK> <structure>"
-  and the Copilot lives only there. The Why sheet shows one verdict line ("3 of 4 agree · score +64
+  market; closing returns to the card. Build has no evidence bar since redesign PR 2: "Why this market" is the market
+  page's Overview, Market levels and History are in "More on this trade ▾", and the trade's copilot is a section of
+  Build. The Why sheet shows one verdict line ("3 of 4 agree · score +64
   · confidence 86"), an ⓘ that writes out how the score and the confidence were worked out from
   this market's numbers, one sentence on what the read changes in Find, and the long narrative
   behind "The full reasoning".
@@ -150,7 +178,9 @@ non-expert trader who wants to learn discipline rather than be sold trades.
 - **Autopilot.** A scheduled server job that reads open positions and proposes exits as
   one-tap approval links. It never executes by itself.
 - **Copilots.** An AI explanation of the loaded trade and of the chart. They explain; they
-  never propose or place a trade.
+  never propose or place a trade. (Flagged in redesign PR 2, for the owner: "Opportunity radar" asks for two proposed
+  trades, the copilot's system prompt has decision trees that recommend structures, and "Pre-trade analysis" asks for a
+  GO/NO-GO and a size. Unchanged until the owner decides; the three new Build questions say they never propose.)
 - **Deploy previews are read-only** (redesign PR 2, TASK 0a, after deploy-preview-51 overwrote production's book on
   5 Oct 2026). A preview reads everything production reads, but every Netlify function that writes or sends (the state
   save, every order, Modify and cancel, the one-tap approval, the autopilot's run, the Alpha Vantage cache write) answers
@@ -336,10 +366,16 @@ normal use, and is never asked for.
    light theme never on a phone.** The list ends 88px above the bottom (owner's choice, 5 Oct 2026): while the Netlify
    badge strip exists the bar sits higher, and the last row may sit under it. **The Chain tab has not met the live Alpaca
    feed (no open interest) nor the CBOE fallback**: "thin", the OI mode and the tray's figures are read on fixtures only.
-   The expected move and the day change have not been held against a live quote. **No screen reader was run.**
+   The expected move and the day change have not been held against a live quote. **Redesign PR 2's Build** (at rest, Why
+   open, the copilot with a stubbed answer, the Order over the cap, the review sheet, the sent state, loading, no
+   quotes, empty, More open, Edit in chain, light) was photographed the same way but through the WHOLE app on fixtures
+   (scripts/build-screens.jsx: Find → UNG → Build ›, a stub Alpaca on a closed market, a stub copilot;
+   docs/screens/redesign-pr2/; Build 2,592px at rest, no sideways scroll) — never on a phone, never live. **No screen
+   reader was run.**
 4. **Read when it happens — no credit has filled at the corrected limit** (the indicative combination ask on thin chains
    has not been measured by a fill; J-0003 never filled at it), **and "Not on Alpaca", "size N > M on the ask", the "Not
-   in the app" card, an order "sent outside this app", and free sizing (PR #41)** have not appeared or been used live (the sync auto-imports a new holding on its
+   in the app" card, an order "sent outside this app", free sizing (PR #41), and an order sent from Build's new review
+   sheet (production only, never from a preview)** have not appeared or been used live (the sync auto-imports a new holding on its
    first read, so "Not in the app" shows mainly when that import has not run); free sizing's "no limit applied" is
    tested on fixtures only.
 5. **Find's cost on a phone is not measured, and the live season has never been read.** Generation is one memo (139–259
@@ -385,7 +421,9 @@ normal use, and is never asked for.
    +8.2, −3.6, 4 of 31; the difference was not traced). The exact long-put maximum (PR #47, 0c) raises three Find fixture cards' return on
    risk 3.5–4.5×; how that moves their rank on live boards is not measured.
 10. **Read when it happens — the AI features** have not seen a real answer since the usage limit ended (2026-10-01),
-    the chart copilot on the market page's Overview included (the same `TaCopilot`, no trade loaded).
+    the chart copilot on the market page's Overview included (the same `TaCopilot`, no trade loaded), and Build's three
+    new questions (redesign PR 2) — tested on a stubbed stream only; "Compare with the other cards" hands the model
+    Find's own figures for this market's other cards.
 
 ## 5. After v1
 
