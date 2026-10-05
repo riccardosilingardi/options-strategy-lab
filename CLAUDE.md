@@ -71,7 +71,19 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
   named in the test). A longer explanation goes behind one ⓘ or fold, never deleted. **An ⓘ shows its label**
   ("How the numbers fit ⓘ"); `iconOnly` only inside a figure tile, where the tile's name is the label.
 - No emoji or rare glyphs in UI strings; stay within `↑ ↓ → ✓ ✗ ⚠ ▲ ▼ ●` and, since redesign PR 1 (owner's mockups,
-  4 Oct 2026), `☆ ★ ⇅ ≈ ‹ ›`.
+  4 Oct 2026), `☆ ★ ⇅ ≈ ‹ › ▾ ▴`.
+- **The app opens on Find (owner, 5 Oct 2026, round 2).** Home (`WizardOpen`) is gone; a first run is `CapitalOnboarding`,
+  then Find; Back on Find leaves the app (nav.js rule 2). Positions to look at are the bottom bar's Positions badge, whose
+  spoken name is `statusLine()`; Settings is the gear in `FindHeader`. Find, Saved and the market page draw NO desk header
+  (`chromeless` in App.jsx); Build, Positions, the Journal and Settings keep it until PR 2 and PR 3.
+- **The mockups' look (round 2) lives in ui.jsx's atoms**: `IconButton`, `SegmentBar` (Results | Saved, the chain's modes),
+  `UnderTabs` (Find's categories, the market's tabs), `FilterChip` (Find's chips, the sheets' choices; ink when off its
+  default, never amber), `TextBtn`, and `Sheet` (scrim, grab handle, the value beside the title). Two theme tokens joined in
+  round 2, in both palettes: `raise` (a selected or in-the-money cell; never dim text on it) and `scrim` (behind a sheet).
+- **The compact card is the one `CandidateCard` with `compact`** (market page's Strategies): four figures, what the trade
+  needs (`needsText()`), the stance, FUTURE · PAST in one mono line (the tiles' own `futureTile()` / `pastTileText()`), the
+  disagree sentence, the actions, and "Details ▾" with the full card (`details`). figures.test.jsx holds the compact and
+  the full card to the same six figures. Its 72×40 picture is handed in (`thumb`): card.jsx draws no band thumbnail.
 - **One registry for the markets: `src/markets.js`.** Adding a market is ONE row there (ticker, name, category, step,
   proposable, weather applies or why not, newsQ, the iv/sigma fallback references); BASKET, `getU()`, the categories
   Find groups by, the weather rule, `basket.js`, the demo and the copilot list derive from it. `markets.test.js` proves
@@ -95,11 +107,12 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
 - **A function with no source yet is a `<Placeholder id>`** (ui.jsx), its words `PLACEHOLDERS` in rules.js; never a
   made-up number, never left out. An id leaves the list only when its function is built (PRD §4 lists them). A feed's own
   limit or a state the app already handles is said in words, not a placeholder.
-- **The event calendar is `src/events.js`**, copied from the publishers' calendars with the source beside each block; the
-  table ends `EVENT_TABLE_END` (31 Dec 2026). **It ships without dates** (owner, 4 Oct 2026: the pages could not be read):
-  until they are copied in, and after the end, the line is the placeholder `events-calendar`. Which market reads which
-  calendar is the `events` key on its markets.js row. Never type a date from memory; the logic is tested on a test-only
-  table in events.test.js.
+- **The event calendar is `src/events.js`**, copied from the publishers' calendars with the source and "read 5 Oct 2026"
+  beside each block; the table ends `EVENT_TABLE_END` (31 Dec 2026), after which the box is the placeholder
+  `events-calendar`. A block may carry a day with no time (the FOMC: never print an hour nobody read), a moved date with
+  its own time (`moves`), or `holidaysRead` (its page lists every holiday change, so no holiday-week note). Which market
+  reads which calendar is the `events` key on its markets.js row; each category's icon is `CATEGORY_ICONS` there. Never
+  type a date from memory; events.test.js runs on the shipped table.
 - **The Chain tab's tray prices legs through `listCardFigures()`** (handed in from App.jsx) and reaches Build only through
   `buildHandOff()` (`openOnBuild`); at most `MLEG_MAX_LEGS` legs (read, never changed); Build › is blocked when
   `undefinedRiskLegs()` finds an uncovered short. Nothing is sent from the market page.
@@ -127,7 +140,7 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
   (action, profit, three exits, entry against now). They compute nothing new: the profit is
   `posAlerts`', the target `takeProfitTarget()`, the stop level `stopWarningLevel()`.
 - `src/nav.js` — Back: the screen state as history entries (push on a move, step back when a sheet
-  is closed from its own button, Home is never intercepted).
+  is closed from its own button, Find — the first entry — is never intercepted).
 - `src/engine.js` — Black-Scholes, payoff, exit simulator, seeded Monte Carlo, seasonal parse (`parseAvJson()` keeps
   the whole series since PR #49; `statsFromMatrix()` returns per-month years and standard errors; `seasonalSpan()`),
   the historical replay `histBacktest()` (PR #49). `SEASONAL` is retired; `SIGMA` stays.
@@ -148,7 +161,8 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
 - `src/market.jsx` — Step 2, the market page: header, Overview, Strategies (`StrategyCard`), Chain (`ChainTab`, the tray).
 - `src/marketView.js` — `dayChange()`, `expectedMove()`, `latestNews()`, `toggleChainLeg()` (plain JS).
 - `src/events.js` — the event calendar to 31 Dec 2026; `nextEvent()`, `eventsFor()`, the holiday weeks.
-- `src/wizard.jsx` — Home (two doors: positions, Find), onboarding and the confirm step.
+- `src/wizard.jsx` — onboarding, the confirm step, and `statusLine()` (Home is gone since round 2).
+- `src/saved.jsx` — Saved's rows (round 2, moved out of App.jsx): When saved / Now, what it would have done.
 - `src/steps.jsx` — navigation chrome: sheets, folds, `DeskCountLine` (`StepNav` removed in PR #48).
 - `src/path.js`, `src/handoff.js` — the three-step path (Find → market → Build) and how a trade reaches Build.
 - `src/why.jsx` — the "Why this trade" evidence panel.
@@ -219,6 +233,8 @@ All in `RULES`, `src/rules.js`, unless noted.
 - A new JSX test file must be added to `FILES` in `scripts/test-jsx.mjs`. JSX tests are
   bundled to CJS, so read source files by repo-relative path, not `import.meta.url`.
 - `node scripts/measure-words.mjs` prints the per-screen word counts and the four rendered surfaces on J-0001.
+- `node scripts/shoot-screens.mjs [dir]` photographs Find, a sheet, Saved and the market page's tabs at 390×844 in the
+  pre-installed headless Chromium, on findB's fixtures (`scripts/screens.jsx`), and prints page and card heights.
 - `node scripts/measure-find.mjs` prints what each Find control passes on the 31 fixture cards and what
   one slider move costs (`scripts/find-fixtures.jsx` builds the cards).
 - `node scripts/measure-season.mjs` (months that count, on avFixture series), `node scripts/measure-signals.mjs`

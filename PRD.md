@@ -16,8 +16,15 @@ non-expert trader who wants to learn discipline rather than be sold trades.
   one row there.
 - **Broker.** An Alpaca paper account (US dollars). Option chains come from Alpaca's
   indicative feed first, CBOE delayed quotes as the fallback. The feed is named on screen.
-- **Three steps, one on screen at a time (redesign PR 1, owner's mockups of 4 Oct 2026; two since PR #40).**
-  1. **Find — one row per market (version B).** Top to bottom: "Find" and Results | Saved; the category tabs "All 10 ·
+- **Three steps, one on screen at a time (redesign PR 1, owner's mockups of 4 Oct 2026; two since PR #40).** **The app opens
+  on Find** (owner, 5 Oct 2026, round 2): Home is no longer a screen; a first run answers the two capital questions, then
+  lands on Find; Back on Find leaves the app. What Home said moved where the mockups put it: positions to look at are the
+  Positions badge on the bottom bar (its spoken name is Home's old sentence, `statusLine()`), Settings is the gear in Find's
+  header. Find and the market page draw no desk header (round 2); Build, Positions, the Journal and Settings keep it, without
+  "← Home", until PR 2 and PR 3.
+  1. **Find — one row per market (version B).** Top to bottom: "Find" with ↻ (refresh every market) and the gear; the status
+     line "<freshness> · <feed> · Paper" (the stale banner with Retry in its place when stale); Results | Saved; the
+     underlined category tabs "All 10 ·
      Grains 3 · Energy 4 · Metals 3" (the registry's own counts; they only filter what is shown, the basket is always
      read); ONE row of chips — ⇅ Order · Budget · Chance · Return · Horizon · Direction · Avg > 0 · Liquidity — each
      showing its value, filled when off its default, every one but Avg > 0 opening a bottom sheet that holds the
@@ -36,28 +43,36 @@ non-expert trader who wants to learn discipline rather than be sold trades.
      PR #49's request block, its card list and the "Go to Build" button left Find: the controls are in the sheets, the
      cards on the market page, the loaded trade on the bottom bar's Build.
   2. **The market page — Overview · Strategies · Chain** (a filtered view of Find's list for one ticker, not a second
-     list; a row opens it on Strategies, "‹ Find" and Back return). The header on every tab: ticker, name · category,
+     list; a row opens it on Strategies, the back arrow and Back return; ↻ refreshes this market). The header on every tab:
+     the category's icon, ticker, name · category,
      price and its freshness, the change since the last close (from the bars already cached), the market clock, IV (the
      at-the-money IV the IV rank records, `atmIv()`), IV rank ("collecting, N of 20 days" until it exists), the expected
      move to the expiry shown (spot × IV × √(days ÷ 365)), ☆ (saves the first Strategies card), the newest headline the
      news factor tagged, and the event line. *Overview*: the price chart with no trade on it, its readout, "THE MARKET'S
      READ" (the Why sheet inline) and the chart copilot. *Strategies*: the market's cards, the signals' family first
      ("▲ BULL · WHAT THE SIGNALS SUGGEST"), then "≈ NEUTRAL · ALWAYS LISTED"; the line "Signals: +46 × 84 ÷ 100 = 38.6 →
-     Bull · sorted by … · built on …"; each card is PR #49's card plus where it stands against the signals ("with the
-     signals, 3 of 4 · none against", `signalStance()`) and, when the future and the past disagree, one sentence;
-     Compare · ☆ · Open in chain · Build ›. *Chain (advanced)*: expiry chips with days left (under 30 days dashed, not
+     Bull" with "The market's read ›", then "Neutral cards are always listed. Order: … Expiry … · 40d."; each card is the
+     **compact card** (round 2): PR #49's `CandidateCard` in its `compact` layout — the name, the legs and a 72×40
+     picture; YOU RISK · MAX PROFIT · CHANCE · RETURN ON RISK in one row (each label opens its definition); what the trade
+     needs at expiry and where it stands against the signals ("with the signals, 3 of 4 · none against",
+     `signalStance()`); "FUTURE avg … · PAST YRS …"; the disagree sentence when the future and the past disagree; ☆ ·
+     Compare · Open in chain · Build ›; and "Details ▾", which holds the full card as it was (nothing deleted). *Chain (advanced)*: expiry chips with days left (under 30 days dashed, not
      buildable), a T-chain with three modes (Bid · Ask, Delta · IV, OI · Vol — the last only when the feed sends open
      interest), "thin" under the liquidity floor; tap an ask to buy one, a bid to sell one (four legs at most); the tray
      names the structure and prices Debit or Credit, Max profit, Max loss and Chance through `listCardFigures()`; Build ›
      is blocked on an uncovered short leg and goes through `buildHandOff()`. Nothing is sent from this page.
   - **The event calendar** (`src/events.js`): WASDE and Crop Progress for the grains, EIA storage for UNG and BOIL, EIA
     petroleum for USO and XLE, FOMC for the metals, plus each market's expiries and its positions' 21-day exits; which
-    market reads which is a key on its markets.js row. The line will name the next major event before the expiry shown,
-    else the next weekly report, in the user's own time ("WASDE · Fri 9 Oct, 18:00 your time · in 5 days · before 20
-    Nov"); a weekly report in a federal holiday week says the publisher may move it. **It ships without dates (owner
-    decision, 4 Oct 2026):** the publishers' pages could not be read from the session that built it, so the line is the
-    placeholder `events-calendar` until a session that can read them copies the dates in. The logic is tested on a
-    test-only table.
+    market reads which is a key on its markets.js row. **The dates were read on the publishers' pages on 4–5 Oct 2026 and
+    copied in (owner decision, 5 Oct 2026)**, each block with its source and "read 5 Oct 2026": WASDE 9 Oct, 10 Nov,
+    10 Dec (12:00 ET); Crop Progress Mondays 16:00 ET to 30 Nov; EIA storage Thursdays 10:30 ET; EIA petroleum Wednesdays
+    10:30 ET, moved to Thu 15 Oct and Thu 12 Nov 12:00 ET (Columbus Day, Veterans Day); FOMC 27–28 Oct and 8–9 Dec — the
+    decision day only, **no time** (the Fed's page gives days, not the hour). The box names the next major event before the
+    expiry shown, else the next weekly report, in the user's own time ("**WASDE** crop report · Fri 9 Oct, 18:00 your time
+    · in 5 days"; "FOMC · decision Wed 28 Oct · in 24 days"); a tap lists every event before the expiry. A weekly report
+    in a federal-holiday week says "holiday week: <publisher> may move it" (round 1's rule, kept by the owner on 5 Oct
+    2026), except EIA petroleum, whose page lists its holiday changes. After 31 Dec 2026 the box is the placeholder
+    `events-calendar`.
   - **Placeholders** (owner's rule, 4 Oct 2026): a function with no source yet is a dashed "Not connected yet" box saying
     what it will show, what it needs and which PR fills it (`PLACEHOLDERS` in rules.js), never a made-up number.
   **The controls and the card, as PR #45–#49 built them** — now inside Find's sheets and on the market page; only the
@@ -99,8 +114,8 @@ non-expert trader who wants to learn discipline rather than be sold trades.
      compared side by side. "Nothing today" appears only when zero candidates pass, with the count for every reason.
   3. **Build** — one trade: chain, legs, a five-line trade card, the order ticket, and the
      confirm step with the risk gate's checks in plain English.
-- **Header (PR #46).** No market select at the top. On Find, Refresh reloads every selected market
-  and the bar reads "N markets · prices Xm ago" (the oldest); on Build the market selector sits
+- **Header (PR #46; round 2).** No market select at the top. On Find, ↻ in Find's own header reloads every selected market
+  and the status line reads "N markets · prices Xm ago · <feed> · Paper" (the oldest); on Build the market selector sits
   beside the trade. Theme is in Settings, behind one gear; **dark is the default** since redesign PR 1 (a stored
   "light" stays light).
 - **Evidence has a subject (PR #46).** Find has no evidence bar: a card's badge opens "<TK> this
@@ -111,9 +126,9 @@ non-expert trader who wants to learn discipline rather than be sold trades.
   this market's numbers, one sentence on what the read changes in Find, and the long narrative
   behind "The full reasoning".
 - **Places and the bottom bar (PR #47).** One bar at the bottom of every desk screen: **Find · Build · Positions ·
-  Journal** (the Positions badge counts decisions plus closes working). Home is still the start screen. Trades you are
-  watching are **Saved**, inside Find (Results | Saved). The browser's Back button steps back through Home, Find, Build,
-  the places, the segments and the open sheets; Back on Home leaves the app, as before.
+  Journal** (the Positions badge counts decisions plus closes working). Find is the start screen (round 2). Trades you are
+  watching are **Saved**, inside Find (Results | Saved). The browser's Back button steps back through Find, the market
+  page, Build, the places, the segments and the open sheets; Back on Find leaves the app.
 - **Positions (PR #47).** On top, the **account strip**: EQUITY and BUYING POWER read from Alpaca at each sync (its
   options buying power when Alpaca sends one, and the label says which), and AT RISK "$X of $Y" — the risk gate's own
   open risk against the total limit ("no limit applied" under free sizing); each has a ⓘ, and the limits come from the
@@ -131,7 +146,7 @@ non-expert trader who wants to learn discipline rather than be sold trades.
 - **The Journal** — what happened, with a timeline per position and a weekly report.
 - **The guided door is removed** at the owner's request, 23 Sep 2026 (PR #40): "Find
   opportunities" answered "Nothing today" while Radar listed seven structures on the same
-  data. Home's second door goes straight to Find.
+  data. Home itself is gone since redesign PR 1 round 2: the app opens on Find.
 - **Autopilot.** A scheduled server job that reads open positions and proposes exits as
   one-tap approval links. It never executes by itself.
 - **Copilots.** An AI explanation of the loaded trade and of the chart. They explain; they
@@ -281,11 +296,11 @@ changes what the owner reads, not what v1 needs: v1 waits only on the owner's th
   filled at a debit of $5.00, and the Positions card reads "That is $18.00 BETTER than you
   asked for, across 9 combinations". It filled on a recheck (pending_new → filled).
 - **(c) read for HOLD** on J-0001 and readable. CLOSE and WARNING are read at J-0001's close.
-- **(b) is the one reading left:** J-0001 closed with the card's "Close at limit" (order path
-  3) and filled. Since PR #44 J-0001 reads CLOSE now ("Take profit reached: 50% of the premium
-  paid"); at the latest its time exit, 9 Oct 2026 (21 DTE). It must be closed **and filed from
-  the production address**, because the Journal lives in that browser only. Until then the owner
-  is asked nothing else.
+- **(b) FILLED, read from the owner's Alpaca screenshot of 5 Oct 2026:** J-0001's close (GDX261030P00094000, sell 9,
+  limit $7.62, the order sent by the card's "Close at limit", order path 3) filled 9 of 9 at an average $7.65 on
+  5 Oct 2026, 3:30 PM — $0.03 a share better than the limit, $27 across the 9 contracts. The earlier $8.23 limit reads
+  canceled. **One step is left: "File in Journal" from the production address** (the Journal lives in that browser only),
+  which the owner reads there; this session cannot see it.
 
 ## 4. NOT VERIFIED
 
@@ -293,25 +308,24 @@ At most ten items. **OWNER CHECK** means only the owner's reading can settle it;
 one, v1 (b). Everything marked **read when it happens** is recorded if the owner meets it in
 normal use, and is never asked for.
 
-1. **OWNER CHECK — J-0001's close has not been seen to fill, and no Modify has run live** (v1 b). Its close was working
-   at Alpaca (GTC, $7.62, 0 of 9) on 2 Oct 2026, 22:08; PR #47 neither cancels, resends nor re-prices it. To read from the
-   production address: the card's "Close working" line, its row in Orders, the fill, and "File in Journal". Whether
-   Alpaca accepts a `PATCH` on a single-leg option order is read from its documentation, not observed; a multi-leg
-   replace is taken as refused (403) from the same reading. A replace made on Alpaca's own screen is followed by
-   `replaces` / `replaced_by` (PR #48), fields read from alpaca-py's source and tested on stubs only.
+1. **OWNER CHECK — J-0001 filed in the Journal, and no Modify has run live** (v1 b). The close FILLED (9 of 9 at $7.65,
+   5 Oct 2026, from the owner's Alpaca screenshot); what is left is "File in Journal" from the production address and the
+   card reading the fill there — this session cannot see that browser. Whether Alpaca accepts a `PATCH` on a single-leg
+   option order is read from its documentation, not observed; a multi-leg replace is taken as refused (403) from the same
+   reading. `replaces` / `replaced_by` (PR #48) are read from alpaca-py's source and tested on stubs only.
 2. **Read when it happens — the live `/v2/clock` and `/v2/account` replies.** Their fields (`is_open`, `next_open`;
    `equity`, `buying_power`, `options_buying_power`) are read from alpaca-py 0.44.0's source, never from a reply; tested
    on stubs and in a headless Chromium against a stubbed broker only. Whether the owner's account sends
    `options_buying_power` is unknown.
-3. **Read when it happens — every new screen on a phone with live data.** Redesign PR 1's Find (tabs, the chip row and
-   its sheets, the rows and their 72×40 pictures, the stale banner, "Nothing fits", Saved's When saved / Now) and the
-   market page (header, Overview, Strategies, Chain) were checked in a headless Chromium at 390px on the Alpaca-shaped
-   UNG fixture with every feed stubbed (no sideways scroll; dark theme on first paint), never with live data. **The Chain
-   tab has not met the live Alpaca feed (no open interest) nor the CBOE fallback**: its "OI · Vol" chip, "thin" and the
-   tray's figures are read on fixtures only. The expected move and the day change have not been held against a live
-   quote. PR #49's tiles and ringed tile, PR #48's Signals decide and Order by, PR #47's Positions | Orders, the
-   account strip and the bottom bar were checked the same way. **No screen reader was run:** labels, `aria-current`,
-   `aria-expanded` and focus are checked in markup and in the browser's DOM, not by hearing them.
+3. **Read when it happens — every new screen on a phone with live data, in both themes.** Redesign PR 1's Find (round 2's
+   look: its header, tabs, filter chips and their sheets, the flat rows, the stale banner, "Nothing fits", Saved's When
+   saved / Now) and the market page (header, event box, Overview, Strategies' compact cards, Chain and its fixed tray)
+   were photographed in a headless Chromium at 390×844, dark and one screen light, on findB.test.jsx's fixtures with every
+   feed stubbed (docs/screens/redesign-pr1/; no sideways scroll) — **never on a real phone, never with live data, and the
+   light theme never on a phone.** The list ends 88px above the bottom (owner's choice, 5 Oct 2026): while the Netlify
+   badge strip exists the bar sits higher, and the last row may sit under it. **The Chain tab has not met the live Alpaca
+   feed (no open interest) nor the CBOE fallback**: "thin", the OI mode and the tray's figures are read on fixtures only.
+   The expected move and the day change have not been held against a live quote. **No screen reader was run.**
 4. **Read when it happens — no credit has filled at the corrected limit**, and the indicative combination ask on thin
    chains has not been measured by a fill (J-0003 never filled at it).
 5. **Find's cost on a phone is not measured, and the live season has never been read.** Generation is one memo (139–259
@@ -324,13 +338,16 @@ normal use, and is never asked for.
    this app", and free sizing (PR #41)** have not appeared or been used live (the sync auto-imports a new holding on its
    first read, so "Not in the app" shows mainly when that import has not run); free sizing's "no limit applied" is
    tested on fixtures only.
-7. **The event calendar has no dates yet, and the placeholders.** `src/events.js` ships its reports, their sources and its
-   logic, but no date: the four publishers' pages (CME's list of USDA's 2026 schedule, EIA's storage page and petroleum
-   schedule, the Fed's calendar) were refused by the sandbox's network, and the owner chose a placeholder over unread
-   dates (4 Oct 2026). The line's logic is tested on a test-only table, never on a publisher's page. **Placeholders
-   shipped** (`PLACEHOLDERS` in rules.js; an id leaves this list only when its function is built):
-   - `events-calendar` — the market page's event line. Needs the publishers' own calendars read on their pages and copied
-     into `src/events.js` with their sources (to 31 Dec 2026, then each next year's).
+7. **The event dates have not been held against the publishers' pages on the days they fall, and the placeholders.**
+   The table was read on the pages on 4–5 Oct 2026 by the owner's assistant (this sandbox could not reach them) and copied
+   in; whether WASDE, the EIA reports and the FOMC decision land on those days, and EIA storage's holiday weeks, is read
+   when they happen. **Placeholders and unknowns shipped** (`PLACEHOLDERS` in rules.js; an id leaves only when its
+   function is built):
+   - `events-calendar` — the event box after 31 Dec 2026 (the next year's calendars are not copied yet), and for a market
+     with no calendar.
+   - The EIA storage holiday weeks — the 2026 changes could not be read: Thanksgiving week (23–27 Nov) and Christmas week
+     (21–25 Dec), like every federal-holiday week of a weekly report whose page was not read in full, carry "holiday week:
+     EIA may move it".
 8. **Chosen, not measured:** `seasonalSignalT` 2 and `directionSignalMin` 12.5 (owner decisions, 3 Oct 2026, PR #48),
    `singleTakeProfitPctOfPremium` 0.5 (owner decision, 2 Oct 2026),
    `modelDisagreementRatio` 4, `maxComboSpreadShareOfNet` 1.0, `maxCrossingShareOfMaxProfit` 0.5, `openLimitSlippage`

@@ -6,6 +6,49 @@ The full history of every item shipped so far (P0–P10, P2-bis) is in `docs/his
 Every pull request updates this file: the session that ships an item marks it done and states
 what the next one inherits.
 
+## Done in this pull request, round 2 (owner, 5 Oct 2026) — the look, the dates, the app opens on Find
+
+The deploy preview did not look like the mockups (measured on 9cb2359 at 390×844: the old Home first, a 230px desk header
+over Find, filled pills, boxed rows, a 590px card and a 10,816px Strategies page). Round 2 is the look, written to the
+mockups' values; no function changed. Planned first; the owner answered four questions (holiday notes as round 1; USO
+tested both ways; ↻ on the market page; the mockup's sizes — 88px list end, 36px ⓘ and text buttons, 32px sliders).
+
+- **Task 0 — the event dates** are in `src/events.js` (read on the publishers' pages 4–5 Oct 2026), with three table
+  additions: a day with no time (FOMC), a weekly date moved with its own time (EIA petroleum), a block whose page lists its
+  holiday changes. events.test.js runs on the shipped table. The placeholder shows after 31 Dec 2026.
+- **Task 1 — the app opens on Find.** Home (`WizardOpen`) is gone; `statusLine()` is the Positions badge's spoken name;
+  Back on Find leaves the app; "← Home" is removed everywhere.
+- **Task 2 — Find's look.** `FindHeader` (Find, ↻, the gear, the status line or the stale banner, Results | Saved);
+  underlined tabs; filter chips; flat 66px rows; sheets with a scrim and a grab handle; Saved's rows in `src/saved.jsx`.
+  Two tokens, `raise` and `scrim`, in both palettes; five atoms in ui.jsx (`IconButton`, `SegmentBar`, `UnderTabs`,
+  `FilterChip`, `TextBtn`).
+- **Task 3 — the market page's look** and **the compact card** (`CandidateCard compact`, the full card behind
+  "Details ▾"); the chain's tray fixed above the bottom bar; category icons named in markets.js (`CATEGORY_ICONS`).
+- **Task 4 — screenshots** in docs/screens/redesign-pr1/ (`node scripts/shoot-screens.mjs`), on findB's fixtures.
+
+**Measured.** Tests 1,300 → 1,318, 0 failed. Build 1,342.69 → 1,362.18 kB, the usual chunk warning. Words: find 332 → 327,
+market 566 → 587, build 267 → 286 (a counter artifact: the compact layout's sites are scored on Build, which never draws
+it), positions 207 → 207; J-0001's surfaces unchanged. Page heights at 390px: Find at rest 844px (one screen), Strategies
+with the 18 fixture cards 10,816 → 6,402px, one compact card 291–365px (median 310; the first, with the disagree
+sentence, 332) against the ≤280px target; nothing scrolls sideways.
+
+**Not changed:** riskGate.js, closeOrder.js, modifyOrder.js, `orderBody()`, the seven gate calls, alpacaContract.js, every
+RULES value, `histBacktest()`, `seasonalSignal()`, `fuseSignals()` and `signalDirection()`'s rules, the /api/state payload,
+the Netlify functions, the look of Build, Positions, Orders, the Journal and Settings beyond "← Home". J-0001 is not touched.
+
+### What the next session inherits from round 2
+
+- **J-0001's close FILLED** (9 of 9 at $7.65, 5 Oct 2026, the owner's Alpaca screenshot). v1 (b) waits only on "File in
+  Journal" from the production address.
+- **The compact card is 291–365px, not ≤280**: the stance and needs line wraps to two lines, and the PAST figure must
+  print `pastTileText()` (the row's words, held by figures.test.jsx), which wraps the FUTURE · PAST line. Shorter words
+  there are the owner's call.
+- **The word counter** still expands every branch of a component (Build is charged the compact layout); the fix is the
+  same one round 1 left.
+- **Red is used for a falling day change on the market page** (the prompt's "red down"), against CLAUDE.md's "red is for
+  errors only"; the owner decides which rule wins.
+- The 2027 event calendars, and EIA storage's holiday weeks once EIA publishes its 2026 changes.
+
 ## Done in this pull request — Redesign PR 1 of 3 (owner, 4 Oct 2026): Find version B, the market page, the event calendar, dark by default
 
 The owner approved the mockups and answered the open questions on 4 Oct 2026. The owner's rule for the redesign: no
@@ -57,10 +100,7 @@ functions, Positions, Orders, the Journal, Settings beyond the theme line, Build
 ### What the next session inherits from redesign PR 1
 
 - **J-0001 is still v1 (b)**: its close was working at Alpaca (GTC, $7.62). Nothing here cancels, resends or re-prices it.
-- **The event calendar needs its dates**: read CME's list of USDA's 2026 schedule, EIA's storage page and petroleum
-  schedule, and the Fed's calendar on their own pages, copy the dates (with any holiday moves) into `src/events.js`, and
-  the `events-calendar` placeholder leaves the line. The sandbox could not reach them; a session whose network allows
-  those four hosts can.
+- DONE IN ROUND 2: the event calendar's dates (read on the publishers' pages 4–5 Oct 2026, copied into `src/events.js`).
 - The market page and Find's rows have run on fixtures in a headless Chromium only; the Chain tab has not met the live
   Alpaca feed (no open interest) or the CBOE fallback.
 - The word counter expands a component mounted inside a closed fold or sheet (it discovers components in the raw
@@ -261,10 +301,9 @@ alpacaContract.js, the seven gate calls, every `RULES` value but the two new one
 
 v1 is done when PRD §3 is true: (a) one opening order filled at the intended price,
 (b) one closing order filled via order path 3 (`src/closeOrder.js`), (c) the owner reads each
-open position's action in five seconds. **(a) is verified and (c) is read for HOLD. v1 now
-waits on one reading: J-0001's close (b), which also shows CLOSE (c). J-0001 reads CLOSE since
-PR #44. It must be closed with "Close at limit" and then filed with "File in Journal" _from the
-production address_: the Journal lives in that browser only.**
+open position's action in five seconds. **(a) is verified and (c) is read for HOLD. J-0001's close FILLED on 5 Oct 2026
+(9 of 9 at $7.65 against a $7.62 limit, sent by "Close at limit", order path 3 — read from the owner's Alpaca screenshot).
+v1 (b) now waits only on "File in Journal" _from the production address_: the Journal lives in that browser only.**
 
 ### What the next session inherits from #40 to #43
 
@@ -289,10 +328,8 @@ production address_: the Journal lives in that browser only.**
 
 ### The one owner reading left for v1
 
-- Close J-0001 with the Positions card's "Close at limit" (order path 3), at the latest on its
-  time exit, 9 Oct 2026 (21 DTE); it reads CLOSE now. Report the confirm step, Alpaca's order and
-  the fill, sign included; then tap "File in Journal", **from the production address**. That is
-  v1 (b), and CLOSE for v1 (c).
+- DONE (owner's Alpaca screenshot, 5 Oct 2026): J-0001 closed with "Close at limit" (order path 3) and filled, 9 of 9 at
+  $7.65. Left: tap "File in Journal" on its Positions card **from the production address**. That completes v1 (b).
 - **Nothing else is asked of the owner until then.** Every other item in PRD §4 is read when
   it happens in normal use, never requested.
 
@@ -304,7 +341,8 @@ One line each; see `PRD.md` §5 and `docs/history/ROADMAP.md` for detail.
   sweep of steps.jsx, why.jsx, positionCard.jsx, wizard.jsx.
 - **DONE: PR #49** — one sorted list, no chance minimum by default, FUTURE (MONTE CARLO) and PAST YRS (BACKTEST) on
   every card, the whole Alpha Vantage history, visible ⓘ labels, and the sweep of App.jsx and pro.jsx.
-- **DONE: redesign PR 1** — Find version B, the market page, the event calendar, dark by default.
+- **DONE: redesign PR 1** — Find version B, the market page, the event calendar, dark by default; round 2: the mockups'
+  look, the event dates, the app opens on Find.
 - **NEXT: redesign PR 2** (Build, the review sheet, Why this trade, the copilot inside Build), then **PR 3** (Positions,
   Orders, the Journal, Settings).
 - **FIRST: PR #50 = basket expansion with a measured admission rule.** The owner pastes `/api/liquidity` for the
