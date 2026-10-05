@@ -6,7 +6,41 @@ The full history of every item shipped so far (P0–P10, P2-bis) is in `docs/his
 Every pull request updates this file: the session that ships an item marks it done and states
 what the next one inherits.
 
-## Done in this pull request — redesign PR 2, part B (owner, 5 Oct 2026): Build, the review sheet, Why this trade, the copilot
+## Done in this pull request — Build checked against the mockup, value by value (owner, 5 Oct 2026)
+
+The owner asked, after PR #52 and #53 merged, to verify that Build carries every element of the mockup with the same
+look. The mockups themselves are not in the repository; the check is against the values the redesign PR 2 prompt wrote
+for "3 · Build" and "Build · review, then send".
+
+- **`scripts/audit-build.mjs`** (new, same harness as shoot-build: the whole app on fixtures, 390×844): reads every
+  value the mockup gives with `getComputedStyle` — sizes, weights, letter-spacing, borders, radii, paddings, tap heights,
+  colours from theme.js — and looks for the mockup's words on the screen, the review sheet and the sent state. Before
+  the fixes: 62 of 64 style checks matched.
+- **Three differences fixed** (src/build.jsx only):
+  1. Delta and Theta were mono 18; the mockup says mono 15 bold.
+  2. The grid's labels read "MAX PROFIT · MAX LOSS · BREAKEVEN · RETURN ON RISK"; the mockup writes "Max profit, Max
+     loss, Breakeven, Return on risk" (and the loading state's "Chance"). Sentence case is derived from `CARD_LABELS`
+     (one home), as the FUTURE box's "Chance" already was.
+  3. On "no quotes" a leg printed "— / — · Δ —"; the mockup prints "bid — / ask —".
+- After: **89 of 89** checks match, dark and light; nothing scrolls sideways.
+
+**Measured.** Tests 1,359 → 1,359, 0 failed (build.test.jsx's checks rewritten to the mockup's words and sizes). Build
+1,379.74 → 1,379.84 kB (unstamped), the usual chunk warning. Words unchanged: find 327, market 587, build 428, positions
+207; J-0001's surfaces 113/120, 32/35, 35/35, 40/40. Build at rest 2,589px. Screens re-shot in docs/screens/redesign-pr2/.
+
+**Not changed:** everything outside src/build.jsx, its test and the new script. Every RULES value, the gate, the order
+paths, the /api/state payload, Find, the market page, Positions, Orders, the Journal, Settings.
+
+### What the next session inherits from this check
+
+- **Not in the mockup, kept (no function is dropped):** the STOP SIGNS line under the title (the gate's own stop signs,
+  red as a refusal), the app-wide footer under every screen ("Paper trading only · … · Educational software"), still mono
+  sentences, and the status banner above the header (e.g. "Loading SOYB option prices…"). PR 3 decides with the owner.
+- The loading and no-quotes states print the title and the "for <date>" only when an expiry is known; the fixture's
+  market never answered, so they show the ticker. Words follow the data, never a made-up date.
+- **Redesign PR 3** (Positions, Orders, the Journal, Settings) waits for its prompt and its mockups' values.
+
+## Done in redesign PR 2, part B (owner, 5 Oct 2026): Build, the review sheet, Why this trade, the copilot
 
 Planned first (with part A); the owner took every recommendation: the five lines are the trade card's with the mockup's
 labels, the tick is the app's cent, the review sheet carries an open-interest row read off Find's floor, "no quotes" is
