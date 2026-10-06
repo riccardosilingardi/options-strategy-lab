@@ -209,7 +209,7 @@ export function CloseLines({ lines = [] }) {
  * (`closeSummaryLine()`), the price slider, the market clock when it is closed, then Send / Keep it open. The order
  * written out in full (`prepared.lines`, unchanged) is behind the ⓘ. Two taps, as ever: this is the second.
  */
-export function CloseConfirm({ prep, onSend, onCancel, onChoose = null, clock = null }) {
+export function CloseConfirm({ prep, onSend, onCancel, onChoose = null, clock = null, look = null }) {
   if (!prep) return null;
   if (prep.busy && !prep.prepared) {
     return <Note style={{ marginTop: 6 }}>Reading the market to price the close…</Note>;
@@ -228,6 +228,34 @@ export function CloseConfirm({ prep, onSend, onCancel, onChoose = null, clock = 
   if (!prep.prepared) return null;
   const summary = closeSummaryLine(prep.prepared.body);
   const clockLine = marketClockLine(clock, { queued: true });
+  /* ON A POSITION'S OWN SCREEN (redesign PR 3b; the board "PositionDetail", its "closing" state): the order in one mono
+     line, the book under it, the clock, then Back / Send close. The same prepared order and the same send (order path 3,
+     unchanged); choosing another price, quantity or TIF (PR #46) is one fold away, and the order in full behind its ⓘ. */
+  if (look === "screen") {
+    const b = prep.prepared.book;
+    const px = (x) => (x == null || !Number.isFinite(+x) ? "—" : Math.abs(+x).toFixed(2));
+    return (
+      <div data-close-confirm="screen" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <p data-close-line style={{ ...mono, margin: 0, fontSize: FS.sm, lineHeight: LH.body, color: T.ink }}>
+          {summary || "The close, written out"}<Info label="the order in full"><CloseLines lines={prep.prepared.lines} /></Info>
+        </p>
+        {b && <p data-close-book style={{ ...mono, margin: 0, fontSize: FS.xs, color: T.mut }}>{`bid ${px(b.bid)} · mid ${px(b.mid)} · ask ${px(b.ask)}`}</p>}
+        {clockLine && <p style={{ ...sans, margin: 0, fontSize: FS.sm, lineHeight: LH.body, color: T.body }}>{clockLine}.</p>}
+        {onChoose && (
+          <Fold label="open" tone={T.ink} summary="Another price, quantity or time in force">
+            <CloseChoice prepared={prep.prepared} choice={prep.choice || null} onChoose={onChoose} />
+          </Fold>
+        )}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8 }}>
+          <button type="button" disabled={!!prep.busy} onClick={onCancel} style={{ ...sans, minHeight: TAP, borderRadius: 10, padding: "0 14px",
+            fontSize: FS.sm, fontWeight: FW.bold, background: "transparent", color: T.ink, border: `1px solid ${T.field}`, cursor: "pointer" }}>Back</button>
+          <button type="button" disabled={!!prep.busy} onClick={onSend} style={{ ...sans, minHeight: TAP, borderRadius: 10, padding: "0 14px",
+            fontSize: FS.sm, fontWeight: FW.bold, background: T.action, color: T.onAccent, border: "none", cursor: prep.busy ? "wait" : "pointer" }}>
+            {prep.busy ? "Sending…" : "Send close"}</button>
+        </div>
+      </div>
+    );
+  }
   return (
     <div data-close-confirm style={{ marginTop: 8, padding: "9px 11px", background: T.bg, border: `1px solid ${T.action}`, borderRadius: 8 }}>
       <div style={{ ...mono, fontSize: FS.sm, fontWeight: FW.bold, color: T.ink, lineHeight: LH.body }}>

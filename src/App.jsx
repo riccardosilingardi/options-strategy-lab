@@ -3831,7 +3831,7 @@ export default function OptionsStrategyLab() {
         closeTitle: DEMO ? DEMO_TOOLTIP : undefined,
       },
       keep: { min: CLOSE_REASON_MIN, onKeep: (reason) => keepPosition(dp, dm, reason) },
-      closeNode: ca ? <CloseConfirm prep={ca} clock={clock} onSend={() => sendCardClose(dp)} onCancel={() => setCloseAt(null)}
+      closeNode: ca ? <CloseConfirm look="screen" prep={ca} clock={clock} onSend={() => sendCardClose(dp)} onCancel={() => setCloseAt(null)}
         onChoose={(c) => prepareCardClose(dp, c, ca.prepared?.chainUsed || null)} /> : null,
       workingNode: dm.working && !ca ? <WorkingCloseLine line={workingCloseText(workingRow ? rowLines(workingRow).terms : null)}
         clockLine={marketClockLine(clock)} onManage={() => { setDetailsId(null); setPosSeg("orders"); setFocusOrder(workingRow ? workingRow.id : null); }} /> : null,

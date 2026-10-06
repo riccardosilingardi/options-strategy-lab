@@ -215,7 +215,12 @@ test("MEASURED: the three screens, and the table in the PRD is this number", () 
      header's title. An upper bound (the waiting line and a card's buttons never all show). The owner's ≤ 120 is held
      on the RENDERED segment below. TASK 3 then moved the close confirm off the card to the position's own screen
      (src/positionScreen.jsx, built outside the block: one tap away): 248 -> 235. */
-  const CEILING = { find: 336, market: 604, build: 435, positions: 235 };
+  /* >>> REDESIGN PR 3b: 235 -> 248, AND IT IS THE COUNTER READING A WHOLE COMPONENT. <<< `CloseConfirm` (pro.jsx) gained
+     its "screen" look for a position's own screen (the board's closing state: "Back", "Send close", "Another price,
+     quantity or time in force", 13 words). That look shows only on a position's screen, but the "Not in the app" card in
+     this block mounts the same component, so its whole body is counted here. The J-0001 confirm (rendered, 35) is
+     unchanged. */
+  const CEILING = { find: 336, market: 604, build: 435, positions: 248 };
   /* >>> PR #46: ONE ORDERS LIST. <<< The record-based "WORKING AT THE BROKER" panel (its paragraph about what a
      working order is, the stale-DAY warning, the per-row sentences) left Positions; the one list lives in
      `orders.jsx`, which the counter now reads. Measured: positions 304 -> 209 (4 typed + 205 generated, 14 sites).
