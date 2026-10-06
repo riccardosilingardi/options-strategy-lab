@@ -32,9 +32,10 @@ import { RequestControls, CompareTray, NumbersFit } from "./card.jsx";
 import { HowWorkedOut } from "./why.jsx";
 import { MARKET_CATEGORIES, BASKET } from "./markets.js";
 import { CompareFigure, BandThumbnail } from "./visuals.jsx";
-import { scaleStrategy } from "./pro.jsx";
+import { scaleStrategy, useCopilot, skillsFor } from "./pro.jsx";
+import { CopilotSection } from "./build.jsx";
 import { legsLine, MAX_COMPARE } from "./path.js";
-import { marketRows, rowCounts, rowFigure, rowStateOf } from "./rows.js";
+import { marketRows, rowCounts, rowFigure, rowStateOf, compareCards } from "./rows.js";
 import { money, chanceText, NO_CEILING, noCeilingNote, noCeilingRankNote, seasonalStampNote,
   filterFold, qualityFloorLine, qualityFloorSentence, liquiditySettingNote, looseningWarning, isLoosened,
   unpriceableNote, impossibleLossNote, modelDisagreementNote, wideSpreadNote, wideComboNote, crossingNote,
@@ -46,6 +47,7 @@ import { money, chanceText, NO_CEILING, noCeilingNote, noCeilingRankNote, season
   rowSubtitleText, ROW_READING, findReadingLine, rowFailedText, ROW_NO_BOARD, staleBannerLine, staleStatusLine, staleFailLine, RETRY,
   SHOW_FLAGGED_TOGGLE, howConnectLabel, HOW_CONNECT_STEPS, CARD_LABELS, ARIA,
   FIND_HEADING, refreshAria, SETTINGS_WORD, FIND_SEGMENTS_ARIA, RESET_SHEET,
+  FIND_COMPARE_BTN, FIND_COPILOT_TITLE, FIND_COPILOT_HEAD, findCopilotLine,
 } from "./rules.js";
 
 const FS = TYPE.size, FW = TYPE.weight, LH = TYPE.line;
@@ -108,6 +110,7 @@ export function FindStep({
   isSaved = () => false, onSave = () => {}, onOpenMarket = () => {},
   freshness = null,
   compare, showCompare, compareNote, onTickCompare, onClearCompare, onToggleCompare, onTakeToBuild,
+  copilot = null,
 }) {
   /* ---- WHAT IS IN, AND WHAT IS STILL BEING READ (redesign PR 1). A market being read has no fused result and no rank
      effect, as before; its row waits after the rows that are in, and says what it is waiting for. ---- */
@@ -138,6 +141,13 @@ export function FindStep({
   const st = { order: findOrder, request, horizon: find.horizon, dir: find.dir,
     dirLabel: (sentiments.find((s) => s.id === find.dir) || {}).label, positiveOnly: find.positiveOnly, flagged: find.flagged,
     liqId: liqState && liqState.id, liqLabel: liqState && liqState.label, liqDefault: liqState && liqState.defaultId };
+  /* FIND'S COPILOT (PR 4): the cards that fit, in the owner's order, up to 20, with their own figures and Greeks
+     (`compareCards()` in rows.js reads what the card reads), the chips in their own words, the misses counted. */
+  const cmp = useMemo(() => compareCards(inItems, request, sizeOf), [inItems, request, sizeOf]);
+  const ask = useCopilot({ ...(copilot || { convo: null, setConvo: () => {} }),
+    ctx: { ...((copilot && copilot.ctx) || {}), findCards: cmp.cards, findMisses: cmp.misses,
+      findFilters: { order: findOrderOf(findOrder).label, category: find.cat || CATEGORY_ALL, chips: FIND_CHIPS.map((c) => chipText(c.id, st)) } } });
+  const askAll = { ...ask, clear: () => copilot && copilot.setConvo({ msgs: [], busy: false, err: null }) };
   const sheetId = sheet && String(sheet).startsWith("find:") ? String(sheet).slice(5) : null;
   const closeSheet = () => onSheet(null);
   /** A sheet's current value, beside its title (round 2): the chip's own value. */
@@ -193,6 +203,7 @@ export function FindStep({
         <span style={{ display: "inline-flex", alignItems: "center" }}>
           {m > 0 && <TextBtn onClick={() => setFind((f) => ({ ...f, hideMisses: !f.hideMisses }))}>{find.hideMisses ? SHOW_ROWS : HIDE_ROWS}</TextBtn>}
           {anyChipOff(st) && <TextBtn onClick={onReset}>{RESET_FILTERS}</TextBtn>}
+          {copilot && cmp.fitting > 0 && <TextBtn data-find-compare onClick={() => onSheet("find:copilot")}>{FIND_COMPARE_BTN}</TextBtn>}
         </span>
       </div>
       {/* While markets are still being read and some rows are in (with none in, "Nothing today" below says it). */}
@@ -346,6 +357,16 @@ export function FindStep({
             {`${limits.answered ? "Your" : "The suggested"} per-trade limit: ${money(limits.perTradeLimit)} (${perTradeCapLabel()}).`} Budget is the most you will pay, taken from live prices. For trades where you receive money up front, the limit becomes the capital tied up instead. Chance is the probability of ending in profit at expiry.
           </Note>
         </Fold>
+      </Sheet>
+
+      {/* THE COPILOT ON FIND (PR 4, owner: "on the summary line, opening a sheet"): Compare the cards and News impact,
+          Find's own questions (SKILLS, place "find"); the answer is filed in the Journal like every other. */}
+      <Sheet open={sheetId === "copilot"} title={FIND_COPILOT_TITLE} onClose={closeSheet}>
+        <div data-find-copilot>
+          <Note color={T.mut} style={{ marginBottom: 8 }}>{findCopilotLine(cmp.cards.length, cmp.fitting)}</Note>
+          <CopilotSection ask={askAll} skills={skillsFor("find")} label={FIND_COPILOT_HEAD} heading={FIND_COPILOT_HEAD}
+            ownLabel="Your own question about these cards" />
+        </div>
       </Sheet>
 
       {/* COMPARING — up to three, one picture (PRD §6). The ticks are on the market page's cards. */}

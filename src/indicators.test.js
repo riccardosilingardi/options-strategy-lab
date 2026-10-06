@@ -414,7 +414,7 @@ test("PROMPT — the four one-tap questions are questions, and they are named he
 test("THE PANEL HAS NO SECOND SOURCE, and the desk prompt no longer recommends what the app refuses", () => {
   const pro = readFileSync(new URL("./pro.jsx", import.meta.url), "utf8")
     .replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
-  const panel = pro.slice(pro.indexOf("export function TaCopilot"), pro.indexOf("export function CopilotTab"));
+  const panel = pro.slice(pro.indexOf("export function TaCopilot"), pro.indexOf("export function useCopilot"));
   assert.ok(panel.length > 500, "TaCopilot must be findable");
   // ONE SOURCE. The panel builds its context with taContext() and hands the
   // model nothing else — no bars, no second indicator call of its own.
@@ -430,19 +430,24 @@ test("THE PANEL HAS NO SECOND SOURCE, and the desk prompt no longer recommends w
   assert.ok(/CUT OFF/.test(panel) && /RAN OUT OF ROOM/.test(panel), "both endings must be named");
   assert.ok(/truncated/.test(panel));
 
-  /* AND THE DESK PROMPT'S DECISION TREES — ROADMAP P3's first item. They
-     recommended a long call and a long straddle, both of which `runWizard`
-     excludes, so the copilot argued with the screen beside it. */
+  /* AND THE STANDING PROMPT'S DECISION TREES — ROADMAP P3's first item, then PR 4 (owner, 6 Oct 2026). They once
+     recommended a long call and a long straddle; after PR #40 they still told the copilot which structure to build
+     while every place's question said it never proposes. Now: the app builds, the copilot recommends only among what
+     the app built, and the trees are criteria for judging a card. */
   const sysAt = pro.indexOf("const SYSTEM_PROMPT");
   const sys = pro.slice(sysAt, pro.indexOf("`;", sysAt));
-  assert.equal(/→ bull call spread \(small capital\) or long call/.test(sys), false,
-    "the desk prompt still recommends a long call, which the guided path excludes");
-  assert.equal(/long ATM straddle\/strangle/.test(sys), false,
-    "the desk prompt still recommends a straddle, which is two single-leg longs");
-  assert.ok(/NEVER recommend one of those/.test(sys), "it must say which structures are off the menu");
-  assert.ok(/RECOMMEND NOTHING/.test(sys), '"nothing today" must be one of the branches');
-  for (const word of ["LONG options", "STRADDLES and STRANGLES", "BUTTERFLIES"]) {
-    assert.ok(sys.includes(word), `the excluded structures must be named: ${word}`);
+  assert.equal(/→ bull call spread \(small capital\) or long call/.test(sys), false, "a long call recommended");
+  assert.equal(/long ATM straddle\/strangle/.test(sys), false, "a straddle recommended");
+  assert.equal(/DECISION TREES/.test(sys), false, "the decision trees are criteria now, never instructions to build");
+  assert.equal(/Execution|Ask for confirmation before any execution/.test(sys), false, "the copilot executes nothing");
+  assert.equal(/start with 1 contract/.test(sys), false, "the size is the app's");
+  assert.ok(/THE APP BUILDS, YOU EXPLAIN AND RECOMMEND, THE PERSON DECIDES, THE GATE CHECKS/.test(sys), "the one principle");
+  assert.ok(/only among what the app built/.test(sys), "it recommends only among what the app built");
+  assert.ok(/HOW TO JUDGE A CARD — criteria, never an instruction to build one/.test(sys), "the trees are criteria");
+  assert.ok(/NEVER recommend a structure that is not one of the cards/.test(sys), "no structure that is not a card");
+  assert.ok(/"nothing today" are correct answers/.test(sys), '"nothing today" is one of the answers');
+  for (const word of ["single-leg LONG option", "STRADDLES and STRANGLES", "BUTTERFLIES"]) {
+    assert.ok(sys.includes(word), `the structures and their weak sides are named: ${word}`);
   }
 });
 

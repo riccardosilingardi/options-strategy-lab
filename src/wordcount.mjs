@@ -270,6 +270,8 @@ export const COPY = {
   trayEmptyText: () => R.trayEmptyText(),
   chainNotLoadedText: () => R.chainNotLoadedText("CORN"),
   marketReadingText: () => R.marketReadingText("CORN"),
+  // PR 4: the fold inside the market page's news block that opens News impact (its summary is on screen at rest).
+  marketNewsAsk: () => R.marketNewsAsk("CORN"),
   noCardsText: () => R.noCardsText("CORN", true),
   savedEmptyText: () => R.savedEmptyText(),
   dayWords: () => "",
@@ -593,8 +595,12 @@ export function screenSource(src, id, { depth = COMPONENT_DEPTH } = {}) {
       seen.add(name);
       const body = componentBody(name, ui);
       if (!body) continue;
-      pieces.push(atRest(body));
-      next.push(...componentsIn(body));
+      // PR 4: A COMPONENT MOUNTED INSIDE A FOLD IS ONE TAP AWAY TOO. The children of a fold were stripped from the words
+      // (`atRest()`), but the components were still looked for in the UNSTRIPPED body, so a component that renders only
+      // inside a fold or a sheet was counted at rest one level down. They are now looked for in what is at rest.
+      const rest = atRest(body);
+      pieces.push(rest);
+      next.push(...componentsIn(rest));
     }
     frontier = next.filter((n) => !seen.has(n));
   }

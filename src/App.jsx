@@ -8,7 +8,7 @@ import {
   FlaskConical, Briefcase, Plus, Plug, Send, ExternalLink, MessageSquare, FileText, Bell,
   SlidersHorizontal, Sun, Moon, AlertTriangle, WifiOff,
 } from "lucide-react";
-import { fetchAllNews, fetchWeather, ImpactTags, CopilotTab, TaCopilot, ReportTab, OrderTicket, UnrecordedCard, scaleStrategy, buildContext, GuardianPanel, ChainMatrix, OptionPanel, PriceChart, QtyField, UnifiedView, taSignals, confluence, WhyThisTrade, Markdown, alpacaReq, CloseConfirm } from "./pro.jsx";
+import { fetchAllNews, fetchWeather, ImpactTags, TaCopilot, ReportTab, OrderTicket, UnrecordedCard, scaleStrategy, buildContext, GuardianPanel, ChainMatrix, OptionPanel, PriceChart, QtyField, UnifiedView, taSignals, confluence, WhyThisTrade, Markdown, alpacaReq, CloseConfirm } from "./pro.jsx";
 import { prepareClose, sendClose, groupForRecord, closeWorking, legsNotHeld, holdingGroups } from "./closeOrder.js";
 import { OrdersPanel } from "./orders.jsx";
 import { WhySheet } from "./why.jsx";
@@ -77,7 +77,7 @@ import { navOf, createNavHistory } from "./nav.js";
 import { exitProgress, entryVsNow, displayName, fileState, pnlShareOfRisk, pnlShareText, holdsStructure,
   sizeWords, withExactMaxProfit, maxProfitCorrection, maxProfitCorrectionNote, exitDateOf,
   exitLabels, positionMetaLine, pnlShareShort, waitingOrdersLine, positionTitle, cardSentence,
-  positionSubLine, statusBadge, keepEntry, paysLine, dayLabel } from "./positionView.js";
+  positionSubLine, statusBadge, keepEntry, paysLine, dayLabel, positionActions, sinceEntry } from "./positionView.js";
 import { PositionScreen } from "./positionScreen.jsx";
 import { JournalScreen } from "./journal.jsx";
 import { SettingsScreen } from "./settings.jsx";
@@ -90,6 +90,7 @@ import { tradeTakeaway, buildSubLine, expiryShort, deltaSharesText, thetaDayText
 import { BuildScreen, BuildLoading, BuildNoQuotes, BuildEmpty, Section } from "./build.jsx";
 import { gateChecklist } from "./wizard.jsx";
 import { undefinedRiskLegs } from "./riskGate.js";
+import { taContext } from "./indicators.js";
 import { EvidenceBar, EvidenceOverlay, DeskSheet, Fold, DeskCountLine } from "./steps.jsx";
 import { BottomBar, placeOf, NAV_BAR_H, FIND_LIST_END } from "./navBar.jsx";
 import { AccountStrip, PositionsBar, PositionsHeader, WorkingCloseLine, CardButton } from "./positions.jsx";
@@ -1360,6 +1361,9 @@ export default function OptionsStrategyLab() {
      a second copy — one fetch, one history, one set of indicators, which is
      the whole reason `indicators.js` exists. */
   const [taChat, setTaChat] = useState({ msgs: [], busy: false, err: null, partial: "" });
+  // FIND'S AND THE MARKET PAGE'S COPILOT CONVERSATIONS (PR 4): owned here, like Build's, so an answer survives the sheet closing.
+  const [findChat, setFindChat] = useState({ msgs: [], busy: false, err: null, partial: "" });
+  const [marketChat, setMarketChat] = useState({ msgs: [], busy: false, err: null, partial: "" });
   const [taBars, setTaBars] = useState(null);
   useEffect(() => { setTaBars(null); setTaChat({ msgs: [], busy: false, err: null, partial: "" }); }, [ticker]);
   /* >>> ONE STATE FOR "WHAT I WANT", ABOVE BOTH DOORS (ROADMAP P10 §2). <<<
@@ -3204,11 +3208,11 @@ export default function OptionsStrategyLab() {
     const seasNow = seasonalNowOf(seasonal, p.ticker, Math.max(1, dteLeft));
     // THE ONE CHANCE, ON A POSITION THAT IS ALREADY OPEN. The Guardian's TIS compares this with `thesis.pop`,
     // recorded at entry — and until the one chance existed the two came from two different arithmetics.
-    const mcNow = s ? (() => {
-      const a2 = analyze(p.legs, s, Math.max(1, dteLeft), ivNow, qp);
-      return chanceFor(a2, { ticker: p.ticker, legs: p.legs, spot: s,
-        dte: Math.max(1, dteLeft), expKey: p.expKey || null, thesisIV: p.thesis?.iv ?? null });
-    })() : null;
+    // THE ANALYSIS NOW, ONCE: the chance below and the Greeks now (PR 4, "Since I opened it") read the same `analyze()`.
+    const aNow = s ? analyze(p.legs, s, Math.max(1, dteLeft), ivNow, qp) : null;
+    const mcNow = aNow ? chanceFor(aNow, { ticker: p.ticker, legs: p.legs, spot: s,
+      dte: Math.max(1, dteLeft), expKey: p.expKey || null, thesisIV: p.thesis?.iv ?? null }) : null;
+    const greeksNow = aNow && aNow.greeks ? aNow.greeks : null;
     const popNow = mcNow ? mcNow.pop : null;
     const nowSignals = signalSnapshot(fuseAt(p.ticker, Math.max(1, dteLeft)) || null,
       { reading: readiness[p.ticker], seasonalSource: seasonalFor(p.ticker).source });
@@ -3218,7 +3222,7 @@ export default function OptionsStrategyLab() {
     const exitPlan = takeProfitTarget({ legs: p.legs, maxProfit: p.maxProfit, maxLoss: p.maxLoss, entryNet: p.entryNet });
     const progress = exitProgress({ p, pnl, dteLeft, tpTarget, n });
     return [p.id, {
-      c, s, qp, dteLeft, n, al0, pnl, act, ivNow, seasNow, mcNow, popNow, tpTarget, nowSignals,
+      c, s, qp, dteLeft, n, al0, pnl, act, ivNow, seasNow, mcNow, popNow, tpTarget, nowSignals, greeksNow,
       name: positionTitle(p), working: closeWorking(p, alSync),
       shareText: pnlShareText(share), shareShort: pnlShareShort(share),
       progress, labels: exitLabels(progress),
@@ -3872,7 +3876,20 @@ export default function OptionsStrategyLab() {
           position: { ref: dp.ref, ticker: dp.ticker, name: dm.name, legs: dp.legs, expKey: dp.expKey, size: sizeWords(dp), openedAt: dp.openedAt,
             entryNet: dp.entryNet, profitNow: dm.pnl, action: dm.act.action, actionLine: dm.act.line,
             exits: { takeProfit: dm.progress.takeProfit.text, time: dm.progress.time.text, stop: dm.progress.stop.text },
-            atEntryVsNow: dm.ev, closeWorking: !!dm.working, timeline: (dp.timeline || []).slice(-6).map((e) => e.text) } } },
+            atEntryVsNow: dm.ev, closeWorking: !!dm.working, timeline: (dp.timeline || []).slice(-6).map((e) => e.text),
+            // PR 4: what the copilot may recommend (the screen's own actions), the Greeks at entry and now (for the size
+            // Alpaca holds; a Greek the entry did not record is null), and the price since the opening, from the chart's bars.
+            actionsOffered: positionActions({ working: !!dm.working, notHeld: dm.act.kind === "not-held",
+              canKeep: dm.act.action === "WARNING" || dm.act.action === "CLOSE", hasTarget: !!dm.tpTarget }),
+            greeksAtEntry: dp.thesis ? { deltaShares: dp.thesis.delta != null ? Math.round(Number(dp.thesis.delta) * 100 * dm.n) : null,
+              thetaPerDay: null, vegaPerVolPoint: dp.thesis.vega != null ? Math.round(Number(dp.thesis.vega) * dm.n) : null,
+              note: "Recorded when the trade was opened; theta was not recorded at entry." } : null,
+            greeksNow: dm.greeksNow ? { deltaShares: Math.round(Number(dm.greeksNow.delta) * 100 * dm.n),
+              thetaPerDay: Math.round(Number(dm.greeksNow.theta) * dm.n), vegaPerVolPoint: Math.round(Number(dm.greeksNow.vega) * dm.n) } : null,
+            sinceEntry: sinceEntry(barsCache[dp.ticker] || [], dp.openedAt, dp.entrySpot ?? null, dm.s) },
+          chart: () => (barsCache[dp.ticker] || []).length ? taContext(barsCache[dp.ticker], { name: dm.name, expKey: dp.expKey, dte: dm.dteLeft,
+            legs: dp.legs, breakevens: bands && Array.isArray(bands.breakevens) ? bands.breakevens : [], spot: dm.s,
+            note: "These figures come from the open position on this screen. They are not recomputed here." }) : null } },
       guardian: (
         <GuardianPanel
           pos={dp} spot={dm.s || dp.entrySpot} dteLeft={dm.dteLeft} ivNow={dm.ivNow}
@@ -4347,14 +4364,13 @@ export default function OptionsStrategyLab() {
             </div>
             )}
   </>);
-  const EVIDENCE = [
-    { id: "why", label: "Why this market", I: Radar, sub: "seasonality, price trend, weather, news" },
-    { id: "levels", label: "Market levels", I: Box, sub: "where the open interest sits" },
-    { id: "history", label: "History", I: FlaskConical, sub: "what happened in past years" },
-    { id: "copilot", label: "Copilot", I: MessageSquare, sub: "ask about this trade" },
-  ];
-  const EV_META = Object.fromEntries([...EVIDENCE,
-    { id: "more", label: `More on ${whyTk || ticker}`, sub: "the market, not this trade: levels, price and season" }].map((e) => [e.id, e]));
+  /* THE EVIDENCE SHEET'S TWO SUBJECTS (PR 4): a card's badge opens "why", a card's More opens "more". The bar that also
+     opened Market levels, History and the desk Copilot has had no screen since redesign PR 2; levels and history live in
+     Build's "More on this trade", the copilot's questions where they belong (SKILLS, by place). */
+  const EV_META = {
+    why: { id: "why", label: "Why this market", sub: "seasonality, price trend, weather, news" },
+    more: { id: "more", label: `More on ${whyTk || ticker}`, sub: "the market, not this trade: levels, price and season" },
+  };
   const SENT = SENTIMENTS.find((s) => s.id === sentiment);
 
   /* ---------- the shell (PRD §5) ----------
@@ -4410,7 +4426,9 @@ export default function OptionsStrategyLab() {
   // TWO PANES (owner, 6 Oct 2026): Find's rows beside the market page, Positions' cards beside a position's screen.
   const paneFind = wide && (onFindStep || onMarketStep);
   const panePos = wide && onPositions;
-  const PANES = { display: "grid", gridTemplateColumns: "minmax(360px, 460px) minmax(0, 1fr)", alignItems: "start", gap: 0 };
+  // PR 4, TASK 0: the right pane never narrower than a phone (390px, the width every board is drawn at). At 1024px the old
+  // 360–460 left pane left it 364px and the market page's header was cut off on the right.
+  const PANES = { display: "grid", gridTemplateColumns: "minmax(320px, 420px) minmax(390px, 1fr)", alignItems: "start", gap: 0 };
   const PANE_L = { minWidth: 0, borderRight: `1px solid ${T.line}`, alignSelf: "stretch" };
   const PANE_R = { minWidth: 0, position: "sticky", top: 0, maxHeight: "100vh", overflowY: "auto" };
   const CONTENTS = { display: "contents" };
@@ -4563,7 +4581,6 @@ export default function OptionsStrategyLab() {
                   : `Only "${findOrderOf("evSignal").label}" adds this read to a card's place in Find.`}
               />
             )}
-            {ev === "levels" && levelsView(chain, oiGrid, spot, lv)}
             {/* MORE ON A CARD'S MARKET (PR #46, TASK 2): its own chain, price and season — never Build's trade. */}
             {ev === "more" && (() => {
               const tk = whyTk || ticker;
@@ -4588,14 +4605,6 @@ export default function OptionsStrategyLab() {
                 </>
               );
             })()}
-            {ev === "history" && historyNode}
-            {ev === "copilot" && (
-              <CopilotTab
-                apiKey={"server"}
-                convo={copilot} setConvo={setCopilot} onAnalysis={logAnalysis}
-                ctx={{ store, scan, news: news[ticker]?.items || [], ticker, legs, expKey, A, spot, seasonalSrc: seas.src, setMsg }}
-              />
-            )}
           </EvidenceOverlay>
         )}
 
@@ -4627,6 +4636,8 @@ export default function OptionsStrategyLab() {
             sheet={deskSheet} onSheet={setDeskSheet} onReset={resetFind}
             isSaved={isSaved} onSave={(x) => saveCandidate(x.cand)} onOpenMarket={(tk) => goMarket(tk, "strategies")}
             freshness={findStale}
+            copilot={{ apiKey: "server", convo: findChat, setConvo: setFindChat, onAnalysis: logAnalysis,
+              ctx: { store, scan, news: newsPool, ticker: null, legs: [], expKey: null, A: null, spot: null, seasonalSrc: null } }}
             foldedNode={<>
               <LiquidityFilter
                 levelId={liqLevelId} onLevel={setLiqLevelId} previews={liqPreview}
@@ -4668,6 +4679,9 @@ export default function OptionsStrategyLab() {
             onMore={(x) => { scrollToCard.current = x.key; setWhyTk(x.tk); setEv("more"); }}
             whyProps={{ weatherData: weather, newsItems: newsPool, month: NOW_MONTH, order: findOrder }}
             onAnalysis={logAnalysis}
+            copilot={{ apiKey: "server", convo: marketChat, setConvo: setMarketChat, onAnalysis: logAnalysis,
+              ctx: { store, scan, news: newsPool.filter((n) => (n.impacts || []).some((im) => im.tk === mkt.tk)), ticker: mkt.tk,
+                legs: [], expKey: null, A: null, spot: chains[mkt.tk]?.spot ?? null, seasonalSrc: seasonalFor(mkt.tk).source } }}
             sheet={deskSheet} onSheet={setDeskSheet}
             compareProps={compareBlock} />
         )}
@@ -5192,6 +5206,10 @@ export default function OptionsStrategyLab() {
             copilot: { apiKey: "server", convo: copilot, setConvo: setCopilot, onAnalysis: logAnalysis,
               ctx: { store, scan, news: news[ticker]?.items || [], ticker, legs, expKey, A, spot, seasonalSrc: seas.src, setMsg,
                 reviewChecks: reviewNow.checks,
+                // THE CHART (PR 4, "The chart and this trade"): `taContext()`'s own indicators on the cached daily bars, with
+                // this trade's legs and breakevens; null until the bars have loaded. A function: worked out at the send only.
+                chart: () => (barsCache[ticker] || []).length ? taContext(barsCache[ticker], { name: stratName, expKey, dte, legs,
+                  breakevens: AE ? AE.breakevens : [], spot }) : null,
                 sized: { contracts, riskDollars: L && L.tradeRisk != null ? L.tradeRisk : null, perTradeLimit: L && !L.sizingFree ? L.perTrade : null },
                 otherCards: findSorted.filter((x) => x.tk === ticker && !(x.name === stratName && x.expKey === expKey)).slice(0, 6)
                   .map((x) => ({ name: x.name, legs: legsLine(x.legs), expKey: x.expKey, figures: x.lf.figures, chance: x.lf.pop,
@@ -5238,6 +5256,7 @@ export default function OptionsStrategyLab() {
           };
           return (
             <BuildScreen v={v} foldedNode={<>
+              {/* PR 4 ("the tabs speak for themselves"): every section is named for what it shows. */}
               <Section label="Market now">
                 <Label color={T.mut}>MARKET NOW · {ticker}</Label>
                 {tickerStrip}
@@ -5284,10 +5303,10 @@ export default function OptionsStrategyLab() {
                   limits={guard ? guard.limits : null} spot={spot} entryOverride={roomReason} qtyBlock={legQtyMsg} />
               )}
               {pNumbers}
-              <Section label="Charts">{pAgree}{pPL}</Section>
-              <Section label="Why this trade, every factor">{pWhy}</Section>
-              <Section label="Market levels">{levelsView(chain, oiGrid, spot, lv)}</Section>
-              <Section label="History">
+              <Section label="Season against trend, and profit and loss by price">{pAgree}{pPL}</Section>
+              <Section label="Why this trade, factor by factor">{pWhy}</Section>
+              <Section label="Where the open interest sits">{levelsView(chain, oiGrid, spot, lv)}</Section>
+              <Section label="What happened in past years">
                 <Label color={T.mut}>HISTORY · WHAT HAPPENED IN PAST YEARS</Label>
                 {historyNode}
               </Section>

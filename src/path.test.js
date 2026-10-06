@@ -197,9 +197,12 @@ test("one step is on screen at a time, and Radar and Shortlist are gone", () => 
 
 test("evidence opens over the step, not under it", () => {
   assert.ok(APP.includes("<EvidenceOverlay"), "the evidence sheet is not mounted");
-  for (const id of ["levels", "history", "copilot", "why"]) {
+  // PR 4: the sheet has two subjects, a card's market ("why") and its More ("more"); levels, history and the desk
+  // copilot had no button since redesign PR 2 and left it (levels and history are in Build's "More on this trade").
+  for (const id of ["why", "more"]) {
     assert.ok(APP.includes(`ev === "${id}"`), `${id} is not one of the evidence sheets`);
   }
+  for (const id of ["levels", "history", "copilot"]) assert.ok(!APP.includes(`ev === "${id}"`), `${id} came back with no button`);
   // every evidence panel is inside the ONE overlay: no second mount point
   assert.equal(APP.split("<EvidenceOverlay").length - 1, 1, "there is more than one evidence sheet");
 });

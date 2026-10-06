@@ -39,7 +39,7 @@ check("TASK 2 — no EvidenceBar on Find; and none on Build since redesign PR 2:
   // "Why this trade" by "The market's read ›"; Market levels and History are in "More on this trade ▾".
   if (app.includes("<EvidenceBar items={EVIDENCE}")) throw new Error("Build still draws the evidence bar");
   has(app, 'onMarketRead: () => goMarket(ticker, "overview"), readLabel: MARKET_READ_LINK');
-  has(app, '<Section label="Market levels">{levelsView(chain, oiGrid, spot, lv)}</Section>');
+  has(app, '<Section label="Where the open interest sits">{levelsView(chain, oiGrid, spot, lv)}</Section>');
   has(app, "{historyNode}");
   const h = renderToStaticMarkup(<EvidenceBar items={[{ id: "why", label: "Why this market" }]} heading="About this trade · CORN Bull Call Spread" />);
   has(h, "About this trade · CORN Bull Call Spread");

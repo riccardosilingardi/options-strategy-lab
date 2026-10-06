@@ -45,14 +45,17 @@ non-expert trader who wants to learn discipline rather than be sold trades.
      You risk, with Remove and Build ›; orders sent and never filled stay there, and "what it would have done" folds.
      PR #49's request block, its card list and the "Go to Build" button left Find: the controls are in the sheets, the
      cards on the market page, the loaded trade on the bottom bar's Build.
-  2. **The market page — Overview · Strategies · Chain** (a filtered view of Find's list for one ticker, not a second
+  2. **The market page — Signals · Strategies · Chain** (the first tab was "Overview" until PR 4: the owner asked that the
+     tabs speak for themselves) (a filtered view of Find's list for one ticker, not a second
      list; a row opens it on Strategies, the back arrow and Back return; ↻ refreshes this market). The header on every tab:
      the category's icon, ticker, name · category,
      price and its freshness, the change since the last close (from the bars already cached), the market clock, IV (the
      at-the-money IV the IV rank records, `atmIv()`), IV rank ("collecting, N of 20 days" until it exists), the expected
      move to the expiry shown (spot × IV × √(days ÷ 365)), ☆ (saves the first Strategies card), the newest headline the
-     news factor tagged, and the event line. *Overview*: the price chart with no trade on it, its readout, "THE MARKET'S
-     READ" (the Why sheet inline) and the chart copilot. *Strategies*: the market's cards, the signals' family first
+     news factor tagged, and the event line. *Signals*: the price chart with no trade on it, its readout, "THE MARKET'S
+     READ" — the four factors as four blocks, each titled with what it highlights ("NEWS · pushes down · 3 headlines");
+     News opens its headlines and Weather its regions in place, and the news block folds "Ask the copilot: News impact on
+     TK" (PR 4) — and the chart copilot. *Strategies*: the market's cards, the signals' family first
      ("▲ BULL · WHAT THE SIGNALS SUGGEST"), then "≈ NEUTRAL · ALWAYS LISTED"; the line "Signals: +46 × 84 ÷ 100 = 38.6 →
      Bull" with "The market's read ›", then "Neutral cards are always listed. Order: … Expiry … · 40d."; each card is the
      **compact card** (round 2): PR #49's `CandidateCard` in its `compact` layout — the name, the legs and a 72×40
@@ -128,8 +131,8 @@ non-expert trader who wants to learn discipline rather than be sold trades.
      with its arrow, strength and "supports / against / quiet", the rule for when Send asks why in its real words (the
      market's score against the trade by 10 or more, not "2 or more against"), "The market's read ›" (the market page's
      Overview) and the five numbered lines (BETS ON, RISKS, WORKS, EXITS, WRONG IF); **Ask the copilot about this trade**
-     — Pre-trade analysis, What would make it wrong?, Compare with the other cards, News that could move it, or your own
-     question; every answer is filed in the Journal; **Legs** with "Edit in chain ›" (the market page's Chain tray; its
+     — Pre-trade analysis (ending on CONFIRM, DOUBTS or DO NOT CONFIRM, PR 4), Explain the Greeks, The chart and this
+     trade, What would make it wrong?, Compare with the other cards, News that could move it, or your own question; every answer is filed in the Journal; **Legs** with "Edit in chain ›" (the market page's Chain tray; its
      Build › comes back); **Order**, inline: Contracts and the limit as two steppers (the tick is the app's one price
      rule, a cent), "Mid · natural · tick", where the limit sits, the risk and its share of capital, the cap as a
      checkbox that writes the same free-sizing setting as Settings (turning it off asks the typed reason), and the open
@@ -206,19 +209,30 @@ non-expert trader who wants to learn discipline rather than be sold trades.
   one-tap approval links. It never executes by itself.
 - **Copilots, by place** (owner, 6 Oct 2026: "It depends where it is. In Find, a preset analyses the cards and, under
   the filters set, makes objective comparisons that highlight or suggest the best strategy. In Build it explains the
-  strategy. In Positions it analyses the position, the exit strategy, where you started from."). Every question in
-  `SKILLS` (pro.jsx, the one home) names its place, and a screen offers only its own place's questions.
-  - **In Find** a preset may rank and highlight among the cards the app itself built under the current filters, citing
-    each card's own figures (you risk, max profit, chance, return on risk, future avg, past yrs) and naming the filters.
-    It never invents a structure, a strike or an expiry that is not a card, never sizes past the per-trade limit, and
-    never sends. ("Compare the cards", once "Opportunity radar"; its place on Find is redesign PR 4.)
-  - **In Build** it explains the loaded trade: "Pre-trade analysis" (its structure, Greeks, risk and reward, breakevens,
-    season and news, then the gate's checks and the app's size read back — no GO/NO-GO, no size of its own), "What would
-    make it wrong?", "Compare with the other cards", "News that could move it".
-  - **In Positions** it reviews one position against its entry and its exit plan: "Review this position", "The exit from
-    here", "Since I opened it" (on the position's screen). It never closes, rolls or opens anything.
-  - The chart copilot (the market page's Overview) explains the chart. No copilot places a trade; every answer is filed
-    in the Journal. (Left for PR 4: the system prompt's decision trees still recommend structures.)
+  strategy. In Positions it analyses the position, the exit strategy, where you started from."; PR 4, the same day: "In
+  Find AI explains the proposals, which is best, with a recommendation; in Build it confirms the structure or not; with
+  open positions, review, analysis against the initial assumptions, what to do to close in profit"). **The app builds,
+  the copilot explains and recommends, the person decides, the gate checks**: a copilot recommends only among what the
+  app built or offers, and never writes a strike, an expiry, a structure or a size of its own, never sends, never closes.
+  Every question in `SKILLS` (pro.jsx, the one home) names its place and opens with that place's role (`COPILOT_ROLE`);
+  a screen offers only its own place's questions. The standing instructions carry no decision tree: the old trees are
+  criteria for judging a card, never an instruction to build one.
+  - **On Find**, "Compare ›" on the summary line opens a sheet: **Compare the cards** reads the cards that fit, in the
+    owner's order, up to 20 (`compareCards()` in rows.js: each card's own figures and its Greeks for the size the budget
+    buys), the chips in their own words and the misses counted, and recommends one card, at most two, or none, saying
+    which filter binds; **News impact** reads the news across the markets and says which cards it supports or undercuts.
+  - **On the market page**, the news block's folded **News impact** explains this market's headlines; the chart copilot
+    explains the chart. Neither recommends a trade.
+  - **In Build**: **Pre-trade analysis** reads the gate's checks and the app's size back and ends on one verdict —
+    CONFIRM, DOUBTS or DO NOT CONFIRM (`BUILD_VERDICTS`) — that never overrides a check; **Explain the Greeks**; **The
+    chart and this trade** (`taContext()` with the trade's breakevens); "What would make it wrong?", "Compare with the
+    other cards" (it may name a card that fits better), "News that could move it".
+  - **On a position's screen**: **Review this position**, **The exit from here** (what it takes to close in profit),
+    **Since I opened it** (the figures, the four factors and the Greeks at entry against now) and **The chart since I
+    opened it** (`sinceEntry()`); each may recommend one of the actions the screen offers (`positionActions()`: keep,
+    keep and write why, close at limit, a good-till-cancelled take-profit order at the target, or Manage a close already
+    working — never a second close). Rolling is PR 4b's (the app computes the candidates; the copilot recommends one).
+  - No copilot places a trade; every answer is filed in the Journal.
 - **Deploy previews are read-only** (redesign PR 2, TASK 0a, after deploy-preview-51 overwrote production's book on
   5 Oct 2026). A preview reads everything production reads, but every Netlify function that writes or sends (the state
   save, every order, Modify and cancel, the one-tap approval, the autopilot's run, the Alpha Vantage cache write) answers
@@ -413,9 +427,11 @@ normal use, and is never asked for.
    records, two holdings, two orders; docs/screens/redesign-pr3/) and every shipped screen was measured against the owner's
    boards themselves (`scripts/audit-screen.mjs`: 18 boards, dark and light, 0 differences unexplained) — never on a
    phone, never live. **Redesign PR 3b's Journal and Settings** joined the same audit (20 boards) and photographs, and
-   **the computer's layout (two panes, the sidebar) was photographed at 1366×900 in the same headless Chromium only —
-   never in a real desktop browser, never at other widths between 1024 and 1366, and no board draws it** (the owner chose
-   it in words). **No screen reader was run.**
+   **the computer's layout (two panes, the sidebar) was photographed at 1024, 1280 and 1366 px in the same headless
+   Chromium only (PR 4: from 1024 the right pane keeps at least 390px) — never in a real desktop browser, and no board
+   draws it** (the owner chose it in words). **PR 4's Signals tab, Find's Compare sheet and the copilot sections** were
+   photographed the same way with a stub copilot (docs/screens/pr4/); the fixture has no headlines, so a news block with
+   real headlines has not been seen. **No screen reader was run.**
 4. **Read when it happens — no credit has filled at the corrected limit** (the indicative combination ask on thin chains
    has not been measured by a fill; J-0003 never filled at it), **and "Not on Alpaca", "size N > M on the ask", the "Not
    in the app" card, an order "sent outside this app", free sizing (PR #41), and an order sent from Build's new review
@@ -459,6 +475,8 @@ normal use, and is never asked for.
    ceilings moved 309 → 315 and 244 → 250 in PR #48: the badge's words are now counted (the real change is one word).
    Redesign PR 3a: Positions' ceiling 207 → 235 (the boards' own words, counted in voice.test.js); the position's screen
    is built outside the block and has no ceiling of its own yet.
+   PR 4: the counter stopped counting components that render only inside a fold or a sheet (main re-measured: find 336
+   → 269, market 604 → 574); the ceilings are now find 288, market 581, build 417, positions 248 (voice.test.js).
 9. **The exit rules are inherited defaults, not backtested** on these ten markets; the single option's +50% of the
    premium is the owner's choice. PAST YRS settles at expiry and does not replay them. **Since PR #50 a replay window
    that runs past December reads the next year's row and the last year is dropped, not padded** (it used to wrap to the
@@ -467,11 +485,11 @@ normal use, and is never asked for.
    season the future avg runs −41.3 → +9.5 per $100, median −4.3, 6 of 31 above zero (the brief measured −41.0 →
    +8.2, −3.6, 4 of 31; the difference was not traced). The exact long-put maximum (PR #47, 0c) raises three Find fixture cards' return on
    risk 3.5–4.5×; how that moves their rank on live boards is not measured.
-10. **Read when it happens — the AI features** have not seen a real answer since the usage limit ended (2026-10-01),
-    the chart copilot on the market page's Overview included (the same `TaCopilot`, no trade loaded), and Build's three
-    new questions (redesign PR 2) — tested on a stubbed stream only; "Compare with the other cards" hands the model
-    Find's own figures for this market's other cards. The position's three questions (redesign PR 3a) have never been
-    asked, stubbed or live.
+10. **Read when it happens — the AI features** have not seen a real answer since the usage limit ended (2026-10-01).
+    PR 4 rewrote the standing instructions (no decision trees; recommend only among what the app built) and added Find's
+    two questions, the market page's News impact, Build's verdict, Greeks and chart questions and the position's four:
+    **whether the model keeps to the cards and actions handed in, and gives exactly one of the three verdicts, has only
+    been read in the prompt, never in a real answer** — tested on a stubbed stream only.
 
 ## 5. After v1
 

@@ -46,6 +46,13 @@ const SHOTS = [
   ["computer-build", "dark", async (p) => { await p.waitForTimeout(1500); await tap(p, "[data-row-button]", "UNG", 1500);
     await tap(p, "[data-market] button", "Build ›", 2000); }, { w: 1366, h: 900 }],
   ["computer-find-light", "light", async (p) => { await p.waitForTimeout(1500); await tap(p, "[data-row-button]", "UNG", 1500); }, { w: 1366, h: 900 }],
+  // PR 4, TASK 0: the two narrower computer windows PR 3b had not looked at.
+  ["computer-find-1024", "dark", async (p) => { await p.waitForTimeout(1500); await tap(p, "[data-row-button]", "UNG", 1500); }, { w: 1024, h: 800 }],
+  ["computer-positions-1024", "dark", toScreen, { w: 1024, h: 800 }],
+  ["computer-build-1024", "dark", async (p) => { await p.waitForTimeout(1500); await tap(p, "[data-row-button]", "UNG", 1500);
+    await tap(p, "[data-market] button", "Build ›", 2000); }, { w: 1024, h: 800 }],
+  ["computer-find-1280", "dark", async (p) => { await p.waitForTimeout(1500); await tap(p, "[data-row-button]", "UNG", 1500); }, { w: 1280, h: 800 }],
+  ["computer-journal-1280", "dark", async (p) => { await p.waitForTimeout(1500); await tap(p, "nav button", "Journal", 1200); }, { w: 1280, h: 800 }],
 ];
 
 const h = await openHarness();

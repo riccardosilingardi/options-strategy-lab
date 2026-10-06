@@ -10,7 +10,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
 import { BuildScreen, NumbersSection, WhySection, ReviewSheet, LegRow, OrderSection, ExitPlanSection, SendBar,
   BuildLoading, BuildNoQuotes, BuildEmpty, buildSkills } from "./build.jsx";
-import { SKILLS, BUILD_SKILL_IDS, COPILOT_EXPLAIN_ONLY } from "./pro.jsx";
+import { SKILLS, BUILD_SKILL_IDS, COPILOT_ROLE, BUILD_VERDICTS } from "./pro.jsx";
 import { payoffBands } from "./visuals.jsx";
 import { tradeTakeaway, buildSubLine, reasonRuleText, sizedFigures, futureFigures, pastFigures, money, CARD_LABELS,
   sendLabel, orderBookLine, capLabel, EXIT_ROWS, exitsPill, timeExitDay, reviewLimitLine, sentOrderLine } from "./rules.js";
@@ -125,25 +125,25 @@ check("WHY THIS TRADE: closed at rest with the stance line; open, the factors an
   eq(signalStance(FUSED, 1).n, 2, "the stance counts the same two");
   eq(factorStands(FUSED, 0).every((r) => r.stand === "quiet"), true, "a direction-neutral trade: nothing to support or oppose");
 });
-check("THE COPILOT: four questions from SKILLS (one home); the three new ones explain and never propose", () => {
-  eq(BUILD_SKILL_IDS.join(","), "pretrade,wrong,compare,newsmove");
-  eq(buildSkills().map((s) => s.label).join(" | "), "Pre-trade analysis | What would make it wrong? | Compare with the other cards | News that could move it");
-  for (const id of ["wrong", "compare", "newsmove"]) {
+check("THE COPILOT: six questions from SKILLS (one home): the mockup's four with PR 4's Greeks and chart; each opens with Build's role", () => {
+  eq(BUILD_SKILL_IDS.join(","), "pretrade,greeks,chart,wrong,compare,newsmove");
+  eq(buildSkills().map((s) => s.label).join(" | "),
+    "Pre-trade analysis | Explain the Greeks | The chart and this trade | What would make it wrong? | Compare with the other cards | News that could move it");
+  for (const id of BUILD_SKILL_IDS) {
     const sk = SKILLS.find((s) => s.id === id);
-    has(sk.prompt, COPILOT_EXPLAIN_ONLY);
-    hasNot(sk.prompt.replace(COPILOT_EXPLAIN_ONLY, ""), "propose", `${id} asks for no proposal`);
+    has(sk.prompt, COPILOT_ROLE.build, id);
+    hasNot(sk.prompt, "send it.", `${id}: never an instruction to send`);
   }
-  has(COPILOT_EXPLAIN_ONLY, "never propose a trade");
-  // The others stay reachable (in "More on this trade ▾", the same conversation).
-  // Redesign PR 3 (the copilot by place): "news" stays reachable from More; "radar" is Find's (PR 4); PR #38's "Position
-  // review" is replaced by the position screen's three (copilot.test.jsx holds them).
-  for (const id of ["news", "radar"]) if (!SKILLS.find((s) => s.id === id)) throw new Error(`${id} left SKILLS`);
-  for (const q of ["Pre-trade analysis", "What would make it wrong?", "Compare with the other cards", "News that could move it", "Or ask your own…"]) has(html, q);
+  has(COPILOT_ROLE.build, "never change its strikes, its expiry or its size yourself");
+  has(SKILLS.find((s) => s.id === "pretrade").prompt, `exactly one of ${BUILD_VERDICTS.join(", ")}`);
+  // PR 4 (the copilot by place): Find's two and the market page's news question are not Build's.
+  for (const id of ["radar", "newsAll", "newsMarket"]) if (!SKILLS.find((s) => s.id === id)) throw new Error(`${id} left SKILLS`);
+  for (const q of ["Pre-trade analysis", "Explain the Greeks", "The chart and this trade", "What would make it wrong?", "Compare with the other cards", "News that could move it", "Or ask your own…"]) has(html, q);
   has(html, "Educational analysis on a paper account, not financial advice. Every answer is filed in the Journal.");
-  // One send, filed in the Journal: Build's section and CopilotTab both run useCopilot().
+  // One send, filed in the Journal: Build's, Find's, the market page's and a position's sections all run useCopilot().
   has(pro, "export function useCopilot(");
-  has(pro, "useCopilot({ ctx, apiKey, convo, setConvo, onAnalysis })");
   has(pro, "if (onAnalysis) onAnalysis({ label: label || \"Question\", prompt: text, answer: reply, ticker: ctx?.ticker || null });");
+  hasNot(pro, "export function CopilotTab", "the desk's old panel is gone");
 });
 check("THE LEGS: SELL ringed, BUY filled; the mid with its bid / ask · Δ; a missing quote is a dash, never zero", () => {
   const sell = renderToStaticMarkup(<LegRow leg={v.legs.legs[0]} />);

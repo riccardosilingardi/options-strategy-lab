@@ -660,7 +660,7 @@ export function taContext(bars, structure = null) {
       distance_to_breakevens_in_average_days: Array.isArray(structure.breakevens) && L.atr > 0 && L.close
         ? structure.breakevens.map((b) => r2(Math.abs(b - L.close) / L.atr, 1))
         : [],
-      note: "These figures come from the trade loaded on the Build screen. They are not recomputed here.",
+      note: structure.note || "These figures come from the trade loaded on the Build screen. They are not recomputed here.",
     }
     : { note: "No trade is loaded on the Build screen, so there are no legs or break-evens to relate this market to." };
 
