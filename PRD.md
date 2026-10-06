@@ -242,6 +242,10 @@ non-expert trader who wants to learn discipline rather than be sold trades.
     never holds both:** Build says "Roll of J-0003: close J-0003 first" and Send waits until Alpaca no longer holds it;
     then the new trade is sent as a new trade through the gate (order path 2), and the two records are linked on their
     timelines ("Rolled into J-0006" / "Rolled from J-0003"). No eighth order path, no 4-leg roll order.
+  - **In the Journal** (PR 4c), an opened closed trade asks **What did this trade teach me?**: its reasons at entry
+    against how it ended (the record's own words — `whyOpenedLine()`, `endedLine()`, its result and whole timeline,
+    a roll's "Rolled into / from" included). It explains; it recommends nothing. The answer is filed with the ref and
+    leaves one line on the record's timeline.
   - No copilot places a trade; every answer is filed in the Journal.
 - **Deploy previews are read-only** (redesign PR 2, TASK 0a, after deploy-preview-51 overwrote production's book on
   5 Oct 2026). A preview reads everything production reads, but every Netlify function that writes or sends (the state

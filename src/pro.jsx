@@ -1192,6 +1192,7 @@ export const COPILOT_ROLE = Object.freeze({
   find: "You are on Find. You may recommend one or two of the cards the app built (findCards in the context), or none of them; never a structure, a strike, an expiry or a size that is not on one of those cards, and never an order.",
   market: "You are on one market's page (currentTicker), about the market, not a trade: you explain what the app measured and you recommend no trade.",
   build: "You are on Build, about the trade loaded there (currentStrategy in the context). You may say whether it holds up, but you never change its strikes, its expiry or its size yourself and you never tell me to send it: the app prices it, the gate checks it, I decide.",
+  journal: "You are in the Journal, about one closed trade (closedTrade in the context). You explain what happened and what it teaches; you recommend no trade and no action.",
   positions: "You are on one open position's screen (position in the context). You may recommend one of the actions the app offers for it (position.actionsOffered), or none; never another action and never a size, and you never close or place anything yourself.",
 });
 /** The three readings Build's verdict may give (owner, PR 4: "in Build it confirms the structure or not"). */
@@ -1227,6 +1228,8 @@ export const SKILLS = [
   /* PR 4b: the roll — offered by the app only when the position is not in profit and its reasons still hold. */
   { id: "posRoll", place: "positions", label: "Should I roll it?", prompt: `${COPILOT_ROLE.positions} Should this position be rolled? Read position.roll: whether the app offers a roll and why (or why not), and its candidates as the app priced them — the same structure on a later expiry, each with its figures and the gate's line. A roll is two orders: this position closed at a limit first (its loss, if any, becomes real), then the new trade opened from Build as a new trade. When a roll is offered, compare closing, keeping and each candidate, and recommend one by its name as the app prints it, or none; when it is not offered, say why in the app's words and do not suggest one. A candidate the gate refuses is never recommended.` },
   { id: "posChart", place: "positions", label: "The chart since I opened it", prompt: `${COPILOT_ROLE.positions} Read this market's price chart since I opened the position (position.sinceEntry: the price at entry, now, the highest and lowest close since, as the app read them from daily bars; chart: the app's own indicators) against the position's breakevens and strikes: where the price has gone, what the trend says now, and how far it is from each breakeven in ordinary days of movement. Quote only the figures in the context.` },
+  /* THE JOURNAL (PR 4c): one closed trade, its reasons at entry against how it ended. It teaches; it recommends nothing. */
+  { id: "lesson", place: "journal", label: "What did this trade teach me?", prompt: `${COPILOT_ROLE.journal} Compare the reasons it was opened (closedTrade.whyOpened, the four factors and the chance at entry) with how it ended (closedTrade.howItEnded, its result and its whole timeline): which reasons held and which turned, whether the exit rules were followed or a reason of mine overrode them, and what this says to look at before opening a similar trade. If its timeline says it was rolled, say into or from which trade. Quote only the figures in the context; never a figure of your own.` },
 ];
 /** The questions Build's copilot shows, in order (the mockup's four with PR 4's Greeks and chart after the first). */
 export const BUILD_SKILL_IDS = Object.freeze(["pretrade", "variants", "greeks", "chart", "wrong", "compare", "newsmove"]);
@@ -1419,7 +1422,7 @@ export async function askAI(_key, messages, contextStr, onDelta, system = SYSTEM
 }
 export function buildContext(ctx) {
   const { store, scan, news, ticker, legs, expKey, A, spot, seasonalSrc, otherCards = null, reviewChecks = null, sized = null, position = null,
-    findCards = null, findFilters = null, findMisses = null, chart = null, variants = null } = ctx;
+    findCards = null, findFilters = null, findMisses = null, chart = null, variants = null, closedTrade = null } = ctx;
   return JSON.stringify({
     date: new Date().toISOString().slice(0, 10),
     currentTicker: ticker,
@@ -1475,6 +1478,8 @@ export function buildContext(ctx) {
     // BUILD'S VARIANTS (PR 4b), as the app priced them: the copilot may recommend one, never a strike of its own.
     buildVariants: Array.isArray(variants) ? variants.map((r) => ({ name: r.label, legs: r.legsText, contracts: r.n, youRisk: r.youRisk,
       maxProfit: r.unbounded ? "no ceiling" : r.maxProfit, chance: r.chance, returnOnRisk: r.rr, futureAvg: r.future, pastYrs: r.past, gate: r.gateText })) : null,
+    // ONE CLOSED TRADE (PR 4c, the Journal's "What did this trade teach me?"): the record's own words and figures.
+    closedTrade: closedTrade || null,
   });
 }
 /**

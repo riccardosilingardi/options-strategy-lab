@@ -38,6 +38,10 @@ const SHOTS = [
     await p.evaluate(() => document.querySelector("[data-position-roll]")?.scrollIntoView()); await p.waitForTimeout(400); }],
   ["position-roll", "dark", async (p) => { await toScreen(p);
     await p.evaluate(() => document.querySelector("[data-position-roll]")?.scrollIntoView()); await p.waitForTimeout(400); }, { mode: "app+all+book+roll" }],
+  // PR 4c: a closed trade in the Journal, opened, its lesson asked (the stub copilot answers).
+  ["journal-lesson", "dark", async (p) => { await p.waitForTimeout(1500); await tap(p, "nav button", "Journal", 1200);
+    await tap(p, "[data-journal-closed] li:nth-child(1) > button", null, 600);
+    await tap(p, "[data-journal-lesson] button", "What did this trade teach me?", 2500); }, { full: true }],
   ["build-roll", "dark", async (p) => { await toScreen(p); await tap(p, "[data-position-roll] [data-alt-rows] button", null, 2500); }, { mode: "app+all+book+roll" }],
 ];
 

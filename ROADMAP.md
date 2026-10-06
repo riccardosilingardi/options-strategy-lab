@@ -6,6 +6,27 @@ The full history of every item shipped so far (P0–P10, P2-bis) is in `docs/his
 Every pull request updates this file: the session that ships an item marks it done and states
 what the next one inherits.
 
+## Done in PR 4c (owner, 6 Oct 2026): "What did this trade teach me?" in the Journal
+
+Rides on PR #59 (the same branch; 4b was not merged yet).
+
+- **The Journal's question** (place `journal`, `COPILOT_ROLE.journal`): inside an opened closed trade, its reasons at
+  entry against how it ended, from the record's own words and figures (`closedTrade` in the context: `whyOpenedLine()`,
+  `endedLine()`, `journalPnl()`, the factors and chance at entry, the whole timeline). It recommends nothing; the answer
+  is filed with the ref and one "Asked the copilot" line goes on the record's timeline.
+- **A timeline number is never repeated:** `highestSeq()` (journal.js) also reads an entry's written seq ("J-0005·02"),
+  so a line appended to an older record or a fixture takes the next number, not "·01" again.
+
+**Measured.** Tests 1,399, 0 failed. Build 1,449.90 kB. Audit 20 boards, 0 unexplained. Words unchanged (the Journal is
+not a counted screen). Photograph: docs/screens/pr4/journal-lesson.png.
+
+### What PR 4d inherits
+
+- **The Liquidity sheet on Find, reworked** (owner, 6 Oct 2026: "its own PR"): today's takeaway on top (when Alpaca has
+  reported no open interest, the floor cannot run and says so first); the four levels as Find's chips, counted across
+  all markets so they agree with "Show N"; what else filters the cards, with counts; the readout table and where the
+  numbers come from in one fold; markets with no data in one line; sentences in sans, Off amber. No floor value changes.
+
 ## Done in PR 4b (owner, 6 Oct 2026): Build's variants and a position's roll — one calculation
 
 The plan agreed in PR 4a's rounds: refine a trade in Build among alternatives the app computes; roll a position that
@@ -657,7 +678,8 @@ One line each; see `PRD.md` §5 and `docs/history/ROADMAP.md` for detail.
 - **DONE: redesign PR 3b** — the Journal, Settings, the app on a computer.
 - **DONE: PR 4a** — the copilot by place (it recommends only among what the app built), Find's Compare, Build's verdict,
   the Greeks and the chart explained, the Signals tab.
-- **DONE: PR 4b** — Build's variants and a position's roll, one calculation. **NEXT: PR 4c** ("What this trade taught").
+- **DONE: PR 4b** — Build's variants and a position's roll, one calculation.
+- **DONE: PR 4c** — "What did this trade teach me?" in the Journal. **NEXT: PR 4d** (the Liquidity sheet on Find).
 - **Basket expansion with a measured admission rule** (planned as #50, not started; #50 shipped the wrap instead). The owner pastes `/api/liquidity` for the
   candidate tickers; a market is admitted when its open interest clears the liquidity floor AND Alpha Vantage holds at
   least **N = 14 years** of its monthly history. N is set from what `seasonalSignal()` needs: a month counts at |mean| ≥

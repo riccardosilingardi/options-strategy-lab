@@ -25,7 +25,7 @@ console.log("\nThe copilot, by place (redesign PR 3; PR 4)\n");
 
 check("EVERY QUESTION NAMES ITS PLACE AND OPENS WITH THAT PLACE'S ROLE; the old desk place is gone", () => {
   for (const s of SKILLS) {
-    if (!["find", "market", "build", "positions"].includes(s.place)) throw new Error(`${s.id}: no place (${s.place})`);
+    if (!["find", "market", "build", "positions", "journal"].includes(s.place)) throw new Error(`${s.id}: no place (${s.place})`);
     has(s.prompt, COPILOT_ROLE[s.place], s.id);
   }
   if (!BUILD_SKILL_IDS.every((id) => byId(id) && byId(id).place === "build")) throw new Error("Build's are not Build's");
@@ -77,6 +77,17 @@ check("THE ACTIONS OFFERED ARE THE SCREEN'S OWN: a working close offers Manage, 
   eq(working.includes(POSITION_ACTIONS.close), false, "never two working orders for one holding");
   eq(working.includes(POSITION_ACTIONS.manage), true);
   eq(positionActions({ notHeld: true }).join(), POSITION_ACTIONS.keep);
+});
+
+check("IN THE JOURNAL IT TEACHES: one closed trade, its reasons at entry against how it ended; it recommends nothing", () => {
+  eq(skillsFor("journal").map((s) => s.label).join(" | "), "What did this trade teach me?");
+  has(COPILOT_ROLE.journal, "you recommend no trade and no action");
+  const l = byId("lesson").prompt;
+  for (const w of ["closedTrade.whyOpened", "closedTrade.howItEnded", "whether the exit rules were followed", "rolled", "never a figure of your own"]) has(l, w, "lesson");
+  const journal = readFileSync("src/journal.jsx", "utf8"), app = readFileSync("src/App.jsx", "utf8");
+  has(journal, 'skills={skillsFor("journal")}');
+  has(app, "closedTrade: { ref: e.ref || null", "the record's own words"); has(app, "howItEnded: endedLine(e), whyOpened: whyOpenedLine(e.thesis)");
+  has(app, "logAnalysis({ ...a, label: `${e.ref || e.ticker} · ${a.label}` })", "filed with the ref");
 });
 
 check("SINCE ENTRY: read from the bars on or after the opening; no bar after it is null, never a zero", () => {

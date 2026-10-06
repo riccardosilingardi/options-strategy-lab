@@ -172,6 +172,8 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
   gate callback). A roll is offered only by `rollEligible()` and is two orders, never both held: Build blocks Send with
   `rollCloseFirst()` until Alpaca no longer holds the old position, then sends through order path 2; the records are
   linked by `rolledInto()` / `rolledFrom()` timeline lines, never a new /api/state field.
+- **The Journal's copilot (PR 4c)** asks about one closed trade (`closedTrade` in the context, the record's own words) and
+  recommends nothing (`COPILOT_ROLE.journal`).
 - Plan first, then change surgically: the plan is the standing rule's ("Plan before you execute", above).
 
 ## Files that matter
