@@ -125,10 +125,10 @@ check("WHY THIS TRADE: closed at rest with the stance line; open, the factors an
   eq(signalStance(FUSED, 1).n, 2, "the stance counts the same two");
   eq(factorStands(FUSED, 0).every((r) => r.stand === "quiet"), true, "a direction-neutral trade: nothing to support or oppose");
 });
-check("THE COPILOT: six questions from SKILLS (one home): the mockup's four with PR 4's Greeks and chart; each opens with Build's role", () => {
-  eq(BUILD_SKILL_IDS.join(","), "pretrade,greeks,chart,wrong,compare,newsmove");
+check("THE COPILOT: seven questions from SKILLS (one home): the mockup's four with PR 4's variants, Greeks and chart; each opens with Build's role", () => {
+  eq(BUILD_SKILL_IDS.join(","), "pretrade,variants,greeks,chart,wrong,compare,newsmove");
   eq(buildSkills().map((s) => s.label).join(" | "),
-    "Pre-trade analysis | Explain the Greeks | The chart and this trade | What would make it wrong? | Compare with the other cards | News that could move it");
+    "Pre-trade analysis | Which variant fits best? | Explain the Greeks | The chart and this trade | What would make it wrong? | Compare with the other cards | News that could move it");
   for (const id of BUILD_SKILL_IDS) {
     const sk = SKILLS.find((s) => s.id === id);
     has(sk.prompt, COPILOT_ROLE.build, id);
@@ -138,7 +138,7 @@ check("THE COPILOT: six questions from SKILLS (one home): the mockup's four with
   has(SKILLS.find((s) => s.id === "pretrade").prompt, `exactly one of ${BUILD_VERDICTS.join(", ")}`);
   // PR 4 (the copilot by place): Find's two and the market page's news question are not Build's.
   for (const id of ["radar", "newsAll", "newsMarket"]) if (!SKILLS.find((s) => s.id === id)) throw new Error(`${id} left SKILLS`);
-  for (const q of ["Pre-trade analysis", "Explain the Greeks", "The chart and this trade", "What would make it wrong?", "Compare with the other cards", "News that could move it", "Or ask your own…"]) has(html, q);
+  for (const q of ["Pre-trade analysis", "Which variant fits best?", "Explain the Greeks", "The chart and this trade", "What would make it wrong?", "Compare with the other cards", "News that could move it", "Or ask your own…"]) has(html, q);
   has(html, "Educational analysis on a paper account, not financial advice. Every answer is filed in the Journal.");
   // One send, filed in the Journal: Build's, Find's, the market page's and a position's sections all run useCopilot().
   has(pro, "export function useCopilot(");

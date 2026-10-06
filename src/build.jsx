@@ -19,7 +19,7 @@ import { T, TYPE } from "./theme.js";
 import { mono, sans, Note, Info, Sheet, Reveal, TAP } from "./ui.jsx";
 import { useCopilot, useTicketSend, SKILLS, BUILD_SKILL_IDS, Markdown, readQty } from "./pro.jsx";
 import { FACTOR_LABEL } from "./why.jsx";
-import { CARD_LABELS, BUILD_DEFINITIONS, money, signedMoney, chanceText, futureTile, ARIA } from "./rules.js";
+import { CARD_LABELS, BUILD_DEFINITIONS, money, signedMoney, chanceText, futureTile, ARIA, VARIANT_LOAD, NO_CEILING } from "./rules.js";
 
 const FS = TYPE.size, FW = TYPE.weight, LH = TYPE.line;
 const tnum = { fontVariantNumeric: "tabular-nums" };
@@ -424,6 +424,44 @@ export function ExitPlanSection({ pill = null, rows = [], footer }) {
   );
 }
 
+/* ---------------------------------------------------------------- THE ALTERNATIVES (PR 4b) */
+/**
+ * ROWS OF ALTERNATIVES — Build's variants and a position's roll candidates. Each row is what `priceAlt()` (App.jsx)
+ * worked out through the card's own path: its name, its legs and expiry, the card's figures for the size the budget
+ * buys, the future and the past, and the gate's line at that size. It computes nothing.
+ */
+export function AltRows({ rows = [], action, onPick, disabled = false }) {
+  return (
+    <ul data-alt-rows style={{ listStyle: "none", margin: 0, padding: 0 }}>
+      {rows.map((r) => (
+        <li key={`${r.kind}-${r.expKey}-${r.legsText}`} data-alt={r.kind} style={{ borderTop: `1px solid ${T.line}`, padding: "10px 0", display: "grid", gap: 4 }}>
+          <span style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
+            <span style={{ ...sans, fontSize: FS.sm, fontWeight: FW.bold, color: T.ink }}>{r.label}</span>
+            <button type="button" disabled={disabled} onClick={() => onPick(r)}
+              style={{ ...sans, minHeight: TAP, padding: "0 4px", background: "transparent", border: "none", color: disabled ? T.dim : T.blue,
+                fontSize: FS.sm, fontWeight: FW.bold, cursor: disabled ? "not-allowed" : "pointer", whiteSpace: "nowrap" }}>{action}</button>
+          </span>
+          <span style={{ ...mono, ...tnum, fontSize: FS.xs, color: T.mut }}>{r.legsText}</span>
+          <span style={{ ...mono, ...tnum, fontSize: FS.xs, color: T.body }}>
+            {`${CARD_LABELS.risk} ${r.youRisk == null ? "—" : money(r.youRisk)} · ${CARD_LABELS.profit} ${r.unbounded ? NO_CEILING : r.maxProfit == null ? "—" : money(r.maxProfit)} · ${CARD_LABELS.chance} ${r.chance} · ${CARD_LABELS.rr} ${r.rr}`}
+          </span>
+          <span style={{ ...mono, ...tnum, fontSize: FS.xs, color: T.body }}>{`Future avg ${r.future} · Past yrs ${r.past}`}</span>
+          <span style={{ ...sans, fontSize: FS.xs, color: r.gate && r.gate.pass ? T.mut : T.red, lineHeight: LH.body }}>{r.gateText}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+/** Build's variants (PR 4b): the loaded structure moved on the listed strikes; "Load ›" puts one on Build. */
+export function VariantsSection({ rows = [], onLoad, note, none }) {
+  return (
+    <Section label="Variants of this trade" data-build-variants>
+      <SectionTitle right={<Info label="How they are made">{note}</Info>}>Variants of this trade</SectionTitle>
+      {rows.length ? <AltRows rows={rows} action={VARIANT_LOAD} onPick={onLoad} /> : <Note>{none}</Note>}
+    </Section>
+  );
+}
+
 /* ---------------------------------------------------------------- SEND */
 export function SendBar({ label, disabled = false, reason = null, footer, onSend }) {
   return (
@@ -535,6 +573,7 @@ export function BuildScreen({ v, foldedNode = null }) {
         <WhatItDoes takeaway={v.takeaway} chart={v.chart} />
         <NumbersSection {...v.numbers} />
         <WhySection {...v.why} />
+        {v.variants && <VariantsSection {...v.variants} />}
         <CopilotSection ask={askAll} />
         <LegsSection {...v.legs} />
         <OrderSection order={v.order} />

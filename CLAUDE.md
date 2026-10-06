@@ -167,6 +167,11 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
   of `positionActions()`); it never writes a strike, an expiry, a structure or a size of its own, never sends, never
   closes. The standing prompt (`SYSTEM_PROMPT`) has no decision tree: the trees are criteria for judging a card. A
   position's answers are filed in copilotLog tagged with its ref, plus one timeline line.
+- **Build's variants and a position's roll are one calculation: `src/alternatives.js`** (PR 4b) — legs moved on the strikes
+  the chain lists, never snapped; priced only through `priceAlt()` in App.jsx (the card's path, the budget's size, the one
+  gate callback). A roll is offered only by `rollEligible()` and is two orders, never both held: Build blocks Send with
+  `rollCloseFirst()` until Alpaca no longer holds the old position, then sends through order path 2; the records are
+  linked by `rolledInto()` / `rolledFrom()` timeline lines, never a new /api/state field.
 - Plan first, then change surgically: the plan is the standing rule's ("Plan before you execute", above).
 
 ## Files that matter
@@ -209,6 +214,7 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
 - `src/find.jsx` — Step 1, Find (version B, redesign PR 1): category tabs, the chip row and its sheets, the summary line,
   one row per market (`MarketRow`), the states, Compare (`ComparePanel`).
 - `src/rows.js` — `marketRows()`, `rowFigure()`, `rowStateOf()`: Find's rows over the one sorted list (plain JS).
+- `src/alternatives.js` — the alternatives of a structure (PR 4b): `variantsOf()`, `rollCandidates()`, `rollEligible()` (plain JS).
 - `src/market.jsx` — Step 2, the market page: header, Signals (the tab id stays `overview`; the four factor blocks are
   why.jsx's `FactorRows`, titled by `factorHeadline()`), Strategies (`StrategyCard`), Chain (`ChainTab`, the tray).
 - `src/marketView.js` — `dayChange()`, `expectedMove()`, `latestNews()`, `toggleChainLeg()` (plain JS).

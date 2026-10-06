@@ -58,8 +58,11 @@ check("IN BUILD IT GIVES A VERDICT, NEVER THE GATE'S: Pre-trade analysis reads t
   has(byId("greeks").prompt, "Quote only the Greeks in the context"); has(byId("chart").prompt, "there are no bars");
 });
 
-check("IN POSITIONS IT REVIEWS AND RECOMMENDS ONE OF THE APP'S ACTIONS: four questions, the chart since entry among them", () => {
-  eq(POSITION_SKILL_IDS.map(byId).map((s) => s.label).join(" | "), "Review this position | The exit from here | Since I opened it | The chart since I opened it");
+check("IN POSITIONS IT REVIEWS AND RECOMMENDS ONE OF THE APP'S ACTIONS: five questions, the roll and the chart since entry among them", () => {
+  eq(POSITION_SKILL_IDS.map(byId).map((s) => s.label).join(" | "), "Review this position | The exit from here | Should I roll it? | Since I opened it | The chart since I opened it");
+  has(byId("posRoll").prompt, "when it is not offered, say why in the app's words and do not suggest one");
+  has(byId("posRoll").prompt, "A candidate the gate refuses is never recommended");
+  has(byId("variants").prompt, "A variant the gate refuses is never recommended");
   has(byId("posReview").prompt, "recommend one of the actions offered, or none");
   has(byId("posExit").prompt, "good-till-cancelled take-profit order");
   has(byId("posSince").prompt, "position.greeksAtEntry and position.greeksNow"); has(byId("posSince").prompt, "is said to be not recorded");

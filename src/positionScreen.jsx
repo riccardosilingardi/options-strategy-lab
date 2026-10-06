@@ -19,7 +19,8 @@ import { Info, Note, Sheet, mono, sans, TAP } from "./ui.jsx";
 import { PREVIEW, PREVIEW_READ_ONLY } from "./deploy.js";
 import { Fold } from "./steps.jsx";
 import { PositionChart } from "./visuals.jsx";
-import { CopilotSection } from "./build.jsx";
+import { CopilotSection, AltRows } from "./build.jsx";
+import { ROLL_HEAD, ROLL_PREPARE, ROLL_NONE } from "./rules.js";
 import { useCopilot, SKILLS, POSITION_SKILL_IDS } from "./pro.jsx";
 import { CardButton } from "./positions.jsx";
 import { ActionBadge } from "./positionCard.jsx";
@@ -131,6 +132,19 @@ function ExitPlanSection({ rows = [], plan = null }) {
   );
 }
 
+/** ROLL IT (PR 4b): shown when the position is not in profit — its candidates when the reasons still hold, else the
+ *  one sentence why no roll is offered. Preparing one opens Build; nothing is sent from here. */
+export function RollSection({ r }) {
+  if (!r) return null;
+  return (
+    <section aria-label="Roll it" data-position-roll style={{ ...PANEL, gap: 8 }}>
+      <h2 style={H2}>{ROLL_HEAD}{r.ok ? <Info label="how a roll works">{r.how}</Info> : null}</h2>
+      <p style={{ ...sans, margin: 0, fontSize: FS.sm, lineHeight: LH.body, color: r.ok ? T.ink : T.mut }}>{r.why}</p>
+      {r.ok && (r.rows.length > 0 ? <AltRows rows={r.rows} action={ROLL_PREPARE} onPick={r.onPrepare} /> : <Note>{ROLL_NONE}</Note>)}
+    </section>
+  );
+}
+
 function EntryVsNowSection({ ev, entryDay, nowDay, footnote }) {
   if (!ev) return null;
   const head = { ...sans, fontSize: FS.xs, fontWeight: FW.bold, color: T.mut, textAlign: "right" };
@@ -235,6 +249,7 @@ export function PositionScreen({ v }) {
         <PaysSection pays={v.pays} />
         <ExitPlanSection rows={exitPlanRows(v.progress)} plan={v.plan} />
         <EntryVsNowSection ev={v.ev} entryDay={v.entryDay} nowDay={v.nowDay} footnote={turnedLine(v.ev, v.p)} />
+        <RollSection r={v.roll} />
         <RecordSection rows={recordRows(v.timeline, 4)} onWhole={v.onWholeRecord} />
         <div style={TWO}>
           <CardButton tone="quiet" onClick={v.onAnalyse}>Analyse as a new trade</CardButton>
@@ -243,7 +258,7 @@ export function PositionScreen({ v }) {
         <Note>Build prices it at today's market. A Send there would open a second position.</Note>
         <CopilotSection ask={askAll} skills={positionSkills()} label="Ask the copilot about this position"
           heading={<>ASK THE COPILOT ABOUT THIS POSITION</>} ownLabel={<>Your own question about this position</>}
-          footer={<>It explains this position; it never closes, rolls or opens anything. Every answer is filed in the Journal.</>} />
+          footer={<>It may recommend one of this screen's actions; it never closes, rolls or opens anything itself. Every answer is filed in the Journal.</>} />
         {v.guardian && (
           <Fold label="open" tone={T.ink} keepMounted summary="Exit orders · the reason check">{v.guardian}</Fold>
         )}
