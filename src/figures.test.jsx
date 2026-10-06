@@ -19,7 +19,7 @@ import { listCardFigures, buildFigures } from "./App.jsx";
 import { CandidateCard } from "./card.jsx";
 import { exitPlanDetail } from "./visuals.jsx";
 import { reconcileFigures, figureSet, tradeCard, money, chanceText, seasonalProvenance,
-  RULES, fillNet, netFromLegs, sizeLine, sizedFigures, sizedFree, requestOf, takeProfitTarget } from "./rules.js";
+  RULES, fillNet, netFromLegs, sizeLine, sizedFigures, sizedFree, requestOf, takeProfitTarget , sentenceCase } from "./rules.js";
 import { shortlistWithFloors, analyze } from "./App.jsx";
 import { exactExtremes } from "./rules.js";
 import { scaleStrategy } from "./pro.jsx";
@@ -325,7 +325,8 @@ check("ROUND 2: THE COMPACT CARD AND THE FULL CARD PRINT THE SAME SIX FIGURES, f
   };
   for (const k of ["risk", "profit", "chance", "rr"]) {
     const ts = valueOf(compact, CARD_LABELS[k]);
-    const v = ts[ts.indexOf(CARD_LABELS[k]) + 1];                 // the value printed under the label
+    // The compact card prints the name in the mockup's sentence case (redesign PR 3, TASK 0a); the value follows it.
+    const v = ts[ts.indexOf(sentenceCase(CARD_LABELS[k])) + 1];   // the value printed under the label
     if (!valueOf(full, CARD_LABELS[k]).includes(v)) throw new Error(`${k}: compact ${v}, full ${valueOf(full, CARD_LABELS[k]).join(" ")}`);
   }
   const fut = futureTile(futureFigures(list.mc, list.aFill, n, EXP)).value;

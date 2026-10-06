@@ -1,7 +1,8 @@
 // ============================================================================
-// scripts/build-screens.jsx — THE REAL APP, ON FIXTURES, FOR BUILD'S PHOTOGRAPHS (redesign PR 2, TASK 6).
+// scripts/app-screens.jsx — THE REAL APP, ON FIXTURES (redesign PR 2, TASK 6; renamed from build-screens.jsx in PR 3).
 //
-// `scripts/shoot-build.mjs` bundles this for the browser and drives it at 390×844. Unlike scripts/screens.jsx (which
+// `scripts/app-harness.mjs` bundles this for the browser; shoot-build.mjs, shoot-screens.mjs and audit-screen.mjs drive
+// it at 390×844. Unlike scripts/screens.jsx (which
 // mounts single components), this mounts the WHOLE app — `OptionsStrategyLab`, App.jsx's default export — so what is
 // photographed is the real wiring: Find → the market page → Build ›, the review sheet, the stubbed send. Every network
 // call is answered here: the UNG chain is the Alpaca-shaped fixture (src/fixtures/alpaca-chain-UNG.json), the monthly
@@ -9,7 +10,10 @@
 // stubbed answer. Nothing here is a live price and nothing leaves the browser.
 //
 // The location hash picks the variant: #app (everything answers), #loading (Build's market never answers),
-// #noquotes (Build's market answers 503 on both feeds). The theme is the page's own (`osl-theme` in localStorage).
+// #noquotes (Build's market answers 503 on both feeds), #empty (a board with no strikes). Flags follow a "+":
+// "+all" answers every market with UNG's contracts under its own ticker (Find's ten rows; never a real price),
+// "+book" puts positions, working orders and Journal records on the stub broker and in the store (scripts/book-fixture.js).
+// The theme is the page's own (`osl-theme` in localStorage).
 // ============================================================================
 import React from "react";
 import { createRoot } from "react-dom/client";
@@ -18,10 +22,15 @@ import OptionsStrategyLab from "../src/App.jsx";
 import { normaliseAlpacaChain } from "../src/chain.js";
 import { avMonthlyBody } from "../src/avFixture.js";
 
-const mode = (location.hash || "#app").slice(1);
+const [mode, ...flags] = (location.hash || "#app").slice(1).split("+");
+const ALL = flags.includes("all");
+// "+reading": only three markets ever answer (Find's "Reading 10 markets · 3 done"); "+stale": every chain was read three
+// days ago (the stale banner); "+poor": a $200 trading capital, so nothing fits the budget ("Nothing fits").
+const READING = flags.includes("reading"), STALE = flags.includes("stale"), POOR = flags.includes("poor");
 const RAW = JSON.parse(readFileSync("src/fixtures/alpaca-chain-UNG.json", "utf8"));
 // UNG's contracts, under whichever ticker asks (SOYB is Build's default market; its empty state needs a price).
-const chainFor = (tk) => ({ ...normaliseAlpacaChain("UNG", RAW, { spot: 13.24, now: Date.now() }), ticker: tk });
+const chainFor = (tk) => ({ ...normaliseAlpacaChain("UNG", RAW, { spot: 13.24, now: Date.now() }), ticker: tk,
+  ...(STALE ? { updated: new Date(Date.now() - 3 * 86400000).toISOString() } : {}) });
 /** Fixture bars: a deterministic walk to the chain's spot. Not a price. */
 const BARS = (() => {
   const out = []; let p = 12.2; const d0 = Date.UTC(2026, 3, 1);
@@ -65,7 +74,8 @@ window.fetch = async (input, init = {}) => {
       const c = chainFor(sym);
       return json({ ...c, byExp: Object.fromEntries(Object.entries(c.byExp).map(([k, v]) => [k, { ...v, calls: {}, puts: {} }])) });
     }
-    if (sym === "UNG" || sym === "SOYB") return json(chainFor(sym));
+    if (READING && !["UNG", "SOYB", "CORN"].includes(sym)) return NEVER();
+    if (sym === "UNG" || sym === "SOYB" || ALL) return json(chainFor(sym));
     return json({ error: "fixture: not served" }, 503);
   }
   if (p === "/api/bars") return json({ bars: BARS, source: "fixture" });
@@ -94,7 +104,7 @@ window.fetch = async (input, init = {}) => {
 // A first run is over: the capital questions are answered (onboarding is the wizard's, photographed elsewhere).
 try {
   localStorage.setItem("options-lab-state", JSON.stringify({ journalSeq: 0, saved: [], positions: [], expiryLog: [], journal: [], ivHist: {}, copilotLog: [],
-    seasonal: {}, settings: { capital: 10000, concurrentTarget: 4, savings: null, sizeOverride: null, sizingFree: null, onboarded: true, mode: "pro",
+    seasonal: {}, settings: { capital: POOR ? 200 : 10000, concurrentTarget: 4, savings: null, sizeOverride: null, sizingFree: null, onboarded: true, mode: "pro",
       notifyWhenReady: false, findOrder: "ev", webhook: "", reportFreq: "weekly", reportLast: 0, reportLastMd: "" } }));
 } catch { /* none */ }
 

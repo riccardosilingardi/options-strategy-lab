@@ -229,7 +229,11 @@ export const COPY = {
   rowSubtitleText: () => R.rowSubtitleText("Bull Put Spread", "2026-11-20"),
   rowFailedText: () => R.rowFailedText("HTTP 502 Bad Gateway from"),
   findReadingLine: () => R.findReadingLine(10, 3),
-  staleBannerLine: () => R.staleBannerLine({ closeDay: "Fri 2 Oct", failedAt: "14:05" }),
+  staleBannerLine: () => R.staleBannerLine({ closeDay: "Fri 2 Oct", closeWeekday: "Friday", failedAt: "14:05" }),
+  // Redesign PR 3 (TASK 0a, the boards): the stale status line and its bold half; the market's read's score line.
+  staleStatusLine: () => R.staleStatusLine({ closeDay: "Fri 2 Oct" }),
+  staleFailLine: () => R.staleFailLine("14:05") || "",
+  readScoreLine: () => R.readScoreLine({ score: 46, confidence: 84 }),
   nothingFitsLine: () => R.nothingFitsLine("size"),
   allMissLine: () => R.allMissLine(10, { tk: "CORN", name: "Bull Put Spread", risk: 75 }),
   overLimitNote: () => R.overLimitNote(250),

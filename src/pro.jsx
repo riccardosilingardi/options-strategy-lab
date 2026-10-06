@@ -8,7 +8,7 @@ import { RULES, ruleBadge, takeProfitLabel, takeProfitTarget, scaleOutLabel, sto
   closeMarket, closeLimitPrice, closeLimitNote, closeUnreadableNote,
   legBook, sizeSkippedNote, onTick, netFromLegs, limitCeilingNote, rewardRisk,
   contractListing, unlistedContractNote, unquotedLegNote, unquotedLegPointer, marketOrderNote,
-  taCopilotPrompt, TA_QUESTIONS, TA_DISCLAIMER,
+  taCopilotPrompt, TA_QUESTIONS, TA_DISCLAIMER, TA_NEVER_PROPOSES, TA_OWN_QUESTION,
   ivProvenance, noRecordNote, copilotOverreach, copilotOverreachNote } from "./rules.js";
 import { contractsOf, positionSize, bookPositions, positionStage, autopilotHorizonNote, autopilotVolNote, positionForHolding, journalPnlTotal, scoredJournal } from "./journal.js";
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, LineStyle } from "lightweight-charts";
@@ -1484,10 +1484,16 @@ export function TaCopilot({ ticker, bars, structure, convo, setConvo, onAnalysis
     }
   };
 
+  const mk = look === "market";
   return (
-    <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${T.line}` }}>
+    /* ON THE MARKET PAGE (the mockup "Market · Overview"): a panel, the heading in small capitals, the questions one per
+       line, the question box with its blue send, the promise under it. Elsewhere, as it was. */
+    <section data-chart-copilot={mk ? "true" : undefined} aria-label={mk ? "Ask about this chart" : undefined}
+      style={mk ? { background: T.panel, border: `1px solid ${T.line}`, borderRadius: 12, padding: 14, display: "flex", flexDirection: "column", gap: 10 }
+        : { marginTop: 12, paddingTop: 10, borderTop: `1px solid ${T.line}` }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-        <Label><Sparkles size={11} style={{ verticalAlign: "-1px" }} /> ASK ABOUT THIS CHART</Label>
+        {mk ? <h2 style={{ ...sans, margin: 0, fontSize: FS.xs, fontWeight: FW.bold, letterSpacing: "0.08em", color: T.mut, lineHeight: LH.tight }}>ASK ABOUT THIS CHART</h2>
+          : <Label><Sparkles size={11} style={{ verticalAlign: "-1px" }} /> ASK ABOUT THIS CHART</Label>}
         {msgs.length > 0 && (
           <Btn small ghost onClick={() => setConvo({ msgs: [], busy: false, err: null, partial: "" })}>
             <Trash2 size={11} /> Clear
@@ -1501,9 +1507,9 @@ export function TaCopilot({ ticker, bars, structure, convo, setConvo, onAnalysis
         </div>
       ) : (
         <>
-          <div style={{ display: "flex", gap: 5, marginTop: 8, flexWrap: "wrap" }}>
+          <div style={mk ? { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 } : { display: "flex", gap: 5, marginTop: 8, flexWrap: "wrap" }}>
             {TA_QUESTIONS.map((q) => (look === "market" ? (
-              <button key={q.id} disabled={busy} onClick={() => { setAskedId(q.id); send(q.ask, q.label); }} aria-pressed={askedId === q.id}
+              <button key={q.id} data-q disabled={busy} onClick={() => { setAskedId(q.id); send(q.ask, q.label); }} aria-pressed={askedId === q.id}
                 style={{ ...sans, minHeight: TAP, padding: "8px 12px", borderRadius: 10, fontSize: FS.sm, textAlign: "left", lineHeight: LH.tight,
                   background: "transparent", color: T.ink, cursor: busy ? "not-allowed" : "pointer", opacity: busy ? 0.5 : 1,
                   border: `1px solid ${askedId === q.id ? T.blue : T.field}` }}>{q.label}</button>
@@ -1511,8 +1517,8 @@ export function TaCopilot({ ticker, bars, structure, convo, setConvo, onAnalysis
               <Btn key={q.id} small ghost color={T.blue} disabled={busy} onClick={() => send(q.ask, q.label)}>{q.label}</Btn>
             )))}
           </div>
-          <div style={{ marginTop: 10, display: "grid", gap: 9 }}>
-            {msgs.length === 0 && !busy && (
+          <div style={{ marginTop: mk ? 0 : 10, display: "grid", gap: 9 }}>
+            {msgs.length === 0 && !busy && !mk && (
               <div style={{ ...mono, fontSize: FS.xs, color: T.mut, lineHeight: 1.6 }}>
                 Pick one, or ask your own. The copilot is given the indicator readings drawn above —
                 the same numbers, never the raw prices — and the legs and break-evens of the trade on
@@ -1552,21 +1558,35 @@ export function TaCopilot({ ticker, bars, structure, convo, setConvo, onAnalysis
               : <div style={{ ...mono, fontSize: FS.xs, color: T.mut }}>Reading the chart…</div>)}
             {err && <div style={{ ...mono, fontSize: FS.xs, color: T.red, lineHeight: 1.6 }}>{err}</div>}
           </div>
-          <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
-            <input value={input} onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") send(input); }}
-              placeholder="Ask about the chart…"
-              style={{ flex: 1, minWidth: 0, ...mono, fontSize: FS.xs, padding: "8px 10px", borderRadius: 6,
-                background: T.bg, border: `1px solid ${T.field}`, color: T.ink }} />
-            <Btn small color={T.blue} onClick={() => send(input)} disabled={busy || !input.trim()}>Ask</Btn>
-          </div>
-          <div style={{ ...mono, fontSize: FS.xs, color: T.dim, marginTop: 8, lineHeight: 1.6 }}>
-            {TA_DISCLAIMER} The copilot may only quote figures the app measured: if it is asked about
+          {mk ? (
+            <form onSubmit={(e) => { e.preventDefault(); send(input); }} style={{ display: "flex", gap: 6 }}>
+              <label htmlFor={`ta-q-${ticker}`} style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)" }}>{TA_OWN_QUESTION}</label>
+              <input id={`ta-q-${ticker}`} value={input} onChange={(e) => setInput(e.target.value)} placeholder="Ask about the chart…"
+                style={{ flex: 1, minWidth: 0, ...sans, fontSize: FS.sm, padding: "0 12px", minHeight: TAP, borderRadius: 10, boxSizing: "border-box",
+                  background: T.bg, border: `1px solid ${T.field}`, color: T.ink }} />
+              <button type="submit" aria-label="Ask the copilot" disabled={busy || !input.trim()}
+                style={{ width: TAP, minWidth: TAP, minHeight: TAP, borderRadius: 10, border: "none", background: T.blue, color: T.onAccent,
+                  cursor: busy || !input.trim() ? "not-allowed" : "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                <Send size={18} aria-hidden="true" />
+              </button>
+            </form>
+          ) : (
+            <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
+              <input value={input} onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") send(input); }}
+                placeholder="Ask about the chart…"
+                style={{ flex: 1, minWidth: 0, ...mono, fontSize: FS.xs, padding: "8px 10px", borderRadius: 6,
+                  background: T.bg, border: `1px solid ${T.field}`, color: T.ink }} />
+              <Btn small color={T.blue} onClick={() => send(input)} disabled={busy || !input.trim()}>Ask</Btn>
+            </div>
+          )}
+          <p style={{ ...(mk ? sans : mono), fontSize: FS.xs, color: mk ? T.mut : T.dim, margin: mk ? 0 : "8px 0 0", lineHeight: LH.body }}>
+            {TA_DISCLAIMER}{mk ? ` ${TA_NEVER_PROPOSES}` : ""} The copilot may only quote figures the app measured: if it is asked about
             something nobody has measured, it says so rather than producing a number.
-          </div>
+          </p>
         </>
       )}
-    </div>
+    </section>
   );
 }
 
@@ -2685,7 +2705,7 @@ export function PriceChart({ ticker, levels, breakevens, entrySpot, legLines, he
           the same arrays the lines were drawn from. On a phone there is no
           pointer, so it falls back to the last bar and says which it is. */}
       {set && (last || hover) && (
-        <div style={{ ...mono, fontSize: FS.xs, color: T.dim, marginTop: 6, lineHeight: 1.7 }}>
+        <div data-chart-readout style={{ ...mono, fontSize: FS.xs, color: T.mut, marginTop: 6, lineHeight: 1.7 }}>
           <b style={{ color: T.mut }}>{hover ? hover.time : last?.time}{hover ? "" : " · latest"}</b>
           {" · "}close {fmt(hover ? hover.bar?.close : last?.close)}
           {prefs.sma20 && set.ready.sma20 ? ` · ${LABELS.sma20} ${fmt(hover ? readAt(set.series.sma20) : set.last.sma20)}` : ""}

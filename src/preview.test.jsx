@@ -2,7 +2,7 @@
 //
 // This file is bundled with `__OSL_DEPLOY_CONTEXT__` = "deploy-preview" (scripts/test-jsx.mjs, PREVIEW_FILES), the
 // stamp vite.config.js writes on a Netlify preview build. Every control that writes or sends must render disabled
-// with the sentence under it: Send (the ticket and the confirm's "Open this on paper"), Close at limit, File in
+// with the sentence under it: Send (the ticket and Build's Send), Close at limit, File in
 // Journal, Modify, Cancel, Cancel all, the exit rungs. The server refuses on its own (src/deploy.test.js); this is
 // the screen saying so before the tap.
 import React from "react";
@@ -11,7 +11,7 @@ import { readFileSync } from "node:fs";
 import { PREVIEW, PREVIEW_READ_ONLY, BUILD_CONTEXT } from "./deploy.js";
 import { OrdersPanel, OrderRow } from "./orders.jsx";
 import { PositionCard } from "./positionCard.jsx";
-import { ConfirmSteps } from "./wizard.jsx";
+import { SendBar } from "./build.jsx";
 import { takeProfitTarget } from "./rules.js";
 import { exitProgress, entryVsNow } from "./positionView.js";
 
@@ -72,12 +72,12 @@ check("a position card: Close at limit and File in Journal are disabled, with th
   has(h, SENTENCE);
 });
 
-check("the confirm step: 'Open this on paper' becomes a disabled 'Read-only preview', with the sentence", () => {
-  const legs = [{ side: 1, type: "put", strike: 94, qty: 1 }];
-  const preview = { pass: true, violations: [], warnings: [], limits: { tradeRisk: 500, perTrade: 1000, total: 5000, openRisk: 0, totalAfter: 500, paper: { verified: true, why: "the proxy said so" } } };
-  const h = renderToStaticMarkup(<ConfirmSteps candidate={{ ticker: "GDX", name: "Long put", legs, expKey: "2026-11-20", dte: 46, risk: 500, maxProfit: 8900, entryNet: 5, spot: 100 }}
-    preview={preview} heading={false} showFigure={false} onConfirm={() => {}} />);
-  allDisabled(h, "Read-only preview");
+// REDESIGN PR 3 (TASK 0b): the confirm step is gone (nothing mounted it since PR 2); Build's Send is the first tap.
+check("Build's Send is disabled on a preview, with the sentence (App.jsx hands it PREVIEW_READ_ONLY as its block)", () => {
+  const app = readFileSync("src/App.jsx", "utf8");
+  if (!/const sendBlock = PREVIEW \? PREVIEW_READ_ONLY/.test(app)) throw new Error("Build's send block does not start with the preview");
+  const h = renderToStaticMarkup(<SendBar label="Send limit order" disabled reason={SENTENCE} footer="Paper account" onSend={() => {}} />);
+  allDisabled(h, "Send limit order");
   has(h, SENTENCE);
 });
 

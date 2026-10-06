@@ -63,7 +63,8 @@ check("ONE ROW OF CHIPS: eight, in order, each saying its value, each 44px, fill
   if (count(bar, "<button") !== FIND_CHIPS.length) throw new Error(`${count(bar, "<button")} chips`);
   // Round 2: a chip's name and value are two spans (name in mut, value in mono); read as text, the words are the same.
   const words = bar.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
-  for (const t of ["⇅ Future avg", "Budget $500", "Chance any", "Return 25%", `Horizon ${RULES.targetEntryDTE}d`, "Signals decide", "Avg &gt; 0", "Liquidity Recommended"]) has(words, t);
+  // Redesign PR 3, TASK 0a: the boards' words — "Return ≥ 25%", "Direction · Signals", each sheet chip ending ▾.
+  for (const t of ["⇅ Future avg ▾", "Budget $500 ▾", "Chance any ▾", "Return ≥ 25% ▾", `Horizon ${RULES.targetEntryDTE}d ▾`, "Direction Signals ▾", "Avg &gt; 0", "Liquidity Recommended ▾"]) has(words, t);
   if (count(bar, "min-height:44px") !== FIND_CHIPS.length) throw new Error("a chip under 44px");
   if (count(bar, 'aria-pressed="true"') !== 0) throw new Error("a chip is filled at its default");
   hasNot(h, ">Reset<");
@@ -116,8 +117,10 @@ check("READING: a market still being read waits after the rows that are in, with
 check("STALE: the freshness line as a banner, with Retry (round 2: in Find's own header, in place of the status line)", () => {
   const h = renderToStaticMarkup(<FindHeader status="10 markets · prices 3m ago · Alpaca · Paper"
     stale={{ stale: true, closeDay: "Fri 2 Oct", failedAt: "14:05", onRetry: () => {} }} />);
-  hasNot(h, "data-find-status");
-  has(h, esc("Stale · Fri 2 Oct close. The feed didn't answer at 14:05. These are Fri 2 Oct's closing numbers; prices may have moved."));
+  // Redesign PR 3, TASK 0a (the board "Find · stale"): the status line turns amber with a dot, the banner under it says why.
+  has(h, "data-find-status"); has(h, esc("Stale · close Fri 2 Oct"));
+  has(h, esc("The feed didn't answer at 14:05."));
+  has(h, esc("These are Fri 2 Oct's closing numbers; prices may have moved."));
   has(h, ">Retry<");
 });
 
@@ -196,7 +199,7 @@ check("STRATEGIES: the signals' family first, then Neutral 'always listed'; the 
   for (const a of ['aria-label="Compare"', ">Open in chain<", ">Build ›<", ">Details ▾<"]) has(h, a);
   // Every card is the COMPACT card at rest; the full card waits behind Details.
   if (count(h, "data-card-key") !== UNG.length) throw new Error("not every UNG card is on its page");
-  if (count(h, "data-compact") !== UNG.length) throw new Error("not every card is compact");
+  if (count(h, 'data-compact="') !== UNG.length) throw new Error("not every card is compact");
   // A fixed direction: one group, the user's, and it says so.
   const fixed = page({ dir: "bear" });
   has(fixed, "YOUR DIRECTION"); hasNot(fixed, "WHAT THE SIGNALS SUGGEST");

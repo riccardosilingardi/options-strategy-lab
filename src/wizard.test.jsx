@@ -1,7 +1,7 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
-import { CapitalOnboarding, ConfirmSteps, statusLine, gateChecklist } from "./wizard.jsx";
+import { CapitalOnboarding, statusLine, gateChecklist } from "./wizard.jsx";
 import { BottomBar } from "./navBar.jsx";
 import { evaluateTrade } from "./riskGate.js";
 import { WhyThisTrade } from "./why.jsx";
@@ -263,10 +263,12 @@ const blockedResult = evaluateTrade({
   portfolio: { positions: [], account: PAPER }, capital: CAPITAL,
 });
 
-check("the confirm step states the checks in plain English with real numbers", () => {
-  const h = renderToStaticMarkup(
-    <ConfirmSteps candidate={ROADS[1]} preview={passResult} result={null} onConfirm={() => {}} onBack={() => {}} />);
-  has(h, "The checks that run when you tap");
+/* REDESIGN PR 3 (TASK 0b, owner's go): `ConfirmSteps` is gone — nothing mounted it since Build's review sheet (PR 2). Its
+   checks are `gateChecklist()`'s, which the review sheet reads, and they are held here; the exit plan stated as decided,
+   the refusal after the gate and the chart are held by build.test.jsx ("THE EXIT PLAN AND SEND", "THE REVIEW SHEET") and
+   visuals.test.jsx. */
+check("the gate's checks are stated in plain English with real numbers (the rows the review sheet reads)", () => {
+  const h = gateChecklist(passResult, { dte: 45 }).map((r) => r.text).join(" ");
   has(h, "$200");                       // the real max loss
   has(h, "$250 per-trade limit");       // the real derived limit
   has(h, "45 days to expiration at entry");
@@ -277,8 +279,8 @@ check("the confirm step states the checks in plain English with real numbers", (
 
 check("an unpriceable trade is NOT ticked as a worst case you can read", () => {
   // The BOIL butterfly: a maximum loss of about zero is one the app could not
-  // compute, and the confirm row must say that rather than printing $0 next to
-  // a tick. The sentence is the gate's own — this screen never writes a rule.
+  // compute, and the row must say that rather than printing $0 next to a tick.
+  // The sentence is the gate's own — this file never writes a rule.
   const unpriced = evaluateTrade({
     proposal: { intent: "open", ticker: "BOIL", legs: bullCall, dte: 45, contracts: 1, maxLoss: -1e-14, maxProfit: 37462 },
     portfolio: { positions: [], account: PAPER }, capital: CAPITAL,
@@ -290,35 +292,7 @@ check("an unpriceable trade is NOT ticked as a worst case you can read", () => {
   if (/The worst case is a number you can read/.test(defined.text)) {
     throw new Error("it is claiming to have read a number it could not read");
   }
-  const h = renderToStaticMarkup(
-    <ConfirmSteps candidate={ROADS[1]} preview={unpriced} result={null} onConfirm={() => {}} onBack={() => {}} />);
-  if (/-\$0/.test(h)) throw new Error("the confirm step printed -$0");
-});
-
-check("the confirm step states the exit plan as already decided", () => {
-  const h = renderToStaticMarkup(
-    <ConfirmSteps candidate={ROADS[1]} preview={passResult} onConfirm={() => {}} onBack={() => {}} />);
-  has(h, "Close at 50% of max gain, or at 21 days to expiration.");
-  has(h, "decided now, not later");
-  has(h, "not renegotiated while the position is open");
-  for (const offered of ["Choose your exit", "Set a target", "Pick a stop"]) {
-    if (h.includes(offered)) throw new Error(`the confirm step is offering the exit rather than stating it: ${offered}`);
-  }
-});
-
-check("the confirm step offers the order until the gate has spoken, then reports the refusal", () => {
-  const before = renderToStaticMarkup(
-    <ConfirmSteps candidate={ROADS[1]} preview={passResult} result={null} onConfirm={() => {}} onBack={() => {}} />);
-  has(before, "Open this on paper");
-  if (before.includes("Blocked by the risk gate")) throw new Error("refusing before the tap");
-
-  const after = renderToStaticMarkup(
-    <ConfirmSteps candidate={{ ...ROADS[1], maxLoss: -900, risk: 900 }} preview={passResult}
-      result={blockedResult} onConfirm={() => {}} onBack={() => {}} onDesk={() => {}} />);
-  has(after, "The gate refused this");
-  has(after, "Blocked by the risk gate");
-  has(after, "your limit: 5%");   // the gate's own sentence, with its numbers
-  has(after, "Change the trade above and try again");
+  if (rows.some((r) => /-\$0/.test(r.text))) throw new Error("a row printed -$0");
 });
 
 check("the checklist is read off the gate, never recomputed", () => {
@@ -330,28 +304,6 @@ check("the checklist is read off the gate, never recomputed", () => {
   // every number in the row comes from the gate's own `limits`
   has(perTrade.text, "$900");
   has(perTrade.text, "$250");
-});
-
-check("the confirm step can carry the unified component as its visual", () => {
-  const h = renderToStaticMarkup(
-    <ConfirmSteps candidate={ROADS[1]} preview={passResult} onConfirm={() => {}} onBack={() => {}}
-      bars={[{ open: 98, high: 101, low: 97, close: 100 }]} sigma={0.25} />);
-  has(h, "What this looks like");
-  has(h, "<svg");
-  has(h, "CORN is at $100.00");   // the generated takeaway under the chart
-});
-
-check("on Build the confirm step drops the chart and the heading it would duplicate", () => {
-  // The Build screen already shows the trade's name and its charts above. The
-  // block there is the CHECKS, the exit plan and the button — nothing repeated.
-  const h = renderToStaticMarkup(
-    <ConfirmSteps candidate={ROADS[1]} preview={passResult} heading={false} showFigure={false}
-      onConfirm={() => {}} />);
-  if (h.includes("What this looks like")) throw new Error("the chart is drawn twice on Build");
-  if (h.includes(">Confirm<")) throw new Error("the heading is drawn twice on Build");
-  has(h, "The checks that run when you tap");
-  has(h, "decided now, not later");
-  has(h, "Open this on paper");
 });
 
 console.log(ok.map((n) => "  ok   " + n).join("\n"));

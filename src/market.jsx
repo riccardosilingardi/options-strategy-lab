@@ -54,7 +54,7 @@ import { RULES, money, chanceText, expiryWords, sizedFree, sizedFigures, sizeLin
   OPEN_IN_CHAIN, BUILD_CTA, COMPARE_TICK, MARKET_READ_HEAD, HOW_WORKED_OUT_LINK, MARKET_READ_END, CHAIN_MODES,
   noOpenInterestText, underEntryText, THIN, spotLineText, legsMaxText, TRAY_LABELS, uncoveredText, trayEmptyText,
   chainEventText, eventLineText, eventInfoText, dateOnlyWhen, inDaysText, holidayWeekNote, eventsBeforeLabel, CHAIN_HEAD,
-  chainNotLoadedText, marketReadingText, noCardsText, ARIA,
+  chainNotLoadedText, marketReadingText, noCardsText, ARIA, readScoreLine,
 } from "./rules.js";
 
 const FS = TYPE.size, FW = TYPE.weight, LH = TYPE.line;
@@ -63,6 +63,10 @@ const dirOfSent = (sent) => { const d = sentimentDirection(sent); return d > 0 ?
 /** A category's icon, by the name markets.js gives it (CATEGORY_ICONS). */
 const ICONS = { Wheat, Flame, Gem };
 const tnum = { fontVariantNumeric: "tabular-nums" };
+/** A panel on the market page (the mockups): the panel ground, a hairline, radius 12. */
+const PANEL = { background: T.panel, border: `1px solid ${T.line}`, borderRadius: 12, padding: 12, boxSizing: "border-box", minWidth: 0 };
+/** A section's small capital heading (THE MARKET'S READ, ASK ABOUT THIS CHART): 12 bold, spaced, mut. */
+export const SECTION_HEAD = { ...sans, margin: 0, fontSize: FS.xs, fontWeight: FW.bold, letterSpacing: "0.08em", color: T.mut, textTransform: "uppercase", lineHeight: LH.tight };
 
 export function MarketPage({
   tk, tab = "strategies", onTab, onBack, onTicker, onRefresh = null, busy = false,
@@ -165,7 +169,7 @@ function MarketHeader({ tk, u, spot, freshLine, bars, clockLine, atm, ivRank, iv
       <h2 data-view-heading tabIndex={-1} style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", margin: 0 }}>
         {tk} · {u.name} · {u.category || "not proposed"}
       </h2>
-      <div style={{ display: "flex", alignItems: "center", padding: "6px 8px 0 4px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 8px 0 4px" }}>
         <IconButton label={BACK_TO_FIND_ARIA} onClick={onBack}><ArrowLeft size={22} strokeWidth={1.75} aria-hidden="true" /></IconButton>
         <button onClick={onTickerSheet} aria-label={ARIA.pickMarket(tk)}
           style={{ flex: 1, minWidth: 0, minHeight: TAP, display: "flex", alignItems: "center", gap: 10, background: "transparent", border: "none",
@@ -174,7 +178,7 @@ function MarketHeader({ tk, u, spot, freshLine, bars, clockLine, atm, ivRank, iv
             display: "inline-flex", alignItems: "center", justifyContent: "center" }}><Icon size={18} strokeWidth={1.75} /></span>
           <span style={{ minWidth: 0 }}>
             <span style={{ display: "block", lineHeight: LH.tight }}>
-              <span style={{ ...mono, fontSize: FS.lg, fontWeight: FW.bold, color: T.ink }}>{tk}</span>
+              <span data-market-ticker style={{ ...mono, fontSize: FS.lg, fontWeight: FW.bold, color: T.ink }}>{tk}</span>
               <span style={{ ...sans, fontSize: FS.xs, color: T.mut, marginLeft: 6 }}>▾</span>
             </span>
             <span style={{ ...sans, display: "block", fontSize: FS.xs, color: T.mut, lineHeight: LH.tight, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
@@ -238,7 +242,7 @@ function EventLine({ tk, expKey, now, timeZone, exits = [], expiries = [], chain
   return (
     <div style={{ margin: "0 16px 6px" }}>
       <button onClick={() => setOpen((o) => !o)} aria-expanded={open} data-event-line={line}
-        style={{ ...sans, width: "100%", display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", minHeight: TAP, border: `1px solid ${T.line}`,
+        style={{ ...sans, width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", minHeight: TAP, border: `1px solid ${T.line}`,
           background: T.panel, borderRadius: 10, fontSize: FS.sm, lineHeight: LH.body, color: T.body, textAlign: "left", cursor: "pointer" }}>
         <CalendarDays size={16} strokeWidth={1.75} color={T.mut} aria-hidden="true" style={{ flexShrink: 0 }} />
         <span style={{ flex: 1, minWidth: 0 }}>
@@ -273,24 +277,30 @@ function Overview({ tk, fused, whyProps, onAnalysis }) {
   const [how, setHow] = useState(false);
   useEffect(() => { setConvo({ msgs: [] }); setBars(null); }, [tk]);
   return (
-    <div style={{ padding: "12px 16px 24px" }}>
+    <div data-market-body style={{ padding: "12px 16px 24px", display: "flex", flexDirection: "column", gap: 12 }}>
+      {/* THREE PANELS (the mockup "Market · Overview"): the chart, the market's read, the chart copilot. */}
       {/* No trade on this chart: no break-evens, no legs. Its range, its RSI and MACD panes, its switches and their
           saved prefs, and the readout at the last bar or under the finger, as on Build. */}
-      <PriceChart ticker={tk} levels={null} breakevens={[]} entrySpot={null} legLines={[]} height={260} onBars={setBars} />
-      <div style={{ marginTop: 14 }}>
-        <Label color={T.mut}>{MARKET_READ_HEAD}</Label>
-        {fused ? <WhySheet fused={fused} ticker={tk} {...whyProps} /> : <Note>{marketReadingText(tk)}</Note>}
-        {fused && (
-          <TextBtn height={TAP} aria-expanded={how} onClick={() => setHow((h) => !h)} style={{ marginTop: 6, padding: 0 }}>
-            {HOW_WORKED_OUT_LINK}
-          </TextBtn>
-        )}
-        {how && fused && <HowWorkedOut fused={fused} />}
-        <Note color={T.mut} style={{ marginTop: 6 }}>{MARKET_READ_END}</Note>
-      </div>
-      <div style={{ marginTop: 14 }}>
-        <TaCopilot ticker={tk} bars={bars || []} structure={null} convo={convo} setConvo={setConvo} onAnalysis={onAnalysis} look="market" />
-      </div>
+      <section aria-label="Price chart" data-chart-panel style={PANEL}>
+        <PriceChart ticker={tk} levels={null} breakevens={[]} entrySpot={null} legLines={[]} height={260} onBars={setBars} />
+      </section>
+      <section aria-label={MARKET_READ_HEAD} data-market-read style={{ ...PANEL, padding: "14px 14px 8px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+          <h2 style={SECTION_HEAD}>{MARKET_READ_HEAD}</h2>
+          {fused && <span style={{ ...mono, ...tnum, fontSize: FS.xs, color: T.mut }}>{readScoreLine(fused)}</span>}
+        </div>
+        {fused ? <WhySheet fused={fused} ticker={tk} {...whyProps} factorsAtRest /> : <Note>{marketReadingText(tk)}</Note>}
+        <div style={{ borderTop: `1px solid ${T.line}`, marginTop: 8, padding: "8px 0 4px" }}>
+          <Note color={T.mut}>{MARKET_READ_END}</Note>
+          {fused && (
+            <TextBtn height={TAP} aria-expanded={how} onClick={() => setHow((h) => !h)} style={{ padding: 0 }}>
+              {HOW_WORKED_OUT_LINK}
+            </TextBtn>
+          )}
+          {how && fused && <HowWorkedOut fused={fused} />}
+        </div>
+      </section>
+      <TaCopilot ticker={tk} bars={bars || []} structure={null} convo={convo} setConvo={setConvo} onAnalysis={onAnalysis} look="market" />
     </div>
   );
 }
@@ -309,15 +319,15 @@ function Strategies({ tk, items, board, fused, findDir, sentiments, findOrder, r
   const sortedBy = findOrderOf(findOrder).tile;
   const sig = signalsParts({ sd: sd ? { ...sd, fused } : null, fixedLabel: fixed ? fixed.label : null });
   return (
-    <div style={{ padding: "12px 16px 24px", display: "flex", flexDirection: "column", gap: 10 }}>
+    <div data-market-body style={{ padding: "12px 16px 24px", display: "flex", flexDirection: "column", gap: 10 }}>
       {/* The whole line, for a screen reader and for the word counter: strategiesLine() says it once. */}
-      <div aria-label={strategiesLine({ sd: sd ? { ...sd, fused } : null, fixedLabel: fixed ? fixed.label : null, order: findOrder,
+      <div data-signals-line aria-label={strategiesLine({ sd: sd ? { ...sd, fused } : null, fixedLabel: fixed ? fixed.label : null, order: findOrder,
         expKey: board ? board.expKey : null, dte: board ? board.dte : null })}>
         <div style={{ ...sans, fontSize: FS.sm, color: T.body, lineHeight: LH.body }}>
           {sig.lead}{sig.math && <> <span style={{ ...mono, ...tnum }}>{sig.math}</span></>}{sig.result && ` ${sig.result}`}
           {" "}<TextBtn onClick={onRead} style={{ fontSize: FS.sm, padding: 0, minHeight: 0 }}>{MARKET_READ_LINK}</TextBtn>
         </div>
-        <div style={{ ...sans, fontSize: FS.xs, color: T.mut, lineHeight: LH.body }}>
+        <div style={{ ...sans, fontSize: FS.sm, color: T.mut, lineHeight: LH.body }}>
           {strategiesNote({ order: findOrder, expKey: board ? board.expKey : null, dte: board ? board.dte : null, fixed: !!fixed })}
         </div>
       </div>
@@ -360,7 +370,7 @@ export function StrategyCard({ x, size, misses, bars, sortedBy, findOrder, saved
     future: futureFigures(mc, af, n, x.expKey), past: pastFigures(x.lf.bt, af, n), ticker: x.tk, sortedBy,
     placeAtRest: findOrderOf(findOrder).id === "evSignal" ? placeLine(x, findOrder) : null,
   };
-  const btn = { ...sans, flex: 1, minWidth: 0, minHeight: TAP, borderRadius: 10, fontSize: FS.sm, fontWeight: FW.bold, cursor: "pointer", padding: "0 4px",
+  const btn = { ...sans, flex: 1, minWidth: 0, minHeight: TAP, borderRadius: 10, fontSize: FS.sm, fontWeight: FW.bold, cursor: "pointer", padding: 0,
     whiteSpace: "nowrap" };
   return (
     <CandidateCard {...common} cardKey={x.key} compact needs={needsText(x.lf.bands, x.tk)} direction={stance}
@@ -368,7 +378,7 @@ export function StrategyCard({ x, size, misses, bars, sortedBy, findOrder, saved
       stanceKind={!st ? null : st.kind === "against" ? "against" : st.kind === "neutral" || st.kind === "quiet" ? "neutral" : "with"}
       disagree={disagree}
       actions={(
-        <div style={{ display: "flex", gap: 8, alignItems: "center", minHeight: TAP }}>
+        <div data-card-actions style={{ display: "flex", gap: 8, alignItems: "center", minHeight: TAP }}>
           <IconButton onClick={onSave} pressed={saved} label={ARIA.saveTrade(saved, x.tk, x.name)} color={saved ? T.amber : T.dim}
             style={{ fontSize: FS.lg, border: `1px solid ${T.field}` }}>{saved ? "★" : "☆"}</IconButton>
           <IconButton onClick={onTick} pressed={ticked} label={ticked ? COMPARE_TICK.on : COMPARE_TICK.off} color={ticked ? T.blue : T.dim}
@@ -415,16 +425,18 @@ export function ChainTab({ tk, chain, clock, tray, setTray, cardFigures, quoteOf
     color: sel === "buy" ? T.onAccent : thin ? (itm ? T.mut : T.dim) : T.ink,
     border: sel === "sell" ? `2px solid ${T.amber}` : "2px solid transparent" });
   const label = (sel, v) => (sel === "buy" ? `+1 ${v}` : sel === "sell" ? `−1 ${v}` : v);
+  /** What scripts/audit-screen.mjs reads a cell by: in the money, and bought or sold on the tray. */
+  const cellData = (sel, itm) => ({ "data-chain-cell": "true", "data-itm": itm ? "true" : undefined, "data-picked": sel || undefined });
   let spotDrawn = false;
   return (
-    <div style={{ padding: "10px 12px 0" }}>
-      <div role="group" aria-label={ARIA.expiries} style={{ display: "flex", gap: 6, overflowX: "auto", whiteSpace: "nowrap", paddingBottom: 4 }}>
+    <div data-market-body>
+      <div role="group" aria-label={ARIA.expiries} style={{ display: "flex", gap: 6, overflowX: "auto", whiteSpace: "nowrap", padding: "10px 16px 6px" }}>
         {chain.expirations.map((x) => {
           const d = chain.byExp[x].dte;
           const under = d < RULES.minEntryDTE;
           const on = x === ek;
           return (
-            <button key={x} onClick={() => { if (!under) pick(x); }} aria-pressed={on} aria-label={ARIA.expiryChip(x, d, under)}
+            <button key={x} onClick={() => { if (!under) pick(x); }} aria-pressed={on} aria-label={ARIA.expiryChip(x, d, under)} data-short={under ? "true" : undefined}
               style={{ ...sans, flex: "0 0 auto", minWidth: 76, minHeight: 48, padding: "0 8px", borderRadius: 10, cursor: under ? "not-allowed" : "pointer",
                 border: `1px ${under ? "dashed" : "solid"} ${on ? T.ink : T.line}`, background: on ? T.raise : "transparent",
                 color: under ? T.dim : T.ink, fontWeight: on ? FW.bold : FW.regular, display: "inline-flex", flexDirection: "column",
@@ -435,12 +447,12 @@ export function ChainTab({ tk, chain, clock, tray, setTray, cardFigures, quoteOf
           );
         })}
       </div>
-      <SegmentBar label={ARIA.chainShows} value={mode} onChange={setMode} style={{ marginTop: 8 }}
+      <SegmentBar label={ARIA.chainShows} value={mode} onChange={setMode} style={{ margin: "4px 16px" }}
         items={CHAIN_MODES.map((md) => ({ id: md.id, label: md.label, disabled: md.id === "oi" && !oi }))} />
-      <div style={{ ...sans, fontSize: FS.xs, color: T.dim, lineHeight: LH.body, padding: "6px 4px" }}>
+      <div data-chain-hint style={{ ...sans, fontSize: FS.xs, color: T.dim, lineHeight: LH.body, padding: "2px 16px 4px" }}>
         {trayEmptyText()}{!oi ? ` ${noOpenInterestText(feedName(chain))}.` : ""}
       </div>
-      <div role="table" aria-label={ARIA.chainTable(tk, ek)} style={{ paddingBottom: 260 }}>
+      <div role="table" aria-label={ARIA.chainTable(tk, ek)} style={{ padding: "0 8px 260px" }}>
         <div role="row" style={{ ...grid, ...sans, fontSize: FS.xs, color: T.mut, textAlign: "center", padding: "4px 0" }}>
           <span role="columnheader">{`${CHAIN_HEAD.call} ${head[0]}`}</span><span role="columnheader">{`${CHAIN_HEAD.call} ${head[1]}`}</span>
           <span role="columnheader">{CHAIN_HEAD.strike}</span>
@@ -460,23 +472,25 @@ export function ChainTab({ tk, chain, clock, tray, setTray, cardFigures, quoteOf
             <React.Fragment key={k}>
               {showSpot && (
                 <div role="row" data-spot style={{ position: "relative", height: 18, margin: "2px 0" }}>
-                  <span aria-hidden="true" style={{ position: "absolute", left: 0, right: 0, top: 8, borderTop: `1px solid ${T.amber}` }} />
-                  <span style={{ ...mono, ...tnum, position: "relative", display: "block", width: "max-content", margin: "0 auto", padding: "0 6px",
-                    fontSize: FS.xs, color: T.amber, background: T.bg, lineHeight: "18px" }}>{spotLineText(spot, spotState)}</span>
+                  {/* (The mockup: a dashed rule and the price in an ink pill.) */}
+                  <span aria-hidden="true" style={{ position: "absolute", left: 0, right: 0, top: 8, borderTop: `1px dashed ${T.field}` }} />
+                  <span style={{ ...mono, ...tnum, position: "relative", display: "block", width: "max-content", margin: "0 auto", padding: "0 8px",
+                    fontSize: FS.xs, fontWeight: FW.bold, color: T.bg, background: T.ink, borderRadius: 999, lineHeight: "18px" }}>{spotLineText(spot, spotState)}</span>
                 </div>
               )}
               <div role="row" style={{ ...grid, marginTop: 4 }}>
-                <button role="cell" style={btn(sel(callOn, "bid"), cItm, thin, price)} disabled={!price || !c}
+                <button role="cell" {...cellData(sel(callOn, "bid"), cItm)} style={btn(sel(callOn, "bid"), cItm, thin, price)} disabled={!price || !c}
                   aria-label={ARIA.chainCell(-1, k, "call")} onClick={() => tap("call", k, -1)}>{label(sel(callOn, "bid"), c1)}</button>
-                <button role="cell" style={btn(sel(callOn, "ask"), cItm, thin, price)} disabled={!price || !c}
+                <button role="cell" {...cellData(sel(callOn, "ask"), cItm)} style={btn(sel(callOn, "ask"), cItm, thin, price)} disabled={!price || !c}
                   aria-label={ARIA.chainCell(1, k, "call")} onClick={() => tap("call", k, 1)}>{label(sel(callOn, "ask"), c2)}</button>
-                <span role="cell" style={{ ...mono, ...tnum, fontSize: FS.md, fontWeight: FW.bold, color: thin ? T.dim : T.ink, textAlign: "center",
+                <span role="cell" data-chain-strike style={{ ...mono, ...tnum, fontSize: FS.md, fontWeight: FW.bold, color: thin ? T.dim : T.ink, textAlign: "center",
+                  background: T.panel, borderLeft: `1px solid ${T.line}`, borderRight: `1px solid ${T.line}`,
                   display: "flex", flexDirection: "column", justifyContent: "center", lineHeight: LH.tight }}>
                   {k}{thin && <span style={{ ...sans, fontSize: FS.xs, fontWeight: FW.regular, color: T.dim }}>{THIN}</span>}
                 </span>
-                <button role="cell" style={btn(sel(putOn, "bid"), pItm, thin, price)} disabled={!price || !p}
+                <button role="cell" {...cellData(sel(putOn, "bid"), pItm)} style={btn(sel(putOn, "bid"), pItm, thin, price)} disabled={!price || !p}
                   aria-label={ARIA.chainCell(-1, k, "put")} onClick={() => tap("put", k, -1)}>{label(sel(putOn, "bid"), p1)}</button>
-                <button role="cell" style={btn(sel(putOn, "ask"), pItm, thin, price)} disabled={!price || !p}
+                <button role="cell" {...cellData(sel(putOn, "ask"), pItm)} style={btn(sel(putOn, "ask"), pItm, thin, price)} disabled={!price || !p}
                   aria-label={ARIA.chainCell(1, k, "put")} onClick={() => tap("put", k, 1)}>{label(sel(putOn, "ask"), p2)}</button>
               </div>
             </React.Fragment>
@@ -516,20 +530,20 @@ function ChainTray({ tk, chain, ek, legs, note, cardFigures, quoteOf, seasonal, 
         {legs.length > 0 && (
           <>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-              <span style={{ ...sans, fontSize: FS.md, fontWeight: FW.bold, color: T.ink, marginRight: 4 }}>{structureName(legs, ek)}</span>
+              <span data-tray-name style={{ ...sans, fontSize: FS.md, fontWeight: FW.bold, color: T.ink, marginRight: 4 }}>{structureName(legs, ek)}</span>
               {legs.map((l) => (
-                <span key={`${l.type}${l.strike}`} style={{ ...mono, ...tnum, fontSize: FS.xs, color: T.ink, border: `1px solid ${T.field}`,
+                <span key={`${l.type}${l.strike}`} data-tray-leg style={{ ...mono, ...tnum, fontSize: FS.xs, color: T.ink, border: `1px solid ${T.field}`,
                   borderRadius: 6, padding: "0 6px", lineHeight: "22px" }}>{legsLine([l])}</span>
               ))}
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 6 }}>
+            <dl style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8, margin: 0 }}>
               {figs.map(([k, v]) => (
                 <div key={k} style={{ minWidth: 0 }}>
-                  <div style={{ ...sans, fontSize: FS.xs, color: T.mut }}>{k}</div>
-                  <div style={{ ...mono, ...tnum, fontSize: FS.md, fontWeight: FW.bold, color: T.ink, whiteSpace: "nowrap" }}>{v}</div>
+                  <dt style={{ ...sans, fontSize: FS.xs, color: T.mut }}>{k}</dt>
+                  <dd style={{ ...mono, ...tnum, fontSize: FS.md, fontWeight: FW.bold, color: T.ink, whiteSpace: "nowrap", margin: 0 }}>{v}</dd>
                 </div>
               ))}
-            </div>
+            </dl>
           </>
         )}
         {naked.length > 0 && <Note color={T.red} role="alert">{uncoveredText()}</Note>}

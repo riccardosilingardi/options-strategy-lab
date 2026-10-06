@@ -8,8 +8,8 @@
 //   · CapitalOnboarding — first run, PRD §3. Capital, positions at once, savings.
 //   · (WizardOpen, Home, is gone since redesign PR 1 round 2 — owner, 5 Oct 2026: the app opens on Find. Its
 //     status sentence, `statusLine()`, is now the Positions badge's spoken name on the bottom bar.)
-//   · ConfirmSteps      — the confirm step on Build: what is being sent, the
-//                         checks, the exit plan.
+//   · (ConfirmSteps, the old confirm block on Build, is gone since redesign PR 3: Build's review sheet carries the
+//     checks — `gateChecklist()`, below, which it reads — and its own Exit plan section states the exits.)
 //
 // The guided door — FindOpportunities, WizardCandidates (the two roads) and
 // NothingToday — was deleted at the owner's request (PR #40, TASK 1,
@@ -21,12 +21,9 @@
 // stacks in one column and widens on a desk.
 // ============================================================================
 import React, { useState } from "react";
-import { ShieldCheck, ShieldAlert, AlertTriangle } from "lucide-react";
 import { T, TYPE, BADGE_SAFE, BADGE_BTN_GAP } from "./theme.js";
 import { mono, sans, Chip, Label, Panel, TAP } from "./ui.jsx";
-import { RULES, sizing, money, pctText, limitOwner, NO_CEILING, takeProfitTarget } from "./rules.js";
-import { UnifiedFigure, exitPlanSentence, exitPlanDetail, price } from "./visuals.jsx";
-import { PREVIEW, PREVIEW_READ_ONLY } from "./deploy.js";
+import { RULES, sizing, money, pctText, limitOwner } from "./rules.js";
 
 // PR #48 SWEEP: the stacks, Chip, Label, Panel and the tap target are ui.jsx's, the sizes are the type tokens. Mono
 // only for numbers and legs (an amount typed, a P&L, the legs being sent). RED IS FOR ERRORS AND REFUSALS: a
@@ -329,177 +326,3 @@ export function gateChecklist(result, proposal = {}) {
   ];
   return rows;
 }
-
-const CheckRow = ({ ok, text }) => (
-  <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-    {ok
-      ? <ShieldCheck size={17} style={{ color: T.green, flexShrink: 0, marginTop: 1 }} />
-      : <ShieldAlert size={17} style={{ color: T.red, flexShrink: 0, marginTop: 1 }} />}
-    <span style={{ ...sans, fontSize: FS.sm, color: ok ? T.body : T.ink, lineHeight: LH.body }}>{text}</span>
-  </div>
-);
-
-/**
- * THE CONFIRM STEP — the checks in plain English, the exit plan stated as
- * already decided, and the one button that opens the position.
- *
- * It is a BLOCK, not a screen, because it now lives at the bottom of the Build
- * screen. "Take this road" used to jump from the two roads straight to a
- * confirm page with a send button on it, which meant the guided flow could
- * reach an order without ever passing the desk where the trade can actually be
- * looked at — the chain, the legs, the greeks. The road now hands off to Build
- * and this block is the end of that screen, so there is ONE route to an order
- * and it runs through the place where the trade is visible.
- *
- * Nothing here decides anything: `gateChecklist()` puts English around what
- * `evaluateTrade()` already returned.
- *
- * @param candidate  { ticker, name, legs, expKey, dte, risk, maxProfit, entryNet, spot }
- *                   `risk` and `maxProfit` are the figures for ONE combination.
- * @param contracts  how many combinations the order will carry. This screen
- *                   used to say "One contract of each" over a ticket that could
- *                   send seven, so the totals below are the per-combination
- *                   figures times this number and the card says which is which.
- * @param preview    the gate's reading BEFORE the tap
- * @param result     the gate's answer AFTER the tap, when there is one
- * @param heading    false on Build, where the trade's name is already above
- */
-export function ConfirmSteps({
-  // THE DRIFT HAS NO DEFAULT. It used to be 0 here and no caller ever passed
-  // one, so the chart under a trade was drawn — and its sentence computed —
-  // against a market that goes nowhere, while the CHANCE printed elsewhere on
-  // the same screen came from a different assumption entirely.
-  /* AND NEITHER DOES THE VOLATILITY. `sigma = 0.3` was a number with no home
-     and no provenance — not the value of any rule, so the rule-literal sweep
-     could never name it — sitting under a picture of a trade priced at the
-     chain's implied volatility. It is null with none, and `UnifiedFigure`
-     draws what it can and says what it cannot. */
-  candidate, preview, result, bars = [], sigma = null, driftAnnual = null,
-  busy, onConfirm, onDesk, heading = true, showFigure = true, contracts = 1,
-  /* THE WARNINGS APPEAR ONCE ON A PAGE. On Build they are in the collapsed
-     panel above this card, with the count in its summary line; printing them
-     again here is how the CONFLICT paragraph came to be on one screen four
-     times. A caller with no panel of its own leaves this true. */
-  showWarnings = true,
-}) {
-  if (!candidate) return null;
-  const c = candidate;
-  const n = Math.max(1, Math.round(Number(contracts) || 1));
-  const totalRisk = Number(c.risk) * n;
-  const shown = result || preview;
-  const rows = gateChecklist(shown, { dte: c.dte });
-  const refused = !!(result && !result.pass);
-
-  return (
-    <div>
-      {heading && (
-        <>
-          <Label style={EYEBROW}>Confirm</Label>
-          <h1 style={{ ...sans, fontSize: FS.xl, fontWeight: FW.bold, color: T.ink, margin: "6px 0 4px", lineHeight: LH.tight }}>
-            {c.ticker} · {c.name}
-          </h1>
-          <p style={{ ...sans, fontSize: FS.md, color: T.mut, lineHeight: LH.body, margin: 0 }}>
-            {c.legs.length} legs, expiring {c.expKey || `in ${Math.round(c.dte)} days`}. Risking {money(totalRisk)}
-            {Number.isFinite(c.maxProfit) ? ` to make up to ${money(c.maxProfit * n)}.` : `, with ${NO_CEILING} on what it can make.`}
-          </p>
-        </>
-      )}
-
-      {showFigure && <Card style={{ marginTop: 14 }}>
-        <Label style={EYEBROW}>What this looks like</Label>
-        <div style={{ marginTop: 10 }}>
-          <UnifiedFigure legs={c.legs} entryNet={c.entryNet} spot={c.spot} bars={bars}
-            dte={c.dte} sigma={sigma} driftAnnual={driftAnnual} ticker={c.ticker} height={340} />
-        </div>
-      </Card>}
-
-      <Card style={{ marginTop: 12 }}>
-        <Label style={EYEBROW}>What is being sent</Label>
-        <div style={{ ...mono, fontSize: FS.sm, color: T.ink, marginTop: 8, lineHeight: 1.7 }}>
-          {c.legs.map((l, i) => (
-            <div key={i}>
-              {l.side > 0 ? "BUY" : "SELL"} {l.qty * n} × {c.ticker} {price(l.strike)} {l.type === "call" ? "call" : "put"}
-            </div>
-          ))}
-        </div>
-        {/* WHAT IS BEING SENT IS THE SIZE ON SCREEN. This said "One contract of
-            each" underneath a ticket whose quantity field could say seven —
-            the app describing an order it was not about to send. */}
-        {/* THE SIZE, AND NOTHING ELSE (P9, TASK 3). "on a paper account" is
-            the header badge, and "nothing is sent until you tap below" is the
-            button four lines down saying so itself. What is left is the fact
-            only this line carries: every figure above is for all of them. */}
-        <div style={{ ...sans, fontSize: FS.sm, color: T.mut, marginTop: 8, lineHeight: LH.body }}>
-          {n === 1
-            ? "One combination. Nothing is sent until you tap below."
-            : `${n} combinations — every figure above is for all ${n}.`}
-        </div>
-      </Card>
-
-      <Card style={{ marginTop: 12 }}>
-        <Label style={EYEBROW}>{refused ? "The gate refused this" : "The checks that run when you tap"}</Label>
-        <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
-          {rows.map((r) => <CheckRow key={r.id} ok={r.ok} text={r.text} />)}
-        </div>
-        {showWarnings && (shown?.warnings || []).map((w, i) => (
-          <div key={i} style={{ display: "flex", gap: 10, alignItems: "flex-start", marginTop: 12 }}>
-            <AlertTriangle size={17} style={{ color: T.amber, flexShrink: 0, marginTop: 1 }} />
-            <span style={{ ...sans, fontSize: FS.sm, color: T.body, lineHeight: LH.body }}>{w.message}</span>
-          </div>
-        ))}
-        {/* A REFUSAL AND A REASSURANCE MAY NOT SHARE A SHEET EITHER (P9, TASK 1).
-            `refused` renders directly below; "none of them stops the order"
-            over "The order was not sent" is the same contradiction the trade
-            card carried. The count and the pointer stay — only the clause that
-            argues with the refusal below it goes. */}
-        {!showWarnings && (shown?.warnings || []).length > 0 && (
-          <div style={{ ...sans, fontSize: FS.sm, color: T.mut, marginTop: 12, lineHeight: LH.body }}>
-            {(shown.warnings || []).length} warning{(shown.warnings || []).length === 1 ? "" : "s"} apply to this
-            trade. {(shown.warnings || []).length === 1 ? "It is" : "They are"} in the warnings panel on
-            the step this sheet closes back onto, written once{refused
-              ? " — the refusal below is what decides."
-              : " — none of them stops the order."}
-          </div>
-        )}
-        {refused && (
-          <Pill tone={T.red}>
-            The order was not sent. {shown.violations.map((v) => v.message).join(" ")}
-          </Pill>
-        )}
-      </Card>
-
-      <Card style={{ marginTop: 12 }}>
-        <Label style={EYEBROW}>The exit plan — decided now, not later</Label>
-        <div style={{ ...sans, fontSize: FS.md, fontWeight: FW.bold, color: T.ink, marginTop: 8, lineHeight: LH.body }}>
-          {exitPlanSentence(takeProfitTarget({ legs: c.legs, maxProfit: c.maxProfit, maxLoss: c.maxLoss, entryNet: c.entryNet }))}
-        </div>
-        <div style={{ ...sans, fontSize: FS.sm, color: T.mut, marginTop: 6, lineHeight: LH.body }}>
-          {exitPlanDetail(takeProfitTarget({ legs: c.legs, maxProfit: c.maxProfit, maxLoss: c.maxLoss, entryNet: c.entryNet }), contracts)}
-        </div>
-      </Card>
-
-      <button onClick={onConfirm} disabled={busy || refused || PREVIEW} title={PREVIEW ? PREVIEW_READ_ONLY : undefined}
-        style={{ ...sans, width: "100%", minHeight: 58, marginTop: 18, marginBottom: BADGE_BTN_GAP, fontSize: FS.md, fontWeight: FW.bold, borderRadius: 10,
-          cursor: busy ? "wait" : refused ? "not-allowed" : "pointer", opacity: busy ? 0.6 : refused ? 0.45 : 1,
-          background: T.amber, color: T.onAccent, border: "none" }}>
-        {busy ? "Checking…" : PREVIEW ? "Read-only preview" : refused ? "Blocked by the risk gate" : `Open this on paper · ${money(totalRisk)} at risk${n > 1 ? ` (${n} × ${money(c.risk)})` : ""}`}
-      </button>
-      {/* A DEPLOY PREVIEW IS READ-ONLY (redesign PR 2, TASK 0a): nothing is opened, not even on the app's own book. */}
-      {PREVIEW && (
-        <div style={{ ...sans, fontSize: FS.sm, color: T.amber, marginTop: 4, lineHeight: LH.body }}>{PREVIEW_READ_ONLY}</div>
-      )}
-
-      {refused && onDesk && (
-        <button onClick={onDesk}
-          style={{ ...sans, fontSize: FS.md, minHeight: TAP, marginTop: 8, padding: "8px 4px", background: "transparent", border: "none", color: T.blue, cursor: "pointer", textAlign: "left", width: "100%" }}>
-          Change the trade above and try again →
-        </button>
-      )}
-
-      <div style={{ ...sans, fontSize: FS.xs, color: T.dim, marginTop: 14, textAlign: "center", lineHeight: LH.body }}>
-        Paper trading only. Educational software, not financial advice.
-      </div>
-    </div>
-  );
-}
-

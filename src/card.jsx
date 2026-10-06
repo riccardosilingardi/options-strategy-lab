@@ -32,7 +32,7 @@ import { RULES, money, chanceText, returnText, NO_CEILING,
   targetPriceOf, stopSigns, sizedHeading, CARD_LABELS,
   meetsRequest, resultsLine, missReasonLine, nearestRelaxation, fillPriceHeading,
   futureTile, pastTileText, futureInfo, pastInfo, HIDE_MISSES_TOGGLE,
-  FIGURE_DEFINITIONS, DETAILS_FOLD } from "./rules.js";
+  FIGURE_DEFINITIONS, DETAILS_FOLD, sentenceCase } from "./rules.js";
 
 const FS = TYPE.size, FW = TYPE.weight, LH = TYPE.line;
 
@@ -369,13 +369,14 @@ function CompactCard({ name, legs, rr, pop, figures, picture, misses, actions, s
       <StopSigns signs={signs} style={{ marginTop: 0 }} />
       <div>
         {/* Four columns sized to their names, spread across the card: equal quarters would fold RETURN ON RISK onto two lines at 390px. */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, auto)", justifyContent: "space-between", gap: 6 }}>
+        <div data-compact-figures style={{ display: "grid", gridTemplateColumns: "repeat(4, auto)", justifyContent: "space-between", gap: 6 }}>
           {cells.map(([id, k, v]) => (
             <div key={id} data-tile={k} data-sorted={sortedBy === id ? "true" : undefined} style={{ minWidth: 0, ...ring(id) }}>
               <button onClick={() => setDef((d) => (d === id ? null : id))} aria-expanded={def === id}
                 style={{ ...sans, display: "block", width: "100%", textAlign: "left", padding: 0, background: "transparent", border: "none",
                   cursor: "pointer", fontSize: FS.xs, lineHeight: LH.tight, color: T.mut, minHeight: 18, whiteSpace: "nowrap" }}>
-                <span style={{ textDecoration: "underline dotted", textUnderlineOffset: 3 }}>{k}</span>
+                {/* The mockup writes the names in sentence case ("You risk"); the words are CARD_LABELS' (one home). */}
+                <span style={{ textDecoration: "underline dotted", textUnderlineOffset: 3 }}>{sentenceCase(k)}</span>
               </button>
               <div style={{ ...mono, fontSize: FS.md, fontWeight: FW.bold, lineHeight: LH.tight, color: muted ? T.dim : T.ink,
                 fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{v}</div>
@@ -385,18 +386,18 @@ function CompactCard({ name, legs, rr, pop, figures, picture, misses, actions, s
         {def && <div role="note" style={{ ...sans, fontSize: FS.xs, lineHeight: LH.body, color: T.body, marginTop: 6 }}>{FIGURE_DEFINITIONS[def]}</div>}
       </div>
       {(needs || stance) && (
-        <div style={{ ...sans, fontSize: FS.xs, lineHeight: LH.tight, color: muted ? T.mut : (STANCE_COLOR[stanceKind] || T.mut) }}>
+        <div data-needs style={{ ...sans, fontSize: FS.xs, lineHeight: LH.tight, color: muted ? T.mut : (STANCE_COLOR[stanceKind] || T.mut) }}>
           {[needs, stance].filter(Boolean).join(" · ")}
         </div>
       )}
-      <div style={{ ...mono, fontSize: FS.xs, lineHeight: LH.body, color: T.mut, display: "flex", flexWrap: "wrap", columnGap: 6 }}>
+      <div data-future-past style={{ ...mono, fontSize: FS.xs, lineHeight: LH.body, color: T.mut, display: "flex", flexWrap: "wrap", columnGap: 6 }}>
         {/* The two figures are the FUTURE and PAST tiles' own values (`futureTile()`, `pastTileText()`), so a row, this line
             and the full card print one figure (figures.test.jsx). */}
         <span data-tile={CARD_LABELS.future} data-sorted={sortedBy === "future" ? "true" : undefined} style={{ whiteSpace: "nowrap", ...ring("future") }}>
-          FUTURE avg <b style={{ color: muted ? T.dim : T.ink }}>{ft.value}</b></span>
+          Future avg <b style={{ color: muted ? T.dim : T.ink }}>{ft.value}</b></span>
         <span aria-hidden="true">·</span>
         <span data-tile={CARD_LABELS.past} data-sorted={sortedBy === "past" ? "true" : undefined} style={{ whiteSpace: "nowrap", ...ring("past") }}>
-          PAST YRS <b style={{ color: muted ? T.dim : T.ink }}>{pastTileText(past)}</b></span>
+          Past yrs <b style={{ color: muted ? T.dim : T.ink }}>{pastTileText(past)}</b></span>
       </div>
       {placeAtRest && <div data-place style={{ ...mono, fontSize: FS.xs, fontWeight: FW.bold, lineHeight: LH.body, color: muted ? T.mut : T.blue }}>{placeAtRest}</div>}
       {disagree && <div style={{ ...sans, fontSize: FS.xs, lineHeight: LH.tight, color: T.amber }}>{disagree}</div>}

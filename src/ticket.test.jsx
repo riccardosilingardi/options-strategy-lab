@@ -41,7 +41,8 @@ import {
   limitPlacement, INDICATIVE_CLAUSE,
   rewardRiskRange, RR_POINTS, crossingCost, crossingCostNote, openingMarkNote, MIN_NET_DOLLARS,
 } from "./rules.js";
-import { analyze, shortlistWithFloors, TradeCard } from "./App.jsx";
+import { analyze, shortlistWithFloors } from "./App.jsx";
+import { WhySection } from "./build.jsx";
 import { terminalDist, compareDistInputs, compareDistNote, ComparePayoffs } from "./visuals.jsx";
 import { candidateOf } from "./path.js";
 import { evaluateTrade } from "./riskGate.js";
@@ -590,9 +591,9 @@ check("the five-line card renders all five lines, with real numbers", () => {
   const card = tradeCard(CARD_ARGS);
   eq(card.lines.length, 5, "the card is not five lines");
   eq(card.lines.map((l) => l.id).join(","), TRADE_CARD_IDS.join(","), "the five are not the five");
-  const html = renderToStaticMarkup(
-    <TradeCard ticker="SOYB" name="Bull Call Spread" card={card} refusals={[]}
-      onNumbers={() => {}} onOrder={() => {}} />);
+  // REDESIGN PR 3 (TASK 0b): `TradeCard` is gone (nothing mounted it since PR 2); the five lines are Build's "Why this
+  // trade", opened.
+  const html = renderToStaticMarkup(<WhySection lines={card.lines} currency={card.currency} reasonRule="" initialOpen />);
   for (const l of card.lines) {
     has(html, l.label);
     // every sentence, whole, not a summary of it
@@ -622,22 +623,9 @@ check("the five-line card renders all five lines, with real numbers", () => {
   hasNot(html, "€");
 });
 
-check("A REFUSAL IS ON THE FIRST SCREEN, NEVER BEHIND THE TAP", () => {
-  const card = tradeCard(CARD_ARGS);
-  const refusals = [{ code: "UNLISTED_CONTRACT", message: unlistedContractNote(
-    [{ i: 0, leg: { strike: 27.5, type: "call" }, side: 1 }], 2) }];
-  const html = renderToStaticMarkup(
-    <TradeCard ticker="SOYB" name="Bull Call Spread" card={card} refusals={refusals}
-      onNumbers={() => {}} onOrder={() => {}} />);
-  has(html, "THIS ORDER WOULD NOT BE SENT");
-  has(html, "27.5C");
-  has(html, "never listed");
-  // ...and the two taps that hide the NUMBERS are still offered beside it: the
-  // tap only ever hides figures that explain a trade, never a reason it cannot
-  // be made.
-  has(html, "All the numbers");
-  has(html, "Price it and send");
-});
+/* REDESIGN PR 3 (TASK 0b): "A REFUSAL IS ON THE FIRST SCREEN" tested `TradeCard`, which nothing mounted since PR 2. On Build
+   a refusal is the title's STOP SIGNS and Send held with the gate's reason beside the button (build.test.jsx, "THE EXIT
+   PLAN AND SEND"); the unlisted contract itself is refused by the gate (riskGate.test.js, UNLISTED_CONTRACT). */
 
 check("an unknown is still not a number on the card", () => {
   const blank = tradeCard({ ticker: "SOYB", name: "x" });

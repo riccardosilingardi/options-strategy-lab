@@ -50,7 +50,7 @@ import { isStale, freshnessNote, staleAmong , findFreshness } from "./freshness.
 import { evaluateTrade, gateSummary } from "./riskGate.js";
 import { DEMO, DEMO_BANNER, DEMO_TOOLTIP, DEMO_SEED_TICKERS, demoPositions } from "./demo.js";
 import { PREVIEW, PREVIEW_BANNER, PREVIEW_READ_ONLY } from "./deploy.js";
-import { CapitalOnboarding, ConfirmSteps, Card, Pill, statusLine } from "./wizard.jsx";
+import { CapitalOnboarding, Card, Pill, statusLine } from "./wizard.jsx";
 // THE CONTROLS AND THE ONE CANDIDATE CARD (ROADMAP P10). Its own file: it is
 // nothing but a trade, so it may not live in `steps.jsx`, and `wizard.jsx`
 // renders the same card, so it may not live here.
@@ -1204,132 +1204,6 @@ const fmt$ = (x) => {
 // a maximum profit of $0 for a payoff that has no maximum at all.
 const ceil$ = (x) => (Number.isFinite(x) ? fmt$(x) : NO_CEILING);
 const ago = (d) => { const m = Math.round((Date.now() - new Date(d)) / 60000); return m < 60 ? `${m}m ago` : m < 1440 ? `${Math.round(m / 60)}h ago` : `${Math.round(m / 1440)}d ago`; };
-
-/* ====================================================================
-   THE TRADE CARD — FIVE FIXED LINES (ROADMAP P4, PRD §4n).
-
-   What you are betting on, what you risk, how often it works, when it exits,
-   what would invalidate it. The sentences are generated in `rules.js` by
-   `tradeCard()`, with every other generated sentence, so they cannot drift
-   from the numbers they describe — and no number on this card is new: it is
-   `analyze()` at the price that will be sent, `chanceOf()`'s one simulation,
-   `sizing()`'s limits through the gate, and the rules themselves.
-
-   >>> A REFUSAL IS NEVER BEHIND A TAP. <<< Anything that stops the order — a
-   gate violation, an unpriceable leg, a contract the chain never listed —
-   renders HERE, beside the button, under the same rule as "an order that fails
-   must fail where the button is". The tap only ever hides numbers that explain
-   a trade, never a reason it cannot be made.
-
-   LAID OUT FOR A 390px PHONE: one column, a 18px rail for the line number, no
-   horizontal scroll, and every control at least 44px tall.
-==================================================================== */
-/* THE FIVE LINES, ON THEIR OWN: what the trade bets on, risks, how often it works, when it exits and what would
-   make it wrong. On a trade that arrived from a card they sit behind "Why this trade" (PR #44, TASK 4). */
-export function TradeLines({ card }) {
-  if (!card) return null;
-  return (
-    <div style={{ display: "grid", gap: 11, marginTop: 12 }}>
-      {card.lines.map((l, i) => (
-        <div key={l.id} style={{ display: "grid", gridTemplateColumns: "18px minmax(0, 1fr)", gap: 8, alignItems: "start" }}>
-          <div style={{ ...mono, fontSize: FS.xs, fontWeight: 800, color: T.violet, lineHeight: 1.6 }}>{i + 1}</div>
-          <div style={{ minWidth: 0 }}>
-            <div style={{ ...mono, fontSize: FS.xs, letterSpacing: 0.4, color: T.dim, fontWeight: 700 }}>{l.label}</div>
-            <div style={{ ...sans, fontSize: FS.md, color: T.body, lineHeight: 1.55, marginTop: 2 }}>{l.text}</div>
-          </div>
-        </div>
-      ))}
-      <div style={{ ...mono, fontSize: FS.xs, color: T.dim, lineHeight: 1.6 }}>{card.currency}</div>
-    </div>
-  );
-}
-
-/* `compact` is "size and send" on a trade that has its own card above: no name, no five lines (they are behind
-   "Why this trade"), and the refusals, the gate's pass line and the two buttons exactly as they were. */
-export function TradeCard({ ticker, name, card, refusals = [], onNumbers, onOrder, orderLabel, compact = false, children }) {
-  if (!card) return null;
-  return (
-    <div style={{ marginTop: 14, padding: "12px 13px", background: T.panel, border: `1px solid ${T.violet}66`, borderLeft: `3px solid ${T.violet}`, borderRadius: 9 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
-        <div style={{ ...mono, fontSize: FS.xs, letterSpacing: "0.15em", color: T.violet }}>{compact ? "SIZE AND SEND" : "THE TRADE"}</div>
-        {!compact && <div style={{ ...mono, fontSize: FS.xs, color: T.dim }}>FIGURES IN {CARD_CURRENCY.toUpperCase()}</div>}
-      </div>
-      {!compact && (
-        <div style={{ ...sans, fontSize: FS.lg, fontWeight: 800, color: T.ink, marginTop: 3, lineHeight: 1.3 }}>
-          {ticker} · {name}
-        </div>
-      )}
-      {!compact && <TradeLines card={card} />}
-
-      {/* THE REFUSALS, ON THE FIRST SCREEN, ALWAYS. */}
-      {refusals.length > 0 && (
-        <div style={{ marginTop: 12, padding: "9px 11px", background: `${T.red}12`, border: `1px solid ${T.red}88`, borderRadius: 7 }}>
-          <div style={{ ...mono, fontSize: FS.xs, color: T.red, fontWeight: 800, letterSpacing: 0.4 }}>
-            ✗ THIS ORDER WOULD NOT BE SENT
-          </div>
-          <div style={{ display: "grid", gap: 7, marginTop: 6 }}>
-            {refusals.map((r) => (
-              <div key={r.code} style={{ ...sans, fontSize: FS.sm, color: T.body, lineHeight: 1.55 }}>{r.message}</div>
-            ))}
-          </div>
-        </div>
-      )}
-      {children}
-
-      <div style={{ display: "flex", gap: 8, marginTop: 13, flexWrap: "wrap" }}>
-        <Btn ghost color={T.blue} onClick={onNumbers}>All the numbers →</Btn>
-        <Btn color={T.violet} onClick={onOrder}>{orderLabel || "Price it and send →"}</Btn>
-      </div>
-      {/* The warnings' two "written once" reminders are gone (PR #40, TASK 2):
-          the warnings print once, as the stop-signs strip above the figures. */}
-      {!compact && <div style={{ ...mono, fontSize: FS.xs, color: T.dim, marginTop: 7, lineHeight: 1.6 }}>{card.currency}</div>}
-    </div>
-  );
-}
-
-/* ====================================================================
-   THE WARNINGS, ONCE.
-
-   >>> COUNTED ON THE OWNER'S PHONE, one Build screen, UNG 2026-09-20. <<<
-   The four-factor CONFLICT paragraph — the same ~400 characters — was on that
-   page FOUR TIMES: inside "Why this trade", again in the amber
-   against-the-signal block, again in the order ticket's warning list, and
-   again in "The checks that run when you tap". The gate embeds
-   `signals.narrative` in its SIGNAL_CONFLICT warning because the gate has no
-   screen of its own, so every surface rendering a gate verdict printed the
-   paragraph a second time beside the panel that already carried it.
-
-   ONE PLACE, COLLAPSED, WITH THE NUMBER IN THE SUMMARY LINE. The narrative
-   keeps its home — the evidence panel — and everything here carries the count
-   and a pointer (`warningsToPrint()` / `conflictSummaryLine()` in rules.js).
-   The gate is UNCHANGED: what changed is what a screen prints.
-
-   IT OPENS BY ITSELF WHEN SOMETHING IS REQUIRED OF THE USER. A textarea that
-   unlocks the ticket cannot be behind a tap nobody knows to make.
-==================================================================== */
-function BuildWarnings({ summary, count, forceOpen = false, children }) {
-  const [open, setOpen] = useState(false);
-  const shown = open || forceOpen;
-  if (!count) return null;
-  return (
-    <div style={{ marginTop: 10, padding: "9px 11px", background: `${T.amber}0d`, border: `1px solid ${T.amber}66`, borderRadius: 8 }}>
-      <button onClick={() => setOpen((o) => !o)} disabled={forceOpen} aria-expanded={shown}
-        style={{ display: "flex", gap: 8, alignItems: "center", width: "100%", textAlign: "left", minHeight: 44,
-          background: "transparent", border: "none", padding: 0, cursor: forceOpen ? "default" : "pointer" }}>
-        <span style={{ ...mono, fontSize: FS.xs, fontWeight: 800, color: T.amber, letterSpacing: 0.4 }}>
-          ⚠ {count} WARNING{count === 1 ? "" : "S"}
-        </span>
-        <span style={{ fontSize: FS.sm, color: T.body, lineHeight: 1.5 }}>{summary}</span>
-        {!forceOpen && (
-          <span style={{ ...mono, fontSize: FS.xs, color: T.blue, marginLeft: "auto", whiteSpace: "nowrap" }}>
-            {shown ? "hide ▲" : "read them ▼"}
-          </span>
-        )}
-      </button>
-      {shown && <div style={{ marginTop: 9 }}>{children}</div>}
-    </div>
-  );
-}
 
 /* ============================== MAIN ============================== */
 class TabBoundary extends React.Component {
@@ -4142,7 +4016,8 @@ export default function OptionsStrategyLab() {
             Since PR #48 it is the window's COUNTED mean (`seasonalSignal()`), for this trade's days. */}
         <Stat k={`SEASONALITY · ${dte} DAYS`}
           v={seasNow == null ? "—" : `${seasNow > 0 ? "+" : ""}${seasNow.toFixed(1)}%/mo`}
-          c={seasNow == null || seasNow === 0 ? T.dim : seasNow > 0 ? T.green : T.red}
+          /* RED IS FOR ERRORS ONLY (redesign PR 3, TASK 0b): a falling season is a reading, in mut. */
+          c={seasNow == null || seasNow === 0 ? T.dim : seasNow > 0 ? T.green : T.mut}
           tip={seasNow == null ? seasProv.note : `${seasSig.note} ${seasonRowLines(seasSig).join("; ")}`} />
         {/* WHERE IT CAME FROM, OR WHY THERE IS NOTHING: "the call failed" and "nobody asked yet" are reasons. */}
         <Stat k="SEASONAL SOURCE" v={seasonal[ticker] ? seas.src : "not read"}
@@ -4158,7 +4033,8 @@ export default function OptionsStrategyLab() {
             which is where the history is. */}
         {ivRank?.rank != null && (
           <Stat k="IV RANK" v={`${ivRank.rank}`}
-            c={ivRank.rank >= RULES.expensiveIVRank ? T.red : ivRank.rank <= 40 ? T.green : T.mut}
+            /* …and dear options are a caution, in amber, never an error's red. */
+            c={ivRank.rank >= RULES.expensiveIVRank ? T.amber : ivRank.rank <= 40 ? T.green : T.mut}
             tip="Where today's option prices sit against their own past year (0 = cheapest ever, 100 = dearest). High means selling premium pays better; low means buying options is good value." />
         )}
       </div>
@@ -4442,7 +4318,9 @@ export default function OptionsStrategyLab() {
      the Journal and Settings (PR 2 and PR 3). The desk's count line is the Positions badge here. */
   // REDESIGN PR 2: Build draws no desk header either — its own header row (‹ back · Paper) is the mockup's.
   const onBuildStep = tab === "build" && !showSettings && "build" === step;
-  const chromeless = onFindStep || onMarketStep || onBuildStep || (tab === "watching" && !showSettings);
+  // REDESIGN PR 3: Positions (and its Orders segment) draws its own header too (the board "Positions").
+  const onPositions = tab === "positions" && !showSettings;
+  const chromeless = onFindStep || onMarketStep || onBuildStep || onPositions || (tab === "watching" && !showSettings);
   /* FIND'S STATUS LINE: "<freshness> · <feed> · Paper". The feed is the feeds the selected markets came from. */
   const findFeeds = Array.from(new Set(find.markets.map((tk) => feedName(chains[tk])).filter(Boolean))).join(" / ");
   /* FIND'S BAR READS THE SELECTION, NOT ONE MARKET (PR #46, TASK 1): "N markets · prices Xm ago", the OLDEST. */
@@ -4457,6 +4335,7 @@ export default function OptionsStrategyLab() {
   const findStale = {
     stale: !!findFresh.oldest && isStale("chain", findFresh.oldest),
     closeDay: findFresh.oldest ? new Date(findFresh.oldest).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" }) : null,
+    closeWeekday: findFresh.oldest ? new Date(findFresh.oldest).toLocaleDateString("en-GB", { weekday: "long" }) : null,
     failedAt: chainErrAt && findFresh.oldest && chainErrAt > findFresh.oldest
       ? new Date(chainErrAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) : null,
     onRetry: refreshFind,
@@ -5203,6 +5082,7 @@ export default function OptionsStrategyLab() {
             },
             why: { stance: stanceText(signalStance(fusedHere, tradeDir)), factors: factorStands(fusedHere, tradeDir),
               reasonRule: reasonRuleText(AGAINST_MIN_SCORE, clash), lines: buildCard ? buildCard.lines : [],
+              currency: buildCard ? buildCard.currency : null,
               onMarketRead: () => goMarket(ticker, "overview"), readLabel: MARKET_READ_LINK },
             copilot: { apiKey: "server", convo: copilot, setConvo: setCopilot, onAnalysis: logAnalysis,
               ctx: { store, scan, news: news[ticker]?.items || [], ticker, legs, expKey, A, spot, seasonalSrc: seas.src, setMsg,
@@ -5909,7 +5789,7 @@ export default function OptionsStrategyLab() {
           <BuildNoQuotes back={{ label: "Find", onClick: () => goStep("find") }} title={legs.length ? stratName : ticker}
             sub={buildSubLine({ ticker, expKey, dte, n: contracts })}
             sentence={`${ticker}'s option prices have not come back${legs.length ? `, so ${legs.length === 1 ? "this leg is" : "these legs are"} not priced` : ""}: nothing on this trade is worked out until a bid and an ask arrive.`}
-            legs={legs} onRetry={() => refreshChain(ticker)} onPickExpiry={() => goMarket(ticker, "chain")}
+            legs={legs} legsTitle={`Legs${expKey ? ` · ${expiryShort(expKey)}` : ""}`} onRetry={() => refreshChain(ticker)} onPickExpiry={() => goMarket(ticker, "chain")}
             lastRead={`Last read: ${chainErrAt ? new Date(chainErrAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) : "not yet"} your time. The feed is indicative; a missing quote is shown as missing, never as zero.`} />
         )}
         {tab === "build" && !showSettings && step === "build" && buildScreen === "empty" && (
@@ -5918,14 +5798,9 @@ export default function OptionsStrategyLab() {
 
         </TabBoundary>
 
-        <div style={{ ...mono, fontSize: FS.xs, color: T.dim, textAlign: "center", marginTop: 22 }}>
-          {/* THE LIMIT IS DERIVED, NOT FIXED (PRD §3). This said "max 5% of
-              capital" — the hardcoded rule the capital model replaced — while
-              every other screen quoted the figure `sizing()` derives from the
-              user's own answers. One home, read everywhere; and until both
-              questions are answered the phrase calls it a suggestion. */}
-          Paper trading only · {sourceNote(chain)} · {perTradeLimitPhrase(limits)} · Total exposure ≤{money(limits.totalLimit)} ({pctText(RULES.totalExposurePct)}) · Educational software, not financial advice
-        </div>
+        {/* THE FOOTER UNDER EVERY SCREEN IS GONE (owner, 6 Oct 2026: "non mi interessa, puoi toglierlo"). Paper only is said
+            where it matters — Build's "Paper" pill and its review sheet, the Positions header's account, Settings → Connections;
+            the limits are in Settings and on the account strip; the feed is on Find's status line and the market page. */}
       </div>
       {/* ONE BOTTOM BAR (PR #47, TASK 4). The badge on Positions is decisions + closes working. */}
       <BottomBar current={placeOf({ tab, step, showSettings })} badge={nAttention + attn.closesWorking}

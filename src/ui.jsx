@@ -355,7 +355,7 @@ export function Placeholder({ id }) {
    which is navigation (`deskSheet`, nav.js), so Back closes it. What it holds is one tap away: the word counter
    (wordcount.mjs) does not score it at rest.
 ==================================================================== */
-export function Sheet({ open, title, value = null, onClose, footer = null, children }) {
+export function Sheet({ open, title, value = null, sub = null, subMono = false, onClose, footer = null, children }) {
   useEffect(() => {
     if (!open || typeof document === "undefined") return undefined;
     const esc = (e) => { if (e.key === "Escape" && onClose) onClose(); };
@@ -374,7 +374,12 @@ export function Sheet({ open, title, value = null, onClose, footer = null, child
           padding: "8px 16px calc(20px + env(safe-area-inset-bottom, 0px))", gap: 12 }}>
         <div aria-hidden="true" style={{ width: 40, height: 4, borderRadius: 2, background: T.field, margin: "0 auto" }} />
         <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-          <h2 data-view-heading tabIndex={-1} style={{ ...sans, fontSize: FS.lg, fontWeight: FW.bold, lineHeight: LH.tight, color: T.ink, margin: 0, outline: "none" }}>{title}</h2>
+          <div style={{ minWidth: 0 }}>
+            <h2 data-view-heading tabIndex={-1} style={{ ...sans, fontSize: FS.lg, fontWeight: FW.bold, lineHeight: LH.tight, color: T.ink, margin: 0, outline: "none" }}>{title}</h2>
+            {/* The line under the title (the mockups: the structure on "How the numbers connect", "Paper account · …" on
+                the review sheet). */}
+            {sub != null && <p data-sheet-sub style={{ ...(subMono ? mono : sans), fontSize: FS.xs, color: T.mut, lineHeight: LH.body, margin: "2px 0 0" }}>{sub}</p>}
+          </div>
           {value != null && <span data-sheet-value style={{ ...mono, fontSize: FS.md, fontWeight: FW.bold, color: T.ink, fontVariantNumeric: "tabular-nums" }}>{value}</span>}
           <span style={{ flex: 1 }} />
           <IconButton label="Close" onClick={onClose} style={{ marginRight: -12 }}><X size={20} strokeWidth={1.75} aria-hidden="true" /></IconButton>
@@ -410,7 +415,7 @@ export function SegmentBar({ items = [], value, onChange, label, style }) {
             aria-label={it.aria || undefined}
             style={{ ...sans, flex: 1, minWidth: 0, minHeight: TAP, borderRadius: 8, border: "none", cursor: it.disabled ? "not-allowed" : "pointer",
               fontSize: FS.sm, fontWeight: on ? FW.bold : FW.regular, background: on ? T.ink : "transparent", color: on ? T.bg : it.disabled ? T.dim : T.mut,
-              display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "0 6px", lineHeight: LH.tight }}>
+              display: "inline-flex", alignItems: "center", justifyContent: "center", gap: it.count != null ? 6 : undefined, padding: 0, lineHeight: LH.tight }}>
             {it.label}{it.count != null ? <span style={{ ...mono, fontSize: FS.xs, fontVariantNumeric: "tabular-nums" }}>{it.count}</span> : null}
           </button>
         );
@@ -422,7 +427,7 @@ export function SegmentBar({ items = [], value, onChange, label, style }) {
 /** Underlined tabs (Find's categories, the market page's three tabs): the chosen one in ink, bold, with an amber rule. */
 export function UnderTabs({ items = [], value, onChange, label, style }) {
   return (
-    <div role="group" aria-label={label} style={{ display: "flex", padding: "0 8px", borderBottom: `1px solid ${T.line}`, overflowX: "auto",
+    <div role="group" aria-label={label} style={{ display: "flex", gap: 2, padding: "0 8px", borderBottom: `1px solid ${T.line}`, overflowX: "auto",
       whiteSpace: "nowrap", ...style }}>
       {items.map((it) => {
         const on = it.id === value;
@@ -430,7 +435,7 @@ export function UnderTabs({ items = [], value, onChange, label, style }) {
           <button key={String(it.id)} onClick={() => onChange && onChange(it.id)} aria-pressed={on}
             style={{ ...sans, flex: "0 0 auto", minHeight: TAP, padding: "0 10px", background: "transparent", border: "none",
               borderBottom: `3px solid ${on ? T.amber : "transparent"}`, cursor: "pointer", fontSize: FS.md, fontWeight: on ? FW.bold : FW.regular,
-              color: on ? T.ink : T.mut, display: "inline-flex", alignItems: "center", gap: 6, lineHeight: LH.tight }}>
+              color: on ? T.ink : T.mut, display: "inline-flex", alignItems: "center", gap: it.count != null ? 6 : undefined, lineHeight: LH.tight }}>
             {it.label}
             {it.count != null && <span style={{ ...mono, fontSize: FS.xs, fontWeight: FW.regular, color: T.dim, fontVariantNumeric: "tabular-nums" }}>{it.count}</span>}
           </button>
@@ -441,15 +446,16 @@ export function UnderTabs({ items = [], value, onChange, label, style }) {
 }
 
 /** A filter chip: its name in mut, its value in mono ink. Off its default it is filled with ink. `strong` (⇅ Order) has
- *  an ink border and bold text always. No amber: amber is the action colour. */
-export const FilterChip = ({ name = null, value = null, valueMono = true, off = false, strong = false, onClick, label, children, style }) => (
+ *  an ink border and bold text always. No amber: amber is the action colour. `opens` (a chip that opens a sheet) ends its
+ *  value with ▾ (the mockups, checked by scripts/audit-screen.mjs). */
+export const FilterChip = ({ name = null, value = null, valueMono = true, off = false, strong = false, opens = false, onClick, label, children, style }) => (
   <button onClick={onClick} aria-label={label} aria-pressed={off}
     style={{ ...sans, flex: "0 0 auto", minHeight: TAP, padding: "0 12px", borderRadius: 999, cursor: "pointer", fontSize: FS.sm,
       fontWeight: off || strong ? FW.bold : FW.regular, lineHeight: LH.tight, whiteSpace: "nowrap",
       border: `1px solid ${off || strong ? T.ink : T.field}`, background: off ? T.ink : "transparent", color: off ? T.bg : T.ink,
-      display: "inline-flex", alignItems: "center", gap: 5, ...style }}>
+      display: "inline-flex", alignItems: "center", gap: 6, ...style }}>
     {name != null && <span style={{ color: off ? T.bg : strong ? T.ink : T.mut }}>{name}</span>}
-    {value != null && <span style={valueMono ? { ...mono, fontVariantNumeric: "tabular-nums" } : null}>{value}</span>}
+    {value != null && <span style={valueMono ? { ...mono, fontVariantNumeric: "tabular-nums" } : null}>{opens ? `${value} ▾` : value}</span>}
     {children}
   </button>
 );
