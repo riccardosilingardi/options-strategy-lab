@@ -32,6 +32,29 @@ export const sans = { fontFamily: SANS_STACK };
 export const TAP = 44;
 
 /* ====================================================================
+   A COMPUTER'S SCREEN (redesign PR 3b; owner, 6 Oct 2026: "le schermate si adattino se vedo da pc o mobile" — two panes
+   on wide screens). From WIDE_MIN pixels the bottom bar becomes a left sidebar (`RAIL_W` wide) and Find and Positions
+   show the list beside the chosen item. A phone is unchanged: below WIDE_MIN nothing here applies.
+==================================================================== */
+export const WIDE_MIN = 1024;
+export const RAIL_W = 200;
+/** True while the window is at least WIDE_MIN wide. False where there is no window (a test, the server). */
+export function useWide() {
+  const q = `(min-width: ${WIDE_MIN}px)`;
+  const read = () => (typeof window !== "undefined" && typeof window.matchMedia === "function" ? window.matchMedia(q).matches : false);
+  const [wide, setWide] = useState(read);
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return undefined;
+    const m = window.matchMedia(q);
+    const on = () => setWide(m.matches);
+    on();
+    if (m.addEventListener) m.addEventListener("change", on); else if (m.addListener) m.addListener(on);
+    return () => { if (m.removeEventListener) m.removeEventListener("change", on); else if (m.removeListener) m.removeListener(on); };
+  }, [q]);
+  return wide;
+}
+
+/* ====================================================================
    BUTTON — 44px tall whatever the size. `small` narrows the padding, never the height: a 22px "Close at limit"
    was the control the owner needed most. The ghost border is the full colour (1.4.11). Any other prop
    (aria-label, aria-expanded, title) reaches the button.

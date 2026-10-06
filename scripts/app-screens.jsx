@@ -21,7 +21,7 @@ import { readFileSync } from "node:fs";
 import OptionsStrategyLab from "../src/App.jsx";
 import { normaliseAlpacaChain } from "../src/chain.js";
 import { avMonthlyBody } from "../src/avFixture.js";
-import { bookRecords, bookHoldings, bookOrders } from "./book-fixture.js";
+import { bookRecords, bookHoldings, bookOrders, bookJournal } from "./book-fixture.js";
 
 const [mode, ...flags] = (location.hash || "#app").slice(1).split("+");
 const ALL = flags.includes("all");
@@ -110,7 +110,7 @@ window.fetch = async (input, init = {}) => {
 
 // A first run is over: the capital questions are answered (onboarding is the wizard's, photographed elsewhere).
 try {
-  localStorage.setItem("options-lab-state", JSON.stringify({ journalSeq: BOOK ? 4 : 0, saved: [], positions: BOOK ? bookRecords() : [], expiryLog: [], journal: [], ivHist: {}, copilotLog: [],
+  localStorage.setItem("options-lab-state", JSON.stringify({ journalSeq: BOOK ? 5 : 0, saved: [], positions: BOOK ? bookRecords() : [], expiryLog: [], journal: BOOK ? bookJournal() : [], ivHist: {}, copilotLog: [],
     seasonal: {}, settings: { capital: POOR ? 200 : 10000, concurrentTarget: 4, savings: null, sizeOverride: null, sizingFree: null, onboarded: true, mode: "pro",
       notifyWhenReady: false, findOrder: "ev", webhook: "", reportFreq: "weekly", reportLast: 0, reportLastMd: "" } }));
 } catch { /* none */ }

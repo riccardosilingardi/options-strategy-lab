@@ -164,7 +164,9 @@ const MIGRATED = ["src/ui.jsx", "src/card.jsx", "src/find.jsx", "src/orders.jsx"
   // Round 2: Saved's rows, moved out of App.jsx.
   "src/saved.jsx",
   // Redesign PR 3: the position's own screen is written on the atoms and tokens from its first line.
-  "src/positionScreen.jsx"];
+  "src/positionScreen.jsx",
+  // Redesign PR 3b: so are the Journal and Settings.
+  "src/journal.jsx", "src/settings.jsx"];
 const stripped = (f) => readFileSync(f, "utf8").replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
 const ATOMS = ["Btn", "Panel", "Lbl", "Label", "Stat", "Chip", "Fold", "RangeField", "Note", "NumberInput", "TextArea", "CheckField", "Info", "Segments",
   // Redesign PR 1: the bottom sheet and the placeholder are atoms too.

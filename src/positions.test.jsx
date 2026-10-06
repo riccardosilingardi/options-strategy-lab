@@ -80,7 +80,8 @@ check("THE BOTTOM BAR: Find · Build · Positions · Journal, aria-current, 44px
 check("THE APP: no StepNav and no places row; the bar is mounted, and Integrations lives in Settings", () => {
   const app = readFileSync("src/App.jsx", "utf8");
   hasnt(app, "<StepNav"); hasnt(app, "OTHER_PLACES");
-  has(app, "<BottomBar"); has(app, "CONNECTIONS"); hasnt(app, "> INTEGRATIONS<"); hasnt(app, "<AlpacaDesk");
+  // Redesign PR 3b: Settings (and its CONNECTIONS card) is src/settings.jsx.
+  has(app, "<BottomBar"); has(readFileSync("src/settings.jsx", "utf8"), "CONNECTIONS"); hasnt(app, "> INTEGRATIONS<"); hasnt(app, "<AlpacaDesk");
   has(app, "BADGE_SAFE + NAV_BAR_H");
 });
 

@@ -21,7 +21,10 @@ non-expert trader who wants to learn discipline rather than be sold trades.
   lands on Find; Back on Find leaves the app. What Home said moved where the mockups put it: positions to look at are the
   Positions badge on the bottom bar (its spoken name is Home's old sentence, `statusLine()`), Settings is the gear in Find's
   header. Find and the market page draw no desk header (round 2), nor Build (redesign PR 2), nor Positions (redesign
-  PR 3a, which draws its own: "Positions", ↻ and the gear); the Journal and Settings keep it until PR 3b.
+  PR 3a, which draws its own: "Positions", ↻ and the gear), nor the Journal and Settings (redesign PR 3b): no screen
+  keeps the desk header. **On a computer** (a window at least 1024px wide, owner, 6 Oct 2026) the bottom bar is a sidebar
+  on the left, Find's rows sit beside the market page, Positions' cards beside a position's own screen, and the Journal
+  is two columns; Build and Settings keep a 760px reading width. A phone is unchanged.
   1. **Find — one row per market (version B).** Top to bottom: "Find" with ↻ (refresh every market) and the gear; the status
      line "<freshness> · <feed> · Paper" (the stale banner with Retry in its place when stale); Results | Saved; the
      underlined category tabs "All 10 ·
@@ -184,7 +187,18 @@ non-expert trader who wants to learn discipline rather than be sold trades.
     to Alpaca), Cancel (asks first) and Details (Alpaca's status history in your time, the order id last). An order with
     no record here is tagged "sent outside this app".
   The order prints once: Build and the desk show counts only. Integrations are in Settings → Connections.
-- **The Journal** — what happened, with a timeline per position and a weekly report.
+- **The Journal (the owner's board since redesign PR 3b).** THE RECORD (level, rule closes, awareness, what is next;
+  "inside the limit" and what the measures mean behind its ⓘ), "Find a trade" (a ref, its number or a ticker), OPEN
+  (every open trade and every order still waiting, each opening on the reason it was opened and its whole timeline),
+  CLOSED TRADES with their net (each opening on why it ended — "Closed by the rules: …" or "Your reason: …" — the reason
+  it was opened, the per-trade reading, both order ids in full and its whole timeline; a figure that is not a fill is
+  never in the net), and "Refs only go up". Folded below: the weekly report (its frequency beside it), the copilot's
+  analyses, the 30-day entry floor's log. "Whole record ›" on a position's screen opens that position's entry.
+- **Settings (the owner's board since redesign PR 3b).** "‹ Back"; YOUR CAPITAL and YOUR LIMITS with what is open now
+  (positions at once, savings and your own per-trade limit with its written reason folded under "More limits");
+  FREE SIZING (one typed reason); CONNECTIONS, each saying what the app last saw of it ("Connected · checked 10:14",
+  "Not read yet" — never "Working" for a service nobody read), and the report webhook; APPEARANCE; WHEN THERE IS NOTHING
+  TO DO; START OVER.
 - **The guided door is removed** at the owner's request, 23 Sep 2026 (PR #40): "Find
   opportunities" answered "Nothing today" while Radar listed seven structures on the same
   data. Home itself is gone since redesign PR 1 round 2: the app opens on Find.
@@ -398,7 +412,10 @@ normal use, and is never asked for.
    3a's Positions, the position's screen and Orders** were photographed the same way on a fixture book (+book: three
    records, two holdings, two orders; docs/screens/redesign-pr3/) and every shipped screen was measured against the owner's
    boards themselves (`scripts/audit-screen.mjs`: 18 boards, dark and light, 0 differences unexplained) — never on a
-   phone, never live. **No screen reader was run.**
+   phone, never live. **Redesign PR 3b's Journal and Settings** joined the same audit (20 boards) and photographs, and
+   **the computer's layout (two panes, the sidebar) was photographed at 1366×900 in the same headless Chromium only —
+   never in a real desktop browser, never at other widths between 1024 and 1366, and no board draws it** (the owner chose
+   it in words). **No screen reader was run.**
 4. **Read when it happens — no credit has filled at the corrected limit** (the indicative combination ask on thin chains
    has not been measured by a fill; J-0003 never filled at it), **and "Not on Alpaca", "size N > M on the ask", the "Not
    in the app" card, an order "sent outside this app", free sizing (PR #41), and an order sent from Build's new review

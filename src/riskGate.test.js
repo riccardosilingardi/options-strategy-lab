@@ -3466,7 +3466,9 @@ test("THE FLAG: OFF by default, ON only with a typed reason, and synced through 
   const app = readFileSync("src/App.jsx", "utf8");
   assert.match(app, /sizeOverride: null, sizingFree: null,/, "OFF in the empty store");
   assert.match(app, /sizingFree: st\.settings\?\.sizingFree \?\? null/, "in the /api/state sync payload");
-  assert.match(app, /setSetting\("sizingFree", \{ reason: freeDraft\.trim\(\), at: Date\.now\(\) \}\)/, "stored with its time");
+  // Redesign PR 3b: Settings' own control is src/settings.jsx, handed `setSetting` as `onSetting`.
+  assert.match(readFileSync("src/settings.jsx", "utf8"), /v\.onSetting\("sizingFree", \{ reason: freeDraft\.trim\(\), at: Date\.now\(\) \}\)/, "stored with its time");
+  assert.match(app, /onSetting: setSetting,/, "through the App's one setter");
   assert.match(app, /sizingFree: freeSizing,\n\s*\}\), \[store\.positions/, "the gate call reads it");
   assert.match(app, /sizingFree: freeSizing,\n\s*openedAt/, "every opened position records it");
 });

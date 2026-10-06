@@ -172,7 +172,9 @@ check("THE CARD'S CLOSE OPENS THIS SCREEN with the confirm open; the old Details
   const app = readFileSync("src/App.jsx", "utf8");
   has(app, "onClose={() => { setDetailsId(p.id); prepareCardClose(p); }}");
   hasNot(app, "<PositionDetails");
-  has(app, "{tab === \"positions\" && !showSettings && positionScreenNode}");
+  // Redesign PR 3b: on a phone the screen replaces the list; on a computer it sits beside it (`panePos`).
+  has(app, "{!panePos && tab === \"positions\" && !showSettings && positionScreenNode}");
+  has(app, "{positionScreenNode || <Note");
 });
 
 check("WCAG: every control is 44px tall and no text is under 12px", () => {

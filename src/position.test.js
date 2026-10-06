@@ -369,7 +369,8 @@ await test("NOT ON ALPACA — WIRED: the card's action, the P&L, the filing and 
   assert.ok(/positionAction\(\{[^}]*notHeld[^}]*\}\)/.test(app), "and hands it to positionAction()");
   assert.ok(/notHeld && notHeld\.length \? \{ pnl: null/.test(app), "the P&L is null, never the model mark");
   assert.ok(/pnlNote: notOnAlpaca \? NOT_A_FILL : null/.test(app), "filing stores the note");
-  assert.ok(/journalPnl\(e\)/.test(app), "the Journal row reads journalPnl()");
+  // Redesign PR 3b: the Journal's rows are src/journal.jsx.
+  assert.ok(/journalPnl\(e\)/.test(readFileSync(new URL("./journal.jsx", import.meta.url), "utf8")), "the Journal row reads journalPnl()");
   assert.ok(/"NOT ON ALPACA"/.test(app), "and the card says it in large type");
 });
 

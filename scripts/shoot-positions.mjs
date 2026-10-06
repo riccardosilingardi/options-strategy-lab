@@ -1,5 +1,6 @@
 // ============================================================================
-// scripts/shoot-positions.mjs — PHOTOGRAPHS OF POSITIONS, A POSITION'S SCREEN AND ORDERS (redesign PR 3, TASK 8).
+// scripts/shoot-positions.mjs — PHOTOGRAPHS OF POSITIONS, A POSITION'S SCREEN AND ORDERS (redesign PR 3, TASK 8), AND
+// SINCE PR 3b THE JOURNAL, SETTINGS AND THE COMPUTER'S TWO PANES (1366×900).
 //
 //   node scripts/shoot-positions.mjs [dir]      (default docs/screens/redesign-pr3)
 //
@@ -32,16 +33,29 @@ const SHOTS = [
   ["orders-cancel", "dark", async (p) => { await toOrders(p); await tap(p, "[data-order-actions] button", "Cancel", 700); }],
   ["orders-details", "dark", async (p) => { await toOrders(p); await tap(p, "[data-order-actions] button", "Details", 700); }],
   ["orders-light", "light", toOrders],
+  // Redesign PR 3b.
+  ["journal", "dark", async (p) => { await p.waitForTimeout(1500); await tap(p, "nav button", "Journal", 1200); }],
+  ["journal-open", "dark", async (p) => { await p.waitForTimeout(1500); await tap(p, "nav button", "Journal", 1200);
+    await tap(p, "[data-journal-open] li:nth-child(2) > button", null, 600); }, { full: true }],
+  ["journal-light", "light", async (p) => { await p.waitForTimeout(1500); await tap(p, "nav button", "Journal", 1200); }],
+  ["settings", "dark", async (p) => { await p.waitForTimeout(1500); await tap(p, "[data-find-header] button[aria-label=Settings]", null, 1200); }, { full: true }],
+  ["settings-light", "light", async (p) => { await p.waitForTimeout(1500); await tap(p, "[data-find-header] button[aria-label=Settings]", null, 1200); }],
+  ["computer-find", "dark", async (p) => { await p.waitForTimeout(1500); await tap(p, "[data-row-button]", "UNG", 1500); }, { w: 1366, h: 900 }],
+  ["computer-positions", "dark", toScreen, { w: 1366, h: 900 }],
+  ["computer-journal", "dark", async (p) => { await p.waitForTimeout(1500); await tap(p, "nav button", "Journal", 1200); }, { w: 1366, h: 900 }],
+  ["computer-build", "dark", async (p) => { await p.waitForTimeout(1500); await tap(p, "[data-row-button]", "UNG", 1500);
+    await tap(p, "[data-market] button", "Build ›", 2000); }, { w: 1366, h: 900 }],
+  ["computer-find-light", "light", async (p) => { await p.waitForTimeout(1500); await tap(p, "[data-row-button]", "UNG", 1500); }, { w: 1366, h: 900 }],
 ];
 
 const h = await openHarness();
 try {
   for (const [name, theme, go, opt = {}] of SHOTS) {
-    const { page, ctx, errors } = await h.open("app+all+book", theme, { scale: 2 });
+    const { page, ctx, errors } = await h.open("app+all+book", theme, opt.w ? { width: opt.w, height: opt.h, scale: 1 } : { scale: 2 });
     await go(page);
     if (opt.full) {
       const tall = await page.evaluate(() => document.documentElement.scrollHeight);
-      await page.setViewportSize({ width: 390, height: Math.min(tall, 6000) });
+      await page.setViewportSize({ width: opt.w || 390, height: Math.min(tall, 6000) });
       await page.waitForTimeout(300);
     }
     await page.screenshot({ path: join(OUT, `${name}.png`) });

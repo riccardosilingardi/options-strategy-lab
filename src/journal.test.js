@@ -451,10 +451,13 @@ test("the open position's timeline is reachable in full, not capped at six", () 
 });
 
 test("the Journal shows every timeline entry, not the last six", () => {
-  const app = readFileSync(new URL("./App.jsx", import.meta.url), "utf8");
-  const journalHalf = app.slice(app.indexOf("CLOSED TRADES"));
-  assert.ok(/e\.timeline\.map\(/.test(journalHalf), "the whole list is mapped");
-  assert.ok(!/e\.timeline \|\| \[\]\)\.slice\(-6\)/.test(journalHalf), "nothing truncates it");
+  // Redesign PR 3b: the Journal is src/journal.jsx; its timeline is `timelineItems()` (journalView.js), every entry.
+  const jsx = readFileSync(new URL("./journal.jsx", import.meta.url), "utf8");
+  const view = readFileSync(new URL("./journalView.js", import.meta.url), "utf8");
+  assert.ok(/<Timeline timeline=\{e\.timeline\} \/>/.test(jsx), "a closed entry maps its whole timeline");
+  assert.ok(/<Timeline timeline=\{p\.timeline\} \/>/.test(jsx), "and so does an open one");
+  assert.ok(/return \(timeline \|\| \[\]\)\.map\(/.test(view), "the whole list is mapped");
+  assert.ok(!/\.slice\(-\d/.test(view.slice(view.indexOf("export function timelineItems"), view.indexOf("export const entriesWords"))), "nothing truncates it");
 });
 
 /* ============================================================================
@@ -813,10 +816,10 @@ test("HYDRATION — a record with no seasonal or volatility stamp reads as the e
 });
 
 test("every screen that renders a timeline prints the volatility note too", () => {
-  // The Guardian (pro.jsx), the Journal (App.jsx), the weekly report's PDF
+  // The Guardian (pro.jsx), the Journal (journal.jsx since redesign PR 3b), the weekly report's PDF
   // export and the model's own context — the four places an autopilot entry's
   // text, and therefore its simulator figures, are read.
-  for (const f of ["pro.jsx", "App.jsx"]) {
+  for (const f of ["pro.jsx", "journal.jsx"]) {
     const src = readFileSync(new URL(`./${f}`, import.meta.url), "utf8");
     assert.ok(/autopilotVolNote\(/.test(src), `${f} does not render the note`);
   }
@@ -827,9 +830,9 @@ test("every screen that renders a timeline prints the volatility note too", () =
 
 test("both screens that render a timeline print the note", () => {
   // The live one (the Guardian, in pro.jsx) and the permanent record (the
-  // Journal, in App.jsx). A closed trade's autopilot entries are exactly the
+  // Journal, in journal.jsx since redesign PR 3b). A closed trade's autopilot entries are exactly the
   // ones nobody will ever re-read against the fix.
-  for (const f of ["pro.jsx", "App.jsx"]) {
+  for (const f of ["pro.jsx", "journal.jsx"]) {
     const src = readFileSync(new URL(`./${f}`, import.meta.url), "utf8");
     assert.ok(/autopilotHorizonNote\(/.test(src), `${f} does not render the note`);
   }
@@ -1509,8 +1512,14 @@ test("TASK 2 — THE JOURNAL SCREEN AND THE LEVEL READ THE HELPERS (source)", ()
   const app = readFileSync("src/App.jsx", "utf8");
   assert.match(app, /const ruled = j\.filter\(countsAsRuleClose\)\.length;/);
   assert.match(app, /const judged = j\.filter\(\(x\) => riskOkOf\(x\) != null\);/);
-  assert.match(app, /\{closeKindWords\(e\)\}/);
-  assert.match(app, /\{riskOkWords\(e\)\}/);
+  // Redesign PR 3b: a row's state is `closedState()` (journalView.js), which reads `countsAsRuleClose()`; its per-trade
+  // reading is `riskOkWords()` — both in src/journal.jsx now.
+  const jsx = readFileSync("src/journal.jsx", "utf8");
+  const view = readFileSync("src/journalView.js", "utf8");
+  assert.match(jsx, /state: closedState\(e\)/);
+  assert.match(jsx, /\{riskOkWords\(e\)/);
+  assert.match(view, /return countsAsRuleClose\(entry\) \? "RULE" : "YOUR REASON";/);
+  assert.equal(/e\.ruleExit \?|e\.riskOk \?/.test(jsx + view), false, "no raw read of either field");
   assert.equal(/e\.ruleExit \?|x\.ruleExit\)|e\.riskOk \?|x\.riskOk\)/.test(app), false, "no raw read of either field");
 });
 
@@ -1557,7 +1566,8 @@ test("TASK 6 — the 30-day entry floor log is behind ONE fold with a one-line s
   const app = readFileSync("src/App.jsx", "utf8");
   const at = app.indexOf("The ${RULES.minEntryDTE}-day entry floor passed over");
   assert.ok(at > 0, "the one-line summary exists");
-  const block = app.slice(app.lastIndexOf("<Panel", at), app.indexOf("</Panel>", at));
+  // Redesign PR 3b: it is the Journal's last fold (`floorLog`), no longer inside its own Panel.
+  const block = app.slice(app.lastIndexOf("<Fold", at), app.indexOf("</Fold>", at));
   assert.match(block, /<Fold label="log"/);
   assert.equal((block.match(/<Fold\b/g) || []).length, 1, "ONE fold");
   const notOff = block.slice(block.lastIndexOf("not offerable") - 400, block.lastIndexOf("not offerable"));
