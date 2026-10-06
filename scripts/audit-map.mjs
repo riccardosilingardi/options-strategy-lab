@@ -33,6 +33,7 @@ export const R = {
   monoNum: "mono only for numbers, tickers, legs and OCC symbols (CLAUDE.md); the board sets a word in mono",
   labels: "the card's names live in rules.js (CARD_LABELS, the owner's, 3 Oct 2026); the board abbreviates",
   versionA: "the board's page under the state is version A (Main), which was not chosen; only the state is compared",
+  cancel: "Cancel is the red outline (CLAUDE.md, PR #47); the board draws it in ink",
   layout: "the same space is carried by the page's own padding (FIND_LIST_END), not this element",
 };
 
@@ -463,6 +464,32 @@ export const SCREENS = {
     skipWords: [[/^(J-000|UNG|Bull call spread|HOLD\. Nothing to do)/, R.sample],
       [/^"Now" is always Alpaca's last price/, "left: the table's NOW is what is left from here (`remainingEdge()`), not a price; the line says what it is"]],
   },
+  Orders: {
+    mode: "app+all+book", go: async (page) => { await page.waitForTimeout(1500); await tap(page, "nav button", "Positions", 2500);
+      await tap(page, "[aria-label='Positions or orders'] button", "Orders", 1500); },
+    pairs: [
+      { n: "Header row", b: "header", a: "[data-positions-header]", p: ["padding", "gap"] },
+      { n: "Title", b: "header h1", a: "[data-positions-header] h1" },
+      { n: "Segment on", b: "[aria-label='Positions or orders'] a.seg.on", a: "[data-positions] [aria-label='Positions or orders'] button[aria-pressed=true]" },
+      { n: "Head line", b: "div.sans > div:nth-child(4)", a: "[data-orders-head]", p: ["size", "color", "gap"] },
+      { n: "Cancel all", b: "div.sans > div:nth-child(4) button", a: "[data-orders-head] button", p: ["size", "weight", "color", "bg", "border", "padding", "minh"] },
+      { n: "List", b: "ul", a: "[data-order-list]", p: ["gap"] },
+      { n: "Row", b: "ul > li:nth-child(1)", a: "[data-order-list] > li:nth-child(1)", p: ["bg", "border", "radius", "padding", "gap"] },
+      { n: "Intent tag", b: "ul > li:nth-child(1) span.tag", a: "[data-order-list] > li:nth-child(1) [data-order-tag]", p: ["size", "weight", "color", "bg", "border", "radius", "padding"] },
+      { n: "Name", b: "ul > li:nth-child(1) span.tag + span", a: "[data-order-list] > li:nth-child(1) [data-order-name]" },
+      { n: "Ref", b: "ul > li:nth-child(1) > div:first-child > span.mono", a: "[data-order-list] > li:nth-child(1) [data-order-ref]" },
+      { n: "Terms", b: "ul > li:nth-child(1) > p:nth-of-type(1)", a: "[data-order-list] > li:nth-child(1) [data-order-terms]" },
+      { n: "Book", b: "ul > li:nth-child(1) > p:nth-of-type(2)", a: "[data-order-list] > li:nth-child(1) [data-order-book]" },
+      { n: "Actions", b: "ul > li:nth-child(1) > div:nth-of-type(2)", a: "[data-order-list] > li:nth-child(1) [data-order-actions]", p: ["gap", "padding"] },
+      { n: "Modify", b: "ul > li:nth-child(1) button.rowbtn:nth-child(1)", a: "[data-order-list] > li:nth-child(1) [data-order-actions] button:nth-child(1)",
+        p: ["size", "weight", "color", "bg", "border", "radius", "minh"] },
+      { n: "Cancel", b: "ul > li:nth-child(1) button.rowbtn:nth-child(2)", a: "[data-order-list] > li:nth-child(1) [data-order-actions] button:nth-child(2)",
+        p: ["size", "weight", "color", "bg", "border", "radius", "minh"],
+        why: { color: R.cancel, border: R.cancel } },
+      ...BOTTOM_BAR,
+    ],
+    skipWords: [[/^(J-000|CORN|WEAT|OPEN|CLOSE)\b/, R.sample]],
+  },
 };
 
 /** Named groups for the command line. */
@@ -470,7 +497,7 @@ export const GROUPS = {
   find: ["FindB", "FindLoading", "FindStale", "FindEmpty", "FindSaved", "FindFilters", "Define"],
   market: ["MarketStrategies", "MarketOverview", "Market"],
   build: ["Build", "BuildReview", "BuildLoading", "BuildNoData", "BuildEmpty"],
-  pr3: ["Positions", "PositionDetail"],
+  pr3: ["Positions", "PositionDetail", "Orders"],
   shipped: ["FindB", "FindLoading", "FindStale", "FindEmpty", "FindSaved", "FindFilters", "Define",
     "MarketStrategies", "MarketOverview", "Market", "Build", "BuildReview", "BuildLoading", "BuildNoData", "BuildEmpty"],
   all: [],
