@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>CORN — overview and chart copilot</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+.t-dark{--bg:#14181d;--panel:#1a1f26;--line:#2a2f36;--field:#6b7685;--ink:#f5f0e6;--mut:#8b95a1;--dim:#7d8794;--amber:#e8b545;--green:#7fb85c;--red:#d66a5a;--blue:#5aa7d6;--violet:#a78bda;--body:#c9d1d9;--on:#14181d;--action:#5aa7d6;--raise:#222831}
+.t-light{--bg:#f5f6f7;--panel:#ffffff;--line:#dcdfe3;--field:#7a8491;--ink:#1c2128;--mut:#5a6472;--dim:#616b78;--amber:#8a6300;--green:#2f6f45;--red:#b23a2b;--blue:#1f6391;--violet:#5d47a8;--body:#2a3038;--on:#ffffff;--action:#1f6391;--raise:#eceff2}
+.sans{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.mono{font-family:ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums}
+button,select,input,output,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+button:disabled{cursor:default}
+a{color:var(--blue)}a:hover{color:var(--ink)}
+.def{text-decoration:underline dotted;text-decoration-color:var(--dim);text-underline-offset:3px}
+.tab{border:none;border-bottom:3px solid transparent;color:var(--mut);font-weight:400}
+.tab.on{color:var(--ink);font-weight:700;border-bottom-color:var(--amber)}
+a.tab:hover{color:var(--ink)}
+.chip{min-height:36px;padding:0 12px;border:1px solid var(--field);background:transparent;color:var(--mut);border-radius:999px;font-size:12px;font-weight:400}
+.chip.on{background:var(--ink);border-color:var(--ink);color:var(--bg);font-weight:700}
+.q{min-height:44px;padding:8px 12px;border:1px solid var(--field);background:transparent;color:var(--ink);border-radius:10px;font-size:13px;text-align:left;line-height:1.3}
+.q.on{border-color:var(--blue);box-shadow:inset 0 0 0 1px var(--blue)}
+.px{fill:none;stroke:var(--ink);stroke-width:1.75;stroke-linejoin:round}
+.s20{fill:none;stroke:var(--blue);stroke-width:1.5}
+.s50{fill:none;stroke:var(--amber);stroke-width:1.5;stroke-dasharray:5 3}
+.bb{fill:var(--blue);fill-opacity:.10;stroke:none}
+.grid{stroke:var(--line);stroke-width:1}
+.ref{stroke:var(--field);stroke-width:1;stroke-dasharray:3 3}
+.rsiLn{fill:none;stroke:var(--violet);stroke-width:1.5}
+.mLn{fill:none;stroke:var(--blue);stroke-width:1.5}
+.sLn{fill:none;stroke:var(--amber);stroke-width:1.5}
+.hP{fill:var(--green);fill-opacity:.6}
+.hN{fill:var(--violet);fill-opacity:.6}
+.axis{fill:var(--mut);font-size:12px;font-family:ui-monospace,Menlo,monospace}
+.fac{width:100%;border:none;background:transparent;padding:10px 0;text-align:left;display:flex;flex-direction:column;gap:6px;color:var(--ink)}
+.trk{fill:var(--line)}
+.up{fill:var(--green)}
+.down{fill:var(--violet)}
+.flat{fill:var(--field)}
+.lbl{fill:var(--mut);font-size:12px}
+</style>
+</helmet>
+<div class="{{ themeClass }} sans" style="width: 390px; height: 1780px; box-sizing: border-box; background: var(--bg); color: var(--ink); overflow: hidden">
+<header style="display: flex; align-items: center; gap: 4px; padding: 6px 8px 0 4px">
+<a href="Main.dc.html" aria-label="Back to Find" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: var(--ink); text-decoration: none; border-radius: 10px">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg>
+</a>
+<a href="MarketSwitch.dc.html" aria-label="Switch market, now CORN" style="flex: 1; min-width: 0; min-height: 44px; display: flex; align-items: center; gap: 10px; color: var(--ink); text-decoration: none">
+<span aria-hidden="true" style="width: 36px; height: 36px; border-radius: 50%; background: var(--raise); color: var(--mut); display: flex; align-items: center; justify-content: center; flex: none"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22V9"></path><path d="M12 9c-2.5-.5-4-2.5-4-5 2.5.5 4 2.5 4 5z"></path><path d="M12 9c2.5-.5 4-2.5 4-5-2.5.5-4 2.5-4 5z"></path><path d="M12 14.5c-2.5-.5-4-2.5-4-5 2.5.5 4 2.5 4 5z"></path><path d="M12 14.5c2.5-.5 4-2.5 4-5-2.5.5-4 2.5-4 5z"></path><path d="M12 20c-2.5-.5-4-2.5-4-5 2.5.5 4 2.5 4 5z"></path><path d="M12 20c2.5-.5 4-2.5 4-5-2.5.5-4 2.5-4 5z"></path></svg></span>
+<span style="display: flex; flex-direction: column; min-width: 0"><span style="display: flex; align-items: center; gap: 4px"><span class="mono" style="font-size: 18px; font-weight: 700; line-height: 1.3">CORN</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></span><span style="font-size: 12px; line-height: 1.3; color: var(--mut)">Corn · Grains</span></span>
+</a>
+<button type="button" aria-label="Watching CORN" aria-pressed="true" style="width: 44px; height: 44px; border: none; background: transparent; color: var(--amber); display: flex; align-items: center; justify-content: center; border-radius: 10px"><svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M12 2.5l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.4l-5.9 3.1 1.2-6.5L2.5 9.4l6.6-.9z"></path></svg></button>
+</header>
+<section style="display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; padding: 4px 16px 10px">
+<div style="display: flex; flex-direction: column; gap: 2px">
+<div class="mono" style="font-size: 24px; font-weight: 700; line-height: 1.3">$18.42</div>
+<div class="mono" style="font-size: 13px; color: var(--green)">▲ +0.21  +1.15%</div>
+<div style="font-size: 12px; color: var(--mut)">Close · Fri 2 Oct, 16:00 ET</div>
+</div>
+<dl style="margin: 0; display: grid; grid-template-columns: auto auto; gap: 4px 14px; font-size: 12px; line-height: 1.3">
+<dt class="def" style="color: var(--mut)">IV</dt><dd class="mono" style="margin: 0; text-align: right">24.2%</dd>
+<dt class="def" style="color: var(--mut)">IV rank</dt><dd class="mono" style="margin: 0; text-align: right">38</dd>
+<dt class="def" style="color: var(--mut)">Move to 20 Nov</dt><dd class="mono" style="margin: 0; text-align: right">±$1.59</dd>
+</dl>
+</section>
+<div style="margin: 0 16px 6px; padding: 8px 12px; border: 1px solid var(--line); background: var(--panel); border-radius: 10px; display: flex; gap: 10px; align-items: center; font-size: 13px; line-height: 1.3">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none; color: var(--amber)"><rect x="3" y="4" width="18" height="18" rx="2"></rect><path d="M16 2v4"></path><path d="M8 2v4"></path><path d="M3 10h18"></path></svg>
+<span><b>WASDE</b> crop report · Fri 9 Oct, 12:00 ET · <span style="color: var(--mut)">in 5 days</span></span>
+</div>
+<nav aria-label="Market sections" style="display: flex; gap: 2px; padding: 0 8px; border-bottom: 1px solid var(--line)">
+<a href="MarketOverview.dc.html" class="tab on" aria-current="page" style="min-height: 44px; padding: 0 10px; display: flex; align-items: center; text-decoration: none; font-size: 15px">Overview</a>
+<a href="MarketStrategies.dc.html" class="tab" style="min-height: 44px; padding: 0 10px; display: flex; align-items: center; text-decoration: none; font-size: 15px">Strategies</a>
+<a href="Market.dc.html" class="tab" style="min-height: 44px; padding: 0 10px; display: flex; align-items: center; text-decoration: none; font-size: 15px">Chain</a>
+</nav>
+<main style="display: flex; flex-direction: column; gap: 12px; padding: 12px 16px 24px">
+<div role="group" aria-label="Indicators" style="display: flex; flex-wrap: wrap; gap: 6px">
+<sc-for list="{{ chips }}" as="c" hint-placeholder-count="4">
+<button type="button" class="chip {{ c.cls }}" aria-pressed="{{ c.on }}" onClick="{{ c.pick }}">{{ c.label }}</button>
+</sc-for>
+</div>
+<section aria-label="Price chart" style="background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 8px">
+<svg width="334" height="212" viewBox="0 0 334 212" role="img" aria-label="{{ chartAria }}" style="display: block; max-width: 100%; height: auto">
+<line class="grid" x1="0" y1="{{ t0y }}" x2="300" y2="{{ t0y }}"></line>
+<line class="grid" x1="0" y1="{{ t1y }}" x2="300" y2="{{ t1y }}"></line>
+<line class="grid" x1="0" y1="{{ t2y }}" x2="300" y2="{{ t2y }}"></line>
+<line class="grid" x1="0" y1="{{ t3y }}" x2="300" y2="{{ t3y }}"></line>
+<path class="bb" d="{{ bb }}"></path>
+<polyline class="s50" points="{{ s50 }}"></polyline>
+<polyline class="s20" points="{{ s20 }}"></polyline>
+<polyline class="px" points="{{ px }}"></polyline>
+<text class="axis" x="306" y="{{ t0ty }}">{{ t0 }}</text>
+<text class="axis" x="306" y="{{ t1ty }}">{{ t1 }}</text>
+<text class="axis" x="306" y="{{ t2ty }}">{{ t2 }}</text>
+<text class="axis" x="306" y="{{ t3ty }}">{{ t3 }}</text>
+<text class="lbl" x="0" y="208">60 sessions</text>
+<text class="lbl" x="300" y="208" text-anchor="end">2 Oct</text>
+</svg>
+<sc-if value="{{ showSma }}" hint-placeholder-val="{{ true }}">
+<p style="margin: 0; display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--mut)"><span><span style="color: var(--ink)">━</span> price</span><span><span style="color: var(--blue)">━</span> 20-day</span><span><span style="color: var(--amber)">╍</span> 50-day</span><sc-if value="{{ showBb }}" hint-placeholder-val="{{ false }}"><span><span style="color: var(--blue)">▮</span> Bollinger 20, 2</span></sc-if></p>
+</sc-if>
+<sc-if value="{{ showRsi }}" hint-placeholder-val="{{ true }}">
+<div style="border-top: 1px solid var(--line); padding-top: 8px">
+<div style="display: flex; justify-content: space-between; font-size: 12px; color: var(--mut)"><span class="def">RSI 14</span><span class="mono" style="color: var(--ink); font-weight: 700">{{ rsiNow }}</span></div>
+<svg width="334" height="64" viewBox="0 0 334 64" aria-hidden="true" style="display: block; max-width: 100%; height: auto">
+<line class="ref" x1="0" y1="{{ r70 }}" x2="300" y2="{{ r70 }}"></line>
+<line class="ref" x1="0" y1="{{ r30 }}" x2="300" y2="{{ r30 }}"></line>
+<polyline class="rsiLn" points="{{ rsi }}"></polyline>
+<text class="axis" x="306" y="{{ r70t }}">70</text>
+<text class="axis" x="306" y="{{ r30t }}">30</text>
+</svg>
+</div>
+</sc-if>
+<sc-if value="{{ showMacd }}" hint-placeholder-val="{{ false }}">
+<div style="border-top: 1px solid var(--line); padding-top: 8px">
+<div style="display: flex; justify-content: space-between; font-size: 12px; color: var(--mut)"><span class="def">MACD 12, 26, 9</span><span class="mono" style="color: var(--ink); font-weight: 700">{{ macdNow }}</span></div>
+<svg width="334" height="64" viewBox="0 0 334 64" aria-hidden="true" style="display: block; max-width: 100%; height: auto">
+<line class="ref" x1="0" y1="32" x2="300" y2="32"></line>
+<path class="hP" d="{{ hP }}"></path>
+<path class="hN" d="{{ hN }}"></path>
+<polyline class="mLn" points="{{ mLn }}"></polyline>
+<polyline class="sLn" points="{{ sLn }}"></polyline>
+</svg>
+</div>
+</sc-if>
+<p class="mono" style="margin: 0; font-size: 12px; color: var(--mut)">{{ readout }}</p>
+</section>
+<section aria-labelledby="mr-h" style="background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 14px 8px; display: flex; flex-direction: column; gap: 4px">
+<div style="display: flex; justify-content: space-between; align-items: baseline; gap: 8px">
+<h2 id="mr-h" style="margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 0.08em; color: var(--mut)">THE MARKET'S READ</h2>
+<span class="mono" style="font-size: 12px; color: var(--mut)">score +46 · confidence 84</span>
+</div>
+<p style="margin: 2px 0 6px; font-size: 15px; font-weight: 700">▲ Bull · 3 of 4 factors agree</p>
+<sc-for list="{{ factors }}" as="f" hint-placeholder-count="4">
+<div style="border-top: 1px solid var(--line)">
+<button type="button" class="fac" aria-expanded="{{ f.open }}" onClick="{{ f.toggle }}">
+<span style="display: flex; justify-content: space-between; align-items: baseline; gap: 8px; width: 100%">
+<span style="font-size: 12px; font-weight: 700; letter-spacing: 0.04em">{{ f.label }} <span class="mono" style="font-weight: 400; color: var(--mut)">× {{ f.w }}</span></span>
+<span class="mono" style="font-size: 15px; font-weight: 700">{{ f.read }}</span>
+</span>
+<svg width="100%" height="6" viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true" style="display: block"><rect class="trk" x="0" y="0" width="100" height="6" rx="3"></rect><rect class="{{ f.dirCls }}" x="0" y="0" width="{{ f.barW }}" height="6" rx="3"></rect></svg>
+<span style="font-size: 13px; line-height: 1.5; color: var(--body)">{{ f.line }}</span>
+</button>
+<sc-if value="{{ f.open }}" hint-placeholder-val="{{ false }}">
+<ul style="list-style: none; margin: 0 0 10px; padding: 10px 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; display: flex; flex-direction: column; gap: 6px">
+<sc-for list="{{ f.detail }}" as="d" hint-placeholder-count="2">
+<li style="font-size: 12px; line-height: 1.5; color: var(--body)">{{ d.t }}</li>
+</sc-for>
+</ul>
+</sc-if>
+</div>
+</sc-for>
+<p style="margin: 0; padding: 8px 0 4px; border-top: 1px solid var(--line); font-size: 12px; line-height: 1.5; color: var(--mut)">This is the market, whatever you trade. How each trade stands against it is in Build, under Why this trade. <a href="Define.dc.html">How score and confidence are worked out ›</a></p>
+</section>
+<section aria-labelledby="cop-h" style="background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 10px">
+<h2 id="cop-h" style="margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 0.08em; color: var(--mut)">ASK ABOUT THIS CHART</h2>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px">
+<sc-for list="{{ questions }}" as="q" hint-placeholder-count="4">
+<button type="button" class="q {{ q.cls }}" aria-pressed="{{ q.on }}" onClick="{{ q.pick }}">{{ q.label }}</button>
+</sc-for>
+</div>
+<form onSubmit="{{ ask }}" style="display: flex; gap: 6px">
+<label for="ask" style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Your own question about the chart</label>
+<input id="ask" type="text" value="{{ typed }}" onChange="{{ setTyped }}" placeholder="Or ask your own…" style="flex: 1; min-width: 0; min-height: 44px; padding: 0 12px; border: 1px solid var(--field); border-radius: 10px; background: var(--bg); color: var(--ink); font-size: 13px">
+<button type="submit" aria-label="Ask the copilot" style="width: 44px; height: 44px; border: none; border-radius: 10px; background: var(--action); color: var(--on); display: flex; align-items: center; justify-content: center"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"></path><path d="m13 6 6 6-6 6"></path></svg></button>
+</form>
+<sc-if value="{{ hasAnswer }}" hint-placeholder-val="{{ false }}">
+<div role="status" style="border-top: 1px solid var(--line); padding-top: 10px; display: flex; flex-direction: column; gap: 6px">
+<p style="margin: 0; font-size: 13px; font-weight: 700">{{ askedText }}</p>
+<p style="margin: 0; font-size: 13px; line-height: 1.5; color: var(--body)">{{ answer }}</p>
+<p style="margin: 0; font-size: 12px; color: var(--mut)">{{ answerFoot }}</p>
+</div>
+</sc-if>
+<p style="margin: 0; font-size: 12px; line-height: 1.5; color: var(--mut)">This is educational analysis on a paper-trading account, not financial advice. The chart copilot never proposes a trade.</p>
+</section>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":true,"section":"Theme"},"$preview":{"width":390,"height":1780}}'>
+// The same CORN series Build draws (same seed, same steps): its last 60 sessions are Build's history line.
+var SPOT = 18.42, N = 140, SHOW = 60, BE = 17.75;
+function rng(seed) { var x = seed; return function () { x = (Math.imul(x, 1664525) + 1013904223) >>> 0; return x / 4294967296; }; }
+var P = (function () { var r = rng(20261002), p = new Array(N); p[N - 1] = SPOT; for (var i = N - 1; i > 0; i--) p[i - 1] = Math.min(21.6, Math.max(15.4, p[i] * Math.exp(-0.0011 + (r() - 0.5) * 0.026))); return p; })();
+function sma(i, l) { var s = 0; for (var k = i - l + 1; k <= i; k++) s += P[k]; return s / l; }
+function sd(i, l) { var m = sma(i, l), s = 0; for (var k = i - l + 1; k <= i; k++) s += (P[k] - m) * (P[k] - m); return Math.sqrt(s / l); }
+function ema(a, len) { var k = 2 / (len + 1), e = a[0]; return a.map(function (v, i) { if (i) e = v * k + e * (1 - k); return e; }); }
+var RSI = (function () {
+  var out = new Array(N).fill(null), g = 0, l = 0;
+  for (var i = 1; i <= 14; i++) { var d = P[i] - P[i - 1]; if (d > 0) g += d; else l -= d; }
+  g /= 14; l /= 14; out[14] = 100 - 100 / (1 + g / l);
+  for (var j = 15; j < N; j++) { var dd = P[j] - P[j - 1]; g = (g * 13 + Math.max(dd, 0)) / 14; l = (l * 13 + Math.max(-dd, 0)) / 14; out[j] = 100 - 100 / (1 + g / l); }
+  return out;
+})();
+var E12 = ema(P, 12), E26 = ema(P, 26), MACD = P.map(function (v, i) { return E12[i] - E26[i]; }), SIG = ema(MACD, 9);
+var START = N - SHOW, LAST = N - 1;
+var X = function (i) { return ((i - START) * 300 / (SHOW - 1)); };
+var f1 = function (x) { return x.toFixed(1); };
+var BBU = [], BBL = [], S20 = [], S50 = [];
+for (var i = START; i <= LAST; i++) { var m = sma(i, 20), s = sd(i, 20); S20.push(m); S50.push(sma(i, 50)); BBU.push(m + 2 * s); BBL.push(m - 2 * s); }
+var LO = Math.min.apply(null, P.slice(START).concat(BBL)) - 0.05, HI = Math.max.apply(null, P.slice(START).concat(BBU)) + 0.05;
+var Y = function (p) { return 8 + (HI - p) / (HI - LO) * 184; };
+var line = function (arr) { return arr.map(function (v, k) { return f1(X(START + k)) + "," + f1(Y(v)); }).join(" "); };
+var TICKS = (function () { var t = [], v = Math.ceil(LO * 2) / 2; while (v <= HI && t.length < 4) { t.push(v); v += 0.5; } return t; })();
+var AVG_MOVE = (function () { var s = 0; for (var k = LAST - 19; k <= LAST; k++) s += Math.abs(P[k] - P[k - 1]); return s / 20; })();
+// The four readings for CORN today (sample): the same numbers as the score working (0.30×70 + 0.25×60 + 0.25×40 + 0.20×0 = 46).
+var F = [
+  { k: "season", label: "SEASONALITY", w: "0.30", dir: 1, str: 70, line: "Oct–Nov average +1.9% a month over 16 years, 2.4× its own noise: it counts.",
+    detail: ["Measured on Alpha Vantage monthly closes, not a table typed by hand.", "A month counts only when its average beats about twice its uncertainty. October and November do; December does not."] },
+  { k: "trend", label: "PRICE TREND", w: "0.25", dir: 1, str: 60, line: "20-day average 18.35 above the 50-day 18.26; the close 18.42 above both.",
+    detail: ["The same averages as the chart above.", "MACD is under its signal line: momentum is fading, which the trend score does not count."] },
+  { k: "weather", label: "WEATHER", w: "0.25", dir: 1, str: 40, line: "Dry planting in Brazil pushes up; the US harvest is normal.",
+    detail: ["Mato Grosso (Brazil): 38 mm of rain against 111 mm normal for October. Dry planting: up for CORN and SOYB.", "Corn Belt (Iowa): harvest under way, temperatures normal. No push.", "Odessa (Ukraine): 31 mm against 30 normal. No push."] },
+  { k: "news", label: "NEWS", w: "0.20", dir: 0, str: 0, line: "6 headlines read today; none tagged as moving CORN.",
+    detail: ["Each headline is matched to cause-and-effect rules; only a match moves the factor.", "Quiet is a reading: a feed that did not load would say not read."] }
+];
+var QS = [
+  { id: "trend", label: "What is the trend saying?" },
+  { id: "rsi", label: "Is RSI stretched?" },
+  { id: "macd", label: "What does MACD confirm or deny?" },
+  { id: "trade", label: "How does this relate to my trade?" }
+];
+function answerFor(id) {
+  var s20 = sma(LAST, 20), s50 = sma(LAST, 50), r = RSI[LAST], mc = MACD[LAST], sg = SIG[LAST], up = s20 > s50;
+  if (id === "trend") return "The 20-day average (" + s20.toFixed(2) + ") is " + (up ? "above" : "below") + " the 50-day (" + s50.toFixed(2) + "), and the close (" + SPOT.toFixed(2) + ") is " + (SPOT > Math.max(s20, s50) ? "above both" : "between them") + ": " + (up ? "an uptrend" : "a downtrend") + " on this window. The two averages are only " + Math.abs(s20 - s50).toFixed(2) + " apart, so it is a mild one.";
+  if (id === "rsi") return "RSI 14 is " + r.toFixed(0) + ", " + (r > 70 ? "above 70: stretched high." : r < 30 ? "below 30: stretched low." : "inside 30 to 70: not stretched either way.") + " On its own it is no reason to act; it would matter if it went past 70 while the price stopped rising.";
+  if (id === "macd") return "MACD is " + (mc > sg ? "above" : "under") + " its signal line (" + mc.toFixed(3) + " against " + sg.toFixed(3) + "). " + (mc > sg === up ? "It confirms the averages." : "The averages point up but the momentum behind them is fading: it does not confirm them.") + " Weight the averages more on a 47-day trade; MACD turns faster and reverses often.";
+  return "Your Build trade breaks even at $" + BE.toFixed(2) + ". CORN closed at $" + SPOT.toFixed(2) + ", $" + (SPOT - BE).toFixed(2) + " above it. Its average day over the last 20 sessions moved $" + AVG_MOVE.toFixed(2) + ", so the cushion is about " + Math.round((SPOT - BE) / AVG_MOVE) + " ordinary days of movement against you.";
+}
+
+class Component extends DCLogic {
+  constructor(props) { super(props); this.state = { sma: true, bb: false, rsi: true, macd: false, q: null, typed: "", asked: "", fopen: null }; }
+  renderVals() {
+    var self = this, s = this.state, dark = this.props.dark ?? true;
+    var chip = function (k, label) { return { label: label, on: s[k], cls: s[k] ? "on" : "", pick: function () { var p = {}; p[k] = !s[k]; self.setState(p); } }; };
+    var bb = "M" + BBU.map(function (v, k) { return f1(X(START + k)) + " " + f1(Y(v)); }).join(" L") + " L" + BBL.slice().reverse().map(function (v, k) { return f1(X(LAST - k)) + " " + f1(Y(v)); }).join(" L") + " Z";
+    var RY = function (v) { return 4 + (100 - v) / 100 * 56; };
+    var mAbs = Math.max.apply(null, MACD.slice(START).concat(SIG.slice(START)).map(Math.abs)) || 1;
+    var MY = function (v) { return 32 - v / mAbs * 26; };
+    var hP = "", hN = "";
+    for (var i = START; i <= LAST; i++) { var h = MACD[i] - SIG[i], x = X(i) - 1.5, y0 = 32, y1 = MY(h); var r = "M" + f1(x) + " " + f1(Math.min(y0, y1)) + "h3V" + f1(Math.max(y0, y1)) + "h-3Z "; if (h >= 0) hP += r; else hN += r; }
+    var ty = TICKS.map(Y);
+    var asked = s.q ? QS.find(function (q) { return q.id === s.q; }) : null;
+    return {
+      themeClass: dark ? "t-dark" : "t-light",
+      factors: F.map(function (f) {
+        return { label: f.label, w: f.w, line: f.line, read: (f.dir > 0 ? "↑ " : f.dir < 0 ? "↓ " : "→ ") + f.str,
+          dirCls: f.dir > 0 ? "up" : f.dir < 0 ? "down" : "flat", barW: Math.max(f.str, 2), open: s.fopen === f.k,
+          toggle: function () { self.setState({ fopen: s.fopen === f.k ? null : f.k }); },
+          detail: f.detail.map(function (t) { return { t: t }; }) };
+      }),
+      chips: [chip("sma", "SMA 20 · 50"), chip("bb", "Bollinger"), chip("rsi", "RSI"), chip("macd", "MACD")],
+      showSma: s.sma, showBb: s.bb, showRsi: s.rsi, showMacd: s.macd,
+      px: line(P.slice(START)), s20: s.sma ? line(S20) : "", s50: s.sma ? line(S50) : "", bb: s.bb ? bb : "",
+      t0: TICKS[0] ? TICKS[0].toFixed(2) : "", t1: TICKS[1] ? TICKS[1].toFixed(2) : "", t2: TICKS[2] ? TICKS[2].toFixed(2) : "", t3: TICKS[3] ? TICKS[3].toFixed(2) : "",
+      t0y: f1(ty[0] || -10), t1y: f1(ty[1] || -10), t2y: f1(ty[2] || -10), t3y: f1(ty[3] || -10),
+      t0ty: f1((ty[0] || -10) + 4), t1ty: f1((ty[1] || -10) + 4), t2ty: f1((ty[2] || -10) + 4), t3ty: f1((ty[3] || -10) + 4),
+      chartAria: "CORN, last 60 sessions: from " + P[START].toFixed(2) + " to " + SPOT.toFixed(2) + "; 20-day average " + sma(LAST, 20).toFixed(2) + ", 50-day " + sma(LAST, 50).toFixed(2) + ".",
+      rsi: RSI.slice(START).map(function (v, k) { return f1(X(START + k)) + "," + f1(RY(v)); }).join(" "),
+      r70: f1(RY(70)), r30: f1(RY(30)), r70t: f1(RY(70) + 4), r30t: f1(RY(30) + 4), rsiNow: RSI[LAST].toFixed(0),
+      hP: hP, hN: hN,
+      mLn: MACD.slice(START).map(function (v, k) { return f1(X(START + k)) + "," + f1(MY(v)); }).join(" "),
+      sLn: SIG.slice(START).map(function (v, k) { return f1(X(START + k)) + "," + f1(MY(v)); }).join(" "),
+      macdNow: MACD[LAST].toFixed(3) + " / " + SIG[LAST].toFixed(3),
+      readout: "Close " + SPOT.toFixed(2) + " · 20d " + sma(LAST, 20).toFixed(2) + " · 50d " + sma(LAST, 50).toFixed(2) + " · RSI " + RSI[LAST].toFixed(0),
+      questions: QS.map(function (q) { return { label: q.label, on: s.q === q.id, cls: s.q === q.id ? "on" : "", pick: function () { self.setState({ q: q.id, asked: "" }); } }; }),
+      typed: s.typed, setTyped: function (e) { self.setState({ typed: e.target.value }); },
+      ask: function (e) { if (e && e.preventDefault) e.preventDefault(); if (s.typed.trim()) self.setState({ asked: s.typed.trim(), q: null, typed: "" }); },
+      hasAnswer: !!(asked || s.asked),
+      askedText: asked ? asked.label : s.asked,
+      answer: asked ? answerFor(asked.id) : "The copilot's answer arrives here. It reads this chart and these indicators, and it may not propose a trade.",
+      answerFoot: asked ? "Sample answer, worked out from the numbers on this chart." : "In the app this goes to the copilot."
+    };
+  }
+}
+</script>
+</body>
+</html>

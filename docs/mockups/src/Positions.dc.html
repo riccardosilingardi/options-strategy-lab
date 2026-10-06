@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Positions</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+.t-dark{--bg:#14181d;--panel:#1a1f26;--line:#2a2f36;--field:#6b7685;--ink:#f5f0e6;--mut:#8b95a1;--dim:#7d8794;--amber:#e8b545;--green:#7fb85c;--red:#d66a5a;--blue:#5aa7d6;--body:#c9d1d9;--on:#14181d;--action:#5aa7d6;--raise:#222831}
+.t-light{--bg:#f5f6f7;--panel:#ffffff;--line:#dcdfe3;--field:#7a8491;--ink:#1c2128;--mut:#5a6472;--dim:#616b78;--amber:#8a6300;--green:#2f6f45;--red:#b23a2b;--blue:#1f6391;--body:#2a3038;--on:#ffffff;--action:#1f6391;--raise:#eceff2}
+.sans{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.mono{font-family:ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums}
+button,select,input,output,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+a{color:var(--blue)}a:hover{color:var(--ink)}
+.place{flex:1;min-height:50px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;border-radius:10px;font-size:12px;color:var(--ink);text-decoration:none;position:relative}
+.place.on{background:var(--ink);color:var(--bg);font-weight:700}
+.place:hover{color:var(--ink)}
+.place.on:hover{color:var(--bg)}
+.seg{flex:1;min-height:44px;display:flex;align-items:center;justify-content:center;gap:6px;border-radius:8px;color:var(--mut);text-decoration:none;font-size:13px;font-weight:400}
+.seg.on{background:var(--ink);color:var(--bg);font-weight:700}
+a.seg:hover{color:var(--ink)}
+a.seg.on:hover{color:var(--bg)}
+.info{border:none;background:transparent;color:var(--blue);width:28px;height:28px;padding:0;font-size:13px}
+.badge{font-size:12px;font-weight:700;letter-spacing:.04em;line-height:22px;padding:0 8px;border-radius:6px}
+.b-close{background:var(--action);color:var(--on)}
+.b-warn{box-shadow:inset 0 0 0 1.5px var(--amber);color:var(--amber)}
+.bar{height:4px;border-radius:2px;background:var(--line);position:relative;overflow:hidden}
+.bar span{position:absolute;left:0;top:0;bottom:0;background:var(--field)}
+.bar.done span{background:var(--green)}
+.bar.warn span{background:var(--amber)}
+.btn-ghost{min-height:44px;display:inline-flex;align-items:center;justify-content:center;padding:0 14px;border-radius:10px;border:1px solid var(--action);color:var(--action);text-decoration:none;font-size:13px;font-weight:700}
+.btn-amber{min-height:44px;display:inline-flex;align-items:center;justify-content:center;padding:0 16px;border-radius:10px;background:var(--amber);color:var(--on);text-decoration:none;font-size:13px;font-weight:700}
+a.btn-amber:hover{color:var(--on)}
+a.btn-ghost:hover{color:var(--action)}
+</style>
+</helmet>
+<div class="{{ themeClass }} sans" style="width: 390px; height: 844px; box-sizing: border-box; background: var(--bg); color: var(--ink); display: flex; flex-direction: column; overflow: hidden; position: relative">
+<header style="display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 8px 4px 16px">
+<h1 style="margin: 0; font-size: 24px; font-weight: 700; line-height: 1.3">Positions</h1>
+<span style="display: flex; gap: 2px">
+<button type="button" aria-label="Read Alpaca again" style="width: 44px; height: 44px; border: none; background: transparent; color: var(--ink); display: flex; align-items: center; justify-content: center; border-radius: 10px">
+<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 0 1-15.5 6.2L3 16"></path><path d="M3 21v-5h5"></path><path d="M3 12a9 9 0 0 1 15.5-6.2L21 8"></path><path d="M21 3v5h-5"></path></svg>
+</button>
+<a href="Settings.dc.html" aria-label="Settings" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: var(--ink); border-radius: 10px">
+<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"></path></svg>
+</a>
+</span>
+</header>
+<section aria-label="Account" style="margin: 0 16px; padding: 10px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px">
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px">
+<div style="min-width: 0">
+<div style="display: flex; align-items: center; font-size: 12px; color: var(--dim); letter-spacing: 0.04em">EQUITY<button type="button" class="info" aria-label="What equity is" aria-expanded="{{ infoEq }}" onClick="{{ showEq }}">ⓘ</button></div>
+<div class="mono" style="font-size: 15px; font-weight: 700">$100,412</div>
+</div>
+<div style="min-width: 0">
+<div style="display: flex; align-items: center; font-size: 12px; color: var(--dim); letter-spacing: 0.04em">BUYING POWER<button type="button" class="info" aria-label="What buying power is" aria-expanded="{{ infoBp }}" onClick="{{ showBp }}">ⓘ</button></div>
+<div class="mono" style="font-size: 15px; font-weight: 700">$99,768</div>
+</div>
+<div style="min-width: 0">
+<div style="display: flex; align-items: center; font-size: 12px; color: var(--dim); letter-spacing: 0.04em">AT RISK<button type="button" class="info" aria-label="What at risk is" aria-expanded="{{ infoRisk }}" onClick="{{ showRisk }}">ⓘ</button></div>
+<div class="mono" style="font-size: 15px; font-weight: 700">$307 <span style="font-size: 12px; font-weight: 400; color: var(--mut)">of $2,500</span></div>
+</div>
+</div>
+<sc-if value="{{ infoText }}" hint-placeholder-val="{{ false }}">
+<p role="note" style="margin: 8px 0 0; padding-top: 8px; border-top: 1px solid var(--line); font-size: 13px; line-height: 1.5; color: var(--body)">{{ infoText }}</p>
+</sc-if>
+</section>
+<div role="group" aria-label="Positions or orders" style="display: flex; gap: 2px; margin: 10px 16px 8px; padding: 3px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px">
+<a href="Positions.dc.html" class="seg on" aria-current="page">Positions <span class="mono" style="font-size: 12px">2</span></a>
+<a href="Orders.dc.html" class="seg">Orders <span class="mono" style="font-size: 12px">2</span></a>
+</div>
+<ul style="list-style: none; margin: 0; padding: 0 16px 96px; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; flex: 1">
+<li style="background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px">
+<div style="display: flex; align-items: center; justify-content: space-between; gap: 8px">
+<span class="badge b-close">CLOSE</span>
+<span class="mono" style="font-size: 12px; color: var(--mut)">J-0005 · WEAT · 3 contracts</span>
+</div>
+<div style="display: flex; justify-content: space-between; align-items: baseline; gap: 8px">
+<span style="font-size: 15px; font-weight: 700; line-height: 1.3">Bear call spread 5/5.5 · 20 Nov</span>
+<span style="text-align: right; flex: none"><span class="mono" style="font-size: 18px; font-weight: 700; color: var(--green)">+$24</span><br><span style="font-size: 12px; color: var(--mut)">22% of risk</span></span>
+</div>
+<p style="margin: 0; font-size: 13px; line-height: 1.5; color: var(--body)">Take profit reached: <span class="mono">$24</span> of <span class="mono">$21</span>. The close is already working.</p>
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; font-size: 12px; color: var(--mut)">
+<div style="display: flex; flex-direction: column; gap: 4px"><span>Take profit ✓</span><div class="bar done"><span style="width: 100%"></span></div></div>
+<div style="display: flex; flex-direction: column; gap: 4px"><span>Time exit 26d</span><div class="bar"><span style="width: 33%"></span></div></div>
+<div style="display: flex; flex-direction: column; gap: 4px"><span>Stop -$54</span><div class="bar"><span style="width: 0%"></span></div></div>
+</div>
+<div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding-top: 8px; border-top: 1px solid var(--line)">
+<span style="flex: 1 1 180px; font-size: 13px; line-height: 1.5"><span class="mono">Close working at $0.07 · 0 of 3</span><span style="color: var(--mut)"> · Market closed · opens Mon 15:30 your time</span></span>
+<a href="Orders.dc.html" class="btn-ghost">Manage order</a>
+</div>
+</li>
+<li style="background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px">
+<div style="display: flex; align-items: center; justify-content: space-between; gap: 8px">
+<span class="badge b-warn">WARNING</span>
+<span class="mono" style="font-size: 12px; color: var(--mut)">J-0006 · UNG · 2 contracts</span>
+</div>
+<div style="display: flex; justify-content: space-between; align-items: baseline; gap: 8px">
+<span style="font-size: 15px; font-weight: 700; line-height: 1.3">Bull call spread 15/17 · 18 Dec</span>
+<span style="text-align: right; flex: none"><span class="mono" style="font-size: 18px; font-weight: 700; color: var(--red)">-$64</span><br><span style="font-size: 12px; color: var(--mut)">52% of risk</span></span>
+</div>
+<p style="margin: 0; font-size: 13px; line-height: 1.5; color: var(--body)">Stop warning reached: <span class="mono">-$64</span> against <span class="mono">-$62</span>. A warning, not an order: you decide.</p>
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; font-size: 12px; color: var(--mut)">
+<div style="display: flex; flex-direction: column; gap: 4px"><span>Take profit</span><div class="bar"><span style="width: 0%"></span></div></div>
+<div style="display: flex; flex-direction: column; gap: 4px"><span>Time exit 54d</span><div class="bar"><span style="width: 14%"></span></div></div>
+<div style="display: flex; flex-direction: column; gap: 4px"><span>Stop ✓</span><div class="bar warn"><span style="width: 100%"></span></div></div>
+</div>
+<div style="display: flex; gap: 8px; padding-top: 8px; border-top: 1px solid var(--line)">
+<a href="PositionDetail.dc.html" class="btn-amber" style="flex: 1">Decide: close or keep ›</a>
+</div>
+</li>
+<li style="padding: 4px 2px; font-size: 12px; line-height: 1.5; color: var(--mut)">The CORN spread from Build is an order, not a position yet: it waits in <a href="Orders.dc.html">Orders</a> for Monday's open.</li>
+</ul>
+<nav aria-label="Places" style="position: absolute; left: 8px; right: 8px; bottom: 12px; display: flex; gap: 2px; padding: 4px; background: var(--panel); border: 1px solid var(--field); border-radius: 14px; box-shadow: 0 4px 18px rgba(0,0,0,0.18)">
+<a href="Main.dc.html" class="place"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4.3-4.3"></path></svg><span>Find</span></a>
+<a href="Build.dc.html" class="place"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 3l8 8-3 3-8-8z"></path><path d="M11.5 7.5l-8 8a1.6 1.6 0 0 0 2.3 2.3l8-8"></path></svg><span>Build</span></a>
+<a href="Positions.dc.html" class="place on" aria-current="page" aria-label="Positions, 2 to look at"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="7" width="20" height="14" rx="2"></rect><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path></svg><span>Positions</span><span class="mono" aria-hidden="true" style="position: absolute; top: 4px; right: 18%; font-size: 12px; font-weight: 700; background: var(--action); color: var(--on); border-radius: 10px; padding: 0 6px; line-height: 18px">2</span></a>
+<a href="Journal.dc.html" class="place"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"></path><path d="M14 2v5h6"></path><path d="M16 13H8"></path><path d="M16 17H8"></path></svg><span>Journal</span></a>
+</nav>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":true,"section":"Theme"},"$preview":{"width":390,"height":844}}'>
+var LIMITS = "Your limits come from the $10,000 capital you set in Settings, not from equity.";
+var INFO = {
+  eq: "Equity: cash plus your positions at Alpaca's own prices, as Alpaca reports it now. " + LIMITS,
+  bp: "Buying power: what Alpaca lets you spend on new trades now. This is Alpaca's options figure, the one it checks an options order against. " + LIMITS,
+  risk: "At risk: the most you can lose on everything you hold and every order still working, as the risk gate counts it: WEAT $108 + UNG $124 + the CORN order $75. " + LIMITS
+};
+class Component extends DCLogic {
+  constructor(props) { super(props); this.state = { info: null }; }
+  renderVals() {
+    var self = this, s = this.state, dark = this.props.dark ?? true;
+    var pick = function (k) { return function () { self.setState({ info: s.info === k ? null : k }); }; };
+    return {
+      themeClass: dark ? "t-dark" : "t-light",
+      infoText: s.info ? INFO[s.info] : "",
+      infoEq: s.info === "eq", infoBp: s.info === "bp", infoRisk: s.info === "risk",
+      showEq: pick("eq"), showBp: pick("bp"), showRisk: pick("risk")
+    };
+  }
+}
+</script>
+</body>
+</html>

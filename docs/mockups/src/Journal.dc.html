@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Journal</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+.t-dark{--bg:#14181d;--panel:#1a1f26;--line:#2a2f36;--field:#6b7685;--ink:#f5f0e6;--mut:#8b95a1;--dim:#7d8794;--amber:#e8b545;--green:#7fb85c;--red:#d66a5a;--blue:#5aa7d6;--body:#c9d1d9;--on:#14181d;--action:#5aa7d6;--raise:#222831}
+.t-light{--bg:#f5f6f7;--panel:#ffffff;--line:#dcdfe3;--field:#7a8491;--ink:#1c2128;--mut:#5a6472;--dim:#616b78;--amber:#8a6300;--green:#2f6f45;--red:#b23a2b;--blue:#1f6391;--body:#2a3038;--on:#ffffff;--action:#1f6391;--raise:#eceff2}
+.sans{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.mono{font-family:ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums}
+button,select,input,output,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+a{color:var(--blue)}a:hover{color:var(--ink)}
+.place{flex:1;min-height:50px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;border-radius:10px;font-size:12px;color:var(--ink);text-decoration:none;position:relative}
+.place.on{background:var(--ink);color:var(--bg);font-weight:700}
+.place:hover{color:var(--ink)}
+.place.on:hover{color:var(--bg)}
+.entry{width:100%;border:none;background:transparent;text-align:left;padding:10px 0;display:grid;grid-template-columns:64px minmax(0,1fr) auto;gap:8px;align-items:baseline;color:var(--ink)}
+.pos{color:var(--green)}
+.neg{color:var(--red)}
+.flat{color:var(--mut)}
+.state{font-size:12px;font-weight:700;letter-spacing:.04em;color:var(--mut)}
+.state.warn{color:var(--amber)}
+</style>
+</helmet>
+<div class="{{ themeClass }} sans" style="width: 390px; height: 1500px; box-sizing: border-box; background: var(--bg); color: var(--ink); position: relative; overflow: hidden">
+<header style="display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 16px 4px">
+<h1 style="margin: 0; font-size: 24px; font-weight: 700; line-height: 1.3">Journal</h1>
+</header>
+<main style="display: flex; flex-direction: column; gap: 12px; padding: 4px 16px 0">
+<section aria-label="Your record" style="background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 10px">
+<div style="font-size: 12px; font-weight: 700; letter-spacing: 0.08em; color: var(--mut)">THE RECORD · 4 CLOSED · 3 OPEN</div>
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px">
+<div><div style="font-size: 12px; color: var(--dim); letter-spacing: 0.04em">LEVEL</div><div class="mono" style="font-size: 18px; font-weight: 700; color: var(--amber)">3</div></div>
+<div><div style="font-size: 12px; color: var(--dim); letter-spacing: 0.04em">RULE CLOSES</div><div class="mono" style="font-size: 18px; font-weight: 700">3 of 4</div></div>
+<div><div style="font-size: 12px; color: var(--dim); letter-spacing: 0.04em">AWARENESS</div><div class="mono" style="font-size: 18px; font-weight: 700">64/100</div></div>
+</div>
+<p style="margin: 0; font-size: 13px; line-height: 1.5; color: var(--body)">Next: close 2 more trades by the rules to reach level 4.</p>
+</section>
+<label style="display: flex; flex-direction: column; gap: 4px">
+<span style="font-size: 12px; color: var(--mut)">Find a trade</span>
+<input type="search" value="{{ q }}" onChange="{{ setQ }}" placeholder="J-0003, 3, or a ticker" style="min-height: 44px; padding: 0 12px; border: 1px solid var(--field); border-radius: 10px; background: var(--panel); color: var(--ink); font-size: 15px; box-sizing: border-box; width: 100%">
+</label>
+<sc-for list="{{ groups }}" as="g" hint-placeholder-count="2">
+<section style="background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 4px 14px">
+<h2 style="margin: 0; padding: 10px 0 4px; font-size: 12px; font-weight: 700; letter-spacing: 0.08em; color: var(--mut)">{{ g.title }}</h2>
+<ul style="list-style: none; margin: 0; padding: 0">
+<sc-for list="{{ g.items }}" as="e" hint-placeholder-count="3">
+<li style="border-top: 1px solid var(--line)">
+<button type="button" class="entry" aria-expanded="{{ e.open }}" onClick="{{ e.toggle }}">
+<span class="mono" style="font-size: 13px; font-weight: 700">{{ e.ref }}</span>
+<span style="display: flex; flex-direction: column; gap: 2px; min-width: 0">
+<span style="font-size: 13px; font-weight: 700"><span class="mono">{{ e.tk }}</span> · {{ e.name }}</span>
+<span style="font-size: 12px; line-height: 1.5; color: var(--mut)">{{ e.sub }}</span>
+</span>
+<span style="text-align: right; display: flex; flex-direction: column; gap: 2px">
+<span class="mono {{ e.pnlCls }}" style="font-size: 15px; font-weight: 700">{{ e.pnl }}</span>
+<span class="state {{ e.stateCls }}">{{ e.state }}</span>
+</span>
+</button>
+<sc-if value="{{ e.open }}" hint-placeholder-val="{{ false }}">
+<div style="padding: 0 0 12px; display: flex; flex-direction: column; gap: 8px">
+<p style="margin: 0; font-size: 12px; line-height: 1.5; color: var(--body)"><b style="letter-spacing: 0.04em">THE REASON YOU OPENED IT · </b>{{ e.why }}</p>
+<sc-if value="{{ e.ended }}" hint-placeholder-val="{{ false }}">
+<p style="margin: 0; font-size: 12px; line-height: 1.5; color: var(--body)"><b style="letter-spacing: 0.04em">WHY IT ENDED · </b>{{ e.ended }}</p>
+</sc-if>
+<div style="font-size: 12px; font-weight: 700; letter-spacing: 0.08em; color: var(--mut)">{{ e.tlTitle }}</div>
+<ol style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px">
+<sc-for list="{{ e.timeline }}" as="t" hint-placeholder-count="3">
+<li style="display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 8px; font-size: 12px; line-height: 1.5">
+<span class="mono" style="color: var(--mut)">{{ t.seq }}</span>
+<span><span class="mono" style="color: var(--mut)">{{ t.when }}</span> · {{ t.what }}<sc-if value="{{ t.order }}" hint-placeholder-val="{{ false }}"><br><span class="mono" style="color: var(--dim); word-break: break-all">order {{ t.order }}</span></sc-if></span>
+</li>
+</sc-for>
+</ol>
+</div>
+</sc-if>
+</li>
+</sc-for>
+</ul>
+</section>
+</sc-for>
+<sc-if value="{{ none }}" hint-placeholder-val="{{ false }}">
+<p style="margin: 0; font-size: 13px; color: var(--body)">{{ noneText }}</p>
+</sc-if>
+<p style="margin: 0; font-size: 12px; line-height: 1.5; color: var(--mut)">Refs only go up: closing or deleting a trade never gives its number back.</p>
+</main>
+<nav aria-label="Places" style="position: absolute; left: 8px; right: 8px; bottom: 12px; display: flex; gap: 2px; padding: 4px; background: var(--panel); border: 1px solid var(--field); border-radius: 14px; box-shadow: 0 4px 18px rgba(0,0,0,0.18)">
+<a href="Main.dc.html" class="place"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4.3-4.3"></path></svg><span>Find</span></a>
+<a href="Build.dc.html" class="place"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 3l8 8-3 3-8-8z"></path><path d="M11.5 7.5l-8 8a1.6 1.6 0 0 0 2.3 2.3l8-8"></path></svg><span>Build</span></a>
+<a href="Positions.dc.html" class="place" aria-label="Positions, 2 to look at"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="7" width="20" height="14" rx="2"></rect><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path></svg><span>Positions</span><span class="mono" aria-hidden="true" style="position: absolute; top: 4px; right: 18%; font-size: 12px; font-weight: 700; background: var(--action); color: var(--on); border-radius: 10px; padding: 0 6px; line-height: 18px">2</span></a>
+<a href="Journal.dc.html" class="place on" aria-current="page"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"></path><path d="M14 2v5h6"></path><path d="M16 13H8"></path><path d="M16 17H8"></path></svg><span>Journal</span></a>
+</nav>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":true,"section":"Theme"},"$preview":{"width":390,"height":1500}}'>
+// The record (sample). Refs are given at open and never reused; each timeline entry has its own sequence number.
+var ENTRIES = [
+  { ref: "J-0007", tk: "CORN", name: "Bull put spread 18/17 · 20 Nov", open: true, state: "ORDER WORKING", pnl: null,
+    why: "▲ 3 of 4 factors agree · score +46 · confidence 84 · chance 73%.",
+    tl: [{ when: "Sun 4 Oct 10:12", what: "Order sent: 0.25 credit × 1, day. It waits for Monday's open.", order: "a3f19c2e-6b7d-4e0a-9c51-2d8f7b6e1a04" }] },
+  { ref: "J-0006", tk: "UNG", name: "Bull call spread 15/17 · 18 Dec", open: true, state: "WARNING", warn: true, pnl: -64,
+    why: "▲ 3 of 4 factors agree · score +32 · confidence 81 · chance 38%.",
+    tl: [{ when: "Fri 25 Sep 16:12", what: "Opened at 0.62 debit × 2.", order: "c81b2d47-0e5f-4a3b-8d6c-7f2e9a1b5c30" },
+         { when: "Tue 29 Sep 22:00", what: "HOLD. Nothing to do: the exit plan is running." },
+         { when: "Thu 1 Oct 22:00", what: "Price trend turned down: 20-day average under the 50-day." },
+         { when: "Fri 2 Oct 21:50", what: "Stop warning reached: -$64 against -$62. A warning, not an order." }] },
+  { ref: "J-0005", tk: "WEAT", name: "Bear call spread 5/5.5 · 20 Nov", open: true, state: "CLOSE WORKING", pnl: 24,
+    why: "▼ 4 of 4 factors agree · score -41 · confidence 86 · chance 66%.",
+    tl: [{ when: "Tue 22 Sep 16:04", what: "Opened at 0.14 credit × 3.", order: "9e27c4f0-1a8b-4d6e-b3c5-6f0d2e8a7b91" },
+         { when: "Tue 29 Sep 22:00", what: "HOLD. +$9; the exit plan is running." },
+         { when: "Fri 2 Oct 21:38", what: "Take profit reached: +$24 of $21. Rule: take profit at 50% of max profit." },
+         { when: "Fri 2 Oct 21:40", what: "Close sent: 0.07 debit × 3, good till cancelled.", order: "5d0e7a91-3c42-4f8b-b6d2-91e04c7a2f13" }] },
+  { ref: "J-0004", tk: "GLD", name: "Bull put spread · 16 Oct", open: false, state: "RULE", pnl: 18,
+    why: "▲ 3 of 4 factors agree · chance 74%.", ended: "Closed by the rules: take profit at 50% of max profit.",
+    tl: [{ when: "Mon 14 Sep 16:20", what: "Opened at 0.36 credit × 1." }, { when: "Thu 1 Oct 17:05", what: "Take profit reached: +$18 of $18." }, { when: "Thu 1 Oct 17:06", what: "Closed at 0.18 debit. Filled 1 of 1." }] },
+  { ref: "J-0003", tk: "UNG", name: "Long call 16 · 16 Oct", open: false, state: "RULE", pnl: -40,
+    why: "▲ 2 of 4 factors push · chance 31%. Opened on the desk.", ended: "Closed by the rules: the 21-day exit.",
+    tl: [{ when: "Tue 8 Sep 15:50", what: "Opened at 0.85 debit × 1." }, { when: "Fri 25 Sep 15:40", what: "21 days to expiry: time exit." }, { when: "Fri 25 Sep 15:41", what: "Closed at 0.45. Filled 1 of 1." }] },
+  { ref: "J-0002", tk: "SOYB", name: "Iron condor · 16 Oct", open: false, state: "YOUR REASON", pnl: -22,
+    why: "≈ the factors contradict each other: Neutral · chance 59%.", ended: "Your reason: “USDA report on Friday; stepping aside before it.”",
+    tl: [{ when: "Wed 2 Sep 16:30", what: "Opened at 0.48 credit × 1." }, { when: "Wed 9 Sep 20:15", what: "Closed by you before the USDA report, at 0.70 debit." }] },
+  { ref: "J-0001", tk: "CORN", name: "Bull put spread · 16 Oct", open: false, state: "RULE", pnl: 31,
+    why: "▲ 3 of 4 factors agree · chance 70%.", ended: "Closed by the rules: take profit at 50% of max profit.",
+    tl: [{ when: "Mon 31 Aug 16:00", what: "Opened at 0.62 credit × 1." }, { when: "Fri 11 Sep 18:30", what: "Take profit reached: +$31 of $31." }, { when: "Fri 11 Sep 18:31", what: "Closed at 0.31 debit. Filled 1 of 1." }] }
+];
+function pnl$(x) { return x == null ? "—" : (x < 0 ? "-" : "+") + "$" + Math.abs(Math.round(x)); }
+
+class Component extends DCLogic {
+  constructor(props) { super(props); this.state = { q: "", open: "J-0005" }; }
+  renderVals() {
+    var self = this, s = this.state, dark = this.props.dark ?? true;
+    var q = s.q.trim().toUpperCase();
+    var match = function (e) {
+      if (!q) return true;
+      var digits = q.replace(/^J-?0*/, "");
+      return e.ref.indexOf(q) >= 0 || e.tk.indexOf(q) >= 0 || (/^\d+$/.test(digits) && String(+e.ref.slice(2)) === String(+digits));
+    };
+    var item = function (e) {
+      var isOpen = s.open === e.ref;
+      return {
+        ref: e.ref, tk: e.tk, name: e.name,
+        sub: e.open ? (e.tl.length + " entr" + (e.tl.length === 1 ? "y" : "ies")) : e.ended,
+        pnl: pnl$(e.pnl), pnlCls: e.pnl == null ? "flat" : e.pnl >= 0 ? "pos" : "neg",
+        state: e.state, stateCls: e.warn ? "warn" : "",
+        open: isOpen, toggle: function () { self.setState({ open: isOpen ? null : e.ref }); },
+        why: e.why, ended: e.ended || "",
+        tlTitle: "TIMELINE · " + e.tl.length + " ENTR" + (e.tl.length === 1 ? "Y" : "IES") + ", ALL OF THEM",
+        timeline: e.tl.map(function (t, i) { return { seq: "·0" + (i + 1), when: t.when, what: t.what, order: t.order || "" }; })
+      };
+    };
+    var shown = ENTRIES.filter(match);
+    var openOnes = shown.filter(function (e) { return e.open; }).map(item);
+    var closed = shown.filter(function (e) { return !e.open; }).map(item);
+    var groups = [];
+    if (openOnes.length) groups.push({ title: "OPEN · " + openOnes.length, items: openOnes });
+    if (closed.length) groups.push({ title: "CLOSED TRADES · " + closed.length + " · NET " + pnl$(shown.filter(function (e) { return !e.open; }).reduce(function (a, e) { return a + e.pnl; }, 0)), items: closed });
+    return {
+      themeClass: dark ? "t-dark" : "t-light",
+      q: s.q, setQ: function (e) { self.setState({ q: e.target.value }); },
+      groups: groups, none: !shown.length,
+      noneText: "Nothing matches “" + s.q + "”. The refs run from J-0001 to J-0007."
+    };
+  }
+}
+</script>
+</body>
+</html>

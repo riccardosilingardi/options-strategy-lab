@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>How CORN's numbers connect</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+.t-dark{--bg:#14181d;--panel:#1a1f26;--line:#2a2f36;--field:#6b7685;--ink:#f5f0e6;--mut:#8b95a1;--dim:#7d8794;--amber:#e8b545;--green:#7fb85c;--red:#d66a5a;--blue:#5aa7d6;--body:#c9d1d9;--on:#14181d;--action:#5aa7d6;--raise:#222831;--scrim:rgba(6,8,10,0.66)}
+.t-light{--bg:#f5f6f7;--panel:#ffffff;--line:#dcdfe3;--field:#7a8491;--ink:#1c2128;--mut:#5a6472;--dim:#616b78;--amber:#8a6300;--green:#2f6f45;--red:#b23a2b;--blue:#1f6391;--body:#2a3038;--on:#ffffff;--action:#1f6391;--raise:#eceff2;--scrim:rgba(20,24,29,0.45)}
+.sans{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.mono{font-family:ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums}
+a{color:var(--blue)}a:hover{color:var(--ink)}
+</style>
+</helmet>
+<div class="{{ themeClass }} sans" style="width: 390px; height: 844px; box-sizing: border-box; position: relative; overflow: hidden; background: var(--bg); color: var(--ink)">
+<div aria-hidden="true" style="position: absolute; left: 0; top: 0; width: 390px; height: 844px">
+<dc-import name="Main" hint-size="390px,844px"></dc-import>
+</div>
+<div aria-hidden="true" style="position: absolute; left: 0; top: 0; right: 0; bottom: 0; background: var(--scrim)"></div>
+<section role="dialog" aria-modal="true" aria-labelledby="def-h" style="position: absolute; left: 0; right: 0; bottom: 0; background: var(--panel); border-top: 1px solid var(--field); border-radius: 18px 18px 0 0; padding: 8px 16px 20px; display: flex; flex-direction: column; gap: 8px; box-shadow: 0 -10px 30px rgba(0,0,0,0.3)">
+<span aria-hidden="true" style="align-self: center; width: 40px; height: 4px; border-radius: 2px; background: var(--field)"></span>
+<div style="display: flex; align-items: center; justify-content: space-between; gap: 8px">
+<div>
+<h2 id="def-h" style="margin: 0; font-size: 18px; font-weight: 700; line-height: 1.3">How CORN's numbers connect</h2>
+<p class="mono" style="margin: 2px 0 0; font-size: 12px; line-height: 1.3; color: var(--mut)">Bull put spread 18/17 · 20 Nov</p>
+</div>
+<a href="Main.dc.html" aria-label="Close" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: var(--ink); border-radius: 10px; flex: none">
+<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="M6 6l12 12"></path></svg>
+</a>
+</div>
+<ol style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column">
+<li style="display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 10px; padding: 10px 0; border-top: 1px solid var(--line)">
+<span class="mono" aria-hidden="true" style="width: 24px; height: 24px; border-radius: 50%; border: 1px solid var(--field); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700">1</span>
+<div style="display: flex; flex-direction: column; gap: 2px">
+<div style="display: flex; justify-content: space-between; align-items: baseline; gap: 8px"><span style="font-size: 13px; font-weight: 700">Score</span><span class="mono" style="font-size: 15px; font-weight: 700">+46</span></div>
+<p style="margin: 0; font-size: 13px; line-height: 1.5; color: var(--body)">Season 0.30, trend 0.25, weather 0.25, news 0.20. Each weight × direction × strength, added up: −100 to +100.</p>
+</div>
+</li>
+<li style="display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 10px; padding: 10px 0; border-top: 1px solid var(--line)">
+<span class="mono" aria-hidden="true" style="width: 24px; height: 24px; border-radius: 50%; border: 1px solid var(--field); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700">2</span>
+<div style="display: flex; flex-direction: column; gap: 2px">
+<div style="display: flex; justify-content: space-between; align-items: baseline; gap: 8px"><span style="font-size: 13px; font-weight: 700">Confidence</span><span class="mono" style="font-size: 15px; font-weight: 700">84</span></div>
+<p style="margin: 0; font-size: 13px; line-height: 1.5; color: var(--body)">How much the four agree. Three point up: 75 + 0.15 × mean(70, 60, 40) = 84, held in the 75–95 band.</p>
+</div>
+</li>
+<li style="display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 10px; padding: 10px 0; border-top: 1px solid var(--line)">
+<span class="mono" aria-hidden="true" style="width: 24px; height: 24px; border-radius: 50%; border: 1px solid var(--field); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700">3</span>
+<div style="display: flex; flex-direction: column; gap: 2px">
+<div style="display: flex; justify-content: space-between; align-items: baseline; gap: 8px"><span style="font-size: 13px; font-weight: 700">Direction</span><span class="mono" style="font-size: 15px; font-weight: 700">▲ Bull</span></div>
+<p style="margin: 0; font-size: 13px; line-height: 1.5; color: var(--body)"><span class="mono">+46 × 84 ÷ 100 = 38.6</span>, past the 12.5 line. A conflict is always Neutral.</p>
+</div>
+</li>
+<li style="display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 10px; padding: 10px 0; border-top: 1px solid var(--line)">
+<span class="mono" aria-hidden="true" style="width: 24px; height: 24px; border-radius: 50%; border: 1px solid var(--field); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700">4</span>
+<div style="display: flex; flex-direction: column; gap: 2px">
+<div style="display: flex; justify-content: space-between; align-items: baseline; gap: 8px"><span style="font-size: 13px; font-weight: 700">Strategy</span><span style="font-size: 13px; font-weight: 700">Bull put spread</span></div>
+<p style="margin: 0; font-size: 13px; line-height: 1.5; color: var(--body)">A Bull spread inside your $500 budget. Neutral cards stay in the list too.</p>
+</div>
+</li>
+<li style="display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 10px; padding: 10px 0; border-top: 1px solid var(--line)">
+<span class="mono" aria-hidden="true" style="width: 24px; height: 24px; border-radius: 50%; border: 1px solid var(--field); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700">5</span>
+<div style="display: flex; flex-direction: column; gap: 2px">
+<div style="display: flex; justify-content: space-between; align-items: baseline; gap: 8px"><span style="font-size: 13px; font-weight: 700">Chance · Future avg</span><span class="mono" style="font-size: 15px; font-weight: 700">73% · +$4</span></div>
+<p style="margin: 0; font-size: 13px; line-height: 1.5; color: var(--body)">Of the simulated paths to 20 Nov, the share ending above the $17.75 breakeven, and their average result. Drift: CORN's measured season.</p>
+</div>
+</li>
+</ol>
+<p style="margin: 0; padding-top: 10px; border-top: 1px solid var(--line); font-size: 12px; line-height: 1.5; color: var(--mut)">The season counts once, inside the score, over the same window as the chance.</p>
+</section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":true,"section":"Theme"},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var dark = this.props.dark ?? true;
+    return { themeClass: dark ? "t-dark" : "t-light" };
+  }
+}
+</script>
+</body>
+</html>

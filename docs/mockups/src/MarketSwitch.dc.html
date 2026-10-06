@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Switch market</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+.t-dark{--bg:#14181d;--panel:#1a1f26;--line:#2a2f36;--field:#6b7685;--ink:#f5f0e6;--mut:#8b95a1;--dim:#7d8794;--amber:#e8b545;--green:#7fb85c;--red:#d66a5a;--blue:#5aa7d6;--body:#c9d1d9;--on:#14181d;--action:#5aa7d6;--raise:#222831;--scrim:rgba(6,8,10,0.66)}
+.t-light{--bg:#f5f6f7;--panel:#ffffff;--line:#dcdfe3;--field:#7a8491;--ink:#1c2128;--mut:#5a6472;--dim:#616b78;--amber:#8a6300;--green:#2f6f45;--red:#b23a2b;--blue:#1f6391;--body:#2a3038;--on:#ffffff;--action:#1f6391;--raise:#eceff2;--scrim:rgba(20,24,29,0.45)}
+.sans{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.mono{font-family:ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums}
+button,select,input{font:inherit;color:inherit}
+a{color:var(--blue)}a:hover{color:var(--ink)}
+.mk{display:grid;grid-template-columns:64px minmax(0,1fr) auto;gap:8px;align-items:center;min-height:48px;padding:0 4px;border-top:1px solid var(--line);color:var(--ink);text-decoration:none}
+.mk:hover{background:var(--raise);color:var(--ink)}
+.mk.cur{box-shadow:inset 3px 0 0 var(--amber)}
+.grp{margin:0;padding:12px 4px 4px;font-size:12px;font-weight:700;letter-spacing:.08em;color:var(--mut)}
+</style>
+</helmet>
+<div class="{{ themeClass }} sans" style="width: 390px; height: 844px; box-sizing: border-box; position: relative; overflow: hidden; background: var(--bg); color: var(--ink)">
+<div aria-hidden="true" style="position: absolute; left: 0; top: 0; width: 390px; height: 844px">
+<dc-import name="Market" hint-size="390px,844px"></dc-import>
+</div>
+<div aria-hidden="true" style="position: absolute; left: 0; top: 0; right: 0; bottom: 0; background: var(--scrim)"></div>
+<section role="dialog" aria-modal="true" aria-labelledby="sw-h" style="position: absolute; left: 0; right: 0; bottom: 0; top: 96px; background: var(--panel); border-top: 1px solid var(--field); border-radius: 18px 18px 0 0; padding: 8px 16px 16px; display: flex; flex-direction: column; gap: 8px">
+<span aria-hidden="true" style="align-self: center; width: 40px; height: 4px; border-radius: 2px; background: var(--field)"></span>
+<div style="display: flex; align-items: center; justify-content: space-between">
+<h2 id="sw-h" style="margin: 0; font-size: 18px; font-weight: 700">Markets</h2>
+<a href="MarketStrategies.dc.html" aria-label="Close" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: var(--ink)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="M6 6l12 12"></path></svg></a>
+</div>
+<label style="display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 12px; border: 1px solid var(--field); border-radius: 10px; background: var(--bg)">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true" style="color: var(--mut)"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4.3-4.3"></path></svg>
+<input type="search" value="{{ q }}" onChange="{{ setQ }}" placeholder="Ticker or name" aria-label="Search markets" style="flex: 1; min-width: 0; border: none; background: transparent; color: var(--ink); font-size: 15px; outline: none">
+</label>
+<div style="display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; gap: 8px; padding: 0 4px; font-size: 12px; color: var(--mut)"><span>Market</span><span>Signal</span><span>Best chance</span></div>
+<div style="overflow-y: auto; flex: 1">
+<sc-for list="{{ groups }}" as="g" hint-placeholder-count="3">
+<h3 class="grp">{{ g.title }}</h3>
+<sc-for list="{{ g.items }}" as="m" hint-placeholder-count="3">
+<a href="{{ m.href }}" class="mk {{ m.cls }}" aria-label="{{ m.aria }}">
+<span class="mono" style="font-size: 15px; font-weight: 700">{{ m.tk }}</span>
+<span style="font-size: 13px; color: var(--body); white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{ m.dir }} <span style="color: var(--mut)">· {{ m.name }}</span></span>
+<span class="mono" style="font-size: 15px; font-weight: 700">{{ m.chance }}</span>
+</a>
+</sc-for>
+</sc-for>
+</div>
+</section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":true,"section":"Theme"},"$preview":{"width":390,"height":844}}'>
+var M = [
+  { tk: "CORN", name: "Corn", cat: "GRAINS", dir: 1, chance: 73 }, { tk: "SOYB", name: "Soybeans", cat: "GRAINS", dir: 0, chance: 58 }, { tk: "WEAT", name: "Wheat", cat: "GRAINS", dir: -1, chance: 66 },
+  { tk: "UNG", name: "US Natural Gas", cat: "ENERGY", dir: 1, chance: 38 }, { tk: "BOIL", name: "2x Natural Gas", cat: "ENERGY", dir: 0, chance: 54 }, { tk: "USO", name: "Crude Oil", cat: "ENERGY", dir: -1, chance: 62 }, { tk: "XLE", name: "Energy Sector", cat: "ENERGY", dir: 0, chance: 57 },
+  { tk: "GLD", name: "Gold", cat: "METALS", dir: 1, chance: 76 }, { tk: "SLV", name: "Silver", cat: "METALS", dir: 0, chance: 64 }, { tk: "GDX", name: "Gold Miners", cat: "METALS", dir: 1, chance: 44 }
+];
+class Component extends DCLogic {
+  constructor(props) { super(props); this.state = { q: "" }; }
+  renderVals() {
+    var self = this, s = this.state, dark = this.props.dark ?? true, q = s.q.trim().toLowerCase();
+    var hit = M.filter(function (m) { return !q || m.tk.toLowerCase().indexOf(q) >= 0 || m.name.toLowerCase().indexOf(q) >= 0; });
+    var groups = ["GRAINS", "ENERGY", "METALS"].map(function (c) {
+      var items = hit.filter(function (m) { return m.cat === c; }).map(function (m) {
+        var d = m.dir > 0 ? "▲ Bull" : m.dir < 0 ? "▼ Bear" : "≈ Neutral";
+        return { tk: m.tk, name: m.name, dir: d, chance: m.chance + "%", href: m.tk === "CORN" ? "MarketStrategies.dc.html" : "#" + m.tk.toLowerCase(),
+          cls: m.tk === "CORN" ? "cur" : "", aria: m.tk + ", " + m.name + ", " + d.slice(2) + ", best chance " + m.chance + "%" + (m.tk === "CORN" ? ", open now" : "") };
+      });
+      return { title: c + " · " + items.length, items: items };
+    }).filter(function (g) { return g.items.length; });
+    return { themeClass: dark ? "t-dark" : "t-light", q: s.q, setQ: function (e) { self.setState({ q: e.target.value }); }, groups: groups };
+  }
+}
+</script>
+</body>
+</html>
