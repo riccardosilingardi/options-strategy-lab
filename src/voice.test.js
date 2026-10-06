@@ -220,7 +220,16 @@ test("MEASURED: the three screens, and the table in the PRD is this number", () 
      quantity or time in force", 13 words). That look shows only on a position's screen, but the "Not in the app" card in
      this block mounts the same component, so its whole body is counted here. The J-0001 confirm (rendered, 35) is
      unchanged. */
-  const CEILING = { find: 336, market: 604, build: 435, positions: 248 };
+  /* >>> PR 4: THE COUNTER STOPPED COUNTING WHAT IS INSIDE A FOLD ONE LEVEL DOWN, AND THE COPILOT FOUND ITS PLACES. <<<
+     `screenSource()` stripped a fold's children from the words but looked for components in the unstripped body, so a
+     component rendered only inside a fold or a sheet was counted at rest (Find's chip sheets' controls; the market
+     page's folded news question). Fixed in wordcount.mjs. The same counter on main (8bac106): find 269, market 574,
+     build 435, positions 248. This PR: find 269 -> 288 (the summary line's "Compare ›" and the sheet's words that are
+     generated at the block: `findCopilotLine()`'s call site, the copilot's heading), market 574 -> 581 (the news
+     block's fold summary `marketNewsAsk()` 7; the factor titles are generated in why.jsx), build 435 -> 417 (the "More
+     questions for the copilot" section left: its desk questions moved to Find and the market page). The ceilings are
+     those numbers. */
+  const CEILING = { find: 288, market: 581, build: 417, positions: 248 };
   /* >>> PR #46: ONE ORDERS LIST. <<< The record-based "WORKING AT THE BROKER" panel (its paragraph about what a
      working order is, the stale-DAY warning, the per-row sentences) left Positions; the one list lives in
      `orders.jsx`, which the counter now reads. Measured: positions 304 -> 209 (4 typed + 205 generated, 14 sites).

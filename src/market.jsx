@@ -30,11 +30,12 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, RefreshCw, CalendarDays, Wheat, Flame, Gem, CircleDot, GitCompare } from "lucide-react";
 import { T, TYPE, BADGE_H } from "./theme.js";
-import { mono, sans, Note, Info, Sheet, Label, Placeholder, IconButton, UnderTabs, SegmentBar, TextBtn, TAP } from "./ui.jsx";
+import { mono, sans, Note, Info, Sheet, Label, Placeholder, IconButton, UnderTabs, SegmentBar, TextBtn, Fold, TAP } from "./ui.jsx";
 import { CandidateCard } from "./card.jsx";
 import { MarketRow, ComparePanel } from "./find.jsx";
 import { WhySheet, HowWorkedOut } from "./why.jsx";
-import { PriceChart, TaCopilot, scaleStrategy } from "./pro.jsx";
+import { PriceChart, TaCopilot, scaleStrategy, useCopilot, skillsFor } from "./pro.jsx";
+import { CopilotSection } from "./build.jsx";
 import { BandThumbnail } from "./visuals.jsx";
 import { getU, MARKET_CATEGORIES, CATEGORY_ICONS } from "./markets.js";
 import { NAV_BAR_H } from "./navBar.jsx";
@@ -51,7 +52,7 @@ import { RULES, money, chanceText, expiryWords, sizedFree, sizedFigures, sizeLin
   chanceBasisLabel, meetsRequest, MARKET_TABS, MARKETS_SHEET_TITLE, SAVE_FIRST_CARD, dayChangeText, dayChangeShort,
   ivText, ivRankText, ivRankShort, moveLabel, HEADER_DEFINITIONS, NEWS_NOT_READ, newsHeadlineText, groupHeadText, strategiesLine,
   signalsParts, strategiesNote, MARKET_READ_LINK, BACK_TO_FIND_ARIA, refreshMarketAria, stanceText, futurePastDisagree, needsText,
-  OPEN_IN_CHAIN, BUILD_CTA, COMPARE_TICK, MARKET_READ_HEAD, HOW_WORKED_OUT_LINK, MARKET_READ_END, CHAIN_MODES,
+  OPEN_IN_CHAIN, BUILD_CTA, COMPARE_TICK, MARKET_READ_HEAD, HOW_WORKED_OUT_LINK, MARKET_READ_END, CHAIN_MODES, marketNewsHead, marketNewsAsk,
   noOpenInterestText, underEntryText, THIN, spotLineText, legsMaxText, TRAY_LABELS, uncoveredText, trayEmptyText,
   chainEventText, eventLineText, eventInfoText, dateOnlyWhen, inDaysText, holidayWeekNote, eventsBeforeLabel, CHAIN_HEAD,
   chainNotLoadedText, marketReadingText, noCardsText, ARIA, readScoreLine,
@@ -76,7 +77,7 @@ export function MarketPage({
   newsItems = [], newsState = null, ago = (d) => String(d), exits = [], timeZone,
   isSaved = () => false, onSave = () => {}, inCompare = () => false, onTickCompare = () => {}, onBuild = () => {},
   onBuildLegs = () => {}, cardFigures = null, quoteOf = () => null, seasonal = null, matrix = null, liqFloor = 0,
-  badgeOf = () => null, onMore = null, whyProps = {}, onAnalysis = () => {},
+  badgeOf = () => null, onMore = null, whyProps = {}, onAnalysis = () => {}, copilot = null,
   sheet = null, onSheet = () => {}, compareProps = {}, now = Date.now(), initialTray = null,
 }) {
   const u = getU(tk);
@@ -112,7 +113,7 @@ export function MarketPage({
       <UnderTabs label={ARIA.marketTabs(tk)} value={tab} onChange={onTab} items={MARKET_TABS} />
 
       {tab === "overview" && (
-        <Overview tk={tk} fused={fused} whyProps={whyProps} onAnalysis={onAnalysis} />
+        <Overview tk={tk} fused={fused} whyProps={whyProps} onAnalysis={onAnalysis} copilot={copilot} />
       )}
       {tab === "strategies" && (
         <Strategies tk={tk} items={items} board={board} fused={fused} findDir={findDir} sentiments={sentiments} findOrder={findOrder}
@@ -271,11 +272,25 @@ function EventLine({ tk, expKey, now, timeZone, exits = [], expiries = [], chain
 }
 
 /* ---------------------------------------------------------------- OVERVIEW */
-function Overview({ tk, fused, whyProps, onAnalysis }) {
+function Overview({ tk, fused, whyProps, onAnalysis, copilot = null }) {
   const [bars, setBars] = useState(null);
   const [convo, setConvo] = useState({ msgs: [] });
   const [how, setHow] = useState(false);
   useEffect(() => { setConvo({ msgs: [] }); setBars(null); }, [tk]);
+  // THE NEWS QUESTION SITS IN THE NEWS BLOCK (PR 4, owner: "news is one of the four factors"): News impact on this market,
+  // the market page's own question (SKILLS, place "market"). Its conversation is App.jsx's, cleared when the market changes.
+  const ask = useCopilot({ ...(copilot || { convo: null, setConvo: () => {} }), ctx: (copilot && copilot.ctx) || {} });
+  const askAll = { ...ask, clear: () => copilot && copilot.setConvo({ msgs: [], busy: false, err: null }) };
+  useEffect(() => { if (copilot) copilot.setConvo({ msgs: [], busy: false, err: null, partial: "" }); }, [tk]); // eslint-disable-line
+  // One tap away (a fold): the chart copilot is already at rest on this tab, and one copilot at rest is enough.
+  const newsExtra = copilot ? (
+    <Fold label="ask" tone={T.blue} summary={marketNewsAsk(tk)} style={{ marginTop: 2 }}>
+      <div data-market-news-copilot style={{ marginTop: 6 }}>
+        <CopilotSection ask={askAll} skills={skillsFor("market")} label={marketNewsHead(tk)} heading={marketNewsHead(tk)}
+          ownLabel={`Your own question about ${tk}'s news`} />
+      </div>
+    </Fold>
+  ) : null;
   return (
     <div data-market-body style={{ padding: "12px 16px 24px", display: "flex", flexDirection: "column", gap: 12 }}>
       {/* THREE PANELS (the mockup "Market · Overview"): the chart, the market's read, the chart copilot. */}
@@ -289,7 +304,7 @@ function Overview({ tk, fused, whyProps, onAnalysis }) {
           <h2 style={SECTION_HEAD}>{MARKET_READ_HEAD}</h2>
           {fused && <span style={{ ...mono, ...tnum, fontSize: FS.xs, color: T.mut }}>{readScoreLine(fused)}</span>}
         </div>
-        {fused ? <WhySheet fused={fused} ticker={tk} {...whyProps} factorsAtRest /> : <Note>{marketReadingText(tk)}</Note>}
+        {fused ? <WhySheet fused={fused} ticker={tk} {...whyProps} factorsAtRest newsExtra={newsExtra} /> : <Note>{marketReadingText(tk)}</Note>}
         <div style={{ borderTop: `1px solid ${T.line}`, marginTop: 8, padding: "8px 0 4px" }}>
           <Note color={T.mut}>{MARKET_READ_END}</Note>
           {fused && (

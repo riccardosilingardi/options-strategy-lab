@@ -25,7 +25,7 @@ import { mono, sans, Label, Stat } from "./ui.jsx";
 // The fold lives in steps.jsx — chrome with no trade in it (P9, TASK 3).
 import { Fold } from "./steps.jsx";
 import { ARROW, regionSignals, newsLine, verdictLine, scoreWorking, confidenceWorking } from "./signals.js";
-import { whyFindEffect, WEIGHTS_CHOSEN_LINE, seasonRowLines, chanceBasisLabel } from "./rules.js";
+import { whyFindEffect, WEIGHTS_CHOSEN_LINE, seasonRowLines, chanceBasisLabel, factorHeadline, headlinesWord, FACTOR_EVIDENCE } from "./rules.js";
 import { useNarrow } from "./visuals.jsx";
 import { NumbersFit } from "./card.jsx";
 
@@ -238,20 +238,27 @@ export function SeasonRow({ season }) {
  * own weight, a bar of its strength, its arrow and strength, and the one sentence the factor wrote (`components[k].why`).
  * Nothing is computed here: every figure is the fused result's. A factor the market does not have is not drawn.
  */
-export function FactorRows({ fused }) {
+export function FactorRows({ fused, ticker = null, newsItems = null, weatherData = null, month = null, newsExtra = null }) {
+  const [open, setOpen] = useState(null);
   if (!fused || !fused.components) return null;
   const keys = (fused.factors || Object.keys(fused.components)).filter((k) => fused.components[k] && fused.components[k].applies !== false);
+  // PR 4 ("the tabs speak for themselves"): each block's title says what the factor highlights — its direction in words,
+  // and for news how many headlines tag this market — and News and Weather open their own evidence in place.
+  const tagged = newsItems && ticker ? newsLine(ticker, newsItems).tagged : null;
   return (
     <div data-factor-rows>
       {keys.map((k) => {
         const c = fused.components[k];
         const w = fused.weights && fused.weights[k] != null ? Number(fused.weights[k]).toFixed(2) : null;
         const tone = c.dir > 0 ? T.green : c.dir < 0 ? T.violet : T.mut;
+        const drill = k === "news" && newsItems ? "news" : k === "weather" && weatherData ? "weather" : null;
+        const isOpen = open === k;
         return (
           <div key={k} data-factor={k} style={{ borderTop: `1px solid ${T.line}`, padding: "10px 0", display: "flex", flexDirection: "column", gap: 6 }}>
             <span style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
-              <span style={{ ...sans, fontSize: FS.xs, fontWeight: FW.bold, letterSpacing: "0.04em", color: T.ink }}>
-                {FACTOR_NAMES[k] || k}{w != null && <span style={{ ...mono, fontWeight: FW.regular, color: T.mut }}>{` × ${w}`}</span>}
+              <span data-factor-head style={{ ...sans, fontSize: FS.xs, fontWeight: FW.bold, letterSpacing: "0.04em", color: T.ink }}>
+                {factorHeadline(FACTOR_NAMES[k] || k, c, k === "news" && tagged != null ? headlinesWord(tagged) : null)}
+                {w != null && <span style={{ ...mono, fontWeight: FW.regular, color: T.mut }}>{` × ${w}`}</span>}
               </span>
               <span style={{ ...mono, fontSize: FS.md, fontWeight: FW.bold, color: T.ink, fontVariantNumeric: "tabular-nums" }}>{`${c.arrow || ""} ${c.strength ?? "—"}`}</span>
             </span>
@@ -259,30 +266,42 @@ export function FactorRows({ fused }) {
               <span style={{ display: "block", height: 4, width: `${Math.max(0, Math.min(100, Number(c.strength) || 0))}%`, background: tone }} />
             </span>
             {c.why && <span style={{ ...sans, fontSize: FS.sm, color: T.body, lineHeight: LH.body }}>{c.why}</span>}
+            {drill && (
+              <button type="button" aria-expanded={isOpen} data-factor-evidence={k} onClick={() => setOpen(isOpen ? null : k)}
+                style={{ ...sans, alignSelf: "flex-start", minHeight: 44, padding: 0, background: "transparent", border: "none", color: T.blue,
+                  fontSize: FS.sm, cursor: "pointer" }}>
+                {FACTOR_EVIDENCE[k]} {isOpen ? "▴" : "▾"}
+              </button>
+            )}
+            {isOpen && k === "news" && <NewsDrill ticker={ticker} newsItems={newsItems} />}
+            {isOpen && k === "weather" && <WeatherDrill ticker={ticker} weatherData={weatherData} month={month} />}
+            {k === "news" && newsExtra}
           </div>
         );
       })}
+      {!keys.includes("news") && newsExtra}
     </div>
   );
 }
 const FACTOR_NAMES = { seasonal: "SEASONALITY", technical: "PRICE TREND", weather: "WEATHER", news: "NEWS" };
 
-export function WhySheet({ fused, title, note, ticker, weatherData, newsItems, month, defaultDetail = false, order = "ev", style, factorsAtRest = false }) {
+export function WhySheet({ fused, title, note, ticker, weatherData, newsItems, month, defaultDetail = false, order = "ev", style, factorsAtRest = false, newsExtra = null }) {
   const [how, setHow] = useState(false);
   const [newsOpen, setNewsOpen] = useState(false);
   if (!fused) return null;
   return (
       <div style={{ marginTop: 4, ...(style || {}) }}>
         <WhySheetTop fused={fused} how={how} onHow={() => setHow((h) => !h)} compact={factorsAtRest} />
-        {factorsAtRest && <FactorRows fused={fused} />}
+        {factorsAtRest && <FactorRows fused={fused} ticker={ticker} newsItems={newsItems} weatherData={weatherData} month={month} newsExtra={newsExtra} />}
         {factorsAtRest && <div style={{ fontSize: FS.sm, color: T.body, marginTop: 8, lineHeight: LH.body }}>{whyFindEffect()}</div>}
         <SeasonRow season={fused.season || null} />
         <div style={{ marginTop: 4 }}><NumbersFit order={order} /></div>
-        <button onClick={() => setNewsOpen((o) => !o)}
+        {/* At rest (the Signals tab) the news has its own block with its headlines (PR 4): no second news line here. */}
+        {!factorsAtRest && <button onClick={() => setNewsOpen((o) => !o)}
           style={{ ...sans, fontSize: FS.xs, marginTop: 6, background: "transparent", color: T.body, border: "none", padding: "4px 0", cursor: "pointer", textAlign: "left", lineHeight: LH.body, minHeight: 44 }}>
           {newsLine(ticker, newsItems).text} {newsOpen ? "▲" : "▼"}
-        </button>
-        {newsOpen && <NewsDrill ticker={ticker} newsItems={newsItems} />}
+        </button>}
+        {!factorsAtRest && newsOpen && <NewsDrill ticker={ticker} newsItems={newsItems} />}
         {/* THE LONG NARRATIVE, behind one tap. The autopilot sentence is inside it. */}
         <Fold summary="The full reasoning" label="why" tone={T.blue} style={{ marginTop: 8 }}>
           <WhyThisTrade fused={fused} title={title} note={note} ticker={ticker} weatherData={weatherData}

@@ -159,9 +159,14 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
   limit is order path 3 unchanged; **"Keep it, write why" is a `keep` entry on the position's timeline**
   (`keepEntry()` through `appendTimeline()`), refused on a preview — never a new /api/state field. The card's sentence is
   `cardSentence()`; its exits are `exitLabels()`.
-- **The copilot by place (PRD §1):** every `SKILLS` question in pro.jsx carries `place` (find · build · positions · desk);
-  a screen shows only its own (`skillsFor()`, `BUILD_SKILL_IDS`, `POSITION_SKILL_IDS`). A copilot explains; it never
-  proposes, closes or sends. A position's answers are filed in copilotLog tagged with its ref, plus one timeline line.
+- **The copilot by place (PRD §1; owner, PR 4): the app builds, the copilot explains and recommends, the person decides,
+  the gate checks.** Every `SKILLS` question in pro.jsx carries `place` (find · market · build · positions) and opens with
+  that place's `COPILOT_ROLE`; a screen shows only its own (`skillsFor()`, `BUILD_SKILL_IDS`, `POSITION_SKILL_IDS`). A
+  copilot recommends ONLY among what the app built or offers and put in the context (Find: the cards that fit,
+  `compareCards()`; Build: a verdict from `BUILD_VERDICTS` on the loaded trade, never over a gate check; a position: one
+  of `positionActions()`); it never writes a strike, an expiry, a structure or a size of its own, never sends, never
+  closes. The standing prompt (`SYSTEM_PROMPT`) has no decision tree: the trees are criteria for judging a card. A
+  position's answers are filed in copilotLog tagged with its ref, plus one timeline line.
 - Plan first, then change surgically: the plan is the standing rule's ("Plan before you execute", above).
 
 ## Files that matter
@@ -204,7 +209,8 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
 - `src/find.jsx` — Step 1, Find (version B, redesign PR 1): category tabs, the chip row and its sheets, the summary line,
   one row per market (`MarketRow`), the states, Compare (`ComparePanel`).
 - `src/rows.js` — `marketRows()`, `rowFigure()`, `rowStateOf()`: Find's rows over the one sorted list (plain JS).
-- `src/market.jsx` — Step 2, the market page: header, Overview, Strategies (`StrategyCard`), Chain (`ChainTab`, the tray).
+- `src/market.jsx` — Step 2, the market page: header, Signals (the tab id stays `overview`; the four factor blocks are
+  why.jsx's `FactorRows`, titled by `factorHeadline()`), Strategies (`StrategyCard`), Chain (`ChainTab`, the tray).
 - `src/marketView.js` — `dayChange()`, `expectedMove()`, `latestNews()`, `toggleChainLeg()` (plain JS).
 - `src/events.js` — the event calendar to 31 Dec 2026; `nextEvent()`, `eventsFor()`, the holiday weeks.
 - `src/wizard.jsx` — onboarding, the confirm step, and `statusLine()` (Home is gone since round 2).
@@ -301,6 +307,8 @@ All in `RULES`, `src/rules.js`, unless noted.
   borders, radii, paddings, taps, theme colours) and its words, on the same harness; exits 1 on any difference.
 - `node scripts/shoot-screens.mjs [dir]` photographs Find, a sheet, Saved and the market page's tabs at 390×844 in the
   pre-installed headless Chromium, on findB's fixtures (`scripts/screens.jsx`), and prints page and card heights.
+- `node scripts/shoot-pr4.mjs [dir]` photographs PR 4's screens (Find's Compare sheet, the Signals tab, the copilot
+  sections) on the `+book` fixture with a stub copilot (docs/screens/pr4/).
 - `node scripts/measure-find.mjs` prints what each Find control passes on the 31 fixture cards and what
   one slider move costs (`scripts/find-fixtures.jsx` builds the cards).
 - `node scripts/measure-season.mjs` (months that count, on avFixture series), `node scripts/measure-signals.mjs`

@@ -527,8 +527,6 @@ export function BuildScreen({ v, foldedNode = null }) {
   const ts = useTicketSend({ ...v.ticket, onSent: (o, info) => { setLastSent(o); if (v.ticket.onSent) v.ticket.onSent(o, info); } });
   const r = { ...v.review, lastSent, onSecond: v.review.viaBroker ? () => ts.fire() : v.review.onLocal,
     onClose: () => { if (ts.outcome && !ts.busy) ts.setOutcome(null); v.review.onClose(); } };
-  // The copilot by place (redesign PR 3): Build's More shows the other Build and desk questions, never Find's or Positions'.
-  const others = SKILLS.filter((s) => !BUILD_SKILL_IDS.includes(s.id) && (s.place === "build" || s.place === "desk"));
   return (
     <div data-build style={{ paddingBottom: 8 }}>
       <BuildHeader backLabel={v.back.label} onBack={v.back.onClick} />
@@ -543,17 +541,6 @@ export function BuildScreen({ v, foldedNode = null }) {
         <ExitPlanSection {...v.exit} />
         <SendBar {...v.send} />
         <MoreOnThisTrade open={more} onToggle={() => setMore((m) => !m)}>
-          <Section label="More questions for the copilot">
-            <SectionTitle>More questions for the copilot</SectionTitle>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-              {others.map((sk) => (
-                <button key={sk.id} disabled={ask.busy} onClick={() => ask.send(sk.prompt, sk.label)}
-                  style={{ ...sans, minHeight: TAP, padding: "8px 12px", borderRadius: 10, border: `1px solid ${T.field}`, background: "transparent",
-                    color: T.ink, fontSize: FS.sm, cursor: "pointer" }}>{sk.label}</button>
-              ))}
-            </div>
-            <Note style={{ marginTop: 6 }}>The answer appears in the copilot section above.</Note>
-          </Section>
           {foldedNode}
         </MoreOnThisTrade>
       </main>

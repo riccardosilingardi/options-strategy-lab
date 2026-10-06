@@ -35,6 +35,7 @@ export const R = {
   versionA: "the board's page under the state is version A (Main), which was not chosen; only the state is compared",
   notRead: "unknown is not zero (CLAUDE.md): the fixture never reads Alpha Vantage, so the app says \"Not read yet\" in a quiet tone, never a green \"Working\"",
   cancel: "Cancel is the red outline (CLAUDE.md, PR #47); the board draws it in ink",
+  signals: "the owner, 6 Oct 2026 (PR 4): \"the tabs speak for themselves\" — the market page's first tab is named for what it shows, Signals (the chart and the four factors); the board says Overview",
   layout: "the same space is carried by the page's own padding (FIND_LIST_END), not this element",
 };
 
@@ -91,6 +92,7 @@ const MARKET_WORDS_SKIP = [
   [/^(CORN|Corn · Grains|WASDE|crop report)/, R.sample],
   [/^Close ·/, R.times],
   [/^IV rank$/, R.ivrank],
+  [/^Overview$/, R.signals],
 ];
 
 export const SCREENS = {
@@ -234,7 +236,7 @@ export const SCREENS = {
       [/^You risk$|^Max profit$|^Return$/, R.labels], [/^▲ Needs CORN/, R.sample], [/^The signals say/, R.data]],
   },
   MarketOverview: {
-    mode: "app+all", go: (page) => toUng(page, "Overview"),
+    mode: "app+all", go: (page) => toUng(page, "Signals"),
     pairs: [
       ...MARKET_HEADER,
       { n: "Body", b: "main", a: "[data-market-body]", p: ["padding", "gap"] },

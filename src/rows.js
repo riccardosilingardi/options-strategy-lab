@@ -96,3 +96,51 @@ export function rowStateOf(tk, g = {}, reading = null) {
   }
   return null;
 }
+
+/**
+ * WHAT FIND'S "COMPARE THE CARDS" HANDS THE COPILOT (PR 4, owner: "the cards that fit, in your order, up to 20").
+ *
+ * The cards that fit the request, in the order `items` already has (the owner's), at most `max`; each with the figures
+ * its card prints — read through the same functions the card reads (`sizedFigures()`, `futureFigures()`,
+ * `pastFigures()`, `chanceText()`, `returnText()`) — and its Greeks for the size the budget buys, from the analysis at
+ * the price that fills (`lf.aFill`, `analyze()`'s own Greeks). Nothing is recomputed. The cards that miss are counted,
+ * with how many miss for each reason (`meetsRequest()`'s own short words).
+ *
+ * @returns {{ cards: object[], fitting: number, misses: { count: number, reasons: object } }}
+ */
+export function compareCards(items = [], request, sizeOf, { max = 20 } = {}) {
+  const cards = [];
+  const reasons = {};
+  let fitting = 0, missN = 0;
+  for (const x of items) {
+    if (!x || !x.cand || !x.lf) continue;
+    const size = sizeOf ? sizeOf(x.cand) : null;
+    const { meets, misses } = meetsRequest(x.cand, request, size);
+    if (!meets) {
+      missN += 1;
+      for (const m of misses) reasons[m.short] = (reasons[m.short] || 0) + 1;
+      continue;
+    }
+    fitting += 1;
+    if (cards.length >= max) continue;
+    const af = x.lf.aFill || null;
+    const n = size && size.ok ? size.n : null;
+    const k = n == null ? 1 : n;
+    const f = af ? sizedFigures(af, n) : null;
+    const g = af && af.greeks ? af.greeks : null;
+    const num = (v, d) => (v != null && Number.isFinite(Number(v)) ? +(Number(v)).toFixed(d) : null);
+    cards.push({
+      rank: cards.length + 1, ticker: x.tk, name: x.name || (x.cand && x.cand.name) || null, expiry: x.expKey || null,
+      legs: (x.legs || (x.cand && x.cand.legs) || []).map((l) => `${l.side > 0 ? "+" : "-"}${l.qty || 1} ${l.strike}${l.type === "call" ? "C" : "P"}`).join(" / "),
+      contracts: n,
+      youRisk: f ? f.risk : null, maxProfit: f ? (f.unbounded ? "no ceiling" : f.profit) : null,
+      chance: chanceText(x.lf.pop), returnOnRisk: x.lf.rr == null ? null : returnText(x.lf.rr),
+      futureAvg: futureTile(futureFigures(x.lf.mc, af, n, x.expKey)).value,
+      pastYrs: pastTileText(pastFigures(x.lf.bt, af, n)),
+      // THE GREEKS FOR THE SIZE: delta in shares (× 100 × contracts), theta in dollars a day, vega in dollars per point of
+      // volatility — `analyze()`'s own per-combination figures times the contracts, as Build's Numbers print them.
+      greeks: g ? { deltaShares: num(Number(g.delta) * 100 * k, 0), thetaPerDay: num(Number(g.theta) * k, 0), vegaPerVolPoint: num(Number(g.vega) * k, 0) } : null,
+    });
+  }
+  return { cards, fitting, misses: { count: missN, reasons } };
+}

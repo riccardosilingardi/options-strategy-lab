@@ -6,6 +6,59 @@ The full history of every item shipped so far (P0–P10, P2-bis) is in `docs/his
 Every pull request updates this file: the session that ships an item marks it done and states
 what the next one inherits.
 
+## Done in PR 4a (owner, 6 Oct 2026): the copilot by place, and screens that say what they show
+
+Planned first, in three rounds with the owner: the copilot may recommend, but only among what the app built ("the app
+builds, the copilot explains and recommends, the person decides, the gate checks"); the chart and the Greeks explained;
+rolling a position that is not in profit; news kept, as one of the four factors, with a place per level; tabs that speak
+for themselves. Split in three: **4a** (this), **4b** (the alternatives: Build's variants and the roll), **4c** (the
+Journal's "What this trade taught").
+
+- **TASK 0 — the computer at 1024 and 1280 px** (left unverified by 3b): no sideways scroll; at 1024 the market page's
+  header was cut off in a 364px pane. The two panes are now `minmax(320px, 420px) minmax(390px, 1fr)`: the right pane is
+  never narrower than a phone. Photographed (`shoot-positions.mjs`, computer-*-1024 / -1280).
+- **TASK 1 — the standing instructions** (pro.jsx `SYSTEM_PROMPT`): the decision trees, the "Execution" step, "ask for
+  confirmation before any execution" and "start with 1 contract" are gone; the trees are criteria for judging a card;
+  the structures the app builds are described as it builds them (verticals, iron condors, butterflies, a single long
+  option only in the very bullish or bearish families), each with its weak side. Every question opens with its place's
+  role (`COPILOT_ROLE`); the "desk" place is gone.
+- **TASK 2 — Find's "Compare ›"** on the summary line opens a sheet with **Compare the cards** (the cards that fit, in
+  the owner's order, up to 20, from `compareCards()` in rows.js: the card's own six figures and its Greeks for the size;
+  the chips' words; the misses counted) and **News impact** across the markets.
+- **TASK 3 — Build**: Pre-trade analysis ends on CONFIRM, DOUBTS or DO NOT CONFIRM (`BUILD_VERDICTS`), never over a
+  gate check; **Explain the Greeks** (gamma joined the context); **The chart and this trade** (`taContext()` with the
+  trade's breakevens, worked out at the send only).
+- **TASK 4 — a position's screen**: the questions may recommend one of the screen's own actions (`positionActions()` in
+  positionView.js); "Since I opened it" reads the Greeks at entry against now; **The chart since I opened it**
+  (`sinceEntry()`).
+- **TASK 5 — the market page's Signals tab** (was "Overview"): the four factors as blocks titled with what they
+  highlight (`factorHeadline()`: "NEWS · pushes down · 3 headlines"); News opens its headlines and Weather its regions in
+  place; the news block folds "Ask the copilot: News impact on TK".
+- **TASK 6** — Build's "More on this trade" sections are named for what they show; the desk's `CopilotTab` and the
+  evidence sheet's Market levels / History / Copilot branches (no button since redesign PR 2) are removed.
+- **TASK 7** — the word counter no longer counts a component that renders only inside a fold or a sheet.
+
+**Measured.** Tests 1,382 → 1,387, 0 failed (copilot.test.jsx rewritten: 11 checks). Build 1,430.59 → 1,436.40 kB (the usual chunk
+warning). Audit: 20 boards, dark and light, 5,268 checks, 0 unexplained (the Signals tab's name is the owner's, R.signals).
+Words (the corrected counter; main re-measured 269 / 574 / 435 / 248): find 288, market 581, build 417, positions 248.
+Photographs: docs/screens/pr4/ (`node scripts/shoot-pr4.mjs`).
+
+**Not changed:** the risk gate, the seven order paths and their bodies, every RULES value, `histBacktest()`,
+`seasonalSignal()`, the rules inside `fuseSignals()` and `signalDirection()`, the /api/state payload, deploy.js's rule,
+events.js's dates, the chart copilot's prompt, the autopilot.
+
+### What PR 4b and 4c inherit
+
+- **4b — the alternatives, one calculation:** the app computes alternatives of the loaded structure from the chain
+  (strikes a step nearer or further, wider or narrower wings, the next listed expiry), each priced and gate-checked;
+  **Build's variants** (the copilot recommends one; "Load this variant") and **the roll** of a position that is not in
+  profit while its reasons still hold: the candidates at a later expiry, "Prepare the roll in Build", the close first
+  (order path 3) then the opening on Build (path 2) as a new trade through the gate, and the two records linked on their
+  timelines ("rolled into J-0006" / "rolled from J-0003"). Never one 4-leg order (an eighth path), never both open.
+- **4c — "What this trade taught"** on a closed trade in the Journal: its entry's reasons against how it ended.
+- Not seen yet: a news block with real headlines (the fixture has none); any real copilot answer under the new
+  instructions.
+
 ## Done in redesign PR 3b (owner, 6 Oct 2026): the Journal, Settings, and the app on a computer
 
 Planned first; the owner answered the four open points: the branch restarted from main after PR #56 merged; on a computer,
@@ -568,8 +621,9 @@ One line each; see `PRD.md` §5 and `docs/history/ROADMAP.md` for detail.
 - **DONE: redesign PR 2** — part A, deploy previews are read-only; part B, Build, the review sheet, Why this trade, the
   copilot inside Build.
 - **DONE: redesign PR 3a** — the audit against the boards; Positions, a position's own screen, Orders.
-- **DONE: redesign PR 3b** — the Journal, Settings, the app on a computer. **NEXT: PR 4** (Find's copilot preset, the
-  system prompt's decision trees).
+- **DONE: redesign PR 3b** — the Journal, Settings, the app on a computer.
+- **DONE: PR 4a** — the copilot by place (it recommends only among what the app built), Find's Compare, Build's verdict,
+  the Greeks and the chart explained, the Signals tab. **NEXT: PR 4b** (Build's variants and the roll), then **4c**.
 - **Basket expansion with a measured admission rule** (planned as #50, not started; #50 shipped the wrap instead). The owner pastes `/api/liquidity` for the
   candidate tickers; a market is admitted when its open interest clears the liquidity floor AND Alpha Vantage holds at
   least **N = 14 years** of its monthly history. N is set from what `seasonalSignal()` needs: a month counts at |mean| ≥

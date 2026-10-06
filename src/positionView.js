@@ -515,3 +515,50 @@ export function recordRows(timeline = [], n = 4) {
     return { key: x.seq || `r${i}`, when: [tail, shortDate(new Date(x.t).toISOString())].filter(Boolean).join(" "), text: x.text || "" };
   });
 }
+
+/* ============================================================================================================
+   WHAT A POSITION'S COPILOT MAY RECOMMEND (PR 4, owner: "review, analysis against the initial assumptions, what to do to
+   close in profit"). The copilot recommends ONLY among the actions the app offers for this position right now; this
+   is that list, in the app's own words, from the screen's own state. It computes nothing.
+   ============================================================================================================ */
+export const POSITION_ACTIONS = Object.freeze({
+  keep: "Keep it and do nothing: the exit rules keep watching it",
+  keepWhy: "Keep it, write why (on its timeline)",
+  close: "Close at limit now (two taps, priced at the tap)",
+  takeProfit: "Place a good-till-cancelled take-profit order at the target (the Guardian fold on this screen)",
+  manage: "Change the price of the close already working (Manage order, in Orders)",
+});
+/**
+ * @param o { action, working, notHeld, canKeep, hasTarget }
+ * @returns string[] — the actions offered, never one the screen does not show
+ */
+export function positionActions({ working = false, notHeld = false, canKeep = false, hasTarget = false } = {}) {
+  if (notHeld) return [POSITION_ACTIONS.keep];
+  const out = [POSITION_ACTIONS.keep];
+  if (canKeep) out.push(POSITION_ACTIONS.keepWhy);
+  if (working) out.push(POSITION_ACTIONS.manage);
+  else {
+    out.push(POSITION_ACTIONS.close);
+    if (hasTarget) out.push(POSITION_ACTIONS.takeProfit);
+  }
+  return out;
+}
+
+/**
+ * THE PRICE SINCE THE POSITION OPENED (PR 4, "The chart since I opened it"), read from the daily bars the chart draws:
+ * the price at entry (the record's, else the first bar's close on or after the opening), now, the highest and lowest
+ * close since, and how many sessions. Null when no bar falls on or after the opening. Unknown stays null.
+ */
+export function sinceEntry(bars = [], openedAt = null, entrySpot = null, spot = null) {
+  const t0 = openedAt ? Date.parse(openedAt) : NaN;
+  if (!Array.isArray(bars) || !bars.length || !Number.isFinite(t0)) return null;
+  const day0 = new Date(t0).toISOString().slice(0, 10);
+  const since = bars.filter((b) => b && String(b.time).slice(0, 10) >= day0 && Number.isFinite(Number(b.close)));
+  if (!since.length) return null;
+  const closes = since.map((b) => Number(b.close));
+  const r2 = (x) => Math.round(x * 100) / 100;
+  const at = entrySpot != null && Number.isFinite(Number(entrySpot)) ? Number(entrySpot) : closes[0];
+  const now = spot != null && Number.isFinite(Number(spot)) ? Number(spot) : closes[closes.length - 1];
+  return { priceAtEntry: r2(at), priceNow: r2(now), highestCloseSince: r2(Math.max(...closes)), lowestCloseSince: r2(Math.min(...closes)),
+    sessionsSince: since.length, changeSinceEntryPct: at ? r2((now / at - 1) * 100) : null };
+}

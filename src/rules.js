@@ -1684,6 +1684,14 @@ export const showRowsCta = (n, m) => `Show ${n} of ${m}`;
 export const HIDE_ROWS = "Hide them";
 export const SHOW_ROWS = "Show them";
 export const RESET_FILTERS = "Reset";
+/* FIND'S COPILOT (PR 4, owner: "on the summary line, opening a sheet"): the button, the sheet and its one line. */
+export const FIND_COMPARE_BTN = "Compare ›";
+export const FIND_COPILOT_TITLE = "Ask the copilot";
+export const FIND_COPILOT_HEAD = "COMPARE THE CARDS THAT FIT";
+/** What the sheet's copilot reads: the cards that fit, in the owner's order, at most `max`. */
+export const findCopilotLine = (shown, fitting) =>
+  `It reads the ${shown === fitting ? fitting : `first ${shown} of the ${fitting}`} card${fitting === 1 ? "" : "s"} that fit, in your order, ` +
+  `and recommends among them only. It never sends an order.`;
 
 /** The column head: "Market" … "Future avg · risk". */
 export const COLUMN_MARKET = "Market";
@@ -1746,7 +1754,9 @@ export const per100Text = (x) => (x == null || !Number.isFinite(Number(x)) ? "�
 
 /** The market page (redesign PR 1). */
 export const MARKET_TABS = Object.freeze([
-  Object.freeze({ id: "overview", label: "Overview" }),
+  // PR 4 (owner, 6 Oct 2026: "the tabs speak for themselves"): the tab shows the chart and the four factors, so it is
+  // named for them. Its id stays "overview" (nav.js keeps it).
+  Object.freeze({ id: "overview", label: "Signals" }),
   Object.freeze({ id: "strategies", label: "Strategies" }),
   Object.freeze({ id: "chain", label: "Chain" }),
 ]);
@@ -1817,6 +1827,18 @@ export function futurePastDisagree(future, past) {
 }
 export const COMPARE_TICK = Object.freeze({ off: "Compare", on: "✓ comparing" });
 export const OPEN_IN_CHAIN = "Open in chain";
+/* THE FOUR FACTOR BLOCKS ON THE SIGNALS TAB (PR 4): each title says what the factor highlights, in words, beside its
+   name — "NEWS · pushes down · 3 headlines". The direction is the factor's own arrow (`components[k].dir`). */
+export const factorDirWords = (dir) => (dir > 0 ? "pushes up" : dir < 0 ? "pushes down" : "no direction");
+export const factorHeadline = (name, c, extra = null) =>
+  [name, c && c.applies === false ? "does not apply here" : factorDirWords(c ? c.dir : 0), extra].filter(Boolean).join(" · ");
+/** The heading of the news question inside the news block. */
+export const marketNewsHead = (tk) => `ASK ABOUT ${tk}'S NEWS`;
+/** The fold that opens it, inside the news block. */
+export const marketNewsAsk = (tk) => `Ask the copilot: News impact on ${tk}`;
+export const headlinesWord = (n) => `${n} headline${n === 1 ? "" : "s"}`;
+/** The two evidence toggles under a factor block. */
+export const FACTOR_EVIDENCE = Object.freeze({ news: "The headlines", weather: "The regions" });
 export const MARKET_READ_HEAD = "THE MARKET'S READ";
 /** Beside THE MARKET'S READ (the mockup): "score +46 · confidence 84", read off the fused result. */
 export const readScoreLine = (fused) => (fused ? `score ${fused.score >= 0 ? "+" : "−"}${Math.abs(fused.score)} · confidence ${fused.confidence}` : "");

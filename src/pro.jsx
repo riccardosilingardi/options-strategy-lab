@@ -1028,55 +1028,45 @@ export function UnrecordedCard({ group: g, gate, orders = [], onImport, setMsg, 
 // da src/rules.js, quindi il modello non puo' citare un numero che il codice
 // non applica piu' (era il caso di "regola del 5%" e "exit 7 DTE").
 /* ====================================================================
-   THE DESK COPILOT'S PROMPT.
+   THE COPILOT'S STANDING INSTRUCTIONS (PR 4, owner, 6 Oct 2026).
 
-   >>> ITS DECISION TREES RECOMMENDED WHAT THE APP REFUSES TO OFFER. <<<
-   ROADMAP P3's first item, open since the guided path was built. The trees
-   below used to read "strong bullish seasonal signal + uptrend -> bull call
-   spread (small capital) or LONG CALL (larger capital)" and "event ahead
-   with low IV -> long ATM STRADDLE/STRANGLE", and every one of those three
-   is a structure the app will not put in front of this user:
+   >>> THE APP BUILDS, THE COPILOT EXPLAINS AND RECOMMENDS, THE PERSON DECIDES, THE GATE CHECKS. <<<
+   Until PR 4 this prompt carried DECISION TREES ("a seasonal signal and a trend agreeing → a debit vertical", "no edge
+   and a quiet market → an iron condor") and a METHOD whose step 3 was "Execution". They were written when the copilot
+   was the one proposing structures; since PR #40 the app builds every trade itself from the real chain (Find's cards,
+   Build's loaded trade, the floors, the gate), and Build's and a position's questions said "you never propose a trade"
+   while this text — sent with every one of them — said "recommend this structure". Two orders in one request.
 
-     - a LONG CALL is a single-leg long option, which `runWizard` excludes
-       because time decay makes it a poor first trade;
-     - a STRADDLE and a STRANGLE are two single-leg longs bought together,
-       so they are the same exclusion twice, and a strangle's short spelling
-       is an uncovered leg, which non-negotiable rule 2 forbids outright;
-     - a LONG CALL also has NO CEILING, so `payoffCeiling()` gives it no
-       maximum profit, there is no take-profit rung, and it sorts last with a
-       blank expected value wherever it is ranked.
+   The owner settled it (6 Oct 2026): the copilot MAY recommend, but only among what the app built and put in the
+   context — on Find one or two of the cards, on Build whether the loaded trade holds up, on a position one of the actions
+   the app offers. It never writes a strike, an expiry, a structure or a size of its own and never sends. The trees stay
+   as CRITERIA for judging a card ("it buys options at an IV rank of 82; card 3 sells them instead"), never as an
+   instruction to build one. The excluded structures stay named, so a card can be explained and an off-menu idea refused.
 
-   A copilot that recommends a structure the screen beside it will not build
-   is the app arguing with itself, and the part that argues in prose wins
-   with a reader who is learning. The trees are rewritten around what this
-   app actually offers: defined-risk verticals, iron condors, and NOTHING —
-   which is a real answer and the one the thesis is named after.
-
-   The chart copilot below does not inherit any of this: it has its own
-   prompt (`taCopilotPrompt()` in rules.js) and it may not propose a trade
-   at all.
+   Each question opens with its place's role (`COPILOT_ROLE`, below SKILLS). The chart copilot does not inherit any of
+   this: it has its own prompt (`taCopilotPrompt()` in rules.js) and it recommends no trade at all.
 ==================================================================== */
 // THE MARKETS ARE THE REGISTRY'S (PR #48, TASK 1): this list was typed out and had stopped at five.
 const SYSTEM_PROMPT = `You are the copilot of an options trader working on commodity ETFs (${BASKET.join(", ")}; SPY only as a hedge) in PAPER TRADING.
 ${copilotRulesBlock()}
-These rules are enforced in code by src/riskGate.js before any order is sent. Never propose a trade that breaks them, and never present a rule number that differs from the ones above.
+These rules are enforced in code by src/riskGate.js before any order is sent. Never present a rule number that differs from the ones above.
 WHO YOU ARE WRITING FOR: someone who is learning, not a professional trader. Plain English sentences. Define any term the first time you use it, in the same sentence — "open interest (how many contracts are actually open)". Never guarantee an outcome: this is educational analysis on a paper account, not financial advice. Always state the risk and what would make the idea wrong.
 
-METHOD (follow in order): 1 Discovery (seasonal scanner + trend) → 2 Construction (real chain, strikes, Greeks, R/R, breakevens) → 3 Execution (only after explicit human confirmation, check buying power) → 4 Monitoring (P&L against the rules, % of max profit) → 5 Reporting.
+HOW THIS APP WORKS: THE APP BUILDS, YOU EXPLAIN AND RECOMMEND, THE PERSON DECIDES, THE GATE CHECKS. The app builds every trade itself from the real option chain: Find lists the cards that clear its quality floors, Build prices the trade loaded there, and the risk gate checks every order before it leaves. You never build a trade: you never write a strike, an expiry, a structure or a size that is not already in the context, and you never send, close or place an order — the person does that in the app, with its own confirmation. You MAY RECOMMEND, but only among what the app built and put in the context (each question tells you which). "None of these" and "nothing today" are correct answers, and this platform is built around being able to give them.
 
-WHAT THIS APP WILL AND WILL NOT BUILD — read this before recommending anything. Every structure must have a KNOWN maximum loss and no uncovered short leg; that is enforced in code and an order breaking it does not leave. Beyond that, the guided path this user starts from also excludes single-leg LONG options (a long call or a long put on its own: time decay makes it a poor trade for someone learning, and an unbounded payoff has no maximum profit, so such a trade takes profit at ${pctText(RULES.singleTakeProfitPctOfPremium)} of the premium paid instead), STRADDLES and STRANGLES (two single-leg longs bought together — the same exclusion twice — and a short strangle is an uncovered leg, which is forbidden outright), and BUTTERFLIES (worth their maximum only AT the middle strike AT expiry, so the ${pctText(RULES.takeProfitPct)} take-profit is out of reach before the ${RULES.exitDTE}-day exit ends the trade). NEVER recommend one of those to this user. If the honest answer is one of them, say that the structure that fits is one this app does not offer, and say why.
+WHAT THE APP BUILDS — so you can explain a card, and refuse an idea the app does not offer. Every structure has a KNOWN maximum loss and no uncovered short leg; that is enforced in code and an order breaking it does not leave. The cards come from a fixed set of shapes per direction: VERTICAL SPREADS (debit and credit), IRON CONDORS and BUTTERFLIES, and, only in the very bullish or very bearish families, a single-leg LONG option. Each has its weak side, and you say it when you explain or compare one: a single long option loses to time decay every day and has no maximum profit, so it takes profit at ${pctText(RULES.singleTakeProfitPctOfPremium)} of the premium paid instead; a butterfly is worth its maximum only AT the middle strike AT expiry, so the ${pctText(RULES.takeProfitPct)} take-profit is often out of reach before the ${RULES.exitDTE}-day exit ends the trade. STRADDLES and STRANGLES are never cards (two single-leg longs bought together, and a short strangle is an uncovered leg, which is forbidden outright). NEVER recommend a structure that is not one of the cards in the context; if the honest answer is a structure the app does not offer, say so and why.
 
-DECISION TREES, over the structures that remain: (A) directional edge — a seasonal signal and a price trend agreeing → a DEBIT VERTICAL SPREAD in that direction (buy the nearer strike, sell the further one), which is the app's default and has both a known maximum loss and a reachable take-profit; (B) the same direction but the options are expensive against their own history (IV rank above ${RULES.expensiveIVRank}) → a CREDIT VERTICAL on the other side instead, so the expensive premium is being sold rather than bought, still with the long leg that defines the risk; (C) no directional edge and a quiet market → an IRON CONDOR, which is two credit verticals and is defined-risk on both sides; (D) the factors disagree, the chain cannot be priced, or nothing clears the quality floors → RECOMMEND NOTHING, and say which of those it was. "Nothing today" is a correct answer and this platform is built around being able to give it.
+HOW TO JUDGE A CARD — criteria, never an instruction to build one: (A) a DEBIT VERTICAL buys options to bet on a direction: it fits when seasonality and the price trend agree in that direction and the options are not expensive; (B) a CREDIT VERTICAL sells premium on the other side of the same direction: it fits when the options are expensive against their own history (IV rank above ${RULES.expensiveIVRank}); (C) an IRON CONDOR is two credit verticals and bets on a quiet market: it fits when there is no directional edge; (D) when the factors disagree, the chain cannot be priced, or nothing clears the floors, the honest answer is none. Use these to say why a card fits or does not fit what the app has measured, and to point at ANOTHER CARD IN THE CONTEXT when it fits better — never to name a structure, a strike or an expiry that is not one of the cards.
 
-MANAGEMENT: scale in and out → start with 1 contract, add if it works, close half at ${pctText(RULES.takeProfitPct)} of max profit and the rest at ${pctText(RULES.scaleOutPct)}; the ${RULES.exitDTE}-day exit ends the trade whatever it is doing; a loss of ${pctText(RULES.stopLossPct)} of max loss is a WARNING that asks you to look, never an automatic close; if the underlying moves against you → re-examine the thesis: if it is invalidated, close, do not average down.
+HOW A POSITION IS MANAGED — the app's exit rules, fixed at entry: take profit at ${pctText(RULES.takeProfitPct)} of max profit (a second, later step at ${pctText(RULES.scaleOutPct)}); the ${RULES.exitDTE}-day exit ends the trade whatever it is doing; a loss of ${pctText(RULES.stopLossPct)} of max loss is a WARNING that asks the person to look, never an automatic close. If the reasons the trade was opened have turned, the honest answer is to close it at a limit, never to add to it (no averaging down). The size of every trade is the app's, from the per-trade limit: you never suggest one.
 
 OUTPUT FORMAT — READ THIS TWICE, IT IS THE MOST IGNORED PART.
 The screen ALREADY shows the legs, the strikes, the greeks, the max profit, the max loss and the breakevens, right next to your answer. Do NOT repeat them as a specification. Refer to them ("the $22/$23 call spread above") and spend your words on what the numbers MEAN.
 - Write prose. Short paragraphs. NO tables, NO pipe characters, NO code fences, NO leg-by-leg listings.
 - At most four short sections. Head each one with "## " and a plain-English title — "What this trade is betting on", not "STRUCTURE".
 - Bullets with "- " only where a list is genuinely a list. **Bold** for the one number that matters in a paragraph, sparingly.
-- Open with one sentence that answers the question asked. Close with what you would watch, and what would tell you the idea is wrong.
-- Ask for confirmation before any execution.`;
+- Open with one sentence that answers the question asked. When you recommend, say it in that first sentence and name the card or the action exactly as the app prints it.
+- Close with what you would watch, and what would tell you the recommendation or the idea is wrong.`;
 /* ================================================================
    MARKDOWN, RENDERED — not printed
 
@@ -1192,41 +1182,52 @@ export function Markdown({ text, style }) {
   return <div style={{ fontSize: FS.sm, color: T.body, ...style }}>{blocks}</div>;
 }
 
-/** The opening every Build and Positions question carries (redesign PR 2; PR 3): the copilot explains; it never proposes
- *  or places a trade. */
-export const COPILOT_EXPLAIN_ONLY = "You explain; you never propose a trade, a structure, a size or an order, and you never tell me to buy, sell or close.";
 /**
- * THE COPILOT, BY PLACE (owner, 6 Oct 2026: "It depends where it is. In Find, a preset analyses the cards and, under the
- * filters set, makes objective comparisons that highlight or suggest the best strategy. In Build it explains the
- * strategy. In Positions it analyses the position, the exit strategy, where you started from."). Each question names
- * its `place`; a screen shows its own place's questions and no other. PRD §1, "Copilots", holds the limits.
- *   find       ranks and highlights AMONG THE CARDS THE APP BUILT under the filters set, citing each card's own figures
- *              and naming the filters; never a structure that is not a card, never a size past the gate, never a send.
- *              (Its place on Find is redesign PR 4: no screen offers it yet.)
- *   build      explains the loaded trade.
- *   positions  reviews the position against its entry and its exit plan.
- *   desk       the older general questions (news across the radar), kept where they were (More on this trade, the desk).
+ * THE COPILOT'S ROLE, BY PLACE (owner, 6 Oct 2026, PR 4): "In Find AI explains the proposals, which is best, with a
+ * recommendation; in Build it confirms the structure or not; with open positions, review, analysis against the
+ * initial assumptions, what to do to close in profit." Every question opens with its place's role. A copilot may
+ * RECOMMEND only among what the app built and put in the context, and never sends, closes or sizes anything.
+ */
+export const COPILOT_ROLE = Object.freeze({
+  find: "You are on Find. You may recommend one or two of the cards the app built (findCards in the context), or none of them; never a structure, a strike, an expiry or a size that is not on one of those cards, and never an order.",
+  market: "You are on one market's page (currentTicker), about the market, not a trade: you explain what the app measured and you recommend no trade.",
+  build: "You are on Build, about the trade loaded there (currentStrategy in the context). You may say whether it holds up, but you never change its strikes, its expiry or its size yourself and you never tell me to send it: the app prices it, the gate checks it, I decide.",
+  positions: "You are on one open position's screen (position in the context). You may recommend one of the actions the app offers for it (position.actionsOffered), or none; never another action and never a size, and you never close or place anything yourself.",
+});
+/** The three readings Build's verdict may give (owner, PR 4: "in Build it confirms the structure or not"). */
+export const BUILD_VERDICTS = Object.freeze(["CONFIRM", "DOUBTS", "DO NOT CONFIRM"]);
+/**
+ * THE COPILOT, BY PLACE. Each question names its `place`; a screen shows its own place's questions and no other.
+ * PRD §1, "Copilots", holds the map:
+ *   find       Compare the cards (and recommend among them) · News impact across the markets      (Find's Compare › sheet)
+ *   market     News impact on this market                                                          (the market page, Signals)
+ *   build      Pre-trade analysis (its verdict) · the Greeks · the chart · what would make it wrong · the other cards · news
+ *   positions  review and the action to take · closing in profit · since I opened it · the chart since I opened it
+ * The chart copilot (TA_QUESTIONS in rules.js) is the market page's and Build's More: it explains the chart only.
  */
 export const SKILLS = [
-  { id: "pretrade", place: "build", label: "Pre-trade analysis", prompt: `${COPILOT_EXPLAIN_ONLY} Explain the current strategy before it is sent: its structure, its Greeks, its risk and reward, its breakevens against support and resistance, how the season lines up with it, and the news that touches it. Then read back the risk gate's checks as the app worked them out (the review checklist in the context: each one as passed or failed, never your own verdict) and the size the app sized, with its share of the per-trade limit (${perTradeCapLabel()}). Do not say GO or NO-GO and do not suggest another size: say what each check means for this trade.` },
-  { id: "news", place: "desk", label: "News impact", prompt: "Analyse the tagged news in context: which items affect my positions and the underlyings on the radar? Separate noise from signal, with cause→effect and a time horizon." },
-  { id: "radar", place: "find", label: "Compare the cards", prompt: `From ONLY the cards the app built under the filters I set (findCards and findFilters in the context), compare them and highlight the best one or two for those filters. Name the filters first. For every card you mention, cite its own figures as the app printed them: you risk, max profit, chance, return on risk, future avg and past yrs. Rank only what is in the list: never propose a structure, a strike or an expiry that is not one of these cards, never a size past the per-trade limit (${perTradeCapLabel()}), and never tell me to send an order. If no card fits the filters, say so and which filter binds.` },
-  /* REDESIGN PR 2 (owner's mockup "3 · Build"): three questions about the LOADED trade. Each one tells the model it
-     explains and never proposes a trade (PRD §1: copilots explain; they never propose or place one). */
-  { id: "wrong", place: "build", label: "What would make it wrong?", prompt: `${COPILOT_EXPLAIN_ONLY} About the current strategy only: what would make it wrong? Name the price levels, the dates (the expiry and the ${RULES.exitDTE}-day exit) and the events before expiry that would turn it against me, and which of the four factors (seasonality, the price trend, weather, news) would have to change. Explain what each would mean for this trade.` },
-  { id: "compare", place: "build", label: "Compare with the other cards", prompt: `${COPILOT_EXPLAIN_ONLY} Compare the current strategy with the other cards the app lists for the same market (otherCards in the context): what each one bets on, where its risk and its chance differ, and what the trade-off between them is. Do not rank them and do not say which to take: explain the differences.` },
-  { id: "newsmove", place: "build", label: "News that could move it", prompt: `${COPILOT_EXPLAIN_ONLY} From the tagged news in the context, which items could move the current strategy's market before its expiry, in which direction, and why? Separate noise from signal, with cause and effect and a time horizon, and say what each would do to this trade.` },
-  /* REDESIGN PR 3 (TASK 3): the position's screen asks about ONE open position (position in the context): its entry,
-     its exit plan, what has changed since. They replace PR #38's "Position review", which asked for HOLD / CLOSE / ROLL
-     on every position at once. They review; they never close, roll or open anything. */
-  { id: "posReview", place: "positions", label: "Review this position", prompt: `${COPILOT_EXPLAIN_ONLY} About this one open position only (position in the context): where does it stand against its entry and against its exit plan? Read its profit now against the take-profit target, its days left against the ${RULES.exitDTE}-day time exit, and its loss against the stop warning (${stopLossLabel()}, a warning, never an automatic close). Say which exit is nearest and what would have to happen for it to be reached. Do not tell me to close or to keep it: explain where it is.` },
-  { id: "posExit", place: "positions", label: "The exit from here", prompt: `${COPILOT_EXPLAIN_ONLY} About this one open position (position in the context): explain its exit plan from today — the take-profit target, the ${RULES.exitDTE}-day time exit and its date, the stop warning — what a close at a limit would cost against the book in the context (bid, mid, ask), and what each exit would leave on the record. The exit rules were fixed at entry: explain them, do not change them.` },
-  { id: "posSince", place: "positions", label: "Since I opened it", prompt: `${COPILOT_EXPLAIN_ONLY} About this one open position (position in the context): what has changed since I opened it? Compare the figures at entry with now (you risk, max profit, chance, return on risk) and the four factors at entry with now (seasonality, the price trend, weather, news), name each reason I opened it that has turned and what that means for this position. Quote only the figures in the context.` },
+  /* FIND (PR 4): the cards that fit, in the owner's order, up to 20 (findCards), the filters in the chips' own words. */
+  { id: "radar", place: "find", label: "Compare the cards", prompt: `${COPILOT_ROLE.find} Compare the cards that fit the filters I set (findCards and findFilters in the context; findMisses says how many miss and why). Name the filters first. For every card you mention, cite its own figures as the app printed them — you risk, max profit, chance, return on risk, future avg and past yrs — and its Greeks as the app worked them out for the size the budget buys: say in a sentence what its delta, its theta and its vega mean for that card (what a move, a day passing and a jump in volatility each do to it). Then recommend the one card, at most two, that fits best, and why, using the criteria for judging a card; or say that none fits and which filter binds. The cards are in the app's own order (findFilters.order): if your pick is not the first, say why. Never a size past the per-trade limit (${perTradeCapLabel()}).` },
+  { id: "newsAll", place: "find", label: "News impact", prompt: `${COPILOT_ROLE.find} From the tagged news in the context (taggedNews, across every market), which headlines move which markets, in which direction, and why? Separate noise from signal, with cause and effect and a time horizon, and say how much the news weighs against the other three factors (seasonality, the price trend, weather) in each market's reading (scanner). Then say which of the cards in findCards the news supports and which it undercuts. Recommend nothing from the news alone.` },
+  /* THE MARKET PAGE (PR 4): news is one of the four factors and has its own question beside its own block. */
+  { id: "newsMarket", place: "market", label: "News impact", prompt: `${COPILOT_ROLE.market} About this market's news only (taggedNews for currentTicker and the news factor's reading in scanner): which headlines push it up and which push it down, why, and over what time horizon? Separate noise from signal. Say how much the news weighs against seasonality, the price trend and weather in this market's reading, and what would make the news factor turn.` },
+  /* BUILD (redesign PR 2's four, PR 4's verdict, the Greeks and the chart). */
+  { id: "pretrade", place: "build", label: "Pre-trade analysis", prompt: `${COPILOT_ROLE.build} Explain the trade before it is sent: its structure, its Greeks, its risk and reward, its breakevens against support and resistance, how the season lines up with it, and the news that touches it. Read back the risk gate's checks as the app worked them out (the review checklist in the context: each one as passed or failed, never your own verdict on a check) and the size the app sized, with its share of the per-trade limit (${perTradeCapLabel()}); do not suggest another size. Then give your verdict on one line, exactly one of ${BUILD_VERDICTS.join(", ")}, with its reasons from the app's figures and the criteria for judging a card. Your verdict is your reading, not the gate's: the gate's checks stand whatever you say. If another card in the context (otherCards) fits better, name it.` },
+  { id: "greeks", place: "build", label: "Explain the Greeks", prompt: `${COPILOT_ROLE.build} Explain the Greeks of the trade loaded, as the app worked them out (currentStrategy.greeks, for one combination; sizedByTheApp.contracts says how many): what delta, gamma, theta and vega mean here in dollars, which of a price move, a day passing and a change in volatility helps this trade and which hurts it, and how they change as expiry nears and the price moves toward a breakeven. Quote only the Greeks in the context.` },
+  { id: "chart", place: "build", label: "The chart and this trade", prompt: `${COPILOT_ROLE.build} Read this market's price chart (chart in the context: the app's own indicators from daily bars; there are no bars) against the trade loaded: where its breakevens and strikes sit against the moving averages, the Bollinger band and recent highs and lows, what the trend says about the side the trade takes, and how far each breakeven is in ordinary days of movement. Quote only the figures in the context.` },
+  { id: "wrong", place: "build", label: "What would make it wrong?", prompt: `${COPILOT_ROLE.build} About the trade loaded only: what would make it wrong? Name the price levels, the dates (the expiry and the ${RULES.exitDTE}-day exit) and the events before expiry that would turn it against me, and which of the four factors (seasonality, the price trend, weather, news) would have to change. Explain what each would mean for this trade.` },
+  { id: "compare", place: "build", label: "Compare with the other cards", prompt: `${COPILOT_ROLE.build} Compare the trade loaded with the other cards the app lists for the same market (otherCards in the context): what each one bets on, where its risk and its chance differ, and what the trade-off between them is. If one of them fits the criteria for judging a card better than the loaded one, say which and why.` },
+  { id: "newsmove", place: "build", label: "News that could move it", prompt: `${COPILOT_ROLE.build} From the tagged news in the context, which items could move this market before the trade's expiry, in which direction, and why? Separate noise from signal, with cause and effect and a time horizon, and say what each would do to this trade.` },
+  /* A POSITION'S SCREEN (redesign PR 3; PR 4: they may recommend one of the app's actions — position.actionsOffered). */
+  { id: "posReview", place: "positions", label: "Review this position", prompt: `${COPILOT_ROLE.positions} Where does this position stand against its entry and against its exit plan? Read its profit now against the take-profit target, its days left against the ${RULES.exitDTE}-day time exit, and its loss against the stop warning (${stopLossLabel()}, a warning, never an automatic close); say which exit is nearest and what would have to happen for it to be reached. Then recommend one of the actions offered, or none, and say what would make that recommendation wrong.` },
+  { id: "posExit", place: "positions", label: "The exit from here", prompt: `${COPILOT_ROLE.positions} What would it take to close this position in profit? Explain its exit plan from today — the take-profit target, the ${RULES.exitDTE}-day time exit and its date, the stop warning — what a close at a limit would get against the book in the context (bid, mid, ask), and, when it is among the actions offered, what a good-till-cancelled take-profit order at the target would do (an order that stays working until it fills or I cancel it). The exit rules were fixed at entry: explain them, do not change them. Recommend one of the actions offered, or none.` },
+  { id: "posSince", place: "positions", label: "Since I opened it", prompt: `${COPILOT_ROLE.positions} What has changed since I opened it? Compare the figures at entry with now (you risk, max profit, chance, return on risk), the four factors at entry with now (seasonality, the price trend, weather, news — the headlines in taggedNews dated after the opening), and the Greeks at entry with now (position.greeksAtEntry and position.greeksNow; a Greek the app did not record at entry is said to be not recorded). Name each reason I opened it that has turned and what that means for the position. Quote only the figures in the context.` },
+  { id: "posChart", place: "positions", label: "The chart since I opened it", prompt: `${COPILOT_ROLE.positions} Read this market's price chart since I opened the position (position.sinceEntry: the price at entry, now, the highest and lowest close since, as the app read them from daily bars; chart: the app's own indicators) against the position's breakevens and strikes: where the price has gone, what the trend says now, and how far it is from each breakeven in ordinary days of movement. Quote only the figures in the context.` },
 ];
-/** The four questions Build's copilot shows (owner's mockup), in order; the rest of SKILLS stay where they were. */
-export const BUILD_SKILL_IDS = Object.freeze(["pretrade", "wrong", "compare", "newsmove"]);
-/** The three a position's screen asks (redesign PR 3, TASK 3), in order. */
-export const POSITION_SKILL_IDS = Object.freeze(["posReview", "posExit", "posSince"]);
+/** The questions Build's copilot shows, in order (the mockup's four with PR 4's Greeks and chart after the first). */
+export const BUILD_SKILL_IDS = Object.freeze(["pretrade", "greeks", "chart", "wrong", "compare", "newsmove"]);
+/** The four a position's screen asks (redesign PR 3; PR 4 added the chart since entry), in order. */
+export const POSITION_SKILL_IDS = Object.freeze(["posReview", "posExit", "posSince", "posChart"]);
 /** The questions a place shows: never another place's. */
 export const skillsFor = (place) => SKILLS.filter((s) => s.place === place);
 /**
@@ -1413,7 +1414,8 @@ export async function askAI(_key, messages, contextStr, onDelta, system = SYSTEM
   return (j.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
 }
 export function buildContext(ctx) {
-  const { store, scan, news, ticker, legs, expKey, A, spot, seasonalSrc, otherCards = null, reviewChecks = null, sized = null, position = null } = ctx;
+  const { store, scan, news, ticker, legs, expKey, A, spot, seasonalSrc, otherCards = null, reviewChecks = null, sized = null, position = null,
+    findCards = null, findFilters = null, findMisses = null, chart = null } = ctx;
   return JSON.stringify({
     date: new Date().toISOString().slice(0, 10),
     currentTicker: ticker,
@@ -1422,7 +1424,7 @@ export function buildContext(ctx) {
     // `+null.toFixed(0)` also throws, so this is the crash guard as well as the
     // honesty one: a model handed a maximum profit of 0 for a long call would
     // write a take-profit target of $0 into the report.
-    currentStrategy: A ? { legs, expKey, entry: +(A.entry * 100).toFixed(0), maxProfit: dollarsOrNull(A.maxProfit), maxLoss: dollarsOrNull(A.maxLoss), breakevens: A.breakevens, greeks: { delta: +A.greeks.delta.toFixed(2), theta: +A.greeks.theta.toFixed(0), vega: +A.greeks.vega.toFixed(0) } } : null,
+    currentStrategy: A ? { legs, expKey, entry: +(A.entry * 100).toFixed(0), maxProfit: dollarsOrNull(A.maxProfit), maxLoss: dollarsOrNull(A.maxLoss), breakevens: A.breakevens, greeks: { delta: +A.greeks.delta.toFixed(2), gamma: Number.isFinite(A.greeks.gamma) ? +A.greeks.gamma.toFixed(3) : null, theta: +A.greeks.theta.toFixed(0), vega: +A.greeks.vega.toFixed(0) } } : null,
     // THE MODEL'S BOOK IS THE BOOK. `reportNarrativePrompt()` tells it that
     // `paperPositions` is AUTHORITATIVE, so a trade the broker never filled
     // handed over in this array is a position the model is entitled to write
@@ -1446,7 +1448,8 @@ export function buildContext(ctx) {
     // "0.0", and the model would read that as a measurement of no edge.
     scanner: (scan || []).map((s) => ({ tk: s.tk, seasonalMonthPct: s.seasonalScore == null ? null : +s.seasonalScore.toFixed(1), sentiment: s.sugg, source: seasonalStampNote(s, s.tk),
       fourFactorSignal: s.fused ? { score: s.fused.score, confidence: s.fused.confidence, agreement: s.fused.agreement, narrative: s.fused.narrative } : null })),
-    taggedNews: (news || []).slice(0, 10).map((n) => ({ title: n.title, geo: !!n.geo,
+    // PR 4: each headline carries its date, so "since I opened it" can tell the news that came after the opening.
+    taggedNews: (news || []).slice(0, findCards ? 20 : 10).map((n) => ({ title: n.title, date: n.date || null, geo: !!n.geo,
       impacts: (n.impacts || []).map((im) => ({ tk: im.tk, dir: ARROW[im.dir], why: im.why })) })),
     seasonalitySource: seasonalSrc,
     // THE OTHER CARDS FOR THIS MARKET (redesign PR 2, "Compare with the other cards"): Find's own figures, read, never
@@ -1458,6 +1461,13 @@ export function buildContext(ctx) {
     sizedByTheApp: sized || null,
     // ONE OPEN POSITION (redesign PR 3, the position's screen): its entry, its exit plan, now — the screen's own figures.
     position: position || null,
+    // FIND'S COMPARE (PR 4): the cards that fit, in the owner's order, up to 20 — each card's own figures and Greeks as the
+    // app printed and computed them, never recomputed here — the filters in the chips' own words, and the misses counted.
+    findCards: Array.isArray(findCards) ? findCards : null,
+    findFilters: findFilters || null,
+    findMisses: findMisses || null,
+    // THE CHART (PR 4, Build's and a position's chart questions): `taContext()`'s own indicators, never the bars.
+    chart: (typeof chart === "function" ? chart() : chart) || null,
   });
 }
 /**
@@ -1722,71 +1732,8 @@ export function useCopilot({ ctx, apiKey, convo, setConvo, onAnalysis }) {
   return { msgs, busy, err, partial, input, setInput, send, printConvo };
 }
 
-export function CopilotTab({ ctx, apiKey, convo, setConvo, onAnalysis, skills = SKILLS.filter((s) => s.place === "build" || s.place === "desk") }) {
-  const { msgs, busy, err, partial, input, setInput, send, printConvo } = useCopilot({ ctx, apiKey, convo, setConvo, onAnalysis });
-  return (
-    <div style={{ marginTop: 12 }}>
-      <Panel>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-          <Label><Sparkles size={11} style={{ verticalAlign: "-1px" }} /> AI COPILOT · IT ALREADY KNOWS YOUR POSITIONS</Label>
-          {msgs.length > 0 && (
-            <div style={{ display: "flex", gap: 6 }}>
-              <Btn small ghost color={T.blue} onClick={printConvo}><FileText size={11} /> Print</Btn>
-              <Btn small ghost onClick={() => setConvo({ msgs: [], busy: false, err: null })}><Trash2 size={11} /> Clear</Btn>
-            </div>
-          )}
-        </div>
-        <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
-          {skills.map((sk) => <Btn key={sk.id} small ghost color={T.blue} onClick={() => send(sk.prompt, sk.label)} disabled={busy}>{sk.label}</Btn>)}
-        </div>
-        {/* No fixed-height window. An analysis is meant to be READ, and a 420px
-            box on a desktop turned every answer into a peephole. It grows with
-            the answer; the page scrolls, as pages do. */}
-        <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-          {msgs.length === 0 && !busy && <div style={{ ...mono, fontSize: FS.xs, color: T.mut }}>Pick one above or just ask. The copilot already knows your open positions, the trade on the Build screen, the Radar, the tagged news and your own risk rules.</div>}
-          {msgs.map((m, i) => (
-            <div key={i} style={{ padding: m.role === "user" ? "9px 11px" : "11px 13px", borderRadius: 7, background: m.role === "user" ? `${T.blue}14` : T.bg, border: `1px solid ${m.role === "user" ? T.blue + "44" : T.line}` }}>
-              <div style={{ ...mono, fontSize: FS.xs, letterSpacing: "0.1em", color: m.role === "user" ? T.blue : T.amber, marginBottom: m.role === "user" ? 3 : 7 }}>{m.role === "user" ? "YOU ASKED" : m.truncated ? (m.reason === "max_tokens" ? "COPILOT · RAN OUT OF ROOM" : "COPILOT · CUT OFF") : "COPILOT"}</div>
-              {m.role === "user"
-                ? <div style={{ fontSize: FS.sm, color: T.body, lineHeight: 1.5 }}>{m.content}</div>
-                : <>
-                  <Markdown text={m.content} />
-                  {m.truncated && (
-                    <div style={{ ...mono, fontSize: FS.xs, color: T.amber, marginTop: 8, paddingTop: 8, borderTop: `1px solid ${T.amber}44`, lineHeight: 1.6 }}>
-                      This answer stops here because the connection was cut, not because the copilot had finished.
-                    </div>
-                  )}
-                </>}
-            </div>
-          ))}
-          {busy && (
-            partial
-              ? (
-                <div style={{ padding: "11px 13px", borderRadius: 7, background: T.bg, border: `1px solid ${T.line}` }}>
-                  <div style={{ ...mono, fontSize: FS.xs, letterSpacing: "0.1em", color: T.amber, marginBottom: 7 }}>COPILOT · WRITING</div>
-                  <Markdown text={partial} />
-                </div>
-              )
-              : (
-                <div style={{ ...mono, fontSize: FS.xs, color: T.amber }}>
-                  Thinking… you can close this panel: the answer waits here, it is not lost.
-                </div>
-              )
-          )}
-        </div>
-        {err && <div style={{ ...mono, fontSize: FS.xs, color: T.red, marginTop: 8 }}>{err}</div>}
-        <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
-          <Inp value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send(input)} placeholder="Ask a question… (Enter to send)" style={{ flex: 1 }} />
-          <Btn onClick={() => send(input)} disabled={busy}><Send size={13} /></Btn>
-        </div>
-        <div style={{ ...mono, fontSize: FS.xs, color: T.dim, marginTop: 6, lineHeight: 1.6 }}>
-          Every analysis you run here is filed in the Journal with its question, so the Journal and this panel tell the
-          same story about the same day. Educational analysis on a paper account, not financial advice.
-        </div>
-      </Panel>
-    </div>
-  );
-}
+/* CopilotTab — the desk's old copilot panel, mounted only by an evidence chip no screen has drawn since redesign PR 2 —
+   was removed in PR 4: its one question of its own, "News impact", lives on Find and on the market page (SKILLS). */
 
 /* ================================================================
    5) REPORT CENTER: routine schedulata + export + webhook
