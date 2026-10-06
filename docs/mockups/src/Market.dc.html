@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>CORN — options chain</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+.t-dark{--bg:#14181d;--panel:#1a1f26;--line:#2a2f36;--field:#6b7685;--ink:#f5f0e6;--mut:#8b95a1;--dim:#7d8794;--amber:#e8b545;--green:#7fb85c;--red:#d66a5a;--blue:#5aa7d6;--body:#c9d1d9;--on:#14181d;--action:#5aa7d6;--raise:#222831;--scrim:rgba(6,8,10,0.66)}
+.t-light{--bg:#f5f6f7;--panel:#ffffff;--line:#dcdfe3;--field:#7a8491;--ink:#1c2128;--mut:#5a6472;--dim:#616b78;--amber:#8a6300;--green:#2f6f45;--red:#b23a2b;--blue:#1f6391;--body:#2a3038;--on:#ffffff;--action:#1f6391;--raise:#eceff2;--scrim:rgba(20,24,29,0.45)}
+.sans{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.mono{font-family:ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums}
+button,select,input,output{font:inherit;color:inherit}
+button{cursor:pointer}
+button:disabled{cursor:default}
+a{color:var(--blue)}a:hover{color:var(--ink)}
+.def{text-decoration:underline dotted;text-decoration-color:var(--dim);text-underline-offset:3px}
+.tab{border:none;border-bottom:3px solid transparent;color:var(--mut);font-weight:400}
+.tab.on{color:var(--ink);font-weight:700;border-bottom-color:var(--amber)}
+a.tab:hover{color:var(--ink)}
+.exp{display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:76px;min-height:48px;padding:0 8px;border-radius:10px;border:1px solid var(--line);background:transparent;color:var(--ink);font-weight:400}
+.exp.on{border-color:var(--ink);background:var(--raise);font-weight:700}
+.exp.short{border-style:dashed;color:var(--dim)}
+.seg{flex:1;min-height:44px;border:none;border-radius:8px;background:transparent;color:var(--mut);font-size:13px;font-weight:400}
+.seg.on{background:var(--ink);color:var(--bg);font-weight:700}
+.cell{min-height:46px;margin:2px;border:none;border-radius:8px;background:transparent;color:var(--ink);font-size:15px;font-weight:400;padding:0}
+.cell.itm{background:var(--raise)}
+.cell.thin{color:var(--dim)}
+.cell:not(:disabled):hover{box-shadow:inset 0 0 0 1px var(--field)}
+.cell.buy{background:var(--amber);color:var(--on);font-weight:700}
+.cell.sell{background:var(--bg);color:var(--ink);font-weight:700;box-shadow:inset 0 0 0 2px var(--amber)}
+.cell.sell:hover{box-shadow:inset 0 0 0 2px var(--amber)}
+.mstar{color:var(--ink)}
+.mstar.on{color:var(--amber)}
+.legchip{border:1px solid var(--field);border-radius:6px;padding:0 6px;line-height:22px}
+</style>
+</helmet>
+<div class="{{ themeClass }} sans" style="width: 390px; height: 844px; box-sizing: border-box; background: var(--bg); color: var(--ink); display: flex; flex-direction: column; overflow: hidden">
+<header style="flex: none; display: flex; align-items: center; gap: 4px; padding: 6px 8px 0 4px">
+<a href="Main.dc.html" aria-label="Back to Find" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: var(--ink); text-decoration: none; border-radius: 10px">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg>
+</a>
+<a href="MarketSwitch.dc.html" aria-label="Switch market, now CORN" style="flex: 1; min-width: 0; min-height: 44px; display: flex; align-items: center; gap: 10px; padding: 0; color: var(--ink); text-decoration: none">
+<span aria-hidden="true" style="width: 36px; height: 36px; border-radius: 50%; background: var(--raise); color: var(--mut); display: flex; align-items: center; justify-content: center; flex: none">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22V9"></path><path d="M12 9c-2.5-.5-4-2.5-4-5 2.5.5 4 2.5 4 5z"></path><path d="M12 9c2.5-.5 4-2.5 4-5-2.5.5-4 2.5-4 5z"></path><path d="M12 14.5c-2.5-.5-4-2.5-4-5 2.5.5 4 2.5 4 5z"></path><path d="M12 14.5c2.5-.5 4-2.5 4-5-2.5.5-4 2.5-4 5z"></path><path d="M12 20c-2.5-.5-4-2.5-4-5 2.5.5 4 2.5 4 5z"></path><path d="M12 20c2.5-.5 4-2.5 4-5-2.5.5-4 2.5-4 5z"></path></svg>
+</span>
+<span style="display: flex; flex-direction: column; min-width: 0">
+<span style="display: flex; align-items: center; gap: 4px">
+<span class="mono" style="font-size: 18px; font-weight: 700; line-height: 1.3">CORN</span>
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
+</span>
+<span style="font-size: 12px; line-height: 1.3; color: var(--mut)">Corn · Grains</span>
+</span>
+</a>
+<button type="button" aria-label="{{ starAria }}" aria-pressed="{{ saved }}" onClick="{{ toggleSave }}" class="mstar {{ starCls }}" style="width: 44px; height: 44px; border: none; background: transparent; display: flex; align-items: center; justify-content: center; border-radius: 10px">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="{{ starFill }}" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M12 2.5l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.4l-5.9 3.1 1.2-6.5L2.5 9.4l6.6-.9z"></path></svg>
+</button>
+</header>
+<section style="flex: none; display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; padding: 4px 16px 10px">
+<div style="display: flex; flex-direction: column; gap: 2px">
+<div class="mono" style="font-size: 24px; font-weight: 700; line-height: 1.3">$18.42</div>
+<div class="mono" style="font-size: 13px; line-height: 1.3; color: var(--green)">▲ +0.21  +1.15%</div>
+<div style="font-size: 12px; line-height: 1.3; color: var(--mut)">Close · Fri 2 Oct, 16:00 ET</div>
+</div>
+<dl style="margin: 0; display: grid; grid-template-columns: auto auto; gap: 4px 14px; font-size: 12px; line-height: 1.3">
+<dt class="def" style="color: var(--mut)">IV</dt>
+<dd class="mono" style="margin: 0; text-align: right">24.2%</dd>
+<dt class="def" style="color: var(--mut)">IV rank</dt>
+<dd class="mono" style="margin: 0; text-align: right">38</dd>
+<dt class="def" style="color: var(--mut)">Move to 20 Nov</dt>
+<dd class="mono" style="margin: 0; text-align: right">±$1.59</dd>
+</dl>
+</section>
+<div style="flex: none; margin: 0 16px 6px; padding: 8px 12px; border: 1px solid var(--line); background: var(--panel); border-radius: 10px; display: flex; gap: 10px; align-items: center; font-size: 13px; line-height: 1.3">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none; color: var(--amber)"><rect x="3" y="4" width="18" height="18" rx="2"></rect><path d="M16 2v4"></path><path d="M8 2v4"></path><path d="M3 10h18"></path></svg>
+<span><b>WASDE</b> crop report · Fri 9 Oct, 12:00 ET · <span style="color: var(--mut)">in 5 days, before every expiry below</span></span>
+</div>
+<nav aria-label="Market sections" style="flex: none; display: flex; gap: 2px; padding: 0 8px; border-bottom: 1px solid var(--line)">
+<a href="MarketOverview.dc.html" class="tab" style="min-height: 44px; padding: 0 10px; display: flex; align-items: center; text-decoration: none; font-size: 15px">Overview</a>
+<a href="MarketStrategies.dc.html" class="tab" style="min-height: 44px; padding: 0 10px; display: flex; align-items: center; text-decoration: none; font-size: 15px">Strategies</a>
+<a href="Market.dc.html" class="tab on" aria-current="page" style="min-height: 44px; padding: 0 10px; display: flex; align-items: center; text-decoration: none; font-size: 15px">Chain</a>
+</nav>
+<div style="flex: 1; min-height: 0; overflow-y: auto">
+<div role="group" aria-label="Expiry" style="display: flex; gap: 6px; padding: 10px 16px 6px; overflow-x: auto">
+<button type="button" class="exp short" aria-pressed="false" aria-label="16 October, 12 days, inside the 21-day exit">
+<span class="mono" style="font-size: 13px; line-height: 1.3">16 Oct</span>
+<span style="font-size: 12px; line-height: 1.3">12d · &lt;21</span>
+</button>
+<button type="button" class="exp on" aria-pressed="true" aria-label="20 November, 47 days">
+<span class="mono" style="font-size: 13px; line-height: 1.3">20 Nov</span>
+<span style="font-size: 12px; line-height: 1.3; color: var(--mut)">47d</span>
+</button>
+<button type="button" class="exp" aria-pressed="false" aria-label="18 December, 75 days">
+<span class="mono" style="font-size: 13px; line-height: 1.3">18 Dec</span>
+<span style="font-size: 12px; line-height: 1.3; color: var(--mut)">75d</span>
+</button>
+<button type="button" class="exp" aria-pressed="false" aria-label="15 January, 103 days">
+<span class="mono" style="font-size: 13px; line-height: 1.3">15 Jan</span>
+<span style="font-size: 12px; line-height: 1.3; color: var(--mut)">103d</span>
+</button>
+</div>
+<div role="group" aria-label="Columns" style="margin: 4px 16px 4px; display: flex; gap: 2px; padding: 3px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px">
+<sc-for list="{{ modes }}" as="md" hint-placeholder-count="3">
+<button type="button" class="seg {{ md.cls }}" aria-pressed="{{ md.on }}" onClick="{{ md.pick }}">{{ md.label }}</button>
+</sc-for>
+</div>
+<p style="margin: 0; padding: 2px 16px 4px; font-size: 12px; line-height: 1.3; color: var(--dim)">{{ hint }}</p>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)) 64px repeat(2, minmax(0, 1fr)); padding: 0 8px; font-size: 12px; color: var(--mut); text-align: center">
+<div style="grid-column: span 2; font-size: 13px; font-weight: 700; color: var(--ink); padding: 6px 0 2px">Calls</div>
+<div style="padding: 6px 0 2px"></div>
+<div style="grid-column: span 2; font-size: 13px; font-weight: 700; color: var(--ink); padding: 6px 0 2px">Puts</div>
+<div class="def" style="padding: 2px 0 6px">{{ h1 }}</div>
+<div class="def" style="padding: 2px 0 6px">{{ h2 }}</div>
+<div style="padding: 2px 0 6px">Strike</div>
+<div class="def" style="padding: 2px 0 6px">{{ h1 }}</div>
+<div class="def" style="padding: 2px 0 6px">{{ h2 }}</div>
+</div>
+<sc-for list="{{ rows }}" as="r" hint-placeholder-count="6">
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)) 64px repeat(2, minmax(0, 1fr)); padding: 0 8px; border-top: 1px solid var(--line)">
+<button type="button" class="mono cell {{ r.c1.cls }}" aria-label="{{ r.c1.aria }}" aria-pressed="{{ r.c1.on }}" disabled="{{ r.locked }}" onClick="{{ r.c1.pick }}">{{ r.c1.txt }}</button>
+<button type="button" class="mono cell {{ r.c2.cls }}" aria-label="{{ r.c2.aria }}" aria-pressed="{{ r.c2.on }}" disabled="{{ r.locked }}" onClick="{{ r.c2.pick }}">{{ r.c2.txt }}</button>
+<div style="display: flex; flex-direction: column; align-items: center; justify-content: center; background: var(--panel); border-left: 1px solid var(--line); border-right: 1px solid var(--line)">
+<span class="mono" style="font-size: 15px; font-weight: 700; line-height: 1.3">{{ r.k }}</span>
+<sc-if value="{{ r.thin }}" hint-placeholder-val="{{ false }}">
+<span style="font-size: 12px; line-height: 1.3; color: var(--dim)">thin</span>
+</sc-if>
+</div>
+<button type="button" class="mono cell {{ r.p1.cls }}" aria-label="{{ r.p1.aria }}" aria-pressed="{{ r.p1.on }}" disabled="{{ r.locked }}" onClick="{{ r.p1.pick }}">{{ r.p1.txt }}</button>
+<button type="button" class="mono cell {{ r.p2.cls }}" aria-label="{{ r.p2.aria }}" aria-pressed="{{ r.p2.on }}" disabled="{{ r.locked }}" onClick="{{ r.p2.pick }}">{{ r.p2.txt }}</button>
+</div>
+<sc-if value="{{ r.spotAfter }}" hint-placeholder-val="{{ false }}">
+<div style="display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 6px; padding: 0 8px; height: 26px; border-top: 1px solid var(--line)">
+<span style="height: 0; border-top: 1px dashed var(--field)"></span>
+<span class="mono" style="font-size: 12px; font-weight: 700; line-height: 18px; padding: 0 8px; border-radius: 999px; background: var(--ink); color: var(--bg)">18.42 close</span>
+<span style="height: 0; border-top: 1px dashed var(--field)"></span>
+</div>
+</sc-if>
+</sc-for>
+<div style="height: 12px; border-top: 1px solid var(--line)"></div>
+</div>
+<section aria-label="Strategy tray" style="flex: none; border-top: 1px solid var(--field); background: var(--panel); padding: 10px 16px 14px; display: flex; flex-direction: column; gap: 8px; box-shadow: 0 -6px 18px rgba(0,0,0,0.18)">
+<sc-if value="{{ hasLegs }}" hint-placeholder-val="{{ true }}">
+<div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 24px">
+<span style="font-size: 15px; font-weight: 700; line-height: 1.3">{{ name }}</span>
+<span style="display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end">
+<sc-for list="{{ chips }}" as="l" hint-placeholder-count="2">
+<span class="mono legchip" style="font-size: 12px">{{ l.txt }}</span>
+</sc-for>
+</span>
+</div>
+<dl style="margin: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px">
+<sc-for list="{{ stats }}" as="st" hint-placeholder-count="4">
+<div style="min-width: 0">
+<dt class="def" style="font-size: 12px; line-height: 1.3; color: var(--mut)">{{ st.label }}</dt>
+<dd class="mono" style="margin: 0; font-size: 15px; font-weight: 700; line-height: 1.3">{{ st.value }}</dd>
+</div>
+</sc-for>
+</dl>
+<sc-if value="{{ blocked }}" hint-placeholder-val="{{ false }}">
+<p role="alert" style="margin: 0; font-size: 12px; line-height: 1.5; color: var(--red)">{{ blockedWhy }}</p>
+</sc-if>
+<sc-if value="{{ note }}" hint-placeholder-val="{{ false }}">
+<p role="status" style="margin: 0; font-size: 12px; line-height: 1.5; color: var(--mut)">{{ note }}</p>
+</sc-if>
+<div style="display: flex; gap: 8px">
+<button type="button" onClick="{{ clear }}" style="min-height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--field); background: transparent; color: var(--ink); font-size: 13px; font-weight: 700">Clear</button>
+<sc-if value="{{ canBuild }}" hint-placeholder-val="{{ true }}">
+<a href="Build.dc.html" style="flex: 1; min-height: 44px; display: flex; align-items: center; justify-content: center; border-radius: 10px; background: var(--amber); color: var(--on); text-decoration: none; font-size: 13px; font-weight: 700">Build ›</a>
+</sc-if>
+<sc-if value="{{ blocked }}" hint-placeholder-val="{{ false }}">
+<button type="button" disabled="{{ true }}" style="flex: 1; min-height: 44px; border-radius: 10px; border: none; background: var(--raise); color: var(--dim); font-size: 13px; font-weight: 700">Build</button>
+</sc-if>
+</div>
+</sc-if>
+<sc-if value="{{ noLegs }}" hint-placeholder-val="{{ false }}">
+<p style="margin: 0; font-size: 13px; line-height: 1.5; color: var(--body)">Tap a bid to sell or an ask to buy. Up to four legs; the strike column stays put.</p>
+<button type="button" disabled="{{ true }}" style="min-height: 44px; border-radius: 10px; border: none; background: var(--raise); color: var(--dim); font-size: 13px; font-weight: 700">Build</button>
+</sc-if>
+</section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":true,"section":"Theme"},"$preview":{"width":390,"height":844}}'>
+var SPOT = 18.42, MU = 0.12, SIG = 0.22, T = 47 / 365;
+var CHAIN = [
+  { k: 16, thin: true, c: { bid: 2.45, ask: 2.65, d: 0.94, iv: 27.0, oi: 6, vol: 0 }, p: { bid: 0.05, ask: 0.15, d: -0.06, iv: 27.0, oi: 14, vol: 2 } },
+  { k: 17, thin: false, c: { bid: 1.55, ask: 1.75, d: 0.84, iv: 25.5, oi: 48, vol: 3 }, p: { bid: 0.10, ask: 0.20, d: -0.16, iv: 25.5, oi: 162, vol: 21 } },
+  { k: 18, thin: false, c: { bid: 0.85, ask: 0.95, d: 0.64, iv: 24.2, oi: 210, vol: 18 }, p: { bid: 0.35, ask: 0.45, d: -0.36, iv: 24.2, oi: 405, vol: 37 } },
+  { k: 19, thin: false, c: { bid: 0.40, ask: 0.45, d: 0.40, iv: 23.8, oi: 388, vol: 44 }, p: { bid: 0.85, ask: 0.95, d: -0.60, iv: 23.8, oi: 120, vol: 9 } },
+  { k: 20, thin: false, c: { bid: 0.15, ask: 0.20, d: 0.20, iv: 24.5, oi: 251, vol: 26 }, p: { bid: 1.55, ask: 1.75, d: -0.80, iv: 24.5, oi: 33, vol: 1 } },
+  { k: 21, thin: true, c: { bid: 0.05, ask: 0.15, d: 0.09, iv: 25.8, oi: 9, vol: 0 }, p: { bid: 2.40, ask: 2.70, d: -0.91, iv: 25.8, oi: 4, vol: 0 } }
+];
+var MODES = [{ id: "price", label: "Bid · Ask" }, { id: "greeks", label: "Delta · IV" }, { id: "liq", label: "OI · Vol" }];
+var HINT = {
+  price: "Tap a bid to sell, an ask to buy. Shaded = in the money.",
+  greeks: "Delta and implied volatility for each strike.",
+  liq: "Open interest and today's volume. thin = bottom 20% of this chain."
+};
+
+// The same simulated terminal distribution Build uses: CORN's measured drift and volatility.
+var GRID = (function () {
+  var m = Math.log(SPOT) + (MU - SIG * SIG / 2) * T, s = SIG * Math.sqrt(T);
+  var lo = SPOT * 0.5, hi = SPOT * 1.7, n = 4000, h = (hi - lo) / n, g = [];
+  for (var i = 0; i < n; i++) {
+    var p = lo + (i + 0.5) * h, z = (Math.log(p) - m) / s;
+    g.push([p, Math.exp(-z * z / 2) / (p * s * Math.sqrt(2 * Math.PI)) * h]);
+  }
+  return g;
+})();
+
+function usd(x) { return (x < 0 ? "-" : "+") + "$" + Math.abs(Math.round(x)).toLocaleString("en-US"); }
+function quote(t, k) { var row = CHAIN.find(function (r) { return r.k === k; }); return t === "C" ? row.c : row.p; }
+function plAt(legs, net, S) {
+  var v = -net;
+  legs.forEach(function (l) { v += l.side * (l.t === "C" ? Math.max(S - l.k, 0) : Math.max(l.k - S, 0)); });
+  return v;
+}
+function nameOf(legs) {
+  var C = legs.filter(function (l) { return l.t === "C"; }).sort(function (a, b) { return a.k - b.k; });
+  var P = legs.filter(function (l) { return l.t === "P"; }).sort(function (a, b) { return a.k - b.k; });
+  if (legs.length === 1) return (legs[0].side > 0 ? "Long " : "Short ") + (legs[0].t === "C" ? "call" : "put");
+  if (legs.length === 2 && C.length === 2 && C[0].side !== C[1].side) return C[0].side > 0 ? "Bull call spread" : "Bear call spread";
+  if (legs.length === 2 && P.length === 2 && P[0].side !== P[1].side) return P[1].side > 0 ? "Bear put spread" : "Bull put spread";
+  if (legs.length === 2 && C.length === 1 && P.length === 1 && C[0].side === P[0].side) return (C[0].side > 0 ? "Long " : "Short ") + (C[0].k === P[0].k ? "straddle" : "strangle");
+  if (legs.length === 4 && C.length === 2 && P.length === 2 && P[0].side > 0 && P[1].side < 0 && C[0].side < 0 && C[1].side > 0) return "Iron condor";
+  return "Custom · " + legs.length + " legs";
+}
+function analyse(legs) {
+  var full = legs.map(function (l) { var q = quote(l.t, l.k); return { t: l.t, k: l.k, side: l.side, mid: (q.bid + q.ask) / 2 }; });
+  var net = full.reduce(function (a, l) { return a + l.side * l.mid; }, 0);
+  var nc = full.filter(function (l) { return l.t === "C"; }).reduce(function (a, l) { return a + l.side; }, 0);
+  var np = full.filter(function (l) { return l.t === "P"; }).reduce(function (a, l) { return a + l.side; }, 0);
+  var mx = -Infinity, mn = Infinity;
+  for (var i = 0; i <= 5600; i++) { var v = plAt(full, net, i / 100); if (v > mx) mx = v; if (v < mn) mn = v; }
+  if (nc > 0) mx = Infinity;
+  if (nc < 0) mn = -Infinity;
+  var ch = 0;
+  GRID.forEach(function (g) { if (plAt(full, net, g[0]) > 1e-9) ch += g[1]; });
+  return { net: net, nc: nc, np: np, mx: mx, mn: mn, ch: ch };
+}
+
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { saved: true, mode: "price", note: "", legs: [{ t: "P", k: 18, side: -1 }, { t: "P", k: 17, side: 1 }] };
+  }
+  toggle(t, k, side) {
+    var legs = this.state.legs.slice();
+    var i = legs.findIndex(function (l) { return l.t === t && l.k === k; });
+    if (i >= 0 && legs[i].side === side) legs.splice(i, 1);
+    else if (i >= 0) legs[i] = { t: t, k: k, side: side };
+    else {
+      if (legs.length >= 4) { this.setState({ note: "Four legs at most. Clear one to add another." }); return; }
+      legs.push({ t: t, k: k, side: side });
+    }
+    this.setState({ legs: legs, note: "" });
+  }
+  renderVals() {
+    var self = this, s = this.state, mode = s.mode;
+    var dark = this.props.dark ?? true;
+    var legOf = function (t, k) { return s.legs.find(function (l) { return l.t === t && l.k === k; }); };
+    var cell = function (t, r, which) {
+      var q = t === "C" ? r.c : r.p, word = t === "C" ? "call" : "put";
+      var itm = t === "C" ? r.k < SPOT : r.k > SPOT;
+      var cls = (itm ? "itm" : "") + (r.thin && mode === "price" ? " thin" : "");
+      if (mode !== "price") {
+        var txt = mode === "greeks" ? (which === 1 ? q.d.toFixed(2) : q.iv.toFixed(1) + "%") : String(which === 1 ? q.oi : q.vol);
+        var lab = mode === "greeks" ? (which === 1 ? "delta " : "implied volatility ") : (which === 1 ? "open interest " : "volume ");
+        return { txt: txt, cls: cls, on: false, aria: r.k + " " + word + ", " + lab + txt, pick: function () {} };
+      }
+      var side = which === 1 ? -1 : 1, px = which === 1 ? q.bid : q.ask;
+      var leg = legOf(t, r.k), on = !!leg && leg.side === side;
+      return {
+        txt: (on ? (side > 0 ? "+1 " : "-1 ") : "") + px.toFixed(2),
+        cls: cls + (on ? (side > 0 ? " buy" : " sell") : ""),
+        on: on,
+        aria: (side > 0 ? "Buy " : "Sell ") + r.k + " " + word + " at " + (side > 0 ? "ask " : "bid ") + px.toFixed(2) + (on ? ", in the tray" : ""),
+        pick: function () { self.toggle(t, r.k, side); }
+      };
+    };
+    var rows = CHAIN.map(function (r) {
+      return { k: r.k, thin: r.thin, locked: mode !== "price", spotAfter: r.k === 18,
+        c1: cell("C", r, 1), c2: cell("C", r, 2), p1: cell("P", r, 1), p2: cell("P", r, 2) };
+    });
+    var heads = { price: ["Bid", "Ask"], greeks: ["Delta", "IV"], liq: ["OI", "Vol"] }[mode];
+    var out = {
+      themeClass: dark ? "t-dark" : "t-light",
+      saved: s.saved, starFill: s.saved ? "currentColor" : "none", starCls: s.saved ? "on" : "",
+      starAria: s.saved ? "Saved: tap to remove CORN" : "Save CORN", toggleSave: function () { self.setState({ saved: !s.saved }); },
+      modes: MODES.map(function (m) { return { label: m.label, on: m.id === mode, cls: m.id === mode ? "on" : "", pick: function () { self.setState({ mode: m.id }); } }; }),
+      hint: HINT[mode], h1: heads[0], h2: heads[1], rows: rows,
+      hasLegs: s.legs.length > 0, noLegs: s.legs.length === 0, note: s.note,
+      clear: function () { self.setState({ legs: [], note: "" }); },
+      name: "", chips: [], stats: [], blocked: false, blockedWhy: "", canBuild: false
+    };
+    if (!s.legs.length) return out;
+    var a = analyse(s.legs);
+    var sorted = s.legs.slice().sort(function (x, y) { return x.t === y.t ? x.k - y.k : (x.t === "C" ? -1 : 1); });
+    out.name = nameOf(s.legs);
+    out.chips = sorted.map(function (l) { return { txt: (l.side > 0 ? "+1 " : "-1 ") + l.k + l.t }; });
+    out.stats = [
+      { label: a.net > 0 ? "Debit" : "Credit", value: Math.abs(a.net).toFixed(2) },
+      { label: "Max profit", value: a.mx === Infinity ? "No cap" : usd(a.mx * 100) },
+      { label: "Max loss", value: a.mn === -Infinity ? "No limit" : usd(a.mn * 100) },
+      { label: "Chance", value: Math.round(a.ch * 100) + "%" }
+    ];
+    if (a.nc < 0) { out.blocked = true; out.blockedWhy = "A short call with no long call above it: the loss has no limit. Add a long call to cap it."; }
+    else if (a.np < 0) { out.blocked = true; out.blockedWhy = "A short put with no long put below it. Add a long put so the most you can lose is known."; }
+    out.canBuild = !out.blocked;
+    return out;
+  }
+}
+</script>
+</body>
+</html>

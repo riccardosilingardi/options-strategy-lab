@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>J-0006 — UNG bull call spread</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+.t-dark{--bg:#14181d;--panel:#1a1f26;--line:#2a2f36;--field:#6b7685;--ink:#f5f0e6;--mut:#8b95a1;--dim:#7d8794;--amber:#e8b545;--green:#7fb85c;--red:#d66a5a;--blue:#5aa7d6;--body:#c9d1d9;--on:#14181d;--action:#5aa7d6;--raise:#222831}
+.t-light{--bg:#f5f6f7;--panel:#ffffff;--line:#dcdfe3;--field:#7a8491;--ink:#1c2128;--mut:#5a6472;--dim:#616b78;--amber:#8a6300;--green:#2f6f45;--red:#b23a2b;--blue:#1f6391;--body:#2a3038;--on:#ffffff;--action:#1f6391;--raise:#eceff2}
+.sans{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.mono{font-family:ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums}
+button,select,input,output,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+button:disabled{cursor:default}
+a{color:var(--blue)}a:hover{color:var(--ink)}
+.def{text-decoration:underline dotted;text-decoration-color:var(--dim);text-underline-offset:3px}
+.place{flex:1;min-height:50px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;border-radius:10px;font-size:12px;color:var(--ink);text-decoration:none;position:relative}
+.place.on{background:var(--ink);color:var(--bg);font-weight:700}
+.place:hover{color:var(--ink)}
+.place.on:hover{color:var(--bg)}
+.badge{font-size:12px;font-weight:700;letter-spacing:.04em;line-height:22px;padding:0 8px;border-radius:6px}
+.b-warn{box-shadow:inset 0 0 0 1.5px var(--amber);color:var(--amber)}
+.act{min-height:44px;border:none;border-radius:10px;background:var(--action);color:var(--on);font-size:13px;font-weight:700;padding:0 14px}
+.act:disabled{background:var(--raise);color:var(--dim)}
+.ghost{min-height:44px;border:1px solid var(--field);border-radius:10px;background:transparent;color:var(--ink);font-size:13px;font-weight:700;padding:0 14px}
+.bar{height:6px;border-radius:3px;background:var(--line);position:relative;overflow:hidden}
+.bar span{position:absolute;left:0;top:0;bottom:0;background:var(--field)}
+.bar.warn span{background:var(--amber)}
+.zp{fill:var(--green);fill-opacity:.14}
+.zl{fill:var(--red);fill-opacity:.08}
+.hist{fill:none;stroke:var(--ink);stroke-width:1.5;stroke-linejoin:round;stroke-linecap:round}
+.beLn{stroke:var(--ink);stroke-width:1;stroke-dasharray:4 3;stroke-opacity:.75}
+.kLn{stroke:var(--field);stroke-width:1;stroke-dasharray:2 4}
+.axis{fill:var(--mut);font-size:12px;font-family:ui-monospace,Menlo,monospace}
+.lbl{fill:var(--ink);font-size:12px;font-family:ui-monospace,Menlo,monospace}
+.lblB{fill:var(--ink);font-size:12px;font-weight:700;font-family:ui-monospace,Menlo,monospace}
+.entry{fill:var(--panel);stroke:var(--ink);stroke-width:2}
+.now{fill:var(--ink);stroke:var(--panel);stroke-width:2}
+.chg{color:var(--amber)}
+</style>
+</helmet>
+<div class="{{ themeClass }} sans" style="width: 390px; height: 1640px; box-sizing: border-box; background: var(--bg); color: var(--ink); position: relative; overflow: hidden">
+<header style="display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 12px 0 4px">
+<a href="Positions.dc.html" style="min-height: 44px; display: flex; align-items: center; gap: 2px; padding: 0 10px 0 4px; color: var(--ink); text-decoration: none; font-size: 15px">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg>
+<span>Positions</span>
+</a>
+<span class="mono" style="font-size: 12px; font-weight: 700; padding: 2px 8px; border: 1px solid var(--field); border-radius: 999px; color: var(--mut)">J-0006</span>
+</header>
+<main style="display: flex; flex-direction: column; gap: 12px; padding: 4px 16px 0">
+<div>
+<h1 style="margin: 0; font-size: 24px; font-weight: 700; line-height: 1.3">Bull call spread 15/17 · 18 Dec</h1>
+<p class="mono" style="margin: 2px 0 0; font-size: 13px; color: var(--mut)">UNG · 2 contracts · opened Fri 25 Sep</p>
+</div>
+<section aria-label="What to do now" style="background: var(--panel); border: 1px solid var(--amber); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; justify-content: space-between; align-items: center; gap: 8px">
+<span class="badge b-warn">WARNING · STOP LEVEL</span>
+<span style="text-align: right"><span class="mono" style="font-size: 24px; font-weight: 700; color: var(--red)">-$64</span></span>
+</div>
+<p style="margin: 0; font-size: 15px; line-height: 1.5">{{ headline }}</p>
+<sc-if value="{{ isIdle }}" hint-placeholder-val="{{ true }}">
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px">
+<button type="button" class="act" onClick="{{ startClose }}">Close at limit</button>
+<button type="button" class="ghost" onClick="{{ startKeep }}">Keep it, write why</button>
+</div>
+</sc-if>
+<sc-if value="{{ isClosing }}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; flex-direction: column; gap: 8px; padding-top: 10px; border-top: 1px solid var(--line)">
+<p class="mono" style="margin: 0; font-size: 13px; line-height: 1.5">Sell 2 × UNG 15/17 call spread · 18 Dec<br>limit $0.28 credit · day</p>
+<p class="mono" style="margin: 0; font-size: 12px; color: var(--mut)">bid 0.25 · mid 0.30 · ask 0.35 · Alpaca mark 0.30</p>
+<p style="margin: 0; font-size: 13px; line-height: 1.5; color: var(--body)">If it fills, the trade ends at <span class="mono">-$68</span>. Market closed: it waits for Mon 15:30 your time.</p>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px">
+<button type="button" class="ghost" onClick="{{ back }}">Back</button>
+<button type="button" class="act" onClick="{{ sendClose }}">Send close</button>
+</div>
+</div>
+</sc-if>
+<sc-if value="{{ isSent }}" hint-placeholder-val="{{ false }}">
+<div role="status" style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding-top: 10px; border-top: 1px solid var(--line)">
+<span style="flex: 1 1 180px; font-size: 13px; line-height: 1.5"><span class="mono">Close working at $0.28 · 0 of 2</span><span style="color: var(--mut)"> · opens Mon 15:30 your time</span></span>
+<a href="Orders.dc.html" style="min-height: 44px; display: inline-flex; align-items: center; padding: 0 14px; border: 1px solid var(--action); border-radius: 10px; color: var(--action); text-decoration: none; font-size: 13px; font-weight: 700">Manage order</a>
+</div>
+</sc-if>
+<sc-if value="{{ isKeeping }}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; flex-direction: column; gap: 8px; padding-top: 10px; border-top: 1px solid var(--line)">
+<label for="why" style="font-size: 13px; color: var(--mut)">Why keep it? It goes into J-0006's record.</label>
+<textarea id="why" rows="3" value="{{ reason }}" onChange="{{ setReason }}" placeholder="e.g. EIA storage on Thursday could turn it" style="width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1px solid var(--field); border-radius: 8px; background: var(--bg); color: var(--ink); font-size: 13px; line-height: 1.5; resize: vertical"></textarea>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px">
+<button type="button" class="ghost" onClick="{{ back }}">Back</button>
+<button type="button" class="act" disabled="{{ cantKeep }}" onClick="{{ keep }}">Keep, with this reason</button>
+</div>
+</div>
+</sc-if>
+<sc-if value="{{ isKept }}" hint-placeholder-val="{{ false }}">
+<p role="status" style="margin: 0; padding-top: 10px; border-top: 1px solid var(--line); font-size: 13px; line-height: 1.5; color: var(--body)"><span class="mono">J-0006·05</span> filed: kept, “{{ reason }}”. The stop warning stays on.</p>
+</sc-if>
+</section>
+<section aria-labelledby="where-h" style="background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 8px">
+<h2 id="where-h" style="margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 0.08em; color: var(--mut)">WHERE IT MAKES AND LOSES MONEY</h2>
+<p style="margin: 0; font-size: 13px; line-height: 1.5">Pays above <span class="mono">$15.62</span> on 18 Dec. UNG closed at <span class="mono">$15.10</span>, <span class="mono">$0.52</span> under that.</p>
+<svg width="326" height="230" viewBox="0 0 326 230" role="img" aria-label="UNG over 60 days with the entry at 15.80 on 25 Sep, now 15.10; breakeven 15.62, strikes 15 and 17" style="display: block; max-width: 100%; height: auto">
+<path class="zp" d="{{ zp }}"></path>
+<path class="zl" d="{{ zl }}"></path>
+<line class="kLn" x1="0" y1="{{ y17 }}" x2="290" y2="{{ y17 }}"></line>
+<line class="kLn" x1="0" y1="{{ y15 }}" x2="290" y2="{{ y15 }}"></line>
+<line class="beLn" x1="0" y1="{{ yBE }}" x2="290" y2="{{ yBE }}"></line>
+<polyline class="hist" points="{{ hist }}"></polyline>
+<circle class="entry" cx="{{ xE }}" cy="{{ yE }}" r="5"></circle>
+<circle class="now" cx="290" cy="{{ yN }}" r="5"></circle>
+<text class="lblB" x="4" y="{{ beY }}">BE 15.62</text>
+<text class="lbl" x="{{ xE }}" y="{{ eLblY }}" text-anchor="end">entry 15.80</text>
+<text class="lbl" x="284" y="{{ nLblY }}" text-anchor="end">now 15.10</text>
+<text class="axis" x="296" y="22">18</text>
+<text class="axis" x="296" y="70">17</text>
+<text class="axis" x="296" y="118">16</text>
+<text class="axis" x="296" y="166">15</text>
+<text class="axis" x="296" y="214">14</text>
+</svg>
+</section>
+<section aria-labelledby="exit-h" style="background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 12px">
+<h2 id="exit-h" style="margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 0.08em; color: var(--mut)">THE EXIT PLAN</h2>
+<div style="display: flex; flex-direction: column; gap: 6px">
+<div style="display: flex; justify-content: space-between; font-size: 13px"><span>Take profit</span><span class="mono">-$64 of $138</span></div>
+<div class="bar"><span style="width: 0%"></span></div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 6px">
+<div style="display: flex; justify-content: space-between; font-size: 13px"><span>Time exit</span><span class="mono">54 days left · 27 Nov</span></div>
+<div class="bar"><span style="width: 14%"></span></div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 6px">
+<div style="display: flex; justify-content: space-between; font-size: 13px"><span>Stop warning <span style="color: var(--amber)">· reached</span></span><span class="mono">at -$62</span></div>
+<div class="bar warn"><span style="width: 100%"></span></div>
+</div>
+</section>
+<section aria-labelledby="evn-h" style="background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 4px">
+<h2 id="evn-h" style="margin: 0 0 6px; font-size: 12px; font-weight: 700; letter-spacing: 0.08em; color: var(--mut)">AT ENTRY VS NOW</h2>
+<div style="display: grid; grid-template-columns: minmax(0, 1.3fr) repeat(2, minmax(0, 1fr)); gap: 6px 8px; align-items: baseline; font-size: 13px">
+<span></span>
+<span style="font-size: 12px; font-weight: 700; color: var(--mut); text-align: right">AT ENTRY<br><span style="font-weight: 400">Fri 25 Sep</span></span>
+<span style="font-size: 12px; font-weight: 700; color: var(--mut); text-align: right">NOW<br><span style="font-weight: 400">Fri 2 Oct close</span></span>
+<span class="def" style="color: var(--mut)">You risk</span><span class="mono" style="text-align: right">$124</span><span class="mono" style="text-align: right; font-weight: 700">$60</span>
+<span class="def" style="color: var(--mut)">Max profit</span><span class="mono" style="text-align: right">$276</span><span class="mono" style="text-align: right; font-weight: 700">$340</span>
+<span class="def" style="color: var(--mut)">Chance</span><span class="mono" style="text-align: right">38%</span><span class="mono" style="text-align: right; font-weight: 700">24%</span>
+<span class="def" style="color: var(--mut)">Return on risk</span><span class="mono" style="text-align: right">223%</span><span class="mono" style="text-align: right; font-weight: 700">567%</span>
+<span style="grid-column: 1 / -1; border-top: 1px solid var(--line); margin: 4px 0"></span>
+<span style="color: var(--mut)">Seasonality</span><span class="mono" style="text-align: right">↑ 45</span><span class="mono" style="text-align: right; font-weight: 700">↑ 20</span>
+<span style="color: var(--mut)">Price trend</span><span class="mono" style="text-align: right">↑ 35</span><span class="mono chg" style="text-align: right; font-weight: 700">↓ 25 •</span>
+<span style="color: var(--mut)">Weather</span><span class="mono" style="text-align: right">↑ 40</span><span class="mono chg" style="text-align: right; font-weight: 700">→ 0 •</span>
+<span style="color: var(--mut)">News</span><span class="mono" style="text-align: right">→ 0</span><span class="mono chg" style="text-align: right; font-weight: 700">↓ 30 •</span>
+</div>
+<p style="margin: 8px 0 0; font-size: 13px; line-height: 1.5; color: var(--body)"><span style="color: var(--amber)">•</span> 3 of the 4 reasons you opened it have turned. "Now" is always Alpaca's last price; "At entry" never changes.</p>
+</section>
+<section aria-labelledby="tl-h" style="background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 14px 6px">
+<div style="display: flex; align-items: center; justify-content: space-between; gap: 8px">
+<h2 id="tl-h" style="margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 0.08em; color: var(--mut)">RECORD · LAST 4</h2>
+<a href="Journal.dc.html" style="min-height: 44px; display: flex; align-items: center; font-size: 13px; text-decoration: none">Whole record ›</a>
+</div>
+<ol style="list-style: none; margin: 0; padding: 0">
+<li style="display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 8px; padding: 8px 0; border-top: 1px solid var(--line); font-size: 13px; line-height: 1.5"><span class="mono" style="color: var(--mut)">·04 2 Oct</span><span>Stop warning reached: <span class="mono">-$64</span> against <span class="mono">-$62</span>.</span></li>
+<li style="display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 8px; padding: 8px 0; border-top: 1px solid var(--line); font-size: 13px; line-height: 1.5"><span class="mono" style="color: var(--mut)">·03 1 Oct</span><span>Price trend turned down: 20-day average under the 50-day.</span></li>
+<li style="display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 8px; padding: 8px 0; border-top: 1px solid var(--line); font-size: 13px; line-height: 1.5"><span class="mono" style="color: var(--mut)">·02 29 Sep</span><span>HOLD. Nothing to do: the exit plan is running.</span></li>
+<li style="display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 8px; padding: 8px 0; border-top: 1px solid var(--line); font-size: 13px; line-height: 1.5"><span class="mono" style="color: var(--mut)">·01 25 Sep</span><span>Opened at <span class="mono">$0.62</span> debit × 2. Three of four factors up, chance 38%.</span></li>
+</ol>
+</section>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px">
+<button type="button" class="ghost">Analyse as a new trade</button>
+<button type="button" class="ghost">Alpaca details</button>
+</div>
+</main>
+<nav aria-label="Places" style="position: absolute; left: 8px; right: 8px; bottom: 12px; display: flex; gap: 2px; padding: 4px; background: var(--panel); border: 1px solid var(--field); border-radius: 14px; box-shadow: 0 4px 18px rgba(0,0,0,0.18)">
+<a href="Main.dc.html" class="place"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4.3-4.3"></path></svg><span>Find</span></a>
+<a href="Build.dc.html" class="place"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 3l8 8-3 3-8-8z"></path><path d="M11.5 7.5l-8 8a1.6 1.6 0 0 0 2.3 2.3l8-8"></path></svg><span>Build</span></a>
+<a href="Positions.dc.html" class="place on" aria-current="page" aria-label="Positions, 2 to look at"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="7" width="20" height="14" rx="2"></rect><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path></svg><span>Positions</span><span class="mono" aria-hidden="true" style="position: absolute; top: 4px; right: 18%; font-size: 12px; font-weight: 700; background: var(--action); color: var(--on); border-radius: 10px; padding: 0 6px; line-height: 18px">2</span></a>
+<a href="Journal.dc.html" class="place"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"></path><path d="M14 2v5h6"></path><path d="M16 13H8"></path><path d="M16 17H8"></path></svg><span>Journal</span></a>
+</nav>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":true,"section":"Theme"},"$preview":{"width":390,"height":1640}}'>
+// UNG over 60 sessions (sample): 14.85 sixty sessions ago, 15.80 at entry (index 54, Fri 25 Sep), 15.10 at Friday's close.
+var Y = function (p) { return 18 + (18 - p) * 48; };
+var X = function (i) { return i * 290 / 59; };
+var f1 = function (x) { return x.toFixed(1); };
+function rng(seed) { var x = seed; return function () { x = (Math.imul(x, 1664525) + 1013904223) >>> 0; return x / 4294967296; }; }
+var SERIES = (function () {
+  var r = rng(925), p = new Array(60);
+  function bridge(a, b, pa, pb, vol) {
+    var w = [0];
+    for (var i = a + 1; i <= b; i++) w.push(w[w.length - 1] + (r() - 0.5) * vol);
+    var end = w[w.length - 1];
+    for (var j = a; j <= b; j++) { var t = (j - a) / (b - a); p[j] = pa + (pb - pa) * t + w[j - a] - end * t; }
+  }
+  bridge(0, 54, 14.85, 15.80, 0.22);
+  bridge(54, 59, 15.80, 15.10, 0.16);
+  return p;
+})();
+var HIST = SERIES.map(function (v, i) { return f1(X(i)) + "," + f1(Y(v)); }).join(" ");
+var BE = 15.62;
+
+class Component extends DCLogic {
+  constructor(props) { super(props); this.state = { mode: "idle", reason: "" }; }
+  renderVals() {
+    var self = this, s = this.state, dark = this.props.dark ?? true;
+    var headline = {
+      idle: "Stop warning reached: -$64 against -$62. A warning, not an order: close it, or keep it and write why.",
+      closing: "Closing at a limit, not at market. Check it, then send.",
+      sent: "Close sent to Alpaca. The position stays here until it fills.",
+      keeping: "Keeping it is allowed. Say why, so the Journal can hold you to it.",
+      kept: "Kept, with your reason on the record."
+    }[s.mode];
+    return {
+      themeClass: dark ? "t-dark" : "t-light",
+      headline: headline,
+      isIdle: s.mode === "idle", isClosing: s.mode === "closing", isSent: s.mode === "sent", isKeeping: s.mode === "keeping", isKept: s.mode === "kept",
+      startClose: function () { self.setState({ mode: "closing" }); },
+      startKeep: function () { self.setState({ mode: "keeping" }); },
+      back: function () { self.setState({ mode: "idle" }); },
+      sendClose: function () { self.setState({ mode: "sent" }); },
+      reason: s.reason, setReason: function (e) { self.setState({ reason: e.target.value }); },
+      cantKeep: s.reason.trim().length < 12,
+      keep: function () { if (s.reason.trim().length >= 12) self.setState({ mode: "kept" }); },
+      zp: "M0 " + f1(Y(18)) + "H290V" + f1(Y(BE)) + "H0Z",
+      zl: "M0 " + f1(Y(BE)) + "H290V" + f1(Y(14)) + "H0Z",
+      y17: f1(Y(17)), y15: f1(Y(15)), yBE: f1(Y(BE)), beY: f1(Y(BE) - 6),
+      hist: HIST,
+      xE: f1(X(54)), yE: f1(Y(SERIES[54])), eLblY: f1(Y(SERIES[54]) - 10),
+      yN: f1(Y(SERIES[59])), nLblY: f1(Y(SERIES[59]) + 20)
+    };
+  }
+}
+</script>
+</body>
+</html>

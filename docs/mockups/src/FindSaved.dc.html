@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Find — saved</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+.t-dark{--bg:#14181d;--panel:#1a1f26;--line:#2a2f36;--field:#6b7685;--ink:#f5f0e6;--mut:#8b95a1;--dim:#7d8794;--amber:#e8b545;--green:#7fb85c;--red:#d66a5a;--blue:#5aa7d6;--body:#c9d1d9;--on:#14181d;--action:#5aa7d6;--raise:#222831}
+.t-light{--bg:#f5f6f7;--panel:#ffffff;--line:#dcdfe3;--field:#7a8491;--ink:#1c2128;--mut:#5a6472;--dim:#616b78;--amber:#8a6300;--green:#2f6f45;--red:#b23a2b;--blue:#1f6391;--body:#2a3038;--on:#ffffff;--action:#1f6391;--raise:#eceff2}
+.sans{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.mono{font-family:ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums}
+button,select,input{font:inherit;color:inherit}
+button{cursor:pointer}
+a{color:var(--blue)}a:hover{color:var(--ink)}
+.place{flex:1;min-height:50px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;border-radius:10px;font-size:12px;color:var(--ink);text-decoration:none;position:relative}
+.place.on{background:var(--ink);color:var(--bg);font-weight:700}
+.place:hover{color:var(--ink)}
+.place.on:hover{color:var(--bg)}
+.seg{flex:1;min-height:44px;display:flex;align-items:center;justify-content:center;gap:6px;border-radius:8px;color:var(--mut);text-decoration:none;font-size:13px;font-weight:400}
+.seg.on{background:var(--ink);color:var(--bg);font-weight:700}
+a.seg:hover{color:var(--ink)}
+a.seg.on:hover{color:var(--bg)}
+.ghost{flex:1;min-height:44px;border:1px solid var(--field);border-radius:10px;background:transparent;color:var(--ink);font-size:13px;font-weight:700}
+.amberA{flex:1;min-height:44px;display:flex;align-items:center;justify-content:center;border-radius:10px;background:var(--amber);color:var(--on);text-decoration:none;font-size:13px;font-weight:700}
+a.amberA:hover{color:var(--on)}
+.up{color:var(--green)}
+.dn{color:var(--amber)}
+</style>
+</helmet>
+<div class="{{ themeClass }} sans" style="width: 390px; height: 844px; box-sizing: border-box; background: var(--bg); color: var(--ink); display: flex; flex-direction: column; overflow: hidden; position: relative">
+<header style="display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 8px 0 16px">
+<h1 style="margin: 0; font-size: 24px; font-weight: 700; line-height: 1.3">Find</h1>
+<a href="Settings.dc.html" aria-label="Settings" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: var(--ink); border-radius: 10px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"></path></svg></a>
+</header>
+<p style="margin: 0; padding: 0 16px 6px; font-size: 12px; line-height: 1.3; color: var(--mut)">Close · Fri 2 Oct, 16:00 ET · indicative feed</p>
+<div role="group" aria-label="Find: results or saved trades" style="display: flex; gap: 2px; margin: 0 16px 10px; padding: 3px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px">
+<a href="Main.dc.html" class="seg">Results <span class="mono" style="font-size: 12px">10</span></a>
+<a href="FindSaved.dc.html" class="seg on" aria-current="page">Saved <span class="mono" style="font-size: 12px">{{ n }}</span></a>
+</div>
+<ul style="list-style: none; margin: 0; padding: 0 16px 96px; display: flex; flex-direction: column; gap: 10px; flex: 1; overflow-y: auto">
+<sc-for list="{{ cards }}" as="c" hint-placeholder-count="2">
+<li style="background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px">
+<div style="display: flex; justify-content: space-between; align-items: baseline; gap: 8px">
+<span><span class="mono" style="font-size: 15px; font-weight: 700">{{ c.tk }}</span> <span style="font-size: 15px; font-weight: 700">· {{ c.name }}</span></span>
+<span style="font-size: 12px; color: var(--mut); flex: none">{{ c.saved }}</span>
+</div>
+<div style="display: grid; grid-template-columns: minmax(0, 1fr) repeat(2, auto); gap: 4px 12px; font-size: 13px; align-items: baseline">
+<span></span><span style="font-size: 12px; color: var(--mut); text-align: right">When saved</span><span style="font-size: 12px; color: var(--mut); text-align: right">Now</span>
+<span style="color: var(--mut)">Chance</span><span class="mono" style="text-align: right">{{ c.chThen }}</span><span class="mono {{ c.chCls }}" style="text-align: right; font-weight: 700">{{ c.chNow }}</span>
+<span style="color: var(--mut)">Future avg</span><span class="mono" style="text-align: right">{{ c.evThen }}</span><span class="mono {{ c.evCls }}" style="text-align: right; font-weight: 700">{{ c.evNow }}</span>
+<span style="color: var(--mut)">You risk</span><span class="mono" style="text-align: right">{{ c.risk }}</span><span class="mono" style="text-align: right; font-weight: 700">{{ c.risk }}</span>
+</div>
+<div style="display: flex; gap: 8px">
+<button type="button" class="ghost" onClick="{{ c.remove }}">Remove</button>
+<a href="Build.dc.html" class="amberA">Build ›</a>
+</div>
+</li>
+</sc-for>
+<sc-if value="{{ empty }}" hint-placeholder-val="{{ false }}">
+<li style="padding: 24px 4px; display: flex; flex-direction: column; gap: 8px">
+<p style="margin: 0; font-size: 15px; font-weight: 700">Nothing saved.</p>
+<p style="margin: 0; font-size: 13px; line-height: 1.5; color: var(--body)">Tap ☆ on a card in Results to watch it here. Saved trades are priced again at every read.</p>
+</li>
+</sc-if>
+<sc-if value="{{ notEmpty }}" hint-placeholder-val="{{ true }}">
+<li style="font-size: 12px; line-height: 1.5; color: var(--mut); padding: 0 2px">Priced again at every read: "Now" is Friday's close, "When saved" never changes.</li>
+</sc-if>
+</ul>
+<nav aria-label="Places" style="position: absolute; left: 8px; right: 8px; bottom: 12px; display: flex; gap: 2px; padding: 4px; background: var(--panel); border: 1px solid var(--field); border-radius: 14px; box-shadow: 0 4px 18px rgba(0,0,0,0.18)">
+<a href="Main.dc.html" class="place on" aria-current="page"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4.3-4.3"></path></svg><span>Find</span></a>
+<a href="Build.dc.html" class="place"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 3l8 8-3 3-8-8z"></path><path d="M11.5 7.5l-8 8a1.6 1.6 0 0 0 2.3 2.3l8-8"></path></svg><span>Build</span></a>
+<a href="Positions.dc.html" class="place" aria-label="Positions, 2 to look at"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="7" width="20" height="14" rx="2"></rect><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path></svg><span>Positions</span><span class="mono" aria-hidden="true" style="position: absolute; top: 4px; right: 18%; font-size: 12px; font-weight: 700; background: var(--action); color: var(--on); border-radius: 10px; padding: 0 6px; line-height: 18px">2</span></a>
+<a href="Journal.dc.html" class="place"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"></path><path d="M14 2v5h6"></path><path d="M16 13H8"></path><path d="M16 17H8"></path></svg><span>Journal</span></a>
+</nav>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":true,"section":"Theme"},"$preview":{"width":390,"height":844}}'>
+var SAVED = [
+  { id: "soyb", tk: "SOYB", name: "Iron condor · 18 Dec", saved: "saved Mon 28 Sep", chThen: 61, chNow: 58, evThen: 5, evNow: 3, risk: 142 },
+  { id: "gld", tk: "GLD", name: "Bull put spread · 18 Dec", saved: "saved Thu 1 Oct", chThen: 74, chNow: 76, evThen: 8, evNow: 9, risk: 390 }
+];
+function usd(x) { return (x < 0 ? "-" : "+") + "$" + Math.abs(Math.round(x)); }
+class Component extends DCLogic {
+  constructor(props) { super(props); this.state = { gone: [] }; }
+  renderVals() {
+    var self = this, s = this.state, dark = this.props.dark ?? true;
+    var cards = SAVED.filter(function (c) { return s.gone.indexOf(c.id) < 0; }).map(function (c) {
+      return { tk: c.tk, name: c.name, saved: c.saved, chThen: c.chThen + "%", chNow: c.chNow + "%", chCls: c.chNow >= c.chThen ? "up" : "dn",
+        evThen: usd(c.evThen), evNow: usd(c.evNow), evCls: c.evNow >= c.evThen ? "up" : "dn", risk: "$" + c.risk,
+        remove: function () { self.setState({ gone: s.gone.concat([c.id]) }); } };
+    });
+    return { themeClass: dark ? "t-dark" : "t-light", cards: cards, n: cards.length, empty: !cards.length, notEmpty: !!cards.length };
+  }
+}
+</script>
+</body>
+</html>

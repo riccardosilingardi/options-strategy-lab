@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Find</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+.t-dark{--bg:#14181d;--panel:#1a1f26;--line:#2a2f36;--field:#6b7685;--ink:#f5f0e6;--mut:#8b95a1;--dim:#7d8794;--amber:#e8b545;--green:#7fb85c;--red:#d66a5a;--blue:#5aa7d6;--body:#c9d1d9;--on:#14181d;--action:#5aa7d6;--raise:#222831;--scrim:rgba(6,8,10,0.66)}
+.t-light{--bg:#f5f6f7;--panel:#ffffff;--line:#dcdfe3;--field:#7a8491;--ink:#1c2128;--mut:#5a6472;--dim:#616b78;--amber:#8a6300;--green:#2f6f45;--red:#b23a2b;--blue:#1f6391;--body:#2a3038;--on:#ffffff;--action:#1f6391;--raise:#eceff2;--scrim:rgba(20,24,29,0.45)}
+.sans{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.mono{font-family:ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums}
+button,select,input,output{font:inherit;color:inherit}
+button{cursor:pointer}
+button:disabled{cursor:default}
+a{color:var(--blue)}a:hover{color:var(--ink)}
+.def{text-decoration:underline dotted;text-decoration-color:var(--dim);text-underline-offset:3px}
+.place{flex:1;min-height:50px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;border-radius:10px;font-size:12px;color:var(--ink);text-decoration:none;position:relative}
+.place.on{background:var(--ink);color:var(--bg);font-weight:700}
+.place:hover{color:var(--ink)}
+.place.on:hover{color:var(--bg)}
+.seg{flex:1;min-height:44px;display:flex;align-items:center;justify-content:center;gap:6px;border-radius:8px;color:var(--mut);text-decoration:none;font-size:13px;font-weight:400}
+.seg.on{background:var(--ink);color:var(--bg);font-weight:700}
+a.seg:hover{color:var(--ink)}
+a.seg.on:hover{color:var(--bg)}
+.tab{border:none;border-bottom:3px solid transparent;color:var(--mut);font-weight:400}
+.tab.on{color:var(--ink);font-weight:700;border-bottom-color:var(--amber)}
+.chip{border:1px solid var(--field);background:transparent;color:var(--mut);border-radius:999px}
+.chip.on{background:var(--ink);border-color:var(--ink);color:var(--bg);font-weight:700}
+.row{color:var(--ink)}
+.star{width:44px;height:44px;border:none;background:transparent;color:var(--dim);display:flex;align-items:center;justify-content:center;flex:none;border-radius:10px}
+.star.on{color:var(--amber)}
+.row:hover{background:var(--panel);color:var(--ink)}
+.dir{border:1px solid var(--field);border-radius:6px;padding:0 6px;line-height:18px;color:var(--ink)}
+.row.miss .tk,.row.miss .fig,.row.miss .dir{color:var(--dim)}
+.row.miss .dir{border-color:var(--line)}
+.row.miss .band{opacity:.35}
+.row.miss .why{color:var(--mut)}
+.zp{fill:var(--green);fill-opacity:.3}
+.zl{fill:var(--red);fill-opacity:.15}
+.ln{fill:none;stroke:var(--ink);stroke-width:1.5;stroke-linejoin:round;stroke-linecap:round}
+.slider{accent-color:var(--amber)}
+</style>
+</helmet>
+<div class="{{ themeClass }} sans" style="width: 390px; height: 844px; box-sizing: border-box; background: var(--bg); color: var(--ink); display: flex; flex-direction: column; overflow: hidden; position: relative">
+<header style="display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 8px 0 16px">
+<h1 style="margin: 0; font-size: 24px; font-weight: 700; line-height: 1.3">Find</h1>
+<span style="display: flex; gap: 2px">
+<a href="FindFilters.dc.html" aria-label="Filters: budget, chance, return on risk, direction" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: var(--ink); border-radius: 10px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><path d="M4 6h10"></path><path d="M18 6h2"></path><circle cx="16" cy="6" r="2"></circle><path d="M4 12h4"></path><path d="M12 12h8"></path><circle cx="10" cy="12" r="2"></circle><path d="M4 18h12"></path><path d="M20 18h0"></path><circle cx="18" cy="18" r="2"></circle></svg></a>
+<a href="Settings.dc.html" aria-label="Settings" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: var(--ink); border-radius: 10px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg></a>
+</span>
+</header>
+<p style="margin: 0; padding: 0 16px 6px; font-size: 12px; line-height: 1.3; color: var(--mut); display: flex; align-items: center; gap: 6px">
+<span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 50%; background: var(--dim); display: inline-block; flex: none"></span>
+<span>Close · Fri 2 Oct, 16:00 ET · indicative feed</span>
+</p>
+<div role="group" aria-label="Find: results or saved trades" style="display: flex; gap: 2px; margin: 0 16px 6px; padding: 3px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px">
+<a href="Main.dc.html" class="seg on" aria-current="page">Results <span class="mono" style="font-size: 12px">10</span></a>
+<a href="FindSaved.dc.html" class="seg">Saved <span class="mono" style="font-size: 12px">{{ savedN }}</span></a>
+</div>
+<nav aria-label="Categories" style="display: flex; gap: 2px; padding: 0 8px; border-bottom: 1px solid var(--line)">
+<sc-for list="{{ cats }}" as="c" hint-placeholder-count="4">
+<button type="button" class="tab {{ c.cls }}" aria-pressed="{{ c.on }}" onClick="{{ c.pick }}" style="min-height: 44px; padding: 0 10px; background: transparent; font-size: 15px; display: flex; align-items: center; gap: 6px">
+<span>{{ c.label }}</span>
+<span class="mono" style="font-size: 12px; color: var(--dim); font-weight: 400">{{ c.n }}</span>
+</button>
+</sc-for>
+</nav>
+<section style="padding: 10px 16px 0">
+<div style="display: flex; align-items: baseline; justify-content: space-between; gap: 8px">
+<label for="budget" style="font-size: 13px; color: var(--mut)">Budget per trade</label>
+<span style="display: flex; align-items: baseline; gap: 6px">
+<span class="mono" style="font-size: 15px; font-weight: 700">{{ budgetTxt }}</span>
+<span style="font-size: 12px; color: var(--dim)">{{ budgetPct }}</span>
+</span>
+</div>
+<input id="budget" class="slider" type="range" min="50" max="1000" step="25" value="{{ budget }}" onChange="{{ setBudget }}" style="width: 100%; height: 32px; margin: 2px 0 0; display: block">
+</section>
+<div role="group" aria-label="List filters" style="display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 16px 8px">
+<button type="button" class="chip {{ posCls }}" aria-pressed="{{ posOnly }}" onClick="{{ togglePos }}" style="min-height: 36px; padding: 0 12px; font-size: 12px">Only a positive future avg</button>
+<button type="button" class="chip {{ hideCls }}" aria-pressed="{{ hideMiss }}" onClick="{{ toggleHide }}" style="min-height: 36px; padding: 0 12px; font-size: 12px">{{ hideTxt }}</button>
+</div>
+<div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 8px 0 16px; min-height: 44px; border-top: 1px solid var(--line); font-size: 12px; color: var(--mut)">
+<span>Market</span>
+<span style="display: flex; align-items: center; gap: 4px">
+<label for="order" style="font-size: 12px; color: var(--mut)">Order by</label>
+<select id="order" value="{{ order }}" onChange="{{ setOrder }}" style="min-height: 36px; padding: 0 6px; background: var(--panel); color: var(--ink); border: 1px solid var(--field); border-radius: 8px; font-size: 13px; font-weight: 700">
+<option value="ev">Future avg</option>
+<option value="evSignal">Future avg + signal</option>
+<option value="chance">Chance</option>
+<option value="rr">Return on risk</option>
+<option value="past">Past yrs</option>
+</select>
+<a href="Define.dc.html" aria-label="How chance, score and confidence connect" style="width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; color: var(--blue); text-decoration: none; font-size: 15px">ⓘ</a>
+</span>
+</div>
+<ul style="list-style: none; margin: 0; padding: 0 0 88px; overflow-y: auto; flex: 1">
+<sc-for list="{{ rows }}" as="m" hint-placeholder-count="7">
+<li class="row {{ m.cls }}" style="border-top: 1px solid var(--line); display: flex; align-items: center; padding-left: 4px">
+<button type="button" class="star {{ m.starCls }}" aria-label="{{ m.starAria }}" aria-pressed="{{ m.saved }}" onClick="{{ m.toggleSave }}"><svg width="20" height="20" viewBox="0 0 24 24" fill="{{ m.starFill }}" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round" aria-hidden="true"><path d="M12 2.5l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.4l-5.9 3.1 1.2-6.5L2.5 9.4l6.6-.9z"></path></svg></button>
+<a href="{{ m.href }}" aria-label="{{ m.aria }}" style="flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 10px 16px 10px 2px; min-height: 68px; box-sizing: border-box; text-decoration: none; color: inherit">
+<span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px">
+<span style="display: flex; align-items: center; gap: 8px">
+<span class="mono tk" style="font-size: 15px; font-weight: 700; line-height: 1.3">{{ m.tk }}</span>
+<span class="dir" style="font-size: 12px">{{ m.dirTxt }}</span>
+</span>
+<span class="why" style="font-size: 12px; line-height: 1.3; color: var(--mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{ m.sub }}</span>
+</span>
+<svg class="band" width="72" height="40" viewBox="0 0 72 40" aria-hidden="true" style="flex: none; border-radius: 4px; overflow: hidden">
+<path class="zp" d="{{ m.zp }}"></path>
+<path class="zl" d="{{ m.zl }}"></path>
+<polyline class="ln" points="{{ m.ln }}"></polyline>
+</svg>
+<span style="width: 60px; flex: none; text-align: right; display: flex; flex-direction: column; gap: 3px">
+<span class="mono fig" style="font-size: 15px; font-weight: 700; line-height: 1.3">{{ m.fig }}</span>
+<span class="mono" style="font-size: 12px; line-height: 1.3; color: var(--mut)">{{ m.risk }}</span>
+</span>
+</a>
+</li>
+</sc-for>
+<sc-if value="{{ empty }}" hint-placeholder-val="{{ false }}">
+<li style="padding: 24px 16px; display: flex; flex-direction: column; gap: 12px; align-items: flex-start">
+<p style="margin: 0; font-size: 15px; font-weight: 700">{{ emptyTitle }}</p>
+<p style="margin: 0; font-size: 13px; color: var(--body)">{{ emptyLine }}</p>
+<button type="button" onClick="{{ fixBudget }}" style="min-height: 44px; padding: 0 16px; border: none; border-radius: 10px; background: var(--amber); color: var(--on); font-size: 13px; font-weight: 700">{{ fixTxt }}</button>
+</li>
+</sc-if>
+</ul>
+<nav aria-label="Places" style="position: absolute; left: 8px; right: 8px; bottom: 12px; display: flex; gap: 2px; padding: 4px; background: var(--panel); border: 1px solid var(--field); border-radius: 14px; box-shadow: 0 4px 18px rgba(0,0,0,0.18)">
+<a href="Main.dc.html" class="place on" aria-current="page">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4.3-4.3"></path></svg>
+<span>Find</span>
+</a>
+<a href="Build.dc.html" class="place">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 3l8 8-3 3-8-8z"></path><path d="M11.5 7.5l-8 8a1.6 1.6 0 0 0 2.3 2.3l8-8"></path></svg>
+<span>Build</span>
+</a>
+<a href="Positions.dc.html" class="place" aria-label="Positions, 2 to look at">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="7" width="20" height="14" rx="2"></rect><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path></svg>
+<span>Positions</span>
+<span class="mono" aria-hidden="true" style="position: absolute; top: 4px; right: 18%; font-size: 12px; font-weight: 700; background: var(--action); color: var(--on); border-radius: 10px; padding: 0 6px; line-height: 18px">2</span>
+</a>
+<a href="Journal.dc.html" class="place">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"></path><path d="M14 2v5h6"></path><path d="M16 13H8"></path><path d="M16 17H8"></path></svg>
+<span>Journal</span>
+</a>
+</nav>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":true,"section":"Theme"},"$preview":{"width":390,"height":844}}'>
+var EQUITY = 10000;
+var CAP_PCT = 0.05;
+var MKTS = [
+  { tk: "GLD", cat: "Metals", dir: 1, strat: "Bull put spread", exp: "18 Dec", chance: 76, fut: 9, rr: 0.28, past: 12, risk: 390, s: 41.6, zone: "above", be: -0.045, w: 0.09, trend: 1 },
+  { tk: "CORN", cat: "Grains", dir: 1, strat: "Bull put spread", exp: "20 Nov", chance: 73, fut: 4, rr: 0.33, past: 9, risk: 75, s: 38.6, zone: "above", be: -0.036, w: 0.10, trend: 1 },
+  { tk: "SLV", cat: "Metals", dir: 0, strat: "Iron condor", exp: "20 Nov", chance: 64, fut: 5, rr: 0.38, past: 3, risk: 181, s: 3.0, zone: "between", be: 0.06, w: 0.11, trend: 0 },
+  { tk: "WEAT", cat: "Grains", dir: -1, strat: "Bear call spread", exp: "20 Nov", chance: 66, fut: 2, rr: 0.30, past: -1, risk: 77, s: -35.3, zone: "below", be: 0.045, w: 0.11, trend: -1 },
+  { tk: "USO", cat: "Energy", dir: -1, strat: "Bear call spread", exp: "18 Dec", chance: 62, fut: 3, rr: 0.36, past: 1, risk: 220, s: -18.6, zone: "below", be: 0.06, w: 0.12, trend: -1 },
+  { tk: "SOYB", cat: "Grains", dir: 0, strat: "Iron condor", exp: "18 Dec", chance: 58, fut: 3, rr: 0.41, past: 2, risk: 142, s: 6.6, zone: "between", be: 0.055, w: 0.10, trend: 0 },
+  { tk: "XLE", cat: "Energy", dir: 0, strat: "Iron condor", exp: "18 Dec", chance: 57, fut: 1, rr: 0.45, past: 0, risk: 275, s: -4.3, zone: "between", be: 0.05, w: 0.10, trend: 0 },
+  { tk: "BOIL", cat: "Energy", dir: 0, strat: "Iron condor", exp: "20 Nov", chance: 54, fut: 11, rr: 0.62, past: 14, risk: 620, s: 1.2, zone: "between", be: 0.12, w: 0.22, trend: 0 },
+  { tk: "GDX", cat: "Metals", dir: 1, strat: "Bull call spread", exp: "18 Dec", chance: 44, fut: 7, rr: 1.10, past: 10, risk: 240, s: 28.8, zone: "above", be: 0.03, w: 0.12, trend: 1 },
+  { tk: "UNG", cat: "Energy", dir: 1, strat: "Bull call spread", exp: "18 Dec", chance: 38, fut: -5, rr: 1.45, past: 9, risk: 95, s: 23.1, zone: "above", be: 0.06, w: 0.16, trend: 1 }
+];
+var ORDER_LABEL = { ev: "Future avg", evSignal: "Future avg + signal", chance: "Chance", rr: "Return on risk", past: "Past yrs" };
+
+function usd(x) { return (x < 0 ? "-" : "+") + "$" + Math.abs(Math.round(x)).toLocaleString("en-US"); }
+function amount(x) { return "$" + Math.abs(Math.round(x)).toLocaleString("en-US"); }
+function seedOf(s) { var h = 2166136261; for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
+function rng(seed) { var x = seed || 1; return function () { x = (Math.imul(x, 1664525) + 1013904223) >>> 0; return x / 4294967296; }; }
+
+function thumb(m) {
+  var W = 72, H = 40, lo = 1 - m.w, hi = 1 + m.w;
+  var y = function (p) { return ((hi - p) / (hi - lo)) * H; };
+  var r = rng(seedOf(m.tk)), n = 24, pts = new Array(n);
+  pts[n - 1] = 1;
+  for (var i = n - 1; i > 0; i--) {
+    var v = pts[i] * (1 - m.trend * m.w * 0.012 + (r() - 0.5) * m.w * 0.22);
+    pts[i - 1] = Math.min(hi - m.w * 0.12, Math.max(lo + m.w * 0.12, v));
+  }
+  var ln = pts.map(function (p, i) { return (1 + i * (W - 2) / (n - 1)).toFixed(1) + "," + y(p).toFixed(1); }).join(" ");
+  var rect = function (a, b) { return "M0 " + a.toFixed(1) + "H" + W + "V" + b.toFixed(1) + "H0Z"; };
+  var zp = "", zl = "";
+  if (m.zone === "above") { var b = y(1 + m.be); zp = rect(0, b); zl = rect(b, H); }
+  else if (m.zone === "below") { var b2 = y(1 + m.be); zl = rect(0, b2); zp = rect(b2, H); }
+  else { var up = y(1 + m.be), dn = y(1 - m.be); zp = rect(up, dn); zl = rect(0, up) + " " + rect(dn, H); }
+  return { ln: ln, zp: zp, zl: zl };
+}
+
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { cat: "All", order: "ev", budget: 500, posOnly: true, hideMiss: false, saved: ["SOYB", "GLD"] };
+  }
+  renderVals() {
+    var self = this, s = this.state;
+    var dark = this.props.dark ?? true;
+    var key = { ev: function (m) { return m.fut; }, evSignal: function (m) { return m.fut + m.s / 10; }, chance: function (m) { return m.chance; }, rr: function (m) { return m.rr; }, past: function (m) { return m.past; } }[s.order];
+    var fig = { ev: function (m) { return usd(m.fut); }, evSignal: function (m) { return usd(m.fut); }, chance: function (m) { return m.chance + "%"; }, rr: function (m) { return Math.round(m.rr * 100) + "%"; }, past: function (m) { return usd(m.past); } }[s.order];
+    var inCat = MKTS.filter(function (m) { return s.cat === "All" || m.cat === s.cat; });
+    var sorted = inCat.slice().sort(function (a, b) { return key(b) - key(a) || (a.tk < b.tk ? -1 : 1); });
+    var rows = [], misses = 0;
+    sorted.forEach(function (m) {
+      var why = "";
+      if (m.risk > s.budget) why = "Risk " + amount(m.risk) + " over the " + amount(s.budget) + " budget";
+      else if (s.posOnly && m.fut <= 0) why = "Future avg " + usd(m.fut) + ", not positive";
+      if (why) misses++;
+      if (why && s.hideMiss) return;
+      var t = thumb(m);
+      var dirTxt = m.dir > 0 ? "▲ Bull" : m.dir < 0 ? "▼ Bear" : "≈ Neutral";
+      var isSaved = s.saved.indexOf(m.tk) >= 0;
+      rows.push({
+        tk: m.tk, dirTxt: dirTxt,
+        sub: why || (m.strat + " · " + m.exp),
+        fig: fig(m), risk: "risk " + amount(m.risk),
+        zp: t.zp, zl: t.zl, ln: t.ln,
+        cls: why ? "miss" : "",
+        href: m.tk === "CORN" ? "MarketStrategies.dc.html" : "#" + m.tk.toLowerCase(),
+        saved: isSaved, starCls: isSaved ? "on" : "", starFill: isSaved ? "currentColor" : "none",
+        starAria: (isSaved ? "Saved: tap to remove " : "Save ") + m.tk + " " + m.strat,
+        toggleSave: function () { self.setState({ saved: isSaved ? s.saved.filter(function (t) { return t !== m.tk; }) : s.saved.concat([m.tk]) }); },
+        aria: m.tk + ", " + dirTxt.slice(2) + ", " + m.strat + " " + m.exp + ", " + ORDER_LABEL[s.order] + " " + fig(m) + ", risk " + amount(m.risk) + (why ? ". Misses: " + why : "")
+      });
+    });
+    var cheapest = inCat.reduce(function (a, m) { return !a || m.risk < a.risk ? m : a; }, null);
+    var cats = ["All", "Grains", "Energy", "Metals"].map(function (c) {
+      return { label: c, n: c === "All" ? MKTS.length : MKTS.filter(function (m) { return m.cat === c; }).length,
+        on: s.cat === c, cls: s.cat === c ? "on" : "", pick: function () { self.setState({ cat: c }); } };
+    });
+    var pct = s.budget / EQUITY * 100;
+    var pctTxt = (Math.abs(pct - Math.round(pct)) < 1e-9 ? Math.round(pct) : pct.toFixed(1)) + "% of " + amount(EQUITY);
+    return {
+      themeClass: dark ? "t-dark" : "t-light",
+      cats: cats, rows: rows, savedN: s.saved.length,
+      budget: s.budget, budgetTxt: amount(s.budget),
+      budgetPct: pctTxt + (s.budget > EQUITY * CAP_PCT ? " · over the 5% cap" : ""),
+      setBudget: function (e) { self.setState({ budget: +e.target.value }); },
+      order: s.order, setOrder: function (e) { self.setState({ order: e.target.value }); },
+      posOnly: s.posOnly, posCls: s.posOnly ? "on" : "", togglePos: function () { self.setState({ posOnly: !s.posOnly }); },
+      hideMiss: s.hideMiss, hideCls: s.hideMiss ? "on" : "", toggleHide: function () { self.setState({ hideMiss: !s.hideMiss }); },
+      hideTxt: "Hide cards that miss · " + misses,
+      empty: rows.length === 0,
+      emptyTitle: "Nothing fits a " + amount(s.budget) + " budget.",
+      emptyLine: cheapest ? "Cheapest here: " + cheapest.tk + " " + cheapest.strat.toLowerCase() + ", " + amount(cheapest.risk) + " risk." : "",
+      fixTxt: cheapest ? "Set budget to " + amount(Math.ceil(cheapest.risk / 25) * 25) : "Clear filters",
+      fixBudget: function () { if (cheapest) self.setState({ budget: Math.ceil(cheapest.risk / 25) * 25 }); }
+    };
+  }
+}
+</script>
+</body>
+</html>

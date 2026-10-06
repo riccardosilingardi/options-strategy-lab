@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>CORN — strategies</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+.t-dark{--bg:#14181d;--panel:#1a1f26;--line:#2a2f36;--field:#6b7685;--ink:#f5f0e6;--mut:#8b95a1;--dim:#7d8794;--amber:#e8b545;--green:#7fb85c;--red:#d66a5a;--blue:#5aa7d6;--body:#c9d1d9;--on:#14181d;--action:#5aa7d6;--raise:#222831}
+.t-light{--bg:#f5f6f7;--panel:#ffffff;--line:#dcdfe3;--field:#7a8491;--ink:#1c2128;--mut:#5a6472;--dim:#616b78;--amber:#8a6300;--green:#2f6f45;--red:#b23a2b;--blue:#1f6391;--body:#2a3038;--on:#ffffff;--action:#1f6391;--raise:#eceff2}
+.sans{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.mono{font-family:ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums}
+button,select,input{font:inherit;color:inherit}
+button{cursor:pointer}
+a{color:var(--blue)}a:hover{color:var(--ink)}
+.def{text-decoration:underline dotted;text-decoration-color:var(--dim);text-underline-offset:3px}
+.tab{border:none;border-bottom:3px solid transparent;color:var(--mut);font-weight:400}
+.tab.on{color:var(--ink);font-weight:700;border-bottom-color:var(--amber)}
+a.tab:hover{color:var(--ink)}
+.zp{fill:var(--green);fill-opacity:.3}
+.zl{fill:var(--red);fill-opacity:.15}
+.ln{fill:none;stroke:var(--ink);stroke-width:1.5;stroke-linejoin:round;stroke-linecap:round}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:10px}
+.card.miss{border-style:dashed}
+.card.miss .fig{color:var(--dim)}
+.card.miss .band{opacity:.35}
+.ghostA{flex:1;min-height:44px;display:flex;align-items:center;justify-content:center;border:1px solid var(--field);border-radius:10px;color:var(--ink);text-decoration:none;font-size:13px;font-weight:700}
+.amberA{flex:1;min-height:44px;display:flex;align-items:center;justify-content:center;border-radius:10px;background:var(--amber);color:var(--on);text-decoration:none;font-size:13px;font-weight:700}
+a.amberA:hover{color:var(--on)}
+.with{color:var(--green)}
+.grp{margin:4px 0 0;font-size:12px;font-weight:700;letter-spacing:.08em;color:var(--mut)}
+</style>
+</helmet>
+<div class="{{ themeClass }} sans" style="width: 390px; height: 1240px; box-sizing: border-box; background: var(--bg); color: var(--ink); overflow: hidden">
+<header style="display: flex; align-items: center; gap: 4px; padding: 6px 8px 0 4px">
+<a href="Main.dc.html" aria-label="Back to Find" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: var(--ink); text-decoration: none; border-radius: 10px"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg></a>
+<a href="MarketSwitch.dc.html" aria-label="Switch market, now CORN" style="flex: 1; min-width: 0; min-height: 44px; display: flex; align-items: center; gap: 10px; color: var(--ink); text-decoration: none">
+<span aria-hidden="true" style="width: 36px; height: 36px; border-radius: 50%; background: var(--raise); color: var(--mut); display: flex; align-items: center; justify-content: center; flex: none"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22V9"></path><path d="M12 9c-2.5-.5-4-2.5-4-5 2.5.5 4 2.5 4 5z"></path><path d="M12 9c2.5-.5 4-2.5 4-5-2.5.5-4 2.5-4 5z"></path><path d="M12 14.5c-2.5-.5-4-2.5-4-5 2.5.5 4 2.5 4 5z"></path><path d="M12 14.5c2.5-.5 4-2.5 4-5-2.5.5-4 2.5-4 5z"></path><path d="M12 20c-2.5-.5-4-2.5-4-5 2.5.5 4 2.5 4 5z"></path><path d="M12 20c2.5-.5 4-2.5 4-5-2.5.5-4 2.5-4 5z"></path></svg></span>
+<span style="display: flex; flex-direction: column; min-width: 0"><span style="display: flex; align-items: center; gap: 4px"><span class="mono" style="font-size: 18px; font-weight: 700; line-height: 1.3">CORN</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></span><span style="font-size: 12px; line-height: 1.3; color: var(--mut)">Corn · Grains</span></span>
+</a>
+<button type="button" aria-label="Watching CORN" aria-pressed="true" style="width: 44px; height: 44px; border: none; background: transparent; color: var(--amber); display: flex; align-items: center; justify-content: center; border-radius: 10px"><svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M12 2.5l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.4l-5.9 3.1 1.2-6.5L2.5 9.4l6.6-.9z"></path></svg></button>
+</header>
+<section style="display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; padding: 4px 16px 10px">
+<div style="display: flex; flex-direction: column; gap: 2px">
+<div class="mono" style="font-size: 24px; font-weight: 700; line-height: 1.3">$18.42</div>
+<div class="mono" style="font-size: 13px; color: var(--green)">▲ +0.21  +1.15%</div>
+<div style="font-size: 12px; color: var(--mut)">Close · Fri 2 Oct, 16:00 ET</div>
+</div>
+<dl style="margin: 0; display: grid; grid-template-columns: auto auto; gap: 4px 14px; font-size: 12px; line-height: 1.3">
+<dt class="def" style="color: var(--mut)">IV</dt><dd class="mono" style="margin: 0; text-align: right">24.2%</dd>
+<dt class="def" style="color: var(--mut)">IV rank</dt><dd class="mono" style="margin: 0; text-align: right">38</dd>
+<dt class="def" style="color: var(--mut)">Move to 20 Nov</dt><dd class="mono" style="margin: 0; text-align: right">±$1.59</dd>
+</dl>
+</section>
+<div style="margin: 0 16px 6px; padding: 8px 12px; border: 1px solid var(--line); background: var(--panel); border-radius: 10px; display: flex; gap: 10px; align-items: center; font-size: 13px; line-height: 1.3">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none; color: var(--amber)"><rect x="3" y="4" width="18" height="18" rx="2"></rect><path d="M16 2v4"></path><path d="M8 2v4"></path><path d="M3 10h18"></path></svg>
+<span><b>WASDE</b> crop report · Fri 9 Oct, 12:00 ET · <span style="color: var(--mut)">in 5 days</span></span>
+</div>
+<nav aria-label="Market sections" style="display: flex; gap: 2px; padding: 0 8px; border-bottom: 1px solid var(--line)">
+<a href="MarketOverview.dc.html" class="tab" style="min-height: 44px; padding: 0 10px; display: flex; align-items: center; text-decoration: none; font-size: 15px">Overview</a>
+<a href="MarketStrategies.dc.html" class="tab on" aria-current="page" style="min-height: 44px; padding: 0 10px; display: flex; align-items: center; text-decoration: none; font-size: 15px">Strategies</a>
+<a href="Market.dc.html" class="tab" style="min-height: 44px; padding: 0 10px; display: flex; align-items: center; text-decoration: none; font-size: 15px">Chain</a>
+</nav>
+<main style="display: flex; flex-direction: column; gap: 10px; padding: 12px 16px 24px">
+<p style="margin: 0; font-size: 13px; line-height: 1.5; color: var(--body)">The signals say <b>▲ Bull</b> (<span class="mono">+46 × 84 ÷ 100 = 38.6</span>). <a href="MarketOverview.dc.html">The market's read ›</a><br><span style="color: var(--mut)">Neutral cards are always listed. Order: Future avg. Expiry 20 Nov · 47d.</span></p>
+<h2 class="grp">▲ BULL · WHAT THE SIGNALS SUGGEST</h2>
+<article class="card" aria-label="Bull put spread 18/17">
+<div style="display: flex; gap: 12px; align-items: center">
+<div style="flex: 1; min-width: 0">
+<div style="font-size: 15px; font-weight: 700">Bull put spread 18/17</div>
+<div class="mono" style="font-size: 12px; color: var(--mut)">-1 18P  +1 17P · credit 0.25</div>
+</div>
+<svg class="band" width="96" height="54" viewBox="0 0 72 40" aria-hidden="true" style="flex: none; border-radius: 4px"><path class="zp" d="M0 0.0H72V27.3H0Z"></path><path class="zl" d="M0 27.3H72V40.0H0Z"></path><polyline class="ln" points="1.0,24.7 4.0,24.0 7.1,23.1 10.1,25.0 13.2,22.8 16.2,23.4 19.3,23.4 22.3,22.3 25.3,23.8 28.4,24.2 31.4,25.5 34.5,23.5 37.5,21.9 40.6,19.8 43.6,19.0 46.7,19.5 49.7,19.4 52.7,20.8 55.8,18.4 58.8,20.2 61.9,21.6 64.9,19.5 68.0,20.5 71.0,20.0"></polyline></svg>
+</div>
+<dl style="margin: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px">
+<div><dt class="def" style="font-size: 12px; color: var(--mut)">You risk</dt><dd class="mono fig" style="margin: 0; font-size: 15px; font-weight: 700">$75</dd></div>
+<div><dt class="def" style="font-size: 12px; color: var(--mut)">Max profit</dt><dd class="mono fig" style="margin: 0; font-size: 15px; font-weight: 700">$25</dd></div>
+<div><dt class="def" style="font-size: 12px; color: var(--mut)">Chance</dt><dd class="mono fig" style="margin: 0; font-size: 15px; font-weight: 700">73%</dd></div>
+<div><dt class="def" style="font-size: 12px; color: var(--mut)">Return</dt><dd class="mono fig" style="margin: 0; font-size: 15px; font-weight: 700">33%</dd></div>
+</dl>
+<p style="margin: 0; font-size: 12px; line-height: 1.5"><span class="with">▲ Needs CORN up or flat · with the signals, 3 of 4 · none against</span></p>
+<p class="mono" style="margin: 0; font-size: 12px; color: var(--mut)">Future avg <b style="color: var(--ink)">+$4</b> · Past yrs 7 of 10, <b style="color: var(--ink)">+$9</b></p>
+<div style="display: flex; gap: 8px"><a href="Market.dc.html" class="ghostA">Open in chain</a><a href="Build.dc.html" class="amberA">Build ›</a></div>
+</article>
+<article class="card" aria-label="Bull call spread 19/21">
+<div style="display: flex; gap: 12px; align-items: center">
+<div style="flex: 1; min-width: 0">
+<div style="font-size: 15px; font-weight: 700">Bull call spread 19/21</div>
+<div class="mono" style="font-size: 12px; color: var(--mut)">+1 19C  -1 21C · debit 0.33</div>
+</div>
+<svg class="band" width="96" height="54" viewBox="0 0 72 40" aria-hidden="true" style="flex: none; border-radius: 4px"><path class="zp" d="M0 0.0H72V10.2H0Z"></path><path class="zl" d="M0 10.2H72V40.0H0Z"></path><polyline class="ln" points="1.0,24.7 4.0,24.0 7.1,23.1 10.1,25.0 13.2,22.8 16.2,23.4 19.3,23.4 22.3,22.3 25.3,23.8 28.4,24.2 31.4,25.5 34.5,23.5 37.5,21.9 40.6,19.8 43.6,19.0 46.7,19.5 49.7,19.4 52.7,20.8 55.8,18.4 58.8,20.2 61.9,21.6 64.9,19.5 68.0,20.5 71.0,20.0"></polyline></svg>
+</div>
+<dl style="margin: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px">
+<div><dt class="def" style="font-size: 12px; color: var(--mut)">You risk</dt><dd class="mono fig" style="margin: 0; font-size: 15px; font-weight: 700">$33</dd></div>
+<div><dt class="def" style="font-size: 12px; color: var(--mut)">Max profit</dt><dd class="mono fig" style="margin: 0; font-size: 15px; font-weight: 700">$168</dd></div>
+<div><dt class="def" style="font-size: 12px; color: var(--mut)">Chance</dt><dd class="mono fig" style="margin: 0; font-size: 15px; font-weight: 700">33%</dd></div>
+<div><dt class="def" style="font-size: 12px; color: var(--mut)">Return</dt><dd class="mono fig" style="margin: 0; font-size: 15px; font-weight: 700">515%</dd></div>
+</dl>
+<p style="margin: 0; font-size: 12px; line-height: 1.5"><span class="with">▲ Needs CORN above $19.33 · with the signals, 3 of 4 · none against</span></p>
+<p class="mono" style="margin: 0; font-size: 12px; color: var(--mut)">Future avg <b style="color: var(--ink)">+$8</b> · Past yrs 2 of 10, <b style="color: var(--ink)">-$17</b></p>
+<p style="margin: 0; font-size: 12px; line-height: 1.5; color: var(--amber)">Future and past disagree: the past ten years would have lost on this one.</p>
+<div style="display: flex; gap: 8px"><a href="Market.dc.html" class="ghostA">Open in chain</a></div>
+</article>
+<h2 class="grp">≈ NEUTRAL · ALWAYS LISTED</h2>
+<article class="card miss" aria-label="Iron condor, misses: future average not positive">
+<div style="display: flex; gap: 12px; align-items: center">
+<div style="flex: 1; min-width: 0">
+<div style="font-size: 15px; font-weight: 700">Iron condor 17/18 · 19/20</div>
+<div class="mono" style="font-size: 12px; color: var(--mut)">+1 17P -1 18P -1 19C +1 20C · credit 0.50</div>
+</div>
+<svg class="band" width="96" height="54" viewBox="0 0 72 40" aria-hidden="true" style="flex: none; border-radius: 4px"><path class="zp" d="M0 8.3H72V30.0H0Z"></path><path class="zl" d="M0 0.0H72V8.3H0Z M0 30.0H72V40.0H0Z"></path><polyline class="ln" points="1.0,24.7 4.0,24.0 7.1,23.1 10.1,25.0 13.2,22.8 16.2,23.4 19.3,23.4 22.3,22.3 25.3,23.8 28.4,24.2 31.4,25.5 34.5,23.5 37.5,21.9 40.6,19.8 43.6,19.0 46.7,19.5 49.7,19.4 52.7,20.8 55.8,18.4 58.8,20.2 61.9,21.6 64.9,19.5 68.0,20.5 71.0,20.0"></polyline></svg>
+</div>
+<dl style="margin: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px">
+<div><dt class="def" style="font-size: 12px; color: var(--mut)">You risk</dt><dd class="mono fig" style="margin: 0; font-size: 15px; font-weight: 700">$50</dd></div>
+<div><dt class="def" style="font-size: 12px; color: var(--mut)">Max profit</dt><dd class="mono fig" style="margin: 0; font-size: 15px; font-weight: 700">$50</dd></div>
+<div><dt class="def" style="font-size: 12px; color: var(--mut)">Chance</dt><dd class="mono fig" style="margin: 0; font-size: 15px; font-weight: 700">50%</dd></div>
+<div><dt class="def" style="font-size: 12px; color: var(--mut)">Return</dt><dd class="mono fig" style="margin: 0; font-size: 15px; font-weight: 700">100%</dd></div>
+</dl>
+<p style="margin: 0; font-size: 12px; line-height: 1.5; color: var(--mut)">≈ Needs CORN quiet, between $17.50 and $19.50 · direction-neutral: the signals neither back it nor go against it</p>
+<p class="mono" style="margin: 0; font-size: 12px; color: var(--mut)">Future avg <b>$0</b> · Past yrs 6 of 10, +$18</p>
+<p style="margin: 0; font-size: 12px; line-height: 1.5; color: var(--mut)">Misses: future avg $0, not positive. Shown dimmed, not hidden.</p>
+<div style="display: flex; gap: 8px"><a href="Market.dc.html" class="ghostA">Open in chain</a></div>
+</article>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":true,"section":"Theme"},"$preview":{"width":390,"height":1240}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var dark = this.props.dark ?? true;
+    return { themeClass: dark ? "t-dark" : "t-light" };
+  }
+}
+</script>
+</body>
+</html>

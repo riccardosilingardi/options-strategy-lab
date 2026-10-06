@@ -1,0 +1,478 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Build — CORN bull put spread</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+.t-dark{--bg:#14181d;--panel:#1a1f26;--line:#2a2f36;--field:#6b7685;--ink:#f5f0e6;--mut:#8b95a1;--dim:#7d8794;--amber:#e8b545;--green:#7fb85c;--red:#d66a5a;--blue:#5aa7d6;--body:#c9d1d9;--on:#14181d;--action:#5aa7d6;--raise:#222831;--scrim:rgba(6,8,10,0.66)}
+.t-light{--bg:#f5f6f7;--panel:#ffffff;--line:#dcdfe3;--field:#7a8491;--ink:#1c2128;--mut:#5a6472;--dim:#616b78;--amber:#8a6300;--green:#2f6f45;--red:#b23a2b;--blue:#1f6391;--body:#2a3038;--on:#ffffff;--action:#1f6391;--raise:#eceff2;--scrim:rgba(20,24,29,0.45)}
+.sans{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.mono{font-family:ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums}
+button,select,input,output{font:inherit;color:inherit}
+button{cursor:pointer}
+button:disabled{cursor:default}
+a{color:var(--blue)}a:hover{color:var(--ink)}
+.def{text-decoration:underline dotted;text-decoration-color:var(--dim);text-underline-offset:3px}
+.place{flex:1;min-height:50px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;border-radius:10px;font-size:12px;color:var(--ink);text-decoration:none;position:relative}
+.place.on{background:var(--ink);color:var(--bg);font-weight:700}
+.place:hover{color:var(--ink)}
+.place.on:hover{color:var(--bg)}
+.step{width:44px;height:44px;border:none;background:transparent;color:var(--ink);display:flex;align-items:center;justify-content:center;border-radius:8px}
+.step:disabled{color:var(--line)}
+.send{background:var(--action);color:var(--on)}
+.send:disabled{background:var(--raise);color:var(--dim)}
+a.send:hover{color:var(--on)}
+.note-ok{color:var(--mut)}
+.ok-t{color:var(--green)}
+.cq{min-height:44px;padding:8px 12px;border:1px solid var(--field);background:transparent;color:var(--ink);border-radius:10px;font-size:13px;text-align:left;line-height:1.3}
+.cq.main{grid-column:1 / -1;border-color:var(--blue);font-weight:700}
+.cq.on{box-shadow:inset 0 0 0 2px var(--blue)}
+.wrow{display:flex;justify-content:space-between;gap:8px;font-size:13px;line-height:1.5}
+.note-warn{color:var(--amber)}
+.note-err{color:var(--red)}
+.zoneP{fill:var(--green);fill-opacity:.12}
+.zoneL{fill:var(--red);fill-opacity:.07}
+.cone1{fill:var(--blue);fill-opacity:.24}
+.cone2{fill:var(--blue);fill-opacity:.10}
+.hist{fill:none;stroke:var(--ink);stroke-width:1.5;stroke-linejoin:round;stroke-linecap:round}
+.distP{fill:var(--green);fill-opacity:.65}
+.distL{fill:var(--red);fill-opacity:.6}
+.payP{fill:var(--green);fill-opacity:.4}
+.payL{fill:var(--red);fill-opacity:.32}
+.payLn{fill:none;stroke:var(--ink);stroke-width:1.75;stroke-linejoin:round}
+.beLn{stroke:var(--ink);stroke-width:1;stroke-dasharray:4 3;stroke-opacity:.75}
+.spotLn{stroke:var(--mut);stroke-width:1.25;stroke-dasharray:2 3}
+.today{stroke:var(--field);stroke-width:1;stroke-opacity:.6}
+.zero{stroke:var(--field);stroke-width:1}
+.axis{fill:var(--mut);font-size:12px;font-family:ui-monospace,Menlo,monospace}
+.lbl{fill:var(--mut);font-size:12px}
+.beLbl{fill:var(--ink);font-size:12px;font-weight:700;font-family:ui-monospace,Menlo,monospace}
+.dot{fill:var(--green);stroke:var(--panel);stroke-width:2}
+</style>
+</helmet>
+<div class="{{ themeClass }} sans" style="width: 390px; height: 2640px; box-sizing: border-box; background: var(--bg); color: var(--ink); position: relative; overflow: hidden">
+<header style="display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 8px 0 4px">
+<a href="MarketStrategies.dc.html" style="min-height: 44px; display: flex; align-items: center; gap: 2px; padding: 0 10px 0 4px; color: var(--ink); text-decoration: none; font-size: 15px; border-radius: 10px">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg>
+<span>CORN</span>
+</a>
+<span style="font-size: 12px; font-weight: 700; padding: 2px 8px; border: 1px solid var(--field); border-radius: 999px; color: var(--mut)">Paper</span>
+</header>
+<main style="display: flex; flex-direction: column; gap: 12px; padding: 4px 16px 0">
+<div>
+<h1 style="margin: 0; font-size: 24px; font-weight: 700; line-height: 1.3">Bull put spread</h1>
+<p class="mono" style="margin: 2px 0 0; font-size: 13px; line-height: 1.3; color: var(--mut)">CORN · 20 Nov · 47 days · ×{{ q }}</p>
+</div>
+<section aria-label="What this trade does" style="background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 10px">
+<p style="margin: 0; font-size: 15px; line-height: 1.5; color: var(--ink)">{{ takeaway }}</p>
+<svg width="326" height="312" viewBox="0 0 326 312" role="img" aria-label="{{ chartAria }}" style="display: block; max-width: 100%; height: auto">
+<path class="zoneP" d="{{ zoneP }}"></path>
+<path class="zoneL" d="{{ zoneL }}"></path>
+<path class="cone2" d="{{ cone2 }}"></path>
+<path class="cone1" d="{{ cone1 }}"></path>
+<line class="today" x1="108" y1="22" x2="108" y2="288"></line>
+<polyline class="hist" points="{{ hist }}"></polyline>
+<path class="distP" d="{{ distP }}"></path>
+<path class="distL" d="{{ distL }}"></path>
+<path class="payP" d="{{ payP }}"></path>
+<path class="payL" d="{{ payL }}"></path>
+<line class="zero" x1="{{ x0 }}" y1="22" x2="{{ x0 }}" y2="288"></line>
+<polyline class="payLn" points="{{ payLn }}"></polyline>
+<line class="beLn" x1="0" y1="{{ yBE }}" x2="294" y2="{{ yBE }}"></line>
+<line class="spotLn" x1="108" y1="{{ yS }}" x2="{{ xS }}" y2="{{ yS }}"></line>
+<circle class="dot" cx="{{ xS }}" cy="{{ yS }}" r="4"></circle>
+<text class="beLbl" x="4" y="{{ beLblY }}">{{ beLbl }}</text>
+<text class="lbl" x="54" y="14" text-anchor="middle">60 days</text>
+<text class="lbl" x="144" y="14" text-anchor="middle">to 20 Nov</text>
+<text class="lbl" x="206" y="14" text-anchor="middle">ends</text>
+<text class="lbl" x="264" y="14" text-anchor="middle">P&amp;L</text>
+<text class="axis" x="300" y="26">22</text>
+<text class="axis" x="300" y="64">21</text>
+<text class="axis" x="300" y="102">20</text>
+<text class="axis" x="300" y="140">19</text>
+<text class="axis" x="300" y="178">18</text>
+<text class="axis" x="300" y="216">17</text>
+<text class="axis" x="300" y="254">16</text>
+<text class="axis" x="300" y="292">15</text>
+<text class="axis" x="234" y="306">{{ lossLbl }}</text>
+<text class="axis" x="294" y="306" text-anchor="end">{{ gainLbl }}</text>
+</svg>
+<button type="button" aria-expanded="{{ explain }}" onClick="{{ toggleExplain }}" style="align-self: flex-start; min-height: 44px; padding: 0; border: none; background: transparent; color: var(--blue); font-size: 13px">{{ explainBtn }} ⓘ</button>
+<sc-if value="{{ explain }}" hint-placeholder-val="{{ false }}">
+<p style="margin: 0; font-size: 13px; line-height: 1.5; color: var(--body)">One price axis on the right. Left: CORN's last 60 days. Blue fan: where it may go by 20 Nov (inner 68%, outer 95% of simulated paths). Bars: how often it ends at each price, green where the trade pays. Right edge: what the trade pays at each price. The dashed line carries today's price across to its payoff.</p>
+</sc-if>
+</section>
+<section aria-label="The numbers" style="background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 14px">
+<dl style="margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px">
+<div><dt class="def" style="font-size: 12px; line-height: 1.3; color: var(--mut)">Max profit</dt><dd class="mono" style="margin: 2px 0 0; font-size: 18px; font-weight: 700; line-height: 1.3">{{ maxP }}</dd></div>
+<div><dt class="def" style="font-size: 12px; line-height: 1.3; color: var(--mut)">Max loss</dt><dd class="mono" style="margin: 2px 0 0; font-size: 18px; font-weight: 700; line-height: 1.3">{{ maxL }}</dd></div>
+<div><dt class="def" style="font-size: 12px; line-height: 1.3; color: var(--mut)">Breakeven</dt><dd class="mono" style="margin: 2px 0 0; font-size: 18px; font-weight: 700; line-height: 1.3">{{ be }}</dd></div>
+<div><dt class="def" style="font-size: 12px; line-height: 1.3; color: var(--mut)">Return on risk</dt><dd class="mono" style="margin: 2px 0 0; font-size: 18px; font-weight: 700; line-height: 1.3">{{ rr }}</dd></div>
+</dl>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px">
+<div style="border: 1px solid var(--line); border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 6px">
+<div style="font-size: 12px; font-weight: 700; letter-spacing: 0.04em; line-height: 1.3; color: var(--mut)">FUTURE (MONTE CARLO)</div>
+<div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 13px"><span class="def" style="color: var(--mut)">Chance</span><span class="mono" style="font-size: 15px; font-weight: 700">{{ chance }}</span></div>
+<div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 13px"><span class="def" style="color: var(--mut)">Avg</span><span class="mono" style="font-size: 15px; font-weight: 700">{{ futAvg }}</span></div>
+</div>
+<div style="border: 1px solid var(--line); border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 6px">
+<div style="font-size: 12px; font-weight: 700; letter-spacing: 0.04em; line-height: 1.3; color: var(--mut)">PAST YRS (BACKTEST)</div>
+<div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 13px"><span class="def" style="color: var(--mut)">In profit</span><span class="mono" style="font-size: 15px; font-weight: 700">{{ pastHit }}</span></div>
+<div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 13px"><span class="def" style="color: var(--mut)">Avg</span><span class="mono" style="font-size: 15px; font-weight: 700">{{ pastAvg }}</span></div>
+</div>
+</div>
+<dl style="margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px">
+<div><dt class="def" style="font-size: 12px; line-height: 1.3; color: var(--mut)">Delta (shares)</dt><dd class="mono" style="margin: 2px 0 0; font-size: 15px; font-weight: 700; line-height: 1.3">{{ delta }}</dd></div>
+<div><dt class="def" style="font-size: 12px; line-height: 1.3; color: var(--mut)">Theta</dt><dd class="mono" style="margin: 2px 0 0; font-size: 15px; font-weight: 700; line-height: 1.3">{{ theta }}</dd></div>
+</dl>
+</section>
+<section aria-label="Why this trade" style="background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 6px 14px; display: flex; flex-direction: column">
+<button type="button" aria-expanded="{{ whyOpen }}" onClick="{{ toggleWhy }}" style="width: 100%; min-height: 44px; border: none; background: transparent; padding: 8px 0; text-align: left; display: flex; flex-direction: column; gap: 4px; color: var(--ink)">
+<span style="display: flex; justify-content: space-between; align-items: baseline; width: 100%; gap: 8px"><span style="font-size: 15px; font-weight: 700">Why this trade</span><span style="font-size: 13px; color: var(--blue)">{{ whyBtn }}</span></span>
+<span style="font-size: 13px; line-height: 1.5; color: var(--body)">▲ Needs CORN up or flat · <span class="ok-t">with the signals, 3 of 4</span> · none against</span>
+</button>
+<sc-if value="{{ whyOpen }}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; flex-direction: column; gap: 6px; padding: 8px 0; border-top: 1px solid var(--line)">
+<div class="wrow"><span>Seasonality <span class="mono" style="color: var(--mut)">↑ 70</span></span><span class="ok-t">supports</span></div>
+<div class="wrow"><span>Price trend <span class="mono" style="color: var(--mut)">↑ 60</span></span><span class="ok-t">supports</span></div>
+<div class="wrow"><span>Weather <span class="mono" style="color: var(--mut)">↑ 40</span></span><span class="ok-t">supports</span></div>
+<div class="wrow"><span>News <span class="mono" style="color: var(--mut)">→ 0</span></span><span style="color: var(--mut)">quiet</span></div>
+<p style="margin: 0; font-size: 12px; line-height: 1.5; color: var(--mut)">Nothing here goes against the trade, so no written reason is needed. Against 2 or more, Send asks why first.</p>
+</div>
+<ol style="list-style: none; margin: 0; padding: 8px 0 10px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 10px">
+<sc-for list="{{ lines }}" as="l" hint-placeholder-count="5">
+<li style="display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 8px">
+<span class="mono" style="font-size: 12px; font-weight: 700; color: var(--mut)">{{ l.n }}</span>
+<span style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 12px; font-weight: 700; letter-spacing: 0.04em; color: var(--mut)">{{ l.k }}</span><span style="font-size: 13px; line-height: 1.5">{{ l.t }}</span></span>
+</li>
+</sc-for>
+</ol>
+</sc-if>
+</section>
+<section aria-labelledby="cp-h" style="background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 10px">
+<h2 id="cp-h" style="margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 0.08em; color: var(--mut)">ASK THE COPILOT ABOUT THIS TRADE</h2>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px">
+<sc-for list="{{ cqs }}" as="q" hint-placeholder-count="4">
+<button type="button" class="cq {{ q.cls }}" aria-pressed="{{ q.on }}" onClick="{{ q.pick }}">{{ q.label }}</button>
+</sc-for>
+</div>
+<form onSubmit="{{ cAsk }}" style="display: flex; gap: 6px">
+<label for="cask" style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Your own question about this trade</label>
+<input id="cask" type="text" value="{{ cTyped }}" onChange="{{ cSetTyped }}" placeholder="Or ask your own…" style="flex: 1; min-width: 0; min-height: 44px; padding: 0 12px; border: 1px solid var(--field); border-radius: 10px; background: var(--bg); color: var(--ink); font-size: 13px">
+<button type="submit" aria-label="Ask the copilot" style="width: 44px; height: 44px; border: none; border-radius: 10px; background: var(--action); color: var(--on); display: flex; align-items: center; justify-content: center"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"></path><path d="m13 6 6 6-6 6"></path></svg></button>
+</form>
+<sc-if value="{{ cHas }}" hint-placeholder-val="{{ false }}">
+<div role="status" style="border-top: 1px solid var(--line); padding-top: 10px; display: flex; flex-direction: column; gap: 6px">
+<p style="margin: 0; font-size: 13px; font-weight: 700">{{ cQ }}</p>
+<p style="margin: 0; font-size: 13px; line-height: 1.5; color: var(--body)">{{ cA }}</p>
+<p style="margin: 0; font-size: 12px; color: var(--mut)">{{ cFoot }}</p>
+</div>
+</sc-if>
+<p style="margin: 0; font-size: 12px; line-height: 1.5; color: var(--mut)">Educational analysis on a paper account, not financial advice. Every answer is filed in the Journal.</p>
+</section>
+<section aria-labelledby="legs-h" style="background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 6px 14px 8px">
+<div style="display: flex; align-items: center; justify-content: space-between; gap: 8px">
+<h2 id="legs-h" style="margin: 0; font-size: 15px; font-weight: 700; line-height: 1.3">Legs · 20 Nov</h2>
+<a href="Market.dc.html" style="min-height: 44px; display: flex; align-items: center; font-size: 13px; text-decoration: none">Edit in chain ›</a>
+</div>
+<ul style="list-style: none; margin: 0; padding: 0">
+<li style="display: flex; align-items: center; gap: 10px; min-height: 52px; border-top: 1px solid var(--line)">
+<span style="width: 44px; text-align: center; font-size: 12px; font-weight: 700; line-height: 22px; border-radius: 6px; box-shadow: inset 0 0 0 2px var(--amber); color: var(--ink)">SELL</span>
+<span class="mono" style="flex: 1; font-size: 15px; font-weight: 700">{{ q }} × 18 put</span>
+<span style="display: flex; flex-direction: column; align-items: flex-end">
+<span class="mono" style="font-size: 15px">0.40 <span style="font-size: 12px; color: var(--mut)">mid</span></span>
+<span class="mono" style="font-size: 12px; color: var(--mut)">0.35 / 0.45 · Δ -0.36</span>
+</span>
+</li>
+<li style="display: flex; align-items: center; gap: 10px; min-height: 52px; border-top: 1px solid var(--line)">
+<span style="width: 44px; text-align: center; font-size: 12px; font-weight: 700; line-height: 22px; border-radius: 6px; background: var(--amber); color: var(--on)">BUY</span>
+<span class="mono" style="flex: 1; font-size: 15px; font-weight: 700">{{ q }} × 17 put</span>
+<span style="display: flex; flex-direction: column; align-items: flex-end">
+<span class="mono" style="font-size: 15px">0.15 <span style="font-size: 12px; color: var(--mut)">mid</span></span>
+<span class="mono" style="font-size: 12px; color: var(--mut)">0.10 / 0.20 · Δ -0.16</span>
+</span>
+</li>
+</ul>
+</section>
+<section aria-labelledby="order-h" style="background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 10px">
+<h2 id="order-h" style="margin: 0; font-size: 15px; font-weight: 700; line-height: 1.3">Order</h2>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px">
+<div style="display: flex; flex-direction: column; gap: 4px">
+<span id="qty-l" style="font-size: 12px; color: var(--mut)">Contracts</span>
+<div role="group" aria-labelledby="qty-l" style="display: flex; align-items: center; justify-content: space-between; border: 1px solid var(--field); border-radius: 10px">
+<button type="button" class="step" aria-label="One contract fewer" disabled="{{ qtyMin }}" onClick="{{ qtyDown }}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14"></path></svg></button>
+<output class="mono" style="font-size: 15px; font-weight: 700">{{ q }}</output>
+<button type="button" class="step" aria-label="One contract more" disabled="{{ qtyMax }}" onClick="{{ qtyUp }}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg></button>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 4px">
+<span id="lim-l" style="font-size: 12px; color: var(--mut)">Limit credit</span>
+<div role="group" aria-labelledby="lim-l" style="display: flex; align-items: center; justify-content: space-between; border: 1px solid var(--field); border-radius: 10px">
+<button type="button" class="step" aria-label="Lower the limit by 0.05" disabled="{{ limMin }}" onClick="{{ limDown }}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14"></path></svg></button>
+<output class="mono" style="font-size: 15px; font-weight: 700">{{ limTxt }}</output>
+<button type="button" class="step" aria-label="Raise the limit by 0.05" disabled="{{ limMax }}" onClick="{{ limUp }}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg></button>
+</div>
+</div>
+</div>
+<p class="mono" style="margin: 0; font-size: 12px; line-height: 1.3; color: var(--mut)">Mid 0.25 · natural 0.15 · tick 0.05</p>
+<p class="{{ limNoteCls }}" style="margin: 0; font-size: 13px; line-height: 1.5">{{ limNote }}</p>
+<div style="border-top: 1px solid var(--line)"></div>
+<div style="display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 13px">
+<span class="def" style="color: var(--mut)">Risk on this trade</span>
+<span><span class="mono" style="font-size: 15px; font-weight: 700">{{ riskTxt }}</span> <span style="font-size: 12px; color: var(--mut)">{{ riskPct }}</span></span>
+</div>
+<label style="display: flex; align-items: center; gap: 10px; min-height: 44px; font-size: 13px; cursor: pointer">
+<input type="checkbox" checked="{{ enforce }}" onChange="{{ toggleCap }}" style="width: 22px; height: 22px; margin: 0; accent-color: var(--amber)">
+<span>Enforce the 5% cap per trade ($500)</span>
+</label>
+<sc-if value="{{ capMsg }}" hint-placeholder-val="{{ false }}">
+<p role="alert" class="{{ capCls }}" style="margin: 0; font-size: 13px; line-height: 1.5">{{ capMsg }}</p>
+</sc-if>
+<div style="display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 13px">
+<span class="def" style="color: var(--mut)">Open risk after this</span>
+<span><span class="mono" style="font-size: 15px; font-weight: 700">{{ openTxt }}</span> <span style="font-size: 12px; color: var(--mut)">of $2,500</span></span>
+</div>
+</section>
+<section aria-labelledby="exit-h" style="background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 8px">
+<div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap">
+<h2 id="exit-h" style="margin: 0; font-size: 15px; font-weight: 700; line-height: 1.3">Exit plan</h2>
+<span style="font-size: 12px; line-height: 20px; padding: 0 8px; border: 1px solid var(--amber); border-radius: 999px; color: var(--amber)">defaults · not backtested on CORN</span>
+</div>
+<ul style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column">
+<li style="display: grid; grid-template-columns: 96px minmax(0, 1fr) auto; gap: 8px; align-items: baseline; padding: 8px 0; border-top: 1px solid var(--line); font-size: 13px">
+<span style="font-weight: 700">Take profit</span><span style="color: var(--body)">at 50% of max profit</span><span class="mono" style="font-weight: 700">{{ tp }}</span>
+</li>
+<li style="display: grid; grid-template-columns: 96px minmax(0, 1fr) auto; gap: 8px; align-items: baseline; padding: 8px 0; border-top: 1px solid var(--line); font-size: 13px">
+<span style="font-weight: 700">Time exit</span><span style="color: var(--body)">21 days before expiry</span><span class="mono" style="font-weight: 700">Fri 30 Oct</span>
+</li>
+<li style="display: grid; grid-template-columns: 96px minmax(0, 1fr) auto; gap: 8px; align-items: baseline; padding: 8px 0; border-top: 1px solid var(--line); font-size: 13px">
+<span style="font-weight: 700">Stop</span><span style="color: var(--body)">alert at 50% of max loss, no order</span><span class="mono" style="font-weight: 700">{{ stop }}</span>
+</li>
+</ul>
+<p style="margin: 0; font-size: 12px; line-height: 1.5; color: var(--mut)">Exits go in as limit orders.</p>
+</section>
+<div style="display: flex; flex-direction: column; gap: 6px; padding-top: 4px">
+<sc-if value="{{ canSend }}" hint-placeholder-val="{{ true }}">
+<a href="BuildReview.dc.html" class="send" style="min-height: 52px; display: flex; align-items: center; justify-content: center; border-radius: 12px; font-size: 15px; font-weight: 700; text-decoration: none">{{ sendTxt }}</a>
+</sc-if>
+<sc-if value="{{ cantSend }}" hint-placeholder-val="{{ false }}">
+<button type="button" class="send" disabled="{{ true }}" style="min-height: 52px; border: none; border-radius: 12px; font-size: 15px; font-weight: 700">{{ sendTxt }}</button>
+</sc-if>
+<p style="margin: 0; text-align: center; font-size: 12px; line-height: 1.3; color: var(--mut)">Paper account · Alpaca · day order</p>
+</div>
+</main>
+<nav aria-label="Places" style="position: absolute; left: 8px; right: 8px; bottom: 12px; display: flex; gap: 2px; padding: 4px; background: var(--panel); border: 1px solid var(--field); border-radius: 14px; box-shadow: 0 4px 18px rgba(0,0,0,0.18)">
+<a href="Main.dc.html" class="place">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4.3-4.3"></path></svg>
+<span>Find</span>
+</a>
+<a href="Build.dc.html" class="place on" aria-current="page">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 3l8 8-3 3-8-8z"></path><path d="M11.5 7.5l-8 8a1.6 1.6 0 0 0 2.3 2.3l8-8"></path></svg>
+<span>Build</span>
+</a>
+<a href="Positions.dc.html" class="place" aria-label="Positions, 2 to look at">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="7" width="20" height="14" rx="2"></rect><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path></svg>
+<span>Positions</span>
+<span class="mono" aria-hidden="true" style="position: absolute; top: 4px; right: 18%; font-size: 12px; font-weight: 700; background: var(--action); color: var(--on); border-radius: 10px; padding: 0 6px; line-height: 18px">2</span>
+</a>
+<a href="Journal.dc.html" class="place">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"></path><path d="M14 2v5h6"></path><path d="M16 13H8"></path><path d="M16 17H8"></path></svg>
+<span>Journal</span>
+</a>
+</nav>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":true,"section":"Theme"},"$preview":{"width":390,"height":2640}}'>
+var SPOT = 18.42, MU = 0.12, SIG = 0.22, T = 47 / 365;
+var EQUITY = 10000, CAP = 500, TOTAL = 2500, OPEN = 232;
+var MID = 25, NATURAL = 15, LIM_MIN = 5, LIM_MAX = 60, QTY_MAX = 20;
+var LEGS = [{ t: "P", k: 18, side: -1, d: -0.36 }, { t: "P", k: 17, side: 1, d: -0.16 }];
+var THETA = 0.15;
+// The copilot's ready questions on Build. "Pre-trade analysis" is the app's own skill of that name.
+var CQS = [
+  { id: "pretrade", label: "Pre-trade analysis" },
+  { id: "wrong", label: "What would make it wrong?" },
+  { id: "compare", label: "Compare with the other cards" },
+  { id: "news", label: "News that could move it" }
+];
+// The same ten-year window, one terminal/start ratio per past year (sample data).
+var PAST = [1.06, 0.97, 1.02, 0.94, 1.04, 1.01, 0.95, 1.08, 0.99, 0.96];
+
+// Chart geometry: one price axis, 15 to 22, 38 px per dollar.
+var Y = function (p) { return 22 + (22 - p) * 38; };
+var X_TODAY = 108, X_EXP = 180, X_DIST = 186, DIST_W = 40, X_PAY0 = 234, X_PAY1 = 294, P_LO = 15, P_HI = 22;
+
+var GRID = (function () {
+  var m = Math.log(SPOT) + (MU - SIG * SIG / 2) * T, s = SIG * Math.sqrt(T);
+  var lo = SPOT * 0.5, hi = SPOT * 1.7, n = 4000, h = (hi - lo) / n, g = [];
+  for (var i = 0; i < n; i++) {
+    var p = lo + (i + 0.5) * h, z = (Math.log(p) - m) / s;
+    g.push([p, Math.exp(-z * z / 2) / (p * s * Math.sqrt(2 * Math.PI)) * h]);
+  }
+  return g;
+})();
+
+function usd(x) { return (x < 0 ? "-" : "+") + "$" + Math.abs(Math.round(x)).toLocaleString("en-US"); }
+function amount(x) { return "$" + Math.abs(Math.round(x)).toLocaleString("en-US"); }
+function f1(x) { return x.toFixed(1); }
+function plAt(net, S) {
+  var v = -net;
+  LEGS.forEach(function (l) { v += l.side * (l.t === "C" ? Math.max(S - l.k, 0) : Math.max(l.k - S, 0)); });
+  return v;
+}
+function rng(seed) { var x = seed; return function () { x = (Math.imul(x, 1664525) + 1013904223) >>> 0; return x / 4294967296; }; }
+
+// Static layers: the last 60 days and the fan to expiry.
+var HIST = (function () {
+  var r = rng(20261002), n = 60, p = new Array(n);
+  p[n - 1] = SPOT;
+  for (var i = n - 1; i > 0; i--) p[i - 1] = Math.min(21.6, Math.max(15.4, p[i] * Math.exp(-0.0011 + (r() - 0.5) * 0.026)));
+  return p.map(function (v, i) { return f1(i * X_TODAY / (n - 1)) + "," + f1(Y(v)); }).join(" ");
+})();
+function cone(k) {
+  var up = [], dn = [];
+  for (var i = 0; i <= 12; i++) {
+    var t = i / 12 * T, x = X_TODAY + (X_EXP - X_TODAY) * i / 12, c = (MU - SIG * SIG / 2) * t, w = k * SIG * Math.sqrt(t);
+    up.push(f1(x) + " " + f1(Y(Math.min(P_HI, SPOT * Math.exp(c + w)))));
+    dn.push(f1(x) + " " + f1(Y(Math.max(P_LO, SPOT * Math.exp(c - w)))));
+  }
+  return "M" + up.join(" L") + " L" + dn.reverse().join(" L") + " Z";
+}
+var CONE1 = cone(1), CONE2 = cone(2);
+
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { q: 1, lim: MID, enforce: true, explain: false, whyOpen: false, cq: null, cTyped: "", cAsked: "" };
+  }
+  renderVals() {
+    var self = this, s = this.state, q = s.q, L = s.lim / 100, net = -L;
+    var dark = this.props.dark ?? true;
+    // Outcomes at expiry, per share.
+    var mx = -Infinity, mn = Infinity, be = null, prev = plAt(net, 0);
+    for (var i = 1; i <= 5600; i++) {
+      var S = i / 100, v = plAt(net, S);
+      if (v > mx) mx = v;
+      if (v < mn) mn = v;
+      if (be === null && prev <= 0 && v > 0) be = S - 0.01 + 0.01 * (-prev) / (v - prev);
+      prev = v;
+    }
+    var ch = 0, ev = 0;
+    GRID.forEach(function (g) { var v = plAt(net, g[0]); if (v > 1e-9) ch += g[1]; ev += v * g[1]; });
+    var past = PAST.map(function (r) { return plAt(net, SPOT * r) * 100 * q; });
+    var pastHit = past.filter(function (v) { return v > 0; }).length;
+    var pastAvg = past.reduce(function (a, v) { return a + v; }, 0) / past.length;
+    var maxP = mx * 100 * q, maxL = mn * 100 * q, risk = -maxL;
+
+    // Chart layers that move with the limit.
+    var x = function (v) { return X_PAY0 + (v - mn) / (mx - mn) * (X_PAY1 - X_PAY0); };
+    var x0 = x(0), pts = [], pP = [], pL = [];
+    for (var p = P_LO; p <= P_HI + 1e-9; p += 0.05) {
+      var pv = plAt(net, p), yy = f1(Y(p));
+      pts.push(f1(x(pv)) + "," + yy);
+      pP.push(f1(x(Math.max(pv, 0))) + " " + yy);
+      pL.push(f1(x(Math.min(pv, 0))) + " " + yy);
+    }
+    var poly = function (arr) { return "M" + f1(x0) + " " + f1(Y(P_LO)) + " L" + arr.join(" L") + " L" + f1(x0) + " " + f1(Y(P_HI)) + " Z"; };
+    var zones = { P: "", L: "" }, runStart = P_LO, runSign = plAt(net, P_LO) > 0 ? "P" : "L";
+    for (var zp = P_LO + 0.01; zp <= P_HI + 0.005; zp += 0.01) {
+      var sg = plAt(net, zp) > 0 ? "P" : "L";
+      if (sg !== runSign || zp > P_HI - 0.005) {
+        zones[runSign] += "M0 " + f1(Y(zp)) + "H" + X_PAY1 + "V" + f1(Y(runStart)) + "H0Z ";
+        runStart = zp; runSign = sg;
+      }
+    }
+    var bins = [], dP = "", dL = "", maxMass = 0;
+    for (var b = P_LO; b < P_HI - 1e-9; b += 0.25) {
+      var mass = 0, lo = b, hi = b + 0.25;
+      GRID.forEach(function (g) { if (g[0] >= lo && g[0] < hi) mass += g[1]; });
+      bins.push([b, mass]);
+      if (mass > maxMass) maxMass = mass;
+    }
+    bins.forEach(function (bn) {
+      var w = bn[1] / maxMass * DIST_W;
+      if (w < 0.5) return;
+      var r = "M" + X_DIST + " " + f1(Y(bn[0] + 0.25) + 0.5) + "h" + f1(w) + "v8.5h" + f1(-w) + "Z ";
+      if (plAt(net, bn[0] + 0.125) > 0) dP += r; else dL += r;
+    });
+    var vS = plAt(net, SPOT);
+    var dlt = Math.round(LEGS.reduce(function (a, l) { return a + l.side * l.d; }, 0) * 100 * q);
+    var yBE = Y(be);
+
+    var capOver = risk > CAP, openAfter = OPEN + risk, totalOver = openAfter > TOTAL;
+    var perOne = -mn * 100, maxQty = Math.floor(CAP / perOne);
+    var capMsg = "", capCls = "note-warn";
+    if (capOver && s.enforce) { capMsg = "Over the 5% cap: " + amount(risk) + " at risk against $500. At most " + maxQty + " contracts, or turn the cap off."; capCls = "note-err"; }
+    else if (capOver) capMsg = "Cap off: this trade risks " + (risk / EQUITY * 100).toFixed(1) + "% of capital.";
+    if (totalOver && s.enforce) { capMsg = (capMsg ? capMsg + " " : "") + "Open risk would reach " + amount(openAfter) + ", over the 25% total."; capCls = "note-err"; }
+    var limNote, limCls = "note-ok";
+    if (s.lim > MID) { limNote = "Above mid: it may not fill."; limCls = "note-warn"; }
+    else if (s.lim === MID) limNote = "At mid, halfway between the two quotes.";
+    else if (s.lim > NATURAL) limNote = "Between natural and mid: likelier to fill, a little less credit.";
+    else limNote = "At natural or below: fills at once, gives up credit.";
+
+    return {
+      themeClass: dark ? "t-dark" : "t-light",
+      q: q,
+      takeaway: "Keeps up to " + amount(maxP) + " if CORN closes above $18.00 on 20 Nov; loses up to " + amount(maxL) + " below $17.00. Breakeven $" + be.toFixed(2) + ".",
+      chartAria: "CORN price, its range to 20 Nov and the trade's payoff. Breakeven " + be.toFixed(2) + ", today " + SPOT.toFixed(2) + ".",
+      zoneP: zones.P, zoneL: zones.L, cone1: CONE1, cone2: CONE2, hist: HIST,
+      distP: dP, distL: dL, payP: poly(pP), payL: poly(pL), payLn: pts.join(" "),
+      x0: f1(x0), yBE: f1(yBE), beLblY: f1(yBE - 6), beLbl: "BE " + be.toFixed(2),
+      yS: f1(Y(SPOT)), xS: f1(x(vS)),
+      lossLbl: usd(maxL), gainLbl: usd(maxP),
+      explain: s.explain, explainBtn: s.explain ? "Hide how to read" : "How to read",
+      toggleExplain: function () { self.setState({ explain: !s.explain }); },
+      maxP: usd(maxP), maxL: usd(maxL), be: "$" + be.toFixed(2), rr: Math.round(maxP / risk * 100) + "%",
+      chance: Math.round(ch * 100) + "%", futAvg: usd(ev * 100 * q),
+      pastHit: pastHit + " of " + PAST.length + " yrs", pastAvg: usd(pastAvg),
+      delta: (dlt >= 0 ? "+" : "") + dlt,
+      theta: "+$" + (THETA * q).toFixed(2) + "/day",
+      qtyMin: q <= 1, qtyMax: q >= QTY_MAX,
+      qtyDown: function () { self.setState({ q: Math.max(1, q - 1) }); },
+      qtyUp: function () { self.setState({ q: Math.min(QTY_MAX, q + 1) }); },
+      limTxt: L.toFixed(2), limMin: s.lim <= LIM_MIN, limMax: s.lim >= LIM_MAX,
+      limDown: function () { self.setState({ lim: Math.max(LIM_MIN, s.lim - 5) }); },
+      limUp: function () { self.setState({ lim: Math.min(LIM_MAX, s.lim + 5) }); },
+      limNote: limNote, limNoteCls: limCls,
+      riskTxt: amount(risk), riskPct: (risk / EQUITY * 100).toFixed(1) + "% of $10,000",
+      enforce: s.enforce, toggleCap: function () { self.setState({ enforce: !s.enforce }); },
+      capMsg: capMsg, capCls: capCls,
+      openTxt: amount(openAfter),
+      tp: usd(maxP / 2), stop: usd(maxL / 2),
+      cantSend: s.enforce && (capOver || totalOver),
+      canSend: !(s.enforce && (capOver || totalOver)),
+      sendTxt: "Send limit order · credit " + amount(L * 100 * q),
+      cqs: CQS.map(function (x) { return { label: x.label, on: s.cq === x.id, cls: (x.id === "pretrade" ? "main" : "") + (s.cq === x.id ? " on" : ""), pick: function () { self.setState({ cq: x.id, cAsked: "" }); } }; }),
+      cTyped: s.cTyped, cSetTyped: function (e) { self.setState({ cTyped: e.target.value }); },
+      cAsk: function (e) { if (e && e.preventDefault) e.preventDefault(); if (s.cTyped.trim()) self.setState({ cAsked: s.cTyped.trim(), cq: null, cTyped: "" }); },
+      cHas: !!(s.cq || s.cAsked),
+      cQ: s.cq ? CQS.find(function (x) { return x.id === s.cq; }).label : s.cAsked,
+      cA: s.cq ? ({
+        pretrade: "Structure: sell the 18 put, buy the 17 put, 20 Nov, " + L.toFixed(2) + " credit × " + q + ". Most it makes " + amount(maxP) + ", most it loses " + amount(maxL) + ", breakeven $" + be.toFixed(2) + ". Greeks: delta " + (dlt >= 0 ? "+" : "") + dlt + ", theta +$" + (THETA * q).toFixed(2) + " a day, so time works for you while CORN holds. Breakeven against the chart: the 50-day average is 18.26 and the 60-day low 17.43, so $" + be.toFixed(2) + " sits between them. Signals: 3 of 4 up, none against. Event before expiry: WASDE on Fri 9 Oct. Size: " + (risk / EQUITY * 100).toFixed(1) + "% of capital, " + (risk <= CAP ? "inside" : "over") + " the 5% cap.",
+        wrong: "It goes wrong if CORN closes under $" + be.toFixed(2) + " on 20 Nov. The first signs: the 20-day average dropping under the 50-day (18.35 against 18.26 now), a WASDE that surprises on supply, or rain back in Mato Grosso, which would take away the weather push.",
+        compare: "The bull call spread 19/21 pays more ($168 against " + amount(maxP) + ") but works less often (33% against " + Math.round(ch * 100) + "%), and the past ten years would have lost on it. The iron condor averages $0. This put spread is the one where the future and the past agree.",
+        news: "Six headlines read today, none tagged as moving CORN. The scheduled risk is WASDE on Fri 9 Oct, 12:00 ET, before your expiry: a supply surprise can move CORN more than an ordinary week does."
+      })[s.cq] : "The copilot's answer arrives here, written as it comes. It reads this trade, its chart and its four factors.",
+      cFoot: s.cq ? "Sample answer, worked out from this trade's numbers. Filed as a copilot analysis." : "In the app this goes to the copilot.",
+      whyOpen: s.whyOpen, whyBtn: s.whyOpen ? "Hide" : "Open",
+      toggleWhy: function () { self.setState({ whyOpen: !s.whyOpen }); },
+      lines: [
+        { n: "1", k: "BETS ON", t: "CORN staying above $18.00 until 20 Nov: it keeps the " + amount(maxP) + " credit." },
+        { n: "2", k: "RISKS", t: "Up to " + amount(maxL) + " if CORN closes under $17.00. Fixed now, never a dollar more." },
+        { n: "3", k: "WORKS", t: Math.round(ch * 100) + "% of simulated paths; " + pastHit + " of the past " + PAST.length + " years." },
+        { n: "4", k: "EXITS", t: "At +" + amount(maxP / 2) + ", half the credit, or on Fri 30 Oct, 21 days before expiry." },
+        { n: "5", k: "WRONG IF", t: "CORN closes under $" + be.toFixed(2) + ". The first sign would be the price trend turning down." }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

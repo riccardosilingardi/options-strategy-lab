@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Find — one row of controls</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+.t-dark{--bg:#14181d;--panel:#1a1f26;--line:#2a2f36;--field:#6b7685;--ink:#f5f0e6;--mut:#8b95a1;--dim:#7d8794;--amber:#e8b545;--green:#7fb85c;--red:#d66a5a;--blue:#5aa7d6;--body:#c9d1d9;--on:#14181d;--action:#5aa7d6;--raise:#222831;--scrim:rgba(6,8,10,0.66)}
+.t-light{--bg:#f5f6f7;--panel:#ffffff;--line:#dcdfe3;--field:#7a8491;--ink:#1c2128;--mut:#5a6472;--dim:#616b78;--amber:#8a6300;--green:#2f6f45;--red:#b23a2b;--blue:#1f6391;--body:#2a3038;--on:#ffffff;--action:#1f6391;--raise:#eceff2;--scrim:rgba(20,24,29,0.45)}
+.sans{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.mono{font-family:ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums}
+button,select,input{font:inherit;color:inherit}
+button{cursor:pointer}
+a{color:var(--blue)}a:hover{color:var(--ink)}
+.place{flex:1;min-height:50px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;border-radius:10px;font-size:12px;color:var(--ink);text-decoration:none;position:relative}
+.place.on{background:var(--ink);color:var(--bg);font-weight:700}
+.place:hover{color:var(--ink)}
+.place.on:hover{color:var(--bg)}
+.seg{flex:1;min-height:44px;display:flex;align-items:center;justify-content:center;gap:6px;border-radius:8px;color:var(--mut);text-decoration:none;font-size:13px;font-weight:400}
+.seg.on{background:var(--ink);color:var(--bg);font-weight:700}
+a.seg:hover{color:var(--ink)}
+a.seg.on:hover{color:var(--bg)}
+.tab{border:none;border-bottom:3px solid transparent;color:var(--mut);font-weight:400}
+.tab.on{color:var(--ink);font-weight:700;border-bottom-color:var(--amber)}
+.fchip{flex:none;min-height:40px;padding:0 12px;border:1px solid var(--field);border-radius:999px;background:transparent;color:var(--ink);font-size:13px;font-weight:400;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.fchip .k{color:var(--mut)}
+.fchip.sort{border-color:var(--ink);font-weight:700}
+.fchip.sort .k{color:var(--ink)}
+.fchip.on{background:var(--ink);border-color:var(--ink);color:var(--bg);font-weight:700}
+.fchip.on .k{color:var(--bg)}
+.link{border:none;background:transparent;color:var(--blue);font-size:12px;min-height:36px;padding:0 4px}
+.row{color:var(--ink)}
+.row:hover{background:var(--panel);color:var(--ink)}
+.star{width:44px;height:44px;border:none;background:transparent;color:var(--dim);display:flex;align-items:center;justify-content:center;flex:none;border-radius:10px}
+.star.on{color:var(--amber)}
+.dir{border:1px solid var(--field);border-radius:6px;padding:0 6px;line-height:18px;color:var(--ink)}
+.row.miss .tk,.row.miss .fig,.row.miss .dir{color:var(--dim)}
+.row.miss .dir{border-color:var(--line)}
+.row.miss .band{opacity:.35}
+.zp{fill:var(--green);fill-opacity:.3}
+.zl{fill:var(--red);fill-opacity:.15}
+.ln{fill:none;stroke:var(--ink);stroke-width:1.5;stroke-linejoin:round;stroke-linecap:round}
+.slider{width:100%;height:32px;margin:0;display:block;accent-color:var(--amber)}
+.opt{width:100%;min-height:52px;border:none;border-top:1px solid var(--line);background:transparent;text-align:left;padding:8px 0;display:grid;grid-template-columns:24px minmax(0,1fr);gap:8px;align-items:start;color:var(--ink)}
+.opt .dot{width:16px;height:16px;border-radius:50%;border:2px solid var(--field);margin-top:2px;box-sizing:border-box}
+.opt.on .dot{border:5px solid var(--amber)}
+.dchip{min-height:40px;padding:0 12px;border:1px solid var(--field);background:transparent;color:var(--mut);border-radius:999px;font-size:13px;font-weight:400}
+.dchip.on{background:var(--ink);border-color:var(--ink);color:var(--bg);font-weight:700}
+.showBtn{width:100%;min-height:48px;border:none;border-radius:10px;background:var(--amber);color:var(--on);font-size:15px;font-weight:700}
+</style>
+</helmet>
+<div class="{{ themeClass }} sans" style="width: 390px; height: 844px; box-sizing: border-box; background: var(--bg); color: var(--ink); display: flex; flex-direction: column; overflow: hidden; position: relative">
+<header style="display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 8px 0 16px">
+<h1 style="margin: 0; font-size: 24px; font-weight: 700; line-height: 1.3">Find</h1>
+<a href="Settings.dc.html" aria-label="Settings" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: var(--ink); border-radius: 10px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"></path></svg></a>
+</header>
+<p style="margin: 0; padding: 0 16px 6px; font-size: 12px; line-height: 1.3; color: var(--mut)">Close · Fri 2 Oct, 16:00 ET · indicative feed</p>
+<div role="group" aria-label="Find: results or saved trades" style="display: flex; gap: 2px; margin: 0 16px 6px; padding: 3px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px">
+<a href="FindB.dc.html" class="seg on" aria-current="page">Results <span class="mono" style="font-size: 12px">10</span></a>
+<a href="FindSaved.dc.html" class="seg">Saved <span class="mono" style="font-size: 12px">{{ savedN }}</span></a>
+</div>
+<nav aria-label="Categories" style="display: flex; gap: 2px; padding: 0 8px; border-bottom: 1px solid var(--line)">
+<sc-for list="{{ cats }}" as="c" hint-placeholder-count="4">
+<button type="button" class="tab {{ c.cls }}" aria-pressed="{{ c.on }}" onClick="{{ c.pick }}" style="min-height: 44px; padding: 0 10px; background: transparent; font-size: 15px; display: flex; align-items: center; gap: 6px"><span>{{ c.label }}</span><span class="mono" style="font-size: 12px; color: var(--dim); font-weight: 400">{{ c.n }}</span></button>
+</sc-for>
+</nav>
+<div role="toolbar" aria-label="Sort and filter" style="display: flex; gap: 6px; padding: 10px 16px 4px; overflow-x: auto">
+<sc-for list="{{ chips }}" as="c" hint-placeholder-count="6">
+<button type="button" class="fchip {{ c.cls }}" aria-pressed="{{ c.pressed }}" aria-label="{{ c.aria }}" onClick="{{ c.pick }}"><span class="k">{{ c.k }}</span><span class="mono">{{ c.v }}</span></button>
+</sc-for>
+</div>
+<div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 0 12px 2px 16px; font-size: 12px; color: var(--mut)">
+<span>{{ fitTxt }}</span>
+<span style="display: flex; gap: 4px">
+<sc-if value="{{ hasMiss }}" hint-placeholder-val="{{ true }}"><button type="button" class="link" onClick="{{ toggleHide }}">{{ hideTxt }}</button></sc-if>
+<sc-if value="{{ changed }}" hint-placeholder-val="{{ false }}"><button type="button" class="link" onClick="{{ reset }}">Reset</button></sc-if>
+</span>
+</div>
+<div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 8px 0 16px; min-height: 36px; border-top: 1px solid var(--line); font-size: 12px; color: var(--mut)">
+<span>Market</span>
+<span style="display: flex; align-items: center; gap: 2px"><span>{{ colLabel }}</span><a href="Define.dc.html" aria-label="How chance, score and confidence connect" style="width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; text-decoration: none; font-size: 15px">ⓘ</a></span>
+</div>
+<ul style="list-style: none; margin: 0; padding: 0 0 88px; overflow-y: auto; flex: 1">
+<sc-for list="{{ rows }}" as="m" hint-placeholder-count="7">
+<li class="row {{ m.cls }}" style="border-top: 1px solid var(--line); display: flex; align-items: center; padding-left: 4px">
+<button type="button" class="star {{ m.starCls }}" aria-label="{{ m.starAria }}" aria-pressed="{{ m.saved }}" onClick="{{ m.toggleSave }}"><svg width="20" height="20" viewBox="0 0 24 24" fill="{{ m.starFill }}" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round" aria-hidden="true"><path d="M12 2.5l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.4l-5.9 3.1 1.2-6.5L2.5 9.4l6.6-.9z"></path></svg></button>
+<a href="{{ m.href }}" aria-label="{{ m.aria }}" style="flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 10px 16px 10px 2px; min-height: 66px; box-sizing: border-box; text-decoration: none; color: inherit">
+<span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px">
+<span style="display: flex; align-items: center; gap: 8px"><span class="mono tk" style="font-size: 15px; font-weight: 700; line-height: 1.3">{{ m.tk }}</span><span class="dir" style="font-size: 12px">{{ m.dirTxt }}</span></span>
+<span style="font-size: 12px; line-height: 1.3; color: var(--mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{ m.sub }}</span>
+</span>
+<svg class="band" width="72" height="40" viewBox="0 0 72 40" aria-hidden="true" style="flex: none; border-radius: 4px"><path class="zp" d="{{ m.zp }}"></path><path class="zl" d="{{ m.zl }}"></path><polyline class="ln" points="{{ m.ln }}"></polyline></svg>
+<span style="width: 60px; flex: none; text-align: right; display: flex; flex-direction: column; gap: 3px"><span class="mono fig" style="font-size: 15px; font-weight: 700; line-height: 1.3">{{ m.fig }}</span><span class="mono" style="font-size: 12px; line-height: 1.3; color: var(--mut)">{{ m.risk }}</span></span>
+</a>
+</li>
+</sc-for>
+<sc-if value="{{ empty }}" hint-placeholder-val="{{ false }}">
+<li style="padding: 24px 16px; display: flex; flex-direction: column; gap: 10px; align-items: flex-start">
+<p style="margin: 0; font-size: 15px; font-weight: 700">Nothing fits these filters.</p>
+<button type="button" onClick="{{ reset }}" style="min-height: 44px; padding: 0 16px; border: none; border-radius: 10px; background: var(--amber); color: var(--on); font-size: 13px; font-weight: 700">Reset filters</button>
+</li>
+</sc-if>
+</ul>
+<nav aria-label="Places" style="position: absolute; left: 8px; right: 8px; bottom: 12px; display: flex; gap: 2px; padding: 4px; background: var(--panel); border: 1px solid var(--field); border-radius: 14px; box-shadow: 0 4px 18px rgba(0,0,0,0.18)">
+<a href="FindB.dc.html" class="place on" aria-current="page"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4.3-4.3"></path></svg><span>Find</span></a>
+<a href="Build.dc.html" class="place"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 3l8 8-3 3-8-8z"></path><path d="M11.5 7.5l-8 8a1.6 1.6 0 0 0 2.3 2.3l8-8"></path></svg><span>Build</span></a>
+<a href="Positions.dc.html" class="place" aria-label="Positions, 2 to look at"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="7" width="20" height="14" rx="2"></rect><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path></svg><span>Positions</span><span class="mono" aria-hidden="true" style="position: absolute; top: 4px; right: 18%; font-size: 12px; font-weight: 700; background: var(--action); color: var(--on); border-radius: 10px; padding: 0 6px; line-height: 18px">2</span></a>
+<a href="Journal.dc.html" class="place"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"></path><path d="M14 2v5h6"></path><path d="M16 13H8"></path><path d="M16 17H8"></path></svg><span>Journal</span></a>
+</nav>
+<sc-if value="{{ sheetOpen }}" hint-placeholder-val="{{ false }}">
+<button type="button" aria-label="Close" onClick="{{ closeSheet }}" style="position: absolute; left: 0; top: 0; right: 0; bottom: 0; border: none; background: var(--scrim)"></button>
+<section role="dialog" aria-modal="true" aria-label="{{ sheetTitle }}" style="position: absolute; left: 0; right: 0; bottom: 0; background: var(--panel); border-top: 1px solid var(--field); border-radius: 18px 18px 0 0; padding: 8px 16px 20px; display: flex; flex-direction: column; gap: 12px">
+<span aria-hidden="true" style="align-self: center; width: 40px; height: 4px; border-radius: 2px; background: var(--field)"></span>
+<div style="display: flex; justify-content: space-between; align-items: baseline; gap: 8px">
+<h2 style="margin: 0; font-size: 18px; font-weight: 700">{{ sheetTitle }}</h2>
+<span class="mono" style="font-size: 15px; font-weight: 700">{{ sheetValue }}</span>
+</div>
+<sc-if value="{{ isOrder }}" hint-placeholder-val="{{ false }}">
+<div role="radiogroup" aria-label="Order by">
+<sc-for list="{{ orderOpts }}" as="o" hint-placeholder-count="5">
+<button type="button" role="radio" class="opt {{ o.cls }}" aria-checked="{{ o.on }}" onClick="{{ o.pick }}"><span class="dot"></span><span style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 15px; font-weight: 700">{{ o.label }}</span><span style="font-size: 12px; line-height: 1.5; color: var(--mut)">{{ o.note }}</span></span></button>
+</sc-for>
+</div>
+</sc-if>
+<sc-if value="{{ isSlider }}" hint-placeholder-val="{{ false }}">
+<div>
+<input class="slider" type="range" aria-label="{{ sheetTitle }}" min="{{ sMin }}" max="{{ sMax }}" step="{{ sStep }}" value="{{ sVal }}" onChange="{{ sSet }}">
+<div class="mono" style="display: flex; justify-content: space-between; font-size: 12px; color: var(--dim)"><span>{{ sMinTxt }}</span><span>{{ sMaxTxt }}</span></div>
+</div>
+</sc-if>
+<sc-if value="{{ isDir }}" hint-placeholder-val="{{ false }}">
+<div role="group" aria-label="Direction" style="display: flex; flex-wrap: wrap; gap: 6px">
+<sc-for list="{{ dirOpts }}" as="d" hint-placeholder-count="6">
+<button type="button" class="dchip {{ d.cls }}" aria-pressed="{{ d.on }}" onClick="{{ d.pick }}">{{ d.label }}</button>
+</sc-for>
+</div>
+</sc-if>
+<p style="margin: 0; font-size: 12px; line-height: 1.5; color: var(--mut)">{{ sheetNote }}</p>
+<button type="button" class="showBtn" onClick="{{ closeSheet }}">{{ showTxt }}</button>
+</section>
+</sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":true,"section":"Theme"},"$preview":{"width":390,"height":844}}'>
+// The same ten cards as Find A (sample), so both versions list the same thing.
+var EQUITY = 10000;
+var MKTS = [
+  { tk: "GLD", cat: "Metals", dir: 1, strat: "Bull put spread", exp: "18 Dec", chance: 76, fut: 9, rr: 0.28, past: 12, risk: 390, s: 41.6, zone: "above", be: -0.045, w: 0.09, trend: 1 },
+  { tk: "CORN", cat: "Grains", dir: 1, strat: "Bull put spread", exp: "20 Nov", chance: 73, fut: 4, rr: 0.33, past: 9, risk: 75, s: 38.6, zone: "above", be: -0.036, w: 0.10, trend: 1 },
+  { tk: "SLV", cat: "Metals", dir: 0, strat: "Iron condor", exp: "20 Nov", chance: 64, fut: 5, rr: 0.38, past: 3, risk: 181, s: 3.0, zone: "between", be: 0.06, w: 0.11, trend: 0 },
+  { tk: "WEAT", cat: "Grains", dir: -1, strat: "Bear call spread", exp: "20 Nov", chance: 66, fut: 2, rr: 0.30, past: -1, risk: 77, s: -35.3, zone: "below", be: 0.045, w: 0.11, trend: -1 },
+  { tk: "USO", cat: "Energy", dir: -1, strat: "Bear call spread", exp: "18 Dec", chance: 62, fut: 3, rr: 0.36, past: 1, risk: 220, s: -18.6, zone: "below", be: 0.06, w: 0.12, trend: -1 },
+  { tk: "SOYB", cat: "Grains", dir: 0, strat: "Iron condor", exp: "18 Dec", chance: 58, fut: 3, rr: 0.41, past: 2, risk: 142, s: 6.6, zone: "between", be: 0.055, w: 0.10, trend: 0 },
+  { tk: "XLE", cat: "Energy", dir: 0, strat: "Iron condor", exp: "18 Dec", chance: 57, fut: 1, rr: 0.45, past: 0, risk: 275, s: -4.3, zone: "between", be: 0.05, w: 0.10, trend: 0 },
+  { tk: "BOIL", cat: "Energy", dir: 0, strat: "Iron condor", exp: "20 Nov", chance: 54, fut: 11, rr: 0.62, past: 14, risk: 620, s: 1.2, zone: "between", be: 0.12, w: 0.22, trend: 0 },
+  { tk: "GDX", cat: "Metals", dir: 1, strat: "Bull call spread", exp: "18 Dec", chance: 44, fut: 7, rr: 1.10, past: 10, risk: 240, s: 28.8, zone: "above", be: 0.03, w: 0.12, trend: 1 },
+  { tk: "UNG", cat: "Energy", dir: 1, strat: "Bull call spread", exp: "18 Dec", chance: 38, fut: -5, rr: 1.45, past: 9, risk: 95, s: 23.1, zone: "above", be: 0.06, w: 0.16, trend: 1 }
+];
+var ORDERS = [
+  { id: "ev", label: "Future avg", note: "The average result of the simulated paths to expiry. The default." },
+  { id: "evSignal", label: "Future avg + signal", note: "The same average, nudged up when the four factors agree strongly." },
+  { id: "chance", label: "Chance", note: "The share of simulated paths that end in profit." },
+  { id: "rr", label: "Return on risk", note: "The most it can make, divided by what you risk." },
+  { id: "past", label: "Past yrs", note: "The average result over the past ten years, same window." }
+];
+var DIRS = [{ id: "signals", label: "Signals decide" }, { id: "vbull", label: "▲▲ Very bull" }, { id: "bull", label: "▲ Bull" }, { id: "neutral", label: "≈ Neutral" }, { id: "bear", label: "▼ Bear" }, { id: "vbear", label: "▼▼ Very bear" }];
+var DEF = { budget: 500, chance: 0, rr: 25, dir: "signals", posOnly: true };
+
+function usd(x) { return (x < 0 ? "-" : "+") + "$" + Math.abs(Math.round(x)).toLocaleString("en-US"); }
+function amount(x) { return "$" + Math.abs(Math.round(x)).toLocaleString("en-US"); }
+function seedOf(s) { var h = 2166136261; for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
+function rng(seed) { var x = seed || 1; return function () { x = (Math.imul(x, 1664525) + 1013904223) >>> 0; return x / 4294967296; }; }
+function thumb(m) {
+  var W = 72, H = 40, lo = 1 - m.w, hi = 1 + m.w;
+  var y = function (p) { return ((hi - p) / (hi - lo)) * H; };
+  var r = rng(seedOf(m.tk)), n = 24, pts = new Array(n);
+  pts[n - 1] = 1;
+  for (var i = n - 1; i > 0; i--) { var v = pts[i] * (1 - m.trend * m.w * 0.012 + (r() - 0.5) * m.w * 0.22); pts[i - 1] = Math.min(hi - m.w * 0.12, Math.max(lo + m.w * 0.12, v)); }
+  var ln = pts.map(function (p, i) { return (1 + i * (W - 2) / (n - 1)).toFixed(1) + "," + y(p).toFixed(1); }).join(" ");
+  var rect = function (a, b) { return "M0 " + a.toFixed(1) + "H" + W + "V" + b.toFixed(1) + "H0Z"; };
+  if (m.zone === "above") { var b = y(1 + m.be); return { ln: ln, zp: rect(0, b), zl: rect(b, H) }; }
+  if (m.zone === "below") { var b2 = y(1 + m.be); return { ln: ln, zl: rect(0, b2), zp: rect(b2, H) }; }
+  var up = y(1 + m.be), dn = y(1 - m.be);
+  return { ln: ln, zp: rect(up, dn), zl: rect(0, up) + " " + rect(dn, H) };
+}
+var dirWord = function (d) { return d > 0 ? "Bull" : d < 0 ? "Bear" : "Neutral"; };
+
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { cat: "All", order: "ev", budget: 500, chance: 0, rr: 25, dir: "signals", posOnly: true, hideMiss: false, sheet: null, saved: ["SOYB", "GLD"] };
+  }
+  renderVals() {
+    var self = this, s = this.state, dark = this.props.dark ?? true;
+    var set = function (p) { return function () { self.setState(p); }; };
+    var want = { bull: 1, vbull: 1, bear: -1, vbear: -1, neutral: 0 }[s.dir];
+    var dirLabel = DIRS.find(function (d) { return d.id === s.dir; }).label;
+    var orderLabel = ORDERS.find(function (o) { return o.id === s.order; }).label;
+    var key = { ev: function (m) { return m.fut; }, evSignal: function (m) { return m.fut + m.s / 10; }, chance: function (m) { return m.chance; }, rr: function (m) { return m.rr; }, past: function (m) { return m.past; } }[s.order];
+    var fig = { ev: function (m) { return usd(m.fut); }, evSignal: function (m) { return usd(m.fut); }, chance: function (m) { return m.chance + "%"; }, rr: function (m) { return Math.round(m.rr * 100) + "%"; }, past: function (m) { return usd(m.past); } }[s.order];
+    var why = function (m) {
+      if (s.dir !== "signals" && m.dir !== want) return "Signals say " + dirWord(m.dir) + ", you chose " + dirLabel.replace(/^[▲▼≈ ]+/, "");
+      if (m.risk > s.budget) return "Risk " + amount(m.risk) + " over the " + amount(s.budget) + " budget";
+      if (m.chance < s.chance) return "Chance " + m.chance + "%, under " + s.chance + "%";
+      if (m.rr * 100 < s.rr) return "Return " + Math.round(m.rr * 100) + "%, under " + s.rr + "%";
+      if (s.posOnly && m.fut <= 0) return "Future avg " + usd(m.fut) + ", not positive";
+      return "";
+    };
+    var inCat = MKTS.filter(function (m) { return s.cat === "All" || m.cat === s.cat; });
+    var sorted = inCat.slice().sort(function (a, b) { return key(b) - key(a) || (a.tk < b.tk ? -1 : 1); });
+    var rows = [], misses = 0;
+    sorted.forEach(function (m) {
+      var w = why(m);
+      if (w) misses++;
+      if (w && s.hideMiss) return;
+      var t = thumb(m), isSaved = s.saved.indexOf(m.tk) >= 0;
+      var dirTxt = m.dir > 0 ? "▲ Bull" : m.dir < 0 ? "▼ Bear" : "≈ Neutral";
+      rows.push({ tk: m.tk, dirTxt: dirTxt, sub: w || (m.strat + " · " + m.exp), fig: fig(m), risk: "risk " + amount(m.risk),
+        zp: t.zp, zl: t.zl, ln: t.ln, cls: w ? "miss" : "", href: m.tk === "CORN" ? "MarketStrategies.dc.html" : "#" + m.tk.toLowerCase(),
+        saved: isSaved, starCls: isSaved ? "on" : "", starFill: isSaved ? "currentColor" : "none",
+        starAria: (isSaved ? "Saved: tap to remove " : "Save ") + m.tk + " " + m.strat,
+        toggleSave: function () { self.setState({ saved: isSaved ? s.saved.filter(function (x) { return x !== m.tk; }) : s.saved.concat([m.tk]) }); },
+        aria: m.tk + ", " + dirTxt.slice(2) + ", " + m.strat + " " + m.exp + ", " + orderLabel + " " + fig(m) + (w ? ". Misses: " + w : "") });
+    });
+    var fits = inCat.length - misses;
+    var changed = s.budget !== DEF.budget || s.chance !== DEF.chance || s.rr !== DEF.rr || s.dir !== DEF.dir || s.posOnly !== DEF.posOnly;
+    var chip = function (id, k, v, on, aria) { return { k: k, v: v, cls: id === "order" ? "sort" : (on ? "on" : ""), pressed: id === "pos" ? s.posOnly : on, aria: aria,
+      pick: id === "pos" ? set({ posOnly: !s.posOnly }) : set({ sheet: id }) }; };
+    var sh = s.sheet, sl = null;
+    if (sh === "budget") sl = { min: 50, max: 1000, step: 25, val: s.budget, key: "budget", lo: "$50", hi: "$1,000", title: "Budget per trade", value: amount(s.budget) + " · " + (s.budget / 100) + "% of $10,000",
+      note: "A card that risks more stays in the list, dimmed, with the reason. Above 5% only counts if Free sizing is on in Settings." };
+    if (sh === "chance") sl = { min: 0, max: 90, step: 5, val: s.chance, key: "chance", lo: "any", hi: "90%", title: "Chance at least", value: s.chance ? s.chance + "%" : "any",
+      note: "Chance is the share of simulated paths to expiry that end in profit. No minimum is the default." };
+    if (sh === "rr") sl = { min: 25, max: 200, step: 5, val: s.rr, key: "rr", lo: "25%", hi: "200%", title: "Return on risk at least", value: s.rr + "%",
+      note: "25% is the app's own floor: no card below it is ever proposed." };
+    var titles = { order: "Order by", dir: "Direction" };
+    return {
+      themeClass: dark ? "t-dark" : "t-light",
+      savedN: s.saved.length,
+      cats: ["All", "Grains", "Energy", "Metals"].map(function (c) { return { label: c, n: c === "All" ? MKTS.length : MKTS.filter(function (m) { return m.cat === c; }).length, on: s.cat === c, cls: s.cat === c ? "on" : "", pick: set({ cat: c }) }; }),
+      chips: [
+        chip("order", "⇅", orderLabel + " ▾", false, "Order by " + orderLabel + ". Change"),
+        chip("budget", "Budget", amount(s.budget) + " ▾", s.budget !== DEF.budget, "Budget " + amount(s.budget) + ". Change"),
+        chip("chance", "Chance", (s.chance ? "≥ " + s.chance + "%" : "any") + " ▾", s.chance !== DEF.chance, "Chance at least " + (s.chance || "any") + ". Change"),
+        chip("rr", "Return", "≥ " + s.rr + "% ▾", s.rr !== DEF.rr, "Return on risk at least " + s.rr + "%. Change"),
+        chip("dir", "Direction", (s.dir === "signals" ? "Signals" : dirLabel.replace(/^[▲▼≈ ]+/, "")) + " ▾", s.dir !== DEF.dir, "Direction " + dirLabel + ". Change"),
+        chip("pos", "Avg > 0", s.posOnly ? "✓" : "", s.posOnly, "Only a positive future avg")
+      ],
+      fitTxt: fits + " of " + inCat.length + " fit" + (misses ? " · " + misses + (s.hideMiss ? " hidden" : " dimmed") : ""),
+      hasMiss: misses > 0, hideTxt: s.hideMiss ? "Show them" : "Hide them", toggleHide: set({ hideMiss: !s.hideMiss }),
+      changed: changed, reset: set({ budget: DEF.budget, chance: DEF.chance, rr: DEF.rr, dir: DEF.dir, posOnly: DEF.posOnly }),
+      colLabel: orderLabel + " · risk", rows: rows, empty: rows.length === 0,
+      sheetOpen: !!sh, closeSheet: set({ sheet: null }),
+      sheetTitle: sl ? sl.title : (titles[sh] || ""), sheetValue: sl ? sl.value : (sh === "order" ? "" : sh === "dir" ? dirLabel : ""),
+      isOrder: sh === "order", isSlider: !!sl, isDir: sh === "dir",
+      orderOpts: ORDERS.map(function (o) { return { label: o.label, note: o.note, on: s.order === o.id, cls: s.order === o.id ? "on" : "", pick: set({ order: o.id, sheet: null }) }; }),
+      sMin: sl ? sl.min : 0, sMax: sl ? sl.max : 1, sStep: sl ? sl.step : 1, sVal: sl ? sl.val : 0, sMinTxt: sl ? sl.lo : "", sMaxTxt: sl ? sl.hi : "",
+      sSet: function (e) { if (sl) { var p = {}; p[sl.key] = +e.target.value; self.setState(p); } },
+      dirOpts: DIRS.map(function (d) { return { label: d.label, on: s.dir === d.id, cls: s.dir === d.id ? "on" : "", pick: set({ dir: d.id }) }; }),
+      sheetNote: sl ? sl.note : sh === "dir" ? (s.dir === "signals" ? "Each market in the direction its four factors give, plus its Neutral cards." : (s.dir === "vbull" || s.dir === "vbear") ? "Very is your call, never the signals': Build then offers long options and butterflies." : "Your direction for every market, whatever its signals say.") : sh === "order" ? "The figure on the right of each row is the one the list is sorted by." : "",
+      showTxt: "Show " + fits + " of " + inCat.length
+    };
+  }
+}
+</script>
+</body>
+</html>

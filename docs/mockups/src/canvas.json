@@ -1,0 +1,273 @@
+{
+  "v": 3,
+  "createdOnFiles": {
+    "v": 1,
+    "at": "2026-10-04T08:10:00Z"
+  },
+  "title": "OSL — Mockup Find · Mercato · Build",
+  "launch": {
+    "view": "canvas"
+  },
+  "pages": [],
+  "boards": {
+    "Main.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "title": "1 · Find",
+      "is_interactive": true,
+      "radius": 24
+    },
+    "Market.dc.html": {
+      "x": 470,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "title": "2 · Market · Chain (advanced) + tray",
+      "is_interactive": true,
+      "radius": 24
+    },
+    "Build.dc.html": {
+      "x": 940,
+      "y": 0,
+      "w": 390,
+      "h": 2640,
+      "title": "3 · Build (full scroll: Why this trade, copilot)",
+      "is_interactive": true,
+      "radius": 24
+    },
+    "Define.dc.html": {
+      "x": 1410,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "title": "4 · Tap ⓘ — how the numbers connect",
+      "radius": 24
+    },
+    "FindLoading.dc.html": {
+      "x": 0,
+      "y": 3040,
+      "w": 390,
+      "h": 640,
+      "title": "Find · loading",
+      "radius": 24
+    },
+    "FindStale.dc.html": {
+      "x": 470,
+      "y": 3040,
+      "w": 390,
+      "h": 640,
+      "title": "Find · stale feed",
+      "radius": 24
+    },
+    "FindEmpty.dc.html": {
+      "x": 940,
+      "y": 3040,
+      "w": 390,
+      "h": 640,
+      "title": "Find · nothing fits",
+      "radius": 24
+    },
+    "Positions.dc.html": {
+      "x": 0,
+      "y": 4240,
+      "w": 390,
+      "h": 844,
+      "title": "Positions — account, two cards, what to do",
+      "is_interactive": true,
+      "radius": 24
+    },
+    "PositionDetail.dc.html": {
+      "x": 470,
+      "y": 4240,
+      "w": 390,
+      "h": 1640,
+      "title": "Position J-0006 — close or keep, at entry vs now",
+      "is_interactive": true,
+      "radius": 24
+    },
+    "Orders.dc.html": {
+      "x": 940,
+      "y": 4240,
+      "w": 390,
+      "h": 1180,
+      "title": "Orders — modify, cancel, details",
+      "is_interactive": true,
+      "radius": 24
+    },
+    "Journal.dc.html": {
+      "x": 1410,
+      "y": 4240,
+      "w": 390,
+      "h": 1500,
+      "title": "Journal — refs and full timelines",
+      "is_interactive": true,
+      "radius": 24
+    },
+    "Settings.dc.html": {
+      "x": 1880,
+      "y": 4240,
+      "w": 390,
+      "h": 1640,
+      "title": "Settings — capital, limits, connections",
+      "is_interactive": true,
+      "radius": 24
+    },
+    "FindSaved.dc.html": {
+      "x": 1410,
+      "y": 3040,
+      "w": 390,
+      "h": 844,
+      "title": "Find · saved trades",
+      "radius": 24,
+      "is_interactive": true
+    },
+    "FindFilters.dc.html": {
+      "x": 1880,
+      "y": 3040,
+      "w": 390,
+      "h": 844,
+      "title": "Find · filters sheet",
+      "radius": 24,
+      "is_interactive": true
+    },
+    "MarketOverview.dc.html": {
+      "x": 0,
+      "y": 6240,
+      "w": 390,
+      "h": 1780,
+      "title": "Market · Overview — chart, copilot, the market's read",
+      "radius": 24,
+      "is_interactive": true
+    },
+    "MarketStrategies.dc.html": {
+      "x": 470,
+      "y": 6240,
+      "w": 390,
+      "h": 1240,
+      "title": "Market · Strategies — opens first",
+      "radius": 24
+    },
+    "MarketSwitch.dc.html": {
+      "x": 940,
+      "y": 6240,
+      "w": 390,
+      "h": 844,
+      "title": "Market · switch sheet",
+      "radius": 24,
+      "is_interactive": true
+    },
+    "BuildReview.dc.html": {
+      "x": 0,
+      "y": 8440,
+      "w": 390,
+      "h": 844,
+      "title": "Build · review, then send",
+      "radius": 24,
+      "is_interactive": true
+    },
+    "BuildLoading.dc.html": {
+      "x": 470,
+      "y": 8440,
+      "w": 390,
+      "h": 640,
+      "title": "Build · loading",
+      "radius": 24
+    },
+    "BuildNoData.dc.html": {
+      "x": 940,
+      "y": 8440,
+      "w": 390,
+      "h": 640,
+      "title": "Build · no quotes",
+      "radius": 24
+    },
+    "BuildEmpty.dc.html": {
+      "x": 1410,
+      "y": 8440,
+      "w": 390,
+      "h": 640,
+      "title": "Build · empty",
+      "radius": 24
+    },
+    "FindB.dc.html": {
+      "w": 390,
+      "radius": 24,
+      "x": 2320,
+      "y": 0,
+      "h": 844,
+      "title": "1B · Find, version B — one row of chips",
+      "is_interactive": true
+    }
+  },
+  "order": [
+    "Main.dc.html",
+    "Market.dc.html",
+    "Build.dc.html",
+    "Define.dc.html",
+    "FindLoading.dc.html",
+    "FindStale.dc.html",
+    "FindEmpty.dc.html",
+    "Positions.dc.html",
+    "PositionDetail.dc.html",
+    "Orders.dc.html",
+    "Journal.dc.html",
+    "Settings.dc.html",
+    "FindSaved.dc.html",
+    "FindFilters.dc.html",
+    "MarketOverview.dc.html",
+    "MarketStrategies.dc.html",
+    "MarketSwitch.dc.html",
+    "BuildReview.dc.html",
+    "BuildLoading.dc.html",
+    "BuildNoData.dc.html",
+    "BuildEmpty.dc.html",
+    "FindB.dc.html"
+  ],
+  "notes": {
+    "flowTitle": {
+      "x": 0,
+      "y": -300,
+      "text": "Options Strategy Lab — Find → Market → Build",
+      "kind": "title1",
+      "maxW": 2710
+    },
+    "readme": {
+      "x": 1880,
+      "y": 0,
+      "w": 360,
+      "maxH": 700,
+      "text": "Come leggere questi mockup\n\n• Percorso: Find → CORN apre il mercato su Strategies → Build → Send → revisione → Orders. Il mercato ha 3 tab: Overview (grafico, copilot e lettura del mercato), Strategies (si apre per prima), Chain (avanzato, per comporre le gambe a mano).\n\n• Il supporto alla strategia sta in Build, sotto Why this trade: i 4 fattori letti contro il trade e le cinque righe.\n\n• Find ha due versioni da confrontare: A (qui a sinistra) e B (a destra), con tutti i controlli in una fila di chip.\n\n• Numeri di esempio, coerenti ovunque: CORN 18/17 → chance 73%, future avg +$4, rischio $75; at risk $307 di $2,500. Score e confidence seguono le formule di signals.js.\n\n• Le schermate col segno blu funzionano in Play; fuori da Play un tocco seleziona, non apre."
+    },
+    "statesTitle": {
+      "x": 0,
+      "y": 2740,
+      "text": "Find — loading · stale · nothing fits · saved · filters",
+      "kind": "title1",
+      "maxW": 2270
+    },
+    "positionsTitle": {
+      "x": 0,
+      "y": 3940,
+      "text": "Positions · Orders · Journal · Settings",
+      "kind": "title1",
+      "maxW": 2270
+    },
+    "marketTitle": {
+      "x": 0,
+      "y": 5940,
+      "text": "Market — overview · strategies · switch",
+      "kind": "title1",
+      "maxW": 1330
+    },
+    "buildTitle": {
+      "x": 0,
+      "y": 8140,
+      "text": "Build — review and send · loading · no quotes · empty",
+      "kind": "title1",
+      "maxW": 1800
+    }
+  },
+  "designSystems": []
+}

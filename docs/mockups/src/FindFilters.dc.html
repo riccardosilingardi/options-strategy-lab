@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Find — filters</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+.t-dark{--bg:#14181d;--panel:#1a1f26;--line:#2a2f36;--field:#6b7685;--ink:#f5f0e6;--mut:#8b95a1;--dim:#7d8794;--amber:#e8b545;--green:#7fb85c;--red:#d66a5a;--blue:#5aa7d6;--body:#c9d1d9;--on:#14181d;--action:#5aa7d6;--raise:#222831;--scrim:rgba(6,8,10,0.66)}
+.t-light{--bg:#f5f6f7;--panel:#ffffff;--line:#dcdfe3;--field:#7a8491;--ink:#1c2128;--mut:#5a6472;--dim:#616b78;--amber:#8a6300;--green:#2f6f45;--red:#b23a2b;--blue:#1f6391;--body:#2a3038;--on:#ffffff;--action:#1f6391;--raise:#eceff2;--scrim:rgba(20,24,29,0.45)}
+.sans{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.mono{font-family:ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums}
+button,select,input{font:inherit;color:inherit}
+button{cursor:pointer}
+a{color:var(--blue)}a:hover{color:var(--ink)}
+.slider{width:100%;height:32px;margin:0;display:block;accent-color:var(--amber)}
+.chip{min-height:40px;padding:0 12px;border:1px solid var(--field);background:transparent;color:var(--mut);border-radius:999px;font-size:13px;font-weight:400}
+.chip.on{background:var(--ink);border-color:var(--ink);color:var(--bg);font-weight:700}
+.row{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.amberA{flex:2;min-height:48px;display:flex;align-items:center;justify-content:center;border-radius:10px;background:var(--amber);color:var(--on);text-decoration:none;font-size:15px;font-weight:700}
+a.amberA:hover{color:var(--on)}
+.ghost{flex:1;min-height:48px;border:1px solid var(--field);border-radius:10px;background:transparent;color:var(--ink);font-size:13px;font-weight:700}
+</style>
+</helmet>
+<div class="{{ themeClass }} sans" style="width: 390px; height: 844px; box-sizing: border-box; position: relative; overflow: hidden; background: var(--bg); color: var(--ink)">
+<div aria-hidden="true" style="position: absolute; left: 0; top: 0; width: 390px; height: 844px">
+<dc-import name="Main" hint-size="390px,844px"></dc-import>
+</div>
+<div aria-hidden="true" style="position: absolute; left: 0; top: 0; right: 0; bottom: 0; background: var(--scrim)"></div>
+<section role="dialog" aria-modal="true" aria-labelledby="fl-h" style="position: absolute; left: 0; right: 0; bottom: 0; background: var(--panel); border-top: 1px solid var(--field); border-radius: 18px 18px 0 0; padding: 8px 16px 20px; display: flex; flex-direction: column; gap: 14px">
+<span aria-hidden="true" style="align-self: center; width: 40px; height: 4px; border-radius: 2px; background: var(--field)"></span>
+<div style="display: flex; align-items: center; justify-content: space-between">
+<h2 id="fl-h" style="margin: 0; font-size: 18px; font-weight: 700">Filters</h2>
+<a href="Main.dc.html" aria-label="Close" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: var(--ink)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="M6 6l12 12"></path></svg></a>
+</div>
+<div>
+<div class="row"><label for="f-b" style="font-size: 13px; color: var(--mut)">Budget per trade</label><span class="mono" style="font-size: 15px; font-weight: 700">{{ budgetTxt }} <span style="font-size: 12px; font-weight: 400; color: var(--dim)">{{ budgetPct }}</span></span></div>
+<input id="f-b" class="slider" type="range" min="50" max="1000" step="25" value="{{ budget }}" onChange="{{ setBudget }}">
+</div>
+<div>
+<div class="row"><label for="f-c" style="font-size: 13px; color: var(--mut)">Chance at least</label><span class="mono" style="font-size: 15px; font-weight: 700">{{ chanceTxt }}</span></div>
+<input id="f-c" class="slider" type="range" min="0" max="90" step="5" value="{{ chance }}" onChange="{{ setChance }}">
+</div>
+<div>
+<div class="row"><label for="f-r" style="font-size: 13px; color: var(--mut)">Return on risk at least</label><span class="mono" style="font-size: 15px; font-weight: 700">{{ rrTxt }}</span></div>
+<input id="f-r" class="slider" type="range" min="25" max="200" step="5" value="{{ rr }}" onChange="{{ setRr }}">
+<p style="margin: 2px 0 0; font-size: 12px; color: var(--dim)">25% is the app's own floor; it never goes lower.</p>
+</div>
+<div style="display: flex; flex-direction: column; gap: 6px">
+<span style="font-size: 13px; color: var(--mut)">Direction</span>
+<div role="group" aria-label="Direction" style="display: flex; flex-wrap: wrap; gap: 6px">
+<sc-for list="{{ dirs }}" as="d" hint-placeholder-count="6">
+<button type="button" class="chip {{ d.cls }}" aria-pressed="{{ d.on }}" onClick="{{ d.pick }}">{{ d.label }}</button>
+</sc-for>
+</div>
+<p style="margin: 0; font-size: 12px; line-height: 1.5; color: var(--dim)">{{ dirNote }}</p>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 6px">
+<button type="button" class="chip {{ posCls }}" aria-pressed="{{ posOnly }}" onClick="{{ togglePos }}" style="font-size: 12px">Only a positive future avg</button>
+<button type="button" class="chip {{ hideCls }}" aria-pressed="{{ hideMiss }}" onClick="{{ toggleHide }}" style="font-size: 12px">Hide cards that miss</button>
+</div>
+<div style="display: flex; gap: 8px">
+<button type="button" class="ghost" onClick="{{ reset }}">Reset</button>
+<a href="Main.dc.html" class="amberA">{{ showTxt }}</a>
+</div>
+</section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":true,"section":"Theme"},"$preview":{"width":390,"height":844}}'>
+// The same ten cards Find lists (sample), so the count on the button is the list you will see.
+var MKTS = [
+  { tk: "GLD", dir: 1, chance: 76, rr: 0.28, risk: 390, fut: 9 }, { tk: "CORN", dir: 1, chance: 73, rr: 0.33, risk: 75, fut: 4 },
+  { tk: "SLV", dir: 0, chance: 64, rr: 0.38, risk: 181, fut: 5 }, { tk: "WEAT", dir: -1, chance: 66, rr: 0.30, risk: 77, fut: 2 },
+  { tk: "USO", dir: -1, chance: 62, rr: 0.36, risk: 220, fut: 3 }, { tk: "SOYB", dir: 0, chance: 58, rr: 0.41, risk: 142, fut: 3 },
+  { tk: "XLE", dir: 0, chance: 57, rr: 0.45, risk: 275, fut: 1 }, { tk: "BOIL", dir: 0, chance: 54, rr: 0.62, risk: 620, fut: 11 },
+  { tk: "GDX", dir: 1, chance: 44, rr: 1.10, risk: 240, fut: 7 }, { tk: "UNG", dir: 1, chance: 38, rr: 1.45, risk: 95, fut: -5 }
+];
+var DIRS = [{ id: "signals", label: "Signals decide" }, { id: "vbull", label: "▲▲ Very bull" }, { id: "bull", label: "▲ Bull" }, { id: "neutral", label: "≈ Neutral" }, { id: "bear", label: "▼ Bear" }, { id: "vbear", label: "▼▼ Very bear" }];
+var START = { budget: 500, chance: 0, rr: 25, dir: "signals", posOnly: true, hideMiss: false };
+function money(x) { return "$" + Math.round(x).toLocaleString("en-US"); }
+class Component extends DCLogic {
+  constructor(props) { super(props); this.state = Object.assign({}, START); }
+  renderVals() {
+    var self = this, s = this.state, dark = this.props.dark ?? true;
+    var want = { bull: 1, vbull: 1, bear: -1, vbear: -1, neutral: 0 }[s.dir];
+    var fits = MKTS.filter(function (m) {
+      if (s.dir !== "signals" && m.dir !== want) return false;
+      return m.risk <= s.budget && m.chance >= s.chance && m.rr * 100 >= s.rr && (!s.posOnly || m.fut > 0);
+    }).length;
+    var pct = s.budget / 100;
+    return {
+      themeClass: dark ? "t-dark" : "t-light",
+      budget: s.budget, budgetTxt: money(s.budget), budgetPct: (pct % 1 ? pct.toFixed(1) : pct) + "% of $10,000",
+      setBudget: function (e) { self.setState({ budget: +e.target.value }); },
+      chance: s.chance, chanceTxt: s.chance ? s.chance + "%" : "any", setChance: function (e) { self.setState({ chance: +e.target.value }); },
+      rr: s.rr, rrTxt: s.rr + "%", setRr: function (e) { self.setState({ rr: +e.target.value }); },
+      dirs: DIRS.map(function (d) { return { label: d.label, on: s.dir === d.id, cls: s.dir === d.id ? "on" : "", pick: function () { self.setState({ dir: d.id }); } }; }),
+      dirNote: s.dir === "signals" ? "Each market in the direction its four factors give, plus its Neutral cards." :
+        (s.dir === "vbull" || s.dir === "vbear") ? "Very is your call, never the signals': Build then offers long options and butterflies." : "Your direction for every market, whatever its signals say.",
+      posOnly: s.posOnly, posCls: s.posOnly ? "on" : "", togglePos: function () { self.setState({ posOnly: !s.posOnly }); },
+      hideMiss: s.hideMiss, hideCls: s.hideMiss ? "on" : "", toggleHide: function () { self.setState({ hideMiss: !s.hideMiss }); },
+      reset: function () { self.setState(Object.assign({}, START)); },
+      showTxt: s.hideMiss ? "Show " + fits + " card" + (fits === 1 ? "" : "s") : "Show 10 · " + fits + " fit"
+    };
+  }
+}
+</script>
+</body>
+</html>

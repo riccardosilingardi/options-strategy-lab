@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Build — review and send</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+.t-dark{--bg:#14181d;--panel:#1a1f26;--line:#2a2f36;--field:#6b7685;--ink:#f5f0e6;--mut:#8b95a1;--dim:#7d8794;--amber:#e8b545;--green:#7fb85c;--red:#d66a5a;--blue:#5aa7d6;--body:#c9d1d9;--on:#14181d;--action:#5aa7d6;--raise:#222831;--scrim:rgba(6,8,10,0.66)}
+.t-light{--bg:#f5f6f7;--panel:#ffffff;--line:#dcdfe3;--field:#7a8491;--ink:#1c2128;--mut:#5a6472;--dim:#616b78;--amber:#8a6300;--green:#2f6f45;--red:#b23a2b;--blue:#1f6391;--body:#2a3038;--on:#ffffff;--action:#1f6391;--raise:#eceff2;--scrim:rgba(20,24,29,0.45)}
+.sans{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.mono{font-family:ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums}
+button,select,input{font:inherit;color:inherit}
+button{cursor:pointer}
+a{color:var(--blue)}a:hover{color:var(--ink)}
+.chk{display:grid;grid-template-columns:20px minmax(0,1fr) auto;gap:8px;align-items:baseline;font-size:13px;line-height:1.5;padding:4px 0}
+.ok{color:var(--green);font-weight:700}
+.act{flex:2;min-height:48px;border:none;border-radius:10px;background:var(--action);color:var(--on);font-size:15px;font-weight:700}
+.ghostA{flex:1;min-height:48px;display:flex;align-items:center;justify-content:center;border:1px solid var(--field);border-radius:10px;color:var(--ink);text-decoration:none;font-size:13px;font-weight:700}
+</style>
+</helmet>
+<div class="{{ themeClass }} sans" style="width: 390px; height: 844px; box-sizing: border-box; position: relative; overflow: hidden; background: var(--bg); color: var(--ink)">
+<div aria-hidden="true" style="position: absolute; left: 0; top: 0; width: 390px; height: 2640px">
+<dc-import name="Build" hint-size="390px,2640px"></dc-import>
+</div>
+<div aria-hidden="true" style="position: absolute; left: 0; top: 0; right: 0; bottom: 0; background: var(--scrim)"></div>
+<section role="dialog" aria-modal="true" aria-labelledby="rv-h" style="position: absolute; left: 0; right: 0; bottom: 0; background: var(--panel); border-top: 1px solid var(--field); border-radius: 18px 18px 0 0; padding: 8px 16px 20px; display: flex; flex-direction: column; gap: 12px">
+<span aria-hidden="true" style="align-self: center; width: 40px; height: 4px; border-radius: 2px; background: var(--field)"></span>
+<sc-if value="{{ reviewing }}" hint-placeholder-val="{{ true }}">
+<div>
+<h2 id="rv-h" style="margin: 0; font-size: 18px; font-weight: 700">Review, then send</h2>
+<p style="margin: 2px 0 0; font-size: 12px; color: var(--mut)">Paper account · Alpaca · second of two taps</p>
+</div>
+<div style="padding: 10px 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; display: flex; flex-direction: column; gap: 6px">
+<div style="display: flex; justify-content: space-between; gap: 8px; font-size: 13px"><span><b>Sell to open</b> 1 × 18 put</span><span class="mono" style="color: var(--mut)">CORN261120P00018000</span></div>
+<div style="display: flex; justify-content: space-between; gap: 8px; font-size: 13px"><span><b>Buy to open</b> 1 × 17 put</span><span class="mono" style="color: var(--mut)">CORN261120P00017000</span></div>
+<div class="mono" style="font-size: 15px; font-weight: 700; padding-top: 6px; border-top: 1px solid var(--line)">Limit $0.25 credit · day · ×1</div>
+</div>
+<div aria-label="Risk gate checks">
+<div class="chk"><span class="ok">✓</span><span>Most it can lose is known</span><span class="mono">$75</span></div>
+<div class="chk"><span class="ok">✓</span><span>Inside the 5% per-trade cap</span><span class="mono">$75 of $500</span></div>
+<div class="chk"><span class="ok">✓</span><span>Open risk after this</span><span class="mono">$307 of $2,500</span></div>
+<div class="chk"><span class="ok">✓</span><span>No uncovered legs</span><span></span></div>
+<div class="chk"><span class="ok">✓</span><span>Outside the 21-day exit</span><span class="mono">47 days</span></div>
+<div class="chk"><span class="ok">✓</span><span>Open interest above this chain's floor</span><span class="mono">405 · 162</span></div>
+</div>
+<p style="margin: 0; font-size: 12px; line-height: 1.5; color: var(--mut)">Market closed: Alpaca holds the order until Mon 15:30 your time.</p>
+<div style="display: flex; gap: 8px">
+<a href="Build.dc.html" class="ghostA">Back</a>
+<button type="button" class="act" onClick="{{ send }}">Send to Alpaca</button>
+</div>
+</sc-if>
+<sc-if value="{{ sent }}" hint-placeholder-val="{{ false }}">
+<div role="status" style="display: flex; flex-direction: column; gap: 10px">
+<h2 style="margin: 0; font-size: 18px; font-weight: 700"><span class="ok">✓</span> Sent. Alpaca accepted it.</h2>
+<p class="mono" style="margin: 0; font-size: 13px; line-height: 1.5">0.25 credit · day · filled 0 of 1<br><span style="color: var(--mut)">waits for Mon 15:30 your time</span></p>
+<p style="margin: 0; font-size: 13px; line-height: 1.5; color: var(--body)"><span class="mono">J-0007</span> is open in the Journal, with this order's id and the reason: ▲ 3 of 4 agree · chance 73%.</p>
+<div style="display: flex; gap: 8px">
+<a href="Journal.dc.html" class="ghostA">Journal</a>
+<a href="Orders.dc.html" class="ghostA" style="flex: 2; border-color: var(--action); color: var(--action)">See it in Orders</a>
+</div>
+</div>
+</sc-if>
+</section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":true,"section":"Theme"},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(props) { super(props); this.state = { sent: false }; }
+  renderVals() {
+    var self = this, dark = this.props.dark ?? true;
+    return { themeClass: dark ? "t-dark" : "t-light", reviewing: !this.state.sent, sent: this.state.sent,
+      send: function () { self.setState({ sent: true }); } };
+  }
+}
+</script>
+</body>
+</html>
