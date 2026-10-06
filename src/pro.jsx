@@ -1164,21 +1164,43 @@ export function Markdown({ text, style }) {
   return <div style={{ fontSize: FS.sm, color: T.body, ...style }}>{blocks}</div>;
 }
 
-/** The opening every Build question carries (redesign PR 2): the copilot explains; it never proposes or places a trade. */
+/** The opening every Build and Positions question carries (redesign PR 2; PR 3): the copilot explains; it never proposes
+ *  or places a trade. */
 export const COPILOT_EXPLAIN_ONLY = "You explain; you never propose a trade, a structure, a size or an order, and you never tell me to buy, sell or close.";
+/**
+ * THE COPILOT, BY PLACE (owner, 6 Oct 2026: "It depends where it is. In Find, a preset analyses the cards and, under the
+ * filters set, makes objective comparisons that highlight or suggest the best strategy. In Build it explains the
+ * strategy. In Positions it analyses the position, the exit strategy, where you started from."). Each question names
+ * its `place`; a screen shows its own place's questions and no other. PRD §1, "Copilots", holds the limits.
+ *   find       ranks and highlights AMONG THE CARDS THE APP BUILT under the filters set, citing each card's own figures
+ *              and naming the filters; never a structure that is not a card, never a size past the gate, never a send.
+ *              (Its place on Find is redesign PR 4: no screen offers it yet.)
+ *   build      explains the loaded trade.
+ *   positions  reviews the position against its entry and its exit plan.
+ *   desk       the older general questions (news across the radar), kept where they were (More on this trade, the desk).
+ */
 export const SKILLS = [
-  { id: "pretrade", label: "Pre-trade analysis", prompt: `Run the pre-trade analysis of the current strategy: structure, Greeks, risk/reward, breakevens against support and resistance, seasonal alignment and news. Finish with a GO/NO-GO checklist and a position size within the per-trade limit (${perTradeCapLabel()}).` },
-  { id: "positions", label: "Position review", prompt: `Review the open positions against the rules (${ruleBadge()}): for each one give → HOLD / CLOSE / ROLL with the reasoning and the levels to watch. Remember the ${stopLossLabel()} rule is a warning, never an automatic close.` },
-  { id: "news", label: "News impact", prompt: "Analyse the tagged news in context: which items affect my positions and the underlyings on the radar? Separate noise from signal, with cause→effect and a time horizon." },
-  { id: "radar", label: "Opportunity radar", prompt: `From the seasonal scanner and the weather signals, propose the 2 best opportunities of this week with a suggested structure (relative strikes, ~${RULES.targetEntryDTE} DTE), the thesis, the risk and the entry trigger. Nothing below ${RULES.minEntryDTE} DTE at entry: the risk gate refuses it.` },
+  { id: "pretrade", place: "build", label: "Pre-trade analysis", prompt: `${COPILOT_EXPLAIN_ONLY} Explain the current strategy before it is sent: its structure, its Greeks, its risk and reward, its breakevens against support and resistance, how the season lines up with it, and the news that touches it. Then read back the risk gate's checks as the app worked them out (the review checklist in the context: each one as passed or failed, never your own verdict) and the size the app sized, with its share of the per-trade limit (${perTradeCapLabel()}). Do not say GO or NO-GO and do not suggest another size: say what each check means for this trade.` },
+  { id: "news", place: "desk", label: "News impact", prompt: "Analyse the tagged news in context: which items affect my positions and the underlyings on the radar? Separate noise from signal, with cause→effect and a time horizon." },
+  { id: "radar", place: "find", label: "Compare the cards", prompt: `From ONLY the cards the app built under the filters I set (findCards and findFilters in the context), compare them and highlight the best one or two for those filters. Name the filters first. For every card you mention, cite its own figures as the app printed them: you risk, max profit, chance, return on risk, future avg and past yrs. Rank only what is in the list: never propose a structure, a strike or an expiry that is not one of these cards, never a size past the per-trade limit (${perTradeCapLabel()}), and never tell me to send an order. If no card fits the filters, say so and which filter binds.` },
   /* REDESIGN PR 2 (owner's mockup "3 · Build"): three questions about the LOADED trade. Each one tells the model it
      explains and never proposes a trade (PRD §1: copilots explain; they never propose or place one). */
-  { id: "wrong", label: "What would make it wrong?", prompt: `${COPILOT_EXPLAIN_ONLY} About the current strategy only: what would make it wrong? Name the price levels, the dates (the expiry and the ${RULES.exitDTE}-day exit) and the events before expiry that would turn it against me, and which of the four factors (seasonality, the price trend, weather, news) would have to change. Explain what each would mean for this trade.` },
-  { id: "compare", label: "Compare with the other cards", prompt: `${COPILOT_EXPLAIN_ONLY} Compare the current strategy with the other cards the app lists for the same market (otherCards in the context): what each one bets on, where its risk and its chance differ, and what the trade-off between them is. Do not rank them and do not say which to take: explain the differences.` },
-  { id: "newsmove", label: "News that could move it", prompt: `${COPILOT_EXPLAIN_ONLY} From the tagged news in the context, which items could move the current strategy's market before its expiry, in which direction, and why? Separate noise from signal, with cause and effect and a time horizon, and say what each would do to this trade.` },
+  { id: "wrong", place: "build", label: "What would make it wrong?", prompt: `${COPILOT_EXPLAIN_ONLY} About the current strategy only: what would make it wrong? Name the price levels, the dates (the expiry and the ${RULES.exitDTE}-day exit) and the events before expiry that would turn it against me, and which of the four factors (seasonality, the price trend, weather, news) would have to change. Explain what each would mean for this trade.` },
+  { id: "compare", place: "build", label: "Compare with the other cards", prompt: `${COPILOT_EXPLAIN_ONLY} Compare the current strategy with the other cards the app lists for the same market (otherCards in the context): what each one bets on, where its risk and its chance differ, and what the trade-off between them is. Do not rank them and do not say which to take: explain the differences.` },
+  { id: "newsmove", place: "build", label: "News that could move it", prompt: `${COPILOT_EXPLAIN_ONLY} From the tagged news in the context, which items could move the current strategy's market before its expiry, in which direction, and why? Separate noise from signal, with cause and effect and a time horizon, and say what each would do to this trade.` },
+  /* REDESIGN PR 3 (TASK 3): the position's screen asks about ONE open position (position in the context): its entry,
+     its exit plan, what has changed since. They replace PR #38's "Position review", which asked for HOLD / CLOSE / ROLL
+     on every position at once. They review; they never close, roll or open anything. */
+  { id: "posReview", place: "positions", label: "Review this position", prompt: `${COPILOT_EXPLAIN_ONLY} About this one open position only (position in the context): where does it stand against its entry and against its exit plan? Read its profit now against the take-profit target, its days left against the ${RULES.exitDTE}-day time exit, and its loss against the stop warning (${stopLossLabel()}, a warning, never an automatic close). Say which exit is nearest and what would have to happen for it to be reached. Do not tell me to close or to keep it: explain where it is.` },
+  { id: "posExit", place: "positions", label: "The exit from here", prompt: `${COPILOT_EXPLAIN_ONLY} About this one open position (position in the context): explain its exit plan from today — the take-profit target, the ${RULES.exitDTE}-day time exit and its date, the stop warning — what a close at a limit would cost against the book in the context (bid, mid, ask), and what each exit would leave on the record. The exit rules were fixed at entry: explain them, do not change them.` },
+  { id: "posSince", place: "positions", label: "Since I opened it", prompt: `${COPILOT_EXPLAIN_ONLY} About this one open position (position in the context): what has changed since I opened it? Compare the figures at entry with now (you risk, max profit, chance, return on risk) and the four factors at entry with now (seasonality, the price trend, weather, news), name each reason I opened it that has turned and what that means for this position. Quote only the figures in the context.` },
 ];
 /** The four questions Build's copilot shows (owner's mockup), in order; the rest of SKILLS stay where they were. */
 export const BUILD_SKILL_IDS = Object.freeze(["pretrade", "wrong", "compare", "newsmove"]);
+/** The three a position's screen asks (redesign PR 3, TASK 3), in order. */
+export const POSITION_SKILL_IDS = Object.freeze(["posReview", "posExit", "posSince"]);
+/** The questions a place shows: never another place's. */
+export const skillsFor = (place) => SKILLS.filter((s) => s.place === place);
 /**
  * Pull the text deltas out of one or more SSE frames.
  *
@@ -1363,7 +1385,7 @@ export async function askAI(_key, messages, contextStr, onDelta, system = SYSTEM
   return (j.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
 }
 export function buildContext(ctx) {
-  const { store, scan, news, ticker, legs, expKey, A, spot, seasonalSrc, otherCards = null } = ctx;
+  const { store, scan, news, ticker, legs, expKey, A, spot, seasonalSrc, otherCards = null, reviewChecks = null, sized = null, position = null } = ctx;
   return JSON.stringify({
     date: new Date().toISOString().slice(0, 10),
     currentTicker: ticker,
@@ -1402,6 +1424,12 @@ export function buildContext(ctx) {
     // THE OTHER CARDS FOR THIS MARKET (redesign PR 2, "Compare with the other cards"): Find's own figures, read, never
     // recomputed. Null when the caller did not hand any.
     otherCards: Array.isArray(otherCards) ? otherCards : null,
+    // THE GATE'S CHECKS AND THE SIZE THE APP SIZED (redesign PR 3, "Pre-trade analysis" explains them; it never decides
+    // them): the review sheet's own rows, read. Null when the caller did not hand them.
+    reviewChecklist: Array.isArray(reviewChecks) ? reviewChecks.map((c) => ({ check: c.text, value: c.value ?? null, passed: c.ok ?? null })) : null,
+    sizedByTheApp: sized || null,
+    // ONE OPEN POSITION (redesign PR 3, the position's screen): its entry, its exit plan, now — the screen's own figures.
+    position: position || null,
   });
 }
 /**
@@ -1666,7 +1694,7 @@ export function useCopilot({ ctx, apiKey, convo, setConvo, onAnalysis }) {
   return { msgs, busy, err, partial, input, setInput, send, printConvo };
 }
 
-export function CopilotTab({ ctx, apiKey, convo, setConvo, onAnalysis, skills = SKILLS }) {
+export function CopilotTab({ ctx, apiKey, convo, setConvo, onAnalysis, skills = SKILLS.filter((s) => s.place === "build" || s.place === "desk") }) {
   const { msgs, busy, err, partial, input, setInput, send, printConvo } = useCopilot({ ctx, apiKey, convo, setConvo, onAnalysis });
   return (
     <div style={{ marginTop: 12 }}>

@@ -5067,6 +5067,7 @@ export default function OptionsStrategyLab() {
           };
           const sendBlock = PREVIEW ? PREVIEW_READ_ONLY : DEMO ? DEMO_TOOLTIP : legQtyMsg ? `${legQtyMsg}.`
             : !guard ? "The risk gate has not run on this trade yet." : !guard.pass ? guard.violations.map((v) => v.message).join(" ") : null;
+          const reviewNow = reviewSheetOf({ net, L, sendBlock });
           const tpB = takeProfitTarget({ legs, maxProfit: AE.maxProfit, maxLoss: AE.maxLoss, entryNet: AE.entry, contracts });
           const stopAt = stopWarningLevel({ maxLoss: AE.maxLoss, contracts });
           const v = {
@@ -5086,6 +5087,8 @@ export default function OptionsStrategyLab() {
               onMarketRead: () => goMarket(ticker, "overview"), readLabel: MARKET_READ_LINK },
             copilot: { apiKey: "server", convo: copilot, setConvo: setCopilot, onAnalysis: logAnalysis,
               ctx: { store, scan, news: news[ticker]?.items || [], ticker, legs, expKey, A, spot, seasonalSrc: seas.src, setMsg,
+                reviewChecks: reviewNow.checks,
+                sized: { contracts, riskDollars: L && L.tradeRisk != null ? L.tradeRisk : null, perTradeLimit: L && !L.sizingFree ? L.perTrade : null },
                 otherCards: findSorted.filter((x) => x.tk === ticker && !(x.name === stratName && x.expKey === expKey)).slice(0, 6)
                   .map((x) => ({ name: x.name, legs: legsLine(x.legs), expKey: x.expKey, figures: x.lf.figures, chance: x.lf.pop,
                     futurePer100: x.lf.future ? x.lf.future.per100 : null })) } },
@@ -5123,7 +5126,7 @@ export default function OptionsStrategyLab() {
             ] },
             send: { label: sendLabel({ type: ticket.type, net, n: contracts }), disabled: !!sendBlock, reason: sendBlock,
               footer: SEND_FOOTER(ticket.tif), onSend: () => setDeskSheet("review") },
-            review: reviewSheetOf({ net, L, sendBlock }),
+            review: reviewNow,
             ticket: { legs, expKey, ticker, quotes: bookQuotes, net, estNet: AE.entry, gate, dte, maxLoss: AE.maxLoss, maxProfit: AE.maxProfit,
               entryOverride: roomReason, qty: contracts, cfg: ticket, legPrices: legPrices || [], setMsg: quietTicketMsg,
               onSent: (o) => openPaper(o), qtyBlock: legQtyMsg },

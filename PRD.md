@@ -177,10 +177,21 @@ non-expert trader who wants to learn discipline rather than be sold trades.
   data. Home itself is gone since redesign PR 1 round 2: the app opens on Find.
 - **Autopilot.** A scheduled server job that reads open positions and proposes exits as
   one-tap approval links. It never executes by itself.
-- **Copilots.** An AI explanation of the loaded trade and of the chart. They explain; they
-  never propose or place a trade. (Flagged in redesign PR 2, for the owner: "Opportunity radar" asks for two proposed
-  trades, the copilot's system prompt has decision trees that recommend structures, and "Pre-trade analysis" asks for a
-  GO/NO-GO and a size. Unchanged until the owner decides; the three new Build questions say they never propose.)
+- **Copilots, by place** (owner, 6 Oct 2026: "It depends where it is. In Find, a preset analyses the cards and, under
+  the filters set, makes objective comparisons that highlight or suggest the best strategy. In Build it explains the
+  strategy. In Positions it analyses the position, the exit strategy, where you started from."). Every question in
+  `SKILLS` (pro.jsx, the one home) names its place, and a screen offers only its own place's questions.
+  - **In Find** a preset may rank and highlight among the cards the app itself built under the current filters, citing
+    each card's own figures (you risk, max profit, chance, return on risk, future avg, past yrs) and naming the filters.
+    It never invents a structure, a strike or an expiry that is not a card, never sizes past the per-trade limit, and
+    never sends. ("Compare the cards", once "Opportunity radar"; its place on Find is redesign PR 4.)
+  - **In Build** it explains the loaded trade: "Pre-trade analysis" (its structure, Greeks, risk and reward, breakevens,
+    season and news, then the gate's checks and the app's size read back — no GO/NO-GO, no size of its own), "What would
+    make it wrong?", "Compare with the other cards", "News that could move it".
+  - **In Positions** it reviews one position against its entry and its exit plan: "Review this position", "The exit from
+    here", "Since I opened it" (on the position's screen). It never closes, rolls or opens anything.
+  - The chart copilot (the market page's Overview) explains the chart. No copilot places a trade; every answer is filed
+    in the Journal. (Left for PR 4: the system prompt's decision trees still recommend structures.)
 - **Deploy previews are read-only** (redesign PR 2, TASK 0a, after deploy-preview-51 overwrote production's book on
   5 Oct 2026). A preview reads everything production reads, but every Netlify function that writes or sends (the state
   save, every order, Modify and cancel, the one-tap approval, the autopilot's run, the Alpha Vantage cache write) answers
