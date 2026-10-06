@@ -41,6 +41,10 @@ const SHOTS = [
   ["build-limit", "dark", async (p) => { await toUng(p); await tap(p, "[data-market] button", "Build ›", 2000);
     await tap(p, "[data-limit-choices] button", "Pay", 600);
     await p.evaluate(() => document.querySelector("[data-build-order]")?.scrollIntoView()); await p.waitForTimeout(400); }],
+  // PR 4d: the Liquidity sheet, at rest and with the numbers open.
+  ["find-liquidity", "dark", async (p) => { await p.waitForTimeout(1500); await tap(p, "[data-chip-row] button", "Liquidity", 1200); }],
+  ["find-liquidity-open", "dark", async (p) => { await p.waitForTimeout(1500); await tap(p, "[data-chip-row] button", "Liquidity", 1200);
+    await tap(p, "[role=dialog] button", "open", 800); }, { full: true }],
   // PR 4c: a closed trade in the Journal, opened, its lesson asked (the stub copilot answers).
   ["journal-lesson", "dark", async (p) => { await p.waitForTimeout(1500); await tap(p, "nav button", "Journal", 1200);
     await tap(p, "[data-journal-closed] li:nth-child(1) > button", null, 600);

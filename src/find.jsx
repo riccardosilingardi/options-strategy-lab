@@ -47,7 +47,7 @@ import { money, chanceText, NO_CEILING, noCeilingNote, noCeilingRankNote, season
   rowSubtitleText, ROW_READING, findReadingLine, rowFailedText, ROW_NO_BOARD, staleBannerLine, staleStatusLine, staleFailLine, RETRY,
   SHOW_FLAGGED_TOGGLE, howConnectLabel, HOW_CONNECT_STEPS, CARD_LABELS, ARIA,
   FIND_HEADING, refreshAria, SETTINGS_WORD, FIND_SEGMENTS_ARIA, RESET_SHEET,
-  FIND_COMPARE_BTN, FIND_COPILOT_TITLE, FIND_COPILOT_HEAD, findCopilotLine,
+  FIND_COMPARE_BTN, FIND_COPILOT_TITLE, FIND_COPILOT_HEAD, findCopilotLine, LIQ_OTHER_HEAD, LIQ_DETAILS, LIQ_REASONS_FOLD,
 } from "./rules.js";
 
 const FS = TYPE.size, FW = TYPE.weight, LH = TYPE.line;
@@ -110,7 +110,7 @@ export function FindStep({
   isSaved = () => false, onSave = () => {}, onOpenMarket = () => {},
   freshness = null,
   compare, showCompare, compareNote, onTickCompare, onClearCompare, onToggleCompare, onTakeToBuild,
-  copilot = null,
+  copilot = null, liquidity = null,
 }) {
   /* ---- WHAT IS IN, AND WHAT IS STILL BEING READ (redesign PR 1). A market being read has no fused result and no rank
      effect, as before; its row waits after the rows that are in, and says what it is waiting for. ---- */
@@ -331,10 +331,36 @@ export function FindStep({
         <RequestControls only={["direction"]} {...sharedControls} />
       </Sheet>
       <Sheet open={sheetId === "liquidity"} title={FIND_SHEET_TITLES.liquidity} value={sheetValue("liquidity")} onClose={closeSheet} footer={footer}>
-        {foldedNode}
+        {/* THE LIQUIDITY SHEET (PR 4d, owner: "the tab and its takeaway are no longer clear"). Today's takeaway first; the
+            four levels as Find's chips, each counting the cards it keeps across every market; the setting's sentence; what
+            else keeps cards out, with its counts; the numbers one fold down. No floor value moves. */}
+        {liquidity && (
+          <div data-liq-panel style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <p data-liq-takeaway style={{ ...sans, margin: 0, fontSize: FS.md, fontWeight: FW.bold, lineHeight: LH.body, color: T.ink }}>{liquidity.takeaway}</p>
+            <div role="group" aria-label="Liquidity floor" data-liq-levels style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {liquidity.levels.map((l) => (
+                <FilterChip key={l.id} off={l.on} name={`${l.label}${l.recommended ? " ✓" : ""}`} value={l.value} valueMono
+                  label={`${l.label}${l.value ? `, ${l.value}` : ""}`} onClick={() => liquidity.onLevel(l.id)} />
+              ))}
+            </div>
+            <Note color={T.mut}>{liquidity.blurb}</Note>
+            {liquidity.warn && <Note color={T.amber} role="note">⚠ {liquidity.warn}</Note>}
+            {fold.reasons && fold.reasons.length > 0 && (
+              <section aria-label={LIQ_OTHER_HEAD} data-liq-other>
+                <h3 style={{ ...sans, margin: "4px 0 2px", fontSize: FS.xs, fontWeight: FW.bold, letterSpacing: "0.08em", color: T.mut }}>{LIQ_OTHER_HEAD}</h3>
+                {fold.reasons.map((r) => (
+                  <div key={r.id} style={{ display: "flex", justifyContent: "space-between", gap: 8, borderTop: `1px solid ${T.line}`, padding: "8px 0", ...sans, fontSize: FS.sm, color: T.body }}>
+                    <span>{r.clause.charAt(0).toUpperCase() + r.clause.slice(1)}</span>
+                    <span style={{ ...mono, fontVariantNumeric: "tabular-nums", color: T.ink }}>{r.count}</span>
+                  </div>
+                ))}
+              </section>
+            )}
+          </div>
+        )}
+        <Fold label="open" tone={T.body} style={{ marginTop: 10 }} summary={LIQ_DETAILS}>{foldedNode}</Fold>
         {/* EVERYTHING THAT EXPLAINS THE LIST, BEHIND ONE "why" (moved here from under the list, owner, 4 Oct 2026). */}
-        <Fold label="why" tone={isLoosened(liqLevel) ? T.red : T.dim} style={{ marginTop: 10 }}
-          summary={fold.summary || `${qualityFloorLine(liqLevel)} Nothing was removed.`}>
+        <Fold label="why" tone={T.dim} style={{ marginTop: 4 }} summary={LIQ_REASONS_FOLD}>
           {t.unpriceable > 0 && <Note color={T.amber} style={{ marginTop: 6 }}>{unpriceableNote(t.unpriceable, what)}</Note>}
           {t.impossible > 0 && <Note color={T.red} style={{ marginTop: 6 }}>{impossibleLossNote(t.impossible, what)}</Note>}
           {t.model > 0 && <Note color={T.red} style={{ marginTop: 6 }}>{modelDisagreementNote(t.model, what)}</Note>}
@@ -348,10 +374,10 @@ export function FindStep({
           {unb > 0 && <Note color={T.dim} style={{ marginTop: 6 }}>{noCeilingRankNote(unb)}</Note>}
           {/* CONFLICT IS LAST ONLY UNDER "FUTURE AVG + SIGNAL" (PR #48). */}
           <Note color={T.dim} style={{ marginTop: 6 }}>Under {findOrderOf("evSignal").label}, CONFLICT markets sort last.</Note>
-          <Note color={isLoosened(liqLevel) ? T.red : T.dim} style={{ marginTop: 6 }}>
+          <Note color={isLoosened(liqLevel) ? T.amber : T.dim} style={{ marginTop: 6 }}>
             {liquiditySettingNote(liqLevel, { ...t, kept: findGen.items.length })}
           </Note>
-          {isLoosened(liqLevel) && <Note color={T.red} style={{ marginTop: 6 }}>{looseningWarning(liqLevel)}</Note>}
+          
           <Note color={T.dim} style={{ marginTop: 8 }}>{qualityFloorSentence(liqLevel)}</Note>
           <Note color={T.dim} style={{ marginTop: 6 }}>
             {`${limits.answered ? "Your" : "The suggested"} per-trade limit: ${money(limits.perTradeLimit)} (${perTradeCapLabel()}).`} Budget is the most you will pay, taken from live prices. For trades where you receive money up front, the limit becomes the capital tied up instead. Chance is the probability of ending in profit at expiry.
