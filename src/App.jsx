@@ -75,7 +75,8 @@ import { FIRST_STEP, stepCarry, candidateOf, candidateKey, legsLine, toggleCompa
 import { PositionCard, PositionDetails } from "./positionCard.jsx";
 import { navOf, createNavHistory } from "./nav.js";
 import { exitProgress, entryVsNow, displayName, fileState, pnlShareOfRisk, pnlShareText, holdsStructure,
-  sizeWords, withExactMaxProfit, maxProfitCorrection, maxProfitCorrectionNote, exitDateOf } from "./positionView.js";
+  sizeWords, withExactMaxProfit, maxProfitCorrection, maxProfitCorrectionNote, exitDateOf,
+  exitLabels, positionMetaLine, pnlShareShort, waitingOrdersLine, positionTitle, cardSentence } from "./positionView.js";
 import { findStatusText, DEFAULT_FIND_ORDER, BUILD_CTA } from "./rules.js";
 // REDESIGN PR 2: Build on the owner's mockup — its words (rules.js) and its screen (build.jsx).
 import { tradeTakeaway, buildSubLine, expiryShort, deltaSharesText, thetaDayText, reasonRuleText, orderBookLine, capLabel,
@@ -86,9 +87,9 @@ import { gateChecklist } from "./wizard.jsx";
 import { undefinedRiskLegs } from "./riskGate.js";
 import { EvidenceBar, EvidenceOverlay, DeskSheet, Fold, DeskCountLine } from "./steps.jsx";
 import { BottomBar, placeOf, NAV_BAR_H, FIND_LIST_END } from "./navBar.jsx";
-import { AccountStrip, PositionsBar, WorkingCloseLine } from "./positions.jsx";
+import { AccountStrip, PositionsBar, PositionsHeader, WorkingCloseLine } from "./positions.jsx";
 import { Note, CheckField, Btn, Panel, Label, Stat, Reveal, mono, sans } from "./ui.jsx";
-import { marketClockLine } from "./clock.js";
+import { marketClockLine, nextOpenDay } from "./clock.js";
 import { BASKET, TICKERS, getU, categoryOf } from "./markets.js";
 
 /* ============================== THEME ============================== */
@@ -3202,11 +3203,12 @@ export default function OptionsStrategyLab() {
       maxLoss: p.maxLoss, entryNet: p.entryNet, contracts: n });
     const share = pnlShareOfRisk(pnl, p, n);
     const exitPlan = takeProfitTarget({ legs: p.legs, maxProfit: p.maxProfit, maxLoss: p.maxLoss, entryNet: p.entryNet });
+    const progress = exitProgress({ p, pnl, dteLeft, tpTarget, n });
     return [p.id, {
       c, s, qp, dteLeft, n, al0, pnl, act, ivNow, seasNow, mcNow, popNow, tpTarget, nowSignals,
-      name: displayName(p), working: closeWorking(p, alSync),
-      shareText: pnlShareText(share),
-      progress: exitProgress({ p, pnl, dteLeft, tpTarget, n }),
+      name: positionTitle(p), working: closeWorking(p, alSync),
+      shareText: pnlShareText(share), shareShort: pnlShareShort(share),
+      progress, labels: exitLabels(progress),
       ev: entryVsNow({ p, n, pnl, popNow, nowSignals }),
       // WHAT ALPACA HOLDS, PER LEG (PR #47, TASK 0b): "9 puts", never `contracts` alone.
       unitNote: `${sizeWords(p)}, the whole position. Now is what is left from here.`,
@@ -3242,6 +3244,18 @@ export default function OptionsStrategyLab() {
                   edgeNote={dm.al0 && dm.al0.edge && dm.al0.edge.thin ? dm.al0.edge.sentence : null}
                   pnlNote={dm.al0 ? dm.al0.pnlNote : null}
                   fileKind={dm.fileKind}
+                  guardian={(
+                    <GuardianPanel
+                      pos={dp} spot={dm.s || dp.entrySpot} dteLeft={dm.dteLeft} ivNow={dm.ivNow}
+                      vol={sigmaFor(dp.ticker)}
+                      seasonalNow={dm.seasNow} pnlNow={dm.pnl} popNow={dm.popNow} chanceNow={dm.mcNow}
+                      seasonalNote={chanceStamp(dm.mcNow, dp.ticker)}
+                      thesisSeasonalNote={seasonalStampNote(dp.thesis, dp.ticker)}
+                      vegaSign={Math.sign(dp.thesis?.vega ?? 1) || 1}
+                      alpaca={!!alpaca} quoteFn={dm.qp}
+                      setMsg={setMsg} logEvent={logEvent} gate={gate}
+                    />
+                  )}
                   onFile={() => { setDetailsId(null); setClosing({ id: dp.id, written: "", err: null }); }}
                   onAnalyse={() => {
                     setDetailsId(null);
@@ -4424,7 +4438,7 @@ export default function OptionsStrategyLab() {
             expiry and seasonality above its list described none of them. It
             stays on Build and everywhere else one ticker is the subject. */}
         {/* (Not on Build since redesign PR 2: the strip is in "More on this trade ▾", under "Market now".) */}
-        {!onFindStep && !onMarketStep && !onBuildStep && tickerStrip}
+        {!onFindStep && !onMarketStep && !onBuildStep && !onPositions && tickerStrip}
 
         {msg && <div style={{ ...mono, fontSize: FS.xs, color: T.amber, border: `1px solid ${T.amber}44`, background: `${T.amber}10`, borderRadius: 6, padding: "7px 10px", margin: chromeless ? "8px 16px 0" : "10px 0 0" }}>{msg}</div>}
 
@@ -5204,14 +5218,14 @@ export default function OptionsStrategyLab() {
             none is a "Not in the app" card, an order with none is a row tagged "sent outside this app" — and its
             Sync is the refresh icon on the bar. Integrations moved to Settings → Connections. */}
         {tab === "positions" && !showSettings && (
-          <div style={{ marginTop: 12 }}>
-            <h2 data-view-heading tabIndex={-1} style={{ ...sans, fontSize: FS.lg, fontWeight: 800, color: T.ink, margin: "0 0 8px", outline: "none" }}>Positions</h2>
+          <div data-positions>
+            <PositionsHeader busy={syncBusy} onSettings={() => setShowSettings(true)}
+              onRefresh={async () => { setSyncBusy(true); try { await syncBroker(); recheckOrders(); } finally { setSyncBusy(false); } }} />
             <AccountStrip account={account || alpaca} risk={exposure} capital={exposure ? exposure.tradingCapital : null} />
             <PositionsBar seg={posSeg} onSeg={(v) => { setPosSeg(v); if (v !== "orders") setFocusOrder(null); }}
-              holdings={ownedPositions.length + unrecorded.length} orders={alpaca && alSync.t ? alSync.orders.length : null}
-              busy={syncBusy} onRefresh={async () => { setSyncBusy(true); try { await syncBroker(); recheckOrders(); } finally { setSyncBusy(false); } }} />
+              holdings={ownedPositions.length + unrecorded.length} orders={alpaca && alSync.t ? alSync.orders.length : null} />
             {posSeg === "positions" && (
-            <div style={{ marginTop: 10 }}>
+            <div style={{ padding: "0 16px" }}>
               {!alpaca && workingOrders.length > 0 && (
                 <Note color={T.amber} style={{ marginBottom: 8 }}>
                   {workingOrders.length} order{workingOrders.length === 1 ? " was" : "s were"} sent and not filled ({workingOrders.map((p) => p.ref || p.ticker).join(", ")}). Alpaca is not connected, so they cannot be read here.
@@ -5219,10 +5233,10 @@ export default function OptionsStrategyLab() {
               )}
               {ownedPositions.length === 0 && unrecorded.length === 0 && (
                 <Note>
-                  Nothing is open.{workingOrders.length > 0 ? " Your orders are under Orders." : ""}{notTakenOrders.length > 0 ? " Orders that ended with nothing bought are under Find → Saved." : ""}
+                  Nothing is open.{workingOrders.length > 0 && !alpaca ? " Your orders are under Orders." : ""}{notTakenOrders.length > 0 ? " Orders that ended with nothing bought are under Find → Saved." : ""}
                 </Note>
               )}
-              <div style={{ display: "grid", gap: 8 }}>
+              <ul data-position-list style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 10 }}>
                 {ownedPositions.map((p) => {
                   /* THE CARD (PR #44, TASK 1): the action, the profit, three exits, the entry against now, and the
                      buttons — `Close at limit` always among them. Everything it prints is in `positionModels`, worked
@@ -5234,28 +5248,17 @@ export default function OptionsStrategyLab() {
                   return (
                     <PositionCard key={p.id} p={p} title={m.name}
                       action={m.act.action || (m.act.kind === "not-held" ? "NOT ON ALPACA" : "NO QUOTE")}
-                      line={m.act.line} notes={m.act.notes} pnl={m.pnl} shareText={m.shareText}
-                      progress={m.progress} ev={m.ev} unitNote={m.unitNote}
+                      line={m.act.action === "HOLD" ? m.act.line : cardSentence({ act: m.act, pnl: m.pnl, progress: m.progress, working: !!m.working })}
+                      notes={m.act.notes} pnl={m.pnl} shareText={m.shareShort}
+                      meta={positionMetaLine(p)} labels={m.labels}
                       /* A CLOSE WORKING HAS NO SECOND CLOSE BUTTON (PR #47, TASK 1): one line and "Manage order". */
                       closeLabel={m.working ? null : "Close at limit"}
                       closeDisabled={!!(ca && (ca.busy || ca.prepared))}
                       closeTitle={DEMO ? DEMO_TOOLTIP : undefined} demo={DEMO}
                       onClose={() => prepareCardClose(p)} onDetails={() => setDetailsId(p.id)}
                       fileKind={m.fileKind} onFile={() => { if (PREVIEW) { setMsg(PREVIEW_READ_ONLY); return; } setClosing({ id: p.id, written: "", err: null }); }}
-                      guardian={(
-                        <GuardianPanel
-                          pos={p} spot={m.s || p.entrySpot} dteLeft={m.dteLeft} ivNow={m.ivNow}
-                          vol={sigmaFor(p.ticker)}
-                          seasonalNow={m.seasNow} pnlNow={m.pnl} popNow={m.popNow} chanceNow={m.mcNow}
-                          seasonalNote={chanceStamp(m.mcNow, p.ticker)}
-                          thesisSeasonalNote={seasonalStampNote(p.thesis, p.ticker)}
-                          vegaSign={Math.sign(p.thesis?.vega ?? 1) || 1}
-                          alpaca={!!alpaca} quoteFn={m.qp}
-                          setMsg={setMsg} logEvent={logEvent} gate={gate}
-                        />
-                      )}>
-                      {/* THE ORDER PRINTS ONCE (PR #47, TASK 1): its row lives in Orders; the card says one line and opens it. */}
-                      {m.working && (() => {
+                      /* THE ORDER PRINTS ONCE (PR #47, TASK 1): its row lives in Orders; the card says one line and opens it. */
+                      foot={m.working ? (() => {
                         const rows = ordersForRecord(p, alSync.orders).filter((o) => orderIntent(o) === "close");
                         const o = rows.find((x) => x.id === p.closeOrder?.id) || rows[0] || null;
                         return (
@@ -5263,7 +5266,7 @@ export default function OptionsStrategyLab() {
                             clockLine={marketClockLine(clock)}
                             onManage={() => { setPosSeg("orders"); setFocusOrder(o ? o.id : null); }} />
                         );
-                      })()}
+                      })() : null}>
                       {ca && <CloseConfirm prep={ca} clock={clock} onSend={() => sendCardClose(p)} onCancel={() => setCloseAt(null)}
                         onChoose={(c) => prepareCardClose(p, c, ca.prepared?.chainUsed || null)} />}
                       {/* FILING ASKS WHY, AND THE ANSWER IS KEPT. A rule close names its rule and needs nothing typed.
@@ -5325,12 +5328,22 @@ export default function OptionsStrategyLab() {
                   <UnrecordedCard key={g.key} group={g} gate={gate} orders={alSync.orders} clock={clock}
                     setMsg={setMsg} onImport={() => importAlpaca(false)} onSent={() => setTimeout(syncBroker, 1500)} />
                 ))}
-              </div>
+                {/* AN ORDER SENT AND NOT FILLED IS NOT A POSITION (the board's last line): it waits in Orders. */}
+                {alpaca && (() => {
+                  const w = waitingOrdersLine(workingOrders, nextOpenDay(clock));
+                  return w ? (
+                    <li data-waiting-line style={{ ...sans, padding: "4px 2px", fontSize: FS.xs, lineHeight: LH.body, color: T.mut }}>
+                      {w[0]}<button type="button" onClick={() => setPosSeg("orders")} style={{ ...sans, fontSize: FS.xs, color: T.blue,
+                        background: "transparent", border: "none", padding: 0, textDecoration: "underline", cursor: "pointer" }}>{w[1]}</button>{w[2]}
+                    </li>
+                  ) : null;
+                })()}
+              </ul>
               <CheckField checked={autoMon} onChange={(e) => setAutoMon(e.target.checked)} style={{ marginTop: 8 }}>refresh prices every 60s</CheckField>
             </div>
             )}
             {posSeg === "orders" && (
-            <div style={{ marginTop: 10 }}>
+            <div style={{ padding: "0 16px" }}>
               {alpaca ? <OrdersPanel orders={alSync.t ? alSync.orders : null} ctx={orderCtx} />
                 : <Note>Alpaca is not connected: Settings → Connections.</Note>}
             </div>

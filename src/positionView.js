@@ -70,6 +70,20 @@ export const displayName = (p) => {
   return structureName(p && p.legs, p && (p.expKey || p.expiry));
 };
 
+/**
+ * THE CARD'S TITLE (redesign PR 3, the board: "Bull call spread 15/17 · 18 Dec"): the structure with its strikes and
+ * expiry when the legs name one (one leg, or a two-leg pair), else the record's own name and the expiry. The stored
+ * name is unchanged.
+ */
+export function positionTitle(p) {
+  const ls = p && Array.isArray(p.legs) ? p.legs.filter(Boolean) : [];
+  const exp = p && (p.expKey || p.expiry);
+  const pair = ls.length === 2 && ls[0].type === ls[1].type && Number(ls[0].side) !== Number(ls[1].side);
+  if (ls.length === 1 || pair) return structureName(ls, exp);
+  const when = shortDate(exp);
+  return `${displayName(p)}${when ? ` · ${when}` : ""}`;
+}
+
 /* ------------------------------------------------------------------
    THE THREE EXITS, AS PROGRESS
 ------------------------------------------------------------------ */
@@ -129,6 +143,73 @@ export function exitProgress({ p, pnl = null, dteLeft = null, tpTarget = null, n
   else stop = { text: `Stop warning: at ${money(level)}`, frac: Number(pnl) < 0 ? clamp01(Number(pnl) / level) : 0,
     state: Number(pnl) <= level ? "reached" : "ok", level };
   return { time, takeProfit, stop };
+}
+
+/**
+ * THE THREE EXITS IN THE CARD'S SHORT WORDS (redesign PR 3, the owner's board "Positions"): take profit, time exit,
+ * stop, each over a 4px bar. Read from `exitProgress()` — the long lines stay on the position's screen, where
+ * THE EXIT PLAN prints them whole. `tone` names the bar: "done" a take profit reached (green), "warn" a time exit or a
+ * stop reached (amber), "field" anything still running.
+ *   "Take profit ✓" · "Time exit 26d" · "Stop -$54"
+ */
+export function exitLabels(progress) {
+  if (!progress) return [];
+  const { takeProfit: tp, time, stop } = progress;
+  const reached = (x) => x && x.state === "reached";
+  return [
+    { id: "takeProfit", text: reached(tp) ? "Take profit ✓" : tp && tp.state === "none" ? "Take profit —" : "Take profit",
+      frac: tp ? tp.frac : 0, tone: reached(tp) ? "done" : "field" },
+    { id: "time", text: reached(time) ? "Time exit ✓" : time && known(time.daysLeft) ? `Time exit ${time.daysLeft}d` : "Time exit —",
+      frac: time ? time.frac : 0, tone: reached(time) ? "warn" : "field" },
+    { id: "stop", text: reached(stop) ? "Stop ✓" : stop && known(stop.level) ? `Stop ${signedMoney$(stop.level)}` : "Stop —",
+      frac: stop ? stop.frac : 0, tone: reached(stop) ? "warn" : "field" },
+  ];
+}
+
+/**
+ * THE CARD'S SENTENCE (the board: "Take profit reached: $24 of $21. The close is already working." / "Stop warning
+ * reached: -$64 against -$62. A warning, not an order: you decide."). Its figures are the ones the action was decided
+ * on — the profit `posAlerts` read, `exitProgress()`'s target and stop level. Any other action keeps
+ * `positionAction()`'s own line; that line, whole, is the position's screen's.
+ */
+export function cardSentence({ act = null, pnl = null, progress = null, working = false } = {}) {
+  if (!act) return null;
+  const still = working ? " The close is already working." : "";
+  const tp = progress && progress.takeProfit, stop = progress && progress.stop;
+  if (act.action === "CLOSE" && act.rule === "take-profit" && known(pnl) && tp && known(tp.target)) {
+    return `Take profit reached: ${money(pnl)} of ${money(tp.target)}.${still}`;
+  }
+  if (act.action === "WARNING" && act.kind === "stop" && known(pnl) && stop && known(stop.level)) {
+    return `Stop warning reached: ${money(pnl)} against ${money(stop.level)}. A warning, not an order: you decide.`;
+  }
+  return `${act.line || ""}${act.action === "CLOSE" ? still : ""}` || null;
+}
+
+/** The card's top line: "J-0002 · UNG · 2 puts" — what Alpaca holds, per leg (`sizeWords()`). */
+export const positionMetaLine = (p = {}) => [p.ref, p.ticker, sizeWords(p)].filter(Boolean).join(" · ");
+
+/** "52% of risk" under the profit (the sign is the profit's own, one line above). Null when unknown. */
+export function pnlShareShort(share) {
+  if (share == null || !Number.isFinite(share)) return null;
+  return `${Math.abs(Math.round(share * 100))}% of risk`;
+}
+
+/**
+ * THE LINE UNDER THE CARDS FOR AN ORDER SENT AND NOT FILLED (the board: "The CORN spread from Build is an order, not a
+ * position yet: it waits in Orders for Monday's open"). `records` are the records at stage "working"; `openDay` is
+ * `nextOpenDay()` (null while the market is open or the clock is unread). Null when nothing waits; otherwise three
+ * parts, [before, "Orders", after], so the screen can make the middle word the way to Orders.
+ */
+export function waitingOrdersLine(records = [], openDay = null) {
+  const rs = (records || []).filter(Boolean);
+  if (!rs.length) return null;
+  const when = openDay ? ` for ${openDay}'s open` : "";
+  if (rs.length === 1) {
+    const r = rs[0];
+    return [`The ${r.ticker} ${unitWords(r.legs)} from Build is an order, not a position yet: it waits in `, "Orders", `${when}.`];
+  }
+  return [`${rs.length} trades from Build are orders, not positions yet (${rs.map((r) => r.ref || r.ticker).join(", ")}): they wait in `,
+    "Orders", `${when}.`];
 }
 
 /* ------------------------------------------------------------------

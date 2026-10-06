@@ -45,6 +45,7 @@ import * as S from "./signals.js";
 // PR #47: the order row's words and the market clock are plain JS too.
 import * as OR from "./orderRow.js";
 import * as CL from "./clock.js";
+import * as PV from "./positionView.js";
 
 // "positions" is the Positions place (PR #44, TASK 1): it is a TAB, not a step of the path, so its block is found by
 // `tab === "positions"`. It is measured by the same counter as the two steps, from the same source.
@@ -217,6 +218,13 @@ export const COPY = {
   closeSummaryLine: () => OR.closeSummaryLine({ symbol: "GDX261030P00094000", qty: "9", side: "sell", limit_price: "7.77", time_in_force: "day" }),
   marketClockLine: () => CL.marketClockLine({ is_open: false, next_open: "2026-10-05T09:30:00-04:00" }, { timeZone: "Europe/Rome", queued: true }),
   workingCloseText: () => OR.workingCloseText("$7.62 credit · GTC · 0 of 9"),
+  // REDESIGN PR 3 (the board "Positions"): the card's sentence in its longest form (the stop warning), its top line,
+  // and the line under the cards for an order sent and not filled.
+  cardSentence: () => PV.cardSentence({ act: { action: "WARNING", kind: "stop", line: "" }, pnl: -153, progress: { stop: { level: -120 } } }),
+  positionMetaLine: () => PV.positionMetaLine({ ref: "J-0003", ticker: "CORN", contracts: 3, legs: [{ side: 1, type: "call", strike: 14, qty: 1 },
+    { side: -1, type: "call", strike: 15, qty: 1 }] }),
+  waitingOrdersLine: () => PV.waitingOrdersLine([{ ticker: "SOYB", legs: [{ side: -1, type: "put", strike: 13, qty: 1 },
+    { side: 1, type: "put", strike: 12, qty: 1 }] }], "Monday").join(""),
   // PR #48: the badge (on CORN's reading) and the card's "Why this place" line (its longest form).
   badgeText: () => S.badgeText({ ticker: "CORN", score: 64, confidence: 86, agreement: "CONFLUENT" }),
   placeLine: () => S.placeLine({ ev100: -12, sent: "bull", fused: { score: 64, confidence: 86, agreement: "CONFLUENT" }, lf: {} }, "evSignal"),

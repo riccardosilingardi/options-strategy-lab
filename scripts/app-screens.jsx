@@ -21,11 +21,13 @@ import { readFileSync } from "node:fs";
 import OptionsStrategyLab from "../src/App.jsx";
 import { normaliseAlpacaChain } from "../src/chain.js";
 import { avMonthlyBody } from "../src/avFixture.js";
+import { bookRecords, bookHoldings, bookOrders } from "./book-fixture.js";
 
 const [mode, ...flags] = (location.hash || "#app").slice(1).split("+");
 const ALL = flags.includes("all");
 // "+reading": only three markets ever answer (Find's "Reading 10 markets · 3 done"); "+stale": every chain was read three
 // days ago (the stale banner); "+poor": a $200 trading capital, so nothing fits the budget ("Nothing fits").
+const BOOK = flags.includes("book");
 const READING = flags.includes("reading"), STALE = flags.includes("stale"), POOR = flags.includes("poor");
 const RAW = JSON.parse(readFileSync("src/fixtures/alpaca-chain-UNG.json", "utf8"));
 // UNG's contracts, under whichever ticker asks (SOYB is Build's default market; its empty state needs a price).
@@ -86,7 +88,7 @@ window.fetch = async (input, init = {}) => {
     const head = { "X-OSL-Paper-Endpoint": "paper-api.alpaca.markets" };
     if (path === "/v2/account") return json({ account_number: "PA3FIXTURE", status: "ACTIVE", equity: "10000", buying_power: "20000", options_buying_power: "10000" }, 200, head);
     if (path === "/v2/clock") return json({ is_open: false, next_open: "2026-10-05T09:30:00-04:00", next_close: "2026-10-05T16:00:00-04:00" }, 200, head);
-    if (path === "/v2/positions") return json([], 200, head);
+    if (path === "/v2/positions") return json(BOOK ? bookHoldings() : [], 200, head);
     if (path.startsWith("/v2/options/contracts")) return json({ option_contracts: [] }, 200, head);
     if (path.startsWith("/v2/orders") && method === "POST") {
       ordersPosted++;
@@ -95,7 +97,12 @@ window.fetch = async (input, init = {}) => {
         type: body.type, limit_price: body.limit_price || null, time_in_force: body.time_in_force, legs: body.legs || null,
         submitted_at: new Date().toISOString() }, 200, head);
     }
-    if (path.startsWith("/v2/orders")) return json([], 200, head);
+    if (path.startsWith("/v2/orders/") && method === "GET") {
+      const id = decodeURIComponent(path.slice("/v2/orders/".length).split("?")[0]);
+      const o = (BOOK ? bookOrders() : []).find((x) => x.id === id);
+      return o ? json(o, 200, head) : json({ message: "order not found" }, 404, head);
+    }
+    if (path.startsWith("/v2/orders")) return json(BOOK ? bookOrders() : [], 200, head);
     return json({}, 200, head);
   }
   return json({ error: "fixture: not served" }, 503);
@@ -103,7 +110,7 @@ window.fetch = async (input, init = {}) => {
 
 // A first run is over: the capital questions are answered (onboarding is the wizard's, photographed elsewhere).
 try {
-  localStorage.setItem("options-lab-state", JSON.stringify({ journalSeq: 0, saved: [], positions: [], expiryLog: [], journal: [], ivHist: {}, copilotLog: [],
+  localStorage.setItem("options-lab-state", JSON.stringify({ journalSeq: BOOK ? 4 : 0, saved: [], positions: BOOK ? bookRecords() : [], expiryLog: [], journal: [], ivHist: {}, copilotLog: [],
     seasonal: {}, settings: { capital: POOR ? 200 : 10000, concurrentTarget: 4, savings: null, sizeOverride: null, sizingFree: null, onboarded: true, mode: "pro",
       notifyWhenReady: false, findOrder: "ev", webhook: "", reportFreq: "weekly", reportLast: 0, reportLastMd: "" } }));
 } catch { /* none */ }

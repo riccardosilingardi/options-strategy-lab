@@ -32,6 +32,15 @@ export function localStamp(iso, { timeZone } = {}) {
   return p ? `${p.d} ${MONTH[p.mo]} ${p.hh}:${p.mm}:${p.ss}` : "time not reported";
 }
 
+const WEEKDAY_LONG = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+/** "Monday": the day of the next open in the reader's time, while the market is closed; null when open or unread. */
+export function nextOpenDay(clock, { timeZone } = {}) {
+  if (!clock || typeof clock !== "object" || clock.is_open !== false) return null;
+  const p = partsOf(Date.parse(clock.next_open || ""), timeZone);
+  return p ? WEEKDAY_LONG[p.wd] : null;
+}
+
 /** "2 Oct 22:08", the same without seconds (a row's sent time). */
 export function localShort(iso, { timeZone } = {}) {
   const p = partsOf(Date.parse(iso || ""), timeZone);

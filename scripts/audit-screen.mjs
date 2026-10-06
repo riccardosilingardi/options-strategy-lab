@@ -62,7 +62,9 @@ const RECORD = ([root, sel]) => {
     minh: cs.minHeight, height: Math.round(r.height), gap: `${cs.rowGap}/${cs.columnGap}`,
   };
 };
-/** The phrases of a screen's text (run in the page): each element's own text, whitespace collapsed. */
+/** The phrases of a screen's text (run in the page): each element's own text, whitespace collapsed. A sentence whose
+ *  figures sit in their own spans ("Take profit reached: <span>$24</span> of <span>$21</span>.") keeps its pieces apart
+ *  with "\u0001", so the words between the figures are looked for in order and the figures are not. */
 const PHRASES = ([root, sub]) => {
   const out = [];
   const top = document.querySelector(root);
@@ -71,7 +73,8 @@ const PHRASES = ([root, sub]) => {
   const walk = (n) => {
     if (n.nodeType === 1 && ["STYLE", "SCRIPT", "svg"].includes(n.tagName)) return;
     if (n.nodeType === 1 && getComputedStyle(n).display === "none") return;
-    const own = Array.from(n.childNodes).filter((c) => c.nodeType === 3).map((c) => c.textContent).join(" ").replace(/\s+/g, " ").trim();
+    const own = Array.from(n.childNodes).filter((c) => c.nodeType === 3).map((c) => c.textContent.replace(/\s+/g, " ").trim())
+      .filter(Boolean).join("\u0001");
     if (own) out.push(own);
     for (const c of n.children || []) walk(c);
   };
@@ -166,11 +169,15 @@ try {
       // ---- the words
       const phrases = Array.from(new Set(await bp.evaluate(PHRASES, [bRoot, S.bWords || null])));
       const appText = await page.evaluate(TEXT, aRoot);
-      for (const ph of phrases) {
+      const inOrder = (parts) => { let at = 0; for (const x of parts) { const i = appText.indexOf(x, at); if (i < 0) return false; at = i + x.length; } return true; };
+      for (const raw of phrases) {
+        const parts = raw.split("\u0001");
+        const ph = parts.join(" … ");
         if (/\d/.test(ph) || ph.length < 2 || /^[ⓘ▾▴›‹·•●☆★⇅≈↑↓→✓✗⚠▲▼−+\-–]+$/.test(ph)) continue;
         const skip = (S.skipWords || []).find(([re]) => re.test(ph));
         if (skip) { out.push({ ok: true, skip: true, name: `Words · «${ph}»`, detail: `not looked for: ${skip[1]}` }); continue; }
-        const ok = appText.includes(ph);
+        // A piece of one punctuation mark between two figures ("." after "$21") is not a phrase of its own.
+        const ok = inOrder(parts.filter((x) => x.replace(/[.,:;·\s]/g, "").length > 0));
         out.push({ ok, name: `Words · «${ph}»`, detail: ok ? "on the screen" : "not on the app's screen", why: ok ? null : null });
       }
       // ---- sideways

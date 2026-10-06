@@ -2,7 +2,7 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
-import { AccountStrip, PositionsBar, WorkingCloseLine, buyingPowerOf } from "./positions.jsx";
+import { AccountStrip, PositionsBar, PositionsHeader, WorkingCloseLine, buyingPowerOf } from "./positions.jsx";
 import { BottomBar, placeOf, NAV_PLACES, NAV_BAR_H } from "./navBar.jsx";
 import { UnrecordedCard } from "./pro.jsx";
 import { workingCloseText } from "./orderRow.js";
@@ -15,12 +15,15 @@ const eq = (a, b, m) => { if (a !== b) throw new Error(`${m}: ${JSON.stringify(a
 
 const ACC = { account_number: "PA1", equity: "102430.12", buying_power: "180000", options_buying_power: "97500" };
 
-check("THE STRIP: equity, OPTIONS buying power when Alpaca sends it (and says which), AT RISK $X of $Y", () => {
+check("THE STRIP: equity, the OPTIONS buying power when Alpaca sends it (its ⓘ says which), AT RISK $X of $Y", () => {
   const h = renderToStaticMarkup(<AccountStrip account={ACC} risk={{ openRisk: 9500, total: 25000 }} capital={100000} />);
   has(h, "EQUITY"); has(h, "$102,430");
-  has(h, "OPTIONS BUYING POWER"); has(h, "$97,500"); hasnt(h, "$180,000");
-  has(h, "AT RISK"); has(h, "$9,500 of $25,000");
-  for (const k of ["equity", "options buying power", "at risk"]) has(h, `About ${k}`);
+  // Redesign PR 3 (the board "Positions"): the label is BUYING POWER either way; the ⓘ sentence names the figure.
+  has(h, ">BUYING POWER"); has(h, "$97,500"); hasnt(h, "$180,000");
+  has(h, "AT RISK"); has(h, "$9,500"); has(h, "of $25,000");
+  for (const k of ["equity", "buying power", "at risk"]) has(h, `What ${k} is`);
+  hasnt(h, 'role="note"');   // one ⓘ open at a time, none at rest
+  has(readFileSync("src/positions.jsx", "utf8"), "This is Alpaca's options figure, the one it checks an options order against.");
   const plain = renderToStaticMarkup(<AccountStrip account={{ ...ACC, options_buying_power: undefined }} risk={null} />);
   has(plain, ">BUYING POWER"); has(plain, "$180,000");
   eq(buyingPowerOf(null).value, null, "no account, no figure");
@@ -29,7 +32,7 @@ check("THE STRIP: equity, OPTIONS buying power when Alpaca sends it (and says wh
 
 check("…under free sizing AT RISK says 'no limit applied'; unread figures are dashes", () => {
   const h = renderToStaticMarkup(<AccountStrip account={null} risk={{ openRisk: 4500, total: 25000, sizingFree: true }} />);
-  has(h, "no limit applied"); hasnt(h, "of $25,000");
+  has(h, "no limit"); hasnt(h, "of $25,000");
   if ((h.match(/—/g) || []).length < 2) throw new Error("equity and buying power should read —");
 });
 
@@ -41,9 +44,11 @@ check("THE ⓘ SENTENCES ARE SOURCED IN THE CODE, and say limits come from the c
   has(src, "not from equity.");
 });
 
-check("THE BAR: Positions | Orders with counts, and one refresh icon", () => {
-  const h = renderToStaticMarkup(<PositionsBar seg="orders" holdings={2} orders={1} onSeg={() => {}} onRefresh={() => {}} />);
-  has(h, "Positions"); has(h, "Orders"); has(h, 'aria-pressed="true"'); has(h, 'aria-label="Read Alpaca again"');
+check("THE BAR: Positions | Orders with counts; the one refresh icon is the header's ↻ beside the gear (the board)", () => {
+  const h = renderToStaticMarkup(<PositionsBar seg="orders" holdings={2} orders={1} onSeg={() => {}} />);
+  has(h, "Positions"); has(h, "Orders"); has(h, 'aria-pressed="true"'); hasnt(h, "Read Alpaca again");
+  const head = renderToStaticMarkup(<PositionsHeader onRefresh={() => {}} onSettings={() => {}} />);
+  has(head, "<h1"); has(head, ">Positions</h1>"); has(head, 'aria-label="Read Alpaca again"'); has(head, 'aria-label="Settings"');
 });
 
 check("THE CARD'S LINE WHILE ITS CLOSE WORKS: 'Close working at $7.62 · 0 of 9 · <clock>' and Manage order", () => {
