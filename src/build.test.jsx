@@ -101,11 +101,16 @@ check("THE ORDER OF THE SCREEN: header, title, what it does, numbers, why, copil
   has(html, "Keeps up to $25 if CORN closes above $18.00 on 20 Nov");
   hasNot(html, "MORE CONTENT", "More is closed at rest");
 });
-check("THE NUMBERS ARE THE CARD'S: sizedFigures, futureFigures, pastFigures, under CARD_LABELS", () => {
-  has(html, CARD_LABELS.profit); has(html, CARD_LABELS.rr); has(html, CARD_LABELS.future); has(html, CARD_LABELS.past);
+check("THE NUMBERS ARE THE CARD'S: sizedFigures, futureFigures, pastFigures, under CARD_LABELS (the grid in the mockup's sentence case)", () => {
+  has(html, ">Max profit<"); has(html, ">Max loss<"); has(html, ">Breakeven<"); has(html, ">Return on risk<");
+  has(html, CARD_LABELS.future); has(html, CARD_LABELS.past);
+  hasNot(html, ">MAX PROFIT<", "the grid's labels are the mockup's sentence case, read off CARD_LABELS");
   has(html, money(25)); has(html, money(75)); has(html, "17.75"); has(html, "0.33");
   has(html, "71%"); has(html, "11 of 16"); has(html, "+$6");
   has(html, "Delta (shares)"); has(html, "+20 sh"); has(html, "Theta");
+  // The mockup: the grid's values mono 18 bold, Delta and Theta mono 15 bold (scripts/audit-build.mjs measures it live).
+  if (!/font-size:15px[^>]*>\+20 sh</.test(html)) throw new Error("Delta's value is not 15px");
+  if (!/font-size:18px[^>]*>\$25</.test(html)) throw new Error("Max profit's value is not 18px");
 });
 check("WHY THIS TRADE: closed at rest with the stance line; open, the factors and the rule in its REAL words", () => {
   has(html, "with the signals, 2 of 4 · 1 against");
@@ -221,9 +226,10 @@ check("THE STATES: loading says what it waits for and shows dashes; no quotes of
   const l = renderToStaticMarkup(<BuildLoading back={back} title="Bull Put Spread" sub="CORN · 20 Nov · 47 days · ×1" reading="Reading CORN's chain for 20 Nov…" />);
   has(l, "Reading CORN&#x27;s chain for 20 Nov…"); has(l, "The chart waits for a bid and an ask on both legs.");
   has(l, "A dash is a number not read yet, never a zero."); hasNot(l, "$0");
+  has(l, ">Max profit<"); has(l, ">Max loss<"); has(l, ">Breakeven<"); has(l, ">Chance<");
   const q = renderToStaticMarkup(<BuildNoQuotes back={back} title="Bull Put Spread" sub="s" sentence="CORN's option prices have not come back." legs={PUT_CREDIT}
     lastRead="Last read: 15:02 your time. The feed is indicative; a missing quote is shown as missing, never as zero." onRetry={() => {}} onPickExpiry={() => {}} />);
-  has(q, "No quotes for these two legs."); has(q, ">Retry<"); has(q, "Pick another expiry"); has(q, "— / —");
+  has(q, "No quotes for these two legs."); has(q, ">Retry<"); has(q, "Pick another expiry"); has(q, "bid — / ask —"); hasNot(q, "Δ —");
   has(q, "a missing quote is shown as missing, never as zero.");
   const e = renderToStaticMarkup(<BuildEmpty onFind={() => {}} onChain={() => {}} />);
   has(e, "Nothing on Build yet."); has(e, "Go to Find"); has(e, "Open a chain");

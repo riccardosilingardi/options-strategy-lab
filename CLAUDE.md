@@ -266,6 +266,8 @@ All in `RULES`, `src/rules.js`, unless noted.
 - `node scripts/shoot-build.mjs [dir]` photographs Build through the WHOLE app on fixtures (`scripts/build-screens.jsx`:
   Find → UNG → Build ›, a stub Alpaca, a stub copilot, a fixed clock) at 390×844: at rest, Why, copilot, over the cap,
   review, sent, the three states, More, Edit in chain, light (docs/screens/redesign-pr2/).
+- `node scripts/audit-build.mjs [light]` measures Build against the mockup's own values (getComputedStyle: sizes, weights,
+  borders, radii, paddings, taps, theme colours) and its words, on the same harness; exits 1 on any difference.
 - `node scripts/shoot-screens.mjs [dir]` photographs Find, a sheet, Saved and the market page's tabs at 390×844 in the
   pre-installed headless Chromium, on findB's fixtures (`scripts/screens.jsx`), and prints page and card heights.
 - `node scripts/measure-find.mjs` prints what each Find control passes on the 31 fixture cards and what

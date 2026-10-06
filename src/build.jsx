@@ -25,6 +25,9 @@ const FS = TYPE.size, FW = TYPE.weight, LH = TYPE.line;
 const tnum = { fontVariantNumeric: "tabular-nums" };
 const ARROW = { 1: "↑", "-1": "↓", 0: "→" };
 const STAND_TONE = () => ({ supports: T.green, against: T.amber, quiet: T.mut });
+/** The mockup writes the grid's labels in sentence case ("Max profit"); the words stay CARD_LABELS' (one home). */
+const sentence = (s) => s.charAt(0) + s.slice(1).toLowerCase();
+const LOSS_LABEL = "Max loss", BE_LABEL = "Breakeven";
 
 
 /** One section of Build: panel ground, a 1px line, radius 12, padding 14. */
@@ -85,14 +88,14 @@ export function WhatItDoes({ takeaway, chart }) {
 }
 
 /* ---------------------------------------------------------------- THE NUMBERS */
-/** A label (12 mut, dotted underline) that opens its definition, over a value (mono 18 bold). */
-function Figure({ id, label, value, def, open, onToggle, tone = T.ink }) {
+/** A label (12 mut, dotted underline) that opens its definition, over a value (mono 18 bold; Delta and Theta 15). */
+function Figure({ id, label, value, def, open, onToggle, tone = T.ink, size = FS.lg }) {
   return (
     <div style={{ minWidth: 0 }}>
       <button onClick={() => onToggle(id)} aria-expanded={open}
         style={{ ...sans, fontSize: FS.xs, color: T.mut, background: "transparent", border: "none", padding: 0, minHeight: 24, cursor: "pointer",
           textDecoration: "underline dotted", textUnderlineOffset: 3, textAlign: "left" }}>{label}</button>
-      <div style={{ ...mono, ...tnum, fontSize: FS.lg, fontWeight: FW.bold, color: tone, lineHeight: LH.tight }}>{value}</div>
+      <div style={{ ...mono, ...tnum, fontSize: size, fontWeight: FW.bold, color: tone, lineHeight: LH.tight }}>{value}</div>
       {open && <div role="note" style={{ ...sans, fontSize: FS.xs, color: T.body, lineHeight: LH.body, marginTop: 2 }}>{def}</div>}
     </div>
   );
@@ -114,10 +117,10 @@ export function NumbersSection({ figures, rr, pop, breakevens = [], future, past
   const toggle = (id) => setDef((d) => (d === id ? null : id));
   const ft = futureTile(future);
   const items = [
-    ["profit", CARD_LABELS.profit, figures && figures.profit != null ? money(figures.profit) : figures && figures.unbounded ? "no ceiling" : "—", T.ink],
-    ["loss", "MAX LOSS", figures && figures.risk != null ? money(figures.risk) : "—", T.ink],
-    ["breakeven", "BREAKEVEN", breakevens.length ? breakevens.map((b) => Number(b).toFixed(2)).join(" · ") : "—", T.ink],
-    ["rr", CARD_LABELS.rr, rr == null ? "—" : Number(rr).toFixed(2), T.ink],
+    ["profit", sentence(CARD_LABELS.profit), figures && figures.profit != null ? money(figures.profit) : figures && figures.unbounded ? "no ceiling" : "—", T.ink],
+    ["loss", LOSS_LABEL, figures && figures.risk != null ? money(figures.risk) : "—", T.ink],
+    ["breakeven", BE_LABEL, breakevens.length ? breakevens.map((b) => Number(b).toFixed(2)).join(" · ") : "—", T.ink],
+    ["rr", sentence(CARD_LABELS.rr), rr == null ? "—" : Number(rr).toFixed(2), T.ink],
   ];
   return (
     <Section label="The numbers">
@@ -129,7 +132,7 @@ export function NumbersSection({ figures, rr, pop, breakevens = [], future, past
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 12 }}>
         <Box title={CARD_LABELS.future}>
-          <BoxRow k={CARD_LABELS.chance.charAt(0) + CARD_LABELS.chance.slice(1).toLowerCase()} v={chanceText(pop)} />
+          <BoxRow k={sentence(CARD_LABELS.chance)} v={chanceText(pop)} />
           <BoxRow k="Avg" v={ft.value} />
         </Box>
         <Box title={CARD_LABELS.past}>
@@ -138,8 +141,8 @@ export function NumbersSection({ figures, rr, pop, breakevens = [], future, past
         </Box>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 12px", marginTop: 12 }}>
-        <Figure id="delta" label="Delta (shares)" value={delta} def={BUILD_DEFINITIONS.delta} open={def === "delta"} onToggle={toggle} />
-        <Figure id="theta" label="Theta" value={theta} def={BUILD_DEFINITIONS.theta} open={def === "theta"} onToggle={toggle} />
+        <Figure id="delta" label="Delta (shares)" value={delta} size={FS.md} def={BUILD_DEFINITIONS.delta} open={def === "delta"} onToggle={toggle} />
+        <Figure id="theta" label="Theta" value={theta} size={FS.md} def={BUILD_DEFINITIONS.theta} open={def === "theta"} onToggle={toggle} />
       </div>
       {reconcile}
     </Section>
@@ -259,7 +262,7 @@ export function CopilotSection({ ask }) {
 
 /* ---------------------------------------------------------------- THE LEGS */
 const px2 = (v) => (v == null || !Number.isFinite(Number(v)) ? "—" : Number(v).toFixed(2));
-export function LegRow({ leg }) {
+export function LegRow({ leg, unquoted = false }) {
   const sell = leg.side < 0;
   return (
     <div data-leg-row style={{ display: "flex", alignItems: "center", gap: 10, minHeight: 52, borderTop: `1px solid ${T.line}` }}>
@@ -272,7 +275,9 @@ export function LegRow({ leg }) {
       </span>
       <span style={{ textAlign: "right" }}>
         <span style={{ display: "block", ...mono, ...tnum, fontSize: FS.md, color: T.ink }}>{px2(leg.mid)} <span style={{ ...sans, fontSize: FS.xs, color: T.mut }}>mid</span></span>
-        <span style={{ display: "block", ...mono, ...tnum, fontSize: FS.xs, color: T.mut }}>{px2(leg.bid)} / {px2(leg.ask)} · Δ {leg.delta == null ? "—" : Number(leg.delta).toFixed(2)}</span>
+        <span style={{ display: "block", ...mono, ...tnum, fontSize: FS.xs, color: T.mut }}>
+          {unquoted ? "bid — / ask —" : `${px2(leg.bid)} / ${px2(leg.ask)} · Δ ${leg.delta == null ? "—" : Number(leg.delta).toFixed(2)}`}
+        </span>
       </span>
     </div>
   );
@@ -565,7 +570,7 @@ export function BuildLoading({ back, title, sub, reading }) {
           <div style={{ ...sans, fontSize: FS.md, color: T.ink }}>{reading}</div>
           <div style={{ ...sans, fontSize: FS.sm, color: T.mut, marginTop: 4, lineHeight: LH.body }}>The chart waits for a bid and an ask on both legs.</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 12px", marginTop: 12 }}>
-            <Dash k={CARD_LABELS.profit} /><Dash k="MAX LOSS" /><Dash k="BREAKEVEN" /><Dash k={CARD_LABELS.chance} />
+            <Dash k={sentence(CARD_LABELS.profit)} /><Dash k={LOSS_LABEL} /><Dash k={BE_LABEL} /><Dash k={sentence(CARD_LABELS.chance)} />
           </div>
           <div style={{ ...sans, fontSize: FS.xs, color: T.mut, marginTop: 10 }}>A dash is a number not read yet, never a zero.</div>
         </Section>
@@ -586,7 +591,7 @@ export function BuildNoQuotes({ back, title, sub, sentence, legs = [], lastRead,
             <button onClick={onRetry} style={{ ...sans, flex: 1, minHeight: TAP, borderRadius: 10, border: "none", background: T.amber, color: T.onAccent, fontSize: FS.sm, fontWeight: FW.bold, cursor: "pointer" }}>Retry</button>
             <button onClick={onPickExpiry} style={{ ...ghost48, minHeight: TAP, fontSize: FS.sm, borderRadius: 10 }}>Pick another expiry</button>
           </div>
-          {legs.length > 0 && <div style={{ marginTop: 12 }}>{legs.map((l, i) => <LegRow key={i} leg={{ ...l, mid: null, bid: null, ask: null, delta: null }} />)}</div>}
+          {legs.length > 0 && <div style={{ marginTop: 12 }}>{legs.map((l, i) => <LegRow key={i} unquoted leg={{ ...l, mid: null, bid: null, ask: null, delta: null }} />)}</div>}
           <div style={{ ...sans, fontSize: FS.xs, color: T.mut, marginTop: 10, lineHeight: LH.body }}>{lastRead}</div>
         </Section>
       </main>
