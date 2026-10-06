@@ -185,7 +185,10 @@ test("WIRING — App.jsx makes its screens out of this module, and every view ha
   // Redesign PR 1: the market page's ticker and tab ride along (`mktTk`, `mktTab`).
   assert.match(app, /navOf\(\{ view, tab, step, showSettings, ev, whyTk, detailsId, deskSheet, posSeg,\s*mktTk: tab === "build" && step === "market" \? mkt\.tk : null, mktTab: mkt\.tab \}\)/);
   // Redesign PR 2: Build's heading is in build.jsx (its title, and each of its three states).
-  const headings = (app.match(/data-view-heading/g) || []).length + (readFileSync("src/build.jsx", "utf8").match(/data-view-heading/g) || []).length;
+  // Redesign PR 3a/3b: Positions' heading is in positions.jsx (its header), a position's in positionScreen.jsx, the
+  // Journal's in journal.jsx.
+  const headings = ["src/build.jsx", "src/positions.jsx", "src/positionScreen.jsx", "src/journal.jsx"]
+    .reduce((n, f) => n + (readFileSync(f, "utf8").match(/data-view-heading/g) || []).length, (app.match(/data-view-heading/g) || []).length);
   assert.ok(headings >= 6, `Find, Build, Positions, Watching, Journal and Settings each carry one (found ${headings})`);
   // Round 2: Home is gone (the app opens on Find); Find's own heading is in find.jsx's header.
   assert.doesNotMatch(readFileSync("src/wizard.jsx", "utf8"), /function WizardOpen/, "Home is no longer a screen");

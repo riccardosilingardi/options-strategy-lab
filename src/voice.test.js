@@ -371,7 +371,8 @@ test("THEY ARE MARKED, NEVER DELETED", () => {
   assert.ok(/not counted/.test(note) && /level/.test(note));
   assert.ok(/stays on the record/.test(note), "the Journal is what happened");
   // The screen renders the marker; the score steps over it.
-  assert.ok(/isTestRecord\(e\)/.test(APP), "the Journal row marks one");
+  // Redesign PR 3b: the Journal's rows are src/journal.jsx.
+  assert.ok(/isTestRecord\(e\)/.test(readFileSync(new URL("./journal.jsx", import.meta.url), "utf8")), "the Journal row marks one");
   assert.ok(/scoredJournal\(store\.journal/.test(APP), "and the level reads the filtered list");
 });
 

@@ -79,6 +79,7 @@ import { exitProgress, entryVsNow, displayName, fileState, pnlShareOfRisk, pnlSh
   exitLabels, positionMetaLine, pnlShareShort, waitingOrdersLine, positionTitle, cardSentence,
   positionSubLine, statusBadge, keepEntry, paysLine, dayLabel } from "./positionView.js";
 import { PositionScreen } from "./positionScreen.jsx";
+import { JournalScreen } from "./journal.jsx";
 import { findStatusText, DEFAULT_FIND_ORDER, BUILD_CTA } from "./rules.js";
 // REDESIGN PR 2: Build on the owner's mockup — its words (rules.js) and its screen (build.jsx).
 import { tradeTakeaway, buildSubLine, expiryShort, deltaSharesText, thetaDayText, reasonRuleText, orderBookLine, capLabel,
@@ -1378,6 +1379,8 @@ export default function OptionsStrategyLab() {
   useEffect(() => { setPosCopilot({ msgs: [], busy: false, err: null, partial: "" }); }, [detailsId]);
   // The Journal's search box. Sorted and searched by ref (src/journal.js).
   const [jq, setJq] = useState("");
+  // The entry the Journal opens on: "Whole record ›" on a position's screen names it (redesign PR 3b).
+  const [journalOpenRef, setJournalOpenRef] = useState(null);
   const [optLeg, setOptLeg] = useState(null); // {occ, label, quote}
   // What re-snapping the legs onto a new board moved, in one sentence, until
   // the next board change. A strike that moves under the reader without a word
@@ -3841,7 +3844,7 @@ export default function OptionsStrategyLab() {
         title: `${dp.ticker} over the last 60 sessions, with where it pays at expiry. The price now ${dm.s != null ? `$${Number(dm.s).toFixed(2)}` : "is not known"}${dp.entrySpot != null ? `, at entry $${Number(dp.entrySpot).toFixed(2)}` : ""}.` },
       progress: dm.progress, plan: <>{dm.planSentence} {dm.planDetail}</>,
       ev: dm.ev, entryDay: dayLabel(dp.openedAt), nowDay: "now",
-      timeline: dp.timeline || [], onWholeRecord: () => { setDetailsId(null); setTab("journal"); },
+      timeline: dp.timeline || [], onWholeRecord: () => { setDetailsId(null); setJq(""); setJournalOpenRef(dp.ref || null); setTab("journal"); },
       onAnalyse: () => {
         setDetailsId(null);
         openOnBuild({ ticker: dp.ticker, expKey: dp.expKey || null, legs: dp.legs, name: `${dm.name} (analysis)`,
@@ -4397,7 +4400,8 @@ export default function OptionsStrategyLab() {
   const onBuildStep = tab === "build" && !showSettings && "build" === step;
   // REDESIGN PR 3: Positions (and its Orders segment) draws its own header too (the board "Positions").
   const onPositions = tab === "positions" && !showSettings;
-  const chromeless = onFindStep || onMarketStep || onBuildStep || onPositions || (tab === "watching" && !showSettings);
+  const onJournal = tab === "journal" && !showSettings;
+  const chromeless = onFindStep || onMarketStep || onBuildStep || onPositions || onJournal || (tab === "watching" && !showSettings);
   /* FIND'S STATUS LINE: "<freshness> · <feed> · Paper". The feed is the feeds the selected markets came from. */
   const findFeeds = Array.from(new Set(find.markets.map((tk) => feedName(chains[tk])).filter(Boolean))).join(" / ");
   /* FIND'S BAR READS THE SELECTION, NOT ONE MARKET (PR #46, TASK 1): "N markets · prices Xm ago", the OLDEST. */
@@ -4501,7 +4505,7 @@ export default function OptionsStrategyLab() {
             expiry and seasonality above its list described none of them. It
             stays on Build and everywhere else one ticker is the subject. */}
         {/* (Not on Build since redesign PR 2: the strip is in "More on this trade ▾", under "Market now".) */}
-        {!onFindStep && !onMarketStep && !onBuildStep && !onPositions && tickerStrip}
+        {!onFindStep && !onMarketStep && !onBuildStep && !onPositions && !onJournal && tickerStrip}
 
         {msg && <div style={{ ...mono, fontSize: FS.xs, color: T.amber, border: `1px solid ${T.amber}44`, background: `${T.amber}10`, borderRadius: 6, padding: "7px 10px", margin: chromeless ? "8px 16px 0" : "10px 0 0" }}>{msg}</div>}
 
@@ -5627,170 +5631,49 @@ export default function OptionsStrategyLab() {
             onRemove={(r) => (r.kind === "saved" ? delSaved(r.saved.id) : dropWatched(r.pos.id))} />
         )}
 
+        {/* ============ THE JOURNAL (redesign PR 3b; the owner's board "Journal") ============
+            src/journal.jsx draws it; everything below is handed in as it was. The open trades are the Positions card's
+            own records and figures; the closed ones the record's. */}
         {tab === "journal" && !showSettings && (
-          <div style={{ marginTop: 12 }}>
-            <h2 data-view-heading tabIndex={-1} style={{ ...sans, fontSize: FS.lg, fontWeight: 800, color: T.ink, margin: "0 0 8px", outline: "none" }}>Journal</h2>
-            <Panel>
-              <Label>THE RECORD · {(store.journal || []).length} CLOSED · {ownedPositions.length} OPEN</Label>
-              <div style={{ display: "flex", gap: 18, marginTop: 10, flexWrap: "wrap" }}>
-                <Stat k="LEVEL" v={journey.level} c={T.amber} />
-                <Stat k="AWARENESS" v={journey.score == null ? "—" : `${journey.score}/100`} c={journey.score >= 70 ? T.green : journey.score >= 40 ? T.amber : T.dim} />
-                <Stat k="CLOSED BY THE RULES" v={journey.closed ? `${journey.ruled}/${journey.closed}` : "—"} c={T.blue} />
-                <Stat k="INSIDE THE LIMIT" v={journey.coerenza == null ? "—" : pctText(journey.coerenza)} c={T.blue} />
-              </div>
-              <div style={{ fontSize: FS.sm, color: T.mut, marginTop: 10, lineHeight: 1.5 }}>
-                Next: {journey.next} Discipline is the share of trades you closed because a rule said so rather than
-                because you felt like it — it is the only number here that predicts the others.
-              </div>
-            </Panel>
-
-            {/* CLOSED TRADES — THE WHOLE RECORD, NOT FOUR FIELDS OF IT.
-                Each entry opens on its full timeline (every entry, not the last
-                six), the thesis it was opened on, the reason it ended and both
-                Alpaca order ids in full — eight characters is right on a row and
-                useless when you are looking a trade up on the broker.
-                Sorted and searched by ref, which is what a ref is for. */}
-            <Panel style={{ marginTop: 10 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-                <Label>CLOSED TRADES</Label>
-                {(store.journal || []).length > 0 && (
-                  <input value={jq} onChange={(e) => setJq(e.target.value)}
-                    placeholder="find by ref — J-0003, 3, or a ticker"
-                    style={{ ...mono, fontSize: FS.xs, padding: "5px 8px", background: T.bg, color: T.ink,
-                      border: `1px solid ${T.field}`, borderRadius: 6, minWidth: 210 }} />
-                )}
-              </div>
-              {!(store.journal || []).length && (
-                <div style={{ ...mono, fontSize: FS.xs, color: T.mut, marginTop: 8 }}>Nothing closed yet. Every trade you close lands here with the reason it ended, its whole timeline and the orders behind it.</div>
-              )}
-              {(store.journal || []).length > 0 && !journalRows.length && (
-                <div style={{ ...mono, fontSize: FS.xs, color: T.mut, marginTop: 8 }}>
-                  {`Nothing matches "${jq}". The refs run from ${(store.journal || []).map((e) => e.ref).filter(Boolean).sort()[0] || "—"} upwards.`}
+          <JournalScreen key={journalOpenRef || "journal"} v={{
+            journey,
+            insideLimit: <>{`Inside the limit: ${journey.coerenza == null ? "not judged yet" : `${pctText(journey.coerenza)} of the trades judged stayed inside the per-trade limit`}.`}
+              {" "}Rule closes are the share of trades you closed because a rule said so rather than because you felt like it — it
+              is the only number here that predicts the others. Awareness averages that, the limit and how often you opened.</>,
+            open: [...ownedPositions.map((p) => ({ p, m: positionModels[p.id] || null, stage: "owned" })),
+              ...workingOrders.map((p) => ({ p, m: null, stage: "working" }))],
+            closed: journalRows, allClosed: store.journal || [], query: jq, onQuery: setJq, openRef: journalOpenRef,
+            onOpenScreen: (p) => { setTab("positions"); setPosSeg("positions"); setDetailsId(p.id); },
+            report: <ReportTab apiKey={"server"} setSetting={setSetting}
+              ctx={{ store, scan, news: news[ticker]?.items || [], ticker, legs, expKey, A, spot, seasonalSrc: seas.src, setMsg }} />,
+            analysesSummary: `Copilot analyses · ${(store.copilotLog || []).length} filed`,
+            analyses: (store.copilotLog || []).length > 0 ? (
+              <div>
+                <div style={{ ...sans, fontSize: FS.xs, color: T.dim, marginTop: 6, lineHeight: 1.6 }}>
+                  Every analysis the copilot runs is filed here with the question that produced it, newest first, and the last
+                  {store.copilotLog.length === 1 ? " one is" : ` ${store.copilotLog.length} are`} included in the report.
                 </div>
-              )}
-              <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
-                {journalRows.map((e) => (
-                  <details key={e.id} style={{ padding: "9px 11px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7 }}>
-                    <summary style={{ cursor: "pointer", listStyle: "none" }}>
-                      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                        {e.ref && <span style={{ ...mono, fontSize: FS.xs, fontWeight: 700, color: T.blue }}>{e.ref}</span>}
-                        <span style={{ fontWeight: 700, color: T.ink, fontSize: FS.sm }}>{e.ticker} · {e.name}</span>
-                        {/* A FIGURE THAT IS NOT A FILL IS LABELLED AND DIMMED, and
-                            no sum counts it (`journalPnl()` in journal.js). */}
-                        {(() => {
-                          const jp = journalPnl(e);
-                          return (
-                            <span style={{ ...mono, fontSize: FS.sm, fontWeight: 700, color: jp.counted == null ? T.dim : jp.counted >= 0 ? T.green : T.red }}>
-                              {jp.shown == null ? "—" : fmt$(jp.shown)}
-                              {jp.note && <span style={{ fontSize: FS.xs, fontWeight: 400 }}>{` ${jp.note}`}</span>}
-                            </span>
-                          );
-                        })()}
-                        <span style={{ ...mono, fontSize: FS.xs, color: countsAsRuleClose(e) ? T.green : T.amber, border: `1px solid ${(countsAsRuleClose(e) ? T.green : T.amber)}55`, borderRadius: 4, padding: "1px 6px" }}>
-                          {closeKindWords(e)}
+                <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
+                  {store.copilotLog.map((c, i) => (
+                    <details key={c.t + "-" + i} style={{ background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7, padding: "9px 11px" }}>
+                      <summary style={{ cursor: "pointer", listStyle: "none", minHeight: 24 }}>
+                        <span style={{ ...sans, fontSize: FS.xs, color: T.amber, letterSpacing: "0.08em" }}>{(c.label || "QUESTION").toUpperCase()}</span>
+                        <span style={{ ...mono, fontSize: FS.xs, color: T.dim, marginLeft: 8 }}>
+                          {c.ticker ? `${c.ticker} · ` : ""}{new Date(c.t).toLocaleString("en-GB")}
                         </span>
-                        <span style={{ ...mono, fontSize: FS.xs, color: riskOkOf(e) === false ? T.red : T.dim }}>
-                          {riskOkWords(e)}
-                        </span>
-                        {/* MARKED, NEVER DELETED (P9, TASK 3). The Journal is
-                            the record of what happened; a record removed to
-                            make a score look better is the opposite of what
-                            this screen is for. The LEVEL steps over it. */}
-                        {isTestRecord(e) && (
-                          <span style={{ ...mono, fontSize: FS.xs, color: T.dim, border: `1px dashed ${T.dim}66`, borderRadius: 4, padding: "1px 6px" }}
-                            title={testRecordNote()}>
-                            read as a test
-                          </span>
-                        )}
+                      </summary>
+                      <div style={{ ...sans, fontSize: FS.xs, color: T.mut, marginTop: 7, lineHeight: 1.5 }}>{c.prompt}</div>
+                      <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${T.line}` }}>
+                        <Markdown text={c.answer} />
                       </div>
-                      <div style={{ ...mono, fontSize: FS.xs, color: T.dim, marginTop: 3 }}>
-                        opened {new Date(e.openedAt).toLocaleDateString("en-GB")} · closed {new Date(e.t).toLocaleDateString("en-GB")}
-                        {(e.timeline || []).length ? ` · ${e.timeline.length} entr${e.timeline.length === 1 ? "y" : "ies"} — tap to open` : ""}
-                      </div>
-                    </summary>
-
-                    <div style={{ ...mono, fontSize: FS.xs, color: T.body, marginTop: 9, paddingTop: 8, borderTop: `1px solid ${T.line}`, lineHeight: 1.55 }}>
-                      <span style={{ color: T.dim }}>WHY IT ENDED · </span>
-                      {e.closeReason?.text || (countsAsRuleClose(e) ? "closed by the rules" : "no reason was recorded")}
-                      {e.closeReason?.kind === "rule" && e.closeReason.written
-                        ? <span style={{ color: T.mut }}>{` — you also wrote: "${e.closeReason.written}"`}</span> : null}
-                    </div>
-
-                    {e.thesis && (
-                      <div style={{ ...mono, fontSize: FS.xs, color: T.mut, marginTop: 7, lineHeight: 1.55 }}>
-                        <span style={{ color: T.dim }}>THE REASON YOU OPENED IT · </span>
-                        {`chance ${e.thesis.pop != null ? chanceText(e.thesis.pop) : "n/a"} · volatility ${e.thesis.iv != null ? (e.thesis.iv * 100).toFixed(0) + "%" : "n/a"} · season ${e.thesis.seasonal != null ? e.thesis.seasonal.toFixed(1) + "%/mo" : "n/a"}${e.thesis.regime ? ` · ${e.thesis.regime}` : ""}`}
-                        {/* WHICH TABLE THAT CHANCE WAS DRIFTED ON. A closed
-                            trade is re-read months later, when nothing else on
-                            screen can still say which seasonal reading was in
-                            force the day it was opened. An entry with no stamp
-                            is one written before the app recorded one, and the
-                            sentence says that rather than guessing. */}
-                        {e.thesis.pop != null
-                          ? <div style={{ color: T.dim, marginTop: 3 }}>{seasonalStampNote(e.thesis, e.ticker || "this market")}</div>
-                          : null}
-                        {e.thesis.againstSignal
-                          ? <div style={{ color: T.amber, marginTop: 3 }}>{`Opened against ${e.thesis.againstSignal.n} of ${e.thesis.againstSignal.total} factors — "${e.thesis.againstSignal.reason}"`}</div>
-                          : null}
-                      </div>
-                    )}
-
-                    {/* THE ORDER IDS IN FULL. This is the record, not a screen:
-                        the whole id is what you paste into the broker. */}
-                    <div style={{ ...mono, fontSize: FS.xs, color: T.dim, marginTop: 7, lineHeight: 1.6, wordBreak: "break-all" }}>
-                      <div>{`OPENING ORDER · ${e.openOrderId || "none — this was the app's own paper book"}${e.openStatus ? ` (${e.openStatus})` : ""}`}</div>
-                      <div>{`CLOSING ORDER · ${e.closeOrderId || "none — closed in the app, no broker order"}`}</div>
-                    </div>
-
-                    {/* THE WHOLE TIMELINE. The position screen shows the last six
-                        because it is a live screen with a chart under it; the
-                        record has no reason to stop at six. */}
-                    {(e.timeline || []).length > 0 && (
-                      <div style={{ marginTop: 9, paddingTop: 8, borderTop: `1px solid ${T.line}` }}>
-                        <div style={{ ...mono, fontSize: FS.xs, color: T.dim }}>TIMELINE · {e.timeline.length} ENTRIES, ALL OF THEM</div>
-                        {e.timeline.map((x, i) => {
-                          // THE SAME SENTENCE THE LIVE SCREEN SHOWS, in the
-                          // permanent record — a closed trade's autopilot
-                          // entries are exactly the ones nobody will re-read
-                          // against the fix. `autopilotHorizonNote()` is null
-                          // on every entry that carries its own horizon.
-                          // ...and which volatility it walked on, the same way.
-                          const notes = [autopilotHorizonNote(x), autopilotVolNote(x)].filter(Boolean);
-                          return (
-                            <div key={x.seq || i} style={{ marginTop: 3 }}>
-                              <div style={{ ...mono, fontSize: FS.xs, color: T.mut, lineHeight: 1.5 }}>
-                                <span style={{ color: T.blue }}>{x.seq || `${e.ref || ""}·??`}</span>
-                                <span style={{ color: T.dim }}>{` ${new Date(x.t).toLocaleDateString("en-GB")} · `}</span>
-                                {x.text}
-                              </div>
-                              {notes.map((n) => <div key={n} style={{ ...mono, fontSize: FS.xs, color: T.amber, lineHeight: 1.5 }}>{`⚠ ${n}`}</div>)}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </details>
-                ))}
+                    </details>
+                  ))}
+                </div>
               </div>
-            </Panel>
-
-            {/* THE ANALYSES RUN IN THE COPILOT PANEL, HERE, IN THE JOURNAL.
-                The Journal is the record of what the app did; a pre-trade
-                analysis or an opportunity radar is part of that record, and
-                leaving it only in a panel that is one tap from being closed
-                made the Journal and the Copilot disagree about the same day. */}
-            {/* WHAT THE ENTRY FLOOR HAS COST, COUNTED RATHER THAN ARGUED ABOUT.
-                `minEntryDTE` is 30 and no session has ever measured it — it is
-                an inherited default. The reading that would settle it is how
-                often the floor takes a genuinely busier board away and by how
-                much, and the only place that can be collected is here, as the
-                app is used. ROADMAP P5 is what reads it back. It is local: it
-                is calibration data about this user's markets, not a position. */}
-            <Panel style={{ marginTop: 12 }}>
-              {/* ONE FOLD, ONE LINE (PR #44, TASK 6). It is a record, not an error: the list is behind the fold, and
-                  "not offerable" is printed in a neutral tone — it is what the floor did, not something that went
-                  wrong. */}
-              <Fold label="log" tone={T.mut}
+            ) : null,
+            /* WHAT THE ENTRY FLOOR HAS COST, COUNTED RATHER THAN ARGUED ABOUT (PR #44, TASK 6): one fold, one line. */
+            floorLog: (
+              <Fold label="log" tone={T.ink}
                 summary={`The ${RULES.minEntryDTE}-day entry floor passed over ${(store.expiryLog || []).length} board${(store.expiryLog || []).length === 1 ? "" : "s"}.`}>
                 <div style={{ ...mono, fontSize: FS.xs, color: T.mut, marginTop: 6, lineHeight: 1.6 }}>
                   {passedOverSummary(store.expiryLog || [])}
@@ -5812,43 +5695,8 @@ export default function OptionsStrategyLab() {
                   </div>
                 )}
               </Fold>
-            </Panel>
-
-            {(store.copilotLog || []).length > 0 && (
-              <Panel style={{ marginTop: 12 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-                  <Label>COPILOT ANALYSES · {store.copilotLog.length} FILED</Label>
-                  <Btn small ghost onClick={() => { setTab("build"); setStep("build"); setEv("copilot"); }}>Run another →</Btn>
-                </div>
-                <div style={{ ...mono, fontSize: FS.xs, color: T.dim, marginTop: 6, lineHeight: 1.6 }}>
-                  Every analysis you run from the Copilot panel on Build is filed here with the question that produced
-                  it, newest first, and the last {store.copilotLog.length === 1 ? "one is" : `${store.copilotLog.length} are`} included in the report below.
-                </div>
-                <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
-                  {store.copilotLog.map((c, i) => (
-                    <details key={c.t + "-" + i} style={{ background: T.bg, border: `1px solid ${T.line}`, borderRadius: 7, padding: "9px 11px" }}>
-                      <summary style={{ cursor: "pointer", listStyle: "none" }}>
-                        <span style={{ ...mono, fontSize: FS.xs, color: T.amber, letterSpacing: "0.08em" }}>{(c.label || "QUESTION").toUpperCase()}</span>
-                        <span style={{ ...mono, fontSize: FS.xs, color: T.dim, marginLeft: 8 }}>
-                          {c.ticker ? `${c.ticker} · ` : ""}{new Date(c.t).toLocaleString("en-GB")}
-                        </span>
-                      </summary>
-                      <div style={{ ...mono, fontSize: FS.xs, color: T.mut, marginTop: 7, lineHeight: 1.5 }}>{c.prompt}</div>
-                      <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${T.line}` }}>
-                        <Markdown text={c.answer} />
-                      </div>
-                    </details>
-                  ))}
-                </div>
-              </Panel>
-            )}
-
-            <ReportTab
-              apiKey={"server"}
-              setSetting={setSetting}
-              ctx={{ store, scan, news: news[ticker]?.items || [], ticker, legs, expKey, A, spot, seasonalSrc: seas.src, setMsg }}
-            />
-          </div>
+            ),
+          }} />
         )}
 
         {/* The chain is on its way. Saying "no market data" here would blame
@@ -5886,6 +5734,7 @@ export default function OptionsStrategyLab() {
           if (id === "find" || id === "build") { goStep(id); return; }
           // A place opens at its top: the position's screen is left for the Positions list (redesign PR 3).
           setTab(id); setShowSettings(false); setEv(null); setDetailsId(null);
+          if (id === "journal") setJournalOpenRef(null);
           window.scrollTo?.({ top: 0 });
         }} />
     </div>

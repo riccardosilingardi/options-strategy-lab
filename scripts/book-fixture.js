@@ -103,3 +103,37 @@ export function bookOrders() {
       submitted_at: "2026-10-04T08:12:00Z", created_at: "2026-10-04T08:12:00Z", updated_at: "2026-10-04T08:12:01Z" },
   ];
 }
+
+/**
+ * THE CLOSED TRADES THE JOURNAL LISTS (redesign PR 3b): two entries written the way `journalEntry()` files them.
+ * J-0001 a GLD bull put spread closed by its take-profit rule (filled, both order ids); J-0005 a CORN bull call spread
+ * the owner closed by hand with a written reason. Fixture inputs only.
+ */
+export function bookJournal() {
+  const base = { contracts: 1, contractsAssumed: false, sizingFree: false, riskOk: true, expKey: EXP };
+  return [
+    { ...base, id: 1001, ref: "J-0001", ticker: "GLD", name: "Bull put spread 180/175 · 18 Dec", openedAt: "2026-09-08T14:20:00.000Z",
+      t: at("2026-09-30T15:06:00Z"), entryNet: -1.1, maxProfit: 110, maxLoss: -390, pnl: 55, pnlNote: null, ruleExit: true,
+      closeReason: { kind: "rule", rule: "take-profit", text: "Take profit reached: 50% of the maximum profit", written: null },
+      openOrderId: "fx-open-1001", closeOrderId: "fx-close-1001", openStatus: "filled",
+      thesis: { pop: 0.71, iv: 0.19, seasonal: 0.8, regime: "up", spot: 186,
+        signals: snap("GLD", "2026-09-08T14:20:00Z", 28, 78, "CONFLUENT",
+          { seasonal: { dir: 1, strength: 30 }, technical: { dir: 1, strength: 40 }, weather: { dir: 0, strength: 0 }, news: { dir: 1, strength: 20 } }) },
+      timeline: [
+        { seq: "J-0001·01", t: at("2026-09-08T14:20:00Z"), type: "sent", orderId: "fx-open-1001", text: "Opened at 1.10 credit × 1." },
+        { seq: "J-0001·02", t: at("2026-09-30T15:05:00Z"), type: "alert", text: "Take profit reached: +$55 of $55." },
+        { seq: "J-0001·03", t: at("2026-09-30T15:06:00Z"), type: "fill", orderId: "fx-close-1001", text: "Closed at 0.55 debit. Filled 1 of 1." },
+      ] },
+    { ...base, id: 1005, ref: "J-0005", ticker: "CORN", name: "Bull call spread 15/16 · 18 Dec", openedAt: "2026-09-28T14:00:00.000Z",
+      t: at("2026-10-02T15:30:00Z"), entryNet: 0.45, maxProfit: 55, maxLoss: -45, pnl: -18, pnlNote: null, ruleExit: false,
+      closeReason: { kind: "manual", rule: null, text: "USDA report on Friday; stepping aside before it.", written: "USDA report on Friday; stepping aside before it." },
+      openOrderId: "fx-open-1005", closeOrderId: "fx-close-1005", openStatus: "filled",
+      thesis: { pop: 0.38, iv: 0.44, seasonal: 1.1, regime: "weak",
+        signals: snap("CORN", "2026-09-28T14:00:00Z", 6, 52, "CONFLICT",
+          { seasonal: { dir: 1, strength: 20 }, technical: { dir: -1, strength: 25 }, weather: { dir: 1, strength: 15 }, news: { dir: 0, strength: 0 } }) },
+      timeline: [
+        { seq: "J-0005·01", t: at("2026-09-28T14:00:00Z"), type: "sent", orderId: "fx-open-1005", text: "Opened at 0.45 debit × 1." },
+        { seq: "J-0005·02", t: at("2026-10-02T15:30:00Z"), type: "fill", orderId: "fx-close-1005", text: "Closed by you before the USDA report, at 0.27 credit." },
+      ] },
+  ];
+}
