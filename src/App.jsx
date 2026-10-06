@@ -80,6 +80,7 @@ import { exitProgress, entryVsNow, displayName, fileState, pnlShareOfRisk, pnlSh
   positionSubLine, statusBadge, keepEntry, paysLine, dayLabel } from "./positionView.js";
 import { PositionScreen } from "./positionScreen.jsx";
 import { JournalScreen } from "./journal.jsx";
+import { SettingsScreen } from "./settings.jsx";
 import { findStatusText, DEFAULT_FIND_ORDER, BUILD_CTA } from "./rules.js";
 // REDESIGN PR 2: Build on the owner's mockup — its words (rules.js) and its screen (build.jsx).
 import { tradeTakeaway, buildSubLine, expiryShort, deltaSharesText, thetaDayText, reasonRuleText, orderBookLine, capLabel,
@@ -4401,7 +4402,8 @@ export default function OptionsStrategyLab() {
   // REDESIGN PR 3: Positions (and its Orders segment) draws its own header too (the board "Positions").
   const onPositions = tab === "positions" && !showSettings;
   const onJournal = tab === "journal" && !showSettings;
-  const chromeless = onFindStep || onMarketStep || onBuildStep || onPositions || onJournal || (tab === "watching" && !showSettings);
+  // Settings draws its own "‹ Back" header since redesign PR 3b: no screen keeps the desk header now.
+  const chromeless = onFindStep || onMarketStep || onBuildStep || onPositions || onJournal || showSettings || (tab === "watching" && !showSettings);
   /* FIND'S STATUS LINE: "<freshness> · <feed> · Paper". The feed is the feeds the selected markets came from. */
   const findFeeds = Array.from(new Set(find.markets.map((tk) => feedName(chains[tk])).filter(Boolean))).join(" / ");
   /* FIND'S BAR READS THE SELECTION, NOT ONE MARKET (PR #46, TASK 1): "N markets · prices Xm ago", the OLDEST. */
@@ -4505,7 +4507,7 @@ export default function OptionsStrategyLab() {
             expiry and seasonality above its list described none of them. It
             stays on Build and everywhere else one ticker is the subject. */}
         {/* (Not on Build since redesign PR 2: the strip is in "More on this trade ▾", under "Market now".) */}
-        {!onFindStep && !onMarketStep && !onBuildStep && !onPositions && !onJournal && tickerStrip}
+        {!onFindStep && !onMarketStep && !onBuildStep && !onPositions && !onJournal && !showSettings && tickerStrip}
 
         {msg && <div style={{ ...mono, fontSize: FS.xs, color: T.amber, border: `1px solid ${T.amber}44`, background: `${T.amber}10`, borderRadius: 6, padding: "7px 10px", margin: chromeless ? "8px 16px 0" : "10px 0 0" }}>{msg}</div>}
 
@@ -5418,204 +5420,26 @@ export default function OptionsStrategyLab() {
           </div>
         )}
 
-        {/* ============ SETTINGS ============ */}
+        {/* ============ SETTINGS (redesign PR 3b; the owner's board "Settings") ============
+            src/settings.jsx draws it; every write is the handler it was. A connection says what the app last saw of it. */}
         {showSettings && (
-          <div style={{ marginTop: 12, maxWidth: 620 }}>
-            <h2 data-view-heading tabIndex={-1} style={{ ...sans, fontSize: FS.lg, fontWeight: 800, color: T.ink, margin: "0 0 8px", outline: "none" }}>Settings</h2>
-            <Card>
-              <Label>APPEARANCE</Label>
-              <div style={{ fontSize: FS.sm, color: T.mut, marginTop: 8, lineHeight: 1.5 }}>
-                Dark is the default. Light is here whenever you want it — the app reloads to apply the change.
-              </div>
-              <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-                {[["light", "Light", Sun], ["dark", "Dark", Moon]].map(([id, label, I]) => {
-                  const on = themeName() === id;
-                  return (
-                    <button key={id} onClick={() => !on && setTheme(id)}
-                      style={{ flex: 1, minHeight: 52, borderRadius: 10, cursor: on ? "default" : "pointer",
-                        fontSize: FS.md, fontWeight: on ? 700 : 500, ...sans,
-                        background: on ? T.amber : "transparent", color: on ? T.onAccent : T.ink,
-                        border: `1.5px solid ${on ? T.amber : T.line}`, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-                      <I size={16} /> {label}
-                    </button>
-                  );
-                })}
-              </div>
-            </Card>
-
-            <Card style={{ marginTop: 12 }}>
-              <Label>{limits.answered ? "YOUR CAPITAL · EVERY LIMIT COMES FROM HERE" : "YOUR CAPITAL · NOT SET YET"}</Label>
-              <div style={{ fontSize: FS.sm, color: T.mut, marginTop: 8, lineHeight: 1.5 }}>
-                Change these and the per-trade limit changes with them. Nothing here is a number we handed you.
-              </div>
-              {/* Empty means UNANSWERED, and the field says what a suggestion
-                  would look like rather than filling itself in as if you had
-                  chosen it. Every figure below then reads "suggested" until
-                  both boxes have something in them. */}
-              {!limits.answered && (
-                <Pill tone={T.blue}>{capitalSourceNote(limits)}</Pill>
-              )}
-              <div style={{ display: "flex", gap: 16, marginTop: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
-                <div>
-                  <div style={{ ...mono, fontSize: FS.xs, color: T.dim }}>TRADING CAPITAL ($)</div>
-                  <Inp type="number" min={100} step={500} value={store.settings.capital ?? ""}
-                    placeholder={`e.g. ${RULES.suggestedTradingCapital}`}
-                    onChange={(e) => setSetting("capital", e.target.value === "" ? null : Math.max(100, +e.target.value))} style={{ width: 130, fontSize: FS.lg, padding: "10px 10px" }} />
-                </div>
-                <div>
-                  <div style={{ ...mono, fontSize: FS.xs, color: T.dim }}>POSITIONS AT ONCE</div>
-                  <Inp type="number" min={1} max={20} value={store.settings.concurrentTarget ?? ""}
-                    placeholder={`e.g. ${RULES.suggestedConcurrentTarget}`}
-                    onChange={(e) => setSetting("concurrentTarget", e.target.value === "" ? null : Math.max(1, +e.target.value))} style={{ width: 90, fontSize: FS.lg, padding: "10px 10px" }} />
-                </div>
-                <div>
-                  <div style={{ ...mono, fontSize: FS.xs, color: T.dim }}>TOTAL SAVINGS ($, OPTIONAL)</div>
-                  <Inp type="number" min={0} step={1000} value={store.settings.savings ?? ""}
-                    onChange={(e) => setSetting("savings", e.target.value === "" ? null : Math.max(0, +e.target.value))} style={{ width: 150, fontSize: FS.lg, padding: "10px 10px" }} />
-                </div>
-              </div>
-              {/* The pills explain the limit while you are still changing it. */}
-              {limits.pills.map((pl) => <Pill key={pl.id}>{pl.text}</Pill>)}
-              <div style={{ marginTop: 14, padding: "12px 14px", background: T.bg, border: `1px solid ${limits.answered ? T.line : T.blue}`, borderRadius: 10 }}>
-                <div style={{ ...mono, fontSize: FS.xs, color: limits.answered ? T.dim : T.blue, letterSpacing: "0.1em" }}>
-                  {limits.answered ? "YOUR LIMITS" : "SUGGESTED — NOT YOUR LIMITS YET"}
-                </div>
-                <div style={{ fontSize: FS.md, fontWeight: 700, color: T.ink, marginTop: 4 }}>{money(limits.perTradeLimit)} at risk per trade</div>
-                <div style={{ fontSize: FS.sm, color: T.mut, marginTop: 4, lineHeight: 1.5 }}>
-                  and {money(limits.totalLimit)} across everything at once ({pctText(RULES.totalExposurePct)} of your capital).
-                  {limits.overrideAccepted ? ` This is your own limit, not the suggested one — your reason: “${limits.overrideReason}”.` : ""}
-                </div>
-                {freeSizing && <div style={{ ...mono, fontSize: FS.xs, color: T.amber, marginTop: 6 }}>Free sizing is on: these two limits are not applied.</div>}
-                {/* Only when answered: unanswered, the pill above the fields
-                    already says it, and saying it twice reads as noise. */}
-                {limits.answered && <div style={{ ...mono, fontSize: FS.xs, color: T.dim, marginTop: 6, lineHeight: 1.5 }}>{capitalSourceNote(limits)}</div>}
-              </div>
-              {/* An override is allowed, and it costs a written reason (PRD §3). */}
-              <div style={{ marginTop: 14 }}>
-                <div style={{ ...mono, fontSize: FS.xs, color: T.dim }}>OVERRIDE THE PER-TRADE LIMIT (NEEDS A WRITTEN REASON)</div>
-                <div style={{ display: "flex", gap: 8, marginTop: 6, flexWrap: "wrap", alignItems: "center" }}>
-                  <Inp type="number" min={0} step={50} placeholder="amount"
-                    value={store.settings.sizeOverride?.perTrade ?? ""}
-                    onChange={(e) => setSetting("sizeOverride", e.target.value === ""
-                      ? null
-                      : { ...(store.settings.sizeOverride || {}), perTrade: Math.max(0, +e.target.value) })}
-                    style={{ width: 120, fontSize: FS.lg, padding: "10px 10px" }} />
-                  {store.settings.sizeOverride && (
-                    <Btn small ghost color={T.red} onClick={() => setSetting("sizeOverride", null)}>Remove override</Btn>
-                  )}
-                </div>
-                {store.settings.sizeOverride && (
-                  <textarea rows={3} placeholder="Why this limit and not the suggested one?"
-                    value={store.settings.sizeOverride?.reason ?? ""}
-                    onChange={(e) => setSetting("sizeOverride", { ...(store.settings.sizeOverride || {}), reason: e.target.value })}
-                    style={{ width: "100%", boxSizing: "border-box", marginTop: 8, fontSize: FS.lg, lineHeight: 1.45,
-                      ...sans, background: T.bg, color: T.ink,
-                      border: `1px solid ${limits.overrideAccepted ? T.green : T.amber}`, borderRadius: 8, padding: "10px 12px", resize: "vertical" }} />
-                )}
-              </div>
-            </Card>
-
-            {/* FREE SIZING (PR #41, TASK 4; owner decision, 23 Sep 2026). OFF by
-                default. ON costs one typed reason, stored with its time like
-                the override above. It turns off the per-trade and exposure
-                limits only — never paper, defined risk, entry DTE or a floor. */}
-            <Card style={{ marginTop: 12 }}>
-              <Label>FREE SIZING</Label>
-              <label style={{ display: "flex", gap: 10, alignItems: "flex-start", marginTop: 10, cursor: "pointer" }}>
-                <input type="checkbox" checked={freeSizing || freeDraft != null}
-                  onChange={(e) => {
-                    if (e.target.checked) { setFreeDraft(""); return; }
-                    setFreeDraft(null); setSetting("sizingFree", null);
-                  }} style={{ marginTop: 3, width: 18, height: 18 }} />
-                <span style={{ fontSize: FS.sm, color: T.body, lineHeight: 1.5 }}>
-                  Size each trade on the amount I type. The per-trade and total limits are not applied; paper only, defined risk, the entry days and every quality floor still are.
-                </span>
-              </label>
-              {freeSizing && (
-                <div style={{ ...mono, fontSize: FS.xs, color: T.dim, marginTop: 8, lineHeight: 1.5 }}>
-                  On since {new Date(store.settings.sizingFree.at).toLocaleString("en-GB")} — your reason: “{store.settings.sizingFree.reason.trim()}”
-                </div>
-              )}
-              {!freeSizing && freeDraft != null && (
-                <>
-                  <textarea rows={3} placeholder="Why size freely?"
-                    value={freeDraft} onChange={(e) => setFreeDraft(e.target.value)}
-                    style={{ width: "100%", boxSizing: "border-box", marginTop: 8, fontSize: FS.lg, lineHeight: 1.45,
-                      ...sans, background: T.bg, color: T.ink,
-                      border: `1px solid ${T.amber}`, borderRadius: 8, padding: "10px 12px", resize: "vertical" }} />
-                  <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
-                    <Btn small color={T.amber} disabled={!sizingFreeOn({ reason: freeDraft })}
-                      onClick={() => { setSetting("sizingFree", { reason: freeDraft.trim(), at: Date.now() }); setFreeDraft(null); }}>
-                      Turn on
-                    </Btn>
-                    {!sizingFreeOn({ reason: freeDraft }) && (
-                      <span style={{ ...mono, fontSize: FS.xs, color: T.mut }}>
-                        {RULES.minOverrideReasonChars - freeDraft.trim().length} more characters
-                      </span>
-                    )}
-                  </div>
-                </>
-              )}
-            </Card>
-
-            {/* CONNECTIONS (PR #47, TASK 2): the Integrations panel, moved here from Positions unchanged in substance.
-                Settings is where the app is set up; Positions is where you act. */}
-            <Card style={{ marginTop: 12 }}>
-              <Label><Plug size={11} style={{ verticalAlign: "-1px" }} /> CONNECTIONS</Label>
-              <div style={{ marginTop: 10 }}>
-                <div style={{ ...mono, fontSize: FS.xs, color: T.ink, fontWeight: 700 }}>Alpaca paper trading</div>
-                <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap", alignItems: "center" }}>
-                  <Btn small onClick={testAlpaca} disabled={busy === "alpaca"}>Check the connection</Btn>
-                  <span style={{ ...mono, fontSize: FS.xs, color: T.dim }}>keys live in the server environment (ALPACA_KEY / ALPACA_SECRET)</span>
-                </div>
-                {alpaca && (
-                  <div style={{ display: "flex", gap: 14, marginTop: 8, flexWrap: "wrap" }}>
-                    <Stat k="STATUS" v={alpaca.status} c={T.blue} />
-                    <Stat k="ACCOUNT" v={alpaca.account_number || "—"} />
-                  </div>
-                )}
-                <div style={{ ...mono, fontSize: FS.xs, color: T.dim, marginTop: 6 }}>
-                  Only paper-api.alpaca.markets is ever contacted, and the app checks that it was: no real money can be reached from here. Every order asks you twice before it is sent. Equity and buying power are on Positions.
-                </div>
-              </div>
-              <div style={{ marginTop: 14 }}>
-                <div style={{ ...mono, fontSize: FS.xs, color: T.ink, fontWeight: 700 }}>Alpha Vantage — free 10-year price history</div>
-                <div style={{ ...mono, fontSize: FS.xs, color: T.dim, marginTop: 6 }}>The key lives in the server environment (ALPHAVANTAGE_KEY). It powers the real seasonality and the year-by-year history under History.</div>
-              </div>
-              <div style={{ marginTop: 14 }}>
-                <div style={{ ...mono, fontSize: FS.xs, color: T.ink, fontWeight: 700 }}>Anthropic API — copilot and reports</div>
-                <div style={{ ...mono, fontSize: FS.xs, color: T.dim, marginTop: 6 }}>The key lives in the server environment (ANTHROPIC_KEY), so nothing needs typing into the site.</div>
-              </div>
-              <div style={{ marginTop: 14 }}>
-                <div style={{ ...mono, fontSize: FS.xs, color: T.ink, fontWeight: 700 }}>Report webhook (optional)</div>
-                <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
-                  <Inp placeholder="https://hooks.zapier.com/…" value={store.settings.webhook} onChange={(e) => setSetting("webhook", e.target.value)} style={{ flex: 1, minWidth: 200 }} />
-                </div>
-                <div style={{ ...mono, fontSize: FS.xs, color: T.dim, marginTop: 4 }}>The report in the Journal can post itself to Zapier or Make, which can forward it by email or messaging.</div>
-              </div>
-            </Card>
-
-            <Card style={{ marginTop: 12 }}>
-              <Label>WHEN THERE IS NOTHING TO DO</Label>
-              <label style={{ display: "flex", gap: 10, alignItems: "flex-start", marginTop: 10, cursor: "pointer" }}>
-                <input type="checkbox" checked={!!store.settings.notifyWhenReady}
-                  onChange={(e) => setNotify(e.target.checked)} style={{ marginTop: 3, width: 18, height: 18 }} />
-                <span style={{ fontSize: FS.sm, color: T.body, lineHeight: 1.5 }}>
-                  Flag it in the daily brief when the signals line up again and options stop being expensive.
-                </span>
-              </label>
-            </Card>
-
-            <Card style={{ marginTop: 12 }}>
-              <Label>START OVER</Label>
-              <div style={{ fontSize: FS.sm, color: T.mut, marginTop: 8, lineHeight: 1.5 }}>
-                Run the capital questions again. Your positions and saved strategies are not touched.
-              </div>
-              <div style={{ marginTop: 12 }}>
-                <Btn ghost color={T.blue} onClick={() => setSetting("onboarded", false)}>Redo setup</Btn>
-              </div>
-            </Card>
-          </div>
+          <SettingsScreen v={{
+            onBack: () => setShowSettings(false), settings: store.settings, limits, freeSizing,
+            openNow: exposure ? exposure.openRisk : null, capitalNote: capitalSourceNote(limits),
+            onSetting: setSetting, onNotify: setNotify, theme: themeName(), onTheme: setTheme,
+            sizingFreeOk: (reason) => sizingFreeOn({ reason: reason || "" }),
+            onCheckAlpaca: testAlpaca, checking: busy === "alpaca",
+            conn: {
+              alpaca: alpaca
+                ? { ok: true, state: `Connected${alSync.t ? ` · checked ${new Date(alSync.t).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}` : ""}`,
+                  account: alpaca.account_number || null, status: alpaca.status || null }
+                : { ok: false, state: "Not connected" },
+              av: TICKERS.some((tk) => seasonalFor(tk).source === "measured")
+                ? { ok: true, state: "Working" } : { ok: false, state: "Not read yet" },
+              ai: (store.copilotLog || []).length
+                ? { ok: true, state: `Answered ${new Date(store.copilotLog[0].t).toLocaleDateString("en-GB")}` } : { ok: false, state: "Not asked yet" },
+            },
+          }} />
         )}
 
         {/* ============ JOURNAL — the third place ============

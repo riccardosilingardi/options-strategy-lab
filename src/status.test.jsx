@@ -189,8 +189,8 @@ check("FIND HAS NO SINGLE-TICKER STRIP; BUILD KEEPS IT", () => {
   // Redesign PR 2: Build draws no desk header, so the strip is guarded off Build too and is ONE piece (`tickerStrip`), drawn
   // in the header and in Build's "More on this trade ▾".
   // Redesign PR 3: Positions draws its own header (the board), so the strip is guarded off it too.
-  // Redesign PR 3b: and off the Journal, which draws its own header too.
-  if (code.indexOf("{!onFindStep && !onMarketStep && !onBuildStep && !onPositions && !onJournal && tickerStrip}") < 0) throw new Error("the strip is not guarded");
+  // Redesign PR 3b: and off the Journal and Settings, which draw their own headers too.
+  if (code.indexOf("{!onFindStep && !onMarketStep && !onBuildStep && !onPositions && !onJournal && !showSettings && tickerStrip}") < 0) throw new Error("the strip is not guarded");
   if (code.indexOf("{tickerStrip}") < 0) throw new Error("Build's More draws the same strip");
   // Every stat of the strip sits inside the one piece.
   const open = code.indexOf("const tickerStrip = (");
