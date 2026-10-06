@@ -91,6 +91,10 @@ import { BuildScreen, BuildLoading, BuildNoQuotes, BuildEmpty, Section } from ".
 import { gateChecklist } from "./wizard.jsx";
 import { undefinedRiskLegs } from "./riskGate.js";
 import { taContext } from "./indicators.js";
+// PR 4b: the alternatives of a structure (Build's variants, a position's roll) and their words.
+import { variantsOf, rollCandidates, rollEligible } from "./alternatives.js";
+import { whyOpenedLine, endedLine } from "./journalView.js";
+import { LIMIT_CHOICES, expiryWords, returnText, pastTileText, futureTile, VARIANT_LABELS, VARIANTS_NOTE, VARIANTS_NONE, gateLine, ROLL_WHY, ROLL_HOW, rollLine, rollCloseFirst, rolledInto, rolledFrom } from "./rules.js";
 import { EvidenceBar, EvidenceOverlay, DeskSheet, Fold, DeskCountLine } from "./steps.jsx";
 import { BottomBar, placeOf, NAV_BAR_H, FIND_LIST_END } from "./navBar.jsx";
 import { AccountStrip, PositionsBar, PositionsHeader, WorkingCloseLine, CardButton } from "./positions.jsx";
@@ -1364,6 +1368,8 @@ export default function OptionsStrategyLab() {
   // FIND'S AND THE MARKET PAGE'S COPILOT CONVERSATIONS (PR 4): owned here, like Build's, so an answer survives the sheet closing.
   const [findChat, setFindChat] = useState({ msgs: [], busy: false, err: null, partial: "" });
   const [marketChat, setMarketChat] = useState({ msgs: [], busy: false, err: null, partial: "" });
+  // THE JOURNAL'S QUESTION ABOUT ONE CLOSED TRADE (PR 4c): one conversation, for the trade it was asked about.
+  const [lessonChat, setLessonChat] = useState({ ref: null, convo: { msgs: [], busy: false, err: null, partial: "" } });
   const [taBars, setTaBars] = useState(null);
   useEffect(() => { setTaBars(null); setTaChat({ msgs: [], busy: false, err: null, partial: "" }); }, [ticker]);
   /* >>> ONE STATE FOR "WHAT I WANT", ABOVE BOTH DOORS (ROADMAP P10 §2). <<<
@@ -2568,6 +2574,21 @@ export default function OptionsStrategyLab() {
     setOpenResult(r.gate);
     if (!r.ok) { setMsg(`Risk gate: position not opened. ${r.gate.violations.map((v) => v.message).join(" ")}`); return; }
     setAgainst({ reason: "" }); setRoomReason(""); setOpenResult(null);
+    // A ROLL'S TWO RECORDS ARE LINKED ON THEIR TIMELINES (PR 4b): "Rolled into J-0006" on the one it replaced (open or
+    // already in the Journal), "Rolled from J-0003" on the new one. Lines on the timeline, never a new /api/state field.
+    if (buildOrigin && buildOrigin.kind === "roll" && r.pos && r.pos.ref) {
+      const fromId = buildOrigin.fromId, fromRef = buildOrigin.fromRef, toId = r.pos.id, toRef = r.pos.ref, t = Date.now();
+      setStore((st) => {
+        const link = (x) => {
+          if (x.id === fromId) { const a = appendTimeline(x, { t, type: "roll", text: rolledInto(toRef) }); return { ...x, timeline: a.timeline, seqNext: a.seqNext }; }
+          if (x.id === toId) { const a = appendTimeline(x, { t, type: "roll", text: rolledFrom(fromRef) }); return { ...x, timeline: a.timeline, seqNext: a.seqNext }; }
+          return x;
+        };
+        const ns = { ...st, positions: (st.positions || []).map(link), journal: (st.journal || []).map(link) };
+        saveState(ns); return ns;
+      });
+      setBuildOrigin({ kind: "load", key: null });
+    }
     // "POSITION OPENED" IS NOT TRUE OF AN ACCEPTED ORDER. The live run came
     // back status "accepted", filled_qty 0 — queued outside market hours —
     // and the app announced a position and an exit plan over it. Filled,
@@ -3515,6 +3536,29 @@ export default function OptionsStrategyLab() {
     return gate({ ticker, intent: "open", legs, dte, contracts, maxLoss: AE.maxLoss, maxProfit: AE.maxProfit,
       quotes: quotesOf(AE), net: AE.entry, occs: occsOf(AE), entryOverride: roomReason }, bookFor(!!alpaca));
   }, [AE, gate, bookFor, alpaca, legs, dte, ticker, roomReason, contracts]); // eslint-disable-line
+  /* THE ALTERNATIVES, PRICED (PR 4b): one function for Build's variants and a position's roll candidates. Each goes
+     through the card's own path — `listCardFigures()` at the price that fills, `scaleStrategy()` for the size the budget
+     buys, the gate at that size against the account the send would use — so a variant reads exactly as a card would. */
+  const priceAlt = useCallback((tk, alt) => {
+    const c = chains[tk];
+    const dteX = c && c.byExp[alt.expKey] ? c.byExp[alt.expKey].dte : null;
+    if (!c || !c.spot || dteX == null) return null;
+    const lf = listCardFigures(alt.legs, { spot: c.spot, dte: dteX, iv: getU(tk).iv, q: makeQuote(c, alt.expKey), ticker: tk, expKey: alt.expKey,
+      seasonal: seasonalFor(tk), matrix: seasonal[tk]?.matrix || null });
+    const size = sizedFree(scaleStrategy(lf.aFill, request.mode, request.amt, request.riskCap), freeSizing);
+    const n = size && size.ok ? size.n : null;
+    const f = sizedFigures(lf.aFill, n);
+    const g = gate({ ticker: tk, intent: "open", legs: alt.legs, dte: dteX, contracts: n || 1, maxLoss: lf.aFill.maxLoss, maxProfit: lf.aFill.maxProfit,
+      quotes: quotesOf(lf.aFill), net: lf.aFill.entry, occs: occsOf(lf.aFill) }, bookFor(!!alpaca));
+    return { ...alt, ticker: tk, dte: dteX, label: VARIANT_LABELS[alt.kind] || alt.kind, legsText: `${legsLine(alt.legs)} · ${expiryWords(alt.expKey)}`, n,
+      youRisk: f ? f.risk : null, maxProfit: f ? (f.unbounded ? null : f.profit) : null, unbounded: !!(f && f.unbounded),
+      chance: chanceText(lf.pop), rr: lf.rr == null ? "—" : returnText(lf.rr), future: futureTile(futureFigures(lf.mc, lf.aFill, n, alt.expKey)).value,
+      past: pastTileText(pastFigures(lf.bt, lf.aFill, n)), gate: g, gateText: gateLine(g) };
+  }, [chains, seasonalFor, seasonal, request, freeSizing, gate, bookFor, alpaca]);
+  /* BUILD'S VARIANTS (PR 4b): the loaded structure moved on the strikes the chain lists (alternatives.js), priced. */
+  const buildVariants = useMemo(() => (AE && legs.length && chain
+    ? variantsOf({ legs, expKey, chain, spot }).map((v) => priceAlt(ticker, v)).filter(Boolean) : []),
+  [AE, legs, expKey, chain, spot, ticker, priceAlt]); // eslint-disable-line
   /* Which band this expiry falls in, for the screen. The gate decides; this
      only decides what the screen has to ASK for. */
   const room = useMemo(() => entryRoom(dte), [dte]);
@@ -3814,6 +3858,17 @@ export default function OptionsStrategyLab() {
       const ns = { ...st, positions }; saveState(ns); return ns;
     });
   };
+  /* A POSITION'S ROLL (PR 4b): offered only when it is not in profit and the reasons it was opened still hold
+     (`rollEligible()`); its candidates are the same structure on the later expiries the entry window allows, priced
+     like cards (`priceAlt()`). Worked out for the one position whose screen is open. */
+  const rollView = useMemo(() => {
+    const rp = detailsId != null ? ownedPositions.find((x) => x.id === detailsId) : null;
+    const rm = rp ? positionModels[rp.id] : null;
+    if (!rp || !rm) return null;
+    const el = rollEligible({ pnl: rm.pnl, notHeld: rm.act.kind === "not-held", working: !!rm.working, factors: rm.ev ? rm.ev.factors : [] });
+    const rows = el.ok && rp.expKey ? rollCandidates({ legs: rp.legs, expKey: rp.expKey, chain: rm.c }).map((c) => priceAlt(rp.ticker, c)).filter(Boolean) : [];
+    return { ...el, rows };
+  }, [detailsId, ownedPositions, positionModels, priceAlt]);
   const positionScreenNode = (() => {
     const dp = detailsId != null ? ownedPositions.find((x) => x.id === detailsId) : null;
     const dm = dp ? positionModels[dp.id] : null;
@@ -3880,7 +3935,12 @@ export default function OptionsStrategyLab() {
             // PR 4: what the copilot may recommend (the screen's own actions), the Greeks at entry and now (for the size
             // Alpaca holds; a Greek the entry did not record is null), and the price since the opening, from the chart's bars.
             actionsOffered: positionActions({ working: !!dm.working, notHeld: dm.act.kind === "not-held",
-              canKeep: dm.act.action === "WARNING" || dm.act.action === "CLOSE", hasTarget: !!dm.tpTarget }),
+              canKeep: dm.act.action === "WARNING" || dm.act.action === "CLOSE", hasTarget: !!dm.tpTarget,
+              canRoll: !!(rollView && rollView.ok && rollView.rows.length) }),
+            // PR 4b: whether a roll is offered, why (or why not), and its candidates as the app priced them.
+            roll: rollView ? { offered: rollView.ok, why: ROLL_WHY[rollView.why], candidates: rollView.rows.map((r) => ({ label: r.label,
+              legs: r.legsText, contracts: r.n, youRisk: r.youRisk, maxProfit: r.maxProfit, chance: r.chance, returnOnRisk: r.rr,
+              futureAvg: r.future, pastYrs: r.past, gate: r.gateText })) } : null,
             greeksAtEntry: dp.thesis ? { deltaShares: dp.thesis.delta != null ? Math.round(Number(dp.thesis.delta) * 100 * dm.n) : null,
               thetaPerDay: null, vegaPerVolPoint: dp.thesis.vega != null ? Math.round(Number(dp.thesis.vega) * dm.n) : null,
               note: "Recorded when the trade was opened; theta was not recorded at entry." } : null,
@@ -3890,6 +3950,10 @@ export default function OptionsStrategyLab() {
           chart: () => (barsCache[dp.ticker] || []).length ? taContext(barsCache[dp.ticker], { name: dm.name, expKey: dp.expKey, dte: dm.dteLeft,
             legs: dp.legs, breakevens: bands && Array.isArray(bands.breakevens) ? bands.breakevens : [], spot: dm.s,
             note: "These figures come from the open position on this screen. They are not recomputed here." }) : null } },
+      roll: rollView && (rollView.ok || rollView.why === "turned" || rollView.why === "notRecorded") ? {
+        ok: rollView.ok, why: ROLL_WHY[rollView.why], how: ROLL_HOW, rows: rollView.rows,
+        onPrepare: (alt) => { setDetailsId(null); openOnBuild({ ticker: dp.ticker, expKey: alt.expKey, legs: alt.legs, name: dp.name || dm.name,
+          origin: { kind: "roll", key: null, fromId: dp.id, fromRef: dp.ref || dp.ticker } }); } } : null,
       guardian: (
         <GuardianPanel
           pos={dp} spot={dm.s || dp.entrySpot} dteLeft={dm.dteLeft} ivNow={dm.ivNow}
@@ -5183,7 +5247,32 @@ export default function OptionsStrategyLab() {
             cur[0] = onTick(Math.max(0, Number(cur[0]) + dir * sNet * s0 * ORDER_TICK));
             setTicket((t) => ({ ...t, legPx: cur }));
           };
-          const sendBlock = PREVIEW ? PREVIEW_READ_ONLY : DEMO ? DEMO_TOOLTIP : legQtyMsg ? `${legQtyMsg}.`
+          /* THE LIMIT, SET TO A PRICE (PR 4b, owner: "type it; Mid, Pay, Negotiate"). The same state the stepper moves —
+             the first leg's price, so the net lands on the target — or, for Negotiate, the app's own seed (`legPx` null:
+             `legLimitSeed()`, the price the card and the gate read). Nothing here sends; the gate checks the new price. */
+          const setLimitTo = (target) => {
+            const cur = Array.isArray(legPrices) && legPrices.length === legs.length ? legPrices.slice() : null;
+            if (!cur || !legs.length || !Number.isFinite(Number(cur[0])) || !Number.isFinite(net) || !Number.isFinite(target)) return;
+            const s0 = Math.sign(+legs[0].side || 1), sNet = net < 0 ? -1 : 1;
+            cur[0] = onTick(Math.max(0, Number(cur[0]) + (target - Math.abs(net)) * sNet * s0));
+            setTicket((t) => ({ ...t, legPx: cur }));
+          };
+          const absNet = Number.isFinite(net) ? Math.abs(net) : null;
+          const near = (x) => absNet != null && x != null && Math.abs(absNet - x) < ORDER_TICK / 2;
+          const midAbs = book.ok ? Math.abs(book.mid) : null, payAbs = book.ok ? Math.abs(book.ask) : null;
+          const limitChoices = LIMIT_CHOICES.map((c) => {
+            if (c.id === "negotiate") return { ...c, value: null, on: !Array.isArray(ticket.legPx), onPick: () => setTicket((t) => ({ ...t, legPx: null })) };
+            const x = c.id === "mid" ? midAbs : payAbs;
+            return { ...c, value: x == null ? null : x.toFixed(2), on: Array.isArray(ticket.legPx) && near(x), disabled: x == null,
+              onPick: () => setLimitTo(Math.round(x * 100) / 100) };
+          });
+          /* A ROLL NEVER HOLDS BOTH (PR 4b): while the position it replaces is still held at Alpaca, Send waits and says
+             so; once its close has filled (or it was filed), this is an ordinary new trade, through the gate. */
+          const rollRef = buildOrigin && buildOrigin.kind === "roll" ? buildOrigin.fromRef : null;
+          const rollFrom = rollRef ? ownedPositions.find((x) => x.id === buildOrigin.fromId) || null : null;
+          const rollHeld = !!(rollFrom && positionModels[rollFrom.id] && positionModels[rollFrom.id].fileKind !== "gone"
+            && positionModels[rollFrom.id].act.kind !== "not-held");
+          const sendBlock = PREVIEW ? PREVIEW_READ_ONLY : DEMO ? DEMO_TOOLTIP : rollHeld ? rollCloseFirst(rollRef) : legQtyMsg ? `${legQtyMsg}.`
             : !guard ? "The risk gate has not run on this trade yet." : !guard.pass ? guard.violations.map((v) => v.message).join(" ") : null;
           const reviewNow = reviewSheetOf({ net, L, sendBlock });
           const tpB = takeProfitTarget({ legs, maxProfit: AE.maxProfit, maxLoss: AE.maxLoss, entryNet: AE.entry, contracts });
@@ -5192,7 +5281,7 @@ export default function OptionsStrategyLab() {
             back: backTk ? { label: backTk, onClick: () => { if (buildOrigin && buildOrigin.kind === "card") backToList(); else goMarket(backTk, "strategies"); } }
               : { label: "Find", onClick: () => goStep("find") },
             title: { name: stratName, sub: buildSubLine({ ticker, expKey, dte, n: contracts }),
-              signs: <StopSigns signs={buildSigns} style={{ marginTop: 8 }} />, note: buildOrigin && buildOrigin.note ? buildOrigin.note : null },
+              signs: <StopSigns signs={buildSigns} style={{ marginTop: 8 }} />, note: rollRef ? rollLine(rollRef, !rollHeld) : buildOrigin && buildOrigin.note ? buildOrigin.note : null },
             takeaway: tradeTakeaway(BF.bands, { ticker, expKey, n: contracts, credit: AE.entry < 0, legs }),
             numbers: {
               figures: sizedFigures(AE, contracts), rr: BF.rr, pop: chance ? chance.pop : null, breakevens: AE.breakevens,
@@ -5205,7 +5294,7 @@ export default function OptionsStrategyLab() {
               onMarketRead: () => goMarket(ticker, "overview"), readLabel: MARKET_READ_LINK },
             copilot: { apiKey: "server", convo: copilot, setConvo: setCopilot, onAnalysis: logAnalysis,
               ctx: { store, scan, news: news[ticker]?.items || [], ticker, legs, expKey, A, spot, seasonalSrc: seas.src, setMsg,
-                reviewChecks: reviewNow.checks,
+                reviewChecks: reviewNow.checks, variants: buildVariants,
                 // THE CHART (PR 4, "The chart and this trade"): `taContext()`'s own indicators on the cached daily bars, with
                 // this trade's legs and breakevens; null until the bars have loaded. A function: worked out at the send only.
                 chart: () => (barsCache[ticker] || []).length ? taContext(barsCache[ticker], { name: stratName, expKey, dte, legs,
@@ -5224,7 +5313,7 @@ export default function OptionsStrategyLab() {
               }) },
             order: {
               contracts, onContracts: (n) => setContracts(Math.max(1, Math.min(20, n))), qtyMin: 1, qtyMax: 20, qtyNote: buildSizeLine,
-              limitSide: Number.isFinite(net) && net < 0 ? "credit" : "debit", limit: Number.isFinite(net) ? Math.abs(net) : null, onStep: stepLimit,
+              limitSide: Number.isFinite(net) && net < 0 ? "credit" : "debit", limit: Number.isFinite(net) ? Math.abs(net) : null, onStep: stepLimit, onTypeLimit: setLimitTo, choices: limitChoices,
               bookLine: orderBookLine({ mid: book.ok ? book.mid : null, natural: book.ok ? book.ask : null }), verdict: ticketVerdict,
               risk: { value: L ? money(L.tradeRisk) : "—", pct: L && L.tradingCapital ? `${pctText(L.tradeRisk / L.tradingCapital)} of capital` : null },
               cap: {
@@ -5246,6 +5335,10 @@ export default function OptionsStrategyLab() {
               { label: "Time exit", sub: EXIT_ROWS.time(), value: timeExitDay(expKey) || "—" },
               { label: "Stop", sub: EXIT_ROWS.stop(), value: stopAt == null ? "—" : money(Math.abs(stopAt)) },
             ] },
+            // PR 4b: the loaded structure's variants, priced like cards; "Load ›" keeps a roll's origin (it is still a roll).
+            variants: { rows: buildVariants, note: VARIANTS_NOTE, none: VARIANTS_NONE,
+              onLoad: (alt) => openOnBuild({ ticker, expKey: alt.expKey, legs: alt.legs, name: stratName,
+                origin: buildOrigin && buildOrigin.kind === "roll" ? buildOrigin : { kind: "variant", key: null } }) },
             send: { label: sendLabel({ type: ticket.type, net, n: contracts }), disabled: !!sendBlock, reason: sendBlock,
               footer: SEND_FOOTER(ticket.tif), onSend: () => setDeskSheet("review") },
             review: reviewNow,
@@ -5516,6 +5609,32 @@ export default function OptionsStrategyLab() {
               ...workingOrders.map((p) => ({ p, m: null, stage: "working" }))],
             closed: journalRows, allClosed: store.journal || [], query: jq, onQuery: setJq, openRef: journalOpenRef,
             onOpenScreen: (p) => { setTab("positions"); setPosSeg("positions"); setDetailsId(p.id); },
+            // PR 4c: "What did this trade teach me?" on a closed trade — the record's own words and figures, nothing
+            // recomputed; the answer is filed in copilotLog with the ref and leaves one line on the record's timeline.
+            copilotFor: (e) => {
+              const EMPTY_CONVO = { msgs: [], busy: false, err: null, partial: "" };
+              const mine = lessonChat.ref === (e.ref || e.id);
+              return { apiKey: "server", convo: mine ? lessonChat.convo : EMPTY_CONVO,
+                setConvo: (f) => setLessonChat((j) => ({ ref: e.ref || e.id, convo: typeof f === "function" ? f(j.ref === (e.ref || e.id) ? j.convo : EMPTY_CONVO) : f })),
+                onAnalysis: (a) => {
+                  logAnalysis({ ...a, label: `${e.ref || e.ticker} · ${a.label}` });
+                  setStore((st) => {
+                    const journal = (st.journal || []).map((x) => {
+                      if (x !== e && !(x.ref && x.ref === e.ref)) return x;
+                      const t = appendTimeline(x, { t: Date.now(), type: "copilot", text: `Asked the copilot: “${a.label}”. The answer is in the Journal.` });
+                      return { ...x, timeline: t.timeline, seqNext: t.seqNext };
+                    });
+                    const ns = { ...st, journal }; saveState(ns); return ns;
+                  });
+                },
+                ctx: { store, scan, news: [], ticker: e.ticker, legs: e.legs || [], expKey: e.expKey || null, A: null, spot: null, seasonalSrc: null,
+                  closedTrade: { ref: e.ref || null, ticker: e.ticker, name: e.name, legs: e.legs || [], expKey: e.expKey || null,
+                    openedAt: e.openedAt || null, closedAt: e.closedAt || null, result: journalPnl(e).shown, resultNote: journalPnl(e).note || null,
+                    howItEnded: endedLine(e), whyOpened: whyOpenedLine(e.thesis), closeReason: e.closeReason || null, ruleExit: !!e.ruleExit,
+                    atEntry: e.thesis ? { chance: e.thesis.pop ?? null, iv: e.thesis.iv ?? null, signals: e.thesis.signals || null,
+                      againstSignal: e.thesis.againstSignal || null } : null,
+                    timeline: (e.timeline || []).map((x) => x.text) } } };
+            },
             report: <ReportTab apiKey={"server"} setSetting={setSetting}
               ctx={{ store, scan, news: news[ticker]?.items || [], ticker, legs, expKey, A, spot, seasonalSrc: seas.src, setMsg }} />,
             analysesSummary: `Copilot analyses · ${(store.copilotLog || []).length} filed`,

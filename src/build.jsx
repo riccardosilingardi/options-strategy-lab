@@ -16,10 +16,10 @@
 import React, { useState } from "react";
 import { Minus, Plus, ArrowUp } from "lucide-react";
 import { T, TYPE } from "./theme.js";
-import { mono, sans, Note, Info, Sheet, Reveal, TAP } from "./ui.jsx";
+import { mono, sans, Note, Info, Sheet, Reveal, FilterChip, TAP } from "./ui.jsx";
 import { useCopilot, useTicketSend, SKILLS, BUILD_SKILL_IDS, Markdown, readQty } from "./pro.jsx";
 import { FACTOR_LABEL } from "./why.jsx";
-import { CARD_LABELS, BUILD_DEFINITIONS, money, signedMoney, chanceText, futureTile, ARIA } from "./rules.js";
+import { CARD_LABELS, BUILD_DEFINITIONS, money, signedMoney, chanceText, futureTile, ARIA, VARIANT_LOAD, NO_CEILING, LIMIT_CHOICES, parseLimitText } from "./rules.js";
 
 const FS = TYPE.size, FW = TYPE.weight, LH = TYPE.line;
 const tnum = { fontVariantNumeric: "tabular-nums" };
@@ -303,7 +303,7 @@ export function LegsSection({ expLabel, legs = [], onEditInChain, snapNote = nul
 
 /* ---------------------------------------------------------------- THE ORDER, INLINE */
 /** − value +, inside one 1px field border: 44×44 buttons, the value mono 15 bold (or typed, when `onType`). */
-export function Stepper({ label, value, onMinus, onPlus, canMinus = true, canPlus = true, onType = null, ariaLabel }) {
+export function Stepper({ label, value, onMinus, onPlus, canMinus = true, canPlus = true, onType = null, ariaLabel, inputMode = "numeric" }) {
   const [text, setText] = useState(null);
   const btn = (on, sign, fn, can) => (
     <button onClick={fn} disabled={!can} aria-label={`${sign > 0 ? "More" : "Less"}: ${ariaLabel}`}
@@ -318,7 +318,7 @@ export function Stepper({ label, value, onMinus, onPlus, canMinus = true, canPlu
       <div style={{ display: "flex", alignItems: "center", border: `1px solid ${T.field}`, borderRadius: 10, overflow: "hidden" }}>
         {btn(<Minus size={18} aria-hidden="true" />, -1, onMinus, canMinus)}
         {onType ? (
-          <input value={text != null ? text : String(value ?? "")} inputMode="numeric" aria-label={ariaLabel}
+          <input value={text != null ? text : String(value ?? "")} inputMode={inputMode} aria-label={ariaLabel}
             onChange={(e) => setText(e.target.value)}
             onBlur={() => { if (text != null) onType(text); setText(null); }}
             onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
@@ -345,8 +345,19 @@ export function OrderSection({ order }) {
           canMinus={o.contracts > o.qtyMin} canPlus={o.contracts < o.qtyMax}
           onType={(t) => { const r = readQty(t, o.qtyMin, o.qtyMax); if (r.ok) o.onContracts(r.value); }} />
         <Stepper label={`Limit ${o.limitSide}`} ariaLabel={`Limit ${o.limitSide}`} value={o.limit == null ? "—" : Number(o.limit).toFixed(2)}
-          onMinus={() => o.onStep(-1)} onPlus={() => o.onStep(1)} canMinus={o.limit != null && o.limit > 0.01} canPlus={o.limit != null} />
+          onMinus={() => o.onStep(-1)} onPlus={() => o.onStep(1)} canMinus={o.limit != null && o.limit > 0.01} canPlus={o.limit != null}
+          inputMode="decimal" onType={o.onTypeLimit ? (t) => { const v = parseLimitText(t); if (v != null) o.onTypeLimit(v); } : null} />
       </div>
+      {/* MID · PAY · NEGOTIATE (owner, 6 Oct 2026): three quick prices; the one in force is ringed. */}
+      {o.choices && (
+        <div role="group" aria-label="Limit price" data-limit-choices style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 8 }}>
+          {o.choices.map((c) => (
+            <FilterChip key={c.id} off={c.on} name={c.label} value={c.value} label={`${c.label}${c.value ? ` ${c.value}` : ""}`}
+              onClick={c.onPick} style={c.disabled ? { opacity: 0.5, pointerEvents: "none" } : null} />
+          ))}
+          <Info label="what these prices mean">{LIMIT_CHOICES.map((c) => `${c.label}: ${c.info}`).join(" ")}</Info>
+        </div>
+      )}
       {o.qtyNote && <div style={{ ...sans, fontSize: FS.xs, color: T.mut, marginTop: 4 }}>{o.qtyNote}</div>}
       <div style={{ ...mono, ...tnum, fontSize: FS.xs, color: T.mut, marginTop: 8 }}>{o.bookLine}</div>
       {o.verdict && o.verdict.known && (
@@ -420,6 +431,44 @@ export function ExitPlanSection({ pill = null, rows = [], footer }) {
         ))}
       </div>
       <div style={{ ...sans, fontSize: FS.xs, color: T.mut }}>{footer}</div>
+    </Section>
+  );
+}
+
+/* ---------------------------------------------------------------- THE ALTERNATIVES (PR 4b) */
+/**
+ * ROWS OF ALTERNATIVES — Build's variants and a position's roll candidates. Each row is what `priceAlt()` (App.jsx)
+ * worked out through the card's own path: its name, its legs and expiry, the card's figures for the size the budget
+ * buys, the future and the past, and the gate's line at that size. It computes nothing.
+ */
+export function AltRows({ rows = [], action, onPick, disabled = false }) {
+  return (
+    <ul data-alt-rows style={{ listStyle: "none", margin: 0, padding: 0 }}>
+      {rows.map((r) => (
+        <li key={`${r.kind}-${r.expKey}-${r.legsText}`} data-alt={r.kind} style={{ borderTop: `1px solid ${T.line}`, padding: "10px 0", display: "grid", gap: 4 }}>
+          <span style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
+            <span style={{ ...sans, fontSize: FS.sm, fontWeight: FW.bold, color: T.ink }}>{r.label}</span>
+            <button type="button" disabled={disabled} onClick={() => onPick(r)}
+              style={{ ...sans, minHeight: TAP, padding: "0 4px", background: "transparent", border: "none", color: disabled ? T.dim : T.blue,
+                fontSize: FS.sm, fontWeight: FW.bold, cursor: disabled ? "not-allowed" : "pointer", whiteSpace: "nowrap" }}>{action}</button>
+          </span>
+          <span style={{ ...mono, ...tnum, fontSize: FS.xs, color: T.mut }}>{r.legsText}</span>
+          <span style={{ ...mono, ...tnum, fontSize: FS.xs, color: T.body }}>
+            {`${CARD_LABELS.risk} ${r.youRisk == null ? "—" : money(r.youRisk)} · ${CARD_LABELS.profit} ${r.unbounded ? NO_CEILING : r.maxProfit == null ? "—" : money(r.maxProfit)} · ${CARD_LABELS.chance} ${r.chance} · ${CARD_LABELS.rr} ${r.rr}`}
+          </span>
+          <span style={{ ...mono, ...tnum, fontSize: FS.xs, color: T.body }}>{`Future avg ${r.future} · Past yrs ${r.past}`}</span>
+          <span style={{ ...sans, fontSize: FS.xs, color: r.gate && r.gate.pass ? T.mut : T.red, lineHeight: LH.body }}>{r.gateText}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+/** Build's variants (PR 4b): the loaded structure moved on the listed strikes; "Load ›" puts one on Build. */
+export function VariantsSection({ rows = [], onLoad, note, none }) {
+  return (
+    <Section label="Variants of this trade" data-build-variants>
+      <SectionTitle right={<Info label="How they are made">{note}</Info>}>Variants of this trade</SectionTitle>
+      {rows.length ? <AltRows rows={rows} action={VARIANT_LOAD} onPick={onLoad} /> : <Note>{none}</Note>}
     </Section>
   );
 }
@@ -535,6 +584,7 @@ export function BuildScreen({ v, foldedNode = null }) {
         <WhatItDoes takeaway={v.takeaway} chart={v.chart} />
         <NumbersSection {...v.numbers} />
         <WhySection {...v.why} />
+        {v.variants && <VariantsSection {...v.variants} />}
         <CopilotSection ask={askAll} />
         <LegsSection {...v.legs} />
         <OrderSection order={v.order} />

@@ -272,6 +272,10 @@ export const COPY = {
   marketReadingText: () => R.marketReadingText("CORN"),
   // PR 4: the fold inside the market page's news block that opens News impact (its summary is on screen at rest).
   marketNewsAsk: () => R.marketNewsAsk("CORN"),
+  // PR 4b: Build's line while a roll is loaded (the longer of its two states).
+  rollLine: () => R.rollLine("J-0003", false),
+  // PR 4b: reads a typed price; it prints no words.
+  parseLimitText: () => "",
   noCardsText: () => R.noCardsText("CORN", true),
   savedEmptyText: () => R.savedEmptyText(),
   dayWords: () => "",

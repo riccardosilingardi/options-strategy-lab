@@ -134,7 +134,8 @@ non-expert trader who wants to learn discipline rather than be sold trades.
      — Pre-trade analysis (ending on CONFIRM, DOUBTS or DO NOT CONFIRM, PR 4), Explain the Greeks, The chart and this
      trade, What would make it wrong?, Compare with the other cards, News that could move it, or your own question; every answer is filed in the Journal; **Legs** with "Edit in chain ›" (the market page's Chain tray; its
      Build › comes back); **Order**, inline: Contracts and the limit as two steppers (the tick is the app's one price
-     rule, a cent), "Mid · natural · tick", where the limit sits, the risk and its share of capital, the cap as a
+     rule, a cent; since PR 4b the limit can also be typed, and **Mid · Pay · Negotiate** set it to the mid, the
+     market's own price, or back to the app's starting price — owner, 6 Oct 2026), "Mid · natural · tick", where the limit sits, the risk and its share of capital, the cap as a
      checkbox that writes the same free-sizing setting as Settings (turning it off asks the typed reason), and the open
      risk after this; **Exit plan** — take profit, the 21-day exit with its date, the stop as an alert, with "defaults ·
      not backtested on CORN"; **Send** ("Send limit order · credit $25"), held with its reason in words when the gate
@@ -231,7 +232,21 @@ non-expert trader who wants to learn discipline rather than be sold trades.
     **Since I opened it** (the figures, the four factors and the Greeks at entry against now) and **The chart since I
     opened it** (`sinceEntry()`); each may recommend one of the actions the screen offers (`positionActions()`: keep,
     keep and write why, close at limit, a good-till-cancelled take-profit order at the target, or Manage a close already
-    working — never a second close). Rolling is PR 4b's (the app computes the candidates; the copilot recommends one).
+    working — never a second close). **Should I roll it?** reads the roll the app offers, below.
+  - **Build's variants and a position's roll (PR 4b) are one calculation**, `src/alternatives.js`: the loaded legs moved
+    on the strikes the chain lists — every strike one step up or down, the outer leg of each pair one step out or in, the
+    same strikes on a later expiry — never a strike the chain did not list. Each is priced like a card (`priceAlt()` in
+    App.jsx: `listCardFigures()`, the size the budget buys, the gate at that size). **Build** shows them under "Variants
+    of this trade" with "Load ›" and asks **Which variant fits best?**. **A position** offers a roll only when it is not
+    in profit and no reason it was opened has turned (`rollEligible()`; otherwise one sentence why not): the same
+    structure on the later expiries the entry window allows, "Prepare the roll in Build ›". **A roll is two orders and
+    never holds both:** Build says "Roll of J-0003: close J-0003 first" and Send waits until Alpaca no longer holds it;
+    then the new trade is sent as a new trade through the gate (order path 2), and the two records are linked on their
+    timelines ("Rolled into J-0006" / "Rolled from J-0003"). No eighth order path, no 4-leg roll order.
+  - **In the Journal** (PR 4c), an opened closed trade asks **What did this trade teach me?**: its reasons at entry
+    against how it ended (the record's own words — `whyOpenedLine()`, `endedLine()`, its result and whole timeline,
+    a roll's "Rolled into / from" included). It explains; it recommends nothing. The answer is filed with the ref and
+    leaves one line on the record's timeline.
   - No copilot places a trade; every answer is filed in the Journal.
 - **Deploy previews are read-only** (redesign PR 2, TASK 0a, after deploy-preview-51 overwrote production's book on
   5 Oct 2026). A preview reads everything production reads, but every Netlify function that writes or sends (the state
@@ -477,6 +492,7 @@ normal use, and is never asked for.
    is built outside the block and has no ceiling of its own yet.
    PR 4: the counter stopped counting components that render only inside a fold or a sheet (main re-measured: find 336
    → 269, market 604 → 574); the ceilings are now find 288, market 581, build 417, positions 248 (voice.test.js).
+   PR 4b: build 417 → 458 (the variants section and the roll's line on Build, an upper bound).
 9. **The exit rules are inherited defaults, not backtested** on these ten markets; the single option's +50% of the
    premium is the owner's choice. PAST YRS settles at expiry and does not replay them. **Since PR #50 a replay window
    that runs past December reads the next year's row and the last year is dropped, not padded** (it used to wrap to the
@@ -489,7 +505,10 @@ normal use, and is never asked for.
     PR 4 rewrote the standing instructions (no decision trees; recommend only among what the app built) and added Find's
     two questions, the market page's News impact, Build's verdict, Greeks and chart questions and the position's four:
     **whether the model keeps to the cards and actions handed in, and gives exactly one of the three verdicts, has only
-    been read in the prompt, never in a real answer** — tested on a stubbed stream only.
+    been read in the prompt, never in a real answer** — tested on a stubbed stream only. **PR 4b's roll has never run
+    live:** the close, then the opening from Build and the two timeline lines, are tested on the source and photographed
+    on a fixture (`+roll`, a later CORN expiry added for the photograph); whether the live chain lists a later expiry
+    inside the 30–90 day window for these markets is read when it happens.
 
 ## 5. After v1
 

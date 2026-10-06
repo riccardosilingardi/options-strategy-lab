@@ -17,6 +17,8 @@ import { Info, Fold, mono, sans, TAP } from "./ui.jsx";
 import { matchesRef, journalPnl, riskOkWords, riskOkOf, isTestRecord, testRecordNote, autopilotHorizonNote,
   autopilotVolNote } from "./journal.js";
 import { seasonalStampNote } from "./rules.js";
+import { CopilotSection } from "./build.jsx";
+import { useCopilot, skillsFor } from "./pro.jsx";
 import { pnlWords, timelineItems, entriesWords, whyOpenedLine, openedDetailLine, endedLine, closedState, closedTitle,
   netNote, openState } from "./journalView.js";
 
@@ -80,6 +82,20 @@ const Para = ({ head, children, color = T.body }) => (
     {head && <b style={{ letterSpacing: "0.04em" }}>{head}</b>}{children}
   </p>
 );
+
+/** WHAT THIS TRADE TAUGHT (PR 4c): the Journal's own question about one closed trade, inside its open row. The
+ *  conversation is App.jsx's (`v.copilotFor(e)`); the answer is filed in the Journal with the trade's ref. */
+function TradeLesson({ c }) {
+  const ask = useCopilot(c);
+  const askAll = { ...ask, clear: () => c.setConvo({ msgs: [], busy: false, err: null }) };
+  return (
+    <div data-journal-lesson style={{ marginTop: 4 }}>
+      <CopilotSection ask={askAll} skills={skillsFor("journal")} label="Ask the copilot about this closed trade"
+        heading={<>ASK THE COPILOT ABOUT THIS CLOSED TRADE</>} ownLabel={<>Your own question about this closed trade</>}
+        footer={<>It explains what happened; it recommends no trade. Every answer is filed in the Journal.</>} />
+    </div>
+  );
+}
 
 /**
  * @param v { journey, insideLimit, open: [{ p, m, stage }], closed (searched, newest ref first), allClosed, query, onQuery,
@@ -183,6 +199,7 @@ export function JournalScreen({ v }) {
                     <div>{`CLOSING ORDER · ${e.closeOrderId || "none — closed in the app, no broker order"}`}</div>
                   </div>
                   <Timeline timeline={e.timeline} />
+                  {v.copilotFor && <TradeLesson c={v.copilotFor(e)} />}
                 </Entry>
               );
             })}

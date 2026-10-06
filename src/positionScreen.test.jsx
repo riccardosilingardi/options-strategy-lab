@@ -149,12 +149,12 @@ check("RECORD · LAST 4: the newest first, each with its number and day; Whole r
   has(screen(), "Whole record ›");
 });
 
-check("THE COPILOT ON A POSITION asks the three position questions and none of Build's; it explains, it never acts", () => {
+check("THE COPILOT ON A POSITION asks the position questions and none of Build's; it may recommend, it never acts", () => {
   eq(positionSkills().map((s) => s.id).join(","), POSITION_SKILL_IDS.join(","));
   const h = screen();
   for (const s of positionSkills()) has(h, `>${s.label}</button>`);
   for (const id of BUILD_SKILL_IDS) hasNot(h, `>${SKILLS.find((s) => s.id === id).label}</button>`, `Build's ${id}`);
-  has(h, "It explains this position; it never closes, rolls or opens anything.");
+  has(h, "actions; it never closes, rolls or opens anything itself.");
   const app = readFileSync("src/App.jsx", "utf8");
   has(app, "logAnalysis({ ...a, label: `${p.ref || p.ticker} · ${a.label}` })", "filed in the Journal, tagged with the ref");
   has(app, "Asked the copilot: “${a.label}”. The answer is in the Journal.", "and one line on the position's timeline");

@@ -31,12 +31,27 @@ const SHOTS = [
   ["position-copilot", "dark", async (p) => { await toScreen(p);
     await p.evaluate(() => document.querySelector("[data-build-copilot]")?.scrollIntoView()); await p.waitForTimeout(400); }],
   ["computer-signals-1024", "dark", toSignals, { w: 1024, h: 800 }],
+  // PR 4b: Build's variants, a position's roll, and Build during a roll.
+  ["build-variants", "dark", async (p) => { await toUng(p); await tap(p, "[data-market] button", "Build ›", 2000);
+    await p.evaluate(() => document.querySelector("[data-build-variants]")?.scrollIntoView()); await p.waitForTimeout(400); }],
+  ["position-roll-turned", "dark", async (p) => { await toScreen(p);
+    await p.evaluate(() => document.querySelector("[data-position-roll]")?.scrollIntoView()); await p.waitForTimeout(400); }],
+  ["position-roll", "dark", async (p) => { await toScreen(p);
+    await p.evaluate(() => document.querySelector("[data-position-roll]")?.scrollIntoView()); await p.waitForTimeout(400); }, { mode: "app+all+book+roll" }],
+  ["build-limit", "dark", async (p) => { await toUng(p); await tap(p, "[data-market] button", "Build ›", 2000);
+    await tap(p, "[data-limit-choices] button", "Pay", 600);
+    await p.evaluate(() => document.querySelector("[data-build-order]")?.scrollIntoView()); await p.waitForTimeout(400); }],
+  // PR 4c: a closed trade in the Journal, opened, its lesson asked (the stub copilot answers).
+  ["journal-lesson", "dark", async (p) => { await p.waitForTimeout(1500); await tap(p, "nav button", "Journal", 1200);
+    await tap(p, "[data-journal-closed] li:nth-child(1) > button", null, 600);
+    await tap(p, "[data-journal-lesson] button", "What did this trade teach me?", 2500); }, { full: true }],
+  ["build-roll", "dark", async (p) => { await toScreen(p); await tap(p, "[data-position-roll] [data-alt-rows] button", null, 2500); }, { mode: "app+all+book+roll" }],
 ];
 
 const h = await openHarness();
 try {
   for (const [name, theme, go, opt = {}] of SHOTS) {
-    const { page, ctx, errors } = await h.open("app+all+book", theme, opt.w ? { width: opt.w, height: opt.h, scale: 1 } : { scale: 2 });
+    const { page, ctx, errors } = await h.open(opt.mode || "app+all+book", theme, opt.w ? { width: opt.w, height: opt.h, scale: 1 } : { scale: 2 });
     await go(page);
     if (opt.full) {
       const tall = await page.evaluate(() => document.documentElement.scrollHeight);

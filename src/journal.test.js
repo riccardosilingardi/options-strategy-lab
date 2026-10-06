@@ -179,6 +179,9 @@ test("highestSeq reads what is there and never guesses from the length", () => {
   assert.equal(highestSeq(POSITION.timeline), 3);
   assert.equal(highestSeq([]), 0);
   assert.equal(highestSeq([{ t: 1 }, { t: 2 }]), 0, "unstamped entries are not a count");
+  // PR 4c: an entry with only its written seq keeps its number, so the next line never repeats one.
+  assert.equal(highestSeq([{ seq: "J-0005·01" }, { seq: "J-0005·02" }]), 2);
+  assert.equal(appendTimeline({ ref: "J-0005", timeline: [{ seq: "J-0005·02" }] }, { text: "x" }).added[0].seq, "J-0005·03");
 });
 
 /* ================================================================

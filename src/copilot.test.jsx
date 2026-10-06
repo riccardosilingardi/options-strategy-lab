@@ -25,7 +25,7 @@ console.log("\nThe copilot, by place (redesign PR 3; PR 4)\n");
 
 check("EVERY QUESTION NAMES ITS PLACE AND OPENS WITH THAT PLACE'S ROLE; the old desk place is gone", () => {
   for (const s of SKILLS) {
-    if (!["find", "market", "build", "positions"].includes(s.place)) throw new Error(`${s.id}: no place (${s.place})`);
+    if (!["find", "market", "build", "positions", "journal"].includes(s.place)) throw new Error(`${s.id}: no place (${s.place})`);
     has(s.prompt, COPILOT_ROLE[s.place], s.id);
   }
   if (!BUILD_SKILL_IDS.every((id) => byId(id) && byId(id).place === "build")) throw new Error("Build's are not Build's");
@@ -58,8 +58,11 @@ check("IN BUILD IT GIVES A VERDICT, NEVER THE GATE'S: Pre-trade analysis reads t
   has(byId("greeks").prompt, "Quote only the Greeks in the context"); has(byId("chart").prompt, "there are no bars");
 });
 
-check("IN POSITIONS IT REVIEWS AND RECOMMENDS ONE OF THE APP'S ACTIONS: four questions, the chart since entry among them", () => {
-  eq(POSITION_SKILL_IDS.map(byId).map((s) => s.label).join(" | "), "Review this position | The exit from here | Since I opened it | The chart since I opened it");
+check("IN POSITIONS IT REVIEWS AND RECOMMENDS ONE OF THE APP'S ACTIONS: five questions, the roll and the chart since entry among them", () => {
+  eq(POSITION_SKILL_IDS.map(byId).map((s) => s.label).join(" | "), "Review this position | The exit from here | Should I roll it? | Since I opened it | The chart since I opened it");
+  has(byId("posRoll").prompt, "when it is not offered, say why in the app's words and do not suggest one");
+  has(byId("posRoll").prompt, "A candidate the gate refuses is never recommended");
+  has(byId("variants").prompt, "A variant the gate refuses is never recommended");
   has(byId("posReview").prompt, "recommend one of the actions offered, or none");
   has(byId("posExit").prompt, "good-till-cancelled take-profit order");
   has(byId("posSince").prompt, "position.greeksAtEntry and position.greeksNow"); has(byId("posSince").prompt, "is said to be not recorded");
@@ -74,6 +77,17 @@ check("THE ACTIONS OFFERED ARE THE SCREEN'S OWN: a working close offers Manage, 
   eq(working.includes(POSITION_ACTIONS.close), false, "never two working orders for one holding");
   eq(working.includes(POSITION_ACTIONS.manage), true);
   eq(positionActions({ notHeld: true }).join(), POSITION_ACTIONS.keep);
+});
+
+check("IN THE JOURNAL IT TEACHES: one closed trade, its reasons at entry against how it ended; it recommends nothing", () => {
+  eq(skillsFor("journal").map((s) => s.label).join(" | "), "What did this trade teach me?");
+  has(COPILOT_ROLE.journal, "you recommend no trade and no action");
+  const l = byId("lesson").prompt;
+  for (const w of ["closedTrade.whyOpened", "closedTrade.howItEnded", "whether the exit rules were followed", "rolled", "never a figure of your own"]) has(l, w, "lesson");
+  const journal = readFileSync("src/journal.jsx", "utf8"), app = readFileSync("src/App.jsx", "utf8");
+  has(journal, 'skills={skillsFor("journal")}');
+  has(app, "closedTrade: { ref: e.ref || null", "the record's own words"); has(app, "howItEnded: endedLine(e), whyOpened: whyOpenedLine(e.thesis)");
+  has(app, "logAnalysis({ ...a, label: `${e.ref || e.ticker} · ${a.label}` })", "filed with the ref");
 });
 
 check("SINCE ENTRY: read from the bars on or after the opening; no bar after it is null, never a zero", () => {

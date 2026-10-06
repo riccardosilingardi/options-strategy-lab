@@ -83,8 +83,11 @@ export const seqOf = (ref, n) =>
   `${ref}${SEQ_SEP}${String(Math.max(1, Math.round(+n || 1))).padStart(SEQ_DIGITS, "0")}`;
 
 /** The highest sequence number a timeline has ever carried. */
+// PR 4c: an entry written without `n` (an older record, a fixture) still has its place in its `seq` ("J-0005·02"), and
+// a new line must never take a number already printed.
+const seqNumber = (e) => { const m = e && typeof e.seq === "string" ? e.seq.match(/·(\d+)$/) : null; return m ? +m[1] : 0; };
 export const highestSeq = (timeline = []) =>
-  (timeline || []).reduce((m, e) => Math.max(m, Number.isFinite(+(e && e.n)) ? +e.n : 0), 0);
+  (timeline || []).reduce((m, e) => Math.max(m, Number.isFinite(+(e && e.n)) ? +e.n : 0, seqNumber(e)), 0);
 
 /**
  * THE HIGHEST REF THIS STATE HAS EVER ISSUED.

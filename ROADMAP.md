@@ -6,6 +6,64 @@ The full history of every item shipped so far (P0–P10, P2-bis) is in `docs/his
 Every pull request updates this file: the session that ships an item marks it done and states
 what the next one inherits.
 
+## Done in PR 4c (owner, 6 Oct 2026): "What did this trade teach me?" in the Journal
+
+Rides on PR #59 (the same branch; 4b was not merged yet).
+
+- **The Journal's question** (place `journal`, `COPILOT_ROLE.journal`): inside an opened closed trade, its reasons at
+  entry against how it ended, from the record's own words and figures (`closedTrade` in the context: `whyOpenedLine()`,
+  `endedLine()`, `journalPnl()`, the factors and chance at entry, the whole timeline). It recommends nothing; the answer
+  is filed with the ref and one "Asked the copilot" line goes on the record's timeline.
+- **The limit, by hand** (owner, 6 Oct 2026: "I no longer see where to set the price"): it was there, a cent a tap.
+  Build's limit can now be typed (`parseLimitText()`), and three quick prices sit under it — **Mid**, **Pay** (the
+  market's own price), **Negotiate** (the app's starting price, `legLimitSeed()`); the one in force is pressed. They set
+  the same ticket state the stepper moves; the gate checks the price as before. Words: build 458 → 462.
+- **A timeline number is never repeated:** `highestSeq()` (journal.js) also reads an entry's written seq ("J-0005·02"),
+  so a line appended to an older record or a fixture takes the next number, not "·01" again.
+
+**Measured.** Tests 1,399, 0 failed. Build 1,449.90 kB. Audit 20 boards, 0 unexplained. Words unchanged (the Journal is
+not a counted screen). Photograph: docs/screens/pr4/journal-lesson.png.
+
+### What PR 4d inherits
+
+- **The Liquidity sheet on Find, reworked** (owner, 6 Oct 2026: "its own PR"): today's takeaway on top (when Alpaca has
+  reported no open interest, the floor cannot run and says so first); the four levels as Find's chips, counted across
+  all markets so they agree with "Show N"; what else filters the cards, with counts; the readout table and where the
+  numbers come from in one fold; markets with no data in one line; sentences in sans, Off amber. No floor value changes.
+
+## Done in PR 4b (owner, 6 Oct 2026): Build's variants and a position's roll — one calculation
+
+The plan agreed in PR 4a's rounds: refine a trade in Build among alternatives the app computes; roll a position that
+is not in profit while its reasons hold, prepared in Build, two orders, never both open.
+
+- **TASK 1 — the alternatives** (`src/alternatives.js`, plain JS, alternatives.test.js): `shiftLegs()`, `widthLegs()`,
+  `sameOnBoard()`, `laterExpiries()`; `variantsOf()` (one step up, one down, wider, narrower, the next expiry) and
+  `rollCandidates()` (the same structure on the first two later expiries inside 30–90 days: same strikes, one up, one
+  down). A leg the chain does not list leaves the alternative out; nothing is snapped.
+- **TASK 2 — priced like a card** (`priceAlt()` in App.jsx): `listCardFigures()`, `scaleStrategy()` for the size the
+  budget buys, the gate (`gate()`, the one `evaluateTrade()` callback) at that size; its first refusal is the row's
+  line (`gateLine()`).
+- **TASK 3 — Build's "Variants of this trade"** with "Load ›" (a roll stays a roll when a variant is loaded), and the
+  question **Which variant fits best?** (`buildVariants` in the context).
+- **TASK 4 — "Roll it" on a position's screen** (`rollEligible()`: not in profit, held, no close working, no reason
+  turned — else one sentence why not; `ROLL_NONE` when the chain has no later expiry in the window), "Prepare the roll
+  in Build ›", the question **Should I roll it?** and the action in `positionActions()`.
+- **TASK 5 — Build during a roll**: "Roll of J-0003: close J-0003 first…", Send blocked (`rollCloseFirst()`) while
+  Alpaca holds it; after, an ordinary send through the gate; "Rolled into / Rolled from" on both timelines (the old
+  record found in positions or the Journal). No new /api/state field, no new order path.
+
+**Measured.** Tests 1,387 → 1,398, 0 failed (new: alternatives.test.js 7, roll.test.jsx 4). Build 1,436.40 → 1,447.17 kB.
+Audit: 20 boards, dark and light, 0 unexplained. Words: build 417 → 458 (reasons in voice.test.js). Photographs:
+docs/screens/pr4/ (build-variants, position-roll, position-roll-turned, build-roll; the `+roll` fixture flag).
+
+**Not changed:** the risk gate, the seven order paths, every RULES value, the /api/state payload, deploy.js.
+
+### What PR 4c inherits
+
+- **"What this trade taught"** on a closed trade in the Journal: its entry's reasons against how it ended — a rolled
+  trade reads its partner through the "Rolled into / from" line.
+- Not seen yet: a live roll; whether the live chains list later expiries inside the window.
+
 ## Done in PR 4a (owner, 6 Oct 2026): the copilot by place, and screens that say what they show
 
 Planned first, in three rounds with the owner: the copilot may recommend, but only among what the app built ("the app
@@ -623,7 +681,9 @@ One line each; see `PRD.md` §5 and `docs/history/ROADMAP.md` for detail.
 - **DONE: redesign PR 3a** — the audit against the boards; Positions, a position's own screen, Orders.
 - **DONE: redesign PR 3b** — the Journal, Settings, the app on a computer.
 - **DONE: PR 4a** — the copilot by place (it recommends only among what the app built), Find's Compare, Build's verdict,
-  the Greeks and the chart explained, the Signals tab. **NEXT: PR 4b** (Build's variants and the roll), then **4c**.
+  the Greeks and the chart explained, the Signals tab.
+- **DONE: PR 4b** — Build's variants and a position's roll, one calculation.
+- **DONE: PR 4c** — "What did this trade teach me?" in the Journal. **NEXT: PR 4d** (the Liquidity sheet on Find).
 - **Basket expansion with a measured admission rule** (planned as #50, not started; #50 shipped the wrap instead). The owner pastes `/api/liquidity` for the
   candidate tickers; a market is admitted when its open interest clears the liquidity floor AND Alpha Vantage holds at
   least **N = 14 years** of its monthly history. N is set from what `seasonalSignal()` needs: a month counts at |mean| ≥

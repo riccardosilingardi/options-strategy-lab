@@ -1513,6 +1513,18 @@ export const reasonRuleText = (floor, clash = null) => (clash
 /** The order line under the two steppers: "Mid 0.25 · natural 0.15 · tick 0.01". The tick is the app's one price rule
  *  (`onTick()`: a cent); no feed sends a contract's tick size. */
 export const ORDER_TICK = 0.01;
+/* THE LIMIT, SET BY HAND (PR 4b, owner, 6 Oct 2026: "Mid, Pay, Negotiate"). Three quick choices under Build's limit
+   stepper and a typed price. They change only the price Build sends; the gate checks it as it checks any other. */
+export const LIMIT_CHOICES = Object.freeze([
+  Object.freeze({ id: "mid", label: "Mid", info: "The middle of the bid and the ask: the cheapest price that might fill, and the least likely to." }),
+  Object.freeze({ id: "pay", label: "Pay", info: "The market's own price: you pay the ask (or take the bid on a credit). It fills now, at the most it costs." }),
+  Object.freeze({ id: "negotiate", label: "Negotiate", info: "The app's starting price: a quarter of the way from the mid toward the market's price — the one the card and the gate read." }),
+]);
+/** A typed limit: a positive price in dollars a share, onto the cent; null when it is not one. */
+export const parseLimitText = (text) => {
+  const n = Number(String(text ?? "").replace(",", ".").trim());
+  return Number.isFinite(n) && n > 0 ? Math.round(n * 100) / 100 : null;
+};
 export const orderBookLine = ({ mid = null, natural = null } = {}) =>
   `Mid ${known(mid) ? Math.abs(Number(mid)).toFixed(2) : "—"} · natural ${known(natural) ? Math.abs(Number(natural)).toFixed(2) : "—"} · tick ${ORDER_TICK.toFixed(2)}`;
 
@@ -1684,6 +1696,46 @@ export const showRowsCta = (n, m) => `Show ${n} of ${m}`;
 export const HIDE_ROWS = "Hide them";
 export const SHOW_ROWS = "Show them";
 export const RESET_FILTERS = "Reset";
+/* THE ALTERNATIVES (PR 4b): Build's variants and a position's roll. The legs come from src/alternatives.js; these are
+   their words. */
+export const VARIANT_LABELS = Object.freeze({
+  up: "Strikes one step higher", down: "Strikes one step lower", wider: "Wider wings", narrower: "Narrower wings",
+  later: "Same strikes, next expiry", roll: "Same strikes", rollUp: "One step higher", rollDown: "One step lower",
+});
+export const VARIANTS_HEAD = "VARIANTS OF THIS TRADE";
+export const VARIANTS_NOTE = "The same structure moved on the strikes the chain lists, priced and sized like a card, checked by the gate at the size the budget buys. Load one to see it in full.";
+export const VARIANT_LOAD = "Load ›";
+export const VARIANTS_NONE = "The chain lists no strike a step away from these legs, so there is no variant to show.";
+/** A variant's or a roll candidate's gate line: passes, or its first refusal in the gate's own words. */
+export const gateLine = (g) => {
+  if (!g) return "The gate has not run on it.";
+  if (g.pass) return "✓ The gate passes it at this size.";
+  // The refusal's first sentence: the whole of it is on Build once the variant is loaded.
+  const m = String((g.violations[0] || {}).message || "The gate refuses it.");
+  return `✗ ${(m.match(/^.*?[.!?](?=\s|$)/) || [m])[0]}`;
+};
+export const ROLL_HEAD = "ROLL IT";
+/** Why a position may not be rolled: one sentence per reason (`rollEligible()` in alternatives.js). */
+export const ROLL_WHY = Object.freeze({
+  ok: "Not in profit, and the reasons you opened it still hold: a roll closes it and opens the same structure later.",
+  notHeld: "Alpaca does not hold it, so there is nothing to roll.",
+  working: "Its close is already working: manage that order first.",
+  noPnl: "Its profit is not known right now, so the app does not offer a roll.",
+  inProfit: "It is in profit: its exit is the take-profit, not a roll.",
+  notRecorded: "Its reasons were not recorded at entry, so the app cannot say they still hold: no roll is offered.",
+  turned: "A reason you opened it has turned since: the app offers no roll on a changed idea. Close it at a limit instead.",
+});
+export const ROLL_HOW = "Two orders, never both open: first close this position at a limit, then send the new one from Build, where the gate checks it as a new trade.";
+export const ROLL_PREPARE = "Prepare the roll in Build ›";
+export const ROLL_NONE = `The chain lists no later expiry inside the entry window (${RULES.minEntryDTE}–${RULES.maxEntryDTE} days) with these strikes, so there is no roll to prepare.`;
+/** Build's line while a roll is loaded: what to close first, or that the close is done. */
+export const rollLine = (ref, closed) => (closed
+  ? `Roll of ${ref}: ${ref} is closed. Send this to open the new position.`
+  : `Roll of ${ref}: close ${ref} first (on its screen), then send this. The new trade is checked by the gate as a new trade.`);
+export const rollCloseFirst = (ref) => `Close ${ref} first: a roll never holds both positions at once.`;
+export const rolledInto = (ref) => `Rolled into ${ref}.`;
+export const rolledFrom = (ref) => `Rolled from ${ref}.`;
+
 /* FIND'S COPILOT (PR 4, owner: "on the summary line, opening a sheet"): the button, the sheet and its one line. */
 export const FIND_COMPARE_BTN = "Compare ›";
 export const FIND_COPILOT_TITLE = "Ask the copilot";

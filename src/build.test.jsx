@@ -12,7 +12,7 @@ import { BuildScreen, NumbersSection, WhySection, ReviewSheet, LegRow, OrderSect
   BuildLoading, BuildNoQuotes, BuildEmpty, buildSkills } from "./build.jsx";
 import { SKILLS, BUILD_SKILL_IDS, COPILOT_ROLE, BUILD_VERDICTS } from "./pro.jsx";
 import { payoffBands } from "./visuals.jsx";
-import { tradeTakeaway, buildSubLine, reasonRuleText, sizedFigures, futureFigures, pastFigures, money, CARD_LABELS,
+import { LIMIT_CHOICES, parseLimitText, tradeTakeaway, buildSubLine, reasonRuleText, sizedFigures, futureFigures, pastFigures, money, CARD_LABELS,
   sendLabel, orderBookLine, capLabel, EXIT_ROWS, exitsPill, timeExitDay, reviewLimitLine, sentOrderLine } from "./rules.js";
 import { AGAINST_MIN_SCORE, factorStands, signalStance } from "./signals.js";
 import { T } from "./theme.js";
@@ -125,10 +125,10 @@ check("WHY THIS TRADE: closed at rest with the stance line; open, the factors an
   eq(signalStance(FUSED, 1).n, 2, "the stance counts the same two");
   eq(factorStands(FUSED, 0).every((r) => r.stand === "quiet"), true, "a direction-neutral trade: nothing to support or oppose");
 });
-check("THE COPILOT: six questions from SKILLS (one home): the mockup's four with PR 4's Greeks and chart; each opens with Build's role", () => {
-  eq(BUILD_SKILL_IDS.join(","), "pretrade,greeks,chart,wrong,compare,newsmove");
+check("THE COPILOT: seven questions from SKILLS (one home): the mockup's four with PR 4's variants, Greeks and chart; each opens with Build's role", () => {
+  eq(BUILD_SKILL_IDS.join(","), "pretrade,variants,greeks,chart,wrong,compare,newsmove");
   eq(buildSkills().map((s) => s.label).join(" | "),
-    "Pre-trade analysis | Explain the Greeks | The chart and this trade | What would make it wrong? | Compare with the other cards | News that could move it");
+    "Pre-trade analysis | Which variant fits best? | Explain the Greeks | The chart and this trade | What would make it wrong? | Compare with the other cards | News that could move it");
   for (const id of BUILD_SKILL_IDS) {
     const sk = SKILLS.find((s) => s.id === id);
     has(sk.prompt, COPILOT_ROLE.build, id);
@@ -138,7 +138,7 @@ check("THE COPILOT: six questions from SKILLS (one home): the mockup's four with
   has(SKILLS.find((s) => s.id === "pretrade").prompt, `exactly one of ${BUILD_VERDICTS.join(", ")}`);
   // PR 4 (the copilot by place): Find's two and the market page's news question are not Build's.
   for (const id of ["radar", "newsAll", "newsMarket"]) if (!SKILLS.find((s) => s.id === id)) throw new Error(`${id} left SKILLS`);
-  for (const q of ["Pre-trade analysis", "Explain the Greeks", "The chart and this trade", "What would make it wrong?", "Compare with the other cards", "News that could move it", "Or ask your own…"]) has(html, q);
+  for (const q of ["Pre-trade analysis", "Which variant fits best?", "Explain the Greeks", "The chart and this trade", "What would make it wrong?", "Compare with the other cards", "News that could move it", "Or ask your own…"]) has(html, q);
   has(html, "Educational analysis on a paper account, not financial advice. Every answer is filed in the Journal.");
   // One send, filed in the Journal: Build's, Find's, the market page's and a position's sections all run useCopilot().
   has(pro, "export function useCopilot(");
@@ -166,6 +166,19 @@ check("THE ORDER, INLINE: two steppers, the book line, the limit note, the risk,
   has(app, 'onCheck: (on) => { if (on) { setFreeDraft(null); setSetting("sizingFree", null); } else setFreeDraft(""); }');
   has(app, 'onTurnOff: () => { setSetting("sizingFree", { reason: String(freeDraft || "").trim(), at: Date.now() }); setFreeDraft(null); }');
   has(app, "draftOk: sizingFreeOn({ reason: freeDraft || \"\" })");
+});
+check("THE LIMIT, BY HAND (PR 4b, owner): it can be typed, and Mid · Pay · Negotiate set it; the one in force is pressed", () => {
+  eq(parseLimitText("0.65"), 0.65); eq(parseLimitText("0,655"), 0.66); eq(parseLimitText("abc"), null); eq(parseLimitText("0"), null);
+  eq(LIMIT_CHOICES.map((c) => c.label).join(" · "), "Mid · Pay · Negotiate");
+  const choices = [{ id: "mid", label: "Mid", value: "0.25", on: false, onPick: () => {} }, { id: "pay", label: "Pay", value: "0.15", on: true, onPick: () => {} },
+    { id: "negotiate", label: "Negotiate", value: null, on: false, onPick: () => {} }];
+  const h = renderToStaticMarkup(<OrderSection order={{ ...order, onTypeLimit: () => {}, choices }} />);
+  has(h, "data-limit-choices"); has(h, 'aria-label="Pay 0.15"'); has(h, "What these prices mean");
+  if (!/aria-label="Pay 0.15" aria-pressed="true"/.test(h)) throw new Error("the price in force is pressed");
+  has(h, 'inputMode="decimal"', "the limit is typed as a decimal");
+  // It only changes the price Build sends: the same ticket state the stepper moves, or the app's seed for Negotiate.
+  has(app, "onTypeLimit: setLimitTo, choices: limitChoices");
+  has(app, 'onPick: () => setTicket((t) => ({ ...t, legPx: null }))');
 });
 check("THE EXIT PLAN AND SEND: the three rules from RULES, the pill only when not backtested; Send held with its reason", () => {
   has(html, "at 50% of max profit"); has(html, "21 days before expiry"); has(html, "30 Oct"); has(html, "alert at 50% of max loss, no order");

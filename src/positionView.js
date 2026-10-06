@@ -527,12 +527,13 @@ export const POSITION_ACTIONS = Object.freeze({
   close: "Close at limit now (two taps, priced at the tap)",
   takeProfit: "Place a good-till-cancelled take-profit order at the target (the Guardian fold on this screen)",
   manage: "Change the price of the close already working (Manage order, in Orders)",
+  roll: "Prepare a roll in Build: one of position.roll.candidates (close this first, then open that)",
 });
 /**
  * @param o { action, working, notHeld, canKeep, hasTarget }
  * @returns string[] — the actions offered, never one the screen does not show
  */
-export function positionActions({ working = false, notHeld = false, canKeep = false, hasTarget = false } = {}) {
+export function positionActions({ working = false, notHeld = false, canKeep = false, hasTarget = false, canRoll = false } = {}) {
   if (notHeld) return [POSITION_ACTIONS.keep];
   const out = [POSITION_ACTIONS.keep];
   if (canKeep) out.push(POSITION_ACTIONS.keepWhy);
@@ -540,6 +541,7 @@ export function positionActions({ working = false, notHeld = false, canKeep = fa
   else {
     out.push(POSITION_ACTIONS.close);
     if (hasTarget) out.push(POSITION_ACTIONS.takeProfit);
+    if (canRoll) out.push(POSITION_ACTIONS.roll);
   }
   return out;
 }

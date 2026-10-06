@@ -29,6 +29,11 @@ const ALL = flags.includes("all");
 // days ago (the stale banner); "+poor": a $200 trading capital, so nothing fits the budget ("Nothing fits").
 const BOOK = flags.includes("book");
 const READING = flags.includes("reading"), STALE = flags.includes("stale"), POOR = flags.includes("poor");
+// "+roll" (PR 4b, photographs only): J-0003's reasons at entry read as today's (seasonality and the trend down), so none
+// has turned and the app offers its roll. Every other fixture keeps J-0003 as the position whose reasons turned.
+const ROLL = flags.includes("roll");
+const rollBook = (recs) => recs.map((r) => (r.ref !== "J-0003" ? r : { ...r, thesis: { ...r.thesis, signals: { ...r.thesis.signals,
+  factors: { seasonal: { dir: -1, strength: 45 }, technical: { dir: -1, strength: 35 }, weather: { dir: 1, strength: 40 }, news: { dir: 0, strength: 0 } } } } }));
 const RAW = JSON.parse(readFileSync("src/fixtures/alpaca-chain-UNG.json", "utf8"));
 // UNG's contracts, under whichever ticker asks (SOYB is Build's default market; its empty state needs a price).
 const chainFor = (tk) => ({ ...normaliseAlpacaChain("UNG", RAW, { spot: 13.24, now: Date.now() }), ticker: tk,
@@ -77,6 +82,11 @@ window.fetch = async (input, init = {}) => {
       return json({ ...c, byExp: Object.fromEntries(Object.entries(c.byExp).map(([k, v]) => [k, { ...v, calls: {}, puts: {} }])) });
     }
     if (READING && !["UNG", "SOYB", "CORN"].includes(sym)) return NEVER();
+    // "+roll": CORN's board gains a later expiry (the same strikes, 15 Jan 2027, 102 days) so its roll has candidates.
+    if (ROLL && sym === "CORN") {
+      const c = chainFor(sym), [k0] = Object.keys(c.byExp);
+      return json({ ...c, expirations: [...(c.expirations || [k0]), "2027-01-15"], byExp: { ...c.byExp, "2027-01-15": { ...c.byExp[k0], dte: 74 } } });
+    }
     if (sym === "UNG" || sym === "SOYB" || ALL) return json(chainFor(sym));
     return json({ error: "fixture: not served" }, 503);
   }
@@ -110,7 +120,7 @@ window.fetch = async (input, init = {}) => {
 
 // A first run is over: the capital questions are answered (onboarding is the wizard's, photographed elsewhere).
 try {
-  localStorage.setItem("options-lab-state", JSON.stringify({ journalSeq: BOOK ? 5 : 0, saved: [], positions: BOOK ? bookRecords() : [], expiryLog: [], journal: BOOK ? bookJournal() : [], ivHist: {}, copilotLog: [],
+  localStorage.setItem("options-lab-state", JSON.stringify({ journalSeq: BOOK ? 5 : 0, saved: [], positions: BOOK ? (ROLL ? rollBook(bookRecords()) : bookRecords()) : [], expiryLog: [], journal: BOOK ? bookJournal() : [], ivHist: {}, copilotLog: [],
     seasonal: {}, settings: { capital: POOR ? 200 : 10000, concurrentTarget: 4, savings: null, sizeOverride: null, sizingFree: null, onboarded: true, mode: "pro",
       notifyWhenReady: false, findOrder: "ev", webhook: "", reportFreq: "weekly", reportLast: 0, reportLastMd: "" } }));
 } catch { /* none */ }
