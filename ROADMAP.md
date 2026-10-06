@@ -6,7 +6,63 @@ The full history of every item shipped so far (P0–P10, P2-bis) is in `docs/his
 Every pull request updates this file: the session that ships an item marks it done and states
 what the next one inherits.
 
-## Done in this pull request — Build checked against the mockup, value by value (owner, 5 Oct 2026)
+## Done in redesign PR 3a (owner, 6 Oct 2026): every screen against its board; Positions, a position's screen, Orders
+
+The owner's prompt for redesign PR 3, split in two at the owner's request ("Dividi in due"): this PR is TASK 0 and TASKS 2,
+3 and 4; **PR 3b** is the Journal, Settings and the layout that adapts to a computer and a phone. The plan opens the PR.
+
+- **TASK 0a — one audit against the boards themselves.** `scripts/audit-screen.mjs` mounts each board in
+  docs/mockups/src (with `render.mjs`'s `mountMockup`) beside the whole app on fixtures (`scripts/app-harness.mjs`,
+  `scripts/app-screens.jsx`), pairs elements (`scripts/audit-map.mjs`), compares size, weight, family, colour, background,
+  border, radius, padding, tap height and gap by computed style, looks for every board phrase on the app's screen, and
+  writes a side-by-side picture per board and theme (docs/screens/redesign-pr3/audit/). A difference passes only with a
+  reason: a README or CLAUDE.md rule, or a named leftover. **18 boards, dark and light: 4,424 checks, 0 unexplained.**
+  The shipped Find, market and Build screens were fixed to it (sizes, gaps, sentence case, the stale banner, the reading
+  bar, the Overview's factor rows, Build's three states, the review sheet's lines). `audit-build.mjs` is now its caller.
+- **TASK 0b** — the desk header left Positions; BuildWarnings, TradeCard and ConfirmSteps (unmounted since PR 2) are
+  deleted, their tests moved; the footer line is gone (owner: "puoi toglierlo"); the ticker strip's falling season is
+  muted and a dear IV rank amber (red is for errors).
+- **TASK 0c — the copilot by place** (PRD §1): every `SKILLS` question names its place; Find's "Compare the cards"
+  waits for PR 4; Build explains (Pre-trade analysis, no GO/NO-GO); Positions reviews (three questions).
+- **TASK 2 — Positions** on the board: its own header, the strip's three tiles with one ⓘ sentence, Positions | Orders,
+  the card's badge, "J-0002 · UNG · 2 puts", title, profit and share, the board's sentence (`cardSentence()`), three
+  short exits over 4px bars (`exitLabels()`), one foot, and the line for an order still waiting (`waitingOrdersLine()`).
+- **TASK 3 — a position's own screen** (src/positionScreen.jsx; it replaces the Details sheet): what to do now, Close at
+  limit (order path 3 unchanged) or **Keep it, write why** (a `keep` entry on the position's timeline through
+  `appendTimeline()` — the /api/state payload's shape is unchanged; refused on a preview), where it pays (`paysLine()`
+  and `PositionChart` in visuals.jsx), the exit plan, at entry vs now with the reasons that turned, the record's last
+  four, Analyse as a new trade, Alpaca details (a sheet of the old rows), the copilot's three position questions (each
+  answer filed in the Journal tagged with the ref, and one line on the timeline), the Guardian folded at the end.
+- **TASK 4 — Orders** on the board: the clock and Cancel all once at the top; the row's tag, name and ref, terms and
+  book, Modify | Cancel | Details; Modify inline with two steppers; the cancel confirm inline. Order path 7 unchanged.
+
+**Measured.** Tests 1,359 → 1,372, 0 failed (new: positionScreen.test.jsx, copilot.test.jsx; rewritten: the card's,
+the strip's and the Orders row's to the boards). Build 1,379.84 → 1,417.33 kB (the usual chunk warning). Words: find 336,
+market 604, build 435, positions 235 (ceilings re-set with reasons in voice.test.js); J-0001's surfaces 62/120, 30/35,
+35/35, 40/40. Photographs: docs/screens/redesign-pr3/ (`node scripts/shoot-positions.mjs`).
+
+**Not changed:** riskGate.js, closeOrder.js, modifyOrder.js's send paths, `orderBody()`, the seven gate calls,
+alpacaContract.js, every RULES value, `histBacktest()`, `seasonalSignal()`, the rules inside `fuseSignals()` and
+`signalDirection()`, the /api/state payload, deploy.js's rule, events.js's dates, the functions of Find, the market
+page and Build.
+
+### What PR 3b and PR 4 inherit
+
+- **PR 3b:** the Journal and Settings on their boards (the desk header leaves them; "Whole record ›" lands on the
+  Journal's top, not yet on the record), the report frequency beside the report (owner, point 10), and the layout that
+  adapts to a computer and a phone (owner, point 8: "va bene da mock up").
+- **Leftovers the audit names ("left:")**: Find's FUTURE · PAST line gap, the price chart's indicator chips, the Build
+  states' header padding, FindEmpty's second action, BuildNoData's legs (the fixture loads none), and the AT ENTRY VS NOW
+  footnote's wording (the board says "Now is Alpaca's last price"; the app's NOW is what is left from here). **The close
+  confirm** inside a position's screen keeps its PR #46 look (the price slider and the chips): it is shared with the "Not
+  in the app" card and a multi-leg Modify, and sits at its 35-word budget — PR 3b restyles it with the owner.
+- **The position's screen has no word ceiling of its own** (it is built outside the Positions block, like the Details
+  sheet was). The board's multi-leg Modify "replaces in place": the rule wins (cancel → wait → a new order).
+- **PR 4:** Find's "Compare the cards" preset on Find, and the system prompt's decision trees, which still recommend
+  structures (the copilot by place says it never proposes).
+- The day change on the market page is still red when the price falls (not an error): PR 3b decides it with the header.
+
+## Done in PR #54 — Build checked against the mockup, value by value (owner, 5 Oct 2026)
 
 The owner asked, after PR #52 and #53 merged, to verify that Build carries every element of the mockup with the same
 look. The mockups themselves are not in the repository; the check is against the values the redesign PR 2 prompt wrote
@@ -38,7 +94,8 @@ paths, the /api/state payload, Find, the market page, Positions, Orders, the Jou
   sentences, and the status banner above the header (e.g. "Loading SOYB option prices…"). PR 3 decides with the owner.
 - The loading and no-quotes states print the title and the "for <date>" only when an expiry is known; the fixture's
   market never answered, so they show the ticker. Words follow the data, never a made-up date.
-- **Redesign PR 3** (Positions, Orders, the Journal, Settings) waits for its prompt and its mockups' values.
+- **Redesign PR 3** (Positions, Orders, the Journal, Settings) waits for its prompt and its mockups' values. (Done in
+  part: PR 3a above.)
 
 ## Done in redesign PR 2, part B (owner, 5 Oct 2026): Build, the review sheet, Why this trade, the copilot
 
@@ -467,7 +524,10 @@ One line each; see `PRD.md` §5 and `docs/history/ROADMAP.md` for detail.
   look, the event dates, the app opens on Find.
 - **DONE: PR #50** — the replay reads the next year's row past December; `scripts/sanity.mjs` (read-only live reads).
 - **DONE: redesign PR 2** — part A, deploy previews are read-only; part B, Build, the review sheet, Why this trade, the
-  copilot inside Build. **NEXT: PR 3** (Positions, Orders, the Journal, Settings).
+  copilot inside Build.
+- **DONE: redesign PR 3a** — the audit against the boards; Positions, a position's own screen, Orders. **NEXT: PR 3b**
+  (the Journal, Settings, the layout for a computer and a phone), then **PR 4** (Find's copilot preset, the system
+  prompt's decision trees).
 - **Basket expansion with a measured admission rule** (planned as #50, not started; #50 shipped the wrap instead). The owner pastes `/api/liquidity` for the
   candidate tickers; a market is admitted when its open interest clears the liquidity floor AND Alpha Vantage holds at
   least **N = 14 years** of its monthly history. N is set from what `seasonalSignal()` needs: a month counts at |mean| ≥

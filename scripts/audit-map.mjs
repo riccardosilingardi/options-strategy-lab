@@ -499,7 +499,8 @@ export const GROUPS = {
   build: ["Build", "BuildReview", "BuildLoading", "BuildNoData", "BuildEmpty"],
   pr3: ["Positions", "PositionDetail", "Orders"],
   shipped: ["FindB", "FindLoading", "FindStale", "FindEmpty", "FindSaved", "FindFilters", "Define",
-    "MarketStrategies", "MarketOverview", "Market", "Build", "BuildReview", "BuildLoading", "BuildNoData", "BuildEmpty"],
+    "MarketStrategies", "MarketOverview", "Market", "Build", "BuildReview", "BuildLoading", "BuildNoData", "BuildEmpty",
+    "Positions", "PositionDetail", "Orders"],
   all: [],
 };
 GROUPS.all = Object.keys(SCREENS);
