@@ -1513,6 +1513,18 @@ export const reasonRuleText = (floor, clash = null) => (clash
 /** The order line under the two steppers: "Mid 0.25 · natural 0.15 · tick 0.01". The tick is the app's one price rule
  *  (`onTick()`: a cent); no feed sends a contract's tick size. */
 export const ORDER_TICK = 0.01;
+/* THE LIMIT, SET BY HAND (PR 4b, owner, 6 Oct 2026: "Mid, Pay, Negotiate"). Three quick choices under Build's limit
+   stepper and a typed price. They change only the price Build sends; the gate checks it as it checks any other. */
+export const LIMIT_CHOICES = Object.freeze([
+  Object.freeze({ id: "mid", label: "Mid", info: "The middle of the bid and the ask: the cheapest price that might fill, and the least likely to." }),
+  Object.freeze({ id: "pay", label: "Pay", info: "The market's own price: you pay the ask (or take the bid on a credit). It fills now, at the most it costs." }),
+  Object.freeze({ id: "negotiate", label: "Negotiate", info: "The app's starting price: a quarter of the way from the mid toward the market's price — the one the card and the gate read." }),
+]);
+/** A typed limit: a positive price in dollars a share, onto the cent; null when it is not one. */
+export const parseLimitText = (text) => {
+  const n = Number(String(text ?? "").replace(",", ".").trim());
+  return Number.isFinite(n) && n > 0 ? Math.round(n * 100) / 100 : null;
+};
 export const orderBookLine = ({ mid = null, natural = null } = {}) =>
   `Mid ${known(mid) ? Math.abs(Number(mid)).toFixed(2) : "—"} · natural ${known(natural) ? Math.abs(Number(natural)).toFixed(2) : "—"} · tick ${ORDER_TICK.toFixed(2)}`;
 

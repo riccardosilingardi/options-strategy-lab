@@ -134,7 +134,8 @@ non-expert trader who wants to learn discipline rather than be sold trades.
      — Pre-trade analysis (ending on CONFIRM, DOUBTS or DO NOT CONFIRM, PR 4), Explain the Greeks, The chart and this
      trade, What would make it wrong?, Compare with the other cards, News that could move it, or your own question; every answer is filed in the Journal; **Legs** with "Edit in chain ›" (the market page's Chain tray; its
      Build › comes back); **Order**, inline: Contracts and the limit as two steppers (the tick is the app's one price
-     rule, a cent), "Mid · natural · tick", where the limit sits, the risk and its share of capital, the cap as a
+     rule, a cent; since PR 4b the limit can also be typed, and **Mid · Pay · Negotiate** set it to the mid, the
+     market's own price, or back to the app's starting price — owner, 6 Oct 2026), "Mid · natural · tick", where the limit sits, the risk and its share of capital, the cap as a
      checkbox that writes the same free-sizing setting as Settings (turning it off asks the typed reason), and the open
      risk after this; **Exit plan** — take profit, the 21-day exit with its date, the stop as an alert, with "defaults ·
      not backtested on CORN"; **Send** ("Send limit order · credit $25"), held with its reason in words when the gate

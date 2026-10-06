@@ -38,6 +38,9 @@ const SHOTS = [
     await p.evaluate(() => document.querySelector("[data-position-roll]")?.scrollIntoView()); await p.waitForTimeout(400); }],
   ["position-roll", "dark", async (p) => { await toScreen(p);
     await p.evaluate(() => document.querySelector("[data-position-roll]")?.scrollIntoView()); await p.waitForTimeout(400); }, { mode: "app+all+book+roll" }],
+  ["build-limit", "dark", async (p) => { await toUng(p); await tap(p, "[data-market] button", "Build ›", 2000);
+    await tap(p, "[data-limit-choices] button", "Pay", 600);
+    await p.evaluate(() => document.querySelector("[data-build-order]")?.scrollIntoView()); await p.waitForTimeout(400); }],
   // PR 4c: a closed trade in the Journal, opened, its lesson asked (the stub copilot answers).
   ["journal-lesson", "dark", async (p) => { await p.waitForTimeout(1500); await tap(p, "nav button", "Journal", 1200);
     await tap(p, "[data-journal-closed] li:nth-child(1) > button", null, 600);

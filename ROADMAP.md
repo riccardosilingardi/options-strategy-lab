@@ -14,6 +14,10 @@ Rides on PR #59 (the same branch; 4b was not merged yet).
   entry against how it ended, from the record's own words and figures (`closedTrade` in the context: `whyOpenedLine()`,
   `endedLine()`, `journalPnl()`, the factors and chance at entry, the whole timeline). It recommends nothing; the answer
   is filed with the ref and one "Asked the copilot" line goes on the record's timeline.
+- **The limit, by hand** (owner, 6 Oct 2026: "I no longer see where to set the price"): it was there, a cent a tap.
+  Build's limit can now be typed (`parseLimitText()`), and three quick prices sit under it — **Mid**, **Pay** (the
+  market's own price), **Negotiate** (the app's starting price, `legLimitSeed()`); the one in force is pressed. They set
+  the same ticket state the stepper moves; the gate checks the price as before. Words: build 458 → 462.
 - **A timeline number is never repeated:** `highestSeq()` (journal.js) also reads an entry's written seq ("J-0005·02"),
   so a line appended to an older record or a fixture takes the next number, not "·01" again.
 

@@ -233,7 +233,9 @@ test("MEASURED: the three screens, and the table in the PRD is this number", () 
      made", the rows' "Future avg" / "Past yrs" labels: 17 typed; the gate's line and the figures are generated) and the
      line Build prints while a roll is loaded (`rollLine()`, 24, only during a roll: an upper bound). The position's
      "Roll it" section is on its own screen, built outside the block. */
-  const CEILING = { find: 288, market: 581, build: 458, positions: 248 };
+  /* …and 458 -> 462: the limit's three quick prices (owner, "Mid, Pay, Negotiate": their labels are LIMIT_CHOICES' and
+     generated) and "What these prices mean" (4 typed words; the meanings are behind the ⓘ). */
+  const CEILING = { find: 288, market: 581, build: 462, positions: 248 };
   /* >>> PR #46: ONE ORDERS LIST. <<< The record-based "WORKING AT THE BROKER" panel (its paragraph about what a
      working order is, the stale-DAY warning, the per-row sentences) left Positions; the one list lives in
      `orders.jsx`, which the counter now reads. Measured: positions 304 -> 209 (4 typed + 205 generated, 14 sites).

@@ -94,7 +94,7 @@ import { taContext } from "./indicators.js";
 // PR 4b: the alternatives of a structure (Build's variants, a position's roll) and their words.
 import { variantsOf, rollCandidates, rollEligible } from "./alternatives.js";
 import { whyOpenedLine, endedLine } from "./journalView.js";
-import { expiryWords, returnText, pastTileText, futureTile, VARIANT_LABELS, VARIANTS_NOTE, VARIANTS_NONE, gateLine, ROLL_WHY, ROLL_HOW, rollLine, rollCloseFirst, rolledInto, rolledFrom } from "./rules.js";
+import { LIMIT_CHOICES, expiryWords, returnText, pastTileText, futureTile, VARIANT_LABELS, VARIANTS_NOTE, VARIANTS_NONE, gateLine, ROLL_WHY, ROLL_HOW, rollLine, rollCloseFirst, rolledInto, rolledFrom } from "./rules.js";
 import { EvidenceBar, EvidenceOverlay, DeskSheet, Fold, DeskCountLine } from "./steps.jsx";
 import { BottomBar, placeOf, NAV_BAR_H, FIND_LIST_END } from "./navBar.jsx";
 import { AccountStrip, PositionsBar, PositionsHeader, WorkingCloseLine, CardButton } from "./positions.jsx";
@@ -5247,6 +5247,25 @@ export default function OptionsStrategyLab() {
             cur[0] = onTick(Math.max(0, Number(cur[0]) + dir * sNet * s0 * ORDER_TICK));
             setTicket((t) => ({ ...t, legPx: cur }));
           };
+          /* THE LIMIT, SET TO A PRICE (PR 4b, owner: "type it; Mid, Pay, Negotiate"). The same state the stepper moves —
+             the first leg's price, so the net lands on the target — or, for Negotiate, the app's own seed (`legPx` null:
+             `legLimitSeed()`, the price the card and the gate read). Nothing here sends; the gate checks the new price. */
+          const setLimitTo = (target) => {
+            const cur = Array.isArray(legPrices) && legPrices.length === legs.length ? legPrices.slice() : null;
+            if (!cur || !legs.length || !Number.isFinite(Number(cur[0])) || !Number.isFinite(net) || !Number.isFinite(target)) return;
+            const s0 = Math.sign(+legs[0].side || 1), sNet = net < 0 ? -1 : 1;
+            cur[0] = onTick(Math.max(0, Number(cur[0]) + (target - Math.abs(net)) * sNet * s0));
+            setTicket((t) => ({ ...t, legPx: cur }));
+          };
+          const absNet = Number.isFinite(net) ? Math.abs(net) : null;
+          const near = (x) => absNet != null && x != null && Math.abs(absNet - x) < ORDER_TICK / 2;
+          const midAbs = book.ok ? Math.abs(book.mid) : null, payAbs = book.ok ? Math.abs(book.ask) : null;
+          const limitChoices = LIMIT_CHOICES.map((c) => {
+            if (c.id === "negotiate") return { ...c, value: null, on: !Array.isArray(ticket.legPx), onPick: () => setTicket((t) => ({ ...t, legPx: null })) };
+            const x = c.id === "mid" ? midAbs : payAbs;
+            return { ...c, value: x == null ? null : x.toFixed(2), on: Array.isArray(ticket.legPx) && near(x), disabled: x == null,
+              onPick: () => setLimitTo(Math.round(x * 100) / 100) };
+          });
           /* A ROLL NEVER HOLDS BOTH (PR 4b): while the position it replaces is still held at Alpaca, Send waits and says
              so; once its close has filled (or it was filed), this is an ordinary new trade, through the gate. */
           const rollRef = buildOrigin && buildOrigin.kind === "roll" ? buildOrigin.fromRef : null;
@@ -5294,7 +5313,7 @@ export default function OptionsStrategyLab() {
               }) },
             order: {
               contracts, onContracts: (n) => setContracts(Math.max(1, Math.min(20, n))), qtyMin: 1, qtyMax: 20, qtyNote: buildSizeLine,
-              limitSide: Number.isFinite(net) && net < 0 ? "credit" : "debit", limit: Number.isFinite(net) ? Math.abs(net) : null, onStep: stepLimit,
+              limitSide: Number.isFinite(net) && net < 0 ? "credit" : "debit", limit: Number.isFinite(net) ? Math.abs(net) : null, onStep: stepLimit, onTypeLimit: setLimitTo, choices: limitChoices,
               bookLine: orderBookLine({ mid: book.ok ? book.mid : null, natural: book.ok ? book.ask : null }), verdict: ticketVerdict,
               risk: { value: L ? money(L.tradeRisk) : "—", pct: L && L.tradingCapital ? `${pctText(L.tradeRisk / L.tradingCapital)} of capital` : null },
               cap: {
