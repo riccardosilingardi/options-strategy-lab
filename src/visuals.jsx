@@ -1407,3 +1407,74 @@ export const exitPlanDetail = (target, contracts = 1) => {
   return `That is ${money(target.perCombo * n)} of profit ${n > 1 ? `for ${n}` : "per contract"}, or the ${RULES.exitDTE}-day mark, ` +
     `whichever comes first. ${tail}`;
 };
+
+/* --------------------------------------------------------------------
+   THE POSITION'S CHART (redesign PR 3, the owner's board "PositionDetail"): the last 60 sessions of the market's own
+   closes over the payoff at expiry — the profit range shaded green, the loss range violet (red is for errors), the
+   breakevens dashed in ink with their price, the strikes dotted, the entry (a ring, on the session the position opened)
+   and now (a dot). Cut from `payoffBands()` like every other trade picture; it computes no figure of its own.
+-------------------------------------------------------------------- */
+export function PositionChart({ bands, bars = [], spot = null, entrySpot = null, openedAt = null, strikes = [], width = 326, height = 230, title }) {
+  if (!bands || !Array.isArray(bands.bands) || !bands.bands.length) return null;
+  const hist = (Array.isArray(bars) ? bars : []).map((b) => ({ t: b && (b.time || b.t) ? String(b.time || b.t).slice(0, 10) : null,
+    c: Number(b?.close ?? b?.c ?? b?.value) })).filter((x) => Number.isFinite(x.c) && x.c > 0).slice(-60);
+  const fin = (v) => v != null && Number.isFinite(Number(v));
+  const now = fin(spot) ? Number(spot) : hist.length ? hist[hist.length - 1].c : null;
+  const day = openedAt ? String(openedAt).slice(0, 10) : null;
+  let ei = -1;
+  if (day) hist.forEach((h, i) => { if (h.t && h.t <= day) ei = i; });
+  const entry = ei >= 0 ? hist[ei].c : fin(entrySpot) ? Number(entrySpot) : null;
+  const levels = [...hist.map((h) => h.c), ...bands.breakevens, ...strikes, now, entry].filter(fin).map(Number);
+  if (!levels.length) return null;
+  const lo0 = Math.min(...levels), hi0 = Math.max(...levels), padV = Math.max((hi0 - lo0) * 0.12, hi0 * 0.01);
+  const lo = lo0 - padV, hi = hi0 + padV;
+  const W = width - 36, top = 10, bot = height - 10;
+  const y = (v) => top + ((hi - v) / (hi - lo)) * (bot - top);
+  const n = hist.length;
+  const x = (i) => (n > 1 ? (i * W) / (n - 1) : W);
+  const f1 = (v) => v.toFixed(1);
+  const step = (() => { const raw = (hi - lo) / 4; const m = 10 ** Math.floor(Math.log10(raw)); return [1, 2, 2.5, 5, 10].map((k) => k * m).find((k) => k >= raw) || raw; })();
+  const ticks = [];
+  for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) ticks.push(v);
+  const dec = step < 1 ? (step < 0.1 ? 2 : 1) : 0;
+  const lbl = { fontFamily: mono.fontFamily, fontSize: 12, fill: T.ink };
+  const ny = now != null ? y(now) : null, eyv = entry != null ? y(entry) : null;
+  return (
+    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} role="img" aria-label={title} data-position-chart
+      style={{ display: "block", maxWidth: "100%", height: "auto" }}>
+      {bands.bands.map((b, i) => {
+        const a = Math.max(lo, b.lo), z = Math.min(hi, b.hi);
+        if (z <= a) return null;
+        return <rect key={i} x={0} y={f1(y(z))} width={W} height={f1(y(a) - y(z))} fill={b.sign > 0 ? T.green : T.violet} fillOpacity={b.sign > 0 ? 0.14 : 0.08} />;
+      })}
+      {strikes.filter((k) => k > lo && k < hi).map((k) => (
+        <line key={`k${k}`} x1={0} x2={W} y1={f1(y(k))} y2={f1(y(k))} stroke={T.field} strokeWidth={1} strokeDasharray="2 4" />
+      ))}
+      {bands.breakevens.filter((v) => v > lo && v < hi).map((v) => (
+        <g key={`be${v}`}>
+          <line x1={0} x2={W} y1={f1(y(v))} y2={f1(y(v))} stroke={T.ink} strokeWidth={1} strokeDasharray="4 3" strokeOpacity={0.75} />
+          <text x={4} y={f1(y(v) - 6)} style={{ ...lbl, fontWeight: 700 }}>{`BE ${v.toFixed(2)}`}</text>
+        </g>
+      ))}
+      {n > 1 && <polyline fill="none" stroke={T.ink} strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round"
+        points={hist.map((h, i) => `${f1(x(i))},${f1(y(h.c))}`).join(" ")} />}
+      {eyv != null && ei >= 0 && (
+        <g>
+          <circle cx={f1(x(ei))} cy={f1(eyv)} r={5} fill={T.panel} stroke={T.ink} strokeWidth={2} />
+          {/* Beside now, the two labels would sit on each other: the entry's goes on the other side of its ring. */}
+          <text x={f1(x(ei))} y={f1(ny != null && Math.abs(eyv - ny) < 30 && ny < eyv ? eyv + 20 : eyv - 10)}
+            textAnchor={x(ei) > W * 0.5 ? "end" : "start"} style={lbl}>{`entry ${entry.toFixed(2)}`}</text>
+        </g>
+      )}
+      {ny != null && (
+        <g>
+          <circle cx={W} cy={f1(ny)} r={5} fill={T.ink} stroke={T.panel} strokeWidth={2} />
+          <text x={W - 6} y={f1(ny + (ny > (top + bot) / 2 ? -12 : 20))} textAnchor="end" style={lbl}>{`now ${now.toFixed(2)}`}</text>
+        </g>
+      )}
+      {ticks.map((v) => (
+        <text key={`t${v}`} x={W + 6} y={f1(y(v) + 4)} style={{ ...lbl, fill: T.mut }}>{v.toFixed(dec)}</text>
+      ))}
+    </svg>
+  );
+}

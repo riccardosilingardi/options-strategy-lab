@@ -1,5 +1,6 @@
 // ============================================================================
-// src/positionCard.jsx — THE POSITIONS CARD, AND THE SHEET BEHIND ITS "Details".
+// src/positionCard.jsx — THE POSITIONS CARD. (Its "Details" sheet became the position's own screen in redesign PR 3:
+// src/positionScreen.jsx.)
 //
 // PR #44, TASKS 1 and 2. Measured on the owner's phone, 2 Oct 2026: J-0001's
 // card read HOLD with no P&L; the +$2,925 was only in the broker panel below it,
@@ -28,9 +29,6 @@ import React from "react";
 import { T, TYPE } from "./theme.js";
 import { Info, Note, mono, sans, TAP } from "./ui.jsx";
 import { PREVIEW, PREVIEW_READ_ONLY } from "./deploy.js";
-import { Fold, EvidenceOverlay } from "./steps.jsx";
-import { BandThumbnail } from "./visuals.jsx";
-import { payoffBands } from "./visuals.jsx";
 import { signedMoney$ } from "./positionView.js";
 import { CardButton } from "./positions.jsx";
 
@@ -38,56 +36,9 @@ import { CardButton } from "./positions.jsx";
 // ref; labels, headings and sentences are sans. RED IS FOR ERRORS: a loss is violet, not an error.
 const FS = TYPE.size, FW = TYPE.weight, LH = TYPE.line;
 
-/** One exit: its words and a bar. The bar is a picture of the words, never the only place a fact is. */
-export function ProgressLine({ line, tone = T.blue, reachedTone = T.amber }) {
-  // Reaching a take profit is good news and reaching the time exit or the stop is not: the caller names the colour.
-  // Not reached-red (PR #47): a reached exit is a warning to act on, not an error.
-  const color = line.state === "reached" ? reachedTone : line.state === "none" || line.state === "unknown" ? T.dim : tone;
-  return (
-    <div style={{ marginTop: 8 }}>
-      <div style={{ ...sans, fontSize: FS.sm, color: line.state === "reached" ? reachedTone : T.ink, lineHeight: LH.body }}>{line.text}</div>
-      <div aria-hidden="true" style={{ height: 6, background: T.line, borderRadius: 3, marginTop: 4, overflow: "hidden" }}>
-        <div style={{ width: `${Math.round((line.frac || 0) * 100)}%`, height: 6, background: color }} />
-      </div>
-    </div>
-  );
-}
-
-/**
- * THE FIND CARD'S FOUR FIGURES, IN ITS ORDER AND UNDER ITS LABELS — at entry, then now — and the four factors.
- * A cell the record cannot answer is a dash, never a zero. `now` is what is LEFT from here (what the position can
- * still make and still lose), which is the one reading of "now" the rules already have (`remainingEdge()`).
- */
-export function EntryVsNow({ ev, unitNote = null }) {
-  if (!ev) return null;
-  const th = { ...sans, fontSize: FS.xs, color: T.dim, fontWeight: FW.regular, textAlign: "right", padding: "2px 0 4px 10px" };
-  const td = (c = T.ink) => ({ ...mono, fontSize: FS.md, fontWeight: FW.bold, color: c, textAlign: "right", padding: "3px 0 3px 10px" });
-  const lab = { ...sans, fontSize: FS.xs, color: T.dim, textAlign: "left", padding: "3px 0", fontWeight: FW.regular };
-  return (
-    <div style={{ marginTop: 12 }}>
-      <table style={{ width: "100%", borderCollapse: "collapse" }}>
-        <caption style={{ ...sans, fontSize: FS.xs, letterSpacing: "0.04em", color: T.amber, textAlign: "left", paddingBottom: 4 }}>AT ENTRY VS NOW</caption>
-        <thead>
-          <tr><th scope="col" style={{ ...th, textAlign: "left" }}><span style={{ position: "absolute", left: -9999 }}>Figure</span></th>
-            <th scope="col" style={th}>AT ENTRY</th><th scope="col" style={th}>NOW</th></tr>
-        </thead>
-        <tbody>
-          {ev.figures.map((r) => (
-            <tr key={r.k}><th scope="row" style={lab}>{r.k}</th><td style={td()}>{r.entry}</td><td style={td()}>{r.now}</td></tr>
-          ))}
-          {ev.factors.map((r) => (
-            <tr key={r.k}><th scope="row" style={lab}>{r.label}</th><td style={td(T.mut)}>{r.entry}</td><td style={td(T.mut)}>{r.now}</td></tr>
-          ))}
-        </tbody>
-      </table>
-      {unitNote && <div style={{ ...sans, fontSize: FS.xs, color: T.mut, lineHeight: LH.body, marginTop: 4 }}>{unitNote}</div>}
-    </div>
-  );
-}
-
 /** The badge: CLOSE filled in the action tone, WARNING an amber outline, HOLD a green outline, anything else dim. */
-export function ActionBadge({ action }) {
-  const word = action || "NO ACTION";
+export function ActionBadge({ action, text = null }) {
+  const word = text || action || "NO ACTION";
   const filled = action === "CLOSE";
   const ring = action === "WARNING" ? T.amber : action === "HOLD" ? T.green : null;
   return (
@@ -190,83 +141,3 @@ export function PositionCard({
     </li>
   );
 }
-
-const Row = ({ k, children }) => (
-  <div style={{ display: "flex", gap: 10, flexWrap: "wrap", padding: "6px 0", borderBottom: `1px solid ${T.line}` }}>
-    <div style={{ ...sans, fontSize: FS.xs, color: T.dim, width: 110, flexShrink: 0 }}>{k}</div>
-    <div style={{ flex: 1, minWidth: 150, ...mono, fontSize: FS.sm, color: T.ink, lineHeight: LH.body }}>{children}</div>
-  </div>
-);
-
-/**
- * THE SHEET BEHIND "Details": the position, read-only. The record, the entry, what it is worth now, the picture,
- * the exit plan and the timeline. The one way out of it that leads to a trade is a quiet link to Build, and it says
- * what a Send there would do. Nothing in it sends anything.
- */
-export function PositionDetails({
-  p, title, onClose, legsText, expiresText, openedText, entryText, fillSentence = null, pnl = null, shareText = null,
-  ev, unitNote = null, spotNow = null, bars = [], planSentence, planDetail, timeline = [], stageNote = null,
-  edgeNote = null, pnlNote = null, onAnalyse, fileKind = "held", onFile, guardian = null,
-}) {
-  const bands = payoffBands({ legs: p.legs, entryNet: p.entryNet, spot: spotNow ?? p.entrySpot });
-  return (
-    <EvidenceOverlay eyebrow="DETAILS" title={`${p.ref ? `${p.ref} · ` : ""}${p.ticker} · ${title}`} onClose={onClose}>
-      {stageNote && <div style={{ ...sans, fontSize: FS.sm, color: T.amber, lineHeight: LH.body, marginBottom: 8 }}>⚠ {stageNote}</div>}
-      <Row k="LEGS">{legsText}</Row>
-      <Row k="EXPIRES">{expiresText}</Row>
-      <Row k="OPENED">{openedText}</Row>
-      <Row k="ENTRY PRICE">{entryText}</Row>
-      {fillSentence && <div style={{ ...sans, fontSize: FS.sm, color: T.mut, lineHeight: LH.body, marginTop: 6 }}>{fillSentence}</div>}
-      <Row k="PROFIT NOW">
-        <span style={{ fontWeight: FW.bold, color: pnl == null ? T.dim : Number(pnl) >= 0 ? T.green : T.violet }}>{signedMoney$(pnl)}</span>
-        {shareText ? ` · ${shareText}` : ""}
-      </Row>
-      {pnlNote && <div style={{ ...sans, fontSize: FS.sm, color: T.dim, lineHeight: LH.body, marginTop: 4 }}>{pnlNote}</div>}
-      {edgeNote && <div style={{ ...sans, fontSize: FS.sm, color: T.amber, lineHeight: LH.body, marginTop: 4 }}>⚠ {edgeNote}</div>}
-      <EntryVsNow ev={ev} unitNote={unitNote} />
-      <div style={{ marginTop: 14 }}>
-        <div style={{ ...sans, fontSize: FS.xs, letterSpacing: "0.04em", color: T.amber }}>WHERE IT MAKES AND LOSES MONEY</div>
-        <div style={{ marginTop: 6 }}>
-          <BandThumbnail bands={bands} bars={bars} spot={spotNow ?? undefined} entrySpot={p.entrySpot ?? null} width={320} height={120}
-            title={`Payoff zones. The price now ${spotNow != null ? `$${Number(spotNow).toFixed(2)}` : "is not known"}${p.entrySpot != null ? `, at entry $${Number(p.entrySpot).toFixed(2)}` : ""}.`} />
-        </div>
-        <div style={{ ...mono, fontSize: FS.xs, color: T.mut, marginTop: 4 }}>
-          now {spotNow != null ? `$${Number(spotNow).toFixed(2)}` : "—"} · at entry {p.entrySpot != null ? `$${Number(p.entrySpot).toFixed(2)}` : "—"}
-        </div>
-      </div>
-      <div style={{ marginTop: 14 }}>
-        <div style={{ ...sans, fontSize: FS.xs, letterSpacing: "0.04em", color: T.amber }}>THE EXIT PLAN</div>
-        <div style={{ ...sans, fontSize: FS.md, fontWeight: FW.bold, color: T.ink, lineHeight: LH.body, marginTop: 4 }}>{planSentence}</div>
-        <div style={{ ...sans, fontSize: FS.sm, color: T.mut, lineHeight: LH.body, marginTop: 4 }}>{planDetail}</div>
-      </div>
-      {timeline.length > 0 && (
-        <div style={{ marginTop: 14 }}>
-          <div style={{ ...sans, fontSize: FS.xs, letterSpacing: "0.04em", color: T.amber }}>TIMELINE · {timeline.length}</div>
-          {timeline.map((x, i) => (
-            <div key={x.seq || i} style={{ ...sans, fontSize: FS.xs, color: T.mut, lineHeight: LH.body, marginTop: 4 }}>
-              <span style={{ color: T.blue }}>{x.seq || `${p.ref || ""}·??`}</span>
-              <span style={{ color: T.dim }}>{` ${new Date(x.t).toLocaleDateString("en-GB")} · `}</span>
-              {x.text}
-            </div>
-          ))}
-        </div>
-      )}
-      <div style={{ marginTop: 18, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 4 }}>
-        <button onClick={onAnalyse}
-          style={{ ...sans, fontSize: FS.md, color: T.blue, background: "transparent", border: "none", padding: "10px 0", minHeight: 44,
-            cursor: "pointer", textDecoration: "underline" }}>Analyse as a new trade</button>
-        <div style={{ ...sans, fontSize: FS.sm, color: T.mut }}>Build prices it at today's market. A Send there would open a second position.</div>
-        {fileKind === "unknown" && (
-          <button onClick={onFile} disabled={PREVIEW} title={PREVIEW ? PREVIEW_READ_ONLY : undefined}
-            style={{ ...sans, fontSize: FS.sm, color: T.mut, background: "transparent", border: "none", padding: "10px 0", minHeight: 44,
-              cursor: "pointer", textDecoration: "underline" }}>Closed it elsewhere? File it</button>
-        )}
-      </div>
-      {/* THE EXIT ORDERS AND THE REASON CHECK (the Guardian), folded at the end: it left the card (redesign PR 3). */}
-      {guardian && (
-        <Fold label="open" tone={T.ink} keepMounted style={{ marginTop: 8 }} summary="Exit orders · the reason check">{guardian}</Fold>
-      )}
-    </EvidenceOverlay>
-  );
-}
-

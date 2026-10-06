@@ -72,11 +72,13 @@ import { nextRef, refCounter, appendTimeline, stampTimeline, orderStatusRecheck,
   journalEntry, searchJournal, CLOSE_REASON_MIN, refNumber, journeyLevel,
   adoptReplacement, replacementsIn, replacedBy } from "./journal.js";
 import { FIRST_STEP, stepCarry, candidateOf, candidateKey, legsLine, toggleCompare, inCompare, MAX_COMPARE, savedFromCandidate, candidateFromSaved, savedAge } from "./path.js";
-import { PositionCard, PositionDetails } from "./positionCard.jsx";
+import { PositionCard } from "./positionCard.jsx";
 import { navOf, createNavHistory } from "./nav.js";
 import { exitProgress, entryVsNow, displayName, fileState, pnlShareOfRisk, pnlShareText, holdsStructure,
   sizeWords, withExactMaxProfit, maxProfitCorrection, maxProfitCorrectionNote, exitDateOf,
-  exitLabels, positionMetaLine, pnlShareShort, waitingOrdersLine, positionTitle, cardSentence } from "./positionView.js";
+  exitLabels, positionMetaLine, pnlShareShort, waitingOrdersLine, positionTitle, cardSentence,
+  positionSubLine, statusBadge, keepEntry, paysLine, dayLabel } from "./positionView.js";
+import { PositionScreen } from "./positionScreen.jsx";
 import { findStatusText, DEFAULT_FIND_ORDER, BUILD_CTA } from "./rules.js";
 // REDESIGN PR 2: Build on the owner's mockup — its words (rules.js) and its screen (build.jsx).
 import { tradeTakeaway, buildSubLine, expiryShort, deltaSharesText, thetaDayText, reasonRuleText, orderBookLine, capLabel,
@@ -87,7 +89,7 @@ import { gateChecklist } from "./wizard.jsx";
 import { undefinedRiskLegs } from "./riskGate.js";
 import { EvidenceBar, EvidenceOverlay, DeskSheet, Fold, DeskCountLine } from "./steps.jsx";
 import { BottomBar, placeOf, NAV_BAR_H, FIND_LIST_END } from "./navBar.jsx";
-import { AccountStrip, PositionsBar, PositionsHeader, WorkingCloseLine } from "./positions.jsx";
+import { AccountStrip, PositionsBar, PositionsHeader, WorkingCloseLine, CardButton } from "./positions.jsx";
 import { Note, CheckField, Btn, Panel, Label, Stat, Reveal, mono, sans } from "./ui.jsx";
 import { marketClockLine, nextOpenDay } from "./clock.js";
 import { BASKET, TICKERS, getU, categoryOf } from "./markets.js";
@@ -1345,6 +1347,8 @@ export default function OptionsStrategyLab() {
   // inside it was destroyed on the next tap and an answer that landed while it
   // was shut never reached the screen at all.
   const [copilot, setCopilot] = useState({ msgs: [], busy: false, err: null, partial: "" });
+  // The position's screen asks its own copilot (redesign PR 3): one conversation per position, cleared when another opens.
+  const [posCopilot, setPosCopilot] = useState({ msgs: [], busy: false, err: null, partial: "" });
   /* AND SO DOES THE TECHNICAL COPILOT'S, for the same reason, and its BARS
      with it. `PriceChart` fetches the daily history once per ticker and hands
      it up here; the copilot under it reads the SAME bars rather than fetching
@@ -1370,6 +1374,8 @@ export default function OptionsStrategyLab() {
   const [closeAt, setCloseAt] = useState(null);
   // WHICH POSITION'S DETAILS SHEET IS OPEN (PR #44, TASK 2): one at a time, a sheet over the list.
   const [detailsId, setDetailsId] = useState(null);
+  // One copilot conversation per position: another position's screen starts clean (redesign PR 3).
+  useEffect(() => { setPosCopilot({ msgs: [], busy: false, err: null, partial: "" }); }, [detailsId]);
   // The Journal's search box. Sorted and searched by ref (src/journal.js).
   const [jq, setJq] = useState("");
   const [optLeg, setOptLeg] = useState(null); // {occ, label, quote}
@@ -3217,55 +3223,6 @@ export default function OptionsStrategyLab() {
     }];
   })), [ownedPositions, chains, posAlerts, seasonal, fuseAt, readiness, seasonalFor, alSync, chanceFor]); // eslint-disable-line
 
-  /* THE DETAILS SHEET (PR #44, TASK 2): the position, read-only. "Monitor" used to hand its legs to Build, which
-     re-priced it as a NEW trade at today's prices, re-sized it and left the ticket live — a Send there opened a second
-     identical position, and it showed neither the entry nor the position now. Built here, outside the Positions block,
-     because a sheet is one tap away and `src/wordcount.mjs` counts what is at rest. */
-  const detailsSheet = (() => {
-              const dp = detailsId != null ? ownedPositions.find((x) => x.id === detailsId) : null;
-              const dm = dp ? positionModels[dp.id] : null;
-              if (!dp || !dm) return null;
-              const fillPx = recordFillPrice(dp);
-              const legsTxt = `${dp.legs.map((l) => `${l.side > 0 ? "+" : "−"}${l.qty} ${l.strike}${l.type === "call" ? "C" : "P"}`).join(" / ")} · ${sizeWords(dp)} at Alpaca${positionSize(dp).assumed ? ` · ${positionSizeNote(dp)}` : ""}`;
-              return (
-                <PositionDetails p={dp} title={dm.name} onClose={() => setDetailsId(null)}
-                  legsText={legsTxt} expiresText={dp.expKey || new Date(dp.expiry).toLocaleDateString("en-GB")}
-                  openedText={new Date(dp.openedAt).toLocaleDateString("en-GB")}
-                  entryText={fillPx != null
-                    ? `${limitWords(fillPx) || fmt$(Math.abs(fillPx) * 100)} a combination, the broker's fill`
-                    : `${limitWords(dp.entryNet) || fmt$(Math.abs(dp.entryNet) * 100)} a combination, the app's own figure`}
-                  fillSentence={(dp.alpacaFillPrice != null || (isBrokerHolding(dp) && dp.entrySource === "fill"))
-                    ? fillVsLimit({ limit: dp.alpacaLimit, fill: recordFillPrice(dp), contracts: dm.n, limitSigned: dp.alpacaLimitSigned === true }).sentence
-                    : null}
-                  pnl={dm.pnl} shareText={dm.shareText} ev={dm.ev} unitNote={dm.unitNote}
-                  spotNow={dm.s} bars={barsCache[dp.ticker] || []}
-                  planSentence={dm.planSentence} planDetail={dm.planDetail}
-                  timeline={dp.timeline || []} stageNote={positionStageNote(dp)}
-                  edgeNote={dm.al0 && dm.al0.edge && dm.al0.edge.thin ? dm.al0.edge.sentence : null}
-                  pnlNote={dm.al0 ? dm.al0.pnlNote : null}
-                  fileKind={dm.fileKind}
-                  guardian={(
-                    <GuardianPanel
-                      pos={dp} spot={dm.s || dp.entrySpot} dteLeft={dm.dteLeft} ivNow={dm.ivNow}
-                      vol={sigmaFor(dp.ticker)}
-                      seasonalNow={dm.seasNow} pnlNow={dm.pnl} popNow={dm.popNow} chanceNow={dm.mcNow}
-                      seasonalNote={chanceStamp(dm.mcNow, dp.ticker)}
-                      thesisSeasonalNote={seasonalStampNote(dp.thesis, dp.ticker)}
-                      vegaSign={Math.sign(dp.thesis?.vega ?? 1) || 1}
-                      alpaca={!!alpaca} quoteFn={dm.qp}
-                      setMsg={setMsg} logEvent={logEvent} gate={gate}
-                    />
-                  )}
-                  onFile={() => { setDetailsId(null); setClosing({ id: dp.id, written: "", err: null }); }}
-                  onAnalyse={() => {
-                    setDetailsId(null);
-                    openOnBuild({ ticker: dp.ticker, expKey: dp.expKey || null, legs: dp.legs, name: `${dm.name} (analysis)`,
-                      origin: { kind: "position", key: null,
-                        note: `This is a trade you already hold, priced again at today's market. A Send here would open a second position, not manage this one.` } });
-                  }} />
-              );
-            })();
-
   const nAttention = attn.decisions;
 
   const setNotify = async (on) => {
@@ -3820,6 +3777,112 @@ export default function OptionsStrategyLab() {
      a different screen pushes an entry, popstate restores the one it hands back, and closing a sheet from its own
      button steps back instead of leaving a screen behind. Find is the first entry (round 2) and is never intercepted. After
      each move, focus goes to the new view's heading (WCAG 2.4.3). */
+  /* THE POSITION'S OWN SCREEN (redesign PR 3, TASK 3; the board "PositionDetail"). It replaces the Details sheet (PR #44,
+     TASK 2), whose rows are now its "Alpaca details" sheet. Built here, outside the Positions block: it is a screen one
+     tap away, and `src/wordcount.mjs` counts what is at rest. Order path 3 is unchanged: "Close at limit" is
+     `prepareCardClose()`, its confirm `CloseConfirm`, its send `sendCardClose()`. */
+  const keepPosition = async (p, m, reason) => {
+    if (PREVIEW) return { ok: false, message: PREVIEW_READ_ONLY };
+    if (String(reason || "").trim().length < CLOSE_REASON_MIN) return { ok: false, message: `At least ${CLOSE_REASON_MIN} characters.` };
+    const t = appendTimeline(p, keepEntry({ reason, act: m.act, pnl: m.pnl }));
+    const positions = store.positions.map((x) => (x.id === p.id ? { ...x, timeline: t.timeline, seqNext: t.seqNext } : x));
+    const st = { ...store, positions };
+    setStore(st); await saveState(st);
+    return { ok: true, seq: t.added[0] ? t.added[0].seq : null };
+  };
+  /* A COPILOT ANSWER ON A POSITION is filed like any other (copilotLog, tagged with the ref) and leaves ONE line on the
+     position's own timeline, so the record says it was asked. */
+  const logPositionAnalysis = (p) => (a) => {
+    logAnalysis({ ...a, label: `${p.ref || p.ticker} · ${a.label}` });
+    setStore((st) => {
+      const positions = st.positions.map((x) => {
+        if (x.id !== p.id) return x;
+        const t = appendTimeline(x, { t: Date.now(), type: "copilot", text: `Asked the copilot: “${a.label}”. The answer is in the Journal.` });
+        return { ...x, timeline: t.timeline, seqNext: t.seqNext };
+      });
+      const ns = { ...st, positions }; saveState(ns); return ns;
+    });
+  };
+  const positionScreenNode = (() => {
+    const dp = detailsId != null ? ownedPositions.find((x) => x.id === detailsId) : null;
+    const dm = dp ? positionModels[dp.id] : null;
+    if (!dp || !dm) return null;
+    const fillPx = recordFillPrice(dp);
+    const legsTxt = `${dp.legs.map((l) => `${l.side > 0 ? "+" : "−"}${l.qty} ${l.strike}${l.type === "call" ? "C" : "P"}`).join(" / ")} · ${sizeWords(dp)} at Alpaca${positionSize(dp).assumed ? ` · ${positionSizeNote(dp)}` : ""}`;
+    const ca = closeAt && closeAt.id === dp.id ? closeAt : null;
+    const workingRow = dm.working ? (() => {
+      const rows = ordersForRecord(dp, alSync.orders).filter((o) => orderIntent(o) === "close");
+      return rows.find((x) => x.id === dp.closeOrder?.id) || rows[0] || null;
+    })() : null;
+    const bands = payoffBands({ legs: dp.legs, entryNet: dp.entryNet, spot: dm.s ?? dp.entrySpot });
+    const v = {
+      p: dp, ref: dp.ref || dp.ticker, title: dm.name, sub: positionSubLine(dp),
+      back: { label: "Positions", onClick: () => { setDetailsId(null); if (ca && !ca.busy) setCloseAt(null); } },
+      status: {
+        act: dm.act, action: dm.act.action || (dm.act.kind === "not-held" ? "NOT ON ALPACA" : "NO QUOTE"), badge: statusBadge(dm.act),
+        pnl: dm.pnl, progress: dm.progress, ref: dp.ref || dp.ticker, notes: dm.act.notes || [],
+        ruleLine: dm.act.action === "HOLD" ? null : dm.act.line,
+        canKeep: dm.act.action === "WARNING" || dm.act.action === "CLOSE",
+        onClose: () => prepareCardClose(dp), closeDisabled: DEMO || !!(ca && (ca.busy || ca.prepared)) || dm.act.kind === "not-held",
+        closeTitle: DEMO ? DEMO_TOOLTIP : undefined,
+      },
+      keep: { min: CLOSE_REASON_MIN, onKeep: (reason) => keepPosition(dp, dm, reason) },
+      closeNode: ca ? <CloseConfirm prep={ca} clock={clock} onSend={() => sendCardClose(dp)} onCancel={() => setCloseAt(null)}
+        onChoose={(c) => prepareCardClose(dp, c, ca.prepared?.chainUsed || null)} /> : null,
+      workingNode: dm.working && !ca ? <WorkingCloseLine line={workingCloseText(workingRow ? rowLines(workingRow).terms : null)}
+        clockLine={marketClockLine(clock)} onManage={() => { setDetailsId(null); setPosSeg("orders"); setFocusOrder(workingRow ? workingRow.id : null); }} /> : null,
+      fileNode: dm.fileKind === "gone" || dm.fileKind === "book" ? (
+        <CardButton tone={dm.fileKind === "gone" ? "amber" : "quiet"} disabled={PREVIEW} title={PREVIEW ? PREVIEW_READ_ONLY : undefined}
+          onClick={() => { setDetailsId(null); setClosing({ id: dp.id, written: "", err: null }); }}>File in Journal</CardButton>
+      ) : null,
+      pays: { bands, bars: barsCache[dp.ticker] || [], spot: dm.s, entrySpot: dp.entrySpot ?? null, openedAt: dp.openedAt,
+        strikes: [...new Set(dp.legs.map((l) => Number(l.strike)))],
+        line: paysLine({ bands, spot: dm.s, ticker: dp.ticker, expKey: dp.expKey || dp.expiry, closed: !!(clock && clock.is_open === false) }),
+        title: `${dp.ticker} over the last 60 sessions, with where it pays at expiry. The price now ${dm.s != null ? `$${Number(dm.s).toFixed(2)}` : "is not known"}${dp.entrySpot != null ? `, at entry $${Number(dp.entrySpot).toFixed(2)}` : ""}.` },
+      progress: dm.progress, plan: <>{dm.planSentence} {dm.planDetail}</>,
+      ev: dm.ev, entryDay: dayLabel(dp.openedAt), nowDay: "now",
+      timeline: dp.timeline || [], onWholeRecord: () => { setDetailsId(null); setTab("journal"); },
+      onAnalyse: () => {
+        setDetailsId(null);
+        openOnBuild({ ticker: dp.ticker, expKey: dp.expKey || null, legs: dp.legs, name: `${dm.name} (analysis)`,
+          origin: { kind: "position", key: null,
+            note: `This is a trade you already hold, priced again at today's market. A Send here would open a second position, not manage this one.` } });
+      },
+      details: { open: deskSheet === "position-alpaca", onOpen: () => setDeskSheet("position-alpaca"), onClose: () => setDeskSheet(null),
+        d: { legsText: legsTxt, expiresText: dp.expKey || new Date(dp.expiry).toLocaleDateString("en-GB"),
+          openedText: new Date(dp.openedAt).toLocaleDateString("en-GB"),
+          entryText: fillPx != null
+            ? `${limitWords(fillPx) || fmt$(Math.abs(fillPx) * 100)} a combination, the broker's fill`
+            : `${limitWords(dp.entryNet) || fmt$(Math.abs(dp.entryNet) * 100)} a combination, the app's own figure`,
+          fillSentence: (dp.alpacaFillPrice != null || (isBrokerHolding(dp) && dp.entrySource === "fill"))
+            ? fillVsLimit({ limit: dp.alpacaLimit, fill: recordFillPrice(dp), contracts: dm.n, limitSigned: dp.alpacaLimitSigned === true }).sentence
+            : null,
+          pnl: dm.pnl, shareText: dm.shareText, stageNote: positionStageNote(dp),
+          edgeNote: dm.al0 && dm.al0.edge && dm.al0.edge.thin ? dm.al0.edge.sentence : null, pnlNote: dm.al0 ? dm.al0.pnlNote : null } },
+      copilot: { apiKey: "server", convo: posCopilot, setConvo: setPosCopilot, onAnalysis: logPositionAnalysis(dp),
+        ctx: { store, scan, news: news[dp.ticker]?.items || [], ticker: dp.ticker, legs: dp.legs, expKey: dp.expKey, A: null, spot: dm.s,
+          seasonalSrc: seasonalFor(dp.ticker).source,
+          position: { ref: dp.ref, ticker: dp.ticker, name: dm.name, legs: dp.legs, expKey: dp.expKey, size: sizeWords(dp), openedAt: dp.openedAt,
+            entryNet: dp.entryNet, profitNow: dm.pnl, action: dm.act.action, actionLine: dm.act.line,
+            exits: { takeProfit: dm.progress.takeProfit.text, time: dm.progress.time.text, stop: dm.progress.stop.text },
+            atEntryVsNow: dm.ev, closeWorking: !!dm.working, timeline: (dp.timeline || []).slice(-6).map((e) => e.text) } } },
+      guardian: (
+        <GuardianPanel
+          pos={dp} spot={dm.s || dp.entrySpot} dteLeft={dm.dteLeft} ivNow={dm.ivNow}
+          vol={sigmaFor(dp.ticker)}
+          seasonalNow={dm.seasNow} pnlNow={dm.pnl} popNow={dm.popNow} chanceNow={dm.mcNow}
+          seasonalNote={chanceStamp(dm.mcNow, dp.ticker)}
+          thesisSeasonalNote={seasonalStampNote(dp.thesis, dp.ticker)}
+          vegaSign={Math.sign(dp.thesis?.vega ?? 1) || 1}
+          alpaca={!!alpaca} quoteFn={dm.qp}
+          setMsg={setMsg} logEvent={logEvent} gate={gate}
+        />
+      ),
+      fileKind: dm.fileKind, onFile: () => { setDetailsId(null); setClosing({ id: dp.id, written: "", err: null }); },
+    };
+    return <PositionScreen v={v} />;
+  })();
+
   const navNow = navOf({ view, tab, step, showSettings, ev, whyTk, detailsId, deskSheet, posSeg,
     mktTk: tab === "build" && step === "market" ? mkt.tk : null, mktTab: mkt.tab });
   const navNowRef = useRef(navNow); navNowRef.current = navNow;
@@ -5217,7 +5280,8 @@ export default function OptionsStrategyLab() {
             opens its row in Orders. The Alpaca panel is dissolved — a holding with a record is its card, one with
             none is a "Not in the app" card, an order with none is a row tagged "sent outside this app" — and its
             Sync is the refresh icon on the bar. Integrations moved to Settings → Connections. */}
-        {tab === "positions" && !showSettings && (
+        {tab === "positions" && !showSettings && positionScreenNode}
+        {tab === "positions" && !showSettings && !positionScreenNode && (
           <div data-positions>
             <PositionsHeader busy={syncBusy} onSettings={() => setShowSettings(true)}
               onRefresh={async () => { setSyncBusy(true); try { await syncBroker(); recheckOrders(); } finally { setSyncBusy(false); } }} />
@@ -5255,7 +5319,7 @@ export default function OptionsStrategyLab() {
                       closeLabel={m.working ? null : "Close at limit"}
                       closeDisabled={!!(ca && (ca.busy || ca.prepared))}
                       closeTitle={DEMO ? DEMO_TOOLTIP : undefined} demo={DEMO}
-                      onClose={() => prepareCardClose(p)} onDetails={() => setDetailsId(p.id)}
+                      onClose={() => { setDetailsId(p.id); prepareCardClose(p); }} onDetails={() => setDetailsId(p.id)}
                       fileKind={m.fileKind} onFile={() => { if (PREVIEW) { setMsg(PREVIEW_READ_ONLY); return; } setClosing({ id: p.id, written: "", err: null }); }}
                       /* THE ORDER PRINTS ONCE (PR #47, TASK 1): its row lives in Orders; the card says one line and opens it. */
                       foot={m.working ? (() => {
@@ -5267,8 +5331,6 @@ export default function OptionsStrategyLab() {
                             onManage={() => { setPosSeg("orders"); setFocusOrder(o ? o.id : null); }} />
                         );
                       })() : null}>
-                      {ca && <CloseConfirm prep={ca} clock={clock} onSend={() => sendCardClose(p)} onCancel={() => setCloseAt(null)}
-                        onChoose={(c) => prepareCardClose(p, c, ca.prepared?.chainUsed || null)} />}
                       {/* FILING ASKS WHY, AND THE ANSWER IS KEPT. A rule close names its rule and needs nothing typed.
                           A filing with no rule behind it needs the same written reason as an against-the-signal
                           override — including a close taken on the stop WARNING, which is a decision and is recorded
@@ -5349,7 +5411,6 @@ export default function OptionsStrategyLab() {
             </div>
             )}
 
-            {detailsSheet}
           </div>
         )}
 
@@ -5823,7 +5884,8 @@ export default function OptionsStrategyLab() {
         badgeLabel={statusLine({ positions: ownedPositions, attention: nAttention, looks: attn.looks, closing: attn.closesWorking })}
         onGo={(id) => {
           if (id === "find" || id === "build") { goStep(id); return; }
-          setTab(id); setShowSettings(false); setEv(null);
+          // A place opens at its top: the position's screen is left for the Positions list (redesign PR 3).
+          setTab(id); setShowSettings(false); setEv(null); setDetailsId(null);
           window.scrollTo?.({ top: 0 });
         }} />
     </div>

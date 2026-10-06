@@ -5,7 +5,7 @@
 // App lays it out and holds what the owner asked for in plain strings, no DOM library.
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { PositionCard, PositionDetails, EntryVsNow, ProgressLine } from "./positionCard.jsx";
+import { PositionCard } from "./positionCard.jsx";
 import { T } from "./theme.js";
 import { takeProfitTarget, positionAction } from "./rules.js";
 import { exitProgress, entryVsNow, pnlShareOfRisk, positionTitle, cardSentence, pnlShareShort, positionMetaLine,
@@ -149,34 +149,7 @@ check("THE LINE UNDER THE CARDS for an order sent and not filled; the card's hel
     "Take profit — · Time exit — · Stop —", "unknown is a dash, never a zero");
 });
 
-check("DETAILS SHEET: legs, opened, entry price, profit, entry vs now, the picture, the exit plan, the timeline", () => {
-  const ev = entryVsNow({ p: J1, n: 9, pnl: 2925, popNow: 0.6, nowSignals: null });
-  const h = renderToStaticMarkup(
-    <PositionDetails p={J1} title="Long put 94 · 30 Oct" onClose={() => {}} legsText="+1 94P · × 9 contracts"
-      expiresText="2026-10-30" openedText="22/09/2026" entryText="a debit of $5.00 a combination, the broker's fill"
-      pnl={2925} shareText="+65% of the risk" ev={ev} unitNote="note" spotNow={92.4} planSentence="Close at 50% of the premium paid, or at 21 days to expiration."
-      planDetail="That is $2,250 of profit for 9." timeline={J1.timeline} onAnalyse={() => {}} fileKind="unknown" onFile={() => {}} />);
-  for (const x of ["role=\"dialog\"", "+1 94P", "OPENED", "22/09/2026", "ENTRY PRICE", "+$2,925", "AT ENTRY VS NOW", "WHERE IT MAKES AND LOSES MONEY",
-    "entry</text>", "THE EXIT PLAN", "TIMELINE", "J-0001·01"]) has(h, x);
-  has(h, "Analyse as a new trade");
-  has(h, "A Send there would open a second position.");
-  has(h, "Closed it elsewhere? File it", "the quiet link, for the unknown case");
-  const held = renderToStaticMarkup(<PositionDetails p={J1} title="x" onClose={() => {}} ev={ev} timeline={[]} fileKind="held" onAnalyse={() => {}} planSentence="p" planDetail="d" />);
-  hasNot(held, "Closed it elsewhere?");
-  hasNot(h, "ⓘ", "no tooltip glyph");
-});
-
-check("DETAILS SHEET is read-only: nothing in it can send an order", () => {
-  const h = renderToStaticMarkup(<PositionDetails p={J1} title="x" onClose={() => {}} ev={entryVsNow({ p: J1 })} timeline={[]} fileKind="held" onAnalyse={() => {}} planSentence="p" planDetail="d" />);
-  const labels = (h.match(/<button\b[^>]*>[\s\S]*?<\/button>/g) || []).map((b) => b.replace(/<[^>]*>/g, "").trim());
-  eq(JSON.stringify(labels), JSON.stringify(["Close", "Analyse as a new trade"]), "the only controls: leave the sheet, or go to Build");
-  for (const x of ["Close at limit", "Cancel it", "GTC"]) hasNot(h, x);
-});
-
-check("EntryVsNow and ProgressLine stand alone", () => {
-  has(renderToStaticMarkup(<ProgressLine line={{ text: "Take profit: $1 of $2", frac: 0.5, state: "ok" }} />), "width:50%");
-  eq(renderToStaticMarkup(<EntryVsNow ev={null} />), "");
-});
+// The Details sheet's tests moved with it to src/positionScreen.test.jsx (redesign PR 3: it is the position's own screen).
 
 console.log(`\n${ok.length} passed, ${bad.length} failed`);
 if (bad.length) { for (const [n, m] of bad) console.error(`FAILED: ${n}\n${m}`); process.exit(1); }

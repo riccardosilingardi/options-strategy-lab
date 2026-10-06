@@ -17,7 +17,7 @@
 // It is plain JS (no React) so the arrangement can be tested without a browser.
 // ============================================================================
 
-import { RULES, money, chanceText, rewardRisk, remainingEdge, payoffCeiling, NO_CEILING,
+import { RULES, money, chanceText, rewardRisk, remainingEdge, payoffCeiling, NO_CEILING, sentenceCase,
   takeProfitProgress, takeProfitBasisWords, stopWarningLevel, known, exactExtremes, CARD_LABELS } from "./rules.js";
 import { legsNotHeld } from "./closeOrder.js";
 import { holdingShape, positionSize } from "./journal.js";
@@ -266,7 +266,11 @@ export function entryVsNow({ p, n = 1, pnl = null, popNow = null, nowSignals = n
     // AN INPUT THAT FAILED TO LOAD IS "NOT READ", NOT A NEUTRAL ZERO: its factor is scored as neutral so the other
     // three still count, but a card must not print that neutral as something the market said.
     const cell = (f, snap) => (snap && Array.isArray(snap.failed) && snap.failed.includes(k) ? "not read" : factorText(f));
-    return { k, label: FACTOR_LABELS[k], entry: na ? "n/a" : cell(thenF, hasEntrySignals ? then : null), now: na ? "n/a" : cell(nowF, nowSignals) };
+    // TURNED (redesign PR 3, the position's screen): read at entry and now, and the direction is not the same.
+    const dirOf = (f, snap) => (f && Number.isFinite(f.dir) && !(snap && Array.isArray(snap.failed) && snap.failed.includes(k)) ? f.dir : null);
+    const d0 = na ? null : dirOf(thenF, hasEntrySignals ? then : null), d1 = na ? null : dirOf(nowF, nowSignals);
+    return { k, label: FACTOR_LABELS[k], entry: na ? "n/a" : cell(thenF, hasEntrySignals ? then : null), now: na ? "n/a" : cell(nowF, nowSignals),
+      readAtEntry: d0 != null, turned: d0 != null && d1 != null && d0 !== d1 };
   });
   return { figures, factors, hasEntrySignals, unbounded };
 }
@@ -386,4 +390,128 @@ export function maxProfitCorrectionNote(c, p = {}) {
   return `Maximum profit corrected: ${money(c.from * n)} → ${money(c.to * n)} for the whole position. The old figure ` +
     `stopped at the edge of a price grid; this one is the payoff if the price went to zero, worked out from the legs ` +
     `and the entry. The stored figure is kept.`;
+}
+
+/* ------------------------------------------------------------------
+   THE POSITION'S OWN SCREEN (redesign PR 3, the owner's board "PositionDetail"). Words only: every figure is one the
+   card already read (`exitProgress()`, `entryVsNow()`, `payoffBands()`), arranged for the screen.
+------------------------------------------------------------------ */
+
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+/** "Fri 25 Sep", in the reader's own time. Null for anything that is not a time. */
+export function dayLabel(t) {
+  const d = new Date(typeof t === "number" ? t : Date.parse(t || ""));
+  return Number.isFinite(d.getTime()) ? `${WEEKDAYS[d.getDay()]} ${d.getDate()} ${MONTHS_SHORT[d.getMonth()]}` : null;
+}
+
+/** "UNG · 2 puts · opened Fri 25 Sep" under the title. */
+export const positionSubLine = (p = {}) => [p.ticker, sizeWords(p), dayLabel(p.openedAt) ? `opened ${dayLabel(p.openedAt)}` : null]
+  .filter(Boolean).join(" · ");
+
+/** The status block's badge: the action and which rule ("WARNING · STOP LEVEL", "CLOSE · TAKE PROFIT"). */
+export function statusBadge(act = null) {
+  if (!act) return "NO QUOTE";
+  if (act.kind === "not-held") return "NOT ON ALPACA";
+  if (act.action === "CLOSE") return act.rule === "take-profit" ? "CLOSE · TAKE PROFIT" : "CLOSE · TIME EXIT";
+  if (act.action === "WARNING") return act.kind === "edge" ? "WARNING · THIN EDGE" : "WARNING · STOP LEVEL";
+  return act.action || "NO QUOTE";
+}
+
+/**
+ * THE STATUS BLOCK'S SENTENCE, BY WHAT IS HAPPENING ON IT (the board): at rest the card's sentence (on a stop warning it
+ * ends with the two answers the screen offers), then one line per step — the close being checked, the close working,
+ * keeping it with a reason, kept.
+ */
+export function screenHeadline({ mode = "idle", act = null, pnl = null, progress = null } = {}) {
+  if (mode === "closing") return "Closing at a limit, not at market. Check it, then send.";
+  if (mode === "working") return "Close sent to Alpaca. The position stays here until it fills.";
+  if (mode === "keeping") return "Keeping it is allowed. Say why, so the Journal can hold you to it.";
+  if (mode === "kept") return "Kept, with your reason on the record.";
+  const line = cardSentence({ act, pnl, progress });
+  if (act && act.action === "WARNING" && act.kind === "stop" && line) {
+    return line.replace(/you decide\.$/, "close it, or keep it and write why.");
+  }
+  return line;
+}
+
+/** "J-0003·06 filed: kept, “EIA storage on Thursday could turn it”. The stop warning stays on." */
+export function keptLine({ seq = null, reason = "", act = null } = {}) {
+  const tail = act && act.action === "WARNING" && act.kind === "stop" ? " The stop warning stays on." : "";
+  return `${seq ? `${seq} filed` : "Filed"}: kept, “${String(reason).trim()}”.${tail}`;
+}
+
+/** The timeline entry a "Keep it, write why" adds (journal.js `appendTimeline()` numbers it). */
+export const keepEntry = ({ reason = "", act = null, pnl = null, t = Date.now() } = {}) => ({
+  t, type: "keep", text: `Kept${act && act.action ? ` on ${act.action}` : ""}${known(pnl) ? ` at ${money(pnl)}` : ""}, with this reason: “${String(reason).trim()}”.`,
+});
+
+/**
+ * WHERE IT PAYS, IN ONE SENTENCE (the board: "Pays above $15.62 on 18 Dec. UNG closed at $15.10, $0.52 under that."),
+ * from `payoffBands()`'s own bands — the profit range at expiry — and the price now.
+ */
+export function paysLine({ bands = null, spot = null, ticker = "", expKey = null, closed = false } = {}) {
+  if (!bands || !Array.isArray(bands.bands)) return null;
+  const up = bands.bands.filter((b) => b.sign > 0);
+  if (!up.length) return "It pays nowhere at expiry on these legs.";
+  const $ = (x) => `$${Number(x).toFixed(2)}`;
+  const on = shortDate(expKey) ? ` on ${shortDate(expKey)}` : "";
+  const first = up[0], last = up[up.length - 1];
+  const openLo = first.lo <= bands.lo + 1e-9, openHi = last.hi >= bands.hi - 1e-9;
+  let where, lo = null, hi = null;
+  if (up.length > 1) where = `in ${up.length} ranges`;
+  else if (openLo && openHi) where = "at every price";
+  else if (openHi) { where = `above ${$(first.lo)}`; lo = first.lo; }
+  else if (openLo) { where = `below ${$(first.hi)}`; hi = first.hi; }
+  else { where = `between ${$(first.lo)} and ${$(first.hi)}`; lo = first.lo; hi = first.hi; }
+  let now = "";
+  if (known(spot)) {
+    const s = Number(spot);
+    const verb = closed ? "closed at" : "is at";
+    const rel = lo != null && s < lo ? `, ${$(lo - s)} under that` : hi != null && s > hi ? `, ${$(s - hi)} over that`
+      : (lo != null || hi != null) ? ", inside it" : "";
+    now = ` ${ticker} ${verb} ${$(s)}${rel}.`;
+  }
+  return `Pays ${where}${on}.${now}`;
+}
+
+/**
+ * THE EXIT PLAN'S THREE ROWS (the board): a label, the figure, and a 6px bar — `exitProgress()`'s own lines, cut at
+ * their colon ("Take profit: $2,925 of $2,250" → "Take profit" · "$2,925 of $2,250"). A reached exit says so.
+ */
+export function exitPlanRows(progress) {
+  if (!progress) return [];
+  const row = (id, x, reachedTone) => {
+    const t = String((x && x.text) || "");
+    const at = t.indexOf(": ");
+    const reached = !!(x && x.state === "reached");
+    return { id, label: at > 0 ? t.slice(0, at) : t, value: at > 0 ? t.slice(at + 2) : "", reached, frac: x ? x.frac : 0,
+      tone: reached ? reachedTone : "field" };
+  };
+  return [row("takeProfit", progress.takeProfit, "done"), row("time", progress.time, "warn"), row("stop", progress.stop, "warn")];
+}
+
+/** The figure rows of AT ENTRY VS NOW in the board's sentence case ("You risk"), the factors likewise ("Price trend"). */
+export const evLabel = (k) => sentenceCase(String(k || ""));
+
+/**
+ * THE LINE UNDER AT ENTRY VS NOW: how many of the reasons read at entry have turned, then what "now" is.
+ * "3 of the 4 reasons you opened it have turned." — the factors read on both days whose direction is not the same.
+ */
+export function turnedLine(ev, p = {}) {
+  const what = `"Now" is what is left from here, for the whole position (${sizeWords(p)}); "At entry" never changes.`;
+  if (!ev || !ev.hasEntrySignals) return `The record has no reading of the four factors from the day it opened. ${what}`;
+  const read = ev.factors.filter((f) => f.readAtEntry);
+  const turned = read.filter((f) => f.turned).length;
+  const head = turned === 0 ? `None of the ${read.length} reasons you opened it has turned.`
+    : `${turned} of the ${read.length} reasons you opened it ${turned === 1 ? "has" : "have"} turned.`;
+  return `${head} ${what}`;
+}
+
+/** RECORD · LAST N: the newest entries first, each "·04 2 Oct" and its words. */
+export function recordRows(timeline = [], n = 4) {
+  return (timeline || []).slice(-n).reverse().map((x, i) => {
+    const seq = String(x.seq || "");
+    const tail = seq.includes("·") ? `·${seq.split("·").pop()}` : "";
+    return { key: x.seq || `r${i}`, when: [tail, shortDate(new Date(x.t).toISOString())].filter(Boolean).join(" "), text: x.text || "" };
+  });
 }

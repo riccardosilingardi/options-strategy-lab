@@ -11,6 +11,7 @@ import { readFileSync } from "node:fs";
 import { PREVIEW, PREVIEW_READ_ONLY, BUILD_CONTEXT } from "./deploy.js";
 import { OrdersPanel, OrderRow } from "./orders.jsx";
 import { PositionCard } from "./positionCard.jsx";
+import { StatusBlock } from "./positionScreen.jsx";
 import { SendBar } from "./build.jsx";
 import { takeProfitTarget } from "./rules.js";
 import { exitProgress, entryVsNow } from "./positionView.js";
@@ -54,7 +55,7 @@ check("the Orders segment: Cancel all is disabled, with the sentence", () => {
   has(h, SENTENCE);
 });
 
-check("a position card: Close at limit and File in Journal are disabled, with the sentence; Details still opens", () => {
+check("a position card: Close at limit and File in Journal are disabled, with the sentence; its title still opens the screen", () => {
   // J-0001 as positionCard.test.jsx draws it.
   const NOW = Date.parse("2026-10-02T12:00:00Z");
   const J1 = { id: 1, ref: "J-0001", ticker: "GDX", name: "Imported from Alpaca", expKey: "2026-10-30", expiry: "2026-10-30",
@@ -68,7 +69,19 @@ check("a position card: Close at limit and File in Journal are disabled, with th
       closeLabel="Close at limit" fileKind="gone" onClose={() => {}} onFile={() => {}} onDetails={() => {}} />);
   allDisabled(h, "Close at limit");
   allDisabled(h, "File in Journal");
-  if (buttons(h, "Details").some((a) => /\bdisabled=""/.test(a))) throw new Error("Details is a read and stays open");
+  const open = buttons(h, "GDX 94 put");
+  if (!open.length || open.some((a) => /\bdisabled=""/.test(a))) throw new Error("the title opens the position's screen, a read, and stays open");
+  has(h, SENTENCE);
+});
+
+// REDESIGN PR 3 (TASK 3): the position's screen writes one thing, a "Keep it" reason on the timeline; a preview keeps
+// nothing, and its Close at limit sends nothing.
+check("the position's screen: Close at limit and Keep it, write why are disabled, with the sentence", () => {
+  const act = { action: "WARNING", kind: "stop", line: "Stop threshold crossed.", notes: [] };
+  const h = renderToStaticMarkup(<StatusBlock s={{ act, action: "WARNING", badge: "WARNING · STOP LEVEL", pnl: -153, progress: null, ref: "J-0003",
+    notes: [], ruleLine: act.line, canKeep: true, onClose: () => {} }} keep={{ min: 12, onKeep: async () => ({ ok: true }) }} />);
+  allDisabled(h, "Close at limit");
+  allDisabled(h, "Keep it, write why");
   has(h, SENTENCE);
 });
 
