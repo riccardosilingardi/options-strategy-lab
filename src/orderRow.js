@@ -338,7 +338,7 @@ export function rowLines(order = {}, model = null) {
   const bk = b && b.ok
     ? `bid ${n2(heldToLimit(order, b.bid))} · mid ${n2(heldToLimit(order, b.mid))} · ask ${n2(heldToLimit(order, b.ask))}`
     : b && b.reason === "chain" ? "chain not loaded" : "no two-sided quote";
-  const book = `${bk}${m.mark ? ` · mark ${n2(m.mark.held)}` : ""}`;
+  const book = `${bk}${m.mark ? ` · Alpaca mark ${n2(m.mark.held)}` : ""}`;
   return { title, terms, book, sent: m.sentAt ? localShort(m.sentAt) : null };
 }
 
@@ -372,4 +372,39 @@ export function workingCloseText(rowTerms = null) {
   const parts = String(rowTerms).split(" · ");
   const price = (parts[0] || "").replace(/ (credit|debit)$/, "");
   return `Close working at ${price}${parts[2] ? ` · ${parts[2]}` : ""}`;
+}
+
+/* ------------------------------------------------------------------
+   THE ROW ON THE OWNER'S BOARD "Orders" (redesign PR 3, TASK 4): its name, Modify's range, the cancel question.
+------------------------------------------------------------------ */
+
+/**
+ * The row's name: "UNG long put 15 · 18 Dec" from the record's own title (`positionTitle()`, handed in as `recTitle`),
+ * else the order's legs in words ("UNG 15P 18 Dec", `rowLines()`'s title without its verb and quantity).
+ */
+export function orderRowName(rec = null, L = null, recTitle = null) {
+  if (rec && rec.ticker && recTitle) return `${rec.ticker} ${recTitle.charAt(0).toLowerCase()}${recTitle.slice(1)}`;
+  return L && L.title ? String(L.title).replace(/^(Close|Open) (\d+ )?/, "") : "";
+}
+
+/** "2.46 – 2.49": Modify's range at rest (the J-0001 Modify budget, ≤ 40 words); its sentence is behind the price's ⓘ. */
+export function modifyRangeText(bounds = null) {
+  if (!bounds) return null;
+  const a = Math.abs(bounds.lo), b = Math.abs(bounds.hi);
+  return `${n2(Math.min(a, b))} – ${n2(Math.max(a, b))}`;
+}
+
+/** "From 2.46 to 2.49: between the side that fills and the mid. At most the 2 you hold." */
+export function modifyBoundsLine(bounds = null, held = null) {
+  if (!bounds) return null;
+  const a = Math.abs(bounds.lo), b = Math.abs(bounds.hi);
+  return `From ${n2(Math.min(a, b))} to ${n2(Math.max(a, b))}: between the side that fills and the mid.` +
+    `${held ? ` At most the ${held} you hold.` : ""}`;
+}
+
+/** The cancel confirm's question: what a cancel leaves, and that Alpaca has the last word on it. */
+export function cancelQuestion(intent = "open") {
+  return intent === "close"
+    ? "Cancel this closing order? The position stays open, with no close working. It is cancelled when Alpaca reports it so."
+    : "Cancel this opening order? Nothing is bought. It is cancelled when Alpaca reports it so.";
 }

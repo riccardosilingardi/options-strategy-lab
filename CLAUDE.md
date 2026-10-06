@@ -75,7 +75,7 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
   (`T.mut`), with its reason first; "Hide cards that miss" (off) hides it behind the count (`resultsLine()`; on Find's rows `rowsResultsLine()`, "Hide them"). Never
   dropped. A slider filters `findGen`'s output and never re-simulates (`find.test.jsx` checks the memo's deps).
 - Atoms and sizes: `src/ui.jsx` (now with `Info`, the ⓘ, and `Segments`) and the type tokens in `theme.js`. `ui.jsx`,
-  `card.jsx`, `find.jsx`, `orders.jsx`, `positions.jsx`, `navBar.jsx`, and since PR #48 `steps.jsx`, `why.jsx`,
+  `card.jsx`, `find.jsx`, `orders.jsx`, `positions.jsx`, `navBar.jsx`, since PR 3a `positionScreen.jsx`, and since PR #48 `steps.jsx`, `why.jsx`,
   `positionCard.jsx` and `wizard.jsx`, since PR #49 `pro.jsx` and `App.jsx`, since redesign PR 1 `market.jsx` and since
   redesign PR 2 `build.jsx`
   (atoms now include `Sheet` and `Placeholder`), use no `fontSize` literal and define no atom; `ui.test.jsx` fails the build otherwise (only visuals.jsx's drawings and main.jsx's crash screen are left,
@@ -86,7 +86,8 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
 - **The app opens on Find (owner, 5 Oct 2026, round 2).** Home (`WizardOpen`) is gone; a first run is `CapitalOnboarding`,
   then Find; Back on Find leaves the app (nav.js rule 2). Positions to look at are the bottom bar's Positions badge, whose
   spoken name is `statusLine()`; Settings is the gear in `FindHeader`. Find, Saved and the market page draw NO desk header
-  (`chromeless` in App.jsx), and neither does Build since redesign PR 2; Positions, the Journal and Settings keep it until PR 3.
+  (`chromeless` in App.jsx), and neither does Build since redesign PR 2, nor Positions since PR 3a (its own `PositionsHeader`);
+  the Journal and Settings keep it until PR 3b.
 - **The mockups' look (round 2) lives in ui.jsx's atoms**: `IconButton`, `SegmentBar` (Results | Saved, the chain's modes),
   `UnderTabs` (Find's categories, the market's tabs), `FilterChip` (Find's chips, the sheets' choices; ink when off its
   default, never amber), `TextBtn`, and `Sheet` (scrim, grab handle, the value beside the title). Two theme tokens joined in
@@ -140,6 +141,22 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
 - **The Chain tab's tray prices legs through `listCardFigures()`** (handed in from App.jsx) and reaches Build only through
   `buildHandOff()` (`openOnBuild`); at most `MLEG_MAX_LEGS` legs (read, never changed); Build › is blocked when
   `undefinedRiskLegs()` finds an uncovered short. Nothing is sent from the market page.
+- **Every screen is checked against the owner's board itself (redesign PR 3a): `scripts/audit-screen.mjs`.** It mounts
+  docs/mockups/src/<Board>.dc.html beside the whole app on fixtures and compares paired elements by computed style and
+  the board's words. A difference passes only with a `why` — a README/CLAUDE.md rule (`R` in audit-map.mjs) or a
+  "left:" leftover the ROADMAP lists; anything else exits 1. **Adding a screen:** dump both trees
+  (`node scripts/dump-tree.mjs board <Board>` and `… app "<mode>" "tap:sel:text"`), give the app's elements `data-*`
+  hooks, write the board's entry in `scripts/audit-map.mjs` (mode, go, pairs, skipWords with reasons) and its group,
+  run it dark and light, fix every unexplained ✗.
+- **A position has its own screen (redesign PR 3a): `src/positionScreen.jsx`**, opened by `detailsId` (nav.js; its ‹ and
+  Back step back like a sheet). It computes nothing: App.jsx hands it `v` from `positionModels` and positionView.js's
+  generators (`screenHeadline()`, `paysLine()`, `exitPlanRows()`, `turnedLine()`, `recordRows()`, `statusBadge()`). Close at
+  limit is order path 3 unchanged; **"Keep it, write why" is a `keep` entry on the position's timeline**
+  (`keepEntry()` through `appendTimeline()`), refused on a preview — never a new /api/state field. The card's sentence is
+  `cardSentence()`; its exits are `exitLabels()`.
+- **The copilot by place (PRD §1):** every `SKILLS` question in pro.jsx carries `place` (find · build · positions · desk);
+  a screen shows only its own (`skillsFor()`, `BUILD_SKILL_IDS`, `POSITION_SKILL_IDS`). A copilot explains; it never
+  proposes, closes or sends. A position's answers are filed in copilotLog tagged with its ref, plus one timeline line.
 - Plan first, then change surgically: the plan is the standing rule's ("Plan before you execute", above).
 
 ## Files that matter
@@ -189,6 +206,8 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
 - `src/saved.jsx` — Saved's rows (round 2, moved out of App.jsx): When saved / Now, what it would have done.
 - `src/steps.jsx` — navigation chrome: sheets, folds, `DeskCountLine` (`StepNav` removed in PR #48).
 - `src/build.jsx` — Step 3, Build (redesign PR 2): its sections, the review sheet, its three states.
+- `src/positionScreen.jsx` — one position's own screen (redesign PR 3a): what to do now, Keep it, the chart, the exit
+  plan, entry vs now, the record, Alpaca details, the copilot, the Guardian fold.
 - `src/path.js`, `src/handoff.js` — the three-step path (Find → market → Build) and how a trade reaches Build.
 - `src/why.jsx` — the "Why this trade" evidence panel.
 - `src/App.jsx`, `src/pro.jsx` — UI, the order ticket (`OrderTicket`), the desk, `QtyField`.
@@ -263,10 +282,14 @@ All in `RULES`, `src/rules.js`, unless noted.
   preview. JSX tests are
   bundled to CJS, so read source files by repo-relative path, not `import.meta.url`.
 - `node scripts/measure-words.mjs` prints the per-screen word counts and the four rendered surfaces on J-0001.
-- `node scripts/shoot-build.mjs [dir]` photographs Build through the WHOLE app on fixtures (`scripts/build-screens.jsx`:
+- `node scripts/shoot-build.mjs [dir]` photographs Build through the WHOLE app on fixtures (`scripts/app-screens.jsx`, renamed from build-screens.jsx in PR 3a:
   Find → UNG → Build ›, a stub Alpaca, a stub copilot, a fixed clock) at 390×844: at rest, Why, copilot, over the cap,
   review, sent, the three states, More, Edit in chain, light (docs/screens/redesign-pr2/).
-- `node scripts/audit-build.mjs [light]` measures Build against the mockup's own values (getComputedStyle: sizes, weights,
+- `node scripts/audit-screen.mjs <Board|find|market|build|pr3|shipped|all> [dark,light] [--quiet] [--no-shots]` checks
+  each screen against the owner's board (docs/mockups) on the whole app on fixtures; exits 1 on an unexplained
+  difference; side-by-side pictures in docs/screens/redesign-pr3/audit/. `node scripts/shoot-positions.mjs [dir]`
+  photographs Positions, a position's screen and Orders on the `+book` fixture (scripts/book-fixture.js).
+- `node scripts/audit-build.mjs [light]` (now `audit-screen.mjs build`) measures Build against the mockup's own values (getComputedStyle: sizes, weights,
   borders, radii, paddings, taps, theme colours) and its words, on the same harness; exits 1 on any difference.
 - `node scripts/shoot-screens.mjs [dir]` photographs Find, a sheet, Saved and the market page's tabs at 390×844 in the
   pre-installed headless Chromium, on findB's fixtures (`scripts/screens.jsx`), and prints page and card heights.

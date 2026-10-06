@@ -66,14 +66,19 @@ check("THE ⓘ SHOWS ITS LABEL (PR #49, 0c): \"How the numbers fit ⓘ\", and th
   eq(renderToStaticMarkup(<Info label="x">{null}</Info>), "", "nothing to say, no ⓘ");
 });
 
-check("…AND `iconOnly` IS USED ONLY INSIDE A FIGURE TILE: the account strip's cells and the card's tiles", () => {
-  const allowed = new Set(["positions.jsx", "card.jsx", "ui.jsx"]);
+check("…AND `iconOnly` IS USED ONLY INSIDE A FIGURE TILE: the card's tiles, and HOLD's badge, which is its label", () => {
+  const allowed = new Set(["card.jsx", "ui.jsx", "positionCard.jsx"]);
   for (const f of readdirSync("src")) {
     if (!/\.jsx?$/.test(f) || /\.test\./.test(f)) continue;
     if (/\biconOnly\b/.test(readFileSync(`src/${f}`, "utf8")) && !allowed.has(f)) throw new Error(`${f} uses iconOnly outside a tile`);
   }
-  // In those two files it sits in the tile itself: the strip's `cell` and the card's `CardFigure`.
-  if (!/const cell = [\s\S]{0,400}<Info iconOnly/.test(readFileSync("src/positions.jsx", "utf8"))) throw new Error("positions.jsx: iconOnly outside the cell");
+  // Redesign PR 3 (the board "Positions"): the account strip's ⓘ is its own small button in each tile, named "What
+  // equity is", with ONE sentence under the three tiles; and the Positions card's one ⓘ sits on HOLD's badge.
+  if (!/const cell = [\s\S]{0,500}aria-label=\{`What \$\{k\.toLowerCase\(\)\} is`\}/.test(readFileSync("src/positions.jsx", "utf8"))) throw new Error("positions.jsx: the ⓘ is outside the cell");
+  const pc = readFileSync("src/positionCard.jsx", "utf8");
+  for (const m of pc.matchAll(/<Info iconOnly/g)) {
+    if (pc.lastIndexOf("<ActionBadge", m.index) < m.index - 300) throw new Error("positionCard.jsx: iconOnly away from the badge");
+  }
   const card = readFileSync("src/card.jsx", "utf8");
   for (const m of card.matchAll(/iconOnly/g)) {
     const before = card.slice(0, m.index);
@@ -157,7 +162,9 @@ const MIGRATED = ["src/ui.jsx", "src/card.jsx", "src/find.jsx", "src/orders.jsx"
   // Redesign PR 2: Build is written on the atoms and tokens from its first line.
   "src/build.jsx",
   // Round 2: Saved's rows, moved out of App.jsx.
-  "src/saved.jsx"];
+  "src/saved.jsx",
+  // Redesign PR 3: the position's own screen is written on the atoms and tokens from its first line.
+  "src/positionScreen.jsx"];
 const stripped = (f) => readFileSync(f, "utf8").replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
 const ATOMS = ["Btn", "Panel", "Lbl", "Label", "Stat", "Chip", "Fold", "RangeField", "Note", "NumberInput", "TextArea", "CheckField", "Info", "Segments",
   // Redesign PR 1: the bottom sheet and the placeholder are atoms too.

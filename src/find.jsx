@@ -43,9 +43,9 @@ import { money, chanceText, NO_CEILING, noCeilingNote, noCeilingRankNote, season
   POSITIVE_FUTURE_TOGGLE, rowsResultsLine, missReasonLine, nothingFits, nothingFitsLine, allMissLine, overLimitNote,
   showMissesCta, RESET_ALL_FILTERS, CATEGORY_ALL, FIND_CHIPS, FIND_SHEET_TITLES, chipText, chipOffDefault, anyChipOff,
   showRowsCta, HIDE_ROWS, SHOW_ROWS, RESET_FILTERS, COLUMN_MARKET, columnHeadText, rowRiskText, DIRECTION_TAGS,
-  rowSubtitleText, ROW_READING, findReadingLine, rowFailedText, ROW_NO_BOARD, staleBannerLine, RETRY,
+  rowSubtitleText, ROW_READING, findReadingLine, rowFailedText, ROW_NO_BOARD, staleBannerLine, staleStatusLine, staleFailLine, RETRY,
   SHOW_FLAGGED_TOGGLE, howConnectLabel, HOW_CONNECT_STEPS, CARD_LABELS, ARIA,
-  FIND_HEADING, refreshAria, SETTINGS_WORD, FIND_SEGMENTS_ARIA,
+  FIND_HEADING, refreshAria, SETTINGS_WORD, FIND_SEGMENTS_ARIA, RESET_SHEET,
 } from "./rules.js";
 
 const FS = TYPE.size, FW = TYPE.weight, LH = TYPE.line;
@@ -60,28 +60,42 @@ export function FindHeader({ seg = "results", onSeg, savedN = 0, nMarkets = 0, b
   status = null, stale = null }) {
   return (
     <header data-find-header>
-      <div style={{ display: "flex", alignItems: "center", padding: "12px 8px 0 16px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 8px 0 16px" }}>
         <h1 data-view-heading tabIndex={-1} style={{ ...sans, flex: 1, fontSize: FS.xl, fontWeight: FW.bold, lineHeight: LH.tight, color: T.ink,
           margin: 0, outline: "none" }}>{FIND_HEADING}</h1>
-        <IconButton label={refreshAria(nMarkets)} onClick={onRefresh} disabled={busy} aria-busy={busy || undefined}>
-          <RefreshCw size={20} strokeWidth={1.75} aria-hidden="true" />
-        </IconButton>
-        <IconButton label={SETTINGS_WORD} pressed={settingsOn} onClick={onSettings}>
-          <Settings size={20} strokeWidth={1.75} aria-hidden="true" />
-        </IconButton>
+        <span style={{ display: "flex", gap: 2 }}>
+          <IconButton label={refreshAria(nMarkets)} onClick={onRefresh} disabled={busy} aria-busy={busy || undefined}>
+            <RefreshCw size={20} strokeWidth={1.75} aria-hidden="true" />
+          </IconButton>
+          <IconButton label={SETTINGS_WORD} pressed={settingsOn} onClick={onSettings}>
+            <Settings size={20} strokeWidth={1.75} aria-hidden="true" />
+          </IconButton>
+        </span>
       </div>
       {stale && stale.stale ? (
-        /* STALE: the status line becomes round 1's banner, with Retry (the same Refresh). */
-        <div role="status" data-stale style={{ ...sans, fontSize: FS.xs, lineHeight: LH.body, color: T.ink, margin: "2px 16px 6px", padding: "6px 6px 6px 12px",
-          border: `1px solid ${T.amber}`, borderRadius: 10, display: "flex", gap: 8, alignItems: "center" }}>
-          <span style={{ flex: 1, minWidth: 0 }}>{staleBannerLine({ closeDay: stale.closeDay, failedAt: stale.failedAt })}</span>
-          <TextBtn color={T.amber} height={TAP} onClick={stale.onRetry} style={{ fontWeight: FW.bold }}>{RETRY}</TextBtn>
-        </div>
+        /* STALE (the mockup "Find · stale"): the status line turns amber with a dot, and a banner under it says why, with
+           Retry (the same Refresh). */
+        <>
+          <div data-find-status style={{ ...sans, fontSize: FS.xs, color: T.amber, padding: "0 16px 8px", lineHeight: LH.body,
+            display: "flex", alignItems: "center", gap: 6 }}>
+            <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: "50%", background: T.amber, flexShrink: 0 }} />
+            <span>{staleStatusLine({ closeDay: stale.closeDay })}</span>
+          </div>
+          <div role="status" data-stale style={{ ...sans, fontSize: FS.sm, lineHeight: LH.body, color: T.ink, margin: "0 16px 8px", padding: "10px 12px",
+            background: T.panel, border: `1px solid ${T.amber}`, borderRadius: 10, display: "flex", gap: 10, alignItems: "center" }}>
+            <span style={{ flex: 1, minWidth: 0 }}>
+              {staleFailLine(stale.failedAt) && <b>{staleFailLine(stale.failedAt)} </b>}
+              {staleBannerLine({ closeDay: stale.closeDay, closeWeekday: stale.closeWeekday })}
+            </span>
+            <button onClick={stale.onRetry} style={{ ...sans, flexShrink: 0, minHeight: TAP, padding: "0 12px", borderRadius: 10, cursor: "pointer",
+              fontSize: FS.sm, fontWeight: FW.bold, color: T.ink, background: "transparent", border: `1px solid ${T.field}` }}>{RETRY}</button>
+          </div>
+        </>
       ) : (
         <div data-find-status style={{ ...sans, fontSize: FS.xs, color: T.mut, padding: "0 16px 6px", lineHeight: LH.body }}>{status}</div>
       )}
       <SegmentBar label={FIND_SEGMENTS_ARIA} value={seg} onChange={onSeg} style={{ margin: "0 16px 6px" }}
-        items={[{ id: "results", label: "Results" }, { id: "saved", label: "Saved", count: savedN }]} />
+        items={[{ id: "results", label: "Results", count: nMarkets || null }, { id: "saved", label: "Saved", count: savedN }]} />
     </header>
   );
 }
@@ -129,7 +143,13 @@ export function FindStep({
   /** A sheet's current value, beside its title (round 2): the chip's own value. */
   const sheetValue = (id) => { const p = chipParts(id, chipText(id, st)); return p.value || p.name; };
   // Every sheet ends with a live "Show N of M": full width, amber, 48px (the mockups).
-  const footer = <Btn color={T.amber} onClick={closeSheet} style={{ width: "100%", minHeight: 48, borderRadius: 10, fontSize: FS.md }}>{showRowsCta(n, rows.length)}</Btn>;
+  // …and Reset beside it, every chip back to its default (the mockup's sheet footer: a quiet Reset, the amber Show).
+  const footer = (
+    <div data-sheet-footer style={{ display: "flex", gap: 8 }}>
+      <ActionBtn onClick={onReset} style={{ minHeight: 48 }}>{RESET_SHEET}</ActionBtn>
+      <ActionBtn primary onClick={closeSheet} style={{ flex: 1, minHeight: 48, fontSize: FS.md }}>{showRowsCta(n, rows.length)}</ActionBtn>
+    </div>
+  );
   const sharedControls = { request, onChange: onRequest, readings, sentiments, direction: find.dir,
     onDirection: (d) => setFind((f) => ({ ...f, dir: d })), horizon: find.horizon,
     onHorizon: (h) => setFind((f) => ({ ...f, horizon: h })), limits, onLimit, bare: true };
@@ -157,7 +177,8 @@ export function FindStep({
         {FIND_CHIPS.map((c) => ({ c, txt: chipText(c.id, st) })).map(({ c, txt }) => {
           const parts = chipParts(c.id, txt);
           return (
-            <FilterChip key={c.id} off={chipOffDefault(c.id, st)} strong={c.id === "order"} name={parts.name} value={parts.value} valueMono={parts.mono}
+            <FilterChip key={c.id} off={chipOffDefault(c.id, st)} strong={c.id === "order"} name={parts.name}
+              value={c.id === "positive" ? (find.positiveOnly ? "✓" : null) : parts.value} valueMono={parts.mono} opens={c.sheet}
               label={c.sheet ? `${txt}: change` : POSITIVE_FUTURE_TOGGLE}
               onClick={() => (c.sheet ? onSheet(`find:${c.id}`) : setFind((f) => ({ ...f, positiveOnly: !f.positiveOnly })))}>
               {c.id === "positive" && positiveHidden ? <span style={mono}>{` · ${positiveHidden}`}</span> : null}
@@ -167,7 +188,7 @@ export function FindStep({
       </div>
 
       {/* THE SUMMARY LINE: "4 of 10 fit · 6 dimmed" left; Hide them / Show them and Reset right. */}
-      <div style={{ display: "flex", gap: 6, alignItems: "center", justifyContent: "space-between", padding: "0 12px 2px 16px", minHeight: 36 }}>
+      <div data-find-summary style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "space-between", padding: "0 12px 2px 16px", minHeight: 36 }}>
         <span aria-live="polite" style={{ ...sans, fontSize: FS.xs, color: T.mut }}>{rowsResultsLine(n, m, !!find.hideMisses)}</span>
         <span style={{ display: "inline-flex", alignItems: "center" }}>
           {m > 0 && <TextBtn onClick={() => setFind((f) => ({ ...f, hideMisses: !f.hideMisses }))}>{find.hideMisses ? SHOW_ROWS : HIDE_ROWS}</TextBtn>}
@@ -175,7 +196,7 @@ export function FindStep({
         </span>
       </div>
       {/* While markets are still being read and some rows are in (with none in, "Nothing today" below says it). */}
-      {reading && findGen.items.length > 0 && <Note color={T.dim} role="status" style={pad}>{findReadingLine(find.markets.length, doneN)}</Note>}
+      {reading && findGen.items.length > 0 && <ReadingLine text={findReadingLine(find.markets.length, doneN)} frac={find.markets.length ? doneN / find.markets.length : 0} />}
 
       {/* SIGNALS THAT LANDED AND ADDED A FAMILY, one line each (PR #48, TASK 3). */}
       {signalLines.length > 0 && <Note color={T.blue} role="status" style={{ ...pad, marginTop: 4 }}>{signalLines.join(" · ")}</Note>}
@@ -191,23 +212,24 @@ export function FindStep({
       )}
 
       {/* NOTHING FITS: the filter that binds, the cheapest card here, ONE fix that never passes a limit. */}
+      {/* (The mockup "Find · nothing fits": no panel, a rule above, 28px of air, the line in 18 bold, the cheapest card, two
+          actions.) */}
       {nf && (
-        <div role="status" style={{ ...sans, fontSize: FS.sm, lineHeight: LH.body, color: T.ink, margin: "8px 16px", padding: "10px 12px",
-          border: `1px solid ${T.line}`, background: T.panel, borderRadius: 10 }}>
-          <div style={{ fontWeight: FW.bold }}>{nothingFitsLine(nf.control)}</div>
-          <div style={{ color: T.mut }}>{allMissLine(rows.length, nf.cheapest)}</div>
-          {nf.overLimit != null && <div style={{ color: T.amber }}>{overLimitNote(nf.overLimit)}</div>}
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
-            {nf.fix ? <Btn small color={T.amber} onClick={() => onRequest(nf.fix.patch)}>{nf.fix.label}</Btn>
-              : <Btn small color={T.amber} onClick={onReset}>{RESET_ALL_FILTERS}</Btn>}
-            {find.hideMisses && <Btn small ghost color={T.blue} onClick={() => setFind((f) => ({ ...f, hideMisses: false }))}>{showMissesCta(m)}</Btn>}
+        <div role="status" data-nothing-fits style={{ ...sans, display: "flex", flexDirection: "column", gap: 12, color: T.ink, padding: "28px 16px",
+          borderTop: `1px solid ${T.line}` }}>
+          <p style={{ margin: 0, fontSize: FS.lg, fontWeight: FW.bold, lineHeight: LH.tight, color: T.ink }}>{nothingFitsLine(nf.control)}</p>
+          <p style={{ margin: 0, fontSize: FS.sm, lineHeight: LH.body, color: T.body }}>{allMissLine(rows.length, nf.cheapest)}</p>
+          {nf.overLimit != null && <p style={{ margin: 0, fontSize: FS.sm, lineHeight: LH.body, color: T.amber }}>{overLimitNote(nf.overLimit)}</p>}
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <ActionBtn primary onClick={() => (nf.fix ? onRequest(nf.fix.patch) : onReset())}>{nf.fix ? nf.fix.label : RESET_ALL_FILTERS}</ActionBtn>
+            {find.hideMisses && <ActionBtn onClick={() => setFind((f) => ({ ...f, hideMisses: false }))}>{showMissesCta(m)}</ActionBtn>}
           </div>
         </div>
       )}
 
       {/* THE COLUMN HEAD, and the ⓘ "How <TK>'s numbers connect" for the top row's market (a sheet, round 2). */}
       {(shown.length > 0 || waiting.length > 0) && (
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, minHeight: 36, padding: "0 8px 0 16px",
+        <div data-find-colhead style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, minHeight: 36, padding: "0 8px 0 16px",
           borderTop: `1px solid ${T.line}`, ...sans, fontSize: FS.xs, color: T.mut }}>
           <span>{COLUMN_MARKET}</span>
           <span style={{ display: "inline-flex", alignItems: "center" }}>
@@ -231,12 +253,25 @@ export function FindStep({
           confidence (HowWorkedOut), the direction (`signalDirection()`'s own arithmetic), the strategy (its family and
           the size the budget buys), the chance and the future avg (the card's own figures) — then "How the numbers fit".
           A sheet since round 2 (the mockups); one tap away, so the word counter does not score it at rest. */}
-      <Sheet open={sheetId === "connect" && !!top} title={top ? howConnectLabel(top.tk) : ""} onClose={closeSheet}>
+      <Sheet open={sheetId === "connect" && !!top} title={top ? howConnectLabel(top.tk) : ""} onClose={closeSheet}
+        sub={top ? rowSubtitleText(top.x.name, top.x.expKey) : null} subMono>
         {top && (
           <div style={{ ...sans, fontSize: FS.sm, lineHeight: LH.body, color: T.body }}>
-            <ol style={{ margin: 0, paddingLeft: 18 }}>
+            {/* FIVE NUMBERED STEPS (the mockup "How the numbers connect"): the number in a ring, the step's name, its figure
+                in mono, and the sentence under them. */}
+            <ol style={{ margin: 0, padding: 0, listStyle: "none" }}>
               {howConnectSteps(top.x, (findGen.boards[top.tk] || {}).signal || null, sizes.get(top.x.key) || null).map((t, i) => (
-                <li key={HOW_CONNECT_STEPS[i]} style={{ marginTop: 4 }}><b>{HOW_CONNECT_STEPS[i]}.</b> {t}</li>
+                <li key={HOW_CONNECT_STEPS[i]} style={{ display: "flex", gap: 10, padding: "10px 0", borderTop: `1px solid ${T.line}` }}>
+                  <span style={{ ...mono, flex: "0 0 26px", width: 26, height: 26, boxSizing: "border-box", borderRadius: "50%", border: `1px solid ${T.field}`,
+                    display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: FS.xs, fontWeight: FW.bold, color: T.ink }}>{i + 1}</span>
+                  <div style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
+                    <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+                      <span data-step-name style={{ ...sans, fontSize: FS.sm, fontWeight: FW.bold, color: T.ink }}>{HOW_CONNECT_STEPS[i]}</span>
+                      {t.value && <span data-step-value style={{ ...mono, fontSize: FS.md, fontWeight: FW.bold, color: T.ink }}>{t.value}</span>}
+                    </div>
+                    <p data-step-text style={{ margin: 0, fontSize: FS.sm, lineHeight: LH.body, color: T.body }}>{t.text}</p>
+                  </div>
+                </li>
               ))}
             </ol>
             {top.x.fused && <HowWorkedOut fused={top.x.fused} />}
@@ -324,12 +359,13 @@ export function FindStep({
 }
 
 /** A chip's words, split for the filter chip (round 2): a name in mut and a value in ink ("Budget $500" → Budget · $500;
- *  "Chance any" → Chance · any). "⇅ Future avg", "Signals decide" and "Avg > 0" stay whole. Never new words: the text is
- *  `chipText()`'s. `mono` says whether the value is a figure (then it is set in mono). */
+ *  "Chance any" → Chance · any; "⇅ Future avg" → ⇅ · Future avg; "Direction Signals" → Direction · Signals, the mockups').
+ *  "Avg > 0" stays whole. Never new words: the text is `chipText()`'s. `mono` says whether the value is a figure (then it
+ *  is set in mono; a word stays sans, CLAUDE.md, where the mockup sets it in mono). */
 export function chipParts(id, txt) {
   const t = String(txt || "");
   const sp = t.indexOf(" ");
-  if (["order", "direction", "positive"].includes(id) || sp < 0) return { name: t, value: null, mono: false };
+  if (id === "positive" || sp < 0) return { name: t, value: null, mono: false };
   const value = t.slice(sp + 1);
   return { name: t.slice(0, sp), value, mono: /\d/.test(value) };
 }
@@ -352,14 +388,14 @@ export function MarketRow({ row, sd = null, fig, bars = NO_BARS, saved = false, 
         style={{ alignSelf: "center", fontSize: FS.lg }}>{saved ? "★" : "☆"}</IconButton>
       <button onClick={onOpen} aria-label={ARIA.openMarket(x.tk)} data-row-button
         style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 10, background: "transparent", border: "none",
-          cursor: "pointer", padding: "8px 16px 8px 4px", textAlign: "left", minHeight: 66, borderRadius: 0 }}>
+          cursor: "pointer", padding: "10px 16px 10px 2px", textAlign: "left", minHeight: 66, borderRadius: 0 }}>
         <span style={{ flex: "1 1 0", minWidth: 0 }}>
           <span style={{ display: "flex", gap: 6, alignItems: "center", minWidth: 0 }}>
-            <span style={{ ...mono, fontSize: FS.md, fontWeight: FW.bold, color: ink, lineHeight: LH.tight }}>{x.tk}</span>
-            {dir && <span style={{ ...sans, fontSize: FS.xs, lineHeight: "18px", padding: "0 6px", borderRadius: 6, whiteSpace: "nowrap",
+            <span data-row-ticker style={{ ...mono, fontSize: FS.md, fontWeight: FW.bold, color: ink, lineHeight: LH.tight }}>{x.tk}</span>
+            {dir && <span data-row-dir style={{ ...sans, fontSize: FS.xs, lineHeight: "18px", padding: "0 6px", borderRadius: 6, whiteSpace: "nowrap",
               border: `1px solid ${muted ? T.line : T.field}`, color: muted ? T.dim : DIR_COLOR[dir] }}>{DIRECTION_TAGS[dir]}</span>}
           </span>
-          <span style={{ ...sans, display: "block", fontSize: FS.xs, lineHeight: LH.body, color: T.mut, marginTop: 2,
+          <span data-row-sub style={{ ...sans, display: "block", fontSize: FS.xs, lineHeight: LH.body, color: T.mut, marginTop: 2,
             overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {muted ? row.misses.map(missReasonLine).filter(Boolean).join(" · ") : rowSubtitleText(x.name, x.expKey)}
           </span>
@@ -424,15 +460,36 @@ export function ComparePanel({ compare, showCompare, compareNote, onTickCompare,
   );
 }
 
-/** The five steps' numbers for one row, each read from its own function (the ⓘ beside the column head). */
+/** The five steps for one row, each { value, text } read from its own function (the ⓘ beside the column head). */
 function howConnectSteps(x, sd, size) {
   const f = x.fused;
   const ft = futureTile(futureFigures(x.lf.mc, x.lf.aFill, size && size.ok ? size.n : null, x.expKey));
   return [
-    f ? `${f.score >= 0 ? "+" : "−"}${Math.abs(f.score)} (how, below)` : "still being read",
-    f ? `${f.confidence} of 100 (how, below)` : "still being read",
-    sd ? sd.why : "still being read",
-    `${x.name} (${x.sent}) · ${size && size.ok ? sizeLine(size) : "not sized"}`,
-    `${CARD_LABELS.chance.toLowerCase()} ${chanceText(x.lf.pop)} (${x.lf.mc ? chanceBasisLabel(x.lf.mc) : "not worked out"}) · future avg ${ft.value}${ft.lines.length ? `, ${ft.lines.join(", ")}` : ""}`,
+    { value: f ? `${f.score >= 0 ? "+" : "−"}${Math.abs(f.score)}` : null, text: f ? "How it is worked out is below." : "Still being read." },
+    { value: f ? String(f.confidence) : null, text: f ? "Of 100. How it is worked out is below." : "Still being read." },
+    { value: null, text: sd ? sd.why : "Still being read." },
+    { value: null, text: `${x.name} (${x.sent}) · ${size && size.ok ? sizeLine(size) : "not sized"}` },
+    { value: chanceText(x.lf.pop), text: `${CARD_LABELS.chance.toLowerCase()} (${x.lf.mc ? chanceBasisLabel(x.lf.mc) : "not worked out"}) · future avg ${ft.value}${ft.lines.length ? `, ${ft.lines.join(", ")}` : ""}` },
   ];
+}
+
+/** "Reading 10 markets · 3 done …" and a 3px bar of how many are in (the mockup "Find · loading"). */
+function ReadingLine({ text, frac }) {
+  return (
+    <div role="status" data-find-reading style={{ display: "flex", flexDirection: "column", gap: 6, padding: "0 16px 8px" }}>
+      <span style={{ ...sans, fontSize: FS.xs, color: T.mut, lineHeight: LH.body }}>{text}</span>
+      <span aria-hidden="true" style={{ display: "block", height: 3, borderRadius: 2, background: T.line, overflow: "hidden" }}>
+        <span style={{ display: "block", height: 3, width: `${Math.round(Math.max(0, Math.min(1, frac)) * 100)}%`, background: T.amber }} />
+      </span>
+    </div>
+  );
+}
+
+/** The mockups' two action buttons (Find's states, Saved): amber primary or a quiet outline, 13 bold, 44 tall. */
+export function ActionBtn({ primary = false, onClick, children, style, ...rest }) {
+  return (
+    <button onClick={onClick} {...rest} style={{ ...sans, minHeight: TAP, padding: "0 16px", borderRadius: 10, cursor: "pointer", fontSize: FS.sm,
+      fontWeight: FW.bold, lineHeight: LH.tight, color: primary ? T.onAccent : T.ink, background: primary ? T.amber : "transparent",
+      border: primary ? "none" : `1px solid ${T.field}`, ...style }}>{children}</button>
+  );
 }

@@ -8,7 +8,7 @@ import { RULES, ruleBadge, takeProfitLabel, takeProfitTarget, scaleOutLabel, sto
   closeMarket, closeLimitPrice, closeLimitNote, closeUnreadableNote,
   legBook, sizeSkippedNote, onTick, netFromLegs, limitCeilingNote, rewardRisk,
   contractListing, unlistedContractNote, unquotedLegNote, unquotedLegPointer, marketOrderNote,
-  taCopilotPrompt, TA_QUESTIONS, TA_DISCLAIMER,
+  taCopilotPrompt, TA_QUESTIONS, TA_DISCLAIMER, TA_NEVER_PROPOSES, TA_OWN_QUESTION,
   ivProvenance, noRecordNote, copilotOverreach, copilotOverreachNote } from "./rules.js";
 import { contractsOf, positionSize, bookPositions, positionStage, autopilotHorizonNote, autopilotVolNote, positionForHolding, journalPnlTotal, scoredJournal } from "./journal.js";
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, LineStyle } from "lightweight-charts";
@@ -1164,21 +1164,43 @@ export function Markdown({ text, style }) {
   return <div style={{ fontSize: FS.sm, color: T.body, ...style }}>{blocks}</div>;
 }
 
-/** The opening every Build question carries (redesign PR 2): the copilot explains; it never proposes or places a trade. */
+/** The opening every Build and Positions question carries (redesign PR 2; PR 3): the copilot explains; it never proposes
+ *  or places a trade. */
 export const COPILOT_EXPLAIN_ONLY = "You explain; you never propose a trade, a structure, a size or an order, and you never tell me to buy, sell or close.";
+/**
+ * THE COPILOT, BY PLACE (owner, 6 Oct 2026: "It depends where it is. In Find, a preset analyses the cards and, under the
+ * filters set, makes objective comparisons that highlight or suggest the best strategy. In Build it explains the
+ * strategy. In Positions it analyses the position, the exit strategy, where you started from."). Each question names
+ * its `place`; a screen shows its own place's questions and no other. PRD §1, "Copilots", holds the limits.
+ *   find       ranks and highlights AMONG THE CARDS THE APP BUILT under the filters set, citing each card's own figures
+ *              and naming the filters; never a structure that is not a card, never a size past the gate, never a send.
+ *              (Its place on Find is redesign PR 4: no screen offers it yet.)
+ *   build      explains the loaded trade.
+ *   positions  reviews the position against its entry and its exit plan.
+ *   desk       the older general questions (news across the radar), kept where they were (More on this trade, the desk).
+ */
 export const SKILLS = [
-  { id: "pretrade", label: "Pre-trade analysis", prompt: `Run the pre-trade analysis of the current strategy: structure, Greeks, risk/reward, breakevens against support and resistance, seasonal alignment and news. Finish with a GO/NO-GO checklist and a position size within the per-trade limit (${perTradeCapLabel()}).` },
-  { id: "positions", label: "Position review", prompt: `Review the open positions against the rules (${ruleBadge()}): for each one give → HOLD / CLOSE / ROLL with the reasoning and the levels to watch. Remember the ${stopLossLabel()} rule is a warning, never an automatic close.` },
-  { id: "news", label: "News impact", prompt: "Analyse the tagged news in context: which items affect my positions and the underlyings on the radar? Separate noise from signal, with cause→effect and a time horizon." },
-  { id: "radar", label: "Opportunity radar", prompt: `From the seasonal scanner and the weather signals, propose the 2 best opportunities of this week with a suggested structure (relative strikes, ~${RULES.targetEntryDTE} DTE), the thesis, the risk and the entry trigger. Nothing below ${RULES.minEntryDTE} DTE at entry: the risk gate refuses it.` },
+  { id: "pretrade", place: "build", label: "Pre-trade analysis", prompt: `${COPILOT_EXPLAIN_ONLY} Explain the current strategy before it is sent: its structure, its Greeks, its risk and reward, its breakevens against support and resistance, how the season lines up with it, and the news that touches it. Then read back the risk gate's checks as the app worked them out (the review checklist in the context: each one as passed or failed, never your own verdict) and the size the app sized, with its share of the per-trade limit (${perTradeCapLabel()}). Do not say GO or NO-GO and do not suggest another size: say what each check means for this trade.` },
+  { id: "news", place: "desk", label: "News impact", prompt: "Analyse the tagged news in context: which items affect my positions and the underlyings on the radar? Separate noise from signal, with cause→effect and a time horizon." },
+  { id: "radar", place: "find", label: "Compare the cards", prompt: `From ONLY the cards the app built under the filters I set (findCards and findFilters in the context), compare them and highlight the best one or two for those filters. Name the filters first. For every card you mention, cite its own figures as the app printed them: you risk, max profit, chance, return on risk, future avg and past yrs. Rank only what is in the list: never propose a structure, a strike or an expiry that is not one of these cards, never a size past the per-trade limit (${perTradeCapLabel()}), and never tell me to send an order. If no card fits the filters, say so and which filter binds.` },
   /* REDESIGN PR 2 (owner's mockup "3 · Build"): three questions about the LOADED trade. Each one tells the model it
      explains and never proposes a trade (PRD §1: copilots explain; they never propose or place one). */
-  { id: "wrong", label: "What would make it wrong?", prompt: `${COPILOT_EXPLAIN_ONLY} About the current strategy only: what would make it wrong? Name the price levels, the dates (the expiry and the ${RULES.exitDTE}-day exit) and the events before expiry that would turn it against me, and which of the four factors (seasonality, the price trend, weather, news) would have to change. Explain what each would mean for this trade.` },
-  { id: "compare", label: "Compare with the other cards", prompt: `${COPILOT_EXPLAIN_ONLY} Compare the current strategy with the other cards the app lists for the same market (otherCards in the context): what each one bets on, where its risk and its chance differ, and what the trade-off between them is. Do not rank them and do not say which to take: explain the differences.` },
-  { id: "newsmove", label: "News that could move it", prompt: `${COPILOT_EXPLAIN_ONLY} From the tagged news in the context, which items could move the current strategy's market before its expiry, in which direction, and why? Separate noise from signal, with cause and effect and a time horizon, and say what each would do to this trade.` },
+  { id: "wrong", place: "build", label: "What would make it wrong?", prompt: `${COPILOT_EXPLAIN_ONLY} About the current strategy only: what would make it wrong? Name the price levels, the dates (the expiry and the ${RULES.exitDTE}-day exit) and the events before expiry that would turn it against me, and which of the four factors (seasonality, the price trend, weather, news) would have to change. Explain what each would mean for this trade.` },
+  { id: "compare", place: "build", label: "Compare with the other cards", prompt: `${COPILOT_EXPLAIN_ONLY} Compare the current strategy with the other cards the app lists for the same market (otherCards in the context): what each one bets on, where its risk and its chance differ, and what the trade-off between them is. Do not rank them and do not say which to take: explain the differences.` },
+  { id: "newsmove", place: "build", label: "News that could move it", prompt: `${COPILOT_EXPLAIN_ONLY} From the tagged news in the context, which items could move the current strategy's market before its expiry, in which direction, and why? Separate noise from signal, with cause and effect and a time horizon, and say what each would do to this trade.` },
+  /* REDESIGN PR 3 (TASK 3): the position's screen asks about ONE open position (position in the context): its entry,
+     its exit plan, what has changed since. They replace PR #38's "Position review", which asked for HOLD / CLOSE / ROLL
+     on every position at once. They review; they never close, roll or open anything. */
+  { id: "posReview", place: "positions", label: "Review this position", prompt: `${COPILOT_EXPLAIN_ONLY} About this one open position only (position in the context): where does it stand against its entry and against its exit plan? Read its profit now against the take-profit target, its days left against the ${RULES.exitDTE}-day time exit, and its loss against the stop warning (${stopLossLabel()}, a warning, never an automatic close). Say which exit is nearest and what would have to happen for it to be reached. Do not tell me to close or to keep it: explain where it is.` },
+  { id: "posExit", place: "positions", label: "The exit from here", prompt: `${COPILOT_EXPLAIN_ONLY} About this one open position (position in the context): explain its exit plan from today — the take-profit target, the ${RULES.exitDTE}-day time exit and its date, the stop warning — what a close at a limit would cost against the book in the context (bid, mid, ask), and what each exit would leave on the record. The exit rules were fixed at entry: explain them, do not change them.` },
+  { id: "posSince", place: "positions", label: "Since I opened it", prompt: `${COPILOT_EXPLAIN_ONLY} About this one open position (position in the context): what has changed since I opened it? Compare the figures at entry with now (you risk, max profit, chance, return on risk) and the four factors at entry with now (seasonality, the price trend, weather, news), name each reason I opened it that has turned and what that means for this position. Quote only the figures in the context.` },
 ];
 /** The four questions Build's copilot shows (owner's mockup), in order; the rest of SKILLS stay where they were. */
 export const BUILD_SKILL_IDS = Object.freeze(["pretrade", "wrong", "compare", "newsmove"]);
+/** The three a position's screen asks (redesign PR 3, TASK 3), in order. */
+export const POSITION_SKILL_IDS = Object.freeze(["posReview", "posExit", "posSince"]);
+/** The questions a place shows: never another place's. */
+export const skillsFor = (place) => SKILLS.filter((s) => s.place === place);
 /**
  * Pull the text deltas out of one or more SSE frames.
  *
@@ -1363,7 +1385,7 @@ export async function askAI(_key, messages, contextStr, onDelta, system = SYSTEM
   return (j.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
 }
 export function buildContext(ctx) {
-  const { store, scan, news, ticker, legs, expKey, A, spot, seasonalSrc, otherCards = null } = ctx;
+  const { store, scan, news, ticker, legs, expKey, A, spot, seasonalSrc, otherCards = null, reviewChecks = null, sized = null, position = null } = ctx;
   return JSON.stringify({
     date: new Date().toISOString().slice(0, 10),
     currentTicker: ticker,
@@ -1402,6 +1424,12 @@ export function buildContext(ctx) {
     // THE OTHER CARDS FOR THIS MARKET (redesign PR 2, "Compare with the other cards"): Find's own figures, read, never
     // recomputed. Null when the caller did not hand any.
     otherCards: Array.isArray(otherCards) ? otherCards : null,
+    // THE GATE'S CHECKS AND THE SIZE THE APP SIZED (redesign PR 3, "Pre-trade analysis" explains them; it never decides
+    // them): the review sheet's own rows, read. Null when the caller did not hand them.
+    reviewChecklist: Array.isArray(reviewChecks) ? reviewChecks.map((c) => ({ check: c.text, value: c.value ?? null, passed: c.ok ?? null })) : null,
+    sizedByTheApp: sized || null,
+    // ONE OPEN POSITION (redesign PR 3, the position's screen): its entry, its exit plan, now — the screen's own figures.
+    position: position || null,
   });
 }
 /**
@@ -1484,10 +1512,16 @@ export function TaCopilot({ ticker, bars, structure, convo, setConvo, onAnalysis
     }
   };
 
+  const mk = look === "market";
   return (
-    <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${T.line}` }}>
+    /* ON THE MARKET PAGE (the mockup "Market · Overview"): a panel, the heading in small capitals, the questions one per
+       line, the question box with its blue send, the promise under it. Elsewhere, as it was. */
+    <section data-chart-copilot={mk ? "true" : undefined} aria-label={mk ? "Ask about this chart" : undefined}
+      style={mk ? { background: T.panel, border: `1px solid ${T.line}`, borderRadius: 12, padding: 14, display: "flex", flexDirection: "column", gap: 10 }
+        : { marginTop: 12, paddingTop: 10, borderTop: `1px solid ${T.line}` }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-        <Label><Sparkles size={11} style={{ verticalAlign: "-1px" }} /> ASK ABOUT THIS CHART</Label>
+        {mk ? <h2 style={{ ...sans, margin: 0, fontSize: FS.xs, fontWeight: FW.bold, letterSpacing: "0.08em", color: T.mut, lineHeight: LH.tight }}>ASK ABOUT THIS CHART</h2>
+          : <Label><Sparkles size={11} style={{ verticalAlign: "-1px" }} /> ASK ABOUT THIS CHART</Label>}
         {msgs.length > 0 && (
           <Btn small ghost onClick={() => setConvo({ msgs: [], busy: false, err: null, partial: "" })}>
             <Trash2 size={11} /> Clear
@@ -1501,9 +1535,9 @@ export function TaCopilot({ ticker, bars, structure, convo, setConvo, onAnalysis
         </div>
       ) : (
         <>
-          <div style={{ display: "flex", gap: 5, marginTop: 8, flexWrap: "wrap" }}>
+          <div style={mk ? { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 } : { display: "flex", gap: 5, marginTop: 8, flexWrap: "wrap" }}>
             {TA_QUESTIONS.map((q) => (look === "market" ? (
-              <button key={q.id} disabled={busy} onClick={() => { setAskedId(q.id); send(q.ask, q.label); }} aria-pressed={askedId === q.id}
+              <button key={q.id} data-q disabled={busy} onClick={() => { setAskedId(q.id); send(q.ask, q.label); }} aria-pressed={askedId === q.id}
                 style={{ ...sans, minHeight: TAP, padding: "8px 12px", borderRadius: 10, fontSize: FS.sm, textAlign: "left", lineHeight: LH.tight,
                   background: "transparent", color: T.ink, cursor: busy ? "not-allowed" : "pointer", opacity: busy ? 0.5 : 1,
                   border: `1px solid ${askedId === q.id ? T.blue : T.field}` }}>{q.label}</button>
@@ -1511,8 +1545,8 @@ export function TaCopilot({ ticker, bars, structure, convo, setConvo, onAnalysis
               <Btn key={q.id} small ghost color={T.blue} disabled={busy} onClick={() => send(q.ask, q.label)}>{q.label}</Btn>
             )))}
           </div>
-          <div style={{ marginTop: 10, display: "grid", gap: 9 }}>
-            {msgs.length === 0 && !busy && (
+          <div style={{ marginTop: mk ? 0 : 10, display: "grid", gap: 9 }}>
+            {msgs.length === 0 && !busy && !mk && (
               <div style={{ ...mono, fontSize: FS.xs, color: T.mut, lineHeight: 1.6 }}>
                 Pick one, or ask your own. The copilot is given the indicator readings drawn above —
                 the same numbers, never the raw prices — and the legs and break-evens of the trade on
@@ -1552,21 +1586,35 @@ export function TaCopilot({ ticker, bars, structure, convo, setConvo, onAnalysis
               : <div style={{ ...mono, fontSize: FS.xs, color: T.mut }}>Reading the chart…</div>)}
             {err && <div style={{ ...mono, fontSize: FS.xs, color: T.red, lineHeight: 1.6 }}>{err}</div>}
           </div>
-          <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
-            <input value={input} onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") send(input); }}
-              placeholder="Ask about the chart…"
-              style={{ flex: 1, minWidth: 0, ...mono, fontSize: FS.xs, padding: "8px 10px", borderRadius: 6,
-                background: T.bg, border: `1px solid ${T.field}`, color: T.ink }} />
-            <Btn small color={T.blue} onClick={() => send(input)} disabled={busy || !input.trim()}>Ask</Btn>
-          </div>
-          <div style={{ ...mono, fontSize: FS.xs, color: T.dim, marginTop: 8, lineHeight: 1.6 }}>
-            {TA_DISCLAIMER} The copilot may only quote figures the app measured: if it is asked about
+          {mk ? (
+            <form onSubmit={(e) => { e.preventDefault(); send(input); }} style={{ display: "flex", gap: 6 }}>
+              <label htmlFor={`ta-q-${ticker}`} style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)" }}>{TA_OWN_QUESTION}</label>
+              <input id={`ta-q-${ticker}`} value={input} onChange={(e) => setInput(e.target.value)} placeholder="Ask about the chart…"
+                style={{ flex: 1, minWidth: 0, ...sans, fontSize: FS.sm, padding: "0 12px", minHeight: TAP, borderRadius: 10, boxSizing: "border-box",
+                  background: T.bg, border: `1px solid ${T.field}`, color: T.ink }} />
+              <button type="submit" aria-label="Ask the copilot" disabled={busy || !input.trim()}
+                style={{ width: TAP, minWidth: TAP, minHeight: TAP, borderRadius: 10, border: "none", background: T.blue, color: T.onAccent,
+                  cursor: busy || !input.trim() ? "not-allowed" : "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                <Send size={18} aria-hidden="true" />
+              </button>
+            </form>
+          ) : (
+            <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
+              <input value={input} onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") send(input); }}
+                placeholder="Ask about the chart…"
+                style={{ flex: 1, minWidth: 0, ...mono, fontSize: FS.xs, padding: "8px 10px", borderRadius: 6,
+                  background: T.bg, border: `1px solid ${T.field}`, color: T.ink }} />
+              <Btn small color={T.blue} onClick={() => send(input)} disabled={busy || !input.trim()}>Ask</Btn>
+            </div>
+          )}
+          <p style={{ ...(mk ? sans : mono), fontSize: FS.xs, color: mk ? T.mut : T.dim, margin: mk ? 0 : "8px 0 0", lineHeight: LH.body }}>
+            {TA_DISCLAIMER}{mk ? ` ${TA_NEVER_PROPOSES}` : ""} The copilot may only quote figures the app measured: if it is asked about
             something nobody has measured, it says so rather than producing a number.
-          </div>
+          </p>
         </>
       )}
-    </div>
+    </section>
   );
 }
 
@@ -1646,7 +1694,7 @@ export function useCopilot({ ctx, apiKey, convo, setConvo, onAnalysis }) {
   return { msgs, busy, err, partial, input, setInput, send, printConvo };
 }
 
-export function CopilotTab({ ctx, apiKey, convo, setConvo, onAnalysis, skills = SKILLS }) {
+export function CopilotTab({ ctx, apiKey, convo, setConvo, onAnalysis, skills = SKILLS.filter((s) => s.place === "build" || s.place === "desk") }) {
   const { msgs, busy, err, partial, input, setInput, send, printConvo } = useCopilot({ ctx, apiKey, convo, setConvo, onAnalysis });
   return (
     <div style={{ marginTop: 12 }}>
@@ -2685,7 +2733,7 @@ export function PriceChart({ ticker, levels, breakevens, entrySpot, legLines, he
           the same arrays the lines were drawn from. On a phone there is no
           pointer, so it falls back to the last bar and says which it is. */}
       {set && (last || hover) && (
-        <div style={{ ...mono, fontSize: FS.xs, color: T.dim, marginTop: 6, lineHeight: 1.7 }}>
+        <div data-chart-readout style={{ ...mono, fontSize: FS.xs, color: T.mut, marginTop: 6, lineHeight: 1.7 }}>
           <b style={{ color: T.mut }}>{hover ? hover.time : last?.time}{hover ? "" : " · latest"}</b>
           {" · "}close {fmt(hover ? hover.bar?.close : last?.close)}
           {prefs.sma20 && set.ready.sma20 ? ` · ${LABELS.sma20} ${fmt(hover ? readAt(set.series.sma20) : set.last.sma20)}` : ""}

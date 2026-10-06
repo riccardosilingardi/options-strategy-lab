@@ -135,7 +135,9 @@ check("THE COPILOT: four questions from SKILLS (one home); the three new ones ex
   }
   has(COPILOT_EXPLAIN_ONLY, "never propose a trade");
   // The others stay reachable (in "More on this trade ▾", the same conversation).
-  for (const id of ["positions", "news", "radar"]) if (!SKILLS.find((s) => s.id === id)) throw new Error(`${id} left SKILLS`);
+  // Redesign PR 3 (the copilot by place): "news" stays reachable from More; "radar" is Find's (PR 4); PR #38's "Position
+  // review" is replaced by the position screen's three (copilot.test.jsx holds them).
+  for (const id of ["news", "radar"]) if (!SKILLS.find((s) => s.id === id)) throw new Error(`${id} left SKILLS`);
   for (const q of ["Pre-trade analysis", "What would make it wrong?", "Compare with the other cards", "News that could move it", "Or ask your own…"]) has(html, q);
   has(html, "Educational analysis on a paper account, not financial advice. Every answer is filed in the Journal.");
   // One send, filed in the Journal: Build's section and CopilotTab both run useCopilot().

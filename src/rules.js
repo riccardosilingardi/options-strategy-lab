@@ -1561,8 +1561,8 @@ export const reviewLimitLine = ({ type = "limit", net = null, tif = "day", n = 1
 export const oiCheckText = (floor) => `Open interest above the chain's floor (${floor}, Find's liquidity floor)`;
 /** The review sheet's checks, in words; their values and their ✓ / ✗ are `gateChecklist()`'s (wizard.jsx). */
 export const REVIEW_CHECKS = Object.freeze({
-  loss: "Most it can lose",
-  cap: (free) => (free ? "Per-trade cap: free sizing, not applied" : "Inside the per-trade cap"),
+  loss: "Most it can lose is known",
+  cap: (free) => (free ? "Per-trade cap: free sizing, not applied" : `Inside the ${pctText(RULES.bestPracticePerTradePct, 0)} per-trade cap`),
   open: "Open risk after this",
   legs: "No uncovered legs",
   days: () => `At least ${RULES.minEntryDTE} days to expiry`,
@@ -1654,9 +1654,10 @@ export function chipText(id, st = {}) {
     case "order": return `⇅ ${(FIND_ORDERS.find((o) => o.id === st.order) || FIND_ORDERS[0]).label}`;
     case "budget": return `${r.mode === "target" ? "Target" : "Budget"} ${r.amt == null ? "not set" : money(r.amt)}`;
     case "chance": return `Chance ${r.minChance == null ? "any" : chanceText(r.minChance)}`;
-    case "return": return `Return ${returnText(r.minReturn == null ? RULES.minRewardRisk : r.minReturn)}`;
+    case "return": return `Return ≥ ${returnText(r.minReturn == null ? RULES.minRewardRisk : r.minReturn)}`;
     case "horizon": return `Horizon ${Math.round(Number(st.horizon) || RULES.targetEntryDTE)}d`;
-    case "direction": return st.dir === "signals" || !st.dir ? SIGNALS_DECIDE : `Direction ${st.dirLabel || st.dir}`;
+    // The mockups' chip reads "Direction · Signals"; the sheet's choice keeps its full name, "Signals decide".
+    case "direction": return `Direction ${st.dir === "signals" || !st.dir ? "Signals" : st.dirLabel || st.dir}`;
     case "positive": return "Avg > 0";
     case "liquidity": return `Liquidity ${st.liqLabel || ""}`.trim();
     default: return "";
@@ -1703,13 +1704,19 @@ export const ROW_NO_BOARD = `No expiry far enough out to open on`;
  * THE STALE BANNER (redesign PR 1): Find's freshness line, when the prices are past their budget. `closeDay` is the
  * day of the numbers shown ("Fri 2 Oct"), `failedAt` the time a refresh did not answer ("14:05"), or null.
  */
-export function staleBannerLine({ closeDay = null, failedAt = null } = {}) {
-  const head = `Stale${closeDay ? ` · ${closeDay} close` : ""}.`;
-  const fail = failedAt ? ` The feed didn't answer at ${failedAt}.` : "";
-  const what = closeDay ? ` These are ${closeDay}'s closing numbers; prices may have moved.` : " Prices may have moved.";
-  return `${head}${fail}${what}`;
+export function staleBannerLine({ closeDay = null, closeWeekday = null, failedAt = null } = {}) {
+  const fail = failedAt ? `The feed didn't answer at ${failedAt}. ` : "";
+  const day = closeWeekday || closeDay;
+  const what = day ? `These are ${day}'s closing numbers; prices may have moved.` : "Prices may have moved.";
+  return `${fail}${what}`;
 }
+/** The status line while stale (the mockup "Find · stale"): amber, with a dot, above the banner. */
+export const staleStatusLine = ({ closeDay = null } = {}) => `Stale${closeDay ? ` · close ${closeDay}` : ""}`;
+/** The bold half of the banner, when a refresh did not answer. */
+export const staleFailLine = (failedAt) => (failedAt ? `The feed didn't answer at ${failedAt}.` : null);
 export const RETRY = "Retry";
+/** A Find sheet's quiet footer button (the mockup): every chip back to its default. */
+export const RESET_SHEET = "Reset";
 
 /** "Nothing fits" (redesign PR 1). The control that binds, in the chips' words. */
 const BINDS = { size: "your budget", target: "your target", chance: "your chance", return: "your return on risk" };
@@ -1722,7 +1729,12 @@ export const showMissesCta = (n) => `Show the ${n} that miss`;
 
 /** Saved (redesign PR 1): "When saved" beside "Now", for three figures. */
 export const SAVED_COLUMNS = Object.freeze({ when: "When saved", now: "Now" });
-export const SAVED_ROWS = Object.freeze({ chance: CARD_LABELS.chance, future: "FUTURE AVG", risk: CARD_LABELS.risk });
+/** A label in sentence case ("MAX PROFIT" → "Max profit"): the mockups write the card's names this way on Build,
+ *  Saved, the compact card and Positions; the words stay CARD_LABELS' (one home). */
+export const sentenceCase = (s) => String(s).charAt(0) + String(s).slice(1).toLowerCase();
+export const SAVED_ROWS = Object.freeze({ chance: sentenceCase(CARD_LABELS.chance), future: "Future avg", risk: sentenceCase(CARD_LABELS.risk) });
+/** Saved's footnote (the mockup): what "Now" and "When saved" are. */
+export const SAVED_PRICED_NOTE = `Priced again at every read: "Now" is the last price read, "When saved" never changes.`;
 export const NOT_RECORDED = "not recorded";
 export const NOT_ON_CHAIN = "not on today's chain";
 export const savedEmptyText = () => "Nothing saved. Tap ☆ on a row to watch it here.";
@@ -1806,6 +1818,8 @@ export function futurePastDisagree(future, past) {
 export const COMPARE_TICK = Object.freeze({ off: "Compare", on: "✓ comparing" });
 export const OPEN_IN_CHAIN = "Open in chain";
 export const MARKET_READ_HEAD = "THE MARKET'S READ";
+/** Beside THE MARKET'S READ (the mockup): "score +46 · confidence 84", read off the fused result. */
+export const readScoreLine = (fused) => (fused ? `score ${fused.score >= 0 ? "+" : "−"}${Math.abs(fused.score)} · confidence ${fused.confidence}` : "");
 export const HOW_WORKED_OUT_LINK = "How score and confidence are worked out ›";
 export const MARKET_READ_END = "How each trade stands against it is in Build, under Why this trade.";
 export const howConnectLabel = (tk) => `How ${tk}'s numbers connect`;
@@ -3490,6 +3504,10 @@ export const TA_QUESTIONS = Object.freeze([
 /** The line that has to appear once, and only once. */
 export const TA_DISCLAIMER =
   "This is educational analysis on a paper-trading account, not financial advice.";
+/** The chart copilot's promise, on the market page (the mockup): it explains, it never proposes. */
+export const TA_NEVER_PROPOSES = "The chart copilot never proposes a trade.";
+/** The chart copilot's own question box (the mockup), its label for a screen reader. */
+export const TA_OWN_QUESTION = "Your own question about the chart";
 
 /**
  * THE SYSTEM PROMPT FOR THE CHART COPILOT.

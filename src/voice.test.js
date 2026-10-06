@@ -200,7 +200,22 @@ test("MEASURED: the three screens, and the table in the PRD is this number", () 
      entry-room warning 46 and Send's held reason 10 (each only when it applies), and the three states (loading 23, empty
      31, no quotes 24) — an upper bound: the states never show together. The review sheet is one tap away (a Sheet,
      assembled outside the block) and "More on this trade ▾" is folded (`Reveal`). The ceiling is that 428. */
-  const CEILING = { find: 332, market: 587, build: 428, positions: 217 };
+  /* >>> REDESIGN PR 3, TASK 0a: THE SHIPPED SCREENS CHECKED AGAINST THE BOARDS THEMSELVES (scripts/audit-screen.mjs). <<<
+     The audit looks for every board phrase on the app's screen; the words it added are the boards' own, site by site:
+     find 327 -> 336 (the stale status line `staleStatusLine()` and its bold half `staleFailLine()`, the chips' "Direction"
+     and "≥", the reading bar's line moved into `ReadingLine`); market 587 -> 604 (the read's score line `readScoreLine()`,
+     the chart copilot's "The chart copilot never proposes a trade." and its question box's label, the Overview's
+     panels' headings); build 428 -> 435 (the review sheet's "is known" and "5%", the empty state's "Build" title, the
+     copilot's question-box label, now on screen for a screen reader). The ceilings are those numbers. */
+  /* >>> REDESIGN PR 3, TASK 2: POSITIONS ON THE OWNER'S BOARD. <<< positions 207 -> 248, the board's own words, site by
+     site: the card's sentence is now the board's (`cardSentence()`, "Stop warning reached: -$153 against -$120. A
+     warning, not an order: you decide.", 15 — it replaces `positionAction()`'s line, an expression the counter did not
+     score), the card's top line "J-0003 · CORN · 3 call spreads" (`positionMetaLine()`, 5), the line under the cards for
+     an order sent and not filled (`waitingOrdersLine()`, 21, only while one waits), the three short exit labels and the
+     header's title. An upper bound (the waiting line and a card's buttons never all show). The owner's ≤ 120 is held
+     on the RENDERED segment below. TASK 3 then moved the close confirm off the card to the position's own screen
+     (src/positionScreen.jsx, built outside the block: one tap away): 248 -> 235. */
+  const CEILING = { find: 336, market: 604, build: 435, positions: 235 };
   /* >>> PR #46: ONE ORDERS LIST. <<< The record-based "WORKING AT THE BROKER" panel (its paragraph about what a
      working order is, the stale-DAY warning, the per-row sentences) left Positions; the one list lives in
      `orders.jsx`, which the counter now reads. Measured: positions 304 -> 209 (4 typed + 205 generated, 14 sites).

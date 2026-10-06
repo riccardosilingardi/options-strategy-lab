@@ -10,6 +10,7 @@ const ok = [], bad = [];
 const check = async (name, fn) => { try { await fn(); ok.push(name); console.log(`  ok   ${name}`); } catch (e) { bad.push([name, e.message]); console.log(`  FAIL ${name}\n       ${e.message}`); } };
 const has = (html, s) => { if (!html.includes(s)) throw new Error(`missing ${JSON.stringify(s)}`); };
 const hasnt = (html, s) => { if (html.includes(s)) throw new Error(`should not contain ${JSON.stringify(s)}`); };
+const eq = (a, b, m) => { if (a !== b) throw new Error(`${m}: ${JSON.stringify(a)} !== ${JSON.stringify(b)}`); };
 
 const SYM = "GDX261030P00094000";
 const HOLD = [{ symbol: SYM, qty: "9", cost_basis: "4500", current_price: "7.90" }];
@@ -21,25 +22,27 @@ const ctx = { positions: HOLD, orders: [ORDER], chainFor: () => CHAIN, demo: fal
   recordFor: () => ({ ref: "J-0001" }) };
 
 (async () => {
-await check("THE ROW AT REST (PR #47): three short lines — what, terms, the book with Alpaca's mark — and Modify / Cancel / History", () => {
+await check("THE ROW AT REST (PR #47; the board \"Orders\", redesign PR 3): the tag, the name, the ref; terms and the book; Modify / Cancel / Details", () => {
   const html = renderToStaticMarkup(<OrderRow order={ORDER} ctx={ctx} />);
-  has(html, "J-0001 · ");
-  has(html, "Close 9 GDX 94P 30 Oct");
-  has(html, "$8.23 credit · today · 0 of 9");
-  has(html, "bid 7.80 · mid 7.95 · ask 8.10 · mark 7.90");
+  has(html, ">CLOSE</span>"); has(html, ">J-0001</span>");
+  has(html, ">GDX 94P 30 Oct</span>");
+  has(html, "$8.23 credit · today · 0 of 9 · sent ");
+  has(html, "bid 7.80 · mid 7.95 · ask 8.10 · Alpaca mark 7.90");
   // The limit is above the mark: one glyph at rest, the sentence behind its ⓘ.
   has(html, "⚠"); has(html, "About the limit against Alpaca&#x27;s mark");
   hasnt(html, "above Alpaca&#x27;s mark of $7.90");
-  for (const b of [">Modify<", ">Cancel<", ">History<"]) has(html, b);
+  for (const b of [">Modify<", ">Cancel<", ">Details<"]) has(html, b);
   // Cancel is the danger OUTLINE, never a red fill.
-  hasnt(html, "background:#b23a2b");
+  hasnt(html, "background:#b23a2b"); hasnt(html, "background:#d66a5a");
 });
 
-await check("THE CLOCK LINE: on every row when the market is closed, and never when it was not read", () => {
+await check("THE CLOCK LINE: once, at the top of the segment, when the market is closed — never when it was not read", () => {
   const closed = { is_open: false, next_open: "2026-10-05T09:30:00-04:00" };
-  has(renderToStaticMarkup(<OrderRow order={ORDER} ctx={{ ...ctx, clock: closed }} />), "Market closed · opens Mon");
-  hasnt(renderToStaticMarkup(<OrderRow order={ORDER} ctx={{ ...ctx, clock: null }} />), "Market closed");
-  hasnt(renderToStaticMarkup(<OrderRow order={ORDER} ctx={{ ...ctx, clock: { ...closed, is_open: true } }} />), "Market closed");
+  const two = renderToStaticMarkup(<OrdersPanel orders={[ORDER, { ...ORDER, id: "x2" }]} ctx={{ ...ctx, clock: closed }} />);
+  eq((two.match(/Market closed · opens Mon/g) || []).length, 1, "once for every row");
+  hasnt(renderToStaticMarkup(<OrderRow order={ORDER} ctx={{ ...ctx, clock: closed }} />), "Market closed");
+  hasnt(renderToStaticMarkup(<OrdersPanel orders={[ORDER]} ctx={{ ...ctx, clock: null }} />), "Market closed");
+  hasnt(renderToStaticMarkup(<OrdersPanel orders={[ORDER]} ctx={{ ...ctx, clock: { ...closed, is_open: true } }} />), "Market closed");
 });
 
 await check("AN ORDER WITH NO RECORD carries one short tag; J-0001's own close does not (0a)", () => {
@@ -50,19 +53,29 @@ await check("AN ORDER WITH NO RECORD carries one short tag; J-0001's own close d
   hasnt(theirs, "The long sentence.");   // behind the ⓘ
 });
 
-await check("THE ORDERS SEGMENT: one row per order, Cancel all at the bottom, 'not read' is not 'none'", () => {
+await check("THE ORDERS SEGMENT: one row per order, Cancel all at the top (the board), 'not read' is not 'none'", () => {
   const one = renderToStaticMarkup(<OrdersPanel orders={[ORDER]} ctx={ctx} />);
   has(one, "Cancel all");
-  if (one.indexOf("Cancel all") < one.indexOf("data-order-row")) throw new Error("Cancel all sits at the bottom");
+  if (one.indexOf("Cancel all") > one.indexOf("data-order-row")) throw new Error("Cancel all sits at the top, beside the clock");
   has(renderToStaticMarkup(<OrdersPanel orders={[]} ctx={ctx} />), "No orders working at Alpaca.");
   has(renderToStaticMarkup(<OrdersPanel orders={null} ctx={ctx} />), "not read from Alpaca yet");
 });
 
-await check("HISTORY: the owner's local time, and the order id LAST", () => {
+await check("DETAILS: Alpaca's status history in the owner's local time, and the order id LAST", () => {
   const html = renderToStaticMarkup(<OrderRow order={ORDER} ctx={ctx} initialMode="details" />);
-  has(html, "YOUR TIME");
-  if (!/\d{1,2} Oct \d{2}:\d{2}:\d{2} · submitted/.test(html)) throw new Error("no local stamp");
-  if (html.lastIndexOf("order b2c3d4e5") < html.lastIndexOf("status now")) throw new Error("the id is not last");
+  has(html, "ALPACA STATUS HISTORY");
+  if (!/submitted<\/span><span[^>]*>\d{1,2} Oct \d{2}:\d{2}:\d{2}/.test(html)) throw new Error("no local stamp");
+  if (html.lastIndexOf("id b2c3d4e5") < html.lastIndexOf("status now")) throw new Error("the id is not last");
+});
+
+await check("MODIFY (the board): two steppers, the range at rest with its sentence behind the price's ⓘ, Day | Good till cancelled, Back / Review", () => {
+  const html = renderToStaticMarkup(<OrderRow order={ORDER} ctx={ctx} initialMode="modify" />);
+  for (const x of ["About limit price", ">Quantity<", 'aria-label="Lower by 0.01"', 'aria-label="One more"', ">Day<", ">Good till cancelled<", ">Back<", ">Review<"]) has(html, x);
+  if (!/data-modify-bounds[^>]*>\d+\.\d{2} – \d+\.\d{2}</.test(html)) throw new Error("the range at rest");
+  hasnt(html, ">Modify<");   // the row's three buttons give way to the panel
+  const cancel = renderToStaticMarkup(<OrderRow order={ORDER} ctx={ctx} initialMode="cancel" />);
+  has(cancel, "Cancel this closing order? The position stays open, with no close working.");
+  has(cancel, ">Keep it<"); has(cancel, ">Cancel order<");
 });
 
 await check("THE CLOSE CONFIRM: one line, the same price field starting at closeLimitPrice(), Send / Keep it open", async () => {

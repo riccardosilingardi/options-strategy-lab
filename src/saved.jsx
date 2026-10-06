@@ -8,13 +8,16 @@
 // `savedNow`, priced through `listCardFigures()`); this file only draws them.
 // ============================================================================
 import React from "react";
-import { Trash2 } from "lucide-react";
 import { T, TYPE } from "./theme.js";
 import { mono, sans, Btn, Fold, Note } from "./ui.jsx";
 import { BandThumbnail, Gauge, payoffBands, bandTakeaway } from "./visuals.jsx";
 import { legsLine } from "./path.js";
 import { SAVED_COLUMNS, SAVED_ROWS, NOT_RECORDED, NOT_ON_CHAIN, savedEmptyText, SAVED_REMOVE, BUILD_CTA, WOULD_HAVE_DONE, per100Text,
-  chanceText, money } from "./rules.js";
+  chanceText, money, rowSubtitleText, SAVED_PRICED_NOTE } from "./rules.js";
+import { ActionBtn } from "./find.jsx";
+
+/** "saved Mon 28 Sep" (the mockup), or "sent Mon 28 Sep" for an order that came back with nothing bought. */
+const savedWhenText = (at, kind) => `${kind === "saved" ? "saved" : "sent"} ${new Date(at).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" }).replace(",", "")}`;
 
 const FS = TYPE.size, FW = TYPE.weight, LH = TYPE.line;
 const NO_BARS = [];
@@ -34,9 +37,11 @@ export function SavedList({ rows = [], savedNow = {}, barsCache = {}, ago = (d) 
       {rows.length === 0 && (
         <div style={{ ...sans, fontSize: FS.sm, color: T.mut, padding: "10px 16px", lineHeight: LH.body, borderTop: `1px solid ${T.line}` }}>{savedEmptyText()}</div>
       )}
-      <div role="list" aria-label="Saved trades">
+      {/* ONE CARD PER SAVED TRADE (the mockup "Find · Saved"): panel cards 10px apart, the footnote last. */}
+      <div role="list" aria-label="Saved trades" style={{ display: "flex", flexDirection: "column", gap: 10, padding: "0 16px" }}>
         {rows.map((r) => <SavedRow key={r.key} r={r} now={r.kind === "saved" ? savedNow[r.saved.id] : null} bars={barsCache[r.ticker] || NO_BARS}
           ago={ago} fmtMoney={fmtMoney} onBuild={() => onBuild && onBuild(r)} onRemove={() => onRemove && onRemove(r)} />)}
+        {rows.length > 0 && <div style={{ ...sans, fontSize: FS.xs, lineHeight: LH.body, color: T.mut, padding: "0 2px" }}>{SAVED_PRICED_NOTE}</div>}
       </div>
     </div>
   );
@@ -48,20 +53,25 @@ function SavedRow({ r, now, bars, ago, fmtMoney, onBuild, onRemove }) {
   const sv = r.kind === "saved" ? r.saved : null;
   const whenRisk = sv && sv.maxLoss != null && Number.isFinite(Number(sv.maxLoss)) ? Math.abs(Number(sv.maxLoss)) : null;
   return (
-    <div role="listitem" data-saved-row={r.key} style={{ borderTop: `1px solid ${T.line}`, padding: "10px 16px 12px" }}>
+    <div role="listitem" data-saved-row={r.key} style={{ display: "flex", flexDirection: "column", gap: 8, background: T.panel,
+      border: `1px solid ${T.line}`, borderRadius: 12, padding: "12px 14px" }}>
+      {/* THE HEAD (the mockup): the ticker and the structure in 15 bold, when it was saved on the right. */}
+      <div style={{ display: "flex", gap: 8, alignItems: "baseline", justifyContent: "space-between" }}>
+        <span style={{ minWidth: 0 }}>
+          <span data-saved-ticker style={{ ...mono, fontSize: FS.md, fontWeight: FW.bold, color: T.ink }}>{r.ref ? `${r.ref} ` : ""}{r.ticker}</span>
+          <span data-saved-name style={{ ...sans, fontSize: FS.md, fontWeight: FW.bold, color: T.ink }}>{` · ${rowSubtitleText(r.name, r.expKey)}`}</span>
+        </span>
+        <span data-saved-when style={{ ...sans, fontSize: FS.xs, color: T.mut, whiteSpace: "nowrap" }}>{r.at ? savedWhenText(r.at, r.kind) : ""}</span>
+      </div>
       <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
         <span style={{ flex: 1, minWidth: 0 }}>
-          <span style={{ display: "flex", gap: 6, alignItems: "center", minWidth: 0 }}>
-            <span style={{ ...mono, fontSize: FS.md, fontWeight: FW.bold, color: T.ink }}>{r.ref ? `${r.ref} ` : ""}{r.ticker}</span>
-            {/* WHICH OF THE TWO IT IS, on the row: "I chose not to" and "I tried and missed" are different facts. */}
-            <span style={{ ...sans, fontSize: FS.xs, lineHeight: "18px", padding: "0 6px", borderRadius: 6, whiteSpace: "nowrap",
-              border: `1px solid ${T.field}`, color: r.kind === "saved" ? T.mut : T.amber }}>
-              {r.kind === "saved" ? "Saved, never sent" : `Sent · ${String(r.status || "finished").replace(/_/g, " ")}`}
-            </span>
-            <span style={{ ...mono, fontSize: FS.xs, color: T.dim, marginLeft: "auto" }}>{r.at ? ago(r.at) : ""}</span>
+          {/* WHICH OF THE TWO IT IS, on the card: "I chose not to" and "I tried and missed" are different facts. */}
+          <span style={{ ...sans, fontSize: FS.xs, lineHeight: "18px", padding: "0 6px", borderRadius: 6, whiteSpace: "nowrap",
+            border: `1px solid ${T.field}`, color: r.kind === "saved" ? T.mut : T.amber }}>
+            {r.kind === "saved" ? "Saved, never sent" : `Sent · ${String(r.status || "finished").replace(/_/g, " ")}`}
           </span>
-          <span style={{ ...sans, display: "block", fontSize: FS.xs, color: T.mut, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {r.name} · <span style={mono}>{legsLine(r.legs)}{r.expKey ? ` · ${r.expKey}` : ""}</span>
+          <span style={{ ...mono, display: "block", fontSize: FS.xs, color: T.mut, marginTop: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {legsLine(r.legs)}{r.at ? ` · ${ago(r.at)}` : ""}
           </span>
         </span>
         {bands && <span aria-hidden="true" style={{ flex: "0 0 72px", width: 72, height: 40, borderRadius: 4, overflow: "hidden" }}>
@@ -72,25 +82,27 @@ function SavedRow({ r, now, bars, ago, fmtMoney, onBuild, onRemove }) {
       {/* WHEN SAVED · NOW: three figures, one contract, in mono. A figure not saved with the item reads "not recorded";
           an expiry today's chain does not list reads "not on today's chain". */}
       {sv && (
-        <div role="table" aria-label="When saved and now" style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 1fr", gap: "2px 8px", marginTop: 8 }}>
+        <div role="table" aria-label="When saved and now" data-saved-grid style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 1fr", gap: "4px 12px", fontSize: FS.sm }}>
           <span />
           <span style={{ ...sans, fontSize: FS.xs, color: T.mut, textAlign: "right" }}>{SAVED_COLUMNS.when}</span>
           <span style={{ ...sans, fontSize: FS.xs, color: T.mut, textAlign: "right" }}>{SAVED_COLUMNS.now}</span>
           {[
-            [SAVED_ROWS.chance, sv.pop == null ? NOT_RECORDED : chanceText(sv.pop), now ? chanceText(now.pop) : NOT_ON_CHAIN],
-            [SAVED_ROWS.future, sv.futureAvg == null ? NOT_RECORDED : per100Text(sv.futureAvg), now ? per100Text(now.per100) : NOT_ON_CHAIN],
-            [SAVED_ROWS.risk, whenRisk == null ? NOT_RECORDED : money(whenRisk), now ? (now.risk == null ? "—" : money(now.risk)) : NOT_ON_CHAIN],
-          ].map(([k, a, b]) => (
+            [SAVED_ROWS.chance, sv.pop == null ? NOT_RECORDED : chanceText(sv.pop), now ? chanceText(now.pop) : NOT_ON_CHAIN, sv.pop, now ? now.pop : null],
+            [SAVED_ROWS.future, sv.futureAvg == null ? NOT_RECORDED : per100Text(sv.futureAvg), now ? per100Text(now.per100) : NOT_ON_CHAIN, sv.futureAvg, now ? now.per100 : null],
+            [SAVED_ROWS.risk, whenRisk == null ? NOT_RECORDED : money(whenRisk), now ? (now.risk == null ? "—" : money(now.risk)) : NOT_ON_CHAIN, null, null],
+          ].map(([k, a, b, x0, x1]) => (
             <React.Fragment key={k}>
-              <span style={{ ...sans, fontSize: FS.xs, color: T.mut }}>{k}</span>
-              <span style={{ ...(/^[a-z]/.test(a) ? sans : mono), fontSize: FS.xs, color: T.mut, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{a}</span>
-              <span style={{ ...(/^[a-z]/.test(b) ? sans : mono), fontSize: FS.xs, color: T.ink, fontWeight: FW.bold, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{b}</span>
+              <span style={{ ...sans, fontSize: FS.sm, color: T.mut }}>{k}</span>
+              <span style={{ ...(/^[a-z]/.test(a) ? sans : mono), fontSize: FS.sm, color: T.ink, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{a}</span>
+              {/* NOW, against when saved (the mockup): better in green, worse in amber, the same in ink. A reading, never red. */}
+              <span style={{ ...(/^[a-z]/.test(b) ? sans : mono), fontSize: FS.sm, fontWeight: FW.bold, textAlign: "right", fontVariantNumeric: "tabular-nums",
+                color: x0 == null || x1 == null || Number(x1) === Number(x0) ? T.ink : Number(x1) > Number(x0) ? T.green : T.amber }}>{b}</span>
             </React.Fragment>
           ))}
         </div>
       )}
 
-      <Fold summary={WOULD_HAVE_DONE} label="show" tone={T.mut} style={{ marginTop: 2 }}>
+      <Fold summary={WOULD_HAVE_DONE} label="show" tone={T.mut}>
         {bands && (
           <div style={{ display: "flex", gap: 12, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
             <BandThumbnail bands={bands} bars={bars} width={200} height={40} title={bandTakeaway(bands, { ticker: r.ticker })} />
@@ -125,11 +137,9 @@ function SavedRow({ r, now, bars, ago, fmtMoney, onBuild, onRemove }) {
         </div>
       </Fold>
 
-      <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
-        <Btn small ghost color={T.mut} onClick={onRemove} style={{ border: `1px solid ${T.field}`, borderRadius: 10 }}>
-          <Trash2 size={14} aria-hidden="true" /> {SAVED_REMOVE}
-        </Btn>
-        <Btn color={T.amber} onClick={onBuild} style={{ flex: 1, borderRadius: 10, fontSize: FS.sm }}>{BUILD_CTA}</Btn>
+      <div style={{ display: "flex", gap: 8 }}>
+        <ActionBtn onClick={onRemove}>{SAVED_REMOVE}</ActionBtn>
+        <ActionBtn primary onClick={onBuild} style={{ flex: 1 }}>{BUILD_CTA}</ActionBtn>
       </div>
     </div>
   );

@@ -20,8 +20,8 @@ non-expert trader who wants to learn discipline rather than be sold trades.
   on Find** (owner, 5 Oct 2026, round 2): Home is no longer a screen; a first run answers the two capital questions, then
   lands on Find; Back on Find leaves the app. What Home said moved where the mockups put it: positions to look at are the
   Positions badge on the bottom bar (its spoken name is Home's old sentence, `statusLine()`), Settings is the gear in Find's
-  header. Find and the market page draw no desk header (round 2), nor Build (redesign PR 2); Positions, the Journal and
-  Settings keep it, without "← Home", until PR 3.
+  header. Find and the market page draw no desk header (round 2), nor Build (redesign PR 2), nor Positions (redesign
+  PR 3a, which draws its own: "Positions", ↻ and the gear); the Journal and Settings keep it until PR 3b.
   1. **Find — one row per market (version B).** Top to bottom: "Find" with ↻ (refresh every market) and the gear; the status
      line "<freshness> · <feed> · Paper" (the stale banner with Retry in its place when stale); Results | Saved; the
      underlined category tabs "All 10 ·
@@ -157,19 +157,32 @@ non-expert trader who wants to learn discipline rather than be sold trades.
   Journal** (the Positions badge counts decisions plus closes working). Find is the start screen (round 2). Trades you are
   watching are **Saved**, inside Find (Results | Saved). The browser's Back button steps back through Find, the market
   page, Build, the places, the segments and the open sheets; Back on Find leaves the app.
-- **Positions (PR #47).** On top, the **account strip**: EQUITY and BUYING POWER read from Alpaca at each sync (its
-  options buying power when Alpaca sends one, and the label says which), and AT RISK "$X of $Y" — the risk gate's own
-  open risk against the total limit ("no limit applied" under free sizing); each has a ⓘ, and the limits come from the
-  capital set in Settings, not from equity. Then two segments, **Positions | Orders**, and one refresh icon.
-  - *Positions*: one card per holding, saying its action first, then the profit (dollars and share of the risk), how far
-    each of the three exits is, and the size as Alpaca holds it ("9 puts"); "Close at limit" and "Details" (the
-    position read-only, with the entry beside now). A card whose close is working shows one line — "Close working at
-    $7.62 · 0 of 9 · Market closed · opens Mon 15:30 your time" — and "Manage order", which opens its row in Orders. A
-    holding Alpaca lists with no record here is a "Not in the app" card with Import (and its close at a limit).
-  - *Orders*: one row per order read from Alpaca, three short lines (what · price, time in force, filled X of Y · the
-    structure's bid / mid / ask and Alpaca's mark), with Modify, Cancel (confirm first) and History (Alpaca's
-    timestamps in your time, the order id last); "Cancel all" at the bottom asks first. An order with no record here is
-    tagged "sent outside this app". When the market is closed every row says when it opens, in your time.
+- **Positions (PR #47; the owner's boards since redesign PR 3a, 6 Oct 2026).** Its own header ("Positions", ↻ to read
+  Alpaca again, the gear), then the **account strip**: EQUITY, BUYING POWER (Alpaca's options figure when it sends one; the
+  ⓘ says which) and AT RISK "$X of $Y" — the risk gate's own open risk against the total limit ("no limit" under free
+  sizing). One ⓘ open at a time, its sentence under the three tiles; the limits come from the capital set in Settings,
+  not from equity. Then **Positions | Orders**.
+  - *Positions*: one card per holding — the badge (CLOSE filled in the action tone, WARNING an amber outline, HOLD a
+    green outline with its sentence behind ⓘ, NOT ON ALPACA / NO QUOTE dim), "J-0002 · UNG · 2 puts" (the size as Alpaca
+    holds it), the structure's title and the profit with its share of the risk, one sentence ("Take profit reached: $178
+    of $160." / "Stop warning reached: -$153 against -$120. A warning, not an order: you decide."), the three exits in
+    short words over 4px bars, and one foot: the working close's line and "Manage order", or "Close at limit" when a rule
+    says close, "Decide: close or keep ›" on a warning, a quiet "Details ›" otherwise; "File in Journal" when the holding
+    is gone from Alpaca. An order sent and not filled is one line under the cards ("…is an order, not a position yet: it
+    waits in Orders for Monday's open"). A holding Alpaca lists with no record is a "Not in the app" card with Import.
+  - *The position's own screen* (the card's title, Decide, Details or Close at limit open it; "‹ Positions" or Back
+    leaves): WHAT TO DO NOW (the badge with its rule, the profit, one sentence, and **Close at limit** — order path 3, its
+    confirm in place — or **Keep it, write why**, which files the reason on the position's timeline; a preview keeps
+    nothing), WHERE IT MAKES AND LOSES MONEY (one sentence and the last 60 sessions over the payoff at expiry), THE EXIT
+    PLAN (three rows and bars), AT ENTRY VS NOW (the card's four figures and the four factors, a factor that turned marked,
+    "N of the M reasons you opened it have turned"), RECORD · LAST 4 with "Whole record ›", Analyse as a new trade, Alpaca
+    details (the record's own rows, read-only), the copilot's three position questions, and the exit orders and the
+    reason check folded at the end.
+  - *Orders*: the market's clock once at the top beside "Cancel all" (it asks first). One row per order read from Alpaca:
+    the intent tag (OPEN / CLOSE), the structure's name and the ref; its terms and when it was sent; the book and Alpaca's
+    mark; Modify (inline: the limit and the quantity on steppers, the range, Day | Good till cancelled, Review, then Send
+    to Alpaca), Cancel (asks first) and Details (Alpaca's status history in your time, the order id last). An order with
+    no record here is tagged "sent outside this app".
   The order prints once: Build and the desk show counts only. Integrations are in Settings → Connections.
 - **The Journal** — what happened, with a timeline per position and a weekly report.
 - **The guided door is removed** at the owner's request, 23 Sep 2026 (PR #40): "Find
@@ -177,10 +190,21 @@ non-expert trader who wants to learn discipline rather than be sold trades.
   data. Home itself is gone since redesign PR 1 round 2: the app opens on Find.
 - **Autopilot.** A scheduled server job that reads open positions and proposes exits as
   one-tap approval links. It never executes by itself.
-- **Copilots.** An AI explanation of the loaded trade and of the chart. They explain; they
-  never propose or place a trade. (Flagged in redesign PR 2, for the owner: "Opportunity radar" asks for two proposed
-  trades, the copilot's system prompt has decision trees that recommend structures, and "Pre-trade analysis" asks for a
-  GO/NO-GO and a size. Unchanged until the owner decides; the three new Build questions say they never propose.)
+- **Copilots, by place** (owner, 6 Oct 2026: "It depends where it is. In Find, a preset analyses the cards and, under
+  the filters set, makes objective comparisons that highlight or suggest the best strategy. In Build it explains the
+  strategy. In Positions it analyses the position, the exit strategy, where you started from."). Every question in
+  `SKILLS` (pro.jsx, the one home) names its place, and a screen offers only its own place's questions.
+  - **In Find** a preset may rank and highlight among the cards the app itself built under the current filters, citing
+    each card's own figures (you risk, max profit, chance, return on risk, future avg, past yrs) and naming the filters.
+    It never invents a structure, a strike or an expiry that is not a card, never sizes past the per-trade limit, and
+    never sends. ("Compare the cards", once "Opportunity radar"; its place on Find is redesign PR 4.)
+  - **In Build** it explains the loaded trade: "Pre-trade analysis" (its structure, Greeks, risk and reward, breakevens,
+    season and news, then the gate's checks and the app's size read back — no GO/NO-GO, no size of its own), "What would
+    make it wrong?", "Compare with the other cards", "News that could move it".
+  - **In Positions** it reviews one position against its entry and its exit plan: "Review this position", "The exit from
+    here", "Since I opened it" (on the position's screen). It never closes, rolls or opens anything.
+  - The chart copilot (the market page's Overview) explains the chart. No copilot places a trade; every answer is filed
+    in the Journal. (Left for PR 4: the system prompt's decision trees still recommend structures.)
 - **Deploy previews are read-only** (redesign PR 2, TASK 0a, after deploy-preview-51 overwrote production's book on
   5 Oct 2026). A preview reads everything production reads, but every Netlify function that writes or sends (the state
   save, every order, Modify and cancel, the one-tap approval, the autopilot's run, the Alpha Vantage cache write) answers
@@ -370,12 +394,16 @@ normal use, and is never asked for.
    open, the copilot with a stubbed answer, the Order over the cap, the review sheet, the sent state, loading, no
    quotes, empty, More open, Edit in chain, light) was photographed the same way but through the WHOLE app on fixtures
    (scripts/build-screens.jsx: Find → UNG → Build ›, a stub Alpaca on a closed market, a stub copilot;
-   docs/screens/redesign-pr2/; Build 2,592px at rest, no sideways scroll) — never on a phone, never live. **No screen
-   reader was run.**
+   docs/screens/redesign-pr2/; Build 2,592px at rest, no sideways scroll) — never on a phone, never live. **Redesign PR
+   3a's Positions, the position's screen and Orders** were photographed the same way on a fixture book (+book: three
+   records, two holdings, two orders; docs/screens/redesign-pr3/) and every shipped screen was measured against the owner's
+   boards themselves (`scripts/audit-screen.mjs`: 18 boards, dark and light, 0 differences unexplained) — never on a
+   phone, never live. **No screen reader was run.**
 4. **Read when it happens — no credit has filled at the corrected limit** (the indicative combination ask on thin chains
    has not been measured by a fill; J-0003 never filled at it), **and "Not on Alpaca", "size N > M on the ask", the "Not
    in the app" card, an order "sent outside this app", free sizing (PR #41), and an order sent from Build's new review
-   sheet (production only, never from a preview)** have not appeared or been used live (the sync auto-imports a new holding on its
+   sheet (production only, never from a preview), "Keep it, write why" and Modify's steppers (redesign PR 3a)** have not
+   appeared or been used live (the sync auto-imports a new holding on its
    first read, so "Not in the app" shows mainly when that import has not run); free sizing's "no limit applied" is
    tested on fixtures only.
 5. **Find's cost on a phone is not measured, and the live season has never been read.** Generation is one memo (139–259
@@ -412,6 +440,8 @@ normal use, and is never asked for.
    live cards and 5 of the 31 fixture cards. PR #47's word budgets (row 35, Positions 120) are the owner's; the close
    confirm 30 → 35 and Modify 38 → 40 are the owner's PR #49 decision (the ⓘ labels' words, measured). Find's and Build's word
    ceilings moved 309 → 315 and 244 → 250 in PR #48: the badge's words are now counted (the real change is one word).
+   Redesign PR 3a: Positions' ceiling 207 → 235 (the boards' own words, counted in voice.test.js); the position's screen
+   is built outside the block and has no ceiling of its own yet.
 9. **The exit rules are inherited defaults, not backtested** on these ten markets; the single option's +50% of the
    premium is the owner's choice. PAST YRS settles at expiry and does not replay them. **Since PR #50 a replay window
    that runs past December reads the next year's row and the last year is dropped, not padded** (it used to wrap to the
@@ -423,7 +453,8 @@ normal use, and is never asked for.
 10. **Read when it happens — the AI features** have not seen a real answer since the usage limit ended (2026-10-01),
     the chart copilot on the market page's Overview included (the same `TaCopilot`, no trade loaded), and Build's three
     new questions (redesign PR 2) — tested on a stubbed stream only; "Compare with the other cards" hands the model
-    Find's own figures for this market's other cards.
+    Find's own figures for this market's other cards. The position's three questions (redesign PR 3a) have never been
+    asked, stubbed or live.
 
 ## 5. After v1
 

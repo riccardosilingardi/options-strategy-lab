@@ -3,7 +3,7 @@
 //
 //   node scripts/shoot-build.mjs [outDir]       (default docs/screens/redesign-pr2)
 //
-// Bundles scripts/build-screens.jsx (the WHOLE app on fixtures) for the browser, serves it on a local port, and drives
+// Bundles scripts/app-screens.jsx (the WHOLE app on fixtures) for the browser, serves it on a local port, and drives
 // the pre-installed headless Chromium (Playwright) at 390×844 with the clock fixed at 5 Oct 2026, 14:00 UTC: Find → the
 // UNG row → its first Strategies card's Build › → Build. Then: Build at rest (full page), Why this trade open, the
 // copilot with its stubbed answer, the Order section over the cap, the review sheet, the sent state, loading, no
@@ -27,7 +27,7 @@ mkdirSync(OUT, { recursive: true });
 const dir = mkdtempSync(join(tmpdir(), "osl-build-"));
 const fixture = resolve("src/fixtures/alpaca-chain-UNG.json");
 await build({
-  entryPoints: ["scripts/build-screens.jsx"], bundle: true, format: "esm", outfile: join(dir, "app.js"), logLevel: "error",
+  entryPoints: ["scripts/app-screens.jsx"], bundle: true, format: "esm", outfile: join(dir, "app.js"), logLevel: "error",
   // Stamped as production: these are production's screens (a preview draws the read-only banner, preview.test.jsx).
   define: { "process.env.NODE_ENV": '"production"', __OSL_DEPLOY_CONTEXT__: '"production"' }, loader: { ".js": "jsx" },
   plugins: [{ name: "fs-fixture", setup(b) {

@@ -174,9 +174,21 @@ export function HowWorkedOut({ fused }) {
   );
 }
 
-export function WhySheetTop({ fused, how, onHow }) {
+export function WhySheetTop({ fused, how, onHow, compact = false }) {
   const v = verdictLine(fused);
   if (!v) return null;
+  // COMPACT (the market page's Overview, redesign PR 3): one verdict line, "▲ Bull · 3 of 4 factors agree"-shaped — the
+  // score and the confidence are beside the panel's heading, and how they are worked out is the panel's own link.
+  if (compact) {
+    const counted = v.numbers.split(" · ")[0];
+    const colC = fused.agreement === "CONFLICT" ? T.amber : fused.score > 0 ? T.green : fused.score < 0 ? T.violet : T.mut;
+    return (
+      <p style={{ margin: "2px 0 6px", display: "flex", gap: 6, alignItems: "baseline", flexWrap: "wrap" }}>
+        <span style={{ ...sans, fontSize: FS.md, fontWeight: FW.bold, color: colC }}>{v.arrow}</span>
+        <span data-read-verdict style={{ ...sans, fontSize: FS.md, fontWeight: FW.bold, color: T.ink }}>{v.words} · {counted}</span>
+      </p>
+    );
+  }
   const col = fused.agreement === "CONFLICT" ? T.amber : fused.score > 0 ? T.green : fused.score < 0 ? T.violet : T.mut;
   const info = (label) => (
     <button onClick={onHow} aria-expanded={!!how} aria-controls="how-worked-out" aria-label={`How the ${label} is worked out`}
@@ -187,7 +199,7 @@ export function WhySheetTop({ fused, how, onHow }) {
     <div>
       <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
         <span style={{ ...sans, fontSize: FS.lg, fontWeight: FW.bold, color: col }}>{v.arrow}</span>
-        <span style={{ fontSize: FS.md, fontWeight: FW.bold, color: T.ink }}>{v.words}</span>
+        <span data-read-verdict style={{ fontSize: FS.md, fontWeight: FW.bold, color: T.ink }}>{v.words}</span>
       </div>
       <div style={{ ...mono, fontSize: FS.sm, color: T.body, display: "flex", alignItems: "center", flexWrap: "wrap", gap: 2 }}>
         <span>{counted} · {scorePart}</span>{info("score")}<span>· {confPart}</span>{info("confidence")}
@@ -221,13 +233,49 @@ export function SeasonRow({ season }) {
  * two ⓘ, the one sentence on what it changes in Find, the news line, and the long narrative behind "The full
  * reasoning" (the `WhyThisTrade` panel, unchanged, the autopilot sentence inside it).
  */
-export function WhySheet({ fused, title, note, ticker, weatherData, newsItems, month, defaultDetail = false, order = "ev", style }) {
+/**
+ * THE FOUR FACTORS AT REST (redesign PR 3, the board "Market · Overview"): each factor the market HAS, its name and its
+ * own weight, a bar of its strength, its arrow and strength, and the one sentence the factor wrote (`components[k].why`).
+ * Nothing is computed here: every figure is the fused result's. A factor the market does not have is not drawn.
+ */
+export function FactorRows({ fused }) {
+  if (!fused || !fused.components) return null;
+  const keys = (fused.factors || Object.keys(fused.components)).filter((k) => fused.components[k] && fused.components[k].applies !== false);
+  return (
+    <div data-factor-rows>
+      {keys.map((k) => {
+        const c = fused.components[k];
+        const w = fused.weights && fused.weights[k] != null ? Number(fused.weights[k]).toFixed(2) : null;
+        const tone = c.dir > 0 ? T.green : c.dir < 0 ? T.violet : T.mut;
+        return (
+          <div key={k} data-factor={k} style={{ borderTop: `1px solid ${T.line}`, padding: "10px 0", display: "flex", flexDirection: "column", gap: 6 }}>
+            <span style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
+              <span style={{ ...sans, fontSize: FS.xs, fontWeight: FW.bold, letterSpacing: "0.04em", color: T.ink }}>
+                {FACTOR_NAMES[k] || k}{w != null && <span style={{ ...mono, fontWeight: FW.regular, color: T.mut }}>{` × ${w}`}</span>}
+              </span>
+              <span style={{ ...mono, fontSize: FS.md, fontWeight: FW.bold, color: T.ink, fontVariantNumeric: "tabular-nums" }}>{`${c.arrow || ""} ${c.strength ?? "—"}`}</span>
+            </span>
+            <span aria-hidden="true" style={{ display: "block", height: 4, borderRadius: 2, background: T.line, overflow: "hidden" }}>
+              <span style={{ display: "block", height: 4, width: `${Math.max(0, Math.min(100, Number(c.strength) || 0))}%`, background: tone }} />
+            </span>
+            {c.why && <span style={{ ...sans, fontSize: FS.sm, color: T.body, lineHeight: LH.body }}>{c.why}</span>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+const FACTOR_NAMES = { seasonal: "SEASONALITY", technical: "PRICE TREND", weather: "WEATHER", news: "NEWS" };
+
+export function WhySheet({ fused, title, note, ticker, weatherData, newsItems, month, defaultDetail = false, order = "ev", style, factorsAtRest = false }) {
   const [how, setHow] = useState(false);
   const [newsOpen, setNewsOpen] = useState(false);
   if (!fused) return null;
   return (
       <div style={{ marginTop: 4, ...(style || {}) }}>
-        <WhySheetTop fused={fused} how={how} onHow={() => setHow((h) => !h)} />
+        <WhySheetTop fused={fused} how={how} onHow={() => setHow((h) => !h)} compact={factorsAtRest} />
+        {factorsAtRest && <FactorRows fused={fused} />}
+        {factorsAtRest && <div style={{ fontSize: FS.sm, color: T.body, marginTop: 8, lineHeight: LH.body }}>{whyFindEffect()}</div>}
         <SeasonRow season={fused.season || null} />
         <div style={{ marginTop: 4 }}><NumbersFit order={order} /></div>
         <button onClick={() => setNewsOpen((o) => !o)}

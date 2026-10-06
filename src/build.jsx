@@ -37,9 +37,10 @@ export const Section = ({ children, style, label, ...rest }) => (
     {children}
   </section>
 );
-const SectionTitle = ({ children, right = null }) => (
-  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, minHeight: TAP, marginTop: -10, marginBottom: -2 }}>
-    <h3 style={{ ...sans, fontSize: FS.md, fontWeight: FW.bold, color: T.ink, margin: 0, lineHeight: LH.tight }}>{children}</h3>
+/** A section's title (the mockup: h2, 15 bold). `tight` when the section's own padding is the mockup's 6px. */
+const SectionTitle = ({ children, right = null, tight = false }) => (
+  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, minHeight: TAP, marginTop: tight ? 0 : -10, marginBottom: tight ? 0 : -2 }}>
+    <h2 style={{ ...sans, fontSize: FS.md, fontWeight: FW.bold, color: T.ink, margin: 0, lineHeight: LH.tight }}>{children}</h2>
     {right}
   </div>
 );
@@ -59,7 +60,7 @@ export function BuildHeader({ backLabel, onBack }) {
         style={{ ...mono, fontSize: FS.md, color: T.ink, background: "transparent", border: "none", minHeight: TAP, padding: "0 8px", cursor: "pointer" }}>
         ‹ {backLabel}
       </button>
-      <span style={{ ...sans, fontSize: FS.xs, fontWeight: FW.bold, color: T.mut, border: `1px solid ${T.field}`, borderRadius: 999, padding: "3px 10px" }}>Paper</span>
+      <span style={{ ...sans, fontSize: FS.xs, fontWeight: FW.bold, color: T.mut, border: `1px solid ${T.field}`, borderRadius: 999, padding: "2px 8px" }}>Paper</span>
     </div>
   );
 }
@@ -107,7 +108,7 @@ const BoxRow = ({ k, v }) => (
   </div>
 );
 const Box = ({ title, children }) => (
-  <div style={{ border: `1px solid ${T.line}`, borderRadius: 10, padding: 10, minWidth: 0, display: "grid", gap: 4 }}>
+  <div style={{ border: `1px solid ${T.line}`, borderRadius: 10, padding: 10, minWidth: 0, display: "grid", gap: 6 }}>
     <div style={{ ...sans, fontSize: FS.xs, fontWeight: FW.bold, letterSpacing: "0.04em", color: T.mut }}>{title}</div>
     {children}
   </div>
@@ -123,14 +124,14 @@ export function NumbersSection({ figures, rr, pop, breakevens = [], future, past
     ["rr", sentence(CARD_LABELS.rr), rr == null ? "—" : Number(rr).toFixed(2), T.ink],
   ];
   return (
-    <Section label="The numbers">
+    <Section label="The numbers" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <SectionTitle>The numbers</SectionTitle>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 12px" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 16px" }}>
         {items.map(([id, label, value, tone]) => (
           <Figure key={id} id={id} label={label} value={value} tone={tone} def={BUILD_DEFINITIONS[id]} open={def === id} onToggle={toggle} />
         ))}
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
         <Box title={CARD_LABELS.future}>
           <BoxRow k={sentence(CARD_LABELS.chance)} v={chanceText(pop)} />
           <BoxRow k="Avg" v={ft.value} />
@@ -140,7 +141,7 @@ export function NumbersSection({ figures, rr, pop, breakevens = [], future, past
           <BoxRow k="Avg" v={past ? signedMoney(past.avg) : "—"} />
         </Box>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 12px", marginTop: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 16px" }}>
         <Figure id="delta" label="Delta (shares)" value={delta} size={FS.md} def={BUILD_DEFINITIONS.delta} open={def === "delta"} onToggle={toggle} />
         <Figure id="theta" label="Theta" value={theta} size={FS.md} def={BUILD_DEFINITIONS.theta} open={def === "theta"} onToggle={toggle} />
       </div>
@@ -150,8 +151,8 @@ export function NumbersSection({ figures, rr, pop, breakevens = [], future, past
 }
 
 /* ---------------------------------------------------------------- WHY THIS TRADE */
-export function WhySection({ stance, factors = null, reasonRule, lines = [], onMarketRead, readLabel }) {
-  const [open, setOpen] = useState(false);
+export function WhySection({ stance, factors = null, reasonRule, lines = [], currency = null, onMarketRead, readLabel, initialOpen = false }) {
+  const [open, setOpen] = useState(initialOpen);
   const tone = STAND_TONE();
   return (
     <Section label="Why this trade" style={{ padding: "6px 14px" }} data-why-trade>
@@ -186,6 +187,9 @@ export function WhySection({ stance, factors = null, reasonRule, lines = [], onM
               </div>
             </div>
           ))}
+          {/* THE CURRENCY, SAID ONCE (the trade card's line since PR #40; back on Build in redesign PR 3, TASK 0b, after the
+              card that carried it stopped being mounted in PR 2). */}
+          {currency && <div style={{ ...sans, fontSize: FS.xs, color: T.mut, lineHeight: LH.body }}>{currency}</div>}
         </div>
       </Reveal>
     </Section>
@@ -195,41 +199,46 @@ export function WhySection({ stance, factors = null, reasonRule, lines = [], onM
 /* ---------------------------------------------------------------- THE COPILOT */
 /** The four questions of the mockup, from SKILLS (one home). */
 export const buildSkills = () => BUILD_SKILL_IDS.map((id) => SKILLS.find((s) => s.id === id)).filter(Boolean);
-export function CopilotSection({ ask }) {
+/** The copilot section (the mockup "Build"), on Build and — with its own questions and words — on a position's screen. */
+export function CopilotSection({ ask, skills: own = null, label = null, heading = null, ownLabel = null, footer = null }) {
   const [chosen, setChosen] = useState(null);
-  const skills = buildSkills();
+  const inputId = React.useId();
+  const skills = own || buildSkills();
   const pairs = [];
   for (let i = 0; i < ask.msgs.length; i++) {
     if (ask.msgs[i].role === "user") pairs.push({ q: ask.msgs[i], a: ask.msgs[i + 1] && ask.msgs[i + 1].role === "assistant" ? ask.msgs[i + 1] : null });
   }
   const labelOf = (q) => (skills.find((s) => s.prompt === q.content) || SKILLS.find((s) => s.prompt === q.content) || {}).label || q.content;
   return (
-    <Section label="Ask the copilot about this trade" data-build-copilot>
-      <div style={{ ...sans, fontSize: FS.xs, fontWeight: FW.bold, letterSpacing: "0.08em", color: T.mut, marginBottom: 10 }}>ASK THE COPILOT ABOUT THIS TRADE</div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+    <Section label={label || "Ask the copilot about this trade"} data-build-copilot style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {/* Build's own words typed here (the word counter reads them); a position's screen hands in its own. */}
+      <h2 style={{ ...sans, margin: 0, fontSize: FS.xs, fontWeight: FW.bold, letterSpacing: "0.08em", color: T.mut, lineHeight: LH.tight }}>
+        {heading || <>ASK THE COPILOT ABOUT THIS TRADE</>}
+      </h2>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {skills.map((sk, i) => (
-          <button key={sk.id} disabled={ask.busy} aria-pressed={chosen === sk.id}
+          <button key={sk.id} data-q={i === 0 ? "main" : "other"} disabled={ask.busy} aria-pressed={chosen === sk.id}
             onClick={() => { setChosen(sk.id); ask.send(sk.prompt, sk.label); }}
-            style={{ ...sans, gridColumn: i === 0 ? "1 / span 2" : undefined, minHeight: TAP, padding: "8px 12px", borderRadius: 10, textAlign: "left",
+            style={{ ...sans, minHeight: TAP, padding: "8px 12px", borderRadius: 10, textAlign: "left",
               fontSize: FS.sm, fontWeight: i === 0 ? FW.bold : FW.regular, color: T.ink, background: "transparent", cursor: ask.busy ? "wait" : "pointer",
               border: `1px solid ${i === 0 ? T.blue : T.field}`, boxShadow: chosen === sk.id ? `inset 0 0 0 2px ${T.blue}` : "none", lineHeight: LH.tight }}>
             {sk.label}
           </button>
         ))}
       </div>
-      <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-        <input value={ask.input} onChange={(e) => ask.setInput(e.target.value)} placeholder="Or ask your own…" aria-label="Ask the copilot your own question"
-          onKeyDown={(e) => { if (e.key === "Enter") { setChosen(null); ask.send(ask.input); } }}
-          style={{ ...sans, flex: 1, minWidth: 0, height: TAP, boxSizing: "border-box", fontSize: FS.sm, color: T.ink, background: T.bg,
+      <form onSubmit={(e) => { e.preventDefault(); setChosen(null); ask.send(ask.input); }} style={{ display: "flex", gap: 6 }}>
+        <label htmlFor={inputId} style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)" }}>{ownLabel || <>Your own question about this trade</>}</label>
+        <input id={inputId} value={ask.input} onChange={(e) => ask.setInput(e.target.value)} placeholder="Or ask your own…"
+          style={{ ...sans, flex: 1, minWidth: 0, minHeight: TAP, boxSizing: "border-box", fontSize: FS.sm, color: T.ink, background: T.bg,
             border: `1px solid ${T.field}`, borderRadius: 10, padding: "0 12px" }} />
-        <button onClick={() => { setChosen(null); ask.send(ask.input); }} disabled={ask.busy} aria-label="Send the question"
+        <button type="submit" disabled={ask.busy} aria-label="Send the question"
           style={{ width: TAP, height: TAP, flexShrink: 0, borderRadius: 10, border: "none", background: T.action, color: T.onAccent,
             display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: ask.busy ? "wait" : "pointer", opacity: ask.busy ? 0.6 : 1 }}>
           <ArrowUp size={20} strokeWidth={2} aria-hidden="true" />
         </button>
-      </div>
+      </form>
       {(pairs.length > 0 || ask.busy) && (
-        <div style={{ borderTop: `1px solid ${T.line}`, marginTop: 12, paddingTop: 10, display: "grid", gap: 12 }} data-copilot-answers>
+        <div style={{ borderTop: `1px solid ${T.line}`, paddingTop: 10, display: "grid", gap: 12 }} data-copilot-answers>
           {pairs.map((p, i) => (
             <div key={i}>
               <div style={{ ...sans, fontSize: FS.sm, fontWeight: FW.bold, color: T.ink }}>{labelOf(p.q)}</div>
@@ -252,10 +261,10 @@ export function CopilotSection({ ask }) {
           )}
         </div>
       )}
-      {ask.err && <div role="alert" style={{ ...sans, fontSize: FS.sm, color: T.red, marginTop: 8 }}>{ask.err}</div>}
-      <div style={{ ...sans, fontSize: FS.xs, color: T.mut, lineHeight: LH.body, marginTop: 10 }}>
-        Educational analysis on a paper account, not financial advice. Every answer is filed in the Journal.
-      </div>
+      {ask.err && <div role="alert" style={{ ...sans, fontSize: FS.sm, color: T.red }}>{ask.err}</div>}
+      <p data-copilot-footer style={{ ...sans, fontSize: FS.xs, color: T.mut, lineHeight: LH.body, margin: 0 }}>
+        {footer || <>Educational analysis on a paper account, not financial advice. Every answer is filed in the Journal.</>}
+      </p>
     </Section>
   );
 }
@@ -270,7 +279,7 @@ export function LegRow({ leg, unquoted = false }) {
         color: sell ? T.amber : T.onAccent, background: sell ? "transparent" : T.amber, boxShadow: sell ? `inset 0 0 0 2px ${T.amber}` : "none" }}>
         {sell ? "SELL" : "BUY"}
       </span>
-      <span style={{ ...mono, ...tnum, fontSize: FS.md, fontWeight: FW.bold, color: T.ink, flex: 1, minWidth: 0 }}>
+      <span data-leg-name style={{ ...mono, ...tnum, fontSize: FS.md, fontWeight: FW.bold, color: T.ink, flex: 1, minWidth: 0 }}>
         {leg.qty} × {leg.strike} {leg.type === "call" ? "call" : "put"}
       </span>
       <span style={{ textAlign: "right" }}>
@@ -284,8 +293,8 @@ export function LegRow({ leg, unquoted = false }) {
 }
 export function LegsSection({ expLabel, legs = [], onEditInChain, snapNote = null }) {
   return (
-    <Section label="Legs" data-build-legs>
-      <SectionTitle right={onEditInChain ? <LinkBtn onClick={onEditInChain}>Edit in chain ›</LinkBtn> : null}>Legs{expLabel ? ` · ${expLabel}` : ""}</SectionTitle>
+    <Section label="Legs" data-build-legs style={{ padding: "6px 14px 8px" }}>
+      <SectionTitle tight right={onEditInChain ? <LinkBtn onClick={onEditInChain}>Edit in chain ›</LinkBtn> : null}>Legs{expLabel ? ` · ${expLabel}` : ""}</SectionTitle>
       {snapNote && <Note color={T.blue} style={{ marginBottom: 6 }}>{snapNote}</Note>}
       <div style={{ marginTop: 6 }}>{legs.map((l, i) => <LegRow key={i} leg={l} />)}</div>
     </Section>
@@ -432,14 +441,14 @@ export function SendBar({ label, disabled = false, reason = null, footer, onSend
 
 /* ---------------------------------------------------------------- THE REVIEW SHEET (TASK 3) */
 const Mark = ({ ok }) => (
-  <span aria-hidden="true" style={{ width: 20, flexShrink: 0, textAlign: "center", fontSize: FS.md, fontWeight: FW.bold,
+  <span aria-hidden="true" style={{ width: 20, flexShrink: 0, textAlign: "center", fontSize: FS.sm, fontWeight: FW.bold,
     color: ok === true ? T.green : ok === false ? T.red : T.mut }}>{ok === true ? "✓" : ok === false ? "✗" : "—"}</span>
 );
 export function ReviewSheet({ r, ts }) {
   const sent = ts.outcome && r.lastSent && !/^NOT SENT/.test(ts.outcome.label || "");
   const refused = ts.outcome && /^NOT SENT/.test(ts.outcome.label || "");
   return (
-    <Sheet open={r.open} title={sent ? "✓ Sent. Alpaca accepted it." : "Review, then send"} onClose={r.onClose}>
+    <Sheet open={r.open} title={sent ? "✓ Sent. Alpaca accepted it." : "Review, then send"} sub={sent ? null : r.sub} onClose={r.onClose}>
       {sent ? (
         <div data-review-sent style={{ display: "grid", gap: 8 }}>
           <div style={{ ...mono, ...tnum, fontSize: FS.sm, color: T.ink }}>{r.sentLine(r.lastSent)}</div>
@@ -452,19 +461,18 @@ export function ReviewSheet({ r, ts }) {
         </div>
       ) : (
         <div data-review style={{ display: "grid", gap: 12 }}>
-          <div style={{ ...sans, fontSize: FS.xs, color: T.mut }}>{r.sub}</div>
-          <div style={{ background: T.bg, border: `1px solid ${T.line}`, borderRadius: 10, padding: "10px 12px" }}>
+          <div data-review-order style={{ background: T.bg, border: `1px solid ${T.line}`, borderRadius: 10, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 6 }}>
             {r.legs.map((l, i) => (
-              <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline", minHeight: 24 }}>
+              <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
                 <span style={{ ...sans, fontSize: FS.sm, color: T.ink }}><b>{l.words[0]}</b> {l.words[1]}</span>
-                <span style={{ ...mono, fontSize: FS.xs, color: T.mut, whiteSpace: "nowrap" }}>{l.occ || "—"}</span>
+                <span data-occ style={{ ...mono, fontSize: FS.sm, color: T.mut, whiteSpace: "nowrap" }}>{l.occ || "—"}</span>
               </div>
             ))}
-            <div style={{ borderTop: `1px solid ${T.line}`, marginTop: 6, paddingTop: 6, ...mono, ...tnum, fontSize: FS.md, fontWeight: FW.bold, color: T.ink }}>{r.limitLine}</div>
+            <div data-review-limit style={{ borderTop: `1px solid ${T.line}`, paddingTop: 6, ...mono, ...tnum, fontSize: FS.md, fontWeight: FW.bold, color: T.ink }}>{r.limitLine}</div>
           </div>
-          <div style={{ display: "grid", gap: 6 }} data-review-checks>
+          <div style={{ display: "grid" }} data-review-checks>
             {r.checks.map((c) => (
-              <div key={c.id} style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+              <div key={c.id} style={{ display: "flex", alignItems: "baseline", gap: 8, padding: "4px 0" }}>
                 <Mark ok={c.ok} />
                 <span style={{ ...sans, fontSize: FS.sm, color: T.body, flex: 1, lineHeight: LH.body }}>{c.text}</span>
                 <span style={{ ...mono, ...tnum, fontSize: FS.sm, color: T.ink, whiteSpace: "nowrap" }}>{c.value}</span>
@@ -519,11 +527,12 @@ export function BuildScreen({ v, foldedNode = null }) {
   const ts = useTicketSend({ ...v.ticket, onSent: (o, info) => { setLastSent(o); if (v.ticket.onSent) v.ticket.onSent(o, info); } });
   const r = { ...v.review, lastSent, onSecond: v.review.viaBroker ? () => ts.fire() : v.review.onLocal,
     onClose: () => { if (ts.outcome && !ts.busy) ts.setOutcome(null); v.review.onClose(); } };
-  const others = SKILLS.filter((s) => !BUILD_SKILL_IDS.includes(s.id));
+  // The copilot by place (redesign PR 3): Build's More shows the other Build and desk questions, never Find's or Positions'.
+  const others = SKILLS.filter((s) => !BUILD_SKILL_IDS.includes(s.id) && (s.place === "build" || s.place === "desk"));
   return (
     <div data-build style={{ paddingBottom: 8 }}>
       <BuildHeader backLabel={v.back.label} onBack={v.back.onClick} />
-      <main style={{ padding: "4px 16px", display: "grid", gap: 12 }}>
+      <main style={{ padding: "4px 16px 0", display: "grid", gap: 12 }}>
         <BuildTitle name={v.title.name} sub={v.title.sub} signs={v.title.signs} note={v.title.note} />
         <WhatItDoes takeaway={v.takeaway} chart={v.chart} />
         <NumbersSection {...v.numbers} />
@@ -556,44 +565,66 @@ export function BuildScreen({ v, foldedNode = null }) {
 /* ---------------------------------------------------------------- THE THREE STATES (TASK 4) */
 const Dash = ({ k }) => (
   <div>
-    <div style={{ ...sans, fontSize: FS.xs, color: T.mut }}>{k}</div>
-    <div style={{ ...mono, fontSize: FS.lg, fontWeight: FW.bold, color: T.dim }}>—</div>
+    <dt style={{ ...sans, fontSize: FS.xs, color: T.mut }}>{k}</dt>
+    <dd style={{ ...mono, fontSize: FS.lg, fontWeight: FW.bold, color: T.dim, margin: "2px 0 0" }}>—</dd>
   </div>
 );
+const WAIT_CSS = `@keyframes osl-wait{0%{transform:translateX(-100%)}100%{transform:translateX(350%)}}`;
 export function BuildLoading({ back, title, sub, reading }) {
   return (
     <div data-build-state="loading">
       <BuildHeader backLabel={back.label} onBack={back.onClick} />
-      <main style={{ padding: "4px 16px", display: "grid", gap: 12 }}>
+      <main style={{ padding: "4px 16px 0", display: "grid", gap: 12 }}>
         <BuildTitle name={title} sub={sub} />
-        <Section label="Loading">
-          <div style={{ ...sans, fontSize: FS.md, color: T.ink }}>{reading}</div>
-          <div style={{ ...sans, fontSize: FS.sm, color: T.mut, marginTop: 4, lineHeight: LH.body }}>The chart waits for a bid and an ask on both legs.</div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 12px", marginTop: 12 }}>
+        {/* (The mockup "Build · loading": what it reads, a moving bar — no amount, it is not a count — and the empty frame
+            where the chart will be; then the four figures as dashes.) */}
+        <Section label="Loading" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <p style={{ ...sans, fontSize: FS.md, color: T.ink, margin: 0 }}>{reading}</p>
+          <style>{WAIT_CSS}</style>
+          <span aria-hidden="true" style={{ display: "block", height: 3, borderRadius: 2, background: T.line, overflow: "hidden" }}>
+            <span style={{ display: "block", height: 3, width: "30%", background: T.amber, animation: "osl-wait 1.4s ease-in-out infinite" }} />
+          </span>
+          <div style={{ ...sans, fontSize: FS.xs, color: T.dim, lineHeight: LH.body, border: `1px dashed ${T.line}`, borderRadius: 8, minHeight: 160,
+            display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", padding: "0 16px" }}>The chart waits for a bid and an ask on both legs.</div>
+        </Section>
+        <Section label="The numbers, not read yet">
+          <dl style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 16px", margin: 0 }}>
             <Dash k={sentence(CARD_LABELS.profit)} /><Dash k={LOSS_LABEL} /><Dash k={BE_LABEL} /><Dash k={sentence(CARD_LABELS.chance)} />
-          </div>
-          <div style={{ ...sans, fontSize: FS.xs, color: T.mut, marginTop: 10 }}>A dash is a number not read yet, never a zero.</div>
+          </dl>
+          <p style={{ ...sans, fontSize: FS.xs, color: T.dim, margin: "10px 0 0" }}>A dash is a number not read yet, never a zero.</p>
         </Section>
       </main>
     </div>
   );
 }
-export function BuildNoQuotes({ back, title, sub, sentence, legs = [], lastRead, onRetry, onPickExpiry }) {
+export function BuildNoQuotes({ back, title, sub, sentence, legs = [], lastRead, onRetry, onPickExpiry, legsTitle = "Legs" }) {
   return (
     <div data-build-state="no-quotes">
       <BuildHeader backLabel={back.label} onBack={back.onClick} />
-      <main style={{ padding: "4px 16px", display: "grid", gap: 12 }}>
+      <main style={{ padding: "4px 16px 0", display: "grid", gap: 12 }}>
         <BuildTitle name={title} sub={sub} />
-        <Section label="No quotes">
-          <div style={{ ...sans, fontSize: FS.md, fontWeight: FW.bold, color: T.ink }}>No quotes for {legs.length === 1 ? "this leg" : legs.length ? `these ${legs.length === 2 ? "two" : legs.length} legs` : "this market"}.</div>
-          <div style={{ ...sans, fontSize: FS.sm, color: T.body, marginTop: 4, lineHeight: LH.body }}>{sentence}</div>
-          <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-            <button onClick={onRetry} style={{ ...sans, flex: 1, minHeight: TAP, borderRadius: 10, border: "none", background: T.amber, color: T.onAccent, fontSize: FS.sm, fontWeight: FW.bold, cursor: "pointer" }}>Retry</button>
-            <button onClick={onPickExpiry} style={{ ...ghost48, minHeight: TAP, fontSize: FS.sm, borderRadius: 10 }}>Pick another expiry</button>
+        {/* (The mockup "Build · no quotes": an amber-edged panel with Retry and Pick another expiry, then the legs with "bid — /
+            ask —", then when it was last read.) */}
+        <Section label="No quotes" style={{ border: `1px solid ${T.amber}`, display: "flex", flexDirection: "column", gap: 10 }}>
+          <p style={{ ...sans, fontSize: FS.md, fontWeight: FW.bold, color: T.ink, margin: 0 }}>No quotes for {legs.length === 1 ? "this leg" : legs.length ? `these ${legs.length === 2 ? "two" : legs.length} legs` : "this market"}.</p>
+          <p style={{ ...sans, fontSize: FS.sm, color: T.body, lineHeight: LH.body, margin: 0 }}>{sentence}</p>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={onRetry} style={{ ...ghost48, minHeight: TAP, fontSize: FS.sm, borderRadius: 10 }}>Retry</button>
+            <button onClick={onPickExpiry} style={{ ...sans, flex: 1, minHeight: TAP, borderRadius: 10, border: "none", background: T.amber, color: T.onAccent, fontSize: FS.sm, fontWeight: FW.bold, cursor: "pointer" }}>Pick another expiry</button>
           </div>
-          {legs.length > 0 && <div style={{ marginTop: 12 }}>{legs.map((l, i) => <LegRow key={i} unquoted leg={{ ...l, mid: null, bid: null, ask: null, delta: null }} />)}</div>}
-          <div style={{ ...sans, fontSize: FS.xs, color: T.mut, marginTop: 10, lineHeight: LH.body }}>{lastRead}</div>
         </Section>
+        {legs.length > 0 && (
+          <Section label="Legs" style={{ padding: "6px 14px 8px" }}>
+            <div style={{ ...sans, fontSize: FS.md, fontWeight: FW.bold, color: T.ink, minHeight: 40, display: "flex", alignItems: "center" }}>{legsTitle}</div>
+            {legs.map((l, i) => (
+              <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 8, padding: "10px 0", borderTop: `1px solid ${T.line}` }}>
+                <span style={{ ...mono, ...tnum, fontSize: FS.md, fontWeight: FW.bold, color: T.ink }}>{l.side < 0 ? "SELL" : "BUY"} {l.qty} × {l.strike} {l.type === "call" ? "call" : "put"}</span>
+                <span style={{ ...mono, fontSize: FS.md, color: T.dim }}>bid — / ask —</span>
+              </div>
+            ))}
+          </Section>
+        )}
+        <p data-last-read style={{ ...sans, fontSize: FS.xs, color: T.mut, lineHeight: LH.body, margin: 0 }}>{lastRead}</p>
       </main>
     </div>
   );
@@ -601,9 +632,13 @@ export function BuildNoQuotes({ back, title, sub, sentence, legs = [], lastRead,
 export function BuildEmpty({ onFind, onChain }) {
   return (
     <div data-build-state="empty">
-      <main style={{ padding: "24px 16px", display: "grid", gap: 12 }}>
-        <h2 data-view-heading tabIndex={-1} style={{ ...sans, fontSize: FS.lg, fontWeight: FW.bold, color: T.ink, margin: 0, outline: "none" }}>Nothing on Build yet.</h2>
-        <p style={{ ...sans, fontSize: FS.md, color: T.body, lineHeight: LH.body, margin: 0 }}>
+      {/* (The mockup "Build · empty": "Build" as the page's title, then the line in 18 bold, the sentence, two actions.) */}
+      <header style={{ padding: "12px 16px 4px" }}>
+        <h1 data-view-heading tabIndex={-1} style={{ ...sans, fontSize: FS.xl, fontWeight: FW.bold, color: T.ink, margin: 0, lineHeight: LH.tight, outline: "none" }}>Build</h1>
+      </header>
+      <main style={{ padding: "48px 16px 0", display: "grid", gap: 14 }}>
+        <p style={{ ...sans, fontSize: FS.lg, fontWeight: FW.bold, color: T.ink, margin: 0, lineHeight: LH.tight }}>Nothing on Build yet.</p>
+        <p style={{ ...sans, fontSize: FS.sm, color: T.body, lineHeight: LH.body, margin: 0 }}>
           Pick a card in Find, or tap prices in a market's chain. The trade you pick lands here with its numbers, its chart and its exit plan.
         </p>
         <div style={{ display: "flex", gap: 8 }}>
