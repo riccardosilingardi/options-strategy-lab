@@ -15,7 +15,7 @@
 import React from "react";
 import { Search, Hammer, Briefcase, FileText } from "lucide-react";
 import { T, TYPE, BADGE_H } from "./theme.js";
-import { sans, mono, TAP } from "./ui.jsx";
+import { sans, mono, TAP, RAIL_W } from "./ui.jsx";
 
 const FS = TYPE.size, FW = TYPE.weight;
 /** The bar's own height in pixels; a page adds it to its bottom padding. */
@@ -39,7 +39,33 @@ export function placeOf({ tab, step, showSettings = false }) {
   return step === "build" ? "build" : "find";
 }
 
-export function BottomBar({ current, badge = 0, badgeLabel = null, onGo }) {
+export function BottomBar({ current, badge = 0, badgeLabel = null, onGo, rail = false }) {
+  /* ON A COMPUTER (redesign PR 3b): the same four places, as a sidebar on the left (`RAIL_W`), one row each. */
+  if (rail) {
+    return (
+      <nav aria-label="Places" data-bottom-bar data-rail
+        style={{ position: "fixed", left: 0, top: 0, bottom: 0, width: RAIL_W, zIndex: 60, boxSizing: "border-box", padding: "16px 10px",
+          background: T.panel, borderRight: `1px solid ${T.line}`, display: "flex", flexDirection: "column", gap: 4 }}>
+        {NAV_PLACES.map(({ id, label, I }) => {
+          const on = current === id;
+          return (
+            <button key={id} onClick={() => onGo && onGo(id)} aria-current={on ? "page" : undefined}
+              aria-label={id === "positions" && badge > 0 ? (badgeLabel ? `${label}: ${badgeLabel}` : `${label}, ${badge} to look at`) : label}
+              style={{ ...sans, minHeight: TAP, border: "none", borderRadius: 10, cursor: "pointer", padding: "0 12px",
+                background: on ? T.ink : "transparent", color: on ? T.bg : T.ink, fontSize: FS.sm, fontWeight: on ? FW.bold : FW.regular,
+                display: "flex", alignItems: "center", gap: 10, textAlign: "left" }}>
+              <I size={18} aria-hidden="true" />
+              <span style={{ flex: 1 }}>{label}</span>
+              {id === "positions" && badge > 0 && (
+                <span aria-hidden="true" style={{ ...mono, fontSize: FS.xs, fontWeight: FW.bold, background: T.action, color: T.onAccent,
+                  borderRadius: 10, padding: "0 6px", lineHeight: "18px" }}>{badge}</span>
+              )}
+            </button>
+          );
+        })}
+      </nav>
+    );
+  }
   return (
     <nav aria-label="Places" data-bottom-bar
       style={{ position: "fixed", left: 0, right: 0, bottom: `calc(${BADGE_H}px + env(safe-area-inset-bottom, 0px))`, zIndex: 60,

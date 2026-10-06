@@ -81,6 +81,7 @@ import { exitProgress, entryVsNow, displayName, fileState, pnlShareOfRisk, pnlSh
 import { PositionScreen } from "./positionScreen.jsx";
 import { JournalScreen } from "./journal.jsx";
 import { SettingsScreen } from "./settings.jsx";
+import { useWide, RAIL_W } from "./ui.jsx";
 import { findStatusText, DEFAULT_FIND_ORDER, BUILD_CTA } from "./rules.js";
 // REDESIGN PR 2: Build on the owner's mockup — its words (rules.js) and its screen (build.jsx).
 import { tradeTakeaway, buildSubLine, expiryShort, deltaSharesText, thetaDayText, reasonRuleText, orderBookLine, capLabel,
@@ -1228,6 +1229,8 @@ class TabBoundary extends React.Component {
 }
 
 export default function OptionsStrategyLab() {
+  // A COMPUTER'S SCREEN (redesign PR 3b): from WIDE_MIN the bar is a sidebar and Find and Positions are two panes.
+  const wide = useWide();
   // PRD §5: `view` is the shell. Since redesign PR 1 round 2 (owner, 5 Oct 2026) THE APP OPENS ON FIND: Home is no
   // longer a screen, so the desk is the only view (its positions are the bottom bar's Positions badge, Settings the
   // gear in Find's header). The field stays in nav.js's entries.
@@ -4404,6 +4407,13 @@ export default function OptionsStrategyLab() {
   const onJournal = tab === "journal" && !showSettings;
   // Settings draws its own "‹ Back" header since redesign PR 3b: no screen keeps the desk header now.
   const chromeless = onFindStep || onMarketStep || onBuildStep || onPositions || onJournal || showSettings || (tab === "watching" && !showSettings);
+  // TWO PANES (owner, 6 Oct 2026): Find's rows beside the market page, Positions' cards beside a position's screen.
+  const paneFind = wide && (onFindStep || onMarketStep);
+  const panePos = wide && onPositions;
+  const PANES = { display: "grid", gridTemplateColumns: "minmax(360px, 460px) minmax(0, 1fr)", alignItems: "start", gap: 0 };
+  const PANE_L = { minWidth: 0, borderRight: `1px solid ${T.line}`, alignSelf: "stretch" };
+  const PANE_R = { minWidth: 0, position: "sticky", top: 0, maxHeight: "100vh", overflowY: "auto" };
+  const CONTENTS = { display: "contents" };
   /* FIND'S STATUS LINE: "<freshness> · <feed> · Paper". The feed is the feeds the selected markets came from. */
   const findFeeds = Array.from(new Set(find.markets.map((tk) => feedName(chains[tk])).filter(Boolean))).join(" / ");
   /* FIND'S BAR READS THE SELECTION, NOT ONE MARKET (PR #46, TASK 1): "N markets · prices Xm ago", the OLDEST. */
@@ -4448,7 +4458,10 @@ export default function OptionsStrategyLab() {
              was covering whatever happened to be at the bottom right. */}
         {/* On Find, Saved and the market page the screen runs edge to edge and the list ends 88px above the bottom (the
             mockups' figure, owner 5 Oct 2026); elsewhere the old padding and the badge strip. */}
-        <div style={{ maxWidth: 1720, margin: "0 auto", padding: chromeless ? `0 0 ${FIND_LIST_END}px` : `18px 14px ${BADGE_SAFE + NAV_BAR_H}px` }}>
+        <div style={{ maxWidth: 1720, margin: "0 auto", padding: chromeless ? `0 0 ${FIND_LIST_END}px` : `18px 14px ${BADGE_SAFE + NAV_BAR_H}px`,
+          ...(wide ? { marginLeft: RAIL_W, paddingBottom: 24 } : null) }}>
+        {/* ON A COMPUTER, ONE COLUMN SCREENS KEEP A READING WIDTH: Build, its states and Settings sit in 760px. */}
+        {wide && <style>{"[data-build],[data-build-state],[data-settings]{max-width:760px;margin-left:auto;margin-right:auto}"}</style>}
 
         {/* Header */}
         {/* (Not on Find, Saved or a market's page since round 2: they draw their own.) */}
@@ -4595,13 +4608,15 @@ export default function OptionsStrategyLab() {
         {/* "FIND", THEN RESULTS | SAVED (PR #47, TASK 4; heading redesign PR 1): the old Watching place, inside Find.
             Written `"find" === step` so the word counter does not take this switch for Find's own block. The gear for
             Settings is in the header above. */}
-        {((tab === "build" && "find" === step) || tab === "watching") && !showSettings && (
+        <div data-panes={paneFind ? "find" : undefined} style={paneFind ? PANES : CONTENTS}>
+        <div data-pane={paneFind ? "list" : undefined} style={paneFind ? PANE_L : CONTENTS}>
+        {((tab === "build" && ("find" === step || paneFind)) || tab === "watching") && !showSettings && (
           <FindHeader seg={tab === "watching" ? "saved" : "results"} savedN={watchRows.length} nMarkets={find.markets.length}
             onSeg={(v) => { if (v === "saved") { setTab("watching"); setShowSettings(false); setEv(null); setDeskSheet(null); } else goStep("find"); }}
             busy={busy !== null} onRefresh={refreshFind} onSettings={() => setShowSettings(true)} settingsOn={showSettings}
             status={findStatusText(findFresh.line, findFeeds)} stale={findStale} />
         )}
-        {tab === "build" && !showSettings && step === "find" && (
+        {tab === "build" && !showSettings && (step === "find" || paneFind) && (
           <FindStep
             request={request} onRequest={(patch) => setWant((w) => ({ ...w, ...patch }))}
             sentiments={SENTIMENTS} find={find} setFind={setFind}
@@ -4621,10 +4636,14 @@ export default function OptionsStrategyLab() {
             </>}
             {...compareBlock} />
         )}
+        </div>
+        <div data-pane={paneFind ? "detail" : undefined} style={paneFind ? PANE_R : CONTENTS}>
 
         {/* ============ STEP 2 · THE MARKET PAGE (redesign PR 1, TASK 3) ============
             One market: Overview · Strategies · Chain. Its cards are Find's one sorted list filtered to its ticker. */}
-        {tab === "build" && !showSettings && step === "market" && mkt.tk && (
+        {/* On a computer the market page stays beside Find's rows (the last one opened); before any, it says where it opens. */}
+        {paneFind && !mkt.tk && <Note style={{ margin: "24px 16px" }}>Pick a market on the left: its page opens here.</Note>}
+        {tab === "build" && !showSettings && (step === "market" || paneFind) && mkt.tk && (
           <MarketPage
             tk={mkt.tk} tab={mkt.tab} onTab={(t) => setMkt((m) => ({ ...m, tab: t }))} onBack={() => goStep("find")}
             onRefresh={() => refreshChain(mkt.tk)} busy={busy !== null}
@@ -4652,6 +4671,8 @@ export default function OptionsStrategyLab() {
             sheet={deskSheet} onSheet={setDeskSheet}
             compareProps={compareBlock} />
         )}
+        </div>
+        </div>
 
         {/* ============ BUILDER ============ */}
         {/* Where a hand-off lands. The anchor is rendered for every state of
@@ -5286,9 +5307,10 @@ export default function OptionsStrategyLab() {
             opens its row in Orders. The Alpaca panel is dissolved — a holding with a record is its card, one with
             none is a "Not in the app" card, an order with none is a row tagged "sent outside this app" — and its
             Sync is the refresh icon on the bar. Integrations moved to Settings → Connections. */}
-        {tab === "positions" && !showSettings && positionScreenNode}
-        {tab === "positions" && !showSettings && !positionScreenNode && (
-          <div data-positions>
+        <div data-panes={panePos ? "positions" : undefined} style={panePos ? PANES : CONTENTS}>
+        {!panePos && tab === "positions" && !showSettings && positionScreenNode}
+        {tab === "positions" && !showSettings && (!positionScreenNode || panePos) && (
+          <div data-positions style={panePos ? PANE_L : undefined}>
             <PositionsHeader busy={syncBusy} onSettings={() => setShowSettings(true)}
               onRefresh={async () => { setSyncBusy(true); try { await syncBroker(); recheckOrders(); } finally { setSyncBusy(false); } }} />
             <AccountStrip account={account || alpaca} risk={exposure} capital={exposure ? exposure.tradingCapital : null} />
@@ -5419,6 +5441,13 @@ export default function OptionsStrategyLab() {
 
           </div>
         )}
+        {/* On a computer a position's screen stays beside the cards; before one is chosen, the pane says where it opens. */}
+        {panePos && (
+          <div data-pane="detail" style={PANE_R}>
+            {positionScreenNode || <Note style={{ margin: "24px 16px" }}>Pick a position on the left: its own screen opens here.</Note>}
+          </div>
+        )}
+        </div>
 
         {/* ============ SETTINGS (redesign PR 3b; the owner's board "Settings") ============
             src/settings.jsx draws it; every write is the handler it was. A connection says what the app last saw of it. */}
@@ -5460,7 +5489,7 @@ export default function OptionsStrategyLab() {
             own records and figures; the closed ones the record's. */}
         {tab === "journal" && !showSettings && (
           <JournalScreen key={journalOpenRef || "journal"} v={{
-            journey,
+            journey, wide,
             insideLimit: <>{`Inside the limit: ${journey.coerenza == null ? "not judged yet" : `${pctText(journey.coerenza)} of the trades judged stayed inside the per-trade limit`}.`}
               {" "}Rule closes are the share of trades you closed because a rule said so rather than because you felt like it — it
               is the only number here that predicts the others. Awareness averages that, the limit and how often you opened.</>,
@@ -5552,7 +5581,7 @@ export default function OptionsStrategyLab() {
             the limits are in Settings and on the account strip; the feed is on Find's status line and the market page. */}
       </div>
       {/* ONE BOTTOM BAR (PR #47, TASK 4). The badge on Positions is decisions + closes working. */}
-      <BottomBar current={placeOf({ tab, step, showSettings })} badge={nAttention + attn.closesWorking}
+      <BottomBar rail={wide} current={placeOf({ tab, step, showSettings })} badge={nAttention + attn.closesWorking}
         badgeLabel={statusLine({ positions: ownedPositions, attention: nAttention, looks: attn.looks, closing: attn.closesWorking })}
         onGo={(id) => {
           if (id === "find" || id === "build") { goStep(id); return; }

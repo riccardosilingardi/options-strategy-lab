@@ -6,6 +6,48 @@ The full history of every item shipped so far (P0–P10, P2-bis) is in `docs/his
 Every pull request updates this file: the session that ships an item marks it done and states
 what the next one inherits.
 
+## Done in redesign PR 3b (owner, 6 Oct 2026): the Journal, Settings, and the app on a computer
+
+Planned first; the owner answered the four open points: the branch restarted from main after PR #56 merged; on a computer,
+two panes; Settings' extra fields folded under "More limits"; the Journal's report, analyses and floor log below, folded.
+
+- **TASK 0 — the close confirm on a position's screen** in the board's closing state (`CloseConfirm look="screen"`):
+  the order in one mono line, the book, the clock, Back / Send close; another price, quantity or TIF one fold away.
+  Order path 3 unchanged; the "Not in the app" card and a multi-leg Modify keep the old look and the 35-word budget.
+- **TASK 1 — the Journal** (src/journal.jsx, its words src/journalView.js): the board's record, search, OPEN (new on the
+  Journal: open trades and waiting orders with the reason they were opened and their whole timeline), CLOSED TRADES with
+  the net (`journalPnlTotal()`), "Refs only go up"; the report, the copilot's analyses and the entry floor's log folded
+  below, unchanged inside. "Whole record ›" opens that position's entry. Two closed trades joined the fixture book.
+- **TASK 2 — Settings** (src/settings.jsx): the board's order; a connection says what the app last saw of it (Alpaca's
+  account and the time of the last sync; Alpha Vantage "Working" only when a market's season was measured; Anthropic
+  the date of the last filed answer), never "Working" for a service nobody read. Every write is the handler it was.
+- **TASK 3 — the app on a computer** (`useWide()`, `WIDE_MIN` 1024, `RAIL_W` 200 in ui.jsx): the bottom bar becomes a
+  sidebar; Find's rows beside the market page; Positions' cards beside a position's screen; the Journal in two columns;
+  Build and Settings at 760px. On a phone the wrappers are `display: contents`, and the 20-board audit shows nothing moved.
+- **TASK 4** — the audit now covers 20 boards (Journal, Settings added), dark and light; photographs in
+  docs/screens/redesign-pr3/ (`node scripts/shoot-positions.mjs`, now with the Journal, Settings and 1366×900).
+
+**Measured.** Tests 1,372 → 1,382, 0 failed (new: journalScreen.test.jsx; the Journal's and Settings' source checks
+point at their new files). Build 1,417.33 → 1,430.59 kB (the usual chunk warning). Words: find 336, market 604, build
+435, positions 248 (the close confirm's screen look is counted where the "Not in the app" card mounts it; reason in
+voice.test.js); J-0001's surfaces 62/120, 30/35, 35/35, 40/40.
+
+**Not changed:** the risk gate, the seven order paths and their bodies, every RULES value, the /api/state payload (no
+new field), deploy.js's rule, what Find, the market page, Build, Positions and Orders do.
+
+### What PR 4 inherits from PR 3b
+
+- **Find's "Compare the cards" preset** on Find, and **the system prompt's decision trees**, which still recommend
+  structures (the copilot by place says it never proposes).
+- **The computer's layout has no board** (the owner chose it in words): it is photographed at 1366×900 only, and a
+  window between 1024 and 1366 has not been looked at. The market page's back arrow, on a computer, keeps the page in its
+  pane (it returns Find to its rows; the pane shows the last market opened).
+- Leftovers the audit still names ("left:"), unchanged from 3a: Find's FUTURE · PAST line gap, the price chart's
+  indicator chips, the Build states' header padding, FindEmpty's second action, BuildNoData's legs, the AT ENTRY VS NOW
+  footnote's wording. The market page's falling day change is still red (not an error): decide with the owner.
+- The position's screen still has no word ceiling of its own; the Journal and Settings have none either (they are not
+  among the counter's screens).
+
 ## Done in redesign PR 3a (owner, 6 Oct 2026): every screen against its board; Positions, a position's screen, Orders
 
 The owner's prompt for redesign PR 3, split in two at the owner's request ("Dividi in due"): this PR is TASK 0 and TASKS 2,
@@ -525,9 +567,9 @@ One line each; see `PRD.md` §5 and `docs/history/ROADMAP.md` for detail.
 - **DONE: PR #50** — the replay reads the next year's row past December; `scripts/sanity.mjs` (read-only live reads).
 - **DONE: redesign PR 2** — part A, deploy previews are read-only; part B, Build, the review sheet, Why this trade, the
   copilot inside Build.
-- **DONE: redesign PR 3a** — the audit against the boards; Positions, a position's own screen, Orders. **NEXT: PR 3b**
-  (the Journal, Settings, the layout for a computer and a phone), then **PR 4** (Find's copilot preset, the system
-  prompt's decision trees).
+- **DONE: redesign PR 3a** — the audit against the boards; Positions, a position's own screen, Orders.
+- **DONE: redesign PR 3b** — the Journal, Settings, the app on a computer. **NEXT: PR 4** (Find's copilot preset, the
+  system prompt's decision trees).
 - **Basket expansion with a measured admission rule** (planned as #50, not started; #50 shipped the wrap instead). The owner pastes `/api/liquidity` for the
   candidate tickers; a market is admitted when its open interest clears the liquidity floor AND Alpha Vantage holds at
   least **N = 14 years** of its monthly history. N is set from what `seasonalSignal()` needs: a month counts at |mean| ≥

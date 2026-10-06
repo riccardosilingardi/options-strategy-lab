@@ -75,7 +75,8 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
   (`T.mut`), with its reason first; "Hide cards that miss" (off) hides it behind the count (`resultsLine()`; on Find's rows `rowsResultsLine()`, "Hide them"). Never
   dropped. A slider filters `findGen`'s output and never re-simulates (`find.test.jsx` checks the memo's deps).
 - Atoms and sizes: `src/ui.jsx` (now with `Info`, the ⓘ, and `Segments`) and the type tokens in `theme.js`. `ui.jsx`,
-  `card.jsx`, `find.jsx`, `orders.jsx`, `positions.jsx`, `navBar.jsx`, since PR 3a `positionScreen.jsx`, and since PR #48 `steps.jsx`, `why.jsx`,
+  `card.jsx`, `find.jsx`, `orders.jsx`, `positions.jsx`, `navBar.jsx`, since PR 3a `positionScreen.jsx`, since PR 3b `journal.jsx` and
+  `settings.jsx`, and since PR #48 `steps.jsx`, `why.jsx`,
   `positionCard.jsx` and `wizard.jsx`, since PR #49 `pro.jsx` and `App.jsx`, since redesign PR 1 `market.jsx` and since
   redesign PR 2 `build.jsx`
   (atoms now include `Sheet` and `Placeholder`), use no `fontSize` literal and define no atom; `ui.test.jsx` fails the build otherwise (only visuals.jsx's drawings and main.jsx's crash screen are left,
@@ -86,8 +87,12 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
 - **The app opens on Find (owner, 5 Oct 2026, round 2).** Home (`WizardOpen`) is gone; a first run is `CapitalOnboarding`,
   then Find; Back on Find leaves the app (nav.js rule 2). Positions to look at are the bottom bar's Positions badge, whose
   spoken name is `statusLine()`; Settings is the gear in `FindHeader`. Find, Saved and the market page draw NO desk header
-  (`chromeless` in App.jsx), and neither does Build since redesign PR 2, nor Positions since PR 3a (its own `PositionsHeader`);
-  the Journal and Settings keep it until PR 3b.
+  (`chromeless` in App.jsx), and neither does Build since redesign PR 2, nor Positions since PR 3a (its own `PositionsHeader`),
+  nor the Journal (`src/journal.jsx`) and Settings (`src/settings.jsx`) since PR 3b: no screen keeps it.
+- **On a computer (redesign PR 3b, owner, 6 Oct 2026): `useWide()` in ui.jsx** (a window ≥ `WIDE_MIN` 1024px). The bottom bar
+  is a left sidebar (`BottomBar rail`, `RAIL_W`), Find's rows sit beside the market page (`paneFind`) and Positions' cards beside
+  a position's screen (`panePos`) — on a phone their wrappers are `display: contents`, so nothing moves; the Journal is two
+  columns (`wide`); Build and Settings keep 760px. Below 1024px nothing here applies; the boards are the phone's.
 - **The mockups' look (round 2) lives in ui.jsx's atoms**: `IconButton`, `SegmentBar` (Results | Saved, the chain's modes),
   `UnderTabs` (Find's categories, the market's tabs), `FilterChip` (Find's chips, the sheets' choices; ink when off its
   default, never amber), `TextBtn`, and `Sheet` (scrim, grab handle, the value beside the title). Two theme tokens joined in
@@ -171,7 +176,7 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
 - `src/orderRow.js` — what one order row says: book, Alpaca's mark, the price range, status history,
   `waitForCanceled()`, the row's three lines (`rowLines()`), the close confirm's one line (`closeSummaryLine()`) and the
   card's working-close line. `src/modifyOrder.js` — Modify (path 7) and Cancel all.
-- `src/orders.jsx` — the Orders segment: `OrderRow`, `OrdersPanel` (Cancel all at the bottom), `PriceField`, `CloseChoice`.
+- `src/orders.jsx` — the Orders segment: `OrderRow`, `OrdersPanel` (the clock and Cancel all at the top since PR 3a), `PriceField`, `CloseChoice`.
 - `src/positions.jsx` — the account strip (`AccountStrip`), Positions | Orders (`PositionsBar`), `WorkingCloseLine`.
 - `src/navBar.jsx` — the one bottom bar (Find · Build · Positions · Journal), `placeOf()`, `NAV_BAR_H`.
 - `src/clock.js` — `marketClockLine()`, `localStamp()`: the market clock and times in the owner's own zone.
@@ -208,6 +213,8 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
 - `src/build.jsx` — Step 3, Build (redesign PR 2): its sections, the review sheet, its three states.
 - `src/positionScreen.jsx` — one position's own screen (redesign PR 3a): what to do now, Keep it, the chart, the exit
   plan, entry vs now, the record, Alpaca details, the copilot, the Guardian fold.
+- `src/journal.jsx`, `src/journalView.js` — the Journal (redesign PR 3b) and its words (plain JS: `whyOpenedLine()`,
+  `endedLine()`, `closedState()`, `closedTitle()`, `timelineItems()`). `src/settings.jsx` — Settings (redesign PR 3b).
 - `src/path.js`, `src/handoff.js` — the three-step path (Find → market → Build) and how a trade reaches Build.
 - `src/why.jsx` — the "Why this trade" evidence panel.
 - `src/App.jsx`, `src/pro.jsx` — UI, the order ticket (`OrderTicket`), the desk, `QtyField`.
@@ -288,7 +295,8 @@ All in `RULES`, `src/rules.js`, unless noted.
 - `node scripts/audit-screen.mjs <Board|find|market|build|pr3|shipped|all> [dark,light] [--quiet] [--no-shots]` checks
   each screen against the owner's board (docs/mockups) on the whole app on fixtures; exits 1 on an unexplained
   difference; side-by-side pictures in docs/screens/redesign-pr3/audit/. `node scripts/shoot-positions.mjs [dir]`
-  photographs Positions, a position's screen and Orders on the `+book` fixture (scripts/book-fixture.js).
+  photographs Positions, a position's screen, Orders, the Journal, Settings and the computer's two panes (1366×900) on the
+  `+book` fixture (scripts/book-fixture.js: three open records, two holdings, two orders, two closed trades).
 - `node scripts/audit-build.mjs [light]` (now `audit-screen.mjs build`) measures Build against the mockup's own values (getComputedStyle: sizes, weights,
   borders, radii, paddings, taps, theme colours) and its words, on the same harness; exits 1 on any difference.
 - `node scripts/shoot-screens.mjs [dir]` photographs Find, a sheet, Saved and the market page's tabs at 390×844 in the

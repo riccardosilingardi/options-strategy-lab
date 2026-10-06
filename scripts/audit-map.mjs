@@ -506,8 +506,8 @@ export const SCREENS = {
       { n: "Level", b: "section[aria-label='Your record'] > div:nth-child(2) > div:nth-child(1) > div.mono", a: "[data-journal-record] > div:nth-child(2) > div:nth-child(1) > div:nth-child(2)" },
       { n: "Rule closes", b: "section[aria-label='Your record'] > div:nth-child(2) > div:nth-child(2) > div.mono", a: "[data-journal-record] > div:nth-child(2) > div:nth-child(2) > div:nth-child(2)" },
       { n: "Next", b: "section[aria-label='Your record'] > p", a: "[data-journal-record] > p" },
-      { n: "Search label", b: "main > label > span", a: "[data-journal] main > label > span" },
-      { n: "Search box", b: "main > label > input", a: "[data-journal] main > label > input", p: ["size", "color", "bg", "border", "radius", "padding", "minh"] },
+      { n: "Search label", b: "main > label > span", a: "[data-journal] main label > span" },
+      { n: "Search box", b: "main > label > input", a: "[data-journal] main label > input", p: ["size", "color", "bg", "border", "radius", "padding", "minh"] },
       { n: "Open group", b: "main > section:nth-of-type(2)", a: "[data-journal-open]", p: ["bg", "border", "radius", "padding"] },
       { n: "Group title", b: "main > section:nth-of-type(2) > h2", a: "[data-journal-open] > h2", p: ["size", "weight", "color", "padding"] },
       { n: "Row", b: "main > section:nth-of-type(2) li:nth-child(1)", a: "[data-journal-open] li:nth-child(1)", p: ["border"] },
@@ -580,7 +580,7 @@ export const GROUPS = {
   pr3b: ["Journal", "Settings"],
   shipped: ["FindB", "FindLoading", "FindStale", "FindEmpty", "FindSaved", "FindFilters", "Define",
     "MarketStrategies", "MarketOverview", "Market", "Build", "BuildReview", "BuildLoading", "BuildNoData", "BuildEmpty",
-    "Positions", "PositionDetail", "Orders"],
+    "Positions", "PositionDetail", "Orders", "Journal", "Settings"],
   all: [],
 };
 GROUPS.all = Object.keys(SCREENS);

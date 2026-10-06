@@ -99,7 +99,10 @@ export function JournalScreen({ v }) {
         <h1 data-view-heading tabIndex={-1} style={{ ...sans, margin: 0, fontSize: FS.xl, fontWeight: FW.bold, lineHeight: LH.tight, color: T.ink,
           outline: "none" }}>Journal</h1>
       </header>
-      <main style={{ display: "flex", flexDirection: "column", gap: 12, padding: "4px 16px 0" }}>
+      <main style={v.wide ? { display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 16, alignItems: "start", padding: "4px 16px 0" }
+        : { display: "flex", flexDirection: "column", gap: 12, padding: "4px 16px 0" }}>
+        {/* ON A COMPUTER (redesign PR 3b): the record, the search and what is open on the left; what closed on the right. */}
+        <div data-journal-col="left" style={{ display: "flex", flexDirection: "column", gap: 12, minWidth: 0, ...(v.wide ? null : { display: "contents" }) }}>
         <section aria-label="Your record" data-journal-record style={{ ...PANEL, padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
             <div style={H2}>{`THE RECORD · ${(v.allClosed || []).length} CLOSED · ${(v.open || []).length} OPEN`}</div>
@@ -149,6 +152,8 @@ export function JournalScreen({ v }) {
           </section>
         )}
 
+        </div>
+        <div data-journal-col="right" style={{ display: "flex", flexDirection: "column", gap: 12, minWidth: 0, ...(v.wide ? null : { display: "contents" }) }}>
         <section data-journal-closed style={{ ...PANEL, padding: "4px 14px" }}>
           <h2 style={{ ...H2, padding: "10px 0 4px" }}>{closedTitle(v.allClosed || [])}</h2>
           {netNote(v.allClosed || []) && <p style={{ ...sans, margin: "0 0 6px", fontSize: FS.xs, color: T.mut }}>{netNote(v.allClosed || [])}</p>}
@@ -198,6 +203,7 @@ export function JournalScreen({ v }) {
           {v.analyses && <Fold label="open" tone={T.ink} summary={v.analysesSummary}>{v.analyses}</Fold>}
           {v.floorLog}
         </section>
+        </div>
       </main>
     </div>
   );
