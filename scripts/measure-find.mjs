@@ -31,7 +31,7 @@ const genMs = performance.now() - t0;
 const cands = cards.map((c) => c.cand);
 const pad = (s, n) => String(s).padEnd(n);
 
-console.log("\\n" + cards.length + " fixture cards over 5 directions (generation incl. 8,000-run chance: " + genMs.toFixed(0) + " ms, once)\\n");
+console.log("\\n" + cards.length + " fixture cards over 5 directions (generation incl. the exact chance: " + genMs.toFixed(0) + " ms, once)\\n");
 
 /* ---- 1. TASK 0 ---- */
 const over = (req, limit) => {
@@ -90,7 +90,7 @@ const t1 = performance.now();
 for (let i = 0; i < N; i++) move(i);
 const per = (performance.now() - t1) / N;
 console.log("\\nONE SLIDER MOVE on " + cards.length + " cards (size each, read every control, split, nearest relaxation): " + per.toFixed(3) + " ms");
-console.log("GENERATING THE LIST (analyse, floors, 8,000-run chance per card): " + genMs.toFixed(0) + " ms — a move never repeats it\\n");
+console.log("GENERATING THE LIST (analyse, floors, the exact chance per card): " + genMs.toFixed(0) + " ms — a move never repeats it\\n");
 /* REDESIGN PR 1: WHAT FIND DRAWS NOW. Before: every card, each with its gauge and its unified picture (two drawings).
    After: one row per market, each with one 72×40 thumbnail; the cards are on each market's own page. */
 {

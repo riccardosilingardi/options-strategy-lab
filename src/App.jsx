@@ -4227,7 +4227,7 @@ export default function OptionsStrategyLab() {
   const historyNode = (<>
             {!spot && (
               <div style={{ ...mono, fontSize: FS.xs, color: T.mut }}>
-                The seasonality chart, the 8,000-run simulation and the year-by-year replay are all drawn from {ticker}{"\u2019"}s own prices, and they have not loaded yet. Press Refresh at the top of the screen.
+                The seasonality chart, the model behind the chance and the year-by-year replay are all drawn from {ticker}{"\u2019"}s own prices, and they have not loaded yet. Press Refresh at the top of the screen.
               </div>
             )}
             {spot && (
@@ -4345,14 +4345,14 @@ export default function OptionsStrategyLab() {
                   <>
                     <div style={{ display: "flex", gap: 16, marginTop: 12, flexWrap: "wrap" }}>
                       <Stat k="CHANCE OF PROFIT" v={chanceText(chance.pop)} c={chance.pop >= 0.5 ? T.green : T.red} tip={chanceSourceNote(chance, ticker)} />
-                      <Stat k="AVERAGE RESULT" v={signedMoney(chance.ev)} c={chance.ev >= 0 ? T.green : T.red} tip="The mean of every simulated run, a combination at a time — not the best case weighted by the chance." />
-                      <Stat k="BAD CASE" v={fmt$(chance.p5)} c={T.red} tip="Only 1 run in 20 turns out worse than this." />
+                      <Stat k="AVERAGE RESULT" v={signedMoney(chance.ev)} c={chance.ev >= 0 ? T.green : T.red} tip="The average over every outcome the model allows, a combination at a time — not the best case weighted by the chance." />
+                      <Stat k="BAD CASE" v={fmt$(chance.p5)} c={T.red} tip="Only 1 outcome in 20 is worse than this." />
                       <Stat k="TYPICAL" v={fmt$(chance.p50)} />
-                      <Stat k="GOOD CASE" v={fmt$(chance.p95)} c={T.green} tip="Only 1 run in 20 turns out better than this." />
+                      <Stat k="GOOD CASE" v={fmt$(chance.p95)} c={T.green} tip="Only 1 outcome in 20 is better than this." />
                       <Stat k="YEARLY DRIFT" v={pctText(chance.driftAnnual)} c={T.blue} tip="This market's own seasonal reading over the window the trade is held for. It is what makes this the app's probability rather than the market's." />
                     </div>
                     <div style={{ marginTop: 10, padding: "9px 11px", background: `${T.blue}0d`, border: `1px solid ${T.blue}33`, borderRadius: 7, fontSize: FS.sm, color: T.body }}>
-                      <b style={{ color: T.ink }}>In plain words:</b> out of {chance.runs.toLocaleString("en-US")} simulated runs, {chancePct(chance.pop)} in 100 finish in profit.
+                      <b style={{ color: T.ink }}>In plain words:</b> of every 100 outcomes the model allows, {chancePct(chance.pop)} finish in profit.
                       In the worst 5% you lose about {fmt$(Math.abs(chance.p5))}{guard ? (Math.abs(chance.p5) <= guard.limits.perTrade ? ` — inside your per-trade limit of ${money(guard.limits.perTrade)} ✓` : ` — CAREFUL: past your per-trade limit of ${money(guard.limits.perTrade)}`) : ""}.
                       The typical result is {fmt$(chance.p50)}. {chanceSourceNote(chance, ticker)}
                       {chance.ivNote ? ` ${chance.ivNote}` : ""}

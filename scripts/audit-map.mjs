@@ -37,6 +37,7 @@ export const R = {
   cancel: "Cancel is the red outline (CLAUDE.md, PR #47); the board draws it in ink",
   signals: "the owner, 6 Oct 2026 (PR 4): \"the tabs speak for themselves\" — the market page's first tab is named for what it shows, Signals (the chart and the four factors); the board says Overview",
   layout: "the same space is carried by the page's own padding (FIND_LIST_END), not this element",
+  model: "the owner's prompt for PR 62 (7 Oct 2026): the chance is worked out exactly, no longer a Monte Carlo, so the tile is renamed FUTURE (MODEL) in CARD_LABELS; the board still says FUTURE (MONTE CARLO)",
 };
 
 const waitRows = (page) => page.waitForFunction(() => document.querySelectorAll("[data-row]").length >= 2, null, { timeout: 20000 });
@@ -327,6 +328,7 @@ export const SCREENS = {
       { n: "Order title", b: "main > section:nth-of-type(6) h2", a: "[data-build-order] h2" },
     ],
     skipWords: [[/^(CORN|Bull put spread|Legs · 20 Nov|Keeps up to|defaults · not backtested on CORN)/, R.sample], [/^(SELL|BUY)$/, R.data],
+      [/^FUTURE \(MONTE CARLO\)$/, R.model],
       [/^At mid, halfway between the two quotes\.$/, "where the limit sits is read off the fixture's book; the board's limit is at its mid, the fixture's is not"],
       [/^BE /, R.sample], [/Needs CORN/, R.sample]],
   },

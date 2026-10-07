@@ -604,9 +604,8 @@ check("P1 DONE WHEN — five screens, one position, ONE number", () => {
     const viaServer = chanceAt(f);
     eq(viaApp.pop, viaServer.pop, `${f.tk} ${f.shape}: pop`);
     eq(viaApp.ev, viaServer.ev, `${f.tk} ${f.shape}: ev`);
-    eq(viaApp.seedKey, viaServer.seedKey, `${f.tk} ${f.shape}: seed`);
-    // ...and asking twice is asking once. An unseeded Monte Carlo would fail
-    // here and would have failed on every screen, silently.
+    eq(viaApp.method, "exact", `${f.tk} ${f.shape}: worked out exactly (PR 62)`);
+    // ...and asking twice is asking once: no draw, no seed (PR 62).
     eq(chanceAt(f).pop, viaServer.pop, `${f.tk} ${f.shape}: asked twice`);
   }
 });
@@ -627,19 +626,15 @@ check("P1 DONE WHEN — the chance travels with the trade, not with the screen",
 });
 
 check("THE CHART AND THE NUMBER AGREE — within the simulation's own sampling error", () => {
-  /* `chanceInProfit()` integrates the lognormal over the profit bands; the
-     Monte Carlo samples it. With the same drift and the same volatility they
-     are two readings of one distribution, so any gap is the Monte Carlo's
-     sampling error and nothing else.
+  /* `chanceInProfit()` integrates the lognormal over the profit bands; the chance works the same lognormal out exactly
+     (PR 62; until then a Monte Carlo sampled it). With the same drift and the same volatility they are one distribution
+     read twice.
 
-     THE TOLERANCE IS 2 PERCENTAGE POINTS, AND IT IS A MEASUREMENT, NOT A
-     CHOICE. At `RULES.mcRuns` = 8,000 the standard error of a proportion near
-     a half is 0.56 points, so two points is about 3.6 standard errors. The
-     worst gap measured across these fifteen fixtures is 1.59 points, on the
-     BOIL vertical; run at 400,000 the SAME structure lands within 0.01 points
-     of the chart, which is what proves the gap is noise rather than a
-     disagreement about the trade. PRD §4h carries the numbers. */
-  const TOL = 0.02;
+     THE TOLERANCE WAS 2 PERCENTAGE POINTS while the chance was 8,000 runs (a standard error of 0.56 points; the worst
+     gap measured on these fixtures was 1.59 points, the BOIL vertical). With the exact chance the worst gap measured is
+     under 0.001 points, so the tolerance is now 0.01 points: the chart's bands and the card's chance are the same
+     number, and a gap is a disagreement about the trade. */
+  const TOL = 0.0001;
   let worst = 0, worstName = "";
   for (const f of fixtures()) {
     const mc = chanceAt(f);
@@ -648,13 +643,13 @@ check("THE CHART AND THE NUMBER AGREE — within the simulation's own sampling e
     const gap = Math.abs(chart - mc.pop);
     if (gap > worst) { worst = gap; worstName = `${f.tk} ${f.shape}`; }
     if (!(gap <= TOL)) {
-      throw new Error(`${f.tk} ${f.shape}: chart ${(chart * 100).toFixed(2)}% vs simulation ` +
+      throw new Error(`${f.tk} ${f.shape}: chart ${(chart * 100).toFixed(2)}% vs the chance ` +
         `${(mc.pop * 100).toFixed(2)}% — ${(gap * 100).toFixed(2)}pp apart. If this fails the chart is ` +
         `wrong; do NOT widen the tolerance.`);
     }
   }
   if (!(worst > 0)) throw new Error("the comparison has to actually be doing something");
-  if (worst > 0.018) throw new Error(`the measured worst gap has moved to ${(worst * 100).toFixed(2)}pp (${worstName})`);
+  if (worst > 0.00001) throw new Error(`the measured worst gap has moved to ${(worst * 100).toFixed(4)}pp (${worstName})`);
 });
 
 check("THE CHART CARRIES ITS TAILS — a band at the edge of the sampling is not a band that ends", () => {
@@ -719,7 +714,8 @@ check("THE CHANCE SAYS WHAT IT IS AN ANSWER ABOUT", () => {
   const f = fixtures()[0];
   const mc = chanceAt(f);
   const note = chanceSourceNote(mc, f.tk);
-  has(note, "8,000");
+  // PR 62: worked out exactly, so the sentence says that, never a run count.
+  has(note, "Worked out exactly"); if (/8,000|simulated/.test(note)) throw new Error("the sentence still counts runs");
   has(note, "seasonal");
   has(note, "not a market-neutral assumption");   // it names what this is NOT
   // and a missing chance is a sentence, not a crash

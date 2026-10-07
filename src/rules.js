@@ -14,7 +14,7 @@
 // price off the chain against `netBS()` — the SAME function and the SAME smile
 // every other screen in this app prices with, which is the point: a second
 // implementation of the model would make the check a comparison of two guesses.
-import { netBS, bs, smile, terminalMC, seasonalDrift, seasonalSpan, seedFrom, payoff } from "./engine.js";
+import { netBS, bs, smile, terminalExact, seasonalDrift, seasonalSpan, payoff } from "./engine.js";
 // WHICH WAY THE MONEY MOVES ON AN ORDER, read from its one home. `order.js`
 // imports nothing, so this is leaf-ward exactly as the `engine.js` import above
 // it is, and it is here for the same reason: `limitAgainstBook()` below has to
@@ -124,29 +124,11 @@ export const RULES = {
   // Read only through `signalDirection()`.
   directionSignalMin: 12.5,
 
-  // --- HOW MANY RUNS THE ONE CHANCE IS MADE OF.
-  //
-  // Every probability this app prints comes out of `chanceOf()` below, which is
-  // a Monte Carlo — so this number is the precision of every CHANCE, every EV
-  // and every distribution on every screen. It is ONE number and not two: the
-  // Shortlist ranks many candidates and prints the chance of each, and a
-  // cheaper count for ranking than for printing would mean the row you compared
-  // and the row you opened disagreeing about the same trade.
-  //
-  // WHAT 8,000 COSTS, MEASURED. On the development machine one candidate takes
-  // 0.54 ms at this count (0.24 ms at 2,000). The widest screen in the app —
-  // the guided flow's pool, five markets x two families x the presets — reaches
-  // about eighty candidates, so roughly 43 ms of arithmetic for the whole pool,
-  // against the `analyze()` call each candidate already pays for. Dropping to
-  // 2,000 would save about 25 ms and cost a standard error on each printed
-  // percentage of 1.1 points instead of 0.55, which is visible at the whole
-  // percent the screens round to. NOT VERIFIED ON A PHONE: there is no browser
-  // in this sandbox, and a phone is the machine this app is demoed on.
-  //
-  // The sampling error is not a rounding error. At 8,000 runs a printed 50% is
-  // 50% give or take about one point of the answer an infinite run would give —
-  // the SAME one point for every screen, because the seed is the position's.
-  mcRuns: 8000,
+  // --- THE ONE CHANCE HAS NO RUN COUNT ANY MORE (PR 62, owner 7 Oct 2026). It was `mcRuns` (8,000): the precision of
+  // every CHANCE, every average and every distribution, give or take about half a point of chance and, on the GLD Bear
+  // Put ×7, $65 of average from one seed to the next. `chanceOf()` now works the same distribution out exactly
+  // (`terminalExact()` in engine.js), so there is no count to choose and nothing reads one; the constant was removed with
+  // the copy that cited it.
 
   // --- QUALITY FLOORS. A structure can pass every rule above and still be
   // indefensible. These two are the floors under a PROPOSAL: a candidate that
@@ -388,7 +370,7 @@ export const RULES = {
   // The owner asked for a control that moves what the app puts in front of him
   // between "pays more" and "works more often". These four numbers are its
   // range, its step and where it starts. They set a MINIMUM CHANCE OF PROFIT,
-  // read off `chanceOf()`'s Monte Carlo — the one source every chance in this
+  // read off `chanceOf()` — the one source every chance in this
   // app comes from — and they decide ONE thing: which HEADING a candidate sits
   // under. They create no structure, bypass no floor and move nothing in the
   // gate. `minRewardRisk` stays a fixed rule and is deliberately NOT a control:
@@ -408,10 +390,9 @@ export const RULES = {
   // all, so the top section empties and the control teaches the wrong lesson:
   // that asking for certainty is free.
   chanceAskMax: 0.80,
-  // chanceAskStep — the Monte Carlo's standard error at `mcRuns` is about 0.55
-  // of a percentage point, and `chancePct()` rounds to the whole percent. A
-  // one-point step would move rows between the two sections on sampling noise,
-  // which is a control that appears to do something it did not do.
+  // chanceAskStep — chosen when the chance was a simulation with a standard error of about 0.55 of a point and
+  // `chancePct()` rounded to the whole percent, so a one-point step moved rows on sampling noise. Since PR 62 the chance
+  // is exact and has no noise; the step is unchanged (a RULES value, not this PR's to move).
   chanceAskStep: 0.05,
   // chanceAskDefault — NONE (owner decision, 3 Oct 2026, PR #49 TASK 2). It was 0.50, the middle of the band:
   // measured, 1 of 9 live cards and 5 of the 31 fixture cards passed it, so the list opened mostly hidden. Now no
@@ -730,9 +711,9 @@ export const chanceInTen = (p) => {
 /* =========================================================================
    ONE CHANCE, ONE ARITHMETIC — THIS IS THE ONE PLACE IT IS COMPUTED.
 
-   `terminalMC()` in engine.js is the arithmetic; this is the policy around it,
+   `terminalExact()` in engine.js is the arithmetic (since PR 62; `terminalMC()` until then); this is the policy around it,
    and it lives here for the same reason `modelSanity()` does: engine.js imports
-   nothing and may not read RULES, so the run count, the drift and the seed are
+   nothing and may not read RULES, so the drift and the volatility are
    assembled at the one place that already reads the home.
 
    WHAT THE APP DECIDED, AND WHAT IT DID NOT.
@@ -749,12 +730,12 @@ export const chanceInTen = (p) => {
      model sanity check — is already worked out at that implied volatility, so
      anything else here would price the trade at one number and judge it at
      another.
-   * THE SEED IS THE POSITION'S. Ticker, expiry, legs and the spot rounded to
-     the cent: the same trade gives the same seed gives the same number, on the
-     Radar, on the Shortlist, on Build, in the Guardian and in the autopilot's
-     brief. An unseeded Monte Carlo would hand each of them a different answer
-     for one object, which is the fault this file exists to prevent, engineered
-     in on purpose.
+   * NO DRAW, NO SEED (PR 62, owner 7 Oct 2026). Until PR 62 this was 8,000 simulated futures from a seed made of the
+     ticker, the expiry, the legs and the spot to the cent — so every price refresh drew a new stream, and on one GLD
+     Bear Put the future avg ran from $952 to $1,360 over 200 seeds. The distribution was never random: it is a
+     lognormal, and the P&L is linear between the strikes, so the answer is worked out exactly. The same trade gives the
+     same number on every screen, in the Guardian and in the autopilot's brief, and a cent on the spot moves it by a
+     cent's worth.
    * UNKNOWN IS NOT A NUMBER. No spot, no horizon or no volatility and the
      answer is `null`, which every screen prints as a dash. A season that has
      not loaded is the one exception (PR #48): the chance is worked out from the
@@ -762,19 +743,6 @@ export const chanceInTen = (p) => {
      `Number(null)` is 0 and 0 is finite — a missing chance must never arrive as
      a confident 0%.
 ========================================================================= */
-
-/**
- * The key the Monte Carlo is seeded from. Stable across screens and across the
- * client/server boundary, and it MOVES when the trade moves: a different strike
- * or a different expiry is a different trade and gets its own stream.
- *
- * The spot is rounded to the cent so that a quote wobbling in the third decimal
- * between two renders does not re-roll the whole simulation under the reader.
- */
-export const chanceSeedKey = ({ ticker = "?", expKey = "?", legs = [], spot = 0, dte = 0 } = {}) =>
-  [ticker, expKey, Math.round(dte),
-    (legs || []).map((l) => `${Math.sign(l.side)}${l.type === "call" ? "C" : "P"}${l.strike}x${l.qty}`).join(","),
-    (Math.round(Number(spot) * 100) / 100).toFixed(2)].join("|");
 
 /**
  * THE CHANCE OF PROFIT, AND EVERYTHING THAT COMES WITH IT.
@@ -789,16 +757,16 @@ export const chanceSeedKey = ({ ticker = "?", expKey = "?", legs = [], spot = 0,
  *                    chance may not be computed without knowing whose table it
  *                    came from. A caller handing twelve numbers straight in is a
  *                    programmer error and THROWS, the same discipline as
- *                    `terminalMC()` throwing without an exit policy.
+ *                    `terminalExact()` throwing without a policy.
  * @param month       the month the window starts in, 0-11
- * @param ticker      part of the seed, and what the fallback sentence names
- * @param expKey      part of the seed
+ * @param ticker      what the fallback sentence names
+ * @param expKey      kept for the callers' sake (no seed reads it since PR 62)
  * @param thesisIV    an implied volatility the position remembered, if any
- * @returns the `terminalMC` result plus `{ ivSource, ivNote, seedKey }` and the
+ * @returns the `terminalExact` result ({ pop, ev, p5, p50, p95, bins, sd, method }) plus `{ ivSource, ivNote }` and the
  *          seasonal stamp (`seasonalSource`, `seasonalMeasured`, `seasonalYears`,
  *          `seasonalAgeDays`, `seasonalNote`) and what the season did (`seasonCounts`,
  *          `seasonRead`, `seasonMean`, `seasonMonths`), or null when there is nothing to
- *          simulate. A season not read drifts at zero (PR #48); it is not a null.
+ *          work out. A season not read drifts at zero (PR #48); it is not a null.
  */
 export function chanceOf({ legs, entryNet, spot, iv, dte, seasonal, month,
   ticker = "this market", expKey = null, thesisIV = null } = {}) {
@@ -817,11 +785,8 @@ export function chanceOf({ legs, entryNet, spot, iv, dte, seasonal, month,
   const driftAnnual = (sig.mean * 12) / 100;
   if (!Number.isFinite(driftAnnual)) return null;
   const vol = ivProvenance(iv, thesisIV, ticker);
-  const seedKey = chanceSeedKey({ ticker, expKey, legs, spot, dte });
-  const mc = terminalMC(legs, entryNet, spot, {
-    driftAnnual, sigma: vol.iv, dte, runs: RULES.mcRuns, seed: seedFrom(seedKey),
-  });
-  return { ...mc, ivSource: vol.source, ivNote: vol.fromFallback ? vol.note : null, seedKey,
+  const mc = terminalExact(legs, entryNet, spot, { driftAnnual, sigma: vol.iv, dte });
+  return { ...mc, ivSource: vol.source, ivNote: vol.fromFallback ? vol.note : null,
     seasonalSource: seasonal.source, seasonalMeasured: seasonal.measured,
     seasonalYears: seasonal.years, seasonalAgeDays: seasonal.ageDays, seasonalNote: seasonal.note,
     // WHAT THE SEASON DID TO THIS CHANCE: whether any month counted ("prices + season" / "prices only") and the window.
@@ -841,8 +806,8 @@ export function chanceOf({ legs, entryNet, spot, iv, dte, seasonal, month,
  */
 export const chanceSourceNote = (mc, ticker = "this market") => {
   if (!mc) return "There is no chance to show: something this calculation needs — a price or a horizon — is missing.";
-  return `Out of ${mc.runs.toLocaleString("en-US")} simulated runs, priced at ${pctText(mc.sigma)} implied volatility ` +
-    `and drifting at ${pctText(mc.driftAnnual)} a year over the window this trade is held for, not a ` +
+  return `Worked out exactly on the spread of prices the options imply (${pctText(mc.sigma)} implied volatility), ` +
+    `drifting at ${pctText(mc.driftAnnual)} a year over the window this trade is held for, not a ` +
     `market-neutral assumption. ` +
     (mc.seasonalNote || seasonalSourceSentence({ measured: !!mc.seasonalMeasured, ticker,
       years: mc.seasonalYears ?? null, ageDays: mc.seasonalAgeDays ?? null }));
@@ -1393,19 +1358,20 @@ export function sizeLine(size, { n = null, byHand = false } = {}) {
 export const sizedHeading = (n) => (n == null ? "PER CONTRACT" : `FOR ${n} CONTRACT${n === 1 ? "" : "S"}`);
 
 /** The card's figures' labels, in the order the card prints them. One home: the card, Positions' "at entry vs now"
- *  (the first four) and their tests read this. PR #49 (owner's names, 3 Oct 2026): the Monte Carlo average is
- *  "FUTURE (MONTE CARLO)" and the historical replay "PAST YRS (BACKTEST)". */
+ *  (the first four) and their tests read this. PR #49 (owner's names, 3 Oct 2026): the Monte Carlo average was
+ *  "FUTURE (MONTE CARLO)" and the historical replay "PAST YRS (BACKTEST)". PR 62 (the owner's prompt, 7 Oct 2026): the
+ *  chance and the average are worked out exactly, no longer a Monte Carlo, so the tile is "FUTURE (MODEL)". */
 export const CARD_LABELS = Object.freeze({ risk: "YOU RISK", profit: "MAX PROFIT", chance: "CHANCE", rr: "RETURN ON RISK",
-  future: "FUTURE (MONTE CARLO)", past: "PAST YRS (BACKTEST)" });
-/** A label as a sentence names it ("Future (Monte Carlo)", "Past yrs (backtest)"): the words are CARD_LABELS'. */
-const labelWords = (l) => (l.charAt(0) + l.slice(1).toLowerCase()).replace("monte carlo", "Monte Carlo");
+  future: "FUTURE (MODEL)", past: "PAST YRS (BACKTEST)" });
+/** A label as a sentence names it ("Future (model)", "Past yrs (backtest)"): the words are CARD_LABELS'. */
+const labelWords = (l) => l.charAt(0) + l.slice(1).toLowerCase();
 /* THE COPILOT'S STANDING INSTRUCTION ON THE TWO TILES (owner, PR 61): neither is the more reliable one. */
 export const FUTURE_PAST_EQUAL = `${labelWords(CARD_LABELS.future)} and ${labelWords(CARD_LABELS.past)} answer different questions; never call one of them more reliable than the other.`;
 /** What each of the card's four figures means, one tap behind its label on the compact card (round 2). */
 export const FIGURE_DEFINITIONS = Object.freeze({
   risk: "The most this trade can lose, for the size your budget buys.",
   profit: "The most it can make by expiry, for that size; \"no ceiling\" when there is none.",
-  chance: "The chance it ends in profit at expiry, from the simulated futures.",
+  chance: "The chance it ends in profit at expiry, worked out from the spread of prices the options imply.",
   rr: "The maximum profit divided by the risk.",
 });
 /** The market page's header labels (round 2), each with its definition one tap away. */
@@ -1620,7 +1586,7 @@ export const sentFiledText = (ref, withReason = false) =>
 ===================================================================== */
 export const FIND_ORDERS = Object.freeze([
   // `note` (redesign PR 1): what the Order sheet says under each name.
-  Object.freeze({ id: "ev", label: "Future avg", tile: "future", note: "the simulation's average result per $100 at risk" }),
+  Object.freeze({ id: "ev", label: "Future avg", tile: "future", note: "the model's average result per $100 at risk" }),
   Object.freeze({ id: "evSignal", label: "Future avg + signal", tile: "future", note: "the same average, plus what the market's signals add" }),
   Object.freeze({ id: "chance", label: "Chance", tile: "chance", note: "the chance of ending in profit at expiry" }),
   Object.freeze({ id: "rr", label: "Return on risk", tile: "rr", note: "the most it can make for each dollar at risk" }),
@@ -2012,9 +1978,9 @@ export const expiryWords = (iso) => {
 const sgnOne = (v) => `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(1)}`;
 
 /**
- * THE MONTE CARLO AVERAGE PER $100 AT RISK — the figure "Future avg" sorts on and the FUTURE tile prints (PR #49).
- * `mc.ev` is the mean of the seeded simulation, per contract, at the price that fills; ÷ the risk × 100. Null when
- * there is no simulation, no readable risk, or NO CEILING: a structure with no maximum profit is not ranked on it
+ * THE MODEL'S AVERAGE PER $100 AT RISK — the figure "Future avg" sorts on and the FUTURE tile prints (PR #49).
+ * `mc.ev` is the exact average at expiry (`chanceOf()`, exact since PR 62), per contract, at the price that fills; ÷ the
+ * risk × 100. Null when there is no chance, no readable risk, or NO CEILING: a structure with no maximum profit is not ranked on it
  * (PRD §4c, unchanged), so it sorts last and its tile says so.
  */
 export function futurePer100(mc, a) {
@@ -2056,9 +2022,10 @@ export const pastTileText = (pf) => (pf ? `won ${pf.wins} of ${pf.n} · avg ${si
 
 /** The FUTURE tile's ⓘ. */
 export const futureInfo = () =>
-  `The average result of ${RULES.mcRuns.toLocaleString("en-US")} simulated futures to expiry, at the price that ` +
-  `fills, for this size: invented from the option prices and the season's months that beat their noise. A ` +
-  `simulation, not history. Per $100 at risk is the figure "Future avg" sorts on.`;
+  `The average result at expiry over every price the model allows, at the price that fills, for this size: the ` +
+  `spread of prices comes from the option prices, the lean from the season's months that beat their noise. Worked out ` +
+  `exactly, so it does not move unless the prices do. A model, not history. Per $100 at risk is the figure ` +
+  `"Future avg" sorts on.`;
 
 /** The PAST tile's ⓘ: it settles at expiry, does not replay the exit rules, and steps in whole months. */
 export const pastInfo = (pf, ticker = "the ETF") =>
@@ -3583,6 +3550,10 @@ export const COPILOT_MODEL = "claude-sonnet-4-6";
    this share of its limit or more. A copy constant for the prompt and the review rows, not a trading rule. */
 export const GATE_NEAR_LIMIT = 0.9;
 
+/* A COPILOT NUMBER MUST EXIST IN THE APP'S FIGURES (PR 62): the one quiet line under a finished answer that quotes a
+   figure the app never sent (`ungroundedFigures()`, grounding.js). Amber, not red: a warning to check, not an error. */
+export const notInFiguresLine = (list = []) => (list && list.length ? `Not in the app's figures: ${list.join(", ")}.` : null);
+
 /** The rules block injected into every model prompt. English, generated. */
 export const copilotRulesBlock = () =>
   `Trading rules, to be applied in EVERY analysis: defined risk only — no uncovered short legs, ` +
@@ -4486,8 +4457,8 @@ export const controlsFoldNote = (request) =>
   `floors still remove what they remove and still say why, and ${money(MIN_NET_DOLLARS)} is still the least a ` +
   `price may be before anything is judged at all. The size never puts more at risk than the per-trade limit ` +
   `(unless free sizing is on); raising the limit is the "edit" beside it, and asks for a reason. The chance is ` +
-  `the one this app computes everywhere — ${RULES.mcRuns.toLocaleString("en-GB")} simulated paths, seeded from ` +
-  `the trade, so the figure on a card and the figure on the Build screen are the same number. Asking for a ` +
+  `the one this app computes everywhere — worked out exactly from the option prices, with no random draw — so the ` +
+  `figure on a card and the figure on the Build screen are the same number. Asking for a ` +
   `higher chance or a higher return only narrows the list; it does not make a trade safer. Return on risk can ` +
   `only tighten the reward floor of ${pctText(RULES.minRewardRisk)}, never loosen it: under that the app does ` +
   `not propose at all, and a floor a user can switch off is not a floor.` +
@@ -6677,9 +6648,9 @@ export function tradeCard({
      saying otherwise would be a field name asserting a reading nobody took. */
   const pop = chance && known(chance.pop) ? Number(chance.pop) : null;
   const often = pop == null
-    ? `Not known: without a live price, a horizon and a seasonal reading there is no simulation to quote, and a missing chance is not a confident zero.`
-    : `${chanceInTen(pop)} — ${chanceText(pop)} of ${Number(chance.runs || 0).toLocaleString("en-US")} simulated runs finish in profit AT EXPIRY${
-      known(chance.ev) ? `, and the average of all of them is ${signedMoney(Number(chance.ev) * n)} ${n > 1 ? `for ${n}` : "per contract"}` : ""}. ` +
+    ? `Not known: without a live price, a horizon and a seasonal reading there is no chance to quote, and a missing chance is not a confident zero.`
+    : `${chanceInTen(pop)} — ${chanceText(pop)} of the outcomes the model allows finish in profit AT EXPIRY${
+      known(chance.ev) ? `, and their average is ${signedMoney(Number(chance.ev) * n)} ${n > 1 ? `for ${n}` : "per contract"}` : ""}. ` +
       `That is where it ENDS. How it ends under your own exit rule is walked day by day, and the app only does ` +
       `that once the position is open.${chanceNote ? ` ${chanceNote}` : ""}`;
 

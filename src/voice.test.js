@@ -243,7 +243,13 @@ test("MEASURED: the three screens, and the table in the PRD is this number", () 
      only when the loaded trade is already in the book: an upper bound), the card-vs-limit line (`limitMovedLine()`, 12,
      only when the limit moved), and the copilot's "Stopped at its length limit: Continue picks up where it stopped." and
      "Continue" (12). The ceilings are those numbers. */
-  const CEILING = { find: 184, market: 474, build: 504, positions: 248 };
+  /* >>> PR 62 (numbers without noise, the copilot grounded). <<< market 474 -> 479 and build 504 -> 518: the quiet line
+     under a finished copilot answer, "Not in the app's figures: $1,040, 52%." (`notInFiguresLine()`, 7, only when an
+     answer quotes a figure the app never sent: an upper bound), at two sites on each screen (the chart copilot and the
+     place's copilot). On the market page the counter also stopped reading 9 words that were never prose: the line
+     `{ role: "assistant", content: reply }], busy: false, err: null, partial: ""` in the chart copilot, which it had
+     taken for a sentence, was split in two (474 - 9 + 14 = 479). The ceilings are those numbers. */
+  const CEILING = { find: 184, market: 479, build: 518, positions: 248 };
   /* >>> PR #46: ONE ORDERS LIST. <<< The record-based "WORKING AT THE BROKER" panel (its paragraph about what a
      working order is, the stale-DAY warning, the per-row sentences) left Positions; the one list lives in
      `orders.jsx`, which the counter now reads. Measured: positions 304 -> 209 (4 typed + 205 generated, 14 sites).

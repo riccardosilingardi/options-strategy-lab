@@ -131,6 +131,8 @@ export const COPY = {
   compareTrayLine: () => R.compareTrayLine(2, 3),
   alreadySentLine: () => R.alreadySentLine("J-0008", 4726, true),
   limitMovedLine: () => R.limitMovedLine({ entry: 6.75, maxLoss: -675, maxProfit: 1225 }, { entry: 6.61, maxLoss: -661, maxProfit: 1239 }, 7),
+  // PR 62: the quiet line under a finished copilot answer whose figures the app never sent.
+  notInFiguresLine: () => R.notInFiguresLine(["$1,040", "52%"]),
   unpriceableNote: () => R.unpriceableNote(2, "XLE"),
   impossibleLossNote: () => R.impossibleLossNote(1, "XLE"),
   modelDisagreementNote: () => R.modelDisagreementNote(1, "XLE"),

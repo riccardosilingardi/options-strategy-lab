@@ -6,6 +6,54 @@ The full history of every item shipped so far (P0–P10, P2-bis) is in `docs/his
 Every pull request updates this file: the session that ships an item marks it done and states
 what the next one inherits.
 
+## Done in PR 62 (owner, 7 Oct 2026): numbers without noise; the copilot grounded
+
+The second of three stacked PRs (61 → 62 → 63), branched from PR 61's branch.
+
+- **62.1 — the chance and the future average are exact.** `chanceOf()` (rules.js) now calls `terminalExact()`
+  (engine.js): the same lognormal, the same implied volatility and the same seasonal drift `terminalMC()` drew 8,000
+  futures from, worked out in closed form between the strikes (the chance of each profit stretch, the average leg by
+  leg, the percentiles by solving the exact distribution, the 30 bars as probabilities). The same shape; `runs`/`seed`
+  became `method: "exact"`; no caller changed. `chanceSeedKey()` and `RULES.mcRuns` are gone (nothing read them);
+  `terminalMC()` stays only as the proof's reference; `exitSim()` (day by day) is unchanged. **The tile is renamed
+  FUTURE (MONTE CARLO) → FUTURE (MODEL)** in `CARD_LABELS`, because it is no longer a Monte Carlo; every sentence that
+  said "8,000 simulated futures/runs" says what is now true.
+- **Proved** (engine.test.js): on nine families (a debit call vertical, the debit put GLD 382/363, the credit call GLD
+  393/412, a credit put vertical, an iron condor, an iron butterfly, a put butterfly, a long call, a long put) the exact answer sits inside 4 standard errors of `terminalMC()` at 1,000,000 runs
+  (measured: within 2); a spot 1 cent apart moves the chance and the average by no more than their true slope;
+  determinism replaces the seed tests; figures.test.jsx's card = Build equality holds.
+- **Before → after, the same trade** (GLD Bear Put 382/363 ×7 at 6.75, 44 days): 200 seeds gave a future average of
+  $752–$1,124 (sd $65) and a chance sd of 0.54 points; exact: $928.81 and 46.59%, and a cent higher on the spot,
+  $926.87 and 46.572%. **On the 31 fixture cards** the chance moved at most 0.94 points (median 0.27) and the average per
+  $100 at risk at most 2.57 (median 0.54); one butterfly went +1.3 → −1.1 per $100, inside the old noise. The chart's
+  fan and the chance now agree to under 0.001 points (they differed by up to 1.59). Find's generation: 215–249 ms →
+  87–106 ms on the 31 cards (three runs each, desktop CPU).
+- **62.2 — a copilot number must exist in the app's figures.** `src/grounding.js` (+ grounding.test.js): once an
+  answer is finished, every $ amount and % in it is looked for among the numbers sent (the context JSON walked value by
+  value, and the standing instructions — so a rule number is never flagged, the owner's "forget these rules"); a
+  rounding tolerance only (half a unit of the last digit, or of a round hundred). Strikes ("$382/$363", "$380 put"),
+  "per $100", dates and plain counts are not looked at. One amber line under the answer, "Not in the app's figures:
+  $1,040, 52%.", on every copilot place (`useCopilot()` — Find, the market page, Build, a position, the Journal — and
+  the chart copilot); nothing when every figure is found; not while an answer is cut off.
+
+**Measured.** Tests 1,411 → 1,422, 0 failed. Build 1,461.38 → 1,465.18 kB (the usual chunk warning). Audit 20 boards,
+dark and light: 5,266 ✓, 0 unexplained (two fewer ✓ than PR 61: the board's "FUTURE (MONTE CARLO)" on Build is now a
+skipped word with its reason, `R.model`). Words: market 474 → 479, build 504 → 518 (the grounding line at two sites;
+reasons in voice.test.js).
+
+**Not changed:** the risk gate and every RULES value but `mcRuns` (removed: nothing read it), the seven order paths and
+their bodies, `exitSim()`, `histBacktest()`, `seasonalSignal()`, the /api/state payload, deploy.js, events.js's dates,
+the copilot's model.
+
+### What PR 63 inherits
+
+- **The chance is exact and has no seed**: Horizon "Auto" (63.1) can build every expiry without the simulation's cost;
+  the payoff zones' probabilities (63.4) read the same distribution (`exactPnl()` in engine.js).
+- The CompareFigure's chance curve under the payoffs is drawn from the candidates' own `sigma`/`driftAnnual` (the same
+  ones the exact chance reads); unchanged.
+- The grounding line has been seen on written examples only; how often a real answer works out a figure the app never
+  sent (a difference, a product) is unknown (PRD §4 #10).
+
 ## Done in PR 61 (owner, 7 Oct 2026): quick fixes from the post-PR-60 sanity check
 
 The first of three PRs (61 quick fixes, 62 numbers without noise and the copilot grounded, 63 Find and the trade chart),

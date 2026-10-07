@@ -309,7 +309,7 @@ export default async (req, context) => {
             // measured series and false of a row somebody typed. The model was
             // free to describe a guess as a measurement; now it is told which,
             // and how old, in the app's own sentence.
-            popNow_from: chance ? { runs: chance.runs, drift_pct_per_year: +(chance.driftAnnual * 100).toFixed(1), volatility_pct: +(chance.sigma * 100).toFixed(0), drift_source: chance.seasonalSource, drift_is_measured: !!chance.seasonalMeasured, drift_years: chance.seasonalYears, drift_age_days: chance.seasonalAgeDays, drift_note: chance.seasonalNote } : null },
+            popNow_from: chance ? { method: chance.method, drift_pct_per_year: +(chance.driftAnnual * 100).toFixed(1), volatility_pct: +(chance.sigma * 100).toFixed(0), drift_source: chance.seasonalSource, drift_is_measured: !!chance.seasonalMeasured, drift_years: chance.seasonalYears, drift_age_days: chance.seasonalAgeDays, drift_note: chance.seasonalNote } : null },
           // THE HORIZON IS STATED BESIDE THE NUMBERS COMPUTED AT IT. The field
           // name `p_exit_at_exit_dte_positive` asserted a rule the arithmetic
           // did not apply; `simulated_to_dte` is the simulator's own answer to
@@ -443,10 +443,11 @@ export default async (req, context) => {
     if (workingClose) ruleWarnings.push(workingClose);
 
     const brief = { t: Date.now(), verdict, rationale, evidence, invalidation, pnl: +pnl.toFixed(0), pctMax: +pctMax.toFixed(0), tis, pop: pop == null ? null : +(pop * 100).toFixed(0), dteLeft, sim, approveUrl,
-      // WHAT THE CHANCE ABOVE IS AN ANSWER ABOUT: how many runs, at what
+      // WHAT THE CHANCE ABOVE IS AN ANSWER ABOUT: how it was worked out, at what
       // implied volatility, and — the half that changed — at whose drift.
       chanceNote: chanceSourceNote(chance, pos.ticker),
-      chanceRuns: chance ? chance.runs : null, chanceDrift: chance ? chance.driftAnnual : null,
+      // PR 62: the chance is exact (no run count); the brief says how it was worked out instead of how many runs.
+      chanceMethod: chance ? chance.method : null, chanceDrift: chance ? chance.driftAnnual : null,
       // AND THE STAMP GOES ON THE RECORD, not only into the sentence. The
       // ABSENCE of these three is the marker — an entry written before this PR
       // carries none, and at that point the hand-written table was the only one

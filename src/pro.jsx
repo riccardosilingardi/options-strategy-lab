@@ -9,7 +9,8 @@ import { RULES, ruleBadge, takeProfitLabel, takeProfitTarget, scaleOutLabel, sto
   legBook, sizeSkippedNote, onTick, netFromLegs, limitCeilingNote, rewardRisk,
   contractListing, unlistedContractNote, unquotedLegNote, unquotedLegPointer, marketOrderNote,
   taCopilotPrompt, TA_QUESTIONS, TA_DISCLAIMER, TA_NEVER_PROPOSES, TA_OWN_QUESTION,
-  ivProvenance, noRecordNote, copilotOverreach, copilotOverreachNote, COPILOT_MODEL, GATE_NEAR_LIMIT, CARD_LABELS, FUTURE_PAST_EQUAL, returnText } from "./rules.js";
+  ivProvenance, noRecordNote, copilotOverreach, copilotOverreachNote, COPILOT_MODEL, GATE_NEAR_LIMIT, CARD_LABELS, FUTURE_PAST_EQUAL, returnText, notInFiguresLine } from "./rules.js";
+import { ungroundedFigures } from "./grounding.js";
 import { contractsOf, positionSize, bookPositions, positionStage, autopilotHorizonNote, autopilotVolNote, positionForHolding, journalPnlTotal, scoredJournal } from "./journal.js";
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, LineStyle } from "lightweight-charts";
 // The fold lives in steps.jsx — chrome with no trade in it, and the one file
@@ -1553,13 +1554,15 @@ export function TaCopilot({ ticker, bars, structure, convo, setConvo, onAnalysis
          copy kept beside it, and never from anything this component computed
          for itself. */
       const ctx = taContext(bars, structure);
+      const contextStr = JSON.stringify({ ticker, ...ctx }, null, 1);
       const reply = await askAI(
         "server",
         next.map((m) => ({ role: m.role, content: m.content })),
-        JSON.stringify({ ticker, ...ctx }, null, 1),
+        contextStr,
         (sofar) => setConvo((c) => ({ ...c, partial: sofar })),
         taCopilotPrompt());
-      setConvo({ msgs: [...next, { role: "assistant", content: reply }], busy: false, err: null, partial: "" });
+      setConvo({ msgs: [...next, { role: "assistant", content: reply, ungrounded: ungroundedFigures(reply, { text: taCopilotPrompt(), context: contextStr }) }],
+        busy: false, err: null, partial: "" });
       // THE JOURNAL IS THE RECORD OF WHAT THE APP DID, and a chart reading is
       // part of that record exactly as a desk analysis is.
       if (onAnalysis) onAnalysis({ label: label || "Chart question", prompt: text, answer: reply, ticker: ticker || null });
@@ -1580,10 +1583,12 @@ export function TaCopilot({ ticker, bars, structure, convo, setConvo, onAnalysis
     const base = msgs;
     setConvo({ msgs: base, busy: true, err: null, partial: "" });
     try {
-      const more = await askAI("server", req.messages, JSON.stringify({ ticker, ...taContext(bars, structure) }, null, 1),
+      const contextStr = JSON.stringify({ ticker, ...taContext(bars, structure) }, null, 1);
+      const more = await askAI("server", req.messages, contextStr,
         (sofar) => setConvo((c) => ({ ...c, msgs: withContinuation(base, req.index, sofar, { truncated: true, reason: "max_tokens" }) })),
         taCopilotPrompt());
-      const done = withContinuation(base, req.index, more);
+      const whole = withContinuation(base, req.index, more);
+      const done = whole.map((m, k) => (k !== req.index ? m : { ...m, ungrounded: ungroundedFigures(m.content, { text: taCopilotPrompt(), context: contextStr }) }));
       setConvo({ msgs: done, busy: false, err: null, partial: "" });
       const q = base[req.index - 1] || {};
       if (onAnalysis) onAnalysis({ label: q.label || "Chart question", prompt: q.content || "", answer: done[req.index].content, ticker: ticker || null });
@@ -1651,6 +1656,9 @@ export function TaCopilot({ ticker, bars, structure, convo, setConvo, onAnalysis
                   ? <div style={{ fontSize: FS.sm, color: T.body, lineHeight: 1.5 }}>{m.content}</div>
                   : <>
                     <Markdown text={m.content} />
+                    {!m.truncated && notInFiguresLine(m.ungrounded) && (
+                      <div data-ungrounded style={{ ...sans, fontSize: FS.xs, color: T.amber, marginTop: 6, lineHeight: LH.body }}>{notInFiguresLine(m.ungrounded)}</div>
+                    )}
                     {m.truncated && (
                       <div style={{ ...mono, fontSize: FS.xs, color: T.amber, marginTop: 8, paddingTop: 8,
                         borderTop: `1px solid ${T.amber}44`, lineHeight: 1.6 }}>
@@ -1740,12 +1748,15 @@ export function useCopilot({ ctx, apiKey, convo, setConvo, onAnalysis }) {
       // seconds to write, and a motionless "Thinking…" for that long is
       // indistinguishable from a hang — which is how the gateway timeout got
       // reported as "it does nothing" in the first place.
+      const contextStr = buildContext(ctx);
       const reply = await askAI(
         apiKey,
         next.map((m) => ({ role: m.role, content: m.content })),
-        buildContext(ctx),
+        contextStr,
         (sofar) => setConvo((c) => ({ ...c, partial: sofar })));
-      setConvo({ msgs: [...next, { role: "assistant", content: reply }], busy: false, err: null, partial: "" });
+      // GROUNDED (PR 62): the figures in the finished answer that the app never sent, listed under it.
+      setConvo({ msgs: [...next, { role: "assistant", content: reply, ungrounded: ungroundedFigures(reply, { text: SYSTEM_PROMPT, context: contextStr }) }],
+        busy: false, err: null, partial: "" });
       // THE JOURNAL IS THE RECORD OF WHAT THE APP DID. An analysis run here is
       // part of that record — the Journal's report was already quoting "the
       // copilot's read" while these runs left no trace at all, so the two told
@@ -1776,9 +1787,11 @@ export function useCopilot({ ctx, apiKey, convo, setConvo, onAnalysis }) {
     const base = msgs;
     setConvo({ msgs: base, busy: true, err: null, partial: "" });
     try {
-      const more = await askAI(apiKey, req.messages, buildContext(ctx),
+      const contextStr = buildContext(ctx);
+      const more = await askAI(apiKey, req.messages, contextStr,
         (sofar) => setConvo((c) => ({ ...c, msgs: withContinuation(base, req.index, sofar, { truncated: true, reason: "max_tokens" }) })));
-      const done = withContinuation(base, req.index, more);
+      const whole = withContinuation(base, req.index, more);
+      const done = whole.map((m, k) => (k !== req.index ? m : { ...m, ungrounded: ungroundedFigures(m.content, { text: SYSTEM_PROMPT, context: contextStr }) }));
       setConvo({ msgs: done, busy: false, err: null, partial: "" });
       // FILED ONCE, WHOLE: the cut answer was never filed; the whole one is, under the question that asked it.
       const q = base[req.index - 1] || {};
@@ -2992,7 +3005,7 @@ export function confluence(seasonalM, ta) {
    PRICE HISTORY × WHERE IT COULD GO × WHERE YOU MAKE MONEY — Build's one chart, on the owner's mockup "3 · Build"
    (redesign PR 2, TASK 2). One price axis on the right, shared by every panel, left to right:
      · the last 60 sessions of the price (a longer history one tap away: 1Y, 5Y);
-     · a BLUE FAN from today to expiry — the inner band holds 68 of 100 simulated paths, the outer 95 — on the same
+     · a BLUE FAN from today to expiry — the inner band holds 68 of 100 outcomes of the model, the outer 95 — on the same
        lognormal the chance is drawn on (the chain's IV, the season's counted drift);
      · BARS OF WHERE IT ENDS at expiry, green where the trade pays;
      · THE PAYOFF at the right edge, at expiry, rotated onto the same axis;
@@ -3154,7 +3167,7 @@ export function UnifiedView({ ticker, dte, sigma, driftM, curve, legs, breakeven
       <Reveal open={how}>
         <p role="note" style={{ ...sans, fontSize: FS.sm, color: T.body, lineHeight: LH.body, margin: "0 0 4px" }}>
           On the left, {ticker}'s price over the last {sessions}. From today's dot, the blue fan is where the price could
-          be by expiry: the darker band holds 68 of every 100 simulated paths, the paler one 95. The bars beside it are
+          be by expiry: the darker band holds 68 of every 100 outcomes of the model, the paler one 95. The bars beside it are
           where it ends, green where this trade pays. At the right edge, what the trade makes or loses at expiry at each
           price, read straight across the same price axis. The dashed blue line is the breakeven. The fan ends on green
           about {chanceText(pIn)} of the time.
