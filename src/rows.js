@@ -2,7 +2,7 @@
 // src/rows.js — FIND, VERSION B: ONE ROW PER MARKET (redesign PR 1, TASK 2; owner's mockups, 4 Oct 2026).
 //
 // THE ROWS ARE A VIEW OF THE ONE SORTED LIST, NOT A SECOND LIST. `findGen` builds every candidate once (the chains,
-// the floors, the 8,000-run chance) and `findShown` sorts them in the owner's order; this file only groups that
+// the floors, the exact chance) and `findShown` sorts them in the owner's order; this file only groups that
 // array by market. No new ranking, no new simulation: a row's card is the market's FIRST card that fits the request
 // in the chosen order, or — when none of its cards fits — its first card, and the row is a miss (quieter, the reason
 // in place of the subtitle). Rows sit in the order of their card in the sorted list, so a miss stays in its place

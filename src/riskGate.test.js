@@ -18,7 +18,7 @@ import { RULES, sizing, ruleBadge, qualityFloor, qualityFloorSentence, liquidity
   spreadShare, spreadFloor, spreadFloorReason, wideSpreadNote, spreadSkippedNote,
   expiryChoice, expiryChoiceNote, checkedAgainstNote, offBoardStrikeLabel,
   modelSanity, modelSanityReason, modelDisagreementNote,
-  chanceOf, chanceSeedKey, seasonalProvenance, seasonalStampOf, seasonalSourceSentence,
+  chanceOf, seasonalProvenance, seasonalStampOf, seasonalSourceSentence,
   MEASURED_SEASONAL_SOURCE, ESTIMATED_SEASONAL_SOURCE, NO_SEASONAL_SOURCE, seasonalStampNote, chanceBasisLabel, watchAttentionLevel,
   ivProvenance, CHAIN_IV_SOURCE, THESIS_IV_SOURCE, FALLBACK_IV_SOURCE,
   comboBook, limitAgainstBook, openLimitPrice, closeLimitPrice, openLimitNote, limitPlacement, notionalControlled, notionalNote,
@@ -1498,21 +1498,16 @@ test("ONE CHANCE — no closed form survives anywhere for a screen to print", ()
   }
 });
 
-test("ONE CHANCE — one run count, so ranking and printing cannot disagree", () => {
-  // THE TRAP THIS EXISTS FOR. The Shortlist prices and ranks many candidates
-  // and prints the chance of each one; a cheaper run count for ranking than for
-  // printing would mean the row you compared and the row you opened disagreeing
-  // about the same trade. The decision is ONE count for both, and the cost of
-  // it is measured in the comment beside `RULES.mcRuns`.
-  assert.equal(typeof RULES.mcRuns, "number");
-  assert.ok(RULES.mcRuns >= 1000, "a run count this low would be visible at the whole percent printed");
-  // `chanceOf` is the only entry point and it reads the home; nothing else in
-  // the app may hand `terminalMC` a run count of its own.
+test("ONE CHANCE — exact since PR 62: no run count, one entry point, so ranking and printing cannot disagree", () => {
+  // There was one run count (`RULES.mcRuns`, 8,000) so the Shortlist's ranking and its printing could not disagree. The
+  // chance is now worked out exactly (`terminalExact()`): there is no count to choose, and RULES no longer has one.
+  assert.equal(RULES.mcRuns, undefined, "a run count came back");
+  // `chanceOf` is the only entry point; nothing else in the app works a chance out on its own.
   const rules = codeOf("rules.js");
-  assert.equal((rules.match(/terminalMC\(/g) || []).length, 1,
-    "terminalMC is called in exactly one place: inside chanceOf");
+  assert.equal((rules.match(/terminalExact\(/g) || []).length, 1, "terminalExact is called in exactly one place: inside chanceOf");
+  assert.equal(/terminalMC\(/.test(rules), false, "rules.js still simulates the chance");
   for (const f of ["App.jsx", "pro.jsx", "visuals.jsx", "wizard.jsx", "../netlify/functions/autopilot.mjs"]) {
-    assert.equal(/terminalMC/.test(codeOf(f)), false, `${f} runs its own simulation`);
+    assert.equal(/terminalMC|terminalExact/.test(codeOf(f)), false, `${f} works out a chance of its own`);
   }
 });
 
@@ -1714,20 +1709,22 @@ test("ONE SEASONAL SOURCE — measured and not read print DIFFERENT sentences; a
   assert.equal(/0 years/.test(seasonalSourceSentence({ measured: true, ticker: "CORN" })), false);
 });
 
-test("ONE CHANCE — the seed is the TRADE's, so it moves when the trade moves", () => {
+test("ONE CHANCE — DETERMINISTIC (PR 62): the same trade gives the same numbers, to the last digit; a cent on the spot moves them by a cent's worth", () => {
+  // It used to be a seed made of the trade and the spot to the cent, so a price refresh re-rolled 8,000 futures under
+  // the reader. Now there is no draw: the same inputs give the same answer, every time, on every screen.
   const legs = [{ side: 1, type: "call", strike: 20, qty: 1 }, { side: -1, type: "call", strike: 21, qty: 1 }];
-  const base = { ticker: "BOIL", expKey: "2026-11-06", legs, spot: 21.23, dte: 45 };
-  assert.equal(chanceSeedKey(base), chanceSeedKey({ ...base }), "same trade, same key");
-  // A price wobbling in the third decimal between two renders must not re-roll
-  // the simulation under the reader; a different strike or expiry must.
-  assert.equal(chanceSeedKey({ ...base, spot: 21.2301 }), chanceSeedKey(base));
-  assert.notEqual(chanceSeedKey({ ...base, spot: 21.25 }), chanceSeedKey(base));
-  assert.notEqual(chanceSeedKey({ ...base, expKey: "2026-12-04" }), chanceSeedKey(base));
-  assert.notEqual(chanceSeedKey({ ...base, ticker: "UNG" }), chanceSeedKey(base));
-  assert.notEqual(chanceSeedKey({ ...base, dte: 46 }), chanceSeedKey(base));
-  assert.notEqual(
-    chanceSeedKey({ ...base, legs: [{ side: 1, type: "call", strike: 20, qty: 1 }, { side: -1, type: "call", strike: 22, qty: 1 }] }),
-    chanceSeedKey(base));
+  const flat = seasonalProvenance(null, "BOIL");
+  const base = { legs, entryNet: 0.4, spot: 21.23, iv: 0.6, dte: 45, seasonal: flat, month: 9, ticker: "BOIL", expKey: "2026-11-06" };
+  const a = chanceOf(base), b = chanceOf({ ...base });
+  for (const k of ["pop", "ev", "p5", "p50", "p95", "sd"]) assert.equal(a[k], b[k], `${k} differs between two runs`);
+  assert.deepEqual(a.bins, b.bins);
+  assert.equal(a.method, "exact"); assert.equal(a.seedKey, undefined, "no seed"); assert.equal(a.runs, undefined, "no run count");
+  // The expiry is no longer part of any seed: the same legs, spot and days give the same chance.
+  assert.equal(chanceOf({ ...base, expKey: "2026-12-04" }).pop, a.pop);
+  // A cent on the spot: a cent's worth, never a re-roll.
+  const up = chanceOf({ ...base, spot: 21.24 });
+  assert.ok(Math.abs(up.pop - a.pop) < 0.002, `a cent moved the chance by ${(up.pop - a.pop) * 100} points`);
+  assert.ok(Math.abs(up.ev - a.ev) < 1, `a cent moved the average by $${up.ev - a.ev}`);
 });
 
 /* ============================================================================
@@ -3230,11 +3227,9 @@ test("REQUEST — the slider's band and step live in RULES, and it is clamped", 
   assert.equal(meetsRequest({ pop: null, rr: 1, maxLoss: -100, maxProfit: 100 }, anyReq).meets, true, "and asks nothing of an unknown one");
   assert.equal(requestOf({ minChance: 2 }, {}).minChance, RULES.chanceAskMax);
   assert.equal(requestOf({}, {}).chanceAnswered, false);
-  // THE STEP IS COARSER THAN THE SIMULATION'S OWN ERROR. At `mcRuns` the
-  // standard error is about half a point; a step finer than that would move
-  // rows between the two sections on sampling noise.
-  assert.ok(RULES.chanceAskStep >= 0.02,
-    "a step finer than the Monte Carlo's own error is a control that appears to do what it did not");
+  // THE STEP WAS CHOSEN COARSER THAN THE SIMULATION'S OWN ERROR (about half a point at 8,000 runs). Since PR 62 the
+  // chance is exact and has no error; the step is a RULES value and stays where it was.
+  assert.ok(RULES.chanceAskStep >= 0.02, "the step moved");
   // AND IT IS NOT THE REWARD FLOOR. `minRewardRisk` stays a FIXED rule.
   assert.equal(RULES.minRewardRisk, 0.25, "the reward floor is not a control and does not move");
 });

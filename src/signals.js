@@ -868,7 +868,7 @@ export const badgeText = (fused, tk = fused && fused.ticker) => {
 export function numbersFitLines(order = DEFAULT_FIND_ORDER) {
   const evSignal = findOrderOf("evSignal").label;
   return [
-    { k: "future", text: `Future (Monte Carlo) = ${RULES.mcRuns.toLocaleString("en-US")} invented futures to expiry, from the option prices and the season's months that beat ${RULES.seasonalSignalT}× their own noise. It is a simulation, not history.` },
+    { k: "future", text: `Future (model) = every price the model allows at expiry, worked out exactly: the spread from the option prices, the lean from the season's months that beat ${RULES.seasonalSignalT}× their own noise. It is a model, not history.` },
     { k: "past", text: "Past yrs (backtest) = this trade replayed on the ETF's real past, one row per year: the same calendar window, settled at expiry." },
     { k: "signal", text: `+ signal = score ÷ ${SIGNAL_DIVISOR} × confidence ÷ 100 for a bull or bear card; (${NEUTRAL_QUIET} − |score|) ÷ ${SIGNAL_DIVISOR} × confidence ÷ 100 for a neutral one. Only "${evSignal}" adds it.` },
     { k: "filter", text: `Filter = the sliders and toggles only; the order never hides a card. The order is the one you chose (${findOrderOf(order).label}).` },

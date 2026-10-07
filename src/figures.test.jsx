@@ -85,7 +85,7 @@ check("RISK, PROFIT, CHANCE, BREAK-EVEN: every figure identical on the list card
   for (const row of r.rows) eq(row.build, row.card, `${row.k}`);
   eq(r.same, true, "the reconciliation says same");
   has(r.line, "per contract");
-  eq(list.pop, build.chance.pop, "one seeded Monte Carlo, one chance");
+  eq(list.pop, build.chance.pop, "one exact chance (PR 62), one number");
 });
 
 check("THE CHART: the picture's break-even is the card's and Build's", () => {

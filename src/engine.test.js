@@ -22,7 +22,7 @@
 
 import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
-import { exitSim, netBS, SIGMA, terminalMC, seedFrom, rng, seasonalDrift, seasonalSpan,
+import { exitSim, netBS, SIGMA, terminalMC, terminalExact, exactPnl, Phi, N, seedFrom, rng, seasonalDrift, seasonalSpan,
   parseAvJson, statsFromMatrix, histBacktest, payoff } from "./engine.js";
 import { RULES, takeProfitTarget, sigmaProvenance, MEASURED_SIGMA_SOURCE, TABLE_SIGMA_SOURCE, FALLBACK_SIGMA_SOURCE } from "./rules.js";
 import { avMonthlyBody, AV_REFUSALS, CORN_SHAPED_MONTH_DRIFT, CORN_MONTHLY_VOL } from "./avFixture.js";
@@ -636,6 +636,85 @@ test("AV STATS — per month: the years that carry it and the standard error of 
   // A month carried by one year has no standard deviation: its error is null, never zero.
   const one = statsFromMatrix([[2026, 1.5, null, null, null, null, null, null, null, null, null, null, null]]);
   assert.equal(one.monthN[0], 1); assert.equal(one.monthSE[0], null); assert.equal(one.monthSE[1], null);
+});
+
+
+/* ============================================================================
+   THE CHANCE, EXACT (PR 62, owner 7 Oct 2026). `terminalExact()` works out what `terminalMC()` estimated — the same
+   lognormal, the same P&L — with no draw. Proved here against the simulation at 1,000,000 runs on every family the app
+   builds, within the simulation's own standard error; and a cent on the spot moves it smoothly.
+============================================================================ */
+const FAMILIES = {
+  "debit call vertical": { legs: [{ side: 1, type: "call", strike: 20, qty: 1 }, { side: -1, type: "call", strike: 22, qty: 1 }], net: 0.8, S: 20.6 },
+  "debit put vertical (GLD 382/363)": { legs: [{ side: 1, type: "put", strike: 382, qty: 1 }, { side: -1, type: "put", strike: 363, qty: 1 }], net: 6.75, S: 378.4 },
+  "credit call vertical (GLD 393/412)": { legs: [{ side: -1, type: "call", strike: 393, qty: 1 }, { side: 1, type: "call", strike: 412, qty: 1 }], net: -4.1, S: 378.4 },
+  "credit put vertical": { legs: [{ side: -1, type: "put", strike: 18, qty: 1 }, { side: 1, type: "put", strike: 17, qty: 1 }], net: -0.25, S: 18.4 },
+  "iron condor": { legs: [{ side: 1, type: "put", strike: 12, qty: 1 }, { side: -1, type: "put", strike: 13, qty: 1 },
+    { side: -1, type: "call", strike: 14, qty: 1 }, { side: 1, type: "call", strike: 15, qty: 1 }], net: -0.33, S: 13.24 },
+  "iron butterfly": { legs: [{ side: 1, type: "put", strike: 12, qty: 1 }, { side: -1, type: "put", strike: 13, qty: 1 },
+    { side: -1, type: "call", strike: 13, qty: 1 }, { side: 1, type: "call", strike: 14, qty: 1 }], net: -0.52, S: 13.24 },
+  "put butterfly (SLV 58/55/51)": { legs: [{ side: 1, type: "put", strike: 58, qty: 1 }, { side: -1, type: "put", strike: 55, qty: 2 },
+    { side: 1, type: "put", strike: 51, qty: 1 }], net: 0.43, S: 56 },
+  "long call (no ceiling)": { legs: [{ side: 1, type: "call", strike: 22, qty: 1 }], net: 0.9, S: 21.5 },
+  "long put": { legs: [{ side: 1, type: "put", strike: 94, qty: 1 }], net: 5.0, S: 96 },
+};
+const EXACT_POLICY = { driftAnnual: 0.04, sigma: 0.32, dte: 44 };
+
+test("Φ IS THE NORMAL CDF TO DOUBLE PRECISION, and agrees with N() to its own error", () => {
+  assert.equal(Phi(0), 0.5);
+  assert.ok(Math.abs(Phi(1.959963984540054) - 0.975) < 1e-12);
+  assert.ok(Math.abs(Phi(-3) - 0.0013498980316301) < 1e-14);
+  for (let x = -6; x <= 6; x += 0.25) assert.ok(Math.abs(Phi(x) - N(x)) < 2e-7, `Φ(${x})`);
+  assert.equal(Phi(-40), 0); assert.equal(Phi(40), 1);
+});
+
+test("EXACT = THE SIMULATION AT 1,000,000 RUNS, within its standard error, on every family the app builds", () => {
+  const n = 1000000;
+  for (const [name, f] of Object.entries(FAMILIES)) {
+    const x = terminalExact(f.legs, f.net, f.S, EXACT_POLICY);
+    const mc = terminalMC(f.legs, f.net, f.S, { ...EXACT_POLICY, runs: n, seed: seedFrom(name) });
+    const sePop = Math.sqrt(x.pop * (1 - x.pop) / n), seEv = x.sd / Math.sqrt(n);
+    assert.ok(Math.abs(mc.pop - x.pop) <= 4 * sePop, `${name}: chance ${x.pop} against ${mc.pop} (${((mc.pop - x.pop) / sePop).toFixed(1)} SE)`);
+    assert.ok(Math.abs(mc.ev - x.ev) <= 4 * seEv, `${name}: average ${x.ev} against ${mc.ev} (${((mc.ev - x.ev) / seEv).toFixed(1)} SE)`);
+    // The percentiles: the simulation's p5 / p50 / p95 sit where the exact distribution puts 5 / 50 / 95% of outcomes.
+    const D = exactPnl(f.legs, f.net, f.S, EXACT_POLICY);
+    for (const [q, v] of [[0.05, mc.p5], [0.5, mc.p50], [0.95, mc.p95]]) {
+      const se = Math.sqrt(q * (1 - q) / n);
+      assert.ok(D.cdf(v) >= q - 4 * se && D.cdf(v, true) <= q + 4 * se, `${name}: p${q * 100} ${v} sits at ${D.cdf(v, true)}–${D.cdf(v)}`);
+    }
+    // The 30 buckets hold every outcome.
+    assert.ok(Math.abs(x.bins.reduce((a, b) => a + b.n, 0) - 100) < 0.2, `${name}: the buckets sum to ${x.bins.reduce((a, b) => a + b.n, 0)}`);
+    assert.equal(x.bins.length, 30);
+  }
+});
+
+test("EXACT IS SMOOTH: a cent on the spot moves the chance and the average by no more than the true change (no jump)", () => {
+  for (const [name, f] of Object.entries(FAMILIES)) {
+    const at = (S) => terminalExact(f.legs, f.net, S, EXACT_POLICY);
+    const a = at(f.S), b = at(f.S + 0.01);
+    // The true change over a cent, from the slope across ±2 cents (no noise, so the two agree when there is no jump).
+    const slope = (k) => (at(f.S + 0.02)[k] - at(f.S - 0.02)[k]) / 4;
+    for (const k of ["pop", "ev"]) {
+      const d = b[k] - a[k], t = slope(k);
+      assert.ok(Math.abs(d - t) <= 0.05 * Math.abs(t) + 1e-7, `${name}: ${k} moved ${d} over a cent, the slope says ${t}`);
+    }
+    // And the same inputs give the same numbers, to the last digit.
+    const c = at(f.S);
+    for (const k of ["pop", "ev", "p5", "p50", "p95"]) assert.equal(c[k], a[k], `${name}: ${k} is not deterministic`);
+  }
+});
+
+test("terminalExact THROWS without a policy, as terminalMC does: a default is how a stale number returns", () => {
+  assert.throws(() => terminalExact(VERT, 0.4, 20), TypeError);
+  for (const k of ["driftAnnual", "sigma", "dte"]) {
+    const partial = { ...EXACT_POLICY }; delete partial[k];
+    assert.throws(() => terminalExact(VERT, 0.4, 20, partial), TypeError, `missing ${k} must throw`);
+  }
+  assert.throws(() => terminalExact(VERT, 0.4, 20, { ...EXACT_POLICY, sigma: 0 }), RangeError);
+  assert.throws(() => terminalExact(VERT, 0.4, 0, EXACT_POLICY), RangeError);
+  // A P&L of exactly zero is not a profit: a flat $0 plateau is not counted in the chance.
+  const flat = terminalExact([{ side: 1, type: "call", strike: 1000, qty: 1 }], 0, 20, EXACT_POLICY);
+  assert.equal(flat.pop, 0);
 });
 
 console.log(`\n${passed} passed, ${failures.length} failed`);

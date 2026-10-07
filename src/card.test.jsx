@@ -194,13 +194,13 @@ check("ZERO MATCHES NAMES THE CONTROL THAT BINDS AND THE NEAREST VALUE THAT LETS
   has(html, "Lower chance to 70% → 1 match: AAA");
 });
 
-check("SIX TILES IN A FIXED ORDER (PR #49): the four, then FUTURE (MONTE CARLO) and PAST YRS (BACKTEST)", () => {
+check("SIX TILES IN A FIXED ORDER (PR #49): the four, then FUTURE (MODEL, since PR 62) and PAST YRS (BACKTEST)", () => {
   const future = futureFigures({ ev: -2.88 }, A80, 3, "2026-10-30");
   const bt = { wins: 9, n: 14, winRate: 9 / 14, avg: 103.4, span: 2, month: 9, excludedYear: 2026 };
   const html = renderToStaticMarkup(
     <CandidateCard name="Bull Call Spread" legs="+1 28C" rr={1.5} pop={0.62} figures={sizedFigures(A80, 3)}
       future={future} past={pastFigures(bt, A80, 3)} ticker="CORN" />);
-  const ORDER = [">YOU RISK<", ">MAX PROFIT<", ">CHANCE<", ">RETURN ON RISK<", ">FUTURE (MONTE CARLO)<", ">PAST YRS (BACKTEST)<"];
+  const ORDER = [">YOU RISK<", ">MAX PROFIT<", ">CHANCE<", ">RETURN ON RISK<", ">FUTURE (MODEL)<", ">PAST YRS (BACKTEST)<"];
   const at = ORDER.map((k) => html.indexOf(k));
   if (at.some((x) => x < 0)) throw new Error(`a tile is missing: ${ORDER.filter((k, i) => at[i] < 0)}`);
   for (let i = 1; i < at.length; i++) if (!(at[i] > at[i - 1])) throw new Error("the six tiles are not in their fixed order");
@@ -209,7 +209,7 @@ check("SIX TILES IN A FIXED ORDER (PR #49): the four, then FUTURE (MONTE CARLO) 
   // PAST: won 9 of 14 · avg for the size (3 × $103.4 = +$310).
   has(html, "won 9 of 14 · avg +$310");
   // Each new tile has its ⓘ, icon only: the tile's name is the label.
-  has(html, 'aria-label="About future (monte carlo)"'); has(html, 'aria-label="About past yrs (backtest)"');
+  has(html, 'aria-label="About future (model)"'); has(html, 'aria-label="About past yrs (backtest)"');
   const none = renderToStaticMarkup(<CandidateCard name="X" legs="x" rr={1} pop={0.5} figures={sizedFigures(A80, 1)} />);
   has(none, "not read");
 });

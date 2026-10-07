@@ -22,7 +22,7 @@ import { spawnSync } from "node:child_process";
 const ENTRY = `
 import { findCards } from "./scripts/find-fixtures.jsx";
 import { RULES, seasonalProvenance, seasonalSignal, chanceOf } from "./src/rules.js";
-import { parseAvJson, statsFromMatrix, seasonalDrift, SIGMA, terminalMC, seedFrom } from "./src/engine.js";
+import { parseAvJson, statsFromMatrix, seasonalDrift, SIGMA, terminalExact } from "./src/engine.js";
 import { avMonthlyBody, CORN_SHAPED_MONTH_DRIFT } from "./src/avFixture.js";
 import { BASKET, getU } from "./src/markets.js";
 
@@ -95,7 +95,8 @@ for (const c of cards) {
   const iv = c.lf.mc ? c.lf.mc.sigma : 0.3;
   const after = chanceOf({ legs: c.legs, entryNet: a.entry, spot: c.spot, iv, dte: c.dte, seasonal: prov, month: MONTH, ticker: c.tk, expKey: c.expKey });
   const driftBefore = seasonalDrift(st.monthlyMean, MONTH, c.dte);
-  const before = terminalMC(c.legs, a.entry, c.spot, { driftAnnual: driftBefore, sigma: after.sigma, dte: c.dte, runs: RULES.mcRuns, seed: seedFrom(after.seedKey) });
+  // The same exact computation as the chance (PR 62), on every month's full mean: the difference is the drift alone.
+  const before = terminalExact(c.legs, a.entry, c.spot, { driftAnnual: driftBefore, sigma: after.sigma, dte: c.dte });
   const d = (after.pop - before.pop) * 100;
   moved.push(Math.abs(d)); maxMove = Math.max(maxMove, Math.abs(d));
 }
