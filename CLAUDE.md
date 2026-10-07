@@ -172,6 +172,16 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
   gate callback). A roll is offered only by `rollEligible()` and is two orders, never both held: Build blocks Send with
   `rollCloseFirst()` until Alpaca no longer holds the old position, then sends through order path 2; the records are
   linked by `rolledInto()` / `rolledFrom()` timeline lines, never a new /api/state field.
+- **One compare (PR 61):** the tick on a Strategies card selects (≤ `MAX_COMPARE`) and shows its word; ONE sheet
+  (`CompareSheet`) — Find's "Compare ›", the market page's "See them ›", Build's "N still ticked" — shows the ticked cards
+  (or, with none, the cards that fit) as `compareCards()`'s rows, labelled C1…Cn, at the size the budget buys, and its
+  copilot reads exactly those rows. Never a second tray.
+- **☆ is a toggle (PR 61):** a second tap removes through `delSaved()` (`withoutSaved()`, the one remover); Undo puts back
+  the same item (`restoreSaved()`).
+- **The copilot's model has one home, `COPILOT_MODEL` (rules.js)**; copilot.test.jsx fails on the id anywhere else. An
+  answer stopped by its length limit offers Continue (appended to the same answer, filed once).
+- **Open risk says what it includes (PR 61):** `limits.openRiskParts` are the gate's own summands; a trade on Build that is
+  already in the book is said ("Already sent as…") and never added twice on Build's figure.
 - **The Journal's copilot (PR 4c)** asks about one closed trade (`closedTrade` in the context, the record's own words) and
   recommends nothing (`COPILOT_ROLE.journal`).
 - Plan first, then change surgically: the plan is the standing rule's ("Plan before you execute", above).
@@ -210,11 +220,11 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
 - `src/freshness.js` — how old a number on screen may be.
 - `src/visuals.jsx` — every trade picture, all cut from `payoffBands()`.
 - `src/card.jsx` — the request controls (shown in Find's sheets, `bare`), the one candidate card (six tiles and its
-  picture row), the one sorted list (misses in place), the compare tray and the card's actions.
+  picture row), the one sorted list (misses in place) and the card's actions.
 - `src/ui.jsx` — Btn, Panel, Label, Stat, Fold, Chip, Note, inputs, `RangeField`, the mono/sans stacks.
   The type tokens (`TYPE`) are in `src/theme.js`. Mono only for numbers, tickers, legs, OCC symbols.
 - `src/find.jsx` — Step 1, Find (version B, redesign PR 1): category tabs, the chip row and its sheets, the summary line,
-  one row per market (`MarketRow`), the states, Compare (`ComparePanel`).
+  one row per market (`MarketRow`), the states, and the one Compare sheet (`CompareSheet`, mounted by App.jsx; PR 61).
 - `src/rows.js` — `marketRows()`, `rowFigure()`, `rowStateOf()`: Find's rows over the one sorted list (plain JS).
 - `src/alternatives.js` — the alternatives of a structure (PR 4b): `variantsOf()`, `rollCandidates()`, `rollEligible()` (plain JS).
 - `src/market.jsx` — Step 2, the market page: header, Signals (the tab id stays `overview`; the four factor blocks are
@@ -317,6 +327,8 @@ All in `RULES`, `src/rules.js`, unless noted.
   pre-installed headless Chromium, on findB's fixtures (`scripts/screens.jsx`), and prints page and card heights.
 - `node scripts/shoot-pr4.mjs [dir]` photographs PR 4's screens (Find's Compare sheet, the Signals tab, the copilot
   sections) on the `+book` fixture with a stub copilot (docs/screens/pr4/).
+- `node scripts/shoot-pr61.mjs [dir]` photographs PR 61's screens (☆ with Undo, the tick and its line, the Compare sheet, Build's
+  card-vs-limit and "already open" lines, AT RISK's "Includes…") on the `+book` fixture (docs/screens/pr61/).
 - `node scripts/measure-find.mjs` prints what each Find control passes on the 31 fixture cards and what
   one slider move costs (`scripts/find-fixtures.jsx` builds the cards).
 - `node scripts/measure-season.mjs` (months that count, on avFixture series), `node scripts/measure-signals.mjs`

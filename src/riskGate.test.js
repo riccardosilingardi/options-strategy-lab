@@ -5,7 +5,8 @@ import { rowStateOf } from "./rows.js";
 import { readFileSync, readdirSync } from "node:fs";
 import assert from "node:assert/strict";
 import * as RL from "./rules.js";
-import { evaluateTrade, paperStatus, undefinedRiskLegs } from "./riskGate.js";
+import { evaluateTrade, paperStatus, undefinedRiskLegs, positionRiskOf } from "./riskGate.js";
+import { holdsStructure } from "./positionView.js";
 import { positionSize, positionSizeNote, contractsOf, withPositionSize, bookPositions, positionStage, positionForHolding } from "./journal.js";
 import { orderBody, mlegLimitPrice } from "./order.js";
 import { RULES, sizing, ruleBadge, qualityFloor, qualityFloorSentence, liquiditySkippedNote,
@@ -3512,6 +3513,55 @@ test("THE LIQUIDITY SHEET: no open interest reported is said first; the levels c
   const find = readFileSync(new URL("./find.jsx", import.meta.url), "utf8");
   assert.ok(find.includes("data-liq-takeaway") && find.includes("data-liq-levels"), "the takeaway and the chips are on the sheet");
   assert.ok(!/isLoosened\(liqLevel\) \? T\.red/.test(find), "a loosened floor is a warning (amber), never red");
+});
+
+
+/* ---------------- PR 61: open risk says what it includes; a trade already sent is not added twice ---------------- */
+// The owner's 6 Oct reading: USO 145/152 ×17 at 2.78, SENT (its order working) and still loaded on Build, read "Open risk
+// after this $18,827" = $14,101 already open (USO's $4,726 in it) + $4,726 again. The next morning the book without USO held
+// $9,375 = GDX's $4,500 (not on Alpaca) + $4,875 (a GLD order still working).
+const USO_LEGS = [{ side: 1, type: "call", strike: 145, qty: 1 }, { side: -1, type: "call", strike: 152, qty: 1 }];
+const BOOK_61 = [
+  { id: "j1", ref: "J-0001", ticker: "GDX", expKey: "2026-10-30", legs: [{ side: 1, type: "put", strike: 94, qty: 1 }], maxLoss: -500, contracts: 9, alpacaHeld: true },
+  { id: "j7", ref: "J-0007", ticker: "GLD", expKey: "2026-11-20", legs: [{ side: 1, type: "put", strike: 382, qty: 1 }, { side: -1, type: "put", strike: 363, qty: 1 }],
+    maxLoss: -975, contracts: 5, alpacaId: "o-gld", status: "accepted" },
+  { id: "j8", ref: "J-0008", ticker: "USO", expKey: "2026-11-20", legs: USO_LEGS, maxLoss: -278, contracts: 17, alpacaId: "o-uso", status: "accepted" },
+];
+test("PR 61 — THE GATE'S OPEN RISK, TERM BY TERM: openRiskParts are exactly the terms it sums (no second sum)", () => {
+  const g = evaluateTrade({ proposal: { intent: "close", legs: [] }, portfolio: { positions: BOOK_61, account: { paperVerified: true } },
+    capital: { tradingCapital: 100000, concurrentTarget: 10 } });
+  const parts = g.limits.openRiskParts;
+  assert.deepEqual(parts.map((p) => [p.ref, p.ticker, p.risk]), [["J-0001", "GDX", 4500], ["J-0007", "GLD", 4875], ["J-0008", "USO", 4726]]);
+  assert.equal(parts.reduce((a, p) => a + p.risk, 0), g.limits.openRisk, "the parts sum to the gate's own open risk");
+  assert.equal(positionRiskOf(BOOK_61[2]), 4726);
+  // A bare total has no records to name.
+  assert.equal(evaluateTrade({ proposal: { intent: "close", legs: [] }, portfolio: { openRisk: 900, account: { paperVerified: true } } }).limits.openRiskParts, null);
+  // The line names what is not a holding at Alpaca, in the gate's own amounts.
+  assert.equal(RL.openRiskIncludesLine([{ risk: 4500, ticker: "GDX", kind: "notHeld" }, { risk: 4725, ticker: "GLD", kind: "working" }]),
+    "Includes $4,500 on GDX (not on Alpaca) and $4,725 on the GLD order still working.");
+  assert.equal(RL.openRiskIncludesLine([]), null);
+});
+test("PR 61 — REPRODUCED: a SENT trade still loaded on Build is counted twice by 'after this'; Build reads the book instead and says so", () => {
+  const g = evaluateTrade({ proposal: { ticker: "USO", intent: "open", legs: USO_LEGS, dte: 44, contracts: 17, maxLoss: -278, maxProfit: 422 },
+    portfolio: { positions: bookPositions(BOOK_61), account: { paperVerified: true } }, capital: { tradingCapital: 100000, concurrentTarget: 10 } });
+  assert.equal(bookPositions(BOOK_61).length, 3, "the working USO order is in the book (owned plus working)");
+  assert.equal(positionStage(BOOK_61[2]), "working");
+  assert.equal(g.limits.openRisk, 14101, "already open, USO included");
+  assert.equal(g.limits.totalAfter, 18827, "the owner's $18,827: USO counted twice");
+  // What Build now does: the record that IS the loaded trade, its own term, and the open risk as it is.
+  const rec = holdsStructure(bookPositions(BOOK_61), { ticker: "USO", expKey: "2026-11-20", legs: USO_LEGS });
+  assert.equal(rec && rec.ref, "J-0008");
+  const part = g.limits.openRiskParts.find((p) => p.id === rec.id);
+  assert.equal(part.risk, 4726);
+  assert.equal(g.limits.openRisk, 14101, "Build shows this, not 18,827");
+  assert.equal(RL.alreadySentLine(rec.ref, part.risk, true),
+    "Already sent as J-0008: its order is working at Alpaca, and its $4,726 is already in the open risk.");
+  // The App wiring: the figure reads openRisk when the trade is already in the book, and the review says a resend is a second order.
+  const APP = readFileSync(new URL("./App.jsx", import.meta.url), "utf8");
+  assert.ok(APP.includes("money(sentAlready ? L.openRisk : L.totalAfter)"), "Build still adds a sent trade twice");
+  assert.ok(APP.includes("sentNote: sentAlready ? ALREADY_SENT_REVIEW : null"));
+  // A different trade is not 'already sent'.
+  assert.equal(holdsStructure(bookPositions(BOOK_61), { ticker: "USO", expKey: "2026-11-20", legs: [{ side: 1, type: "call", strike: 146, qty: 1 }, { side: -1, type: "call", strike: 152, qty: 1 }] }), null);
 });
 
 console.log(`\n${passed} passed, ${failures.length} failed\n`);

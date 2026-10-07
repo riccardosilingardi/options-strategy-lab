@@ -56,7 +56,8 @@ import { CapitalOnboarding, Card, Pill, statusLine } from "./wizard.jsx";
 // renders the same card, so it may not live here.
 import { CandidateCard, CandidateActions, SignalBadge, StopSigns } from "./card.jsx";
 // STEP 1, FIND: its own file since PR #45, built on `ui.jsx` and the type tokens.
-import { FindStep, FindHeader } from "./find.jsx";
+import { FindStep, FindHeader, CompareSheet, filtersOfFind } from "./find.jsx";
+import { rowStateOf, compareCards } from "./rows.js";
 import { SavedList } from "./saved.jsx";
 import { MarketPage } from "./market.jsx";
 import { buildHandOff, buildScreenState, BUILD_TAB } from "./handoff.js";
@@ -71,7 +72,7 @@ import { nextRef, refCounter, appendTimeline, stampTimeline, orderStatusRecheck,
   isTestRecord, testRecordNote, scoredJournal, journalPnl, NOT_A_FILL,
   journalEntry, searchJournal, CLOSE_REASON_MIN, refNumber, journeyLevel,
   adoptReplacement, replacementsIn, replacedBy } from "./journal.js";
-import { FIRST_STEP, stepCarry, candidateOf, candidateKey, legsLine, toggleCompare, inCompare, MAX_COMPARE, savedFromCandidate, candidateFromSaved, savedAge } from "./path.js";
+import { FIRST_STEP, stepCarry, candidateOf, candidateKey, legsLine, toggleCompare, inCompare, MAX_COMPARE, savedFromCandidate, candidateFromSaved, savedAge, savedItemFor, withoutSaved, restoreSaved, sizedCandidate } from "./path.js";
 import { PositionCard } from "./positionCard.jsx";
 import { navOf, createNavHistory } from "./nav.js";
 import { exitProgress, entryVsNow, displayName, fileState, pnlShareOfRisk, pnlShareText, holdsStructure,
@@ -82,7 +83,7 @@ import { PositionScreen } from "./positionScreen.jsx";
 import { JournalScreen } from "./journal.jsx";
 import { SettingsScreen } from "./settings.jsx";
 import { useWide, RAIL_W } from "./ui.jsx";
-import { findStatusText, DEFAULT_FIND_ORDER, BUILD_CTA } from "./rules.js";
+import { findStatusText, DEFAULT_FIND_ORDER, BUILD_CTA, savedLine, removedFromSavedLine, UNDO, openRiskIncludesLine, alreadySentLine, ALREADY_SENT_REVIEW, CARD_LABELS, limitMovedLine } from "./rules.js";
 // REDESIGN PR 2: Build on the owner's mockup — its words (rules.js) and its screen (build.jsx).
 import { tradeTakeaway, buildSubLine, expiryShort, deltaSharesText, thetaDayText, reasonRuleText, orderBookLine, capLabel,
   EXIT_ROWS, EXITS_FOOTER, exitsPill, timeExitDay, sendLabel, SEND_FOOTER, reviewLegWords, reviewLimitLine, oiCheckText,
@@ -98,7 +99,7 @@ import { liquidityTakeaway, liquidityLevelValue, noOiLine, LIMIT_CHOICES, expiry
 import { EvidenceBar, EvidenceOverlay, DeskSheet, Fold, DeskCountLine } from "./steps.jsx";
 import { BottomBar, placeOf, NAV_BAR_H, FIND_LIST_END } from "./navBar.jsx";
 import { AccountStrip, PositionsBar, PositionsHeader, WorkingCloseLine, CardButton } from "./positions.jsx";
-import { Note, CheckField, Btn, Panel, Label, Stat, Reveal, mono, sans } from "./ui.jsx";
+import { Note, CheckField, Btn, Panel, Label, Stat, Reveal, TextBtn, mono, sans } from "./ui.jsx";
 import { marketClockLine, nextOpenDay } from "./clock.js";
 import { BASKET, TICKERS, getU, categoryOf } from "./markets.js";
 
@@ -1196,7 +1197,6 @@ export default function OptionsStrategyLab() {
      list lives HERE, so walking to Build and back does not lose it. */
   const [compare, setCompare] = useState([]);
   const [compareNote, setCompareNote] = useState(null);
-  const [showCompare, setShowCompare] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [ticker, setTicker] = useState("SOYB");
   const [chains, setChains] = useState({});      // ticker -> normalised chain (Alpaca, or CBOE as the net)
@@ -1243,6 +1243,9 @@ export default function OptionsStrategyLab() {
   const [freeDraft, setFreeDraft] = useState(null);
   const [busy, setBusy] = useState(null);
   const [msg, setMsg] = useState(null);
+  // ONE ACTION BESIDE THE MESSAGE (PR 61: "removed from Saved" · Undo). It belongs to the line it was set with: any
+  // other message hides it, so an old Undo never sits under a new sentence.
+  const [msgAction, setMsgAction] = useState(null);
   const [bt, setBt] = useState(null);
   const [alpaca, setAlpaca] = useState(null);    // account info
   const [confirmSend, setConfirmSend] = useState(false);
@@ -2258,7 +2261,6 @@ export default function OptionsStrategyLab() {
   const tickCompare = (c) => {
     const r = toggleCompare(compare, c);
     setCompare(r.list); setCompareNote(r.note);
-    if (r.changed && r.list.length < 2) setShowCompare(false);
   };
   const savedKeys = useMemo(
     () => new Set((store.saved || []).map((sv) => candidateKey(candidateFromSaved(sv) || {}))),
@@ -2268,12 +2270,26 @@ export default function OptionsStrategyLab() {
   // the same `store.saved` array, the same hydration check, the same sync. A
   // second store for "things to come back to" would be a second thing to keep
   // correct for no reason.
+  // ☆ IS A TOGGLE (PR 61, owner 7 Oct 2026): a second tap removes the saved item through `delSaved()` (the one remover),
+  // and the message line's Undo puts back THE SAME item (`restoreSaved()`, path.js). Read from `storeRef` at the tap,
+  // so an Undo tapped a render later restores into the store as it is then.
   const saveCandidate = async (c) => {
+    const had = savedItemFor(storeRef.current.saved, c);
+    if (had) {
+      await delSaved(had.id);
+      const line = removedFromSavedLine(c.ticker, c.name);
+      setMsg(line);
+      setMsgAction({ msg: line, label: UNDO, run: async () => {
+        const st = { ...storeRef.current, saved: restoreSaved(storeRef.current.saved, had) };
+        setStore(st); setMsg(null); await saveState(st);
+      } });
+      return;
+    }
     const item = savedFromCandidate(c);
-    if (!item || isSaved(c)) return;
-    const st = { ...store, saved: [...store.saved, item] };
+    if (!item) return;
+    const st = { ...storeRef.current, saved: [...storeRef.current.saved, item] };
     setStore(st); await saveState(st);
-    setMsg(`${c.ticker} ${c.name} kept. It is at the bottom of this step, and with your saved strategies on the Positions screen.`);
+    setMsg(savedLine(c.ticker, c.name));
   };
   /* A CARD ON FIND GOES TO BUILD WITH ITS OWN FIGURES, ALL OF THEM (PR #40).
      The Shortlist carried the MID's entry and nothing else, so Build compared
@@ -2557,7 +2573,7 @@ export default function OptionsStrategyLab() {
     });
   }, []);
 
-  const delSaved = async (id) => { const st = { ...store, saved: store.saved.filter((s) => s.id !== id) }; setStore(st); await saveState(st); };
+  const delSaved = async (id) => { const st = { ...storeRef.current, saved: withoutSaved(storeRef.current.saved, id) }; setStore(st); await saveState(st); };
   /* STOP WATCHING a trade that was never taken. It deletes the record, and
      that is the whole of it: nothing was ever bought, so there is nothing to
      close, no profit to bank and nothing the Journal needs to keep. A record
@@ -3227,7 +3243,7 @@ export default function OptionsStrategyLab() {
     // percent every CHANCE on screen prints, so a card cannot say "75%" beside
     // "8 times in 10" about two different roundings of one number.
     const tag = pop >= 0.6 ? { t: "WINS OFTEN", c: T.green, d: `works out about ${chanceInTen(pop)}, for a smaller gain` }
-      : pop < 0.45 && rr >= 2 ? { t: "WINS BIG", c: T.violet, d: `works out about ${chanceInTen(pop)}, but pays ${rr.toFixed(1)}× what you risk` }
+      : pop < 0.45 && rr >= 2 ? { t: "WINS BIG", c: T.violet, d: `works out about ${chanceInTen(pop)}, but pays ${returnText(rr)} of what you risk` }
       : { t: "BALANCED", c: T.blue, d: "a middle path between how often and how much" };
     return { ev, ev100, rr, tag };
   };
@@ -3447,6 +3463,21 @@ export default function OptionsStrategyLab() {
   /* AT RISK ON THE ACCOUNT STRIP (PR #47, TASK 2) IS THE GATE'S OWN ARITHMETIC: `limits.openRisk` of `limits.total`,
      from `evaluateTrade()` with no trade in it. Never a second sum. */
   const exposure = useMemo(() => gate({ intent: "close", legs: [] }, bookFor(!!alpaca))?.limits || null, [gate, bookFor, alpaca]);
+  /* OPEN RISK SAYS WHAT IT INCLUDES (PR 61). The gate's own terms (`limits.openRiskParts`, one per record it summed) for
+     the records that are not a holding at Alpaca: an order still working, or a record Alpaca does not hold ("Not on
+     Alpaca", from the same `legsNotHeld()` the card reads). No second sum: the amounts are the gate's. */
+  const riskIncludes = useCallback((limits) => {
+    const parts = limits && Array.isArray(limits.openRiskParts) ? limits.openRiskParts : [];
+    const out = [];
+    for (const part of parts) {
+      const p = store.positions.find((x) => x.id === part.id);
+      if (!p) continue;
+      const working = positionStage(p) === "working";
+      const al = working ? null : posAlerts.find((a) => a.p.id === p.id);
+      if (working || (al && al.notHeld && al.notHeld.length)) out.push({ risk: part.risk, ticker: p.ticker, kind: working ? "working" : "notHeld" });
+    }
+    return openRiskIncludesLine(out);
+  }, [store.positions, posAlerts]);
   const guard = useMemo(() => {
     if (!AE) return null;
     // AT THE QUANTITY THAT WILL ACTUALLY BE SENT. This read `contracts: 1`
@@ -3471,6 +3502,15 @@ export default function OptionsStrategyLab() {
     return gate({ ticker, intent: "open", legs, dte, contracts, maxLoss: AE.maxLoss, maxProfit: AE.maxProfit,
       quotes: quotesOf(AE), net: AE.entry, occs: occsOf(AE), entryOverride: roomReason }, bookFor(!!alpaca));
   }, [AE, gate, bookFor, alpaca, legs, dte, ticker, roomReason, contracts]); // eslint-disable-line
+  /* A TRADE ALREADY SENT IS NOT ADDED TWICE (PR 61; owner's answer: "say it, don't add"). The record in the book that IS
+     the trade on Build (same market, expiry and legs, `holdsStructure()`), with its own term from the gate. */
+  const sentAlready = useMemo(() => {
+    if (!guard || !legs.length) return null;
+    const rec = holdsStructure(bookPositions(store.positions), { ticker, expKey, legs });
+    if (!rec) return null;
+    const part = (guard.limits.openRiskParts || []).find((x) => x.id === rec.id);
+    return part ? { ref: rec.ref || rec.ticker, risk: part.risk, working: positionStage(rec) === "working" } : null;
+  }, [guard, legs, store.positions, ticker, expKey]);
   /* THE ALTERNATIVES, PRICED (PR 4b): one function for Build's variants and a position's roll candidates. Each goes
      through the card's own path — `listCardFigures()` at the price that fills, `scaleStrategy()` for the size the budget
      buys, the gate at that size against the account the send would use — so a variant reads exactly as a card would. */
@@ -3751,6 +3791,21 @@ export default function OptionsStrategyLab() {
     (find.flagged || x.flags.length === 0) && (!find.positiveOnly || futurePositive(x))).sort(findOrderCompare(findOrder)),
   [findGen, find.flagged, find.positiveOnly, findOrder]);
   const findShown = useMemo(() => findSorted.filter(inFindFilter), [findSorted, inFindFilter]);
+  /* ONE COMPARE (PR 61, owner 7 Oct 2026). The tick selects; ONE sheet — Find's "Compare ›", the market page's "See
+     them ›", Build's "N still ticked" — shows the ticked cards, or with none ticked the cards that fit, and its copilot
+     reads exactly the rows it shows (`compareCards()`: the card's own figures for the size the budget buys, C1…Cn). The
+     size is the one every card reads (`scaleStrategy()`, the same request); nothing is re-simulated. */
+  const compareSizes = useMemo(() => {
+    const m = new Map();
+    for (const x of findSorted) m.set(x.key, sizedFree(scaleStrategy(x.lf.aFill, request.mode, request.amt, request.riskCap), freeSizing));
+    return m;
+  }, [findSorted, request, freeSizing]);
+  const compareSizeOf = useCallback((c) => compareSizes.get(c.key) || null, [compareSizes]);
+  // The cards Find's rows are made of: the category tab's list, without the markets still being read (as FindStep).
+  const findIn = useMemo(() => findShown.filter((x) => !rowStateOf(x.tk, findGen, readiness[x.tk] || null)), [findShown, findGen, readiness]);
+  const tickedLive = useMemo(() => compare.map((c) => findSorted.find((x) => x.key === c.key)).filter(Boolean), [compare, findSorted]);
+  const cmp = useMemo(() => (tickedLive.length ? compareCards(tickedLive, request, compareSizeOf, { fitOnly: false })
+    : compareCards(findIn, request, compareSizeOf)), [tickedLive, findIn, request, compareSizeOf]);
   useEffect(() => {
     // BACK RETURNS TO THE CARD (PR #46, TASK 2): a sheet opened from a card scrolls back to it when it closes.
     if ((step !== "find" && step !== "market") || ev || !scrollToCard.current) return;
@@ -4102,8 +4157,12 @@ export default function OptionsStrategyLab() {
       limitLine: reviewLimitLine({ type: ticket.type, net, tif: ticket.tif, n: contracts }),
       checks: !L ? [] : [
         { id: "loss", ok: rowOk("defined"), text: REVIEW_CHECKS.loss, value: money(L.tradeRisk) },
-        { id: "cap", ok: rowOk("per-trade"), text: REVIEW_CHECKS.cap(L.sizingFree), value: L.sizingFree ? money(L.tradeRisk) : `${money(L.tradeRisk)} of ${money(L.perTrade)}` },
-        { id: "open", ok: rowOk("total"), text: REVIEW_CHECKS.open, value: L.sizingFree ? money(L.totalAfter) : `${money(L.totalAfter)} of ${money(L.total)}` },
+        // `share`: the figure's share of its limit, worked out here from the gate's own `limits` (PR 61), so Pre-trade
+        // analysis can quote "94% of the per-trade cap" as the app's figure. None under free sizing (no limit applies).
+        { id: "cap", ok: rowOk("per-trade"), text: REVIEW_CHECKS.cap(L.sizingFree), value: L.sizingFree ? money(L.tradeRisk) : `${money(L.tradeRisk)} of ${money(L.perTrade)}`,
+          share: !L.sizingFree && L.perTrade > 0 ? L.tradeRisk / L.perTrade : null },
+        { id: "open", ok: rowOk("total"), text: REVIEW_CHECKS.open, value: L.sizingFree ? money(L.totalAfter) : `${money(L.totalAfter)} of ${money(L.total)}`,
+          share: !L.sizingFree && L.total > 0 ? L.totalAfter / L.total : null },
         { id: "legs", ok: uncovered.length === 0 && rowOk("defined") !== false, text: REVIEW_CHECKS.legs, value: uncovered.length ? `${uncovered.length} uncovered` : "none" },
         { id: "days", ok: rowOk("entry-dte"), text: REVIEW_CHECKS.days(), value: `${Math.round(dte)} days` },
         { id: "oi", ok: oiKnown ? oiMin >= liqLevel.absolute : null, text: oiCheckText(liqLevel.absolute), value: oiKnown ? `${oiMin}` : "not read" },
@@ -4111,7 +4170,7 @@ export default function OptionsStrategyLab() {
       ],
       checksFull: <>{rows.map((x) => <span key={x.id} style={{ display: "block", marginBottom: 4 }}>{x.ok ? "✓" : "✗"} {x.text}</span>)}{checkedAgainstNote(!!alpaca, guard?.limits?.paper?.why)}</>,
       clockLine: marketClockLine(clock, { queued: true }), waitLine: marketClockLine(clock, { queued: true }),
-      reason: reasonNode, canSend: !reviewBlock, blocked: reviewBlock,
+      reason: reasonNode, canSend: !reviewBlock, blocked: reviewBlock, sentNote: sentAlready ? ALREADY_SENT_REVIEW : null,
       secondLabel: alpaca ? "Send to Alpaca" : "Open on the app's own book", onLocal: () => { setDeskSheet(null); openPaper(); },
       sentLine: (o) => sentOrderLine({ net, tif: ticket.tif, filled: o && o.filled_qty, qty: o && o.qty }),
       filedLine: (o) => { const rec = o ? recordFor(o) : null; return sentFiledText(rec ? rec.ref : null, !!(rec && rec.thesis && rec.thesis.override)); },
@@ -4481,13 +4540,17 @@ export default function OptionsStrategyLab() {
     setLiqLevelId(RECOMMENDED_LIQUIDITY.id);
   };
   // COMPARE, on Find and on the market page (the ticks are on the market page's cards).
+  // The ticked cards in the order ticked (one no longer in the list says so, with its ✕); with none still in the list,
+  // the cards that fit, after any ticked card that left it.
+  const compareRows = tickedLive.length
+    ? compare.map((c) => { const k = tickedLive.findIndex((x) => x.key === c.key); return { cand: c, card: k >= 0 ? cmp.cards[k] || null : null }; })
+    : [...compare.map((c) => ({ cand: c, card: null })), ...cmp.cards.map((card) => ({ cand: null, card }))];
   const compareBlock = {
-    compare, showCompare, compareNote,
+    compare, compareFitting: cmp.fitting,
+    note: compareNote, onOpen: () => setDeskSheet("compare"),
     onTickCompare: (c) => tickCompare(c),
-    onClearCompare: () => { setCompare([]); setShowCompare(false); setCompareNote(null); },
-    onToggleCompare: () => setShowCompare((v) => !v),
-    onTakeToBuild: (c) => { const x = findGen.items.find((y) => y.key === c.key); if (x) openFound(x); else openOnBuild({ ticker: c.ticker, expKey: c.expKey, legs: c.legs, name: c.name }); },
   };
+  const takeCompared = (c) => { setDeskSheet(null); const x = findGen.items.find((y) => y.key === c.key); if (x) openFound(x); else openOnBuild({ ticker: c.ticker, expKey: c.expKey, legs: c.legs, name: c.name }); };
   return (
     <div style={{ minHeight: "100vh", background: T.bg, color: T.body, ...sans }}>
       <PreviewBanner />
@@ -4562,7 +4625,11 @@ export default function OptionsStrategyLab() {
         {/* (Not on Build since redesign PR 2: the strip is in "More on this trade ▾", under "Market now".) */}
         {!onFindStep && !onMarketStep && !onBuildStep && !onPositions && !onJournal && !showSettings && tickerStrip}
 
-        {msg && <div style={{ ...mono, fontSize: FS.xs, color: T.amber, border: `1px solid ${T.amber}44`, background: `${T.amber}10`, borderRadius: 6, padding: "7px 10px", margin: chromeless ? "8px 16px 0" : "10px 0 0" }}>{msg}</div>}
+        {msg && <div role="status" data-msg style={{ ...mono, fontSize: FS.xs, color: T.amber, border: `1px solid ${T.amber}44`, background: `${T.amber}10`, borderRadius: 6, padding: "7px 10px", margin: chromeless ? "8px 16px 0" : "10px 0 0",
+          display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ flex: 1, minWidth: 0 }}>{msg}</span>
+          {msgAction && msgAction.msg === msg && <TextBtn data-msg-action onClick={() => { const r = msgAction.run; setMsgAction(null); r(); }}>{msgAction.label}</TextBtn>}
+        </div>}
 
         <TabBoundary k={`${tab}/${step}/${ev}`}>
         {/* ONE STATUS PER OBJECT, ONE PLACE (PR #40, TASK 2). An order's state
@@ -4708,6 +4775,19 @@ export default function OptionsStrategyLab() {
         )}
         </div>
         </div>
+
+        {/* ============ ONE COMPARE (PR 61) ============ The sheet Find's "Compare ›", the market page's "See them ›" and
+            Build's "N still ticked" all open. Here, so it opens over whichever of the three is on screen. */}
+        {tab === "build" && !showSettings && (
+          <CompareSheet open={deskSheet === "compare"} onClose={() => setDeskSheet(null)} cmp={cmp} rows={compareRows}
+            ticked={tickedLive.map((x) => { const c = compare.find((y) => y.key === x.key); const sz = compareSizeOf(x.cand);
+              return c ? sizedCandidate(c, sz && sz.ok ? sz.n : null) : null; }).filter(Boolean)} note={compareNote}
+            filters={filtersOfFind({ find, findOrder, request, sentiments: SENTIMENTS,
+              liqState: { id: liqLevelId, label: liqLevel.label, defaultId: RECOMMENDED_LIQUIDITY.id } })}
+            copilot={{ apiKey: "server", convo: findChat, setConvo: setFindChat, onAnalysis: logAnalysis,
+              ctx: { store, scan, news: newsPool, ticker: null, legs: [], expKey: null, A: null, spot: null, seasonalSrc: null } }}
+            onUntick={(c) => tickCompare(c)} onClear={() => { setCompare([]); setCompareNote(null); }} onTakeToBuild={takeCompared} />
+        )}
 
         {/* ============ BUILDER ============ */}
         {/* Where a hand-off lands. The anchor is rendered for every state of
@@ -4994,7 +5074,7 @@ export default function OptionsStrategyLab() {
                                     {k === "fill" ? "R/R SUGGESTED" : `R/R AT THE ${k.toUpperCase()}`}
                                   </div>
                                   <div style={{ ...mono, fontSize: FS.sm, fontWeight: 700, color: T.amber }}>
-                                    {rng[k].rr == null ? "—" : rng[k].rr.toFixed(2)}
+                                    {rng[k].rr == null ? "—" : returnText(rng[k].rr)}
                                   </div>
                                 </div>
                               ))}
@@ -5043,7 +5123,7 @@ export default function OptionsStrategyLab() {
                     : "The best this trade can do at expiry, at the price it will be opened at. It cannot make more than this."} />
                 <Stat k="MOST YOU CAN LOSE" v={fmt$(AE.maxLoss)} c={T.red} tip="The worst this trade can do, at the price it will be opened at. It is fixed the moment you open it — never a dollar more." />
                 <Stat k="BREAKEVEN" v={AE.breakevens.map((b) => b.toFixed(2)).join(" · ") || "—"} c={T.blue} />
-                <Stat k="MADE PER $1 RISKED" v={(() => { const r = rewardRisk(AE.maxProfit, AE.maxLoss); return r == null ? "—" : `${r.toFixed(2)}`; })()}
+                <Stat k={CARD_LABELS.rr} v={(() => { const r = rewardRisk(AE.maxProfit, AE.maxLoss); return r == null ? "—" : returnText(r); })()}
                   c={T.violet}
                   tip={AE.profitUnbounded ? noCeilingNote(stratName || "This structure")
                     : "The best case divided by the worst, at the price that will be sent. At the mid it would read better than this and you cannot trade at the mid."} />
@@ -5272,6 +5352,8 @@ export default function OptionsStrategyLab() {
               contracts, onContracts: (n) => setContracts(Math.max(1, Math.min(20, n))), qtyMin: 1, qtyMax: 20, qtyNote: buildSizeLine,
               limitSide: Number.isFinite(net) && net < 0 ? "credit" : "debit", limit: Number.isFinite(net) ? Math.abs(net) : null, onStep: stepLimit, onTypeLimit: setLimitTo, choices: limitChoices,
               bookLine: orderBookLine({ mid: book.ok ? book.mid : null, natural: book.ok ? book.ask : null }), verdict: ticketVerdict,
+              // PR 61: the limit in force against the price the card was built at (the card's own figures, the same sizing).
+              moved: optRef && optRef.card && optRef.name === stratName && optRef.expKey === expKey ? limitMovedLine(optRef.card, AE, contracts) : null,
               risk: { value: L ? money(L.tradeRisk) : "—", pct: L && L.tradingCapital ? `${pctText(L.tradeRisk / L.tradingCapital)} of capital` : null },
               cap: {
                 checked: !freeSizing && freeDraft == null, label: capLabel(L),
@@ -5284,7 +5366,10 @@ export default function OptionsStrategyLab() {
                 onTurnOff: () => { setSetting("sizingFree", { reason: String(freeDraft || "").trim(), at: Date.now() }); setFreeDraft(null); },
                 onCancelDraft: () => setFreeDraft(null),
               },
-              openRisk: { value: L ? money(L.totalAfter) : "—", of: !L ? "" : freeSizing ? "no limit applied" : `of ${money(L.total)}` },
+              // A trade already in the book is not added twice (PR 61): the open risk as it is, and the sentence why.
+              openRisk: { value: L ? money(sentAlready ? L.openRisk : L.totalAfter) : "—", of: !L ? "" : freeSizing ? "no limit applied" : `of ${money(L.total)}`,
+                includes: L ? riskIncludes(L) : null,
+                sent: sentAlready ? alreadySentLine(sentAlready.ref, sentAlready.risk, sentAlready.working) : null },
               room: pRoom,
             },
             exit: { pill: exitsPill(ticker), footer: EXITS_FOOTER, rows: [
@@ -5314,7 +5399,7 @@ export default function OptionsStrategyLab() {
                 <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
                   <Btn small ghost color={T.blue} onClick={() => refreshChain(ticker)} disabled={busy !== null}>{busy === ticker ? "…" : "Refresh prices"}</Btn>
                   <Btn small ghost color={T.blue} onClick={() => setShowSettings(true)}>Settings</Btn>
-                  {compare.length > 0 && <Btn small ghost color={T.blue} onClick={() => { setShowCompare(true); goStep("find"); }}>{compare.length} still ticked to compare</Btn>}
+                  {compare.length > 0 && <Btn small ghost color={T.blue} onClick={() => setDeskSheet("compare")}>{compare.length} still ticked to compare</Btn>}
                 </div>
               </Section>
               <Section label="The card, as Find shows it">
@@ -5382,7 +5467,7 @@ export default function OptionsStrategyLab() {
           <div data-positions style={panePos ? PANE_L : undefined}>
             <PositionsHeader busy={syncBusy} onSettings={() => setShowSettings(true)}
               onRefresh={async () => { setSyncBusy(true); try { await syncBroker(); recheckOrders(); } finally { setSyncBusy(false); } }} />
-            <AccountStrip account={account || alpaca} risk={exposure} capital={exposure ? exposure.tradingCapital : null} />
+            <AccountStrip account={account || alpaca} risk={exposure} capital={exposure ? exposure.tradingCapital : null} includes={riskIncludes(exposure)} />
             <PositionsBar seg={posSeg} onSeg={(v) => { setPosSeg(v); if (v !== "orders") setFocusOrder(null); }}
               holdings={ownedPositions.length + unrecorded.length} orders={alpaca && alSync.t ? alSync.orders.length : null} />
             {posSeg === "positions" && (

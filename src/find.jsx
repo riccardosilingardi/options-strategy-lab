@@ -28,7 +28,7 @@ import { RefreshCw, Settings } from "lucide-react";
 import { T, TYPE } from "./theme.js";
 import { mono, sans, Btn, Panel, Label, Stat, Note, Fold, CheckField, Sheet, IconButton, FilterChip, UnderTabs, TextBtn, SegmentBar, TAP } from "./ui.jsx";
 import { FIND_ORDERS, DEFAULT_FIND_ORDER, findOrderOf } from "./signals.js";
-import { RequestControls, CompareTray, NumbersFit } from "./card.jsx";
+import { RequestControls, NumbersFit } from "./card.jsx";
 import { HowWorkedOut } from "./why.jsx";
 import { MARKET_CATEGORIES, BASKET } from "./markets.js";
 import { CompareFigure, BandThumbnail } from "./visuals.jsx";
@@ -47,7 +47,8 @@ import { money, chanceText, NO_CEILING, noCeilingNote, noCeilingRankNote, season
   rowSubtitleText, ROW_READING, findReadingLine, rowFailedText, ROW_NO_BOARD, staleBannerLine, staleStatusLine, staleFailLine, RETRY,
   SHOW_FLAGGED_TOGGLE, howConnectLabel, HOW_CONNECT_STEPS, CARD_LABELS, ARIA,
   FIND_HEADING, refreshAria, SETTINGS_WORD, FIND_SEGMENTS_ARIA, RESET_SHEET,
-  FIND_COMPARE_BTN, FIND_COPILOT_TITLE, FIND_COPILOT_HEAD, findCopilotLine, LIQ_OTHER_HEAD, LIQ_DETAILS, LIQ_REASONS_FOLD,
+  FIND_COMPARE_BTN, FIND_COPILOT_HEAD, findCopilotLine, LIQ_OTHER_HEAD, LIQ_DETAILS, LIQ_REASONS_FOLD,
+  COMPARE_SHEET_TITLE, compareCountLine, compareTickedLine, COMPARE_ONE_MORE, COMPARE_CLEAR, compareUntickAria, COMPARE_GONE, BUILD_CTA,
 } from "./rules.js";
 
 const FS = TYPE.size, FW = TYPE.weight, LH = TYPE.line;
@@ -109,7 +110,7 @@ export function FindStep({
   sheet = null, onSheet = () => {}, onReset = () => {},
   isSaved = () => false, onSave = () => {}, onOpenMarket = () => {},
   freshness = null,
-  compare, showCompare, compareNote, onTickCompare, onClearCompare, onToggleCompare, onTakeToBuild,
+  compare = [], compareFitting = 0,
   copilot = null, liquidity = null,
 }) {
   /* ---- WHAT IS IN, AND WHAT IS STILL BEING READ (redesign PR 1). A market being read has no fused result and no rank
@@ -141,13 +142,6 @@ export function FindStep({
   const st = { order: findOrder, request, horizon: find.horizon, dir: find.dir,
     dirLabel: (sentiments.find((s) => s.id === find.dir) || {}).label, positiveOnly: find.positiveOnly, flagged: find.flagged,
     liqId: liqState && liqState.id, liqLabel: liqState && liqState.label, liqDefault: liqState && liqState.defaultId };
-  /* FIND'S COPILOT (PR 4): the cards that fit, in the owner's order, up to 20, with their own figures and Greeks
-     (`compareCards()` in rows.js reads what the card reads), the chips in their own words, the misses counted. */
-  const cmp = useMemo(() => compareCards(inItems, request, sizeOf), [inItems, request, sizeOf]);
-  const ask = useCopilot({ ...(copilot || { convo: null, setConvo: () => {} }),
-    ctx: { ...((copilot && copilot.ctx) || {}), findCards: cmp.cards, findMisses: cmp.misses,
-      findFilters: { order: findOrderOf(findOrder).label, category: find.cat || CATEGORY_ALL, chips: FIND_CHIPS.map((c) => chipText(c.id, st)) } } });
-  const askAll = { ...ask, clear: () => copilot && copilot.setConvo({ msgs: [], busy: false, err: null }) };
   const sheetId = sheet && String(sheet).startsWith("find:") ? String(sheet).slice(5) : null;
   const closeSheet = () => onSheet(null);
   /** A sheet's current value, beside its title (round 2): the chip's own value. */
@@ -203,7 +197,8 @@ export function FindStep({
         <span style={{ display: "inline-flex", alignItems: "center" }}>
           {m > 0 && <TextBtn onClick={() => setFind((f) => ({ ...f, hideMisses: !f.hideMisses }))}>{find.hideMisses ? SHOW_ROWS : HIDE_ROWS}</TextBtn>}
           {anyChipOff(st) && <TextBtn onClick={onReset}>{RESET_FILTERS}</TextBtn>}
-          {copilot && cmp.fitting > 0 && <TextBtn data-find-compare onClick={() => onSheet("find:copilot")}>{FIND_COMPARE_BTN}</TextBtn>}
+          {/* ONE COMPARE (PR 61): the sheet opens with the ticked cards, or the cards that fit when none is ticked. */}
+          {copilot && (compareFitting > 0 || (compare || []).length > 0) && <TextBtn data-find-compare onClick={() => onSheet("compare")}>{FIND_COMPARE_BTN}</TextBtn>}
         </span>
       </div>
       {/* While markets are still being read and some rows are in (with none in, "Nothing today" below says it). */}
@@ -385,19 +380,7 @@ export function FindStep({
         </Fold>
       </Sheet>
 
-      {/* THE COPILOT ON FIND (PR 4, owner: "on the summary line, opening a sheet"): Compare the cards and News impact,
-          Find's own questions (SKILLS, place "find"); the answer is filed in the Journal like every other. */}
-      <Sheet open={sheetId === "copilot"} title={FIND_COPILOT_TITLE} onClose={closeSheet}>
-        <div data-find-copilot>
-          <Note color={T.mut} style={{ marginBottom: 8 }}>{findCopilotLine(cmp.cards.length, cmp.fitting)}</Note>
-          <CopilotSection ask={askAll} skills={skillsFor("find")} label={FIND_COPILOT_HEAD} heading={FIND_COPILOT_HEAD}
-            ownLabel="Your own question about these cards" />
-        </div>
-      </Sheet>
-
-      {/* COMPARING — up to three, one picture (PRD §6). The ticks are on the market page's cards. */}
-      <ComparePanel compare={compare} showCompare={showCompare} compareNote={compareNote} onTickCompare={onTickCompare}
-        onClearCompare={onClearCompare} onToggleCompare={onToggleCompare} onTakeToBuild={onTakeToBuild} />
+      {/* THE COMPARE SHEET (PR 4's copilot sheet; one compare since PR 61) is App.jsx's: the market page opens it too. */}
 
       {/* NO "GO TO BUILD" BUTTON HERE (redesign PR 1): the owner's Find is the tabs, the chips, the line and the rows; the
           trade loaded on Build is one tap away on the bottom bar's Build, and a card's "Build ›" is on its market's page. */}
@@ -473,37 +456,73 @@ function WaitingRow({ tk, st }) {
   );
 }
 
-/** The compare tray and the side-by-side picture: on Find and on the market page (redesign PR 1). */
-export function ComparePanel({ compare, showCompare, compareNote, onTickCompare, onClearCompare, onToggleCompare, onTakeToBuild }) {
+/* ====================================================================
+   ONE COMPARE (PR 61, owner 7 Oct 2026: "I don't understand this button, and it does nothing"). The tick on a market's
+   Strategies card selects (at most MAX_COMPARE); this sheet — Find's "Compare ›", the market page's "See them ›", Build's
+   "N still ticked" — shows the ticked cards (the one picture, CompareFigure, and their rows) above "Compare the cards";
+   with nothing ticked it shows the cards that fit. Its rows are `compareCards()`'s cards — the card's own figures for the
+   size the budget buys, in CARD_LABELS' words, labelled C1…Cn — and the same rows, with the same labels, are what the
+   copilot is handed. The old blue tray (drawn at the foot of the market page, far below the cards) is gone; its remove,
+   clear and "Take to Build" are here.
+==================================================================== */
+export function filtersOfFind({ find, findOrder, request, sentiments = [], liqState = null }) {
+  const st = { order: findOrder, request, horizon: find.horizon, dir: find.dir,
+    dirLabel: (sentiments.find((x) => x.id === find.dir) || {}).label, positiveOnly: find.positiveOnly, flagged: find.flagged,
+    liqId: liqState && liqState.id, liqLabel: liqState && liqState.label, liqDefault: liqState && liqState.defaultId };
+  return { order: findOrderOf(findOrder).label, category: find.cat || CATEGORY_ALL, chips: FIND_CHIPS.map((c) => chipText(c.id, st)) };
+}
+/** One row of the Compare sheet: its label, the card's market, structure and expiry, its figures as the card prints them. */
+export function CompareRow({ card, cand = null, onUntick, onTakeToBuild }) {
   return (
-    <>
-      <CompareTray items={compare} max={MAX_COMPARE} note={compareNote}
-        onRemove={onTickCompare} onClear={onClearCompare} onCompare={onToggleCompare} showing={showCompare} />
-      {showCompare && compare.length >= 2 && (
-        <Panel style={{ marginTop: 10 }}>
-          <Label>{compare.length} SIDE BY SIDE · SAME AXIS, SAME PICTURE</Label>
-          <div style={{ marginTop: 10 }}>
-            <CompareFigure items={compare} height={300} />
-          </div>
-          <div style={{ display: "grid", gap: 6, marginTop: 12 }}>
-            {compare.map((c, i) => (
-              <div key={c.key} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "8px 10px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 8 }}>
-                <span style={{ width: 10, height: 10, borderRadius: 3, background: [T.blue, T.amber, T.violet][i], flexShrink: 0 }} />
-                <div style={{ flex: 1, minWidth: 140 }}>
-                  <div style={{ ...sans, fontWeight: FW.bold, color: T.ink, fontSize: FS.sm }}>{c.ticker} · {c.name}</div>
-                  <div style={{ ...mono, fontSize: FS.xs, color: T.dim }}>{legsLine(c.legs)} · per contract</div>
-                </div>
-                <Stat k="RISK" v={money(Math.abs(c.risk))} c={T.red} />
-                <Stat k="MAX PROFIT" v={c.maxProfit == null ? NO_CEILING : money(c.maxProfit)} c={T.green}
-                  tip={c.maxProfit == null ? noCeilingNote(c.name) : undefined} />
-                <Stat k="CHANCE" v={chanceText(c.pop)} c={(c.pop || 0) >= 0.5 ? T.green : T.violet} tip={seasonalStampNote(c, c.ticker || "this market")} />
-                <Btn small onClick={() => onTakeToBuild(c)}>Take to Build →</Btn>
-              </div>
-            ))}
-          </div>
-        </Panel>
+    <li data-compare-row={card ? card.label : "gone"} style={{ borderTop: `1px solid ${T.line}`, padding: "10px 0", display: "grid", gap: 4 }}>
+      <span style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+        {card && <span data-compare-label style={{ ...mono, fontSize: FS.sm, fontWeight: FW.bold, color: T.ink }}>{card.label}</span>}
+        <span style={{ ...sans, flex: 1, minWidth: 0, fontSize: FS.sm, fontWeight: FW.bold, color: T.ink }}>
+          {card ? `${card.ticker} · ${rowSubtitleText(card.name, card.expiry)}` : `${cand.ticker} · ${cand.name}`}
+        </span>
+        {cand && onUntick && (
+          <IconButton size={36} label={compareUntickAria(cand.ticker, cand.name)} onClick={() => onUntick(cand)} style={{ fontSize: FS.sm }}>✕</IconButton>
+        )}
+      </span>
+      {card ? (
+        <>
+          <span style={{ ...mono, fontVariantNumeric: "tabular-nums", fontSize: FS.xs, color: T.body }}>
+            {`${CARD_LABELS.risk} ${card.youRisk == null ? "—" : money(card.youRisk)} · ${CARD_LABELS.profit} ${card.maxProfit == null ? "—"
+              : typeof card.maxProfit === "number" ? money(card.maxProfit) : card.maxProfit} · ${CARD_LABELS.chance} ${card.chance} · ${CARD_LABELS.rr} ${card.returnOnRisk ?? "—"}`}
+          </span>
+          <span style={{ ...mono, fontVariantNumeric: "tabular-nums", fontSize: FS.xs, color: T.body }}>{`Future avg ${card.futureAvg} · Past yrs ${card.pastYrs}`}</span>
+          {card.misses && card.misses.length > 0 && <span style={{ ...sans, fontSize: FS.xs, color: T.amber }}>{card.misses.join(" · ")}</span>}
+        </>
+      ) : <span style={{ ...sans, fontSize: FS.xs, color: T.mut }}>{COMPARE_GONE}</span>}
+      {cand && card && onTakeToBuild && (
+        <span><TextBtn onClick={() => onTakeToBuild(cand)} style={{ padding: 0 }}>{BUILD_CTA}</TextBtn></span>
       )}
-    </>
+    </li>
+  );
+}
+export function CompareSheet({ open, onClose, cmp, rows = [], ticked = [], note = null, copilot = null, filters = null, onUntick, onClear, onTakeToBuild }) {
+  const tickedMode = ticked.length > 0;
+  const ask = useCopilot({ ...(copilot || { convo: null, setConvo: () => {} }),
+    ctx: { ...((copilot && copilot.ctx) || {}), findCards: cmp.cards, findMisses: cmp.misses, findFilters: filters } });
+  const askAll = { ...ask, clear: () => copilot && copilot.setConvo({ msgs: [], busy: false, err: null }) };
+  return (
+    <Sheet open={open} title={COMPARE_SHEET_TITLE} onClose={onClose}>
+      <div data-find-copilot data-compare-sheet style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {tickedMode && (ticked.length >= 2 ? <CompareFigure items={ticked} height={260} /> : <Note>{COMPARE_ONE_MORE}</Note>)}
+        <Note color={T.mut} data-compare-count>
+          {tickedMode ? compareTickedLine(ticked.length) : `${compareCountLine(cmp.fitting, cmp.markets)} ${findCopilotLine(cmp.cards.length, cmp.fitting)}`}
+        </Note>
+        {note && <Note color={T.amber} role="status">{note}</Note>}
+        <ul data-compare-rows style={{ listStyle: "none", margin: 0, padding: 0 }}>
+          {rows.map((r, i) => <CompareRow key={r.card ? r.card.label : `gone-${i}`} card={r.card} cand={r.cand} onUntick={onUntick} onTakeToBuild={onTakeToBuild} />)}
+        </ul>
+        {tickedMode && <span><TextBtn onClick={onClear} style={{ padding: 0 }}>{COMPARE_CLEAR}</TextBtn></span>}
+        {copilot && (
+          <CopilotSection ask={askAll} skills={skillsFor("find")} label={FIND_COPILOT_HEAD} heading={FIND_COPILOT_HEAD}
+            ownLabel="Your own question about these cards" />
+        )}
+      </div>
+    </Sheet>
   );
 }
 

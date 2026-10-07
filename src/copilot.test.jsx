@@ -8,11 +8,13 @@
 import { readFileSync } from "node:fs";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { SKILLS, COPILOT_ROLE, BUILD_VERDICTS, BUILD_SKILL_IDS, POSITION_SKILL_IDS, skillsFor } from "./pro.jsx";
+import { SKILLS, COPILOT_ROLE, BUILD_VERDICTS, BUILD_SKILL_IDS, POSITION_SKILL_IDS, skillsFor, askAI, continueRequest, withContinuation,
+  CONTINUE_PROMPT, CONTINUE_OFFER, COMPARE_LABEL_RULE } from "./pro.jsx";
+import { readdirSync, statSync } from "node:fs";
 import { compareCards } from "./rows.js";
 import { positionActions, POSITION_ACTIONS, sinceEntry } from "./positionView.js";
 import { FactorRows } from "./why.jsx";
-import { MARKET_TABS, factorHeadline, findCopilotLine } from "./rules.js";
+import { MARKET_TABS, factorHeadline, findCopilotLine, COPILOT_MODEL, GATE_NEAR_LIMIT, compareCountLine, FUTURE_PAST_EQUAL } from "./rules.js";
 
 const ok = [], bad = [];
 const check = (name, fn) => { try { fn(); ok.push(name); console.log(`  ok   ${name}`); } catch (e) { bad.push(name); console.log(`  FAIL ${name}\n       ${e.message}`); } };
@@ -50,11 +52,18 @@ check("IN FIND IT COMPARES AND RECOMMENDS AMONG THE CARDS THAT FIT: the filters 
   has(byId("newsAll").prompt, "Recommend nothing from the news alone");
 });
 
-check("IN BUILD IT GIVES A VERDICT, NEVER THE GATE'S: Pre-trade analysis reads the gate back and ends on one of three readings", () => {
+check("PRE-TRADE ANALYSIS (PR 61): the verdict FIRST, at most three reasons, the gate only for a failed check or one at 90%+ of its limit", () => {
   const pre = byId("pretrade").prompt;
-  has(pre, `exactly one of ${BUILD_VERDICTS.join(", ")}`); eq(BUILD_VERDICTS.join("|"), "CONFIRM|DOUBTS|DO NOT CONFIRM");
-  has(pre, "never your own verdict on a check"); has(pre, "the gate's checks stand whatever you say"); has(pre, "do not suggest another size");
-  has(pre, "review checklist in the context"); has(pre, "the size the app sized");
+  has(pre, `Your FIRST line is your verdict alone, exactly one of ${BUILD_VERDICTS.join(", ")}.`); eq(BUILD_VERDICTS.join("|"), "CONFIRM|DOUBTS|DO NOT CONFIRM");
+  has(pre, "at most three reasons for it, from the app's figures and the criteria for judging a card");
+  has(pre, "do not read them back");
+  has(pre, `Mention a check only when it fails, or when it sits at 90% or more of its limit`); eq(GATE_NEAR_LIMIT, 0.9);
+  has(pre, "quote the app's own share"); has(pre, "shareOfLimit");
+  // The constraints kept word for word.
+  has(pre, "do not suggest another size"); has(pre, "Your verdict is your reading, not the gate's: the gate's checks stand whatever you say.");
+  has(pre, "If another card in the context (otherCards) fits better, name it.");
+  // What it no longer asks: a read-back of every check, a tour of every figure.
+  hasNot(pre, "Read back the risk gate's checks"); hasNot(pre, "Explain the trade before it is sent");
   has(byId("greeks").prompt, "Quote only the Greeks in the context"); has(byId("chart").prompt, "there are no bars");
 });
 
@@ -112,6 +121,22 @@ check("FIND'S COMPARE READS THE CARDS THAT FIT, IN ORDER, AT MOST 20, WITH THE C
   eq(r.cards[0].legs, "+1 14C / -1 15C");
   eq(Object.values(r.misses.reasons).reduce((x, y) => x + y, 0) >= 1, true);
   has(findCopilotLine(20, 25), "first 20 of the 25 cards that fit"); has(findCopilotLine(3, 3), "the 3 cards that fit");
+  // PR 61: each card carries its label, the sheet counts cards from markets (Find keeps counting rows).
+  eq(r.cards.map((c) => c.label).slice(0, 3).join(","), "C1,C2,C3"); eq(r.cards[19].label, "C20");
+  eq(r.markets, 2, "the 25 fitting cards come from CORN and GLD (UNG's card misses)");
+  eq(compareCountLine(r.fitting, r.markets), "25 cards from 2 markets fit.");
+  // THE TICKED CARDS (PR 61, one compare): compared whether they fit or not, a miss saying so.
+  const t = compareCards([items[1], items[0]], request, sizeOf, { fitOnly: false });
+  eq(t.cards.map((c) => `${c.label}:${c.ticker}`).join(","), "C1:UNG,C2:CORN");
+  eq(t.cards[0].misses.length > 0, true, "the ticked miss says why"); eq(t.cards[1].misses, undefined);
+});
+
+check("PR 61 — FIND'S QUESTIONS NAME CARDS ONLY BY THEIR LABEL; the standing instructions hold Future and Past equal", () => {
+  has(byId("radar").prompt, COMPARE_LABEL_RULE); has(byId("newsAll").prompt, COMPARE_LABEL_RULE);
+  has(COMPARE_LABEL_RULE, "name a card only by its label");
+  hasNot(byId("compare").prompt, COMPARE_LABEL_RULE, "Build's 'Compare with the other cards' is unchanged");
+  eq(FUTURE_PAST_EQUAL, "Future (Monte Carlo) and Past yrs (backtest) answer different questions; never call one of them more reliable than the other.");
+  has(readFileSync("src/pro.jsx", "utf8"), "${FUTURE_PAST_EQUAL}`;");
 });
 
 check("THE MARKET PAGE'S TABS SPEAK FOR THEMSELVES: Signals; each factor block's title says what it highlights; news opens its headlines", () => {
@@ -133,5 +158,60 @@ check("A SCREEN SHOWS ITS OWN PLACE'S QUESTIONS: Find's sheet, the market page's
   for (const p of ["build", "positions", "find", "market"]) for (const s of skillsFor(p)) if (s.place !== p) throw new Error(`${s.id} leaked into ${p}`);
 });
 
-console.log(`\n${ok.length} passed, ${bad.length} failed`);
-if (bad.length) process.exit(1);
+check("THE MODEL HAS ONE HOME (PR 61): COPILOT_MODEL in rules.js; no other source file types a claude- model id", () => {
+  eq(COPILOT_MODEL, "claude-sonnet-4-6", "the model itself did not change");
+  const files = [];
+  const walk = (d) => { for (const f of readdirSync(d)) { const q = `${d}/${f}`; if (statSync(q).isDirectory()) walk(q); else if (/\.(m?js|jsx)$/.test(f) && !/\.test\./.test(f)) files.push(q); } };
+  for (const d of ["src", "netlify", "scripts"]) walk(d);
+  const typed = files.filter((f) => /["'`]claude-(sonnet|opus|haiku|fable)-/.test(readFileSync(f, "utf8")));
+  eq(typed.join(","), "src/rules.js", "the id is typed outside its home");
+  has(readFileSync("src/pro.jsx", "utf8"), "model: COPILOT_MODEL,"); has(readFileSync("netlify/functions/autopilot.mjs", "utf8"), "model: COPILOT_MODEL,");
+  has(readFileSync("src/pro.jsx", "utf8"), "max_tokens: 3000,");
+});
+
+check("CONTINUE (PR 61): offered only after a length-limit stop; it sends the conversation with the cut answer last and one request to go on", () => {
+  const msgs = [{ role: "user", content: "Q", label: "Pre-trade analysis" }, { role: "assistant", content: "Half an ans", truncated: true, reason: "max_tokens" }];
+  const r = continueRequest(msgs);
+  eq(r.index, 1);
+  eq(JSON.stringify(r.messages), JSON.stringify([{ role: "user", content: "Q" }, { role: "assistant", content: "Half an ans" }, { role: "user", content: CONTINUE_PROMPT }]));
+  eq(continueRequest([msgs[0], { ...msgs[1], reason: "cut" }]), null, "a cut connection asks again, it is not continued");
+  eq(continueRequest([msgs[0], { role: "assistant", content: "whole" }]), null);
+  has(CONTINUE_PROMPT, "exactly where it stopped"); hasNot(CONTINUE_OFFER, "would hit the same limit");
+  const build = readFileSync("src/build.jsx", "utf8");
+  has(build, "{ask.canContinue && <LinkBtn data-copilot-continue onClick={ask.cont}>{CONTINUE_LABEL}</LinkBtn>}");
+  hasNot(readFileSync("src/pro.jsx", "utf8"), "where asking the same one again would hit the same limit");
+});
+
+/* A STUBBED STREAM: the first answer stops on max_tokens, the continuation finishes. Continue APPENDS to the same answer. */
+const sse = (text, reason) => [
+  `event: content_block_delta\ndata: ${JSON.stringify({ type: "content_block_delta", delta: { type: "text_delta", text } })}\n\n`,
+  `event: message_delta\ndata: ${JSON.stringify({ type: "message_delta", delta: { stop_reason: reason } })}\n\n`,
+  `event: message_stop\ndata: ${JSON.stringify({ type: "message_stop" })}\n\n`].join("");
+const bodies = [];
+const stubFetch = (texts) => { let i = 0; globalThis.fetch = async (url, init) => { bodies.push(JSON.parse(init.body)); const [t, why] = texts[i++];
+  return new Response(new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode(sse(t, why))); c.close(); } }), { headers: { "content-type": "text/event-stream" } }); }; };
+const asyncChecks = [["CONTINUE APPENDS, NEVER REPLACES (stubbed stream): the cut answer keeps its words and the continuation follows them; same context", async () => {
+  stubFetch([["The verdict: DOUBTS. The first reason is the per-tra", "max_tokens"], ["de cap at 94%.", "end_turn"]]);
+  const ctx = JSON.stringify({ currentTicker: "GLD" });
+  let msgs = [{ role: "user", content: "Q", label: "Pre-trade analysis" }];
+  try { await askAI("server", msgs, ctx, null); throw new Error("a length-limit stop was taken as finished"); }
+  catch (e) { if (e.reason !== "max_tokens") throw e; msgs = [...msgs, { role: "assistant", content: e.partial, truncated: true, reason: "max_tokens" }]; eq(e.message, CONTINUE_OFFER); }
+  const req = continueRequest(msgs);
+  const more = await askAI("server", req.messages, ctx, null);
+  const done = withContinuation(msgs, req.index, more);
+  eq(done.length, 2, "no second answer was added");
+  eq(done[1].content, "The verdict: DOUBTS. The first reason is the per-trade cap at 94%.");
+  eq(done[1].truncated, false);
+  eq(bodies[1].system, bodies[0].system, "the same standing instructions and the same context");
+  eq(bodies[1].messages[1].content, "The verdict: DOUBTS. The first reason is the per-tra", "the partial answer travels with the request");
+  eq(bodies[1].messages[2].content, CONTINUE_PROMPT);
+  eq(bodies[0].max_tokens, 3000); eq(bodies[0].model, COPILOT_MODEL);
+}]];
+
+(async () => {
+  for (const [name, fn] of asyncChecks) {
+    try { await fn(); ok.push(name); console.log(`  ok   ${name}`); } catch (e) { bad.push(name); console.log(`  FAIL ${name}\n       ${e.message}`); }
+  }
+  console.log(`\n${ok.length} passed, ${bad.length} failed`);
+  if (bad.length) process.exit(1);
+})();

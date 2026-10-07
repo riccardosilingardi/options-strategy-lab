@@ -157,7 +157,7 @@ export function DeskSheet({ open, eyebrow, title, sub, onClose, children }) {
 
 /* THE COMPARE TRAY AND THE TICK/KEEP/BUILD ROW LIVE IN `card.jsx` NOW (PR #45): they are nothing but candidates, and
    Find is the only screen that mounts them. Re-exported here so every importer keeps working until PR #47. */
-export { CompareTray, CandidateActions } from "./card.jsx";
+export { CandidateActions } from "./card.jsx";
 
 /* THE FOLD LIVES IN `ui.jsx` NOW (PR #45) — one home for the atom, re-exported here so every screen that imports it
    from this file keeps working until the sweep that moves them (ROADMAP PR #47). */

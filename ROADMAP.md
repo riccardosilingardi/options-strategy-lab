@@ -6,6 +6,60 @@ The full history of every item shipped so far (P0–P10, P2-bis) is in `docs/his
 Every pull request updates this file: the session that ships an item marks it done and states
 what the next one inherits.
 
+## Done in PR 61 (owner, 7 Oct 2026): quick fixes from the post-PR-60 sanity check
+
+The first of three PRs (61 quick fixes, 62 numbers without noise and the copilot grounded, 63 Find and the trade chart),
+planned together; the owner answered the plan's questions on 7 Oct 2026 (a sent trade is said, never added twice; Find
+builds every expiry and picks after; the copilot check ignores the rule numbers; Find's two questions use the C1…Cn
+labels).
+
+- **61.0 — the debt, by name.** Every PRD §4 item was re-read; none can be closed from the sandbox, each is re-confirmed
+  with what this PR adds to it (the four OWNER CHECKS are now named in §4's header). The inherits below were re-read: the
+  computer at 1024–1366 px (closed by 4a's TASK 0), the audit's "left:" leftovers (six per theme, unchanged; the AT ENTRY
+  VS NOW footnote is no longer among them), the falling day change in red (still the owner's decision), the position's
+  screen, the Journal and Settings with no word ceiling (still none), a news block with real headlines, a live roll and a
+  real copilot answer (still unseen).
+- **61.1 — ☆ is a toggle** on Find's rows, the market header, the Strategies card and `CandidateActions`: a second tap
+  removes through `delSaved()` (the one remover, `withoutSaved()` in path.js); "GLD Bear Put Spread removed from Saved."
+  with **Undo**, which puts back the same item (`restoreSaved()`); `ARIA.saveTrade` says what the tap will do.
+- **61.2 — the copilot is not cut off**: `max_tokens` 1200 → 3000; the model's one home `COPILOT_MODEL` (rules.js, read
+  by pro.jsx and autopilot.mjs; a test fails on the id anywhere else; the model unchanged). **Pre-trade analysis**: the
+  verdict first, at most three reasons, the gate only for a failed check or one at `GATE_NEAR_LIMIT` (90%) or more —
+  the review rows now carry each check's share of its limit. **Continue** beside Print/Clear (and on the chart copilot):
+  the same context and the cut answer, appended to the same answer, filed once when whole.
+- **61.3 — Compare counts cards**: the sheet's rows are `compareCards()`'s, labelled C1…Cn, the same labels in the
+  context; Find's two questions name cards only by them; "N cards from M markets fit" (Find keeps counting rows); the
+  standing instructions: Future (Monte Carlo) and Past yrs (backtest) answer different questions, neither more reliable.
+- **61.4 — return on risk in one unit**: `returnText()` on Build's Numbers, the More's ticket and price ranges, and the
+  card's "WINS BIG" sentence; figures.test.jsx now compares the PRINTED strings of the six figures, card vs Build.
+- **61.5 — open risk says what it includes**: "Includes $4,500 on GDX (not on Alpaca) and $4,725 on the GLD order still
+  working." under AT RISK and Build's open risk, from the gate's own terms (`limits.openRiskParts`, the summands of
+  `openRiskOf()`; no rule touched). **The double count reproduced** (riskGate.test.js: USO ×17 sent and still on Build,
+  $14,101 + $4,726 = $18,827); Build now shows the open risk as it is and says "Already sent as J-0008…"; the review sheet
+  says a resend is a second order (the gate, unchanged, counts that one).
+- **61.6 — Build says when its limit is not the card's price**: "Card at 6.75 · now 6.61: risk −$98, max profit +$98"
+  (`limitMovedLine()`, the same sized figures), nothing when they match.
+- **61.7 — one compare**: the tick shows its word ("Compare" / "✓ Comparing"; the card's actions on two rows so it
+  fits); after a tick, "2 of 3 to compare · See them ›" above the bottom bar; the one Compare sheet (App.jsx mounts it,
+  so Find, the market page and Build open it) shows the ticked cards — one picture at the size the budget buys
+  (`sizedCandidate()`) and their rows — above "Compare the cards", which compares those (or the cards that fit when
+  nothing is ticked). The blue tray (`CompareTray`, `ComparePanel`, drawn at the foot of the market page) is gone; its
+  remove, Clear and "Take to Build" are in the sheet.
+
+**Measured.** Tests 1,401 → 1,411, 0 failed. Build 1,452.43 → 1,461.38 kB (the usual chunk warning). Audit 20 boards,
+dark and light: 5,268 ✓, 0 unexplained. Words: find 288 → 184, market 581 → 474 (the tray left), build 462 → 504
+(reasons in voice.test.js). Photographs: docs/screens/pr61/ (`node scripts/shoot-pr61.mjs`).
+
+**Not changed:** the risk gate's rules (one output field added: the terms it already sums), every RULES value, the seven
+order paths and their bodies, `histBacktest()`, `seasonalSignal()`, the /api/state payload, deploy.js, events.js's dates,
+the copilot's model.
+
+### What PR 62 inherits
+
+- **The chance is a simulation** (8,000 seeded runs, the seed moving with the spot to the cent): PR 62 makes it exact.
+- **A copilot number is not checked against the app's figures**: PR 62's `grounding.js`.
+- The CompareFigure's chance curve underneath the payoffs is still drawn from the candidates' own `sigma`/`driftAnnual`.
+
 ## Done in PR 4d (owner, 6 Oct 2026): the Liquidity sheet on Find, said plainly
 
 The owner: "the liquidity floor tab and its takeaway are no longer clear". The sheet held the desk's old panel as it was:
@@ -706,7 +760,10 @@ One line each; see `PRD.md` §5 and `docs/history/ROADMAP.md` for detail.
   the Greeks and the chart explained, the Signals tab.
 - **DONE: PR 4b** — Build's variants and a position's roll, one calculation.
 - **DONE: PR 4c** — "What did this trade teach me?" in the Journal.
-- **DONE: PR 4d** — the Liquidity sheet on Find, said plainly. **NEXT:** the basket expansion with a measured admission rule (below), unless the owner picks another.
+- **DONE: PR 4d** — the Liquidity sheet on Find, said plainly.
+- **DONE: PR 61** — quick fixes from the post-PR-60 sanity check (☆ toggle, the copilot's room and Continue, Compare
+  counts cards, one return unit, open risk says what it includes, one compare). **NEXT:** PR 62 and PR 63 (stacked), then
+  the basket expansion with a measured admission rule (below), unless the owner picks another.
 - **Basket expansion with a measured admission rule** (planned as #50, not started; #50 shipped the wrap instead). The owner pastes `/api/liquidity` for the
   candidate tickers; a market is admitted when its open interest clears the liquidity floor AND Alpha Vantage holds at
   least **N = 14 years** of its monthly history. N is set from what `seasonalSignal()` needs: a month counts at |mean| ≥

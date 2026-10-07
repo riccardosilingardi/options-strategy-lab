@@ -26,7 +26,7 @@ import { scaleStrategy } from "./pro.jsx";
 import { rowFigure } from "./rows.js";
 import { StrategyCard } from "./market.jsx";
 import { NumbersSection } from "./build.jsx";
-import { FIND_ORDERS, CARD_LABELS, futureFigures, pastFigures, futureTile, pastTileText } from "./rules.js";
+import { FIND_ORDERS, CARD_LABELS, futureFigures, pastFigures, futureTile, pastTileText, returnText, signedMoney, limitMovedLine } from "./rules.js";
 // Repo-relative: JSX tests are bundled to CJS (CLAUDE.md, "How to test").
 import { MODEL_BOARD, ungBoards } from "../scripts/crossing-fixtures.jsx";
 
@@ -129,6 +129,22 @@ check("…and a price moved in the ticket is SAID, figure by figure, never 'same
   }
   has(r.line, "risk");
   eq(reconcileFigures(figureSet(list.aFill, list.pop), figureSet(list.aFill, list.pop)).same, true, "same is same");
+});
+
+check("PR 61 — BUILD SAYS WHEN ITS LIMIT IS NOT THE CARD'S PRICE: 'Card at X · now Y: risk ±$, max profit ±$' for the size; nothing when they match", () => {
+  const n = 7;
+  const typed = buildFigures(LEGS, { ...OPTS, legPx: [QUOTES[28].ask, QUOTES[30].bid] });
+  const line = limitMovedLine(list.figures, typed.AE, n);
+  const a = sizedFigures(list.aFill, n), b = sizedFigures(typed.AE, n);
+  eq(line, `Card at ${Math.abs(list.figures.entry).toFixed(2)} · now ${Math.abs(typed.AE.entry).toFixed(2)}: risk ${signedMoney(Math.round(b.risk - a.risk))}, ` +
+    `max profit ${signedMoney(Math.round(b.profit - a.profit))}`, "the line");
+  // A debit paid higher costs risk and gives back the same in profit (a vertical: the width does not move).
+  eq(Math.round(b.risk - a.risk), -Math.round(b.profit - a.profit), "risk and profit move by the same dollars");
+  // Negotiate (nothing typed): Build's price IS the card's, so there is nothing to say.
+  eq(limitMovedLine(list.figures, build.AE, n), null, "same price, no line");
+  // The owner's example: GLD Bear Put ×7, card at 6.75, Mid at 6.61.
+  eq(limitMovedLine({ entry: 6.75, maxLoss: -675, maxProfit: 1225 }, { entry: 6.61, maxLoss: -661, maxProfit: 1239 }, 7),
+    "Card at 6.75 · now 6.61: risk -$98, max profit +$98");
 });
 
 /* ====================================================================
@@ -347,7 +363,49 @@ check("REDESIGN PR 2: BUILD'S NUMBERS SECTION PRINTS THE CARD'S FIGURES — max 
   has(futureTile(futureFigures(list.mc, list.aFill, n, EXP)).value, "future avg");
   const pf = pastFigures(list.bt, list.aFill, n);
   if (pf) has(`${pf.wins} of ${pf.n}`, "past yrs");
-  has(list.rr.toFixed(2), "return on risk");
+  has(returnText(list.rr), "return on risk");
+});
+
+/* PR 61 (owner, 7 Oct 2026): the Find card printed 181% and Build 1.81 for one trade — the test above held the VALUES
+   equal and read Build's "1.81" as a pass. This one holds the PRINTED STRINGS: what the card's tile shows and what Build's
+   Numbers show, figure by figure, for the same size. */
+check("PR 61 — THE SIX FIGURES ARE PRINTED THE SAME on the card and on Build (strings, not values): risk, profit, chance, return, future, past", () => {
+  const n = 3;
+  const card = renderToStaticMarkup(<CandidateCard name="x" legs="x" figures={sizedFigures(list.aFill, n)} rr={list.rr} pop={list.pop}
+    future={futureFigures(list.mc, list.aFill, n, EXP)} past={pastFigures(list.bt, list.aFill, n)} ticker={TICKER} />);
+  const bld = renderToStaticMarkup(<NumbersSection figures={sizedFigures(build.AE, n)} rr={build.rr} pop={build.chance ? build.chance.pop : null}
+    breakevens={build.AE.breakevens} future={futureFigures(build.chance, build.AE, n, EXP)} past={pastFigures(build.bt, build.AE, n)} delta="x" theta="y" />);
+  const tile = (label) => {
+    const at = card.indexOf(`data-tile="${label}"`);
+    if (at < 0) throw new Error(`no tile ${label}`);
+    const end = card.indexOf("data-tile=", at + 10);
+    return card.slice(card.indexOf(">", at) + 1, end < 0 ? undefined : end).replace(/<[^>]+>/g, "|").split("|").map((t) => t.trim()).filter(Boolean).join(" ");
+  };
+  // Build's figure: the value printed right after its label (a Figure's button, or a box row's name).
+  const onBuild = (label) => {
+    const m = bld.match(new RegExp(`>${label}</(?:button|span)><(?:div|span)[^>]*>([^<]*)<`));
+    if (!m) throw new Error(`Build prints no "${label}"`);
+    return m[1].replace(/&amp;/g, "&");
+  };
+  const pairs = [[CARD_LABELS.risk, "Max loss"], [CARD_LABELS.profit, "Max profit"], [CARD_LABELS.rr, "Return on risk"], [CARD_LABELS.chance, "Chance"]];
+  for (const [cardLabel, buildLabel] of pairs) {
+    const v = onBuild(buildLabel);
+    if (!tile(cardLabel).split(" ").includes(v) && !tile(cardLabel).includes(` ${v} `) && !tile(cardLabel).endsWith(v)) {
+      throw new Error(`${buildLabel}: Build prints "${v}", the card's tile prints "${tile(cardLabel)}"`);
+    }
+  }
+  eq(onBuild("Return on risk"), returnText(list.rr), "return on risk, in the card's unit");
+  if (!/%$/.test(onBuild("Return on risk"))) throw new Error("Build's return on risk is not a percentage");
+  // FUTURE: Build's "Avg" is the tile's value; PAST: Build's "In profit" and "Avg" are inside the tile's sentence.
+  const ft = futureTile(futureFigures(list.mc, list.aFill, n, EXP)).value;
+  if (!tile(CARD_LABELS.future).includes(ft)) throw new Error(`future: card ${tile(CARD_LABELS.future)}`);
+  if (!bld.includes(`>${ft.replace(/&/g, "&amp;")}<`)) throw new Error(`future: Build does not print ${ft}`);
+  const pf = pastFigures(list.bt, list.aFill, n);
+  if (pf) {
+    if (!tile(CARD_LABELS.past).includes(`${pf.wins} of ${pf.n}`)) throw new Error("past: the card's count");
+    eq(onBuild("In profit"), `${pf.wins} of ${pf.n}`, "past: Build's count");
+    if (!tile(CARD_LABELS.past).includes(signedMoney(pf.avg))) throw new Error(`past: card avg, ${tile(CARD_LABELS.past)}`);
+  }
 });
 
 console.log(`\n${ok.length} passed, ${bad.length} failed\n`);

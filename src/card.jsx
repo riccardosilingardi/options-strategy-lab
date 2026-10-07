@@ -27,7 +27,7 @@ import { mono, sans, Btn, Chip, FilterChip, Panel, Label, Stat, Note, Fold, Numb
 import { readingLine, unreadInputsAria, inputName, numbersFitLines, badgeText } from "./signals.js";
 export { badgeText };
 import { Gauge, UnifiedPosition, UnifiedFigure } from "./visuals.jsx";
-import { RULES, money, chanceText, returnText, NO_CEILING,
+import { RULES, money, chanceText, returnText, NO_CEILING, COMPARE_TICK,
   requestAmountLabel, amountNote, freeAmountNote, chanceAskLabel, chanceAskText, rewardAskLabel, controlsFoldNote,
   targetPriceOf, stopSigns, sizedHeading, CARD_LABELS,
   meetsRequest, resultsLine, missReasonLine, nearestRelaxation, fillPriceHeading,
@@ -572,36 +572,16 @@ export function StopSigns({ signs, children, style }) {
    4) COMPARE AND KEEP — what is ticked, and the row of three buttons every card carries
    (moved here from steps.jsx in PR #45: they are nothing but candidates, and only Find mounts them)
 ==================================================================== */
-export function CompareTray({ items = [], max = 3, onRemove, onClear, onCompare, showing, note }) {
-  if (!items.length && !note) return null;
-  return (
-    <Panel accent={T.blue} style={{ marginTop: 12, padding: "10px 12px", border: `1px solid ${T.blue}55`, borderLeft: `3px solid ${T.blue}` }}>
-      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-        <Label color={T.blue}>COMPARING {items.length} OF {max}</Label>
-        {items.map((c) => (
-          <Btn small ghost key={c.key} onClick={() => onRemove && onRemove(c)} color={T.dim}
-            aria-label={`Take ${c.ticker} ${c.name} out of the comparison`}>
-            {c.ticker} {c.name} ✕
-          </Btn>
-        ))}
-        <span style={{ flex: 1 }} />
-        {items.length >= 2 && (
-          <Btn color={T.blue} ghost={!!showing} onClick={onCompare}>{showing ? "Hide the comparison" : "Compare them"}</Btn>
-        )}
-        {items.length > 0 && <Btn small ghost color={T.mut} onClick={onClear}>clear</Btn>}
-      </div>
-      {items.length === 1 && <Note style={{ marginTop: 6 }}>Tick a second one to compare it with.</Note>}
-      {note && <Note color={T.amber} style={{ marginTop: 6 }}>{note}</Note>}
-    </Panel>
-  );
-}
+/* CompareTray — the blue "COMPARING 2 OF 3" panel — was removed in PR 61: ONE compare, the Compare sheet (find.jsx's
+   `CompareSheet`), holds the ticked cards, their remove, Clear and "Take to Build", and the refusal of a fourth. */
 
 /** The three controls every candidate row carries: tick, keep, and take it to Build. */
 export function CandidateActions({ ticked, onTick, saved, onSave, onBuild }) {
   return (
     <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-      <Btn small ghost={!ticked} color={T.blue} onClick={onTick}>{ticked ? "✓ comparing" : "Compare"}</Btn>
-      <Btn small ghost={!saved} color={T.violet} disabled={saved} onClick={onSave} style={{ opacity: 1, cursor: saved ? "default" : "pointer" }}>
+      <Btn small ghost={!ticked} color={T.blue} onClick={onTick} aria-pressed={ticked}>{ticked ? COMPARE_TICK.on : COMPARE_TICK.off}</Btn>
+      {/* A TOGGLE (PR 61): a second tap removes it from Saved; never disabled. */}
+      <Btn small ghost={!saved} color={T.violet} onClick={onSave} aria-pressed={saved}>
         {saved ? "✓ saved" : "Save for later"}
       </Btn>
       {onBuild && <Btn small ghost color={T.amber} onClick={onBuild}>Take to Build →</Btn>}

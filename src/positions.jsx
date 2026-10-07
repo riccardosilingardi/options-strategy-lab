@@ -65,7 +65,7 @@ export function PositionsHeader({ title = "Positions", onRefresh, busy = false, 
  * The board (redesign PR 3): three tiles in a panel; one ⓘ open at a time, its sentence under the tiles. The label is
  * BUYING POWER either way and its ⓘ says which figure it is.
  */
-export function AccountStrip({ account = null, risk = null, capital = null }) {
+export function AccountStrip({ account = null, risk = null, capital = null, includes = null }) {
   const [info, setInfo] = useState(null);
   const eq = account ? num(account.equity) : null;
   const bp = buyingPowerOf(account);
@@ -102,6 +102,8 @@ export function AccountStrip({ account = null, risk = null, capital = null }) {
         {cell("risk", "AT RISK", open == null ? "—" : money(open),
           open == null ? null : risk && risk.sizingFree ? "no limit" : `of ${total == null ? "—" : money(total)}`)}
       </div>
+      {/* PR 61: what AT RISK includes that Alpaca does not hold as a position (`openRiskIncludesLine()`, the gate's terms). */}
+      {includes && <p data-risk-includes style={{ ...sans, margin: "6px 0 0", fontSize: FS.xs, lineHeight: LH.body, color: T.mut }}>{includes}</p>}
       {info && (
         <p role="note" style={{ ...sans, margin: "8px 0 0", paddingTop: 8, borderTop: `1px solid ${T.line}`, fontSize: FS.sm, lineHeight: LH.body,
           color: T.body }}>{INFO[info]}</p>

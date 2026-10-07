@@ -199,6 +199,21 @@ export function toggleCompare(list = [], cand) {
   return { list: [...list, cand], changed: true, note: null };
 }
 
+/**
+ * THE COMPARE PICTURE AT THE SIZE THE BUDGET BUYS (PR 61). The Compare sheet's rows print each card's figures for the size
+ * the budget buys, as the card does; the picture above them was per contract ("up to $78" over a row's "$1,005"). The
+ * payoff is linear in the quantity, so the same candidate with every leg, the net, the maximum profit and loss times `n`
+ * is the same trade at that size: the curves, the takeaway and the rows then say one number. The breakevens and the
+ * chance do not move. n missing or 1 returns the candidate as it is.
+ */
+export function sizedCandidate(c, n) {
+  const k = Number.isFinite(Number(n)) && Number(n) >= 1 ? Math.round(Number(n)) : 1;
+  if (!c || k === 1) return c;
+  const m = (v) => (v != null && Number.isFinite(Number(v)) ? Number(v) * k : v);
+  return { ...c, legs: (c.legs || []).map((l) => ({ ...l, qty: (l.qty || 1) * k })), entryNet: m(c.entryNet),
+    maxProfit: m(c.maxProfit), maxLoss: m(c.maxLoss), risk: m(c.risk) };
+}
+
 export const inCompare = (list = [], cand) => {
   const key = cand ? (cand.key || candidateKey(cand)) : "";
   return list.some((x) => (x.key || candidateKey(x)) === key);
@@ -244,6 +259,26 @@ export function savedFromCandidate(c, now = Date.now()) {
 
 /** A saved item read back as a candidate, so it can be compared like any other. */
 export const candidateFromSaved = (sv) => candidateOf(sv, { source: "saved" });
+
+/* ☆ IS A TOGGLE (PR 61, owner 7 Oct 2026: "the Find star does not unsave"). A second tap removes the saved item, and
+   the message line offers Undo, which puts back THE SAME item (its id, its "When saved" figures). `isSaved()` in App.jsx
+   and these read one key: `candidateKey()` of the saved item read back as a candidate. */
+/** The `store.saved` item a candidate is already saved as, or null. */
+export function savedItemFor(saved = [], c) {
+  const key = c ? (c.key || candidateKey(c)) : null;
+  if (!key) return null;
+  return (Array.isArray(saved) ? saved : []).find((sv) => candidateKey(candidateFromSaved(sv) || {}) === key) || null;
+}
+/** THE ONE REMOVER: `store.saved` without the item whose id this is. `delSaved()` in App.jsx is its only caller. */
+export const withoutSaved = (saved = [], id) => (Array.isArray(saved) ? saved : []).filter((s) => s.id !== id);
+/** Undo of a removal: the same item back at the end, unless an item for the same trade is already there. */
+export function restoreSaved(saved = [], item) {
+  const list = Array.isArray(saved) ? saved : [];
+  if (!item) return list;
+  const c = candidateFromSaved(item);
+  if (list.some((s) => s.id === item.id) || (c && savedItemFor(list, c))) return list;
+  return [...list, item];
+}
 
 /**
  * Is this saved row still the same trade the Build screen would load today?
