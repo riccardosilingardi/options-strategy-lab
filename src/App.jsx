@@ -94,7 +94,7 @@ import { taContext } from "./indicators.js";
 // PR 4b: the alternatives of a structure (Build's variants, a position's roll) and their words.
 import { variantsOf, rollCandidates, rollEligible } from "./alternatives.js";
 import { whyOpenedLine, endedLine } from "./journalView.js";
-import { LIMIT_CHOICES, expiryWords, returnText, pastTileText, futureTile, VARIANT_LABELS, VARIANTS_NOTE, VARIANTS_NONE, gateLine, ROLL_WHY, ROLL_HOW, rollLine, rollCloseFirst, rolledInto, rolledFrom } from "./rules.js";
+import { liquidityTakeaway, liquidityLevelValue, noOiLine, LIMIT_CHOICES, expiryWords, returnText, pastTileText, futureTile, VARIANT_LABELS, VARIANTS_NOTE, VARIANTS_NONE, gateLine, ROLL_WHY, ROLL_HOW, rollLine, rollCloseFirst, rolledInto, rolledFrom } from "./rules.js";
 import { EvidenceBar, EvidenceOverlay, DeskSheet, Fold, DeskCountLine } from "./steps.jsx";
 import { BottomBar, placeOf, NAV_BAR_H, FIND_LIST_END } from "./navBar.jsx";
 import { AccountStrip, PositionsBar, PositionsHeader, WorkingCloseLine, CardButton } from "./positions.jsx";
@@ -976,67 +976,19 @@ const OfflineBanner = () => {
  * minimum underneath it. A relative floor that will not show its own arithmetic
  * is worse than the fixed number it replaced.
  * ------------------------------------------------------------------------- */
-function LiquidityFilter({ levelId, onLevel, previews, threshold, ticker, expKey, peers, feed }) {
+function FloorDetail({ levelId, threshold, ticker, expKey, peers, feed }) {
+  /* THE FLOOR ON ONE BOARD (PR 4d): the market in focus, its contracts drawn from the emptiest to the busiest with the
+     line where the setting cuts, the arithmetic in one sentence, why the floor is relative, and where its two numbers
+     come from. The four levels and their counts are the sheet's own chips now; nothing here changes a setting. */
   const level = liquidityLevel(levelId);
   const [open, setOpen] = useState(null);
-  // The strip is drawn at the panel's own width, so it fits a 390px phone and
-  // grows on a desk screen rather than being cropped or letterboxed. The ref
-  // goes on a wrapper that renders in EVERY state (see below): a ResizeObserver
-  // handed a node that only exists once the data arrives observes nothing, and
-  // the width stays at its fallback for the life of the component.
   const [wrapRef, panelW] = useWidth(320);
   const stripW = Math.max(180, panelW - 2);
-  const here = previews?.[levelId];
-  const warn = looseningWarning(level);
   const t = threshold;
   return (
-    <Panel style={{ marginTop: 12 }}>
-      <Label>LIQUIDITY FLOOR · YOUR SETTING, THE APP{"\u2019"}S RECOMMENDATION MARKED</Label>
-      {/* WHY THE FLOOR IS RELATIVE. Worth reading ONCE; the four buttons
-          below it are what the reader came for (P9, TASK 3). */}
-      <Fold label="why relative" tone={T.body} style={{ marginTop: 8 }}
-        summary={`A leg is judged against the other strikes on its own expiry, never against one number picked for every market.`}>
-        <div style={{ ...sans, fontSize: FS.sm, color: T.body, lineHeight: 1.55, marginTop: 6 }}>
-          {RULES.minOpenInterestAbsolute} open contracts means one thing on a busy board and another on a quiet
-          one. Underneath the relative test sits an absolute minimum, so a chain where nothing trades cannot
-          pass itself by being uniformly empty.
-        </div>
-      </Fold>
-
-      <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
-        {LIQUIDITY_LEVELS.map((l) => {
-          const on = l.id === levelId;
-          const col = l.id === "off" ? T.red : l.recommended ? T.green : T.blue;
-          const pv = previews?.[l.id];
-          return (
-            <button key={l.id} onClick={() => onLevel(l.id)}
-              style={{
-                ...mono, fontSize: FS.xs, padding: "8px 10px", borderRadius: 8, cursor: "pointer",
-                minHeight: 44, textAlign: "left", flex: "1 1 44%",
-                background: on ? col : "transparent", color: on ? T.onAccent : col,
-                border: `1.5px solid ${col}`, fontWeight: 700,
-              }}>
-              {l.label.toUpperCase()}{l.recommended ? " \u2713" : ""}
-              <span style={{ display: "block", fontWeight: 400, fontSize: FS.xs, marginTop: 2, opacity: 0.9 }}>
-                {l.recommended ? "recommended \u00b7 " : ""}
-                {pv ? `${pv.kept} of ${pv.total} shown` : "\u2014"}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-
-      <div style={{ ...sans, fontSize: FS.sm, color: T.mut, lineHeight: 1.5, marginTop: 10 }}>{level.blurb}</div>
-
-      {/* THE FLOOR, DRAWN. Every CONTRACT on this expiry \u2014 calls and puts,
-          which is twice the number of strikes \u2014 from the emptiest to the
-          busiest, and the line where the setting above cuts. It sits directly
-          under the buttons because the point is cause and effect: move the
-          setting, watch the line move. Three paragraphs of prose could not
-          explain this; the picture does it at a glance. */}
-      {/* The wrapper is unconditional so the ResizeObserver has a node on mount;
-          only its contents wait for the chain. */}
-      <div ref={wrapRef} style={{ marginTop: 12 }}>
+    <div style={{ marginTop: 12 }}>
+      <Label>{`THE FLOOR ON ONE BOARD · ${ticker}${expKey ? ` · ${expKey}` : ""}`}</Label>
+      <div ref={wrapRef} style={{ marginTop: 8 }}>
       {peers?.length > 0 && (
         <div>
           <OpenInterestStrip peers={peers} threshold={t?.threshold ?? 0} expKey={expKey}
@@ -1050,67 +1002,35 @@ function LiquidityFilter({ levelId, onLevel, previews, threshold, ticker, expKey
                 {explainOiStrip(open, { threshold: t?.threshold ?? 0, cut: oiCutAt(peers, t?.threshold ?? 0), total: peers.length,
                   ghost: (t?.threshold ?? 0) > 0 ? null : oiGhostCut([...peers].sort((a, b) => a - b)).threshold })}
               </div>
-              <button onClick={() => setOpen(null)} style={{ ...mono, fontSize: FS.xs, marginTop: 6, background: "transparent", border: "none", color: T.blue, cursor: "pointer", padding: 0 }}>close</button>
+              <button onClick={() => setOpen(null)} style={{ ...sans, fontSize: FS.xs, marginTop: 6, background: "transparent", border: "none", color: T.blue, cursor: "pointer", padding: 0 }}>close</button>
             </div>
           )}
         </div>
       )}
       </div>
-
-      {/* THE CONSEQUENCE, LIVE. Not a promise about the setting: the count this
-          setting produces on the list directly below it. */}
-      <div style={{ ...mono, fontSize: FS.xs, color: T.ink, marginTop: 8, lineHeight: 1.6, padding: "8px 10px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 6 }}>
-        {here
-          ? `${here.kept} of ${here.total} structures on ${ticker} are shown at this setting` +
-            `${here.liquidity ? ` \u00b7 ${here.liquidity} removed because a leg is too thinly traded` : ""}` +
-            `${here.spread ? ` \u00b7 ${here.spread} removed because one leg's own market is too wide` : ""}` +
-            // THE PAIR, NAMED SEPARATELY FROM THE LEG. It does not move with
-            // this setting either, and the two are different faults.
-            `${here.comboSpread ? ` \u00b7 ${here.comboSpread} removed because the WHOLE combination is too wide` : ""}` +
-            `${here.crossing ? ` \u00b7 ${here.crossing} removed for crossing cost` : ""}` +
-            `${here.reward ? ` \u00b7 ${here.reward} removed for paying too little per dollar risked` : ""}` +
-            `${here.skipped ? ` \u00b7 ${here.skipped} not liquidity-checked \u2014 the open interest has not arrived, so none cleared it` : ""}.`
-          : `Nothing is priced on ${ticker} yet, so there is nothing for this setting to filter.`}
-      </div>
-
-      {/* THE ARITHMETIC, on the expiry actually on screen. */}
-      <div style={{ ...mono, fontSize: FS.xs, color: T.dim, marginTop: 8, lineHeight: 1.6 }}>
+      <div style={{ ...sans, fontSize: FS.sm, color: T.mut, marginTop: 8, lineHeight: 1.55 }}>
         {!(t && t.peers > 0)
-          // NOT LANDED IS NOT PASSED. Alpaca snapshots carry `oi: null` on every
-          // contract — all 26 of the tested expiry — and the count arrives later
-          // from a separate trading-API call. Until it does the floor has
-          // NOTHING TO JUDGE, and the sentence has to say that rather than
-          // leaving a reader to assume the structures on screen cleared it.
-          ? `${feed || "This feed"} has not reported open interest for ${ticker} ${expKey ? `on ${expKey}` : ""} yet, ` +
-            `so the liquidity floor has NOTHING TO JUDGE: it was skipped, not passed. Nothing here was rejected ` +
-            `for it and nothing here has cleared it. The count arrives from a separate call to the broker's ` +
-            `contract list and is patched in when it lands \u2014 missing data is not evidence that nobody trades these.`
+          // NOT LANDED IS NOT PASSED: with no open interest reported the floor has nothing to judge on this board.
+          ? `${feed || "This feed"} has not reported open interest for ${ticker}${expKey ? ` on ${expKey}` : ""} yet, so the floor was skipped there, not passed. ` +
+            `The count comes from a separate call to the broker's contract list and is patched in when it lands.`
           : level.percentile <= 0 && level.absolute <= 0
-            ? `Nothing on ${expKey} was removed for liquidity at this setting. ${feed || "The feed"} prices ${t.peers} contracts there \u2014 every call and every put \u2014 and every one of them is on offer, whatever is open on it.`
+            ? `Nothing on ${expKey} was removed for liquidity at this setting: every one of the ${t.peers} contracts ${feed || "the feed"} prices there is on offer.`
             : t.basis === "relative"
-              ? `On ${expKey} that works out at ${t.threshold} open contracts per leg \u2014 the ${ordinal(level.percentile * 100)} percentile of the ${t.peers} contracts ${feed || "the feed"} prices there.`
-              : `On ${expKey} the ${t.absolute}-contract absolute minimum is what binds: ${
+              ? `On ${expKey} that works out at ${t.threshold} open contracts per leg: the ${ordinal(level.percentile * 100)} percentile of the ${t.peers} contracts ${feed || "the feed"} prices there.`
+              : `On ${expKey} the ${t.absolute}-contract minimum is what binds: ${
                   t.relative == null
                     ? `only ${t.peers} contract${t.peers === 1 ? "" : "s"} there report open interest, too few to take a percentile of`
                     : `the ${ordinal(level.percentile * 100)} percentile of the ${t.peers} contracts there is only ${t.relative}`}.`}
       </div>
-
-      {warn && (
-        <div style={{ ...sans, fontSize: FS.sm, color: T.red, marginTop: 10, lineHeight: 1.55, padding: "9px 11px", background: `${T.red}0f`, border: `1px solid ${T.red}66`, borderRadius: 6 }}>
-          <AlertTriangle size={13} style={{ verticalAlign: "-2px", marginRight: 5 }} />{warn}
-        </div>
-      )}
-
-      {/* WHERE THE TWO NUMBERS CAME FROM. It is PROVENANCE — a reading of
-          1,654 contracts on one close — and provenance is what somebody
-          checks, not what they read on the way past (P9, TASK 3). */}
-      <Fold label="where these numbers come from" tone={T.dim} style={{ marginTop: 8 }}
-        summary={`Both floor numbers are measured, not chosen: ${LIQUIDITY_MEASUREMENT.markets} live chains on the ${LIQUIDITY_MEASUREMENT.asOf} close.`}>
-        <div style={{ ...mono, fontSize: FS.xs, color: T.dim, marginTop: 6, lineHeight: 1.6 }}>
-          {liquidityMeasurementNote()}
-        </div>
-      </Fold>
-    </Panel>
+      <div style={{ ...sans, fontSize: FS.sm, color: T.mut, lineHeight: 1.55, marginTop: 8 }}>
+        Why relative: {RULES.minOpenInterestAbsolute} open contracts means one thing on a busy board and another on a quiet one, so a
+        leg is judged against the other strikes on its own expiry; the absolute minimum underneath stops a chain where nothing
+        trades from passing itself by being uniformly empty.
+      </div>
+      <div style={{ ...sans, fontSize: FS.xs, color: T.dim, marginTop: 8, lineHeight: 1.55 }}>
+        {`Both floor numbers are measured, not chosen: ${LIQUIDITY_MEASUREMENT.markets} live chains on the ${LIQUIDITY_MEASUREMENT.asOf} close. `}{liquidityMeasurementNote()}
+      </div>
+    </div>
   );
 }
 
@@ -1122,10 +1042,19 @@ function OpenInterestReadout({ chains, floor, percentile = 0, level }) {
   const num = (x) => (x == null ? "\u2014" : String(Math.round(x)));
   const pct = (x) => (x == null ? "\u2014" : `${Math.round(x * 100)}%`);
   const reporting = rows.filter((r) => r.p.reports);
+  // PR 4d: with no market reporting there is no table to read — one line says so, and the floor's sheet already led with it.
+  if (!reporting.length) {
+    return (
+      <Panel style={{ marginTop: 10 }}>
+        <Label>OPEN INTEREST, MARKET BY MARKET</Label>
+        <div style={{ ...sans, fontSize: FS.sm, color: T.mut, marginTop: 8, lineHeight: 1.55 }}>{noOiLine(rows.map((r) => r.tk))}</div>
+      </Panel>
+    );
+  }
   const th = { padding: "4px 8px" };
   return (
     <Panel style={{ marginTop: 10 }}>
-      <Label>3 · WHAT THESE CHAINS ACTUALLY CARRY — IS THIS THE RIGHT FLOOR?</Label>
+      <Label>OPEN INTEREST, MARKET BY MARKET</Label>
       {/* THIS PANEL IS INSTRUMENTATION, NOT A DECISION (P9, TASK 3). It exists
           so the floor can be settled from a live screen instead of re-argued
           from one walkthrough — a question somebody ASKS, which is exactly
@@ -1151,7 +1080,7 @@ function OpenInterestReadout({ chains, floor, percentile = 0, level }) {
             </tr>
           </thead>
           <tbody>
-            {rows.map(({ tk, feed, p }) => (p.reports ? (
+            {rows.filter((r) => r.p.reports).map(({ tk, feed, p }) => (p.reports ? (
               <React.Fragment key={tk}>
                 <tr style={{ borderTop: `1px solid ${T.line}`, textAlign: "right" }}>
                   <td style={{ padding: "5px 8px 5px 0", textAlign: "left", color: T.ink, fontWeight: 700 }}>{tk}</td>
@@ -1183,7 +1112,13 @@ function OpenInterestReadout({ chains, floor, percentile = 0, level }) {
           </tbody>
         </table>
       </div>
-      <div style={{ ...mono, fontSize: FS.xs, color: T.dim, marginTop: 8, lineHeight: 1.6 }}>
+      {/* PR 4d: the markets with no open interest are one line, not a row each. */}
+      {rows.some((r) => !r.p.reports) && (
+        <div style={{ ...sans, fontSize: FS.sm, color: T.mut, marginTop: 8, lineHeight: 1.55 }}>
+          {noOiLine(rows.filter((r) => !r.p.reports).map((r) => r.tk))}
+        </div>
+      )}
+      <div style={{ ...sans, fontSize: FS.xs, color: T.dim, marginTop: 8, lineHeight: 1.6 }}>
         {reporting.length === 0
           ? "No loaded feed reports open interest yet, so there is nothing here to judge the floor against. Open interest arrives after the chain, and only from the broker's contract list."
           : `Read it this way. The ${ordinal(percentile * 100)} column is what the RELATIVE half of the floor asks for on that set, and it moves with the market: where it sits above ${floor} the chain's own distribution is doing the work, and where it sits below, the ${floor}-contract minimum underneath is what bound. If "clear ${floor}" falls towards zero near the money on a market worth trading, the absolute minimum is too high for it. Every number here is a reported count, never an estimate. The floor's two numbers were set from exactly this reading, taken across all ${LIQUIDITY_MEASUREMENT.markets} chains on the ${LIQUIDITY_MEASUREMENT.asOf} close; /api/liquidity takes it again.`}
@@ -4022,19 +3957,42 @@ export default function OptionsStrategyLab() {
      peers — so it reads the market in focus: the filter, or the top card's. */
   const focusTk = find.market || ((findShown[0] || findGen.items[0]) || {}).tk || find.markets[0] || ticker;
   const focusBoard = findGen.boards[focusTk] || null;
+  /* THE FOUR LEVELS, COUNTED ACROSS EVERY MARKET (PR 4d): the cards each level keeps on every board Find built, so the
+     chips agree with the list. The same `shortlistWithFloors()` findGen runs, family by family, one structure counted
+     once; worked out only while the Liquidity sheet is open (it reprices every board four times). */
+  const liqSheetOpen = deskSheet === "find:liquidity";
   const liqPreview = useMemo(() => {
-    const c = chains[focusTk];
-    if (!c?.spot || !focusBoard) return null;
-    const strikes = expiryStrikes(c, focusBoard.expKey);
-    if (!strikes) return null;
-    const u = getU(focusTk), qq = makeQuote(c, focusBoard.expKey);
-    const out = {};
-    for (const l of LIQUIDITY_LEVELS) {
-      const r = shortlistWithFloors(focusBoard.sent, c.spot, u.step, strikes, focusBoard.dte, u.iv, qq, { peers: focusBoard.peers, level: l });
-      out[l.id] = { ...r.tally, total: r.rows.length + r.cut.length };
+    if (!liqSheetOpen) return null;
+    const out = Object.fromEntries(LIQUIDITY_LEVELS.map((l) => [l.id, { kept: 0, total: 0, liquidity: 0 }]));
+    for (const [tk, b] of Object.entries(findGen.boards || {})) {
+      const c = chains[tk];
+      if (!c?.spot || !b) continue;
+      const strikes = expiryStrikes(c, b.expKey);
+      if (!strikes) continue;
+      const u = getU(tk), qq = makeQuote(c, b.expKey);
+      for (const l of LIQUIDITY_LEVELS) {
+        const seenK = new Set(), seenT = new Set();
+        for (const fam of b.fams || [b.sent]) {
+          const r = shortlistWithFloors(fam, c.spot, u.step, strikes, b.dte, u.iv, qq, { peers: b.peers, level: l });
+          for (const row of r.rows) seenK.add(JSON.stringify(row.p.legs));
+          for (const row of [...r.rows, ...r.cut]) seenT.add(JSON.stringify((row.p || row).legs || row));
+          out[l.id].liquidity += r.tally.liquidity || 0;
+        }
+        out[l.id].kept += seenK.size; out[l.id].total += seenT.size;
+      }
     }
     return out;
-  }, [chains, focusTk, focusBoard]);
+  }, [liqSheetOpen, chains, findGen]);
+  // THE LIQUIDITY SHEET (PR 4d): today's takeaway, the four levels counted across every market, the setting's own sentence
+  // and its warning; the numbers are Find's `foldedNode`, one fold down. Assembled here, outside the step block: the sheet
+  // is one tap away, and its words are not Find's at rest.
+  const liquiditySheet = {
+    takeaway: liquidityTakeaway({ reporting: Object.values(findGen.boards || {}).filter((b) => b && b.peers && b.peers.length).length,
+      total: Object.keys(findGen.boards || {}).length, hidden: (findGen.tally && findGen.tally.liquidity) || 0, level: liqLevel }),
+    levels: LIQUIDITY_LEVELS.map((l) => ({ id: l.id, label: l.label, recommended: !!l.recommended, on: l.id === liqLevelId,
+      value: liqPreview ? liquidityLevelValue(liqPreview[l.id]) : null })),
+    onLevel: setLiqLevelId, blurb: liqLevel.blurb, warn: looseningWarning(liqLevel),
+  };
   const liqThreshold = useMemo(() => liquidityThreshold(focusBoard ? focusBoard.peers : [], liqLevel), [focusBoard, liqLevel]);
 
   /* FIND LOADS WHAT IT READS. Every selected market's chain and daily bars are
@@ -4700,14 +4658,13 @@ export default function OptionsStrategyLab() {
             sheet={deskSheet} onSheet={setDeskSheet} onReset={resetFind}
             isSaved={isSaved} onSave={(x) => saveCandidate(x.cand)} onOpenMarket={(tk) => goMarket(tk, "strategies")}
             freshness={findStale}
+            liquidity={liquiditySheet}
             copilot={{ apiKey: "server", convo: findChat, setConvo: setFindChat, onAnalysis: logAnalysis,
               ctx: { store, scan, news: newsPool, ticker: null, legs: [], expKey: null, A: null, spot: null, seasonalSrc: null } }}
             foldedNode={<>
-              <LiquidityFilter
-                levelId={liqLevelId} onLevel={setLiqLevelId} previews={liqPreview}
-                threshold={liqThreshold} ticker={focusTk} expKey={focusBoard ? focusBoard.expKey : null}
-                peers={focusBoard ? focusBoard.peers : []} feed={focusBoard ? focusBoard.feed : null} />
               <OpenInterestReadout chains={chains} floor={liqLevel.absolute} percentile={liqLevel.percentile} level={liqLevel} />
+              <FloorDetail levelId={liqLevelId} threshold={liqThreshold} ticker={focusTk} expKey={focusBoard ? focusBoard.expKey : null}
+                peers={focusBoard ? focusBoard.peers : []} feed={focusBoard ? focusBoard.feed : null} />
             </>}
             {...compareBlock} />
         )}

@@ -1053,6 +1053,26 @@ export const LIQUIDITY_LEVELS = [
 ];
 
 export const RECOMMENDED_LIQUIDITY = LIQUIDITY_LEVELS.find((l) => l.recommended);
+/* THE LIQUIDITY SHEET (PR 4d, owner, 6 Oct 2026: "the tab and its takeaway are no longer clear"). Today's takeaway first,
+   the four levels counted across every market, what else keeps cards out, the numbers one fold away. Words only: no
+   floor value moves. */
+/** Today's takeaway, from what the feeds reported: whether the open-interest floor could run at all, and what it hid. */
+export function liquidityTakeaway({ reporting = 0, total = 0, hidden = 0, level = RECOMMENDED_LIQUIDITY } = {}) {
+  if (!total) return "No market's prices have loaded yet, so the floor has nothing to judge.";
+  if (!reporting) return `Today the open-interest floor cannot run: no feed has reported open interest on any of the ${total} markets yet. ` +
+    "Cards are kept or hidden by their price, spread, crossing cost and return on risk only.";
+  const cards = `${hidden} card${hidden === 1 ? " is" : "s are"}`;
+  return `Open interest is read on ${reporting} of ${total} markets: at ${level.label}, ${cards} hidden for thin strikes.` +
+    (reporting < total ? ` On the other ${total - reporting} the floor is skipped, not passed.` : "");
+}
+/** A level chip's count: the cards it keeps across every market. */
+export const liquidityLevelValue = (pv) => (pv && Number.isFinite(pv.kept) ? `${pv.kept} card${pv.kept === 1 ? "" : "s"}` : "—");
+export const LIQ_OTHER_HEAD = "WHAT ELSE KEEPS CARDS OUT";
+export const LIQ_DETAILS = "The numbers behind it: open interest per market, the floor on one board, where the numbers come from";
+export const LIQ_REASONS_FOLD = "Each reason in full";
+/** The markets whose feed reported no open interest, in one line. */
+export const noOiLine = (tks = []) => (tks.length ? `No open interest reported yet for ${tks.join(", ")}: the floor is skipped there, not failed.` : null);
+
 
 /** A level by id, and never undefined: an unknown id falls back to the advice. */
 export const liquidityLevel = (id) =>

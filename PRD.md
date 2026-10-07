@@ -32,7 +32,8 @@ non-expert trader who wants to learn discipline rather than be sold trades.
      read); ONE row of chips — ⇅ Order · Budget · Chance · Return · Horizon · Direction · Avg > 0 · Liquidity — each
      showing its value, filled when off its default, every one but Avg > 0 opening a bottom sheet that holds the
      existing control unchanged and ends with a live "Show N of M" ("Show flagged" is in the Order sheet, the floors'
-     "why" fold in the Liquidity sheet); the line "N of M fit · K dimmed" (or "· K hidden") with Hide them / Show them
+     "why" fold in the Liquidity sheet — which since PR 4d opens on today's takeaway, its four levels as chips counting the
+     cards each keeps across every market, what else keeps cards out with counts, and the numbers one fold down); the line "N of M fit · K dimmed" (or "· K hidden") with Hide them / Show them
      and Reset; the column head "Market … <the sorted-by figure> · risk" with the ⓘ "How <TK>'s numbers connect" (five
      numbered steps); then one row per market: ☆, the ticker, ▲ Bull / ▼ Bear / ≈ Neutral from "Signals decide", "<structure>
      · <expiry>" (or the miss reason), a 72×40 picture, the sorted-by figure and "risk $N". **The rows are a view of the

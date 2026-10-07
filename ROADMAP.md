@@ -6,6 +6,28 @@ The full history of every item shipped so far (P0–P10, P2-bis) is in `docs/his
 Every pull request updates this file: the session that ships an item marks it done and states
 what the next one inherits.
 
+## Done in PR 4d (owner, 6 Oct 2026): the Liquidity sheet on Find, said plainly
+
+The owner: "the liquidity floor tab and its takeaway are no longer clear". The sheet held the desk's old panel as it was:
+its four buttons counted ONE market (USO, "0 of 2 shown") while the footer said "Show 10 of 10"; the takeaway (no feed
+had reported open interest, so the floor filtered nothing) sat at the bottom in three paragraphs; sentences in mono, Off
+in red, a ten-row table of "does not report".
+
+- **Today's takeaway first** (`liquidityTakeaway()`): no open interest anywhere → "the floor cannot run… cards are kept or
+  hidden by their price, spread, crossing cost and return on risk only"; else how many markets report it and how many
+  cards it hid, and that the others are skipped, not passed.
+- **The four levels as Find's chips**, each counting the cards it keeps across EVERY market (`liqPreview`, the same
+  `shortlistWithFloors()` findGen runs, family by family; worked out only while the sheet is open); the setting's own
+  sentence; a loosened floor's warning in amber (a warning, not an error).
+- **What else keeps cards out**, one row per reason with its count (`filterFold()`'s reasons); each in full behind "why".
+- **The numbers one fold down** ("The numbers behind it"): open interest market by market (the markets with none in one
+  line, `noOiLine()`; with none anywhere, only that line), the floor on one board (`FloorDetail`, was LiquidityFilter:
+  the strip, the arithmetic, why relative, where the two numbers come from). Sentences in sans.
+- The sheet's model is assembled outside Find's step block (`liquiditySheet`): it is one tap away, so its words are not
+  Find's at rest (find stays 288). **No floor value changed** (riskGate.test.js holds the four levels).
+
+**Measured.** Tests 1,400 → 1,401. Audit 20 boards, 0 unexplained. Photographs: docs/screens/pr4/find-liquidity*.png.
+
 ## Done in PR 4c (owner, 6 Oct 2026): "What did this trade teach me?" in the Journal
 
 Rides on PR #59 (the same branch; 4b was not merged yet).
@@ -683,7 +705,8 @@ One line each; see `PRD.md` §5 and `docs/history/ROADMAP.md` for detail.
 - **DONE: PR 4a** — the copilot by place (it recommends only among what the app built), Find's Compare, Build's verdict,
   the Greeks and the chart explained, the Signals tab.
 - **DONE: PR 4b** — Build's variants and a position's roll, one calculation.
-- **DONE: PR 4c** — "What did this trade teach me?" in the Journal. **NEXT: PR 4d** (the Liquidity sheet on Find).
+- **DONE: PR 4c** — "What did this trade teach me?" in the Journal.
+- **DONE: PR 4d** — the Liquidity sheet on Find, said plainly. **NEXT:** the basket expansion with a measured admission rule (below), unless the owner picks another.
 - **Basket expansion with a measured admission rule** (planned as #50, not started; #50 shipped the wrap instead). The owner pastes `/api/liquidity` for the
   candidate tickers; a market is admitted when its open interest clears the liquidity floor AND Alpha Vantage holds at
   least **N = 14 years** of its monthly history. N is set from what `seasonalSignal()` needs: a month counts at |mean| ≥

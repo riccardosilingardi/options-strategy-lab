@@ -4,6 +4,7 @@
 import { rowStateOf } from "./rows.js";
 import { readFileSync, readdirSync } from "node:fs";
 import assert from "node:assert/strict";
+import * as RL from "./rules.js";
 import { evaluateTrade, paperStatus, undefinedRiskLegs } from "./riskGate.js";
 import { positionSize, positionSizeNote, contractsOf, withPositionSize, bookPositions, positionStage, positionForHolding } from "./journal.js";
 import { orderBody, mlegLimitPrice } from "./order.js";
@@ -3492,6 +3493,25 @@ test("FREE SIZING ON: no card is over budget — it is sized on the amount typed
 test("EVERY POSITION RECORDS sizingFree, AND THE JOURNAL KEEPS IT", () => {
   const src = readFileSync("src/journal.js", "utf8");
   assert.match(src, /sizingFree: pos\.sizingFree === true,/);
+});
+
+/* PR 4d — THE LIQUIDITY SHEET SAYS TODAY'S TAKEAWAY FIRST, AND ITS COUNTS ARE EVERY MARKET'S. */
+test("THE LIQUIDITY SHEET: no open interest reported is said first; the levels count cards; no-data markets are one line", () => {
+  const R = RL;
+  assert.match(R.liquidityTakeaway({ reporting: 0, total: 10 }), /^Today the open-interest floor cannot run: no feed has reported open interest on any of the 10 markets yet\./);
+  assert.equal(R.liquidityTakeaway({ reporting: 7, total: 10, hidden: 4 }),
+    "Open interest is read on 7 of 10 markets: at Recommended, 4 cards are hidden for thin strikes. On the other 3 the floor is skipped, not passed.");
+  assert.equal(R.liquidityTakeaway({ reporting: 10, total: 10, hidden: 1 }), "Open interest is read on 10 of 10 markets: at Recommended, 1 card is hidden for thin strikes.");
+  assert.equal(R.liquidityTakeaway({ total: 0 }), "No market's prices have loaded yet, so the floor has nothing to judge.");
+  assert.equal(R.liquidityLevelValue({ kept: 20 }), "20 cards"); assert.equal(R.liquidityLevelValue(null), "—");
+  assert.equal(R.noOiLine(["CORN", "UNG"]), "No open interest reported yet for CORN, UNG: the floor is skipped there, not failed.");
+  assert.equal(R.noOiLine([]), null);
+  // No floor value moved: the four levels are the ones the gate's tests above hold.
+  assert.deepEqual(R.LIQUIDITY_LEVELS.map((l) => [l.id, l.percentile, l.absolute]),
+    [["strict", 0.6, 25], ["recommended", RULES.liquidityPercentile, RULES.minOpenInterestAbsolute], ["relaxed", 0.2, 5], ["off", 0, 0]]);
+  const find = readFileSync(new URL("./find.jsx", import.meta.url), "utf8");
+  assert.ok(find.includes("data-liq-takeaway") && find.includes("data-liq-levels"), "the takeaway and the chips are on the sheet");
+  assert.ok(!/isLoosened\(liqLevel\) \? T\.red/.test(find), "a loosened floor is a warning (amber), never red");
 });
 
 console.log(`\n${passed} passed, ${failures.length} failed\n`);
