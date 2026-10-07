@@ -1741,9 +1741,18 @@ export const findCopilotLine = (shown, fitting) =>
   `It reads the ${shown === fitting ? fitting : `first ${shown} of the ${fitting}`} card${fitting === 1 ? "" : "s"} that fit, in your order, ` +
   `and recommends among them only. It never sends an order.`;
 
-/** The column head: "Market" … "Future avg · risk". */
+/** The column head: "Market" … "Days · risk" (PR 63: the row's three figures carry their own words, the ring marks the
+ *  one the list is sorted by, so the head names only the right-hand column). */
 export const COLUMN_MARKET = "Market";
-export const columnHeadText = (order) => `${(FIND_ORDERS.find((o) => o.id === order) || FIND_ORDERS[0]).label} · risk`;
+export const columnHeadText = () => "Days · risk";
+/* A ROW'S THREE FIGURES (PR 63, owner 7 Oct 2026: "Chance · Return on risk · Avg per $100 at risk, plus the days, always").
+   Their short words on a row, where the card's names (CARD_LABELS) do not fit three to a line at 390px; the values are the
+   card's own (`rowFigures()` in rows.js). */
+export const ROW_FIGURE_WORDS = Object.freeze({ chance: "chance", rr: "return", future: "avg per $100" });
+/** "44d": a row's days to expiry. */
+export const rowDaysText = (dte) => (dte == null || !Number.isFinite(Number(dte)) ? "—" : `${Math.round(Number(dte))}d`);
+/** 63.3: above the rows when cards fit but not one of them has a positive future average. */
+export const NO_POSITIVE_AVG_LINE = "No card has a positive average today.";
 export const rowRiskText = (risk) => (risk == null ? "risk —" : `risk ${money(risk)}`);
 /** A market's direction on its row and its page: from `signalDirection()`, never "Very". */
 export const DIRECTION_TAGS = Object.freeze({ bull: "▲ Bull", bear: "▼ Bear", neutral: "≈ Neutral" });
@@ -1798,7 +1807,7 @@ export const SAVED_REMOVE = "Remove";
 export const BUILD_CTA = "Build ›";
 export const WOULD_HAVE_DONE = "What it would have done";
 /** A future avg per $100 at risk, as Saved prints it. */
-export const per100Text = (x) => (x == null || !Number.isFinite(Number(x)) ? "—" : `${Number(x) >= 0 ? "+" : "−"}${Math.abs(Number(x)).toFixed(1)} per $100`);
+export const per100Text = (x) => (x == null || !Number.isFinite(Number(x)) ? "—" : `${per100Value(x)} per $100`);
 
 /** The market page (redesign PR 1). */
 export const MARKET_TABS = Object.freeze([
@@ -1975,7 +1984,42 @@ export const expiryWords = (iso) => {
   if (!m || +m[2] < 1 || +m[2] > 12) return null;
   return `${+m[3]} ${MON3[+m[2] - 1]} ${m[1]}`;
 };
+/** "2026-10-30" → "30 Oct": the chart's time axis and its readout, where the year is the expiry's own. */
+export const dayWords = (iso) => { const w = expiryWords(iso); return w ? w.replace(/ \d{4}$/, "") : null; };
+
+/* ====================================================================
+   BUILD'S CHART, SAID (PR 63, tasks 63.4 and 63.5; owner 7 Oct 2026). The words on the one chart: today's price, each
+   breakeven's distance, the ±1 standard deviation prices at the fan's edge, the exit at RULES.exitDTE on the time axis,
+   each payoff zone's chance, and the crosshair's readout. The numbers come from `src/tradeChart.js` (the chance's own
+   lognormal, `exactPnl()`); this is only how they are written.
+==================================================================== */
+export const spotNowLabel = (spot) => `${Number(spot).toFixed(2)} · now`;
+export const beAwayLabel = (be, pct = null) =>
+  `BE ${Number(be).toFixed(2)}${pct == null || !Number.isFinite(pct) ? "" : ` · ${pct >= 0 ? "+" : "−"}${Math.abs(pct * 100).toFixed(1)}%`}`;
+export const sdLabel = (sign, px) => `${sign > 0 ? "+" : "−"}1 sd ${Number(px).toFixed(2)}`;
+export const exitMarkLabel = (day) => `exit ${day}`;
+/** A zone's chance on the chart: "47%", and "<1%" for a sliver the whole percent would print as 0. */
+export const zoneOddsLabel = (p) => (known(p) && Number(p) > 0 && Number(p) < 0.005 ? "<1%" : chanceText(p));
+export const CROSS_HINT = "Tap the chart, drag the line, or use the arrow keys to read a price.";
+export const CROSS_ARIA = "Price to read on the chart";
+/** "GLD at $370.00 on 20 Nov → +$1,240 on 7 contracts · 31% chance to finish below". */
+export const crosshairLine = ({ ticker, price, day, pnl, contracts, below }) =>
+  `${ticker} at $${Number(price).toFixed(2)} on ${day} → ${signedMoney(pnl)} on ${contracts} contract${contracts === 1 ? "" : "s"} · ` +
+  `${zoneOddsLabel(below)} chance to finish below`;
+/** "How to read ⓘ" on Build's chart: what each mark is (the zones and the crosshair joined in PR 63). */
+export const howToReadChart = ({ ticker, sessions, chance, exitDay }) =>
+  `On the left, ${ticker}'s price over the last ${sessions}; the amber dot is today's price. From it, the blue fan is where ` +
+  `the price could be by expiry: the darker band holds about 68 of every 100 outcomes of the model (one standard deviation ` +
+  `either side, its two prices written at the fan's edge), the paler one 95. The faint green and violet zones are where the ` +
+  `trade pays and where it loses at expiry; the figure in each is the chance of finishing there, on the same model as the ` +
+  `CHANCE figure, and they add up to 100%: the green ones add up to ${chance}. The bars are the same chances, price by ` +
+  `price. At the right edge, what the trade makes or loses at expiry, read straight across the same price axis. The dashed ` +
+  `blue line is the breakeven, with how far it is from today's price.${exitDay ? ` The tick on the time axis is ${exitDay}, ` +
+  `when the plan exits at ${RULES.exitDTE} days to expiry.` : ""} Tap the chart (or drag the line, or use the arrow keys) to ` +
+  `read any price: what the trade makes there at expiry for your size, and the chance of finishing below it.`;
 const sgnOne = (v) => `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(1)}`;
+/** "+12.5": a future average per $100 at risk as the FUTURE tile and Find's row print it (one formatter). */
+export const per100Value = (v) => (v == null || !Number.isFinite(Number(v)) ? "—" : sgnOne(Number(v)));
 
 /**
  * THE MODEL'S AVERAGE PER $100 AT RISK — the figure "Future avg" sorts on and the FUTURE tile prints (PR #49).
@@ -2005,7 +2049,7 @@ export function futureFigures(mc, a, n = null, expKey = null) {
 export function futureTile(ff) {
   const to = ff && expiryWords(ff.expiry) ? `to ${expiryWords(ff.expiry)}` : null;
   if (!ff || ff.per100 == null) return { value: "—", lines: [ff && ff.unbounded ? "no ceiling" : "not known", to].filter(Boolean) };
-  return { value: signedMoney(ff.avg), lines: [`${sgnOne(ff.per100)} per $100 at risk`, to].filter(Boolean) };
+  return { value: signedMoney(ff.avg), lines: [`${per100Value(ff.per100)} per $100 at risk`, to].filter(Boolean) };
 }
 
 /** The PAST tile's numbers for the size: { wins, n, avg ($, size × the replay's per-contract mean), per100 } or null. */
@@ -2019,6 +2063,48 @@ export function pastFigures(bt, a = null, n = null) {
 
 /** "won 9 of 14 · avg +$310", or "not read" until the market's monthly series has loaded. */
 export const pastTileText = (pf) => (pf ? `won ${pf.wins} of ${pf.n} · avg ${signedMoney(pf.avg)}` : "not read");
+
+/* ====================================================================
+   THE CARD'S DETAILS (PR 63, task 63.2; owner 7 Oct 2026). What a card's "Details ▾" opens with, from figures the app
+   already has — nothing is worked out here but a ratio. Each row is { k, v }; an unknown is "—" and a word, never a 0.
+     · Breakeven   each breakeven's distance from the price, in % and in expected moves (the move the options imply to
+                   expiry, `expectedMove()` in marketView.js, handed in as `move`).
+     · Entry cost  the combination's bid/ask spread (`comboBook()`'s `spread`, per share), for the size, and as a share of
+                   the maximum profit.
+     · IV rank     the market's (`ivRankShort()`).
+     · Theta       `analyze()`'s time decay a day (dollars a combination), for the size.
+     · Held        the days to the exit at `RULES.exitDTE` — kept from 63.1 (the owner moved the expiry search to its own run).
+==================================================================== */
+export const CARD_DETAIL_LABELS = Object.freeze({ breakeven: "Breakeven", entry: "Entry cost", ivRank: "IV rank", theta: "Theta", held: "Held" });
+export function cardDetailRows({ spot = null, breakevens = null, move = null, spread = null, maxProfit = null, unbounded = false,
+  n = null, ivRank = null, ivDays = 0, theta = null, dte = null } = {}) {
+  const k = n != null && Number.isFinite(Number(n)) && Number(n) >= 1 ? Math.round(Number(n)) : null;
+  const forSize = k ? ` for ${k}` : " a contract";
+  const bes = (Array.isArray(breakevens) ? breakevens : []).filter(known).map(Number);
+  const sp = known(spot) && Number(spot) > 0 ? Number(spot) : null;
+  const mv = known(move) && Number(move) > 0 ? Number(move) : null;
+  const beText = !bes.length ? "— none: it never crosses zero"
+    : !sp ? `${bes.map((b) => `$${b.toFixed(2)}`).join(" · ")} (the price is not read)`
+      : bes.map((b) => {
+        const pct = (b - sp) / sp;
+        const away = `${pct >= 0 ? "+" : "−"}${Math.abs(pct * 100).toFixed(1)}%`;
+        return `$${b.toFixed(2)} (${away}, ${mv ? `${(Math.abs(b - sp) / mv).toFixed(2)} expected moves` : "expected move not known"})`;
+      }).join(" · ");
+  const entryText = !known(spread) ? "— a leg has no two-sided quote"
+    : `${money(Number(spread) * 100 * (k || 1))} spread${forSize}${unbounded || !known(maxProfit) || Number(maxProfit) <= 0 ? " · no ceiling to compare"
+      : ` · ${Math.round((Number(spread) * 100 / Number(maxProfit)) * 100)}% of max profit`}`;
+  const ivText = ivRank != null && Number.isFinite(Number(ivRank)) ? String(Math.round(Number(ivRank))) : `— ${ivRankShort(null, ivDays || 0)} days`;
+  const thetaText = !known(theta) ? "— not worked out" : `${signedMoney(Number(theta) * (k || 1))} a day${forSize}`;
+  const heldText = !known(dte) ? "—" : Number(dte) > RULES.exitDTE
+    ? `~${Math.round(Number(dte) - RULES.exitDTE)} days (exit at ${RULES.exitDTE} DTE)` : `— inside the ${RULES.exitDTE}-day exit`;
+  return [
+    { id: "breakeven", k: CARD_DETAIL_LABELS.breakeven, v: beText },
+    { id: "entry", k: CARD_DETAIL_LABELS.entry, v: entryText },
+    { id: "ivRank", k: CARD_DETAIL_LABELS.ivRank, v: ivText },
+    { id: "theta", k: CARD_DETAIL_LABELS.theta, v: thetaText },
+    { id: "held", k: CARD_DETAIL_LABELS.held, v: heldText },
+  ];
+}
 
 /** The FUTURE tile's ⓘ. */
 export const futureInfo = () =>

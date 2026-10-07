@@ -9,7 +9,8 @@ import { RULES, ruleBadge, takeProfitLabel, takeProfitTarget, scaleOutLabel, sto
   legBook, sizeSkippedNote, onTick, netFromLegs, limitCeilingNote, rewardRisk,
   contractListing, unlistedContractNote, unquotedLegNote, unquotedLegPointer, marketOrderNote,
   taCopilotPrompt, TA_QUESTIONS, TA_DISCLAIMER, TA_NEVER_PROPOSES, TA_OWN_QUESTION,
-  ivProvenance, noRecordNote, copilotOverreach, copilotOverreachNote, COPILOT_MODEL, GATE_NEAR_LIMIT, CARD_LABELS, FUTURE_PAST_EQUAL, returnText, notInFiguresLine } from "./rules.js";
+  ivProvenance, noRecordNote, copilotOverreach, copilotOverreachNote, COPILOT_MODEL, GATE_NEAR_LIMIT, CARD_LABELS, FUTURE_PAST_EQUAL, returnText, notInFiguresLine,
+  spotNowLabel, beAwayLabel, sdLabel, exitMarkLabel, zoneOddsLabel, CROSS_HINT, CROSS_ARIA, howToReadChart } from "./rules.js";
 import { ungroundedFigures } from "./grounding.js";
 import { contractsOf, positionSize, bookPositions, positionStage, autopilotHorizonNote, autopilotVolNote, positionForHolding, journalPnlTotal, scoredJournal } from "./journal.js";
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, LineStyle } from "lightweight-charts";
@@ -23,6 +24,7 @@ import { indicatorSet, takeaway, taContext, LABELS, MEASURES, RSI_HIGH, RSI_LOW 
 import { erf, netBS } from "./engine.js";
 import { ARROW, REGIONS, regionSignals, tagImpacts, taRead } from "./signals.js";
 import { useNarrow, BandThumbnail, payoffBands, bandTakeaway, pnl$ } from "./visuals.jsx";
+import { chartDist, zoneOdds, coneEdges, exitMark, awayFrom, crosshairReadout, crossStep, crossKey } from "./tradeChart.js";
 import { DEMO, DEMO_TOOLTIP } from "./demo.js";
 import { PREVIEW, PREVIEW_READ_ONLY } from "./deploy.js";
 import { reduceRatios, orderQty, mlegLimitPrice, limitWords, orderLimitWords, limitKind, signedLimitFor, orderBody, orderPreviewLines, orderOutcome, alpacaErrorText, cancelOutcome, cancelWaiting } from "./order.js";
@@ -3004,24 +3006,28 @@ export function confluence(seasonalM, ta) {
 /* ====================================================================
    PRICE HISTORY × WHERE IT COULD GO × WHERE YOU MAKE MONEY — Build's one chart, on the owner's mockup "3 · Build"
    (redesign PR 2, TASK 2). One price axis on the right, shared by every panel, left to right:
-     · the last 60 sessions of the price (a longer history one tap away: 1Y, 5Y);
-     · a BLUE FAN from today to expiry — the inner band holds 68 of 100 outcomes of the model, the outer 95 — on the same
-       lognormal the chance is drawn on (the chain's IV, the season's counted drift);
+     · the last 60 sessions of the price (a longer history one tap away: 1Y, 5Y), today's price as a DOT with its value;
+     · a BLUE FAN from today to expiry — the inner band is one standard deviation either side (about 68 of 100 outcomes
+       of the model, its two prices written at the fan's edge), the outer 95 — on THE CHANCE'S OWN LOGNORMAL (PR 63: the
+       drift and the volatility `chanceOf()` used, handed in; it used to draw on its own legs-average IV and season);
+     · FAINT ZONES where the trade pays (green) and loses (violet) at expiry, `payoffBands()`'s, each with the chance of
+       finishing in it on the same lognormal (`zoneOdds()`): they add up to 100%, the green ones to the CHANCE figure;
      · BARS OF WHERE IT ENDS at expiry, green where the trade pays;
      · THE PAYOFF at the right edge, at expiry, rotated onto the same axis;
-     · the BREAKEVEN as a dashed line with its label, today's price as a DOT, each leg's strike as a thin line.
-   It used to have a 560px floor (the page scrolled sideways inside it on a phone), a violet 50 / 90% cone and no
-   ending bars; the payoff strip appeared only above 820px. It now draws at the card's full width at any size.
-   "How to read ⓘ" opens one paragraph. Only Build mounts it.
+     · the BREAKEVEN as a dashed line with its label and its distance from today's price, each leg's strike as a thin line;
+     · the EXIT at RULES.exitDTE days to expiry, a tick on the time axis with its date (PR 63).
+   A CROSSHAIR (PR 63, task 63.5): a tap on the chart, a drag of the line's handle, the mouse, or the arrow keys (the chart
+   is a slider) put a line at a price; under the chart one sentence says what the trade makes there at expiry for Build's
+   size and the chance of finishing below it (`crosshairReadout()`). Every figure is `src/tradeChart.js`'s.
+   "How to read ⓘ" opens one paragraph (`howToReadChart()`). Only Build mounts it.
 ==================================================================== */
-const FAN_Z = Object.freeze({ lo95: -1.96, lo68: -0.9945, mid: 0, hi68: 0.9945, hi95: 1.96 });
+// The fan's bands: ±1 standard deviation (68.3 of 100 outcomes) and ±1.96 (95).
+const FAN_Z = Object.freeze({ lo95: -1.96, lo68: -1, mid: 0, hi68: 1, hi95: 1.96 });
 export const UNIFIED_SESSIONS = 60;
-export function UnifiedView({ ticker, dte, sigma, driftM, curve, legs, breakevens, spot, onTa }) {
-  const [bars, setBars] = useState(null);
+export function UnifiedView({ ticker, dte, sigma, driftAnnual = 0, curve, legs, breakevens, spot, entryNet = 0, expKey = null, contracts = 1, onTa }) {
   const [allBars, setAllBars] = useState(null);
   const [range, setRange] = useState(UNIFIED_SESSIONS);
   const [err, setErr] = useState(null);
-  const [how, setHow] = useState(false);
   const wrapRef = React.useRef(null);
   const [W, setW] = useState(340);
   useEffect(() => {
@@ -3047,14 +3053,29 @@ export function UnifiedView({ ticker, dte, sigma, driftM, curve, legs, breakeven
       } catch (e) { setErr(String(e.message || e)); }
     })();
   }, [ticker, range > 400]); // eslint-disable-line
-  useEffect(() => {
-    if (!allBars) return;
+  const bars = React.useMemo(() => {
+    if (!allBars) return null;
     const n = range <= UNIFIED_SESSIONS ? UNIFIED_SESSIONS : range <= 400 ? 250 : allBars.length;
-    setBars(allBars.slice(-n));
+    return allBars.slice(-n);
   }, [allBars, range]);
   const shell = (inner) => <div ref={wrapRef} style={{ maxWidth: "100%" }}>{inner}</div>;
   if (err) return shell(<div style={{ ...sans, fontSize: FS.sm, color: T.mut }}>The price history is not loaded: {err}</div>);
   if (!bars || !bars.length || !spot || !curve?.length) return shell(<div style={{ ...sans, fontSize: FS.sm, color: T.mut }}>Loading the chart…</div>);
+  return (
+    <div ref={wrapRef} data-unified style={{ maxWidth: "100%" }}>
+      <UnifiedChart W={W} ticker={ticker} bars={bars} range={range} onRange={setRange} dte={dte} sigma={sigma} driftAnnual={driftAnnual}
+        curve={curve} legs={legs} breakevens={breakevens} spot={spot} entryNet={entryNet} expKey={expKey} contracts={contracts} />
+    </div>
+  );
+}
+
+/** The drawing, the crosshair and the controls, on bars already loaded (chart.test.jsx renders it on fixture bars). */
+export function UnifiedChart({ W = 340, ticker, bars, range = UNIFIED_SESSIONS, onRange = () => {}, dte, sigma, driftAnnual = 0, curve, legs,
+  breakevens, spot, entryNet = 0, expKey = null, contracts = 1, initialCross = null }) {
+  const [how, setHow] = useState(false);
+  const [cross, setCross] = useState(initialCross);
+  const svgRef = React.useRef(null);
+  const drag = React.useRef(null);
 
   const H = 240, padL = 2, padR = 40, padT = 8, padB = 20;
   const inner = W - padL - padR;
@@ -3063,9 +3084,13 @@ export function UnifiedView({ ticker, dte, sigma, driftM, curve, legs, breakeven
   const xDist0 = xFanEnd + 2, xDistEnd = xFanEnd + inner * 0.12;
   const xPay0 = xDistEnd + 4, xPayEnd = padL + inner;
 
-  // The fan: the lognormal from today, drifted on the season's counted mean, at the chain's IV.
-  const mu = Math.log(1 + (driftM || 0) / 100) * 12;
+  // THE CHANCE'S LOGNORMAL (PR 63): the drift and the volatility `chanceOf()` used, so the fan, the bars, the zones and the
+  // crosshair all read the distribution the CHANCE figure is worked out on.
   const days = Math.max(1, dte);
+  const policy = { driftAnnual: Number(driftAnnual) || 0, sigma, dte: days };
+  const dist = chartDist(legs, entryNet, spot, policy);
+  const edges = coneEdges(spot, policy);
+  const mu = policy.driftAnnual;
   const fan = [];
   for (let i = 0; i <= 24; i++) {
     const t = (i / 24) * (days / 365);
@@ -3081,6 +3106,7 @@ export function UnifiedView({ ticker, dte, sigma, driftM, curve, legs, breakeven
   const yMin = Math.min(...ys) * 0.985, yMax = Math.max(...ys) * 1.015;
   const Y = (v) => padT + (1 - (v - yMin) / (yMax - yMin)) * (H - padT - padB);
   const XH = (i) => xHist0 + (bars.length > 1 ? i / (bars.length - 1) : 0) * (xToday - xHist0);
+  const clampY = (v) => Math.max(padT, Math.min(H - padB, v));
 
   // Where it pays at expiry, read off `curve` (the same payoff every figure on Build reads).
   const payAt = (px) => {
@@ -3089,16 +3115,19 @@ export function UnifiedView({ ticker, dte, sigma, driftM, curve, legs, breakeven
     return best.exp;
   };
   // Where it ends: the same lognormal at expiry, in bins along the price axis.
-  const erf2 = (x) => { const sg = x < 0 ? -1 : 1; x = Math.abs(x); const t2 = 1 / (1 + 0.3275911 * x); return sg * (1 - (((((1.061405429 * t2 - 1.453152027) * t2) + 1.421413741) * t2 - 0.284496736) * t2 + 0.254829592) * t2 * Math.exp(-x * x)); };
-  const Tyr = days / 365, sq = sigma * Math.sqrt(Tyr), muT = Math.log(spot) + (mu - 0.5 * sigma * sigma) * Tyr;
-  const cdf = (x) => (x <= 0 ? 0 : 0.5 * (1 + erf2((Math.log(x) - muT) / (sq * Math.SQRT2))));
   const NB = 28;
-  const dist = Array.from({ length: NB }, (_, i) => {
+  const dist28 = Array.from({ length: NB }, (_, i) => {
     const lo = yMin + (i / NB) * (yMax - yMin), hi = yMin + ((i + 1) / NB) * (yMax - yMin);
-    return { lo, hi, p: Math.max(0, cdf(hi) - cdf(lo)), pays: payAt((lo + hi) / 2) > 0 };
+    return { lo, hi, p: dist ? Math.max(0, dist.mass(lo, hi)) : 0, pays: payAt((lo + hi) / 2) > 0 };
   });
-  const peak = Math.max(...dist.map((d) => d.p), 1e-9);
-  const pIn = dist.reduce((a, d) => a + (d.pays ? d.p : 0), 0);
+  const peak = Math.max(...dist28.map((d) => d.p), 1e-9);
+
+  // THE ZONES (PR 63): `payoffBands()` over a range wide enough to hold every strike, then each zone's chance.
+  const ks = legs.map((l) => Number(l.strike)).filter((k) => k > 0);
+  const zones = zoneOdds(payoffBands({ legs, entryNet, spot, lo: Math.min(spot, ...ks) * 0.5, hi: Math.max(spot, ...ks) * 1.5 }).bands, dist);
+  const pProfit = zones.filter((z) => z.sign > 0).reduce((a, z) => a + z.p, 0);
+  const exit = exitMark(expKey, dte);
+  const xExit = exit ? xToday + (exit.daysFromNow / days) * (xFanEnd - xToday) : null;
 
   // The payoff at the right edge: zero a third in, profit to the right, loss to the left.
   const payPts = curve.filter((c) => c.s >= yMin && c.s <= yMax).map((c) => ({ y: Y(c.s), v: c.exp }));
@@ -3111,10 +3140,48 @@ export function UnifiedView({ ticker, dte, sigma, driftM, curve, legs, breakeven
   const closes = bars.map((b, i) => `${(i ? "L" : "M")}${XH(i).toFixed(1)},${Y(b.close).toFixed(1)}`).join("");
   const sessions = range <= UNIFIED_SESSIONS ? `${bars.length} sessions` : range <= 400 ? "1 year" : "5 years";
 
+  // THE CROSSHAIR (PR 63, 63.5): a price, set by a tap, a drag of its handle, the mouse, or the keys.
+  const priceAtY = (clientY) => {
+    const r = svgRef.current ? svgRef.current.getBoundingClientRect() : null;
+    if (!r || !r.height) return null;
+    const y = (clientY - r.top) * (H / r.height);
+    return Math.min(yMax, Math.max(yMin, yMin + (1 - (y - padT) / (H - padT - padB)) * (yMax - yMin)));
+  };
+  const step = crossStep(spot);
+  const readout = cross == null ? null : crosshairReadout({ ticker, price: cross, expKey, legs, entryNet, contracts, dist });
+  const onDown = (e) => {
+    const handle = e.target && e.target.getAttribute && e.target.getAttribute("data-cross-handle") != null;
+    drag.current = { handle, x: e.clientX, y: e.clientY };
+    if (handle && e.currentTarget.setPointerCapture) e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  const onMove = (e) => {
+    if (drag.current && drag.current.handle) { const p = priceAtY(e.clientY); if (p != null) setCross(p); return; }
+    if (!drag.current && e.pointerType === "mouse") { const p = priceAtY(e.clientY); if (p != null) setCross(p); }
+  };
+  const onUp = (e) => {
+    const d = drag.current;
+    drag.current = null;
+    // A TAP puts the line where it landed; a swipe that moved is the page scrolling, and is left alone.
+    if (d && !d.handle && Math.hypot(e.clientX - d.x, e.clientY - d.y) < 8) { const p = priceAtY(e.clientY); if (p != null) setCross(p); }
+  };
+  const onKey = (e) => {
+    const p = crossKey(cross, e.key, { min: yMin, max: yMax, step, spot });
+    if (p == null) return;
+    e.preventDefault();
+    setCross(p);
+  };
+  const lbl = { fontSize: FS.xs, fontFamily: MONO_STACK, stroke: T.bg, strokeWidth: 3, paintOrder: "stroke" };
+  // Where the ±1 sd labels sit (their baselines), so a zone's figure can keep off them.
+  const sdYs = edges ? [[1, edges.hi], [-1, edges.lo]].filter(([, px]) => px >= yMin && px <= yMax).map(([sg, px]) => Y(px) + (sg > 0 ? -4 : 12)) : [];
+
   return (
-    <div ref={wrapRef} data-unified style={{ maxWidth: "100%" }}>
-      <svg width={W} height={H} role="img" aria-label={`${ticker}: price history, where it could go by expiry and where this trade makes money`}
-        style={{ display: "block", maxWidth: "100%" }}>
+    <>
+      <div role="slider" tabIndex={0} aria-label={CROSS_ARIA} aria-valuemin={+yMin.toFixed(2)} aria-valuemax={+yMax.toFixed(2)}
+        aria-valuenow={+(cross == null ? spot : cross).toFixed(2)} aria-valuetext={readout ? readout.text : CROSS_HINT} onKeyDown={onKey}
+        data-chart-slider style={{ outlineOffset: 2, borderRadius: 6 }}>
+      <svg ref={svgRef} width={W} height={H} role="img" aria-label={`${ticker}: price history, where it could go by expiry and where this trade makes money`}
+        onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={() => { drag.current = null; }}
+        style={{ display: "block", maxWidth: "100%", touchAction: "pan-y" }}>
         {Array.from({ length: ticks + 1 }, (_, i) => {
           const v = yMin + (i / ticks) * (yMax - yMin);
           return (<g key={i}>
@@ -3122,14 +3189,31 @@ export function UnifiedView({ ticker, dte, sigma, driftM, curve, legs, breakeven
             <text x={xPayEnd + 4} y={Y(v) + 4} fill={T.dim} fontSize={FS.xs} fontFamily={MONO_STACK}>{v.toFixed(2)}</text>
           </g>);
         })}
-        {/* the fan, blue: 95% pale, 68% darker, the middle path dashed */}
+        {/* the zones, faint: green where it pays at expiry, violet where it loses, each with its chance (PR 63) */}
+        {zones.map((z, i) => {
+          const top = clampY(Y(Math.min(z.hi, yMax))), bot = clampY(Y(Math.max(z.lo, yMin)));
+          if (bot - top < 1) return null;
+          const c = z.sign > 0 ? T.green : T.violet;
+          // The zone's figure at its middle, moved clear of a ±1 sd label on the same line when the zone has room.
+          const base = (top + bot) / 2 + 4;
+          const ly = [base, base - 16, base + 16].find((y) => y - 12 >= top && y <= bot - 2 && sdYs.every((s2) => Math.abs(s2 - y) >= 14)) ?? base;
+          return (<g key={"z" + i} data-zone={z.sign > 0 ? "pays" : "loses"} data-zone-p={z.p.toFixed(6)}>
+            <rect x={xToday} y={top} width={Math.max(0, xDistEnd - xToday)} height={bot - top} fill={c} opacity={0.08} />
+            {bot - top >= 14 && <text x={xToday + 6} y={ly} fill={c} {...lbl}>{zoneOddsLabel(z.p)}</text>}
+          </g>);
+        })}
+        {/* the fan, blue: 95% pale, ±1 sd darker, the middle path dashed */}
         <polygon points={band("hi95", "lo95")} fill={T.blue} opacity={0.14} />
         <polygon points={band("hi68", "lo68")} fill={T.blue} opacity={0.26} />
         <polyline points={fan.map((c) => `${c.x.toFixed(1)},${Y(c.mid).toFixed(1)}`).join(" ")} fill="none" stroke={T.blue} strokeWidth={1} strokeDasharray="3 3" />
+        {/* ±1 standard deviation at expiry, written at the fan's edge (PR 63) */}
+        {edges && [[1, edges.hi], [-1, edges.lo]].filter(([, px]) => px >= yMin && px <= yMax).map(([sg, px]) => (
+          <text key={"sd" + sg} data-sd={sg > 0 ? "+1" : "-1"} x={xFanEnd - 3} y={Y(px) + (sg > 0 ? -4 : 12)} fill={T.blue} textAnchor="end" {...lbl}>{sdLabel(sg, px)}</text>
+        ))}
         {/* the price history */}
         <path d={closes} fill="none" stroke={T.ink} strokeWidth={1.3} />
         {/* where it ends, green where it pays */}
-        {dist.map((d, i) => (
+        {dist28.map((d, i) => (
           <rect key={i} x={xDist0} y={Y(d.hi) + 0.5} height={Math.max(0.5, Y(d.lo) - Y(d.hi) - 1)}
             width={Math.max(0, (d.p / peak) * (xDistEnd - xDist0))} fill={d.pays ? T.green : T.field} opacity={d.pays ? 0.85 : 0.7} />
         ))}
@@ -3137,20 +3221,38 @@ export function UnifiedView({ ticker, dte, sigma, driftM, curve, legs, breakeven
         {legs.map((l, i) => (
           <line key={"lg" + i} x1={xToday} x2={xPayEnd} y1={Y(l.strike)} y2={Y(l.strike)} stroke={T.mut} strokeWidth={0.7} opacity={0.6} />
         ))}
+        {/* the exit at RULES.exitDTE days to expiry, on the time axis with its date (PR 63) */}
+        {exit && (<g data-exit-mark>
+          <line x1={xExit} x2={xExit} y1={padT} y2={H - padB} stroke={T.mut} strokeWidth={0.8} strokeDasharray="2 3" />
+          <line x1={xExit} x2={xExit} y1={H - padB} y2={H - padB + 5} stroke={T.ink} strokeWidth={1.2} />
+          {/* the date at the top of its line: the time axis below already carries the sessions, the days and P&L */}
+          <text x={xExit - 3} y={padT + 10} fill={T.mut} textAnchor="end" {...lbl}>{exitMarkLabel(exit.day)}</text>
+        </g>)}
         {/* the payoff at expiry, at the right edge */}
         <line x1={payZero} x2={payZero} y1={padT} y2={H - padB} stroke={T.field} strokeWidth={0.9} />
         <path d={payPath} fill="none" stroke={T.amber} strokeWidth={2} />
-        {/* the breakeven, dashed, with its label */}
+        {/* the breakeven, dashed, with its label and how far it is from today's price */}
         {(breakevens || []).filter((b) => b >= yMin && b <= yMax).map((b, i) => (<g key={"be" + i}>
           <line x1={xHist0} x2={xPayEnd} y1={Y(b)} y2={Y(b)} stroke={T.blue} strokeWidth={1.1} strokeDasharray="6 4" />
-          <text x={xHist0 + 2} y={Y(b) - 4} fill={T.blue} fontSize={FS.xs} fontFamily={MONO_STACK}>BE {b.toFixed(2)}</text>
+          <text data-be x={xHist0 + 2} y={Y(b) - 4} fill={T.blue} {...lbl}>{beAwayLabel(b, awayFrom(b, spot))}</text>
         </g>))}
-        {/* today's price, a dot */}
+        {/* today's price, a dot, with its value (PR 63) */}
         <circle cx={xToday} cy={Y(spot)} r={4} fill={T.amber} stroke={T.bg} strokeWidth={1.5} />
+        <text data-spot-label x={xToday - 7} y={Y(spot) - 7} fill={T.amber} textAnchor="end" {...lbl}>{spotNowLabel(spot)}</text>
+        {/* the crosshair: a line at the price read, and its handle (a 44px target) to drag it */}
+        {cross != null && (<g data-crosshair>
+          <line x1={xHist0} x2={xPayEnd} y1={Y(cross)} y2={Y(cross)} stroke={T.ink} strokeWidth={1} opacity={0.8} />
+          <circle cx={xPayEnd - 8} cy={Y(cross)} r={6} fill={T.ink} stroke={T.bg} strokeWidth={1.5} />
+          <rect data-cross-handle x={xPayEnd - 30} y={Y(cross) - 22} width={44} height={44} fill="transparent" style={{ touchAction: "none", cursor: "grab" }} />
+        </g>)}
         <text x={xHist0} y={H - 5} fill={T.dim} fontSize={FS.xs} fontFamily={MONO_STACK}>{sessions}</text>
         <text x={xFanEnd} y={H - 5} fill={T.dim} fontSize={FS.xs} fontFamily={MONO_STACK} textAnchor="end">{days}d</text>
         <text x={xPayEnd} y={H - 5} fill={T.dim} fontSize={FS.xs} fontFamily={MONO_STACK} textAnchor="end">P&amp;L</text>
       </svg>
+      </div>
+      {/* THE CROSSHAIR'S READOUT (PR 63): one sentence, or how to get one. */}
+      <div data-cross-readout aria-live="polite" style={{ ...(readout ? mono : sans), fontSize: FS.xs, lineHeight: LH.body, color: readout ? T.ink : T.mut,
+        marginTop: 4, fontVariantNumeric: "tabular-nums" }}>{readout ? readout.text : CROSS_HINT}</div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
         <button onClick={() => setHow((v) => !v)} aria-expanded={how}
           style={{ ...sans, fontSize: FS.sm, color: T.blue, background: "transparent", border: "none", padding: 0, minHeight: TAP, cursor: "pointer" }}>
@@ -3158,7 +3260,7 @@ export function UnifiedView({ ticker, dte, sigma, driftM, curve, legs, breakeven
         </button>
         <div role="group" aria-label="How much history" style={{ display: "flex", gap: 2 }}>
           {[[UNIFIED_SESSIONS, "60d"], [365, "1Y"], [1825, "5Y"]].map(([v, l]) => (
-            <button key={l} onClick={() => setRange(v)} aria-pressed={range === v}
+            <button key={l} onClick={() => onRange(v)} aria-pressed={range === v}
               style={{ ...mono, fontSize: FS.xs, minHeight: TAP, minWidth: TAP, padding: "0 6px", borderRadius: 8, cursor: "pointer",
                 background: range === v ? T.raise : "transparent", color: range === v ? T.ink : T.mut, border: "none" }}>{l}</button>
           ))}
@@ -3166,13 +3268,9 @@ export function UnifiedView({ ticker, dte, sigma, driftM, curve, legs, breakeven
       </div>
       <Reveal open={how}>
         <p role="note" style={{ ...sans, fontSize: FS.sm, color: T.body, lineHeight: LH.body, margin: "0 0 4px" }}>
-          On the left, {ticker}'s price over the last {sessions}. From today's dot, the blue fan is where the price could
-          be by expiry: the darker band holds 68 of every 100 outcomes of the model, the paler one 95. The bars beside it are
-          where it ends, green where this trade pays. At the right edge, what the trade makes or loses at expiry at each
-          price, read straight across the same price axis. The dashed blue line is the breakeven. The fan ends on green
-          about {chanceText(pIn)} of the time.
+          {howToReadChart({ ticker, sessions, chance: chanceText(pProfit), exitDay: exit ? exit.day : null })}
         </p>
       </Reveal>
-    </div>
+    </>
   );
 }

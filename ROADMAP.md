@@ -6,6 +6,92 @@ The full history of every item shipped so far (P0–P10, P2-bis) is in `docs/his
 Every pull request updates this file: the session that ships an item marks it done and states
 what the next one inherits.
 
+## Proposed, waiting for the owner: PR 64 — "Optimize", the best expiry AND legs for one trade
+
+The owner, 7 Oct 2026, after 63.1's measurement: *"make it a separate run; Find presents as it is; then an Optimize tab
+or similar that finds the best combination of duration and also of legs (the roll with proposals is already there,
+maybe it is about optimizing that too). Plan the improvement and propose before executing."* Nothing below is built.
+
+**What 63.1 measured** (scripts on fixture boards, desktop CPU, three runs each): generating Find's cards takes 33–51 ms
+with one expiry per market (today), 59–61 ms with 2 (a monthly-only market: CORN, SOYB, WEAT), 140–147 ms with 5 and
+250–301 ms with 9 (markets listing weekly expiries). Live expiry counts could not be read (CBOE blocked, Alpaca 401 from
+the sandbox). So Find stays on one expiry per market, nearest the Horizon.
+
+**The proposal.**
+1. **Where:** a section on Build, "Optimize this trade", under "Variants of this trade" (PR 4b) — one button, "Find
+   the best expiry and legs", never run on its own. The market page's card gets "Optimize ›", which opens Build with
+   that section open. Find is untouched.
+2. **What it searches:** the loaded trade's structure on EVERY expiry the chain lists inside the entry window
+   (`RULES.minEntryDTE`–`maxEntryDTE`), and on each one the same strikes, one listed step up, one down, one wider, one
+   narrower (`alternatives.js`'s `sameOnBoard()`, `shiftLegs()`, `widthLegs()`, extended by one function,
+   `optimizeCandidates()`): about 5 per expiry, 10–45 in all. Never a contract the chain did not list.
+3. **How each is read:** `priceAlt()`, the card's own path — `listCardFigures()` at the price that fills, the size the
+   budget buys, the gate at that size. Nothing new is worked out.
+4. **How they are ranked:** Find's own rule — the owner's order (`findOrderCompare()`), the request applied (budget,
+   chance, return on risk), the ones that fit first, a miss in its place with its reason. The top 5 are shown as rows
+   (O1…O5) with the six figures, the days, "held ~Nd (exit at 21 DTE)" and why it ranks ("best Future avg of 23
+   checked, 31–86d"); "Load ›" puts one on Build, as a variant does.
+5. **Cost:** one trade, not ten markets: the card figures cost about 0.15 ms each here (43 ms for 279 cards in the
+   measurement above), so 45 candidates is under 10 ms on a desktop; it is measured on the phone (OWNER CHECK) before it
+   ships.
+6. **The roll uses the same search:** `rollCandidates()` today takes the next 2 later expiries × 3 moves; it would take
+   every later expiry in the window × the same 5 moves, ranked the same way, top 3 shown — still offered only by
+   `rollEligible()`, still two orders never both held.
+7. **The copilot:** Build's "Which variant fits best?" reads the Optimize rows by their labels and recommends among
+   them only; it never writes a strike or an expiry.
+
+**Questions for the owner before it is built:** the place (Build section, recommended, or a tab on the market page);
+the search width (±1 step, recommended, or ±2, about twice the candidates); whether the roll moves to the same search.
+
+## Done in PR 63 (owner, 7 Oct 2026): Find's rows and the trade chart
+
+The third of three stacked PRs (61 → 62 → 63), branched from PR 62's branch.
+
+- **63.1 — measured, stopped, moved (the owner's rule: "if it more than doubles, stop and tell me").** Building every
+  expiry in the window more than doubles Find's work (numbers above). The owner chose a separate run: the proposal is
+  the section above, waiting for a yes. Kept from 63.1, because it costs nothing: the card's Details say the days held,
+  "~23 days (exit at 21 DTE)". Find's Horizon is unchanged (the nearest board).
+- **63.2 — three figures on every row.** Chance · Return on risk · Avg per $100 at risk, each the card's own
+  (`rowFigures()` in rows.js, replacing `rowFigure()`), the one the list is sorted by ringed (under "Past yrs" the PAST
+  tile's text is added, ringed); the days and the risk in the right-hand column; the column head "Days · risk". The
+  card's **Details** open with five rows (`cardDetailRows()` in rules.js): breakeven distance in % and in expected moves
+  (`expectedMove()` on the chance's volatility), entry cost (the combination's bid/ask spread for the size and as a share
+  of the maximum profit), IV rank ("— collecting N of 20 days" until it can be read), theta a day for the size, and the
+  days held — each "—" with a word when unknown. findGen carries the spread and the IV rank on each item.
+- **63.3 — "No card has a positive average today."** above the rows, when cards fit and none has a positive future
+  average (the "Avg > 0" chip's own test, `futureIsPositive()`).
+- **63.4 — Build's chart says more, on one distribution.** The fan, the bars, the new zones and the crosshair all read
+  the chance's own lognormal (its drift and volatility, handed in; the fan used to draw on the legs' average IV and its
+  own drift). Today's price is written at its dot ("13.24 · now"); each breakeven says how far it is ("BE 14.67 ·
+  +10.8%"); the fan's darker band is now exactly ±1 standard deviation, its two prices written at its edge ("+1 sd
+  15.51"); faint green and violet zones are `payoffBands()`'s, each with its chance — they add up to 100% and the green
+  ones to the CHANCE figure (chart.test.jsx); the exit at 21 days to expiry is a dashed tick with its date ("exit 27
+  Nov"). The arithmetic is plain JS in `src/tradeChart.js`.
+- **63.5 — a crosshair.** A tap on the chart, a drag of the line's handle (a 44px target; the rest of the chart still
+  scrolls the page), the mouse, or the arrow keys (the chart is a slider: ↑↓ a step near 0.25% of the price, Page ×10,
+  Home / End) put a line at a price; under the chart: "UNG at $11.75 on 18 Dec → -$495 on 15 contracts · 37% chance to
+  finish below" (`crosshairReadout()`: `payoff()` for Build's size, the same lognormal). "How to read ⓘ" explains the
+  zones, ±1 sd, the exit tick and the crosshair (`howToReadChart()`).
+
+**Later (nothing more than written here):** event ticks on the chart's time axis (the calendar, `events.js`); Bollinger
+and moving-average toggles on the chart; the 21 past years as dots where each ended; an "at expiry / at the 21-DTE exit"
+toggle for the payoff (waits for P5, the exit model).
+
+**Measured.** Tests 1,422 → 1,429, 0 failed. Build 1,465.18 → 1,475.46 kB (the usual chunk warning). Audit 20 boards,
+dark and light: 5,264 ✓, 0 unexplained (two fewer ✓ than PR 62: the board's column head "Future avg · risk" on Find is
+now a skipped word with its reason, `R.rows`, once per theme; Find's row gap matches the board's 10px). Words: find 184, market 479, build 518 — unchanged, with what
+the source counter cannot see written in voice.test.js. Photographs: docs/screens/pr63/ (`node scripts/shoot-pr63.mjs`).
+
+**Not changed:** the risk gate and every RULES value, the seven order paths and their bodies, `histBacktest()`,
+`seasonalSignal()`, the /api/state payload, deploy.js, events.js's dates, the copilot's model, Find's generation.
+
+### What PR 64 inherits
+
+- **The Optimize proposal above, waiting for the owner's yes and three answers.**
+- The new row and the chart's marks have no board to be audited against (docs/mockups draws neither); they were checked
+  by photograph only (docs/screens/pr63/).
+- The crosshair has not been used on a phone (OWNER CHECK); the handle's drag and the page's scroll share the chart.
+
 ## Done in PR 62 (owner, 7 Oct 2026): numbers without noise; the copilot grounded
 
 The second of three stacked PRs (61 → 62 → 63), branched from PR 61's branch.

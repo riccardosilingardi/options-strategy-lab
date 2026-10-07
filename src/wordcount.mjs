@@ -133,6 +133,12 @@ export const COPY = {
   limitMovedLine: () => R.limitMovedLine({ entry: 6.75, maxLoss: -675, maxProfit: 1225 }, { entry: 6.61, maxLoss: -661, maxProfit: 1239 }, 7),
   // PR 62: the quiet line under a finished copilot answer whose figures the app never sent.
   notInFiguresLine: () => R.notInFiguresLine(["$1,040", "52%"]),
+  // PR 63: a row's days, the card's Details rows (at their longest: two breakevens), the chart's crosshair and its words.
+  rowDaysText: () => R.rowDaysText(44),
+  cardDetailRows: () => R.cardDetailRows({ spot: 378.4, breakevens: [363.25, 375.25], move: 25.1, spread: 0.3, maxProfit: 1225, n: 7,
+    ivRank: null, ivDays: 7, theta: 2.1, dte: 44 }).map((r) => `${r.k} ${r.v}`).join(" "),
+  crosshairLine: () => R.crosshairLine({ ticker: "GLD", price: 370, day: "20 Nov", pnl: 1240, contracts: 7, below: 0.31 }),
+  howToReadChart: () => R.howToReadChart({ ticker: "GLD", sessions: "60 sessions", chance: "47%", exitDay: "30 Oct" }),
   unpriceableNote: () => R.unpriceableNote(2, "XLE"),
   impossibleLossNote: () => R.impossibleLossNote(1, "XLE"),
   modelDisagreementNote: () => R.modelDisagreementNote(1, "XLE"),
@@ -391,9 +397,10 @@ export function atRest(src) {
   // sees the tags in the caller's text, outside any `<Fold>`, and would score a tap-away panel as words at rest; the
   // prop's whole value is stripped, by brace matching, because the JSX inside nests deeper than a regex can follow.
   // PR #47: `guardian={…}` is the same case — the Positions card renders it inside its own closed fold.
-  // Round 2: `details={…}` too — the compact card renders it only behind its "Details ▾".
+  // Round 2: `details={…}` too — the compact card renders it only behind its "Details ▾" (PR 63: its value may open with
+  // a parenthesis, `details={(<>…</>)}`, now that the card's Details rows sit above the full card).
   for (;;) {
-    const at = Math.max(out.indexOf("foldedNode={"), out.indexOf("guardian={"), out.indexOf("details={<"));
+    const at = Math.max(out.indexOf("foldedNode={"), out.indexOf("guardian={"), out.indexOf("details={<"), out.indexOf("details={("));
     if (at < 0) break;
     let depth = 0, i = at + out.slice(at).indexOf("=");
     for (; i < out.length; i++) {
