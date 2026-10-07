@@ -3748,6 +3748,9 @@ export default function OptionsStrategyLab() {
             ev100: prof && prof.ev100 != null ? prof.ev100 : -999, tag: prof ? prof.tag : null,
             // THE PAST, PER CONTRACT (PR #49): what "Past yrs" sorts on; the tile sizes it at render.
             past: lf.past,
+            // THE CARD'S DETAILS (PR 63, 63.2): the combination's bid/ask spread per share (`comboBook()`, null when a leg has
+            // no two-sided quote), and the market's IV rank with the days collected — read here, printed by `cardDetailRows()`.
+            spread: comboBook(p.legs, quotesOf(aFill)).spread, ivRank: ivRankOf(tk), ivDays: ((store.ivHist || {})[tk] || []).length,
           }, f, sentimentDirection(fam)));
         }
       }
@@ -5198,10 +5201,13 @@ export default function OptionsStrategyLab() {
               {/* The chart's name is its aria-label now: "What this trade does" is the section's title (redesign PR 2). */}
               <div>
                 <div>
+                  {/* THE CHANCE'S OWN LOGNORMAL (PR 63): the fan, the zones and the crosshair read the drift and the
+                      volatility the CHANCE figure was worked out on; with no chance yet, the legs' average IV and the
+                      season's counted mean, as before. The crosshair reads Build's size. */}
                   <UnifiedView
-                    ticker={ticker} dte={dte} spot={spot}
-                    sigma={A.legPx.length ? A.legPx.reduce((x, y) => x + y.iv, 0) / A.legPx.length : iv}
-                    driftM={seasNow}
+                    ticker={ticker} dte={dte} spot={spot} expKey={expKey} contracts={contracts} entryNet={AE.entry}
+                    sigma={chance && chance.sigma > 0 ? chance.sigma : A.legPx.length ? A.legPx.reduce((x, y) => x + y.iv, 0) / A.legPx.length : iv}
+                    driftAnnual={chance ? chance.driftAnnual : Math.log(1 + (seasNow || 0) / 100) * 12}
                     curve={AE.curve} legs={legs} breakevens={AE.breakevens}
                     onTa={(t2) => setTa((m) => ({ ...m, [ticker]: t2 }))}
                   />

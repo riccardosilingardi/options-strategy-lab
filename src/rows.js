@@ -8,14 +8,15 @@
 // in place of the subtitle). Rows sit in the order of their card in the sorted list, so a miss stays in its place
 // (CLAUDE.md "One sorted list").
 //
-// A ROW'S FIGURE IS THE CARD'S TILE. `rowFigure()` reads the same pieces the card reads — `sizedFigures()` for the
-// risk, `futureFigures()` / `pastFigures()` / `chanceText()` / `returnText()` for the tile — at the price that fills
-// (`lf.aFill`, worked out by `listCardFigures()` in findGen). `figures.test.jsx` holds a row's figure equal to the
-// card's tile for the same candidate under all five orders.
+// A ROW'S FIGURES ARE THE CARD'S TILES. `rowFigures()` (PR 63: three figures, always, plus the days) reads the same pieces
+// the card reads — `sizedFigures()` for the risk, `futureFigures()` / `pastFigures()` / `chanceText()` / `returnText()` for
+// the tiles — at the price that fills (`lf.aFill`, worked out by `listCardFigures()` in findGen). `figures.test.jsx` holds
+// each of a row's figures equal to the card's tile for the same candidate under all five orders.
 //
 // Plain JS, no React: it is tested without a browser, like path.js and rules.js.
 // ============================================================================
-import { meetsRequest, sizedFigures, futureFigures, futureTile, pastFigures, pastTileText, chanceText, returnText, compareLabel } from "./rules.js";
+import { meetsRequest, sizedFigures, futureFigures, futureTile, pastFigures, pastTileText, chanceText, returnText, compareLabel,
+  per100Value, ROW_FIGURE_WORDS } from "./rules.js";
 import { findOrderOf } from "./signals.js";
 
 /**
@@ -52,27 +53,32 @@ export function marketRows(items = [], request, sizeOf = () => null) {
 export const rowCounts = (rows = []) => ({ n: rows.filter((r) => r.fits).length, m: rows.length });
 
 /**
- * THE FIGURE A ROW PRINTS: the tile the list is sorted by, for the size the budget buys, and the risk — read exactly
- * as the card reads them (find.jsx's `renderItem`).
+ * WHAT A ROW PRINTS (PR 63, owner 7 Oct 2026: "three figures, always: Chance · Return on risk · Avg per $100 at risk, plus
+ * the days"). Each figure is the card's own — `chanceText()` and `returnText()` as the CHANCE and RETURN ON RISK tiles print
+ * them, the FUTURE tile's per-$100 figure (`per100Value()`, its first line) — for the size the budget buys, at the price that
+ * fills; the one the list is sorted by is `sorted` (ringed). Under "Past yrs" the PAST tile's text is added, ringed, so the
+ * ring is always on the figure that decides the order. Then the days and the risk (YOU RISK).
  *
- * @param x     a findGen item ({ lf, expKey })
+ * @param x     a findGen item ({ lf, expKey, dte })
  * @param size  the size the budget buys for its candidate, or null
  * @param order the Find order id ("ev", "evSignal", "chance", "rr", "past")
- * @returns {{ tile, value, risk }} — `tile` is the card tile's key (CARD_LABELS), `value` the text that tile prints
+ * @returns {{ tile, items: [{ tile, value, word, sorted }], days, risk }} — `tile` is the sorted-by tile's key (CARD_LABELS)
  */
-export function rowFigure(x, size, order) {
-  const af = x && x.lf ? x.lf.aFill : null;
+export function rowFigures(x, size, order) {
+  const lf = x && x.lf ? x.lf : null;
+  const af = lf ? lf.aFill : null;
   const n = size && size.ok ? size.n : null;
   const tile = findOrderOf(order).tile;
   const f = af ? sizedFigures(af, n) : null;
-  let value = "—";
-  if (x && x.lf) {
-    if (tile === "future") value = futureTile(futureFigures(x.lf.mc, af, n, x.expKey)).value;
-    else if (tile === "past") value = pastTileText(pastFigures(x.lf.bt, af, n));
-    else if (tile === "chance") value = chanceText(x.lf.pop);
-    else if (tile === "rr") value = x.lf.rr == null ? "—" : returnText(x.lf.rr);
-  }
-  return { tile, value, risk: f ? f.risk : null };
+  const ff = lf ? futureFigures(lf.mc, af, n, x.expKey) : null;
+  const items = [
+    { tile: "chance", value: lf ? chanceText(lf.pop) : "—", word: ROW_FIGURE_WORDS.chance },
+    { tile: "rr", value: lf && lf.rr != null ? returnText(lf.rr) : "—", word: ROW_FIGURE_WORDS.rr },
+    { tile: "future", value: ff ? per100Value(ff.per100) : "—", word: ROW_FIGURE_WORDS.future },
+  ];
+  if (tile === "past") items.push({ tile: "past", value: lf ? pastTileText(pastFigures(lf.bt, af, n)) : "not read", word: null });
+  return { tile, items: items.map((it) => ({ ...it, sorted: it.tile === tile })), days: x && x.dte != null ? x.dte : null,
+    risk: f ? f.risk : null };
 }
 
 /**

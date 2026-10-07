@@ -6,13 +6,14 @@
 // TOP TO BOTTOM: the category tabs "All · Grains · Energy · Metals" (counted from markets.js, they only filter what is
 // shown); ONE row of chips — ⇅ Order · Budget · Chance · Return · Horizon · Direction · Avg > 0 · Liquidity — each
 // showing its value and filled when off its default; one summary line ("4 of 10 fit · 6 dimmed", Hide them / Show
-// them, Reset); the column head "Market … <the sorted-by figure> · risk ⓘ"; then ONE ROW PER MARKET. ("Find", the
+// them, Reset); the column head "Market … Days · risk ⓘ"; then ONE ROW PER MARKET. ("Find", the
 // gear and the Results | Saved segment sit above, in App.jsx, because Saved shares them.)
 //
 // >>> THE ROWS ARE A VIEW OF THE ONE SORTED LIST, NOT A SECOND LIST. <<< `marketRows()` (src/rows.js) groups
 // `findShown` — the list findGen built and the owner's order sorted — by market: a row's card is the market's first
 // card that fits, in the chosen order, else its first card as a miss (quieter, the reason in place of its subtitle).
-// No new ranking, no new simulation. A row's figure is its card's tile (`rowFigure()`, held equal by figures.test.jsx).
+// No new ranking, no new simulation. A row's figures are its card's tiles (`rowFigures()`, held equal by figures.test.jsx):
+// Chance · Return on risk · Avg per $100 at risk on every row, the sorted-by one ringed, then the days and the risk (PR 63).
 // Tapping a row opens the market's page on Strategies (market.jsx), where its cards are.
 //
 // >>> EVERY CHIP BUT "Avg > 0" OPENS A SHEET HOLDING THE EXISTING CONTROL, BEHAVIOUR UNCHANGED. <<< The sliders still
@@ -35,7 +36,7 @@ import { CompareFigure, BandThumbnail } from "./visuals.jsx";
 import { scaleStrategy, useCopilot, skillsFor } from "./pro.jsx";
 import { CopilotSection } from "./build.jsx";
 import { legsLine, MAX_COMPARE } from "./path.js";
-import { marketRows, rowCounts, rowFigure, rowStateOf, compareCards } from "./rows.js";
+import { marketRows, rowCounts, rowFigures, rowStateOf, compareCards } from "./rows.js";
 import { money, chanceText, NO_CEILING, noCeilingNote, noCeilingRankNote, seasonalStampNote,
   filterFold, qualityFloorLine, qualityFloorSentence, liquiditySettingNote, looseningWarning, isLoosened,
   unpriceableNote, impossibleLossNote, modelDisagreementNote, wideSpreadNote, wideComboNote, crossingNote,
@@ -43,7 +44,7 @@ import { money, chanceText, NO_CEILING, noCeilingNote, noCeilingRankNote, season
   nothingTodayLine, staleBoardLine, sizedFree, sizeLine, controlReadings, chanceBasisLabel, futureFigures, futureTile,
   POSITIVE_FUTURE_TOGGLE, rowsResultsLine, missReasonLine, nothingFits, nothingFitsLine, allMissLine, overLimitNote,
   showMissesCta, RESET_ALL_FILTERS, CATEGORY_ALL, FIND_CHIPS, FIND_SHEET_TITLES, chipText, chipOffDefault, anyChipOff,
-  showRowsCta, HIDE_ROWS, SHOW_ROWS, RESET_FILTERS, COLUMN_MARKET, columnHeadText, rowRiskText, DIRECTION_TAGS,
+  showRowsCta, HIDE_ROWS, SHOW_ROWS, RESET_FILTERS, COLUMN_MARKET, columnHeadText, rowRiskText, rowDaysText, NO_POSITIVE_AVG_LINE, futureIsPositive, meetsRequest, DIRECTION_TAGS,
   rowSubtitleText, ROW_READING, findReadingLine, rowFailedText, ROW_NO_BOARD, staleBannerLine, staleStatusLine, staleFailLine, RETRY,
   SHOW_FLAGGED_TOGGLE, howConnectLabel, HOW_CONNECT_STEPS, CARD_LABELS, ARIA,
   FIND_HEADING, refreshAria, SETTINGS_WORD, FIND_SEGMENTS_ARIA, RESET_SHEET,
@@ -54,6 +55,8 @@ import { money, chanceText, NO_CEILING, noCeilingNote, noCeilingRankNote, season
 const FS = TYPE.size, FW = TYPE.weight, LH = TYPE.line;
 /** One empty list, so a market with no bars yet hands every row the SAME array and a memoised picture stays put. */
 const NO_BARS = [];
+/** The ring on the figure a row is sorted by (PR 63): the card's own ring (card.jsx), drawn tight around a short figure. */
+const ROW_RING = { outline: `2px solid ${T.blue}`, outlineOffset: 2, borderRadius: 6, padding: "0 4px" };
 /** A direction's colour: red is for errors only, so a bear reading is violet. */
 const DIR_COLOR = { bull: T.green, bear: T.violet, neutral: T.mut };
 
@@ -138,6 +141,12 @@ export function FindStep({
   const m = rowsN - n;
   const shown = find.hideMisses ? rows.filter((r) => r.fits) : rows;
   const nf = useMemo(() => (rows.length && n === 0 ? nothingFits(cands, request, sizeOf) : null), [rows.length, n, cands, request, sizeOf]);
+  /* 63.3 (PR 63, owner 7 Oct 2026): cards fit, and not one of them has a positive future average — said once, above the
+     rows, so a list sorted by "Future avg" is not read as a list of good bets. `futureIsPositive()` is the "Avg > 0" chip's. */
+  const noPositive = useMemo(() => {
+    const fitting = inItems.filter((x) => meetsRequest(x.cand, request, sizeOf(x.cand)).meets);
+    return fitting.length > 0 && !fitting.some((x) => futureIsPositive(x.ev100));
+  }, [inItems, request, sizeOf]);
 
   const st = { order: findOrder, request, horizon: find.horizon, dir: find.dir,
     dirLabel: (sentiments.find((s) => s.id === find.dir) || {}).label, positiveOnly: find.positiveOnly, flagged: find.flagged,
@@ -210,6 +219,8 @@ export function FindStep({
       {/* A STALE BOARD IS SAID ONCE, ABOVE THE ROWS (PR #41, TASK 2). (A stale FEED is the header's banner, round 2.) */}
       {findGen.stale.length > 0 && <Note color={T.amber} style={{ ...pad, marginTop: 6 }}>⚠ {staleBoardLine(findGen.stale)}</Note>}
 
+      {noPositive && <Note color={T.amber} role="status" data-no-positive style={{ ...pad, marginTop: 6 }}>{NO_POSITIVE_AVG_LINE}</Note>}
+
       {/* "NOTHING TODAY" ONLY WHEN ZERO CANDIDATES PASS THE FLOORS, WITH THE COUNTS. */}
       {findGen.items.length === 0 && (
         <div style={{ ...sans, fontSize: FS.sm, color: T.mut, margin: "10px 16px", lineHeight: LH.body, padding: "10px 12px", border: `1px dashed ${T.line}`, borderRadius: 10 }}>
@@ -239,7 +250,7 @@ export function FindStep({
           borderTop: `1px solid ${T.line}`, ...sans, fontSize: FS.xs, color: T.mut }}>
           <span>{COLUMN_MARKET}</span>
           <span style={{ display: "inline-flex", alignItems: "center" }}>
-            {columnHeadText(findOrder)}
+            {columnHeadText()}
             {top && <IconButton size={36} color={T.blue} label={howConnectLabel(top.tk)} aria-expanded={sheetId === "connect"}
               onClick={() => onSheet("find:connect")} style={{ fontSize: FS.md }}>ⓘ</IconButton>}
           </span>
@@ -249,7 +260,7 @@ export function FindStep({
       <div role="list" aria-label={ARIA.markets} data-find-list>
         {shown.map((r) => (
           <MarketRow key={r.tk} row={r} sd={(findGen.boards[r.tk] || {}).signal || null}
-            fig={rowFigure(r.x, sizes.get(r.x.key) || null, findOrder)} bars={barsCache[r.tk] || NO_BARS}
+            fig={rowFigures(r.x, sizes.get(r.x.key) || null, findOrder)} bars={barsCache[r.tk] || NO_BARS}
             saved={isSaved(r.x.cand)} onSave={() => onSave(r.x)} onOpen={() => onOpenMarket(r.tk)} />
         ))}
         {waiting.map((w) => <WaitingRow key={w.tk} tk={w.tk} st={w.st} />)}
@@ -417,7 +428,7 @@ export function MarketRow({ row, sd = null, fig, bars = NO_BARS, saved = false, 
       <IconButton onClick={onSave} pressed={saved} label={ARIA.saveTrade(saved, x.tk, x.name)} color={saved ? T.amber : T.dim}
         style={{ alignSelf: "center", fontSize: FS.lg }}>{saved ? "★" : "☆"}</IconButton>
       <button onClick={onOpen} aria-label={ARIA.openMarket(x.tk)} data-row-button
-        style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 10, background: "transparent", border: "none",
+        style={{ flex: 1, minWidth: 0, display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10, background: "transparent", border: "none",
           cursor: "pointer", padding: "10px 16px 10px 2px", textAlign: "left", minHeight: 66, borderRadius: 0 }}>
         <span style={{ flex: "1 1 0", minWidth: 0 }}>
           <span style={{ display: "flex", gap: 6, alignItems: "center", minWidth: 0 }}>
@@ -433,10 +444,22 @@ export function MarketRow({ row, sd = null, fig, bars = NO_BARS, saved = false, 
         <span aria-hidden="true" style={{ flex: "0 0 72px", width: 72, height: 40, opacity: muted ? 0.35 : 1, borderRadius: 4, overflow: "hidden" }}>
           {x.lf.bands && <BandThumbnail bands={x.lf.bands} bars={bars} width={72} height={40} lineWidth={1.5} />}
         </span>
+        {/* THE DAYS AND THE RISK (PR 63): the right-hand column; the column head says "Days · risk". */}
         <span style={{ flex: "0 0 auto", textAlign: "right", minWidth: 60 }}>
-          <span data-row-figure={fig.tile} style={{ ...mono, display: "block", fontSize: FS.md, fontWeight: FW.bold, color: ink,
-            fontVariantNumeric: "tabular-nums", lineHeight: LH.tight }}>{fig.value}</span>
+          <span data-row-figure="days" style={{ ...mono, display: "block", fontSize: FS.md, fontWeight: FW.bold, color: ink,
+            fontVariantNumeric: "tabular-nums", lineHeight: LH.tight }}>{rowDaysText(fig.days)}</span>
           <span style={{ ...mono, display: "block", fontSize: FS.xs, color: T.mut, fontVariantNumeric: "tabular-nums" }}>{rowRiskText(fig.risk)}</span>
+        </span>
+        {/* THREE FIGURES, ALWAYS (PR 63, owner 7 Oct 2026): Chance · Return on risk · Avg per $100 at risk, the card's own
+            (`rowFigures()`), on a line of their own under the market; the one the list is sorted by is ringed. */}
+        <span data-row-figures style={{ flex: "1 0 100%", display: "flex", flexWrap: "wrap", columnGap: 12, rowGap: 4, ...sans, fontSize: FS.xs,
+          lineHeight: LH.tight, color: T.mut }}>
+          {fig.items.map((it) => (
+            <span key={it.tile} data-row-fig={it.tile} data-sorted={it.sorted ? "true" : undefined}
+              style={{ whiteSpace: "nowrap", ...(it.sorted ? ROW_RING : null) }}>
+              <b style={{ ...mono, fontVariantNumeric: "tabular-nums", color: ink }}>{it.value}</b>{it.word ? ` ${it.word}` : ""}
+            </span>
+          ))}
         </span>
       </button>
     </div>

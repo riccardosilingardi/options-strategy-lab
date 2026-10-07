@@ -23,7 +23,7 @@ import { reconcileFigures, figureSet, tradeCard, money, chanceText, seasonalProv
 import { shortlistWithFloors, analyze } from "./App.jsx";
 import { exactExtremes } from "./rules.js";
 import { scaleStrategy } from "./pro.jsx";
-import { rowFigure } from "./rows.js";
+import { rowFigures } from "./rows.js";
 import { StrategyCard } from "./market.jsx";
 import { NumbersSection } from "./build.jsx";
 import { FIND_ORDERS, CARD_LABELS, futureFigures, pastFigures, futureTile, pastTileText, returnText, signedMoney, limitMovedLine } from "./rules.js";
@@ -292,10 +292,11 @@ check("0c — analyze() equals the exact extremes for every family, a long put i
   eq(analyze([call(1, 90)], 90, 45, 0.3, null).maxProfit, null, "a long call still has no ceiling");
 });
 
-/* REDESIGN PR 1: FIND'S ROW PRINTS ITS CARD'S TILE. A row on Find shows the figure the list is sorted by and "risk $N";
-   they come from `rowFigure()` (rows.js), and must be what the card on the market page prints for the same candidate,
-   for the same size, under every one of the five orders. */
-check("A ROW'S FIGURE IS THE CARD'S TILE, UNDER ALL FIVE ORDERS — and its risk is the card's YOU RISK", () => {
+/* REDESIGN PR 1, PR 63: FIND'S ROW PRINTS ITS CARD'S TILES. A row on Find shows Chance · Return on risk · Avg per $100 at
+   risk, always, the sorted-by one ringed (and, under "Past yrs", the PAST tile ringed), then the days and "risk $N"; they
+   come from `rowFigures()` (rows.js), and must be what the card on the market page prints for the same candidate, for the
+   same size, under every one of the five orders. */
+check("A ROW'S THREE FIGURES ARE THE CARD'S TILES, UNDER ALL FIVE ORDERS — the sorted one ringed, its risk the card's YOU RISK", () => {
   const x = { key: "SOYB|2026-11-20|+1C28,-1C30", tk: TICKER, name: "Bull Call Spread", legs: LEGS, expKey: EXP, dte: DTE, spot: SPOT,
     sent: "bull", family: "signal", lf: list, flags: [], fused: null, feedBroken: false, noQuoteLegs: 0, touchSize: null,
     cand: { key: "SOYB|2026-11-20|+1C28,-1C30", pop: list.pop, rr: list.rr } };
@@ -307,15 +308,25 @@ check("A ROW'S FIGURE IS THE CARD'S TILE, UNDER ALL FIVE ORDERS — and its risk
     return html.slice(at, end < 0 ? undefined : end);
   };
   for (const o of FIND_ORDERS) {
-    const fig = rowFigure(x, size, o.id);
+    const fig = rowFigures(x, size, o.id);
     eq(fig.tile, o.tile, `${o.id}: the tile the order rings`);
+    eq(fig.items.slice(0, 3).map((it) => it.tile).join(","), "chance,rr,future", `${o.id}: the three figures, always, in that order`);
+    eq(fig.items.filter((it) => it.sorted).map((it) => it.tile).join(","), o.tile, `${o.id}: exactly one ringed, the sorted-by tile`);
     const html = renderToStaticMarkup(<StrategyCard x={x} size={size} misses={[]} bars={[]} sortedBy={o.tile} findOrder={o.id}
       saved={false} ticked={false} onSave={() => {}} onTick={() => {}} onBuild={() => {}} onChain={() => {}} badge={null} />);
-    const tile = tileOf(html, CARD_LABELS[o.tile]);
-    const esc = fig.value.replace(/&/g, "&amp;");
-    if (!tile.includes(`>${esc}<`)) throw new Error(`${o.id}: the row prints "${fig.value}", the card's tile does not: ${tile.slice(0, 300)}`);
-    has(tile, 'data-sorted="true"');
+    // The FUTURE figure on a row is the FUTURE tile's per-$100 line ("+12.5 per $100 at risk"), which the full card prints
+    // (the compact card prints the tile's dollar value); the others are the compact card's own tile values.
+    const n = size.ok ? size.n : null;
+    const full = renderToStaticMarkup(<CandidateCard name="x" legs="x" figures={sizedFigures(list.aFill, n)} rr={list.rr} pop={list.pop}
+      future={futureFigures(list.mc, list.aFill, n, EXP)} past={pastFigures(list.bt, list.aFill, n)} ticker={TICKER} />);
+    for (const it of fig.items) {
+      const tile = tileOf(it.tile === "future" ? full : html, CARD_LABELS[it.tile]);
+      const want = it.tile === "future" ? `${it.value} per $100 at risk` : `>${it.value.replace(/&/g, "&amp;")}<`;
+      if (!tile.includes(want)) throw new Error(`${o.id}: the row prints ${it.tile} "${it.value}", the card's tile does not: ${tile.slice(0, 300)}`);
+    }
+    has(tileOf(html, CARD_LABELS[o.tile]), 'data-sorted="true"');
     has(tileOf(html, CARD_LABELS.risk), `>${money(fig.risk)}<`);
+    eq(fig.days, DTE, `${o.id}: the row's days are the card's`);
   }
 });
 

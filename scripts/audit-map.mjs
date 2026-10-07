@@ -38,6 +38,7 @@ export const R = {
   signals: "the owner, 6 Oct 2026 (PR 4): \"the tabs speak for themselves\" — the market page's first tab is named for what it shows, Signals (the chart and the four factors); the board says Overview",
   layout: "the same space is carried by the page's own padding (FIND_LIST_END), not this element",
   model: "the owner's prompt for PR 62 (7 Oct 2026): the chance is worked out exactly, no longer a Monte Carlo, so the tile is renamed FUTURE (MODEL) in CARD_LABELS; the board still says FUTURE (MONTE CARLO)",
+  rows: "the owner's prompt for PR 63 (7 Oct 2026): every row shows Chance · Return on risk · Avg per $100 at risk with their own words, the sorted one ringed, then the days and the risk, so the column head names only \"Days · risk\"; the board's head says \"<order> · risk\" over one figure",
 };
 
 const waitRows = (page) => page.waitForFunction(() => document.querySelectorAll("[data-row]").length >= 2, null, { timeout: 20000 });
@@ -123,7 +124,7 @@ export const SCREENS = {
       { n: "Row risk", b: "li.row:not(.miss) span.fig + span", a: "[data-row]:not([data-miss]) [data-row-figure] + span" },
       ...BOTTOM_BAR,
     ],
-    skipWords: [[/^(Hide them|≈ Neutral|▲ Bull)$/, R.data], [/^Close ·/, R.times]],
+    skipWords: [[/^(Hide them|≈ Neutral|▲ Bull)$/, R.data], [/^Close ·/, R.times], [/^Future avg · risk$/, R.rows]],
   },
   FindLoading: {
     mode: "app+all+reading", go: async (page) => { await page.waitForTimeout(2000); },

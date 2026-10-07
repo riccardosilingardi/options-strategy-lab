@@ -249,6 +249,15 @@ test("MEASURED: the three screens, and the table in the PRD is this number", () 
      place's copilot). On the market page the counter also stopped reading 9 words that were never prose: the line
      `{ role: "assistant", content: reply }], busy: false, err: null, partial: ""` in the chart copilot, which it had
      taken for a sentence, was split in two (474 - 9 + 14 = 479). The ceilings are those numbers. */
+  /* >>> PR 63 (Find's rows and Build's chart). <<< No ceiling moves, and what the counter does not see is written here.
+     find 184 → 184: the column head lost a word ("Days · risk"), the row's days are `rowDaysText()` (1); the row's three
+     figures carry their words through `rowFigures()`'s data (ROW_FIGURE_WORDS: "chance", "return", "avg per $100", five
+     words a row), which a source counter cannot score. "No card has a positive average today." (7) is a constant
+     (NO_POSITIVE_AVG_LINE), printed only when no fitting card has a positive average. market 479 → 479: the card's Details
+     rows (`cardDetailRows()`) sit behind "Details ▾", one tap away (wordcount.mjs strips `details={(…)}` now as it did
+     `details={<…}`). build 518 → 518: the chart is drawn by pro.jsx's `UnifiedChart`, outside the block, as it was; its
+     one sentence at rest is CROSS_HINT (14 words), its readout replaces it once a price is read, and "How to read" is
+     behind its button. */
   const CEILING = { find: 184, market: 479, build: 518, positions: 248 };
   /* >>> PR #46: ONE ORDERS LIST. <<< The record-based "WORKING AT THE BROKER" panel (its paragraph about what a
      working order is, the stale-DAY warning, the per-row sentences) left Positions; the one list lives in
