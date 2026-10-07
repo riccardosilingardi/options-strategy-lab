@@ -17,7 +17,7 @@
 import { readFileSync } from "node:fs";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { StepForward, EvidenceBar, EvidenceOverlay, CompareTray, CandidateActions } from "./steps.jsx";
+import { StepForward, EvidenceBar, EvidenceOverlay, CandidateActions } from "./steps.jsx";
 import {
   ComparePayoffs, CompareFigure, compareTakeaway, explainCompareElement, sharesOneMarket,
   simplifyCloses, thumbPoints, terminalDist, BandThumbnail, payoffBands, COMPARE_COLORS,
@@ -94,30 +94,14 @@ const c3 = candidateOf({
   maxProfit: 40, maxLoss: -60, pop: 0.5, sigma: 0.5,
 });
 
-check("the tray says how many of the three are ticked and offers the way out", () => {
-  const h = renderToStaticMarkup(<CompareTray items={[c1, c2]} max={MAX_COMPARE} showing={false} />);
-  has(h, "COMPARING 2 OF 3");
-  has(h, "Compare them");
-  has(h, "Bull Call Spread");
-});
-
-check("one on its own explains what a second one would buy", () => {
-  const h = renderToStaticMarkup(<CompareTray items={[c1]} max={MAX_COMPARE} />);
-  has(h, "Tick a second one");
-  hasNot(h, "Compare them");   // there is nothing to compare it with yet
-});
-
-check("the refusal to add a fourth is shown, not swallowed", () => {
-  const h = renderToStaticMarkup(
-    <CompareTray items={[c1, c2, c3]} max={MAX_COMPARE} note="Untick one first." />);
-  has(h, "Untick one first.");
-});
+/* The tray's three checks (how many are ticked, one alone, the refusal of a fourth) moved to findB.test.jsx with the one
+   Compare sheet and the market page's compare line (PR 61). */
 
 check("a candidate row carries tick, keep and take-to-Build", () => {
   const h = renderToStaticMarkup(<CandidateActions ticked={false} saved={false} onBuild={() => {}} />);
   has(h, "Compare"); has(h, "Save for later"); has(h, "Take to Build");
   const on = renderToStaticMarkup(<CandidateActions ticked saved />);
-  has(on, "✓ comparing"); has(on, "✓ saved");
+  has(on, "✓ Comparing"); has(on, "✓ saved");
 });
 
 /* ---------------- the compare picture (PRD §6) ---------------- */

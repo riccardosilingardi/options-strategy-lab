@@ -127,6 +127,10 @@ export const COPY = {
   expiryChoiceNote: () => R.expiryChoiceNote(CHOICE, LEVEL),
   staleBoardLine: () => R.staleBoardLine([{ tk: "SLV", expKey: "2026-11-20" }, { tk: "SOYB", expKey: "2026-11-20" }]),
   atRiskNowLine: () => R.atRiskNowLine(1800, 2),
+  // PR 61: the market page's compare line, Build's "already sent" and its card-vs-limit line, at their longest.
+  compareTrayLine: () => R.compareTrayLine(2, 3),
+  alreadySentLine: () => R.alreadySentLine("J-0008", 4726, true),
+  limitMovedLine: () => R.limitMovedLine({ entry: 6.75, maxLoss: -675, maxProfit: 1225 }, { entry: 6.61, maxLoss: -661, maxProfit: 1239 }, 7),
   unpriceableNote: () => R.unpriceableNote(2, "XLE"),
   impossibleLossNote: () => R.impossibleLossNote(1, "XLE"),
   modelDisagreementNote: () => R.modelDisagreementNote(1, "XLE"),

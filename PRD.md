@@ -62,8 +62,11 @@ non-expert trader who wants to learn discipline rather than be sold trades.
      **compact card** (round 2): PR #49's `CandidateCard` in its `compact` layout — the name, the legs and a 72×40
      picture; YOU RISK · MAX PROFIT · CHANCE · RETURN ON RISK in one row (each label opens its definition); what the trade
      needs at expiry and where it stands against the signals ("with the signals, 3 of 4 · none against",
-     `signalStance()`); "FUTURE avg … · PAST YRS …"; the disagree sentence when the future and the past disagree; ☆ ·
-     Compare · Open in chain · Build ›; and "Details ▾", which holds the full card as it was (nothing deleted). *Chain (advanced)*: expiry chips with days left (under 30 days dashed, not
+     `signalStance()`); "FUTURE avg … · PAST YRS …"; the disagree sentence when the future and the past disagree; ☆ and
+     **Compare** (the tick shows its word, "✓ Comparing" when on; PR 61), then Open in chain and Build ›; and "Details ▾",
+     which holds the full card as it was (nothing deleted). After a tick, a line fixed above the bottom bar says "2 of 3 to
+     compare · See them ›" and opens the one Compare sheet (below). ☆ is a toggle everywhere (PR 61): a second tap removes
+     the saved item and the message line offers Undo, which puts back the same item. *Chain (advanced)*: expiry chips with days left (under 30 days dashed, not
      buildable), a T-chain with three modes (Bid · Ask, Delta · IV, OI · Vol — the last only when the feed sends open
      interest), "thin" under the liquidity floor; tap an ask to buy one, a bid to sell one (four legs at most); the tray
      names the structure and prices Debit or Credit, Max profit, Max loss and Chance through `listCardFigures()`; Build ›
@@ -136,9 +139,13 @@ non-expert trader who wants to learn discipline rather than be sold trades.
      trade, What would make it wrong?, Compare with the other cards, News that could move it, or your own question; every answer is filed in the Journal; **Legs** with "Edit in chain ›" (the market page's Chain tray; its
      Build › comes back); **Order**, inline: Contracts and the limit as two steppers (the tick is the app's one price
      rule, a cent; since PR 4b the limit can also be typed, and **Mid · Pay · Negotiate** set it to the mid, the
-     market's own price, or back to the app's starting price — owner, 6 Oct 2026), "Mid · natural · tick", where the limit sits, the risk and its share of capital, the cap as a
-     checkbox that writes the same free-sizing setting as Settings (turning it off asks the typed reason), and the open
-     risk after this; **Exit plan** — take profit, the 21-day exit with its date, the stop as an alert, with "defaults ·
+     market's own price, or back to the app's starting price — owner, 6 Oct 2026), "Mid · natural · tick", where the limit sits, "Card at 6.75 · now 6.61: risk
+     −$98, max profit +$98" when the limit in force is not the card's price (PR 61), the risk and its share of capital, the
+     cap as a checkbox that writes the same free-sizing setting as Settings (turning it off asks the typed reason), and the
+     open risk after this — with what it includes ("Includes $4,500 on GDX (not on Alpaca) and $4,725 on the GLD order
+     still working", the gate's own terms) and, when the trade on Build is already in the book, "Already sent as J-0008…"
+     and the open risk as it is, never the trade added a second time (PR 61; the review sheet says a resend is a second
+     order); return on risk is a percentage, as on the card; **Exit plan** — take profit, the 21-day exit with its date, the stop as an alert, with "defaults ·
      not backtested on CORN"; **Send** ("Send limit order · credit $25"), held with its reason in words when the gate
      refuses; then **More on this trade ▾**, everything else in today's form (the market now, the card, the editor and
      the chain, the price and what crossing costs, the ticket's leg prices, order type and time in force with no Send of
@@ -168,7 +175,8 @@ non-expert trader who wants to learn discipline rather than be sold trades.
 - **Positions (PR #47; the owner's boards since redesign PR 3a, 6 Oct 2026).** Its own header ("Positions", ↻ to read
   Alpaca again, the gear), then the **account strip**: EQUITY, BUYING POWER (Alpaca's options figure when it sends one; the
   ⓘ says which) and AT RISK "$X of $Y" — the risk gate's own open risk against the total limit ("no limit" under free
-  sizing). One ⓘ open at a time, its sentence under the three tiles; the limits come from the capital set in Settings,
+  sizing), and under it what that figure includes that is not a holding at Alpaca (a record Alpaca does not hold, an order
+  still working; PR 61). One ⓘ open at a time, its sentence under the three tiles; the limits come from the capital set in Settings,
   not from equity. Then **Positions | Orders**.
   - *Positions*: one card per holding — the badge (CLOSE filled in the action tone, WARNING an amber outline, HOLD a
     green outline with its sentence behind ⓘ, NOT ON ALPACA / NO QUOTE dim), "J-0002 · UNG · 2 puts" (the size as Alpaca
@@ -219,14 +227,20 @@ non-expert trader who wants to learn discipline rather than be sold trades.
   Every question in `SKILLS` (pro.jsx, the one home) names its place and opens with that place's role (`COPILOT_ROLE`);
   a screen offers only its own place's questions. The standing instructions carry no decision tree: the old trees are
   criteria for judging a card, never an instruction to build one.
-  - **On Find**, "Compare ›" on the summary line opens a sheet: **Compare the cards** reads the cards that fit, in the
-    owner's order, up to 20 (`compareCards()` in rows.js: each card's own figures and its Greeks for the size the budget
-    buys), the chips in their own words and the misses counted, and recommends one card, at most two, or none, saying
-    which filter binds; **News impact** reads the news across the markets and says which cards it supports or undercuts.
+  - **On Find**, "Compare ›" on the summary line opens **the one Compare sheet** (PR 61; the market page's "See them ›"
+    and Build's "N still ticked" open the same one). With cards ticked it shows them — one picture (`CompareFigure`, at
+    the size the budget buys) and their rows — and **Compare the cards** compares those; with none ticked it says "N cards
+    from M markets fit" (cards, from `compareCards()`; Find's summary line keeps counting rows, one per market) and reads
+    the cards that fit, in the owner's order, up to 20. Every row is labelled C1…Cn and prints the card's own figures for
+    that size in CARD_LABELS' words; the copilot is handed the same rows with the same labels and names cards only by
+    them. It recommends one card, at most two, or none, saying which filter binds; **News impact** reads the news across
+    the markets and says which cards it supports or undercuts. The standing instructions say that Future and Past yrs
+    answer different questions and neither is the more reliable.
   - **On the market page**, the news block's folded **News impact** explains this market's headlines; the chart copilot
     explains the chart. Neither recommends a trade.
-  - **In Build**: **Pre-trade analysis** reads the gate's checks and the app's size back and ends on one verdict —
-    CONFIRM, DOUBTS or DO NOT CONFIRM (`BUILD_VERDICTS`) — that never overrides a check; **Explain the Greeks**; **The
+  - **In Build**: **Pre-trade analysis** opens on one verdict — CONFIRM, DOUBTS or DO NOT CONFIRM (`BUILD_VERDICTS`) —
+    then at most three reasons from the app's figures; it names a gate check only when it fails or sits at 90% or more of
+    its limit (the share is the app's, in the context), and never overrides one (PR 61); **Explain the Greeks**; **The
     chart and this trade** (`taContext()` with the trade's breakevens); "What would make it wrong?", "Compare with the
     other cards" (it may name a card that fits better), "News that could move it".
   - **On a position's screen**: **Review this position**, **The exit from here** (what it takes to close in profit),
@@ -248,7 +262,9 @@ non-expert trader who wants to learn discipline rather than be sold trades.
     against how it ended (the record's own words — `whyOpenedLine()`, `endedLine()`, its result and whole timeline,
     a roll's "Rolled into / from" included). It explains; it recommends nothing. The answer is filed with the ref and
     leaves one line on the record's timeline.
-  - No copilot places a trade; every answer is filed in the Journal.
+  - No copilot places a trade; every answer is filed in the Journal. An answer cut off by its length limit (3,000 tokens
+    since PR 61) offers **Continue**: the same context and the cut answer, continued where it stopped and appended to the
+    same answer, filed once when whole. The model's id has one home, `COPILOT_MODEL` in rules.js.
 - **Deploy previews are read-only** (redesign PR 2, TASK 0a, after deploy-preview-51 overwrote production's book on
   5 Oct 2026). A preview reads everything production reads, but every Netlify function that writes or sends (the state
   save, every order, Modify and cancel, the one-tap approval, the autopilot's run, the Alpha Vantage cache write) answers
@@ -413,9 +429,10 @@ changes what the owner reads, not what v1 needs: v1 waits only on the owner's th
 
 ## 4. NOT VERIFIED
 
-At most ten items. **OWNER CHECK** means only the owner's reading can settle it; there is exactly
-one, J-0001's Journal entry. Everything marked **read when it happens** is recorded if the owner meets it in
-normal use, and is never asked for.
+At most ten items. **OWNER CHECK** means only the owner's reading can settle it: J-0001's Journal entry (#1), the live
+open-risk numbers (#4), Find's speed on the phone (#5) and a real copilot answer (#10). Everything marked **read when it
+happens** is recorded if the owner meets it in normal use, and is never asked for. (PR 61 re-read every item below by
+name: none could be closed from this sandbox; each is re-confirmed with what PR 61 added to it.)
 
 1. **OWNER CHECK — the Journal entry for J-0001 shows the $7.65 fill** (v1 is reached on the owner's report of 5 Oct
    2026: filled 9 of 9 at $7.65, filed from the production address; this session cannot see that browser). **No Modify
@@ -447,15 +464,21 @@ normal use, and is never asked for.
    Chromium only (PR 4: from 1024 the right pane keeps at least 390px) — never in a real desktop browser, and no board
    draws it** (the owner chose it in words). **PR 4's Signals tab, Find's Compare sheet and the copilot sections** were
    photographed the same way with a stub copilot (docs/screens/pr4/); the fixture has no headlines, so a news block with
-   real headlines has not been seen. **No screen reader was run.**
+   real headlines has not been seen. **PR 61's screens** (☆ with Undo, the tick's word and the line after it, the one
+   Compare sheet ticked and fitting, Build's card-vs-limit line, "Already open as…", AT RISK's "Includes…") were
+   photographed the same way (docs/screens/pr61/, `node scripts/shoot-pr61.mjs`) — never on a phone. **No screen reader
+   was run.**
 4. **Read when it happens — no credit has filled at the corrected limit** (the indicative combination ask on thin chains
    has not been measured by a fill; J-0003 never filled at it), **and "Not on Alpaca", "size N > M on the ask", the "Not
    in the app" card, an order "sent outside this app", free sizing (PR #41), and an order sent from Build's new review
    sheet (production only, never from a preview), "Keep it, write why" and Modify's steppers (redesign PR 3a)** have not
    appeared or been used live (the sync auto-imports a new holding on its
    first read, so "Not in the app" shows mainly when that import has not run); free sizing's "no limit applied" is
-   tested on fixtures only.
-5. **Find's cost on a phone is not measured, and the live season has never been read.** Generation is one memo (139–259
+   tested on fixtures only. **OWNER CHECK — the live open-risk numbers (PR 61):** the double count is reproduced in code
+   and fixed on Build (USO 145/152 ×17: $14,101 + $4,726 = $18,827 in riskGate.test.js); "Includes … (not on Alpaca) …
+   order still working" and "Already sent as …" have been seen on the `+book` fixture and the owner's numbers only, never
+   on the live book.
+5. **OWNER CHECK — Find's speed on the phone; the live season has never been read.** Generation is one memo (139–259
    ms for the 31 fixture cards on a desktop CPU; under "Signals decide" a directional market builds two families; the
    PR #49 replay adds ≈ 1 ms); a slider move is 0.1 ms. The sandbox cannot call Alpha Vantage: `seasonalSignal()` and
    `histBacktest()` have run on avFixture series only. Since PR #49 `parseAvJson()` keeps the whole series: on a
@@ -493,7 +516,9 @@ normal use, and is never asked for.
    is built outside the block and has no ceiling of its own yet.
    PR 4: the counter stopped counting components that render only inside a fold or a sheet (main re-measured: find 336
    → 269, market 604 → 574); the ceilings are now find 288, market 581, build 417, positions 248 (voice.test.js).
-   PR 4b: build 417 → 458 (the variants section and the roll's line on Build, an upper bound).
+   PR 4b: build 417 → 458 (the variants section and the roll's line on Build, an upper bound). PR 61: find 288 → 184
+   and market 581 → 474 (the compare tray left both screens for the Compare sheet), build 462 → 504 (the "already sent"
+   and card-vs-limit lines, Continue); `GATE_NEAR_LIMIT` 0.9 (when Pre-trade analysis names a gate check) is chosen.
 9. **The exit rules are inherited defaults, not backtested** on these ten markets; the single option's +50% of the
    premium is the owner's choice. PAST YRS settles at expiry and does not replay them. **Since PR #50 a replay window
    that runs past December reads the next year's row and the last year is dropped, not padded** (it used to wrap to the
@@ -502,7 +527,10 @@ normal use, and is never asked for.
    season the future avg runs −41.3 → +9.5 per $100, median −4.3, 6 of 31 above zero (the brief measured −41.0 →
    +8.2, −3.6, 4 of 31; the difference was not traced). The exact long-put maximum (PR #47, 0c) raises three Find fixture cards' return on
    risk 3.5–4.5×; how that moves their rank on live boards is not measured.
-10. **Read when it happens — the AI features** have not seen a real answer since the usage limit ended (2026-10-01).
+10. **OWNER CHECK — a real copilot answer.** The AI features have not seen a real answer since the usage limit ended
+    (2026-10-01). PR 61 changed what they are asked (Pre-trade analysis: the verdict first, at most three reasons, the gate
+    only for a failed check or one at 90%+; Find's cards named C1…Cn; Future and Past held equal), raised the budget to
+    3,000 tokens and added Continue: all tested on a stubbed stream only.
     PR 4 rewrote the standing instructions (no decision trees; recommend only among what the app built) and added Find's
     two questions, the market page's News impact, Build's verdict, Greeks and chart questions and the position's four:
     **whether the model keeps to the cards and actions handed in, and gives exactly one of the three verdicts, has only

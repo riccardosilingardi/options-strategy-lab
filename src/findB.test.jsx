@@ -8,14 +8,18 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
-import { FindStep, FindHeader } from "./find.jsx";
+import { FindStep, FindHeader, MarketRow, CompareSheet } from "./find.jsx";
+import { StrategyCard } from "./market.jsx";
+import { compareCards } from "./rows.js";
+import { scaleStrategy } from "./pro.jsx";
+import { toggleCompare } from "./path.js";
 import { MarketPage, ChainTab } from "./market.jsx";
 import { listCardFigures } from "./App.jsx";
 import { normaliseAlpacaChain } from "./chain.js";
 import { findCards } from "../scripts/find-fixtures.jsx";
 import { BASKET, MARKET_CATEGORIES } from "./markets.js";
 import { findOrderCompare } from "./signals.js";
-import { requestOf, RULES, FIND_CHIPS, FIND_ORDERS, PLACEHOLDER_HEAD, NEWS_NOT_READ, chanceText } from "./rules.js";
+import { requestOf, RULES, FIND_CHIPS, FIND_ORDERS, PLACEHOLDER_HEAD, NEWS_NOT_READ, chanceText, sizedFree, sizedFigures, money, CARD_LABELS, COMPARE_TICK, returnText } from "./rules.js";
 import { rowFigure } from "./rows.js";
 
 const ok = [], bad = [];
@@ -196,7 +200,7 @@ check("STRATEGIES: the signals' family first, then Neutral 'always listed'; the 
   has(h, "Neutral cards are always listed. Order: Future avg.");
   has(h, ">The market&#x27;s read ›<");
   if (!/with the signals, \d of 4|against the signals, \d of 4|direction-neutral/.test(h)) throw new Error("no stance line");
-  for (const a of ['aria-label="Compare"', ">Open in chain<", ">Build ›<", ">Details ▾<"]) has(h, a);
+  for (const a of ['>Compare</button>', ">Open in chain<", ">Build ›<", ">Details ▾<"]) has(h, a);
   // Every card is the COMPACT card at rest; the full card waits behind Details.
   if (count(h, "data-card-key") !== UNG.length) throw new Error("not every UNG card is on its page");
   if (count(h, 'data-compact="') !== UNG.length) throw new Error("not every card is compact");
@@ -232,6 +236,61 @@ check("CHAIN: an uncovered short leg blocks Build with the reason; nothing is se
   if (!/<button[^>]*disabled=""[^>]*>Build ›<\/button>/.test(h)) throw new Error("Build is not disabled");
   const src = readFileSync("src/market.jsx", "utf8");
   for (const w of ["orderBody", "sendToAlpaca", "alpacaReq", "/v2/orders"]) hasNot(src, w);
+});
+
+check("☆ IS A TOGGLE (PR 61): a saved row's star stays enabled and says it removes; the market header's star says the same", () => {
+  const x = SORTED.find((c) => c.tk === "UNG");
+  const row = { tk: x.tk, x, misses: [], fits: true };
+  const fig = rowFigure(x, null, "ev");
+  const off = renderToStaticMarkup(<MarketRow row={row} fig={fig} saved={false} onSave={() => {}} onOpen={() => {}} />);
+  const on = renderToStaticMarkup(<MarketRow row={row} fig={fig} saved onSave={() => {}} onOpen={() => {}} />);
+  has(off, `aria-label="${esc(`Save: UNG ${x.name}`)}"`); has(off, "☆");
+  has(on, `aria-label="${esc(`Remove from Saved: UNG ${x.name}`)}"`); has(on, "★");
+  if (/<button[^>]*aria-label="Remove from Saved[^"]*"[^>]*disabled/.test(on)) throw new Error("a saved star is disabled");
+  const src = readFileSync("src/market.jsx", "utf8");
+  has(src, "label={saved ? UNSAVE_FIRST_CARD : SAVE_FIRST_CARD}");
+});
+
+check("ONE COMPARE (PR 61): tick on the market page → '1 of 3 to compare · See them ›' → the sheet shows THAT card with the figures its card prints", () => {
+  const x = UNG[0];
+  const request = requestOf({}, LIMITS);
+  const size = sizedFree(scaleStrategy(x.lf.aFill, request.mode, request.amt, request.riskCap), false);
+  // The tick shows its word, off and on.
+  const off = renderToStaticMarkup(<StrategyCard x={x} size={size} misses={[]} bars={[]} sortedBy="future" findOrder="ev" saved={false} ticked={false}
+    onSave={() => {}} onTick={() => {}} onBuild={() => {}} onChain={() => {}} badge={null} />);
+  const on = renderToStaticMarkup(<StrategyCard x={x} size={size} misses={[]} bars={[]} sortedBy="future" findOrder="ev" saved={false} ticked
+    onSave={() => {}} onTick={() => {}} onBuild={() => {}} onChain={() => {}} badge={null} />);
+  has(off, `aria-pressed="false" data-compare-tick`); has(off, `>${COMPARE_TICK.off}</button>`);
+  has(on, `aria-pressed="true" data-compare-tick`); has(on, `>${COMPARE_TICK.on}</button>`);
+  // After the tick: the line, on the page, with the way to the sheet.
+  const ticked = toggleCompare([], x.cand).list;
+  const h = page({}).replace(/compareProps=\{\{ compare: \[\] \}\}/, "");
+  hasNot(h, "data-compare-line");
+  const withLine = renderToStaticMarkup(<MarketPage tk="UNG" tab="strategies" onTab={() => {}} onBack={() => {}} onTicker={() => {}} chain={CHAIN}
+    board={{ ...GEN.boards.UNG, expKey: UNG[0].expKey }} fused={FUSED} items={UNG} allItems={SORTED} boards={GEN.boards} request={request}
+    findDir="signals" sentiments={SENTS} findOrder="ev" newsItems={[]} newsState={{ err: "x" }} now={NOW} timeZone="Europe/Rome"
+    cardFigures={listCardFigures} quoteOf={QUOTE} liqFloor={10} compareProps={{ compare: ticked, onOpen: () => {} }} />);
+  has(withLine, "data-compare-line"); has(withLine, "1 of 3 to compare"); has(withLine, "See them ›");
+  // The refusal of a fourth is on the line, not swallowed.
+  const four = toggleCompare([UNG[0].cand, UNG[1].cand, UNG[2].cand], UNG[3] ? UNG[3].cand : SORTED[0].cand);
+  const capped = renderToStaticMarkup(<MarketPage tk="UNG" tab="strategies" onTab={() => {}} onBack={() => {}} onTicker={() => {}} chain={CHAIN}
+    board={{ ...GEN.boards.UNG, expKey: UNG[0].expKey }} fused={FUSED} items={UNG} allItems={SORTED} boards={GEN.boards} request={request}
+    findDir="signals" sentiments={SENTS} findOrder="ev" newsItems={[]} newsState={{ err: "x" }} now={NOW} timeZone="Europe/Rome"
+    cardFigures={listCardFigures} quoteOf={QUOTE} liqFloor={10} compareProps={{ compare: four.list, note: four.note, onOpen: () => {} }} />);
+  has(capped, "3 of 3 to compare"); has(capped, "Untick one first");
+  // The sheet: the ticked card's row, labelled C1, with the figures the card prints for the same size.
+  const cmp = compareCards([x], request, () => size, { fitOnly: false });
+  const sheet = renderToStaticMarkup(<CompareSheet open onClose={() => {}} cmp={cmp} rows={[{ cand: ticked[0], card: cmp.cards[0] }]} ticked={ticked} />);
+  has(sheet, "data-compare-sheet"); has(sheet, ">C1<"); has(sheet, "1 card you ticked");
+  const f = sizedFigures(x.lf.aFill, size.ok ? size.n : null);
+  for (const v of [`${CARD_LABELS.risk} ${money(f.risk)}`, `${CARD_LABELS.chance} ${chanceText(x.lf.pop)}`, `${CARD_LABELS.rr} ${returnText(x.lf.rr)}`]) has(sheet, v);
+  // …and those are the card's own strings.
+  has(on, money(f.risk)); has(on, chanceText(x.lf.pop)); has(on, returnText(x.lf.rr));
+  hasNot(sheet, "per contract");
+  // Find's "Compare ›" shows with ticks even when nothing fits.
+  has(renderToStaticMarkup(<FindStep request={request} onRequest={() => {}} sentiments={SENTS} find={FIND} setFind={() => {}} limits={LIMITS} onLimit={() => {}}
+    freeSizing={false} findGen={GEN} findShown={SORTED} findOrder="ev" onFindOrder={() => {}} readiness={{}} liqLevel={LEVEL} liqState={LIQ}
+    onSheet={() => {}} compare={ticked} compareFitting={0} copilot={{ convo: null, setConvo: () => {} }} />), "data-find-compare");
 });
 
 console.log(`\n${ok.length} passed, ${bad.length} failed\n`);

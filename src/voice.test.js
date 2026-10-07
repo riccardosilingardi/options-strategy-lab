@@ -235,7 +235,15 @@ test("MEASURED: the three screens, and the table in the PRD is this number", () 
      "Roll it" section is on its own screen, built outside the block. */
   /* …and 458 -> 462: the limit's three quick prices (owner, "Mid, Pay, Negotiate": their labels are LIMIT_CHOICES' and
      generated) and "What these prices mean" (4 typed words; the meanings are behind the ⓘ). */
-  const CEILING = { find: 288, market: 581, build: 462, positions: 248 };
+  /* >>> PR 61 (the post-PR-60 sanity check, owner 7 Oct 2026). <<< find 288 -> 184 and market 581 -> 474: the blue
+     compare tray (`ComparePanel`: "COMPARING 2 OF 3", "Tick a second one…", "Compare them", "SIDE BY SIDE…", the rows'
+     labels, about 105 words) was mounted on both and is gone — ONE compare, its words in the Compare sheet, one tap away
+     (find.jsx's `CompareSheet`, mounted by App.jsx outside the step blocks). The market page gained the line after a tick
+     (`compareTrayLine()`, 4, plus "See them ›"). build 462 -> 504: "Already sent as J-0008 …" (`alreadySentLine()`, 21,
+     only when the loaded trade is already in the book: an upper bound), the card-vs-limit line (`limitMovedLine()`, 12,
+     only when the limit moved), and the copilot's "Stopped at its length limit: Continue picks up where it stopped." and
+     "Continue" (12). The ceilings are those numbers. */
+  const CEILING = { find: 184, market: 474, build: 504, positions: 248 };
   /* >>> PR #46: ONE ORDERS LIST. <<< The record-based "WORKING AT THE BROKER" panel (its paragraph about what a
      working order is, the stale-DAY warning, the per-row sentences) left Positions; the one list lives in
      `orders.jsx`, which the counter now reads. Measured: positions 304 -> 209 (4 typed + 205 generated, 14 sites).

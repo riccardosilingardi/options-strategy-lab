@@ -88,12 +88,22 @@ export function undefinedRiskLegs(legs) {
   return bad;
 }
 
+/** The dollars ONE record of the book puts at risk: the term `openRiskOf()` sums, and nothing else. */
+export const positionRiskOf = (p) => abs(p?.maxLoss) * positionSize(p).contracts;
+
 /** Total dollars already at risk across open positions. */
 function openRiskOf(portfolio) {
   if (!portfolio) return 0;
   if (isNum(portfolio.openRisk)) return abs(portfolio.openRisk);
-  return (portfolio.positions || []).reduce(
-    (a, p) => a + abs(p?.maxLoss) * positionSize(p).contracts, 0);
+  return (portfolio.positions || []).reduce((a, p) => a + positionRiskOf(p), 0);
+}
+
+/* WHAT THE OPEN RISK IS MADE OF (PR 61, owner 7 Oct 2026: "open risk says what it includes"). The very terms the sum
+   above adds, one per record, so a screen can name a record Alpaca does not hold or an order still working without a
+   second sum. Null when the caller handed a bare total (there are no records to name). No rule reads it. */
+function openRiskPartsOf(portfolio) {
+  if (!portfolio || isNum(portfolio.openRisk)) return null;
+  return (portfolio.positions || []).map((p) => ({ id: p?.id ?? null, ref: p?.ref ?? null, ticker: p?.ticker ?? null, risk: positionRiskOf(p) }));
 }
 
 /** Dollars this proposal puts at risk: max loss per combo × number of combos. */
@@ -420,6 +430,7 @@ export function evaluateTrade({ proposal, portfolio, capital, signals, sizingFre
       total: limits.totalLimit,
       tradeRisk,
       openRisk,
+      openRiskParts: openRiskPartsOf(portfolio),
       totalAfter,
       paper,
       sizingFree: free,

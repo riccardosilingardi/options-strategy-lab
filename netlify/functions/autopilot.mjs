@@ -5,7 +5,7 @@ import { deployWrites, PREVIEW_READ_ONLY } from "../../src/deploy.js";
 import { netBS, exitSim, SIGMA, parseAvJson, statsFromMatrix } from "../../src/engine.js";
 import { RULES, ruleBadge, copilotRulesBlock, pctText,
   markProvenance, sigmaProvenance, ivProvenance, seasonalProvenance, seasonalSignal, chanceOf, chanceSourceNote,
-  autopilotVerdict, AUTOPILOT_VERDICTS, MODEL_PRICE, takeProfitTarget, takeProfitBasisWords } from "../../src/rules.js";
+  autopilotVerdict, AUTOPILOT_VERDICTS, MODEL_PRICE, takeProfitTarget, takeProfitBasisWords, COPILOT_MODEL } from "../../src/rules.js";
 import { evaluateTrade } from "../../src/riskGate.js";
 // HOW MANY COMBINATIONS THE POSITION IS. A close proposed at one lot on a
 // seven-lot position leaves six open and calls it an exit — and the gate would
@@ -329,7 +329,7 @@ export default async (req, context) => {
           method: "POST",
           headers: { "x-api-key": anthKey, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
           body: JSON.stringify({
-            model: "claude-sonnet-4-6", max_tokens: 700,
+            model: COPILOT_MODEL, max_tokens: 700,
             // STOP IS NOT ON THE MENU. It was, and the model was told to
             // return it "when pnl <= the stop warning or the thesis has
             // collapsed" — on a rule the PRD downgraded to an alert because

@@ -105,7 +105,7 @@ check("THE NUMBERS ARE THE CARD'S: sizedFigures, futureFigures, pastFigures, und
   has(html, ">Max profit<"); has(html, ">Max loss<"); has(html, ">Breakeven<"); has(html, ">Return on risk<");
   has(html, CARD_LABELS.future); has(html, CARD_LABELS.past);
   hasNot(html, ">MAX PROFIT<", "the grid's labels are the mockup's sentence case, read off CARD_LABELS");
-  has(html, money(25)); has(html, money(75)); has(html, "17.75"); has(html, "0.33");
+  has(html, money(25)); has(html, money(75)); has(html, "17.75"); has(html, ">33%<");   // PR 61: `returnText()`, the card's unit (it read "0.33")
   has(html, "71%"); has(html, "11 of 16"); has(html, "+$6");
   has(html, "Delta (shares)"); has(html, "+20 sh"); has(html, "Theta");
   // The mockup: the grid's values mono 18 bold, Delta and Theta mono 15 bold (scripts/audit-build.mjs measures it live).

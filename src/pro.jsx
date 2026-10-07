@@ -9,7 +9,7 @@ import { RULES, ruleBadge, takeProfitLabel, takeProfitTarget, scaleOutLabel, sto
   legBook, sizeSkippedNote, onTick, netFromLegs, limitCeilingNote, rewardRisk,
   contractListing, unlistedContractNote, unquotedLegNote, unquotedLegPointer, marketOrderNote,
   taCopilotPrompt, TA_QUESTIONS, TA_DISCLAIMER, TA_NEVER_PROPOSES, TA_OWN_QUESTION,
-  ivProvenance, noRecordNote, copilotOverreach, copilotOverreachNote } from "./rules.js";
+  ivProvenance, noRecordNote, copilotOverreach, copilotOverreachNote, COPILOT_MODEL, GATE_NEAR_LIMIT, CARD_LABELS, FUTURE_PAST_EQUAL, returnText } from "./rules.js";
 import { contractsOf, positionSize, bookPositions, positionStage, autopilotHorizonNote, autopilotVolNote, positionForHolding, journalPnlTotal, scoredJournal } from "./journal.js";
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, LineStyle } from "lightweight-charts";
 // The fold lives in steps.jsx — chrome with no trade in it, and the one file
@@ -603,7 +603,7 @@ function ComboBookPanel({ legs, quotes, verdict, effective, type, qty, spot, tic
           note={limits && Number.isFinite(limits.perTrade)
             ? `of ${money(limits.perTrade)} ${limits.answered === false ? "suggested" : "allowed"}`
             : "the most you can lose"} />
-        <Cell k="MADE PER $1 RISKED" v={rr == null ? "—" : rr.toFixed(2)} c={T.violet}
+        <Cell k={CARD_LABELS.rr} v={rr == null ? "—" : returnText(rr)} c={T.violet}
           note={rr == null ? "no ceiling, or no readable price" : "best case over worst case"} />
         <Cell k="NOTIONAL CONTROLLED" v={notional != null ? money(notional) : "—"} c={T.violet}
           note={`${Math.max(1, Math.round(Number(qty) || 1))} × 100 × ${spot != null ? `$${(+spot).toFixed(2)}` : "spot"}`} />
@@ -1066,7 +1066,9 @@ The screen ALREADY shows the legs, the strikes, the greeks, the max profit, the 
 - At most four short sections. Head each one with "## " and a plain-English title — "What this trade is betting on", not "STRUCTURE".
 - Bullets with "- " only where a list is genuinely a list. **Bold** for the one number that matters in a paragraph, sparingly.
 - Open with one sentence that answers the question asked. When you recommend, say it in that first sentence and name the card or the action exactly as the app prints it.
-- Close with what you would watch, and what would tell you the recommendation or the idea is wrong.`;
+- Close with what you would watch, and what would tell you the recommendation or the idea is wrong.
+
+${FUTURE_PAST_EQUAL}`;
 /* ================================================================
    MARKDOWN, RENDERED — not printed
 
@@ -1206,14 +1208,20 @@ export const BUILD_VERDICTS = Object.freeze(["CONFIRM", "DOUBTS", "DO NOT CONFIR
  *   positions  review and the action to take · closing in profit · since I opened it · the chart since I opened it
  * The chart copilot (TA_QUESTIONS in rules.js) is the market page's and Build's More: it explains the chart only.
  */
+/** Find's two questions name a card only by its label (PR 61): the table above the answer prints the same C1…Cn. */
+export const COMPARE_LABEL_RULE = "Each card in findCards has a label (C1, C2 and on, printed in the table above your answer): name a card only by its label, never by a number of your own.";
 export const SKILLS = [
   /* FIND (PR 4): the cards that fit, in the owner's order, up to 20 (findCards), the filters in the chips' own words. */
-  { id: "radar", place: "find", label: "Compare the cards", prompt: `${COPILOT_ROLE.find} Compare the cards that fit the filters I set (findCards and findFilters in the context; findMisses says how many miss and why). Name the filters first. For every card you mention, cite its own figures as the app printed them — you risk, max profit, chance, return on risk, future avg and past yrs — and its Greeks as the app worked them out for the size the budget buys: say in a sentence what its delta, its theta and its vega mean for that card (what a move, a day passing and a jump in volatility each do to it). Then recommend the one card, at most two, that fits best, and why, using the criteria for judging a card; or say that none fits and which filter binds. The cards are in the app's own order (findFilters.order): if your pick is not the first, say why. Never a size past the per-trade limit (${perTradeCapLabel()}).` },
-  { id: "newsAll", place: "find", label: "News impact", prompt: `${COPILOT_ROLE.find} From the tagged news in the context (taggedNews, across every market), which headlines move which markets, in which direction, and why? Separate noise from signal, with cause and effect and a time horizon, and say how much the news weighs against the other three factors (seasonality, the price trend, weather) in each market's reading (scanner). Then say which of the cards in findCards the news supports and which it undercuts. Recommend nothing from the news alone.` },
+  { id: "radar", place: "find", label: "Compare the cards", prompt: `${COPILOT_ROLE.find} Compare the cards that fit the filters I set (findCards and findFilters in the context; findMisses says how many miss and why). ${COMPARE_LABEL_RULE} Name the filters first. For every card you mention, cite its own figures as the app printed them — you risk, max profit, chance, return on risk, future avg and past yrs — and its Greeks as the app worked them out for the size the budget buys: say in a sentence what its delta, its theta and its vega mean for that card (what a move, a day passing and a jump in volatility each do to it). Then recommend the one card, at most two, that fits best, and why, using the criteria for judging a card; or say that none fits and which filter binds. The cards are in the app's own order (findFilters.order): if your pick is not the first, say why. Never a size past the per-trade limit (${perTradeCapLabel()}).` },
+  { id: "newsAll", place: "find", label: "News impact", prompt: `${COPILOT_ROLE.find} From the tagged news in the context (taggedNews, across every market), which headlines move which markets, in which direction, and why? Separate noise from signal, with cause and effect and a time horizon, and say how much the news weighs against the other three factors (seasonality, the price trend, weather) in each market's reading (scanner). Then say which of the cards in findCards the news supports and which it undercuts. ${COMPARE_LABEL_RULE} Recommend nothing from the news alone.` },
   /* THE MARKET PAGE (PR 4): news is one of the four factors and has its own question beside its own block. */
   { id: "newsMarket", place: "market", label: "News impact", prompt: `${COPILOT_ROLE.market} About this market's news only (taggedNews for currentTicker and the news factor's reading in scanner): which headlines push it up and which push it down, why, and over what time horizon? Separate noise from signal. Say how much the news weighs against seasonality, the price trend and weather in this market's reading, and what would make the news factor turn.` },
   /* BUILD (redesign PR 2's four, PR 4's verdict, the Greeks and the chart). */
-  { id: "pretrade", place: "build", label: "Pre-trade analysis", prompt: `${COPILOT_ROLE.build} Explain the trade before it is sent: its structure, its Greeks, its risk and reward, its breakevens against support and resistance, how the season lines up with it, and the news that touches it. Read back the risk gate's checks as the app worked them out (the review checklist in the context: each one as passed or failed, never your own verdict on a check) and the size the app sized, with its share of the per-trade limit (${perTradeCapLabel()}); do not suggest another size. Then give your verdict on one line, exactly one of ${BUILD_VERDICTS.join(", ")}, with its reasons from the app's figures and the criteria for judging a card. Your verdict is your reading, not the gate's: the gate's checks stand whatever you say. If another card in the context (otherCards) fits better, name it.` },
+  /* PRE-TRADE ANALYSIS (PR 61, owner 7 Oct 2026): the app already prints all of the gate's checks beside the answer, so
+     reading them back spent half of it and made a second copy of the gate's numbers. The verdict comes FIRST; at most
+     three reasons; the gate only for a check that fails or sits at GATE_NEAR_LIMIT or more of its limit (the share is the
+     app's, in reviewChecklist). The other sentences are kept word for word. */
+  { id: "pretrade", place: "build", label: "Pre-trade analysis", prompt: `${COPILOT_ROLE.build} Your FIRST line is your verdict alone, exactly one of ${BUILD_VERDICTS.join(", ")}. Then at most three reasons for it, from the app's figures and the criteria for judging a card (the trade's figures, its Greeks, its breakevens against support and resistance, the season and the news, as the context has them). The app prints every one of the risk gate's checks beside your answer: do not read them back. Mention a check only when it fails, or when it sits at ${pctText(GATE_NEAR_LIMIT, 0)} or more of its limit (reviewChecklist: passed, shareOfLimit), and then quote the app's own share, as in "$4,725 is 94% of the per-trade cap". The size is the app's (sizedByTheApp, against the per-trade limit, ${perTradeCapLabel()}); do not suggest another size. Your verdict is your reading, not the gate's: the gate's checks stand whatever you say. If another card in the context (otherCards) fits better, name it.` },
   { id: "greeks", place: "build", label: "Explain the Greeks", prompt: `${COPILOT_ROLE.build} Explain the Greeks of the trade loaded, as the app worked them out (currentStrategy.greeks, for one combination; sizedByTheApp.contracts says how many): what delta, gamma, theta and vega mean here in dollars, which of a price move, a day passing and a change in volatility helps this trade and which hurts it, and how they change as expiry nears and the price moves toward a breakeven. Quote only the Greeks in the context.` },
   { id: "chart", place: "build", label: "The chart and this trade", prompt: `${COPILOT_ROLE.build} Read this market's price chart (chart in the context: the app's own indicators from daily bars; there are no bars) against the trade loaded: where its breakevens and strikes sit against the moving averages, the Bollinger band and recent highs and lows, what the trend says about the side the trade takes, and how far each breakeven is in ordinary days of movement. Quote only the figures in the context.` },
   /* PR 4b: refine it — the variants the app priced (buildVariants in the context), never a strike of its own. */
@@ -1324,8 +1332,10 @@ export async function askAI(_key, messages, contextStr, onDelta, system = SYSTEM
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: "claude-sonnet-4-6",
-      max_tokens: 1200,
+      model: COPILOT_MODEL,
+      // 3000 (PR 61; 1200 cut Compare and Pre-trade analysis off mid-answer). The answer streams, so a longer one
+      // cannot time out; one that still runs out of room offers Continue (useCopilot's `cont()`).
+      max_tokens: 3000,
       stream: true,
       system: system + "\n\nLIVE CONTEXT (JSON):\n" + contextStr,
       messages,
@@ -1368,10 +1378,8 @@ export async function askAI(_key, messages, contextStr, onDelta, system = SYSTEM
     // `message_stop` — Anthropic announces the end perfectly, and the answer is
     // still truncated — so without reading `stop_reason` it passes as whole.
     if (finished && why === "max_tokens") {
-      const err = new Error(
-        "The copilot ran out of room before it finished: this answer hit its length limit rather than " +
-        "reaching an end. What arrived is kept below and stops mid-thought — a narrower question gets a " +
-        "whole answer, where asking the same one again would hit the same limit.");
+      // PR 61: the reader can now ask it to go on (Continue), so the sentence says that instead of "ask a narrower question".
+      const err = new Error(CONTINUE_OFFER);
       err.partial = text;
       err.reason = "max_tokens";
       throw err;
@@ -1464,7 +1472,9 @@ export function buildContext(ctx) {
     otherCards: Array.isArray(otherCards) ? otherCards : null,
     // THE GATE'S CHECKS AND THE SIZE THE APP SIZED (redesign PR 3, "Pre-trade analysis" explains them; it never decides
     // them): the review sheet's own rows, read. Null when the caller did not hand them.
-    reviewChecklist: Array.isArray(reviewChecks) ? reviewChecks.map((c) => ({ check: c.text, value: c.value ?? null, passed: c.ok ?? null })) : null,
+    // PR 61: each check's share of its limit, as the app worked it out ("94%"), and whether it sits at GATE_NEAR_LIMIT or more.
+    reviewChecklist: Array.isArray(reviewChecks) ? reviewChecks.map((c) => ({ check: c.text, value: c.value ?? null, passed: c.ok ?? null,
+      ...(Number.isFinite(c.share) ? { shareOfLimit: pctText(c.share, 0), nearLimit: c.share >= GATE_NEAR_LIMIT } : {}) })) : null,
     sizedByTheApp: sized || null,
     // ONE OPEN POSITION (redesign PR 3, the position's screen): its entry, its exit plan, now — the screen's own figures.
     position: position || null,
@@ -1534,7 +1544,7 @@ export function TaCopilot({ ticker, bars, structure, convo, setConvo, onAnalysis
 
   const send = async (text, label) => {
     if (!text.trim() || busy || !ready) return;
-    const next = [...msgs, { role: "user", content: text }];
+    const next = [...msgs, { role: "user", content: text, label: label || null }];
     setConvo({ msgs: next, busy: true, err: null, partial: "" });
     setInput("");
     try {
@@ -1562,6 +1572,27 @@ export function TaCopilot({ ticker, bars, structure, convo, setConvo, onAnalysis
     }
   };
 
+  /* CONTINUE (PR 61), as Build's copilot does it: the same context (`taContext()` on the same bars), the cut answer last,
+     the continuation appended to it; filed once, whole. */
+  const cont = async () => {
+    const req = continueRequest(msgs);
+    if (!req || busy || !ready) return;
+    const base = msgs;
+    setConvo({ msgs: base, busy: true, err: null, partial: "" });
+    try {
+      const more = await askAI("server", req.messages, JSON.stringify({ ticker, ...taContext(bars, structure) }, null, 1),
+        (sofar) => setConvo((c) => ({ ...c, msgs: withContinuation(base, req.index, sofar, { truncated: true, reason: "max_tokens" }) })),
+        taCopilotPrompt());
+      const done = withContinuation(base, req.index, more);
+      setConvo({ msgs: done, busy: false, err: null, partial: "" });
+      const q = base[req.index - 1] || {};
+      if (onAnalysis) onAnalysis({ label: q.label || "Chart question", prompt: q.content || "", answer: done[req.index].content, ticker: ticker || null });
+    } catch (e) {
+      setConvo({ msgs: withContinuation(base, req.index, (e && e.partial) || "", { truncated: true, reason: (e && e.reason) || "cut" }),
+        busy: false, err: String(e.message || e), partial: "" });
+    }
+  };
+  const canContinue = !busy && !!continueRequest(msgs);
   const mk = look === "market";
   return (
     /* ON THE MARKET PAGE (the mockup "Market · Overview"): a panel, the heading in small capitals, the questions one per
@@ -1573,9 +1604,12 @@ export function TaCopilot({ ticker, bars, structure, convo, setConvo, onAnalysis
         {mk ? <h2 style={{ ...sans, margin: 0, fontSize: FS.xs, fontWeight: FW.bold, letterSpacing: "0.08em", color: T.mut, lineHeight: LH.tight }}>ASK ABOUT THIS CHART</h2>
           : <Label><Sparkles size={11} style={{ verticalAlign: "-1px" }} /> ASK ABOUT THIS CHART</Label>}
         {msgs.length > 0 && (
-          <Btn small ghost onClick={() => setConvo({ msgs: [], busy: false, err: null, partial: "" })}>
-            <Trash2 size={11} /> Clear
-          </Btn>
+          <span style={{ display: "inline-flex", gap: 6 }}>
+            {canContinue && <Btn small ghost color={T.blue} data-copilot-continue onClick={cont}>{CONTINUE_LABEL}</Btn>}
+            <Btn small ghost onClick={() => setConvo({ msgs: [], busy: false, err: null, partial: "" })}>
+              <Trash2 size={11} /> Clear
+            </Btn>
+          </span>
         )}
       </div>
       {!ready ? (
@@ -1621,7 +1655,7 @@ export function TaCopilot({ ticker, bars, structure, convo, setConvo, onAnalysis
                       <div style={{ ...mono, fontSize: FS.xs, color: T.amber, marginTop: 8, paddingTop: 8,
                         borderTop: `1px solid ${T.amber}44`, lineHeight: 1.6 }}>
                         {m.reason === "max_tokens"
-                          ? "This answer stops here because it reached the length limit, not because the copilot had finished. Ask for a shorter answer, or for one part of it."
+                          ? "This answer stops here because it reached the length limit, not because the copilot had finished. Continue picks up where it stopped; it is filed in the Journal once it is whole."
                           : "This answer stops here because the connection was cut, not because the copilot had finished. It is not filed in the Journal."}
                       </div>
                     )}
@@ -1668,6 +1702,25 @@ export function TaCopilot({ ticker, bars, structure, convo, setConvo, onAnalysis
   );
 }
 
+/* CONTINUE (PR 61, owner 7 Oct 2026: two answers cut off mid-sentence, Compare and Pre-trade analysis). An answer that
+   stopped on its length limit can be continued: the same context, the conversation with the cut answer last, and one
+   request to go on exactly where it stopped. The continuation is APPENDED to the same answer, never a new one and never
+   a replacement; one continuation per tap; the Journal files the whole answer once, when it is whole. */
+export const CONTINUE_OFFER = "The copilot reached its length limit before it finished. What arrived is kept below; Continue asks it to pick up exactly where it stopped.";
+export const CONTINUE_PROMPT = "Your previous answer stopped at its length limit. Continue it exactly where it stopped, starting with the very next words: do not repeat anything, do not summarise what came before, and add no introduction.";
+export const CONTINUE_LABEL = "Continue";
+/** What a Continue sends, or null when the last answer did not stop on its length limit. */
+export function continueRequest(msgs = []) {
+  const index = msgs.length - 1;
+  const last = msgs[index];
+  if (!last || last.role !== "assistant" || !last.truncated || last.reason !== "max_tokens") return null;
+  return { index, messages: [...msgs.map((m) => ({ role: m.role, content: m.content })), { role: "user", content: CONTINUE_PROMPT }] };
+}
+/** The conversation with `more` appended to the answer at `index` — the same message, its words kept, the new ones after. */
+export function withContinuation(msgs = [], index, more = "", { truncated = false, reason = null } = {}) {
+  return msgs.map((m, k) => (k !== index ? m : { ...m, content: `${m.content}${more}`, truncated, reason: truncated ? (reason || "cut") : undefined }));
+}
+
 /**
  * THE COPILOT'S ONE SEND (redesign PR 2): Build's copilot section and `CopilotTab` call this, so a question asked in
  * either streams the same way, keeps a cut-off answer marked as cut off, and is filed in the Journal (`onAnalysis`).
@@ -1679,7 +1732,7 @@ export function useCopilot({ ctx, apiKey, convo, setConvo, onAnalysis }) {
   const send = async (text, label) => {
     if (!text.trim() || busy) return;
     if (!apiKey) { setConvo((c) => ({ ...c, err: "The copilot is not configured on the server." })); return; }
-    const next = [...msgs, { role: "user", content: text }];
+    const next = [...msgs, { role: "user", content: text, label: label || null }];
     setConvo({ msgs: next, busy: true, err: null, partial: "" });
     setInput("");
     try {
@@ -1715,6 +1768,26 @@ export function useCopilot({ ctx, apiKey, convo, setConvo, onAnalysis }) {
       });
     }
   };
+  /** Continue an answer that stopped on its length limit (PR 61): one request per tap, appended to the same answer. */
+  const cont = async () => {
+    const req = continueRequest(msgs);
+    if (!req || busy) return;
+    if (!apiKey) { setConvo((c) => ({ ...c, err: "The copilot is not configured on the server." })); return; }
+    const base = msgs;
+    setConvo({ msgs: base, busy: true, err: null, partial: "" });
+    try {
+      const more = await askAI(apiKey, req.messages, buildContext(ctx),
+        (sofar) => setConvo((c) => ({ ...c, msgs: withContinuation(base, req.index, sofar, { truncated: true, reason: "max_tokens" }) })));
+      const done = withContinuation(base, req.index, more);
+      setConvo({ msgs: done, busy: false, err: null, partial: "" });
+      // FILED ONCE, WHOLE: the cut answer was never filed; the whole one is, under the question that asked it.
+      const q = base[req.index - 1] || {};
+      if (onAnalysis) onAnalysis({ label: q.label || "Question", prompt: q.content || "", answer: done[req.index].content, ticker: ctx?.ticker || null });
+    } catch (e) {
+      setConvo({ msgs: withContinuation(base, req.index, (e && e.partial) || "", { truncated: true, reason: (e && e.reason) || "cut" }),
+        busy: false, err: String(e.message || e), partial: "" });
+    }
+  };
   /** Print what is on screen. The browser's own dialog also saves to PDF. */
   const printConvo = () => {
     const w = window.open("", "_blank");
@@ -1741,7 +1814,7 @@ export function useCopilot({ ctx, apiKey, convo, setConvo, onAnalysis }) {
       </body></html>`);
     w.document.close();
   };
-  return { msgs, busy, err, partial, input, setInput, send, printConvo };
+  return { msgs, busy, err, partial, input, setInput, send, printConvo, cont, canContinue: !busy && !!continueRequest(msgs) };
 }
 
 /* CopilotTab — the desk's old copilot panel, mounted only by an evidence chip no screen has drawn since redesign PR 2 —

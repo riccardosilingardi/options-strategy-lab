@@ -15,7 +15,7 @@
 //
 // Plain JS, no React: it is tested without a browser, like path.js and rules.js.
 // ============================================================================
-import { meetsRequest, sizedFigures, futureFigures, futureTile, pastFigures, pastTileText, chanceText, returnText } from "./rules.js";
+import { meetsRequest, sizedFigures, futureFigures, futureTile, pastFigures, pastTileText, chanceText, returnText, compareLabel } from "./rules.js";
 import { findOrderOf } from "./signals.js";
 
 /**
@@ -106,11 +106,16 @@ export function rowStateOf(tk, g = {}, reading = null) {
  * the price that fills (`lf.aFill`, `analyze()`'s own Greeks). Nothing is recomputed. The cards that miss are counted,
  * with how many miss for each reason (`meetsRequest()`'s own short words).
  *
- * @returns {{ cards: object[], fitting: number, misses: { count: number, reasons: object } }}
+ * PR 61: each card carries its label (C1…Cn, `compareLabel()`), the one the sheet's table prints and the copilot names it
+ * by; `markets` counts the markets the fitting cards come from ("N cards from M markets fit": the sheet counts cards,
+ * Find's summary line keeps counting rows).
+ *
+ * @returns {{ cards: object[], fitting: number, markets: number, misses: { count: number, reasons: object } }}
  */
-export function compareCards(items = [], request, sizeOf, { max = 20 } = {}) {
+export function compareCards(items = [], request, sizeOf, { max = 20, fitOnly = true } = {}) {
   const cards = [];
   const reasons = {};
+  const tks = new Set();
   let fitting = 0, missN = 0;
   for (const x of items) {
     if (!x || !x.cand || !x.lf) continue;
@@ -119,9 +124,11 @@ export function compareCards(items = [], request, sizeOf, { max = 20 } = {}) {
     if (!meets) {
       missN += 1;
       for (const m of misses) reasons[m.short] = (reasons[m.short] || 0) + 1;
-      continue;
-    }
-    fitting += 1;
+      // THE TICKED CARDS (PR 61, `fitOnly: false`): the ones the person chose are compared whether they fit or not, and
+      // a miss says so in the request's own short words.
+      if (fitOnly) continue;
+    } else fitting += 1;
+    tks.add(x.tk);
     if (cards.length >= max) continue;
     const af = x.lf.aFill || null;
     const n = size && size.ok ? size.n : null;
@@ -130,7 +137,7 @@ export function compareCards(items = [], request, sizeOf, { max = 20 } = {}) {
     const g = af && af.greeks ? af.greeks : null;
     const num = (v, d) => (v != null && Number.isFinite(Number(v)) ? +(Number(v)).toFixed(d) : null);
     cards.push({
-      rank: cards.length + 1, ticker: x.tk, name: x.name || (x.cand && x.cand.name) || null, expiry: x.expKey || null,
+      rank: cards.length + 1, label: compareLabel(cards.length + 1), ticker: x.tk, name: x.name || (x.cand && x.cand.name) || null, expiry: x.expKey || null,
       legs: (x.legs || (x.cand && x.cand.legs) || []).map((l) => `${l.side > 0 ? "+" : "-"}${l.qty || 1} ${l.strike}${l.type === "call" ? "C" : "P"}`).join(" / "),
       contracts: n,
       youRisk: f ? f.risk : null, maxProfit: f ? (f.unbounded ? "no ceiling" : f.profit) : null,
@@ -139,8 +146,9 @@ export function compareCards(items = [], request, sizeOf, { max = 20 } = {}) {
       pastYrs: pastTileText(pastFigures(x.lf.bt, af, n)),
       // THE GREEKS FOR THE SIZE: delta in shares (× 100 × contracts), theta in dollars a day, vega in dollars per point of
       // volatility — `analyze()`'s own per-combination figures times the contracts, as Build's Numbers print them.
+      ...(meets ? {} : { misses: misses.map((m) => m.short) }),
       greeks: g ? { deltaShares: num(Number(g.delta) * 100 * k, 0), thetaPerDay: num(Number(g.theta) * k, 0), vegaPerVolPoint: num(Number(g.vega) * k, 0) } : null,
     });
   }
-  return { cards, fitting, misses: { count: missN, reasons } };
+  return { cards, fitting, markets: tks.size, misses: { count: missN, reasons } };
 }

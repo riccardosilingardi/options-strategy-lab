@@ -16,7 +16,7 @@ import { readFileSync } from "node:fs";
 import {
   STEPS, FIRST_STEP, LAST_STEP, stepIndex, stepOf, nextStepId, prevStepId, stepCarry,
   candidateKey, candidateOf, legsLine, toggleCompare, inCompare, MAX_COMPARE,
-  savedFromCandidate, candidateFromSaved, savedAge,
+  savedFromCandidate, candidateFromSaved, savedAge, savedItemFor, withoutSaved, restoreSaved, sizedCandidate,
 } from "./path.js";
 import { BUILD_TAB } from "./handoff.js";
 
@@ -216,6 +216,54 @@ test("THE GUIDED DOOR IS GONE, and nothing imports it (PR #40, TASK 1)", () => {
     assert.ok(!WIZ.includes(name), `wizard.jsx still defines ${name}`);
   }
   assert.ok(!WIZ.includes("Find opportunities"), "the guided door's title survives");
+});
+
+
+/* ---------------- ☆ is a toggle (PR 61, owner 7 Oct 2026) ---------------- */
+test("☆ IS A TOGGLE: save → unsave (delSaved's one remover) → Undo restores THE SAME item; the Saved count follows", () => {
+  const c = candidateOf({ name: "Bear Put Spread", legs: [{ type: "put", strike: 382, side: 1, qty: 1 }, { type: "put", strike: 363, side: -1, qty: 1 }],
+    pop: 0.41, futureAvg: 12.5, expKey: "2026-11-20", dte: 44 }, { ticker: "GLD", source: "find" });
+  const other = savedFromCandidate(candidateOf({ name: "Bull Call Spread", legs: LEGS, expKey: "2026-11-20" }, { ticker: "CORN" }), 1);
+  let saved = [other];
+  // save
+  assert.equal(savedItemFor(saved, c), null, "not saved yet");
+  const item = savedFromCandidate(c, Date.UTC(2026, 9, 7, 9));
+  saved = [...saved, item];
+  assert.equal(saved.length, 2);
+  assert.equal(savedItemFor(saved, c), item, "the star reads it as saved");
+  // unsave: the item found by the card's key, removed by id
+  const had = savedItemFor(saved, c);
+  saved = withoutSaved(saved, had.id);
+  assert.equal(saved.length, 1, "the count follows the removal");
+  assert.equal(savedItemFor(saved, c), null);
+  assert.equal(saved[0], other, "nothing else was touched");
+  // undo: the same object back — its id, its savedAt and its 'When saved' figures
+  saved = restoreSaved(saved, had);
+  assert.equal(saved.length, 2, "the count follows the undo");
+  assert.equal(savedItemFor(saved, c), item, "the very same item, not a new save");
+  assert.equal(savedItemFor(saved, c).savedAt, item.savedAt);
+  assert.equal(savedItemFor(saved, c).futureAvg, 12.5);
+  // an undo tapped twice, or after a fresh save of the same trade, adds nothing
+  assert.equal(restoreSaved(saved, had).length, 2);
+  assert.equal(restoreSaved([other, savedFromCandidate(c, 99)], had).length, 2);
+});
+
+test("☆ ONE REMOVER: App.jsx's delSaved reads withoutSaved(); the star never returns early on a saved card", () => {
+  assert.ok(/const delSaved = async \(id\) => \{[^\n]*withoutSaved\(/.test(APP), "delSaved is not the one remover");
+  assert.equal(APP.split("withoutSaved(").length - 1, 1, "a second remover appeared");
+  assert.ok(!APP.includes("if (!item || isSaved(c)) return;"), "the early return that made ☆ do nothing is back");
+  assert.ok(/await delSaved\(had\.id\)/.test(APP), "a second tap does not remove through delSaved");
+});
+
+
+test("ONE COMPARE, ONE SIZE (PR 61): the Compare picture draws the candidate at the size the budget buys — the rows' size", () => {
+  const c = candidateOf({ name: "Bear Put Spread", legs: [{ side: 1, type: "put", strike: 13, qty: 1 }, { side: -1, type: "put", strike: 12, qty: 1 }],
+    entryNet: 0.4, maxProfit: 60, maxLoss: -40, pop: 0.4, spot: 13 }, { ticker: "UNG" });
+  const s = sizedCandidate(c, 15);
+  assert.deepEqual([s.maxProfit, s.maxLoss, s.risk, s.entryNet], [900, -600, 600, 6]);
+  assert.deepEqual(s.legs.map((l) => l.qty), [15, 15]);
+  assert.equal(s.key, c.key, "the same card"); assert.equal(s.pop, c.pop, "the chance does not move with the size");
+  assert.equal(sizedCandidate(c, null), c); assert.equal(sizedCandidate(c, 1), c);
 });
 
 console.log(`\n${passed} passed, ${failures.length} failed\n`);

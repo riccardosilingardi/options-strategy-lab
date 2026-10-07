@@ -496,7 +496,7 @@ check("the rebuilt ticket renders the market, the sliders and the verdict band",
   // 6 — the four numbers that move, at the effective price.
   has(html, "MOST YOU CAN MAKE");
   has(html, "MOST YOU CAN LOSE");
-  has(html, "MADE PER $1 RISKED");
+  has(html, "RETURN ON RISK");   // PR 61: the card's label and unit (it read "MADE PER $1 RISKED")
   has(html, "NOTIONAL CONTROLLED");
   // 7 — the warnings are NOT here: they are in the one panel on the screen.
   hasNot(html, "The four factors disagree");

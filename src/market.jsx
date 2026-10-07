@@ -28,11 +28,11 @@
 // tokens: ui.test.jsx holds this file to the design system.
 // ============================================================================
 import React, { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, RefreshCw, CalendarDays, Wheat, Flame, Gem, CircleDot, GitCompare } from "lucide-react";
+import { ArrowLeft, RefreshCw, CalendarDays, Wheat, Flame, Gem, CircleDot } from "lucide-react";
 import { T, TYPE, BADGE_H } from "./theme.js";
 import { mono, sans, Note, Info, Sheet, Label, Placeholder, IconButton, UnderTabs, SegmentBar, TextBtn, Fold, TAP } from "./ui.jsx";
 import { CandidateCard } from "./card.jsx";
-import { MarketRow, ComparePanel } from "./find.jsx";
+import { MarketRow } from "./find.jsx";
 import { WhySheet, HowWorkedOut } from "./why.jsx";
 import { PriceChart, TaCopilot, scaleStrategy, useCopilot, skillsFor } from "./pro.jsx";
 import { CopilotSection } from "./build.jsx";
@@ -44,18 +44,18 @@ import { signalStance, sentimentDirection, findOrderOf, placeLine } from "./sign
 import { structureName } from "./positionView.js";
 import { undefinedRiskLegs } from "./riskGate.js";
 import { MLEG_MAX_LEGS } from "./alpacaContract.js";
-import { legsLine } from "./path.js";
+import { legsLine, MAX_COMPARE } from "./path.js";
 import { marketRows, rowFigure } from "./rows.js";
 import { dayChange, expectedMove, latestNews, toggleChainLeg, legCell } from "./marketView.js";
 import { nextEvent, eventsFor, localWhen, daysUntil, etDay } from "./events.js";
 import { RULES, money, chanceText, expiryWords, sizedFree, sizedFigures, sizeLine, futureFigures, pastFigures, stopSigns,
-  chanceBasisLabel, meetsRequest, MARKET_TABS, MARKETS_SHEET_TITLE, SAVE_FIRST_CARD, dayChangeText, dayChangeShort,
+  chanceBasisLabel, meetsRequest, MARKET_TABS, MARKETS_SHEET_TITLE, SAVE_FIRST_CARD, UNSAVE_FIRST_CARD, dayChangeText, dayChangeShort,
   ivText, ivRankText, ivRankShort, moveLabel, HEADER_DEFINITIONS, NEWS_NOT_READ, newsHeadlineText, groupHeadText, strategiesLine,
   signalsParts, strategiesNote, MARKET_READ_LINK, BACK_TO_FIND_ARIA, refreshMarketAria, stanceText, futurePastDisagree, needsText,
   OPEN_IN_CHAIN, BUILD_CTA, COMPARE_TICK, MARKET_READ_HEAD, HOW_WORKED_OUT_LINK, MARKET_READ_END, CHAIN_MODES, marketNewsHead, marketNewsAsk,
   noOpenInterestText, underEntryText, THIN, spotLineText, legsMaxText, TRAY_LABELS, uncoveredText, trayEmptyText,
   chainEventText, eventLineText, eventInfoText, dateOnlyWhen, inDaysText, holidayWeekNote, eventsBeforeLabel, CHAIN_HEAD,
-  chainNotLoadedText, marketReadingText, noCardsText, ARIA, readScoreLine,
+  chainNotLoadedText, marketReadingText, noCardsText, ARIA, readScoreLine, compareTrayLine, SEE_THEM,
 } from "./rules.js";
 
 const FS = TYPE.size, FW = TYPE.weight, LH = TYPE.line;
@@ -126,7 +126,11 @@ export function MarketPage({
           seasonal={seasonal} matrix={matrix} iv={u.iv} liqFloor={liqFloor} onBuildLegs={onBuildLegs} />
       )}
 
-      <div style={{ padding: "0 16px" }}><ComparePanel {...compareProps} /></div>
+      {/* ONE COMPARE (PR 61): right after a tick, how many are ticked and the way to the one Compare sheet. Fixed above the
+          bottom bar, so it is on screen where the tap was; the Chain tab has its own tray there. */}
+      {tab !== "chain" && (compareProps.compare || []).length > 0 && (
+        <CompareLine n={compareProps.compare.length} note={compareProps.note || null} onOpen={compareProps.onOpen} />
+      )}
 
       {/* THE MARKETS, BY CATEGORY: the same rows as Find, the current one marked. Picking one keeps the tab. */}
       <Sheet open={sheet === "market:tickers"} title={MARKETS_SHEET_TITLE} value={tk} onClose={() => onSheet(null)}>
@@ -147,6 +151,26 @@ export function MarketPage({
         })}
       </Sheet>
     </div>
+  );
+}
+
+/** "2 of 3 to compare · See them ›" (PR 61), and the refusal of a fourth when there is one. */
+export function CompareLine({ n, note = null, onOpen }) {
+  return (
+    <>
+      <div aria-hidden="true" style={{ height: note ? 88 : 56 }} />
+      <div data-compare-line style={{ position: "fixed", left: 0, right: 0, zIndex: 55, display: "flex", justifyContent: "center", pointerEvents: "none",
+        bottom: `calc(${BADGE_H + NAV_BAR_H}px + env(safe-area-inset-bottom, 0px))` }}>
+        <div role="status" style={{ pointerEvents: "auto", width: "100%", maxWidth: 640, boxSizing: "border-box", background: T.panel,
+          borderTop: `1px solid ${T.field}`, boxShadow: "0 -6px 18px rgba(0,0,0,0.22)", padding: "4px 8px 4px 16px", display: "flex", flexDirection: "column" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ ...sans, flex: 1, fontSize: FS.sm, color: T.ink }}>{compareTrayLine(n, MAX_COMPARE)}</span>
+            <TextBtn height={TAP} onClick={onOpen} style={{ fontSize: FS.sm, fontWeight: FW.bold }}>{SEE_THEM}</TextBtn>
+          </div>
+          {note && <Note color={T.amber} style={{ paddingBottom: 6 }}>{note}</Note>}
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -188,7 +212,7 @@ function MarketHeader({ tk, u, spot, freshLine, bars, clockLine, atm, ivRank, iv
           </span>
         </button>
         {onRefresh && <IconButton label={refreshMarketAria(tk)} onClick={onRefresh} disabled={busy}><RefreshCw size={20} strokeWidth={1.75} aria-hidden="true" /></IconButton>}
-        <IconButton onClick={onSave} disabled={!first} pressed={saved} label={SAVE_FIRST_CARD} color={saved ? T.amber : T.dim}
+        <IconButton onClick={onSave} disabled={!first} pressed={saved} label={saved ? UNSAVE_FIRST_CARD : SAVE_FIRST_CARD} color={saved ? T.amber : T.dim}
           style={{ fontSize: FS.lg }}>{saved ? "★" : "☆"}</IconButton>
       </div>
 
@@ -393,13 +417,21 @@ export function StrategyCard({ x, size, misses, bars, sortedBy, findOrder, saved
       stanceKind={!st ? null : st.kind === "against" ? "against" : st.kind === "neutral" || st.kind === "quiet" ? "neutral" : "with"}
       disagree={disagree}
       actions={(
-        <div data-card-actions style={{ display: "flex", gap: 8, alignItems: "center", minHeight: TAP }}>
-          <IconButton onClick={onSave} pressed={saved} label={ARIA.saveTrade(saved, x.tk, x.name)} color={saved ? T.amber : T.dim}
-            style={{ fontSize: FS.lg, border: `1px solid ${T.field}` }}>{saved ? "★" : "☆"}</IconButton>
-          <IconButton onClick={onTick} pressed={ticked} label={ticked ? COMPARE_TICK.on : COMPARE_TICK.off} color={ticked ? T.blue : T.dim}
-            style={{ border: `1px solid ${ticked ? T.blue : T.field}`, fontSize: FS.md }}>{ticked ? "✓" : <GitCompare size={18} strokeWidth={1.75} aria-hidden="true" />}</IconButton>
-          <button onClick={onChain} style={{ ...btn, background: "transparent", color: T.ink, border: `1px solid ${T.field}` }}>{OPEN_IN_CHAIN}</button>
-          <button onClick={onBuild} style={{ ...btn, background: T.amber, color: T.onAccent, border: "none" }}>{BUILD_CTA}</button>
+        <div data-card-actions style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {/* TWO ROWS SINCE PR 61: the tick shows its word ("Compare" / "✓ Comparing"), and four buttons with words do not
+              fit one phone row ("Open in chain" was cut). ☆ and Compare, then Open in chain and Build ›. */}
+          <div style={{ display: "flex", gap: 8, alignItems: "center", minHeight: TAP }}>
+            <IconButton onClick={onSave} pressed={saved} label={ARIA.saveTrade(saved, x.tk, x.name)} color={saved ? T.amber : T.dim}
+              style={{ fontSize: FS.lg, border: `1px solid ${T.field}` }}>{saved ? "★" : "☆"}</IconButton>
+            {/* THE TICK SHOWS ITS WORD (PR 61): it selects the card for the one Compare sheet. */}
+            <button onClick={onTick} aria-pressed={ticked} data-compare-tick
+              style={{ ...btn, background: ticked ? T.raise : "transparent", color: ticked ? T.blue : T.ink,
+                border: `1px solid ${ticked ? T.blue : T.field}` }}>{ticked ? COMPARE_TICK.on : COMPARE_TICK.off}</button>
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", minHeight: TAP }}>
+            <button onClick={onChain} style={{ ...btn, background: "transparent", color: T.ink, border: `1px solid ${T.field}` }}>{OPEN_IN_CHAIN}</button>
+            <button onClick={onBuild} style={{ ...btn, background: T.amber, color: T.onAccent, border: "none" }}>{BUILD_CTA}</button>
+          </div>
         </div>
       )}
       details={<CandidateCard {...common} misses={[]} direction={stance} badge={badge}

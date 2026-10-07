@@ -1397,6 +1397,10 @@ export const sizedHeading = (n) => (n == null ? "PER CONTRACT" : `FOR ${n} CONTR
  *  "FUTURE (MONTE CARLO)" and the historical replay "PAST YRS (BACKTEST)". */
 export const CARD_LABELS = Object.freeze({ risk: "YOU RISK", profit: "MAX PROFIT", chance: "CHANCE", rr: "RETURN ON RISK",
   future: "FUTURE (MONTE CARLO)", past: "PAST YRS (BACKTEST)" });
+/** A label as a sentence names it ("Future (Monte Carlo)", "Past yrs (backtest)"): the words are CARD_LABELS'. */
+const labelWords = (l) => (l.charAt(0) + l.slice(1).toLowerCase()).replace("monte carlo", "Monte Carlo");
+/* THE COPILOT'S STANDING INSTRUCTION ON THE TWO TILES (owner, PR 61): neither is the more reliable one. */
+export const FUTURE_PAST_EQUAL = `${labelWords(CARD_LABELS.future)} and ${labelWords(CARD_LABELS.past)} answer different questions; never call one of them more reliable than the other.`;
 /** What each of the card's four figures means, one tap behind its label on the compact card (round 2). */
 export const FIGURE_DEFINITIONS = Object.freeze({
   risk: "The most this trade can lose, for the size your budget buys.",
@@ -1760,6 +1764,12 @@ export const rolledFrom = (ref) => `Rolled from ${ref}.`;
 export const FIND_COMPARE_BTN = "Compare ›";
 export const FIND_COPILOT_TITLE = "Ask the copilot";
 export const FIND_COPILOT_HEAD = "COMPARE THE CARDS THAT FIT";
+/** "N cards from M markets fit" (PR 61): the sheet counts CARDS, from `compareCards()`; Find's summary line keeps counting
+ *  rows (one per market). The two say different things in different words, so they cannot contradict each other. */
+export const compareCountLine = (fitting, markets) =>
+  `${fitting} card${fitting === 1 ? "" : "s"} from ${markets} market${markets === 1 ? "" : "s"} fit.`;
+/** The label a card carries in the Compare sheet's table and in the copilot's context (PR 61): C1, C2… */
+export const compareLabel = (rank) => `C${rank}`;
 /** What the sheet's copilot reads: the cards that fit, in the owner's order, at most `max`. */
 export const findCopilotLine = (shown, fitting) =>
   `It reads the ${shown === fitting ? fitting : `first ${shown} of the ${fitting}`} card${fitting === 1 ? "" : "s"} that fit, in your order, ` +
@@ -1836,6 +1846,11 @@ export const DEFAULT_MARKET_TAB = "strategies";
 export const BACK_TO_FIND = "‹ Find";
 export const MARKETS_SHEET_TITLE = "Markets";
 export const SAVE_FIRST_CARD = "Save this market's first card";
+/* ☆ IS A TOGGLE (PR 61, owner 7 Oct 2026): what a tap on a filled star does, and the message line's words. */
+export const UNSAVE_FIRST_CARD = "Remove this market's first card from Saved";
+export const savedLine = (tk, name) => `${tk} ${name} saved. It is under Saved on Find.`;
+export const removedFromSavedLine = (tk, name) => `${tk} ${name} removed from Saved.`;
+export const UNDO = "Undo";
 /** "+0.12 (+0.7%) since the last close", or null when there is no previous close to read. */
 export const dayChangeText = (ch) => (!ch ? null
   : `${ch.change >= 0 ? "+" : "−"}${Math.abs(ch.change).toFixed(2)} (${ch.pct >= 0 ? "+" : "−"}${Math.abs(ch.pct * 100).toFixed(1)}%) since the ${ch.prevDay} close`);
@@ -1897,7 +1912,18 @@ export function futurePastDisagree(future, past) {
   if (f == null || p == null || f === 0 || p === 0 || Math.sign(f) === Math.sign(p)) return null;
   return `Future and past disagree: the past years would have ${p < 0 ? "lost" : "won"} on this one.`;
 }
-export const COMPARE_TICK = Object.freeze({ off: "Compare", on: "✓ comparing" });
+/* ONE COMPARE (PR 61, owner 7 Oct 2026: "I don't understand this button, and it does nothing"). The tick shows its word;
+   after a tap the market page says how many are ticked and opens the one Compare sheet (Find's "Compare ›"). */
+export const COMPARE_TICK = Object.freeze({ off: "Compare", on: "✓ Comparing" });
+export const compareTrayLine = (n, max) => `${n} of ${max} to compare`;
+export const SEE_THEM = "See them ›";
+export const COMPARE_SHEET_TITLE = "Compare";
+/** The Compare sheet's line when cards are ticked: the copilot compares those, not the cards that fit. */
+export const compareTickedLine = (n) => `${n} card${n === 1 ? "" : "s"} you ticked. "Compare the cards" reads ${n === 1 ? "it" : "these"}, not the cards that fit.`;
+export const COMPARE_ONE_MORE = "Tick a second card on a market's Strategies to see them on one picture.";
+export const COMPARE_CLEAR = "Untick all";
+export const compareUntickAria = (tk, name) => `Take ${tk} ${name} out of the comparison`;
+export const COMPARE_GONE = "No longer in the list: the prices moved or a filter hides it.";
 export const OPEN_IN_CHAIN = "Open in chain";
 /* THE FOUR FACTOR BLOCKS ON THE SIGNALS TAB (PR 4): each title says what the factor highlights, in words, beside its
    name — "NEWS · pushes down · 3 headlines". The direction is the factor's own arrow (`components[k].dir`). */
@@ -1935,7 +1961,8 @@ export const noCardsText = (tk, neutral) => `No ${neutral ? "neutral " : ""}card
 /** What a screen reader hears on the new screens (redesign PR 1): the same one home for the words. */
 export const ARIA = Object.freeze({
   categories: "Categories", filters: "Filters", markets: "Markets", expiries: "Expiries", chainShows: "What the chain shows",
-  saveTrade: (saved, tk, name) => `${saved ? "Saved" : "Save"}: ${tk} ${name}`,
+  // WHAT THE TAP WILL DO (PR 61): the star is a toggle, so a filled one says it removes.
+  saveTrade: (saved, tk, name) => `${saved ? "Remove from Saved" : "Save"}: ${tk} ${name}`,
   openMarket: (tk) => `Open ${tk}`,
   marketTabs: (tk) => `${tk}: overview, strategies or chain`,
   pickMarket: (tk) => `${tk}: pick another market`,
@@ -3549,6 +3576,13 @@ export function qualityFloor({
     liquidity, spread, comboSpread, crossing, reward: rewardCheck, reasons };
 }
 
+/* THE COPILOT'S MODEL, ONE HOME (PR 61, owner 7 Oct 2026). pro.jsx's `askAI()` and autopilot.mjs's brief read it; the
+   model itself is unchanged, only its home moved. copilot.test.jsx fails if the id is typed in any other source file. */
+export const COPILOT_MODEL = "claude-sonnet-4-6";
+/* WHEN A GATE CHECK IS WORTH NAMING IN "PRE-TRADE ANALYSIS" (PR 61): a check that fails, or one whose figure sits at
+   this share of its limit or more. A copy constant for the prompt and the review rows, not a trading rule. */
+export const GATE_NEAR_LIMIT = 0.9;
+
 /** The rules block injected into every model prompt. English, generated. */
 export const copilotRulesBlock = () =>
   `Trading rules, to be applied in EVERY analysis: defined risk only — no uncovered short legs, ` +
@@ -3830,6 +3864,26 @@ export function atRiskNowLine(openRisk, n) {
   const k = Math.max(0, Math.round(Number(n) || 0));
   return `at risk now: ${money(openRisk)} across ${k} position${k === 1 ? "" : "s"}`;
 }
+
+/* OPEN RISK SAYS WHAT IT INCLUDES (PR 61, owner 7 Oct 2026). Positions' AT RISK and Build's "Open risk after this" count
+   a record Alpaca does not hold (J-0001, GDX, "Not on Alpaca", $4,500) and an order not filled yet, because the gate
+   counts the book (`bookPositions()`: owned plus working). The arithmetic is unchanged; this names those amounts, read
+   off the gate's own terms (`limits.openRiskParts`), never a second sum.
+   @param parts [{ risk, ticker, kind: "notHeld" | "working" }] — only the records worth naming */
+const andWords = (xs) => (xs.length <= 1 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`);
+export function openRiskIncludesLine(parts = []) {
+  const xs = (parts || []).filter((p) => p && Number.isFinite(Number(p.risk)) && Number(p.risk) > 0);
+  if (!xs.length) return null;
+  return `Includes ${andWords(xs.map((p) => (p.kind === "working"
+    ? `${money(p.risk)} on the ${p.ticker} order still working` : `${money(p.risk)} on ${p.ticker} (not on Alpaca)`)))}.`;
+}
+/* A TRADE ALREADY SENT IS NOT ADDED TWICE (PR 61, owner's answer 7 Oct 2026: "say it, don't add"). On 6 Oct USO 145/152
+   ×17, sent and still loaded on Build, read "Open risk after this $18,827" — $14,101 already open (USO's $4,726 in it)
+   plus $4,726 again. Build now says so and shows the open risk as it is; a second Send is a second order. */
+export const alreadySentLine = (ref, risk, working) => (working
+  ? `Already sent as ${ref}: its order is working at Alpaca, and its ${money(risk)} is already in the open risk.`
+  : `Already open as ${ref}: its ${money(risk)} is already in the open risk.`);
+export const ALREADY_SENT_REVIEW = "This trade is already in your book: sending it again opens a second order, and the check below counts both.";
 
 /* =====================================================================
    THE REQUEST — ONE STATE FOR "WHAT I WANT", ABOVE BOTH DOORS.
@@ -4341,6 +4395,26 @@ export function reconcileFigures(card, build) {
     : `⚠ Moved since the card, per contract: ${moved.map((r) => `${r.k} ${r.card} → ${r.build}`).join(" · ")}. ` +
       `The quotes refreshed or the price was changed in the ticket; these are the ones that will be sent.`;
   return { same: moved.length === 0, rows, line };
+}
+
+/**
+ * BUILD SAYS WHEN ITS LIMIT IS NOT THE CARD'S PRICE (PR 61, owner 7 Oct 2026). The card is priced at the app's starting
+ * limit (Negotiate); on Build, Mid or Pay move the risk and the max profit and nothing said why. One line under the
+ * Order, from the same sized figures (`sizedFigures()`) on both sides: "Card at 6.75 · now 6.61: risk −$98, max profit
+ * +$98". Null when the two prices are the same to the cent (nothing to say), or when either is unread.
+ * @param card  the card's figures (`figureSet()`, per contract: entry per share, maxLoss, maxProfit)
+ * @param now   the analysis at the limit in force (`AE`)
+ * @param n     the contracts on the order
+ */
+export function limitMovedLine(card, now, n) {
+  if (!card || !now || !known(card.entry) || !known(now.entry)) return null;
+  const c = Math.round(Math.abs(Number(card.entry)) * 100), w = Math.round(Math.abs(Number(now.entry)) * 100);
+  if (c === w) return null;
+  const a = sizedFigures(card, n), b = sizedFigures(now, n);
+  const parts = [];
+  if (a && b && a.risk != null && b.risk != null) parts.push(`risk ${signedMoney(Math.round(b.risk - a.risk))}`);
+  if (a && b && a.profit != null && b.profit != null) parts.push(`max profit ${signedMoney(Math.round(b.profit - a.profit))}`);
+  return `Card at ${(c / 100).toFixed(2)} · now ${(w / 100).toFixed(2)}${parts.length ? `: ${parts.join(", ")}` : ""}`;
 }
 
 /** A money figure with its unit, always: per contract, or for N. */

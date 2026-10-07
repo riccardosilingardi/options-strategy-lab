@@ -17,9 +17,9 @@ import React, { useState } from "react";
 import { Minus, Plus, ArrowUp } from "lucide-react";
 import { T, TYPE } from "./theme.js";
 import { mono, sans, Note, Info, Sheet, Reveal, FilterChip, TAP } from "./ui.jsx";
-import { useCopilot, useTicketSend, SKILLS, BUILD_SKILL_IDS, Markdown, readQty } from "./pro.jsx";
+import { useCopilot, useTicketSend, SKILLS, BUILD_SKILL_IDS, Markdown, readQty, CONTINUE_LABEL } from "./pro.jsx";
 import { FACTOR_LABEL } from "./why.jsx";
-import { CARD_LABELS, BUILD_DEFINITIONS, money, signedMoney, chanceText, futureTile, ARIA, VARIANT_LOAD, NO_CEILING, LIMIT_CHOICES, parseLimitText } from "./rules.js";
+import { CARD_LABELS, BUILD_DEFINITIONS, money, signedMoney, chanceText, returnText, futureTile, ARIA, VARIANT_LOAD, NO_CEILING, LIMIT_CHOICES, parseLimitText } from "./rules.js";
 
 const FS = TYPE.size, FW = TYPE.weight, LH = TYPE.line;
 const tnum = { fontVariantNumeric: "tabular-nums" };
@@ -121,7 +121,8 @@ export function NumbersSection({ figures, rr, pop, breakevens = [], future, past
     ["profit", sentence(CARD_LABELS.profit), figures && figures.profit != null ? money(figures.profit) : figures && figures.unbounded ? "no ceiling" : "—", T.ink],
     ["loss", LOSS_LABEL, figures && figures.risk != null ? money(figures.risk) : "—", T.ink],
     ["breakeven", BE_LABEL, breakevens.length ? breakevens.map((b) => Number(b).toFixed(2)).join(" · ") : "—", T.ink],
-    ["rr", sentence(CARD_LABELS.rr), rr == null ? "—" : Number(rr).toFixed(2), T.ink],
+    // `returnText()`, the card's own (PR 61): Find printed 181% and Build 1.81 for one trade.
+    ["rr", sentence(CARD_LABELS.rr), rr == null ? "—" : returnText(rr), T.ink],
   ];
   return (
     <Section label="The numbers" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -245,7 +246,9 @@ export function CopilotSection({ ask, skills: own = null, label = null, heading 
               {p.a && <Markdown text={p.a.content} style={{ marginTop: 4, lineHeight: LH.body }} />}
               {p.a && (
                 <div style={{ ...sans, fontSize: FS.xs, color: p.a.truncated ? T.amber : T.mut, marginTop: 4 }}>
-                  {p.a.truncated ? "Cut off before the end: ask again for the rest." : "Filed in the Journal."}
+                  {!p.a.truncated ? "Filed in the Journal." : p.a.reason === "max_tokens"
+                    ? "Stopped at its length limit: Continue picks up where it stopped."
+                    : "Cut off before the end: ask again for the rest."}
                 </div>
               )}
             </div>
@@ -255,6 +258,7 @@ export function CopilotSection({ ask, skills: own = null, label = null, heading 
             : <Note>Thinking… the answer waits here if you scroll away.</Note>)}
           {pairs.length > 0 && !ask.busy && (
             <div style={{ display: "flex", gap: 12 }}>
+              {ask.canContinue && <LinkBtn data-copilot-continue onClick={ask.cont}>{CONTINUE_LABEL}</LinkBtn>}
               <LinkBtn onClick={ask.printConvo}>Print</LinkBtn>
               <LinkBtn onClick={ask.clear}>Clear</LinkBtn>
             </div>
@@ -367,6 +371,8 @@ export function OrderSection({ order }) {
         </div>
       )}
       {o.verdict && !o.verdict.known && <div style={{ ...sans, fontSize: FS.sm, color: T.mut, lineHeight: LH.body, marginTop: 4 }}>{o.verdict.sentence}</div>}
+      {/* PR 61: when the limit in force is not the price the card was built at, what that moves (`limitMovedLine()`). */}
+      {o.moved && <div data-limit-moved style={{ ...mono, ...tnum, fontSize: FS.xs, color: T.body, marginTop: 4 }}>{o.moved}</div>}
       <Rule />
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
         <button onClick={() => setRiskDef((v) => !v)} aria-expanded={riskDef}
@@ -409,6 +415,9 @@ export function OrderSection({ order }) {
           <span style={{ ...sans, fontSize: FS.xs, color: T.mut, marginLeft: 6 }}>{o.openRisk.of}</span>
         </span>
       </div>
+      {/* PR 61: a trade already in the book is not added twice, and the open risk says what it includes. */}
+      {o.openRisk.sent && <div data-already-sent style={{ ...sans, fontSize: FS.xs, color: T.amber, lineHeight: LH.body }}>{o.openRisk.sent}</div>}
+      {o.openRisk.includes && <div data-risk-includes style={{ ...sans, fontSize: FS.xs, color: T.mut, lineHeight: LH.body }}>{o.openRisk.includes}</div>}
       {o.room}
     </Section>
   );
@@ -529,6 +538,7 @@ export function ReviewSheet({ r, ts }) {
             ))}
             <Info label="the checks in full">{r.checksFull}</Info>
           </div>
+          {r.sentNote && <div data-review-sent-note style={{ ...sans, fontSize: FS.sm, color: T.amber, lineHeight: LH.body }}>{r.sentNote}</div>}
           {r.clockLine && <div style={{ ...sans, fontSize: FS.sm, color: T.mut }}>{r.clockLine}</div>}
           {r.reason}
           {refused && (
