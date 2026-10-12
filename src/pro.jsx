@@ -10,7 +10,9 @@ import { RULES, ruleBadge, takeProfitLabel, takeProfitTarget, scaleOutLabel, sto
   contractListing, unlistedContractNote, unquotedLegNote, unquotedLegPointer, marketOrderNote,
   taCopilotPrompt, TA_QUESTIONS, TA_DISCLAIMER, TA_NEVER_PROPOSES, TA_OWN_QUESTION,
   ivProvenance, noRecordNote, copilotOverreach, copilotOverreachNote, COPILOT_MODEL, GATE_NEAR_LIMIT, CARD_LABELS, FUTURE_PAST_EQUAL, returnText, notInFiguresLine,
-  spotNowLabel, beAwayLabel, sdLabel, exitMarkLabel, zoneOddsLabel, CROSS_HINT, CROSS_ARIA, howToReadChart } from "./rules.js";
+  spotNowLabel, beAwayLabel, sdLabel, exitMarkLabel, zoneOddsLabel, CROSS_HINT, CROSS_ARIA, howToReadChart,
+  GREEK_TABS, GREEK_UNITS, greekLegend, GREEK_NO_EXIT, greeksInfo, greekNowLine, greekText, SCENARIO_MAX_MOVES, SCENARIO_MAX_DEFAULT,
+  SCENARIO_WORDS, scenarioMoveText, scenarioMaxLabel, scenarioInfo, scenarioPnlText, greekNotDrawn } from "./rules.js";
 import { ungroundedFigures } from "./grounding.js";
 import { contractsOf, positionSize, bookPositions, positionStage, autopilotHorizonNote, autopilotVolNote, positionForHolding, journalPnlTotal, scoredJournal } from "./journal.js";
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, LineStyle } from "lightweight-charts";
@@ -25,13 +27,13 @@ import { erf, netBS } from "./engine.js";
 import { ARROW, REGIONS, regionSignals, tagImpacts, taRead } from "./signals.js";
 import { eventsBrief, EVENT_TABLE_END } from "./events.js";
 import { useNarrow, BandThumbnail, payoffBands, bandTakeaway, pnl$ } from "./visuals.jsx";
-import { chartDist, zoneOdds, coneEdges, exitMark, awayFrom, crosshairReadout, crossStep, crossKey } from "./tradeChart.js";
+import { chartDist, zoneOdds, coneEdges, exitMark, awayFrom, crosshairReadout, crossStep, crossKey, scenarioGrid, greekCurves, brokerGreeks } from "./tradeChart.js";
 import { DEMO, DEMO_TOOLTIP } from "./demo.js";
 import { PREVIEW, PREVIEW_READ_ONLY } from "./deploy.js";
 import { reduceRatios, orderQty, mlegLimitPrice, limitWords, orderLimitWords, limitKind, signedLimitFor, orderBody, orderPreviewLines, orderOutcome, alpacaErrorText, cancelOutcome, cancelWaiting } from "./order.js";
 import { hasOpenInterest, sourceNote, openInterestNote, fetchChain } from "./chain.js";
 import { CloseChoice } from "./orders.jsx";
-import { Btn, Note, Info, Panel, Label, Stat, Reveal, mono, sans, MONO_STACK, TAP } from "./ui.jsx";
+import { Btn, Note, Info, Panel, Label, Stat, Reveal, mono, sans, MONO_STACK, TAP, UnderTabs, Segments } from "./ui.jsx";
 import { TYPE } from "./theme.js";
 import { closeSummaryLine } from "./orderRow.js";
 import { marketClockLine } from "./clock.js";
@@ -1459,7 +1461,7 @@ function signalsBrief(fused, reading = null) {
 export function buildContext(ctx) {
   const { store, scan, news, ticker, legs, expKey, A, spot, seasonalSrc, otherCards = null, reviewChecks = null, sized = null, position = null,
     findCards = null, findFilters = null, findMisses = null, chart = null, variants = null, optimize = null, closedTrade = null,
-    signals = null } = ctx;
+    signals = null, chances = null } = ctx;
   /* THE CALENDAR (PR 65): the reports before the expiry in question, by market — the cards' markets on Find (to the latest
      expiry among each market's cards), else the trade's or the position's market to its expiry. None without an expiry. */
   const events = (() => {
@@ -1517,6 +1519,9 @@ export function buildContext(ctx) {
     reviewChecklist: Array.isArray(reviewChecks) ? reviewChecks.map((c) => ({ check: c.text, value: c.value ?? null, passed: c.ok ?? null,
       ...(Number.isFinite(c.share) ? { shareOfLimit: pctText(c.share, 0), nearLimit: c.share >= GATE_NEAR_LIMIT } : {}) })) : null,
     sizedByTheApp: sized || null,
+    // THE TRADE'S TWO CHANCES (PR 67): the market's (implied by this expiry's option prices, IBKR's method) and the OSL
+    // model's (one volatility, the measured season), as the CHANCE tile prints them, and the one line saying why they differ.
+    chances: chances || null,
     // ONE OPEN POSITION (redesign PR 3, the position's screen): its entry, its exit plan, now — the screen's own figures.
     position: position || null,
     // FIND'S COMPARE (PR 4): the cards that fit, in the owner's order, up to 20 — each card's own figures and Greeks as the
@@ -3074,8 +3079,11 @@ export function confluence(seasonalM, ta) {
 // The fan's bands: ±1 standard deviation (68.3 of 100 outcomes) and ±1.96 (95).
 const FAN_Z = Object.freeze({ lo95: -1.96, lo68: -1, mid: 0, hi68: 1, hi95: 1.96 });
 export const UNIFIED_SESSIONS = 60;
-export function UnifiedView({ ticker, dte, sigma, driftAnnual = 0, curve, legs, breakevens, spot, entryNet = 0, expKey = null, contracts = 1, onTa }) {
+export function UnifiedView({ ticker, dte, sigma, driftAnnual = 0, curve, legs, breakevens, spot, entryNet = 0, expKey = null, contracts = 1, onTa,
+  ivs = null, reads = null }) {
   const [allBars, setAllBars] = useState(null);
+  // PR 67 (task 67.4): IBKR's tabs above the chart. P&L is the chart as it was; a Greek draws the position against price.
+  const [tab, setTab] = useState("pnl");
   const [range, setRange] = useState(UNIFIED_SESSIONS);
   const [err, setErr] = useState(null);
   const wrapRef = React.useRef(null);
@@ -3108,13 +3116,129 @@ export function UnifiedView({ ticker, dte, sigma, driftAnnual = 0, curve, legs, 
     const n = range <= UNIFIED_SESSIONS ? UNIFIED_SESSIONS : range <= 400 ? 250 : allBars.length;
     return allBars.slice(-n);
   }, [allBars, range]);
-  const shell = (inner) => <div ref={wrapRef} style={{ maxWidth: "100%" }}>{inner}</div>;
-  if (err) return shell(<div style={{ ...sans, fontSize: FS.sm, color: T.mut }}>The price history is not loaded: {err}</div>);
-  if (!bars || !bars.length || !spot || !curve?.length) return shell(<div style={{ ...sans, fontSize: FS.sm, color: T.mut }}>Loading the chart…</div>);
+  const pnl = err ? <div style={{ ...sans, fontSize: FS.sm, color: T.mut }}>The price history is not loaded: {err}</div>
+    : !bars || !bars.length || !spot || !curve?.length ? <div style={{ ...sans, fontSize: FS.sm, color: T.mut }}>Loading the chart…</div>
+    : <UnifiedChart W={W} ticker={ticker} bars={bars} range={range} onRange={setRange} dte={dte} sigma={sigma} driftAnnual={driftAnnual}
+      curve={curve} legs={legs} breakevens={breakevens} spot={spot} entryNet={entryNet} expKey={expKey} contracts={contracts} />;
   return (
     <div ref={wrapRef} data-unified style={{ maxWidth: "100%" }}>
-      <UnifiedChart W={W} ticker={ticker} bars={bars} range={range} onRange={setRange} dte={dte} sigma={sigma} driftAnnual={driftAnnual}
-        curve={curve} legs={legs} breakevens={breakevens} spot={spot} entryNet={entryNet} expKey={expKey} contracts={contracts} />
+      <UnderTabs items={GREEK_TABS} value={tab} onChange={setTab} label="What the chart draws" style={{ padding: 0, marginBottom: 8 }} />
+      {tab === "pnl" ? pnl : <GreekChart W={W} greek={tab} legs={legs} spot={spot} dte={dte} ivs={ivs} reads={reads} contracts={contracts} expKey={expKey} />}
+      <ScenarioTable legs={legs} entryNet={entryNet} spot={spot} dte={dte} ivs={ivs} contracts={contracts} />
+    </div>
+  );
+}
+
+/**
+ * ONE GREEK OF THE WHOLE POSITION AGAINST PRICE (PR 67, task 67.4; IBKR's tabs): today (ink) and on the exit day (blue,
+ * dashed), for Build's size, over the same ±30% the "now" curve covers; today's price an amber line, and on it a dot at the
+ * broker's own figure when every leg carries one (read). Every number is `greekCurves()` / `brokerGreeks()`'s.
+ */
+export function GreekChart({ W = 340, greek, legs, spot, dte, ivs, reads = null, contracts = 1, expKey = null }) {
+  const cv = greekCurves({ legs, spot, dte, ivs, contracts, greek });
+  const tab = GREEK_TABS.find((t) => t.id === greek);
+  if (!cv) return <Note>{greekNotDrawn(tab ? tab.label : greek)}</Note>;
+  const read = brokerGreeks(legs, reads, contracts)[greek];
+  const exit = exitMark(expKey, dte);
+  const leg = greekLegend(exit ? exit.day : null);
+  const H = 180, padL = 4, padR = 44, padT = 10, padB = 20;
+  const vals = [...cv.points.map((p) => p.today), ...cv.points.map((p) => p.exit), read, 0].filter((v) => v != null && Number.isFinite(v));
+  let yMin = Math.min(...vals), yMax = Math.max(...vals);
+  if (yMax - yMin < 1e-9) { yMin -= 1; yMax += 1; }
+  const pad = (yMax - yMin) * 0.08; yMin -= pad; yMax += pad;
+  const s0 = cv.points[0].s, s1 = cv.points[cv.points.length - 1].s;
+  const X = (s) => padL + ((s - s0) / (s1 - s0)) * (W - padL - padR);
+  const Y = (v) => padT + (1 - (v - yMin) / (yMax - yMin)) * (H - padT - padB);
+  const path = (k) => cv.points.filter((p) => p[k] != null).map((p, i) => `${i ? "L" : "M"}${X(p.s).toFixed(1)},${Y(p[k]).toFixed(1)}`).join("");
+  const now = scenarioGrid({ legs, entryNet: 0, spot, dte, ivs, contracts, maxMove: SCENARIO_MAX_DEFAULT });
+  const today = now && now.columns[3].today ? now.columns[3].today[greek] : null;
+  const unit = GREEK_UNITS[greek];
+  return (
+    <div data-greek-chart={greek}>
+      <svg width={W} height={H} role="img" aria-label={`${tab.label} of the whole position against price, today and at the exit, in ${unit}`}
+        style={{ display: "block", maxWidth: "100%" }}>
+        {[0, 1, 2, 3].map((i) => {
+          const v = yMin + (i / 3) * (yMax - yMin);
+          return (<g key={i}>
+            <line x1={padL} x2={W - padR} y1={Y(v)} y2={Y(v)} stroke={T.line} strokeWidth={0.6} />
+            <text x={W - padR + 4} y={Y(v) + 4} fill={T.dim} fontSize={FS.xs} fontFamily={MONO_STACK}>{greekText(v)}</text>
+          </g>);
+        })}
+        <line x1={padL} x2={W - padR} y1={Y(0)} y2={Y(0)} stroke={T.field} strokeWidth={1} />
+        <line x1={X(spot)} x2={X(spot)} y1={padT} y2={H - padB} stroke={T.amber} strokeWidth={1} strokeDasharray="3 3" />
+        <path data-greek-line="today" d={path("today")} fill="none" stroke={T.ink} strokeWidth={1.8} />
+        {cv.exitDays != null && <path data-greek-line="exit" d={path("exit")} fill="none" stroke={T.blue} strokeWidth={1.6} strokeDasharray="5 4" />}
+        {read != null && <circle data-greek-read cx={X(spot)} cy={Y(read)} r={4} fill={T.amber} stroke={T.bg} strokeWidth={1.5} />}
+        <text x={padL} y={H - 5} fill={T.dim} fontSize={FS.xs} fontFamily={MONO_STACK}>{s0.toFixed(2)}</text>
+        <text x={X(spot)} y={H - 5} fill={T.amber} fontSize={FS.xs} fontFamily={MONO_STACK} textAnchor="middle">{Number(spot).toFixed(2)}</text>
+        <text x={W - padR} y={H - 5} fill={T.dim} fontSize={FS.xs} fontFamily={MONO_STACK} textAnchor="end">{s1.toFixed(2)}</text>
+      </svg>
+      <div data-greek-now style={{ ...mono, fontSize: FS.xs, lineHeight: LH.body, color: T.ink, fontVariantNumeric: "tabular-nums", marginTop: 4 }}>
+        {greekNowLine({ label: tab.label, unit, price: spot, today, read })}</div>
+      <div style={{ ...sans, fontSize: FS.xs, lineHeight: LH.body, color: T.mut, display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+        <span><span aria-hidden="true" style={{ color: T.ink }}>━</span> {leg.today}</span>
+        {cv.exitDays != null ? <span><span aria-hidden="true" style={{ color: T.blue }}>╍</span> {leg.exit}</span> : <span>{GREEK_NO_EXIT}</span>}
+        <Info label="where the Greeks come from">{greeksInfo()}</Info>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * THE SCENARIO TABLE (PR 67, task 67.3; IBKR's): the columns move today's price by −max … +max in thirds; the rows are the
+ * price, the P&L for Build's size and the whole position's delta, gamma, vega and theta; "Today" (Black-Scholes on each leg's
+ * own IV) or "At expiry" (the payoff; the Greeks zero there). Every figure is `scenarioGrid()`'s; nothing is computed here.
+ */
+export function ScenarioTable({ legs, entryNet, spot, dte, ivs, contracts = 1 }) {
+  const [set, setSet] = useState("today");
+  const [mx, setMx] = useState(SCENARIO_MAX_DEFAULT);
+  const g = scenarioGrid({ legs, entryNet, spot, dte, ivs, contracts, maxMove: mx });
+  if (!g) return null;
+  const which = set === "today" && g.columns.some((c) => c.today) ? "today" : "expiry";
+  const W = SCENARIO_WORDS;
+  const cell = (id, c) => {
+    if (id === "price") return c.price.toFixed(2);
+    const f = c[which];
+    if (!f) return "\u2014";
+    return id === "pnl" ? scenarioPnlText(f.pnl) : greekText(f[id]);
+  };
+  // Tight enough for seven columns at 390px wide; the label column stays put if a wide figure makes the table scroll.
+  const th = { ...sans, fontSize: FS.xs, color: T.mut, fontWeight: FW.regular, textAlign: "left", padding: "4px 4px 4px 0", position: "sticky", left: 0,
+    background: T.panel, whiteSpace: "nowrap" };
+  const td = { ...mono, fontSize: FS.xs, color: T.ink, textAlign: "right", padding: "4px 0 4px 4px", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums",
+    letterSpacing: "-0.03em" };
+  return (
+    <div data-scenario style={{ marginTop: 12, display: "grid", gap: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+        <span style={{ ...sans, fontSize: FS.sm, fontWeight: FW.bold, color: T.ink }}>{W.title}</span>
+        <Segments label={W.title} value={which} onChange={setSet} items={[{ id: "today", label: W.today }, { id: "expiry", label: W.expiry }]} />
+      </div>
+      <div role="group" aria-label={W.max} style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+        <span style={{ ...sans, fontSize: FS.xs, color: T.mut }}>{W.max}</span>
+        {SCENARIO_MAX_MOVES.map((m) => (
+          <button key={m} onClick={() => setMx(m)} aria-pressed={mx === m}
+            style={{ ...mono, fontSize: FS.xs, minHeight: TAP, minWidth: TAP, padding: "0 6px", borderRadius: 8, cursor: "pointer",
+              background: mx === m ? T.raise : "transparent", color: mx === m ? T.ink : T.mut, border: "none" }}>{scenarioMaxLabel(m)}</button>
+        ))}
+      </div>
+      {/* Into the section's own padding (14px a side), so seven columns fit a phone; a wider figure scrolls the table, not the page. */}
+      <div style={{ overflowX: "auto", margin: "0 -14px", padding: "0 14px" }}>
+        <table aria-label={W.aria} style={{ borderCollapse: "collapse", minWidth: "100%" }}>
+          <thead><tr>
+            <th scope="col" style={th}>{W.move}</th>
+            {g.columns.map((c) => <th key={c.move} scope="col" style={{ ...td, color: c.move === 0 ? T.amber : T.mut, fontWeight: FW.bold }}>{scenarioMoveText(c.move)}</th>)}
+          </tr></thead>
+          <tbody>
+            {Object.entries(W.rows).map(([id, label]) => (
+              <tr key={id} data-scenario-row={id} style={{ borderTop: `1px solid ${T.line}` }}>
+                <th scope="row" style={th}>{label}</th>
+                {g.columns.map((c) => <td key={c.move} style={{ ...td, color: id === "pnl" && c[which] ? (c[which].pnl > 0 ? T.green : c[which].pnl < 0 ? T.violet : T.ink) : T.ink }}>{cell(id, c)}</td>)}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <Info label="how the table is worked out">{scenarioInfo()}</Info>
     </div>
   );
 }

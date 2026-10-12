@@ -7,11 +7,14 @@
 // ============================================================================
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { UnifiedChart } from "./pro.jsx";
+import { UnifiedChart, GreekChart, ScenarioTable } from "./pro.jsx";
+import { analyze } from "./App.jsx";
 import { payoffBands } from "./visuals.jsx";
 import { terminalExact, payoff, Phi } from "./engine.js";
-import { RULES, CROSS_HINT, chanceText, signedMoney, spotNowLabel } from "./rules.js";
-import { chartDist, zoneOdds, coneEdges, exitMark, awayFrom, crosshairReadout, crossStep, crossKey } from "./tradeChart.js";
+import { RULES, CROSS_HINT, chanceText, signedMoney, spotNowLabel, SCENARIO_MAX_MOVES, SCENARIO_MAX_DEFAULT, scenarioMoveText, SCENARIO_WORDS,
+  GREEK_TABS } from "./rules.js";
+import { chartDist, zoneOdds, coneEdges, exitMark, awayFrom, crosshairReadout, crossStep, crossKey, scenarioGrid, greekCurves,
+  brokerGreeks } from "./tradeChart.js";
 
 let passed = 0;
 const failures = [];
@@ -124,6 +127,89 @@ check("THE CHART IS A SLIDER (keyboard), SAYS HOW TO READ A PRICE AT REST, AND R
   has(at, 'aria-valuenow="370"');
   has(at, "touch-action:none");                       // only the handle takes the drag; the page still scrolls over the chart
   has(at, "touch-action:pan-y");
+});
+
+/* ====================================================================
+   PR 67 (tasks 67.3 and 67.4) — THE SCENARIO TABLE AND THE GREEK TABS, against the figures Build already prints.
+==================================================================== */
+const BUILD = (() => {
+  const f = FAMILIES["GLD bear put 382/363"];
+  const q = (l) => ({ 382: { bid: 12.1, ask: 12.5, mid: 12.3, iv: 0.19 }, 363: { bid: 5.4, ask: 5.7, mid: 5.55, iv: 0.21 } })[l.strike];
+  return { ...f, a: analyze(f.legs, f.S, POLICY.dte, 0.18, q), ivs: [0.19, 0.21] };
+})();
+
+check("THE TABLE'S COLUMNS ARE THE LARGEST MOVE IN THIRDS, 0 IN THE MIDDLE, AND THE SWITCH CHANGES ONLY THAT", () => {
+  for (const mx of SCENARIO_MAX_MOVES) {
+    const g = scenarioGrid({ legs: BUILD.legs, entryNet: BUILD.a.entry, spot: BUILD.S, dte: POLICY.dte, ivs: BUILD.ivs, contracts: 3, maxMove: mx });
+    eq(g.columns.length, 7, `${mx}: seven columns`);
+    g.columns.forEach((c, i) => near(c.move, ((i - 3) * mx) / 3, 1e-12, `${mx}: column ${i}`));
+    near(g.columns[3].price, BUILD.S, 1e-9, "the middle column is today's price");
+  }
+  eq(SCENARIO_MAX_DEFAULT, 0.30, "IBKR's default, ±30%");
+  eq(["−30%", "−20%", "−10%", "0", "+10%", "+20%", "+30%"].join(" "),
+    scenarioGrid({ legs: BUILD.legs, entryNet: 1, spot: 100, dte: 30, maxMove: 0.3 }).columns.map((c) => scenarioMoveText(c.move)).join(" "), "the heads");
+});
+
+check("THE TABLE NEVER COMPUTES A SECOND P&L: at expiry it is the crosshair's; today it is Build's 'now' curve, for the size", () => {
+  const n = 3;
+  const g = scenarioGrid({ legs: BUILD.legs, entryNet: BUILD.a.entry, spot: BUILD.S, dte: POLICY.dte, ivs: BUILD.ivs, contracts: n });
+  for (const c of g.columns) {
+    const x = crosshairReadout({ ticker: "GLD", price: c.price, expKey: "2026-11-20", legs: BUILD.legs, entryNet: BUILD.a.entry, contracts: n, dist: null });
+    near(c.expiry.pnl, x.pnl, 1e-6, `expiry P&L at ${c.price}`);
+    for (const k of ["delta", "gamma", "vega", "theta"]) eq(c.expiry[k], 0, `at expiry ${k} is zero, as IBKR shows it`);
+    // ±10/20/30% are points of analyze()'s grid (0.7S … 1.3S in 240 steps): its "now" P&L per contract, to the dollar.
+    const pt = BUILD.a.curve.reduce((b, p) => (Math.abs(p.s - c.price) < Math.abs(b.s - c.price) ? p : b));
+    near(c.today.pnl / n, pt.now, 0.51 + Math.abs(pt.s - c.price) * 100, `today's P&L at ${c.price}`);
+  }
+});
+
+check("…AND TODAY'S GREEKS AT TODAY'S PRICE ARE BUILD'S OWN (analyze()'s), for the size", () => {
+  const n = 4;
+  const g = scenarioGrid({ legs: BUILD.legs, entryNet: BUILD.a.entry, spot: BUILD.S, dte: POLICY.dte, ivs: BUILD.ivs, contracts: n });
+  const t = g.columns[3].today, G = BUILD.a.greeks;
+  near(t.delta, G.delta * 100 * n, 1e-6, "delta in shares");
+  near(t.gamma, G.gamma * 100 * n, 1e-6, "gamma in shares per $1");
+  near(t.theta, G.theta * n, 1e-6, "theta, $ a day (analyze()'s is per contract)");
+  near(t.vega, G.vega * n, 1e-6, "vega, $ per vol point");
+  // Without each leg's IV there is no "today", never a zero.
+  eq(scenarioGrid({ legs: BUILD.legs, entryNet: 1, spot: 100, dte: 30, ivs: [0.2] }).columns[0].today, null, "one IV for two legs");
+  eq(scenarioGrid({ legs: BUILD.legs, entryNet: 1, spot: null, dte: 30 }), null, "no price, no table");
+});
+
+check("THE GREEK TABS: the curve at today's price is the table's middle column; no exit line inside the exit window", () => {
+  for (const greek of ["delta", "gamma", "vega", "theta"]) {
+    const cv = greekCurves({ legs: BUILD.legs, spot: BUILD.S, dte: POLICY.dte, ivs: BUILD.ivs, contracts: 2, greek, lo: BUILD.S, hi: BUILD.S * 1.3 });
+    const g = scenarioGrid({ legs: BUILD.legs, entryNet: BUILD.a.entry, spot: BUILD.S, dte: POLICY.dte, ivs: BUILD.ivs, contracts: 2 });
+    near(cv.points[0].today, g.columns[3].today[greek], 1e-9, greek);
+    eq(cv.exitDays, RULES.exitDTE, `${greek}: the exit is ${RULES.exitDTE} days before the expiry`);
+    if (!cv.points.every((p) => Number.isFinite(p.exit))) throw new Error(`${greek}: an exit point is missing`);
+  }
+  const inside = greekCurves({ legs: BUILD.legs, spot: BUILD.S, dte: RULES.exitDTE, ivs: BUILD.ivs, greek: "delta" });
+  eq(inside.exitDays, null, "inside the window"); eq(inside.points[0].exit, null, "no exit point");
+  eq(greekCurves({ legs: BUILD.legs, spot: BUILD.S, dte: 30, ivs: null, greek: "delta" }), null, "no IVs, no curve");
+});
+
+check("THE BROKER'S GREEKS ARE READ AND ADDED UP, AND A LEG WITHOUT ONE LEAVES THAT GREEK UNKNOWN (never a partial sum)", () => {
+  const reads = [{ delta: -0.46, gamma: 0.011, theta: -0.09, vega: 0.52 }, { delta: -0.22, gamma: 0.008, theta: -0.07, vega: null }];
+  const b = brokerGreeks(BUILD.legs, reads, 2);
+  near(b.delta, (-0.46 - -0.22) * 200, 1e-9, "delta: +1 × −0.46 − 1 × −0.22, × 100 × 2");
+  near(b.theta, (-0.09 - -0.07) * 200, 1e-9, "theta");
+  eq(b.vega, null, "one leg sent no vega");
+  eq(brokerGreeks(BUILD.legs, null, 2).delta, null, "nothing read");
+});
+
+check("THE SCREEN: the tabs, a Greek's chart with its read dot only when every leg was read, and the table's six rows", () => {
+  const html = renderToStaticMarkup(<ScenarioTable legs={BUILD.legs} entryNet={BUILD.a.entry} spot={BUILD.S} dte={POLICY.dte} ivs={BUILD.ivs} contracts={3} />);
+  for (const id of ["price", "pnl", "delta", "gamma", "vega", "theta"]) has(html, `data-scenario-row="${id}"`);
+  for (const m of ["−30%", "−20%", "−10%", "+10%", "+20%", "+30%"]) has(html, `>${m}<`);
+  has(html, SCENARIO_WORDS.title); has(html, SCENARIO_WORDS.today); has(html, SCENARIO_WORDS.expiry);
+  const reads = [{ delta: -0.46, gamma: 0.011, theta: -0.09, vega: 0.52 }, { delta: -0.22, gamma: 0.008, theta: -0.07, vega: 0.40 }];
+  const with_ = renderToStaticMarkup(<GreekChart greek="delta" legs={BUILD.legs} spot={BUILD.S} dte={POLICY.dte} ivs={BUILD.ivs} reads={reads} contracts={2} expKey="2026-11-20" />);
+  has(with_, 'data-greek-line="today"'); has(with_, 'data-greek-line="exit"'); has(with_, "data-greek-read");
+  has(with_, "read from the broker"); has(with_, "Where the Greeks come from");
+  const without = renderToStaticMarkup(<GreekChart greek="vega" legs={BUILD.legs} spot={BUILD.S} dte={POLICY.dte} ivs={BUILD.ivs} reads={[reads[0], { ...reads[1], vega: null }]} contracts={2} expKey="2026-11-20" />);
+  if (without.includes("data-greek-read")) throw new Error("a dot from a partial sum");
+  for (const t of GREEK_TABS) has(GREEK_TABS.map((x) => x.label).join(" "), t.label);
 });
 
 console.log(`\n${passed} passed, ${failures.length} failed\n`);

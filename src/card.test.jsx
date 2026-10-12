@@ -17,7 +17,7 @@ import { CandidateCard, MatchList, RequestControls, MissLine, CardGrid, SignalBa
 import * as CARD from "./card.jsx";
 import { readFileSync } from "node:fs";
 import { requestOf, RULES, fillNet, comboBook, openLimitPrice, rewardRisk, onTick, sizeLine, candidateFlags,
-  sizedFigures, directionTag, controlReadings, futureFigures, pastFigures } from "./rules.js";
+  sizedFigures, directionTag, controlReadings, futureFigures, pastFigures, chanceGapLine } from "./rules.js";
 import { T } from "./theme.js";
 import { payoffBands } from "./visuals.jsx";
 
@@ -60,6 +60,25 @@ check("ZERO PROSE — no text node on a card runs past six words", () => {
       throw new Error(`"${t}" is ${wordsIn(t)} words — a card carries labels and numbers, not sentences`);
     }
   }
+});
+
+check("PR 67 — THE ONE SENTENCE A CARD MAY CARRY: why its two chances differ (owner, 12 Oct 2026), and nothing else", () => {
+  const gap = { model: 0.74, market: 0.62, season: 0.06, flat: 0.68, left: 0.03, right: -0.004, lower: true };
+  const line = chanceGapLine(gap);
+  const html = renderToStaticMarkup(
+    <CandidateCard name="Bull Call Spread" legs="+1 28C / −1 30C" rr={1.5} pop={0.74} mkt={{ pop: 0.62 }} gap={gap}
+      figures={sizedFigures(A80, 3)} sizeText={sizeLine({ ok: true, n: 3, risk: 80 })} picture={PIC} />);
+  const EXEMPT = new Set(["Bull Call Spread", "+1 28C / −1 30C", "3 contracts × $80 at risk each", line]);
+  let seen = false;
+  for (const t of textNodes(html)) {
+    if (t === line) seen = true;
+    if (!EXEMPT.has(t) && wordsIn(t) > 6) throw new Error(`"${t}" is ${wordsIn(t)} words`);
+  }
+  if (!seen) throw new Error("the line is not on the card");
+  has(html, 'data-chance-gap="lower"');
+  // The tile's two lines: the market's, then the OSL model's.
+  if (!(html.indexOf('data-chance-line="market"') < html.indexOf('data-chance-line="model"'))) throw new Error("Market first, then OSL model");
+  has(html, ">62%<"); has(html, ">74%<");
 });
 
 check("FOUR FIGURES, ALWAYS THE SAME FOUR, ALWAYS IN THE SAME ORDER, FOR THE SIZE THE BUDGET BUYS", () => {

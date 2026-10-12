@@ -3559,6 +3559,29 @@ test("PR 61 — REPRODUCED: a SENT trade still loaded on Build is counted twice 
   assert.equal(holdsStructure(bookPositions(BOOK_61), { ticker: "USO", expKey: "2026-11-20", legs: [{ side: 1, type: "call", strike: 146, qty: 1 }, { side: -1, type: "call", strike: 152, qty: 1 }] }), null);
 });
 
+test("COSTS CHANGE NOTHING WHILE ALPACA IS THE ONLY BROKER (PR 67, task 67.5): said, never subtracted", () => {
+  // The gate, the rankings, the floors, the alternatives and the order paths never read a cost.
+  for (const f of ["riskGate.js", "rows.js", "signals.js", "alternatives.js", "order.js", "closeOrder.js", "modifyOrder.js",
+    "../netlify/functions/autopilot.mjs", "../netlify/functions/approve.mjs"]) {
+    assert.equal(/costsFor|BROKER_COSTS|costsLine/.test(codeOf(f)), false, `${f} reads a cost`);
+  }
+  // In rules.js a cost is read only by its own sentence and the card's Details row; in App.jsx only by Build's Order line.
+  const rules = codeOf("rules.js");
+  assert.equal((rules.match(/costsFor\(/g) || []).length, 1, "costsFor is defined once and called by no rule");
+  assert.equal((codeOf("App.jsx").match(/costsFor\(/g) || []).length, 1, "App.jsx: Build's Order line only");
+  // Alpaca's commission is $0, said with the fees it does not count; IBKR is not connected, so nothing is worked out.
+  const legs = [{ side: 1, qty: 1, type: "call", strike: 28 }, { side: -1, qty: 1, type: "call", strike: 30 }];
+  const { costsFor, costsLine, BROKER_COSTS, PLACEHOLDERS } = RL;
+  const a = costsFor("alpaca", legs, 3, { entryNet: 0.8 });
+  assert.equal(a.commission, 0); assert.equal(a.feesCounted, false);
+  assert.equal(costsLine(a), "Costs: $0 commission on Alpaca, 0% of the debit (regulatory fees not counted)");
+  const ib = costsFor("ibkr", legs, 3, { entryNet: 0.8 });
+  assert.equal(ib.connected, false); assert.equal(ib.commission, null); assert.equal(costsLine(ib), null);
+  // No US rate a contract is invented from a report without its contract count.
+  assert.equal(BROKER_COSTS.ibkr.usPerContractPerSide, null);
+  assert.ok(PLACEHOLDERS.some((p) => p.id === "costs-ibkr"));
+});
+
 console.log(`\n${passed} passed, ${failures.length} failed\n`);
 if (failures.length) {
   for (const f of failures) console.error(`${f.name}:\n${f.e.stack}\n`);

@@ -12,11 +12,14 @@
 //   · THE EXIT: the day the plan exits, `RULES.exitDTE` days before the expiry, read off the expiry's own date (no clock).
 //   · THE CROSSHAIR: at a price, what the trade makes at expiry for the size (`payoff()`, the one payoff) and the chance of
 //     finishing below it (the same lognormal); its keyboard steps.
+//   · THE SCENARIO TABLE AND THE GREEK TABS (PR 67, IBKR's Option Wizard): today's price moved in steps, the P&L at expiry
+//     (the same `payoff()`) and today (`legsAt()`: Black-Scholes on each leg's own IV, the curve Build's "now" line reads),
+//     and the whole position's Greeks against price, today and on the exit day; the broker's Greeks, read, at today's price.
 //
 // Plain JS, no React. Nothing here is a new rule or a new number: it reads the chance's distribution and the payoff.
 // ============================================================================
-import { exactPnl, payoff } from "./engine.js";
-import { RULES, dayWords, crosshairLine } from "./rules.js";
+import { exactPnl, payoff, legsAt } from "./engine.js";
+import { RULES, dayWords, crosshairLine, SCENARIO_MAX_DEFAULT } from "./rules.js";
 
 /** The chance's distribution at expiry, or null when the policy cannot be read (no spot, no volatility, no days). */
 export function chartDist(legs, entryNet, spot, { driftAnnual, sigma, dte } = {}) {
@@ -99,4 +102,73 @@ export function crossKey(price, key, { min, max, step, spot }) {
     case "End": return max;
     default: return null;
   }
+}
+
+/* ====================================================================
+   PR 67 — THE SCENARIO TABLE AND THE GREEK TABS (tasks 67.3 and 67.4).
+==================================================================== */
+const sizeOf = (contracts) => (Number.isFinite(Number(contracts)) && Number(contracts) >= 1 ? Math.round(Number(contracts)) : 1);
+const ivsReadable = (legs, ivs) => Array.isArray(ivs) && ivs.length === legs.length && ivs.every((v) => Number.isFinite(Number(v)) && Number(v) > 0);
+
+/**
+ * THE SCENARIO TABLE: today's price moved by −max … +max in thirds (0 in the middle), and at each price
+ *   · AT EXPIRY: the P&L for the size, `payoff()` − the entry (the crosshair's own arithmetic); the Greeks are zero there,
+ *     as on IBKR's screen;
+ *   · TODAY: the P&L and the whole position's Greeks for the size, `legsAt()` on each leg's own IV (null without them).
+ * Units for the size: P&L in $; delta and gamma in shares (× 100 × contracts); vega in $ per vol point; theta in $ a day.
+ * @returns { maxMove, contracts, columns: [{ move, price, expiry: {pnl, delta, gamma, vega, theta}, today: {…} | null }] }
+ *          or null without a price or legs
+ */
+export function scenarioGrid({ legs, entryNet, spot, dte, ivs = null, contracts = 1, maxMove = SCENARIO_MAX_DEFAULT } = {}) {
+  const S = Number(spot), e = Number(entryNet) || 0, mx = Number(maxMove);
+  if (!(S > 0) || !Array.isArray(legs) || !legs.length || !(mx > 0)) return null;
+  const n = sizeOf(contracts), k = 100 * n;
+  const readable = ivsReadable(legs, ivs) && Number(dte) > 0;
+  // The "now" curve's own clock (`analyze()` reads Math.max(0.5, dte)), so a column and the curve are one number.
+  const days = Math.max(0.5, Number(dte));
+  const columns = [-3, -2, -1, 0, 1, 2, 3].map((j) => {
+    const move = (j * mx) / 3, price = S * (1 + move);
+    const expiry = { pnl: (payoff(legs, price) - e) * k, delta: 0, gamma: 0, vega: 0, theta: 0 };
+    const t = readable ? legsAt(legs, price, days, ivs.map(Number)) : null;
+    const today = t ? { pnl: (t.value - e) * k, delta: t.delta * k, gamma: t.gamma * k, vega: t.vega * k, theta: t.theta * k } : null;
+    return { move, price, expiry, today };
+  });
+  return { maxMove: mx, contracts: n, columns };
+}
+
+/**
+ * ONE GREEK OF THE WHOLE POSITION AGAINST PRICE (the Greek tabs): today, and on the exit day (`RULES.exitDTE` days before
+ * the expiry; null when the trade is already inside it), for the size, over [lo, hi] in `steps` points.
+ * @param greek "delta" | "gamma" | "vega" | "theta"
+ * @returns { greek, points: [{ s, today, exit }], exitDays } or null without each leg's IV
+ */
+export function greekCurves({ legs, spot, dte, ivs, contracts = 1, greek, lo = null, hi = null, steps = 61, exitDTE = RULES.exitDTE } = {}) {
+  const S = Number(spot), d = Number(dte);
+  if (!(S > 0) || !Array.isArray(legs) || !legs.length || !(d > 0) || !ivsReadable(legs, ivs)) return null;
+  if (!["delta", "gamma", "vega", "theta"].includes(greek)) return null;
+  const k = 100 * sizeOf(contracts), iv = ivs.map(Number);
+  const a = lo != null ? Number(lo) : S * 0.7, b = hi != null ? Number(hi) : S * 1.3;
+  const exitDays = d > exitDTE ? exitDTE : null;
+  const points = Array.from({ length: steps }, (_, i) => {
+    const s = a + (i / (steps - 1)) * (b - a);
+    return { s, today: legsAt(legs, s, d, iv)[greek] * k, exit: exitDays == null ? null : legsAt(legs, s, exitDays, iv)[greek] * k };
+  });
+  return { greek, points, exitDays };
+}
+
+/**
+ * THE BROKER'S GREEKS FOR THE WHOLE POSITION, READ (task 67.4): Σ side × qty × each leg's own figure × 100 × contracts, at
+ * today's price. A Greek is null unless EVERY leg carries it — a sum with a leg missing would be a number nobody sent.
+ * @param reads per leg, `{ delta, gamma, theta, vega }` from the chain (`analyze()`'s legPx[i].greeks), or null
+ */
+export function brokerGreeks(legs, reads, contracts = 1) {
+  const out = { delta: null, gamma: null, vega: null, theta: null };
+  if (!Array.isArray(legs) || !legs.length || !Array.isArray(reads) || reads.length !== legs.length) return out;
+  const k = 100 * sizeOf(contracts);
+  for (const g of Object.keys(out)) {
+    const vals = reads.map((r) => (r && r[g] != null && Number.isFinite(Number(r[g])) ? Number(r[g]) : null));
+    if (vals.some((v) => v == null)) continue;
+    out[g] = legs.reduce((acc, l, i) => acc + Math.sign(l.side) * (Number(l.qty) || 1) * vals[i], 0) * k;
+  }
+  return out;
 }

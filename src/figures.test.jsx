@@ -26,6 +26,10 @@ import { scaleStrategy } from "./pro.jsx";
 import { rowFigures } from "./rows.js";
 import { StrategyCard } from "./market.jsx";
 import { NumbersSection } from "./build.jsx";
+import { marketDistOf, chanceGapOf, chanceGapLine, CHANCE_LINES, MARKET_CHANCE_ROW_WORD } from "./rules.js";
+import { bs as bsPrice } from "./engine.js";
+import { undefinedRiskLegs } from "./riskGate.js";
+import { movesOnBoard, OPTIMIZE_STEPS } from "./alternatives.js";
 import { FIND_ORDERS, CARD_LABELS, futureFigures, pastFigures, futureTile, pastTileText, returnText, signedMoney, limitMovedLine } from "./rules.js";
 // Repo-relative: JSX tests are bundled to CJS (CLAUDE.md, "How to test").
 import { MODEL_BOARD, ungBoards } from "../scripts/crossing-fixtures.jsx";
@@ -417,6 +421,104 @@ check("PR 61 — THE SIX FIGURES ARE PRINTED THE SAME on the card and on Build (
     eq(onBuild("In profit"), `${pf.wins} of ${pf.n}`, "past: Build's count");
     if (!tile(CARD_LABELS.past).includes(signedMoney(pf.avg))) throw new Error(`past: card avg, ${tile(CARD_LABELS.past)}`);
   }
+});
+
+/* ====================================================================
+   PR 67 (owner, 12 Oct 2026) — TWO CHANCES, ONE PER SOURCE, THE SAME ON THE CARD, ON BUILD AND ON THE ROW: the market's
+   (`marketChanceOf()`, the board's own distribution, IBKR's method) and the OSL model's (`chanceOf()`). A SOYB board priced
+   by Black-Scholes with a put skew, read by both paths at the same price.
+==================================================================== */
+const BOARD = (() => {
+  const b = { calls: {}, puts: {} };
+  for (let K = 22; K <= 34; K += 0.5) {
+    const iv = IV + (K < SPOT ? 0.5 * (SPOT - K) / SPOT : 0);
+    const c = bsPrice(SPOT, K, DTE / 365, iv, "call"), p = bsPrice(SPOT, K, DTE / 365, iv, "put");
+    b.calls[K] = { bid: +(c * 0.97).toFixed(2), ask: +(c * 1.03 + 0.01).toFixed(2) };
+    b.puts[K] = { bid: +(p * 0.97).toFixed(2), ask: +(p * 1.03 + 0.01).toFixed(2) };
+  }
+  return b;
+})();
+const DIST = marketDistOf(BOARD, SPOT);
+const listM = listCardFigures(LEGS, { ...OPTS, dist: DIST });
+const buildM = buildFigures(LEGS, { ...OPTS, dist: DIST });
+
+check("PR 67 — THE MARKET'S CHANCE IS ONE NUMBER on the list card and on Build, at the same price; the model's is unchanged", () => {
+  if (!DIST.ok) throw new Error(`the fixture board is not read: ${DIST.reason}`);
+  if (listM.mkt.pop == null) throw new Error("the fixture has no market chance: it proves nothing");
+  eq(listM.mkt.pop, buildM.mkt.pop, "the market's chance");
+  eq(JSON.stringify(listM.gap), JSON.stringify(buildM.gap), "why they differ");
+  eq(listM.pop, list.pop, "the OSL model's chance does not move with the board");
+  eq(buildM.chance.pop, build.chance.pop, "…on Build either");
+  // No board, no market chance: a dash and a reason, never 0%.
+  eq(list.mkt.pop, null, "no board: not read"); eq(list.mkt.reason, "noBoard", "and why");
+});
+
+check("PR 67 — THE CHANCE TILE PRINTS 'Market X%' AND 'OSL model Y%' on the full card, the compact card and Build", () => {
+  const n = 3;
+  const mk = chanceText(listM.mkt.pop), md = chanceText(listM.pop);
+  const lines = (html) => [...html.matchAll(/data-chance-line="(market|model)"[^>]*>(.*?)<\/div>/g)]
+    .map((m) => `${m[1]}:${m[2].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()}`);
+  const want = [`market:${CHANCE_LINES.market} ${mk}`, `model:${CHANCE_LINES.model} ${md}`];
+  const full = renderToStaticMarkup(<CandidateCard name="x" legs="x" figures={sizedFigures(listM.aFill, n)} rr={listM.rr} pop={listM.pop}
+    mkt={listM.mkt} gap={listM.gap} />);
+  eq(JSON.stringify(lines(full)), JSON.stringify(want), "the full card");
+  const x = { key: "k", tk: TICKER, name: "Bull Call Spread", legs: LEGS, expKey: EXP, dte: DTE, spot: SPOT, sent: "bull", family: "signal",
+    lf: listM, flags: [], fused: null, feedBroken: false, noQuoteLegs: 0, touchSize: null, cand: { key: "k", pop: listM.pop, rr: listM.rr } };
+  const compact = renderToStaticMarkup(<StrategyCard x={x} size={{ ok: true, n }} misses={[]} bars={[]} sortedBy="chance" findOrder="chance"
+    saved={false} ticked={false} onSave={() => {}} onTick={() => {}} onBuild={() => {}} onChain={() => {}} badge={null} />);
+  eq(JSON.stringify(lines(compact)), JSON.stringify(want), "the compact card");
+  const bld = renderToStaticMarkup(<NumbersSection figures={sizedFigures(buildM.AE, n)} rr={buildM.rr} pop={buildM.chance.pop}
+    mkt={buildM.mkt} gap={buildM.gap} breakevens={buildM.AE.breakevens} future={futureFigures(buildM.chance, buildM.AE, n, EXP)}
+    past={pastFigures(buildM.bt, buildM.AE, n)} delta="x" theta="y" />);
+  eq(JSON.stringify(lines(bld)), JSON.stringify(want), "Build's Numbers");
+  // The row prints the model's chance and, small, the market's (the owner's leaning, "yes, small").
+  const fig = rowFigures(x, { ok: true, n }, "chance");
+  const ch = fig.items.find((it) => it.tile === "chance");
+  eq(ch.value, md, "the row's chance is the model's"); eq(ch.extra.value, mk, "the row's small figure is the market's");
+  eq(ch.extra.word, MARKET_CHANCE_ROW_WORD, "its word");
+});
+
+check("PR 67 — WHY THEY DIFFER is one line, the same on the card and on Build, amber when the market's is lower", () => {
+  // A model 9 points over the market, so the line is said whatever the board gives.
+  const gap = chanceGapOf({ mc: { ...buildM.chance, pop: buildM.mkt.pop + 0.09 }, mkt: buildM.mkt, dist: DIST, legs: LEGS,
+    entryNet: buildM.AE.entry, spot: SPOT });
+  const line = chanceGapLine(gap);
+  if (!line) throw new Error("no line at 9 points");
+  const card = renderToStaticMarkup(<CandidateCard name="x" legs="x" figures={sizedFigures(listM.aFill, 1)} rr={1} pop={0.5} mkt={listM.mkt} gap={gap} />);
+  const bld = renderToStaticMarkup(<NumbersSection figures={sizedFigures(buildM.AE, 1)} rr={1} pop={0.5} mkt={buildM.mkt} gap={gap}
+    future={null} past={null} delta="x" theta="y" />);
+  for (const [where, html] of [["card", card], ["Build", bld]]) {
+    has(html, 'data-chance-gap="lower"');
+    has(html, line.replace(/&/g, "&amp;").replace(/'/g, "&#x27;"));
+  }
+  // Within the owner's 5 points: nothing.
+  const close = chanceGapOf({ mc: { ...buildM.chance, pop: buildM.mkt.pop + 0.01 }, mkt: buildM.mkt, dist: DIST, legs: LEGS, entryNet: buildM.AE.entry, spot: SPOT });
+  eq(close, null, "a one-point gap says nothing");
+});
+
+/* PR 67, task 67.6 (owner, 12 Oct 2026): IBKR's wizard suggests ratio spreads, short straddles and naked short puts; this
+   app never does. Every structure Find builds on the fixture boards, for every view, and every move Optimize reads off the
+   board from each of them (`movesOnBoard()`, the search `optimizeCandidates()` runs per expiry, two steps), has no
+   uncovered short leg (`undefinedRiskLegs()`, the gate's own check). */
+check("PR 67 — NO FIND OR OPTIMIZE CANDIDATE HAS AN UNCOVERED SHORT LEG (the gate's own `undefinedRiskLegs()`)", () => {
+  let found = 0, moved = 0;
+  for (const b of [MODEL_BOARD, ...ungBoards()]) {
+    for (const sent of ["verybear", "bear", "neutral", "bull", "verybull"]) {
+      const r = shortlistWithFloors(sent, b.S, b.step, b.strikes, b.dte, b.iv, b.q, { peers: b.peers });
+      for (const row of [...r.rows, ...r.cut.filter((c) => c.p && c.p.legs)]) {
+        const legs = (row.p || row).legs;
+        if (!legs) continue;
+        found++;
+        if (undefinedRiskLegs(legs).length) throw new Error(`Find built ${(row.p || row).name} with an uncovered short leg`);
+        for (const m of movesOnBoard(legs, b.strikes, b.S, OPTIMIZE_STEPS + 1)) {
+          moved++;
+          if (undefinedRiskLegs(m.legs).length) throw new Error(`Optimize's ${m.move} ${m.step} of ${(row.p || row).name} is uncovered`);
+        }
+      }
+    }
+  }
+  if (found < 20 || moved < 50) throw new Error(`only ${found} structures and ${moved} moves: the sweep proves little`);
+  console.log(`       ${found} Find structures, ${moved} Optimize moves, none uncovered`);
 });
 
 console.log(`\n${ok.length} passed, ${bad.length} failed\n`);

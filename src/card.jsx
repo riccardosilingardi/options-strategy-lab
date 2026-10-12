@@ -32,7 +32,7 @@ import { RULES, money, chanceText, returnText, NO_CEILING, COMPARE_TICK,
   targetPriceOf, stopSigns, sizedHeading, CARD_LABELS,
   meetsRequest, resultsLine, missReasonLine, nearestRelaxation, fillPriceHeading,
   futureTile, pastTileText, futureInfo, pastInfo, HIDE_MISSES_TOGGLE,
-  FIGURE_DEFINITIONS, DETAILS_FOLD, sentenceCase } from "./rules.js";
+  FIGURE_DEFINITIONS, DETAILS_FOLD, sentenceCase, chanceLines, chanceGapLine, CHANCE_TWO_INFO } from "./rules.js";
 
 const FS = TYPE.size, FW = TYPE.weight, LH = TYPE.line;
 
@@ -41,19 +41,26 @@ const FS = TYPE.size, FW = TYPE.weight, LH = TYPE.line;
    >>> NAMED `CardFigure`, NOT `Figure`. <<< `visuals.jsx` already exports a `Figure` — the tap-to-explain frame — and
    two components with one name in a tree this size is how a reader, a grep and `src/wordcount.mjs` all resolve to
    the wrong one. */
-const CardFigure = ({ k, v, c, lines = null, info = null, sorted = false, muted = false, wide = false, words = false }) => (
+const CardFigure = ({ k, v, c, lines = null, info = null, sorted = false, muted = false, wide = false, words = false, pair = null }) => (
   /* A TILE (PR #49): its name, its value, up to two short lines under it, a ⓘ in the name where it has one
      (`iconOnly`: the tile's name is the label), and — on the tile the list is sorted by — an accent ring and
      "sorted by" above the name, so the order is visible at rest (TASK 1). A miss is quieter: `T.mut`, which the
      theme test holds at 4.5:1 on both surfaces. */
   <div data-tile={k} data-sorted={sorted ? "true" : undefined}
-    style={{ flex: wide ? "1 1 148px" : "1 1 72px", minWidth: wide ? 148 : 72, borderRadius: 6,
+    style={{ flex: wide ? "1 1 148px" : pair ? "1 1 96px" : "1 1 72px", minWidth: wide ? 148 : pair ? 96 : 72, borderRadius: 6,
       ...(sorted ? { outline: `2px solid ${T.blue}`, outlineOffset: 3 } : null) }}>
     {sorted && <div style={{ ...sans, fontSize: FS.xs, fontWeight: FW.bold, lineHeight: LH.tight, color: T.blue }}>sorted by</div>}
     <div style={{ ...sans, fontSize: FS.xs, letterSpacing: "0.04em", lineHeight: LH.tight, color: T.dim, display: "flex", alignItems: "center", flexWrap: "wrap" }}>
       {k}{info}
     </div>
-    <div style={{ ...(words ? sans : mono), fontSize: FS.md, fontWeight: FW.bold, lineHeight: LH.tight, color: muted ? T.mut : (c || T.ink) }}>{v}</div>
+    {/* PR 67: the CHANCE tile's two lines ("Market 71%", "OSL model 74%", `chanceLines()`), each in its own colour. */}
+    {pair ? pair.map((p) => (
+      <div key={p.id} data-chance-line={p.id} style={{ display: "flex", alignItems: "baseline", gap: 4, whiteSpace: "nowrap" }}>
+        <span style={{ ...sans, fontSize: FS.xs, lineHeight: LH.tight, color: T.dim }}>{p.word}</span>
+        <span style={{ ...mono, fontSize: FS.md, fontWeight: FW.bold, lineHeight: LH.tight,
+          color: muted ? T.mut : p.pop == null ? T.dim : p.pop >= 0.5 ? T.green : T.violet }}>{p.value}</span>
+      </div>
+    )) : <div style={{ ...(words ? sans : mono), fontSize: FS.md, fontWeight: FW.bold, lineHeight: LH.tight, color: muted ? T.mut : (c || T.ink) }}>{v}</div>}
     {lines && lines.map((l) => <div key={l} style={{ ...sans, fontSize: FS.xs, lineHeight: LH.tight, color: T.dim, marginTop: 2 }}>{l}</div>)}
   </div>
 );
@@ -231,6 +238,16 @@ export function PerTradeLimit({ limits, onLimit }) {
 
 export { CardFigure };
 
+/* WHY THE TWO CHANCES DIFFER (PR 67, owner 12 Oct 2026): one line under the CHANCE tile when they are more than
+   `RULES.chanceGapPoints` apart (`chanceGapLine()` in rules.js), amber when the market's is the lower one — the cautious
+   number is the lower one. The one sentence a card carries besides its name and legs (card.test.jsx names it). */
+const ChanceGap = ({ gap, style }) => {
+  const line = chanceGapLine(gap);
+  if (!line) return null;
+  return <div data-chance-gap={gap.lower ? "lower" : "higher"}
+    style={{ ...sans, fontSize: FS.xs, lineHeight: LH.tight, color: gap.lower ? T.amber : T.dim, marginTop: 4, ...style }}>{line}</div>;
+};
+
 /* ====================================================================
    2) THE ONE CANDIDATE CARD (ROADMAP P10 §3-bis, points 2-4; PR #45, TASKS 3-4)
 
@@ -259,11 +276,14 @@ export function CandidateCard({
   // ROUND 2 (owner's mockup "Market · Strategies"): the COMPACT layout of this same card, on the market page. It prints
   // the same six figures (figures.test.jsx) and moves everything else behind "Details ▾" (`details`), never deleted.
   compact = false, needs = null, stanceKind = null, disagree = null, details = null, thumb = null,
+  // PR 67: the market's chance (`marketChanceOf()`) and why it differs from the model's (`chanceGapOf()`), handed in.
+  mkt = null, gap = null,
 }) {
   if (compact) {
     return <CompactCard name={name} legs={legs} rr={rr} pop={pop} figures={figures} picture={picture} misses={misses}
       actions={actions} signs={signs || stopSigns({ flags })} future={future} past={past} sortedBy={sortedBy}
-      cardKey={cardKey} needs={needs} stance={direction} stanceKind={stanceKind} disagree={disagree} details={details} thumb={thumb} style={style} />;
+      cardKey={cardKey} needs={needs} stance={direction} stanceKind={stanceKind} disagree={disagree} details={details} thumb={thumb} style={style}
+      mkt={mkt} gap={gap} />;
   }
   const f = figures || { n: null, risk: null, profit: null, unbounded: false, perRisk: null, perProfit: null };
   const sized = f.n != null;
@@ -292,7 +312,8 @@ export function CandidateCard({
       <div style={{ display: "flex", gap: "12px 10px", marginTop: 4, flexWrap: "wrap" }}>
         <CardFigure k={CARD_LABELS.risk} v={f.risk == null ? "—" : money(f.risk)} c={T.red} {...tile("risk")} />
         <CardFigure k={CARD_LABELS.profit} v={f.unbounded ? NO_CEILING : f.profit == null ? "—" : money(f.profit)} c={T.green} {...tile("profit")} />
-        <CardFigure k={CARD_LABELS.chance} v={chanceText(pop)} c={pop >= 0.5 ? T.green : T.violet} {...tile("chance")} />
+        <CardFigure k={CARD_LABELS.chance} pair={chanceLines(pop, mkt)}
+          info={<Info iconOnly label={CARD_LABELS.chance.toLowerCase()}>{CHANCE_TWO_INFO}</Info>} {...tile("chance")} />
         <CardFigure k={CARD_LABELS.rr} v={rr == null ? "—" : returnText(rr)} c={T.amber} {...tile("rr")} />
         <CardFigure k={CARD_LABELS.future} wide v={ft.value} lines={ft.lines}
           c={future && future.avg != null ? (future.avg >= 0 ? T.green : T.violet) : T.dim}
@@ -301,6 +322,7 @@ export function CandidateCard({
           c={past ? (past.avg >= 0 ? T.green : T.violet) : T.dim}
           info={<Info iconOnly label={CARD_LABELS.past.toLowerCase()}>{pastInfo(past, ticker || "the ETF")}</Info>} {...tile("past")} />
       </div>
+      <ChanceGap gap={gap} />
       {/* WHAT THE CHANCE IS MADE OF (PR #48): "prices + season" when a month in the window beat its noise, else
           "prices only". `chanceBasisLabel()` in rules.js; Find and Build pass the same one. */}
       {basis && <Note color={T.dim} style={{ marginTop: 2 }}>chance: {basis}</Note>}
@@ -335,7 +357,7 @@ export function CandidateCard({
 ==================================================================== */
 const STANCE_COLOR = { with: T.green, against: T.amber, neutral: T.mut, quiet: T.mut };
 function CompactCard({ name, legs, rr, pop, figures, picture, misses, actions, signs, future, past, sortedBy, cardKey,
-  needs, stance, stanceKind, disagree, details, thumb, style }) {
+  needs, stance, stanceKind, disagree, details, thumb, style, mkt, gap }) {
   const [def, setDef] = React.useState(null);
   const [more, setMore] = React.useState(false);
   const moreId = React.useId();
@@ -346,7 +368,7 @@ function CompactCard({ name, legs, rr, pop, figures, picture, misses, actions, s
   const cells = [
     ["risk", CARD_LABELS.risk, f.risk == null ? "—" : money(f.risk)],
     ["profit", CARD_LABELS.profit, f.unbounded ? NO_CEILING : f.profit == null ? "—" : money(f.profit)],
-    ["chance", CARD_LABELS.chance, chanceText(pop)],
+    ["chance", CARD_LABELS.chance, chanceText(pop), chanceLines(pop, mkt)],
     ["rr", CARD_LABELS.rr, rr == null ? "—" : returnText(rr)],
   ];
   return (
@@ -368,7 +390,7 @@ function CompactCard({ name, legs, rr, pop, figures, picture, misses, actions, s
       <div>
         {/* Four columns sized to their names, spread across the card: equal quarters would fold RETURN ON RISK onto two lines at 390px. */}
         <div data-compact-figures style={{ display: "grid", gridTemplateColumns: "repeat(4, auto)", justifyContent: "space-between", gap: 6 }}>
-          {cells.map(([id, k, v]) => (
+          {cells.map(([id, k, v, pair]) => (
             <div key={id} data-tile={k} data-sorted={sortedBy === id ? "true" : undefined} style={{ minWidth: 0, ...ring(id) }}>
               <button onClick={() => setDef((d) => (d === id ? null : id))} aria-expanded={def === id}
                 style={{ ...sans, display: "block", width: "100%", textAlign: "left", padding: 0, background: "transparent", border: "none",
@@ -376,12 +398,20 @@ function CompactCard({ name, legs, rr, pop, figures, picture, misses, actions, s
                 {/* The mockup writes the names in sentence case ("You risk"); the words are CARD_LABELS' (one home). */}
                 <span style={{ textDecoration: "underline dotted", textUnderlineOffset: 3 }}>{sentenceCase(k)}</span>
               </button>
-              <div style={{ ...mono, fontSize: FS.md, fontWeight: FW.bold, lineHeight: LH.tight, color: muted ? T.dim : T.ink,
-                fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{v}</div>
+              {/* PR 67: the CHANCE cell is two short lines, the market's then the OSL model's (`chanceLines()`). */}
+              {pair ? pair.map((p) => (
+                <div key={p.id} data-chance-line={p.id} style={{ display: "flex", alignItems: "baseline", gap: 3, whiteSpace: "nowrap" }}>
+                  <span style={{ ...sans, fontSize: FS.xs, lineHeight: LH.tight, color: T.mut }}>{p.word}</span>
+                  <span style={{ ...mono, fontSize: FS.sm, fontWeight: FW.bold, lineHeight: LH.tight, color: muted ? T.dim : T.ink,
+                    fontVariantNumeric: "tabular-nums" }}>{p.value}</span>
+                </div>
+              )) : <div style={{ ...mono, fontSize: FS.md, fontWeight: FW.bold, lineHeight: LH.tight, color: muted ? T.dim : T.ink,
+                fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{v}</div>}
             </div>
           ))}
         </div>
         {def && <div role="note" style={{ ...sans, fontSize: FS.xs, lineHeight: LH.body, color: T.body, marginTop: 6 }}>{FIGURE_DEFINITIONS[def]}</div>}
+        <ChanceGap gap={gap} style={{ marginTop: 6 }} />
       </div>
       {(needs || stance) && (
         <div data-needs style={{ ...sans, fontSize: FS.xs, lineHeight: LH.tight, color: muted ? T.mut : (STANCE_COLOR[stanceKind] || T.mut) }}>
