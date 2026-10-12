@@ -728,8 +728,9 @@ test("HOW THE NUMBERS FIT (PR #48, rewritten PR #49): every number printed is th
   const lines = numbersFitLines("evSignal");
   const all = lines.map((l) => l.text).join(" ");
   assert.deepEqual(lines.map((l) => l.k), ["future", "past", "signal", "filter", "decide", "autopilot"]);
-  assert.ok(all.includes(`Future (Monte Carlo) = ${RULES.mcRuns.toLocaleString("en-US")} invented futures to expiry`));
-  assert.ok(all.includes("It is a simulation, not history."));
+  // PR 62: the future is worked out exactly (no 8,000 runs to count), and the tile is FUTURE (MODEL).
+  assert.ok(all.includes("Future (model) = every price the model allows at expiry, worked out exactly"));
+  assert.ok(all.includes("It is a model, not history.")); assert.ok(!/Monte Carlo|invented futures|8,000/.test(all));
   assert.ok(all.includes("Past yrs (backtest) = this trade replayed on the ETF's real past, one row per year"));
   assert.ok(all.includes(`${RULES.seasonalSignalT}× their own noise`));
   assert.ok(all.includes(`score ÷ ${SIGNAL_DIVISOR} × confidence ÷ 100 for a bull or bear card`));
@@ -753,7 +754,7 @@ test("HOW THE NUMBERS FIT (PR #48, rewritten PR #49): every number printed is th
   assert.equal(seasonalSignal({ ...st, monthlyMean: Array(12).fill(RULES.seasonalSignalT - 0.01) }, 0, 30).counts, false);
   // and no number in the text is anything else.
   const nums = all.match(/\d[\d,.]*/g).map((x) => x.replace(/,/g, "").replace(/\.$/, ""));
-  const allowed = new Set([String(RULES.mcRuns), String(RULES.seasonalSignalT), String(RULES.directionSignalMin), String(RULES.autopilotConfidence),
+  const allowed = new Set([String(RULES.seasonalSignalT), String(RULES.directionSignalMin), String(RULES.autopilotConfidence),
     String(SIGNAL_DIVISOR), String(NEUTRAL_QUIET), "100"]);
   for (const n of nums) assert.ok(allowed.has(n), `an unexplained number in the text: ${n}`);
 });

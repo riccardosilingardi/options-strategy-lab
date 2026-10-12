@@ -34,12 +34,16 @@ non-expert trader who wants to learn discipline rather than be sold trades.
      existing control unchanged and ends with a live "Show N of M" ("Show flagged" is in the Order sheet, the floors'
      "why" fold in the Liquidity sheet — which since PR 4d opens on today's takeaway, its four levels as chips counting the
      cards each keeps across every market, what else keeps cards out with counts, and the numbers one fold down); the line "N of M fit · K dimmed" (or "· K hidden") with Hide them / Show them
-     and Reset; the column head "Market … <the sorted-by figure> · risk" with the ⓘ "How <TK>'s numbers connect" (five
+     and Reset; "No card has a positive average today." when cards fit and none has a positive future average (PR 63);
+     the column head "Market … Days · risk" with the ⓘ "How <TK>'s numbers connect" (five
      numbered steps); then one row per market: ☆, the ticker, ▲ Bull / ▼ Bear / ≈ Neutral from "Signals decide", "<structure>
-     · <expiry>" (or the miss reason), a 72×40 picture, the sorted-by figure and "risk $N". **The rows are a view of the
+     · <expiry>" (or the miss reason), a 72×40 picture, the days and "risk $N", and under them **three figures, always**
+     (PR 63, `rowFigures()`): "31% chance · 203% return · −20.3 avg per $100", the one the list is sorted by ringed (under
+     "Past yrs" the PAST tile's text is added, ringed). **The rows are a view of the
      one sorted list** (`marketRows()`, src/rows.js): a row's card is the market's first card that fits, in the chosen
-     order, else its first card as a miss, quieter, in its place. No new ranking, no new simulation; a row's figure is
-     its card's tile (figures.test.jsx). States: markets still being read wait after the rows that are in ("Reading 10
+     order, else its first card as a miss, quieter, in its place. No new ranking, no new simulation; a row's figures are
+     its card's tiles (figures.test.jsx). Find reads each market on ONE expiry, its buildable board nearest the Horizon (PR
+     63 measured every expiry at 2–6× the work; the owner moved that search to a separate run, proposed in the ROADMAP). States: markets still being read wait after the rows that are in ("Reading 10
      markets · 3 done · the order settles when all are in"); a stale feed is a banner with Retry; nothing fitting says
      which filter binds, the cheapest card here and ONE fix that never passes the per-trade limit ("Set budget to
      $75"), else "Reset filters". Saved shows "When saved" beside "Now" (priced at every read) for Chance, Future avg and
@@ -64,7 +68,10 @@ non-expert trader who wants to learn discipline rather than be sold trades.
      needs at expiry and where it stands against the signals ("with the signals, 3 of 4 · none against",
      `signalStance()`); "FUTURE avg … · PAST YRS …"; the disagree sentence when the future and the past disagree; ☆ and
      **Compare** (the tick shows its word, "✓ Comparing" when on; PR 61), then Open in chain and Build ›; and "Details ▾",
-     which holds the full card as it was (nothing deleted). After a tick, a line fixed above the bottom bar says "2 of 3 to
+     which opens with five rows (PR 63, `cardDetailRows()`: each breakeven's distance in % and in expected moves, the
+     entry cost — the combination's bid/ask spread for the size and as a share of the maximum profit — the IV rank, theta a
+     day for the size, and the days held to the 21-day exit; each "—" with a word when unknown) and then holds the full
+     card as it was (nothing deleted). After a tick, a line fixed above the bottom bar says "2 of 3 to
      compare · See them ›" and opens the one Compare sheet (below). ☆ is a toggle everywhere (PR 61): a second tap removes
      the saved item and the message line offers Undo, which puts back the same item. *Chain (advanced)*: expiry chips with days left (under 30 days dashed, not
      buildable), a T-chain with three modes (Bid · Ask, Delta · IV, OI · Vol — the last only when the feed sends open
@@ -107,15 +114,16 @@ non-expert trader who wants to learn discipline rather than be sold trades.
      Only "Future avg + signal" adds the signal adjustment (then CONFLICT markets sort last), and then the card says its
      sum at rest: "sorted by −3.6 + signal +27.5 = 23.9 per $100". "Past yrs" sorts by the replay's win rate, then
      its average per $100 at risk. "Only a positive future avg" (off by default) hides the rest and says how many.
-     **"How the numbers fit ⓘ"** (every ⓘ shows its label since PR #49) says, from the constants: Future (Monte Carlo)
-     = 8,000 invented futures to expiry, a simulation, not history; Past yrs (backtest) = this trade replayed on the
+     **"How the numbers fit ⓘ"** (every ⓘ shows its label since PR #49) says, from the constants: Future (model)
+     = the trade worked out exactly on the spread of prices the options imply, to expiry (PR 62: no longer 8,000
+     simulated runs, so no noise and no seed), a model, not history; Past yrs (backtest) = this trade replayed on the
      ETF's real past, one row per year; + signal = score ÷ 2 × confidence ÷ 100 (a neutral card: (40 − |score|) ÷ 2 ×
      confidence ÷ 100); the filter is the sliders and toggles only; "Signals decide" and the autopilot's thresholds.
      Each card carries one badge ("CORN ↑ +64 · conf 86", tap for "Why this market"), a flag where it applies (single
      option, butterfly, CONFLICT, confidence under 40, options dear), the gauge beside the unified picture (tap opens
      the full figure), and **six figures for the size the budget buys**: YOU RISK (contracts × the risk), MAX PROFIT
-     (contracts × the maximum profit, or "no ceiling"), CHANCE, RETURN ON RISK, **FUTURE (MONTE CARLO)** (the
-     simulation's average at the fill price for this size, then "per $100 at risk", then "to <expiry>"; "— · no
+     (contracts × the maximum profit, or "no ceiling"), CHANCE, RETURN ON RISK, **FUTURE (MODEL)** (named FUTURE (MONTE CARLO) until PR 62; the
+     model's average at the fill price for this size, then "per $100 at risk", then "to <expiry>"; "— · no
      ceiling" for a structure with no maximum, which sorts last) and **PAST YRS (BACKTEST)** ("won 9 of 14 · avg
      +$310" for this size, "not read" until the series loads; its ⓘ says it settles at expiry, does not replay the
      exit rules and steps in whole months), with one line under them, "25 contracts × $193 at risk each", and what the
@@ -127,9 +135,15 @@ non-expert trader who wants to learn discipline rather than be sold trades.
      structure's name and "CORN · 20 Nov · 47 days · ×1", with the warning signs under it; **What this trade does** — one
      sentence from one generator (`tradeTakeaway()`: "Keeps up to $25 if CORN closes above $18.00 on 20 Nov; loses up to
      $75 below $17.00. Breakeven $17.75.") and the one chart: the last 60 sessions (1Y, 5Y a tap away), a blue fan to
-     expiry (inner 68%, outer 95%), the bars of where it ends (green where it pays), the payoff at the right edge, the
-     dashed labelled breakeven and today's price as a dot, at full width, with "How to read ⓘ"; **The numbers** — max
-     profit, max loss, breakeven, return on risk (each label opens its definition), FUTURE (MONTE CARLO) chance and avg,
+     expiry (inner ±1 standard deviation with its two prices at the edge, outer 95%), the bars of where it ends (green
+     where it pays), faint green and violet zones where it pays and loses, each with its chance (they add up to 100%, the
+     green ones to the CHANCE figure), the payoff at the right edge, the dashed labelled breakeven with its distance from
+     today's price, today's price as a dot with its value, and the exit at 21 days to expiry as a dated tick — the fan,
+     bars, zones and crosshair all on the chance's own lognormal (PR 63, `src/tradeChart.js`) — at full width; a tap, a
+     drag of the line's handle, the mouse or the arrow keys put a crosshair at a price, and one sentence under the chart
+     says what the trade makes there at expiry for the size and the chance of finishing below it; "How to read ⓘ"
+     explains every mark; **The numbers** — max
+     profit, max loss, breakeven, return on risk (each label opens its definition), FUTURE (MODEL) chance and avg,
      PAST YRS (BACKTEST) in profit N of M and avg, delta in shares and theta a day — the card's own figures
      (figures.test.jsx); **Why this trade**, folded: the stance line the market page's card prints; open, each factor
      with its arrow, strength and "supports / against / quiet", the rule for when Send asks why in its real words (the
@@ -265,6 +279,11 @@ non-expert trader who wants to learn discipline rather than be sold trades.
   - No copilot places a trade; every answer is filed in the Journal. An answer cut off by its length limit (3,000 tokens
     since PR 61) offers **Continue**: the same context and the cut answer, continued where it stopped and appended to the
     same answer, filed once when whole. The model's id has one home, `COPILOT_MODEL` in rules.js.
+  - **Grounded (PR 62).** Once an answer is finished, every dollar amount and percentage in it is looked for among the
+    numbers the app sent (the context and the standing instructions), with a rounding tolerance only (`src/grounding.js`).
+    One that is not there is listed under the answer in one quiet amber line, "Not in the app's figures: $1,040, 52%.",
+    in every copilot place; when every figure is found, nothing is printed. Strikes, dates and plain counts are not
+    looked at.
 - **Deploy previews are read-only** (redesign PR 2, TASK 0a, after deploy-preview-51 overwrote production's book on
   5 Oct 2026). A preview reads everything production reads, but every Netlify function that writes or sends (the state
   save, every order, Modify and cancel, the one-tap approval, the autopilot's run, the Alpha Vantage cache write) answers
@@ -430,9 +449,12 @@ changes what the owner reads, not what v1 needs: v1 waits only on the owner's th
 ## 4. NOT VERIFIED
 
 At most ten items. **OWNER CHECK** means only the owner's reading can settle it: J-0001's Journal entry (#1), the live
-open-risk numbers (#4), Find's speed on the phone (#5) and a real copilot answer (#10). Everything marked **read when it
+open-risk numbers (#4), Find's speed on the phone (#5), a real copilot answer (#10) and Build's crosshair on the phone
+(#3). Everything marked **read when it
 happens** is recorded if the owner meets it in normal use, and is never asked for. (PR 61 re-read every item below by
-name: none could be closed from this sandbox; each is re-confirmed with what PR 61 added to it.)
+name: none could be closed from this sandbox; each is re-confirmed with what PR 61 added to it. PR 62 re-read them
+again: none closed; #5, #8, #9 and #10 carry what PR 62 changed. PR 63 re-read them: none closed; #3, #5 and #8
+carry what PR 63 changed.)
 
 1. **OWNER CHECK — the Journal entry for J-0001 shows the $7.65 fill** (v1 is reached on the owner's report of 5 Oct
    2026: filled 9 of 9 at $7.65, filed from the production address; this session cannot see that browser). **No Modify
@@ -466,8 +488,13 @@ name: none could be closed from this sandbox; each is re-confirmed with what PR 
    photographed the same way with a stub copilot (docs/screens/pr4/); the fixture has no headlines, so a news block with
    real headlines has not been seen. **PR 61's screens** (☆ with Undo, the tick's word and the line after it, the one
    Compare sheet ticked and fitting, Build's card-vs-limit line, "Already open as…", AT RISK's "Includes…") were
-   photographed the same way (docs/screens/pr61/, `node scripts/shoot-pr61.mjs`) — never on a phone. **No screen reader
-   was run.**
+   photographed the same way (docs/screens/pr61/, `node scripts/shoot-pr61.mjs`) — never on a phone. **PR 62's quiet line
+   under a copilot answer** ("Not in the app's figures: …") is rendered in copilot.test.jsx only, never photographed.
+   **PR 63's rows, card Details and Build's chart** (zones, ±1 sd, the exit tick, the crosshair by a tap and by the keys,
+   "How to read", light) were photographed the same way (docs/screens/pr63/, `node scripts/shoot-pr63.mjs`); no board
+   draws them, so the audit cannot compare them. **OWNER CHECK — the crosshair on the phone:** the line's handle takes a
+   drag (`touch-action: none` on its 44px target) while the rest of the chart scrolls the page; whether that feels right
+   under a thumb has not been tried. **No screen reader was run** (the chart is a slider with a spoken value: unheard).
 4. **Read when it happens — no credit has filled at the corrected limit** (the indicative combination ask on thin chains
    has not been measured by a fill; J-0003 never filled at it), **and "Not on Alpaca", "size N > M on the ask", the "Not
    in the app" card, an order "sent outside this app", free sizing (PR #41), and an order sent from Build's new review
@@ -478,9 +505,13 @@ name: none could be closed from this sandbox; each is re-confirmed with what PR 
    and fixed on Build (USO 145/152 ×17: $14,101 + $4,726 = $18,827 in riskGate.test.js); "Includes … (not on Alpaca) …
    order still working" and "Already sent as …" have been seen on the `+book` fixture and the owner's numbers only, never
    on the live book.
-5. **OWNER CHECK — Find's speed on the phone; the live season has never been read.** Generation is one memo (139–259
-   ms for the 31 fixture cards on a desktop CPU; under "Signals decide" a directional market builds two families; the
-   PR #49 replay adds ≈ 1 ms); a slider move is 0.1 ms. The sandbox cannot call Alpha Vantage: `seasonalSignal()` and
+5. **OWNER CHECK — Find's speed on the phone; the live season has never been read.** Generation is one memo (since PR
+   62's exact chance, 87–106 ms for the 31 fixture cards on a desktop CPU, three runs; 215–249 ms with the 8,000 runs it
+   replaced, same machine). **PR 63 measured reading every expiry in the window instead of one** (the same boards, a
+   warm run, so lower than the first-run figure above): 33–51 ms with one board per market, 59–61 ms with 2, 140–147 ms
+   with 5, 250–301 ms with 9; the live number of expiries per market could not be read from the sandbox. Find stays on
+   one expiry (the owner's decision, 7 Oct 2026). Under "Signals decide" a directional market builds two families; the
+   PR #49 replay adds ≈ 1 ms; a slider move is 0.1 ms. The sandbox cannot call Alpha Vantage: `seasonalSignal()` and
    `histBacktest()` have run on avFixture series only. Since PR #49 `parseAvJson()` keeps the whole series: on a
    195-month fixture a month carries 16–17 years instead of 9–10; which live months count, and every live PAST YRS
    tile, are unread.
@@ -519,18 +550,30 @@ name: none could be closed from this sandbox; each is re-confirmed with what PR 
    PR 4b: build 417 → 458 (the variants section and the roll's line on Build, an upper bound). PR 61: find 288 → 184
    and market 581 → 474 (the compare tray left both screens for the Compare sheet), build 462 → 504 (the "already sent"
    and card-vs-limit lines, Continue); `GATE_NEAR_LIMIT` 0.9 (when Pre-trade analysis names a gate check) is chosen.
+   PR 62: market 474 → 479 and build 504 → 518 (the "Not in the app's figures" line, 7 words, at two sites on each; the
+   counter also stopped reading 9 words of code on the market page as prose). The grounding check's tolerance (half a
+   unit of the last digit written, or of a round hundred) is chosen, not measured. PR 63: no ceiling moved; the row's
+   three figure words (five a row) and the chart's hint (14 words) are not seen by the source counter (written in
+   voice.test.js). The chart's keyboard step (a round number near 0.25% of the price) is chosen.
 9. **The exit rules are inherited defaults, not backtested** on these ten markets; the single option's +50% of the
    premium is the owner's choice. PAST YRS settles at expiry and does not replay them. **Since PR #50 a replay window
    that runs past December reads the next year's row and the last year is dropped, not padded** (it used to wrap to the
    same row's January): the PAST YRS tiles on windows that cross December (a November or December entry held 45+ days)
    changed with #50 and are owner-observed — no live tile has been read. On fixtures with no
    season the future avg runs −41.3 → +9.5 per $100, median −4.3, 6 of 31 above zero (the brief measured −41.0 →
-   +8.2, −3.6, 4 of 31; the difference was not traced). The exact long-put maximum (PR #47, 0c) raises three Find fixture cards' return on
+   +8.2, −3.6, 4 of 31; the difference was not traced). **Since PR 62 the chance and the future average are worked out
+   exactly on the model** (the spread of prices the options imply, with the season's drift), no longer by 8,000 seeded
+   runs: on the 31 fixture cards the chance moved at most 0.94 points (median 0.27) and the average per $100 at most
+   2.57 (median 0.54); one butterfly's average went +1.3 → −1.1, inside the old runs' noise. Exact is exact for the
+   model only: **whether the model's chance matches what live trades do is not measured**, as before. The exact long-put maximum (PR #47, 0c) raises three Find fixture cards' return on
    risk 3.5–4.5×; how that moves their rank on live boards is not measured.
 10. **OWNER CHECK — a real copilot answer.** The AI features have not seen a real answer since the usage limit ended
     (2026-10-01). PR 61 changed what they are asked (Pre-trade analysis: the verdict first, at most three reasons, the gate
     only for a failed check or one at 90%+; Find's cards named C1…Cn; Future and Past held equal), raised the budget to
-    3,000 tokens and added Continue: all tested on a stubbed stream only.
+    3,000 tokens and added Continue: all tested on a stubbed stream only. **PR 62's grounding check** (every $ amount
+    and % in a finished answer looked for among the numbers the app sent; strikes, dates and plain counts are not looked
+    at) has run on written examples only: **how often it flags a figure a real answer works out correctly from the app's
+    own numbers (a difference, a product) is unknown** — such a figure is listed, by design, since the app never sent it.
     PR 4 rewrote the standing instructions (no decision trees; recommend only among what the app built) and added Find's
     two questions, the market page's News impact, Build's verdict, Greeks and chart questions and the position's four:
     **whether the model keeps to the cards and actions handed in, and gives exactly one of the three verdicts, has only

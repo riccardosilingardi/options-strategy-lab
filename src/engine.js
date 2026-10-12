@@ -25,7 +25,11 @@ export const netBS = (legs, S, dte, iv) => legs.reduce((a, l) => a + Math.sign(l
 export const payoff = (legs, S) => legs.reduce((a, l) => a + Math.sign(l.side) * l.qty * (l.type === "call" ? Math.max(S - l.strike, 0) : Math.max(l.strike - S, 0)), 0);
 
 /* ============================================================================
-   ONE CHANCE, ONE ARITHMETIC — AND THE MONTE CARLO IS THE ONE.
+   ONE CHANCE, ONE ARITHMETIC — AND THE MONTE CARLO WAS THE ONE.
+
+   >>> SINCE PR 62 (owner, 7 Oct 2026) THE ONE CHANCE IS `terminalExact()` below: the same lognormal and the same drift,
+   worked out exactly instead of drawn 8,000 times. `terminalMC()` stays as the reference the proof test runs against
+   (engine.test.js, 1,000,000 runs); nothing on screen reads it. What follows is the history of why there is one. <<<
 
    WHAT WAS HERE, AND WHY IT IS GONE. `probProfit(legs, entry, S, iv, dte)`
    integrated the expiry payoff against a lognormal with a RISK-NEUTRAL drift of
@@ -167,6 +171,132 @@ export function terminalMC(legs, entryNet, S, policy) {
   }
   return { pop: wins / n, ev: sum / n, p5: qq(0.05), p50: qq(0.5), p95: qq(0.95),
     bins, runs: n, driftAnnual, sigma, dte, seed };
+}
+
+/* ============================================================================
+   THE CHANCE, EXACT (PR 62, owner 7 Oct 2026: "Future avg and Chance move by chance alone").
+
+   `terminalMC()` above drew 8,000 futures from a seed that moved with the spot to the cent, so every price refresh drew
+   a new stream. Measured on main, one trade (GLD Bear Put 382/363 ×7 at 6.75, 44 days) over 200 seeds: Future avg
+   $952 to $1,360 (sd $65), and Find's order inside that noise. The distribution was never random: the terminal price
+   is lognormal with the caller's drift and volatility, and the P&L is linear between the strikes. So the same answer is
+   worked out EXACTLY, with no draw: on each piece between two strikes the chance is a difference of two normal CDFs and
+   the average a partial expectation of the lognormal. The same trade gives the same numbers on every screen, and a cent
+   on the spot moves them by a cent's worth. `terminalMC()` stays only as the reference engine.test.js checks this
+   against at 1,000,000 runs.
+============================================================================ */
+
+/**
+ * Φ, the standard normal CDF, to double precision (Hart's algorithm 5666 as given by West, 2005, "Better approximations
+ * to cumulative normal functions"; error about 1e-15). `N()` above (Abramowitz–Stegun 7.1.26, error 1.5e-7) stays for
+ * the pricing and the pictures; the chance reads this one.
+ */
+export function Phi(x) {
+  if (Number.isNaN(x)) return NaN;
+  if (x === Infinity) return 1;
+  if (x === -Infinity) return 0;
+  const a = Math.abs(x);
+  let c;
+  if (a > 37) c = 0;
+  else {
+    const e = Math.exp(-a * a / 2);
+    if (a < 7.07106781186547) {
+      let b = 3.52624965998911e-02 * a + 0.700383064443688;
+      b = b * a + 6.37396220353165; b = b * a + 33.912866078383; b = b * a + 112.079291497871;
+      b = b * a + 221.213596169931; b = b * a + 220.206867912376;
+      c = e * b;
+      b = 8.83883476483184e-02 * a + 1.75566716318264; b = b * a + 16.064177579207; b = b * a + 86.7807322029461;
+      b = b * a + 296.564248779674; b = b * a + 637.333633378831; b = b * a + 793.826512519948; b = b * a + 440.413735824752;
+      c /= b;
+    } else {
+      let b = a + 0.65; b = a + 4 / b; b = a + 3 / b; b = a + 2 / b; b = a + 1 / b;
+      c = e / b / 2.506628274631;
+    }
+  }
+  return x > 0 ? 1 - c : c;
+}
+
+/**
+ * THE P&L AT EXPIRY AS AN EXACT DISTRIBUTION. The terminal price is S·exp(m + s·Z), m = (drift − σ²/2)·T, s = σ·√T,
+ * Z standard normal — the same lognormal `terminalMC()` drew from. The P&L, (payoff − entryNet) × 100 per combination,
+ * is a + b·S_T on each piece between two strikes. Returns the pieces and three exact functions:
+ *   mass(lo, hi)  P(lo < S_T ≤ hi)
+ *   cdf(x, strict) P(P&L ≤ x), or P(P&L < x) when strict
+ *   plus the pieces' bounds, for the quantiles.
+ * @param policy { driftAnnual, sigma, dte } — NO DEFAULTS, as `terminalMC()`.
+ */
+export function exactPnl(legs, entryNet, S, policy) {
+  const { driftAnnual, sigma, dte } = policy || {};
+  const finite = (x) => Number.isFinite(x);
+  if (![driftAnnual, sigma, dte].every(finite) || !Array.isArray(legs) || !finite(entryNet)) {
+    throw new TypeError("exactPnl needs { driftAnnual, sigma, dte } and finite legs/entryNet: see chanceOf() in src/rules.js");
+  }
+  if (!(S > 0) || !(sigma > 0) || !(dte > 0)) throw new RangeError("exactPnl needs a positive spot, volatility and horizon");
+  const T = dte / 365, s = sigma * Math.sqrt(T), m = (driftAnnual - 0.5 * sigma * sigma) * T, lnS = Math.log(S);
+  const z = (x) => (x <= 0 ? -Infinity : x === Infinity ? Infinity : (Math.log(x) - lnS - m) / s);
+  const P = (x) => (x <= 0 ? 0 : x === Infinity ? 1 : Phi(z(x)));                         // P(S_T ≤ x)
+  const fwd = S * Math.exp(m + 0.5 * s * s);
+  const PX = (x) => (x <= 0 ? 0 : x === Infinity ? fwd : fwd * Phi(z(x) - s));            // E[S_T · 1{S_T ≤ x}]
+  const fwd2 = S * S * Math.exp(2 * m + 2 * s * s);
+  const PX2 = (x) => (x <= 0 ? 0 : x === Infinity ? fwd2 : fwd2 * Phi(z(x) - 2 * s));     // E[S_T² · 1{S_T ≤ x}]
+  const pnl = (x) => (payoff(legs, x) - entryNet) * 100;
+  const ks = [0, ...Array.from(new Set(legs.map((l) => Number(l.strike)).filter((k) => k > 0))).sort((a, b) => a - b), Infinity];
+  const pieces = [];
+  for (let i = 0; i < ks.length - 1; i++) {
+    const lo = ks[i], hi = ks[i + 1];
+    const b = hi === Infinity ? pnl(lo + 1) - pnl(lo) : (pnl(hi) - pnl(lo)) / (hi - lo);
+    pieces.push({ lo, hi, a: pnl(lo) - b * lo, b });
+  }
+  const mass = (lo, hi) => (hi > lo ? P(hi) - P(lo) : 0);
+  /** P(P&L ≤ x), or < x when `strict`. */
+  const cdf = (x, strict = false) => {
+    let F = 0;
+    for (const { lo, hi, a, b } of pieces) {
+      if (b === 0) { if (strict ? a < x : a <= x) F += mass(lo, hi); continue; }
+      const r = (x - a) / b;
+      F += b > 0 ? mass(lo, Math.min(hi, Math.max(lo, r))) : mass(Math.max(lo, Math.min(hi, r)), hi);
+    }
+    return Math.min(1, Math.max(0, F));
+  };
+  const far = S * Math.exp(m + 8.3 * s);   // Φ(8.3) = 1 − 5e-17: past it there is no probability to speak of
+  const ends = [...ks.slice(0, -1), far].map(pnl);
+  return { pieces, mass, cdf, P, PX, PX2, lowest: Math.min(...ends), highest: Math.max(...ends) };
+}
+
+/**
+ * THE ONE CHANCE, EXACT. The same answer `terminalMC()` estimated, with no sampling error: { pop, ev, p5, p50, p95,
+ * bins, sd, driftAnnual, sigma, dte, method: "exact" }, ev / p5 / p50 / p95 / sd in DOLLARS per combination.
+ * `bins` are the 30 buckets `terminalMC()` drew between the 1st and 99th percentile (the first and last take what lies
+ * beyond), each { x: its middle, rounded to the dollar, n: the share of outcomes in it, in percent }.
+ */
+export function terminalExact(legs, entryNet, S, policy) {
+  const D = exactPnl(legs, entryNet, S, policy);
+  let pop = 0, ev = 0, ev2 = 0;
+  for (const { lo, hi, a, b } of D.pieces) {
+    const mass = D.mass(lo, hi);
+    const ex = D.PX(hi) - D.PX(lo), ex2 = D.PX2(hi) - D.PX2(lo);
+    ev += a * mass + b * ex;
+    ev2 += a * a * mass + 2 * a * b * ex + b * b * ex2;
+    // A P&L of exactly zero is not a profit (the convention `terminalMC()` and `payoffBands()` keep).
+    if (b === 0) { if (a > 0) pop += mass; continue; }
+    const r = -a / b;
+    pop += b > 0 ? D.mass(Math.max(lo, r), hi) : D.mass(lo, Math.min(hi, r));
+  }
+  /** The q-quantile of the P&L: the smallest x with P(P&L ≤ x) ≥ q, by bisection on the exact CDF. */
+  const quantile = (q) => {
+    let lo = D.lowest - 1, hi = D.highest + 1;
+    for (let i = 0; i < 200 && hi - lo > 1e-9; i++) { const mid = (lo + hi) / 2; if (D.cdf(mid) >= q) hi = mid; else lo = mid; }
+    return Math.round(hi * 1e6) / 1e6;
+  };
+  const lo = quantile(0.01), hi = quantile(0.99), B = 30, span = hi - lo;
+  const edge = (j) => lo + (j / B) * span;
+  const bins = Array.from({ length: B }, (_, i) => {
+    const below = i === 0 ? 0 : D.cdf(edge(i), true);
+    const upTo = i === B - 1 ? 1 : D.cdf(edge(i + 1), true);
+    return { x: +(lo + ((i + 0.5) / B) * span).toFixed(0), n: span > 0 ? +(Math.max(0, upTo - below) * 100).toFixed(2) : (i === 0 ? 100 : 0) };
+  });
+  return { pop: Math.min(1, Math.max(0, pop)), ev, p5: quantile(0.05), p50: quantile(0.5), p95: quantile(0.95), bins,
+    sd: Math.sqrt(Math.max(0, ev2 - ev * ev)), driftAnnual: policy.driftAnnual, sigma: policy.sigma, dte: policy.dte, method: "exact" };
 }
 
 /**

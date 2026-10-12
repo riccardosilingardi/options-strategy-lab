@@ -20,7 +20,7 @@ import { findCards } from "../scripts/find-fixtures.jsx";
 import { BASKET, MARKET_CATEGORIES } from "./markets.js";
 import { findOrderCompare } from "./signals.js";
 import { requestOf, RULES, FIND_CHIPS, FIND_ORDERS, PLACEHOLDER_HEAD, NEWS_NOT_READ, chanceText, sizedFree, sizedFigures, money, CARD_LABELS, COMPARE_TICK, returnText } from "./rules.js";
-import { rowFigure } from "./rows.js";
+import { rowFigures } from "./rows.js";
 
 const ok = [], bad = [];
 const check = (n, f) => { try { f(); ok.push(n); console.log(`  ok   ${n}`); }
@@ -77,14 +77,20 @@ check("ONE ROW OF CHIPS: eight, in order, each saying its value, each 44px, fill
   has(bar2.replace(/<[^>]+>/g, " ").replace(/\s+/g, " "), "Chance 60%"); has(off, ">Reset<");
 });
 
-check("ONE ROW PER MARKET, IN THE ORDER OF ITS CARD: ticker (mono), subtitle, picture, the sorted-by figure and 'risk $N'", () => {
+check("ONE ROW PER MARKET, IN THE ORDER OF ITS CARD: ticker (mono), subtitle, picture, three figures (the sorted one ringed), the days and 'risk $N'", () => {
   const h = find();
   if (count(h, 'role="listitem" data-row=') !== 2) throw new Error("not one row per market");
   if (h.indexOf('data-row="' + SORTED[0].tk + '"') > h.indexOf('data-row="' + SORTED.find((x) => x.tk !== SORTED[0].tk).tk + '"')) {
     throw new Error("the rows are not in the order of their cards");
   }
-  has(h, "Future avg · risk");
+  has(h, "Days · risk");
   has(h, "risk $");
+  // PR 63: Chance · Return on risk · Avg per $100 at risk on every row, the sorted-by one (Future avg) ringed, and the days.
+  if (count(h, 'data-row-fig="chance"') !== 2 || count(h, 'data-row-fig="rr"') !== 2 || count(h, 'data-row-fig="future"') !== 2) {
+    throw new Error("a row without its three figures");
+  }
+  if (count(h, 'data-row-fig="future" data-sorted="true"') !== 2 || count(h, 'data-sorted="true"') !== 2) throw new Error("the ring is not on Future avg alone");
+  has(h, " avg per $100"); has(h, `>${SORTED[0].dte}d<`);
   has(h, "<svg width=\"72\" height=\"40\"");          // the 72×40 picture: payoffBands()'s zones and the price line
   has(h, "▲ Bull");                                  // UNG's direction from signalDirection(), never "Very"
   has(h, "2 of 2 fit");
@@ -241,7 +247,7 @@ check("CHAIN: an uncovered short leg blocks Build with the reason; nothing is se
 check("☆ IS A TOGGLE (PR 61): a saved row's star stays enabled and says it removes; the market header's star says the same", () => {
   const x = SORTED.find((c) => c.tk === "UNG");
   const row = { tk: x.tk, x, misses: [], fits: true };
-  const fig = rowFigure(x, null, "ev");
+  const fig = rowFigures(x, null, "ev");
   const off = renderToStaticMarkup(<MarketRow row={row} fig={fig} saved={false} onSave={() => {}} onOpen={() => {}} />);
   const on = renderToStaticMarkup(<MarketRow row={row} fig={fig} saved onSave={() => {}} onOpen={() => {}} />);
   has(off, `aria-label="${esc(`Save: UNG ${x.name}`)}"`); has(off, "☆");

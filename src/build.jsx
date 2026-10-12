@@ -19,7 +19,7 @@ import { T, TYPE } from "./theme.js";
 import { mono, sans, Note, Info, Sheet, Reveal, FilterChip, TAP } from "./ui.jsx";
 import { useCopilot, useTicketSend, SKILLS, BUILD_SKILL_IDS, Markdown, readQty, CONTINUE_LABEL } from "./pro.jsx";
 import { FACTOR_LABEL } from "./why.jsx";
-import { CARD_LABELS, BUILD_DEFINITIONS, money, signedMoney, chanceText, returnText, futureTile, ARIA, VARIANT_LOAD, NO_CEILING, LIMIT_CHOICES, parseLimitText } from "./rules.js";
+import { CARD_LABELS, BUILD_DEFINITIONS, money, signedMoney, chanceText, returnText, notInFiguresLine, futureTile, ARIA, VARIANT_LOAD, NO_CEILING, LIMIT_CHOICES, parseLimitText } from "./rules.js";
 
 const FS = TYPE.size, FW = TYPE.weight, LH = TYPE.line;
 const tnum = { fontVariantNumeric: "tabular-nums" };
@@ -244,6 +244,10 @@ export function CopilotSection({ ask, skills: own = null, label = null, heading 
             <div key={i}>
               <div style={{ ...sans, fontSize: FS.sm, fontWeight: FW.bold, color: T.ink }}>{labelOf(p.q)}</div>
               {p.a && <Markdown text={p.a.content} style={{ marginTop: 4, lineHeight: LH.body }} />}
+              {/* GROUNDED (PR 62): a figure in the finished answer the app never sent, in one quiet amber line. */}
+              {p.a && !p.a.truncated && notInFiguresLine(p.a.ungrounded) && (
+                <div data-ungrounded style={{ ...sans, fontSize: FS.xs, color: T.amber, marginTop: 4, lineHeight: LH.body }}>{notInFiguresLine(p.a.ungrounded)}</div>
+              )}
               {p.a && (
                 <div style={{ ...sans, fontSize: FS.xs, color: p.a.truncated ? T.amber : T.mut, marginTop: 4 }}>
                   {!p.a.truncated ? "Filed in the Journal." : p.a.reason === "max_tokens"

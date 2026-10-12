@@ -9,7 +9,7 @@
 //    brief's own CORN reading of 2 Oct (+64 / conf 86, October measured +1.2%).
 // 2. CARDS, on the two fixture boards (MODEL_BOARD and the UNG board): how many cards one family gave before and the
 //    suggested family plus Neutral give after.
-// 3. TIME: generating those cards (analyse, floors, 8,000-run chance), before and after, on this machine — not a
+// 3. TIME: generating those cards (analyse, floors, the chance), before and after, on this machine — not a
 //    phone (PRD §4.5).
 // FIXTURES ONLY: no live board, no live reading.
 // ============================================================================

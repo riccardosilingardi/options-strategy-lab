@@ -14,6 +14,7 @@ import { readdirSync, statSync } from "node:fs";
 import { compareCards } from "./rows.js";
 import { positionActions, POSITION_ACTIONS, sinceEntry } from "./positionView.js";
 import { FactorRows } from "./why.jsx";
+import { CopilotSection } from "./build.jsx";
 import { MARKET_TABS, factorHeadline, findCopilotLine, COPILOT_MODEL, GATE_NEAR_LIMIT, compareCountLine, FUTURE_PAST_EQUAL } from "./rules.js";
 
 const ok = [], bad = [];
@@ -135,7 +136,8 @@ check("PR 61 — FIND'S QUESTIONS NAME CARDS ONLY BY THEIR LABEL; the standing i
   has(byId("radar").prompt, COMPARE_LABEL_RULE); has(byId("newsAll").prompt, COMPARE_LABEL_RULE);
   has(COMPARE_LABEL_RULE, "name a card only by its label");
   hasNot(byId("compare").prompt, COMPARE_LABEL_RULE, "Build's 'Compare with the other cards' is unchanged");
-  eq(FUTURE_PAST_EQUAL, "Future (Monte Carlo) and Past yrs (backtest) answer different questions; never call one of them more reliable than the other.");
+  // PR 62 renamed the tile FUTURE (MODEL): the sentence follows CARD_LABELS.
+  eq(FUTURE_PAST_EQUAL, "Future (model) and Past yrs (backtest) answer different questions; never call one of them more reliable than the other.");
   has(readFileSync("src/pro.jsx", "utf8"), "${FUTURE_PAST_EQUAL}`;");
 });
 
@@ -180,6 +182,24 @@ check("CONTINUE (PR 61): offered only after a length-limit stop; it sends the co
   const build = readFileSync("src/build.jsx", "utf8");
   has(build, "{ask.canContinue && <LinkBtn data-copilot-continue onClick={ask.cont}>{CONTINUE_LABEL}</LinkBtn>}");
   hasNot(readFileSync("src/pro.jsx", "utf8"), "where asking the same one again would hit the same limit");
+});
+
+check("PR 62 — A COPILOT NUMBER MUST EXIST IN THE APP'S FIGURES: one amber line under a finished answer, nothing when all match, on every place", () => {
+  const ask = (a) => ({ msgs: [{ role: "user", content: "Q", label: "Pre-trade analysis" }, a], busy: false, err: null, partial: "", input: "", setInput: () => {},
+    send: () => {}, printConvo: () => {}, clear: () => {}, cont: () => {}, canContinue: false });
+  const flagged = renderToStaticMarkup(<CopilotSection ask={ask({ role: "assistant", content: "DOUBTS. It could lose $1,040.", ungrounded: ["$1,040"] })} />);
+  has(flagged, "data-ungrounded"); has(flagged, "Not in the app&#x27;s figures: $1,040.");
+  hasNot(renderToStaticMarkup(<CopilotSection ask={ask({ role: "assistant", content: "CONFIRM.", ungrounded: [] })} />), "data-ungrounded");
+  // A cut answer is not checked (it is not finished): the line waits for the whole one.
+  hasNot(renderToStaticMarkup(<CopilotSection ask={ask({ role: "assistant", content: "DOUBTS. $1,040", truncated: true, reason: "max_tokens", ungrounded: ["$1,040"] })} />), "data-ungrounded");
+  // Every place: Build's, Find's, the market page's, a position's and the Journal's run useCopilot (the check is in it, after
+  // the answer and after a Continue), and the chart copilot runs its own send with the same check.
+  const pro = readFileSync("src/pro.jsx", "utf8");
+  eq((pro.match(/ungroundedFigures\(/g) || []).length, 4, "send and Continue, in useCopilot and in the chart copilot");
+  has(pro, "ungroundedFigures(reply, { text: SYSTEM_PROMPT, context: contextStr })");
+  has(pro, "ungroundedFigures(reply, { text: taCopilotPrompt(), context: contextStr })");
+  // The colour is amber: a warning to check, not an error.
+  if (/data-ungrounded[^>]*T\.red/.test(readFileSync("src/build.jsx", "utf8"))) throw new Error("the line is red");
 });
 
 /* A STUBBED STREAM: the first answer stops on max_tokens, the continuation finishes. Continue APPENDS to the same answer. */

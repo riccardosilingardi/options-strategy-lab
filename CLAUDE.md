@@ -63,7 +63,7 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
   budget buys, from `sizedFigures()` and `sizeLine()`, read at `aFill` (Find) and `AE` (Build), held
   equal by the same test — and so are the two PR #49 tiles, `futureFigures()` and `pastFigures()`.
 - **The card's names are the owner's (3 Oct 2026) and live in rules.js only:** `CARD_LABELS` — YOU RISK, MAX PROFIT,
-  CHANCE, RETURN ON RISK, FUTURE (MONTE CARLO), PAST YRS (BACKTEST) — and `FIND_ORDERS` — Future avg · Future avg +
+  CHANCE, RETURN ON RISK, FUTURE (MODEL) (FUTURE (MONTE CARLO) until PR 62), PAST YRS (BACKTEST) — and `FIND_ORDERS` — Future avg · Future avg +
   signal · Chance · Return on risk · Past yrs (each with the `tile` it rings); `PAST_AVG_LABEL` ("PAST YRS AVG") on
   Build; the two toggles' words. Positions' "at entry vs now" reads the first four. No screen spells them itself.
 - **The historical replay has one home: `histBacktest()` in engine.js** (PR #49): the trade settled at expiry in the
@@ -128,10 +128,14 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
   evidence bar. `Reveal` (ui.jsx) is a tap-away region the word counter folds.
 - **Three steps since redesign PR 1 (owner, 4 Oct 2026): Find → the market page → Build** (`STEPS`, path.js). Find is one
   row per market from ONE function, `marketRows()` in `src/rows.js`, over `findShown` (the one sorted list): a row's card
-  is the market's first card that fits, else its first card as a miss in its place; a row's figure is `rowFigure()`, the
-  card's tile (figures.test.jsx). The market page (`src/market.jsx`) is a filtered view of the same list for one ticker
+  is the market's first card that fits, else its first card as a miss in its place; a row's figures are `rowFigures()`, the
+  card's tiles (figures.test.jsx). The market page (`src/market.jsx`) is a filtered view of the same list for one ticker
   (`findSorted`), never a second list; its ticker and tab are nav.js fields (`mkt`, `mtab`), and opening it does not
   replace the trade loaded on Build. Every chip on Find opens a `Sheet` (ui.jsx) holding the existing control.
+  **A row prints three figures, always (PR 63): `rowFigures()`** — Chance · Return on risk · Avg per $100 at risk, the
+  card's own, the sorted-by one ringed — then the days and the risk. **Find reads ONE expiry per market** (the board
+  nearest the Horizon): reading every expiry costs 2–6× (PR 63's measurement); the owner moved that search to a separate
+  "Optimize" run, proposed in the ROADMAP and not built until the owner says yes.
 - **Where a card stands against its market's signals is `signalStance()`** (signals.js, beside `againstSignal()`, one
   counting: the factors the market HAS, the `AGAINST_MIN_SCORE` noise floor); its words are `stanceText()` in rules.js.
 - **A function with no source yet is a `<Placeholder id>`** (ui.jsx), its words `PLACEHOLDERS` in rules.js; never a
@@ -180,6 +184,15 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
   the same item (`restoreSaved()`).
 - **The copilot's model has one home, `COPILOT_MODEL` (rules.js)**; copilot.test.jsx fails on the id anywhere else. An
   answer stopped by its length limit offers Continue (appended to the same answer, filed once).
+- **A copilot answer is checked against the app's figures (PR 62):** once finished, `ungroundedFigures()` (grounding.js)
+  looks for every $ and % among the numbers sent (the context and the standing instructions; rounding tolerance only;
+  strikes, dates and counts not looked at), and every copilot place prints `notInFiguresLine()` under it in amber.
+- **The chance is exact (PR 62): `chanceOf()` reads `terminalExact()`** — no runs, no seed. Never put a simulation back
+  under a figure on screen; `exitSim()` is the only path simulation.
+- **Build's chart reads the chance's own lognormal (PR 63): `src/tradeChart.js`** — the zones (`payoffBands()`' bands with
+  their chances, adding to 100%, the green ones to CHANCE), the ±1 sd prices, the exit tick, the crosshair's readout and
+  keys. `UnifiedView` loads the bars; `UnifiedChart` (pro.jsx) draws and takes no other distribution. A card's Details
+  rows are `cardDetailRows()` (rules.js).
 - **Open risk says what it includes (PR 61):** `limits.openRiskParts` are the gate's own summands; a trade on Build that is
   already in the book is said ("Already sent as…") and never added twice on Build's figure.
 - **The Journal's copilot (PR 4c)** asks about one closed trade (`closedTrade` in the context, the record's own words) and
@@ -209,13 +222,18 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
   `posAlerts`', the target `takeProfitTarget()`, the stop level `stopWarningLevel()`.
 - `src/nav.js` — Back: the screen state as history entries (push on a move, step back when a sheet
   is closed from its own button, Find — the first entry — is never intercepted).
-- `src/engine.js` — Black-Scholes, payoff, exit simulator, seeded Monte Carlo, seasonal parse (`parseAvJson()` keeps
+- `src/engine.js` — Black-Scholes, payoff, exit simulator, the exact chance `terminalExact()` (PR 62; `terminalMC()`, the
+  seeded Monte Carlo it replaced, stays only as the proof test's reference), seasonal parse (`parseAvJson()` keeps
   the whole series since PR #49; `statsFromMatrix()` returns per-month years and standard errors; `seasonalSpan()`),
   the historical replay `histBacktest()` (PR #49). `SEASONAL` is retired; `SIGMA` stays.
   Imports nothing; shared by client and Netlify functions.
 - `src/chain.js` — where the option chain comes from, strikes, open interest, feed names.
 - `src/signals.js` — the four-factor confluence engine, `signalDirection()`, the Find order (`findOrderCompare()`,
   `placeLine()`; it re-exports `FIND_ORDERS` from rules.js), `badgeText()` and `numbersFitLines()`.
+- `src/tradeChart.js` — Build's chart arithmetic (PR 63): `zoneOdds()`, `coneEdges()`, `exitMark()`, `crosshairReadout()`,
+  `crossKey()` (plain JS; chart.test.jsx).
+- `src/grounding.js` — a copilot number must exist in the app's figures (PR 62): `ungroundedFigures()` and the one
+  amber line `notInFiguresLine()` (rules.js) under a finished answer, on every copilot place.
 - `src/indicators.js` — every technical indicator, and the chart copilot's context.
 - `src/freshness.js` — how old a number on screen may be.
 - `src/visuals.jsx` — every trade picture, all cut from `payoffBands()`.
@@ -225,7 +243,7 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
   The type tokens (`TYPE`) are in `src/theme.js`. Mono only for numbers, tickers, legs, OCC symbols.
 - `src/find.jsx` — Step 1, Find (version B, redesign PR 1): category tabs, the chip row and its sheets, the summary line,
   one row per market (`MarketRow`), the states, and the one Compare sheet (`CompareSheet`, mounted by App.jsx; PR 61).
-- `src/rows.js` — `marketRows()`, `rowFigure()`, `rowStateOf()`: Find's rows over the one sorted list (plain JS).
+- `src/rows.js` — `marketRows()`, `rowFigures()`, `rowStateOf()`: Find's rows over the one sorted list (plain JS).
 - `src/alternatives.js` — the alternatives of a structure (PR 4b): `variantsOf()`, `rollCandidates()`, `rollEligible()` (plain JS).
 - `src/market.jsx` — Step 2, the market page: header, Signals (the tab id stays `overview`; the four factor blocks are
   why.jsx's `FactorRows`, titled by `factorHeadline()`), Strategies (`StrategyCard`), Chain (`ChainTab`, the tray).
@@ -294,7 +312,7 @@ All in `RULES`, `src/rules.js`, unless noted.
   `maxSpreadShareOfMid` 0.35, `maxComboSpreadShareOfNet` 1.0, `maxCrossingShareOfMaxProfit` 0.5,
   `minRewardRisk` 0.25.
 - Limit pricing: `openLimitSlippage` 0.25, `closeLimitSlippage` 0.25.
-- Simulation: `mcRuns` 8000, `fallbackIV` 0.25, `fallbackSigma` 0.25.
+- Simulation: `fallbackIV` 0.25, `fallbackSigma` 0.25 (`mcRuns` left in PR 62: the chance is exact, nothing read it).
 - Attention: `watchAttentionShare` 0.35, `autopilotConfidence` 70, `lowConfidence` 40.
 - Chance slider: `chanceAskMin` 0.20, `chanceAskMax` 0.80, `chanceAskStep` 0.05,
   `chanceAskDefault` none (null; the slider's leftmost position reads "any", PR #49). Return-on-risk slider: floor `minRewardRisk`, `rewardAskMax` 3,
@@ -327,6 +345,8 @@ All in `RULES`, `src/rules.js`, unless noted.
   pre-installed headless Chromium, on findB's fixtures (`scripts/screens.jsx`), and prints page and card heights.
 - `node scripts/shoot-pr4.mjs [dir]` photographs PR 4's screens (Find's Compare sheet, the Signals tab, the copilot
   sections) on the `+book` fixture with a stub copilot (docs/screens/pr4/).
+- `node scripts/shoot-pr63.mjs [dir]` photographs PR 63's screens (Find's rows, a card's Details, Build's chart at rest, with
+  the crosshair, "How to read", light) on the `+book` fixture (docs/screens/pr63/).
 - `node scripts/shoot-pr61.mjs [dir]` photographs PR 61's screens (☆ with Undo, the tick and its line, the Compare sheet, Build's
   card-vs-limit and "already open" lines, AT RISK's "Includes…") on the `+book` fixture (docs/screens/pr61/).
 - `node scripts/measure-find.mjs` prints what each Find control passes on the 31 fixture cards and what

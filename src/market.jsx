@@ -45,7 +45,7 @@ import { structureName } from "./positionView.js";
 import { undefinedRiskLegs } from "./riskGate.js";
 import { MLEG_MAX_LEGS } from "./alpacaContract.js";
 import { legsLine, MAX_COMPARE } from "./path.js";
-import { marketRows, rowFigure } from "./rows.js";
+import { marketRows, rowFigures } from "./rows.js";
 import { dayChange, expectedMove, latestNews, toggleChainLeg, legCell } from "./marketView.js";
 import { nextEvent, eventsFor, localWhen, daysUntil, etDay } from "./events.js";
 import { RULES, money, chanceText, expiryWords, sizedFree, sizedFigures, sizeLine, futureFigures, pastFigures, stopSigns,
@@ -55,7 +55,7 @@ import { RULES, money, chanceText, expiryWords, sizedFree, sizedFigures, sizeLin
   OPEN_IN_CHAIN, BUILD_CTA, COMPARE_TICK, MARKET_READ_HEAD, HOW_WORKED_OUT_LINK, MARKET_READ_END, CHAIN_MODES, marketNewsHead, marketNewsAsk,
   noOpenInterestText, underEntryText, THIN, spotLineText, legsMaxText, TRAY_LABELS, uncoveredText, trayEmptyText,
   chainEventText, eventLineText, eventInfoText, dateOnlyWhen, inDaysText, holidayWeekNote, eventsBeforeLabel, CHAIN_HEAD,
-  chainNotLoadedText, marketReadingText, noCardsText, ARIA, readScoreLine, compareTrayLine, SEE_THEM,
+  chainNotLoadedText, marketReadingText, noCardsText, ARIA, readScoreLine, compareTrayLine, SEE_THEM, cardDetailRows,
 } from "./rules.js";
 
 const FS = TYPE.size, FW = TYPE.weight, LH = TYPE.line;
@@ -142,7 +142,7 @@ export function MarketPage({
               <div role="list" style={{ marginTop: 4 }}>
                 {rows.map((r) => (
                   <MarketRow key={r.tk} row={r} sd={(boards[r.tk] || {}).signal || null} current={r.tk === tk}
-                    fig={rowFigure(r.x, sizes.get(r.x.key) || null, findOrder)} saved={isSaved(r.x.cand)}
+                    fig={rowFigures(r.x, sizes.get(r.x.key) || null, findOrder)} saved={isSaved(r.x.cand)}
                     onSave={() => onSave(r.x)} onOpen={() => { onSheet(null); onTicker(r.tk); }} />
                 ))}
               </div>
@@ -434,8 +434,25 @@ export function StrategyCard({ x, size, misses, bars, sortedBy, findOrder, saved
           </div>
         </div>
       )}
-      details={<CandidateCard {...common} misses={[]} direction={stance} badge={badge}
-        more={onMore ? { tk: x.tk, onOpen: () => onMore(x) } : null} style={{ background: T.bg }} cardKey={null} />} />
+      details={(
+        <>
+          {/* 63.2 (PR 63): breakeven distance, entry cost, IV rank, theta and the days held, first — from figures the app
+              already has (`cardDetailRows()`), each "—" with a word when unknown. Then the full card as before. */}
+          <dl data-card-details style={{ ...sans, display: "grid", gridTemplateColumns: "auto 1fr", columnGap: 10, rowGap: 4, margin: "0 0 10px",
+            fontSize: FS.xs, lineHeight: LH.body }}>
+            {cardDetailRows({ spot: x.spot, breakevens: af.breakevens, move: expectedMove(x.spot, mc ? mc.sigma : null, x.dte),
+              spread: x.spread, maxProfit: af.maxProfit, unbounded: af.profitUnbounded, n, ivRank: x.ivRank, ivDays: x.ivDays,
+              theta: af.greeks ? af.greeks.theta : null, dte: x.dte }).map((r) => (
+              <React.Fragment key={r.id}>
+                <dt style={{ color: T.mut }}>{r.k}</dt>
+                <dd data-detail={r.id} style={{ ...mono, margin: 0, color: T.body, fontVariantNumeric: "tabular-nums", overflowWrap: "anywhere" }}>{r.v}</dd>
+              </React.Fragment>
+            ))}
+          </dl>
+          <CandidateCard {...common} misses={[]} direction={stance} badge={badge}
+            more={onMore ? { tk: x.tk, onOpen: () => onMore(x) } : null} style={{ background: T.bg }} cardKey={null} />
+        </>
+      )} />
   );
 }
 
