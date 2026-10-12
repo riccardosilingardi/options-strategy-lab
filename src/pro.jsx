@@ -23,6 +23,7 @@ import { Fold } from "./steps.jsx";
 import { indicatorSet, takeaway, taContext, LABELS, MEASURES, RSI_HIGH, RSI_LOW } from "./indicators.js";
 import { erf, netBS } from "./engine.js";
 import { ARROW, REGIONS, regionSignals, tagImpacts, taRead } from "./signals.js";
+import { eventsBrief, EVENT_TABLE_END } from "./events.js";
 import { useNarrow, BandThumbnail, payoffBands, bandTakeaway, pnl$ } from "./visuals.jsx";
 import { chartDist, zoneOdds, coneEdges, exitMark, awayFrom, crosshairReadout, crossStep, crossKey } from "./tradeChart.js";
 import { DEMO, DEMO_TOOLTIP } from "./demo.js";
@@ -1204,48 +1205,59 @@ export const COPILOT_ROLE = Object.freeze({
 export const BUILD_VERDICTS = Object.freeze(["CONFIRM", "DOUBTS", "DO NOT CONFIRM"]);
 /**
  * THE COPILOT, BY PLACE. Each question names its `place`; a screen shows its own place's questions and no other.
- * PRD §1, "Copilots", holds the map:
- *   find       Compare the cards (and recommend among them) · News impact across the markets      (Find's Compare › sheet)
- *   market     News impact on this market                                                          (the market page, Signals)
- *   build      Pre-trade analysis (its verdict) · the Greeks · the chart · what would make it wrong · the other cards · news
- *   positions  review and the action to take · closing in profit · since I opened it · the chart since I opened it
- * The chart copilot (TA_QUESTIONS in rules.js) is the market page's and Build's More: it explains the chart only.
+ * PR 65 (owner, 12 Oct 2026: "rationalize the presets so they are not redundant and specifically useful for the section
+ * they sit in") — thirteen here and the chart copilot's three; each about what its screen shows, each reading what its context carries:
+ *   find       Which card fits best? · What could change the pick?                                   (Find's Compare sheet)
+ *   market     News impact (in the news block) · Do the four signals agree? (under the market's read)  (Signals)
+ *   build      Pre-trade analysis (its verdict) · What would make it wrong? · Is there a better choice? · the Greeks · the chart
+ *   positions  What should I do now? · Should I roll it? (only when the app offers a roll) · Since I opened it
+ *   journal    What did this trade teach me?
+ * The chart copilot (TA_QUESTIONS in rules.js: the trend, RSI, MACD) is the market page's and Build's More: it explains the
+ * chart only. Merged in PR 65: Build's variants + other cards ("Is there a better choice?"), Build's news into "What would
+ * make it wrong?", a position's review + exit ("What should I do now?") and its chart into "Since I opened it".
  */
 /** Find's two questions name a card only by its label (PR 61): the table above the answer prints the same C1…Cn. */
 export const COMPARE_LABEL_RULE = "Each card in findCards has a label (C1, C2 and on, printed in the table above your answer): name a card only by its label, never by a number of your own.";
+/** The scheduled reports a question may weigh (PR 65): only the dates the app's calendar put in the context. */
+const EVENTS_RULE = "Quote only the dates in events; a market the calendar lists nothing for has none copied in, and you say so rather than name a date.";
 export const SKILLS = [
-  /* FIND (PR 4): the cards that fit, in the owner's order, up to 20 (findCards), the filters in the chips' own words. */
-  { id: "radar", place: "find", label: "Compare the cards", prompt: `${COPILOT_ROLE.find} Compare the cards that fit the filters I set (findCards and findFilters in the context; findMisses says how many miss and why). ${COMPARE_LABEL_RULE} Name the filters first. For every card you mention, cite its own figures as the app printed them — you risk, max profit, chance, return on risk, future avg and past yrs — and its Greeks as the app worked them out for the size the budget buys: say in a sentence what its delta, its theta and its vega mean for that card (what a move, a day passing and a jump in volatility each do to it). Then recommend the one card, at most two, that fits best, and why, using the criteria for judging a card; or say that none fits and which filter binds. The cards are in the app's own order (findFilters.order): if your pick is not the first, say why. Never a size past the per-trade limit (${perTradeCapLabel()}).` },
-  { id: "newsAll", place: "find", label: "News impact", prompt: `${COPILOT_ROLE.find} From the tagged news in the context (taggedNews, across every market), which headlines move which markets, in which direction, and why? Separate noise from signal, with cause and effect and a time horizon, and say how much the news weighs against the other three factors (seasonality, the price trend, weather) in each market's reading (scanner). Then say which of the cards in findCards the news supports and which it undercuts. ${COMPARE_LABEL_RULE} Recommend nothing from the news alone.` },
-  /* THE MARKET PAGE (PR 4): news is one of the four factors and has its own question beside its own block. */
-  { id: "newsMarket", place: "market", label: "News impact", prompt: `${COPILOT_ROLE.market} About this market's news only (taggedNews for currentTicker and the news factor's reading in scanner): which headlines push it up and which push it down, why, and over what time horizon? Separate noise from signal. Say how much the news weighs against seasonality, the price trend and weather in this market's reading, and what would make the news factor turn.` },
-  /* BUILD (redesign PR 2's four, PR 4's verdict, the Greeks and the chart). */
+  /* FIND (PR 4): the cards that fit, in the owner's order, up to 20 (findCards), the filters in the chips' own words. PR 65: the
+     Greeks only where they separate the cards (Build explains them in full); the news question became the pick's. */
+  { id: "radar", place: "find", label: "Which card fits best?", prompt: `${COPILOT_ROLE.find} Compare the cards that fit the filters I set (findCards and findFilters in the context; findMisses says how many miss and why). ${COMPARE_LABEL_RULE} Name the filters first. For every card you mention, cite its own figures as the app printed them — you risk, max profit, chance, return on risk, future avg and past yrs. Use its Greeks (as the app worked them out for the size the budget buys) only where they separate one card from another, and say in a sentence what that difference does. Then recommend the one card, at most two, that fits best, and why, using the criteria for judging a card; or say that none fits and which filter binds. The cards are in the app's own order (findFilters.order): if your pick is not the first, say why. Never a size past the per-trade limit (${perTradeCapLabel()}).` },
+  { id: "pickChange", place: "find", label: "What could change the pick?", prompt: `${COPILOT_ROLE.find} For the markets of the cards in findCards only: which headlines (taggedNews) and which scheduled reports before each card's expiry (events in the context, by market) could move them, in which direction, why and when? Separate noise from signal. ${EVENTS_RULE} ${COMPARE_LABEL_RULE} For each card you mention, say whether these support or undercut it and whether they would change which card fits best. Recommend nothing from the news or the calendar alone.` },
+  /* THE MARKET PAGE (PR 4): news is one of the four factors and has its own question beside its own block (`slot` "news");
+     PR 65: the four read together, under the market's read (`slot` "read"). */
+  { id: "newsMarket", place: "market", slot: "news", label: "News impact", prompt: `${COPILOT_ROLE.market} About this market's news only (taggedNews for currentTicker and the news factor's reading in scanner): which headlines push it up and which push it down, why, and over what time horizon? Separate noise from signal. Say how much the news weighs against seasonality, the price trend and weather in this market's reading, and what would make the news factor turn.` },
+  { id: "signalsAgree", place: "market", slot: "read", label: "Do the four signals agree?", prompt: `${COPILOT_ROLE.market} Read this market's four factors together (marketSignals in the context: seasonality, the price trend, weather and news, each with its direction and strength as the app measured them, the agreement, the score and the confidence; a factor still being read, failed or not applying here is said to be so, never guessed). Where do they agree, where do they conflict, which weighs most in the app's reading and how sure is that reading? Then say what would have to change for the reading to turn. Quote only the figures in the context.` },
+  /* BUILD (redesign PR 2's four, PR 4's verdict, the Greeks and the chart; PR 65: five, no two answering the same thing). */
   /* PRE-TRADE ANALYSIS (PR 61, owner 7 Oct 2026): the app already prints all of the gate's checks beside the answer, so
      reading them back spent half of it and made a second copy of the gate's numbers. The verdict comes FIRST; at most
      three reasons; the gate only for a check that fails or sits at GATE_NEAR_LIMIT or more of its limit (the share is the
-     app's, in reviewChecklist). The other sentences are kept word for word. */
-  { id: "pretrade", place: "build", label: "Pre-trade analysis", prompt: `${COPILOT_ROLE.build} Your FIRST line is your verdict alone, exactly one of ${BUILD_VERDICTS.join(", ")}. Then at most three reasons for it, from the app's figures and the criteria for judging a card (the trade's figures, its Greeks, its breakevens against support and resistance, the season and the news, as the context has them). The app prints every one of the risk gate's checks beside your answer: do not read them back. Mention a check only when it fails, or when it sits at ${pctText(GATE_NEAR_LIMIT, 0)} or more of its limit (reviewChecklist: passed, shareOfLimit), and then quote the app's own share, as in "$4,725 is 94% of the per-trade cap". The size is the app's (sizedByTheApp, against the per-trade limit, ${perTradeCapLabel()}); do not suggest another size. Your verdict is your reading, not the gate's: the gate's checks stand whatever you say. If another card in the context (otherCards) fits better, name it.` },
+     app's, in reviewChecklist). PR 65: the other cards moved to "Is there a better choice?"; this is about the trade loaded. */
+  { id: "pretrade", place: "build", label: "Pre-trade analysis", prompt: `${COPILOT_ROLE.build} Your FIRST line is your verdict alone, exactly one of ${BUILD_VERDICTS.join(", ")}. Then at most three reasons for it, from the app's figures and the criteria for judging a card (the trade's figures, its Greeks, its breakevens against support and resistance, the season and the news, as the context has them). The app prints every one of the risk gate's checks beside your answer: do not read them back. Mention a check only when it fails, or when it sits at ${pctText(GATE_NEAR_LIMIT, 0)} or more of its limit (reviewChecklist: passed, shareOfLimit), and then quote the app's own share, as in "$4,725 is 94% of the per-trade cap". The size is the app's (sizedByTheApp, against the per-trade limit, ${perTradeCapLabel()}); do not suggest another size. Your verdict is your reading, not the gate's: the gate's checks stand whatever you say. Judge the trade loaded only: whether another choice is better is its own question.` },
+  /* PR 65: "What would make it wrong?" and "News that could move it" were two halves of one question; the calendar is now in
+     the context (events), so the dates it names are the publishers', never the model's. */
+  { id: "wrong", place: "build", label: "What would make it wrong?", prompt: `${COPILOT_ROLE.build} About the trade loaded only: what would make it wrong? Name the price levels (its breakevens and strikes); the dates — the expiry, the ${RULES.exitDTE}-day exit and the scheduled reports before expiry (events in the context for currentTicker); the headlines in taggedNews that could move this market before expiry, which way and why, separating noise from signal; and which of the four factors (seasonality, the price trend, weather, news) would have to change. ${EVENTS_RULE} Explain what each would mean for this trade.` },
+  /* PR 4b's variants, Build's "Compare with the other cards" and PR 65's Optimize rows are one question: is anything the
+     app priced beside this trade better? Never a strike of its own. */
+  { id: "better", place: "build", label: "Is there a better choice?", prompt: `${COPILOT_ROLE.build} Is there a better choice than the trade loaded among what the app priced beside it? Read the other cards for this market (otherCards: Find's own figures), the variants (buildVariants: the same structure one listed strike up or down, with wider or narrower wings, or on the next expiry, each with its figures for the size the budget buys and the gate's line) and, when Optimize has run, its rows (optimize: the same structure on every expiry in the entry window and on the strikes around these, ranked in the person's Find order, labelled O1 to O5). For each one you mention, say what it bets on and what it changes against the trade loaded — risk, profit, chance, the time it has. Then recommend the trade loaded, one card, one variant or one O row, by its name or label as the app prints it, or none. A variant the gate refuses is never recommended, and neither is an O row the gate refuses or one that misses the request. Name no strike or expiry that is not one of these.` },
   { id: "greeks", place: "build", label: "Explain the Greeks", prompt: `${COPILOT_ROLE.build} Explain the Greeks of the trade loaded, as the app worked them out (currentStrategy.greeks, for one combination; sizedByTheApp.contracts says how many): what delta, gamma, theta and vega mean here in dollars, which of a price move, a day passing and a change in volatility helps this trade and which hurts it, and how they change as expiry nears and the price moves toward a breakeven. Quote only the Greeks in the context.` },
   { id: "chart", place: "build", label: "The chart and this trade", prompt: `${COPILOT_ROLE.build} Read this market's price chart (chart in the context: the app's own indicators from daily bars; there are no bars) against the trade loaded: where its breakevens and strikes sit against the moving averages, the Bollinger band and recent highs and lows, what the trend says about the side the trade takes, and how far each breakeven is in ordinary days of movement. Quote only the figures in the context.` },
-  /* PR 4b: refine it — the variants the app priced (buildVariants in the context), never a strike of its own. */
-  { id: "variants", place: "build", label: "Which variant fits best?", prompt: `${COPILOT_ROLE.build} Compare the trade loaded with its variants as the app priced them (buildVariants in the context: the same structure one listed strike up or down, with wider or narrower wings, or on the next expiry — each with its figures for the size the budget buys and the gate's line). When Optimize has run (optimize in the context: the same structure on every expiry in the entry window and on the strikes around these, ranked in the person's Find order, labelled O1 to O5), compare those rows too. Say what each one changes — risk, profit, chance, the time it has — and recommend the loaded trade, one variant or one O row, by its name or label as the app prints it, or none. A variant the gate refuses is never recommended, and neither is an O row the gate refuses or one that misses the request. Name no strike or expiry that is not one of these.` },
-  { id: "wrong", place: "build", label: "What would make it wrong?", prompt: `${COPILOT_ROLE.build} About the trade loaded only: what would make it wrong? Name the price levels, the dates (the expiry and the ${RULES.exitDTE}-day exit) and the events before expiry that would turn it against me, and which of the four factors (seasonality, the price trend, weather, news) would have to change. Explain what each would mean for this trade.` },
-  { id: "compare", place: "build", label: "Compare with the other cards", prompt: `${COPILOT_ROLE.build} Compare the trade loaded with the other cards the app lists for the same market (otherCards in the context): what each one bets on, where its risk and its chance differ, and what the trade-off between them is. If one of them fits the criteria for judging a card better than the loaded one, say which and why.` },
-  { id: "newsmove", place: "build", label: "News that could move it", prompt: `${COPILOT_ROLE.build} From the tagged news in the context, which items could move this market before the trade's expiry, in which direction, and why? Separate noise from signal, with cause and effect and a time horizon, and say what each would do to this trade.` },
-  /* A POSITION'S SCREEN (redesign PR 3; PR 4: they may recommend one of the app's actions — position.actionsOffered). */
-  { id: "posReview", place: "positions", label: "Review this position", prompt: `${COPILOT_ROLE.positions} Where does this position stand against its entry and against its exit plan? Read its profit now against the take-profit target, its days left against the ${RULES.exitDTE}-day time exit, and its loss against the stop warning (${stopLossLabel()}, a warning, never an automatic close); say which exit is nearest and what would have to happen for it to be reached. Then recommend one of the actions offered, or none, and say what would make that recommendation wrong.` },
-  { id: "posExit", place: "positions", label: "The exit from here", prompt: `${COPILOT_ROLE.positions} What would it take to close this position in profit? Explain its exit plan from today — the take-profit target, the ${RULES.exitDTE}-day time exit and its date, the stop warning — what a close at a limit would get against the book in the context (bid, mid, ask), and, when it is among the actions offered, what a good-till-cancelled take-profit order at the target would do (an order that stays working until it fills or I cancel it). The exit rules were fixed at entry: explain them, do not change them. Recommend one of the actions offered, or none.` },
-  { id: "posSince", place: "positions", label: "Since I opened it", prompt: `${COPILOT_ROLE.positions} What has changed since I opened it? Compare the figures at entry with now (you risk, max profit, chance, return on risk), the four factors at entry with now (seasonality, the price trend, weather, news — the headlines in taggedNews dated after the opening), and the Greeks at entry with now (position.greeksAtEntry and position.greeksNow; a Greek the app did not record at entry is said to be not recorded). Name each reason I opened it that has turned and what that means for the position. Quote only the figures in the context.` },
-  /* PR 4b: the roll — offered by the app only when the position is not in profit and its reasons still hold. */
+  /* A POSITION'S SCREEN (redesign PR 3; PR 4: they may recommend one of the app's actions — position.actionsOffered). PR 65:
+     the review and the exit were one decision asked twice; the chart since entry is part of what changed since entry. */
+  { id: "posNow", place: "positions", label: "What should I do now?", prompt: `${COPILOT_ROLE.positions} What should I do with this position now? Say where it stands against its exit plan, fixed at entry (explain it, do not change it): its profit now against the take-profit target, its days left against the ${RULES.exitDTE}-day time exit and its date, its loss against the stop warning (${stopLossLabel()}, a warning, never an automatic close), and which exit is nearest. Say what a close at a limit would get against the book in the context (bid, mid, ask) and, when it is among the actions offered, what a good-till-cancelled take-profit order at the target would do (an order that stays working until it fills or I cancel it). Weigh the scheduled reports before its expiry (events in the context). ${EVENTS_RULE} Then recommend one of the actions offered, or none, and say what would make that recommendation wrong.` },
+  /* PR 4b: the roll — offered by the app only when the position is not in profit and its reasons still hold. PR 65: the
+     question is shown only when a roll is offered (`positionSkills({ canRoll })`): otherwise it could only read back the
+     sentence the screen already prints. */
   { id: "posRoll", place: "positions", label: "Should I roll it?", prompt: `${COPILOT_ROLE.positions} Should this position be rolled? Read position.roll: whether the app offers a roll and why (or why not), and its candidates as the app priced them — the same structure on a later expiry, moved on the strikes the chain lists, at the size held, each with its figures, the gate's line and its whole-trade line (position.roll.judgedOn says how the app judged them: today's loss plus the new trade, never more risk than was accepted at entry, ranked by the chance the whole trade gets back to zero). A roll is two orders: this position closed at a limit first (its loss, if any, becomes real), then the new trade opened from Build as a new trade. When a roll is offered, compare closing, keeping and each candidate, and recommend one by its name as the app prints it, or none; when it is not offered, say why in the app's words and do not suggest one. A candidate the gate refuses is never recommended.` },
-  { id: "posChart", place: "positions", label: "The chart since I opened it", prompt: `${COPILOT_ROLE.positions} Read this market's price chart since I opened the position (position.sinceEntry: the price at entry, now, the highest and lowest close since, as the app read them from daily bars; chart: the app's own indicators) against the position's breakevens and strikes: where the price has gone, what the trend says now, and how far it is from each breakeven in ordinary days of movement. Quote only the figures in the context.` },
+  { id: "posSince", place: "positions", label: "Since I opened it", prompt: `${COPILOT_ROLE.positions} What has changed since I opened it? Compare the figures at entry with now (you risk, max profit, chance, return on risk), the four factors at entry with now (seasonality, the price trend, weather, news — the headlines in taggedNews dated after the opening), the Greeks at entry with now (position.greeksAtEntry and position.greeksNow; a Greek the app did not record at entry is said to be not recorded), and the price since the opening (position.sinceEntry: the price at entry, now, the highest and lowest close since; chart: the app's own indicators) against the position's breakevens and strikes — where it has gone and how far it is from each breakeven in ordinary days of movement. Name each reason I opened it that has turned and what that means for the position. Quote only the figures in the context.` },
   /* THE JOURNAL (PR 4c): one closed trade, its reasons at entry against how it ended. It teaches; it recommends nothing. */
   { id: "lesson", place: "journal", label: "What did this trade teach me?", prompt: `${COPILOT_ROLE.journal} Compare the reasons it was opened (closedTrade.whyOpened, the four factors and the chance at entry) with how it ended (closedTrade.howItEnded, its result and its whole timeline): which reasons held and which turned, whether the exit rules were followed or a reason of mine overrode them, and what this says to look at before opening a similar trade. If its timeline says it was rolled, say into or from which trade. Quote only the figures in the context; never a figure of your own.` },
 ];
-/** The questions Build's copilot shows, in order (the mockup's four with PR 4's Greeks and chart after the first). */
-export const BUILD_SKILL_IDS = Object.freeze(["pretrade", "variants", "greeks", "chart", "wrong", "compare", "newsmove"]);
-/** The four a position's screen asks (redesign PR 3; PR 4 added the chart since entry), in order. */
-export const POSITION_SKILL_IDS = Object.freeze(["posReview", "posExit", "posRoll", "posSince", "posChart"]);
+/** The questions Build's copilot shows, in order (PR 65: the board's first two, then the alternatives, the Greeks, the chart). */
+export const BUILD_SKILL_IDS = Object.freeze(["pretrade", "wrong", "better", "greeks", "chart"]);
+/** The questions a position's screen asks, in order (PR 65: three; the roll's only when the app offers one). */
+export const POSITION_SKILL_IDS = Object.freeze(["posNow", "posRoll", "posSince"]);
 /** The questions a place shows: never another place's. */
 export const skillsFor = (place) => SKILLS.filter((s) => s.place === place);
 /**
@@ -1431,9 +1443,35 @@ export async function askAI(_key, messages, contextStr, onDelta, system = SYSTEM
   if (!r.ok) throw new Error(`HTTP ${r.status}: ${raw.trim().slice(0, 300)}`);
   return (j.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
 }
+/** What "Do the four signals agree?" reads (PR 65): the fused reading the market page shows, in plain fields. */
+function signalsBrief(fused, reading = null) {
+  const waiting = reading && Array.isArray(reading.waiting) ? reading.waiting.slice() : [];
+  const failed = reading && Array.isArray(reading.failed) ? reading.failed.map((f) => f.key || f) : [];
+  if (!fused) return { ready: false, waiting, failed };
+  const factors = {};
+  for (const [k, c] of Object.entries(fused.components || {})) {
+    factors[k] = { direction: ARROW[c.dir] || null, strength: c.strength ?? null, weight: fused.weights && fused.weights[k] != null ? +Number(fused.weights[k]).toFixed(2) : null,
+      appliesHere: c.applies !== false, why: c.why || null };
+  }
+  return { ready: !waiting.length, score: fused.score ?? null, confidence: fused.confidence ?? null, agreement: fused.agreement || null,
+    narrative: fused.narrative || null, factors, waiting, failed };
+}
 export function buildContext(ctx) {
   const { store, scan, news, ticker, legs, expKey, A, spot, seasonalSrc, otherCards = null, reviewChecks = null, sized = null, position = null,
-    findCards = null, findFilters = null, findMisses = null, chart = null, variants = null, optimize = null, closedTrade = null } = ctx;
+    findCards = null, findFilters = null, findMisses = null, chart = null, variants = null, optimize = null, closedTrade = null,
+    signals = null } = ctx;
+  /* THE CALENDAR (PR 65): the reports before the expiry in question, by market — the cards' markets on Find (to the latest
+     expiry among each market's cards), else the trade's or the position's market to its expiry. None without an expiry. */
+  const events = (() => {
+    if (Array.isArray(findCards) && findCards.length) {
+      const until = {};
+      for (const c of findCards) if (c && c.ticker && c.expiry) until[c.ticker] = until[c.ticker] && until[c.ticker] > c.expiry ? until[c.ticker] : c.expiry;
+      const keys = Object.keys(until);
+      return keys.length ? { ...Object.fromEntries(keys.map((tk) => [tk, eventsBrief(tk, { untilIso: until[tk] })])), tableEnds: EVENT_TABLE_END } : null;
+    }
+    // A closed trade (the Journal) looks back: the calendar from today says nothing about it.
+    return ticker && expKey && !closedTrade ? { [ticker]: eventsBrief(ticker, { untilIso: expKey }), tableEnds: EVENT_TABLE_END } : null;
+  })();
   return JSON.stringify({
     date: new Date().toISOString().slice(0, 10),
     currentTicker: ticker,
@@ -1497,6 +1535,12 @@ export function buildContext(ctx) {
       rows: optimize.rows.map((r) => ({ label: r.label, legs: r.legsText, contracts: r.n, youRisk: r.youRisk,
         maxProfit: r.unbounded ? "no ceiling" : r.maxProfit, chance: r.chance, returnOnRisk: r.rr, futureAvg: r.future, pastYrs: r.past,
         gate: r.gateText, fitsYourRequest: !r.miss, isTheTradeOnBuild: !!r.current, why: r.note })) } : null,
+    // THE CALENDAR (PR 65): null for a market the calendar does not read; `tableEnds` is the last day it was copied to.
+    events,
+    // THE MARKET'S FOUR FACTORS (PR 65, the market page's "Do the four signals agree?"): what its Signals tab shows — each
+    // factor's direction, strength, weight and its own sentence, the agreement, the score, the confidence. A factor still
+    // being read or failed is listed as such; the whole is `ready: false` until the four are in.
+    marketSignals: signals ? signalsBrief(signals.fused, signals.reading) : null,
     // ONE CLOSED TRADE (PR 4c, the Journal's "What did this trade teach me?"): the record's own words and figures.
     closedTrade: closedTrade || null,
   });

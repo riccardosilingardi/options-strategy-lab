@@ -185,6 +185,19 @@ export function eventsFor(tk, { now = Date.now(), untilIso = EVENT_TABLE_END, ex
 }
 
 /**
+ * THE CALENDAR AS THE COPILOT READS IT (PR 65: "What would make it wrong?", "What could change the pick?" and "What should I
+ * do now?" weigh the reports before an expiry, and a model asked for dates it was never given would make them up). The
+ * market's scheduled reports from today to `untilIso` (exclusive), as `eventsFor()` lists them — the publishers' dates,
+ * never a guess — each { name, what, date, timeNewYork, major, holidayWeek }. Null when the market reads no calendar or
+ * the table has ended (`EVENT_TABLE_END`): unknown, never an empty week.
+ */
+export function eventsBrief(tk, { now = Date.now(), untilIso = null } = {}) {
+  if (!calendarsOf(tk).length || dateIn(now) > EVENT_TABLE_END) return null;
+  return eventsFor(tk, { now, untilIso: untilIso || EVENT_TABLE_END }).filter((e) => !untilIso || e.etDate < untilIso)
+    .map((e) => ({ name: e.name, what: e.what || null, date: e.etDate, timeNewYork: e.etTime, major: !!e.major, holidayWeek: e.holiday || null }));
+}
+
+/**
  * THE ONE EVENT THE LINE NAMES: the next MAJOR report (WASDE, FOMC) before the expiry shown, otherwise the next
  * weekly one. Past the table's end it is the placeholder.
  * @returns {{ placeholder: "events-calendar" } | { ev, before: [...] } | null}

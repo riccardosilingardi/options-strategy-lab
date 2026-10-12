@@ -21,7 +21,7 @@ const toScreen = async (p) => { await p.waitForTimeout(1500); await tap(p, "nav 
 const SHOTS = [
   ["find-compare", "dark", async (p) => { await p.waitForTimeout(1500); await tap(p, "[data-find-compare]", null, 900); }],
   ["find-compare-answer", "dark", async (p) => { await p.waitForTimeout(1500); await tap(p, "[data-find-compare]", null, 900);
-    await tap(p, "[data-find-copilot] button", "Compare the cards", 2500); }],
+    await tap(p, "[data-find-copilot] button", "Which card fits best?", 2500); }],
   ["market-signals", "dark", toSignals, { full: true }],
   ["market-news", "dark", async (p) => { await toSignals(p); await tap(p, "[data-factor-evidence=news]", null, 600);
     await tap(p, "[data-factor=news] button", "Ask the copilot", 600); }, { full: true }],

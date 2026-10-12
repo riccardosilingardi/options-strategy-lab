@@ -10,7 +10,7 @@
 // ============================================================================
 import assert from "node:assert/strict";
 import { CALENDARS, CALENDAR_KEYS, EVENT_TABLE_END, eventsFor, nextEvent, daysUntil,
-  localWhen, etDay, etInstant, federalHolidays, holidayWeekOf, calendarsOf } from "./events.js";
+  localWhen, etDay, etInstant, federalHolidays, holidayWeekOf, calendarsOf, eventsBrief } from "./events.js";
 import { EVENT_CALENDARS, MARKET_ROWS, BASKET } from "./markets.js";
 import { eventLineText, eventInfoText, dateOnlyWhen, holidayWeekNote, PLACEHOLDERS } from "./rules.js";
 
@@ -146,6 +146,20 @@ test("EXPIRIES AND 21-DAY EXITS JOIN THE LIST, read only", () => {
   assert.ok(xs.some((e) => e.id === "expiry" && e.etDate === "2026-10-16"));
   assert.ok(!xs.some((e) => e.etDate === "2026-12-18"), "past the expiry shown");
   assert.ok(xs.some((e) => e.id === "exit" && e.name === "21-day exit · J-0009"));
+});
+
+
+test("THE CALENDAR AS THE COPILOT READS IT (PR 65): the publishers' dates before the expiry, never past the table, never a guess", () => {
+  const now = Date.parse("2026-10-07T14:00:00Z");
+  const ung = eventsBrief("UNG", { now, untilIso: "2026-10-30" });
+  assert.deepEqual(ung.map((e) => e.date), ["2026-10-08", "2026-10-15", "2026-10-22", "2026-10-29"], "EIA storage, every Thursday before the expiry");
+  assert.deepEqual(Object.keys(ung[0]).sort(), ["date", "holidayWeek", "major", "name", "timeNewYork", "what"]);
+  assert.equal(ung[1].holidayWeek, "Columbus Day", "the holiday week travels with its date");
+  assert.ok(eventsBrief("UNG", { now, untilIso: "2026-10-30" }).every((e) => e.date < "2026-10-30"), "nothing on or after the expiry");
+  for (const tk of BASKET) assert.ok(Array.isArray(eventsBrief(tk, { now, untilIso: "2026-11-20" })), `${tk} reads a calendar`);
+  // Past the table's end it is unknown (null), never an empty week.
+  assert.equal(eventsBrief("UNG", { now: Date.parse(`${EVENT_TABLE_END}T12:00:00Z`) + 3 * 86400000 }), null);
+  assert.equal(eventsBrief("NOPE", { now }), null, "a market with no calendar");
 });
 
 console.log(`\n${passed} passed, ${failures.length} failed\n`);

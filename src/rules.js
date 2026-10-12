@@ -1960,7 +1960,7 @@ export const compareTrayLine = (n, max) => `${n} of ${max} to compare`;
 export const SEE_THEM = "See them ›";
 export const COMPARE_SHEET_TITLE = "Compare";
 /** The Compare sheet's line when cards are ticked: the copilot compares those, not the cards that fit. */
-export const compareTickedLine = (n) => `${n} card${n === 1 ? "" : "s"} you ticked. "Compare the cards" reads ${n === 1 ? "it" : "these"}, not the cards that fit.`;
+export const compareTickedLine = (n) => `${n} card${n === 1 ? "" : "s"} you ticked. "Which card fits best?" reads ${n === 1 ? "it" : "these"}, not the cards that fit.`;
 export const COMPARE_ONE_MORE = "Tick a second card on a market's Strategies to see them on one picture.";
 export const COMPARE_CLEAR = "Untick all";
 export const compareUntickAria = (tk, name) => `Take ${tk} ${name} out of the comparison`;
@@ -1975,6 +1975,9 @@ export const factorHeadline = (name, c, extra = null) =>
 export const marketNewsHead = (tk) => `ASK ABOUT ${tk}'S NEWS`;
 /** The fold that opens it, inside the news block. */
 export const marketNewsAsk = (tk) => `Ask the copilot: News impact on ${tk}`;
+/** PR 65: the market's four factors read together, under the market's read (the fold's summary and the section's heading). */
+export const marketReadAsk = (tk) => `Ask the copilot: do ${tk}'s four signals agree?`;
+export const marketReadHead = (tk) => `ASK ABOUT ${tk}'S SIGNALS`;
 export const headlinesWord = (n) => `${n} headline${n === 1 ? "" : "s"}`;
 /** The two evidence toggles under a factor block. */
 export const FACTOR_EVIDENCE = Object.freeze({ news: "The headlines", weather: "The regions" });
@@ -3741,7 +3744,10 @@ export const copilotRulesBlock = () =>
 
 /** The one-tap questions under the chart. They are here rather than in the
  *  component because each one is a QUESTION PUT TO THE MODEL, and the prompt
- *  above and the questions below are one contract. */
+ *  above and the questions below are one contract. PR 65: "How does this
+ *  relate to my trade?" left — on the market page there is no trade to read
+ *  (the chart copilot is handed none), and on Build it asked what Build's own
+ *  "The chart and this trade" asks. A typed question still reads Build's legs. */
 export const TA_QUESTIONS = Object.freeze([
   { id: "trend", label: "What is the trend saying?",
     ask: "What are the moving averages and the trend read saying about this market right now, and how sure can I be about it?" },
@@ -3749,8 +3755,6 @@ export const TA_QUESTIONS = Object.freeze([
     ask: "Is RSI stretched here, what does that actually mean, and what would it take for this reading to be the wrong thing to act on?" },
   { id: "macd", label: "What does MACD confirm or deny?",
     ask: "Does MACD confirm or contradict what the moving averages are saying, and which of the two should I weight more here?" },
-  { id: "trade", label: "How does this relate to my trade?",
-    ask: "Relate this chart to the trade loaded on the Build screen: where are my break-evens against where this market has been, and how far is that in ordinary days of movement?" },
 ]);
 
 /** The line that has to appear once, and only once. */

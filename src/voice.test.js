@@ -263,8 +263,14 @@ test("MEASURED: the three screens, and the table in the PRD is this number", () 
      does not read (as with the variants); at rest it says 12 words — its title (3), "How it searches" (3) and its button,
      "Find the best expiry and legs" (6). Its summary and rows appear only after the tap. Its load handler lives outside the
      step block (`optimizeView`), so no code there is read as prose. The roll's summary and whole-trade lines are on the
-     position's screen, built outside the Positions block. */
-  const CEILING = { find: 184, market: 479, build: 518, positions: 248 };
+     position's screen, built outside the Positions block.
+     Task 65.7 (owner, 12 Oct 2026: the copilot's presets rationalized, and "Do the four signals agree?" added on the market
+     page): market 479 → 487. The new fold under the market's read says "Ask the copilot: do CORN's four signals agree?" at
+     rest (`marketReadAsk()`, 8). The chart copilot's "How does this relate to my trade?" (7) left the same screen, but its
+     words are TA_QUESTIONS' data, which the source counter never scored — so on screen the page reads one word more, and
+     the counter eight. Build's copilot lost two questions and a position's two (their labels are SKILLS' data, unscored
+     too): fewer words on both screens than the counter can show. */
+  const CEILING = { find: 184, market: 487, build: 518, positions: 248 };
   /* >>> PR #46: ONE ORDERS LIST. <<< The record-based "WORKING AT THE BROKER" panel (its paragraph about what a
      working order is, the stale-DAY warning, the per-row sentences) left Positions; the one list lives in
      `orders.jsx`, which the counter now reads. Measured: positions 304 -> 209 (4 typed + 205 generated, 14 sites).

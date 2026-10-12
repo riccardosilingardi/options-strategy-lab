@@ -170,7 +170,12 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
   `compareCards()`; Build: a verdict from `BUILD_VERDICTS` on the loaded trade, never over a gate check; a position: one
   of `positionActions()`); it never writes a strike, an expiry, a structure or a size of its own, never sends, never
   closes. The standing prompt (`SYSTEM_PROMPT`) has no decision tree: the trees are criteria for judging a card. A
-  position's answers are filed in copilotLog tagged with its ref, plus one timeline line.
+  position's answers are filed in copilotLog tagged with its ref, plus one timeline line. **No two questions on one screen
+  ask the same thing (owner, 12 Oct 2026, PR 65 task 65.7):** Find 2, market 2 (`slot` "news" in the news block, "read"
+  under the market's read), Build 5, a position 3 ("Should I roll it?" only when a roll is offered, `positionSkills({
+  canRoll })`), Journal 1, and the chart copilot's 3 (`TA_QUESTIONS`, no trade question). A question asks only for what its
+  context carries: dates come from `eventsBrief()` (events.js, in the context as `events`), the market's factors from
+  `marketSignals`. A new question first checks that no question on its screen already answers it.
 - **Build's variants and a position's roll are one calculation: `src/alternatives.js`** (PR 4b) — legs moved on the strikes
   the chain lists, never snapped; priced only through `priceAlt()` in App.jsx (the card's path, the budget's size, the one
   gate callback). A roll is offered only by `rollEligible()` and is two orders, never both held: Build blocks Send with

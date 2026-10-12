@@ -150,9 +150,12 @@ check("RECORD · LAST 4: the newest first, each with its number and day; Whole r
 });
 
 check("THE COPILOT ON A POSITION asks the position questions and none of Build's; it may recommend, it never acts", () => {
-  eq(positionSkills().map((s) => s.id).join(","), POSITION_SKILL_IDS.join(","));
+  // PR 65: "Should I roll it?" only when the app offers a roll; this fixture's screen offers none.
+  eq(positionSkills({ canRoll: true }).map((s) => s.id).join(","), POSITION_SKILL_IDS.join(","));
+  eq(positionSkills().map((s) => s.id).join(","), "posNow,posSince");
   const h = screen();
   for (const s of positionSkills()) has(h, `>${s.label}</button>`);
+  hasNot(h, ">Should I roll it?</button>", "no roll offered, no roll question");
   for (const id of BUILD_SKILL_IDS) hasNot(h, `>${SKILLS.find((s) => s.id === id).label}</button>`, `Build's ${id}`);
   has(h, "actions; it never closes, rolls or opens anything itself.");
   const app = readFileSync("src/App.jsx", "utf8");

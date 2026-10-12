@@ -9,7 +9,8 @@ import { readFileSync } from "node:fs";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { SKILLS, COPILOT_ROLE, BUILD_VERDICTS, BUILD_SKILL_IDS, POSITION_SKILL_IDS, skillsFor, askAI, continueRequest, withContinuation,
-  CONTINUE_PROMPT, CONTINUE_OFFER, COMPARE_LABEL_RULE } from "./pro.jsx";
+  CONTINUE_PROMPT, CONTINUE_OFFER, COMPARE_LABEL_RULE, buildContext } from "./pro.jsx";
+import { EVENT_TABLE_END } from "./events.js";
 import { readdirSync, statSync } from "node:fs";
 import { compareCards } from "./rows.js";
 import { positionActions, POSITION_ACTIONS, sinceEntry } from "./positionView.js";
@@ -33,8 +34,8 @@ check("EVERY QUESTION NAMES ITS PLACE AND OPENS WITH THAT PLACE'S ROLE; the old 
   }
   if (!BUILD_SKILL_IDS.every((id) => byId(id) && byId(id).place === "build")) throw new Error("Build's are not Build's");
   if (!POSITION_SKILL_IDS.every((id) => byId(id) && byId(id).place === "positions")) throw new Error("the position's are not Positions'");
-  eq(skillsFor("find").map((s) => s.label).join(" | "), "Compare the cards | News impact");
-  eq(skillsFor("market").map((s) => s.label).join(" | "), "News impact");
+  eq(skillsFor("find").map((s) => s.label).join(" | "), "Which card fits best? | What could change the pick?");
+  eq(skillsFor("market").map((s) => `${s.label} (${s.slot})`).join(" | "), "News impact (news) | Do the four signals agree? (read)");
 });
 
 check("EVERY ROLE: recommend only among what the app built or offers; never a strike, an expiry, a size or an order of its own", () => {
@@ -46,11 +47,16 @@ check("EVERY ROLE: recommend only among what the app built or offers; never a st
   has(COPILOT_ROLE.positions, "never another action and never a size"); has(COPILOT_ROLE.positions, "never close or place anything yourself");
 });
 
-check("IN FIND IT COMPARES AND RECOMMENDS AMONG THE CARDS THAT FIT: the filters named, each card's figures and Greeks, the app's order", () => {
+check("IN FIND IT COMPARES AND RECOMMENDS AMONG THE CARDS THAT FIT: the filters named, each card's figures, the Greeks where they differ", () => {
   const r = byId("radar");
-  for (const w of ["Name the filters first", "you risk, max profit, chance, return on risk, future avg and past yrs", "its Greeks",
+  for (const w of ["Name the filters first", "you risk, max profit, chance, return on risk, future avg and past yrs",
+    "its Greeks (as the app worked them out for the size the budget buys) only where they separate one card from another",
     "recommend the one card, at most two", "or say that none fits and which filter binds", "findFilters.order", "per-trade limit"]) has(r.prompt, w, "radar");
-  has(byId("newsAll").prompt, "Recommend nothing from the news alone");
+  hasNot(r.prompt, "what its delta, its theta and its vega mean for that card", "PR 65: no Greeks lecture per card on Find");
+  // PR 65: the second question is the pick's, on the cards' own markets, with the calendar's dates only.
+  const pc = byId("pickChange").prompt;
+  for (const w of ["For the markets of the cards in findCards only", "events in the context, by market", "Quote only the dates in events",
+    "whether they would change which card fits best", "Recommend nothing from the news or the calendar alone"]) has(pc, w, "pickChange");
 });
 
 check("PRE-TRADE ANALYSIS (PR 61): the verdict FIRST, at most three reasons, the gate only for a failed check or one at 90%+ of its limit", () => {
@@ -62,23 +68,28 @@ check("PRE-TRADE ANALYSIS (PR 61): the verdict FIRST, at most three reasons, the
   has(pre, "quote the app's own share"); has(pre, "shareOfLimit");
   // The constraints kept word for word.
   has(pre, "do not suggest another size"); has(pre, "Your verdict is your reading, not the gate's: the gate's checks stand whatever you say.");
-  has(pre, "If another card in the context (otherCards) fits better, name it.");
+  // PR 65: the other cards moved to "Is there a better choice?"; the verdict is about the trade loaded.
+  hasNot(pre, "otherCards"); has(pre, "Judge the trade loaded only");
   // What it no longer asks: a read-back of every check, a tour of every figure.
   hasNot(pre, "Read back the risk gate's checks"); hasNot(pre, "Explain the trade before it is sent");
   has(byId("greeks").prompt, "Quote only the Greeks in the context"); has(byId("chart").prompt, "there are no bars");
 });
 
-check("IN POSITIONS IT REVIEWS AND RECOMMENDS ONE OF THE APP'S ACTIONS: five questions, the roll and the chart since entry among them", () => {
-  eq(POSITION_SKILL_IDS.map(byId).map((s) => s.label).join(" | "), "Review this position | The exit from here | Should I roll it? | Since I opened it | The chart since I opened it");
+check("IN POSITIONS IT REVIEWS AND RECOMMENDS ONE OF THE APP'S ACTIONS: three questions (PR 65), the roll's only when one is offered", () => {
+  eq(POSITION_SKILL_IDS.map(byId).map((s) => s.label).join(" | "), "What should I do now? | Should I roll it? | Since I opened it");
   has(byId("posRoll").prompt, "when it is not offered, say why in the app's words and do not suggest one");
   has(byId("posRoll").prompt, "A candidate the gate refuses is never recommended");
-  has(byId("variants").prompt, "A variant the gate refuses is never recommended");
-  // PR 65: Optimize's rows, by their label, under the same rule and the request's.
-  has(byId("variants").prompt, "labelled O1 to O5"); has(byId("variants").prompt, "an O row the gate refuses or one that misses the request");
-  has(byId("posReview").prompt, "recommend one of the actions offered, or none");
-  has(byId("posExit").prompt, "good-till-cancelled take-profit order");
+  // PR 65: Build's variants, the other cards and Optimize's rows are one question, under the same rules and the request's.
+  const b = byId("better").prompt;
+  has(b, "A variant the gate refuses is never recommended"); has(b, "otherCards"); has(b, "buildVariants");
+  has(b, "labelled O1 to O5"); has(b, "an O row the gate refuses or one that misses the request");
+  // PR 65: the review and the exit are one decision; the chart since entry is part of what changed since entry.
+  const now = byId("posNow").prompt;
+  has(now, "recommend one of the actions offered, or none"); has(now, "good-till-cancelled take-profit order"); has(now, "which exit is nearest");
+  has(now, "Quote only the dates in events");
   has(byId("posSince").prompt, "position.greeksAtEntry and position.greeksNow"); has(byId("posSince").prompt, "is said to be not recorded");
-  has(byId("posChart").prompt, "position.sinceEntry");
+  has(byId("posSince").prompt, "position.sinceEntry");
+  for (const gone of ["posReview", "posExit", "posChart", "variants", "compare", "newsmove", "newsAll"]) if (byId(gone)) throw new Error(`${gone} is back`);
   if (SKILLS.find((s) => s.id === "positions")) throw new Error("PR #38's HOLD / CLOSE / ROLL review is back");
 });
 
@@ -135,9 +146,9 @@ check("FIND'S COMPARE READS THE CARDS THAT FIT, IN ORDER, AT MOST 20, WITH THE C
 });
 
 check("PR 61 — FIND'S QUESTIONS NAME CARDS ONLY BY THEIR LABEL; the standing instructions hold Future and Past equal", () => {
-  has(byId("radar").prompt, COMPARE_LABEL_RULE); has(byId("newsAll").prompt, COMPARE_LABEL_RULE);
+  has(byId("radar").prompt, COMPARE_LABEL_RULE); has(byId("pickChange").prompt, COMPARE_LABEL_RULE);
   has(COMPARE_LABEL_RULE, "name a card only by its label");
-  hasNot(byId("compare").prompt, COMPARE_LABEL_RULE, "Build's 'Compare with the other cards' is unchanged");
+  hasNot(byId("better").prompt, COMPARE_LABEL_RULE, "Build's cards are not Find's C1…Cn");
   // PR 62 renamed the tile FUTURE (MODEL): the sentence follows CARD_LABELS.
   eq(FUTURE_PAST_EQUAL, "Future (model) and Past yrs (backtest) answer different questions; never call one of them more reliable than the other.");
   has(readFileSync("src/pro.jsx", "utf8"), "${FUTURE_PAST_EQUAL}`;");
@@ -157,9 +168,47 @@ check("THE MARKET PAGE'S TABS SPEAK FOR THEMSELVES: Signals; each factor block's
 
 check("A SCREEN SHOWS ITS OWN PLACE'S QUESTIONS: Find's sheet, the market page's news fold, Build and a position's screen", () => {
   const find = readFileSync("src/find.jsx", "utf8"), market = readFileSync("src/market.jsx", "utf8"), build = readFileSync("src/build.jsx", "utf8");
-  has(find, 'skills={skillsFor("find")}'); has(market, 'skills={skillsFor("market")}');
+  has(find, 'skills={skillsFor("find")}'); has(market, 'skillsFor("market").filter((s) => s.slot === id)');
+  has(market, 'skills={slot("news")}'); has(market, 'skills={slot("read")}');
   hasNot(build, 's.place === "desk"', "the desk place is gone");
   for (const p of ["build", "positions", "find", "market"]) for (const s of skillsFor(p)) if (s.place !== p) throw new Error(`${s.id} leaked into ${p}`);
+});
+
+check("PR 65 — EACH QUESTION READS WHAT ITS CONTEXT CARRIES: the calendar's dates by market, and the market's four factors", () => {
+  const base = { store: { positions: [] }, scan: [], news: [], legs: [], A: null, spot: 13.2, seasonalSrc: null };
+  const live = Date.now() <= Date.parse(`${EVENT_TABLE_END}T23:59:59Z`);
+  // Build or a position: the trade's market, to its expiry.
+  const b = JSON.parse(buildContext({ ...base, ticker: "UNG", expKey: "2026-12-18" }));
+  eq(b.events.tableEnds, EVENT_TABLE_END);
+  if (live) { eq(Array.isArray(b.events.UNG), true, "UNG's EIA reports"); eq(b.events.UNG.every((e) => e.date < "2026-12-18"), true, "before the expiry only"); }
+  else eq(b.events.UNG, null, "past the table: unknown, never an empty week");
+  // Find: the cards' markets, each to the latest expiry among its cards.
+  const f = JSON.parse(buildContext({ ...base, ticker: null, expKey: null, findCards: [{ ticker: "CORN", expiry: "2026-11-20" }, { ticker: "CORN", expiry: "2026-12-18" }, { ticker: "GLD", expiry: "2026-11-20" }] }));
+  eq(Object.keys(f.events).sort().join(","), "CORN,GLD,tableEnds");
+  if (live) eq(f.events.CORN.every((e) => e.date < "2026-12-18"), true);
+  // No expiry, no cards: no calendar handed in (the market page's questions do not weigh it); nor for a closed trade.
+  eq(JSON.parse(buildContext({ ...base, ticker: "UNG", expKey: null })).events, null);
+  eq(JSON.parse(buildContext({ ...base, ticker: "UNG", expKey: "2026-09-18", closedTrade: { ref: "J-0001" } })).events, null);
+  // The market's four factors, as its Signals tab shows them; a reading still in flight says so.
+  const fused = { score: 18, confidence: 64, agreement: "MIXED", narrative: "Two up, one down.", weights: { seasonal: 0.4, technical: 0.3, news: 0.3 },
+    components: { seasonal: { dir: 1, strength: 62, why: "October rose in 9 of 12 years" }, technical: { dir: 1, strength: 40, why: "above its 50-day" },
+      weather: { dir: 0, strength: 0, applies: false, why: "no growing season in October" }, news: { dir: -1, strength: 35, why: "two headlines lean down" } } };
+  const m = JSON.parse(buildContext({ ...base, ticker: "CORN", expKey: null, signals: { fused, reading: { reading: false, waiting: [], failed: [] } } })).marketSignals;
+  eq(m.ready, true); eq(m.agreement, "MIXED"); eq(m.factors.seasonal.direction, "↑"); eq(m.factors.news.direction, "↓");
+  eq(m.factors.weather.appliesHere, false); eq(m.factors.technical.weight, 0.3); eq(m.factors.seasonal.why, "October rose in 9 of 12 years");
+  const r = JSON.parse(buildContext({ ...base, ticker: "CORN", expKey: null, signals: { fused: null, reading: { reading: true, waiting: ["news"], failed: [{ key: "weather" }] } } })).marketSignals;
+  eq(JSON.stringify(r), JSON.stringify({ ready: false, waiting: ["news"], failed: ["weather"] }));
+  const sa = byId("signalsAgree").prompt;
+  has(sa, COPILOT_ROLE.market); has(sa, "marketSignals"); has(sa, "never guessed"); has(sa, "what would have to change for the reading to turn");
+});
+
+check("PR 65 — NO TWO QUESTIONS ON ONE SCREEN ASK THE SAME THING: sixteen in all, each place's own", () => {
+  const per = Object.fromEntries(["find", "market", "build", "positions", "journal"].map((p) => [p, skillsFor(p).length]));
+  eq(JSON.stringify(per), JSON.stringify({ find: 2, market: 2, build: 5, positions: 3, journal: 1 }));
+  eq(SKILLS.length, 13, "thirteen copilot questions, and the chart copilot's three");
+  eq(new Set(SKILLS.map((s) => s.label)).size, 13, "no label twice");
+  // The news is asked once per place: Find's pick, the market's news block, Build's "wrong" — never a second news question beside them.
+  for (const p of ["find", "market", "build"]) eq(skillsFor(p).filter((s) => /taggedNews/.test(s.prompt) && /news/i.test(s.label)).length <= 1, true, p);
 });
 
 check("THE MODEL HAS ONE HOME (PR 61): COPILOT_MODEL in rules.js; no other source file types a claude- model id", () => {

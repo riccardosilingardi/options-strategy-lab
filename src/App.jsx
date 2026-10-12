@@ -4869,7 +4869,9 @@ export default function OptionsStrategyLab() {
             onAnalysis={logAnalysis}
             copilot={{ apiKey: "server", convo: marketChat, setConvo: setMarketChat, onAnalysis: logAnalysis,
               ctx: { store, scan, news: newsPool.filter((n) => (n.impacts || []).some((im) => im.tk === mkt.tk)), ticker: mkt.tk,
-                legs: [], expKey: null, A: null, spot: chains[mkt.tk]?.spot ?? null, seasonalSrc: seasonalFor(mkt.tk).source } }}
+                legs: [], expKey: null, A: null, spot: chains[mkt.tk]?.spot ?? null, seasonalSrc: seasonalFor(mkt.tk).source,
+                // PR 65, "Do the four signals agree?": the very reading the Signals tab shows, and what is still being read.
+                signals: { fused: findGen.boards[mkt.tk] ? fuseFind(mkt.tk, findGen.boards[mkt.tk].dte) : null, reading: readiness[mkt.tk] || null } } }}
             sheet={deskSheet} onSheet={setDeskSheet}
             compareProps={compareBlock} />
         )}

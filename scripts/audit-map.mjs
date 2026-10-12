@@ -38,6 +38,7 @@ export const R = {
   signals: "the owner, 6 Oct 2026 (PR 4): \"the tabs speak for themselves\" — the market page's first tab is named for what it shows, Signals (the chart and the four factors); the board says Overview",
   layout: "the same space is carried by the page's own padding (FIND_LIST_END), not this element",
   model: "the owner's prompt for PR 62 (7 Oct 2026): the chance is worked out exactly, no longer a Monte Carlo, so the tile is renamed FUTURE (MODEL) in CARD_LABELS; the board still says FUTURE (MONTE CARLO)",
+  presets: "the owner, 12 Oct 2026 (PR 65, task 65.7): the copilot's preset questions rationalized so no two on a screen ask the same thing — Build's \"Compare with the other cards\" joined the variants and Optimize's rows in \"Is there a better choice?\", \"News that could move it\" joined \"What would make it wrong?\", and the chart copilot's \"How does this relate to my trade?\" left (no trade on the market page; Build asks it as \"The chart and this trade\")",
   rows: "the owner's prompt for PR 63 (7 Oct 2026): every row shows Chance · Return on risk · Avg per $100 at risk with their own words, the sorted one ringed, then the days and the risk, so the column head names only \"Days · risk\"; the board's head says \"<order> · risk\" over one figure",
 };
 
@@ -261,7 +262,7 @@ export const SCREENS = {
     ],
     skipWords: [...MARKET_WORDS_SKIP, [/^(SMA 20 · 50|Bollinger|RSI|MACD|RSI 14|price|20-day|50-day)$/, R.kept],
 [/^▲ Bull · /, R.data], [/^(Oct–Nov|20-day average|Dry planting|6 headlines)/, R.sample],
-      [/^This is the market, whatever you trade/, R.kept]],
+      [/^This is the market, whatever you trade/, R.kept], [/^How does this relate to my trade\?$/, R.presets]],
   },
   Market: {
     mode: "app+all", go: async (page) => {
@@ -331,7 +332,7 @@ export const SCREENS = {
     skipWords: [[/^(CORN|Bull put spread|Legs · 20 Nov|Keeps up to|defaults · not backtested on CORN)/, R.sample], [/^(SELL|BUY)$/, R.data],
       [/^FUTURE \(MONTE CARLO\)$/, R.model],
       [/^At mid, halfway between the two quotes\.$/, "where the limit sits is read off the fixture's book; the board's limit is at its mid, the fixture's is not"],
-      [/^BE /, R.sample], [/Needs CORN/, R.sample]],
+      [/^BE /, R.sample], [/Needs CORN/, R.sample], [/^(Compare with the other cards|News that could move it)$/, R.presets]],
   },
   BuildReview: {
     mode: "app+all", go: async (page) => { await toBuild(page); await tap(page, "[data-build-send] button", "Send", 900); },

@@ -51,11 +51,25 @@ the market page's card ("Build is enough").
   Find's floors at the size held; the summary says how many keep the risk, how many would risk more, how many fail a floor
   ("Every roll the chain lists would put more at risk than you accepted at entry" when none is left). "Prepare the roll in
   Build ›" arrives at the size held. The position's copilot reads the summary and each whole-trade line.
+- **65.7 — the copilot's presets rationalized (owner, 12 Oct 2026: "not redundant, and specifically useful for the section
+  they sit in"; the owner chose: in PR 65, merge Build's and a position's, add "Do the four signals agree?").** Twenty
+  preset questions → sixteen. **Find:** "Which card fits best?" (the Greeks only where they separate the cards) and "What
+  could change the pick?" (news and reports for the cards' own markets, no longer a survey of every market). **Market
+  page:** "News impact" in the news block, and a new fold under the market's read, "Do the four signals agree?"
+  (`marketSignals` in the context); the chart copilot lost "How does this relate to my trade?" (the market page hands it no
+  trade). **Build (7 → 5):** Pre-trade analysis (about the trade loaded only), What would make it wrong? (now with the news
+  and the calendar), Is there a better choice? (the other cards + the variants + Optimize's O rows), Explain the Greeks,
+  The chart and this trade. **A position (5 → 3):** What should I do now? (review + exit), Should I roll it? (only when a
+  roll is offered), Since I opened it (with the price since entry). **Two questions asked for what they were never given:**
+  the market page's chart question had no trade, and "What would make it wrong?" asked for the reports before expiry with
+  no calendar in its context — it now gets `eventsBrief()` (the publishers' dates, by market; null past 31 Dec 2026).
 
-**Measured.** Tests 1,429 → 1,436, 0 failed. Build 1,475.46 → 1,486.72 kB (the usual chunk warning). Audit 20 boards, dark
-and light: 5,264 ✓, 0 unexplained (unchanged: no board draws Optimize or the roll's lines). Words: find 184, market 479,
-build 518 — unchanged; Optimize's 12 words at rest are build.jsx's, which the source counter does not read (written in
-voice.test.js). Photographs: docs/screens/pr65/ (`node scripts/shoot-pr65.mjs`, `+opt` copies UNG's December board onto two
+**Measured.** Tests 1,429 → 1,439, 0 failed. Build 1,475.46 → 1,488.31 kB (the usual chunk warning). Audit 20 boards, dark
+and light: 5,264 → 5,258 ✓, 0 unexplained (no board draws Optimize or the roll's lines; the six fewer ✓ are the three board
+phrases 65.7 retired — "Compare with the other cards", "News that could move it", "How does this relate to my trade?" —
+now skipped words with their reason, `R.presets`). Words: find 184, build 518 unchanged (Optimize's 12 words at rest are
+build.jsx's, which the source counter does not read; written in voice.test.js); market 479 → 487 (65.7's new fold, 8 words;
+the chart's trade question, 7 unscored words, left the same screen). Photographs: docs/screens/pr65/ (`node scripts/shoot-pr65.mjs`, `+opt` copies UNG's December board onto two
 more expiries — the same prices on every expiry, not a live chain).
 
 **Not changed:** the risk gate and every RULES value, the seven order paths and their bodies, `histBacktest()`,
@@ -71,6 +85,8 @@ output (one expiry per market), the variants (no floors, as before).
 - The roll's booked loss is today's mark; the close is priced at the tap.
 - Proposed, not built: two steps of width if the owner wants the wider search (`OPTIMIZE_STEPS`); an Optimize run on the
   market page's card (the owner said Build is enough).
+- The sixteen questions have not met a real answer (OWNER CHECK, PRD §4 #10): whether "What would make it wrong?" keeps to
+  the calendar's dates, and "Do the four signals agree?" to the factors handed in, is unread.
 
 ## Done in PR 63 (owner, 7 Oct 2026): Find's rows and the trade chart
 

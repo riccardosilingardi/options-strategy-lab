@@ -149,8 +149,8 @@ non-expert trader who wants to learn discipline rather than be sold trades.
      with its arrow, strength and "supports / against / quiet", the rule for when Send asks why in its real words (the
      market's score against the trade by 10 or more, not "2 or more against"), "The market's read ›" (the market page's
      Overview) and the five numbered lines (BETS ON, RISKS, WORKS, EXITS, WRONG IF); **Ask the copilot about this trade**
-     — Pre-trade analysis (ending on CONFIRM, DOUBTS or DO NOT CONFIRM, PR 4), Explain the Greeks, The chart and this
-     trade, What would make it wrong?, Compare with the other cards, News that could move it, or your own question; every answer is filed in the Journal; **Legs** with "Edit in chain ›" (the market page's Chain tray; its
+     — Pre-trade analysis (ending on CONFIRM, DOUBTS or DO NOT CONFIRM, PR 4), What would make it wrong?, Is there a
+     better choice?, Explain the Greeks, The chart and this trade (five since PR 65), or your own question; every answer is filed in the Journal; **Legs** with "Edit in chain ›" (the market page's Chain tray; its
      Build › comes back); **Order**, inline: Contracts and the limit as two steppers (the tick is the app's one price
      rule, a cent; since PR 4b the limit can also be typed, and **Mid · Pay · Negotiate** set it to the mid, the
      market's own price, or back to the app's starting price — owner, 6 Oct 2026), "Mid · natural · tick", where the limit sits, "Card at 6.75 · now 6.61: risk
@@ -243,25 +243,35 @@ non-expert trader who wants to learn discipline rather than be sold trades.
   criteria for judging a card, never an instruction to build one.
   - **On Find**, "Compare ›" on the summary line opens **the one Compare sheet** (PR 61; the market page's "See them ›"
     and Build's "N still ticked" open the same one). With cards ticked it shows them — one picture (`CompareFigure`, at
-    the size the budget buys) and their rows — and **Compare the cards** compares those; with none ticked it says "N cards
+    the size the budget buys) and their rows — and **Which card fits best?** compares those; with none ticked it says "N cards
     from M markets fit" (cards, from `compareCards()`; Find's summary line keeps counting rows, one per market) and reads
     the cards that fit, in the owner's order, up to 20. Every row is labelled C1…Cn and prints the card's own figures for
     that size in CARD_LABELS' words; the copilot is handed the same rows with the same labels and names cards only by
-    them. It recommends one card, at most two, or none, saying which filter binds; **News impact** reads the news across
-    the markets and says which cards it supports or undercuts. The standing instructions say that Future and Past yrs
-    answer different questions and neither is the more reliable.
-  - **On the market page**, the news block's folded **News impact** explains this market's headlines; the chart copilot
-    explains the chart. Neither recommends a trade.
-  - **In Build**: **Pre-trade analysis** opens on one verdict — CONFIRM, DOUBTS or DO NOT CONFIRM (`BUILD_VERDICTS`) —
-    then at most three reasons from the app's figures; it names a gate check only when it fails or sits at 90% or more of
-    its limit (the share is the app's, in the context), and never overrides one (PR 61); **Explain the Greeks**; **The
-    chart and this trade** (`taContext()` with the trade's breakevens); "What would make it wrong?", "Compare with the
-    other cards" (it may name a card that fits better), "News that could move it".
-  - **On a position's screen**: **Review this position**, **The exit from here** (what it takes to close in profit),
-    **Since I opened it** (the figures, the four factors and the Greeks at entry against now) and **The chart since I
-    opened it** (`sinceEntry()`); each may recommend one of the actions the screen offers (`positionActions()`: keep,
+    them. It recommends one card, at most two, or none, saying which filter binds; the Greeks only where they separate the
+    cards (PR 65). **What could change the pick?** reads the news and the scheduled reports before each card's expiry, for
+    the cards' own markets, and says which cards they support or undercut. The standing instructions say that Future and
+    Past yrs answer different questions and neither is the more reliable.
+  - **On the market page**, the news block's folded **News impact** explains this market's headlines; since PR 65 a fold
+    under the market's read asks **Do the four signals agree?** (the four factors as the Signals tab shows them, where they
+    agree or conflict, how sure the reading is, what would turn it); the chart copilot explains the chart (the trend, RSI,
+    MACD). None recommends a trade.
+  - **In Build** (five since PR 65): **Pre-trade analysis** opens on one verdict — CONFIRM, DOUBTS or DO NOT CONFIRM
+    (`BUILD_VERDICTS`) — then at most three reasons from the app's figures about the trade loaded; it names a gate check
+    only when it fails or sits at 90% or more of its limit (the share is the app's, in the context), and never overrides
+    one (PR 61); **What would make it wrong?** (price levels, the expiry and the 21-day exit, the scheduled reports before
+    expiry from the app's calendar, the news, the factor that would have to turn); **Is there a better choice?** (the other
+    cards for the market, the variants and Optimize's O rows, one of which it may recommend by its label); **Explain the
+    Greeks**; **The chart and this trade** (`taContext()` with the trade's breakevens).
+  - **On a position's screen** (three since PR 65): **What should I do now?** (where it stands against the exit plan, the
+    nearest exit, what a close at a limit gets against the book, the take-profit order when offered, the reports before
+    expiry) and **Since I opened it** (the figures, the four factors, the Greeks and the price since the opening against
+    the breakevens, `sinceEntry()`); each may recommend one of the actions the screen offers (`positionActions()`: keep,
     keep and write why, close at limit, a good-till-cancelled take-profit order at the target, or Manage a close already
-    working — never a second close). **Should I roll it?** reads the roll the app offers, below.
+    working — never a second close). **Should I roll it?** reads the roll the app offers, below, and is shown only when
+    one is offered.
+  - **Every question reads what its context carries (PR 65):** a question that weighs dates is handed the app's own
+    calendar (`eventsBrief()` in events.js: the publishers' dates before the expiry, by market; null past the table's end)
+    and quotes only those; "Do the four signals agree?" is handed the market's four factors (`marketSignals`).
   - **Build's variants and a position's roll (PR 4b) are one calculation**, `src/alternatives.js`: the loaded legs moved
     on the strikes the chain lists — every strike one step up or down, the outer leg of each pair one step out or in, the
     same strikes on a later expiry — never a strike the chain did not list. Each is priced like a card (`priceAlt()` in
@@ -280,7 +290,7 @@ non-expert trader who wants to learn discipline rather than be sold trades.
     App.jsx: the price that fills, the size the budget buys, the gate at that size); they are ranked in the owner's Find
     order with the request applied, the ones that fit first (`rankOptimize()` in rows.js). The section says what it
     checked ("Checked 12 on 3 expiries, 39–88 days: 6 fit your request, 6 fail a floor."), where the trade on Build sits,
-    and the top five as O1…O5 with the days held; "Load ›" puts one on Build. Build's **Which variant fits best?** reads
+    and the top five as O1…O5 with the days held; "Load ›" puts one on Build. Build's **Is there a better choice?** reads
     the O rows by label and recommends among them only. Not offered while a roll is on Build.
   - **A roll is judged on the whole trade (PR 65; owner: "weigh the starting position more, to mitigate the risk against
     the initial strategy and goal").** The search is Optimize's on the later expiries; the judge is `rollJudge()`: today's
@@ -584,7 +594,9 @@ OWNER CHECK, Optimize's speed on the phone.)
    Optimize's section is build.jsx's and the source counter does not read it (12 words at rest: its title, "How it
    searches" and its button; written in voice.test.js). Chosen, not measured: the 50 ms rule for the search width, the
    five O rows and the three roll rows, and a cent of tolerance on the roll's accepted risk; the roll's ranking (back to
-   zero, then the average) is the owner's yes to the proposal.
+   zero, then the average) is the owner's yes to the proposal. Task 65.7: market 479 → 487 ("Ask the copilot: do CORN's
+   four signals agree?", 8 words at rest, the owner's new question; the chart's "How does this relate to my trade?" left the
+   same screen, 7 words the counter never scored, so on screen the page reads one word more).
 9. **The exit rules are inherited defaults, not backtested** on these ten markets; the single option's +50% of the
    premium is the owner's choice. PAST YRS settles at expiry and does not replay them. **Since PR #50 a replay window
    that runs past December reads the next year's row and the last year is dropped, not padded** (it used to wrap to the
@@ -613,7 +625,9 @@ OWNER CHECK, Optimize's speed on the phone.)
     inside the 30–90 day window for these markets is read when it happens. **PR 65's whole-trade judge** reads the
     position's P&L at today's mark: the close is priced at the tap, so the loss it books can differ by the spread. Its
     chances are the model's (the same lognormal as CHANCE), tested against a closed form on one spread; the copilot's
-    reading of the O rows and the whole-trade lines is in the prompt only.
+    reading of the O rows and the whole-trade lines is in the prompt only. **Task 65.7's sixteen questions** (merged,
+    refocused, one added) and the calendar and signals now in their context are tested on the prompt and the context
+    only: whether a real answer keeps to the calendar's dates and to its own screen's subject is unread.
 
 ## 5. After v1
 
