@@ -12,9 +12,10 @@ import { analyze } from "./App.jsx";
 import { payoffBands } from "./visuals.jsx";
 import { terminalExact, payoff, Phi } from "./engine.js";
 import { RULES, CROSS_HINT, chanceText, signedMoney, spotNowLabel, SCENARIO_MAX_MOVES, SCENARIO_MAX_DEFAULT, scenarioMoveText, SCENARIO_WORDS,
-  GREEK_TABS } from "./rules.js";
+  GREEK_TABS, CHART_WHEN } from "./rules.js";
 import { chartDist, zoneOdds, coneEdges, exitMark, awayFrom, crosshairReadout, crossStep, crossKey, scenarioGrid, greekCurves,
-  brokerGreeks } from "./tradeChart.js";
+  brokerGreeks, exitCurve, curveZones, exitPnlAt } from "./tradeChart.js";
+import { legsAt } from "./engine.js";
 
 let passed = 0;
 const failures = [];
@@ -210,6 +211,42 @@ check("THE SCREEN: the tabs, a Greek's chart with its read dot only when every l
   const without = renderToStaticMarkup(<GreekChart greek="vega" legs={BUILD.legs} spot={BUILD.S} dte={POLICY.dte} ivs={BUILD.ivs} reads={[reads[0], { ...reads[1], vega: null }]} contracts={2} expKey="2026-11-20" />);
   if (without.includes("data-greek-read")) throw new Error("a dot from a partial sum");
   for (const t of GREEK_TABS) has(GREEK_TABS.map((x) => x.label).join(" "), t.label);
+});
+
+/* ====================================================================
+   PR 68 — THE CHART AT THE 21-DTE EXIT (the toggle deferred from PR 63 until P5).
+==================================================================== */
+check("THE EXIT DAY'S CURVE IS legsAt() WITH RULES.exitDTE DAYS LEFT, ITS ZONES CUT WHERE IT CROSSES ZERO, THEIR CHANCES ADD UP TO 1", () => {
+  const curveX = exitCurve({ legs: BUILD.legs, entryNet: BUILD.a.entry, curve: BUILD.a.curve, ivs: BUILD.ivs, dte: POLICY.dte });
+  eq(curveX.length, BUILD.a.curve.length, "one point per curve point");
+  const mid = curveX[120];
+  near(mid.exp, (legsAt(BUILD.legs, mid.s, RULES.exitDTE, BUILD.ivs).value - BUILD.a.entry) * 100, 1e-9, "a point");
+  const zones = curveZones(curveX);
+  for (let i = 1; i < zones.length; i++) { eq(zones[i].lo, zones[i - 1].hi, "contiguous"); if (zones[i].sign === zones[i - 1].sign) throw new Error("two zones of one sign"); }
+  for (const z of zones.slice(1)) near(exitPnlAt(curveX, z.lo), 0, 1e-6, "a zone edge is a zero of the curve");
+  const dist = chartDist(BUILD.legs, BUILD.a.entry, BUILD.S, { ...POLICY, dte: POLICY.dte - RULES.exitDTE });
+  near(zoneOdds(zones, dist).reduce((a, z) => a + z.p, 0), 1, 1e-9, "the zones cover every price");
+  eq(exitCurve({ legs: BUILD.legs, entryNet: 1, curve: BUILD.a.curve, ivs: BUILD.ivs, dte: RULES.exitDTE }), null, "inside the window: none");
+  eq(exitCurve({ legs: BUILD.legs, entryNet: 1, curve: BUILD.a.curve, ivs: null, dte: 45 }), null, "no IVs: none");
+});
+
+check("THE TOGGLE: at the exit the crosshair reads the exit curve on the exit day; inside the window the exit is not offered", () => {
+  const bars = Array.from({ length: 60 }, (_, i) => ({ time: `2026-08-${String((i % 28) + 1).padStart(2, "0")}`, open: 378, high: 380, low: 376, close: 378 + Math.sin(i / 5) * 2 }));
+  const props = { W: 360, ticker: "GLD", bars, dte: POLICY.dte, sigma: POLICY.sigma, driftAnnual: POLICY.driftAnnual, curve: BUILD.a.curve,
+    legs: BUILD.legs, breakevens: BUILD.a.breakevens, spot: BUILD.S, entryNet: BUILD.a.entry, expKey: "2026-11-20", contracts: 2, ivs: BUILD.ivs };
+  const atExp = renderToStaticMarkup(<UnifiedChart {...props} initialCross={370} />);
+  has(atExp, 'data-chart-when="expiry"'); has(atExp, CHART_WHEN.exit);
+  const atExit = renderToStaticMarkup(<UnifiedChart {...props} initialCross={370} initialWhen="exit" />);
+  has(atExit, 'data-chart-when="exit"');
+  const exit = exitMark("2026-11-20", POLICY.dte);
+  const curveX = exitCurve({ legs: BUILD.legs, entryNet: BUILD.a.entry, curve: BUILD.a.curve, ivs: BUILD.ivs, dte: POLICY.dte });
+  const want = crosshairReadout({ ticker: "GLD", price: 370, expKey: "2026-11-20", legs: BUILD.legs, entryNet: BUILD.a.entry, contracts: 2,
+    dist: chartDist(BUILD.legs, BUILD.a.entry, BUILD.S, { ...POLICY, dte: exit.daysFromNow }), pnlAt: (px) => exitPnlAt(curveX, px), dayKey: exit.key });
+  has(atExit, want.text.replace(/&/g, "&amp;"));
+  has(want.text, exit.day);
+  // Inside the window the exit cannot be chosen, and the chart reads at expiry.
+  const inside = renderToStaticMarkup(<UnifiedChart {...props} dte={RULES.exitDTE} initialWhen="exit" />);
+  has(inside, 'data-chart-when="expiry"'); has(inside, "disabled");
 });
 
 console.log(`\n${passed} passed, ${failures.length} failed\n`);

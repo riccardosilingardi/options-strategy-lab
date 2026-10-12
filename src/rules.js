@@ -541,6 +541,14 @@ export const RULES = {
   // chanceGapPoints (PR 67, owner 12 Oct 2026) — the market's chance and the model's apart by more than this (as a
   // fraction: 0.05 = five points), and one line under the CHANCE tile says why. The owner's number.
   chanceGapPoints: 0.05,
+  // replayVolDays (PR 68, P5) — THE TRADING DAYS OF REALISED VOLATILITY the exit replay prices a past entry at
+  // (`exitBacktest()`): past option quotes are not available, so each past day's options are Black-Scholes at the
+  // volatility the series showed over the 20 sessions before it (about a month). Chosen, not measured (PRD §4).
+  replayVolDays: 20,
+  // calibrationMinTrades (PR 68, task 68.3) — the closed trades carrying BOTH chances the Journal waits for before it says
+  // how often each chance came true (bands and a Brier score). Under it: "N trades so far — too few to judge". The
+  // owner's number (12 Oct 2026).
+  calibrationMinTrades: 10,
 
   // --- scratchPayoffShare — FOR COPY ONLY, AND FOR NOTHING ELSE.
   //
@@ -2374,13 +2382,18 @@ export const exitMarkLabel = (day) => `exit ${day}`;
 /** A zone's chance on the chart: "47%", and "<1%" for a sliver the whole percent would print as 0. */
 export const zoneOddsLabel = (p) => (known(p) && Number(p) > 0 && Number(p) < 0.005 ? "<1%" : chanceText(p));
 export const CROSS_HINT = "Tap the chart, drag the line, or use the arrow keys to read a price.";
+/** The chart's toggle (PR 68, deferred from PR 63 until P5): read at expiry, or on the exit day. */
+export const CHART_WHEN = Object.freeze({ expiry: "At expiry", exit: `At the ${RULES.exitDTE}-DTE exit`, aria: "When the chart is read",
+  none: `Within ${RULES.exitDTE} days of expiry, or a leg's volatility not read: no exit day to draw.` });
 export const CROSS_ARIA = "Price to read on the chart";
 /** "GLD at $370.00 on 20 Nov → +$1,240 on 7 contracts · 31% chance to finish below". */
 export const crosshairLine = ({ ticker, price, day, pnl, contracts, below }) =>
   `${ticker} at $${Number(price).toFixed(2)} on ${day} → ${signedMoney(pnl)} on ${contracts} contract${contracts === 1 ? "" : "s"} · ` +
   `${zoneOddsLabel(below)} chance to finish below`;
 /** "How to read ⓘ" on Build's chart: what each mark is (the zones and the crosshair joined in PR 63). */
-export const howToReadChart = ({ ticker, sessions, chance, exitDay }) =>
+export const howToReadChart = ({ ticker, sessions, chance, exitDay, atExit = false }) =>
+  (atExit && exitDay ? `Read on the exit day, ${exitDay}: the zones, the bars, the line at the right edge and the crosshair are ` +
+    `what the trade is worth then (each leg priced on its own volatility with ${RULES.exitDTE} days left), not at expiry. ` : "") +
   `On the left, ${ticker}'s price over the last ${sessions}; the amber dot is today's price. From it, the blue fan is where ` +
   `the price could be by expiry: the darker band holds about 68 of every 100 outcomes of the model (one standard deviation ` +
   `either side, its two prices written at the fan's edge), the paler one 95. The faint green and violet zones are where the ` +
@@ -5892,6 +5905,54 @@ export function takeProfitTarget({ legs = null, maxProfit = null, maxLoss = null
   }
   return none;
 }
+
+/**
+ * THE EXIT POLICY THE REPLAY APPLIES (PR 68, P5): the app's own rules, from their one home, for `exitBacktest()` in
+ * engine.js (which imports nothing). `targetOf` is `takeProfitTarget()`'s per-contract dollars (50% of the maximum profit,
+ * 50% of the premium for a single long option), null when there is none (no ceiling).
+ */
+export const exitReplayPolicy = () => ({
+  exitDTE: RULES.exitDTE, stopLossPct: RULES.stopLossPct, volDays: RULES.replayVolDays,
+  targetOf: ({ legs, maxProfit, maxLoss, entryNet }) => takeProfitTarget({ legs, maxProfit, maxLoss, entryNet: entryNet == null ? null : entryNet, contracts: 1 }).perCombo,
+});
+
+/* =====================================================================
+   "EXIT RULES, PAST YEARS" ON BUILD, SAID (PR 68, P5). The numbers are `exitBacktest()`'s (engine.js) on the daily closes
+   `/api/bars` returns — read on a tap, never on their own, and never from a made-up series (the owner, 12 Oct 2026).
+===================================================================== */
+const MONTH_WORDS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+export const EXIT_REPLAY = Object.freeze({
+  title: "Exit rules, past years",
+  run: "Replay the exit rules ›",
+  loading: "Reading five years of daily closes…",
+  none: "No finished window in the years read: nothing to replay.",
+  cols: Object.freeze({ rules: "With the rules", expiry: "Held to expiry", stop: "Stop as exit" }),
+  rows: Object.freeze({ won: "In profit", per100: "Avg per $100 at risk", worst: "Worst per $100", held: "Days held" }),
+  aria: "Exit rules replayed on past years",
+});
+export const exitReplayInside = () => `Already within ${RULES.exitDTE} days of expiry: no exit rule left to replay.`;
+export const exitReplayNotRead = (err) => `The daily closes are not loaded${err ? ` (${err})` : ""}, so nothing is replayed.`;
+/** "107 entries · every session of October · 2021–2025". */
+export const exitReplayHead = ({ n, years = [], month }) =>
+  `${n} entr${n === 1 ? "y" : "ies"} · every session of ${MONTH_WORDS[month] || "the month"} · ${years.length ? `${years[0]}–${years[years.length - 1]}` : "no year"}`;
+/** "Exits: take profit 41 · 21 days 50 · expiry 16". */
+export const exitReplayExitsLine = (ex) => `Exits: take profit ${ex.target} · ${RULES.exitDTE} days ${ex.time} · expiry ${ex.expiry}`;
+/** The stop warning, what it caught and what came after. */
+export const exitReplayWarnLine = (w, n) => (!w || !w.n ? "The stop warning never fired."
+  : `The stop warning (${pctText(RULES.stopLossPct, 0)} of the maximum loss) fired on ${w.n} of ${n}; ${w.thenWon} of those still ended in profit under the rules.`);
+/** The owner's question, answered from these numbers only (P5). */
+export const exitReplayVerdict = (r) => (!r || !r.rules || !r.expiry ? null
+  : `On these years the rules averaged ${sgnOne(r.rules.per100)} per $100 at risk, against ${sgnOne(r.expiry.per100)} held to expiry` +
+    `${r.withStop ? `; exiting at the stop warning would have averaged ${sgnOne(r.withStop.per100)}` : ""}.`);
+/** One cell of the table: "52 of 107", "+3.4", "−61.0", "24". */
+export const exitReplayCell = (sum, row) => (!sum ? "\u2014" : row === "won" ? `${sum.wins} of ${sum.n}`
+  : row === "per100" ? sgnOne(sum.per100) : row === "worst" ? sgnOne(sum.worstPer100) : String(Math.round(sum.held)));
+export const exitReplayInfo = () => `Every trading session of this month in each past year (this year left out: its windows have not ` +
+  `finished), the trade re-struck at today's moneyness with today's days to expiry, held day by day until the first of the take ` +
+  `profit, ${RULES.exitDTE} days to expiry, or the expiry. Past option quotes are not available, so each day's options are ` +
+  `Black-Scholes at the realised volatility of the ${RULES.replayVolDays} sessions before the entry — implied volatility usually ` +
+  `sits above it, so the premiums are usually understated. The stop is a warning, never an exit: "Stop as exit" is what getting ` +
+  `out at the warning would have done. Nothing here changes a rule.`;
 
 /** The target's basis as a phrase: "50% of the premium paid" / "50% of the maximum profit". */
 export const takeProfitBasisWords = (basis = "max-profit") =>

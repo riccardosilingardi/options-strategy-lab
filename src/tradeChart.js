@@ -66,14 +66,18 @@ export const awayFrom = (px, spot) => (Number(spot) > 0 && Number.isFinite(Numbe
  * THE CROSSHAIR'S READOUT at a price: the P&L at expiry for the size, the chance of finishing below, and its sentence.
  * `contracts` is Build's size (1 when unknown, and then the sentence says "1 contract").
  */
-export function crosshairReadout({ ticker, price, expKey, legs, entryNet, contracts, dist }) {
+export function crosshairReadout({ ticker, price, expKey, legs, entryNet, contracts, dist, pnlAt = null, dayKey = null }) {
   const px = price == null ? NaN : Number(price);
   if (!Number.isFinite(px) || px <= 0 || !Array.isArray(legs) || !legs.length) return null;
   const n = Number.isFinite(Number(contracts)) && Number(contracts) >= 1 ? Math.round(Number(contracts)) : 1;
-  const pnl = (payoff(legs, px) - (Number(entryNet) || 0)) * 100 * n;
+  // At expiry, the one payoff; on the exit day (PR 68), the exit curve's P&L per contract (`pnlAt`).
+  const per = pnlAt ? pnlAt(px) : (payoff(legs, px) - (Number(entryNet) || 0)) * 100;
+  if (per == null || !Number.isFinite(per)) return null;
+  const pnl = per * n;
   const below = dist ? dist.P(px) : null;
+  const key = dayKey || expKey;
   return { price: px, pnl, below, contracts: n,
-    text: crosshairLine({ ticker, price: px, day: dayWords(expKey) || expKey || "expiry", pnl, contracts: n, below }) };
+    text: crosshairLine({ ticker, price: px, day: dayWords(key) || key || "expiry", pnl, contracts: n, below }) };
 }
 
 /** The crosshair's keyboard step: a round number near 0.25% of the price ($1 on GLD at 378, 5 cents on UNG at 12). */
@@ -171,4 +175,52 @@ export function brokerGreeks(legs, reads, contracts = 1) {
     out[g] = legs.reduce((acc, l, i) => acc + Math.sign(l.side) * (Number(l.qty) || 1) * vals[i], 0) * k;
   }
   return out;
+}
+
+/* ====================================================================
+   PR 68 — THE CHART AT THE EXIT DAY (the toggle "At expiry / At the 21-DTE exit", deferred from PR 63 until P5).
+==================================================================== */
+/**
+ * THE P&L ON THE EXIT DAY, per contract, at the curve's own prices: each leg priced by Black-Scholes on its own IV with
+ * `exitDTE` days left (`legsAt()`, the "now" curve's function) — the shape of `analyze()`'s curve ({ s, exp }), so the chart
+ * draws it where it drew the expiry payoff. Null without each leg's IV, or when the trade is already inside the window.
+ */
+export function exitCurve({ legs, entryNet, curve, ivs, dte, exitDTE = RULES.exitDTE } = {}) {
+  if (!Array.isArray(curve) || !curve.length || !Array.isArray(legs) || !legs.length || !(Number(dte) > exitDTE) || !ivsReadable(legs, ivs)) return null;
+  const e = Number(entryNet) || 0, iv = ivs.map(Number);
+  return curve.map((c) => ({ s: c.s, exp: (legsAt(legs, c.s, exitDTE, iv).value - e) * 100 }));
+}
+
+/**
+ * THE ZONES OF A CURVE: where its P&L is above zero and where it is not, cut where it crosses zero (interpolated), in
+ * `payoffBands()`' shape ({ lo, hi, sign }) so `zoneOdds()` gives each its chance. A P&L of exactly zero is not a profit.
+ */
+export function curveZones(curve) {
+  if (!Array.isArray(curve) || curve.length < 2) return [];
+  const sign = (v) => (v > 0 ? 1 : -1);
+  const out = [];
+  let lo = curve[0].s, sg = sign(curve[0].exp);
+  for (let i = 1; i < curve.length; i++) {
+    const a = curve[i - 1], b = curve[i], sb = sign(b.exp);
+    if (sb !== sg) {
+      const t = a.exp === b.exp ? 0.5 : a.exp / (a.exp - b.exp);
+      const x = a.s + t * (b.s - a.s);
+      out.push({ lo, hi: x, sign: sg });
+      lo = x; sg = sb;
+    }
+  }
+  out.push({ lo, hi: curve[curve.length - 1].s, sign: sg });
+  return out;
+}
+
+/** The crosshair's readout on the exit day: the exit curve's P&L at the price (interpolated), for the size. */
+export function exitPnlAt(curveX, px) {
+  if (!Array.isArray(curveX) || !curveX.length || !Number.isFinite(Number(px))) return null;
+  const x = Number(px);
+  if (x <= curveX[0].s) return curveX[0].exp;
+  for (let i = 1; i < curveX.length; i++) {
+    const a = curveX[i - 1], b = curveX[i];
+    if (x <= b.s) return a.exp + ((x - a.s) / (b.s - a.s)) * (b.exp - a.exp);
+  }
+  return curveX[curveX.length - 1].exp;
 }

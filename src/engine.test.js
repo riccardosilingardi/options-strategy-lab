@@ -23,7 +23,8 @@
 import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { exitSim, netBS, SIGMA, terminalMC, terminalExact, exactPnl, Phi, N, seedFrom, rng, seasonalDrift, seasonalSpan,
-  parseAvJson, statsFromMatrix, histBacktest, payoff } from "./engine.js";
+  parseAvJson, statsFromMatrix, histBacktest, payoff, exitBacktest, realisedVol, bs } from "./engine.js";
+import { exitReplayPolicy } from "./rules.js";
 import { RULES, takeProfitTarget, sigmaProvenance, MEASURED_SIGMA_SOURCE, TABLE_SIGMA_SOURCE, FALLBACK_SIGMA_SOURCE } from "./rules.js";
 import { avMonthlyBody, AV_REFUSALS, CORN_SHAPED_MONTH_DRIFT, CORN_MONTHLY_VOL } from "./avFixture.js";
 
@@ -715,6 +716,118 @@ test("terminalExact THROWS without a policy, as terminalMC does: a default is ho
   // A P&L of exactly zero is not a profit: a flat $0 plateau is not counted in the chance.
   const flat = terminalExact([{ side: 1, type: "call", strike: 1000, qty: 1 }], 0, 20, EXACT_POLICY);
   assert.equal(flat.pop, 0);
+});
+
+/* ============================================================================
+   PR 68 (P5) — THE EXIT RULES REPLAYED ON PAST DAYS: `exitBacktest()`, beside `histBacktest()` (unchanged).
+   Every series below is SYNTHETIC — made here, for the test, never shown on a screen (the owner, 12 Oct 2026: "the logic,
+   without data, or it passes for real").
+============================================================================ */
+/** Weekday closes from `from` to `to` (ISO), the price `px(i)` on the i-th session. */
+function series(from, to, px) {
+  const out = [];
+  for (let t = Date.parse(`${from}T00:00:00Z`), i = 0; t <= Date.parse(`${to}T00:00:00Z`); t += 864e5) {
+    const d = new Date(t).getUTCDay();
+    if (d === 0 || d === 6) continue;
+    out.push({ time: new Date(t).toISOString().slice(0, 10), close: px(i, new Date(t)) });
+    i++;
+  }
+  return out;
+}
+// A wiggle of ±0.8% a day, so every window has a volatility; then the trend under it.
+const wig = (i) => (i % 2 ? 1.008 : 1 / 1.008);
+const BCS = [{ side: 1, type: "call", strike: 100, qty: 1 }, { side: -1, type: "call", strike: 105, qty: 1 }];
+
+test("PR 68 — THE REPLAY REFUSES A POLICY THAT IS NOT RULES', and says nothing inside the exit window", () => {
+  const bars = series("2020-01-01", "2026-10-09", (i) => 100 * wig(i));
+  assert.throws(() => exitBacktest(BCS, 100, 45, bars, {}), /exit policy from RULES/);
+  assert.equal(exitBacktest(BCS, 100, RULES.exitDTE, bars, exitReplayPolicy(), { month: 9, year: 2026 }), null);
+  assert.equal(exitBacktest(BCS, 100, 45, bars.slice(0, 5), exitReplayPolicy(), { month: 9, year: 2026 }), null);
+});
+
+test("PR 68 — REALISED VOLATILITY: the daily log returns' sample sd × √252; a missing close is not a volatility", () => {
+  const closes = series("2024-01-01", "2024-03-01", (i) => 50 * wig(i)).map((b) => b.close);
+  const v = realisedVol(closes, 30, 20);
+  // The closes alternate 50/1.008 and 50 × 1.008, so the log returns alternate ±2 ln(1.008): mean 0, sample sd
+  // 2 ln(1.008) × √(20/19) over twenty of them.
+  assert.ok(Math.abs(v - 2 * Math.log(1.008) * Math.sqrt(20 / 19) * Math.sqrt(252)) < 1e-12, String(v));
+  assert.equal(realisedVol(closes, 10, 20), null, "not enough days");
+  assert.equal(realisedVol([1, 0, 1, 1], 3, 2), null, "a zero close");
+});
+
+test("PR 68 — ENTRIES ARE EVERY SESSION OF THE MONTH IN PAST YEARS; THIS YEAR IS LEFT OUT, AND SAID; AN UNFINISHED WINDOW IS DROPPED", () => {
+  const bars = series("2020-01-01", "2026-10-09", (i) => 100 * wig(i));
+  const r = exitBacktest(BCS, 100, 45, bars, exitReplayPolicy(), { month: 9, year: 2026 });
+  assert.ok(r && r.n > 0);
+  for (const t of r.trades) { assert.equal(t.day.slice(5, 7), "10", t.day); assert.notEqual(t.year, 2026); }
+  assert.deepEqual(r.years, [2020, 2021, 2022, 2023, 2024, 2025]);
+  assert.equal(r.excludedYear, 2026);
+  // October 2020 … 2025: 22 or 23 sessions a year, every one of them a trade.
+  assert.equal(r.n, bars.filter((b) => b.time.slice(5, 7) === "10" && b.time < "2026").length);
+  // A series that stops before the last window's expiry: those entries are dropped, never settled early.
+  const short = exitBacktest(BCS, 100, 45, bars.filter((b) => b.time <= "2025-11-20"), exitReplayPolicy(), { month: 9, year: 2026 });
+  assert.ok(short.trades.every((t) => Date.parse(t.day) + 45 * 864e5 < Date.parse("2025-11-20")), "an unfinished window was counted");
+  assert.ok(short.n < r.n);
+});
+
+test("PR 68 — THE STRUCTURE IS RE-STRUCK AT TODAY'S MONEYNESS and priced at the realised volatility before entry", () => {
+  const bars = series("2023-01-01", "2026-10-09", (i) => 40 * wig(i));
+  const r = exitBacktest(BCS, 100, 45, bars, exitReplayPolicy(), { month: 9, year: 2026 });
+  const t = r.trades[0];
+  // Today 100 → 100/105; a past close of 40 → 40/42.
+  const k = t.spot / 100;
+  const v = realisedVol(bars.map((b) => b.close), bars.findIndex((b) => b.time === t.day), RULES.replayVolDays);
+  assert.ok(Math.abs(t.sigma - v) < 1e-12);
+  const want = bs(t.spot, 100 * k, 45 / 365, v, "call") - bs(t.spot, 105 * k, 45 / 365, v, "call");
+  assert.ok(Math.abs(t.entry - want) < 1e-12, `${t.entry} vs ${want}`);
+  assert.ok(Math.abs(t.risk - t.entry * 100) < 1e-9, "a debit spread risks its premium");
+});
+
+test("PR 68 — A RISE: the take profit (RULES' 50% of max profit) ends the trade early; held to expiry it makes more", () => {
+  // +0.4% a session through each autumn.
+  const bars = series("2020-01-01", "2026-10-09", (i) => 100 * wig(i) * Math.pow(1.004, i));
+  const r = exitBacktest(BCS, 100, 45, bars, exitReplayPolicy(), { month: 9, year: 2026 });
+  assert.ok(r.exits.target > r.n / 2, JSON.stringify(r.exits));
+  for (const t of r.trades.filter((x) => x.rules.why === "target")) {
+    assert.ok(t.rules.pnl >= t.target, "exited under its target");
+    assert.ok(Math.abs(t.target - RULES.takeProfitPct * t.maxProfit) < 1e-9, "the target is RULES'");
+    assert.ok(t.rules.held < t.expiry.held);
+  }
+  assert.ok(r.rules.held < r.expiry.held, "held fewer days with the rules");
+  assert.ok(r.expiry.per100 > r.rules.per100, "a steady rise pays more to whoever waits");
+});
+
+test("PR 68 — A FALL: the stop is a WARNING (never an exit), with its day; exiting there instead is reported beside", () => {
+  const bars = series("2020-01-01", "2026-10-09", (i) => 100 * wig(i) * Math.pow(0.996, i));
+  const r = exitBacktest(BCS, 100, 45, bars, exitReplayPolicy(), { month: 9, year: 2026 });
+  assert.ok(r.warnings.n > 0);
+  for (const t of r.trades.filter((x) => x.warn)) {
+    assert.ok(t.warn.pnl <= RULES.stopLossPct * -t.risk + 1e-9, "warned above the stop level");
+    assert.notEqual(t.rules.why, "stop", "the warning ended a trade");
+    assert.ok(t.warn.held <= t.rules.held);
+  }
+  assert.equal(r.trades.filter((t) => t.rules.why === "stop").length, 0);
+  // In a steady fall, getting out at the warning loses less than the rules (which hold to 21 days) or the expiry.
+  assert.ok(r.withStop.per100 > r.rules.per100, `${r.withStop.per100} vs ${r.rules.per100}`);
+  assert.ok(r.rules.per100 >= r.expiry.per100 - 1e-9);
+});
+
+test("PR 68 — SIDEWAYS: a credit spread rarely reaches its target and leaves at 21 days to expiry", () => {
+  const bps = [{ side: -1, type: "put", strike: 95, qty: 1 }, { side: 1, type: "put", strike: 90, qty: 1 }];
+  const bars = series("2020-01-01", "2026-10-09", (i) => 100 * wig(i));
+  const r = exitBacktest(bps, 100, 45, bars, exitReplayPolicy(), { month: 9, year: 2026 });
+  assert.ok(r.exits.time + r.exits.target === r.n, JSON.stringify(r.exits));
+  for (const t of r.trades.filter((x) => x.rules.why === "time")) assert.ok(45 - t.rules.held <= RULES.exitDTE + 3, `${t.rules.held} days`);
+  // Deterministic: the same series, the same numbers.
+  assert.deepEqual(exitBacktest(bps, 100, 45, bars, exitReplayPolicy(), { month: 9, year: 2026 }), r);
+});
+
+test("PR 68 — histBacktest() IS UNCHANGED beside it (its source, by name)", () => {
+  const src = codeOf("engine.js");
+  const at = src.indexOf("export function histBacktest");
+  const body = src.slice(at, src.indexOf("\n}\n", at));
+  assert.ok(/settles|payoff\(legs, ST\)/.test(body));
+  assert.ok(!/exitDTE|stopLossPct|realisedVol/.test(body), "histBacktest started applying the exit rules");
 });
 
 console.log(`\n${passed} passed, ${failures.length} failed`);

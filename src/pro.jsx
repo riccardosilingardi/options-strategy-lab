@@ -12,7 +12,7 @@ import { RULES, ruleBadge, takeProfitLabel, takeProfitTarget, scaleOutLabel, sto
   ivProvenance, noRecordNote, copilotOverreach, copilotOverreachNote, COPILOT_MODEL, GATE_NEAR_LIMIT, CARD_LABELS, FUTURE_PAST_EQUAL, returnText, notInFiguresLine,
   spotNowLabel, beAwayLabel, sdLabel, exitMarkLabel, zoneOddsLabel, CROSS_HINT, CROSS_ARIA, howToReadChart,
   GREEK_TABS, GREEK_UNITS, greekLegend, GREEK_NO_EXIT, greeksInfo, greekNowLine, greekText, SCENARIO_MAX_MOVES, SCENARIO_MAX_DEFAULT,
-  SCENARIO_WORDS, scenarioMoveText, scenarioMaxLabel, scenarioInfo, scenarioPnlText, greekNotDrawn } from "./rules.js";
+  SCENARIO_WORDS, scenarioMoveText, scenarioMaxLabel, scenarioInfo, scenarioPnlText, greekNotDrawn, CHART_WHEN } from "./rules.js";
 import { ungroundedFigures } from "./grounding.js";
 import { contractsOf, positionSize, bookPositions, positionStage, autopilotHorizonNote, autopilotVolNote, positionForHolding, journalPnlTotal, scoredJournal } from "./journal.js";
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, LineStyle } from "lightweight-charts";
@@ -27,7 +27,8 @@ import { erf, netBS } from "./engine.js";
 import { ARROW, REGIONS, regionSignals, tagImpacts, taRead } from "./signals.js";
 import { eventsBrief, EVENT_TABLE_END } from "./events.js";
 import { useNarrow, BandThumbnail, payoffBands, bandTakeaway, pnl$ } from "./visuals.jsx";
-import { chartDist, zoneOdds, coneEdges, exitMark, awayFrom, crosshairReadout, crossStep, crossKey, scenarioGrid, greekCurves, brokerGreeks } from "./tradeChart.js";
+import { chartDist, zoneOdds, coneEdges, exitMark, awayFrom, crosshairReadout, crossStep, crossKey, scenarioGrid, greekCurves, brokerGreeks,
+  exitCurve, curveZones, exitPnlAt } from "./tradeChart.js";
 import { DEMO, DEMO_TOOLTIP } from "./demo.js";
 import { PREVIEW, PREVIEW_READ_ONLY } from "./deploy.js";
 import { reduceRatios, orderQty, mlegLimitPrice, limitWords, orderLimitWords, limitKind, signedLimitFor, orderBody, orderPreviewLines, orderOutcome, alpacaErrorText, cancelOutcome, cancelWaiting } from "./order.js";
@@ -3119,7 +3120,7 @@ export function UnifiedView({ ticker, dte, sigma, driftAnnual = 0, curve, legs, 
   const pnl = err ? <div style={{ ...sans, fontSize: FS.sm, color: T.mut }}>The price history is not loaded: {err}</div>
     : !bars || !bars.length || !spot || !curve?.length ? <div style={{ ...sans, fontSize: FS.sm, color: T.mut }}>Loading the chart…</div>
     : <UnifiedChart W={W} ticker={ticker} bars={bars} range={range} onRange={setRange} dte={dte} sigma={sigma} driftAnnual={driftAnnual}
-      curve={curve} legs={legs} breakevens={breakevens} spot={spot} entryNet={entryNet} expKey={expKey} contracts={contracts} />;
+      curve={curve} legs={legs} breakevens={breakevens} spot={spot} entryNet={entryNet} expKey={expKey} contracts={contracts} ivs={ivs} />;
   return (
     <div ref={wrapRef} data-unified style={{ maxWidth: "100%" }}>
       <UnderTabs items={GREEK_TABS} value={tab} onChange={setTab} label="What the chart draws" style={{ padding: 0, marginBottom: 8 }} />
@@ -3245,9 +3246,11 @@ export function ScenarioTable({ legs, entryNet, spot, dte, ivs, contracts = 1 })
 
 /** The drawing, the crosshair and the controls, on bars already loaded (chart.test.jsx renders it on fixture bars). */
 export function UnifiedChart({ W = 340, ticker, bars, range = UNIFIED_SESSIONS, onRange = () => {}, dte, sigma, driftAnnual = 0, curve, legs,
-  breakevens, spot, entryNet = 0, expKey = null, contracts = 1, initialCross = null }) {
+  breakevens, spot, entryNet = 0, expKey = null, contracts = 1, initialCross = null, ivs = null, initialWhen = "expiry" }) {
   const [how, setHow] = useState(false);
   const [cross, setCross] = useState(initialCross);
+  // PR 68 (deferred from PR 63 until P5): the payoff, the zones, the bars and the crosshair at expiry, or on the exit day.
+  const [when, setWhen] = useState(initialWhen);
   const svgRef = React.useRef(null);
   const drag = React.useRef(null);
 
@@ -3262,7 +3265,12 @@ export function UnifiedChart({ W = 340, ticker, bars, range = UNIFIED_SESSIONS, 
   // crosshair all read the distribution the CHANCE figure is worked out on.
   const days = Math.max(1, dte);
   const policy = { driftAnnual: Number(driftAnnual) || 0, sigma, dte: days };
-  const dist = chartDist(legs, entryNet, spot, policy);
+  // ON THE EXIT DAY (PR 68): each leg priced with RULES.exitDTE days left (`exitCurve()`), on the lognormal to that day.
+  const exit = exitMark(expKey, dte);
+  const curveX = exit ? exitCurve({ legs, entryNet, curve, ivs, dte }) : null;
+  const atExit = when === "exit" && curveX != null;
+  const drawCurve = atExit ? curveX : curve;
+  const dist = chartDist(legs, entryNet, spot, atExit ? { ...policy, dte: Math.max(1, exit.daysFromNow) } : policy);
   const edges = coneEdges(spot, policy);
   const mu = policy.driftAnnual;
   const fan = [];
@@ -3282,10 +3290,10 @@ export function UnifiedChart({ W = 340, ticker, bars, range = UNIFIED_SESSIONS, 
   const XH = (i) => xHist0 + (bars.length > 1 ? i / (bars.length - 1) : 0) * (xToday - xHist0);
   const clampY = (v) => Math.max(padT, Math.min(H - padB, v));
 
-  // Where it pays at expiry, read off `curve` (the same payoff every figure on Build reads).
+  // Where it pays at expiry, read off `curve` (the same payoff every figure on Build reads) — or on the exit day, `curveX`.
   const payAt = (px) => {
-    let best = curve[0];
-    for (const c of curve) if (Math.abs(c.s - px) < Math.abs(best.s - px)) best = c;
+    let best = drawCurve[0];
+    for (const c of drawCurve) if (Math.abs(c.s - px) < Math.abs(best.s - px)) best = c;
     return best.exp;
   };
   // Where it ends: the same lognormal at expiry, in bins along the price axis.
@@ -3298,13 +3306,13 @@ export function UnifiedChart({ W = 340, ticker, bars, range = UNIFIED_SESSIONS, 
 
   // THE ZONES (PR 63): `payoffBands()` over a range wide enough to hold every strike, then each zone's chance.
   const ks = legs.map((l) => Number(l.strike)).filter((k) => k > 0);
-  const zones = zoneOdds(payoffBands({ legs, entryNet, spot, lo: Math.min(spot, ...ks) * 0.5, hi: Math.max(spot, ...ks) * 1.5 }).bands, dist);
+  const zones = zoneOdds(atExit ? curveZones(curveX)
+    : payoffBands({ legs, entryNet, spot, lo: Math.min(spot, ...ks) * 0.5, hi: Math.max(spot, ...ks) * 1.5 }).bands, dist);
   const pProfit = zones.filter((z) => z.sign > 0).reduce((a, z) => a + z.p, 0);
-  const exit = exitMark(expKey, dte);
   const xExit = exit ? xToday + (exit.daysFromNow / days) * (xFanEnd - xToday) : null;
 
   // The payoff at the right edge: zero a third in, profit to the right, loss to the left.
-  const payPts = curve.filter((c) => c.s >= yMin && c.s <= yMax).map((c) => ({ y: Y(c.s), v: c.exp }));
+  const payPts = drawCurve.filter((c) => c.s >= yMin && c.s <= yMax).map((c) => ({ y: Y(c.s), v: c.exp }));
   const payMax = payPts.length ? Math.max(...payPts.map((q) => Math.abs(q.v)), 1) : 1;
   const payZero = xPay0 + (xPayEnd - xPay0) * 0.34;
   const PX = (v) => payZero + (v / payMax) * (v >= 0 ? xPayEnd - 3 - payZero : payZero - xPay0 - 3);
@@ -3322,7 +3330,8 @@ export function UnifiedChart({ W = 340, ticker, bars, range = UNIFIED_SESSIONS, 
     return Math.min(yMax, Math.max(yMin, yMin + (1 - (y - padT) / (H - padT - padB)) * (yMax - yMin)));
   };
   const step = crossStep(spot);
-  const readout = cross == null ? null : crosshairReadout({ ticker, price: cross, expKey, legs, entryNet, contracts, dist });
+  const readout = cross == null ? null : crosshairReadout({ ticker, price: cross, expKey, legs, entryNet, contracts, dist,
+    ...(atExit ? { pnlAt: (px) => exitPnlAt(curveX, px), dayKey: exit.key } : {}) });
   const onDown = (e) => {
     const handle = e.target && e.target.getAttribute && e.target.getAttribute("data-cross-handle") != null;
     drag.current = { handle, x: e.clientX, y: e.clientY };
@@ -3432,6 +3441,16 @@ export function UnifiedChart({ W = 340, ticker, bars, range = UNIFIED_SESSIONS, 
           style={{ ...sans, fontSize: FS.sm, color: T.blue, background: "transparent", border: "none", padding: 0, minHeight: TAP, cursor: "pointer" }}>
           How to read <span aria-hidden="true">ⓘ</span>
         </button>
+        {/* AT EXPIRY / AT THE 21-DTE EXIT (PR 68): what the payoff, the zones, the bars and the crosshair are read at. */}
+        <div role="group" aria-label={CHART_WHEN.aria} data-chart-when={atExit ? "exit" : "expiry"} style={{ display: "flex", gap: 2 }}>
+          {[["expiry", CHART_WHEN.expiry], ["exit", CHART_WHEN.exit]].map(([id, l]) => (
+            <button key={id} onClick={() => setWhen(id)} aria-pressed={(id === "exit") === atExit} disabled={id === "exit" && !curveX}
+              title={id === "exit" && !curveX ? CHART_WHEN.none : undefined}
+              style={{ ...sans, fontSize: FS.xs, minHeight: TAP, padding: "0 6px", borderRadius: 8, cursor: id === "exit" && !curveX ? "not-allowed" : "pointer",
+                background: (id === "exit") === atExit ? T.raise : "transparent", color: (id === "exit") === atExit ? T.ink : id === "exit" && !curveX ? T.dim : T.mut,
+                border: "none" }}>{l}</button>
+          ))}
+        </div>
         <div role="group" aria-label="How much history" style={{ display: "flex", gap: 2 }}>
           {[[UNIFIED_SESSIONS, "60d"], [365, "1Y"], [1825, "5Y"]].map(([v, l]) => (
             <button key={l} onClick={() => onRange(v)} aria-pressed={range === v}
@@ -3442,7 +3461,7 @@ export function UnifiedChart({ W = 340, ticker, bars, range = UNIFIED_SESSIONS, 
       </div>
       <Reveal open={how}>
         <p role="note" style={{ ...sans, fontSize: FS.sm, color: T.body, lineHeight: LH.body, margin: "0 0 4px" }}>
-          {howToReadChart({ ticker, sessions, chance: chanceText(pProfit), exitDay: exit ? exit.day : null })}
+          {howToReadChart({ ticker, sessions, chance: chanceText(pProfit), exitDay: exit ? exit.day : null, atExit })}
         </p>
       </Reveal>
     </>
