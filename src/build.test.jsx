@@ -6,6 +6,9 @@
 // ones never proposing a trade, the cap checkbox writing the ONE free-sizing setting, the review sheet's checks being
 // `gateChecklist()`'s, order path 2 being `useTicketSend()` (the ticket's send, moved unchanged), and the three states.
 import React from "react";
+import { ExitRulesPast } from "./build.jsx";
+import { exitBacktest } from "./engine.js";
+import { exitReplayPolicy, EXIT_REPLAY, exitReplayVerdict, exitReplayInside } from "./rules.js";
 import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
 import { BuildScreen, NumbersSection, WhySection, ReviewSheet, LegRow, OrderSection, ExitPlanSection, SendBar,
@@ -265,6 +268,28 @@ check("NO DESK HEADER ON BUILD, NO EVIDENCE BAR; WHY THIS MARKET IS THE MARKET P
   has(app, 'onMarketRead: () => goMarket(ticker, "overview"), readLabel: MARKET_READ_LINK');
   has(app, "const chromeless = onFindStep || onMarketStep || onBuildStep ||");
   if (app.includes("<EvidenceBar items={EVIDENCE}")) throw new Error("the bar is back");
+});
+
+/* PR 68 (P5) — EXIT RULES, PAST YEARS: one button; never a number without the closes; the table when they came.
+   The series below is synthetic — for this test only, never on a screen. */
+check("PR 68 — EXIT RULES, PAST YEARS: idle is the button; no closes is a sentence and the button; a result is the table and its answer", () => {
+  const idle = renderToStaticMarkup(<ExitRulesPast state="idle" onRun={() => {}} />);
+  has(idle, EXIT_REPLAY.run); has(idle, 'data-exit-replay="idle"'); hasNot(idle, "per $100");
+  const err = renderToStaticMarkup(<ExitRulesPast state="error" error="HTTP 503" onRun={() => {}} />);
+  has(err, "The daily closes are not loaded (HTTP 503), so nothing is replayed."); has(err, EXIT_REPLAY.run); hasNot(err, "per $100 at risk,");
+  has(renderToStaticMarkup(<ExitRulesPast inside onRun={() => {}} />), exitReplayInside());
+  const bars = [];
+  for (let t = Date.UTC(2021, 0, 4), i = 0; t <= Date.UTC(2026, 9, 9); t += 864e5) {
+    const d = new Date(t).getUTCDay(); if (d === 0 || d === 6) continue;
+    bars.push({ time: new Date(t).toISOString().slice(0, 10), close: 100 * (i % 2 ? 1.01 : 1 / 1.01) * Math.pow(1.001, i) }); i++;
+  }
+  const legs = [{ side: 1, type: "call", strike: 100, qty: 1 }, { side: -1, type: "call", strike: 105, qty: 1 }];
+  const result = exitBacktest(legs, 100, 45, bars, exitReplayPolicy(), { month: 9, year: 2026 });
+  const done = renderToStaticMarkup(<ExitRulesPast state="done" result={result} onRun={() => {}} />);
+  for (const row of ["won", "per100", "worst", "held"]) has(done, `data-exit-replay-row="${row}"`);
+  for (const c of Object.values(EXIT_REPLAY.cols)) has(done, c);
+  has(done, exitReplayVerdict(result).replace(/'/g, "&#x27;"));
+  has(done, "every session of October");
 });
 
 console.log(`\n${ok.length} passed, ${bad.length} failed`);

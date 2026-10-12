@@ -180,7 +180,11 @@ non-expert trader who wants to learn discipline rather than be sold trades.
      refuses; then **More on this trade ▾**, everything else in today's form (the market now, the card, the editor and
      the chain, the price and what crossing costs, the ticket's leg prices, order type and time in force with no Send of
      its own, all the numbers, the charts, every factor, market levels, history and the replay behind its button, the
-     copilot's other questions). **Send opens the review sheet** — the order written out leg by leg with its OCC symbols,
+     copilot's other questions; **since PR 68, "Exit rules, past years"** under the backtest: one button reads five years of
+     daily closes and replays the take profit, the 21-day exit and the expiry on every session of this month in past years —
+     with the rules, held to expiry, and the stop as an exit — options priced at the realised volatility before each entry;
+     no closes, no numbers). **Since PR 68 the chart reads "At expiry" or "At the 21-DTE exit"** (the line at the right edge,
+     the zones and their chances, the bars and the crosshair on the exit day). **Send opens the review sheet** — the order written out leg by leg with its OCC symbols,
      "Limit $0.25 credit · day · ×1", the gate's checks one per row (✓ / ✗, "—" when not read), the market clock, the
      against-the-signals reason when the rule asks it, Back and **Send to Alpaca** (the second tap: order path 2, the
      same gate call, `orderBody()` and POST). Accepted, it says "✓ Sent. Alpaca accepted it.", the order, the Journal ref,
@@ -231,7 +235,10 @@ non-expert trader who wants to learn discipline rather than be sold trades.
     no record here is tagged "sent outside this app".
   The order prints once: Build and the desk show counts only. Integrations are in Settings → Connections.
 - **The Journal (the owner's board since redesign PR 3b).** THE RECORD (level, rule closes, awareness, what is next;
-  "inside the limit" and what the measures mean behind its ⓘ), "Find a trade" (a ref, its number or a ticker), OPEN
+  "inside the limit" and what the measures mean behind its ⓘ), **WHICH CHANCE CAME TRUE (PR 68)** — once ten closed trades
+  carry both chances at entry (the market's, `thesis.marketPop`, stored since PR 68, and the OSL model's) and a result read
+  from a fill: per band, what each said and how often it won, and each Brier score; until then "N trades so far — too few
+  to judge", "Find a trade" (a ref, its number or a ticker), OPEN
   (every open trade and every order still waiting, each opening on the reason it was opened and its whole timeline),
   CLOSED TRADES with their net (each opening on why it ended — "Closed by the rules: …" or "Your reason: …" — the reason
   it was opened, the per-trade reading, both order ids in full and its whole timeline; a figure that is not a fill is
@@ -500,7 +507,8 @@ again: none closed; #5, #8, #9 and #10 carry what PR 62 changed. PR 63 re-read t
 carry what PR 63 changed. PR 65 re-read them: none closed; #3, #5, #8 and #10 carry what PR 65 changed, and #5 gains an
 OWNER CHECK, Optimize's speed on the phone. PR 66 re-read them: none closed; #3 and #8 carry what PR 66 changed. PR 67
 re-read them: none closed; #3, #7, #8, #9 and #10 carry what PR 67 changed, and #9 gains an OWNER CHECK, the market's
-chance against IBKR's.)
+chance against IBKR's. PR 68 re-read them: none closed; #3, #8 and #9 carry what PR 68 changed, and #9 gains an OWNER CHECK,
+the exit replay on real closes.)
 
 1. **OWNER CHECK — the Journal entry for J-0001 shows the $7.65 fill** (v1 is reached on the owner's report of 5 Oct
    2026: filled 9 of 9 at $7.65, filed from the production address; this session cannot see that browser). **No Modify
@@ -553,7 +561,11 @@ chance against IBKR's.)
    amber line, the row's "· mkt", Build's FUTURE box), **the Greek tabs, the scenario table and the costs line with IBKR's
    placeholder** were photographed the same way (docs/screens/pr67/, `node scripts/shoot-pr67.mjs`), on the `+book`
    fixture whose every market carries UNG's board; no board draws them. The Greek dot read "+23" beside a computed "+23"
-   there: the fixture's broker Greeks are Black-Scholes too, so a live gap between them is unseen. Never on a phone.
+   there: the fixture's broker Greeks are Black-Scholes too, so a live gap between them is unseen. Never on a phone. **PR
+   68's chart at the exit, "Exit rules, past years" and the Journal's "Which chance came true"** were photographed the same
+   way (docs/screens/pr68/, `node scripts/shoot-pr68.mjs`) in their empty states only: the fixture's daily closes cover this
+   year, which the replay leaves out, and its records carry no market chance — **no result of either has been seen on a
+   screen**, by design (no made-up series is drawn).
 4. **Read when it happens — no credit has filled at the corrected limit** (the indicative combination ask on thin chains
    has not been measured by a fill; J-0003 never filled at it), **and "Not on Alpaca", "size N > M on the ask", the "Not
    in the app" card, an order "sent outside this app", free sizing (PR #41), and an order sent from Build's new review
@@ -636,9 +648,17 @@ chance against IBKR's.)
    price (IBKR does not say which it reads), the "big move" at ±1.5 standard deviations that names the tails in the why
    line, and the four largest moves (IBKR's own) are chosen; `chanceGapPoints` 0.05 is the owner's; the smoothing penalty
    (0.01 × the median strike width) is measured on synthetic boards only (impliedDist.test.js's table). Words: build 518 →
-   610 (two chance lines and the why line or the not-read line, the Greek tabs, the table, the costs line).
-9. **The exit rules are inherited defaults, not backtested** on these ten markets; the single option's +50% of the
-   premium is the owner's choice. PAST YRS settles at expiry and does not replay them. **Since PR #50 a replay window
+   610 (two chance lines and the why line or the not-read line, the Greek tabs, the table, the costs line). **PR 68:**
+   `replayVolDays` 20 (the realised volatility a past entry is priced at) and the Journal's five chance bands are chosen;
+   `calibrationMinTrades` 10 is the owner's.
+9. **The exit rules are inherited defaults, not yet backtested on real data** on these ten markets; the single option's +50%
+   of the premium is the owner's choice. **OWNER CHECK — the exit replay on real closes (PR 68).** `exitBacktest()` is
+   built and tested on synthetic series only: this environment reads no daily closes (its Alpaca credential is refused,
+   Alpha Vantage's fails to inject), and no made-up series is shown. Steps: on the deploy, Build → More on this trade →
+   "Replay the exit rules ›" on a trade, or save each market's `/api/bars?sym=<TICKER>&days=1900` reply and run
+   `node scripts/measure-exits.mjs <dir>`; read whether the rules beat holding to expiry and whether the stop as an exit
+   helped. The past options are Black-Scholes at the realised volatility of the 20 sessions before each entry, not past
+   quotes (implied volatility usually sits above it, so the premiums are usually understated). PAST YRS settles at expiry and does not replay them. **Since PR #50 a replay window
    that runs past December reads the next year's row and the last year is dropped, not padded** (it used to wrap to the
    same row's January): the PAST YRS tiles on windows that cross December (a November or December entry held 45+ days)
    changed with #50 and are owner-observed — no live tile has been read. On fixtures with no
