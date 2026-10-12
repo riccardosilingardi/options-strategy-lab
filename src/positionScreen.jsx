@@ -133,14 +133,17 @@ function ExitPlanSection({ rows = [], plan = null }) {
 }
 
 /** ROLL IT (PR 4b): shown when the position is not in profit — its candidates when the reasons still hold, else the
- *  one sentence why no roll is offered. Preparing one opens Build; nothing is sent from here. */
+ *  one sentence why no roll is offered. Preparing one opens Build; nothing is sent from here. PR 65: the candidates are
+ *  judged on the whole trade (`rollJudge()`): the run's one summary line, then the best three, each with its whole-trade
+ *  line; `none` says why none is offered when the chain lists some but every one would risk more than was accepted. */
 export function RollSection({ r }) {
   if (!r) return null;
   return (
     <section aria-label="Roll it" data-position-roll style={{ ...PANEL, gap: 8 }}>
       <h2 style={H2}>{ROLL_HEAD}{r.ok ? <Info label="how a roll works">{r.how}</Info> : null}</h2>
       <p style={{ ...sans, margin: 0, fontSize: FS.sm, lineHeight: LH.body, color: r.ok ? T.ink : T.mut }}>{r.why}</p>
-      {r.ok && (r.rows.length > 0 ? <AltRows rows={r.rows} action={ROLL_PREPARE} onPick={r.onPrepare} /> : <Note>{ROLL_NONE}</Note>)}
+      {r.ok && r.summary && <p data-roll-summary style={{ ...sans, margin: 0, fontSize: FS.sm, lineHeight: LH.body, color: T.body }}>{r.summary}</p>}
+      {r.ok && (r.rows.length > 0 ? <AltRows rows={r.rows} action={ROLL_PREPARE} onPick={r.onPrepare} /> : <Note>{r.none || ROLL_NONE}</Note>)}
     </section>
   );
 }

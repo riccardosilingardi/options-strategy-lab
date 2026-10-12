@@ -73,6 +73,8 @@ check("IN POSITIONS IT REVIEWS AND RECOMMENDS ONE OF THE APP'S ACTIONS: five que
   has(byId("posRoll").prompt, "when it is not offered, say why in the app's words and do not suggest one");
   has(byId("posRoll").prompt, "A candidate the gate refuses is never recommended");
   has(byId("variants").prompt, "A variant the gate refuses is never recommended");
+  // PR 65: Optimize's rows, by their label, under the same rule and the request's.
+  has(byId("variants").prompt, "labelled O1 to O5"); has(byId("variants").prompt, "an O row the gate refuses or one that misses the request");
   has(byId("posReview").prompt, "recommend one of the actions offered, or none");
   has(byId("posExit").prompt, "good-till-cancelled take-profit order");
   has(byId("posSince").prompt, "position.greeksAtEntry and position.greeksNow"); has(byId("posSince").prompt, "is said to be not recorded");

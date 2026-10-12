@@ -16,8 +16,8 @@
 // Plain JS, no React: it is tested without a browser, like path.js and rules.js.
 // ============================================================================
 import { meetsRequest, sizedFigures, futureFigures, futureTile, pastFigures, pastTileText, chanceText, returnText, compareLabel,
-  per100Value, ROW_FIGURE_WORDS } from "./rules.js";
-import { findOrderOf } from "./signals.js";
+  per100Value, ROW_FIGURE_WORDS, optimizeLabel } from "./rules.js";
+import { findOrderOf, findOrderCompare } from "./signals.js";
 
 /**
  * One row per market, in the order of each row's card in `items` (already sorted by the caller).
@@ -157,4 +157,39 @@ export function compareCards(items = [], request, sizeOf, { max = 20, fitOnly = 
     });
   }
   return { cards, fitting, markets: tks.size, misses: { count: missN, reasons } };
+}
+
+/**
+ * OPTIMIZE'S RANKING (PR 65; owner 7 Oct 2026: "the best combination of duration and also of legs"). The candidates
+ * `priceAlt()` read on Build (App.jsx) — the floors Find applies, the price that fills, the size the budget buys, the gate
+ * at that size — put in the owner's Find order (`findOrderCompare()` on each one's `rank`, the very fields a Find card
+ * sorts on), with the request applied as Find applies it (`meetsRequest()` at the size the budget buys). A candidate
+ * fits when it meets the request AND the gate passes it at that size. Nothing is priced or simulated here.
+ *
+ * @param priced  [{ …alt, dte, cut?, cand, size, rank, gate, gateText, loaded }] — `cut` when a floor refused it
+ * @param request a `requestOf()` result
+ * @param order   the Find order id
+ * @returns {{ checked, expiries, lo, hi, cut, fitting, missing, rows, anyFit, place }}
+ *   rows   the first `max` that fit, each tagged O1…; when none fits, the first `max` that miss, each with its `reason`
+ *   place  where the loaded trade sits: { rank, of, fits }, { cut: true }, or null when it is not among them
+ */
+export function rankOptimize(priced = [], request, order, { max = 5 } = {}) {
+  const all = (priced || []).filter(Boolean);
+  const days = all.map((p) => p.dte).filter((d) => d != null && Number.isFinite(Number(d))).map(Number);
+  const cmp = findOrderCompare(order);
+  const read = all.filter((p) => !p.cut).map((p) => {
+    const misses = meetsRequest(p.cand, request, p.size).misses;
+    const gateOk = !!(p.gate && p.gate.pass);
+    // Its reason, in the request's own short words, then the gate's line when that is what stops it.
+    const reason = misses.length ? misses.map((m) => m.short).join(" · ") : gateOk ? null : p.gateText || null;
+    return { ...p, misses, reason, fits: !misses.length && gateOk };
+  }).sort((a, b) => cmp(a.rank, b.rank));
+  const fit = read.filter((p) => p.fits);
+  const rows = (fit.length ? fit : read).slice(0, max).map((p, i) => ({ ...p, tag: optimizeLabel(i + 1) }));
+  const loaded = all.find((p) => p.loaded) || null;
+  const place = !loaded ? null : loaded.cut ? { cut: true }
+    : fit.includes(read.find((p) => p.loaded)) ? { rank: fit.findIndex((p) => p.loaded) + 1, of: fit.length, fits: true } : { fits: false };
+  return { checked: all.length, expiries: new Set(all.map((p) => p.expKey)).size, lo: days.length ? Math.min(...days) : null,
+    hi: days.length ? Math.max(...days) : null, cut: all.length - read.length, fitting: fit.length, missing: read.length - fit.length,
+    rows, anyFit: fit.length > 0, place };
 }

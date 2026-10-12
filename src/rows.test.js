@@ -3,8 +3,9 @@
 // The rows are a view of the one sorted list (no new ranking); "Nothing fits" offers one fix that never passes a limit.
 // ============================================================================
 import assert from "node:assert/strict";
-import { marketRows, rowCounts, rowStateOf } from "./rows.js";
-import { requestOf, nothingFits, nothingFitsLine, allMissLine, overLimitNote, resultsLine, RESET_ALL_FILTERS } from "./rules.js";
+import { marketRows, rowCounts, rowStateOf, rankOptimize } from "./rows.js";
+import { requestOf, nothingFits, nothingFitsLine, allMissLine, overLimitNote, resultsLine, RESET_ALL_FILTERS,
+  optimizeSummary, optimizePlaceLine, optimizeRowNote, boardMoveLabel, heldText, RULES } from "./rules.js";
 
 let passed = 0; const failures = [];
 const test = (name, fn) => { try { fn(); passed++; console.log(`  ok   ${name}`); } catch (e) { failures.push({ name, e }); console.log(`  FAIL ${name} — ${e.message}`); } };
@@ -94,6 +95,59 @@ test("NOTHING FITS — no single chip lets a card in → 'Reset filters'; and so
   assert.equal(nf.fix, null); assert.equal(nf.reset, true);
   assert.equal(nothingFits([cand("CORN", "X", 0.8, 40)], req, sizer(50)), null);
   assert.equal(nothingFits([], req, sizer(50)), null);
+});
+
+
+/* ---- OPTIMIZE (PR 65): Find's order and Find's request, on the candidates Build priced ---- */
+// One priced candidate as `priceAlt()` returns it: the fields the ranking reads (rank, cand, size, gate) and no others.
+const priced = (id, { ev100 = 0, pop = 0.5, risk = 100, gate = true, cut = false, loaded = false, dte = 45, expKey = "2026-11-20" } = {}) => (cut
+  ? { id, expKey, dte, cut: { why: "liquidity", reasons: ["thin"] }, loaded }
+  : { id, expKey, dte, loaded, label: id, legsText: id, cand: cand("UNG", id, pop, risk), size: sizer(500)(cand("UNG", id, pop, risk)),
+    gate: { pass: gate, violations: gate ? [] : [{ message: "Over the exposure cap." }] }, gateText: gate ? "✓ The gate passes it at this size." : "✗ Over the exposure cap.",
+    rank: { ev100, lf: { pop, rr: 0.5 }, past: null, fused: null, sent: "bull" } });
+
+test("OPTIMIZE RANKS IN THE OWNER'S FIND ORDER, THE ONES THAT FIT FIRST, TOP FIVE AS O1…O5; floors and misses counted", () => {
+  const req = requestOf({ amt: 500, minChance: 0.4 }, { perTradeLimit: 500 });
+  const list = [priced("A", { ev100: 3 }), priced("B", { ev100: 9, loaded: true }), priced("C", { ev100: 12, pop: 0.2 }),
+    priced("D", { ev100: 15, gate: false }), priced("E", { cut: true }), priced("F", { ev100: 1, dte: 80, expKey: "2027-01-15" }),
+    priced("G", { ev100: 6 }), priced("H", { ev100: 5 }), priced("I", { ev100: 4 })];
+  const r = rankOptimize(list, req, "ev");
+  assert.deepEqual(r.rows.map((x) => `${x.tag}:${x.id}`), ["O1:B", "O2:G", "O3:H", "O4:I", "O5:A"],
+    "by future avg, highest first; C misses the chance asked, D the gate, E a floor");
+  assert.equal(r.checked, 9); assert.equal(r.cut, 1); assert.equal(r.fitting, 6); assert.equal(r.missing, 2);
+  assert.equal(r.expiries, 2); assert.equal(r.lo, 45); assert.equal(r.hi, 80);
+  assert.deepEqual(r.place, { rank: 1, of: 6, fits: true });
+  // The same candidates under "Chance": C (20%) cannot fit, the rest tie at 50% and keep the search's order.
+  assert.deepEqual(rankOptimize(list, req, "chance").rows.map((x) => x.id), ["A", "B", "F", "G", "H"]);
+  // Nothing fits: the best that miss, in the order, each with its reason in the request's or the gate's words.
+  const none = rankOptimize([priced("C", { ev100: 12, pop: 0.2 }), priced("D", { ev100: 15, gate: false })], req, "ev");
+  assert.equal(none.anyFit, false);
+  assert.deepEqual(none.rows.map((x) => x.id), ["D", "C"]);
+  assert.equal(none.rows[0].reason, "✗ Over the exposure cap.");
+  assert.ok(none.rows[1].reason.startsWith("chance 20%"));
+  // Where the trade on Build sits when it misses, when a floor cut it, and when it is not among them.
+  assert.deepEqual(rankOptimize([priced("C", { pop: 0.2, loaded: true })], req, "ev").place, { fits: false });
+  assert.deepEqual(rankOptimize([priced("E", { cut: true, loaded: true })], req, "ev").place, { cut: true });
+  assert.equal(rankOptimize([priced("A")], req, "ev").place, null);
+  assert.deepEqual(rankOptimize([], req, "ev"), { checked: 0, expiries: 0, lo: null, hi: null, cut: 0, fitting: 0, missing: 0, rows: [], anyFit: false, place: null });
+});
+
+test("OPTIMIZE'S WORDS: the summary counts, the place, a row's note, a move's name", () => {
+  assert.equal(optimizeSummary({ checked: 34, expiries: 4, lo: 31, hi: 86, fitting: 9, missing: 6, cut: 19 }),
+    "Checked 34 on 4 expiries, 31–86 days: 9 fit your request, 6 miss it, 19 fail a floor.");
+  assert.equal(optimizeSummary({ checked: 7, expiries: 1, lo: 44, hi: 44, fitting: 1, missing: 1, cut: 0 }),
+    "Checked 7 on 1 expiry, 44 days: 1 fits your request, 1 misses it.");
+  assert.equal(optimizePlaceLine({ rank: 3, of: 9, fits: true }), "Your trade ranks 3rd of the 9 that fit.");
+  assert.equal(optimizePlaceLine({ rank: 1, of: 9, fits: true }), "Your trade is the best of the 9 that fit.");
+  assert.equal(optimizePlaceLine({ rank: 1, of: 1, fits: true }), "Your trade is the only one that fits.");
+  assert.equal(optimizePlaceLine({ fits: false }), "Your trade misses your request.");
+  assert.equal(optimizePlaceLine(null), null);
+  assert.equal(optimizeRowNote({ dte: 44, place: "future avg +4.2 per $100" }), `44 days, held ${heldText(44)} · future avg +4.2 per $100`);
+  assert.equal(heldText(44), `~${44 - RULES.exitDTE} days (exit at ${RULES.exitDTE} DTE)`);
+  assert.ok(optimizeRowNote({ reason: "over budget by $40", dte: 44 }).startsWith("Misses: over budget by $40 · 44 days"));
+  assert.deepEqual(["same", "up", "down", "wider", "narrower"].map((m) => boardMoveLabel(m, 2)),
+    ["Same strikes", "Two steps higher", "Two steps lower", "Wings two steps wider", "Wings two steps narrower"]);
+  assert.equal(boardMoveLabel("up", 1), "One step higher");
 });
 
 console.log(`\n${passed} passed, ${failures.length} failed\n`);

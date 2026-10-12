@@ -272,6 +272,23 @@ non-expert trader who wants to learn discipline rather than be sold trades.
     never holds both:** Build says "Roll of J-0003: close J-0003 first" and Send waits until Alpaca no longer holds it;
     then the new trade is sent as a new trade through the gate (order path 2), and the two records are linked on their
     timelines ("Rolled into J-0006" / "Rolled from J-0003"). No eighth order path, no 4-leg roll order.
+  - **Optimize this trade (PR 65; owner, 7 Oct 2026: "a separate run; Find presents as it is"; "ok in Build").** A section
+    on Build under the variants, one button, "Find the best expiry and legs"; it never runs on its own. It searches the
+    loaded structure on EVERY expiry the chain lists inside the entry window, and on each one the same strikes and every
+    move of up to `OPTIMIZE_STEPS` listed strikes (one, by the rule measured in task 64.5) higher, lower, wider or narrower
+    (`optimizeCandidates()`). Each candidate goes through Find's own floors and is read as a card (`readAlternative()` in
+    App.jsx: the price that fills, the size the budget buys, the gate at that size); they are ranked in the owner's Find
+    order with the request applied, the ones that fit first (`rankOptimize()` in rows.js). The section says what it
+    checked ("Checked 12 on 3 expiries, 39–88 days: 6 fit your request, 6 fail a floor."), where the trade on Build sits,
+    and the top five as O1…O5 with the days held; "Load ›" puts one on Build. Build's **Which variant fits best?** reads
+    the O rows by label and recommends among them only. Not offered while a roll is on Build.
+  - **A roll is judged on the whole trade (PR 65; owner: "weigh the starting position more, to mitigate the risk against
+    the initial strategy and goal").** The search is Optimize's on the later expiries; the judge is `rollJudge()`: today's
+    P&L, booked by the close, plus the new trade at the SAME size held. A candidate whose worst case for the whole trade
+    is past the maximum loss accepted at entry is not offered; the rest are ranked by the chance the whole trade gets back
+    to at least zero, then its average, and each row says "Whole trade: back to $0 or better 22% · reaches your target
+    21% · worst -$237 · avg -$162". The best three are shown with one summary line; the roll arrives on Build at the size
+    held.
   - **In the Journal** (PR 4c), an opened closed trade asks **What did this trade teach me?**: its reasons at entry
     against how it ended (the record's own words — `whyOpenedLine()`, `endedLine()`, its result and whole timeline,
     a roll's "Rolled into / from" included). It explains; it recommends nothing. The answer is filed with the ref and
@@ -449,12 +466,13 @@ changes what the owner reads, not what v1 needs: v1 waits only on the owner's th
 ## 4. NOT VERIFIED
 
 At most ten items. **OWNER CHECK** means only the owner's reading can settle it: J-0001's Journal entry (#1), the live
-open-risk numbers (#4), Find's speed on the phone (#5), a real copilot answer (#10) and Build's crosshair on the phone
-(#3). Everything marked **read when it
+open-risk numbers (#4), Find's and Optimize's speed on the phone (#5), a real copilot answer (#10) and Build's crosshair on
+the phone (#3). Everything marked **read when it
 happens** is recorded if the owner meets it in normal use, and is never asked for. (PR 61 re-read every item below by
 name: none could be closed from this sandbox; each is re-confirmed with what PR 61 added to it. PR 62 re-read them
 again: none closed; #5, #8, #9 and #10 carry what PR 62 changed. PR 63 re-read them: none closed; #3, #5 and #8
-carry what PR 63 changed.)
+carry what PR 63 changed. PR 65 re-read them: none closed; #3, #5, #8 and #10 carry what PR 65 changed, and #5 gains an
+OWNER CHECK, Optimize's speed on the phone.)
 
 1. **OWNER CHECK — the Journal entry for J-0001 shows the $7.65 fill** (v1 is reached on the owner's report of 5 Oct
    2026: filled 9 of 9 at $7.65, filed from the production address; this session cannot see that browser). **No Modify
@@ -495,6 +513,10 @@ carry what PR 63 changed.)
    draws them, so the audit cannot compare them. **OWNER CHECK — the crosshair on the phone:** the line's handle takes a
    drag (`touch-action: none` on its 44px target) while the rest of the chart scrolls the page; whether that feels right
    under a thumb has not been tried. **No screen reader was run** (the chart is a slider with a spoken value: unheard).
+   **PR 65's Optimize section and the roll's whole-trade lines** were photographed the same way (docs/screens/pr65/,
+   `node scripts/shoot-pr65.mjs`): Optimize on `+opt`, UNG's one December board copied onto three expiries, so every
+   expiry carries the same prices — the ranking on a real chain, where a later expiry costs more, has not been seen. No
+   board draws either; the audit cannot compare them.
 4. **Read when it happens — no credit has filled at the corrected limit** (the indicative combination ask on thin chains
    has not been measured by a fill; J-0003 never filled at it), **and "Not on Alpaca", "size N > M on the ask", the "Not
    in the app" card, an order "sent outside this app", free sizing (PR #41), and an order sent from Build's new review
@@ -514,7 +536,11 @@ carry what PR 63 changed.)
    PR #49 replay adds ≈ 1 ms; a slider move is 0.1 ms. The sandbox cannot call Alpha Vantage: `seasonalSignal()` and
    `histBacktest()` have run on avFixture series only. Since PR #49 `parseAvJson()` keeps the whole series: on a
    195-month fixture a month carries 16–17 years instead of 9–10; which live months count, and every live PAST YRS
-   tile, are unread.
+   tile, are unread. **OWNER CHECK — Optimize's speed on the phone (PR 65).** One run on a desktop CPU
+   (`node scripts/measure-optimize.mjs`, UNG's board copied onto 1–9 expiries, six repeats, each trade's median of three or five warm runs): the median
+   trade took 2.5–4 ms with 1 expiry, 5.5–6 with 2, 10–20 with 5 and 20–34 with 9 at one step (the slowest 32–48 ms); at two steps the
+   slowest trade with 9 expiries took 40–82 ms, over the 50 ms the rule allowed in four of six repeats, so the search is
+   one step. A phone is slower; the run happens only on a tap.
 6. **Not verified on the real deploy — the read-only preview guard (redesign PR 2, TASK 0a).** The deploy context is
     read from `context.deploy` as Netlify's own type definitions (`@netlify/types` 3.2.0) describe it; this sandbox
     could not open docs.netlify.com, and no function has run on a real preview or on production with the check. Stubbed
@@ -554,7 +580,11 @@ carry what PR 63 changed.)
    counter also stopped reading 9 words of code on the market page as prose). The grounding check's tolerance (half a
    unit of the last digit written, or of a round hundred) is chosen, not measured. PR 63: no ceiling moved; the row's
    three figure words (five a row) and the chart's hint (14 words) are not seen by the source counter (written in
-   voice.test.js). The chart's keyboard step (a round number near 0.25% of the price) is chosen.
+   voice.test.js). The chart's keyboard step (a round number near 0.25% of the price) is chosen. PR 65: no ceiling moved;
+   Optimize's section is build.jsx's and the source counter does not read it (12 words at rest: its title, "How it
+   searches" and its button; written in voice.test.js). Chosen, not measured: the 50 ms rule for the search width, the
+   five O rows and the three roll rows, and a cent of tolerance on the roll's accepted risk; the roll's ranking (back to
+   zero, then the average) is the owner's yes to the proposal.
 9. **The exit rules are inherited defaults, not backtested** on these ten markets; the single option's +50% of the
    premium is the owner's choice. PAST YRS settles at expiry and does not replay them. **Since PR #50 a replay window
    that runs past December reads the next year's row and the last year is dropped, not padded** (it used to wrap to the
@@ -580,7 +610,10 @@ carry what PR 63 changed.)
     been read in the prompt, never in a real answer** — tested on a stubbed stream only. **PR 4b's roll has never run
     live:** the close, then the opening from Build and the two timeline lines, are tested on the source and photographed
     on a fixture (`+roll`, a later CORN expiry added for the photograph); whether the live chain lists a later expiry
-    inside the 30–90 day window for these markets is read when it happens.
+    inside the 30–90 day window for these markets is read when it happens. **PR 65's whole-trade judge** reads the
+    position's P&L at today's mark: the close is priced at the tap, so the loss it books can differ by the spread. Its
+    chances are the model's (the same lognormal as CHANCE), tested against a closed form on one spread; the copilot's
+    reading of the O rows and the whole-trade lines is in the prompt only.
 
 ## 5. After v1
 

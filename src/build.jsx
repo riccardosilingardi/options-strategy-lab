@@ -19,7 +19,8 @@ import { T, TYPE } from "./theme.js";
 import { mono, sans, Note, Info, Sheet, Reveal, FilterChip, TAP } from "./ui.jsx";
 import { useCopilot, useTicketSend, SKILLS, BUILD_SKILL_IDS, Markdown, readQty, CONTINUE_LABEL } from "./pro.jsx";
 import { FACTOR_LABEL } from "./why.jsx";
-import { CARD_LABELS, BUILD_DEFINITIONS, money, signedMoney, chanceText, returnText, notInFiguresLine, futureTile, ARIA, VARIANT_LOAD, NO_CEILING, LIMIT_CHOICES, parseLimitText } from "./rules.js";
+import { CARD_LABELS, BUILD_DEFINITIONS, money, signedMoney, chanceText, returnText, notInFiguresLine, futureTile, ARIA, VARIANT_LOAD, NO_CEILING, LIMIT_CHOICES, parseLimitText,
+  OPTIMIZE_HEAD, OPTIMIZE_RUN, OPTIMIZE_CURRENT } from "./rules.js";
 
 const FS = TYPE.size, FW = TYPE.weight, LH = TYPE.line;
 const tnum = { fontVariantNumeric: "tabular-nums" };
@@ -457,13 +458,16 @@ export function ExitPlanSection({ pill = null, rows = [], footer }) {
 export function AltRows({ rows = [], action, onPick, disabled = false }) {
   return (
     <ul data-alt-rows style={{ listStyle: "none", margin: 0, padding: 0 }}>
-      {rows.map((r) => (
-        <li key={`${r.kind}-${r.expKey}-${r.legsText}`} data-alt={r.kind} style={{ borderTop: `1px solid ${T.line}`, padding: "10px 0", display: "grid", gap: 4 }}>
+      {rows.map((r) => {
+        // PR 65: a row that is the trade on Build already says so instead of offering itself; a miss is quieter (Find's rule).
+        const off = disabled || !!r.current;
+        return (
+        <li key={`${r.kind}-${r.expKey}-${r.legsText}`} data-alt={r.kind} data-alt-miss={r.miss ? "" : undefined} style={{ borderTop: `1px solid ${T.line}`, padding: "10px 0", display: "grid", gap: 4 }}>
           <span style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
-            <span style={{ ...sans, fontSize: FS.sm, fontWeight: FW.bold, color: T.ink }}>{r.label}</span>
-            <button type="button" disabled={disabled} onClick={() => onPick(r)}
-              style={{ ...sans, minHeight: TAP, padding: "0 4px", background: "transparent", border: "none", color: disabled ? T.dim : T.blue,
-                fontSize: FS.sm, fontWeight: FW.bold, cursor: disabled ? "not-allowed" : "pointer", whiteSpace: "nowrap" }}>{action}</button>
+            <span style={{ ...sans, fontSize: FS.sm, fontWeight: FW.bold, color: r.miss ? T.mut : T.ink }}>{r.label}</span>
+            <button type="button" disabled={off} onClick={() => onPick(r)}
+              style={{ ...sans, minHeight: TAP, padding: "0 4px", background: "transparent", border: "none", color: off ? T.dim : T.blue,
+                fontSize: FS.sm, fontWeight: FW.bold, cursor: off ? "not-allowed" : "pointer", whiteSpace: "nowrap" }}>{r.current ? OPTIMIZE_CURRENT : action}</button>
           </span>
           <span style={{ ...mono, ...tnum, fontSize: FS.xs, color: T.mut }}>{r.legsText}</span>
           <span style={{ ...mono, ...tnum, fontSize: FS.xs, color: T.body }}>
@@ -471,8 +475,10 @@ export function AltRows({ rows = [], action, onPick, disabled = false }) {
           </span>
           <span style={{ ...mono, ...tnum, fontSize: FS.xs, color: T.body }}>{`Future avg ${r.future} · Past yrs ${r.past}`}</span>
           <span style={{ ...sans, fontSize: FS.xs, color: r.gate && r.gate.pass ? T.mut : T.red, lineHeight: LH.body }}>{r.gateText}</span>
+          {r.note && <span data-alt-note style={{ ...sans, fontSize: FS.xs, color: T.mut, lineHeight: LH.body }}>{r.note}</span>}
         </li>
-      ))}
+        );
+      })}
     </ul>
   );
 }
@@ -482,6 +488,30 @@ export function VariantsSection({ rows = [], onLoad, note, none }) {
     <Section label="Variants of this trade" data-build-variants>
       <SectionTitle right={<Info label="How they are made">{note}</Info>}>Variants of this trade</SectionTitle>
       {rows.length ? <AltRows rows={rows} action={VARIANT_LOAD} onPick={onLoad} /> : <Note>{none}</Note>}
+    </Section>
+  );
+}
+
+/**
+ * OPTIMIZE THIS TRADE (PR 65; owner 7 Oct 2026: "a separate run … the best combination of duration and also of legs";
+ * "ok in Build"). One button; it never runs on its own. Then the run's summary, where the trade on Build sits, and the
+ * top five as rows O1…O5 (`rankOptimize()` in rows.js, each read by `priceAlt()`), "Load ›" putting one on Build.
+ */
+export function OptimizeSection({ note, asked, onRun, summary = null, place = null, none = null, rows = [], onLoad }) {
+  return (
+    <Section label={OPTIMIZE_HEAD} data-build-optimize>
+      <SectionTitle right={<Info label="How it searches">{note}</Info>}>{OPTIMIZE_HEAD}</SectionTitle>
+      {!asked ? (
+        <button type="button" onClick={onRun} data-optimize-run
+          style={{ ...sans, width: "100%", minHeight: TAP, borderRadius: 12, border: `1px solid ${T.field}`, background: "transparent", color: T.ink,
+            fontSize: FS.sm, fontWeight: FW.bold, cursor: "pointer" }}>{OPTIMIZE_RUN}</button>
+      ) : (
+        <div style={{ display: "grid", gap: 6 }}>
+          <div data-optimize-summary style={{ ...sans, fontSize: FS.sm, color: T.body, lineHeight: LH.body }}>{summary}{place ? ` ${place}` : ""}</div>
+          {none && <Note>{none}</Note>}
+          {rows.length > 0 && <AltRows rows={rows} action={VARIANT_LOAD} onPick={onLoad} />}
+        </div>
+      )}
     </Section>
   );
 }
@@ -599,6 +629,7 @@ export function BuildScreen({ v, foldedNode = null }) {
         <NumbersSection {...v.numbers} />
         <WhySection {...v.why} />
         {v.variants && <VariantsSection {...v.variants} />}
+        {v.optimize && <OptimizeSection {...v.optimize} />}
         <CopilotSection ask={askAll} />
         <LegsSection {...v.legs} />
         <OrderSection order={v.order} />

@@ -176,6 +176,13 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
   gate callback). A roll is offered only by `rollEligible()` and is two orders, never both held: Build blocks Send with
   `rollCloseFirst()` until Alpaca no longer holds the old position, then sends through order path 2; the records are
   linked by `rolledInto()` / `rolledFrom()` timeline lines, never a new /api/state field.
+- **Optimize and the roll search the same way, judge differently (PR 65, owner 7 Oct 2026).** The search is
+  `optimizeCandidates()` / `rollCandidates()` (every expiry in the entry window — the later ones for a roll — × the moves of
+  up to `OPTIMIZE_STEPS` listed strikes, one by the measured rule). Every candidate is read by `readAlternative()` (App.jsx,
+  `priceAlt()`'s arithmetic) through Find's own floors (`floorsFor()`, the loop body of `shortlistWithFloors()`). Optimize
+  ranks with `rankOptimize()` (rows.js: the owner's Find order, `meetsRequest()`, the gate; O1…O5) and runs ONLY on its
+  button; never on Find, never on its own. A roll is judged by `rollJudge()` on the WHOLE trade at the size held — today's
+  P&L plus the new trade, never a worst case past the max loss accepted at entry — ranked by `rankRolls()`.
 - **One compare (PR 61):** the tick on a Strategies card selects (≤ `MAX_COMPARE`) and shows its word; ONE sheet
   (`CompareSheet`) — Find's "Compare ›", the market page's "See them ›", Build's "N still ticked" — shows the ticked cards
   (or, with none, the cards that fit) as `compareCards()`'s rows, labelled C1…Cn, at the size the budget buys, and its
@@ -243,8 +250,10 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
   The type tokens (`TYPE`) are in `src/theme.js`. Mono only for numbers, tickers, legs, OCC symbols.
 - `src/find.jsx` — Step 1, Find (version B, redesign PR 1): category tabs, the chip row and its sheets, the summary line,
   one row per market (`MarketRow`), the states, and the one Compare sheet (`CompareSheet`, mounted by App.jsx; PR 61).
-- `src/rows.js` — `marketRows()`, `rowFigures()`, `rowStateOf()`: Find's rows over the one sorted list (plain JS).
-- `src/alternatives.js` — the alternatives of a structure (PR 4b): `variantsOf()`, `rollCandidates()`, `rollEligible()` (plain JS).
+- `src/rows.js` — `marketRows()`, `rowFigures()`, `rowStateOf()`: Find's rows over the one sorted list; `rankOptimize()`,
+  Build's Optimize ranking (PR 65) (plain JS).
+- `src/alternatives.js` — the alternatives of a structure (PR 4b): `variantsOf()`, `rollCandidates()`, `rollEligible()`; since
+  PR 65 `optimizeCandidates()`, `movesOnBoard()`, `OPTIMIZE_STEPS`, `rollJudge()`, `rankRolls()` (plain JS).
 - `src/market.jsx` — Step 2, the market page: header, Signals (the tab id stays `overview`; the four factor blocks are
   why.jsx's `FactorRows`, titled by `factorHeadline()`), Strategies (`StrategyCard`), Chain (`ChainTab`, the tray).
 - `src/marketView.js` — `dayChange()`, `expectedMove()`, `latestNews()`, `toggleChainLeg()` (plain JS).
@@ -347,6 +356,9 @@ All in `RULES`, `src/rules.js`, unless noted.
   sections) on the `+book` fixture with a stub copilot (docs/screens/pr4/).
 - `node scripts/shoot-pr63.mjs [dir]` photographs PR 63's screens (Find's rows, a card's Details, Build's chart at rest, with
   the crosshair, "How to read", light) on the `+book` fixture (docs/screens/pr63/).
+- `node scripts/measure-optimize.mjs` times one Optimize run (one step against two) on UNG's board copied onto 1–9 expiries,
+  and counts how often the second step changed the first pick (PR 65, task 64.5). `node scripts/shoot-pr65.mjs [dir]`
+  photographs Optimize on Build (`+opt`) and the roll's whole-trade lines (`+roll`) (docs/screens/pr65/).
 - `node scripts/shoot-pr61.mjs [dir]` photographs PR 61's screens (☆ with Undo, the tick and its line, the Compare sheet, Build's
   card-vs-limit and "already open" lines, AT RISK's "Includes…") on the `+book` fixture (docs/screens/pr61/).
 - `node scripts/measure-find.mjs` prints what each Find control passes on the 31 fixture cards and what

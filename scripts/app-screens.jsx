@@ -32,6 +32,9 @@ const READING = flags.includes("reading"), STALE = flags.includes("stale"), POOR
 // "+roll" (PR 4b, photographs only): J-0003's reasons at entry read as today's (seasonality and the trend down), so none
 // has turned and the app offers its roll. Every other fixture keeps J-0003 as the position whose reasons turned.
 const ROLL = flags.includes("roll");
+// "+opt" (PR 65, photographs only): UNG's December board copied onto 20 Nov (39 days) and 15 Jan (88 days), so Build's
+// Optimize has three expiries in the entry window to search. Copies of one board: the same prices on every expiry.
+const OPT = flags.includes("opt");
 const rollBook = (recs) => recs.map((r) => (r.ref !== "J-0003" ? r : { ...r, thesis: { ...r.thesis, signals: { ...r.thesis.signals,
   factors: { seasonal: { dir: -1, strength: 45 }, technical: { dir: -1, strength: 35 }, weather: { dir: 1, strength: 40 }, news: { dir: 0, strength: 0 } } } } }));
 const RAW = JSON.parse(readFileSync("src/fixtures/alpaca-chain-UNG.json", "utf8"));
@@ -86,6 +89,11 @@ window.fetch = async (input, init = {}) => {
     if (ROLL && sym === "CORN") {
       const c = chainFor(sym), [k0] = Object.keys(c.byExp);
       return json({ ...c, expirations: [...(c.expirations || [k0]), "2027-01-15"], byExp: { ...c.byExp, "2027-01-15": { ...c.byExp[k0], dte: 74 } } });
+    }
+    if (OPT && sym === "UNG") {
+      const c = chainFor(sym), dec = c.byExp["2026-12-18"];
+      return json({ ...c, expirations: [...(c.expirations || []), "2026-11-20", "2027-01-15"],
+        byExp: { ...c.byExp, "2026-11-20": { ...dec, dte: 39 }, "2027-01-15": { ...dec, dte: 88 } } });
     }
     if (sym === "UNG" || sym === "SOYB" || ALL) return json(chainFor(sym));
     return json({ error: "fixture: not served" }, 503);

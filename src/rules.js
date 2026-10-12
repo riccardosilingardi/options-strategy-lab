@@ -1132,7 +1132,7 @@ export const thresholdPhrase = (t) => {
     : `${t.threshold} open contracts${t.threshold === t.absolute ? " — the absolute floor, which bound here" : ""}`;
 };
 
-/** `40th`, `60th`, `1st`. Only ever used on a percentile. */
+/** `40th`, `60th`, `1st`. A percentile, and since PR 65 a rank among Optimize's candidates. */
 export const ordinal = (n) => {
   const v = Math.round(n);
   const s = ["th", "st", "nd", "rd"][(v % 100 - v % 10 !== 10) ? Math.min(v % 10, 4) % 4 : 0] || "th";
@@ -1691,6 +1691,7 @@ export const RESET_FILTERS = "Reset";
 export const VARIANT_LABELS = Object.freeze({
   up: "Strikes one step higher", down: "Strikes one step lower", wider: "Wider wings", narrower: "Narrower wings",
   later: "Same strikes, next expiry", roll: "Same strikes", rollUp: "One step higher", rollDown: "One step lower",
+  rollWider: "Wider wings", rollNarrower: "Narrower wings",
 });
 export const VARIANTS_HEAD = "VARIANTS OF THIS TRADE";
 export const VARIANTS_NOTE = "The same structure moved on the strikes the chain lists, priced and sized like a card, checked by the gate at the size the budget buys. Load one to see it in full.";
@@ -1717,7 +1718,7 @@ export const ROLL_WHY = Object.freeze({
 });
 export const ROLL_HOW = "Two orders, never both open: first close this position at a limit, then send the new one from Build, where the gate checks it as a new trade.";
 export const ROLL_PREPARE = "Prepare the roll in Build ›";
-export const ROLL_NONE = `The chain lists no later expiry inside the entry window (${RULES.minEntryDTE}–${RULES.maxEntryDTE} days) with these strikes, so there is no roll to prepare.`;
+export const ROLL_NONE = `The chain lists no later expiry inside the entry window (${RULES.minEntryDTE}–${RULES.maxEntryDTE} days) where these legs can be placed, so there is no roll to prepare.`;
 /** Build's line while a roll is loaded: what to close first, or that the close is done. */
 export const rollLine = (ref, closed) => (closed
   ? `Roll of ${ref}: ${ref} is closed. Send this to open the new position.`
@@ -1725,6 +1726,71 @@ export const rollLine = (ref, closed) => (closed
 export const rollCloseFirst = (ref) => `Close ${ref} first: a roll never holds both positions at once.`;
 export const rolledInto = (ref) => `Rolled into ${ref}.`;
 export const rolledFrom = (ref) => `Rolled from ${ref}.`;
+/* A ROLL JUDGED ON THE WHOLE TRADE (PR 65; owner 7 Oct 2026: "in a roll it must weigh the starting position more, to mitigate
+   the risk against the initial strategy and goal"). The arithmetic is `rollJudge()` in alternatives.js; these are its words. */
+export const ROLL_JUDGE_NOTE = "A roll is judged on the whole trade: today's loss, booked by the close, plus the new trade at the same size. " +
+  "It is offered only when the worst case of the whole stays within the maximum loss you accepted at entry, and it is ranked by the " +
+  "chance the whole trade gets back to at least zero, then by its average. Both chances are read at expiry on the same model as CHANCE.";
+/** "Whole trade: back to $0 or better 41% · reaches your target 18% · worst -$540 · avg -$35" */
+export const rollWholeLine = ({ back = null, target = null, worst = null, avg = null } = {}) =>
+  `Whole trade: back to $0 or better ${back == null ? "—" : chanceText(back)} · reaches your target ${target == null ? "—" : chanceText(target)} · ` +
+  `worst ${worst == null ? "—" : signedMoney(worst)} · avg ${avg == null ? "—" : signedMoney(avg)}`;
+/** "Checked 24 rolls on 3 later expiries: 9 keep the whole trade within the $600 you accepted at entry; 13 would risk more…" */
+export function rollSummaryLine({ checked = 0, expiries = 0, kept = 0, overRisk = 0, cut = 0, accepted = null } = {}) {
+  const within = accepted == null ? "the maximum loss you accepted at entry" : `the ${money(accepted)} you accepted at entry`;
+  const parts = [`${kept} keep${kept === 1 ? "s" : ""} the whole trade within ${within}`];
+  if (overRisk) parts.push(`${overRisk} would risk more and ${overRisk === 1 ? "is" : "are"} not offered`);
+  if (cut) parts.push(`${cut} fail${cut === 1 ? "s" : ""} a floor`);
+  return `Checked ${checked} roll${checked === 1 ? "" : "s"} on ${expiries} later expir${expiries === 1 ? "y" : "ies"}: ${parts.join("; ")}.`;
+}
+export const ROLL_NONE_SAFE = "Every roll the chain lists would put more at risk than you accepted at entry, so none is offered. Close it at a limit, or keep it.";
+
+/* OPTIMIZE (PR 65; owner 7 Oct 2026: "make it a separate run … that finds the best combination of duration and also of legs";
+   "ok in Build"; the search width "the objectively best"). The search is `optimizeCandidates()` (alternatives.js), the
+   ranking `rankOptimize()` (rows.js); these are their words. */
+export const OPTIMIZE_HEAD = "Optimize this trade";
+export const OPTIMIZE_RUN = "Find the best expiry and legs";
+export const OPTIMIZE_CURRENT = "On Build now";
+export const OPTIMIZE_NONE_FIT = "None of them fits your request. The best that miss are below, each with its reason first.";
+export const OPTIMIZE_EMPTY = "The chain lists no expiry inside the entry window where these legs can be placed, so there is nothing to compare.";
+export const OPTIMIZE_ALL_CUT = "Every one of them fails a floor at today's prices, so there is nothing to load.";
+const STEP_WORDS = ["no", "one", "two", "three", "four"];
+const stepsWord = (n) => STEP_WORDS[n] || String(n);
+/** How Optimize searches (its ⓘ); `steps` is `OPTIMIZE_STEPS`, handed in (alternatives.js imports this file). */
+export const optimizeNote = (steps) => `The same structure on every expiry the chain lists from ${RULES.minEntryDTE} to ${RULES.maxEntryDTE} days, ` +
+  `and on each one the same strikes and every move of up to ${stepsWord(steps)} listed step${steps === 1 ? "" : "s"} higher, lower, wider or narrower. ` +
+  "Each is read like a card on Find: the same floors, the price that fills, the size the budget buys and the gate at that size. " +
+  "They are ranked in your Find order, the ones that fit your request first. It runs only when you tap, and it never names a contract the chain did not list.";
+/** The label an Optimize row carries on Build and in the copilot's context: O1, O2… */
+export const optimizeLabel = (rank) => `O${rank}`;
+/** What a move on the board is called: "Same strikes", "One step higher", "Wings two steps wider"… */
+export function boardMoveLabel(move, step = 1) {
+  if (move === "same") return "Same strikes";
+  const n = Math.max(1, Math.round(Number(step) || 1));
+  const st = `${stepsWord(n)} step${n === 1 ? "" : "s"}`;
+  const w = move === "up" ? `${st} higher` : move === "down" ? `${st} lower` : move === "wider" ? `wings ${st} wider`
+    : move === "narrower" ? `wings ${st} narrower` : String(move);
+  return w.charAt(0).toUpperCase() + w.slice(1);
+}
+/** "Checked 34 on 4 expiries, 31–86 days: 9 fit your request, 6 miss it, 19 fail a floor." */
+export function optimizeSummary({ checked = 0, expiries = 0, lo = null, hi = null, fitting = 0, missing = 0, cut = 0 } = {}) {
+  const span = lo == null ? "" : lo === hi ? `, ${lo} days` : `, ${lo}–${hi} days`;
+  const parts = [`${fitting} fit${fitting === 1 ? "s" : ""} your request`];
+  if (missing) parts.push(`${missing} miss${missing === 1 ? "es" : ""} it`);
+  if (cut) parts.push(`${cut} fail${cut === 1 ? "s" : ""} a floor`);
+  return `Checked ${checked} on ${expiries} expir${expiries === 1 ? "y" : "ies"}${span}: ${parts.join(", ")}.`;
+}
+/** Where the trade on Build sits among what Optimize checked (`rankOptimize()`'s `place`), or null. */
+export function optimizePlaceLine(place) {
+  if (!place) return null;
+  if (place.cut) return "Your trade fails a floor at today's prices.";
+  if (!place.fits) return "Your trade misses your request.";
+  if (place.of === 1) return "Your trade is the only one that fits.";
+  return place.rank === 1 ? `Your trade is the best of the ${place.of} that fit.` : `Your trade ranks ${ordinal(place.rank)} of the ${place.of} that fit.`;
+}
+/** An Optimize row's last line: its reason first when it misses, the days and the days held, then why it ranks (`placeLine()`). */
+export const optimizeRowNote = ({ reason = null, dte = null, place = null } = {}) =>
+  [reason ? `Misses: ${reason}` : null, known(dte) ? `${Math.round(Number(dte))} days, held ${heldText(dte)}` : null, place].filter(Boolean).join(" · ");
 
 /* FIND'S COPILOT (PR 4, owner: "on the summary line, opening a sheet"): the button, the sheet and its one line. */
 export const FIND_COMPARE_BTN = "Compare ›";
@@ -2095,16 +2161,17 @@ export function cardDetailRows({ spot = null, breakevens = null, move = null, sp
       : ` · ${Math.round((Number(spread) * 100 / Number(maxProfit)) * 100)}% of max profit`}`;
   const ivText = ivRank != null && Number.isFinite(Number(ivRank)) ? String(Math.round(Number(ivRank))) : `— ${ivRankShort(null, ivDays || 0)} days`;
   const thetaText = !known(theta) ? "— not worked out" : `${signedMoney(Number(theta) * (k || 1))} a day${forSize}`;
-  const heldText = !known(dte) ? "—" : Number(dte) > RULES.exitDTE
-    ? `~${Math.round(Number(dte) - RULES.exitDTE)} days (exit at ${RULES.exitDTE} DTE)` : `— inside the ${RULES.exitDTE}-day exit`;
   return [
     { id: "breakeven", k: CARD_DETAIL_LABELS.breakeven, v: beText },
     { id: "entry", k: CARD_DETAIL_LABELS.entry, v: entryText },
     { id: "ivRank", k: CARD_DETAIL_LABELS.ivRank, v: ivText },
     { id: "theta", k: CARD_DETAIL_LABELS.theta, v: thetaText },
-    { id: "held", k: CARD_DETAIL_LABELS.held, v: heldText },
+    { id: "held", k: CARD_DETAIL_LABELS.held, v: heldText(dte) },
   ];
 }
+/** "~23 days (exit at 21 DTE)": the days a trade is held before the exit at `RULES.exitDTE` (a card's Details, Optimize's rows). */
+export const heldText = (dte) => (!known(dte) ? "—" : Number(dte) > RULES.exitDTE
+  ? `~${Math.round(Number(dte) - RULES.exitDTE)} days (exit at ${RULES.exitDTE} DTE)` : `— inside the ${RULES.exitDTE}-day exit`);
 
 /** The FUTURE tile's ⓘ. */
 export const futureInfo = () =>

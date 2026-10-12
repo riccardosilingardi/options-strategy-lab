@@ -258,6 +258,12 @@ test("MEASURED: the three screens, and the table in the PRD is this number", () 
      `details={<…}`). build 518 → 518: the chart is drawn by pro.jsx's `UnifiedChart`, outside the block, as it was; its
      one sentence at rest is CROSS_HINT (14 words), its readout replaces it once a price is read, and "How to read" is
      behind its button. */
+  /* >>> PR 65 (Optimize on Build, the roll judged on the whole trade). <<< No ceiling moves, and what the counter does not
+     see is written here. build 518 → 518: "Optimize this trade" is build.jsx's `OptimizeSection`, which the source counter
+     does not read (as with the variants); at rest it says 12 words — its title (3), "How it searches" (3) and its button,
+     "Find the best expiry and legs" (6). Its summary and rows appear only after the tap. Its load handler lives outside the
+     step block (`optimizeView`), so no code there is read as prose. The roll's summary and whole-trade lines are on the
+     position's screen, built outside the Positions block. */
   const CEILING = { find: 184, market: 479, build: 518, positions: 248 };
   /* >>> PR #46: ONE ORDERS LIST. <<< The record-based "WORKING AT THE BROKER" panel (its paragraph about what a
      working order is, the stale-DAY warning, the per-row sentences) left Positions; the one list lives in

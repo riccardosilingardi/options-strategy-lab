@@ -6,42 +6,71 @@ The full history of every item shipped so far (P0–P10, P2-bis) is in `docs/his
 Every pull request updates this file: the session that ships an item marks it done and states
 what the next one inherits.
 
-## Proposed, waiting for the owner: PR 64 — "Optimize", the best expiry AND legs for one trade
+## Done in PR 65 (owner, 7 Oct 2026): Optimize on Build, and the roll judged on the whole trade
 
-The owner, 7 Oct 2026, after 63.1's measurement: *"make it a separate run; Find presents as it is; then an Optimize tab
-or similar that finds the best combination of duration and also of legs (the roll with proposals is already there,
-maybe it is about optimizing that too). Plan the improvement and propose before executing."* Nothing below is built.
+PR 64 is a carry-over with no code: PRs 62 and 63 were merged into the branches they were stacked on, not into `main`, and
+#64 brings them there. PR 65 targets `main` directly.
 
-**What 63.1 measured** (scripts on fixture boards, desktop CPU, three runs each): generating Find's cards takes 33–51 ms
-with one expiry per market (today), 59–61 ms with 2 (a monthly-only market: CORN, SOYB, WEAT), 140–147 ms with 5 and
-250–301 ms with 9 (markets listing weekly expiries). Live expiry counts could not be read (CBOE blocked, Alpaca 401 from
-the sandbox). So Find stays on one expiry per market, nearest the Horizon.
+The owner, after 63.1's measurement: *"make it a separate run; Find presents as it is; then an Optimize tab or similar that
+finds the best combination of duration and also of legs (the roll with proposals is already there, maybe it is about
+optimizing that too). Plan the improvement and propose before executing."* Then, to the proposal: *"1. ok in Build;
+2. I trust you to choose the objectively best solution for target profit; 3. the roll: judge objectively whether the search
+principle is the same. But in a roll it must weigh the starting position more, to mitigate the risk against the initial
+strategy and goal, which is maybe different."* And: the roll judged on the whole trade, as proposed; no Optimize button on
+the market page's card ("Build is enough").
 
-**The proposal.**
-1. **Where:** a section on Build, "Optimize this trade", under "Variants of this trade" (PR 4b) — one button, "Find
-   the best expiry and legs", never run on its own. The market page's card gets "Optimize ›", which opens Build with
-   that section open. Find is untouched.
-2. **What it searches:** the loaded trade's structure on EVERY expiry the chain lists inside the entry window
-   (`RULES.minEntryDTE`–`maxEntryDTE`), and on each one the same strikes, one listed step up, one down, one wider, one
-   narrower (`alternatives.js`'s `sameOnBoard()`, `shiftLegs()`, `widthLegs()`, extended by one function,
-   `optimizeCandidates()`): about 5 per expiry, 10–45 in all. Never a contract the chain did not list.
-3. **How each is read:** `priceAlt()`, the card's own path — `listCardFigures()` at the price that fills, the size the
-   budget buys, the gate at that size. Nothing new is worked out.
-4. **How they are ranked:** Find's own rule — the owner's order (`findOrderCompare()`), the request applied (budget,
-   chance, return on risk), the ones that fit first, a miss in its place with its reason. The top 5 are shown as rows
-   (O1…O5) with the six figures, the days, "held ~Nd (exit at 21 DTE)" and why it ranks ("best Future avg of 23
-   checked, 31–86d"); "Load ›" puts one on Build, as a variant does.
-5. **Cost:** one trade, not ten markets: the card figures cost about 0.15 ms each here (43 ms for 279 cards in the
-   measurement above), so 45 candidates is under 10 ms on a desktop; it is measured on the phone (OWNER CHECK) before it
-   ships.
-6. **The roll uses the same search:** `rollCandidates()` today takes the next 2 later expiries × 3 moves; it would take
-   every later expiry in the window × the same 5 moves, ranked the same way, top 3 shown — still offered only by
-   `rollEligible()`, still two orders never both held.
-7. **The copilot:** Build's "Which variant fits best?" reads the Optimize rows by their labels and recommends among
-   them only; it never writes a strike or an expiry.
+- **64.2 — the search, legs only** (`src/alternatives.js`). `optimizeCandidates()`: the loaded structure on every expiry the
+  chain lists inside the entry window (`windowExpiries()`, plus the loaded expiry if it sits outside), and on each board
+  `movesOnBoard()`: the same strikes and every move of up to `OPTIMIZE_STEPS` listed strikes up, down, wider, narrower. A
+  move the board cannot list is left out, never snapped. `rollCandidates()` is the same search on the LATER expiries only
+  (it took the next two × three moves); it now gets the price, so its wider and narrower moves exist (it was never handed
+  one, so they never did).
+- **64.3 — each candidate read as a card, ranked as Find ranks.** `floorsFor()` (App.jsx) is `shortlistWithFloors()`'s
+  loop body moved out unchanged (Find's 31 fixture cards, tallies and cuts identical before and after), so a candidate meets
+  Find's floors in Find's order. `readAlternative()` is `priceAlt()`'s arithmetic at module scope (so a script measures the
+  same code), with `floors`, `contracts` and what Find sorts and fits on (`rank`, `cand`, `size`); `sortEv100()` is the one
+  home of the "Future avg" sort figure, read by findGen's `evProfile()` too. `rankOptimize()` (rows.js): the owner's Find
+  order (`findOrderCompare()`), `meetsRequest()` at the size the budget buys and the gate; fit = meets the request AND the
+  gate passes; the top five that fit as O1…O5, or — when none fits — the best that miss with their reason first.
+- **64.4 — the section.** "Optimize this trade" on Build under the variants (`OptimizeSection`, build.jsx): one button,
+  "Find the best expiry and legs", never run on its own; then "Checked 12 on 3 expiries, 39–88 days: 6 fit your request,
+  6 fail a floor. Your trade ranks 2nd of the 6 that fit." and the rows (the card's figures, the gate's line, "39 days, held
+  ~18 days (exit at 21 DTE) · future avg +14.3 per $100" — `placeLine()`, why it ranks). "Load ›" puts one on Build and the
+  run stays open on it; the trade already on Build says "On Build now". Not offered while a roll is on Build (its own
+  judge is on the position's screen). Build's "Which variant fits best?" reads the O rows by label (`optimize` in the
+  context) and recommends among them only, never one the gate refuses or one that misses the request.
+- **64.5 — the width, by the rule fixed before measuring** ("two steps if one run stays under 50 ms on the fixture chains,
+  else one"). `node scripts/measure-optimize.mjs` (UNG's board copied onto 1, 2, 5, 9 expiries; the app's own functions
+  and gate): with 9 expiries the slowest trade took 40–82 ms at two steps, over 50 ms in four of six repeats, and 32–48 ms
+  at one; two steps changed the first pick on 1 of 9 trades. **So `OPTIMIZE_STEPS` is 1.** Two is that one number.
+- **64.6 — the roll judged on the whole trade** (`rollJudge()`, `rankRolls()` in alternatives.js). The close books today's
+  P&L; the new trade at the SAME size held adds its P&L at expiry on the chance's own lognormal (`exactPnl()`). Refused when
+  the whole trade's worst case is past the maximum loss accepted at entry (|record max loss| × size); ranked by the chance
+  the whole trade gets back to at least zero, then its average; each row says "Whole trade: back to $0 or better 22% ·
+  reaches your target 21% · worst -$237 · avg -$162" (the target is the take-profit set at entry). Candidates go through
+  Find's floors at the size held; the summary says how many keep the risk, how many would risk more, how many fail a floor
+  ("Every roll the chain lists would put more at risk than you accepted at entry" when none is left). "Prepare the roll in
+  Build ›" arrives at the size held. The position's copilot reads the summary and each whole-trade line.
 
-**Questions for the owner before it is built:** the place (Build section, recommended, or a tab on the market page);
-the search width (±1 step, recommended, or ±2, about twice the candidates); whether the roll moves to the same search.
+**Measured.** Tests 1,429 → 1,436, 0 failed. Build 1,475.46 → 1,486.72 kB (the usual chunk warning). Audit 20 boards, dark
+and light: 5,264 ✓, 0 unexplained (unchanged: no board draws Optimize or the roll's lines). Words: find 184, market 479,
+build 518 — unchanged; Optimize's 12 words at rest are build.jsx's, which the source counter does not read (written in
+voice.test.js). Photographs: docs/screens/pr65/ (`node scripts/shoot-pr65.mjs`, `+opt` copies UNG's December board onto two
+more expiries — the same prices on every expiry, not a live chain).
+
+**Not changed:** the risk gate and every RULES value, the seven order paths and their bodies, `histBacktest()`,
+`seasonalSignal()`, the /api/state payload, deploy.js, events.js's dates, the copilot's model, Find's generation and its
+output (one expiry per market), the variants (no floors, as before).
+
+### What the next PR inherits
+
+- **OWNER CHECK — Optimize on the phone:** its speed (one tap, 20–34 ms for the median trade with 9 expiries on a desktop)
+  and whether five rows read well at 390px.
+- The ranking has met copies of one board only: on a real chain a later expiry costs more, and how often Optimize moves the
+  expiry rather than the strikes is not known.
+- The roll's booked loss is today's mark; the close is priced at the tap.
+- Proposed, not built: two steps of width if the owner wants the wider search (`OPTIMIZE_STEPS`); an Optimize run on the
+  market page's card (the owner said Build is enough).
 
 ## Done in PR 63 (owner, 7 Oct 2026): Find's rows and the trade chart
 
@@ -87,7 +116,7 @@ the source counter cannot see written in voice.test.js. Photographs: docs/screen
 
 ### What PR 64 inherits
 
-- **The Optimize proposal above, waiting for the owner's yes and three answers.**
+- **The Optimize proposal, waiting for the owner's yes and three answers** (answered and built in PR 65, above).
 - The new row and the chart's marks have no board to be audited against (docs/mockups draws neither); they were checked
   by photograph only (docs/screens/pr63/).
 - The crosshair has not been used on a phone (OWNER CHECK); the handle's drag and the page's scroll share the chart.
