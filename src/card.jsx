@@ -254,7 +254,7 @@ export { CardFigure };
 export function CandidateCard({
   name, legs = "", rr = null, pop = null, basis = null, figures = null, sizeText = null,
   picture = null, misses = [], actions = null, badge = null, direction = null, flags = [], signs = null,
-  future = null, past = null, ticker = null, sortedBy = null, placeAtRest = null,
+  future = null, past = null, ticker = null, sortedBy = null,
   cardKey = null, more = null, style,
   // ROUND 2 (owner's mockup "Market · Strategies"): the COMPACT layout of this same card, on the market page. It prints
   // the same six figures (figures.test.jsx) and moves everything else behind "Details ▾" (`details`), never deleted.
@@ -262,7 +262,7 @@ export function CandidateCard({
 }) {
   if (compact) {
     return <CompactCard name={name} legs={legs} rr={rr} pop={pop} figures={figures} picture={picture} misses={misses}
-      actions={actions} signs={signs || stopSigns({ flags })} future={future} past={past} sortedBy={sortedBy} placeAtRest={placeAtRest}
+      actions={actions} signs={signs || stopSigns({ flags })} future={future} past={past} sortedBy={sortedBy}
       cardKey={cardKey} needs={needs} stance={direction} stanceKind={stanceKind} disagree={disagree} details={details} thumb={thumb} style={style} />;
   }
   const f = figures || { n: null, risk: null, profit: null, unbounded: false, perRisk: null, perProfit: null };
@@ -301,8 +301,6 @@ export function CandidateCard({
           c={past ? (past.avg >= 0 ? T.green : T.violet) : T.dim}
           info={<Info iconOnly label={CARD_LABELS.past.toLowerCase()}>{pastInfo(past, ticker || "the ETF")}</Info>} {...tile("past")} />
       </div>
-      {/* "FUTURE AVG + SIGNAL" SAYS ITS SUM AT REST (PR #49, TASK 1): `placeLine()`, out of the fold. */}
-      {placeAtRest && <div data-place style={{ ...mono, fontSize: FS.xs, fontWeight: FW.bold, lineHeight: LH.body, color: muted ? T.mut : T.blue, marginTop: 6 }}>{placeAtRest}</div>}
       {/* WHAT THE CHANCE IS MADE OF (PR #48): "prices + season" when a month in the window beat its noise, else
           "prices only". `chanceBasisLabel()` in rules.js; Find and Build pass the same one. */}
       {basis && <Note color={T.dim} style={{ marginTop: 2 }}>chance: {basis}</Note>}
@@ -333,10 +331,10 @@ export function CandidateCard({
    the legs with the 72×40 picture; the four figures in one row (each label opens its definition); what the trade needs
    and where it stands against the signals; one mono line for the future and the past; the disagree sentence; the
    actions; and "Details ▾" with the full card as it was — gauge, picture row, sizing, per $100, the chance's make-up,
-   the per-contract figures. Stop signs and the "Future avg + signal" sum stay at rest (CLAUDE.md).
+   the per-contract figures. Stop signs stay at rest (CLAUDE.md).
 ==================================================================== */
 const STANCE_COLOR = { with: T.green, against: T.amber, neutral: T.mut, quiet: T.mut };
-function CompactCard({ name, legs, rr, pop, figures, picture, misses, actions, signs, future, past, sortedBy, placeAtRest, cardKey,
+function CompactCard({ name, legs, rr, pop, figures, picture, misses, actions, signs, future, past, sortedBy, cardKey,
   needs, stance, stanceKind, disagree, details, thumb, style }) {
   const [def, setDef] = React.useState(null);
   const [more, setMore] = React.useState(false);
@@ -399,7 +397,6 @@ function CompactCard({ name, legs, rr, pop, figures, picture, misses, actions, s
         <span data-tile={CARD_LABELS.past} data-sorted={sortedBy === "past" ? "true" : undefined} style={{ whiteSpace: "nowrap", ...ring("past") }}>
           Past yrs <b style={{ color: muted ? T.dim : T.ink }}>{pastTileText(past)}</b></span>
       </div>
-      {placeAtRest && <div data-place style={{ ...mono, fontSize: FS.xs, fontWeight: FW.bold, lineHeight: LH.body, color: muted ? T.mut : T.blue }}>{placeAtRest}</div>}
       {disagree && <div style={{ ...sans, fontSize: FS.xs, lineHeight: LH.tight, color: T.amber }}>{disagree}</div>}
       {actions}
       {details && (

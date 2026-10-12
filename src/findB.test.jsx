@@ -19,7 +19,8 @@ import { normaliseAlpacaChain } from "./chain.js";
 import { findCards } from "../scripts/find-fixtures.jsx";
 import { BASKET, MARKET_CATEGORIES } from "./markets.js";
 import { findOrderCompare } from "./signals.js";
-import { requestOf, RULES, FIND_CHIPS, FIND_ORDERS, PLACEHOLDER_HEAD, NEWS_NOT_READ, chanceText, sizedFree, sizedFigures, money, CARD_LABELS, COMPARE_TICK, returnText } from "./rules.js";
+import { requestOf, RULES, FIND_CHIPS, FIND_ORDERS, FIND_STYLES, FIND_VIEWS, NET_SIDES, PLACEHOLDER_HEAD, NEWS_NOT_READ, chanceText, sizedFree, sizedFigures, money, CARD_LABELS,
+  COMPARE_TICK, returnText, styleNumbersText, POSITIVE_FUTURE_TOGGLE, SHOW_FLAGGED_TOGGLE, HIDE_MISSES_TOGGLE } from "./rules.js";
 import { rowFigures } from "./rows.js";
 
 const ok = [], bad = [];
@@ -61,20 +62,29 @@ check("CATEGORY TABS: 'All 10 · Grains 3 · Energy 4 · Metals 3' — the regis
   has(energy.slice(energy.indexOf('aria-label="Categories"')), 'aria-pressed="true" style="font-family:system-ui, -apple-system, Segoe UI, Roboto, sans-serif;flex:0 0 auto;min-height:44px;padding:0 10px;background:transparent;border:none;border-bottom:3px solid');
 });
 
-check("ONE ROW OF CHIPS: eight, in order, each saying its value, each 44px, filled only when off its default", () => {
+check("ONE ROW OF CHIPS (PR 66): View · Style · Max loss · ⇅ Sort · More, in order, each 44px, filled only when off its default", () => {
   const h = find();
   const bar = h.slice(h.indexOf("data-chip-row"), h.indexOf("</div>", h.indexOf("data-chip-row")));
-  if (count(bar, "<button") !== FIND_CHIPS.length) throw new Error(`${count(bar, "<button")} chips`);
-  // Round 2: a chip's name and value are two spans (name in mut, value in mono); read as text, the words are the same.
+  if (count(bar, "<button") !== FIND_CHIPS.length || FIND_CHIPS.length !== 5) throw new Error(`${count(bar, "<button")} chips`);
+  // A chip's name and value are two spans (name in mut, value in mono for a figure); read as text, the words in order.
   const words = bar.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
-  // Redesign PR 3, TASK 0a: the boards' words — "Return ≥ 25%", "Direction · Signals", each sheet chip ending ▾.
-  for (const t of ["⇅ Future avg ▾", "Budget $500 ▾", "Chance any ▾", "Return ≥ 25% ▾", `Horizon ${RULES.targetEntryDTE}d ▾`, "Direction Signals ▾", "Avg &gt; 0", "Liquidity Recommended ▾"]) has(words, t);
+  const want = ["View Signals ▾", "Style Balanced ▾", "Max loss $500 ▾", "⇅ Future avg ▾", "More ▾"];
+  let at = -1;
+  for (const t of want) { const i = words.indexOf(t); if (i < 0) throw new Error(`missing "${t}" in ${words}`); if (i < at) throw new Error(`"${t}" out of order`); at = i; }
+  for (const gone of ["Chance any", "Return ≥", "Horizon ", "Direction", "Avg &gt; 0", "Liquidity"]) hasNot(words, gone);
   if (count(bar, "min-height:44px") !== FIND_CHIPS.length) throw new Error("a chip under 44px");
   if (count(bar, 'aria-pressed="true"') !== 0) throw new Error("a chip is filled at its default");
   hasNot(h, ">Reset<");
-  const off = find({ want: { minChance: 0.6 } });
-  const bar2 = off.slice(off.indexOf("data-chip-row"));
-  has(bar2.replace(/<[^>]+>/g, " ").replace(/\s+/g, " "), "Chance 60%"); has(off, ">Reset<");
+  // Off its default: a style, a side, a fixed view — each fills its own chip, and Reset appears.
+  const words2 = (o) => { const x = find(o); return x.slice(x.indexOf("data-chip-row")).replace(/<[^>]+>/g, " ").replace(/\s+/g, " "); };
+  has(words2({ want: { minChance: 0.6 } }), "Style Custom"); has(find({ want: { minChance: 0.6 } }), ">Reset<");
+  has(words2({ want: { minChance: RULES.styleCautiousChance } }), "Style Cautious");
+  has(words2({ want: { minReturn: RULES.styleBoldReturn } }), "Style Bold");
+  has(words2({ want: { side: "credit" } }), "More · 1");
+  has(words2({ find: { positiveOnly: true, flagged: false } }), "More · 2");
+  has(words2({ find: { dir: "verybull", target: null } }), `View Up ${RULES.viewFartherMoves}×`);
+  has(words2({ find: { dir: "bear", target: 1.25 } }), "View Down 1.25×");
+  has(words2({ find: { dir: "neutral" } }), "View Range");
 });
 
 check("ONE ROW PER MARKET, IN THE ORDER OF ITS CARD: ticker (mono), subtitle, picture, three figures (the sorted one ringed), the days and 'risk $N'", () => {
@@ -134,20 +144,41 @@ check("STALE: the freshness line as a banner, with Retry (round 2: in Find's own
   has(h, ">Retry<");
 });
 
-check("THE SHEETS HOLD THE EXISTING CONTROLS, AND EACH ENDS WITH A LIVE 'Show N of M'", () => {
+check("THE SHEETS (PR 66): View, Style, Budget, ⇅ Sort, More — each holds its controls and ends with a live 'Show N of M'", () => {
   const budget = find({ sheet: "find:budget" });
   has(budget, 'role="dialog"'); has(budget, "What I can spend"); has(budget, "What I want to make"); has(budget, "edit the per-trade limit");
   has(budget, ">Show 2 of 2<");
-  const order = find({ sheet: "find:order" });
-  for (const o of FIND_ORDERS) { has(order, esc(o.label)); has(order, esc(o.note)); }
-  has(order, "Show flagged cards");
-  has(find({ sheet: "find:chance" }), "Chance at least");
-  has(find({ sheet: "find:return" }), "Return on risk at least");
-  has(find({ sheet: "find:horizon" }), ">Horizon<");
-  const dir = find({ sheet: "find:direction" });
-  has(dir, "Signals decide"); has(dir, "Very Bull");
+  const sort = find({ sheet: "find:sort" });
+  for (const o of FIND_ORDERS) { has(sort, esc(o.label)); has(sort, esc(o.note)); }
+  hasNot(sort, "Future avg + signal"); hasNot(sort, SHOW_FLAGGED_TOGGLE);
+  // View: the four choices; Up and Down take the target in expected moves and say which family it builds.
+  const view = find({ sheet: "find:view" });
+  for (const v of FIND_VIEWS) has(view, `>${esc(v.label)}<`);
+  hasNot(view, "Very Bull"); hasNot(view, "Target, in expected moves");
+  const up = find({ sheet: "find:view", find: { dir: "bull", target: null } });
+  has(up, "Target, in expected moves"); has(up, "builds the Bull cards"); has(up, ">Show 2 of 2<");
+  has(find({ sheet: "find:view", find: { dir: "verybull", target: null } }), "builds the Very Bull cards");
+  // Style: the three, each with the two numbers it sets; the two sliders one fold down.
+  const style = find({ sheet: "find:style" });
+  for (const st of FIND_STYLES) { has(style, `>${st.label}<`); has(style, esc(styleNumbersText(st))); }
+  has(style, "Set them yourself");
+  // More: Debit · Credit · Both, Horizon, the three list toggles, and the Liquidity panel as a fold.
+  const more = find({ sheet: "find:more" });
+  for (const o of NET_SIDES) has(more, `>${o.label}<`);
+  has(more, ">Horizon<"); has(more, esc(POSITIVE_FUTURE_TOGGLE)); has(more, SHOW_FLAGGED_TOGGLE); has(more, HIDE_MISSES_TOGGLE);
+  has(more, "Liquidity · Recommended");
   // No sheet open: none of them is on screen.
   hasNot(find(), 'role="dialog"');
+});
+
+check("THE FILTER THAT BINDS (PR 66, task 66.2): named under the summary when rows are dimmed, with ONE fix", () => {
+  // Credit only: on the fixture, SPY and UNG both carry credits, so nothing is dimmed and no line is drawn.
+  hasNot(find({ want: { side: "credit" } }), "data-find-binding");
+  // Cautious keeps SPY (Bear Call at 73%) and UNG (Bull Put at 58%): nothing dimmed either.
+  hasNot(find({ want: { minChance: RULES.styleCautiousChance } }), "data-find-binding");
+  // 60%: SPY fits, UNG is dimmed by the chance alone → "Style Custom leaves out 1 market · Loosen ›".
+  const h = find({ want: { minChance: 0.6 } });
+  has(h, "1 of 2 fit · 1 dimmed"); has(h, "data-find-binding"); has(h, "Style Custom leaves out 1 market"); has(h, ">Loosen ›<");
 });
 
 check("FIND DRAWS NO CARDS AND NO PICTURE ROW ANY MORE: the cards are on the market page", () => {
@@ -212,7 +243,9 @@ check("STRATEGIES: the signals' family first, then Neutral 'always listed'; the 
   if (count(h, 'data-compact="') !== UNG.length) throw new Error("not every card is compact");
   // A fixed direction: one group, the user's, and it says so.
   const fixed = page({ dir: "bear" });
-  has(fixed, "YOUR DIRECTION"); hasNot(fixed, "WHAT THE SIGNALS SUGGEST");
+  has(fixed, "YOUR VIEW"); hasNot(fixed, "WHAT THE SIGNALS SUGGEST");
+  // PR 66: the line says the View in its own words, with this market's price at the target.
+  has(fixed, "View: Down to $");
 });
 
 check("CHAIN: expiries with days left, under 30d dashed and not buildable; OI · Vol only with open interest; '—' for a missing delta", () => {

@@ -8,7 +8,7 @@ import { fuseSignals, weatherComponent, newsComponent, ageDecay, regionSignals,
   weatherApplies, weatherNaReason, factorsOf, tagImpacts, seasonalComponent, REGIONS,
   readingState, readingLine, unreadInputsAria, signalSnapshot, compareSignals,
   verdictLine, scoreWorking, confidenceWorking, signalDirection, signalFamilies,
-  FIND_ORDERS, DEFAULT_FIND_ORDER, findOrderOf, findOrderKey, findOrderCompare, placeLine, placeSignal, numbersFitLines, NEUTRAL_QUIET, SIGNAL_DIVISOR, BASE_WEIGHTS, REINFORCE, CONFLICT_DAMPING, CONFIDENCE_BANDS } from "./signals.js";
+  FIND_ORDERS, DEFAULT_FIND_ORDER, findOrderOf, findOrderKey, findOrderCompare, placeLine, numbersFitLines, NEUTRAL_QUIET, SIGNAL_DIVISOR, BASE_WEIGHTS, REINFORCE, CONFLICT_DAMPING, CONFIDENCE_BANDS } from "./signals.js";
 import { readFileSync } from "node:fs";
 import { seasonalSignal, RULES, stanceText } from "./rules.js";
 /* A MEASURED SEASON FOR A FIXTURE (PR #48): every month at `x`%, 16 years, a standard error of 0.4% — so a month
@@ -694,9 +694,11 @@ test("SIGNALS DECIDE (PR #48): s = score × confidence / 100 against directionSi
   assert.ok(/signalFamilies\(sd\)/.test(app), "Find builds the suggested family plus Neutral");
 });
 
-test("ORDER BY (PR #48, names PR #49): five orders; only 'Future avg + signal' adds the signal and puts CONFLICT last", () => {
-  assert.deepEqual(FIND_ORDERS.map((o) => o.label), ["Future avg", "Future avg + signal", "Chance", "Return on risk", "Past yrs"]);
-  assert.deepEqual(FIND_ORDERS.map((o) => o.id), ["ev", "evSignal", "chance", "rr", "past"], "the stored ids are unchanged");
+test("⇅ SORT (PR #48, names PR #49, PR 66): four orders; 'Future avg + signal' is gone and a stored 'evSignal' reads as Future avg", () => {
+  assert.deepEqual(FIND_ORDERS.map((o) => o.label), ["Future avg", "Chance", "Return on risk", "Past yrs"]);
+  assert.deepEqual(FIND_ORDERS.map((o) => o.id), ["ev", "chance", "rr", "past"], "the stored ids of the four kept are unchanged");
+  // PR 66 (owner, 12 Oct 2026): the View carries the direction; a setting saved as "evSignal" is the default order now.
+  assert.equal(findOrderOf("evSignal").id, "ev", "evSignal migrates to ev"); assert.equal(findOrderOf("evSignal").label, "Future avg");
   assert.equal(DEFAULT_FIND_ORDER, "ev");
   const corn = { score: 64, confidence: 86, agreement: "CONFLUENT" };
   const war = { score: 30, confidence: 30, agreement: "CONFLICT" };
@@ -706,40 +708,39 @@ test("ORDER BY (PR #48, names PR #49): five orders; only 'Future avg + signal' a
   const D = { key: "d", ev100: -999, sent: "bull", fused: null, lf: { pop: null, rr: null }, past: null };
   const order = (o) => [A, B, C, D].sort(findOrderCompare(o)).map((x) => x.key).join("");
   assert.equal(order("ev"), "cbad", "future avg alone; CONFLICT is not last; unknown last");
-  assert.equal(order("evSignal"), "abdc", "−12 + 27.5 = 15.5 beats 5; CONFLICT last");
+  assert.equal(order("evSignal"), order("ev"), "a stored evSignal sorts exactly as Future avg: no signal is added, CONFLICT is not last");
   assert.equal(order("chance"), "bcad");
   assert.equal(order("rr"), "acbd");
   assert.equal(order("past"), "bacd", "win rate first (9 of 14 beats 3 of 14), then the average per $100; not read last");
-  // THE "SORTED BY" LINE is built from the same figures the sort read.
-  assert.equal(placeSignal(A), signalAdjustment(corn, 1));
-  assert.equal(+placeSignal(A).toFixed(2), 27.52);
-  assert.equal(placeLine(A, "evSignal"), "sorted by −12.0 + signal +27.5 = 15.5 per $100");
-  assert.equal(+(findOrderKey(A, "evSignal")).toFixed(1), 15.5, "the line's result is the sort key");
+  // THE PLACE LINE (Optimize's rows) is built from the same figures the sort read.
+  assert.equal(placeLine(A, "evSignal"), "future avg −12.0 per $100", "no '+ signal' sum any more");
+  assert.equal(findOrderKey(A, "evSignal"), findOrderKey(A, "ev"), "the sort key is the future avg alone");
   assert.equal(placeLine(A, "ev"), "future avg −12.0 per $100");
   assert.equal(placeLine(A, "chance"), "chance 42%");
   assert.equal(placeLine(A, "rr"), "return on risk 120%");
   assert.equal(placeLine(A, "past"), "past yrs won 9 of 14");
-  assert.match(placeLine(C, "evSignal"), /CONFLICT: last$/);
+  assert.doesNotMatch(placeLine(C, "evSignal"), /CONFLICT/);
+  // signalAdjustment() stays for its other readers (`rankScore()`, `withSignalRank()`).
+  assert.equal(+signalAdjustment(corn, 1).toFixed(2), 27.52);
   assert.equal(placeLine(D, "ev"), "future avg not known · last");
   assert.equal(findOrderOf("nonsense").id, "ev", "an unknown setting reads as the default");
 });
 
 test("HOW THE NUMBERS FIT (PR #48, rewritten PR #49): every number printed is the function it describes", () => {
-  const lines = numbersFitLines("evSignal");
+  const lines = numbersFitLines("chance");
   const all = lines.map((l) => l.text).join(" ");
-  assert.deepEqual(lines.map((l) => l.k), ["future", "past", "signal", "filter", "decide", "autopilot"]);
+  assert.deepEqual(lines.map((l) => l.k), ["future", "past", "filter", "decide", "autopilot"], "PR 66: no '+ signal' line");
   // PR 62: the future is worked out exactly (no 8,000 runs to count), and the tile is FUTURE (MODEL).
   assert.ok(all.includes("Future (model) = every price the model allows at expiry, worked out exactly"));
   assert.ok(all.includes("It is a model, not history.")); assert.ok(!/Monte Carlo|invented futures|8,000/.test(all));
   assert.ok(all.includes("Past yrs (backtest) = this trade replayed on the ETF's real past, one row per year"));
   assert.ok(all.includes(`${RULES.seasonalSignalT}× their own noise`));
-  assert.ok(all.includes(`score ÷ ${SIGNAL_DIVISOR} × confidence ÷ 100 for a bull or bear card`));
-  assert.ok(all.includes(`(${NEUTRAL_QUIET} − |score|) ÷ ${SIGNAL_DIVISOR} × confidence ÷ 100 for a neutral one`));
-  assert.ok(all.includes("Filter = the sliders and toggles only"));
+  assert.ok(!/\+ signal/.test(all), "the signal adds to no order");
+  assert.ok(all.includes("Filter = the chips only (your view, the style, the budget and More)"));
   assert.ok(all.includes(`"Signals decide" = score × confidence ÷ 100 against ±${RULES.directionSignalMin}`));
   assert.ok(all.includes(`Autopilot = confidence of at least ${RULES.autopilotConfidence}`));
-  assert.ok(all.includes("(Future avg + signal)"));
-  // …and the numbers are the ones the functions use. + signal is signalAdjustment's, for both kinds of card,
+  assert.ok(all.includes("(Chance)"));
+  // …and the numbers are the ones the functions use. signalAdjustment() (rankScore's) for both kinds of card,
   const f = { score: 64, confidence: 86 };
   assert.equal(signalAdjustment(f, 1), (f.score / SIGNAL_DIVISOR) * (f.confidence / 100));
   assert.equal(signalAdjustment(f, -1), (-f.score / SIGNAL_DIVISOR) * (f.confidence / 100));

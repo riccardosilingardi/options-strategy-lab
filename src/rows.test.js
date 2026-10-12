@@ -3,7 +3,7 @@
 // The rows are a view of the one sorted list (no new ranking); "Nothing fits" offers one fix that never passes a limit.
 // ============================================================================
 import assert from "node:assert/strict";
-import { marketRows, rowCounts, rowStateOf, rankOptimize } from "./rows.js";
+import { marketRows, rowCounts, rowStateOf, rankOptimize, bindingFilter } from "./rows.js";
 import { requestOf, nothingFits, nothingFitsLine, allMissLine, overLimitNote, resultsLine, RESET_ALL_FILTERS,
   optimizeSummary, optimizePlaceLine, optimizeRowNote, boardMoveLabel, heldText, RULES } from "./rules.js";
 
@@ -31,6 +31,31 @@ test("ONE ROW PER MARKET, IN THE ORDER OF ITS CARD; THE ROW'S CARD IS THE FIRST 
   assert.deepEqual(rowCounts(rows), { n: 2, m: 3 });
   assert.equal(resultsLine(2, 1, false, { unit: "rows" }), "2 of 3 fit · 1 dimmed");
   assert.equal(resultsLine(2, 1, true, { unit: "rows" }), "2 of 3 fit · 1 hidden");
+});
+
+test("THE FILTER THAT BINDS (PR 66): counted by MARKET, the control that leaves out the most is named, its fix inside the limit", () => {
+  // Two credits on GLD, a debit on CORN and on UNG; CORN's other card is a credit at 40%.
+  const it = (tk, name, pop, risk, net) => ({ ...item(tk, name, pop, risk), cand: { ...cand(tk, name, pop, risk), entryNet: net } });
+  const items = [it("GLD", "Iron Condor", 0.7, 120, -0.6), it("CORN", "Bull Call Spread", 0.4, 100, 0.5), it("CORN", "Bull Put Spread", 0.45, 75, -0.3),
+    it("UNG", "Bull Call Spread", 0.35, 90, 0.4), it("GLD", "Bear Put Spread", 0.5, 110, 0.6)];
+  const lim = { perTradeLimit: 500 };
+  // Credit only and chance ≥ 60%: GLD fits; CORN and UNG are dimmed. Chance alone leaves out CORN (its credit misses only
+  // the chance) — 1 market; the side alone leaves out none (no dimmed card misses only the side) — so the style is named.
+  const r1 = bindingFilter(items, requestOf({ amt: 500, minChance: 0.6, side: "credit" }, lim), sizer(500));
+  assert.equal(r1.control, "style"); assert.equal(r1.count, 1); assert.equal(r1.text, "Style Custom leaves out 1 market");
+  // Credit only, no chance asked: CORN fits (its credit), UNG's only card is a debit → the side leaves out 1.
+  const r2 = bindingFilter(items, requestOf({ amt: 500, side: "credit" }, lim), sizer(500));
+  assert.equal(r2.control, "side"); assert.equal(r2.count, 1); assert.equal(r2.fix.label, "Both ›"); assert.deepEqual(r2.fix.patch, { side: "both" });
+  // The budget: $80 leaves out GLD (120, 110) and CORN's 100 but CORN's 75 fits; UNG's 90 is out. The fix is an amount that
+  // lets them in, never past the $500 limit, rounded up to the slider's step.
+  const r3 = bindingFilter(items, requestOf({ amt: 80 }, lim), sizer(80));
+  assert.equal(r3.control, "size"); assert.equal(r3.count, 2);
+  assert.ok(r3.fix.patch.amt <= 500 && r3.fix.patch.amt % RULES.amountAskStep === 0, `fix ${r3.fix.patch.amt}`);
+  // On a $100 limit with the budget at it, the 120 and 110 cards are over the limit: no budget fix, and it says so.
+  const r4 = bindingFilter(items, requestOf({ amt: 100 }, { perTradeLimit: 100 }), sizer(100));
+  assert.equal(r4.control, "size"); assert.equal(r4.fix, null); assert.ok(r4.text.endsWith("· over your per-trade limit"));
+  // Nothing dimmed, nothing said.
+  assert.equal(bindingFilter(items, requestOf({ amt: 500 }, lim), sizer(500)), null);
 });
 
 test("A MISS STAYS IN ITS PLACE: a market whose only card misses sits where that card sits, not at the bottom", () => {

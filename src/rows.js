@@ -16,7 +16,7 @@
 // Plain JS, no React: it is tested without a browser, like path.js and rules.js.
 // ============================================================================
 import { meetsRequest, sizedFigures, futureFigures, futureTile, pastFigures, pastTileText, chanceText, returnText, compareLabel,
-  per100Value, ROW_FIGURE_WORDS, optimizeLabel } from "./rules.js";
+  per100Value, ROW_FIGURE_WORDS, optimizeLabel, RULES, styleOf, STYLE_DEFAULT, DEFAULT_NET_SIDE, bindingFilterText } from "./rules.js";
 import { findOrderOf, findOrderCompare } from "./signals.js";
 
 /**
@@ -51,6 +51,59 @@ export function marketRows(items = [], request, sizeOf = () => null) {
 
 /** "N of M fit": how many rows fit and how many there are. */
 export const rowCounts = (rows = []) => ({ n: rows.filter((r) => r.fits).length, m: rows.length });
+
+/**
+ * WHICH FILTER BINDS, AND ONE FIX (PR 66, task 66.2): "Style Cautious leaves out 5 markets · Loosen ›". Read from the same
+ * `meetsRequest()` misses that dim the rows — no second filter. For each request control that is off its default (the
+ * Style's two floors, Debit · Credit, the budget) it counts the dimmed markets that would fit if that one control alone
+ * let them in: a market counts when at least one of its cards misses ONLY on that control. The one that leaves out the
+ * most is named (ties: Style, then Debit · Credit, then the budget). The fix never passes the per-trade limit: the budget's
+ * is the amount that lets those markets in, at most the limit (the capital under free sizing); a card over the limit gives
+ * no budget fix and the line says so.
+ *
+ * @param items   findShown (every card of every market, in the owner's order)
+ * @param request a `requestOf()` result
+ * @param sizeOf  (cand) → the size the budget buys, or null
+ * @returns null when nothing is dimmed or nothing one control can loosen; else
+ *   { control: "style"|"side"|"size", count, text, fix: { label, patch } | null, overLimit: boolean }
+ */
+export function bindingFilter(items = [], request, sizeOf = () => null) {
+  if (!request) return null;
+  const rows = marketRows(items, request, sizeOf);
+  const dimmed = new Set(rows.filter((r) => !r.fits).map((r) => r.tk));
+  if (!dimmed.size) return null;
+  const cards = (items || []).filter((x) => x && x.tk && dimmed.has(x.tk))
+    .map((x) => ({ tk: x.tk, misses: meetsRequest(x.cand, request, sizeOf(x.cand)).misses }));
+  const markets = (test) => new Set(cards.filter((c) => c.misses.length && c.misses.every(test)).map((c) => c.tk)).size;
+  const tries = [];
+  const style = styleOf(request);
+  if (style !== STYLE_DEFAULT) {
+    tries.push({ control: "style", count: markets((m) => m.control === "chance" || m.control === "return"),
+      fix: { patch: { minChance: null, minReturn: null } }, style });
+  }
+  if (request.side && request.side !== DEFAULT_NET_SIDE) {
+    tries.push({ control: "side", count: markets((m) => m.control === "side"), fix: { patch: { side: DEFAULT_NET_SIDE } }, side: request.side });
+  }
+  const amt = Number(request.amt);
+  if (request.mode === "budget" && Number.isFinite(amt) && amt > 0) {
+    const over = (m) => m.control === "size" && m.id === "budget" && m.need != null;
+    const top = Number.isFinite(Number(request.riskCap)) ? Number(request.riskCap) : (Number.isFinite(Number(request.amtMax)) ? Number(request.amtMax) : null);
+    const needs = cards.filter((c) => c.misses.length && c.misses.every(over)).map((c) => Math.max(...c.misses.map((m) => Number(m.need))));
+    const within = needs.filter((n) => top == null || n <= top);
+    if (needs.length) {
+      const step = RULES.amountAskStep;
+      const value = within.length ? Math.min(top == null ? Infinity : top, Math.ceil(Math.max(...within) / step) * step) : null;
+      const count = value == null ? markets(over) : markets((m) => over(m) && Number(m.need) <= value);
+      tries.push({ control: "size", count, fix: value == null ? null : { patch: { amt: value } }, value, amt, mode: request.mode,
+        overLimit: value == null });
+    }
+  }
+  const best = tries.filter((t) => t.count > 0).sort((a, b) => b.count - a.count)[0];
+  if (!best) return null;
+  const words = bindingFilterText(best);
+  return { control: best.control, count: best.count, text: words.text,
+    fix: best.fix ? { label: words.fix, patch: best.fix.patch } : null, overLimit: !!best.overLimit };
+}
 
 /**
  * WHAT A ROW PRINTS (PR 63, owner 7 Oct 2026: "three figures, always: Chance · Return on risk · Avg per $100 at risk, plus

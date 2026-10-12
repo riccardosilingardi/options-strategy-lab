@@ -7,6 +7,8 @@
 //   2. TASK 1/2 — how many cards each control passes at its default, and at the owner's "chance at least 60%".
 //   3. PERFORMANCE — how long one slider move takes (size every card, read every control, split the list), and how
 //      long generating the list takes, which a slider move never repeats.
+//   4. PR 66 — cards and rows kept per Style (Cautious · Balanced · Bold) and per Debit · Credit · Both. The fixture has
+//      TWO markets (SPY's model board and UNG), so "rows" is at most 2: the cards are printed too.
 //
 //   node scripts/measure-find.mjs
 //
@@ -22,7 +24,7 @@ import { spawnSync } from "node:child_process";
 const ENTRY = `
 import { findCards } from "./scripts/find-fixtures.jsx";
 import { scaleStrategy } from "./src/pro.jsx";
-import { RULES, requestOf, sizing, sizedFree, controlReadings, splitByRequest, nearestRelaxation } from "./src/rules.js";
+import { RULES, requestOf, sizing, sizedFree, controlReadings, splitByRequest, nearestRelaxation, FIND_STYLES, styleNumbersText, NET_SIDES } from "./src/rules.js";
 import { marketRows } from "./src/rows.js";
 
 const t0 = performance.now();
@@ -73,6 +75,28 @@ for (const amt of [500, 1250, 2500, 5000]) row("most I will risk $" + amt, reque
 const zero = requestOf({ minChance: 0.8 }, LIMITS);
 const sz = new Map(cards.map((c) => [c.key, sizedFree(scaleStrategy(c.lf.aFill, zero.mode, zero.amt, zero.riskCap), false)]));
 console.log("\\nNEAREST RELAXATION at chance >= 80%: " + (nearestRelaxation(cands, zero, (c) => sz.get(c.key) || null) || {}).text);
+
+/* ---- 4. PR 66: what each Style and each Debit · Credit choice keeps ---- */
+{
+  const kept = (want) => {
+    const rq = requestOf(want, LIMITS);
+    const sizes = new Map(cards.map((c) => [c.key, sizedFree(scaleStrategy(c.lf.aFill, rq.mode, rq.amt, rq.riskCap), false)]));
+    const so = (c) => sizes.get(c.key) || null;
+    const n = splitByRequest(cands, rq, so).meets.length;
+    const rows = marketRows(cards, rq, so);
+    return { n, rows: rows.filter((r) => r.fits).length, of: rows.length };
+  };
+  console.log("\\nPR 66 — WHAT EACH STYLE KEEPS (of " + cards.length + " cards; rows of the fixture's markets)");
+  for (const st of FIND_STYLES) {
+    const k = kept({ minChance: st.minChance, minReturn: st.minReturn });
+    console.log("  " + pad(st.label, 10) + pad(styleNumbersText(st), 32) + "cards " + String(k.n).padStart(2) + " · rows " + k.rows + " of " + k.of);
+  }
+  console.log("PR 66 — WHAT EACH DEBIT · CREDIT CHOICE KEEPS");
+  for (const sd of NET_SIDES) {
+    const k = kept({ side: sd.id });
+    console.log("  " + pad(sd.label, 10) + "cards " + String(k.n).padStart(2) + " · rows " + k.rows + " of " + k.of);
+  }
+}
 
 /* ---- 3. one slider move ---- */
 const N = 200;

@@ -270,7 +270,16 @@ test("MEASURED: the three screens, and the table in the PRD is this number", () 
      words are TA_QUESTIONS' data, which the source counter never scored — so on screen the page reads one word more, and
      the counter eight. Build's copilot lost two questions and a position's two (their labels are SKILLS' data, unscored
      too): fewer words on both screens than the counter can show. */
-  const CEILING = { find: 184, market: 487, build: 518, positions: 248 };
+  /* >>> PR 66 (Find: four chips and More, owner 12 Oct 2026: "too many filters, and not incisive"). <<< find 184 → 157:
+     the chip row is five chips, not eight ("View Signals · Style Balanced · Max loss $500 · ⇅ Future avg · More", read
+     through `chipText()`'s fixture), and the Liquidity sheet's "Under Future avg + signal, CONFLICT markets sort last." left
+     with the order it named. What the counter does not see: the line that names the binding filter
+     ("Style Cautious leaves out 5 markets · Loosen ›", 7 words) is `bindingFilter()`'s data (rows.js), shown only when rows
+     are dimmed; the sheets' new words (the views, the styles and their numbers, Debit · Credit · Both, the three toggles)
+     are one tap away. market 487 → 477: under "Future avg + signal" a card printed its sum at rest ("sorted by −12.0 +
+     signal +27.5 = 15.5 per $100", `placeLine()`, 10) — that order is gone, and so is the line. The ceilings are those
+     numbers. */
+  const CEILING = { find: 157, market: 477, build: 518, positions: 248 };
   /* >>> PR #46: ONE ORDERS LIST. <<< The record-based "WORKING AT THE BROKER" panel (its paragraph about what a
      working order is, the stale-DAY warning, the per-row sentences) left Positions; the one list lives in
      `orders.jsx`, which the counter now reads. Measured: positions 304 -> 209 (4 typed + 205 generated, 14 sites).

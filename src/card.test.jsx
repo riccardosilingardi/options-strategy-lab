@@ -214,17 +214,14 @@ check("SIX TILES IN A FIXED ORDER (PR #49): the four, then FUTURE (MODEL, since 
   has(none, "not read");
 });
 
-check("THE ORDER IS VISIBLE AT REST: the sorted-by tile is ringed and labelled, and '+ signal' says its sum", () => {
+check("THE ORDER IS VISIBLE AT REST: the sorted-by tile is ringed and labelled (PR 66: no '+ signal' sum any more)", () => {
   const html = renderToStaticMarkup(
     <CandidateCard name="X" legs="x" rr={1.5} pop={0.62} figures={sizedFigures(A80, 1)} sortedBy="chance" />);
   const ringed = [...html.matchAll(/data-tile="([^"]+)" data-sorted="true"/g)].map((m) => m[1]);
   if (ringed.join() !== "CHANCE") throw new Error(`ringed: ${ringed}`);
   has(html, ">sorted by<"); has(html, `outline:2px solid ${T.blue}`);
-  const sig = renderToStaticMarkup(
-    <CandidateCard name="X" legs="x" rr={1.5} pop={0.62} figures={sizedFigures(A80, 1)} sortedBy="future"
-      placeAtRest="sorted by −3.6 + signal +27.5 = 23.9 per $100" />);
-  has(sig, "sorted by −3.6 + signal +27.5 = 23.9 per $100");
-  if (sig.includes("Why this place")) throw new Error("the place line is still in the fold");
+  const src = readFileSync("src/card.jsx", "utf8");
+  if (/placeAtRest|data-place/.test(src)) throw new Error("the card still prints a place line at rest");
 });
 
 check("THE PRICE NOTE IS OPT-IN, because a mid-priced row may not claim otherwise", () => {

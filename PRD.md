@@ -29,12 +29,21 @@ non-expert trader who wants to learn discipline rather than be sold trades.
      line "<freshness> · <feed> · Paper" (the stale banner with Retry in its place when stale); Results | Saved; the
      underlined category tabs "All 10 ·
      Grains 3 · Energy 4 · Metals 3" (the registry's own counts; they only filter what is shown, the basket is always
-     read); ONE row of chips — ⇅ Order · Budget · Chance · Return · Horizon · Direction · Avg > 0 · Liquidity — each
-     showing its value, filled when off its default, every one but Avg > 0 opening a bottom sheet that holds the
-     existing control unchanged and ends with a live "Show N of M" ("Show flagged" is in the Order sheet, the floors'
-     "why" fold in the Liquidity sheet — which since PR 4d opens on today's takeaway, its four levels as chips counting the
-     cards each keeps across every market, what else keeps cards out with counts, and the numbers one fold down); the line "N of M fit · K dimmed" (or "· K hidden") with Hide them / Show them
-     and Reset; "No card has a positive average today." when cards fit and none has a positive future average (PR 63);
+     read); ONE row of chips, **from your view of the market** (PR 66, owner 12 Oct 2026, after IBKR's Option Wizard: "too
+     many filters, and not incisive") — **View · Style · Max loss · ⇅ Sort · More** — each showing its value, filled when
+     off its default, each opening a bottom sheet that ends with a live "Show N of M". *View*: Signals decide (default) ·
+     Up · Down · Range; Up and Down take a target in expected moves (default 1×; the sheet writes it as a price on the top
+     row's market, "CORN $13.24 → $15.97 by 18 Dec"), and the target picks the family built: up to 1.5 expected moves the
+     Bull (Bear) cards, beyond it the Very Bull (Very Bear) ones — what "Very" was. *Style*: Cautious (chance ≥ 50%) ·
+     Balanced (the default list: no chance asked, the return floor) · Bold (return ≥ 150%), each printing the two numbers it
+     sets, the two sliders under "Set them yourself", "Custom" when moved. *Max loss*: the budget, unchanged (IBKR's
+     word). *⇅ Sort*: Future avg · Chance · Return on risk · Past yrs. *More*: Debit · Credit · Both (the card's net
+     decides; a card on the other side is dimmed with its reason), Horizon, the three list toggles, and the Liquidity panel
+     as a fold (since PR 4d it opens on today's takeaway, its four levels as chips counting the cards each keeps across
+     every market, what else keeps cards out with counts, and the numbers one fold down). The line "N of M fit · K dimmed"
+     (or "· K hidden") with Hide them / Show them and Reset; **when rows are dimmed, the filter that leaves out the most
+     and one fix** ("Style Cautious leaves out 5 markets · Loosen ›", "Credit only leaves out 4 markets · Both ›", "Max loss
+     $500 leaves out 3 markets · Max loss $750 ›" — never past the per-trade limit), read from the same misses; "No card has a positive average today." when cards fit and none has a positive future average (PR 63);
      the column head "Market … Days · risk" with the ⓘ "How <TK>'s numbers connect" (five
      numbered steps); then one row per market: ☆, the ticker, ▲ Bull / ▼ Bear / ≈ Neutral from "Signals decide", "<structure>
      · <expiry>" (or the miss reason), a 72×40 picture, the days and "risk $N", and under them **three figures, always**
@@ -109,16 +118,15 @@ non-expert trader who wants to learn discipline rather than be sold trades.
      suggested family plus the Neutral family; each card says "↑ bull · signals" or "→ neutral". While a market's
      signals are being read it shows its Neutral cards and the badge reads "reading…"; when they land, one line says
      "CORN: signals in, Bull cards added".
-     **Order by** (names PR #49): Future avg (default) · Future avg + signal · Chance · Return on risk · Past yrs
-     (synced). It sorts the whole list. The tile the list is sorted by is ringed and says "sorted by" on every card.
-     Only "Future avg + signal" adds the signal adjustment (then CONFLICT markets sort last), and then the card says its
-     sum at rest: "sorted by −3.6 + signal +27.5 = 23.9 per $100". "Past yrs" sorts by the replay's win rate, then
-     its average per $100 at risk. "Only a positive future avg" (off by default) hides the rest and says how many.
+     **⇅ Sort** (names PR #49): Future avg (default) · Chance · Return on risk · Past yrs (synced). It sorts the whole
+     list. The tile the list is sorted by is ringed and says "sorted by" on every card. "Future avg + signal" was removed
+     in PR 66 (the View carries the direction); a stored one reads as Future avg. "Past yrs" sorts by the replay's win
+     rate, then its average per $100 at risk. "Only a positive future avg" (off by default) hides the rest and says how many.
      **"How the numbers fit ⓘ"** (every ⓘ shows its label since PR #49) says, from the constants: Future (model)
      = the trade worked out exactly on the spread of prices the options imply, to expiry (PR 62: no longer 8,000
      simulated runs, so no noise and no seed), a model, not history; Past yrs (backtest) = this trade replayed on the
-     ETF's real past, one row per year; + signal = score ÷ 2 × confidence ÷ 100 (a neutral card: (40 − |score|) ÷ 2 ×
-     confidence ÷ 100); the filter is the sliders and toggles only; "Signals decide" and the autopilot's thresholds.
+     ETF's real past, one row per year; the filter is the chips only (the "+ signal" line left with its order in PR 66);
+     "Signals decide" and the autopilot's thresholds.
      Each card carries one badge ("CORN ↑ +64 · conf 86", tap for "Why this market"), a flag where it applies (single
      option, butterfly, CONFLICT, confidence under 40, options dear), the gauge beside the unified picture (tap opens
      the full figure), and **six figures for the size the budget buys**: YOU RISK (contracts × the risk), MAX PROFIT
@@ -482,7 +490,7 @@ happens** is recorded if the owner meets it in normal use, and is never asked fo
 name: none could be closed from this sandbox; each is re-confirmed with what PR 61 added to it. PR 62 re-read them
 again: none closed; #5, #8, #9 and #10 carry what PR 62 changed. PR 63 re-read them: none closed; #3, #5 and #8
 carry what PR 63 changed. PR 65 re-read them: none closed; #3, #5, #8 and #10 carry what PR 65 changed, and #5 gains an
-OWNER CHECK, Optimize's speed on the phone.)
+OWNER CHECK, Optimize's speed on the phone. PR 66 re-read them: none closed; #3 and #8 carry what PR 66 changed.)
 
 1. **OWNER CHECK — the Journal entry for J-0001 shows the $7.65 fill** (v1 is reached on the owner's report of 5 Oct
    2026: filled 9 of 9 at $7.65, filed from the production address; this session cannot see that browser). **No Modify
@@ -526,7 +534,12 @@ OWNER CHECK, Optimize's speed on the phone.)
    **PR 65's Optimize section and the roll's whole-trade lines** were photographed the same way (docs/screens/pr65/,
    `node scripts/shoot-pr65.mjs`): Optimize on `+opt`, UNG's one December board copied onto three expiries, so every
    expiry carries the same prices — the ranking on a real chain, where a later expiry costs more, has not been seen. No
-   board draws either; the audit cannot compare them.
+   board draws either; the audit cannot compare them. **PR 66's chip row and its five sheets** (View with its target in
+   expected moves, Style, Max loss, ⇅ Sort, More) and the market page under a chosen View were photographed the same way
+   (docs/screens/pr66/, `node scripts/shoot-pr66.mjs`); the whole-app fixture answers every market with UNG's contracts,
+   so a filter dims all rows or none there, and the line naming the binding filter was photographed on the two-market
+   component fixture instead (`shoot-screens.mjs`, SPY and UNG). The owner's board still draws the eight old chips: the
+   audit skips their words with the reason (`R.chips`). Never on a phone.
 4. **Read when it happens — no credit has filled at the corrected limit** (the indicative combination ask on thin chains
    has not been measured by a fill; J-0003 never filled at it), **and "Not on Alpaca", "size N > M on the ask", the "Not
    in the app" card, an order "sent outside this app", free sizing (PR #41), and an order sent from Build's new review
@@ -596,7 +609,12 @@ OWNER CHECK, Optimize's speed on the phone.)
    five O rows and the three roll rows, and a cent of tolerance on the roll's accepted risk; the roll's ranking (back to
    zero, then the average) is the owner's yes to the proposal. Task 65.7: market 479 → 487 ("Ask the copilot: do CORN's
    four signals agree?", 8 words at rest, the owner's new question; the chart's "How does this relate to my trade?" left the
-   same screen, 7 words the counter never scored, so on screen the page reads one word more).
+   same screen, 7 words the counter never scored, so on screen the page reads one word more). **PR 66:** the three Styles'
+   floors (`styleCautiousChance` 0.5, `styleBoldReturn` 1.5) and the View's target constants (`viewTargetDefault` 1,
+   `viewVeryMoves` 1.5 — where a target starts building the Very cards — `viewFartherMoves` 2, the slider's 0.5–3 in
+   0.25 steps) are chosen on the 31 fixture cards, which cover TWO markets (SPY's model board, UNG): Cautious keeps 5
+   cards, Balanced 31, Bold 19, and "rows kept" there can only be 0–2 — how many of the ten live rows each style keeps is
+   unread. Words: find 184 → 157 (five chips, not eight), market 487 → 477 (the "+ signal" sum left the cards).
 9. **The exit rules are inherited defaults, not backtested** on these ten markets; the single option's +50% of the
    premium is the owner's choice. PAST YRS settles at expiry and does not replay them. **Since PR #50 a replay window
    that runs past December reads the next year's row and the last year is dropped, not padded** (it used to wrap to the
@@ -639,4 +657,6 @@ One line each. Detail for every item is in `docs/history/ROADMAP.md`.
 - **P8** — more indicators and timeframes, only after the owner has used the current ones.
 - **P10-bis** — expiry strip, strike ruler, break-even line with a date slider, view toggles.
 - **Play Store** — ship the PWA as an Android app.
-- **Broker change** — a broker with futures and futures options; means rewriting the Alpaca layer.
+- **Broker change** — a broker with futures and futures options; means rewriting the Alpaca layer. Owner, 12 Oct 2026:
+  Directa evaluated and archived (options only on IDEM/EUREX; its API runs only through the Darwin desktop platform on a
+  PC; no API test account, so paper cannot be verified); IBKR is the candidate for futures options, studied after P5.
