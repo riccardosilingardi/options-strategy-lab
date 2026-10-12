@@ -33,8 +33,10 @@ const H2 = { ...sans, margin: 0, fontSize: FS.xs, fontWeight: FW.bold, letterSpa
 const BAR_TONE = { done: () => T.green, warn: () => T.amber, field: () => T.field };
 const TWO = { display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8 };
 
-/** The three questions a position's screen asks (SKILLS, one home). */
-export const positionSkills = () => POSITION_SKILL_IDS.map((id) => SKILLS.find((s) => s.id === id)).filter(Boolean);
+/** The position's questions (PR 65: "Should I roll it?" only when the app offers a roll with candidates; otherwise its answer
+ *  could only read back the sentence ROLL IT already prints). */
+export const positionSkills = ({ canRoll = false } = {}) => POSITION_SKILL_IDS.filter((id) => canRoll || id !== "posRoll")
+  .map((id) => SKILLS.find((s) => s.id === id)).filter(Boolean);
 
 /* ---------------------------------------------------------------- WHAT TO DO NOW */
 export function StatusBlock({ s, keep, closeNode = null, workingNode = null }) {
@@ -133,14 +135,17 @@ function ExitPlanSection({ rows = [], plan = null }) {
 }
 
 /** ROLL IT (PR 4b): shown when the position is not in profit — its candidates when the reasons still hold, else the
- *  one sentence why no roll is offered. Preparing one opens Build; nothing is sent from here. */
+ *  one sentence why no roll is offered. Preparing one opens Build; nothing is sent from here. PR 65: the candidates are
+ *  judged on the whole trade (`rollJudge()`): the run's one summary line, then the best three, each with its whole-trade
+ *  line; `none` says why none is offered when the chain lists some but every one would risk more than was accepted. */
 export function RollSection({ r }) {
   if (!r) return null;
   return (
     <section aria-label="Roll it" data-position-roll style={{ ...PANEL, gap: 8 }}>
       <h2 style={H2}>{ROLL_HEAD}{r.ok ? <Info label="how a roll works">{r.how}</Info> : null}</h2>
       <p style={{ ...sans, margin: 0, fontSize: FS.sm, lineHeight: LH.body, color: r.ok ? T.ink : T.mut }}>{r.why}</p>
-      {r.ok && (r.rows.length > 0 ? <AltRows rows={r.rows} action={ROLL_PREPARE} onPick={r.onPrepare} /> : <Note>{ROLL_NONE}</Note>)}
+      {r.ok && r.summary && <p data-roll-summary style={{ ...sans, margin: 0, fontSize: FS.sm, lineHeight: LH.body, color: T.body }}>{r.summary}</p>}
+      {r.ok && (r.rows.length > 0 ? <AltRows rows={r.rows} action={ROLL_PREPARE} onPick={r.onPrepare} /> : <Note>{r.none || ROLL_NONE}</Note>)}
     </section>
   );
 }
@@ -256,7 +261,7 @@ export function PositionScreen({ v }) {
           <CardButton tone="quiet" onClick={v.details.onOpen} aria-haspopup="dialog">Alpaca details</CardButton>
         </div>
         <Note>Build prices it at today's market. A Send there would open a second position.</Note>
-        <CopilotSection ask={askAll} skills={positionSkills()} label="Ask the copilot about this position"
+        <CopilotSection ask={askAll} skills={positionSkills({ canRoll: !!(v.roll && v.roll.ok && v.roll.rows && v.roll.rows.length) })} label="Ask the copilot about this position"
           heading={<>ASK THE COPILOT ABOUT THIS POSITION</>} ownLabel={<>Your own question about this position</>}
           footer={<>It may recommend one of this screen's actions; it never closes, rolls or opens anything itself. Every answer is filed in the Journal.</>} />
         {v.guardian && (

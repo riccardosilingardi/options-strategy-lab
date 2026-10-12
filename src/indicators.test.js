@@ -398,17 +398,17 @@ test("PROMPT — it forbids inventing a figure, and says the context is the only
   assert.match(p, /No tables, no pipe characters, no code fences/i);
 });
 
-test("PROMPT — the four one-tap questions are questions, and they are named here", () => {
-  assert.equal(TA_QUESTIONS.length, 4);
+test("PROMPT — the three one-tap questions are questions, and they are named here", () => {
+  assert.equal(TA_QUESTIONS.length, 3);
   for (const q of TA_QUESTIONS) {
     assert.ok(q.id && q.label && q.ask, JSON.stringify(q));
     assert.ok(q.label.length < 40, `"${q.label}" will not fit on a 390px chip row`);
     assert.ok(q.ask.endsWith("?"), `"${q.ask}" is not a question`);
   }
-  assert.equal(new Set(TA_QUESTIONS.map((q) => q.id)).size, 4);
-  // One of them relates the chart to the trade, which is the only reason the
-  // break-evens are in the context at all.
-  assert.ok(TA_QUESTIONS.some((q) => /break-even/i.test(q.ask)), "no question uses the trade in the context");
+  assert.equal(new Set(TA_QUESTIONS.map((q) => q.id)).size, 3);
+  // PR 65: none of them asks about a trade. The market page hands the chart copilot no trade, and on Build the trade's
+  // chart question is Build's own ("The chart and this trade"); a typed question still reads Build's break-evens.
+  assert.ok(!TA_QUESTIONS.some((q) => /break-even|my trade/i.test(q.ask + q.label)), "a one-tap chart question asks about a trade");
 });
 
 test("THE PANEL HAS NO SECOND SOURCE, and the desk prompt no longer recommends what the app refuses", () => {

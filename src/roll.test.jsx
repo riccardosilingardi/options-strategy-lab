@@ -2,9 +2,10 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
-import { VariantsSection, AltRows } from "./build.jsx";
+import { VariantsSection, AltRows, OptimizeSection } from "./build.jsx";
 import { RollSection } from "./positionScreen.jsx";
-import { ROLL_WHY, ROLL_HOW, ROLL_NONE, ROLL_PREPARE, VARIANT_LOAD, VARIANTS_NOTE, VARIANTS_NONE, rollLine, rollCloseFirst } from "./rules.js";
+import { ROLL_WHY, ROLL_HOW, ROLL_NONE, ROLL_PREPARE, VARIANT_LOAD, VARIANTS_NOTE, VARIANTS_NONE, rollLine, rollCloseFirst,
+  OPTIMIZE_HEAD, OPTIMIZE_RUN, OPTIMIZE_CURRENT, OPTIMIZE_NONE_FIT, ROLL_JUDGE_NOTE, ROLL_NONE_SAFE, optimizeNote } from "./rules.js";
 import { T } from "./theme.js";
 
 const ok = [], bad = [];
@@ -39,6 +40,38 @@ check("ROLL IT: offered — its sentence, its ⓘ and its candidates; offered wi
   has(turned, "the app offers no roll on a changed idea"); hasNot(turned, ROLL_PREPARE, "no candidate on a turned idea");
   if (renderToStaticMarkup(<RollSection r={null} />) !== "") throw new Error("no section when the screen hands none");
   if (!ROLL_NONE.includes("30–90")) throw new Error("the window is the rule's");
+});
+
+check("OPTIMIZE (PR 65): at rest one button and its ⓘ, nothing priced; after the tap the summary, where the trade sits, O1… rows", () => {
+  const rest = renderToStaticMarkup(<OptimizeSection note={optimizeNote(2)} asked={false} onRun={() => {}} onLoad={() => {}} />);
+  has(rest, OPTIMIZE_HEAD); has(rest, OPTIMIZE_RUN); has(rest, "How it searches"); has(rest, "data-build-optimize");
+  hasNot(rest, "data-alt-rows", "it never runs on its own");
+  const rows = [row({ kind: "optimize", label: "O1 · Same strikes", current: true, note: "44 days, held ~23 days (exit at 21 DTE) · future avg +4.2 per $100" }),
+    row({ kind: "optimize", label: "O2 · One step higher", expKey: "2027-01-15", legsText: "+1 16C / −1 17C · 15 Jan 2027" })];
+  const ran = renderToStaticMarkup(<OptimizeSection note={optimizeNote(2)} asked onRun={() => {}} onLoad={() => {}} rows={rows}
+    summary="Checked 14 on 2 expiries, 44–72 days: 9 fit your request, 3 miss it, 2 fail a floor." place="Your trade is the best of the 9 that fit." />);
+  for (const x of ["Checked 14 on 2 expiries", "Your trade is the best of the 9 that fit.", "O1 · Same strikes", "O2 · One step higher",
+    OPTIMIZE_CURRENT, VARIANT_LOAD, "held ~23 days (exit at 21 DTE)", "data-alt-note"]) has(ran, x);
+  hasNot(ran, OPTIMIZE_RUN, "the button gives way to its answer");
+  // Nothing fits: the line, then the best that miss — quieter, the reason first.
+  const miss = renderToStaticMarkup(<OptimizeSection note="" asked onRun={() => {}} onLoad={() => {}} none={OPTIMIZE_NONE_FIT} summary="Checked 2."
+    rows={[row({ kind: "optimize", label: "O1 · Same strikes", miss: true, note: "Misses: over budget by $40 · 44 days" })]} />);
+  has(miss, OPTIMIZE_NONE_FIT); has(miss, "data-alt-miss"); has(miss, "Misses: over budget by $40");
+  if (!optimizeNote(2).includes("up to two listed steps") || !optimizeNote(1).includes("up to one listed step")) throw new Error("the width is the constant's");
+});
+
+check("ROLL IT (PR 65): judged on the whole trade — the summary line, each row's whole-trade line, and why none when all risk more", () => {
+  const r = renderToStaticMarkup(<RollSection r={{ ok: true, why: ROLL_WHY.ok, how: `${ROLL_HOW} ${ROLL_JUDGE_NOTE}`,
+    summary: "Checked 24 rolls on 3 later expiries: 9 keep the whole trade within the $600 you accepted at entry.",
+    rows: [row({ kind: "roll", label: "Same strikes", note: "Whole trade: back to $0 or better 41% · reaches your target 18% · worst -$540 · avg -$35" })], onPrepare: () => {} }} />);
+  has(r, "Checked 24 rolls on 3 later expiries"); has(r, "Whole trade: back to $0 or better 41%"); has(r, "data-roll-summary");
+  const none = renderToStaticMarkup(<RollSection r={{ ok: true, why: ROLL_WHY.ok, how: ROLL_HOW, summary: "Checked 6 rolls on 1 later expiry: 0 keep…",
+    none: ROLL_NONE_SAFE, rows: [], onPrepare: () => {} }} />);
+  has(none, ROLL_NONE_SAFE); hasNot(none, "there is no roll to prepare", "the chain listed some: the reason is the risk, not the board");
+  const app = readFileSync("src/App.jsx", "utf8");
+  has(app, "priceAlt(rp.ticker, c, { floors: true, contracts: n })", "a roll is read at the size held, through Find's floors");
+  has(app, "contracts: rollView.n", "and arrives on Build at that size");
+  has(app, "priceAlt(ticker, c, { floors: true })", "Optimize reads each candidate through Find's floors");
 });
 
 check("A ROLL NEVER HOLDS BOTH: Build's Send waits while the old position is held, and the two records are linked on their timelines", () => {

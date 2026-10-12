@@ -52,7 +52,7 @@ import { RULES, money, chanceText, expiryWords, sizedFree, sizedFigures, sizeLin
   chanceBasisLabel, meetsRequest, MARKET_TABS, MARKETS_SHEET_TITLE, SAVE_FIRST_CARD, UNSAVE_FIRST_CARD, dayChangeText, dayChangeShort,
   ivText, ivRankText, ivRankShort, moveLabel, HEADER_DEFINITIONS, NEWS_NOT_READ, newsHeadlineText, groupHeadText, strategiesLine,
   signalsParts, strategiesNote, MARKET_READ_LINK, BACK_TO_FIND_ARIA, refreshMarketAria, stanceText, futurePastDisagree, needsText,
-  OPEN_IN_CHAIN, BUILD_CTA, COMPARE_TICK, MARKET_READ_HEAD, HOW_WORKED_OUT_LINK, MARKET_READ_END, CHAIN_MODES, marketNewsHead, marketNewsAsk,
+  OPEN_IN_CHAIN, BUILD_CTA, COMPARE_TICK, MARKET_READ_HEAD, HOW_WORKED_OUT_LINK, MARKET_READ_END, CHAIN_MODES, marketNewsHead, marketNewsAsk, marketReadAsk, marketReadHead,
   noOpenInterestText, underEntryText, THIN, spotLineText, legsMaxText, TRAY_LABELS, uncoveredText, trayEmptyText,
   chainEventText, eventLineText, eventInfoText, dateOnlyWhen, inDaysText, holidayWeekNote, eventsBeforeLabel, CHAIN_HEAD,
   chainNotLoadedText, marketReadingText, noCardsText, ARIA, readScoreLine, compareTrayLine, SEE_THEM, cardDetailRows,
@@ -306,11 +306,18 @@ function Overview({ tk, fused, whyProps, onAnalysis, copilot = null }) {
   const ask = useCopilot({ ...(copilot || { convo: null, setConvo: () => {} }), ctx: (copilot && copilot.ctx) || {} });
   const askAll = { ...ask, clear: () => copilot && copilot.setConvo({ msgs: [], busy: false, err: null }) };
   useEffect(() => { if (copilot) copilot.setConvo({ msgs: [], busy: false, err: null, partial: "" }); }, [tk]); // eslint-disable-line
+  // PR 65 (owner, 12 Oct 2026): the four factors read together, under the market's read — its own conversation, here, so
+  // an answer about the signals never prints inside the news block (and the other way round). Cleared with the market.
+  const [readConvo, setReadConvo] = useState({ msgs: [] });
+  useEffect(() => { setReadConvo({ msgs: [], busy: false, err: null, partial: "" }); }, [tk]);
+  const askRead = useCopilot({ ...(copilot || { convo: null, setConvo: () => {} }), convo: readConvo, setConvo: setReadConvo, ctx: (copilot && copilot.ctx) || {} });
+  const askReadAll = { ...askRead, clear: () => setReadConvo({ msgs: [], busy: false, err: null }) };
+  const slot = (id) => skillsFor("market").filter((s) => s.slot === id);
   // One tap away (a fold): the chart copilot is already at rest on this tab, and one copilot at rest is enough.
   const newsExtra = copilot ? (
     <Fold label="ask" tone={T.blue} summary={marketNewsAsk(tk)} style={{ marginTop: 2 }}>
       <div data-market-news-copilot style={{ marginTop: 6 }}>
-        <CopilotSection ask={askAll} skills={skillsFor("market")} label={marketNewsHead(tk)} heading={marketNewsHead(tk)}
+        <CopilotSection ask={askAll} skills={slot("news")} label={marketNewsHead(tk)} heading={marketNewsHead(tk)}
           ownLabel={`Your own question about ${tk}'s news`} />
       </div>
     </Fold>
@@ -337,6 +344,14 @@ function Overview({ tk, fused, whyProps, onAnalysis, copilot = null }) {
             </TextBtn>
           )}
           {how && fused && <HowWorkedOut fused={fused} />}
+          {copilot && fused && (
+            <Fold label="ask" tone={T.blue} summary={marketReadAsk(tk)} style={{ marginTop: 2 }}>
+              <div data-market-read-copilot style={{ marginTop: 6 }}>
+                <CopilotSection ask={askReadAll} skills={slot("read")} label={marketReadHead(tk)} heading={marketReadHead(tk)}
+                  ownLabel={`Your own question about ${tk}'s signals`} />
+              </div>
+            </Fold>
+          )}
         </div>
       </section>
       <TaCopilot ticker={tk} bars={bars || []} structure={null} convo={convo} setConvo={setConvo} onAnalysis={onAnalysis} look="market" />

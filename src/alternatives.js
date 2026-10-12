@@ -15,6 +15,7 @@
 // ============================================================================
 import { RULES } from "./rules.js";
 import { expiryStrikes } from "./chain.js";
+import { exactPnl } from "./engine.js";
 
 const DAY = 86400000;
 /** Days from `now` to an expiry key ("2026-12-18"), at the 4pm New York close (20:00 UTC, the same day). */
@@ -43,7 +44,8 @@ export function shiftLegs(legs = [], strikes = null, steps = 1) {
  * shape (a butterfly's three strikes, a single option) has no width to change: null when no pair moved.
  */
 export function widthLegs(legs = [], strikes = null, spot = null, dir = 1) {
-  if (!strikes || !strikes.length || !legs.length || !Number.isFinite(Number(spot))) return null;
+  // `Number(null)` is 0 and 0 is finite (CLAUDE.md): an unread price is null, tested before the coercion (PR 65 found it).
+  if (!strikes || !strikes.length || !legs.length || spot == null || !Number.isFinite(Number(spot))) return null;
   const out = legs.map((l) => ({ ...l }));
   let moved = 0;
   for (const type of ["call", "put"]) {
@@ -96,21 +98,116 @@ export function variantsOf({ legs = [], expKey = null, chain = null, spot = null
   return out;
 }
 
+/* ====================================================================
+   OPTIMIZE (PR 65, owner 7 Oct 2026: "a separate run that finds the best combination of duration and also of legs"; "ok in
+   Build"; the width "the objectively best"). The loaded structure on EVERY expiry the chain lists inside the entry window,
+   and on each board every move up to `OPTIMIZE_STEPS` listed strikes: the same strikes, up and down, wider and narrower.
+   LEGS ONLY, as above: pricing, the floors, sizing, the gate and the ranking are the caller's (App.jsx `optimizeRun`).
+==================================================================== */
+/* WHY ONE STEP (PR 65, task 64.5). Two steps hold every candidate one step holds, so the first pick can only be as good
+   or better; what it costs is time, and the rule fixed BEFORE measuring was "two steps if one run stays under 50 ms on the
+   fixture chains, else one". `node scripts/measure-optimize.mjs` on UNG's board copied onto 9 expiries (a market listing
+   weeklies): the slowest trade's run took 40–82 ms at two steps (over 50 ms in four of six repeats), 32–48 ms at one; two
+   steps changed the first pick on 1 of 9 trades. So one step. Two is this one number, and the owner's to ask for. */
+export const OPTIMIZE_STEPS = 1;
+
+/** The chain's expiries whose days fall in [min, max], nearest first. */
+export function windowExpiries(chain, { now = Date.now(), min = RULES.minEntryDTE, max = RULES.maxEntryDTE } = {}) {
+  if (!chain || !chain.byExp) return [];
+  return Object.keys(chain.byExp).sort()
+    .filter((k) => { const d = Number.isFinite(chain.byExp[k] && chain.byExp[k].dte) ? chain.byExp[k].dte : daysTo(k, now); return d != null && d >= min && d <= max; });
+}
+
 /**
- * A ROLL'S CANDIDATES: the same structure on the first `n` later expiries the entry window allows — the same strikes,
- * then one step up and one step down on that board. Each { kind, legs, expKey }.
+ * Every move of a structure on one board, up to `steps` listed strikes each way: { move, step, legs }, move one of
+ * "same" (step 0), "up", "down", "wider", "narrower". A move the board cannot list is left out, never snapped; two
+ * moves that land on the same legs are kept once (the first).
  */
-export function rollCandidates({ legs = [], expKey = null, chain = null, now = Date.now(), n = 2 } = {}) {
+export function movesOnBoard(legs = [], strikes = null, spot = null, steps = OPTIMIZE_STEPS) {
   const out = [];
-  for (const ek of laterExpiries(chain, expKey, { now }).slice(0, n)) {
-    const strikes = expiryStrikes(chain, ek);
-    const same = sameOnBoard(legs, strikes);
-    for (const [kind, ls] of [["roll", same], ["rollUp", shiftLegs(legs, strikes, 1)], ["rollDown", shiftLegs(legs, strikes, -1)]]) {
-      if (ls && !out.some((v) => v.expKey === ek && sameLegs(v.legs, ls))) out.push({ kind, legs: ls, expKey: ek });
+  const add = (move, step, ls) => { if (ls && !out.some((x) => sameLegs(x.legs, ls))) out.push({ move, step, legs: ls }); };
+  add("same", 0, sameOnBoard(legs, strikes));
+  for (let k = 1; k <= steps; k++) {
+    add("up", k, shiftLegs(legs, strikes, k));
+    add("down", k, shiftLegs(legs, strikes, -k));
+  }
+  for (const [move, dir] of [["wider", 1], ["narrower", -1]]) {
+    let ls = legs;
+    for (let k = 1; k <= steps && ls; k++) { ls = widthLegs(ls, strikes, spot, dir); add(move, k, ls); }
+  }
+  return out;
+}
+
+/**
+ * BUILD'S OPTIMIZE CANDIDATES: the loaded structure's moves on every expiry in the entry window (and on the loaded
+ * expiry, which may sit outside it). Each { kind: "optimize", move, step, legs, expKey, loaded } — `loaded` marks the
+ * trade on Build itself, so the run can say where it ranks.
+ */
+export function optimizeCandidates({ legs = [], expKey = null, chain = null, spot = null, now = Date.now(), steps = OPTIMIZE_STEPS } = {}) {
+  if (!chain || !chain.byExp || !legs.length) return [];
+  const eks = windowExpiries(chain, { now });
+  if (expKey && chain.byExp[expKey] && !eks.includes(expKey)) eks.push(expKey);
+  const out = [];
+  for (const ek of eks.sort()) {
+    for (const m of movesOnBoard(legs, expiryStrikes(chain, ek), spot, steps)) {
+      out.push({ kind: "optimize", move: m.move, step: m.step, legs: m.legs, expKey: ek, loaded: ek === expKey && sameLegs(m.legs, legs) });
     }
   }
   return out;
 }
+
+/**
+ * A ROLL'S CANDIDATES (PR 65: the same search as Optimize, on the LATER expiries only — owner: "evaluate whether the
+ * search principle is the same"; it is, the judge is not, see `rollJudge()` below). Every later expiry the entry
+ * window allows × every move up to `steps` listed strikes. Each { kind, move, step, legs, expKey }: kind "roll" for the
+ * same strikes, "rollUp" / "rollDown" for a shift, "rollWider" / "rollNarrower" for a width.
+ */
+export function rollCandidates({ legs = [], expKey = null, chain = null, spot = null, now = Date.now(), steps = OPTIMIZE_STEPS } = {}) {
+  const KIND = { same: "roll", up: "rollUp", down: "rollDown", wider: "rollWider", narrower: "rollNarrower" };
+  const out = [];
+  for (const ek of laterExpiries(chain, expKey, { now })) {
+    for (const m of movesOnBoard(legs, expiryStrikes(chain, ek), spot, steps)) out.push({ kind: KIND[m.move], move: m.move, step: m.step, legs: m.legs, expKey: ek });
+  }
+  return out;
+}
+
+/**
+ * A ROLL JUDGED ON THE WHOLE TRADE (PR 65; owner 7 Oct 2026: "in a roll it must weigh the starting position more, to
+ * mitigate the risk against the initial strategy and goal, which is maybe different"). The search is Optimize's; the
+ * judge is not, because a roll is not a new idea: it is the same position, carried on.
+ *
+ * The close books `realized` (the position's P&L now, at or below zero — `rollEligible()` offers a roll only then). The
+ * new trade, at the SAME size `n` as the one held, adds n × its P&L at expiry, read on the chance's own lognormal
+ * (`exactPnl()`, the drift, volatility and days the new trade's CHANCE used — `mc` is `listCardFigures()`' `mc`). So:
+ *   worst   realized + n × the new maximum loss: the roll is REFUSED ("overRisk") when that is more than `accepted`,
+ *           the maximum loss accepted at entry for the whole position (|record max loss| × n). Never more risk.
+ *   back    the chance the whole trade ends at or above zero: P(realized + n·X ≥ 0)
+ *   target  the chance it reaches the take-profit set at entry (`target`, dollars for the position), or null
+ *   avg     realized + n × the new trade's average
+ * Unknown is not zero: a missing P&L, size, risk or model is "noFigures", never a pass.
+ *
+ * @returns {{ ok: boolean, why: "ok"|"overRisk"|"noFigures", worst?, back?, target?, avg? }}
+ */
+export function rollJudge({ realized = null, n = null, accepted = null, target = null, legs = [], entryNet = null, spot = null, mc = null, maxLoss = null } = {}) {
+  const fin = (x) => x != null && Number.isFinite(Number(x));
+  if (![realized, n, accepted, entryNet, spot, maxLoss].every(fin) || !(Number(n) >= 1) || !mc || !legs.length) return { ok: false, why: "noFigures" };
+  let D;
+  try { D = exactPnl(legs, Number(entryNet), Number(spot), { driftAnnual: Number(mc.driftAnnual) || 0, sigma: Number(mc.sigma), dte: Number(mc.dte) }); }
+  catch { return { ok: false, why: "noFigures" }; }
+  const R = Number(realized), k = Math.round(Number(n));
+  const worst = R + k * Number(maxLoss);
+  // P(R + k·X ≥ x) = 1 − P(X < (x − R) / k): the exact distribution's strict cdf.
+  const atLeast = (x) => 1 - D.cdf((x - R) / k, true);
+  const ev = fin(mc.ev) ? Number(mc.ev) : null;
+  const out = { worst, back: atLeast(0), target: fin(target) && Number(target) > 0 ? atLeast(Number(target)) : null, avg: ev == null ? null : R + k * ev };
+  // A cent of tolerance: the two are the same dollars, rounded differently on the way in.
+  if (worst < -Math.abs(Number(accepted)) - 0.01) return { ok: false, why: "overRisk", ...out };
+  return { ok: true, why: "ok", ...out };
+}
+
+/** The rolls that keep the risk, best first: the chance back to zero, then the average; unknown last. */
+export const rankRolls = (rows = []) => rows.filter((r) => r && r.judge && r.judge.ok).sort((a, b) =>
+  (b.judge.back - a.judge.back) || ((b.judge.avg == null ? -Infinity : b.judge.avg) - (a.judge.avg == null ? -Infinity : a.judge.avg)));
 
 /**
  * MAY THIS POSITION BE ROLLED? (owner: "if it is not in profit"; PR 4a's plan: "only while the reasons it was opened

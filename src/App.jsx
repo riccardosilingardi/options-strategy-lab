@@ -16,7 +16,7 @@ import { orderLegs as orderLegsOf, orderHoldingKey, ordersForRecord, orderIntent
 import { BandThumbnail, payoffBands, bandTakeaway, GaugeFigure, Gauge, CompareFigure, exitPlanSentence, exitPlanDetail,
   OpenInterestStrip, oiStripTakeaway, oiCutAt, oiGhostCut, explainOiStrip, useWidth } from "./visuals.jsx";
 import { fuseSignals, sentimentDirection, signalDirection, signalFamilies, findOrderOf, findOrderCompare, withSignalRank, compareCandidates, againstSignal,
-  readingState, signalSnapshot, compareSignals, signalStance, factorStands, AGAINST_MIN_SCORE } from "./signals.js";
+  readingState, signalSnapshot, compareSignals, signalStance, factorStands, AGAINST_MIN_SCORE, placeLine } from "./signals.js";
 import { N as nCDF, bs as bsPrice, smile as smileIV, payoff as payoffExp, SIGMA, histBacktest, monthReturn,
   parseAvJson, statsFromMatrix } from "./engine.js";
 import { parseOcc, buildOcc, snapStrike, resnapLegs, expiryStrikes, strikeOptions, fetchChain, hasOpenInterest, enrichOpenInterest, feedName, sourceNote, openInterestNote, oiProfile, expiryOpenInterest, nearMoneyOpenInterest, monotonicityBreaks, monotonicityNote, invertedOnStrikes, spotOf, spotAt, atmIv } from "./chain.js";
@@ -57,7 +57,7 @@ import { CapitalOnboarding, Card, Pill, statusLine } from "./wizard.jsx";
 import { CandidateCard, CandidateActions, SignalBadge, StopSigns } from "./card.jsx";
 // STEP 1, FIND: its own file since PR #45, built on `ui.jsx` and the type tokens.
 import { FindStep, FindHeader, CompareSheet, filtersOfFind } from "./find.jsx";
-import { rowStateOf, compareCards } from "./rows.js";
+import { rowStateOf, compareCards, rankOptimize } from "./rows.js";
 import { SavedList } from "./saved.jsx";
 import { MarketPage } from "./market.jsx";
 import { buildHandOff, buildScreenState, BUILD_TAB } from "./handoff.js";
@@ -93,9 +93,11 @@ import { gateChecklist } from "./wizard.jsx";
 import { undefinedRiskLegs } from "./riskGate.js";
 import { taContext } from "./indicators.js";
 // PR 4b: the alternatives of a structure (Build's variants, a position's roll) and their words.
-import { variantsOf, rollCandidates, rollEligible } from "./alternatives.js";
+import { variantsOf, rollCandidates, rollEligible, optimizeCandidates, OPTIMIZE_STEPS, rollJudge, rankRolls } from "./alternatives.js";
 import { whyOpenedLine, endedLine } from "./journalView.js";
-import { liquidityTakeaway, liquidityLevelValue, noOiLine, LIMIT_CHOICES, expiryWords, returnText, pastTileText, futureTile, VARIANT_LABELS, VARIANTS_NOTE, VARIANTS_NONE, gateLine, ROLL_WHY, ROLL_HOW, rollLine, rollCloseFirst, rolledInto, rolledFrom } from "./rules.js";
+import { liquidityTakeaway, liquidityLevelValue, noOiLine, LIMIT_CHOICES, expiryWords, returnText, pastTileText, futureTile, VARIANT_LABELS, VARIANTS_NOTE, VARIANTS_NONE, gateLine, ROLL_WHY, ROLL_HOW, rollLine, rollCloseFirst, rolledInto, rolledFrom,
+  boardMoveLabel, optimizeNote, optimizeSummary, optimizePlaceLine, optimizeRowNote, OPTIMIZE_NONE_FIT, OPTIMIZE_EMPTY, OPTIMIZE_ALL_CUT, ROLL_JUDGE_NOTE, rollWholeLine,
+  rollSummaryLine, ROLL_NONE_SAFE } from "./rules.js";
 import { EvidenceBar, EvidenceOverlay, DeskSheet, Fold, DeskCountLine } from "./steps.jsx";
 import { BottomBar, placeOf, NAV_BAR_H, FIND_LIST_END } from "./navBar.jsx";
 import { AccountStrip, PositionsBar, PositionsHeader, WorkingCloseLine, CardButton } from "./positions.jsx";
@@ -387,7 +389,7 @@ export function buildPresets(sent, S, step, strikes) {
 }
 
 /* ============================== PRICING ENGINE (ibrido: chain reale → BS) ============================== */
-function makeQuote(chain, expKey) {
+export function makeQuote(chain, expKey) {
   return (leg) => {
     if (!chain || !expKey || !chain.byExp[expKey]) return null;
     return chain.byExp[expKey][leg.type === "call" ? "calls" : "puts"][leg.strike] || null;
@@ -713,75 +715,131 @@ export function shortlistWithFloors(sent, S, step, strikes, dte, baseIV, q, { pe
     return { rows, cut, oiSkipped: false, offFloor: entryRoom(dte), tally };
   }
   for (const p of buildPresets(sent, S, step, strikes)) {
-    const a = analyze(p.legs, S, dte, baseIV, q);
-    // UNPRICEABLE FIRST, because it is prior to both floors: they judge a
-    // structure, and this asks whether there is a structure to judge. A leg
-    // nobody bids for or a net of about nothing means the numbers below —
-    // reward-to-risk, the maximum loss, how many contracts fit the budget —
-    // would all be arithmetic on a placeholder. It is never rendered.
-    const pz = priceability({ legs: p.legs, quotes: quotesOf(a), net: a.entry, maxLoss: a.maxLoss });
-    if (!pz.priceable) {
-      tally.unpriceable++;
-      cut.push({ name: p.name, reasons: pz.reasons, why: "unpriceable" });
-      continue;
+    // EVERY CANDIDATE THROUGH ONE FUNCTION (PR 65): `floorsFor()` below asks the same questions, in the same order, of any
+    // set of legs — Find's presets here, Build's Optimize candidates there.
+    const r = floorsFor(p.legs, { S, dte, iv: baseIV, q, peers, level });
+    if (r.qf) {
+      if (!r.qf.liquidity.checked) { oiSkipped = true; tally.skipped++; }
+      if (!r.qf.spread.checked) tally.spreadSkipped++;
+      if (!r.qf.comboSpread.checked) tally.comboSpreadSkipped++;
     }
-    // AND A WORST CASE THAT IS A PROFIT, in the same register and at the same
-    // point in the order (src/rules.js, `impossibleLoss`). This is the debt
-    // PR #14 wrote down and left open: the wizard already skipped it, the
-    // Shortlist ranked it. An arbitrage on these chains is a mispriced leg, and
-    // a mispriced leg is not a candidate.
-    const imp = impossibleLoss(a.maxLoss);
-    if (imp) {
-      tally.impossible++;
-      cut.push({ name: p.name, reasons: [imp], why: "impossible" });
-      continue;
-    }
-    // AND A PRICE THE MODEL CANNOT ACCOUNT FOR (src/rules.js, `modelSanity`).
-    // Third question, third refusal, and it is not either of the two above: the
-    // price was read and it clears the absolute minimum, it is simply not this
-    // structure's price. The BOIL 20/21 spread that reached the broker priced
-    // at $0.05 against a model value of $0.333 — one cent above the floor built
-    // to catch the $0 butterfly, and wrong by a factor of 6.7.
-    const ms = modelCheckOf(a, { legs: p.legs, spot: S, dte, iv: baseIV });
-    if (!ms.pass) {
-      tally.model++;
-      cut.push({ name: p.name, reasons: [ms.reason], why: "model" });
-      continue;
-    }
-    // THE CROSSING FLOOR READS THE MAXIMUM PROFIT AT THE PRICE THAT FILLS
-    // (PR #39), which is what the card will print — never the mid's.
-    const aFill = atFillPrice(p.legs, a, { spot: S, dte, iv: baseIV, q });
-    // The two-sided quotes go in as well now: the SPREAD floor reads them, and
-    // it is a different question from the headcount the liquidity floor asks.
-    // A leg can have 300 contracts open and a market 145% of the mid wide.
-    const qf = qualityFloor({
-      openInterest: a.legPx.map((l) => l.oi), peerOpenInterest: peers, level,
-      // AND THE LEGS, because the COMBINATION spread floor needs to know which
-      // side of each leg trades. The pair is not the legs: UNG's 10.50/11.00
-      // call spread passed the per-leg test on both legs and its combination
-      // was 143% of its own mid wide (src/rules.js, `comboSpreadFloor`).
-      quotes: quotesOf(a), legs: p.legs,
-      // THE REWARD FLOOR READS THE PRICE THAT FILLS TOO (PR #40, TASK 0). It
-      // read the mid while the card printed the fill: "ranked and floored at
-      // the MID while cards print at the price that fills", PR #39's debt.
-      maxProfit: aFill.maxProfit, maxLoss: aFill.maxLoss, unboundedProfit: aFill.profitUnbounded,
-      maxProfitAtFill: aFill ? aFill.maxProfit : null,
-    });
-    if (!qf.liquidity.checked) { oiSkipped = true; tally.skipped++; }
-    if (!qf.spread.checked) tally.spreadSkipped++;
-    if (!qf.comboSpread.checked) tally.comboSpreadSkipped++;
-    if (qf.pass) rows.push({ p, a, aFill, qf });
+    if (r.pass) rows.push({ p, a: r.a, aFill: r.aFill, qf: r.qf });
     else {
-      // WHICH FLOOR DID THE WORK, in the order they are applied. Pooling them
-      // would leave the screen unable to say whether the leg was untraded or
-      // simply unpriced, which are different faults with different answers.
-      const why = !qf.liquidity.pass ? "liquidity" : !qf.spread.pass ? "spread"
-        : !qf.comboSpread.pass ? "comboSpread" : !qf.crossing.pass ? "crossing" : "reward";
-      tally[why]++;
-      cut.push({ name: p.name, reasons: qf.reasons, why, qf, legs: p.legs, a });
+      tally[r.why]++;
+      cut.push(r.qf ? { name: p.name, reasons: r.reasons, why: r.why, qf: r.qf, legs: p.legs, a: r.a }
+        : { name: p.name, reasons: r.reasons, why: r.why });
     }
   }
   return { rows, cut, oiSkipped, tally: { ...tally, kept: rows.length } };
+}
+
+/**
+ * THE FIGURE "FUTURE AVG" SORTS ON (PR 65: one home, read by findGen's `evProfile()` and by `readAlternative()`). The
+ * exact average per $100 at risk (`futurePer100()`), or null when there is no ceiling or no readable risk — which sorts last.
+ */
+export function sortEv100(mc, maxProfit, maxLoss) {
+  if (!mc || !Number.isFinite(mc.ev) || !Number.isFinite(maxProfit) || !Number.isFinite(maxLoss) || maxLoss >= 0) return null;
+  if (rewardRisk(maxProfit, maxLoss) == null) return null;
+  return futurePer100(mc, { maxProfit, maxLoss });
+}
+
+/**
+ * ONE ALTERNATIVE, READ AS A CARD (PR 4b's `priceAlt()`, moved to module scope in PR 65 so scripts/measure-optimize.mjs runs
+ * this very code). `listCardFigures()` at the price that fills, `scaleStrategy()` for the size the budget buys, the gate (the
+ * caller's one callback) at that size. PR 65 adds:
+ *   floors     Find's own floors first (`floorsFor()`, the board's open interest, the liquidity `level`): a refusal comes
+ *              back `cut`, with its reason, unpriced;
+ *   contracts  a size handed in (a roll keeps the size held) instead of the budget's;
+ *   rank, cand, size, mc   what Find sorts a card on (`findOrderCompare()`), what `meetsRequest()` reads, and the chance's
+ *              distribution (the roll's whole-trade judge reads it).
+ */
+export function readAlternative(alt, { chain: c, ticker: tk, iv, seasonal, matrix = null, request, freeSizing = false, gate, floors = false,
+  contracts = null, level = RECOMMENDED_LIQUIDITY, fuseAt = () => null, name = "Structure" } = {}) {
+  const dteX = c && c.byExp && c.byExp[alt.expKey] ? c.byExp[alt.expKey].dte : null;
+  if (!c || !c.spot || dteX == null) return null;
+  const q = makeQuote(c, alt.expKey);
+  const label = alt.move ? boardMoveLabel(alt.move, alt.step) : VARIANT_LABELS[alt.kind] || alt.kind;
+  const legsText = `${legsLine(alt.legs)} · ${expiryWords(alt.expKey)}`;
+  const fl = floors ? floorsFor(alt.legs, { S: c.spot, dte: dteX, iv, q, peers: expiryOpenInterest(c, alt.expKey), level }) : null;
+  if (fl && !fl.pass) return { ...alt, ticker: tk, dte: dteX, label, legsText, cut: { why: fl.why, reasons: fl.reasons } };
+  const lf = listCardFigures(alt.legs, { spot: c.spot, dte: dteX, iv, q, ticker: tk, expKey: alt.expKey, seasonal, matrix,
+    ...(fl ? { a: fl.a, aFill: fl.aFill } : {}) });
+  const size = contracts != null ? null : sizedFree(scaleStrategy(lf.aFill, request.mode, request.amt, request.riskCap), freeSizing);
+  const n = contracts != null ? Math.max(1, Math.round(Number(contracts) || 1)) : size && size.ok ? size.n : null;
+  const f = sizedFigures(lf.aFill, n);
+  const g = gate({ ticker: tk, intent: "open", legs: alt.legs, dte: dteX, contracts: n || 1, maxLoss: lf.aFill.maxLoss, maxProfit: lf.aFill.maxProfit,
+    quotes: quotesOf(lf.aFill), net: lf.aFill.entry, occs: occsOf(lf.aFill) });
+  const ev100 = sortEv100(lf.mc, lf.aFill.maxProfit, lf.aFill.maxLoss);
+  // THE TRADE'S OWN DIRECTION (the net delta, as Build's `tradeDir` reads it): a moved structure can change it.
+  const d = lf.aFill.greeks ? Number(lf.aFill.greeks.delta) : 0;
+  const sent = Math.abs(d) < 0.05 ? "neutral" : d > 0 ? "bull" : "bear";
+  const cand = candidateOf({ name, legs: alt.legs, a: lf.aFill, pop: lf.pop, dte: dteX, expKey: alt.expKey, futureAvg: lf.future ? lf.future.per100 : null,
+    ...seasonalStampFields(lf.mc), ...chanceDrawFields(lf.mc) }, { ticker: tk, spot: c.spot, source: "optimize" });
+  return { ...alt, ticker: tk, dte: dteX, label, legsText, n,
+    youRisk: f ? f.risk : null, maxProfit: f ? (f.unbounded ? null : f.profit) : null, unbounded: !!(f && f.unbounded),
+    chance: chanceText(lf.pop), rr: lf.rr == null ? "—" : returnText(lf.rr), future: futureTile(futureFigures(lf.mc, lf.aFill, n, alt.expKey)).value,
+    past: pastTileText(pastFigures(lf.bt, lf.aFill, n)), gate: g, gateText: gateLine(g),
+    mc: lf.mc, entryNet: lf.aFill.entry, maxLoss: lf.aFill.maxLoss, spot: c.spot, cand, size,
+    rank: { ev100: ev100 != null ? ev100 : -999, lf, past: lf.past, fused: fuseAt(dteX), sent } };
+}
+
+/**
+ * THE FLOORS FOR ONE SET OF LEGS (PR 65: moved out of `shortlistWithFloors()`'s loop, unchanged, so Build's Optimize
+ * judges every candidate exactly as Find judges a card). In order: is there a price at all (unpriceable), is the worst
+ * case a loss (impossible), does the model account for the price (model), then — at the price that fills — the quality
+ * floor (liquidity, spread, combination spread, crossing, reward). Returns { pass: true, a, aFill, qf } or
+ * { pass: false, why, reasons, a, aFill?, qf? }; `why` is the tally key of the first floor that refused.
+ */
+export function floorsFor(legs, { S, dte, iv, q, peers = null, level = RECOMMENDED_LIQUIDITY } = {}) {
+  const a = analyze(legs, S, dte, iv, q);
+  // UNPRICEABLE FIRST, because it is prior to both floors: they judge a
+  // structure, and this asks whether there is a structure to judge. A leg
+  // nobody bids for or a net of about nothing means the numbers below —
+  // reward-to-risk, the maximum loss, how many contracts fit the budget —
+  // would all be arithmetic on a placeholder. It is never rendered.
+  const pz = priceability({ legs, quotes: quotesOf(a), net: a.entry, maxLoss: a.maxLoss });
+  if (!pz.priceable) return { pass: false, why: "unpriceable", reasons: pz.reasons, a };
+  // AND A WORST CASE THAT IS A PROFIT, in the same register and at the same
+  // point in the order (src/rules.js, `impossibleLoss`). This is the debt
+  // PR #14 wrote down and left open: the wizard already skipped it, the
+  // Shortlist ranked it. An arbitrage on these chains is a mispriced leg, and
+  // a mispriced leg is not a candidate.
+  const imp = impossibleLoss(a.maxLoss);
+  if (imp) return { pass: false, why: "impossible", reasons: [imp], a };
+  // AND A PRICE THE MODEL CANNOT ACCOUNT FOR (src/rules.js, `modelSanity`).
+  // Third question, third refusal, and it is not either of the two above: the
+  // price was read and it clears the absolute minimum, it is simply not this
+  // structure's price. The BOIL 20/21 spread that reached the broker priced
+  // at $0.05 against a model value of $0.333 — one cent above the floor built
+  // to catch the $0 butterfly, and wrong by a factor of 6.7.
+  const ms = modelCheckOf(a, { legs, spot: S, dte, iv });
+  if (!ms.pass) return { pass: false, why: "model", reasons: [ms.reason], a };
+  // THE CROSSING FLOOR READS THE MAXIMUM PROFIT AT THE PRICE THAT FILLS
+  // (PR #39), which is what the card will print — never the mid's.
+  const aFill = atFillPrice(legs, a, { spot: S, dte, iv, q });
+  // The two-sided quotes go in as well now: the SPREAD floor reads them, and
+  // it is a different question from the headcount the liquidity floor asks.
+  // A leg can have 300 contracts open and a market 145% of the mid wide.
+  const qf = qualityFloor({
+    openInterest: a.legPx.map((l) => l.oi), peerOpenInterest: peers, level,
+    // AND THE LEGS, because the COMBINATION spread floor needs to know which
+    // side of each leg trades. The pair is not the legs: UNG's 10.50/11.00
+    // call spread passed the per-leg test on both legs and its combination
+    // was 143% of its own mid wide (src/rules.js, `comboSpreadFloor`).
+    quotes: quotesOf(a), legs,
+    // THE REWARD FLOOR READS THE PRICE THAT FILLS TOO (PR #40, TASK 0). It
+    // read the mid while the card printed the fill: "ranked and floored at
+    // the MID while cards print at the price that fills", PR #39's debt.
+    maxProfit: aFill.maxProfit, maxLoss: aFill.maxLoss, unboundedProfit: aFill.profitUnbounded,
+    maxProfitAtFill: aFill ? aFill.maxProfit : null,
+  });
+  if (qf.pass) return { pass: true, a, aFill, qf };
+  // WHICH FLOOR DID THE WORK, in the order they are applied. Pooling them
+  // would leave the screen unable to say whether the leg was untraded or
+  // simply unpriced, which are different faults with different answers.
+  const why = !qf.liquidity.pass ? "liquidity" : !qf.spread.pass ? "spread"
+    : !qf.comboSpread.pass ? "comboSpread" : !qf.crossing.pass ? "crossing" : "reward";
+  return { pass: false, why, reasons: qf.reasons, a, aFill, qf };
 }
 
 /* ============================== THE ONE CHANCE + BACKTEST STORICO ==============================
@@ -3237,8 +3295,9 @@ export default function OptionsStrategyLab() {
     const rr = rewardRisk(maxProfit, maxLoss);
     if (rr == null) return null;
     const ev = mc.ev;
-    // The one home for this figure is `futurePer100()` in rules.js (PR #49): the FUTURE tile prints it.
-    const ev100 = futurePer100(mc, { maxProfit, maxLoss });
+    // The one home for this figure is `futurePer100()` in rules.js (PR #49): the FUTURE tile prints it; `sortEv100()` (PR 65)
+    // is the guard above and that call, so Build's Optimize sorts on exactly what Find sorts on.
+    const ev100 = sortEv100(mc, maxProfit, maxLoss);
     // ONE ROUNDING, from rules.js: the phrase is derived from the same whole
     // percent every CHANCE on screen prints, so a card cannot say "75%" beside
     // "8 times in 10" about two different roundings of one number.
@@ -3514,22 +3573,13 @@ export default function OptionsStrategyLab() {
   /* THE ALTERNATIVES, PRICED (PR 4b): one function for Build's variants and a position's roll candidates. Each goes
      through the card's own path — `listCardFigures()` at the price that fills, `scaleStrategy()` for the size the budget
      buys, the gate at that size against the account the send would use — so a variant reads exactly as a card would. */
-  const priceAlt = useCallback((tk, alt) => {
-    const c = chains[tk];
-    const dteX = c && c.byExp[alt.expKey] ? c.byExp[alt.expKey].dte : null;
-    if (!c || !c.spot || dteX == null) return null;
-    const lf = listCardFigures(alt.legs, { spot: c.spot, dte: dteX, iv: getU(tk).iv, q: makeQuote(c, alt.expKey), ticker: tk, expKey: alt.expKey,
-      seasonal: seasonalFor(tk), matrix: seasonal[tk]?.matrix || null });
-    const size = sizedFree(scaleStrategy(lf.aFill, request.mode, request.amt, request.riskCap), freeSizing);
-    const n = size && size.ok ? size.n : null;
-    const f = sizedFigures(lf.aFill, n);
-    const g = gate({ ticker: tk, intent: "open", legs: alt.legs, dte: dteX, contracts: n || 1, maxLoss: lf.aFill.maxLoss, maxProfit: lf.aFill.maxProfit,
-      quotes: quotesOf(lf.aFill), net: lf.aFill.entry, occs: occsOf(lf.aFill) }, bookFor(!!alpaca));
-    return { ...alt, ticker: tk, dte: dteX, label: VARIANT_LABELS[alt.kind] || alt.kind, legsText: `${legsLine(alt.legs)} · ${expiryWords(alt.expKey)}`, n,
-      youRisk: f ? f.risk : null, maxProfit: f ? (f.unbounded ? null : f.profit) : null, unbounded: !!(f && f.unbounded),
-      chance: chanceText(lf.pop), rr: lf.rr == null ? "—" : returnText(lf.rr), future: futureTile(futureFigures(lf.mc, lf.aFill, n, alt.expKey)).value,
-      past: pastTileText(pastFigures(lf.bt, lf.aFill, n)), gate: g, gateText: gateLine(g) };
-  }, [chains, seasonalFor, seasonal, request, freeSizing, gate, bookFor, alpaca]);
+  /* PR 65: the arithmetic is `readAlternative()` (module scope, below `floorsFor()`), so a script measures the same code;
+     this hands it the screen's state — the chain, the season, the request, the one gate callback against the account the
+     send would use, the liquidity level and the signals keyed by (market, days). */
+  const priceAlt = useCallback((tk, alt, { floors = false, contracts = null } = {}) => readAlternative(alt, {
+    chain: chains[tk], ticker: tk, iv: getU(tk).iv, seasonal: seasonalFor(tk), matrix: seasonal[tk]?.matrix || null, request, freeSizing,
+    gate: (proposal) => gate(proposal, bookFor(!!alpaca)), floors, contracts, level: liqLevel, fuseAt: (d) => fuseFind(tk, d), name: stratName }),
+  [chains, seasonalFor, seasonal, request, freeSizing, gate, bookFor, alpaca, liqLevel, fuseFind, stratName]); // eslint-disable-line
   /* BUILD'S VARIANTS (PR 4b): the loaded structure moved on the strikes the chain lists (alternatives.js), priced. */
   const buildVariants = useMemo(() => (AE && legs.length && chain
     ? variantsOf({ legs, expKey, chain, spot }).map((v) => priceAlt(ticker, v)).filter(Boolean) : []),
@@ -3794,6 +3844,32 @@ export default function OptionsStrategyLab() {
     (find.flagged || x.flags.length === 0) && (!find.positiveOnly || futurePositive(x))).sort(findOrderCompare(findOrder)),
   [findGen, find.flagged, find.positiveOnly, findOrder]);
   const findShown = useMemo(() => findSorted.filter(inFindFilter), [findSorted, inFindFilter]);
+  /* OPTIMIZE (PR 65; owner 7 Oct 2026: "make it a separate run, Find presents as it is"; "ok in Build"). ONE TAP, NEVER ON
+     ITS OWN: `optAsk` is the trade the run was asked for, so another expiry or other legs on Build put the button back.
+     The candidates are `optimizeCandidates()` (alternatives.js: every expiry in the entry window × every move of up to
+     OPTIMIZE_STEPS listed strikes), each read by `priceAlt()` through Find's floors; `rankOptimize()` (rows.js) puts them
+     in the owner's Find order with the request applied. A roll on Build is judged on the whole trade on its position's
+     screen, so Optimize is not offered on one. */
+  const [optAsk, setOptAsk] = useState(null);
+  const optKey = `${ticker}|${expKey}|${legsLine(legs)}`;
+  const optimizeRun = useMemo(() => {
+    if (optAsk !== optKey || !chain || !legs.length) return null;
+    const priced = optimizeCandidates({ legs, expKey, chain, spot }).map((c) => priceAlt(ticker, c, { floors: true })).filter(Boolean);
+    return rankOptimize(priced, request, findOrder);
+  }, [optAsk, optKey, chain, legs, expKey, spot, ticker, priceAlt, request, findOrder]); // eslint-disable-line
+  // What Build's section reads (build.jsx `OptimizeSection`). A load is the run's own answer, so the list stays open on the
+  // trade it put on Build (its key, re-asked).
+  const optimizeView = (() => {
+    const base = { note: optimizeNote(OPTIMIZE_STEPS), asked: !!optimizeRun, onRun: () => setOptAsk(optKey),
+      onLoad: (alt) => { openOnBuild({ ticker, expKey: alt.expKey, legs: alt.legs, name: stratName, origin: { kind: "variant", key: null } });
+        setOptAsk(`${ticker}|${alt.expKey}|${legsLine(alt.legs)}`); } };
+    if (!optimizeRun) return base;
+    const r = optimizeRun;
+    return { ...base, summary: optimizeSummary(r), place: optimizePlaceLine(r.place),
+      none: r.rows.length ? (r.anyFit ? null : OPTIMIZE_NONE_FIT) : r.checked ? OPTIMIZE_ALL_CUT : OPTIMIZE_EMPTY,
+      rows: r.rows.map((x) => ({ ...x, label: `${x.tag} · ${x.label}`, current: !!x.loaded, miss: !x.fits,
+        note: optimizeRowNote({ reason: x.fits ? null : x.reason, dte: x.dte, place: placeLine(x.rank, findOrder) }) })) };
+  })();
   /* ONE COMPARE (PR 61, owner 7 Oct 2026). The tick selects; ONE sheet — Find's "Compare ›", the market page's "See
      them ›", Build's "N still ticked" — shows the ticked cards, or with none ticked the cards that fit, and its copilot
      reads exactly the rows it shows (`compareCards()`: the card's own figures for the size the budget buys, C1…Cn). The
@@ -3859,8 +3935,25 @@ export default function OptionsStrategyLab() {
     const rm = rp ? positionModels[rp.id] : null;
     if (!rp || !rm) return null;
     const el = rollEligible({ pnl: rm.pnl, notHeld: rm.act.kind === "not-held", working: !!rm.working, factors: rm.ev ? rm.ev.factors : [] });
-    const rows = el.ok && rp.expKey ? rollCandidates({ legs: rp.legs, expKey: rp.expKey, chain: rm.c }).map((c) => priceAlt(rp.ticker, c)).filter(Boolean) : [];
-    return { ...el, rows };
+    if (!el.ok || !rp.expKey) return { ...el, rows: [] };
+    /* PR 65: OPTIMIZE'S SEARCH ON THE LATER EXPIRIES, JUDGED ON THE WHOLE TRADE (owner: "weigh the starting position more").
+       Each candidate goes through Find's floors at the SIZE HELD (`rm.n`), then `rollJudge()`: today's P&L, booked by the
+       close, plus the new trade at that size — never a worst case past the maximum loss accepted at entry, ranked by the
+       chance the whole trade gets back to zero (`rankRolls()`), the best three shown. */
+    const n = rm.n;
+    // `Number(null)` is 0 and 0 is finite (CLAUDE.md): a max loss nobody recorded is null, tested before the coercion.
+    const accepted = rp.maxLoss != null && Number.isFinite(Number(rp.maxLoss)) && Number(rp.maxLoss) !== 0 ? Math.abs(Number(rp.maxLoss)) * n : null;
+    const priced = rollCandidates({ legs: rp.legs, expKey: rp.expKey, chain: rm.c, spot: rm.s })
+      .map((c) => priceAlt(rp.ticker, c, { floors: true, contracts: n })).filter(Boolean);
+    const read = priced.filter((x) => !x.cut).map((x) => ({ ...x, judge: rollJudge({ realized: rm.pnl, n, accepted,
+      target: rm.tpTarget ? rm.tpTarget.dollars : null, legs: x.legs, entryNet: x.entryNet, spot: x.spot, mc: x.mc, maxLoss: x.maxLoss }) }));
+    const kept = rankRolls(read);
+    const overRisk = read.filter((x) => x.judge.why === "overRisk").length;
+    const rows = kept.slice(0, 3).map((x) => ({ ...x, note: rollWholeLine(x.judge) }));
+    return { ...el, rows, accepted, n,
+      summary: priced.length ? rollSummaryLine({ checked: priced.length, expiries: new Set(priced.map((x) => x.expKey)).size, kept: kept.length,
+        overRisk, cut: priced.length - read.length, accepted }) : null,
+      none: priced.length && !kept.length ? ROLL_NONE_SAFE : null };
   }, [detailsId, ownedPositions, positionModels, priceAlt]);
   const positionScreenNode = (() => {
     const dp = detailsId != null ? ownedPositions.find((x) => x.id === detailsId) : null;
@@ -3931,9 +4024,11 @@ export default function OptionsStrategyLab() {
               canKeep: dm.act.action === "WARNING" || dm.act.action === "CLOSE", hasTarget: !!dm.tpTarget,
               canRoll: !!(rollView && rollView.ok && rollView.rows.length) }),
             // PR 4b: whether a roll is offered, why (or why not), and its candidates as the app priced them.
-            roll: rollView ? { offered: rollView.ok, why: ROLL_WHY[rollView.why], candidates: rollView.rows.map((r) => ({ label: r.label,
+            roll: rollView ? { offered: rollView.ok, why: ROLL_WHY[rollView.why], judgedOn: rollView.ok ? ROLL_JUDGE_NOTE : null,
+              summary: rollView.summary || null, none: rollView.none || null,
+              candidates: rollView.rows.map((r) => ({ label: r.label,
               legs: r.legsText, contracts: r.n, youRisk: r.youRisk, maxProfit: r.maxProfit, chance: r.chance, returnOnRisk: r.rr,
-              futureAvg: r.future, pastYrs: r.past, gate: r.gateText })) } : null,
+              futureAvg: r.future, pastYrs: r.past, gate: r.gateText, wholeTrade: r.note })) } : null,
             greeksAtEntry: dp.thesis ? { deltaShares: dp.thesis.delta != null ? Math.round(Number(dp.thesis.delta) * 100 * dm.n) : null,
               thetaPerDay: null, vegaPerVolPoint: dp.thesis.vega != null ? Math.round(Number(dp.thesis.vega) * dm.n) : null,
               note: "Recorded when the trade was opened; theta was not recorded at entry." } : null,
@@ -3944,9 +4039,11 @@ export default function OptionsStrategyLab() {
             legs: dp.legs, breakevens: bands && Array.isArray(bands.breakevens) ? bands.breakevens : [], spot: dm.s,
             note: "These figures come from the open position on this screen. They are not recomputed here." }) : null } },
       roll: rollView && (rollView.ok || rollView.why === "turned" || rollView.why === "notRecorded") ? {
-        ok: rollView.ok, why: ROLL_WHY[rollView.why], how: ROLL_HOW, rows: rollView.rows,
+        ok: rollView.ok, why: ROLL_WHY[rollView.why], how: `${ROLL_HOW} ${ROLL_JUDGE_NOTE}`, rows: rollView.rows,
+        summary: rollView.summary || null, none: rollView.none || null,
+        // PR 65: the roll keeps the size held, the one the whole-trade judge read; it arrives on Build as that size.
         onPrepare: (alt) => { setDetailsId(null); openOnBuild({ ticker: dp.ticker, expKey: alt.expKey, legs: alt.legs, name: dp.name || dm.name,
-          origin: { kind: "roll", key: null, fromId: dp.id, fromRef: dp.ref || dp.ticker } }); } } : null,
+          contracts: rollView.n, origin: { kind: "roll", key: null, fromId: dp.id, fromRef: dp.ref || dp.ticker } }); } } : null,
       guardian: (
         <GuardianPanel
           pos={dp} spot={dm.s || dp.entrySpot} dteLeft={dm.dteLeft} ivNow={dm.ivNow}
@@ -4772,7 +4869,9 @@ export default function OptionsStrategyLab() {
             onAnalysis={logAnalysis}
             copilot={{ apiKey: "server", convo: marketChat, setConvo: setMarketChat, onAnalysis: logAnalysis,
               ctx: { store, scan, news: newsPool.filter((n) => (n.impacts || []).some((im) => im.tk === mkt.tk)), ticker: mkt.tk,
-                legs: [], expKey: null, A: null, spot: chains[mkt.tk]?.spot ?? null, seasonalSrc: seasonalFor(mkt.tk).source } }}
+                legs: [], expKey: null, A: null, spot: chains[mkt.tk]?.spot ?? null, seasonalSrc: seasonalFor(mkt.tk).source,
+                // PR 65, "Do the four signals agree?": the very reading the Signals tab shows, and what is still being read.
+                signals: { fused: findGen.boards[mkt.tk] ? fuseFind(mkt.tk, findGen.boards[mkt.tk].dte) : null, reading: readiness[mkt.tk] || null } } }}
             sheet={deskSheet} onSheet={setDeskSheet}
             compareProps={compareBlock} />
         )}
@@ -5337,7 +5436,7 @@ export default function OptionsStrategyLab() {
               onMarketRead: () => goMarket(ticker, "overview"), readLabel: MARKET_READ_LINK },
             copilot: { apiKey: "server", convo: copilot, setConvo: setCopilot, onAnalysis: logAnalysis,
               ctx: { store, scan, news: news[ticker]?.items || [], ticker, legs, expKey, A, spot, seasonalSrc: seas.src, setMsg,
-                reviewChecks: reviewNow.checks, variants: buildVariants,
+                reviewChecks: reviewNow.checks, variants: buildVariants, optimize: optimizeView.rows ? optimizeView : null,
                 // THE CHART (PR 4, "The chart and this trade"): `taContext()`'s own indicators on the cached daily bars, with
                 // this trade's legs and breakevens; null until the bars have loaded. A function: worked out at the send only.
                 chart: () => (barsCache[ticker] || []).length ? taContext(barsCache[ticker], { name: stratName, expKey, dte, legs,
@@ -5387,6 +5486,7 @@ export default function OptionsStrategyLab() {
             variants: { rows: buildVariants, note: VARIANTS_NOTE, none: VARIANTS_NONE,
               onLoad: (alt) => openOnBuild({ ticker, expKey: alt.expKey, legs: alt.legs, name: stratName,
                 origin: buildOrigin && buildOrigin.kind === "roll" ? buildOrigin : { kind: "variant", key: null } }) },
+            optimize: buildOrigin && buildOrigin.kind === "roll" ? null : optimizeView,
             send: { label: sendLabel({ type: ticket.type, net, n: contracts }), disabled: !!sendBlock, reason: sendBlock,
               footer: SEND_FOOTER(ticket.tif), onSend: () => setDeskSheet("review") },
             review: reviewNow,

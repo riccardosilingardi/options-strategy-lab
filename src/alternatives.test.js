@@ -1,7 +1,8 @@
 // PR 4b — the alternatives of a structure, from the chain: Build's variants and a position's roll.
 import assert from "node:assert/strict";
-import { shiftLegs, widthLegs, sameOnBoard, laterExpiries, variantsOf, rollCandidates, rollEligible, daysTo } from "./alternatives.js";
-import { ROLL_WHY, VARIANT_LABELS, gateLine } from "./rules.js";
+import { shiftLegs, widthLegs, sameOnBoard, laterExpiries, variantsOf, rollCandidates, rollEligible, daysTo,
+  windowExpiries, movesOnBoard, optimizeCandidates, OPTIMIZE_STEPS, rollJudge, rankRolls } from "./alternatives.js";
+import { ROLL_WHY, VARIANT_LABELS, gateLine, rollWholeLine, rollSummaryLine, ROLL_NONE_SAFE } from "./rules.js";
 
 let passed = 0; const failures = [];
 const test = (name, fn) => { try { fn(); passed++; console.log(`  ok   ${name}`); } catch (e) { failures.push({ name, e }); console.log(`  FAIL ${name}\n       ${e.message}`); } };
@@ -55,11 +56,82 @@ test("BUILD'S VARIANTS: up, down, wider, the next expiry — only what the chain
   for (const k of Object.keys(VARIANT_LABELS)) assert.ok(VARIANT_LABELS[k].length > 3);
 });
 
-test("ROLL CANDIDATES: the same structure on the later expiries the window allows — same strikes, one step up and down", () => {
-  const r = rollCandidates({ legs: BCS, expKey: "2026-11-20", chain, now: NOW });
-  assert.deepEqual(r.map((x) => `${x.kind}@${x.expKey}`), ["roll@2026-12-18", "rollUp@2026-12-18", "rollDown@2026-12-18"]);
+test("ROLL CANDIDATES (PR 65: Optimize's search on the LATER expiries): same strikes, up to two steps up, down, wider, narrower", () => {
+  // Two steps, to hold the search at its widest; the app's default is OPTIMIZE_STEPS (one, task 64.5's measurement).
+  const r = rollCandidates({ legs: BCS, expKey: "2026-11-20", chain, spot: 14.2, now: NOW, steps: 2 });
+  assert.deepEqual(rollCandidates({ legs: BCS, expKey: "2026-11-20", chain, spot: 14.2, now: NOW }).map((x) => `${x.kind}${x.step || ""}`),
+    ["roll", "rollUp1", "rollDown1", "rollWider1"], "by default, one listed step");
+  assert.deepEqual(r.map((x) => `${x.kind}${x.step || ""}@${x.expKey}`), ["roll@2026-12-18", "rollUp1@2026-12-18", "rollDown1@2026-12-18",
+    "rollUp2@2026-12-18", "rollDown2@2026-12-18", "rollWider1@2026-12-18", "rollWider2@2026-12-18"]);
   assert.deepEqual(r[0].legs.map((l) => l.strike), [14, 15]);
+  assert.deepEqual(r.find((x) => x.kind === "rollWider" && x.step === 2).legs.map((l) => l.strike), [14, 17]);
+  assert.ok(r.every((x) => x.expKey > "2026-11-20"), "a roll is only ever later");
   assert.deepEqual(rollCandidates({ legs: BCS, expKey: "2026-12-18", chain, now: NOW }), [], "nothing later inside the window");
+  assert.equal(rollCandidates({ legs: BCS, expKey: "2026-11-20", chain, now: NOW }).some((x) => x.move === "wider"), false, "no spot read: no width, never a guess");
+});
+
+test("OPTIMIZE (PR 65): every expiry in the window × every move up to OPTIMIZE_STEPS, chain-listed only; the loaded trade is marked", () => {
+  assert.equal(OPTIMIZE_STEPS, 1, "one step: the rule fixed before measuring (scripts/measure-optimize.mjs)");
+  assert.deepEqual(windowExpiries(chain, { now: NOW }), ["2026-11-20", "2026-12-18"], "January (102 days) and March are past the window");
+  const m = movesOnBoard(BCS, [12, 13, 14, 15, 16, 17], 14.2, 2);
+  assert.deepEqual(m.map((x) => `${x.move}${x.step}`), ["same0", "up1", "down1", "up2", "down2", "wider1", "wider2"]);
+  assert.deepEqual(movesOnBoard(BCS, [12, 13, 14, 15, 16, 17], 14.2, 1).map((x) => `${x.move}${x.step}`), ["same0", "up1", "down1", "wider1"],
+    "one step is a subset of two");
+  const o = optimizeCandidates({ legs: BCS, expKey: "2026-11-20", chain, spot: 14.2, now: NOW, steps: 2 });
+  assert.equal(o.length, 14, "seven moves on each of the two boards in the window");
+  assert.equal(optimizeCandidates({ legs: BCS, expKey: "2026-11-20", chain, spot: 14.2, now: NOW }).length, 8, "four a board at the default step");
+  assert.equal(o.filter((x) => x.loaded).length, 1, "the loaded trade once");
+  assert.deepEqual(o.find((x) => x.loaded), { kind: "optimize", move: "same", step: 0, legs: BCS, expKey: "2026-11-20", loaded: true });
+  for (const x of o) for (const l of x.legs) assert.ok(Object.keys(chain.byExp[x.expKey].calls).map(Number).includes(l.strike), `${x.move}${x.step}@${x.expKey} names a listed strike`);
+  // A trade built on an expiry outside the window is still ranked: its own board is searched too.
+  const far = optimizeCandidates({ legs: [{ side: 1, qty: 1, type: "call", strike: 14 }, { side: -1, qty: 1, type: "call", strike: 15 }],
+    expKey: "2027-01-15", chain, spot: 14.2, now: NOW });
+  assert.ok(far.some((x) => x.expKey === "2027-01-15" && x.loaded));
+  assert.deepEqual(optimizeCandidates({ legs: BCS, expKey: "2026-11-20", chain: null, now: NOW }), [], "no chain: nothing invented");
+});
+
+/* ---- A ROLL JUDGED ON THE WHOLE TRADE (PR 65) ---- */
+// An independent normal CDF (Abramowitz–Stegun 7.1.26, |error| < 1.5e-7), not engine.js's, to hold the judge to the lognormal.
+const ncdf = (x) => { const t = 1 / (1 + 0.3275911 * Math.abs(x) / Math.SQRT2);
+  const y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x / 2);
+  return x >= 0 ? (1 + y) / 2 : (1 - y) / 2; };
+const above = (K, { S, sigma, dte, drift = 0 }) => { const T = dte / 365, s = sigma * Math.sqrt(T), m = (drift - sigma * sigma / 2) * T;
+  return 1 - ncdf((Math.log(K / S) - m) / s); };
+
+test("ROLL JUDGE: today's loss plus the new trade at the size held; never more risk than accepted; the chances are the lognormal's", () => {
+  // The new trade: the 14/15 call spread at 0.40 — X per combination runs from -$40 (below 14) to +$60 (above 15).
+  const mc = { driftAnnual: 0, sigma: 0.4, dte: 60, ev: 2.5 };
+  const base = { realized: -120, n: 3, legs: BCS, entryNet: 0.4, spot: 14.2, mc, maxLoss: -40 };
+  const j = rollJudge({ ...base, accepted: 300, target: 30 });
+  assert.equal(j.ok, true); assert.equal(j.why, "ok");
+  assert.equal(j.worst, -120 + 3 * -40, "the close's loss plus three new maximum losses");
+  // Back to zero: -120 + 3X ≥ 0 ⇔ X ≥ 40 ⇔ the spread pays 0.80 ⇔ the price ends at 14.80 or more.
+  assert.ok(Math.abs(j.back - above(14.8, { S: 14.2, sigma: 0.4, dte: 60 })) < 1e-6, `back ${j.back}`);
+  // The target ($30 on the whole): X ≥ 50 ⇔ 14.90 or more.
+  assert.ok(Math.abs(j.target - above(14.9, { S: 14.2, sigma: 0.4, dte: 60 })) < 1e-6, `target ${j.target}`);
+  assert.equal(j.avg, -120 + 3 * 2.5);
+  // Over the risk accepted at entry: refused, with the figures that say why.
+  const over = rollJudge({ ...base, accepted: 200 });
+  assert.equal(over.ok, false); assert.equal(over.why, "overRisk"); assert.equal(over.worst, -240);
+  assert.equal(rollJudge({ ...base, accepted: 240 }).ok, true, "exactly the accepted risk is within it");
+  // A target out of reach is a chance of zero, not an unknown; no target is unknown.
+  assert.equal(rollJudge({ ...base, accepted: 300, target: 90 }).target, 0);
+  assert.equal(rollJudge({ ...base, accepted: 300 }).target, null);
+  // Unknown is not zero: a missing P&L, size, accepted risk or model is never a pass.
+  for (const miss of [{ realized: null }, { n: null }, { accepted: null }, { mc: null }, { maxLoss: null }, { n: 0 }]) {
+    assert.equal(rollJudge({ ...base, accepted: 300, ...miss }).why, "noFigures", JSON.stringify(miss));
+  }
+});
+
+test("ROLLS RANK BY THE CHANCE THE WHOLE TRADE GETS BACK TO ZERO, THEN THE AVERAGE; a refused one is never ranked", () => {
+  const row = (id, back, avg, ok = true) => ({ id, judge: { ok, why: ok ? "ok" : "overRisk", back, avg } });
+  assert.deepEqual(rankRolls([row("a", 0.3, 10), row("b", 0.5, -20), row("c", 0.5, 5), row("d", 0.9, 50, false), row("e", 0.3, null)]).map((r) => r.id),
+    ["c", "b", "a", "e"]);
+  assert.equal(rollWholeLine({ back: 0.412, target: 0.18, worst: -540, avg: -35 }),
+    "Whole trade: back to $0 or better 41% · reaches your target 18% · worst -$540 · avg -$35");
+  assert.equal(rollSummaryLine({ checked: 24, expiries: 3, kept: 9, overRisk: 13, cut: 2, accepted: 600 }),
+    "Checked 24 rolls on 3 later expiries: 9 keep the whole trade within the $600 you accepted at entry; 13 would risk more and are not offered; 2 fail a floor.");
+  assert.ok(ROLL_NONE_SAFE.includes("more at risk than you accepted"));
 });
 
 test("A ROLL IS OFFERED ONLY WHEN NOT IN PROFIT AND THE REASONS HOLD; unknown is a no with its reason", () => {
