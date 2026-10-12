@@ -5,7 +5,8 @@
 // components (FindHeader, FindStep, SavedList, MarketPage, BottomBar) on the fixtures findB.test.jsx already uses — the
 // 31 fixture cards (scripts/find-fixtures.jsx) and the Alpaca-shaped UNG chain — with the app's own page shell for these
 // screens (edge to edge, the list ending FIND_LIST_END above the bottom). Nothing here is a live price; nothing is sent.
-// The screen is picked by the location hash: #find, #find-budget, #find-nothing, #saved, #strategies, #overview, #chain.
+// The screen is picked by the location hash: #find, #find-budget, #find-nothing, #find-binding, #saved, #strategies, #overview,
+// #chain.
 // ============================================================================
 import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -122,6 +123,8 @@ const VIEWS = {
   find: () => <FindScreen />,
   "find-budget": () => <FindScreen sheet="find:budget" />,
   "find-nothing": () => <FindScreen want={{ amt: 10 }} />,
+  // PR 66: chance ≥ 60% keeps SPY and dims UNG — the line that names the binding filter, and its one fix.
+  "find-binding": () => <FindScreen want={{ minChance: 0.6 }} />,
   saved: () => <FindScreen seg="saved" />,
   strategies: () => <Market tab="strategies" />,
   overview: () => <Market tab="overview" />,

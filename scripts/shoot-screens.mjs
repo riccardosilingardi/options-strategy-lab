@@ -2,6 +2,7 @@
 // scripts/shoot-screens.mjs — PHOTOGRAPH THE SCREENS (redesign PR 1, round 2, TASK 4).
 //
 //   node scripts/shoot-screens.mjs [outDir]       (default docs/screens/redesign-pr1)
+//   ONLY=find-binding,find-binding-light node scripts/shoot-screens.mjs docs/screens/pr66   (PR 66: a few shots only)
 //
 // Bundles scripts/screens.jsx for the browser (esbuild; `node:fs` is swapped for the one fixture file it reads), serves
 // it on a local port, and drives the pre-installed headless Chromium (Playwright) at 390×844, dark, then one screen in
@@ -46,7 +47,8 @@ const SHOTS = [
   ["01-find", "find"], ["02-find-budget-sheet", "find-budget"], ["03-find-nothing-fits", "find-nothing"], ["04-saved", "saved"],
   ["05-market-strategies", "strategies"], ["06-market-overview", "overview"], ["06b-market-overview-copilot", "overview-copilot"], ["07-market-chain-two-legs", "chain"],
   ["08-market-strategies-light", "strategies", "light"],
-];
+  ["find-binding", "find-binding"], ["find-binding-light", "find-binding", "light"],
+].filter(([name]) => !process.env.ONLY || process.env.ONLY.split(",").includes(name));
 const browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM || undefined });
 const report = [];
 try {

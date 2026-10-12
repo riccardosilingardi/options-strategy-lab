@@ -792,9 +792,12 @@ export function rankScore(ev100, fused, dir) {
    One function sorts (`findOrderCompare()`) and the card's "sorted by" line (`placeLine()`) is built from the same
    figures, so a card cannot say a reason the sort did not use.
 
-   PR #49: the names are the owner's ("Future avg", "Future avg + signal", "Chance", "Return on risk", "Past yrs") and
-   live in rules.js with the card's labels; "Past yrs" sorts by the replay's win rate, then by its average per $100
-   at risk (a per-size dollar figure would sort on the budget, not on the trade).
+   PR #49: the names are the owner's ("Future avg", "Chance", "Return on risk", "Past yrs") and live in rules.js with the
+   card's labels; "Past yrs" sorts by the replay's win rate, then by its average per $100 at risk (a per-size dollar
+   figure would sort on the budget, not on the trade).
+   PR 66 (owner, 12 Oct 2026): "Future avg + signal" is gone — the View chip carries the direction. A stored "evSignal"
+   reads as "Future avg" (`findOrderOf()`'s fallback). `signalAdjustment()` stays: `rankScore()` and `withSignalRank()`
+   read it for the candidates' `rank`.
 ================================================================ */
 export { FIND_ORDERS, DEFAULT_FIND_ORDER };
 export const findOrderOf = (id) => FIND_ORDERS.find((o) => o.id === id) || FIND_ORDERS[0];
@@ -802,14 +805,11 @@ export const findOrderOf = (id) => FIND_ORDERS.find((o) => o.id === id) || FIND_
 const ev100Of = (x) => (x && Number.isFinite(x.ev100) && x.ev100 > -999 ? x.ev100 : null);
 /** The past replay a card carries (`pastFigures()` per contract), or null when the series has not loaded. */
 const pastOf = (x) => (x && x.past && Number.isFinite(x.past.winRate) ? x.past : null);
-/** The signal's share of a card's place, in EV points: `signalAdjustment()` for the direction the card needs. */
-export const placeSignal = (x) => signalAdjustment(x && x.fused, sentimentDirection(x && x.sent));
 
 /** The one figure a card sorts on under `order`; null sorts last. "Past yrs" sorts on two (`findOrderCompare`). */
 export function findOrderKey(x, order = DEFAULT_FIND_ORDER) {
   const ev = ev100Of(x);
   switch (findOrderOf(order).id) {
-    case "evSignal": return ev == null ? null : ev + placeSignal(x);
     case "chance": return x && x.lf && Number.isFinite(x.lf.pop) ? x.lf.pop : null;
     case "rr": return x && x.lf && Number.isFinite(x.lf.rr) ? x.lf.rr : null;
     case "past": { const p = pastOf(x); return p ? p.winRate : null; }
@@ -817,14 +817,10 @@ export function findOrderKey(x, order = DEFAULT_FIND_ORDER) {
   }
 }
 
-/** The comparator. Highest first, unknown last; CONFLICT last only under "Future avg + signal"; "Past yrs" breaks a
- *  tie in win rate on the replay's average per $100 at risk. */
+/** The comparator. Highest first, unknown last; "Past yrs" breaks a tie in win rate on the replay's average per $100 at
+ *  risk. */
 export const findOrderCompare = (order = DEFAULT_FIND_ORDER) => (a, b) => {
   const id = findOrderOf(order).id;
-  if (id === "evSignal") {
-    const ca = a?.fused?.agreement === "CONFLICT", cb = b?.fused?.agreement === "CONFLICT";
-    if (ca !== cb) return ca ? 1 : -1;
-  }
   const ka = findOrderKey(a, order), kb = findOrderKey(b, order);
   if (ka == null || kb == null) return ka == null ? (kb == null ? 0 : 1) : -1;
   if (kb !== ka) return kb - ka;
@@ -837,8 +833,7 @@ export const findOrderCompare = (order = DEFAULT_FIND_ORDER) => (a, b) => {
 };
 
 const sgn1 = (v) => `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(1)}`;
-/** Why a card sits where it does. Under "Future avg + signal" it is on the card at rest (PR #49, TASK 1):
- *  "sorted by −3.6 + signal +27.5 = 23.9 per $100"; the other orders ring their tile instead. */
+/** Why a card sits where it does, in the order's own figure (Optimize's rows print it; the cards ring their tile). */
 export function placeLine(x, order = DEFAULT_FIND_ORDER) {
   const id = findOrderOf(order).id;
   const ev = ev100Of(x);
@@ -846,10 +841,7 @@ export function placeLine(x, order = DEFAULT_FIND_ORDER) {
   if (id === "rr") return x?.lf && Number.isFinite(x.lf.rr) ? `return on risk ${Math.round(x.lf.rr * 100)}%` : "no ceiling · last";
   if (id === "past") { const p = pastOf(x); return p ? `past yrs won ${p.wins} of ${p.n}` : "past yrs not read · last"; }
   if (ev == null) return "future avg not known · last";
-  if (id !== "evSignal") return `future avg ${sgn1(ev)} per $100`;
-  const sig = placeSignal(x);
-  const conflict = x?.fused?.agreement === "CONFLICT" ? " · CONFLICT: last" : "";
-  return `sorted by ${sgn1(ev)} + signal ${sgn1(sig)} = ${(ev + sig).toFixed(1)} per $100${conflict}`;
+  return `future avg ${sgn1(ev)} per $100`;
 }
 
 /** "CORN ↑ +64 · conf 86" — the card's badge (PR #48, TASK 4). A CONFLICT reads "●", a zero score "●". */
@@ -866,12 +858,10 @@ export const badgeText = (fused, tk = fused && fused.ticker) => {
  * @returns {{ k, text }[]}
  */
 export function numbersFitLines(order = DEFAULT_FIND_ORDER) {
-  const evSignal = findOrderOf("evSignal").label;
   return [
     { k: "future", text: `Future (model) = every price the model allows at expiry, worked out exactly: the spread from the option prices, the lean from the season's months that beat ${RULES.seasonalSignalT}× their own noise. It is a model, not history.` },
     { k: "past", text: "Past yrs (backtest) = this trade replayed on the ETF's real past, one row per year: the same calendar window, settled at expiry." },
-    { k: "signal", text: `+ signal = score ÷ ${SIGNAL_DIVISOR} × confidence ÷ 100 for a bull or bear card; (${NEUTRAL_QUIET} − |score|) ÷ ${SIGNAL_DIVISOR} × confidence ÷ 100 for a neutral one. Only "${evSignal}" adds it.` },
-    { k: "filter", text: `Filter = the sliders and toggles only; the order never hides a card. The order is the one you chose (${findOrderOf(order).label}).` },
+    { k: "filter", text: `Filter = the chips only (your view, the style, the budget and More); the order never hides a card. The order is the one you chose (${findOrderOf(order).label}).` },
     { k: "decide", text: `"Signals decide" = score × confidence ÷ 100 against ±${RULES.directionSignalMin}.` },
     { k: "autopilot", text: `Autopilot = confidence of at least ${RULES.autopilotConfidence}.` },
   ];

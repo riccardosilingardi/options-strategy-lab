@@ -63,8 +63,9 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
   budget buys, from `sizedFigures()` and `sizeLine()`, read at `aFill` (Find) and `AE` (Build), held
   equal by the same test — and so are the two PR #49 tiles, `futureFigures()` and `pastFigures()`.
 - **The card's names are the owner's (3 Oct 2026) and live in rules.js only:** `CARD_LABELS` — YOU RISK, MAX PROFIT,
-  CHANCE, RETURN ON RISK, FUTURE (MODEL) (FUTURE (MONTE CARLO) until PR 62), PAST YRS (BACKTEST) — and `FIND_ORDERS` — Future avg · Future avg +
-  signal · Chance · Return on risk · Past yrs (each with the `tile` it rings); `PAST_AVG_LABEL` ("PAST YRS AVG") on
+  CHANCE, RETURN ON RISK, FUTURE (MODEL) (FUTURE (MONTE CARLO) until PR 62), PAST YRS (BACKTEST) — and `FIND_ORDERS` — Future avg ·
+  Chance · Return on risk · Past yrs (each with the `tile` it rings; "Future avg + signal" removed in PR 66, a stored "evSignal"
+  reads as Future avg); `PAST_AVG_LABEL` ("PAST YRS AVG") on
   Build; the two toggles' words. Positions' "at entry vs now" reads the first four. No screen spells them itself.
 - **The historical replay has one home: `histBacktest()` in engine.js** (PR #49): the trade settled at expiry in the
   same calendar window of every past year, whole months, the current year left out; a window past December reads the
@@ -111,8 +112,18 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
   (`SEASON_NOT_READ`): the factor is excluded and the chance drifts at zero. There is no hand-written table; never add one.
 - **"Signals decide" is `signalDirection()`** (signals.js): score × confidence / 100 against `RULES.directionSignalMin`,
   CONFLICT Neutral, never "Very"; a market shows that family plus Neutral. **The list order is the owner's**
-  (`settings.findOrder`, `findOrderCompare()`); only "Future avg + signal" adds `signalAdjustment()`, and then the
-  card says its sum at rest with `placeLine()` on the same figures. The tile the list is sorted by is ringed.
+  (`settings.findOrder`, `findOrderCompare()`); no order adds the signal since PR 66 (`signalAdjustment()` stays for
+  `rankScore()` / `withSignalRank()`). The tile the list is sorted by is ringed.
+- **Find's chips, from your view of the market (PR 66, owner 12 Oct 2026): View · Style · Max loss · ⇅ Sort · More**
+  (`FIND_CHIPS`, `chipPartsOf()`, `chipText()`, `chipOffDefault()`, `moreOffCount()` in rules.js). **View** is Signals
+  decide · Up · Down · Range; the target is in EXPECTED MOVES and picks the family (`dirOfView()`: up to
+  `RULES.viewVeryMoves` the Bull/Bear cards, beyond it the Very ones; `viewOfDir()` reads an old direction, "Very" as
+  `viewFartherMoves`); `find.dir` stays the family findGen builds and `find.target` the moves, so a target inside one family
+  re-builds nothing. **Style** is Cautious · Balanced · Bold (`FIND_STYLES`, `styleOf()`): the chance and return floors,
+  Balanced = the default list, the two sliders under "Set them yourself", "Custom" off a style. **More** holds Debit ·
+  Credit · Both (`request.side` in `meetsRequest()`, the card's `entryNet` sign: a miss is dimmed, an unknown net a miss),
+  Horizon, the Liquidity panel as a fold, and the three list toggles. **When rows are dimmed, `bindingFilter()` (rows.js)
+  names the control that leaves out the most markets, from the same misses, with one fix** that never passes the limit.
 - **Build, since redesign PR 2 (owner's mockup "3 · Build", 5 Oct 2026), is `src/build.jsx`** — it computes nothing; App.jsx
   hands it `v` (figures from `buildFigures()`/`AE`, the gate's `guard`, `buildCard`, `factorStands()`, `BF.bands`). Order:
   header ("‹ TK" back, "Paper"), title (`buildSubLine()`), What this trade does (`tradeTakeaway()` + `UnifiedView`, the one
@@ -131,7 +142,7 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
   is the market's first card that fits, else its first card as a miss in its place; a row's figures are `rowFigures()`, the
   card's tiles (figures.test.jsx). The market page (`src/market.jsx`) is a filtered view of the same list for one ticker
   (`findSorted`), never a second list; its ticker and tab are nav.js fields (`mkt`, `mtab`), and opening it does not
-  replace the trade loaded on Build. Every chip on Find opens a `Sheet` (ui.jsx) holding the existing control.
+  replace the trade loaded on Build. Every chip on Find opens a `Sheet` (ui.jsx) holding its controls.
   **A row prints three figures, always (PR 63): `rowFigures()`** — Chance · Return on risk · Avg per $100 at risk, the
   card's own, the sorted-by one ringed — then the days and the risk. **Find reads ONE expiry per market** (the board
   nearest the Horizon): reading every expiry costs 2–6× (PR 63's measurement); the owner moved that search to a separate
@@ -331,6 +342,9 @@ All in `RULES`, `src/rules.js`, unless noted.
 - Chance slider: `chanceAskMin` 0.20, `chanceAskMax` 0.80, `chanceAskStep` 0.05,
   `chanceAskDefault` none (null; the slider's leftmost position reads "any", PR #49). Return-on-risk slider: floor `minRewardRisk`, `rewardAskMax` 3,
   `rewardAskStep` 0.05 (it can only tighten the floor). Amount slider: `amountAskStep` 25.
+- Find's Style (PR 66): `styleCautiousChance` 0.5, `styleBoldReturn` 1.5. The View's target, in expected moves:
+  `viewTargetDefault` 1, `viewTargetMin` 0.5, `viewTargetMax` 3, `viewTargetStep` 0.25, `viewVeryMoves` 1.5,
+  `viewFartherMoves` 2 (all chosen on fixtures, PRD §4).
 - Quantity fields: ticket 1–20 (`OrderTicket`), leg 1–10 (Build legs editor), via `QtyField`.
 - Indicator periods: `PERIODS` in `src/indicators.js` (deliberately not in `RULES`).
 - Theme colours: `src/theme.js`. Liquidity measurement table: `LIQUIDITY_MEASUREMENT` in rules.
@@ -367,7 +381,10 @@ All in `RULES`, `src/rules.js`, unless noted.
 - `node scripts/shoot-pr61.mjs [dir]` photographs PR 61's screens (☆ with Undo, the tick and its line, the Compare sheet, Build's
   card-vs-limit and "already open" lines, AT RISK's "Includes…") on the `+book` fixture (docs/screens/pr61/).
 - `node scripts/measure-find.mjs` prints what each Find control passes on the 31 fixture cards and what
-  one slider move costs (`scripts/find-fixtures.jsx` builds the cards).
+  one slider move costs (`scripts/find-fixtures.jsx` builds the cards); since PR 66 also the cards and rows each Style and
+  each Debit · Credit choice keeps. `node scripts/shoot-pr66.mjs [dir]` photographs Find's chips and sheets and the market
+  page under a chosen View (`app+all`); `ONLY=find-binding,find-binding-light node scripts/shoot-screens.mjs docs/screens/pr66`
+  the binding-filter line on the two-market fixture (docs/screens/pr66/).
 - `node scripts/measure-season.mjs` (months that count, on avFixture series), `node scripts/measure-signals.mjs`
   ("Signals decide" against the retired rule), `node scripts/measure-sweep.mjs` (design-system counts per file).
 - No order can be sent from the sandbox (no broker keys); live behaviour is an OWNER CHECK.

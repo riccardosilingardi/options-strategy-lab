@@ -17,8 +17,11 @@ import { buildPresets } from "./App.jsx";
 import { scaleStrategy } from "./pro.jsx";
 import { MatchList, CandidateCard } from "./card.jsx";
 import { RULES, requestOf, sizing, sizedFree, sizedFigures, sizeLine, controlReadings, splitByRequest,
-  nearestRelaxation, resultsLine, futureFigures, futureIsPositive, FIND_ORDERS } from "./rules.js";
-import { findOrderCompare } from "./signals.js";
+  nearestRelaxation, resultsLine, futureFigures, futureIsPositive, FIND_ORDERS, FIND_CHIPS, chipText, chipPartsOf, chipOffDefault,
+  anyChipOff, moreOffCount, MORE_ITEMS, viewOfDir, dirOfView, FIND_STYLES, styleOf, styleNumbersText, NET_SIDES, netSideOf,
+  meetsRequest, nothingFits, bindingFilterText, viewTargetPrice, viewExampleText } from "./rules.js";
+import { findOrderCompare, findOrderOf } from "./signals.js";
+import { marketRows, bindingFilter } from "./rows.js";
 import { findCards, DIRECTIONS } from "../scripts/find-fixtures.jsx";
 
 const ok = [], bad = [];
@@ -308,7 +311,8 @@ check("THE SLIDERS NEVER TRIGGER A SIMULATION: generation stays in findGen's mem
   const app = code("src/App.jsx");
   const dep = app.match(/const findGen = useMemo\([\s\S]*?\n  \}, (\[[^\]]*\])\)/);
   if (!dep) throw new Error("findGen's dependency list moved; point this at it again");
-  for (const k of ["request", "want", "minChance", "minReturn", "amt", "freeSizing", "limits"]) {
+  // PR 66: nor the View's target, the style or the side — a target moved inside one family re-builds nothing.
+  for (const k of ["request", "want", "minChance", "minReturn", "amt", "freeSizing", "limits", "target", "side", "style"]) {
     if (new RegExp(`\\b${k}\\b`).test(dep[1])) throw new Error(`findGen depends on ${k}: a slider move re-simulates every card`);
   }
   for (const f of ["src/find.jsx", "src/card.jsx", "src/ui.jsx"]) {
@@ -331,6 +335,156 @@ check("ONE SLIDER MOVE ON THE 31 CARDS IS MILLISECONDS, NOT THE GENERATION'S HUN
   const per = (performance.now() - t0) / N;
   console.log(`       one slider move: ${per.toFixed(3)} ms on ${cards.length} cards`);
   if (per > 25) throw new Error(`${per.toFixed(1)} ms a move: something in it is no longer a filter`);
+});
+
+/* ====================================================================
+   PR 66 — FOUR CHIPS AND MORE, FROM YOUR VIEW OF THE MARKET (owner, 12 Oct 2026)
+==================================================================== */
+const ST = (o = {}) => ({ order: "ev", request: requestOf(o.want || {}, LIMITS), horizon: RULES.targetEntryDTE, dir: "signals", target: null,
+  positiveOnly: false, flagged: true, hideMisses: false, liqId: "recommended", liqLabel: "Recommended", liqDefault: "recommended", ...(o.st || {}) });
+
+check("66.1 — FIVE CHIPS, EACH SAYING ITS VALUE, AND OFF ITS DEFAULT ONLY WHEN SOMETHING WAS CHANGED", () => {
+  eq(FIND_CHIPS.map((c) => c.id).join(" "), "view style budget sort more", "the order of the row");
+  const at = ST();
+  eq(FIND_CHIPS.map((c) => chipText(c.id, at)).join(" | "), "View Signals | Style Balanced | Max loss $5,000 | ⇅ Future avg | More", "at rest");
+  eq(anyChipOff(at), false, "nothing is off at rest");
+  const cases = [
+    ["view", { st: { dir: "bull", target: null } }, "View Up 1×"],
+    ["view", { st: { dir: "verybear", target: null } }, `View Down ${RULES.viewFartherMoves}×`],
+    ["view", { st: { dir: "neutral" } }, "View Range"],
+    ["style", { want: { minChance: RULES.styleCautiousChance } }, "Style Cautious"],
+    ["style", { want: { minReturn: RULES.styleBoldReturn } }, "Style Bold"],
+    ["style", { want: { minChance: 0.65, minReturn: 1 } }, "Style Custom"],
+    ["budget", { want: { amt: 750 } }, "Max loss $750"],
+    ["budget", { want: { mode: "target", amt: 300 } }, "Target $300"],
+    ["sort", { st: { order: "past" } }, "⇅ Past yrs"],
+  ];
+  for (const [id, o, text] of cases) {
+    const st = ST(o);
+    eq(chipText(id, st), text, `${id} text`);
+    eq(chipOffDefault(id, st), true, `${id} is off its default`);
+    for (const other of FIND_CHIPS.map((c) => c.id).filter((c) => c !== id && c !== "budget")) eq(chipOffDefault(other, st), false, `${id} moved ${other}`);
+  }
+  eq(chipOffDefault("style", ST({ want: { minChance: null, minReturn: null } })), false, "Balanced is the default style");
+  eq(chipPartsOf("budget", ST()).name, "Max loss", "the IBKR wording");
+});
+
+check("66.1e — MORE COUNTS EACH OF ITS SIX ITEMS OFF ITS DEFAULT, AND SAYS HOW MANY", () => {
+  eq(MORE_ITEMS.join(" "), "side horizon liquidity positive flagged hideMisses", "what More holds");
+  const one = { side: { want: { side: "credit" } }, horizon: { st: { horizon: 60 } }, liquidity: { st: { liqId: "off" } },
+    positive: { st: { positiveOnly: true } }, flagged: { st: { flagged: false } }, hideMisses: { st: { hideMisses: true } } };
+  for (const k of MORE_ITEMS) {
+    const st = ST(one[k]);
+    eq(moreOffCount(st), 1, `${k} alone`); eq(chipText("more", st), "More · 1", `${k}: the chip`); eq(chipOffDefault("more", st), true, k);
+  }
+  const all = ST({ want: { side: "debit" }, st: { horizon: 60, liqId: "off", positiveOnly: true, flagged: false, hideMisses: true } });
+  eq(chipText("more", all), "More · 6", "all six");
+});
+
+check("66.1a — THE VIEW: the five old directions collapse into four, 'Very' is a farther target, and the target picks the family", () => {
+  for (const [dir, view, target] of [["verybull", "up", RULES.viewFartherMoves], ["bull", "up", RULES.viewTargetDefault],
+    ["verybear", "down", RULES.viewFartherMoves], ["bear", "down", RULES.viewTargetDefault], ["neutral", "range", null], ["signals", "signals", null]]) {
+    const v = viewOfDir(dir);
+    eq(v.view, view, `${dir}: view`); eq(v.target, target, `${dir}: target`);
+    eq(dirOfView(v.view, v.target), dir, `${dir}: and back to the same family`);
+  }
+  eq(viewOfDir("nonsense").view, "signals", "anything unknown is Signals decide, never an error");
+  eq(viewOfDir(undefined).view, "signals", "nothing stored is Signals decide");
+  // The target inside one family builds the same family (so findGen, which reads the family, re-builds nothing)…
+  eq(dirOfView("up", RULES.viewTargetMin), "bull"); eq(dirOfView("up", RULES.viewVeryMoves), "bull");
+  eq(dirOfView("up", RULES.viewVeryMoves + RULES.viewTargetStep), "verybull"); eq(dirOfView("down", RULES.viewTargetMax), "verybear");
+  // …a target kept when it still builds the family, the default when it does not.
+  eq(viewOfDir("bull", 1.25).target, 1.25); eq(viewOfDir("bull", 2.5).target, RULES.viewTargetDefault);
+  // The price on one market: spot ± target × the expected move; unknown is null, never a price of zero.
+  eq(viewTargetPrice("up", 1.5, 10, 0.8), 11.2); eq(+viewTargetPrice("down", 1, 10, 0.8).toFixed(2), 9.2);
+  eq(viewTargetPrice("up", 1, null, 0.8), null, "no spot"); eq(viewTargetPrice("range", 1, 10, 0.8), null, "range has no target");
+  has(viewExampleText("CORN", "up", 1, 17.2, 1.2, "2026-11-20"), "CORN $17.20 → $18.40 by 20 Nov (1× its expected move of ±$1.20).");
+});
+
+check("66.1b — THE THREE STYLES ON THE 31 FIXTURE CARDS: Cautious 5, Balanced 31 (today's default), Bold 19, no card shared", () => {
+  const kept = {};
+  for (const st of FIND_STYLES) {
+    const req = requestOf({ minChance: st.minChance, minReturn: st.minReturn }, LIMITS);
+    eq(styleOf(req), st.id, `${st.label} reads as itself`);
+    kept[st.id] = splitByRequest(cands, req, sizesFor(req)).meets.map((m) => m.cand.key);
+    const rows = marketRows(cards, req, sizesFor(req)).filter((r) => r.fits).length;
+    console.log(`       ${st.label.padEnd(9)} ${styleNumbersText(st).padEnd(30)} cards ${String(kept[st.id].length).padStart(2)} of ${cards.length} · rows ${rows} of 2`);
+  }
+  eq(kept.balanced.length, 31, "Balanced keeps today's default list");
+  const base = requestOf({}, LIMITS);
+  eq(styleOf(base), "balanced", "the default request IS Balanced");
+  eq(kept.cautious.length, 5, "Cautious"); eq(kept.bold.length, 19, "Bold");
+  const shared = kept.cautious.filter((k) => kept.bold.includes(k));
+  eq(shared.length, 0, "Cautious and Bold give visibly different lists");
+  // The return floor is never under minRewardRisk, whatever a style or a slider asks.
+  eq(requestOf({ minReturn: 0.01 }, LIMITS).minReturn, RULES.minRewardRisk, "never under the floor");
+});
+
+check("66.1e — DEBIT · CREDIT · BOTH ON THE FIXTURE CARDS: the card's own net decides, and an unknown net is a miss", () => {
+  const credits = cards.filter((c) => netSideOf(c.cand.entryNet) === "credit").length;
+  const debits = cards.filter((c) => netSideOf(c.cand.entryNet) === "debit").length;
+  eq(credits, 10, "credits on the fixture"); eq(debits, 21, "debits on the fixture");
+  eq(NET_SIDES.map((x) => x.id).join(" "), "debit credit both");
+  for (const [side, n] of [["both", 31], ["credit", 10], ["debit", 21]]) {
+    const req = requestOf({ side }, LIMITS);
+    eq(splitByRequest(cands, req, sizesFor(req)).meets.length, n, side);
+  }
+  const req = requestOf({ side: "credit" }, LIMITS);
+  const debit = cards.find((c) => netSideOf(c.cand.entryNet) === "debit");
+  const m = meetsRequest(debit.cand, req, sizesFor(req)(debit.cand)).misses;
+  eq(m.length, 1, "one miss"); eq(m[0].control, "side"); eq(m[0].short, "a debit, not a credit");
+  const unknown = meetsRequest({ ...debit.cand, entryNet: null }, req, sizesFor(req)(debit.cand)).misses;
+  eq(unknown[0].id, "side-unknown", "unknown is not a pass");
+  eq(netSideOf(0), null, "a net of zero is not a side"); eq(netSideOf(null), null, "Number(null) is 0: tested before");
+  // With nothing fitting at all, the one fix is to show both again.
+  const nf = nothingFits(cards.filter((c) => netSideOf(c.cand.entryNet) === "debit").map((c) => c.cand), req, sizesFor(req));
+  eq(nf.control, "side", "the side binds"); eq(nf.fix.patch.side, "both", "the fix");
+});
+
+check("66.2 — THE FILTER THAT BINDS: read from the same misses, its fix lets those markets in and never passes the limit", () => {
+  // Chance 60% on the fixture: SPY fits, UNG is dimmed by the chance alone.
+  const req = requestOf({ minChance: 0.6 }, LIMITS);
+  const b = bindingFilter(cards, req, sizesFor(req));
+  eq(b.control, "style", "the style binds"); eq(b.count, 1, "one market left out"); eq(b.text, "Style Custom leaves out 1 market");
+  eq(b.fix.label, "Loosen ›"); eq(JSON.stringify(b.fix.patch), JSON.stringify({ minChance: null, minReturn: null }), "Loosen is Balanced");
+  // Applied, the fix lets the market in.
+  const after = requestOf({ minChance: null, minReturn: null }, LIMITS);
+  eq(marketRows(cards, after, sizesFor(after)).filter((r) => r.fits).length, 2, "both rows fit after the fix");
+  // Nothing dimmed: nothing said.
+  eq(bindingFilter(cards, requestOf({}, LIMITS), sizesFor(requestOf({}, LIMITS))), null, "nothing to say at rest");
+  // The budget, on a limit of $250: a budget that leaves one market's cards over it names the budget, and its fix is an amount
+  // inside the limit — or no fix, said, when the cheapest card is over the limit.
+  const lim = { perTradeLimit: 250, tradingCapital: 5000 };
+  const sz = (r) => { const mm = new Map(cards.map((c) => [c.key, sizedFree(scaleStrategy(c.lf.aFill, r.mode, r.amt, r.riskCap), false)])); return (c) => mm.get(c.key) || null; };
+  let named = 0;
+  for (const amt of [25, 50, 75, 100, 150, 200]) {
+    const small = requestOf({ amt }, lim);
+    const bb = bindingFilter(cards, small, sz(small));
+    if (!bb || bb.control !== "size") continue;
+    named++;
+    if (bb.fix) {
+      if (!(bb.fix.patch.amt <= 250)) throw new Error(`the fix ${bb.fix.patch.amt} passes the $250 limit`);
+      if (!/^Max loss \$[\d,]+ ›$/.test(bb.fix.label)) throw new Error(bb.fix.label);
+      const fixed = requestOf({ amt: bb.fix.patch.amt }, lim);
+      const before = marketRows(cards, small, sz(small)).filter((r) => r.fits).length;
+      const now = marketRows(cards, fixed, sz(fixed)).filter((r) => r.fits).length;
+      if (!(now > before)) throw new Error(`$${amt}: the fix lets nothing in`);
+    } else has(bb.text, "over your per-trade limit");
+  }
+  console.log(`       the budget named as binding on ${named} of 6 amounts on a $250 limit`);
+  // The words: one home each.
+  eq(bindingFilterText({ control: "side", count: 4, side: "credit" }).text, "Credit only leaves out 4 markets");
+  eq(bindingFilterText({ control: "side", count: 4, side: "credit" }).fix, "Both ›");
+  eq(bindingFilterText({ control: "style", count: 5, style: "cautious" }).text, "Style Cautious leaves out 5 markets");
+  eq(bindingFilterText({ control: "size", count: 3, amt: 500, value: 750 }).fix, "Max loss $750 ›");
+  eq(bindingFilterText({ control: "size", count: 3, amt: 500, overLimit: true }).text, "Max loss $500 leaves out 3 markets · over your per-trade limit");
+});
+
+check("66.1d — A STORED 'evSignal' READS AS FUTURE AVG, AND NO ORDER ADDS THE SIGNAL", () => {
+  eq(findOrderOf("evSignal").id, "ev", "migrated");
+  const byEv = [...cards].sort(findOrderCompare("ev")).map((c) => c.key).join("|");
+  eq([...cards].sort(findOrderCompare("evSignal")).map((c) => c.key).join("|"), byEv, "the same list");
+  eq(FIND_ORDERS.length, 4, "four orders");
 });
 
 console.log(`\n${ok.length} passed, ${bad.length} failed\n`);

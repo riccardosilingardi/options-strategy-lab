@@ -409,6 +409,23 @@ export const RULES = {
   rewardAskStep: 0.05,
   // amountAskStep — the amount slider's step in dollars, and its smallest value: the old box said min 25, step 25.
   amountAskStep: 25,
+  // THE THREE STYLES ON FIND (PR 66, owner 12 Oct 2026: "too many filters, and not incisive"). A style sets the two
+  // request floors the chance and return sliders set; Balanced is today's default list (no chance asked, the return at
+  // `minRewardRisk`). CHOSEN ON THE 31 FIXTURE CARDS, not measured on live chains (PRD §4): Cautious keeps 5 (the credits:
+  // Bear Call, Bull Put ×3, SPY's Iron Condor), Bold keeps 19 (long options, butterflies, debit spreads), and the two share
+  // no card. At 60% Cautious kept 2 (one row of two); at 100% Bold kept 26, barely different from Balanced.
+  styleCautiousChance: 0.5,
+  styleBoldReturn: 1.5,
+  // THE VIEW'S TARGET (PR 66; the owner's answers to the plan, 12 Oct 2026): in EXPECTED MOVES (spot × IV × √(days ÷ 365)),
+  // so one number means the same thing on ten markets of different volatility; a dollar price is written for the market
+  // on screen. It PICKS THE FAMILY: up to `viewVeryMoves` builds the Bull (Bear) cards, beyond it the Very Bull (Very
+  // Bear) ones — what "Very" did before. An old "Very" direction reads as `viewFartherMoves`. Chosen, not measured.
+  viewTargetDefault: 1,
+  viewTargetMin: 0.5,
+  viewTargetMax: 3,
+  viewTargetStep: 0.25,
+  viewVeryMoves: 1.5,
+  viewFartherMoves: 2,
 
   // minNetPremium — THE PRICE HAS TO EXIST BEFORE ANY OTHER RULE CAN BE
   // APPLIED TO IT. In dollars per share, the unit an option is quoted in:
@@ -1579,15 +1596,16 @@ export const sentFiledText = (ref, withReason = false) =>
   `${ref ? `${ref} is filed in the Journal` : "The trade is filed in the Journal"}${withReason ? ", with the reason you wrote" : ""}; its state is on its row in Orders.`;
 
 /* =====================================================================
-   "ORDER BY" — THE FIVE ORDERS AND THEIR NAMES (PR #48, TASK 4; names and "Past yrs" PR #49, owner decision 3 Oct).
+   "⇅ SORT" — THE FOUR ORDERS AND THEIR NAMES (PR #48, TASK 4; names and "Past yrs" PR #49, owner decision 3 Oct).
    The labels live here, with the card's (one home for the words); `signals.js` sorts by them and re-exports them.
    `tile` is the card figure the list is sorted by, which the card rings and labels "sorted by" (PR #49, TASK 1).
    The ids are what `settings.findOrder` stores, unchanged since PR #48.
+   PR 66 (owner, 12 Oct 2026): "Future avg + signal" is removed — the View chip now carries the direction. A stored
+   "evSignal" reads as the first order, "Future avg" (`findOrderOf()` falls back to it; signals.test.js holds it).
 ===================================================================== */
 export const FIND_ORDERS = Object.freeze([
-  // `note` (redesign PR 1): what the Order sheet says under each name.
+  // `note` (redesign PR 1): what the Sort sheet says under each name.
   Object.freeze({ id: "ev", label: "Future avg", tile: "future", note: "the model's average result per $100 at risk" }),
-  Object.freeze({ id: "evSignal", label: "Future avg + signal", tile: "future", note: "the same average, plus what the market's signals add" }),
   Object.freeze({ id: "chance", label: "Chance", tile: "chance", note: "the chance of ending in profit at expiry" }),
   Object.freeze({ id: "rr", label: "Return on risk", tile: "rr", note: "the most it can make for each dollar at risk" }),
   Object.freeze({ id: "past", label: "Past yrs", tile: "past", note: "how often the past years won, then their average per $100" }),
@@ -1629,58 +1647,189 @@ export const refreshAria = (n) => `Refresh prices for ${n} market${n === 1 ? "" 
 export const SETTINGS_WORD = "Settings";
 export const FIND_SEGMENTS_ARIA = "Find: results or saved trades";
 export const CATEGORY_ALL = "All";
-/** The chip row, in order. `sheet: false` is the one toggled in place. */
+/* THE CHIP ROW, FROM YOUR VIEW OF THE MARKET (PR 66, owner 12 Oct 2026: "too many filters, and not incisive"; IBKR's
+   wizard starts from the person's view, then sorts). Eight chips and two hidden toggles became four chips and More:
+   View · Style · Budget · ⇅ Sort · More. Every one opens a sheet that ends with the live "Show N of M". */
 export const FIND_CHIPS = Object.freeze([
-  Object.freeze({ id: "order", label: "Order", sheet: true }),
+  Object.freeze({ id: "view", label: "View", sheet: true }),
+  Object.freeze({ id: "style", label: "Style", sheet: true }),
   Object.freeze({ id: "budget", label: "Budget", sheet: true }),
-  Object.freeze({ id: "chance", label: "Chance", sheet: true }),
-  Object.freeze({ id: "return", label: "Return", sheet: true }),
-  Object.freeze({ id: "horizon", label: "Horizon", sheet: true }),
-  Object.freeze({ id: "direction", label: "Direction", sheet: true }),
-  Object.freeze({ id: "positive", label: "Avg > 0", sheet: false }),
-  Object.freeze({ id: "liquidity", label: "Liquidity", sheet: true }),
+  Object.freeze({ id: "sort", label: "Sort", sheet: true }),
+  Object.freeze({ id: "more", label: "More", sheet: true }),
 ]);
 /** The sheet each chip opens: its title. */
-export const FIND_SHEET_TITLES = Object.freeze({ order: "Order the list by", budget: "Budget", chance: "Chance of profit",
-  return: "Return on risk", horizon: "Horizon", direction: "Direction", liquidity: "Liquidity" });
+export const FIND_SHEET_TITLES = Object.freeze({ view: "Your view of the market", style: "Style", budget: "Budget",
+  sort: "Sort the list by", more: "More filters" });
 export const SIGNALS_DECIDE = "Signals decide";
 export const SHOW_FLAGGED_TOGGLE = "Show flagged cards";
 
+/* THE VIEW (PR 66; the owner's answers to the plan, 12 Oct 2026). Four choices; the five old directions collapse into them
+   (Bull and Very Bull → Up, Bear and Very Bear → Down, Neutral → Range, "Very" a farther target). The target is in
+   EXPECTED MOVES and PICKS THE FAMILY Find builds: up to `RULES.viewVeryMoves` the Bull (Bear) cards, beyond it the Very
+   ones. No new pricing: the family is what findGen has always built from (`find.dir`). */
+export const FIND_VIEWS = Object.freeze([
+  Object.freeze({ id: "signals", label: SIGNALS_DECIDE, chip: "Signals" }),
+  Object.freeze({ id: "up", label: "Up", chip: "Up" }),
+  Object.freeze({ id: "down", label: "Down", chip: "Down" }),
+  Object.freeze({ id: "range", label: "Range", chip: "Range" }),
+]);
+/** The family Find builds for a view and a target (in expected moves): "signals", "bull", "verybull", "bear", "verybear",
+ *  "neutral". A missing target is the default one. */
+export function dirOfView(view, target = null) {
+  const t = target == null || !Number.isFinite(Number(target)) ? RULES.viewTargetDefault : Number(target);
+  const far = t > RULES.viewVeryMoves + 1e-9;
+  if (view === "up") return far ? "verybull" : "bull";
+  if (view === "down") return far ? "verybear" : "bear";
+  if (view === "range") return "neutral";
+  return "signals";
+}
+/** The view and the target a family reads as — and the migration of an old direction: "verybull" is Up with the farther
+ *  target, never an error; anything unknown is "Signals decide". `target` is kept when it still builds the same family. */
+export function viewOfDir(dir, target = null) {
+  const view = dir === "bull" || dir === "verybull" ? "up" : dir === "bear" || dir === "verybear" ? "down" : dir === "neutral" ? "range" : "signals";
+  if (view !== "up" && view !== "down") return { view, target: null };
+  const t = target == null || !Number.isFinite(Number(target)) ? null : Number(target);
+  if (t != null && dirOfView(view, t) === dir) return { view, target: t };
+  return { view, target: dir === "verybull" || dir === "verybear" ? RULES.viewFartherMoves : RULES.viewTargetDefault };
+}
+/** "1×", "1.5×": a target in expected moves. */
+export const movesText = (t) => `${Number(Number(t).toFixed(2))}×`;
+/** The price a target reaches on one market: spot ± target × the expected move to the expiry, or null when unknown. */
+export function viewTargetPrice(view, target, spot, move) {
+  const S = Number(spot), mv = Number(move), t = Number(target);
+  if (spot == null || move == null || !Number.isFinite(S) || !Number.isFinite(mv) || !Number.isFinite(t) || S <= 0 || mv <= 0) return null;
+  if (view === "up") return S + t * mv;
+  if (view === "down") return Math.max(0, S - t * mv);
+  return null;
+}
+/** What a view builds, one sentence (the View sheet). */
+export function viewBuildsText(view, target = null) {
+  if (view === "range") return "Range builds the Neutral cards: an iron condor, an iron butterfly, a call butterfly.";
+  if (view === "up" || view === "down") {
+    const fam = view === "up" ? "Bull" : "Bear";
+    const far = dirOfView(view, target) === (view === "up" ? "verybull" : "verybear");
+    return `Up to ${movesText(RULES.viewVeryMoves)} the expected move builds the ${fam} cards; beyond it, the Very ${fam} cards ` +
+      `(a long ${view === "up" ? "call" : "put"}, a wide spread, a butterfly). This target builds the ${far ? `Very ${fam}` : fam} cards.`;
+  }
+  return "Each market's four signals pick Bull, Bear or Neutral; the Neutral cards are always listed.";
+}
+/** "CORN $17.20 → $18.40 by 20 Nov" — the target as a price on one market, or null when it cannot be read. */
+export function viewExampleText(tk, view, target, spot, move, expKey) {
+  const p = viewTargetPrice(view, target, spot, move);
+  if (p == null) return null;
+  return `${tk} $${Number(spot).toFixed(2)} → $${p.toFixed(2)}${expKey ? ` by ${(expiryWords(expKey) || expKey).replace(/ \d{4}$/, "")}` : ""} ` +
+    `(${movesText(target)} its expected move of ±$${Number(move).toFixed(2)}).`;
+}
+export const VIEW_TARGET_LABEL = "Target, in expected moves";
+/** The market page's line for a chosen view: "View: Up to $18.40, your choice" (no price read: the target in moves). */
+export function viewChoiceLabel(view, target, price = null) {
+  const v = FIND_VIEWS.find((x) => x.id === view) || FIND_VIEWS[0];
+  if (view !== "up" && view !== "down") return v.label;
+  return `${v.label} to ${price != null && Number.isFinite(Number(price)) ? `$${Number(price).toFixed(2)}` : `${movesText(target)} the expected move`}`;
+}
+
+/* THE STYLE (PR 66): three presets of the two request floors the chance and return sliders set. Balanced is the default
+   list. Their values are RULES' (chosen on the 31 fixture cards, PRD §4); a slider moved off them is "Custom". */
+export const FIND_STYLES = Object.freeze([
+  Object.freeze({ id: "cautious", label: "Cautious", minChance: RULES.styleCautiousChance, minReturn: null,
+    note: "more often right, smaller wins" }),
+  Object.freeze({ id: "balanced", label: "Balanced", minChance: null, minReturn: null, note: "no chance asked; the return floor only" }),
+  Object.freeze({ id: "bold", label: "Bold", minChance: null, minReturn: RULES.styleBoldReturn, note: "bigger wins, less often" }),
+]);
+export const STYLE_CUSTOM = "Custom";
+export const STYLE_DEFAULT = "balanced";
+export const STYLE_OWN_FOLD = "Set them yourself";
+/** Which style a request is: one of FIND_STYLES' ids, or "custom". Read from the request's own two floors. */
+export function styleOf(request = {}) {
+  const ch = request.minChance == null ? null : Number(request.minChance);
+  const rt = request.returnAsk == null ? null : Number(request.returnAsk);
+  const same = (a, b) => (a == null ? b == null : b != null && Math.abs(a - b) < 1e-9);
+  const s = FIND_STYLES.find((x) => same(x.minChance, ch) && same(x.minReturn, rt));
+  return s ? s.id : "custom";
+}
+/** "Chance ≥ 50% · Return ≥ 25%": the two numbers a style sets. */
+export function styleNumbersText(style) {
+  const s = typeof style === "string" ? FIND_STYLES.find((x) => x.id === style) : style;
+  if (!s) return null;
+  return `Chance ${s.minChance == null ? "any" : `≥ ${chanceText(s.minChance)}`} · Return ≥ ${returnText(s.minReturn == null ? RULES.minRewardRisk : s.minReturn)}`;
+}
+/** The two numbers in force, whatever the style ("Chance ≥ 55% · Return ≥ 40%"). */
+export const requestFloorsText = (request = {}) =>
+  styleNumbersText({ minChance: request.minChance == null ? null : request.minChance, minReturn: request.returnAsk == null ? null : request.returnAsk });
+
+/** The More sheet's items (PR 66): what is in it, in order. */
+export const MORE_ITEMS = Object.freeze(["side", "horizon", "liquidity", "positive", "flagged", "hideMisses"]);
+export const NET_SIDE_HEAD = "Debit · Credit";
+export const NET_SIDE_NOTE = "A debit pays to open the trade; a credit is paid to you when it opens.";
+export const LIQUIDITY_HEAD = "Liquidity";
+
 /**
- * WHAT A CHIP SAYS, AND WHETHER IT IS OFF ITS DEFAULT (then it is drawn filled). `st` is the screen's state:
- * { order, request, horizon, dir, dirLabel, positiveOnly, flagged, liqId, liqLabel, liqDefault }.
+ * WHAT A CHIP SAYS — its name and its value — AND WHETHER IT IS OFF ITS DEFAULT (then it is drawn filled). `st` is the
+ * screen's state: { order, request, horizon, dir, target, positiveOnly, flagged, hideMisses, liqId, liqLabel, liqDefault }.
  */
-export function chipText(id, st = {}) {
+export function chipPartsOf(id, st = {}) {
   const r = st.request || {};
   switch (id) {
-    case "order": return `⇅ ${(FIND_ORDERS.find((o) => o.id === st.order) || FIND_ORDERS[0]).label}`;
-    case "budget": return `${r.mode === "target" ? "Target" : "Budget"} ${r.amt == null ? "not set" : money(r.amt)}`;
-    case "chance": return `Chance ${r.minChance == null ? "any" : chanceText(r.minChance)}`;
-    case "return": return `Return ≥ ${returnText(r.minReturn == null ? RULES.minRewardRisk : r.minReturn)}`;
-    case "horizon": return `Horizon ${Math.round(Number(st.horizon) || RULES.targetEntryDTE)}d`;
-    // The mockups' chip reads "Direction · Signals"; the sheet's choice keeps its full name, "Signals decide".
-    case "direction": return `Direction ${st.dir === "signals" || !st.dir ? "Signals" : st.dirLabel || st.dir}`;
-    case "positive": return "Avg > 0";
-    case "liquidity": return `Liquidity ${st.liqLabel || ""}`.trim();
-    default: return "";
+    case "view": {
+      const { view, target } = viewOfDir(st.dir || "signals", st.target);
+      const v = FIND_VIEWS.find((x) => x.id === view) || FIND_VIEWS[0];
+      return { name: "View", value: view === "up" || view === "down" ? `${v.chip} ${movesText(target)}` : v.chip };
+    }
+    case "style": {
+      const s = styleOf(r);
+      return { name: "Style", value: s === "custom" ? STYLE_CUSTOM : FIND_STYLES.find((x) => x.id === s).label };
+    }
+    // The IBKR wording the owner recognised: the budget is the most the trade may lose.
+    case "budget": return { name: r.mode === "target" ? "Target" : "Max loss", value: r.amt == null ? "not set" : money(r.amt) };
+    case "sort": return { name: "⇅", value: (FIND_ORDERS.find((o) => o.id === st.order) || FIND_ORDERS[0]).label };
+    case "more": { const n = moreOffCount(st); return { name: "More", value: n ? `· ${n}` : "" }; }
+    default: return { name: "", value: null };
   }
+}
+/** The chip as one string: "Max loss $500", "⇅ Future avg", "More · 2". */
+export const chipText = (id, st = {}) => { const p = chipPartsOf(id, st); return [p.name, p.value].filter((x) => x != null && x !== "").join(" "); };
+/** How many of the More sheet's items are off their default. */
+export function moreOffCount(st = {}) {
+  const r = st.request || {};
+  return [
+    !!r.side && r.side !== DEFAULT_NET_SIDE,
+    st.horizon != null && Math.round(Number(st.horizon)) !== RULES.targetEntryDTE,
+    !!st.liqId && st.liqId !== st.liqDefault,
+    !!st.positiveOnly,
+    st.flagged === false,
+    !!st.hideMisses,
+  ].filter(Boolean).length;
 }
 export function chipOffDefault(id, st = {}) {
   const r = st.request || {};
   switch (id) {
-    case "order": return !!st.order && st.order !== DEFAULT_FIND_ORDER;
+    case "view": return !!st.dir && st.dir !== "signals";
+    case "style": return styleOf(r) !== STYLE_DEFAULT;
     case "budget": return r.mode === "target" || !!r.amtAnswered;
-    case "chance": return r.minChance != null;
-    case "return": return r.returnAsk != null;
-    case "horizon": return Math.round(Number(st.horizon)) !== RULES.targetEntryDTE;
-    case "direction": return !!st.dir && st.dir !== "signals";
-    case "positive": return !!st.positiveOnly;
-    case "liquidity": return !!st.liqId && st.liqId !== st.liqDefault;
+    case "sort": return !!st.order && st.order !== DEFAULT_FIND_ORDER;
+    case "more": return moreOffCount(st) > 0;
     default: return false;
   }
 }
-/** The Order sheet also holds the flag toggle (owner, 4 Oct 2026): hiding flagged cards is off its default too. */
-export const anyChipOff = (st = {}) => FIND_CHIPS.some((c) => chipOffDefault(c.id, st)) || st.flagged === false;
+export const anyChipOff = (st = {}) => FIND_CHIPS.some((c) => chipOffDefault(c.id, st));
+
+/** THE FILTER THAT BINDS, IN WORDS (PR 66, task 66.2; `bindingFilter()` in rows.js counts): "Style Cautious leaves out 5
+ *  markets" with "Loosen ›"; "Credit only leaves out 4 markets" with "Both ›"; "Max loss $500 leaves out 3 markets" with
+ *  "Max loss $750 ›", or "· over your per-trade limit" when no amount inside it lets one in. */
+export function bindingFilterText({ control, count = 0, style = null, side = null, amt = null, value = null, mode = "budget", overLimit = false } = {}) {
+  const out = `leaves out ${count} market${count === 1 ? "" : "s"}`;
+  if (control === "style") {
+    const s = FIND_STYLES.find((x) => x.id === style);
+    return { text: `Style ${s ? s.label : STYLE_CUSTOM} ${out}`, fix: "Loosen ›" };
+  }
+  if (control === "side") {
+    const s = NET_SIDES.find((x) => x.id === side);
+    return { text: `${s ? s.label : side} only ${out}`, fix: "Both ›" };
+  }
+  const name = mode === "target" ? "Target" : "Max loss";
+  return { text: `${name} ${money(amt)} ${out}${overLimit ? " · over your per-trade limit" : ""}`,
+    fix: value == null ? null : `${name} ${money(value)} ›` };
+}
 /** The live button that ends every sheet: "Show 4 of 10". */
 export const showRowsCta = (n, m) => `Show ${n} of ${m}`;
 export const HIDE_ROWS = "Hide them";
@@ -1850,7 +1999,7 @@ export const RETRY = "Retry";
 export const RESET_SHEET = "Reset";
 
 /** "Nothing fits" (redesign PR 1). The control that binds, in the chips' words. */
-const BINDS = { size: "your budget", target: "your target", chance: "your chance", return: "your return on risk" };
+const BINDS = { size: "your budget", target: "your target", chance: "your chance", return: "your return on risk", side: "your debit or credit choice" };
 export const nothingFitsLine = (control) => `Nothing fits ${BINDS[control] || "your filters"}.`;
 export const allMissLine = (n, cheap) =>
   `All ${n} market${n === 1 ? "" : "s"} miss.` +
@@ -1907,11 +2056,11 @@ export const newsHeadlineText = (title, source, ago) => `${title}${source ? ` ·
 export function groupHeadText(dir, kind) {
   const tag = (DIRECTION_TAGS[dir] || DIRECTION_TAGS.neutral).toUpperCase();
   if (kind === "neutral") return `${tag} · ALWAYS LISTED`;
-  return `${tag} · ${kind === "yours" ? "YOUR DIRECTION" : "WHAT THE SIGNALS SUGGEST"}`;
+  return `${tag} · ${kind === "yours" ? "YOUR VIEW" : "WHAT THE SIGNALS SUGGEST"}`;
 }
 /** What the signals say (round 2 splits it so the arithmetic can be set in mono): { lead, math, result }. */
 export function signalsParts({ sd = null, fixedLabel = null } = {}) {
-  if (fixedLabel) return { lead: `Direction: ${fixedLabel}, your choice`, math: null, result: null };
+  if (fixedLabel) return { lead: `View: ${fixedLabel}, your choice`, math: null, result: null };
   if (sd && Number.isFinite(sd.s) && sd.fused) {
     return { lead: "Signals:", math: `${sd.fused.score >= 0 ? "+" : "−"}${Math.abs(sd.fused.score)} × ${sd.fused.confidence} ÷ 100 = ${sd.s.toFixed(1)}`,
       result: `→ ${(DIRECTION_TAGS[sd.dir] || "").replace(/^\S+ /, "")}` };
@@ -4095,9 +4244,22 @@ export function requestOf(want = {}, limits = {}, { sizingFree = false } = {}) {
   // `returnAsk` is what the FILTER reads: null until the slider is moved above the reward floor, so the filter never
   // names the floor and cannot be mistaken for it. `minReturn` is what the slider shows.
   const returnAsk = minReturn > RULES.minRewardRisk + 1e-9 ? minReturn : null;
+  // DEBIT · CREDIT · BOTH (PR 66): which side of the money a card opens on. "both" asks nothing.
+  const side = NET_SIDES.some((s) => s.id === want.side) ? want.side : DEFAULT_NET_SIDE;
   return { mode, amt, amtAnswered, amtCapped: amtAnswered && amt != null && Math.round(typed) > amt, amtMax, riskCap,
-    minChance, chanceAnswered, minReturn, returnAsk, returnAnswered, answered: amtAnswered };
+    minChance, chanceAnswered, minReturn, returnAsk, returnAnswered, side, answered: amtAnswered };
 }
+
+/* DEBIT · CREDIT · BOTH (PR 66, owner 12 Oct 2026, after IBKR's wizard, whose filters are debit/credit and the maximum
+   loss). A card's own net at the price that fills decides: positive is a debit, negative a credit (CLAUDE.md). */
+export const NET_SIDES = Object.freeze([
+  Object.freeze({ id: "debit", label: "Debit" }),
+  Object.freeze({ id: "credit", label: "Credit" }),
+  Object.freeze({ id: "both", label: "Both" }),
+]);
+export const DEFAULT_NET_SIDE = "both";
+/** "debit" / "credit" for a net per share, or null when it is not known (unknown is neither). */
+export const netSideOf = (net) => (net == null || !Number.isFinite(Number(net)) || Number(net) === 0 ? null : Number(net) > 0 ? "debit" : "credit");
 
 /* =====================================================================
    DOES THIS CANDIDATE MEET WHAT WAS ASKED FOR? (ROADMAP P10 §3)
@@ -4203,6 +4365,19 @@ export function meetsRequest(cand, request, size = null) {
         text: `Its return on risk is ${returnText(rr)}, under the ${returnText(askedR)} you asked for.` });
     }
   }
+
+  /* ---- THE SIDE OF THE MONEY (PR 66): "Debit" or "Credit" only. A net that is not known is neither, and unknown is not
+     a pass. ---- */
+  if (request.side && request.side !== DEFAULT_NET_SIDE) {
+    const got = netSideOf(cand.entryNet);
+    if (got == null) {
+      misses.push({ id: "side-unknown", control: "side", need: null, short: "debit or credit not known",
+        text: `Its price could not be read, so it cannot be held against the ${request.side}s you asked for.` });
+    } else if (got !== request.side) {
+      misses.push({ id: "side", control: "side", need: null, short: `a ${got}, not a ${request.side}`,
+        text: `It opens for a ${got}, and you asked for ${request.side}s only.` });
+    }
+  }
   return { meets: misses.length === 0, misses };
 }
 
@@ -4258,7 +4433,7 @@ export const rowsResultsLine = (n, m, hidden = false) => resultsLine(n, m, hidde
 export const missReasonLine = (miss) => (miss && miss.short ? miss.short : "");
 
 /** The control names a miss can carry, in the words the sliders use. */
-const CONTROL_WORDS = { chance: "chance", return: "return on risk", size: "size" };
+const CONTROL_WORDS = { chance: "chance", return: "return on risk", size: "size", side: "debit or credit" };
 
 /**
  * HOW MANY CANDIDATES EACH CONTROL LETS THROUGH, ON ITS OWN, AND THE VALUES IT WAS HELD AGAINST.
@@ -4355,9 +4530,17 @@ export function relaxOptions(cands = [], request, sizeOf = () => null) {
       }
     }
   }
+  // DEBIT · CREDIT (PR 66): the move is back to Both, a whole switch, so it is the farthest move there is.
+  // (A side miss carries no `need`, so `only()` cannot read it: the row's misses are all the side's.)
+  const sd = rows.filter((r) => r.misses.length && r.misses.every((m) => m.control === "side"));
+  if (sd.length && request.side && request.side !== DEFAULT_NET_SIDE) {
+    options.push({ control: "side", value: DEFAULT_NET_SIDE, matches: names(sd), n: sd.length, dist: 1, lead: SIDE_FIX_LABEL });
+  }
   options.sort((a, b) => a.dist - b.dist);
   return { rows, options };
 }
+/** The one fix for "Debit only" / "Credit only": both again. */
+export const SIDE_FIX_LABEL = "Show debits and credits";
 
 /**
  * ZERO MATCHES: WHICH CONTROL BINDS, AND THE NEAREST VALUE THAT LETS SOMETHING IN.
@@ -4426,7 +4609,8 @@ export function nothingFits(cands = [], request, sizeOf = () => null) {
       : o.control === "chance"
         ? { control: "chance", label: o.value <= RULES.chanceAskMin + 1e-9 ? "Set chance to any" : `Set chance to ${chanceText(o.value)}`,
           patch: { minChance: o.value <= RULES.chanceAskMin + 1e-9 ? null : o.value } }
-        : { control: "return", label: `Set return to ${returnText(o.value)}`, patch: { minReturn: o.value } };
+        : o.control === "side" ? { control: "side", label: SIDE_FIX_LABEL, patch: { side: DEFAULT_NET_SIDE } }
+          : { control: "return", label: `Set return to ${returnText(o.value)}`, patch: { minReturn: o.value } };
   return { control, cheapest, fix, reset: !fix, overLimit };
 }
 export const RESET_ALL_FILTERS = "Reset filters";
@@ -6860,13 +7044,15 @@ export default RULES;
    WHAT THE SCORE CHANGES IN FIND, checked clause by clause against the code on 2 Oct 2026:
    - "Signals decide" picks the direction built on a market from score × confidence against
      RULES.directionSignalMin (`signalDirection()` in signals.js, PR #48), always beside the Neutral family;
-   - only under the order "Expected value + signal" do a market's cards move by `signalAdjustment()`, and only
-     then does a CONFLICT market's cards sort last (`findOrderCompare()`, PR #48);
+   - since PR 66 no order adds the score to a card's place ("Future avg + signal" was removed: the View carries the
+     direction), so the score never moves a card up or down the list;
    - price, risk and chance are worked out from the option prices and the season's drift (`seasonalDrift()`),
      never from this score.
 ===================================================================== */
 export const whyFindEffect = () =>
-  `What this changes in Find: with "Signals decide" it picks the direction built on this market (beside the Neutral ` +
-  `cards), and under "Expected value + signal" it moves this market's cards up or down the list (a CONFLICT market's ` +
-  `cards go last). Price, risk and chance come from the option prices and the season, not from this score.`;
+  `What this changes in Find: with the View on "Signals decide" it picks the direction built on this market (beside the ` +
+  `Neutral cards). It never moves a card up or down the list: the order is the one you chose. Price, risk and chance ` +
+  `come from the option prices and the season, not from this score.`;
+/** The Why sheet's note under the score (PR 66): the read decides the family, never a card's place. */
+export const WHY_ORDER_NOTE = "This read picks the cards built under \"Signals decide\"; it never moves a card's place in Find, which follows your ⇅ order.";
 export const WEIGHTS_CHOSEN_LINE = "These weights and bands are chosen, not measured on past trades.";

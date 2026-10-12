@@ -4,10 +4,11 @@
 // it out of App.jsx; PR #49 made it one sorted list with the misses in place).
 //
 // TOP TO BOTTOM: the category tabs "All · Grains · Energy · Metals" (counted from markets.js, they only filter what is
-// shown); ONE row of chips — ⇅ Order · Budget · Chance · Return · Horizon · Direction · Avg > 0 · Liquidity — each
-// showing its value and filled when off its default; one summary line ("4 of 10 fit · 6 dimmed", Hide them / Show
-// them, Reset); the column head "Market … Days · risk ⓘ"; then ONE ROW PER MARKET. ("Find", the
-// gear and the Results | Saved segment sit above, in App.jsx, because Saved shares them.)
+// shown); ONE row of chips — View · Style · Max loss · ⇅ Sort · More (PR 66, owner 12 Oct 2026: "too many filters, and
+// not incisive"; it was eight chips and two toggles hidden in sheets) — each showing its value and filled when off its
+// default; one summary line ("4 of 10 fit · 6 dimmed", Hide them / Show them, Reset) and, when rows are dimmed, the
+// filter that binds with one fix (`bindingFilter()`, rows.js); the column head "Market … Days · risk ⓘ"; then ONE ROW PER
+// MARKET. ("Find", the gear and the Results | Saved segment sit above, in App.jsx, because Saved shares them.)
 //
 // >>> THE ROWS ARE A VIEW OF THE ONE SORTED LIST, NOT A SECOND LIST. <<< `marketRows()` (src/rows.js) groups
 // `findShown` — the list findGen built and the owner's order sorted — by market: a row's card is the market's first
@@ -16,10 +17,12 @@
 // Chance · Return on risk · Avg per $100 at risk on every row, the sorted-by one ringed, then the days and the risk (PR 63).
 // Tapping a row opens the market's page on Strategies (market.jsx), where its cards are.
 //
-// >>> EVERY CHIP BUT "Avg > 0" OPENS A SHEET HOLDING THE EXISTING CONTROL, BEHAVIOUR UNCHANGED. <<< The sliders still
-// move `request`, which this file reads: it filters and sizes, and never simulates (`scripts/measure-find.mjs`; the
-// memo-deps check in find.test.jsx). Every sheet ends with a live "Show N of M". "Show flagged" lives in the Order
-// sheet and the "why" fold in the Liquidity sheet (owner, 4 Oct 2026).
+// >>> EVERY CHIP OPENS A SHEET. <<< View (Signals decide · Up · Down · Range, and the target in expected moves, which
+// picks the family findGen builds), Style (Cautious · Balanced · Bold: the chance and return floors, the two sliders one
+// fold down), Budget (the existing control), ⇅ Sort (the four orders) and More (Debit · Credit · Both, Horizon, the
+// Liquidity panel as a fold, the three list toggles). The sliders still move `request`, which this file reads: it
+// filters and sizes, and never simulates (`scripts/measure-find.mjs`; the memo-deps check in find.test.jsx). Every sheet
+// ends with a live "Show N of M".
 //
 // WHAT IS PASSED IN AS A FUNCTION OR A NODE is what lives in App.jsx's closures (the liquidity filter, Save, opening a
 // market): passing them is the price of not importing App.jsx back, which would be a cycle.
@@ -27,7 +30,7 @@
 import React, { useCallback, useMemo } from "react";
 import { RefreshCw, Settings } from "lucide-react";
 import { T, TYPE } from "./theme.js";
-import { mono, sans, Btn, Panel, Label, Stat, Note, Fold, CheckField, Sheet, IconButton, FilterChip, UnderTabs, TextBtn, SegmentBar, TAP } from "./ui.jsx";
+import { mono, sans, Btn, Panel, Label, Stat, Note, Fold, CheckField, Sheet, IconButton, FilterChip, UnderTabs, TextBtn, SegmentBar, RangeField, TAP } from "./ui.jsx";
 import { FIND_ORDERS, DEFAULT_FIND_ORDER, findOrderOf } from "./signals.js";
 import { RequestControls, NumbersFit } from "./card.jsx";
 import { HowWorkedOut } from "./why.jsx";
@@ -36,7 +39,7 @@ import { CompareFigure, BandThumbnail } from "./visuals.jsx";
 import { scaleStrategy, useCopilot, skillsFor } from "./pro.jsx";
 import { CopilotSection } from "./build.jsx";
 import { legsLine, MAX_COMPARE } from "./path.js";
-import { marketRows, rowCounts, rowFigures, rowStateOf, compareCards } from "./rows.js";
+import { marketRows, rowCounts, rowFigures, rowStateOf, compareCards, bindingFilter } from "./rows.js";
 import { money, chanceText, NO_CEILING, noCeilingNote, noCeilingRankNote, seasonalStampNote,
   filterFold, qualityFloorLine, qualityFloorSentence, liquiditySettingNote, looseningWarning, isLoosened,
   unpriceableNote, impossibleLossNote, modelDisagreementNote, wideSpreadNote, wideComboNote, crossingNote,
@@ -49,6 +52,9 @@ import { money, chanceText, NO_CEILING, noCeilingNote, noCeilingRankNote, season
   SHOW_FLAGGED_TOGGLE, howConnectLabel, HOW_CONNECT_STEPS, CARD_LABELS, ARIA,
   FIND_HEADING, refreshAria, SETTINGS_WORD, FIND_SEGMENTS_ARIA, RESET_SHEET,
   FIND_COMPARE_BTN, FIND_COPILOT_HEAD, findCopilotLine, LIQ_OTHER_HEAD, LIQ_DETAILS, LIQ_REASONS_FOLD,
+  RULES, chipPartsOf, FIND_VIEWS, viewOfDir, dirOfView, viewBuildsText, viewExampleText, VIEW_TARGET_LABEL, movesText,
+  FIND_STYLES, styleOf, styleNumbersText, STYLE_OWN_FOLD, NET_SIDES, NET_SIDE_HEAD, NET_SIDE_NOTE, LIQUIDITY_HEAD,
+  HIDE_MISSES_TOGGLE, DEFAULT_NET_SIDE, requestFloorsText,
   COMPARE_SHEET_TITLE, compareCountLine, compareTickedLine, COMPARE_ONE_MORE, COMPARE_CLEAR, compareUntickAria, COMPARE_GONE, BUILD_CTA,
 } from "./rules.js";
 
@@ -115,6 +121,8 @@ export function FindStep({
   freshness = null,
   compare = [], compareFitting = 0,
   copilot = null, liquidity = null,
+  // The top row's market for the View sheet's example (PR 66): { tk, spot, move, expKey } — App.jsx's `marketMoveOf()`.
+  viewExample = null,
 }) {
   /* ---- WHAT IS IN, AND WHAT IS STILL BEING READ (redesign PR 1). A market being read has no fused result and no rank
      effect, as before; its row waits after the rows that are in, and says what it is waiting for. ---- */
@@ -143,18 +151,28 @@ export function FindStep({
   const nf = useMemo(() => (rows.length && n === 0 ? nothingFits(cands, request, sizeOf) : null), [rows.length, n, cands, request, sizeOf]);
   /* 63.3 (PR 63, owner 7 Oct 2026): cards fit, and not one of them has a positive future average — said once, above the
      rows, so a list sorted by "Future avg" is not read as a list of good bets. `futureIsPositive()` is the "Avg > 0" chip's. */
+  /* 66.2 (PR 66): when rows are dimmed, the filter that leaves out the most and one fix — the same misses that dim them. */
+  const bind = useMemo(() => bindingFilter(inItems, request, sizeOf), [inItems, request, sizeOf]);
   const noPositive = useMemo(() => {
     const fitting = inItems.filter((x) => meetsRequest(x.cand, request, sizeOf(x.cand)).meets);
     return fitting.length > 0 && !fitting.some((x) => futureIsPositive(x.ev100));
   }, [inItems, request, sizeOf]);
 
-  const st = { order: findOrder, request, horizon: find.horizon, dir: find.dir,
-    dirLabel: (sentiments.find((s) => s.id === find.dir) || {}).label, positiveOnly: find.positiveOnly, flagged: find.flagged,
-    liqId: liqState && liqState.id, liqLabel: liqState && liqState.label, liqDefault: liqState && liqState.defaultId };
+  const st = findChipState({ find, findOrder, request, liqState });
   const sheetId = sheet && String(sheet).startsWith("find:") ? String(sheet).slice(5) : null;
   const closeSheet = () => onSheet(null);
   /** A sheet's current value, beside its title (round 2): the chip's own value. */
-  const sheetValue = (id) => { const p = chipParts(id, chipText(id, st)); return p.value || p.name; };
+  const sheetValue = (id) => { const p = chipPartsOf(id, st); return id === "more" ? (p.value || null) : p.value || p.name; };
+  /* THE VIEW (PR 66): the family findGen builds is `find.dir`, set from the view and the target together, so the target
+     moved inside one family re-builds nothing (findGen reads `find.dir` only). */
+  const cur = viewOfDir(find.dir, find.target);
+  const setView = (v) => setFind((f) => {
+    const was = viewOfDir(f.dir, f.target);
+    const t = v === "up" || v === "down" ? (was.view === "up" || was.view === "down" ? was.target : RULES.viewTargetDefault) : null;
+    return { ...f, dir: dirOfView(v, t), target: t };
+  });
+  const setTarget = (t) => setFind((f) => ({ ...f, target: t, dir: dirOfView(viewOfDir(f.dir, f.target).view, t) }));
+  const style = styleOf(request);
   // Every sheet ends with a live "Show N of M": full width, amber, 48px (the mockups).
   // …and Reset beside it, every chip back to its default (the mockup's sheet footer: a quiet Reset, the amber Show).
   const footer = (
@@ -187,15 +205,12 @@ export function FindStep({
       {/* ONE ROW OF CHIPS, scrolling sideways. Each says its value; one off its default is filled with ink. */}
       <div role="toolbar" aria-label={ARIA.filters} data-chip-row
         style={{ display: "flex", gap: 6, overflowX: "auto", whiteSpace: "nowrap", padding: "10px 16px 4px", WebkitOverflowScrolling: "touch" }}>
-        {FIND_CHIPS.map((c) => ({ c, txt: chipText(c.id, st) })).map(({ c, txt }) => {
-          const parts = chipParts(c.id, txt);
+        {FIND_CHIPS.map((c) => {
+          const parts = chipPartsOf(c.id, st);
           return (
-            <FilterChip key={c.id} off={chipOffDefault(c.id, st)} strong={c.id === "order"} name={parts.name}
-              value={c.id === "positive" ? (find.positiveOnly ? "✓" : null) : parts.value} valueMono={parts.mono} opens={c.sheet}
-              label={c.sheet ? `${txt}: change` : POSITIVE_FUTURE_TOGGLE}
-              onClick={() => (c.sheet ? onSheet(`find:${c.id}`) : setFind((f) => ({ ...f, positiveOnly: !f.positiveOnly })))}>
-              {c.id === "positive" && positiveHidden ? <span style={mono}>{` · ${positiveHidden}`}</span> : null}
-            </FilterChip>
+            <FilterChip key={c.id} off={chipOffDefault(c.id, st)} strong={c.id === "sort"} name={parts.name}
+              value={parts.value} valueMono={/^[$\d]/.test(String(parts.value || ""))} opens
+              label={`${chipText(c.id, st)}: change`} onClick={() => onSheet(`find:${c.id}`)} />
           );
         })}
       </div>
@@ -210,6 +225,14 @@ export function FindStep({
           {copilot && (compareFitting > 0 || (compare || []).length > 0) && <TextBtn data-find-compare onClick={() => onSheet("compare")}>{FIND_COMPARE_BTN}</TextBtn>}
         </span>
       </div>
+      {/* THE FILTER THAT BINDS (PR 66, task 66.2): "Style Cautious leaves out 5 markets · Loosen ›". With nothing fitting at all,
+          "Nothing fits" below says it instead. Its fix never passes the per-trade limit. */}
+      {bind && n > 0 && (
+        <div data-find-binding style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", padding: "0 12px 2px 16px", minHeight: 36 }}>
+          <span role="status" style={{ ...sans, fontSize: FS.xs, color: T.mut }}>{bind.text}</span>
+          {bind.fix && <TextBtn data-find-binding-fix onClick={() => onRequest(bind.fix.patch)}>{bind.fix.label}</TextBtn>}
+        </div>
+      )}
       {/* While markets are still being read and some rows are in (with none in, "Nothing today" below says it). */}
       {reading && findGen.items.length > 0 && <ReadingLine text={findReadingLine(find.markets.length, doneN)} frac={find.markets.length ? doneN / find.markets.length : 0} />}
 
@@ -297,9 +320,57 @@ export function FindStep({
         )}
       </Sheet>
 
-      {/* ---- THE SHEETS, one at a time, from `deskSheet` (Back closes them). ---- */}
-      <Sheet open={sheetId === "order"} title={FIND_SHEET_TITLES.order} value={sheetValue("order")} onClose={closeSheet} footer={footer}>
-        <div role="radiogroup" aria-label={FIND_SHEET_TITLES.order}>
+      {/* ---- THE SHEETS, one at a time, from `deskSheet` (Back closes them). PR 66: View · Style · Budget · ⇅ Sort · More. ---- */}
+      <Sheet open={sheetId === "view"} title={FIND_SHEET_TITLES.view} value={sheetValue("view")} onClose={closeSheet} footer={footer}>
+        <div role="radiogroup" aria-label={FIND_SHEET_TITLES.view} data-view-choices style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {FIND_VIEWS.map((v) => (
+            <FilterChip key={v.id} off={cur.view === v.id} name={v.label} label={v.label} onClick={() => setView(v.id)} />
+          ))}
+        </div>
+        {(cur.view === "up" || cur.view === "down") && (
+          <div style={{ marginTop: 10 }}>
+            <RangeField label={VIEW_TARGET_LABEL} value={cur.target} onChange={(v) => setTarget(Math.round(v / RULES.viewTargetStep) * RULES.viewTargetStep)}
+              min={RULES.viewTargetMin} max={RULES.viewTargetMax} step={RULES.viewTargetStep}
+              format={(v) => movesText(v)} parse={(t) => Number(String(t).replace(/[×x\s]/g, ""))} toInput={(v) => String(Number(Number(v).toFixed(2)))}
+              color={T.amber} trackHeight={32} />
+          </div>
+        )}
+        <Note color={T.body} style={{ marginTop: 10 }}>{viewBuildsText(cur.view, cur.target)}</Note>
+        {(cur.view === "up" || cur.view === "down") && viewExample && viewExampleText(viewExample.tk, cur.view, cur.target, viewExample.spot, viewExample.move, viewExample.expKey) && (
+          <Note color={T.mut} style={{ marginTop: 6 }} data-view-example>
+            {viewExampleText(viewExample.tk, cur.view, cur.target, viewExample.spot, viewExample.move, viewExample.expKey)}
+          </Note>
+        )}
+      </Sheet>
+      <Sheet open={sheetId === "style"} title={FIND_SHEET_TITLES.style} value={sheetValue("style")} onClose={closeSheet} footer={footer}>
+        {/* THE STYLE (PR 66): each sets the two floors the sliders below set, and says which numbers it sets. */}
+        <div role="radiogroup" aria-label={FIND_SHEET_TITLES.style}>
+          {FIND_STYLES.map((o, i) => {
+            const on = style === o.id;
+            return (
+              <button key={o.id} role="radio" aria-checked={on} data-style={o.id}
+                onClick={() => onRequest({ minChance: o.minChance, minReturn: o.minReturn })}
+                style={{ ...sans, display: "flex", alignItems: "center", gap: 12, width: "100%", textAlign: "left", minHeight: 52, padding: "6px 0",
+                  cursor: "pointer", background: "transparent", border: "none", borderTop: i ? `1px solid ${T.line}` : "none", color: T.ink }}>
+                <span aria-hidden="true" style={{ width: 16, height: 16, boxSizing: "border-box", borderRadius: "50%", flexShrink: 0,
+                  border: on ? `5px solid ${T.amber}` : `2px solid ${T.field}` }} />
+                <span style={{ minWidth: 0 }}>
+                  <span style={{ display: "block", fontSize: FS.md, fontWeight: FW.bold, lineHeight: LH.tight }}>{o.label}</span>
+                  <span style={{ display: "block", fontSize: FS.xs, color: T.mut, lineHeight: LH.body }}>{`${styleNumbersText(o)} · ${o.note}`}</span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        <Fold label="open" tone={T.body} style={{ marginTop: 8 }} summary={STYLE_OWN_FOLD}>
+          <RequestControls only={["chance", "return"]} {...sharedControls} />
+        </Fold>
+      </Sheet>
+      <Sheet open={sheetId === "budget"} title={FIND_SHEET_TITLES.budget} value={sheetValue("budget")} onClose={closeSheet} footer={footer}>
+        <RequestControls only={["size"]} {...sharedControls} />
+      </Sheet>
+      <Sheet open={sheetId === "sort"} title={FIND_SHEET_TITLES.sort} value={sheetValue("sort")} onClose={closeSheet} footer={footer}>
+        <div role="radiogroup" aria-label={FIND_SHEET_TITLES.sort}>
           {FIND_ORDERS.map((o, i) => {
             const on = findOrder === o.id;
             return (
@@ -317,77 +388,78 @@ export function FindStep({
             );
           })}
         </div>
-        <CheckField checked={find.flagged} onChange={(e) => setFind((f) => ({ ...f, flagged: e.target.checked }))} style={{ marginTop: 8 }}>
-          {SHOW_FLAGGED_TOGGLE}{flaggedHidden ? ` (${flaggedHidden} hidden)` : ""}
-        </CheckField>
       </Sheet>
-      <Sheet open={sheetId === "budget"} title={FIND_SHEET_TITLES.budget} value={sheetValue("budget")} onClose={closeSheet} footer={footer}>
-        <RequestControls only={["size"]} {...sharedControls} />
-      </Sheet>
-      <Sheet open={sheetId === "chance"} title={FIND_SHEET_TITLES.chance} value={sheetValue("chance")} onClose={closeSheet} footer={footer}>
-        <RequestControls only={["chance"]} {...sharedControls} />
-      </Sheet>
-      <Sheet open={sheetId === "return"} title={FIND_SHEET_TITLES.return} value={sheetValue("return")} onClose={closeSheet} footer={footer}>
-        <RequestControls only={["return"]} {...sharedControls} />
-      </Sheet>
-      <Sheet open={sheetId === "horizon"} title={FIND_SHEET_TITLES.horizon} value={sheetValue("horizon")} onClose={closeSheet} footer={footer}>
-        <RequestControls only={["horizon"]} {...sharedControls} />
-      </Sheet>
-      <Sheet open={sheetId === "direction"} title={FIND_SHEET_TITLES.direction} value={sheetValue("direction")} onClose={closeSheet} footer={footer}>
-        <RequestControls only={["direction"]} {...sharedControls} />
-      </Sheet>
-      <Sheet open={sheetId === "liquidity"} title={FIND_SHEET_TITLES.liquidity} value={sheetValue("liquidity")} onClose={closeSheet} footer={footer}>
-        {/* THE LIQUIDITY SHEET (PR 4d, owner: "the tab and its takeaway are no longer clear"). Today's takeaway first; the
-            four levels as Find's chips, each counting the cards it keeps across every market; the setting's sentence; what
-            else keeps cards out, with its counts; the numbers one fold down. No floor value moves. */}
-        {liquidity && (
-          <div data-liq-panel style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <p data-liq-takeaway style={{ ...sans, margin: 0, fontSize: FS.md, fontWeight: FW.bold, lineHeight: LH.body, color: T.ink }}>{liquidity.takeaway}</p>
-            <div role="group" aria-label="Liquidity floor" data-liq-levels style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {liquidity.levels.map((l) => (
-                <FilterChip key={l.id} off={l.on} name={`${l.label}${l.recommended ? " ✓" : ""}`} value={l.value} valueMono
-                  label={`${l.label}${l.value ? `, ${l.value}` : ""}`} onClick={() => liquidity.onLevel(l.id)} />
-              ))}
-            </div>
-            <Note color={T.mut}>{liquidity.blurb}</Note>
-            {liquidity.warn && <Note color={T.amber} role="note">⚠ {liquidity.warn}</Note>}
-            {fold.reasons && fold.reasons.length > 0 && (
-              <section aria-label={LIQ_OTHER_HEAD} data-liq-other>
-                <h3 style={{ ...sans, margin: "4px 0 2px", fontSize: FS.xs, fontWeight: FW.bold, letterSpacing: "0.08em", color: T.mut }}>{LIQ_OTHER_HEAD}</h3>
-                {fold.reasons.map((r) => (
-                  <div key={r.id} style={{ display: "flex", justifyContent: "space-between", gap: 8, borderTop: `1px solid ${T.line}`, padding: "8px 0", ...sans, fontSize: FS.sm, color: T.body }}>
-                    <span>{r.clause.charAt(0).toUpperCase() + r.clause.slice(1)}</span>
-                    <span style={{ ...mono, fontVariantNumeric: "tabular-nums", color: T.ink }}>{r.count}</span>
-                  </div>
-                ))}
-              </section>
+      <Sheet open={sheetId === "more"} title={FIND_SHEET_TITLES.more} value={sheetValue("more")} onClose={closeSheet} footer={footer}>
+        {/* DEBIT · CREDIT · BOTH (PR 66): a request, so a card on the other side is dimmed with its reason. */}
+        <h3 style={{ ...sans, margin: "0 0 6px", fontSize: FS.xs, fontWeight: FW.bold, letterSpacing: "0.08em", color: T.mut }}>{NET_SIDE_HEAD.toUpperCase()}</h3>
+        <div role="radiogroup" aria-label={NET_SIDE_HEAD} data-net-side style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {NET_SIDES.map((o) => (
+            <FilterChip key={o.id} off={(request.side || DEFAULT_NET_SIDE) === o.id} name={o.label} label={o.label} onClick={() => onRequest({ side: o.id })} />
+          ))}
+        </div>
+        <Note color={T.mut} style={{ marginTop: 4 }}>{NET_SIDE_NOTE}</Note>
+        <RequestControls only={["horizon"]} {...sharedControls} style={{ marginTop: 8 }} />
+        <div style={{ display: "flex", flexDirection: "column", marginTop: 6 }}>
+          <CheckField checked={!!find.positiveOnly} onChange={(e) => setFind((f) => ({ ...f, positiveOnly: e.target.checked }))}>
+            {POSITIVE_FUTURE_TOGGLE}{positiveHidden ? ` (${positiveHidden} hidden)` : ""}
+          </CheckField>
+          <CheckField checked={find.flagged} onChange={(e) => setFind((f) => ({ ...f, flagged: e.target.checked }))}>
+            {SHOW_FLAGGED_TOGGLE}{flaggedHidden ? ` (${flaggedHidden} hidden)` : ""}
+          </CheckField>
+          <CheckField checked={!!find.hideMisses} onChange={(e) => setFind((f) => ({ ...f, hideMisses: e.target.checked }))}>
+            {HIDE_MISSES_TOGGLE}
+          </CheckField>
+        </div>
+        {/* THE LIQUIDITY PANEL (PR 4d), unchanged, one fold down since PR 66. */}
+        <Fold label="open" tone={T.body} style={{ marginTop: 8 }} summary={`${LIQUIDITY_HEAD} · ${liqState && liqState.label ? liqState.label : ""}`.replace(/ · $/, "")}>
+          <div data-liq-fold style={{ marginTop: 8 }}>
+            {liquidity && (
+              <div data-liq-panel style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <p data-liq-takeaway style={{ ...sans, margin: 0, fontSize: FS.md, fontWeight: FW.bold, lineHeight: LH.body, color: T.ink }}>{liquidity.takeaway}</p>
+                <div role="group" aria-label="Liquidity floor" data-liq-levels style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {liquidity.levels.map((l) => (
+                    <FilterChip key={l.id} off={l.on} name={`${l.label}${l.recommended ? " ✓" : ""}`} value={l.value} valueMono
+                      label={`${l.label}${l.value ? `, ${l.value}` : ""}`} onClick={() => liquidity.onLevel(l.id)} />
+                  ))}
+                </div>
+                <Note color={T.mut}>{liquidity.blurb}</Note>
+                {liquidity.warn && <Note color={T.amber} role="note">⚠ {liquidity.warn}</Note>}
+                {fold.reasons && fold.reasons.length > 0 && (
+                  <section aria-label={LIQ_OTHER_HEAD} data-liq-other>
+                    <h3 style={{ ...sans, margin: "4px 0 2px", fontSize: FS.xs, fontWeight: FW.bold, letterSpacing: "0.08em", color: T.mut }}>{LIQ_OTHER_HEAD}</h3>
+                    {fold.reasons.map((r) => (
+                      <div key={r.id} style={{ display: "flex", justifyContent: "space-between", gap: 8, borderTop: `1px solid ${T.line}`, padding: "8px 0", ...sans, fontSize: FS.sm, color: T.body }}>
+                        <span>{r.clause.charAt(0).toUpperCase() + r.clause.slice(1)}</span>
+                        <span style={{ ...mono, fontVariantNumeric: "tabular-nums", color: T.ink }}>{r.count}</span>
+                      </div>
+                    ))}
+                  </section>
+                )}
+              </div>
             )}
+            <Fold label="open" tone={T.body} style={{ marginTop: 10 }} summary={LIQ_DETAILS}>{foldedNode}</Fold>
+            {/* EVERYTHING THAT EXPLAINS THE LIST, BEHIND ONE "why" (moved here from under the list, owner, 4 Oct 2026). */}
+            <Fold label="why" tone={T.dim} style={{ marginTop: 4 }} summary={LIQ_REASONS_FOLD}>
+              {t.unpriceable > 0 && <Note color={T.amber} style={{ marginTop: 6 }}>{unpriceableNote(t.unpriceable, what)}</Note>}
+              {t.impossible > 0 && <Note color={T.red} style={{ marginTop: 6 }}>{impossibleLossNote(t.impossible, what)}</Note>}
+              {t.model > 0 && <Note color={T.red} style={{ marginTop: 6 }}>{modelDisagreementNote(t.model, what)}</Note>}
+              {t.spread > 0 && <Note color={T.amber} style={{ marginTop: 6 }}>{wideSpreadNote(t.spread, what)}</Note>}
+              {t.comboSpread > 0 && <Note color={T.amber} style={{ marginTop: 6 }}>{wideComboNote(t.comboSpread, what)}</Note>}
+              {t.crossing > 0 && <Note color={T.amber} style={{ marginTop: 6 }}>{crossingNote(t.crossing, what)}</Note>}
+              {findGen.oiSkipped.length > 0 && <Note color={T.dim} style={{ marginTop: 6 }}>{liquiditySkippedNote(`the feed for ${findGen.oiSkipped.join(", ")}`)}</Note>}
+              {findGen.spreadSkipped.length > 0 && <Note color={T.dim} style={{ marginTop: 6 }}>{spreadSkippedNote(`the feed for ${findGen.spreadSkipped.join(", ")}`)}</Note>}
+              {findGen.comboSpreadSkipped.length > 0 && <Note color={T.dim} style={{ marginTop: 6 }}>{comboSpreadSkippedNote(`the feed for ${findGen.comboSpreadSkipped.join(", ")}`)}</Note>}
+              {findGen.noBoard.length > 0 && <Note style={{ marginTop: 6 }}>{`No expiry on ${findGen.noBoard.join(", ")} is far enough out to open on, so nothing was built there. ${horizonFloorNote()}.`}</Note>}
+              {unb > 0 && <Note color={T.dim} style={{ marginTop: 6 }}>{noCeilingRankNote(unb)}</Note>}
+              <Note color={isLoosened(liqLevel) ? T.amber : T.dim} style={{ marginTop: 6 }}>
+                {liquiditySettingNote(liqLevel, { ...t, kept: findGen.items.length })}
+              </Note>
+              <Note color={T.dim} style={{ marginTop: 8 }}>{qualityFloorSentence(liqLevel)}</Note>
+              <Note color={T.dim} style={{ marginTop: 6 }}>
+                {`${limits.answered ? "Your" : "The suggested"} per-trade limit: ${money(limits.perTradeLimit)} (${perTradeCapLabel()}).`} Budget is the most you will pay, taken from live prices. For trades where you receive money up front, the limit becomes the capital tied up instead. Chance is the probability of ending in profit at expiry.
+              </Note>
+            </Fold>
           </div>
-        )}
-        <Fold label="open" tone={T.body} style={{ marginTop: 10 }} summary={LIQ_DETAILS}>{foldedNode}</Fold>
-        {/* EVERYTHING THAT EXPLAINS THE LIST, BEHIND ONE "why" (moved here from under the list, owner, 4 Oct 2026). */}
-        <Fold label="why" tone={T.dim} style={{ marginTop: 4 }} summary={LIQ_REASONS_FOLD}>
-          {t.unpriceable > 0 && <Note color={T.amber} style={{ marginTop: 6 }}>{unpriceableNote(t.unpriceable, what)}</Note>}
-          {t.impossible > 0 && <Note color={T.red} style={{ marginTop: 6 }}>{impossibleLossNote(t.impossible, what)}</Note>}
-          {t.model > 0 && <Note color={T.red} style={{ marginTop: 6 }}>{modelDisagreementNote(t.model, what)}</Note>}
-          {t.spread > 0 && <Note color={T.amber} style={{ marginTop: 6 }}>{wideSpreadNote(t.spread, what)}</Note>}
-          {t.comboSpread > 0 && <Note color={T.amber} style={{ marginTop: 6 }}>{wideComboNote(t.comboSpread, what)}</Note>}
-          {t.crossing > 0 && <Note color={T.amber} style={{ marginTop: 6 }}>{crossingNote(t.crossing, what)}</Note>}
-          {findGen.oiSkipped.length > 0 && <Note color={T.dim} style={{ marginTop: 6 }}>{liquiditySkippedNote(`the feed for ${findGen.oiSkipped.join(", ")}`)}</Note>}
-          {findGen.spreadSkipped.length > 0 && <Note color={T.dim} style={{ marginTop: 6 }}>{spreadSkippedNote(`the feed for ${findGen.spreadSkipped.join(", ")}`)}</Note>}
-          {findGen.comboSpreadSkipped.length > 0 && <Note color={T.dim} style={{ marginTop: 6 }}>{comboSpreadSkippedNote(`the feed for ${findGen.comboSpreadSkipped.join(", ")}`)}</Note>}
-          {findGen.noBoard.length > 0 && <Note style={{ marginTop: 6 }}>{`No expiry on ${findGen.noBoard.join(", ")} is far enough out to open on, so nothing was built there. ${horizonFloorNote()}.`}</Note>}
-          {unb > 0 && <Note color={T.dim} style={{ marginTop: 6 }}>{noCeilingRankNote(unb)}</Note>}
-          {/* CONFLICT IS LAST ONLY UNDER "FUTURE AVG + SIGNAL" (PR #48). */}
-          <Note color={T.dim} style={{ marginTop: 6 }}>Under {findOrderOf("evSignal").label}, CONFLICT markets sort last.</Note>
-          <Note color={isLoosened(liqLevel) ? T.amber : T.dim} style={{ marginTop: 6 }}>
-            {liquiditySettingNote(liqLevel, { ...t, kept: findGen.items.length })}
-          </Note>
-          
-          <Note color={T.dim} style={{ marginTop: 8 }}>{qualityFloorSentence(liqLevel)}</Note>
-          <Note color={T.dim} style={{ marginTop: 6 }}>
-            {`${limits.answered ? "Your" : "The suggested"} per-trade limit: ${money(limits.perTradeLimit)} (${perTradeCapLabel()}).`} Budget is the most you will pay, taken from live prices. For trades where you receive money up front, the limit becomes the capital tied up instead. Chance is the probability of ending in profit at expiry.
-          </Note>
         </Fold>
       </Sheet>
 
@@ -399,17 +471,10 @@ export function FindStep({
   );
 }
 
-/** A chip's words, split for the filter chip (round 2): a name in mut and a value in ink ("Budget $500" → Budget · $500;
- *  "Chance any" → Chance · any; "⇅ Future avg" → ⇅ · Future avg; "Direction Signals" → Direction · Signals, the mockups').
- *  "Avg > 0" stays whole. Never new words: the text is `chipText()`'s. `mono` says whether the value is a figure (then it
- *  is set in mono; a word stays sans, CLAUDE.md, where the mockup sets it in mono). */
-export function chipParts(id, txt) {
-  const t = String(txt || "");
-  const sp = t.indexOf(" ");
-  if (id === "positive" || sp < 0) return { name: t, value: null, mono: false };
-  const value = t.slice(sp + 1);
-  return { name: t.slice(0, sp), value, mono: /\d/.test(value) };
-}
+/** THE SCREEN'S STATE AS THE CHIPS READ IT (PR 66): one shape for the chip row, the sheets and the copilot's filters. */
+export const findChipState = ({ find, findOrder, request, liqState = null }) => ({ order: findOrder, request, horizon: find.horizon,
+  dir: find.dir, target: find.target, positiveOnly: find.positiveOnly, flagged: find.flagged, hideMisses: find.hideMisses,
+  liqId: liqState && liqState.id, liqLabel: liqState && liqState.label, liqDefault: liqState && liqState.defaultId });
 
 /* ONE ROW (round 2, the mockup's flat list): ☆ · the ticker and its direction tag · the subtitle (or the miss reason) ·
    the 72×40 picture · the figure the list is sorted by and "risk $N". The row (not the ☆) opens the market's page on
@@ -488,11 +553,11 @@ function WaitingRow({ tk, st }) {
    copilot is handed. The old blue tray (drawn at the foot of the market page, far below the cards) is gone; its remove,
    clear and "Take to Build" are here.
 ==================================================================== */
-export function filtersOfFind({ find, findOrder, request, sentiments = [], liqState = null }) {
-  const st = { order: findOrder, request, horizon: find.horizon, dir: find.dir,
-    dirLabel: (sentiments.find((x) => x.id === find.dir) || {}).label, positiveOnly: find.positiveOnly, flagged: find.flagged,
-    liqId: liqState && liqState.id, liqLabel: liqState && liqState.label, liqDefault: liqState && liqState.defaultId };
-  return { order: findOrderOf(findOrder).label, category: find.cat || CATEGORY_ALL, chips: FIND_CHIPS.map((c) => chipText(c.id, st)) };
+export function filtersOfFind({ find, findOrder, request, liqState = null }) {
+  const st = findChipState({ find, findOrder, request, liqState });
+  return { order: findOrderOf(findOrder).label, category: find.cat || CATEGORY_ALL, chips: FIND_CHIPS.map((c) => chipText(c.id, st)),
+    // What the Style and Debit · Credit chips mean in numbers (PR 66): the copilot reads the floors, not a style's name.
+    floors: requestFloorsText(request), side: request.side || DEFAULT_NET_SIDE };
 }
 /** One row of the Compare sheet: its label, the card's market, structure and expiry, its figures as the card prints them. */
 export function CompareRow({ card, cand = null, onUntick, onTakeToBuild }) {

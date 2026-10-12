@@ -60,6 +60,7 @@ import { FindStep, FindHeader, CompareSheet, filtersOfFind } from "./find.jsx";
 import { rowStateOf, compareCards, rankOptimize } from "./rows.js";
 import { SavedList } from "./saved.jsx";
 import { MarketPage } from "./market.jsx";
+import { expectedMove } from "./marketView.js";
 import { buildHandOff, buildScreenState, BUILD_TAB } from "./handoff.js";
 import { orderBody, orderOutcome, alpacaErrorText, reduceRatios, limitWords, orderLimitWords, fillPriceOf, cancelOutcome, cancelWaiting } from "./order.js";
 // THE PERMANENT RECORD: the ref a position is given at open, the sequence on
@@ -83,7 +84,8 @@ import { PositionScreen } from "./positionScreen.jsx";
 import { JournalScreen } from "./journal.jsx";
 import { SettingsScreen } from "./settings.jsx";
 import { useWide, RAIL_W } from "./ui.jsx";
-import { findStatusText, DEFAULT_FIND_ORDER, BUILD_CTA, savedLine, removedFromSavedLine, UNDO, openRiskIncludesLine, alreadySentLine, ALREADY_SENT_REVIEW, CARD_LABELS, limitMovedLine } from "./rules.js";
+import { findStatusText, DEFAULT_FIND_ORDER, BUILD_CTA, savedLine, removedFromSavedLine, UNDO, openRiskIncludesLine, alreadySentLine, ALREADY_SENT_REVIEW, CARD_LABELS, limitMovedLine,
+  WHY_ORDER_NOTE, DEFAULT_NET_SIDE } from "./rules.js";
 // REDESIGN PR 2: Build on the owner's mockup — its words (rules.js) and its screen (build.jsx).
 import { tradeTakeaway, buildSubLine, expiryShort, deltaSharesText, thetaDayText, reasonRuleText, orderBookLine, capLabel,
   EXIT_ROWS, EXITS_FOOTER, exitsPill, timeExitDay, sendLabel, SEND_FOOTER, reviewLegWords, reviewLimitLine, oiCheckText,
@@ -1375,7 +1377,7 @@ export default function OptionsStrategyLab() {
      falls back to `limits.perTradeLimit`, DERIVED and never typed, and
      `request.amtAnswered` is how every screen knows to call it a suggestion
      rather than quoting a figure the user never chose back at them. */
-  const [want, setWant] = useState({ mode: "budget", amt: null, minChance: null, minReturn: null });
+  const [want, setWant] = useState({ mode: "budget", amt: null, minChance: null, minReturn: null, side: DEFAULT_NET_SIDE });
   // THE AMOUNT NEVER PASSES THE PER-TRADE LIMIT unless free sizing is on (PR #45, TASK 0): `requestOf()` reads the flag.
   const request = useMemo(() => requestOf(want, limits, { sizingFree: freeSizing }), [want, limits, freeSizing]);
   const [autoMon, setAutoMon] = useState(true);
@@ -1422,7 +1424,10 @@ export default function OptionsStrategyLab() {
      step, and whether flagged cards are listed. Every one of them re-filters
      the list live. */
   // `hideMisses` and `positiveOnly` (PR #49): the two list toggles, off by default; screen state, not synced.
-  const [find, setFind] = useState({ markets: [...BASKET], dir: "signals", horizon: RULES.targetEntryDTE, market: null, cat: null, flagged: true,
+  // `target` (PR 66): the View's target in expected moves (null is the default); `dir` stays the family findGen builds,
+  // set from the View and the target together (`dirOfView()` in rules.js), so a target moved inside one family re-builds
+  // nothing.
+  const [find, setFind] = useState({ markets: [...BASKET], dir: "signals", target: null, horizon: RULES.targetEntryDTE, market: null, cat: null, flagged: true,
     hideMisses: false, positiveOnly: false });
   // Which market "Why this market" is open on: a card's badge sets it.
   const [whyTk, setWhyTk] = useState(null);
@@ -4115,7 +4120,8 @@ export default function OptionsStrategyLab() {
   /* THE FOUR LEVELS, COUNTED ACROSS EVERY MARKET (PR 4d): the cards each level keeps on every board Find built, so the
      chips agree with the list. The same `shortlistWithFloors()` findGen runs, family by family, one structure counted
      once; worked out only while the Liquidity sheet is open (it reprices every board four times). */
-  const liqSheetOpen = deskSheet === "find:liquidity";
+  // The Liquidity panel is a fold of the More sheet since PR 66.
+  const liqSheetOpen = deskSheet === "find:more";
   const liqPreview = useMemo(() => {
     if (!liqSheetOpen) return null;
     const out = Object.fromEntries(LIQUIDITY_LEVELS.map((l) => [l.id, { kept: 0, total: 0, liquidity: 0 }]));
@@ -4634,10 +4640,17 @@ export default function OptionsStrategyLab() {
   };
   // RESET: every chip back to its default (the request, the horizon, the direction, the toggles, the order, liquidity).
   const resetFind = () => {
-    setWant({ mode: "budget", amt: null, minChance: null, minReturn: null });
-    setFind((f) => ({ ...f, horizon: RULES.targetEntryDTE, dir: "signals", positiveOnly: false, flagged: true, hideMisses: false }));
+    setWant({ mode: "budget", amt: null, minChance: null, minReturn: null, side: DEFAULT_NET_SIDE });
+    setFind((f) => ({ ...f, horizon: RULES.targetEntryDTE, dir: "signals", target: null, positiveOnly: false, flagged: true, hideMisses: false }));
     setFindOrder(DEFAULT_FIND_ORDER);
     setLiqLevelId(RECOMMENDED_LIQUIDITY.id);
+  };
+  /* THE VIEW'S TARGET AS A PRICE (PR 66): one market's expected move to its board's expiry — the market header's own
+     figure (`expectedMove()` on the at-the-money IV, marketView.js) — so the View sheet can write "CORN $17.20 → $18.40". */
+  const marketMoveOf = (tk) => {
+    const c = tk ? chains[tk] : null, b = tk ? findGen.boards[tk] : null, atm = c ? atmIv(c) : null;
+    if (!c || !c.spot || !b || !atm) return null;
+    return { tk, spot: c.spot, move: expectedMove(c.spot, atm.iv, b.dte), expKey: b.expKey };
   };
   // COMPARE, on Find and on the market page (the ticks are on the market page's cards).
   // The ticked cards in the order ticked (one no longer in the list says so, with its ✕); with none still in the list,
@@ -4765,9 +4778,7 @@ export default function OptionsStrategyLab() {
                 fused={fuseAt(whyTk || ticker, whyDte ?? marketDte(whyTk || ticker))} order={findOrder}
                 ticker={whyTk || ticker} weatherData={weather} newsItems={newsPool} month={NOW_MONTH}
                 title={`WHY THIS MARKET · ${whyTk || ticker}`} defaultDetail
-                note={fused[whyTk || ticker]?.agreement === "CONFLICT"
-                  ? `Under "${findOrderOf("evSignal").label}", candidates on a CONFLICT market sort last, whatever their future avg.`
-                  : `Only "${findOrderOf("evSignal").label}" adds this read to a card's place in Find.`}
+                note={WHY_ORDER_NOTE}
               />
             )}
             {/* MORE ON A CARD'S MARKET (PR #46, TASK 2): its own chain, price and season — never Build's trade. */}
@@ -4825,7 +4836,7 @@ export default function OptionsStrategyLab() {
             sheet={deskSheet} onSheet={setDeskSheet} onReset={resetFind}
             isSaved={isSaved} onSave={(x) => saveCandidate(x.cand)} onOpenMarket={(tk) => goMarket(tk, "strategies")}
             freshness={findStale}
-            liquidity={liquiditySheet}
+            liquidity={liquiditySheet} viewExample={marketMoveOf((findShown[0] || {}).tk)}
             copilot={{ apiKey: "server", convo: findChat, setConvo: setFindChat, onAnalysis: logAnalysis,
               ctx: { store, scan, news: newsPool, ticker: null, legs: [], expKey: null, A: null, spot: null, seasonalSrc: null } }}
             foldedNode={<>
@@ -4854,7 +4865,7 @@ export default function OptionsStrategyLab() {
             fused={findGen.boards[mkt.tk] ? fuseFind(mkt.tk, findGen.boards[mkt.tk].dte) : null}
             readingState={readiness[mkt.tk] || null}
             items={findSorted.filter((x) => x.tk === mkt.tk)} allItems={findSorted} boards={findGen.boards}
-            request={request} freeSizing={freeSizing} findDir={find.dir} sentiments={SENTIMENTS} findOrder={findOrder}
+            request={request} freeSizing={freeSizing} findDir={find.dir} findTarget={find.target} sentiments={SENTIMENTS} findOrder={findOrder}
             newsItems={newsPool} newsState={news[mkt.tk] || null} ago={ago}
             exits={store.positions.filter((p) => p.ticker === mkt.tk && exitDateOf(p)).map((p) => ({ date: exitDateOf(p), label: `${RULES.exitDTE}-day exit · ${p.ref || p.ticker}` }))}
             isSaved={isSaved} onSave={(x) => saveCandidate(x.cand)} inCompare={(c) => inCompare(compare, c)} onTickCompare={(c) => tickCompare(c)}

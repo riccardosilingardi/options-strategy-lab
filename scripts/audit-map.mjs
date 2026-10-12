@@ -39,6 +39,7 @@ export const R = {
   layout: "the same space is carried by the page's own padding (FIND_LIST_END), not this element",
   model: "the owner's prompt for PR 62 (7 Oct 2026): the chance is worked out exactly, no longer a Monte Carlo, so the tile is renamed FUTURE (MODEL) in CARD_LABELS; the board still says FUTURE (MONTE CARLO)",
   presets: "the owner, 12 Oct 2026 (PR 65, task 65.7): the copilot's preset questions rationalized so no two on a screen ask the same thing — Build's \"Compare with the other cards\" joined the variants and Optimize's rows in \"Is there a better choice?\", \"News that could move it\" joined \"What would make it wrong?\", and the chart copilot's \"How does this relate to my trade?\" left (no trade on the market page; Build asks it as \"The chart and this trade\")",
+  chips: "the owner's prompt for PR 66 (12 Oct 2026: \"too many filters, and not incisive\"): Find's chip row is View · Style · Max loss · ⇅ Sort · More (the budget in IBKR's wording, the chance and return floors in Style, Direction in View, Horizon, Avg > 0 and Liquidity in More); the board still draws the eight chips — ⇅ Order · Budget · Chance · Return · Horizon · Direction · Avg > 0 · Liquidity",
   rows: "the owner's prompt for PR 63 (7 Oct 2026): every row shows Chance · Return on risk · Avg per $100 at risk with their own words, the sorted one ringed, then the days and the risk, so the column head names only \"Days · risk\"; the board's head says \"<order> · risk\" over one figure",
 };
 
@@ -109,10 +110,11 @@ export const SCREENS = {
       { n: "Tab off", b: "button.tab:not(.on)", a: "[data-find] [aria-label=Categories] button[aria-pressed=false]" },
       { n: "Tab count", b: "button.tab:not(.on) span.mono", a: "[data-find] [aria-label=Categories] button[aria-pressed=false] span" },
       { n: "Chip row", b: "[aria-label='Sort and filter']", a: "[data-chip-row]" },
-      { n: "Order chip", b: "button.fchip.sort", a: "[data-chip-row] button:nth-child(1)" },
-      { n: "Chip (default)", b: "button.fchip:nth-child(2)", a: "[data-chip-row] button:nth-child(2)" },
-      { n: "Chip label", b: "button.fchip:nth-child(2) span.k", a: "[data-chip-row] button:nth-child(2) span:nth-child(1)" },
-      { n: "Chip value", b: "button.fchip:nth-child(2) span.mono", a: "[data-chip-row] button:nth-child(2) span:nth-child(2)" },
+      // PR 66: the sort chip is the row's fourth and the budget (the board's second chip, "Budget $500") its third.
+      { n: "Order chip", b: "button.fchip.sort", a: "[data-chip-row] button:nth-child(4)" },
+      { n: "Chip (default)", b: "button.fchip:nth-child(2)", a: "[data-chip-row] button:nth-child(3)" },
+      { n: "Chip label", b: "button.fchip:nth-child(2) span.k", a: "[data-chip-row] button:nth-child(3) span:nth-child(1)" },
+      { n: "Chip value", b: "button.fchip:nth-child(2) span.mono", a: "[data-chip-row] button:nth-child(3) span:nth-child(2)" },
       { n: "Summary line", b: "div.sans > div:nth-child(6)", a: "[data-find-summary]", p: ["padding", "gap", "minh"] },
       { n: "Summary text", b: "div.sans > div:nth-child(6) > span:first-child", a: "[data-find-summary] > span:first-child" },
       { n: "Column head", b: "div.sans > div:nth-child(7)", a: "[data-find-colhead]" },
@@ -125,7 +127,8 @@ export const SCREENS = {
       { n: "Row risk", b: "li.row:not(.miss) span.fig + span", a: "[data-row]:not([data-miss]) [data-row-figure] + span" },
       ...BOTTOM_BAR,
     ],
-    skipWords: [[/^(Hide them|≈ Neutral|▲ Bull)$/, R.data], [/^Close ·/, R.times], [/^Future avg · risk$/, R.rows]],
+    skipWords: [[/^(Hide them|≈ Neutral|▲ Bull)$/, R.data], [/^Close ·/, R.times], [/^Future avg · risk$/, R.rows],
+      [/^(Budget|Chance|any ▾|Return|Direction)$/, R.chips]],
   },
   FindLoading: {
     mode: "app+all+reading", go: async (page) => { await page.waitForTimeout(2000); },
@@ -188,7 +191,8 @@ export const SCREENS = {
       [/^Priced again at every read/, "the board's 'Now is Friday's close' is a sample day; the app says what Now is: the last price read"]],
   },
   FindFilters: {
-    mode: "app+all", go: async (page) => { await waitRows(page); await tap(page, "[data-chip-row] button", "Budget", 900); },
+    // PR 66: the budget chip reads "Max loss $N" (IBKR's wording); the board's sheet is its Budget sheet.
+    mode: "app+all", go: async (page) => { await waitRows(page); await tap(page, "[data-chip-row] button", "Max loss", 900); },
     bWords: ":scope > div > div > section > div:last-child",
     pairs: [
       ...SHEET,

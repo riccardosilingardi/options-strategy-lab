@@ -40,7 +40,7 @@ import { BandThumbnail } from "./visuals.jsx";
 import { getU, MARKET_CATEGORIES, CATEGORY_ICONS } from "./markets.js";
 import { NAV_BAR_H } from "./navBar.jsx";
 import { hasOpenInterest, atmIv, feedName } from "./chain.js";
-import { signalStance, sentimentDirection, findOrderOf, placeLine } from "./signals.js";
+import { signalStance, sentimentDirection, findOrderOf } from "./signals.js";
 import { structureName } from "./positionView.js";
 import { undefinedRiskLegs } from "./riskGate.js";
 import { MLEG_MAX_LEGS } from "./alpacaContract.js";
@@ -56,11 +56,14 @@ import { RULES, money, chanceText, expiryWords, sizedFree, sizedFigures, sizeLin
   noOpenInterestText, underEntryText, THIN, spotLineText, legsMaxText, TRAY_LABELS, uncoveredText, trayEmptyText,
   chainEventText, eventLineText, eventInfoText, dateOnlyWhen, inDaysText, holidayWeekNote, eventsBeforeLabel, CHAIN_HEAD,
   chainNotLoadedText, marketReadingText, noCardsText, ARIA, readScoreLine, compareTrayLine, SEE_THEM, cardDetailRows,
+  viewOfDir, viewChoiceLabel, viewTargetPrice,
 } from "./rules.js";
 
 const FS = TYPE.size, FW = TYPE.weight, LH = TYPE.line;
 const NO_BARS = [];
 const dirOfSent = (sent) => { const d = sentimentDirection(sent); return d > 0 ? "bull" : d < 0 ? "bear" : "neutral"; };
+/** "Up to $18.40" — the View's own words for a chosen family on this market (PR 66), its price when one can be read. */
+const viewLabelOf = (dir, target, spot, move) => { const v = viewOfDir(dir, target); return viewChoiceLabel(v.view, v.target, viewTargetPrice(v.view, v.target, spot, move)); };
 /** A category's icon, by the name markets.js gives it (CATEGORY_ICONS). */
 const ICONS = { Wheat, Flame, Gem };
 const tnum = { fontVariantNumeric: "tabular-nums" };
@@ -73,7 +76,7 @@ export function MarketPage({
   tk, tab = "strategies", onTab, onBack, onTicker, onRefresh = null, busy = false,
   chain = null, freshLine = null, bars = NO_BARS, clock = null, clockLine = null, ivRank = null, ivDays = 0,
   board = null, fused = null, readingState = null, items = [], allItems = [], boards = {},
-  request, freeSizing = false, findDir = "signals", sentiments = [], findOrder = "ev",
+  request, freeSizing = false, findDir = "signals", findTarget = null, sentiments = [], findOrder = "ev",
   newsItems = [], newsState = null, ago = (d) => String(d), exits = [], timeZone,
   isSaved = () => false, onSave = () => {}, inCompare = () => false, onTickCompare = () => {}, onBuild = () => {},
   onBuildLegs = () => {}, cardFigures = null, quoteOf = () => null, seasonal = null, matrix = null, liqFloor = 0,
@@ -117,6 +120,7 @@ export function MarketPage({
       )}
       {tab === "strategies" && (
         <Strategies tk={tk} items={items} board={board} fused={fused} findDir={findDir} sentiments={sentiments} findOrder={findOrder}
+          viewLabel={findDir !== "signals" ? viewLabelOf(findDir, findTarget, spot, board && atm ? expectedMove(spot, atm.iv, board.dte) : null) : null}
           request={request} sizeOf={sizeOf} bars={bars} isSaved={isSaved} onSave={onSave} inCompare={inCompare}
           onTickCompare={onTickCompare} onBuild={onBuild} onOpenInChain={openInChain} badgeOf={badgeOf} onMore={onMore}
           readingState={readingState} onRead={() => onTab("overview")} />
@@ -361,7 +365,7 @@ function Overview({ tk, fused, whyProps, onAnalysis, copilot = null }) {
 
 /* ---------------------------------------------------------------- STRATEGIES */
 function Strategies({ tk, items, board, fused, findDir, sentiments, findOrder, request, sizeOf, bars, isSaved, onSave, inCompare,
-  onTickCompare, onBuild, onOpenInChain, badgeOf, onMore, readingState, onRead }) {
+  onTickCompare, onBuild, onOpenInChain, badgeOf, onMore, readingState, onRead, viewLabel = null }) {
   const sd = board ? board.signal : null;
   const fixed = findDir !== "signals" ? (sentiments.find((s) => s.id === findDir) || null) : null;
   const groups = fixed
@@ -371,11 +375,13 @@ function Strategies({ tk, items, board, fused, findDir, sentiments, findOrder, r
       { id: "neutral", head: groupHeadText("neutral", "neutral"), xs: items.filter((x) => x.family !== "signal") },
     ];
   const sortedBy = findOrderOf(findOrder).tile;
-  const sig = signalsParts({ sd: sd ? { ...sd, fused } : null, fixedLabel: fixed ? fixed.label : null });
+  // YOUR VIEW (PR 66): "Up to $18.40", in the View's words; the cards keep their family's name.
+  const fixedLabel = fixed ? (viewLabel || fixed.label) : null;
+  const sig = signalsParts({ sd: sd ? { ...sd, fused } : null, fixedLabel });
   return (
     <div data-market-body style={{ padding: "12px 16px 24px", display: "flex", flexDirection: "column", gap: 10 }}>
       {/* The whole line, for a screen reader and for the word counter: strategiesLine() says it once. */}
-      <div data-signals-line aria-label={strategiesLine({ sd: sd ? { ...sd, fused } : null, fixedLabel: fixed ? fixed.label : null, order: findOrder,
+      <div data-signals-line aria-label={strategiesLine({ sd: sd ? { ...sd, fused } : null, fixedLabel, order: findOrder,
         expKey: board ? board.expKey : null, dte: board ? board.dte : null })}>
         <div style={{ ...sans, fontSize: FS.sm, color: T.body, lineHeight: LH.body }}>
           {sig.lead}{sig.math && <> <span style={{ ...mono, ...tnum }}>{sig.math}</span></>}{sig.result && ` ${sig.result}`}
@@ -422,7 +428,6 @@ export function StrategyCard({ x, size, misses, bars, sortedBy, findOrder, saved
     picture: x.lf.bands ? { bands: x.lf.bands, legs: x.legs, entryNet: af.entry, spot: x.spot, bars: bars || NO_BARS,
       dte: x.dte, sigma: mc ? mc.sigma : undefined, driftAnnual: mc ? mc.driftAnnual : undefined, ticker: x.tk } : null,
     future: futureFigures(mc, af, n, x.expKey), past: pastFigures(x.lf.bt, af, n), ticker: x.tk, sortedBy,
-    placeAtRest: findOrderOf(findOrder).id === "evSignal" ? placeLine(x, findOrder) : null,
   };
   const btn = { ...sans, flex: 1, minWidth: 0, minHeight: TAP, borderRadius: 10, fontSize: FS.sm, fontWeight: FW.bold, cursor: "pointer", padding: 0,
     whiteSpace: "nowrap" };

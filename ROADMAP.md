@@ -6,6 +6,56 @@ The full history of every item shipped so far (P0–P10, P2-bis) is in `docs/his
 Every pull request updates this file: the session that ships an item marks it done and states
 what the next one inherits.
 
+## Done in PR 66 (owner, 12 Oct 2026): Find — four chips, from your view of the market
+
+The first of three stacked PRs (66 → 67 → 68), planned together and approved by the owner on 12 Oct 2026 after comparing
+OSL with IBKR's Option Wizard. The plan's four questions were answered: the View's target picks the family; it is in
+expected moves; Alpaca's four Greeks are read (PR 67); PR 68 builds the exit replay's logic with no data (nothing shown
+that could pass for a real result).
+
+- **66.1 — the chip row is View · Style · Max loss · ⇅ Sort · More** (it was eight chips and two toggles hidden in sheets).
+  *View* (`FIND_VIEWS`, `dirOfView()`, `viewOfDir()`): Signals decide · Up · Down · Range; Up and Down take a target in
+  expected moves (0.5–3×, default 1×), which picks the family findGen builds — up to 1.5× the Bull (Bear) cards, beyond it
+  the Very ones — and is written as a price on the top row's market ("CORN $13.24 → $15.97 by 18 Dec") and on the market
+  page ("View: Up to $15.97, your choice"). `find.dir` stays the family; a target moved inside one family re-builds
+  nothing. *Style* (`FIND_STYLES`, `styleOf()`): Cautious · Balanced · Bold set the chance and return floors, print the two
+  numbers, keep the sliders under "Set them yourself", read "Custom" when moved. *Max loss*: the budget, unchanged.
+  *⇅ Sort*: four orders — "Future avg + signal" removed (a stored "evSignal" reads as Future avg; `placeSignal()`, the
+  card's sum line and the "+ signal" line of "How the numbers fit" deleted; `signalAdjustment()` kept for `rankScore()`).
+  *More*: Debit · Credit · Both (new: `request.side`, the card's `entryNet` sign, a miss dimmed with its reason), Horizon,
+  the three list toggles, the Liquidity panel as a fold. The words are rules.js's (`FIND_CHIPS`, `chipPartsOf()`,
+  `chipText()`, `chipOffDefault()`, `moreOffCount()`).
+- **66.2 — the filter that binds** (`bindingFilter()`, rows.js; words `bindingFilterText()`): when rows are dimmed, the
+  control that leaves out the most markets — counted from the same `meetsRequest()` misses — and one fix: "Style Cautious
+  leaves out 5 markets · Loosen ›" (to Balanced), "Credit only leaves out 4 markets · Both ›", "Max loss $500 leaves out 3
+  markets · Max loss $750 ›" (never past the per-trade limit; over it, "· over your per-trade limit" and no fix).
+- **66.3 — tests and measurement.** Every chip and every More item, the migrations (verybull, evSignal), Debit/Credit on the
+  10 credit and 21 debit fixture cards, the binding line and its fix, and the memo-deps check (now also forbidding the
+  target, the style and the side). `node scripts/measure-find.mjs` (PR 66's section): **Cautious (chance ≥ 50% · return ≥
+  25%) 5 of 31 cards · Balanced (any · 25%) 31 · Bold (any · 150%) 19 · Debit 21 · Credit 10 · Both 31**; rows 2 of 2 in
+  each (the fixture has two markets). Before PR 66 the same requests (chance 50%, return 150%) kept the same cards; Debit ·
+  Credit did not exist (31).
+- **66.4 — Broker change**: the owner's decision of 12 Oct 2026 is below, in its line.
+
+**Measured.** Tests 1,439 → 1,448, 0 failed. Build 1,488.32 → 1,496.42 kB (the usual chunk warning). Audit 20 boards, dark
+and light: 5,258 → 5,248 ✓, 0 unexplained (the board still draws the eight chips: five of its words per theme are skipped
+with their reason, `R.chips`; the order and budget chips are paired with the app's 4th and 3rd). Words: find 184 → 157
+(five chips, not eight), market 487 → 477 (the "+ signal" sum left the cards); the binding line (7 words, only when rows
+are dimmed) is `bindingFilter()`'s data, written in voice.test.js. Photographs: docs/screens/pr66/
+(`node scripts/shoot-pr66.mjs`; the binding line on the two-market component fixture,
+`ONLY=find-binding,find-binding-light node scripts/shoot-screens.mjs docs/screens/pr66`).
+
+**Not changed:** findGen and the one sorted list, every floor, the gate and every existing RULES value, one expiry per market
+(the all-expiry search stays in Optimize on Build), Build, the order paths, the /api/state payload.
+
+### What PR 67 inherits
+
+- Find's chips have met fixtures only: how many of the ten live rows each Style keeps is unread (PRD §4 #8).
+- The binding line was photographed on the two-market fixture; the whole-app fixture's ten identical markets cannot show it.
+- This environment cannot read market data (its Alpaca credential is refused, Alpha Vantage's and FRED's fail to inject),
+  and the network policy blocks interactivebrokers.com: PR 67's market chance follows IBKR's method as the owner's
+  prompt describes it, unread against IBKR's page.
+
 ## Done in PR 65 (owner, 7 Oct 2026): Optimize on Build, and the roll judged on the whole trade
 
 PR 64 is a carry-over with no code: PRs 62 and 63 were merged into the branches they were stacked on, not into `main`, and
@@ -940,6 +990,8 @@ One line each; see `PRD.md` §5 and `docs/history/ROADMAP.md` for detail.
 - **DONE: PR 4b** — Build's variants and a position's roll, one calculation.
 - **DONE: PR 4c** — "What did this trade teach me?" in the Journal.
 - **DONE: PR 4d** — the Liquidity sheet on Find, said plainly.
+- **DONE: PR 66** — Find's four chips from your view of the market (View, Style, Max loss, ⇅ Sort, More) and the filter
+  that binds. **NEXT:** PR 67 (Build like IBKR's Option Wizard) and PR 68 (P5's exit replay, logic only), stacked.
 - **DONE: PR 61** — quick fixes from the post-PR-60 sanity check (☆ toggle, the copilot's room and Continue, Compare
   counts cards, one return unit, open risk says what it includes, one compare). **NEXT:** PR 62 and PR 63 (stacked), then
   the basket expansion with a measured admission rule (below), unless the owner picks another.
@@ -959,4 +1011,6 @@ One line each; see `PRD.md` §5 and `docs/history/ROADMAP.md` for detail.
 - **P8** — more indicators and timeframes, after the owner has used the current ones.
 - **P10-bis** — expiry strip, strike ruler, break-even line with date slider, view toggles.
 - **Play Store** — the PWA as an Android app.
-- **Broker change** — futures and futures options need another broker.
+- **Broker change** — futures and futures options need another broker. **Owner, 12 Oct 2026 (PR 66, task 66.4):** Directa
+  evaluated and archived — options only on IDEM/EUREX, its API runs only through the Darwin desktop platform on a PC, and
+  there is no API test account, so paper cannot be verified. IBKR is the candidate for futures options, studied after P5.

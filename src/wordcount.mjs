@@ -239,9 +239,12 @@ export const COPY = {
     { side: 1, type: "put", strike: 12, qty: 1 }] }], "Monday").join(""),
   // PR #48: the badge (on CORN's reading) and the card's "Why this place" line (its longest form).
   badgeText: () => S.badgeText({ ticker: "CORN", score: 64, confidence: 86, agreement: "CONFLUENT" }),
-  placeLine: () => S.placeLine({ ev100: -12, sent: "bull", fused: { score: 64, confidence: 86, agreement: "CONFLUENT" }, lf: {} }, "evSignal"),
-  // REDESIGN PR 1 — Find, version B. The chip row is scored as all eight chips at rest (one call site renders them).
+  // PR 66: "Future avg + signal" is gone, so the longest place line is the plain order's.
+  placeLine: () => S.placeLine({ ev100: -12, sent: "bull", fused: { score: 64, confidence: 86, agreement: "CONFLUENT" }, lf: {} }, "ev"),
+  // REDESIGN PR 1 — Find, version B. The chip row is scored as all its chips at rest (one call site renders them; PR 66:
+  // five — View · Style · Max loss · ⇅ Sort · More). `chipPartsOf()` draws the same words, so it scores none of its own.
   chipText: () => R.FIND_CHIPS.map((c) => R.chipText(c.id, { order: "ev", request: REQUEST, horizon: 45, dir: "signals", liqLabel: "Recommended" })).join(" "),
+  chipPartsOf: () => "",
   showRowsCta: () => R.showRowsCta(4, 10),
   rowsResultsLine: () => R.rowsResultsLine(4, 6, false),
   columnHeadText: () => R.columnHeadText("ev"),
