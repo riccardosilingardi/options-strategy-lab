@@ -20,6 +20,42 @@ export function bs(S, K, T, iv, type) {
 
 export const smile = (b, S, K) => b * (1 + 0.6 * Math.abs(Math.log(K / S)));
 
+/**
+ * THE GREEKS OF ONE OPTION, BLACK-SCHOLES (moved here from App.jsx in PR 67, unchanged: the same 4.5% rate as `bs()`).
+ * Per share: delta, gamma (per $1), theta (per day), vega (per point of volatility). Build's scenario table and Greek
+ * tabs (src/tradeChart.js) and `analyze()` read this one.
+ */
+const nPDF = (x) => Math.exp(-0.5 * x * x) / Math.sqrt(2 * Math.PI);
+export function bsGreeks(S, K, Tyr, iv, type) {
+  if (Tyr <= 0 || iv <= 0) return { delta: 0, gamma: 0, theta: 0, vega: 0 };
+  const R = 0.045;
+  const sq = Math.sqrt(Tyr);
+  const d1 = (Math.log(S / K) + (R + 0.5 * iv * iv) * Tyr) / (iv * sq);
+  const d2 = d1 - iv * sq;
+  const delta = type === "call" ? N(d1) : N(d1) - 1;
+  const gamma = nPDF(d1) / (S * iv * sq);
+  const theta = ((-S * nPDF(d1) * iv / (2 * sq)) - (type === "call" ? 1 : -1) * R * K * Math.exp(-R * Tyr) * N(type === "call" ? d2 : -d2)) / 365;
+  const vega = S * nPDF(d1) * sq / 100;
+  return { delta, gamma, theta, vega };
+}
+
+/**
+ * A STRUCTURE TODAY, AT ONE PRICE (PR 67): Σ side × qty × Black-Scholes on each leg's OWN implied volatility (`ivs[i]`) —
+ * its value per share and its four Greeks per share (`bsGreeks()`). Build's "now" curve and its Greeks (App.jsx's
+ * `scenarioValue()` / `netGreeks()`), the scenario table and the Greek tabs (src/tradeChart.js) all read this one.
+ */
+export function legsAt(legs, S, dte, ivs) {
+  const T = dte / 365;
+  let value = 0, delta = 0, gamma = 0, theta = 0, vega = 0;
+  legs.forEach((l, i) => {
+    const m = Math.sign(l.side) * l.qty;
+    value += m * bs(S, l.strike, T, ivs[i], l.type);
+    const g = bsGreeks(S, l.strike, T, ivs[i], l.type);
+    delta += m * g.delta; gamma += m * g.gamma; theta += m * g.theta; vega += m * g.vega;
+  });
+  return { value, delta, gamma, theta, vega };
+}
+
 export const netBS = (legs, S, dte, iv) => legs.reduce((a, l) => a + Math.sign(l.side) * l.qty * bs(S, l.strike, dte / 365, smile(iv, S, l.strike), l.type), 0);
 
 export const payoff = (legs, S) => legs.reduce((a, l) => a + Math.sign(l.side) * l.qty * (l.type === "call" ? Math.max(S - l.strike, 0) : Math.max(l.strike - S, 0)), 0);

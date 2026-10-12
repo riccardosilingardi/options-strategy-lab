@@ -55,7 +55,7 @@ import { RULES, money, chanceText, expiryWords, sizedFree, sizedFigures, sizeLin
   OPEN_IN_CHAIN, BUILD_CTA, COMPARE_TICK, MARKET_READ_HEAD, HOW_WORKED_OUT_LINK, MARKET_READ_END, CHAIN_MODES, marketNewsHead, marketNewsAsk, marketReadAsk, marketReadHead,
   noOpenInterestText, underEntryText, THIN, spotLineText, legsMaxText, TRAY_LABELS, uncoveredText, trayEmptyText,
   chainEventText, eventLineText, eventInfoText, dateOnlyWhen, inDaysText, holidayWeekNote, eventsBeforeLabel, CHAIN_HEAD,
-  chainNotLoadedText, marketReadingText, noCardsText, ARIA, readScoreLine, compareTrayLine, SEE_THEM, cardDetailRows,
+  chainNotLoadedText, marketReadingText, noCardsText, ARIA, readScoreLine, compareTrayLine, SEE_THEM, cardDetailRows, costsFor,
   viewOfDir, viewChoiceLabel, viewTargetPrice,
 } from "./rules.js";
 
@@ -428,6 +428,8 @@ export function StrategyCard({ x, size, misses, bars, sortedBy, findOrder, saved
     picture: x.lf.bands ? { bands: x.lf.bands, legs: x.legs, entryNet: af.entry, spot: x.spot, bars: bars || NO_BARS,
       dte: x.dte, sigma: mc ? mc.sigma : undefined, driftAnnual: mc ? mc.driftAnnual : undefined, ticker: x.tk } : null,
     future: futureFigures(mc, af, n, x.expKey), past: pastFigures(x.lf.bt, af, n), ticker: x.tk, sortedBy,
+    // PR 67: the market's chance and why it differs, as `listCardFigures()` worked them out.
+    mkt: x.lf.mkt || null, gap: x.lf.gap || null,
   };
   const btn = { ...sans, flex: 1, minWidth: 0, minHeight: TAP, borderRadius: 10, fontSize: FS.sm, fontWeight: FW.bold, cursor: "pointer", padding: 0,
     whiteSpace: "nowrap" };
@@ -462,13 +464,15 @@ export function StrategyCard({ x, size, misses, bars, sortedBy, findOrder, saved
             fontSize: FS.xs, lineHeight: LH.body }}>
             {cardDetailRows({ spot: x.spot, breakevens: af.breakevens, move: expectedMove(x.spot, mc ? mc.sigma : null, x.dte),
               spread: x.spread, maxProfit: af.maxProfit, unbounded: af.profitUnbounded, n, ivRank: x.ivRank, ivDays: x.ivDays,
-              theta: af.greeks ? af.greeks.theta : null, dte: x.dte }).map((r) => (
+              theta: af.greeks ? af.greeks.theta : null, dte: x.dte, costs: costsFor("alpaca", x.legs, n, { entryNet: af.entry }) }).map((r) => (
               <React.Fragment key={r.id}>
                 <dt style={{ color: T.mut }}>{r.k}</dt>
                 <dd data-detail={r.id} style={{ ...mono, margin: 0, color: T.body, fontVariantNumeric: "tabular-nums", overflowWrap: "anywhere" }}>{r.v}</dd>
               </React.Fragment>
             ))}
           </dl>
+          {/* PR 67: IBKR's costs, for comparison only — not connected yet. */}
+          <Placeholder id="costs-ibkr" />
           <CandidateCard {...common} misses={[]} direction={stance} badge={badge}
             more={onMore ? { tk: x.tk, onOpen: () => onMore(x) } : null} style={{ background: T.bg }} cardKey={null} />
         </>

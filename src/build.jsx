@@ -16,10 +16,10 @@
 import React, { useState } from "react";
 import { Minus, Plus, ArrowUp } from "lucide-react";
 import { T, TYPE } from "./theme.js";
-import { mono, sans, Note, Info, Sheet, Reveal, FilterChip, TAP } from "./ui.jsx";
+import { mono, sans, Note, Info, Sheet, Reveal, FilterChip, TAP, Placeholder } from "./ui.jsx";
 import { useCopilot, useTicketSend, SKILLS, BUILD_SKILL_IDS, Markdown, readQty, CONTINUE_LABEL } from "./pro.jsx";
 import { FACTOR_LABEL } from "./why.jsx";
-import { CARD_LABELS, BUILD_DEFINITIONS, money, signedMoney, chanceText, returnText, notInFiguresLine, futureTile, ARIA, VARIANT_LOAD, NO_CEILING, LIMIT_CHOICES, parseLimitText,
+import { chanceLines, chanceGapLine, marketNotReadText, CHANCE_TWO_INFO, CARD_LABELS, BUILD_DEFINITIONS, money, signedMoney, chanceText, returnText, notInFiguresLine, futureTile, ARIA, VARIANT_LOAD, NO_CEILING, LIMIT_CHOICES, parseLimitText,
   OPTIMIZE_HEAD, OPTIMIZE_RUN, OPTIMIZE_CURRENT } from "./rules.js";
 
 const FS = TYPE.size, FW = TYPE.weight, LH = TYPE.line;
@@ -114,10 +114,11 @@ const Box = ({ title, children }) => (
     {children}
   </div>
 );
-export function NumbersSection({ figures, rr, pop, breakevens = [], future, past, delta, theta, reconcile = null }) {
+export function NumbersSection({ figures, rr, pop, breakevens = [], future, past, delta, theta, reconcile = null, mkt = null, gap = null }) {
   const [def, setDef] = useState(null);
   const toggle = (id) => setDef((d) => (d === id ? null : id));
   const ft = futureTile(future);
+  const gapLine = chanceGapLine(gap), notRead = marketNotReadText(mkt);
   const items = [
     ["profit", sentence(CARD_LABELS.profit), figures && figures.profit != null ? money(figures.profit) : figures && figures.unbounded ? "no ceiling" : "—", T.ink],
     ["loss", LOSS_LABEL, figures && figures.risk != null ? money(figures.risk) : "—", T.ink],
@@ -135,7 +136,11 @@ export function NumbersSection({ figures, rr, pop, breakevens = [], future, past
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
         <Box title={CARD_LABELS.future}>
-          <BoxRow k={sentence(CARD_LABELS.chance)} v={chanceText(pop)} />
+          {/* PR 67: two chances, as the card's CHANCE tile prints them (`chanceLines()`): the market's, then the OSL model's. */}
+          <span style={{ ...sans, fontSize: FS.sm, color: T.mut }}>{sentence(CARD_LABELS.chance)}</span>
+          {chanceLines(pop, mkt).map((l) => (
+            <div key={l.id} data-chance-line={l.id} style={{ paddingLeft: 8 }}><BoxRow k={l.word} v={l.value} /></div>
+          ))}
           <BoxRow k="Avg" v={ft.value} />
         </Box>
         <Box title={CARD_LABELS.past}>
@@ -146,6 +151,13 @@ export function NumbersSection({ figures, rr, pop, breakevens = [], future, past
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 16px" }}>
         <Figure id="delta" label="Delta (shares)" value={delta} size={FS.md} def={BUILD_DEFINITIONS.delta} open={def === "delta"} onToggle={toggle} />
         <Figure id="theta" label="Theta" value={theta} size={FS.md} def={BUILD_DEFINITIONS.theta} open={def === "theta"} onToggle={toggle} />
+      </div>
+      {/* WHY THE TWO CHANCES DIFFER (PR 67): amber when the market's is the lower one; the market's not read, in words. */}
+      <div data-chance-two style={{ display: "grid", gap: 4 }}>
+        {gapLine && <div data-chance-gap={gap.lower ? "lower" : "higher"}
+          style={{ ...sans, fontSize: FS.xs, lineHeight: LH.body, color: gap.lower ? T.amber : T.body }}>{gapLine}</div>}
+        {notRead && <Note>{notRead}</Note>}
+        <Info label="the two chances">{CHANCE_TWO_INFO}</Info>
       </div>
       {reconcile}
     </Section>
@@ -390,6 +402,9 @@ export function OrderSection({ order }) {
         </span>
       </div>
       {riskDef && <div role="note" style={{ ...sans, fontSize: FS.xs, color: T.body, lineHeight: LH.body }}>{BUILD_DEFINITIONS.loss}</div>}
+      {/* PR 67 (task 67.5): what the broker charges, said and never subtracted; IBKR's, for comparison, not connected yet. */}
+      {o.costs && <div data-costs style={{ ...sans, fontSize: FS.xs, color: T.mut, lineHeight: LH.body }}>{o.costs}</div>}
+      {o.costs && <Placeholder id="costs-ibkr" />}
       <label style={{ ...sans, display: "flex", alignItems: "center", gap: 10, minHeight: TAP, fontSize: FS.sm, color: T.ink, cursor: "pointer" }}>
         <input type="checkbox" checked={capOn} onChange={(e) => o.cap.onCheck(e.target.checked)}
           style={{ width: 22, height: 22, accentColor: T.amber, flexShrink: 0, margin: 0 }} />

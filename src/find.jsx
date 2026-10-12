@@ -523,6 +523,8 @@ export function MarketRow({ row, sd = null, fig, bars = NO_BARS, saved = false, 
             <span key={it.tile} data-row-fig={it.tile} data-sorted={it.sorted ? "true" : undefined}
               style={{ whiteSpace: "nowrap", ...(it.sorted ? ROW_RING : null) }}>
               <b style={{ ...mono, fontVariantNumeric: "tabular-nums", color: ink }}>{it.value}</b>{it.word ? ` ${it.word}` : ""}
+              {/* PR 67: the market's chance, small, beside the model's ("· mkt 71%"). */}
+              {it.extra && <span data-row-fig-extra> · {it.extra.word} <span style={{ ...mono, fontVariantNumeric: "tabular-nums" }}>{it.extra.value}</span></span>}
             </span>
           ))}
         </span>

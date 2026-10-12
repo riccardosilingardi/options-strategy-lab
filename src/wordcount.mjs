@@ -185,6 +185,15 @@ export const COPY = {
   alpacaErrorText: () => O.alpacaErrorText(new Error("422")),
   pctText: () => R.pctText(0.35),
   chanceText: () => R.chanceText(0.55),
+  // PR 67: why the two chances differ (shown only past `chanceGapPoints`) and why the market's is not read — both counted.
+  chanceGapLine: () => R.chanceGapLine({ model: 0.74, market: 0.66, season: 0.06, flat: 0.68, left: 0.03, right: -0.005, lower: true }),
+  marketNotReadText: () => R.marketNotReadText({ pop: null, reason: "few" }),
+  // PR 67: Build's Greek tab readout, the scenario table's figures and heads, and the Order's costs line.
+  greekNowLine: () => R.greekNowLine({ label: "Delta", unit: "shares", price: 378.2, today: 34, read: 36 }),
+  greekText: () => R.greekText(34),
+  scenarioMoveText: () => R.scenarioMoveText(-0.3),
+  scenarioPnlText: () => R.scenarioPnlText(-390),
+  costsLine: () => R.costsLine({ connected: true, name: "Alpaca", commission: 0, shareOfNet: 0, side: "debit", feesCounted: false }),
   chanceAskText: () => R.chanceAskText(null),
   // PR #49, TASK 3: the two new tiles, on a fixture of the owner's example ("won 9 of 14 · avg +$310").
   pastTileText: () => R.pastTileText({ wins: 9, n: 14, avg: 310 }),

@@ -6,6 +6,68 @@ The full history of every item shipped so far (P0–P10, P2-bis) is in `docs/his
 Every pull request updates this file: the session that ships an item marks it done and states
 what the next one inherits.
 
+## Done in PR 67 (owner, 12 Oct 2026): Build like IBKR's Option Wizard — the market's chance, scenarios, Greeks, costs
+
+The second of three stacked PRs (66 → 67 → 68). Stacked on PR 66.
+
+- **67.1 — the market's chance, IBKR's method** (`src/impliedDist.js`, plain JS, imports nothing; read once in rules.js by
+  `marketDistOf()` / `marketChanceOf()` beside `chanceOf()`, spelled once in App.jsx by `marketChanceCheckOf()` beside
+  `chanceCheckOf()`, one fit per board and expiry `boardDistOf()`). One expiry's out-of-the-money quotes at their mid (a
+  choice: IBKR does not say which price), segments between listed strikes with their mass at the midpoint, the tails at
+  ⅔ of the lowest strike and 20% above the highest, fair pricing with no interest, non-negative least squares under Σ = 1.
+  A board `boardLooksStale()` calls stale, or with fewer than `RULES.impliedMinQuotes` (4) usable quotes, gives no number
+  and says why (`MARKET_CHANCE_NOT_READ`). **A small smoothing penalty** (0.01 × the median strike width on the second
+  difference) tames the zig-zag the midpoint rule leaves on quotes rounded to the cent — measured in impliedDist.test.js:
+  a 1-cent move moved a chance by up to 0.25 points without it, 0.05 with it. **The solver** (`simplexLS()`: Lawson–
+  Hanson's active set with Σ = 1 held exactly, its Cholesky factor grown a column at a time) fits a 60-strike board in
+  about 5 ms and a 150-strike one in about 17 ms on a desktop CPU (the first version, Σ = 1 as a weighted row solved by QR,
+  took 26 and 63 ms at 60 and 100); one fit per market and expiry, cached on the chain. Tests: (a) IBKR's example (510 call 6.45, 515 call 4.40) reads
+  back exactly 0.56 / 0.06 / 0.38 with no penalty, within a point with it; (b) a flat-IV board gives the lognormal's own
+  chance within 0.11 points (1 allowed); (c) a put skew lowers a far out-of-the-money credit put spread's chance (91.0%
+  against 93.7% flat) and the market's equals the prices' own answer — **near the money the same skew raises it** (75.0%
+  against 70.6%; changed from the plan's wording, tested both ways); (d) determinism, and a 1-cent move moves nothing.
+- **67.2 — two chances on the card, the row and Build.** The CHANCE tile reads "Market 71%" then "OSL model 74%"
+  (`chanceLines()`, `CHANCE_LINES`); past `RULES.chanceGapPoints` (5 points) one line under it says why
+  (`chanceGapOf()`, `chanceGapLine()`: the season against the same model at zero drift; the market's tails past ±1.5
+  standard deviations against one volatility, "(skew)" when they lean opposite ways), amber when the market's is lower —
+  the one sentence a card carries besides its name and legs (card.test.jsx names it). Find's row adds "· mkt 71%" (the
+  owner's leaning); the sort stays on the OSL model. Build's FUTURE box lists both, then the line or "Market chance not
+  read: …", then "The two chances ⓘ". The copilot reads both (Build's `chances`, Find's Compare `chanceMarket`, Build's
+  other cards). figures.test.jsx holds card = compact card = Build = row for both chances and the line.
+- **67.3 — the scenario table under Build's chart** (`scenarioGrid()`, tradeChart.js): today's price moved by the largest
+  move in thirds (1% · 5% · 10% · 30%, default 30%, IBKR's "Variaz. max"); rows Price, P&L $, Delta, Gamma, Vega, Theta for
+  Build's size; **Today** (Black-Scholes on each leg's own IV, `legsAt()` in engine.js — the same function Build's "now"
+  curve and its Greeks now read) or **At expiry** (the one payoff; Greeks zero, as IBKR shows them). One set at a time
+  (a phone holds seven columns, not fourteen: changed from "a second column set").
+- **67.4 — Greek tabs above the chart**: P&L (the chart as it was) · Delta · Gamma · Vega · Theta, each drawn against price
+  today and on the exit day (`greekCurves()`), with a dot at today's price where the broker sent the figure for every leg
+  (`brokerGreeks()`, read; a partial sum is never drawn). The chain parsers now keep gamma and vega (the owner's answer:
+  "read all four"); Build's Legs list prints the broker's delta where it has one.
+- **67.5 — costs, said, never subtracted** (`BROKER_COSTS`, `costsFor()`, `costsLine()` in rules.js): "Costs: $0
+  commission on Alpaca, 0% of the debit (regulatory fees not counted)" on Build's Order and in a card's Details; IBKR is
+  `<Placeholder id="costs-ibkr">` ("Not connected yet") with the owner's IDEM rate (€2.00 a contract a side) and the US
+  combo report stored, and no US rate invented. riskGate.test.js holds that no gate, ranking, floor, alternative or order
+  path reads a cost.
+- **67.6 — owner checks and the defined-risk sweep.** PRD §4 #9 is the OWNER CHECK "Market chance = IBKR's", with its
+  steps. figures.test.jsx sweeps every structure Find builds on the fixture boards (31, every view) and every move Optimize
+  reads off the board from them (150): none has an uncovered short leg (`undefinedRiskLegs()`, the gate's own check).
+
+**Measured.** Tests 1,448 → 1,473, 0 failed. Build 1,496.42 → 1,519.03 kB (the usual chunk warning). Audit 20 boards, dark
+and light: 5,248 ✓, 0 unexplained (no board draws the new sections). Words: build 518 → 610 (both chance lines, the Greek
+tabs' readout and legend, the table's words, the costs line; written in voice.test.js); find and market unchanged.
+Photographs: docs/screens/pr67/ (`node scripts/shoot-pr67.mjs`, 14 shots, dark and light).
+
+**Not changed:** the gate and every existing RULES value, the seven order paths, `chanceOf()`'s own arithmetic,
+`histBacktest()`, `seasonalSignal()`, the /api/state payload, findGen and the sort.
+
+### What PR 68 inherits
+
+- The market's chance has met fixture boards only; equality with IBKR's screen is the owner's check (PRD §4 #9).
+- The Greek dot and the leg deltas read the broker's figures only where the feed sends them; the live Alpaca snapshot's
+  gamma and vega have not been seen (this environment's Alpaca credential is refused).
+- `thesis.marketPop` (PR 68) can store `marketChanceOf()`'s figure at entry: the function exists and is held equal on the
+  card and on Build.
+
 ## Done in PR 66 (owner, 12 Oct 2026): Find — four chips, from your view of the market
 
 The first of three stacked PRs (66 → 67 → 68), planned together and approved by the owner on 12 Oct 2026 after comparing
@@ -991,7 +1053,9 @@ One line each; see `PRD.md` §5 and `docs/history/ROADMAP.md` for detail.
 - **DONE: PR 4c** — "What did this trade teach me?" in the Journal.
 - **DONE: PR 4d** — the Liquidity sheet on Find, said plainly.
 - **DONE: PR 66** — Find's four chips from your view of the market (View, Style, Max loss, ⇅ Sort, More) and the filter
-  that binds. **NEXT:** PR 67 (Build like IBKR's Option Wizard) and PR 68 (P5's exit replay, logic only), stacked.
+  that binds.
+- **DONE: PR 67** — Build like IBKR's Option Wizard: the market's chance beside the OSL model's, the scenario table, the
+  Greek tabs, costs said per broker. **NEXT:** PR 68 (P5's exit replay, logic only), stacked.
 - **DONE: PR 61** — quick fixes from the post-PR-60 sanity check (☆ toggle, the copilot's room and Continue, Compare
   counts cards, one return unit, open risk says what it includes, one compare). **NEXT:** PR 62 and PR 63 (stacked), then
   the basket expansion with a measured admission rule (below), unless the owner picks another.

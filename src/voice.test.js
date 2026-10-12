@@ -279,7 +279,16 @@ test("MEASURED: the three screens, and the table in the PRD is this number", () 
      are one tap away. market 487 → 477: under "Future avg + signal" a card printed its sum at rest ("sorted by −12.0 +
      signal +27.5 = 15.5 per $100", `placeLine()`, 10) — that order is gone, and so is the line. The ceilings are those
      numbers. */
-  const CEILING = { find: 157, market: 477, build: 518, positions: 248 };
+  /* >>> PR 67 (Build like IBKR's Option Wizard, owner 12 Oct 2026). <<< build 518 → 610. The numbers' two chances and the
+     line under them: why they differ (`chanceGapLine()`, 19 words, only past `RULES.chanceGapPoints`) or why the market's is
+     not read (`marketNotReadText()`, 8) — the counter scores both though they never show together — and "The two chances ⓘ";
+     the chart's Greek tabs (their chart's spoken name, the readout "Delta at $… today: … · read from the broker: …", the
+     legend and "Where the Greeks come from ⓘ") and the scenario table under it (its title, Today | At expiry, Largest move,
+     its row and column names, "How the table is worked out ⓘ"); the Order's costs line ("Costs: $0 commission on Alpaca, 0%
+     of the debit (regulatory fees not counted)", 14). The IBKR placeholder's words are PLACEHOLDERS' data, unscored (about 40
+     more on screen). find and market do not move: the row's "· mkt 71%" and the cards' two chance lines are rows.js's and
+     card.jsx's data. */
+  const CEILING = { find: 157, market: 477, build: 610, positions: 248 };
   /* >>> PR #46: ONE ORDERS LIST. <<< The record-based "WORKING AT THE BROKER" panel (its paragraph about what a
      working order is, the stale-DAY warning, the per-row sentences) left Positions; the one list lives in
      `orders.jsx`, which the counter now reads. Measured: positions 304 -> 209 (4 typed + 205 generated, 14 sites).

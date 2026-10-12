@@ -130,7 +130,10 @@ non-expert trader who wants to learn discipline rather than be sold trades.
      Each card carries one badge ("CORN ↑ +64 · conf 86", tap for "Why this market"), a flag where it applies (single
      option, butterfly, CONFLICT, confidence under 40, options dear), the gauge beside the unified picture (tap opens
      the full figure), and **six figures for the size the budget buys**: YOU RISK (contracts × the risk), MAX PROFIT
-     (contracts × the maximum profit, or "no ceiling"), CHANCE, RETURN ON RISK, **FUTURE (MODEL)** (named FUTURE (MONTE CARLO) until PR 62; the
+     (contracts × the maximum profit, or "no ceiling"), CHANCE — **two lines since PR 67: "Market 71%", the chance the
+     expiry's option prices imply (IBKR's method, `src/impliedDist.js`), and "OSL model 74%", the app's own (one
+     volatility, the measured season); past 5 points apart one line under them says why, amber when the market's is lower;
+     the list sorts on the OSL model; Find's row adds "· mkt 71%"** — RETURN ON RISK, **FUTURE (MODEL)** (named FUTURE (MONTE CARLO) until PR 62; the
      model's average at the fill price for this size, then "per $100 at risk", then "to <expiry>"; "— · no
      ceiling" for a structure with no maximum, which sorts last) and **PAST YRS (BACKTEST)** ("won 9 of 14 · avg
      +$310" for this size, "not read" until the series loads; its ⓘ says it settles at expiry, does not replay the
@@ -150,8 +153,13 @@ non-expert trader who wants to learn discipline rather than be sold trades.
      bars, zones and crosshair all on the chance's own lognormal (PR 63, `src/tradeChart.js`) — at full width; a tap, a
      drag of the line's handle, the mouse or the arrow keys put a crosshair at a price, and one sentence under the chart
      says what the trade makes there at expiry for the size and the chance of finishing below it; "How to read ⓘ"
-     explains every mark; **The numbers** — max
-     profit, max loss, breakeven, return on risk (each label opens its definition), FUTURE (MODEL) chance and avg,
+     explains every mark. **Since PR 67, IBKR's tabs above it** — P&L (this chart) · Delta · Gamma · Vega · Theta, each
+     Greek of the whole position drawn against price today and on the exit day, with a dot at the broker's own figure where
+     every leg carries one — **and the scenario table under it**: today's price moved by the largest move in thirds (1% · 5%
+     · 10% · 30%), the price, the P&L for the size and the four Greeks, Today (Black-Scholes on each leg's own IV) or At
+     expiry (the payoff; Greeks zero); **The numbers** — max
+     profit, max loss, breakeven, return on risk (each label opens its definition), FUTURE (MODEL) chance (Market · OSL
+     model, PR 67) and avg,
      PAST YRS (BACKTEST) in profit N of M and avg, delta in shares and theta a day — the card's own figures
      (figures.test.jsx); **Why this trade**, folded: the stance line the market page's card prints; open, each factor
      with its arrow, strength and "supports / against / quiet", the rule for when Send asks why in its real words (the
@@ -490,7 +498,9 @@ happens** is recorded if the owner meets it in normal use, and is never asked fo
 name: none could be closed from this sandbox; each is re-confirmed with what PR 61 added to it. PR 62 re-read them
 again: none closed; #5, #8, #9 and #10 carry what PR 62 changed. PR 63 re-read them: none closed; #3, #5 and #8
 carry what PR 63 changed. PR 65 re-read them: none closed; #3, #5, #8 and #10 carry what PR 65 changed, and #5 gains an
-OWNER CHECK, Optimize's speed on the phone. PR 66 re-read them: none closed; #3 and #8 carry what PR 66 changed.)
+OWNER CHECK, Optimize's speed on the phone. PR 66 re-read them: none closed; #3 and #8 carry what PR 66 changed. PR 67
+re-read them: none closed; #3, #7, #8, #9 and #10 carry what PR 67 changed, and #9 gains an OWNER CHECK, the market's
+chance against IBKR's.)
 
 1. **OWNER CHECK — the Journal entry for J-0001 shows the $7.65 fill** (v1 is reached on the owner's report of 5 Oct
    2026: filled 9 of 9 at $7.65, filed from the production address; this session cannot see that browser). **No Modify
@@ -539,7 +549,11 @@ OWNER CHECK, Optimize's speed on the phone. PR 66 re-read them: none closed; #3 
    (docs/screens/pr66/, `node scripts/shoot-pr66.mjs`); the whole-app fixture answers every market with UNG's contracts,
    so a filter dims all rows or none there, and the line naming the binding filter was photographed on the two-market
    component fixture instead (`shoot-screens.mjs`, SPY and UNG). The owner's board still draws the eight old chips: the
-   audit skips their words with the reason (`R.chips`). Never on a phone.
+   audit skips their words with the reason (`R.chips`). Never on a phone. **PR 67's two chances** (the compact card, its
+   amber line, the row's "· mkt", Build's FUTURE box), **the Greek tabs, the scenario table and the costs line with IBKR's
+   placeholder** were photographed the same way (docs/screens/pr67/, `node scripts/shoot-pr67.mjs`), on the `+book`
+   fixture whose every market carries UNG's board; no board draws them. The Greek dot read "+23" beside a computed "+23"
+   there: the fixture's broker Greeks are Black-Scholes too, so a live gap between them is unseen. Never on a phone.
 4. **Read when it happens — no credit has filled at the corrected limit** (the indicative combination ask on thin chains
    has not been measured by a fill; J-0003 never filled at it), **and "Not on Alpaca", "size N > M on the ask", the "Not
    in the app" card, an order "sent outside this app", free sizing (PR #41), and an order sent from Build's new review
@@ -579,6 +593,9 @@ OWNER CHECK, Optimize's speed on the phone. PR 66 re-read them: none closed; #3 
    function is built):
    - `events-calendar` — the event box after 31 Dec 2026 (the next year's calendars are not copied yet), and for a market
      with no calendar.
+   - `costs-ibkr` (PR 67) — IBKR's commission beside Alpaca's on Build's Order and in a card's Details: no second broker is
+     connected, and the owner's US combo report gave no contract count, so no US rate a contract is stored. Alpaca's "$0
+     commission" does not count its regulatory and exchange fees, and says so.
    - The EIA storage holiday weeks — the 2026 changes could not be read: Thanksgiving week (23–27 Nov) and Christmas week
      (21–25 Dec), like every federal-holiday week of a weekly report whose page was not read in full, carry "holiday week:
      EIA may move it".
@@ -614,7 +631,12 @@ OWNER CHECK, Optimize's speed on the phone. PR 66 re-read them: none closed; #3 
    `viewVeryMoves` 1.5 — where a target starts building the Very cards — `viewFartherMoves` 2, the slider's 0.5–3 in
    0.25 steps) are chosen on the 31 fixture cards, which cover TWO markets (SPY's model board, UNG): Cautious keeps 5
    cards, Balanced 31, Bold 19, and "rows kept" there can only be 0–2 — how many of the ten live rows each style keeps is
-   unread. Words: find 184 → 157 (five chips, not eight), market 487 → 477 (the "+ signal" sum left the cards).
+   unread. Words: find 184 → 157 (five chips, not eight), market 487 → 477 (the "+ signal" sum left the cards). **PR 67:**
+   `impliedMinQuotes` 4 (the fewest out-of-the-money quotes a market chance is read from), the mid of bid and ask as the
+   price (IBKR does not say which it reads), the "big move" at ±1.5 standard deviations that names the tails in the why
+   line, and the four largest moves (IBKR's own) are chosen; `chanceGapPoints` 0.05 is the owner's; the smoothing penalty
+   (0.01 × the median strike width) is measured on synthetic boards only (impliedDist.test.js's table). Words: build 518 →
+   610 (two chance lines and the why line or the not-read line, the Greek tabs, the table, the costs line).
 9. **The exit rules are inherited defaults, not backtested** on these ten markets; the single option's +50% of the
    premium is the owner's choice. PAST YRS settles at expiry and does not replay them. **Since PR #50 a replay window
    that runs past December reads the next year's row and the last year is dropped, not padded** (it used to wrap to the
@@ -626,7 +648,16 @@ OWNER CHECK, Optimize's speed on the phone. PR 66 re-read them: none closed; #3 
    runs: on the 31 fixture cards the chance moved at most 0.94 points (median 0.27) and the average per $100 at most
    2.57 (median 0.54); one butterfly's average went +1.3 → −1.1, inside the old runs' noise. Exact is exact for the
    model only: **whether the model's chance matches what live trades do is not measured**, as before. The exact long-put maximum (PR #47, 0c) raises three Find fixture cards' return on
-   risk 3.5–4.5×; how that moves their rank on live boards is not measured.
+   risk 3.5–4.5×; how that moves their rank on live boards is not measured. **OWNER CHECK — the market's chance against
+   IBKR's (PR 67; acceptance: within 2 points).** IBKR's Probability Lab page could not be read from this sandbox (the
+   network policy blocks it) and no live chain could be read (the Alpaca credential is refused), so the method follows
+   the owner's description, tested on synthetic boards only (IBKR's own example reads back exactly with no smoothing; the
+   smoothing moves that sparse example 0.9 points). Steps: (1) on Build, note the market, the expiry, each leg (buy or
+   sell, call or put, strike, ratio), the limit price, the CHANCE tile's "Market N%" and the time; (2) within a minute, in
+   IBKR's Option Wizard (or Strategy Builder) open the same underlying and expiry, build the same legs and set the same
+   price; (3) read "Probability of profit — implied by the market"; (4) within 2 points passes; otherwise refresh both and
+   read again once — a gap that stays is a difference of method (the price IBKR reads, its tails or its smoothing): send
+   both screenshots with their times.
 10. **OWNER CHECK — a real copilot answer.** The AI features have not seen a real answer since the usage limit ended
     (2026-10-01). PR 61 changed what they are asked (Pre-trade analysis: the verdict first, at most three reasons, the gate
     only for a failed check or one at 90%+; Find's cards named C1…Cn; Future and Past held equal), raised the budget to
@@ -645,7 +676,9 @@ OWNER CHECK, Optimize's speed on the phone. PR 66 re-read them: none closed; #3 
     chances are the model's (the same lognormal as CHANCE), tested against a closed form on one spread; the copilot's
     reading of the O rows and the whole-trade lines is in the prompt only. **Task 65.7's sixteen questions** (merged,
     refocused, one added) and the calendar and signals now in their context are tested on the prompt and the context
-    only: whether a real answer keeps to the calendar's dates and to its own screen's subject is unread.
+    only: whether a real answer keeps to the calendar's dates and to its own screen's subject is unread. **PR 67** hands
+    the copilot both chances, labelled (Build's `chances`, Find's Compare `chanceMarket`): whether a real answer tells
+    them apart is unread.
 
 ## 5. After v1
 

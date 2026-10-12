@@ -16,7 +16,8 @@
 // Plain JS, no React: it is tested without a browser, like path.js and rules.js.
 // ============================================================================
 import { meetsRequest, sizedFigures, futureFigures, futureTile, pastFigures, pastTileText, chanceText, returnText, compareLabel,
-  per100Value, ROW_FIGURE_WORDS, optimizeLabel, RULES, styleOf, STYLE_DEFAULT, DEFAULT_NET_SIDE, bindingFilterText } from "./rules.js";
+  per100Value, ROW_FIGURE_WORDS, optimizeLabel, RULES, styleOf, STYLE_DEFAULT, DEFAULT_NET_SIDE, bindingFilterText,
+  MARKET_CHANCE_ROW_WORD } from "./rules.js";
 import { findOrderOf, findOrderCompare } from "./signals.js";
 
 /**
@@ -125,7 +126,10 @@ export function rowFigures(x, size, order) {
   const f = af ? sizedFigures(af, n) : null;
   const ff = lf ? futureFigures(lf.mc, af, n, x.expKey) : null;
   const items = [
-    { tile: "chance", value: lf ? chanceText(lf.pop) : "—", word: ROW_FIGURE_WORDS.chance },
+    // PR 67 (owner's leaning, 12 Oct 2026: "yes, small"): the market's chance beside the model's, "74% chance · mkt 71%".
+    // The sort stays on the model's (the ring is the tile's). Not read is a dash, never 0%.
+    { tile: "chance", value: lf ? chanceText(lf.pop) : "—", word: ROW_FIGURE_WORDS.chance,
+      extra: lf ? { word: MARKET_CHANCE_ROW_WORD, value: lf.mkt && lf.mkt.pop != null ? chanceText(lf.mkt.pop) : "—" } : null },
     { tile: "rr", value: lf && lf.rr != null ? returnText(lf.rr) : "—", word: ROW_FIGURE_WORDS.rr },
     { tile: "future", value: ff ? per100Value(ff.per100) : "—", word: ROW_FIGURE_WORDS.future },
   ];
@@ -200,7 +204,8 @@ export function compareCards(items = [], request, sizeOf, { max = 20, fitOnly = 
       legs: (x.legs || (x.cand && x.cand.legs) || []).map((l) => `${l.side > 0 ? "+" : "-"}${l.qty || 1} ${l.strike}${l.type === "call" ? "C" : "P"}`).join(" / "),
       contracts: n,
       youRisk: f ? f.risk : null, maxProfit: f ? (f.unbounded ? "no ceiling" : f.profit) : null,
-      chance: chanceText(x.lf.pop), returnOnRisk: x.lf.rr == null ? null : returnText(x.lf.rr),
+      // PR 67: both chances, labelled; the copilot reads them as the card prints them (grounding.js accepts any figure sent).
+      chance: chanceText(x.lf.pop), chanceMarket: x.lf.mkt && x.lf.mkt.pop != null ? chanceText(x.lf.mkt.pop) : null, returnOnRisk: x.lf.rr == null ? null : returnText(x.lf.rr),
       futureAvg: futureTile(futureFigures(x.lf.mc, af, n, x.expKey)).value,
       pastYrs: pastTileText(pastFigures(x.lf.bt, af, n)),
       // THE GREEKS FOR THE SIZE: delta in shares (× 100 × contracts), theta in dollars a day, vega in dollars per point of
