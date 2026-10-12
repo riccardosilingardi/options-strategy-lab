@@ -19,7 +19,8 @@ import { T, TYPE } from "./theme.js";
 import { mono, sans, Note, Info, Sheet, Reveal, FilterChip, TAP, Placeholder } from "./ui.jsx";
 import { useCopilot, useTicketSend, SKILLS, BUILD_SKILL_IDS, Markdown, readQty, CONTINUE_LABEL } from "./pro.jsx";
 import { FACTOR_LABEL } from "./why.jsx";
-import { chanceLines, chanceGapLine, marketNotReadText, CHANCE_TWO_INFO, CARD_LABELS, BUILD_DEFINITIONS, money, signedMoney, chanceText, returnText, notInFiguresLine, futureTile, ARIA, VARIANT_LOAD, NO_CEILING, LIMIT_CHOICES, parseLimitText,
+import { EXIT_REPLAY, exitReplayInside, exitReplayNotRead, exitReplayHead, exitReplayExitsLine, exitReplayWarnLine, exitReplayVerdict,
+  exitReplayCell, exitReplayInfo, chanceLines, chanceGapLine, marketNotReadText, CHANCE_TWO_INFO, CARD_LABELS, BUILD_DEFINITIONS, money, signedMoney, chanceText, returnText, notInFiguresLine, futureTile, ARIA, VARIANT_LOAD, NO_CEILING, LIMIT_CHOICES, parseLimitText,
   OPTIMIZE_HEAD, OPTIMIZE_RUN, OPTIMIZE_CURRENT } from "./rules.js";
 
 const FS = TYPE.size, FW = TYPE.weight, LH = TYPE.line;
@@ -527,6 +528,55 @@ export function OptimizeSection({ note, asked, onRun, summary = null, place = nu
           {rows.length > 0 && <AltRows rows={rows} action={VARIANT_LOAD} onPick={onLoad} />}
         </div>
       )}
+    </Section>
+  );
+}
+
+/**
+ * EXIT RULES, PAST YEARS (PR 68, P5; under the backtest panel in "More on this trade ▾"). One button; it never runs on its
+ * own and never on a made-up series: App.jsx reads five years of daily closes from `/api/bars` on the tap and hands back
+ * `exitBacktest()`'s result. With the rules · held to expiry · the stop as an exit, side by side; the exits by rule; the
+ * stop warning; and the owner's question answered from these numbers. It computes nothing.
+ */
+export function ExitRulesPast({ state = "idle", error = null, result = null, inside = false, onRun }) {
+  const W = EXIT_REPLAY;
+  const runBtn = (
+    <button type="button" onClick={onRun} data-exit-replay-run
+      style={{ ...sans, width: "100%", minHeight: TAP, borderRadius: 12, border: `1px solid ${T.field}`, background: "transparent", color: T.ink,
+        fontSize: FS.sm, fontWeight: FW.bold, cursor: "pointer" }}>{W.run}</button>
+  );
+  const cols = [["rules", result && result.rules], ["expiry", result && result.expiry], ["stop", result && result.withStop]];
+  const cell = { ...mono, ...tnum, fontSize: FS.xs, color: T.ink, textAlign: "right", padding: "4px 0 4px 8px", whiteSpace: "nowrap" };
+  return (
+    <Section label={W.title} data-exit-replay={state}>
+      <SectionTitle right={<Info label="How it is replayed">{exitReplayInfo()}</Info>}>{W.title}</SectionTitle>
+      {inside ? <Note>{exitReplayInside()}</Note>
+        : state === "idle" ? runBtn
+          : state === "loading" ? <Note>{W.loading}</Note>
+            : state === "error" ? <div style={{ display: "grid", gap: 8 }}><Note>{exitReplayNotRead(error)}</Note>{runBtn}</div>
+              : !result ? <Note>{W.none}</Note>
+                : (
+                  <div style={{ display: "grid", gap: 8 }}>
+                    <div data-exit-replay-head style={{ ...sans, fontSize: FS.xs, color: T.mut }}>{exitReplayHead(result)}</div>
+                    <table aria-label={W.aria} style={{ borderCollapse: "collapse", width: "100%" }}>
+                      <thead><tr>
+                        <th scope="col" />
+                        {cols.map(([id]) => <th key={id} scope="col" style={{ ...cell, ...sans, color: T.mut, fontWeight: FW.regular, whiteSpace: "normal" }}>{W.cols[id]}</th>)}
+                      </tr></thead>
+                      <tbody>
+                        {Object.entries(W.rows).map(([row, label]) => (
+                          <tr key={row} data-exit-replay-row={row} style={{ borderTop: `1px solid ${T.line}` }}>
+                            <th scope="row" style={{ ...sans, fontSize: FS.xs, color: T.mut, fontWeight: FW.regular, textAlign: "left", padding: "4px 0" }}>{label}</th>
+                            {cols.map(([id, sum]) => <td key={id} style={cell}>{exitReplayCell(sum, row)}</td>)}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <div style={{ ...sans, fontSize: FS.xs, color: T.body, lineHeight: LH.body }}>{exitReplayExitsLine(result.exits)}</div>
+                    <div style={{ ...sans, fontSize: FS.xs, color: T.body, lineHeight: LH.body }}>{exitReplayWarnLine(result.warnings, result.n)}</div>
+                    <div data-exit-replay-verdict style={{ ...sans, fontSize: FS.sm, color: T.ink, lineHeight: LH.body }}>{exitReplayVerdict(result)}</div>
+                  </div>
+                )}
     </Section>
   );
 }

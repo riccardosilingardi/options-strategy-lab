@@ -573,3 +573,114 @@ export function histBacktest(legs, S, dte, entry, matrix, { month = new Date().g
   return { rows: out, wins, n: out.length, winRate: wins / out.length, avg: out.reduce((a, b) => a + b.pnl, 0) / out.length,
     span, month, excludedYear: matrix.some((r) => +r[0] === year) ? year : null };
 }
+
+/* ============================================================================
+   THE EXIT RULES, REPLAYED ON PAST DAYS (PR 68, P5; owner 3 Oct 2026, prompt 12 Oct 2026). Beside `histBacktest()`, which
+   stays as it is (it settles at expiry on monthly returns and replays no rule).
+
+   THE DATA: daily closes (the `/api/bars` series the chart loads, up to 1,900 days: about five past years), oldest first.
+   THE OPTION PRICES ON PAST DAYS ARE RECONSTRUCTED, because past quotes are not available: Black-Scholes (`bs()`, its 4.5%
+   rate) at the REALISED volatility of the `volDays` trading days before each entry — the only volatility the series itself
+   carries — held for the trade's life. Implied volatility usually sits above realised, so the premiums are usually
+   understated: said beside every result.
+   THE TRADES: every trading day of `month` in each past year (the current year is left out: its windows have not finished);
+   the structure re-struck at today's moneyness (each strike × the entry day's close ÷ today's price, ratios kept), with
+   today's days to expiry; a window whose expiry the series has not passed is dropped, never padded.
+   THE RULES (the CALLER'S, `policy`, from RULES through rules.js — this file imports nothing): held day by day until the
+   first of the take-profit target (`targetOf()`, `takeProfitTarget()`'s per-contract dollars), `exitDTE` days to expiry,
+   or the expiry; the stop level (`stopLossPct` × the maximum loss) is recorded as "would have warned", with its day and
+   what happened after it — never an exit. Each trade is also settled held to expiry, and "had the warning been an exit".
+   @returns null without enough bars or inside the exit window; else { trades, rules, expiry, withStop, exits, warnings,
+            years, month, volDays, excludedYear } — every P&L per contract in dollars, every "per100" per $100 at risk
+============================================================================ */
+const dayOf = (iso) => Date.UTC(+String(iso).slice(0, 4), +String(iso).slice(5, 7) - 1, +String(iso).slice(8, 10)) / 864e5;
+
+/** The annualised standard deviation of the `n` daily log returns ending at index `end` (√252 days), or null. */
+export function realisedVol(closes, end, n) {
+  if (!(end - n >= 0)) return null;
+  const r = [];
+  for (let k = end - n + 1; k <= end; k++) {
+    const a = Number(closes[k - 1]), b = Number(closes[k]);
+    if (!(a > 0 && b > 0)) return null;
+    r.push(Math.log(b / a));
+  }
+  const m = r.reduce((s, x) => s + x, 0) / r.length;
+  const v = r.reduce((s, x) => s + (x - m) * (x - m), 0) / (r.length - 1);
+  return v > 0 ? Math.sqrt(v * 252) : null;
+}
+
+/** In profit, the average and the worst, per contract and per $100 at risk, and the days held, over trades' results. */
+function replaySummary(rows) {
+  if (!rows.length) return null;
+  const wins = rows.filter((r) => r.pnl > 0).length;
+  const avg = (f) => rows.reduce((a, r) => a + f(r), 0) / rows.length;
+  const worst = rows.reduce((w, r) => (r.pnl < w.pnl ? r : w), rows[0]);
+  return { n: rows.length, wins, winRate: wins / rows.length, avg: avg((r) => r.pnl), per100: avg((r) => (r.pnl / r.risk) * 100),
+    worst: worst.pnl, worstPer100: (worst.pnl / worst.risk) * 100, worstDay: worst.day, held: avg((r) => r.held) };
+}
+
+export function exitBacktest(legs, S, dte, bars, policy, { month = new Date().getMonth(), year = new Date().getFullYear() } = {}) {
+  const { exitDTE, stopLossPct, targetOf, volDays } = policy || {};
+  if (![exitDTE, stopLossPct, volDays].every((x) => Number.isFinite(x)) || typeof targetOf !== "function") {
+    throw new TypeError("exitBacktest needs the exit policy from RULES: { exitDTE, stopLossPct, targetOf, volDays }");
+  }
+  const S1 = Number(S), D = Number(dte);
+  if (!Array.isArray(legs) || !legs.length || !(S1 > 0) || !(D > exitDTE) || !Array.isArray(bars) || bars.length < volDays + 2) return null;
+  const closes = bars.map((b) => Number(b.close));
+  const days = bars.map((b) => dayOf(b.time));
+  const last = days[days.length - 1];
+  const trades = [];
+  for (let i = volDays; i < bars.length; i++) {
+    const iso = String(bars[i].time), y = +iso.slice(0, 4), mo = +iso.slice(5, 7) - 1;
+    if (mo !== month || y === year) continue;
+    const S0 = closes[i];
+    const sigma = realisedVol(closes, i, volDays);
+    const expiryDay = days[i] + D;
+    if (!(S0 > 0) || !(sigma > 0) || !(last > expiryDay)) continue;
+    const k = S0 / S1;
+    const ls = legs.map((l) => ({ ...l, strike: Number(l.strike) * k, qty: Number(l.qty) || 1 }));
+    const valueAt = (px, left) => ls.reduce((a, l) => a + Math.sign(l.side) * l.qty * bs(px, l.strike, Math.max(0, left) / 365, sigma, l.type), 0);
+    const entry = valueAt(S0, D);
+    // The extremes at expiry, per contract: the payoff at zero, at each strike, and far above (a rising slope there is no
+    // ceiling, so no maximum profit).
+    const xs = [0, ...ls.map((l) => l.strike), S0 * 10];
+    const pnls = xs.map((x) => (payoff(ls, x) - entry) * 100);
+    const rising = payoff(ls, S0 * 20) > payoff(ls, S0 * 10) + 1e-9;
+    const maxProfit = rising ? null : Math.max(...pnls), maxLoss = Math.min(...pnls);
+    if (!(maxLoss < 0)) continue;
+    const risk = Math.abs(maxLoss);
+    const target = targetOf({ legs: ls, maxProfit, maxLoss, entryNet: entry });
+    const stopAt = stopLossPct * maxLoss;
+    let exit = null, warn = null, jx = i;
+    for (let j = i + 1; j < bars.length && days[j] <= expiryDay; j++) {
+      jx = j;
+      const left = expiryDay - days[j];
+      const pnl = (valueAt(closes[j], left) - entry) * 100;
+      if (!exit) {
+        if (warn == null && pnl <= stopAt) warn = { day: bars[j].time, pnl, held: days[j] - days[i] };
+        if (target != null && Number.isFinite(target) && pnl >= target) exit = { why: "target", day: bars[j].time, pnl, held: days[j] - days[i] };
+        else if (left <= exitDTE) exit = { why: "time", day: bars[j].time, pnl, held: days[j] - days[i] };
+      }
+    }
+    const held = { day: bars[jx].time, pnl: (payoff(ls, closes[jx]) - entry) * 100, held: days[jx] - days[i] };
+    if (!exit) exit = { why: "expiry", ...held };
+    trades.push({ day: iso, year: y, spot: S0, sigma, entry, risk, maxProfit, target, stopAt, rules: exit, expiry: held, warn,
+      // "had the warning been an exit": the warning's P&L when it came before the rules' exit, else the rules' result.
+      withStop: warn ? { ...warn, why: "stop" } : exit });
+  }
+  if (!trades.length) return null;
+  const rows = (pick) => trades.map((t) => ({ ...pick(t), risk: t.risk }));
+  const warned = trades.filter((t) => t.warn);
+  return {
+    trades, n: trades.length, years: [...new Set(trades.map((t) => t.year))], month, volDays,
+    rules: replaySummary(rows((t) => t.rules)),
+    expiry: replaySummary(rows((t) => t.expiry)),
+    withStop: replaySummary(rows((t) => t.withStop)),
+    exits: { target: trades.filter((t) => t.rules.why === "target").length, time: trades.filter((t) => t.rules.why === "time").length,
+      expiry: trades.filter((t) => t.rules.why === "expiry").length },
+    // After the warning: how many still ended in profit under the rules, and the average move from the warning to the exit.
+    warnings: { n: warned.length, thenWon: warned.filter((t) => t.rules.pnl > 0).length,
+      afterPer100: warned.length ? warned.reduce((a, t) => a + ((t.rules.pnl - t.warn.pnl) / t.risk) * 100, 0) / warned.length : null },
+    excludedYear: bars.some((b) => +String(b.time).slice(0, 4) === year && +String(b.time).slice(5, 7) - 1 === month) ? year : null,
+  };
+}

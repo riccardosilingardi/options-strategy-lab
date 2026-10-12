@@ -20,7 +20,8 @@ import { seasonalStampNote } from "./rules.js";
 import { CopilotSection } from "./build.jsx";
 import { useCopilot, skillsFor } from "./pro.jsx";
 import { pnlWords, timelineItems, entriesWords, whyOpenedLine, openedDetailLine, endedLine, closedState, closedTitle,
-  netNote, openState } from "./journalView.js";
+  netNote, openState, CALIBRATION_HEAD, calibrationTooFew, calibrationNeeds, calibrationBand, calibrationCell, brierLine,
+  calibrationInfo } from "./journalView.js";
 
 const FS = TYPE.size, FW = TYPE.weight, LH = TYPE.line;
 const PANEL = { background: T.panel, border: `1px solid ${T.line}`, borderRadius: 12 };
@@ -135,6 +136,44 @@ export function JournalScreen({ v }) {
           </div>
           <p style={{ ...sans, margin: 0, fontSize: FS.sm, lineHeight: LH.body, color: T.body }}>Next: {v.journey.next}</p>
         </section>
+
+        {/* WHICH CHANCE CAME TRUE (PR 68, task 68.3): the market's and the OSL model's against what happened, once enough
+            closed trades carry both (`chanceCalibration()`); until then the count, and nothing judged. */}
+        {v.calibration && (
+          <section aria-label="Which chance came true" data-journal-calibration={v.calibration.enough ? "judged" : "too-few"}
+            style={{ ...PANEL, padding: 14, display: "flex", flexDirection: "column", gap: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+              <div style={H2}>{CALIBRATION_HEAD}</div>
+              <Info label="how it is judged">{calibrationInfo()}</Info>
+            </div>
+            {!v.calibration.enough ? (
+              <>
+                <p style={{ ...sans, margin: 0, fontSize: FS.sm, lineHeight: LH.body, color: T.body }}>{calibrationTooFew(v.calibration.n)}</p>
+                <p style={{ ...sans, margin: 0, fontSize: FS.xs, lineHeight: LH.body, color: T.mut }}>{calibrationNeeds()}</p>
+              </>
+            ) : (
+              <>
+                <table aria-label="Which chance came true, by band" style={{ borderCollapse: "collapse", width: "100%" }}>
+                  <thead><tr>
+                    {["Chance", "Market", "OSL model"].map((h) => <th key={h} scope="col" style={{ ...sans, fontSize: FS.xs, color: T.mut, fontWeight: FW.regular,
+                      textAlign: "left", padding: "4px 6px 4px 0" }}>{h}</th>)}
+                  </tr></thead>
+                  <tbody>
+                    {v.calibration.market.bands.map((b, i) => (
+                      <tr key={b.lo} data-calibration-band={calibrationBand(b.lo, b.hi)} style={{ borderTop: `1px solid ${T.line}` }}>
+                        <th scope="row" style={{ ...mono, fontSize: FS.xs, color: T.mut, fontWeight: FW.regular, textAlign: "left", padding: "4px 6px 4px 0" }}>
+                          {calibrationBand(b.lo, b.hi)}</th>
+                        <td style={{ ...mono, fontSize: FS.xs, color: T.ink, padding: "4px 6px 4px 0" }}>{calibrationCell(b)}</td>
+                        <td style={{ ...mono, fontSize: FS.xs, color: T.ink, padding: "4px 0" }}>{calibrationCell(v.calibration.model.bands[i])}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <p data-journal-brier style={{ ...mono, margin: 0, fontSize: FS.xs, lineHeight: LH.body, color: T.ink }}>{brierLine(v.calibration)}</p>
+              </>
+            )}
+          </section>
+        )}
 
         <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           <span style={{ ...sans, fontSize: FS.xs, color: T.mut }}>Find a trade</span>

@@ -27,7 +27,7 @@ import {
   positionStage, isOwnedPosition, positionStageNote, wouldHaveDone,
   isBrokerHolding, fillVsLimit, storedLimitOf, orderReconciliation, recordForOrder, bookPositions, upgradeHolding,
   holdingShape, isImportedRecord, dropImportedTwins, recordFillPrice,
-  countsAsRuleClose, closeKindWords, riskOkOf, riskOkWords, NOT_A_FILL,
+  countsAsRuleClose, closeKindWords, riskOkOf, riskOkWords, NOT_A_FILL, chanceCalibration, CALIBRATION_BANDS,
 } from "./journal.js";
 import { RULES, ruleExitOf, stopWarningSentence,
   seasonalStampOf, seasonalStampNote, ESTIMATED_SEASONAL_SOURCE, MEASURED_SEASONAL_SOURCE } from "./rules.js";
@@ -1576,6 +1576,45 @@ test("TASK 6 — the 30-day entry floor log is behind ONE fold with a one-line s
   const notOff = block.slice(block.lastIndexOf("not offerable") - 400, block.lastIndexOf("not offerable"));
   assert.doesNotMatch(notOff, /T\.red/, "a record, not an error: no red");
   assert.match(notOff, /color: T\.mut/);
+});
+
+/* ================================================================
+   PR 68 (task 68.3) — WHICH CHANCE CAME TRUE. Made-up records here, for the arithmetic only; the screen judges nothing
+   until RULES.calibrationMinTrades real closed trades carry both chances.
+================================================================ */
+const closedWith = (pop, marketPop, pnl, extra = {}) => ({ ref: `J-${Math.random()}`, ticker: "UNG", pnl, closeOrderId: "c1",
+  thesis: { pop, ...(marketPop === undefined ? {} : { marketPop }) }, ...extra });
+
+test("PR 68 — UNDER THE MINIMUM NOTHING IS JUDGED: the count only; a trade needs both chances and a result read from a fill", () => {
+  assert.equal(RULES.calibrationMinTrades, 10);
+  const few = [closedWith(0.6, 0.5, 40), closedWith(0.7, 0.66, -20)];
+  assert.deepEqual(chanceCalibration(few), { n: 2, enough: false });
+  // Not counted: no market chance (opened before PR 68), no fill, an unknown model chance, the app's own test record.
+  const skip = [closedWith(0.6, undefined, 40), closedWith(0.6, 0.5, 40, { closeOrderId: null }), closedWith(null, 0.5, 40),
+    closedWith(0.6, 0.5, 40, { pnlNote: NOT_A_FILL })];
+  assert.equal(chanceCalibration([...few, ...skip]).n, 2);
+});
+
+test("PR 68 — AT TEN: each chance's bands (said against won) and its Brier score, the average of (chance − result)²", () => {
+  // Ten trades: the market said 30% on five (one won) and 70% on five (four won); the model said 50% on all ten (five won).
+  const trades = [
+    ...[1, 0, 0, 0, 0].map((w) => closedWith(0.5, 0.3, w ? 50 : -50)),
+    ...[1, 1, 1, 1, 0].map((w) => closedWith(0.5, 0.7, w ? 50 : -50)),
+  ];
+  const c = chanceCalibration(trades);
+  assert.equal(c.enough, true); assert.equal(c.n, 10);
+  const band = (sum, lo) => sum.bands.find((b) => Math.abs(b.lo - lo) < 1e-9);
+  assert.deepEqual([band(c.market, 0.2).n, band(c.market, 0.2).won], [5, 0.2]);
+  assert.deepEqual([band(c.market, 0.6).n, band(c.market, 0.6).won], [5, 0.8]);
+  assert.equal(band(c.model, 0.4).n, 10); assert.equal(band(c.model, 0.4).won, 0.5);
+  assert.equal(band(c.model, 0).n, 0); assert.equal(band(c.model, 0).said, null, "an empty band says nothing, never 0%");
+  // Brier: market (4 × 0.09 + 1 × 0.49 + 4 × 0.09 + 1 × 0.49) / 10 = 0.17; model 0.25 on every trade.
+  assert.ok(Math.abs(c.market.brier - 0.17) < 1e-12, String(c.market.brier));
+  assert.ok(Math.abs(c.model.brier - 0.25) < 1e-12, String(c.model.brier));
+  assert.equal(CALIBRATION_BANDS.length, 6);
+  // A chance of exactly 100% falls in the last band, not out of every band.
+  const top = chanceCalibration([...trades.slice(1), closedWith(1, 1, 10)]);
+  assert.equal(top.market.bands[4].n, 1, "80–100% holds the 100% trade");
 });
 
 /* ---------------- report ---------------- */

@@ -17,7 +17,7 @@ import { BandThumbnail, payoffBands, bandTakeaway, GaugeFigure, Gauge, CompareFi
   OpenInterestStrip, oiStripTakeaway, oiCutAt, oiGhostCut, explainOiStrip, useWidth } from "./visuals.jsx";
 import { fuseSignals, sentimentDirection, signalDirection, signalFamilies, findOrderOf, findOrderCompare, withSignalRank, compareCandidates, againstSignal,
   readingState, signalSnapshot, compareSignals, signalStance, factorStands, AGAINST_MIN_SCORE, placeLine } from "./signals.js";
-import { N as nCDF, bs as bsPrice, smile as smileIV, payoff as payoffExp, SIGMA, histBacktest, monthReturn, bsGreeks, legsAt,
+import { N as nCDF, bs as bsPrice, smile as smileIV, payoff as payoffExp, SIGMA, histBacktest, monthReturn, bsGreeks, legsAt, exitBacktest,
   parseAvJson, statsFromMatrix } from "./engine.js";
 import { parseOcc, buildOcc, snapStrike, resnapLegs, expiryStrikes, strikeOptions, fetchChain, hasOpenInterest, enrichOpenInterest, feedName, sourceNote, openInterestNote, oiProfile, expiryOpenInterest, nearMoneyOpenInterest, monotonicityBreaks, monotonicityNote, invertedOnStrikes, spotOf, spotAt, atmIv } from "./chain.js";
 import { T, TYPE, themeName, setTheme, BADGE_SAFE } from "./theme.js";
@@ -72,7 +72,7 @@ import { nextRef, refCounter, appendTimeline, stampTimeline, orderStatusRecheck,
   positionStage, positionStageNote, bookPositions, holdingShape, dropImportedTwins, recordFillPrice, countsAsRuleClose, closeKindWords, riskOkOf, riskOkWords, wouldHaveDone, isBrokerHolding, upgradeHolding, positionForHolding,
   isTestRecord, testRecordNote, scoredJournal, journalPnl, NOT_A_FILL,
   journalEntry, searchJournal, CLOSE_REASON_MIN, refNumber, journeyLevel,
-  adoptReplacement, replacementsIn, replacedBy } from "./journal.js";
+  adoptReplacement, replacementsIn, replacedBy, chanceCalibration } from "./journal.js";
 import { FIRST_STEP, stepCarry, candidateOf, candidateKey, legsLine, toggleCompare, inCompare, MAX_COMPARE, savedFromCandidate, candidateFromSaved, savedAge, savedItemFor, withoutSaved, restoreSaved, sizedCandidate } from "./path.js";
 import { PositionCard } from "./positionCard.jsx";
 import { navOf, createNavHistory } from "./nav.js";
@@ -86,12 +86,12 @@ import { SettingsScreen } from "./settings.jsx";
 import { useWide, RAIL_W } from "./ui.jsx";
 import { findStatusText, DEFAULT_FIND_ORDER, BUILD_CTA, savedLine, removedFromSavedLine, UNDO, openRiskIncludesLine, alreadySentLine, ALREADY_SENT_REVIEW, CARD_LABELS, limitMovedLine,
   WHY_ORDER_NOTE, DEFAULT_NET_SIDE, marketDistOf, marketChanceOf, chanceGapOf, chancesBrief,
-  costsFor, costsLine } from "./rules.js";
+  costsFor, costsLine, exitReplayPolicy } from "./rules.js";
 // REDESIGN PR 2: Build on the owner's mockup — its words (rules.js) and its screen (build.jsx).
 import { tradeTakeaway, buildSubLine, expiryShort, deltaSharesText, thetaDayText, reasonRuleText, orderBookLine, capLabel,
   EXIT_ROWS, EXITS_FOOTER, exitsPill, timeExitDay, sendLabel, SEND_FOOTER, reviewLegWords, reviewLimitLine, oiCheckText,
   REVIEW_CHECKS, REVIEW_SUB, sentOrderLine, sentFiledText, ORDER_TICK, stanceText, MARKET_READ_LINK } from "./rules.js";
-import { BuildScreen, BuildLoading, BuildNoQuotes, BuildEmpty, Section } from "./build.jsx";
+import { BuildScreen, BuildLoading, BuildNoQuotes, BuildEmpty, Section, ExitRulesPast } from "./build.jsx";
 import { gateChecklist } from "./wizard.jsx";
 import { undefinedRiskLegs } from "./riskGate.js";
 import { taContext } from "./indicators.js";
@@ -1426,6 +1426,8 @@ export default function OptionsStrategyLab() {
   const [syncBusy, setSyncBusy] = useState(false);
   const [ta, setTa] = useState({}); // per ticker
   const [replay, setReplay] = useState(null);
+  // PR 68 (P5): "Exit rules, past years" — read on its button only, keyed by the trade it was read for.
+  const [exitReplay, setExitReplay] = useState({ key: null, state: "idle", error: null, result: null });
   const [nf, setNf] = useState({ tk: "ALL", kind: "all", q: "", days: 7 });
   /* ---- WHAT FIND IS ASKED (PR #40, TASK 1) ----
      The markets it reads (all of the basket by default), the direction — one
@@ -2469,6 +2471,10 @@ export default function OptionsStrategyLab() {
     // against a Monte Carlo at the app's own.
     const mc0 = chanceFor(analysis, { ticker: tk, legs: lg, spot: sp, dte: d, expKey: ek });
     const pop0 = mc0 ? mc0.pop : null;
+    // AND THE MARKET'S, BESIDE IT (PR 68, task 68.3): the board's own distribution at the same price — a field of the
+    // record's thesis (`thesis.marketPop`, null when the board was not read), never a new /api/state field. The Journal
+    // compares the two against what happened (`chanceCalibration()`).
+    const mkt0 = marketChanceCheckOf(analysis, { legs: lg, dist: boardDistOf(chains[tk], ek) });
     const f = fused[tk];
     // THE REF IS GIVEN HERE, ONCE, AND IS THE POSITION'S NAME FOR THE REST OF
     // ITS LIFE — including after it is closed, which is the whole point: the
@@ -2494,7 +2500,7 @@ export default function OptionsStrategyLab() {
       // The absence of these three fields on an older record is the marker, the
       // way `contractsAssumed` marks a size that was assumed: at that point the
       // hand-written table was the only one either side could reach.
-      thesis: { pop: pop0, ...seasonalStampFields(mc0), iv: ivAvg0, seasonal: seasM, regime: seasM > 0 ? "strong up" : seasM < 0 ? "strong down" : "weak", spot: sp, breakevens: analysis.breakevens, delta: analysis.greeks.delta, vega: analysis.greeks.vega,
+      thesis: { pop: pop0, marketPop: mkt0 && mkt0.pop != null ? mkt0.pop : null, ...seasonalStampFields(mc0), iv: ivAvg0, seasonal: seasM, regime: seasM > 0 ? "strong up" : seasM < 0 ? "strong down" : "weak", spot: sp, breakevens: analysis.breakevens, delta: analysis.greeks.delta, vega: analysis.greeks.vega,
         signal: f ? { score: f.score, confidence: f.confidence, agreement: f.agreement, narrative: f.narrative } : null,
         // THE FOUR FACTORS AS READ AT ENTRY (PR #44, TASK 4): each factor's direction and strength and the seasonal
         // source, so Details and the Positions card can set "at entry" beside "now". Absent on an older record.
@@ -2949,6 +2955,24 @@ export default function OptionsStrategyLab() {
   // and the stat were two separate readings, which is the fault this PR closes.
   // At the price that fills (`AE`, PR #49): the same entry the top card's PAST YRS tile replays, so the two agree.
   const runMC = () => { setBt(histBacktest(legs, spot, dte, (AE || A).entry, seas.matrix, { month: NOW_MONTH })); };
+  /* THE EXIT RULES, REPLAYED (PR 68, P5): five years of daily closes from /api/bars on the tap, then `exitBacktest()` with
+     the rules' own policy (`exitReplayPolicy()`). Never on its own, never on a made-up series: no closes, no numbers. A
+     result belongs to the trade it was read for (`exitKey`); another trade on Build shows the button again. */
+  const exitKey = `${ticker}|${expKey}|${dte}|${legs.map((l) => `${l.side}:${l.qty}:${l.type}:${l.strike}`).join(",")}`;
+  const runExitReplay = async () => {
+    const key = exitKey;
+    setExitReplay({ key, state: "loading", error: null, result: null });
+    try {
+      const r = await fetch(`/api/bars?sym=${encodeURIComponent(ticker)}&days=1900`);
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !Array.isArray(j.bars) || !j.bars.length) throw new Error(j.error || `HTTP ${r.status}`);
+      const result = exitBacktest(legs, spot, dte, j.bars, exitReplayPolicy(), { month: NOW_MONTH });
+      setExitReplay((cur) => (cur.key === key ? { key, state: "done", error: null, result } : cur));
+    } catch (e) {
+      setExitReplay((cur) => (cur.key === key ? { key, state: "error", error: String(e.message || e), result: null } : cur));
+    }
+  };
+  const exitView = exitReplay.key === exitKey ? exitReplay : { state: "idle", error: null, result: null };
 
   /* ---- Alpaca ---- */
   const setSetting = async (k, v) => { const st = { ...store, settings: { ...store.settings, [k]: v } }; setStore(st); await saveState(st); };
@@ -4559,6 +4583,11 @@ export default function OptionsStrategyLab() {
                   <div style={{ ...mono, fontSize: FS.xs, color: T.mut, marginTop: 10 }}>Press "Run it" for the odds, the spread of outcomes, and what happened in each past year.</div>
                 )}
               </Panel>
+              {/* PR 68 (P5): the exit rules on past days, under the backtest panel. */}
+              <div style={{ marginTop: 10 }}>
+                <ExitRulesPast state={exitView.state} error={exitView.error} result={exitView.result} inside={!(dte > RULES.exitDTE)}
+                  onRun={runExitReplay} />
+              </div>
             </div>
             )}
   </>);
@@ -5783,6 +5812,8 @@ export default function OptionsStrategyLab() {
         {tab === "journal" && !showSettings && (
           <JournalScreen key={journalOpenRef || "journal"} v={{
             journey, wide,
+            // PR 68 (task 68.3): which chance came true, once enough closed trades carry both.
+            calibration: chanceCalibration(store.journal || []),
             insideLimit: <>{`Inside the limit: ${journey.coerenza == null ? "not judged yet" : `${pctText(journey.coerenza)} of the trades judged stayed inside the per-trade limit`}.`}
               {" "}Rule closes are the share of trades you closed because a rule said so rather than because you felt like it — it
               is the only number here that predicts the others. Awareness averages that, the limit and how often you opened.</>,

@@ -5,7 +5,7 @@
 // ended `countsAsRuleClose()` and its `closeReason`; an open trade's profit and action are the Positions card's own
 // (`positionModels` in App.jsx). This file only words them for the board's rows.
 // ============================================================================
-import { chanceText } from "./rules.js";
+import { chanceText, RULES } from "./rules.js";
 import { countsAsRuleClose, journalPnl, journalPnlTotal } from "./journal.js";
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -114,3 +114,20 @@ export function openState({ stage = "owned", working = false, action = null, kin
   if (kind === "not-held") return "NOT ON ALPACA";
   return action || "NO QUOTE";
 }
+
+/* WHICH CHANCE CAME TRUE (PR 68, task 68.3): the words around `chanceCalibration()` (journal.js). */
+export const CALIBRATION_HEAD = "WHICH CHANCE CAME TRUE";
+/** "4 trades so far — too few to judge." */
+export const calibrationTooFew = (n) => `${n} trade${n === 1 ? "" : "s"} so far — too few to judge.`;
+export const calibrationNeeds = () => `It needs ${RULES.calibrationMinTrades} closed trades that carry both chances at entry: the market's ` +
+  "(since PR 68) and the OSL model's, and a result read from a fill.";
+/** A band's name: "40–60%". */
+export const calibrationBand = (lo, hi) => `${Math.round(lo * 100)}–${Math.round(hi * 100)}%`;
+/** A band's cell: "said 52% · won 4 of 7", or "—" for an empty band. */
+export const calibrationCell = (b) => (!b || !b.n ? "\u2014" : `said ${chanceText(b.said)} · won ${Math.round(b.won * b.n)} of ${b.n}`);
+/** "Brier score (lower is better): Market 0.180 · OSL model 0.210". */
+export const brierLine = (c) => `Brier score (lower is better): Market ${c.market.brier.toFixed(3)} · OSL model ${c.model.brier.toFixed(3)}`;
+export const calibrationInfo = () => "For each band of the chance a trade was opened with, how often trades in it actually ended in profit: " +
+  "a chance that is right says 30% and wins about 3 in 10. The Brier score is the average of (chance − result)², the result 1 " +
+  "for a profit and 0 for a loss: 0 is perfect, 0.25 is what always saying 50% scores. A trade counts with both chances and a " +
+  "result read from a fill.";
