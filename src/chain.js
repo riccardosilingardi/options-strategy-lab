@@ -7,7 +7,7 @@
  *
  * and every contract inside it:
  *
- *   { bid, ask, mid, bidSize, askSize, iv, oi, vol, delta, theta, occ }
+ *   { bid, ask, mid, bidSize, askSize, iv, oi, vol, delta, theta, gamma, vega, occ }
  *
  * That shape is the contract with the rest of the app. The Shortlist, the
  * wizard's ranking and every visual read it, so a new source is allowed to
@@ -215,7 +215,8 @@ export function parseCboeJson(sym, j, now = Date.now()) {
       // legs have no size rather than drawing a blank that reads as "nobody".
       bidSize: null, askSize: null,
       iv: o.iv || null, oi: o.open_interest || 0, vol: o.volume || 0,
-      delta: o.delta, theta: o.theta, occ: p.occ,
+      // PR 67: gamma and vega are read too (the owner's answer, 12 Oct 2026: "read all four"); missing is null.
+      delta: o.delta, theta: o.theta, gamma: o.gamma ?? null, vega: o.vega ?? null, occ: p.occ,
     };
   }
   const expirations = Object.keys(byExp).sort();
@@ -293,7 +294,8 @@ export function normaliseAlpacaChain(sym, payload, { spot, feed = "indicative", 
       bidSize: sizeOf(q.bs), askSize: sizeOf(q.as),
       iv: s?.impliedVolatility ?? null,
       oi: null, vol: null,                       // not in an Alpaca snapshot — see above
-      delta: g.delta ?? null, theta: g.theta ?? null,
+      // PR 67 (the owner's answer, 12 Oct 2026: "read all four"): the snapshot's gamma and vega were parsed away.
+      delta: g.delta ?? null, theta: g.theta ?? null, gamma: g.gamma ?? null, vega: g.vega ?? null,
       occ: p.occ,
     };
   }

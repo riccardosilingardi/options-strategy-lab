@@ -72,6 +72,13 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
   next year's row, and the last year (whose next row does not exist yet) is dropped, not padded (PR #50; `runReplay()`
   on Build reads the same way). Find runs it per card in
   `findGen` (via `listCardFigures()`), Build in `buildFigures()` and its backtest panel; never copy it.
+- **The exit rules replayed (PR 68, P5) are `exitBacktest()` in engine.js, beside `histBacktest()` (unchanged):** daily
+  closes, every session of this month in past years, the trade re-struck at today's moneyness, options at the realised
+  volatility of `RULES.replayVolDays` sessions before entry, held to the first of the take profit, 21 days, or expiry; the
+  stop is a warning ("Stop as exit" is reported beside, never applied). The policy is `exitReplayPolicy()` (rules.js). It
+  runs ONLY on its button (Build's "Exit rules, past years", under the backtest in "More on this trade ▾") on the closes
+  `/api/bars` returns, never on its own and **never on a made-up series shown on a screen** (the owner, 12 Oct 2026); it
+  changes no rule. Tests use synthetic series; photographs show its empty states only.
 - **One sorted list (PR #49).** A candidate that misses the request stays in its place in the chosen order, quieter
   (`T.mut`), with its reason first; "Hide cards that miss" (off) hides it behind the count (`resultsLine()`; on Find's rows `rowsResultsLine()`, "Hide them"). Never
   dropped. A slider filters `findGen`'s output and never re-simulates (`find.test.jsx` checks the memo's deps).
@@ -212,12 +219,35 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
   strikes, dates and counts not looked at), and every copilot place prints `notInFiguresLine()` under it in amber.
 - **The chance is exact (PR 62): `chanceOf()` reads `terminalExact()`** — no runs, no seed. Never put a simulation back
   under a figure on screen; `exitSim()` is the only path simulation.
+- **Two chances (PR 67, owner 12 Oct 2026): the market's and the OSL model's.** The market's is IBKR's method in
+  `src/impliedDist.js` (one expiry's out-of-the-money mids, segments between strikes, non-negative least squares with Σ = 1 held exactly, a small
+  measured smoothing; plain JS, imports nothing), read ONLY through `marketDistOf()` / `marketChanceOf()` in rules.js beside
+  `chanceOf()`, and spelled once in App.jsx (`marketChanceCheckOf()`, one fit per board and expiry `boardDistOf()`).
+  `listCardFigures()` and `buildFigures()` return both (`mkt`, `gap`; figures.test.jsx holds card = compact card = Build =
+  row). The tile's words are `chanceLines()` / `CHANCE_LINES` ("Market", "OSL model"); past `RULES.chanceGapPoints` one
+  line says why (`chanceGapOf()`, `chanceGapLine()`), amber when the market's is lower — the one sentence a card carries
+  besides its name and legs. A board too broken to read gives no number (`MARKET_CHANCE_NOT_READ`). The sort, the floors
+  and the gate stay on the OSL model's chance.
 - **Build's chart reads the chance's own lognormal (PR 63): `src/tradeChart.js`** — the zones (`payoffBands()`' bands with
   their chances, adding to 100%, the green ones to CHANCE), the ±1 sd prices, the exit tick, the crosshair's readout and
   keys. `UnifiedView` loads the bars; `UnifiedChart` (pro.jsx) draws and takes no other distribution. A card's Details
-  rows are `cardDetailRows()` (rules.js).
+  rows are `cardDetailRows()` (rules.js). **Since PR 67 (IBKR's Option Wizard)** `UnifiedView` has the tabs P&L · Delta ·
+  Gamma · Vega · Theta (`GREEK_TABS`; a Greek is `GreekChart`, `greekCurves()`, today and on the exit day) and the scenario
+  table under it (`ScenarioTable`, `scenarioGrid()`: Today or At expiry, the largest move in thirds). The structure today is
+  ONE function, `legsAt()` in engine.js (Black-Scholes on each leg's own IV; `bsGreeks()` moved there from App.jsx), read
+  by Build's "now" curve and Greeks and by both; the broker's Greeks are read (`brokerGreeks()`, never a partial sum).
+  **Since PR 68 the chart reads "At expiry" or "At the 21-DTE exit"** (`CHART_WHEN`): at the exit the right-edge line, the
+  zones, the bars and the crosshair are the exit day's (`exitCurve()`, `curveZones()`, `exitPnlAt()`; the lognormal to that
+  day); the fan and the ±1 sd prices stay at expiry.
 - **Open risk says what it includes (PR 61):** `limits.openRiskParts` are the gate's own summands; a trade on Build that is
   already in the book is said ("Already sent as…") and never added twice on Build's figure.
+- **Costs are said, never subtracted (PR 67): `BROKER_COSTS`, `costsFor()`, `costsLine()` in rules.js.** Alpaca $0
+  commission with "regulatory fees not counted" (never as $0 fees); IBKR is `<Placeholder id="costs-ibkr">` until a second
+  broker is connected. No gate check, ranking, floor, alternative or order path reads a cost (riskGate.test.js).
+- **Which chance came true (PR 68): `thesis.marketPop` beside `thesis.pop`** (a field of the record's thesis, written at
+  entry by `commitPosition()`; never a new /api/state field) and `chanceCalibration()` in journal.js: bands and Brier
+  scores only once `RULES.calibrationMinTrades` closed trades carry both and a result read from a fill; until then the
+  count and "too few to judge". Its words are journalView.js's.
 - **The Journal's copilot (PR 4c)** asks about one closed trade (`closedTrade` in the context, the record's own words) and
   recommends nothing (`COPILOT_ROLE.journal`).
 - Plan first, then change surgically: the plan is the standing rule's ("Plan before you execute", above).
@@ -239,13 +269,14 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
 - `src/navBar.jsx` — the one bottom bar (Find · Build · Positions · Journal), `placeOf()`, `NAV_BAR_H`.
 - `src/clock.js` — `marketClockLine()`, `localStamp()`: the market clock and times in the owner's own zone.
 - `src/alpacaContract.js` — Alpaca's order contract mirrored from alpaca-py.
-- `src/journal.js` — the position record: refs, timelines, size, stage, book, fills.
+- `src/journal.js` — the position record: refs, timelines, size, stage, book, fills; `chanceCalibration()` (PR 68).
 - `src/positionView.js`, `src/positionCard.jsx` — what a Positions card and its Details sheet say
   (action, profit, three exits, entry against now). They compute nothing new: the profit is
   `posAlerts`', the target `takeProfitTarget()`, the stop level `stopWarningLevel()`.
 - `src/nav.js` — Back: the screen state as history entries (push on a move, step back when a sheet
   is closed from its own button, Find — the first entry — is never intercepted).
-- `src/engine.js` — Black-Scholes, payoff, exit simulator, the exact chance `terminalExact()` (PR 62; `terminalMC()`, the
+- `src/engine.js` — Black-Scholes and its Greeks (`bsGreeks()`, and `legsAt()`: a structure today on each leg's own IV,
+  since PR 67), payoff, exit simulator, the exit-rule replay `exitBacktest()` and `realisedVol()` (PR 68), the exact chance `terminalExact()` (PR 62; `terminalMC()`, the
   seeded Monte Carlo it replaced, stays only as the proof test's reference), seasonal parse (`parseAvJson()` keeps
   the whole series since PR #49; `statsFromMatrix()` returns per-month years and standard errors; `seasonalSpan()`),
   the historical replay `histBacktest()` (PR #49). `SEASONAL` is retired; `SIGMA` stays.
@@ -254,7 +285,9 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
 - `src/signals.js` — the four-factor confluence engine, `signalDirection()`, the Find order (`findOrderCompare()`,
   `placeLine()`; it re-exports `FIND_ORDERS` from rules.js), `badgeText()` and `numbersFitLines()`.
 - `src/tradeChart.js` — Build's chart arithmetic (PR 63): `zoneOdds()`, `coneEdges()`, `exitMark()`, `crosshairReadout()`,
-  `crossKey()` (plain JS; chart.test.jsx).
+  `crossKey()`; since PR 67 `scenarioGrid()`, `greekCurves()`, `brokerGreeks()` (plain JS; chart.test.jsx).
+- `src/impliedDist.js` — the market's chance (PR 67): `impliedDistribution()`, `marketChance()`, `marketBelow()`, `simplexLS()`,
+  `quoteMid()` (plain JS, imports nothing; impliedDist.test.js). Read only through rules.js.
 - `src/grounding.js` — a copilot number must exist in the app's figures (PR 62): `ungroundedFigures()` and the one
   amber line `notInFiguresLine()` (rules.js) under a finished answer, on every copilot place.
 - `src/indicators.js` — every technical indicator, and the chart copilot's context.
@@ -342,6 +375,9 @@ All in `RULES`, `src/rules.js`, unless noted.
 - Chance slider: `chanceAskMin` 0.20, `chanceAskMax` 0.80, `chanceAskStep` 0.05,
   `chanceAskDefault` none (null; the slider's leftmost position reads "any", PR #49). Return-on-risk slider: floor `minRewardRisk`, `rewardAskMax` 3,
   `rewardAskStep` 0.05 (it can only tighten the floor). Amount slider: `amountAskStep` 25.
+- The exit replay (PR 68): `replayVolDays` 20; the Journal's calibration waits for `calibrationMinTrades` 10.
+- The market's chance (PR 67): `impliedMinQuotes` 4, `chanceGapPoints` 0.05 (the owner's five points); the scenario table's
+  largest moves `SCENARIO_MAX_MOVES` (1% 5% 10% 30%, default 30%) and the smoothing `SMOOTH` 0.01 (impliedDist.js) are not RULES.
 - Find's Style (PR 66): `styleCautiousChance` 0.5, `styleBoldReturn` 1.5. The View's target, in expected moves:
   `viewTargetDefault` 1, `viewTargetMin` 0.5, `viewTargetMax` 3, `viewTargetStep` 0.25, `viewVeryMoves` 1.5,
   `viewFartherMoves` 2 (all chosen on fixtures, PRD §4).
@@ -385,6 +421,13 @@ All in `RULES`, `src/rules.js`, unless noted.
   each Debit · Credit choice keeps. `node scripts/shoot-pr66.mjs [dir]` photographs Find's chips and sheets and the market
   page under a chosen View (`app+all`); `ONLY=find-binding,find-binding-light node scripts/shoot-screens.mjs docs/screens/pr66`
   the binding-filter line on the two-market fixture (docs/screens/pr66/).
+- `node scripts/shoot-pr67.mjs [dir]` photographs PR 67's screens (Find's row "· mkt", the compact card's two chances and its
+  why line, its Details with the costs row and IBKR's placeholder, Build's numbers, the Delta tab, the scenario table, the
+  Order's costs line; dark and light) on the `+book` fixture (docs/screens/pr67/).
+- `node scripts/shoot-pr68.mjs [dir]` photographs PR 68's screens (the chart at the 21-DTE exit, "Exit rules, past years" at
+  rest and after the tap, the Journal's "Which chance came true") on the `+book` fixture, in their empty states
+  (docs/screens/pr68/). `node scripts/measure-exits.mjs <dir> [month]` answers P5 per market and family from the owner's saved
+  `/api/bars?sym=<TICKER>&days=1900` replies (`<TICKER>.json`); with none it says so and prints no number.
 - `node scripts/measure-season.mjs` (months that count, on avFixture series), `node scripts/measure-signals.mjs`
   ("Signals decide" against the retired rule), `node scripts/measure-sweep.mjs` (design-system counts per file).
 - No order can be sent from the sandbox (no broker keys); live behaviour is an OWNER CHECK.

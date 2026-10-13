@@ -1177,6 +1177,46 @@ export function journalPnlTotal(entries = []) {
 }
 
 /* ------------------------------------------------------------------
+   5d) WHICH CHANCE CAME TRUE (PR 68, task 68.3; owner 12 Oct 2026: "this is how I will learn which chance to trust")
+
+   Every trade opened since PR 68 keeps both chances at entry: the OSL model's (`thesis.pop`, since the first Journal) and
+   the market's (`thesis.marketPop`, a field of the record's thesis — not a new /api/state field). A closed trade counts
+   here when it carries both AND a P&L read from a fill (`countedPnl()`); it "won" when that P&L is above zero. Until
+   `RULES.calibrationMinTrades` such trades exist, nothing is judged: the count is said, and no band or score is printed.
+------------------------------------------------------------------ */
+/** The chance bands: [0, 20%), [20, 40%), … [80, 100%]. */
+export const CALIBRATION_BANDS = Object.freeze([0, 0.2, 0.4, 0.6, 0.8, 1]);
+const knownP = (x) => x != null && x !== "" && Number.isFinite(Number(x)) && Number(x) >= 0 && Number(x) <= 1;
+
+/**
+ * @returns { n, enough } — and when enough: { model, market }, each { brier, bands: [{ lo, hi, n, said, won }] } where
+ *          `said` is the band's average predicted chance and `won` its share that ended in profit (null for an empty band)
+ */
+export function chanceCalibration(entries = [], minTrades = RULES.calibrationMinTrades) {
+  const rows = [];
+  for (const e of scoredJournal(entries)) {
+    const t = e && e.thesis;
+    const pnl = countedPnl(e);
+    if (!t || !knownP(t.pop) || !knownP(t.marketPop) || pnl == null) continue;
+    rows.push({ model: Number(t.pop), market: Number(t.marketPop), won: pnl > 0 ? 1 : 0 });
+  }
+  const n = rows.length;
+  if (n < minTrades) return { n, enough: false };
+  const of = (key) => {
+    const brier = rows.reduce((a, r) => a + (r[key] - r.won) ** 2, 0) / n;
+    const bands = CALIBRATION_BANDS.slice(0, -1).map((lo, i) => {
+      const hi = CALIBRATION_BANDS[i + 1];
+      const inB = rows.filter((r) => r[key] >= lo && (i === CALIBRATION_BANDS.length - 2 ? r[key] <= hi : r[key] < hi));
+      return { lo, hi, n: inB.length, said: inB.length ? inB.reduce((a, r) => a + r[key], 0) / inB.length : null,
+        won: inB.length ? inB.reduce((a, r) => a + r.won, 0) / inB.length : null };
+    });
+    return { brier, bands };
+  };
+  return { n, enough: true, model: of("model"), market: of("market") };
+}
+
+
+/* ------------------------------------------------------------------
    6) FINDING IT AGAIN
 
    Sorted and searched by ref, which is the point of having one.

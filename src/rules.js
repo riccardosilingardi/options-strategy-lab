@@ -14,7 +14,9 @@
 // price off the chain against `netBS()` — the SAME function and the SAME smile
 // every other screen in this app prices with, which is the point: a second
 // implementation of the model would make the check a comparison of two guesses.
-import { netBS, bs, smile, terminalExact, seasonalDrift, seasonalSpan, payoff } from "./engine.js";
+import { netBS, bs, smile, terminalExact, seasonalDrift, seasonalSpan, payoff, Phi } from "./engine.js";
+// PR 67: the market's own distribution (IBKR's method), a leaf module like engine.js. Read here and nowhere else.
+import { impliedDistribution, marketChance, marketBelow } from "./impliedDist.js";
 // WHICH WAY THE MONEY MOVES ON AN ORDER, read from its one home. `order.js`
 // imports nothing, so this is leaf-ward exactly as the `engine.js` import above
 // it is, and it is here for the same reason: `limitAgainstBook()` below has to
@@ -532,6 +534,21 @@ export const RULES = {
   // (7%), which he read as noise. 0.15 is between them. CHOSEN, NOT MEASURED:
   // PRD §4 item 8, until a week of boards is counted.
   staleBoardShare: 0.15,
+  // impliedMinQuotes (PR 67) — THE FEWEST USABLE OUT-OF-THE-MONEY QUOTES (a bid and an ask) ONE EXPIRY MUST CARRY BEFORE
+  // THE MARKET'S CHANCE IS READ FROM IT. Under four, the segments are a handful of points and the tails carry most of the
+  // mass, so a figure printed from them would be the tails' rule, not the market's prices. Chosen, not measured (PRD §4).
+  impliedMinQuotes: 4,
+  // chanceGapPoints (PR 67, owner 12 Oct 2026) — the market's chance and the model's apart by more than this (as a
+  // fraction: 0.05 = five points), and one line under the CHANCE tile says why. The owner's number.
+  chanceGapPoints: 0.05,
+  // replayVolDays (PR 68, P5) — THE TRADING DAYS OF REALISED VOLATILITY the exit replay prices a past entry at
+  // (`exitBacktest()`): past option quotes are not available, so each past day's options are Black-Scholes at the
+  // volatility the series showed over the 20 sessions before it (about a month). Chosen, not measured (PRD §4).
+  replayVolDays: 20,
+  // calibrationMinTrades (PR 68, task 68.3) — the closed trades carrying BOTH chances the Journal waits for before it says
+  // how often each chance came true (bands and a Brier score). Under it: "N trades so far — too few to judge". The
+  // owner's number (12 Oct 2026).
+  calibrationMinTrades: 10,
 
   // --- scratchPayoffShare — FOR COPY ONLY, AND FOR NOTHING ELSE.
   //
@@ -809,6 +826,101 @@ export function chanceOf({ legs, entryNet, spot, iv, dte, seasonal, month,
     // WHAT THE SEASON DID TO THIS CHANCE: whether any month counted ("prices + season" / "prices only") and the window.
     seasonCounts: sig.counts, seasonRead: sig.read, seasonMean: sig.mean, seasonMonths: sig.months.map((x) => x.line) };
 }
+
+/* =========================================================================
+   THE MARKET'S CHANCE (PR 67, task 67.1; owner 12 Oct 2026: "the market probability must be the same as IBKR's").
+   The distribution the option prices of ONE expiry imply, strike by strike, with no view and no interest — IBKR's method
+   as `src/impliedDist.js` sets it out. Read here, once, beside `chanceOf()`; App.jsx spells it once
+   (`marketChanceCheckOf()`, beside `chanceCheckOf()`). A board too broken to read gives no number and says so.
+========================================================================= */
+/** The distribution one expiry's quotes imply, or { ok: false, reason }. `stale` is `boardLooksStale()` of the board. */
+export const marketDistOf = (board, spot, { stale = false } = {}) =>
+  impliedDistribution(board, spot, { stale, minQuotes: RULES.impliedMinQuotes });
+/** The market's chance of profit for a structure at its entry price: { pop, ok, reason } (pop null when not read). */
+export function marketChanceOf({ dist = null, legs, entryNet } = {}) {
+  if (!dist) return { pop: null, ok: false, reason: "noBoard" };
+  if (!dist.ok) return { pop: null, ok: false, reason: dist.reason };
+  const pop = marketChance(dist, legs, entryNet);
+  return pop == null ? { pop: null, ok: false, reason: "noPrice" } : { pop, ok: true, reason: null };
+}
+/** Why the market's chance is not read, in words. */
+export const MARKET_CHANCE_NOT_READ = Object.freeze({
+  stale: "Market chance not read: this expiry's prices contradict each other.",
+  few: `Market chance not read: fewer than ${RULES.impliedMinQuotes} out-of-the-money quotes.`,
+  noSpot: "Market chance not read: no price for the market.",
+  noBoard: "Market chance not read yet: the quotes are loading.",
+  noPrice: "Market chance not read: no entry price.",
+});
+/** The two lines of the CHANCE tile (PR 67): their words, the owner's. */
+export const CHANCE_LINES = Object.freeze({ market: "Market", model: "OSL model" });
+/** A row's short word for the market's chance ("74% chance · mkt 71%"). */
+export const MARKET_CHANCE_ROW_WORD = "mkt";
+
+/**
+ * WHY THE TWO CHANCES DIFFER (PR 67, task 67.2), from the two inputs the app knows: the season (the model with its drift
+ * against the same model at zero drift) and the shape of the market's distribution against one volatility (its tails
+ * past ±1.5 standard deviations of the model's own lognormal — "big" moves: at ±1 sd a put skew's two effects, fewer
+ * small falls and more big ones, cancel; measured on impliedDist.test.js's skewed board, +3.0 points of big falls at 1.5 sd
+ * against +0.4 at 1). Null when they are within `RULES.chanceGapPoints`.
+ * @param mc   a `chanceOf()` result (the OSL model: one IV, the measured season)
+ * @param mkt  a `marketChanceOf()` result
+ * @returns { model, market, season, flat, left, right, lower } — points as fractions; left / right are the market's tail
+ *          mass past ∓1.5 sd minus the lognormal's
+ */
+export function chanceGapOf({ mc, mkt, dist, legs, entryNet, spot } = {}) {
+  if (!mc || !mkt || mkt.pop == null || mc.pop == null) return null;
+  const gap = mc.pop - mkt.pop;
+  if (Math.abs(gap) <= RULES.chanceGapPoints + 1e-12) return null;
+  // The same model with no season (`chanceOf()`, the one entry point, on a season "not read": zero drift, the same IV).
+  let flat = null;
+  try { const z = chanceOf({ legs, entryNet, spot, iv: mc.sigma, dte: mc.dte, seasonal: seasonalProvenance(null) }); flat = z ? z.pop : null; }
+  catch { flat = null; }
+  const BIG = 1.5;
+  const T = mc.dte / 365, s = mc.sigma * Math.sqrt(T), m = -0.5 * mc.sigma * mc.sigma * T;
+  const lo = spot * Math.exp(m - BIG * s), hi = spot * Math.exp(m + BIG * s), tail = Phi(-BIG);
+  const below = dist ? marketBelow(dist, lo) : null, under = dist ? marketBelow(dist, hi) : null;
+  return { model: mc.pop, market: mkt.pop, season: flat == null ? null : mc.pop - flat, flat,
+    left: below == null ? null : below - tail, right: under == null ? null : (1 - under) - tail, lower: mkt.pop < mc.pop };
+}
+/** The one line under the CHANCE tile: "Market 6 points under the model: the season adds +6; the market prices bigger
+ *  falls than one volatility (skew)." Null when there is nothing to say. */
+export function chanceGapLine(g) {
+  if (!g) return null;
+  const pts = (x) => Math.round(x * 100);
+  const parts = [];
+  if (g.season != null && Math.abs(pts(g.season)) >= 1) parts.push(`the season ${g.season > 0 ? "adds" : "takes"} ${g.season > 0 ? "+" : "−"}${Math.abs(pts(g.season))}`);
+  const shapeGap = g.flat == null ? g.model - g.market : g.flat - g.market;
+  if (Math.abs(pts(shapeGap)) >= 1) {
+    const word = (d, big, small) => (d == null || Math.abs(d) < 0.01 ? null : d > 0 ? big : small);
+    const fall = word(g.left, "bigger falls", "smaller falls"), rise = word(g.right, "bigger rises", "smaller rises");
+    // "(skew)" only when the two tails lean opposite ways (or only one moves): bigger falls AND bigger rises is fat tails.
+    const big = (d) => (d == null || Math.abs(d) < 0.01 ? 0 : Math.sign(d));
+    const skew = big(g.left) !== big(g.right) && Math.abs((g.left || 0) - (g.right || 0)) >= 0.01;
+    parts.push(fall || rise ? `the market prices ${[fall, rise].filter(Boolean).join(" and ")} than one volatility${skew ? " (skew)" : ""}`
+      : "the market's prices differ from one volatility");
+  }
+  const d = Math.abs(pts(g.model - g.market));
+  return `Market ${d} points ${g.lower ? "under" : "over"} the model${parts.length ? `: ${parts.join("; ")}` : ""}.`;
+}
+
+/** The CHANCE tile's two lines (PR 67): the market's first, then the OSL model's — `{ id, word, value, pop }`; a chance not
+ *  read is a dash, never 0%. */
+export function chanceLines(pop, mkt) {
+  const m = mkt && mkt.pop != null ? mkt.pop : null;
+  return [{ id: "market", word: CHANCE_LINES.market, value: chanceText(m), pop: m },
+    { id: "model", word: CHANCE_LINES.model, value: chanceText(pop), pop: pop ?? null }];
+}
+/** Why the market's chance is not read, or null when it is. `mkt` null is "not loaded yet". */
+export const marketNotReadText = (mkt) => (mkt && mkt.pop != null ? null : MARKET_CHANCE_NOT_READ[(mkt && mkt.reason) || "noBoard"] || null);
+/** What the market's chance is and how the two differ, behind the CHANCE tile's ⓘ and Build's (PR 67). */
+export const CHANCE_TWO_INFO = "Market: the chance this expiry's option prices imply, strike by strike, with no view and no interest — IBKR's " +
+  "method, on the mid of each out-of-the-money bid and ask. OSL model: the app's own, one volatility (the legs' average) and the " +
+  `measured season. The list is sorted by the OSL model; when the two differ by more than ${Math.round(RULES.chanceGapPoints * 100)} points, a line says why.`;
+/** Both chances for a copilot, labelled as the tile labels them (PR 67; grounding.js reads every figure sent). */
+export const chancesBrief = ({ pop = null, mkt = null, gap = null } = {}) => ({
+  market: mkt && mkt.pop != null ? chanceText(mkt.pop) : null, marketNotRead: marketNotReadText(mkt),
+  oslModel: pop == null ? null : chanceText(pop), whyTheyDiffer: chanceGapLine(gap),
+});
 
 /**
  * One sentence saying what the chance on screen is an answer about. It names
@@ -1388,7 +1500,8 @@ export const FUTURE_PAST_EQUAL = `${labelWords(CARD_LABELS.future)} and ${labelW
 export const FIGURE_DEFINITIONS = Object.freeze({
   risk: "The most this trade can lose, for the size your budget buys.",
   profit: "The most it can make by expiry, for that size; \"no ceiling\" when there is none.",
-  chance: "The chance it ends in profit at expiry, worked out from the spread of prices the options imply.",
+  // PR 67: two chances on the tile, said here once.
+  chance: "The chance it ends in profit at expiry. Market: what this expiry's option prices imply, strike by strike (IBKR's method). OSL model: one volatility and the measured season.",
   rr: "The maximum profit divided by the risk.",
 });
 /** The market page's header labels (round 2), each with its definition one tap away. */
@@ -1631,8 +1744,58 @@ export const PLACEHOLDERS = Object.freeze([
     shows: "the next report or central-bank meeting before the expiry shown, and every one before it",
     needs: "the next year's calendars read on the publishers' own pages and copied into src/events.js with their sources",
     pr: "the session that copies the next year's dates" }),
+  // PR 67 (owner, 12 Oct 2026: "only Alpaca is connected; IBKR costs are a placeholder and not applied until another
+  // provider is connected"). `BROKER_COSTS.ibkr` keeps the rates the owner's reports gave; none is applied.
+  Object.freeze({ id: "costs-ibkr", screen: "build",
+    shows: "IBKR's commission on this trade beside Alpaca's, and as a share of the credit or debit, for comparison only",
+    needs: "a second broker connected, and one more IBKR report on US options that gives its contract count",
+    pr: "the PR that connects a second broker" }),
 ]);
 export const placeholderOf = (id) => PLACEHOLDERS.find((p) => p.id === id) || null;
+/* =====================================================================
+   WHAT A TRADE COSTS, PER BROKER (PR 67, task 67.5; owner 12 Oct 2026). One home. While Alpaca is the only broker
+   connected, costs change NO figure, ranking or gate check: they are said, never subtracted. `costsFor()` is the hook a
+   later PR subtracts from, once a second broker is connected.
+===================================================================== */
+export const BROKER_COSTS = Object.freeze({
+  alpaca: Object.freeze({ name: "Alpaca", connected: true, currency: "USD",
+    // Alpaca's options commission is $0 a contract; the regulatory and exchange fees it passes on are NOT counted here, and
+    // the screen says so in words — never as $0.
+    optionsPerContractPerSide: 0, feesCounted: false,
+    source: "Alpaca: options commission-free; regulatory and exchange fees passed on, not counted here." }),
+  ibkr: Object.freeze({ name: "IBKR", connected: false, currency: "EUR",
+    // IDEM options (the owner's report, 12 Oct 2026): ENI Dec17'26 22 Put × 9, €18.0 at entry → €2.00 a contract a side.
+    idemPerContractPerSide: 2.00,
+    idemSource: "Owner's IBKR report, 12 Oct 2026: ENI Dec17'26 22 Put × 9, €18.0 at entry (IDEM).",
+    // A US combo's ex-ante report: €11.55 commissions + €0.44 exchange and regulatory fees, entry and exit, 1.39% of the
+    // investment — WITHOUT the contract count, so no US rate a contract is derived from it. US options: not read.
+    usPerContractPerSide: null,
+    usComboReport: Object.freeze({ commissions: 11.55, fees: 0.44, shareOfInvestment: 0.0139,
+      source: "Owner's IBKR ex-ante report, 12 Oct 2026: a US combo, entry and exit; the contract count was not on it." }),
+  }),
+});
+/**
+ * WHAT ONE TRADE WOULD COST AT ONE BROKER — the hook (task 67.5). Never read by a figure, a ranking or the gate while
+ * Alpaca is the only broker (riskGate.test.js holds it). Unknown is null: a broker not connected, or a rate not read.
+ * @returns { broker, name, connected, commission (entry, all legs, the size), roundTrip, shareOfNet, side, feesCounted }
+ */
+export function costsFor(broker, legs = [], contracts = 1, { entryNet = null } = {}) {
+  const b = BROKER_COSTS[broker];
+  if (!b) return null;
+  const n = Number.isFinite(Number(contracts)) && Number(contracts) >= 1 ? Math.round(Number(contracts)) : 1;
+  const rate = b.connected ? b.optionsPerContractPerSide : null;
+  const units = (Array.isArray(legs) ? legs : []).reduce((a, l) => a + Math.abs(Number(l.qty) || 1), 0) * n;
+  const commission = rate == null || !units ? null : rate * units;
+  const premium = known(entryNet) && Number(entryNet) !== 0 ? Math.abs(Number(entryNet)) * 100 * n : null;
+  return { broker, name: b.name, connected: b.connected, commission, roundTrip: commission == null ? null : commission * 2,
+    shareOfNet: commission != null && premium ? commission / premium : null,
+    side: !known(entryNet) || Number(entryNet) === 0 ? null : Number(entryNet) > 0 ? "debit" : "credit", feesCounted: !!b.feesCounted };
+}
+/** "Costs: $0 commission on Alpaca, 0% of the debit (regulatory fees not counted)"; null for a broker not connected. */
+export const costsLine = (c) => (!c || !c.connected || c.commission == null ? null
+  : `Costs: ${money(c.commission)} commission on ${c.name}${c.shareOfNet != null && c.side ? `, ${pctText(c.shareOfNet, 0)} of the ${c.side}` : ""}` +
+    `${c.feesCounted ? "" : " (regulatory fees not counted)"}`);
+
 
 /* =====================================================================
    FIND, VERSION B, AND THE MARKET PAGE — EVERY WORD (redesign PR 1, owner's mockups of 4 Oct 2026).
@@ -2219,13 +2382,18 @@ export const exitMarkLabel = (day) => `exit ${day}`;
 /** A zone's chance on the chart: "47%", and "<1%" for a sliver the whole percent would print as 0. */
 export const zoneOddsLabel = (p) => (known(p) && Number(p) > 0 && Number(p) < 0.005 ? "<1%" : chanceText(p));
 export const CROSS_HINT = "Tap the chart, drag the line, or use the arrow keys to read a price.";
+/** The chart's toggle (PR 68, deferred from PR 63 until P5): read at expiry, or on the exit day. */
+export const CHART_WHEN = Object.freeze({ expiry: "At expiry", exit: `At the ${RULES.exitDTE}-DTE exit`, aria: "When the chart is read",
+  none: `Within ${RULES.exitDTE} days of expiry, or a leg's volatility not read: no exit day to draw.` });
 export const CROSS_ARIA = "Price to read on the chart";
 /** "GLD at $370.00 on 20 Nov → +$1,240 on 7 contracts · 31% chance to finish below". */
 export const crosshairLine = ({ ticker, price, day, pnl, contracts, below }) =>
   `${ticker} at $${Number(price).toFixed(2)} on ${day} → ${signedMoney(pnl)} on ${contracts} contract${contracts === 1 ? "" : "s"} · ` +
   `${zoneOddsLabel(below)} chance to finish below`;
 /** "How to read ⓘ" on Build's chart: what each mark is (the zones and the crosshair joined in PR 63). */
-export const howToReadChart = ({ ticker, sessions, chance, exitDay }) =>
+export const howToReadChart = ({ ticker, sessions, chance, exitDay, atExit = false }) =>
+  (atExit && exitDay ? `Read on the exit day, ${exitDay}: the zones, the bars, the line at the right edge and the crosshair are ` +
+    `what the trade is worth then (each leg priced on its own volatility with ${RULES.exitDTE} days left), not at expiry. ` : "") +
   `On the left, ${ticker}'s price over the last ${sessions}; the amber dot is today's price. From it, the blue fan is where ` +
   `the price could be by expiry: the darker band holds about 68 of every 100 outcomes of the model (one standard deviation ` +
   `either side, its two prices written at the fan's edge), the paler one 95. The faint green and violet zones are where the ` +
@@ -2235,6 +2403,65 @@ export const howToReadChart = ({ ticker, sessions, chance, exitDay }) =>
   `blue line is the breakeven, with how far it is from today's price.${exitDay ? ` The tick on the time axis is ${exitDay}, ` +
   `when the plan exits at ${RULES.exitDTE} days to expiry.` : ""} Tap the chart (or drag the line, or use the arrow keys) to ` +
   `read any price: what the trade makes there at expiry for your size, and the chance of finishing below it.`;
+/* ====================================================================
+   BUILD'S GREEK TABS AND SCENARIO TABLE, SAID (PR 67, tasks 67.3 and 67.4; the owner's comparison with IBKR's Option
+   Wizard, 12 Oct 2026). The numbers are `src/tradeChart.js`'s (`scenarioGrid()`, `greekCurves()`, `brokerGreeks()`): the
+   one payoff at expiry, Black-Scholes on each leg's own implied volatility today (`legsAt()`), the broker's Greeks read.
+==================================================================== */
+/** IBKR's tabs above the chart: P&L is the chart as it was; each Greek draws the whole position's figure against price. */
+export const GREEK_TABS = Object.freeze([
+  { id: "pnl", label: "P&L" }, { id: "delta", label: "Delta" }, { id: "gamma", label: "Gamma" },
+  { id: "vega", label: "Vega" }, { id: "theta", label: "Theta" },
+]);
+/** Each Greek's unit, for the whole position at the size shown. */
+export const GREEK_UNITS = Object.freeze({ delta: "shares", gamma: "shares per $1", vega: "$ per vol point", theta: "$ a day" });
+/** The Greek chart's two lines. */
+export const greekLegend = (exitDay = null) => ({ today: "Today", exit: exitDay ? `At the exit, ${exitDay}` : "At the exit" });
+/** When the trade is already inside the exit window, the exit line is not drawn, and the chart says why. */
+export const GREEK_NO_EXIT = `Already within ${RULES.exitDTE} days of expiry: no exit line.`;
+/** The Greek tabs' ⓘ: which figures are read and which computed (the owner's prompt, task 67.4). */
+export const greeksInfo = () => `The lines are computed: Black-Scholes on each leg's own implied volatility (read from the chain), ` +
+  `for the whole position at your size — today, and on the exit day, ${RULES.exitDTE} days before the expiry. The dot at today's ` +
+  `price is read: the broker's own Greeks for each leg, added up for your size. A leg the feed sends no figure for leaves no dot.`;
+/** "Delta at $378.20 today: +34 shares · read from the broker: +36". */
+export const greekNowLine = ({ label, unit, price, today, read }) =>
+  `${label} at $${Number(price).toFixed(2)} today: ${greekText(today)} ${unit}${read == null ? "" : ` · read from the broker: ${greekText(read)}`}`;
+/** A Greek figure: "+34", "−0.4", "—" when unknown. Whole above 10, one decimal below. */
+export const greekText = (v) => {
+  if (v == null || !Number.isFinite(Number(v))) return "\u2014";
+  const n = Number(v), a = Math.abs(n);
+  const t = a >= 10 ? a.toFixed(0) : a.toFixed(1);
+  return Number(t) === 0 ? "0" : `${n > 0 ? "+" : "−"}${t}`;
+};
+/** IBKR's "Variaz. max": the largest move the table shows; the columns are it in thirds. */
+export const SCENARIO_MAX_MOVES = Object.freeze([0.01, 0.05, 0.10, 0.30]);
+export const SCENARIO_MAX_DEFAULT = 0.30;
+/** A Greek tab when a leg's IV is not read. */
+export const greekNotDrawn = (label) => `${label}: a leg's implied volatility is not read, so it is not drawn.`;
+/** A largest-move chip: "30%". */
+export const scenarioMaxLabel = (m) => scenarioMoveText(m).replace(/^\+/, "");
+export const SCENARIO_WORDS = Object.freeze({
+  title: "If the price moves", today: "Today", expiry: "At expiry", max: "Largest move", aria: "Scenario table", move: "Move",
+  rows: Object.freeze({ price: "Price", pnl: "P&L $", delta: "Delta", gamma: "Gamma", vega: "Vega", theta: "Theta" }),
+});
+/** A column's head: "−30%", "0", "+3.3%". */
+export const scenarioMoveText = (m) => {
+  const n = Number(m) * 100;
+  if (!Number.isFinite(n)) return "\u2014";
+  if (Math.abs(n) < 1e-9) return "0";
+  return `${n > 0 ? "+" : "−"}${+Math.abs(n).toFixed(1)}%`;
+};
+/** A P&L cell, in dollars without the sign of the unit (the row says "P&L $", as IBKR's does): "+1,005", "−390", "0". */
+export const scenarioPnlText = (v) => {
+  if (v == null || !Number.isFinite(Number(v))) return "\u2014";
+  const r = Math.round(Number(v));
+  return r === 0 ? "0" : `${r > 0 ? "+" : "−"}${Math.abs(r).toLocaleString("en-US")}`;
+};
+/** The table's ⓘ. */
+export const scenarioInfo = () => "Each column moves today's price by the percentage above it. At expiry: what the trade makes " +
+  "for your size, and the Greeks are zero, as IBKR shows them. Today: Black-Scholes on each leg's own implied volatility. " +
+  "Delta and gamma in shares, vega in dollars per point of volatility, theta in dollars a day.";
+
 const sgnOne = (v) => `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(1)}`;
 /** "+12.5": a future average per $100 at risk as the FUTURE tile and Find's row print it (one formatter). */
 export const per100Value = (v) => (v == null || !Number.isFinite(Number(v)) ? "—" : sgnOne(Number(v)));
@@ -2293,9 +2520,10 @@ export const pastTileText = (pf) => (pf ? `won ${pf.wins} of ${pf.n} · avg ${si
      · Theta       `analyze()`'s time decay a day (dollars a combination), for the size.
      · Held        the days to the exit at `RULES.exitDTE` — kept from 63.1 (the owner moved the expiry search to its own run).
 ==================================================================== */
-export const CARD_DETAIL_LABELS = Object.freeze({ breakeven: "Breakeven", entry: "Entry cost", ivRank: "IV rank", theta: "Theta", held: "Held" });
+export const CARD_DETAIL_LABELS = Object.freeze({ breakeven: "Breakeven", entry: "Entry cost", ivRank: "IV rank", theta: "Theta", held: "Held",
+  costs: "Costs" });
 export function cardDetailRows({ spot = null, breakevens = null, move = null, spread = null, maxProfit = null, unbounded = false,
-  n = null, ivRank = null, ivDays = 0, theta = null, dte = null } = {}) {
+  n = null, ivRank = null, ivDays = 0, theta = null, dte = null, costs = null } = {}) {
   const k = n != null && Number.isFinite(Number(n)) && Number(n) >= 1 ? Math.round(Number(n)) : null;
   const forSize = k ? ` for ${k}` : " a contract";
   const bes = (Array.isArray(breakevens) ? breakevens : []).filter(known).map(Number);
@@ -2319,6 +2547,8 @@ export function cardDetailRows({ spot = null, breakevens = null, move = null, sp
     { id: "ivRank", k: CARD_DETAIL_LABELS.ivRank, v: ivText },
     { id: "theta", k: CARD_DETAIL_LABELS.theta, v: thetaText },
     { id: "held", k: CARD_DETAIL_LABELS.held, v: heldText(dte) },
+    // PR 67: what Alpaca charges, said, never subtracted (`costsFor()`); only when the caller handed it.
+    ...(costs ? [{ id: "costs", k: CARD_DETAIL_LABELS.costs, v: (costsLine(costs) || "—").replace(/^Costs: /, "") }] : []),
   ];
 }
 /** "~23 days (exit at 21 DTE)": the days a trade is held before the exit at `RULES.exitDTE` (a card's Details, Optimize's rows). */
@@ -5675,6 +5905,54 @@ export function takeProfitTarget({ legs = null, maxProfit = null, maxLoss = null
   }
   return none;
 }
+
+/**
+ * THE EXIT POLICY THE REPLAY APPLIES (PR 68, P5): the app's own rules, from their one home, for `exitBacktest()` in
+ * engine.js (which imports nothing). `targetOf` is `takeProfitTarget()`'s per-contract dollars (50% of the maximum profit,
+ * 50% of the premium for a single long option), null when there is none (no ceiling).
+ */
+export const exitReplayPolicy = () => ({
+  exitDTE: RULES.exitDTE, stopLossPct: RULES.stopLossPct, volDays: RULES.replayVolDays,
+  targetOf: ({ legs, maxProfit, maxLoss, entryNet }) => takeProfitTarget({ legs, maxProfit, maxLoss, entryNet: entryNet == null ? null : entryNet, contracts: 1 }).perCombo,
+});
+
+/* =====================================================================
+   "EXIT RULES, PAST YEARS" ON BUILD, SAID (PR 68, P5). The numbers are `exitBacktest()`'s (engine.js) on the daily closes
+   `/api/bars` returns — read on a tap, never on their own, and never from a made-up series (the owner, 12 Oct 2026).
+===================================================================== */
+const MONTH_WORDS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+export const EXIT_REPLAY = Object.freeze({
+  title: "Exit rules, past years",
+  run: "Replay the exit rules ›",
+  loading: "Reading five years of daily closes…",
+  none: "No finished window in the years read: nothing to replay.",
+  cols: Object.freeze({ rules: "With the rules", expiry: "Held to expiry", stop: "Stop as exit" }),
+  rows: Object.freeze({ won: "In profit", per100: "Avg per $100 at risk", worst: "Worst per $100", held: "Days held" }),
+  aria: "Exit rules replayed on past years",
+});
+export const exitReplayInside = () => `Already within ${RULES.exitDTE} days of expiry: no exit rule left to replay.`;
+export const exitReplayNotRead = (err) => `The daily closes are not loaded${err ? ` (${err})` : ""}, so nothing is replayed.`;
+/** "107 entries · every session of October · 2021–2025". */
+export const exitReplayHead = ({ n, years = [], month }) =>
+  `${n} entr${n === 1 ? "y" : "ies"} · every session of ${MONTH_WORDS[month] || "the month"} · ${years.length ? `${years[0]}–${years[years.length - 1]}` : "no year"}`;
+/** "Exits: take profit 41 · 21 days 50 · expiry 16". */
+export const exitReplayExitsLine = (ex) => `Exits: take profit ${ex.target} · ${RULES.exitDTE} days ${ex.time} · expiry ${ex.expiry}`;
+/** The stop warning, what it caught and what came after. */
+export const exitReplayWarnLine = (w, n) => (!w || !w.n ? "The stop warning never fired."
+  : `The stop warning (${pctText(RULES.stopLossPct, 0)} of the maximum loss) fired on ${w.n} of ${n}; ${w.thenWon} of those still ended in profit under the rules.`);
+/** The owner's question, answered from these numbers only (P5). */
+export const exitReplayVerdict = (r) => (!r || !r.rules || !r.expiry ? null
+  : `On these years the rules averaged ${sgnOne(r.rules.per100)} per $100 at risk, against ${sgnOne(r.expiry.per100)} held to expiry` +
+    `${r.withStop ? `; exiting at the stop warning would have averaged ${sgnOne(r.withStop.per100)}` : ""}.`);
+/** One cell of the table: "52 of 107", "+3.4", "−61.0", "24". */
+export const exitReplayCell = (sum, row) => (!sum ? "\u2014" : row === "won" ? `${sum.wins} of ${sum.n}`
+  : row === "per100" ? sgnOne(sum.per100) : row === "worst" ? sgnOne(sum.worstPer100) : String(Math.round(sum.held)));
+export const exitReplayInfo = () => `Every trading session of this month in each past year (this year left out: its windows have not ` +
+  `finished), the trade re-struck at today's moneyness with today's days to expiry, held day by day until the first of the take ` +
+  `profit, ${RULES.exitDTE} days to expiry, or the expiry. Past option quotes are not available, so each day's options are ` +
+  `Black-Scholes at the realised volatility of the ${RULES.replayVolDays} sessions before the entry — implied volatility usually ` +
+  `sits above it, so the premiums are usually understated. The stop is a warning, never an exit: "Stop as exit" is what getting ` +
+  `out at the warning would have done. Nothing here changes a rule.`;
 
 /** The target's basis as a phrase: "50% of the premium paid" / "50% of the maximum profit". */
 export const takeProfitBasisWords = (basis = "max-profit") =>

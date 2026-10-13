@@ -17,7 +17,7 @@ import { BandThumbnail, payoffBands, bandTakeaway, GaugeFigure, Gauge, CompareFi
   OpenInterestStrip, oiStripTakeaway, oiCutAt, oiGhostCut, explainOiStrip, useWidth } from "./visuals.jsx";
 import { fuseSignals, sentimentDirection, signalDirection, signalFamilies, findOrderOf, findOrderCompare, withSignalRank, compareCandidates, againstSignal,
   readingState, signalSnapshot, compareSignals, signalStance, factorStands, AGAINST_MIN_SCORE, placeLine } from "./signals.js";
-import { N as nCDF, bs as bsPrice, smile as smileIV, payoff as payoffExp, SIGMA, histBacktest, monthReturn,
+import { N as nCDF, bs as bsPrice, smile as smileIV, payoff as payoffExp, SIGMA, histBacktest, monthReturn, bsGreeks, legsAt, exitBacktest,
   parseAvJson, statsFromMatrix } from "./engine.js";
 import { parseOcc, buildOcc, snapStrike, resnapLegs, expiryStrikes, strikeOptions, fetchChain, hasOpenInterest, enrichOpenInterest, feedName, sourceNote, openInterestNote, oiProfile, expiryOpenInterest, nearMoneyOpenInterest, monotonicityBreaks, monotonicityNote, invertedOnStrikes, spotOf, spotAt, atmIv } from "./chain.js";
 import { T, TYPE, themeName, setTheme, BADGE_SAFE } from "./theme.js";
@@ -72,7 +72,7 @@ import { nextRef, refCounter, appendTimeline, stampTimeline, orderStatusRecheck,
   positionStage, positionStageNote, bookPositions, holdingShape, dropImportedTwins, recordFillPrice, countsAsRuleClose, closeKindWords, riskOkOf, riskOkWords, wouldHaveDone, isBrokerHolding, upgradeHolding, positionForHolding,
   isTestRecord, testRecordNote, scoredJournal, journalPnl, NOT_A_FILL,
   journalEntry, searchJournal, CLOSE_REASON_MIN, refNumber, journeyLevel,
-  adoptReplacement, replacementsIn, replacedBy } from "./journal.js";
+  adoptReplacement, replacementsIn, replacedBy, chanceCalibration } from "./journal.js";
 import { FIRST_STEP, stepCarry, candidateOf, candidateKey, legsLine, toggleCompare, inCompare, MAX_COMPARE, savedFromCandidate, candidateFromSaved, savedAge, savedItemFor, withoutSaved, restoreSaved, sizedCandidate } from "./path.js";
 import { PositionCard } from "./positionCard.jsx";
 import { navOf, createNavHistory } from "./nav.js";
@@ -85,12 +85,13 @@ import { JournalScreen } from "./journal.jsx";
 import { SettingsScreen } from "./settings.jsx";
 import { useWide, RAIL_W } from "./ui.jsx";
 import { findStatusText, DEFAULT_FIND_ORDER, BUILD_CTA, savedLine, removedFromSavedLine, UNDO, openRiskIncludesLine, alreadySentLine, ALREADY_SENT_REVIEW, CARD_LABELS, limitMovedLine,
-  WHY_ORDER_NOTE, DEFAULT_NET_SIDE } from "./rules.js";
+  WHY_ORDER_NOTE, DEFAULT_NET_SIDE, marketDistOf, marketChanceOf, chanceGapOf, chancesBrief,
+  costsFor, costsLine, exitReplayPolicy } from "./rules.js";
 // REDESIGN PR 2: Build on the owner's mockup — its words (rules.js) and its screen (build.jsx).
 import { tradeTakeaway, buildSubLine, expiryShort, deltaSharesText, thetaDayText, reasonRuleText, orderBookLine, capLabel,
   EXIT_ROWS, EXITS_FOOTER, exitsPill, timeExitDay, sendLabel, SEND_FOOTER, reviewLegWords, reviewLimitLine, oiCheckText,
   REVIEW_CHECKS, REVIEW_SUB, sentOrderLine, sentFiledText, ORDER_TICK, stanceText, MARKET_READ_LINK } from "./rules.js";
-import { BuildScreen, BuildLoading, BuildNoQuotes, BuildEmpty, Section } from "./build.jsx";
+import { BuildScreen, BuildLoading, BuildNoQuotes, BuildEmpty, Section, ExitRulesPast } from "./build.jsx";
 import { gateChecklist } from "./wizard.jsx";
 import { undefinedRiskLegs } from "./riskGate.js";
 import { taContext } from "./indicators.js";
@@ -115,21 +116,9 @@ const FS = TYPE.size, FW = TYPE.weight, LH = TYPE.line;
 /** One empty bar list, so a market with no history yet hands the memoised card picture the same array every render. */
 const NO_BARS = [];
 
-/* ============================== MATH: Black-Scholes (Greeks only — shared engine covers price/payoff) ============================== */
-const nPDF = (x) => Math.exp(-0.5 * x * x) / Math.sqrt(2 * Math.PI);
-const R = 0.045;
-
-function bsGreeks(S, K, Tyr, iv, type) {
-  if (Tyr <= 0 || iv <= 0) return { delta: 0, gamma: 0, theta: 0, vega: 0 };
-  const sq = Math.sqrt(Tyr);
-  const d1 = (Math.log(S / K) + (R + 0.5 * iv * iv) * Tyr) / (iv * sq);
-  const d2 = d1 - iv * sq;
-  const delta = type === "call" ? nCDF(d1) : nCDF(d1) - 1;
-  const gamma = nPDF(d1) / (S * iv * sq);
-  const theta = ((-S * nPDF(d1) * iv / (2 * sq)) - (type === "call" ? 1 : -1) * R * K * Math.exp(-R * Tyr) * nCDF(type === "call" ? d2 : -d2)) / 365;
-  const vega = S * nPDF(d1) * sq / 100;
-  return { delta, gamma, theta, vega };
-}
+/* ============================== MATH: Black-Scholes Greeks ==============================
+   `bsGreeks()` lives in engine.js since PR 67 (Build's scenario table and Greek tabs read it from src/tradeChart.js, which
+   cannot import this file); the same arithmetic, moved, not copied. */
 
 /* ============================== THE MARKETS: ONE REGISTRY (PR #48, TASK 1) ==============================
    `UNDERLYINGS` lived here (name, step, iv, sigma, news query, the commodity flag) and `src/basket.js` carried the
@@ -408,7 +397,9 @@ function priceLeg(leg, S, dte, baseIV, q) {
   // table says how many contracts are bid for and offered at those two prices,
   // which is what "how close am I to a probable fill" actually means. A missing
   // size stays undefined — UNKNOWN, never zero (`legBook()` in rules.js).
-  if (quote && quote.mid != null) return { px: quote.mid, iv: quote.iv || smileIV(baseIV, S, leg.strike), real: true, occ: quote.occ, oi: quote.oi, vol: quote.vol, bid: quote.bid, ask: quote.ask, bidSize: quote.bidSize, askSize: quote.askSize };
+  // PR 67: the broker's four Greeks travel too, READ (Alpaca's snapshot or CBOE's), each null when the feed has none.
+  if (quote && quote.mid != null) return { px: quote.mid, iv: quote.iv || smileIV(baseIV, S, leg.strike), real: true, occ: quote.occ, oi: quote.oi, vol: quote.vol, bid: quote.bid, ask: quote.ask, bidSize: quote.bidSize, askSize: quote.askSize,
+    greeks: { delta: quote.delta ?? null, gamma: quote.gamma ?? null, theta: quote.theta ?? null, vega: quote.vega ?? null } };
   const iv = smileIV(baseIV, S, leg.strike);
   return { px: bsPrice(S, leg.strike, dte / 365, iv, leg.type), iv, real: false };
 }
@@ -505,6 +496,22 @@ export const chanceCheckOf = (a, { ticker, legs, spot, dte, expKey = null, seaso
   });
 
 /**
+ * THE MARKET'S CHANCE (PR 67, task 67.1) — `marketChanceOf()` is spelled ONCE in this file, here, beside `chanceCheckOf()`.
+ * `dist` is one expiry's distribution (`boardDistOf()` below); the price is the analysis's own entry, as the model's is.
+ */
+export const marketChanceCheckOf = (a, { legs, dist }) => marketChanceOf({ dist, legs, entryNet: a?.entry });
+/** One expiry's market distribution, memoised on the chain object (a refresh is a new object), so findGen, Optimize, the
+ *  variants and Build read one fit per board. Null without a board. */
+const DIST_MEMO = new WeakMap();
+export function boardDistOf(c, ek) {
+  if (!c || !ek || !c.byExp || !c.byExp[ek] || !c.spot) return null;
+  let m = DIST_MEMO.get(c);
+  if (!m) { m = new Map(); DIST_MEMO.set(c, m); }
+  if (!m.has(ek)) m.set(ek, marketDistOf(c.byExp[ek], c.spot, { stale: boardLooksStale(monotonicityBreaks(c, ek)) }));
+  return m.get(ek);
+}
+
+/**
  * THE ONE SENTENCE THAT TRAVELS WITH EVERY PRINTED CHANCE.
  *
  * PR #25 made all five screens agree on the NUMBER and left the debt it wrote
@@ -534,22 +541,27 @@ const chanceStamp = (mc, ticker = "this market") => (mc ? mc.seasonalNote : chan
 
 /** The figures one list card prints. `a`/`aFill` may be handed in when the
  *  generation site already computed them; nothing is re-derived either way. */
-export function listCardFigures(legs, { spot, dte, iv, q, ticker, expKey = null, seasonal, a = null, aFill = null, matrix = null, month = NOW_MONTH }) {
+export function listCardFigures(legs, { spot, dte, iv, q, ticker, expKey = null, seasonal, a = null, aFill = null, matrix = null, month = NOW_MONTH,
+  dist = null }) {
   const mid = a || analyze(legs, spot, dte, iv, q);
   const af = aFill || atFillPrice(legs, mid, { spot, dte, iv, q });
   const mc = seasonal ? chanceCheckOf(af, { ticker, legs, spot, dte, expKey, seasonal }) : null;
   const pop = mc ? mc.pop : null;
+  /* THE MARKET'S CHANCE (PR 67): the same price, the board's own distribution; and why it differs from the model's. */
+  const mkt = marketChanceCheckOf(af, { legs, dist });
+  const gap = chanceGapOf({ mc, mkt, dist, legs, entryNet: af.entry, spot });
   /* THE FUTURE AND THE PAST (PR #49, TASK 3): the Monte Carlo average per $100 at risk, and the historical replay on
      the market's measured monthly matrix — settled at expiry, the same window each past year. No simulation: one
      pass over the matrix. Null until the series loads ("not read"). */
   const bt = matrix ? histBacktest(legs, spot, dte, af.entry, matrix, { month }) : null;
-  return { a: mid, aFill: af, mc, pop, bands: payoffBands({ legs, entryNet: af.entry, spot }),
+  return { a: mid, aFill: af, mc, pop, mkt, gap, bands: payoffBands({ legs, entryNet: af.entry, spot }),
     rr: rewardRisk(af.maxProfit, af.maxLoss), figures: figureSet(af, pop),
     future: futureFigures(mc, af, null, expKey), bt, past: pastFigures(bt, af) };
 }
 
 /** The Build screen's chain, from the legs to the price that will be sent. */
-export function buildFigures(legs, { spot, dte, iv, q, ticker = null, expKey = null, seasonal = null, legPx = null, type = "limit", matrix = null, month = NOW_MONTH }) {
+export function buildFigures(legs, { spot, dte, iv, q, ticker = null, expKey = null, seasonal = null, legPx = null, type = "limit", matrix = null, month = NOW_MONTH,
+  dist = null }) {
   const A = spot && legs.length ? analyze(legs, spot, dte, iv, q) : null;
   /* THE PRICE THE ORDER WILL BE SENT AT IS BUILD-SCREEN STATE. Type, time in
      force and ONE PRICE PER LEG live in App.jsx; `legPx` is null until the user
@@ -581,11 +593,14 @@ export function buildFigures(legs, { spot, dte, iv, q, ticker = null, expKey = n
   const AE = !A ? null : !Number.isFinite(effective.net) ? A : analyze(legs, spot, dte, iv, q, { net: effective.net });
   /* THE ONE CHANCE, AT THE PRICE THAT WILL BE SENT. */
   const chance = AE && spot && legs.length && seasonal ? chanceCheckOf(AE, { ticker, legs, spot, dte, expKey, seasonal }) : null;
+  // THE MARKET'S CHANCE (PR 67), at the same `AE`, as `listCardFigures()` reads it (figures.test.jsx holds them equal).
+  const mkt = AE && legs.length ? marketChanceCheckOf(AE, { legs, dist }) : null;
+  const gap = AE ? chanceGapOf({ mc: chance, mkt, dist, legs, entryNet: AE.entry, spot }) : null;
   // `rr` and `bands` are what the ONE candidate card prints beside the figures (PR #44, TASK 4); they are worked
   // out exactly as `listCardFigures()` works them out, from the same `AE`.
   // The future and the past, as `listCardFigures()` works them out, at the same `AE` (PR #49; figures.test.jsx).
   const bt = AE && matrix && spot ? histBacktest(legs, spot, dte, AE.entry, matrix, { month }) : null;
-  return { A, bookQuotes, book, seedPx, legPrices, ticketNet, ticketDir, effective, AE, chance,
+  return { A, bookQuotes, book, seedPx, legPrices, ticketNet, ticketDir, effective, AE, chance, mkt, gap,
     rr: AE ? rewardRisk(AE.maxProfit, AE.maxLoss) : null,
     bands: AE && spot ? payoffBands({ legs, entryNet: AE.entry, spot }) : null,
     figures: AE ? figureSet(AE, chance ? chance.pop : null) : null,
@@ -595,19 +610,14 @@ export function buildFigures(legs, { spot, dte, iv, q, ticker = null, expKey = n
 function netValue(legs, S, dte, baseIV, q) {
   return legs.reduce((a, l) => a + Math.sign(l.side) * l.qty * priceLeg(l, S, dte, baseIV, q).px, 0);
 }
+// THE STRUCTURE TODAY is `legsAt()` (engine.js, PR 67), the one the scenario table and the Greek tabs read too.
+const ivsOf = (legs, S, baseIV, ivMap) => ivMap || legs.map((l) => smileIV(baseIV, S, l.strike));
 function scenarioValue(legs, S, dte, baseIV, ivMap) {
-  return legs.reduce((a, l, i) => {
-    const iv = ivMap ? ivMap[i] : smileIV(baseIV, S, l.strike);
-    return a + Math.sign(l.side) * l.qty * bsPrice(S, l.strike, dte / 365, iv, l.type);
-  }, 0);
+  return legsAt(legs, S, dte, ivsOf(legs, S, baseIV, ivMap)).value;
 }
 function netGreeks(legs, S, dte, baseIV, ivMap) {
-  return legs.reduce((a, l, i) => {
-    const iv = ivMap ? ivMap[i] : smileIV(baseIV, S, l.strike);
-    const g = bsGreeks(S, l.strike, dte / 365, iv, l.type);
-    const m = Math.sign(l.side) * l.qty;
-    return { delta: a.delta + m * g.delta, gamma: a.gamma + m * g.gamma, theta: a.theta + m * g.theta * 100, vega: a.vega + m * g.vega * 100 };
-  }, { delta: 0, gamma: 0, theta: 0, vega: 0 });
+  const g = legsAt(legs, S, dte, ivsOf(legs, S, baseIV, ivMap));
+  return { delta: g.delta, gamma: g.gamma, theta: g.theta * 100, vega: g.vega * 100 };
 }
 /**
  * EVERY FIGURE ON THIS SCREEN IS WORKED OUT AT ONE PRICE, AND IT IS NOT ALWAYS
@@ -765,7 +775,7 @@ export function readAlternative(alt, { chain: c, ticker: tk, iv, seasonal, matri
   const fl = floors ? floorsFor(alt.legs, { S: c.spot, dte: dteX, iv, q, peers: expiryOpenInterest(c, alt.expKey), level }) : null;
   if (fl && !fl.pass) return { ...alt, ticker: tk, dte: dteX, label, legsText, cut: { why: fl.why, reasons: fl.reasons } };
   const lf = listCardFigures(alt.legs, { spot: c.spot, dte: dteX, iv, q, ticker: tk, expKey: alt.expKey, seasonal, matrix,
-    ...(fl ? { a: fl.a, aFill: fl.aFill } : {}) });
+    dist: boardDistOf(c, alt.expKey), ...(fl ? { a: fl.a, aFill: fl.aFill } : {}) });
   const size = contracts != null ? null : sizedFree(scaleStrategy(lf.aFill, request.mode, request.amt, request.riskCap), freeSizing);
   const n = contracts != null ? Math.max(1, Math.round(Number(contracts) || 1)) : size && size.ok ? size.n : null;
   const f = sizedFigures(lf.aFill, n);
@@ -1416,6 +1426,8 @@ export default function OptionsStrategyLab() {
   const [syncBusy, setSyncBusy] = useState(false);
   const [ta, setTa] = useState({}); // per ticker
   const [replay, setReplay] = useState(null);
+  // PR 68 (P5): "Exit rules, past years" — read on its button only, keyed by the trade it was read for.
+  const [exitReplay, setExitReplay] = useState({ key: null, state: "idle", error: null, result: null });
   const [nf, setNf] = useState({ tk: "ALL", kind: "all", q: "", days: 7 });
   /* ---- WHAT FIND IS ASKED (PR #40, TASK 1) ----
      The markets it reads (all of the basket by default), the direction — one
@@ -2028,8 +2040,8 @@ export default function OptionsStrategyLab() {
      that stood beside those memos stands beside the function now. */
   const BF = useMemo(
     () => buildFigures(legs, { spot, dte, iv, q, ticker, expKey, seasonal: seasonalOf(seasonal, ticker),
-      legPx: ticket.legPx, type: ticket.type, matrix: seasonal[ticker]?.matrix || null }),
-    [legs, spot, dte, iv, q, ticker, expKey, seasonal, ticket.legPx, ticket.type]);
+      legPx: ticket.legPx, type: ticket.type, matrix: seasonal[ticker]?.matrix || null, dist: boardDistOf(chain, expKey) }),
+    [legs, spot, dte, iv, q, ticker, expKey, seasonal, ticket.legPx, ticket.type, chain]);
   const { A, bookQuotes, book, seedPx, legPrices, ticketNet, ticketDir, effective, AE } = BF;
   // WHERE THIS TRADE ARRIVED FROM: null when it was built here by hand, { kind: "card", key } from a Find card.
   const [buildOrigin, setBuildOrigin] = useState(null);
@@ -2459,6 +2471,10 @@ export default function OptionsStrategyLab() {
     // against a Monte Carlo at the app's own.
     const mc0 = chanceFor(analysis, { ticker: tk, legs: lg, spot: sp, dte: d, expKey: ek });
     const pop0 = mc0 ? mc0.pop : null;
+    // AND THE MARKET'S, BESIDE IT (PR 68, task 68.3): the board's own distribution at the same price — a field of the
+    // record's thesis (`thesis.marketPop`, null when the board was not read), never a new /api/state field. The Journal
+    // compares the two against what happened (`chanceCalibration()`).
+    const mkt0 = marketChanceCheckOf(analysis, { legs: lg, dist: boardDistOf(chains[tk], ek) });
     const f = fused[tk];
     // THE REF IS GIVEN HERE, ONCE, AND IS THE POSITION'S NAME FOR THE REST OF
     // ITS LIFE — including after it is closed, which is the whole point: the
@@ -2484,7 +2500,7 @@ export default function OptionsStrategyLab() {
       // The absence of these three fields on an older record is the marker, the
       // way `contractsAssumed` marks a size that was assumed: at that point the
       // hand-written table was the only one either side could reach.
-      thesis: { pop: pop0, ...seasonalStampFields(mc0), iv: ivAvg0, seasonal: seasM, regime: seasM > 0 ? "strong up" : seasM < 0 ? "strong down" : "weak", spot: sp, breakevens: analysis.breakevens, delta: analysis.greeks.delta, vega: analysis.greeks.vega,
+      thesis: { pop: pop0, marketPop: mkt0 && mkt0.pop != null ? mkt0.pop : null, ...seasonalStampFields(mc0), iv: ivAvg0, seasonal: seasM, regime: seasM > 0 ? "strong up" : seasM < 0 ? "strong down" : "weak", spot: sp, breakevens: analysis.breakevens, delta: analysis.greeks.delta, vega: analysis.greeks.vega,
         signal: f ? { score: f.score, confidence: f.confidence, agreement: f.agreement, narrative: f.narrative } : null,
         // THE FOUR FACTORS AS READ AT ENTRY (PR #44, TASK 4): each factor's direction and strength and the seasonal
         // source, so Details and the Positions card can set "at entry" beside "now". Absent on an older record.
@@ -2939,6 +2955,24 @@ export default function OptionsStrategyLab() {
   // and the stat were two separate readings, which is the fault this PR closes.
   // At the price that fills (`AE`, PR #49): the same entry the top card's PAST YRS tile replays, so the two agree.
   const runMC = () => { setBt(histBacktest(legs, spot, dte, (AE || A).entry, seas.matrix, { month: NOW_MONTH })); };
+  /* THE EXIT RULES, REPLAYED (PR 68, P5): five years of daily closes from /api/bars on the tap, then `exitBacktest()` with
+     the rules' own policy (`exitReplayPolicy()`). Never on its own, never on a made-up series: no closes, no numbers. A
+     result belongs to the trade it was read for (`exitKey`); another trade on Build shows the button again. */
+  const exitKey = `${ticker}|${expKey}|${dte}|${legs.map((l) => `${l.side}:${l.qty}:${l.type}:${l.strike}`).join(",")}`;
+  const runExitReplay = async () => {
+    const key = exitKey;
+    setExitReplay({ key, state: "loading", error: null, result: null });
+    try {
+      const r = await fetch(`/api/bars?sym=${encodeURIComponent(ticker)}&days=1900`);
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !Array.isArray(j.bars) || !j.bars.length) throw new Error(j.error || `HTTP ${r.status}`);
+      const result = exitBacktest(legs, spot, dte, j.bars, exitReplayPolicy(), { month: NOW_MONTH });
+      setExitReplay((cur) => (cur.key === key ? { key, state: "done", error: null, result } : cur));
+    } catch (e) {
+      setExitReplay((cur) => (cur.key === key ? { key, state: "error", error: String(e.message || e), result: null } : cur));
+    }
+  };
+  const exitView = exitReplay.key === exitKey ? exitReplay : { state: "idle", error: null, result: null };
 
   /* ---- Alpaca ---- */
   const setSetting = async (k, v) => { const st = { ...store, settings: { ...store.settings, [k]: v } }; setStore(st); await saveState(st); };
@@ -3080,7 +3114,8 @@ export default function OptionsStrategyLab() {
       if (!c || !c.spot || !e || !(sv.legs || []).length) { out[sv.id] = null; continue; }
       try {
         const lf = listCardFigures(sv.legs, { spot: c.spot, dte: e.dte, iv: getU(sv.ticker).iv, q: makeQuote(c, sv.expKey),
-          ticker: sv.ticker, expKey: sv.expKey, seasonal: seasonalFor(sv.ticker), matrix: seasonal[sv.ticker]?.matrix || null });
+          ticker: sv.ticker, expKey: sv.expKey, seasonal: seasonalFor(sv.ticker), matrix: seasonal[sv.ticker]?.matrix || null,
+          dist: boardDistOf(c, sv.expKey) });
         out[sv.id] = { pop: lf.pop, per100: lf.future ? lf.future.per100 : null,
           risk: lf.aFill && lf.aFill.maxLoss != null ? Math.abs(lf.aFill.maxLoss) : null };
       } catch { out[sv.id] = null; }
@@ -3785,7 +3820,7 @@ export default function OptionsStrategyLab() {
         if (r.tally.comboSpreadSkipped && !comboSpreadSkipped.includes(tk)) comboSpreadSkipped.push(tk);
         for (const { p, a, aFill } of r.rows) {
           const lf = listCardFigures(p.legs, { spot: c.spot, dte: d2, iv: u.iv, q: qq, ticker: tk, expKey: ek,
-            seasonal: seasonalFor(tk), a, aFill, matrix: seasonal[tk]?.matrix || null });
+            seasonal: seasonalFor(tk), a, aFill, matrix: seasonal[tk]?.matrix || null, dist: boardDistOf(c, ek) });
           const f = fHere || null;
           const prof = evProfile(lf.mc, aFill.maxProfit, aFill.maxLoss);
           const cand = candidateOf({ name: p.name, legs: p.legs, a: aFill, pop: lf.pop, dte: d2, expKey: ek, futureAvg: lf.future ? lf.future.per100 : null,
@@ -4548,6 +4583,11 @@ export default function OptionsStrategyLab() {
                   <div style={{ ...mono, fontSize: FS.xs, color: T.mut, marginTop: 10 }}>Press "Run it" for the odds, the spread of outcomes, and what happened in each past year.</div>
                 )}
               </Panel>
+              {/* PR 68 (P5): the exit rules on past days, under the backtest panel. */}
+              <div style={{ marginTop: 10 }}>
+                <ExitRulesPast state={exitView.state} error={exitView.error} result={exitView.result} inside={!(dte > RULES.exitDTE)}
+                  onRun={runExitReplay} />
+              </div>
             </div>
             )}
   </>);
@@ -5319,6 +5359,7 @@ export default function OptionsStrategyLab() {
                     sigma={chance && chance.sigma > 0 ? chance.sigma : A.legPx.length ? A.legPx.reduce((x, y) => x + y.iv, 0) / A.legPx.length : iv}
                     driftAnnual={chance ? chance.driftAnnual : Math.log(1 + (seasNow || 0) / 100) * 12}
                     curve={AE.curve} legs={legs} breakevens={AE.breakevens}
+                    ivs={AE.legPx.map((p) => p.iv)} reads={AE.legPx.map((p) => p.greeks || null)}
                     onTa={(t2) => setTa((m) => ({ ...m, [ticker]: t2 }))}
                   />
                 </div>
@@ -5438,6 +5479,7 @@ export default function OptionsStrategyLab() {
             takeaway: tradeTakeaway(BF.bands, { ticker, expKey, n: contracts, credit: AE.entry < 0, legs }),
             numbers: {
               figures: sizedFigures(AE, contracts), rr: BF.rr, pop: chance ? chance.pop : null, breakevens: AE.breakevens,
+              mkt: BF.mkt, gap: BF.gap,
               future: futureFigures(chance, AE, contracts, expKey), past: pastFigures(BF.bt, AE, contracts),
               delta: deltaSharesText(AE.greeks.delta, contracts), theta: thetaDayText(AE.greeks.theta, contracts),
             },
@@ -5453,16 +5495,23 @@ export default function OptionsStrategyLab() {
                 chart: () => (barsCache[ticker] || []).length ? taContext(barsCache[ticker], { name: stratName, expKey, dte, legs,
                   breakevens: AE ? AE.breakevens : [], spot }) : null,
                 sized: { contracts, riskDollars: L && L.tradeRisk != null ? L.tradeRisk : null, perTradeLimit: L && !L.sizingFree ? L.perTrade : null },
+                // PR 67: the trade's two chances, labelled as its CHANCE tile labels them.
+                chances: chancesBrief({ pop: chance ? chance.pop : null, mkt: BF.mkt, gap: BF.gap }),
                 otherCards: findSorted.filter((x) => x.tk === ticker && !(x.name === stratName && x.expKey === expKey)).slice(0, 6)
                   .map((x) => ({ name: x.name, legs: legsLine(x.legs), expKey: x.expKey, figures: x.lf.figures, chance: x.lf.pop,
+                    chanceMarket: x.lf.mkt && x.lf.mkt.pop != null ? x.lf.mkt.pop : null,
                     futurePer100: x.lf.future ? x.lf.future.per100 : null })) } },
             legs: { expLabel: expiryShort(expKey), snapNote,
               onEditInChain: () => { goMarket(ticker, "chain"); setMktTray({ expKey, legs: legs.map((l) => ({ ...l })), note: null }); },
               legs: legs.map((l, i) => {
                 const lp = AE.legPx[i] || {};
+                // PR 67 (task 67.4): the broker's delta where the feed sends it (read, never recomputed); else Black-Scholes on
+                // the leg's own IV.
                 const g = Number.isFinite(lp.iv) ? bsGreeks(spot, l.strike, dte / 365, lp.iv, l.type) : null;
+                const readDelta = lp.greeks && lp.greeks.delta != null && Number.isFinite(Number(lp.greeks.delta)) ? Number(lp.greeks.delta) : null;
                 return { side: l.side, qty: l.qty, strike: l.strike, type: l.type, mid: lp.real ? lp.px : null,
-                  bid: lp.real && lp.bid != null ? lp.bid : null, ask: lp.real && lp.ask != null ? lp.ask : null, delta: g ? g.delta : null };
+                  bid: lp.real && lp.bid != null ? lp.bid : null, ask: lp.real && lp.ask != null ? lp.ask : null,
+                  delta: readDelta != null ? readDelta : g ? g.delta : null };
               }) },
             order: {
               contracts, onContracts: (n) => setContracts(Math.max(1, Math.min(20, n))), qtyMin: 1, qtyMax: 20, qtyNote: buildSizeLine,
@@ -5471,6 +5520,8 @@ export default function OptionsStrategyLab() {
               // PR 61: the limit in force against the price the card was built at (the card's own figures, the same sizing).
               moved: optRef && optRef.card && optRef.name === stratName && optRef.expKey === expKey ? limitMovedLine(optRef.card, AE, contracts) : null,
               risk: { value: L ? money(L.tradeRisk) : "—", pct: L && L.tradingCapital ? `${pctText(L.tradeRisk / L.tradingCapital)} of capital` : null },
+              // PR 67 (task 67.5): Alpaca's commission, said — `costsFor()` changes no figure, ranking or gate check.
+              costs: costsLine(costsFor("alpaca", legs, contracts, { entryNet: AE.entry })),
               cap: {
                 checked: !freeSizing && freeDraft == null, label: capLabel(L),
                 over: guard ? ((guard.violations || []).find((x) => x.code === "PER_TRADE_LIMIT") || {}).message || null : null,
@@ -5528,7 +5579,7 @@ export default function OptionsStrategyLab() {
                     cardKey={buildOrigin && buildOrigin.key}
                     signs={buildSigns} sizeText={buildSizeLine}
                     figures={sizedFigures(AE, contracts)}
-                    rr={BF.rr} pop={chance ? chance.pop : null} basis={chance ? chanceBasisLabel(chance) : null}
+                    rr={BF.rr} pop={chance ? chance.pop : null} basis={chance ? chanceBasisLabel(chance) : null} mkt={BF.mkt}
                     future={futureFigures(chance, AE, contracts, expKey)} past={pastFigures(BF.bt, AE, contracts)} ticker={ticker}
                     picture={BF.bands ? { bands: BF.bands, legs, entryNet: AE.entry, spot, bars: barsCache[ticker] || NO_BARS,
                       dte, sigma: chance ? chance.sigma : undefined, driftAnnual: chance ? chance.driftAnnual : undefined, ticker } : null}
@@ -5761,6 +5812,8 @@ export default function OptionsStrategyLab() {
         {tab === "journal" && !showSettings && (
           <JournalScreen key={journalOpenRef || "journal"} v={{
             journey, wide,
+            // PR 68 (task 68.3): which chance came true, once enough closed trades carry both.
+            calibration: chanceCalibration(store.journal || []),
             insideLimit: <>{`Inside the limit: ${journey.coerenza == null ? "not judged yet" : `${pctText(journey.coerenza)} of the trades judged stayed inside the per-trade limit`}.`}
               {" "}Rule closes are the share of trades you closed because a rule said so rather than because you felt like it — it
               is the only number here that predicts the others. Awareness averages that, the limit and how often you opened.</>,

@@ -138,5 +138,20 @@ check("TWO PANES ONLY ON A COMPUTER: Find's rows beside the market page, Positio
   has(journal(), "display:contents", "a phone's Journal is one column");
 });
 
+check("PR 68 — WHICH CHANCE CAME TRUE: the count until ten trades carry both chances; then each band, both chances, and the Brier scores", () => {
+  const few = journal({ calibration: { n: 3, enough: false } });
+  has(few, 'data-journal-calibration="too-few"'); has(few, "3 trades so far — too few to judge.");
+  hasNot(few, "Brier", "a score printed before there is enough to judge");
+  // The arithmetic is journal.test.js's; this is only what the section draws from it.
+  const band = (lo, n, said, won) => ({ lo, hi: +(lo + 0.2).toFixed(1), n, said, won });
+  const judged = journal({ calibration: { n: 10, enough: true,
+    market: { brier: 0.17, bands: [band(0, 0, null, null), band(0.2, 5, 0.3, 0.2), band(0.4, 0, null, null), band(0.6, 5, 0.7, 0.8), band(0.8, 0, null, null)] },
+    model: { brier: 0.25, bands: [band(0, 0, null, null), band(0.2, 0, null, null), band(0.4, 10, 0.5, 0.5), band(0.6, 0, null, null), band(0.8, 0, null, null)] } } });
+  has(judged, 'data-journal-calibration="judged"');
+  has(judged, "said 30% · won 1 of 5"); has(judged, "said 50% · won 5 of 10"); has(judged, 'data-calibration-band="60–80%"');
+  has(judged, "Brier score (lower is better): Market 0.170 · OSL model 0.250");
+  hasNot(journal(), "data-journal-calibration", "no section when the caller hands none");
+});
+
 console.log(`\n${ok.length} passed, ${bad.length} failed`);
 if (bad.length) { for (const [n, m] of bad) console.error(`FAILED: ${n}\n${m}`); process.exit(1); }

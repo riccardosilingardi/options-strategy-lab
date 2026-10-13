@@ -6,6 +6,118 @@ The full history of every item shipped so far (P0–P10, P2-bis) is in `docs/his
 Every pull request updates this file: the session that ships an item marks it done and states
 what the next one inherits.
 
+## Done in PR 68 (owner, 12 Oct 2026): P5 — the exit rules replayed, the chart at the exit, the chances checked
+
+The third of three stacked PRs (66 → 67 → 68). Stacked on PR 67. **The logic only, with no data shown** (the owner, 12 Oct
+2026: "implement the logic but without data, otherwise they pass for real"): every number below the code is computed on
+the owner's deploy from real daily closes, on a tap; this environment reads none, so **the owner's P5 question is not
+answered with numbers here** — its answer is one tap away on Build, or one command away (`scripts/measure-exits.mjs`).
+
+- **68.0 — the design** (in the plan; no stop: the free limits hold it). *Data:* daily closes from `/api/bars` (Alpaca
+  IEX, else Alpha Vantage's daily series; up to 1,900 days, about five past years), the series the chart already reads —
+  no new call against Alpha Vantage's 25 a day, none against its monthly cache. *Past option prices:* Black-Scholes at the
+  **realised** volatility of the 20 sessions before each entry (`RULES.replayVolDays`), since past quotes are not available;
+  implied volatility usually sits above realised, so premiums are usually understated — said beside every result.
+  *Trades:* every session of today's month in each past year, the loaded structure re-struck at today's moneyness, today's
+  days to expiry; this year left out. *Reported:* with the rules, held to expiry, and the stop as an exit — in profit, the
+  average and the worst per $100 at risk, days held; the exits by rule; how often the stop warning fired and how many of
+  those still won.
+- **68.1 — `exitBacktest()`** (engine.js, beside `histBacktest()`, which is unchanged; `realisedVol()`): held day by day
+  until the first of the take profit (`takeProfitTarget()`, through `exitReplayPolicy()` in rules.js), 21 days to expiry,
+  or the expiry; the stop level recorded as "would have warned" with its day, never an exit. Tested on synthetic series
+  only (engine.test.js: a rise takes profit early and leaves money on the table; a fall warns, and exiting at the warning
+  loses less; sideways a credit spread leaves at 21 days; determinism; an unfinished window dropped).
+  `scripts/measure-exits.mjs <dir>` reports per market and per family (templates in strike steps) from the owner's saved
+  `/api/bars` replies; with none it says so and prints no number.
+- **68.2 — where it shows.** Build's "Exit rules, past years", under the backtest panel in "More on this trade ▾": one
+  button; the closes are read on the tap; the table (With the rules · Held to expiry · Stop as exit), the exits, the
+  warning, and the owner's question answered from those numbers (`exitReplayVerdict()`). No closes: "The daily closes are not
+  loaded …, so nothing is replayed." **The chart's toggle "At expiry / At the 21-DTE exit"** (deferred from PR 63): at the
+  exit the right-edge line, the zones and their chances, the bars and the crosshair are read on the exit day — each leg on
+  its own IV with 21 days left (`exitCurve()`, `curveZones()`, `exitPnlAt()`), on the lognormal to that day.
+- **68.3 — the Journal checks both chances.** A trade opened from now on stores `thesis.marketPop` beside `thesis.pop` (a
+  field of the record's thesis, not a new /api/state field). The Journal's "Which chance came true" (`chanceCalibration()`,
+  journal.js) waits for `RULES.calibrationMinTrades` (10) closed trades carrying both and a result read from a fill: until
+  then "N trades so far — too few to judge"; then, per band, what each chance said and how often it won, and each Brier score.
+
+**Measured.** Tests 1,473 → 1,487, 0 failed. Build 1,519.03 → 1,533.08 kB (the usual chunk warning). Audit 20 boards, dark
+and light: 5,248 ✓, 0 unexplained. Words: no ceiling moved (the replay is in a fold; the toggle's words are `CHART_WHEN`'s).
+Photographs: docs/screens/pr68/ (`node scripts/shoot-pr68.mjs`): the chart at the exit, the replay at rest and after the tap
+(the fixture's closes cover this year only, which the replay leaves out: "No finished window …"), the Journal's section with
+the fixture's records (none carries a market chance: "0 trades so far"). No photograph shows a number from a made-up series.
+
+**Not changed:** the gate, every existing RULES value (the exit rules included: the replay informs a later owner decision,
+it changes no rule), the order paths, `histBacktest()`, the /api/state payload's fields.
+
+### What the next session inherits
+
+- **The owner's P5 answer is one tap away**: on the deploy, Build → More on this trade → "Replay the exit rules ›", per trade;
+  or every market and family at once: save each `/api/bars?sym=<TICKER>&days=1900` reply and run
+  `node scripts/measure-exits.mjs <dir>`. Then the owner decides whether any exit rule changes (a later PR; none changes here).
+- The Journal's calibration starts counting with the first trade opened after this merges; it judges at ten.
+
+## Done in PR 67 (owner, 12 Oct 2026): Build like IBKR's Option Wizard — the market's chance, scenarios, Greeks, costs
+
+The second of three stacked PRs (66 → 67 → 68). Stacked on PR 66.
+
+- **67.1 — the market's chance, IBKR's method** (`src/impliedDist.js`, plain JS, imports nothing; read once in rules.js by
+  `marketDistOf()` / `marketChanceOf()` beside `chanceOf()`, spelled once in App.jsx by `marketChanceCheckOf()` beside
+  `chanceCheckOf()`, one fit per board and expiry `boardDistOf()`). One expiry's out-of-the-money quotes at their mid (a
+  choice: IBKR does not say which price), segments between listed strikes with their mass at the midpoint, the tails at
+  ⅔ of the lowest strike and 20% above the highest, fair pricing with no interest, non-negative least squares under Σ = 1.
+  A board `boardLooksStale()` calls stale, or with fewer than `RULES.impliedMinQuotes` (4) usable quotes, gives no number
+  and says why (`MARKET_CHANCE_NOT_READ`). **A small smoothing penalty** (0.01 × the median strike width on the second
+  difference) tames the zig-zag the midpoint rule leaves on quotes rounded to the cent — measured in impliedDist.test.js:
+  a 1-cent move moved a chance by up to 0.25 points without it, 0.05 with it. **The solver** (`simplexLS()`: Lawson–
+  Hanson's active set with Σ = 1 held exactly, its Cholesky factor grown a column at a time) fits a 60-strike board in
+  about 5 ms and a 150-strike one in about 17 ms on a desktop CPU (the first version, Σ = 1 as a weighted row solved by QR,
+  took 26 and 63 ms at 60 and 100); one fit per market and expiry, cached on the chain. Tests: (a) IBKR's example (510 call 6.45, 515 call 4.40) reads
+  back exactly 0.56 / 0.06 / 0.38 with no penalty, within a point with it; (b) a flat-IV board gives the lognormal's own
+  chance within 0.11 points (1 allowed); (c) a put skew lowers a far out-of-the-money credit put spread's chance (91.0%
+  against 93.7% flat) and the market's equals the prices' own answer — **near the money the same skew raises it** (75.0%
+  against 70.6%; changed from the plan's wording, tested both ways); (d) determinism, and a 1-cent move moves nothing.
+- **67.2 — two chances on the card, the row and Build.** The CHANCE tile reads "Market 71%" then "OSL model 74%"
+  (`chanceLines()`, `CHANCE_LINES`); past `RULES.chanceGapPoints` (5 points) one line under it says why
+  (`chanceGapOf()`, `chanceGapLine()`: the season against the same model at zero drift; the market's tails past ±1.5
+  standard deviations against one volatility, "(skew)" when they lean opposite ways), amber when the market's is lower —
+  the one sentence a card carries besides its name and legs (card.test.jsx names it). Find's row adds "· mkt 71%" (the
+  owner's leaning); the sort stays on the OSL model. Build's FUTURE box lists both, then the line or "Market chance not
+  read: …", then "The two chances ⓘ". The copilot reads both (Build's `chances`, Find's Compare `chanceMarket`, Build's
+  other cards). figures.test.jsx holds card = compact card = Build = row for both chances and the line.
+- **67.3 — the scenario table under Build's chart** (`scenarioGrid()`, tradeChart.js): today's price moved by the largest
+  move in thirds (1% · 5% · 10% · 30%, default 30%, IBKR's "Variaz. max"); rows Price, P&L $, Delta, Gamma, Vega, Theta for
+  Build's size; **Today** (Black-Scholes on each leg's own IV, `legsAt()` in engine.js — the same function Build's "now"
+  curve and its Greeks now read) or **At expiry** (the one payoff; Greeks zero, as IBKR shows them). One set at a time
+  (a phone holds seven columns, not fourteen: changed from "a second column set").
+- **67.4 — Greek tabs above the chart**: P&L (the chart as it was) · Delta · Gamma · Vega · Theta, each drawn against price
+  today and on the exit day (`greekCurves()`), with a dot at today's price where the broker sent the figure for every leg
+  (`brokerGreeks()`, read; a partial sum is never drawn). The chain parsers now keep gamma and vega (the owner's answer:
+  "read all four"); Build's Legs list prints the broker's delta where it has one.
+- **67.5 — costs, said, never subtracted** (`BROKER_COSTS`, `costsFor()`, `costsLine()` in rules.js): "Costs: $0
+  commission on Alpaca, 0% of the debit (regulatory fees not counted)" on Build's Order and in a card's Details; IBKR is
+  `<Placeholder id="costs-ibkr">` ("Not connected yet") with the owner's IDEM rate (€2.00 a contract a side) and the US
+  combo report stored, and no US rate invented. riskGate.test.js holds that no gate, ranking, floor, alternative or order
+  path reads a cost.
+- **67.6 — owner checks and the defined-risk sweep.** PRD §4 #9 is the OWNER CHECK "Market chance = IBKR's", with its
+  steps. figures.test.jsx sweeps every structure Find builds on the fixture boards (31, every view) and every move Optimize
+  reads off the board from them (150): none has an uncovered short leg (`undefinedRiskLegs()`, the gate's own check).
+
+**Measured.** Tests 1,448 → 1,473, 0 failed. Build 1,496.42 → 1,519.03 kB (the usual chunk warning). Audit 20 boards, dark
+and light: 5,248 ✓, 0 unexplained (no board draws the new sections). Words: build 518 → 610 (both chance lines, the Greek
+tabs' readout and legend, the table's words, the costs line; written in voice.test.js); find and market unchanged.
+Photographs: docs/screens/pr67/ (`node scripts/shoot-pr67.mjs`, 14 shots, dark and light).
+
+**Not changed:** the gate and every existing RULES value, the seven order paths, `chanceOf()`'s own arithmetic,
+`histBacktest()`, `seasonalSignal()`, the /api/state payload, findGen and the sort.
+
+### What PR 68 inherits
+
+- The market's chance has met fixture boards only; equality with IBKR's screen is the owner's check (PRD §4 #9).
+- The Greek dot and the leg deltas read the broker's figures only where the feed sends them; the live Alpaca snapshot's
+  gamma and vega have not been seen (this environment's Alpaca credential is refused).
+- `thesis.marketPop` (PR 68) can store `marketChanceOf()`'s figure at entry: the function exists and is held equal on the
+  card and on Build.
+
 ## Done in PR 66 (owner, 12 Oct 2026): Find — four chips, from your view of the market
 
 The first of three stacked PRs (66 → 67 → 68), planned together and approved by the owner on 12 Oct 2026 after comparing
@@ -170,7 +282,7 @@ The third of three stacked PRs (61 → 62 → 63), branched from PR 62's branch.
 
 **Later (nothing more than written here):** event ticks on the chart's time axis (the calendar, `events.js`); Bollinger
 and moving-average toggles on the chart; the 21 past years as dots where each ended; an "at expiry / at the 21-DTE exit"
-toggle for the payoff (waits for P5, the exit model).
+toggle for the payoff (waits for P5, the exit model — **done in PR 68**).
 
 **Measured.** Tests 1,422 → 1,429, 0 failed. Build 1,465.18 → 1,475.46 kB (the usual chunk warning). Audit 20 boards,
 dark and light: 5,264 ✓, 0 unexplained (two fewer ✓ than PR 62: the board's column head "Future avg · risk" on Find is
@@ -991,7 +1103,12 @@ One line each; see `PRD.md` §5 and `docs/history/ROADMAP.md` for detail.
 - **DONE: PR 4c** — "What did this trade teach me?" in the Journal.
 - **DONE: PR 4d** — the Liquidity sheet on Find, said plainly.
 - **DONE: PR 66** — Find's four chips from your view of the market (View, Style, Max loss, ⇅ Sort, More) and the filter
-  that binds. **NEXT:** PR 67 (Build like IBKR's Option Wizard) and PR 68 (P5's exit replay, logic only), stacked.
+  that binds.
+- **DONE: PR 67** — Build like IBKR's Option Wizard: the market's chance beside the OSL model's, the scenario table, the
+  Greek tabs, costs said per broker.
+- **DONE: PR 68** — P5's logic: the exit rules replayed on real daily closes on a tap (no data shown from this sandbox), the
+  chart at the 21-DTE exit, the market chance stored at entry and the Journal's calibration. **NEXT:** the owner reads the
+  replay on the deploy and decides on the exit rules; then the basket expansion (below), unless the owner picks another.
 - **DONE: PR 61** — quick fixes from the post-PR-60 sanity check (☆ toggle, the copilot's room and Continue, Compare
   counts cards, one return unit, open risk says what it includes, one compare). **NEXT:** PR 62 and PR 63 (stacked), then
   the basket expansion with a measured admission rule (below), unless the owner picks another.

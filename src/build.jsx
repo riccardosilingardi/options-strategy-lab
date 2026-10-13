@@ -16,10 +16,11 @@
 import React, { useState } from "react";
 import { Minus, Plus, ArrowUp } from "lucide-react";
 import { T, TYPE } from "./theme.js";
-import { mono, sans, Note, Info, Sheet, Reveal, FilterChip, TAP } from "./ui.jsx";
+import { mono, sans, Note, Info, Sheet, Reveal, FilterChip, TAP, Placeholder } from "./ui.jsx";
 import { useCopilot, useTicketSend, SKILLS, BUILD_SKILL_IDS, Markdown, readQty, CONTINUE_LABEL } from "./pro.jsx";
 import { FACTOR_LABEL } from "./why.jsx";
-import { CARD_LABELS, BUILD_DEFINITIONS, money, signedMoney, chanceText, returnText, notInFiguresLine, futureTile, ARIA, VARIANT_LOAD, NO_CEILING, LIMIT_CHOICES, parseLimitText,
+import { EXIT_REPLAY, exitReplayInside, exitReplayNotRead, exitReplayHead, exitReplayExitsLine, exitReplayWarnLine, exitReplayVerdict,
+  exitReplayCell, exitReplayInfo, chanceLines, chanceGapLine, marketNotReadText, CHANCE_TWO_INFO, CARD_LABELS, BUILD_DEFINITIONS, money, signedMoney, chanceText, returnText, notInFiguresLine, futureTile, ARIA, VARIANT_LOAD, NO_CEILING, LIMIT_CHOICES, parseLimitText,
   OPTIMIZE_HEAD, OPTIMIZE_RUN, OPTIMIZE_CURRENT } from "./rules.js";
 
 const FS = TYPE.size, FW = TYPE.weight, LH = TYPE.line;
@@ -114,10 +115,11 @@ const Box = ({ title, children }) => (
     {children}
   </div>
 );
-export function NumbersSection({ figures, rr, pop, breakevens = [], future, past, delta, theta, reconcile = null }) {
+export function NumbersSection({ figures, rr, pop, breakevens = [], future, past, delta, theta, reconcile = null, mkt = null, gap = null }) {
   const [def, setDef] = useState(null);
   const toggle = (id) => setDef((d) => (d === id ? null : id));
   const ft = futureTile(future);
+  const gapLine = chanceGapLine(gap), notRead = marketNotReadText(mkt);
   const items = [
     ["profit", sentence(CARD_LABELS.profit), figures && figures.profit != null ? money(figures.profit) : figures && figures.unbounded ? "no ceiling" : "—", T.ink],
     ["loss", LOSS_LABEL, figures && figures.risk != null ? money(figures.risk) : "—", T.ink],
@@ -135,7 +137,11 @@ export function NumbersSection({ figures, rr, pop, breakevens = [], future, past
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
         <Box title={CARD_LABELS.future}>
-          <BoxRow k={sentence(CARD_LABELS.chance)} v={chanceText(pop)} />
+          {/* PR 67: two chances, as the card's CHANCE tile prints them (`chanceLines()`): the market's, then the OSL model's. */}
+          <span style={{ ...sans, fontSize: FS.sm, color: T.mut }}>{sentence(CARD_LABELS.chance)}</span>
+          {chanceLines(pop, mkt).map((l) => (
+            <div key={l.id} data-chance-line={l.id} style={{ paddingLeft: 8 }}><BoxRow k={l.word} v={l.value} /></div>
+          ))}
           <BoxRow k="Avg" v={ft.value} />
         </Box>
         <Box title={CARD_LABELS.past}>
@@ -146,6 +152,13 @@ export function NumbersSection({ figures, rr, pop, breakevens = [], future, past
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 16px" }}>
         <Figure id="delta" label="Delta (shares)" value={delta} size={FS.md} def={BUILD_DEFINITIONS.delta} open={def === "delta"} onToggle={toggle} />
         <Figure id="theta" label="Theta" value={theta} size={FS.md} def={BUILD_DEFINITIONS.theta} open={def === "theta"} onToggle={toggle} />
+      </div>
+      {/* WHY THE TWO CHANCES DIFFER (PR 67): amber when the market's is the lower one; the market's not read, in words. */}
+      <div data-chance-two style={{ display: "grid", gap: 4 }}>
+        {gapLine && <div data-chance-gap={gap.lower ? "lower" : "higher"}
+          style={{ ...sans, fontSize: FS.xs, lineHeight: LH.body, color: gap.lower ? T.amber : T.body }}>{gapLine}</div>}
+        {notRead && <Note>{notRead}</Note>}
+        <Info label="the two chances">{CHANCE_TWO_INFO}</Info>
       </div>
       {reconcile}
     </Section>
@@ -390,6 +403,9 @@ export function OrderSection({ order }) {
         </span>
       </div>
       {riskDef && <div role="note" style={{ ...sans, fontSize: FS.xs, color: T.body, lineHeight: LH.body }}>{BUILD_DEFINITIONS.loss}</div>}
+      {/* PR 67 (task 67.5): what the broker charges, said and never subtracted; IBKR's, for comparison, not connected yet. */}
+      {o.costs && <div data-costs style={{ ...sans, fontSize: FS.xs, color: T.mut, lineHeight: LH.body }}>{o.costs}</div>}
+      {o.costs && <Placeholder id="costs-ibkr" />}
       <label style={{ ...sans, display: "flex", alignItems: "center", gap: 10, minHeight: TAP, fontSize: FS.sm, color: T.ink, cursor: "pointer" }}>
         <input type="checkbox" checked={capOn} onChange={(e) => o.cap.onCheck(e.target.checked)}
           style={{ width: 22, height: 22, accentColor: T.amber, flexShrink: 0, margin: 0 }} />
@@ -512,6 +528,55 @@ export function OptimizeSection({ note, asked, onRun, summary = null, place = nu
           {rows.length > 0 && <AltRows rows={rows} action={VARIANT_LOAD} onPick={onLoad} />}
         </div>
       )}
+    </Section>
+  );
+}
+
+/**
+ * EXIT RULES, PAST YEARS (PR 68, P5; under the backtest panel in "More on this trade ▾"). One button; it never runs on its
+ * own and never on a made-up series: App.jsx reads five years of daily closes from `/api/bars` on the tap and hands back
+ * `exitBacktest()`'s result. With the rules · held to expiry · the stop as an exit, side by side; the exits by rule; the
+ * stop warning; and the owner's question answered from these numbers. It computes nothing.
+ */
+export function ExitRulesPast({ state = "idle", error = null, result = null, inside = false, onRun }) {
+  const W = EXIT_REPLAY;
+  const runBtn = (
+    <button type="button" onClick={onRun} data-exit-replay-run
+      style={{ ...sans, width: "100%", minHeight: TAP, borderRadius: 12, border: `1px solid ${T.field}`, background: "transparent", color: T.ink,
+        fontSize: FS.sm, fontWeight: FW.bold, cursor: "pointer" }}>{W.run}</button>
+  );
+  const cols = [["rules", result && result.rules], ["expiry", result && result.expiry], ["stop", result && result.withStop]];
+  const cell = { ...mono, ...tnum, fontSize: FS.xs, color: T.ink, textAlign: "right", padding: "4px 0 4px 8px", whiteSpace: "nowrap" };
+  return (
+    <Section label={W.title} data-exit-replay={state}>
+      <SectionTitle right={<Info label="How it is replayed">{exitReplayInfo()}</Info>}>{W.title}</SectionTitle>
+      {inside ? <Note>{exitReplayInside()}</Note>
+        : state === "idle" ? runBtn
+          : state === "loading" ? <Note>{W.loading}</Note>
+            : state === "error" ? <div style={{ display: "grid", gap: 8 }}><Note>{exitReplayNotRead(error)}</Note>{runBtn}</div>
+              : !result ? <Note>{W.none}</Note>
+                : (
+                  <div style={{ display: "grid", gap: 8 }}>
+                    <div data-exit-replay-head style={{ ...sans, fontSize: FS.xs, color: T.mut }}>{exitReplayHead(result)}</div>
+                    <table aria-label={W.aria} style={{ borderCollapse: "collapse", width: "100%" }}>
+                      <thead><tr>
+                        <th scope="col" />
+                        {cols.map(([id]) => <th key={id} scope="col" style={{ ...cell, ...sans, color: T.mut, fontWeight: FW.regular, whiteSpace: "normal" }}>{W.cols[id]}</th>)}
+                      </tr></thead>
+                      <tbody>
+                        {Object.entries(W.rows).map(([row, label]) => (
+                          <tr key={row} data-exit-replay-row={row} style={{ borderTop: `1px solid ${T.line}` }}>
+                            <th scope="row" style={{ ...sans, fontSize: FS.xs, color: T.mut, fontWeight: FW.regular, textAlign: "left", padding: "4px 0" }}>{label}</th>
+                            {cols.map(([id, sum]) => <td key={id} style={cell}>{exitReplayCell(sum, row)}</td>)}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <div style={{ ...sans, fontSize: FS.xs, color: T.body, lineHeight: LH.body }}>{exitReplayExitsLine(result.exits)}</div>
+                    <div style={{ ...sans, fontSize: FS.xs, color: T.body, lineHeight: LH.body }}>{exitReplayWarnLine(result.warnings, result.n)}</div>
+                    <div data-exit-replay-verdict style={{ ...sans, fontSize: FS.sm, color: T.ink, lineHeight: LH.body }}>{exitReplayVerdict(result)}</div>
+                  </div>
+                )}
     </Section>
   );
 }
