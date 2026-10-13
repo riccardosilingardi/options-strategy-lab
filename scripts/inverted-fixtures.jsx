@@ -23,7 +23,7 @@
 // its own strikes, and the board is called stale once, at RULES.staleBoardShare.
 // ============================================================================
 import { shortlistWithFloors } from "../src/App.jsx";
-import { monotonicityBreaks, invertedOnStrikes, expiryStrikes, expiryOpenInterest } from "../src/chain.js";
+import { monotonicityBreaks, invertedOnStrikes, boardStrikes, expiryOpenInterest } from "../src/chain.js";
 import { boardLooksStale } from "../src/rules.js";
 import { bs, smile } from "../src/engine.js";
 import { ungBoards } from "./crossing-fixtures.jsx";
@@ -66,11 +66,9 @@ export function invertedBoards() {
     // ungBoards() hands `q`; the chain it came from is rebuilt from `q` for the scan.
     const ek = b.id.replace(/^UNG-/, "");
     const byExp = { calls: {}, puts: {} };
-    for (const k of b.strikes) {
-      const cq = b.q({ type: "call", strike: k }), pq = b.q({ type: "put", strike: k });
-      if (cq) byExp.calls[k] = cq;
-      if (pq) byExp.puts[k] = pq;
-    }
+    // `b.strikes` is a per-type board since PR 70 (`boardStrikes()`): each side is rebuilt from its own strikes.
+    for (const k of b.strikes.call) { const cq = b.q({ type: "call", strike: k }); if (cq) byExp.calls[k] = cq; }
+    for (const k of b.strikes.put) { const pq = b.q({ type: "put", strike: k }); if (pq) byExp.puts[k] = pq; }
     out.push({ id: `UNG ${ek} (fixture)`, tk: "UNG", chain: { spot: b.S, byExp: { [ek]: { dte: b.dte, ...byExp } } }, ek,
       S: b.S, step: b.step, dte: b.dte, iv: b.iv });
   }
@@ -90,7 +88,7 @@ export function invertedTable() {
     const peers = expiryOpenInterest(b.chain, b.ek);
     let cards = 0, before = 0, after = 0;
     for (const sent of SENTIMENTS) {
-      const r = shortlistWithFloors(sent, b.S, b.step, expiryStrikes(b.chain, b.ek), b.dte, b.iv, q, { peers });
+      const r = shortlistWithFloors(sent, b.S, b.step, boardStrikes(b.chain, b.ek), b.dte, b.iv, q, { peers });
       for (const row of r.rows) {
         cards++;
         if (m.breaks > 0) before++;                                   // main: any pair, every card

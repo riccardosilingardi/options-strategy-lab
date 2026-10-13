@@ -2796,14 +2796,57 @@ test("offBoardStrikeLabel() is written once, and it names the strike", () => {
 
 test("buildPresets() REFUSES A NULL BOARD, and the preset effect waits for one", () => {
   const app = codeOf("App.jsx");
-  const fn = app.slice(app.indexOf("export function buildPresets"), app.indexOf("export function buildPresets") + 300);
-  assert.equal(/if \(!strikes \|\| !strikes\.length\) return \[\];/.test(fn), true,
+  const fn = app.slice(app.indexOf("export function buildPresets"), app.indexOf("export function buildPresets") + 2400);
+  // PR 70: the board is per type (`boardStrikes()`), so an empty ARRAY and a missing board are refused at the door…
+  assert.equal(/if \(!strikes \|\| \(Array\.isArray\(strikes\) && !strikes\.length\)\) return \[\];/.test(fn), true,
     "buildPresets() builds from a fallback grid again");
+  // …and a preset needing a type the board lists nothing for is never built, so `snapStrike()`'s grid stays unreachable.
+  assert.equal(/\.filter\(\(p\) => p\.raw\.every\(\(\[, t\]\) => \{ const ks = sideOf\(t\); return !!\(ks && ks\.length\); \}\)\)/.test(fn), true,
+    "buildPresets() builds a leg on a type the board lists no strike for");
+  // …and every leg snaps onto ITS OWN type's strikes, never the calls-and-puts union.
+  assert.equal(/const K = \(pct, t\) => snapStrike\(S \* \(1 \+ pct\), sideOf\(t\), step\);/.test(fn), true,
+    "buildPresets() snaps a leg onto a list that is not its own type's");
   assert.equal(/if \(!spot \|\| !expStrikes \|\| legs\.length !== 0\) return;/.test(app), true,
     "the default-preset effect fires before the board is known again");
   // And the two inline copies of expiryStrikes() are gone.
   const copies = (app.match(/new Set\(\[\.\.\.Object\.keys\([a-z.]*\.?byExp\[[a-zA-Z]+\]\.calls\)/g) || []).length;
   assert.equal(copies, 0, `App.jsx re-implements expiryStrikes() ${copies} time(s)`);
+});
+
+/* PR 70: A LEG IS CHOSEN ON ITS OWN TYPE'S STRIKES. The calls-and-puts union (`expiryStrikes()`) put a 59.5 PUT into Find's
+   iron condor on XLE's 27 Nov board, which lists 59.5 as a call only. The union is the chain table's rows and nothing else:
+   every file that chooses or moves a leg reads `boardStrikes()` / `strikesFor()`. */
+test("PR 70: the calls-and-puts union is read ONLY by the chain table; leg choosers read the board per type", () => {
+  const users = readdirSync(new URL("./", import.meta.url))
+    .filter((f) => /\.(js|jsx)$/.test(f) && !/\.test\./.test(f) && f !== "chain.js")
+    .filter((f) => /\bexpiryStrikes\(/.test(codeOf(f)));
+  assert.deepEqual(users, ["market.jsx"], `expiryStrikes() is read outside the chain table: ${users.join(", ")}`);
+  for (const f of ["App.jsx", "alternatives.js", "handoff.js"]) {
+    assert.ok(/\bboardStrikes\(/.test(codeOf(f)), `${f} no longer reads the per-type board`);
+  }
+  // …and the snap, the move and the dropdown each read a leg's OWN side.
+  const chain = codeOf("chain.js");
+  assert.ok(/const ks = strikesFor\(strikes, l && l\.type\);/.test(chain), "resnapLegs() snaps onto the union again");
+  const alt = codeOf("alternatives.js");
+  assert.ok(/const ks = strikesFor\(strikes, l\.type\) \|\| \[\];/.test(alt), "shiftLegs() moves a leg along the union again");
+  assert.ok(/const ks = strikesFor\(strikes, type\) \|\| \[\];/.test(alt), "widthLegs() moves a wing along the union again");
+});
+
+/* PR 70: THE GENERATION SITES ASK ONE STRICTER QUESTION THAN THE GATE, AND THE GATE IS UNCHANGED. `chainQuotedLegs()` is
+   asked by `floorsFor()` (Find, Optimize, the roll) and by `readAlternative()` without floors (the variants); riskGate.js
+   never asks it — a hand-built trade is the user's, and UNLISTED_CONTRACT / UNPRICEABLE are its refusals. */
+test("PR 70: chainQuotedLegs() is a generation-site question only — never inside the gate", () => {
+  assert.equal(/chainQuotedLegs/.test(codeOf("riskGate.js")), false, "the gate asks the generation sites' question");
+  const app = codeOf("App.jsx");
+  const floors = app.slice(app.indexOf("export function floorsFor"), app.indexOf("export function floorsFor") + 900);
+  assert.ok(/const ql = chainQuotedLegs\(\{ legs, quotes: quotesOf\(a\) \}\);\s*if \(!ql\.ok\) return \{ pass: false, why: "unpriceable"/.test(floors),
+    "floorsFor() no longer asks it first");
+  const alt = app.slice(app.indexOf("export function readAlternative"), app.indexOf("export function readAlternative") + 2400);
+  assert.ok(/chainQuotedLegs\(\{ legs: alt\.legs, quotes: quotesOf\(a0\) \}\)/.test(alt), "a variant without floors is not asked");
+  // The gate's own unpriceable test is the same function it always was.
+  const pz = priceability({ legs: [{ side: 1, type: "put", strike: 59.5 }], quotes: [], net: -0.5, maxLoss: -250 });
+  assert.equal(pz.priceable, true, "priceability() started refusing a leg with no quote: the gate changed");
+  assert.equal(pz.unknownQuotes, 1);
 });
 
 /* ================================================================

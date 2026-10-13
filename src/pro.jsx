@@ -12,7 +12,7 @@ import { RULES, ruleBadge, takeProfitLabel, takeProfitTarget, scaleOutLabel, sto
   ivProvenance, noRecordNote, copilotOverreach, copilotOverreachNote, COPILOT_MODEL, GATE_NEAR_LIMIT, CARD_LABELS, FUTURE_PAST_EQUAL, returnText, notInFiguresLine,
   spotNowLabel, beAwayLabel, sdLabel, exitMarkLabel, zoneOddsLabel, CROSS_HINT, CROSS_ARIA, howToReadChart,
   GREEK_TABS, GREEK_UNITS, greekLegend, GREEK_NO_EXIT, greeksInfo, greekNowLine, greekText, SCENARIO_MAX_MOVES, SCENARIO_MAX_DEFAULT,
-  SCENARIO_WORDS, scenarioMoveText, scenarioMaxLabel, scenarioInfo, scenarioPnlText, greekNotDrawn, CHART_WHEN } from "./rules.js";
+  SCENARIO_WORDS, scenarioMoveText, scenarioMaxLabel, scenarioInfo, scenarioPnlText, greekNotDrawn, CHART_WHEN, rsiWarning } from "./rules.js";
 import { ungroundedFigures } from "./grounding.js";
 import { contractsOf, positionSize, bookPositions, positionStage, autopilotHorizonNote, autopilotVolNote, positionForHolding, journalPnlTotal, scoredJournal } from "./journal.js";
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, LineStyle } from "lightweight-charts";
@@ -3045,7 +3045,7 @@ export function taSignals(bars) {
   return { ...ta,
     trendTxt: ta.trend > 0 ? "rising" : ta.trend < 0 ? "falling" : "going sideways" };
 }
-export function confluence(seasonalM, ta) {
+export function confluence(seasonalM, ta, need = null) {
   if (!ta) return null;
   // THE SEASON'S DIRECTION IS `seasonalSignal()`'s (PR #48): `seasonalM` is the window's counted mean, 0 when no
   // month beats its noise. The fixed ±0.8% band that stood here is gone.
@@ -3055,7 +3055,9 @@ export function confluence(seasonalM, ta) {
   else if (seaDir !== 0 && ta.trend === -seaDir) { verdict = "THEY DISAGREE"; c = T.amber; advice = `The season points ${seaDir > 0 ? "up" : "down"} but the price is moving the other way. Trade smaller, wait for the price to turn, or pick a trade that does not need a direction.`; }
   else if (seaDir === 0 && ta.trend === 0) { verdict = "QUIET MARKET"; c = T.blue; advice = "Neither the season nor the price is pushing. A trade that profits from things staying still suits this best — time works for you."; }
   else { verdict = "ONE SIGNAL ONLY"; c = T.mut; advice = seaDir !== 0 ? "Only the season is pushing and the price is flat. Trade smaller, or wait for the price to confirm it." : "Only the price is pushing and the season is flat. Follow the price, but trade smaller."; }
-  const warn = ta.rsi >= 70 ? "⚠ The price has run hot recently (RSI " + ta.rsi.toFixed(0) + "). Buying here often means buying the top — waiting for a dip usually gets a better entry." : ta.rsi <= 30 ? "⚠ The price has been beaten down recently (RSI " + ta.rsi.toFixed(0) + "). Selling here often means selling the bottom — a bounce is common." : null;
+  // PR 70: THE WARNING FOLLOWS THE TRADE (`rsiWarning()` in rules.js, `need` the payoff's word): "buying the top" was printed
+  // over a credit iron condor. Only a trade that needs the move that just ran to keep going is warned.
+  const warn = rsiWarning(ta.rsi, need);
   return { verdict, c, advice, warn };
 }
 

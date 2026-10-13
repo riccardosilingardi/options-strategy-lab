@@ -1,8 +1,10 @@
 // PR 4b — the alternatives of a structure, from the chain: Build's variants and a position's roll.
 import assert from "node:assert/strict";
 import { shiftLegs, widthLegs, sameOnBoard, laterExpiries, variantsOf, rollCandidates, rollEligible, daysTo,
-  windowExpiries, movesOnBoard, optimizeCandidates, OPTIMIZE_STEPS, rollJudge, rankRolls } from "./alternatives.js";
-import { ROLL_WHY, VARIANT_LABELS, gateLine, rollWholeLine, rollSummaryLine, ROLL_NONE_SAFE } from "./rules.js";
+  windowExpiries, movesOnBoard, optimizeCandidates, OPTIMIZE_STEPS, rollJudge, rankRolls, nearestListedOf } from "./alternatives.js";
+import { ROLL_WHY, VARIANT_LABELS, gateLine, rollWholeLine, rollSummaryLine, ROLL_NONE_SAFE, listedFixLead, LISTED_FIX_NONE } from "./rules.js";
+import { expiryStrikes, boardStrikes } from "./chain.js";
+import { xleChain, XLE_EK, XLE_SPOT, OWNER_CONDOR, hasUnlistedPut } from "./fixtures/xleListed.js";
 
 let passed = 0; const failures = [];
 const test = (name, fn) => { try { fn(); passed++; console.log(`  ok   ${name}`); } catch (e) { failures.push({ name, e }); console.log(`  FAIL ${name}\n       ${e.message}`); } };
@@ -151,6 +153,53 @@ test("THE GATE LINE: passes, or its first refusal in the gate's own words", () =
   assert.equal(gateLine({ pass: true, violations: [] }), "✓ The gate passes it at this size.");
   assert.equal(gateLine({ pass: false, violations: [{ message: "Over the per-trade limit." }] }), "✗ Over the per-trade limit.");
   assert.equal(gateLine(null), "The gate has not run on it.");
+});
+
+/* ====================================================================
+   PR 70 — THE MOVES READ EACH LEG'S OWN SIDE OF THE BOARD. XLE 27 Nov (synthetic prices): 59.5 is a call, not a put.
+==================================================================== */
+const XC = xleChain();
+const CONDOR = [{ side: 1, qty: 1, type: "put", strike: 60 }, { side: -1, qty: 1, type: "put", strike: 62.5 },
+  { side: -1, qty: 1, type: "call", strike: 69 }, { side: 1, qty: 1, type: "call", strike: 72.5 }];
+
+test("PR 70: ON THE UNION A PUT STEPPED ONTO 59.5 (the bug, shown); on the board's put side it never does", () => {
+  // What the merged list did: one step down from 60 is 59.5 — a strike only the CALLS list.
+  assert.ok(hasUnlistedPut(shiftLegs(CONDOR, expiryStrikes(XC, XLE_EK), -1)), "the union no longer shows the bug: the fixture changed");
+  const down = shiftLegs(CONDOR, boardStrikes(XC, XLE_EK), -1);
+  assert.deepEqual(down.map((l) => `${l.strike}${l.type[0]}`), ["57.5p", "60p", "67.5c", "70c"], "each leg one step along ITS type's strikes");
+  assert.deepEqual(widthLegs(CONDOR, boardStrikes(XC, XLE_EK), XLE_SPOT, 1).map((l) => l.strike), [57.5, 62.5, 69, 75], "wider, per type");
+  assert.equal(sameOnBoard([{ side: 1, type: "put", strike: 59.5 }], boardStrikes(XC, XLE_EK)), null, "59.5 is not a put on this board");
+  assert.ok(sameOnBoard([{ side: 1, type: "call", strike: 59.5 }], boardStrikes(XC, XLE_EK)), "…and is a call");
+});
+
+test("PR 70: VARIANTS, OPTIMIZE AND THE ROLL NEVER PRODUCE A 59.5P", () => {
+  const vs = variantsOf({ legs: CONDOR, expKey: XLE_EK, chain: XC, spot: XLE_SPOT, now: NOW });
+  assert.ok(vs.length >= 3, "the variants are built");
+  for (const v of vs) assert.equal(hasUnlistedPut(v.legs), false, `${v.kind} names a 59.5 put`);
+  const opt = optimizeCandidates({ legs: CONDOR, expKey: XLE_EK, chain: XC, spot: XLE_SPOT, now: NOW, steps: 2 });
+  assert.ok(opt.length >= 3, "Optimize's moves are built");
+  for (const o of opt) assert.equal(hasUnlistedPut(o.legs), false, `Optimize ${o.move} ${o.step} names a 59.5 put`);
+  const rolls = rollCandidates({ legs: CONDOR, expKey: "2026-10-30", chain: XC, spot: XLE_SPOT, now: NOW, steps: 2 });
+  assert.ok(rolls.length >= 3, "the roll's moves are built");
+  for (const r of rolls) assert.equal(hasUnlistedPut(r.legs), false, `roll ${r.kind} names a 59.5 put`);
+});
+
+test("PR 70: THE ONE-TAP FIX — the refused leg to the nearest strike its type lists and quotes; the rest untouched", () => {
+  const fix = nearestListedOf({ legs: OWNER_CONDOR, expKey: XLE_EK, chain: XC, bad: [3] });
+  assert.equal(fix.kind, "listed");
+  assert.ok(VARIANT_LABELS.listed, "its label");
+  assert.deepEqual(fix.legs.map((l) => `${l.strike}${l.type[0]}`), ["62.5p", "69c", "70c", "60p"], "59.5P → 60P, nothing else moved");
+  assert.equal(fix.legs[3].side, 1, "still bought"); assert.equal(fix.expKey, XLE_EK, "the same expiry");
+  assert.equal(listedFixLead(fix.moved), "The same structure on strikes this board lists and quotes: 59.5P → 60P.");
+  // A bought put nobody bids for at 60 is skipped: the next nearest QUOTED put is 57.5 (62.5 is the short leg's).
+  const noBid60 = xleChain((type, k, q) => (type === "put" && k === 60 ? { ...q, bid: 0 } : q));
+  assert.equal(nearestListedOf({ legs: OWNER_CONDOR, expKey: XLE_EK, chain: noBid60, bad: [3] }).legs[3].strike, 57.5);
+  // A put side with nothing quoted: no fix, and Send says so in words (LISTED_FIX_NONE), never a made-up strike.
+  const dead = xleChain((type, k, q) => (type === "put" ? { ...q, mid: null, bid: 0, ask: 0 } : q));
+  assert.equal(nearestListedOf({ legs: OWNER_CONDOR, expKey: XLE_EK, chain: dead, bad: [3] }), null);
+  assert.ok(/pick another expiry/.test(LISTED_FIX_NONE));
+  assert.equal(nearestListedOf({ legs: OWNER_CONDOR, expKey: "2027-01-15", chain: XC, bad: [3] }), null, "no board");
+  assert.equal(nearestListedOf({ legs: OWNER_CONDOR, expKey: XLE_EK, chain: XC, bad: [] }), null, "nothing refused");
 });
 
 console.log(`\n${passed} passed, ${failures.length} failed\n`);

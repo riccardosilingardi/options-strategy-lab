@@ -4,8 +4,9 @@
 // ============================================================================
 import assert from "node:assert/strict";
 import { dayChange, expectedMove, latestNews, toggleChainLeg, legCell, etDate, dayWords } from "./marketView.js";
-import { expectedMoveText, dayChangeText, ivRankText, legsMaxText, NEWS_NOT_READ } from "./rules.js";
+import { expectedMoveText, dayChangeText, ivRankText, legsMaxText, NEWS_NOT_READ, chainQuotedLegs, trayReplaceHint, trayReplacedText } from "./rules.js";
 import { MLEG_MAX_LEGS } from "./alpacaContract.js";
+import { xleChain, XLE_EK, OWNER_CONDOR, hasUnlistedPut } from "./fixtures/xleListed.js";
 
 let passed = 0; const failures = [];
 const test = (name, fn) => { try { fn(); passed++; console.log(`  ok   ${name}`); } catch (e) { failures.push({ name, e }); console.log(`  FAIL ${name} — ${e.message}`); } };
@@ -88,6 +89,42 @@ test("AT MOST MLEG_MAX_LEGS (4, read from alpacaContract.js): a fifth tap change
   assert.equal(legsMaxText(MLEG_MAX_LEGS), "Four legs at most. Clear one to add another.");
   // Removing one still works at the cap.
   assert.equal(toggleChainLeg(legs, { type: "call", strike: 16, side: 1 }, MLEG_MAX_LEGS).legs.length, 3);
+});
+
+/* PR 70 — "EDIT IN CHAIN" REPLACES THE LEG THE BOARD DOES NOT LIST. The owner's condor (XLE 27 Nov) came to the tray with a
+   59.5P the board lists no put for: no cell to tap it away, four legs, and every other tap refused as full. */
+const XB = xleChain().byExp[XLE_EK];
+// The market page's `trayLegQuoted()`: the generation sites' one predicate, its "unquoted" half, on this board's quote.
+const quoted = (l) => {
+  const q = (XB[l.type === "call" ? "calls" : "puts"] || {})[l.strike];
+  return chainQuotedLegs({ legs: [l], quotes: [q ? { bid: q.bid, ask: q.ask, real: q.mid != null } : null] }).unquoted.length === 0;
+};
+test("PR 70, BEFORE: with no board to ask, the owner's four legs refuse the 60P as full — the leg could never be swapped", () => {
+  const r = toggleChainLeg(OWNER_CONDOR, { type: "put", strike: 60, side: 1 }, MLEG_MAX_LEGS);
+  assert.equal(r.full, true, "this is what the owner met");
+  assert.equal(r.replaced, null);
+  assert.ok(hasUnlistedPut(r.legs), "the 59.5P stays");
+});
+test("PR 70, AFTER: a tap on the same type and side REPLACES the unlisted leg (not added), keeps its size, and says so", () => {
+  assert.equal(quoted(OWNER_CONDOR[3]), false, "the 59.5P is not quoted on this board");
+  assert.equal(OWNER_CONDOR.slice(0, 3).every(quoted), true, "the other three are");
+  const withQty = OWNER_CONDOR.map((l, i) => (i === 3 ? { ...l, qty: 2 } : l));
+  const r = toggleChainLeg(withQty, { type: "put", strike: 60, side: 1 }, MLEG_MAX_LEGS, quoted);
+  assert.equal(r.full, false);
+  assert.equal(r.legs.length, 4, "replaced, not added");
+  assert.equal(hasUnlistedPut(r.legs), false, "the 59.5P is gone");
+  const put60 = r.legs.find((l) => l.type === "put" && l.strike === 60);
+  assert.ok(put60 && put60.side === 1 && put60.qty === 2, "bought, at the size the leg had");
+  assert.deepEqual(r.legs.map((l) => `${l.side > 0 ? "+" : "-"}${l.strike}${l.type[0].toUpperCase()}`), ["+60P", "-62.5P", "-69C", "+70C"], "in strike order");
+  assert.equal(trayReplacedText(r.replaced.from, r.replaced.to), "59.5P replaced by 60P.");
+  assert.equal(trayReplaceHint(OWNER_CONDOR[3]), "No 59.5P on this board: tap a put ask to replace it.");
+  // The other side (a put BID) is not the leg's side: it is an ordinary tap — here, a fifth leg, refused as full.
+  assert.equal(toggleChainLeg(OWNER_CONDOR, { type: "put", strike: 60, side: -1 }, MLEG_MAX_LEGS, quoted).full, true);
+  // A CALL tap never replaces a put.
+  assert.equal(toggleChainLeg(OWNER_CONDOR, { type: "call", strike: 72.5, side: 1 }, MLEG_MAX_LEGS, quoted).full, true);
+  // A tray whose legs are all quoted taps exactly as before.
+  const fine = OWNER_CONDOR.slice(0, 3);
+  assert.deepEqual(toggleChainLeg(fine, { type: "put", strike: 60, side: 1 }, MLEG_MAX_LEGS, quoted).legs.length, 4, "added as before");
 });
 
 console.log(`\n${passed} passed, ${failures.length} failed\n`);

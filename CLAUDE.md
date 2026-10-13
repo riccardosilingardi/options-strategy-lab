@@ -48,6 +48,10 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
   recomputed. Combination properties (net, payoff, max loss, chance, gate) are computed.
 - A multi-leg limit price is signed: positive is a debit, negative a credit.
 - Never name a contract the chain did not list; `buildOcc()` formats, it is never a fallback.
+- **A leg is chosen on its own type's strikes (PR 70): `boardStrikes()` / `strikesFor()`** (chain.js) — Build's dropdown,
+  CALL ↔ PUT (`toggleLegType()`), every snap, Find's presets, the variants, Optimize and the roll. The calls-and-puts union
+  `expiryStrikes()` is the chain table's rows only (riskGate.test.js). A generated proposal also passes
+  `chainQuotedLegs()` (rules.js: every leg quoted by the chain, every bought leg bid); the gate's `priceability()` does not.
 - A close is always a limit priced at the tap; never a market order.
 - An order that fails must fail where the button is. An order's state lives on its row in Positions → Orders, and
   prints once: a card whose close is working shows one line and "Manage order"; the desk and the bottom bar show counts.
@@ -281,7 +285,8 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
   the whole series since PR #49; `statsFromMatrix()` returns per-month years and standard errors; `seasonalSpan()`),
   the historical replay `histBacktest()` (PR #49). `SEASONAL` is retired; `SIGMA` stays.
   Imports nothing; shared by client and Netlify functions.
-- `src/chain.js` — where the option chain comes from, strikes, open interest, feed names.
+- `src/chain.js` — where the option chain comes from, strikes (per type since PR 70: `boardStrikes()`, `strikesFor()`,
+  `toggleLegType()`), open interest, feed names.
 - `src/signals.js` — the four-factor confluence engine, `signalDirection()`, the Find order (`findOrderCompare()`,
   `placeLine()`; it re-exports `FIND_ORDERS` from rules.js), `badgeText()` and `numbersFitLines()`.
 - `src/tradeChart.js` — Build's chart arithmetic (PR 63): `zoneOdds()`, `coneEdges()`, `exitMark()`, `crosshairReadout()`,

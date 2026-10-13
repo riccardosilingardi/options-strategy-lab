@@ -6,6 +6,65 @@ The full history of every item shipped so far (P0–P10, P2-bis) is in `docs/his
 Every pull request updates this file: the session that ships an item marks it done and states
 what the next one inherits.
 
+## Done in PR 70 (owner, 13 Oct 2026): only listed contracts, everywhere a leg is chosen (+ three wrong sentences)
+
+Read on the owner's phone, XLE 27 Nov board: Find proposed an iron condor −62.5P / −69C / +70C / +59.5P. The board lists a
+59.5 CALL and no 59.5 PUT; Build priced that leg off the model ("◌"), Send refused it (UNLISTED_CONTRACT, correctly),
+"Edit in chain" stayed blocked, and only "Load" on a variant got him out.
+
+- **Cause A — one strike list for two sides.** `expiryStrikes()` (chain.js) merged the calls' and the puts' strikes, and
+  every place that chose or moved a leg — Find's presets, Build's strike dropdown and its snaps, the variants, Optimize and
+  the roll — read that union, so a put could land on a strike only the calls list.
+- **Cause B — a leg with no quote passed at generation.** `priceability()` (rules.js) reads a leg with no quote as UNKNOWN
+  and lets it through — right inside the gate, where a hand-built trade is the user's and UNLISTED_CONTRACT refuses the
+  contract by name, but it let the app PROPOSE a modelled leg.
+- **70.1 — strikes per type** (chain.js): `expiryStrikesFor()`, `boardStrikes()` ({ call, put }) and `strikesFor()`, the one
+  accessor. `resnapLegs()` snaps each leg onto its own side; `toggleLegType()` turns CALL ↔ PUT onto the nearest strike
+  the new type lists and says what moved (`typeSnapNote()`). Moved onto the board per type: Build's dropdown (each leg its
+  type's strikes), its snaps on an expiry change and on arrival, `addLeg`, the hand-off, Find's `buildPresets()` (a preset
+  needing a type the board lists nothing for is not built), Find's liquidity preview, and every move in alternatives.js.
+  The union stays only for the chain table's rows (market.jsx); riskGate.test.js holds that no other file reads it.
+- **70.2 — one stricter question at generation, the gate unchanged**: `chainQuotedLegs()` (rules.js, beside
+  `priceability()`): every leg priced off the chain's own quote, every bought leg with a bid above zero. Asked first by
+  `floorsFor()` (Find, Optimize, the roll), by `readAlternative()` without floors (the variants: a cut one is never a row,
+  and the count is behind "How they are made ⓘ"), and by Build's default preset. Counted as "unpriceable";
+  `unpriceableNote()` now names "a leg the chain does not list". riskGate.js never asks it (riskGate.test.js).
+- **70.3 — the fix beside the refusal.** When the gate refuses with UNLISTED_CONTRACT or UNPRICEABLE because of a leg,
+  `nearestListedOf()` (alternatives.js) moves that leg to the nearest strike its type lists and quotes (a tie to the lower,
+  as `snapStrike()` does; never onto another leg of its type), `priceAlt()` prices it like a variant, and it shows under
+  Send as an `AltRows` row with "Load ›" (`listedFixLead()`; `LISTED_FIX_NONE` when no strike qualifies). **Edit in
+  chain:** measured before — the owner's four legs refused the 60P tap as "full" and the 59.5P had no cell to tap away; now
+  the tray marks it "not listed", says "No 59.5P on this board: tap a put ask to replace it.", and a tap on the same type
+  and side REPLACES it, keeping its size ("59.5P replaced by 60P.", `toggleChainLeg(…, quoted)`).
+- **70.4 — three sentences.** (1) Build's "Why" line and the trade card's "bets on" line read the payoff (`payoffNeed()`,
+  `structureNeedsLine()`): an iron condor "needs XLE to stay between $X and $Y", a butterfly away from today's price "to go
+  down, to between…", a long strangle "to move far, either way"; the net delta still decides only against-the-signals.
+  (2) "One simulation, one seed", "THE SIMULATION BEHIND THE CHANCE" and "Simulated at…" are gone from "More on this trade":
+  `CHANCE_EXACT_LINE`, `CHANCE_METHOD_HEAD`, the two chances as two figures, `chanceMethodLine()`. (3) The RSI warning is
+  `rsiWarning(rsi, lean)`: only a trade that needs the move that just ran to keep going is warned; a condor around today's
+  price, a strangle or a trade leaning the other way gets nothing.
+- **70.5 — tests** on the owner's board (src/fixtures/xleListed.js: which strikes each side lists is his reading, the
+  prices synthetic): src/listed.test.jsx (new, 14), chain.test.js (+5), alternatives.test.js (+3), marketView.test.js (+2:
+  the tray before and after), handoff.test.js (+1), riskGate.test.js (+2 sweeps; the `buildPresets()` guard check now also
+  holds the per-type snap and the empty side).
+
+**Measured.** Tests 1,487 → 1,514, 0 failed. Build 1,533.08 → 1,540.51 kB (the usual chunk warning). Audit 20 boards, dark
+and light: 5,248 ✓, 0 unexplained. Words: find 157 and build 610 unchanged; **market 477 → 493** (the tray's replace hint,
+12 words, and its "replaced" line, 4 — shown only while the tray holds a leg the board does not list; written in
+voice.test.js). The 31 fixture cards are unchanged: the UNG fixture lists the same strikes on both sides.
+
+**Not changed:** riskGate.js and `priceability()`, every RULES value, limit and cap, the seven order paths, against-the-
+signals (still the net delta), /api/state. No photographs this PR: the new states are rendered in tests only (PRD §4 #3).
+
+### What the next session inherits
+
+- The fix under Send and the tray's replace have met the owner's board shape in tests only; on the live chain they are read
+  when a refusal happens (PRD §4 #3).
+- Against-the-signals still reads the net delta: an iron condor whose delta is past ±0.05 can still be asked for a typed
+  reason before Send. Moving it onto the payoff's lean would drop that ask for such a trade — the owner's call, not taken here.
+- Next, unless the owner picks another: the owner reads the P5 replay (PR 68); then the basket expansion, the server
+  Journal and P7 (below).
+
 ## Done in PR 68 (owner, 12 Oct 2026): P5 — the exit rules replayed, the chart at the exit, the chances checked
 
 The third of three stacked PRs (66 → 67 → 68). Stacked on PR 67. **The logic only, with no data shown** (the owner, 12 Oct
@@ -1109,6 +1168,9 @@ One line each; see `PRD.md` §5 and `docs/history/ROADMAP.md` for detail.
 - **DONE: PR 68** — P5's logic: the exit rules replayed on real daily closes on a tap (no data shown from this sandbox), the
   chart at the 21-DTE exit, the market chance stored at entry and the Journal's calibration. **NEXT:** the owner reads the
   replay on the deploy and decides on the exit rules; then the basket expansion (below), unless the owner picks another.
+- **DONE: PR 70** — only listed contracts everywhere a leg is chosen (strikes per option type; a proposal names only
+  quoted contracts; the nearest listed alternative under Send's refusal; Edit in chain replaces), and three wrong
+  sentences (a condor "goes up", the simulation, the RSI warning on a credit).
 - **DONE: PR 61** — quick fixes from the post-PR-60 sanity check (☆ toggle, the copilot's room and Continue, Compare
   counts cards, one return unit, open risk says what it includes, one compare). **NEXT:** PR 62 and PR 63 (stacked), then
   the basket expansion with a measured admission rule (below), unless the owner picks another.

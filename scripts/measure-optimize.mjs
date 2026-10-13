@@ -29,7 +29,7 @@ import { spawnSync } from "node:child_process";
 const ENTRY = `
 import { readFileSync } from "node:fs";
 import { readAlternative, shortlistWithFloors, makeQuote } from "./src/App.jsx";
-import { normaliseAlpacaChain, expiryStrikes, expiryOpenInterest } from "./src/chain.js";
+import { normaliseAlpacaChain, boardStrikes, expiryOpenInterest } from "./src/chain.js";
 import { optimizeCandidates } from "./src/alternatives.js";
 import { rankOptimize } from "./src/rows.js";
 import { requestOf, seasonalProvenance, sizing } from "./src/rules.js";
@@ -59,7 +59,7 @@ const gate = (proposal) => evaluateTrade({ proposal, portfolio: { positions: [],
 const c1 = chainWith(1), ek1 = Object.keys(c1.byExp)[0], b1 = c1.byExp[ek1];
 const loaded = [];
 for (const sent of DIRECTIONS) {
-  const r = shortlistWithFloors(sent, c1.spot, 0.5, expiryStrikes(c1, ek1), b1.dte, 0.6, makeQuote(c1, ek1), { peers: expiryOpenInterest(c1, ek1) });
+  const r = shortlistWithFloors(sent, c1.spot, 0.5, boardStrikes(c1, ek1), b1.dte, 0.6, makeQuote(c1, ek1), { peers: expiryOpenInterest(c1, ek1) });
   for (const { p } of r.rows) if (!loaded.some((x) => JSON.stringify(x.legs) === JSON.stringify(p.legs))) loaded.push({ name: p.name, legs: p.legs });
 }
 

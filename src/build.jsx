@@ -499,10 +499,12 @@ export function AltRows({ rows = [], action, onPick, disabled = false }) {
   );
 }
 /** Build's variants (PR 4b): the loaded structure moved on the listed strikes; "Load ›" puts one on Build. */
-export function VariantsSection({ rows = [], onLoad, note, none }) {
+export function VariantsSection({ rows = [], onLoad, note, none, left = null }) {
   return (
     <Section label="Variants of this trade" data-build-variants>
-      <SectionTitle right={<Info label="How they are made">{note}</Info>}>Variants of this trade</SectionTitle>
+      {/* PR 70: variants naming a leg the chain does not quote are left out, and counted (`unpriceableNote()`), behind the
+          same ⓘ — one tap away, as Find keeps its own "left out" lines behind "why". */}
+      <SectionTitle right={<Info label="How they are made">{note}{left && <span data-variants-left>{` ${left}`}</span>}</Info>}>Variants of this trade</SectionTitle>
       {rows.length ? <AltRows rows={rows} action={VARIANT_LOAD} onPick={onLoad} /> : <Note>{none}</Note>}
     </Section>
   );
@@ -582,7 +584,7 @@ export function ExitRulesPast({ state = "idle", error = null, result = null, ins
 }
 
 /* ---------------------------------------------------------------- SEND */
-export function SendBar({ label, disabled = false, reason = null, footer, onSend }) {
+export function SendBar({ label, disabled = false, reason = null, footer, onSend, fix = null }) {
   return (
     <div data-build-send>
       <button onClick={onSend} disabled={disabled} aria-describedby={reason ? "build-send-reason" : undefined}
@@ -591,6 +593,14 @@ export function SendBar({ label, disabled = false, reason = null, footer, onSend
         {label}
       </button>
       {reason && <div id="build-send-reason" style={{ ...sans, fontSize: FS.sm, color: T.mut, lineHeight: LH.body, marginTop: 6 }}>{reason}</div>}
+      {/* PR 70 (task 70.3): the gate refused a leg the chain does not list or quote; the same structure on the nearest
+          strikes it does, priced like a variant, with "Load ›" — one tap from the refusal. */}
+      {fix && (
+        <div data-send-fix style={{ marginTop: 6 }}>
+          <div style={{ ...sans, fontSize: FS.sm, color: T.body, lineHeight: LH.body }}>{fix.lead}</div>
+          {fix.rows && fix.rows.length > 0 && <AltRows rows={fix.rows} action={VARIANT_LOAD} onPick={fix.onLoad} />}
+        </div>
+      )}
       <div style={{ ...sans, fontSize: FS.xs, color: T.mut, textAlign: "center", marginTop: 6 }}>{footer}</div>
     </div>
   );

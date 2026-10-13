@@ -288,7 +288,12 @@ test("MEASURED: the three screens, and the table in the PRD is this number", () 
      of the debit (regulatory fees not counted)", 14). The IBKR placeholder's words are PLACEHOLDERS' data, unscored (about 40
      more on screen). find and market do not move: the row's "· mkt 71%" and the cards' two chance lines are rows.js's and
      card.jsx's data. */
-  const CEILING = { find: 157, market: 477, build: 610, positions: 248 };
+  /* >>> PR 70 (only listed contracts, owner 13 Oct 2026). <<< market 477 → 493: the Chain tray's two lines for a leg the
+     board does not list — "No 59.5P on this board: tap a put ask to replace it." (`trayReplaceHint()`, 12) and "59.5P
+     replaced by 60P." (`trayReplacedText()`, 4). They show only while the tray holds such a leg; without them "Edit in
+     chain" left the owner blocked on XLE 27 Nov (no cell to tap the leg away, four legs, every tap "full"). find and build
+     do not move: the variants' left-out line is behind their "How they are made ⓘ", as Find's is behind "why". */
+  const CEILING = { find: 157, market: 493, build: 610, positions: 248 };
   /* >>> PR #46: ONE ORDERS LIST. <<< The record-based "WORKING AT THE BROKER" panel (its paragraph about what a
      working order is, the stale-DAY warning, the per-row sentences) left Positions; the one list lives in
      `orders.jsx`, which the counter now reads. Measured: positions 304 -> 209 (4 typed + 205 generated, 14 sites).

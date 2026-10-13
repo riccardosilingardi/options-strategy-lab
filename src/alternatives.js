@@ -10,11 +10,14 @@
 //
 // NEVER NAME A CONTRACT THE CHAIN DID NOT LIST (CLAUDE.md): a leg that would fall off the board, onto a strike the
 // expiry does not list, or onto its own pair, makes the whole alternative null — it is left out, never snapped.
+// SINCE PR 70 "THE BOARD" IS PER TYPE (`boardStrikes()`): a put moves along the strikes the PUTS list, a call along the
+// calls'. On the merged list a put stepped onto a strike only the calls list (XLE 27 Nov, 59.5). `strikes` below is a
+// board from `boardStrikes()`, or a plain array for a board whose two sides list the same strikes (`strikesFor()`).
 //
 // Plain JS, no React: tested without a browser (alternatives.test.js).
 // ============================================================================
-import { RULES } from "./rules.js";
-import { expiryStrikes } from "./chain.js";
+import { RULES, chainQuotedLegs } from "./rules.js";
+import { boardStrikes, strikesFor } from "./chain.js";
 import { exactPnl } from "./engine.js";
 
 const DAY = 86400000;
@@ -25,15 +28,16 @@ export const daysTo = (expKey, now = Date.now()) => {
 };
 const sameLegs = (a, b) => a.length === b.length && a.every((l, i) => l.strike === b[i].strike && l.type === b[i].type && l.side === b[i].side && (l.qty || 1) === (b[i].qty || 1));
 
-/** Every leg moved `steps` listed strikes (+ up, − down); null when one leaves the board or starts off it. */
+/** Every leg moved `steps` strikes its own type lists (+ up, − down); null when one leaves the board or starts off it. */
 export function shiftLegs(legs = [], strikes = null, steps = 1) {
-  if (!strikes || !strikes.length || !legs.length) return null;
+  if (!strikes || !legs.length) return null;
   const out = [];
   for (const l of legs) {
-    const i = strikes.indexOf(Number(l.strike));
+    const ks = strikesFor(strikes, l.type) || [];
+    const i = ks.indexOf(Number(l.strike));
     const j = i + steps;
-    if (i < 0 || j < 0 || j >= strikes.length) return null;
-    out.push({ ...l, strike: strikes[j] });
+    if (i < 0 || j < 0 || j >= ks.length) return null;
+    out.push({ ...l, strike: ks[j] });
   }
   return out;
 }
@@ -45,10 +49,11 @@ export function shiftLegs(legs = [], strikes = null, steps = 1) {
  */
 export function widthLegs(legs = [], strikes = null, spot = null, dir = 1) {
   // `Number(null)` is 0 and 0 is finite (CLAUDE.md): an unread price is null, tested before the coercion (PR 65 found it).
-  if (!strikes || !strikes.length || !legs.length || spot == null || !Number.isFinite(Number(spot))) return null;
+  if (!strikes || !legs.length || spot == null || !Number.isFinite(Number(spot))) return null;
   const out = legs.map((l) => ({ ...l }));
   let moved = 0;
   for (const type of ["call", "put"]) {
+    const ks = strikesFor(strikes, type) || [];
     const idx = out.map((l, i) => (l.type === type ? i : -1)).filter((i) => i >= 0);
     if (idx.length !== 2) continue;
     const [a, b] = idx.map((i) => out[i]);
@@ -56,20 +61,20 @@ export function widthLegs(legs = [], strikes = null, spot = null, dir = 1) {
     const outer = Math.abs(a.strike - spot) >= Math.abs(b.strike - spot) ? idx[0] : idx[1];
     const inner = outer === idx[0] ? idx[1] : idx[0];
     const away = out[outer].strike > out[inner].strike ? 1 : -1;
-    const i = strikes.indexOf(Number(out[outer].strike));
+    const i = ks.indexOf(Number(out[outer].strike));
     const j = i + away * dir;
-    if (i < 0 || j < 0 || j >= strikes.length) return null;
-    if (strikes[j] === out[inner].strike || Math.sign(strikes[j] - out[inner].strike) !== away) return null; // never onto or past its pair
-    out[outer] = { ...out[outer], strike: strikes[j] };
+    if (i < 0 || j < 0 || j >= ks.length) return null;
+    if (ks[j] === out[inner].strike || Math.sign(ks[j] - out[inner].strike) !== away) return null; // never onto or past its pair
+    out[outer] = { ...out[outer], strike: ks[j] };
     moved += 1;
   }
   return moved ? out : null;
 }
 
-/** The same strikes on another board; null when that board does not list one of them. */
+/** The same strikes on another board; null when that board does not list one of them for its leg's type. */
 export function sameOnBoard(legs = [], strikes = null) {
-  if (!strikes || !strikes.length || !legs.length) return null;
-  return legs.every((l) => strikes.includes(Number(l.strike))) ? legs.map((l) => ({ ...l })) : null;
+  if (!strikes || !legs.length) return null;
+  return legs.every((l) => (strikesFor(strikes, l.type) || []).includes(Number(l.strike))) ? legs.map((l) => ({ ...l })) : null;
 }
 
 /** The chain's expiries after `expKey` whose days fall in [min, max], nearest first. */
@@ -86,7 +91,7 @@ export function laterExpiries(chain, expKey, { now = Date.now(), min = RULES.min
  * one equal to the loaded legs is dropped.
  */
 export function variantsOf({ legs = [], expKey = null, chain = null, spot = null, now = Date.now() } = {}) {
-  const strikes = expiryStrikes(chain, expKey);
+  const strikes = boardStrikes(chain, expKey);
   const out = [];
   const add = (kind, ls, ek = expKey) => { if (ls && !(ek === expKey && sameLegs(ls, legs)) && !out.some((v) => v.expKey === ek && sameLegs(v.legs, ls))) out.push({ kind, legs: ls, expKey: ek }); };
   add("up", shiftLegs(legs, strikes, 1));
@@ -94,8 +99,43 @@ export function variantsOf({ legs = [], expKey = null, chain = null, spot = null
   add("wider", widthLegs(legs, strikes, spot, 1));
   add("narrower", widthLegs(legs, strikes, spot, -1));
   const next = laterExpiries(chain, expKey, { now })[0];
-  if (next) add("later", sameOnBoard(legs, expiryStrikes(chain, next)), next);
+  if (next) add("later", sameOnBoard(legs, boardStrikes(chain, next)), next);
   return out;
+}
+
+/**
+ * THE NEAREST LISTED ALTERNATIVE (PR 70, task 70.3) — what Send offers, one tap away, when the gate refuses a leg the
+ * chain does not list or quote (UNLISTED_CONTRACT) or a bought leg nobody bids for (UNPRICEABLE). Read live, XLE 27 Nov:
+ * "Load" on a variant was the only thing that unblocked the owner. The same structure on the same expiry, each refused
+ * leg (`bad`, indices) moved to the nearest strike ITS TYPE lists that passes `chainQuotedLegs()` — the one predicate the
+ * generation sites use — never onto another leg of its type; a tie goes to the lower strike, as `snapStrike()` does.
+ * Null when a refused leg has no such strike. LEGS ONLY: pricing, sizing and the gate are the caller's (`priceAlt()`).
+ *
+ * @returns {{ kind: "listed", legs, expKey, moved: {i, from, to}[] } | null}
+ */
+export function nearestListedOf({ legs = [], expKey = null, chain = null, bad = [] } = {}) {
+  const board = chain && chain.byExp && chain.byExp[expKey];
+  const strikes = boardStrikes(chain, expKey);
+  if (!board || !strikes || !legs.length || !bad.length) return null;
+  const out = legs.map((l) => ({ ...l }));
+  const moved = [];
+  for (const i of [...new Set(bad)].sort((a, b) => a - b)) {
+    const l = out[i];
+    if (!l) return null;
+    const side = board[l.type === "call" ? "calls" : "puts"] || {};
+    const taken = new Set(out.filter((x, j) => j !== i && x.type === l.type).map((x) => Number(x.strike)));
+    const k0 = Number(l.strike);
+    const ks = (strikesFor(strikes, l.type) || []).filter((k) => k !== k0 && !taken.has(k))
+      .sort((a, b) => Math.abs(a - k0) - Math.abs(b - k0) || a - b);
+    const k = ks.find((x) => {
+      const q = side[x];
+      return !!q && chainQuotedLegs({ legs: [{ ...l, strike: x }], quotes: [{ bid: q.bid, ask: q.ask, real: q.mid != null }] }).ok;
+    });
+    if (k == null) return null;
+    out[i] = { ...l, strike: k };
+    moved.push({ i, from: legs[i], to: out[i] });
+  }
+  return { kind: "listed", legs: out, expKey, moved };
 }
 
 /* ====================================================================
@@ -149,7 +189,7 @@ export function optimizeCandidates({ legs = [], expKey = null, chain = null, spo
   if (expKey && chain.byExp[expKey] && !eks.includes(expKey)) eks.push(expKey);
   const out = [];
   for (const ek of eks.sort()) {
-    for (const m of movesOnBoard(legs, expiryStrikes(chain, ek), spot, steps)) {
+    for (const m of movesOnBoard(legs, boardStrikes(chain, ek), spot, steps)) {
       out.push({ kind: "optimize", move: m.move, step: m.step, legs: m.legs, expKey: ek, loaded: ek === expKey && sameLegs(m.legs, legs) });
     }
   }
@@ -166,7 +206,7 @@ export function rollCandidates({ legs = [], expKey = null, chain = null, spot = 
   const KIND = { same: "roll", up: "rollUp", down: "rollDown", wider: "rollWider", narrower: "rollNarrower" };
   const out = [];
   for (const ek of laterExpiries(chain, expKey, { now })) {
-    for (const m of movesOnBoard(legs, expiryStrikes(chain, ek), spot, steps)) out.push({ kind: KIND[m.move], move: m.move, step: m.step, legs: m.legs, expKey: ek });
+    for (const m of movesOnBoard(legs, boardStrikes(chain, ek), spot, steps)) out.push({ kind: KIND[m.move], move: m.move, step: m.step, legs: m.legs, expKey: ek });
   }
   return out;
 }

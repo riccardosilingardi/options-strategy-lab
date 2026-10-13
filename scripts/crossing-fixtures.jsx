@@ -17,7 +17,7 @@
 import { readFileSync } from "node:fs";
 import { shortlistWithFloors, analyze } from "../src/App.jsx";
 import { scaleStrategy } from "../src/pro.jsx";
-import { normaliseAlpacaChain, expiryStrikes, expiryOpenInterest } from "../src/chain.js";
+import { normaliseAlpacaChain, boardStrikes, expiryOpenInterest } from "../src/chain.js";
 import { RULES, comboBook, fillNet, openLimitPrice, qualityFloor, rewardRisk, openableBoard,
   chanceOf, seasonalProvenance } from "../src/rules.js";
 
@@ -51,7 +51,7 @@ export function ungBoards() {
   const S = RAW._capture?.underlying_last_trade ?? 13.24;
   const c = normaliseAlpacaChain("UNG", RAW, { spot: S, now: Date.parse("2026-09-02T12:00:00Z") });
   return c.expirations.filter((e) => openableBoard(c.byExp[e].dte)).map((ek) => ({
-    id: `UNG-${ek}`, ticker: "UNG", S, step: 0.5, strikes: expiryStrikes(c, ek), dte: c.byExp[ek].dte, iv: 0.48,
+    id: `UNG-${ek}`, ticker: "UNG", S, step: 0.5, strikes: boardStrikes(c, ek), dte: c.byExp[ek].dte, iv: 0.48,
     q: (leg) => c.byExp[ek][leg.type === "call" ? "calls" : "puts"][leg.strike] || null,
     peers: expiryOpenInterest(c, ek),
   }));

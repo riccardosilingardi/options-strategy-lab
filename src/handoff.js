@@ -24,7 +24,7 @@
 // sure the chain is on its way, and scroll Build into view.
 // ============================================================================
 
-import { expiryStrikes, resnapLegs } from "./chain.js";
+import { boardStrikes, resnapLegs } from "./chain.js";
 
 /** The tab id of the Build screen. One string, one place. */
 export const BUILD_TAB = "build";
@@ -59,7 +59,8 @@ export const BUILD_TAB = "build";
  */
 export function buildHandOff({ ticker, expKey = null, legs = [], name = "", chains = {} }) {
   const copies = (legs || []).map((l) => ({ ...l }));
-  const snapped = resnapLegs(copies, expiryStrikes((chains || {})[ticker], expKey));
+  // PR 70: each leg onto ITS OWN type's strikes (`boardStrikes()`), never the calls-and-puts union.
+  const snapped = resnapLegs(copies, boardStrikes((chains || {})[ticker], expKey));
   return {
     tab: BUILD_TAB,
     ticker,

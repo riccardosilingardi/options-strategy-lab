@@ -297,7 +297,9 @@ non-expert trader who wants to learn discipline rather than be sold trades.
     and quotes only those; "Do the four signals agree?" is handed the market's four factors (`marketSignals`).
   - **Build's variants and a position's roll (PR 4b) are one calculation**, `src/alternatives.js`: the loaded legs moved
     on the strikes the chain lists — every strike one step up or down, the outer leg of each pair one step out or in, the
-    same strikes on a later expiry — never a strike the chain did not list. Each is priced like a card (`priceAlt()` in
+    same strikes on a later expiry — never a strike the chain did not list, and since PR 70 each leg along ITS OWN type's
+    strikes (a put never steps onto a strike only the calls list), and a variant naming a leg the chain does not quote is
+    left out and counted behind "How they are made ⓘ". Each is priced like a card (`priceAlt()` in
     App.jsx: `listCardFigures()`, the size the budget buys, the gate at that size). **Build** shows them under "Variants
     of this trade" with "Load ›" and asks **Which variant fits best?**. **A position** offers a roll only when it is not
     in profit and no reason it was opened has turned (`rollEligible()`; otherwise one sentence why not): the same
@@ -416,6 +418,15 @@ Every rule below is code, not a prompt. The numbers live in `src/rules.js` (`RUL
   leg spread (≤35% of mid), combination spread (≤100% of net), crossing cost (the combination
   spread in and out, ≤50% of the maximum profit at the price that fills) and reward-to-risk (≥0.25).
 - A contract the chain never listed is refused by the gate.
+- **And the app never proposes one (PR 70; XLE 27 Nov, 13 Oct 2026: Find proposed a 59.5 put on a board that lists 59.5 as
+  a call only).** A leg is chosen on its own type's strikes everywhere — Find's presets, Build's strike dropdown, CALL ↔ PUT
+  (it moves to the nearest strike the new type lists and says so), the snaps, the variants, Optimize and the roll
+  (`boardStrikes()`, `strikesFor()`; the calls-and-puts union is the chain table's rows only). Every generated proposal
+  needs a chain quote on every leg and a bid above zero on every leg bought (`chainQuotedLegs()`); what fails is left out
+  and counted as "a leg the chain does not list". The gate is unchanged. When Send is refused because of a leg
+  (UNLISTED_CONTRACT or UNPRICEABLE), the same structure with that leg on the nearest strike its type lists and quotes is
+  offered under the refusal with "Load ›"; on the Chain tab's tray a leg the board does not list is marked "not listed"
+  and a tap on the same type and side replaces it.
 - Every figure on a card, every floor and the ranking are worked out at the price that will fill
   (`fillNet()`: `openLimitPrice()` on `comboBook()`, on the cent), and Build reads the same price.
 
@@ -508,7 +519,7 @@ carry what PR 63 changed. PR 65 re-read them: none closed; #3, #5, #8 and #10 ca
 OWNER CHECK, Optimize's speed on the phone. PR 66 re-read them: none closed; #3 and #8 carry what PR 66 changed. PR 67
 re-read them: none closed; #3, #7, #8, #9 and #10 carry what PR 67 changed, and #9 gains an OWNER CHECK, the market's
 chance against IBKR's. PR 68 re-read them: none closed; #3, #8 and #9 carry what PR 68 changed, and #9 gains an OWNER CHECK,
-the exit replay on real closes.)
+the exit replay on real closes. PR 70 re-read them: none closed; #3 and #8 carry what PR 70 changed.)
 
 1. **OWNER CHECK — the Journal entry for J-0001 shows the $7.65 fill** (v1 is reached on the owner's report of 5 Oct
    2026: filled 9 of 9 at $7.65, filed from the production address; this session cannot see that browser). **No Modify
@@ -565,7 +576,11 @@ the exit replay on real closes.)
    68's chart at the exit, "Exit rules, past years" and the Journal's "Which chance came true"** were photographed the same
    way (docs/screens/pr68/, `node scripts/shoot-pr68.mjs`) in their empty states only: the fixture's daily closes cover this
    year, which the replay leaves out, and its records carry no market chance — **no result of either has been seen on a
-   screen**, by design (no made-up series is drawn).
+   screen**, by design (no made-up series is drawn). **PR 70's new states** — the nearest listed alternative under Send's
+   refusal, the Chain tray's "not listed" chip and its replace line, the CALL ↔ PUT move note, Build's payoff-based "needs"
+   line and the rewritten chance panel in "More on this trade" — are rendered in tests only (src/listed.test.jsx, on the
+   owner's XLE board shape with synthetic prices), **never photographed and never seen on the live chain**: whether the
+   live feed lists a contract with no quote at all (a listed strike the app now leaves out) is read when it happens.
 4. **Read when it happens — no credit has filled at the corrected limit** (the indicative combination ask on thin chains
    has not been measured by a fill; J-0003 never filled at it), **and "Not on Alpaca", "size N > M on the ask", the "Not
    in the app" card, an order "sent outside this app", free sizing (PR #41), and an order sent from Build's new review
@@ -650,7 +665,9 @@ the exit replay on real closes.)
    (0.01 × the median strike width) is measured on synthetic boards only (impliedDist.test.js's table). Words: build 518 →
    610 (two chance lines and the why line or the not-read line, the Greek tabs, the table, the costs line). **PR 68:**
    `replayVolDays` 20 (the realised volatility a past entry is priced at) and the Journal's five chance bands are chosen;
-   `calibrationMinTrades` 10 is the owner's.
+   `calibrationMinTrades` 10 is the owner's. **PR 70:** market 477 → 493 (the Chain tray's replace hint and its "replaced"
+   line, 16 words, shown only while the tray holds a leg the board does not list); a tie between two equally near listed
+   strikes goes to the lower one (`snapStrike()`'s rule, kept), chosen, not measured.
 9. **The exit rules are inherited defaults, not yet backtested on real data** on these ten markets; the single option's +50%
    of the premium is the owner's choice. **OWNER CHECK — the exit replay on real closes (PR 68).** `exitBacktest()` is
    built and tested on synthetic series only: this environment reads no daily closes (its Alpaca credential is refused,

@@ -159,7 +159,19 @@ test("a leg carried from another board is snapped onto this one, and it says so"
   assert.equal(h.legs[0].strike, 27, "the 27.5 the 2026-11-20 board does not list survived");
   assert.equal(h.legs[1].strike, 29, "a strike the board DOES list was moved");
   assert.equal(h.moved.length, 1);
-  assert.deepEqual(h.moved[0], { i: 0, from: 27.5, to: 27 });
+  // PR 70: the moved leg carries its type, so the note can name it ("27.5C → 27C").
+  assert.deepEqual(h.moved[0], { i: 0, from: 27.5, to: 27, type: "call" });
+});
+
+test("PR 70: a PUT is snapped onto the strikes the PUTS list, never onto one only the calls list", () => {
+  // 29 is listed as a call on the 2026-11-20 board and not as a put: the put goes to 28, the nearest PUT.
+  const h = buildHandOff({
+    ticker: "SOYB", expKey: "2026-11-20", name: "x", chains: BOARD,
+    legs: [{ side: 1, type: "put", strike: 29 }, { side: -1, type: "call", strike: 29 }],
+  });
+  assert.equal(h.legs[0].strike, 28, "the 29 put survived onto a board that lists 29 as a call only");
+  assert.equal(h.legs[1].strike, 29, "the 29 call the board lists was moved");
+  assert.deepEqual(h.moved, [{ i: 0, from: 29, to: 28, type: "put" }]);
 });
 
 test("a leg the board already lists is untouched, and nothing is said", () => {
