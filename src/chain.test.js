@@ -23,7 +23,10 @@ import {
   hasOpenInterest, oiProfile,
   spotOf, spotAt, nearMoneyOpenInterest, monotonicityBreaks, monotonicityNote,
   snapStrike, expiryStrikes, resnapLegs, strikeOptions, atmIv,
+  expiryStrikesFor, boardStrikes, strikesFor, toggleLegType,
 } from "./chain.js";
+import { typeSnapNote, strikeSnapNote } from "./rules.js";
+import { xleChain, XLE_EK, CALL_STRIKES, PUT_STRIKES } from "./fixtures/xleListed.js";
 
 const ok = [], bad = [];
 // Run IN ORDER, one at a time. The fallback tests below drive a session-level
@@ -507,6 +510,63 @@ check("resnapLegs leaves an unloaded board alone rather than snapping to a grid"
   const r = resnapLegs(legs, null);
   eq(r.moved.length, 0);
   eq(r.legs, legs, "the same array, so React bails out of the update");
+});
+
+/* PR 70 — STRIKES PER OPTION TYPE. XLE 27 Nov (the owner's board, synthetic prices): 59.5 is a call and not a put; 60
+   is both. The union `expiryStrikes()` is the chain table's rows only; a leg reads its own side. */
+check("PR 70: expiryStrikesFor() lists ONE side; boardStrikes() is both sides, apart; the union keeps 59.5 for the table", () => {
+  const c = xleChain();
+  eq(JSON.stringify(expiryStrikesFor(c, XLE_EK, "call")), JSON.stringify(CALL_STRIKES), "the calls' strikes");
+  eq(JSON.stringify(expiryStrikesFor(c, XLE_EK, "put")), JSON.stringify(PUT_STRIKES), "the puts' strikes");
+  eq(expiryStrikesFor(c, XLE_EK, "put").includes(59.5), false, "a 59.5 put is not listed");
+  eq(expiryStrikesFor(c, "2027-01-15", "put"), null, "no board is unknown, not empty");
+  eq(expiryStrikesFor(c, XLE_EK, "straddle"), null, "only calls and puts");
+  const b = boardStrikes(c, XLE_EK);
+  eq(b.put.includes(59.5), false, "the board's put side");
+  eq(b.call.includes(59.5), true, "the board's call side");
+  eq(b.put.includes(60) && b.call.includes(60), true, "60 on both sides");
+  eq(boardStrikes(c, "2027-01-15"), null, "no board");
+  eq(expiryStrikes(c, XLE_EK).includes(59.5), true, "the union (the chain table's rows) still has the row");
+});
+check("PR 70: strikesFor() reads a leg's own side; a plain array is a board whose two sides list the same strikes", () => {
+  const b = boardStrikes(xleChain(), XLE_EK);
+  eq(strikesFor(b, "put").includes(59.5), false);
+  eq(strikesFor(b, "call").includes(59.5), true);
+  const same = [10, 11, 12];
+  eq(strikesFor(same, "put"), same); eq(strikesFor(same, "call"), same);
+  eq(strikesFor(null, "put"), null);
+});
+check("PR 70: a PUT carried onto the board snaps onto the PUTS' strikes — 59.5P goes to 60P, the 59.5 call stays", () => {
+  const legs = [{ side: 1, type: "put", strike: 59.5, qty: 1 }, { side: -1, type: "call", strike: 59.5, qty: 1 }];
+  const r = resnapLegs(legs, boardStrikes(xleChain(), XLE_EK));
+  eq(r.legs[0].strike, 60, "the put moved to the nearest listed put");
+  eq(r.legs[1].strike, 59.5, "the call the board lists did not move");
+  eq(JSON.stringify(r.moved), JSON.stringify([{ i: 0, from: 59.5, to: 60, type: "put" }]), "what moved, with its type");
+  truthy(/59\.5P → 60P/.test(strikeSnapNote(r.moved, XLE_EK)), "the note names the leg with its type");
+});
+check("PR 70: CALL → PUT on a 59.5 leg moves it to a listed put strike (60) and says so; PUT → CALL keeps a listed strike", () => {
+  const b = boardStrikes(xleChain(), XLE_EK);
+  const legs = [{ side: 1, type: "call", strike: 59.5, qty: 2 }, { side: -1, type: "call", strike: 62.5, qty: 1 }];
+  const r = toggleLegType(legs, 0, b);
+  eq(r.legs[0].type, "put"); eq(r.legs[0].strike, 60, "onto the nearest listed put"); eq(r.legs[0].qty, 2, "the quantity kept");
+  eq(r.legs[1], legs[1], "the other leg untouched");
+  eq(JSON.stringify(r.moved), JSON.stringify([{ i: 0, from: 59.5, to: 60, type: "put" }]));
+  const note = typeSnapNote(r.moved, XLE_EK);
+  truthy(/lists no 59\.5 put/.test(note) && /59\.5P → 60P/.test(note), `the note says what moved: ${note}`);
+  const back = toggleLegType(r.legs, 0, b);
+  eq(back.legs[0].type, "call"); eq(back.legs[0].strike, 60, "60 is a listed call: nothing moves");
+  eq(back.moved.length, 0); eq(typeSnapNote(back.moved, XLE_EK), null, "nothing moved is not an event");
+  const blind = toggleLegType(legs, 0, null);
+  eq(blind.legs[0].type, "put"); eq(blind.legs[0].strike, 59.5, "no board: the type flips, nothing is snapped to a grid");
+  eq(toggleLegType(legs, 5, b).legs, legs, "no such leg: unchanged");
+});
+check("PR 70: Build's put dropdown is offered the puts' strikes only — strikeOptions() over the put side has no 59.5", () => {
+  const b = boardStrikes(xleChain(), XLE_EK);
+  eq(strikeOptions(strikesFor(b, "put"), 60).some((o) => o.k === 59.5), false, "the put select offers 59.5");
+  eq(strikeOptions(strikesFor(b, "call"), 60).some((o) => o.k === 59.5 && o.listed), true, "the call select lists 59.5");
+  // A put already ON 59.5 shows it, disabled and named, never as a choice.
+  const off = strikeOptions(strikesFor(b, "put"), 59.5).find((o) => o.k === 59.5);
+  eq(off && off.listed, false, "the off-board put is shown as not listed");
 });
 
 // REDESIGN PR 1: the at-the-money IV the IV-rank recorder records and the market page prints — one function.

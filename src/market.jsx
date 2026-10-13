@@ -39,7 +39,7 @@ import { CopilotSection } from "./build.jsx";
 import { BandThumbnail } from "./visuals.jsx";
 import { getU, MARKET_CATEGORIES, CATEGORY_ICONS } from "./markets.js";
 import { NAV_BAR_H } from "./navBar.jsx";
-import { hasOpenInterest, atmIv, feedName } from "./chain.js";
+import { hasOpenInterest, atmIv, feedName, expiryStrikes } from "./chain.js";
 import { signalStance, sentimentDirection, findOrderOf } from "./signals.js";
 import { structureName } from "./positionView.js";
 import { undefinedRiskLegs } from "./riskGate.js";
@@ -56,7 +56,7 @@ import { RULES, money, chanceText, expiryWords, sizedFree, sizedFigures, sizeLin
   noOpenInterestText, underEntryText, THIN, spotLineText, legsMaxText, TRAY_LABELS, uncoveredText, trayEmptyText,
   chainEventText, eventLineText, eventInfoText, dateOnlyWhen, inDaysText, holidayWeekNote, eventsBeforeLabel, CHAIN_HEAD,
   chainNotLoadedText, marketReadingText, noCardsText, ARIA, readScoreLine, compareTrayLine, SEE_THEM, cardDetailRows, costsFor,
-  viewOfDir, viewChoiceLabel, viewTargetPrice,
+  viewOfDir, viewChoiceLabel, viewTargetPrice, chainQuotedLegs, TRAY_UNLISTED, trayReplaceHint, trayReplacedText,
 } from "./rules.js";
 
 const FS = TYPE.size, FW = TYPE.weight, LH = TYPE.line;
@@ -481,6 +481,12 @@ export function StrategyCard({ x, size, misses, bars, sortedBy, findOrder, saved
 }
 
 /* ---------------------------------------------------------------- CHAIN (advanced) */
+/** Does this board quote that leg's contract (PR 70): the generation sites' one predicate, `chainQuotedLegs()`, its
+ *  "unquoted" half — the chain answered about the contract with a price. A bought leg with no bid still has its cell. */
+export const trayLegQuoted = (board, l) => {
+  const q = board && l ? (board[l.type === "call" ? "calls" : "puts"] || {})[l.strike] : null;
+  return chainQuotedLegs({ legs: [l], quotes: [q ? { bid: q.bid, ask: q.ask, real: q.mid != null } : null] }).unquoted.length === 0;
+};
 export function ChainTab({ tk, chain, clock, tray, setTray, cardFigures, quoteOf, seasonal, matrix, iv, liqFloor, onBuildLegs }) {
   const [mode, setMode] = useState("price");
   if (!chain || !chain.spot || !chain.expirations || !chain.expirations.length) return <Note style={{ padding: "10px 16px" }}>{chainNotLoadedText(tk)}</Note>;
@@ -490,12 +496,15 @@ export function ChainTab({ tk, chain, clock, tray, setTray, cardFigures, quoteOf
   const e = chain.byExp[ek];
   const legs = tray && tray.expKey === ek ? tray.legs : [];
   const spot = chain.spot;
-  const ks = Array.from(new Set([...Object.keys(e.calls || {}), ...Object.keys(e.puts || {})].map(Number)))
-    .sort((a, b) => a - b).filter((k) => k >= spot * 0.8 && k <= spot * 1.2);
+  // THE TABLE'S ROWS ARE THE UNION (PR 70): a row is a strike either side lists, each cell its own contract or none.
+  // This is the one place the union is meant; a leg is chosen per type (`boardStrikes()` elsewhere).
+  const ks = (expiryStrikes(chain, ek) || []).filter((k) => k >= spot * 0.8 && k <= spot * 1.2);
   const spotState = clock && clock.is_open === false ? "close" : clock && clock.is_open ? "now" : null;
+  const quoted = (l) => trayLegQuoted(e, l);
   const tap = (type, strike, side) => {
-    const r = toggleChainLeg(legs, { type, strike, side }, MLEG_MAX_LEGS);
-    setTray({ expKey: ek, legs: r.legs, note: r.full ? legsMaxText(MLEG_MAX_LEGS) : null });
+    // PR 70: a leg this board does not quote is REPLACED by a tap on the same type and side, and the tray says so.
+    const r = toggleChainLeg(legs, { type, strike, side }, MLEG_MAX_LEGS, quoted);
+    setTray({ expKey: ek, legs: r.legs, note: r.replaced ? trayReplacedText(r.replaced.from, r.replaced.to) : r.full ? legsMaxText(MLEG_MAX_LEGS) : null });
   };
   const pick = (exp) => setTray({ expKey: exp, legs: [], note: null });
   const fmt = (v, d = 2) => (v == null || !Number.isFinite(Number(v)) ? "—" : Number(v).toFixed(d));
@@ -585,7 +594,7 @@ export function ChainTab({ tk, chain, clock, tray, setTray, cardFigures, quoteOf
           );
         })}
       </div>
-      <ChainTray tk={tk} chain={chain} ek={ek} legs={legs} note={tray ? tray.note : null} cardFigures={cardFigures}
+      <ChainTray tk={tk} chain={chain} ek={ek} legs={legs} note={tray ? tray.note : null} cardFigures={cardFigures} quoted={quoted}
         quoteOf={quoteOf} seasonal={seasonal} matrix={matrix} iv={iv} onClear={() => setTray({ expKey: ek, legs: [], note: null })}
         onBuild={() => onBuildLegs({ ticker: tk, expKey: ek, legs, name: structureName(legs) })} />
     </div>
@@ -595,12 +604,14 @@ export function ChainTab({ tk, chain, clock, tray, setTray, cardFigures, quoteOf
 /** The tray, FIXED above the bottom bar while the chain scrolls (round 2): the structure's name, the legs as chips, and
  *  Debit or Credit · Max profit · Max loss · Chance — through `listCardFigures()`, the function every card reads. Build is
  *  blocked, with the reason, on an uncovered short. */
-function ChainTray({ tk, chain, ek, legs, note, cardFigures, quoteOf, seasonal, matrix, iv, onClear, onBuild }) {
+function ChainTray({ tk, chain, ek, legs, note, cardFigures, quoteOf, seasonal, matrix, iv, onClear, onBuild, quoted = () => true }) {
   const e = chain.byExp[ek];
   const lf = useMemo(() => (legs.length && cardFigures && e
     ? cardFigures(legs, { spot: chain.spot, dte: e.dte, iv, q: quoteOf(chain, ek), ticker: tk, expKey: ek, seasonal, matrix })
     : null), [legs, cardFigures, chain, ek, e, iv, quoteOf, tk, seasonal, matrix]);
   const naked = undefinedRiskLegs(legs);
+  // PR 70: a leg this board does not quote is marked on its chip, and the tray says how to replace it.
+  const offLeg = legs.find((l) => !quoted(l)) || null;
   const af = lf ? lf.aFill : null;
   const entry = af && Number.isFinite(af.entry) ? af.entry : null;
   const figs = [
@@ -619,10 +630,14 @@ function ChainTray({ tk, chain, ek, legs, note, cardFigures, quoteOf, seasonal, 
           <>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
               <span data-tray-name style={{ ...sans, fontSize: FS.md, fontWeight: FW.bold, color: T.ink, marginRight: 4 }}>{structureName(legs, ek)}</span>
-              {legs.map((l) => (
-                <span key={`${l.type}${l.strike}`} data-tray-leg style={{ ...mono, ...tnum, fontSize: FS.xs, color: T.ink, border: `1px solid ${T.field}`,
-                  borderRadius: 6, padding: "0 6px", lineHeight: "22px" }}>{legsLine([l])}</span>
-              ))}
+              {legs.map((l) => {
+                const off = !quoted(l);
+                return (
+                  <span key={`${l.type}${l.strike}`} data-tray-leg data-tray-unlisted={off ? "true" : undefined} style={{ ...mono, ...tnum, fontSize: FS.xs,
+                    color: off ? T.amber : T.ink, border: `1px ${off ? "dashed" : "solid"} ${off ? T.amber : T.field}`,
+                    borderRadius: 6, padding: "0 6px", lineHeight: "22px" }}>{legsLine([l])}{off ? ` · ${TRAY_UNLISTED}` : ""}</span>
+                );
+              })}
             </div>
             <dl style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8, margin: 0 }}>
               {figs.map(([k, v]) => (
@@ -635,6 +650,7 @@ function ChainTray({ tk, chain, ek, legs, note, cardFigures, quoteOf, seasonal, 
           </>
         )}
         {naked.length > 0 && <Note color={T.red} role="alert">{uncoveredText()}</Note>}
+        {offLeg && <Note color={T.amber} role="status" data-tray-replace>{trayReplaceHint(offLeg)}</Note>}
         {note && <Note color={T.amber} role="status">{note}</Note>}
         <div style={{ display: "flex", gap: 8 }}>
           <button disabled={!legs.length} onClick={onClear} style={{ ...sans, minHeight: TAP, padding: "0 16px", borderRadius: 10, fontSize: FS.sm,

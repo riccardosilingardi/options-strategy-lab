@@ -112,7 +112,14 @@ export function snapStrike(x, strikes, step) {
   return strikes.reduce((best, k) => (Math.abs(k - x) < Math.abs(best - x) ? k : best), strikes[0]);
 }
 
-/** Every strike on ONE expiry, calls and puts together, sorted. */
+/**
+ * Every strike on ONE expiry, calls and puts together, sorted.
+ *
+ * THE UNION IS FOR DRAWING THE CHAIN TABLE ONLY (PR 70). A row of the T-chain is a strike either side lists; a LEG is
+ * one contract of one type, and the two sides do not list the same strikes. Read live, XLE 27 Nov 2026: 59.5 was listed
+ * as a call and not as a put, and Find proposed an iron condor buying the 59.5 PUT — snapped onto this union — which the
+ * gate then refused (UNLISTED_CONTRACT). Anything that chooses or moves a leg reads `boardStrikes()` / `strikesFor()`.
+ */
 export function expiryStrikes(chain, expKey) {
   const b = chain && chain.byExp && chain.byExp[expKey];
   if (!b) return null;
@@ -120,26 +127,77 @@ export function expiryStrikes(chain, expKey) {
   return Array.from(set).sort((a, c) => a - c);
 }
 
+/** Every strike ONE expiry lists for ONE option type ("call" or "put"), sorted; null with no board (PR 70). */
+export function expiryStrikesFor(chain, expKey, type) {
+  const b = chain && chain.byExp && chain.byExp[expKey];
+  if (!b || (type !== "call" && type !== "put")) return null;
+  const side = b[type === "call" ? "calls" : "puts"] || {};
+  return Object.keys(side).map(Number).filter(Number.isFinite).sort((a, c) => a - c);
+}
+
+/**
+ * THE BOARD A LEG CHOOSES ON (PR 70): `{ call: [...], put: [...] }`, each side's own listed strikes; null with no board.
+ * Every place that chooses or moves a leg — Build's strike dropdown, the snap onto a board, Find's presets, the
+ * variants, Optimize and the roll — reads its leg's side of this through `strikesFor()`, never the union.
+ */
+export function boardStrikes(chain, expKey) {
+  const call = expiryStrikesFor(chain, expKey, "call");
+  const put = expiryStrikesFor(chain, expKey, "put");
+  return call || put ? { call: call || [], put: put || [] } : null;
+}
+
+/**
+ * THE STRIKES A LEG OF `type` MAY SIT ON — the one accessor (PR 70). A board from `boardStrikes()` answers per side; a
+ * plain array is a board whose two sides list the same strikes (the tests' fixtures say it that way). Null with none.
+ */
+export function strikesFor(strikes, type) {
+  if (!strikes) return null;
+  if (Array.isArray(strikes)) return strikes;
+  const ks = strikes[type === "call" ? "call" : "put"];
+  return Array.isArray(ks) ? ks : null;
+}
+
 /**
  * EVERY LEG ONTO THE BOARD IT IS ON — and what moved, so it can be said.
  *
  * With no strikes for the target board NOTHING is touched: an unloaded chain
  * is UNKNOWN, and snapping against a fallback grid would invent exactly the
- * kind of strike this exists to stop.
+ * kind of strike this exists to stop. Since PR 70 each leg snaps onto ITS OWN
+ * type's strikes (`strikesFor()`): a put never lands on a strike only the calls list.
  *
- * @returns {{ legs, moved: {i, from, to}[] }}
+ * @returns {{ legs, moved: {i, from, to, type}[] }}
  */
 export function resnapLegs(legs = [], strikes = null) {
   const ls = Array.isArray(legs) ? legs : [];
-  if (!strikes || !strikes.length) return { legs: ls, moved: [] };
+  if (!strikes || (Array.isArray(strikes) && !strikes.length)) return { legs: ls, moved: [] };
   const moved = [];
   const out = ls.map((l, i) => {
-    const k = snapStrike(Number(l.strike), strikes, null);
+    const ks = strikesFor(strikes, l && l.type);
+    if (!ks || !ks.length) return l;
+    const k = snapStrike(Number(l.strike), ks, null);
     if (!Number.isFinite(k) || k === Number(l.strike)) return l;
-    moved.push({ i, from: Number(l.strike), to: k });
+    moved.push({ i, from: Number(l.strike), to: k, type: l.type });
     return { ...l, strike: k };
   });
   return { legs: moved.length ? out : ls, moved };
+}
+
+/**
+ * CALL ↔ PUT ON ONE LEG, ONTO A STRIKE THAT TYPE LISTS (PR 70). The type flips; when the new type does not list the
+ * leg's strike, the leg moves to the nearest strike it does list (`snapStrike()`, a tie to the lower one) and `moved`
+ * says so, for `strikeSnapNote()`. With no board nothing but the type changes: an unloaded chain is UNKNOWN.
+ *
+ * @returns {{ legs, moved: {i, from, to, type}[] }}
+ */
+export function toggleLegType(legs = [], i, strikes = null) {
+  const ls = Array.isArray(legs) ? legs : [];
+  const l = ls[i];
+  if (!l) return { legs: ls, moved: [] };
+  const type = l.type === "call" ? "put" : "call";
+  const ks = strikesFor(strikes, type);
+  const k = ks && ks.length ? snapStrike(Number(l.strike), ks, null) : Number(l.strike);
+  const moved = Number.isFinite(k) && k !== Number(l.strike) ? [{ i, from: Number(l.strike), to: k, type }] : [];
+  return { legs: ls.map((x, j) => (j === i ? { ...x, type, strike: moved.length ? k : x.strike } : x)), moved };
 }
 
 /**

@@ -81,19 +81,32 @@ export function latestNews(tk, items = [], state = null) {
  * THE CHAIN TAB'S TAP. An ask is "buy 1" (side +1), a bid is "sell 1" (side −1); the same cell again removes the leg;
  * the other side of the same contract replaces it (a contract is held one way). At most `max` legs
  * (`MLEG_MAX_LEGS`, read by the caller from alpacaContract.js): one more returns the legs unchanged and `full`.
+ *
+ * A LEG THIS BOARD DOES NOT QUOTE IS REPLACED, NOT ADDED TO (PR 70). "Edit in chain" can carry a leg the board lists no
+ * contract for (XLE 27 Nov: a 59.5P where only a 59.5 call is listed): it has no cell, so it cannot be tapped away, and
+ * with four legs in the tray every other tap came back `full` — the owner stayed blocked. So when `quoted(leg)` says the
+ * board does not quote a leg in the tray, a tap on a cell of the SAME type and side replaces it (its quantity kept), and
+ * `replaced` says which. With no `quoted` callback nothing changes.
  * @param legs [{ type, strike, side, qty }]
  * @param tap  { type: "call"|"put", strike, side: 1|-1 }
- * @returns {{ legs, full: boolean }}
+ * @param quoted  (leg) → boolean: does this board quote that contract (the caller's `chainQuotedLegs()` on its quote)
+ * @returns {{ legs, full: boolean, replaced: { from, to } | null }}
  */
-export function toggleChainLeg(legs = [], tap, max = 4) {
+export function toggleChainLeg(legs = [], tap, max = 4, quoted = null) {
   const same = (l) => l.type === tap.type && Number(l.strike) === Number(tap.strike);
   const at = legs.findIndex(same);
-  if (at >= 0 && Math.sign(legs[at].side) === Math.sign(tap.side)) return { legs: legs.filter((_, i) => i !== at), full: false };
-  if (at >= 0) return { legs: legs.map((l, i) => (i === at ? { ...l, side: Math.sign(tap.side) } : l)), full: false };
-  if (legs.length >= max) return { legs, full: true };
+  const order = (ls) => ls.sort((a, b) => a.strike - b.strike || (a.type === b.type ? 0 : a.type === "put" ? -1 : 1));
+  if (at >= 0 && Math.sign(legs[at].side) === Math.sign(tap.side)) return { legs: legs.filter((_, i) => i !== at), full: false, replaced: null };
+  if (at >= 0) return { legs: legs.map((l, i) => (i === at ? { ...l, side: Math.sign(tap.side) } : l)), full: false, replaced: null };
+  const off = typeof quoted === "function"
+    ? legs.findIndex((l) => l.type === tap.type && Math.sign(l.side) === Math.sign(tap.side) && !quoted(l)) : -1;
+  if (off >= 0) {
+    const to = { ...legs[off], strike: Number(tap.strike) };
+    return { legs: order(legs.map((l, i) => (i === off ? to : l))), full: false, replaced: { from: legs[off], to } };
+  }
+  if (legs.length >= max) return { legs, full: true, replaced: null };
   const next = [...legs, { type: tap.type, strike: Number(tap.strike), side: Math.sign(tap.side), qty: 1 }];
-  next.sort((a, b) => a.strike - b.strike || (a.type === b.type ? 0 : a.type === "put" ? -1 : 1));
-  return { legs: next, full: false };
+  return { legs: order(next), full: false, replaced: null };
 }
 
 /** The cell a leg occupies: "ask" for a long, "bid" for a short. */

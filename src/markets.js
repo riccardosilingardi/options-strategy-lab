@@ -44,7 +44,7 @@ const NO_WEATHER = {
 
 /* ---- THE ROWS ----
    ticker, name, category, step (a listing increment for a dropdown before the chain lands — never a strike a trade
-   is built on: strikes are the board's, `expiryStrikes()`), proposable (false: priced as a hedge, never offered),
+   is built on: strikes are the board's, per type since PR 70, `boardStrikes()`), proposable (false: priced as a hedge, never offered),
    weather (does the factor apply, and the sentence when it does not), newsQ (the news query), iv (the implied
    volatility used before a chain quotes one: a reference, `RULES.fallbackIV` for every market nobody measured) and
    sigma (the realised-volatility fallback from `SIGMA`, or null: `sigmaProvenance()` then says the fallback was chosen)

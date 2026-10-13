@@ -19,17 +19,18 @@ import { fuseSignals, sentimentDirection, signalDirection, signalFamilies, findO
   readingState, signalSnapshot, compareSignals, signalStance, factorStands, AGAINST_MIN_SCORE, placeLine } from "./signals.js";
 import { N as nCDF, bs as bsPrice, smile as smileIV, payoff as payoffExp, SIGMA, histBacktest, monthReturn, bsGreeks, legsAt, exitBacktest,
   parseAvJson, statsFromMatrix } from "./engine.js";
-import { parseOcc, buildOcc, snapStrike, resnapLegs, expiryStrikes, strikeOptions, fetchChain, hasOpenInterest, enrichOpenInterest, feedName, sourceNote, openInterestNote, oiProfile, expiryOpenInterest, nearMoneyOpenInterest, monotonicityBreaks, monotonicityNote, invertedOnStrikes, spotOf, spotAt, atmIv } from "./chain.js";
+import { parseOcc, buildOcc, snapStrike, resnapLegs, boardStrikes, strikesFor, toggleLegType, strikeOptions, fetchChain, hasOpenInterest, enrichOpenInterest, feedName, sourceNote, openInterestNote, oiProfile, expiryOpenInterest, nearMoneyOpenInterest, monotonicityBreaks, monotonicityNote, invertedOnStrikes, spotOf, spotAt, atmIv } from "./chain.js";
 import { T, TYPE, themeName, setTheme, BADGE_SAFE } from "./theme.js";
 import { RULES, sizing, ruleBadge, takeProfitLabel, takeProfitTarget, takeProfitBasisWords, stopWarningLevel, stopLossLabel, perTradeCapLabel, RULE_PILLS, money, pctText, capitalSourceNote, perTradeLimitPhrase, qualityFloor, qualityFloorSentence, liquiditySkippedNote,
   positionPnl, BROKER_PNL, remainingEdge, remainingEdgeLabel, shareOfMaximum, attentionCount,
   filterFold, qualityFloorLine, voicePointer, VOICE_HOMES, noCeilingRankLine,
   buildableExpiries, openableBoard, offFloorExpiryLabel, horizonFloorNote,
   LIQUIDITY_LEVELS, RECOMMENDED_LIQUIDITY, LIQUIDITY_MEASUREMENT, liquidityMeasurementNote, liquidityLevel, liquidityThreshold, looseningWarning, liquiditySettingNote, isLoosened, ordinal,
-  priceability, unpriceableNote, rewardRisk, MIN_NET_DOLLARS,
+  priceability, chainQuotedLegs, unpriceableNote, rewardRisk, MIN_NET_DOLLARS,
   payoffCeiling, payoffAtZero, exactExtremes, NO_CEILING, noCeilingNote, noCeilingRankNote,
   impossibleLoss, impossibleLossNote,
-  contractListing, unlistedContractNote, unlistedContractListNote, strikeSnapNote, offBoardStrikeLabel,
+  contractListing, unlistedContractNote, unlistedContractListNote, strikeSnapNote, typeSnapNote, offBoardStrikeLabel,
+  payoffNeed, structureNeedsLine, CHANCE_METHOD_HEAD, CHANCE_EXACT_LINE, chanceMethodLine, chanceLines, CHANCE_TWO_INFO, listedFixLead, LISTED_FIX_NONE,
   tradeCard, cardCurrencyNote, CARD_CURRENCY, limitOwner,
   modelSanity, modelDisagreementNote,
   entryRoom, entryRoomWarning, entryOverrideOk, entryOverrideNote, entryInsideExitNote,
@@ -96,7 +97,7 @@ import { gateChecklist } from "./wizard.jsx";
 import { undefinedRiskLegs } from "./riskGate.js";
 import { taContext } from "./indicators.js";
 // PR 4b: the alternatives of a structure (Build's variants, a position's roll) and their words.
-import { variantsOf, rollCandidates, rollEligible, optimizeCandidates, OPTIMIZE_STEPS, rollJudge, rankRolls } from "./alternatives.js";
+import { variantsOf, rollCandidates, rollEligible, optimizeCandidates, OPTIMIZE_STEPS, rollJudge, rankRolls, nearestListedOf } from "./alternatives.js";
 import { whyOpenedLine, endedLine } from "./journalView.js";
 import { liquidityTakeaway, liquidityLevelValue, noOiLine, LIMIT_CHOICES, expiryWords, returnText, pastTileText, futureTile, VARIANT_LABELS, VARIANTS_NOTE, VARIANTS_NONE, gateLine, ROLL_WHY, ROLL_HOW, rollLine, rollCloseFirst, rolledInto, rolledFrom,
   boardMoveLabel, optimizeNote, optimizeSummary, optimizePlaceLine, optimizeRowNote, OPTIMIZE_NONE_FIT, OPTIMIZE_EMPTY, OPTIMIZE_ALL_CUT, ROLL_JUDGE_NOTE, rollWholeLine,
@@ -346,8 +347,13 @@ export function StrikeSelect({ strikes, value, step, onChange }) {
 }
 
 export function buildPresets(sent, S, step, strikes) {
-  if (!strikes || !strikes.length) return [];
-  const K = (pct) => snapStrike(S * (1 + pct), strikes, step);
+  if (!strikes || (Array.isArray(strikes) && !strikes.length)) return [];
+  /* EACH LEG ONTO ITS OWN TYPE'S STRIKES (PR 70). `strikes` is `boardStrikes()`' board, or a plain array where both
+     sides list the same strikes. Snapped onto the calls-and-puts union, XLE's iron condor bought a 59.5 PUT on a board
+     that lists 59.5 as a call only. A preset needing a type the board lists nothing for is not built — the grid
+     fallback inside `snapStrike()` stays unreachable from here. */
+  const sideOf = (t) => strikesFor(strikes, t);
+  const K = (pct, t) => snapStrike(S * (1 + pct), sideOf(t), step);
   const P = {
     verybear: [
       { name: "Long Put ATM", raw: [[1, "put", 0]] },
@@ -373,9 +379,9 @@ export function buildPresets(sent, S, step, strikes) {
       { name: "Bullish Call Butterfly", raw: [[1, "call", 0], [-2, "call", 0.06], [1, "call", 0.12]] },
     ],
   };
-  return P[sent].map((p) => ({
+  return P[sent].filter((p) => p.raw.every(([, t]) => { const ks = sideOf(t); return !!(ks && ks.length); })).map((p) => ({
     name: p.name,
-    legs: p.raw.map(([s, t, pct]) => ({ side: Math.sign(s), qty: Math.abs(s), type: t, strike: K(pct) })),
+    legs: p.raw.map(([s, t, pct]) => ({ side: Math.sign(s), qty: Math.abs(s), type: t, strike: K(pct, t) })),
   }));
 }
 
@@ -410,8 +416,9 @@ const touchSizeOf = (legs, a) => {
     .filter((x) => x != null && Number.isFinite(Number(x)));
   return xs.length ? Math.min(...xs.map(Number)) : null;
 };
-/** The two-sided quotes behind an analysis, one per leg, for `priceability()`. */
-const quotesOf = (a) => (a?.legPx || []).map((l) => ({ bid: l.bid, ask: l.ask }));
+/** The two-sided quotes behind an analysis, one per leg, for `priceability()` — and, since PR 70, whether the chain
+ *  quoted the leg at all (`real`), for `chainQuotedLegs()` at the generation sites. `priceability()` reads bid and ask only. */
+const quotesOf = (a) => (a?.legPx || []).map((l) => ({ bid: l.bid, ask: l.ask, real: l.real === true }));
 /**
  * THE SAME STRUCTURE, RE-READ AT THE PRICE THAT FILLS (ROADMAP P10 §3-bis).
  *
@@ -774,8 +781,13 @@ export function readAlternative(alt, { chain: c, ticker: tk, iv, seasonal, matri
   const legsText = `${legsLine(alt.legs)} · ${expiryWords(alt.expKey)}`;
   const fl = floors ? floorsFor(alt.legs, { S: c.spot, dte: dteX, iv, q, peers: expiryOpenInterest(c, alt.expKey), level }) : null;
   if (fl && !fl.pass) return { ...alt, ticker: tk, dte: dteX, label, legsText, cut: { why: fl.why, reasons: fl.reasons } };
+  // WITHOUT THE FLOORS (Build's variants) A VARIANT STILL NAMES ONLY QUOTED CONTRACTS (PR 70): `chainQuotedLegs()`, the
+  // one predicate `floorsFor()` asks first. A variant on a leg the chain does not quote comes back `cut`, never priced.
+  const a0 = fl ? null : analyze(alt.legs, c.spot, dteX, iv, q);
+  const ql = a0 ? chainQuotedLegs({ legs: alt.legs, quotes: quotesOf(a0) }) : null;
+  if (ql && !ql.ok) return { ...alt, ticker: tk, dte: dteX, label, legsText, cut: { why: "unpriceable", reasons: ql.reasons } };
   const lf = listCardFigures(alt.legs, { spot: c.spot, dte: dteX, iv, q, ticker: tk, expKey: alt.expKey, seasonal, matrix,
-    dist: boardDistOf(c, alt.expKey), ...(fl ? { a: fl.a, aFill: fl.aFill } : {}) });
+    dist: boardDistOf(c, alt.expKey), ...(fl ? { a: fl.a, aFill: fl.aFill } : { a: a0 }) });
   const size = contracts != null ? null : sizedFree(scaleStrategy(lf.aFill, request.mode, request.amt, request.riskCap), freeSizing);
   const n = contracts != null ? Math.max(1, Math.round(Number(contracts) || 1)) : size && size.ok ? size.n : null;
   const f = sizedFigures(lf.aFill, n);
@@ -804,6 +816,11 @@ export function readAlternative(alt, { chain: c, ticker: tk, iv, seasonal, matri
  */
 export function floorsFor(legs, { S, dte, iv, q, peers = null, level = RECOMMENDED_LIQUIDITY } = {}) {
   const a = analyze(legs, S, dte, iv, q);
+  // A PROPOSAL NAMES ONLY CONTRACTS THE CHAIN QUOTED (PR 70): a leg priced off the model ("◌") — the chain lists no such
+  // contract, or quotes none — or a bought leg nobody bids for. Before everything else, and counted as "unpriceable"
+  // (`unpriceableNote()` names it). The gate's own `priceability()` is unchanged: a hand-built trade is the user's.
+  const ql = chainQuotedLegs({ legs, quotes: quotesOf(a) });
+  if (!ql.ok) return { pass: false, why: "unpriceable", reasons: ql.reasons, a };
   // UNPRICEABLE FIRST, because it is prior to both floors: they judge a
   // structure, and this asks whether there is a structure to judge. A leg
   // nobody bids for or a net of about nothing means the numbers below —
@@ -1497,8 +1514,10 @@ export default function OptionsStrategyLab() {
      second copy of `expiryStrikes()` in chain.js, written out again here and
      twice more below in the wide search and the guided run — four answers to
      one question, any of which could have been corrected without the others.
-     A strike is a fact about a board, so the board decides. */
-  const expStrikes = useMemo(() => expiryStrikes(chain, expKey), [chain, expKey]);
+     A strike is a fact about a board, so the board decides.
+     PR 70: AND EACH SIDE OF IT. `boardStrikes()` is { call, put }: every leg's dropdown, snap and preset reads its own
+     type's strikes through `strikesFor()`; the calls-and-puts union offered a 59.5 put on a board listing only the call. */
+  const expStrikes = useMemo(() => boardStrikes(chain, expKey), [chain, expKey]);
   const q = useMemo(() => makeQuote(chain, expKey), [chain, expKey]);
 
   /* ---- a hand-off ends where the trade is ---- */
@@ -1840,7 +1859,9 @@ export default function OptionsStrategyLab() {
      smaller failure than a default trade naming a contract nobody issued. */
   useEffect(() => {
     if (!spot || !expStrikes || legs.length !== 0) return;
-    const first = buildPresets(sentiment, spot, U.step, expStrikes)[0];
+    // PR 70: the first preset whose legs the chain QUOTES (`chainQuotedLegs()`, the generation sites' one predicate).
+    const first = buildPresets(sentiment, spot, U.step, expStrikes)
+      .find((p) => chainQuotedLegs({ legs: p.legs, quotes: quotesOf(analyze(p.legs, spot, dte, iv, q)) }).ok);
     if (first) setLegs(first.legs);
   }, [spot, expStrikes]); // eslint-disable-line
 
@@ -2388,7 +2409,7 @@ export default function OptionsStrategyLab() {
      the expiry that is still in state when this runs, so the target board's
      strikes are read straight off the chain here rather than waited for. */
   const resnapTo = (ek) => {
-    const ks = expiryStrikes(chain, ek);
+    const ks = boardStrikes(chain, ek);
     if (!ks) { setSnapNote(null); return; }
     setLegs((L) => {
       const r = resnapLegs(L, ks);
@@ -2405,7 +2426,14 @@ export default function OptionsStrategyLab() {
     });
     setBt(null);
   };
-  const addLeg = () => setLegs((L) => [...L, { side: 1, type: "call", strike: snapStrike(spot, expStrikes, U.step), qty: 1 }]);
+  const addLeg = () => setLegs((L) => [...L, { side: 1, type: "call", strike: snapStrike(spot, strikesFor(expStrikes, "call"), U.step), qty: 1 }]);
+  /* CALL ↔ PUT LANDS ON A STRIKE THAT TYPE LISTS (PR 70): `toggleLegType()` re-snaps the leg onto the new type's nearest
+     listed strike and the move is said (`typeSnapNote()`), like the board's own move notes. */
+  const flipLegType = (i) => setLegs((L) => {
+    const r = toggleLegType(L, i, expStrikes);
+    setSnapNote(r.moved.length ? typeSnapNote(r.moved, expKey) : null);
+    return r.legs;
+  });
   const rmLeg = (i) => setLegs((L) => L.filter((_, j) => j !== i));
 
   const saveStrategy = async () => {
@@ -3620,10 +3648,30 @@ export default function OptionsStrategyLab() {
     chain: chains[tk], ticker: tk, iv: getU(tk).iv, seasonal: seasonalFor(tk), matrix: seasonal[tk]?.matrix || null, request, freeSizing,
     gate: (proposal) => gate(proposal, bookFor(!!alpaca)), floors, contracts, level: liqLevel, fuseAt: (d) => fuseFind(tk, d), name: stratName }),
   [chains, seasonalFor, seasonal, request, freeSizing, gate, bookFor, alpaca, liqLevel, fuseFind, stratName]); // eslint-disable-line
-  /* BUILD'S VARIANTS (PR 4b): the loaded structure moved on the strikes the chain lists (alternatives.js), priced. */
-  const buildVariants = useMemo(() => (AE && legs.length && chain
+  /* BUILD'S VARIANTS (PR 4b): the loaded structure moved on the strikes the chain lists (alternatives.js), priced.
+     PR 70: a variant naming a leg the chain does not quote comes back `cut` (`chainQuotedLegs()`); it is never a row,
+     and the ones left out are counted under the list (`unpriceableNote()`). */
+  const variantsPriced = useMemo(() => (AE && legs.length && chain
     ? variantsOf({ legs, expKey, chain, spot }).map((v) => priceAlt(ticker, v)).filter(Boolean) : []),
   [AE, legs, expKey, chain, spot, ticker, priceAlt]); // eslint-disable-line
+  const buildVariants = useMemo(() => variantsPriced.filter((r) => !r.cut), [variantsPriced]);
+  const variantsLeftOut = variantsPriced.length - buildVariants.length;
+  // Behind the variants' "How they are made ⓘ", as Find keeps its own behind "why": one tap away.
+  const variantsLeftNote = variantsLeftOut > 0 ? unpriceableNote(variantsLeftOut, ticker) : null;
+  /* SEND REFUSED ON A LEG, AND THE FIX ONE TAP AWAY (PR 70, task 70.3). When the gate refuses this trade because a leg
+     is not listed or quoted (UNLISTED_CONTRACT) or a bought leg has no bid (UNPRICEABLE), the same structure with those
+     legs on the nearest strikes their type lists and quotes (`nearestListedOf()`), priced like a variant (`priceAlt()`),
+     is offered under Send with "Load ›" — the owner's own way out on XLE 27 Nov, now one tap from the refusal. */
+  const listedFix = useMemo(() => {
+    if (!AE || !guard || guard.pass || !chain) return null;
+    if (!guard.violations.some((x) => x.code === "UNLISTED_CONTRACT" || x.code === "UNPRICEABLE")) return null;
+    const ql = chainQuotedLegs({ legs, quotes: quotesOf(AE) });
+    if (ql.ok) return null;
+    const alt = nearestListedOf({ legs, expKey, chain, bad: ql.bad });
+    if (!alt) return { lead: LISTED_FIX_NONE, rows: [] };
+    const row = priceAlt(ticker, alt);
+    return !row || row.cut ? { lead: LISTED_FIX_NONE, rows: [] } : { lead: listedFixLead(alt.moved), rows: [row] };
+  }, [AE, guard, chain, legs, expKey, ticker, priceAlt]); // eslint-disable-line
   /* Which band this expiry falls in, for the screen. The gate decides; this
      only decides what the screen has to ASK for. */
   const room = useMemo(() => entryRoom(dte), [dte]);
@@ -3670,6 +3718,11 @@ export default function OptionsStrategyLab() {
     return Math.abs(d) < 0.05 ? 0 : Math.sign(d);
   }, [A]);
   const clash = useMemo(() => againstSignal(fused[ticker], tradeDir), [fused, ticker, tradeDir]);
+  /* WHAT THE TRADE NEEDS IS THE PAYOFF'S (PR 70): `payoffNeed()` reads the expiry payoff's profit zones — up, down, stay
+     between, move far. Every SENTENCE about where the trade pays reads it (the "Why" line, the trade card's bets-on line,
+     the RSI warning); `tradeDir` above (the net delta) still decides only against-the-signals, unchanged. Read live, XLE:
+     an iron condor's delta past 0.05 printed "This structure needs XLE to go up". */
+  const tradeNeed = useMemo(() => payoffNeed(BF.bands), [BF.bands]);
   // ONE HOME FOR THE OVERRIDE MINIMUM. This was a bare 15 sitting beside the
   // constant it is a copy of; the entry-room override added a second caller and
   // a second copy is how the two come to disagree about what a reason is.
@@ -3701,7 +3754,7 @@ export default function OptionsStrategyLab() {
   const buildCard = useMemo(() => {
     if (!AE) return null;
     return tradeCard({
-      ticker, name: stratName, dir: tradeDir, spot, expKey, dte,
+      ticker, name: stratName, dir: tradeDir, need: tradeNeed, spot, expKey, dte,
       maxLoss: AE.maxLoss, maxProfit: AE.maxProfit, breakevens: AE.breakevens,
       profitUnbounded: AE.profitUnbounded, contracts,
       /* THE PRICE THE FIGURES WERE WORKED OUT AT, BY NAME. `AE.entry` is
@@ -3716,7 +3769,7 @@ export default function OptionsStrategyLab() {
       agreement: fused[ticker]?.agreement || null,
       clashCount: clash ? clash.n : 0,
     });
-  }, [AE, ticker, stratName, tradeDir, spot, expKey, dte, contracts, chance, guard, fused, clash]);
+  }, [AE, ticker, stratName, tradeDir, tradeNeed, spot, expKey, dte, contracts, chance, guard, fused, clash]);
 
   /* ---- scanner ----
      Il punteggio non è più la sola stagionalità: pesa fuseSignals(), che
@@ -3795,7 +3848,8 @@ export default function OptionsStrategyLab() {
       const d2 = c.byExp[ek].dte;
       // THE SIGNALS FOR THIS MARKET ON THIS BOARD'S DAYS (PR #48): keyed by (market, dte), the same as Build's.
       const fHere = fuseFind(tk, d2);
-      const strikes = expiryStrikes(c, ek);
+      // PR 70: the board PER TYPE (`boardStrikes()`): a preset's put snaps onto the strikes the puts list.
+      const strikes = boardStrikes(c, ek);
       if (!strikes) { failed.push({ tk, why: "board unreadable" }); continue; }
       /* "SIGNALS DECIDE" (PR #48, TASK 3): the suggested family PLUS the Neutral one, each card tagged with the
          family it came from; a market still being read shows its Neutral cards only. A fixed direction is as before. */
@@ -4163,7 +4217,7 @@ export default function OptionsStrategyLab() {
     for (const [tk, b] of Object.entries(findGen.boards || {})) {
       const c = chains[tk];
       if (!c?.spot || !b) continue;
-      const strikes = expiryStrikes(c, b.expKey);
+      const strikes = boardStrikes(c, b.expKey);
       if (!strikes) continue;
       const u = getU(tk), qq = makeQuote(c, b.expKey);
       for (const l of LIQUIDITY_LEVELS) {
@@ -4465,14 +4519,14 @@ export default function OptionsStrategyLab() {
               <Panel style={{ marginTop: 10 }}>
                 <Label>TWO QUESTIONS · WHERE IT ENDS, AND HOW IT ENDS</Label>
                 <div style={{ fontSize: FS.sm, color: T.body, marginTop: 8, lineHeight: 1.6 }}>
-                  <b style={{ color: T.blue }}>CHANCE</b> (everywhere — Radar, Shortlist, Build, your open positions and the autopilot's brief): where the price finishes <i>at expiry</i>, and whether the trade is in profit there. One simulation, one seed, the same number on every screen. Use it to <b>compare trades</b>.<br/>
+                  <b style={{ color: T.blue }}>CHANCE</b> (everywhere — Radar, Shortlist, Build, your open positions and the autopilot's brief): where the price finishes <i>at expiry</i>, and whether the trade is in profit there. {CHANCE_EXACT_LINE} Use it to <b>compare trades</b>.<br/>
                   <b style={{ color: T.violet }}>EXIT PATH</b> (on open positions): a different question — it walks day by day <i>from today</i> and applies your own rules ({ruleBadge()}), so it answers "from here, how does this end if I stick to the plan?" rather than "where does it finish". Use it to <b>decide whether to hold or take the money</b>.
                 </div>
               </Panel>
 
               <Panel style={{ marginTop: 10 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-                  <Label>THE SIMULATION BEHIND THE CHANCE — "{stratName}"</Label>
+                  <Label>{CHANCE_METHOD_HEAD} — "{stratName}"</Label>
                   <Btn small onClick={runMC} disabled={!A || !seas.matrix}><FlaskConical size={12} /> Replay the real years</Btn>
                 </div>
                 {/* THE SIMULATION IS NOT BEHIND A BUTTON ANY MORE, and that is
@@ -4485,7 +4539,11 @@ export default function OptionsStrategyLab() {
                 {chance ? (
                   <>
                     <div style={{ display: "flex", gap: 16, marginTop: 12, flexWrap: "wrap" }}>
-                      <Stat k="CHANCE OF PROFIT" v={chanceText(chance.pop)} c={chance.pop >= 0.5 ? T.green : T.red} tip={chanceSourceNote(chance, ticker)} />
+                      {/* PR 70: the two chances the card prints (PR 67), in their own words — the OSL model's, exact, and the market's. */}
+                      {chanceLines(chance.pop, BF.mkt).map((ln) => (
+                        <Stat key={ln.id} k={ln.word.toUpperCase()} v={ln.value} c={ln.pop == null ? T.mut : ln.pop >= 0.5 ? T.green : T.red}
+                          tip={ln.id === "model" ? chanceSourceNote(chance, ticker) : CHANCE_TWO_INFO} />
+                      ))}
                       <Stat k="AVERAGE RESULT" v={signedMoney(chance.ev)} c={chance.ev >= 0 ? T.green : T.red} tip="The average over every outcome the model allows, a combination at a time — not the best case weighted by the chance." />
                       <Stat k="BAD CASE" v={fmt$(chance.p5)} c={T.red} tip="Only 1 outcome in 20 is worse than this." />
                       <Stat k="TYPICAL" v={fmt$(chance.p50)} />
@@ -4576,11 +4634,11 @@ export default function OptionsStrategyLab() {
                           say where that N came from — it is to name the number
                           that produced the figures above, with its source, and
                           stop printing one that produced nothing here. */}
-                      Simulated at {pctText(chance.sigma)} implied volatility from the {chance.ivSource}, drifted on {ticker}&apos;s {chance.seasonalMeasured ? "measured" : "hand-written"} seasonality — both named in full above. A simplified model: no price jumps, no volatility term structure.
+                      {chanceMethodLine(chance, BF.mkt, ticker)}
                     </div>
                   </>
                 ) : (
-                  <div style={{ ...mono, fontSize: FS.xs, color: T.mut, marginTop: 10 }}>Press "Run it" for the odds, the spread of outcomes, and what happened in each past year.</div>
+                  <div style={{ ...mono, fontSize: FS.xs, color: T.mut, marginTop: 10 }}>{chanceMethodLine(null, null, ticker)}</div>
                 )}
               </Panel>
               {/* PR 68 (P5): the exit rules on past days, under the backtest panel. */}
@@ -5041,9 +5099,7 @@ export default function OptionsStrategyLab() {
                 fused={fused[ticker]}
                 ticker={ticker} weatherData={weather} newsItems={newsPool} month={NOW_MONTH}
                 title={`WHY THIS TRADE · ${ticker}`}
-                note={tradeDir === 0
-                  ? "This structure is direction-neutral: it wants a quiet tape more than a call on direction."
-                  : `This structure needs ${ticker} to go ${tradeDir > 0 ? "up" : "down"}.`}
+                note={structureNeedsLine(tradeNeed, ticker)}
               />
 
           </Reveal>);
@@ -5098,10 +5154,10 @@ export default function OptionsStrategyLab() {
                       <button onClick={() => updLeg(i, "side", -l.side)} style={{ ...mono, fontSize: FS.xs, fontWeight: 800, width: 52, padding: "5px 0", borderRadius: 5, cursor: "pointer", background: l.side > 0 ? `${T.green}22` : `${T.red}22`, color: l.side > 0 ? T.green : T.red, border: `1px solid ${l.side > 0 ? T.green : T.red}55` }}>
                         {l.side > 0 ? "BUY" : "SELL"}
                       </button>
-                      <button onClick={() => updLeg(i, "type", l.type === "call" ? "put" : "call")} style={{ ...mono, fontSize: FS.xs, fontWeight: 700, width: 52, padding: "5px 0", borderRadius: 5, cursor: "pointer", background: `${T.blue}18`, color: T.blue, border: `1px solid ${T.blue}44` }}>
+                      <button onClick={() => flipLegType(i)} style={{ ...mono, fontSize: FS.xs, fontWeight: 700, width: 52, padding: "5px 0", borderRadius: 5, cursor: "pointer", background: `${T.blue}18`, color: T.blue, border: `1px solid ${T.blue}44` }}>
                         {l.type.toUpperCase()}
                       </button>
-                      <StrikeSelect strikes={expStrikes} value={l.strike} step={U.step}
+                      <StrikeSelect strikes={strikesFor(expStrikes, l.type)} value={l.strike} step={U.step}
                         onChange={(v) => updLeg(i, "strike", v)} />
                       <QtyField value={l.qty} min={1} max={10} ariaLabel={`Leg ${i + 1} quantity`} onValue={(n) => updLeg(i, "qty", n)}
                         onValidity={(ok, note) => setLegQtyErr((m) => ({ ...m, [i]: ok ? null : note }))} style={{ width: 48 }} />
@@ -5373,7 +5429,10 @@ export default function OptionsStrategyLab() {
                 // compares the season with the trend; with one of the two
                 // unknown there is nothing to agree or disagree about, and a
                 // zero would make "the season is flat" out of "nobody looked".
-                const cf = seasNow == null ? null : confluence(seasNow, t2);
+                // PR 70: the RSI warning follows the way the trade needs the price to move (the payoff's lean, else the
+                // net delta's): a condor around today's price leans nowhere, and is warned of nothing.
+                const cf = seasNow == null ? null : confluence(seasNow, t2,
+                  tradeNeed ? tradeNeed.lean : tradeDir > 0 ? "up" : tradeDir < 0 ? "down" : null);
                 if (!cf) return null;
                 return (
                   <div style={{ marginTop: 10, padding: "10px 12px", background: `${cf.c}0d`, border: `1px solid ${cf.c}55`, borderRadius: 8 }}>
@@ -5546,10 +5605,14 @@ export default function OptionsStrategyLab() {
             ] },
             // PR 4b: the loaded structure's variants, priced like cards; "Load ›" keeps a roll's origin (it is still a roll).
             variants: { rows: buildVariants, note: VARIANTS_NOTE, none: VARIANTS_NONE,
+              left: variantsLeftNote,
               onLoad: (alt) => openOnBuild({ ticker, expKey: alt.expKey, legs: alt.legs, name: stratName,
                 origin: buildOrigin && buildOrigin.kind === "roll" ? buildOrigin : { kind: "variant", key: null } }) },
             optimize: buildOrigin && buildOrigin.kind === "roll" ? null : optimizeView,
             send: { label: sendLabel({ type: ticket.type, net, n: contracts }), disabled: !!sendBlock, reason: sendBlock,
+              // PR 70: the refused leg's nearest listed alternative, one tap ("Load ›"), beside the refusal.
+              fix: sendBlock && listedFix ? { ...listedFix, onLoad: (alt) => openOnBuild({ ticker, expKey: alt.expKey, legs: alt.legs, name: stratName,
+                origin: buildOrigin && buildOrigin.kind === "roll" ? buildOrigin : { kind: "variant", key: null } }) } : null,
               footer: SEND_FOOTER(ticket.tif), onSend: () => setDeskSheet("review") },
             review: reviewNow,
             ticket: { legs, expKey, ticker, quotes: bookQuotes, net, estNet: AE.entry, gate, dte, maxLoss: AE.maxLoss, maxProfit: AE.maxProfit,

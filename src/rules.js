@@ -942,6 +942,25 @@ export const chanceSourceNote = (mc, ticker = "this market") => {
       years: mc.seasonalYears ?? null, ageDays: mc.seasonalAgeDays ?? null }));
 };
 
+/* HOW THE CHANCE IS WORKED OUT, IN "MORE ON THIS TRADE" (PR 70). The panel still said "One simulation, one seed" and "THE
+   SIMULATION BEHIND THE CHANCE … Simulated at 25.9%" after PR 62 replaced the 8,000 seeded runs with the exact answer, and
+   PR 67 added the market's own chance beside it. These are its words now; no simulation is named under a figure. */
+export const CHANCE_METHOD_HEAD = "HOW THE CHANCE IS WORKED OUT";
+/** The CHANCE half of "Two questions": what it answers and how it is worked out. */
+export const CHANCE_EXACT_LINE = "Two chances, the same on every screen: the OSL model's, worked out exactly on one volatility " +
+  "and the measured season (no runs, no seed), and the market's, what this expiry's option prices imply.";
+/** One line under the panel's figures, from the two chances' own provenance. */
+export function chanceMethodLine(mc, mkt = null, ticker = "this market") {
+  if (!mc) return chanceSourceNote(null, ticker);
+  const season = mc.seasonalMeasured && Number.isFinite(Number(mc.driftAnnual)) && Number(mc.driftAnnual) !== 0
+    ? `drifting at ${pctText(mc.driftAnnual)} a year on ${ticker}'s measured season`
+    : `at zero drift (${ticker}'s season adds none over this window)`;
+  const market = mkt && mkt.pop != null ? `${CHANCE_LINES.market} ${chanceText(mkt.pop)}: this expiry's option prices, strike by strike.`
+    : marketNotReadText(mkt) || "";
+  return `${CHANCE_LINES.model} ${chanceText(mc.pop)}: worked out exactly at ${pctText(mc.sigma)} implied volatility from the ` +
+    `${mc.ivSource}, ${season}; no price jumps, no volatility term structure. ${market}`.trim();
+}
+
 /* ============================== rule text ==============================
    Short labels the UI renders. Generated from RULES so changing a number
    changes every screen at once. Never hand-write these strings. */
@@ -1533,6 +1552,63 @@ export function needsText(b, tk) {
   if (atHi) return `Needs ${tk} above ${f(z.lo)} at expiry`;
   return `Needs ${tk} between ${f(z.lo)} and ${f(z.hi)} at expiry`;
 }
+/**
+ * WHAT THE PAYOFF NEEDS THE PRICE TO DO (PR 70), read off the expiry payoff's profit zones (`payoffBands()`), never off
+ * the net delta, the leg count or the first leg. Read live, XLE 27 Nov: an iron condor's delta sat past ±0.05 and Build
+ * said "This structure needs XLE to go up" — a condor needs XLE to stay between its breakevens.
+ *   up       one profit zone running to the top of the range       → lo is where it starts paying
+ *   down     one profit zone running to the bottom                 → hi is where it stops paying
+ *   between  one profit zone inside the range (condor, butterfly)  → lo, hi
+ *   apart    two profit zones, one at each end (long strangle)     → lo, hi: the inner edges
+ * `lean` is the way the price has to MOVE from today's (`b.spot`): "up" / "down", or null when today's price already sits
+ * in the zone (a condor around the price), the trade pays far either way, or today's price is not known. A butterfly
+ * centred below today's price is "between" and leans "down".
+ * Null for a payoff with no profit zone, or a shape these four words do not fit.
+ */
+export function payoffNeed(b) {
+  if (!b || !Array.isArray(b.bands)) return null;
+  const up = b.bands.filter((z) => z.sign > 0);
+  const atLo = (z) => z.lo <= b.lo + 1e-9, atHi = (z) => z.hi >= b.hi - 1e-9;
+  const sp = b.spot != null && Number.isFinite(Number(b.spot)) ? Number(b.spot) : null;
+  if (up.length === 1) {
+    const z = up[0];
+    if (atLo(z) && atHi(z)) return null;
+    if (atHi(z)) return { need: "up", lo: z.lo, hi: null, lean: "up" };
+    if (atLo(z)) return { need: "down", lo: null, hi: z.hi, lean: "down" };
+    const lean = sp == null ? null : sp < z.lo ? "up" : sp > z.hi ? "down" : null;
+    return { need: "between", lo: z.lo, hi: z.hi, lean };
+  }
+  if (up.length === 2 && atLo(up[0]) && atHi(up[1])) return { need: "apart", lo: up[0].hi, hi: up[1].lo, lean: null };
+  return null;
+}
+/** Build's "Why this trade" line, from `payoffNeed()` (PR 70). */
+export function structureNeedsLine(n, tk = "the price") {
+  const f = (v) => `$${Number(v).toFixed(2)}`;
+  if (!n) return "Where this structure pays is drawn on the chart above; it is not one direction.";
+  if (n.need === "up") return `This structure needs ${tk} to go up: above ${f(n.lo)} at expiry.`;
+  if (n.need === "down") return `This structure needs ${tk} to go down: below ${f(n.hi)} at expiry.`;
+  if (n.need === "between" && n.lean) return `This structure needs ${tk} to go ${n.lean}, to between ${f(n.lo)} and ${f(n.hi)} at expiry.`;
+  if (n.need === "between") return `This structure needs ${tk} to stay between ${f(n.lo)} and ${f(n.hi)} at expiry: a quiet tape, not a call on direction.`;
+  return `This structure needs ${tk} to move far, either way: below ${f(n.lo)} or above ${f(n.hi)} at expiry.`;
+}
+/**
+ * THE RSI WARNING FOLLOWS THE TRADE (PR 70). Read live, XLE: "Buying here often means buying the top" was printed over a
+ * CREDIT iron condor — the warning read the RSI and nothing about the trade. It speaks only when the trade needs the move
+ * that just ran to keep going: up after a run hot (RSI ≥ 70), down after a fall (RSI ≤ 30). A trade that needs the
+ * price to stay put, to move either way, or the other way gets nothing. `need` is `payoffNeed()`'s word (or, for a
+ * payoff it cannot name, the net delta's "up" / "down").
+ */
+export function rsiWarning(rsi, need) {
+  if (rsi == null || !Number.isFinite(Number(rsi))) return null;
+  const r = Number(rsi).toFixed(0);
+  if (Number(rsi) >= 70 && need === "up") {
+    return `⚠ The price has run hot recently (RSI ${r}), and this trade needs it to keep rising. An entry after a run like this often comes near the top — waiting for a dip usually gets a better one.`;
+  }
+  if (Number(rsi) <= 30 && need === "down") {
+    return `⚠ The price has been beaten down recently (RSI ${r}), and this trade needs it to keep falling. A bounce is common after a fall like this.`;
+  }
+  return null;
+}
 export const DETAILS_FOLD = "Details";
 /** Build's backtest panel names its average with the same words (PR #49): "PAST YRS AVG". */
 export const PAST_AVG_LABEL = "PAST YRS AVG";
@@ -2004,7 +2080,17 @@ export const VARIANT_LABELS = Object.freeze({
   up: "Strikes one step higher", down: "Strikes one step lower", wider: "Wider wings", narrower: "Narrower wings",
   later: "Same strikes, next expiry", roll: "Same strikes", rollUp: "One step higher", rollDown: "One step lower",
   rollWider: "Wider wings", rollNarrower: "Narrower wings",
+  // PR 70: the same structure with the leg the gate refused moved to the nearest strike its type lists and quotes.
+  listed: "Nearest listed strike",
 });
+/** Under Send's refusal (PR 70): which leg moved where in the one-tap fix ("59.5P → 60P"), then the row with Load ›. */
+export const listedFixLead = (moved = []) => {
+  const ms = Array.isArray(moved) ? moved : [];
+  if (!ms.length) return null;
+  return `The same structure on strikes this board lists and quotes: ${ms.map((m) => `${legName(m.from)} → ${legName(m.to)}`).join(", ")}.`;
+};
+/** When no listed strike of that type can stand in for the refused leg. */
+export const LISTED_FIX_NONE = "This board lists no quoted strike of that type to put in its place: pick another expiry.";
 export const VARIANTS_HEAD = "VARIANTS OF THIS TRADE";
 export const VARIANTS_NOTE = "The same structure moved on the strikes the chain lists, priced and sized like a card, checked by the gate at the size the budget buys. Load one to see it in full.";
 export const VARIANT_LOAD = "Load ›";
@@ -2335,6 +2421,16 @@ export const TRAY_LABELS = Object.freeze({ debit: "Debit", credit: "Credit", max
   chance: "Chance", noCap: "No cap", clear: "Clear" });
 export const uncoveredText = () => "Build is blocked: a short leg is not covered, and the gate refuses an uncovered short leg. Add the leg that covers it.";
 export const trayEmptyText = () => "Tap an ask to buy one, a bid to sell one. Tap it again to remove it.";
+/* A LEG THE BOARD DOES NOT QUOTE IS REPLACED, NOT ADDED TO (PR 70). Read live, XLE 27 Nov: "Edit in chain" carried a 59.5P
+   the board lists no put for — no cell to tap it away, four legs already in the tray — so every tap was refused as full.
+   Now a tap on the same type and side replaces that leg, and these say so. */
+/** The tray chip's mark on a leg this board does not quote. */
+export const TRAY_UNLISTED = "not listed";
+/** The note while the tray holds such a leg: what a tap will do. */
+export const trayReplaceHint = (leg) =>
+  `No ${legName(leg)} on this board: tap a ${leg && leg.type === "call" ? "call" : "put"} ${Number(leg && leg.side) < 0 ? "bid" : "ask"} to replace it.`;
+/** After a tap replaced it. */
+export const trayReplacedText = (from, to) => `${legName(from)} replaced by ${legName(to)}.`;
 /** The event line (redesign PR 1, TASK 4): "WASDE · Fri 9 Oct, 18:00 your time · in 5 days · before 20 Nov".
  *  Round 2: `dateOnly` (the publisher gives the day, not the hour: "FOMC · decision Wed 28 Oct · in 24 days") and
  *  `publisher` (the holiday note names who may move it); without them the line reads exactly as before. */
@@ -2848,10 +2944,57 @@ export function priceability({ legs = [], quotes = [], net = null, maxLoss = nul
   return { priceable: reasons.length === 0, reasons, why, noBid, unknownQuotes, netDollars };
 }
 
-/** The one line a list prints in place of a structure it could not price. */
+/* -------------------------------------------------------------------------
+ * A PROPOSED TRADE NAMES ONLY CONTRACTS THE CHAIN QUOTED (PR 70).
+ *
+ * >>> READ ON THE OWNER'S PHONE, XLE 27 Nov 2026 board, 13 Oct 2026. <<< Find
+ * proposed −62.5P / −69C / +70C / +59.5P. The chain lists a 59.5 CALL and no
+ * 59.5 PUT, so `analyze()` priced that leg off the model ("◌"), and
+ * `priceability()` let it through: a leg with no quote at all is UNKNOWN there,
+ * and unknown tests nothing. Right for the gate — a hand-built trade is the
+ * user's, and UNLISTED_CONTRACT refuses the contract by name — but wrong for a
+ * PROPOSAL: the app offered a trade it then refused.
+ *
+ * So the places that GENERATE candidates (Find's floors, the variants, Optimize,
+ * the roll, Build's default preset) ask one more, stricter question, here and
+ * only here; `priceability()` and the gate are unchanged.
+ *
+ *  1. EVERY LEG IS PRICED OFF THE CHAIN'S OWN QUOTE (`real` from `analyze()`:
+ *     the chain answered about that contract with a price). In production that
+ *     is the same as "the chain listed it": every quote carries its OCC symbol.
+ *  2. EVERY LEG YOU BUY HAS A BID ABOVE ZERO — known, not just "not zero": a
+ *     proposal you could not sell back is not proposed.
+ * ------------------------------------------------------------------------- */
+/**
+ * @param legs    [{ side, type, strike, qty }]
+ * @param quotes  one per leg, aligned: `{ bid, ask, real }` — `real` true when the chain quoted that leg (`analyze()`'s
+ *                `legPx[i].real`); a missing entry or `real` not true is a leg the chain does not quote.
+ * @returns {{ ok, unquoted: {i, leg, side}[], noBid: {i, leg, side}[], bad: number[], reasons }}
+ */
+export function chainQuotedLegs({ legs = [], quotes = [] } = {}) {
+  const ls = Array.isArray(legs) ? legs : [];
+  const qs = Array.isArray(quotes) ? quotes : [];
+  const unquoted = [], noBid = [];
+  ls.forEach((l, i) => {
+    const qt = qs[i] || null;
+    const side = Math.sign(+(l && l.side) || 1);
+    if (!qt || qt.real !== true) { unquoted.push({ i, leg: l, side }); return; }
+    if (side > 0 && !(qt.bid != null && Number(qt.bid) > 0)) noBid.push({ i, leg: l, side });
+  });
+  const reasons = [];
+  if (unquoted.length) reasons.push(unlistedContractNote(unquoted, ls.length));
+  if (noBid.length) {
+    reasons.push(`Nobody is bidding for the ${noBid.map((m) => legName(m.leg)).join(", ")} you would be buying: its bid is 0, ` +
+      `so you could not sell it back at any price, and the app does not propose it.`);
+  }
+  const bad = [...unquoted, ...noBid].map((m) => m.i).sort((a, b) => a - b);
+  return { ok: !bad.length, unquoted, noBid, bad, reasons };
+}
+
+/** The one line a list prints in place of a structure it could not price. PR 70: or one naming a leg the chain does not list. */
 export const unpriceableNote = (n, what) =>
   `${n} structure${n === 1 ? "" : "s"} ${n === 1 ? "was" : "were"} left out because ${n === 1 ? "its" : "their"} ` +
-  `price could not be read${what ? ` on ${what}` : ""}: a leg nobody bids for, or a net of about nothing. ` +
+  `price could not be read${what ? ` on ${what}` : ""}: a leg the chain does not list, a leg nobody bids for, or a net of about nothing. ` +
   `A maximum loss the app cannot compute is not a maximum loss of zero, and nothing here is shown at ${money(0)}.`;
 
 /* -------------------------------------------------------------------------
@@ -2983,10 +3126,21 @@ export const marketOrderNote = (book = null) => {
 export const strikeSnapNote = (moved = [], expKey = null) => {
   const ms = Array.isArray(moved) ? moved : [];
   if (!ms.length) return null;
+  // PR 70: a leg snaps onto its OWN type's strikes, so a moved leg is named with its type ("59.5P → 60P").
+  const t = (m) => (m.type === "call" ? "C" : m.type === "put" ? "P" : "");
   return `${ms.length === 1 ? "One strike was" : `${ms.length} strikes were`} moved onto ` +
-    `${expKey ? `the ${expKey} board` : "this board"}: ${ms.map((m) => `${m.from} → ${m.to}`).join(", ")}. ` +
+    `${expKey ? `the ${expKey} board` : "this board"}: ${ms.map((m) => `${m.from}${t(m)} → ${m.to}${t(m)}`).join(", ")}. ` +
     `Strikes are a property of the board, not of the trade, and a leg carried over from another expiry can name a ` +
     `contract this one does not list. That is the symbol the broker refused on 20 September.`;
+};
+
+/** CALL ↔ PUT moved a leg (PR 70, `toggleLegType()`): the new type does not list its strike. Null when nothing moved. */
+export const typeSnapNote = (moved = [], expKey = null) => {
+  const m = (Array.isArray(moved) ? moved : [])[0];
+  if (!m) return null;
+  const kind = m.type === "call" ? "call" : "put";
+  return `${expKey ? `The ${expKey} board` : "This board"} lists no ${m.from} ${kind}, so the leg moved to the nearest ` +
+    `${kind} it lists: ${m.from}${kind === "call" ? "C" : "P"} → ${m.to}${kind === "call" ? "C" : "P"}.`;
 };
 
 /**
@@ -7193,12 +7347,13 @@ export const cardCurrencyNote = () =>
   `USD, so that is the currency the broker fills in and the one the app counts in — nothing here is converted.`;
 
 /** Where a payoff pays, in words, from the breakevens the analysis produced. */
-const profitWhere = (breakevens = [], dir = 0) => {
+const profitWhere = (breakevens = [], dir = 0, need = null) => {
   const bs = (Array.isArray(breakevens) ? breakevens : []).filter((b) => known(b)).map(Number).sort((a, b) => a - b);
   if (!bs.length) return null;
   const px = (b) => `$${b.toFixed(2)}`;
   if (bs.length === 1) return `${dir < 0 ? "below" : "above"} ${px(bs[0])}`;
-  if (bs.length === 2) return dir === 0 ? `between ${px(bs[0])} and ${px(bs[1])}` : `between ${px(bs[0])} and ${px(bs[1])}`;
+  // PR 70: two breakevens are "between" for a condor and "outside" for a long strangle — the payoff says which.
+  if (bs.length === 2) return need === "apart" ? `below ${px(bs[0])} or above ${px(bs[1])}` : `between ${px(bs[0])} and ${px(bs[1])}`;
   return `around ${bs.map(px).join(" / ")}`;
 };
 
@@ -7218,17 +7373,22 @@ export function tradeCard({
   maxLoss = null, maxProfit = null, breakevens = [], profitUnbounded = false,
   contracts = 1, chance = null, chanceNote = null, limits = null, notional = null,
   agreement = null, clashCount = 0, seasonalNote = null,
-  entry = null, entrySource = null, takeProfit = null,
+  entry = null, entrySource = null, takeProfit = null, need = null,
 } = {}) {
   const n = Math.max(1, Math.round(Number(contracts) || 1));
+  /* PR 70: WHAT THE TRADE BETS ON IS THE PAYOFF'S (`payoffNeed()`'s object), when the caller hands it in: the net delta
+     (`dir`) called an iron condor "goes up". Without it, `dir` reads as before. */
+  const shape = need && need.need ? need.need : null;
+  if (shape) dir = need.lean === "up" ? 1 : need.lean === "down" ? -1 : 0;
   const risk = known(maxLoss) ? Math.abs(Number(maxLoss)) * n : null;
   const best = profitUnbounded || !known(maxProfit) ? null : Number(maxProfit) * n;
-  const where = profitWhere(breakevens, dir);
+  const where = profitWhere(breakevens, dir, shape);
   const days = known(dte) ? Math.round(Number(dte)) : null;
   const room = days == null ? null : days - RULES.exitDTE;
 
   /* 1 — WHAT YOU ARE BETTING ON. Direction, the level, and the horizon. */
-  const dirWord = dir > 0 ? "goes up" : dir < 0 ? "goes down" : "stays where it is";
+  const dirWord = shape === "between" && !dir ? "stays between two prices" : shape === "apart" ? "moves far, either way"
+    : dir > 0 ? "goes up" : dir < 0 ? "goes down" : "stays where it is";
   const bet = `${ticker} ${dirWord}. ${where
     ? `You make money ${where} at expiry`
     : `Where it pays cannot be read: this structure has no breakeven the app could compute`}${
