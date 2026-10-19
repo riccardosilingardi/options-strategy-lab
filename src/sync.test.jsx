@@ -31,11 +31,25 @@ check("settings.findOrder IS IN THE SYNC PAYLOAD (PR #48, the one payload change
   const r = hydrateFromServer(null, { positions: [J1], settings: { findOrder: "chance" } });
   eq(r.settings.findOrder, "chance", "adopted from the server");
   const app = readFileSync("src/App.jsx", "utf8");
-  const post = app.slice(app.indexOf('fetch("/api/state", { method: "POST"'), app.indexOf("catch { /* offline ok */ }", app.indexOf('fetch("/api/state", { method: "POST"')));
+  // The payload is built in ONE place (`serverPayload()`, PR 71) and the save posts exactly it.
+  const at = app.indexOf("const serverPayload = (st) =>");
+  if (at < 0) throw new Error("no serverPayload()");
+  const post = app.slice(at, app.indexOf("\n", at));
+  if (!app.includes('body: JSON.stringify(serverPayload(st))')) throw new Error("the save does not post serverPayload()");
   if (!post.includes('findOrder: st.settings?.findOrder || "ev"')) throw new Error("findOrder is not posted");
-  // …and nothing else new: the payload's keys are the eight it had plus findOrder.
+  // …and nothing else new: the payload's keys are the eight it had plus findOrder, plus PR 71's Journal and counter.
   const keys = [...post.matchAll(/(\w+): (?:st\.|!!st\.)/g)].map((m) => m[1]);
-  eq(JSON.stringify(keys), JSON.stringify(["positions", "webhook", "capital", "concurrentTarget", "savings", "sizeOverride", "sizingFree", "notifyWhenReady", "findOrder"]), "payload keys");
+  eq(JSON.stringify(keys), JSON.stringify(["positions", "webhook", "capital", "concurrentTarget", "savings", "sizeOverride", "sizingFree", "notifyWhenReady", "findOrder", "journal", "journalSeq"]), "payload keys");
+});
+
+check("PR 71: a browser with nothing saved adopts the server's Journal too — even when no position is open", () => {
+  const E1 = { id: 7, ref: "J-0007", t: 1, ticker: "UNG", legs: [] };
+  const r = hydrateFromServer(null, { positions: [], journal: [E1], journalSeq: 9 });
+  eq(r.journal.length, 1, "the Journal adopted");
+  eq(r.journalSeq, 9, "with its counter");
+  eq(r.positions.length, 0, "and no position invented");
+  const both = hydrateFromServer(null, { positions: [J1], journal: [E1] });
+  eq(both.positions.length + both.journal.length, 2, "both adopted");
 });
 
 check("A LOCAL STORE ALWAYS WINS — even an empty one, which is the owner's own newer word", () => {

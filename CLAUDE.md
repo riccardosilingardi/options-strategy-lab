@@ -252,6 +252,14 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
   entry by `commitPosition()`; never a new /api/state field) and `chanceCalibration()` in journal.js: bands and Brier
   scores only once `RULES.calibrationMinTrades` closed trades carry both and a result read from a fill; until then the
   count and "too few to judge". Its words are journalView.js's.
+- **The Journal is on the server (PR 71): `journal` and `journalSeq` ride on `/api/state`, MERGED, never replaced.** One
+  home for the rule, `src/journalSync.js`: an entry is keyed by ref AND position id (`journalKey()`), the newer `updatedAt`
+  wins (`journalEntry()` stamps it at filing; every later edit of a FILED entry goes through `touchEntry()`), nothing is
+  dropped, the counter is the highest either side has seen (`mergedSeq()`). The server's POST merges (`mergeStateBody()`:
+  every other key the body sends replaces, a key it omits is kept); the load merges the server's into the browser's, drops
+  an open position another device filed (`filedElsewhere()`, id and ref), and uploads `{ journal, journalSeq }` once when the
+  server lacks something (`journalBehind()`). A new ref reads the server's counter first (`serverSeq()` in App.jsx). The
+  payload is `serverPayload()`; the Journal's line under its title is `journalSyncLine()`. `copilotLog` stays on the device.
 - **The Journal's copilot (PR 4c)** asks about one closed trade (`closedTrade` in the context, the record's own words) and
   recommends nothing (`COPILOT_ROLE.journal`).
 - Plan first, then change surgically: the plan is the standing rule's ("Plan before you execute", above).
@@ -274,6 +282,7 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
 - `src/clock.js` — `marketClockLine()`, `localStamp()`: the market clock and times in the owner's own zone.
 - `src/alpacaContract.js` — Alpaca's order contract mirrored from alpaca-py.
 - `src/journal.js` — the position record: refs, timelines, size, stage, book, fills; `chanceCalibration()` (PR 68).
+- `src/journalSync.js` — one Journal on every device (PR 71): the merge by ref, the counter, what the server stores on a POST.
 - `src/positionView.js`, `src/positionCard.jsx` — what a Positions card and its Details sheet say
   (action, profit, three exits, entry against now). They compute nothing new: the profit is
   `posAlerts`', the target `takeProfitTarget()`, the stop level `stopWarningLevel()`.
@@ -433,6 +442,8 @@ All in `RULES`, `src/rules.js`, unless noted.
   rest and after the tap, the Journal's "Which chance came true") on the `+book` fixture, in their empty states
   (docs/screens/pr68/). `node scripts/measure-exits.mjs <dir> [month]` answers P5 per market and family from the owner's saved
   `/api/bars?sym=<TICKER>&days=1900` replies (`<TICKER>.json`); with none it says so and prints no number.
+- `node scripts/shoot-pr71.mjs [dir]` photographs the Journal's line under its title, saved on the server and (with the
+  harness's `+offline` flag: `/api/state` refused) only on this device, dark and light (docs/screens/pr71/).
 - `node scripts/measure-season.mjs` (months that count, on avFixture series), `node scripts/measure-signals.mjs`
   ("Signals decide" against the retired rule), `node scripts/measure-sweep.mjs` (design-system counts per file).
 - No order can be sent from the sandbox (no broker keys); live behaviour is an OWNER CHECK.
@@ -449,7 +460,8 @@ All in `RULES`, `src/rules.js`, unless noted.
   working, never as a decision.
 - The account and the clock are their own state (`account`, `clock`), set by the sync; never write them into `alpaca`,
   whose identity re-arms the sync.
-- `settings.notifyWhenReady`, `settings.sizingFree` and `settings.findOrder` must be in the `/api/state` sync payload.
+- `settings.notifyWhenReady`, `settings.sizingFree` and `settings.findOrder` must be in the `/api/state` sync payload
+  (`serverPayload()` in App.jsx, which since PR 71 also carries `journal` and `journalSeq`).
 - Free sizing is ONE gate input (`evaluateTrade({ sizingFree })`): it drops the per-trade,
   exposure and capital-not-set checks only. Never let it reach another check.
 - A card's size is `scaleStrategy()` on the maximum loss; `sizeLine()` prints contracts × risk.

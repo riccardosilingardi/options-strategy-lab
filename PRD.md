@@ -234,7 +234,14 @@ non-expert trader who wants to learn discipline rather than be sold trades.
     to Alpaca), Cancel (asks first) and Details (Alpaca's status history in your time, the order id last). An order with
     no record here is tagged "sent outside this app".
   The order prints once: Build and the desk show counts only. Integrations are in Settings → Connections.
-- **The Journal (the owner's board since redesign PR 3b).** THE RECORD (level, rule closes, awareness, what is next;
+- **The Journal (the owner's board since redesign PR 3b; on the server since PR 71).** Under the title one line says where
+  it is kept: "Saved on the server · updated 14:05", or in amber "Only on this device: the server did not answer". **One
+  Journal on the phone and the computer (PR 71):** `journal` and `journalSeq` ride on `/api/state` beside the positions and
+  are MERGED, never replaced (`src/journalSync.js`): one entry per trade (its ref and the position it was filed from), the
+  newer edit winning (`updatedAt`), nothing ever deleted by a save — an empty or cleared browser cannot erase the server's
+  Journal, and the ref counter is the highest either side has seen (a new ref also reads the server's counter first). On the
+  first load after PR 71 the browser's Journal is uploaded once; a browser with nothing saved adopts the server's; a position
+  another device has already filed (same id and ref) is no longer shown open. A preview reads and never writes. THE RECORD (level, rule closes, awareness, what is next;
   "inside the limit" and what the measures mean behind its ⓘ), **WHICH CHANCE CAME TRUE (PR 68)** — once ten closed trades
   carry both chances at entry (the market's, `thesis.marketPop`, stored since PR 68, and the OSL model's) and a result read
   from a fill: per band, what each said and how often it won, and each Brier score; until then "N trades so far — too few
@@ -519,7 +526,8 @@ carry what PR 63 changed. PR 65 re-read them: none closed; #3, #5, #8 and #10 ca
 OWNER CHECK, Optimize's speed on the phone. PR 66 re-read them: none closed; #3 and #8 carry what PR 66 changed. PR 67
 re-read them: none closed; #3, #7, #8, #9 and #10 carry what PR 67 changed, and #9 gains an OWNER CHECK, the market's
 chance against IBKR's. PR 68 re-read them: none closed; #3, #8 and #9 carry what PR 68 changed, and #9 gains an OWNER CHECK,
-the exit replay on real closes. PR 70 re-read them: none closed; #3 and #8 carry what PR 70 changed.)
+the exit replay on real closes. PR 70 re-read them: none closed; #3 and #8 carry what PR 70 changed. PR 71 re-read them: none
+closed; #6 gains the Journal's merge on the server.)
 
 1. **OWNER CHECK — the Journal entry for J-0001 shows the $7.65 fill** (v1 is reached on the owner's report of 5 Oct
    2026: filled 9 of 9 at $7.65, filed from the production address; this session cannot see that browser). **No Modify
@@ -605,7 +613,13 @@ the exit replay on real closes. PR 70 re-read them: none closed; #3 and #8 carry
    trade took 2.5–4 ms with 1 expiry, 5.5–6 with 2, 10–20 with 5 and 20–34 with 9 at one step (the slowest 32–48 ms); at two steps the
    slowest trade with 9 expiries took 40–82 ms, over the 50 ms the rule allowed in four of six repeats, so the search is
    one step. A phone is slower; the run happens only on a tap.
-6. **Not verified on the real deploy — the read-only preview guard (redesign PR 2, TASK 0a).** The deploy context is
+6. **Not verified on the real deploy — the read-only preview guard (redesign PR 2, TASK 0a), and the Journal's merge on
+    the server (PR 71).** The merge (`mergeStateBody()` in state.mjs, the load's `mergeJournalState()` and its one upload)
+    ran on a recording blob store and a stubbed `/api/state` only: the first load on the owner's phone after the merge —
+    the upload of the Journal that browser holds — and a second device reading it are read when they happen. Netlify's
+    6 MB function body limit is not near (a Journal entry is a few kB), not measured on the live Journal. Two saves
+    landing at once still race on the one blob, as the autopilot's write always has: the Journal survives either order
+    (each side merges), the positions are the last save's. The deploy context is
     read from `context.deploy` as Netlify's own type definitions (`@netlify/types` 3.2.0) describe it; this sandbox
     could not open docs.netlify.com, and no function has run on a real preview or on production with the check. Stubbed
     in tests only (preview, branch, unpublished production, no context → 403 and nothing upstream; production → as
@@ -721,8 +735,6 @@ the exit replay on real closes. PR 70 re-read them: none closed; #3 and #8 carry
 
 One line each. Detail for every item is in `docs/history/ROADMAP.md`.
 
-- **Journal on the server** — `journal` and `journalSeq` on `/api/state`, merged by ref. First
-  after v1: changing the sync of the only live record before its first live close is the wrong week.
 - **P7** — learn about fills from Alpaca's `trade_updates` stream server-side, instead of polling.
 - **P8** — more indicators and timeframes, only after the owner has used the current ones.
 - **P10-bis** — expiry strip, strike ruler, break-even line with a date slider, view toggles.

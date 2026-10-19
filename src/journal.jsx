@@ -100,7 +100,7 @@ function TradeLesson({ c }) {
 
 /**
  * @param v { journey, insideLimit, open: [{ p, m, stage }], closed (searched, newest ref first), allClosed, query, onQuery,
- *            openRef, onOpenScreen(p), report, analyses, floorLog }
+ *            openRef, onOpenScreen(p), report, analyses, floorLog, sync (PR 71: `journalSyncLine()`, or null) }
  */
 export function JournalScreen({ v }) {
   const [openKey, setOpenKey] = useState(v.openRef || null);
@@ -116,6 +116,11 @@ export function JournalScreen({ v }) {
         <h1 data-view-heading tabIndex={-1} style={{ ...sans, margin: 0, fontSize: FS.xl, fontWeight: FW.bold, lineHeight: LH.tight, color: T.ink,
           outline: "none" }}>Journal</h1>
       </header>
+      {/* PR 71 (task 71.3): where this Journal is kept — one line, amber when the server did not answer. */}
+      {v.sync && (
+        <div data-journal-sync={v.sync.warn ? "local" : "server"} role="status"
+          style={{ ...sans, fontSize: FS.xs, lineHeight: LH.body, color: v.sync.warn ? T.amber : T.mut, padding: "0 16px 4px" }}>{v.sync.text}</div>
+      )}
       <main style={v.wide ? { display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 16, alignItems: "start", padding: "4px 16px 0" }
         : { display: "flex", flexDirection: "column", gap: 12, padding: "4px 16px 0" }}>
         {/* ON A COMPUTER (redesign PR 3b): the record, the search and what is open on the left; what closed on the right. */}

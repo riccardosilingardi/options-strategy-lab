@@ -6,6 +6,56 @@ The full history of every item shipped so far (P0–P10, P2-bis) is in `docs/his
 Every pull request updates this file: the session that ships an item marks it done and states
 what the next one inherits.
 
+## Done in PR 71 (owner, 19 Oct 2026): the Journal on the server
+
+The first of three stacked PRs (71 → 72 → 73). **Goal:** one Journal on the phone and the computer, not lost when a browser
+is cleared. Until now it lived only in the browser that filed it (deferred on 24 Sep 2026, before J-0001's live close).
+
+- **71.1 — merged, never replaced** (`src/journalSync.js`, new; plain JS). `journal` and `journalSeq` ride on `/api/state`.
+  An entry is keyed by its ref AND the position id it was filed from (`journalKey()`): the same trade on two devices is one
+  entry, and two trades that ever got the same ref (two devices before this PR) stay two. The newer edit wins: `updatedAt`,
+  stamped by `journalEntry()` at filing and by `touchEntry()` on every later edit of a filed entry (a roll's link line, a
+  copilot lesson line); an entry filed before this PR is read at its filing time. Nothing is deleted by a merge. The counter
+  is the highest of both counters and of every ref either side holds (`mergedSeq()`). **The server merges too:** state.mjs's
+  POST now stores `mergeStateBody(stored, incoming)` — the positions and settings a body sends replace the stored ones as
+  before, a key it omits is kept (a Journal-only upload leaves the positions alone), and the Journal is merged, so no POST,
+  however empty or stale, can delete an entry or lower the counter. Bad JSON is a 400 in words. The preview guard is first,
+  unchanged.
+- **71.2 — the migration.** On every load the server's Journal is merged into the browser's (`mergeJournalState()`); when the
+  server lacks anything the browser holds — the first load after this PR, or an entry filed while the server did not answer —
+  the browser uploads `{ journal, journalSeq }` once (`journalBehind()`), never on a preview. A browser with nothing saved
+  adopts the server's Journal with its positions (`hydrateFromServer()`, PR #42's rule), even when no position is open. **A
+  position another device has already filed** (the Journal holds an entry with its id AND ref) is no longer shown open here
+  (`filedElsewhere()`), so a closed trade is not posted back to the autopilot as open; one line says so. **Two devices never
+  issue the same ref:** before a new position gets its ref, `commitPosition()` reads the server's counter (`serverSeq()`, 2 s
+  wait; unread, the browser's own, as before). The save's body is one function, `serverPayload()`.
+- **71.3 — one line under the title** (`journalSyncLine()`, journalView.js): "Saved on the server · updated 16:00", or amber
+  "Only on this device: the server did not answer", from the last read or save of `/api/state`. Not in the public demo, which
+  never talks to the server. Nothing else changed on screen.
+- **71.4 — tests.** `src/journalSync.test.js` (new, 11): two devices with an edit conflict and a new entry on each side; an
+  entry from before this PR; two trades sharing a ref; an empty browser does not erase (the load and the server's POST); the
+  POST replaces positions, merges the Journal, leaves positions on a Journal-only upload, refuses bad JSON; a preview cannot
+  write (403, the store untouched; the client's upload and save skip a preview); the counter never repeats (a reload after
+  the other device's J-0011 issues J-0012; a lower counter never lowers the server's; the server's counter read first);
+  `journalBehind()`; a position filed elsewhere matched by id and ref; the line's words. sync.test.jsx (+1, and the payload
+  keys now include `journal` and `journalSeq`), roll.test.jsx and journal.test.js read the two changed source lines.
+
+**Measured.** Tests 1,514 → 1,526, 0 failed. Build 1,540.51 → 1,543.16 kB (the usual chunk warning).
+Audit 20 boards, dark and light: 5,248 ✓, 0 unexplained. Words: find 157, market 493, build 610, positions 248 — unchanged
+(the line is the Journal's, which the counter does not score). Photographs: docs/screens/pr71/ (`node scripts/shoot-pr71.mjs`;
+the harness gained `+offline`: `/api/state` refused).
+
+**Not changed:** the positions' sync (the last save still wins for them), `copilotLog` (stays on the device: a lesson's
+answer is on the device that asked, its timeline line everywhere), autopilot.mjs and approve.mjs (they rewrite the whole blob,
+so the Journal survives them), riskGate.js, every RULES value, the order paths.
+
+### What the next session inherits
+
+- The merge has run on a recording blob store and a stubbed `/api/state` only (PRD §4 #6): the owner's first load after this
+  merges uploads the Journal that browser holds; a second device then shows it. Read when it happens.
+- A copilot lesson's answer stays on the device that asked (its line on the trade's timeline syncs).
+- Next: PR 72 (stacked on this), then PR 73.
+
 ## Done in PR 70 (owner, 13 Oct 2026): only listed contracts, everywhere a leg is chosen (+ three wrong sentences)
 
 Read on the owner's phone, XLE 27 Nov board: Find proposed an iron condor −62.5P / −69C / +70C / +59.5P. The board lists a
@@ -1183,9 +1233,15 @@ One line each; see `PRD.md` §5 and `docs/history/ROADMAP.md` for detail.
   a phone (PRD §4.5). Not started.
 - **What the sweep left** (under #49's inherits): sentences in mono in App.jsx and pro.jsx; visuals.jsx's drawings;
   main.jsx's crash screen.
-- **Journal on the server** — `journal` and `journalSeq` on `/api/state`, merged by ref, so a
-  second browser keeps the Journal. Deferred on purpose (24 Sep 2026): changing the sync of
-  the only live record before its first live close is the wrong week.
+- **DONE: PR 71** — the Journal on the server: `journal` and `journalSeq` on `/api/state`, merged by ref on both sides, never
+  replaced; the line under the Journal's title says where it is kept.
+- **Planned by the owner (19 Oct 2026), in this order, after PR 72 and PR 73:**
+  - **PR 74** — Education, the figure lab, as on IBKR Campus: tabs that add a long or short call or put, blue points to
+    drag, a card per figure.
+  - **PR 75** — a figure drawn with a finger → the defined-risk structure it is recognised as → opened in the chain → Build
+    → Optimize.
+  - **PR 76** — P7, fills streamed server-side (below), plus IBKR-style alerts (the day's P&L, a position's daily move).
+  - Then the **basket expansion** (below), when the owner sends `/api/liquidity`.
 - **P7** — fills pushed by Alpaca's stream, server-side.
 - **P8** — more indicators and timeframes, after the owner has used the current ones.
 - **P10-bis** — expiry strip, strike ruler, break-even line with date slider, view toggles.
