@@ -47,7 +47,7 @@ non-expert trader who wants to learn discipline rather than be sold trades.
      the column head "Market … Days · risk" with the ⓘ "How <TK>'s numbers connect" (five
      numbered steps); then one row per market: ☆, the ticker, ▲ Bull / ▼ Bear / ≈ Neutral from "Signals decide", "<structure>
      · <expiry>" (or the miss reason), a 72×40 picture, the days and "risk $N", and under them **three figures, always**
-     (PR 63, `rowFigures()`): "31% chance · 203% return · −20.3 avg per $100", the one the list is sorted by ringed (under
+     (PR 63, `rowFigures()`): "31% chance · 203% return · −20.3 avg per $100" ("31% model chance · mkt 29%" since PR 72: which chance it is, by name), the one the list is sorted by ringed (under
      "Past yrs" the PAST tile's text is added, ringed). **The rows are a view of the
      one sorted list** (`marketRows()`, src/rows.js): a row's card is the market's first card that fits, in the chosen
      order, else its first card as a miss, quieter, in its place. No new ranking, no new simulation; a row's figures are
@@ -63,7 +63,8 @@ non-expert trader who wants to learn discipline rather than be sold trades.
      tabs speak for themselves) (a filtered view of Find's list for one ticker, not a second
      list; a row opens it on Strategies, the back arrow and Back return; ↻ refreshes this market). The header on every tab:
      the category's icon, ticker, name · category,
-     price and its freshness, the change since the last close (from the bars already cached), the market clock, IV (the
+     price and its freshness, the change since the last close (from the bars already cached), the market clock, the feed beside
+     the prices' age ("Alpaca indicative prices ⓘ", or "Alpaca OPRA real-time" when the deploy reads OPRA; PR 72), IV (the
      at-the-money IV the IV rank records, `atmIv()`), IV rank ("collecting, N of 20 days" until it exists), the expected
      move to the expiry shown (spot × IV × √(days ÷ 365)), ☆ (saves the first Strategies card), the newest headline the
      news factor tagged, and the event line. *Signals*: the price chart with no trade on it, its readout, "THE MARKET'S
@@ -85,7 +86,9 @@ non-expert trader who wants to learn discipline rather than be sold trades.
      the saved item and the message line offers Undo, which puts back the same item. *Chain (advanced)*: expiry chips with days left (under 30 days dashed, not
      buildable), a T-chain with three modes (Bid · Ask, Delta · IV, OI · Vol — the last only when the feed sends open
      interest), "thin" under the liquidity floor; tap an ask to buy one, a bid to sell one (four legs at most); the tray
-     names the structure and prices Debit or Credit, Max profit, Max loss and Chance through `listCardFigures()`; Build ›
+     names the structure and prices Debit or Credit, Max profit, Max loss and Chance through `listCardFigures()` (since
+     PR 72 the Chance cell is two lines, "31% model" and "26% mkt": it printed the OSL model's alone under "Chance", which is
+     where the owner read GLD's 73%, and it was handed no board, so the market's was never read there); Build ›
      is blocked on an uncovered short leg and goes through `buildHandOff()`. Nothing is sent from this page.
   - **The event calendar** (`src/events.js`): WASDE and Crop Progress for the grains, EIA storage for UNG and BOIL, EIA
     petroleum for USO and XLE, FOMC for the metals, plus each market's expiries and its positions' 21-day exits; which
@@ -162,7 +165,8 @@ non-expert trader who wants to learn discipline rather than be sold trades.
      model, PR 67) and avg,
      PAST YRS (BACKTEST) in profit N of M and avg, delta in shares and theta a day — the card's own figures
      (figures.test.jsx); **Why this trade**, folded: the stance line the market page's card prints; open, each factor
-     with its arrow, strength and "supports / against / quiet", the rule for when Send asks why in its real words (the
+     with its arrow, strength and "supports / against / quiet" (since PR 72 the trade's direction is the payoff's on its own
+     plan's exit day, not the net delta), the rule for when Send asks why in its real words (the
      market's score against the trade by 10 or more, not "2 or more against"), "The market's read ›" (the market page's
      Overview) and the five numbered lines (BETS ON, RISKS, WORKS, EXITS, WRONG IF); **Ask the copilot about this trade**
      — Pre-trade analysis (ending on CONFIRM, DOUBTS or DO NOT CONFIRM, PR 4), What would make it wrong?, Is there a
@@ -176,7 +180,15 @@ non-expert trader who wants to learn discipline rather than be sold trades.
      still working", the gate's own terms) and, when the trade on Build is already in the book, "Already sent as J-0008…"
      and the open risk as it is, never the trade added a second time (PR 61; the review sheet says a resend is a second
      order); return on risk is a percentage, as on the card; **Exit plan** — take profit, the 21-day exit with its date, the stop as an alert, with "defaults ·
-     not backtested on CORN"; **Send** ("Send limit order · credit $25"), held with its reason in words when the gate
+     not backtested on CORN"; **since PR 72 the plan is the trade's own**: a tap on a row opens its − / + in place (take
+     profit 25–90%, time exit 7–45 days before expiry and never at or past it, stop 25–100% of the maximum loss), each row
+     tagged Suggested or Edited, "Reset to suggested" under the card while edited; the suggestion is the replay's best variant
+     ("Suggested from the replay: 11 windows on XLE, TP 50% · 21 days") once "Replay the exit rules ›" has run this month on
+     that market and family, else the defaults with their pill; Send freezes the plan on the position; **each leg is named
+     twice since PR 72** — "1 × SLV Nov27'26 49.5 Put" and under it the chain's own OCC symbol in small mono with Copy (the
+     review sheet and a position's Alpaca details likewise, a position's symbol the broker's own), and above Send, only past
+     the total-exposure limit, one amber line "Open risk after this trade: $5,200 = 26% of capital (your limit: 25%)"
+     ("suggested" until the capital is answered; it never blocks: the gate decides); **Send** ("Send limit order · credit $25"), held with its reason in words when the gate
      refuses; then **More on this trade ▾**, everything else in today's form (the market now, the card, the editor and
      the chain, the price and what crossing costs, the ticket's leg prices, order type and time in force with no Send of
      its own, all the numbers, the charts, every factor, market levels, history and the replay behind its button, the
@@ -437,13 +449,32 @@ Every rule below is code, not a prompt. The numbers live in `src/rules.js` (`RUL
 - Every figure on a card, every floor and the ranking are worked out at the price that will fill
   (`fillNet()`: `openLimitPrice()` on `comboBook()`, on the cent), and Build reads the same price.
 
-### Exit — chosen once at entry, then frozen
+### Exit — chosen once at entry, then frozen (per trade since PR 72)
 
-| Rule | Value | Status |
-|---|---|---|
-| Take profit | 50% of max profit; **a single long option: 50% of the premium paid** | Closes the trade |
-| Time exit | 21 days to expiry | Closes the trade |
-| Stop | 50% of max loss | **Warning only.** Never an automatic close, never an approve link |
+| Rule | Default (the suggestion) | Per trade (PR 72) | Status |
+|---|---|---|---|
+| Take profit | 50% of max profit; **a single long option: 50% of the premium paid** | 25–90%, 5-point steps | Closes the trade |
+| Time exit | 21 days to expiry | 7–45 days, never at or past the expiry (`entryRoom()`) | Closes the trade |
+| Stop | 50% of max loss | 25–100% (owner, 19 Oct 2026: past 100% it could never fire) | **Warning only.** Never an automatic close, never an approve link |
+
+**The plan per trade (PR 72, owner 19 Oct 2026).** Each position carries `exitPlan: { takeProfitPct, exitDTE, stopLossPct,
+source: "suggested" | "edited", suggestedFrom }`, frozen at Send and filed in the Journal with a timeline line ("Exit plan:
+TP 60% · 14 days · stop 50% — edited; suggested was TP 50% · 21 days · stop 50% (the defaults, not backtested)."). Every
+reader asks `exitPlanOf()` (rules.js): Positions and their exits, a position's screen and its Guardian, the autopilot (its
+verdict, its simulator and the facts it hands the model), the exit date, the take-profit target, the stop warning and the
+chart's exit day. A position opened before PR 72 reads the defaults, exactly as before. **The suggestion** is the replay's
+(PR 68) best variant for the market and the structure's family — take profit 25 / 50 / 75% × time exit 14 / 21 / 30 days,
+best average per $100 at risk on at least one finished window, a tie to the defaults — kept on the device for the month; the
+replay still runs only on its button. **The gate is unchanged:** its own stop warning (a warning on a close) still reads
+the default 50%.
+
+**Against the signals, on the plan (PR 72).** Which way a trade needs the price is read off its payoff valued on the plan's
+exit day (`exitCurve()` → `curveZones()` → `payoffNeed()`), no longer off the net delta. A directional trade is judged as
+before (the market's score against it by 10 or more). A trade that pays where the price is — a condor, a butterfly around
+today's price — is against only when "Signals decide" reads Bull or Bear (score × confidence ÷ 100 past 12.5, Find's rule)
+AND one expected move that way by the exit day (the chance's volatility over the days to the exit) leaves the zone where it
+is in profit then (owner, 19 Oct 2026); the reason prompt says so with the numbers. A trade that pays on a move either way
+is never against.
 
 **Owner decision, 2 Oct 2026 (amends "frozen at entry" for single options).** A single long option
 has no maximum to be half of: J-0001 (9 × GDX 94P, paid $4,500, now +$2,925 = +65%) needed
@@ -527,7 +558,7 @@ OWNER CHECK, Optimize's speed on the phone. PR 66 re-read them: none closed; #3 
 re-read them: none closed; #3, #7, #8, #9 and #10 carry what PR 67 changed, and #9 gains an OWNER CHECK, the market's
 chance against IBKR's. PR 68 re-read them: none closed; #3, #8 and #9 carry what PR 68 changed, and #9 gains an OWNER CHECK,
 the exit replay on real closes. PR 70 re-read them: none closed; #3 and #8 carry what PR 70 changed. PR 71 re-read them: none
-closed; #6 gains the Journal's merge on the server.)
+closed; #6 gains the Journal's merge on the server. PR 72 re-read them: none closed; #3, #8 and #9 carry what PR 72 changed.)
 
 1. **OWNER CHECK — the Journal entry for J-0001 shows the $7.65 fill** (v1 is reached on the owner's report of 5 Oct
    2026: filled 9 of 9 at $7.65, filed from the production address; this session cannot see that browser). **No Modify
@@ -588,7 +619,11 @@ closed; #6 gains the Journal's merge on the server.)
    refusal, the Chain tray's "not listed" chip and its replace line, the CALL ↔ PUT move note, Build's payoff-based "needs"
    line and the rewritten chance panel in "More on this trade" — are rendered in tests only (src/listed.test.jsx, on the
    owner's XLE board shape with synthetic prices), **never photographed and never seen on the live chain**: whether the
-   live feed lists a contract with no quote at all (a listed strike the app now leaves out) is read when it happens.
+   live feed lists a contract with no quote at all (a listed strike the app now leaves out) is read when it happens. **PR 72's
+   Exit plan edited in place, the legs named twice, the review's legs, the exposure line (on the `+poor` fixture), the feed
+   line and the tray's two chances** were photographed the same way (docs/screens/pr72/, `node scripts/shoot-pr72.mjs`) —
+   never on a phone; the replay's suggestion line is rendered in tests only (the fixture's closes cover this year, which the
+   replay leaves out), and the Copy button has not been tried on a phone's clipboard.
 4. **Read when it happens — no credit has filled at the corrected limit** (the indicative combination ask on thin chains
    has not been measured by a fill; J-0003 never filled at it), **and "Not on Alpaca", "size N > M on the ask", the "Not
    in the app" card, an order "sent outside this app", free sizing (PR #41), and an order sent from Build's new review
@@ -681,7 +716,12 @@ closed; #6 gains the Journal's merge on the server.)
    `replayVolDays` 20 (the realised volatility a past entry is priced at) and the Journal's five chance bands are chosen;
    `calibrationMinTrades` 10 is the owner's. **PR 70:** market 477 → 493 (the Chain tray's replace hint and its "replaced"
    line, 16 words, shown only while the tray holds a leg the board does not list); a tie between two equally near listed
-   strikes goes to the lower one (`snapStrike()`'s rule, kept), chosen, not measured.
+   strikes goes to the lower one (`snapStrike()`'s rule, kept), chosen, not measured. **PR 72:** the plan's bounds are the
+   owner's (take profit 25–90%, time exit 7–45 days, stop 25–100%); the replay's grid (take profit 25 / 50 / 75% × time exit
+   14 / 21 / 30 days), "best average per $100, a tie to the defaults" and keeping a suggestion for the month are chosen —
+   the best of nine on one month's past years flatters the winner, and the line says how many windows it read; the neutral
+   trade's move is one expected move to the exit day (the owner's choice of the three offered); the price history's two
+   retries (0.8 s, 1.6 s) and `bars.mjs`'s 4 s a source are chosen. Words: build 610 → 675, market 493 → 499 (voice.test.js).
 9. **The exit rules are inherited defaults, not yet backtested on real data** on these ten markets; the single option's +50%
    of the premium is the owner's choice. **OWNER CHECK — the exit replay on real closes (PR 68).** `exitBacktest()` is
    built and tested on synthetic series only: this environment reads no daily closes (its Alpaca credential is refused,
@@ -708,7 +748,14 @@ closed; #6 gains the Journal's merge on the server.)
    IBKR's Option Wizard (or Strategy Builder) open the same underlying and expiry, build the same legs and set the same
    price; (3) read "Probability of profit — implied by the market"; (4) within 2 points passes; otherwise refresh both and
    read again once — a gap that stays is a difference of method (the price IBKR reads, its tails or its smoothing): send
-   both screenshots with their times.
+   both screenshots with their times. **The owner's two readings (19 Oct 2026):** SLV Nov27 −53C/+56C, IBKR 63%, OSL
+   "Market" 65% (inside the 2 points); GLD Nov27 −391C/+410C, IBKR 70%, OSL 73% — read on Find's tray, which printed the
+   OSL MODEL's chance under the word "Chance" (code read in PR 72: the tray was handed no board, so it had no market
+   chance at all). Build reads both chances at the limit in force (`effectiveLimit()`, the − / + moving both), and its ⓘ now
+   says which price and breakeven. On synthetic Black-Scholes boards shaped to IBKR's figures (src/exitPlan.test.js; the
+   screenshots and the live boards are not in this environment), OSL's market chance at IBKR's price reads 70.0% and 63.0%,
+   and the mid instead of the natural moves it by only 0.3 and 0.6 points: the order price alone does not explain a 3-point
+   gap. Still an OWNER CHECK: GLD's market chance read on Build (or the tray's "mkt" line) beside IBKR's.
 10. **OWNER CHECK — a real copilot answer.** The AI features have not seen a real answer since the usage limit ended
     (2026-10-01). PR 61 changed what they are asked (Pre-trade analysis: the verdict first, at most three reasons, the gate
     only for a failed check or one at 90%+; Find's cards named C1…Cn; Future and Past held equal), raised the budget to

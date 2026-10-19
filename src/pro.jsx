@@ -2,7 +2,7 @@ import { BASKET } from "./markets.js";
 import React, { useState, useEffect } from "react";
 import { RefreshCw, Send, Trash2, Download, Sparkles, FileText, XCircle } from "lucide-react";
 import { T } from "./theme.js";
-import { RULES, ruleBadge, takeProfitLabel, takeProfitTarget, scaleOutLabel, stopLossLabel, exitDTELabel, perTradeCapLabel, copilotRulesBlock, money, pctText, MIN_NET_DOLLARS,
+import { RULES, ruleBadge, takeProfitLabel, takeProfitTarget, scaleOutLabel, stopLossLabel, exitDTELabel, perTradeCapLabel, copilotRulesBlock, money, pctText, MIN_NET_DOLLARS, exitPlanOf,
   NO_CEILING, reportNarrativePrompt, chanceText, seasonalStampNote, MEASURED_SIGMA_SOURCE,
   comboBook, limitAgainstBook, notionalControlled, notionalNote,
   closeMarket, closeLimitPrice, closeLimitNote, closeUnreadableNote,
@@ -11,8 +11,11 @@ import { RULES, ruleBadge, takeProfitLabel, takeProfitTarget, scaleOutLabel, sto
   taCopilotPrompt, TA_QUESTIONS, TA_DISCLAIMER, TA_NEVER_PROPOSES, TA_OWN_QUESTION,
   ivProvenance, noRecordNote, copilotOverreach, copilotOverreachNote, COPILOT_MODEL, GATE_NEAR_LIMIT, CARD_LABELS, FUTURE_PAST_EQUAL, returnText, notInFiguresLine,
   spotNowLabel, beAwayLabel, sdLabel, exitMarkLabel, zoneOddsLabel, CROSS_HINT, CROSS_ARIA, howToReadChart,
-  GREEK_TABS, GREEK_UNITS, greekLegend, GREEK_NO_EXIT, greeksInfo, greekNowLine, greekText, SCENARIO_MAX_MOVES, SCENARIO_MAX_DEFAULT,
-  SCENARIO_WORDS, scenarioMoveText, scenarioMaxLabel, scenarioInfo, scenarioPnlText, greekNotDrawn, CHART_WHEN, rsiWarning } from "./rules.js";
+  GREEK_TABS, GREEK_UNITS, greekLegend, GREEK_NO_EXIT, greekNoExit, greeksInfo, greekNowLine, greekText, SCENARIO_MAX_MOVES, SCENARIO_MAX_DEFAULT,
+  SCENARIO_WORDS, scenarioMoveText, scenarioMaxLabel, scenarioInfo, scenarioPnlText, greekNotDrawn, CHART_WHEN, rsiWarning,
+  barsNotLoadedText, BARS_RETRY } from "./rules.js";
+// PR 72 (task 72.6): the price history asked again when the connection drops.
+import { fetchJsonRetry } from "./marketView.js";
 import { ungroundedFigures } from "./grounding.js";
 import { contractsOf, positionSize, bookPositions, positionStage, autopilotHorizonNote, autopilotVolNote, positionForHolding, journalPnlTotal, scoredJournal } from "./journal.js";
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, LineStyle } from "lightweight-charts";
@@ -34,7 +37,7 @@ import { PREVIEW, PREVIEW_READ_ONLY } from "./deploy.js";
 import { reduceRatios, orderQty, mlegLimitPrice, limitWords, orderLimitWords, limitKind, signedLimitFor, orderBody, orderPreviewLines, orderOutcome, alpacaErrorText, cancelOutcome, cancelWaiting } from "./order.js";
 import { hasOpenInterest, sourceNote, openInterestNote, fetchChain } from "./chain.js";
 import { CloseChoice } from "./orders.jsx";
-import { Btn, Note, Info, Panel, Label, Stat, Reveal, mono, sans, MONO_STACK, TAP, UnderTabs, Segments } from "./ui.jsx";
+import { Btn, Note, Info, Panel, Label, Stat, Reveal, mono, sans, MONO_STACK, TAP, UnderTabs, Segments, TextBtn } from "./ui.jsx";
 import { TYPE } from "./theme.js";
 import { closeSummaryLine } from "./orderRow.js";
 import { marketClockLine } from "./clock.js";
@@ -2280,9 +2283,11 @@ export function exitPathSim(pos, S, dteLeft, iv, vol, nSim = 2000) {
   // A null target is no take-profit level: without this the simulator would count
   // every path that ever touched break-even as a take-profit exit, and report a
   // rule the app never applied. `takeProfitTarget()` (rules.js) is the one home.
-  const tp = takeProfitTarget({ legs, maxProfit, maxLoss, entryNet }).perCombo;
-  const sl = RULES.stopLossPct * maxLoss;
-  const days = Math.max(1, dteLeft - RULES.exitDTE);
+  // PR 72: the position's own exit plan (`exitPlanOf()`; the RULES defaults for a position opened before it).
+  const plan = exitPlanOf(pos);
+  const tp = takeProfitTarget({ legs, maxProfit, maxLoss, entryNet, plan }).perCombo;
+  const sl = plan.stopLossPct * maxLoss;
+  const days = Math.max(1, dteLeft - plan.exitDTE);
   const dt = 1 / 365, sq = sigma * Math.sqrt(dt);
   let nTP = 0, nSL = 0, nTimePos = 0, nTimeNeg = 0, sumExit = 0;
   const tpDays = [];
@@ -2302,7 +2307,7 @@ export function exitPathSim(pos, S, dteLeft, iv, vol, nSim = 2000) {
       // bare 7 — the fourth copy of the fault `exitSim` carried in engine.js.
       // The walk above already stops at `RULES.exitDTE`; marking the survivors
       // at 7 priced them fourteen days past the day the app closes them.
-      const pnl = (netBS(legs, s, RULES.exitDTE, iv) - entryNet) * 100;
+      const pnl = (netBS(legs, s, plan.exitDTE, iv) - entryNet) * 100;
       if (pnl > 0) nTimePos++; else nTimeNeg++;
       sumExit += pnl;
     }
@@ -2436,7 +2441,9 @@ export function GuardianPanel({ pos, spot, dteLeft, ivNow, vol, seasonalNow, pnl
   };
   // THE TARGET AND WHAT IT IS A SHARE OF, from the one function (`takeProfitTarget`, rules.js):
   // the premium paid for a single long option, the maximum profit for the rest.
-  const tpT = takeProfitTarget({ legs: pos.legs, maxProfit: pos.maxProfit, maxLoss: pos.maxLoss, entryNet: pos.entryNet, contracts: size });
+  // PR 72: the position's own plan — the target, the stop rung and the simulator's labels read it.
+  const gPlan = exitPlanOf(pos);
+  const tpT = takeProfitTarget({ legs: pos.legs, maxProfit: pos.maxProfit, maxLoss: pos.maxLoss, entryNet: pos.entryNet, contracts: size, plan: gPlan });
   const pct = tpT.base != null && tpT.base > 0 && pnlNow != null ? Math.max(-100, Math.min(130, (pnlNow / (tpT.base * size)) * 100)) : null;
   return (
     <div style={{ marginTop: 8, padding: "10px 12px", background: `${T.bg}`, border: `1px solid ${tisColor}44`, borderRadius: 7 }}>
@@ -2489,25 +2496,25 @@ export function GuardianPanel({ pos, spot, dteLeft, ivNow, vol, seasonalNow, pnl
               close the position for nothing. The stop rung stays: the maximum
               LOSS is always known, which is non-negotiable rule 2. */}
           {tpT.perCombo != null ? (<>
-            <Btn small ghost color={T.green} title={DEMO ? DEMO_TOOLTIP : undefined} onClick={() => placeExit(takeProfitLabel(tpT.basis), tpT.perCombo)} disabled={!!ladderBusy || DEMO || PREVIEW}>GTC {takeProfitLabel(tpT.basis)} @ {ladderRungPrice(pos.entryNet, tpT.perCombo)}</Btn>
+            <Btn small ghost color={T.green} title={DEMO ? DEMO_TOOLTIP : undefined} onClick={() => placeExit(takeProfitLabel(tpT.basis, tpT.pct), tpT.perCombo)} disabled={!!ladderBusy || DEMO || PREVIEW}>GTC {takeProfitLabel(tpT.basis, tpT.pct)} @ {ladderRungPrice(pos.entryNet, tpT.perCombo)}</Btn>
             {tpT.basis !== "premium" && Number.isFinite(pos.maxProfit) && (
               <Btn small ghost color={T.green} title={DEMO ? DEMO_TOOLTIP : undefined} onClick={() => placeExit(`TP ${scaleOutLabel()}`, RULES.scaleOutPct * pos.maxProfit)} disabled={!!ladderBusy || DEMO || PREVIEW}>GTC TP {scaleOutLabel()} @ {ladderRungPrice(pos.entryNet, RULES.scaleOutPct * pos.maxProfit)}</Btn>
             )}
           </>) : (
             <span style={{ ...mono, fontSize: FS.xs, color: T.dim }}>
-              {`No profit rung: this position has ${NO_CEILING}, so ${pctText(RULES.takeProfitPct)} of the maximum is not a price. The ${RULES.exitDTE}-day exit still applies.`}
+              {`No profit rung: this position has ${NO_CEILING}, so ${pctText(gPlan.takeProfitPct)} of the maximum is not a price. The ${gPlan.exitDTE}-day exit still applies.`}
             </span>
           )}
-          <Btn small ghost color={T.red} title={DEMO ? DEMO_TOOLTIP : undefined} onClick={() => placeExit(stopLossLabel(), RULES.stopLossPct * pos.maxLoss)} disabled={!!ladderBusy || DEMO || PREVIEW}>{stopLossLabel()} @ {ladderRungPrice(pos.entryNet, RULES.stopLossPct * pos.maxLoss)}</Btn>
+          <Btn small ghost color={T.red} title={DEMO ? DEMO_TOOLTIP : undefined} onClick={() => placeExit(stopLossLabel(gPlan.stopLossPct), gPlan.stopLossPct * pos.maxLoss)} disabled={!!ladderBusy || DEMO || PREVIEW}>{stopLossLabel(gPlan.stopLossPct)} @ {ladderRungPrice(pos.entryNet, gPlan.stopLossPct * pos.maxLoss)}</Btn>
         </>)}
       </div>
       {alpaca && PREVIEW && <Note color={T.amber} style={{ marginTop: 4 }}>{PREVIEW_READ_ONLY}</Note>}
       {sim && (
         <div style={{ display: "flex", gap: 14, marginTop: 10, flexWrap: "wrap", padding: "8px 10px", background: `${T.blue}0d`, borderRadius: 6 }}>
-          <Stat k={`HITS ${takeProfitLabel()} FIRST`} v={`${(sim.pTP * 100).toFixed(0)}%`} c={T.green} />
-          <Stat k={`HITS ${stopLossLabel()} FIRST`} v={`${(sim.pSL * 100).toFixed(0)}%`} c={T.red} />
-          <Stat k={`RUNS TO ${exitDTELabel()} IN PROFIT`} v={`${(sim.pTimePos * 100).toFixed(0)}%`} c={T.green} />
-          <Stat k={`RUNS TO ${exitDTELabel()} AT A LOSS`} v={`${(sim.pTimeNeg * 100).toFixed(0)}%`} c={T.red} />
+          <Stat k={`HITS ${takeProfitLabel(tpT.basis, tpT.pct)} FIRST`} v={`${(sim.pTP * 100).toFixed(0)}%`} c={T.green} />
+          <Stat k={`HITS ${stopLossLabel(gPlan.stopLossPct)} FIRST`} v={`${(sim.pSL * 100).toFixed(0)}%`} c={T.red} />
+          <Stat k={`RUNS TO ${exitDTELabel(gPlan.exitDTE)} IN PROFIT`} v={`${(sim.pTimePos * 100).toFixed(0)}%`} c={T.green} />
+          <Stat k={`RUNS TO ${exitDTELabel(gPlan.exitDTE)} AT A LOSS`} v={`${(sim.pTimeNeg * 100).toFixed(0)}%`} c={T.red} />
           <Stat k="TYPICAL DAYS TO TARGET" v={sim.medTPdays ?? "—"} c={T.blue} />
           <Stat k="AVERAGE RESULT FOLLOWING THE RULES" v={fmt$(sim.evExit)} c={sim.evExit >= 0 ? T.green : T.red} />
           <Stat k="TAKE IT NOW OR WAIT?" v={pnlNow != null ? (pnlNow >= sim.evExit ? "→ TAKE IT NOW" : "→ WAIT") : "—"} c={T.amber} />
@@ -3082,8 +3089,9 @@ export function confluence(seasonalM, ta, need = null) {
 // The fan's bands: ±1 standard deviation (68.3 of 100 outcomes) and ±1.96 (95).
 const FAN_Z = Object.freeze({ lo95: -1.96, lo68: -1, mid: 0, hi68: 1, hi95: 1.96 });
 export const UNIFIED_SESSIONS = 60;
+// PR 72: `exitDTE` is the trade's own plan (Build's `buildPlan`); the exit tick, the exit-day curve and the Greeks' exit line read it.
 export function UnifiedView({ ticker, dte, sigma, driftAnnual = 0, curve, legs, breakevens, spot, entryNet = 0, expKey = null, contracts = 1, onTa,
-  ivs = null, reads = null }) {
+  ivs = null, reads = null, exitDTE = RULES.exitDTE }) {
   const [allBars, setAllBars] = useState(null);
   // PR 67 (task 67.4): IBKR's tabs above the chart. P&L is the chart as it was; a Greek draws the position against price.
   const [tab, setTab] = useState("pnl");
@@ -3101,32 +3109,37 @@ export function UnifiedView({ ticker, dte, sigma, driftAnnual = 0, curve, legs, 
     measure();
     return () => ro.disconnect();
   }, []);
+  // PR 72 (task 72.6): a request that got no answer is asked again (`fetchJsonRetry()`); a refusal is said in its own words;
+  // Retry asks once more on a tap.
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
+    let live = true;
     (async () => {
-      try {
-        setErr(null);
-        const r = await fetch(`/api/bars?sym=${encodeURIComponent(ticker)}&days=${range > 400 ? 1900 : 400}`);
-        const j = await r.json();
-        if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
-        setAllBars(j.bars);
-        const ta = taSignals(j.bars);
-        if (onTa && ta) onTa(ta);
-      } catch (e) { setErr(String(e.message || e)); }
+      setErr(null);
+      const r = await fetchJsonRetry(`/api/bars?sym=${encodeURIComponent(ticker)}&days=${range > 400 ? 1900 : 400}`);
+      if (!live) return;
+      if (!r.ok || !r.json || !Array.isArray(r.json.bars)) { setErr(barsNotLoadedText(r.ok ? { error: "no bars in the answer" } : r)); return; }
+      setAllBars(r.json.bars);
+      const ta = taSignals(r.json.bars);
+      if (onTa && ta) onTa(ta);
     })();
-  }, [ticker, range > 400]); // eslint-disable-line
+    return () => { live = false; };
+  }, [ticker, range > 400, attempt]); // eslint-disable-line
   const bars = React.useMemo(() => {
     if (!allBars) return null;
     const n = range <= UNIFIED_SESSIONS ? UNIFIED_SESSIONS : range <= 400 ? 250 : allBars.length;
     return allBars.slice(-n);
   }, [allBars, range]);
-  const pnl = err ? <div style={{ ...sans, fontSize: FS.sm, color: T.mut }}>The price history is not loaded: {err}</div>
+  const pnl = err ? (
+    <div data-bars-error style={{ ...sans, fontSize: FS.sm, color: T.mut, lineHeight: LH.body }}>{err}{" "}
+      <TextBtn onClick={() => setAttempt((a) => a + 1)}>{BARS_RETRY}</TextBtn></div>)
     : !bars || !bars.length || !spot || !curve?.length ? <div style={{ ...sans, fontSize: FS.sm, color: T.mut }}>Loading the chart…</div>
     : <UnifiedChart W={W} ticker={ticker} bars={bars} range={range} onRange={setRange} dte={dte} sigma={sigma} driftAnnual={driftAnnual}
-      curve={curve} legs={legs} breakevens={breakevens} spot={spot} entryNet={entryNet} expKey={expKey} contracts={contracts} ivs={ivs} />;
+      curve={curve} legs={legs} breakevens={breakevens} spot={spot} entryNet={entryNet} expKey={expKey} contracts={contracts} ivs={ivs} exitDTE={exitDTE} />;
   return (
     <div ref={wrapRef} data-unified style={{ maxWidth: "100%" }}>
       <UnderTabs items={GREEK_TABS} value={tab} onChange={setTab} label="What the chart draws" style={{ padding: 0, marginBottom: 8 }} />
-      {tab === "pnl" ? pnl : <GreekChart W={W} greek={tab} legs={legs} spot={spot} dte={dte} ivs={ivs} reads={reads} contracts={contracts} expKey={expKey} />}
+      {tab === "pnl" ? pnl : <GreekChart W={W} greek={tab} legs={legs} spot={spot} dte={dte} ivs={ivs} reads={reads} contracts={contracts} expKey={expKey} exitDTE={exitDTE} />}
       <ScenarioTable legs={legs} entryNet={entryNet} spot={spot} dte={dte} ivs={ivs} contracts={contracts} />
     </div>
   );
@@ -3137,12 +3150,12 @@ export function UnifiedView({ ticker, dte, sigma, driftAnnual = 0, curve, legs, 
  * dashed), for Build's size, over the same ±30% the "now" curve covers; today's price an amber line, and on it a dot at the
  * broker's own figure when every leg carries one (read). Every number is `greekCurves()` / `brokerGreeks()`'s.
  */
-export function GreekChart({ W = 340, greek, legs, spot, dte, ivs, reads = null, contracts = 1, expKey = null }) {
-  const cv = greekCurves({ legs, spot, dte, ivs, contracts, greek });
+export function GreekChart({ W = 340, greek, legs, spot, dte, ivs, reads = null, contracts = 1, expKey = null, exitDTE = RULES.exitDTE }) {
+  const cv = greekCurves({ legs, spot, dte, ivs, contracts, greek, exitDTE });
   const tab = GREEK_TABS.find((t) => t.id === greek);
   if (!cv) return <Note>{greekNotDrawn(tab ? tab.label : greek)}</Note>;
   const read = brokerGreeks(legs, reads, contracts)[greek];
-  const exit = exitMark(expKey, dte);
+  const exit = exitMark(expKey, dte, exitDTE);
   const leg = greekLegend(exit ? exit.day : null);
   const H = 180, padL = 4, padR = 44, padT = 10, padB = 20;
   const vals = [...cv.points.map((p) => p.today), ...cv.points.map((p) => p.exit), read, 0].filter((v) => v != null && Number.isFinite(v));
@@ -3180,8 +3193,8 @@ export function GreekChart({ W = 340, greek, legs, spot, dte, ivs, reads = null,
         {greekNowLine({ label: tab.label, unit, price: spot, today, read })}</div>
       <div style={{ ...sans, fontSize: FS.xs, lineHeight: LH.body, color: T.mut, display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
         <span><span aria-hidden="true" style={{ color: T.ink }}>━</span> {leg.today}</span>
-        {cv.exitDays != null ? <span><span aria-hidden="true" style={{ color: T.blue }}>╍</span> {leg.exit}</span> : <span>{GREEK_NO_EXIT}</span>}
-        <Info label="where the Greeks come from">{greeksInfo()}</Info>
+        {cv.exitDays != null ? <span><span aria-hidden="true" style={{ color: T.blue }}>╍</span> {leg.exit}</span> : <span>{greekNoExit(exitDTE)}</span>}
+        <Info label="where the Greeks come from">{greeksInfo(exitDTE)}</Info>
       </div>
     </div>
   );
@@ -3248,7 +3261,7 @@ export function ScenarioTable({ legs, entryNet, spot, dte, ivs, contracts = 1 })
 
 /** The drawing, the crosshair and the controls, on bars already loaded (chart.test.jsx renders it on fixture bars). */
 export function UnifiedChart({ W = 340, ticker, bars, range = UNIFIED_SESSIONS, onRange = () => {}, dte, sigma, driftAnnual = 0, curve, legs,
-  breakevens, spot, entryNet = 0, expKey = null, contracts = 1, initialCross = null, ivs = null, initialWhen = "expiry" }) {
+  breakevens, spot, entryNet = 0, expKey = null, contracts = 1, initialCross = null, ivs = null, initialWhen = "expiry", exitDTE = RULES.exitDTE }) {
   const [how, setHow] = useState(false);
   const [cross, setCross] = useState(initialCross);
   // PR 68 (deferred from PR 63 until P5): the payoff, the zones, the bars and the crosshair at expiry, or on the exit day.
@@ -3267,9 +3280,10 @@ export function UnifiedChart({ W = 340, ticker, bars, range = UNIFIED_SESSIONS, 
   // crosshair all read the distribution the CHANCE figure is worked out on.
   const days = Math.max(1, dte);
   const policy = { driftAnnual: Number(driftAnnual) || 0, sigma, dte: days };
-  // ON THE EXIT DAY (PR 68): each leg priced with RULES.exitDTE days left (`exitCurve()`), on the lognormal to that day.
-  const exit = exitMark(expKey, dte);
-  const curveX = exit ? exitCurve({ legs, entryNet, curve, ivs, dte }) : null;
+  // ON THE EXIT DAY (PR 68): each leg priced with the plan's days left (`exitCurve()`; PR 72: the trade's own `exitDTE`),
+  // on the lognormal to that day.
+  const exit = exitMark(expKey, dte, exitDTE);
+  const curveX = exit ? exitCurve({ legs, entryNet, curve, ivs, dte, exitDTE }) : null;
   const atExit = when === "exit" && curveX != null;
   const drawCurve = atExit ? curveX : curve;
   const dist = chartDist(legs, entryNet, spot, atExit ? { ...policy, dte: Math.max(1, exit.daysFromNow) } : policy);
@@ -3445,9 +3459,9 @@ export function UnifiedChart({ W = 340, ticker, bars, range = UNIFIED_SESSIONS, 
         </button>
         {/* AT EXPIRY / AT THE 21-DTE EXIT (PR 68): what the payoff, the zones, the bars and the crosshair are read at. */}
         <div role="group" aria-label={CHART_WHEN.aria} data-chart-when={atExit ? "exit" : "expiry"} style={{ display: "flex", gap: 2 }}>
-          {[["expiry", CHART_WHEN.expiry], ["exit", CHART_WHEN.exit]].map(([id, l]) => (
+          {[["expiry", CHART_WHEN.expiry], ["exit", CHART_WHEN.exitAt(exitDTE)]].map(([id, l]) => (
             <button key={id} onClick={() => setWhen(id)} aria-pressed={(id === "exit") === atExit} disabled={id === "exit" && !curveX}
-              title={id === "exit" && !curveX ? CHART_WHEN.none : undefined}
+              title={id === "exit" && !curveX ? CHART_WHEN.noneAt(exitDTE) : undefined}
               style={{ ...sans, fontSize: FS.xs, minHeight: TAP, padding: "0 6px", borderRadius: 8, cursor: id === "exit" && !curveX ? "not-allowed" : "pointer",
                 background: (id === "exit") === atExit ? T.raise : "transparent", color: (id === "exit") === atExit ? T.ink : id === "exit" && !curveX ? T.dim : T.mut,
                 border: "none" }}>{l}</button>
@@ -3463,7 +3477,7 @@ export function UnifiedChart({ W = 340, ticker, bars, range = UNIFIED_SESSIONS, 
       </div>
       <Reveal open={how}>
         <p role="note" style={{ ...sans, fontSize: FS.sm, color: T.body, lineHeight: LH.body, margin: "0 0 4px" }}>
-          {howToReadChart({ ticker, sessions, chance: chanceText(pProfit), exitDay: exit ? exit.day : null, atExit })}
+          {howToReadChart({ ticker, sessions, chance: chanceText(pProfit), exitDay: exit ? exit.day : null, atExit, exitDTE })}
         </p>
       </Reveal>
     </>

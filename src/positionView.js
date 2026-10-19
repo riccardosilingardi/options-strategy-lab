@@ -18,7 +18,7 @@
 // ============================================================================
 
 import { RULES, money, chanceText, rewardRisk, remainingEdge, payoffCeiling, NO_CEILING, sentenceCase,
-  takeProfitProgress, takeProfitBasisWords, stopWarningLevel, known, exactExtremes, CARD_LABELS } from "./rules.js";
+  takeProfitProgress, takeProfitBasisWords, stopWarningLevel, known, exactExtremes, CARD_LABELS, exitPlanOf } from "./rules.js";
 import { legsNotHeld } from "./closeOrder.js";
 import { holdingShape, positionSize } from "./journal.js";
 
@@ -90,11 +90,12 @@ export function positionTitle(p) {
 
 const clamp01 = (x) => (Number.isFinite(x) ? Math.max(0, Math.min(1, x)) : 0);
 
-/** The date the time exit applies on: `exitDTE` days before expiry. Null without an expiry. */
+/** The date the time exit applies on: the position's own plan's days before expiry (PR 72; `exitPlanOf()`, the RULES
+ *  default for a position opened before it). Null without an expiry. */
 export function exitDateOf(p) {
   const t = Date.parse(p && (p.expKey || p.expiry));
   if (!Number.isFinite(t)) return null;
-  return new Date(t - RULES.exitDTE * DAY).toISOString().slice(0, 10);
+  return new Date(t - exitPlanOf(p).exitDTE * DAY).toISOString().slice(0, 10);
 }
 
 /**
@@ -109,8 +110,9 @@ export function exitDateOf(p) {
  */
 export function exitProgress({ p, pnl = null, dteLeft = null, tpTarget = null, n = 1, now = Date.now() } = {}) {
   /* TIME. Counted to the EXIT date, not to expiry: the rule closes the trade there. */
+  const plan = exitPlanOf(p);
   const exitDate = exitDateOf(p);
-  const daysToExit = known(dteLeft) ? Number(dteLeft) - RULES.exitDTE : null;
+  const daysToExit = known(dteLeft) ? Number(dteLeft) - plan.exitDTE : null;
   const opened = Date.parse(p && p.openedAt);
   const exitT = exitDate ? Date.parse(exitDate) : NaN;
   let time;
@@ -132,11 +134,11 @@ export function exitProgress({ p, pnl = null, dteLeft = null, tpTarget = null, n
   } else {
     const prog = takeProfitProgress(pnl, tpTarget);
     takeProfit = { text: `Take profit: ${money(pnl)} of ${money(dollars)}`, frac: clamp01(prog), state: prog >= 1 ? "reached" : "ok",
-      target: dollars, basis: tpTarget.basis, basisWords: takeProfitBasisWords(tpTarget.basis) };
+      target: dollars, basis: tpTarget.basis, basisWords: takeProfitBasisWords(tpTarget.basis, tpTarget.pct) };
   }
 
   /* STOP WARNING: its level, and how far the loss has come. A warning, never an order. */
-  const level = stopWarningLevel({ maxLoss: p && p.maxLoss, contracts: n });
+  const level = stopWarningLevel({ maxLoss: p && p.maxLoss, contracts: n, plan });
   let stop;
   if (level == null) stop = { text: "Stop warning: level not known", frac: 0, state: "unknown" };
   else if (!known(pnl)) stop = { text: `Stop warning: at ${money(level)}`, frac: 0, state: "unknown", level };

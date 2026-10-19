@@ -54,7 +54,7 @@ import { RULES, money, chanceText, expiryWords, sizedFree, sizedFigures, sizeLin
   signalsParts, strategiesNote, MARKET_READ_LINK, BACK_TO_FIND_ARIA, refreshMarketAria, stanceText, futurePastDisagree, needsText,
   OPEN_IN_CHAIN, BUILD_CTA, COMPARE_TICK, MARKET_READ_HEAD, HOW_WORKED_OUT_LINK, MARKET_READ_END, CHAIN_MODES, marketNewsHead, marketNewsAsk, marketReadAsk, marketReadHead,
   noOpenInterestText, underEntryText, THIN, spotLineText, legsMaxText, TRAY_LABELS, uncoveredText, trayEmptyText,
-  chainEventText, eventLineText, eventInfoText, dateOnlyWhen, inDaysText, holidayWeekNote, eventsBeforeLabel, CHAIN_HEAD,
+  chainEventText, eventLineText, eventInfoText, dateOnlyWhen, inDaysText, holidayWeekNote, eventsBeforeLabel, CHAIN_HEAD, trayChanceLines,
   chainNotLoadedText, marketReadingText, noCardsText, ARIA, readScoreLine, compareTrayLine, SEE_THEM, cardDetailRows, costsFor,
   viewOfDir, viewChoiceLabel, viewTargetPrice, chainQuotedLegs, TRAY_UNLISTED, trayReplaceHint, trayReplacedText,
 } from "./rules.js";
@@ -74,7 +74,7 @@ export const SECTION_HEAD = { ...sans, margin: 0, fontSize: FS.xs, fontWeight: F
 
 export function MarketPage({
   tk, tab = "strategies", onTab, onBack, onTicker, onRefresh = null, busy = false,
-  chain = null, freshLine = null, bars = NO_BARS, clock = null, clockLine = null, ivRank = null, ivDays = 0,
+  chain = null, freshLine = null, feed = null, bars = NO_BARS, clock = null, clockLine = null, ivRank = null, ivDays = 0,
   board = null, fused = null, readingState = null, items = [], allItems = [], boards = {},
   request, freeSizing = false, findDir = "signals", findTarget = null, sentiments = [], findOrder = "ev",
   newsItems = [], newsState = null, ago = (d) => String(d), exits = [], timeZone,
@@ -107,7 +107,7 @@ export function MarketPage({
 
   return (
     <div data-market style={{ maxWidth: 1100 }}>
-      <MarketHeader tk={tk} u={u} spot={spot} freshLine={freshLine} bars={bars} clockLine={clockLine} atm={atm}
+      <MarketHeader tk={tk} u={u} spot={spot} freshLine={freshLine} feed={feed} bars={bars} clockLine={clockLine} atm={atm}
         ivRank={ivRank} ivDays={ivDays} board={board} now={now} onBack={onBack} onRefresh={onRefresh} busy={busy}
         news={latestNews(tk, newsItems, newsState)} newsItems={newsItems} ago={ago} first={first} saved={first ? isSaved(first.cand) : false}
         onSave={() => first && onSave(first)} onTickerSheet={() => onSheet("market:tickers")}
@@ -179,7 +179,7 @@ export function CompareLine({ n, note = null, onOpen }) {
 }
 
 /* ---------------------------------------------------------------- THE HEADER */
-function MarketHeader({ tk, u, spot, freshLine, bars, clockLine, atm, ivRank, ivDays, board, now, news, newsItems, ago, first,
+function MarketHeader({ tk, u, spot, freshLine, feed = null, bars, clockLine, atm, ivRank, ivDays, board, now, news, newsItems, ago, first,
   saved, onSave, onTickerSheet, eventNode, onBack, onRefresh, busy }) {
   const [def, setDef] = useState(null);
   const ch = dayChange(bars, spot, now);
@@ -238,7 +238,11 @@ function MarketHeader({ tk, u, spot, freshLine, bars, clockLine, atm, ivRank, iv
           ))}
         </div>
       </div>
-      <div style={{ ...sans, fontSize: FS.xs, color: T.mut, lineHeight: LH.body, padding: "0 16px 8px", marginTop: -6 }}>{[freshLine, clockLine].filter(Boolean).join(" · ")}</div>
+      <div style={{ ...sans, fontSize: FS.xs, color: T.mut, lineHeight: LH.body, padding: "0 16px 8px", marginTop: -6 }}>
+        {[freshLine, clockLine].filter(Boolean).join(" · ")}
+        {/* PR 72 (task 72.4): which feed the prices are, beside their age, with one ⓘ. */}
+        {feed && feed.line && <span data-feed-line>{freshLine || clockLine ? " · " : ""}<Info label={feed.line}>{feed.info}</Info></span>}
+      </div>
       {def && <div role="note" style={{ ...sans, fontSize: FS.xs, color: T.body, lineHeight: LH.body, padding: "0 16px 8px" }}>{HEADER_DEFINITIONS[def]}</div>}
       {eventNode}
       {/* THE NEWS LINE: one line; a tap opens the headline. */}
@@ -618,7 +622,8 @@ function ChainTray({ tk, chain, ek, legs, note, cardFigures, quoteOf, seasonal, 
     [entry == null ? TRAY_LABELS.debit : entry >= 0 ? TRAY_LABELS.debit : TRAY_LABELS.credit, entry == null ? "—" : money(Math.abs(entry) * 100)],
     [TRAY_LABELS.maxProfit, af ? (af.profitUnbounded ? TRAY_LABELS.noCap : af.maxProfit == null ? "—" : money(af.maxProfit)) : "—"],
     [TRAY_LABELS.maxLoss, af && af.maxLoss != null && !naked.length ? money(Math.abs(af.maxLoss)) : "—"],
-    [TRAY_LABELS.chance, chanceText(lf ? lf.pop : null)],
+    // PR 72 (task 72.5): which chance — the OSL model's and the market's, both named.
+    [TRAY_LABELS.chance, trayChanceLines(lf ? lf.pop : null, lf && lf.mkt && lf.mkt.pop != null ? lf.mkt.pop : null)],
   ];
   return (
     <div data-chain-tray style={{ position: "fixed", left: 0, right: 0, zIndex: 55,
@@ -643,7 +648,10 @@ function ChainTray({ tk, chain, ek, legs, note, cardFigures, quoteOf, seasonal, 
               {figs.map(([k, v]) => (
                 <div key={k} style={{ minWidth: 0 }}>
                   <dt style={{ ...sans, fontSize: FS.xs, color: T.mut }}>{k}</dt>
-                  <dd style={{ ...mono, ...tnum, fontSize: FS.md, fontWeight: FW.bold, color: T.ink, whiteSpace: "nowrap", margin: 0 }}>{v}</dd>
+                  <dd style={{ ...mono, ...tnum, fontSize: FS.md, fontWeight: FW.bold, color: T.ink, whiteSpace: "nowrap", margin: 0 }}>
+                    {/* PR 72: the chance cell is two lines, the model's and the market's, each named. */}
+                    {Array.isArray(v) ? v.map((x, i) => <span key={i} data-tray-chance={i ? "mkt" : "model"} style={{ display: "block", fontSize: i ? FS.sm : FS.md }}>{x}</span>) : v}
+                  </dd>
                 </div>
               ))}
             </dl>

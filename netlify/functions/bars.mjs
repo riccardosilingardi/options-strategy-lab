@@ -1,4 +1,13 @@
 // Barre giornaliere sottostante: Alpaca Market Data (env) -> fallback Alpha Vantage
+/* EACH UPSTREAM CALL HAS ITS OWN WAIT (PR 72, task 72.6). A synchronous Netlify function is cut off at about ten seconds,
+   and a cut-off function gives the page no sentence at all. Alpaca, then Alpha Vantage, each get UPSTREAM_MS; past it the
+   call is abandoned and the next source is asked, so the function always answers, in words, inside its limit. */
+export const UPSTREAM_MS = 4000;
+const timed = (url, init = {}) => {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), UPSTREAM_MS);
+  return fetch(url, { ...init, signal: ctl.signal }).finally(() => clearTimeout(t));
+};
 export default async (req) => {
   const url0 = new URL(req.url);
   const sym = (url0.searchParams.get("sym") || "").toUpperCase().replace(/[^A-Z]/g, "");
@@ -10,7 +19,7 @@ export default async (req) => {
     if (!k || !s) return Response.json({ error: "ALPACA_KEY and ALPACA_SECRET are needed for the price history of a single option contract." }, { status: 503 });
     try {
       const start = new Date(Date.now() - 180 * 864e5).toISOString();
-      const r = await fetch(`https://data.alpaca.markets/v1beta1/options/bars?symbols=${occ}&timeframe=1Day&start=${start}&limit=200`, {
+      const r = await timed(`https://data.alpaca.markets/v1beta1/options/bars?symbols=${occ}&timeframe=1Day&start=${start}&limit=200`, {
         headers: { "APCA-API-KEY-ID": k, "APCA-API-SECRET-KEY": s },
       });
       const j = await r.json();
@@ -21,11 +30,14 @@ export default async (req) => {
     } catch (e) { return Response.json({ error: String(e.message || e) }, { status: 502 }); }
   }
   if (!sym) return Response.json({ error: "missing sym" }, { status: 400 });
+  // Which sources were asked and gave nothing (PR 72): the last sentence names them rather than "not configured".
+  const asked = [];
   // 1) Alpaca (IEX feed, gratuito con le chiavi)
   if (k && s) {
+    asked.push("Alpaca");
     try {
       const start = new Date(Date.now() - daysBack * 864e5).toISOString();
-      const r = await fetch(`https://data.alpaca.markets/v2/stocks/${sym}/bars?timeframe=1Day&start=${start}&limit=2000&adjustment=split&feed=iex`, {
+      const r = await timed(`https://data.alpaca.markets/v2/stocks/${sym}/bars?timeframe=1Day&start=${start}&limit=2000&adjustment=split&feed=iex`, {
         headers: { "APCA-API-KEY-ID": k, "APCA-API-SECRET-KEY": s },
       });
       if (r.ok) {
@@ -40,8 +52,9 @@ export default async (req) => {
   // 2) Alpha Vantage daily
   const av = Netlify.env.get("ALPHAVANTAGE_KEY");
   if (av) {
+    asked.push("Alpha Vantage");
     try {
-      const r = await fetch(`https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${sym}&outputsize=full&apikey=${av}`);
+      const r = await timed(`https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${sym}&outputsize=full&apikey=${av}`);
       const j = await r.json();
       const ts = j["Time Series (Daily)"];
       if (ts) {
@@ -51,6 +64,9 @@ export default async (req) => {
         return Response.json({ bars, source: "Alpha Vantage" }, { headers: { "Cache-Control": "public, max-age=3600" } });
       }
     } catch { /* niente */ }
+  }
+  if (asked.length) {
+    return Response.json({ error: `No price history came back from ${asked.join(" or ")} within ${UPSTREAM_MS / 1000} seconds each: try again in a moment.` }, { status: 504 });
   }
   return Response.json({ error: "No price-history source is configured: set ALPACA_KEY and ALPACA_SECRET, or ALPHAVANTAGE_KEY, in the Netlify environment." }, { status: 503 });
 };
