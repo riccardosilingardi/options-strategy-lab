@@ -24,7 +24,15 @@ non-expert trader who wants to learn discipline rather than be sold trades.
   PR 3a, which draws its own: "Positions", ↻ and the gear), nor the Journal and Settings (redesign PR 3b): no screen
   keeps the desk header. **On a computer** (a window at least 1024px wide, owner, 6 Oct 2026) the bottom bar is a sidebar
   on the left, Find's rows sit beside the market page, Positions' cards beside a position's own screen, and the Journal
-  is two columns; Build and Settings keep a 760px reading width. A phone is unchanged.
+  is two columns; Build and Settings keep a 760px reading width. A phone is unchanged. **Responsive since PR 73** (owner,
+  19 Oct 2026: "horrible on desktop"; "responsive, the phone unchanged under 1024px"): Find's list keeps one width (420px)
+  and the market page takes the rest, opening on Strategies as before; Find's chips wrap onto a second line; the market
+  page's Chain tray and compare line dock at the foot of its own pane instead of floating over the list; **Build is two
+  columns** that widen with the window up to 1440px — the legs, the order, the exit plan and Send on the left, the chart,
+  the numbers, why, the copilot, the variants and Optimize on the right, "More on this trade" under both; **Positions is
+  a table** (status · position · profit now · exits · the action) beside the position's own screen, its columns following
+  its pane (below about 720px the exits and the action go under the position). Nothing scrolls sideways at 1024, 1100,
+  1280 or 1440px (`scripts/audit-computer.mjs`); the phone's photographs are pixel-identical before and after.
   1. **Find — one row per market (version B).** Top to bottom: "Find" with ↻ (refresh every market) and the gear; the status
      line "<freshness> · <feed> · Paper" (the stale banner with Retry in its place when stale); Results | Saved; the
      underlined category tabs "All 10 ·
@@ -558,7 +566,8 @@ OWNER CHECK, Optimize's speed on the phone. PR 66 re-read them: none closed; #3 
 re-read them: none closed; #3, #7, #8, #9 and #10 carry what PR 67 changed, and #9 gains an OWNER CHECK, the market's
 chance against IBKR's. PR 68 re-read them: none closed; #3, #8 and #9 carry what PR 68 changed, and #9 gains an OWNER CHECK,
 the exit replay on real closes. PR 70 re-read them: none closed; #3 and #8 carry what PR 70 changed. PR 71 re-read them: none
-closed; #6 gains the Journal's merge on the server. PR 72 re-read them: none closed; #3, #8 and #9 carry what PR 72 changed.)
+closed; #6 gains the Journal's merge on the server. PR 72 re-read them: none closed; #3, #8 and #9 carry what PR 72 changed.
+PR 73 re-read them: none closed; #3 carries the computer's new layout.)
 
 1. **OWNER CHECK — the Journal entry for J-0001 shows the $7.65 fill** (v1 is reached on the owner's report of 5 Oct
    2026: filled 9 of 9 at $7.65, filed from the production address; this session cannot see that browser). **No Modify
@@ -623,7 +632,12 @@ closed; #6 gains the Journal's merge on the server. PR 72 re-read them: none clo
    Exit plan edited in place, the legs named twice, the review's legs, the exposure line (on the `+poor` fixture), the feed
    line and the tray's two chances** were photographed the same way (docs/screens/pr72/, `node scripts/shoot-pr72.mjs`) —
    never on a phone; the replay's suggestion line is rendered in tests only (the fixture's closes cover this year, which the
-   replay leaves out), and the Copy button has not been tried on a phone's clipboard.
+   replay leaves out), and the Copy button has not been tried on a phone's clipboard. **PR 73's computer layout** (Find's
+   list beside the market page with the docked tray, Build's two columns, Positions' table beside a position) was measured
+   and photographed in the same headless Chromium at 1024×768, 1100×800, 1280×800 and 1440×900 (docs/screens/pr73/before
+   and after, `node scripts/shoot-pr73.mjs`; `node scripts/audit-computer.mjs`: 36 checks, 0 missed) — **never in a real
+   desktop browser**: a visible scrollbar (Windows, ~15px) narrows each pane, and the table then reads in its compact
+   columns sooner; no board draws any of it, so the board audit cannot compare it.
 4. **Read when it happens — no credit has filled at the corrected limit** (the indicative combination ask on thin chains
    has not been measured by a fill; J-0003 never filled at it), **and "Not on Alpaca", "size N > M on the ask", the "Not
    in the app" card, an order "sent outside this app", free sizing (PR #41), and an order sent from Build's new review

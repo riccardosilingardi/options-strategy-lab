@@ -300,7 +300,11 @@ test("MEASURED: the three screens, and the table in the PRD is this number", () 
      only when it did not arrive). The Exit plan's tags ("Suggested" / "Edited") and "Reset to suggested" are build.jsx's
      data, unscored (one word a row; the link only while edited). market 493 → 499: the feed beside the prices' age
      (`feedLine()`, 3, its ⓘ unscored) and the tray's chance naming both (`trayChanceLines()`, 4). An upper bound, as ever. */
-  const CEILING = { find: 157, market: 499, build: 675, positions: 248 };
+  /* >>> PR 73 (the computer's layout, owner 19 Oct 2026). <<< positions 248 → 256: the card has a second layout, the
+     Positions table's row (`PositionRow`, chosen inside `PositionCard` by `row` on a computer), and the counter scores both
+     bodies, as it scores every branch — the row's "Decide ›", "Details ›", "File in Journal" and "no price right now" (8).
+     A phone shows the card alone: on screen nothing grew. */
+  const CEILING = { find: 157, market: 499, build: 675, positions: 256 };
   /* >>> PR #46: ONE ORDERS LIST. <<< The record-based "WORKING AT THE BROKER" panel (its paragraph about what a
      working order is, the stale-DAY warning, the per-row sentences) left Positions; the one list lives in
      `orders.jsx`, which the counter now reads. Measured: positions 304 -> 209 (4 typed + 205 generated, 14 sites).

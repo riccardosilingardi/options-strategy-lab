@@ -513,3 +513,21 @@ export function ContractName({ name, occ = null, nameStyle = null, nameProps = n
     </span>
   );
 }
+
+/**
+ * HOW WIDE A BOX IS, LIVE (PR 73): the box's own width from a ResizeObserver, so a layout can follow the space it is given
+ * (a pane beside another) rather than the window. `fallback` until it is measured (a test, the server).
+ */
+export function useBoxWidth(fallback = 0) {
+  const ref = useRef(null);
+  const [w, setW] = useState(fallback);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === "undefined") return undefined;
+    const ro = new ResizeObserver(() => setW(el.clientWidth || fallback));
+    ro.observe(el);
+    setW(el.clientWidth || fallback);
+    return () => ro.disconnect();
+  }, [fallback]);
+  return [ref, w];
+}
