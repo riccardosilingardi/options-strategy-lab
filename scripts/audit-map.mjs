@@ -529,7 +529,7 @@ export const SCREENS = {
       { n: "Row state", b: "main > section:nth-of-type(2) li:nth-child(3) span.state", a: "[data-journal-open] li:nth-child(1) [data-entry-state]" },
       { n: "Row state · warning", b: "main > section:nth-of-type(2) li:nth-child(2) span.state.warn", a: "[data-journal-open] li:nth-child(2) [data-entry-state]" },
       { n: "Entry body", b: "main > section:nth-of-type(2) li:nth-child(3) > div", a: "[data-entry-body]", p: ["padding", "gap"] },
-      { n: "Why opened", b: "main > section:nth-of-type(2) li:nth-child(3) > div > p", a: "[data-entry-body] > p:first-child" },
+      { n: "Why opened", b: "main > section:nth-of-type(2) li:nth-child(3) > div > p", a: "[data-entry-body] > p:first-of-type" },
       { n: "Timeline title", b: "main > section:nth-of-type(2) li:nth-child(3) > div > div", a: "[data-entry-body] > div:not([style*='mono'])" },
       { n: "Timeline", b: "main > section:nth-of-type(2) li:nth-child(3) ol", a: "[data-entry-body] ol", p: ["gap"] },
       { n: "Timeline line", b: "main > section:nth-of-type(2) li:nth-child(3) ol > li", a: "[data-entry-body] ol > li", p: ["size", "gap"] },

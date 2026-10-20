@@ -16,7 +16,9 @@ export const PAPER_HOST = "paper-api.alpaca.markets";
    So the proxy names what the app uses and refuses the rest with a sentence:
 
      GET    the read paths the app uses (account, clock, positions, orders,
-            one order, the option contract list for open interest)
+            one order, the option contract list for open interest, and since
+            PR 76 one asset — a market's exchange and official name, as IBKR
+            lists it)
      POST   /v2/orders                     every new order (paths 1-6)
      PATCH  /v2/orders/{id}                Modify of a single-leg order (path 7)
      DELETE /v2/orders/{id}, /v2/orders    cancel one, cancel all
@@ -34,6 +36,8 @@ const ROUTES = [
   { method: "GET", re: /^\/v2\/orders(\?[A-Za-z0-9_=&%.-]*)?$/ },
   { method: "GET", re: new RegExp(`^/v2/orders/${ORDER_ID}$`) },
   { method: "GET", re: /^\/v2\/options\/contracts(\?[A-Za-z0-9_=&%.-]*)?$/ },
+  // PR 76 (task 76.4): one asset by its symbol — read-only, like the others (src/listing.js).
+  { method: "GET", re: /^\/v2\/assets\/[A-Za-z0-9.]{1,12}$/ },
   { method: "POST", re: /^\/v2\/orders$/ },
   { method: "PATCH", re: new RegExp(`^/v2/orders/${ORDER_ID}$`) },
   { method: "DELETE", re: new RegExp(`^/v2/orders/${ORDER_ID}$`) },

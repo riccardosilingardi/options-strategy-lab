@@ -52,8 +52,10 @@ export async function openHarness({ context = "production" } = {}) {
     .catch(() => chromium.launch());
 
   /** A fresh page on the app: `mode` is the fixture hash, `theme` the stored palette, the clock fixed. */
-  async function open(mode = "app", theme = "dark", { width = 390, height = 844, scale = 1 } = {}) {
-    const ctx = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: scale, colorScheme: theme, locale: "en-GB", timezoneId: "Europe/Rome" });
+  // `touch` (PR 76): a phone's touch screen, so a finger's drag meets the page's own `touch-action` as on a phone.
+  async function open(mode = "app", theme = "dark", { width = 390, height = 844, scale = 1, touch = false } = {}) {
+    const ctx = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: scale, colorScheme: theme, locale: "en-GB", timezoneId: "Europe/Rome",
+      ...(touch ? { hasTouch: true, isMobile: true } : {}) });
     await ctx.addInitScript((t) => { try { localStorage.setItem("osl-theme", t); } catch { /* none */ } }, theme);
     const page = await ctx.newPage();
     await page.clock.setFixedTime(new Date(FIXED_NOW));

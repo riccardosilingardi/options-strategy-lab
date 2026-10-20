@@ -6,6 +6,70 @@ The full history of every item shipped so far (P0–P10, P2-bis) is in `docs/his
 Every pull request updates this file: the session that ships an item marks it done and states
 what the next one inherits.
 
+## Done in PR 76 (owner, 20 Oct 2026): Learn's real chart, a finger that drags, names as IBKR writes them
+
+The first of three stacked PRs (76 → 77 → 78; the owner's prompt "OSL: PR 76, 77, 78", which renumbers the plan below: the
+finger drawing is PR 77, the bridge to the chain and Build PR 78, P7 after them). The owner (20 Oct 2026): "Learn is missing
+the manual drawing and the link to chain and Build. Dragging works with a finger but not well. The graph is too simple. And I
+asked for the underlying's code reference, so I recognise it immediately in IBKR." Asked before building, the owner chose:
+**Find's rows carry the exchange only** ("UNG · ARCA"; the official name on the market page, one tap away), and "Build's
+ticker strip" is **Build's title line**.
+
+- **76.1 — the picture (`FigureChart`, visuals.jsx; its arithmetic in learnView.js).** A dollar scale with its grid on the
+  left and the prices along the bottom (`niceTicks()`); the card's own max profit and max loss written over the flat where
+  the curve reaches them, "no ceiling" / "unlimited" at the edge, a best or worst case at a price of 0 said so at the left
+  edge (`labExtremes()`, from `exactExtremes()`, never re-read off the curve); each breakeven labelled on the side of the
+  zero line the curve leaves empty, never on a point or another label; **today** (dashed) and **the exit date** (dotted:
+  `exitPlanOf()`'s defaults — Learn has no trade — through Build's own `exitCurve()`), each leg on its own IV (`legsAt()`),
+  with a three-entry legend (`labLegend()`); **the market's distribution** (Build's fit, `boardDistOf()`, one per board) as a
+  thin band under the price axis (`labDensity()`) and one line, "Market chance of profit at expiry: 53%, at the model price."
+  (`labMarketLine()`; not read is said in `MARKET_CHANCE_NOT_READ`'s words) with "The band ⓘ"; and **a crosshair** where a
+  finger or a mouse rests: "at 13.40 → +$85 at expiry · +$40 today" (`labReadout()`), gone on release.
+- **76.2 — the finger.** Measured first (`node scripts/shoot-pr76.mjs`, Chromium's own touch input on a touch screen, a
+  70px slide with a ±14px wobble): on PR 74's code no point moved and the page scrolled 36–486px. The cause: **Chromium (and
+  Safari) ignore `touch-action` on shapes inside an `<svg>`**, so the point's `pan-y` picture let the page take the gesture.
+  Now a touch that starts on a point is cancelled by hand (non-passive `touchstart`/`touchmove` listeners) — measured after:
+  every point moves (11 → 13, 12 → 14, 14 → 16; 16 is the board's top) and the page scrolls 0px; the rest of the picture still
+  scrolls the page. Each point takes a finger anywhere along its dotted guide, a band at least 44px wide (`labHitZones()`);
+  two legs on one strike sit side by side (`labPointXs()`), each its own band; the leg moves by the SIDEWAYS distance from
+  where it was held (`labDragTo()`: the height is never read); a label rides 48px above the finger with the strike it snaps
+  to and that leg's model price, "16 C · $0.35" (`labSnapLabel()`); each snap is a 5ms vibration where the phone has one. − /
+  + and the arrow keys unchanged. **Found by the same measurement and fixed: Build's crosshair handle** (PR 63) had the same
+  flaw — under a finger the line moved and the page scrolled 50px with it; with the same listener it follows the finger
+  (13.42 → 16.54) and the page stays (PRD §4 #3).
+- **76.3 — the legs named as IBKR writes them:** "Short UNG Dec18'26 12 Put" (`labLegName()`, from `ibkrName()`) and under it
+  the chain's own OCC symbol with Copy (`ContractName`); no symbol from the chain, nothing said (`labLegOcc()`). The rows are
+  stacked (contract, then the price and the controls), so each keeps its line on a phone.
+- **76.4 — the market as IBKR lists it.** `GET /v2/assets/{symbol}` joins the proxy's read allowlist; `src/listing.js` reads
+  `{ exchange, name }` from alpaca-py's `Asset` (one GET per market, kept a day on the device: /api/state has no market cache),
+  `EXCHANGE_WORDS` (rules.js) turns Alpaca's codes into IBKR's (ARCA, NYSE, NASDAQ, BATS, AMEX; NYSEARCA → ARCA). Shown:
+  Find's rows "UNG · ARCA"; the market page "UNG · ARCA" over "UNITED STATES NATURAL GAS FUND, LP · Energy" (the registry's
+  word until it is read) and its market sheet's ⓘ; Build's title "UNG · ARCA · 18 Dec · 73 days · ×1" with the name under it;
+  Learn's market chip, its sheet (each market "· ARCA") and the ⓘ "In IBKR, search the symbol (UNG), not the word: …"; a
+  position's header; the Journal's rows (exchange) and an opened entry (the name). Not read (the demo, a failed call, a reply
+  without both): the ticker alone. No name is typed in the app (listing.test.js reads markets.js).
+
+**Tests:** src/listing.test.js (7: the fixture asset, every way a reply is not a listing, the exchange table, the day's cache,
+one GET per market, the ⓘ, no name typed); learn.test.js +6 (the scales, the finger's wobble, two legs on one strike, the
+lane, IBKR's names and the chain's symbol); learn.test.jsx +8 (today and the exit date, the crosshair's sentence, the extremes,
+the market's band and chance, the picture read, the finger's targets and the cancelled touch, the names and Copy, Learn's
+listing); findB.test.jsx +1 (the header and the row's listing); orders.test.js +1 (GET /v2/assets/SLV passes, writes to it and
+DELETE /v2/positions do not). **Measured:** tests 1,575 → 1,597, build clean (the usual chunk warning); board audit 5,248 ✓,
+0 unexplained (20 boards, dark and light: the Journal entry's first paragraph is named by type, the name now opening the
+entry); `node scripts/audit-computer.mjs` 45 checks, 0 missed. Words: market 499 → 502, build 675 → 684, learn 22 → 23
+(voice.test.js); Learn rendered 313 → 319 at rest and 379 → 426 with an iron condor (learn.test.jsx). Photographs:
+docs/screens/pr76/before and after (`node scripts/shoot-pr76.mjs [dir]`).
+
+**Not changed:** riskGate.js, the seven order paths, RULES, /api/state, the gate's stop warning, Find's ranking.
+
+### What the next session inherits
+
+- **PR 77** (stacked on this): a figure drawn with a finger → the nearest defined-risk figure. The picture's geometry lives in
+  learnView.js (`labHitZones()`, `niceTicks()`, the price ↔ pixel mapping is FigureLab's); a stroke inside the picture must
+  cancel the page's scroll the same way (Chromium ignores `touch-action` inside an svg).
+- The names in the photographs are fixture inputs typed in scripts/app-screens.jsx (the sandbox's Alpaca key is refused):
+  Alpaca's own strings, and whether every market's reply carries both an exchange and a name, are read on the deploy (PRD §4 #2).
+
 ## Done in PR 74 (owner, 20 Oct 2026): Learn, the figure lab
 
 The owner's line (19 Oct 2026): "Education, the figure lab, as on IBKR Campus: tabs that add a long or short call or put,
@@ -1405,9 +1469,13 @@ One line each; see `PRD.md` §5 and `docs/history/ROADMAP.md` for detail.
 - **Planned by the owner (19 Oct 2026), in this order, after PR 72 and PR 73:**
   - **DONE: PR 74** — Education, the figure lab, as on IBKR Campus: tabs that add a long or short call or put, blue points
     to drag, a card per figure (Learn, the fifth place; above).
-  - **PR 75** — a figure drawn with a finger → the defined-risk structure it is recognised as → opened in the chain → Build
-    → Optimize.
-  - **PR 76** — P7, fills streamed server-side (below), plus IBKR-style alerts (the day's P&L, a position's daily move).
+  - **Renumbered by the owner's prompt of 20 Oct 2026 ("OSL: PR 76, 77, 78"):**
+  - **DONE: PR 76** — Learn's real chart (scale, extremes, today and the exit date, the market's band and chance, a
+    crosshair), a finger that drags, legs named as IBKR writes them, every market as IBKR lists it (above).
+  - **PR 77** — a figure drawn with a finger → the nearest defined-risk figure (was "PR 75").
+  - **PR 78** — from Learn to the real chain, Build and Optimize (was "PR 75"'s second half).
+  - Then **P7**, fills streamed server-side (below), plus IBKR-style alerts (the day's P&L, a position's daily move) (was
+    "PR 76").
   - Then the **basket expansion** (below), when the owner sends `/api/liquidity`.
 - **P7** — fills pushed by Alpaca's stream, server-side.
 - **P8** — more indicators and timeframes, after the owner has used the current ones.

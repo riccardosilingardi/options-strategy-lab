@@ -37,6 +37,12 @@ const ROLL = flags.includes("roll");
 const OPT = flags.includes("opt");
 // "+offline" (PR 71, photographs only): /api/state does not answer, so the Journal says it is only on this device.
 const OFFLINE = flags.includes("offline");
+// "+nolisting" (PR 76): Alpaca answers no asset, so every market reads as its ticker alone.
+const NOLISTING = flags.includes("nolisting");
+/** The fixture's asset names (PR 76), for the photographs only: plausible fund names, typed here, NOT Alpaca's reply. */
+const ASSETS = { CORN: "Teucrium Corn Fund", SOYB: "Teucrium Soybean Fund", WEAT: "Teucrium Wheat Fund", UNG: "United States Natural Gas Fund, LP",
+  BOIL: "ProShares Ultra Bloomberg Natural Gas", USO: "United States Oil Fund", XLE: "Energy Select Sector SPDR Fund", GLD: "SPDR Gold Trust",
+  SLV: "iShares Silver Trust", GDX: "VanEck Gold Miners ETF" };
 const rollBook = (recs) => recs.map((r) => (r.ref !== "J-0003" ? r : { ...r, thesis: { ...r.thesis, signals: { ...r.thesis.signals,
   factors: { seasonal: { dir: -1, strength: 45 }, technical: { dir: -1, strength: 35 }, weather: { dir: 1, strength: 40 }, news: { dir: 0, strength: 0 } } } } }));
 const RAW = JSON.parse(readFileSync("src/fixtures/alpaca-chain-UNG.json", "utf8"));
@@ -110,6 +116,13 @@ window.fetch = async (input, init = {}) => {
     if (path === "/v2/clock") return json({ is_open: false, next_open: "2026-10-05T09:30:00-04:00", next_close: "2026-10-05T16:00:00-04:00" }, 200, head);
     if (path === "/v2/positions") return json(BOOK ? bookHoldings() : [], 200, head);
     if (path.startsWith("/v2/options/contracts")) return json({ option_contracts: [] }, 200, head);
+    // PR 76: one asset, alpaca-py's `Asset` shape. FIXTURE INPUTS typed for the photographs (the sandbox reads no live
+    // reply: its Alpaca credential is refused), never a reading; "+nolisting" answers 404, so the ticker stands alone.
+    if (path.startsWith("/v2/assets/")) {
+      const sym = decodeURIComponent(path.slice("/v2/assets/".length));
+      return NOLISTING || !ASSETS[sym] ? json({ message: "asset not found" }, 404, head)
+        : json({ class: "us_equity", symbol: sym, exchange: "ARCA", name: ASSETS[sym], status: "active", tradable: true }, 200, head);
+    }
     if (path.startsWith("/v2/orders") && method === "POST") {
       ordersPosted++;
       const body = JSON.parse(init.body || "{}");

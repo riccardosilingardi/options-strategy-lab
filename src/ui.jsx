@@ -515,6 +515,15 @@ export function ContractName({ name, occ = null, nameStyle = null, nameProps = n
 }
 
 /**
+ * A MARKET'S OFFICIAL NAME, THE WAY IBKR PRINTS IT (PR 76, task 76.4): under "SLV · ARCA", in capitals, quiet
+ * ("ISHARES SILVER TRUST"). Read from Alpaca (src/listing.js); without it, nothing is drawn — never a name typed here.
+ */
+export const ListingName = ({ name, style, ...rest }) => (name ? (
+  <span data-listing-name {...rest} style={{ ...sans, display: "block", fontSize: FS.xs, fontWeight: FW.regular, color: T.mut,
+    letterSpacing: "0.02em", lineHeight: LH.tight, overflowWrap: "anywhere", ...style }}>{name}</span>
+) : null);
+
+/**
  * HOW WIDE A BOX IS, LIVE (PR 73): the box's own width from a ResizeObserver, so a layout can follow the space it is given
  * (a pane beside another) rather than the window. `fallback` until it is measured (a test, the server).
  */

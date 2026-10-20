@@ -15,7 +15,7 @@
 import React, { useState } from "react";
 import { ChevronLeft } from "lucide-react";
 import { T, TYPE } from "./theme.js";
-import { Info, Note, Sheet, mono, sans, TAP, ContractName } from "./ui.jsx";
+import { Info, Note, Sheet, mono, sans, TAP, ContractName, ListingName } from "./ui.jsx";
 import { PREVIEW, PREVIEW_READ_ONLY } from "./deploy.js";
 import { Fold } from "./steps.jsx";
 import { PositionChart } from "./visuals.jsx";
@@ -250,6 +250,8 @@ export function PositionScreen({ v }) {
           <h1 data-view-heading tabIndex={-1} style={{ ...sans, margin: 0, fontSize: FS.xl, fontWeight: FW.bold, lineHeight: LH.tight, color: T.ink,
             outline: "none" }}>{v.title}</h1>
           <p data-position-sub style={{ ...mono, margin: "2px 0 0", fontSize: FS.sm, color: T.mut }}>{v.sub}</p>
+          {/* PR 76: the market's official name, as IBKR prints it under "UNG · ARCA". */}
+          <ListingName name={v.listing} style={{ marginTop: 2 }} />
         </div>
         <StatusBlock key={v.ref} s={v.status} keep={v.keep} closeNode={v.closeNode} workingNode={v.workingNode} />
         {v.fileNode}

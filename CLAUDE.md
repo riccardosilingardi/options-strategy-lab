@@ -296,6 +296,20 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
   sold call, and the card says in amber that the app never sends it (`undefinedRiskLegs()`, the gate's own question).
   **Nothing in Learn sends, saves or calls the gate** (learn.test.js reads learnView.js, learn.jsx and App's block); the lab
   lives in memory (`lab` in App.jsx), never on /api/state.
+- **Learn's picture (PR 76) is `FigureChart` drawing what learnView.js works out:** the dollar and price scales (`niceTicks()`),
+  the card's extremes (`labExtremes()`, never re-read off the curve), today and the exit date (`labCurves()`: each leg's own IV
+  through `legsAt()`, the exit `exitPlanOf({})`'s days through Build's `exitCurve()`), the market's band and chance at the
+  MODEL net (`labDensity()`, `labMarketLine()` on `boardDistOf()`), the crosshair's sentence (`labReadout()`), the finger's
+  bands and offsets (`labHitZones()`, `labPointXs()`) and the sideways-only drag (`labDragTo()`). Its words are LEARN_WORDS'.
+- **A finger on a shape inside an `<svg>` must cancel the page's scroll itself (PR 76, measured):** Chromium and Safari
+  ignore `touch-action` there, so a handle (Learn's points, Build's crosshair handle) adds non-passive `touchstart` /
+  `touchmove` listeners that `preventDefault()` a touch starting on it; the picture keeps `pan-y` so the page still scrolls
+  elsewhere. `node scripts/shoot-pr76.mjs` measures it with Chromium's own touch input.
+- **A market as IBKR lists it (PR 76): `src/listing.js`** reads `{ exchange, name }` from Alpaca's `GET /v2/assets/{symbol}`
+  (one GET per market, a day on the device, never /api/state), the words are rules.js's (`listingLine()` "UNG · ARCA",
+  `listingName()`, `EXCHANGE_WORDS`, `listingSearchInfo()`), the name line is the `ListingName` atom. Lists (Find's rows, the
+  Journal's) carry the exchange only (owner, 20 Oct 2026); a market's or a trade's own header carries the name under it. Not
+  read: the ticker alone — never a name typed in the app.
 - **The Journal's copilot (PR 4c)** asks about one closed trade (`closedTrade` in the context, the record's own words) and
   recommends nothing (`COPILOT_ROLE.journal`).
 - Plan first, then change surgically: the plan is the standing rule's ("Plan before you execute", above).
@@ -319,6 +333,7 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
 - `src/alpacaContract.js` — Alpaca's order contract mirrored from alpaca-py.
 - `src/journal.js` — the position record: refs, timelines, size, stage, book, fills; `chanceCalibration()` (PR 68).
 - `src/journalSync.js` — one Journal on every device (PR 71): the merge by ref, the counter, what the server stores on a POST.
+- `src/listing.js` — every market as IBKR lists it (PR 76): Alpaca's asset reply read into an exchange and a name, a day's cache.
 - `src/positionView.js`, `src/positionCard.jsx` — what a Positions card and its Details sheet say
   (action, profit, three exits, entry against now). They compute nothing new: the profit is
   `posAlerts`', the target `takeProfitTarget()`, the stop level `stopWarningLevel()`.
@@ -399,7 +414,7 @@ new order through path 3 (close) or path 2 (open, on Build's ticket). Never two 
 for one holding. Adding an eighth means adding a gate call.
 
 The proxy `netlify/functions/alpaca.mjs` passes only an allowlist (`routeAllowed()`): GET on the
-read paths the app uses (account, clock, positions, orders, contracts), POST `/v2/orders`, PATCH `/v2/orders/{id}`, DELETE `/v2/orders/{id}` and
+read paths the app uses (account, clock, positions, orders, contracts, one asset since PR 76), POST `/v2/orders`, PATCH `/v2/orders/{id}`, DELETE `/v2/orders/{id}` and
 `/v2/orders`. Everything else, `DELETE /v2/positions` included, is 405 with a sentence. A new
 call to Alpaca from the client needs its route added there and in `orders.test.js`. Every route but a GET answers 403
 off the published production deploy (`deployWrites()`, rule 6).
@@ -490,6 +505,10 @@ All in `RULES`, `src/rules.js`, unless noted.
 - `node scripts/shoot-pr74.mjs [dir]` photographs Learn (empty, an iron condor from the gallery, a sold call alone, light, and
   1280×800) on the `+book` fixture (docs/screens/pr74/; the harness answers every market with UNG's board). Since PR 74
   `scripts/audit-computer.mjs` checks Learn too (two columns, the picture in its column, four points).
+- `node scripts/shoot-pr76.mjs [dir]` photographs PR 76's screens (Learn's picture, the crosshair, a point held, the listings on
+  Find, the market page, Build, a position and the Journal; 390×844 and 1280×800) and MEASURES a finger's slide on each point
+  with Chromium's touch input (the strike before and after, the page's scroll); `ONLY=a,b` picks shots ("finger" included).
+  The harness answers `/v2/assets/{sym}` with fixture names (typed there, not Alpaca's); "+nolisting" answers 404.
 - `node scripts/shoot-pr72.mjs [dir]` photographs PR 72's screens (the Exit plan at rest and edited, the legs named twice,
   the review's legs, the exposure line on `+poor`, the market's feed line, the tray's two chances) (docs/screens/pr72/).
 - `node scripts/shoot-pr71.mjs [dir]` photographs the Journal's line under its title, saved on the server and (with the

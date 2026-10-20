@@ -308,7 +308,12 @@ test("MEASURED: the three screens, and the table in the PRD is this number", () 
      typed + 10 generated: `labWhereLine()`, `labLegText()`). Most of what it shows is data — LEARN_WORDS' lines and the
      gallery's fourteen ideas (LAB_FIGURES) — which this counter does not read, so learn.test.jsx measures the screen
      RENDERED as well: 313 words with no leg, 379 with an iron condor, each its own ceiling. */
-  const CEILING = { find: 157, market: 499, build: 675, positions: 256, learn: 22 };
+  /* >>> PR 76 (Learn's picture, the finger, IBKR's names; owner 20 Oct 2026). <<< market 499 → 502 and build 675 → 684: the
+     market as IBKR lists it, "SLV · ARCA" (`listingLine()`, 3 words a call: the market page's spoken heading; Build's title
+     line in its three states — at rest, loading, no quotes — an upper bound, as they never show together). The official
+     name under it is Alpaca's data, not scored. learn 22 → 23 (the listing on the chip and in the sheet; the leg rows'
+     IBKR names are `ibkrName()` data). Learn's picture and its lines are measured rendered in learn.test.jsx (319 / 426). */
+  const CEILING = { find: 157, market: 502, build: 684, positions: 256, learn: 23 };
   /* >>> PR #46: ONE ORDERS LIST. <<< The record-based "WORKING AT THE BROKER" panel (its paragraph about what a
      working order is, the stale-DAY warning, the per-row sentences) left Positions; the one list lives in
      `orders.jsx`, which the counter now reads. Measured: positions 304 -> 209 (4 typed + 205 generated, 14 sites).

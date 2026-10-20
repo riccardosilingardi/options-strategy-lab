@@ -27,7 +27,7 @@ import { exitPlanOf, clampExitPlan, stepExitPlan, exitPlanBounds, structureFamil
   exitSuggestionLine, EXIT_PLAN_WORDS, exitPlanEntryLine, rulesExitPlan, needDirection, ibkrName, exposureLine, chanceAtPriceLine } from "./rules.js";
 // PR 72: the payoff on the plan's exit day, for which way the trade needs the price (tradeChart.js, PR 68's).
 import { exitCurve, curveZones } from "./tradeChart.js";
-import { LAB_TABS, LEARN_WORDS, labWhereLine, labLegText, RULES, sizing, ruleBadge, takeProfitLabel, takeProfitTarget, takeProfitBasisWords, stopWarningLevel, stopLossLabel, perTradeCapLabel, RULE_PILLS, money, pctText, capitalSourceNote, perTradeLimitPhrase, qualityFloor, qualityFloorSentence, liquiditySkippedNote,
+import { LAB_TABS, LEARN_WORDS, labWhereLine, labLegText, listingLine, listingName, listingSearchInfo, LISTING_SEARCH_LABEL, RULES, sizing, ruleBadge, takeProfitLabel, takeProfitTarget, takeProfitBasisWords, stopWarningLevel, stopLossLabel, perTradeCapLabel, RULE_PILLS, money, pctText, capitalSourceNote, perTradeLimitPhrase, qualityFloor, qualityFloorSentence, liquiditySkippedNote,
   positionPnl, BROKER_PNL, remainingEdge, remainingEdgeLabel, shareOfMaximum, attentionCount,
   filterFold, qualityFloorLine, voicePointer, VOICE_HOMES, noCeilingRankLine,
   buildableExpiries, openableBoard, offFloorExpiryLabel, horizonFloorNote,
@@ -116,10 +116,13 @@ import { AccountStrip, PositionsBar, PositionsHeader, WorkingCloseLine, CardButt
 import { Note, CheckField, Btn, Panel, Label, Stat, Reveal, TextBtn, mono, sans } from "./ui.jsx";
 import { marketClockLine, nextOpenDay } from "./clock.js";
 import { BASKET, TICKERS, getU, categoryOf } from "./markets.js";
+// PR 76: every market the way IBKR lists it (read from Alpaca, kept a day on the device).
+import { readListings, writeListings, listingsToAsk, fetchListings } from "./listing.js";
 // PR 74: Learn, the figure lab — its arithmetic (learnView.js) and its screen (learn.jsx). Nothing in either sends.
 import { LearnScreen } from "./learn.jsx";
-import { labExpiry, labStepExpiry, labAddLeg, labStepLeg, labMoveLeg, labFlipLeg, labRemoveLeg, labFigureLegs, labExpectedMove,
-  labModel, labCard, labLegRows, labGallery, LAB_MAX_LEGS } from "./learnView.js";
+import { labExpiry, labStepExpiry, labAddLeg, labStepLeg, labFlipLeg, labRemoveLeg, labFigureLegs, labExpectedMove,
+  labModel, labCard, labLegRows, labGallery, LAB_MAX_LEGS, labCurves, labExtremes, labDensity, labReadout, labSnapLabel,
+  labMarketLine, labLegend, labDragTo } from "./learnView.js";
 
 /* ============================== THEME ============================== */
 /* PR #49, TASK 4 — THE SWEEP. This file's own Btn, Panel, Lbl, Stat, mono and sansUI are gone: the atoms and the two
@@ -1342,6 +1345,22 @@ export default function OptionsStrategyLab() {
      its legs, and the gallery figure they were loaded from (so a change of market or expiry lays that figure out again).
      In memory only: the lab saves nothing, on this device or the server. */
   const [lab, setLab] = useState({ ticker: null, expKey: null, legs: [], figureId: null, reload: false });
+  /* PR 76 (task 76.4): EVERY MARKET THE WAY IBKR LISTS IT — "SLV · ARCA" and "ISHARES SILVER TRUST", read from Alpaca's
+     `GET /v2/assets/{symbol}` (src/listing.js), one read-only GET per market, kept on this device for a day. Not read (the
+     demo, a failed call): the ticker alone. Never on /api/state. */
+  const [listings, setListings] = useState(() => readListings(typeof localStorage !== "undefined" ? localStorage : null));
+  useEffect(() => {
+    if (DEMO) return undefined;
+    const ask = listingsToAsk(listings, BASKET, Date.now());
+    if (!ask.length) return undefined;
+    let live = true;
+    fetchListings(ask, alpacaGet).then((got) => {
+      if (!live || !Object.keys(got).length) return;
+      setListings((prev) => { const next = { ...prev, ...got }; writeListings(typeof localStorage !== "undefined" ? localStorage : null, next); return next; });
+    });
+    return () => { live = false; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- once a load: a day's cache decides what is asked
+  const listingOfTk = (tk) => listings[tk] || null;
   const [seasonal, setSeasonal] = useState({});  // ticker -> {monthlyMean, sigma, matrix, years, src, at} from Alpha Vantage
   // WHY a market is not in `seasonal`: loading, or a named failure. A fallback
   // that cannot say why it is in use is indistinguishable from a measurement.
@@ -1688,6 +1707,16 @@ export default function OptionsStrategyLab() {
   const labGal = useMemo(() => (onLearnTab && labChain && labExp
     ? labGallery({ ticker: labTk, chain: labChain, expKey: labExp, bandsOf: payoffBands }) : []),
   [onLearnTab, labTk, labChain, labExp]);
+  /* PR 76: THE PICTURE'S OTHER READINGS — today's and the exit date's curves, the card's extremes on the curve, the
+     market's distribution (Build's own fit, `boardDistOf()`, one per board) as a band and as the chance at the model net. */
+  const labDist = useMemo(() => (onLearnTab && labChain && labExp ? boardDistOf(labChain, labExp) : null), [onLearnTab, labChain, labExp]);
+  const labCurv = useMemo(() => (labM ? labCurves(labM, labChain) : null), [labM, labChain]);
+  const labChart = labM ? {
+    bands: labM.bands || null, legs: lab.legs, spot: labSpot, curves: labCurv, extremes: labExtremes(labM),
+    density: labM.bands ? labDensity(labDist, labM.bands.lo, labM.bands.hi) : [],
+    readout: (s) => labReadout(labM, labCurv, s), snapLabel: (i) => labSnapLabel(labM, i),
+    market: labMarketLine(labM, labDist), legend: labLegend(labCurv),
+  } : { bands: null, legs: lab.legs, spot: labSpot, curves: null, extremes: [], density: [], market: null, legend: null };
   // The lab keeps its market once it holds a leg: Build moving to another market must not leave these strikes on its board.
   const editLab = (f) => setLab((l) => ({ ...l, ticker: l.ticker || labTk, legs: f(l.legs), figureId: null, reload: false }));
 
@@ -4235,7 +4264,7 @@ export default function OptionsStrategyLab() {
     })() : null;
     const bands = payoffBands({ legs: dp.legs, entryNet: dp.entryNet, spot: dm.s ?? dp.entrySpot });
     const v = {
-      p: dp, ref: dp.ref || dp.ticker, title: dm.name, sub: positionSubLine(dp),
+      p: dp, ref: dp.ref || dp.ticker, title: dm.name, sub: positionSubLine(dp, listingOfTk(dp.ticker)), listing: listingName(listingOfTk(dp.ticker)),
       back: { label: "Positions", onClick: () => { setDetailsId(null); if (ca && !ca.busy) setCloseAt(null); } },
       status: {
         act: dm.act, action: dm.act.action || (dm.act.kind === "not-held" ? "NOT ON ALPACA" : "NO QUOTE"), badge: statusBadge(dm.act),
@@ -5108,7 +5137,7 @@ export default function OptionsStrategyLab() {
             status={findStatusText(findFresh.line, findFeeds)} stale={findStale} />
         )}
         {tab === "build" && !showSettings && (step === "find" || paneFind) && (
-          <FindStep wide={wide}
+          <FindStep wide={wide} listingOf={listingOfTk}
             request={request} onRequest={(patch) => setWant((w) => ({ ...w, ...patch }))}
             sentiments={SENTIMENTS} find={find} setFind={setFind}
             limits={limits} onLimit={(ov) => setSetting("sizeOverride", ov)} freeSizing={freeSizing}
@@ -5136,7 +5165,7 @@ export default function OptionsStrategyLab() {
         {/* On a computer the market page stays beside Find's rows (the last one opened); before any, it says where it opens. */}
         {paneFind && !mkt.tk && <Note style={{ margin: "24px 16px" }}>Pick a market on the left: its page opens here.</Note>}
         {tab === "build" && !showSettings && (step === "market" || paneFind) && mkt.tk && (
-          <MarketPage docked={paneFind}
+          <MarketPage docked={paneFind} listingOf={listingOfTk}
             tk={mkt.tk} tab={mkt.tab} onTab={(t) => setMkt((m) => ({ ...m, tab: t }))} onBack={() => goStep("find")}
             onRefresh={() => refreshChain(mkt.tk)} busy={busy !== null}
             onTicker={(tk) => setMkt((m) => ({ ...m, tk }))}
@@ -5721,7 +5750,9 @@ export default function OptionsStrategyLab() {
             wide,
             back: backTk ? { label: backTk, onClick: () => { if (buildOrigin && buildOrigin.kind === "card") backToList(); else goMarket(backTk, "strategies"); } }
               : { label: "Find", onClick: () => goStep("find") },
-            title: { name: stratName, sub: buildSubLine({ ticker, expKey, dte, n: contracts }),
+            // PR 76: "UNG · ARCA · 18 Dec · 74 days · ×1" and the official name under it, as IBKR lists the market.
+            title: { name: stratName, sub: buildSubLine({ ticker: listingLine(ticker, listingOfTk(ticker)), expKey, dte, n: contracts }),
+              listing: listingName(listingOfTk(ticker)),
               signs: <StopSigns signs={buildSigns} style={{ marginTop: 8 }} />, note: rollRef ? rollLine(rollRef, !rollHeld) : buildOrigin && buildOrigin.note ? buildOrigin.note : null },
             takeaway: tradeTakeaway(BF.bands, { ticker, expKey, n: contracts, credit: AE.entry < 0, legs }),
             numbers: {
@@ -6087,7 +6118,7 @@ export default function OptionsStrategyLab() {
             own records and figures; the closed ones the record's. */}
         {tab === "journal" && !showSettings && (
           <JournalScreen key={journalOpenRef || "journal"} v={{
-            journey, wide,
+            journey, wide, listingOf: listingOfTk,
             // PR 71 (task 71.3): where this Journal is kept. Not in the demo, which never talks to the server.
             sync: DEMO ? null : journalSyncLine(serverSync),
             // PR 68 (task 68.3): which chance came true, once enough closed trades carry both.
@@ -6185,7 +6216,7 @@ export default function OptionsStrategyLab() {
             src/learn.jsx draws it; learnView.js computes it; nothing in it sends, saves or calls the gate. */}
         {tab === "learn" && !showSettings && (
           <LearnScreen v={{
-            wide, ticker: labTk, markets: BASKET,
+            wide, ticker: labTk, markets: BASKET, listingOf: listingOfTk,
             onMarket: (tk) => setLab((l) => ({ ticker: tk, expKey: null, legs: [], figureId: l.figureId, reload: !!l.figureId })),
             where: labWhereLine(labTk, labExp, labExp ? labChain?.byExp?.[labExp]?.dte : null),
             canPrevExp: !!labExp && labStepExpiry(labChain, labExp, -1) !== labExp,
@@ -6202,11 +6233,11 @@ export default function OptionsStrategyLab() {
               : !labExp || !labBoard ? { text: LEARN_WORDS.noBoard(labTk) } : null,
             tabs: LAB_TABS.map((t) => ({ id: t.id, label: t.label, onAdd: () => editLab((ls) => labAddLeg(ls, t.id, labBoard, labSpot)) })),
             full: lab.legs.length >= LAB_MAX_LEGS ? LEARN_WORDS.maxLegs(LAB_MAX_LEGS) : null,
-            chart: { bands: labM?.bands || null, legs: lab.legs, spot: labSpot,
-              onMove: (i, price) => editLab((ls) => labMoveLeg(ls, i, price, labBoard)),
+            chart: { ...labChart,
+              onMove: (i, d) => editLab((ls) => labDragTo(ls, i, labBoard, d)),
               onStep: (i, dir) => editLab((ls) => labStepLeg(ls, i, dir, labBoard)),
               label: (i) => `${labLegText(lab.legs[i] || {})}: drag, or press the arrow keys` },
-            legs: labLegRows(labM, labBoard).map((r) => ({ ...r,
+            legs: labLegRows(labM, labBoard, labChain).map((r) => ({ ...r,
               onMinus: () => editLab((ls) => labStepLeg(ls, r.i, -1, labBoard)),
               onPlus: () => editLab((ls) => labStepLeg(ls, r.i, 1, labBoard)),
               flipLabel: r.side === "long" ? "Sell" : "Buy",
@@ -6228,12 +6259,12 @@ export default function OptionsStrategyLab() {
             empty. A trade whose legs are unquoted on a read chain stays on the builder, with dashes and Send held. */}
         {tab === "build" && !showSettings && step === "build" && buildScreen === "loading" && (
           <BuildLoading back={{ label: "Find", onClick: () => goStep("find") }} title={legs.length ? stratName : ticker}
-            sub={buildSubLine({ ticker, expKey, dte, n: contracts })}
+            sub={buildSubLine({ ticker: listingLine(ticker, listingOfTk(ticker)), expKey, dte, n: contracts })}
             reading={`Reading ${ticker}'s chain${expKey ? ` for ${expiryShort(expKey)}` : ""}…`} />
         )}
         {tab === "build" && !showSettings && step === "build" && buildScreen === "no-market-data" && (
           <BuildNoQuotes back={{ label: "Find", onClick: () => goStep("find") }} title={legs.length ? stratName : ticker}
-            sub={buildSubLine({ ticker, expKey, dte, n: contracts })}
+            sub={buildSubLine({ ticker: listingLine(ticker, listingOfTk(ticker)), expKey, dte, n: contracts })}
             sentence={`${ticker}'s option prices have not come back${legs.length ? `, so ${legs.length === 1 ? "this leg is" : "these legs are"} not priced` : ""}: nothing on this trade is worked out until a bid and an ask arrive.`}
             legs={legs} legsTitle={`Legs${expKey ? ` · ${expiryShort(expKey)}` : ""}`} onRetry={() => refreshChain(ticker)} onPickExpiry={() => goMarket(ticker, "chain")}
             lastRead={`Last read: ${chainErrAt ? new Date(chainErrAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) : "not yet"} your time. The feed is indicative; a missing quote is shown as missing, never as zero.`} />

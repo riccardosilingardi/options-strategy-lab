@@ -57,6 +57,7 @@ import { RULES, money, chanceText, expiryWords, sizedFree, sizedFigures, sizeLin
   chainEventText, eventLineText, eventInfoText, dateOnlyWhen, inDaysText, holidayWeekNote, eventsBeforeLabel, CHAIN_HEAD, trayChanceLines,
   chainNotLoadedText, marketReadingText, noCardsText, ARIA, readScoreLine, compareTrayLine, SEE_THEM, cardDetailRows, costsFor,
   viewOfDir, viewChoiceLabel, viewTargetPrice, chainQuotedLegs, TRAY_UNLISTED, trayReplaceHint, trayReplacedText,
+  listingLine, listingName, listingSearchInfo, LISTING_SEARCH_LABEL,
 } from "./rules.js";
 
 const FS = TYPE.size, FW = TYPE.weight, LH = TYPE.line;
@@ -84,6 +85,8 @@ export function MarketPage({
   sheet = null, onSheet = () => {}, compareProps = {}, now = Date.now(), initialTray = null,
   // PR 73: on a computer the page is a pane beside Find's list; its tray and compare line dock at the pane's foot.
   docked = false,
+  // PR 76: a market's listing as IBKR writes it (`{ exchange, name }`, read from Alpaca), or null.
+  listingOf = () => null,
 }) {
   const u = getU(tk);
   const spot = chain && chain.spot ? chain.spot : null;
@@ -109,7 +112,7 @@ export function MarketPage({
 
   return (
     <div data-market style={{ maxWidth: 1100 }}>
-      <MarketHeader tk={tk} u={u} spot={spot} freshLine={freshLine} feed={feed} bars={bars} clockLine={clockLine} atm={atm}
+      <MarketHeader tk={tk} u={u} listing={listingOf(tk)} spot={spot} freshLine={freshLine} feed={feed} bars={bars} clockLine={clockLine} atm={atm}
         ivRank={ivRank} ivDays={ivDays} board={board} now={now} onBack={onBack} onRefresh={onRefresh} busy={busy}
         news={latestNews(tk, newsItems, newsState)} newsItems={newsItems} ago={ago} first={first} saved={first ? isSaved(first.cand) : false}
         onSave={() => first && onSave(first)} onTickerSheet={() => onSheet("market:tickers")}
@@ -140,6 +143,8 @@ export function MarketPage({
 
       {/* THE MARKETS, BY CATEGORY: the same rows as Find, the current one marked. Picking one keeps the tab. */}
       <Sheet open={sheet === "market:tickers"} title={MARKETS_SHEET_TITLE} value={tk} onClose={() => onSheet(null)}>
+        {/* PR 76: finding this market in IBKR — by its symbol, not its word. */}
+        <Info label={LISTING_SEARCH_LABEL}>{listingSearchInfo(tk, u.name)}</Info>
         {MARKET_CATEGORIES.map((c) => {
           const rows = marketRows(allItems.filter((x) => c.tickers.includes(x.tk)), request, sizeOf);
           return (
@@ -149,7 +154,7 @@ export function MarketPage({
                 {rows.map((r) => (
                   <MarketRow key={r.tk} row={r} sd={(boards[r.tk] || {}).signal || null} current={r.tk === tk}
                     fig={rowFigures(r.x, sizes.get(r.x.key) || null, findOrder)} saved={isSaved(r.x.cand)}
-                    onSave={() => onSave(r.x)} onOpen={() => { onSheet(null); onTicker(r.tk); }} />
+                    onSave={() => onSave(r.x)} onOpen={() => { onSheet(null); onTicker(r.tk); }} listing={listingOf(r.tk)} />
                 ))}
               </div>
             </div>
@@ -186,7 +191,7 @@ export function CompareLine({ n, note = null, onOpen, docked = false }) {
 }
 
 /* ---------------------------------------------------------------- THE HEADER */
-function MarketHeader({ tk, u, spot, freshLine, feed = null, bars, clockLine, atm, ivRank, ivDays, board, now, news, newsItems, ago, first,
+function MarketHeader({ tk, u, listing = null, spot, freshLine, feed = null, bars, clockLine, atm, ivRank, ivDays, board, now, news, newsItems, ago, first,
   saved, onSave, onTickerSheet, eventNode, onBack, onRefresh, busy }) {
   const [def, setDef] = useState(null);
   const ch = dayChange(bars, spot, now);
@@ -203,7 +208,7 @@ function MarketHeader({ tk, u, spot, freshLine, feed = null, bars, clockLine, at
   return (
     <header data-market-header>
       <h2 data-view-heading tabIndex={-1} style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", margin: 0 }}>
-        {tk} · {u.name} · {u.category || "not proposed"}
+        {listingLine(tk, listing)} · {listingName(listing) || u.name} · {u.category || "not proposed"}
       </h2>
       <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 8px 0 4px" }}>
         <IconButton label={BACK_TO_FIND_ARIA} onClick={onBack}><ArrowLeft size={22} strokeWidth={1.75} aria-hidden="true" /></IconButton>
@@ -215,10 +220,15 @@ function MarketHeader({ tk, u, spot, freshLine, feed = null, bars, clockLine, at
           <span style={{ minWidth: 0 }}>
             <span style={{ display: "block", lineHeight: LH.tight }}>
               <span data-market-ticker style={{ ...mono, fontSize: FS.lg, fontWeight: FW.bold, color: T.ink }}>{tk}</span>
+              {/* PR 76: SYMBOL · EXCHANGE, as IBKR lists it; the ticker alone when the listing was not read. */}
+              {listing && listing.exchange && <span data-market-exchange style={{ ...mono, fontSize: FS.sm, color: T.mut }}>{` · ${listing.exchange}`}</span>}
               <span style={{ ...sans, fontSize: FS.xs, color: T.mut, marginLeft: 6 }}>▾</span>
             </span>
-            <span style={{ ...sans, display: "block", fontSize: FS.xs, color: T.mut, lineHeight: LH.tight, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-              {u.name} · {u.category || "not proposed"}
+            <span data-market-name={listing && listing.name ? "official" : "registry"} style={{ ...sans, display: "block", fontSize: FS.xs, color: T.mut,
+              lineHeight: LH.tight, ...(listing && listing.name ? { letterSpacing: "0.02em", overflowWrap: "anywhere" }
+                : { whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }) }}>
+              {/* The official name in capitals under the symbol (IBKR's second line); the registry's word until it is read. */}
+              {listingName(listing) || u.name} · {u.category || "not proposed"}
             </span>
           </span>
         </button>

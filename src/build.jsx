@@ -16,7 +16,7 @@
 import React, { useState } from "react";
 import { Minus, Plus, ArrowUp } from "lucide-react";
 import { T, TYPE } from "./theme.js";
-import { mono, sans, Note, Info, Sheet, Reveal, FilterChip, TAP, Placeholder, ContractName } from "./ui.jsx";
+import { mono, sans, Note, Info, Sheet, Reveal, FilterChip, TAP, Placeholder, ContractName, ListingName } from "./ui.jsx";
 import { useCopilot, useTicketSend, SKILLS, BUILD_SKILL_IDS, Markdown, readQty, CONTINUE_LABEL } from "./pro.jsx";
 import { FACTOR_LABEL } from "./why.jsx";
 import { EXIT_REPLAY, exitReplayInside, exitReplayNotRead, exitReplayHead, exitReplayExitsLine, exitReplayWarnLine, exitReplayVerdict,
@@ -68,11 +68,13 @@ export function BuildHeader({ backLabel, onBack }) {
 }
 
 /* ---------------------------------------------------------------- THE TITLE */
-export function BuildTitle({ name, sub, signs = null, note = null }) {
+export function BuildTitle({ name, sub, signs = null, note = null, listing = null }) {
   return (
     <div>
       <h2 data-view-heading tabIndex={-1} style={{ ...sans, fontSize: FS.xl, fontWeight: FW.bold, color: T.ink, margin: 0, lineHeight: LH.tight, outline: "none" }}>{name}</h2>
       <div style={{ ...mono, ...tnum, fontSize: FS.sm, color: T.mut, marginTop: 4 }}>{sub}</div>
+      {/* PR 76: the market's official name, as IBKR prints it under "UNG · ARCA" (read from Alpaca; nothing when not read). */}
+      <ListingName name={listing} style={{ marginTop: 2 }} />
       {signs}
       {note && <div style={{ ...sans, fontSize: FS.sm, color: T.amber, marginTop: 6, lineHeight: LH.body }}>{note}</div>}
     </div>
@@ -736,7 +738,7 @@ export function BuildScreen({ v, foldedNode = null }) {
     <div data-build style={{ paddingBottom: 8 }}>
       <BuildHeader backLabel={v.back.label} onBack={v.back.onClick} />
       <main style={{ padding: v.wide ? "4px 24px 0" : "4px 16px 0", display: "grid", gap: 12 }}>
-        <BuildTitle name={v.title.name} sub={v.title.sub} signs={v.title.signs} note={v.title.note} />
+        <BuildTitle name={v.title.name} sub={v.title.sub} signs={v.title.signs} note={v.title.note} listing={v.title.listing} />
         {v.wide ? (
           /* ON A COMPUTER (PR 73, owner 19 Oct 2026): two columns that widen with the window — on the left what is sent (the
              legs, the order, the exit plan, Send), on the right what it does (the chart, the numbers, why, the copilot, the

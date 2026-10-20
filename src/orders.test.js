@@ -298,6 +298,18 @@ await test("…and passes every path the app uses", () => {
   }
 });
 
+await test("PR 76: ONE ASSET IS A READ — GET /v2/assets/SLV passes; writing to it, listing every asset or DELETE /v2/positions does not", () => {
+  assert.equal(routeAllowed("GET", "/v2/assets/SLV").ok, true);
+  assert.equal(routeAllowed("GET", "/v2/assets/BRK.B").ok, true, "a class share's dot");
+  for (const [m, p] of [["POST", "/v2/assets/SLV"], ["DELETE", "/v2/assets/SLV"], ["PATCH", "/v2/assets/SLV"], ["GET", "/v2/assets"],
+    ["GET", "/v2/assets?status=active"], ["GET", "/v2/assets/SLV/x"], ["DELETE", "/v2/positions"]]) {
+    const r = routeAllowed(m, p);
+    assert.equal(r.ok, false, `${m} ${p}`); assert.equal(r.status, 405, `${m} ${p}`);
+  }
+  // The client asks it through the one GET helper, so the source sweep below sees the path too.
+  assert.ok(readFileSync(new URL("./listing.js", import.meta.url), "utf8").includes("`/v2/assets/${encodeURIComponent(tk)}`"));
+});
+
 await test("every proxy path the client source calls is on the allowlist (source sweep)", () => {
   const files = ["App.jsx", "pro.jsx", "chain.js", "closeOrder.js", "modifyOrder.js", "orderRow.js"];
   const seen = new Set();

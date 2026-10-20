@@ -176,7 +176,9 @@ const ATOMS = ["Btn", "Panel", "Lbl", "Label", "Stat", "Chip", "Fold", "RangeFie
   // Round 2: the mockups' atoms.
   "IconButton", "SegmentBar", "UnderTabs", "FilterChip", "TextBtn",
   // PR 72: a contract named twice (IBKR's name, the OCC symbol with Copy).
-  "ContractName"];
+  "ContractName",
+  // PR 76: a market's official name as IBKR prints it.
+  "ListingName"];
 
 /** What a migrated file may not contain, as findings (so the sweep itself can be shown to fail). */
 function offences(src, { isHome }) {
