@@ -27,7 +27,7 @@ import { exitPlanOf, clampExitPlan, stepExitPlan, exitPlanBounds, structureFamil
   exitSuggestionLine, EXIT_PLAN_WORDS, exitPlanEntryLine, rulesExitPlan, needDirection, ibkrName, exposureLine, chanceAtPriceLine } from "./rules.js";
 // PR 72: the payoff on the plan's exit day, for which way the trade needs the price (tradeChart.js, PR 68's).
 import { exitCurve, curveZones } from "./tradeChart.js";
-import { LAB_TABS, LEARN_WORDS, labWhereLine, labLegText, listingLine, listingName, listingSearchInfo, LISTING_SEARCH_LABEL, RULES, sizing, ruleBadge, takeProfitLabel, takeProfitTarget, takeProfitBasisWords, stopWarningLevel, stopLossLabel, perTradeCapLabel, RULE_PILLS, money, pctText, capitalSourceNote, perTradeLimitPhrase, qualityFloor, qualityFloorSentence, liquiditySkippedNote,
+import { LAB_TABS, LAB_FIGURES, LEARN_WORDS, labWhereLine, labLegText, listingLine, listingName, listingSearchInfo, LISTING_SEARCH_LABEL, RULES, sizing, ruleBadge, takeProfitLabel, takeProfitTarget, takeProfitBasisWords, stopWarningLevel, stopLossLabel, perTradeCapLabel, RULE_PILLS, money, pctText, capitalSourceNote, perTradeLimitPhrase, qualityFloor, qualityFloorSentence, liquiditySkippedNote,
   positionPnl, BROKER_PNL, remainingEdge, remainingEdgeLabel, shareOfMaximum, attentionCount,
   filterFold, qualityFloorLine, voicePointer, VOICE_HOMES, noCeilingRankLine,
   buildableExpiries, openableBoard, offFloorExpiryLabel, horizonFloorNote,
@@ -122,7 +122,9 @@ import { readListings, writeListings, listingsToAsk, fetchListings } from "./lis
 import { LearnScreen } from "./learn.jsx";
 import { labExpiry, labStepExpiry, labAddLeg, labStepLeg, labFlipLeg, labRemoveLeg, labFigureLegs, labExpectedMove,
   labModel, labCard, labLegRows, labGallery, LAB_MAX_LEGS, labCurves, labExtremes, labDensity, labReadout, labSnapLabel,
-  labMarketLine, labLegend, labDragTo } from "./learnView.js";
+  labMarketLine, labLegend, labDragTo, labDrawView } from "./learnView.js";
+// PR 77: a figure drawn with a finger, recognised on the market shown (plain JS; nothing in it sends).
+import { recogniseDrawing } from "./learnDraw.js";
 
 /* ============================== THEME ============================== */
 /* PR #49, TASK 4 — THE SWEEP. This file's own Btn, Panel, Lbl, Stat, mono and sansUI are gone: the atoms and the two
@@ -1717,6 +1719,27 @@ export default function OptionsStrategyLab() {
     readout: (s) => labReadout(labM, labCurv, s), snapLabel: (i) => labSnapLabel(labM, i),
     market: labMarketLine(labM, labDist), legend: labLegend(labCurv),
   } : { bands: null, legs: lab.legs, spot: labSpot, curves: null, extremes: [], density: [], market: null, legend: null };
+  /* PR 77: A FIGURE DRAWN WITH A FINGER. The strokes (each in the picture's own units, with the price range it was drawn on)
+     live in `lab`, in memory like the rest of it; the last one is read against this market and expiry
+     (`recogniseDrawing()`, learnDraw.js: every shape on the strikes the chain lists, priced at the lab's model net). */
+  const labStrokes = Array.isArray(lab.strokes) ? lab.strokes : [];
+  const labStroke = labStrokes.length ? labStrokes[labStrokes.length - 1] : null;
+  const labRec = useMemo(() => (onLearnTab && labStroke && labBoard ? recogniseDrawing({ stroke: labStroke.points, board: labBoard, spot: labSpot,
+    lo: labStroke.lo, hi: labStroke.hi, sd: labExpectedMove(labChain, labExp),
+    netOf: (ls) => labModel({ ticker: labTk, chain: labChain, expKey: labExp, legs: ls }).net }) : null),
+  [onLearnTab, labStroke, labBoard, labSpot, labChain, labExp, labTk]);
+  const labDrawV = labDrawView(labRec, { ticker: labTk, chain: labChain, expKey: labExp, bandsOf: payoffBands });
+  const labDraw = {
+    mode: lab.mode === "draw" ? "draw" : "points", onMode: (m) => setLab((l) => ({ ...l, mode: m })),
+    stroke: labStroke, canUndo: labStrokes.length > 0,
+    onStroke: (st) => setLab((l) => ({ ...l, ticker: l.ticker || labTk, strokes: [...(Array.isArray(l.strokes) ? l.strokes : []), st] })),
+    onUndo: () => setLab((l) => ({ ...l, strokes: (l.strokes || []).slice(0, -1) })),
+    onRedraw: () => setLab((l) => ({ ...l, strokes: [] })),
+    lines: labDrawV.lines,
+    // A tap loads the figure as the gallery does, on the strikes laid out from the drawing, and hands the finger back to the points.
+    cards: labDrawV.cards.map((c) => ({ ...c, onLoad: () => setLab((l) => ({ ...l, ticker: l.ticker || labTk, legs: c.legs.map((x) => ({ ...x })),
+      figureId: LAB_FIGURES.some((f) => f.id === c.id) ? c.id : null, reload: false, mode: "points" })) })),
+  };
   // The lab keeps its market once it holds a leg: Build moving to another market must not leave these strikes on its board.
   const editLab = (f) => setLab((l) => ({ ...l, ticker: l.ticker || labTk, legs: f(l.legs), figureId: null, reload: false }));
 
@@ -6243,7 +6266,7 @@ export default function OptionsStrategyLab() {
               flipLabel: r.side === "long" ? "Sell" : "Buy",
               onFlip: () => editLab((ls) => labFlipLeg(ls, r.i)),
               onRemove: () => editLab((ls) => labRemoveLeg(ls, r.i)) })),
-            card: labCard(labM),
+            card: labCard(labM), draw: labDraw,
             onClear: () => setLab((l) => ({ ...l, legs: [], figureId: null, reload: false })),
             gallery: labGal.map((g) => ({ id: g.id, name: g.name, idea: g.idea, bands: g.model?.bands || null, spot: labSpot,
               current: !!labM && labM.figure.id === g.id,

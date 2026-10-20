@@ -487,4 +487,30 @@ export function labLane(items = [], { left = 0, right = Infinity, gap = 4 } = {}
   return out;
 }
 
+/* =====================================================================================================================
+   PR 77: A FIGURE DRAWN WITH A FINGER. `recogniseDrawing()` (learnDraw.js) says which figures look like the stroke; this
+   turns its answer into the cards the screen shows. Each card's picture is the lab's own model of those legs.
+===================================================================================================================== */
+/**
+ * @param rec  `recogniseDrawing()`'s answer, or null (nothing drawn)
+ * @returns { cards: [{ id, name, legs, bands, tag, uncovered, sibling }], lines: [sentence] } — no card when nothing is
+ *          named ("No known figure looks like this; the closest is X" is the line), the sibling's sentence and the
+ *          same-line sentence as lines
+ */
+export function labDrawView(rec, { ticker, chain, expKey, bandsOf } = {}) {
+  if (!rec) return { cards: [], lines: [] };
+  if (!rec.ok) return { cards: [], lines: [rec.reason === "flat" ? LEARN_WORDS.drawFlat : rec.reason === "short" ? LEARN_WORDS.drawShort : null].filter(Boolean) };
+  if (!rec.named) return { cards: [], lines: [LEARN_WORDS.noMatch(rec.best.name)] };
+  const cards = rec.matches.map((m) => {
+    const model = labModel({ ticker, chain, expKey, legs: m.legs, bandsOf });
+    return { id: m.id, name: m.name, legs: m.legs, bands: model.bands, tag: m.sibling ? LEARN_WORDS.siblingTag : LEARN_WORDS.similar(m.sim),
+      uncovered: m.uncovered, sibling: m.sibling };
+  });
+  const lines = [];
+  const sib = rec.matches.find((m) => m.sibling);
+  if (sib) lines.push(sib.sentence);
+  if (rec.twin) lines.push(LEARN_WORDS.sameLine(FIGURE_NAMES[rec.twin.of], rec.twin.name, rec.twin.ofNet, rec.twin.net));
+  return { cards, lines };
+}
+
 export { boardStrikes };
