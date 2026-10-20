@@ -11,7 +11,7 @@
 import React, { useState } from "react";
 import { Minus, Plus, X } from "lucide-react";
 import { T, TYPE } from "./theme.js";
-import { mono, sans, Note, Sheet, FilterChip, IconButton, TextBtn, TAP, useBoxWidth, Info, ContractName, ListingName } from "./ui.jsx";
+import { mono, sans, Note, Sheet, FilterChip, IconButton, TextBtn, TAP, useBoxWidth, Info, ContractName, ListingName, Segments, Btn } from "./ui.jsx";
 import { FigureChart, FigureLegendLine as LegendLine } from "./visuals.jsx";
 import { LEARN_WORDS as W, listingLine, listingName, listingSearchInfo, LISTING_SEARCH_LABEL } from "./rules.js";
 import { getU } from "./markets.js";
@@ -29,7 +29,10 @@ const tnum = { fontVariantNumeric: "tabular-nums" };
  *   chart: { bands, legs, spot, onMove(i, drag), onStep(i, dir), label(i),
  *            curves, extremes, density, readout(s), snapLabel(i), market: { pop, text }, legend: [{ id, text, drawn }] },
  *   legs: [{ i, text, price, canMinus, canPlus, onMinus, onPlus, onFlip, flipLabel, onRemove }],
- *   card: labCard() | null, onClear, gallery: [{ id, name, idea, bands, spot, current, onLoad }]
+ *   card: labCard() | null, onClear, gallery: [{ id, name, idea, bands, spot, current, onLoad }],
+ *   bridge (PR 78): { kind: "build" | "defined" | "none", line, onChain, onBuild } | null,
+ *   draw (PR 77): { mode: "points" | "draw", onMode, stroke, onStroke, canUndo, onUndo, onRedraw,
+ *                   cards: [{ id, name, bands, tag, uncovered, sibling, onLoad }], lines: [sentence] } | null
  * }
  */
 export function LearnScreen({ v }) {
@@ -76,11 +79,44 @@ export function LearnScreen({ v }) {
               </div>
               {v.full && <Note data-learn-full style={{ margin: 0 }}>{v.full}</Note>}
 
+              {/* PR 77: what a finger does on the picture — move the points, or draw the figure you want. */}
+              {v.draw && <div data-learn-mode style={{ display: "flex" }}><Segments items={[{ id: "points", label: W.modePoints }, { id: "draw", label: W.modeDraw }]}
+                value={v.draw.mode} onChange={v.draw.onMode} label={W.modeLabel} /></div>}
               <div ref={boxRef} data-learn-chart style={{ minWidth: 0 }}>
                 <FigureChart bands={v.chart.bands} legs={v.chart.legs} spot={v.chart.spot} width={chartW} height={v.wide ? 320 : 260}
                   onMove={v.chart.onMove} onStep={v.chart.onStep} handleLabel={v.chart.label} curves={v.chart.curves}
-                  extremes={v.chart.extremes} density={v.chart.density} readout={v.chart.readout} snapLabel={v.chart.snapLabel} />
+                  extremes={v.chart.extremes} density={v.chart.density} readout={v.chart.readout} snapLabel={v.chart.snapLabel}
+                  drawMode={!!v.draw && v.draw.mode === "draw"} stroke={v.draw ? v.draw.stroke : null} onStroke={v.draw ? v.draw.onStroke : null} />
               </div>
+              {/* PR 77: DRAWN — Undo and Redraw on one row, then the closest figures (the defined-risk one first when the closest
+                  is a figure the app never sends), or the sentence that names none. A tap loads one into the lab. */}
+              {v.draw && v.draw.mode === "draw" && (
+                <section data-learn-draw aria-label={W.closest} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {!v.draw.stroke && <Note style={{ margin: 0 }}>{W.drawHint}</Note>}
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <TextBtn onClick={v.draw.onUndo} disabled={!v.draw.canUndo} height={TAP} style={{ opacity: v.draw.canUndo ? 1 : 0.5 }}>{W.undo}</TextBtn>
+                    <TextBtn onClick={v.draw.onRedraw} disabled={!v.draw.stroke} height={TAP} style={{ opacity: v.draw.stroke ? 1 : 0.5 }}>{W.redraw}</TextBtn>
+                  </div>
+                  {v.draw.cards.length > 0 && (
+                    <>
+                      <h2 style={H2}>{W.closest.toUpperCase()}</h2>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 }}>
+                        {v.draw.cards.map((c) => (
+                          <button key={c.id} data-learn-match={c.id} data-sibling={c.sibling ? "true" : undefined} onClick={c.onLoad}
+                            style={{ ...PANEL, ...sans, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 4, padding: 8, textAlign: "left",
+                              cursor: "pointer", color: T.ink, minHeight: TAP, minWidth: 0, border: `1px solid ${c.sibling ? T.green : T.line}` }}>
+                            <FigureChart compact bands={c.bands} spot={v.chart.spot} width={96} height={44} />
+                            <span style={{ fontSize: FS.sm, fontWeight: FW.bold, lineHeight: LH.tight }}>{c.name}</span>
+                            <span style={{ fontSize: FS.xs, color: c.sibling ? T.green : T.mut, lineHeight: LH.tight }}>{c.tag}</span>
+                            {c.uncovered && <span data-learn-match-warn style={{ fontSize: FS.xs, color: T.amber, lineHeight: LH.tight }}>{W.neverSentShort}</span>}
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                  {v.draw.lines.map((t) => <Note key={t} data-learn-draw-line style={{ margin: 0 }}>{t}</Note>)}
+                </section>
+              )}
               {/* PR 76: what each curve is, then the market's chance with the band's ⓘ. */}
               {v.chart.legend && (
                 <div data-learn-legend style={{ display: "flex", flexWrap: "wrap", columnGap: 14, rowGap: 2, ...sans, fontSize: FS.xs, color: T.mut, lineHeight: LH.body }}>
@@ -142,6 +178,19 @@ export function LearnScreen({ v }) {
               </div>
               {v.card.needs && <div style={{ ...sans, fontSize: FS.sm, color: T.body, lineHeight: LH.body }}>{v.card.needs}</div>}
               {v.card.missing.map((t) => <Note key={t} color={T.amber} style={{ margin: 0 }}>{t}</Note>)}
+              {/* PR 78: THE TWO DOORS OUT OF LEARN — the market's chain with these legs on its tray, and Build through
+                  buildHandOff() (the market's prices, the gate, the size, the exit plan). A figure the app never sends has no
+                  "Build this": its defined-risk version, the wings it adds said in one line. Nothing is sent from here. */}
+              {v.bridge && (
+                <div data-learn-bridge={v.bridge.kind} style={{ display: "flex", flexDirection: "column", gap: 6, borderTop: `1px solid ${T.line}`, paddingTop: 10 }}>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <Btn ghost color={T.ink} onClick={v.bridge.onChain} data-learn-open-chain="">{W.openInChain}</Btn>
+                    {v.bridge.kind === "build" && <Btn color={T.action} onClick={v.bridge.onBuild} data-learn-build="">{W.buildThis}</Btn>}
+                    {v.bridge.kind === "defined" && <Btn color={T.action} onClick={v.bridge.onBuild} data-learn-build="defined">{W.buildDefined}</Btn>}
+                  </div>
+                  {v.bridge.line && <Note data-learn-bridge-line style={{ margin: 0 }} color={v.bridge.kind === "none" ? T.amber : undefined}>{v.bridge.line}</Note>}
+                </div>
+              )}
             </section>
           )}
 

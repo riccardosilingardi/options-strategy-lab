@@ -17,6 +17,7 @@ import { boardStrikes, strikesFor, spotOf, atmIv } from "./chain.js";
 import { RULES, figureOf, LAB_FIGURES, LAB_TABS, FIGURE_NAMES, LEARN_WORDS, exactExtremes, payoffCeiling, needsText,
   NO_CEILING, known, labWhereLine, labLegText, labLegName, exitPlanOf, marketChanceOf, MARKET_CHANCE_NOT_READ, dayWords } from "./rules.js";
 import { exitCurve } from "./tradeChart.js";
+import { withWings } from "./learnDraw.js";
 import { undefinedRiskLegs } from "./riskGate.js";
 import { MLEG_MAX_LEGS } from "./alpacaContract.js";
 
@@ -485,6 +486,52 @@ export function labLane(items = [], { left = 0, right = Infinity, gap = 4 } = {}
   const out = new Array(items.length);
   order.forEach((it, k) => { out[it.i] = xs[k]; });
   return out;
+}
+
+/* =====================================================================================================================
+   PR 78: FROM LEARN TO THE REAL CHAIN AND BUILD. Learn sends nothing: its two doors are the market page's Chain tray (the
+   legs highlighted, as "Open in chain" on a card does) and `buildHandOff()` (handoff.js), the one way every trade reaches
+   Build, where the market's prices, the gate, the sizing and the exit plan take over.
+===================================================================================================================== */
+/**
+ * WHAT THE LAB CAN HAND TO BUILD. A defined-risk figure: its own legs ("Build this"). A figure the app never sends: the
+ * same legs with a bought option beyond each uncovered sold one (`withWings()`, learnDraw.js — PR 77's defined-risk
+ * version), named by `figureOf()`, the wings said in one line; with no room for them (four legs already), nothing.
+ * @returns null (no leg, or legs that cancel) or { kind: "build" | "defined" | "none", legs, name, modelNet, line }
+ */
+export function labBridge(m, { board = null, sd = null, chain = null } = {}) {
+  if (!m || !m.legs.length || m.figure.id === "none") return null;
+  if (!m.uncovered) return { kind: "build", legs: m.legs.map((l) => ({ ...l })), name: m.figure.name, modelNet: m.net, line: null };
+  const ww = withWings(m.legs, board, { sd });
+  if (!ww) return { kind: "none", legs: null, name: null, modelNet: null, line: LEARN_WORDS.noRoomWings };
+  const wm = chain ? labModel({ ticker: m.ticker, chain, expKey: m.expKey, legs: ww.legs }) : null;
+  return { kind: "defined", legs: ww.legs, name: figureOf(ww.legs).name, modelNet: wm ? wm.net : null, line: LEARN_WORDS.wingsLine(ww.added) };
+}
+
+/* =====================================================================================================================
+   PR 77: A FIGURE DRAWN WITH A FINGER. `recogniseDrawing()` (learnDraw.js) says which figures look like the stroke; this
+   turns its answer into the cards the screen shows. Each card's picture is the lab's own model of those legs.
+===================================================================================================================== */
+/**
+ * @param rec  `recogniseDrawing()`'s answer, or null (nothing drawn)
+ * @returns { cards: [{ id, name, legs, bands, tag, uncovered, sibling }], lines: [sentence] } — no card when nothing is
+ *          named ("No known figure looks like this; the closest is X" is the line), the sibling's sentence and the
+ *          same-line sentence as lines
+ */
+export function labDrawView(rec, { ticker, chain, expKey, bandsOf } = {}) {
+  if (!rec) return { cards: [], lines: [] };
+  if (!rec.ok) return { cards: [], lines: [rec.reason === "flat" ? LEARN_WORDS.drawFlat : rec.reason === "short" ? LEARN_WORDS.drawShort : null].filter(Boolean) };
+  if (!rec.named) return { cards: [], lines: [LEARN_WORDS.noMatch(rec.best.name)] };
+  const cards = rec.matches.map((m) => {
+    const model = labModel({ ticker, chain, expKey, legs: m.legs, bandsOf });
+    return { id: m.id, name: m.name, legs: m.legs, bands: model.bands, tag: m.sibling ? LEARN_WORDS.siblingTag : LEARN_WORDS.similar(m.sim),
+      uncovered: m.uncovered, sibling: m.sibling };
+  });
+  const lines = [];
+  const sib = rec.matches.find((m) => m.sibling);
+  if (sib) lines.push(sib.sentence);
+  if (rec.twin) lines.push(LEARN_WORDS.sameLine(FIGURE_NAMES[rec.twin.of], rec.twin.name, rec.twin.ofNet, rec.twin.net));
+  return { cards, lines };
 }
 
 export { boardStrikes };

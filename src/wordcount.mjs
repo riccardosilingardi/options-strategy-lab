@@ -351,6 +351,8 @@ export const COPY = {
   // Not copy: the clipboard's own call inside `ContractName` (ui.jsx), which PR 76 mounts on Learn. Named so it is not
   // taken for a sentence generator; it puts no words on screen.
   writeText: () => "",
+  // PR 78: on Build, a trade from Learn says its model price against the market's, until it is edited.
+  learnPriceLine: () => R.learnPriceLine(-1.2, -1.35),
   sendLabel: () => R.sendLabel({ net: -0.25, n: 1 }),
   timeExitDay: () => R.timeExitDay("2026-11-20"),
   expiryShort: () => R.expiryShort("2026-11-20"),

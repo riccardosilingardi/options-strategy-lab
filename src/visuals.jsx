@@ -1575,9 +1575,16 @@ const curveAt = (pts, s) => {
 };
 
 function FigureLab({ bands, legs = [], spot = null, width = 340, height = 260, onMove, onStep, handleLabel = (i) => `Leg ${i + 1}`,
-  curves = null, extremes = [], density = [], readout = null, snapLabel = null, vibrate = snapBuzz }) {
+  curves = null, extremes = [], density = [], readout = null, snapLabel = null, vibrate = snapBuzz,
+  drawMode = false, stroke = null, onStroke = null }) {
   const svgRef = useRef(null);
   const dragRef = useRef(null);                 // { i, startStrike, startPrice } while a point is held
+  // PR 77: DRAWING. While "Draw" is on, a finger (or a mouse) traces a profile; the stroke is kept in the picture's own
+  // units (price, P&L) and handed over when the finger lifts (`onStroke`). The page never scrolls under a drawing finger.
+  const drawRef = useRef(null);                 // the stroke being drawn: [{ s, v }]
+  const [live, setLive] = useState(null);
+  const drawOn = useRef(drawMode);
+  drawOn.current = drawMode;
   const [drag, setDrag] = useState(null);       // the same, plus where the finger is, for the label above it
   const [cross, setCross] = useState(null);     // a price, while a finger or a mouse rests on the picture
   const lastStrike = useRef(null);
@@ -1600,6 +1607,31 @@ function FigureLab({ bands, legs = [], spot = null, width = 340, height = 260, o
     return { x: ((e.clientX - r.left) / r.width) * W, y: ((e.clientY - r.top) / r.height) * H };
   };
   const priceOfX = (x) => lo + ((x - padL) / ((W - padL - padR) || 1)) * (hi - lo);
+  const valueOfY = (y) => yTop - ((y - padT) / ((plotB - padT) || 1)) * (yTop - yBot);
+  /* THE STROKE (PR 77): down starts it, every move adds a point inside the plot, up hands it over. */
+  const drawStart = (e) => {
+    const p = local(e);
+    if (!p) return;
+    e.preventDefault();
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    drawRef.current = [{ s: priceOfX(Math.min(W - padR, Math.max(padL, p.x))), v: valueOfY(Math.min(plotB, Math.max(padT, p.y))) }];
+    setLive(drawRef.current.slice());
+  };
+  const drawMove = (e) => {
+    if (!drawRef.current) return;
+    const p = local(e);
+    if (!p) return;
+    drawRef.current.push({ s: priceOfX(Math.min(W - padR, Math.max(padL, p.x))), v: valueOfY(Math.min(plotB, Math.max(padT, p.y))) });
+    setLive(drawRef.current.slice());
+  };
+  const drawEnd = (e) => {
+    const pts = drawRef.current;
+    drawRef.current = null;
+    e.currentTarget.releasePointerCapture?.(e.pointerId);
+    setLive(null);
+    if (pts && pts.length > 1 && onStroke) onStroke({ points: pts, lo, hi });
+  };
+  const shownStroke = live || (stroke && stroke.points) || null;
   const line = b ? pathOf(b.samples, X, Y) : null;
   const area = b ? `${line} L${X(b.samples[b.samples.length - 1].s).toFixed(1)},${y0.toFixed(1)} L${X(b.samples[0].s).toFixed(1)},${y0.toFixed(1)} Z` : null;
   const id = `fig${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
@@ -1613,8 +1645,8 @@ function FigureLab({ bands, legs = [], spot = null, width = 340, height = 260, o
   useEffect(() => {
     const el = svgRef.current;
     if (!el || typeof el.addEventListener !== "function") return undefined;
-    const onStart = (e) => { if (e.target && typeof e.target.closest === "function" && e.target.closest("[data-lab-point]")) e.preventDefault(); };
-    const onMove = (e) => { if (dragRef.current) e.preventDefault(); };
+    const onStart = (e) => { if (drawOn.current || (e.target && typeof e.target.closest === "function" && e.target.closest("[data-lab-point]"))) e.preventDefault(); };
+    const onMove = (e) => { if (dragRef.current || drawRef.current) e.preventDefault(); };
     el.addEventListener("touchstart", onStart, { passive: false });
     el.addEventListener("touchmove", onMove, { passive: false });
     return () => { el.removeEventListener("touchstart", onStart); el.removeEventListener("touchmove", onMove); };
@@ -1711,9 +1743,12 @@ function FigureLab({ bands, legs = [], spot = null, width = 340, height = 260, o
   return (
     <svg ref={svgRef} width={W} height={H} viewBox={`0 0 ${W} ${H}`} role="group" data-figure-chart="lab"
       aria-label="the payoff at expiry, today and on the exit date; each blue point is a leg's strike"
-      onPointerDown={rest} onPointerMove={(e) => { if (e.pointerType === "mouse" || cross != null) rest(e); }}
-      onPointerUp={(e) => { if (e.pointerType !== "mouse") leave(); }} onPointerCancel={leave} onPointerLeave={leave}
-      style={{ display: "block", maxWidth: "100%", background: T.bg, borderRadius: 8, touchAction: "pan-y" }}>
+      data-draw-mode={drawMode ? "draw" : "points"}
+      onPointerDown={drawMode ? drawStart : rest} onPointerMove={drawMode ? drawMove : (e) => { if (e.pointerType === "mouse" || cross != null) rest(e); }}
+      onPointerUp={drawMode ? drawEnd : (e) => { if (e.pointerType !== "mouse") leave(); }} onPointerCancel={drawMode ? drawEnd : leave}
+      onPointerLeave={drawMode ? undefined : leave}
+      style={{ display: "block", maxWidth: "100%", background: T.bg, borderRadius: 8, touchAction: drawMode ? "none" : "pan-y",
+        cursor: drawMode ? "crosshair" : undefined }}>
       <defs>
         <clipPath id={`${id}u`}><rect x={padL} y={0} width={W - padL - padR} height={Math.max(0, y0)} /></clipPath>
         <clipPath id={`${id}d`}><rect x={padL} y={y0} width={W - padL - padR} height={Math.max(0, plotB - y0)} /></clipPath>
@@ -1737,15 +1772,20 @@ function FigureLab({ bands, legs = [], spot = null, width = 340, height = 260, o
           {!crossText && <text x={todayX} y={14} style={txt}>{todayText}</text>}
         </g>
       )}
-      <g clipPath={`url(#${id}p)`}>
+      <g clipPath={`url(#${id}p)`} opacity={drawMode ? 0.3 : 1}>
         {exit && <path data-lab-curve="exit" d={pathOf(exit, X, Y)} fill="none" {...curveStroke("exit")} />}
         {today && <path data-lab-curve="today" d={pathOf(today, X, Y)} fill="none" {...curveStroke("today")} />}
         {line && <path data-lab-curve="expiry" d={line} fill="none" {...curveStroke("expiry")} strokeLinejoin="round" />}
       </g>
-      {extremeLabels.map((e) => (
+      {/* PR 77: THE DRAWN STROKE, in the picture's own units: drawn as the finger moves, kept once it lifts. */}
+      {drawMode && shownStroke && shownStroke.length > 1 && (
+        <path data-lab-stroke d={shownStroke.map((p, i) => `${i ? "L" : "M"}${X(p.s).toFixed(1)},${Math.min(plotB, Math.max(padT, Y(p.v))).toFixed(1)}`).join(" ")}
+          fill="none" stroke={T.blue} strokeWidth={3} strokeLinejoin="round" strokeLinecap="round" clipPath={`url(#${id}p)`} />
+      )}
+      {!drawMode && extremeLabels.map((e) => (
         <text key={e.id} data-lab-extreme={e.id} x={e.x} y={e.y} style={{ ...txt, fill: T.ink }}>{e.text}</text>
       ))}
-      {beLabels.map((x, i) => (
+      {!drawMode && beLabels.map((x, i) => (
         <g key={`be${i}`} data-lab-be aria-label="breakeven">
           <circle cx={X(x.s)} cy={y0} r={3} fill={T.ink} />
           <text x={x.x} y={x.y} style={txt}>{x.t}</text>
@@ -1768,7 +1808,7 @@ function FigureLab({ bands, legs = [], spot = null, width = 340, height = 260, o
           </g>);
         })}
       </g>
-      {crossText && (
+      {!drawMode && crossText && (
         <g data-lab-cross aria-live="polite">
           <line x1={X(cross)} x2={X(cross)} y1={padT - 4} y2={plotB} stroke={T.ink} strokeWidth={1} opacity={0.7} />
           {b && <circle cx={X(cross)} cy={Y(b.at(cross))} r={4} fill={T.ink} stroke={T.bg} strokeWidth={1.5} />}
@@ -1776,7 +1816,7 @@ function FigureLab({ bands, legs = [], spot = null, width = 340, height = 260, o
           <text x={crossX} y={14} style={{ ...txt, fill: T.ink }}>{crossText}</text>
         </g>
       )}
-      {b && legs.map((l, i) => {
+      {b && !drawMode && legs.map((l, i) => {
         if (!inRange[i]) return null;
         const k = Number(l.strike);
         const cx = pxs[i], cy = Y(b.at(k));

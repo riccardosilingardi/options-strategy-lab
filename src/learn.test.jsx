@@ -8,7 +8,8 @@ import { FigureChart, payoffBands } from "./visuals.jsx";
 import { LAB_TABS, LAB_FIGURES, LEARN_WORDS, labLegText } from "./rules.js";
 import assert from "node:assert/strict";
 import { labModel, labCard, labLegRows, labGallery, labExpiry, labFigureLegs, labExpectedMove, legIv, labExitDay, labCurves, labReadout,
-  labExtremes, labDensity, labMarketLine, labLegend } from "./learnView.js";
+  labExtremes, labDensity, labMarketLine, labLegend, labDrawView, labBridge } from "./learnView.js";
+import { recogniseDrawing } from "./learnDraw.js";
 import { bs, legsAt } from "./engine.js";
 import { impliedDistribution } from "./impliedDist.js";
 import { exitPlanOf, marketChanceOf, MARKET_CHANCE_NOT_READ, RULES, NO_CEILING } from "./rules.js";
@@ -46,6 +47,9 @@ function vOf(legs, extra = {}) {
       curves, extremes: labExtremes(m), density: m.bands ? labDensity(dist, m.bands.lo, m.bands.hi) : [], readout: (x) => labReadout(m, curves, x),
       snapLabel: noop, market: labMarketLine(m, dist), legend: labLegend(legs.length ? curves : null) },
     legs: labLegRows(m, BOARD, CHAIN).map((r) => ({ ...r, onMinus: noop, onPlus: noop, flipLabel: r.side === "long" ? "Sell" : "Buy", onFlip: noop, onRemove: noop })),
+    // PR 77 and 78: the Points | Draw switch and the two doors, as App.jsx hands them.
+    draw: { mode: "points", onMode: noop, stroke: null, canUndo: false, onStroke: noop, onUndo: noop, onRedraw: noop, cards: [], lines: [] },
+    bridge: (() => { const b = labBridge(m, { board: BOARD, chain: CHAIN }); return b ? { kind: b.kind, line: b.line, onChain: noop, onBuild: noop } : null; })(),
     card: labCard(m), onClear: noop,
     gallery: labGallery({ ticker: "GLD", chain: CHAIN, expKey: EXP, bandsOf: payoffBands })
       .map((g) => ({ id: g.id, name: g.name, idea: g.idea, bands: g.model.bands, spot: 377.2, current: m.figure.id === g.id, onLoad: noop })),
@@ -56,7 +60,9 @@ function vOf(legs, extra = {}) {
 // the empty picture's price figures), 379 → 426 with the iron condor (the dollar scale and the prices along the bottom,
 // "max profit $…" and "max loss $…", the three-entry legend, the market's chance line and its ⓘ, each leg named the way
 // IBKR writes it, "Long GLD Nov27'26 340 Put" against "Long 340 put").
-const LEARN_CEILING = { empty: 319, condor: 426 };
+// PR 77 and 78 moved them again: 319 → 321 (the switch "Points · Draw", on screen at rest) and 426 → 433 (the switch, and the
+// card's two doors, "Open in chain" and "Build this").
+const LEARN_CEILING = { empty: 321, condor: 433 };
 const SPREAD = [{ side: 1, type: "put", strike: 340, qty: 1 }, { side: -1, type: "put", strike: 361, qty: 1 }];
 
 check("AT REST, NO LEG: the title and its line, the market and expiry, four tabs, the empty sentence, 14 figures", () => {
@@ -246,6 +252,51 @@ check("76.4 LEARN'S MARKET as IBKR lists it: the chip 'GLD · ARCA', the officia
   const n = renderToStaticMarkup(<LearnScreen v={vOf([], { listingOf: () => null })} />);
   hasNot(n, "ARCA"); hasNot(n, "data-listing-name");
   has(readFileSync("src/learn.jsx", "utf8"), "<Info label={LISTING_SEARCH_LABEL}>{listingSearchInfo(v.ticker, getU(v.ticker).name)}</Info>", "the sheet's ⓘ");
+});
+
+/* ================================================================ PR 77: DRAWN WITH A FINGER, rendered */
+console.log("\nPR 77 — a figure drawn with a finger, rendered\n");
+const STRANGLE_DRAWN = (() => {
+  const legs = [{ side: -1, type: "put", strike: 355, qty: 1 }, { side: -1, type: "call", strike: 400, qty: 1 }];
+  const netOf = (ls) => labModel({ ticker: "GLD", chain: CHAIN, expKey: EXP, legs: ls }).net;
+  const net = netOf(legs);
+  const pts = [];
+  for (let x = 300; x <= 455; x += 1.7) pts.push({ s: x, v: legs.reduce((a, l) => a - (l.type === "call" ? Math.max(x - l.strike, 0) : Math.max(l.strike - x, 0)), 0) - net });
+  return recogniseDrawing({ stroke: pts, board: BOARD, spot: 377.2, lo: 282.9, hi: 471.5, netOf, sd: 24 });
+})();
+const drawV = (rec, mode = "draw", stroke = { points: [{ s: 300, v: 1 }, { s: 400, v: 2 }], lo: 282.9, hi: 471.5 }) => {
+  const dv = labDrawView(rec, { ticker: "GLD", chain: CHAIN, expKey: EXP, bandsOf: payoffBands });
+  return { mode, onMode: noop, stroke: rec ? stroke : null, canUndo: !!rec, onStroke: noop, onUndo: noop, onRedraw: noop, lines: dv.lines,
+    cards: dv.cards.map((c) => ({ ...c, onLoad: noop })) };
+};
+check("77 THE SWITCH: Points | Draw above the picture; in Points the picture scrolls the page as before, in Draw it holds it still", () => {
+  const pts = renderToStaticMarkup(<LearnScreen v={vOf(SPREAD, { draw: drawV(null, "points") })} />);
+  has(pts, "data-learn-mode"); has(pts, ">Points<"); has(pts, ">Draw<"); if (!/aria-pressed="true"[^>]*>Points</.test(pts)) throw new Error("Points is on");
+  has(pts, 'data-draw-mode="points"'); hasNot(pts, "data-learn-draw=", "no drawing section in Points");
+  const drw = renderToStaticMarkup(<LearnScreen v={vOf(SPREAD, { draw: drawV(null, "draw") })} />);
+  if (!/data-draw-mode="draw"[^>]*touch-action:none/.test(drw)) throw new Error("drawing holds the page still");
+  hasNot(drw, "data-lab-point=", "the points step aside while drawing"); has(drw, LEARN_WORDS.drawHint);
+  has(drw, ">Undo<"); has(drw, ">Redraw<");
+  if (drw.indexOf("data-learn-mode") > drw.indexOf("data-learn-chart")) throw new Error("the switch is above the picture");
+});
+check("77 A DRAWN SHORT STRANGLE: the iron condor first (Defined-risk version, its sentence), the strangle marked 'The app never sends this'", () => {
+  const h = renderToStaticMarkup(<LearnScreen v={vOf([], { draw: drawV(STRANGLE_DRAWN) })} />);
+  has(h, "data-lab-stroke"); has(h, LEARN_WORDS.closest.toUpperCase());
+  const first = h.indexOf("data-learn-match=");
+  eq(h.slice(first, first + 40).includes('data-learn-match="iron-condor"'), true, "the defined-risk sibling first");
+  has(h, 'data-sibling="true"'); has(h, LEARN_WORDS.siblingTag);
+  has(h, 'data-learn-match="short-strangle"'); has(h, "data-learn-match-warn"); has(h, LEARN_WORDS.neverSentShort);
+  has(h, "Short strangle → Iron condor: same shape, the wings cap the loss");
+  if (!/% similar/.test(h)) throw new Error("each other card says how similar it is");
+  eq(count(h, "data-learn-match="), 3, "three cards");
+});
+check("77 NOTHING LIKE IT: no card, one sentence naming the closest — never a forced name; a short stroke says draw across", () => {
+  const zig = []; for (let x = 290; x < 465; x += 1.1) zig.push({ s: x, v: (Math.floor((x - 283) / 9) % 2 ? 30 : -30) });
+  const rec = recogniseDrawing({ stroke: zig, board: BOARD, spot: 377.2, lo: 282.9, hi: 471.5, netOf: null });
+  const h = renderToStaticMarkup(<LearnScreen v={vOf([], { draw: drawV(rec) })} />);
+  hasNot(h, "data-learn-match="); has(h, "No known figure looks like this; the closest is ");
+  const short = recogniseDrawing({ stroke: [{ s: 370, v: 1 }, { s: 372, v: 2 }, { s: 374, v: 3 }, { s: 376, v: 1 }, { s: 378, v: 0 }, { s: 380, v: 2 }], board: BOARD, lo: 282.9, hi: 471.5 });
+  has(renderToStaticMarkup(<LearnScreen v={vOf([], { draw: drawV(short) })} />), LEARN_WORDS.drawShort);
 });
 
 check("HOW MUCH THERE IS TO READ (the owner's question): rendered words at rest, empty and with an iron condor, under their ceilings", () => {

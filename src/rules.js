@@ -7851,6 +7851,60 @@ export const LAB_FIGURES = Object.freeze([
   { id: "iron-condor", legs: [[1, "put", -1], [-1, "put", -0.5], [-1, "call", 0.5], [1, "call", 1]], idea: "Two credit spreads around the price: paid if it stays between the sold strikes." },
   { id: "iron-fly", legs: [[1, "put", -0.75], [-1, "put", 0], [-1, "call", 0], [1, "call", 0.75]], idea: "An iron condor with both sold legs on one strike: more credit, a narrower zone." },
 ]);
+/**
+ * WHAT A DRAWING CAN BE (PR 77, owner 20 Oct 2026: "draw the payoff shape I want and the app says which figure it is").
+ * Every shape `FIGURE_NAMES` names, as legs on SLOTS — slot 0 the lowest strike, a slot shared by a call and a put one
+ * strike both list — never on prices: `learnDraw.js` puts the slots on the strikes the drawing's kinks point to (the
+ * chain's own, per type). The name shown is always `figureOf()` of the legs laid out (a butterfly whose wings come out
+ * uneven is the broken-wing one): this table only says which shapes are tried. A leg is [side, type, slot, qty].
+ */
+export const DRAW_SHAPES = Object.freeze({
+  "long-call": [[1, "call", 0]], "short-call": [[-1, "call", 0]], "long-put": [[1, "put", 0]], "short-put": [[-1, "put", 0]],
+  "bull-call": [[1, "call", 0], [-1, "call", 1]], "bear-call": [[-1, "call", 0], [1, "call", 1]],
+  "bull-put": [[1, "put", 0], [-1, "put", 1]], "bear-put": [[-1, "put", 0], [1, "put", 1]],
+  "call-ratio": [[1, "call", 0], [-1, "call", 1, 2]], "put-ratio": [[-1, "put", 0, 2], [1, "put", 1]],
+  "long-straddle": [[1, "call", 0], [1, "put", 0]], "short-straddle": [[-1, "call", 0], [-1, "put", 0]],
+  "long-strangle": [[1, "put", 0], [1, "call", 1]], "short-strangle": [[-1, "put", 0], [-1, "call", 1]],
+  "long-guts": [[1, "call", 0], [1, "put", 1]], "short-guts": [[-1, "call", 0], [-1, "put", 1]],
+  "synthetic-long": [[1, "call", 0], [-1, "put", 0]], "synthetic-short": [[-1, "call", 0], [1, "put", 0]],
+  "bull-reversal": [[-1, "put", 0], [1, "call", 1]], "bear-reversal": [[1, "put", 0], [-1, "call", 1]],
+  "call-fly": [[1, "call", 0], [-1, "call", 1, 2], [1, "call", 2]], "put-fly": [[1, "put", 0], [-1, "put", 1, 2], [1, "put", 2]],
+  "short-call-fly": [[-1, "call", 0], [1, "call", 1, 2], [-1, "call", 2]], "short-put-fly": [[-1, "put", 0], [1, "put", 1, 2], [-1, "put", 2]],
+  "broken-call-fly": [[1, "call", 0], [-1, "call", 1, 2], [1, "call", 2]], "broken-put-fly": [[1, "put", 0], [-1, "put", 1, 2], [1, "put", 2]],
+  "iron-condor": [[1, "put", 0], [-1, "put", 1], [-1, "call", 2], [1, "call", 3]],
+  "iron-fly": [[1, "put", 0], [-1, "put", 1], [-1, "call", 1], [1, "call", 2]],
+  "reverse-iron-condor": [[-1, "put", 0], [1, "put", 1], [1, "call", 2], [-1, "call", 3]],
+  "reverse-iron-fly": [[-1, "put", 0], [1, "put", 1], [1, "call", 1], [-1, "call", 2]],
+  "call-condor": [[1, "call", 0], [-1, "call", 1], [-1, "call", 2], [1, "call", 3]], "put-condor": [[1, "put", 0], [-1, "put", 1], [-1, "put", 2], [1, "put", 3]],
+  "short-call-condor": [[-1, "call", 0], [1, "call", 1], [1, "call", 2], [-1, "call", 3]],
+  "short-put-condor": [[-1, "put", 0], [1, "put", 1], [1, "put", 2], [-1, "put", 3]],
+});
+/**
+ * THE DEFINED-RISK SIBLING OF A SHAPE THE APP NEVER SENDS (PR 77): the same idea with a bought option capping each sold one
+ * — the owner's list (short straddle → iron butterfly, short strangle → iron condor, short put → bull put spread, short call
+ * → bear call spread, a ratio spread → its covered version) and, chosen for completeness, the guts, the synthetics and the
+ * risk reversals (each to the capped figure with the same direction). `to` is a `FIGURE_NAMES` id; `why` finishes the
+ * sentence "Short straddle → Iron butterfly: same shape, the wings cap the loss".
+ */
+export const DEFINED_SIBLINGS = Object.freeze({
+  "short-straddle": { to: "iron-fly", why: "same shape, the wings cap the loss" },
+  "short-strangle": { to: "iron-condor", why: "same shape, the wings cap the loss" },
+  "short-guts": { to: "iron-condor", why: "the same flat top, the wings cap the loss" },
+  "short-put": { to: "bull-put", why: "the bought put caps the loss" },
+  "short-call": { to: "bear-call", why: "the bought call caps the loss" },
+  "call-ratio": { to: "call-fly", why: "a bought call above covers the second sold one" },
+  "put-ratio": { to: "put-fly", why: "a bought put below covers the second sold one" },
+  "synthetic-long": { to: "bull-call", why: "the same direction, capped both ways" },
+  "synthetic-short": { to: "bear-put", why: "the same direction, capped both ways" },
+  "bull-reversal": { to: "bull-call", why: "the same direction, capped both ways" },
+  "bear-reversal": { to: "bear-put", why: "the same direction, capped both ways" },
+});
+/** "Short straddle → Iron butterfly: same shape, the wings cap the loss". */
+export const siblingSentence = (fromId, toId) => {
+  const s = DEFINED_SIBLINGS[fromId];
+  return s ? `${FIGURE_NAMES[fromId]} → ${FIGURE_NAMES[toId || s.to]}: ${s.why}` : null;
+};
+
 /** The lab's four tabs: each adds one option, at the strike nearest today's price. */
 export const LAB_TABS = Object.freeze([
   { id: "long-call", side: 1, type: "call", label: "+ Long call" },
@@ -7897,10 +7951,50 @@ export const LEARN_WORDS = Object.freeze({
   legendExit: (day, n) => `Exit date${day ? `, ${day}` : ""} (${n} days before expiry)`,
   legendExitInside: (n) => `No exit date: this expiry is inside the last ${n} days`,
   legendNoCurves: "Today and the exit date need a model price on every leg",
+  // PR 78: from Learn to the real chain and Build.
+  openInChain: "Open in chain",
+  buildThis: "Build this",
+  buildDefined: "Build the defined-risk version",
+  /** The wings "Build the defined-risk version" adds: "Adds a bought 15 call and a bought 11 put: the wings cap the loss." */
+  wingsLine: (added = []) => `Adds ${added.map((l) => `a bought ${Math.abs(Number(l.qty) || 1) > 1 ? `${Math.abs(l.qty)} × ` : ""}${strikeWords(l.strike)} ${l.type}`)
+    .join(" and ")}: the wings cap the loss.`,
+  noRoomWings: "No room for the wings: 4 legs at most, as a combination order allows.",
+  backToLearn: "‹ Back to Learn",
+  backLabel: "Learn",
+  // PR 77: drawing a figure with a finger.
+  modePoints: "Points",
+  modeDraw: "Draw",
+  modeLabel: "What a finger does on the picture",
+  drawHint: "Draw the profit and loss you want, left to right across the picture.",
+  undo: "Undo",
+  redraw: "Redraw",
+  closest: "Closest figures",
+  siblingTag: "Defined-risk version",
+  neverSentShort: "The app never sends this",
+  similar: (p) => `${Math.round(p * 100)}% similar`,
+  noMatch: (name) => `No known figure looks like this; the closest is ${name}.`,
+  drawShort: "Draw across at least half of the picture, left to right.",
+  drawFlat: "A flat line is no figure: draw where it makes money and where it loses.",
+  /** Two figures that draw the same line: how they differ, from their nets (positive pays to enter, negative is paid). */
+  sameLine: (a, b, aNet, bNet) => `${a} and ${b} draw the same line: ${Math.sign(Number(aNet) || 0) !== Math.sign(Number(bNet) || 0)
+    ? "one pays to enter, the other is paid" : "the same profit and loss from different strikes"}.`,
   band: "The band",
   bandInfo: (tk) => `The blue band under the prices is where ${tk}'s option prices put it at expiry: the market's own spread of ` +
     "prices, read strike by strike (IBKR's method, the same one as Build's market chance). Darker is likelier.",
 });
+/**
+ * THE MODEL'S PRICE AGAINST THE MARKET'S (PR 78): on Build, for a trade that came from Learn and only until it is edited,
+ * "Model 1.20 → market 1.35 (credit)". Per share, signed nets (positive a debit, negative a credit); the side is said once
+ * when both agree and on each when they do not. The market's is Build's own, the price in force from the chain's bid and ask.
+ */
+export function learnPriceLine(model, market) {
+  const side = (x) => (Number(x) < 0 ? "credit" : "debit");
+  const a = (x) => Math.abs(Number(x)).toFixed(2);
+  if (!known(model)) return known(market) ? `Model — → market ${a(market)} (${side(market)})` : null;
+  if (!known(market)) return `Model ${a(model)} (${side(model)}) → market —`;
+  return side(model) === side(market) ? `Model ${a(model)} → market ${a(market)} (${side(market)})`
+    : `Model ${a(model)} ${side(model)} → market ${a(market)} ${side(market)}`;
+}
 /** "GLD · 27 Nov · 38 days": where the lab is reading from. */
 export const labWhereLine = (tk, expKey, dte) => `${tk} · ${dayWords(expKey) || expKey || "—"}${known(dte) ? ` · ${dte} day${dte === 1 ? "" : "s"}` : ""}`;
 /** A leg's name in the lab the way IBKR writes the contract (PR 76): "Short SLV Nov27'26 49.5 Put" (`ibkrName()`). */
