@@ -108,8 +108,8 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
 - Atoms and sizes: `src/ui.jsx` (now with `Info`, the ⓘ, and `Segments`) and the type tokens in `theme.js`. `ui.jsx`,
   `card.jsx`, `find.jsx`, `orders.jsx`, `positions.jsx`, `navBar.jsx`, since PR 3a `positionScreen.jsx`, since PR 3b `journal.jsx` and
   `settings.jsx`, and since PR #48 `steps.jsx`, `why.jsx`,
-  `positionCard.jsx` and `wizard.jsx`, since PR #49 `pro.jsx` and `App.jsx`, since redesign PR 1 `market.jsx` and since
-  redesign PR 2 `build.jsx`
+  `positionCard.jsx` and `wizard.jsx`, since PR #49 `pro.jsx` and `App.jsx`, since redesign PR 1 `market.jsx`, since
+  redesign PR 2 `build.jsx` and since PR 74 `learn.jsx`
   (atoms now include `Sheet` and `Placeholder`), use no `fontSize` literal and define no atom; `ui.test.jsx` fails the build otherwise (only visuals.jsx's drawings and main.jsx's crash screen are left,
   named in the test). A longer explanation goes behind one ⓘ or fold, never deleted. **An ⓘ shows its label**
   ("How the numbers fit ⓘ"); `iconOnly` only inside a figure tile, where the tile's name is the label.
@@ -285,6 +285,17 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
   an open position another device filed (`filedElsewhere()`, id and ref), and uploads `{ journal, journalSeq }` once when the
   server lacks something (`journalBehind()`). A new ref reads the server's counter first (`serverSeq()` in App.jsx). The
   payload is `serverPayload()`; the Journal's line under its title is `journalSyncLine()`. `copilotLog` stays on the device.
+- **Learn, the figure lab (PR 74, owner 20 Oct 2026: "as on IBKR Campus") — the fifth place.** `src/learn.jsx` draws,
+  `src/learnView.js` computes, the picture is `FigureChart` in visuals.jsx (cut from `payoffBands()`). **What a set of legs
+  is called has one home, `figureOf()` (rules.js)**, read as a NET position per strike and type (`figureLegs()`: a four-leg
+  butterfly is a butterfly); PR 75's drawing names what it recognises through it. The gallery is `LAB_FIGURES` (each leg's
+  strike in expected moves, laid out by `labFigureLegs()` on the type's listed strikes, symmetric pairs kept equal), its
+  words `LEARN_WORDS`. A real market's price, listed strikes and each strike's own IV; the premiums are Black-Scholes on
+  each leg's own IV, said "model price", and a strike with no IV has no price (never a guess). Legs move only onto their own
+  type's listed strikes, at most `MLEG_MAX_LEGS`. A sold option alone is allowed, to learn from: max loss "unlimited" for a
+  sold call, and the card says in amber that the app never sends it (`undefinedRiskLegs()`, the gate's own question).
+  **Nothing in Learn sends, saves or calls the gate** (learn.test.js reads learnView.js, learn.jsx and App's block); the lab
+  lives in memory (`lab` in App.jsx), never on /api/state.
 - **The Journal's copilot (PR 4c)** asks about one closed trade (`closedTrade` in the context, the record's own words) and
   recommends nothing (`COPILOT_ROLE.journal`).
 - Plan first, then change surgically: the plan is the standing rule's ("Plan before you execute", above).
@@ -303,7 +314,7 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
   card's working-close line. `src/modifyOrder.js` — Modify (path 7) and Cancel all.
 - `src/orders.jsx` — the Orders segment: `OrderRow`, `OrdersPanel` (the clock and Cancel all at the top since PR 3a), `PriceField`, `CloseChoice`.
 - `src/positions.jsx` — the account strip (`AccountStrip`), Positions | Orders (`PositionsBar`), `WorkingCloseLine`.
-- `src/navBar.jsx` — the one bottom bar (Find · Build · Positions · Journal), `placeOf()`, `NAV_BAR_H`.
+- `src/navBar.jsx` — the one bottom bar (Find · Build · Positions · Journal · Learn), `placeOf()`, `NAV_BAR_H`.
 - `src/clock.js` — `marketClockLine()`, `localStamp()`: the market clock and times in the owner's own zone.
 - `src/alpacaContract.js` — Alpaca's order contract mirrored from alpaca-py.
 - `src/journal.js` — the position record: refs, timelines, size, stage, book, fills; `chanceCalibration()` (PR 68).
@@ -352,6 +363,8 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
 - `src/build.jsx` — Step 3, Build (redesign PR 2): its sections, the review sheet, its three states.
 - `src/positionScreen.jsx` — one position's own screen (redesign PR 3a): what to do now, Keep it, the chart, the exit
   plan, entry vs now, the record, Alpaca details, the copilot, the Guardian fold.
+- `src/learn.jsx`, `src/learnView.js` — Learn, the figure lab (PR 74): the screen, and its plain-JS arithmetic (`labModel()`,
+  `labCard()`, `labLegRows()`, `labGallery()`, `labFigureLegs()`, the leg moves). Nothing in either sends or saves.
 - `src/journal.jsx`, `src/journalView.js` — the Journal (redesign PR 3b) and its words (plain JS: `whyOpenedLine()`,
   `endedLine()`, `closedState()`, `closedTitle()`, `timelineItems()`). `src/settings.jsx` — Settings (redesign PR 3b).
 - `src/path.js`, `src/handoff.js` — the three-step path (Find → market → Build) and how a trade reaches Build.
@@ -474,6 +487,9 @@ All in `RULES`, `src/rules.js`, unless noted.
   sideways (the page or inside it), the chips wrap, the tray sits in its pane, Build is two columns, Positions a table;
   exits 1 on a miss. `node scripts/shoot-pr73.mjs [dir]` photographs those screens at 1024, 1100, 1280 and 1440px and the
   phone's (docs/screens/pr73/before and after).
+- `node scripts/shoot-pr74.mjs [dir]` photographs Learn (empty, an iron condor from the gallery, a sold call alone, light, and
+  1280×800) on the `+book` fixture (docs/screens/pr74/; the harness answers every market with UNG's board). Since PR 74
+  `scripts/audit-computer.mjs` checks Learn too (two columns, the picture in its column, four points).
 - `node scripts/shoot-pr72.mjs [dir]` photographs PR 72's screens (the Exit plan at rest and edited, the legs named twice,
   the review's legs, the exposure line on `+poor`, the market's feed line, the tray's two chances) (docs/screens/pr72/).
 - `node scripts/shoot-pr71.mjs [dir]` photographs the Journal's line under its title, saved on the server and (with the

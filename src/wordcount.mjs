@@ -52,8 +52,9 @@ import * as PV from "./positionView.js";
 // PR #47: Positions has two segments; "positions" is the Positions SEGMENT's block (`posSeg === "positions"`), and the
 // Orders segment, the close confirm and Modify are measured RENDERED, on J-0001's fixtures (`SURFACE_IDS` below).
 // Redesign PR 1: "market" is the market page, the step between Find and Build (`step === "market"`).
-export const SCREEN_IDS = ["find", "market", "build", "positions"];
-const GUARD = { positions: 'posSeg === "positions"' };
+// PR 74: "learn" is Learn, the figure lab — a tab like Positions, found by `tab === "learn"`.
+export const SCREEN_IDS = ["find", "market", "build", "positions", "learn"];
+const GUARD = { positions: 'posSeg === "positions"', learn: 'tab === "learn"' };
 
 /* ---- PR #47, TASK 3: FOUR SURFACES, MEASURED AS RENDERED ----------------------------------------------------
    A row's words are built in `orderRow.js` (`rowLines()`), which the source counter above cannot score, and a
@@ -341,6 +342,10 @@ export const COPY = {
   barsNotLoadedText: () => R.barsNotLoadedText({ network: true }),
   feedLine: () => C.feedLine({ source: C.SOURCE.alpacaIndicative }),
   trayChanceLines: () => R.trayChanceLines(0.74, 0.71).join(" "),
+  // PR 74: Learn's line under the market and a leg's own words (the rest of the lab is rendered and measured in
+  // learn.test.jsx: its words are LEARN_WORDS' and LAB_FIGURES' data, which this source counter does not read).
+  labWhereLine: () => R.labWhereLine("GLD", "2026-11-27", 38),
+  labLegText: () => R.labLegText({ side: -1, type: "put", strike: 361, qty: 1 }),
   sendLabel: () => R.sendLabel({ net: -0.25, n: 1 }),
   timeExitDay: () => R.timeExitDay("2026-11-20"),
   expiryShort: () => R.expiryShort("2026-11-20"),
@@ -559,7 +564,9 @@ const UI_FILES = ["App.jsx", "pro.jsx", "steps.jsx", "why.jsx", "visuals.jsx", "
   // in the old 209; they are now, which makes the number larger AND honest.
   "positions.jsx", "positionCard.jsx", "navBar.jsx",
   // Redesign PR 1: the market page. Redesign PR 2: Build's own file.
-  "market.jsx", "build.jsx"];
+  "market.jsx", "build.jsx",
+  // PR 74: Learn's own file.
+  "learn.jsx"];
 
 const sourcesOnce = (() => {
   let cache = null;

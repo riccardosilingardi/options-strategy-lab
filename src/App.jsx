@@ -27,7 +27,7 @@ import { exitPlanOf, clampExitPlan, stepExitPlan, exitPlanBounds, structureFamil
   exitSuggestionLine, EXIT_PLAN_WORDS, exitPlanEntryLine, rulesExitPlan, needDirection, ibkrName, exposureLine, chanceAtPriceLine } from "./rules.js";
 // PR 72: the payoff on the plan's exit day, for which way the trade needs the price (tradeChart.js, PR 68's).
 import { exitCurve, curveZones } from "./tradeChart.js";
-import { RULES, sizing, ruleBadge, takeProfitLabel, takeProfitTarget, takeProfitBasisWords, stopWarningLevel, stopLossLabel, perTradeCapLabel, RULE_PILLS, money, pctText, capitalSourceNote, perTradeLimitPhrase, qualityFloor, qualityFloorSentence, liquiditySkippedNote,
+import { LAB_TABS, LEARN_WORDS, labWhereLine, labLegText, RULES, sizing, ruleBadge, takeProfitLabel, takeProfitTarget, takeProfitBasisWords, stopWarningLevel, stopLossLabel, perTradeCapLabel, RULE_PILLS, money, pctText, capitalSourceNote, perTradeLimitPhrase, qualityFloor, qualityFloorSentence, liquiditySkippedNote,
   positionPnl, BROKER_PNL, remainingEdge, remainingEdgeLabel, shareOfMaximum, attentionCount,
   filterFold, qualityFloorLine, voicePointer, VOICE_HOMES, noCeilingRankLine,
   buildableExpiries, openableBoard, offFloorExpiryLabel, horizonFloorNote,
@@ -116,6 +116,10 @@ import { AccountStrip, PositionsBar, PositionsHeader, WorkingCloseLine, CardButt
 import { Note, CheckField, Btn, Panel, Label, Stat, Reveal, TextBtn, mono, sans } from "./ui.jsx";
 import { marketClockLine, nextOpenDay } from "./clock.js";
 import { BASKET, TICKERS, getU, categoryOf } from "./markets.js";
+// PR 74: Learn, the figure lab — its arithmetic (learnView.js) and its screen (learn.jsx). Nothing in either sends.
+import { LearnScreen } from "./learn.jsx";
+import { labExpiry, labStepExpiry, labAddLeg, labStepLeg, labMoveLeg, labFlipLeg, labRemoveLeg, labFigureLegs, labExpectedMove,
+  labModel, labCard, labLegRows, labGallery, LAB_MAX_LEGS } from "./learnView.js";
 
 /* ============================== THEME ============================== */
 /* PR #49, TASK 4 — THE SWEEP. This file's own Btn, Panel, Lbl, Stat, mono and sansUI are gone: the atoms and the two
@@ -1334,6 +1338,10 @@ export default function OptionsStrategyLab() {
   const [chainErr, setChainErr] = useState({});  // ticker -> error in a few words
   // When a refresh last failed (redesign PR 1): Find's stale banner says "The feed didn't answer at <time>".
   const [chainErrAt, setChainErrAt] = useState(null);
+  /* PR 74: LEARN, THE FIGURE LAB. Its market (null: Build's market), its expiry (null: the one nearest the target entry),
+     its legs, and the gallery figure they were loaded from (so a change of market or expiry lays that figure out again).
+     In memory only: the lab saves nothing, on this device or the server. */
+  const [lab, setLab] = useState({ ticker: null, expKey: null, legs: [], figureId: null, reload: false });
   const [seasonal, setSeasonal] = useState({});  // ticker -> {monthlyMean, sigma, matrix, years, src, at} from Alpha Vantage
   // WHY a market is not in `seasonal`: loading, or a named failure. A fallback
   // that cannot say why it is in use is indistinguishable from a measurement.
@@ -1652,6 +1660,36 @@ export default function OptionsStrategyLab() {
       return null;
     } finally { if (!silent) setBusy(null); }
   }, [ensureOpenInterest]);
+
+  /* ---- PR 74: LEARN, THE FIGURE LAB ----
+     The market's chain is the one every screen reads (`chains`, loaded by `refreshChain()`); the lab only reads it. */
+  const labTk = lab.ticker || (BASKET.includes(ticker) ? ticker : BASKET[0]);
+  const labChain = chains[labTk] || null;
+  const labExp = lab.expKey && labChain?.byExp?.[lab.expKey] ? lab.expKey : labExpiry(labChain);
+  const labBoard = labExp ? boardStrikes(labChain, labExp) : null;
+  const labSpot = spotOf(labChain);
+  const onLearnTab = tab === "learn" && !showSettings;
+  // One request per market: the effect runs again as other markets' chains land, and a request already out is not repeated.
+  const labAsked = useRef(new Set());
+  useEffect(() => {
+    if (!onLearnTab || !labTk || chains[labTk] || chainErr[labTk] || labAsked.current.has(labTk)) return;
+    labAsked.current.add(labTk);
+    refreshChain(labTk, true).finally(() => labAsked.current.delete(labTk));
+  }, [onLearnTab, labTk, chains, chainErr, refreshChain]);
+  // A figure from the gallery, laid out again on a market or an expiry that has just arrived.
+  useEffect(() => {
+    if (!lab.reload || !lab.figureId || !labBoard || !labSpot) return;
+    const legs = labFigureLegs(lab.figureId, { board: labBoard, spot: labSpot, sd: labExpectedMove(labChain, labExp) });
+    setLab((l) => ({ ...l, legs: legs || [], figureId: legs ? l.figureId : null, reload: false }));
+  }, [lab.reload, lab.figureId, labBoard, labSpot, labChain, labExp]);
+  const labM = useMemo(() => (onLearnTab && labChain && labExp
+    ? labModel({ ticker: labTk, chain: labChain, expKey: labExp, legs: lab.legs, bandsOf: payoffBands }) : null),
+  [onLearnTab, labTk, labChain, labExp, lab.legs]);
+  const labGal = useMemo(() => (onLearnTab && labChain && labExp
+    ? labGallery({ ticker: labTk, chain: labChain, expKey: labExp, bandsOf: payoffBands }) : []),
+  [onLearnTab, labTk, labChain, labExp]);
+  // The lab keeps its market once it holds a leg: Build moving to another market must not leave these strikes on its board.
+  const editLab = (f) => setLab((l) => ({ ...l, ticker: l.ticker || labTk, legs: f(l.legs), figureId: null, reload: false }));
 
   /* ---- SEASONALITY, FOR EVERY MARKET IN THE BASKET ----
      This used to be one button for whichever ticker was on screen, and every
@@ -4845,8 +4883,8 @@ export default function OptionsStrategyLab() {
   // REDESIGN PR 3: Positions (and its Orders segment) draws its own header too (the board "Positions").
   const onPositions = tab === "positions" && !showSettings;
   const onJournal = tab === "journal" && !showSettings;
-  // Settings draws its own "‹ Back" header since redesign PR 3b: no screen keeps the desk header now.
-  const chromeless = onFindStep || onMarketStep || onBuildStep || onPositions || onJournal || showSettings || (tab === "watching" && !showSettings);
+  // Settings draws its own "‹ Back" header since redesign PR 3b: no screen keeps the desk header now. Nor does Learn (PR 74).
+  const chromeless = onFindStep || onMarketStep || onBuildStep || onPositions || onJournal || onLearnTab || showSettings || (tab === "watching" && !showSettings);
   // TWO PANES (owner, 6 Oct 2026): Find's rows beside the market page, Positions' cards beside a position's screen.
   const paneFind = wide && (onFindStep || onMarketStep);
   const panePos = wide && onPositions;
@@ -4980,7 +5018,7 @@ export default function OptionsStrategyLab() {
             expiry and seasonality above its list described none of them. It
             stays on Build and everywhere else one ticker is the subject. */}
         {/* (Not on Build since redesign PR 2: the strip is in "More on this trade ▾", under "Market now".) */}
-        {!onFindStep && !onMarketStep && !onBuildStep && !onPositions && !onJournal && !showSettings && tickerStrip}
+        {!onFindStep && !onMarketStep && !onBuildStep && !onPositions && !onJournal && !onLearnTab && !showSettings && tickerStrip}
 
         {msg && <div role="status" data-msg style={{ ...mono, fontSize: FS.xs, color: T.amber, border: `1px solid ${T.amber}44`, background: `${T.amber}10`, borderRadius: 6, padding: "7px 10px", margin: chromeless ? "8px 16px 0" : "10px 0 0",
           display: "flex", alignItems: "center", gap: 8 }}>
@@ -6140,6 +6178,45 @@ export default function OptionsStrategyLab() {
                 )}
               </Fold>
             ),
+          }} />
+        )}
+
+        {/* ============ LEARN, THE FIGURE LAB (PR 74; owner, 20 Oct 2026) ============
+            src/learn.jsx draws it; learnView.js computes it; nothing in it sends, saves or calls the gate. */}
+        {tab === "learn" && !showSettings && (
+          <LearnScreen v={{
+            wide, ticker: labTk, markets: BASKET,
+            onMarket: (tk) => setLab((l) => ({ ticker: tk, expKey: null, legs: [], figureId: l.figureId, reload: !!l.figureId })),
+            where: labWhereLine(labTk, labExp, labExp ? labChain?.byExp?.[labExp]?.dte : null),
+            canPrevExp: !!labExp && labStepExpiry(labChain, labExp, -1) !== labExp,
+            canNextExp: !!labExp && labStepExpiry(labChain, labExp, 1) !== labExp,
+            onExpiry: (dir) => {
+              const next = labStepExpiry(labChain, labExp, dir);
+              if (!next || next === labExp) return;
+              const board = boardStrikes(labChain, next);
+              setLab((l) => (l.figureId ? { ...l, ticker: l.ticker || labTk, expKey: next, reload: true }
+                : { ...l, ticker: l.ticker || labTk, expKey: next, legs: resnapLegs(l.legs, board).legs }));
+            },
+            status: chainErr[labTk] && !labChain ? { text: LEARN_WORDS.noChain(labTk), retry: () => refreshChain(labTk) }
+              : !labChain ? { text: LEARN_WORDS.loading(labTk) }
+              : !labExp || !labBoard ? { text: LEARN_WORDS.noBoard(labTk) } : null,
+            tabs: LAB_TABS.map((t) => ({ id: t.id, label: t.label, onAdd: () => editLab((ls) => labAddLeg(ls, t.id, labBoard, labSpot)) })),
+            full: lab.legs.length >= LAB_MAX_LEGS ? LEARN_WORDS.maxLegs(LAB_MAX_LEGS) : null,
+            chart: { bands: labM?.bands || null, legs: lab.legs, spot: labSpot,
+              onMove: (i, price) => editLab((ls) => labMoveLeg(ls, i, price, labBoard)),
+              onStep: (i, dir) => editLab((ls) => labStepLeg(ls, i, dir, labBoard)),
+              label: (i) => `${labLegText(lab.legs[i] || {})}: drag, or press the arrow keys` },
+            legs: labLegRows(labM, labBoard).map((r) => ({ ...r,
+              onMinus: () => editLab((ls) => labStepLeg(ls, r.i, -1, labBoard)),
+              onPlus: () => editLab((ls) => labStepLeg(ls, r.i, 1, labBoard)),
+              flipLabel: r.side === "long" ? "Sell" : "Buy",
+              onFlip: () => editLab((ls) => labFlipLeg(ls, r.i)),
+              onRemove: () => editLab((ls) => labRemoveLeg(ls, r.i)) })),
+            card: labCard(labM),
+            onClear: () => setLab((l) => ({ ...l, legs: [], figureId: null, reload: false })),
+            gallery: labGal.map((g) => ({ id: g.id, name: g.name, idea: g.idea, bands: g.model?.bands || null, spot: labSpot,
+              current: !!labM && labM.figure.id === g.id,
+              onLoad: g.legs ? () => setLab((l) => ({ ...l, ticker: l.ticker || labTk, legs: g.legs, figureId: g.id, reload: false })) : null })),
           }} />
         )}
 

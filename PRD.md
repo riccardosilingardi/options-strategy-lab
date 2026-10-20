@@ -223,7 +223,7 @@ non-expert trader who wants to learn discipline rather than be sold trades.
   this market's numbers, one sentence on what the read changes in Find, and the long narrative
   behind "The full reasoning".
 - **Places and the bottom bar (PR #47).** One bar at the bottom of every desk screen: **Find · Build · Positions ·
-  Journal** (the Positions badge counts decisions plus closes working). Find is the start screen (round 2). Trades you are
+  Journal · Learn** (Learn since PR 74; the Positions badge counts decisions plus closes working). Find is the start screen (round 2). Trades you are
   watching are **Saved**, inside Find (Results | Saved). The browser's Back button steps back through Find, the market
   page, Build, the places, the segments and the open sheets; Back on Find leaves the app.
 - **Positions (PR #47; the owner's boards since redesign PR 3a, 6 Oct 2026).** Its own header ("Positions", ↻ to read
@@ -271,6 +271,20 @@ non-expert trader who wants to learn discipline rather than be sold trades.
   it was opened, the per-trade reading, both order ids in full and its whole timeline; a figure that is not a fill is
   never in the net), and "Refs only go up". Folded below: the weekly report (its frequency beside it), the copilot's
   analyses, the 30-day entry floor's log. "Whole record ›" on a position's screen opens that position's entry.
+- **Learn, the figure lab (PR 74; owner, 20 Oct 2026: "as on IBKR Campus").** The fifth place. A real market (the Market
+  sheet; Build's market first) and one of its expiries (‹ ›; the one nearest the 45-day target first): its price, the
+  strikes its chain lists and each strike's implied volatility. Four tabs add an option at the strike nearest today's price
+  (**+ Long call · + Short call · + Long put · + Short put**, four legs at most, as a combination order allows); the picture
+  is the payoff at expiry with **one blue point per leg** to drag sideways onto another listed strike (or − / +, or the
+  arrow keys), Sell / Buy and ✕ on each leg. The premiums are the **model's** (Black-Scholes on each leg's own implied
+  volatility) and say "model price"; a strike the chain gives no volatility for has no price, said so. The **card of the
+  figure** being built: its name (`figureOf()` — one home for what a set of legs is called, read as a net position, so a
+  four-leg butterfly is a butterfly), "Defined risk" or, for a sold option with nothing covering it, in amber "The app never
+  sends this", what it costs or collects, the exact max profit ("no ceiling" when there is none) and max loss ("unlimited"
+  for a sold call), the breakevens, and what it needs. Then **FIGURES**, fourteen cards (long and short calls and puts, the
+  four verticals, straddle, strangles, butterfly, iron condor, iron butterfly), each with its picture on this market and
+  its idea in one line; a tap loads it. On a computer, two columns. **Nothing is sent, saved or asked from Learn**: no
+  order path, no gate call, no /api/state field; the bridge from a figure to the chain and Build is PR 75.
 - **Settings (the owner's board since redesign PR 3b).** "‹ Back"; YOUR CAPITAL and YOUR LIMITS with what is open now
   (positions at once, savings and your own per-trade limit with its written reason folded under "More limits");
   FREE SIZING (one typed reason); CONNECTIONS, each saying what the app last saw of it ("Connected · checked 10:14",
@@ -567,7 +581,7 @@ re-read them: none closed; #3, #7, #8, #9 and #10 carry what PR 67 changed, and 
 chance against IBKR's. PR 68 re-read them: none closed; #3, #8 and #9 carry what PR 68 changed, and #9 gains an OWNER CHECK,
 the exit replay on real closes. PR 70 re-read them: none closed; #3 and #8 carry what PR 70 changed. PR 71 re-read them: none
 closed; #6 gains the Journal's merge on the server. PR 72 re-read them: none closed; #3, #8 and #9 carry what PR 72 changed.
-PR 73 re-read them: none closed; #3 carries the computer's new layout.)
+PR 73 re-read them: none closed; #3 carries the computer's new layout. PR 74 re-read them: none closed; #3 carries Learn.)
 
 1. **OWNER CHECK — the Journal entry for J-0001 shows the $7.65 fill** (v1 is reached on the owner's report of 5 Oct
    2026: filled 9 of 9 at $7.65, filed from the production address; this session cannot see that browser). **No Modify
@@ -637,7 +651,12 @@ PR 73 re-read them: none closed; #3 carries the computer's new layout.)
    and photographed in the same headless Chromium at 1024×768, 1100×800, 1280×800 and 1440×900 (docs/screens/pr73/before
    and after, `node scripts/shoot-pr73.mjs`; `node scripts/audit-computer.mjs`: 36 checks, 0 missed) — **never in a real
    desktop browser**: a visible scrollbar (Windows, ~15px) narrows each pane, and the table then reads in its compact
-   columns sooner; no board draws any of it, so the board audit cannot compare it.
+   columns sooner; no board draws any of it, so the board audit cannot compare it. **PR 74's Learn** (empty, an iron condor
+   from the gallery, a sold call alone, light, and two columns at 1280×800; docs/screens/pr74/, `node scripts/shoot-pr74.mjs`;
+   `node scripts/audit-computer.mjs` now 45 checks, 0 missed) was photographed the same way — **never on a phone, never on a
+   live chain** (the harness answers every market with UNG's fixture board, so the photographs read UNG), the drag tried with
+   a mouse in Chromium, never with a finger; **no board draws Learn**, so the board audit cannot compare it. As on the
+   Journal and Positions, the last ~50px of the gallery sits under the bottom bar on a phone (the 88px end above).
 4. **Read when it happens — no credit has filled at the corrected limit** (the indicative combination ask on thin chains
    has not been measured by a fill; J-0003 never filled at it), **and "Not on Alpaca", "size N > M on the ask", the "Not
    in the app" card, an order "sent outside this app", free sizing (PR #41), and an order sent from Build's new review

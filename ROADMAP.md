@@ -6,6 +6,55 @@ The full history of every item shipped so far (P0–P10, P2-bis) is in `docs/his
 Every pull request updates this file: the session that ships an item marks it done and states
 what the next one inherits.
 
+## Done in PR 74 (owner, 20 Oct 2026): Learn, the figure lab
+
+The owner's line (19 Oct 2026): "Education, the figure lab, as on IBKR Campus: tabs that add a long or short call or put,
+blue points to drag, a card per figure." Asked on 20 Oct 2026, the owner chose: a fifth place in the bottom bar, **Learn**;
+a **real market's** price, listed strikes and volatility, the premiums the model's and said so; a **sold option alone
+allowed, to learn from, never sent**; the card of the figure being built **and** a gallery of the known figures.
+
+- **One name for a set of legs: `figureOf()` (rules.js),** read as a net position per strike and type (`figureLegs()`), over
+  `FIGURE_NAMES` (34 shapes: the four singles, the verticals, ratios, straddles, strangles, guts, synthetics, risk
+  reversals, butterflies and their broken wings, condors, iron condors and butterflies and their reverses); anything else
+  is "N legs". PR 75's finger drawing names what it recognises through it.
+- **The lab (`src/learnView.js`, plain JS):** a tab adds its option at the strike its own type lists nearest today's price;
+  − / + and a drag move a leg only onto its type's listed strikes; at most `MLEG_MAX_LEGS` (4); Sell / Buy and ✕ per leg;
+  the expiry nearest the 45-day target first, ‹ › through the others. Premiums: Black-Scholes on each leg's own IV (`bs()`),
+  "model price"; a strike with no IV has none. The card: name; "Defined risk", or in amber "The app never sends this" when
+  `undefinedRiskLegs()` finds a sold option uncovered; costs/collects; exact max profit ("no ceiling") and max loss
+  ("unlimited" for a sold call; a sold put's at a price of zero); breakevens from `payoffBands()`; `needsText()`.
+- **The gallery: `LAB_FIGURES`, 14 figures**, each leg's strike in expected moves laid out on this market's listed strikes
+  (`labFigureLegs()`: an at-the-money strike both types list, symmetric pairs equal, distinct moves never on one strike),
+  each card with its picture and its idea in one line; a tap loads it; a change of market or expiry lays it out again.
+- **The picture: `FigureChart` (visuals.jsx),** the classic payoff (price across, P&L up), cut from `payoffBands()`: green and
+  red zones, breakevens, today's price, one **blue point per leg** to drag (pointer) or step (arrow keys, a `slider` role).
+- **The place:** `NAV_PLACES` gains Learn (GraduationCap); `placeOf()`; App.jsx's `lab` state in memory only (never on
+  /api/state), the market's chain loaded by the same `refreshChain()`; Build's ticker strip stays off it; on a computer two
+  columns (the lab | the card and the gallery).
+- **Nothing is sent from Learn:** learn.test.js reads learnView.js, learn.jsx and App's Learn block and fails on an order
+  path, a gate call, a fetch, /api/ or a save.
+
+**Tests:** src/learn.test.js (13: every name and its mirror, net legs, the gallery named back as itself on fine, coarse,
+gappy and $13 boards, listed strikes only, the cap, the expiry, model prices on each leg's IV, the card, a sold call and a
+sold put, the gallery's models, nothing sent, the lab keeping its market once it holds a leg, one home for the words) and src/learn.test.jsx (7, rendered: tabs, a point
+per leg, the rows, the card, the warn line, the states, two columns, the picture, and the words read: 313 at rest, 379 with
+an iron condor, each a ceiling). positions.test.jsx and journalScreen.test.jsx read five places; status.test.jsx the strip
+kept off Learn; voice.test.js counts Learn (22 by the source counter, its data read rendered). **Measured:** tests 1,555 →
+1,575, build clean (1,589 kB, the usual chunk warning); board audit 5,248 ✓, 0 unexplained (20 boards, dark and light: the fifth place changes no board pair);
+`node scripts/audit-computer.mjs` 45 checks (Learn at 1024, 1280, 1440), 0 missed. Photographs: docs/screens/pr74/.
+
+**Not changed:** riskGate.js, the seven order paths, RULES, /api/state, Find, Build, Positions, the Journal.
+
+### What the next session inherits
+
+- **PR 75** (the finger drawing → a defined-risk figure → the chain → Build → Optimize) names what it recognises through
+  `figureOf()` and can lay a figure out with `labFigureLegs()`; the bridge to Build (`buildHandOff()`) is its own to add —
+  Learn sends nothing today.
+- No board draws Learn: the board audit cannot compare it until the owner draws one (docs/mockups).
+- Observed while building it, not changed: on a phone the last ~50px of the Journal, Positions and Learn sit under the
+  bottom bar (measured at 390×844: content ends at 748–756px, the bar starts at 704px) — the 88px end the owner chose on
+  5 Oct 2026 (PRD §4 #3). Raising it is the owner's call.
+
 ## Carry-over (20 Oct 2026): PRs 72 and 73 reach `main`
 
 No code of its own. PR 71 merged into `main`; PRs 72 and 73 merged into the branches they were stacked on, not into
@@ -1354,8 +1403,8 @@ One line each; see `PRD.md` §5 and `docs/history/ROADMAP.md` for detail.
 - **DONE: PR 71** — the Journal on the server: `journal` and `journalSeq` on `/api/state`, merged by ref on both sides, never
   replaced; the line under the Journal's title says where it is kept.
 - **Planned by the owner (19 Oct 2026), in this order, after PR 72 and PR 73:**
-  - **PR 74** — Education, the figure lab, as on IBKR Campus: tabs that add a long or short call or put, blue points to
-    drag, a card per figure.
+  - **DONE: PR 74** — Education, the figure lab, as on IBKR Campus: tabs that add a long or short call or put, blue points
+    to drag, a card per figure (Learn, the fifth place; above).
   - **PR 75** — a figure drawn with a finger → the defined-risk structure it is recognised as → opened in the chain → Build
     → Optimize.
   - **PR 76** — P7, fills streamed server-side (below), plus IBKR-style alerts (the day's P&L, a position's daily move).

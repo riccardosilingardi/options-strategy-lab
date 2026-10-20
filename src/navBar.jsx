@@ -2,7 +2,8 @@
 // src/navBar.jsx — ONE BOTTOM NAVIGATION BAR (PR #47, TASK 4).
 //
 // It replaces two rows that did one job: `StepNav` (1 Find → 2 Build) and the "places" row (Positions, Watching,
-// Journal). Four places, always in the same spot under the thumb: Find · Build · Positions · Journal. Watching is
+// Journal). Five places since PR 74, always in the same spot under the thumb: Find · Build · Positions · Journal · Learn
+// (the figure lab, owner 20 Oct 2026). Watching is
 // "Saved", inside Find. Since redesign PR 1 round 2 the app opens on Find (Home is gone), and Back still walks the
 // screens (`nav.js`): the bar only changes the same state the two rows changed.
 //
@@ -13,7 +14,7 @@
 // Home's old status sentence (`statusLine()`, `badgeLabel`), so what Home said is still said where the count is.
 // ============================================================================
 import React from "react";
-import { Search, Hammer, Briefcase, FileText } from "lucide-react";
+import { Search, Hammer, Briefcase, FileText, GraduationCap } from "lucide-react";
 import { T, TYPE, BADGE_H } from "./theme.js";
 import { sans, mono, TAP, RAIL_W } from "./ui.jsx";
 
@@ -29,18 +30,20 @@ export const NAV_PLACES = [
   { id: "build", label: "Build", I: Hammer },
   { id: "positions", label: "Positions", I: Briefcase },
   { id: "journal", label: "Journal", I: FileText },
+  // PR 74 (owner, 20 Oct 2026): the fifth place — Learn, the figure lab. Nothing is sent from it.
+  { id: "learn", label: "Learn", I: GraduationCap },
 ];
 
-/** Which of the four is current, from the screen state. Saved (the old Watching) is part of Find. */
+/** Which of the five is current, from the screen state. Saved (the old Watching) is part of Find. */
 export function placeOf({ tab, step, showSettings = false }) {
   if (showSettings) return null;
-  if (tab === "positions" || tab === "journal") return tab;
+  if (tab === "positions" || tab === "journal" || tab === "learn") return tab;
   if (tab === "watching") return "find";
   return step === "build" ? "build" : "find";
 }
 
 export function BottomBar({ current, badge = 0, badgeLabel = null, onGo, rail = false }) {
-  /* ON A COMPUTER (redesign PR 3b): the same four places, as a sidebar on the left (`RAIL_W`), one row each. */
+  /* ON A COMPUTER (redesign PR 3b): the same places, as a sidebar on the left (`RAIL_W`), one row each. */
   if (rail) {
     return (
       <nav aria-label="Places" data-bottom-bar data-rail
