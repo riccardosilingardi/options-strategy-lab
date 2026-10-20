@@ -6,6 +6,17 @@ The full history of every item shipped so far (P0–P10, P2-bis) is in `docs/his
 Every pull request updates this file: the session that ships an item marks it done and states
 what the next one inherits.
 
+## Carry-over (20 Oct 2026): PRs 72 and 73 reach `main`
+
+No code of its own. PR 71 merged into `main`; PRs 72 and 73 merged into the branches they were stacked on, not into
+`main` (as PRs 62 and 63 did, carried by #64). This carry-over merges PR 73's branch, which holds both, into `main`: the
+files are identical to PR 73's head (`da7c734`). It takes a GitHub number of its own; the next items keep the names the
+owner gave them (PR 74, 75, 76 below).
+
+**What the next session inherits:** a stacked PR merges into the branch it is stacked on. After the PR under it merges,
+retarget it to `main` (Edit beside its title) before merging it; GitHub does that by itself only when the merged branch
+is deleted.
+
 ## Done in PR 73 (owner, 19 Oct 2026): the app on a computer, responsive
 
 The third of three stacked PRs (71 → 72 → 73), stacked on PR 72. The owner, 19 Oct 2026: "horrible on desktop"; asked
