@@ -1053,6 +1053,9 @@ export function journalEntry({ pos = {}, pnl = null, pnlNote = null, reason = nu
     id: pos.id,
     ref: pos.ref || null,
     t,
+    // WHEN IT WAS LAST CHANGED (PR 71): the Journal is merged across devices by ref, and the newer edit wins
+    // (src/journalSync.js). Filing is the first change; every later edit stamps it again (`touchEntry()`).
+    updatedAt: t,
     ticker: pos.ticker,
     name: pos.name,
     openedAt: pos.openedAt,

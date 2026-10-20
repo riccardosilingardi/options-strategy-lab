@@ -35,6 +35,8 @@ const ROLL = flags.includes("roll");
 // "+opt" (PR 65, photographs only): UNG's December board copied onto 20 Nov (39 days) and 15 Jan (88 days), so Build's
 // Optimize has three expiries in the entry window to search. Copies of one board: the same prices on every expiry.
 const OPT = flags.includes("opt");
+// "+offline" (PR 71, photographs only): /api/state does not answer, so the Journal says it is only on this device.
+const OFFLINE = flags.includes("offline");
 const rollBook = (recs) => recs.map((r) => (r.ref !== "J-0003" ? r : { ...r, thesis: { ...r.thesis, signals: { ...r.thesis.signals,
   factors: { seasonal: { dir: -1, strength: 45 }, technical: { dir: -1, strength: 35 }, weather: { dir: 1, strength: 40 }, news: { dir: 0, strength: 0 } } } } }));
 const RAW = JSON.parse(readFileSync("src/fixtures/alpaca-chain-UNG.json", "utf8"));
@@ -74,7 +76,7 @@ window.fetch = async (input, init = {}) => {
   const p = url.pathname;
   const method = (init.method || "GET").toUpperCase();
   if (window.__LOG) console.log("FETCH", method, String(input).slice(0, 120));
-  if (p === "/api/state") return json({});
+  if (p === "/api/state") return OFFLINE ? Promise.reject(new TypeError("Failed to fetch")) : json({});
   if (p === "/api/chainAlpaca") {
     const sym = url.searchParams.get("sym");
     if (sym === "SOYB" && mode === "loading") return NEVER();

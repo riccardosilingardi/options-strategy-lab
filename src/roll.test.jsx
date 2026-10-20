@@ -79,7 +79,8 @@ check("A ROLL NEVER HOLDS BOTH: Build's Send waits while the old position is hel
   has(app, "rollHeld ? rollCloseFirst(rollRef)", "Send is blocked while the old one is held");
   has(app, "note: rollRef ? rollLine(rollRef, !rollHeld)", "Build says which step it is on");
   has(app, 'text: rolledInto(toRef)'); has(app, 'text: rolledFrom(fromRef)');
-  has(app, "journal: (st.journal || []).map(link)", "the old record is linked even once filed");
+  // PR 71: the filed record's new line also stamps it (`touchEntry()`), so the newer copy wins across devices.
+  has(app, "journal: (st.journal || []).map((x) => { const y = link(x); return y === x ? x : touchEntry(y, t); })", "the old record is linked even once filed");
   has(rollCloseFirst("J-0003"), "never holds both positions at once");
   has(rollLine("J-0003", false), "close J-0003 first"); has(rollLine("J-0003", true), "J-0003 is closed");
   // The new trade goes through the same send as any other: no eighth order path.

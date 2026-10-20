@@ -439,7 +439,8 @@ test("App.jsx builds the closed entry with journalEntry(), not by hand", () => {
 
 test("App.jsx gives a position its ref at open and stores the counter", () => {
   const app = readFileSync(new URL("./App.jsx", import.meta.url), "utf8");
-  assert.ok(/const \{ n: refN, ref \} = nextRef\(store\);/.test(app));
+  // PR 71: the store's counter, raised to the server's (`serverSeq()`) so two devices never issue the same ref.
+  assert.ok(/const \{ n: refN, ref \} = nextRef\(\{ \.\.\.store, journalSeq: Math\.max\(\+store\.journalSeq \|\| 0, srvSeq\) \}\);/.test(app));
   assert.ok(/journalSeq: refN/.test(app), "the counter moves with the ref it issued");
   assert.ok(/journalSeq: 0/.test(app), "and the empty state has one");
 });

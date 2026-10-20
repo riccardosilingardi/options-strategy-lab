@@ -98,7 +98,9 @@ import { undefinedRiskLegs } from "./riskGate.js";
 import { taContext } from "./indicators.js";
 // PR 4b: the alternatives of a structure (Build's variants, a position's roll) and their words.
 import { variantsOf, rollCandidates, rollEligible, optimizeCandidates, OPTIMIZE_STEPS, rollJudge, rankRolls, nearestListedOf } from "./alternatives.js";
-import { whyOpenedLine, endedLine } from "./journalView.js";
+import { whyOpenedLine, endedLine, journalSyncLine, restoredFromServerLine, filedElsewhereLine } from "./journalView.js";
+// PR 71: one Journal on every device — merged by ref with the server's (src/journalSync.js).
+import { mergeJournalState, journalBehind, filedElsewhere, touchEntry, mergedSeq } from "./journalSync.js";
 import { liquidityTakeaway, liquidityLevelValue, noOiLine, LIMIT_CHOICES, expiryWords, returnText, pastTileText, futureTile, VARIANT_LABELS, VARIANTS_NOTE, VARIANTS_NONE, gateLine, ROLL_WHY, ROLL_HOW, rollLine, rollCloseFirst, rolledInto, rolledFrom,
   boardMoveLabel, optimizeNote, optimizeSummary, optimizePlaceLine, optimizeRowNote, OPTIMIZE_NONE_FIT, OPTIMIZE_EMPTY, OPTIMIZE_ALL_CUT, ROLL_JUDGE_NOTE, rollWholeLine,
   rollSummaryLine, ROLL_NONE_SAFE } from "./rules.js";
@@ -954,16 +956,42 @@ const EMPTY = { journalSeq: 0, saved: [], positions: [], expiryLog: [], settings
    browser has nothing at all — `loadState()` returned null, not "an empty
    book the owner emptied" — those are adopted before anything else runs.
    A local store, even an empty one, always wins: it is the newer word. */
+// SINCE PR 71 THE JOURNAL IS ON THE SERVER TOO: a browser with nothing saved adopts it with the positions, and one whose
+// server holds only a Journal (every trade closed) adopts that.
 export function hydrateFromServer(local, srv) {
   if (local) return local;
   const positions = srv && Array.isArray(srv.positions) ? srv.positions : [];
-  if (!positions.length) return null;
+  const journal = srv && Array.isArray(srv.journal) ? srv.journal : [];
+  if (!positions.length && !journal.length) return null;
   const s0 = (srv && srv.settings) || {};
   const settings = {};
   for (const k of ["webhook", "capital", "concurrentTarget", "savings", "sizeOverride", "sizingFree", "notifyWhenReady", "findOrder"]) {
     if (s0[k] !== undefined) settings[k] = s0[k];
   }
-  return { positions, settings, restoredFromServer: true };
+  return { positions, journal, journalSeq: Number.isFinite(+srv.journalSeq) ? +srv.journalSeq : 0, settings, restoredFromServer: true };
+}
+
+/* WHETHER THE SERVER HOLDS THIS BROWSER'S JOURNAL (PR 71, task 71.3): every save and every read of `/api/state` reports
+   here, and the Journal's line under its title reads it ("Saved on the server · updated 14:05", or amber "Only on this
+   device"). One listener, set by the app; nothing else listens. */
+let serverSyncListener = null;
+const reportServerSync = (ok) => { try { if (serverSyncListener) serverSyncListener(ok, Date.now()); } catch { /* a report never breaks a save */ } };
+
+/* THE STATE SENT TO THE SERVER: the positions, the synced settings and, since PR 71, the Journal and its counter (merged
+   there entry by entry, never replaced: src/journalSync.js). */
+const serverPayload = (st) => ({ positions: st.positions, settings: { webhook: st.settings?.webhook, capital: st.settings?.capital, concurrentTarget: st.settings?.concurrentTarget, savings: st.settings?.savings, sizeOverride: st.settings?.sizeOverride, sizingFree: st.settings?.sizingFree ?? null, notifyWhenReady: !!st.settings?.notifyWhenReady, findOrder: st.settings?.findOrder || "ev" }, journal: st.journal || [], journalSeq: st.journalSeq || 0 });
+
+/* THE HIGHEST REF THE SERVER HAS SEEN (PR 71): its counter and every ref in its positions and Journal. 0 when it cannot
+   be read within the wait (offline, the demo): the caller then uses its own counter, which is never lower. */
+const SERVER_SEQ_WAIT_MS = 2000;
+async function serverSeq() {
+  if (DEMO) return 0;
+  const ctl = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timer = ctl ? setTimeout(() => ctl.abort(), SERVER_SEQ_WAIT_MS) : null;
+  try {
+    const r = await fetch("/api/state", ctl ? { signal: ctl.signal } : undefined);
+    return r.ok ? mergedSeq(await r.json()) : 0;
+  } catch { return 0; } finally { if (timer) clearTimeout(timer); }
 }
 
 async function saveState(st) {
@@ -975,8 +1003,11 @@ async function saveState(st) {
   // A PREVIEW NEVER SAVES TO THE SERVER EITHER (redesign PR 2, TASK 0a): that same shared document is production's
   // book, and deploy-preview-51 overwrote it. The server refuses a preview's POST on its own (state.mjs); this only
   // spares a request that would be refused.
-  // sync server (abilita Autopilot ad app chiusa); fire-and-forget
-  try { fetch("/api/state", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ positions: st.positions, settings: { webhook: st.settings?.webhook, capital: st.settings?.capital, concurrentTarget: st.settings?.concurrentTarget, savings: st.settings?.savings, sizeOverride: st.settings?.sizeOverride, sizingFree: st.settings?.sizingFree ?? null, notifyWhenReady: !!st.settings?.notifyWhenReady, findOrder: st.settings?.findOrder || "ev" } }) }); } catch { /* offline ok */ }
+  // sync server (abilita Autopilot ad app chiusa); fire-and-forget — its outcome is reported for the Journal's line.
+  try {
+    fetch("/api/state", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(serverPayload(st)) })
+      .then((r) => reportServerSync(!!r.ok), () => reportServerSync(false));
+  } catch { reportServerSync(false); /* offline ok */ }
 }
 
 /* ============================== UI ATOMS ============================== */
@@ -1259,6 +1290,10 @@ class TabBoundary extends React.Component {
 export default function OptionsStrategyLab() {
   // A COMPUTER'S SCREEN (redesign PR 3b): from WIDE_MIN the bar is a sidebar and Find and Positions are two panes.
   const wide = useWide();
+  // PR 71 (task 71.3): whether the server holds this browser's Journal, from the last read or save of /api/state. Set up
+  // before the load below runs (effects run in the order they are written), so the load's own report is heard.
+  const [serverSync, setServerSync] = useState({ ok: null, at: null });
+  useEffect(() => { serverSyncListener = (ok, at) => setServerSync({ ok, at }); return () => { serverSyncListener = null; }; }, []);
   // PRD §5: `view` is the shell. Since redesign PR 1 round 2 (owner, 5 Oct 2026) THE APP OPENS ON FIND: Home is no
   // longer a screen, so the desk is the only view (its positions are the bottom bar's Positions badge, Settings the
   // gear in Find's header). The field stays in nav.js's entries.
@@ -1692,13 +1727,11 @@ export default function OptionsStrategyLab() {
         const r = DEMO ? { ok: false } : await fetch("/api/state");
         if (r.ok) {
           const srv = await r.json();
-          // NOTHING SAVED IN THIS BROWSER: start from the server's book (PR #42).
+          // NOTHING SAVED IN THIS BROWSER: start from the server's book (PR #42), and since PR 71 its Journal.
           const restored = hydrateFromServer(local, srv);
           if (restored && restored !== local) {
             st = { ...EMPTY, ...restored, settings: { ...EMPTY.settings, ...restored.settings, onboarded: true } };
-            setMsg(`This browser had nothing saved, so your ${restored.positions.length} open ` +
-              `position${restored.positions.length === 1 ? " was" : "s were"} loaded from the server. ` +
-              `The Journal is kept only in the browser that filed it: open the app from its installed icon to see it.`);
+            setMsg(restoredFromServerLine(restored.positions.length, restored.journal.length));
           }
           for (const sp of srv.positions || []) {
             const lp = st.positions?.find((x) => x.id === sp.id);
@@ -1707,8 +1740,25 @@ export default function OptionsStrategyLab() {
               lp.timeline = [...(lp.timeline || []), ...sp.timeline.filter((e) => !known.has(e.t))].sort((a, b) => a.t - b.t);
             }
           }
-        }
-      } catch { /* server sync opzionale */ }
+          /* ONE JOURNAL ON EVERY DEVICE (PR 71). The server's Journal is merged into this browser's by ref (the newer edit
+             wins, nothing is dropped) and the counter is the highest either side has seen. A position this browser still
+             shows open that another device has already filed is closed here too. If the server lacks anything this browser
+             holds — the first load after PR 71, or an entry filed while the server did not answer — the Journal alone is
+             uploaded once (the positions are not touched by it). A preview reads and never writes. */
+          const mergedJ = mergeJournalState(st, srv);
+          const gone = new Set(filedElsewhere(st.positions, mergedJ.journal));
+          st = { ...st, ...mergedJ, positions: (st.positions || []).filter((p) => !gone.has(p.id)) };
+          if (gone.size) setMsg(filedElsewhereLine(gone.size));
+          const behind = journalBehind(srv, mergedJ);
+          if (behind && !PREVIEW) {
+            try {
+              const up = await fetch("/api/state", { method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ journal: mergedJ.journal, journalSeq: mergedJ.journalSeq }) });
+              reportServerSync(!!up.ok);
+            } catch { reportServerSync(false); }
+          } else reportServerSync(!behind);
+        } else if (!DEMO) reportServerSync(false);
+      } catch { if (!DEMO) reportServerSync(false); /* server sync opzionale */ }
       // SANIFICAZIONE stato salvato (v2): posizioni corrotte da versioni precedenti
       // non devono mai piuò far crashare l'app. Si tengono solo record integri.
       const okPos = (p) => p && typeof p === "object" && Array.isArray(p.legs) && p.legs.length > 0
@@ -2507,7 +2557,10 @@ export default function OptionsStrategyLab() {
     // THE REF IS GIVEN HERE, ONCE, AND IS THE POSITION'S NAME FOR THE REST OF
     // ITS LIFE — including after it is closed, which is the whole point: the
     // Journal entry keeps it, so a closed trade can still be pointed at.
-    const { n: refN, ref } = nextRef(store);
+    // TWO DEVICES NEVER ISSUE THE SAME REF (PR 71): the server's counter is read first (it holds the highest ref any
+    // device has saved), with a short wait; unread, this browser's own counter is used, as before.
+    const srvSeq = await serverSeq();
+    const { n: refN, ref } = nextRef({ ...store, journalSeq: Math.max(+store.journalSeq || 0, srvSeq) });
     const pos = {
       id: Date.now(), ref, name, ticker: tk, expKey: ek, legs: lg, entryNet: analysis.entry, entrySpot: sp,
       // THE POSITION REMEMBERS ITS SIZE. `entryNet`, `maxProfit` and `maxLoss`
@@ -2642,7 +2695,8 @@ export default function OptionsStrategyLab() {
           if (x.id === toId) { const a = appendTimeline(x, { t, type: "roll", text: rolledFrom(fromRef) }); return { ...x, timeline: a.timeline, seqNext: a.seqNext }; }
           return x;
         };
-        const ns = { ...st, positions: (st.positions || []).map(link), journal: (st.journal || []).map(link) };
+        // A FILED entry that gains a line is an edit: stamped, so the newer copy wins across devices (PR 71).
+        const ns = { ...st, positions: (st.positions || []).map(link), journal: (st.journal || []).map((x) => { const y = link(x); return y === x ? x : touchEntry(y, t); }) };
         saveState(ns); return ns;
       });
       setBuildOrigin({ kind: "load", key: null });
@@ -5875,6 +5929,8 @@ export default function OptionsStrategyLab() {
         {tab === "journal" && !showSettings && (
           <JournalScreen key={journalOpenRef || "journal"} v={{
             journey, wide,
+            // PR 71 (task 71.3): where this Journal is kept. Not in the demo, which never talks to the server.
+            sync: DEMO ? null : journalSyncLine(serverSync),
             // PR 68 (task 68.3): which chance came true, once enough closed trades carry both.
             calibration: chanceCalibration(store.journal || []),
             insideLimit: <>{`Inside the limit: ${journey.coerenza == null ? "not judged yet" : `${pctText(journey.coerenza)} of the trades judged stayed inside the per-trade limit`}.`}
@@ -5896,8 +5952,9 @@ export default function OptionsStrategyLab() {
                   setStore((st) => {
                     const journal = (st.journal || []).map((x) => {
                       if (x !== e && !(x.ref && x.ref === e.ref)) return x;
-                      const t = appendTimeline(x, { t: Date.now(), type: "copilot", text: `Asked the copilot: “${a.label}”. The answer is in the Journal.` });
-                      return { ...x, timeline: t.timeline, seqNext: t.seqNext };
+                      const now = Date.now();
+                      const t = appendTimeline(x, { t: now, type: "copilot", text: `Asked the copilot: “${a.label}”. The answer is in the Journal.` });
+                      return touchEntry({ ...x, timeline: t.timeline, seqNext: t.seqNext }, now);
                     });
                     const ns = { ...st, journal }; saveState(ns); return ns;
                   });

@@ -131,3 +131,26 @@ export const calibrationInfo = () => "For each band of the chance a trade was op
   "a chance that is right says 30% and wins about 3 in 10. The Brier score is the average of (chance − result)², the result 1 " +
   "for a profit and 0 for a loss: 0 is perfect, 0.25 is what always saying 50% scores. A trade counts with both chances and a " +
   "result read from a fill.";
+
+/* ---------------------------------------------------------------- PR 71: THE JOURNAL ON THE SERVER */
+/**
+ * THE ONE LINE UNDER THE JOURNAL'S TITLE (owner, 19 Oct 2026, task 71.3). `ok` is the last read or save of `/api/state`:
+ * true → "Saved on the server · updated 14:05" (the time the server last confirmed it, the reader's clock); false → amber
+ * "Only on this device: the server did not answer"; null (never asked: the demo, or before the first read) → nothing.
+ */
+export function journalSyncLine({ ok = null, at = null } = {}) {
+  if (ok === true) {
+    const d = new Date(Number(at));
+    const hhmm = Number.isFinite(d.getTime()) ? `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}` : null;
+    return { text: `Saved on the server${hhmm ? ` · updated ${hhmm}` : ""}`, warn: false };
+  }
+  if (ok === false) return { text: "Only on this device: the server did not answer", warn: true };
+  return null;
+}
+/** What a browser with nothing saved says when it adopted the server's book and Journal (PR #42; PR 71). */
+export const restoredFromServerLine = (nPos = 0, nJournal = 0) =>
+  `This browser had nothing saved, so ${[nPos ? `your ${nPos} open position${nPos === 1 ? "" : "s"}` : null,
+    nJournal ? `the Journal (${entriesWords(nJournal)})` : null].filter(Boolean).join(" and ")} ${nPos > 1 || (nPos && nJournal) ? "were" : "was"} loaded from the server.`;
+/** What the load says when another device had already filed positions this browser still showed open (PR 71). */
+export const filedElsewhereLine = (n = 1) =>
+  `${n} position${n === 1 ? " was" : "s were"} closed and filed in the Journal on another device: ${n === 1 ? "it is" : "they are"} no longer shown as open here.`;
