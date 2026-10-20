@@ -303,7 +303,8 @@ export function labExitDay(expKey, exitDTE) {
  */
 export function labCurves(m, chain, plan = exitPlanOf({})) {
   const exitDTE = plan.exitDTE;
-  const none = { today: null, exit: null, ivs: null, exitDTE, exitDay: labExitDay(m && m.expKey, exitDTE), inside: false };
+  const none = { today: null, exit: null, ivs: null, exitDTE, exitDay: labExitDay(m && m.expKey, exitDTE), inside: false,
+    legs: m && Array.isArray(m.legs) ? m.legs.length : 0 };
   if (!m || !m.bands || m.net == null || !m.legs.length || !known(m.dte)) return none;
   const ivs = m.legs.map((l) => legIv(chain, m.expKey, l));
   if (ivs.some((v) => v == null)) return none;
@@ -384,10 +385,10 @@ export function labMarketLine(m, dist) {
 
 /**
  * THE LEGEND UNDER THE PICTURE (76.1): three entries — at expiry, today, the exit date (its day and its days before the
- * expiry) — each saying when it cannot be drawn. Null with no curves object (no leg).
+ * expiry) — each saying when it cannot be drawn. Null with no leg.
  */
 export function labLegend(curves) {
-  if (!curves) return null;
+  if (!curves || !curves.legs) return null;                // no leg, no curve to name
   const n = curves.exitDTE;
   return [
     { id: "expiry", text: LEARN_WORDS.legendExpiry, drawn: true },

@@ -209,8 +209,10 @@ check("76.1 THE PICTURE READS LIKE IBKR'S: a dollar scale, prices along the bott
   has(h, "Exit date, 6 Nov (21 days before expiry)");
   has(h, 'data-lab-extreme="profit"'); has(h, 'data-lab-extreme="loss"'); has(h, v.chart.extremes[0].text);
   has(h, "data-lab-density"); has(h, v.chart.market.text.replace(/'/g, "&#x27;")); has(h, "The band");
-  // No leg: no dollar scale (nothing to scale), no curve, no legend, no market line.
-  const e = renderToStaticMarkup(<LearnScreen v={vOf([])} />);
+  // No leg: no dollar scale (nothing to scale), no curve, no legend, no market line — App.jsx hands the legend of an empty
+  // lab's curves, which is null.
+  eq(labLegend(labCurves(labModel({ ticker: "GLD", chain: CHAIN, expKey: EXP, legs: [], bandsOf: payoffBands }), CHAIN)), null, "no leg, no legend");
+  const e = renderToStaticMarkup(<LearnScreen v={vOf([], { chart: { ...vOf([]).chart, legend: labLegend(labCurves(labModel({ ticker: "GLD", chain: CHAIN, expKey: EXP, legs: [] }), CHAIN)) } })} />);
   hasNot(e, ">$0<"); hasNot(e, "data-lab-curve"); hasNot(e, "data-learn-legend"); hasNot(e, "data-learn-market-chance");
 });
 check("76.2 A FINGER'S TARGETS: each point holds the page still (touch-action none, a ≥44px band along its guide); the picture itself still scrolls", () => {
