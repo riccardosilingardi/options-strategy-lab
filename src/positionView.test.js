@@ -184,7 +184,9 @@ test("THE BROKER PANEL — a holding with a record is one line", () => {
 
 test("ONE HOME — the card's stop level is the level that raises the warning", () => {
   const app = readFileSync("src/App.jsx", "utf8");
-  assert.match(app, /stopWarningLevel\(\{ maxLoss: p\.maxLoss, contracts: n \}\)/);
+  // PR 72: with the position's own plan (`exitPlanOf()`; the RULES default for a position opened before it).
+  assert.match(app, /stopWarningLevel\(\{ maxLoss: p\.maxLoss, contracts: n, plan \}\)/);
+  assert.match(app, /const plan = exitPlanOf\(p\);/);
   assert.equal(/RULES\.stopLossPct \* p\.maxLoss/.test(app), false, "posAlerts no longer spells the level itself");
   assert.equal(RULES.stopLossPct, 0.5);
 });

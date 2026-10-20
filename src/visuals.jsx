@@ -1380,15 +1380,20 @@ export function CompareFigure({ items = [], height, width, style }) {
    frozen (PRD §4), so screen 4 states it rather than offering it — and the
    numbers come from src/rules.js like every other rule number.
 ==================================================================== */
-export const exitPlanSentence = (target = null) =>
-  `Close at ${target && target.basis === "premium" ? takeProfitBasisWords("premium") : `${pctText(RULES.takeProfitPct)} of max gain`}, or at ${RULES.exitDTE} days to expiration.`;
+// PR 72: the trade's own plan (`exitPlanOf()`); without one, the RULES defaults.
+const planDays = (plan) => (plan && Number.isFinite(Number(plan.exitDTE)) ? Number(plan.exitDTE) : RULES.exitDTE);
+const planStop = (plan) => (plan && Number.isFinite(Number(plan.stopLossPct)) ? Number(plan.stopLossPct) : RULES.stopLossPct);
+const planTp = (target, plan) => (target && Number.isFinite(Number(target.pct)) ? Number(target.pct)
+  : plan && Number.isFinite(Number(plan.takeProfitPct)) ? Number(plan.takeProfitPct) : RULES.takeProfitPct);
+export const exitPlanSentence = (target = null, plan = null) =>
+  `Close at ${target && target.basis === "premium" ? takeProfitBasisWords("premium", planTp(target, plan)) : `${pctText(planTp(target, plan))} of max gain`}, or at ${planDays(plan)} days to expiration.`;
 
 /** @param target a `takeProfitTarget()` result for ONE combination (rules.js) — the one place the target is worked out. */
-export const exitPlanDetail = (target, contracts = 1) => {
+export const exitPlanDetail = (target, contracts = 1, plan = null) => {
   // EVERY MONEY FIGURE SAYS ITS UNIT (PR #40, TASK 0): the confirm step said
   // "$66 of profit" for one contract beside "$924 of $1,848" for fourteen.
   const n = Math.max(1, Math.round(Number(contracts) || 1));
-  const tail = `A loss of ${pctText(RULES.stopLossPct)} of the maximum raises a warning, never an ` +
+  const tail = `A loss of ${pctText(planStop(plan))} of the maximum raises a warning, never an ` +
     `automatic close. These are chosen now and not renegotiated while the position is open.`;
   // NO CEILING AND NOT A SINGLE OPTION MEANS NO TARGET. Half of an unknown is
   // not $0, and printing "that is $0 of profit" under a structure with no
@@ -1396,15 +1401,15 @@ export const exitPlanDetail = (target, contracts = 1) => {
   // break-even. The rule stands, its number does not exist, and the DTE half
   // of it still does.
   if (!target || !Number.isFinite(target.perCombo)) {
-    return `There is ${NO_CEILING} on this one, so ${pctText(RULES.takeProfitPct)} of the maximum is not a ` +
-      `dollar figure the app can put here — the ${RULES.exitDTE}-day mark is the exit that still applies, and ` +
+    return `There is ${NO_CEILING} on this one, so ${pctText(planTp(target, plan))} of the maximum is not a ` +
+      `dollar figure the app can put here — the ${planDays(plan)}-day mark is the exit that still applies, and ` +
       `a profit target on this trade is yours to set. ${tail}`;
   }
   if (target.basis === "premium") {
     return `That is ${money(target.perCombo * n)} of profit ${n > 1 ? `for ${n}` : "per contract"}, ${pctText(target.pct)} of the ${money(target.base * n)} you pay, ` +
-      `or the ${RULES.exitDTE}-day mark, whichever comes first. ${tail}`;
+      `or the ${planDays(plan)}-day mark, whichever comes first. ${tail}`;
   }
-  return `That is ${money(target.perCombo * n)} of profit ${n > 1 ? `for ${n}` : "per contract"}, or the ${RULES.exitDTE}-day mark, ` +
+  return `That is ${money(target.perCombo * n)} of profit ${n > 1 ? `for ${n}` : "per contract"}, or the ${planDays(plan)}-day mark, ` +
     `whichever comes first. ${tail}`;
 };
 

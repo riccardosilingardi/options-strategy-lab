@@ -94,6 +94,22 @@ const v = {
 };
 const html = renderToStaticMarkup(<BuildScreen v={v} foldedNode={<div data-more-content>MORE CONTENT</div>} />);
 
+/* PR 73 (owner, 19 Oct 2026): ON A COMPUTER, TWO COLUMNS — the same sections, the same props; a phone is unchanged. */
+check("PR 73 — ON A COMPUTER BUILD IS TWO COLUMNS: legs, order, exit plan and Send on the left; the chart, numbers, why and copilot on the right", () => {
+  const wideHtml = renderToStaticMarkup(<BuildScreen v={{ ...v, wide: true }} foldedNode={<div data-more-content>MORE CONTENT</div>} />);
+  has(wideHtml, 'data-build-cols="2"');
+  const left = wideHtml.indexOf('data-build-col="order"'), right = wideHtml.indexOf('data-build-col="chart"');
+  if (!(left > 0 && right > left)) throw new Error("the order column comes first, the chart column second");
+  for (const m of ["data-build-legs", "data-build-order", "data-build-exits", "data-build-send"]) {
+    const at = wideHtml.indexOf(m); if (!(at > left && at < right)) throw new Error(`${m} is in the order column`);
+  }
+  for (const m of ["What this trade does", "The numbers", "data-why-trade", "ASK THE COPILOT ABOUT THIS TRADE"]) {
+    const at = wideHtml.indexOf(m); if (!(at > right)) throw new Error(`${m} is in the chart column`);
+  }
+  if (!(wideHtml.indexOf("More on this trade") > wideHtml.lastIndexOf("ASK THE COPILOT ABOUT THIS TRADE"))) throw new Error("More is under both columns");
+  hasNot(html, "data-build-cols", "a phone keeps one column");
+});
+
 check("THE ORDER OF THE SCREEN: header, title, what it does, numbers, why, copilot, legs, order, exit plan, Send, More", () => {
   const marks = ["data-build-header", "Bull Put Spread", "What this trade does", "The numbers", "data-why-trade", "ASK THE COPILOT ABOUT THIS TRADE",
     "data-build-legs", "data-build-order", "data-build-exits", "data-build-send", "More on this trade"];

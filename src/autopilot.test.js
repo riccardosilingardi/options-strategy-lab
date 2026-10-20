@@ -474,8 +474,11 @@ test("THE SIMULATOR IS RUN AT THE EXIT RULE, AND THE POLICY COMES FROM ITS HOME"
   // `exitSim` held its own copies (0.5, 0.5 and 7) and `RULES.exitDTE` is 21.
   assert.ok(/const EXIT_POLICY = \{ exitDTE: RULES\.exitDTE, stopLossPct: RULES\.stopLossPct \}/
     .test(AUTOPILOT_CODE), "the policy is read from RULES, in one place");
-  assert.ok(/exitSim\(pos, spot, dteLeft, iv, vol, \{ \.\.\.EXIT_POLICY, takeProfit: tpTarget\.perCombo \}\)/.test(AUTOPILOT_CODE),
-    "and handed to the simulator, which has no default for it, with the position's own take-profit target");
+  // PR 72: the position's own exit plan (`exitPlanOf()`: the RULES defaults for a position opened before it) overrides
+  // the time exit and the stop; the take-profit target is the plan's too.
+  assert.ok(/exitSim\(pos, spot, dteLeft, iv, vol, \{ \.\.\.EXIT_POLICY, exitDTE: plan\.exitDTE, stopLossPct: plan\.stopLossPct, takeProfit: tpTarget\.perCombo \}\)/.test(AUTOPILOT_CODE),
+    "and handed to the simulator, which has no default for it, with the position's own plan and take-profit target");
+  assert.ok(/const plan = exitPlanOf\(pos\);/.test(AUTOPILOT_CODE), "the plan is the position's, from its one reader");
 });
 
 test("THE FIELD NAMES CLAIM THE HORIZON THE BLOCK WAS COMPUTED AT", () => {

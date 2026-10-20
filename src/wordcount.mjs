@@ -332,6 +332,15 @@ export const COPY = {
   orderBookLine: () => R.orderBookLine({ mid: 0.25, natural: 0.15 }),
   capLabel: () => R.capLabel({ perTrade: 500, tradingCapital: 10000 }),
   exitsPill: () => R.exitsPill("CORN"),
+  // PR 72: the replay's suggestion line, in the pill's place (they never show together; both are scored, an upper bound).
+  exitSuggestionLine: () => R.exitSuggestionLine({ from: "replay", n: 107, ticker: "CORN", takeProfitPct: 0.5, exitDTE: 21 }),
+  // PR 72: the exposure line above Send (only past the limit), the chances' price inside "the two chances ⓘ", the price
+  // history's error with Retry, the feed beside the prices' age, the tray's two chances. Each scored: an upper bound.
+  exposureLine: () => R.exposureLine({ after: 5200, total: 5000, tradingCapital: 20000, answered: true }),
+  chanceAtPriceLine: () => R.chanceAtPriceLine(-3.95, [394.95]),
+  barsNotLoadedText: () => R.barsNotLoadedText({ network: true }),
+  feedLine: () => C.feedLine({ source: C.SOURCE.alpacaIndicative }),
+  trayChanceLines: () => R.trayChanceLines(0.74, 0.71).join(" "),
   sendLabel: () => R.sendLabel({ net: -0.25, n: 1 }),
   timeExitDay: () => R.timeExitDay("2026-11-20"),
   expiryShort: () => R.expiryShort("2026-11-20"),

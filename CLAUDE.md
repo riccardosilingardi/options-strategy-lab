@@ -62,6 +62,25 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
 - A closed market is one line, `marketClockLine()` (src/clock.js), from Alpaca's `/v2/clock`; an unread clock is not closed.
 - Red is for errors and refusals only. CLOSE, Send and the Positions badge use `T.action`; Cancel is the red outline.
 - A take-profit target is `takeProfitTarget()` in `rules.js`, never `takeProfitPct * maxProfit` at a site.
+- **The exit plan is per trade (PR 72): `exitPlanOf(pos)` (rules.js) is its one reader** — the position's frozen
+  `exitPlan` { takeProfitPct, exitDTE, stopLossPct, source, suggestedFrom }, else the RULES defaults (a position opened
+  before PR 72). `takeProfitTarget()`, `stopWarningLevel()`, `ruleExitOf()`, `positionAction()`, `autopilotVerdict()`,
+  `timeExitDay()`, `exitReplayPolicy()`, `exitCurve()`/`exitMark()` and the labels take `plan` (or its value); never read
+  `RULES.exitDTE` / `stopLossPct` / `takeProfitPct` for a position or for Build. Build edits `buildPlan` in place within
+  `exitPlanBounds()` (`stepExitPlan()`; the time exit never at or past the expiry, `entryRoom()`); Send freezes it
+  (`commitPosition({ exitPlan })`); the Journal entry keeps it. The suggestion is `exitSuggestionOf()` over
+  `exitPlanVariants()` replayed on the replay's button only, kept per market and `structureFamily()` in
+  `store.exitSuggestions` (local, never on /api/state). riskGate.js does not read the plan (its stop warning stays 50%).
+- **Against the signals is `againstOnPlan()` (signals.js, PR 72)** on `payoffNeed()` of the payoff valued on the plan's exit
+  day (`planNeed` in App.jsx): a direction → `againstSignal()`; a zone around today's price → against only when
+  `signalDirection()` reads Bull/Bear and one expected move that way to the exit day leaves the zone; a move either way →
+  never. `tradeDir` is that direction (the net delta only when no payoff can be read).
+- **A contract is named twice (PR 72): `ibkrName()` (rules.js, "SLV Nov27'26 49.5 Put") and the OCC symbol read from the
+  chain (`bookQuotes[i].occ`) or the broker (`heldSymbolFor()`, closeOrder.js)**, drawn by the `ContractName` atom (ui.jsx:
+  small mono, Copy); no symbol is "the chain did not list" (`OCC_NOT_LISTED`), never `buildOcc()`. The feed beside the
+  prices' age is `feedLine()` / `FEED_INFO` (chain.js).
+- **The exposure line above Send is `exposureLine()` (rules.js, PR 72)**, from the gate's own `limits` (totalAfter, or
+  openRisk when the trade is already sent), shown only past `limits.total`, cap on or off; it never blocks.
 - A card and Build read one price: `fillNet()`. `listCardFigures()` and `buildFigures()` are the
   two paths and `figures.test.jsx` holds them equal; the card's figures are for the size the
   budget buys, from `sizedFigures()` and `sizeLine()`, read at `aFill` (Find) and `AE` (Build), held
@@ -104,7 +123,13 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
 - **On a computer (redesign PR 3b, owner, 6 Oct 2026): `useWide()` in ui.jsx** (a window ≥ `WIDE_MIN` 1024px). The bottom bar
   is a left sidebar (`BottomBar rail`, `RAIL_W`), Find's rows sit beside the market page (`paneFind`) and Positions' cards beside
   a position's screen (`panePos`) — on a phone their wrappers are `display: contents`, so nothing moves; the Journal is two
-  columns (`wide`); Build and Settings keep 760px. Below 1024px nothing here applies; the boards are the phone's.
+  columns (`wide`); Settings keeps 760px. Below 1024px nothing here applies; the boards are the phone's.
+  **Responsive since PR 73 (owner, 19 Oct 2026):** Find's list is a fixed 420px (`PANES_FIND`), its chips wrap (`FindStep
+  wide`); the market page is `docked` (its Chain tray and compare line sticky at the pane's foot, `barOuter()`); Build is
+  two columns (`v.wide` → `data-build-cols="2"`: legs, order, exit plan, Send | chart, numbers, why, copilot, variants,
+  Optimize; More under both; up to 1440px); Positions is a table (`PANES_POS`, `PositionsTable`, the card's `row` prop →
+  `PositionRow`, columns from its own width via `useBoxWidth()` in ui.jsx, full from `TABLE_FULL_MIN`). Nothing may scroll
+  sideways on a computer: `node scripts/audit-computer.mjs` (1280×800, 1024×768, 1440×900) exits 1 if anything does.
 - **The mockups' look (round 2) lives in ui.jsx's atoms**: `IconButton`, `SegmentBar` (Results | Saved, the chain's modes),
   `UnderTabs` (Find's categories, the market's tabs), `FilterChip` (Find's chips, the sheets' choices; ink when off its
   default, never amber), `TextBtn`, and `Sheet` (scrim, grab handle, the value beside the title). Two theme tokens joined in
@@ -371,7 +396,10 @@ off the published production deploy (`deployWrites()`, rule 6).
 All in `RULES`, `src/rules.js`, unless noted.
 
 - Exits: `takeProfitPct` 0.5, `singleTakeProfitPctOfPremium` 0.5 (a single long option; read only through
-  `takeProfitTarget()`), `stopLossPct` 0.5 (warning only), `exitDTE` 21, `scaleOutPct` 0.75.
+  `takeProfitTarget()`), `stopLossPct` 0.5 (warning only), `exitDTE` 21, `scaleOutPct` 0.75 — since PR 72 the defaults a
+  trade's plan is suggested from. The plan's bounds: `exitPlanTakeProfitMin` 0.25 / `Max` 0.9, `exitPlanDTEMin` 7 / `Max` 45,
+  `exitPlanStopMin` 0.25 / `Max` 1 (owner), `exitPlanPctStep` 0.05; the replay's grid `exitPlanReplayTakeProfits` [0.25,
+  0.5, 0.75] × `exitPlanReplayExitDays` [14, 21, 30] (chosen).
 - Entry: `minEntryDTE` 30, `targetEntryDTE` 45, `maxEntryDTE` 90.
 - Sizing: `bestPracticePerTradePct` 0.05, `totalExposurePct` 0.25, `suggestedTradingCapital`.
 - Price exists: `minNetPremium` 0.05 (`MIN_NET_DOLLARS` = $5 a contract).
@@ -442,6 +470,12 @@ All in `RULES`, `src/rules.js`, unless noted.
   rest and after the tap, the Journal's "Which chance came true") on the `+book` fixture, in their empty states
   (docs/screens/pr68/). `node scripts/measure-exits.mjs <dir> [month]` answers P5 per market and family from the owner's saved
   `/api/bars?sym=<TICKER>&days=1900` replies (`<TICKER>.json`); with none it says so and prints no number.
+- `node scripts/audit-computer.mjs [1280x800,…]` checks the computer's layout on the whole app on fixtures: nothing scrolls
+  sideways (the page or inside it), the chips wrap, the tray sits in its pane, Build is two columns, Positions a table;
+  exits 1 on a miss. `node scripts/shoot-pr73.mjs [dir]` photographs those screens at 1024, 1100, 1280 and 1440px and the
+  phone's (docs/screens/pr73/before and after).
+- `node scripts/shoot-pr72.mjs [dir]` photographs PR 72's screens (the Exit plan at rest and edited, the legs named twice,
+  the review's legs, the exposure line on `+poor`, the market's feed line, the tray's two chances) (docs/screens/pr72/).
 - `node scripts/shoot-pr71.mjs [dir]` photographs the Journal's line under its title, saved on the server and (with the
   harness's `+offline` flag: `/api/state` refused) only on this device, dark and light (docs/screens/pr71/).
 - `node scripts/measure-season.mjs` (months that count, on avFixture series), `node scripts/measure-signals.mjs`

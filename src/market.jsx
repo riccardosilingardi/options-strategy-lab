@@ -54,7 +54,7 @@ import { RULES, money, chanceText, expiryWords, sizedFree, sizedFigures, sizeLin
   signalsParts, strategiesNote, MARKET_READ_LINK, BACK_TO_FIND_ARIA, refreshMarketAria, stanceText, futurePastDisagree, needsText,
   OPEN_IN_CHAIN, BUILD_CTA, COMPARE_TICK, MARKET_READ_HEAD, HOW_WORKED_OUT_LINK, MARKET_READ_END, CHAIN_MODES, marketNewsHead, marketNewsAsk, marketReadAsk, marketReadHead,
   noOpenInterestText, underEntryText, THIN, spotLineText, legsMaxText, TRAY_LABELS, uncoveredText, trayEmptyText,
-  chainEventText, eventLineText, eventInfoText, dateOnlyWhen, inDaysText, holidayWeekNote, eventsBeforeLabel, CHAIN_HEAD,
+  chainEventText, eventLineText, eventInfoText, dateOnlyWhen, inDaysText, holidayWeekNote, eventsBeforeLabel, CHAIN_HEAD, trayChanceLines,
   chainNotLoadedText, marketReadingText, noCardsText, ARIA, readScoreLine, compareTrayLine, SEE_THEM, cardDetailRows, costsFor,
   viewOfDir, viewChoiceLabel, viewTargetPrice, chainQuotedLegs, TRAY_UNLISTED, trayReplaceHint, trayReplacedText,
 } from "./rules.js";
@@ -74,7 +74,7 @@ export const SECTION_HEAD = { ...sans, margin: 0, fontSize: FS.xs, fontWeight: F
 
 export function MarketPage({
   tk, tab = "strategies", onTab, onBack, onTicker, onRefresh = null, busy = false,
-  chain = null, freshLine = null, bars = NO_BARS, clock = null, clockLine = null, ivRank = null, ivDays = 0,
+  chain = null, freshLine = null, feed = null, bars = NO_BARS, clock = null, clockLine = null, ivRank = null, ivDays = 0,
   board = null, fused = null, readingState = null, items = [], allItems = [], boards = {},
   request, freeSizing = false, findDir = "signals", findTarget = null, sentiments = [], findOrder = "ev",
   newsItems = [], newsState = null, ago = (d) => String(d), exits = [], timeZone,
@@ -82,6 +82,8 @@ export function MarketPage({
   onBuildLegs = () => {}, cardFigures = null, quoteOf = () => null, seasonal = null, matrix = null, liqFloor = 0,
   badgeOf = () => null, onMore = null, whyProps = {}, onAnalysis = () => {}, copilot = null,
   sheet = null, onSheet = () => {}, compareProps = {}, now = Date.now(), initialTray = null,
+  // PR 73: on a computer the page is a pane beside Find's list; its tray and compare line dock at the pane's foot.
+  docked = false,
 }) {
   const u = getU(tk);
   const spot = chain && chain.spot ? chain.spot : null;
@@ -107,7 +109,7 @@ export function MarketPage({
 
   return (
     <div data-market style={{ maxWidth: 1100 }}>
-      <MarketHeader tk={tk} u={u} spot={spot} freshLine={freshLine} bars={bars} clockLine={clockLine} atm={atm}
+      <MarketHeader tk={tk} u={u} spot={spot} freshLine={freshLine} feed={feed} bars={bars} clockLine={clockLine} atm={atm}
         ivRank={ivRank} ivDays={ivDays} board={board} now={now} onBack={onBack} onRefresh={onRefresh} busy={busy}
         news={latestNews(tk, newsItems, newsState)} newsItems={newsItems} ago={ago} first={first} saved={first ? isSaved(first.cand) : false}
         onSave={() => first && onSave(first)} onTickerSheet={() => onSheet("market:tickers")}
@@ -127,13 +129,13 @@ export function MarketPage({
       )}
       {tab === "chain" && (
         <ChainTab tk={tk} chain={chain} clock={clock} tray={tray} setTray={setTray} cardFigures={cardFigures} quoteOf={quoteOf}
-          seasonal={seasonal} matrix={matrix} iv={u.iv} liqFloor={liqFloor} onBuildLegs={onBuildLegs} />
+          seasonal={seasonal} matrix={matrix} iv={u.iv} liqFloor={liqFloor} onBuildLegs={onBuildLegs} docked={docked} />
       )}
 
       {/* ONE COMPARE (PR 61): right after a tick, how many are ticked and the way to the one Compare sheet. Fixed above the
           bottom bar, so it is on screen where the tap was; the Chain tab has its own tray there. */}
       {tab !== "chain" && (compareProps.compare || []).length > 0 && (
-        <CompareLine n={compareProps.compare.length} note={compareProps.note || null} onOpen={compareProps.onOpen} />
+        <CompareLine n={compareProps.compare.length} note={compareProps.note || null} onOpen={compareProps.onOpen} docked={docked} />
       )}
 
       {/* THE MARKETS, BY CATEGORY: the same rows as Find, the current one marked. Picking one keeps the tab. */}
@@ -159,13 +161,18 @@ export function MarketPage({
 }
 
 /** "2 of 3 to compare · See them ›" (PR 61), and the refusal of a fourth when there is one. */
-export function CompareLine({ n, note = null, onOpen }) {
+/* ON A PHONE, A BAR FIXED ABOVE THE BOTTOM BAR; ON A COMPUTER (PR 73), DOCKED AT THE FOOT OF THE MARKET'S OWN PANE — the
+   pane scrolls on its own beside Find's list, so a bar fixed to the window sat over the list. */
+const barOuter = (docked) => (docked
+  ? { position: "sticky", bottom: 0, zIndex: 5, display: "flex", justifyContent: "center", pointerEvents: "none", marginTop: 8 }
+  : { position: "fixed", left: 0, right: 0, zIndex: 55, display: "flex", justifyContent: "center", pointerEvents: "none",
+    bottom: `calc(${BADGE_H + NAV_BAR_H}px + env(safe-area-inset-bottom, 0px))` });
+export function CompareLine({ n, note = null, onOpen, docked = false }) {
   return (
     <>
-      <div aria-hidden="true" style={{ height: note ? 88 : 56 }} />
-      <div data-compare-line style={{ position: "fixed", left: 0, right: 0, zIndex: 55, display: "flex", justifyContent: "center", pointerEvents: "none",
-        bottom: `calc(${BADGE_H + NAV_BAR_H}px + env(safe-area-inset-bottom, 0px))` }}>
-        <div role="status" style={{ pointerEvents: "auto", width: "100%", maxWidth: 640, boxSizing: "border-box", background: T.panel,
+      {!docked && <div aria-hidden="true" style={{ height: note ? 88 : 56 }} />}
+      <div data-compare-line style={barOuter(docked)}>
+        <div role="status" style={{ pointerEvents: "auto", width: "100%", maxWidth: docked ? "none" : 640, boxSizing: "border-box", background: T.panel,
           borderTop: `1px solid ${T.field}`, boxShadow: "0 -6px 18px rgba(0,0,0,0.22)", padding: "4px 8px 4px 16px", display: "flex", flexDirection: "column" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ ...sans, flex: 1, fontSize: FS.sm, color: T.ink }}>{compareTrayLine(n, MAX_COMPARE)}</span>
@@ -179,7 +186,7 @@ export function CompareLine({ n, note = null, onOpen }) {
 }
 
 /* ---------------------------------------------------------------- THE HEADER */
-function MarketHeader({ tk, u, spot, freshLine, bars, clockLine, atm, ivRank, ivDays, board, now, news, newsItems, ago, first,
+function MarketHeader({ tk, u, spot, freshLine, feed = null, bars, clockLine, atm, ivRank, ivDays, board, now, news, newsItems, ago, first,
   saved, onSave, onTickerSheet, eventNode, onBack, onRefresh, busy }) {
   const [def, setDef] = useState(null);
   const ch = dayChange(bars, spot, now);
@@ -238,7 +245,11 @@ function MarketHeader({ tk, u, spot, freshLine, bars, clockLine, atm, ivRank, iv
           ))}
         </div>
       </div>
-      <div style={{ ...sans, fontSize: FS.xs, color: T.mut, lineHeight: LH.body, padding: "0 16px 8px", marginTop: -6 }}>{[freshLine, clockLine].filter(Boolean).join(" · ")}</div>
+      <div style={{ ...sans, fontSize: FS.xs, color: T.mut, lineHeight: LH.body, padding: "0 16px 8px", marginTop: -6 }}>
+        {[freshLine, clockLine].filter(Boolean).join(" · ")}
+        {/* PR 72 (task 72.4): which feed the prices are, beside their age, with one ⓘ. */}
+        {feed && feed.line && <span data-feed-line>{freshLine || clockLine ? " · " : ""}<Info label={feed.line}>{feed.info}</Info></span>}
+      </div>
       {def && <div role="note" style={{ ...sans, fontSize: FS.xs, color: T.body, lineHeight: LH.body, padding: "0 16px 8px" }}>{HEADER_DEFINITIONS[def]}</div>}
       {eventNode}
       {/* THE NEWS LINE: one line; a tap opens the headline. */}
@@ -487,7 +498,7 @@ export const trayLegQuoted = (board, l) => {
   const q = board && l ? (board[l.type === "call" ? "calls" : "puts"] || {})[l.strike] : null;
   return chainQuotedLegs({ legs: [l], quotes: [q ? { bid: q.bid, ask: q.ask, real: q.mid != null } : null] }).unquoted.length === 0;
 };
-export function ChainTab({ tk, chain, clock, tray, setTray, cardFigures, quoteOf, seasonal, matrix, iv, liqFloor, onBuildLegs }) {
+export function ChainTab({ tk, chain, clock, tray, setTray, cardFigures, quoteOf, seasonal, matrix, iv, liqFloor, onBuildLegs, docked = false }) {
   const [mode, setMode] = useState("price");
   if (!chain || !chain.spot || !chain.expirations || !chain.expirations.length) return <Note style={{ padding: "10px 16px" }}>{chainNotLoadedText(tk)}</Note>;
   const oi = hasOpenInterest(chain);
@@ -595,7 +606,7 @@ export function ChainTab({ tk, chain, clock, tray, setTray, cardFigures, quoteOf
         })}
       </div>
       <ChainTray tk={tk} chain={chain} ek={ek} legs={legs} note={tray ? tray.note : null} cardFigures={cardFigures} quoted={quoted}
-        quoteOf={quoteOf} seasonal={seasonal} matrix={matrix} iv={iv} onClear={() => setTray({ expKey: ek, legs: [], note: null })}
+        quoteOf={quoteOf} seasonal={seasonal} matrix={matrix} iv={iv} docked={docked} onClear={() => setTray({ expKey: ek, legs: [], note: null })}
         onBuild={() => onBuildLegs({ ticker: tk, expKey: ek, legs, name: structureName(legs) })} />
     </div>
   );
@@ -604,7 +615,7 @@ export function ChainTab({ tk, chain, clock, tray, setTray, cardFigures, quoteOf
 /** The tray, FIXED above the bottom bar while the chain scrolls (round 2): the structure's name, the legs as chips, and
  *  Debit or Credit · Max profit · Max loss · Chance — through `listCardFigures()`, the function every card reads. Build is
  *  blocked, with the reason, on an uncovered short. */
-function ChainTray({ tk, chain, ek, legs, note, cardFigures, quoteOf, seasonal, matrix, iv, onClear, onBuild, quoted = () => true }) {
+function ChainTray({ tk, chain, ek, legs, note, cardFigures, quoteOf, seasonal, matrix, iv, onClear, onBuild, quoted = () => true, docked = false }) {
   const e = chain.byExp[ek];
   const lf = useMemo(() => (legs.length && cardFigures && e
     ? cardFigures(legs, { spot: chain.spot, dte: e.dte, iv, q: quoteOf(chain, ek), ticker: tk, expKey: ek, seasonal, matrix })
@@ -618,12 +629,12 @@ function ChainTray({ tk, chain, ek, legs, note, cardFigures, quoteOf, seasonal, 
     [entry == null ? TRAY_LABELS.debit : entry >= 0 ? TRAY_LABELS.debit : TRAY_LABELS.credit, entry == null ? "—" : money(Math.abs(entry) * 100)],
     [TRAY_LABELS.maxProfit, af ? (af.profitUnbounded ? TRAY_LABELS.noCap : af.maxProfit == null ? "—" : money(af.maxProfit)) : "—"],
     [TRAY_LABELS.maxLoss, af && af.maxLoss != null && !naked.length ? money(Math.abs(af.maxLoss)) : "—"],
-    [TRAY_LABELS.chance, chanceText(lf ? lf.pop : null)],
+    // PR 72 (task 72.5): which chance — the OSL model's and the market's, both named.
+    [TRAY_LABELS.chance, trayChanceLines(lf ? lf.pop : null, lf && lf.mkt && lf.mkt.pop != null ? lf.mkt.pop : null)],
   ];
   return (
-    <div data-chain-tray style={{ position: "fixed", left: 0, right: 0, zIndex: 55,
-      bottom: `calc(${BADGE_H + NAV_BAR_H}px + env(safe-area-inset-bottom, 0px))`, display: "flex", justifyContent: "center", pointerEvents: "none" }}>
-      <div style={{ pointerEvents: "auto", width: "100%", maxWidth: 640, boxSizing: "border-box", background: T.panel, borderTop: `1px solid ${T.field}`,
+    <div data-chain-tray={docked ? "docked" : ""} style={barOuter(docked)}>
+      <div style={{ pointerEvents: "auto", width: "100%", maxWidth: docked ? "none" : 640, boxSizing: "border-box", background: T.panel, borderTop: `1px solid ${T.field}`,
         boxShadow: "0 -6px 18px rgba(0,0,0,0.22)", padding: "10px 16px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
         {/* Empty, the tray holds its two buttons only: the hint line above the chain says what to tap. */}
         {legs.length > 0 && (
@@ -643,7 +654,10 @@ function ChainTray({ tk, chain, ek, legs, note, cardFigures, quoteOf, seasonal, 
               {figs.map(([k, v]) => (
                 <div key={k} style={{ minWidth: 0 }}>
                   <dt style={{ ...sans, fontSize: FS.xs, color: T.mut }}>{k}</dt>
-                  <dd style={{ ...mono, ...tnum, fontSize: FS.md, fontWeight: FW.bold, color: T.ink, whiteSpace: "nowrap", margin: 0 }}>{v}</dd>
+                  <dd style={{ ...mono, ...tnum, fontSize: FS.md, fontWeight: FW.bold, color: T.ink, whiteSpace: "nowrap", margin: 0 }}>
+                    {/* PR 72: the chance cell is two lines, the model's and the market's, each named. */}
+                    {Array.isArray(v) ? v.map((x, i) => <span key={i} data-tray-chance={i ? "mkt" : "model"} style={{ display: "block", fontSize: i ? FS.sm : FS.md }}>{x}</span>) : v}
+                  </dd>
                 </div>
               ))}
             </dl>

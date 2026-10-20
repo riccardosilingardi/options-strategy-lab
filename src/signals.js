@@ -936,6 +936,49 @@ export function againstSignal(fused, dir) {
 
 
 /**
+ * AGAINST THE SIGNALS, ON THE TRADE'S OWN PLAN (PR 72, owner 19 Oct 2026). `need` is `payoffNeed()` of the payoff valued
+ * on the plan's exit day (App.jsx; the expiry payoff when that cannot be read), with `at` saying which.
+ *   a direction (up, down, or a zone today's price has to move to) → `againstSignal()` as before, on that direction;
+ *   a zone around today's price (a condor, a butterfly, a short strangle inside its wings) → against ONLY when "Signals
+ *     decide" reads Bull or Bear (`signalDirection()`, Find's rule) AND one expected move that way by the exit day (`move`,
+ *     dollars) takes today's price out of the zone; the numbers ride on the answer for the reason prompt;
+ *   paying on a move either way (a long strangle) → never against;
+ *   no need at all → the net delta's direction (`dirFallback`), as before PR 72.
+ * Null when not against. Never blocks: the caller asks for a written reason and stores it with the position.
+ */
+export function againstOnPlan(fused, need, { dirFallback = 0, spot = null, move = null, exitDay = null, ticker = null } = {}) {
+  if (!fused) return null;
+  if (!need) return againstSignal(fused, dirFallback);
+  const dir = need.need === "up" ? 1 : need.need === "down" ? -1 : need.need === "between" && need.lean ? (need.lean === "up" ? 1 : -1) : 0;
+  if (dir) return againstSignal(fused, dir);
+  if (need.need !== "between") return null;
+  const sd = signalDirection(fused);
+  if (!sd || sd.dir === "neutral") return null;
+  const S = Number(spot), M = Number(move), lo = Number(need.lo), hi = Number(need.hi);
+  if (![S, M, lo, hi].every(Number.isFinite) || !(S > 0) || !(M > 0)) return null;
+  const sgn = sd.dir === "bull" ? 1 : -1;
+  const to = S + sgn * M;
+  if (sgn > 0 ? to <= hi : to >= lo) return null;
+  // The factors that push the way the signals call: the trade, which needs the price to stay, is against them.
+  const { keys, opposing, supporting } = factorCount(fused, -sgn);
+  const $ = (x) => `$${Number(x).toFixed(2)}`;
+  const when = need.at === "exit" ? `by the exit day${exitDay ? `, ${exitDay}` : ""}` : "by expiry";
+  const name = fused.ticker || ticker || "The market";
+  return {
+    dir: 0, neutral: true,
+    n: opposing.length, total: keys.length,
+    opposing: opposing.map((k) => ({ key: k, label: LABEL[k], strength: fused.components[k].strength, why: fused.components[k].why })),
+    supporting: supporting.map((k) => LABEL[k]),
+    score: fused.score, confidence: fused.confidence, agreement: fused.agreement,
+    signal: sd.dir, s: sd.s, move: M, to, lo, hi, at: need.at || null,
+    question: `The signals call for a move past this trade's profit zone. Why take it?`,
+    detail: `${name} reads ${sd.dir === "bull" ? "Bull" : "Bear"} (score × confidence ÷ 100 = ${num2(sd.s)}), and one expected move ` +
+      `${sgn > 0 ? "up" : "down"} ${when} (${$(M)}) takes it from ${$(S)} to ${$(to)}, ${sgn > 0 ? "above" : "below"} the zone where this ` +
+      `trade is in profit then (${$(lo)}–${$(hi)})`,
+  };
+}
+
+/**
  * WHERE A CARD STANDS AGAINST ITS MARKET'S SIGNALS (redesign PR 1), beside `againstSignal()` and on its counting.
  *   dir 0 (a range structure)                          → { kind: "neutral" }
  *   |score| under AGAINST_MIN_SCORE (the noise floor)   → { kind: "quiet", floor }

@@ -332,6 +332,29 @@ check("ONE COMPARE (PR 61): tick on the market page → '1 of 3 to compare · Se
     onSheet={() => {}} compare={ticked} compareFitting={0} copilot={{ convo: null, setConvo: () => {} }} />), "data-find-compare");
 });
 
+/* PR 73 (owner, 19 Oct 2026): ON A COMPUTER the chips wrap onto a second line and the market page's tray docks at the foot
+   of its own pane; a phone keeps the sideways chip row and the tray fixed above the bottom bar. */
+check("PR 73 — ON A COMPUTER FIND'S CHIPS WRAP (no sideways scroll); a phone keeps its one scrolling row", () => {
+  const wideHtml = renderToStaticMarkup(
+    <FindStep wide request={requestOf({}, LIMITS)} onRequest={() => {}} sentiments={SENTS} find={FIND} setFind={() => {}} limits={LIMITS} onLimit={() => {}}
+      freeSizing={false} findGen={GEN} findShown={SORTED} findOrder="ev" onFindOrder={() => {}} readiness={{}} liqLevel={LEVEL} liqState={LIQ}
+      sheet={null} onSheet={() => {}} compare={[]} />);
+  const row = wideHtml.slice(wideHtml.indexOf("data-chip-row"), wideHtml.indexOf(">", wideHtml.indexOf("data-chip-row")));
+  has(row, 'data-chip-row="wrap"'); has(row, "flex-wrap:wrap"); hasNot(row, "overflow-x");
+  const phone = find();
+  const prow = phone.slice(phone.indexOf("data-chip-row"), phone.indexOf(">", phone.indexOf("data-chip-row")));
+  has(prow, "overflow-x:auto"); hasNot(prow, "flex-wrap:wrap");
+});
+check("PR 73 — ON A COMPUTER THE CHAIN'S TRAY DOCKS IN ITS PANE (sticky at the pane's foot); a phone's stays fixed above the bar", () => {
+  const legs = UNG[0].legs.map((l) => ({ ...l }));
+  const at = (docked) => renderToStaticMarkup(<ChainTab tk="UNG" chain={CHAIN} clock={{ is_open: false }} tray={{ expKey: UNG[0].expKey, legs, note: null }}
+    setTray={() => {}} cardFigures={listCardFigures} quoteOf={QUOTE} iv={0.48} liqFloor={10} onBuildLegs={() => {}} docked={docked} />);
+  const d = at(true), p = at(false);
+  const tray = (h) => h.slice(h.indexOf("data-chain-tray"), h.indexOf(">", h.indexOf("data-chain-tray")));
+  has(tray(d), 'data-chain-tray="docked"'); has(tray(d), "position:sticky"); hasNot(tray(d), "position:fixed");
+  has(tray(p), "position:fixed");
+});
+
 console.log(`\n${ok.length} passed, ${bad.length} failed\n`);
 for (const [n, m] of bad) console.error(`FAILED: ${n}\n  ${m}`);
 if (bad.length) process.exit(1);

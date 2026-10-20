@@ -172,7 +172,9 @@ const ATOMS = ["Btn", "Panel", "Lbl", "Label", "Stat", "Chip", "Fold", "RangeFie
   // Redesign PR 1: the bottom sheet and the placeholder are atoms too.
   "Sheet", "Placeholder",
   // Round 2: the mockups' atoms.
-  "IconButton", "SegmentBar", "UnderTabs", "FilterChip", "TextBtn"];
+  "IconButton", "SegmentBar", "UnderTabs", "FilterChip", "TextBtn",
+  // PR 72: a contract named twice (IBKR's name, the OCC symbol with Copy).
+  "ContractName"];
 
 /** What a migrated file may not contain, as findings (so the sweep itself can be shown to fail). */
 function offences(src, { isHome }) {

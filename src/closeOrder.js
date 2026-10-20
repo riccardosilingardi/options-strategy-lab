@@ -101,6 +101,23 @@ export function legsNotHeld(record, alSync = null) {
 }
 
 /**
+ * THE BROKER'S OWN SYMBOL FOR ONE LEG OF A RECORD (PR 72, task 72.4): the OCC symbol of the holding Alpaca lists for the
+ * same underlying, expiry, type, strike and side — read, never formatted. Null when the last sync holds no such leg.
+ */
+export function heldSymbolFor(record, leg, alSync = null) {
+  if (!record || !leg || !alSync || !Array.isArray(alSync.positions)) return null;
+  for (const x of alSync.positions) {
+    const m = OCC_RE.exec(String(x?.symbol || ""));
+    const h = holdingLeg(x);
+    if (!m || !h) continue;
+    const exp = `20${m[2].slice(0, 2)}-${m[2].slice(2, 4)}-${m[2].slice(4, 6)}`;
+    if (m[1] === record.ticker && exp === record.expKey && h.type === leg.type && Math.abs(h.strike - Number(leg.strike)) < 1e-6
+      && h.side === Math.sign(+leg.side || 1)) return String(x.symbol);
+  }
+  return null;
+}
+
+/**
  * IS A CLOSE ALREADY WORKING FOR THIS RECORD? Only the broker can say.
  * Working while the broker still lists the close order as open — or while it
  * has not been asked since the order was sent. Once the order is gone from the

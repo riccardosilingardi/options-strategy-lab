@@ -6,6 +6,119 @@ The full history of every item shipped so far (P0–P10, P2-bis) is in `docs/his
 Every pull request updates this file: the session that ships an item marks it done and states
 what the next one inherits.
 
+## Carry-over (20 Oct 2026): PRs 72 and 73 reach `main`
+
+No code of its own. PR 71 merged into `main`; PRs 72 and 73 merged into the branches they were stacked on, not into
+`main` (as PRs 62 and 63 did, carried by #64). This carry-over merges PR 73's branch, which holds both, into `main`: the
+files are identical to PR 73's head (`da7c734`). It takes a GitHub number of its own; the next items keep the names the
+owner gave them (PR 74, 75, 76 below).
+
+**What the next session inherits:** a stacked PR merges into the branch it is stacked on. After the PR under it merges,
+retarget it to `main` (Edit beside its title) before merging it; GitHub does that by itself only when the merged branch
+is deleted.
+
+## Done in PR 73 (owner, 19 Oct 2026): the app on a computer, responsive
+
+The third of three stacked PRs (71 → 72 → 73), stacked on PR 72. The owner, 19 Oct 2026: "horrible on desktop"; asked
+which breakpoint, "I want a responsive layout, is it possible?", then yes to the proposal — the phone unchanged under
+1024px, and from 1024px columns that widen and narrow with the window; Find's market page opens on Strategies, as today.
+
+- **Find.** The list keeps one width, 420px (`PANES_FIND`); the market page takes the rest. The chips wrap onto a second line
+  (`FindStep wide`) — they scrolled sideways inside a 420px pane. The Chain tab fits its column (strike centred, Delta · IV
+  and OI · Vol the toggles they were); **its tray and the compare line dock at the foot of the market's own pane**
+  (`MarketPage docked`, `barOuter()`): fixed to the window, the tray sat over Find's list.
+- **Build: two columns** (`v.wide` → `data-build-cols="2"`, `minmax(340px, 1fr) minmax(440px, 1.35fr)`, up to 1440px wide):
+  the legs, the order, the exit plan and Send on the left; the chart, the numbers, why, the copilot, the variants and
+  Optimize on the right; "More on this trade" under both. The same sections with the same props; a phone keeps one column
+  in the mockup's order. The chart measures its own width, so it widens with its column.
+- **Positions: a table** beside the position's own screen (`PANES_POS`: the table the larger share, the screen 400px):
+  status · position · profit now · exits · the action, one row per holding, from the card's own props (`PositionCard row`
+  → `PositionRow`, positionCard.jsx); the open position's row is marked. Its columns follow its pane (`useBoxWidth()`): from
+  `TABLE_FULL_MIN` (724px) the full five, narrower the exits and the action under the position — never a sideways scroll.
+  The filing form sits under its row as under its card.
+- **Nothing scrolls sideways on a computer**, checked by `scripts/audit-computer.mjs` (new): at 1280×800, 1024×768 and
+  1440×900 it opens Find with a market, its Chain tray, Build, Positions and a position, and fails on any sideways scroll
+  (the page or inside it) or a missing layout — 36 checks, 0 missed; on the code before this PR it misses 8 of 12 at
+  1280×800 (the chip row, the tray over the list, one column on Build, no table).
+- **Tests.** build.test.jsx (+1: the two columns, each section in its column, More under both, a phone one column),
+  findB.test.jsx (+2: the chips wrap / the phone's row scrolls; the tray docked / fixed), positionCard.test.jsx (+2: the full
+  table and the compact one, the filing form under its row), journalScreen.test.jsx (the panes' source check).
+
+**Measured.** Tests 1,550 → 1,555, 0 failed. Build 1,557.71 → 1,562.92 kB (the usual chunk warning). Audit 20 boards (the
+phone), dark and light: 5,248 ✓, 0 unexplained. The phone's photographs (Find, Build, Positions at 390×844) are
+pixel-identical before and after. Words: positions 248 → 256 — the counter now scores the card's second layout, the table
+row, beside the card (an upper bound; on a phone nothing grew); find, market and build unchanged. Photographs:
+docs/screens/pr73/before and after (`node scripts/shoot-pr73.mjs`), 1024, 1100, 1280 and 1440px and the phone.
+
+**Not changed:** the phone (under 1024px), the sidebar and its 1024px threshold, the Journal's two columns, Settings' 760px,
+every screen's words and figures, the gate, the order paths.
+
+### What the next session inherits
+
+- The computer's layout has been measured in a headless Chromium only (PRD §4 #3), never in a desktop browser with a
+  visible scrollbar; the table falls back to its compact columns a little sooner there.
+- The PR 74 – 76 plan stands (After v1, below), in the owner's order.
+
+## Done in PR 72 (owner, 19 Oct 2026): exit rules per trade, signals on the trade's plan, exposure line, contract names
+
+The second of three stacked PRs (71 → 72 → 73), stacked on PR 71. The plan's open points were the owner's to settle (19 Oct
+2026): the stop's range is 25–100% of the maximum loss (past 100% it could never fire); a neutral trade is against the
+signals only when Find would read Bull or Bear AND one expected move to the exit day leaves its profit zone.
+
+- **72.1 — the exit plan per trade.** `exitPlanOf()` (rules.js) is the one reader of a position's frozen `exitPlan`
+  { takeProfitPct, exitDTE, stopLossPct, source: "suggested" | "edited", suggestedFrom }, the RULES defaults for a position
+  opened before this PR. Every reader takes it: the Positions card and its exits, a position's screen and its Guardian
+  (target, stop rung, simulator), the autopilot (its verdict, `exitSim()`, the facts and the stop sentence it hands the
+  model), the exit date (`exitDateOf()`, the market page's event line), the take-profit target, the stop warning, the
+  chart's exit day and Greeks, More's yearly replay and stats. **Build's Exit plan** edits it in place: a tap on a row opens
+  its − / + (bounds in RULES: take profit 25–90% and stop 25–100% in 5-point steps, time exit 7–45 days, never at or past the
+  expiry through `entryRoom()`), each row tagged Suggested or Edited, "Reset to suggested" while edited. Send freezes it
+  (`commitPosition({ exitPlan })`), with a timeline line saying the plan and, when edited, what was suggested; the Journal
+  entry keeps it. **The suggestion:** "Replay the exit rules ›" (still on its button only) also replays nine variants (take
+  profit 25 / 50 / 75% × time exit 14 / 21 / 30 days), and the best average per $100 on a finished window becomes the
+  market-and-family suggestion for the month (`exitSuggestionOf()`, `structureFamily()`, `store.exitSuggestions`, on the
+  device): "Suggested from the replay: 11 windows on XLE, TP 50% · 21 days"; without it, the defaults and their pill.
+- **72.2 — against the signals, on the plan.** The trade's direction is the payoff valued on the plan's exit day
+  (`planNeed`: `exitCurve()` → `curveZones()` → `payoffNeed()`; `needDirection()`), no longer the net delta. `againstOnPlan()`
+  (signals.js): a direction is judged as before; a zone around today's price only when `signalDirection()` reads Bull or
+  Bear and one expected move that way to the exit day (the chance's volatility) leaves the zone — the reason prompt says so
+  with the numbers; a move either way is never against. Recomputed when the plan's exit moves.
+- **72.3 — the exposure line**, amber above Send, only past the total limit and with the cap on or off: "Open risk after
+  this trade: $653 = 327% of capital (your limit: 25%)" ("suggested" until the capital is answered), from the gate's own
+  limits, never a block (`exposureLine()`).
+- **72.4 — contracts named twice and the feed.** Each leg on Build, in the review sheet and in a position's Alpaca details
+  reads "1 × SLV Nov27'26 49.5 Put" (`ibkrName()`) and under it the chain's own OCC symbol (a position: the broker's,
+  `heldSymbolFor()`) in small mono with Copy (`ContractName`, ui.jsx); no listed symbol is said, never built. Build's leg
+  rows are stacked (name · symbol · prices) so each keeps one line on a phone. The market header names the feed beside the
+  prices' age: "Alpaca indicative prices ⓘ", "Alpaca OPRA real-time" when the deploy reads OPRA (`feedLine()`, `FEED_INFO`).
+- **72.5 — the market chance at the order's price.** Measured in the code: Build already read both chances at the limit in
+  force (`AE`, `effectiveLimit()`), and its ⓘ now says the price and breakeven (`chanceAtPriceLine()`). **The GLD 73% was
+  the tray's OSL MODEL chance** printed under "Chance" — and the tray was handed no board, so it had no market chance at
+  all: it now reads both, "31% model" over "26% mkt" (`trayChanceLines()`, the board's distribution through `trayFigures`),
+  and Find's rows say "model chance". On synthetic boards shaped to the owner's two IBKR readings (src/exitPlan.test.js),
+  OSL at IBKR's price reads 70.0% (GLD) and 63.0% (SLV), and the mid against the natural moves it 0.3 and 0.6 points: the
+  price alone does not explain a 3-point gap. PRD §4 #9 records both readings; the live check stays the owner's.
+- **72.6 — "Failed to fetch".** It is the browser's own words for a request that got no answer at all (a dropped
+  connection), not a reply from `/api/bars`. The chart now asks again twice with a growing wait (`fetchJsonRetry()`,
+  marketView.js), says "The price history did not arrive: the connection dropped before the server answered, three times."
+  with a Retry, and `bars.mjs` gives each upstream source 4 s (`UPSTREAM_MS`) so it always answers in words inside Netlify's
+  limit, naming the sources that gave nothing. The cause on the owner's phone cannot be read from here.
+
+**Measured.** Tests 1,526 → 1,550, 0 failed (src/exitPlan.test.js 20, src/exitPlan.test.jsx 4; five source checks follow
+the plan). Build 1,543.16 → 1,557.71 kB (the usual chunk warning). Audit 20 boards, dark and light: 5,248 ✓, 0 unexplained.
+Words: build 610 → 675, market 493 → 499, find 157 and positions 248 unchanged (voice.test.js says each line). Photographs:
+docs/screens/pr72/ (`node scripts/shoot-pr72.mjs`).
+
+**Not changed:** riskGate.js (its stop warning still reads 50%), every RULES default, the seven order paths, /api/state's
+fields (the plan rides inside the position and the Journal entry), `histBacktest()`, the replay's table (the rules').
+
+### What the next session inherits
+
+- No live trade has carried an edited plan, and the replay's suggestion has never come from real closes (PRD §4 #3, #9).
+- The gate's own stop warning still reads the default 50%: a trade whose plan says otherwise can see 50% in a close confirm's
+  warning list. Moving it is a riskGate.js change, left to the owner.
+- Next: PR 73 (stacked on this), the computer layout. **PR 73 done** (above).
+
 ## Done in PR 71 (owner, 19 Oct 2026): the Journal on the server
 
 The first of three stacked PRs (71 → 72 → 73). **Goal:** one Journal on the phone and the computer, not lost when a browser
@@ -54,7 +167,7 @@ so the Journal survives them), riskGate.js, every RULES value, the order paths.
 - The merge has run on a recording blob store and a stubbed `/api/state` only (PRD §4 #6): the owner's first load after this
   merges uploads the Journal that browser holds; a second device then shows it. Read when it happens.
 - A copilot lesson's answer stays on the device that asked (its line on the trade's timeline syncs).
-- Next: PR 72 (stacked on this), then PR 73.
+- Next: PR 72 (stacked on this), then PR 73. **PR 72 done** (above).
 
 ## Done in PR 70 (owner, 13 Oct 2026): only listed contracts, everywhere a leg is chosen (+ three wrong sentences)
 
@@ -1233,6 +1346,11 @@ One line each; see `PRD.md` §5 and `docs/history/ROADMAP.md` for detail.
   a phone (PRD §4.5). Not started.
 - **What the sweep left** (under #49's inherits): sentences in mono in App.jsx and pro.jsx; visuals.jsx's drawings;
   main.jsx's crash screen.
+- **DONE: PR 73** — the app on a computer, responsive: Find's list beside the market page with its tray docked, chips that
+  wrap, Build in two columns, Positions as a table beside a position; nothing scrolls sideways (`scripts/audit-computer.mjs`).
+- **DONE: PR 72** — the exit plan per trade (edited in place, suggested by the replay, frozen at Send, read everywhere),
+  against-the-signals on the plan's exit day, the exposure line, contracts named twice with the OCC symbol, the feed named,
+  the tray's two chances, the price history asked again.
 - **DONE: PR 71** — the Journal on the server: `journal` and `journalSeq` on `/api/state`, merged by ref on both sides, never
   replaced; the line under the Journal's title says where it is kept.
 - **Planned by the owner (19 Oct 2026), in this order, after PR 72 and PR 73:**
