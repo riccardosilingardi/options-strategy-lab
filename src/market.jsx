@@ -58,6 +58,7 @@ import { RULES, money, chanceText, expiryWords, sizedFree, sizedFigures, sizeLin
   chainNotLoadedText, marketReadingText, noCardsText, ARIA, readScoreLine, compareTrayLine, SEE_THEM, cardDetailRows, costsFor,
   viewOfDir, viewChoiceLabel, viewTargetPrice, chainQuotedLegs, TRAY_UNLISTED, trayReplaceHint, trayReplacedText,
   listingLine, listingName, listingSearchInfo, LISTING_SEARCH_LABEL,
+  LEARN_WORDS,
 } from "./rules.js";
 
 const FS = TYPE.size, FW = TYPE.weight, LH = TYPE.line;
@@ -87,6 +88,8 @@ export function MarketPage({
   docked = false,
   // PR 76: a market's listing as IBKR writes it (`{ exchange, name }`, read from Alpaca), or null.
   listingOf = () => null,
+  // PR 78: opened from Learn's "Open in chain" — one link back to the lab, as it was left.
+  onBackToLearn = null,
 }) {
   const u = getU(tk);
   const spot = chain && chain.spot ? chain.spot : null;
@@ -112,6 +115,7 @@ export function MarketPage({
 
   return (
     <div data-market style={{ maxWidth: 1100 }}>
+      {onBackToLearn && <TextBtn data-back-learn onClick={onBackToLearn} height={TAP} style={{ marginLeft: 8 }}>{LEARN_WORDS.backToLearn}</TextBtn>}
       <MarketHeader tk={tk} u={u} listing={listingOf(tk)} spot={spot} freshLine={freshLine} feed={feed} bars={bars} clockLine={clockLine} atm={atm}
         ivRank={ivRank} ivDays={ivDays} board={board} now={now} onBack={onBack} onRefresh={onRefresh} busy={busy}
         news={latestNews(tk, newsItems, newsState)} newsItems={newsItems} ago={ago} first={first} saved={first ? isSaved(first.cand) : false}
@@ -542,7 +546,9 @@ export function ChainTab({ tk, chain, clock, tray, setTray, cardFigures, quoteOf
     background: sel === "buy" ? T.amber : itm ? T.raise : "transparent",
     color: sel === "buy" ? T.onAccent : thin ? (itm ? T.mut : T.dim) : T.ink,
     border: sel === "sell" ? `2px solid ${T.amber}` : "2px solid transparent" });
-  const label = (sel, v) => (sel === "buy" ? `+1 ${v}` : sel === "sell" ? `−1 ${v}` : v);
+  // The leg's own quantity (PR 78: a butterfly from Learn sells two of its middle strike).
+  const label = (sel, v, n = 1) => (sel === "buy" ? `+${n} ${v}` : sel === "sell" ? `−${n} ${v}` : v);
+  const qtyAt = (type, k) => { const l = legs.find((x) => x.type === type && Number(x.strike) === Number(k)); return l ? Math.abs(Number(l.qty) || 1) : 1; };
   /** What scripts/audit-screen.mjs reads a cell by: in the money, and bought or sold on the tray. */
   const cellData = (sel, itm) => ({ "data-chain-cell": "true", "data-itm": itm ? "true" : undefined, "data-picked": sel || undefined });
   let spotDrawn = false;
@@ -598,18 +604,18 @@ export function ChainTab({ tk, chain, clock, tray, setTray, cardFigures, quoteOf
               )}
               <div role="row" style={{ ...grid, marginTop: 4 }}>
                 <button role="cell" {...cellData(sel(callOn, "bid"), cItm)} style={btn(sel(callOn, "bid"), cItm, thin, price)} disabled={!price || !c}
-                  aria-label={ARIA.chainCell(-1, k, "call")} onClick={() => tap("call", k, -1)}>{label(sel(callOn, "bid"), c1)}</button>
+                  aria-label={ARIA.chainCell(-1, k, "call")} onClick={() => tap("call", k, -1)}>{label(sel(callOn, "bid"), c1, qtyAt("call", k))}</button>
                 <button role="cell" {...cellData(sel(callOn, "ask"), cItm)} style={btn(sel(callOn, "ask"), cItm, thin, price)} disabled={!price || !c}
-                  aria-label={ARIA.chainCell(1, k, "call")} onClick={() => tap("call", k, 1)}>{label(sel(callOn, "ask"), c2)}</button>
+                  aria-label={ARIA.chainCell(1, k, "call")} onClick={() => tap("call", k, 1)}>{label(sel(callOn, "ask"), c2, qtyAt("call", k))}</button>
                 <span role="cell" data-chain-strike style={{ ...mono, ...tnum, fontSize: FS.md, fontWeight: FW.bold, color: thin ? T.dim : T.ink, textAlign: "center",
                   background: T.panel, borderLeft: `1px solid ${T.line}`, borderRight: `1px solid ${T.line}`,
                   display: "flex", flexDirection: "column", justifyContent: "center", lineHeight: LH.tight }}>
                   {k}{thin && <span style={{ ...sans, fontSize: FS.xs, fontWeight: FW.regular, color: T.dim }}>{THIN}</span>}
                 </span>
                 <button role="cell" {...cellData(sel(putOn, "bid"), pItm)} style={btn(sel(putOn, "bid"), pItm, thin, price)} disabled={!price || !p}
-                  aria-label={ARIA.chainCell(-1, k, "put")} onClick={() => tap("put", k, -1)}>{label(sel(putOn, "bid"), p1)}</button>
+                  aria-label={ARIA.chainCell(-1, k, "put")} onClick={() => tap("put", k, -1)}>{label(sel(putOn, "bid"), p1, qtyAt("put", k))}</button>
                 <button role="cell" {...cellData(sel(putOn, "ask"), pItm)} style={btn(sel(putOn, "ask"), pItm, thin, price)} disabled={!price || !p}
-                  aria-label={ARIA.chainCell(1, k, "put")} onClick={() => tap("put", k, 1)}>{label(sel(putOn, "ask"), p2)}</button>
+                  aria-label={ARIA.chainCell(1, k, "put")} onClick={() => tap("put", k, 1)}>{label(sel(putOn, "ask"), p2, qtyAt("put", k))}</button>
               </div>
             </React.Fragment>
           );

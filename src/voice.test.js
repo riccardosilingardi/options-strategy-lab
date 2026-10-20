@@ -313,7 +313,10 @@ test("MEASURED: the three screens, and the table in the PRD is this number", () 
      line in its three states — at rest, loading, no quotes — an upper bound, as they never show together). The official
      name under it is Alpaca's data, not scored. learn 22 → 23 (the listing on the chip and in the sheet; the leg rows'
      IBKR names are `ibkrName()` data). Learn's picture and its lines are measured rendered in learn.test.jsx (319 / 426). */
-  const CEILING = { find: 157, market: 502, build: 684, positions: 256, learn: 23 };
+  /* >>> PR 78 (Learn to the chain and Build). <<< build 684 → 690: a trade from Learn says "Model 1.20 → market 1.35 (credit)"
+     under its title until it is edited (`learnPriceLine()`, 6). Learn's two doors and the market page's "‹ Back to Learn" are
+     LEARN_WORDS' data, measured rendered in learn.test.jsx and learnBridge.test.jsx. */
+  const CEILING = { find: 157, market: 502, build: 690, positions: 256, learn: 23 };
   /* >>> PR #46: ONE ORDERS LIST. <<< The record-based "WORKING AT THE BROKER" panel (its paragraph about what a
      working order is, the stale-DAY warning, the per-row sentences) left Positions; the one list lives in
      `orders.jsx`, which the counter now reads. Measured: positions 304 -> 209 (4 typed + 205 generated, 14 sites).

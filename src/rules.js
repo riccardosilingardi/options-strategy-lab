@@ -7951,6 +7951,16 @@ export const LEARN_WORDS = Object.freeze({
   legendExit: (day, n) => `Exit date${day ? `, ${day}` : ""} (${n} days before expiry)`,
   legendExitInside: (n) => `No exit date: this expiry is inside the last ${n} days`,
   legendNoCurves: "Today and the exit date need a model price on every leg",
+  // PR 78: from Learn to the real chain and Build.
+  openInChain: "Open in chain",
+  buildThis: "Build this",
+  buildDefined: "Build the defined-risk version",
+  /** The wings "Build the defined-risk version" adds: "Adds a bought 15 call and a bought 11 put: the wings cap the loss." */
+  wingsLine: (added = []) => `Adds ${added.map((l) => `a bought ${Math.abs(Number(l.qty) || 1) > 1 ? `${Math.abs(l.qty)} × ` : ""}${strikeWords(l.strike)} ${l.type}`)
+    .join(" and ")}: the wings cap the loss.`,
+  noRoomWings: "No room for the wings: 4 legs at most, as a combination order allows.",
+  backToLearn: "‹ Back to Learn",
+  backLabel: "Learn",
   // PR 77: drawing a figure with a finger.
   modePoints: "Points",
   modeDraw: "Draw",
@@ -7972,6 +7982,19 @@ export const LEARN_WORDS = Object.freeze({
   bandInfo: (tk) => `The blue band under the prices is where ${tk}'s option prices put it at expiry: the market's own spread of ` +
     "prices, read strike by strike (IBKR's method, the same one as Build's market chance). Darker is likelier.",
 });
+/**
+ * THE MODEL'S PRICE AGAINST THE MARKET'S (PR 78): on Build, for a trade that came from Learn and only until it is edited,
+ * "Model 1.20 → market 1.35 (credit)". Per share, signed nets (positive a debit, negative a credit); the side is said once
+ * when both agree and on each when they do not. The market's is Build's own, the price in force from the chain's bid and ask.
+ */
+export function learnPriceLine(model, market) {
+  const side = (x) => (Number(x) < 0 ? "credit" : "debit");
+  const a = (x) => Math.abs(Number(x)).toFixed(2);
+  if (!known(model)) return known(market) ? `Model — → market ${a(market)} (${side(market)})` : null;
+  if (!known(market)) return `Model ${a(model)} (${side(model)}) → market —`;
+  return side(model) === side(market) ? `Model ${a(model)} → market ${a(market)} (${side(market)})`
+    : `Model ${a(model)} ${side(model)} → market ${a(market)} ${side(market)}`;
+}
 /** "GLD · 27 Nov · 38 days": where the lab is reading from. */
 export const labWhereLine = (tk, expKey, dte) => `${tk} · ${dayWords(expKey) || expKey || "—"}${known(dte) ? ` · ${dte} day${dte === 1 ? "" : "s"}` : ""}`;
 /** A leg's name in the lab the way IBKR writes the contract (PR 76): "Short SLV Nov27'26 49.5 Put" (`ibkrName()`). */

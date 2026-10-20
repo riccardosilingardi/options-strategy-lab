@@ -27,7 +27,7 @@ import { exitPlanOf, clampExitPlan, stepExitPlan, exitPlanBounds, structureFamil
   exitSuggestionLine, EXIT_PLAN_WORDS, exitPlanEntryLine, rulesExitPlan, needDirection, ibkrName, exposureLine, chanceAtPriceLine } from "./rules.js";
 // PR 72: the payoff on the plan's exit day, for which way the trade needs the price (tradeChart.js, PR 68's).
 import { exitCurve, curveZones } from "./tradeChart.js";
-import { LAB_TABS, LAB_FIGURES, LEARN_WORDS, labWhereLine, labLegText, listingLine, listingName, listingSearchInfo, LISTING_SEARCH_LABEL, RULES, sizing, ruleBadge, takeProfitLabel, takeProfitTarget, takeProfitBasisWords, stopWarningLevel, stopLossLabel, perTradeCapLabel, RULE_PILLS, money, pctText, capitalSourceNote, perTradeLimitPhrase, qualityFloor, qualityFloorSentence, liquiditySkippedNote,
+import { LAB_TABS, LAB_FIGURES, LEARN_WORDS, learnPriceLine, labWhereLine, labLegText, listingLine, listingName, listingSearchInfo, LISTING_SEARCH_LABEL, RULES, sizing, ruleBadge, takeProfitLabel, takeProfitTarget, takeProfitBasisWords, stopWarningLevel, stopLossLabel, perTradeCapLabel, RULE_PILLS, money, pctText, capitalSourceNote, perTradeLimitPhrase, qualityFloor, qualityFloorSentence, liquiditySkippedNote,
   positionPnl, BROKER_PNL, remainingEdge, remainingEdgeLabel, shareOfMaximum, attentionCount,
   filterFold, qualityFloorLine, voicePointer, VOICE_HOMES, noCeilingRankLine,
   buildableExpiries, openableBoard, offFloorExpiryLabel, horizonFloorNote,
@@ -68,7 +68,7 @@ import { rowStateOf, compareCards, rankOptimize } from "./rows.js";
 import { SavedList } from "./saved.jsx";
 import { MarketPage } from "./market.jsx";
 import { expectedMove } from "./marketView.js";
-import { buildHandOff, buildScreenState, BUILD_TAB } from "./handoff.js";
+import { buildHandOff, buildScreenState, BUILD_TAB, tradeKey } from "./handoff.js";
 import { orderBody, orderOutcome, alpacaErrorText, reduceRatios, limitWords, orderLimitWords, fillPriceOf, cancelOutcome, cancelWaiting } from "./order.js";
 // THE PERMANENT RECORD: the ref a position is given at open, the sequence on
 // every timeline entry, the close reason, and what survives into the Journal.
@@ -122,7 +122,7 @@ import { readListings, writeListings, listingsToAsk, fetchListings } from "./lis
 import { LearnScreen } from "./learn.jsx";
 import { labExpiry, labStepExpiry, labAddLeg, labStepLeg, labFlipLeg, labRemoveLeg, labFigureLegs, labExpectedMove,
   labModel, labCard, labLegRows, labGallery, LAB_MAX_LEGS, labCurves, labExtremes, labDensity, labReadout, labSnapLabel,
-  labMarketLine, labLegend, labDragTo, labDrawView } from "./learnView.js";
+  labMarketLine, labLegend, labDragTo, labDrawView, labBridge } from "./learnView.js";
 // PR 77: a figure drawn with a finger, recognised on the market shown (plain JS; nothing in it sends).
 import { recogniseDrawing } from "./learnDraw.js";
 
@@ -1329,6 +1329,8 @@ export default function OptionsStrategyLab() {
   const [mkt, setMkt] = useState({ tk: null, tab: "strategies" });
   // "EDIT IN CHAIN ›" ON BUILD (redesign PR 2): the legs it hands the market page's Chain tray, read once when the page opens.
   const [mktTray, setMktTray] = useState(null);
+  // PR 78: the market page was opened from Learn ("Open in chain"), so it offers "‹ Back to Learn" until another market is opened.
+  const [mktFromLearn, setMktFromLearn] = useState(false);
   const [ev, setEv] = useState(null);           // which evidence sheet is open OVER the step
   /* ---- comparing, on Find ----
      Up to three candidates, normalised into one shape by `candidateOf`. The
@@ -1719,6 +1721,17 @@ export default function OptionsStrategyLab() {
     readout: (s) => labReadout(labM, labCurv, s), snapLabel: (i) => labSnapLabel(labM, i),
     market: labMarketLine(labM, labDist), legend: labLegend(labCurv),
   } : { bands: null, legs: lab.legs, spot: labSpot, curves: null, extremes: [], density: [], market: null, legend: null };
+  /* PR 78: LEARN'S TWO DOORS. "Open in chain" puts the lab's legs on the market page's Chain tray (the same highlighting a
+     card's "Open in chain" gives) with "‹ Back to Learn"; "Build this" — or, for a figure the app never sends, "Build the
+     defined-risk version" (`labBridge()`: the wings `withWings()` adds) — hands the legs to Build through `openOnBuild()`,
+     i.e. `buildHandOff()`, the one way every trade reaches Build. Learn itself sends, saves and gates nothing. */
+  const labBr = labM ? labBridge(labM, { board: labBoard, sd: labExpectedMove(labChain, labExp), chain: labChain }) : null;
+  const labBridgeV = labBr ? {
+    kind: labBr.kind, line: labBr.line,
+    onChain: () => { goMarket(labTk, "chain"); setMktTray({ expKey: labExp, legs: lab.legs.map((l) => ({ ...l })), note: null }); setMktFromLearn(true); },
+    onBuild: labBr.legs ? () => openOnBuild({ ticker: labTk, expKey: labExp, legs: labBr.legs, name: labBr.name,
+      origin: { kind: "learn", key: null, modelNet: labBr.modelNet, tradeKey: tradeKey(labExp, labBr.legs) } }) : null,
+  } : null;
   /* PR 77: A FIGURE DRAWN WITH A FINGER. The strokes (each in the picture's own units, with the price range it was drawn on)
      live in `lab`, in memory like the rest of it; the last one is read against this market and expiry
      (`recogniseDrawing()`, learnDraw.js: every shape on the strikes the chain lists, priced at the lab's model net). */
@@ -2479,7 +2492,9 @@ export default function OptionsStrategyLab() {
     refreshExpired();
   };
   /** Open a market's page (redesign PR 1): from a Find row on Strategies; a tab is kept when the ticker changes. */
-  const goMarket = (tk, tab = "strategies") => { setMktTray(null); setMkt({ tk, tab }); goStep("market"); };
+  const goMarket = (tk, tab = "strategies") => { setMktTray(null); setMktFromLearn(false); setMkt({ tk, tab }); goStep("market"); };
+  /** Learn, as the bottom bar opens it (PR 78: "Back to Learn" from the chain and from Build); the lab is as it was left. */
+  const goLearn = () => { setTab("learn"); setShowSettings(false); setEv(null); setDetailsId(null); window.scrollTo?.({ top: 0 }); };
 
   /* ---- WHAT IS OUT OF DATE, AND NOTHING ELSE ----
      Every source has its own budget (src/freshness.js) and they are wildly
@@ -5188,7 +5203,7 @@ export default function OptionsStrategyLab() {
         {/* On a computer the market page stays beside Find's rows (the last one opened); before any, it says where it opens. */}
         {paneFind && !mkt.tk && <Note style={{ margin: "24px 16px" }}>Pick a market on the left: its page opens here.</Note>}
         {tab === "build" && !showSettings && (step === "market" || paneFind) && mkt.tk && (
-          <MarketPage docked={paneFind} listingOf={listingOfTk}
+          <MarketPage docked={paneFind} listingOf={listingOfTk} onBackToLearn={mktFromLearn ? goLearn : null}
             tk={mkt.tk} tab={mkt.tab} onTab={(t) => setMkt((m) => ({ ...m, tab: t }))} onBack={() => goStep("find")}
             onRefresh={() => refreshChain(mkt.tk)} busy={busy !== null}
             onTicker={(tk) => setMkt((m) => ({ ...m, tk }))}
@@ -5772,10 +5787,13 @@ export default function OptionsStrategyLab() {
             // PR 73: on a computer, two columns — the order on the left, the chart and the numbers on the right.
             wide,
             back: backTk ? { label: backTk, onClick: () => { if (buildOrigin && buildOrigin.kind === "card") backToList(); else goMarket(backTk, "strategies"); } }
+              : buildOrigin && buildOrigin.kind === "learn" ? { label: LEARN_WORDS.backLabel, onClick: goLearn }
               : { label: "Find", onClick: () => goStep("find") },
             // PR 76: "UNG · ARCA · 18 Dec · 74 days · ×1" and the official name under it, as IBKR lists the market.
             title: { name: stratName, sub: buildSubLine({ ticker: listingLine(ticker, listingOfTk(ticker)), expKey, dte, n: contracts }),
               listing: listingName(listingOfTk(ticker)),
+              // PR 78: a trade from Learn says its model price against the market's, until it is edited.
+              from: buildOrigin && buildOrigin.kind === "learn" && buildOrigin.tradeKey === tradeKey(expKey, legs) ? learnPriceLine(buildOrigin.modelNet, AE.entry) : null,
               signs: <StopSigns signs={buildSigns} style={{ marginTop: 8 }} />, note: rollRef ? rollLine(rollRef, !rollHeld) : buildOrigin && buildOrigin.note ? buildOrigin.note : null },
             takeaway: tradeTakeaway(BF.bands, { ticker, expKey, n: contracts, credit: AE.entry < 0, legs }),
             numbers: {
@@ -6266,7 +6284,7 @@ export default function OptionsStrategyLab() {
               flipLabel: r.side === "long" ? "Sell" : "Buy",
               onFlip: () => editLab((ls) => labFlipLeg(ls, r.i)),
               onRemove: () => editLab((ls) => labRemoveLeg(ls, r.i)) })),
-            card: labCard(labM), draw: labDraw,
+            card: labCard(labM), draw: labDraw, bridge: labBridgeV,
             onClear: () => setLab((l) => ({ ...l, legs: [], figureId: null, reload: false })),
             gallery: labGal.map((g) => ({ id: g.id, name: g.name, idea: g.idea, bands: g.model?.bands || null, spot: labSpot,
               current: !!labM && labM.figure.id === g.id,

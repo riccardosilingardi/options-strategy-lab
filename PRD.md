@@ -284,7 +284,7 @@ non-expert trader who wants to learn discipline rather than be sold trades.
   for a sold call), the breakevens, and what it needs. Then **FIGURES**, fourteen cards (long and short calls and puts, the
   four verticals, straddle, strangles, butterfly, iron condor, iron butterfly), each with its picture on this market and
   its idea in one line; a tap loads it. On a computer, two columns. **Nothing is sent, saved or asked from Learn**: no
-  order path, no gate call, no /api/state field; the bridge from a figure to the chain and Build is PR 78. **Since PR 76** (owner,
+  order path, no gate call, no /api/state field; since PR 78 its only way to Build is `buildHandOff()`. **Since PR 76** (owner,
   20 Oct 2026: "the graph is too simple", "dragging works with a finger but not well") the picture reads like IBKR's Option
   Wizard: a dollar scale and its grid, the prices along the bottom, the card's max profit and max loss written where the
   curve reaches them ("no ceiling" / "unlimited" at the edge), the breakevens labelled clear of the curve, **today** (dashed)
@@ -301,7 +301,12 @@ non-expert trader who wants to learn discipline rather than be sold trades.
   and a bull call spread on the same strikes draw the same line: one sentence says so). A closest figure the app never sends
   comes with its defined-risk version first ("Short strangle → Iron condor: same shape, the wings cap the loss") and its own
   amber line; nothing alike, or a scribble, names nothing: "No known figure looks like this; the closest is X." Undo and
-  Redraw; a tap loads a card on the lab.
+  Redraw; a tap loads a card on the lab. **Since PR 78, two doors under the card:** **Open in chain** (the market page's Chain
+  tab with the legs on its tray, "‹ Back to Learn" above it) and **Build this** (through `buildHandOff()`, like every trade:
+  Build prices it at the market's bid and ask, and the gate, the size, the exit plan and its suggestion, the signals on the
+  plan and the exposure line all apply; "‹ Learn" is Build's back, and until the trade is edited one line says "Model 0.75 →
+  market 0.78 (credit)"). A figure the app never sends has "Build the defined-risk version" instead, saying which wings it
+  adds. Optimize runs on it as on any trade.
 - **Every market as IBKR lists it (PR 76; owner, 20 Oct 2026: "so I recognise it immediately in IBKR").** SYMBOL · EXCHANGE
   and the official name in capitals, read from Alpaca's `GET /v2/assets/{symbol}` (kept a day on the device), Alpaca's
   exchange codes in IBKR's words (`EXCHANGE_WORDS`). Lists carry the exchange only — Find's rows and the Journal's ("UNG ·
@@ -609,7 +614,7 @@ closed; #6 gains the Journal's merge on the server. PR 72 re-read them: none clo
 PR 73 re-read them: none closed; #3 carries the computer's new layout. PR 74 re-read them: none closed; #3 carries Learn.
 PR 76 re-read them: none closed (its asset call was tried from this sandbox and refused, 401); #2 and #3 carry what PR 76
 changed, and #3's crosshair check is half settled by a measurement. PR 77 re-read them: none closed; #3 and #8 carry the
-drawing.)
+drawing. PR 78 re-read them: none closed; #3 and #4 carry the bridge from Learn.)
 
 1. **OWNER CHECK — the Journal entry for J-0001 shows the $7.65 fill** (v1 is reached on the owner's report of 5 Oct
    2026: filled 9 of 9 at $7.65, filed from the production address; this session cannot see that browser). **No Modify
@@ -696,11 +701,14 @@ drawing.)
    **OWNER CHECK — a point and Build's line under a real finger**, iOS Safari included, and whether the 5ms vibration is felt
    (Safari has none). **PR 77's drawing** (docs/screens/pr77/, `node scripts/shoot-pr77.mjs`) was drawn by Chromium's touch
    input — straight segments with a sine tremor — and kept the page still (0px) in every drawing; a real thumb's stroke, and
-   how often a real drawing is named, have not been seen.
+   how often a real drawing is named, have not been seen. **PR 78's doors** (Learn's card, Build from Learn with its model →
+   market line, the chain from Learn, the defined-risk version, Optimize on a Learn trade; docs/screens/pr78/, `node
+   scripts/shoot-pr78.mjs`) were photographed the same way — never on a phone.
 4. **Read when it happens — no credit has filled at the corrected limit** (the indicative combination ask on thin chains
    has not been measured by a fill; J-0003 never filled at it), **and "Not on Alpaca", "size N > M on the ask", the "Not
    in the app" card, an order "sent outside this app", free sizing (PR #41), and an order sent from Build's new review
-   sheet (production only, never from a preview), "Keep it, write why" and Modify's steppers (redesign PR 3a)** have not
+   sheet (production only, never from a preview), a trade built from Learn (PR 78: Build this, then order path 2,
+   unchanged), "Keep it, write why" and Modify's steppers (redesign PR 3a)** have not
    appeared or been used live (the sync auto-imports a new holding on its
    first read, so "Not in the app" shows mainly when that import has not run); free sizing's "no limit applied" is
    tested on fixtures only. **OWNER CHECK — the live open-risk numbers (PR 61):** the double count is reproduced in code

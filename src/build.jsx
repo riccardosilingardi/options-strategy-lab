@@ -68,13 +68,15 @@ export function BuildHeader({ backLabel, onBack }) {
 }
 
 /* ---------------------------------------------------------------- THE TITLE */
-export function BuildTitle({ name, sub, signs = null, note = null, listing = null }) {
+export function BuildTitle({ name, sub, signs = null, note = null, listing = null, from = null }) {
   return (
     <div>
       <h2 data-view-heading tabIndex={-1} style={{ ...sans, fontSize: FS.xl, fontWeight: FW.bold, color: T.ink, margin: 0, lineHeight: LH.tight, outline: "none" }}>{name}</h2>
       <div style={{ ...mono, ...tnum, fontSize: FS.sm, color: T.mut, marginTop: 4 }}>{sub}</div>
       {/* PR 76: the market's official name, as IBKR prints it under "UNG · ARCA" (read from Alpaca; nothing when not read). */}
       <ListingName name={listing} style={{ marginTop: 2 }} />
+      {/* PR 78: a trade from Learn — the model's price against the market's, until the trade is edited. */}
+      {from && <div data-build-from style={{ ...mono, ...tnum, fontSize: FS.xs, color: T.body, marginTop: 4 }}>{from}</div>}
       {signs}
       {note && <div style={{ ...sans, fontSize: FS.sm, color: T.amber, marginTop: 6, lineHeight: LH.body }}>{note}</div>}
     </div>
@@ -738,7 +740,7 @@ export function BuildScreen({ v, foldedNode = null }) {
     <div data-build style={{ paddingBottom: 8 }}>
       <BuildHeader backLabel={v.back.label} onBack={v.back.onClick} />
       <main style={{ padding: v.wide ? "4px 24px 0" : "4px 16px 0", display: "grid", gap: 12 }}>
-        <BuildTitle name={v.title.name} sub={v.title.sub} signs={v.title.signs} note={v.title.note} listing={v.title.listing} />
+        <BuildTitle name={v.title.name} sub={v.title.sub} signs={v.title.signs} note={v.title.note} listing={v.title.listing} from={v.title.from} />
         {v.wide ? (
           /* ON A COMPUTER (PR 73, owner 19 Oct 2026): two columns that widen with the window — on the left what is sent (the
              legs, the order, the exit plan, Send), on the right what it does (the chart, the numbers, why, the copilot, the

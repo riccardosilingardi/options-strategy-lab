@@ -281,6 +281,9 @@ test("NOTHING SENDS, SAVES OR CALLS OUT: learnView.js and learn.jsx import no or
   for (const bad of ["saveState", "setStore", "sendToAlpaca", "evaluateTrade", "fetch(", "openOnBuild", "setLegs("]) {
     assert.ok(!block.includes(bad), `the Learn block must not ${bad}`);
   }
+  // PR 78: the screen's two doors are handed in whole (`bridge: labBridgeV`); learnBridge.test.jsx reads them — Build only
+  // through openOnBuild() → buildHandOff(), the chain through the market page's tray, nothing sent.
+  assert.ok(block.includes("bridge: labBridgeV"), "the doors are App's, handed in");
   assert.ok(/const \[lab, setLab\] = useState\(/.test(app) && !/serverPayload[\s\S]{0,400}\blab\b/.test(app.slice(app.indexOf("function serverPayload"), app.indexOf("function serverPayload") + 600)),
     "the lab lives in memory: it is not in the /api/state payload");
 });

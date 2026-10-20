@@ -79,6 +79,16 @@ export function buildHandOff({ ticker, expKey = null, legs = [], name = "", chai
 }
 
 /**
+ * ONE TRADE, AS A KEY (PR 78): the expiry and the legs, in strike order — so Build can tell the trade a hand-off brought
+ * (Learn's "Build this") from the same screen after an edit. Two keys are equal exactly when the expiry and every leg's
+ * side, type, strike and quantity are.
+ */
+export function tradeKey(expKey, legs = []) {
+  const ls = (Array.isArray(legs) ? legs : []).map((l) => `${Number(l.side) > 0 ? "+" : "-"}${Math.abs(Number(l.qty) || 1)}${l.type === "call" ? "C" : "P"}${Number(l.strike)}`);
+  return `${expKey || ""}|${ls.sort().join(",")}`;
+}
+
+/**
  * Which of the Build screen's four states to render.
  *
  * "loading" is the one that did not exist before: a chain that is still being

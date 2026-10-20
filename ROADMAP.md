@@ -6,6 +6,45 @@ The full history of every item shipped so far (P0–P10, P2-bis) is in `docs/his
 Every pull request updates this file: the session that ships an item marks it done and states
 what the next one inherits.
 
+## Done in PR 78 (owner, 20 Oct 2026): from Learn to the real chain, Build and Optimize
+
+The third of three stacked PRs (76 → 77 → 78), stacked on PR 77. The figure on the lab becomes a real trade with real
+prices, through the same doors every other trade uses. Learn itself still sends, saves and gates nothing.
+
+- **Two doors under Learn's card** (`labBridge()`, learnView.js; App.jsx's `labBridgeV`):
+  - **Open in chain** — the market page's Chain tab, on the lab's expiry, with the legs on its tray and highlighted (the
+    same tray a card's "Open in chain" fills; a leg of two now reads "−2" in its cell), and **"‹ Back to Learn"** above the
+    header until another market is opened (`mktFromLearn`); the lab is in memory, so it is as it was left.
+  - **Build this** — the legs to Build through `openOnBuild()` → `buildHandOff()`, named by `figureOf()`, `origin: { kind:
+    "learn", modelNet, tradeKey }`. Build's back reads "‹ Learn".
+- **On Build, the market's prices** (the chain's bid and ask, the card's path — every check as for any trade: listed
+  contracts, the gate, the size, the exit plan and its suggestion, against-the-signals on the plan, the exposure line). One
+  line under the title, only for a trade from Learn and only until it is edited (`tradeKey()`, handoff.js): "Model 0.75 →
+  market 0.78 (credit)" (`learnPriceLine()`, rules.js; the side said on each when they differ).
+- **A figure the app never sends has no "Build this":** "Build the defined-risk version" — the lab's legs with a bought
+  option beyond each uncovered sold one (`withWings()`, PR 77's), and one line, "Adds a bought 14 call and a bought 12 put:
+  the wings cap the loss."; a short straddle arrives on Build as an Iron butterfly. With four legs already there is no room:
+  said, and nothing to build.
+- **Optimize** runs on a trade from Learn exactly as on any other (only a roll turns it off); checked by a test and on the
+  `+opt` fixture: "Checked 6 on 3 expiries, 39–88 days: 3 fit your request, 3 fail a floor."
+
+**Tests:** src/learnBridge.test.jsx (5: Build this holds the same legs, priced at the market's bid and ask — a wider book
+moves the market's price and not the model's — and the line's words and its key; an iron condor DRAWN with PR 77's
+recognition reaches Build and passes the gate on a fixture chain; a short straddle shows only the defined-risk button, and
+four legs leave no room; Optimize on a trade from Learn; Learn's only way to Build is `openOnBuild()` → `buildHandOff()`);
+learn.test.js reads the doors handed in. **Measured:** tests 1,616 → 1,621; build clean; words build 684 → 690
+(`learnPriceLine()`); Learn rendered 319 → 321 at rest and 426 → 433 with an iron condor (the switch and the two doors; a
+17-word note under them was cut to keep it short). Photographs: docs/screens/pr78/ (`node scripts/shoot-pr78.mjs`).
+
+**Not changed:** riskGate.js, the seven order paths, RULES, /api/state, the chain tray's own rules (an uncovered short still
+holds its Build ›).
+
+### What the next session inherits
+
+- Nothing from Learn has been sent live: the path after Build is order path 2, unchanged (PRD §4 #4).
+- Next, in the owner's order: **P7** (fills streamed server-side) **plus IBKR-style alerts** (the day's P&L, a position's
+  daily move); then **the basket expansion**, when the owner sends `/api/liquidity`.
+
 ## Done in PR 77 (owner, 20 Oct 2026): draw with a finger → the nearest defined-risk figure
 
 The second of three stacked PRs (76 → 77 → 78), stacked on PR 76. "Learn is missing the manual drawing": the owner draws the
@@ -1526,8 +1565,8 @@ One line each; see `PRD.md` §5 and `docs/history/ROADMAP.md` for detail.
   - **DONE: PR 76** — Learn's real chart (scale, extremes, today and the exit date, the market's band and chance, a
     crosshair), a finger that drags, legs named as IBKR writes them, every market as IBKR lists it (above).
   - **DONE: PR 77** — a figure drawn with a finger → the nearest defined-risk figure (was "PR 75"; above).
-  - **PR 78** — from Learn to the real chain, Build and Optimize (was "PR 75"'s second half).
-  - Then **P7**, fills streamed server-side (below), plus IBKR-style alerts (the day's P&L, a position's daily move) (was
+  - **DONE: PR 78** — from Learn to the real chain, Build and Optimize (was "PR 75"'s second half; above).
+  - **NEXT: P7**, fills streamed server-side (below), plus IBKR-style alerts (the day's P&L, a position's daily move) (was
     "PR 76").
   - Then the **basket expansion** (below), when the owner sends `/api/liquidity`.
 - **P7** — fills pushed by Alpaca's stream, server-side.

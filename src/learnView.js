@@ -17,6 +17,7 @@ import { boardStrikes, strikesFor, spotOf, atmIv } from "./chain.js";
 import { RULES, figureOf, LAB_FIGURES, LAB_TABS, FIGURE_NAMES, LEARN_WORDS, exactExtremes, payoffCeiling, needsText,
   NO_CEILING, known, labWhereLine, labLegText, labLegName, exitPlanOf, marketChanceOf, MARKET_CHANCE_NOT_READ, dayWords } from "./rules.js";
 import { exitCurve } from "./tradeChart.js";
+import { withWings } from "./learnDraw.js";
 import { undefinedRiskLegs } from "./riskGate.js";
 import { MLEG_MAX_LEGS } from "./alpacaContract.js";
 
@@ -485,6 +486,26 @@ export function labLane(items = [], { left = 0, right = Infinity, gap = 4 } = {}
   const out = new Array(items.length);
   order.forEach((it, k) => { out[it.i] = xs[k]; });
   return out;
+}
+
+/* =====================================================================================================================
+   PR 78: FROM LEARN TO THE REAL CHAIN AND BUILD. Learn sends nothing: its two doors are the market page's Chain tray (the
+   legs highlighted, as "Open in chain" on a card does) and `buildHandOff()` (handoff.js), the one way every trade reaches
+   Build, where the market's prices, the gate, the sizing and the exit plan take over.
+===================================================================================================================== */
+/**
+ * WHAT THE LAB CAN HAND TO BUILD. A defined-risk figure: its own legs ("Build this"). A figure the app never sends: the
+ * same legs with a bought option beyond each uncovered sold one (`withWings()`, learnDraw.js — PR 77's defined-risk
+ * version), named by `figureOf()`, the wings said in one line; with no room for them (four legs already), nothing.
+ * @returns null (no leg, or legs that cancel) or { kind: "build" | "defined" | "none", legs, name, modelNet, line }
+ */
+export function labBridge(m, { board = null, sd = null, chain = null } = {}) {
+  if (!m || !m.legs.length || m.figure.id === "none") return null;
+  if (!m.uncovered) return { kind: "build", legs: m.legs.map((l) => ({ ...l })), name: m.figure.name, modelNet: m.net, line: null };
+  const ww = withWings(m.legs, board, { sd });
+  if (!ww) return { kind: "none", legs: null, name: null, modelNet: null, line: LEARN_WORDS.noRoomWings };
+  const wm = chain ? labModel({ ticker: m.ticker, chain, expKey: m.expKey, legs: ww.legs }) : null;
+  return { kind: "defined", legs: ww.legs, name: figureOf(ww.legs).name, modelNet: wm ? wm.net : null, line: LEARN_WORDS.wingsLine(ww.added) };
 }
 
 /* =====================================================================================================================

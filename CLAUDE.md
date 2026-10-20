@@ -311,6 +311,12 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
   one card per line; a figure the app never sends brings its `DEFINED_SIBLINGS` version first, built by `withWings()` (also
   PR 78's defined-risk version); under `DRAW_MATCH_MIN` or a scribble, nothing is named. Learn's screen reads it through
   `labDrawView()` (learnView.js); the strokes live in `lab`, never on /api/state.
+- **Learn's two doors (PR 78) are `labBridge()` (learnView.js) handed in as `labBridgeV` (App.jsx):** "Open in chain" fills the
+  market page's tray (`setMktTray`, "‹ Back to Learn" while `mktFromLearn`), "Build this" is `openOnBuild()` → `buildHandOff()`
+  with `origin: { kind: "learn", modelNet, tradeKey }` — never a setter, a gate call or an order from Learn
+  (learnBridge.test.jsx reads the source). A figure the app never sends offers only "Build the defined-risk version"
+  (`withWings()`). Build's "Model … → market …" line is `learnPriceLine()`, shown while `tradeKey(expKey, legs)` (handoff.js)
+  is the one handed over.
 - **A market as IBKR lists it (PR 76): `src/listing.js`** reads `{ exchange, name }` from Alpaca's `GET /v2/assets/{symbol}`
   (one GET per market, a day on the device, never /api/state), the words are rules.js's (`listingLine()` "UNG · ARCA",
   `listingName()`, `EXCHANGE_WORDS`, `listingSearchInfo()`), the name line is the `ListingName` atom. Lists (Find's rows, the
@@ -389,7 +395,8 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
 - `src/learnDraw.js` — a figure drawn with a finger, recognised on the market shown (PR 77); `withWings()`.
 - `src/journal.jsx`, `src/journalView.js` — the Journal (redesign PR 3b) and its words (plain JS: `whyOpenedLine()`,
   `endedLine()`, `closedState()`, `closedTitle()`, `timelineItems()`). `src/settings.jsx` — Settings (redesign PR 3b).
-- `src/path.js`, `src/handoff.js` — the three-step path (Find → market → Build) and how a trade reaches Build.
+- `src/path.js`, `src/handoff.js` — the three-step path (Find → market → Build) and how a trade reaches Build (`tradeKey()`
+  since PR 78).
 - `src/why.jsx` — the "Why this trade" evidence panel.
 - `src/App.jsx`, `src/pro.jsx` — UI, the order ticket (`OrderTicket`), the desk, `QtyField`.
 - `src/theme.js` — the one theme; dark is the default since redesign PR 1 (owner, 4 Oct 2026); a stored "light" stays light.
@@ -516,6 +523,8 @@ All in `RULES`, `src/rules.js`, unless noted.
   Find, the market page, Build, a position and the Journal; 390×844 and 1280×800) and MEASURES a finger's slide on each point
   with Chromium's touch input (the strike before and after, the page's scroll); `ONLY=a,b` picks shots ("finger" included).
   The harness answers `/v2/assets/{sym}` with fixture names (typed there, not Alpaca's); "+nolisting" answers 404.
+- `node scripts/shoot-pr78.mjs [dir]` photographs PR 78's doors (Learn's card, Build from Learn, the chain from Learn, the
+  defined-risk version on Learn and Build, Optimize on a Learn trade with `+opt`, light, 1280×800).
 - `node scripts/shoot-pr77.mjs [dir]` photographs PR 77's drawing (at rest, a short strangle, a bull put spread, a scribble, a
   card loaded, light, 1280×800), drawn by Chromium's touch input, and prints each drawing's cards and the page's scroll.
 - `node scripts/shoot-pr72.mjs [dir]` photographs PR 72's screens (the Exit plan at rest and edited, the legs named twice,

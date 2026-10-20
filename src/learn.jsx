@@ -11,7 +11,7 @@
 import React, { useState } from "react";
 import { Minus, Plus, X } from "lucide-react";
 import { T, TYPE } from "./theme.js";
-import { mono, sans, Note, Sheet, FilterChip, IconButton, TextBtn, TAP, useBoxWidth, Info, ContractName, ListingName, Segments } from "./ui.jsx";
+import { mono, sans, Note, Sheet, FilterChip, IconButton, TextBtn, TAP, useBoxWidth, Info, ContractName, ListingName, Segments, Btn } from "./ui.jsx";
 import { FigureChart, FigureLegendLine as LegendLine } from "./visuals.jsx";
 import { LEARN_WORDS as W, listingLine, listingName, listingSearchInfo, LISTING_SEARCH_LABEL } from "./rules.js";
 import { getU } from "./markets.js";
@@ -30,6 +30,7 @@ const tnum = { fontVariantNumeric: "tabular-nums" };
  *            curves, extremes, density, readout(s), snapLabel(i), market: { pop, text }, legend: [{ id, text, drawn }] },
  *   legs: [{ i, text, price, canMinus, canPlus, onMinus, onPlus, onFlip, flipLabel, onRemove }],
  *   card: labCard() | null, onClear, gallery: [{ id, name, idea, bands, spot, current, onLoad }],
+ *   bridge (PR 78): { kind: "build" | "defined" | "none", line, onChain, onBuild } | null,
  *   draw (PR 77): { mode: "points" | "draw", onMode, stroke, onStroke, canUndo, onUndo, onRedraw,
  *                   cards: [{ id, name, bands, tag, uncovered, sibling, onLoad }], lines: [sentence] } | null
  * }
@@ -177,6 +178,19 @@ export function LearnScreen({ v }) {
               </div>
               {v.card.needs && <div style={{ ...sans, fontSize: FS.sm, color: T.body, lineHeight: LH.body }}>{v.card.needs}</div>}
               {v.card.missing.map((t) => <Note key={t} color={T.amber} style={{ margin: 0 }}>{t}</Note>)}
+              {/* PR 78: THE TWO DOORS OUT OF LEARN — the market's chain with these legs on its tray, and Build through
+                  buildHandOff() (the market's prices, the gate, the size, the exit plan). A figure the app never sends has no
+                  "Build this": its defined-risk version, the wings it adds said in one line. Nothing is sent from here. */}
+              {v.bridge && (
+                <div data-learn-bridge={v.bridge.kind} style={{ display: "flex", flexDirection: "column", gap: 6, borderTop: `1px solid ${T.line}`, paddingTop: 10 }}>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <Btn ghost color={T.ink} onClick={v.bridge.onChain} data-learn-open-chain="">{W.openInChain}</Btn>
+                    {v.bridge.kind === "build" && <Btn color={T.action} onClick={v.bridge.onBuild} data-learn-build="">{W.buildThis}</Btn>}
+                    {v.bridge.kind === "defined" && <Btn color={T.action} onClick={v.bridge.onBuild} data-learn-build="defined">{W.buildDefined}</Btn>}
+                  </div>
+                  {v.bridge.line && <Note data-learn-bridge-line style={{ margin: 0 }} color={v.bridge.kind === "none" ? T.amber : undefined}>{v.bridge.line}</Note>}
+                </div>
+              )}
             </section>
           )}
 

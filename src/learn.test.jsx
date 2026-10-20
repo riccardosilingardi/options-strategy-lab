@@ -8,7 +8,7 @@ import { FigureChart, payoffBands } from "./visuals.jsx";
 import { LAB_TABS, LAB_FIGURES, LEARN_WORDS, labLegText } from "./rules.js";
 import assert from "node:assert/strict";
 import { labModel, labCard, labLegRows, labGallery, labExpiry, labFigureLegs, labExpectedMove, legIv, labExitDay, labCurves, labReadout,
-  labExtremes, labDensity, labMarketLine, labLegend, labDrawView } from "./learnView.js";
+  labExtremes, labDensity, labMarketLine, labLegend, labDrawView, labBridge } from "./learnView.js";
 import { recogniseDrawing } from "./learnDraw.js";
 import { bs, legsAt } from "./engine.js";
 import { impliedDistribution } from "./impliedDist.js";
@@ -47,6 +47,9 @@ function vOf(legs, extra = {}) {
       curves, extremes: labExtremes(m), density: m.bands ? labDensity(dist, m.bands.lo, m.bands.hi) : [], readout: (x) => labReadout(m, curves, x),
       snapLabel: noop, market: labMarketLine(m, dist), legend: labLegend(legs.length ? curves : null) },
     legs: labLegRows(m, BOARD, CHAIN).map((r) => ({ ...r, onMinus: noop, onPlus: noop, flipLabel: r.side === "long" ? "Sell" : "Buy", onFlip: noop, onRemove: noop })),
+    // PR 77 and 78: the Points | Draw switch and the two doors, as App.jsx hands them.
+    draw: { mode: "points", onMode: noop, stroke: null, canUndo: false, onStroke: noop, onUndo: noop, onRedraw: noop, cards: [], lines: [] },
+    bridge: (() => { const b = labBridge(m, { board: BOARD, chain: CHAIN }); return b ? { kind: b.kind, line: b.line, onChain: noop, onBuild: noop } : null; })(),
     card: labCard(m), onClear: noop,
     gallery: labGallery({ ticker: "GLD", chain: CHAIN, expKey: EXP, bandsOf: payoffBands })
       .map((g) => ({ id: g.id, name: g.name, idea: g.idea, bands: g.model.bands, spot: 377.2, current: m.figure.id === g.id, onLoad: noop })),
@@ -57,7 +60,9 @@ function vOf(legs, extra = {}) {
 // the empty picture's price figures), 379 → 426 with the iron condor (the dollar scale and the prices along the bottom,
 // "max profit $…" and "max loss $…", the three-entry legend, the market's chance line and its ⓘ, each leg named the way
 // IBKR writes it, "Long GLD Nov27'26 340 Put" against "Long 340 put").
-const LEARN_CEILING = { empty: 319, condor: 426 };
+// PR 77 and 78 moved them again: 319 → 321 (the switch "Points · Draw", on screen at rest) and 426 → 433 (the switch, and the
+// card's two doors, "Open in chain" and "Build this").
+const LEARN_CEILING = { empty: 321, condor: 433 };
 const SPREAD = [{ side: 1, type: "put", strike: 340, qty: 1 }, { side: -1, type: "put", strike: 361, qty: 1 }];
 
 check("AT REST, NO LEG: the title and its line, the market and expiry, four tabs, the empty sentence, 14 figures", () => {
