@@ -37,6 +37,17 @@ export const RULES = {
   stopLossPct: 0.5,            // stop at 50% of max loss...
   stopLossEnforcement: "warn", // ...but WARNING ONLY: never auto-closes (PRD §4)
   exitDTE: 21,                 // exit at 21 DTE — CHANGED from 7 (PRD §4)
+  // --- THE EXIT PLAN PER TRADE (PR 72, owner 19 Oct 2026). The three values above are the SUGGESTION a trade starts
+  // from; Build's Exit plan edits them in place within these bounds, and the plan is frozen on the position at Send
+  // (`exitPlanOf()`). The stop's top is the whole maximum loss (owner, 19 Oct 2026: past 100% it could never fire).
+  exitPlanTakeProfitMin: 0.25, exitPlanTakeProfitMax: 0.9,
+  exitPlanDTEMin: 7, exitPlanDTEMax: 45,
+  exitPlanStopMin: 0.25, exitPlanStopMax: 1,
+  exitPlanPctStep: 0.05,       // the take profit and the stop move in 5-point steps; the time exit a day at a time
+  // The variants "Replay the exit rules ›" also replays to suggest a plan (PR 72): every take profit × time exit below that
+  // leaves room before the expiry. Chosen, not measured (PRD §4 #8); the defaults are among them.
+  exitPlanReplayTakeProfits: [0.25, 0.5, 0.75],
+  exitPlanReplayExitDays: [14, 21, 30],
 
   // --- entry window. An entry too close to the exit rule has no room to work:
   // the position would be opened already inside its own exit window.
@@ -916,6 +927,20 @@ export const marketNotReadText = (mkt) => (mkt && mkt.pop != null ? null : MARKE
 export const CHANCE_TWO_INFO = "Market: the chance this expiry's option prices imply, strike by strike, with no view and no interest — IBKR's " +
   "method, on the mid of each out-of-the-money bid and ask. OSL model: the app's own, one volatility (the legs' average) and the " +
   `measured season. The list is sorted by the OSL model; when the two differ by more than ${Math.round(RULES.chanceGapPoints * 100)} points, a line says why.`;
+/**
+ * THE PRICE BOTH CHANCES WERE READ AT (PR 72, task 72.5; owner's check against IBKR, 19 Oct 2026): IBKR reads its
+ * probability at the ORDER's price, which sets the breakeven — GLD −391C / +410C at the natural 3.78 breaks even at 394.78,
+ * at the mid 4.00 at 395.00, and a credit read at the mid is flattered. Build's two chances are read at the limit in force
+ * (`effectiveLimit()`; − / + and Mid · Pay · Negotiate move both), and the ⓘ says which price and which breakeven.
+ */
+export function chanceAtPriceLine(entryNet = null, breakevens = []) {
+  if (!known(entryNet)) return null;
+  const be = (breakevens || []).filter(known).map((b) => `$${Number(b).toFixed(2)}`);
+  return `Both are read at the limit in force, $${Math.abs(Number(entryNet)).toFixed(2)} ${Number(entryNet) < 0 ? "credit" : "debit"}` +
+    `${be.length ? `: breakeven ${be.join(" and ")}` : ""}. A change of the limit moves both.`;
+}
+/** Find's tray and rows say which chance they print (PR 72, task 72.5): the OSL model's, beside the market's ("mkt"). */
+export const MODEL_CHANCE_WORD = "model";
 /** Both chances for a copilot, labelled as the tile labels them (PR 67; grounding.js reads every figure sent). */
 export const chancesBrief = ({ pop = null, mkt = null, gap = null } = {}) => ({
   market: mkt && mkt.pop != null ? chanceText(mkt.pop) : null, marketNotRead: marketNotReadText(mkt),
@@ -965,11 +990,12 @@ export function chanceMethodLine(mc, mkt = null, ticker = "this market") {
    Short labels the UI renders. Generated from RULES so changing a number
    changes every screen at once. Never hand-write these strings. */
 
-export const takeProfitLabel = (basis = "max-profit") =>
-  `TP ${pctText(basis === "premium" ? RULES.singleTakeProfitPctOfPremium : RULES.takeProfitPct)}`;
+// PR 72: each takes the trade's own plan value (`exitPlanOf()`); without one, the RULES default.
+export const takeProfitLabel = (basis = "max-profit", pct = null) =>
+  `TP ${pctText(known(pct) ? Number(pct) : basis === "premium" ? RULES.singleTakeProfitPctOfPremium : RULES.takeProfitPct)}`;
 export const scaleOutLabel = () => `${pctText(RULES.scaleOutPct)}`;
-export const stopLossLabel = () => `SL ${pctText(RULES.stopLossPct)}`;
-export const exitDTELabel = () => `${RULES.exitDTE} DTE`;
+export const stopLossLabel = (pct = null) => `SL ${pctText(known(pct) ? Number(pct) : RULES.stopLossPct)}`;
+export const exitDTELabel = (dte = null) => `${known(dte) ? Number(dte) : RULES.exitDTE} DTE`;
 
 /** `TP 50% · SL 50% · 21 DTE` — the badge shown next to the PAPER chip. */
 export const ruleBadge = () => [takeProfitLabel(), stopLossLabel(), exitDTELabel()].join(" · ");
@@ -1581,6 +1607,17 @@ export function payoffNeed(b) {
   if (up.length === 2 && atLo(up[0]) && atHi(up[1])) return { need: "apart", lo: up[0].hi, hi: up[1].lo, lean: null };
   return null;
 }
+/**
+ * WHICH WAY A NEED POINTS (PR 72): +1 up, −1 down — a zone that runs off one end, or a zone inside the range that today's
+ * price must move to (`lean`) — 0 for a trade that pays where the price is or on a move either way; null with no need.
+ */
+export function needDirection(n) {
+  if (!n) return null;
+  if (n.need === "up") return 1;
+  if (n.need === "down") return -1;
+  if (n.need === "between" && n.lean) return n.lean === "up" ? 1 : -1;
+  return 0;
+}
 /** Build's "Why this trade" line, from `payoffNeed()` (PR 70). */
 export function structureNeedsLine(n, tk = "the price") {
   const f = (v) => `$${Number(v).toFixed(2)}`;
@@ -1732,21 +1769,22 @@ export const capLabel = (limits = null) => {
   return `Enforce the ${cap ? `${pctText(per / cap, 0)} ` : ""}cap per trade (${money(per)})`;
 };
 
-/** The exit plan's three rows (redesign PR 2): what each rule is, in words, from RULES. */
+/** The exit plan's three rows (redesign PR 2): what each rule is, in words — the trade's own plan since PR 72. */
 export const EXIT_ROWS = Object.freeze({
-  takeProfit: (basis = "max-profit") => `at ${basis === "premium" ? takeProfitBasisWords("premium") : `${pctText(RULES.takeProfitPct)} of max profit`}`,
-  time: () => `${RULES.exitDTE} days before expiry`,
-  stop: () => `alert at ${pctText(RULES.stopLossPct)} of max loss, no order`,
+  takeProfit: (basis = "max-profit", plan = null) => `at ${basis === "premium" ? takeProfitBasisWords("premium", plan && plan.takeProfitPct)
+    : `${pctText(plan && known(plan.takeProfitPct) ? plan.takeProfitPct : RULES.takeProfitPct)} of max profit`}`,
+  time: (plan = null) => `${plan && known(plan.exitDTE) ? plan.exitDTE : RULES.exitDTE} days before expiry`,
+  stop: (plan = null) => `alert at ${pctText(plan && known(plan.stopLossPct) ? plan.stopLossPct : RULES.stopLossPct)} of max loss, no order`,
 });
 export const EXITS_FOOTER = "Exits go in as limit orders.";
 /** The markets whose exit rules have been backtested. None yet (PRD §4 #9): every market shows the pill. */
 export const EXITS_BACKTESTED = Object.freeze([]);
 export const exitsPill = (tk) => (EXITS_BACKTESTED.includes(tk) ? null : `defaults · not backtested on ${tk}`);
-/** The time exit's date: the expiry less `RULES.exitDTE` days, "30 Oct". */
-export const timeExitDay = (expKey) => {
+/** The time exit's date: the expiry less the plan's days (`RULES.exitDTE` by default), "30 Oct". */
+export const timeExitDay = (expKey, exitDTE = RULES.exitDTE) => {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(expKey || ""));
   if (!m) return null;
-  const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]) - RULES.exitDTE * 86400000);
+  const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]) - (known(exitDTE) ? Number(exitDTE) : RULES.exitDTE) * 86400000);
   return `${d.getUTCDate()} ${MON3[d.getUTCMonth()]}`;
 };
 
@@ -1762,6 +1800,34 @@ export const SEND_FOOTER = (tif = "day") => `Paper account · Alpaca · ${tif ==
 /** The review sheet's leg line: "Sell to open 1 × 18 put". */
 export const reviewLegWords = (l, n = 1) =>
   [`${l.side > 0 ? "Buy" : "Sell"} to open`, `${Math.abs(Number(l.qty) || 1) * Math.max(1, Math.round(Number(n) || 1))} × ${l.strike} ${l.type === "call" ? "call" : "put"}`];
+/**
+ * A CONTRACT'S NAME, THE WAY IBKR WRITES IT (PR 72, task 72.4): "SLV Nov27'26 49.5 Put" — ticker, the expiry as month,
+ * day and two-digit year, the strike as the chain lists it, Call or Put. It names; it never builds a symbol: the exact
+ * contract the order carries is the chain's (or the broker's) OCC symbol, printed under it (`contractLine()`).
+ */
+export function ibkrName(ticker, expKey, leg = {}) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(expKey || ""));
+  const when = m ? `${MON3[+m[2] - 1]}${m[3]}'${m[1].slice(2)}` : "";
+  const k = Number(leg.strike);
+  const strike = Number.isFinite(k) ? String(+k.toFixed(3)) : "—";
+  return [ticker || "", when, strike, leg.type === "call" ? "Call" : "Put"].filter(Boolean).join(" ");
+}
+/** The OCC symbol under the name: the listing's own, or nothing — never one formatted from a strike (`buildOcc()`). */
+export const OCC_NOT_LISTED = "no OCC symbol: the chain did not list this contract";
+/** The copy button's words. */
+export const COPY_WORDS = Object.freeze({ copy: "Copy", copied: "Copied", aria: (occ) => `Copy ${occ}` });
+/**
+ * THE OPEN RISK AFTER THIS TRADE AGAINST THE TOTAL LIMIT (PR 72, task 72.3), amber above Send, never a block:
+ * "Open risk after this trade: $5,200 = 26% of capital (your limit: 25%)". The limit is the gate's own (`limits.total`
+ * over `limits.tradingCapital`, Settings' capital × `totalExposurePct`); "suggested" while the capital is not answered.
+ * Null unless the limit is passed — with the cap on (the gate then refuses too) or off (free sizing, where nothing else says it).
+ */
+export function exposureLine({ after = null, total = null, tradingCapital = null, answered = false } = {}) {
+  if (![after, total, tradingCapital].every(known) || !(Number(tradingCapital) > 0) || !(Number(after) > Number(total))) return null;
+  const cap = Number(tradingCapital);
+  return `Open risk after this trade: ${money(after)} = ${pctText(Number(after) / cap, 0)} of capital ` +
+    `(${answered ? "your limit" : "suggested"}: ${pctText(Number(total) / cap, 0)})`;
+}
 /** "Limit $0.25 credit · day · ×1". */
 export const reviewLimitLine = ({ type = "limit", net = null, tif = "day", n = 1 } = {}) =>
   `${type === "market" || !known(net) ? "Market" : `Limit $${Math.abs(Number(net)).toFixed(2)} ${Number(net) < 0 ? "credit" : "debit"}`} · ${tif === "gtc" ? "GTC" : "day"} · ×${Math.max(1, Math.round(Number(n) || 1))}`;
@@ -2212,7 +2278,8 @@ export const columnHeadText = () => "Days · risk";
 /* A ROW'S THREE FIGURES (PR 63, owner 7 Oct 2026: "Chance · Return on risk · Avg per $100 at risk, plus the days, always").
    Their short words on a row, where the card's names (CARD_LABELS) do not fit three to a line at 390px; the values are the
    card's own (`rowFigures()` in rows.js). */
-export const ROW_FIGURE_WORDS = Object.freeze({ chance: "chance", rr: "return", future: "avg per $100" });
+// PR 72 (task 72.5): the row's chance is the OSL model's, and says so beside the market's "mkt".
+export const ROW_FIGURE_WORDS = Object.freeze({ chance: "model chance", rr: "return", future: "avg per $100" });
 /** "44d": a row's days to expiry. */
 export const rowDaysText = (dte) => (dte == null || !Number.isFinite(Number(dte)) ? "—" : `${Math.round(Number(dte))}d`);
 /** 63.3: above the rows when cards fit but not one of them has a positive future average. */
@@ -2419,6 +2486,11 @@ const NUM_WORDS = ["Zero", "One", "Two", "Three", "Four", "Five", "Six"];
 export const legsMaxText = (max) => `${NUM_WORDS[max] || max} legs at most. Clear one to add another.`;
 export const TRAY_LABELS = Object.freeze({ debit: "Debit", credit: "Credit", maxProfit: "Max profit", maxLoss: "Max loss",
   chance: "Chance", noCap: "No cap", clear: "Clear" });
+/** The tray's chance cell names both (PR 72, task 72.5): "74% model · 71% mkt"; a chance not read is a dash. */
+export const trayChanceText = (model = null, mkt = null) => trayChanceLines(model, mkt).join(" · ");
+/** …as the cell's two lines, so it fits a quarter of a phone's tray: ["74% model", "71% mkt"]. */
+export const trayChanceLines = (model = null, mkt = null) =>
+  [`${chanceText(model)} ${MODEL_CHANCE_WORD}`, `${known(mkt) ? chanceText(mkt) : "\u2014"} ${MARKET_CHANCE_ROW_WORD}`];
 export const uncoveredText = () => "Build is blocked: a short leg is not covered, and the gate refuses an uncovered short leg. Add the leg that covers it.";
 export const trayEmptyText = () => "Tap an ask to buy one, a bid to sell one. Tap it again to remove it.";
 /* A LEG THE BOARD DOES NOT QUOTE IS REPLACED, NOT ADDED TO (PR 70). Read live, XLE 27 Nov: "Edit in chain" carried a 59.5P
@@ -2479,17 +2551,20 @@ export const exitMarkLabel = (day) => `exit ${day}`;
 export const zoneOddsLabel = (p) => (known(p) && Number(p) > 0 && Number(p) < 0.005 ? "<1%" : chanceText(p));
 export const CROSS_HINT = "Tap the chart, drag the line, or use the arrow keys to read a price.";
 /** The chart's toggle (PR 68, deferred from PR 63 until P5): read at expiry, or on the exit day. */
+// PR 72: `exitAt(days)` / `noneAt(days)` read the trade's own plan; `exit` / `none` are the RULES default's words.
 export const CHART_WHEN = Object.freeze({ expiry: "At expiry", exit: `At the ${RULES.exitDTE}-DTE exit`, aria: "When the chart is read",
-  none: `Within ${RULES.exitDTE} days of expiry, or a leg's volatility not read: no exit day to draw.` });
+  none: `Within ${RULES.exitDTE} days of expiry, or a leg's volatility not read: no exit day to draw.`,
+  exitAt: (d = RULES.exitDTE) => `At the ${d}-DTE exit`,
+  noneAt: (d = RULES.exitDTE) => `Within ${d} days of expiry, or a leg's volatility not read: no exit day to draw.` });
 export const CROSS_ARIA = "Price to read on the chart";
 /** "GLD at $370.00 on 20 Nov → +$1,240 on 7 contracts · 31% chance to finish below". */
 export const crosshairLine = ({ ticker, price, day, pnl, contracts, below }) =>
   `${ticker} at $${Number(price).toFixed(2)} on ${day} → ${signedMoney(pnl)} on ${contracts} contract${contracts === 1 ? "" : "s"} · ` +
   `${zoneOddsLabel(below)} chance to finish below`;
 /** "How to read ⓘ" on Build's chart: what each mark is (the zones and the crosshair joined in PR 63). */
-export const howToReadChart = ({ ticker, sessions, chance, exitDay, atExit = false }) =>
+export const howToReadChart = ({ ticker, sessions, chance, exitDay, atExit = false, exitDTE = RULES.exitDTE }) =>
   (atExit && exitDay ? `Read on the exit day, ${exitDay}: the zones, the bars, the line at the right edge and the crosshair are ` +
-    `what the trade is worth then (each leg priced on its own volatility with ${RULES.exitDTE} days left), not at expiry. ` : "") +
+    `what the trade is worth then (each leg priced on its own volatility with ${exitDTE} days left), not at expiry. ` : "") +
   `On the left, ${ticker}'s price over the last ${sessions}; the amber dot is today's price. From it, the blue fan is where ` +
   `the price could be by expiry: the darker band holds about 68 of every 100 outcomes of the model (one standard deviation ` +
   `either side, its two prices written at the fan's edge), the paler one 95. The faint green and violet zones are where the ` +
@@ -2497,7 +2572,7 @@ export const howToReadChart = ({ ticker, sessions, chance, exitDay, atExit = fal
   `CHANCE figure, and they add up to 100%: the green ones add up to ${chance}. The bars are the same chances, price by ` +
   `price. At the right edge, what the trade makes or loses at expiry, read straight across the same price axis. The dashed ` +
   `blue line is the breakeven, with how far it is from today's price.${exitDay ? ` The tick on the time axis is ${exitDay}, ` +
-  `when the plan exits at ${RULES.exitDTE} days to expiry.` : ""} Tap the chart (or drag the line, or use the arrow keys) to ` +
+  `when the plan exits at ${exitDTE} days to expiry.` : ""} Tap the chart (or drag the line, or use the arrow keys) to ` +
   `read any price: what the trade makes there at expiry for your size, and the chance of finishing below it.`;
 /* ====================================================================
    BUILD'S GREEK TABS AND SCENARIO TABLE, SAID (PR 67, tasks 67.3 and 67.4; the owner's comparison with IBKR's Option
@@ -2515,9 +2590,11 @@ export const GREEK_UNITS = Object.freeze({ delta: "shares", gamma: "shares per $
 export const greekLegend = (exitDay = null) => ({ today: "Today", exit: exitDay ? `At the exit, ${exitDay}` : "At the exit" });
 /** When the trade is already inside the exit window, the exit line is not drawn, and the chart says why. */
 export const GREEK_NO_EXIT = `Already within ${RULES.exitDTE} days of expiry: no exit line.`;
+/** The same, on the trade's own plan (PR 72). */
+export const greekNoExit = (d = RULES.exitDTE) => `Already within ${d} days of expiry: no exit line.`;
 /** The Greek tabs' ⓘ: which figures are read and which computed (the owner's prompt, task 67.4). */
-export const greeksInfo = () => `The lines are computed: Black-Scholes on each leg's own implied volatility (read from the chain), ` +
-  `for the whole position at your size — today, and on the exit day, ${RULES.exitDTE} days before the expiry. The dot at today's ` +
+export const greeksInfo = (exitDTE = RULES.exitDTE) => `The lines are computed: Black-Scholes on each leg's own implied volatility (read from the chain), ` +
+  `for the whole position at your size — today, and on the exit day, ${exitDTE} days before the expiry. The dot at today's ` +
   `price is read: the broker's own Greeks for each leg, added up for your size. A leg the feed sends no figure for leaves no dot.`;
 /** "Delta at $378.20 today: +34 shares · read from the broker: +36". */
 export const greekNowLine = ({ label, unit, price, today, read }) =>
@@ -6016,11 +6093,11 @@ export const modelPriceNote = (feed = "the option chain") =>
  * warning looks like. The first clause is the phrase the brief and the screen
  * both carry, so the two cannot drift apart.
  */
-export const stopWarningHead = (pnl = null) =>
+export const stopWarningHead = (pnl = null, pct = null) =>
   `Stop threshold crossed — not validated by backtest` +
-  `${pnl != null && Number.isFinite(+pnl) ? ` (${money(pnl)}, at or past ${pctText(RULES.stopLossPct)} of the maximum loss)` : ""}.`;
-export const stopWarningSentence = (pnl = null) =>
-  `${stopWarningHead(pnl)} ` +
+  `${pnl != null && Number.isFinite(+pnl) ? ` (${money(pnl)}, at or past ${pctText(known(pct) ? Number(pct) : RULES.stopLossPct)} of the maximum loss)` : ""}.`;
+export const stopWarningSentence = (pnl = null, pct = null) =>
+  `${stopWarningHead(pnl, pct)} ` +
   `Nothing closes on this and no order is offered for it. Closing here is your decision, and it is ` +
   `recorded as a manual close with the reason you write, never as a trade the rules ended.`;
 
@@ -6042,20 +6119,24 @@ export const stopWarningSentence = (pnl = null) =>
    (`contracts` combinations) and is what a whole-position P&L is compared with.
    `base` is what the percentage is a share of, per combination.
 ===================================================================== */
-export function takeProfitTarget({ legs = null, maxProfit = null, maxLoss = null, entryNet = null, contracts = 1 } = {}) {
+export function takeProfitTarget({ legs = null, maxProfit = null, maxLoss = null, entryNet = null, contracts = 1, plan = null } = {}) {
   const n = Math.max(1, Math.round(Number(contracts) || 1));
   const ls = Array.isArray(legs) ? legs : [];
   const none = { basis: null, pct: null, base: null, perCombo: null, dollars: null };
-  if (ls.length === 1 && Number(ls[0].side) > 0) {
+  // PR 72: the trade's own take profit (`exitPlanOf()`), a share of whichever basis applies; else the RULES default.
+  const own = plan && known(plan.takeProfitPct) && Number(plan.takeProfitPct) > 0 ? Number(plan.takeProfitPct) : null;
+  if (isSingleLong(ls)) {
+    const pct = own ?? RULES.singleTakeProfitPctOfPremium;
     const premium = known(entryNet) && Number(entryNet) > 0 ? Number(entryNet) * 100
       : known(maxLoss) && Number(maxLoss) < 0 ? Math.abs(Number(maxLoss)) : null;
-    if (premium == null) return { ...none, basis: "premium", pct: RULES.singleTakeProfitPctOfPremium };
-    const perCombo = RULES.singleTakeProfitPctOfPremium * premium;
-    return { basis: "premium", pct: RULES.singleTakeProfitPctOfPremium, base: premium, perCombo, dollars: perCombo * n };
+    if (premium == null) return { ...none, basis: "premium", pct };
+    const perCombo = pct * premium;
+    return { basis: "premium", pct, base: premium, perCombo, dollars: perCombo * n };
   }
   if (known(maxProfit) && Number(maxProfit) > 0) {
-    const perCombo = RULES.takeProfitPct * Number(maxProfit);
-    return { basis: "max-profit", pct: RULES.takeProfitPct, base: Number(maxProfit), perCombo, dollars: perCombo * n };
+    const pct = own ?? RULES.takeProfitPct;
+    const perCombo = pct * Number(maxProfit);
+    return { basis: "max-profit", pct, base: Number(maxProfit), perCombo, dollars: perCombo * n };
   }
   return none;
 }
@@ -6065,9 +6146,10 @@ export function takeProfitTarget({ legs = null, maxProfit = null, maxLoss = null
  * engine.js (which imports nothing). `targetOf` is `takeProfitTarget()`'s per-contract dollars (50% of the maximum profit,
  * 50% of the premium for a single long option), null when there is none (no ceiling).
  */
-export const exitReplayPolicy = () => ({
-  exitDTE: RULES.exitDTE, stopLossPct: RULES.stopLossPct, volDays: RULES.replayVolDays,
-  targetOf: ({ legs, maxProfit, maxLoss, entryNet }) => takeProfitTarget({ legs, maxProfit, maxLoss, entryNet: entryNet == null ? null : entryNet, contracts: 1 }).perCombo,
+export const exitReplayPolicy = (plan = null) => ({
+  exitDTE: plan && known(plan.exitDTE) ? Number(plan.exitDTE) : RULES.exitDTE,
+  stopLossPct: plan && known(plan.stopLossPct) ? Number(plan.stopLossPct) : RULES.stopLossPct, volDays: RULES.replayVolDays,
+  targetOf: ({ legs, maxProfit, maxLoss, entryNet }) => takeProfitTarget({ legs, maxProfit, maxLoss, entryNet: entryNet == null ? null : entryNet, contracts: 1, plan }).perCombo,
 });
 
 /* =====================================================================
@@ -6075,6 +6157,11 @@ export const exitReplayPolicy = () => ({
    `/api/bars` returns — read on a tap, never on their own, and never from a made-up series (the owner, 12 Oct 2026).
 ===================================================================== */
 const MONTH_WORDS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+/** Why the price history is not on Build's chart (PR 72, task 72.6): no answer at all, or the server's own sentence. */
+export const barsNotLoadedText = ({ network = false, error = null } = {}) => (network
+  ? "The price history did not arrive: the connection dropped before the server answered, three times. Retry, or check the connection."
+  : `The price history is not loaded: ${error || "the server sent no reason"}.`);
+export const BARS_RETRY = "Retry";
 export const EXIT_REPLAY = Object.freeze({
   title: "Exit rules, past years",
   run: "Replay the exit rules ›",
@@ -6109,10 +6196,10 @@ export const exitReplayInfo = () => `Every trading session of this month in each
   `out at the warning would have done. Nothing here changes a rule.`;
 
 /** The target's basis as a phrase: "50% of the premium paid" / "50% of the maximum profit". */
-export const takeProfitBasisWords = (basis = "max-profit") =>
+export const takeProfitBasisWords = (basis = "max-profit", pct = null) =>
   basis === "premium"
-    ? `${pctText(RULES.singleTakeProfitPctOfPremium)} of the premium paid`
-    : `${pctText(RULES.takeProfitPct)} of the maximum profit`;
+    ? `${pctText(known(pct) ? Number(pct) : RULES.singleTakeProfitPctOfPremium)} of the premium paid`
+    : `${pctText(known(pct) ? Number(pct) : RULES.takeProfitPct)} of the maximum profit`;
 
 /** Where a profit stands against its target, as a share (0 to 1+), or null when either is unknown. */
 export const takeProfitProgress = (pnl, target) =>
@@ -6123,10 +6210,133 @@ export const takeProfitProgress = (pnl, target) =>
  * unknown. A warning, never an order (`stopLossEnforcement`). One home: `posAlerts` and the Positions card both
  * read it, so the level on the card is the level that raises the warning.
  */
-export const stopWarningLevel = ({ maxLoss = null, contracts = 1 } = {}) =>
+export const stopWarningLevel = ({ maxLoss = null, contracts = 1, plan = null } = {}) =>
   known(maxLoss) && Number(maxLoss) < 0
-    ? RULES.stopLossPct * Number(maxLoss) * Math.max(1, Math.round(Number(contracts) || 1))
+    ? (plan && known(plan.stopLossPct) ? Number(plan.stopLossPct) : RULES.stopLossPct) * Number(maxLoss) * Math.max(1, Math.round(Number(contracts) || 1))
     : null;
+
+/* =====================================================================
+   THE EXIT PLAN, PER TRADE (PR 72, owner 19 Oct 2026).
+
+   Each trade carries its own plan — { takeProfitPct, exitDTE, stopLossPct, source, suggestedFrom } — frozen on the
+   position at Send (`commitPosition()` in App.jsx) and filed with it in the Journal. Every reader asks `exitPlanOf()`:
+   Positions, a position's screen, the autopilot, the exit date, the take-profit target, the stop warning and the chart's
+   exit marker. A position opened before PR 72 has no plan and reads the RULES defaults, exactly as before.
+
+   THE SUGGESTION a trade starts from is the replay's best variant for its market and structure family when "Replay the
+   exit rules ›" has run on a finished window (the replay still runs only on its button, the owner's rule of 12 Oct
+   2026), else the RULES defaults, which keep "defaults · not backtested on TK". Build edits each value in place within
+   `exitPlanBounds()`; the time exit never reaches the expiry (`entryRoom()`), so no plan opens inside its own exit.
+   The stop stays a warning whatever its level.
+===================================================================== */
+/** One long option and nothing else: its take profit is a share of the premium paid, not of a maximum. */
+export function isSingleLong(legs) {
+  return Array.isArray(legs) && legs.length === 1 && !!legs[0] && Number(legs[0].side) > 0;
+}
+/** The plan the RULES give a structure: the defaults every trade opened before PR 72 still reads. */
+export function rulesExitPlan(legs = null) {
+  return { takeProfitPct: isSingleLong(legs) ? RULES.singleTakeProfitPctOfPremium : RULES.takeProfitPct,
+    exitDTE: RULES.exitDTE, stopLossPct: RULES.stopLossPct };
+}
+/**
+ * Where each value may go: take profit 25–90%, stop 25–100% of the maximum loss, both in 5-point steps; the time exit
+ * 7–45 days before expiry, a day at a time, its top cut so it stays before the expiry (`entryRoom()`, the gate's own band).
+ */
+export function exitPlanBounds(key, dte = null) {
+  if (key === "takeProfitPct") return { min: RULES.exitPlanTakeProfitMin, max: RULES.exitPlanTakeProfitMax, step: RULES.exitPlanPctStep };
+  if (key === "stopLossPct") return { min: RULES.exitPlanStopMin, max: RULES.exitPlanStopMax, step: RULES.exitPlanPctStep };
+  if (key === "exitDTE") {
+    let max = RULES.exitPlanDTEMax;
+    if (known(dte)) while (max > RULES.exitPlanDTEMin && entryRoom(dte, { exitDTE: max }).band === "inside-exit") max -= 1;
+    return { min: RULES.exitPlanDTEMin, max, step: 1 };
+  }
+  return null;
+}
+const onStep = (x, step) => Number((Math.round(Number(x) / step) * step).toFixed(4));
+/** A plan held inside its bounds and on its steps (a value that is not a number falls back to the RULES one). */
+export function clampExitPlan(plan = {}, { dte = null, legs = null } = {}) {
+  const base = rulesExitPlan(legs);
+  const out = {};
+  for (const k of ["takeProfitPct", "exitDTE", "stopLossPct"]) {
+    const b = exitPlanBounds(k, dte);
+    const v = plan && known(plan[k]) ? Number(plan[k]) : base[k];
+    out[k] = Math.min(b.max, Math.max(b.min, onStep(v, b.step)));
+  }
+  return out;
+}
+/** One value moved one step (− or +), held inside its bounds. */
+export function stepExitPlan(plan, key, dir, { dte = null, legs = null } = {}) {
+  const b = exitPlanBounds(key, dte);
+  if (!b) return plan;
+  return clampExitPlan({ ...plan, [key]: Number(plan[key]) + Math.sign(dir) * b.step }, { dte, legs });
+}
+/** The plan a position carries, or the RULES defaults for one opened before PR 72 (`source` null says which). */
+export function exitPlanOf(pos = {}) {
+  const base = rulesExitPlan(pos && pos.legs);
+  const e = pos && pos.exitPlan;
+  if (!e || typeof e !== "object") return { ...base, source: null, suggestedFrom: null };
+  const pick = (k) => (known(e[k]) && Number(e[k]) > 0 ? Number(e[k]) : base[k]);
+  return { takeProfitPct: pick("takeProfitPct"), exitDTE: pick("exitDTE"), stopLossPct: pick("stopLossPct"),
+    source: e.source === "edited" ? "edited" : "suggested", suggestedFrom: e.suggestedFrom || null };
+}
+/**
+ * A STRUCTURE'S FAMILY, for the replay's suggestion: the legs' shape without their strikes — each leg's side, ratio and
+ * type in strike order. A bull put spread on any strikes is one family; an iron condor another.
+ */
+export function structureFamily(legs = []) {
+  const ls = (Array.isArray(legs) ? legs : []).filter(Boolean)
+    .map((l) => ({ k: Number(l.strike), t: l.type === "call" ? "c" : "p", s: Number(l.side) > 0 ? "+" : "-", q: Math.abs(Number(l.qty) || 1) }))
+    .sort((a, b) => a.k - b.k || (a.t < b.t ? -1 : a.t > b.t ? 1 : 0));
+  return ls.map((l) => `${l.s}${l.q}${l.t}`).join(" ");
+}
+/** The variants the replay also runs (PR 72): every take profit × time exit of the grid that leaves room before `dte`. */
+export function exitPlanVariants(dte, legs = null) {
+  const base = rulesExitPlan(legs);
+  const out = [];
+  for (const tp of RULES.exitPlanReplayTakeProfits) {
+    for (const ex of RULES.exitPlanReplayExitDays) {
+      if (known(dte) && entryRoom(dte, { exitDTE: ex }).band === "inside-exit") continue;
+      out.push({ takeProfitPct: tp, exitDTE: ex, stopLossPct: base.stopLossPct });
+    }
+  }
+  return out;
+}
+/**
+ * THE SUGGESTION FROM THE REPLAY: of the variants replayed (`runs`: [{ plan, result }], `result` from `exitBacktest()`),
+ * the one with the best average per $100 at risk under its rules, on at least one finished window; a tie goes to the
+ * RULES defaults, then to the smaller change. Null when no variant finished a window. The best on these years, not a
+ * forecast: picking the best of nine on one month's history flatters it, and the line says how many windows it read.
+ */
+export function exitSuggestionOf({ ticker = null, legs = null, runs = [], month = null } = {}) {
+  const base = rulesExitPlan(legs);
+  const ok = (runs || []).filter((r) => r && r.result && r.result.n > 0 && r.result.rules && known(r.result.rules.per100));
+  if (!ok.length) return null;
+  const isBase = (p) => p.takeProfitPct === base.takeProfitPct && p.exitDTE === base.exitDTE;
+  const dist = (p) => Math.abs(p.takeProfitPct - base.takeProfitPct) * 100 + Math.abs(p.exitDTE - base.exitDTE);
+  const best = [...ok].sort((a, b) => (b.result.rules.per100 - a.result.rules.per100) || (isBase(b.plan) - isBase(a.plan)) || (dist(a.plan) - dist(b.plan)))[0];
+  return { takeProfitPct: best.plan.takeProfitPct, exitDTE: best.plan.exitDTE, stopLossPct: best.plan.stopLossPct, from: "replay",
+    ticker, family: structureFamily(legs), n: best.result.n, years: best.result.years || [], per100: best.result.rules.per100, month };
+}
+/** The defaults as a suggestion, said as such ("defaults · not backtested on TK" stays the pill). */
+export const defaultSuggestion = (legs = null) => ({ ...rulesExitPlan(legs), from: "defaults" });
+/** "TP 50% · 21 days · stop 50%": a plan in one line. */
+export const exitPlanShort = (p) => (!p ? "—" : `TP ${pctText(p.takeProfitPct, 0)} · ${p.exitDTE} days · stop ${pctText(p.stopLossPct, 0)}`);
+/** "Suggested from the replay: 107 windows on XLE, TP 50% · 21 days" — the owner's line (19 Oct 2026). */
+export const exitSuggestionLine = (sg) => (!sg || sg.from !== "replay" ? null
+  : `Suggested from the replay: ${sg.n} window${sg.n === 1 ? "" : "s"} on ${sg.ticker}, TP ${pctText(sg.takeProfitPct, 0)} · ${sg.exitDTE} days`);
+/** Build's tags and link (PR 72). */
+export const EXIT_PLAN_WORDS = Object.freeze({ suggested: "Suggested", edited: "Edited", reset: "Reset to suggested",
+  aria: (label) => `${label} of the exit plan` });
+/** The line filed on the position's timeline at entry, and read in the Journal: the plan and where it came from. */
+export function exitPlanEntryLine(plan) {
+  if (!plan) return null;
+  const sg = plan.suggestedFrom;
+  const from = !sg ? "" : sg.from === "replay" ? ` (suggested from the replay: ${sg.n} window${sg.n === 1 ? "" : "s"} on ${sg.ticker})`
+    : " (the defaults, not backtested)";
+  return plan.source === "edited"
+    ? `Exit plan: ${exitPlanShort(plan)} — edited; suggested was ${exitPlanShort(sg)}${from}.`
+    : `Exit plan: ${exitPlanShort(plan)} — as suggested${from}.`;
+}
 
 /**
  * WHICH RULE ENDED A TRADE — and the stop is not one of them.
@@ -6140,14 +6350,14 @@ export const stopWarningLevel = ({ maxLoss = null, contracts = 1 } = {}) =>
  *
  * @returns { ruleExit, rule, text, stopWarning }
  */
-export function ruleExitOf({ tpHit = false, dteExit = false, slHit = false, dteLeft = null, tpBasis = "max-profit" } = {}) {
+export function ruleExitOf({ tpHit = false, dteExit = false, slHit = false, dteLeft = null, tpBasis = "max-profit", plan = null } = {}) {
   if (tpHit) {
     return { ruleExit: true, rule: "take-profit", stopWarning: !!slHit,
-      text: `Closed by the rules: ${takeProfitBasisWords(tpBasis)} was reached.` };
+      text: `Closed by the rules: ${takeProfitBasisWords(tpBasis, plan && plan.takeProfitPct)} was reached.` };
   }
   if (dteExit) {
     return { ruleExit: true, rule: "exit-dte", stopWarning: !!slHit,
-      text: `Closed by the rules: inside the ${RULES.exitDTE}-day exit window` +
+      text: `Closed by the rules: inside the ${plan && known(plan.exitDTE) ? plan.exitDTE : RULES.exitDTE}-day exit window` +
         `${dteLeft != null ? ` (${dteLeft} day${dteLeft === 1 ? "" : "s"} left)` : ""}.` };
   }
   return { ruleExit: false, rule: null, stopWarning: !!slHit, text: null };
@@ -6175,7 +6385,7 @@ export function ruleExitOf({ tpHit = false, dteExit = false, slHit = false, dteL
    not move the action. Their lines, and any lower-ranked line, go in `notes`.
 ===================================================================== */
 export function positionAction({ tpHit = false, dteExit = false, slHit = false, edge = null,
-  pnl = null, dteLeft = null, level = null, ap = null, notHeld = null, tpBasis = "max-profit" } = {}) {
+  pnl = null, dteLeft = null, level = null, ap = null, notHeld = null, tpBasis = "max-profit", plan = null } = {}) {
   /* >>> NOT ON ALPACA (0c, 23 Sep 2026). <<< J-0002 showed a WARNING and a
      -$133 profit — the app's own mark — while a SUCCESSFUL sync of
      /v2/positions returned nothing at all. A position the broker does not hold
@@ -6192,21 +6402,24 @@ export function positionAction({ tpHit = false, dteExit = false, slHit = false, 
   const thin = !!(edge && edge.thin);
   const stop = !!slHit && known;
   const notes = [];
-  const r = ruleExitOf({ tpHit: !!tpHit && known, dteExit: !!dteExit, slHit: stop, dteLeft, tpBasis });
+  const r = ruleExitOf({ tpHit: !!tpHit && known, dteExit: !!dteExit, slHit: stop, dteLeft, tpBasis, plan });
+  // PR 72: the trade's own plan (`exitPlanOf()`); without one, the RULES defaults.
+  const exitDays = plan && Number.isFinite(Number(plan.exitDTE)) ? Number(plan.exitDTE) : RULES.exitDTE;
+  const stopPct = plan ? plan.stopLossPct : null;
   let out;
   if (r.ruleExit) {
     out = { action: "CLOSE", rule: r.rule,
       line: r.rule === "take-profit"
-        ? `Take profit reached: ${takeProfitBasisWords(tpBasis)}.`
+        ? `Take profit reached: ${takeProfitBasisWords(tpBasis, plan && plan.takeProfitPct)}.`
         : `${dteLeft != null ? `${dteLeft} day${dteLeft === 1 ? "" : "s"} to expiry` : "Inside the exit window"}: ` +
-          `the ${RULES.exitDTE}-day exit applies.` };
-    if (stop) notes.push(stopWarningHead(pnl));
+          `the ${exitDays}-day exit applies.` };
+    if (stop) notes.push(stopWarningHead(pnl, stopPct));
     if (thin) notes.push(remainingEdgeLabel(edge));
   } else if (!known) {
     out = { action: null, rule: null,
       line: `No quote: no broker price for this position right now, so no action can be read. It is not HOLD.` };
   } else if (stop) {
-    out = { action: "WARNING", rule: null, kind: "stop", line: stopWarningHead(pnl) };
+    out = { action: "WARNING", rule: null, kind: "stop", line: stopWarningHead(pnl, stopPct) };
     if (thin) notes.push(remainingEdgeLabel(edge));
   } else if (thin) {
     out = { action: "WARNING", rule: null, kind: "edge", line: remainingEdgeLabel(edge) };
@@ -6233,8 +6446,11 @@ export const AUTOPILOT_VERDICTS = ["HOLD", "CLOSE_ALL"];
  * @returns { verdict, rule, rationale, warnings, approvable }
  */
 export function autopilotVerdict({ verdict = "HOLD", takeProfit = null, pnl = null,
-  maxLoss = null, dteLeft = null, modelled = false } = {}) {
+  maxLoss = null, dteLeft = null, modelled = false, plan = null } = {}) {
   const warnings = [];
+  // PR 72: the position's own plan (`exitPlanOf()`); a position from before PR 72 reads the RULES defaults.
+  const exitDays = plan && known(plan.exitDTE) ? Number(plan.exitDTE) : RULES.exitDTE;
+  const stopPct = plan && known(plan.stopLossPct) ? Number(plan.stopLossPct) : RULES.stopLossPct;
   let v = String(verdict || "HOLD").toUpperCase();
   let rationale = null, rule = null;
 
@@ -6249,19 +6465,19 @@ export function autopilotVerdict({ verdict = "HOLD", takeProfit = null, pnl = nu
     && known(pnl) && Number(pnl) >= Number(takeProfit.dollars);
   if (tp) {
     v = "CLOSE_ALL"; rule = "take-profit";
-    rationale = `Rule: reached ${takeProfitBasisWords(takeProfit.basis)}.`;
+    rationale = `Rule: reached ${takeProfitBasisWords(takeProfit.basis, takeProfit.pct)}.`;
   }
 
   // 2) the stop — NEVER a verdict, NEVER a link, ALWAYS a warning.
   const stopCrossed = pnl != null && maxLoss != null
     && Number.isFinite(+pnl) && Number.isFinite(+maxLoss) && +maxLoss < 0
-    && +pnl <= RULES.stopLossPct * +maxLoss;
-  if (stopCrossed) warnings.push(stopWarningSentence(pnl));
+    && +pnl <= stopPct * +maxLoss;
+  if (stopCrossed) warnings.push(stopWarningSentence(pnl, stopPct));
 
   // 3) the exit window — a rule of action, and it keeps its link.
-  if (!tp && v === "HOLD" && dteLeft != null && Number.isFinite(+dteLeft) && +dteLeft <= RULES.exitDTE) {
+  if (!tp && v === "HOLD" && dteLeft != null && Number.isFinite(+dteLeft) && +dteLeft <= exitDays) {
     v = "CLOSE_ALL"; rule = "exit-dte";
-    rationale = `Rule: inside the ${RULES.exitDTE} DTE exit window.`;
+    rationale = `Rule: inside the ${exitDays} DTE exit window.`;
   }
 
   // 4) AN ESTIMATED PRICE CANNOT AUTHORISE AN ORDER. The trigger is real and is
@@ -6270,7 +6486,7 @@ export function autopilotVerdict({ verdict = "HOLD", takeProfit = null, pnl = nu
   // does not read as an instruction the app is refusing to act on.
   if (modelled && rule) {
     warnings.push(
-      `${rule === "take-profit" ? `The take-profit level (${takeProfitBasisWords(takeProfit.basis)})` : `The ${RULES.exitDTE}-day exit window`} ` +
+      `${rule === "take-profit" ? `The take-profit level (${takeProfitBasisWords(takeProfit.basis, takeProfit.pct)})` : `The ${exitDays}-day exit window`} ` +
       `has been reached on an ESTIMATED price, so this is a warning and not a proposal: no order is offered. ` +
       `Check the position against a live chain before doing anything.`);
     v = "HOLD";

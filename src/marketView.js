@@ -114,3 +114,24 @@ export const legCell = (legs = [], type, strike) => {
   const l = legs.find((x) => x.type === type && Number(x.strike) === Number(strike));
   return !l ? null : l.side > 0 ? "ask" : "bid";
 };
+
+/**
+ * THE PRICE HISTORY, ASKED AGAIN WHEN THE CONNECTION DROPS (PR 72, task 72.6). Read on the owner's phone: Build said "The
+ * price history is not loaded: Failed to fetch" beside a live chain. "Failed to fetch" is the browser's own words for a
+ * request that got NO answer (a dropped connection, the phone switching networks, a request cut off) — not a reply from
+ * `/api/bars`, which answers every failure in a sentence. So a request with no answer is asked again, up to `tries` times
+ * with a growing wait; an answer — even a refusal — is never asked again. Returns { ok, json, status, network, error }.
+ */
+export async function fetchJsonRetry(url, { tries = 3, waitMs = 800, fetchImpl = null, sleep = null } = {}) {
+  const f = fetchImpl || ((u) => fetch(u));
+  const nap = sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
+  let last = null;
+  for (let i = 0; i < Math.max(1, tries); i++) {
+    if (i > 0) await nap(waitMs * i);
+    let r;
+    try { r = await f(url); } catch (e) { last = String((e && e.message) || e); continue; }
+    const json = await r.json().catch(() => ({}));
+    return { ok: !!r.ok, json, status: r.status, network: false, error: r.ok ? null : (json && json.error) || `HTTP ${r.status}` };
+  }
+  return { ok: false, json: null, status: null, network: true, error: last };
+}

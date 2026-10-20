@@ -18,7 +18,7 @@
 import React, { useEffect, useId, useRef, useState } from "react";
 import { T, TYPE } from "./theme.js";
 import { X } from "lucide-react";
-import { PLACEHOLDER_HEAD, placeholderOf } from "./rules.js";
+import { PLACEHOLDER_HEAD, placeholderOf, COPY_WORDS, OCC_NOT_LISTED } from "./rules.js";
 
 const FS = TYPE.size, FW = TYPE.weight, LH = TYPE.line;
 
@@ -489,3 +489,27 @@ export const TextBtn = ({ children, onClick, color = T.blue, height = 36, style,
     style={{ ...sans, fontSize: FS.xs, fontWeight: FW.regular, color, background: "transparent", border: "none", padding: "0 6px",
       minHeight: height, cursor: "pointer", lineHeight: LH.tight, ...style }}>{children}</button>
 );
+
+/**
+ * A CONTRACT, NAMED TWICE (PR 72, task 72.4): the name the way IBKR writes it ("SLV Nov27'26 49.5 Put", `ibkrName()` in
+ * rules.js) and, under it in small mono, the exact OCC symbol the order carries — the chain's (or the broker's) own, never
+ * one formatted from a strike — with a Copy button. No symbol: one quiet line says the chain did not list it.
+ * `name` is the line's first half as the caller sets it (its style is the caller's: the leg rows keep theirs).
+ */
+export function ContractName({ name, occ = null, nameStyle = null, nameProps = null }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(String(occ)); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* nothing copied */ }
+  };
+  return (
+    <span data-contract style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+      <span data-contract-name {...(nameProps || {})} style={nameStyle || { ...mono, fontSize: FS.sm, fontWeight: FW.bold, color: T.ink }}>{name}</span>
+      {occ ? (
+        <span style={{ display: "flex", alignItems: "center", gap: 2, minWidth: 0 }}>
+          <span data-contract-occ style={{ ...mono, fontSize: FS.xs, color: T.mut, overflowWrap: "anywhere" }}>{occ}</span>
+          <TextBtn onClick={copy} aria-label={COPY_WORDS.aria(occ)} height={28}>{copied ? COPY_WORDS.copied : COPY_WORDS.copy}</TextBtn>
+        </span>
+      ) : <span data-contract-occ="" style={{ ...sans, fontSize: FS.xs, color: T.mut }}>{OCC_NOT_LISTED}</span>}
+    </span>
+  );
+}

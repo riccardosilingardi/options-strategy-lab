@@ -6,6 +6,66 @@ The full history of every item shipped so far (P0–P10, P2-bis) is in `docs/his
 Every pull request updates this file: the session that ships an item marks it done and states
 what the next one inherits.
 
+## Done in PR 72 (owner, 19 Oct 2026): exit rules per trade, signals on the trade's plan, exposure line, contract names
+
+The second of three stacked PRs (71 → 72 → 73), stacked on PR 71. The plan's open points were the owner's to settle (19 Oct
+2026): the stop's range is 25–100% of the maximum loss (past 100% it could never fire); a neutral trade is against the
+signals only when Find would read Bull or Bear AND one expected move to the exit day leaves its profit zone.
+
+- **72.1 — the exit plan per trade.** `exitPlanOf()` (rules.js) is the one reader of a position's frozen `exitPlan`
+  { takeProfitPct, exitDTE, stopLossPct, source: "suggested" | "edited", suggestedFrom }, the RULES defaults for a position
+  opened before this PR. Every reader takes it: the Positions card and its exits, a position's screen and its Guardian
+  (target, stop rung, simulator), the autopilot (its verdict, `exitSim()`, the facts and the stop sentence it hands the
+  model), the exit date (`exitDateOf()`, the market page's event line), the take-profit target, the stop warning, the
+  chart's exit day and Greeks, More's yearly replay and stats. **Build's Exit plan** edits it in place: a tap on a row opens
+  its − / + (bounds in RULES: take profit 25–90% and stop 25–100% in 5-point steps, time exit 7–45 days, never at or past the
+  expiry through `entryRoom()`), each row tagged Suggested or Edited, "Reset to suggested" while edited. Send freezes it
+  (`commitPosition({ exitPlan })`), with a timeline line saying the plan and, when edited, what was suggested; the Journal
+  entry keeps it. **The suggestion:** "Replay the exit rules ›" (still on its button only) also replays nine variants (take
+  profit 25 / 50 / 75% × time exit 14 / 21 / 30 days), and the best average per $100 on a finished window becomes the
+  market-and-family suggestion for the month (`exitSuggestionOf()`, `structureFamily()`, `store.exitSuggestions`, on the
+  device): "Suggested from the replay: 11 windows on XLE, TP 50% · 21 days"; without it, the defaults and their pill.
+- **72.2 — against the signals, on the plan.** The trade's direction is the payoff valued on the plan's exit day
+  (`planNeed`: `exitCurve()` → `curveZones()` → `payoffNeed()`; `needDirection()`), no longer the net delta. `againstOnPlan()`
+  (signals.js): a direction is judged as before; a zone around today's price only when `signalDirection()` reads Bull or
+  Bear and one expected move that way to the exit day (the chance's volatility) leaves the zone — the reason prompt says so
+  with the numbers; a move either way is never against. Recomputed when the plan's exit moves.
+- **72.3 — the exposure line**, amber above Send, only past the total limit and with the cap on or off: "Open risk after
+  this trade: $653 = 327% of capital (your limit: 25%)" ("suggested" until the capital is answered), from the gate's own
+  limits, never a block (`exposureLine()`).
+- **72.4 — contracts named twice and the feed.** Each leg on Build, in the review sheet and in a position's Alpaca details
+  reads "1 × SLV Nov27'26 49.5 Put" (`ibkrName()`) and under it the chain's own OCC symbol (a position: the broker's,
+  `heldSymbolFor()`) in small mono with Copy (`ContractName`, ui.jsx); no listed symbol is said, never built. Build's leg
+  rows are stacked (name · symbol · prices) so each keeps one line on a phone. The market header names the feed beside the
+  prices' age: "Alpaca indicative prices ⓘ", "Alpaca OPRA real-time" when the deploy reads OPRA (`feedLine()`, `FEED_INFO`).
+- **72.5 — the market chance at the order's price.** Measured in the code: Build already read both chances at the limit in
+  force (`AE`, `effectiveLimit()`), and its ⓘ now says the price and breakeven (`chanceAtPriceLine()`). **The GLD 73% was
+  the tray's OSL MODEL chance** printed under "Chance" — and the tray was handed no board, so it had no market chance at
+  all: it now reads both, "31% model" over "26% mkt" (`trayChanceLines()`, the board's distribution through `trayFigures`),
+  and Find's rows say "model chance". On synthetic boards shaped to the owner's two IBKR readings (src/exitPlan.test.js),
+  OSL at IBKR's price reads 70.0% (GLD) and 63.0% (SLV), and the mid against the natural moves it 0.3 and 0.6 points: the
+  price alone does not explain a 3-point gap. PRD §4 #9 records both readings; the live check stays the owner's.
+- **72.6 — "Failed to fetch".** It is the browser's own words for a request that got no answer at all (a dropped
+  connection), not a reply from `/api/bars`. The chart now asks again twice with a growing wait (`fetchJsonRetry()`,
+  marketView.js), says "The price history did not arrive: the connection dropped before the server answered, three times."
+  with a Retry, and `bars.mjs` gives each upstream source 4 s (`UPSTREAM_MS`) so it always answers in words inside Netlify's
+  limit, naming the sources that gave nothing. The cause on the owner's phone cannot be read from here.
+
+**Measured.** Tests 1,526 → 1,550, 0 failed (src/exitPlan.test.js 20, src/exitPlan.test.jsx 4; five source checks follow
+the plan). Build 1,543.16 → 1,557.71 kB (the usual chunk warning). Audit 20 boards, dark and light: 5,248 ✓, 0 unexplained.
+Words: build 610 → 675, market 493 → 499, find 157 and positions 248 unchanged (voice.test.js says each line). Photographs:
+docs/screens/pr72/ (`node scripts/shoot-pr72.mjs`).
+
+**Not changed:** riskGate.js (its stop warning still reads 50%), every RULES default, the seven order paths, /api/state's
+fields (the plan rides inside the position and the Journal entry), `histBacktest()`, the replay's table (the rules').
+
+### What the next session inherits
+
+- No live trade has carried an edited plan, and the replay's suggestion has never come from real closes (PRD §4 #3, #9).
+- The gate's own stop warning still reads the default 50%: a trade whose plan says otherwise can see 50% in a close confirm's
+  warning list. Moving it is a riskGate.js change, left to the owner.
+- Next: PR 73 (stacked on this), the computer layout.
+
 ## Done in PR 71 (owner, 19 Oct 2026): the Journal on the server
 
 The first of three stacked PRs (71 → 72 → 73). **Goal:** one Journal on the phone and the computer, not lost when a browser
@@ -54,7 +114,7 @@ so the Journal survives them), riskGate.js, every RULES value, the order paths.
 - The merge has run on a recording blob store and a stubbed `/api/state` only (PRD §4 #6): the owner's first load after this
   merges uploads the Journal that browser holds; a second device then shows it. Read when it happens.
 - A copilot lesson's answer stays on the device that asked (its line on the trade's timeline syncs).
-- Next: PR 72 (stacked on this), then PR 73.
+- Next: PR 72 (stacked on this), then PR 73. **PR 72 done** (above).
 
 ## Done in PR 70 (owner, 13 Oct 2026): only listed contracts, everywhere a leg is chosen (+ three wrong sentences)
 
@@ -1233,6 +1293,9 @@ One line each; see `PRD.md` §5 and `docs/history/ROADMAP.md` for detail.
   a phone (PRD §4.5). Not started.
 - **What the sweep left** (under #49's inherits): sentences in mono in App.jsx and pro.jsx; visuals.jsx's drawings;
   main.jsx's crash screen.
+- **DONE: PR 72** — the exit plan per trade (edited in place, suggested by the replay, frozen at Send, read everywhere),
+  against-the-signals on the plan's exit day, the exposure line, contracts named twice with the OCC symbol, the feed named,
+  the tray's two chances, the price history asked again.
 - **DONE: PR 71** — the Journal on the server: `journal` and `journalSeq` on `/api/state`, merged by ref on both sides, never
   replaced; the line under the Journal's title says where it is kept.
 - **Planned by the owner (19 Oct 2026), in this order, after PR 72 and PR 73:**

@@ -1088,6 +1088,9 @@ export function journalEntry({ pos = {}, pnl = null, pnlNote = null, reason = nu
     ruleExit: r.kind === "rule" && pnlNote !== NOT_A_FILL,
     closeReason: { kind: r.kind, rule: r.rule || null, text: r.text || null, written: r.written || null },
     thesis: pos.thesis || null,
+    // THE EXIT PLAN IT WAS HELD TO (PR 72): its three values, whether they were the suggestion or edited, and what the
+    // suggestion was — so a later reading can see whether edits paid. Null for a trade opened before PR 72 (the defaults).
+    exitPlan: pos.exitPlan || null,
     timeline: pos.timeline || [],
     seqNext: pos.seqNext ?? (highestSeq(pos.timeline) + 1),
     // FULL, both of them.

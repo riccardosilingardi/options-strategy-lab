@@ -9,18 +9,24 @@ import {
   SlidersHorizontal, Sun, Moon, AlertTriangle, WifiOff,
 } from "lucide-react";
 import { fetchAllNews, fetchWeather, ImpactTags, TaCopilot, ReportTab, OrderTicket, UnrecordedCard, scaleStrategy, buildContext, GuardianPanel, ChainMatrix, OptionPanel, PriceChart, QtyField, UnifiedView, taSignals, confluence, WhyThisTrade, Markdown, alpacaReq, CloseConfirm } from "./pro.jsx";
-import { prepareClose, sendClose, groupForRecord, closeWorking, legsNotHeld, holdingGroups } from "./closeOrder.js";
+import { prepareClose, sendClose, groupForRecord, closeWorking, legsNotHeld, holdingGroups, heldSymbolFor } from "./closeOrder.js";
 import { OrdersPanel } from "./orders.jsx";
 import { WhySheet } from "./why.jsx";
 import { orderLegs as orderLegsOf, orderHoldingKey, ordersForRecord, orderIntent, rowLines, workingCloseText } from "./orderRow.js";
 import { BandThumbnail, payoffBands, bandTakeaway, GaugeFigure, Gauge, CompareFigure, exitPlanSentence, exitPlanDetail,
   OpenInterestStrip, oiStripTakeaway, oiCutAt, oiGhostCut, explainOiStrip, useWidth } from "./visuals.jsx";
-import { fuseSignals, sentimentDirection, signalDirection, signalFamilies, findOrderOf, findOrderCompare, withSignalRank, compareCandidates, againstSignal,
+import { fuseSignals, sentimentDirection, signalDirection, signalFamilies, findOrderOf, findOrderCompare, withSignalRank, compareCandidates, againstSignal, againstOnPlan,
   readingState, signalSnapshot, compareSignals, signalStance, factorStands, AGAINST_MIN_SCORE, placeLine } from "./signals.js";
 import { N as nCDF, bs as bsPrice, smile as smileIV, payoff as payoffExp, SIGMA, histBacktest, monthReturn, bsGreeks, legsAt, exitBacktest,
   parseAvJson, statsFromMatrix } from "./engine.js";
+import { feedLine, FEED_INFO } from "./chain.js";
 import { parseOcc, buildOcc, snapStrike, resnapLegs, boardStrikes, strikesFor, toggleLegType, strikeOptions, fetchChain, hasOpenInterest, enrichOpenInterest, feedName, sourceNote, openInterestNote, oiProfile, expiryOpenInterest, nearMoneyOpenInterest, monotonicityBreaks, monotonicityNote, invertedOnStrikes, spotOf, spotAt, atmIv } from "./chain.js";
 import { T, TYPE, themeName, setTheme, BADGE_SAFE } from "./theme.js";
+// PR 72: the exit plan per trade — its one reader, its bounds, the replay's suggestion and their words (rules.js).
+import { exitPlanOf, clampExitPlan, stepExitPlan, exitPlanBounds, structureFamily, exitPlanVariants, exitSuggestionOf, defaultSuggestion,
+  exitSuggestionLine, EXIT_PLAN_WORDS, exitPlanEntryLine, rulesExitPlan, needDirection, ibkrName, exposureLine, chanceAtPriceLine } from "./rules.js";
+// PR 72: the payoff on the plan's exit day, for which way the trade needs the price (tradeChart.js, PR 68's).
+import { exitCurve, curveZones } from "./tradeChart.js";
 import { RULES, sizing, ruleBadge, takeProfitLabel, takeProfitTarget, takeProfitBasisWords, stopWarningLevel, stopLossLabel, perTradeCapLabel, RULE_PILLS, money, pctText, capitalSourceNote, perTradeLimitPhrase, qualityFloor, qualityFloorSentence, liquiditySkippedNote,
   positionPnl, BROKER_PNL, remainingEdge, remainingEdgeLabel, shareOfMaximum, attentionCount,
   filterFold, qualityFloorLine, voicePointer, VOICE_HOMES, noCeilingRankLine,
@@ -134,8 +140,9 @@ const NOW_MONTH = new Date().getMonth();
    confidence / 100 against RULES.directionSignalMin, CONFLICT always Neutral. `suggestionScore()` / `suggestionOf()`
    (season × 1.5 + score / 25 × confidence) are retired: they counted the season twice. */
 /** The exit plan's sentence for a trade, with its take-profit target from `takeProfitTarget()`. */
-const planOf = (legs, { maxProfit = null, maxLoss = null, entry = null } = {}) =>
-  exitPlanSentence(takeProfitTarget({ legs, maxProfit, maxLoss, entryNet: entry }));
+// PR 72: with the trade's own plan when it has one (`exitPlanOf()`); without, the RULES defaults.
+const planOf = (legs, { maxProfit = null, maxLoss = null, entry = null } = {}, plan = null) =>
+  exitPlanSentence(takeProfitTarget({ legs, maxProfit, maxLoss, entryNet: entry, plan }), plan);
 /* WHICH SEASONAL MEANS ARE IN FORCE FOR A MARKET — ONE EXPRESSION.
    `seasonalProvenance()` in rules.js is the home; this binds it to the loaded
    Alpha Vantage state and the table row behind it (which the liquid tier does
@@ -2495,7 +2502,7 @@ export default function OptionsStrategyLab() {
      The Build screen and the wizard's confirm screen both land here, so a
      position opened from screen 4 carries exactly the same gate record, thesis
      and timeline as one built by hand. Two paths would mean two truths. */
-  const commitPosition = async ({ ticker: tk, expKey: ek, legs: lg, dte: d, analysis, spot: sp, name, alpacaOrder, clashInfo, reason, roomOverride, contracts: n }) => {
+  const commitPosition = async ({ ticker: tk, expKey: ek, legs: lg, dte: d, analysis, spot: sp, name, alpacaOrder, clashInfo, reason, roomOverride, contracts: n, exitPlan = null }) => {
     /* HOW MANY, AND IN WHICH UNITS — THE TRAP IS THE UNITS.
        Where a broker order was built, the ORDER BODY'S `qty` is the authority:
        it is what Alpaca was actually asked for. But it is NOT the number that
@@ -2623,6 +2630,11 @@ export default function OptionsStrategyLab() {
       alpacaSentAt: alpacaOrder ? Date.now() : null,
       entryRoomOverride: entryOverrideOk(roomOverride) && entryRoom(d).band === "tight"
         ? { dte: d, room: entryRoom(d).room, reason: String(roomOverride).trim(), at: Date.now() } : null,
+      /* THE EXIT PLAN, FROZEN HERE (PR 72): the three values Build showed at Send, whether they were the suggestion or
+         edited, and what the suggestion was (`suggestedFrom`), so the Journal can later say whether edits paid. Every
+         reader asks `exitPlanOf()`; a record without it reads the RULES defaults. */
+      exitPlan: exitPlan ? { ...clampExitPlan(exitPlan, { dte: d, legs: lg }), source: exitPlan.source === "edited" ? "edited" : "suggested",
+        suggestedFrom: exitPlan.suggestedFrom || null } : null,
       /* SENT AND FILLED ARE TWO EVENTS, AND THEY GET TWO ENTRIES.
          The live order came back `accepted` with `filled_qty: 0` and the app
          wrote one entry that read as an opening. Nothing in the record then
@@ -2646,8 +2658,10 @@ export default function OptionsStrategyLab() {
         }] : []),
         { t: Date.now(), type: "open", text: `${working ? "Recorded" : "Opened"} with a ${pop0 != null ? (pop0 * 100).toFixed(0) + "%" : "n/a"} chance · volatility ${(ivAvg0 * 100).toFixed(0)}% · season ${seasM != null ? `${seasM.toFixed(1)}%/mo` : "not read"}${f ? ` · signal ${f.score > 0 ? "+" : ""}${f.score}/100 ${f.agreement}` : ""}` },
         { t: Date.now(), type: "plan", text: working
-          ? `Exit plan frozen at entry — ${planOf(lg, analysis)} It starts counting when the order fills; it has not filled yet.`
-          : `Exit plan frozen at entry — ${planOf(lg, analysis)}` },
+          ? `Exit plan frozen at entry — ${planOf(lg, analysis, exitPlan)} It starts counting when the order fills; it has not filled yet.`
+          : `Exit plan frozen at entry — ${planOf(lg, analysis, exitPlan)}` },
+        // PR 72: the plan's three values and where they came from — the suggestion, or edited and what was suggested.
+        ...(exitPlan ? [{ t: Date.now(), type: "plan", text: exitPlanEntryLine(exitPlan) }] : []),
         ...(clashInfo ? [{ t: Date.now(), type: "against", text: `Against ${clashInfo.n} of ${clashInfo.total} factors. Reason: "${(reason || "").trim()}"` }] : []),
         // THE ENTRY-ROOM OVERRIDE AND ITS REASON GO TO THE JOURNAL. That is
         // the whole point of asking for one: a run of these is what ROADMAP P5
@@ -2681,7 +2695,9 @@ export default function OptionsStrategyLab() {
     // a position whose maximum loss, breakeven and take-profit target describe
     // a trade nobody made — and the Guardian reads it for the rest of its life.
     const r = await commitPosition({ ticker, expKey, legs, dte, analysis: AE, spot, name: stratName,
-      alpacaOrder, clashInfo: clash, reason: against.reason, roomOverride: roomReason, contracts });
+      alpacaOrder, clashInfo: clash, reason: against.reason, roomOverride: roomReason, contracts,
+      // PR 72: the exit plan Build showed at Send — suggested or edited, and what the suggestion was — frozen on the record.
+      exitPlan: buildPlan });
     setOpenResult(r.gate);
     if (!r.ok) { setMsg(`Risk gate: position not opened. ${r.gate.violations.map((v) => v.message).join(" ")}`); return; }
     setAgainst({ reason: "" }); setRoomReason(""); setOpenResult(null);
@@ -2711,7 +2727,7 @@ export default function OptionsStrategyLab() {
     // beside the button already said what the send did. One line pointing there.
     setMsg(r.outcome
       ? `${r.pos && r.pos.ref ? `${r.pos.ref} · ` : ""}Sent. Its state is on its row in Positions.`
-      : `Position opened on the app's own paper book. ${planOf(legs, AE)}`);
+      : `Position opened on the app's own paper book. ${planOf(legs, AE, buildPlan)}`);
     // AN ORDER THAT IS STILL WORKING KEEPS THE SCREEN THAT EXPLAINS IT.
     // Jumping to Positions unmounts the ticket, and the ticket is where the
     // "working, not filled" answer and the price it is waiting at are written.
@@ -2973,7 +2989,7 @@ export default function OptionsStrategyLab() {
             ? { ...c.r.entry, type: "fill" }
             : c.r.entry,
           ...(c.r.outcome.startsExitPlan ? [{ t: Date.now(), type: "plan",
-            text: `The order has filled, so the exit plan starts now — ${planOf(p.legs, { maxProfit: p.maxProfit, maxLoss: p.maxLoss, entry: p.entryNet })}` }] : []),
+            text: `The order has filled, so the exit plan starts now — ${planOf(p.legs, { maxProfit: p.maxProfit, maxLoss: p.maxLoss, entry: p.entryNet }, exitPlanOf(p))}` }] : []),
         ];
         const t = appendTimeline(p, entries);
         // WHAT THE BROKER GAVE GOES ON THE RECORD, SIGNED. Until 21 Sep 2026
@@ -3021,9 +3037,11 @@ export default function OptionsStrategyLab() {
       // without this the replay would "take profit" at break-even on every path
       // and report a discipline the rule never asked for. The DTE exit below
       // still runs: that half of the plan does not need a maximum.
-      const tpLevel = takeProfitTarget({ legs, maxProfit: A.maxProfit, maxLoss: A.maxLoss, entryNet: A.entry }).perCombo;
-      if (!closed && tpLevel != null && pnl >= tpLevel) { closed = { i, pnl: tpLevel, why: takeProfitLabel() }; note += ` → TAKE PROFIT: ${takeProfitLabel()} hit: you take the profit`; }
-      else if (!closed && pnl <= RULES.stopLossPct * A.maxLoss) { closed = { i, pnl: RULES.stopLossPct * A.maxLoss, why: stopLossLabel() }; note += ` → STOP: ${stopLossLabel()}: a warning, think about closing`; }
+      // PR 72: the plan on Build (its take profit and its stop warning), read when the button is tapped.
+      const tpT = takeProfitTarget({ legs, maxProfit: A.maxProfit, maxLoss: A.maxLoss, entryNet: A.entry, plan: buildPlan });
+      const tpLevel = tpT.perCombo, slPct = buildPlan.stopLossPct;
+      if (!closed && tpLevel != null && pnl >= tpLevel) { closed = { i, pnl: tpLevel, why: takeProfitLabel(tpT.basis, tpT.pct) }; note += ` → TAKE PROFIT: ${takeProfitLabel(tpT.basis, tpT.pct)} hit: you take the profit`; }
+      else if (!closed && pnl <= slPct * A.maxLoss) { closed = { i, pnl: slPct * A.maxLoss, why: stopLossLabel(slPct) }; note += ` → STOP: ${stopLossLabel(slPct)}: a warning, think about closing`; }
       steps.push({ m: i, label: MONTHS[(NOW_MONTH + i) % 12], S: Sx, pnl, note });
       if (closed) break;
     }
@@ -3049,12 +3067,27 @@ export default function OptionsStrategyLab() {
       const j = await r.json().catch(() => ({}));
       if (!r.ok || !Array.isArray(j.bars) || !j.bars.length) throw new Error(j.error || `HTTP ${r.status}`);
       const result = exitBacktest(legs, spot, dte, j.bars, exitReplayPolicy(), { month: NOW_MONTH });
-      setExitReplay((cur) => (cur.key === key ? { key, state: "done", error: null, result } : cur));
+      /* PR 72: THE SAME CLOSES, REPLAYED ON THE PLAN'S VARIANTS (`exitPlanVariants()`: take profit × time exit), and the best
+         on a finished window becomes this market and family's suggestion (`exitSuggestionOf()`), kept on this device for the
+         month. The table above stays the RULES'; nothing here changes a rule or a plan already sent. */
+      const runs = exitPlanVariants(dte, legs).map((plan) => ({ plan, result: exitBacktest(legs, spot, dte, j.bars, exitReplayPolicy(plan), { month: NOW_MONTH }) }));
+      const sg = exitSuggestionOf({ ticker, legs, runs, month: NOW_MONTH });
+      if (sg) {
+        const fk = `${ticker}|${structureFamily(legs)}`;
+        setStore((st) => {
+          const kept = Object.entries({ ...(st.exitSuggestions || {}), [fk]: { ...sg, at: Date.now() } }).sort((a, b) => (b[1].at || 0) - (a[1].at || 0)).slice(0, SUGGESTIONS_KEPT);
+          const ns = { ...st, exitSuggestions: Object.fromEntries(kept) };
+          saveState(ns); return ns;
+        });
+      }
+      setExitReplay((cur) => (cur.key === key ? { key, state: "done", error: null, result, suggestion: sg } : cur));
     } catch (e) {
       setExitReplay((cur) => (cur.key === key ? { key, state: "error", error: String(e.message || e), result: null } : cur));
     }
   };
   const exitView = exitReplay.key === exitKey ? exitReplay : { state: "idle", error: null, result: null };
+  // How many market-and-family suggestions this device keeps (PR 72): the newest, local only (never on /api/state).
+  const SUGGESTIONS_KEPT = 40;
 
   /* ---- Alpaca ---- */
   const setSetting = async (k, v) => { const st = { ...store, settings: { ...store.settings, [k]: v } }; setStore(st); await saveState(st); };
@@ -3269,11 +3302,13 @@ export default function OptionsStrategyLab() {
     const pnl = pv.pnl, live = pv.source === BROKER_PNL;
     /* THE TAKE-PROFIT TARGET IS `takeProfitTarget()` (rules.js): 50% of the premium paid for a
        single long option, 50% of the maximum profit for the rest. Whole position, like `pnl`. */
-    const tpTarget = takeProfitTarget({ legs: p.legs, maxProfit: p.maxProfit, maxLoss: p.maxLoss, entryNet: p.entryNet, contracts: n });
+    // PR 72: THE POSITION'S OWN EXIT PLAN, frozen at Send (`exitPlanOf()`; the RULES defaults before PR 72).
+    const plan = exitPlanOf(p);
+    const tpTarget = takeProfitTarget({ legs: p.legs, maxProfit: p.maxProfit, maxLoss: p.maxLoss, entryNet: p.entryNet, contracts: n, plan });
     const tpHit = pnl != null && tpTarget.dollars != null && tpTarget.dollars > 0 && pnl >= tpTarget.dollars;
-    const stopLevel = stopWarningLevel({ maxLoss: p.maxLoss, contracts: n });
+    const stopLevel = stopWarningLevel({ maxLoss: p.maxLoss, contracts: n, plan });
     const slHit = pnl != null && stopLevel != null && pnl <= stopLevel;
-    const dteExit = dteLeft <= RULES.exitDTE;
+    const dteExit = dteLeft <= plan.exitDTE;
     // verdetto autopilot recente non-HOLD in attesa
     const ap = (p.timeline || []).filter((e) => e.type === "autopilot" && Date.now() - e.t < 48 * 36e5 && !e.text.includes("HOLD")).slice(-1)[0];
     // THE "WATCH" LEVEL READS ITS HOME. This was a bare `0.35 * p.maxLoss`: a
@@ -3295,12 +3330,12 @@ export default function OptionsStrategyLab() {
     // the broker does not hold, and no headline may call it on plan.
     const level = notOnAlpaca ? "watch" : tpHit || slHit || dteExit || ap || edge.thin ? "action"
       : pnl != null && watchLevel != null && pnl < watchLevel * n ? "watch" : "ok";
-    const label = notOnAlpaca ? "Not on Alpaca — the record and the account disagree" : tpHit ? `${takeProfitLabel(tpTarget.basis)} reached — take the profit` : slHit ? `${stopLossLabel()} reached — a warning, not an order` : dteExit ? `${dteLeft} days left — close or roll` : ap ? "The autopilot has something waiting for your OK" : edge.thin ? remainingEdgeLabel(edge) : pnl == null ? "waiting for prices…" : level === "watch" ? "Losing: check the reason you opened it" : "On plan";
+    const label = notOnAlpaca ? "Not on Alpaca — the record and the account disagree" : tpHit ? `${takeProfitLabel(tpTarget.basis, tpTarget.pct)} reached — take the profit` : slHit ? `${stopLossLabel(plan.stopLossPct)} reached — a warning, not an order` : dteExit ? `${dteLeft} days left — close or roll` : ap ? "The autopilot has something waiting for your OK" : edge.thin ? remainingEdgeLabel(edge) : pnl == null ? "waiting for prices…" : level === "watch" ? "Losing: check the reason you opened it" : "On plan";
     /* ONE ACTION (ROADMAP PR #38). `level` and `label` above stay exactly as
        they were: the headline and `attentionCount()` read them. The card
        reads this. */
-    const act = positionAction({ tpHit, dteExit, slHit, edge, pnl, dteLeft, level, ap, notHeld, tpBasis: tpTarget.basis || "max-profit" });
-    return { p, pnl, pnlNote: pv.sentence, dteLeft, level, label, ap, live, spotNow: sp, tpHit, tpTarget, stopLevel, slHit, dteExit, edge, act, contracts: n, sizeAssumed: size.assumed, notHeld,
+    const act = positionAction({ tpHit, dteExit, slHit, edge, pnl, dteLeft, level, ap, notHeld, tpBasis: tpTarget.basis || "max-profit", plan });
+    return { p, pnl, pnlNote: pv.sentence, dteLeft, level, label, ap, live, spotNow: sp, tpHit, tpTarget, stopLevel, slHit, dteExit, edge, act, contracts: n, sizeAssumed: size.assumed, notHeld, plan,
       // A close already sent is an order working, not a decision still to take (PR #47, TASK 0f).
       closeWorking: closeWorking(p, alSync) };
   }), [ownedPositions, chains, alSync, pnlOf]);
@@ -3309,9 +3344,9 @@ export default function OptionsStrategyLab() {
   // DENTRO il JSX del tab Paper (setState durante il render) => instabilità del tab.
   useEffect(() => {
     for (const a of posAlerts) {
-      if (a.tpHit) logEvent(a.p.id, "tp", `Reached ${takeProfitLabel(a.tpTarget.basis)} (${fmt$(a.pnl)})`);
-      if (a.slHit) logEvent(a.p.id, "sl", `Reached ${stopLossLabel()} (${fmt$(a.pnl)}) — a warning, nothing closes automatically`);
-      if (a.dteExit && !(a.notHeld && a.notHeld.length)) logEvent(a.p.id, "dte", `Inside the ${RULES.exitDTE}-day exit window`);
+      if (a.tpHit) logEvent(a.p.id, "tp", `Reached ${takeProfitLabel(a.tpTarget.basis, a.tpTarget.pct)} (${fmt$(a.pnl)})`);
+      if (a.slHit) logEvent(a.p.id, "sl", `Reached ${stopLossLabel(a.plan.stopLossPct)} (${fmt$(a.pnl)}) — a warning, nothing closes automatically`);
+      if (a.dteExit && !(a.notHeld && a.notHeld.length)) logEvent(a.p.id, "dte", `Inside the ${a.plan.exitDTE}-day exit window`);
     }
   }, [posAlerts, logEvent]);
   /* "CORRECTED", ONCE, IN THE TIMELINE (PR #47, TASK 0c). A record whose stored best case a price grid cut off keeps
@@ -3349,8 +3384,9 @@ export default function OptionsStrategyLab() {
     const n = size.contracts;
     const al0 = posAlerts.find((a) => a.p.id === p.id) || null;
     const pnl = al0 ? al0.pnl : null;
-    const dteExit = dteLeft <= RULES.exitDTE;
-    const act = al0?.act || positionAction({ pnl: null, dteExit, dteLeft });
+    const plan = exitPlanOf(p);   // PR 72: the position's own plan
+    const dteExit = dteLeft <= plan.exitDTE;
+    const act = al0?.act || positionAction({ pnl: null, dteExit, dteLeft, plan });
     const ivNow = (() => {
       if (!c || !p.expKey || !c.byExp[p.expKey]) return p.thesis?.iv ?? getU(p.ticker).iv;
       const ivs = p.legs.map((l) => qp(l)?.iv).filter(Boolean);
@@ -3369,9 +3405,9 @@ export default function OptionsStrategyLab() {
     const nowSignals = signalSnapshot(fuseAt(p.ticker, Math.max(1, dteLeft)) || null,
       { reading: readiness[p.ticker], seasonalSource: seasonalFor(p.ticker).source });
     const tpTarget = al0 && al0.tpTarget ? al0.tpTarget : takeProfitTarget({ legs: p.legs, maxProfit: p.maxProfit,
-      maxLoss: p.maxLoss, entryNet: p.entryNet, contracts: n });
+      maxLoss: p.maxLoss, entryNet: p.entryNet, contracts: n, plan });
     const share = pnlShareOfRisk(pnl, p, n);
-    const exitPlan = takeProfitTarget({ legs: p.legs, maxProfit: p.maxProfit, maxLoss: p.maxLoss, entryNet: p.entryNet });
+    const exitPlan = takeProfitTarget({ legs: p.legs, maxProfit: p.maxProfit, maxLoss: p.maxLoss, entryNet: p.entryNet, plan });
     const progress = exitProgress({ p, pnl, dteLeft, tpTarget, n });
     return [p.id, {
       c, s, qp, dteLeft, n, al0, pnl, act, ivNow, seasNow, mcNow, popNow, tpTarget, nowSignals, greeksNow,
@@ -3382,7 +3418,7 @@ export default function OptionsStrategyLab() {
       // WHAT ALPACA HOLDS, PER LEG (PR #47, TASK 0b): "9 puts", never `contracts` alone.
       unitNote: `${sizeWords(p)}, the whole position. Now is what is left from here.`,
       fileKind: fileState(p, alSync),
-      planSentence: exitPlanSentence(exitPlan), planDetail: exitPlanDetail(exitPlan, n),
+      planSentence: exitPlanSentence(exitPlan, plan), planDetail: exitPlanDetail(exitPlan, n, plan), plan,
     }];
   })), [ownedPositions, chains, posAlerts, seasonal, fuseAt, readiness, seasonalFor, alSync, chanceFor]); // eslint-disable-line
 
@@ -3470,10 +3506,11 @@ export default function OptionsStrategyLab() {
         let next = st.positions.map((p) => {
           const g0 = Object.values(groups).find((g) => sigOf(g.und, g.exp, g.legs) === sigOf(p.ticker, p.expKey || "", p.legs));
           if (!g0) return p;
-          const exitOn0 = new Date(new Date(g0.exp).getTime() - RULES.exitDTE * 864e5).toISOString().slice(0, 10);
+          const plan0 = exitPlanOf(p);   // PR 72: the record's own plan (the RULES defaults before PR 72)
+          const exitOn0 = new Date(new Date(g0.exp).getTime() - plan0.exitDTE * 864e5).toISOString().slice(0, 10);
           const up = upgradeHolding(p, g0, {
-            plan: `Exit plan starts from the broker's own fill — ${planOf(g0.legs, { maxProfit: p.maxProfit, maxLoss: p.maxLoss, entry: g0.net })} On this expiry the ` +
-              `${RULES.exitDTE}-day mark is ${exitOn0}.` });
+            plan: `Exit plan starts from the broker's own fill — ${planOf(g0.legs, { maxProfit: p.maxProfit, maxLoss: p.maxLoss, entry: g0.net }, plan0)} On this expiry the ` +
+              `${plan0.exitDTE}-day mark is ${exitOn0}.` });
           if (up !== p) upgraded++;
           return up;
         });
@@ -3762,21 +3799,65 @@ export default function OptionsStrategyLab() {
     [optRef, buildSignals, ticker]);
 
 
-  /* ---- direzione del trade e scontro col segnale (PRD §7) ----
-     La direzione la dà il delta netto della struttura: positivo = il trade
-     guadagna se il prezzo sale. Sotto 0.05 in valore assoluto la struttura è
-     di fatto neutra e non c'è nessuna direzione contro cui andare. */
-  const tradeDir = useMemo(() => {
-    if (!A) return 0;
-    const d = A.greeks.delta;
-    return Math.abs(d) < 0.05 ? 0 : Math.sign(d);
-  }, [A]);
-  const clash = useMemo(() => againstSignal(fused[ticker], tradeDir), [fused, ticker, tradeDir]);
+  /* ---- THE EXIT PLAN ON BUILD (PR 72, owner 19 Oct 2026) ----
+     The suggestion is the replay's best variant for this market and structure family when "Replay the exit rules ›" has
+     run this month on a finished window (`store.exitSuggestions`, kept on this device), else the RULES defaults. Each of
+     the three values is edited in place (− / +) within `exitPlanBounds()`; the edits belong to the trade's market and
+     family, so another kind of trade starts again from its own suggestion. What Send freezes on the position is
+     `buildPlan`: the values, "suggested" or "edited", and what the suggestion was. */
+  const [exitEdits, setExitEdits] = useState(null);   // { key: "TK|family", plan: { takeProfitPct, exitDTE, stopLossPct } }
+  const famKey = `${ticker}|${structureFamily(legs)}`;
+  const buildSuggestion = useMemo(() => {
+    const sg = (store.exitSuggestions || {})[famKey];
+    return sg && sg.month === NOW_MONTH && sg.from === "replay" ? sg : defaultSuggestion(legs);
+  }, [store.exitSuggestions, famKey, legs]);
+  const buildPlan = useMemo(() => {
+    const sgVals = clampExitPlan(buildSuggestion, { dte, legs });
+    const vals = exitEdits && exitEdits.key === famKey ? clampExitPlan(exitEdits.plan, { dte, legs }) : sgVals;
+    const tags = Object.fromEntries(["takeProfitPct", "exitDTE", "stopLossPct"].map((k) => [k, vals[k] === sgVals[k] ? "suggested" : "edited"]));
+    const edited = Object.values(tags).includes("edited");
+    return { ...vals, source: edited ? "edited" : "suggested", tags,
+      suggestedFrom: { ...buildSuggestion, ...sgVals } };
+  }, [buildSuggestion, exitEdits, famKey, dte, legs]);
+  /* THE CHAIN TRAY'S FIGURES (PR 72, task 72.5): `listCardFigures()` with the board's own distribution, so the tray's chance
+     cell reads the market's beside the model's (it was handed no board, so its market chance was never read). */
+  const trayFigures = useCallback((lg, o = {}) => listCardFigures(lg, { ...o,
+    dist: o.dist != null ? o.dist : boardDistOf(chains[o.ticker], o.expKey) }), [chains]);
+  const stepBuildPlan = (key, dir) => setExitEdits({ key: famKey, plan: stepExitPlan(buildPlan, key, dir, { dte, legs }) });
+  const resetBuildPlan = () => setExitEdits(null);
+
   /* WHAT THE TRADE NEEDS IS THE PAYOFF'S (PR 70): `payoffNeed()` reads the expiry payoff's profit zones — up, down, stay
      between, move far. Every SENTENCE about where the trade pays reads it (the "Why" line, the trade card's bets-on line,
-     the RSI warning); `tradeDir` above (the net delta) still decides only against-the-signals, unchanged. Read live, XLE:
-     an iron condor's delta past 0.05 printed "This structure needs XLE to go up". */
+     the RSI warning). Read live, XLE: an iron condor's delta past 0.05 printed "This structure needs XLE to go up". */
   const tradeNeed = useMemo(() => payoffNeed(BF.bands), [BF.bands]);
+  /* ---- WHICH WAY THE TRADE NEEDS THE PRICE, ON ITS OWN PLAN (PR 72, task 72.2) ----
+     It was the net delta (|delta| ≥ 0.05), so a neutral iron condor whose delta leaned slightly was asked for a typed
+     reason. Now it is the PAYOFF VALUED ON THE PLAN'S EXIT DAY (`exitCurve()` → `curveZones()` → `payoffNeed()`: each leg
+     on its own IV with the plan's days left), the day the trade is closed: up or down is a direction; a zone around today's
+     price is neutral. Without the legs' IVs or inside the exit, the expiry payoff; with neither, the net delta, as before. */
+  const planNeed = useMemo(() => {
+    if (!AE || !legs.length || !Array.isArray(AE.curve) || !AE.curve.length) return null;
+    const curveX = exitCurve({ legs, entryNet: AE.entry, curve: AE.curve, ivs: AE.legPx.map((p) => p.iv), dte, exitDTE: buildPlan.exitDTE });
+    const atExit = curveX && curveX.length > 1
+      ? payoffNeed({ bands: curveZones(curveX), lo: curveX[0].s, hi: curveX[curveX.length - 1].s, spot }) : null;
+    return atExit ? { ...atExit, at: "exit" } : tradeNeed ? { ...tradeNeed, at: "expiry" } : null;
+  }, [AE, legs, dte, buildPlan.exitDTE, spot, tradeNeed]);
+  const tradeDir = useMemo(() => {
+    const d = needDirection(planNeed);
+    if (d != null) return d;
+    if (!A) return 0;
+    const delta = A.greeks.delta;
+    return Math.abs(delta) < 0.05 ? 0 : Math.sign(delta);
+  }, [A, planNeed]);
+  /* AGAINST THE SIGNALS, ON THAT PLAN (`againstOnPlan()`, signals.js): a directional trade as before; a neutral one only
+     when "Signals decide" reads Bull or Bear (Find's rule) AND one expected move that way to the exit day leaves the zone
+     where it is in profit then (owner, 19 Oct 2026). The move is the chance's own volatility over the days to the exit. */
+  const clash = useMemo(() => {
+    const sigma = chance && chance.sigma > 0 ? chance.sigma : AE && AE.legPx.length ? AE.legPx.reduce((x, y) => x + (Number(y.iv) || 0), 0) / AE.legPx.length : null;
+    const toExit = Math.max(0, Number(dte) - buildPlan.exitDTE);
+    return againstOnPlan(fused[ticker], planNeed, { dirFallback: tradeDir, spot, move: expectedMove(spot, sigma, toExit),
+      exitDay: timeExitDay(expKey, buildPlan.exitDTE), ticker });
+  }, [fused, ticker, planNeed, tradeDir, spot, chance, AE, dte, buildPlan.exitDTE, expKey]);
   // ONE HOME FOR THE OVERRIDE MINIMUM. This was a bare 15 sitting beside the
   // constant it is a copy of; the entry-room override added a second caller and
   // a second copy is how the two come to disagree about what a reason is.
@@ -4149,7 +4230,11 @@ export default function OptionsStrategyLab() {
             note: `This is a trade you already hold, priced again at today's market. A Send here would open a second position, not manage this one.` } });
       },
       details: { open: deskSheet === "position-alpaca", onOpen: () => setDeskSheet("position-alpaca"), onClose: () => setDeskSheet(null),
-        d: { legsText: legsTxt, expiresText: dp.expKey || new Date(dp.expiry).toLocaleDateString("en-GB"),
+        d: { legsText: legsTxt,
+          // PR 72 (task 72.4): each leg named as IBKR names it, with the broker's own OCC symbol (else the chain's listing).
+          legs: (dp.legs || []).map((l) => ({ name: `${Number(l.side) > 0 ? "Buy" : "Sell"} ${Math.abs(Number(l.qty) || 1)} · ${ibkrName(dp.ticker, dp.expKey, l)}`,
+            occ: heldSymbolFor(dp, l, alSync) || (dm.qp && dm.qp(l) && dm.qp(l).occ) || null })),
+          expiresText: dp.expKey || new Date(dp.expiry).toLocaleDateString("en-GB"),
           openedText: new Date(dp.openedAt).toLocaleDateString("en-GB"),
           entryText: fillPx != null
             ? `${limitWords(fillPx) || fmt$(Math.abs(fillPx) * 100)} a combination, the broker's fill`
@@ -4402,7 +4487,7 @@ export default function OptionsStrategyLab() {
     ) : null;
     return {
       open: deskSheet === "review", onClose: () => setDeskSheet(null), sub: REVIEW_SUB(!!alpaca), viaBroker: !!alpaca,
-      legs: legs.map((l, i) => ({ words: reviewLegWords(l, contracts), occ: bookQuotes[i] && bookQuotes[i].occ ? bookQuotes[i].occ : null })),
+      legs: legs.map((l, i) => ({ words: reviewLegWords(l, contracts), name: ibkrName(ticker, expKey, l), occ: bookQuotes[i] && bookQuotes[i].occ ? bookQuotes[i].occ : null })),
       limitLine: reviewLimitLine({ type: ticket.type, net, tif: ticket.tif, n: contracts }),
       checks: !L ? [] : [
         { id: "loss", ok: rowOk("defined"), text: REVIEW_CHECKS.loss, value: money(L.tradeRisk) },
@@ -5011,6 +5096,7 @@ export default function OptionsStrategyLab() {
             onRefresh={() => refreshChain(mkt.tk)} busy={busy !== null}
             onTicker={(tk) => setMkt((m) => ({ ...m, tk }))}
             chain={chains[mkt.tk] || null} freshLine={findFreshness([mkt.tk], chains, ago).line} bars={barsCache[mkt.tk] || []}
+            feed={chains[mkt.tk] ? { line: feedLine(chains[mkt.tk]), info: FEED_INFO } : null}
             clock={clock} clockLine={marketClockLine(clock)}
             ivRank={ivRankOf(mkt.tk)} ivDays={((store.ivHist || {})[mkt.tk] || []).length}
             board={findGen.boards[mkt.tk] || null}
@@ -5019,12 +5105,12 @@ export default function OptionsStrategyLab() {
             items={findSorted.filter((x) => x.tk === mkt.tk)} allItems={findSorted} boards={findGen.boards}
             request={request} freeSizing={freeSizing} findDir={find.dir} findTarget={find.target} sentiments={SENTIMENTS} findOrder={findOrder}
             newsItems={newsPool} newsState={news[mkt.tk] || null} ago={ago}
-            exits={store.positions.filter((p) => p.ticker === mkt.tk && exitDateOf(p)).map((p) => ({ date: exitDateOf(p), label: `${RULES.exitDTE}-day exit · ${p.ref || p.ticker}` }))}
+            exits={store.positions.filter((p) => p.ticker === mkt.tk && exitDateOf(p)).map((p) => ({ date: exitDateOf(p), label: `${exitPlanOf(p).exitDTE}-day exit · ${p.ref || p.ticker}` }))}
             isSaved={isSaved} onSave={(x) => saveCandidate(x.cand)} inCompare={(c) => inCompare(compare, c)} onTickCompare={(c) => tickCompare(c)}
             onBuild={(x) => openFound(x)}
             onBuildLegs={({ ticker: tk, expKey: ek, legs: lg, name }) => openOnBuild({ ticker: tk, expKey: ek, legs: lg, name, origin: { kind: "chain", tk, key: null } })}
             initialTray={mktTray}
-            cardFigures={listCardFigures} quoteOf={makeQuote} seasonal={seasonalFor(mkt.tk)} matrix={seasonal[mkt.tk]?.matrix || null}
+            cardFigures={trayFigures} quoteOf={makeQuote} seasonal={seasonalFor(mkt.tk)} matrix={seasonal[mkt.tk]?.matrix || null}
             liqFloor={liqLevel.absolute}
             badgeOf={(x) => <SignalBadge fused={x.fused} state={readiness[x.tk]} onClick={() => { scrollToCard.current = x.key; setWhyTk(x.tk); setWhyDte(x.dte); setEv("why"); }} />}
             onMore={(x) => { scrollToCard.current = x.key; setWhyTk(x.tk); setEv("more"); }}
@@ -5393,15 +5479,15 @@ export default function OptionsStrategyLab() {
                 {(() => {
                   // ONE FUNCTION WORKS THE TARGET OUT (`takeProfitTarget`, rules.js): a share of the premium
                   // for a single long option, a share of the maximum for the rest, "—" when there is neither.
-                  const tpB = takeProfitTarget({ legs, maxProfit: AE.maxProfit, maxLoss: AE.maxLoss, entryNet: AE.entry });
+                  const tpB = takeProfitTarget({ legs, maxProfit: AE.maxProfit, maxLoss: AE.maxLoss, entryNet: AE.entry, plan: buildPlan });
                   return (
-                    <Stat k={takeProfitLabel(tpB.basis)} v={tpB.perCombo == null ? "—" : fmt$(tpB.perCombo)} c={T.green}
+                    <Stat k={takeProfitLabel(tpB.basis, tpB.pct)} v={tpB.perCombo == null ? "—" : fmt$(tpB.perCombo)} c={T.green}
                       tip={tpB.perCombo == null && AE.profitUnbounded
                         ? `${RULE_PILLS.takeProfit()} ${noCeilingNote(stratName || "This structure")}`
                         : RULE_PILLS.takeProfit(tpB.basis || "max-profit")} />
                   );
                 })()}
-                <Stat k={stopLossLabel()} v={fmt$(AE.maxLoss * RULES.stopLossPct)} c={T.red} tip={RULE_PILLS.stopLoss()} />
+                <Stat k={stopLossLabel(buildPlan.stopLossPct)} v={fmt$(AE.maxLoss * buildPlan.stopLossPct)} c={T.red} tip={RULE_PILLS.stopLoss()} />
               </div>
               {/* ONE SENTENCE SAYING WHICH PRICE THE BLOCK ABOVE IS AT, because
                   the Shortlist row for the same structure is at the MID and a
@@ -5469,7 +5555,7 @@ export default function OptionsStrategyLab() {
                     sigma={chance && chance.sigma > 0 ? chance.sigma : A.legPx.length ? A.legPx.reduce((x, y) => x + y.iv, 0) / A.legPx.length : iv}
                     driftAnnual={chance ? chance.driftAnnual : Math.log(1 + (seasNow || 0) / 100) * 12}
                     curve={AE.curve} legs={legs} breakevens={AE.breakevens}
-                    ivs={AE.legPx.map((p) => p.iv)} reads={AE.legPx.map((p) => p.greeks || null)}
+                    ivs={AE.legPx.map((p) => p.iv)} reads={AE.legPx.map((p) => p.greeks || null)} exitDTE={buildPlan.exitDTE}
                     onTa={(t2) => setTa((m) => ({ ...m, [ticker]: t2 }))}
                   />
                 </div>
@@ -5582,8 +5668,9 @@ export default function OptionsStrategyLab() {
           const sendBlock = PREVIEW ? PREVIEW_READ_ONLY : DEMO ? DEMO_TOOLTIP : rollHeld ? rollCloseFirst(rollRef) : legQtyMsg ? `${legQtyMsg}.`
             : !guard ? "The risk gate has not run on this trade yet." : !guard.pass ? guard.violations.map((v) => v.message).join(" ") : null;
           const reviewNow = reviewSheetOf({ net, L, sendBlock });
-          const tpB = takeProfitTarget({ legs, maxProfit: AE.maxProfit, maxLoss: AE.maxLoss, entryNet: AE.entry, contracts });
-          const stopAt = stopWarningLevel({ maxLoss: AE.maxLoss, contracts });
+          // PR 72: the exit plan on Build — its target and its stop level for the size, from the plan being edited.
+          const tpB = takeProfitTarget({ legs, maxProfit: AE.maxProfit, maxLoss: AE.maxLoss, entryNet: AE.entry, contracts, plan: buildPlan });
+          const stopAt = stopWarningLevel({ maxLoss: AE.maxLoss, contracts, plan: buildPlan });
           const v = {
             back: backTk ? { label: backTk, onClick: () => { if (buildOrigin && buildOrigin.kind === "card") backToList(); else goMarket(backTk, "strategies"); } }
               : { label: "Find", onClick: () => goStep("find") },
@@ -5592,7 +5679,7 @@ export default function OptionsStrategyLab() {
             takeaway: tradeTakeaway(BF.bands, { ticker, expKey, n: contracts, credit: AE.entry < 0, legs }),
             numbers: {
               figures: sizedFigures(AE, contracts), rr: BF.rr, pop: chance ? chance.pop : null, breakevens: AE.breakevens,
-              mkt: BF.mkt, gap: BF.gap,
+              mkt: BF.mkt, gap: BF.gap, atPrice: chanceAtPriceLine(AE.entry, AE.breakevens),
               future: futureFigures(chance, AE, contracts, expKey), past: pastFigures(BF.bt, AE, contracts),
               delta: deltaSharesText(AE.greeks.delta, contracts), theta: thetaDayText(AE.greeks.theta, contracts),
             },
@@ -5622,7 +5709,9 @@ export default function OptionsStrategyLab() {
                 // the leg's own IV.
                 const g = Number.isFinite(lp.iv) ? bsGreeks(spot, l.strike, dte / 365, lp.iv, l.type) : null;
                 const readDelta = lp.greeks && lp.greeks.delta != null && Number.isFinite(Number(lp.greeks.delta)) ? Number(lp.greeks.delta) : null;
-                return { side: l.side, qty: l.qty, strike: l.strike, type: l.type, mid: lp.real ? lp.px : null,
+                // PR 72 (task 72.4): IBKR's name and the chain's own OCC symbol (never `buildOcc()`).
+                return { side: l.side, qty: l.qty, strike: l.strike, type: l.type, name: ibkrName(ticker, expKey, l),
+                  occ: bookQuotes[i] && bookQuotes[i].occ ? bookQuotes[i].occ : null, mid: lp.real ? lp.px : null,
                   bid: lp.real && lp.bid != null ? lp.bid : null, ask: lp.real && lp.ask != null ? lp.ask : null,
                   delta: readDelta != null ? readDelta : g ? g.delta : null };
               }) },
@@ -5652,11 +5741,28 @@ export default function OptionsStrategyLab() {
                 sent: sentAlready ? alreadySentLine(sentAlready.ref, sentAlready.risk, sentAlready.working) : null },
               room: pRoom,
             },
-            exit: { pill: exitsPill(ticker), footer: EXITS_FOOTER, rows: [
-              { label: "Take profit", sub: EXIT_ROWS.takeProfit(tpB.basis || "max-profit"), value: tpB.dollars == null ? "—" : money(tpB.dollars) },
-              { label: "Time exit", sub: EXIT_ROWS.time(), value: timeExitDay(expKey) || "—" },
-              { label: "Stop", sub: EXIT_ROWS.stop(), value: stopAt == null ? "—" : money(Math.abs(stopAt)) },
-            ] },
+            /* PR 72: THE EXIT PLAN, EDITED IN PLACE. Each row's − / + moves its value one step inside `exitPlanBounds()`
+               (rules.js; the time exit's top keeps it before the expiry); its tag says Suggested or Edited; Reset puts back
+               the suggestion. The replay's line names where the suggestion came from; the defaults keep the pill. */
+            exit: (() => {
+              const edit = (key, value) => {
+                const b = exitPlanBounds(key, dte);
+                return { value, tag: buildPlan.tags[key], onMinus: () => stepBuildPlan(key, -1), onPlus: () => stepBuildPlan(key, 1),
+                  canMinus: buildPlan[key] > b.min + 1e-9, canPlus: buildPlan[key] < b.max - 1e-9 };
+              };
+              const replay = buildSuggestion && buildSuggestion.from === "replay";
+              return { pill: replay ? null : exitsPill(ticker), note: replay ? exitSuggestionLine(buildSuggestion) : null, footer: EXITS_FOOTER,
+                words: EXIT_PLAN_WORDS,
+                reset: buildPlan.source === "edited" ? { label: EXIT_PLAN_WORDS.reset, onReset: resetBuildPlan } : null,
+                rows: [
+                  { id: "takeProfitPct", label: "Take profit", sub: EXIT_ROWS.takeProfit(tpB.basis || "max-profit", buildPlan), value: tpB.dollars == null ? "—" : money(tpB.dollars),
+                    edit: edit("takeProfitPct", pctText(buildPlan.takeProfitPct, 0)) },
+                  { id: "exitDTE", label: "Time exit", sub: EXIT_ROWS.time(buildPlan), value: timeExitDay(expKey, buildPlan.exitDTE) || "—",
+                    edit: edit("exitDTE", `${buildPlan.exitDTE} days`) },
+                  { id: "stopLossPct", label: "Stop", sub: EXIT_ROWS.stop(buildPlan), value: stopAt == null ? "—" : money(Math.abs(stopAt)),
+                    edit: edit("stopLossPct", pctText(buildPlan.stopLossPct, 0)) },
+                ] };
+            })(),
             // PR 4b: the loaded structure's variants, priced like cards; "Load ›" keeps a roll's origin (it is still a roll).
             variants: { rows: buildVariants, note: VARIANTS_NOTE, none: VARIANTS_NONE,
               left: variantsLeftNote,
@@ -5664,6 +5770,9 @@ export default function OptionsStrategyLab() {
                 origin: buildOrigin && buildOrigin.kind === "roll" ? buildOrigin : { kind: "variant", key: null } }) },
             optimize: buildOrigin && buildOrigin.kind === "roll" ? null : optimizeView,
             send: { label: sendLabel({ type: ticket.type, net, n: contracts }), disabled: !!sendBlock, reason: sendBlock,
+              // PR 72 (task 72.3): open risk after this trade past the total limit — the gate's own figures, never added twice.
+              exposure: L ? exposureLine({ after: sentAlready ? L.openRisk : L.totalAfter, total: L.total, tradingCapital: L.tradingCapital,
+                answered: !!L.answered }) : null,
               // PR 70: the refused leg's nearest listed alternative, one tap ("Load ›"), beside the refusal.
               fix: sendBlock && listedFix ? { ...listedFix, onLoad: (alt) => openOnBuild({ ticker, expKey: alt.expKey, legs: alt.legs, name: stratName,
                 origin: buildOrigin && buildOrigin.kind === "roll" ? buildOrigin : { kind: "variant", key: null } }) } : null,

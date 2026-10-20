@@ -16,7 +16,7 @@
 import React, { useState } from "react";
 import { Minus, Plus, ArrowUp } from "lucide-react";
 import { T, TYPE } from "./theme.js";
-import { mono, sans, Note, Info, Sheet, Reveal, FilterChip, TAP, Placeholder } from "./ui.jsx";
+import { mono, sans, Note, Info, Sheet, Reveal, FilterChip, TAP, Placeholder, ContractName } from "./ui.jsx";
 import { useCopilot, useTicketSend, SKILLS, BUILD_SKILL_IDS, Markdown, readQty, CONTINUE_LABEL } from "./pro.jsx";
 import { FACTOR_LABEL } from "./why.jsx";
 import { EXIT_REPLAY, exitReplayInside, exitReplayNotRead, exitReplayHead, exitReplayExitsLine, exitReplayWarnLine, exitReplayVerdict,
@@ -115,7 +115,7 @@ const Box = ({ title, children }) => (
     {children}
   </div>
 );
-export function NumbersSection({ figures, rr, pop, breakevens = [], future, past, delta, theta, reconcile = null, mkt = null, gap = null }) {
+export function NumbersSection({ figures, rr, pop, breakevens = [], future, past, delta, theta, reconcile = null, mkt = null, gap = null, atPrice = null }) {
   const [def, setDef] = useState(null);
   const toggle = (id) => setDef((d) => (d === id ? null : id));
   const ft = futureTile(future);
@@ -158,7 +158,8 @@ export function NumbersSection({ figures, rr, pop, breakevens = [], future, past
         {gapLine && <div data-chance-gap={gap.lower ? "lower" : "higher"}
           style={{ ...sans, fontSize: FS.xs, lineHeight: LH.body, color: gap.lower ? T.amber : T.body }}>{gapLine}</div>}
         {notRead && <Note>{notRead}</Note>}
-        <Info label="the two chances">{CHANCE_TWO_INFO}</Info>
+        {/* PR 72 (task 72.5): the price and the breakeven both chances were read at. */}
+        <Info label="the two chances">{CHANCE_TWO_INFO}{atPrice ? <span data-chance-at style={{ display: "block", marginTop: 6 }}>{atPrice}</span> : null}</Info>
       </div>
       {reconcile}
     </Section>
@@ -301,13 +302,13 @@ export function LegRow({ leg, unquoted = false }) {
         color: sell ? T.amber : T.onAccent, background: sell ? "transparent" : T.amber, boxShadow: sell ? `inset 0 0 0 2px ${T.amber}` : "none" }}>
         {sell ? "SELL" : "BUY"}
       </span>
-      <span data-leg-name style={{ ...mono, ...tnum, fontSize: FS.md, fontWeight: FW.bold, color: T.ink, flex: 1, minWidth: 0 }}>
-        {leg.qty} × {leg.strike} {leg.type === "call" ? "call" : "put"}
-      </span>
-      <span style={{ textAlign: "right" }}>
-        <span style={{ display: "block", ...mono, ...tnum, fontSize: FS.md, color: T.ink }}>{px2(leg.mid)} <span style={{ ...sans, fontSize: FS.xs, color: T.mut }}>mid</span></span>
-        <span style={{ display: "block", ...mono, ...tnum, fontSize: FS.xs, color: T.mut }}>
-          {unquoted ? "bid — / ask —" : `${px2(leg.bid)} / ${px2(leg.ask)} · Δ ${leg.delta == null ? "—" : Number(leg.delta).toFixed(2)}`}
+      {/* PR 72 (task 72.4): the contract the way IBKR names it, under it the chain's own OCC symbol with Copy, then its prices
+          — stacked, so the name and the symbol each keep one line on a phone. */}
+      <span style={{ flex: 1, minWidth: 0, padding: "8px 0", display: "flex", flexDirection: "column", gap: 2 }}>
+        <ContractName name={`${leg.qty} × ${leg.name || `${leg.strike} ${leg.type === "call" ? "call" : "put"}`}`} occ={leg.occ || null}
+          nameProps={{ "data-leg-name": "" }} nameStyle={{ ...mono, ...tnum, fontSize: FS.md, fontWeight: FW.bold, color: T.ink }} />
+        <span data-leg-prices style={{ ...mono, ...tnum, fontSize: FS.xs, color: T.mut }}>
+          <span style={{ color: T.ink, fontWeight: FW.bold }}>{px2(leg.mid)}</span> mid · {unquoted ? "bid — / ask —" : `${px2(leg.bid)} / ${px2(leg.ask)} · Δ ${leg.delta == null ? "—" : Number(leg.delta).toFixed(2)}`}
         </span>
       </span>
     </div>
@@ -445,21 +446,53 @@ export function OrderSection({ order }) {
 }
 
 /* ---------------------------------------------------------------- THE EXIT PLAN */
-export function ExitPlanSection({ pill = null, rows = [], footer }) {
+/**
+ * THE EXIT PLAN (redesign PR 2; per trade since PR 72, owner 19 Oct 2026). Three rows — take profit, time exit, stop — each
+ * with a small "Suggested" or "Edited" tag; a tap on a row opens its − / + in place (one row at a time), and "Reset to
+ * suggested" sits under the card while anything is edited. Above the rows: where the suggestion came from — the replay's
+ * line, or the pill "defaults · not backtested on TK". It computes nothing: App.jsx hands in the rows, each with its
+ * `edit` ({ value, onMinus, onPlus, canMinus, canPlus, tag }), from `exitPlanBounds()` and `stepExitPlan()` (rules.js).
+ */
+export function ExitPlanSection({ pill = null, note = null, rows = [], footer, reset = null, words = null }) {
+  const [open, setOpen] = useState(null);
   return (
     <Section label="Exit plan" data-build-exits>
       <SectionTitle right={pill ? (
         <span style={{ ...sans, fontSize: FS.xs, color: T.amber, border: `1px solid ${T.amber}`, borderRadius: 999, padding: "2px 8px", whiteSpace: "nowrap" }}>{pill}</span>
       ) : null}>Exit plan</SectionTitle>
+      {note && <div data-exit-suggestion style={{ ...sans, fontSize: FS.xs, color: T.mut, lineHeight: LH.body, marginTop: 2 }}>{note}</div>}
       <div style={{ marginTop: 6 }}>
-        {rows.map((r) => (
-          <div key={r.label} style={{ display: "grid", gridTemplateColumns: "96px 1fr auto", gap: 8, alignItems: "baseline", borderTop: `1px solid ${T.line}`, padding: "10px 0" }}>
-            <span style={{ ...sans, fontSize: FS.sm, fontWeight: FW.bold, color: T.ink }}>{r.label}</span>
-            <span style={{ ...sans, fontSize: FS.sm, color: T.mut, lineHeight: LH.body }}>{r.sub}</span>
-            <span style={{ ...mono, ...tnum, fontSize: FS.sm, fontWeight: FW.bold, color: T.ink, whiteSpace: "nowrap" }}>{r.value}</span>
-          </div>
-        ))}
+        {rows.map((r) => {
+          const e = r.edit || null;
+          const isOpen = !!e && open === r.id;
+          return (
+            <div key={r.label} data-exit-row={r.id || r.label} style={{ borderTop: `1px solid ${T.line}` }}>
+              <button type="button" disabled={!e} aria-expanded={e ? isOpen : undefined} onClick={() => e && setOpen(isOpen ? null : r.id)}
+                aria-label={e && words ? words.aria(r.label) : undefined}
+                style={{ ...sans, width: "100%", display: "grid", gridTemplateColumns: "96px 1fr auto", gap: 8, alignItems: "baseline", padding: "10px 0",
+                  minHeight: TAP, background: "transparent", border: "none", textAlign: "left", color: T.ink, cursor: e ? "pointer" : "default" }}>
+                <span style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                  <span style={{ fontSize: FS.sm, fontWeight: FW.bold, color: T.ink }}>{r.label}</span>
+                  {e && e.tag && words && (
+                    <span data-exit-tag={e.tag} style={{ fontSize: FS.xs, fontWeight: FW.bold, color: e.tag === "edited" ? T.amber : T.mut }}>{words[e.tag]}</span>
+                  )}
+                </span>
+                <span style={{ fontSize: FS.sm, color: T.mut, lineHeight: LH.body }}>{r.sub}</span>
+                <span style={{ ...mono, ...tnum, fontSize: FS.sm, fontWeight: FW.bold, color: T.ink, whiteSpace: "nowrap" }}>{r.value}</span>
+              </button>
+              {isOpen && (
+                <div data-exit-editor={r.id} style={{ padding: "0 0 10px" }}>
+                  <Stepper label={r.label} ariaLabel={r.label} value={e.value}
+                    onMinus={e.onMinus} onPlus={e.onPlus} canMinus={e.canMinus} canPlus={e.canPlus} />
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
+      {reset && (
+        <div style={{ marginTop: 4 }}><LinkBtn onClick={reset.onReset}>{reset.label}</LinkBtn></div>
+      )}
       <div style={{ ...sans, fontSize: FS.xs, color: T.mut }}>{footer}</div>
     </Section>
   );
@@ -584,9 +617,11 @@ export function ExitRulesPast({ state = "idle", error = null, result = null, ins
 }
 
 /* ---------------------------------------------------------------- SEND */
-export function SendBar({ label, disabled = false, reason = null, footer, onSend, fix = null }) {
+export function SendBar({ label, disabled = false, reason = null, footer, onSend, fix = null, exposure = null }) {
   return (
     <div data-build-send>
+      {/* PR 72 (task 72.3): past the total-exposure limit, one amber line above Send. It never blocks (the gate decides). */}
+      {exposure && <div data-exposure-line role="note" style={{ ...sans, fontSize: FS.sm, color: T.amber, lineHeight: LH.body, marginBottom: 8 }}>{exposure}</div>}
       <button onClick={onSend} disabled={disabled} aria-describedby={reason ? "build-send-reason" : undefined}
         style={{ ...sans, width: "100%", minHeight: 52, borderRadius: 12, border: "none", fontSize: FS.md, fontWeight: FW.bold,
           background: disabled ? T.raise : T.action, color: disabled ? T.dim : T.onAccent, cursor: disabled ? "not-allowed" : "pointer" }}>
@@ -631,7 +666,9 @@ export function ReviewSheet({ r, ts }) {
           <div data-review-order style={{ background: T.bg, border: `1px solid ${T.line}`, borderRadius: 10, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 6 }}>
             {r.legs.map((l, i) => (
               <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
-                <span style={{ ...sans, fontSize: FS.sm, color: T.ink }}><b>{l.words[0]}</b> {l.words[1]}</span>
+                <span style={{ ...sans, fontSize: FS.sm, color: T.ink }}><b>{l.words[0]}</b> {l.words[1]}
+                  {/* PR 72: IBKR's name for the contract under the leg's words. */}
+                  {l.name && <span data-review-name style={{ display: "block", ...mono, fontSize: FS.xs, color: T.body }}>{l.name}</span>}</span>
                 <span data-occ style={{ ...mono, fontSize: FS.sm, color: T.mut, whiteSpace: "nowrap" }}>{l.occ || "—"}</span>
               </div>
             ))}

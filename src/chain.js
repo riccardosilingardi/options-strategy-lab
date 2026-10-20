@@ -59,6 +59,22 @@ export function feedName(chain) {
 }
 
 /**
+ * THE FEED, NAMED BESIDE THE PRICES' AGE (PR 72, task 72.4): "Alpaca indicative prices" — Alpaca's free feed and the
+ * default (`ALPACA_OPTIONS_FEED` unset, netlify/functions/chainAlpaca.mjs) — or "Alpaca OPRA real-time" when the deploy
+ * reads OPRA; CBOE's delayed quotes as the fallback. Null when nothing is loaded. `FEED_INFO` is its one ⓘ sentence.
+ */
+export function feedLine(chain) {
+  const s = chain?.source;
+  if (!s) return null;
+  if (s === SOURCE.alpacaIndicative) return "Alpaca indicative prices";
+  if (s === SOURCE.alpacaOpra) return "Alpaca OPRA real-time";
+  if (s === SOURCE.cboeServer || s === SOURCE.cboeDirect) return "CBOE delayed prices";
+  return s;
+}
+export const FEED_INFO = "Indicative quotes are Alpaca's own calculated prices, not the consolidated book: they can differ by a few " +
+  "cents from what a broker shows. OPRA is the consolidated real-time book; CBOE's quotes are about 15 minutes delayed.";
+
+/**
  * One sentence saying how fresh these prices really are.
  * The delay is a property of the feed, so it is stated wherever the feed is —
  * never "~15 min delayed" under numbers that came from somewhere else.

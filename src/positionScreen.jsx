@@ -15,7 +15,7 @@
 import React, { useState } from "react";
 import { ChevronLeft } from "lucide-react";
 import { T, TYPE } from "./theme.js";
-import { Info, Note, Sheet, mono, sans, TAP } from "./ui.jsx";
+import { Info, Note, Sheet, mono, sans, TAP, ContractName } from "./ui.jsx";
 import { PREVIEW, PREVIEW_READ_ONLY } from "./deploy.js";
 import { Fold } from "./steps.jsx";
 import { PositionChart } from "./visuals.jsx";
@@ -213,7 +213,9 @@ export function AlpacaDetails({ d }) {
   return (
     <div data-alpaca-details>
       {d.stageNote && <Note color={T.amber} style={{ marginBottom: 8 }}>⚠ {d.stageNote}</Note>}
-      <Row k="LEGS">{d.legsText}</Row>
+      <Row k="LEGS">{d.legs && d.legs.length
+        ? <span style={{ display: "grid", gap: 6 }}>{d.legs.map((l, i) => <ContractName key={i} name={l.name} occ={l.occ} />)}</span>
+        : d.legsText}</Row>
       <Row k="EXPIRES">{d.expiresText}</Row>
       <Row k="OPENED">{d.openedText}</Row>
       <Row k="ENTRY PRICE">{d.entryText}</Row>
