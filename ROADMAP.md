@@ -6,6 +6,59 @@ The full history of every item shipped so far (P0–P10, P2-bis) is in `docs/his
 Every pull request updates this file: the session that ships an item marks it done and states
 what the next one inherits.
 
+## Done in PR 77 (owner, 20 Oct 2026): draw with a finger → the nearest defined-risk figure
+
+The second of three stacked PRs (76 → 77 → 78), stacked on PR 76. "Learn is missing the manual drawing": the owner draws the
+payoff shape he wants and the app says which figure it is, on the real market.
+
+- **Points | Draw** above Learn's picture (the `Segments` atom). In Draw a finger (or a mouse) traces a profile left to right;
+  the page never scrolls under it (the picture is `touch-action: none` in Draw, and its touches are cancelled by hand, as
+  PR 76 measured Chromium needs); the points step aside and the curve fades. **Undo** (back to the previous drawing) and
+  **Redraw** sit in one row. The strokes live in `lab`, in memory like the rest of the lab.
+- **The recognition, `src/learnDraw.js` (plain JS, tested without a browser):** the stroke resampled on 64 prices across
+  the span it covers, smoothed, normalised (scale gone, sign kept), cut into segments — rising, falling, flat above, below
+  or near zero — and its kinks; every shape `FIGURE_NAMES` names (`DRAW_SHAPES`, rules.js: the 34, as legs on strike slots)
+  laid out on the strikes the chain lists for each leg's type, starting on the drawn kinks, then moved a listed strike at a
+  time while it gets nearer; each strike inside the drawn span and a segment's width from any other (a kink nobody drew
+  is no evidence); each scored on the segment pattern first, then the kinks, then the whole curve, against its P&L at expiry
+  less its MODEL net (the lab's premiums). The three closest, one card per name (`figureOf()` of the legs laid out) and one
+  per LINE (a bull put spread and a bull call spread on the same strikes draw the same line: said in one sentence, "one pays
+  to enter, the other is paid"); a tie (two points) goes to fewer legs, then the one paid to stay when today's price already
+  makes money, else the one that pays to move.
+- **Defined risk first.** When the closest is a figure the app never sends (`undefinedRiskLegs()`), its sibling
+  (`DEFINED_SIBLINGS`, rules.js: short straddle → iron butterfly, short strangle → iron condor, short put → bull put spread,
+  short call → bear call spread, a ratio spread → its covered butterfly; and, chosen, the guts, the synthetics and the risk
+  reversals) comes first, tagged "Defined-risk version", with one sentence ("Short strangle → Iron condor: same shape, the
+  wings cap the loss"). It is the drawn figure with a bought option beyond each uncovered sold one (`withWings()`: half an
+  expected move out, on the type's listed strikes — the drawn strikes kept), PR 78's "Build the defined-risk version" too.
+  The undefined one is still shown, in amber "The app never sends this".
+- **Nothing named when nothing matches:** under `DRAW_MATCH_MIN` (0.75), or for a scribble (a stroke the smoothing mostly took
+  away, `SCRIBBLE_WIGGLE`), no card and one sentence, "No known figure looks like this; the closest is X." A tap on a card
+  loads it on the lab (the gallery's path), on the strikes laid out from the drawing, back on Points.
+
+**Chosen, measured on drawn fixtures (src/learnDraw.test.js, scripts kept out of the repo):** nine figures drawn with a ±3%
+tremor on fine, coarse and gappy boards score 0.92–0.99 for their own shape, sloppier hands (±6–8%, rounded corners, a tilted
+flat, a shorter stroke) 0.95–0.99 — except an iron condor whose flat top the rounding removed, which reads, fairly, as a
+butterfly; smoothed random walks 0.38–0.70, zig-zags and a sine 0.28–0.44. The threshold 0.75, the wiggle 0.2, the wing at
+half an expected move and the weights (pattern 0.5, kinks 0.2, curve 0.3) are chosen (PRD §4 #8).
+
+**Tests:** src/learnDraw.test.js (16: the table covers every name, the siblings and their sentence, a stroke read, the
+pattern's distance, the seven drawn figures on three boards each — long call, bull call, bull put, iron condor, butterfly,
+straddle named first; a short strangle offered as an iron condor first — the same line said once, a sloppier hand, a
+scribble named nothing, the wings, strikes judged on what was drawn, nothing sent); learn.test.jsx +3 (the switch and the
+held page, a drawn strangle's cards, nothing named). **Measured:** tests 1,597 → 1,616; build clean; `audit-computer` 45
+checks, 0 missed; in Chromium's touch input, every drawing kept the page still (0px). Photographs: docs/screens/pr77/
+(`node scripts/shoot-pr77.mjs`).
+
+**Not changed:** riskGate.js, the order paths, RULES, /api/state, the gallery, Points mode.
+
+### What the next session inherits
+
+- **PR 78** (stacked on this): the bridge to the chain and Build. `withWings()` (learnDraw.js) is its "Build the
+  defined-risk version": the lab's legs with a bought option beyond each uncovered sold one, the wings added named for the
+  sentence.
+- A real finger has not drawn: Chromium's touch emulation drew straight segments with a sine tremor (PRD §4 #3).
+
 ## Done in PR 76 (owner, 20 Oct 2026): Learn's real chart, a finger that drags, names as IBKR writes them
 
 The first of three stacked PRs (76 → 77 → 78; the owner's prompt "OSL: PR 76, 77, 78", which renumbers the plan below: the
@@ -1472,7 +1525,7 @@ One line each; see `PRD.md` §5 and `docs/history/ROADMAP.md` for detail.
   - **Renumbered by the owner's prompt of 20 Oct 2026 ("OSL: PR 76, 77, 78"):**
   - **DONE: PR 76** — Learn's real chart (scale, extremes, today and the exit date, the market's band and chance, a
     crosshair), a finger that drags, legs named as IBKR writes them, every market as IBKR lists it (above).
-  - **PR 77** — a figure drawn with a finger → the nearest defined-risk figure (was "PR 75").
+  - **DONE: PR 77** — a figure drawn with a finger → the nearest defined-risk figure (was "PR 75"; above).
   - **PR 78** — from Learn to the real chain, Build and Optimize (was "PR 75"'s second half).
   - Then **P7**, fills streamed server-side (below), plus IBKR-style alerts (the day's P&L, a position's daily move) (was
     "PR 76").

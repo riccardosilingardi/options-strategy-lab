@@ -294,7 +294,14 @@ non-expert trader who wants to learn discipline rather than be sold trades.
   point anywhere along its dotted guide (a band ≥ 44px; the page stays still while it is held, the rest of the picture still
   scrolls), a label above the finger names the strike it snaps to and the leg's model price, each snap is a short vibration,
   two legs on one strike sit side by side; − / + and the arrow keys stay. Each leg is named as IBKR writes it ("Short UNG
-  Dec18'26 12 Put") with the chain's OCC symbol and Copy under it.
+  Dec18'26 12 Put") with the chain's OCC symbol and Copy under it. **Since PR 77, Points | Draw:** in Draw a finger traces
+  the profit and loss wanted, left to right (the page holds still), and the app names the three closest figures on this
+  market and expiry — every shape it knows laid out on the strikes the chain lists near the drawn kinks, priced at the model,
+  scored on the shape (segments first, then the kinks, then the curve), "86% similar" — one card per line drawn (a bull put
+  and a bull call spread on the same strikes draw the same line: one sentence says so). A closest figure the app never sends
+  comes with its defined-risk version first ("Short strangle → Iron condor: same shape, the wings cap the loss") and its own
+  amber line; nothing alike, or a scribble, names nothing: "No known figure looks like this; the closest is X." Undo and
+  Redraw; a tap loads a card on the lab.
 - **Every market as IBKR lists it (PR 76; owner, 20 Oct 2026: "so I recognise it immediately in IBKR").** SYMBOL · EXCHANGE
   and the official name in capitals, read from Alpaca's `GET /v2/assets/{symbol}` (kept a day on the device), Alpaca's
   exchange codes in IBKR's words (`EXCHANGE_WORDS`). Lists carry the exchange only — Find's rows and the Journal's ("UNG ·
@@ -601,7 +608,8 @@ the exit replay on real closes. PR 70 re-read them: none closed; #3 and #8 carry
 closed; #6 gains the Journal's merge on the server. PR 72 re-read them: none closed; #3, #8 and #9 carry what PR 72 changed.
 PR 73 re-read them: none closed; #3 carries the computer's new layout. PR 74 re-read them: none closed; #3 carries Learn.
 PR 76 re-read them: none closed (its asset call was tried from this sandbox and refused, 401); #2 and #3 carry what PR 76
-changed, and #3's crosshair check is half settled by a measurement.)
+changed, and #3's crosshair check is half settled by a measurement. PR 77 re-read them: none closed; #3 and #8 carry the
+drawing.)
 
 1. **OWNER CHECK — the Journal entry for J-0001 shows the $7.65 fill** (v1 is reached on the owner's report of 5 Oct
    2026: filled 9 of 9 at $7.65, filed from the production address; this session cannot see that browser). **No Modify
@@ -686,7 +694,9 @@ changed, and #3's crosshair check is half settled by a measurement.)
    0px. The cause was Chromium ignoring `touch-action` on shapes inside an svg; **Build's crosshair handle had the same flaw**
    (the line moved and the page scrolled 50px) and is fixed the same way (13.42 → 16.54, 0px). Emulated touch is not a thumb:
    **OWNER CHECK — a point and Build's line under a real finger**, iOS Safari included, and whether the 5ms vibration is felt
-   (Safari has none).
+   (Safari has none). **PR 77's drawing** (docs/screens/pr77/, `node scripts/shoot-pr77.mjs`) was drawn by Chromium's touch
+   input — straight segments with a sine tremor — and kept the page still (0px) in every drawing; a real thumb's stroke, and
+   how often a real drawing is named, have not been seen.
 4. **Read when it happens — no credit has filled at the corrected limit** (the indicative combination ask on thin chains
    has not been measured by a fill; J-0003 never filled at it), **and "Not on Alpaca", "size N > M on the ask", the "Not
    in the app" card, an order "sent outside this app", free sizing (PR #41), and an order sent from Build's new review
@@ -785,6 +795,10 @@ changed, and #3's crosshair check is half settled by a measurement.)
    the best of nine on one month's past years flatters the winner, and the line says how many windows it read; the neutral
    trade's move is one expected move to the exit day (the owner's choice of the three offered); the price history's two
    retries (0.8 s, 1.6 s) and `bars.mjs`'s 4 s a source are chosen. Words: build 610 → 675, market 493 → 499 (voice.test.js).
+   **PR 77:** the drawing's naming threshold `DRAW_MATCH_MIN` 0.75, the scribble's wiggle 0.2, the score's weights (pattern
+   0.5, kinks 0.2, curve 0.3), the tie (two points) and its order (fewer legs, then paid-to-stay or pays-to-move by where
+   today's price sits), the wing at half an expected move, and the siblings of the guts, the synthetics and the risk
+   reversals are chosen, on drawn fixtures only (learnDraw.test.js; own figure 0.92–0.99, random walks ≤ 0.70).
 9. **The exit rules are inherited defaults, not yet backtested on real data** on these ten markets; the single option's +50%
    of the premium is the owner's choice. **OWNER CHECK — the exit replay on real closes (PR 68).** `exitBacktest()` is
    built and tested on synthetic series only: this environment reads no daily closes (its Alpaca credential is refused,

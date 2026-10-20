@@ -305,6 +305,12 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
   ignore `touch-action` there, so a handle (Learn's points, Build's crosshair handle) adds non-passive `touchstart` /
   `touchmove` listeners that `preventDefault()` a touch starting on it; the picture keeps `pan-y` so the page still scrolls
   elsewhere. `node scripts/shoot-pr76.mjs` measures it with Chromium's own touch input.
+- **A figure drawn with a finger (PR 77) is `recogniseDrawing()` in `src/learnDraw.js`** (plain JS, sends nothing): the stroke
+  read as segments and kinks, every `DRAW_SHAPES` shape (rules.js, all of FIGURE_NAMES on strike slots) laid out on its
+  types' listed strikes inside the drawn span, scored pattern → kinks → curve at the MODEL net; the names are `figureOf()`'s;
+  one card per line; a figure the app never sends brings its `DEFINED_SIBLINGS` version first, built by `withWings()` (also
+  PR 78's defined-risk version); under `DRAW_MATCH_MIN` or a scribble, nothing is named. Learn's screen reads it through
+  `labDrawView()` (learnView.js); the strokes live in `lab`, never on /api/state.
 - **A market as IBKR lists it (PR 76): `src/listing.js`** reads `{ exchange, name }` from Alpaca's `GET /v2/assets/{symbol}`
   (one GET per market, a day on the device, never /api/state), the words are rules.js's (`listingLine()` "UNG · ARCA",
   `listingName()`, `EXCHANGE_WORDS`, `listingSearchInfo()`), the name line is the `ListingName` atom. Lists (Find's rows, the
@@ -380,6 +386,7 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
   plan, entry vs now, the record, Alpaca details, the copilot, the Guardian fold.
 - `src/learn.jsx`, `src/learnView.js` — Learn, the figure lab (PR 74): the screen, and its plain-JS arithmetic (`labModel()`,
   `labCard()`, `labLegRows()`, `labGallery()`, `labFigureLegs()`, the leg moves). Nothing in either sends or saves.
+- `src/learnDraw.js` — a figure drawn with a finger, recognised on the market shown (PR 77); `withWings()`.
 - `src/journal.jsx`, `src/journalView.js` — the Journal (redesign PR 3b) and its words (plain JS: `whyOpenedLine()`,
   `endedLine()`, `closedState()`, `closedTitle()`, `timelineItems()`). `src/settings.jsx` — Settings (redesign PR 3b).
 - `src/path.js`, `src/handoff.js` — the three-step path (Find → market → Build) and how a trade reaches Build.
@@ -509,6 +516,8 @@ All in `RULES`, `src/rules.js`, unless noted.
   Find, the market page, Build, a position and the Journal; 390×844 and 1280×800) and MEASURES a finger's slide on each point
   with Chromium's touch input (the strike before and after, the page's scroll); `ONLY=a,b` picks shots ("finger" included).
   The harness answers `/v2/assets/{sym}` with fixture names (typed there, not Alpaca's); "+nolisting" answers 404.
+- `node scripts/shoot-pr77.mjs [dir]` photographs PR 77's drawing (at rest, a short strangle, a bull put spread, a scribble, a
+  card loaded, light, 1280×800), drawn by Chromium's touch input, and prints each drawing's cards and the page's scroll.
 - `node scripts/shoot-pr72.mjs [dir]` photographs PR 72's screens (the Exit plan at rest and edited, the legs named twice,
   the review's legs, the exposure line on `+poor`, the market's feed line, the tray's two chances) (docs/screens/pr72/).
 - `node scripts/shoot-pr71.mjs [dir]` photographs the Journal's line under its title, saved on the server and (with the
