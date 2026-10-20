@@ -1187,6 +1187,8 @@ export const compareDistInputs = (items = []) => {
 /* `compareDistNote()` moved to path.js (PR #40, TASK 2) so the word counter,
    which runs in plain node, can score it; re-exported here unchanged. */
 import { compareDistNote } from "./path.js";
+// PR 76: where Learn's picture puts its points, a finger's bands and its labels (plain JS, tested in learn.test.js).
+import { niceTicks, labPointXs, labHitZones, labLane } from "./learnView.js";
 export { compareDistNote };
 
 /** One sentence: who pays most, who works most often, and what it costs. */
@@ -1485,20 +1487,38 @@ export function PositionChart({ bands, bars = [], spot = null, entrySpot = null,
 }
 
 /* ====================================================================
-   THE FIGURE LAB'S PICTURE (PR 74, owner 20 Oct 2026: "as on IBKR Campus — blue points to drag").
+   THE FIGURE LAB'S PICTURE (PR 74, owner 20 Oct 2026: "as on IBKR Campus — blue points to drag"; PR 76, the same day:
+   "the graph is too simple", "dragging works with a finger but not well").
 
-   The classic payoff diagram: the price runs left to right, the profit or loss at expiry up and down, the zero line
-   across. Cut from `payoffBands()` like every picture in this file: the curve is its samples, the green and red are its
-   sign, the breakevens its own. One BLUE POINT per leg sits on the curve at the leg's strike; drag it sideways (or focus
-   it and press ← →) and the leg moves to the listed strike nearest — the snapping is the caller's (`labMoveLeg()`,
-   learnView.js), this only says where the finger is. `compact` draws the gallery's small card picture: no words, no points.
+   The classic payoff diagram: the price runs left to right, the profit or loss up and down, the zero line across. Cut
+   from `payoffBands()` like every picture in this file: the curve is its samples, the green and red are its sign, the
+   breakevens its own. Since PR 76 it reads like IBKR's Option Wizard: a dollar scale with its grid and the prices along
+   the bottom; the card's max profit and max loss written where the curve is flat (or "no ceiling" / "unlimited" at the
+   edge); the breakevens labelled clear of the curve and of each other; two more curves, TODAY (dashed) and on the EXIT
+   DATE (dotted), from `labCurves()`; the market's distribution as a thin band under the axis (`labDensity()`); and a
+   crosshair where a finger or a mouse rests, saying what the legs make there (`labReadout()`). Everything it writes is
+   handed in from learnView.js: it works out nothing.
+
+   One BLUE POINT per leg sits on the curve at the leg's strike. A finger holds it anywhere along its dotted guide (a band
+   at least 44px wide, `labHitZones()`, whose `touch-action: none` keeps the page still while it is held; the rest of the
+   picture still scrolls the page up and down), a label rides 48px above the finger with the strike it snaps to and the
+   leg's model price, and each snap is felt (a 5ms vibration where the phone has one). Two legs on one strike sit side by
+   side (`labPointXs()`), each its own band. The leg moves by how far the finger moved SIDEWAYS (`labDragTo()`): a thumb's
+   wobble up and down does nothing. − / + and the arrow keys stay. The snapping is the caller's (listed strikes only).
+   `compact` draws the gallery's small card picture: no words, no points, as in PR 74.
 ==================================================================== */
-export function FigureChart({ bands, legs = [], spot = null, width = 340, height = 200, compact = false, onMove, onStep,
-  handleLabel = (i) => `Leg ${i + 1}` }) {
-  const svgRef = useRef(null);
-  const [drag, setDrag] = useState(null);
+/** A snap felt under the finger: five milliseconds where the phone has a vibrator, nothing anywhere else. */
+export const snapBuzz = () => {
+  try { if (typeof navigator !== "undefined" && typeof navigator.vibrate === "function") navigator.vibrate(5); } catch { /* none */ }
+};
+export function FigureChart(props) {
+  return props.compact ? <FigureThumb {...props} /> : <FigureLab {...props} />;
+}
+
+/** The gallery's small picture: the curve and its two colours, today's price, nothing to read or hold (PR 74). */
+function FigureThumb({ bands, spot = null, width = 84, height = 44 }) {
   const W = Math.max(60, width), H = Math.max(36, height);
-  const padL = compact ? 2 : 10, padR = compact ? 2 : 10, padT = compact ? 3 : 18, padB = compact ? 3 : 26;
+  const padL = 2, padR = 2, padT = 3, padB = 3;
   const b = bands;
   const lo = b ? b.lo : (spot ? spot * 0.75 : 0), hi = b ? b.hi : (spot ? spot * 1.25 : 1);
   const pnls = b ? b.samples.map((p) => p.pnl) : [0];
@@ -1508,21 +1528,12 @@ export function FigureChart({ bands, legs = [], spot = null, width = 340, height
   const X = (s) => padL + ((s - lo) / ((hi - lo) || 1)) * (W - padL - padR);
   const Y = (v) => padT + ((yTop - v) / ((yTop - yBot) || 1)) * (H - padT - padB);
   const y0 = Y(0);
-  const priceAt = (clientX) => {
-    const r = svgRef.current?.getBoundingClientRect?.();
-    if (!r || !r.width) return null;
-    const x = ((clientX - r.left) / r.width) * W;
-    return lo + ((x - padL) / ((W - padL - padR) || 1)) * (hi - lo);
-  };
   const line = b ? b.samples.map((p, i) => `${i ? "L" : "M"}${X(p.s).toFixed(1)},${Y(p.pnl).toFixed(1)}`).join(" ") : null;
   const area = b ? `${line} L${X(b.samples[b.samples.length - 1].s).toFixed(1)},${y0.toFixed(1)} L${X(b.samples[0].s).toFixed(1)},${y0.toFixed(1)} Z` : null;
   const id = `fig${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
-  // A halo in the ground's colour keeps a label readable where the curve runs through it (a breakeven sits on the curve).
-  const txt = { fontFamily: "ui-monospace, Menlo, monospace", fontSize: 11, fill: T.mut, stroke: T.bg, strokeWidth: 3, paintOrder: "stroke" };
   return (
-    <svg ref={svgRef} width={W} height={H} viewBox={`0 0 ${W} ${H}`} role={compact ? "img" : "group"} data-figure-chart={compact ? "thumb" : "lab"}
-      aria-label={compact ? "the figure's payoff at expiry" : "the payoff at expiry; each blue point is a leg's strike"}
-      style={{ display: "block", maxWidth: "100%", background: T.bg, borderRadius: compact ? 4 : 8, touchAction: compact ? "auto" : "pan-y" }}>
+    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} role="img" data-figure-chart="thumb" aria-label="the figure's payoff at expiry"
+      style={{ display: "block", maxWidth: "100%", background: T.bg, borderRadius: 4, touchAction: "auto" }}>
       <defs>
         <clipPath id={`${id}u`}><rect x={0} y={0} width={W} height={Math.max(0, y0)} /></clipPath>
         <clipPath id={`${id}d`}><rect x={0} y={y0} width={W} height={Math.max(0, H - y0)} /></clipPath>
@@ -1531,47 +1542,268 @@ export function FigureChart({ bands, legs = [], spot = null, width = 340, height
       {area && <path d={area} fill={T.green} opacity={0.28} clipPath={`url(#${id}u)`} />}
       {area && <path d={area} fill={T.red} opacity={0.16} clipPath={`url(#${id}d)`} />}
       {spot != null && Number.isFinite(spot) && spot >= lo && spot <= hi && (
+        <line x1={X(spot)} x2={X(spot)} y1={padT} y2={H - padB} stroke={T.ink} strokeWidth={1} opacity={0.45} strokeDasharray="3 3" />
+      )}
+      {line && <path d={line} fill="none" stroke={T.ink} strokeWidth={1.4} strokeLinejoin="round" />}
+    </svg>
+  );
+}
+
+/** The three curves' strokes, one home: the picture and its legend read these. */
+const FIGURE_CURVES = {
+  expiry: { stroke: "ink", strokeWidth: 2 },
+  today: { stroke: "mut", strokeWidth: 1.6, strokeDasharray: "6 4" },
+  exit: { stroke: "mut", strokeWidth: 2, strokeDasharray: "0.5 4", strokeLinecap: "round" },
+};
+const curveStroke = (id) => { const c = FIGURE_CURVES[id]; return { ...c, stroke: T[c.stroke] }; };
+/** A legend's sample of one curve, drawn as the picture draws it. */
+export const FigureLegendLine = ({ id }) => (
+  <svg width={22} height={8} aria-hidden="true" style={{ flexShrink: 0 }}><line x1={1} x2={21} y1={4} y2={4} {...curveStroke(id)} /></svg>
+);
+/** About how wide a run of 11px mono text is (0.6em a character): enough to keep labels apart. */
+const textW = (t) => String(t || "").length * 6.6;
+/** "$0", "+$200", "-$1,000": the dollar scale's words. */
+const axisMoney = (v) => (Math.abs(v) < 1e-9 ? "$0" : `${v > 0 ? "+" : "-"}$${Math.round(Math.abs(v)).toLocaleString("en-US")}`);
+const axisPrice = (v) => (Number.isInteger(v) ? String(v) : String(+Number(v).toFixed(2)));
+const pathOf = (pts, X, Y) => pts.map((p, i) => `${i ? "L" : "M"}${X(p.s).toFixed(1)},${Y(p.pnl).toFixed(1)}`).join(" ");
+/** A curve's value at a price, on its own samples (straight between them). */
+const curveAt = (pts, s) => {
+  if (!pts || !pts.length) return null;
+  if (s <= pts[0].s) return pts[0].pnl;
+  for (let i = 1; i < pts.length; i++) if (s <= pts[i].s) { const a = pts[i - 1], c = pts[i]; return a.pnl + ((s - a.s) / ((c.s - a.s) || 1)) * (c.pnl - a.pnl); }
+  return pts[pts.length - 1].pnl;
+};
+
+function FigureLab({ bands, legs = [], spot = null, width = 340, height = 260, onMove, onStep, handleLabel = (i) => `Leg ${i + 1}`,
+  curves = null, extremes = [], density = [], readout = null, snapLabel = null, vibrate = snapBuzz }) {
+  const svgRef = useRef(null);
+  const dragRef = useRef(null);                 // { i, startStrike, startPrice } while a point is held
+  const [drag, setDrag] = useState(null);       // the same, plus where the finger is, for the label above it
+  const [cross, setCross] = useState(null);     // a price, while a finger or a mouse rests on the picture
+  const lastStrike = useRef(null);
+  const W = Math.max(200, width), H = Math.max(160, height);
+  const padL = 50, padR = 12, padT = 24, padB = 46;
+  const plotB = H - padB;
+  const b = bands;
+  const lo = b ? b.lo : (spot ? spot * 0.75 : 0), hi = b ? b.hi : (spot ? spot * 1.25 : 1);
+  const today = curves && curves.today, exit = curves && curves.exit;
+  const all = [...(b ? b.samples.map((p) => p.pnl) : [0]), ...(today || []).map((p) => p.pnl), ...(exit || []).map((p) => p.pnl)];
+  const top = Math.max(0, ...all), bot = Math.min(0, ...all);
+  const span = (top - bot) || 1;
+  const yTop = top + span * 0.14, yBot = bot - span * 0.14;
+  const X = (s) => padL + ((s - lo) / ((hi - lo) || 1)) * (W - padL - padR);
+  const Y = (v) => padT + ((yTop - v) / ((yTop - yBot) || 1)) * (plotB - padT);
+  const y0 = Y(0);
+  const local = (e) => {
+    const r = svgRef.current?.getBoundingClientRect?.();
+    if (!r || !r.width) return null;
+    return { x: ((e.clientX - r.left) / r.width) * W, y: ((e.clientY - r.top) / r.height) * H };
+  };
+  const priceOfX = (x) => lo + ((x - padL) / ((W - padL - padR) || 1)) * (hi - lo);
+  const line = b ? pathOf(b.samples, X, Y) : null;
+  const area = b ? `${line} L${X(b.samples[b.samples.length - 1].s).toFixed(1)},${y0.toFixed(1)} L${X(b.samples[0].s).toFixed(1)},${y0.toFixed(1)} Z` : null;
+  const id = `fig${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
+  // A halo in the ground's colour keeps a label readable where a curve runs through it.
+  const txt = { fontFamily: "ui-monospace, Menlo, monospace", fontSize: 11, fill: T.mut, stroke: T.bg, strokeWidth: 3, paintOrder: "stroke" };
+
+  /* A FINGER ON A POINT HOLDS THE PAGE STILL. Chromium and Safari ignore `touch-action` on the shapes INSIDE an <svg>
+     (measured in Chromium, PR 76: a finger on a point with `touch-action: none` still scrolled the page and the drag was
+     cancelled), so the picture cancels the scroll itself: a touch that starts on a point, or moves while one is held, is
+     `preventDefault()`ed — which needs listeners that are not passive (React's are). Anywhere else the page scrolls. */
+  useEffect(() => {
+    const el = svgRef.current;
+    if (!el || typeof el.addEventListener !== "function") return undefined;
+    const onStart = (e) => { if (e.target && typeof e.target.closest === "function" && e.target.closest("[data-lab-point]")) e.preventDefault(); };
+    const onMove = (e) => { if (dragRef.current) e.preventDefault(); };
+    el.addEventListener("touchstart", onStart, { passive: false });
+    el.addEventListener("touchmove", onMove, { passive: false });
+    return () => { el.removeEventListener("touchstart", onStart); el.removeEventListener("touchmove", onMove); };
+  }, []);
+
+  // EACH SNAP IS FELT: the held leg's strike changed since the last render.
+  const heldStrike = drag && legs[drag.i] ? Number(legs[drag.i].strike) : null;
+  useEffect(() => {
+    if (heldStrike == null) { lastStrike.current = null; return; }
+    if (lastStrike.current != null && heldStrike !== lastStrike.current) vibrate();
+    lastStrike.current = heldStrike;
+  }, [heldStrike, vibrate]);
+
+  // THE POINTS: at their strikes, spread apart when closer than 22px; each its own band for a finger.
+  const inRange = legs.map((l) => Number.isFinite(Number(l.strike)) && Number(l.strike) >= lo && Number(l.strike) <= hi);
+  const pxs = labPointXs(legs.map((l) => X(Number(l.strike))));
+  const zones = labHitZones(pxs, { left: padL, right: W - padR });
+  // THE STRIKE LABELS under the band, in one lane, never on top of each other.
+  const kText = legs.map((l) => `${+Number(l.strike).toFixed(3)}${l.type === "call" ? "C" : "P"}`);
+  const kLane = labLane(legs.map((l, i) => ({ x: pxs[i] - textW(kText[i]) / 2, w: textW(kText[i]) })), { left: padL, right: W - padR });
+
+  // THE WORDS ON THE CURVE: today's price on the top lane (the crosshair's sentence takes its place while it shows), the
+  // card's extremes, then each breakeven on the side of the zero line the curve leaves empty.
+  const boxes = [];
+  const overlaps = (r) => boxes.some((q) => r.x0 < q.x1 + 2 && r.x1 > q.x0 - 2 && r.y0 < q.y1 + 1 && r.y1 > q.y0 - 1);
+  const clampX = (x, w) => Math.min(W - padR - w, Math.max(padL + 2, x));
+  const todayText = spot != null && Number.isFinite(spot) && spot >= lo && spot <= hi ? `today ${Number(spot).toFixed(2)}` : null;
+  const todayX = todayText ? clampX(X(spot) - textW(todayText) / 2, textW(todayText)) : 0;
+  if (todayText) boxes.push({ x0: todayX, x1: todayX + textW(todayText), y0: 4, y1: 16 });
+  // The points are obstacles too: no word sits on a blue point.
+  if (b) legs.forEach((l, i) => { if (inRange[i]) { const cy = Y(b.at(Number(l.strike))); boxes.push({ x0: pxs[i] - 9, x1: pxs[i] + 9, y0: cy - 9, y1: cy + 9 }); } });
+  const extremeLabels = (extremes || []).map((e) => {
+    const w = textW(e.text);
+    const x = e.edge === "right" ? W - padR - 2 - w : e.edge === "left" ? padL + 4 : clampX(X(e.s) - w / 2, w);
+    // Above the best case, below the worst, a step farther out when a point or a label is in the way.
+    const tries = e.id === "profit" ? [Y(e.pnl) - 7, Y(e.pnl) - 14] : [Y(e.pnl) + 16, Y(e.pnl) + 23];
+    const ys = tries.map((y) => (e.id === "profit" ? Math.max(padT + 10, y) : Math.min(plotB - 3, y)));
+    const yb = ys.find((y) => !overlaps({ x0: x, x1: x + w, y0: y - 10, y1: y + 2 })) ?? ys[ys.length - 1];
+    boxes.push({ x0: x, x1: x + w, y0: yb - 10, y1: yb + 2 });
+    return { ...e, x, y: yb };
+  });
+  const beLabels = b ? b.breakevens.map((s) => {
+    const t = Number(s).toFixed(2), w = textW(t);
+    const rising = b.at(s + (hi - lo) * 0.004) > b.at(s - (hi - lo) * 0.004);
+    // Rising through zero, the curve fills the lower left and the upper right: the label goes upper left, else lower right.
+    const spots = rising ? [[X(s) - 6 - w, y0 - 6], [X(s) + 6, y0 + 15]] : [[X(s) + 6, y0 - 6], [X(s) - 6 - w, y0 + 15]];
+    const pick = spots.map(([x, y]) => ({ x: clampX(x, w), y })).find((p) => !overlaps({ x0: p.x, x1: p.x + w, y0: p.y - 10, y1: p.y + 2 }))
+      || { x: clampX(spots[0][0], w), y: spots[0][1] };
+    boxes.push({ x0: pick.x, x1: pick.x + w, y0: pick.y - 10, y1: pick.y + 2 });
+    return { s, t, ...pick };
+  }) : [];
+
+  // No leg, no money to scale: the dollar figures wait for a curve (a scale of "$0" either side says nothing).
+  const yTicks = b ? niceTicks(yBot, yTop, 4).filter((v) => Y(v) >= padT - 1 && Y(v) <= plotB + 1 && (v === 0 || Math.round(Math.abs(v)) > 0)) : [];
+  const xTicks = niceTicks(lo, hi, 4).filter((v) => v >= lo && v <= hi);
+  const crossText = cross != null && readout ? readout(cross) : null;
+  const crossX = crossText ? clampX(X(cross) - textW(crossText) / 2, textW(crossText)) : 0;
+  const crossToday = cross != null ? curveAt(today, cross) : null;
+
+  /* THE POINTER ON THE PICTURE (not on a point): a crosshair while a finger or a mouse rests there; gone on release. A
+     finger's up-and-down still scrolls the page (`touch-action: pan-y`), which ends the crosshair. */
+  const rest = (e) => {
+    if (dragRef.current) return;
+    const p = local(e);
+    if (!p || p.x < padL || p.x > W - padR || p.y > plotB) { setCross(null); return; }
+    setCross(priceOfX(p.x));
+  };
+  const leave = () => setCross(null);
+  const hold = (i, e) => {
+    e.preventDefault(); e.stopPropagation();
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    const p = local(e);
+    if (!p) return;
+    const d = { i, startStrike: Number(legs[i].strike), startPrice: priceOfX(p.x) };
+    dragRef.current = d; lastStrike.current = d.startStrike;
+    setCross(null); setDrag({ ...d, x: p.x, y: p.y });
+  };
+  const slide = (i, e) => {
+    const d = dragRef.current;
+    if (!d || d.i !== i) return;
+    e.stopPropagation();
+    const p = local(e);
+    if (!p) return;
+    setDrag({ ...d, x: p.x, y: p.y });
+    if (onMove) onMove(i, { startStrike: d.startStrike, startPrice: d.startPrice, price: priceOfX(p.x) });
+  };
+  const release = (e) => { e.currentTarget.releasePointerCapture?.(e.pointerId); dragRef.current = null; setDrag(null); };
+
+  const held = drag && legs[drag.i] && snapLabel ? snapLabel(drag.i) : null;
+  const heldW = held ? textW(held) + 16 : 0;
+  const heldX = held ? Math.min(W - padR - heldW, Math.max(padL, drag.x - heldW / 2)) : 0;
+  const heldY = held ? Math.min(plotB - 24, Math.max(2, drag.y - 48 - 12)) : 0;
+
+  return (
+    <svg ref={svgRef} width={W} height={H} viewBox={`0 0 ${W} ${H}`} role="group" data-figure-chart="lab"
+      aria-label="the payoff at expiry, today and on the exit date; each blue point is a leg's strike"
+      onPointerDown={rest} onPointerMove={(e) => { if (e.pointerType === "mouse" || cross != null) rest(e); }}
+      onPointerUp={(e) => { if (e.pointerType !== "mouse") leave(); }} onPointerCancel={leave} onPointerLeave={leave}
+      style={{ display: "block", maxWidth: "100%", background: T.bg, borderRadius: 8, touchAction: "pan-y" }}>
+      <defs>
+        <clipPath id={`${id}u`}><rect x={padL} y={0} width={W - padL - padR} height={Math.max(0, y0)} /></clipPath>
+        <clipPath id={`${id}d`}><rect x={padL} y={y0} width={W - padL - padR} height={Math.max(0, plotB - y0)} /></clipPath>
+        <clipPath id={`${id}p`}><rect x={padL} y={0} width={W - padL - padR} height={plotB} /></clipPath>
+      </defs>
+      {/* THE DOLLAR SCALE: a light grid and its figures on the left; the zero line stronger. */}
+      <g data-lab-yaxis aria-hidden="true">
+        {yTicks.map((v) => (
+          <g key={`y${v}`}>
+            {Math.abs(v) > 1e-9 && <line x1={padL} x2={W - padR} y1={Y(v)} y2={Y(v)} stroke={T.line} strokeWidth={0.8} />}
+            <text x={padL - 6} y={Y(v) + 4} textAnchor="end" style={{ ...txt, stroke: "none" }}>{axisMoney(v)}</text>
+          </g>
+        ))}
+      </g>
+      <line x1={padL} x2={W - padR} y1={y0} y2={y0} stroke={T.field} strokeWidth={1} />
+      {area && <path d={area} fill={T.green} opacity={0.28} clipPath={`url(#${id}u)`} />}
+      {area && <path d={area} fill={T.red} opacity={0.16} clipPath={`url(#${id}d)`} />}
+      {todayText && (
         <g aria-label="today's price">
-          <line x1={X(spot)} x2={X(spot)} y1={padT} y2={H - padB} stroke={T.ink} strokeWidth={1} opacity={0.45} strokeDasharray="3 3" />
-          {!compact && <text x={Math.min(W - padR - 70, Math.max(padL, X(spot) - 34))} y={12} style={txt}>{`today ${Number(spot).toFixed(2)}`}</text>}
+          <line x1={X(spot)} x2={X(spot)} y1={padT - 4} y2={plotB} stroke={T.ink} strokeWidth={1} opacity={0.45} strokeDasharray="3 3" />
+          {!crossText && <text x={todayX} y={14} style={txt}>{todayText}</text>}
         </g>
       )}
-      {line && <path d={line} fill="none" stroke={T.ink} strokeWidth={compact ? 1.4 : 2} strokeLinejoin="round" />}
-      {!compact && b && b.breakevens.map((s, i) => (
-        <g key={`be${i}`} aria-label="breakeven">
-          <circle cx={X(s)} cy={y0} r={3} fill={T.ink} />
-          <text x={Math.min(W - padR - 40, Math.max(padL, X(s) - 18))} y={y0 + (i % 2 ? -8 : 14)} style={txt}>{Number(s).toFixed(2)}</text>
+      <g clipPath={`url(#${id}p)`}>
+        {exit && <path data-lab-curve="exit" d={pathOf(exit, X, Y)} fill="none" {...curveStroke("exit")} />}
+        {today && <path data-lab-curve="today" d={pathOf(today, X, Y)} fill="none" {...curveStroke("today")} />}
+        {line && <path data-lab-curve="expiry" d={line} fill="none" {...curveStroke("expiry")} strokeLinejoin="round" />}
+      </g>
+      {extremeLabels.map((e) => (
+        <text key={e.id} data-lab-extreme={e.id} x={e.x} y={e.y} style={{ ...txt, fill: T.ink }}>{e.text}</text>
+      ))}
+      {beLabels.map((x, i) => (
+        <g key={`be${i}`} data-lab-be aria-label="breakeven">
+          <circle cx={X(x.s)} cy={y0} r={3} fill={T.ink} />
+          <text x={x.x} y={x.y} style={txt}>{x.t}</text>
         </g>
       ))}
-      {!compact && (
-        <g aria-hidden="true">
-          <text x={padL} y={H - 6} style={txt}>{Number(lo).toFixed(0)}</text>
-          <text x={W - padR - 30} y={H - 6} style={txt}>{Number(hi).toFixed(0)}</text>
+      {/* THE MARKET'S DISTRIBUTION: a thin band under the price axis, darker where the market's prices put the price. */}
+      {density && density.length > 0 && (
+        <g data-lab-density aria-hidden="true">
+          {density.map((g, i) => (
+            <rect key={`d${i}`} x={X(g.lo)} y={plotB + 3} width={Math.max(0.5, X(g.hi) - X(g.lo))} height={6} fill={T.blue} opacity={0.1 + 0.8 * g.w} />
+          ))}
         </g>
       )}
-      {!compact && b && legs.map((l, i) => {
+      <g data-lab-xaxis aria-hidden="true">
+        {xTicks.map((v) => {
+          const w = textW(axisPrice(v));
+          return (<g key={`x${v}`}>
+            <line x1={X(v)} x2={X(v)} y1={plotB} y2={plotB + 3} stroke={T.field} strokeWidth={1} />
+            <text x={Math.min(W - padR - w, Math.max(padL - 4, X(v) - w / 2))} y={H - 4} style={{ ...txt, stroke: "none" }}>{axisPrice(v)}</text>
+          </g>);
+        })}
+      </g>
+      {crossText && (
+        <g data-lab-cross aria-live="polite">
+          <line x1={X(cross)} x2={X(cross)} y1={padT - 4} y2={plotB} stroke={T.ink} strokeWidth={1} opacity={0.7} />
+          {b && <circle cx={X(cross)} cy={Y(b.at(cross))} r={4} fill={T.ink} stroke={T.bg} strokeWidth={1.5} />}
+          {crossToday != null && <circle cx={X(cross)} cy={Y(crossToday)} r={3.5} fill={T.bg} stroke={T.ink} strokeWidth={1.5} />}
+          <text x={crossX} y={14} style={{ ...txt, fill: T.ink }}>{crossText}</text>
+        </g>
+      )}
+      {b && legs.map((l, i) => {
+        if (!inRange[i]) return null;
         const k = Number(l.strike);
-        if (!Number.isFinite(k) || k < lo || k > hi) return null;
-        const cx = X(k), cy = Y(b.at(k));
-        const on = drag === i;
+        const cx = pxs[i], cy = Y(b.at(k));
+        const on = drag && drag.i === i;
+        const z = zones[i];
         return (
           <g key={`h${i}`} data-lab-point={i} role="slider" tabIndex={0} aria-label={handleLabel(i)} aria-valuenow={k}
-            aria-valuetext={String(k)} style={{ cursor: on ? "grabbing" : "grab", outline: "none" }}
+            aria-valuetext={String(k)} style={{ cursor: on ? "grabbing" : "grab", outline: "none", touchAction: "none" }}
             onKeyDown={(e) => {
               if (e.key === "ArrowLeft" || e.key === "ArrowDown") { e.preventDefault(); onStep && onStep(i, -1); }
               if (e.key === "ArrowRight" || e.key === "ArrowUp") { e.preventDefault(); onStep && onStep(i, 1); }
             }}
-            onPointerDown={(e) => { e.preventDefault(); e.currentTarget.setPointerCapture?.(e.pointerId); setDrag(i); }}
-            onPointerMove={(e) => { if (drag !== i) return; const p = priceAt(e.clientX); if (p != null && onMove) onMove(i, p); }}
-            onPointerUp={(e) => { e.currentTarget.releasePointerCapture?.(e.pointerId); setDrag(null); }}
-            onPointerCancel={() => setDrag(null)}>
-            <circle cx={cx} cy={cy} r={22} fill="transparent" />
-            <line x1={cx} x2={cx} y1={cy} y2={H - padB} stroke={T.blue} strokeWidth={1} opacity={0.5} strokeDasharray="2 3" />
-            <circle cx={cx} cy={cy} r={on ? 9 : 7} fill={T.blue} stroke={T.bg} strokeWidth={2} />
-            <text x={cx - 12} y={H - padB + 13} style={{ ...txt, fill: T.blue }}>{`${k}${l.type === "call" ? "C" : "P"}`}</text>
+            onPointerDown={(e) => hold(i, e)} onPointerMove={(e) => slide(i, e)} onPointerUp={release} onPointerCancel={release}>
+            {/* THE FINGER'S BAND: the whole height of the guide, at least 44px wide where there is room, the page held still. */}
+            <rect data-lab-zone={i} x={z.x0} y={padT - 4} width={Math.max(0, z.x1 - z.x0)} height={plotB - padT + 4} fill="transparent" style={{ touchAction: "none" }} />
+            <line x1={cx} x2={cx} y1={cy} y2={plotB} stroke={T.blue} strokeWidth={1} opacity={0.5} strokeDasharray="2 3" />
+            <circle data-lab-dot cx={cx} cy={cy} r={on ? 9 : 7} fill={T.blue} stroke={T.bg} strokeWidth={2} />
+            <text x={kLane[i]} y={plotB + 22} style={{ ...txt, fill: T.blue }}>{kText[i]}</text>
           </g>
         );
       })}
+      {held && (
+        <g data-lab-held aria-hidden="true" pointerEvents="none">
+          <rect x={heldX} y={heldY} width={heldW} height={22} rx={6} fill={T.panel} stroke={T.blue} strokeWidth={1} />
+          <text x={heldX + 8} y={heldY + 15} style={{ ...txt, fill: T.ink, stroke: "none" }}>{held}</text>
+        </g>
+      )}
     </svg>
   );
 }

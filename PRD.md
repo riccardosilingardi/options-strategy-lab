@@ -284,7 +284,24 @@ non-expert trader who wants to learn discipline rather than be sold trades.
   for a sold call), the breakevens, and what it needs. Then **FIGURES**, fourteen cards (long and short calls and puts, the
   four verticals, straddle, strangles, butterfly, iron condor, iron butterfly), each with its picture on this market and
   its idea in one line; a tap loads it. On a computer, two columns. **Nothing is sent, saved or asked from Learn**: no
-  order path, no gate call, no /api/state field; the bridge from a figure to the chain and Build is PR 75.
+  order path, no gate call, no /api/state field; the bridge from a figure to the chain and Build is PR 78. **Since PR 76** (owner,
+  20 Oct 2026: "the graph is too simple", "dragging works with a finger but not well") the picture reads like IBKR's Option
+  Wizard: a dollar scale and its grid, the prices along the bottom, the card's max profit and max loss written where the
+  curve reaches them ("no ceiling" / "unlimited" at the edge), the breakevens labelled clear of the curve, **today** (dashed)
+  and **the exit date** (dotted, the default plan's 21 days, as Build) beside the expiry curve with a legend, the market's
+  distribution of that expiry as a thin band under the axis and "Market chance of profit at expiry: N%, at the model price."
+  under it, and a crosshair where a finger or a mouse rests ("at 13.40 → +$85 at expiry · +$40 today"). A finger holds a
+  point anywhere along its dotted guide (a band ≥ 44px; the page stays still while it is held, the rest of the picture still
+  scrolls), a label above the finger names the strike it snaps to and the leg's model price, each snap is a short vibration,
+  two legs on one strike sit side by side; − / + and the arrow keys stay. Each leg is named as IBKR writes it ("Short UNG
+  Dec18'26 12 Put") with the chain's OCC symbol and Copy under it.
+- **Every market as IBKR lists it (PR 76; owner, 20 Oct 2026: "so I recognise it immediately in IBKR").** SYMBOL · EXCHANGE
+  and the official name in capitals, read from Alpaca's `GET /v2/assets/{symbol}` (kept a day on the device), Alpaca's
+  exchange codes in IBKR's words (`EXCHANGE_WORDS`). Lists carry the exchange only — Find's rows and the Journal's ("UNG ·
+  ARCA", the owner's choice) — and a market's or a trade's own header carries the name under it: the market page ("UNG ·
+  ARCA" over "UNITED STATES NATURAL GAS FUND, LP · Energy"), Build's title line, Learn's market chip and sheet, a position's
+  screen, an opened Journal entry. The market sheets' ⓘ: "In IBKR, search the symbol (UNG), not the word: …". Not read:
+  the ticker alone, never a typed name.
 - **Settings (the owner's board since redesign PR 3b).** "‹ Back"; YOUR CAPITAL and YOUR LIMITS with what is open now
   (positions at once, savings and your own per-trade limit with its written reason folded under "More limits");
   FREE SIZING (one typed reason); CONNECTIONS, each saying what the app last saw of it ("Connected · checked 10:14",
@@ -533,7 +550,8 @@ still pending at night means nothing new is sent until the session opens.
   market. The proxy now refuses it outright.
 - **Exercise** — turns the option into shares (100 per contract), outside the defined risk every
   trade here is sized on.
-The proxy (`netlify/functions/alpaca.mjs`) passes an allowlist only: the read paths the app uses (`/v2/clock` since PR #47),
+The proxy (`netlify/functions/alpaca.mjs`) passes an allowlist only: the read paths the app uses (`/v2/clock` since PR #47,
+one asset `/v2/assets/{symbol}` since PR 76),
 `POST /v2/orders`, `PATCH /v2/orders/{id}`, `DELETE /v2/orders/{id}` and `DELETE /v2/orders`.
 Anything else is 405 with a sentence.
 
@@ -581,7 +599,9 @@ re-read them: none closed; #3, #7, #8, #9 and #10 carry what PR 67 changed, and 
 chance against IBKR's. PR 68 re-read them: none closed; #3, #8 and #9 carry what PR 68 changed, and #9 gains an OWNER CHECK,
 the exit replay on real closes. PR 70 re-read them: none closed; #3 and #8 carry what PR 70 changed. PR 71 re-read them: none
 closed; #6 gains the Journal's merge on the server. PR 72 re-read them: none closed; #3, #8 and #9 carry what PR 72 changed.
-PR 73 re-read them: none closed; #3 carries the computer's new layout. PR 74 re-read them: none closed; #3 carries Learn.)
+PR 73 re-read them: none closed; #3 carries the computer's new layout. PR 74 re-read them: none closed; #3 carries Learn.
+PR 76 re-read them: none closed (its asset call was tried from this sandbox and refused, 401); #2 and #3 carry what PR 76
+changed, and #3's crosshair check is half settled by a measurement.)
 
 1. **OWNER CHECK — the Journal entry for J-0001 shows the $7.65 fill** (v1 is reached on the owner's report of 5 Oct
    2026: filled 9 of 9 at $7.65, filed from the production address; this session cannot see that browser). **No Modify
@@ -591,7 +611,10 @@ PR 73 re-read them: none closed; #3 carries the computer's new layout. PR 74 re-
 2. **Read when it happens — the live `/v2/clock` and `/v2/account` replies.** Their fields (`is_open`, `next_open`;
    `equity`, `buying_power`, `options_buying_power`) are read from alpaca-py 0.44.0's source, never from a reply; tested
    on stubs and in a headless Chromium against a stubbed broker only. Whether the owner's account sends
-   `options_buying_power` is unknown.
+   `options_buying_power` is unknown. **PR 76's `GET /v2/assets/{symbol}`** (a market's exchange and official name) is read
+   from alpaca-py 0.44.0's `Asset` model; the names in the photographs are fixture inputs typed in scripts/app-screens.jsx, not
+   Alpaca's strings — whether every market's reply carries both an exchange and a name, and in which words, is read on the
+   deploy (a reply without both shows the ticker alone).
 3. **Read when it happens — every new screen on a phone with live data, in both themes.** Redesign PR 1's Find (round 2's
    look: its header, tabs, filter chips and their sheets, the flat rows, the stale banner, "Nothing fits", Saved's When
    saved / Now) and the market page (header, event box, Overview, Strategies' compact cards, Chain and its fixed tray)
@@ -656,7 +679,14 @@ PR 73 re-read them: none closed; #3 carries the computer's new layout. PR 74 re-
    `node scripts/audit-computer.mjs` now 45 checks, 0 missed) was photographed the same way — **never on a phone, never on a
    live chain** (the harness answers every market with UNG's fixture board, so the photographs read UNG), the drag tried with
    a mouse in Chromium, never with a finger; **no board draws Learn**, so the board audit cannot compare it. As on the
-   Journal and Positions, the last ~50px of the gallery sits under the bottom bar on a phone (the 88px end above).
+   Journal and Positions, the last ~50px of the gallery sits under the bottom bar on a phone (the 88px end above). **PR 76's
+   Learn picture, the finger and the listings** (docs/screens/pr76/before and after, `node scripts/shoot-pr76.mjs`) were
+   photographed the same way, and **the finger was measured in Chromium's own touch input** on a touch screen (a 70px slide
+   with a ±14px wobble): before, no point moved and the page scrolled 36–486px; after, every point moves and the page scrolls
+   0px. The cause was Chromium ignoring `touch-action` on shapes inside an svg; **Build's crosshair handle had the same flaw**
+   (the line moved and the page scrolled 50px) and is fixed the same way (13.42 → 16.54, 0px). Emulated touch is not a thumb:
+   **OWNER CHECK — a point and Build's line under a real finger**, iOS Safari included, and whether the 5ms vibration is felt
+   (Safari has none).
 4. **Read when it happens — no credit has filled at the corrected limit** (the indicative combination ask on thin chains
    has not been measured by a fill; J-0003 never filled at it), **and "Not on Alpaca", "size N > M on the ask", the "Not
    in the app" card, an order "sent outside this app", free sizing (PR #41), and an order sent from Build's new review

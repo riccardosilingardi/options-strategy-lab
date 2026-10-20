@@ -13,7 +13,7 @@
 // ============================================================================
 import React, { useState } from "react";
 import { T, TYPE } from "./theme.js";
-import { Info, Fold, mono, sans, TAP } from "./ui.jsx";
+import { Info, Fold, mono, sans, TAP, ListingName } from "./ui.jsx";
 import { matchesRef, journalPnl, riskOkWords, riskOkOf, isTestRecord, testRecordNote, autopilotHorizonNote,
   autopilotVolNote } from "./journal.js";
 import { seasonalStampNote } from "./rules.js";
@@ -63,7 +63,9 @@ function Entry({ row, open, onToggle, children }) {
           display: "grid", gridTemplateColumns: "64px minmax(0, 1fr) auto", gap: 8, alignItems: "baseline", color: T.ink, cursor: "pointer" }}>
         <span style={{ ...mono, fontSize: FS.sm, fontWeight: FW.bold }}>{row.ref || "—"}</span>
         <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
-          <span data-entry-name style={{ fontSize: FS.sm, fontWeight: FW.bold, lineHeight: LH.tight }}><span style={mono}>{row.ticker}</span> · {row.name}</span>
+          <span data-entry-name style={{ fontSize: FS.sm, fontWeight: FW.bold, lineHeight: LH.tight }}><span style={mono}>{row.ticker}</span>
+            {/* PR 76: the exchange IBKR lists the market on; the official name opens with the entry. */}
+            {row.listing && row.listing.exchange && <span data-entry-exchange style={{ ...mono, fontWeight: FW.regular, color: T.mut }}>{` · ${row.listing.exchange}`}</span>} · {row.name}</span>
           <span data-entry-sub style={{ fontSize: FS.xs, lineHeight: LH.body, color: T.mut }}>{row.sub}</span>
         </span>
         <span style={{ textAlign: "right", display: "flex", flexDirection: "column", gap: 2 }}>
@@ -73,7 +75,8 @@ function Entry({ row, open, onToggle, children }) {
           <span data-entry-state style={{ fontSize: FS.xs, fontWeight: FW.bold, letterSpacing: "0.04em", color: row.warn ? T.amber : T.mut }}>{row.state}</span>
         </span>
       </button>
-      {open && <div data-entry-body style={{ padding: "0 0 12px", display: "flex", flexDirection: "column", gap: 8 }}>{children}</div>}
+      {open && <div data-entry-body style={{ padding: "0 0 12px", display: "flex", flexDirection: "column", gap: 8 }}>
+        <ListingName name={row.listing ? row.listing.name : null} />{children}</div>}
     </li>
   );
 }
@@ -104,6 +107,7 @@ function TradeLesson({ c }) {
  */
 export function JournalScreen({ v }) {
   const [openKey, setOpenKey] = useState(v.openRef || null);
+  const listingOf = typeof v.listingOf === "function" ? v.listingOf : () => null;
   const q = v.query || "";
   const toggle = (k) => setOpenKey((x) => (x === k ? null : k));
   const openRows = (v.open || []).filter(({ p }) => matchesRef(p, q));
@@ -194,7 +198,7 @@ export function JournalScreen({ v }) {
               {openRows.map(({ p, m, stage }) => {
                 const k = p.ref || `p${p.id}`;
                 const state = openState({ stage, working: !!(m && m.working), action: m && m.act ? m.act.action : null, kind: m && m.act ? m.act.kind : null });
-                const row = { ref: p.ref, key: k, ticker: p.ticker, name: m ? m.name : p.name, sub: entriesWords((p.timeline || []).length),
+                const row = { ref: p.ref, key: k, ticker: p.ticker, listing: listingOf(p.ticker), name: m ? m.name : p.name, sub: entriesWords((p.timeline || []).length),
                   pnl: stage === "working" ? null : m ? m.pnl : null, state, warn: state === "WARNING" };
                 return (
                   <Entry key={k} row={row} open={openKey === k} onToggle={() => toggle(k)}>
@@ -227,7 +231,7 @@ export function JournalScreen({ v }) {
               const k = e.ref || `e${e.id}`;
               const jp = journalPnl(e);
               // A TEST IS MARKED ON ITS ROW, NEVER DELETED (P9, TASK 3); the level steps over it.
-              const row = { ref: e.ref, key: k, ticker: e.ticker, name: e.name, sub: `${endedLine(e)}${isTestRecord(e) ? " · read as a test" : ""}`, pnl: jp.shown, pnlNote: jp.note,
+              const row = { ref: e.ref, key: k, ticker: e.ticker, listing: listingOf(e.ticker), name: e.name, sub: `${endedLine(e)}${isTestRecord(e) ? " · read as a test" : ""}`, pnl: jp.shown, pnlNote: jp.note,
                 state: closedState(e), warn: false };
               return (
                 <Entry key={k} row={row} open={openKey === k} onToggle={() => toggle(k)}>

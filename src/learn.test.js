@@ -8,9 +8,13 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { figureOf, figureLegs, FIGURE_NAMES, LAB_FIGURES, LAB_TABS, LEARN_WORDS, labWhereLine, labLegText, NO_CEILING } from "./rules.js";
 import { labExpiry, labStepExpiry, labAddLeg, labStepLeg, labCanStep, labMoveLeg, labFlipLeg, labRemoveLeg, labFigureLegs,
-  labExpectedMove, legIv, labModel, labCard, labLegRows, labGallery, LAB_MAX_LEGS } from "./learnView.js";
+  labExpectedMove, legIv, labModel, labCard, labLegRows, labGallery, LAB_MAX_LEGS,
+  niceTicks, labExitDay, labCurves, labReadout, labExtremes, labDensity, labMarketLine, labLegend, labSnapLabel, labPointXs, labHitZones,
+  labPointAt, labDragTo, labLane, labLegOcc, POINT_GAP, HIT_MIN } from "./learnView.js";
 import { boardStrikes } from "./chain.js";
-import { bs } from "./engine.js";
+import { bs, legsAt } from "./engine.js";
+import { impliedDistribution } from "./impliedDist.js";
+import { exitPlanOf, marketChanceOf, MARKET_CHANCE_NOT_READ, labLegName, RULES } from "./rules.js";
 import { MLEG_MAX_LEGS } from "./alpacaContract.js";
 
 let passed = 0, failed = 0;
@@ -191,6 +195,75 @@ test("THE GALLERY'S MODELS are the card's own arithmetic: one labModel per figur
     assert.ok(x.model && x.model.priced, `${x.id} priced`);
     assert.deepEqual(x.model, labModel({ ticker: "GLD", chain: ch, expKey: "2026-11-27", legs: x.legs }));
   }
+});
+
+/* ================================================================ PR 76: THE PICTURE, THE FINGER, THE NAMES */
+const condorOn = (ch, exp = "2026-11-27") => labFigureLegs("iron-condor", { board: boardStrikes(ch, exp), spot: ch.spot, sd: labExpectedMove(ch, exp) });
+// Plain JS: no payoff picture here (visuals.jsx is JSX); the picture's readings are tested in learn.test.jsx.
+const modelOf = (legs, ch = chainOf(), exp = "2026-11-27") => labModel({ ticker: "GLD", chain: ch, expKey: exp, legs });
+
+test("76.1 THE SCALES: round ticks on a 1 · 2 · 2.5 · 5 step, inside the range, none for an empty one", () => {
+  assert.deepEqual(niceTicks(9, 18, 4), [10, 12.5, 15, 17.5]);
+  assert.deepEqual(niceTicks(-140, 90, 3), [-100, 0]);
+  assert.deepEqual(niceTicks(-0.14, 0.14, 3), [-0.1, 0, 0.1], "the picture drops figures that round to $0");
+  assert.deepEqual(niceTicks(5, 5), []); assert.deepEqual(niceTicks(null, 3), []);
+  for (const v of niceTicks(280.3, 471.9, 4)) assert.ok(v >= 280.3 && v <= 471.9);
+});
+test("76.2 A FINGER WITH A WOBBLE STILL MOVES THE LEG: only the sideways distance counts, from where it was held", () => {
+  const ch = chainOf(), board = boardStrikes(ch, "2026-11-27");
+  let legs = [L(1, "put", 360), L(-1, "put", 370)];
+  // The picture's own mapping: 300px of plot for prices 300–450 (2px a dollar). The finger holds the 370 put at x = 140
+  // and slides right 24px, 3px at a time, its height wobbling ±14px.
+  const W = 300, lo = 300, hi = 450, X = (s) => ((s - lo) / (hi - lo)) * W, P = (x) => lo + (x / W) * (hi - lo);
+  const hold = { startStrike: 370, startPrice: P(X(370) + 3) };   // pressed 3px right of the point: no jump
+  const ys = [];
+  for (let k = 1; k <= 8; k++) {
+    const pointer = { x: X(370) + 3 + 3 * k, y: 120 + (k % 2 ? 14 : -14) };
+    ys.push(pointer.y);
+    legs = labDragTo(legs, 1, board, { ...hold, price: P(pointer.x) });
+    assert.ok(board.put.includes(legs[1].strike), "every snap is a listed put strike");
+    assert.equal(labSnapLabel(modelOf(legs, ch), 1), LEARN_WORDS.snap(legs[1].strike, "put", modelOf(legs, ch).prices[1]),
+      "the label above the finger shows the strike it snaps to and its model price");
+    assert.match(labSnapLabel(modelOf(legs, ch), 1), new RegExp(`^${legs[1].strike} P · \\$\\d+\\.\\d\\d$`));
+  }
+  assert.equal(legs[1].strike, 382, "24px right is 12 dollars: 370 → 382, whatever the height did");
+  assert.ok(Math.max(...ys) - Math.min(...ys) === 28, "the finger wobbled 28px up and down");
+  assert.equal(labDragTo(legs, 1, board, { ...hold, price: P(X(370) + 3) })[1].strike, 370, "back where it was held: back on 370");
+  assert.equal(labDragTo(legs, 1, board, { startStrike: null, startPrice: 1, price: 2 }), legs, "no hold, no move");
+});
+test("76.2 TWO LEGS ON ONE STRIKE are drawn side by side and BOTH are reachable; every band ≥ 44px where there is room", () => {
+  const xs = labPointXs([100, 100, 200, 300]);
+  assert.equal(xs[1] - xs[0], POINT_GAP, "side by side, 22px apart"); assert.equal((xs[0] + xs[1]) / 2, 100, "centred on their strike");
+  assert.equal(xs[2], 200); assert.equal(xs[3], 300);
+  const z = labHitZones(xs, { left: 0, right: 400 });
+  z.forEach((zn, i) => assert.ok(zn.x0 <= xs[i] && xs[i] <= zn.x1, `band ${i} holds its point`));
+  z.forEach((zn, i) => assert.ok(zn.x1 - zn.x0 >= HIT_MIN, `band ${i} is ${zn.x1 - zn.x0}px`));
+  for (let i = 0; i < z.length; i++) for (let j = i + 1; j < z.length; j++) assert.ok(z[i].x1 <= z[j].x0 || z[j].x1 <= z[i].x0, `bands ${i} and ${j} do not overlap`);
+  assert.equal(labPointAt(z, xs[0]), 0); assert.equal(labPointAt(z, xs[1]), 1, "the second leg on the strike is its own target");
+  assert.equal(labPointAt(z, 380), null, "past every band: the picture, not a point (the crosshair, or the page's scroll)");
+  // Crowded: three strikes 8px apart are spread to 22px; their bands split the space and never overlap.
+  const cx = labPointXs([200, 208, 216]);
+  assert.ok(cx[1] - cx[0] >= POINT_GAP - 1e-9 && cx[2] - cx[1] >= POINT_GAP - 1e-9);
+  const cz = labHitZones(cx, { left: 0, right: 400 });
+  cz.forEach((zn, i) => assert.equal(labPointAt(cz, cx[i]), i));
+  // At the picture's edge a band stays inside it.
+  assert.ok(labHitZones([5], { left: 0, right: 400 })[0].x0 >= 0);
+});
+test("76.1 LABELS IN ONE LANE never overlap and stay inside the picture", () => {
+  const x = labLane([{ x: 10, w: 30 }, { x: 20, w: 30 }, { x: 380, w: 40 }], { left: 0, right: 400 });
+  assert.ok(x[1] >= x[0] + 30, "pushed right of the first"); assert.ok(x[2] + 40 <= 400, "pulled back inside");
+});
+test("76.3 A LEG'S NAME IS IBKR'S AND ITS SYMBOL THE CHAIN'S: 'Short GLD Nov27'26 361 Put'; no symbol listed, none built", () => {
+  const ch = chainOf();
+  ch.byExp["2026-11-27"].puts[361] = { ...ch.byExp["2026-11-27"].puts[361], occ: "GLD261127P00361000" };
+  const m = modelOf([L(1, "put", 340), L(-1, "put", 361)], ch);
+  const rows = labLegRows(m, boardStrikes(ch, "2026-11-27"), ch);
+  assert.equal(rows[1].name, "Short GLD Nov27'26 361 Put"); assert.equal(rows[1].occ, "GLD261127P00361000");
+  assert.equal(rows[0].name, "Long GLD Nov27'26 340 Put"); assert.equal(rows[0].occ, null, "the chain gave no symbol: none");
+  assert.equal(labLegName("SLV", "2026-11-27", L(-1, "put", 49.5)), "Short SLV Nov27'26 49.5 Put");
+  assert.equal(labLegName("GLD", "2026-11-27", L(-1, "call", 400, 2)), "Short 2 × GLD Nov27'26 400 Call");
+  assert.equal(labLegOcc(ch, "2026-11-27", L(1, "call", 999)), null);
+  assert.equal(labLegRows(m, boardStrikes(ch, "2026-11-27"))[1].occ, null, "no chain handed in: no symbol");
 });
 
 /* ================================================================ NOTHING IS SENT FROM HERE */

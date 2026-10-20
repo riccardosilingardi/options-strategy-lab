@@ -11,9 +11,10 @@
 import React, { useState } from "react";
 import { Minus, Plus, X } from "lucide-react";
 import { T, TYPE } from "./theme.js";
-import { mono, sans, Note, Sheet, FilterChip, IconButton, TextBtn, TAP, useBoxWidth } from "./ui.jsx";
-import { FigureChart } from "./visuals.jsx";
-import { LEARN_WORDS as W } from "./rules.js";
+import { mono, sans, Note, Sheet, FilterChip, IconButton, TextBtn, TAP, useBoxWidth, Info, ContractName, ListingName } from "./ui.jsx";
+import { FigureChart, FigureLegendLine as LegendLine } from "./visuals.jsx";
+import { LEARN_WORDS as W, listingLine, listingName, listingSearchInfo, LISTING_SEARCH_LABEL } from "./rules.js";
+import { getU } from "./markets.js";
 
 const FS = TYPE.size, FW = TYPE.weight, LH = TYPE.line;
 const PANEL = { background: T.panel, border: `1px solid ${T.line}`, borderRadius: 12 };
@@ -22,16 +23,18 @@ const tnum = { fontVariantNumeric: "tabular-nums" };
 
 /**
  * v: {
- *   wide, ticker, markets: [tk], onMarket(tk), where ("GLD · 27 Nov · 38 days"), canPrevExp, canNextExp, onExpiry(dir),
+ *   wide, ticker, markets: [tk], onMarket(tk), listingOf(tk) (PR 76: { exchange, name } or null), where ("GLD · 27 Nov · 38 days"), canPrevExp, canNextExp, onExpiry(dir),
  *   status: null | { text, retry? },      the chain loading, missing or without a usable board
  *   tabs: [{ id, label, onAdd }], full (the leg cap's sentence when reached),
- *   chart: { bands, legs, spot, onMove(i, price), onStep(i, dir), label(i) },
+ *   chart: { bands, legs, spot, onMove(i, drag), onStep(i, dir), label(i),
+ *            curves, extremes, density, readout(s), snapLabel(i), market: { pop, text }, legend: [{ id, text, drawn }] },
  *   legs: [{ i, text, price, canMinus, canPlus, onMinus, onPlus, onFlip, flipLabel, onRemove }],
  *   card: labCard() | null, onClear, gallery: [{ id, name, idea, bands, spot, current, onLoad }]
  * }
  */
 export function LearnScreen({ v }) {
   const [pick, setPick] = useState(false);
+  const listingOf = typeof v.listingOf === "function" ? v.listingOf : () => null;
   const [boxRef, boxW] = useBoxWidth(358);
   const chartW = Math.max(240, Math.min(boxW || 358, 760));
   return (
@@ -47,13 +50,15 @@ export function LearnScreen({ v }) {
         {/* ON A COMPUTER: the lab on the left (market, tabs, picture, legs); the figure's card and the gallery on the right. */}
         <div data-learn-col="lab" style={v.wide ? { display: "flex", flexDirection: "column", gap: 12, minWidth: 0 } : { display: "contents" }}>
           <section data-learn-market aria-label={W.market} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            <FilterChip name={W.market} value={v.ticker} opens onClick={() => setPick(true)} label={`${W.market}: ${v.ticker}`} />
+            <FilterChip name={W.market} value={listingLine(v.ticker, listingOf(v.ticker))} opens onClick={() => setPick(true)} label={`${W.market}: ${v.ticker}`} />
             <div style={{ display: "flex", alignItems: "center", minWidth: 0 }}>
               <IconButton label="Earlier expiry" disabled={!v.canPrevExp} onClick={() => v.onExpiry(-1)}>‹</IconButton>
               <span data-learn-where style={{ ...mono, ...tnum, fontSize: FS.sm, color: T.ink }}>{v.where}</span>
               <IconButton label="Later expiry" disabled={!v.canNextExp} onClick={() => v.onExpiry(1)}>›</IconButton>
             </div>
           </section>
+          {/* PR 76: the market's official name, as IBKR prints it under "UNG · ARCA" (read from Alpaca; nothing when not read). */}
+          <ListingName name={listingName(listingOf(v.ticker))} data-learn-listing="" style={{ marginTop: -6 }} />
 
           {v.status ? (
             <div data-learn-status style={{ ...PANEL, padding: 14, display: "flex", alignItems: "center", gap: 10 }}>
@@ -72,24 +77,44 @@ export function LearnScreen({ v }) {
               {v.full && <Note data-learn-full style={{ margin: 0 }}>{v.full}</Note>}
 
               <div ref={boxRef} data-learn-chart style={{ minWidth: 0 }}>
-                <FigureChart bands={v.chart.bands} legs={v.chart.legs} spot={v.chart.spot} width={chartW} height={v.wide ? 280 : 220}
-                  onMove={v.chart.onMove} onStep={v.chart.onStep} handleLabel={v.chart.label} />
+                <FigureChart bands={v.chart.bands} legs={v.chart.legs} spot={v.chart.spot} width={chartW} height={v.wide ? 320 : 260}
+                  onMove={v.chart.onMove} onStep={v.chart.onStep} handleLabel={v.chart.label} curves={v.chart.curves}
+                  extremes={v.chart.extremes} density={v.chart.density} readout={v.chart.readout} snapLabel={v.chart.snapLabel} />
               </div>
+              {/* PR 76: what each curve is, then the market's chance with the band's ⓘ. */}
+              {v.chart.legend && (
+                <div data-learn-legend style={{ display: "flex", flexWrap: "wrap", columnGap: 14, rowGap: 2, ...sans, fontSize: FS.xs, color: T.mut, lineHeight: LH.body }}>
+                  {v.chart.legend.map((e) => (
+                    <span key={e.id} data-learn-legend-item={e.id} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                      {e.drawn && <LegendLine id={e.id} />}{e.text}
+                    </span>
+                  ))}
+                </div>
+              )}
+              {v.chart.market && (
+                <div data-learn-market-chance style={{ ...sans, fontSize: FS.xs, color: T.body, lineHeight: LH.body }}>
+                  {v.chart.market.text} {v.chart.density && v.chart.density.length > 0 && <Info label={W.band}>{W.bandInfo(v.ticker)}</Info>}
+                </div>
+              )}
               {v.legs.length ? <Note style={{ margin: 0 }}>{W.drag}</Note> : <Note data-learn-empty style={{ margin: 0 }}>{W.empty}</Note>}
 
               {v.legs.length > 0 && (
                 <ul data-learn-legs style={{ listStyle: "none", margin: 0, padding: 0, ...PANEL }}>
                   {v.legs.map((l, n) => (
-                    <li key={l.i} data-learn-leg={l.i} style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 6px 4px 12px",
+                    <li key={l.i} data-learn-leg={l.i} style={{ display: "flex", flexDirection: "column", gap: 0, padding: "8px 6px 2px 12px",
                       borderTop: n ? `1px solid ${T.line}` : "none", minWidth: 0 }}>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ ...mono, fontSize: FS.sm, fontWeight: FW.bold, color: T.ink }}>{l.text}</div>
-                        <div style={{ ...mono, ...tnum, fontSize: FS.xs, color: T.mut }}>{l.price}</div>
+                      {/* PR 76: the contract as IBKR writes it, and under it the chain's own OCC symbol with Copy (none when the chain
+                          gives none — never one built), each on a line of its own (as Build's legs since PR 72); then the leg's price
+                          and the leg's controls. */}
+                      {l.occ ? <ContractName name={l.name} occ={l.occ} nameProps={{ "data-learn-leg-name": "" }} />
+                        : <div data-learn-leg-name style={{ ...mono, fontSize: FS.sm, fontWeight: FW.bold, color: T.ink }}>{l.name}</div>}
+                      <div style={{ display: "flex", alignItems: "center", gap: 4, minWidth: 0 }}>
+                        <div style={{ ...mono, ...tnum, flex: 1, minWidth: 0, fontSize: FS.xs, color: T.mut }}>{l.price}</div>
+                        <IconButton label={`Lower strike: ${l.text}`} disabled={!l.canMinus} onClick={l.onMinus}><Minus size={18} aria-hidden="true" /></IconButton>
+                        <IconButton label={`Higher strike: ${l.text}`} disabled={!l.canPlus} onClick={l.onPlus}><Plus size={18} aria-hidden="true" /></IconButton>
+                        <TextBtn onClick={l.onFlip} height={TAP} aria-label={`${l.flipLabel}: ${l.text}`}>{l.flipLabel}</TextBtn>
+                        <IconButton label={`Remove: ${l.text}`} onClick={l.onRemove}><X size={18} aria-hidden="true" /></IconButton>
                       </div>
-                      <IconButton label={`Lower strike: ${l.text}`} disabled={!l.canMinus} onClick={l.onMinus}><Minus size={18} aria-hidden="true" /></IconButton>
-                      <IconButton label={`Higher strike: ${l.text}`} disabled={!l.canPlus} onClick={l.onPlus}><Plus size={18} aria-hidden="true" /></IconButton>
-                      <TextBtn onClick={l.onFlip} height={TAP} aria-label={`${l.flipLabel}: ${l.text}`}>{l.flipLabel}</TextBtn>
-                      <IconButton label={`Remove: ${l.text}`} onClick={l.onRemove}><X size={18} aria-hidden="true" /></IconButton>
                     </li>
                   ))}
                 </ul>
@@ -144,11 +169,13 @@ export function LearnScreen({ v }) {
         </div>
       </main>
 
-      <Sheet open={pick} title={W.market} value={v.ticker} onClose={() => setPick(false)}>
+      <Sheet open={pick} title={W.market} value={listingLine(v.ticker, listingOf(v.ticker))} onClose={() => setPick(false)}>
+        {/* PR 76: finding the market in IBKR — by its symbol, not its word. */}
+        <Info label={LISTING_SEARCH_LABEL}>{listingSearchInfo(v.ticker, getU(v.ticker).name)}</Info>
         <div data-learn-markets style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
           {v.markets.map((tk) => (
             <FilterChip key={tk} off={tk === v.ticker} label={tk} onClick={() => { v.onMarket(tk); setPick(false); }}>
-              <span style={mono}>{tk}</span>
+              <span style={mono}>{listingLine(tk, listingOf(tk))}</span>
             </FilterChip>
           ))}
         </div>

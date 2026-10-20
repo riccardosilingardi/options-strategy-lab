@@ -3268,6 +3268,18 @@ export function UnifiedChart({ W = 340, ticker, bars, range = UNIFIED_SESSIONS, 
   const [when, setWhen] = useState(initialWhen);
   const svgRef = React.useRef(null);
   const drag = React.useRef(null);
+  /* THE HANDLE HOLDS THE PAGE STILL (PR 76, measured): Chromium and Safari ignore `touch-action` on shapes inside an
+     <svg>, so a finger on the line's handle moved the line AND scrolled the page (50px in Chromium's touch emulation). A
+     touch that starts on the handle, or moves while it is held, is cancelled here — listeners that are not passive. */
+  React.useEffect(() => {
+    const el = svgRef.current;
+    if (!el || typeof el.addEventListener !== "function") return undefined;
+    const onStart = (e) => { if (e.target && typeof e.target.closest === "function" && e.target.closest("[data-cross-handle]")) e.preventDefault(); };
+    const onMoveT = (e) => { if (drag.current && drag.current.handle) e.preventDefault(); };
+    el.addEventListener("touchstart", onStart, { passive: false });
+    el.addEventListener("touchmove", onMoveT, { passive: false });
+    return () => { el.removeEventListener("touchstart", onStart); el.removeEventListener("touchmove", onMoveT); };
+  }, []);
 
   const H = 240, padL = 2, padR = 40, padT = 8, padB = 20;
   const inner = W - padL - padR;

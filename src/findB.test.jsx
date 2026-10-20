@@ -203,7 +203,7 @@ const page = (over = {}) => renderToStaticMarkup(
     board={{ ...GEN.boards.UNG, expKey: UNG[0].expKey }} fused={FUSED}
     items={UNG} allItems={SORTED} boards={GEN.boards} request={requestOf({}, LIMITS)} findDir={over.dir || "signals"} sentiments={SENTS}
     findOrder="ev" newsItems={[]} newsState={over.news || { err: "timeout" }} now={over.now || NOW} timeZone="Europe/Rome"
-    cardFigures={listCardFigures} quoteOf={QUOTE} liqFloor={10} compareProps={{ compare: [] }} />);
+    cardFigures={listCardFigures} quoteOf={QUOTE} liqFloor={10} compareProps={{ compare: [] }} listingOf={over.listingOf} />);
 
 check("THE HEADER (round 2's look): back arrow, the switcher (icon, ticker ▾, name · category), ↻, ☆; price, day change, status; IV, IV rank 'collecting', move", () => {
   const h = page();
@@ -217,6 +217,23 @@ check("THE HEADER (round 2's look): back arrow, the switcher (icon, ticker ▾, 
   has(h, NEWS_NOT_READ);
   // The three tabs are underlined tabs, not a segmented control.
   has(h, "border-bottom:3px solid");
+});
+
+check("PR 76: THE MARKET AS IBKR LISTS IT — the header 'UNG · ARCA' over the official name, Find's row the exchange only; not read, the ticker alone", () => {
+  const UNGL = { exchange: "ARCA", name: "UNITED STATES NATURAL GAS FUND, LP" };
+  const h = page({ listingOf: (tk) => (tk === "UNG" ? UNGL : null) });
+  has(h, 'data-market-exchange="true"'); has(h, ">UNG</span>"); has(h, " · ARCA</span>");
+  has(h, 'data-market-name="official"'); has(h, "UNITED STATES NATURAL GAS FUND, LP · Energy");
+  has(h, "UNG · ARCA · UNITED STATES NATURAL GAS FUND, LP · Energy", "the spoken heading says it too");
+  const none = page();
+  hasNot(none, "data-market-exchange"); has(none, 'data-market-name="registry"'); has(none, "US Natural Gas · Energy", "the registry's word until it is read");
+  // Find's row: " · ARCA" beside the ticker; the official name is the market page's (owner, 20 Oct 2026: rows keep their height).
+  const r = SORTED.find((x) => x.tk === "UNG");
+  const row = { tk: "UNG", x: r, fits: true, misses: [] };
+  const fig = rowFigures(r, null, "ev");
+  const withL = renderToStaticMarkup(<MarketRow row={row} fig={fig} listing={UNGL} onSave={() => {}} onOpen={() => {}} />);
+  has(withL, "data-row-exchange"); has(withL, " · ARCA"); hasNot(withL, "UNITED STATES NATURAL GAS");
+  hasNot(renderToStaticMarkup(<MarketRow row={row} fig={fig} onSave={() => {}} onOpen={() => {}} />), "data-row-exchange");
 });
 
 check("THE EVENT LINE (round 2, dates read 5 Oct 2026): UNG at 4 Oct names EIA storage Thu 8 Oct in the user's time; the placeholder only after the table's end", () => {

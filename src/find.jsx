@@ -125,6 +125,8 @@ export function FindStep({
   viewExample = null,
   // PR 73: on a computer the chips wrap onto a second line instead of scrolling sideways.
   wide = false,
+  // PR 76: a market's listing as IBKR writes it (`{ exchange, name }`, read from Alpaca), or null — the row adds " · ARCA".
+  listingOf = () => null,
 }) {
   /* ---- WHAT IS IN, AND WHAT IS STILL BEING READ (redesign PR 1). A market being read has no fused result and no rank
      effect, as before; its row waits after the rows that are in, and says what it is waiting for. ---- */
@@ -288,7 +290,7 @@ export function FindStep({
         {shown.map((r) => (
           <MarketRow key={r.tk} row={r} sd={(findGen.boards[r.tk] || {}).signal || null}
             fig={rowFigures(r.x, sizes.get(r.x.key) || null, findOrder)} bars={barsCache[r.tk] || NO_BARS}
-            saved={isSaved(r.x.cand)} onSave={() => onSave(r.x)} onOpen={() => onOpenMarket(r.tk)} />
+            saved={isSaved(r.x.cand)} onSave={() => onSave(r.x)} onOpen={() => onOpenMarket(r.tk)} listing={listingOf(r.tk)} />
         ))}
         {waiting.map((w) => <WaitingRow key={w.tk} tk={w.tk} st={w.st} />)}
       </div>
@@ -484,7 +486,7 @@ export const findChipState = ({ find, findOrder, request, liqState = null }) => 
    the 72×40 picture · the figure the list is sorted by and "risk $N". The row (not the ☆) opens the market's page on
    Strategies. A miss is dim, its tag's border the line colour, its picture at 0.35. */
 const ROW_CSS = `[data-row-button]:hover,[data-row-button]:active{background:${T.panel}}`;
-export function MarketRow({ row, sd = null, fig, bars = NO_BARS, saved = false, onSave, onOpen, current = false }) {
+export function MarketRow({ row, sd = null, fig, bars = NO_BARS, saved = false, onSave, onOpen, current = false, listing = null }) {
   const x = row.x;
   const muted = !row.fits;
   const ink = muted ? T.dim : T.ink;
@@ -501,7 +503,10 @@ export function MarketRow({ row, sd = null, fig, bars = NO_BARS, saved = false, 
           cursor: "pointer", padding: "10px 16px 10px 2px", textAlign: "left", minHeight: 66, borderRadius: 0 }}>
         <span style={{ flex: "1 1 0", minWidth: 0 }}>
           <span style={{ display: "flex", gap: 6, alignItems: "center", minWidth: 0 }}>
-            <span data-row-ticker style={{ ...mono, fontSize: FS.md, fontWeight: FW.bold, color: ink, lineHeight: LH.tight }}>{x.tk}</span>
+            <span data-row-ticker style={{ ...mono, fontSize: FS.md, fontWeight: FW.bold, color: ink, lineHeight: LH.tight, whiteSpace: "nowrap" }}>{x.tk}
+              {/* PR 76: the exchange IBKR lists it on ("UNG · ARCA"); the official name is on the market page (owner: rows keep their height). */}
+              {listing && listing.exchange && <span data-row-exchange style={{ fontSize: FS.xs, fontWeight: FW.regular, color: T.mut }}>{` · ${listing.exchange}`}</span>}
+            </span>
             {dir && <span data-row-dir style={{ ...sans, fontSize: FS.xs, lineHeight: "18px", padding: "0 6px", borderRadius: 6, whiteSpace: "nowrap",
               border: `1px solid ${muted ? T.line : T.field}`, color: muted ? T.dim : DIR_COLOR[dir] }}>{DIRECTION_TAGS[dir]}</span>}
           </span>

@@ -1812,6 +1812,26 @@ export function ibkrName(ticker, expKey, leg = {}) {
   const strike = Number.isFinite(k) ? String(+k.toFixed(3)) : "—";
   return [ticker || "", when, strike, leg.type === "call" ? "Call" : "Put"].filter(Boolean).join(" ");
 }
+/* =====================================================================
+   THE MARKET AS IBKR LISTS IT (PR 76, task 76.4; owner 20 Oct 2026: "I asked for the underlying's code reference, so I
+   recognise it immediately in IBKR"). IBKR lists an instrument as SYMBOL – EXCHANGE on the first line and its official
+   name in capitals on the second ("SILVER – NSE / ADITYA BIRLA SL SILVER ETF"). The app reads both from Alpaca's
+   `GET /v2/assets/{symbol}` (alpaca-py `Asset`: symbol, exchange, name; src/listing.js), never from a table typed here:
+   without a reply the ticker stands alone. Lists (Find's rows, the Journal's rows) carry "SLV · ARCA" only (owner,
+   20 Oct 2026: "exchange only on rows"); a market's or a trade's own header carries the name under it.
+===================================================================== */
+/** Alpaca's exchange codes (alpaca-py `AssetExchange`) in IBKR's primary-exchange words, where they differ; a code not
+ *  here is shown as Alpaca writes it (it is a reading, not a guess). NYSEARCA is NYSE Arca, which IBKR calls ARCA. */
+export const EXCHANGE_WORDS = Object.freeze({ ARCA: "ARCA", NYSEARCA: "ARCA", NYSE: "NYSE", NASDAQ: "NASDAQ", BATS: "BATS", AMEX: "AMEX" });
+/** "SLV · ARCA", or the ticker alone when the listing was not read. */
+export const listingLine = (tk, l) => (l && l.exchange ? `${tk} · ${l.exchange}` : String(tk || ""));
+/** The official name in capitals ("ISHARES SILVER TRUST"), or null when it was not read. */
+export const listingName = (l) => (l && l.name ? String(l.name) : null);
+/** The one sentence behind the market sheets' ⓘ: search IBKR by the symbol. `word` is the registry's name for the market. */
+export const LISTING_SEARCH_LABEL = "Finding it in IBKR";
+export const listingSearchInfo = (tk, word) =>
+  `In IBKR, search the symbol (${tk}), not the word: searching '${String(word || tk).toLowerCase()}' lists other countries' funds first.`;
+
 /** The OCC symbol under the name: the listing's own, or nothing — never one formatted from a strike (`buildOcc()`). */
 export const OCC_NOT_LISTED = "no OCC symbol: the chain did not list this contract";
 /** The copy button's words. */
@@ -7860,9 +7880,31 @@ export const LEARN_WORDS = Object.freeze({
   retry: "Retry",
   noIv: (k, type) => `The chain lists no volatility for the ${k} ${type}, so it has no model price.`,
   noBoard: (tk) => `${tk} lists no option this lab can use for that expiry.`,
+  // PR 76 (owner, 20 Oct 2026: "the graph is too simple"): the picture's own words.
+  /** The best case written on the picture: the card's figure, or "no ceiling"; `atZero` when it sits at a price of 0. */
+  chartProfit: (v, atZero = false) => (v == null ? `max profit: ${NO_CEILING}` : `max profit ${money(v)}${atZero ? " at price $0" : ""}`),
+  /** The worst case written on the picture: the card's figure, or "unlimited" (a sold call). */
+  chartLoss: (v, atZero = false) => (v == null ? "max loss: unlimited" : `max loss ${money(Math.abs(Number(v)))}${atZero ? " at price $0" : ""}`),
+  /** The crosshair: "at 13.40 → +$85 at expiry · +$40 today". */
+  readout: (s, exp, today) => `at ${Number(s).toFixed(2)} → ${signedMoney(exp)} at expiry${today == null ? "" : ` · ${signedMoney(today)} today`}`,
+  readoutNoPrice: (s) => `at ${Number(s).toFixed(2)} · no model price, so no P&L`,
+  /** The label above a held point: the strike it snaps to and the leg's model price. */
+  snap: (k, type, price) => `${strikeWords(k)} ${type === "call" ? "C" : "P"} · ${known(price) ? `$${Number(price).toFixed(2)}` : "no model price"}`,
+  /** The line under the picture: the market's chance at the lab's model net. */
+  marketChance: (p) => `Market chance of profit at expiry: ${chanceText(p)}, at the model price.`,
+  legendExpiry: "At expiry",
+  legendToday: "Today",
+  legendExit: (day, n) => `Exit date${day ? `, ${day}` : ""} (${n} days before expiry)`,
+  legendExitInside: (n) => `No exit date: this expiry is inside the last ${n} days`,
+  legendNoCurves: "Today and the exit date need a model price on every leg",
+  band: "The band",
+  bandInfo: (tk) => `The blue band under the prices is where ${tk}'s option prices put it at expiry: the market's own spread of ` +
+    "prices, read strike by strike (IBKR's method, the same one as Build's market chance). Darker is likelier.",
 });
 /** "GLD · 27 Nov · 38 days": where the lab is reading from. */
 export const labWhereLine = (tk, expKey, dte) => `${tk} · ${dayWords(expKey) || expKey || "—"}${known(dte) ? ` · ${dte} day${dte === 1 ? "" : "s"}` : ""}`;
+/** A leg's name in the lab the way IBKR writes the contract (PR 76): "Short SLV Nov27'26 49.5 Put" (`ibkrName()`). */
+export const labLegName = (tk, expKey, l) => `${Number(l.side) > 0 ? "Long" : "Short"}${Math.abs(Number(l.qty) || 1) > 1 ? ` ${Math.abs(l.qty)} ×` : ""} ${ibkrName(tk, expKey, l)}`;
 /** A leg's words in the lab: "Long 340 put". */
 export const labLegText = (l) => `${Number(l.side) > 0 ? "Long" : "Short"}${Math.abs(Number(l.qty) || 1) > 1 ? ` ${Math.abs(l.qty)} ×` : ""} ${strikeWords(l.strike)} ${l.type}`;
 const strikeWords = (k) => (Number.isInteger(Number(k)) ? String(Number(k)) : Number(k).toFixed(2).replace(/0$/, ""));

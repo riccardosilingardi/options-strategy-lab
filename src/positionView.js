@@ -18,7 +18,7 @@
 // ============================================================================
 
 import { RULES, money, chanceText, rewardRisk, remainingEdge, payoffCeiling, NO_CEILING, sentenceCase,
-  takeProfitProgress, takeProfitBasisWords, stopWarningLevel, known, exactExtremes, CARD_LABELS, exitPlanOf } from "./rules.js";
+  takeProfitProgress, takeProfitBasisWords, stopWarningLevel, known, exactExtremes, CARD_LABELS, exitPlanOf, listingLine } from "./rules.js";
 import { legsNotHeld } from "./closeOrder.js";
 import { holdingShape, positionSize } from "./journal.js";
 
@@ -407,7 +407,7 @@ export function dayLabel(t) {
 }
 
 /** "UNG · 2 puts · opened Fri 25 Sep" under the title. */
-export const positionSubLine = (p = {}) => [p.ticker, sizeWords(p), dayLabel(p.openedAt) ? `opened ${dayLabel(p.openedAt)}` : null]
+export const positionSubLine = (p = {}, listing = null) => [listingLine(p.ticker, listing), sizeWords(p), dayLabel(p.openedAt) ? `opened ${dayLabel(p.openedAt)}` : null]
   .filter(Boolean).join(" · ");
 
 /** The status block's badge: the action and which rule ("WARNING · STOP LEVEL", "CLOSE · TAKE PROFIT"). */

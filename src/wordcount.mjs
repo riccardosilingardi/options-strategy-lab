@@ -346,6 +346,11 @@ export const COPY = {
   // learn.test.jsx: its words are LEARN_WORDS' and LAB_FIGURES' data, which this source counter does not read).
   labWhereLine: () => R.labWhereLine("GLD", "2026-11-27", 38),
   labLegText: () => R.labLegText({ side: -1, type: "put", strike: 361, qty: 1 }),
+  // PR 76: a market the way IBKR lists it, "SLV · ARCA" (the official name is data read from Alpaca, not scored here).
+  listingLine: () => R.listingLine("SLV", { exchange: "ARCA" }),
+  // Not copy: the clipboard's own call inside `ContractName` (ui.jsx), which PR 76 mounts on Learn. Named so it is not
+  // taken for a sentence generator; it puts no words on screen.
+  writeText: () => "",
   sendLabel: () => R.sendLabel({ net: -0.25, n: 1 }),
   timeExitDay: () => R.timeExitDay("2026-11-20"),
   expiryShort: () => R.expiryShort("2026-11-20"),
