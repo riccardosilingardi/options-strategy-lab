@@ -131,7 +131,10 @@ check("TWO PANES ONLY ON A COMPUTER: Find's rows beside the market page, Positio
   const app = readFileSync("src/App.jsx", "utf8");
   has(app, "const paneFind = wide && (onFindStep || onMarketStep);");
   has(app, "const panePos = wide && onPositions;");
-  has(app, 'style={paneFind ? PANES : CONTENTS}');
+  // PR 73: each screen's own columns (Find's list a fixed 420px; Positions' table the larger share), the same contents rule.
+  has(app, 'style={paneFind ? PANES_FIND : CONTENTS}');
+  has(app, 'style={panePos ? PANES_POS : CONTENTS}');
+  has(app, 'const PANES_FIND = { ...PANES, gridTemplateColumns: "420px minmax(390px, 1fr)" };');
   has(app, 'const CONTENTS = { display: "contents" };');
   has(app, "<BottomBar rail={wide}");
   has(journal({ wide: true }), "grid-template-columns:minmax(0, 1fr) minmax(0, 1fr)");

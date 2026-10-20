@@ -25,9 +25,9 @@
 // in the sans stack; the details toggle is a real dialog button; the progress bars
 // are decoration and carry no meaning that the text beside them does not.
 // ============================================================================
-import React from "react";
+import React, { createContext, useContext } from "react";
 import { T, TYPE } from "./theme.js";
-import { Info, Note, mono, sans, TAP } from "./ui.jsx";
+import { Info, Note, mono, sans, TAP, useBoxWidth } from "./ui.jsx";
 import { PREVIEW, PREVIEW_READ_ONLY } from "./deploy.js";
 import { signedMoney$ } from "./positionView.js";
 import { CardButton } from "./positions.jsx";
@@ -76,7 +76,12 @@ export function ExitBars({ labels = [] }) {
  * `children` (the close confirm, the filing form) sit under the foot. The title is a 44px target whose negative margins
  * give the extra height back, so the row keeps the board's height.
  */
-export function PositionCard({
+export function PositionCard(props) {
+  // PR 73: on a computer the same card is a row of the Positions table (`row`, App.jsx's `panePos`): one model, two layouts.
+  if (props.row) return <PositionRow {...props} />;
+  return <PositionCardBody {...props} />;
+}
+function PositionCardBody({
   p, title, action, line, notes = [], pnl = null, shareText = null, meta = null, labels = [],
   closeLabel, closeDisabled = false, closeTitle, onClose, onDetails, fileKind = "held", onFile,
   demo = false, foot = null, children,
@@ -138,6 +143,90 @@ export function PositionCard({
         {PREVIEW && (closeOffered || fileOffered) && <Note color={T.amber}>{PREVIEW_READ_ONLY}</Note>}
       </div>
       {children}
+    </li>
+  );
+}
+
+/* =====================================================================================================================
+   POSITIONS AS A TABLE, ON A COMPUTER (PR 73; owner 19 Oct 2026: "Positions = a table + the position's screen"). One row per
+   holding, the SAME props as `PositionCard` — the same action, line, profit, exits and the one button — laid out across:
+   status · the position · profit now · the three exits · the action. The table follows the width of its own pane: below
+   `TABLE_FULL_MIN` the exits go under the position (one column fewer), so nothing ever scrolls sideways. A phone keeps the
+   cards (App.jsx picks the table only beside a position's screen, `panePos`).
+===================================================================================================================== */
+// The full row's fixed columns (88 + 88 + 180 + 140), its four gaps and its padding, and 160px for the position itself.
+export const TABLE_FULL_MIN = 724;
+const TableWidth = createContext(TABLE_FULL_MIN);
+const COLS = (full) => (full ? "88px minmax(160px, 1fr) 88px 180px 140px" : "92px minmax(0, 1fr) 96px");
+const HEAD = { ...sans, fontSize: FS.xs, fontWeight: FW.bold, letterSpacing: "0.06em", color: T.mut };
+export function PositionsTable({ children, heads = ["STATUS", "POSITION", "PROFIT NOW", "EXITS", ""], initialWidth = TABLE_FULL_MIN }) {
+  // `initialWidth` is the width before the pane is measured (a test renders both layouts with it).
+  const [ref, w] = useBoxWidth(initialWidth);
+  const full = w >= TABLE_FULL_MIN;
+  return (
+    <TableWidth.Provider value={w}>
+      <div ref={ref} data-positions-table={full ? "full" : "compact"} style={{ background: T.panel, border: `1px solid ${T.line}`, borderRadius: 12 }}>
+        <div role="row" style={{ display: "grid", gridTemplateColumns: COLS(full), gap: 10, padding: "10px 14px", borderBottom: `1px solid ${T.line}` }}>
+          {(full ? heads : heads.slice(0, 3)).map((h, i) => <span key={i} role="columnheader" style={{ ...HEAD, textAlign: i === 2 ? "right" : "left" }}>{h}</span>)}
+        </div>
+        <ul data-position-list style={{ listStyle: "none", margin: 0, padding: 0 }}>{children}</ul>
+      </div>
+    </TableWidth.Provider>
+  );
+}
+export function PositionRow({
+  p, title, action, line, notes = [], pnl = null, shareText = null, meta = null, labels = [],
+  closeLabel, closeDisabled = false, closeTitle, onClose, onDetails, fileKind = "held", onFile,
+  demo = false, foot = null, children, current = false,
+}) {
+  const full = useContext(TableWidth) >= TABLE_FULL_MIN;
+  const pnlKnown = pnl != null && Number.isFinite(Number(pnl));
+  const fileOffered = fileKind === "gone" || fileKind === "book";
+  const closeOffered = action === "CLOSE" && !!closeLabel;
+  const buttons = (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "stretch" }}>
+      {!foot && (closeOffered ? (
+        <CardButton tone="action" disabled={demo || PREVIEW || closeDisabled} title={PREVIEW ? PREVIEW_READ_ONLY : closeTitle} onClick={onClose}>{closeLabel}</CardButton>
+      ) : action === "WARNING" ? (
+        <CardButton tone="amber" onClick={onDetails} aria-haspopup="dialog">Decide ›</CardButton>
+      ) : (
+        <CardButton tone="quiet" onClick={onDetails} aria-haspopup="dialog">Details ›</CardButton>
+      ))}
+      {fileOffered && (
+        <CardButton tone={fileKind === "gone" ? "amber" : "quiet"} onClick={onFile} disabled={PREVIEW} title={PREVIEW ? PREVIEW_READ_ONLY : undefined}>File in Journal</CardButton>
+      )}
+    </div>
+  );
+  return (
+    <li aria-label={`${p.ref || p.ticker} ${title}`} data-position={p.id} data-position-row={current ? "current" : ""}
+      style={{ borderTop: `1px solid ${T.line}`, background: current ? T.raise : "transparent" }}>
+      <div role="row" style={{ display: "grid", gridTemplateColumns: COLS(full), gap: 10, alignItems: "start", padding: "12px 14px" }}>
+        <span style={{ display: "inline-flex", alignItems: "center", flexWrap: "wrap", gap: 4 }}>
+          <ActionBadge action={action} />
+          {action === "HOLD" && line ? <Info iconOnly label="hold" style={{ marginLeft: 8 }}>{line}</Info> : null}
+        </span>
+        <span style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}>
+          <button type="button" onClick={onDetails} data-position-open aria-haspopup="dialog"
+            style={{ ...sans, fontSize: FS.md, fontWeight: FW.bold, lineHeight: LH.tight, color: T.ink, background: "transparent", border: "none",
+              padding: 0, minHeight: 28, textAlign: "left", cursor: "pointer" }}>{title}</button>
+          <span data-position-meta style={{ ...mono, fontSize: FS.xs, color: T.mut }}>{meta || p.ref || p.ticker}</span>
+          {action !== "HOLD" && line && <span data-position-line style={{ ...sans, fontSize: FS.sm, lineHeight: LH.body, color: T.body }}>{line}</span>}
+          {notes.map((n, i) => <span key={i} style={{ ...sans, fontSize: FS.sm, color: T.amber, lineHeight: LH.body }}>⚠ {n}</span>)}
+          {!full && <ExitBars labels={labels} />}
+          {!full && <div style={{ marginTop: 4 }}>{foot || buttons}</div>}
+        </span>
+        <span style={{ textAlign: "right" }}>
+          <span data-position-pnl aria-label={pnlKnown ? `profit now ${signedMoney$(pnl)}` : "profit now not known"}
+            style={{ ...mono, display: "block", fontSize: FS.lg, fontWeight: FW.bold, color: !pnlKnown ? T.dim : Number(pnl) >= 0 ? T.green : T.violet }}>
+            {signedMoney$(pnl)}
+          </span>
+          <span data-position-share style={{ ...sans, fontSize: FS.xs, color: T.mut }}>{shareText || (pnlKnown ? "" : "no price right now")}</span>
+        </span>
+        {full && <span style={{ minWidth: 0 }}><ExitBars labels={labels} /></span>}
+        {full && <span style={{ minWidth: 0 }}>{foot || buttons}</span>}
+      </div>
+      {PREVIEW && (closeOffered || fileOffered) && <div style={{ padding: "0 14px 10px" }}><Note color={T.amber}>{PREVIEW_READ_ONLY}</Note></div>}
+      {children && <div style={{ padding: "0 14px 12px" }}>{children}</div>}
     </li>
   );
 }

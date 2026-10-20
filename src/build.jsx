@@ -735,18 +735,40 @@ export function BuildScreen({ v, foldedNode = null }) {
   return (
     <div data-build style={{ paddingBottom: 8 }}>
       <BuildHeader backLabel={v.back.label} onBack={v.back.onClick} />
-      <main style={{ padding: "4px 16px 0", display: "grid", gap: 12 }}>
+      <main style={{ padding: v.wide ? "4px 24px 0" : "4px 16px 0", display: "grid", gap: 12 }}>
         <BuildTitle name={v.title.name} sub={v.title.sub} signs={v.title.signs} note={v.title.note} />
-        <WhatItDoes takeaway={v.takeaway} chart={v.chart} />
-        <NumbersSection {...v.numbers} />
-        <WhySection {...v.why} />
-        {v.variants && <VariantsSection {...v.variants} />}
-        {v.optimize && <OptimizeSection {...v.optimize} />}
-        <CopilotSection ask={askAll} />
-        <LegsSection {...v.legs} />
-        <OrderSection order={v.order} />
-        <ExitPlanSection {...v.exit} />
-        <SendBar {...v.send} />
+        {v.wide ? (
+          /* ON A COMPUTER (PR 73, owner 19 Oct 2026): two columns that widen with the window — on the left what is sent (the
+             legs, the order, the exit plan, Send), on the right what it does (the chart, the numbers, why, the copilot, the
+             variants and Optimize). The same sections, the same props: a phone keeps one column in the mockup's order. */
+          <div data-build-cols="2" style={{ display: "grid", gridTemplateColumns: "minmax(340px, 1fr) minmax(440px, 1.35fr)", gap: 16, alignItems: "start" }}>
+            <div data-build-col="order" style={{ display: "grid", gap: 12, minWidth: 0 }}>
+              <LegsSection {...v.legs} />
+              <OrderSection order={v.order} />
+              <ExitPlanSection {...v.exit} />
+              <SendBar {...v.send} />
+            </div>
+            <div data-build-col="chart" style={{ display: "grid", gap: 12, minWidth: 0 }}>
+              <WhatItDoes takeaway={v.takeaway} chart={v.chart} />
+              <NumbersSection {...v.numbers} />
+              <WhySection {...v.why} />
+              <CopilotSection ask={askAll} />
+              {v.variants && <VariantsSection {...v.variants} />}
+              {v.optimize && <OptimizeSection {...v.optimize} />}
+            </div>
+          </div>
+        ) : (<>
+          <WhatItDoes takeaway={v.takeaway} chart={v.chart} />
+          <NumbersSection {...v.numbers} />
+          <WhySection {...v.why} />
+          {v.variants && <VariantsSection {...v.variants} />}
+          {v.optimize && <OptimizeSection {...v.optimize} />}
+          <CopilotSection ask={askAll} />
+          <LegsSection {...v.legs} />
+          <OrderSection order={v.order} />
+          <ExitPlanSection {...v.exit} />
+          <SendBar {...v.send} />
+        </>)}
         <MoreOnThisTrade open={more} onToggle={() => setMore((m) => !m)}>
           {foldedNode}
         </MoreOnThisTrade>

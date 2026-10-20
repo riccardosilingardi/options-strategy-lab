@@ -81,7 +81,7 @@ import { nextRef, refCounter, appendTimeline, stampTimeline, orderStatusRecheck,
   journalEntry, searchJournal, CLOSE_REASON_MIN, refNumber, journeyLevel,
   adoptReplacement, replacementsIn, replacedBy, chanceCalibration } from "./journal.js";
 import { FIRST_STEP, stepCarry, candidateOf, candidateKey, legsLine, toggleCompare, inCompare, MAX_COMPARE, savedFromCandidate, candidateFromSaved, savedAge, savedItemFor, withoutSaved, restoreSaved, sizedCandidate } from "./path.js";
-import { PositionCard } from "./positionCard.jsx";
+import { PositionCard, PositionsTable } from "./positionCard.jsx";
 import { navOf, createNavHistory } from "./nav.js";
 import { exitProgress, entryVsNow, displayName, fileState, pnlShareOfRisk, pnlShareText, holdsStructure,
   sizeWords, withExactMaxProfit, maxProfitCorrection, maxProfitCorrectionNote, exitDateOf,
@@ -4853,6 +4853,11 @@ export default function OptionsStrategyLab() {
   // PR 4, TASK 0: the right pane never narrower than a phone (390px, the width every board is drawn at). At 1024px the old
   // 360–460 left pane left it 364px and the market page's header was cut off on the right.
   const PANES = { display: "grid", gridTemplateColumns: "minmax(320px, 420px) minmax(390px, 1fr)", alignItems: "start", gap: 0 };
+  /* PR 73 (owner, 19 Oct 2026: "the app uses the screen"). Find's list keeps ONE width, 420px, whatever the window — the
+     market page takes the rest; Positions' table takes the larger share (its columns follow its own width, positionCard.jsx).
+     At 1024px both still leave the right pane a phone's 390px. */
+  const PANES_FIND = { ...PANES, gridTemplateColumns: "420px minmax(390px, 1fr)" };
+  const PANES_POS = { ...PANES, gridTemplateColumns: "minmax(420px, 1fr) 400px" };
   const PANE_L = { minWidth: 0, borderRight: `1px solid ${T.line}`, alignSelf: "stretch" };
   const PANE_R = { minWidth: 0, position: "sticky", top: 0, maxHeight: "100vh", overflowY: "auto" };
   const CONTENTS = { display: "contents" };
@@ -4914,7 +4919,9 @@ export default function OptionsStrategyLab() {
         <div style={{ maxWidth: 1720, margin: "0 auto", padding: chromeless ? `0 0 ${FIND_LIST_END}px` : `18px 14px ${BADGE_SAFE + NAV_BAR_H}px`,
           ...(wide ? { marginLeft: RAIL_W, paddingBottom: 24 } : null) }}>
         {/* ON A COMPUTER, ONE COLUMN SCREENS KEEP A READING WIDTH: Build, its states and Settings sit in 760px. */}
-        {wide && <style>{"[data-build],[data-build-state],[data-settings]{max-width:760px;margin-left:auto;margin-right:auto}"}</style>}
+        {/* PR 73: Build is two columns on a computer and takes the width (up to 1440px); its three states and Settings keep the
+            760px reading width. */}
+        {wide && <style>{"[data-build-state],[data-settings]{max-width:760px;margin-left:auto;margin-right:auto}[data-build]{max-width:1440px;margin-left:auto;margin-right:auto}"}</style>}
 
         {/* Header */}
         {/* (Not on Find, Saved or a market's page since round 2: they draw their own.) */}
@@ -5054,7 +5061,7 @@ export default function OptionsStrategyLab() {
         {/* "FIND", THEN RESULTS | SAVED (PR #47, TASK 4; heading redesign PR 1): the old Watching place, inside Find.
             Written `"find" === step` so the word counter does not take this switch for Find's own block. The gear for
             Settings is in the header above. */}
-        <div data-panes={paneFind ? "find" : undefined} style={paneFind ? PANES : CONTENTS}>
+        <div data-panes={paneFind ? "find" : undefined} style={paneFind ? PANES_FIND : CONTENTS}>
         <div data-pane={paneFind ? "list" : undefined} style={paneFind ? PANE_L : CONTENTS}>
         {((tab === "build" && ("find" === step || paneFind)) || tab === "watching") && !showSettings && (
           <FindHeader seg={tab === "watching" ? "saved" : "results"} savedN={watchRows.length} nMarkets={find.markets.length}
@@ -5063,7 +5070,7 @@ export default function OptionsStrategyLab() {
             status={findStatusText(findFresh.line, findFeeds)} stale={findStale} />
         )}
         {tab === "build" && !showSettings && (step === "find" || paneFind) && (
-          <FindStep
+          <FindStep wide={wide}
             request={request} onRequest={(patch) => setWant((w) => ({ ...w, ...patch }))}
             sentiments={SENTIMENTS} find={find} setFind={setFind}
             limits={limits} onLimit={(ov) => setSetting("sizeOverride", ov)} freeSizing={freeSizing}
@@ -5091,7 +5098,7 @@ export default function OptionsStrategyLab() {
         {/* On a computer the market page stays beside Find's rows (the last one opened); before any, it says where it opens. */}
         {paneFind && !mkt.tk && <Note style={{ margin: "24px 16px" }}>Pick a market on the left: its page opens here.</Note>}
         {tab === "build" && !showSettings && (step === "market" || paneFind) && mkt.tk && (
-          <MarketPage
+          <MarketPage docked={paneFind}
             tk={mkt.tk} tab={mkt.tab} onTab={(t) => setMkt((m) => ({ ...m, tab: t }))} onBack={() => goStep("find")}
             onRefresh={() => refreshChain(mkt.tk)} busy={busy !== null}
             onTicker={(tk) => setMkt((m) => ({ ...m, tk }))}
@@ -5672,6 +5679,8 @@ export default function OptionsStrategyLab() {
           const tpB = takeProfitTarget({ legs, maxProfit: AE.maxProfit, maxLoss: AE.maxLoss, entryNet: AE.entry, contracts, plan: buildPlan });
           const stopAt = stopWarningLevel({ maxLoss: AE.maxLoss, contracts, plan: buildPlan });
           const v = {
+            // PR 73: on a computer, two columns — the order on the left, the chart and the numbers on the right.
+            wide,
             back: backTk ? { label: backTk, onClick: () => { if (buildOrigin && buildOrigin.kind === "card") backToList(); else goMarket(backTk, "strategies"); } }
               : { label: "Find", onClick: () => goStep("find") },
             title: { name: stratName, sub: buildSubLine({ ticker, expKey, dte, n: contracts }),
@@ -5855,7 +5864,7 @@ export default function OptionsStrategyLab() {
             opens its row in Orders. The Alpaca panel is dissolved — a holding with a record is its card, one with
             none is a "Not in the app" card, an order with none is a row tagged "sent outside this app" — and its
             Sync is the refresh icon on the bar. Integrations moved to Settings → Connections. */}
-        <div data-panes={panePos ? "positions" : undefined} style={panePos ? PANES : CONTENTS}>
+        <div data-panes={panePos ? "positions" : undefined} style={panePos ? PANES_POS : CONTENTS}>
         {!panePos && tab === "positions" && !showSettings && positionScreenNode}
         {tab === "positions" && !showSettings && (!positionScreenNode || panePos) && (
           <div data-positions style={panePos ? PANE_L : undefined}>
@@ -5876,7 +5885,10 @@ export default function OptionsStrategyLab() {
                   Nothing is open.{workingOrders.length > 0 && !alpaca ? " Your orders are under Orders." : ""}{notTakenOrders.length > 0 ? " Orders that ended with nothing bought are under Find → Saved." : ""}
                 </Note>
               )}
-              <ul data-position-list style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 10 }}>
+              {/* ON A COMPUTER, A TABLE BESIDE THE POSITION'S SCREEN (PR 73, owner 19 Oct 2026); on a phone the cards, unchanged.
+                  The rows take the cards' own props: one model, two layouts. */}
+              {((items) => (panePos ? <PositionsTable>{items}</PositionsTable>
+                : <ul data-position-list style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 10 }}>{items}</ul>))(<>
                 {ownedPositions.map((p) => {
                   /* THE CARD (PR #44, TASK 1): the action, the profit, three exits, the entry against now, and the
                      buttons — `Close at limit` always among them. Everything it prints is in `positionModels`, worked
@@ -5886,7 +5898,7 @@ export default function OptionsStrategyLab() {
                   if (!m) return null;
                   const ca = closeAt && closeAt.id === p.id ? closeAt : null;
                   return (
-                    <PositionCard key={p.id} p={p} title={m.name}
+                    <PositionCard key={p.id} row={panePos} p={p} title={m.name} current={detailsId === p.id}
                       action={m.act.action || (m.act.kind === "not-held" ? "NOT ON ALPACA" : "NO QUOTE")}
                       line={m.act.action === "HOLD" ? m.act.line : cardSentence({ act: m.act, pnl: m.pnl, progress: m.progress, working: !!m.working })}
                       notes={m.act.notes} pnl={m.pnl} shareText={m.shareShort}
@@ -5976,7 +5988,7 @@ export default function OptionsStrategyLab() {
                     </li>
                   ) : null;
                 })()}
-              </ul>
+              </>)}
               <CheckField checked={autoMon} onChange={(e) => setAutoMon(e.target.checked)} style={{ marginTop: 8 }}>refresh prices every 60s</CheckField>
             </div>
             )}
