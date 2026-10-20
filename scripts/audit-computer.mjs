@@ -8,6 +8,7 @@
 // (the owner's 1280×800 first). For Find with a market open, its Chain tab with the tray, Build, Positions and a position
 // beside the table it checks: nothing scrolls sideways — the page or any element inside it; Find's chips wrap; the tray
 // sits inside the market's pane, not over the list; Build is two columns; Positions is a table. Exits 1 on any miss.
+// PR 74: and Learn, the figure lab, with an iron condor loaded: two columns, the picture inside its column.
 // ============================================================================
 import { openHarness, tap } from "./app-harness.mjs";
 
@@ -17,12 +18,14 @@ const toChain = async (p) => { await toMarket(p); await tap(p, "[data-market] bu
 const toBuild = async (p) => { await toMarket(p); await tap(p, "[data-market] button", "Build ›", 2200); };
 const toPositions = async (p) => { await p.waitForTimeout(1500); await tap(p, "nav button", "Positions", 2500); };
 const toPosition = async (p) => { await toPositions(p); await tap(p, "[data-position-open]", null, 1500); };
+const toLearn = async (p) => { await p.waitForTimeout(1500); await tap(p, "nav button", "Learn", 2500); await tap(p, '[data-learn-figure="iron-condor"]', null, 800); };
 const SCREENS = [
   ["find + market", toMarket, ["chipsWrap"]],
   ["chain + tray", toChain, ["chipsWrap", "trayInPane"]],
   ["build", toBuild, ["buildCols"]],
   ["positions", toPositions, ["table"]],
   ["position beside the table", toPosition, ["table", "screenBeside"]],
+  ["learn", toLearn, ["learnCols", "chartInCol"]],
 ];
 
 const h = await openHarness();
@@ -48,7 +51,13 @@ try {
             trayInPane: !!(tb && pb && tb.left >= pb.left - 1 && tb.right <= pb.right + 1),
             buildCols: document.querySelector("[data-build-cols]")?.getAttribute("data-build-cols") === "2",
             table: !!document.querySelector("[data-positions-table]"),
-            screenBeside: !!document.querySelector("[data-panes=positions] [data-position-screen]") };
+            screenBeside: !!document.querySelector("[data-panes=positions] [data-position-screen]"),
+            learnCols: document.querySelector("[data-learn-cols]")?.getAttribute("data-learn-cols") === "2",
+            chartInCol: (() => {
+              const c = document.querySelector("[data-figure-chart=lab]"), col = document.querySelector("[data-learn-col=lab]");
+              const cb = c && c.getBoundingClientRect(), kb = col && col.getBoundingClientRect();
+              return !!(cb && kb && cb.left >= kb.left - 1 && cb.right <= kb.right + 1 && document.querySelectorAll("[data-lab-point]").length === 4);
+            })() };
         });
         const bad = [];
         if (r.sideways) bad.push("the page scrolls sideways");

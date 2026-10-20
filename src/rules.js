@@ -7710,3 +7710,159 @@ export const whyFindEffect = () =>
 /** The Why sheet's note under the score (PR 66): the read decides the family, never a card's place. */
 export const WHY_ORDER_NOTE = "This read picks the cards built under \"Signals decide\"; it never moves a card's place in Find, which follows your ⇅ order.";
 export const WEIGHTS_CHOSEN_LINE = "These weights and bands are chosen, not measured on past trades.";
+
+/* =====================================================================
+   THE FIGURE LAB (PR 74, owner 20 Oct 2026): "Education, the figure lab, as on IBKR Campus — tabs that add a long or
+   short call or put, blue points to drag, a card per figure." The owner's answers: a fifth place, Learn; a real market's
+   price, listed strikes and volatility with the premiums the model's (Black-Scholes on each leg's own IV, said as
+   "model price"); a lone short leg allowed, to learn from, and never sent; the card of the figure being built plus a
+   gallery of the known ones.
+
+   ONE HOME FOR WHAT A SET OF LEGS IS CALLED: `figureOf()`. It reads the legs as a NET position per strike and type (two
+   short calls on one strike are one short call × 2; a long and a short on one strike cancel), so the same shape has
+   one name however it was built. PR 75 (a figure drawn with a finger) names what it recognises through it too.
+   It names shapes only: what one can lose is `payoffCeiling()` / `exactExtremes()`, and whether the gate would take it
+   is `undefinedRiskLegs()` (riskGate.js) — the lab reads both and changes neither.
+===================================================================== */
+/** The legs as a net position: one leg per (type, strike), sorted by strike then puts first; zero quantities dropped. */
+export function figureLegs(legs = []) {
+  const net = new Map();
+  for (const l of Array.isArray(legs) ? legs : []) {
+    if (!l || (l.type !== "call" && l.type !== "put")) continue;
+    const k = Number(l.strike);
+    if (!Number.isFinite(k)) continue;
+    const q = Math.sign(Number(l.side) || 0) * Math.abs(Number(l.qty) || 1);
+    const key = `${l.type}|${k}`;
+    net.set(key, (net.get(key) || 0) + q);
+  }
+  return [...net.entries()].filter(([, q]) => q !== 0)
+    .map(([key, q]) => { const [type, k] = key.split("|"); return { type, strike: Number(k), side: Math.sign(q), qty: Math.abs(q) }; })
+    .sort((a, b) => a.strike - b.strike || (a.type === b.type ? 0 : a.type === "put" ? -1 : 1));
+}
+/** Every name the lab can give, in one table (the gallery's cards read their names here too). */
+export const FIGURE_NAMES = Object.freeze({
+  "long-call": "Long call", "short-call": "Short call", "long-put": "Long put", "short-put": "Short put",
+  "bull-call": "Bull call spread", "bear-call": "Bear call spread", "bull-put": "Bull put spread", "bear-put": "Bear put spread",
+  "call-ratio": "Call ratio spread", "put-ratio": "Put ratio spread",
+  "long-straddle": "Long straddle", "short-straddle": "Short straddle", "long-strangle": "Long strangle",
+  "short-strangle": "Short strangle", "long-guts": "Long guts", "short-guts": "Short guts",
+  "synthetic-long": "Synthetic long", "synthetic-short": "Synthetic short",
+  "bull-reversal": "Bullish risk reversal", "bear-reversal": "Bearish risk reversal",
+  "call-fly": "Call butterfly", "put-fly": "Put butterfly", "short-call-fly": "Short call butterfly",
+  "short-put-fly": "Short put butterfly", "broken-call-fly": "Broken-wing call butterfly",
+  "broken-put-fly": "Broken-wing put butterfly",
+  "iron-condor": "Iron condor", "iron-fly": "Iron butterfly", "reverse-iron-condor": "Reverse iron condor",
+  "reverse-iron-fly": "Reverse iron butterfly", "call-condor": "Call condor", "put-condor": "Put condor",
+  "short-call-condor": "Short call condor", "short-put-condor": "Short put condor",
+});
+/**
+ * WHAT THESE LEGS ARE CALLED: `{ id, name, legs }` with `legs` the net position (`figureLegs()`); `id` "none" (name
+ * null) with no leg, "custom" ("3 legs") for a shape this table does not name. Up to four strikes, one expiry.
+ */
+export function figureOf(legs = []) {
+  const N = figureLegs(legs);
+  const out = (id) => ({ id, name: id === "none" ? null : id === "custom" ? `${N.length} legs` : FIGURE_NAMES[id], legs: N });
+  if (!N.length) return out("none");
+  const sameQty = N.every((l) => l.qty === N[0].qty);
+  if (N.length === 1) return out(`${N[0].side > 0 ? "long" : "short"}-${N[0].type}`);
+  if (N.length === 2) {
+    const [a, b] = N;                                                    // a: the lower strike (puts first on a tie)
+    if (a.type === b.type && a.side !== b.side) {
+      if (a.qty !== b.qty) return out(`${a.type}-ratio`);
+      const longLow = a.side > 0;
+      return out(a.type === "call" ? (longLow ? "bull-call" : "bear-call") : (longLow ? "bull-put" : "bear-put"));
+    }
+    if (a.type !== b.type && sameQty) {
+      const put = a.type === "put" ? a : b, call = a.type === "call" ? a : b;
+      if (put.side === call.side) {
+        const s = put.side > 0 ? "long" : "short";
+        if (put.strike === call.strike) return out(`${s}-straddle`);
+        return out(put.strike < call.strike ? `${s}-strangle` : `${s}-guts`);
+      }
+      if (put.strike === call.strike) return out(call.side > 0 ? "synthetic-long" : "synthetic-short");
+      return out(call.side > 0 ? "bull-reversal" : "bear-reversal");
+    }
+    return out("custom");
+  }
+  const allType = N.every((l) => l.type === N[0].type) ? N[0].type : null;
+  if (N.length === 3 && allType) {
+    const [a, b, c] = N;
+    const m = a.qty;
+    if (c.qty === m && b.qty === 2 * m && a.side === c.side && b.side === -a.side) {
+      const even = Math.abs((b.strike - a.strike) - (c.strike - b.strike)) < 1e-9;
+      if (a.side > 0) return out(even ? `${allType}-fly` : `broken-${allType}-fly`);
+      return out(`short-${allType}-fly`);
+    }
+    return out("custom");
+  }
+  if (N.length === 4 && sameQty) {
+    const [a, b, c, d] = N;
+    if (allType && a.side === d.side && b.side === c.side && a.side !== b.side) {
+      return out(a.side > 0 ? `${allType}-condor` : `short-${allType}-condor`);
+    }
+    if (a.type === "put" && b.type === "put" && c.type === "call" && d.type === "call"
+      && a.side === d.side && b.side === c.side && a.side !== b.side && b.strike <= c.strike) {
+      const fly = b.strike === c.strike;
+      if (a.side > 0) return out(fly ? "iron-fly" : "iron-condor");
+      return out(fly ? "reverse-iron-fly" : "reverse-iron-condor");
+    }
+  }
+  return out("custom");
+}
+/**
+ * THE GALLERY (PR 74): the figures the lab offers, one card each. A leg is [side, type, moves, qty]: `moves` is where its
+ * strike sits in expected moves from today's price (one standard deviation to the expiry, `labFigureLegs()` in
+ * learnView.js snaps it to the strikes its type lists), so a figure keeps its proportions on any market. The sentence is
+ * the figure's idea in one line; the numbers on the card are the market's, never these.
+ */
+export const LAB_FIGURES = Object.freeze([
+  { id: "long-call", legs: [[1, "call", 0]], idea: "Pays when the price rises past the strike plus what it cost. The most it can lose is that cost." },
+  { id: "long-put", legs: [[1, "put", 0]], idea: "Pays when the price falls below the strike minus what it cost. The most it can lose is that cost." },
+  { id: "short-call", legs: [[-1, "call", 0]], idea: "Collects a premium and loses without limit if the price rises. The app never sends it." },
+  { id: "short-put", legs: [[-1, "put", 0]], idea: "Collects a premium and loses down to a price of zero. The app never sends it." },
+  { id: "bull-call", legs: [[1, "call", 0], [-1, "call", 0.75]], idea: "A call bought and a dearer-strike call sold: a rise, capped, for less." },
+  { id: "bear-put", legs: [[1, "put", 0], [-1, "put", -0.75]], idea: "A put bought and a lower put sold: a fall, capped, for less." },
+  { id: "bull-put", legs: [[-1, "put", 0], [1, "put", -0.75]], idea: "Paid now to bet the price stays above the sold put; the bought one caps the loss." },
+  { id: "bear-call", legs: [[-1, "call", 0], [1, "call", 0.75]], idea: "Paid now to bet the price stays below the sold call; the bought one caps the loss." },
+  { id: "long-straddle", legs: [[1, "call", 0], [1, "put", 0]], idea: "A call and a put on one strike: pays on a large move either way." },
+  { id: "long-strangle", legs: [[1, "put", -0.5], [1, "call", 0.5]], idea: "A put below and a call above: cheaper than a straddle, needs a larger move." },
+  { id: "short-strangle", legs: [[-1, "put", -0.75], [-1, "call", 0.75]], idea: "Paid while the price stays between the two; no limit outside. The app never sends it." },
+  { id: "call-fly", legs: [[1, "call", -0.5], [-1, "call", 0, 2], [1, "call", 0.5]], idea: "Pays most if the price ends on the middle strike; the most it can lose is what it cost." },
+  { id: "iron-condor", legs: [[1, "put", -1], [-1, "put", -0.5], [-1, "call", 0.5], [1, "call", 1]], idea: "Two credit spreads around the price: paid if it stays between the sold strikes." },
+  { id: "iron-fly", legs: [[1, "put", -0.75], [-1, "put", 0], [-1, "call", 0], [1, "call", 0.75]], idea: "An iron condor with both sold legs on one strike: more credit, a narrower zone." },
+]);
+/** The lab's four tabs: each adds one option, at the strike nearest today's price. */
+export const LAB_TABS = Object.freeze([
+  { id: "long-call", side: 1, type: "call", label: "+ Long call" },
+  { id: "short-call", side: -1, type: "call", label: "+ Short call" },
+  { id: "long-put", side: 1, type: "put", label: "+ Long put" },
+  { id: "short-put", side: -1, type: "put", label: "+ Short put" },
+]);
+/** The lab's own words, one home (PR 74). */
+export const LEARN_WORDS = Object.freeze({
+  title: "Learn",
+  sub: "The figure lab. Model prices on a real market; nothing is sent from here.",
+  modelPrice: "model price",
+  empty: "Add an option with the buttons above, or tap a figure below.",
+  maxLegs: (n) => `${n} legs at most, as a combination order allows.`,
+  gallery: "Figures",
+  galleryNote: "Tap one to load it on this market.",
+  clear: "Clear",
+  drag: "Drag a blue point, or use − and +, to move a strike.",
+  cancels: "These legs cancel out",
+  cancelsNote: "A bought and a sold option on one strike and type hold nothing between them.",
+  defined: "Defined risk: the most it can lose is known.",
+  neverSent: "The app never sends this: a sold option is not covered by a bought one.",
+  unlimited: "unlimited",
+  market: "Market",
+  loading: (tk) => `Loading ${tk} option prices…`,
+  noChain: (tk) => `${tk}'s option prices did not arrive.`,
+  retry: "Retry",
+  noIv: (k, type) => `The chain lists no volatility for the ${k} ${type}, so it has no model price.`,
+  noBoard: (tk) => `${tk} lists no option this lab can use for that expiry.`,
+});
+/** "GLD · 27 Nov · 38 days": where the lab is reading from. */
+export const labWhereLine = (tk, expKey, dte) => `${tk} · ${dayWords(expKey) || expKey || "—"}${known(dte) ? ` · ${dte} day${dte === 1 ? "" : "s"}` : ""}`;
+/** A leg's words in the lab: "Long 340 put". */
+export const labLegText = (l) => `${Number(l.side) > 0 ? "Long" : "Short"}${Math.abs(Number(l.qty) || 1) > 1 ? ` ${Math.abs(l.qty)} ×` : ""} ${strikeWords(l.strike)} ${l.type}`;
+const strikeWords = (k) => (Number.isInteger(Number(k)) ? String(Number(k)) : Number(k).toFixed(2).replace(/0$/, ""));

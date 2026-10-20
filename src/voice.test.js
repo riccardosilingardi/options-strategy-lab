@@ -304,7 +304,11 @@ test("MEASURED: the three screens, and the table in the PRD is this number", () 
      Positions table's row (`PositionRow`, chosen inside `PositionCard` by `row` on a computer), and the counter scores both
      bodies, as it scores every branch — the row's "Decide ›", "Details ›", "File in Journal" and "no price right now" (8).
      A phone shows the card alone: on screen nothing grew. */
-  const CEILING = { find: 157, market: 499, build: 675, positions: 256 };
+  /* >>> PR 74 (Learn, the figure lab, owner 20 Oct 2026). <<< A fifth screen, `tab === "learn"`: 22 by this counter (12
+     typed + 10 generated: `labWhereLine()`, `labLegText()`). Most of what it shows is data — LEARN_WORDS' lines and the
+     gallery's fourteen ideas (LAB_FIGURES) — which this counter does not read, so learn.test.jsx measures the screen
+     RENDERED as well: 313 words with no leg, 379 with an iron condor, each its own ceiling. */
+  const CEILING = { find: 157, market: 499, build: 675, positions: 256, learn: 22 };
   /* >>> PR #46: ONE ORDERS LIST. <<< The record-based "WORKING AT THE BROKER" panel (its paragraph about what a
      working order is, the stale-DAY warning, the per-row sentences) left Positions; the one list lives in
      `orders.jsx`, which the counter now reads. Measured: positions 304 -> 209 (4 typed + 205 generated, 14 sites).

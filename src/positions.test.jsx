@@ -64,8 +64,10 @@ check("A HOLDING WITH NO RECORD: 'Not in the app', Import, and its one close (pa
   has(h, "Not in the app"); has(h, ">Import<"); has(h, ">Close at limit<"); has(h, "SLV 2026-11-20");
 });
 
-check("THE BOTTOM BAR: Find · Build · Positions · Journal, aria-current, 44px, the badge, above the badge strip", () => {
-  eq(NAV_PLACES.map((p) => p.label).join(" · "), "Find · Build · Positions · Journal", "four places");
+check("THE BOTTOM BAR: Find · Build · Positions · Journal · Learn, aria-current, 44px, the badge, above the badge strip", () => {
+  // PR 74 (owner, 20 Oct 2026): Learn, the figure lab, is the fifth place.
+  eq(NAV_PLACES.map((p) => p.label).join(" · "), "Find · Build · Positions · Journal · Learn", "five places");
+  eq(placeOf({ tab: "learn", step: "find" }), "learn", "Learn");
   const h = renderToStaticMarkup(<BottomBar current="positions" badge={2} onGo={() => {}} />);
   eq((h.match(/aria-current="page"/g) || []).length, 1, "one current");
   has(h, "Positions, 2 to look at");
@@ -74,7 +76,7 @@ check("THE BOTTOM BAR: Find · Build · Positions · Journal, aria-current, 44px
   eq(placeOf({ tab: "watching", step: "find" }), "find", "Saved is part of Find");
   eq(placeOf({ tab: "build", step: "build" }), "build", "Build");
   eq(placeOf({ tab: "positions", step: "find" }), "positions", "Positions");
-  eq(placeOf({ tab: "build", step: "find", showSettings: true }), null, "Settings is none of the four");
+  eq(placeOf({ tab: "build", step: "find", showSettings: true }), null, "Settings is none of the five");
 });
 
 check("THE APP: no StepNav and no places row; the bar is mounted, and Integrations lives in Settings", () => {

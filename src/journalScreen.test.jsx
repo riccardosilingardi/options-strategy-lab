@@ -114,7 +114,7 @@ check("NOTHING IS DROPPED: positions at once, savings and your own per-trade lim
   has(settings({ settings: { capital: 1, sizeOverride: { perTrade: 300, reason: "x" } } }), "Remove your own limit");
 });
 
-check("A COMPUTER: from WIDE_MIN the bar is a left sidebar with the same four places and the badge; a test has no window, so not wide", () => {
+check("A COMPUTER: from WIDE_MIN the bar is a left sidebar with the same five places and the badge; a test has no window, so not wide", () => {
   eq(WIDE_MIN, 1024); eq(RAIL_W, 200);
   let seen = null;
   const Probe = () => { seen = useWide(); return null; };
@@ -122,7 +122,7 @@ check("A COMPUTER: from WIDE_MIN the bar is a left sidebar with the same four pl
   eq(seen, false, "no window: the phone layout");
   const rail = renderToStaticMarkup(<BottomBar rail current="positions" badge={2} onGo={() => {}} />);
   has(rail, "data-rail"); has(rail, `width:${RAIL_W}px`); has(rail, 'aria-current="page"'); has(rail, "Positions, 2 to look at");
-  for (const k of ["Find", "Build", "Positions", "Journal"]) has(rail, `<span style="flex:1">${k}</span>`);
+  for (const k of ["Find", "Build", "Positions", "Journal", "Learn"]) has(rail, `<span style="flex:1">${k}</span>`);
   const bar = renderToStaticMarkup(<BottomBar current="positions" badge={2} onGo={() => {}} />);
   hasNot(bar, "data-rail", "a phone keeps the bottom bar");
 });
