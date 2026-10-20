@@ -123,7 +123,13 @@ description; each task then reads 'Done as planned' or 'Changed from the plan, a
 - **On a computer (redesign PR 3b, owner, 6 Oct 2026): `useWide()` in ui.jsx** (a window ≥ `WIDE_MIN` 1024px). The bottom bar
   is a left sidebar (`BottomBar rail`, `RAIL_W`), Find's rows sit beside the market page (`paneFind`) and Positions' cards beside
   a position's screen (`panePos`) — on a phone their wrappers are `display: contents`, so nothing moves; the Journal is two
-  columns (`wide`); Build and Settings keep 760px. Below 1024px nothing here applies; the boards are the phone's.
+  columns (`wide`); Settings keeps 760px. Below 1024px nothing here applies; the boards are the phone's.
+  **Responsive since PR 73 (owner, 19 Oct 2026):** Find's list is a fixed 420px (`PANES_FIND`), its chips wrap (`FindStep
+  wide`); the market page is `docked` (its Chain tray and compare line sticky at the pane's foot, `barOuter()`); Build is
+  two columns (`v.wide` → `data-build-cols="2"`: legs, order, exit plan, Send | chart, numbers, why, copilot, variants,
+  Optimize; More under both; up to 1440px); Positions is a table (`PANES_POS`, `PositionsTable`, the card's `row` prop →
+  `PositionRow`, columns from its own width via `useBoxWidth()` in ui.jsx, full from `TABLE_FULL_MIN`). Nothing may scroll
+  sideways on a computer: `node scripts/audit-computer.mjs` (1280×800, 1024×768, 1440×900) exits 1 if anything does.
 - **The mockups' look (round 2) lives in ui.jsx's atoms**: `IconButton`, `SegmentBar` (Results | Saved, the chain's modes),
   `UnderTabs` (Find's categories, the market's tabs), `FilterChip` (Find's chips, the sheets' choices; ink when off its
   default, never amber), `TextBtn`, and `Sheet` (scrim, grab handle, the value beside the title). Two theme tokens joined in
@@ -464,6 +470,10 @@ All in `RULES`, `src/rules.js`, unless noted.
   rest and after the tap, the Journal's "Which chance came true") on the `+book` fixture, in their empty states
   (docs/screens/pr68/). `node scripts/measure-exits.mjs <dir> [month]` answers P5 per market and family from the owner's saved
   `/api/bars?sym=<TICKER>&days=1900` replies (`<TICKER>.json`); with none it says so and prints no number.
+- `node scripts/audit-computer.mjs [1280x800,…]` checks the computer's layout on the whole app on fixtures: nothing scrolls
+  sideways (the page or inside it), the chips wrap, the tray sits in its pane, Build is two columns, Positions a table;
+  exits 1 on a miss. `node scripts/shoot-pr73.mjs [dir]` photographs those screens at 1024, 1100, 1280 and 1440px and the
+  phone's (docs/screens/pr73/before and after).
 - `node scripts/shoot-pr72.mjs [dir]` photographs PR 72's screens (the Exit plan at rest and edited, the legs named twice,
   the review's legs, the exposure line on `+poor`, the market's feed line, the tray's two chances) (docs/screens/pr72/).
 - `node scripts/shoot-pr71.mjs [dir]` photographs the Journal's line under its title, saved on the server and (with the

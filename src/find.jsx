@@ -123,6 +123,8 @@ export function FindStep({
   copilot = null, liquidity = null,
   // The top row's market for the View sheet's example (PR 66): { tk, spot, move, expKey } — App.jsx's `marketMoveOf()`.
   viewExample = null,
+  // PR 73: on a computer the chips wrap onto a second line instead of scrolling sideways.
+  wide = false,
 }) {
   /* ---- WHAT IS IN, AND WHAT IS STILL BEING READ (redesign PR 1). A market being read has no fused result and no rank
      effect, as before; its row waits after the rows that are in, and says what it is waiting for. ---- */
@@ -202,9 +204,11 @@ export function FindStep({
       <UnderTabs label={ARIA.categories} value={find.cat || null} items={catItems}
         onChange={(id) => setFind((f) => ({ ...f, cat: id }))} />
 
-      {/* ONE ROW OF CHIPS, scrolling sideways. Each says its value; one off its default is filled with ink. */}
-      <div role="toolbar" aria-label={ARIA.filters} data-chip-row
-        style={{ display: "flex", gap: 6, overflowX: "auto", whiteSpace: "nowrap", padding: "10px 16px 4px", WebkitOverflowScrolling: "touch" }}>
+      {/* ONE ROW OF CHIPS, scrolling sideways on a phone; on a computer (PR 73) they wrap, never a sideways scroll. Each says its
+          value; one off its default is filled with ink. */}
+      <div role="toolbar" aria-label={ARIA.filters} data-chip-row={wide ? "wrap" : ""}
+        style={wide ? { display: "flex", flexWrap: "wrap", gap: 6, padding: "10px 16px 4px" }
+          : { display: "flex", gap: 6, overflowX: "auto", whiteSpace: "nowrap", padding: "10px 16px 4px", WebkitOverflowScrolling: "touch" }}>
         {FIND_CHIPS.map((c) => {
           const parts = chipPartsOf(c.id, st);
           return (

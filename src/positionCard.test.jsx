@@ -5,7 +5,7 @@
 // App lays it out and holds what the owner asked for in plain strings, no DOM library.
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { PositionCard } from "./positionCard.jsx";
+import { PositionCard, PositionRow, PositionsTable, TABLE_FULL_MIN } from "./positionCard.jsx";
 import { T } from "./theme.js";
 import { takeProfitTarget, positionAction } from "./rules.js";
 import { exitProgress, entryVsNow, pnlShareOfRisk, positionTitle, cardSentence, pnlShareShort, positionMetaLine,
@@ -147,6 +147,32 @@ check("THE LINE UNDER THE CARDS for an order sent and not filled; the card's hel
   eq(exitLabels(null).length, 0);
   eq(exitLabels({ takeProfit: { state: "none" }, time: { state: "unknown" }, stop: { state: "unknown" } }).map((l) => l.text).join(" · "),
     "Take profit — · Time exit — · Stop —", "unknown is a dash, never a zero");
+});
+
+/* PR 73 (owner, 19 Oct 2026): ON A COMPUTER, POSITIONS IS A TABLE beside the position's screen — the same props as the card,
+   laid across; its columns follow its pane's width (full from TABLE_FULL_MIN, else the exits go under the position). */
+const rowFor = (width, over = {}) => {
+  const pnl = 2925, n = 9;
+  const tpTarget = takeProfitTarget({ legs: J1.legs, maxProfit: J1.maxProfit, maxLoss: J1.maxLoss, entryNet: J1.entryNet, contracts: n });
+  const act = positionAction({ tpHit: pnl >= tpTarget.dollars, pnl, dteLeft: 28, tpBasis: tpTarget.basis });
+  const progress = exitProgress({ p: J1, pnl, dteLeft: 28, tpTarget, n, now: NOW });
+  return renderToStaticMarkup(
+    <PositionsTable initialWidth={width}><PositionRow p={J1} title={positionTitle(J1)} action={act.action} current={!!over.current}
+      line={cardSentence({ act, pnl, progress })} notes={act.notes} pnl={pnl} shareText={pnlShareShort(pnlShareOfRisk(pnl, J1, n))}
+      meta={positionMetaLine(J1)} labels={exitLabels(progress)} closeLabel="Close at limit" fileKind="held">{over.children}</PositionRow></PositionsTable>);
+};
+check("PR 73 — THE TABLE, FULL WIDTH: status · position · profit now · exits · the action, one row per holding", () => {
+  const h = rowFor(TABLE_FULL_MIN + 100);
+  has(h, 'data-positions-table="full"');
+  for (const head of ["STATUS", "POSITION", "PROFIT NOW", "EXITS"]) has(h, `>${head}</span>`);
+  has(h, ">CLOSE</span>"); has(h, "J-0001 · GDX · 9 puts"); has(h, "+$2,925"); has(h, "data-exit-bars"); has(h, "Close at limit");
+  has(h, "data-position-open", "the title opens the position's screen beside the table");
+});
+check("PR 73 — …NARROWER, THE SAME ROW IN THREE COLUMNS: the exits and the action go under the position, nothing scrolls sideways", () => {
+  const h = rowFor(TABLE_FULL_MIN - 100, { current: true, children: <div data-file-form /> });
+  has(h, 'data-positions-table="compact"'); hasNot(h, ">EXITS</span>");
+  has(h, "data-exit-bars"); has(h, "Close at limit"); has(h, 'data-position-row="current"', "the row whose screen is open is marked");
+  has(h, "data-file-form", "the filing form sits under its row, as under its card");
 });
 
 // The Details sheet's tests moved with it to src/positionScreen.test.jsx (redesign PR 3: it is the position's own screen).
